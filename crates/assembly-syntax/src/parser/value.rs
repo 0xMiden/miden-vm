@@ -5,7 +5,6 @@ use miden_core::{
     field::PrimeField64,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-
 // PUSH VALUE
 // ================================================================================================
 

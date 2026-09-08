@@ -7,7 +7,7 @@ fn replace_nops_with_named_inline_call_markers(
     context: &TestContext,
     procedure: &mut Procedure,
     markers: &[Option<&str>],
-) -> Result<(), Report> {
+) {
     use miden_assembly_syntax::ast::DebugInlineCallInfo;
 
     let mut markers = markers.iter();
@@ -25,10 +25,11 @@ fn replace_nops_with_named_inline_call_markers(
         let span = instruction.span();
         let replacement = match marker {
             Some(name) => {
-                let source_location = context
-                    .source_manager()
-                    .file_line_col(span)
-                    .map_err(|error| Report::msg(error.to_string()))?;
+                let source_location = miden_assembly_syntax::debuginfo::Location::from_span(
+                    span,
+                    context.sources().as_ref(),
+                )
+                .expect("marker instruction should have a registered source location");
                 Instruction::DebugInlineCall(DebugInlineCallInfo::new(
                     *name,
                     source_location.clone(),
@@ -41,7 +42,6 @@ fn replace_nops_with_named_inline_call_markers(
     }
 
     assert!(markers.next().is_none(), "test fixture has too few marker placeholders");
-    Ok(())
 }
 
 fn reachable_source_nodes(
@@ -82,7 +82,7 @@ fn inline_call_chains_are_recorded_on_call_and_structured_control_occurrences() 
         end
         "
     );
-    let mut module = context.parse_module(source)?;
+    let mut module = context.parse_module_source_file(source)?;
     let entrypoint = module
         .procedures_mut()
         .find(|procedure| procedure.is_entrypoint())
@@ -91,9 +91,11 @@ fn inline_call_chains_are_recorded_on_call_and_structured_control_occurrences() 
         &context,
         entrypoint,
         &[None, Some("source::inlined"), None, Some("source::inlined")],
-    )?;
+    );
 
-    let package = Assembler::new(context.source_manager()).assemble_program("test", module)?;
+    let package = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_program("test", module)
+        .into_result_with_policy(&WarningsAsErrors)?;
     let debug_info = package
         .debug_info()
         .into_diagnostic()?
@@ -147,7 +149,7 @@ fn inline_call_chains_cover_exec_source_occurrences() -> TestResult {
         end
         "
     );
-    let mut module = context.parse_module(source)?;
+    let mut module = context.parse_module_source_file(source)?;
     let entrypoint = module
         .procedures_mut()
         .find(|procedure| procedure.is_entrypoint())
@@ -156,9 +158,11 @@ fn inline_call_chains_cover_exec_source_occurrences() -> TestResult {
         &context,
         entrypoint,
         &[None, Some("source::inlined"), None, Some("source::inlined")],
-    )?;
+    );
 
-    let package = Assembler::new(context.source_manager()).assemble_program("test", module)?;
+    let package = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_program("test", module)
+        .into_result_with_policy(&WarningsAsErrors)?;
     let debug_info = package
         .debug_info()
         .into_diagnostic()?
@@ -214,7 +218,7 @@ fn exec_occurrences_do_not_reuse_stale_inline_chains() -> TestResult {
         end
         "
     );
-    let mut module = context.parse_module(source)?;
+    let mut module = context.parse_module_source_file(source)?;
     let entrypoint = module
         .procedures_mut()
         .find(|procedure| procedure.is_entrypoint())
@@ -223,9 +227,11 @@ fn exec_occurrences_do_not_reuse_stale_inline_chains() -> TestResult {
         &context,
         entrypoint,
         &[None, Some("source::decorated"), None],
-    )?;
+    );
 
-    let package = Assembler::new(context.source_manager()).assemble_program("test", module)?;
+    let package = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_program("test", module)
+        .into_result_with_policy(&WarningsAsErrors)?;
     let debug_info = package
         .debug_info()
         .into_diagnostic()?
@@ -276,24 +282,26 @@ fn nested_exec_inline_chains_are_innermost_first() -> TestResult {
         end
         "
     );
-    let mut module = context.parse_module(source)?;
+    let mut module = context.parse_module_source_file(source)?;
     for procedure in module.procedures_mut() {
         if procedure.is_entrypoint() {
             replace_nops_with_named_inline_call_markers(
                 &context,
                 procedure,
                 &[None, Some("source::outer")],
-            )?;
+            );
         } else if procedure.name().as_str() == "outer_target" {
             replace_nops_with_named_inline_call_markers(
                 &context,
                 procedure,
                 &[None, Some("source::inner")],
-            )?;
+            );
         }
     }
 
-    let package = Assembler::new(context.source_manager()).assemble_program("test", module)?;
+    let package = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_program("test", module)
+        .into_result_with_policy(&WarningsAsErrors)?;
     let debug_info = package
         .debug_info()
         .into_diagnostic()?
@@ -342,13 +350,7 @@ fn external_exec_records_inline_context_at_the_boundary() -> TestResult {
         end
         ",
     )?;
-    let library = Assembler::new(context.source_manager()).assemble_library(
-        "dep",
-        library_module,
-        None::<Box<Module>>,
-    )?;
-    let assembler = Assembler::new(context.source_manager())
-        .with_package(Arc::from(library), Linkage::Dynamic)?;
+    let library = context.assemble_library("dep", None, library_module, [])?;
     let source = source_file!(
         &context,
         "
@@ -361,7 +363,7 @@ fn external_exec_records_inline_context_at_the_boundary() -> TestResult {
         end
         "
     );
-    let mut module = context.parse_module(source)?;
+    let mut module = context.parse_module_source_file(source)?;
     let entrypoint = module
         .procedures_mut()
         .find(|procedure| procedure.is_entrypoint())
@@ -370,9 +372,13 @@ fn external_exec_records_inline_context_at_the_boundary() -> TestResult {
         &context,
         entrypoint,
         &[None, Some("source::external")],
-    )?;
+    );
 
-    let package = assembler.assemble_program("test", module)?;
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone())
+        .with_package(Arc::from(library), Linkage::Dynamic)?;
+    let package = assembler
+        .assemble_program("test", module)
+        .into_result_with_policy(&WarningsAsErrors)?;
     let debug_info = package
         .debug_info()
         .into_diagnostic()?
@@ -399,7 +405,7 @@ fn external_exec_records_inline_context_at_the_boundary() -> TestResult {
 #[test]
 fn source_name_attribute_sets_debug_name_and_linkage_name() -> TestResult {
     let context = TestContext::default();
-    let module = context.parse_module(source_file!(
+    let module = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace debug::names
@@ -419,11 +425,7 @@ fn source_name_attribute_sets_debug_name_and_linkage_name() -> TestResult {
         end
         "#
     ))?;
-    let package = Assembler::new(context.source_manager()).assemble_library(
-        "debug-names",
-        module,
-        None::<Box<Module>>,
-    )?;
+    let package = context.assemble_library("debug-names", None, module, [])?;
 
     let assert_function_names = |package: &Package| {
         let debug_info = package
@@ -493,9 +495,9 @@ fn malformed_source_name_attributes_are_rejected() -> TestResult {
                 "#
             )
         );
-        let module = context.parse_module(source)?;
-        let error = Assembler::new(context.source_manager())
-            .assemble_library("invalid-source-name", module, None::<Box<Module>>)
+        let module = context.parse_module_source_file(source)?;
+        let error = context
+            .assemble_library("invalid-source-name", None, module, [])
             .expect_err("malformed @source_name should be rejected");
         assert_diagnostic!(&error, "invalid `@source_name` procedure attribute");
         assert_diagnostic!(&error, "expected exactly one quoted string");

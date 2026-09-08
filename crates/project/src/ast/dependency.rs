@@ -1,5 +1,5 @@
-use super::{parsing::SetSourceId, *};
-use crate::{Linkage, SourceId, Span, Uri, VersionRequirement};
+use super::*;
+use crate::TomlSpan;
 
 /// Represents information about a project dependency needed to resolve it to a Miden package
 #[derive(Debug, Clone)]
@@ -7,13 +7,13 @@ use crate::{Linkage, SourceId, Span, Uri, VersionRequirement};
 pub struct DependencySpec {
     /// The name of the dependency package
     #[cfg_attr(feature = "serde", serde(default, skip))]
-    pub name: Span<Arc<str>>,
+    pub name: TomlSpan<Arc<str>>,
     /// The version requirement specified for this dependency
     #[cfg_attr(
         feature = "serde",
         serde(rename = "version", alias = "digest", skip_serializing_if = "Option::is_none")
     )]
-    pub version_or_digest: Option<VersionRequirement>,
+    pub version_or_digest: Option<TomlSpan<Arc<str>>>,
     /// Whether or not the version requirement is inherited from the containing workspace
     #[cfg_attr(
         feature = "serde",
@@ -22,28 +22,28 @@ pub struct DependencySpec {
     pub workspace: bool,
     /// If present, specifies the path from which this dependency should be loaded
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
-    pub path: Option<Span<Uri>>,
+    pub path: Option<TomlSpan<Arc<str>>>,
     /// If present, specifies the URI of the git repository to clone in order to load this
     /// dependency.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
-    pub git: Option<Span<Uri>>,
+    pub git: Option<TomlSpan<Arc<str>>>,
     /// If present, specifies the branch of the git repository to checkout when loading this
     /// dependency from the URI specified by `git`.
     ///
     /// NOTE: This field is only valid when specified along with `git`, and may not be used in
     /// conjunction with `rev`.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
-    pub branch: Option<Span<Arc<str>>>,
+    pub branch: Option<TomlSpan<Arc<str>>>,
     /// If present, specifies the revision of the git repository to checkout when loading this
     /// dependency from the URI specified by `git`.
     ///
     /// NOTE: This field is only valid when specified along with `git`, and may not be used in
     /// conjunction with `branch`.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
-    pub rev: Option<Span<Arc<str>>>,
+    pub rev: Option<TomlSpan<Arc<str>>>,
     /// If present, specifies the desired linkage for this dependency during assembly
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
-    pub linkage: Option<Span<Linkage>>,
+    pub linkage: Option<TomlSpan<Arc<str>>>,
 }
 
 #[inline(always)]
@@ -53,7 +53,7 @@ fn does_not_inherit_from_workspace(is_workspace_dependency: &bool) -> bool {
 
 impl DependencySpec {
     /// Returns the version constraint to apply to this dependency
-    pub fn version(&self) -> Option<&VersionRequirement> {
+    pub fn version(&self) -> Option<&TomlSpan<Arc<str>>> {
         self.version_or_digest.as_ref()
     }
 
@@ -78,31 +78,6 @@ impl DependencySpec {
     }
 }
 
-impl SetSourceId for DependencySpec {
-    fn set_source_id(&mut self, source_id: SourceId) {
-        self.name.set_source_id(source_id);
-        if let Some(version_or_digest) = self.version_or_digest.as_mut() {
-            version_or_digest.set_source_id(source_id);
-        }
-
-        if let Some(path) = self.path.as_mut() {
-            path.set_source_id(source_id);
-        }
-
-        if let Some(git) = self.git.as_mut() {
-            git.set_source_id(source_id);
-        }
-
-        if let Some(branch) = self.branch.as_mut() {
-            branch.set_source_id(source_id);
-        }
-
-        if let Some(rev) = self.rev.as_mut() {
-            rev.set_source_id(source_id);
-        }
-    }
-}
-
 #[cfg(feature = "serde")]
 pub use self::serialization::deserialize_dependency_map;
 
@@ -110,81 +85,84 @@ pub use self::serialization::deserialize_dependency_map;
 mod serialization {
     use alloc::sync::Arc;
 
-    use miden_assembly_syntax::debuginfo::Span;
     use serde::{
-        Deserialize,
+        Deserialize, Deserializer,
         de::{IntoDeserializer, MapAccess, Visitor},
     };
 
     use super::DependencySpec;
-    use crate::Map;
+    use crate::{Map, TomlSpan};
 
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct DependencySpecTable {
-        #[serde(default, skip)]
-        name: Span<Arc<str>>,
-        #[serde(rename = "version", alias = "digest", skip_serializing_if = "Option::is_none")]
-        version_or_digest: Option<crate::VersionRequirement>,
-        #[serde(default, skip_serializing_if = "super::does_not_inherit_from_workspace")]
+        #[serde(rename = "version", alias = "digest")]
+        version_or_digest: Option<TomlSpan<Arc<str>>>,
+        #[serde(default)]
         workspace: bool,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        path: Option<Span<crate::Uri>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        git: Option<Span<crate::Uri>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        branch: Option<Span<Arc<str>>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        rev: Option<Span<Arc<str>>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        linkage: Option<Span<crate::Linkage>>,
+        path: Option<TomlSpan<Arc<str>>>,
+        git: Option<TomlSpan<Arc<str>>>,
+        branch: Option<TomlSpan<Arc<str>>>,
+        rev: Option<TomlSpan<Arc<str>>>,
+        linkage: Option<TomlSpan<Arc<str>>>,
     }
 
-    impl From<DependencySpecTable> for DependencySpec {
-        fn from(table: DependencySpecTable) -> Self {
-            Self {
-                name: table.name,
-                version_or_digest: table.version_or_digest,
-                workspace: table.workspace,
-                path: table.path,
-                git: table.git,
-                branch: table.branch,
-                rev: table.rev,
-                linkage: table.linkage,
-            }
+    enum DependencySpecKind {
+        Simple(Arc<str>),
+        Detailed(DependencySpecTable),
+    }
+
+    impl<'de> Deserialize<'de> for DependencySpecKind {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            serde_untagged::UntaggedEnumVisitor::new()
+                .expecting("a dependency requirement string or dependency table")
+                .string(|value| {
+                    Arc::<str>::deserialize(value.into_deserializer()).map(Self::Simple)
+                })
+                .map(|value| value.deserialize().map(Self::Detailed))
+                .deserialize(deserializer)
         }
     }
 
     impl<'de> Deserialize<'de> for DependencySpec {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
-            D: serde::Deserializer<'de>,
+            D: Deserializer<'de>,
         {
-            serde_untagged::UntaggedEnumVisitor::new()
-                .expecting("a dependency requirement string or dependency table")
-                .string(|value| {
-                    crate::VersionRequirement::deserialize(value.into_deserializer()).map(
-                        |version_or_digest| Self {
-                            name: Span::default(),
-                            version_or_digest: Some(version_or_digest),
-                            workspace: false,
-                            path: None,
-                            git: None,
-                            branch: None,
-                            rev: None,
-                            linkage: None,
-                        },
-                    )
-                })
-                .map(|map| map.deserialize::<DependencySpecTable>().map(Into::into))
-                .deserialize(deserializer)
+            let value = TomlSpan::<DependencySpecKind>::deserialize(deserializer)?;
+            let span = value.span();
+            Ok(match value.into_inner() {
+                DependencySpecKind::Simple(version_or_digest) => DependencySpec {
+                    name: TomlSpan::new(span.clone(), Arc::from("")),
+                    version_or_digest: Some(TomlSpan::new(span, version_or_digest)),
+                    workspace: false,
+                    path: None,
+                    git: None,
+                    branch: None,
+                    rev: None,
+                    linkage: None,
+                },
+                DependencySpecKind::Detailed(table) => DependencySpec {
+                    name: TomlSpan::new(span, Arc::from("")),
+                    version_or_digest: table.version_or_digest,
+                    workspace: table.workspace,
+                    path: table.path,
+                    git: table.git,
+                    branch: table.branch,
+                    rev: table.rev,
+                    linkage: table.linkage,
+                },
+            })
         }
     }
 
     struct DependencyMapVisitor;
 
     impl<'de> Visitor<'de> for DependencyMapVisitor {
-        type Value = Map<Span<Arc<str>>, Span<DependencySpec>>;
+        type Value = Map<TomlSpan<Arc<str>>, TomlSpan<DependencySpec>>;
 
         fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
             formatter.write_str("a dependency map")
@@ -197,9 +175,9 @@ mod serialization {
             let mut map = Self::Value::default();
 
             while let Some((key, mut value)) =
-                access.next_entry::<Span<Arc<str>>, Span<DependencySpec>>()?
+                access.next_entry::<TomlSpan<Arc<str>>, TomlSpan<DependencySpec>>()?
             {
-                value.name = key.clone();
+                value.get_mut().name = key.clone();
                 map.insert(key, value);
             }
 
@@ -209,9 +187,9 @@ mod serialization {
 
     pub fn deserialize_dependency_map<'de, D>(
         deserializer: D,
-    ) -> Result<Map<Span<Arc<str>>, Span<DependencySpec>>, D::Error>
+    ) -> Result<Map<TomlSpan<Arc<str>>, TomlSpan<DependencySpec>>, D::Error>
     where
-        D: serde::Deserializer<'de>,
+        D: Deserializer<'de>,
     {
         deserializer.deserialize_map(DependencyMapVisitor)
     }

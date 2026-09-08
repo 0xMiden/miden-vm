@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
-use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
+use miden_diagnostics::{SourceSpan, Span, Spanned};
 use midenc_hir_type::{AddressSpace, Type, TypeRepr, TypeTemplate};
 
 use super::{
@@ -28,7 +28,6 @@ const MAX_TYPE_EXPR_NESTING: usize = 256;
 /// can mutate its own state as necessary during resolution (e.g. to manage a cache, or other side
 /// table-like data structures).
 pub trait TypeResolver<E> {
-    fn source_manager(&self) -> Arc<dyn SourceManager>;
     /// Should be called by consumers of this resolver to convert a [SymbolResolutionError] to the
     /// error type used by the [TypeResolver] implementation.
     fn resolve_local_failed(&self, err: SymbolResolutionError) -> E;
@@ -317,12 +316,10 @@ impl TypeExpr {
         R: ?Sized + TypeResolver<E>,
     {
         if depth > MAX_TYPE_EXPR_NESTING {
-            let source_manager = resolver.source_manager();
             return Err(resolver.resolve_local_failed(
                 SymbolResolutionError::type_expression_depth_exceeded(
                     self.span(),
                     MAX_TYPE_EXPR_NESTING,
-                    source_manager.as_ref(),
                 ),
             ));
         }
@@ -351,7 +348,6 @@ impl TypeExpr {
                                     path.span(),
                                     "type",
                                     module_path.span(),
-                                    &resolver.source_manager(),
                                 ),
                             ));
                         },
@@ -361,7 +357,6 @@ impl TypeExpr {
                                     path.span(),
                                     "type",
                                     item.span(),
-                                    &resolver.source_manager(),
                                 ),
                             ));
                         },
@@ -1257,31 +1252,23 @@ impl crate::prettier::PrettyPrint for Variant {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{string::ToString, sync::Arc};
+    use alloc::string::ToString;
     use core::str::FromStr;
 
-    use miden_debug_types::{DefaultSourceManager, SourceFile, SourceId, SourceLanguage, Uri};
+    use miden_diagnostics::{SourceId, SourceSpan};
 
     use super::*;
     use crate::{ast::Form, prettier::PrettyPrint};
 
-    struct DummyResolver {
-        source_manager: Arc<dyn SourceManager>,
-    }
+    struct DummyResolver;
 
     impl DummyResolver {
         fn new() -> Self {
-            Self {
-                source_manager: Arc::new(DefaultSourceManager::default()),
-            }
+            Self
         }
     }
 
     impl TypeResolver<SymbolResolutionError> for DummyResolver {
-        fn source_manager(&self) -> Arc<dyn SourceManager> {
-            self.source_manager.clone()
-        }
-
         fn resolve_local_failed(&self, err: SymbolResolutionError) -> SymbolResolutionError {
             err
         }
@@ -1291,7 +1278,7 @@ mod tests {
             context: SourceSpan,
             _gid: GlobalItemIndex,
         ) -> Result<Option<TypeTemplate>, SymbolResolutionError> {
-            Err(SymbolResolutionError::undefined(context, self.source_manager.as_ref()))
+            Err(SymbolResolutionError::undefined(context))
         }
 
         fn get_local_type(
@@ -1306,7 +1293,7 @@ mod tests {
             &mut self,
             ty: Span<&Path>,
         ) -> Result<SymbolResolution, SymbolResolutionError> {
-            Err(SymbolResolutionError::undefined(ty.span(), self.source_manager.as_ref()))
+            Err(SymbolResolutionError::undefined(ty.span()))
         }
 
         fn finalize(
@@ -1315,9 +1302,8 @@ mod tests {
             template: TypeTemplate,
         ) -> Result<Type, SymbolResolutionError> {
             // This resolver never produces back-references, so closing can never fail on one.
-            midenc_hir_type::close_template(&template, |_| None).map_err(|_| {
-                SymbolResolutionError::undefined(context, self.source_manager.as_ref())
-            })
+            midenc_hir_type::close_template(&template, |_| None)
+                .map_err(|_| SymbolResolutionError::undefined(context))
         }
     }
 
@@ -1340,18 +1326,10 @@ mod tests {
         expr
     }
 
-    fn test_source_file(source: &str) -> Arc<SourceFile> {
-        Arc::new(SourceFile::new(
-            SourceId::default(),
-            SourceLanguage::Masm,
-            Uri::new("memory:///type-expr-test.masm"),
-            source.to_string().into_boxed_str(),
-        ))
-    }
-
     fn parse_type_alias_expr(source: &str) -> TypeExpr {
-        let mut forms =
-            crate::parser::parse_forms(test_source_file(source)).expect("type alias should parse");
+        let mut forms = crate::parser::parse_forms(SourceId::UNKNOWN, source)
+            .result
+            .expect("type alias should parse");
         assert_eq!(forms.len(), 1, "expected exactly one parsed form");
         match forms.pop().expect("expected parsed form") {
             Form::Type(alias) => alias.ty,

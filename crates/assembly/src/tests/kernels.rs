@@ -36,15 +36,16 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
         let external_helpers = context.parse_module(EXTERNAL_HELPERS)?;
         let kernel = context.parse_kernel(source_file!(&context, KERNEL)).unwrap();
 
-        let mut assembler = Assembler::new(context.source_manager());
-        assembler.compile_and_statically_link(external_helpers)?;
+        let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
+        assembler.compile_and_statically_link(external_helpers).into_result()?;
         assembler.assemble_kernel("kernel", kernel, [helpers]).unwrap()
     };
 
     assert_eq!(kernel_lib.to_kernel_descriptor().ok().map(|k| k.proc_hashes().len()), Some(1));
 
-    Assembler::with_kernel(context.source_manager(), Arc::from(kernel_lib))?
-        .assemble_program("program", PROGRAM)?;
+    Assembler::with_sources_and_kernel(context.sources().as_ref().clone(), Arc::from(kernel_lib))?
+        .assemble_program("program", PROGRAM)
+        .into_result()?;
 
     Ok(())
 }
@@ -52,16 +53,16 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
 #[test]
 fn regression_empty_kernel_is_rejected() {
     let context = TestContext::default();
-    let source_manager = context.source_manager();
 
     // A kernel module with no exported procedures should be rejected.
     let kernel_masm = "pub const FOO = 1\n";
-    let err = Assembler::new(source_manager)
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel(
             "kernel",
             context.parse_kernel(source_file!(&context, kernel_masm)).unwrap(),
             None,
         )
+        .into_result()
         .expect_err("expected empty kernel to be rejected");
     assert_diagnostic_lines!(err, "package must contain at least one exported procedure");
 }
@@ -69,15 +70,17 @@ fn regression_empty_kernel_is_rejected() {
 #[test]
 fn regression_empty_kernel_with_submodule_is_rejected() {
     let context = TestContext::default();
-    let source_manager = context.source_manager();
 
     // A kernel module with no exported procedures should be rejected.
     let kernel_masm = "mod sub\n\npub const FOO = 1\n";
     let submodule_masm = "namespace $kernel::sub\n\npub proc foo push.1 end\n";
     let kernel_module = context.parse_kernel(source_file!(&context, kernel_masm)).unwrap();
-    let submodule = context.parse_module(source_file!(&context, submodule_masm)).unwrap();
-    let err = Assembler::new(source_manager)
+    let submodule = context
+        .parse_module_source_file(source_file!(&context, submodule_masm))
+        .unwrap();
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel("kernel", kernel_module, [submodule])
+        .into_result()
         .expect_err("expected empty kernel to be rejected");
     assert_diagnostic_lines!(err, "package must contain at least one exported procedure");
 }
@@ -102,9 +105,12 @@ fn regression_reexport_of_kernel_procedure_from_kernel_submodule_is_rejected() {
     let submodule_masm =
         "namespace $kernel::sub\n\npub use {root} from $kernel\n\npub proc foo push.1 end\n";
     let kernel_module = context.parse_kernel(source_file!(&context, kernel_masm)).unwrap();
-    let submodule = context.parse_module(source_file!(&context, submodule_masm)).unwrap();
-    let err = Assembler::new(context.source_manager())
+    let submodule = context
+        .parse_module_source_file(source_file!(&context, submodule_masm))
+        .unwrap();
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel("kernel", kernel_module, [submodule])
+        .into_result()
         .expect_err("expected kernel submodule re-exporting kernel syscall to be rejected");
     assert_diagnostic!(err, "invalid re-export of kernel syscall");
 }
@@ -120,9 +126,12 @@ fn regression_exec_of_kernel_procedure_is_rejected() {
     let kernel_masm = "pub mod sub\n\npub const FOO = 1\n\npub proc root push.FOO end\n\npub proc other exec.root end";
     let submodule_masm = "namespace $kernel::sub\n\npub proc foo exec.$kernel::root end\n";
     let kernel_module = context.parse_kernel(source_file!(&context, kernel_masm)).unwrap();
-    let submodule = context.parse_module(source_file!(&context, submodule_masm)).unwrap();
-    let err = Assembler::new(context.source_manager())
+    let submodule = context
+        .parse_module_source_file(source_file!(&context, submodule_masm))
+        .unwrap();
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel("kernel", kernel_module, [submodule])
+        .into_result()
         .expect_err("expected assembler to reject exec of syscall from within kernel submodule");
     assert_diagnostic!(err, "kernel procedure '::$kernel::root' can only be invoked via syscall");
 }
@@ -135,12 +144,14 @@ fn regression_syscall_of_kernel_submodule_procedure_is_rejected() {
     let submodule_masm = "namespace $kernel::sub\n\npub proc foo syscall.root end\n";
     let program_masm = "begin syscall.::$kernel::sub::foo end\n";
     let kernel_module = context.parse_kernel(source_file!(&context, kernel_masm)).unwrap();
-    let submodule = context.parse_module(source_file!(&context, submodule_masm)).unwrap();
-    let _kernel = Assembler::new(context.source_manager())
+    let submodule = context
+        .parse_module_source_file(source_file!(&context, submodule_masm))
+        .unwrap();
+    let _kernel = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel("kernel", kernel_module, [submodule])
         .expect("expected valid kernel");
     let err = context
-        .parse_module(source_file!(&context, program_masm))
+        .parse_module_source_file(source_file!(&context, program_masm))
         .expect_err("expected sema to reject syscall of non-syscall procedure");
     assert_diagnostic!(err, "invalid syscall: callee must be resolvable to kernel module");
 }
@@ -166,7 +177,7 @@ fn test_kernel_linking_against_its_own_library() -> TestResult {
         "#
     ))?;
 
-    let lib = context.parse_module(source_file!(
+    let lib = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace $kernel::lib
@@ -177,7 +188,9 @@ fn test_kernel_linking_against_its_own_library() -> TestResult {
             "#
     ))?;
 
-    let _ = Assembler::new(context.source_manager()).assemble_kernel("kernel", kernel, [lib])?;
+    let _ = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_kernel("kernel", kernel, [lib])
+        .into_result()?;
 
     Ok(())
 }
@@ -203,7 +216,7 @@ fn test_syscall_resolution_uses_kernel_module() -> TestResult {
         "#
     ))?;
 
-    let lib = context.parse_module(source_file!(
+    let lib = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace userspace
@@ -230,14 +243,19 @@ fn test_syscall_resolution_uses_kernel_module() -> TestResult {
         "#
     );
 
-    let kernel =
-        Assembler::new(context.source_manager()).assemble_kernel("kernel", kernel, None)?;
+    let kernel = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_kernel("kernel", kernel, None)
+        .into_result()?;
     let kernel_bar_root = kernel.as_ref().get_procedure_root_by_path("::$kernel::bar").unwrap();
     let kernel_foo_root = kernel.as_ref().get_procedure_root_by_path("::$kernel::foo").unwrap();
 
-    let mut assembler = Assembler::with_kernel(context.source_manager(), Arc::from(kernel))?;
-    assembler.compile_and_statically_link(lib)?;
-    let program = assembler.assemble_program("program", source)?.unwrap_program();
+    let mut assembler =
+        Assembler::with_sources_and_kernel(context.sources().as_ref().clone(), Arc::from(kernel))?;
+    assembler.compile_and_statically_link(lib).into_result()?;
+    let program = assembler
+        .assemble_program("program", source.inner().as_str())
+        .into_result()?
+        .unwrap_program();
 
     let mast = {
         let entry = program.get_node_by_id(program.entrypoint()).unwrap();
@@ -273,7 +291,7 @@ fn test_syscall_resolution_to_non_kernel_path_is_checked() -> TestResult {
         "#
     ))?;
 
-    let lib = context.parse_module(source_file!(
+    let lib = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace userspace
@@ -293,18 +311,19 @@ fn test_syscall_resolution_to_non_kernel_path_is_checked() -> TestResult {
         "#
     );
 
-    let kernel =
-        Assembler::new(context.source_manager()).assemble_kernel("kernel", kernel, None)?;
-    let lib = Assembler::new(context.source_manager()).assemble_library(
-        "lib",
-        lib,
-        None::<Box<Module>>,
-    )?;
+    let kernel = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_kernel("kernel", kernel, None)
+        .into_result()?;
+    let lib = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("lib", lib, None::<Box<Module>>)
+        .into_result()?;
 
-    let error = Assembler::with_kernel(context.source_manager(), Arc::from(kernel))?
-        .with_package(Arc::from(lib), Linkage::Static)?
-        .assemble_program("program", source)
-        .expect_err("expected diagnostic to be raised, but compilation succeeded");
+    let error =
+        Assembler::with_sources_and_kernel(context.sources().as_ref().clone(), Arc::from(kernel))?
+            .with_package(Arc::from(lib), Linkage::Static)?
+            .assemble_program("program", source.inner().as_str())
+            .into_result()
+            .expect_err("expected diagnostic to be raised, but compilation succeeded");
 
     assert_diagnostic!(&error, "invalid syscall: callee must be resolvable to kernel module");
     assert_diagnostic!(&error, "syscall.userspace::bar");
@@ -317,7 +336,6 @@ fn syscall_validation_does_not_panic_on_same_digest_userspace_procedure() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     let context = TestContext::default();
-    let source_manager = context.source_manager();
 
     let kernel_src = r#"
 pub proc k1
@@ -325,7 +343,7 @@ pub proc k1
 end
 "#;
 
-    let kernel_lib = Assembler::new(source_manager.clone())
+    let kernel_lib = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel(
             "kernel",
             context.parse_kernel(source_file!(&context, kernel_src)).unwrap(),
@@ -333,8 +351,11 @@ end
         )
         .expect("kernel assembly must succeed");
 
-    let assembler = Assembler::with_kernel(source_manager, Arc::from(kernel_lib))
-        .expect("test package should be valid");
+    let assembler = Assembler::with_sources_and_kernel(
+        context.sources().as_ref().clone(),
+        Arc::from(kernel_lib),
+    )
+    .expect("test package should be valid");
 
     let program_src = r#"
 proc dup
@@ -356,7 +377,6 @@ end
 #[test]
 fn syscall_by_unknown_digest_is_rejected_at_assembly_time_when_kernel_is_configured() {
     let context = TestContext::default();
-    let source_manager = context.source_manager();
 
     let kernel_src = r#"
 pub proc k1
@@ -364,7 +384,7 @@ pub proc k1
 end
 "#;
 
-    let kernel_lib = Assembler::new(source_manager.clone())
+    let kernel_lib = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel(
             "kernel",
             context.parse_kernel(source_file!(&context, kernel_src)).unwrap(),
@@ -372,8 +392,11 @@ end
         )
         .expect("kernel assembly must succeed");
 
-    let assembler = Assembler::with_kernel(source_manager, Arc::from(kernel_lib))
-        .expect("test kernel should be valid");
+    let assembler = Assembler::with_sources_and_kernel(
+        context.sources().as_ref().clone(),
+        Arc::from(kernel_lib),
+    )
+    .expect("test kernel should be valid");
 
     let program_src = r#"
 begin
@@ -383,6 +406,7 @@ end
 
     let err = assembler
         .assemble_program("program", program_src)
+        .into_result()
         .expect_err("expected unknown digest syscall to be rejected");
     assert_diagnostic!(err, "invalid syscall");
 }
@@ -390,7 +414,7 @@ end
 #[test]
 fn syscall_without_kernel_is_rejected_at_assembly_time() {
     let context = TestContext::default();
-    let assembler = Assembler::new(context.source_manager());
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
 
     let program_src = r#"
 begin
@@ -400,6 +424,7 @@ end
 
     let err = assembler
         .assemble_program("program", program_src)
+        .into_result()
         .expect_err("expected syscall without kernel to be rejected");
     assert_diagnostic!(err, "invalid syscall");
 }
@@ -407,7 +432,6 @@ end
 #[test]
 fn regression_kernel_exports_are_syscall_only_for_all_non_syscall_entrypoints() {
     let context = TestContext::default();
-    let source_manager = context.source_manager();
 
     let kernel_src = r#"
 pub proc k1
@@ -415,7 +439,7 @@ pub proc k1
 end
 "#;
 
-    let kernel = Assembler::new(source_manager.clone())
+    let kernel = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel(
             "kernel",
             context.parse_kernel(source_file!(&context, kernel_src)).unwrap(),
@@ -441,10 +465,14 @@ end
     ];
 
     for (kind, program_src) in cases {
-        let err = Assembler::with_kernel(source_manager.clone(), Arc::clone(&kernel))
-            .expect("test kernel should be valid")
-            .assemble_program("program", program_src)
-            .expect_err(&format!("kernel exports should be syscall-only, but {kind} succeeded"));
+        let err = Assembler::with_sources_and_kernel(
+            context.sources().as_ref().clone(),
+            Arc::clone(&kernel),
+        )
+        .expect("test kernel should be valid")
+        .assemble_program("program", program_src)
+        .into_result()
+        .expect_err(&format!("kernel exports should be syscall-only, but {kind} succeeded"));
         assert_diagnostic!(err, "syscall");
     }
 }

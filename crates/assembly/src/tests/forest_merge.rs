@@ -7,7 +7,7 @@ use super::*;
 #[test]
 fn issue_3035_self_merge_does_not_grow_mast() -> TestResult {
     let context = TestContext::default();
-    let module = context.parse_module(source_file!(
+    let module = context.parse_module_source_file(source_file!(
         &context,
         "
             namespace issue_3035::repro
@@ -19,11 +19,9 @@ fn issue_3035_self_merge_does_not_grow_mast() -> TestResult {
             "
     ))?;
 
-    let library = Assembler::new(context.source_manager()).assemble_library(
-        "lib",
-        module,
-        None::<Box<Module>>,
-    )?;
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("lib", module, None::<Box<Module>>)
+        .into_result()?;
     let forest = library.mast_forest().as_ref().clone();
     assert!(
         forest
@@ -94,7 +92,7 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
         exec.main
     end"#;
 
-    let program = context.assemble(program_source)?;
+    let program = assemble_source(&context, program_source)?;
     let original_forest = program.mast_forest().clone();
 
     // Core test: Merge the forest with itself

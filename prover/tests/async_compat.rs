@@ -1,7 +1,6 @@
-use std::sync::Arc;
-
 use miden_assembly::Assembler;
-use miden_debug_types::{Location, SourceFile, SourceSpan};
+use miden_debug_types::Location;
+use miden_diagnostics::{SharedSourceProvider, SourceSpan};
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host,
     LoadedMastForest, ProcessorState, Word,
@@ -22,10 +21,7 @@ impl YieldingAsyncHost {
 }
 
 impl BaseHost for YieldingAsyncHost {
-    fn get_label_and_source_file(
-        &self,
-        _location: &Location,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+    fn resolve_location(&self, _location: &Location) -> (SourceSpan, Option<SharedSourceProvider>) {
         (SourceSpan::UNKNOWN, None)
     }
 }

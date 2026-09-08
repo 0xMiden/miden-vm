@@ -9,7 +9,7 @@ fn variadic_procedure_signatures_resolve() -> TestResult {
     use miden_mast_package::PackageExport;
 
     let context = TestContext::new();
-    let module = context.parse_module(source_file!(
+    let module = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace lib::variadic
@@ -40,7 +40,7 @@ fn variadic_procedure_signatures_resolve() -> TestResult {
 #[test]
 fn self_recursive_struct_through_a_pointer_resolves() -> TestResult {
     let context = TestContext::new();
-    let module = context.parse_module(source_file!(
+    let module = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace lib::list
@@ -88,7 +88,7 @@ fn a_recursive_type_survives_a_full_package_round_trip() -> TestResult {
     use miden_mast_package::{Package, PackageExport};
 
     let context = TestContext::new();
-    let module = context.parse_module(source_file!(
+    let module = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace lib::tree
@@ -142,7 +142,7 @@ fn a_recursive_type_survives_a_full_package_round_trip() -> TestResult {
 #[test]
 fn mutually_recursive_structs_through_pointers_resolve() -> TestResult {
     let context = TestContext::new();
-    let module = context.parse_module(source_file!(
+    let module = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace lib::graph
@@ -201,7 +201,7 @@ fn mutually_recursive_structs_through_pointers_resolve() -> TestResult {
 #[test]
 fn directly_self_referential_type_alias_is_diagnosed() -> TestResult {
     let context = TestContext::new();
-    let module = context.parse_module(source_file!(
+    let module = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace lib::selfref
@@ -242,7 +242,7 @@ fn a_finite_cycle_through_an_alias_resolves() -> TestResult {
 "
         );
         let context = TestContext::new();
-        let module = context.parse_module(source_file!(&context, src))?;
+        let module = context.parse_module_source_file(source_file!(&context, src))?;
         let package = context
             .assemble_library("lib", None, module, [])
             .expect("a finite cycle through an alias should resolve");
@@ -268,7 +268,7 @@ fn an_alias_used_twice_in_one_aggregate_resolves() -> TestResult {
     // Both fields go through the same alias, and the pointer guards the cycle in each. Re-opening
     // the alias once per resolution is too coarse: the second field is not a new cycle.
     let context = TestContext::new();
-    let module = context.parse_module(source_file!(
+    let module = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace lib::twice
@@ -302,7 +302,7 @@ fn an_alias_used_twice_in_one_aggregate_resolves() -> TestResult {
 #[test]
 fn recursive_type_alias_cycle_is_diagnosed() -> TestResult {
     let context = TestContext::new();
-    let module = context.parse_module(source_file!(
+    let module = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace lib::cyc

@@ -20,14 +20,16 @@ fn merge_programs(
     let context = TestContext::new();
     let module = context.parse_module(program_a)?;
 
-    let lib_a = Assembler::new(context.source_manager())
+    let lib_a = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("lib-a", module, None::<Box<ast::Module>>)
-        .map(Arc::from)?;
+        .map(Arc::from)
+        .into_result()?;
 
-    let mut assembler = Assembler::new(context.source_manager());
+    let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
     assembler.link_package(Arc::clone(&lib_a), Linkage::Dynamic)?;
     let lib_b = assembler
-        .assemble_library("lib-b", program_b, None::<Box<ast::Module>>)?
+        .assemble_library("lib-b", program_b, None::<Box<ast::Module>>)
+        .into_result()?
         .mast_forest()
         .as_ref()
         .clone();

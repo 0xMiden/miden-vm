@@ -8,7 +8,7 @@ fn test_cross_module_constant_resolution() -> TestResult {
     let context = TestContext::default();
 
     // Module A defines and exports a constant
-    let module_a = context.parse_module(source_file!(
+    let module_a = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_a
@@ -21,7 +21,7 @@ fn test_cross_module_constant_resolution() -> TestResult {
     ))?;
 
     // Module B imports Module A and defines a constant using it
-    let module_b = context.parse_module(source_file!(
+    let module_b = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_b
@@ -34,9 +34,9 @@ fn test_cross_module_constant_resolution() -> TestResult {
         "#
     ))?;
 
-    let assembler = Assembler::new(context.source_manager());
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
 
-    let _ = assembler.assemble_library("test", module_a, [module_b])?;
+    let _ = assembler.assemble_library("test", module_a, [module_b]).into_result()?;
 
     Ok(())
 }
@@ -46,7 +46,7 @@ fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
     let context = TestContext::default();
 
     // Module A defines and exports a constant
-    let module_a = context.parse_module(source_file!(
+    let module_a = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_a
@@ -59,7 +59,7 @@ fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
     ))?;
 
     // Module B imports Module A and defines a constant using it
-    let module_b = context.parse_module(source_file!(
+    let module_b = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_b
@@ -71,9 +71,9 @@ fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
         "#
     ))?;
 
-    let assembler = Assembler::new(context.source_manager());
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
 
-    let _ = assembler.assemble_library("cycle", module_a, [module_b])?;
+    let _ = assembler.assemble_library("cycle", module_a, [module_b]).into_result()?;
 
     Ok(())
 }
@@ -82,7 +82,7 @@ fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
 fn importing_private_constant_from_another_module_is_rejected() -> TestResult {
     let context = TestContext::default();
 
-    let module_a = context.parse_module(source_file!(
+    let module_a = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_a
@@ -94,7 +94,7 @@ fn importing_private_constant_from_another_module_is_rejected() -> TestResult {
         "#
     ))?;
 
-    let module_b = context.parse_module(source_file!(
+    let module_b = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_b
@@ -106,8 +106,9 @@ fn importing_private_constant_from_another_module_is_rejected() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("library", module_a, [module_b])
+        .into_result()
         .expect_err("expected private constant import to be rejected");
     assert_diagnostic!(&err, "private symbol reference");
     assert_diagnostic!(&err, "only public items can be referenced from another module");
@@ -119,7 +120,7 @@ fn importing_private_constant_from_another_module_is_rejected() -> TestResult {
 fn importing_private_constant_from_another_module_by_absolute_path_is_rejected() -> TestResult {
     let context = TestContext::default();
 
-    let module_a = context.parse_module(source_file!(
+    let module_a = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_a
@@ -131,7 +132,7 @@ fn importing_private_constant_from_another_module_by_absolute_path_is_rejected()
         "#
     ))?;
 
-    let module_b = context.parse_module(source_file!(
+    let module_b = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_b
@@ -143,8 +144,9 @@ fn importing_private_constant_from_another_module_by_absolute_path_is_rejected()
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("library", module_a, [module_b])
+        .into_result()
         .expect_err("expected private absolute constant import to be rejected");
     assert_diagnostic!(&err, "private symbol reference");
     assert_diagnostic!(&err, "only public items can be referenced from another module");
@@ -156,7 +158,7 @@ fn importing_private_constant_from_another_module_by_absolute_path_is_rejected()
 fn importing_private_type_from_another_module_is_rejected() -> TestResult {
     let context = TestContext::default();
 
-    let module_a = context.parse_module(source_file!(
+    let module_a = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_a
@@ -168,7 +170,7 @@ fn importing_private_type_from_another_module_is_rejected() -> TestResult {
         "#
     ))?;
 
-    let module_b = context.parse_module(source_file!(
+    let module_b = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_b
@@ -180,8 +182,9 @@ fn importing_private_type_from_another_module_is_rejected() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("library", module_a, [module_b])
+        .into_result()
         .expect_err("expected private type import to be rejected");
     assert_diagnostic!(&err, "private symbol reference");
     assert_diagnostic!(&err, "only public items can be referenced from another module");
@@ -194,7 +197,7 @@ fn public_item_import_reexporting_private_signature_is_rejected() {
     let context = TestContext::default();
 
     let module = context
-        .parse_module(source_file!(
+        .parse_module_source_file(source_file!(
             &context,
             r#"
                 namespace cycle::module_a
@@ -210,8 +213,9 @@ fn public_item_import_reexporting_private_signature_is_rejected() {
         ))
         .expect("private procedure signature should be valid before public re-export");
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("library", module, None::<Box<Module>>)
+        .into_result()
         .expect_err("expected public re-export of private signature to be rejected");
 
     assert_diagnostic!(&err, "private type in exported procedure signature");
@@ -223,7 +227,7 @@ fn public_item_import_reexporting_private_type_is_rejected() {
     let context = TestContext::default();
 
     let module = context
-        .parse_module(source_file!(
+        .parse_module_source_file(source_file!(
             &context,
             r#"
                 namespace cycle::module_a
@@ -235,8 +239,9 @@ fn public_item_import_reexporting_private_type_is_rejected() {
         ))
         .expect("private type should be valid before public re-export");
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("library", module, None::<Box<Module>>)
+        .into_result()
         .expect_err("expected public re-export of private type to be rejected");
 
     assert_diagnostic!(&err, "private type in exported type declaration");
@@ -299,7 +304,9 @@ fn test_cross_module_constant_reexport_chain_in_procedure_scope() -> TestResult 
         "#
     );
 
-    let lib = Assembler::new(context.source_manager()).assemble_library("dcrc", root, [a, b, c])?;
+    let lib = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("dcrc", root, [a, b, c])
+        .into_result()?;
 
     let src = source_file!(
         &context,
@@ -312,10 +319,12 @@ fn test_cross_module_constant_reexport_chain_in_procedure_scope() -> TestResult 
             end
         "#
     );
+    let src = context.parse_program(src)?;
 
-    let _program = Assembler::new(context.source_manager())
+    let _program = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(Arc::from(lib), Linkage::Dynamic)?
-        .assemble_program("test", src)?;
+        .assemble_program("test", src)
+        .into_result()?;
 
     Ok(())
 }
@@ -358,7 +367,9 @@ fn test_issue_2696_imported_constant_with_private_dependency() -> TestResult {
         "#
     );
 
-    Assembler::new(context.source_manager()).assemble_library("wallet", root, [memory, account])?;
+    Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("wallet", root, [memory, account])
+        .into_result()?;
 
     Ok(())
 }

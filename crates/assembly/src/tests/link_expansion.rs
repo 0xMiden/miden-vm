@@ -8,7 +8,7 @@ fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResul
     let context = TestContext::default();
 
     // The name of this library is `lib::lib` on purpose
-    let lib = context.parse_module(source_file!(
+    let lib = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace lib::lib
@@ -19,23 +19,26 @@ fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResul
         "#
     ))?;
 
-    let assembler = Assembler::new(context.source_manager());
-    let lib = assembler.assemble_library("lib", lib, None::<Box<Module>>)?;
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
+    let lib = assembler.assemble_library("lib", lib, None::<Box<Module>>).into_result()?;
 
     // This import's default alias is `lib`, which is also the first component of its global
     // target. That must still resolve globally rather than being mistaken for an import-through-
     // import attempt.
-    let assembler = Assembler::new(context.source_manager());
-    let _ = assembler.with_package(Arc::from(lib), Linkage::Static)?.assemble_program(
-        "program",
-        r#"
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
+    let _ = assembler
+        .with_package(Arc::from(lib), Linkage::Static)?
+        .assemble_program(
+            "program",
+            r#"
         use lib::lib
 
         begin
             exec.lib::lib_proc
         end
         "#,
-    )?;
+        )
+        .into_result()?;
 
     Ok(())
 }
@@ -45,7 +48,7 @@ fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResul
 fn test_linking_recursive_expansion() -> TestResult {
     let context = TestContext::default();
 
-    let a_lib = context.parse_module(source_file!(
+    let a_lib = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace a
@@ -57,7 +60,7 @@ fn test_linking_recursive_expansion() -> TestResult {
         "#
     ))?;
 
-    let b_lib = context.parse_module(source_file!(
+    let b_lib = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace b
@@ -69,8 +72,8 @@ fn test_linking_recursive_expansion() -> TestResult {
         "#
     ))?;
 
-    let assembler = Assembler::new(context.source_manager());
-    let _ = assembler.assemble_library("lib", a_lib, [b_lib])?;
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
+    let _ = assembler.assemble_library("lib", a_lib, [b_lib]).into_result()?;
 
     Ok(())
 }
@@ -80,7 +83,7 @@ fn test_linking_recursive_expansion() -> TestResult {
 fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
     let context = TestContext::default();
 
-    let a_lib = context.parse_module(source_file!(
+    let a_lib = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace a::a
@@ -92,7 +95,7 @@ fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
         "#
     ))?;
 
-    let b_lib = context.parse_module(source_file!(
+    let b_lib = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace b
@@ -104,8 +107,8 @@ fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
         "#
     ))?;
 
-    let assembler = Assembler::new(context.source_manager());
-    let _ = assembler.assemble_library("lib", a_lib, [b_lib])?;
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
+    let _ = assembler.assemble_library("lib", a_lib, [b_lib]).into_result()?;
 
     Ok(())
 }

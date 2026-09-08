@@ -81,7 +81,8 @@ fn field_operation_cycle_costs_match_docs() {
         let context = TestContext::default();
         let body = core::iter::repeat_n(instruction, copies).collect::<Vec<_>>().join("\n    ");
         let source = source_file!(&context, format!("begin\n    {body}\nend"));
-        let program = Assembler::new(context.source_manager())
+        let source = context.parse_program(source).expect("source should parse");
+        let program = Assembler::with_sources(context.sources().as_ref().clone())
             .assemble_program("program", source)
             .expect("assembly failed")
             .unwrap_program();
@@ -120,8 +121,9 @@ fn field_operation_cycle_costs_match_docs() {
 #[test]
 fn bare_exp_lowers_to_63_expacc_rows() -> Result<(), Report> {
     let context = TestContext::default();
-    let program = Assembler::new(context.source_manager())
-        .assemble_program("p", "begin push.5 push.3 exp drop end")?
+    let program = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_program("p", "begin push.5 push.3 exp drop end")
+        .into_result()?
         .unwrap_program();
     let ops: Vec<Operation> = program.mast_forest()[program.entrypoint()]
         .unwrap_basic_block()
@@ -148,8 +150,9 @@ fn exp_imm_uses_exact_exponent_bit_length() -> Result<(), Report> {
 
     for pow in [(1_u64 << 63) - 1, 1_u64 << 63, Felt::ORDER_U64 - 2, Felt::ORDER_U64 - 1] {
         let source = format!("begin push.3 exp.{pow} drop end");
-        let program = Assembler::new(context.source_manager())
-            .assemble_program("p", source.as_str())?
+        let program = Assembler::with_sources(context.sources().as_ref().clone())
+            .assemble_program("p", source.as_str())
+            .into_result()?
             .unwrap_program();
         let num_expacc = program.mast_forest()[program.entrypoint()]
             .unwrap_basic_block()

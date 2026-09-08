@@ -1,10 +1,7 @@
-// Allow unused assignments - required by miette::Diagnostic derive macro
-#![allow(unused_assignments)]
-
 use alloc::vec::Vec;
 
 use miden_core::deferred::PrecompileError;
-use miden_utils_diagnostics::{Diagnostic, miette};
+use miden_diagnostics::Diagnostic;
 
 use crate::{Felt, Word, crypto::merkle::MerkleError};
 

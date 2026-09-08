@@ -255,11 +255,12 @@ fn assemble_project(manifest_path: &Path, target: ProjectTargetSelector<'_>, pro
     let assembler = Assembler::default();
     let mut registry = InMemoryPackageRegistry::default();
 
-    let Ok(mut project_assembler) = assembler.for_project_at_path(manifest_path, &mut registry)
+    let Ok(mut project_assembler) =
+        assembler.for_project_at_path(manifest_path, &mut registry).result
     else {
         return;
     };
-    let Ok(package) = project_assembler.assemble(target, profile) else {
+    let Ok(package) = project_assembler.assemble(target, profile).result else {
         return;
     };
 

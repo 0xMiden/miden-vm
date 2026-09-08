@@ -2,10 +2,10 @@ use alloc::sync::Arc;
 
 use miden_assembly_syntax::{
     ast::{Attribute, AttributeSet, MetaExpr, Path, PathBuf, Visibility, types::FunctionType},
-    debuginfo::{SourceManager, SourceSpan, Spanned},
     diagnostics::Report,
 };
 use miden_core::Word;
+use miden_diagnostics::{SourceSpan, Spanned};
 
 use super::{
     GlobalItemIndex,
@@ -18,7 +18,6 @@ use super::{
 
 /// Information about a procedure currently being compiled.
 pub struct ProcedureContext {
-    source_manager: Arc<dyn SourceManager>,
     gid: GlobalItemIndex,
     is_program_entrypoint: bool,
     span: SourceSpan,
@@ -40,10 +39,8 @@ impl ProcedureContext {
         visibility: Visibility,
         signature: Option<Arc<FunctionType>>,
         is_kernel: bool,
-        source_manager: Arc<dyn SourceManager>,
     ) -> Self {
         Self {
-            source_manager,
             gid,
             is_program_entrypoint,
             span: SourceSpan::UNKNOWN,
@@ -66,10 +63,8 @@ impl ProcedureContext {
     /// Call [`Self::with_span`] first so the error can point at the procedure definition.
     pub fn with_num_locals(mut self, num_locals: u16) -> Result<Self, Report> {
         if num_locals > MAX_PROC_LOCALS {
-            let source_file = self.source_manager.get(self.span.source_id()).ok();
             return Err(Report::new(AssemblerError::TooManyProcedureLocals {
                 span: self.span,
-                source_file,
                 max_locals: MAX_PROC_LOCALS,
                 num_locals,
             }));
@@ -124,11 +119,6 @@ impl ProcedureContext {
     /// Returns true if the procedure is being assembled for a kernel.
     pub fn is_kernel(&self) -> bool {
         self.is_kernel
-    }
-
-    #[inline(always)]
-    pub fn source_manager(&self) -> &dyn SourceManager {
-        self.source_manager.as_ref()
     }
 }
 
@@ -296,10 +286,7 @@ impl Procedure {
     ///
     /// Returns an error if a `@source_name` attribute is present, but is not of the form
     /// `@source_name("...")`.
-    pub fn source_name_fully_qualified(
-        &self,
-        source_manager: &dyn SourceManager,
-    ) -> Result<Option<PathBuf>, Report> {
+    pub fn source_name_fully_qualified(&self) -> Result<Option<PathBuf>, Report> {
         let Some(attribute) = self.attributes.get("source_name") else {
             return Ok(None);
         };
@@ -311,10 +298,7 @@ impl Procedure {
         }
 
         let span = attribute.span();
-        Err(Report::new(AssemblerError::InvalidSourceNameAttribute {
-            span,
-            source_file: source_manager.get(span.source_id()).ok(),
-        }))
+        Err(Report::new(AssemblerError::InvalidSourceNameAttribute { span }))
     }
 
     /// Returns the number of memory locals reserved by the procedure.
@@ -354,7 +338,7 @@ mod tests {
     use miden_assembly_syntax::{
         PathBuf,
         ast::{Attribute, Ident, MetaExpr},
-        debuginfo::{DefaultSourceManager, SourceLanguage, Uri},
+        diagnostics::{SourceKey, SourceMap, SourceNamespace, TextRange},
     };
 
     use super::*;
@@ -375,15 +359,13 @@ mod tests {
 
     #[test]
     fn source_name_fully_qualified_is_none_without_attribute() {
-        let source_manager = DefaultSourceManager::default();
         let procedure = procedure_with_attributes(vec![].into_iter());
 
-        assert_eq!(procedure.source_name_fully_qualified(&source_manager).unwrap(), None);
+        assert_eq!(procedure.source_name_fully_qualified().unwrap(), None);
     }
 
     #[test]
     fn source_name_fully_qualified_returns_quoted_string_joined_to_module_path() {
-        let source_manager = DefaultSourceManager::default();
         let attribute = Attribute::from_iter(
             Ident::new("source_name").unwrap(),
             [MetaExpr::String(Ident::new("bar").unwrap())],
@@ -391,20 +373,17 @@ mod tests {
         let procedure = procedure_with_attributes(vec![attribute].into_iter());
 
         assert_eq!(
-            procedure.source_name_fully_qualified(&source_manager).unwrap(),
+            procedure.source_name_fully_qualified().unwrap(),
             Some(PathBuf::new("::test::module::bar").unwrap()),
         );
     }
 
     #[test]
     fn malformed_source_name_attributes_are_rejected() {
-        let source_manager = DefaultSourceManager::default();
-        let file = source_manager.load(
-            SourceLanguage::Masm,
-            Uri::new("test.masm"),
-            "@source_name(unquoted)".into(),
-        );
-        let span = SourceSpan::new(file.id(), 0..19);
+        let mut source_map = SourceMap::new(SourceNamespace::new_unchecked(1));
+        let source_id = source_map.insert("test.masm", "@source_name(unquoted)", None).unwrap();
+        let span =
+            SourceSpan::new(SourceKey::Session(source_id), None, TextRange::new(0, 19).unwrap());
 
         // Generate some malformed `@source_name` attributes
         let malformed = vec![
@@ -431,12 +410,12 @@ mod tests {
 
         for attribute in malformed {
             let procedure = procedure_with_attributes(vec![attribute.with_span(span)].into_iter());
-            let error = procedure.source_name_fully_qualified(&source_manager).unwrap_err();
+            let error = procedure.source_name_fully_qualified().unwrap_err();
 
             match error.downcast_ref::<AssemblerError>() {
-                Some(AssemblerError::InvalidSourceNameAttribute { source_file, .. }) => {
+                Some(AssemblerError::InvalidSourceNameAttribute { span: error_span, .. }) => {
                     // The error must be attributed to the file in which the attribute occurred
-                    assert_eq!(source_file.as_ref(), Some(&file));
+                    assert_eq!(error_span.source(), span.source());
                 },
                 unexpected => panic!("expected InvalidSourceNameAttribute, got {unexpected:?}"),
             }

@@ -8,7 +8,7 @@ fn test_cross_module_quoted_identifier_resolution() -> TestResult {
     let context = TestContext::default();
 
     // Module A defines and exports a constant
-    let module_a = context.parse_module(source_file!(
+    let module_a = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::"module::a"
@@ -30,7 +30,7 @@ fn test_cross_module_quoted_identifier_resolution() -> TestResult {
     ))?;
 
     // Module B imports Module A and defines a constant using it
-    let module_b = context.parse_module(source_file!(
+    let module_b = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module::b
@@ -45,9 +45,9 @@ fn test_cross_module_quoted_identifier_resolution() -> TestResult {
         "#
     ))?;
 
-    let assembler = Assembler::new(context.source_manager());
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
 
-    let _ = assembler.assemble_library("cycle", module_a, [module_b])?;
+    let _ = assembler.assemble_library("cycle", module_a, [module_b]).into_result()?;
 
     Ok(())
 }
@@ -66,11 +66,10 @@ end
             assembler.link_package(lib.clone(), Linkage::Static)?;
         }
 
-        assembler.assemble_program("program", program_source).map(|_| ())
+        assembler.assemble_program("program", program_source).into_result().map(|_| ())
     }
 
     let context = TestContext::default();
-    let source_manager = context.source_manager();
 
     let legit_mod = context
         .parse_module(
@@ -92,11 +91,11 @@ pub proc add add.2 end"##,
         )
         .expect("module must parse and analyse");
 
-    let legit_lib = Assembler::new(source_manager.clone())
+    let legit_lib = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("legit", legit_mod, None::<Box<Module>>)
         .map(Arc::<Package>::from)
         .expect("library assembly must succeed");
-    let attacker_lib = Assembler::new(source_manager)
+    let attacker_lib = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("legit", attacker_mod, None::<Box<Module>>)
         .map(Arc::<Package>::from)
         .expect("library assembly must succeed");
@@ -113,7 +112,6 @@ pub proc add add.2 end"##,
 #[test]
 fn regression_symbol_resolution_in_library_canonical_export_collision_is_rejected() {
     let context = TestContext::default();
-    let source_manager = context.source_manager();
     let legit_mod = context
         .parse_module("namespace ::foo::bar\n\npub proc add add.1 end")
         .expect("module must parse and analyse");
@@ -125,8 +123,9 @@ pub proc add add.2 end"##,
         )
         .expect("module must parse and analyse");
 
-    let err = Assembler::new(source_manager)
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("lib", legit_mod, [attacker_mod])
+        .into_result()
         .expect_err("expected duplicate canonical export paths to be rejected during assembly");
     assert_diagnostic!(err, "duplicate definition found for module '::foo::bar'");
 }
@@ -145,7 +144,7 @@ end
 "#,
         )
         .expect("base module parsing must succeed");
-    let base = Assembler::new(context.source_manager())
+    let base = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("lib", module, None::<Box<Module>>)
         .expect("base library assembly must succeed");
     let (node, digest) = base
@@ -186,10 +185,11 @@ fn executable_package_main_export_points_to_entrypoint_source_root() -> TestResu
         end
         "#,
     )?;
-    let lib = Assembler::new(context.source_manager().clone())
+    let lib = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("lib", lib_module, None::<Box<Module>>)
+        .into_result()
         .map(Arc::<Package>::from)?;
-    let package = Assembler::new(context.source_manager())
+    let package = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(lib, Linkage::Static)?
         .assemble_program(
             "program",
@@ -200,7 +200,8 @@ fn executable_package_main_export_points_to_entrypoint_source_root() -> TestResu
                 exec.lib::lib_proc
             end
             "#,
-        )?;
+        )
+        .into_result()?;
 
     let main_path = Path::exec_path().join(ProcedureName::MAIN_PROC_NAME);
     let entrypoint = package
@@ -235,7 +236,7 @@ end
 "#,
         )
         .expect("base module parsing must succeed");
-    let base = Assembler::new(context.source_manager())
+    let base = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("test", module, None::<Box<Module>>)
         .expect("base library assembly must succeed");
     let (node, digest) = base

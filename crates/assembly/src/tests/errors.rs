@@ -7,8 +7,7 @@ use super::*;
 fn invalid_empty_program() {
     let context = TestContext::default();
     for _ in 0..2 {
-        let err = context
-            .assemble(source_file!(&context, "namespace foo"))
+        let err = assemble_source(&context, source_file!(&context, "namespace foo"))
             .expect_err("expected empty program to be rejected");
         assert_diagnostic!(&err, "unable to assemble program: source is not an executable module");
     }
@@ -17,8 +16,7 @@ fn invalid_empty_program() {
 #[test]
 fn invalid_program_unrecognized_token() {
     let context = TestContext::default();
-    let err = context
-        .assemble(source_file!(&context, "none"))
+    let err = assemble_source(&context, source_file!(&context, "none"))
         .expect_err("expected unexpected top-level token to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "unexpected top-level token");
@@ -28,8 +26,7 @@ fn invalid_program_unrecognized_token() {
 #[test]
 fn invalid_program_unmatched_begin() {
     let context = TestContext::default();
-    let err = context
-        .assemble(source_file!(&context, "begin add"))
+    let err = assemble_source(&context, source_file!(&context, "begin add"))
         .expect_err("expected unmatched begin to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "expected `end` to close `begin` block");
@@ -39,8 +36,7 @@ fn invalid_program_unmatched_begin() {
 #[test]
 fn invalid_program_invalid_top_level_token() {
     let context = TestContext::default();
-    let err = context
-        .assemble(source_file!(&context, "begin add end mul"))
+    let err = assemble_source(&context, source_file!(&context, "begin add end mul"))
         .expect_err("expected invalid top-level token to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "unexpected top-level token");
@@ -53,8 +49,7 @@ fn removed_debug_instructions_are_rejected_by_assembler() {
 
     for spelling in ["debug.stack.4", "debug.mem", "debug.local.0.2", "debug.adv_stack.4"] {
         let source = source_file!(&context, format!("begin {spelling} end"));
-        let error = context
-            .assemble(source)
+        let error = assemble_source(&context, source)
             .expect_err("removed debug.* instruction should be rejected");
         assert_diagnostic!(&error, "invalid instruction");
     }
@@ -65,17 +60,15 @@ fn removed_debug_instructions_are_rejected_by_assembler() {
 fn invalid_debug_variable_type_returns_error_instead_of_panicking() -> TestResult {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
-    use miden_assembly_syntax::{
-        ast::{
-            DebugVarInfo, DebugVarLocation, Instruction, Op,
-            types::{ArrayType, Type},
-        },
-        debuginfo::{SourceSpan, Span},
+    use miden_assembly_syntax::ast::{
+        DebugVarInfo, DebugVarLocation, Instruction, Op,
+        types::{ArrayType, Type},
     };
+    use miden_diagnostics::{SourceSpan, Span};
 
     let context = TestContext::default();
     let source = source_file!(&context, "begin nop end");
-    let mut module = context.parse_module(source)?;
+    let mut module = context.parse_module_source_file(source)?;
     let entrypoint = module
         .procedures_mut()
         .find(|procedure| procedure.is_entrypoint())
@@ -89,7 +82,7 @@ fn invalid_debug_variable_type_returns_error_instead_of_panicking() -> TestResul
         .body_mut()
         .push(Op::Inst(Span::new(SourceSpan::default(), Instruction::DebugVar(debug_var))));
 
-    let assembled = catch_unwind(AssertUnwindSafe(|| context.assemble(module)));
+    let assembled = catch_unwind(AssertUnwindSafe(|| assemble_source(&context, module)));
     let err = assembled
         .expect("assembly panicked, expected a structured error")
         .expect_err("invalid debug variable type should be rejected");
@@ -102,8 +95,7 @@ fn invalid_debug_variable_type_returns_error_instead_of_panicking() -> TestResul
 fn invalid_proc_missing_end_unexpected_begin() {
     let context = TestContext::default();
     let source = source_file!(&context, "proc foo add mul begin push.1 end");
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected procedure missing end to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "expected `end` to close procedure before top-level item");
@@ -114,8 +106,7 @@ fn invalid_proc_missing_end_unexpected_begin() {
 fn invalid_proc_missing_end_unexpected_proc() {
     let context = TestContext::default();
     let source = source_file!(&context, "proc foo add mul proc bar push.3 end begin push.1 end");
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected procedure missing end to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "expected `end` to close procedure before top-level item");
@@ -126,8 +117,7 @@ fn invalid_proc_missing_end_unexpected_proc() {
 fn invalid_proc_undefined_local() {
     let context = TestContext::default();
     let source = source_file!(&context, "proc foo add mul end begin push.1 exec.bar end");
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected undefined local proc to be rejected");
     assert_diagnostic!(&err, "undefined symbol reference");
     assert_diagnostic!(&err, "this symbol path could not be resolved");
@@ -146,7 +136,8 @@ fn missing_import() {
     end"#
     );
 
-    let err = context.assemble(source).expect_err("expected missing import to be rejected");
+    let err =
+        assemble_source(&context, source).expect_err("expected missing import to be rejected");
     assert_diagnostic!(&err, "invalid relative item path 'u64::add'");
     assert_diagnostic!(&err, "absolute, local, or qualified by an import or submodule");
     assert_diagnostic!(&err, "exec.u64::add");
@@ -156,10 +147,8 @@ fn missing_import() {
 fn invalid_proc_invalid_numeric_name() {
     let context = TestContext::default();
     let source = source_file!(&context, "proc 123 add mul end begin push.1 exec.123 end");
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected numeric procedure name to be rejected");
-    assert_diagnostic!(&err, "Multiple syntax errors were identified");
     assert_diagnostic!(&err, "expected a procedure name");
     assert_diagnostic!(&err, "unexpected token in block");
 }
@@ -169,8 +158,7 @@ fn invalid_proc_duplicate_procedure_name() {
     let context = TestContext::default();
     let source =
         source_file!(&context, "proc foo add mul end proc foo push.3 end begin push.1 end");
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected duplicate procedure name to be rejected");
     assert_diagnostic!(&err, "symbol conflict: found duplicate definitions of the same name");
     assert_diagnostic!(&err, "conflict occurs here");
@@ -182,7 +170,8 @@ fn invalid_proc_duplicate_procedure_name() {
 fn invalid_if_missing_end_no_else() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.1 add if.true mul");
-    let err = context.assemble(source).expect_err("expected missing if end to be rejected");
+    let err =
+        assemble_source(&context, source).expect_err("expected missing if end to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "expected `end` to close `if`");
     assert_diagnostic!(&err, "begin push.1 add if.true mul");
@@ -192,14 +181,14 @@ fn invalid_if_missing_end_no_else() {
 fn invalid_else_with_no_if() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.1 add else mul end");
-    let err = context.assemble(source).expect_err("expected unmatched else to be rejected");
-    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    let err =
+        assemble_source(&context, source).expect_err("expected unmatched else to be rejected");
     assert_diagnostic!(&err, "expected `end` to close `begin` block before `else`");
     assert_diagnostic!(&err, "unexpected top-level token");
 
     let source = source_file!(&context, "begin push.1 while.true add else mul end end");
-    let err = context.assemble(source).expect_err("expected while-local else to be rejected");
-    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    let err =
+        assemble_source(&context, source).expect_err("expected while-local else to be rejected");
     assert_diagnostic!(&err, "expected `end` to close `while` before `else`");
     assert_diagnostic!(&err, "unexpected top-level token");
 }
@@ -210,8 +199,8 @@ fn invalid_unmatched_else_within_if_else() {
 
     let source =
         source_file!(&context, "begin push.1 if.true add else mul else push.1 end end end");
-    let err = context.assemble(source).expect_err("expected duplicate else to be rejected");
-    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    let err =
+        assemble_source(&context, source).expect_err("expected duplicate else to be rejected");
     assert_diagnostic!(&err, "expected `end` to close `if` before `else`");
     assert_diagnostic!(&err, "expected `end` to close `begin` block before `else`");
     assert_diagnostic!(&err, "unexpected top-level token");
@@ -222,9 +211,8 @@ fn invalid_if_else_no_matching_end() {
     let context = TestContext::default();
 
     let source = source_file!(&context, "begin push.1 add if.true mul else add");
-    let err = context
-        .assemble(source)
-        .expect_err("expected missing if/else end to be rejected");
+    let err =
+        assemble_source(&context, source).expect_err("expected missing if/else end to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "expected `end` to close `if`");
     assert_diagnostic!(&err, "begin push.1 add if.true mul else add");
@@ -236,15 +224,15 @@ fn invalid_repeat() {
 
     // unmatched repeat
     let source = source_file!(&context, "begin push.1 add repeat.10 mul");
-    let err = context.assemble(source).expect_err("expected unmatched repeat to be rejected");
+    let err =
+        assemble_source(&context, source).expect_err("expected unmatched repeat to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "expected `end` to close `repeat`");
     assert_diagnostic!(&err, "begin push.1 add repeat.10 mul");
 
     // invalid iter count
     let source = source_file!(&context, "begin push.1 add repeat.23x3 mul end end");
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected malformed repeat count to be rejected");
     assert_diagnostic!(&err, "invalid syntax: invalid instruction `x3` or malformed operands");
     assert_diagnostic!(&err, "begin push.1 add repeat.23x3 mul end end");
@@ -264,8 +252,7 @@ fn invalid_repeat() {
             "
         )
     );
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected overflowing repeat count to be rejected");
     assert_diagnostic!(&err, "invalid immediate: value is larger than expected range");
     assert_diagnostic!(&err, "repeat.CONSTANT");
@@ -275,9 +262,8 @@ fn invalid_repeat() {
 fn invalid_repeat_count_zero() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin repeat.0 nop end end");
-    let error = context.assemble(source).expect_err("expected repeat.0 to be rejected");
-    let rendered =
-        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    let error = assemble_source(&context, source).expect_err("expected repeat.0 to be rejected");
+    let rendered = format!("{}", error.display_with_sources(context.sources().as_ref()));
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -297,9 +283,8 @@ begin
     call.foo
 end"
     );
-    let error = context.assemble(source).expect_err("expected repeat.0 to be rejected");
-    let rendered =
-        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    let error = assemble_source(&context, source).expect_err("expected repeat.0 to be rejected");
+    let rendered = format!("{}", error.display_with_sources(context.sources().as_ref()));
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -308,11 +293,9 @@ fn invalid_repeat_count_too_large() {
     let context = TestContext::default();
     let repeat_count = MAX_REPEAT_COUNT + 1;
     let source = source_file!(&context, format!("begin repeat.{repeat_count} nop end end"));
-    let error = context
-        .assemble(source)
+    let error = assemble_source(&context, source)
         .expect_err("expected repeat count above limit to be rejected");
-    let rendered =
-        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    let rendered = format!("{}", error.display_with_sources(context.sources().as_ref()));
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -321,11 +304,9 @@ fn invalid_repeat_count_constant_zero() {
     let context = TestContext::default();
     let source =
         source_file!(&context, "const REPEAT_COUNT = 0\nbegin repeat.REPEAT_COUNT nop end end");
-    let error = context
-        .assemble(source)
+    let error = assemble_source(&context, source)
         .expect_err("expected repeat.0 from constant to be rejected");
-    let rendered =
-        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    let rendered = format!("{}", error.display_with_sources(context.sources().as_ref()));
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -337,11 +318,9 @@ fn invalid_repeat_count_constant_too_large() {
         &context,
         format!("const REPEAT_COUNT = {repeat_count}\nbegin repeat.REPEAT_COUNT nop end end")
     );
-    let error = context
-        .assemble(source)
+    let error = assemble_source(&context, source)
         .expect_err("expected repeat count above limit from constant to be rejected");
-    let rendered =
-        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    let rendered = format!("{}", error.display_with_sources(context.sources().as_ref()));
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -572,21 +551,20 @@ fn invalid_while() {
     let context = TestContext::default();
 
     let source = source_file!(&context, "begin push.1 add while mul end end");
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected invalid while spelling to be rejected");
     assert_diagnostic!(&err, "invalid syntax: expected `while.true`");
     assert_diagnostic!(&err, "begin push.1 add while mul end end");
 
     let source = source_file!(&context, "begin push.1 add while.abc mul end end");
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected invalid while spelling to be rejected");
     assert_diagnostic!(&err, "invalid syntax: expected `while.true`");
     assert_diagnostic!(&err, "begin push.1 add while.abc mul end end");
 
     let source = source_file!(&context, "begin push.1 add while.true mul");
-    let err = context.assemble(source).expect_err("expected unmatched while to be rejected");
+    let err =
+        assemble_source(&context, source).expect_err("expected unmatched while to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "expected `end` to close `while`");
     assert_diagnostic!(&err, "begin push.1 add while.true mul");

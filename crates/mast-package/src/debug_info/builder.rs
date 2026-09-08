@@ -1,11 +1,9 @@
 use alloc::{boxed::Box, sync::Arc};
 
-use miden_assembly_syntax::{
-    Report,
-    ast::types::{EnumRef, RecTypeRef, StructRef},
-};
+use miden_assembly_syntax::ast::types::{EnumRef, RecTypeRef, StructRef};
 use miden_core::mast::MastNodeId;
 use miden_debug_types::{Location, Uri};
+use miden_diagnostics::Report;
 use miden_utils_indexing::{Idx, IndexedVecError};
 
 use super::{

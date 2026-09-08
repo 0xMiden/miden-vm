@@ -4,11 +4,11 @@ use alloc::{
     sync::Arc,
     vec,
 };
-use core::{assert_matches, cell::Cell, str::FromStr};
+use core::{assert_matches, cell::Cell, num::NonZeroU32, str::FromStr};
 
 use miden_air::trace::MIN_TRACE_LEN;
 use miden_assembly::{
-    Assembler, DefaultSourceManager, Linkage, Path,
+    Assembler, Linkage, Path,
     ast::{DebugInlineCallInfo, Instruction, Module, ModuleKind, Op, QualifiedProcedureName},
 };
 use miden_core::{
@@ -22,9 +22,10 @@ use miden_core::{
     program::StackInputs,
     serde::{Deserializable, Serializable},
 };
-use miden_debug_types::{
-    ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan,
-    Span, Uri,
+use miden_debug_types::{ByteIndex, Location, Uri};
+use miden_diagnostics::{
+    SharedSourceProvider, SourceId, SourceMap, SourceNamespace, SourceProvider, SourceSpan, Span,
+    TextRange,
 };
 use miden_mast_package::{
     Package, PackageExport, PackageId, ProcedureExport, Section, SectionId, TargetType, Version,
@@ -51,13 +52,32 @@ mod all_ops;
 mod masm_consistency;
 mod memory;
 
-fn parse_kernel_source(source_manager: Arc<dyn SourceManager>, source: &str) -> Box<Module> {
+fn new_source_map() -> SourceMap {
+    SourceMap::new(SourceNamespace::new(NonZeroU32::new(3).unwrap()))
+}
+
+fn parse_kernel_source(sources: &mut SourceMap, source: &str) -> Box<Module> {
     let mut parser = Module::parser(Some(ModuleKind::Kernel));
-    parser.parse_str(Some(Path::KERNEL), source, source_manager).unwrap()
+    parser
+        .parse_str(Some(Path::KERNEL), source, sources)
+        .expect("kernel module should parse")
+}
+
+fn parse_named_source(
+    sources: &mut SourceMap,
+    display_name: &str,
+    path: Option<&Path>,
+    kind: Option<ModuleKind>,
+    source: &str,
+) -> Box<Module> {
+    let source_id = sources.insert(display_name, source, None).unwrap();
+    Module::parser(kind)
+        .parse(path, source_id, source)
+        .expect("module should parse")
 }
 
 fn set_entrypoint_inline_context(
-    source_manager: &DefaultSourceManager,
+    source_provider: &dyn SourceProvider,
     module: &mut Module,
     name: &str,
 ) {
@@ -78,7 +98,7 @@ fn set_entrypoint_inline_context(
         let instruction = match replacement {
             None => Instruction::DebugInlineCallClear,
             Some(name) => {
-                let location = source_manager.file_line_col(span).unwrap();
+                let location = Location::from_span(span, source_provider).unwrap();
                 Instruction::DebugInlineCall(DebugInlineCallInfo::new(
                     name,
                     location.clone(),
@@ -165,8 +185,7 @@ fn stack_get_word_out_of_bounds_read() {
         INITIAL_STACK_TOP_IDX - MIN_STACK_DEPTH
     );
 
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let program = Assembler::new(source_manager)
+    let program = Assembler::new()
         .assemble_program("program", &program_source)
         .expect("program should assemble")
         .unwrap_program();
@@ -321,8 +340,7 @@ fn test_syscall_fail() {
 
 #[test]
 fn validated_debug_child_bearing_package_executes_with_debug_info() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let package = Assembler::new(source_manager)
+    let package = Assembler::new()
         .assemble_program(
             "program",
             "
@@ -357,15 +375,12 @@ fn validated_debug_child_bearing_package_executes_with_debug_info() {
 
 #[test]
 fn host_loaded_package_debug_info_reports_loaded_source_span() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let (loaded_package, target_digest, loaded_source_file) = host_loaded_package_fixture(
-        source_manager.clone(),
-        vec![Operation::Assert(Felt::from_u32(9))],
-        true,
-    );
+    let mut sources = new_source_map();
+    let (loaded_package, target_digest, loaded_source_id) =
+        host_loaded_package_fixture(&mut sources, vec![Operation::Assert(Felt::from_u32(9))], true);
     let (program, caller_debug_info) = external_program_for_digest(target_digest);
     let mut host = DefaultHost::default()
-        .with_source_manager(source_manager)
+        .with_source_provider(Arc::new(sources))
         .with_library(Arc::new(loaded_package))
         .expect("loaded package should register");
 
@@ -377,25 +392,22 @@ fn host_loaded_package_debug_info_reports_loaded_source_span() {
         err,
         ExecutionError::OperationError {
             label,
-            source_file: Some(actual_source_file),
+            sources: Some(actual_sources),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(loaded_source_file.id(), 0u32..11)
-            && actual_source_file.id() == loaded_source_file.id()
+        } if label == SourceSpan::session(loaded_source_id, TextRange::new(0, 11).unwrap())
+            && actual_sources.get(loaded_source_id).is_some()
             && err_code == Felt::from_u32(9)
     );
 }
 
 #[test]
 fn host_loaded_package_debug_info_requires_source_aware_execution() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let (loaded_package, target_digest, loaded_source_file) = host_loaded_package_fixture(
-        source_manager.clone(),
-        vec![Operation::Assert(Felt::from_u32(9))],
-        true,
-    );
+    let mut sources = new_source_map();
+    let (loaded_package, target_digest, loaded_source_id) =
+        host_loaded_package_fixture(&mut sources, vec![Operation::Assert(Felt::from_u32(9))], true);
     let (program, _) = external_program_for_digest(target_digest);
     let mut plain_host = DefaultHost::default()
-        .with_source_manager(source_manager.clone())
+        .with_source_provider(Arc::new(sources.clone()))
         .with_library(Arc::new(loaded_package.clone()))
         .expect("loaded package should register");
 
@@ -405,7 +417,7 @@ fn host_loaded_package_debug_info_requires_source_aware_execution() {
     assert_matches!(
         err,
         ExecutionError::OperationError {
-            source_file: None,
+            sources: None,
             err: OperationError::FailedAssertion { err_code, .. },
             ..
         } if err_code == Felt::from_u32(9)
@@ -413,7 +425,7 @@ fn host_loaded_package_debug_info_requires_source_aware_execution() {
 
     let caller_debug_info = PackageDebugInfo::default();
     let mut source_aware_host = DefaultHost::default()
-        .with_source_manager(source_manager)
+        .with_source_provider(Arc::new(sources))
         .with_library(Arc::new(loaded_package))
         .expect("loaded package should register");
     let err = FastProcessor::new(StackInputs::default())
@@ -424,26 +436,23 @@ fn host_loaded_package_debug_info_requires_source_aware_execution() {
         err,
         ExecutionError::OperationError {
             label,
-            source_file: Some(actual_source_file),
+            sources: Some(actual_sources),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(loaded_source_file.id(), 0u32..11)
-            && actual_source_file.id() == loaded_source_file.id()
+        } if label == SourceSpan::session(loaded_source_id, TextRange::new(0, 11).unwrap())
+            && actual_sources.get(loaded_source_id).is_some()
             && err_code == Felt::from_u32(9)
     );
 }
 
 #[test]
 fn host_loaded_package_debug_info_survives_missing_caller_entrypoint_root() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let (loaded_package, target_digest, loaded_source_file) = host_loaded_package_fixture(
-        source_manager.clone(),
-        vec![Operation::Assert(Felt::from_u32(9))],
-        true,
-    );
+    let mut sources = new_source_map();
+    let (loaded_package, target_digest, loaded_source_id) =
+        host_loaded_package_fixture(&mut sources, vec![Operation::Assert(Felt::from_u32(9))], true);
     let (program, _) = external_program_for_digest(target_digest);
     let caller_debug_info = PackageDebugInfo::default();
     let mut host = DefaultHost::default()
-        .with_source_manager(source_manager)
+        .with_source_provider(Arc::new(sources))
         .with_library(Arc::new(loaded_package))
         .expect("loaded package should register");
 
@@ -455,25 +464,22 @@ fn host_loaded_package_debug_info_survives_missing_caller_entrypoint_root() {
         err,
         ExecutionError::OperationError {
             label,
-            source_file: Some(actual_source_file),
+            sources: Some(actual_sources),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(loaded_source_file.id(), 0u32..11)
-            && actual_source_file.id() == loaded_source_file.id()
+        } if label == SourceSpan::session(loaded_source_id, TextRange::new(0, 11).unwrap())
+            && actual_sources.get(loaded_source_id).is_some()
             && err_code == Felt::from_u32(9)
     );
 }
 
 #[test]
 fn host_loaded_package_debug_info_survives_step_execution() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let (loaded_package, target_digest, loaded_source_file) = host_loaded_package_fixture(
-        source_manager.clone(),
-        vec![Operation::Assert(Felt::from_u32(9))],
-        true,
-    );
+    let mut sources = new_source_map();
+    let (loaded_package, target_digest, loaded_source_id) =
+        host_loaded_package_fixture(&mut sources, vec![Operation::Assert(Felt::from_u32(9))], true);
     let (program, caller_debug_info) = external_program_for_digest(target_digest);
     let mut host = DefaultHost::default()
-        .with_source_manager(source_manager)
+        .with_source_provider(Arc::new(sources))
         .with_library(Arc::new(loaded_package))
         .expect("loaded package should register");
 
@@ -485,25 +491,22 @@ fn host_loaded_package_debug_info_survives_step_execution() {
         err,
         ExecutionError::OperationError {
             label,
-            source_file: Some(actual_source_file),
+            sources: Some(actual_sources),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(loaded_source_file.id(), 0u32..11)
-            && actual_source_file.id() == loaded_source_file.id()
+        } if label == SourceSpan::session(loaded_source_id, TextRange::new(0, 11).unwrap())
+            && actual_sources.get(loaded_source_id).is_some()
             && err_code == Felt::from_u32(9)
     );
 }
 
 #[test]
 fn direct_step_with_package_debug_info_seeds_initial_resume_context() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let (loaded_package, target_digest, loaded_source_file) = host_loaded_package_fixture(
-        source_manager.clone(),
-        vec![Operation::Assert(Felt::from_u32(9))],
-        true,
-    );
+    let mut sources = new_source_map();
+    let (loaded_package, target_digest, loaded_source_id) =
+        host_loaded_package_fixture(&mut sources, vec![Operation::Assert(Felt::from_u32(9))], true);
     let (program, caller_debug_info) = external_program_for_digest(target_digest);
     let mut host = DefaultHost::default()
-        .with_source_manager(source_manager)
+        .with_source_provider(Arc::new(sources))
         .with_library(Arc::new(loaded_package))
         .expect("loaded package should register");
     let mut processor = FastProcessor::new(StackInputs::default());
@@ -524,26 +527,26 @@ fn direct_step_with_package_debug_info_seeds_initial_resume_context() {
         err,
         ExecutionError::OperationError {
             label,
-            source_file: Some(actual_source_file),
+            sources: Some(actual_sources),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(loaded_source_file.id(), 0u32..11)
-            && actual_source_file.id() == loaded_source_file.id()
+        } if label == SourceSpan::session(loaded_source_id, TextRange::new(0, 11).unwrap())
+            && actual_sources.get(loaded_source_id).is_some()
             && err_code == Felt::from_u32(9)
     );
 }
 
 #[test]
 fn host_loaded_stripped_package_executes_without_loaded_debug_info() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut sources = new_source_map();
     let (loaded_package, target_digest, _) =
-        host_loaded_package_fixture(source_manager.clone(), vec![Operation::Add], true);
+        host_loaded_package_fixture(&mut sources, vec![Operation::Add], true);
     let stripped_package =
         loaded_package.without_debug_info().expect("debug stripping should succeed");
     assert!(stripped_package.debug_info().unwrap().is_none());
 
     let (program, caller_debug_info) = external_program_for_digest(target_digest);
     let mut host = DefaultHost::default()
-        .with_source_manager(source_manager)
+        .with_source_provider(Arc::new(sources))
         .with_library(Arc::new(stripped_package))
         .expect("stripped loaded package should register");
 
@@ -557,18 +560,15 @@ fn host_loaded_stripped_package_executes_without_loaded_debug_info() {
 
 #[test]
 fn host_loaded_stripped_package_restores_caller_debug_info() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let (loaded_package, target_digest, _) = host_loaded_package_fixture(
-        source_manager.clone(),
-        vec![Operation::Pad, Operation::Drop],
-        true,
-    );
+    let mut sources = new_source_map();
+    let (loaded_package, target_digest, _) =
+        host_loaded_package_fixture(&mut sources, vec![Operation::Pad, Operation::Drop], true);
     let stripped_package =
         loaded_package.without_debug_info().expect("debug stripping should succeed");
-    let (program, caller_debug_info, caller_source_file) =
-        external_then_fail_program_for_digest(source_manager.clone(), target_digest);
+    let (program, caller_debug_info, caller_source_id) =
+        external_then_fail_program_for_digest(&mut sources, target_digest);
     let mut host = DefaultHost::default()
-        .with_source_manager(source_manager)
+        .with_source_provider(Arc::new(sources))
         .with_library(Arc::new(stripped_package))
         .expect("stripped loaded package should register");
 
@@ -580,28 +580,25 @@ fn host_loaded_stripped_package_restores_caller_debug_info() {
         err,
         ExecutionError::OperationError {
             label,
-            source_file: Some(actual_source_file),
+            sources: Some(actual_sources),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(caller_source_file.id(), 12u32..23)
-            && actual_source_file.id() == caller_source_file.id()
+        } if label == SourceSpan::session(caller_source_id, TextRange::new(12, 23).unwrap())
+            && actual_sources.get(caller_source_id).is_some()
             && err_code == Felt::from_u32(11)
     );
 }
 
 #[test]
 fn host_loaded_debug_info_survives_stripped_intermediate_package() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let (leaf_package, leaf_digest, leaf_source_file) = host_loaded_package_fixture(
-        source_manager.clone(),
-        vec![Operation::Assert(Felt::from_u32(9))],
-        true,
-    );
+    let mut sources = new_source_map();
+    let (leaf_package, leaf_digest, leaf_source_id) =
+        host_loaded_package_fixture(&mut sources, vec![Operation::Assert(Felt::from_u32(9))], true);
     let (forwarder_package, forwarder_digest) = host_loaded_forwarder_package(leaf_digest);
     assert!(forwarder_package.debug_info().unwrap().is_none());
 
     let (program, caller_debug_info) = external_program_for_digest(forwarder_digest);
     let mut host = DefaultHost::default()
-        .with_source_manager(source_manager)
+        .with_source_provider(Arc::new(sources))
         .with_library(Arc::new(forwarder_package))
         .expect("forwarder package should register")
         .with_library(Arc::new(leaf_package))
@@ -615,19 +612,19 @@ fn host_loaded_debug_info_survives_stripped_intermediate_package() {
         err,
         ExecutionError::OperationError {
             label,
-            source_file: Some(actual_source_file),
+            sources: Some(actual_sources),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(leaf_source_file.id(), 0u32..11)
-            && actual_source_file.id() == leaf_source_file.id()
+        } if label == SourceSpan::session(leaf_source_id, TextRange::new(0, 11).unwrap())
+            && actual_sources.get(leaf_source_id).is_some()
             && err_code == Felt::from_u32(9)
     );
 }
 
 #[test]
 fn host_loaded_ambiguous_debug_root_drops_precise_loaded_source_span() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut sources = new_source_map();
     let (mut loaded_package, target_digest, _) = host_loaded_package_fixture(
-        source_manager.clone(),
+        &mut sources,
         vec![Operation::Assert(Felt::from_u32(9))],
         false,
     );
@@ -644,7 +641,7 @@ fn host_loaded_ambiguous_debug_root_drops_precise_loaded_source_span() {
 
     let (program, caller_debug_info) = external_program_for_digest(target_digest);
     let mut host = DefaultHost::default()
-        .with_source_manager(source_manager)
+        .with_source_provider(Arc::new(sources))
         .with_library(Arc::new(loaded_package))
         .expect("loaded package should register");
 
@@ -655,7 +652,7 @@ fn host_loaded_ambiguous_debug_root_drops_precise_loaded_source_span() {
     assert_matches!(
         err,
         ExecutionError::OperationError {
-            source_file: None,
+            sources: None,
             err: OperationError::FailedAssertion { err_code, .. },
             ..
         } if err_code == Felt::from_u32(9)
@@ -664,43 +661,49 @@ fn host_loaded_ambiguous_debug_root_drops_precise_loaded_source_span() {
 
 #[test]
 fn package_source_debug_static_call_selects_identical_proc_from_called_file() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let root = source_manager.load(
-        SourceLanguage::Masm,
-        Uri::from("lib/root.masm"),
+    let mut sources = new_source_map();
+    let lib_path = Path::validate("lib").unwrap();
+    let a_path = Path::validate("lib::a").unwrap();
+    let b_path = Path::validate("lib::b").unwrap();
+    let root = parse_named_source(
+        &mut sources,
+        "lib/root.masm",
+        Some(lib_path),
+        None,
         r#"
         namespace lib
 
         pub mod a
         pub mod b
-        "#
-        .to_string(),
+        "#,
     );
-    let a = source_manager.load(
-        SourceLanguage::Masm,
-        Uri::from("lib/a.masm"),
+    let a = parse_named_source(
+        &mut sources,
+        "lib/a.masm",
+        Some(a_path),
+        None,
         r#"
         namespace lib::a
 
         pub proc same
             push.1 add
         end
-        "#
-        .to_string(),
+        "#,
     );
-    let b = source_manager.load(
-        SourceLanguage::Masm,
-        Uri::from("lib/b.masm"),
+    let b = parse_named_source(
+        &mut sources,
+        "lib/b.masm",
+        Some(b_path),
+        None,
         r#"
         namespace lib::b
 
         pub proc same
             push.1 add
         end
-        "#
-        .to_string(),
+        "#,
     );
-    let lib = Assembler::new(source_manager.clone())
+    let lib = Assembler::with_sources(sources.clone())
         .assemble_library("lib", root, [a, b])
         .map(Arc::<Package>::from)
         .expect("library should assemble");
@@ -721,19 +724,20 @@ fn package_source_debug_static_call_selects_identical_proc_from_called_file() {
         "the two library exports should reduce to the same executable node",
     );
 
-    let main = source_manager.load(
-        SourceLanguage::Masm,
-        Uri::from("main.masm"),
+    let main = parse_named_source(
+        &mut sources,
+        "main.masm",
+        None,
+        Some(ModuleKind::Executable),
         r#"
         use lib::b
 
         begin
             call.b::same
         end
-        "#
-        .to_string(),
+        "#,
     );
-    let package = Assembler::new(source_manager)
+    let package = Assembler::with_sources(sources)
         .with_package(lib, Linkage::Static)
         .expect("library should link statically")
         .assemble_program("program", main)
@@ -783,13 +787,10 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
     forest.make_root(root_id);
     let program = Program::new(forest.into(), root_id);
 
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut sources = new_source_map();
     let uri = Uri::new("file://pkg/same-node.masm");
-    let source_file = source_manager.load_from_raw_parts(
-        uri.clone(),
-        SourceContent::new("masm", uri.clone(), "true;\nfalse;\n"),
-    );
-    let mut host = DefaultHost::default().with_source_manager(source_manager);
+    let source_id = sources.insert(uri.as_str(), "true;\nfalse;\n", None).unwrap();
+    let mut host = DefaultHost::default().with_source_provider(Arc::new(sources));
 
     let mut builder = PackageDebugInfoBuilder::default();
     let true_asm_op = debug_asm_op(
@@ -829,10 +830,10 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
         err,
         ExecutionError::OperationError {
             label,
-            source_file: Some(actual_source_file),
+            sources: Some(actual_sources),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(source_file.id(), 6u32..12)
-            && actual_source_file.id() == source_file.id()
+        } if label == SourceSpan::session(source_id, TextRange::new(6, 12).unwrap())
+            && actual_sources.get(source_id).is_some()
             && err_code == Felt::from_u32(7)
     );
 }
@@ -849,7 +850,7 @@ fn package_source_debug_execution_uses_manifest_entrypoint_source_node() {
         "debug info alone cannot pick the manifest-selected same-digest entrypoint"
     );
 
-    let mut host = DefaultHost::default().with_source_manager(fixture.source_manager);
+    let mut host = DefaultHost::default().with_source_provider(fixture.sources.clone());
     let err = FastProcessor::new(StackInputs::default())
         .execute_with_package_debug_info_at_source_node_sync(
             &fixture.program,
@@ -863,10 +864,10 @@ fn package_source_debug_execution_uses_manifest_entrypoint_source_node() {
         err,
         ExecutionError::OperationError {
             label,
-            source_file: Some(actual_source_file),
+            sources: Some(actual_sources),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(fixture.source_file.id(), 9u32..17)
-            && actual_source_file.id() == fixture.source_file.id()
+        } if label == SourceSpan::session(fixture.source_id, TextRange::new(9, 17).unwrap())
+            && actual_sources.get(fixture.source_id).is_some()
             && err_code == Felt::from_u32(9)
     );
 }
@@ -888,7 +889,7 @@ async fn program_executor_routes_package_debug_to_entrypoint_source_node() {
         "debug info alone cannot pick the manifest-selected same-digest entrypoint"
     );
 
-    let mut host = DefaultHost::default().with_source_manager(fixture.source_manager);
+    let mut host = DefaultHost::default().with_source_provider(fixture.sources.clone());
     let processor = <FastProcessor as ProgramExecutor>::new(
         StackInputs::default(),
         AdviceInputs::default(),
@@ -909,10 +910,10 @@ async fn program_executor_routes_package_debug_to_entrypoint_source_node() {
         err,
         ExecutionError::OperationError {
             label,
-            source_file: Some(actual_source_file),
+            sources: Some(actual_sources),
             err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(fixture.source_file.id(), 9u32..17)
-            && actual_source_file.id() == fixture.source_file.id()
+        } if label == SourceSpan::session(fixture.source_id, TextRange::new(9, 17).unwrap())
+            && actual_sources.get(fixture.source_id).is_some()
             && err_code == Felt::from_u32(9)
     );
 }
@@ -969,8 +970,7 @@ fn initial_package_resume_context_tracks_manifest_entrypoint_source_node() {
 
 #[test]
 fn package_source_debug_execution_degrades_ambiguous_local_dyn_root() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let program = Assembler::new(source_manager)
+    let program = Assembler::new()
         .assemble_program(
             "program",
             "
@@ -1025,7 +1025,7 @@ fn package_source_debug_execution_degrades_ambiguous_local_dyn_root() {
 
 #[test]
 fn dynexec_propagates_inline_context_through_the_selected_target() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut source_map = SourceMap::new(SourceNamespace::new_unchecked(1));
     let mut parser = Module::parser(Some(ModuleKind::Executable));
     let mut module = parser
         .parse_str(
@@ -1045,12 +1045,12 @@ fn dynexec_propagates_inline_context_through_the_selected_target() {
                 drop
             end
             ",
-            source_manager.clone(),
+            &mut source_map,
         )
         .unwrap();
-    set_entrypoint_inline_context(&source_manager, &mut module, "source::dynamic");
+    set_entrypoint_inline_context(&source_map, &mut module, "source::dynamic");
     let package: Arc<Package> =
-        Arc::from(Assembler::new(source_manager).assemble_program("program", module).unwrap());
+        Arc::from(Assembler::with_sources(source_map).assemble_program("program", module).unwrap());
 
     let mut processor = FastProcessor::new(StackInputs::default());
     let mut resume_context = processor
@@ -1081,30 +1081,20 @@ fn dynexec_propagates_inline_context_through_the_selected_target() {
 
 #[test]
 fn external_exec_propagates_inline_context_into_the_loaded_package() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let mut library_parser = Module::parser(Some(ModuleKind::Library));
-    let library_module = library_parser
-        .parse_str(
-            None,
-            "
+    let library_module = "
             namespace dep::math
 
             pub proc target
                 push.7
                 drop
             end
-            ",
-            source_manager.clone(),
-        )
-        .unwrap();
+            ";
     let library: Arc<Package> = Arc::from(
-        Assembler::new(source_manager.clone())
+        Assembler::new()
             .assemble_library("dep", library_module, None::<Box<Module>>)
             .unwrap(),
     );
-    let assembler = Assembler::new(source_manager.clone())
-        .with_package(library.clone(), Linkage::Dynamic)
-        .unwrap();
+    let mut assembler = Assembler::new().with_package(library.clone(), Linkage::Dynamic).unwrap();
     let mut program_parser = Module::parser(Some(ModuleKind::Executable));
     let mut program_module = program_parser
         .parse_str(
@@ -1120,10 +1110,10 @@ fn external_exec_propagates_inline_context_into_the_loaded_package() {
                 drop
             end
             ",
-            source_manager.clone(),
+            assembler.sources_mut(),
         )
         .unwrap();
-    set_entrypoint_inline_context(&source_manager, &mut program_module, "source::external");
+    set_entrypoint_inline_context(assembler.sources(), &mut program_module, "source::external");
     let package: Arc<Package> =
         Arc::from(assembler.assemble_program("program", program_module).unwrap());
     let caller_forest = package.mast_forest().clone();
@@ -1171,12 +1161,9 @@ fn external_exec_propagates_inline_context_into_the_loaded_package() {
 
 #[test]
 fn nested_external_returns_restore_the_caller_before_resuming() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let (leaf_package, leaf_digest, _) = host_loaded_package_fixture(
-        source_manager.clone(),
-        vec![Operation::Pad, Operation::Drop],
-        true,
-    );
+    let mut source_map = SourceMap::new(SourceNamespace::new_unchecked(1));
+    let (leaf_package, leaf_digest, _) =
+        host_loaded_package_fixture(&mut source_map, vec![Operation::Pad, Operation::Drop], true);
     let leaf_forest = leaf_package.mast_forest().clone();
     let (forwarder_package, forwarder_digest) = host_loaded_forwarder_package(leaf_digest);
     let forwarder_forest = forwarder_package.mast_forest().clone();
@@ -1184,7 +1171,7 @@ fn nested_external_returns_restore_the_caller_before_resuming() {
     let caller_forest = program.mast_forest().clone();
 
     let mut host = DefaultHost::default()
-        .with_source_manager(source_manager)
+        .with_source_provider(Arc::new(source_map))
         .with_library(Arc::new(forwarder_package))
         .expect("forwarder package should register")
         .with_library(Arc::new(leaf_package))
@@ -1233,10 +1220,10 @@ fn absolute_path(name: &str) -> Arc<Path> {
 }
 
 fn host_loaded_package_fixture(
-    source_manager: Arc<DefaultSourceManager>,
+    sources: &mut SourceMap,
     operations: Vec<Operation>,
     include_debug_info: bool,
-) -> (Package, Word, Arc<SourceFile>) {
+) -> (Package, Word, SourceId) {
     let mut forest = MastForest::new();
     let op_end = operations.len() as u32;
     let root_id = BasicBlockNodeBuilder::new(operations).add_to_forest(&mut forest).unwrap();
@@ -1259,8 +1246,7 @@ fn host_loaded_package_fixture(
     .unwrap();
 
     let uri = Uri::new("file://loaded/target.masm");
-    let source_file = source_manager
-        .load_from_raw_parts(uri.clone(), SourceContent::new("masm", uri.clone(), "assert.fail"));
+    let source_id = sources.insert(uri.as_str(), "assert.fail", None).unwrap();
 
     if include_debug_info {
         let mut builder = PackageDebugInfoBuilder::default();
@@ -1281,7 +1267,7 @@ fn host_loaded_package_fixture(
         assert!(package.debug_info().unwrap().is_some());
     }
 
-    (package, target_digest, source_file)
+    (package, target_digest, source_id)
 }
 
 fn host_loaded_forwarder_package(target_digest: Word) -> (Package, Word) {
@@ -1325,9 +1311,9 @@ fn external_program_for_digest(target_digest: Word) -> (Program, PackageDebugInf
 }
 
 fn external_then_fail_program_for_digest(
-    source_manager: Arc<DefaultSourceManager>,
+    sources: &mut SourceMap,
     target_digest: Word,
-) -> (Program, PackageDebugInfo, Arc<SourceFile>) {
+) -> (Program, PackageDebugInfo, SourceId) {
     let mut forest = MastForest::new();
     let external_id = ExternalNodeBuilder::new(target_digest).add_to_forest(&mut forest).unwrap();
     let fail_id = BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::from_u32(11))])
@@ -1338,10 +1324,7 @@ fn external_then_fail_program_for_digest(
     let program = Program::new(forest.into(), root_id);
 
     let uri = Uri::new("file://caller/main.masm");
-    let source_file = source_manager.load_from_raw_parts(
-        uri.clone(),
-        SourceContent::new("masm", uri.clone(), "exec.loaded\nassert.fail"),
-    );
+    let source_id = sources.insert(uri.as_str(), "exec.loaded\nassert.fail", None).unwrap();
 
     let mut builder = PackageDebugInfoBuilder::default();
     let source_external = builder
@@ -1363,7 +1346,7 @@ fn external_then_fail_program_for_digest(
         .unwrap();
     builder.add_root(source_root);
     let package_debug_info = *builder.build();
-    (program, package_debug_info, source_file)
+    (program, package_debug_info, source_id)
 }
 
 struct SameDigestEntrypointFixture {
@@ -1371,8 +1354,8 @@ struct SameDigestEntrypointFixture {
     program: Program,
     debug_info: PackageDebugInfo,
     entrypoint_source_node_id: DebugSourceNodeId,
-    source_manager: Arc<DefaultSourceManager>,
-    source_file: Arc<SourceFile>,
+    sources: Arc<SourceMap>,
+    source_id: SourceId,
 }
 
 fn same_digest_entrypoint_fixture(
@@ -1397,12 +1380,9 @@ fn same_digest_entrypoint_fixture(
             )
         });
 
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut sources = new_source_map();
     let uri = Uri::new("file://pkg/same-digest-entrypoint.masm");
-    let source_file = source_manager.load_from_raw_parts(
-        uri.clone(),
-        SourceContent::new("masm", uri.clone(), "alias_a;\nalias_b;\n"),
-    );
+    let source_id = sources.insert(uri.as_str(), "alias_a;\nalias_b;\n", None).unwrap();
     let mut builder = PackageDebugInfoBuilder::default();
     let alias_a_asm_op = debug_asm_op(
         &mut builder,
@@ -1455,19 +1435,13 @@ fn same_digest_entrypoint_fixture(
         program: executable.unwrap_program(),
         debug_info: executable.debug_info().unwrap().unwrap(),
         entrypoint_source_node_id,
-        source_manager,
-        source_file,
+        sources: Arc::new(sources),
+        source_id,
     }
 }
 
-fn missing_external_package_source_debug_fixture() -> (
-    Program,
-    PackageDebugInfo,
-    DefaultHost,
-    Arc<DefaultSourceManager>,
-    SourceSpan,
-    Arc<SourceFile>,
-) {
+fn missing_external_package_source_debug_fixture()
+-> (Program, PackageDebugInfo, DefaultHost, Arc<SourceMap>, SourceSpan, SourceId) {
     let mut forest = MastForest::new();
     let missing_digest = Word::from([ONE, ONE, ONE, ONE]);
     let external_id = ExternalNodeBuilder::new(missing_digest).add_to_forest(&mut forest).unwrap();
@@ -1475,15 +1449,15 @@ fn missing_external_package_source_debug_fixture() -> (
     forest.make_root(root_id);
     let program = Program::new(forest.into(), root_id);
 
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut sources = new_source_map();
     let uri = Uri::new("file://pkg/missing-external.masm");
-    let source_file = source_manager.load_from_raw_parts(
-        uri.clone(),
-        SourceContent::new("masm", uri.clone(), "begin\n    call.missing::proc\nend\n"),
-    );
-    let host = DefaultHost::default().with_source_manager(source_manager.clone());
+    let source_id = sources
+        .insert(uri.as_str(), "begin\n    call.missing::proc\nend\n", None)
+        .unwrap();
+    let sources = Arc::new(sources);
+    let host = DefaultHost::default().with_source_provider(sources.clone());
 
-    let expected_span = SourceSpan::new(source_file.id(), 10u32..28);
+    let expected_span = SourceSpan::session(source_id, TextRange::new(10, 28).unwrap());
     let mut builder = PackageDebugInfoBuilder::default();
     let external_asm_op = debug_asm_op(
         &mut builder,
@@ -1502,11 +1476,11 @@ fn missing_external_package_source_debug_fixture() -> (
     builder.add_root(source_root);
     let package_debug_info = *builder.build();
 
-    (program, package_debug_info, host, source_manager, expected_span, source_file)
+    (program, package_debug_info, host, sources, expected_span, source_id)
 }
 
 struct MalformedExternalHost {
-    source_manager: Arc<DefaultSourceManager>,
+    sources: Arc<SourceMap>,
     loaded_mast_forest: LoadedMastForest,
 }
 
@@ -1529,10 +1503,7 @@ impl CountingMastForestHost {
 }
 
 impl BaseHost for CountingMastForestHost {
-    fn get_label_and_source_file(
-        &self,
-        _location: &Location,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+    fn resolve_location(&self, _location: &Location) -> (SourceSpan, Option<SharedSourceProvider>) {
         (SourceSpan::UNKNOWN, None)
     }
 }
@@ -1565,13 +1536,9 @@ fn program_calling_external_procedures(procedure_digests: [Word; 2]) -> Program 
 }
 
 impl BaseHost for MalformedExternalHost {
-    fn get_label_and_source_file(
-        &self,
-        location: &Location,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        let source_file = self.source_manager.get_by_uri(location.uri());
-        let label = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
-        (label, source_file)
+    fn resolve_location(&self, location: &Location) -> (SourceSpan, Option<SharedSourceProvider>) {
+        let sources = SharedSourceProvider::from(self.sources.clone());
+        (location.to_span(&sources).unwrap_or(SourceSpan::UNKNOWN), Some(sources))
     }
 }
 
@@ -1697,7 +1664,7 @@ fn preserves_first_cached_forest_for_a_shared_procedure() {
 
 #[test]
 fn package_source_debug_missing_external_preserves_external_source_span() {
-    let (program, package_debug_info, mut host, _, expected_span, source_file) =
+    let (program, package_debug_info, mut host, _, expected_span, source_id) =
         missing_external_package_source_debug_fixture();
 
     let err = FastProcessor::new(StackInputs::default())
@@ -1708,15 +1675,15 @@ fn package_source_debug_missing_external_preserves_external_source_span() {
         err,
         ExecutionError::ProcedureNotFound {
             label,
-            source_file: Some(actual_source_file),
+            sources: Some(actual_sources),
             ..
-        } if label == expected_span && actual_source_file.id() == source_file.id()
+        } if label == expected_span && actual_sources.get(source_id).is_some()
     );
 }
 
 #[test]
 fn package_source_debug_malformed_external_preserves_external_source_span() {
-    let (program, package_debug_info, _, source_manager, expected_span, source_file) =
+    let (program, package_debug_info, _, sources, expected_span, source_id) =
         missing_external_package_source_debug_fixture();
 
     let mut wrong_forest = MastForest::new();
@@ -1726,7 +1693,7 @@ fn package_source_debug_malformed_external_preserves_external_source_span() {
     wrong_forest.make_root(wrong_root);
 
     let mut host = MalformedExternalHost {
-        source_manager,
+        sources,
         loaded_mast_forest: LoadedMastForest::new(Arc::new(wrong_forest)),
     };
 
@@ -1738,15 +1705,15 @@ fn package_source_debug_malformed_external_preserves_external_source_span() {
         err,
         ExecutionError::OperationError {
             label,
-            source_file: Some(actual_source_file),
+            sources: Some(actual_sources),
             err: OperationError::MalformedMastForestInHost { .. },
-        } if label == expected_span && actual_source_file.id() == source_file.id()
+        } if label == expected_span && actual_sources.get(source_id).is_some()
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn package_source_debug_malformed_external_preserves_external_source_span_async() {
-    let (program, package_debug_info, _, source_manager, expected_span, source_file) =
+    let (program, package_debug_info, _, sources, expected_span, source_id) =
         missing_external_package_source_debug_fixture();
 
     let mut wrong_forest = MastForest::new();
@@ -1756,7 +1723,7 @@ async fn package_source_debug_malformed_external_preserves_external_source_span_
     wrong_forest.make_root(wrong_root);
 
     let mut host = MalformedExternalHost {
-        source_manager,
+        sources,
         loaded_mast_forest: LoadedMastForest::new(Arc::new(wrong_forest)),
     };
 
@@ -1769,9 +1736,9 @@ async fn package_source_debug_malformed_external_preserves_external_source_span_
         err,
         ExecutionError::OperationError {
             label,
-            source_file: Some(actual_source_file),
+            sources: Some(actual_sources),
             err: OperationError::MalformedMastForestInHost { .. },
-        } if label == expected_span && actual_source_file.id() == source_file.id()
+        } if label == expected_span && actual_sources.get(source_id).is_some()
     );
 }
 
@@ -2591,8 +2558,7 @@ fn nested_calls_enforce_aggregate_stack_depth_limit() {
         end
         ";
 
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let program = Assembler::new(source_manager)
+    let program = Assembler::new()
         .assemble_program("program", source)
         .expect("program should assemble")
         .unwrap_program();
@@ -2672,8 +2638,7 @@ fn nested_calls_within_aggregate_budget_succeed() {
         end
         ";
 
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let program = Assembler::new(source_manager)
+    let program = Assembler::new()
         .assemble_program("program", source)
         .expect("program should assemble")
         .unwrap_program();

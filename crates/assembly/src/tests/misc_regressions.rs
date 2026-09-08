@@ -26,7 +26,7 @@ begin
     exec.main
 end"#
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }

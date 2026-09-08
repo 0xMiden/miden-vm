@@ -117,7 +117,7 @@ impl core::fmt::Display for ModuleIndex {
 mod regression_tests {
     use std::string::String;
 
-    use crate::sema::{LimitKind, SemanticAnalysisError, SyntaxError};
+    use crate::sema::{LimitKind, SemanticAnalysisError};
 
     fn huge_library_masm() -> String {
         let num_consts = usize::from(u16::MAX) + 2;
@@ -138,13 +138,11 @@ mod regression_tests {
             .parse_module(&huge_library_masm())
             .expect_err("expected oversized module to be rejected during analysis");
 
-        let syntax_error = err.downcast_ref::<SyntaxError>().expect("expected SyntaxError report");
         assert!(
-            syntax_error.errors.iter().any(|error| {
+            err.iter::<SemanticAnalysisError>().any(|error| {
                 matches!(error, SemanticAnalysisError::LimitExceeded { kind: LimitKind::Items, .. })
             }),
-            "expected item-limit error, got {:?}",
-            syntax_error.errors
+            "expected item-limit error, got {err:?}",
         );
     }
 }

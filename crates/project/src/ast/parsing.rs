@@ -1,8 +1,7 @@
-use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
-
-use miden_assembly_syntax::{
-    Report,
-    debuginfo::{SourceFile, SourceId, SourceSpan, Span, Uri},
+#[cfg(feature = "std")]
+use miden_diagnostics::Span;
+use miden_diagnostics::{
+    Diagnostic, DiagnosticCollector, PushResult, SourceId, SourceKey, SourceSpan, TextRange,
 };
 
 /// This type is used to represent package information which may be inherited within a workspace.
@@ -130,101 +129,97 @@ mod maybe_inherit {
     }
 }
 
-/// This trait is implemented for all types which have source spans with an associated [SourceId].
-///
-/// After parsing via `serde`, it is necessary for us to post-process such spans to attach the
-/// `SourceId` to the span, otherwise the spans only contain the byte range, which is insufficient
-/// for reporting purposes.
-///
-/// NOTE: In the future, we may want to define this as part of a as-yet-to-be-defined `SpannedMut`
-/// trait which would provide APIs to not only set the `SourceId`, but also the `SourceSpan` itself,
-/// but it isn't clear if that is actually needed at the moment, so to keep things simple, we're
-/// keeping this crate-local.
-///
-/// This is an internal trait.
-pub(crate) trait SetSourceId {
-    fn set_source_id(&mut self, source_id: SourceId);
-}
-
-impl<T: SetSourceId> SetSourceId for Span<T> {
-    fn set_source_id(&mut self, source_id: SourceId) {
-        Span::set_source_id(self, source_id);
-        <T as SetSourceId>::set_source_id(self, source_id);
-    }
-}
-
-impl SetSourceId for SourceSpan {
-    fn set_source_id(&mut self, source_id: SourceId) {
-        SourceSpan::set_source_id(self, source_id);
-    }
-}
-
-impl SetSourceId for String {
-    #[inline(always)]
-    fn set_source_id(&mut self, _source_id: SourceId) {}
-}
-
-impl SetSourceId for toml::Value {
-    #[inline(always)]
-    fn set_source_id(&mut self, _source_id: SourceId) {}
-}
-
-impl SetSourceId for crate::SemVer {
-    #[inline(always)]
-    fn set_source_id(&mut self, _source_id: SourceId) {}
-}
-
-impl SetSourceId for crate::VersionRequirement {
-    fn set_source_id(&mut self, source_id: SourceId) {
-        match self {
-            crate::VersionRequirement::Semantic(version) => version.set_source_id(source_id),
-            crate::VersionRequirement::Digest(digest) => digest.set_source_id(source_id),
-            crate::VersionRequirement::Exact(_) => {},
-        }
-    }
-}
-
-impl SetSourceId for Uri {
-    #[inline(always)]
-    fn set_source_id(&mut self, _source_id: SourceId) {}
-}
-
-impl<T: ?Sized> SetSourceId for Arc<T> {
-    fn set_source_id(&mut self, _source_id: SourceId) {}
-}
-
-impl<T: ?Sized + SetSourceId> SetSourceId for Box<T> {
-    fn set_source_id(&mut self, source_id: SourceId) {
-        <T as SetSourceId>::set_source_id(self, source_id)
-    }
-}
-impl<T: SetSourceId> SetSourceId for Vec<T> {
-    fn set_source_id(&mut self, source_id: SourceId) {
-        for value in self.iter_mut() {
-            value.set_source_id(source_id);
-        }
-    }
-}
-
-impl<K: SetSourceId + Ord, V: SetSourceId> SetSourceId for BTreeMap<K, V> {
-    fn set_source_id(&mut self, source_id: SourceId) {
-        let map = core::mem::take(self);
-        for (mut key, mut value) in map {
-            key.set_source_id(source_id);
-            value.set_source_id(source_id);
-            self.insert(key, value);
-        }
-    }
-}
-
-/// This trait is implemented for all types for which we have additional semantic validation rules
-/// we wish to check after parsing from source, which cannot be easily represented (or represented
-/// at all) in Rust/`serde` type system (and thus enforced during the actual parsing).
-///
-/// This is an internal trait.
-pub(crate) trait Validate {
-    #[allow(unused_variables)]
-    fn validate(&self, source: Arc<SourceFile>) -> Result<(), Report> {
+/// Records a parsed field, rejecting duplicate occurrences.
+#[cfg(feature = "serde")]
+pub(super) fn set_once<T, E>(slot: &mut Option<T>, value: T, field: &'static str) -> Result<(), E>
+where
+    E: serde::de::Error,
+{
+    if slot.replace(value).is_some() {
+        Err(E::duplicate_field(field))
+    } else {
         Ok(())
+    }
+}
+
+/// Converts the source-local byte range produced by TOML into a canonical diagnostic span.
+pub(crate) fn source_span(source_id: SourceId, range: core::ops::Range<usize>) -> SourceSpan {
+    let range = TextRange::try_from_usize(range.start, range.end)
+        .expect("TOML input was registered as a valid diagnostic source");
+    SourceSpan::new(SourceKey::Session(source_id), None, range)
+}
+
+/// Lowers a TOML parsing span into the canonical span type used by the project model.
+#[cfg(feature = "std")]
+pub(crate) fn lower_span<T>(source_id: SourceId, value: toml::Spanned<T>) -> Span<T> {
+    let span = source_span(source_id, value.span());
+    Span::new(span, value.into_inner())
+}
+
+#[cfg(feature = "std")]
+pub(crate) fn lower_metadata(
+    source_id: SourceId,
+    metadata: &crate::AstMetadata,
+) -> crate::Metadata {
+    metadata
+        .iter()
+        .map(|(key, value)| {
+            (lower_span(source_id, key.clone()), lower_span(source_id, value.clone()))
+        })
+        .collect()
+}
+
+#[cfg(feature = "std")]
+pub(crate) fn lower_metadata_set(
+    source_id: SourceId,
+    metadata: &crate::AstMetadataSet,
+) -> crate::MetadataSet {
+    metadata
+        .iter()
+        .map(|(key, values)| {
+            (lower_span(source_id, key.clone()), lower_metadata(source_id, values))
+        })
+        .collect()
+}
+
+/// Context shared by semantic validation and AST lowering.
+pub(crate) struct ValidationContext<'a> {
+    source_id: SourceId,
+    diagnostics: &'a mut DiagnosticCollector,
+}
+
+impl<'a> ValidationContext<'a> {
+    pub(crate) fn new(source_id: SourceId, diagnostics: &'a mut DiagnosticCollector) -> Self {
+        Self { source_id, diagnostics }
+    }
+
+    pub(crate) const fn source_id(&self) -> SourceId {
+        self.source_id
+    }
+
+    pub(crate) fn span<T>(&self, value: &toml::Spanned<T>) -> SourceSpan {
+        source_span(self.source_id, value.span())
+    }
+
+    #[cfg(feature = "std")]
+    pub(crate) fn span_in<T>(&self, source_id: SourceId, value: &toml::Spanned<T>) -> SourceSpan {
+        source_span(source_id, value.span())
+    }
+
+    #[cfg(feature = "std")]
+    pub(crate) fn lower<T>(&self, value: toml::Spanned<T>) -> Span<T> {
+        lower_span(self.source_id, value)
+    }
+
+    pub(crate) fn add<D>(&mut self, diagnostic: D) -> PushResult
+    where
+        D: Diagnostic + Send + Sync + 'static,
+    {
+        self.diagnostics.add(diagnostic)
+    }
+
+    #[cfg(feature = "std")]
+    pub(crate) fn error_count(&self) -> usize {
+        self.diagnostics.counts().errors()
     }
 }

@@ -2,12 +2,13 @@ use std::{fs, path::PathBuf, sync::Arc, time::Instant};
 
 use clap::Parser;
 use miden_assembly::{
-    Assembler, DefaultSourceManager,
+    Assembler,
     diagnostics::{IntoDiagnostic, Report, Result, WrapErr},
 };
 use miden_mast_package::Package;
 use miden_vm::{
-    ExecutionClaim, KernelDescriptor, ProgramInfo, internal::InputFile, serde::Deserializable,
+    ExecutionClaim, KernelDescriptor, ProgramInfo, diagnostics::Outcome, internal::InputFile,
+    serde::Deserializable,
 };
 
 use super::data::{OutputFile, ProgramHash, ProofFile};
@@ -34,79 +35,98 @@ pub struct VerifyCmd {
 }
 
 impl VerifyCmd {
-    pub fn execute(&self) -> Result<(), Report> {
-        // Validate the kernel file's extension before doing any other file I/O (mirrors the
-        // same ordering issue already fixed for `prove` in #3587).
-        if let Some(ref kernel_path) = self.kernel_file {
-            validate_kernel_extension(kernel_path)?;
-        }
+    pub fn execute(&self) -> Outcome<()> {
+        Outcome::from(()).and_then(|(), diagnostics| {
+            let preparation = (|| -> Result<_, Report> {
+                // Validate the kernel file's extension before doing any other file I/O (mirrors the
+                // same ordering issue already fixed for `prove` in #3587).
+                if let Some(ref kernel_path) = self.kernel_file {
+                    validate_kernel_extension(kernel_path)?;
+                }
 
-        let (input_file, output_file) = self.infer_defaults()?;
+                let (input_file, output_file) = self.infer_defaults()?;
 
-        println!("===============================================================================");
-        println!("Verifying proof: {}", self.proof_file.display());
-        println!("-------------------------------------------------------------------------------");
+                println!(
+                    "==============================================================================="
+                );
+                println!("Verifying proof: {}", self.proof_file.display());
+                println!(
+                    "-------------------------------------------------------------------------------"
+                );
 
-        // read program hash from input
-        let program_hash = ProgramHash::read(&self.program_hash).map_err(Report::msg)?;
+                // read program hash from input
+                let program_hash = ProgramHash::read(&self.program_hash).map_err(Report::msg)?;
 
-        // load input data from file
-        let input_data = InputFile::read(&Some(input_file), self.proof_file.as_ref())?;
+                // load input data from file
+                let input_data = InputFile::read(&Some(input_file), self.proof_file.as_ref())?;
 
-        // fetch the stack inputs from the arguments
-        let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
+                // fetch the stack inputs from the arguments
+                let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
 
-        // load outputs data from file
-        let outputs_data =
-            OutputFile::read(&Some(output_file), self.proof_file.as_ref()).map_err(Report::msg)?;
+                // load outputs data from file
+                let outputs_data =
+                    OutputFile::read(&Some(output_file), self.proof_file.as_ref()).map_err(Report::msg)?;
 
-        // load proof from file
-        let proof = ProofFile::read(&Some(self.proof_file.clone()), self.proof_file.as_ref())
-            .map_err(Report::msg)?;
+                // load proof from file
+                let proof = ProofFile::read(&Some(self.proof_file.clone()), self.proof_file.as_ref())
+                    .map_err(Report::msg)?;
 
-        let now = Instant::now();
+                let now = Instant::now();
 
-        // Load kernel if provided, otherwise use default
-        let kernel = if let Some(ref kernel_path) = self.kernel_file {
-            if !kernel_path.is_file() {
-                return Err(Report::msg(format!(
-                    "Kernel file `{}` must be a file.",
-                    kernel_path.display()
-                )));
-            }
-            load_kernel_descriptor(kernel_path)?
-        } else {
-            KernelDescriptor::default()
-        };
-        let program_info = ProgramInfo::new(program_hash, kernel);
+                if let Some(ref kernel_path) = self.kernel_file
+                    && !kernel_path.is_file()
+                {
+                    return Err(Report::msg(format!(
+                        "Kernel file `{}` must be a file.",
+                        kernel_path.display()
+                    )));
+                }
+                Ok((program_hash, stack_inputs, outputs_data, proof, now))
+            })();
+            let (program_hash, stack_inputs, outputs_data, proof, now) =
+                diagnostics.capture(preparation).ok_or(())?;
 
-        // verify proof
-        let stack_outputs = outputs_data.stack_outputs().map_err(Report::msg)?;
-        let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
-        let outcome = miden_vm::Verifier::new()
-            .verify(&claim, &proof)
-            .into_diagnostic()
-            .wrap_err("Program failed verification!")?;
-        if let Some(root) = outcome.outstanding_precompile_root() {
-            return Err(Report::msg(format!(
-                "Program proof is valid but incomplete; outstanding precompile root: {root}"
-            )));
-        }
-        let vm_security_level = outcome.vm_security_parameters().conjectured_security_level();
-        let security_level = outcome.precompile_security_parameters().map_or(
-            vm_security_level,
-            |precompile_parameters| {
-                vm_security_level.min(precompile_parameters.conjectured_security_level())
-            },
-        );
+            // Load kernel if provided, otherwise use default
+            let kernel = if let Some(ref kernel_path) = self.kernel_file {
+                let outcome = load_kernel_descriptor(kernel_path);
+                diagnostics.merge(outcome.diagnostics);
+                outcome.result?
+            } else {
+                KernelDescriptor::default()
+            };
+            let verification = (|| -> Result<(), Report> {
+                let program_info = ProgramInfo::new(program_hash, kernel);
 
-        println!(
-            "Verification complete in {} ms. Security level: {} bits",
-            now.elapsed().as_millis(),
-            security_level
-        );
+                // verify proof
+                let stack_outputs = outputs_data.stack_outputs().map_err(Report::msg)?;
+                let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
+                let outcome = miden_vm::Verifier::new()
+                    .verify(&claim, &proof)
+                    .into_diagnostic()
+                    .wrap_err("Program failed verification!")?;
+                if let Some(root) = outcome.outstanding_precompile_root() {
+                    return Err(Report::msg(format!(
+                        "Program proof is valid but incomplete; outstanding precompile root: {root}"
+                    )));
+                }
+                let vm_security_level = outcome.vm_security_parameters().conjectured_security_level();
+                let security_level = outcome.precompile_security_parameters().map_or(
+                    vm_security_level,
+                    |precompile_parameters| {
+                        vm_security_level.min(precompile_parameters.conjectured_security_level())
+                    },
+                );
 
-        Ok(())
+                println!(
+                    "Verification complete in {} ms. Security level: {} bits",
+                    now.elapsed().as_millis(),
+                    security_level
+                );
+
+                Ok(())
+            })();
+            diagnostics.capture(verification).ok_or(())
+        })
     }
 
     fn infer_defaults(&self) -> Result<(PathBuf, PathBuf), Report> {
@@ -143,49 +163,52 @@ fn validate_kernel_extension(kernel_path: &std::path::Path) -> Result<(), Report
 ///
 /// Callers are expected to have already validated the extension via
 /// [`validate_kernel_extension`]; this only re-derives it to pick the right loading path.
-fn load_kernel_descriptor(kernel_path: &PathBuf) -> Result<KernelDescriptor, Report> {
-    // Determine file type based on extension
-    let ext = kernel_path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+fn load_kernel_descriptor(kernel_path: &PathBuf) -> Outcome<KernelDescriptor> {
+    Outcome::from(()).and_then(|(), diagnostics| {
+        // Determine file type based on extension
+        let ext = kernel_path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
 
-    // Load kernel from .masp package or compile from .masm source
-    let kernel_pkg = match ext.as_str() {
-        "masp" => {
-            // Load kernel from package file
-            let bytes = fs::read(kernel_path).into_diagnostic().wrap_err_with(|| {
-                format!("Failed to read kernel package `{}`", kernel_path.display())
-            })?;
-            let package =
-                Package::read_from_bytes(&bytes).into_diagnostic().wrap_err_with(|| {
-                    format!("Failed to deserialize kernel package `{}`", kernel_path.display())
-                })?;
-            if !package.is_kernel() {
-                return Err(Report::msg(format!(
-                    "invalid kernel package, package is of type {}",
-                    package.kind,
+        // Load kernel from .masp package or compile from .masm source
+        let kernel_pkg = match ext.as_str() {
+            "masp" => diagnostics
+                .capture((|| -> Result<_, Report> {
+                    let bytes = fs::read(kernel_path).into_diagnostic().wrap_err_with(|| {
+                        format!("Failed to read kernel package `{}`", kernel_path.display())
+                    })?;
+                    let package =
+                        Package::read_from_bytes(&bytes).into_diagnostic().wrap_err_with(|| {
+                            format!(
+                                "Failed to deserialize kernel package `{}`",
+                                kernel_path.display()
+                            )
+                        })?;
+                    if !package.is_kernel() {
+                        return Err(Report::msg(format!(
+                            "invalid kernel package, package is of type {}",
+                            package.kind,
+                        )));
+                    }
+                    Ok(Arc::new(package))
+                })())
+                .ok_or(())?,
+            "masm" => {
+                let mut assembler = Assembler::new();
+                let outcome = assembler.assemble_kernel_from_root_in_place("kernel", kernel_path);
+                diagnostics.merge(outcome.diagnostics);
+                Arc::<Package>::from(outcome.result?)
+            },
+            _ => {
+                diagnostics.add_report(Report::msg(format!(
+                    "Kernel file `{}` must have a .masm or .masp extension",
+                    kernel_path.display()
                 )));
-            }
-            Arc::new(package)
-        },
-        "masm" => {
-            // Compile kernel from assembly source
-            let source_manager = Arc::new(DefaultSourceManager::default());
-            Assembler::new(source_manager)
-                .assemble_kernel_from_root("kernel", kernel_path)
-                .map(Arc::<Package>::from)
-                .wrap_err_with(|| {
-                    format!("Failed to compile kernel from `{}`", kernel_path.display())
-                })?
-        },
-        _ => {
-            return Err(Report::msg(format!(
-                "Kernel file `{}` must have a .masm or .masp extension",
-                kernel_path.display()
-            )));
-        },
-    };
+                return Err(());
+            },
+        };
 
-    // Extract the kernel descriptor from the kernel package.
-    kernel_pkg.to_kernel_descriptor()
+        // Extract the kernel descriptor from the kernel package.
+        diagnostics.capture(kernel_pkg.to_kernel_descriptor()).ok_or(())
+    })
 }
 
 #[cfg(test)]
@@ -238,8 +261,12 @@ mod tests {
             kernel_file: Some(PathBuf::from("kernel.txt")),
         };
 
-        let err = cmd.execute().expect_err("expected the bad kernel extension to be rejected");
-        let message = format!("{err}");
+        let outcome = cmd.execute();
+        assert!(outcome.is_err(), "expected the bad kernel extension to be rejected");
+        let message = format!(
+            "{:?}",
+            outcome.diagnostics.into_report(&miden_vm::diagnostics::DefaultFailurePolicy)
+        );
         assert!(
             message.contains("must have a .masm or .masp extension"),
             "expected a kernel-extension error, got: {message}"

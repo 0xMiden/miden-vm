@@ -46,7 +46,7 @@ end
 #[test]
 fn public_item_import_exports_without_alias_symbol() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace root
@@ -54,7 +54,7 @@ fn public_item_import_exports_without_alias_symbol() -> TestResult {
         pub use {foo as bar} from dep
         "#
     ))?;
-    let dep = context.parse_module(source_file!(
+    let dep = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace dep
@@ -65,7 +65,9 @@ fn public_item_import_exports_without_alias_symbol() -> TestResult {
         "#
     ))?;
 
-    let library = Assembler::new(context.source_manager()).assemble_library("pkg", root, [dep])?;
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("pkg", root, [dep])
+        .into_result()?;
     let exports = library.manifest.exports().map(PackageExport::path).collect::<BTreeSet<_>>();
 
     assert_eq!(exports.len(), 1);
@@ -77,7 +79,7 @@ fn public_item_import_exports_without_alias_symbol() -> TestResult {
 #[test]
 fn link_import_module_and_item_forms_resolve() -> TestResult {
     let context = TestContext::new();
-    let dep = context.parse_module(source_file!(
+    let dep = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace lib::math
@@ -90,7 +92,7 @@ fn link_import_module_and_item_forms_resolve() -> TestResult {
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace app
@@ -111,8 +113,9 @@ fn link_import_module_and_item_forms_resolve() -> TestResult {
         "#
     ))?;
 
-    let package =
-        Assembler::new(context.source_manager()).assemble_library("app", consumer, [dep])?;
+    let package = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("app", consumer, [dep])
+        .into_result()?;
     let exports = package.manifest.exports().map(PackageExport::path).collect::<BTreeSet<_>>();
 
     assert!(exports.contains(&Arc::from(Path::new("::app::entry"))));
@@ -123,7 +126,7 @@ fn link_import_module_and_item_forms_resolve() -> TestResult {
 #[test]
 fn link_import_single_segment_module_import_resolves() -> TestResult {
     let context = TestContext::new();
-    let dep = context.parse_module(source_file!(
+    let dep = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace foo
@@ -133,7 +136,7 @@ fn link_import_single_segment_module_import_resolves() -> TestResult {
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace app
@@ -146,7 +149,9 @@ fn link_import_single_segment_module_import_resolves() -> TestResult {
         "#
     ))?;
 
-    Assembler::new(context.source_manager()).assemble_library("app", consumer, [dep])?;
+    Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("app", consumer, [dep])
+        .into_result()?;
 
     Ok(())
 }
@@ -154,7 +159,7 @@ fn link_import_single_segment_module_import_resolves() -> TestResult {
 #[test]
 fn link_import_item_form_rejects_submodule_target() -> TestResult {
     let context = TestContext::new().with_warnings_as_errors(false);
-    let dep = context.parse_module(source_file!(
+    let dep = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace dep
@@ -162,7 +167,7 @@ fn link_import_item_form_rejects_submodule_target() -> TestResult {
         pub mod child
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace dep::child
@@ -172,7 +177,7 @@ fn link_import_item_form_rejects_submodule_target() -> TestResult {
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace app
@@ -185,8 +190,9 @@ fn link_import_item_form_rejects_submodule_target() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("app", consumer, [dep, child])
+        .into_result()
         .expect_err("item import of a submodule should be rejected");
 
     assert_diagnostic!(&err, "item import target '::dep::child' resolved to a module");
@@ -197,7 +203,7 @@ fn link_import_item_form_rejects_submodule_target() -> TestResult {
 #[test]
 fn link_import_public_item_reexport_chain_resolves_order_independently() -> TestResult {
     let context = TestContext::new();
-    let dep = context.parse_module(source_file!(
+    let dep = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace dep
@@ -205,7 +211,7 @@ fn link_import_public_item_reexport_chain_resolves_order_independently() -> Test
         pub const VALUE = 1
         "#
     ))?;
-    let mid = context.parse_module(source_file!(
+    let mid = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace mid
@@ -213,7 +219,7 @@ fn link_import_public_item_reexport_chain_resolves_order_independently() -> Test
         pub use {VALUE as MID_VALUE} from dep
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace app
@@ -227,7 +233,9 @@ fn link_import_public_item_reexport_chain_resolves_order_independently() -> Test
         "#
     ))?;
 
-    Assembler::new(context.source_manager()).assemble_library("app", consumer, [mid, dep])?;
+    Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("app", consumer, [mid, dep])
+        .into_result()?;
 
     Ok(())
 }
@@ -235,7 +243,7 @@ fn link_import_public_item_reexport_chain_resolves_order_independently() -> Test
 #[test]
 fn link_import_self_relative_public_item_reexport_resolves() -> TestResult {
     let context = TestContext::new();
-    let dep = context.parse_module(source_file!(
+    let dep = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace dep
@@ -245,7 +253,7 @@ fn link_import_self_relative_public_item_reexport_resolves() -> TestResult {
         end
         "#
     ))?;
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace app
@@ -260,7 +268,7 @@ fn link_import_self_relative_public_item_reexport_resolves() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace app::child
@@ -269,7 +277,9 @@ fn link_import_self_relative_public_item_reexport_resolves() -> TestResult {
         "#
     ))?;
 
-    Assembler::new(context.source_manager()).assemble_library("app", root, [child, dep])?;
+    Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("app", root, [child, dep])
+        .into_result()?;
 
     Ok(())
 }
@@ -277,7 +287,7 @@ fn link_import_self_relative_public_item_reexport_resolves() -> TestResult {
 #[test]
 fn link_import_public_item_reexport_cycle_is_rejected() -> TestResult {
     let context = TestContext::new();
-    let a = context.parse_module(source_file!(
+    let a = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace a
@@ -285,7 +295,7 @@ fn link_import_public_item_reexport_cycle_is_rejected() -> TestResult {
         pub use {B as A} from b
         "#
     ))?;
-    let b = context.parse_module(source_file!(
+    let b = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace b
@@ -293,7 +303,7 @@ fn link_import_public_item_reexport_cycle_is_rejected() -> TestResult {
         pub use {A as B} from a
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace app
@@ -307,8 +317,9 @@ fn link_import_public_item_reexport_cycle_is_rejected() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("app", consumer, [a, b])
+        .into_result()
         .expect_err("public item re-export cycle should be rejected");
 
     assert_diagnostic!(&err, "import re-export cycle");
@@ -319,7 +330,7 @@ fn link_import_public_item_reexport_cycle_is_rejected() -> TestResult {
 #[test]
 fn link_import_public_item_reexport_cycle_with_self_relative_target_is_rejected() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace root
@@ -328,7 +339,7 @@ fn link_import_public_item_reexport_cycle_with_self_relative_target_is_rejected(
         pub use {B as A} from self::child
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace root::child
@@ -336,7 +347,7 @@ fn link_import_public_item_reexport_cycle_with_self_relative_target_is_rejected(
         pub use {A as B} from root
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace app
@@ -350,8 +361,9 @@ fn link_import_public_item_reexport_cycle_with_self_relative_target_is_rejected(
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("app", consumer, [root, child])
+        .into_result()
         .expect_err("public item re-export cycle should be rejected");
 
     assert_diagnostic!(&err, "import re-export cycle");

@@ -49,8 +49,8 @@ struct WireDebugFunctionInfo {
     linkage_name_idx: OptionalIndex<DebugStringIdx>,
     name_idx: DebugStringIdx,
     file_idx: DebugFileIdx,
-    line: LineIndex,
-    column: ColumnIndex,
+    line: u32,
+    column: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -111,8 +111,8 @@ impl Serializable for PackageDebugInfo {
                     linkage_name_idx: row.linkage_name_idx,
                     name_idx: row.name_idx,
                     file_idx: row.file_idx,
-                    line: row.line,
-                    column: row.column,
+                    line: row.line.to_u32(),
+                    column: row.column.to_u32(),
                 }
             }),
             &mut output,
@@ -238,8 +238,8 @@ impl PackageDebugInfo {
                     linkage_name_idx: row.linkage_name_idx,
                     name_idx: row.name_idx,
                     file_idx: row.file_idx,
-                    line: row.line,
-                    column: row.column,
+                    line: LineIndex::from(row.line),
+                    column: ColumnIndex::from(row.column),
                 })
             },
         )?;

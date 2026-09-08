@@ -252,6 +252,7 @@ impl FastProcessor {
     ///
     /// let program = Assembler::default()
     ///     .assemble_program("prg", "begin push.1 drop end")
+    ///     .result
     ///     .unwrap()
     ///     .unwrap_program();
     /// let mut host = DefaultHost::default();

@@ -7,15 +7,15 @@ use super::*;
 fn simple_instructions() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.0 assertz end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
 
     let source = source_file!(&context, "begin push.10 push.50 push.2 u32wrapping_madd end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
 
     let source = source_file!(&context, "begin push.10 push.50 push.2 u32wrapping_add3 end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -26,7 +26,7 @@ fn simple_instructions() -> TestResult {
 fn empty_program() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -35,7 +35,8 @@ fn empty_program() -> TestResult {
 fn empty_if() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin if.true end end");
-    let err = context.assemble(source).expect_err("expected empty if block to be rejected");
+    let err =
+        assemble_source(&context, source).expect_err("expected empty if block to be rejected");
     assert_diagnostic!(&err, "invalid syntax: expected a non-empty `if` block");
     assert_diagnostic!(&err, "begin if.true end end");
 }
@@ -44,7 +45,7 @@ fn empty_if() {
 fn empty_if_true_then_branch() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin if.true nop end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -55,7 +56,7 @@ fn empty_if_true_then_branch() -> TestResult {
 fn empty_while() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin while.true end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -66,7 +67,7 @@ fn empty_while() -> TestResult {
 fn empty_repeat() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin repeat.5 end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -77,7 +78,7 @@ fn empty_repeat() -> TestResult {
 fn repeat_basic_blocks_merged() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin mul repeat.5 add end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
 
     // Also ensure that dead code elimination works properly
@@ -92,7 +93,7 @@ fn repeat_basic_blocks_merged() -> TestResult {
 fn do_while_lowers_to_bare_loop() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin do push.1 while eq.0 end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     let forest = program.mast_forest();
 
     let num_loops = forest.nodes().iter().filter(|n| matches!(n, MastNode::Loop(_))).count();
@@ -117,7 +118,7 @@ fn do_while_lowers_to_bare_loop() -> TestResult {
 fn repeat_dynamic_iteration_count() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "const A = 5 begin repeat.A add end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -126,7 +127,7 @@ fn repeat_dynamic_iteration_count() -> TestResult {
 fn single_basic_block() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.1 push.2 add end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -137,12 +138,12 @@ fn basic_block_and_simple_if_true() -> TestResult {
 
     // if with else
     let source = source_file!(&context, "begin push.2 push.3 if.true add else mul end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
 
     // if without else
     let source = source_file!(&context, "begin push.2 push.3 if.true add end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -153,12 +154,30 @@ fn basic_block_and_simple_if_false() -> TestResult {
 
     // if with else
     let source = source_file!(&context, "begin push.2 push.3 if.false add else mul end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
 
     // if without else
     let source = source_file!(&context, "begin push.2 push.3 if.false add end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
+}
+
+#[test]
+fn in_place_program_assembly_retains_parsed_sources() {
+    let mut assembler = Assembler::new();
+    let outcome = assembler.assemble_program_in_place("test", "begin push.1 end");
+
+    assert!(outcome.is_ok());
+    assert!(assembler.sources().find_by_name("<anonymous>").is_some());
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn assembler_defaults_use_distinct_source_namespaces() {
+    let first = Assembler::new();
+    let second = Assembler::new();
+
+    assert_ne!(first.sources().namespace(), second.sources().namespace());
 }

@@ -5,7 +5,10 @@ use std::{
     path::{Path as FsPath, PathBuf},
 };
 
-use miden_assembly_syntax::{ast::ModuleKind, diagnostics::Report};
+use miden_assembly_syntax::{
+    ast::ModuleKind,
+    diagnostics::{DiagnosticCollector, DiagnosticSet, Outcome, Report, SourceMap},
+};
 use miden_core::serde::Deserializable;
 use miden_mast_package::{Package as MastPackage, TargetType};
 use miden_package_registry::{PackageCache, PackageId, Version as PackageVersion};
@@ -16,6 +19,10 @@ use miden_project::{
 
 use crate::{Assembler, ast::Module};
 
+fn finish_diagnostics(diagnostics: DiagnosticCollector, sources: &SourceMap) -> DiagnosticSet {
+    diagnostics.finish().attach_session_sources(Arc::new(sources.clone()))
+}
+
 mod build_provenance;
 mod dependency_graph;
 mod providers;
@@ -23,7 +30,8 @@ mod runtime_dependencies;
 mod target_selector;
 
 use self::{
-    build_provenance::PackageBuildProvenance, dependency_graph::DependencyGraph,
+    build_provenance::PackageBuildProvenance,
+    dependency_graph::{Completion, DependencyGraph},
     runtime_dependencies::RuntimeDependencies,
 };
 pub use self::{
@@ -43,7 +51,7 @@ impl Assembler {
         self,
         manifest_path: impl AsRef<FsPath>,
         store: &'a mut S,
-    ) -> Result<ProjectAssembler<'a, S>, Report>
+    ) -> Outcome<ProjectAssembler<'a, S>>
     where
         S: PackageCache,
     {
@@ -53,28 +61,42 @@ impl Assembler {
 
     /// Get a [ProjectAssembler] configured for the project whose manifest is at `manifest_path`.
     pub fn for_project_at_path_with_providers<'a, S>(
-        self,
+        mut self,
         manifest_path: impl AsRef<FsPath>,
         store: &'a mut S,
         providers: impl IntoIterator<Item = Box<dyn ProjectSourceProvider>>,
-    ) -> Result<ProjectAssembler<'a, S>, Report>
+    ) -> Outcome<ProjectAssembler<'a, S>>
     where
         S: PackageCache,
     {
+        let mut diagnostics = DiagnosticCollector::new();
         let manifest_path = manifest_path.as_ref();
-        let source_manager = self.source_manager();
-        let project = miden_project::Project::load(manifest_path, &source_manager)?;
+        let Outcome { result: project, diagnostics: emitted } =
+            miden_project::Project::load(manifest_path, self.sources_mut());
+        let _ = diagnostics.merge(emitted);
+        let Ok(project) = project else {
+            return Outcome {
+                result: Err(()),
+                diagnostics: finish_diagnostics(diagnostics, self.sources()),
+            };
+        };
         let package = project.package();
-        let dependency_graph =
-            DependencyGraph::from_project_path(manifest_path, store, source_manager)?;
-
-        Ok(ProjectAssembler {
-            assembler: self,
-            project: package,
-            source_provider: SourceProviderRegistry::new(providers),
-            dependency_graph,
-            store,
-        })
+        let Outcome {
+            result: dependency_graph,
+            diagnostics: emitted,
+        } = DependencyGraph::from_loaded_project(project, store, self.sources_mut());
+        let _ = diagnostics.merge(emitted);
+        let diagnostics = finish_diagnostics(diagnostics, self.sources());
+        Outcome {
+            result: dependency_graph.map(|dependency_graph| ProjectAssembler {
+                assembler: self,
+                project: package,
+                source_provider: SourceProviderRegistry::new(providers),
+                dependency_graph,
+                store,
+            }),
+            diagnostics,
+        }
     }
 
     /// Get a [ProjectAssembler] configured for `project`
@@ -82,7 +104,7 @@ impl Assembler {
         self,
         project: Arc<ProjectPackage>,
         store: &'a mut S,
-    ) -> Result<ProjectAssembler<'a, S>, Report>
+    ) -> Outcome<ProjectAssembler<'a, S>>
     where
         S: PackageCache,
     {
@@ -92,24 +114,31 @@ impl Assembler {
 
     /// Get a [ProjectAssembler] configured for `project`
     pub fn for_project_with_providers<'a, S>(
-        self,
+        mut self,
         project: Arc<ProjectPackage>,
         store: &'a mut S,
         providers: impl IntoIterator<Item = Box<dyn ProjectSourceProvider>>,
-    ) -> Result<ProjectAssembler<'a, S>, Report>
+    ) -> Outcome<ProjectAssembler<'a, S>>
     where
         S: PackageCache,
     {
-        let source_manager = self.source_manager();
-        let dependency_graph =
-            DependencyGraph::from_project(project.clone(), store, source_manager)?;
-        Ok(ProjectAssembler {
-            assembler: self,
-            project,
-            source_provider: SourceProviderRegistry::new(providers),
-            dependency_graph,
-            store,
-        })
+        let mut diagnostics = DiagnosticCollector::new();
+        let Outcome {
+            result: dependency_graph,
+            diagnostics: emitted,
+        } = DependencyGraph::from_project(project.clone(), store, self.sources_mut());
+        let _ = diagnostics.merge(emitted);
+        let diagnostics = finish_diagnostics(diagnostics, self.sources());
+        Outcome {
+            result: dependency_graph.map(|dependency_graph| ProjectAssembler {
+                assembler: self,
+                project,
+                source_provider: SourceProviderRegistry::new(providers),
+                dependency_graph,
+                store,
+            }),
+            diagnostics,
+        }
     }
 }
 
@@ -262,16 +291,30 @@ where
         &mut self,
         target_selector: ProjectTargetSelector<'_>,
         profile_name: &str,
-    ) -> Result<Arc<MastPackage>, Report> {
-        let result = self.assemble_interruptible(target_selector, profile_name)?;
+    ) -> Outcome<Arc<MastPackage>> {
+        let Outcome { result, diagnostics: emitted } =
+            self.assemble_interruptible(target_selector, profile_name);
+        let mut diagnostics = DiagnosticCollector::new();
+        let _ = diagnostics.merge(emitted);
 
-        match result {
-            ControlFlow::Continue(package) => Ok(package),
-            ControlFlow::Break(AssemblyInterrupted { package, target_name, target_type, role }) => {
-                Err(Report::msg(format!(
+        let result = match result {
+            Ok(ControlFlow::Continue(package)) => Ok(package),
+            Ok(ControlFlow::Break(AssemblyInterrupted {
+                package,
+                target_name,
+                target_type,
+                role,
+            })) => {
+                let _ = diagnostics.add_report(Report::msg(format!(
                     "assembly of {role} package '{package}' was interrupted by the source provider for target '{target_name}' (type={target_type})"
-                )))
+                )));
+                Err(())
             },
+            Err(_) => Err(()),
+        };
+        Outcome {
+            result,
+            diagnostics: finish_diagnostics(diagnostics, self.assembler.sources()),
         }
     }
 
@@ -294,7 +337,23 @@ where
         &mut self,
         target_selector: ProjectTargetSelector<'_>,
         profile_name: &str,
-    ) -> Result<ControlFlow<AssemblyInterrupted, Arc<MastPackage>>, Report> {
+    ) -> Outcome<ControlFlow<AssemblyInterrupted, Arc<MastPackage>>> {
+        let mut diagnostics = DiagnosticCollector::new();
+        let result =
+            self.assemble_interruptible_inner(target_selector, profile_name, &mut diagnostics);
+        let result = diagnostics.capture(result).flatten().ok_or(());
+        Outcome {
+            result,
+            diagnostics: finish_diagnostics(diagnostics, self.assembler.sources()),
+        }
+    }
+
+    fn assemble_interruptible_inner(
+        &mut self,
+        target_selector: ProjectTargetSelector<'_>,
+        profile_name: &str,
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Option<ControlFlow<AssemblyInterrupted, Arc<MastPackage>>>, Report> {
         let target = target_selector.select_target(self.project.as_ref())?;
 
         // When building an executable target from a project with a library target, we require
@@ -305,7 +364,7 @@ where
             && let Some(library_target) =
                 self.project.library_target().map(|target| target.inner().clone())
         {
-            match self.assemble_source_package(
+            let Some(result) = self.assemble_source_package_inner(
                 root_id.clone(),
                 Arc::clone(&self.project),
                 &library_target,
@@ -315,15 +374,20 @@ where
                 None,
                 None,
                 &mut cache,
-            )? {
-                ControlFlow::Break(breaker) => return Ok(ControlFlow::Break(breaker)),
+                diagnostics,
+            )?
+            else {
+                return Ok(None);
+            };
+            match result {
+                ControlFlow::Break(breaker) => return Ok(Some(ControlFlow::Break(breaker))),
                 ControlFlow::Continue(resolved) => Some(resolved),
             }
         } else {
             None
         };
 
-        self.assemble_source_package(
+        let result = self.assemble_source_package_inner(
             root_id,
             Arc::clone(&self.project),
             &target,
@@ -333,8 +397,9 @@ where
             None,
             None,
             &mut cache,
-        )
-        .map(|resolved| resolved.map_continue(|r| r.package))
+            diagnostics,
+        )?;
+        Ok(result.map(|resolved| resolved.map_continue(|r| r.package)))
     }
 
     /// This is a low-level utility function of the project assembly infrastructure for assembling
@@ -369,7 +434,41 @@ where
         sources: Option<ProjectSourceInputs>,
         source_provenance: Option<ProjectSourceProvenanceInputs>,
         cache: &mut BTreeMap<PackageId, ResolvedPackage>,
-    ) -> Result<ControlFlow<AssemblyInterrupted, ResolvedPackage>, Report> {
+    ) -> Outcome<ControlFlow<AssemblyInterrupted, ResolvedPackage>> {
+        let mut diagnostics = DiagnosticCollector::new();
+        let result = self.assemble_source_package_inner(
+            package_id,
+            project,
+            target,
+            profile_name,
+            package_role,
+            required_lib,
+            sources,
+            source_provenance,
+            cache,
+            &mut diagnostics,
+        );
+        let result = diagnostics.capture(result).flatten().ok_or(());
+        Outcome {
+            result,
+            diagnostics: finish_diagnostics(diagnostics, self.assembler.sources()),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn assemble_source_package_inner(
+        &mut self,
+        package_id: PackageId,
+        project: Arc<ProjectPackage>,
+        target: &Target,
+        profile_name: &str,
+        package_role: InterruptedTargetRole,
+        required_lib: Option<ResolvedPackage>,
+        sources: Option<ProjectSourceInputs>,
+        source_provenance: Option<ProjectSourceProvenanceInputs>,
+        cache: &mut BTreeMap<PackageId, ResolvedPackage>,
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Option<ControlFlow<AssemblyInterrupted, ResolvedPackage>>, Report> {
         assert!(
             source_provenance.is_none() || sources.is_some(),
             "source provenance may only be provided with sources"
@@ -378,10 +477,34 @@ where
         let cache_key = project.target_package_name(target);
         if let Some(package) = cache.get(&cache_key).cloned() {
             assert_eq!(package.package.kind, target.ty);
-            return Ok(ControlFlow::Continue(package));
+            return Ok(Some(ControlFlow::Continue(package)));
         }
 
         let profile = project.resolve_profile(profile_name)?;
+        let manually_provided_sources = sources.is_some();
+        let ProjectSourceInputs { root, support } = match sources {
+            Some(sources) => sources,
+            None => {
+                let Some(loaded) = self.load_target_sources(
+                    project.clone(),
+                    target,
+                    profile,
+                    package_role,
+                    diagnostics,
+                )?
+                else {
+                    return Ok(None);
+                };
+                match loaded {
+                    ControlFlow::Break(breaker) => {
+                        return Ok(Some(ControlFlow::Break(breaker)));
+                    },
+                    ControlFlow::Continue(sources) => sources,
+                }
+            },
+        };
+
+        // Clone only after parsing the target so the assembly session includes its source map.
         let mut assembler = self.assembler.clone().with_profile(profile);
         let mut runtime_dependencies = RuntimeDependencies::default();
         debug_assert!(
@@ -407,11 +530,21 @@ where
         let node = self.dependency_graph.get(&package_id)?;
         let dependencies = node.dependencies.clone();
         for edge in dependencies.iter() {
-            let dependency_package =
-                match self.resolve_dependency_package(&edge.dependency, profile_name, cache)? {
-                    ControlFlow::Break(breaker) => return Ok(ControlFlow::Break(breaker)),
-                    ControlFlow::Continue(pkg) => pkg,
-                };
+            let Some(resolved) = self.resolve_dependency_package(
+                &edge.dependency,
+                profile_name,
+                cache,
+                diagnostics,
+            )?
+            else {
+                return Ok(None);
+            };
+            let dependency_package = match resolved {
+                ControlFlow::Break(breaker) => {
+                    return Ok(Some(ControlFlow::Break(breaker)));
+                },
+                ControlFlow::Continue(pkg) => pkg,
+            };
             if !dependency_package.package.is_library() {
                 return Err(Report::msg(format!(
                     "dependency '{}' resolved to executable package '{}', but only library-like packages can be linked",
@@ -425,17 +558,6 @@ where
             runtime_dependencies.merge_package(dependency_package, edge.linkage)?;
         }
 
-        let manually_provided_sources = sources.is_some();
-        let ProjectSourceInputs { root, support } = match sources {
-            Some(sources) => sources,
-            None => {
-                match self.load_target_sources(project.clone(), target, profile, package_role)? {
-                    ControlFlow::Break(breaker) => return Ok(ControlFlow::Break(breaker)),
-                    ControlFlow::Continue(sources) => sources,
-                }
-            },
-        };
-
         // Collect specific well-known custom sections produced by the project assembler
         let mut sections = Vec::new();
 
@@ -443,15 +565,21 @@ where
         //
         // This is produced before actual assembly, while we still have the sources on hand
         let build_provenance = if source_provenance.is_some() || !manually_provided_sources {
-            self.dependency_graph.build_source_provenance(
+            let status = self.dependency_graph.build_source_provenance(
                 &package_id,
                 project.clone(),
                 target,
                 profile_name,
                 &self.source_provider,
                 self.store,
+                self.assembler.sources_mut(),
                 source_provenance.as_ref(),
-            )?
+                diagnostics,
+            )?;
+            match status {
+                Completion::Complete(provenance) => provenance,
+                Completion::Incomplete => return Ok(None),
+            }
         } else {
             None
         };
@@ -502,7 +630,7 @@ where
         };
         cache.insert(package_id, resolved.clone());
 
-        Ok(ControlFlow::Continue(resolved))
+        Ok(Some(ControlFlow::Continue(resolved)))
     }
 
     fn resolve_dependency_package(
@@ -510,12 +638,13 @@ where
         package_id: &PackageId,
         profile_name: &str,
         cache: &mut BTreeMap<PackageId, ResolvedPackage>,
-    ) -> Result<ControlFlow<AssemblyInterrupted, ResolvedPackage>, Report> {
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Option<ControlFlow<AssemblyInterrupted, ResolvedPackage>>, Report> {
         if let Some(package) = cache.get(package_id).cloned() {
-            return Ok(ControlFlow::Continue(package));
+            return Ok(Some(ControlFlow::Continue(package)));
         }
 
-        let node = self.dependency_graph.get(package_id)?;
+        let node = self.dependency_graph.get(package_id)?.clone();
         let node_version = node.version.clone();
 
         let (package, should_cache) = match &node.provenance {
@@ -530,12 +659,16 @@ where
                 library_path: Some(_),
                 ..
             }) => {
-                let project = miden_project::Project::load_project_reference(
-                    package_id,
-                    manifest_path,
-                    &self.assembler.source_manager(),
-                )
-                .map(|project| project.package())?;
+                let Outcome { result: project, diagnostics: emitted } =
+                    miden_project::Project::load_project_reference(
+                        package_id,
+                        manifest_path,
+                        self.assembler.sources_mut(),
+                    );
+                let _ = diagnostics.merge(emitted);
+                let Ok(project) = project.map(|project| project.package()) else {
+                    return Ok(None);
+                };
                 let target = project
                     .library_target()
                     .map(|target| target.inner().clone())
@@ -544,7 +677,7 @@ where
                             "dependency '{package_id}' does not define a library target"
                         ))
                     })?;
-                match self.try_reuse_registered_source_package(
+                let Some(reuse) = self.try_reuse_registered_source_package(
                     package_id,
                     &node_version,
                     project.clone(),
@@ -552,7 +685,12 @@ where
                     profile_name,
                     origin,
                     manifest_path,
-                )? {
+                    diagnostics,
+                )?
+                else {
+                    return Ok(None);
+                };
+                match reuse {
                     RegisteredSourcePackage::Loaded(package) => (
                         ResolvedPackage {
                             linked_kernel_package: self
@@ -562,7 +700,7 @@ where
                         false,
                     ),
                     reuse => {
-                        let package = match self.assemble_source_package(
+                        let Some(assembled) = self.assemble_source_package_inner(
                             package_id.clone(),
                             project,
                             &target,
@@ -572,8 +710,15 @@ where
                             None,
                             None,
                             cache,
-                        )? {
-                            ControlFlow::Break(breaker) => return Ok(ControlFlow::Break(breaker)),
+                            diagnostics,
+                        )?
+                        else {
+                            return Ok(None);
+                        };
+                        let package = match assembled {
+                            ControlFlow::Break(breaker) => {
+                                return Ok(Some(ControlFlow::Break(breaker)));
+                            },
                             ControlFlow::Continue(package) => package,
                         };
                         match reuse {
@@ -651,7 +796,7 @@ where
             self.cache_resolved_package(&package)?;
         }
         cache.insert(package_id.clone(), package.clone());
-        Ok(ControlFlow::Continue(package))
+        Ok(Some(ControlFlow::Continue(package)))
     }
 
     fn resolve_linked_kernel_package(
@@ -711,7 +856,7 @@ where
     }
 
     fn try_reuse_registered_source_package(
-        &self,
+        &mut self,
         package_id: &PackageId,
         version: &miden_project::SemVer,
         project: Arc<ProjectPackage>,
@@ -719,14 +864,17 @@ where
         profile_name: &str,
         origin: &ProjectSourceOrigin,
         manifest_path: &FsPath,
-    ) -> Result<RegisteredSourcePackage, Report> {
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Option<RegisteredSourcePackage>, Report> {
         let Some(record) = self.store.get_by_semver(package_id, version) else {
-            return Ok(RegisteredSourcePackage::Missing);
+            return Ok(Some(RegisteredSourcePackage::Missing));
         };
         let package = match self.store.load_package(package_id, record.version()) {
             Ok(package) => package,
             Err(_) => {
-                return Ok(RegisteredSourcePackage::IndexedButUnreadable(record.version().clone()));
+                return Ok(Some(RegisteredSourcePackage::IndexedButUnreadable(
+                    record.version().clone(),
+                )));
             },
         };
 
@@ -739,8 +887,13 @@ where
             manifest_path,
             &self.source_provider,
             self.store,
+            self.assembler.sources_mut(),
             None,
+            diagnostics,
         )?;
+        let Completion::Complete(expected) = expected else {
+            return Ok(None);
+        };
 
         match PackageBuildProvenance::from_package(&package)? {
             Some(actual) if actual == expected => Ok(()),
@@ -756,7 +909,7 @@ where
             ))),
         }?;
 
-        Ok(RegisteredSourcePackage::Loaded(package))
+        Ok(Some(RegisteredSourcePackage::Loaded(package)))
     }
 
     fn should_cache_preassembled_package(
@@ -804,53 +957,62 @@ where
     }
 
     fn load_target_sources(
-        &self,
+        &mut self,
         project: Arc<ProjectPackage>,
         target: &Target,
         profile: &Profile,
         role: InterruptedTargetRole,
-    ) -> Result<ControlFlow<AssemblyInterrupted, ProjectSourceInputs>, Report> {
-        let (provider, context) =
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Option<ControlFlow<AssemblyInterrupted, ProjectSourceInputs>>, Report> {
+        let (provider, mut context) =
             self.get_provider_and_target_assembly_context(&project, target, profile)?;
 
-        let inputs = match provider.provide_sources_interruptible(&context)? {
+        let outcome = provider.provide_sources_interruptible(&mut context);
+        let _ = diagnostics.merge(outcome.diagnostics);
+        let Ok(provided) = outcome.result else {
+            return Ok(None);
+        };
+        let inputs = match provided {
             ControlFlow::Break(_) => {
-                return Ok(ControlFlow::Break(AssemblyInterrupted {
+                return Ok(Some(ControlFlow::Break(AssemblyInterrupted {
                     package: project.name().into_inner(),
                     target_name: target.name.inner().clone(),
                     target_type: target.ty,
                     role,
-                }));
+                })));
             },
             ControlFlow::Continue(inputs) => inputs,
         };
-        match target.ty {
+        let inputs = match target.ty {
             TargetType::Executable if !inputs.root.kind().is_executable() => {
-                Err(Report::msg(format!(
+                return Err(Report::msg(format!(
                     "requested target type is executable, but root module provided to assembler for '{}' is {}",
                     project.name(),
                     inputs.root.kind()
-                )))
+                )));
             },
-            TargetType::Kernel if !inputs.root.kind().is_kernel() => Err(Report::msg(format!(
-                "requested target type is kernel, but root module provided to assembler for '{}' is {}",
-                project.name(),
-                inputs.root.kind()
-            ))),
+            TargetType::Kernel if !inputs.root.kind().is_kernel() => {
+                return Err(Report::msg(format!(
+                    "requested target type is kernel, but root module provided to assembler for '{}' is {}",
+                    project.name(),
+                    inputs.root.kind()
+                )));
+            },
             _ if inputs.root.path() != target.namespace.inner().as_ref() => {
-                Err(Report::msg(format!(
+                return Err(Report::msg(format!(
                     "requested target namespace is '{}', but root module provided to assembler for '{}' is '{}'",
                     target.namespace,
                     project.name(),
                     inputs.root.path()
-                )))
+                )));
             },
-            _ => Ok(ControlFlow::Continue(inputs)),
-        }
+            _ => inputs,
+        };
+        Ok(Some(ControlFlow::Continue(inputs)))
     }
 
     fn apply_post_assembly_hooks(
-        &self,
+        &mut self,
         package: &mut MastPackage,
         project: Arc<ProjectPackage>,
         target: &Target,
@@ -865,12 +1027,12 @@ where
     }
 
     fn get_provider_and_target_assembly_context<'this>(
-        &'this self,
+        &'this mut self,
         project: &'this Arc<ProjectPackage>,
         target: &'this Target,
         profile: &'this Profile,
     ) -> Result<(&'this dyn ProjectSourceProvider, TargetAssemblyContext<'this>), Report> {
-        let mut context = match project.manifest_path() {
+        let context = match project.manifest_path() {
             Some(manifest_path) => TargetAssemblyContext::new(
                 project.clone(),
                 manifest_path,
@@ -878,7 +1040,7 @@ where
                 profile,
                 self.dependency_graph.as_ref(),
                 self.store,
-                self.assembler.source_manager(),
+                self.assembler.sources_mut(),
             )?,
             None => TargetAssemblyContext::new_virtual(
                 project.clone(),
@@ -886,11 +1048,9 @@ where
                 profile,
                 self.dependency_graph.as_ref(),
                 self.store,
-                self.assembler.source_manager(),
+                self.assembler.sources_mut(),
             )?,
         };
-        context.with_warnings_as_errors(self.assembler.warnings_as_errors());
-
         let extension = context.resolved_target_root.extension().ok_or_else(|| {
             Report::msg(format!(
                 "invalid target 'path' {}: path must have an extension",

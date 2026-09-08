@@ -21,12 +21,14 @@ fn assemble_library_with_num_locals(
           "
     );
 
-    let mut module = context.parse_module(source)?;
+    let mut module = context.parse_module_source_file(source)?;
     for proc in module.procedures_mut() {
         proc.set_num_locals(num_locals);
     }
 
-    Assembler::new(context.source_manager()).assemble_library("test", module, None::<Box<Module>>)
+    Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("test", module, None::<Box<Module>>)
+        .into_result()
 }
 
 #[test]
@@ -93,9 +95,8 @@ fn test_entrypoint_with_locals_via_constructor_panics() {
         Procedure::new(SourceSpan::default(), Visibility::Public, ProcedureName::main(), 4, body);
 
     let mut module = Module::new_executable();
-    module
-        .define_procedure(main, context.source_manager())
-        .expect("failed to define entrypoint");
+    module.define_procedure(main).expect("failed to define entrypoint");
 
-    let _ = Assembler::new(context.source_manager()).assemble_program("test", module);
+    let _ = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_program("test", module);
 }

@@ -35,10 +35,6 @@ fn eval_circuit_overflow_panic_check() {
     // Namely, this checks that execution doesn't panic due to an overflow.
     assert!(matches!(
         processor.execute_sync(&program, &mut host),
-        Err(ExecutionError::AceChipError {
-            label: _,
-            source_file: _,
-            error: AceError(_),
-        })
+        Err(ExecutionError::AceChipError { label: _, sources: _, error: AceError(_) })
     ));
 }

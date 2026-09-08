@@ -7,7 +7,7 @@ use super::*;
 fn program_with_dynamic_code_execution() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin dynexec end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -16,7 +16,7 @@ fn program_with_dynamic_code_execution() -> TestResult {
 fn program_with_dynamic_code_execution_in_new_context() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin dyncall end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }

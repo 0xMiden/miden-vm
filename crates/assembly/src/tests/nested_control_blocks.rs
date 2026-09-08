@@ -20,7 +20,7 @@ fn nested_control_blocks() -> TestResult {
         push.3 add
         end"
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -43,7 +43,7 @@ fn control_flow_nesting_depth_boundary() -> TestResult {
     let context = TestContext::default();
     let source = nested_if_source(MAX_CONTROL_FLOW_NESTING);
     let source = source_file!(&context, source.as_str());
-    context.assemble(source)?;
+    assemble_source(&context, source)?;
     Ok(())
 }
 
@@ -52,8 +52,7 @@ fn control_flow_nesting_depth_exceeded() {
     let context = TestContext::default();
     let source = nested_if_source(1_500);
     let source = source_file!(&context, source.as_str());
-    let error = context
-        .assemble(source)
+    let error = assemble_source(&context, source)
         .expect_err("expected diagnostic to be raised, but compilation succeeded");
     assert_diagnostic!(&error, "control-flow nesting depth exceeded");
 }

@@ -2,6 +2,11 @@
 
 ## v0.33.0 (Unreleased)
 
+#### Changes
+
+- [BREAKING] Replaced `miden-miette` and `miden-utils-diagnostics` with `miden-diagnostics`. Source management now uses `SourceMap`, `SourceProvider`, and canonical diagnostics spans instead of the former `miden-debug-types` source-manager APIs. Parsing, project loading, and assembly return `Outcome<T>`, which carries diagnostics even on success ([#3657](https://github.com/0xMiden/miden-vm/pull/3657)).
+- [BREAKING] Removed `serde::Serialize` and `serde::Deserialize` implementations for `miden_debug_types::{Location, FileLineCol, ByteIndex}` and `miden_mast_package::TargetType`; their `miden_serde_utils` serialization and binary formats remain supported. `LineIndex`, `LineNumber`, `ColumnIndex`, and `ColumnNumber` now come from `miden-diagnostics` and no longer implement serde or standalone Miden binary serialization traits. Serialize their `u32` values instead; `FileLineCol` continues to encode its line and column values in the existing format ([#3657](https://github.com/0xMiden/miden-vm/pull/3657)).
+
 ## v0.32.0 (2026-09-05)
 
 #### Changes

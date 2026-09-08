@@ -1,10 +1,10 @@
 use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
-use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
+use miden_assembly::diagnostics::{IntoDiagnostic, Outcome, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor,
+    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor,
     trace::{DEFAULT_MAX_PROVER_MEMORY_BYTES, VmTrace, build_trace_with_budget},
 };
 use miden_vm::internal::InputFile;
@@ -12,7 +12,7 @@ use tracing::instrument;
 
 use super::{
     data::{Libraries, OutputFile},
-    utils::{get_masm_program, get_masp_program, parse_byte_size},
+    utils::{MasmProgram, get_masm_program, get_masp_program, parse_byte_size},
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -60,7 +60,7 @@ pub struct RunCmd {
 }
 
 impl RunCmd {
-    pub fn execute(&self) -> Result<(), Report> {
+    pub fn execute(&self) -> Outcome<()> {
         println!("===============================================================================");
         println!("Run program: {}", self.program_file.display());
         println!("-------------------------------------------------------------------------------");
@@ -76,34 +76,46 @@ impl RunCmd {
         let now = Instant::now();
 
         // use a single match expression based on file extension
-        let (trace, program_hash) = match ext.as_str() {
-            "masp" => run_masp_program(self)?,
-            "masm" => run_masm_program(self)?,
-            _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),
+        let outcome = match ext.as_str() {
+            "masp" => match run_masp_program(self) {
+                Ok(value) => Outcome::from(value),
+                Err(report) => Outcome::from_report(report),
+            },
+            "masm" => run_masm_program(self),
+            _ => {
+                return Outcome::from_report(Report::msg(
+                    "The provided file must have a .masm or .masp extension",
+                ));
+            },
         };
 
-        println!(
-            "Executed the program with hash {} in {} ms",
-            hex::encode(program_hash),
-            now.elapsed().as_millis()
-        );
+        outcome.and_then(|(trace, program_hash), diagnostics| {
+            println!(
+                "Executed the program with hash {} in {} ms",
+                hex::encode(program_hash),
+                now.elapsed().as_millis()
+            );
 
-        if let Some(output_path) = &self.output_file {
-            // write outputs to file if one was specified
-            OutputFile::write(trace.stack_outputs(), output_path).map_err(Report::msg)?;
-        } else {
-            // write the stack outputs to the terminal
-            println!("Output: {:?}", trace.stack_outputs().get_num_elements(self.num_outputs));
-        }
+            if let Some(output_path) = &self.output_file {
+                // write outputs to file if one was specified
+                diagnostics
+                    .capture(
+                        OutputFile::write(trace.stack_outputs(), output_path).map_err(Report::msg),
+                    )
+                    .ok_or(())?;
+            } else {
+                // write the stack outputs to the terminal
+                println!("Output: {:?}", trace.stack_outputs().get_num_elements(self.num_outputs));
+            }
 
-        // calculate the percentage of padded rows
-        let padding_percentage = (trace.trace_len_summary().padded_trace_len()
-            - trace.trace_len_summary().trace_len())
-            * 100
-            / trace.trace_len_summary().padded_trace_len();
-        // print the required cycles for each component
-        println!(
-            "VM cycles: {} extended to {} steps ({}% padding).
+            // calculate the percentage of padded rows
+            let padding_percentage = (trace.trace_len_summary().padded_trace_len()
+                - trace.trace_len_summary().trace_len())
+                * 100
+                / trace.trace_len_summary().padded_trace_len();
+            // print the required cycles for each component
+            println!(
+                "VM cycles: {} extended to {} steps ({}% padding).
 ├── Stack rows: {}
 ├── Range checker rows: {}
 ├── Chiplets rows: {}
@@ -113,21 +125,22 @@ impl RunCmd {
 │   ├── ACE chiplet rows: {}
 │   └── Kernel ROM rows: {}
 └── Poseidon2 permutation rows: {}",
-            trace.trace_len_summary().trace_len(),
-            trace.trace_len_summary().padded_trace_len(),
-            padding_percentage,
-            trace.trace_len_summary().core_trace_len(),
-            trace.trace_len_summary().range_trace_len(),
-            trace.trace_len_summary().chiplets_trace_len().trace_len(),
-            trace.trace_len_summary().chiplets_trace_len().hash_chiplet_len(),
-            trace.trace_len_summary().chiplets_trace_len().bitwise_chiplet_len(),
-            trace.trace_len_summary().chiplets_trace_len().memory_chiplet_len(),
-            trace.trace_len_summary().chiplets_trace_len().ace_chiplet_len(),
-            trace.trace_len_summary().chiplets_trace_len().kernel_rom_len(),
-            trace.trace_len_summary().poseidon2_permutation_trace_len(),
-        );
+                trace.trace_len_summary().trace_len(),
+                trace.trace_len_summary().padded_trace_len(),
+                padding_percentage,
+                trace.trace_len_summary().core_trace_len(),
+                trace.trace_len_summary().range_trace_len(),
+                trace.trace_len_summary().chiplets_trace_len().trace_len(),
+                trace.trace_len_summary().chiplets_trace_len().hash_chiplet_len(),
+                trace.trace_len_summary().chiplets_trace_len().bitwise_chiplet_len(),
+                trace.trace_len_summary().chiplets_trace_len().memory_chiplet_len(),
+                trace.trace_len_summary().chiplets_trace_len().ace_chiplet_len(),
+                trace.trace_len_summary().chiplets_trace_len().kernel_rom_len(),
+                trace.trace_len_summary().poseidon2_permutation_trace_len(),
+            );
 
-        Ok(())
+            Ok(())
+        })
     }
 }
 
@@ -159,6 +172,7 @@ fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
 
     let witness = processor
         .execute_for_proving_sync(&program, &mut host)
+        .map_err(ExecutionError::into_report)
         .wrap_err("Failed to execute program")?;
     let (vm_witness, _) = witness.into_parts();
     let trace = build_trace_with_budget(vm_witness, params.max_prover_memory)
@@ -168,74 +182,105 @@ fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
 }
 
 #[instrument(name = "run_program", skip_all)]
-fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
-    for lib in &params.library_paths {
-        if !lib.is_file() {
-            let name = lib.display();
-            return Err(Report::msg(format!("{name} must be a file.")));
+fn run_masm_program(params: &RunCmd) -> Outcome<(VmTrace, [u8; 32])> {
+    let libraries = (|| -> Result<Libraries, Report> {
+        for lib in &params.library_paths {
+            if !lib.is_file() {
+                let name = lib.display();
+                return Err(Report::msg(format!("{name} must be a file.")));
+            }
         }
-    }
 
-    // load libraries from files
-    let libraries = Libraries::new(&params.library_paths)?;
+        // load libraries from files
+        let libraries = Libraries::new(&params.library_paths)?;
 
-    // validate kernel file if provided
-    if let Some(ref kernel_path) = params.kernel_file
-        && !kernel_path.is_file()
-    {
-        return Err(Report::msg(format!(
-            "Kernel file `{}` must be a file.",
-            kernel_path.display()
-        )));
-    }
+        // validate kernel file if provided
+        if let Some(ref kernel_path) = params.kernel_file
+            && !kernel_path.is_file()
+        {
+            return Err(Report::msg(format!(
+                "Kernel file `{}` must be a file.",
+                kernel_path.display()
+            )));
+        }
 
-    // load program from file and compile
-    let (program, package_debug_info, entrypoint_source_node, source_manager) =
-        get_masm_program(&params.program_file, &libraries, params.kernel_file.as_deref())?;
-    let input_data = InputFile::read(&params.input_file, &params.program_file)?;
-
-    // fetch the stack and program inputs from the arguments
-    let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
-    let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
-    let mut host = DefaultHost::default().with_source_manager(source_manager);
-    host.load_library(&CoreLibrary::default())
-        .into_diagnostic()
-        .wrap_err("Failed to load core library")?;
-    for lib in libraries.libraries {
-        host.load_library(lib).into_diagnostic().wrap_err("Failed to load library")?;
-    }
-
-    let program_hash: [u8; 32] = program.hash().into();
-
-    let exec_options = ExecutionOptions::new(
-        Some(params.max_cycles),
-        params.expected_cycles,
-        ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-    )
-    .map_err(|err| Report::msg(format!("{err}")))?;
-
-    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
-        .map_err(|err| Report::msg(format!("{err}")))?;
-
-    let execution_witness = match (package_debug_info.as_ref(), entrypoint_source_node) {
-        (Some(debug_info), Some(entrypoint_source_node_id)) => processor
-            .execute_for_proving_with_package_debug_info_at_source_node_sync(
-                &program,
-                debug_info,
-                entrypoint_source_node_id,
-                &mut host,
-            )
-            .wrap_err("Failed to execute program")?,
-        (Some(debug_info), None) => processor
-            .execute_for_proving_with_package_debug_info_sync(&program, debug_info, &mut host)
-            .wrap_err("Failed to execute program")?,
-        (None, _) => processor
-            .execute_for_proving_sync(&program, &mut host)
-            .wrap_err("Failed to execute program")?,
+        Ok(libraries)
+    })();
+    let libraries = match libraries {
+        Ok(libraries) => libraries,
+        Err(report) => return Outcome::from_report(report),
     };
-    let (vm_witness, _) = execution_witness.into_parts();
-    let trace = build_trace_with_budget(vm_witness, params.max_prover_memory)
-        .wrap_err("Failed to build trace")?;
 
-    Ok((trace, program_hash))
+    get_masm_program(&params.program_file, &libraries, params.kernel_file.as_deref()).and_then(
+        |MasmProgram {
+             program,
+             package_debug_info,
+             entrypoint_source_node,
+             sources,
+             kernel,
+         },
+         diagnostics| {
+            let execution = (|| -> Result<(VmTrace, [u8; 32]), Report> {
+                let input_data = InputFile::read(&params.input_file, &params.program_file)?;
+
+                // fetch the stack and program inputs from the arguments
+                let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
+                let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
+                let mut host = DefaultHost::default().with_source_provider(sources);
+                host.load_library(&CoreLibrary::default())
+                    .into_diagnostic()
+                    .wrap_err("Failed to load core library")?;
+                if let Some(kernel) = kernel {
+                    host.load_library(kernel)
+                        .into_diagnostic()
+                        .wrap_err("Failed to load kernel")?;
+                }
+                for lib in libraries.libraries {
+                    host.load_library(lib).into_diagnostic().wrap_err("Failed to load library")?;
+                }
+
+                let program_hash: [u8; 32] = program.hash().into();
+
+                let exec_options = ExecutionOptions::new(
+                    Some(params.max_cycles),
+                    params.expected_cycles,
+                    ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
+                )
+                .map_err(|err| Report::msg(format!("{err}")))?;
+
+                let processor =
+                    FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
+                        .map_err(|err| Report::msg(format!("{err}")))?;
+
+                let execution_witness = match (package_debug_info.as_ref(), entrypoint_source_node)
+                {
+                    (Some(debug_info), Some(entrypoint_source_node_id)) => processor
+                        .execute_for_proving_with_package_debug_info_at_source_node_sync(
+                            &program,
+                            debug_info,
+                            entrypoint_source_node_id,
+                            &mut host,
+                        )
+                        .map_err(ExecutionError::into_report)
+                        .wrap_err("Failed to execute program")?,
+                    (Some(debug_info), None) => processor
+                        .execute_for_proving_with_package_debug_info_sync(
+                            &program, debug_info, &mut host,
+                        )
+                        .map_err(ExecutionError::into_report)
+                        .wrap_err("Failed to execute program")?,
+                    (None, _) => processor
+                        .execute_for_proving_sync(&program, &mut host)
+                        .map_err(ExecutionError::into_report)
+                        .wrap_err("Failed to execute program")?,
+                };
+                let (vm_witness, _) = execution_witness.into_parts();
+                let trace = build_trace_with_budget(vm_witness, params.max_prover_memory)
+                    .wrap_err("Failed to build trace")?;
+
+                Ok((trace, program_hash))
+            })();
+            diagnostics.capture(execution).ok_or(())
+        },
+    )
 }

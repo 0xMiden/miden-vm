@@ -7,7 +7,7 @@ use super::*;
 fn comment_simple() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin # simple comment \n push.1 push.2 add end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -31,7 +31,7 @@ fn comment_in_nested_control_blocks() -> TestResult {
         push.3 add
         end"
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -40,7 +40,7 @@ fn comment_in_nested_control_blocks() -> TestResult {
 fn comment_before_program() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "# starting comment \n begin push.1 push.2 add end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -49,7 +49,7 @@ fn comment_before_program() -> TestResult {
 fn comment_after_program() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.1 push.2 add end # closing comment");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -65,7 +65,7 @@ begin
     push.A
 end"
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -80,7 +80,7 @@ adv_map A(0x0200000000000000020000000000000002000000000000000200000000000000) = 
 begin push.A adv.push_mapval assert end"
     );
 
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -95,7 +95,7 @@ adv_map A = [0x01]
 begin push.A adv.push_mapval assert end"
     );
 
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -110,7 +110,7 @@ adv_map A(0x0200000000000000020000000000000002000000000000000200000000000000) = 
 begin adv.has_mapkey assert end"
     );
 
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }

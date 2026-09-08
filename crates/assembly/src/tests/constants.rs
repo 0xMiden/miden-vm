@@ -14,7 +14,7 @@ fn simple_constant() -> TestResult {
         push.TEST_CONSTANT
     end"
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -38,7 +38,7 @@ begin
 end
 "#
     );
-    let _program = context.assemble(source)?;
+    let _program = assemble_source(&context, source)?;
     Ok(())
 }
 
@@ -61,7 +61,7 @@ begin
 end
 "#
     );
-    let _program = context.assemble(source)?;
+    let _program = assemble_source(&context, source)?;
     Ok(())
 }
 
@@ -80,7 +80,7 @@ begin
 end
 "#
     );
-    let _program = context.assemble(source)?;
+    let _program = assemble_source(&context, source)?;
     Ok(())
 }
 
@@ -99,8 +99,7 @@ begin
 end
 "#
     );
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected negative discriminant to be rejected");
     assert_diagnostic!(err, "invalid constant expression: value is larger than expected range");
 }
@@ -123,8 +122,7 @@ end
 "#
         )
     );
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected out-of-range felt discriminant to be rejected");
     assert_diagnostic!(err, "invalid literal: value overflowed the field modulus");
 }
@@ -139,8 +137,7 @@ fn constant_expression_overflow_is_rejected() {
             "const TOO_BIG = {modulus_minus_one} + {modulus_minus_one}\nbegin\n    push.TOO_BIG\nend\n"
         )
     );
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected constant expression overflow to be rejected");
     assert_diagnostic!(err, "invalid constant expression: value is larger than expected range");
 }
@@ -157,7 +154,7 @@ fn multiple_constants_push() -> TestResult {
     push.CONSTANT_1.64.CONSTANT_2.72 \
     end"
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -174,7 +171,7 @@ fn constant_numeric_expression() -> TestResult {
     end \
     "
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -193,7 +190,7 @@ fn constant_alphanumeric_expression() -> TestResult {
     end \
     "
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -210,7 +207,7 @@ fn constant_hexadecimal_value() -> TestResult {
     end \
     "
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -227,7 +224,7 @@ fn constant_field_division() -> TestResult {
     end \
     "
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -243,10 +240,15 @@ fn constant_err_const_not_initialized() {
     push.TEST_CONSTANT \
     end"
     );
-    let err = context.assemble(source).expect_err("expected undefined constant diagnostic");
-    assert_diagnostic!(&err, "undefined constant 'A'");
-    assert_diagnostic!(&err, "the constant referenced here is not defined in the current scope");
-    assert_diagnostic!(&err, "are you missing an import?");
+    let err =
+        assemble_source(&context, source).expect_err("expected undefined constant diagnostic");
+    let rendered = format!("{}", err.display_with_sources(context.sources().as_ref()));
+    assert_diagnostic!(&rendered, "undefined constant 'A'");
+    assert_diagnostic!(
+        &rendered,
+        "the constant referenced here is not defined in the current scope"
+    );
+    assert_diagnostic!(&rendered, "are you missing an import?");
 }
 
 #[test]
@@ -260,9 +262,10 @@ fn constant_err_div_by_zero() {
     push.TEST_CONSTANT \
     end"
     );
-    let err = context.assemble(source).expect_err("expected division by zero diagnostic");
-    assert_diagnostic!(&err, "invalid constant expression: division by zero");
-    assert_diagnostic!(&err, "const TEST_CONSTANT = 5/0");
+    let err = assemble_source(&context, source).expect_err("expected division by zero diagnostic");
+    let rendered = format!("{}", err.display_with_sources(context.sources().as_ref()));
+    assert_diagnostic!(&rendered, "invalid constant expression: division by zero");
+    assert_diagnostic!(&rendered, "const TEST_CONSTANT = 5/0");
 
     let source = source_file!(
         &context,
@@ -272,9 +275,10 @@ fn constant_err_div_by_zero() {
     push.TEST_CONSTANT \
     end"
     );
-    let err = context.assemble(source).expect_err("expected division by zero diagnostic");
-    assert_diagnostic!(&err, "invalid constant expression: division by zero");
-    assert_diagnostic!(&err, "const TEST_CONSTANT = 5//0");
+    let err = assemble_source(&context, source).expect_err("expected division by zero diagnostic");
+    let rendered = format!("{}", err.display_with_sources(context.sources().as_ref()));
+    assert_diagnostic!(&rendered, "invalid constant expression: division by zero");
+    assert_diagnostic!(&rendered, "const TEST_CONSTANT = 5//0");
 }
 
 #[test]
@@ -293,9 +297,10 @@ fn constant_err_div_by_zero_indirect() {
     end"
     );
 
-    let err = context.assemble(source).expect_err("expected division by zero diagnostic");
-    assert_diagnostic!(&err, "invalid constant expression: division by zero");
-    assert_diagnostic!(&err, "const BAD_DIV = NUMERATOR / DENOMINATOR");
+    let err = assemble_source(&context, source).expect_err("expected division by zero diagnostic");
+    let rendered = format!("{}", err.display_with_sources(context.sources().as_ref()));
+    assert_diagnostic!(&rendered, "invalid constant expression: division by zero");
+    assert_diagnostic!(&rendered, "const BAD_DIV = NUMERATOR / DENOMINATOR");
 }
 
 #[test]
@@ -310,6 +315,7 @@ fn constant_err_div_by_zero_link_time() -> TestResult {
         pub const DENOMINATOR = 0"
     );
 
+    let module_a = context.parse_module_source_file(module_a)?;
     context.add_module(module_a)?;
 
     let source = source_file!(
@@ -324,9 +330,10 @@ fn constant_err_div_by_zero_link_time() -> TestResult {
     end"
     );
 
-    let err = context.assemble(source).expect_err("expected division by zero diagnostic");
-    assert_diagnostic!(&err, "invalid constant expression: division by zero");
-    assert_diagnostic!(&err, "const BAD_DIV = NUMERATOR / DENOMINATOR");
+    let err = assemble_source(&context, source).expect_err("expected division by zero diagnostic");
+    let rendered = format!("{}", err.display_with_sources(context.sources().as_ref()));
+    assert_diagnostic!(&rendered, "invalid constant expression: division by zero");
+    assert_diagnostic!(&rendered, "const BAD_DIV = NUMERATOR / DENOMINATOR");
 
     Ok(())
 }
@@ -343,7 +350,8 @@ fn constants_must_be_uppercase() {
     end"
     );
 
-    let err = context.assemble(source).expect_err("expected lowercase constant diagnostic");
+    let err =
+        assemble_source(&context, source).expect_err("expected lowercase constant diagnostic");
     assert_diagnostic!(
         &err,
         "invalid identifier: only uppercase characters or underscores are allowed"
@@ -364,7 +372,8 @@ fn duplicate_constant_name() {
     end"
     );
 
-    let err = context.assemble(source).expect_err("expected duplicate constant diagnostic");
+    let err =
+        assemble_source(&context, source).expect_err("expected duplicate constant diagnostic");
     assert_diagnostic!(&err, "symbol conflict: found duplicate definitions of the same name");
     assert_diagnostic!(&err, "conflict occurs here");
     assert_diagnostic!(&err, "previously defined here");
@@ -382,7 +391,7 @@ fn constant_must_be_valid_felt() {
     end"
     );
 
-    let err = context.assemble(source).expect_err("expected invalid felt diagnostic");
+    let err = assemble_source(&context, source).expect_err("expected invalid felt diagnostic");
     assert_diagnostic!(&err, "invalid syntax: unexpected trailing tokens in expression");
     assert_diagnostic!(&err, "unexpected trailing tokens in expression");
 }
@@ -401,7 +410,7 @@ fn constant_must_be_within_valid_felt_range() {
     end"
     );
 
-    let err = context.assemble(source).expect_err("expected felt overflow diagnostic");
+    let err = assemble_source(&context, source).expect_err("expected felt overflow diagnostic");
     assert_diagnostic!(&err, "invalid literal: value overflowed the field modulus");
     assert_diagnostic!(&err, "18446744073709551615");
 
@@ -415,7 +424,7 @@ fn constant_must_be_within_valid_felt_range() {
     end"
     );
 
-    let err = context.assemble(source).expect_err("expected felt overflow diagnostic");
+    let err = assemble_source(&context, source).expect_err("expected felt overflow diagnostic");
     assert_diagnostic!(&err, "invalid literal: value overflowed the field modulus");
     assert_diagnostic!(&err, "18446744069414584321");
 
@@ -429,7 +438,7 @@ fn constant_must_be_within_valid_felt_range() {
     end"
     );
 
-    let err = context.assemble(source).expect_err("expected felt overflow diagnostic");
+    let err = assemble_source(&context, source).expect_err("expected felt overflow diagnostic");
     assert_diagnostic!(&err, "invalid literal: value overflowed the field modulus");
     assert_diagnostic!(&err, "0xFFFFFFFF00000001");
 }
@@ -446,10 +455,8 @@ fn constants_defined_in_global_scope() {
     end"
     );
 
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected block-local constants to be rejected");
-    assert_diagnostic!(&err, "Multiple syntax errors were identified");
     assert_diagnostic!(&err, "expected `end` to close `begin` block before top-level item");
     assert_diagnostic!(&err, "unexpected top-level token");
 }
@@ -468,16 +475,14 @@ fn constant_not_found() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "syntax error",
-        "help: see emitted diagnostics for details",
         "undefined constant 'CONSTANT'",
-        regex!(r#",-\[test[\d]+:2:16\]"#),
+        regex!(r#" --> test[\d]+:2:16"#),
+        "  |",
         "1 |",
         "2 |     begin push.CONSTANT end",
-        "  :                ^^^^|^^^",
-        "  :                    `-- the constant referenced here is not defined in the current scope",
-        "  `----",
-        "help: are you missing an import?"
+        "  |                ^^^^^^^^ the constant referenced here is not defined in the current scope",
+        "  |",
+        "  = help: are you missing an import?"
     );
 }
 
@@ -545,7 +550,7 @@ fn mem_operations_with_constants() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     // Define expected
     let expected = source_file!(
@@ -589,7 +594,7 @@ fn mem_operations_with_constants() -> TestResult {
     "
         )
     );
-    let expected_program = context.assemble(expected)?;
+    let expected_program = assemble_source(&context, expected)?;
     assert_eq!(expected_program.to_string(), program.to_string());
     Ok(())
 }
@@ -621,15 +626,22 @@ fn const_conversion_failed_to_u16() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "invalid immediate: value is larger than expected range",
-        regex!(r#",-\[test[\d]+:5:18\]"#),
+        "error: invalid immediate: value is larger than expected range",
+        regex!(r#"^ *--> test\d+:5:18$"#),
+        "  |",
+        "1 | const CONSTANT = 65536",
+        "2 |",
+        "3 |     @locals(1)",
         "4 |     proc test_constant_overflow",
         "5 |         loc_load.CONSTANT",
-        "  :                  ^^^^^^^^",
+        regex!(r#"^ *\| *\^+$"#),
         "6 |     end",
-        "  `----"
+        "7 |",
+        "8 |     begin",
+        "9 |         exec.test_constant_overflow",
+        "10 |     end",
+        regex!(r#"^11 \| *$"#),
+        "   |"
     );
 }
 
@@ -655,15 +667,17 @@ fn const_conversion_failed_to_u32() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "invalid immediate: value is larger than expected range",
-        regex!(r#",-\[test[\d]+:4:18\]"#),
+        "error: invalid immediate: value is larger than expected range",
+        regex!(r#"^ *--> test\d+:4:18$"#),
+        "  |",
+        "1 | const CONSTANT = 4294967296",
+        "2 |",
         "3 |     begin",
         "4 |         mem_load.CONSTANT",
-        "  :                  ^^^^^^^^",
+        regex!(r#"^ *\| *\^+$"#),
         "5 |     end",
-        "  `----"
+        regex!(r#"^6 \| *$"#),
+        "  |"
     );
 }
 
@@ -683,15 +697,16 @@ fn deprecated_mem_loadw_instruction() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "deprecated instruction: `mem_loadw` has been removed",
-        regex!(r#",-\[test[\d]+:2:9\]"#),
+        "error: deprecated instruction: `mem_loadw` has been removed",
+        regex!(r#"^ *--> test\d+:2:9$"#),
+        "  |",
         "1 | begin",
         "2 |         mem_loadw",
-        regex!(r#"^ *: *\^+"#),
-        regex!(r#"this instruction is no longer supported"#),
+        regex!(r#"^ *\| *\^+ this instruction is no longer supported$"#),
         "3 |     end",
-        "  `----",
-        regex!(r#"help:.*use.*mem_loadw_be.*instead"#)
+        regex!(r#"^4 \| *$"#),
+        "  |",
+        regex!(r#"^ *= help: use `mem_loadw_be` instead$"#)
     );
 }
 
@@ -715,15 +730,20 @@ fn deprecated_loc_loadw_instruction() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "deprecated instruction: `loc_loadw` has been removed",
-        regex!(r#",-\[test[\d]+:3:9\]"#),
+        "error: deprecated instruction: `loc_loadw` has been removed",
+        regex!(r#"^ *--> test\d+:3:9$"#),
+        "  |",
+        "1 | @locals(8)",
         "2 |     proc foo",
         "3 |         loc_loadw.0",
-        regex!(r#"^ *: *\^+"#),
-        regex!(r#"this instruction is no longer supported"#),
+        regex!(r#"^ *\| *\^+ this instruction is no longer supported$"#),
         "4 |     end",
-        "  `----",
-        regex!(r#"help:.*use.*loc_loadw_be.*instead"#)
+        "5 |     begin",
+        "6 |         exec.foo",
+        "7 |     end",
+        regex!(r#"^8 \| *$"#),
+        "  |",
+        regex!(r#"^ *= help: use `loc_loadw_be` instead$"#)
     );
 }
 
@@ -747,15 +767,20 @@ fn deprecated_loc_storew_instruction() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "deprecated instruction: `loc_storew` has been removed",
-        regex!(r#",-\[test[\d]+:3:9\]"#),
+        "error: deprecated instruction: `loc_storew` has been removed",
+        regex!(r#"^ *--> test\d+:3:9$"#),
+        "  |",
+        "1 | @locals(8)",
         "2 |     proc foo",
         "3 |         loc_storew.0",
-        regex!(r#"^ *: *\^+"#),
-        regex!(r#"this instruction is no longer supported"#),
+        regex!(r#"^ *\| *\^+ this instruction is no longer supported$"#),
         "4 |     end",
-        "  `----",
-        regex!(r#"help:.*use.*loc_storew_be.*instead"#)
+        "5 |     begin",
+        "6 |         exec.foo",
+        "7 |     end",
+        regex!(r#"^8 \| *$"#),
+        "  |",
+        regex!(r#"^ *= help: use `loc_storew_be` instead$"#)
     );
 }
 
@@ -776,7 +801,7 @@ fn const_word_from_string() -> TestResult {
     "#
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
 
@@ -814,8 +839,8 @@ fn const_event_from_string() -> TestResult {
         )
     );
 
-    let program1 = context.assemble(source1)?;
-    let program2 = context.assemble(source2)?;
+    let program1 = assemble_source(&context, source1)?;
+    let program2 = assemble_source(&context, source2)?;
     assert_eq!(program1.hash(), program2.hash());
 
     Ok(())
@@ -840,7 +865,7 @@ fn test_push_word_slice() -> TestResult {
     end
     "
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -859,7 +884,7 @@ fn test_push_word_slice_invalid() {
     end
     "
     );
-    assert!(context.assemble(source_invalid_range).is_err());
+    assert!(assemble_source(&context, source_invalid_range).is_err());
 
     let source_empty_range = source_file!(
         &context,
@@ -871,7 +896,7 @@ fn test_push_word_slice_invalid() {
     end
     "
     );
-    assert!(context.assemble(source_empty_range).is_err());
+    assert!(assemble_source(&context, source_empty_range).is_err());
 
     let source_invalid_constant_type = source_file!(
         &context,
@@ -882,7 +907,7 @@ fn test_push_word_slice_invalid() {
     end
     "
     );
-    assert!(context.assemble(source_invalid_constant_type).is_err());
+    assert!(assemble_source(&context, source_invalid_constant_type).is_err());
 
     let source_invalid_constant_type = source_file!(
         &context,
@@ -892,7 +917,7 @@ fn test_push_word_slice_invalid() {
     end
     "
     );
-    assert!(context.assemble(source_invalid_constant_type).is_err());
+    assert!(assemble_source(&context, source_invalid_constant_type).is_err());
 }
 
 #[test]
@@ -908,8 +933,9 @@ fn link_time_const_evaluation_succeeds() -> TestResult {
         "#;
     let a = parse_module!(&context, a);
 
-    let lib =
-        Assembler::new(context.source_manager()).assemble_library("lib", a, None::<Box<Module>>)?;
+    let lib = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("lib", a, None::<Box<Module>>)
+        .into_result()?;
 
     let program_source = source_file!(
         &context,
@@ -923,10 +949,12 @@ fn link_time_const_evaluation_succeeds() -> TestResult {
             add
         end"
     );
+    let program_source = context.parse_program(program_source)?;
 
-    let program = Assembler::new(context.source_manager())
+    let program = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(Arc::from(lib), Linkage::Dynamic)?
-        .assemble_program("program", program_source)?
+        .assemble_program("program", program_source)
+        .into_result()?
         .unwrap_program();
     insta::assert_snapshot!(program);
 
@@ -948,15 +976,11 @@ fn link_time_const_evaluation_deferred_expressions_succeed() -> TestResult {
             end
         "#
     );
-    let lib = Assembler::new(context.source_manager()).assemble_library(
-        "lib",
-        constants,
-        None::<Box<Module>>,
-    )?;
+    let lib = Assembler::new()
+        .assemble_library("lib", constants, None::<Box<Module>>)
+        .into_result()?;
 
-    let program = source_file!(
-        &context,
-        r#"
+    let program = r#"
             use {WORD_NUM_ELEMENTS} from lib::constants
 
             const OFFSET_1 = WORD_NUM_ELEMENTS + 1
@@ -988,12 +1012,12 @@ fn link_time_const_evaluation_deferred_expressions_succeed() -> TestResult {
                 push.3
                 assert_eq
             end
-        "#
-    );
+        "#;
 
-    Assembler::new(context.source_manager())
+    Assembler::new()
         .with_package(Arc::from(lib), Linkage::Dynamic)?
-        .assemble_program("program", program)?;
+        .assemble_program("program", program)
+        .into_result()?;
 
     Ok(())
 }
@@ -1015,35 +1039,31 @@ fn link_time_event_constants_must_be_event_hashes() -> TestResult {
             end
         "#
     );
-    let lib: Arc<Package> = Arc::from(Assembler::new(context.source_manager()).assemble_library(
-        "lib",
-        constants,
-        None::<Box<Module>>,
-    )?);
+    let lib: Arc<Package> = Arc::from(
+        Assembler::new()
+            .assemble_library("lib", constants, None::<Box<Module>>)
+            .into_result()?,
+    );
 
     for (instruction, constant) in
         [("emit", "INT"), ("emit", "WORD"), ("trace", "INT"), ("trace", "WORD")]
     {
-        let program = source_file!(
-            &context,
-            format!(
-                "use {{{constant}}} from lib::constants\nbegin\n    {instruction}.{constant}\nend"
-            )
+        let program = format!(
+            "use {{{constant}}} from lib::constants\nbegin\n    {instruction}.{constant}\nend"
         );
-        let err = Assembler::new(context.source_manager())
+        let err = Assembler::new()
             .with_package(lib.clone(), Linkage::Dynamic)?
             .assemble_program("program", program)
+            .into_result()
             .expect_err("imported event constant must be defined via event() hashing");
         assert_diagnostic!(&err, "expected an event name");
     }
 
-    let program = source_file!(
-        &context,
-        "use {EVENT} from lib::constants\nbegin\n    emit.EVENT\n    trace.EVENT\nend"
-    );
-    Assembler::new(context.source_manager())
+    let program = "use {EVENT} from lib::constants\nbegin\n    emit.EVENT\n    trace.EVENT\nend";
+    Assembler::new()
         .with_package(lib, Linkage::Dynamic)?
-        .assemble_program("program", program)?;
+        .assemble_program("program", program)
+        .into_result()?;
 
     Ok(())
 }
@@ -1060,8 +1080,9 @@ fn link_time_const_evaluation_undefined_symbol() -> TestResult {
         "#;
     let a = parse_module!(&context, a);
 
-    let lib =
-        Assembler::new(context.source_manager()).assemble_library("lib", a, None::<Box<Module>>)?;
+    let lib = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("lib", a, None::<Box<Module>>)
+        .into_result()?;
 
     let source = source_file!(
         &context,
@@ -1073,40 +1094,35 @@ fn link_time_const_evaluation_undefined_symbol() -> TestResult {
             add
         end"
     );
+    let source = context.parse_program(source)?;
 
-    let error = Assembler::new(context.source_manager())
+    let error = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(Arc::from(lib), Linkage::Dynamic)?
         .assemble_program("program", source)
+        .into_result()
         .expect_err("expected diagnostic to be raised, but compilation succeeded");
     assert_diagnostic_lines!(
         error,
         "undefined item 'lib::a::FOO'",
-        regex!(r#",-\[test[\d]+:1:6\]"#),
+        regex!(r#" --> test[\d]+:1:6"#),
+        "  |",
         "1 | use {FOO} from lib::a",
-        "  :      ^^^",
+        "  |      ^^^",
         "2 |         begin",
-        "  `----",
-        "help: you might be missing an import, or the containing library has not been linked"
+        "3 |             push.FOO",
+        "4 |             exec.lib::a::f",
+        "5 |             add",
+        "6 |         end",
+        "  |",
+        "  = help: you might be missing an import, or the containing library has not been linked"
     );
 
     Ok(())
 }
 
 #[test]
-fn link_time_const_evaluation_invalid_constant() -> TestResult {
+fn link_time_const_evaluation_invalid_constant() {
     let context = TestContext::default();
-    let a = r#"
-            namespace lib::a
-
-            pub proc f
-                push.1
-            end
-        "#;
-    let a = parse_module!(&context, a);
-
-    let lib =
-        Assembler::new(context.source_manager()).assemble_library("lib", a, None::<Box<Module>>)?;
-
     let source = source_file!(
         &context,
         "\
@@ -1115,24 +1131,22 @@ fn link_time_const_evaluation_invalid_constant() -> TestResult {
         push.f
     end"
     );
-
-    let error = Assembler::new(context.source_manager())
-        .with_package(Arc::from(lib), Linkage::Dynamic)?
-        .assemble_program("program", source)
+    let error = context
+        .parse_program(source)
         .expect_err("expected diagnostic to be raised, but compilation succeeded");
 
     assert_diagnostic_lines!(
         error,
         "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
-        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
-        regex!(r#",-\[test[\d]+:3:14\]"#),
+        regex!(r#" --> test[\d]+:3:14"#),
+        "  |",
+        "1 | use {f} from lib::a",
         "2 |     begin",
         "3 |         push.f",
-        "  :              ^",
+        "  |              ^",
         "4 |     end",
-        "  `----",
-        "help: bare identifiers must be lowercase alphanumeric with '_', quoted identifiers can include any graphical character"
+        "  |",
+        "  = note: caused by: invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
+        "  = help: bare identifiers must be lowercase alphanumeric with '_', quoted identifiers can include any graphical character"
     );
-
-    Ok(())
 }

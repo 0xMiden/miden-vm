@@ -9,7 +9,7 @@ fn asm_import_source_digest_reexport_is_rejected_without_panicking() {
 
     let context = TestContext::new();
     let parsed = catch_unwind(AssertUnwindSafe(|| {
-        context.parse_module(source_file!(
+        context.parse_module_source_file(source_file!(
             &context,
             "namespace m::n\n\npub use {foo} from 0x0000000000000000000000000000000000000000000000000000000000000000\n"
         ))
@@ -28,7 +28,7 @@ fn asm_import_source_digest_alias_chain_is_rejected_without_panicking() {
 
     let context = TestContext::new();
     let parsed = catch_unwind(AssertUnwindSafe(|| {
-        context.parse_module(source_file!(
+        context.parse_module_source_file(source_file!(
             &context,
             r#"
                     namespace m::n
@@ -75,32 +75,23 @@ fn asm_import_direct_digest_invoke_assembles_without_source_import() {
 
 #[test]
 fn asm_import_direct_digest_invoke_parses_with_warnings_as_errors() {
-    use std::sync::Arc;
-
-    use crate::DefaultSourceManager;
-
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let context = TestContext::default();
     let program = r#"
         begin
             exec.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a213dae
         end
     "#;
 
-    let mut parser = Module::parser(None);
-    parser.set_warnings_as_errors(true);
-
-    parser
-        .parse_str(None, program, source_manager)
-        .expect("expected direct digest invocation to parse without import warnings");
+    let source = context.add_source("program.masm", program);
+    let _module = Module::parser(None)
+        .parse(None, source.span().source().id(), source.inner())
+        .into_result_with_policy(&WarningsAsErrors)
+        .expect("expected direct digest invocation to produce a module");
 }
 
 #[test]
 fn asm_import_direct_digest_forward_decl_assembles_without_source_import() {
-    use std::sync::Arc;
-
-    use crate::DefaultSourceManager;
-
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let context = TestContext::default();
     let program = r#"
         proc helper
             exec.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a213dae
@@ -111,18 +102,14 @@ fn asm_import_direct_digest_forward_decl_assembles_without_source_import() {
         end
     "#;
 
-    Assembler::new(source_manager)
+    Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_program("program", program)
         .expect("expected direct digest invocation in helper proc to assemble");
 }
 
 #[test]
 fn forward_declared_import_used_by_type_ref_is_not_reported_unused_when_warnings_are_errors() {
-    use std::sync::Arc;
-
-    use crate::DefaultSourceManager;
-
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let context = TestContext::default();
     let module = r#"
         namespace m
 
@@ -130,22 +117,17 @@ fn forward_declared_import_used_by_type_ref_is_not_reported_unused_when_warnings
         use external::module as foo
     "#;
 
-    let mut parser = Module::parser(None);
-    parser.set_warnings_as_errors(true);
-
-    parser
-        .parse_str(None, module, source_manager)
-        .expect("expected forward-declared import used by type ref to count as used");
+    let source = context.add_source("module.masm", module);
+    let _module = Module::parser(None)
+        .parse(None, source.span().source().id(), source.inner())
+        .into_result_with_policy(&WarningsAsErrors)
+        .expect("expected forward-declared import to produce a module");
 }
 
 #[test]
 fn forward_declared_import_used_by_proc_signature_is_not_reported_unused_when_warnings_are_errors()
 {
-    use std::sync::Arc;
-
-    use crate::DefaultSourceManager;
-
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let context = TestContext::default();
     let module = r#"
         namespace m
 
@@ -155,12 +137,11 @@ fn forward_declared_import_used_by_proc_signature_is_not_reported_unused_when_wa
         use external::module as foo
     "#;
 
-    let mut parser = Module::parser(None);
-    parser.set_warnings_as_errors(true);
-
-    parser
-        .parse_str(None, module, source_manager)
-        .expect("expected forward-declared import used by signature type to count as used");
+    let source = context.add_source("module.masm", module);
+    let _module = Module::parser(None)
+        .parse(None, source.span().source().id(), source.inner())
+        .into_result_with_policy(&WarningsAsErrors)
+        .expect("expected forward-declared import to produce a module");
 }
 
 #[test]
@@ -184,11 +165,7 @@ fn kernel_import_used_by_proc_signature_is_not_reported_unused_when_warnings_are
 
 #[test]
 fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warnings_are_errors() {
-    use std::sync::Arc;
-
-    use crate::DefaultSourceManager;
-
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let context = TestContext::default();
     let module = r#"
         namespace m
 
@@ -196,12 +173,11 @@ fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warn
         use external::module as foo
     "#;
 
-    let mut parser = Module::parser(None);
-    parser.set_warnings_as_errors(true);
-
-    parser
-        .parse_str(None, module, source_manager)
-        .expect("expected forward-declared import used by constant ref to count as used");
+    let source = context.add_source("module.masm", module);
+    let _module = Module::parser(None)
+        .parse(None, source.span().source().id(), source.inner())
+        .into_result_with_policy(&WarningsAsErrors)
+        .expect("expected forward-declared import to produce a module");
 }
 
 #[test]
@@ -217,7 +193,7 @@ fn asm_import_source_digest_import_is_rejected_without_panicking() {
     "#;
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::default().assemble_program("program", program)
+        Assembler::default().assemble_program("program", program).into_result()
     }));
 
     assert!(assembled.is_ok(), "assembly panicked, expected a structured error");
@@ -233,8 +209,9 @@ fn invoking_local_type_alias_returns_error_instead_of_panicking() {
 
     let masm = "type foo = u32\nbegin\n    exec.foo\nend\n";
 
-    let result =
-        catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program("program", masm)));
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::default().assemble_program("program", masm).into_result()
+    }));
 
     let result = result.expect("assembly panicked, expected a structured error");
     let err = result.expect_err("assembly unexpectedly succeeded");
@@ -270,18 +247,22 @@ pub proc fun(in: foo)
     push.1
 end"
     );
-    let lib = context.parse_module(lib_src).expect("library module parsing must succeed");
-    let library = Assembler::new(context.source_manager())
+    let lib = context
+        .parse_module_source_file(lib_src)
+        .expect("library module parsing must succeed");
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("test", lib, None::<Box<Module>>)
         .expect("library assembly must succeed");
 
-    let mut assembler = Assembler::new(context.source_manager());
+    let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
     assembler
         .link_package(Arc::from(library), Linkage::Dynamic)
         .expect("library linking must succeed");
 
     let program = "use test::types\nbegin\n    exec.types::foo\nend\n";
-    let result = catch_unwind(AssertUnwindSafe(|| assembler.assemble_program("program", program)));
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        assembler.assemble_program("program", program).into_result()
+    }));
 
     let result = result.expect("assembly panicked, expected a structured error");
     let err = result.expect_err("assembly unexpectedly succeeded");

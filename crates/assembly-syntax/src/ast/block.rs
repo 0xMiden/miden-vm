@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use core::fmt;
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
+use miden_diagnostics::{SourceSpan, Span, Spanned};
 
 use super::Op;
 

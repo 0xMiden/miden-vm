@@ -3,11 +3,11 @@ mod symbol_table;
 
 use alloc::sync::Arc;
 
-use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
+use miden_diagnostics::{SourceSpan, Span, Spanned};
 
 use self::symbol_table::LocalSymbolTable;
 pub use self::{
-    error::SymbolResolutionError,
+    error::{SymbolResolutionError, SymbolResolutionRelated},
     symbol_table::{LocalSymbol, SymbolTable},
 };
 use super::{GlobalItemIndex, ModuleIndex};
@@ -65,26 +65,17 @@ impl Spanned for SymbolResolution {
 ///
 /// This is used as a low-level symbol resolution primitive in the linker as well.
 pub struct LocalSymbolResolver {
-    source_manager: Arc<dyn SourceManager>,
     symbols: LocalSymbolTable,
 }
 
 impl LocalSymbolResolver {
-    /// Create a new resolver using the provided [SymbolTable] and [SourceManager].
-    pub fn new<S>(
-        symbols: S,
-        source_manager: Arc<dyn SourceManager>,
-    ) -> Result<Self, SymbolResolutionError>
+    /// Create a new resolver using the provided [SymbolTable].
+    pub fn new<S>(symbols: S) -> Result<Self, SymbolResolutionError>
     where
         S: SymbolTable,
     {
-        let symbols = LocalSymbolTable::new(symbols, source_manager.clone())?;
-        Ok(Self { source_manager, symbols })
-    }
-
-    #[inline]
-    pub fn source_manager(&self) -> Arc<dyn SourceManager> {
-        self.source_manager.clone()
+        let symbols = LocalSymbolTable::new(symbols)?;
+        Ok(Self { symbols })
     }
 
     /// Try to resolve `name` to an item, either local or external
@@ -126,11 +117,7 @@ impl LocalSymbolResolver {
 
                 // This is an invalid subpath reference
                 log::error!(target: "local-symbol-resolver", "cannot resolve '{subpath}' relative to non-module item");
-                Err(SymbolResolutionError::invalid_sub_path(
-                    path.span(),
-                    item.span(),
-                    &*self.source_manager,
-                ))
+                Err(SymbolResolutionError::invalid_sub_path(path.span(), item.span()))
             },
             SymbolResolution::MastRoot(digest) => {
                 log::debug!(target: "local-symbol-resolver", "resolved '{ns}' to procedure root '{digest}'");
@@ -140,11 +127,7 @@ impl LocalSymbolResolver {
 
                 // This is an invalid subpath reference
                 log::error!(target: "local-symbol-resolver", "cannot resolve '{subpath}' relative to procedure");
-                Err(SymbolResolutionError::invalid_sub_path(
-                    path.span(),
-                    digest.span(),
-                    &*self.source_manager,
-                ))
+                Err(SymbolResolutionError::invalid_sub_path(path.span(), digest.span()))
             },
             SymbolResolution::Module { id, path, .. } => {
                 if subpath.is_empty() {

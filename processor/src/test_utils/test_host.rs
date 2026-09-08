@@ -1,9 +1,8 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use miden_core::Felt;
-use miden_debug_types::{
-    DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
-};
+use miden_debug_types::Location;
+use miden_diagnostics::{SharedSourceProvider, SourceSpan};
 
 use crate::{
     BaseHost, LoadedMastForest, MastForestStore, MemMastForestStore, ProcessorState, SyncHost,
@@ -97,7 +96,7 @@ impl ProcessorStateSnapshot {
 /// A unified testing host that combines event handling, debug handling, and external node
 /// resolution.
 #[derive(Debug, Clone)]
-pub struct TestHost<S: SourceManager = DefaultSourceManager> {
+pub struct TestHost {
     /// List of event IDs that have been received
     pub event_handler: Vec<u64>,
 
@@ -112,9 +111,6 @@ pub struct TestHost<S: SourceManager = DefaultSourceManager> {
 
     /// MAST forest store for external node resolution
     store: MemMastForestStore,
-
-    /// Source manager for debugging information
-    pub source_manager: Arc<S>,
 }
 
 impl TestHost {
@@ -126,7 +122,6 @@ impl TestHost {
             snapshots: BTreeMap::new(),
             trace_snapshots: BTreeMap::new(),
             store: MemMastForestStore::default(),
-            source_manager: Arc::new(DefaultSourceManager::default()),
         }
     }
 
@@ -140,7 +135,6 @@ impl TestHost {
             snapshots: BTreeMap::new(),
             trace_snapshots: BTreeMap::new(),
             store,
-            source_manager: Arc::new(DefaultSourceManager::default()),
         }
     }
 
@@ -161,24 +155,13 @@ impl Default for TestHost {
     }
 }
 
-impl<S> BaseHost for TestHost<S>
-where
-    S: SourceManagerSync,
-{
-    fn get_label_and_source_file(
-        &self,
-        location: &Location,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        let maybe_file = self.source_manager.get_by_uri(location.uri());
-        let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
-        (span, maybe_file)
+impl BaseHost for TestHost {
+    fn resolve_location(&self, _location: &Location) -> (SourceSpan, Option<SharedSourceProvider>) {
+        (SourceSpan::UNKNOWN, None)
     }
 }
 
-impl<S> SyncHost for TestHost<S>
-where
-    S: SourceManagerSync,
-{
+impl SyncHost for TestHost {
     fn get_mast_forest(&self, node_digest: &Word) -> Option<LoadedMastForest> {
         self.store.get(node_digest)
     }
