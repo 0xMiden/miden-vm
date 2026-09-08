@@ -34,10 +34,10 @@ const LEAF_VALUE_MISMATCH = "hash of leaf pre-image does not match leaf value fr
 #!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI queries computations.
 pub proc compute_deep_composition_polynomial_queries(
     scratch: word,
-    query_ptr: types::Address,
-    query_end_ptr: types::Address,
+    query_ptr: ptr<word>,
+    query_end_ptr: ptr<word>,
     fixed_terms: types::EvaluationPair,
-    queries_start: types::Address,
+    queries_start: ptr<word>,
 )
     # Iterate over all FRI query indices and compute the corresponding DEEP query.
     # The verifier checks earlier that there is at least one query.
@@ -84,8 +84,8 @@ end
 #! - Y is a "garbage" word.
 proc load_query_row(
     scratch: word,
-    query_ptr: types::Address,
-) -> (word, types::EvaluationPair, u32, types::Address)
+    query_ptr: ptr<word>,
+) -> (word, types::EvaluationPair, u32, ptr<word>)
     # Process the main segment of the execution trace portion of the query
     exec.process_main_segment_execution_trace
     #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
@@ -108,8 +108,8 @@ end
 #! Output: [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 proc process_main_segment_execution_trace(
     scratch: word,
-    query_ptr: types::Address,
-) -> (word, types::HornerState, u8, u32, types::Address)
+    query_ptr: ptr<word>,
+) -> (word, types::HornerState, u8, u32, ptr<word>)
     # Load the query index
     dup.4 mem_loadw_le
     #=> [index, depth, y, y, query_ptr] where y are "garbage" values here and throughout
@@ -177,8 +177,8 @@ proc process_aux_segment_execution_trace(
     evaluation: types::HornerState,
     depth: u8,
     index: u32,
-    query_ptr: types::Address,
-) -> (word, types::HornerState, u8, u32, types::Address)
+    query_ptr: ptr<word>,
+) -> (word, types::HornerState, u8, u32, ptr<word>)
     # Load aux trace commitment and get leaf
     exec.constants::aux_trace_com_ptr mem_loadw_le
 
@@ -235,8 +235,8 @@ proc process_constraints_composition_poly_trace(
     evaluation: types::HornerState,
     depth: u8,
     index: u32,
-    query_ptr: types::Address,
-) -> (word, types::EvaluationPair, u32, types::Address)
+    query_ptr: ptr<word>,
+) -> (word, types::EvaluationPair, u32, ptr<word>)
     # Load the commitment to the constraint trace
     exec.constants::composition_poly_com_ptr mem_loadw_le
     #=> [R, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]

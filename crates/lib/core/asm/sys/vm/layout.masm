@@ -115,7 +115,7 @@ end
 ### Relation-facing pointer accessors used by the generated constraint evaluator.
 ### Keeping the anchors here gives the shared renderer one contract for VM and PVM while
 ### keeping relation-sized regions out of the generic layer.
-pub proc aux_rand_elem_ptr() -> types::Address
+pub proc aux_rand_elem_ptr() -> ptr<types::QuadFelt>
     push.AUX_RAND_ELEM_PTR
 end
 
@@ -131,7 +131,7 @@ pub proc ace_circuit_stream_ptr() -> types::Address
     push.ACE_CIRCUIT_STREAM_PTR
 end
 
-pub proc ood_evaluations_ptr() -> types::Address
+pub proc ood_evaluations_ptr() -> ptr<types::QuadFelt>
     push.OOD_EVALUATIONS_PTR
 end
 
@@ -151,7 +151,7 @@ pub proc boundary_inputs_ptr() -> types::Address
     push.BOUNDARY_INPUTS_PTR
 end
 
-pub proc claim_commitment_ptr() -> types::Address
+pub proc claim_commitment_ptr() -> ptr<types::Digest>
     push.CLAIM_COMMITMENT_PTR
 end
 

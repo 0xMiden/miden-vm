@@ -5,9 +5,6 @@ use miden::core::stark::random_coin
 use miden::core::sys::vm::layout
 use miden::core::sys::vm::public_inputs
 
-#! AIR log heights in proof order.
-type ProofOrderLogHeights = struct { first: u8, second: u8, third: u8 }
-
 # Number of valid Lehmer proof-order tags for the Miden VM's three AIRs: 3! = 6.
 # Valid tags are 0..5; the remaining two leaves in the depth-3 registry are padding.
 const ORDER_TAG_COUNT = 6
@@ -46,7 +43,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [log_0, log_1, log_2, ...]
-proc push_proof_order_log_heights() -> ProofOrderLogHeights
+proc push_proof_order_log_heights() -> (u8, u8, u8)
     push.ORDER_TAG_COUNT exec.constants::assert_valid_order_tag
     exec.constants::get_order_tag
     dup eq.0

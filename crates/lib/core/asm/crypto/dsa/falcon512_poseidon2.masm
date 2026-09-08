@@ -18,6 +18,9 @@ const FALCON_DIV_EVENT = event("miden::core::crypto::dsa::falcon512_poseidon2::f
 
 #! Falcon coefficient reduced modulo 12289.
 pub type Coefficient = u16
+#! In memory each reduced coefficient occupies a full felt, rather than a packed u16.
+#! Use this for coefficient buffers; scalar stack arguments use Coefficient.
+pub type StoredCoefficient = struct @align(4) { value: Coefficient }
 #! A 64-bit integer with its high limb on top of the stack.
 pub type WideInteger = struct { hi: u32, lo: u32 }
 #! Falcon nonce, with the second word on top of the stack.
@@ -580,7 +583,7 @@ end
 #! Output: [norm_sq(s2), ...]
 #!
 #! Cycles: 11150
-pub proc compute_s2_norm_sq(s2_ptr: ptr<Coefficient>) -> SquaredNorm
+pub proc compute_s2_norm_sq(s2_ptr: ptr<StoredCoefficient>) -> SquaredNorm
     repeat.128
         padw
         dup.4

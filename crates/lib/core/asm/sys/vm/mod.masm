@@ -263,7 +263,7 @@ end
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
 #!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
 #!          log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
-proc build_security_descriptor(parameters: types::ProofParameters) -> types::SecurityDescriptor
+proc build_security_descriptor(parameters: types::StackProofParameters) -> types::StackSecurityDescriptor
     exec.constants::get_trace_length_log
     push.LOOKUP_FRACTIONS_PER_ROW
     exec.layout::num_kernel_procedures_ptr mem_load
@@ -321,7 +321,7 @@ end
 #! - D is the deferred root bound by the verified statement.
 #!
 #! Invocation: exec
-pub proc verify_proof(claim_commitment: types::Digest) -> (types::SecurityDescriptor, types::Digest)
+pub proc verify_proof(claim_commitment: types::Digest) -> (types::StackSecurityDescriptor, types::Digest)
     # --- Authenticate execution claim -----------------------------------------------------------
 
     # Preserve the commitment until public inputs are absorbed after transcript initialization.

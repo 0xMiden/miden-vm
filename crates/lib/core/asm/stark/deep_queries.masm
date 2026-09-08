@@ -16,8 +16,8 @@ proc compute_denominators(
     scratch: word,
     preserved: word,
     index: u32,
-    query_ptr: types::Address,
-) -> (types::EvaluationPair, word, felt, u32, types::Address)
+    query_ptr: ptr<word>,
+) -> (types::EvaluationPair, word, felt, u32, ptr<word>)
     # Compute poe and x.
     exec.constants::get_lde_domain_info_word
     #=> [lde_size, depth, domain_gen, 0, Y, index, query_ptr, ...]
@@ -62,8 +62,8 @@ proc divide_and_add(
     query_evaluations: types::EvaluationPair,
     cursor: types::DeepQueryCursor,
     fixed_evaluations: types::EvaluationPair,
-    query_ptr: types::Address,
-) -> (types::QuadFelt, types::DeepQueryCursor, types::EvaluationPair, types::Address)
+    query_ptr: ptr<word>,
+) -> (types::QuadFelt, types::DeepQueryCursor, types::EvaluationPair, ptr<word>)
     swapw
     #=> [X, Z, Y, W, query_ptr, ...]
     dupw.3
@@ -122,10 +122,10 @@ end
 #!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI queries computations.
 pub proc prepare_stack_deep_queries_computation() -> (
     word,
-    types::Address,
-    types::Address,
+    ptr<word>,
+    ptr<word>,
     types::EvaluationPair,
-    types::Address,
+    ptr<word>,
 )
     exec.constants::get_fri_queries_address
     # => [query_ptr, ...]
@@ -188,11 +188,11 @@ pub proc compute_deep_query(
     scratch: word,
     evaluations: types::EvaluationPair,
     index: u32,
-    query_ptr: types::Address,
-    query_end_ptr: types::Address,
+    query_ptr: ptr<word>,
+    query_end_ptr: ptr<word>,
     fixed_evaluations: types::EvaluationPair,
-    queries_ptr: types::Address,
-) -> (i1, types::FriQuery, types::Address, types::Address, types::EvaluationPair, types::Address)
+    queries_ptr: ptr<word>,
+) -> (i1, types::FriQuery, ptr<word>, ptr<word>, types::EvaluationPair, ptr<word>)
     # 1) Compute poe := domain_gen^index, x := offset * poe, and denominators (x - z)
     # and (x - gz).
     exec.compute_denominators

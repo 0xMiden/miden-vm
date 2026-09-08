@@ -671,7 +671,7 @@ end
 #!
 #! Input: [aux_rand_ptr, ...]
 #! Output: [...]
-pub proc generate_aux_randomness(aux_rand_ptr: types::Address)
+pub proc generate_aux_randomness(aux_rand_ptr: ptr<types::QuadFelt>)
 
     exec.sample_ext
     exec.sample_ext

@@ -194,7 +194,7 @@ end
 #!
 #! Input:  [addr, ...]
 #! Output: [q0, q1, ...]
-proc load_quad(address: types::Address) -> types::QuadFelt
+proc load_quad(address: ptr<types::QuadFelt>) -> types::QuadFelt
     dup add.1 mem_load
     swap mem_load
 end
