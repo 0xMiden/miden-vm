@@ -43,7 +43,7 @@ impl Eidos {
         compression::compress_felt_block(cv, block)
     }
 
-    /// Compress one complete block in each native packed lane.
+    /// Compress one complete block in each packed lane.
     ///
     /// Each lane is independent. Like [`Self::compress`], this adds no message framing.
     #[inline]
@@ -110,7 +110,7 @@ impl Eidos {
         encoding::output_cv_to_word(framing::init_cv(tag.as_u32(), params))
     }
 
-    /// Construct the same one-parameter initial chaining word in every native packed lane.
+    /// Construct the same one-parameter initial chaining word in every packed lane.
     ///
     /// The interpretation of `param0` is defined by the registered domain.
     #[inline]
@@ -205,7 +205,7 @@ impl Eidos {
         encoding::output_cv_to_word(MERKLE_NODE_INIT_CV)
     }
 
-    /// Compress two packed digest words as reserved Merkle inner nodes in every native packed lane.
+    /// Compress two packed digest words as reserved Merkle inner nodes in every packed lane.
     ///
     /// This is the packed equivalent of [`Self::merge`].
     #[inline]

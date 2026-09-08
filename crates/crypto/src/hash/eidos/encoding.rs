@@ -184,8 +184,16 @@ pub(super) fn encode_packed_felt_block<const LANES: usize>(
     })
 }
 
+/// Generic lane layout for packed `u64` blocks.
+///
+/// Under `std` this stays live on x86_64 as the runtime fallback next to the AVX-512 adapter, so
+/// the gate must not follow `target_feature` alone.
 #[inline]
-#[cfg(any(test, not(all(target_arch = "x86_64", target_feature = "avx512f"))))]
+#[cfg(any(
+    test,
+    feature = "std",
+    not(all(target_arch = "x86_64", target_feature = "avx512f"))
+))]
 pub(super) fn encode_packed_u64_block<const LANES: usize>(
     block: [[u64; LANES]; BLOCK_LEN],
 ) -> [[u32; LANES]; 16] {

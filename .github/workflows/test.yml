@@ -65,13 +65,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - backend: SSE2
+            target_features: -avx2,-avx512f,-avx512vl
+            required_cpu_features: sse2
+            forbidden_target_features: avx2 avx512f avx512vl
           - backend: AVX2
-            target_features: +avx2,-avx512f
+            target_features: +avx2,-avx512f,-avx512vl
             required_cpu_features: avx2
-            forbidden_target_features: avx512f
-          - backend: AVX-512
-            target_features: +avx2,+avx512f
-            required_cpu_features: avx2 avx512f
+            forbidden_target_features: avx512f avx512vl
+          - backend: AVX-512F/VL
+            target_features: +avx2,+avx512f,+avx512vl
+            required_cpu_features: avx2 avx512f avx512vl
             forbidden_target_features: ""
     env:
       RUSTFLAGS: -C target-feature=${{ matrix.target_features }}
@@ -110,7 +114,7 @@ jobs:
         uses: taiki-e/install-action@b6b84cf49ebfe0176417bdce007c624f0db37f20 # v2.86.2
         with:
           tool: cargo-nextest
-      - name: Verify selected Rust backend
+      - name: Verify configured Rust target features
         env:
           FORBIDDEN_TARGET_FEATURES: ${{ matrix.forbidden_target_features }}
           REQUIRED_TARGET_FEATURES: ${{ matrix.required_cpu_features }}
@@ -132,9 +136,21 @@ jobs:
               exit 1
             fi
           done
-          echo "Selected Eidos backend: ${{ matrix.backend }}"
+          echo "Configured Eidos target: ${{ matrix.backend }}"
+      - name: Check every miden-crypto target with the configured target features
+        # `cfg(test)` keeps otherwise-gated helpers alive, so the plain library build has to be
+        # checked on its own: once with runtime dispatch (`std`) and once with compile-time backend
+        # selection (`no_std`).
+        env:
+          RUSTFLAGS: -D warnings -C target-feature=${{ matrix.target_features }}
+        run: |
+          cargo check -p miden-crypto --all-targets
+          cargo check -p miden-crypto --lib --no-default-features
       - name: Run Eidos backend equivalence and vector tests
-        run: cargo nextest run --profile ci -p miden-crypto --lib --no-tests=fail 'hash::eidos::'
+        # Disabling the crate's `std` feature makes target features select the exact backend. The
+        # default-feature crypto job above exercises runtime CPU dispatch and checks each x86-64
+        # backend directly on the runner's CPU.
+        run: cargo nextest run --profile ci -p miden-crypto --lib --no-default-features --no-tests=fail 'hash::eidos::'
 
   doc-tests:
     name: doc-tests

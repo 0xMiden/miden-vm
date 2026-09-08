@@ -1,24 +1,15 @@
 //! Row-wise (diagonalized) single-block BLAKE3 compression for x86_64.
 //!
-//! Ported from the `blake3` crate's `rust_sse2::compress_pre` (the pure-Rust SSE2 backend,
-//! MIT/Apache-2.0/CC0), adapted to Eidos's fixed parameter-word tail
-//! (`v[12..16] = IV[4..8]`, no counter/block_len/flags) and to a `[u32; 16]` message block
-//! instead of raw bytes. Keeping one G-function row per 128-bit vector and diagonalizing via
-//! shuffles (instead of one scalar 32-bit lane per `g` call) does the same seven rounds in
-//! roughly a quarter of the vector instructions of the portable loop in `super`.
+//! Adapted from the `blake3` crate's `rust_sse2::compress_pre` (MIT/Apache-2.0/CC0). It applies
+//! Eidos's fixed parameter-word tail (`v[12..16] = IV[4..8]`, without counter, block length, or
+//! flags) to a `[u32; 16]` message block using four diagonalized 128-bit rows.
 //!
 //! SSE2 is part of the x86_64 architectural baseline, so the plain `compress_raw`/
 //! `compress_raw_xof` below run unconditionally on x86_64 with no runtime feature check.
 //!
-//! `compress_pre` keeps up to 13 `__m128i` values alive at once (`row0..row3`, `m0..m3`,
-//! `t0..t3`, `tt`), which exceeds the 16-register legacy SSE/AVX file once ABI and spill
-//! bookkeeping are accounted for, forcing real stack spills on a default (non
-//! `target-cpu=native`) build — measured at ~30-37% slower than with a wider register file
-//! available. AVX-512VL's EVEX encoding reaches XMM16-31 even for plain 128-bit operations, so
-//! the `_avx512vl` variants below are the exact same logic (generated from one macro body, so
-//! there is no copy-paste divergence risk) recompiled with that attribute purely for the wider
-//! register file — no wider vectors, no different instructions selected by us. `avx512f` is
-//! AVX-512VL's prerequisite.
+//! The AVX-512F/VL-targeted variant uses the same algorithm with access to XMM16-31, reducing
+//! register spills without changing the logical width. Both variants are emitted from the same
+//! macro body. `avx512f` is AVX-512VL's prerequisite.
 
 use core::arch::x86_64::*;
 
@@ -155,9 +146,8 @@ unsafe fn blend_epi16(a: __m128i, b: __m128i, imm8: i32) -> __m128i {
 /// BLAKE3 permuted state after all seven rounds, with Eidos's fixed parameter-word tail
 /// (`v[12..16] = IV[4..8]`, matching `super::permuted_state_with_parameter_words`).
 ///
-/// Generated twice (see module docs): a plain variant with no feature requirement beyond SSE2,
-/// and an `avx512f,avx512vl`-attributed variant that is bit-for-bit the same logic, recompiled
-/// for the wider register file. Both bodies come from this one macro, so they cannot diverge.
+/// The macro emits a baseline SSE2 variant and an `avx512f,avx512vl`-targeted variant from the
+/// same body.
 macro_rules! define_compress_pre {
     ($(#[$attr:meta])* $name:ident) => {
         $(#[$attr])*
