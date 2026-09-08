@@ -45,7 +45,7 @@ const MSG_SCHEDULE: [[usize; 16]; ROUNDS] = [
 
 /// Fixed logical width of a packed compression batch.
 ///
-/// This is independent of any particular SIMD backend. Every backend below fills a 16-lane
+/// This is independent of any particular SIMD backend. Each SIMD backend fills a 16-lane
 /// batch using as many physical-width calls as its vector registers need: one call of 16 for
 /// AVX-512, two calls of 8 for AVX2, four calls of 4 for SSE2 or NEON. A stable logical width
 /// keeps `PackedFelt` and friends the same public type regardless of which physical backend
@@ -55,6 +55,7 @@ pub(super) const PACKED_LANES: usize = 16;
 /// Splits a `PACKED_LANES`-wide batch into `PACKED_LANES / W` sub-batches of width `W`, applies
 /// `f` to each, and reassembles the results.
 #[cfg(any(
+    test,
     all(target_arch = "x86_64", feature = "std"),
     all(target_arch = "x86_64", not(target_feature = "avx512f")),
     all(target_arch = "aarch64", target_feature = "neon"),
@@ -80,56 +81,61 @@ fn compress_via_sub_batches<const W: usize>(
     out
 }
 
+/// Runtime CPU feature queries shared by every x86_64 dispatch site under `std`.
+///
+/// The standard library caches runtime feature detection results. Keeping the queries here means
+/// the packed backend, the row-wise variant, and the AVX-512 `u64` lane adapter all key off the
+/// same predicates.
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+pub(crate) mod cpu {
+    /// AVX-512F selects the 16-lane packed backend and the AVX-512 `u64` lane adapter.
+    #[inline]
+    pub(crate) fn has_avx512f() -> bool {
+        std::is_x86_feature_detected!("avx512f")
+    }
+
+    /// AVX-512VL on top of AVX-512F selects the row-wise variant that can use XMM16-31.
+    #[inline]
+    pub(crate) fn has_avx512vl() -> bool {
+        has_avx512f() && std::is_x86_feature_detected!("avx512vl")
+    }
+
+    /// AVX2 selects the 8-lane packed backend when AVX-512F is unavailable.
+    #[inline]
+    pub(crate) fn has_avx2() -> bool {
+        std::is_x86_feature_detected!("avx2")
+    }
+}
+
 /// Backend selection: on x86_64 with the `std` feature, the physical SIMD tier (AVX-512, AVX2,
-/// or SSE2) is detected once at runtime and cached, so an off-the-shelf build picks up whatever
-/// the host CPU actually supports. Without `std` (or off x86_64), selection falls back to
+/// or SSE2) is chosen at runtime through `cpu`, so an off-the-shelf build picks up whatever the
+/// host CPU actually supports. Without `std` (or off x86_64), selection falls back to
 /// `target_feature` cfg, exactly as before: a native build needs `-C target-cpu=native` or an
 /// explicit `+avx2`/`+avx512f` to get past the SSE2/NEON baseline.
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 mod native_backend {
-    use once_cell::sync::Lazy;
-
-    use super::{PACKED_LANES, compress_via_sub_batches, x86_64_avx2, x86_64_avx512, x86_64_sse2};
-
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-    enum Tier {
-        Avx512,
-        Avx2,
-        Sse2,
-    }
-
-    fn detect() -> Tier {
-        if std::is_x86_feature_detected!("avx512f") {
-            Tier::Avx512
-        } else if std::is_x86_feature_detected!("avx2") {
-            Tier::Avx2
-        } else {
-            Tier::Sse2
-        }
-    }
-
-    static TIER: Lazy<Tier> = Lazy::new(detect);
+    use super::{
+        PACKED_LANES, compress_via_sub_batches, cpu, x86_64_avx2, x86_64_avx512, x86_64_sse2,
+    };
 
     #[inline]
     pub(super) fn compress(
         cv: &[[u32; PACKED_LANES]; 8],
         block: &[[u32; PACKED_LANES]; 16],
     ) -> [[u32; PACKED_LANES]; 8] {
-        match *TIER {
-            Tier::Avx512 => {
-                // SAFETY: `TIER` only reports `Avx512` after `is_x86_feature_detected!("avx512f")`
-                // returned true for the running CPU.
-                unsafe { x86_64_avx512::compress_packed_16(*cv, *block) }
-            },
-            Tier::Avx2 => compress_via_sub_batches::<8>(cv, block, |cv, block| {
-                // SAFETY: `TIER` only reports `Avx2` after `is_x86_feature_detected!("avx2")`
-                // returned true for the running CPU.
+        if cpu::has_avx512f() {
+            // SAFETY: `cpu::has_avx512f` confirmed AVX-512F support on the running CPU.
+            unsafe { x86_64_avx512::compress_packed_16(*cv, *block) }
+        } else if cpu::has_avx2() {
+            compress_via_sub_batches::<8>(cv, block, |cv, block| {
+                // SAFETY: `cpu::has_avx2` confirmed AVX2 support on the running CPU.
                 unsafe { x86_64_avx2::compress_packed_8(cv, block) }
-            }),
-            Tier::Sse2 => compress_via_sub_batches::<4>(cv, block, |cv, block| {
+            })
+        } else {
+            compress_via_sub_batches::<4>(cv, block, |cv, block| {
                 // SAFETY: SSE2 is part of the x86_64 architectural baseline.
                 unsafe { x86_64_sse2::compress_packed_4(cv, block) }
-            }),
+            })
         }
     }
 }
@@ -213,28 +219,17 @@ mod native_backend {
     }
 }
 
-/// Runtime dispatch for `row_x86`'s single-block path: `compress_pre` keeps up to 13 live
-/// 128-bit vectors, which spills under the legacy 16-register SSE/AVX file on a default build
-/// (measured ~30-37% slower than with a wider register file available). AVX-512VL's EVEX
-/// encoding reaches XMM16-31 even for plain 128-bit operations, eliminating those spills with
-/// the exact same instructions — so, like `native_backend` above, this is detected once at
-/// runtime and cached under the `std` feature. Without `std` (or off x86_64), selection falls
-/// back to `target_feature` cfg.
+/// Selects the baseline SSE2 or AVX-512F/VL row implementation at runtime under `std` through
+/// `cpu`. Without `std`, target features select the implementation at compile time.
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 mod row_dispatch {
-    use once_cell::sync::Lazy;
-
-    use super::row_x86;
-
-    static HAS_AVX512VL: Lazy<bool> = Lazy::new(|| {
-        std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl")
-    });
+    use super::{cpu, row_x86};
 
     #[inline]
     pub(super) fn compress_raw(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 8] {
-        if *HAS_AVX512VL {
-            // SAFETY: `HAS_AVX512VL` only true after `is_x86_feature_detected!` confirmed both
-            // "avx512f" and "avx512vl" for the running CPU.
+        if cpu::has_avx512vl() {
+            // SAFETY: `cpu::has_avx512vl` confirmed AVX-512F and AVX-512VL support on the running
+            // CPU.
             unsafe { row_x86::compress_raw_avx512vl(cv, block) }
         } else {
             row_x86::compress_raw(cv, block)
@@ -243,7 +238,7 @@ mod row_dispatch {
 
     #[inline]
     pub(super) fn compress_raw_xof(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 16] {
-        if *HAS_AVX512VL {
+        if cpu::has_avx512vl() {
             // SAFETY: see `compress_raw` above.
             unsafe { row_x86::compress_raw_xof_avx512vl(cv, block) }
         } else {
@@ -451,7 +446,7 @@ pub(super) fn compress_packed<const LANES: usize>(
     array::from_fn(|i| xor_packed(v[i], v[i + 8]))
 }
 
-/// Applies the raw BLAKE3 schedule to the build's selected native lane width.
+/// Applies the raw BLAKE3 schedule to one logical packed batch using the selected native backend.
 #[inline]
 pub(super) fn compress_packed_native(
     cv: &[[u32; PACKED_LANES]; 8],
@@ -1005,5 +1000,139 @@ mod neon {
             store(xor(v6, v14)),
             store(xor(v7, v15)),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// xorshift64 stream for backend equivalence inputs.
+    fn next_u32(state: &mut u64) -> u32 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        *state as u32
+    }
+
+    fn random_packed<const W: usize>(state: &mut u64) -> ([[u32; W]; 8], [[u32; W]; 16]) {
+        let cv = array::from_fn(|_| array::from_fn(|_| next_u32(state)));
+        let block = array::from_fn(|_| array::from_fn(|_| next_u32(state)));
+        (cv, block)
+    }
+
+    /// `compress_via_sub_batches` must split, process, and reassemble lanes without mixing them,
+    /// whatever physical width the backend uses.
+    #[test]
+    fn sub_batches_reassemble_lanes_in_order() {
+        let mut state = 0x1234_5678_9abc_def0u64;
+        let (cv, block) = random_packed::<PACKED_LANES>(&mut state);
+        let expected = compress_packed::<PACKED_LANES>(cv, block);
+
+        assert_eq!(compress_via_sub_batches::<4>(&cv, &block, compress_packed::<4>), expected);
+        assert_eq!(compress_via_sub_batches::<8>(&cv, &block, compress_packed::<8>), expected);
+        assert_eq!(compress_via_sub_batches::<16>(&cv, &block, compress_packed::<16>), expected);
+    }
+
+    /// Each x86_64 backend is checked directly rather than through the runtime dispatcher, so one
+    /// AVX-512 host exercises every tier a default `std` build can select.
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
+    mod x86_64_backends {
+        use super::*;
+
+        const PARAMETER_WORDS: [u32; 4] = [IV[4], IV[5], IV[6], IV[7]];
+
+        fn assert_packed_backend_matches_reference<const W: usize>(
+            backend: impl Fn([[u32; W]; 8], [[u32; W]; 16]) -> [[u32; W]; 8],
+        ) {
+            let mut state = 0x9e37_79b9_7f4a_7c15u64;
+            for _ in 0..512 {
+                let (cv, block) = random_packed::<W>(&mut state);
+                let out = backend(cv, block);
+                for lane in 0..W {
+                    let cv_lane: [u32; 8] = array::from_fn(|word| cv[word][lane]);
+                    let block_lane: [u32; 16] = array::from_fn(|word| block[word][lane]);
+                    let expected =
+                        compress_raw_with_parameter_words(cv_lane, block_lane, PARAMETER_WORDS);
+                    let actual: [u32; 8] = array::from_fn(|word| out[word][lane]);
+                    assert_eq!(actual, expected, "lane {lane} diverged");
+                }
+            }
+        }
+
+        fn assert_row_variant_matches_reference(
+            raw: impl Fn(&[u32; 8], &[u32; 16]) -> [u32; 8],
+            xof: impl Fn(&[u32; 8], &[u32; 16]) -> [u32; 16],
+        ) {
+            let mut state = 0x0123_4567_89ab_cdefu64;
+            for _ in 0..2048 {
+                let cv: [u32; 8] = array::from_fn(|_| next_u32(&mut state));
+                let block: [u32; 16] = array::from_fn(|_| next_u32(&mut state));
+                assert_eq!(
+                    raw(&cv, &block),
+                    compress_raw_with_parameter_words(cv, block, PARAMETER_WORDS)
+                );
+                assert_eq!(
+                    xof(&cv, &block),
+                    compress_raw_xof_with_parameter_words(cv, block, PARAMETER_WORDS)
+                );
+            }
+        }
+
+        #[test]
+        fn sse2_packed_backend_matches_reference() {
+            assert_packed_backend_matches_reference::<4>(|cv, block| {
+                // SAFETY: SSE2 is part of the x86_64 architectural baseline.
+                unsafe { x86_64_sse2::compress_packed_4(cv, block) }
+            });
+        }
+
+        #[test]
+        fn avx2_packed_backend_matches_reference() {
+            if !cpu::has_avx2() {
+                std::eprintln!("skipped: the running CPU lacks AVX2");
+                return;
+            }
+            assert_packed_backend_matches_reference::<8>(|cv, block| {
+                // SAFETY: `cpu::has_avx2` confirmed AVX2 support on the running CPU.
+                unsafe { x86_64_avx2::compress_packed_8(cv, block) }
+            });
+        }
+
+        #[test]
+        fn avx512_packed_backend_matches_reference() {
+            if !cpu::has_avx512f() {
+                std::eprintln!("skipped: the running CPU lacks AVX-512F");
+                return;
+            }
+            assert_packed_backend_matches_reference::<16>(|cv, block| {
+                // SAFETY: `cpu::has_avx512f` confirmed AVX-512F support on the running CPU.
+                unsafe { x86_64_avx512::compress_packed_16(cv, block) }
+            });
+        }
+
+        #[test]
+        fn sse2_row_variant_matches_reference() {
+            assert_row_variant_matches_reference(row_x86::compress_raw, row_x86::compress_raw_xof);
+        }
+
+        #[test]
+        fn avx512vl_row_variant_matches_reference() {
+            if !cpu::has_avx512vl() {
+                std::eprintln!("skipped: the running CPU lacks AVX-512VL");
+                return;
+            }
+            assert_row_variant_matches_reference(
+                |cv, block| {
+                    // SAFETY: `cpu::has_avx512vl` confirmed AVX-512F and AVX-512VL support on the
+                    // running CPU.
+                    unsafe { row_x86::compress_raw_avx512vl(cv, block) }
+                },
+                |cv, block| {
+                    // SAFETY: see above.
+                    unsafe { row_x86::compress_raw_xof_avx512vl(cv, block) }
+                },
+            );
+        }
     }
 }
