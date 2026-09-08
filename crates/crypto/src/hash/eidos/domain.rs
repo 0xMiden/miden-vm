@@ -25,8 +25,8 @@ use crate::Felt;
 
 /// One centrally allocated 8-bit Eidos namespace.
 ///
-/// New namespaces are added to [`namespace`] and [`NAMESPACE_REGISTRY`] in `miden-crypto`.
-/// Downstream registries select one of those values rather than constructing their own.
+/// Add namespaces to [`namespace`] and [`NAMESPACE_REGISTRY`] in `miden-crypto`. Downstream
+/// registries select one of those values rather than constructing their own.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct DomainNamespace(u8);
 

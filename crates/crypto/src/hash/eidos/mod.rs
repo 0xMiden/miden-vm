@@ -34,7 +34,7 @@ pub use lmcs::{EidosLmcs, config as lmcs_config};
 /// Number of Felts in one Eidos message block.
 pub const BLOCK_LEN: usize = 8;
 
-/// Number of felts in an Eidos digest.
+/// Number of Felts in an Eidos digest.
 pub const DIGEST_WIDTH: usize = 4;
 
 /// Number of independent Eidos inputs in one logical packed batch.

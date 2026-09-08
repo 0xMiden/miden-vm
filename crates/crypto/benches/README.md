@@ -14,39 +14,41 @@ The `miden-crypto` crate provides several hash functions. Some are "traditional"
 * **Poseidon2** as specified [here](https://eprint.iacr.org/2023/323) and implemented in this crate.
 * **Eidos** as implemented in this crate.
 
-We benchmark the above hash functions using two scenarios. The first is a 2-to-1 $(a,b)\mapsto h(a,b)$ hashing where both $a$, $b$ and $h(a,b)$ are the digests corresponding to each of the hash functions. The second scenario is that of sequential hashing where we take a sequence of length $100$ field elements and hash these to produce a single digest. The digests are $4$ field elements in a prime field with modulus $2^{64} - 2^{32} + 1$ (i.e., 32 bytes) for Poseidon2, Eidos, RPO, and RPX, and an array `[u8; 32]` for SHA3, BLAKE3, and Keccak256.
+The benchmark harness covers two scenarios. The first is 2-to-1 $(a,b)\mapsto h(a,b)$ hashing,
+where $a$, $b$, and $h(a,b)$ are digests for the selected hash function. The second hashes a
+sequence of 100 field elements into one digest. Digests contain four elements in the field with
+modulus $2^{64} - 2^{32} + 1$ for Poseidon2, Eidos, RPO, and RPX, and 32 bytes for SHA3, BLAKE3,
+and Keccak256. The tables report the available measurements for their displayed columns.
 
 ### Scenario 1: 2-to-1 hashing `h(a,b)`
 
 | Function            | BLAKE3 | SHA3   | Keccak256 | Poseidon2 | RPO_256  | RPX_256  |
 | ------------------- | :----: | :----: | :-------: | :-------: | :------: | :------: |
-| Apple M1 Pro        | 76 ns  | 245 ns |           |           | *5.2 µs  | *2.7 µs  |
-| Apple M2 Max        | 71 ns  | 233 ns |           |           | *4.6 µs  | *2.4 µs  |
+| Apple M1 Pro        | 76 ns  | 245 ns |           |           |          |          |
+| Apple M2 Max        | 71 ns  | 233 ns |           |           |          |          |
 | Apple M4 Max        | 48 ns  |        | 149 ns    | 0.47 µs   | 2.5 µs   | 1.3 µs   |
-| Amazon Graviton 3   | 108 ns |        |           |           | *5.3 µs  | *3.1 µs  |
-| Amazon Graviton 4   | 96 ns  |        |           |           | *5.1 µs  | *2.8 µs  |
+| Amazon Graviton 3   | 108 ns |        |           |           |          |          |
+| Amazon Graviton 4   | 96 ns  |        |           |           |          |          |
 | AMD Ryzen 9 9950X   | 49 ns  |        | 375 ns    | 0.65 µs   | 3.1 µs   | 1.6 µs   |
-| AMD EPYC 9R14       | 83 ns  |        |           |           | *4.3 µs  | *2.4 µs  |
-| Intel Core i5-8279U | 68 ns  | 536 ns | 514 ns    | *1.7 µs   | *8.5 µs  | *4.4 µs  |
-| Intel Xeon 8375C    | 67 ns  |        |           |           | *8.2 µs  |          |
+| AMD EPYC 9R14       | 83 ns  |        |           |           |          |          |
+| Intel Core i5-8279U | 68 ns  | 536 ns | 514 ns    |           |          |          |
+| Intel Xeon 8375C    | 67 ns  |        |           |           |          |          |
 
 ### Scenario 2: Sequential hashing of 100 elements `h([a_0,...,a_99])`
 
 | Function            | BLAKE3 | SHA3   | Keccak256 | Poseidon2 | RPO_256   | RPX_256 |
 | ------------------- | :----: | :----: | :-------: | :-------: | :------: | :------: |
-| Apple M1 Pro        | 1.0 µs | 1.5 µs |           |           | *69 µs   | *35 µs   |
-| Apple M2 Max        | 0.9 µs | 1.5 µs |           |           | *60 µs   | *31 µs   |
+| Apple M1 Pro        | 1.0 µs | 1.5 µs |           |           |          |          |
+| Apple M2 Max        | 0.9 µs | 1.5 µs |           |           |          |          |
 | Apple M4 Max        | 0.7 µs |        | 0.7 µs    | 6.1 µs    | 32 µs    | 17 µs    |
-| Amazon Graviton 3   | 1.4 µs |        |           |           | *69 µs   | *41 µs   |
-| Amazon Graviton 4   | 1.2 µs |        |           |           | *67 µs   | *36 µs   |
+| Amazon Graviton 3   | 1.4 µs |        |           |           |          |          |
+| Amazon Graviton 4   | 1.2 µs |        |           |           |          |          |
 | AMD Ryzen 9 9950X   | 0.8 µs |        | 2.2 µs    | 8.7 µs    | 40 µs    | 22 µs    |
-| AMD EPYC 9R14       | 0.9 µs |        |           |           | *56 µs   | *32 µs   |
-| Intel Core i5-8279U | 0.9 µs |        | 3.4 µs    | *27 µs    | *107 µs  | *56 µs   |
-| Intel Xeon 8375C    | 0.8 µs |        |           |           | *110 µs  |          |
+| AMD EPYC 9R14       | 0.9 µs |        |           |           |          |          |
+| Intel Core i5-8279U | 0.9 µs |        | 3.4 µs    |           |          |          |
+| Intel Xeon 8375C    | 0.8 µs |        |           |           |          |          |
 
 Notes:
-- Measurements marked with an `*` are obsolete and need to be re-run.
-- Eidos is included in the benchmark harness but not in these result tables.
 - On Graviton 3 and 4, RPO256 and RPX256 are run with SVE acceleration enabled.
 - On AMD Ryzen 9 9950X, benchmarks are run with AVX512 acceleration enabled.
 - On AMD EPYC 9R14, RPO256 and RPX256 are run with AVX2 acceleration enabled.

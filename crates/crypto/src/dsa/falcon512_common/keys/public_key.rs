@@ -1,4 +1,4 @@
-//! Public key types for the Miden Falcon 512 variants.
+//! Public key types for the Miden Falcon512 variants.
 
 use alloc::{string::ToString, vec::Vec};
 use core::{fmt, marker::PhantomData, ops::Deref};
