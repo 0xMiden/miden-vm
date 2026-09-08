@@ -292,7 +292,7 @@ mod prover_api_lifecycle {
         )
     }
 
-    fn u256_witness(value: u64) -> ExecutionWitness {
+    fn u256_program(value: u64) -> Program {
         let precompile_id = precompile_id("uint256");
         let value_tag = Tag::precompile(
             precompile_id,
@@ -335,7 +335,11 @@ mod prover_api_lifecycle {
             word_literal(equality_tag.as_word().into()),
         );
 
-        execute(&assemble(&source))
+        assemble(&source)
+    }
+
+    fn u256_witness(value: u64) -> ExecutionWitness {
+        execute(&u256_program(value))
     }
 
     fn assert_complete(
@@ -350,48 +354,53 @@ mod prover_api_lifecycle {
             .verify(&claim, proof)
             .expect("complete execution proof should verify");
         assert!(outcome.is_complete());
-        assert!(outcome.precompile_security_parameters().is_none());
+        assert_eq!(
+            outcome.precompile_security_parameters().is_some(),
+            matches!(proof.precompile(), PrecompileStatus::Proven(_)),
+        );
         assert_eq!(minimum_conjectured_security_level(&outcome), 96);
         assert_eq!(outcome.outstanding_precompile_root(), None);
     }
 
     #[test]
     fn configured_prove_sync_matches_buffered_and_overlapped_routes() {
-        let program = assemble("begin push.1 drop end");
         let stack_inputs = StackInputs::default();
         let prover = Prover::new().with_hash_fn(HashFunction::Blake3_256);
         let execution_options = ExecutionOptions::default()
             .with_core_trace_fragment_size(1)
             .expect("one-row trace fragments should be supported");
 
-        let mut buffered_host = DefaultHost::default();
-        let (buffered_outputs, buffered_proof) = prove_sync(
-            &prover,
-            &program,
-            stack_inputs,
-            AdviceInputs::default(),
-            &mut buffered_host,
-            execution_options.with_overlapped_trace_build(false),
-        )
-        .expect("buffered execute-and-prove should succeed");
+        for program in [assemble("begin push.1 drop end"), u256_program(1)] {
+            let mut buffered_host = DefaultHost::default();
+            let (buffered_outputs, buffered_proof) = prove_sync(
+                &prover,
+                &program,
+                stack_inputs,
+                AdviceInputs::default(),
+                &mut buffered_host,
+                execution_options.with_overlapped_trace_build(false),
+            )
+            .expect("buffered execute-and-prove should succeed");
 
-        let mut overlapped_host = DefaultHost::default();
-        let (overlapped_outputs, overlapped_proof) = prove_sync(
-            &prover,
-            &program,
-            stack_inputs,
-            AdviceInputs::default(),
-            &mut overlapped_host,
-            execution_options.with_overlapped_trace_build(true),
-        )
-        .expect("overlapped execute-and-prove should succeed");
+            let mut overlapped_host = DefaultHost::default();
+            let (overlapped_outputs, overlapped_proof) = prove_sync(
+                &prover,
+                &program,
+                stack_inputs,
+                AdviceInputs::default(),
+                &mut overlapped_host,
+                execution_options.with_overlapped_trace_build(true),
+            )
+            .expect("overlapped execute-and-prove should succeed");
 
-        assert_eq!(buffered_outputs, overlapped_outputs);
+            assert_eq!(buffered_outputs, overlapped_outputs);
+            assert_eq!(buffered_proof.vm().precompile_root, overlapped_proof.vm().precompile_root);
 
-        // Parallel proof-of-work grinding may select different valid witnesses, so verify both
-        // proofs instead of requiring byte-identical encodings.
-        assert_complete(&program, stack_inputs, buffered_outputs, &buffered_proof);
-        assert_complete(&program, stack_inputs, overlapped_outputs, &overlapped_proof);
+            // Parallel proof-of-work grinding may select different valid witnesses, so verify both
+            // proofs instead of requiring byte-identical encodings.
+            assert_complete(&program, stack_inputs, buffered_outputs, &buffered_proof);
+            assert_complete(&program, stack_inputs, overlapped_outputs, &overlapped_proof);
+        }
     }
 
     #[test]
@@ -446,14 +455,14 @@ mod prover_api_lifecycle {
             panic!("transported root-two proof should remain deferred");
         };
         let two_root = two_transported.vm().precompile_root;
-        let ordered_roots = vec![one_root, one_root, two_root];
+        let ordered_roots = vec![one_root, two_root, one_root];
 
         let shared_precompile = Prover::new()
             .with_hash_fn(HashFunction::Poseidon2)
             .prove_precompiles(vec![
                 one_precompile.clone(),
-                one_precompile.clone(),
                 two_precompile.clone(),
+                one_precompile.clone(),
             ])
             .expect("portable precompile witnesses should prove in one batch");
         assert_eq!(shared_precompile.roots, ordered_roots);
@@ -470,14 +479,14 @@ mod prover_api_lifecycle {
         assert_eq!(root_two_security_parameters.conjectured_security_level(), 96);
 
         let mut reordered_precompile = shared_precompile.clone();
-        reordered_precompile.roots.swap(1, 2);
+        reordered_precompile.roots.swap(0, 1);
         assert!(matches!(
             verifier.verify_precompile(&reordered_precompile, one_root),
             Err(VerificationError::PrecompileStarkVerification(_))
         ));
 
         let mut missing_duplicate_precompile = shared_precompile.clone();
-        missing_duplicate_precompile.roots.remove(1);
+        missing_duplicate_precompile.roots.remove(2);
         assert!(matches!(
             verifier.verify_precompile(&missing_duplicate_precompile, one_root),
             Err(VerificationError::PrecompileStarkVerification(_))
@@ -805,5 +814,12 @@ mod execution_witness_serialization {
         let outcome =
             Verifier::new().verify(&claim, &proof).expect("deferred VM proof should verify");
         assert_eq!(outcome.outstanding_precompile_root(), Some(expected_deferred_root));
+
+        let precompile_proof = Prover::new()
+            .with_hash_fn(HashFunction::Blake3_256)
+            .prove_precompiles(vec![portable.clone()])
+            .expect("restored portable witness should prove directly");
+        let complete = proof.complete(precompile_proof).expect("matching proof should complete");
+        assert!(Verifier::new().verify(&claim, &complete).unwrap().is_complete());
     }
 }

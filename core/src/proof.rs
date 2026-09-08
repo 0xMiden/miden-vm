@@ -675,12 +675,11 @@ mod tests {
 
     #[test]
     fn versioned_proof_decoder_rejects_unknown_format_before_body() {
-        let error = ExecutionProof::read_from_bytes(&[ExecutionProofCompatibility::FORMAT_V2 + 1])
-            .unwrap_err();
-
-        assert!(
-            matches!(error, DeserializationError::InvalidValue(message) if message.contains("unsupported execution proof format 3"))
-        );
+        for version in [0, 1, ExecutionProofCompatibility::FORMAT_V2 + 1] {
+            let error = ExecutionProof::read_from_bytes(&[version]).unwrap_err();
+            assert!(matches!(error, DeserializationError::InvalidValue(message)
+                if message.contains("unsupported execution proof format")));
+        }
     }
 
     #[test]

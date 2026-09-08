@@ -633,12 +633,29 @@ mod tests {
 
     #[test]
     fn portable_structure_rejects_noncanonical_and_malformed_graphs() {
+        let leaf = || WireEntry::Data {
+            tag: tag(1),
+            chunks: alloc::vec![felts(10)],
+        };
+        let other = || WireEntry::Data {
+            tag: tag(1),
+            chunks: alloc::vec![felts(20)],
+        };
         let malformed_and = Tag::from_word([Tag::AND.id(), Felt::new_unchecked(1), ZERO, ZERO]);
         let cases = [
             Vec::new(),
             alloc::vec![WireEntry::Data { tag: Tag::CHUNKS, chunks: Vec::new() }],
             alloc::vec![WireEntry::PairList { tag: tag(1), pairs: Vec::new() }],
+            alloc::vec![WireEntry::Data {
+                tag: Tag::TRUE,
+                chunks: alloc::vec![felts(10)]
+            }],
+            alloc::vec![WireEntry::Join { tag: Tag::CHUNKS, lhs: 0, rhs: 0 }],
             alloc::vec![WireEntry::Join { tag: malformed_and, lhs: 0, rhs: 0 }],
+            alloc::vec![WireEntry::Join { tag: Tag::AND, lhs: 0, rhs: 1 }],
+            alloc::vec![leaf(), leaf(), WireEntry::Join { tag: Tag::AND, lhs: 1, rhs: 2 }],
+            alloc::vec![leaf(), other()],
+            alloc::vec![leaf(), other(), WireEntry::Join { tag: Tag::AND, lhs: 2, rhs: 1 }],
         ];
         for entries in cases {
             let bytes = encoded_entries(&entries);
@@ -662,17 +679,61 @@ mod tests {
     }
 
     #[test]
-    fn wire_encoder_handles_deep_roots_iteratively() {
+    fn deep_shared_graph_exports_and_decodes_without_expansion() {
         let mut state = DeferredState::default();
+        let mut statement = TRUE_DIGEST;
         for _ in 0..4_096 {
-            state.log_statement(TRUE_DIGEST).unwrap();
+            statement = state.register(Node::and(statement, statement)).unwrap();
         }
+        state.log_statement(statement).unwrap();
         let root = state.root();
         let witness = state.into_witness().unwrap().unwrap();
-        assert_eq!(witness.entries().len(), 4_096);
+        assert_eq!(witness.entries().len(), 4_097);
         assert_eq!(witness.root(), root);
         assert_eq!(PrecompileWitness::from_entries(witness.entries().to_vec()).unwrap(), witness);
         assert_eq!(PrecompileWitness::read_from_bytes(&witness.to_bytes()).unwrap(), witness);
+    }
+
+    #[test]
+    fn standalone_witness_rejects_unsupported_versions_and_trailing_bytes() {
+        let witness = PrecompileWitness::from_entries(alloc::vec![WireEntry::Join {
+            tag: Tag::AND,
+            lhs: 0,
+            rhs: 0
+        }])
+        .unwrap();
+        let bytes = witness.to_bytes();
+        for version in [0, PrecompileWitness::WIRE_VERSION + 1] {
+            let mut unsupported = bytes.clone();
+            unsupported[0] = version;
+            assert!(PrecompileWitness::read_from_bytes(&unsupported).is_err());
+        }
+        let mut trailing = bytes;
+        trailing.push(0);
+        assert!(PrecompileWitness::read_from_bytes(&trailing).is_err());
+    }
+
+    #[test]
+    fn decoder_rejects_overlong_entry_and_payload_lengths() {
+        let entries = [
+            WireEntry::Data {
+                tag: Tag::CHUNKS,
+                chunks: alloc::vec![felts(10)],
+            },
+            WireEntry::PairList { tag: tag(1), pairs: alloc::vec![(0, 0)] },
+        ];
+        for entry in entries {
+            let witness = PrecompileWitness::from_entries(alloc::vec![entry]).unwrap();
+            let bytes = witness.to_bytes();
+            // Version + entry count + variant precede the tag and payload count.
+            for offset in [1, 3 + Tag::min_serialized_size()] {
+                assert_eq!(bytes[offset], 3, "one uses the one-byte vint64 encoding");
+                let mut noncanonical = bytes[..offset].to_vec();
+                noncanonical.extend_from_slice(&[6, 0]);
+                noncanonical.extend_from_slice(&bytes[offset + 1..]);
+                assert!(PrecompileWitness::read_from_bytes(&noncanonical).is_err());
+            }
+        }
     }
 
     #[test]
@@ -694,12 +755,12 @@ mod tests {
 
     #[test]
     fn wire_element_budget_accepts_exact_limit_and_rejects_one_more() {
-        let mut exact = MAX_DEFERRED_ELEMENTS;
-        reserve_wire_elements(&mut exact, MAX_DEFERRED_ELEMENTS).unwrap();
-        assert_eq!(exact, 0);
-
-        let mut oversized = MAX_DEFERRED_ELEMENTS;
-        assert!(reserve_wire_elements(&mut oversized, MAX_DEFERRED_ELEMENTS + 1).is_err());
+        let mut remaining = MAX_DEFERRED_ELEMENTS;
+        reserve_wire_elements(&mut remaining, MAX_DEFERRED_ELEMENTS).unwrap();
+        assert_eq!(remaining, 0);
+        assert!(reserve_wire_elements(&mut remaining, 1).is_err());
+        let mut overflow_budget = MAX_DEFERRED_ELEMENTS;
+        assert!(reserve_wire_payload(&mut overflow_budget, usize::MAX).is_err());
     }
 
     #[test]
@@ -720,7 +781,7 @@ mod tests {
 
     #[test]
     fn decoder_rejects_oversized_and_truncated_lengths_before_payload_allocation() {
-        for count in [MAX_WIRE_ENTRIES, MAX_WIRE_ENTRIES + 1] {
+        for count in [MAX_WIRE_ENTRIES, MAX_WIRE_ENTRIES + 1, usize::MAX] {
             let mut bytes = alloc::vec![PrecompileWitness::WIRE_VERSION];
             bytes.write_usize(count);
             assert!(PrecompileWitness::read_from_bytes(&bytes).is_err());

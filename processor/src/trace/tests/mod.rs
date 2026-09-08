@@ -135,6 +135,9 @@ fn non_empty_execution_witness_splits_with_matching_precompile_root() {
     let precompile_witness = precompile_witness.expect("logged statement must be retained");
     assert_eq!(vm_witness.claim(), claim);
     assert_eq!(precompile_witness.root(), precompile_root);
+    let output = FastProcessor::new(stack_inputs).execute_sync(&program, &mut host).unwrap();
+    assert_eq!(output.precompile_root(), precompile_root);
+    assert_eq!(output.precompile_witness.as_ref(), Some(&precompile_witness));
 
     let trace = build_trace(vm_witness).unwrap();
     assert_eq!(trace.precompile_root(), precompile_root);
@@ -169,6 +172,9 @@ fn empty_execution_witness_splits_and_replays_with_explicit_stack_inputs() {
     assert_eq!(vm_witness.claim(), claim);
     assert_eq!(vm_witness.precompile_root, TRUE_DIGEST);
     assert!(precompile_witness.is_none());
+    let output = FastProcessor::new(stack_inputs).execute_sync(&program, &mut host).unwrap();
+    assert_eq!(output.precompile_root(), TRUE_DIGEST);
+    assert!(output.precompile_witness.is_none());
 
     let trace = build_trace(vm_witness).unwrap();
     assert_eq!(trace.init_stack_state(), stack_inputs);
