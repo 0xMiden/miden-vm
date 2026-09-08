@@ -284,13 +284,14 @@ Assume $s_0$ and $s_1$ are the values at the top of the stack. The `U32AND` oper
 
 ![u32and](../../img/design/stack/u32_operations/U32AND.png)
 
-To facilitate this operation, we will need to make a request to the chiplet bus $b_{chip}$ by dividing its current value by the value representing bitwise operation request. This can be enforced with the following constraint:
+The operation removes one typed `Bitwise` message from the
+[LogUp relation](../lookups/logup.md), with multiplicity $-1$:
 
 $$
-b_{chip}' \cdot \left(\alpha_0 + \alpha_1 \cdot op_{u32and} + \alpha_2 \cdot s_0 + \alpha_3 \cdot s_1 +  \alpha_4 \cdot s_0'  \right) = b_{chip} \text{ | degree} = 2
+[0,s_0,s_1,s'_0].
 $$
 
-In the above, $op_{u32and}$ is the unique [operation label](../chiplets/index.md#operation-labels) of the bitwise `AND` operation.
+The leading $0$ selects AND. The bitwise chiplet adds the matching message with multiplicity $+1$.
 
 **Note**: unlike for many other u32 operations, bitwise AND operation does not assume that the values at the top of the stack are smaller than $2^{32}$. This is because the lookup will fail for any inputs which are not 32-bit integers.
 
@@ -302,13 +303,13 @@ Assume $s_0$ and $s_1$ are the values at the top of the stack. The `U32XOR` oper
 
 ![u32xor](../../img/design/stack/u32_operations/U32XOR.png)
 
-To facilitate this operation, we will need to make a request to the chiplet bus $b_{chip}$ by dividing its current value by the value representing bitwise operation request. This can be enforced with the following constraint:
+The operation removes one typed `Bitwise` message from the LogUp relation, with multiplicity $-1$:
 
 > $$
-> b_{chip}' \cdot \left(\alpha_0 + \alpha_1 \cdot op_{u32xor} + \alpha_2 \cdot s_0 + \alpha_3 \cdot s_1 +  \alpha_4 \cdot s_0'  \right) = b_{chip} \text{ | degree} = 2
+> [1,s_0,s_1,s'_0].
 > $$
 
-In the above, $op_{u32xor}$ is the unique [operation label](../chiplets/index.md#operation-labels) of the bitwise `XOR` operation.
+The leading $1$ selects XOR. The bitwise chiplet adds the matching message with multiplicity $+1$.
 
 **Note**: unlike for many other u32 operations, bitwise XOR operation does not assume that the values at the top of the stack are smaller than $2^{32}$. This is because the lookup will fail for any inputs which are not 32-bit integers.
 
