@@ -15,8 +15,8 @@ use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor};
 use miden_utils_testing::Test;
 
 use super::{
-    f1_scatter_bench::{RowGeometry, expected_frame_memory, proof_order},
     vm_layout_const,
+    vm_scatter_bench::{RowGeometry, expected_frame_memory, proof_order},
 };
 
 // MASM MEMORY LAYOUT
@@ -184,15 +184,32 @@ fn extract_ace_inputs(read: &impl Fn(u32) -> Felt, layout: &InputLayout) -> Vec<
         .collect()
 }
 
-/// The proof order the verifier's staged heights induce.
+/// The proof order the verifier staged.
 ///
-/// The verifier stores no standalone proof-order tag. Each site derives positions from the
-/// transcript-bound per-AIR heights; `load_air_context` also materializes the out-of-domain
-/// scatter table from those heights.
+/// `stage_proof_order_maps` derives `pos_by_id` and `id_by_pos` from the transcript-bound per-AIR
+/// heights. Scatter staging, boundary placement, and fold-coefficient staging read those maps.
+/// This helper checks both maps against the Rust ordering before extracting the ACE inputs.
 fn extract_order(read: &impl Fn(u32) -> Felt) -> ProofOrder {
     let log_heights: Vec<u8> =
         staged_log_heights(read).into_iter().map(|height| height as u8).collect();
-    ProofOrder::from_instance_log_heights(&log_heights)
+    let order = ProofOrder::from_instance_log_heights(&log_heights);
+
+    let positions_ptr = vm_layout_const("PROOF_ORDER_POSITIONS_PTR");
+    let ids_ptr = vm_layout_const("PROOF_ORDER_IDS_PTR");
+    for (position, air) in order.airs().iter().enumerate() {
+        let id = air.instance_index();
+        assert_eq!(
+            read(positions_ptr + id as u32).as_canonical_u64(),
+            position as u64,
+            "staged pos_by_id[{id}] disagrees with the Rust ranking of the staged heights"
+        );
+        assert_eq!(
+            read(ids_ptr + position as u32).as_canonical_u64(),
+            id as u64,
+            "staged id_by_pos[{position}] disagrees with the Rust ranking of the staged heights"
+        );
+    }
+    order
 }
 
 // INPUT CHECKS

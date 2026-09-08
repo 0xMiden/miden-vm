@@ -103,12 +103,12 @@ fn hook_source(log_heights: &LogHeights) -> String {
     format!(
         r#"
         use miden::core::stark::constants
-        use miden::core::sys::pvm
         use miden::core::sys::pvm::aux_trace
+        use miden::core::sys::pvm::ood_frames
 
         begin
             {}
-            exec.pvm::stage_proof_order_positions
+            exec.ood_frames::stage_proof_order_maps
             exec.aux_trace::observe_aux_trace
         end
         "#,
