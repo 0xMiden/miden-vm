@@ -21,12 +21,9 @@
 //! is that the sampling process during signature generation must be ensured to be consistent
 //! across the entire computing stack i.e., hardware, compiler, OS, sampler implementations ...
 //!
-//! This is made even more difficult by the extensive use of floating-point arithmetic by
-//! the sampler. In relation to this point, the current implementation does not use any platform
-//! specific optimizations (e.g., AVX2, NEON, FMA ...) and relies solely on the builtin `f64` type.
-//! Moreover, as per the time of this writing, the implementation does not use any methods or
-//! functions from `std::f64` that have non-deterministic precision mentioned in their
-//! documentation.
+//! The sampler uses only the built-in `f64` type. It avoids platform-specific floating-point
+//! optimizations and standard-library operations whose documented precision may vary between
+//! platforms.
 //!
 //! [1]: <https://github.com/algorand/falcon/blob/main/falcon-det.pdf>
 //! [2]: <https://datatracker.ietf.org/doc/html/rfc6979#section-3.5>

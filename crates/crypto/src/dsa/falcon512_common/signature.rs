@@ -30,7 +30,7 @@ use crate::{
 /// where `c = HashToPoint(r || message)`. The variant-specific commitment to `h` is exposed through
 /// [`PublicKey::to_commitment`](super::keys::PublicKey::to_commitment).
 ///
-/// Main differences from the Falcon reference implementation:
+/// This construction uses:
 ///
 /// 1. Hash-to-point uses the variant's hash function and fixed nonce. The nonce is
 ///    `nonce_version_byte || preversioned_nonce`; only the version byte is serialized.
@@ -48,9 +48,6 @@ use crate::{
 /// 2. 896 bytes encoding the public key.
 ///
 /// The total serialized length is 1524 bytes.
-///
-/// [1]: <https://github.com/algorand/falcon/blob/main/falcon-det.pdf>
-/// [2]: <https://datatracker.ietf.org/doc/html/rfc6979#section-3.5>
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signature<V: FalconVariant> {
     header: SignatureHeader,

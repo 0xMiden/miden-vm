@@ -96,8 +96,7 @@ impl EidosChallenger {
 
     /// Samples `bits` low bits from the next sampled field element.
     ///
-    /// This follows the existing transcript cadence: `bits == 0` still consumes
-    /// one field element and returns zero.
+    /// A zero-bit request consumes one field element and returns zero.
     pub fn sample_bits(&mut self, bits: usize) -> usize {
         assert!(bits < usize::BITS as usize, "bit count must be valid");
         assert!((1u64 << bits) < Felt::ORDER_U64);

@@ -9,9 +9,7 @@ Eidos binds a numeric domain tag and three domain-defined parameters into its in
 value. Domain tags are allocated rather than derived by hashing names. Rust APIs carry the domain
 as a type, and downstream MASM constants can be generated from the same declarations.
 
-This is the canonical registry and framing specification for Eidos. It replaces the Eidos-relevant
-parts of the historical Poseidon2 capacity-tag draft linked in the [history](#history) section;
-Poseidon2 constructions keep their existing framing.
+This document specifies Eidos framing and the domain-registry contract.
 
 ## Construction overview
 
@@ -294,20 +292,7 @@ generated MASM constants.
 | `0x000a` | 1 | `GENERIC_FELT_SEQUENCE` | `FeltSequence` |
 | `0x000b` | 1 | `LMCS_LEAF` | `Custom` |
 
-`SMT_BUCKET_LEAF` and `MMR_PEAKS` retain the allocations from the original RFC. Their consumers
-are integrated and tested with the VM migration rather than in this crate.
-
 Numeric assignments are consensus-visible. Changing a numbered construction's encoding, parameter
 schema, or schedule requires a new version. A delegated construction may evolve the payload grammar
 through its embedded object version, but changing its version envelope or hash schedule requires a
-new tag. Either change requires migration of every dependent digest.
-
-## History
-
-The [Poseidon2 capacity-tag RFC](https://github.com/0xMiden/crypto/pull/1026) introduced the
-numeric-allocation model, assigned `SMT_BUCKET_LEAF` and `MMR_PEAKS`, and reserved the all-zero
-Merkle capacity. That repository is archived, and Poseidon2's capacity layout does not describe
-Eidos framing. This document preserves its allocations and carries the registry forward in the
-active `miden-crypto` home using Eidos's four injected initial-CV lanes. The delegated-versioning
-marker follows the protocol object-versioning discussion in
-[protocol#1155](https://github.com/0xMiden/protocol/issues/1155#issuecomment-5408357338).
+new tag. Either change invalidates every digest that depends on the construction.

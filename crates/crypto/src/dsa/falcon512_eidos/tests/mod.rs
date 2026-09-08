@@ -115,10 +115,10 @@ fn test_signature_gen_reference_impl() {
         let expected_sig_bytes = EXPECTED_SIG[i];
         let hex_expected_sig_bytes = hex::decode(expected_sig_bytes).unwrap();
         // to compare against the test vectors we:
-        // 1. remove the headers when comparing as FALCON512_Eidos uses a different header format,
+        // 1. remove the headers when comparing as Falcon512-Eidos uses a different header format,
         // 2. compare the nonce part separately as the deterministic version we use omits the
-        //    inclusion of the preversioned portion of the nonce by in its serialized format,
-        // 3. we remove the public key from the FALCON512_Eidos signature as this is not part of the
+        //    inclusion of the preversioned portion of the nonce in its serialized format,
+        // 3. we remove the public key from the Falcon512-Eidos signature as this is not part of the
         //    signature in the reference implementation,
         // 4. remove the nonce version byte, in addition to the header, from `sig_bytes`.
         let nonce = signature.nonce();

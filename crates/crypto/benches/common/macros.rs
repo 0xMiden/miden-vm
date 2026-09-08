@@ -942,9 +942,8 @@ macro_rules! benchmark_word_conversions {
 
 /// Generates comprehensive AEAD benchmarks for bytes operations.
 ///
-/// This macro creates benchmarks for encryption and decryption operations
-/// using the new standardized approach with consistent data generation,
-/// throughput measurement, and reduced boilerplate.
+/// This macro creates encryption and decryption benchmarks with consistent data generation and
+/// throughput measurement.
 ///
 /// # Arguments
 /// * `$aead_module` - The AEAD module name
@@ -1025,9 +1024,8 @@ macro_rules! benchmark_aead_bytes {
 
 /// Generates comprehensive AEAD benchmarks for field elements.
 ///
-/// This macro creates benchmarks for encryption and decryption operations
-/// using the new standardized approach with consistent data generation,
-/// throughput measurement, and reduced boilerplate.
+/// This macro creates encryption and decryption benchmarks with consistent data generation and
+/// throughput measurement.
 ///
 /// # Arguments
 /// * `$aead_module` - The AEAD module name

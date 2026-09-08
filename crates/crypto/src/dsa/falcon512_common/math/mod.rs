@@ -215,10 +215,9 @@ pub(crate) fn has_acceptable_gram_schmidt_norm(f: &Polynomial<i16>, g: &Polynomi
     norm_squared.is_finite() && norm_squared <= 1.3689 * (MODULUS as f64)
 }
 
-/// Reduces the vector (F,G) relative to (f,g). This method follows the python implementation [1].
-/// Note that this algorithm can end up in an infinite loop. (It's one of the things the author
-/// would like to fix.) When this happens, control returns an error (hence the return type) and
-/// generates another keypair with fresh randomness.
+/// Reduces the vector (F,G) relative to (f,g). This method follows the Python implementation [1].
+/// The reduction can fail to converge; in that case it returns `None` and key generation retries
+/// with fresh randomness.
 ///
 /// Algorithm 7 in the spec [2, p.35]
 ///
