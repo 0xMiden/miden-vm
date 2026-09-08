@@ -1,6 +1,6 @@
 # Miden core fuzzing
 
-This crate tests Miden core deserialization surfaces against bad inputs. It covers `MastForest` and `ExecutionProof` as well as deferred-state proof wire formats.
+This crate tests Miden core deserialization surfaces against bad inputs. It covers `MastForest` and `ExecutionProof` as well as portable precompile-witness formats.
 
 ## Prerequisites
 
@@ -102,7 +102,7 @@ cargo +nightly fuzz run operation_serde_deserialize --fuzz-dir tools/miden-core-
 ```
 
 The **`execution_proof_deserialize`** target tests canonical `ExecutionProof` decoding without a
-registry, including its passive deferred-state proof wire. Successful decodes must encode to the
+registry, including its portable singleton witness. Successful decodes must encode to the
 same bytes and decode to the same proof.
 
 ```bash
@@ -117,16 +117,12 @@ claim allocation-bounded generic Serde.
 cargo +nightly fuzz run execution_proof_serde_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-The **`deferred_state_wire_deserialize`** target tests `DeferredStateWire::read_from_bytes`.
+The **`deferred_state_wire_deserialize`** target exercises checked portable singleton-witness
+decoding, canonical round trips, and `Vec`/`Option` containers. It rejects unsupported versions,
+malformed graph structure, and trailing bytes without evaluating precompile operations.
 
 ```bash
 cargo +nightly fuzz run deferred_state_wire_deserialize --fuzz-dir tools/miden-core-fuzz
-```
-
-The **`deferred_state_wire_serde_deserialize`** target tests `DeferredStateWire` JSON deserialization via `serde_json`.
-
-```bash
-cargo +nightly fuzz run deferred_state_wire_serde_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
 ### Package deserialization targets
@@ -206,7 +202,7 @@ Where we expect malicious inputs to cause problems:
 - MastNodeInfo type discriminants and child data
 - DebugInfo decorators and string-table CSR data
 - Hash verification in validation
-- Deferred-state proof wire parsing and JSON deserialization
+- Portable precompile-witness graph decoding and canonical transport
 
 ## Safety properties
 

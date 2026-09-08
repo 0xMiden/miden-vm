@@ -10,9 +10,9 @@ appropriate for projects that only need verification.
 Use `Verifier::new().verify(&claim, &proof)` to verify a deferred or complete `ExecutionProof`
 against its `ExecutionClaim`. The claim contains the program information and public stack inputs and
 outputs. The VM STARK authenticates the precompile root in either state. For a deferred proof, the
-passive wire is neither hydrated nor validated. The outcome exposes the authenticated root and VM
-security parameters. For a complete proof, the verifier also checks the aggregate precompile STARK
-when present and returns its security parameters.
+verifier leaves the portable witness's precompile assertions unchecked. The outcome exposes the
+authenticated root and VM security parameters. For a complete proof, the verifier also checks the
+aggregate precompile STARK when present and returns its security parameters.
 
 Use `Verifier::new().verify_precompile(&proof, expected_root)` to validate a `PrecompileProof`
 without first attaching it to an execution proof. It checks the expected-root membership and full
