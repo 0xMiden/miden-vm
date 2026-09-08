@@ -26,28 +26,20 @@
 //! that collide in value) stay distinct claims — that ptr-equality
 //! across hash-distinct nodes is exactly what `Is` proves.
 //!
-//! `Truthy` handles are **move-only and tracked**: each is consumed
-//! exactly once (by `record_and`, or as the [`generate_trace`] root).
-//! Reuse is a compile error; a handle issued but never consumed is a
-//! stray claim `generate_trace` panics on — an unasserted keccak handle
-//! would otherwise be a silent `Binding` bus imbalance (its provider's
-//! `out_mult` with no matching eval consume). `UintNode`s are **counted**
-//! instead: each op-use bumps the node's consumer count, which becomes
-//! its row's `out_mult`; a value node with no consumer is likewise a
-//! stray claim (a dead DAG branch proves nothing) and panics.
+//! Assertion and value handles are reusable. Each parent operand occurrence
+//! increments its provider's `out_mult`; reusing a computation does not
+//! repeat its own child uses. External assertion counts route back to their
+//! chiplet providers. An unused assertion must be the final root; Session
+//! also rejects unused value nodes.
 //!
 //! Row order is free (both children flow over the bus, not a local
 //! thread), so the root sits at row 0 — the AIR pins row 0's hash to
 //! `public_root` — with `out_mult = 0` (no parent, it absorbs the
-//! `Binding` σ). Every non-root `True`-binding node is consumed once
-//! (`out_mult = 1`); value nodes carry their consumer count. `ZERO_HASH`
+//! `Binding` σ). Every other node carries its consumer count. `ZERO_HASH`
 //! leaves all share **one** row (`Binding(0, True)` is a single
-//! provider): `out_mult` = the number of non-root zero leaves.
+//! provider): `out_mult` = the total uses of non-root zero leaves.
 
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    vec::Vec,
-};
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_core::{
     Felt,
@@ -91,11 +83,9 @@ use crate::{
 
 /// A handle to a `Binding(hash, True)` claim, issued by the eval requires.
 ///
-/// Move-only (no `Copy`/`Clone`): a handle is consumed exactly once — by
-/// [`TranscriptEvalRequires::record_and`] or as the [`generate_trace`]
-/// root. Reuse is a compile error; a handle issued but never consumed is
-/// caught as a stray claim at `generate_trace`.
-#[derive(Debug)]
+/// Reusable: each parent operand occurrence records one binding use.
+/// An assertion with no parent must be the final root.
+#[derive(Debug, Clone, Copy)]
 pub struct Truthy {
     id: u32,
     hash: P2Digest,
@@ -294,8 +284,10 @@ enum EcKey {
 pub struct TranscriptEvalRequires {
     /// Monotonic handle-id allocator (shared by both handle kinds).
     next_id: u32,
-    /// Issued-but-unconsumed `Truthy` ids. Holds only the root at trace-gen.
-    live: BTreeSet<u32>,
+    /// Parent operand counts for reusable assertion handles.
+    truth_consumers: BTreeMap<u32, ProvideMult>,
+    /// Assertions supplied by another chiplet, without an eval row.
+    external_truths: BTreeMap<u32, P2Digest>,
     /// Per-value-node consumer counts (= the row's `out_mult`), bumped by
     /// each op-use. A node still at 0 at trace-gen is a stray claim.
     node_consumers: BTreeMap<u32, ProvideMult>,
@@ -320,7 +312,9 @@ impl TranscriptEvalRequires {
     /// eval row — the provider lays the bus provide; the eval chip only
     /// consumes it when the handle is folded.
     pub fn issue(&mut self, hash: P2Digest) -> Truthy {
-        self.fresh(hash)
+        let truth = self.fresh(hash);
+        self.external_truths.insert(truth.id, hash);
+        truth
     }
 
     /// Issue a `ZERO_HASH` leaf handle. All non-root zero leaves merge into
@@ -335,7 +329,7 @@ impl TranscriptEvalRequires {
         t
     }
 
-    /// Record an AND node folding `a` and `b` (both consumed) into
+    /// Record an AND node folding `a` and `b` (one use each) into
     /// `Binding(hash, True)`, driving the Poseidon2 absorption of
     /// `a.hash || b.hash || VM Tag::AND` itself. Returns the result
     /// handle.
@@ -386,7 +380,7 @@ impl TranscriptEvalRequires {
         let _ = p2.require_digest(absorption.digest);
         let hash = absorption.digest;
         let id = self.next_id;
-        self.next_id += 1;
+        self.next_id = self.next_id.checked_add(1).expect("eval node id overflow");
         self.nodes.push(EvalNode {
             id,
             absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
@@ -465,7 +459,7 @@ impl TranscriptEvalRequires {
         let _ = p2.require_digest(absorption.digest);
         let hash = absorption.digest;
         let id = self.next_id;
-        self.next_id += 1;
+        self.next_id = self.next_id.checked_add(1).expect("eval node id overflow");
         self.nodes.push(EvalNode {
             id,
             absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
@@ -551,7 +545,7 @@ impl TranscriptEvalRequires {
         let _ = p2.require_digest(absorption.digest);
         let hash = absorption.digest;
         let id = self.next_id;
-        self.next_id += 1;
+        self.next_id = self.next_id.checked_add(1).expect("eval node id overflow");
         self.nodes.push(EvalNode {
             id,
             absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
@@ -597,7 +591,7 @@ impl TranscriptEvalRequires {
         let _ = p2.require_digest(absorption.digest);
         let hash = absorption.digest;
         let id = self.next_id;
-        self.next_id += 1;
+        self.next_id = self.next_id.checked_add(1).expect("eval node id overflow");
         self.nodes.push(EvalNode {
             id,
             absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
@@ -643,7 +637,7 @@ impl TranscriptEvalRequires {
         let _ = p2.require_digest(absorption.digest);
         let hash = absorption.digest;
         let id = self.next_id;
-        self.next_id += 1;
+        self.next_id = self.next_id.checked_add(1).expect("eval node id overflow");
         self.nodes.push(EvalNode {
             id,
             absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
@@ -692,7 +686,7 @@ impl TranscriptEvalRequires {
         let _ = p2.require_digest(absorption.digest);
         let hash = absorption.digest;
         let id = self.next_id;
-        self.next_id += 1;
+        self.next_id = self.next_id.checked_add(1).expect("eval node id overflow");
         self.nodes.push(EvalNode {
             id,
             absorbed: Some(Absorbed { hash, perm_seq_id: absorption.head() }),
@@ -830,7 +824,7 @@ impl TranscriptEvalRequires {
             self.consume_uint(scalar);
         }
         let id = self.next_id;
-        self.next_id += 1;
+        self.next_id = self.next_id.checked_add(1).expect("eval node id overflow");
         self.nodes.push(EvalNode {
             id,
             absorbed: None, // per-row perms / digests live in `absorbs`
@@ -850,17 +844,19 @@ impl TranscriptEvalRequires {
     }
 
     fn consume_ec(&mut self, node: &EcNode) {
-        *self
+        let count = self
             .node_consumers
             .get_mut(&node.id)
-            .expect("EcNode consumed under a foreign requires") += 1;
+            .expect("EcNode consumed under a foreign requires");
+        *count = count.checked_add(1).expect("point binding multiplicity overflow");
     }
 
     fn consume_uint(&mut self, node: &UintNode) {
-        *self
+        let count = self
             .node_consumers
             .get_mut(&node.id)
-            .expect("UintNode consumed under a foreign requires") += 1;
+            .expect("UintNode consumed under a foreign requires");
+        *count = count.checked_add(1).expect("uint binding multiplicity overflow");
     }
 
     /// Panic on any value node no op ever consumed — a dead DAG branch
@@ -889,19 +885,33 @@ impl TranscriptEvalRequires {
     ) -> Truthy {
         store.require_uintval(ptr);
         let (id, hash) = self.push_uint_leaf(ptr, bound_ptr, true, value, p2);
-        self.live.insert(id);
+        self.truth_consumers.insert(id, 0);
         Truthy { id, hash }
+    }
+
+    /// Count external supply by binding hash, including uses of distinct
+    /// handles that share one provider.
+    pub(crate) fn external_truth_uses(&self) -> BTreeMap<P2Digest, ProvideMult> {
+        let mut uses = BTreeMap::<P2Digest, ProvideMult>::new();
+        for (id, hash) in &self.external_truths {
+            let total = uses.entry(*hash).or_default();
+            *total = total
+                .checked_add(self.truth_consumers[id])
+                .expect("external assertion multiplicity overflow");
+        }
+        uses
     }
 
     fn fresh(&mut self, hash: P2Digest) -> Truthy {
         let id = self.next_id;
-        self.next_id += 1;
-        self.live.insert(id);
+        self.next_id = self.next_id.checked_add(1).expect("eval node id overflow");
+        self.truth_consumers.insert(id, 0);
         Truthy { id, hash }
     }
 
     fn consume(&mut self, t: Truthy) {
-        assert!(self.live.remove(&t.id), "Truthy consumed twice");
+        let count = self.truth_consumers.get_mut(&t.id).expect("foreign assertion handle");
+        *count = count.checked_add(1).expect("assertion multiplicity overflow");
     }
 }
 
@@ -917,9 +927,15 @@ pub fn generate_trace(requires: TranscriptEvalRequires, root: Truthy) -> RowMajo
     let root_id = root.id;
     let public_root = root.hash;
     assert!(
-        requires.live.len() == 1 && requires.live.contains(&root_id),
-        "transcript has stray unasserted claims or root is not live: {} live",
-        requires.live.len(),
+        requires.truth_consumers.contains_key(&root_id),
+        "root is not owned by this session",
+    );
+    assert!(
+        requires
+            .truth_consumers
+            .iter()
+            .all(|(id, count)| { if *id == root_id { *count == 0 } else { *count > 0 } }),
+        "transcript has stray unasserted claims or the root has parents",
     );
 
     let root_node = requires.nodes.iter().find(|n| n.id == root_id).expect(
@@ -927,18 +943,17 @@ pub fn generate_trace(requires: TranscriptEvalRequires, root: Truthy) -> RowMajo
     );
 
     // Row 0 is the root (out_mult 0 — no parent, it absorbs the Binding σ).
-    // Every other True-binding node (AND / pinned leaf / Is) is consumed
-    // once; value nodes (transient leaf / value op) carry their op-consumer
-    // count. Non-root zero leaves all merge into one row whose out_mult is
-    // their count — `Binding(0, True)` has a single provider.
+    // Every other assertion and value row carries its consumer count.
+    // Non-root zero leaves merge into one row with their total demand —
+    // `Binding(0, True)` has a single provider.
     let non_root = |n: &&EvalNode| n.id != root_id;
     let zero_mult: ProvideMult = requires
         .nodes
         .iter()
         .filter(non_root)
         .filter(|n| matches!(n.kind, NodeKind::Zero))
-        .map(|_| 1u32)
-        .sum();
+        .try_fold(0u32, |total, node| total.checked_add(requires.truth_consumers[&node.id]))
+        .expect("zero binding multiplicity overflow");
     let rows: Vec<(&EvalNode, u32)> = requires
         .nodes
         .iter()
@@ -949,7 +964,7 @@ pub fn generate_trace(requires: TranscriptEvalRequires, root: Truthy) -> RowMajo
                 NodeKind::And { .. }
                 | NodeKind::UintLeaf { is_pinned: true, .. }
                 | NodeKind::UintOp { op: UintOpId::Is, .. }
-                | NodeKind::EcBinOp { op: EcOpId::Is, .. } => 1,
+                | NodeKind::EcBinOp { op: EcOpId::Is, .. } => requires.truth_consumers[&n.id],
                 NodeKind::UintLeaf { .. }
                 | NodeKind::UintOp { .. }
                 | NodeKind::EcCreate { .. }
