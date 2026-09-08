@@ -40,7 +40,7 @@ pub enum ValueTag {
     True = 0,
     /// A uint value-binding (the uint chiplet).
     Uint = 1,
-    /// A group-element value-binding (future group chiplet).
+    /// A group-element value-binding.
     Group = 2,
 }
 

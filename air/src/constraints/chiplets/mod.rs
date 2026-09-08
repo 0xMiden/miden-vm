@@ -1,6 +1,6 @@
 //! Chiplets trace constraints.
 //!
-//! Currently we implement:
+//! This module enforces:
 //! - chiplet selector constraints (including hasher internal selectors)
 //! - controller sub-chiplet main-trace constraints
 //! - bitwise chiplet main-trace constraints

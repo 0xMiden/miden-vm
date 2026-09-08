@@ -202,9 +202,8 @@ fn build_advice(
             "unexpected number of aux-final groups",
         ));
     }
-    // The registry and MASM wrapper implement the same stable (height, instance-index) order as
-    // lifted-stark. Make that coupling executable so a future proof-order convention change fails
-    // here rather than selecting a circuit for a different ordering.
+    // The native proof, registry, and MASM wrapper use the same stable (height, instance-index)
+    // order. Validate each group's width and the proof-carried permutation against that order.
     let proof_order = proof_order_from_log_heights(&log_heights);
     let airs = ChipletAir::all();
     if stark.all_aux_values.iter().zip(proof_order).any(|(values, air_index)| {
@@ -381,10 +380,8 @@ where
 }
 
 fn commitment_felts<C: Copy + Into<[u64; 4]>>(commitment: C) -> [Felt; 4] {
-    // Eidos LMCS masks every packed high limb, so current commitments are already canonical.
-    // Reduce explicitly anyway: this adapter is generic over the concrete commitment wrapper,
-    // and advice words must never retain Goldilocks' permitted non-canonical representation if a
-    // future backend supplies an arbitrary u64 limb.
+    // Eidos LMCS commitments are canonical, but this generic adapter accepts raw u64 limbs.
+    // Reduce them explicitly because advice words require canonical field representations.
     commitment.into().map(|limb| Felt::new_unchecked(limb % Felt::ORDER))
 }
 

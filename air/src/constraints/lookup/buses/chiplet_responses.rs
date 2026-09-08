@@ -65,8 +65,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     let ace = local.ace();
     let krom = local.kernel_rom();
 
-    // Hasher-internal sub-selectors (valid on controller rows). Used many times below via their
-    // negated siblings, so kept as named expressions.
+    // Hasher-internal sub-selectors are valid on controller rows and are reused below with their
+    // negated siblings.
     let hs0: LB::Expr = ctrl.s0.into();
     let hs1: LB::Expr = ctrl.s1.into();
     let hs2: LB::Expr = ctrl.s2.into();

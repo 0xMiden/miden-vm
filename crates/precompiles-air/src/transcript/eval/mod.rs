@@ -310,9 +310,7 @@ pub const NUM_MAIN_COLS: usize = COL_MSM_IS_HEAD + 1;
 // `[public_root[0], …, public_root[3]]` — just the transcript's target root
 // (`PUBLIC_ROOT_BEGIN = 0`).
 
-/// Index of the first `public_root` felt. Under 0.26 the transcript root is
-/// the *whole* shared public-input vector (`air_inputs`); the old `inv_n`
-/// slot is gone (see `crate::logup`), so it starts at 0.
+/// Index of the first `public_root` felt in the shared `air_inputs` vector.
 pub const PUBLIC_ROOT_BEGIN: usize = 0;
 pub const PUBLIC_ROOT_END: usize = PUBLIC_ROOT_BEGIN + DIGEST_WIDTH;
 /// Total public-values count: the 4-felt `public_root`. Equals
@@ -665,7 +663,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
             .when_transition()
             .assert_zero(continues * (group_next_const - group_local));
 
-        // Phase 2: LogUp argument via the LogUp adapter.
+        // Evaluate this AIR's LogUp relations through the cyclic adapter.
         let mut lb =
             CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
         <Self as LookupAir<_>>::eval(self, &mut lb);
@@ -859,9 +857,8 @@ where
             ),
         );
 
-        // col 4: Binding bus, value path — consume the whole UintVal in
-        // one message on leaf rows (the 4×32+4×32 view is the chain message), alone now that both
-        // halves merged.
+        // col 4: Binding bus, value path — consume the complete 4×32+4×32 `UintVal` chain message
+        // on leaf rows.
         frac_col!(
             builder,
             "binding-uint",

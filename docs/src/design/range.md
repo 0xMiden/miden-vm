@@ -37,7 +37,7 @@ without adding bridge rows or extending a VM trace.
 
 ## Request sources
 
-Range-check requests currently come from:
+Range-check requests come from:
 
 - selected operand-stack [`u32` operations](./stack/u32_ops.md#range-checks), which request four
   checks for decoder helper values; `U32DIV` requests two additional checks for its remainder

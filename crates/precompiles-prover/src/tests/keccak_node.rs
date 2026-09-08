@@ -253,10 +253,8 @@ fn corruption_chunk_continuity() {
     });
 }
 
-// `absorption_id_chunks` is no longer constrained for cross-row
-// continuity (it's bus-pinned per row by `ChunkChain`); a single-cell
-// corruption is caught by the `ChunkChain` bus going out of balance,
-// not by a local AIR constraint, and bus-balance falsification
+// The `ChunkChain` bus pins `absorption_id_chunks` on each row instead of a local cross-row
+// constraint. A single-cell corruption therefore unbalances that bus, and bus-balance falsification
 // belongs in a cross-chiplet test, not here.
 
 #[test]
