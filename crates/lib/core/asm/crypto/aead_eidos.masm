@@ -10,10 +10,11 @@
 #! Security contract:
 #! - callers must never reuse `(key, nonce)`;
 #! - counter blocks under a fixed `K_CTR` must be unique;
-#! - expanded-ciphertext authentication is the canonical AEAD tag direction;
+#! - authentication tags cover the expanded ciphertext;
 #! - this construction is not nonce-misuse-resistant.
 #!
-#! Test vectors are checked against `miden_crypto::aead::aead_eidos::expanded`.
+#! These procedures implement the expanded-ciphertext format exposed by
+#! `miden_crypto::aead::aead_eidos::expanded`.
 
 use miden::core::crypto::hashes::eidos
 
@@ -703,7 +704,7 @@ pub proc auth_empty_ad_expanded
     ext2add
 end
 
-#! Encrypts `num_blocks * 8` plaintext felts using the `crypto_stream` fast path.
+#! Encrypts `num_blocks * 8` plaintext felts using `crypto_stream`.
 #!
 #! Input:  [K_CTR(4), src_ptr, dst_ptr, counter, num_blocks, ...]
 #! Output: [K_CTR(4), src_ptr + 8*num_blocks, dst_ptr + 16*num_blocks,

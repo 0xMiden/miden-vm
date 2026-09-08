@@ -6,7 +6,6 @@
 //! chiplet-request branch and its degree fits the column bound.
 //!
 //! Every interaction is folded into a single [`super::super::LookupColumn::group`] call.
-//! The emitter uses ordinary lookup batches; cached encoding is unnecessary for this column today.
 
 use core::array;
 

@@ -1736,8 +1736,8 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
 #[test]
 fn quotient_recomposition_constants_match_derivation() {
     // The generated evaluator serializes values derived from two independent protocol inputs:
-    // quotient arity from the AIRs, and the canonical LDE shift from the PCS configuration. The
-    // VM currently has arity = blowup = 8, so deriving all three from the blowup would produce the
+    // quotient arity from the AIRs, and the canonical LDE shift from the PCS configuration. The VM
+    // has arity = blowup = 8, so deriving all three from the blowup would produce the
     // same numbers and conceal the conflation that breaks relations where they differ.
     let masm = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
