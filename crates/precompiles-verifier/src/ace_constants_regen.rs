@@ -769,14 +769,14 @@ fn render_protocol(relation_digest: &[Felt; 4]) -> String {
 fn replace_limb_array_const(content: &mut String, name: &str, word: &Word) -> Result<(), String> {
     let body: String =
         word.iter().map(|felt| format!("\n    {},", felt.as_canonical_u64())).collect();
-    replace_const_initializer(content, name, " = [", "];", &format!("{body}\n"))
+    replace_const_initializer(content, name, "[", "];", &format!("{body}\n"))
 }
 
 /// Rewrite the initializer of the `pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize)`
 /// declaration.
 fn replace_shape_const(content: &mut String, shape: CircuitShape) -> Result<(), String> {
     let body = format!("{}, {}, {}", shape.num_inputs, shape.num_eval_gates, shape.stream_len);
-    replace_const_initializer(content, "PVM_CIRCUIT_SHAPE", " = (", ");", &body)
+    replace_const_initializer(content, "PVM_CIRCUIT_SHAPE", "(", ");", &body)
 }
 
 fn replace_const_initializer(
@@ -793,16 +793,32 @@ fn replace_const_initializer(
     if content[start + marker.len()..].contains(&marker) {
         return Err(format!("{name} is declared more than once in {CONSTANTS_PATH}"));
     }
-    let open_start = content[start..]
+    let declaration_start = start + marker.len();
+    let declaration_end = content[declaration_start..]
+        .find("pub const ")
+        .map(|offset| declaration_start + offset)
+        .unwrap_or(content.len());
+    let declaration = &content[declaration_start..declaration_end];
+    // The initializer follows the first `=` after the declaration's type. rustfmt may wrap it
+    // onto its own line, so the search for the opening delimiter starts at that `=` (never inside
+    // the `[u64; 4]` type) and the whole `= <open>...<close>` span is rewritten in one canonical
+    // shape rather than patched in place. Every search is bounded by the next public constant so a
+    // malformed declaration cannot consume its neighbor's initializer.
+    let assign = declaration
+        .find('=')
+        .map(|offset| declaration_start + offset)
+        .ok_or_else(|| format!("{name} initializer not found in {CONSTANTS_PATH}"))?;
+    let after_assign = &content[assign..declaration_end];
+    let open_start = after_assign
         .find(open)
-        .map(|offset| start + offset)
+        .map(|offset| assign + offset)
         .ok_or_else(|| format!("{name} initializer not found in {CONSTANTS_PATH}"))?;
     let body_start = open_start + open.len();
-    let body_end = content[body_start..]
+    let body_end = content[body_start..declaration_end]
         .find(close)
         .map(|offset| body_start + offset)
         .ok_or_else(|| format!("{name} terminator not found in {CONSTANTS_PATH}"))?;
-    content.replace_range(body_start..body_end, body);
+    content.replace_range(assign..body_end + close.len(), &format!("= {open}{body}{close}"));
     Ok(())
 }
 
@@ -895,13 +911,50 @@ mod tests {
         );
     }
 
+    /// rustfmt wraps a long limb array onto the line after the `=`; the initializer must still be
+    /// found (not the `[` of the `[u64; 4]` type) and rewritten in the canonical shape.
     #[test]
-    fn generated_rust_constant_replacement_fails_closed_when_absent() {
-        let mut source = String::from("pub const OTHER: [u64; 4] = [0, 0, 0, 0];\n");
+    fn generated_rust_constants_are_rewritten_when_rustfmt_wraps_the_initializer() {
+        let mut source = String::from(
+            "pub const PVM_RELATION_DIGEST: [u64; 4] =\n    [1, 2, 3, 4];\n\npub const \
+             PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [\n    0,\n    0,\n    0,\n    0,\n];\n",
+        );
+        let word = Word::new([5u64, 6, 7, 8].map(Felt::new_unchecked));
+        replace_limb_array_const(&mut source, "PVM_RELATION_DIGEST", &word).unwrap();
+        assert_eq!(
+            source,
+            "pub const PVM_RELATION_DIGEST: [u64; 4] = [\n    5,\n    6,\n    7,\n    8,\n];\n\n\
+             pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [\n    0,\n    0,\n    0,\n    0,\n];\n"
+        );
+    }
+
+    #[test]
+    fn generated_rust_constant_replacement_fails_closed_when_absent_or_malformed() {
         let word = Word::new([1u64, 2, 3, 4].map(Felt::new_unchecked));
-        let error =
-            replace_limb_array_const(&mut source, "PVM_ACE_CIRCUIT_DIGEST", &word).unwrap_err();
-        assert!(error.contains("PVM_ACE_CIRCUIT_DIGEST not found"));
+        let following = "pub const OTHER: [u64; 4] = [9, 8, 7, 6];\n";
+        for (malformed, expected_error) in [
+            (String::new(), "not found"),
+            ("pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4]\n".into(), "initializer not found"),
+            (
+                "pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = 0;\n".into(),
+                "initializer not found",
+            ),
+            (
+                "pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [0, 0, 0, 0;\n".into(),
+                "terminator not found",
+            ),
+        ] {
+            let mut source = malformed;
+            source.push_str(following);
+            let original = source.clone();
+
+            let error =
+                replace_limb_array_const(&mut source, "PVM_ACE_CIRCUIT_DIGEST", &word).unwrap_err();
+
+            assert!(error.contains(expected_error), "unexpected error: {error}");
+            assert_eq!(source, original);
+            assert!(source.ends_with(following));
+        }
     }
 
     #[test]
