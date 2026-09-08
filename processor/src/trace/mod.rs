@@ -528,15 +528,13 @@ mod wire_tests {
         let mut bytes = deferred_witness_bytes();
         assert!(ExecutionWitness::read_from_bytes(&bytes).is_ok());
 
-        // The first byte of the wire is the format version; any other value must be rejected
-        // before any payload is parsed.
-        bytes[0] = bytes[0].wrapping_add(1);
-        let err = ExecutionWitness::read_from_bytes(&bytes)
-            .expect_err("witness with an unknown wire version should be rejected");
-        assert!(
-            format!("{err:?}").contains("unsupported execution witness wire version"),
-            "unexpected error: {err:?}"
-        );
+        // Rejected versions are checked before decoding replay or witness payloads.
+        for version in [0, 1, super::EXECUTION_WITNESS_WIRE_VERSION + 1] {
+            bytes[0] = version;
+            let err = ExecutionWitness::read_from_bytes(&bytes)
+                .expect_err("unsupported witness format must be rejected");
+            assert!(format!("{err:?}").contains("unsupported execution witness wire version"));
+        }
     }
 
     #[test]

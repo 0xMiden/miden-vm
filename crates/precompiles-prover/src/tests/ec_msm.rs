@@ -10,7 +10,7 @@
 //! in-circuit resolve through the eval `EcMsm` seam — the positionless
 //! `MsmClaimTerm` set match, so the absorb (root) order is the caller's.
 
-use std::{format, string::String};
+use std::{format, string::String, vec::Vec};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
 use miden_core::{Felt, utils::Matrix};
@@ -538,6 +538,53 @@ fn msm_joint_wnaf_checks() {
 fn msm_joint_wnaf_proves() {
     verify_deferred(&msm_joint_wnaf_traces().prove())
         .expect("joint_wnaf strategy round-trip must verify");
+}
+
+/// Unit scalars put every base in one wNAF column, exposing term-list copying at large arity.
+fn msm_joint_wnaf_unit_scalars(count: usize) -> crate::session::SessionTraces {
+    let mut s = Session::new();
+    let mut point = ProjectivePoint::IDENTITY;
+    let mut expected = ProjectivePoint::IDENTITY;
+    let mut terms = Vec::with_capacity(count);
+    for _ in 0..count {
+        point += ProjectivePoint::GENERATOR;
+        expected += point;
+        let (x, y) = k256_coords(&point);
+        terms.push((create(&mut s, x, y), U256::from(1u64)));
+    }
+    s.constrain_scalar_bound(&terms[0].0, SN_PTR);
+    let expr = joint_wnaf(&mut s, &terms, 2);
+    let one = s.uint_leaf(U256::from(1u64), SN_PTR);
+    let claim_terms: Vec<_> = terms.iter().map(|(point, _)| (*point, one)).collect();
+    let value = s.ec_msm(expr, &claim_terms);
+    let (x, y) = k256_coords(&expected);
+    let expected = create(&mut s, x, y);
+    let claim = s.ec_is(&value, &expected);
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_joint_wnaf_large_arity_avoids_quadratic_term_rows_and_proves() {
+    use crate::ec::msm::COL_ACT;
+
+    let small = msm_joint_wnaf_unit_scalars(32);
+    let large = msm_joint_wnaf_unit_scalars(64);
+    let rows = |traces: &crate::session::SessionTraces| {
+        let msm = traces.mains()[9];
+        msm.values
+            .chunks_exact(msm.width)
+            .filter(|row| row[COL_ACT] == Felt::ONE)
+            .count()
+    };
+    let (small_rows, large_rows) = (rows(&small), rows(&large));
+    assert!(
+        large_rows < 3 * small_rows,
+        "doubling arity must not quadruple MSM term rows: {small_rows} -> {large_rows}"
+    );
+    small.check();
+    large.check();
+    verify_deferred(&large.prove()).expect("large-arity joint wNAF claim must verify");
 }
 
 /// Relation-identity dedup: a repeated `intro` / `combine` collapses onto

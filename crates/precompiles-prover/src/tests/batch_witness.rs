@@ -1,9 +1,20 @@
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 
-use miden_core::deferred::{
-    DeferredError, Digest, Node, Precompile, PrecompileWitness, PrecompileWitnessEntry, TRUE_DIGEST,
+use miden_core::{
+    Felt,
+    deferred::{
+        DeferredError, Digest, Node, Precompile, PrecompileWitness, PrecompileWitnessEntry,
+        TRUE_DIGEST, Tag, fold_deferred_root,
+    },
 };
-use miden_precompiles::{CurvePrecompile, UintPrecompile};
+use miden_precompiles::{CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile};
+use miden_precompiles_verifier::verify_deferred;
+
+use crate::{
+    HashFunction, SessionInputError, WitnessLocation,
+    deferred::session::{ImportLimits, import_witnesses, session_from_witnesses},
+    hash::keccak::sponge::trace::keccak_oracle,
+};
 
 /// Raw committed test graphs, with no runtime evaluator. The shared fixture also supports the
 /// pre-existing arithmetic/MSM cases, and permits false claims to reach the importer boundary.
@@ -96,4 +107,342 @@ impl WitnessFixture {
         assert_eq!(witness.root(), root);
         witness
     }
+}
+
+fn uint(fixture: &mut WitnessFixture, domain: UintDomain, value: u32) -> Digest {
+    fixture
+        .register(UintPrecompile::value_node(domain, [value, 0, 0, 0, 0, 0, 0, 0]))
+        .unwrap()
+}
+
+fn uint_eq(fixture: &mut WitnessFixture, a: Digest, b: Digest) -> Digest {
+    fixture
+        .register(Node::join(UintPrecompile::op_tag(UintPrecompile::EQ_OP_ID), a, b).unwrap())
+        .unwrap()
+}
+
+fn keccak(fixture: &mut WitnessFixture, input: &[u8]) -> Digest {
+    let preimage = fixture.register(Node::chunks_from_bytes(input)).unwrap();
+    let expected = fixture
+        .register(Node::chunks(vec![keccak_oracle(input).to_u32s().map(Felt::from_u32)]).unwrap())
+        .unwrap();
+    fixture
+        .register(Keccak256Precompile::assert_node(input.len() as u32, preimage, expected))
+        .unwrap()
+}
+
+fn shared_witnesses() -> (PrecompileWitness, PrecompileWitness) {
+    let mut fixture = WitnessFixture::new();
+    let value = uint(&mut fixture, UintDomain::U256, 17);
+    let eq = uint_eq(&mut fixture, value, value);
+    let hash = keccak(&mut fixture, b"shared prefix");
+    let shared = fixture.register(Node::and(eq, hash)).unwrap();
+    fixture.log_statement(shared).unwrap();
+    let a = fixture.witness();
+    fixture.log_statement(eq).unwrap();
+    (a, fixture.witness())
+}
+
+#[test]
+fn ordered_repeated_batches_prove_and_verify() {
+    let (a, b) = shared_witnesses();
+    for inputs in [vec![a.clone(), b.clone(), a.clone()], vec![b.clone(), a.clone(), a.clone()]] {
+        let roots: Vec<_> = inputs.iter().map(PrecompileWitness::root).collect();
+        let root = roots.iter().copied().reduce(fold_deferred_root).unwrap();
+        let proof = crate::prove_precompiles(inputs, HashFunction::Blake3_256).unwrap();
+        assert_eq!(proof.roots, roots);
+        verify_deferred(&proof.proof, root).unwrap();
+        assert!(verify_deferred(&proof.proof, TRUE_DIGEST).is_err());
+    }
+    assert_ne!(fold_deferred_root(a.root(), b.root()), fold_deferred_root(b.root(), a.root()));
+}
+
+#[test]
+fn shared_subgraphs_keep_local_indices_and_binding_uses() {
+    let (a, b) = shared_witnesses();
+    // The same uint assertion is an internal child in A and a later statement in B. It also
+    // appears as a direct transcript root here, covering roots already used as operands.
+    let mut fixture = WitnessFixture::new();
+    let value = uint(&mut fixture, UintDomain::U256, 17);
+    let eq = uint_eq(&mut fixture, value, value);
+    let root = fixture.open(eq);
+    session_from_witnesses(vec![a.clone(), b, a, root]).unwrap().finish().check();
+}
+
+#[test]
+fn exponentially_shared_graph_is_imported_without_expansion() {
+    let mut fixture = WitnessFixture::new();
+    let mut root = TRUE_DIGEST;
+    for _ in 0..2048 {
+        root = fixture.register(Node::and(root, root)).unwrap();
+    }
+    let witness = fixture.open(root);
+    let traces = session_from_witnesses(vec![witness.clone(), witness]).unwrap().finish();
+    traces.check();
+}
+
+#[test]
+fn malformed_semantics_are_located_before_session_operations() {
+    let mut fixture = WitnessFixture::new();
+    let one = uint(&mut fixture, UintDomain::U256, 1);
+    let two = uint(&mut fixture, UintDomain::U256, 2);
+    let field_one = uint(&mut fixture, UintDomain::K1Base, 1);
+    let false_eq = uint_eq(&mut fixture, one, two);
+    let wrong_domain = fixture
+        .register(
+            Node::join(UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID), one, field_one).unwrap(),
+        )
+        .unwrap();
+    let bad_limb = fixture
+        .register(
+            Node::value(
+                UintPrecompile::value_tag(UintDomain::U256),
+                [Felt::new_unchecked(u32::MAX as u64 + 1); 8],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let unknown = fixture
+        .register(
+            Node::value(
+                Tag::precompile(Felt::from_u32(77), [Felt::ZERO; 3]).unwrap(),
+                [Felt::ZERO; 8],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let wrong_shape = fixture
+        .register(
+            Node::value(UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID), [Felt::ZERO; 8])
+                .unwrap(),
+        )
+        .unwrap();
+    let off_curve = fixture
+        .register(CurvePrecompile::affine_node_from_digests(
+            miden_precompiles::CurveId::Secp256k1,
+            field_one,
+            field_one,
+        ))
+        .unwrap();
+    let modulus = fixture
+        .register(
+            Node::value(
+                UintPrecompile::value_tag(UintDomain::K1Base),
+                miden_precompiles::K1Base::MODULUS.map(Felt::from_u32),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let above_modulus = fixture
+        .register(
+            Node::value(
+                UintPrecompile::value_tag(UintDomain::K1Base),
+                [Felt::from_u32(u32::MAX); 8],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let curve = miden_precompiles::CurveId::Secp256k1;
+    let incomplete_infinity = fixture
+        .register(CurvePrecompile::affine_node_from_digests(curve, TRUE_DIGEST, field_one))
+        .unwrap();
+    let wrong_coordinate_domain = fixture
+        .register(CurvePrecompile::affine_node_from_digests(curve, one, one))
+        .unwrap();
+    let generator = fixture.register(CurvePrecompile::generator_node(curve)).unwrap();
+    let identity = fixture.register(CurvePrecompile::identity_node(curve)).unwrap();
+    let false_point_eq = fixture
+        .register(
+            Node::join(CurvePrecompile::op_tag(CurvePrecompile::EQ_OP_ID), generator, identity)
+                .unwrap(),
+        )
+        .unwrap();
+    let wrong_scalar_domain = fixture
+        .register(
+            Node::try_pair_list(CurvePrecompile::msm_tag(), vec![(generator, field_one)]).unwrap(),
+        )
+        .unwrap();
+    let chunks = fixture.register(Node::chunks_from_bytes(b"abc")).unwrap();
+    let false_hash = fixture.register(Keccak256Precompile::assert_node(3, chunks, chunks)).unwrap();
+    let (valid, _) = shared_witnesses();
+    for root in [
+        false_eq,
+        wrong_domain,
+        bad_limb,
+        unknown,
+        wrong_shape,
+        off_curve,
+        false_hash,
+        modulus,
+        above_modulus,
+        incomplete_infinity,
+        wrong_coordinate_domain,
+        false_point_eq,
+        wrong_scalar_domain,
+    ] {
+        let error = session_from_witnesses(vec![valid.clone(), fixture.open(root)]).err().unwrap();
+        assert!(
+            matches!(
+                error,
+                SessionInputError::Invalid {
+                    location: WitnessLocation::Entry { witness: 1, .. },
+                    ..
+                }
+            ),
+            "{error}"
+        );
+    }
+    let hash = keccak(&mut fixture, b"abc");
+    for root in [one, chunks, hash] {
+        let error = session_from_witnesses(vec![fixture.open(root)]).err().unwrap();
+        assert!(
+            matches!(
+                error,
+                SessionInputError::Invalid {
+                    location: WitnessLocation::Root { witness: 0 },
+                    ..
+                }
+            ),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn batch_limits_count_repeated_inputs_and_shared_hash_demand() {
+    let (a, _) = shared_witnesses();
+    assert!(matches!(session_from_witnesses(Vec::new()), Err(SessionInputError::Empty)));
+    let entries_cost: usize = a
+        .entries()
+        .iter()
+        .map(|entry| match entry {
+            PrecompileWitnessEntry::Data { chunks, .. } => 4 + 8 * chunks.len(),
+            PrecompileWitnessEntry::Join { .. } => 12,
+            PrecompileWitnessEntry::PairList { pairs, .. } => 4 + 8 * pairs.len(),
+        })
+        .sum();
+    let singleton_cost = entries_cost;
+    let exact = ImportLimits {
+        elements: singleton_cost,
+        ..ImportLimits::default()
+    };
+    assert!(import_witnesses(vec![a.clone()], exact).is_ok());
+    for limits in [
+        ImportLimits { roots: 1, ..ImportLimits::default() },
+        exact,
+        ImportLimits {
+            hash_bytes: b"shared prefix".len(),
+            ..ImportLimits::default()
+        },
+    ] {
+        assert!(matches!(
+            import_witnesses(vec![a.clone(), a.clone()], limits),
+            Err(SessionInputError::Limit { .. })
+        ));
+    }
+    let exact_batch = ImportLimits {
+        elements: 2 * singleton_cost + 12,
+        hash_bytes: 2 * b"shared prefix".len(),
+        ..ImportLimits::default()
+    };
+    assert!(import_witnesses(vec![a.clone(), a], exact_batch).is_ok());
+}
+
+#[test]
+fn shared_commitment_cannot_change_payload_shape() {
+    use miden_precompiles::CurveId;
+
+    let mut fixture = WitnessFixture::new();
+    let scalar = uint(&mut fixture, UintDomain::K1Scalar, 1);
+    let generator = fixture.register(CurvePrecompile::generator_node(CurveId::Secp256k1)).unwrap();
+    let msm = fixture
+        .register(
+            Node::try_pair_list(CurvePrecompile::msm_tag(), vec![(generator, scalar)]).unwrap(),
+        )
+        .unwrap();
+    let eq = fixture
+        .register(
+            Node::join(CurvePrecompile::op_tag(CurvePrecompile::EQ_OP_ID), msm, generator).unwrap(),
+        )
+        .unwrap();
+    fixture.log_statement(eq).unwrap();
+    let valid = fixture.witness();
+    let mut entries = valid.entries().to_vec();
+    let changed = entries
+        .iter()
+        .position(|entry| matches!(entry, PrecompileWitnessEntry::PairList { .. }))
+        .unwrap();
+    let PrecompileWitnessEntry::PairList { tag, pairs } = &entries[changed] else {
+        unreachable!()
+    };
+    let (lhs, rhs) = pairs[0];
+    entries[changed] = PrecompileWitnessEntry::Join { tag: *tag, lhs, rhs };
+    let malformed = PrecompileWitness::from_entries(entries).unwrap();
+    assert_eq!(valid.root(), malformed.root(), "payload bytes commit identically");
+    let error = session_from_witnesses(vec![valid, malformed]).err().unwrap();
+    assert!(matches!(error, SessionInputError::Invalid {
+        location: WitnessLocation::Entry { witness: 1, entry },
+        reason: "conflicting definition for a shared commitment",
+    } if entry == changed + 1));
+}
+
+#[test]
+fn fallback_msm_limits_apply_across_distinct_claims() {
+    use miden_precompiles::CurveId;
+
+    let mut fixture = WitnessFixture::new();
+    let generator = fixture.register(CurvePrecompile::generator_node(CurveId::Secp256k1)).unwrap();
+    let zero = uint(&mut fixture, UintDomain::K1Scalar, 0);
+    let mut inputs = Vec::new();
+    for count in [1, 2] {
+        let msm = fixture
+            .register(
+                Node::try_pair_list(CurvePrecompile::msm_tag(), vec![(generator, zero); count])
+                    .unwrap(),
+            )
+            .unwrap();
+        let identity =
+            fixture.register(CurvePrecompile::identity_node(CurveId::Secp256k1)).unwrap();
+        let eq = fixture
+            .register(
+                Node::join(CurvePrecompile::op_tag(CurvePrecompile::EQ_OP_ID), msm, identity)
+                    .unwrap(),
+            )
+            .unwrap();
+        inputs.push(fixture.open(eq));
+    }
+    let per_claim = ImportLimits {
+        fallback_terms_per_node: 1,
+        ..ImportLimits::default()
+    };
+    assert!(matches!(
+        import_witnesses(vec![inputs[1].clone()], per_claim),
+        Err(SessionInputError::Limit { .. })
+    ));
+    let aggregate = ImportLimits {
+        fallback_terms: 2,
+        ..ImportLimits::default()
+    };
+    assert!(matches!(
+        import_witnesses(inputs.clone(), aggregate),
+        Err(SessionInputError::Limit {
+            location: WitnessLocation::Entry { witness: 1, .. },
+            ..
+        })
+    ));
+    // Repeated roots reuse the lowering, although their input scan and binding uses still count.
+    import_witnesses(vec![inputs[1].clone(), inputs[1].clone()], aggregate)
+        .unwrap()
+        .finish()
+        .check();
+    import_witnesses(
+        inputs,
+        ImportLimits {
+            fallback_terms: 3,
+            ..ImportLimits::default()
+        },
+    )
+    .unwrap()
+    .finish()
+    .check();
 }
