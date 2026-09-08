@@ -652,7 +652,7 @@ fn msm_resolve_absorb_order_is_caller_declared() {
 /// [`Session::msm_combine_terms_preserving`] so the repeat survives as its
 /// own row.
 #[test]
-#[should_panic(expected = "not a term of this MSM expression")]
+#[should_panic(expected = "claim terms do not match this MSM expression")]
 fn msm_resolve_duplicate_base_rejected() {
     let g = ProjectivePoint::GENERATOR;
     let (gx, gy) = k256_coords(&g);
