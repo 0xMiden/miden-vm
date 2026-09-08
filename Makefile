@@ -35,6 +35,8 @@ help:
 BACKTRACE                := RUST_BACKTRACE=1
 BUILDDOCS                := MIDEN_BUILD_LIB_DOCS=1
 DOCS_NIGHTLY_TOOLCHAIN   ?= nightly
+PVM_GENERATOR_RUST_OUTPUTS := crates/precompiles-verifier/src/ace_constants.rs \
+	crates/precompiles-air/src/protocol.rs
 
 # -- feature configuration ------------------------------------------------------------------------
 ALL_FEATURES             := --all-features
@@ -329,11 +331,23 @@ exec-sve: ## Builds an executable with SVE acceleration enabled
 regenerate-constraints: ## Regenerate the checked-in constraint artifacts (MASM circuit + evaluator)
 	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write
 	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-evaluator -- --write
+	@$(MAKE) --no-print-directory recursive-verifier-regeneration-handoff
 
 .PHONY: regenerate-pvm-constants
 regenerate-pvm-constants: ## Regenerate PVM ACE constants and MASM artifacts (protocol break)
 	cargo run --release --package miden-precompiles-verifier --features constants-tools --bin pvm-constants-regen -- --write
-	$(MAKE) format
+	rustup run nightly rustfmt --edition 2024 --config-path . $(PVM_GENERATOR_RUST_OUTPUTS)
+	@$(MAKE) --no-print-directory recursive-verifier-regeneration-handoff
+
+.PHONY: recursive-verifier-regeneration-handoff
+recursive-verifier-regeneration-handoff:
+	@printf '%s\n' \
+		'' \
+		'Post-regeneration handoff (not run automatically):' \
+		'  1. Rebuild generated MASM docs: MIDEN_BUILD_LIB_DOCS=1 cargo build -p miden-core-lib' \
+		'  2. Update/check embedded roots: cargo test -p miden-core-lib --lib proof_compatibility_roots_match_the_embedded_core_library' \
+		'  3. Verify the pinned PVM fixture: make check-pvm-proof-fixture' \
+		'Review generated docs; update roots or the fixture only when the corresponding change is intentional.'
 
 .PHONY: check-pvm-constants
 check-pvm-constants: ## Check PVM ACE constants and MASM artifacts for drift
