@@ -44,7 +44,10 @@ Miden VM consists of several interconnected components, each providing a specifi
 * **And8 lookup AIR**, whose fixed byte-pair table supplies byte-AND, Eidos compression rotation, and
   [16-bit range-check](./range.md) relations.
 
-The above components are connected via **buses**, which are implemented using [lookup arguments](./lookups/index.md). We also use [multiset check lookups](./lookups/multiset.md) internally within components to describe **virtual tables**.
+The above components are connected via **buses**, and some components maintain **virtual
+tables**. Both are signed multiset relations enforced by typed, domain-separated
+[LogUp](./lookups/logup.md). The [lookup overview](./lookups/index.md) describes their use, while
+[multiset checks](./lookups/multiset.md) describe the underlying equality.
 
 ## VM execution trace
 

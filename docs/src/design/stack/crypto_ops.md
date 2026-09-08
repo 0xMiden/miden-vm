@@ -6,7 +6,10 @@ sidebar_position: 8
 # Cryptographic operations
 In this section we describe the AIR constraints for Miden VM cryptographic operations.
 
-Cryptographic operations in Miden VM are performed by the [Hash chiplet](../chiplets/hasher.md). Communication between the stack and the hash chiplet is accomplished via the chiplet bus $b_{chip}$. To make requests to and to read results from the chiplet bus we need to divide its current value by the value representing the request.
+Cryptographic operations in Miden VM are supported by the hash, memory, bitwise, and ACE chiplets.
+The Core AIR removes each typed request from the relevant [LogUp](../lookups/logup.md) relation
+with negative multiplicity; the AIR or component responsible for that relation adds the matching
+response with positive multiplicity.
 
 Hasher interactions use typed, domain-separated LogUp messages. For message kind $k$, controller
 address $a$, node index $n$, and payload $p$, write
@@ -15,8 +18,8 @@ $$
 H_k(a,n,p) = P_k + a + \beta n + \sum_{i=0}^{|p|-1}\beta^{i+2}p_i,
 $$
 
-where $P_k$ is the fixed bus prefix for that semantic message kind. The separate prefixes prevent
-equal payloads from satisfying different relations.
+where $P_k$ is the fixed bus prefix for that semantic message kind. The separate prefixes
+domain-separate equal payloads except with the standard random-encoding collision probability.
 
 ## COMPRESS
 
@@ -46,14 +49,8 @@ $$
 The one-row controller overlays its input and output at the same address; the compression AIR
 enforces the 32-row computation behind that controller row.
 
-Using the above values, we can describe the constraint for the chiplet bus column as follows:
-
-$$
-b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
-$$
-
-The constraint enforces that the input state and returned chaining value occur together in the
-hasher controller and are backed by a valid Eidos compression.
+The Core row removes both messages with multiplicity $-1$. Matching positive messages from the
+hasher controller bind the input state and returned chaining value to a valid Eidos compression.
 
 The effect of this operation on the rest of the stack is:
 * **No change** in positions $0$ through $7$ and from position $12$ onward.
@@ -71,12 +68,14 @@ The Merkle path itself is expected to be provided by the prover non-deterministi
 
 ![mpverify](../../img/design/stack/crypto_ops/MPVERIFY.png)
 
-In the above, $r$ (located in the helper register $h_0$) is the row address from the hash chiplet set by the prover non-deterministically.
+In the above, $r$ (located in helper register $h_0$) is the row address from the hash chiplet set by
+the prover non-deterministically. Helper register $h_1$ contains the first Merkle direction bit,
+denoted $b$ below.
 
 For the `MPVERIFY` operation, we define input and output values as follows:
 
 $$
-v_{input} = H_{merkle\_verify}(h_0, s_5, [s_0,\ldots,s_3])
+v_{input} = H_{merkle\_verify}(h_0, s_5, [b,s_0,\ldots,s_3])
 $$
 
 $$
@@ -85,13 +84,10 @@ $$
 
 The input carries the leaf node and its Merkle index; the output carries the resulting root.
 
-Using the above values, we can describe the constraint for the chiplet bus column as follows:
-
-$$
-b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
-$$
-
-The above constraint enforces that the specified input and output controller rows must be present in the hash-controller region, and that they must be exactly $d - 1$ rows apart, where $d$ is the depth of the node. Each Merkle level contributes one controller row; that row overlays its input and output messages.
+The Core row removes both messages with multiplicity $-1$. Matching controller messages enforce
+that the input and output rows are present and exactly $d - 1$ rows apart, where $d$ is the depth
+of the node. Each Merkle level contributes one controller row; that row overlays its input and
+output messages.
 
 The effect of this operation on the rest of the stack is:
 * **No change** starting from position $0$.
@@ -110,12 +106,14 @@ The Merkle path for the node is expected to be provided by the prover non-determ
 
 ![mrupdate](../../img/design/stack/crypto_ops/MRUPDATE.png)
 
-In the above, $r$ (located in the helper register $h_0$) is the row address from the hash chiplet set by the prover non-deterministically.
+In the above, $r$ (located in helper register $h_0$) is the row address from the hash chiplet set by
+the prover non-deterministically. Helper register $h_1$ contains the first Merkle direction bit,
+denoted $b$ below.
 
 For the `MRUPDATE` operation, we define input and output values as follows:
 
 $$
-v_{inputold} = H_{merkle\_old}(h_0, s_5, [s_0,\ldots,s_3])
+v_{inputold} = H_{merkle\_old}(h_0, s_5, [b,s_0,\ldots,s_3])
 $$
 
 $$
@@ -123,7 +121,7 @@ v_{outputold} = H_{return}(h_0 + s_4 - 1, 0, [s_6,\ldots,s_9])
 $$
 
 $$
-v_{inputnew} = H_{merkle\_new}(h_0 + s_4, s_5, [s_{10},\ldots,s_{13}])
+v_{inputnew} = H_{merkle\_new}(h_0 + s_4, s_5, [b,s_{10},\ldots,s_{13}])
 $$
 
 $$
@@ -132,11 +130,11 @@ $$
 
 In the above, the first two expressions correspond to inputs and outputs for verifying the Merkle path between the old node value and the old tree root, while the last two expressions correspond to inputs and outputs for verifying the Merkle path between the new node value and the new tree root. The hash chiplet ensures the same set of sibling nodes are used in both of these computations.
 
-> $$
-> b_{chip}' \cdot v_{inputold} \cdot v_{outputold} \cdot v_{inputnew} \cdot v_{outputnew} = b_{chip} \text{ | degree} = 5
-> $$
-
-The above constraint enforces that the specified input and output controller rows for both the old and the new node/root combinations must be present in the hash-controller region. The old-path output is $d - 1$ rows after the old-path input, the new-path input starts immediately after that at offset $d$, and the new-path output is $2 \cdot d - 1$ rows after the initial old-path input. It also ensures that the computation for the old node/root combination is immediately followed by the computation for the new node/root combination.
+The Core row removes all four messages with multiplicity $-1$. Matching controller messages
+enforce that the input and output rows for both node/root combinations are present. The old-path
+output is $d - 1$ rows after the old-path input, the new-path input starts immediately after that
+at offset $d$, and the new-path output is $2 \cdot d - 1$ rows after the initial old-path input.
+This also ensures that the old computation is immediately followed by the new computation.
 
 The effect of this operation on the rest of the stack is:
 * **No change** for positions starting from $4$.
@@ -303,16 +301,12 @@ $$
 \end{align*}
 $$
 
-`HORNERBASE` makes one word-read request, which also constrains the unused half of the word to zero:
+`HORNERBASE` removes one typed `MemoryReadWord` message with payload
+`[ctx, s13, clk, h0, h1, 0, 0]`. Matching it against the memory-chiplet response also constrains
+the unused half of the word to zero:
 
 $$
-u_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_{13} + \alpha_4 \cdot clk + \alpha_{5} \cdot h_{0} + \alpha_{6} \cdot h_{1}
-$$
-
-Using the above value, we can describe the constraint for the chiplets bus column as follows:
-
-$$
-b_{chip}' \cdot u_{mem} = b_{chip} \text{ | degree} = 2
+M_{read\_word}(ctx,s_{13},clk,[h_0,h_1,0,0]).
 $$
 
 The effect on the rest of the stack is:
@@ -362,16 +356,11 @@ $$
 The effect on the rest of the stack is:
 * **No change.**
 
-`HORNEREXT` makes one word-read request, which also constrains the unused half of the word to zero:
+`HORNEREXT` removes the same typed `MemoryReadWord` message, which also constrains the unused half
+of the word to zero:
 
 $$
-u_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_{13} + \alpha_4 \cdot clk + \alpha_{5} \cdot h_{0} + \alpha_{6} \cdot h_{1}
-$$
-
-Using the above value, we can describe the constraint for the chiplets bus column as follows:
-
-$$
-b_{chip}' \cdot u_{mem} = b_{chip} \text{ | degree} = 2
+M_{read\_word}(ctx,s_{13},clk,[h_0,h_1,0,0]).
 $$
 
 ## EVALCIRCUIT
@@ -387,23 +376,20 @@ The diagram below illustrates this graphically.
 
 ![evalcircuit](../../img/design/stack/crypto_ops/EVALCIRCUIT.png)
 
-Calling the operation has no effect on the stack or on helper registers. Instead, the operation makes a request to the `ACE` chiplet using the chiplets' bus. More precisely, let 
+Calling the operation has no effect on the stack or on helper registers. Instead, it removes one
+typed `AceInit` message with multiplicity $-1$:
 
 $$
-v_{ace} = \alpha_0 + \mathsf{ACE\_LABEL}\cdot\alpha_1 + ctx \cdot\alpha_2 + ptr\cdot\alpha_3 + clk\cdot\alpha_4 + n_{read}\cdot\alpha_5 + n_{eval}\cdot\alpha_6.
+v_{ace} = P_{ace\_init} + clk + \beta ctx + \beta^2 ptr
++ \beta^3 n_{read} + \beta^4 n_{eval}.
 $$
 
 where:
-- $\mathsf{ACE\_LABEL}$ is the unique [operation labels](../chiplets/index.md#operation-labels) for initiating a circuit evaluation request to the ACE chiplet,
 - $ctx$ is the memory context from which the operation was initiated,
 - $clk$ is the clock cycle at which the operation was initiated,
 - $ptr$, $n_{read}$ and $n_{eval}$ are as above.
 
-Then, using the above value, we can describe the constraint for the chiplets' bus column as follows:
-
-$$
-b_{chip}' \cdot v_{ace} = b_{chip} \text{ | degree} = 2
-$$
+The ACE chiplet adds the matching message with multiplicity $+1$.
 
 ## LOG_DEFERRED
 
@@ -483,21 +469,14 @@ $$
 v_{\text{output}} = H_{return}(h_0, 0, \mathsf{ROOT}^{\text{new}}).
 $$
 
-Using the above values, we can describe the constraint for the chiplet bus column as follows:
-
-$$
-b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip}
-$$
-
-The constraint enforces that both messages occur on one hasher-controller row backed by the same
-physical Eidos compression cycle.
-
-
+The Core row removes both messages with multiplicity $-1$. Matching positive controller messages
+enforce that they occur on one hasher-controller row backed by the same physical Eidos
+compression cycle.
 
 ### Deferred-root Initialization
 
-Inside the VM, the deferred root is tracked via the virtual-table bus: each `log_deferred` update
-removes the previous root before inserting the next one.
+Inside the VM, the deferred root is tracked by the typed `LogDeferredRoot` virtual-table relation:
+each `log_deferred` update removes the previous root before inserting the next one.
 
 Let $D(r) = P_{log\_deferred} + \sum_{j=0}^{3}\beta^j r_j$. We denote the messages for
 removing and inserting the root as
@@ -510,22 +489,12 @@ $$
 v_{ins} = D(\mathsf{ROOT\_NEW})
 $$
 
-The bus constraint is applied to the virtual table column as follows.
+The previous-root message has multiplicity $-1$ and the new-root message has multiplicity $+1$.
+The verifier supplies two boundary contributions so the chain has fixed endpoints: it adds the
+initial `TRUE_DIGEST` (the zero word) and removes the final four-felt deferred root committed by
+the VM trace.
 
-$$
-b_{vtable}' \cdot v_{rem} = b_{vtable} \cdot v_{ins}
-$$
-
-To ensure the column accounts for the initial and final deferred roots, the verifier initializes the
-bus with fixed public values: the initial root is `TRUE_DIGEST` (the zero word) and the final
-deferred root is the four-felt public value committed by the VM trace. More specifically, it
-constrains the first value of the bus to be equal to
-
-$$
-b_{vtable,0} = \frac{v_{ins, init}}{v_{rem, last}}
-$$
-
-The messages $v_{ins, init}$ and $v_{rem, last}$ are given by
+The boundary messages are therefore
 
 $$
 v_{ins,init} = D([0,0,0,0]),
