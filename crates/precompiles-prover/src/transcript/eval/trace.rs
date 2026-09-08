@@ -890,6 +890,13 @@ impl TranscriptEvalRequires {
         id
     }
 
+    /// Whether this assertion has an eval row that can bind the public root.
+    pub(crate) fn is_recorded_truth(&self, truth: Truthy) -> bool {
+        self.claims
+            .get(truth.id as usize)
+            .is_some_and(|claim| matches!(claim.kind, ClaimKind::Truthy))
+    }
+
     fn fresh(&mut self, hash: P2Digest) -> Truthy {
         let id = self.new_claim(ClaimKind::Truthy);
         Truthy { id, hash }

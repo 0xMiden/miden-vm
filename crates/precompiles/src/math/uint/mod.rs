@@ -7,6 +7,6 @@ mod spec;
 
 pub use self::{
     domain::{K1_BASE_BOUND_PTR, K1_SCALAR_BOUND_PTR, U256_BOUND_PTR, UintDomain},
-    precompile::{UintNodeRef, UintPrecompile},
+    precompile::{UintBinaryOp, UintNodeRef, UintOp, UintPrecompile},
     spec::{Limbs, ONE_LIMBS, TWO_LIMBS, UintSpec, ZERO_LIMBS},
 };
