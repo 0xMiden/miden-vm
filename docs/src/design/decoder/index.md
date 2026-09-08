@@ -110,7 +110,7 @@ The decoder is one of the more complex parts of the VM. It consists of the follo
 
 * Main [execution trace](#decoder-trace) consisting of $24$ trace columns which contain the state of the decoder at a given cycle of a computation.
 * Connection to the hash chiplet, which is used to offload [hash computations](#program-block-hashing) from the decoder.
-* $3$ [virtual tables](#control-flow-tables) (implemented via multi-set checks), which keep track of code blocks and operations executing on the VM.
+* $3$ [virtual tables](#control-flow-tables), implemented with typed LogUp messages, which keep track of code blocks and operations executing on the VM.
 
 ### Decoder trace
 
@@ -165,15 +165,19 @@ Message reduction and the cross-AIR compression link are described in the
 
 ### Control flow tables
 
-In addition to the hash chiplet, control flow operations rely on $3$ virtual tables: *block stack* table, *block hash* table, and _op group_ table. These tables are virtual in that they don't require separate trace columns. Their state is described solely by running product columns: $p_1$, $p_2$, and $p_3$. The tables are described in the following sections.
+In addition to the hash chiplet, control-flow operations use three virtual tables: the *block
+stack*, *block hash*, and _op group_ tables. Each table is encoded as a domain-separated typed
+[LogUp](../lookups/logup.md) relation: insertions contribute with multiplicity $+1$, and removals
+with multiplicity $-1$. The following sections define their payloads and update rules.
 
 #### Block stack table
 
 When the VM starts executing a new program block, it adds its block ID together with the ID of its parent block (and some additional info) to the *block stack* table. When a program block is fully executed, it is removed from the table. In this way, the table represents a stack of blocks which are currently executing on the VM. By the time program execution completes, block stack table must be empty.
 
-The block stack table is also used to ensure that execution contexts are managed properly across the `CALL` and `SYSCALL` operations.
+The block stack table is also used to ensure that execution contexts are managed properly across
+the `CALL`, `DYNCALL`, and `SYSCALL` operations.
 
-The table can be thought of as consisting of $11$ columns as shown below:
+The table can be thought of as consisting of $10$ columns as shown below:
 
 ![decoder_block_stack_table](../../img/design/decoder/decoder_block_stack_table.png)
 
@@ -181,20 +185,22 @@ where:
 * The first column ($t_0$) contains the ID of the block.
 * The second column ($t_1$) contains the ID of the parent block. If the block has no parent (i.e., it is a root block of the program), parent ID is 0.
 * The third column ($t_2$) contains a binary value which is set to $1$ is the block is a *loop* block, and to $0$ otherwise.
-* The following 8 columns are only set to non-zero values for `CALL` and `SYSCALL` operations. They save all the necessary information to be able to restore the parent context properly upon the corresponding `END` operation
+* The following 7 columns are only set to non-zero values for `CALL`, `SYSCALL`, and `DYNCALL`
+  operations. They save the context, stack depth, overflow-table pointer, and function hash needed
+  to restore the parent context upon the corresponding `END` operation.
     - the `prnt_b0` and `prnt_b1` columns refer to the stack helper columns B0 and B1 (current stack depth and last overflow address, respectively)
 
 In the above diagram, the first 2 rows correspond to 2 different `CALL` operations. The first `CALL` operation is called from the root context, and hence its parent fn hash is the zero hash. Additionally, the second `CALL` operation has a parent fn hash of `[h0, h1, h2, h3]`, indicating that the first `CALL` was to a procedure with that hash.
 
-Running product column $p_1$ is used to keep track of the state of the table. At any step of the computation, the current value of $p_1$ defines which rows are present in the table.
-
-To reduce a row in the block stack table to a single value, we compute the following.
+Each entry is a `BlockStackTable` message with the payload
 
 $$
-row = \alpha_0 + \sum_{i=0}^{10} (\alpha_{i+1} \cdot t_i),
+[block\_id, parent\_id, is\_loop, ctx, b_0, b_1, fn\_hash_0,\ldots,fn\_hash_3].
 $$
 
-where $\alpha_0, ..., \alpha_{11}$ are the random values provided by the verifier.
+The final seven slots are zero for blocks that do not save an execution context. Starting a block
+adds the corresponding message; completing it removes the same message. LogUp closure therefore
+requires the saved values restored by `END` to match the values recorded on entry.
 
 #### Block hash table
 
@@ -210,19 +216,16 @@ where:
 * The next column ($t_5$) contains a binary value which is set to $1$ if the block is the first child of a *join* block, and to $0$ otherwise.
 * The last column ($t_6$) contains a binary value which is set to $1$ if the block is a body of a loop, and to $0$ otherwise.
 
-Running product column $p_2$ is used to keep track of the state of the table. At any step of the computation, the current value of $p_2$ defines which rows are present in the table.
-
-To reduce a row in the block hash table to a single value, we compute the following.
+Each entry is a `BlockHashTable` message with the payload
 
 $$
-row = \alpha_0 + \sum_{i=0}^6 (\alpha_{i+1} \cdot t_i)
+[child\_hash_0,\ldots,child\_hash_3,parent,is\_first\_child,is\_loop\_body].
 $$
-
-Where $\alpha_0, ..., \alpha_7$ are the random values provided by the verifier.
 
 Unlike other virtual tables, block hash table does not start out in an empty state. Specifically, it is initialized with a single row containing the hash of the program's root block. This needs to be done because the root block does not have a parent and, thus, otherwise it would never be added to the block hash table.
 
-Initialization of the block hash table is done by setting the initial value of $p_2$ to the value of the row containing the hash of a program's root block.
+The verifier supplies that root entry as a positive LogUp boundary contribution. The root `END`
+row removes the matching message, binding the decoded execution to the public program hash.
 
 #### Op group table
 *Op group* table is used in decoding of *basic* blocks, which are leaves in a program's MAST. As described [here](../programs.md#basic-block), a *basic* block can contain one or more operation batches, each batch containing up to $8$ operation groups.
@@ -239,15 +242,15 @@ The meaning of the columns is as follows:
 * The second column ($t_1$) contains the position of the group in the *basic* block (not just in the current batch). The position is $1$-based and is counted from the end. Thus, for example, if a *basic* block consists of a single batch with $4$ groups, the position of the first group would be $4$, the position of the second group would be $3$ etc. (the reason for this is explained in [this](#single-batch-span) section). Note that the group with position $4$ is not added to the table, because it is the first group in the batch, so the first row of the table will be for the group with position $3$.
 * The third column ($t_2$) contains the actual values of operation groups (this could include up to $9$ opcodes or a single immediate value).
 
-Permutation column $p_3$ is used to keep track of the state of the table. At any step of the computation, the current value of $p_3$ defines which rows are present in the table.
-
-To reduce a row in the op group table to a single value, we compute the following.
+Each entry is an `OpGroupTable` message with the payload
 
 $$
-row = \alpha_0 + \sum_{i=0}^2 (\alpha_{i+1} \cdot t_i)
+[batch\_id,group\_pos,group\_value].
 $$
 
-Where $\alpha_0, ..., \alpha_3$ are the random values provided by the verifier.
+Batch setup adds every deferred group, while beginning a group or consuming an immediate removes
+the matching message. The table is empty at completion because the relation's signed LogUp sum
+must close.
 
 ### Control flow operation semantics
 
@@ -344,7 +347,7 @@ In the above diagram, `blk` is the ID of the *dyn* block which is about to be ex
 
 When the VM executes a `DYNCALL` operation, it does the following:
 
-1. Adds a tuple `(blk, p_addr, 0, ctx, b_0, b_1, fn_hash[0..3])` to the block stack table.
+1. Adds a tuple `(blk, p_addr, 0, ctx, h_4, h_5, fn_hash)` to the block stack table. The $h_4$ and $h_5$ registers hold the caller's post-shift stack depth and overflow address; `fn_hash` is a four-element word.
 2. Sends a memory read request to the memory chiplet, using `s0` as the memory address. The result `hash of callee` is placed in the decoder hasher trace at $h_0, h_1, h_2, h_3$.
 3. Sends a memory write request to the memory chiplet to set address `FMP_ADDR = 2^32 - 2` to `FMP_INIT_VALUE = 2^31` in the new memory context. This initializes the `fmp` in the new context.
 4. Adds the tuple `(blk, hash of callee, 0, 0)` to the block hash table.
@@ -370,10 +373,10 @@ In the above diagram, `blk` is the ID of the block which is about to finish exec
 When the VM executes an `END` operation, it does the following:
 
 1. Removes a tuple from the block stack table.
-    - if `f2` or `f3` is set, we remove a row `(blk, prnt, 0, ctx_next, b0_next, b1_next, fn_hash_next[0..4])`
+    - if `f2` or `f3` is set, we remove a row `(blk, prnt, 0, ctx_next, b0_next, b1_next, fn_hash_next)`
         - in the above, the `x_next` variables denote the column `x` in the next row
-    - else, we remove a row `(blk, prnt, f1, 0, 0, 0, 0, 0)`
-2. Removes a tuple `(prnt, current_block_hash, nxt, f0)` from the block hash table, where $nxt=0$ if the next operation is either `END` or `REPEAT`, and $1$ otherwise.
+    - else, we remove a row `(blk, prnt, f1, 0, 0, 0, [0; 4])`
+2. Removes a tuple `(prnt, current_block_hash, nxt, f0)` from the block hash table, where $nxt=0$ if the next operation is `END`, `REPEAT`, `RESPAN`, or `HALT`, and $1$ otherwise.
 3. Reads the block digest from the hash chiplet (as described [here](#program-block-hashing)) using `blk` as the hash-controller row address.
 4. If $h_5 = 1$ (i.e., we are exiting a *loop* block), pops the value off the top of the stack and verifies that the value is $0$.
 5. Verifies that `group_count` register is set to $0$.
@@ -404,7 +407,7 @@ In the above diagram, `blk` is the ID of the loop's body and `prnt` is the ID of
 When the VM executes a `REPEAT` operation, it does the following:
 
 1. Checks whether register $h_4$ is set to $1$. If it isn't (i.e., we are not in a loop), the execution fails.
-2. Pops the stack and if the popped value is $1$, adds a tuple `(prnt, loop_body_loop 0, 1)` to the block hash table. If the popped value is not $1$, the execution fails.
+2. Pops the stack and if the popped value is $1$, adds a tuple `(prnt, loop_body_hash, 0, 1)` to the block hash table. If the popped value is not $1$, the execution fails.
 
 The effect of the above is that the VM needs to execute the loop's body again to clear the block hash table.
 
@@ -446,7 +449,7 @@ In the above diagram, `blk` is the ID of the *call* block which is about to be e
 
 When the VM executes a `CALL` operation, it does the following:
 
-1. Adds a tuple `(blk, prnt, 0, p_ctx, p_b0, p_b1, prnt_fn_hash[0..4])` to the block stack table.
+1. Adds a tuple `(blk, prnt, 0, p_ctx, p_b0, p_b1, prnt_fn_hash)` to the block stack table.
 2. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-two-to-one-hash)) using `blk` as the hash-controller row address and $h_0, ..., h_3$ as input values.
 3. Sends a memory write request to the memory chiplet to set address `FMP_ADDR = 2^32 - 2` to `FMP_INIT_VALUE = 2^31` in the new memory context. This initializes the `fmp` in the new context.
 
@@ -469,7 +472,7 @@ In the above diagram, `blk` is the ID of the *syscall* block which is about to b
 
 When the VM executes a `SYSCALL` operation, it does the following:
 
-1. Adds a tuple `(blk, prnt, 0, p_ctx, p_b0, p_b1, prnt_fn_hash[0..4])` to the block stack table.
+1. Adds a tuple `(blk, prnt, 0, p_ctx, p_b0, p_b1, prnt_fn_hash)` to the block stack table.
 2. Sends a request to the kernel ROM chiplet indicating that `hash of callee` is being accessed.
     - this results in a fault if `hash of callee` does not correspond to the hash of a kernel procedure
 3. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-two-to-one-hash)) using `blk` as the hash-controller row address and $h_0, ..., h_3$ as input values.
