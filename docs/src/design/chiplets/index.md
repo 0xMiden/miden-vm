@@ -49,39 +49,40 @@ The resulting order is as follows:
 | Bitwise chiplet |      8       |        3        |            2            |      5       |   20    | $\{1, 0\}$            |
 | Memory          |      -       |        6        |            3            |      9       |   17    | $\{1, 1, 0\}$         |
 | ACE             |      -       |        5        |            4            |      9       |   16    | $\{1, 1, 1, 0\}$      |
-| Kernel ROM      |      -       |        3        |            5            |      8       |    5    | $\{1, 1, 1, 1, 0\}$   |
+| Kernel ROM      |      -       |        -        |            5            |      -       |    5    | $\{1, 1, 1, 1, 0\}$   |
 | Padding         |      -       |        -        |            -            |      -       |    -    | $\{1, 1, 1, 1, 1\}$   |
 
 ### Additional requirements for stacking execution traces
 
-Stacking the chiplets introduces one new complexity. Each chiplet proves its own correctness with its own set of internal transition constraints, many of which are enforced between each row in its trace and the next row. As a result, when the chiplets are stacked, transition constraints applied to the final row of one chiplet will cause a conflict with the first row of the following chiplet.
+Internal transition constraints are gated by selectors that identify the rows and transitions
+owned by each chiplet. Multi-row cyclic chiplets use periodic columns aligned to their cycles. The
+stacked trace applies the following boundary contracts.
 
-This is true for any transition constraints that are applied at every row and selected by a `Chiplet Selector Flag` for the current row. (Therefore, cyclic transition constraints controlled by periodic columns do not cause any issue.)
+**In the hash chiplet:** controller constraints delimit the controller region, which is padded to
+an 8-row boundary before the bitwise region. `EidosCompressionAir` proves the Eidos compression
+rows.
 
-This requires the following adjustments for each chiplet.
+**In the bitwise chiplet:** ordinary operations are row-local, while period-eight selectors gate
+transitions within each AEAD stream entry.
 
-**In the hash chiplet:** controller constraints explicitly confine the end of the controller region.
-The controller region is padded to an 8-row boundary before the bitwise region begins. Eidos
-compression constraints live in `EidosCompressionAir`, not in the chiplets trace.
+**In the memory chiplet:** the next-row selector $1-s'_2$ selects transitions whose next row belongs
+to the memory region, keeping the selector degree at three as shown [below](#chiplet-constraints).
 
-**In the bitwise chiplet:** there is no conflict, and therefore no change, since all constraints are periodic.
+**In the ACE chiplet:** first-row, intra-chiplet transition, and last-row flags gate the
+corresponding constraints, as described under [flags and boundary constraints](./ace.md#flags).
 
-**In the memory chiplet:** all transition constraints cause a conflict. To adjust for this, the selector flag for the memory chiplet is designed to exclude its last row. Thus, memory constraints will not be applied when transitioning from the last row of the memory chiplet to the following row. This is achieved without any additional increase in the degree of constraints by using $s'_2$ as a selector instead of $s_2$ as seen [below](#chiplet-constraints).
-
-**In the ACE chiplet:** some transition constraints must be disabled in the last row. The flags are derived both from the chiplet selectors and are described in the [flags and boundary constraints section](./ace.md#flags).
-
-**In the kernel ROM chiplet:** the transition constraints referring to the $s_{first}'$ column cause a conflict.
-It is resolved by enforcing the initial value of this selector in the last row of the previous chiplet,
-and disabling the hash equality constraint in the last row.
+**In the kernel ROM chiplet:** typed initialization and call messages bind each declared procedure
+digest and its call multiplicity.
 
 ## Operation labels
 
 Lookup messages carry an explicit `BusId`, independent of the physical selector encoding used by
 the chiplet overlay. A message is reduced with the domain-separated prefix
-`bus_prefix[id] = alpha + (id + 1) * gamma`, followed by its typed payload. This prevents two
-relations with structurally similar payloads from cancelling each other.
+`bus_prefix[id] = alpha + (id + 1) * gamma`, where `gamma = beta^16` in the native VM proof,
+followed by its typed payload. This prevents two relations with structurally similar payloads from
+cancelling each other except with the standard random-encoding collision probability.
 
-The IDs relevant to the stacked chiplets are protocol constants:
+The following selection covers Core requests and their stacked-chiplet responses:
 
 | Interaction | `BusId` value |
 | ----------- | ------------- |
@@ -123,16 +124,16 @@ This gives the following sets of constraints:
 > s_0 \cdot s_1 \cdot (s_2) \cdot (1 - s'_3) \cdot c_{ace} = 0 \text{ | degree} = 4 + \deg(c_{ace})
 > $$
 
-> $$
-> s_0 \cdot s_1 \cdot (s_2) \cdot (s_3) \cdot (1 - s'_4) \cdot c_{krom} = 0 \text{ | degree} = 5 + \deg(c_{krom})
-> $$
-
 In the above:
 
-- $c_{hash}, c_{bitwise}, c_{memory}, c_{ace}, c_{krom}$ each represent an internal constraint from the indicated chiplet.
+- $c_{hash}, c_{bitwise}, c_{memory}, c_{ace}$ each represent an internal constraint from the indicated chiplet.
 - $\deg(c)$ indicates the degree of the specified constraint.
 - flags are applied in a like manner for all internal constraints in each respective chiplet.
-- the selector for the memory chiplet excludes the last row of the chiplet (as discussed [above](#additional-requirements-for-stacking-execution-traces)).
+- the memory selector uses $s'_2$ to select transitions whose next row belongs to the memory region,
+  as described [above](#additional-requirements-for-stacking-execution-traces).
+
+The Kernel ROM selector gates its `KernelRomInit` and `KernelRomCall` messages, described
+[below](#chiplets-bus).
 
 ### Chiplet selector constraints
 
@@ -189,13 +190,13 @@ The verifier combines the proof-exposed normalized finals across AIRs, weighted 
 lengths, with the statement boundary corrections and requires the total to be zero. These lookup
 columns do not use explicit last-row boundary constraints.
 
-## Chiplets virtual table
+## Hash-kernel lookup column {#chiplets-virtual-table}
 
 The hash-kernel LogUp column multiplexes row-disjoint relations for Merkle siblings, ACE memory
 reads, AEAD memory I/O, ordinary bitwise AND8 lookups, and memory range checks. Each relation uses
 its own `BusId`.
 
-## Chiplet LogUp bus
+## Shared wiring column {#chiplet-logup-bus}
 
 The shared wiring column carries [ACE wiring](./ace.md#wire-bus), hasher-compression links, and AEAD
 stream traffic.
