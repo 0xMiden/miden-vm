@@ -108,9 +108,7 @@ macro_rules! shuffle2 {
     };
 }
 
-// Note the optimization here of leaving row1 as the unrotated row, rather than row0. All the
-// message loads below are adjusted to compensate. See
-// https://github.com/sneves/blake2-avx2/pull/4.
+// Leaving row1 unrotated avoids an extra shuffle; the message loads below account for this layout.
 #[inline(always)]
 unsafe fn diagonalize(row0: &mut __m128i, row2: &mut __m128i, row3: &mut __m128i) {
     unsafe {
@@ -140,7 +138,7 @@ unsafe fn blend_epi16(a: __m128i, b: __m128i, imm8: i32) -> __m128i {
     }
 }
 
-/// Row-wise diagonalized permutation, adapted from `blake3::rust_sse2::compress_pre`.
+/// Row-wise diagonalized permutation.
 ///
 /// Returns `[row0, row1, row2, row3] = [v[0..4], v[4..8], v[8..12], v[12..16]]` of the standard
 /// BLAKE3 permuted state after all seven rounds, with Eidos's fixed parameter-word tail

@@ -12,10 +12,10 @@ use crate::{
 /// Returns a polynomial in `Z_p[x]/(phi)` representing the hash of the provided message and
 /// nonce using Eidos.
 ///
-/// Unlike the SHAKE256-based reference implementation, this implementation reduces wide samples
-/// directly instead of using rejection sampling. The Falcon specification [1] describes this
-/// branch-free alternative for sufficiently wide samples. Each Eidos output element supplies 63
-/// pseudorandom bits, so reduction modulo the Falcon prime introduces a small bias.
+/// This construction reduces wide samples directly instead of using rejection sampling. The
+/// Falcon specification [1] describes this branch-free alternative for sufficiently wide samples.
+/// Each Eidos output element supplies 63 pseudorandom bits, so reduction modulo the Falcon prime
+/// introduces a small bias.
 ///
 /// [1]: <https://falcon-sign.info/falcon.pdf>
 pub fn hash_to_point_eidos(message: Word, nonce: &Nonce) -> Polynomial<FalconFelt> {
