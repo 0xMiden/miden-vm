@@ -110,13 +110,14 @@ let output = FastProcessor::new_with_options(
 
 Execute with `FastProcessor` to produce an `ExecutionWitness`, and read its public claim before
 proving consumes it. `Prover::prove` proves the VM portion. The returned `ExecutionProof` has an
-empty precompile status when no deferred work exists, or a deferred status with a passive
-`DeferredStateWire`. Use `Prover::prove_full` to complete all proof work in the local process.
+empty precompile status when no deferred work exists, or a deferred status carrying one portable
+`PrecompileWitness`. Use `Prover::prove_full` to complete all proof work in the local process.
 
 For delegated precompile proving, transport the proof with `ExecutionProof::to_bytes`, then decode
-it with `ExecutionProof::read_from_bytes`. Pass the deferred status wire to
-`precompile_witness_from_wire`. After precompile proving, call `complete` and then
-`Verifier::verify`. Completion preserves the compatibility declaration.
+it with `ExecutionProof::read_from_bytes`. Pass the carried witnesses to
+`Prover::prove_precompiles(Vec<PrecompileWitness>)`. One batch produces one proof, preserving input
+root order and repeated roots. After precompile proving, call `complete` and then `Verifier::verify`.
+Completion preserves the compatibility declaration.
 
 `ExecutionOptions` configure execution, while `Prover::with_hash_fn` selects the proof hash
 function. The FastProcessor-backed `prove_sync(&Prover, ...)` function executes and fully proves in
@@ -177,9 +178,9 @@ Stack inputs are expected to be ordered as if they would be pushed onto the stac
 Stack outputs are expected to be ordered as if they would be popped off the stack one by one. Thus, the value at the top of the stack is expected to be in the first position of the `stack_outputs`, and the order of the rest of the output elements will also match the order on the stack. This is the reverse of the order of the `stack_inputs`.
 
 The verifier returns `Result<VerificationOutcome, VerificationError>`. A successful deferred outcome
-authenticates an outstanding VM root without validating the passive wire; a successful complete
-outcome verifies every applicable STARK. Canonical proof decoding is registry-free, while delegated
-precompile proving hydrates wire explicitly with `precompile_witness_from_wire`. See the
+authenticates an outstanding VM root without checking the carried witness's assertions; a successful
+complete outcome verifies every applicable STARK. Canonical proof decoding checks portable graph
+structure without a registry. Precompile proving imports each witness directly into a shared Session. See the
 [deferred-proof semantics](../docs/src/design/deferred/semantics.md) for transport and limit
 details.
 

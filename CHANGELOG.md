@@ -2,6 +2,10 @@
 
 ## v0.33.0 (Unreleased)
 
+#### Changes
+
+- [BREAKING] Replaced hydrated precompile witnesses with portable singleton witnesses and moved batching into `Prover::prove_precompiles`, preserving input root order and duplicates. Execution proof and execution witness encodings now use format 2; previous encodings are rejected.
+
 ## v0.32.1 (2026-09-09)
 
 #### Changes

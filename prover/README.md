@@ -2,16 +2,17 @@
 
 This crate proves post-execution witnesses produced by the
 [Miden processor](../processor/) using [Plonky3](https://github.com/0xMiden/Plonky3). The
-synchronous `Prover` does not execute programs: it consumes `ExecutionWitness` values and borrows
-`PrecompileWitness` values.
+synchronous `Prover` does not execute programs: it consumes `ExecutionWitness` values and owned
+batches of portable `PrecompileWitness` values.
 
 ## Usage
 
 `Prover` is synchronous and consumes post-execution witnesses. `Prover::prove(ExecutionWitness)`
 proves the VM portion. Its `PrecompileStatus` is `Empty` when there is no deferred work, or
-`Deferred` with a passive `DeferredStateWire`. `Prover::prove_full(ExecutionWitness)` proves the VM
-and any precompile work locally. `Prover::prove_precompile(&PrecompileWitness)` proves one hydrated
-singleton or merged witness.
+`Deferred` with a portable singleton `PrecompileWitness`. `Prover::prove_full(ExecutionWitness)`
+proves the VM and any precompile work locally. `Prover::prove_precompiles(Vec<PrecompileWitness>)`
+imports a nonempty batch directly into one Session and returns one proof. Its root metadata preserves
+input order and repeated roots.
 
 Use `Prover::with_hash_fn` to select the proof hash function.
 
@@ -25,7 +26,6 @@ will be passed to `Prover`.
 ```rust,ignore
 use miden_prover::{ExecutionProof, PrecompileStatus, Prover};
 use miden_verifier::Verifier;
-use miden_vm::precompile_witness_from_wire;
 
 // `witness` is an ExecutionWitness produced by FastProcessor.
 let claim = witness.claim();
@@ -35,26 +35,25 @@ let deferred = prover.prove(witness)?;
 // Transport and decode the proof without a registry.
 let bytes = deferred.to_bytes();
 let proof = ExecutionProof::read_from_bytes(&bytes)?;
-let PrecompileStatus::Deferred(wire) = proof.precompile_status() else {
+let PrecompileStatus::Deferred(precompile_witness) = proof.precompile_status() else {
     unreachable!("precompile proving is only needed for deferred proofs");
 };
 
-// Hydration installs the bundled registry only when precompile proving begins.
-let precompile_witness = precompile_witness_from_wire(wire)?;
-let precompile_proof = prover.prove_precompile(&precompile_witness)?;
+// Direct import checks the portable operations and assertions when proving begins.
+let precompile_proof = prover.prove_precompiles(vec![precompile_witness.clone()])?;
 let complete = proof.complete(precompile_proof)?;
 let outcome = Verifier::new().verify(&claim, &complete)?;
 assert!(outcome.is_complete());
 ```
 
-To share precompile proving across several deferred proofs, hydrate each transported wire, merge the
-singleton witnesses with `PrecompileWitness::merge`, and call `prove_precompile` once. Attach the
-resulting `PrecompileProof` to each deferred proof with `complete`, then verify each completed
-proof.
+To share precompile proving across several deferred proofs, collect their portable singleton
+witnesses in the required order and pass the vector to `prove_precompiles` once. Computations are
+shared inside proving; no merged portable witness is created. Attach the resulting `PrecompileProof`
+to each deferred proof with `complete`, then verify each completed proof.
 `complete` performs only the deferred-to-complete lifecycle transition; it does not check artifact
 compatibility.
 
-Transport, hydration, structural validity, and fixed limits are specified in the
+Transport, direct import, structural validity, and fixed limits are specified in the
 [deferred-proof semantics](../docs/src/design/deferred/semantics.md).
 
 ### Synchronous execution and proving

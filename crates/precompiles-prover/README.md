@@ -3,13 +3,23 @@
 `miden-precompiles-prover` proves STARK-backed deferred precompile claims for
 Miden VM execution proofs.
 
-The public entry point is `prove_deferred_state`. The chiplet and session
-modules remain private.
+The public entry point is `prove_precompiles(Vec<PrecompileWitness>, HashFunction)`. It consumes
+singleton execution witnesses and returns one `PrecompileProof`, preserving input root order and
+repetitions. The chiplet and session modules remain private.
 
 ## What's here
 
-The crate translates a VM `DeferredState` into a proving session. It builds the
-chiplet traces and serializes the resulting STARK proof.
+The crate imports portable graphs directly into one proving session, checks operation semantics,
+and shares computations across inputs. It builds the chiplet traces and serializes one STARK proof
+bound to the ordered fold of the constituent roots. No runtime evaluator or merged witness is built.
+
+Empty batches and bare external assertion roots are rejected. Batch input uses the existing
+`MAX_DEFERRED_ELEMENTS` ceiling for tags and payloads, including repeated inputs and aggregate AND
+nodes. `MAX_PRECOMPILE_ROOTS` bounds every root occurrence. Total declared hash input is separately
+bounded to four bytes per allowed element, so sharing one large payload cannot hide repeated hash
+work. MSM lowering retains its existing per-claim and aggregate fallback term limits; the input
+element ceiling also bounds total pair-list terms. Balanced per-column wNAF reductions and exact
+sorted term-multiset checks keep term processing at O(n log n) for the fixed scalar width.
 
 ## Build
 
@@ -23,6 +33,7 @@ make test-fast
 ```
 src/
 ├── lib.rs              crate root
+├── witness.rs          checked singleton batch import
 ├── relations.rs        global relation-tag (bus-id) registry
 ├── math.rs             field and integer helpers
 ├── logup/              LogUp encoding + natural last-row σ-closing adapter
