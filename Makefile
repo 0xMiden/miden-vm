@@ -333,6 +333,7 @@ regenerate-constraints: ## Regenerate the checked-in constraint artifacts (MASM 
 .PHONY: regenerate-pvm-constants
 regenerate-pvm-constants: ## Regenerate PVM ACE constants and MASM artifacts (protocol break)
 	cargo run --release --package miden-precompiles-verifier --features constants-tools --bin pvm-constants-regen -- --write
+	$(MAKE) format
 
 .PHONY: check-pvm-constants
 check-pvm-constants: ## Check PVM ACE constants and MASM artifacts for drift
