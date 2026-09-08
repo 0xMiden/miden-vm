@@ -815,9 +815,9 @@ fn forged_result_ptr_unbalances() {
 }
 
 // ============================================================================
-// Closure-certificate soundness (Phase 2). A fresh generic / double result
-// no longer pays the on-curve MAC trio — its point-store row consumes one
-// `EcOnCurveCert`, provided only by a genuine mint op (gated `mints`, with
+// Closure-certificate soundness. A fresh generic / double result uses one
+// `EcOnCurveCert` instead of the on-curve MAC trio. Its point-store row consumes the
+// certificate, provided only by a genuine mint op (gated `mints`, with
 // the case guard `mints ⟹ generic ∨ double` and the strict ptr ordering
 // `r > p ∧ r > q`). These check the two forgeries the cert's well-foundedness
 // rests on, plus that the cert consume is load-bearing.

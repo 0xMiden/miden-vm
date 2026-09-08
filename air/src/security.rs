@@ -211,7 +211,7 @@ pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << config::LOG_FOL
 
 /// Lookup grinding applied before the lookup challenges are sampled.
 ///
-/// Lifted STARK currently samples them directly after the main-trace commitment and exposes no
+/// Lifted STARK samples them directly after the main-trace commitment and exposes no
 /// lookup-grinding parameter.
 pub const LOOKUP_POW_BITS: u32 = 0;
 
@@ -596,7 +596,7 @@ mod tests {
         assert_eq!(FOLDING_BASE, FOLDING_BASE_FP, "FOLDING_BASE_FP is stale");
         assert_eq!(
             LOOKUP_POW_BITS, LOOKUP_POW_BITS_SNAPSHOT,
-            "Lifted STARK does not currently support lookup grinding"
+            "Lifted STARK does not support lookup grinding"
         );
     }
 

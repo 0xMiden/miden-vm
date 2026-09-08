@@ -33,7 +33,7 @@ const KERNEL_COMMITMENT_OFFSET = 4
 
 # Domain tag for the kernel commitment:
 # (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (0x010000 << 8) | 1.
-# Must match miden_core::program::KERNEL_DOMAIN_TAG (enforced by cross-tests).
+# Must match miden_core::program::KERNEL_DOMAIN_TAG.
 const KERNEL_DOMAIN_TAG = 0x01000001
 
 const FELTS_PER_KERNEL_DIGEST = 4
@@ -135,10 +135,10 @@ end
 #! `pos_k` is always in `0 .. NUM_MIDEN_AIRS - 1` (inv_k <= k and k + after_k <= N - 1), so the
 #! factorial argument never underflows the field.
 #!
-#! This VM-local specialization keeps the four-AIR loop bounds compile-time constants. New
-#! relations should use `stark::utils::derive_order_tag_from_heights`; tests pin both paths to the
-#! same Rust ranking. Changing the VM AIR set requires updating `NUM_MIDEN_AIRS`, its relation
-#! layout accessors, and the public-input schema; regeneration checks pin those copies.
+#! This four-AIR specialization implements the same height-sorted Lehmer ranking as
+#! `stark::utils::derive_order_tag_from_heights` and the Rust proof-order implementation.
+#! `NUM_MIDEN_AIRS`, the relation layout accessors, and the public-input schema must describe the
+#! same AIR set; regeneration checks reject drift among them.
 #!
 #! Input:  []
 #! Output: [tag]

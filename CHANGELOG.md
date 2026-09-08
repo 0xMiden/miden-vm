@@ -23,22 +23,7 @@
 - Fixed issue where parsing of pointer types dropped address space information ([#3790](https://github.com/0xMiden/miden-vm/pull/3790)).
 #### Changes
 
-- [BREAKING] Adopted Eidos as the native hash for VM data, signatures, AEAD, deferred
-  computation, and proof transcripts, changing digests, verifier roots, and proof layout;
-  `crypto_stream` now derives Eidos XOF blocks and writes expanded u32 ciphertext. Replaced
-  `HPERM`/`adv.insert_hperm` with `COMPRESS`/`adv.insert_compress`; removed
-  `adv.insert_hdword_d`, `sys::hdword_to_map_with_domain`, SMT `LEAF_DOMAIN`, and the
-  Poseidon2-backed `RandomCoin`; and replaced the Poseidon2 core-library hash and AEAD modules with
-  Eidos equivalents. Deferred nodes now use checked `EidosFrame` instead of `Tag`;
-  `adv.evaluate_deferred_tag` is now `adv.evaluate_deferred_frame`; the name-derived IDs of
-  `sys::adv::register_deferred` and `sys::adv::evaluate_deferred` were corrected;
-  `adv.register_deferred` now uses `[CV, PAYLOAD_LO, PAYLOAD_HI]` and
-  `adv.register_deferred_data` uses `[n_chunks, CV, ptr]`; and `precompiles::digest_expr` and
-  `precompiles::register_value` are replaced by `precompiles::register_fixed_expr`. Renamed core
-  `merge_in_domain` to `merge_in_mast_domain` and crypto `merge_in_domain` to
-  `hash_two_words_in_domain`; assigned IES IDs 2 and 3 to `K256AeadEidos` and `X25519AeadEidos`;
-  and bumped MAST serialization to 0.0.5 and Eidos execution witnesses to version 2
-  ([#3718](https://github.com/0xMiden/miden-vm/pull/3718)).
+- [BREAKING] Adopted Eidos as the native hash for VM data, Falcon signatures, AEAD, deferred computation, and proof transcripts, changing digests, verifier roots, and proof layout; `crypto_stream` now derives Eidos XOF blocks and writes expanded u32 ciphertext. Replaced `HPERM`/`adv.insert_hperm` with `COMPRESS`/`adv.insert_compress`; removed `adv.insert_hdword_d`, `sys::hdword_to_map_with_domain`, SMT `LEAF_DOMAIN`, and the Poseidon2-backed `RandomCoin`; and replaced the Poseidon2 core-library hash and AEAD modules with Eidos equivalents. Deferred nodes now use checked `EidosFrame` instead of `Tag`; `adv.evaluate_deferred_tag` is now `adv.evaluate_deferred_frame`; the name-derived IDs of `sys::adv::register_deferred` and `sys::adv::evaluate_deferred` were corrected; `adv.register_deferred` now uses `[CV, PAYLOAD_LO, PAYLOAD_HI]` and `adv.register_deferred_data` uses `[n_chunks, CV, ptr]`; and `precompiles::digest_expr` and `precompiles::register_value` are replaced by `precompiles::register_fixed_expr`. Renamed core `merge_in_domain` to `merge_in_mast_domain` and crypto `merge_in_domain` to `hash_two_words_in_domain`; reassigned IES IDs 2 and 3 from `K256AeadPoseidon2` and `X25519AeadPoseidon2` to `K256AeadEidos` and `X25519AeadEidos`; and bumped MAST serialization to 0.0.5 and Eidos execution witnesses to version 2 ([#3718](https://github.com/0xMiden/miden-vm/pull/3718)).
 
 ## v0.32.0 (2026-09-05)
 

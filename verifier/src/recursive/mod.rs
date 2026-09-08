@@ -466,10 +466,8 @@ fn validate_non_hiding_lmcs_salt(
 }
 
 fn commitment_felts<C: Copy + Into<[u64; 4]>>(commitment: C) -> [Felt; 4] {
-    // Eidos LMCS masks every packed high limb, so current commitments are already canonical.
-    // Reduce explicitly anyway: this adapter is generic over the concrete commitment wrapper,
-    // and advice words must never retain Goldilocks' permitted non-canonical representation if a
-    // future backend supplies an arbitrary u64 limb.
+    // Eidos LMCS commitments are canonical, but this generic adapter accepts raw u64 limbs.
+    // Reduce them explicitly because advice words require canonical field representations.
     commitment.into().map(|limb| Felt::new_unchecked(limb % Felt::ORDER))
 }
 
