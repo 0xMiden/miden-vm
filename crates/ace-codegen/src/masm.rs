@@ -28,16 +28,84 @@ pub struct MasmConstraintsEvalConfig<'a> {
     pub max_cycle_len_log: u32,
     /// Number of AIR instances in the relation.
     pub num_airs: usize,
-    /// Whether the evaluator stages one multi-AIR fold coefficient per AIR.
+    /// How the evaluator stages one multi-AIR fold coefficient per AIR, or `None` for a relation
+    /// whose ACE READ layout reserves no coefficient slots.
     ///
-    /// Only a relation whose ACE READ layout reserves the coefficient slots may do this: the
-    /// staged block sits immediately after the selectors, so a relation without those slots
+    /// The staged block sits immediately after the selectors, so a relation without those slots
     /// would write past its `auxiliary_ace_inputs_ptr` region.
-    pub stages_fold_coefficients: bool,
+    pub fold_coefficients: Option<FoldCoefficientStaging<'a>>,
     /// Relation-local inputs for reconstructing the quotient from its chunks.
     pub quotient_inputs: QuotientRecompositionInputs<Felt>,
     /// Eidos digest of the circuit-stream the relation accepts.
     pub circuit_digest: Word,
+}
+
+/// Where the generated evaluator finds the proof order and the coefficient slots.
+#[derive(Clone, Debug)]
+pub struct FoldCoefficientStaging<'a> {
+    /// MASM leaving the `id_by_pos` table base on the stack (instance index at each proof
+    /// position, as materialized by the relation's proof-order pass).
+    pub id_by_pos_ptr: &'a str,
+    /// Felt offset of AIR 0's fold-coefficient slot from `auxiliary_ace_inputs_ptr`; AIR `k`'s
+    /// slot is `2k` felts further.
+    pub coefficient_offset: usize,
+}
+
+/// Renders the fold-coefficient staging procedure of a relation's evaluator. It is private to the
+/// evaluator module: the only production caller is `execute_constraint_evaluation_check`.
+///
+/// The native verifier folds the per-AIR constraint roots as a Horner chain over proof order, so
+/// the AIR opened last carries `beta^0` and the one opened first `beta^(num_airs - 1)`. Walking
+/// `id_by_pos` from the last proof position to the first produces every power with one
+/// multiplication between consecutive positions, each written to the slot of the AIR at that
+/// position.
+fn render_fold_coefficient_staging(
+    staging: &FoldCoefficientStaging<'_>,
+    num_airs: usize,
+) -> String {
+    let mut steps = Vec::with_capacity(num_airs);
+    for position in (0..num_airs).rev() {
+        let load = if position == 0 {
+            "dup.5 mem_load".to_string()
+        } else {
+            format!("dup.5 add.{position} mem_load")
+        };
+        let advance = if position == 0 { "" } else { "\n    dup.3 dup.3 ext2mul" };
+        steps.push(format!(
+            "    # proof position {position}: coefficient beta^{exponent} to that AIR's slot\n    \
+             {load} mul.2 dup.5 add\n    \
+             # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]\n    \
+             dup.2 dup.2 dup.2 mem_store swap add.1 mem_store\n    \
+             # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]{advance}",
+            exponent = num_airs - 1 - position,
+        ));
+    }
+    format!(
+        "#! Stages AIR k's multi-AIR fold coefficient `beta^(NUM_AIRS - 1 - pos_k)` in its READ slot.\n\
+         #!\n\
+         #! The native verifier folds the per-AIR roots as a Horner chain over the height-sorted proof\n\
+         #! order, so the AIR opened last carries `beta^0` and the one opened first\n\
+         #! `beta^(NUM_AIRS - 1)`. Walking `id_by_pos` from the last proof position to the first\n\
+         #! produces every power with one multiplication between consecutive positions; each is written\n\
+         #! to the slot of whichever AIR sits at that position. `beta` is sampled after the auxiliary\n\
+         #! trace, so this runs after `set_up_auxiliary_inputs_ace`, and the proof-order pass\n\
+         #! must already have filled `id_by_pos`.\n\
+         #!\n\
+         #! Inputs:  []\n\
+         #! Outputs: []\n\
+         proc stage_air_fold_coefficients\n    \
+         {ids_ptr}\n    \
+         exec.layout::auxiliary_ace_inputs_ptr add.{offset}\n    \
+         padw exec.constants::composition_coef_ptr mem_loadw_le drop drop\n    \
+         push.0.1\n    \
+         # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]\n    # Each step copies its coefficient and destination before storing c0 then c1.\n\
+         {steps}\n    \
+         drop drop drop drop drop drop\n\
+         end\n",
+        ids_ptr = staging.id_by_pos_ptr,
+        offset = staging.coefficient_offset,
+        steps = steps.join("\n"),
+    )
 }
 
 /// Render the MASM wrapper that prepares ACE inputs, authenticates the circuit, and executes it.
@@ -62,16 +130,12 @@ pub fn render_masm_constraints_eval(
     let stream_init_cv = Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, stream_felts);
     let circuit_digest = config.circuit_digest;
     let quotient = config.quotient_inputs;
-    let fold_coefficient_staging = if config.stages_fold_coefficients {
-        concat!(
-            "\n",
-            "    exec.layout::auxiliary_ace_inputs_ptr\n",
-            "    exec.constants::air_trace_length_logs_ptr\n",
-            "    push.NUM_AIRS\n",
-            "    exec.constraints_eval_inputs::stage_air_fold_coefficients\n",
-        )
-    } else {
-        ""
+    let (fold_coefficient_call, fold_coefficient_proc) = match &config.fold_coefficients {
+        Some(staging) => (
+            "\n    exec.stage_air_fold_coefficients\n".to_string(),
+            format!("\n{}", render_fold_coefficient_staging(staging, config.num_airs)),
+        ),
+        None => (String::new(), String::new()),
     };
 
     Ok(format!(
@@ -129,7 +193,7 @@ pub fn render_masm_constraints_eval(
             "    push.NUM_AIRS\n",
             "    push.MAX_CYCLE_LEN_LOG\n",
             "    exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace\n",
-            "{fold_coefficient_staging}\n",
+            "{fold_coefficient_call}\n",
             "    exec.load_and_authenticate_ace_circuit\n\n",
             "    push.NUM_EVAL_GATES_CIRCUIT\n",
             "    push.NUM_INPUTS_CIRCUIT\n",
@@ -160,6 +224,7 @@ pub fn render_masm_constraints_eval(
             "    # => [STREAM_DIGEST, ACE_CIRCUIT_DIGEST]\n",
             "    assert_eqw.err=ERR_CIRCUIT_DIGEST_MISMATCH\n",
             "end\n",
+            "{fold_coefficient_proc}",
         ),
         generated_by = config.generated_by,
         layout_module = config.layout_module,
@@ -171,7 +236,8 @@ pub fn render_masm_constraints_eval(
         quotient_shift_ratio = quotient.shift_ratio.as_canonical_u64(),
         quotient_first_shift = quotient.first_shift.as_canonical_u64(),
         quotient_first_weight = quotient.first_weight.as_canonical_u64(),
-        fold_coefficient_staging = fold_coefficient_staging,
+        fold_coefficient_call = fold_coefficient_call,
+        fold_coefficient_proc = fold_coefficient_proc,
         stream_init_cv_0 = stream_init_cv[0].as_canonical_u64(),
         stream_init_cv_1 = stream_init_cv[1].as_canonical_u64(),
         stream_init_cv_2 = stream_init_cv[2].as_canonical_u64(),
@@ -188,9 +254,10 @@ mod tests {
     use miden_core::Felt;
     use miden_crypto::stark::QuotientRecompositionInputs;
 
-    use super::{MasmConstraintsEvalConfig, render_masm_constraints_eval};
+    use super::{FoldCoefficientStaging, MasmConstraintsEvalConfig, render_masm_constraints_eval};
 
-    const STAGING_CALL: &str = "exec.constraints_eval_inputs::stage_air_fold_coefficients";
+    const STAGING_CALL: &str = "exec.stage_air_fold_coefficients";
+    const STAGING_PROC: &str = "proc stage_air_fold_coefficients";
 
     fn config(stages_fold_coefficients: bool) -> MasmConstraintsEvalConfig<'static> {
         MasmConstraintsEvalConfig {
@@ -201,7 +268,10 @@ mod tests {
             stream_len: 64,
             max_cycle_len_log: 5,
             num_airs: 4,
-            stages_fold_coefficients,
+            fold_coefficients: stages_fold_coefficients.then_some(FoldCoefficientStaging {
+                id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
+                coefficient_offset: 46,
+            }),
             quotient_inputs: QuotientRecompositionInputs {
                 shift_ratio: Felt::new_unchecked(2),
                 first_shift: Felt::new_unchecked(3),
@@ -221,11 +291,20 @@ mod tests {
     fn fold_coefficient_staging_is_emitted_only_when_the_relation_asks_for_it() {
         let staged = render_masm_constraints_eval(&config(true)).expect("renders");
         assert!(staged.contains(STAGING_CALL), "the staging call is missing when requested");
+        assert!(staged.contains(STAGING_PROC), "the staging procedure is missing when requested");
+        assert!(
+            !staged.contains(&format!("pub {STAGING_PROC}")),
+            "the staging procedure is evaluator-private"
+        );
+        // One multiplication between consecutive positions; four AIRs, four writes.
+        assert_eq!(staged.matches("ext2mul").count(), 3);
+        assert_eq!(staged.matches("add.1 mem_store").count(), 4);
+        assert!(staged.contains("exec.layout::auxiliary_ace_inputs_ptr add.46"));
 
         let bare = render_masm_constraints_eval(&config(false)).expect("renders");
         assert!(
-            !bare.contains(STAGING_CALL),
-            "the staging call leaked into a relation without fold-coefficient slots"
+            !bare.contains(STAGING_CALL) && !bare.contains(STAGING_PROC),
+            "the staging leaked into a relation without fold-coefficient slots"
         );
 
         // Only the staging block may differ: both relations run the same setup, authentication,

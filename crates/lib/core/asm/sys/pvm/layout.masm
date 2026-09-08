@@ -4,7 +4,7 @@
 ### The ACE READ section is one dense vector of quadratic-extension inputs.
 ### Every boundary below is derived from the PVM circuit's InputLayout; each
 ### input occupies two base-field felts. The complete allocation, including relation-local
-### scratch after the stream, is the half-open range 3225432064..3225449414.
+### scratch after the stream, is the half-open range 3225432064..3225449426.
 ### Per-AIR heights remain in the generic 16-cell array, in ChipletAir::all()
 ### order; the PVM wrapper supplies the relation count and that shared base.
 
@@ -72,10 +72,17 @@ const PREPROCESSED_COM_PTR = 3225449304
 ### accordingly.
 const OOD_SCATTER_TABLE_PTR = 3225449308
 
-### 10 felts: 3225449404..3225449414. Position of each chiplet, in
-### ChipletAir::all() order, within the height-sorted proof order. Staged once per proof by
-### `sys/pvm/mod.masm`; read by both ingest scatters.
+### 12 felts: 3225449404..3225449416. `pos_by_id`: the position of each
+### chiplet, in ChipletAir::all() order, within the height-sorted proof order. The first
+### 10 cells are live and the final 2 pad the following table to a word boundary.
+### Staged once per proof by `sys/pvm/ood_frames.masm::stage_proof_order_maps`; read by both
+### ingest scatters.
 const PROOF_ORDER_POSITIONS_PTR = 3225449404
+
+### 10 felts: 3225449416..3225449426. `id_by_pos`: the
+### ChipletAir::all() index committed at each proof position. Staged with `pos_by_id`;
+### read by the reverse fold-coefficient walk in `sys/pvm/constraints_eval.masm`.
+const PROOF_ORDER_IDS_PTR = 3225449416
 
 pub proc public_inputs_ptr() -> types::Address
     push.PUBLIC_INPUTS_PTR
@@ -123,4 +130,8 @@ end
 
 pub proc proof_order_positions_ptr() -> types::Address
     push.PROOF_ORDER_POSITIONS_PTR
+end
+
+pub proc proof_order_ids_ptr() -> types::Address
+    push.PROOF_ORDER_IDS_PTR
 end
