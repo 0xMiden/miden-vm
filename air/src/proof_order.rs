@@ -27,10 +27,12 @@ const _: () = assert!(PROOF_ORDER_COUNT <= u32::MAX as usize, "proof-order tags 
 /// placing that AIR's data and weighting its contribution. `tag` is the Lehmer rank of the
 /// permutation relative to [`AIRS`].
 ///
-/// The recursive verifier derives each AIR's position directly from the committed heights with
-/// `proof_order_position_from_heights`. The Lehmer tag API provides a stable encoding for
-/// exhaustive proof-order enumeration. The shared [`miden_ace_codegen::MAX_ORDER_AIRS`] bound
-/// ensures that every supported rank fits in `u32`.
+/// The recursive verifier derives the complete order once from the committed heights with the
+/// fixed sorting network emitted as `stage_proof_order_maps` in each relation's out-of-domain
+/// hook. The resulting position maps drive scatter, boundary placement, and fold-coefficient
+/// staging. The Lehmer tag API provides a stable encoding for exhaustive proof-order enumeration.
+/// The shared [`miden_ace_codegen::MAX_ORDER_AIRS`] bound ensures that every supported rank fits in
+/// `u32`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProofOrder {
     airs: [MidenAir; MIDEN_AIR_COUNT],

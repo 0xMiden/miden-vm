@@ -6,13 +6,16 @@ use alloc::{
 };
 use std::{fs, io, println};
 
-use miden_ace_codegen::{EXT_DEGREE, InputKey, InputLayout};
+use miden_ace_codegen::{
+    EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, ProofOrderMapsConfig,
+    render_proof_order_maps,
+};
 use miden_air::{
     AIRS, MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, NUM_PUBLIC_VALUES, Statement,
     ace::{build_recursive_verifier_ace_circuit, recursive_verifier_input_layout},
     config::relation_digest,
 };
-use miden_core::{Felt, Word, field::QuadFelt, program::KernelDescriptor};
+use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt, program::KernelDescriptor};
 use miden_crypto::stark::{
     Preprocessed, QuotientRecompositionInputs,
     air::{BaseAir, LiftedAir},
@@ -30,8 +33,8 @@ const AIR_CONFIG_PATH: &str = "../../../air/src/config.rs";
 const CONSTRAINTS_EVAL_PATH: &str = "asm/sys/vm/constraints_eval.masm";
 const RELATION_DIGEST_PATH: &str = "asm/sys/vm/mod.masm";
 const VERIFIER_LIB_PATH: &str = "../../../verifier/src/lib.rs";
-const VM_AUX_TRACE_PATH: &str = "asm/sys/vm/aux_trace.masm";
 const VM_LAYOUT_PATH: &str = "asm/sys/vm/layout.masm";
+const STARK_CONSTANTS_PATH: &str = "asm/stark/constants.masm";
 const VM_OOD_FRAMES_PATH: &str = "asm/sys/vm/ood_frames.masm";
 const VM_DEEP_QUERIES_PATH: &str = "asm/sys/vm/deep_queries.masm";
 const VM_PUBLIC_INPUTS_PATH: &str = "asm/sys/vm/public_inputs.masm";
@@ -100,8 +103,8 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
 
     let circuit_digest = word_to_array(circuit.commitment);
     let relation_digest = compute_relation_digest(&circuit_digest);
-    let constraints_eval = render_constraints_eval_file(&circuit, quotient_inputs)?;
     let vm_geometry = VmGeometry::from_input_layout(&input_layout)?;
+    let constraints_eval = render_constraints_eval_file(&circuit, quotient_inputs, &vm_geometry)?;
     let vm_layout = render_vm_layout(&vm_geometry)?;
     let vm_ood_frames = render_vm_ood_frames(&vm_geometry)?;
     let vm_deep_queries = render_vm_deep_queries(&vm_geometry)?;
@@ -232,6 +235,9 @@ struct VmGeometry {
     auxiliary_ace_inputs_ptr: usize,
     ace_circuit_stream_ptr: usize,
     current_trace_row_ptr: usize,
+    ood_scatter_table_ptr: usize,
+    /// Felt offset of AIR 0's fold-coefficient slot from `auxiliary_ace_inputs_ptr`.
+    fold_coefficient_offset: usize,
 }
 
 impl VmGeometry {
@@ -254,6 +260,17 @@ impl VmGeometry {
             })
             .collect();
         let aux_width: usize = aux_widths.iter().sum();
+        let aux_values: Vec<_> =
+            AIRS.iter().map(LiftedAir::<Felt, QuadFelt>::num_aux_values).collect();
+        if aux_values.as_slice() != [1usize; MIDEN_AIR_COUNT].as_slice() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "the VM proof-order boundary scatter requires exactly one auxiliary value per \
+                     AIR, got {aux_values:?}"
+                ),
+            ));
+        }
         let quotient_width = input_layout.counts.num_quotient_chunks * EXT_DEGREE;
         let row_width = preprocessed_width + main_width + aux_width + quotient_width;
 
@@ -261,6 +278,11 @@ impl VmGeometry {
             ("preprocessed", preprocessed_width, input_layout.counts.preprocessed_width),
             ("main", main_width, input_layout.counts.width),
             ("auxiliary-coordinate", aux_width, input_layout.counts.aux_width * EXT_DEGREE),
+            (
+                "auxiliary-boundary",
+                aux_values.iter().sum::<usize>(),
+                input_layout.counts.num_aux_boundary,
+            ),
         ] {
             if derived != actual {
                 return Err(io::Error::new(
@@ -326,6 +348,26 @@ impl VmGeometry {
                 ),
             ));
         }
+        // Its lower neighbour is the kernel digest witness, one word per supported kernel
+        // procedure written by `materialize_kernel_witness`; the table must start at or after its
+        // end.
+        let kernel_witness_ptr =
+            parse_masm_const::<usize>(&layout, "KERNEL_WITNESS_PTR", VM_LAYOUT_PATH)
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        let kernel_witness_end = kernel_witness_ptr
+            .checked_add(WORD_SIZE * KernelDescriptor::MAX_NUM_PROCEDURES)
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "the kernel witness end overflows")
+            })?;
+        if ood_scatter_table_ptr < kernel_witness_end {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "the out-of-domain scatter table at {ood_scatter_table_ptr} overlaps the \
+                     kernel digest witness, which ends at {kernel_witness_end}"
+                ),
+            ));
+        }
 
         let aux_rand_index = require_input_index(input_layout, InputKey::AuxRandBeta)?;
         let ood_index =
@@ -335,6 +377,13 @@ impl VmGeometry {
         let aux_bus_boundary_index =
             require_input_index(input_layout, InputKey::AuxBusBoundary(0))?;
         let auxiliary_ace_inputs_index = require_input_index(input_layout, InputKey::Alpha)?;
+        let fold_coefficient_index =
+            require_input_index(input_layout, InputKey::MultiAirFoldCoeff(0))?;
+        let fold_coefficient_offset = input_layout_extent(
+            auxiliary_ace_inputs_index,
+            fold_coefficient_index,
+            "fold coefficients",
+        )?;
 
         let ood_row_felts = input_layout_extent(ood_index, next_ood_index, "current OOD row")?;
         let ood_frame_felts = input_layout_extent(ood_index, aux_bus_boundary_index, "OOD frame")?;
@@ -379,6 +428,8 @@ impl VmGeometry {
             auxiliary_ace_inputs_ptr,
             ace_circuit_stream_ptr,
             current_trace_row_ptr,
+            ood_scatter_table_ptr,
+            fold_coefficient_offset,
         })
     }
 }
@@ -416,6 +467,7 @@ fn input_layout_ptr(
 }
 
 fn render_vm_layout(geometry: &VmGeometry) -> io::Result<String> {
+    let plan = vm_scatter_plan(geometry)?;
     let mut layout = read_file(VM_LAYOUT_PATH)?;
     for (name, value) in [
         ("OOD_EVALUATIONS_PTR", geometry.ood_evaluations_ptr),
@@ -426,6 +478,46 @@ fn render_vm_layout(geometry: &VmGeometry) -> io::Result<String> {
     ] {
         replace_masm_const(&mut layout, name, &value.to_string())?;
     }
+
+    replace_comment_before_const(
+        &mut layout,
+        "OOD_SCATTER_TABLE_PTR",
+        &format!(
+            "### Out-of-domain ingest scatter table and proof-order maps, immediately after the VM \
+             control\n\
+             ### frame. Reserves {OOD_SCATTER_TABLE_FELTS} felts:\n\
+             ###\n\
+             ###   +0            base address of the out-of-domain row being ingested\n\
+             ###   +4  .. +{pairs_end}    per proof position, in stream order: (row-relative \
+             destination, digest address)\n\
+             ###   +{digests} .. +{digests_end}    `pipe_k` procedure digests reached by `dynexec`, \
+             one word each\n\
+             ###   +{positions} .. +{positions_end}    `pos_by_id`: each AIR's proof position, in \
+             instance order\n\
+             ###   +{ids} .. +{ids_end}    `id_by_pos`: the AIR committed at each proof position\n\
+             ###\n\
+             ### The internal offsets and the reserve's sufficiency are owned by the regeneration \
+             tool, which\n\
+             ### derives them from the AIR widths and fills `sys/vm/ood_frames.masm` accordingly.",
+            pairs_end = plan.digest_offset - 1,
+            digests = plan.digest_offset,
+            digests_end = plan.maps_offset - 1,
+            positions = plan.maps_offset,
+            positions_end = plan.maps_offset + MIDEN_AIR_COUNT - 1,
+            ids = plan.maps_offset + MIDEN_AIR_COUNT,
+            ids_end = plan.maps_offset + 2 * MIDEN_AIR_COUNT - 1,
+        ),
+    )?;
+
+    let positions_ptr =
+        geometry.ood_scatter_table_ptr.checked_add(plan.maps_offset).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "VM proof-order map overflows")
+        })?;
+    let ids_ptr = positions_ptr.checked_add(MIDEN_AIR_COUNT).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "VM proof-order map overflows")
+    })?;
+    replace_masm_const(&mut layout, "PROOF_ORDER_POSITIONS_PTR", &positions_ptr.to_string())?;
+    replace_masm_const(&mut layout, "PROOF_ORDER_IDS_PTR", &ids_ptr.to_string())?;
 
     replace_line_with_prefix(
         &mut layout,
@@ -490,7 +582,7 @@ struct ScatterSource {
     air: usize,
     dst: usize,
     blocks: usize,
-    slot_offset: usize,
+    group_slots_offset: usize,
 }
 
 /// Compile-time shape of the out-of-domain ingest scatter.
@@ -503,6 +595,9 @@ struct ScatterPlan {
     lengths: Vec<usize>,
     /// Offset, in felts from the table base, of the first `pipe_k` digest word.
     digest_offset: usize,
+    /// Offset, in felts from the table base, of the proof-order maps: `pos_by_id` followed by
+    /// `id_by_pos`, one felt per AIR each.
+    maps_offset: usize,
 }
 
 impl ScatterPlan {
@@ -555,7 +650,7 @@ fn vm_scatter_plan(geometry: &VmGeometry) -> io::Result<ScatterPlan> {
                 ),
             ));
         }
-        let group_slot_offset = OOD_SCATTER_SLOTS_OFFSET + 2 * slot;
+        let group_slots_offset = OOD_SCATTER_SLOTS_OFFSET + 2 * slot;
         let mut canonical = group_base;
         let mut position = 0usize;
         for (air, width) in widths.iter().enumerate() {
@@ -569,7 +664,7 @@ fn vm_scatter_plan(geometry: &VmGeometry) -> io::Result<ScatterPlan> {
                     air,
                     dst: canonical,
                     blocks,
-                    slot_offset: group_slot_offset,
+                    group_slots_offset,
                 });
                 dispatches.push(ScatterDispatch {
                     group,
@@ -607,13 +702,15 @@ fn vm_scatter_plan(geometry: &VmGeometry) -> io::Result<ScatterPlan> {
 
     // Digest words must be word-aligned, so they follow the pair table at the next word boundary.
     let digest_offset = (OOD_SCATTER_SLOTS_OFFSET + 2 * slot).next_multiple_of(WORD_FELTS);
-    let required = digest_offset + WORD_FELTS * lengths.len();
+    // The proof-order maps follow the digests: `pos_by_id`, then `id_by_pos`.
+    let maps_offset = digest_offset + WORD_FELTS * lengths.len();
+    let required = maps_offset + 2 * MIDEN_AIR_COUNT;
     if required > OOD_SCATTER_TABLE_FELTS {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "the out-of-domain scatter table needs {required} felts but OOD_SCATTER_TABLE_PTR \
-                 reserves {OOD_SCATTER_TABLE_FELTS}"
+                "the out-of-domain scatter table and proof-order maps need {required} felts but \
+                 OOD_SCATTER_TABLE_PTR reserves {OOD_SCATTER_TABLE_FELTS}"
             ),
         ));
     }
@@ -630,6 +727,7 @@ fn vm_scatter_plan(geometry: &VmGeometry) -> io::Result<ScatterPlan> {
         sources,
         lengths,
         digest_offset,
+        maps_offset,
     })
 }
 
@@ -642,8 +740,42 @@ fn scatter_cell_load(offset: usize) -> String {
     }
 }
 
+/// Loads one AIR's staged proof-order position, leaving it on the stack.
+fn scatter_position_load(air: usize) -> String {
+    if air == 0 {
+        "dup mem_load".into()
+    } else {
+        format!("dup add.{air} mem_load")
+    }
+}
+
 fn render_vm_ood_frames(geometry: &VmGeometry) -> io::Result<String> {
     let plan = vm_scatter_plan(geometry)?;
+    // Word reads and writes need word-aligned bases; the pass falls back to single-cell accesses
+    // otherwise, so alignment is a layout fact checked here, not an assumption.
+    let stark_constants = read_file(STARK_CONSTANTS_PATH)?;
+    let heights_ptr = parse_masm_const::<usize>(
+        &stark_constants,
+        "AIR_TRACE_LENGTH_LOGS_PTR",
+        STARK_CONSTANTS_PATH,
+    )
+    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let ids_ptr = geometry
+        .ood_scatter_table_ptr
+        .checked_add(plan.maps_offset)
+        .and_then(|ptr| ptr.checked_add(MIDEN_AIR_COUNT))
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "VM proof-order map overflows")
+        })?;
+    let proof_order_maps = render_proof_order_maps(&ProofOrderMapsConfig {
+        num_airs: MIDEN_AIR_COUNT,
+        heights_ptr: "exec.constants::air_trace_length_logs_ptr",
+        pos_by_id_ptr: "exec.layout::proof_order_positions_ptr",
+        id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
+        word_load_heights: heights_ptr.is_multiple_of(WORD_FELTS),
+        word_store_ids: ids_ptr.is_multiple_of(WORD_FELTS),
+    })
+    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
 
     let pipes = plan
         .lengths
@@ -671,8 +803,7 @@ fn render_vm_ood_frames(geometry: &VmGeometry) -> io::Result<String> {
         .iter()
         .map(|blocks| {
             format!(
-                "    procref.pipe_{blocks} exec.layout::ood_scatter_table_ptr add.{offset} \
-                 mem_storew_le dropw",
+                "    procref.pipe_{blocks} dup.4 add.{offset} mem_storew_le dropw",
                 offset = plan.digest_offset_for(*blocks),
             )
         })
@@ -686,23 +817,21 @@ fn render_vm_ood_frames(geometry: &VmGeometry) -> io::Result<String> {
             continue;
         }
         let mut block = format!(
-            "\n    exec.constants::air_trace_length_logs_ptr push.NUM_AIRS push.{air}\n    \
-             exec.utils::proof_order_position_from_heights\n    \
-             # => [pos]\n"
+            "\n    # AIR {air}: its pair slots start at table + 2 * pos_by_id[{air}]\n    \
+             {position} mul.2 dup.2 add\n    # => [base, pos_ptr, table]\n",
+            position = scatter_position_load(air),
         );
         for source in sources {
             block += &format!(
                 "    # {group}: {blocks} blocks at row offset {dst}\n    \
-                 push.{dst} dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.{slot} \
-                 mem_store\n    \
-                 exec.layout::ood_scatter_table_ptr add.{digest} dup.1 mul.2 \
-                 exec.layout::ood_scatter_table_ptr add add.{next} mem_store\n",
+                 push.{dst} dup.1 add.{slot} mem_store\n    \
+                 dup.2 add.{digest} dup.1 add.{next} mem_store\n",
                 group = source.group,
                 blocks = source.blocks,
                 dst = source.dst,
-                slot = source.slot_offset,
+                slot = source.group_slots_offset,
                 digest = plan.digest_offset_for(source.blocks),
-                next = source.slot_offset + 1,
+                next = source.group_slots_offset + 1,
             );
         }
         block += "    drop\n";
@@ -744,7 +873,6 @@ fn render_vm_ood_frames(geometry: &VmGeometry) -> io::Result<String> {
     Ok(format!(
         r#"# GENERATED by `cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write` — do not edit by hand.
 use miden::core::stark::constants
-use miden::core::stark::utils
 use miden::core::sys::vm::layout
 
 # Number of AIR instances in the relation.
@@ -758,20 +886,27 @@ const NUM_AIRS = {num_airs}
 # The advice stream supplies {ood_felts} base felts, read as {pipe_blocks} `adv_pipe` blocks.
 
 {pipes}
+{proof_order_maps}
 #! Stages the proof-order-dependent half of the out-of-domain scatter table.
 #!
 #! The proof commits each AIR's trace at its position in the height-sorted proof order, while the
 #! constraint circuit reads it at the AIR's canonical instance offset. Both the canonical
 #! destination and the segment length are compile-time per AIR; this procedure only routes them to
-#! the stream position the absorbed trace heights put that AIR in.
+#! the stream position `stage_proof_order_maps` recorded for that AIR.
 #!
-#! Must run after the AIR heights are stored and before the first out-of-domain row is ingested.
+#! Must run after the proof-order maps are staged and before the first out-of-domain row is
+#! ingested.
 #!
 #! Inputs:  []
 #! Outputs: []
 pub proc stage_ood_scatter_table
+    exec.layout::ood_scatter_table_ptr
+    # => [table]
 {digest_staging}
-{order_pass}end
+    exec.layout::proof_order_positions_ptr
+    # => [pos_ptr, table]
+{order_pass}    drop drop
+end
 
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
 #!
@@ -799,6 +934,7 @@ end
         quotient = geometry.quotient_width,
         ood_felts = geometry.ood_row_felts,
         pipe_blocks = geometry.ood_pipe_blocks,
+        proof_order_maps = proof_order_maps,
         order_pass = order_pass.join(""),
     ))
 }
@@ -954,6 +1090,7 @@ fn word_to_array(word: Word) -> [Felt; 4] {
 fn render_constraints_eval_file(
     circuit: &miden_air::ace::RecursiveAceCircuit,
     quotient_inputs: QuotientRecompositionInputs<Felt>,
+    geometry: &VmGeometry,
 ) -> io::Result<String> {
     miden_ace_codegen::render_masm_constraints_eval(&miden_ace_codegen::MasmConstraintsEvalConfig {
         generated_by: "cargo run -p miden-core-lib --features constraints-tools --bin \
@@ -965,8 +1102,12 @@ fn render_constraints_eval_file(
         max_cycle_len_log: max_periodic_cycle_len_log(),
         num_airs: MIDEN_AIR_COUNT,
         // The VM's canonical READ layout reserves one fold-coefficient slot per AIR, so its
-        // evaluator stages them; that block is what makes the circuit order-invariant.
-        stages_fold_coefficients: true,
+        // evaluator stages them from the proof-order maps; that block is what makes the circuit
+        // order-invariant.
+        fold_coefficients: Some(FoldCoefficientStaging {
+            id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
+            coefficient_offset: geometry.fold_coefficient_offset,
+        }),
         quotient_inputs,
         circuit_digest: circuit.commitment,
     })
@@ -1049,13 +1190,12 @@ fn relation_digest_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), 
         return Err("EIDOS_PREPROCESSED_COMMITMENT in verifier/src/lib.rs is stale".into());
     }
 
-    // Both the boundary weighting and `scatter_aux_bus_boundary` unroll one block per AIR against
-    // this bound; a stale value would drop the extra AIR from the weighted sum and leave its
-    // boundary value at its proof-order address.
-    let aux_trace = read_file(VM_AUX_TRACE_PATH).map_err(|e| e.to_string())?;
-    let scatter_airs = parse_masm_const::<usize>(&aux_trace, "NUM_AIRS", VM_AUX_TRACE_PATH)?;
+    // The generated map/scatter hook is specialized to one block per AIR. A stale value would
+    // leave an AIR without a routed out-of-domain segment.
+    let ood_frames = read_file(VM_OOD_FRAMES_PATH).map_err(|e| e.to_string())?;
+    let scatter_airs = parse_masm_const::<usize>(&ood_frames, "NUM_AIRS", VM_OOD_FRAMES_PATH)?;
     if scatter_airs != MIDEN_AIR_COUNT {
-        return Err("NUM_AIRS in sys/vm/aux_trace.masm is stale".into());
+        return Err("NUM_AIRS in sys/vm/ood_frames.masm is stale".into());
     }
 
     Ok(())
@@ -1397,6 +1537,8 @@ mod tests {
             auxiliary_ace_inputs_ptr: 0,
             ace_circuit_stream_ptr: 0,
             current_trace_row_ptr: 0,
+            ood_scatter_table_ptr: 0,
+            fold_coefficient_offset: 0,
         }
     }
 

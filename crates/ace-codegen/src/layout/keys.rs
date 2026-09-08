@@ -18,9 +18,10 @@ pub enum InputKey {
     MultiAirFoldBeta,
     /// Fold coefficient for the AIR instance at the given index.
     ///
-    /// Has a real READ-layout slot. The MASM verifier populates it with `beta^(N-1-pos(k))`,
-    /// where `pos(k)` is the AIR's position in the height-sorted proof order, via
-    /// `stark::constraints_eval_inputs::stage_air_fold_coefficients`.
+    /// Has a real READ-layout slot. Each relation's generated evaluator
+    /// (`sys/<relation>/constraints_eval.masm`) populates it with `beta^(N-1-pos(k))`, where
+    /// `pos(k)` is the AIR's position in the height-sorted proof order, by walking the staged
+    /// proof-order maps.
     MultiAirFoldCoeff(usize),
     /// Preprocessed trace value at (offset, index).
     Preprocessed { offset: usize, index: usize },

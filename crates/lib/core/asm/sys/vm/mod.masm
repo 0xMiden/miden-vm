@@ -87,9 +87,11 @@ pub proc load_air_context
     u32max
     exec.constants::set_trace_length_log
 
-    # Route each AIR's canonical out-of-domain destination to its proof-order stream position.
-    # The heights are stored above and unchanged from here on, so this runs once per proof rather
-    # than once per ingested row.
+    # Derive the height-sorted proof order once from the heights stored above, then route each
+    # AIR's canonical out-of-domain destination to its proof-order stream position. The heights are
+    # unchanged from here on, so both run once per proof; the auxiliary-boundary placement and the
+    # fold-coefficient staging reuse the same maps.
+    exec.ood_frames::stage_proof_order_maps
     exec.ood_frames::stage_ood_scatter_table
 
     exec.store_relation_digest

@@ -57,9 +57,9 @@ const PREPROCESSED_COMMITMENT_3 = 5080896414781165458
 
 #! Loads the fixed PVM relation context.
 #!
-#! Stores the ten AIR heights in `ChipletAir::all()` order, their maximum, each chiplet's position
-#! in the height-sorted proof order, the out-of-domain scatter table, relation commitments, and
-#! fixed OOD/query-row addresses.
+#! Stores the ten AIR heights in `ChipletAir::all()` order, their maximum, both inverse maps of the
+#! height-sorted proof order, the out-of-domain scatter table, relation commitments, and fixed
+#! OOD/query-row addresses.
 #!
 #! Advice order: [h0, ..., h9].
 #! Inputs:  [...]
@@ -83,9 +83,9 @@ pub proc load_air_context
     drop
     exec.constants::set_trace_length_log
 
-    # The heights are stored above and unchanged from here on, so both ingest scatters read each
-    # chiplet's proof-order position from this table rather than re-ranking the heights per use.
-    exec.stage_proof_order_positions
+    # The heights are stored above and unchanged from here on. Derive both inverse maps once: the
+    # ingest scatters use pos_by_id, and fold-coefficient staging uses id_by_pos.
+    exec.ood_frames::stage_proof_order_maps
 
     # Route each chiplet's canonical out-of-domain destination to its proof-order stream position.
     exec.ood_frames::stage_ood_scatter_table
@@ -100,59 +100,6 @@ pub proc load_air_context
     exec.constants::set_auxiliary_ace_inputs_address
     exec.layout::aux_rand_elem_ptr
     exec.constants::set_aux_rand_elem_address
-end
-
-#! Stores each chiplet's position in the stable height-sorted proof order, indexed by its
-#! `ChipletAir::all()` instance index.
-#!
-#! Both ingest scatters — the out-of-domain row scatter and the auxiliary-bus boundary scatter —
-#! address the proof stream by these positions. Ranking the heights once per chiplet here instead
-#! of once per use is what keeps that addressing off the per-row path.
-#!
-#! The AIR heights must already be stored.
-#!
-#! Inputs:  []
-#! Outputs: []
-pub proc stage_proof_order_positions
-    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.0
-    exec.utils::proof_order_position_from_heights
-    exec.layout::proof_order_positions_ptr mem_store
-
-    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.1
-    exec.utils::proof_order_position_from_heights
-    exec.layout::proof_order_positions_ptr add.1 mem_store
-
-    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.2
-    exec.utils::proof_order_position_from_heights
-    exec.layout::proof_order_positions_ptr add.2 mem_store
-
-    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.3
-    exec.utils::proof_order_position_from_heights
-    exec.layout::proof_order_positions_ptr add.3 mem_store
-
-    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.4
-    exec.utils::proof_order_position_from_heights
-    exec.layout::proof_order_positions_ptr add.4 mem_store
-
-    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.5
-    exec.utils::proof_order_position_from_heights
-    exec.layout::proof_order_positions_ptr add.5 mem_store
-
-    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.6
-    exec.utils::proof_order_position_from_heights
-    exec.layout::proof_order_positions_ptr add.6 mem_store
-
-    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.7
-    exec.utils::proof_order_position_from_heights
-    exec.layout::proof_order_positions_ptr add.7 mem_store
-
-    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.8
-    exec.utils::proof_order_position_from_heights
-    exec.layout::proof_order_positions_ptr add.8 mem_store
-
-    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.9
-    exec.utils::proof_order_position_from_heights
-    exec.layout::proof_order_positions_ptr add.9 mem_store
 end
 
 #! Loads, validates, stores, and folds one instance's log height into the running maximum.

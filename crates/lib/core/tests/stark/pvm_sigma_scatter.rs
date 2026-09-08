@@ -44,7 +44,7 @@ fn total_values() -> usize {
 /// The canonical chiplet occupying each proof position.
 ///
 /// The proof order sorts ascending by log height with the canonical instance index breaking ties,
-/// which is what `stark::utils::proof_order_position_from_heights` computes one chiplet at a time.
+/// which is what `sys::pvm::ood_frames::stage_proof_order_maps` derives once from the heights.
 fn proof_order(heights: &[u64]) -> Vec<usize> {
     let mut order: Vec<usize> = (0..heights.len()).collect();
     order.sort_by_key(|&air| (heights[air], air));
@@ -174,13 +174,13 @@ fn source(heights: &[u64], scatter: bool) -> String {
     };
     format!(
         "use miden::core::stark::constants
-use miden::core::sys::pvm
 use miden::core::sys::pvm::aux_trace
 use miden::core::sys::pvm::layout
+use miden::core::sys::pvm::ood_frames
 
 begin
 {stores}
-    exec.pvm::stage_proof_order_positions
+    exec.ood_frames::stage_proof_order_maps
 
     push.{s3}.{s2}.{s1}.{s0}
 
@@ -224,7 +224,7 @@ fn run(heights: &[u64], scatter: bool) -> Vec<u64> {
 // TESTS
 // ================================================================================================
 
-/// The scatter resolves one proof position per chiplet and addresses exactly the boundary region
+/// The scatter reads one `pos_by_id` entry per chiplet and addresses exactly the boundary region
 /// the circuit reads.
 #[test]
 fn the_scatter_covers_every_chiplet_of_the_relation() {

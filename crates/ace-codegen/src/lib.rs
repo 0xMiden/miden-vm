@@ -28,7 +28,9 @@
 //! - `masm`: shared renderer for relation-local MASM constraint evaluators.
 //! - `randomness`: challenge input planning for layouts + DAG lowering.
 //! - `quotient`: barycentric quotient recomposition helpers (used by DAG + tests).
-//! - `proof_order`: Lehmer ranking of a relation's committed-trace orderings.
+//! - `proof_order`: Lehmer ranking and the sorting network of a relation's committed-trace
+//!   orderings.
+//! - `order_maps`: shared renderer for the MASM proof-order pass that materializes inverse maps.
 
 // Core IR and lowering.
 mod circuit;
@@ -38,6 +40,7 @@ mod dag;
 mod encode;
 mod layout;
 mod masm;
+mod order_maps;
 mod proof_order;
 mod quotient;
 mod randomness;
@@ -74,7 +77,8 @@ pub use crate::{
     dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
     encode::EncodedCircuit,
     layout::{InputCounts, InputKey, InputLayout},
-    masm::{MasmConstraintsEvalConfig, render_masm_constraints_eval},
+    masm::{FoldCoefficientStaging, MasmConstraintsEvalConfig, render_masm_constraints_eval},
+    order_maps::{ProofOrderMapsConfig, render_proof_order_maps},
     pipeline::{
         AceArtifacts, AceConfig, LayoutKind, build_ace_circuit_for_air, build_ace_dag_for_air,
         build_canonical_multi_air_ace_circuit, build_multi_air_ace_circuit,

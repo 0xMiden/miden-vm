@@ -48,8 +48,8 @@ end
 #! The proof submits one sum per chiplet ordered by trace height, so the absorb above stores them
 #! in that order. The constraint circuit instead reads chiplet `k`'s sum at
 #! `AUX_BUS_BOUNDARY_PTR + 2k`, the address `InputKey::AuxBusBoundary(k)` names, with `k` the
-#! canonical instance index. Positions come from the table `pvm::stage_proof_order_positions`
-#! stages once per proof, not from a per-call ranking of the heights.
+#! canonical instance index. The `pos_by_id` table staged once per proof by
+#! `ood_frames::stage_proof_order_maps` supplies these positions.
 #!
 #! Every sum is read onto the operand stack before any is written back, so the region is permuted
 #! in place without scratch memory. The AIR heights and their proof-order positions must already

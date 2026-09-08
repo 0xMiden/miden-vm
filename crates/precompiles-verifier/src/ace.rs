@@ -315,7 +315,7 @@ mod tests {
     /// exhaustive sweep is out of reach and end-to-end proofs only ever exercise a handful.
     #[test]
     fn canonical_circuit_matches_the_per_order_builder_for_structured_orders() {
-        use miden_ace_codegen::{EXT_DEGREE, InputLayout};
+        use miden_ace_codegen::EXT_DEGREE;
         use miden_lifted_air::BaseAir;
 
         let airs = ChipletAir::all();
@@ -333,25 +333,13 @@ mod tests {
             "a second preprocessed chiplet would make the preprocessed region order-dependent"
         );
 
-        // Zero the quotient openings so the shared `q * v` binding drops out of both circuits and
-        // the evaluation is exactly the fold of the per-chiplet accumulators.
-        let zero_quotient = |layout: &InputLayout, inputs: &mut [QuadFelt]| {
-            for chunk in 0..layout.counts.num_quotient_chunks {
-                for offset in 0..2 {
-                    for coord in 0..EXT_DEGREE {
-                        let key = InputKey::QuotientChunkCoord { offset, chunk, coord };
-                        inputs[layout.index(key).expect("quotient slot")] = QuadFelt::ZERO;
-                    }
-                }
-            }
-        };
-
         let widths = chiplet_block_widths();
         let identity: [usize; NUM_CHIPLETS] = core::array::from_fn(|index| index);
         let canonical_offsets = chiplet_block_offsets(&widths, &identity);
 
-        let mut base = pseudo_random_inputs(canonical_layout.total_inputs);
-        zero_quotient(&canonical_layout, &mut base);
+        // Keep the quotient openings non-zero: the shared `q * v` binding is part of what the
+        // canonical circuit must reproduce, so every per-order input set receives the same values.
+        let base = pseudo_random_inputs(canonical_layout.total_inputs);
 
         let beta = QuadFelt::from_u64(97);
         // Duplicate orders would evaluate identically and defeat the non-vacuity check below.
@@ -380,7 +368,15 @@ mod tests {
             // the shared generator therefore gives both the same public, randomness, and
             // preprocessed values, and only the per-chiplet trace blocks need routing.
             let mut inputs = pseudo_random_inputs(per_order_layout.total_inputs);
-            zero_quotient(&per_order_layout, &mut inputs);
+            for chunk in 0..per_order_layout.counts.num_quotient_chunks {
+                for offset in 0..2 {
+                    for coord in 0..EXT_DEGREE {
+                        let key = InputKey::QuotientChunkCoord { offset, chunk, coord };
+                        inputs[per_order_layout.index(key).expect("proof quotient slot")] =
+                            base[canonical_layout.index(key).expect("canonical quotient slot")];
+                    }
+                }
+            }
 
             for index in 0..NUM_CHIPLETS {
                 let (main_width, aux_width, boundary_width) = widths[index];

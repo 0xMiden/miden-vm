@@ -18,7 +18,8 @@ use std::{
 };
 
 use miden_ace_codegen::{
-    InputKey, InputLayout, MasmConstraintsEvalConfig, render_masm_constraints_eval,
+    EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, MasmConstraintsEvalConfig,
+    render_masm_constraints_eval,
 };
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
@@ -49,6 +50,8 @@ const PVM_RELATION_MOD_PATH: &str = "../lib/core/asm/sys/pvm/mod.masm";
 const PVM_READ_START: u32 = 3_225_432_064;
 /// Start of the VM relation's next scratch region; the PVM allocation must end before it.
 const NEXT_VM_REGION_START: u32 = 3_238_002_688;
+/// `pos_by_id` is padded to a whole word so the following `id_by_pos` table is word-aligned.
+const PROOF_ORDER_POSITIONS_FELTS: u32 = (NUM_CHIPLETS as u32).next_multiple_of(4);
 
 /// Whether [`run`] re-mints the committed artifacts (`Write`) or byte-compares a freshly
 /// built set against them (`Check`).
@@ -103,6 +106,8 @@ struct PvmReadLayout {
     regions: Vec<PvmReadRegion>,
     stream_ptr: u32,
     query_row_felts: u32,
+    /// Felt offset of chiplet 0's fold-coefficient slot from `AUXILIARY_ACE_INPUTS_PTR`.
+    fold_coefficient_offset: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -188,6 +193,18 @@ impl PvmReadLayout {
         if fold_coefficients_end > layout.total_inputs {
             return Err("PVM fold coefficients fall outside the declared READ section".into());
         }
+        let alpha_index = layout
+            .index(InputKey::Alpha)
+            .ok_or_else(|| "PVM ACE layout is missing its stark-vars base".to_string())?;
+        let first_fold_coefficient =
+            layout.index(InputKey::MultiAirFoldCoeff(0)).ok_or_else(|| {
+                "PVM ACE layout is missing its first fold-coefficient slot".to_string()
+            })?;
+        let fold_coefficient_offset = first_fold_coefficient
+            .checked_sub(alpha_index)
+            .ok_or_else(|| "PVM fold coefficients precede the stark-vars base".to_string())?
+            .checked_mul(EXT_DEGREE)
+            .ok_or_else(|| "PVM fold-coefficient felt offset overflows usize".to_string())?;
 
         let regions = boundaries
             .windows(2)
@@ -211,7 +228,12 @@ impl PvmReadLayout {
         )
         .map_err(|_| "PVM query row exceeds u32 memory".to_string())?;
 
-        Ok(Self { regions, stream_ptr, query_row_felts })
+        Ok(Self {
+            regions,
+            stream_ptr,
+            query_row_felts,
+            fold_coefficient_offset,
+        })
     }
 }
 
@@ -246,10 +268,18 @@ fn compute() -> Result<GeneratedArtifacts, String> {
 
     let geometry = PvmOodGeometry::from_input_layout(&input_layout)?;
     let layout_masm = render_pvm_layout(&read_layout, shape.stream_len)?;
-    let ood_frames_masm = render_pvm_ood_frames(&geometry)?;
+    let stream_len = u32::try_from(shape.stream_len)
+        .map_err(|_| "PVM ACE stream length exceeds u32 memory".to_string())?;
+    let scratch = pvm_scratch_allocation(&read_layout, stream_len)?;
+    let ood_frames_masm =
+        render_pvm_ood_frames(&geometry, scratch.proof_order_ids_ptr.is_multiple_of(4))?;
     let deep_queries_masm = render_pvm_deep_queries(&geometry)?;
-    let constraints_eval_masm =
-        render_pvm_constraints_eval(shape, circuit_digest, quotient_inputs)?;
+    let constraints_eval_masm = render_pvm_constraints_eval(
+        shape,
+        circuit_digest,
+        quotient_inputs,
+        read_layout.fold_coefficient_offset,
+    )?;
 
     let mut relation_mod_masm = read_generated_file(PVM_RELATION_MOD_PATH)?;
     for (prefix, word) in [
@@ -334,9 +364,25 @@ fn preprocessed_commitment(digest: [Felt; 4]) -> Word {
     Word::new(commitment.map(Felt::new_unchecked))
 }
 
-fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String, String> {
-    let stream_len = u32::try_from(stream_len)
-        .map_err(|_| "PVM ACE stream length exceeds u32 memory".to_string())?;
+/// Relation-local scratch that follows the ACE READ section, in allocation order.
+struct PvmScratchAllocation {
+    stream_end: u32,
+    bus_gamma_ptr: u32,
+    c_total_ptr: u32,
+    current_trace_row_ptr: u32,
+    preprocessed_com_ptr: u32,
+    ood_scatter_table_ptr: u32,
+    proof_order_positions_ptr: u32,
+    proof_order_ids_ptr: u32,
+    allocation_end: u32,
+}
+
+/// Lays out the scratch regions after a `stream_len`-felt circuit stream, checking every
+/// alignment their MASM consumers rely on.
+fn pvm_scratch_allocation(
+    layout: &PvmReadLayout,
+    stream_len: u32,
+) -> Result<PvmScratchAllocation, String> {
     let stream_end = layout
         .stream_ptr
         .checked_add(stream_len)
@@ -369,14 +415,48 @@ fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String
     let proof_order_positions_ptr = ood_scatter_table_ptr
         .checked_add(OOD_SCATTER_TABLE_FELTS)
         .ok_or_else(|| "PVM out-of-domain scatter table overflows u32".to_string())?;
-    let allocation_end = proof_order_positions_ptr
-        .checked_add(NUM_CHIPLETS as u32)
+    // The ten live `pos_by_id` cells are padded to a whole word so that `id_by_pos`, which the
+    // proof-order pass writes with word stores, starts word-aligned.
+    let proof_order_ids_ptr = proof_order_positions_ptr
+        .checked_add(PROOF_ORDER_POSITIONS_FELTS)
         .ok_or_else(|| "PVM proof-order position table overflows u32".to_string())?;
+    let allocation_end = proof_order_ids_ptr
+        .checked_add(NUM_CHIPLETS as u32)
+        .ok_or_else(|| "PVM proof-order id table overflows u32".to_string())?;
     if allocation_end > NEXT_VM_REGION_START {
         return Err(format!(
             "PVM ACE allocation {PVM_READ_START}..{allocation_end} reaches the VM scratch region starting at {NEXT_VM_REGION_START}"
         ));
     }
+
+    Ok(PvmScratchAllocation {
+        stream_end,
+        bus_gamma_ptr,
+        c_total_ptr,
+        current_trace_row_ptr,
+        preprocessed_com_ptr,
+        ood_scatter_table_ptr,
+        proof_order_positions_ptr,
+        proof_order_ids_ptr,
+        allocation_end,
+    })
+}
+
+fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String, String> {
+    let stream_len = u32::try_from(stream_len)
+        .map_err(|_| "PVM ACE stream length exceeds u32 memory".to_string())?;
+    let PvmScratchAllocation {
+        stream_end,
+        bus_gamma_ptr,
+        c_total_ptr,
+        current_trace_row_ptr,
+        preprocessed_com_ptr,
+        ood_scatter_table_ptr,
+        proof_order_positions_ptr,
+        proof_order_ids_ptr,
+        allocation_end,
+    } = pvm_scratch_allocation(layout, stream_len)?;
+    let proof_order_padding = PROOF_ORDER_POSITIONS_FELTS - NUM_CHIPLETS as u32;
 
     let mut out = String::new();
     writeln!(out, "# GENERATED by `{GENERATED_BY}` — do not edit by hand.")
@@ -449,9 +529,19 @@ fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String
     .expect("writing to String cannot fail");
     writeln!(
         out,
-        "### {NUM_CHIPLETS} felts: {proof_order_positions_ptr}..{allocation_end}. Position of each chiplet, in\n\
-         ### ChipletAir::all() order, within the height-sorted proof order. Staged once per proof by\n\
-         ### `sys/pvm/mod.masm`; read by both ingest scatters.\nconst PROOF_ORDER_POSITIONS_PTR = {proof_order_positions_ptr}\n"
+        "### {PROOF_ORDER_POSITIONS_FELTS} felts: {proof_order_positions_ptr}..{proof_order_ids_ptr}. `pos_by_id`: the position of each\n\
+         ### chiplet, in ChipletAir::all() order, within the height-sorted proof order. The first\n\
+         ### {NUM_CHIPLETS} cells are live and the final {proof_order_padding} pad the following table to a word boundary.\n\
+         ### Staged once per proof by `sys/pvm/ood_frames.masm::stage_proof_order_maps`; read by both\n\
+         ### ingest scatters.\nconst PROOF_ORDER_POSITIONS_PTR = {proof_order_positions_ptr}\n"
+    )
+    .expect("writing to String cannot fail");
+    writeln!(
+        out,
+        "### {NUM_CHIPLETS} felts: {proof_order_ids_ptr}..{allocation_end}. `id_by_pos`: the\n\
+         ### ChipletAir::all() index committed at each proof position. Staged with `pos_by_id`;\n\
+         ### read by the reverse fold-coefficient walk in `sys/pvm/constraints_eval.masm`.\n\
+         const PROOF_ORDER_IDS_PTR = {proof_order_ids_ptr}\n"
     )
     .expect("writing to String cannot fail");
 
@@ -472,6 +562,7 @@ fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String
     out.push_str("\npub proc preprocessed_com_ptr\n    push.PREPROCESSED_COM_PTR\nend\n");
     out.push_str("\npub proc ood_scatter_table_ptr\n    push.OOD_SCATTER_TABLE_PTR\nend\n");
     out.push_str("\npub proc proof_order_positions_ptr\n    push.PROOF_ORDER_POSITIONS_PTR\nend\n");
+    out.push_str("\npub proc proof_order_ids_ptr\n    push.PROOF_ORDER_IDS_PTR\nend\n");
 
     Ok(out)
 }
@@ -480,6 +571,7 @@ fn render_pvm_constraints_eval(
     shape: CircuitShape,
     circuit_digest: Word,
     quotient_inputs: QuotientRecompositionInputs<Felt>,
+    fold_coefficient_offset: usize,
 ) -> Result<String, String> {
     let max_cycle_len_log = max_periodic_cycle_len_log()?;
     render_masm_constraints_eval(&MasmConstraintsEvalConfig {
@@ -490,7 +582,10 @@ fn render_pvm_constraints_eval(
         stream_len: shape.stream_len,
         max_cycle_len_log,
         num_airs: NUM_CHIPLETS,
-        stages_fold_coefficients: true,
+        fold_coefficients: Some(FoldCoefficientStaging {
+            id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
+            coefficient_offset: fold_coefficient_offset,
+        }),
         quotient_inputs,
         circuit_digest,
     })
@@ -714,10 +809,34 @@ mod tests {
     use miden_core::{Felt, Word};
 
     use super::{
-        CircuitShape, PVM_DEEP_QUERIES_PATH, PvmOodGeometry, apply_pvm_deep_query_geometry,
+        CircuitShape, NEXT_VM_REGION_START, PROOF_ORDER_POSITIONS_FELTS, PVM_DEEP_QUERIES_PATH,
+        PvmOodGeometry, PvmReadLayout, apply_pvm_deep_query_geometry, pvm_scratch_allocation,
         read_generated_file, render_pvm_deep_queries, replace_limb_array_const, replace_masm_const,
         replace_shape_const,
     };
+
+    #[test]
+    fn pvm_proof_order_tables_are_disjoint_and_word_aligned() {
+        let canonical = crate::ace::build_canonical_precompile_ace_circuit().unwrap();
+        let read_layout = PvmReadLayout::from_input_layout(canonical.layout()).unwrap();
+        let circuit = crate::ace::build_pvm_recursive_verifier_ace_circuit().unwrap();
+        let stream_len = u32::try_from(circuit.stream_len).unwrap();
+        let scratch = pvm_scratch_allocation(&read_layout, stream_len).unwrap();
+
+        assert!(scratch.proof_order_positions_ptr.is_multiple_of(4));
+        assert!(scratch.proof_order_ids_ptr.is_multiple_of(4));
+        assert_eq!(
+            scratch.proof_order_ids_ptr - scratch.proof_order_positions_ptr,
+            PROOF_ORDER_POSITIONS_FELTS,
+            "the ten live pos_by_id cells must be padded from 10 to 12 felts"
+        );
+        assert_eq!(
+            scratch.allocation_end - scratch.proof_order_ids_ptr,
+            miden_precompiles_air::NUM_CHIPLETS as u32,
+            "id_by_pos must reserve exactly one cell per chiplet"
+        );
+        assert!(scratch.allocation_end <= NEXT_VM_REGION_START);
+    }
 
     #[test]
     fn relation_constants_are_replaced_without_touching_the_wrapper() {
