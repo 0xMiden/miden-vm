@@ -37,13 +37,14 @@ pub const BLOCK_LEN: usize = 8;
 /// Number of felts in an Eidos digest.
 pub const DIGEST_WIDTH: usize = 4;
 
-/// Number of independent Eidos inputs processed by the selected native packed backend.
+/// Number of independent Eidos inputs in one logical packed batch.
 ///
-/// The width is selected at compile time from the target features. Callers should always process
-/// tails by repeating a real lane and discarding the duplicate outputs.
+/// The logical width is fixed across targets. Backends with narrower SIMD registers process the
+/// batch in independent sub-batches. Callers should fill tails by repeating a real lane and
+/// discard the duplicate outputs.
 pub const PACKED_LANES: usize = primitive::PACKED_LANES;
 
-/// One packed base-field element, with one independent value per native SIMD lane.
+/// One packed base-field element, with one independent value per logical packed lane.
 pub type PackedFelt = [crate::Felt; PACKED_LANES];
 
 /// Lane-oriented chaining value retained between packed compression calls.
@@ -51,14 +52,14 @@ pub type PackedFelt = [crate::Felt; PACKED_LANES];
 /// Packing into field elements is reserved for API boundaries.
 type PackedU32ChainingValue = [[u32; PACKED_LANES]; 8];
 
-/// One packed Eidos chaining value, with one independent CV per native SIMD lane.
+/// One packed Eidos chaining value, with one independent CV per logical packed lane.
 ///
 /// Raw compression accepts arbitrary canonical field elements here; callers must not assume that
 /// an input CV already lies in Eidos's 252-bit output subspace.
 pub type PackedChainingValue = [PackedFelt; DIGEST_WIDTH];
 
-/// One packed Eidos digest, with one independent digest per native SIMD lane.
+/// One packed Eidos digest, with one independent digest per logical packed lane.
 pub type PackedDigest = PackedChainingValue;
 
-/// One packed Eidos message block, with one independent block per native SIMD lane.
+/// One packed Eidos message block, with one independent block per logical packed lane.
 pub type PackedBlock = [PackedFelt; BLOCK_LEN];

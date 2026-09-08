@@ -6,6 +6,10 @@
 
 - [BREAKING] Added Eidos hashing with typed domain separation, including Eidos-backed IES, random-coin, and length-bound LMCS implementations; existing Poseidon2 variants remain available.
 
+#### Changes
+
+- Accelerated `miden-crypto` Eidos hashing and proof-of-work grinding with a fixed 16-lane logical batch and runtime x86-64 SIMD dispatch ([#3782](https://github.com/0xMiden/miden-vm/pull/3782)).
+
 #### Fixes
 
 - Fixed `PartialMmr::from_parts()` and deserialization so they reject tracked leaves without complete authentication paths ([#3809](https://github.com/0xMiden/miden-vm/pull/3809)).

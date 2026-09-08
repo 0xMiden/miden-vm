@@ -336,21 +336,14 @@ impl GrindingChallenger for EidosChallenger {
         let cv = self.cv;
         let buffer = self.buffer;
         let buffer_len = self.buffer_len;
-        let num_batches = Felt::ORDER_U64.div_ceil(PACKED_LANES as u64);
 
         // Every candidate shares the same pre-witness challenger snapshot (`observe_felt` always
         // forces absorbing mode first, so this only ever replays that branch); only the witness
         // lane varies. One packed compression pass therefore checks `PACKED_LANES` candidates.
-        let witness = (0..num_batches)
+        let witness = (0..WITNESS_BATCHES)
             .into_par_iter()
             .map(|batch| {
-                let base = batch * PACKED_LANES as u64;
-                let candidates: PackedFelt = core::array::from_fn(|lane| {
-                    let candidate = base + lane as u64;
-                    // Lanes beyond the field order can never satisfy the PoW check; repeat the
-                    // last in-range candidate so every lane stays a canonical field element.
-                    Felt::new_unchecked(candidate.min(Felt::ORDER_U64 - 1))
-                });
+                let candidates = witness_batch(batch);
                 let accepted = check_witness_packed(cv, buffer, buffer_len, candidates, mask);
                 (0..PACKED_LANES).find(|&lane| accepted[lane]).map(|lane| candidates[lane])
             })
@@ -361,6 +354,22 @@ impl GrindingChallenger for EidosChallenger {
         assert!(self.check_witness(bits, witness));
         witness
     }
+}
+
+/// Number of `PACKED_LANES`-wide candidate batches that cover every canonical field element.
+const WITNESS_BATCHES: u64 = Felt::ORDER_U64.div_ceil(PACKED_LANES as u64);
+
+#[inline]
+fn witness_batch(batch: u64) -> PackedFelt {
+    debug_assert!(batch < WITNESS_BATCHES);
+
+    let base = batch * PACKED_LANES as u64;
+    core::array::from_fn(|lane| {
+        let candidate = base + lane as u64;
+        // No canonical candidate exists beyond the field order. Repeat the last in-range
+        // candidate so every lane stays a canonical field element.
+        Felt::new_unchecked(candidate.min(Felt::ORDER_U64 - 1))
+    })
 }
 
 /// Runs the equivalent of `EidosChallenger::check_witness` for `PACKED_LANES` independent
@@ -687,6 +696,20 @@ mod tests {
         assert_eq!(row[15..20], [0, 0, 0, 0, 0]);
     }
 
+    #[test]
+    fn witness_batches_cover_the_field_boundary_canonically() {
+        let first = witness_batch(0).map(|candidate| candidate.as_canonical_u64());
+        assert_eq!(first, core::array::from_fn(|lane| lane as u64));
+
+        let penultimate =
+            witness_batch(WITNESS_BATCHES - 2).map(|candidate| candidate.as_canonical_u64());
+        let penultimate_base = Felt::ORDER_U64 - 1 - PACKED_LANES as u64;
+        assert_eq!(penultimate, core::array::from_fn(|lane| penultimate_base + lane as u64));
+
+        let last = witness_batch(WITNESS_BATCHES - 1).map(|candidate| candidate.as_canonical_u64());
+        assert_eq!(last, [Felt::ORDER_U64 - 1; PACKED_LANES]);
+    }
+
     /// `check_witness_packed` must agree, lane by lane, with the scalar `check_witness` default
     /// implementation run on an independently cloned challenger, for every pre-witness buffer
     /// state it can be called with (`buffer_len` in `0..BLOCK_LEN`, covering both the case where
@@ -738,15 +761,26 @@ mod tests {
             for i in 0..buffer_len {
                 challenger.observe_felt(felt(200 + i as u64));
             }
-            let pre_grind = challenger.clone();
-
-            let witness = challenger.grind(bits);
-
-            let mut verifier = pre_grind;
-            assert!(
-                verifier.check_witness(bits, witness),
-                "witness from buffer_len={buffer_len} failed independent verification"
-            );
+            assert_grind_matches_independent_check(challenger, bits);
         }
+    }
+
+    #[test]
+    fn grind_from_squeezing_state_matches_independent_check() {
+        let mut challenger = EidosChallenger::new(word([1, 2, 3, 4]));
+        challenger.observe_felt(felt(200));
+        let _ = challenger.sample_felt();
+        assert_eq!(challenger.mode, EidosChallengerMode::Squeezing);
+        assert_ne!(challenger.output_len, 0);
+
+        assert_grind_matches_independent_check(challenger, 4);
+    }
+
+    fn assert_grind_matches_independent_check(mut challenger: EidosChallenger, bits: usize) {
+        let mut verifier = challenger.clone();
+        let witness = challenger.grind(bits);
+
+        assert!(verifier.check_witness(bits, witness));
+        assert_eq!(snapshot(&challenger), snapshot(&verifier));
     }
 }

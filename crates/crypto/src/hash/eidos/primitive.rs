@@ -9,6 +9,8 @@ mod blake3_schedule;
 
 pub(super) const IV: [u32; 8] = blake3_schedule::IV;
 pub(super) const PACKED_LANES: usize = blake3_schedule::PACKED_LANES;
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+pub(super) use blake3_schedule::cpu;
 
 use super::encoding::ODD_LANE_MASK;
 
@@ -89,7 +91,7 @@ impl CompressionCore {
         cv_new
     }
 
-    /// Apply compression to the build's selected native packed lane width.
+    /// Apply compression to one logical packed batch using the selected native backend.
     #[inline]
     pub(super) fn compress_packed_native(
         cv: &[[u32; PACKED_LANES]; 8],
@@ -221,10 +223,8 @@ mod tests {
         assert_eq!(CompressionCore::compress_raw(cv, block), expected);
     }
 
-    /// `compress_raw`/`compress_raw_xof` dispatch to an architecture- and (on x86_64, under the
-    /// `std` feature) runtime-CPU-selected backend; this checks every reachable backend against
-    /// the portable scalar reference over many pseudo-random inputs, not just the single fixed
-    /// vector above.
+    /// Checks the selected raw and XOF paths against the portable scalar reference over many
+    /// pseudo-random inputs, not just the single fixed vector above.
     #[test]
     fn compress_raw_and_xof_match_scalar_reference_over_random_inputs() {
         let mut state = 0x243f_6a88_85a3_08d3u64;

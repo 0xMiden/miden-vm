@@ -5,6 +5,8 @@
 //! elements are accepted in the input CV; only the output CV is placed in Eidos's 252-bit packed
 //! subspace.
 
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+use super::primitive::cpu;
 use super::{
     BLOCK_LEN, DIGEST_WIDTH, PACKED_LANES, PackedBlock, PackedChainingValue,
     PackedU32ChainingValue, encoding, primitive::CompressionCore,
@@ -83,10 +85,21 @@ pub(super) fn compress_packed_u64_block(
     cv: &PackedU32ChainingValue,
     block: &[[u64; PACKED_LANES]; BLOCK_LEN],
 ) -> PackedU32ChainingValue {
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
-    let block = avx512_u64_adapter::unpack_block(*block);
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
+    let block = if cpu::has_avx512f() {
+        // SAFETY: `cpu::has_avx512f` confirmed AVX-512F support on the running CPU.
+        unsafe { avx512_u64_adapter::unpack_block(block) }
+    } else {
+        encoding::encode_packed_u64_block(*block)
+    };
 
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512f")))]
+    #[cfg(all(target_arch = "x86_64", not(feature = "std"), target_feature = "avx512f"))]
+    let block = {
+        // SAFETY: AVX-512F is enabled crate-wide in this configuration.
+        unsafe { avx512_u64_adapter::unpack_block(block) }
+    };
+
+    #[cfg(not(all(target_arch = "x86_64", any(feature = "std", target_feature = "avx512f"))))]
     let block = encoding::encode_packed_u64_block(*block);
 
     compress_cv_packed(cv, &block)
@@ -96,18 +109,29 @@ pub(super) fn compress_packed_u64_block(
 pub(super) fn pack_packed_u64_cv(
     cv: &PackedU32ChainingValue,
 ) -> [[u64; PACKED_LANES]; DIGEST_WIDTH] {
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
     {
-        avx512_u64_adapter::pack_cv(*cv)
+        if cpu::has_avx512f() {
+            // SAFETY: `cpu::has_avx512f` confirmed AVX-512F support on the running CPU.
+            unsafe { avx512_u64_adapter::pack_cv(cv) }
+        } else {
+            encoding::pack_cv_to_packed_u64s(*cv)
+        }
     }
 
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512f")))]
+    #[cfg(all(target_arch = "x86_64", not(feature = "std"), target_feature = "avx512f"))]
+    {
+        // SAFETY: AVX-512F is enabled crate-wide in this configuration.
+        unsafe { avx512_u64_adapter::pack_cv(cv) }
+    }
+
+    #[cfg(not(all(target_arch = "x86_64", any(feature = "std", target_feature = "avx512f"))))]
     {
         encoding::pack_cv_to_packed_u64s(*cv)
     }
 }
 
-#[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
+#[cfg(all(target_arch = "x86_64", any(feature = "std", target_feature = "avx512f")))]
 mod avx512_u64_adapter {
     use core::arch::x86_64::*;
 
@@ -118,25 +142,23 @@ mod avx512_u64_adapter {
     const _: () = assert!(LANES == 16, "the AVX-512 adapter requires sixteen packed lanes");
 
     #[inline]
-    pub(super) fn unpack_block(block: [[u64; LANES]; BLOCK_LEN]) -> [[u32; LANES]; 16] {
+    #[target_feature(enable = "avx512f")]
+    pub(super) unsafe fn unpack_block(block: &[[u64; LANES]; BLOCK_LEN]) -> [[u32; LANES]; 16] {
         let mut output = [[0u32; LANES]; 16];
 
         for (element, values) in block.iter().enumerate() {
             for half in 0..2 {
                 let lane_offset = half * HALF_LANES;
-                // SAFETY: this module is compiled only with AVX-512F enabled. `lane_offset` is
-                // either 0 or 8, so the unaligned eight-u64 load remains within `values`.
+                // SAFETY: this function requires AVX-512F. `lane_offset` is either 0 or 8, so the
+                // unaligned eight-u64 load remains within `values`.
                 let packed = unsafe {
                     _mm512_loadu_si512(values.as_ptr().add(lane_offset).cast::<__m512i>())
                 };
-                // SAFETY: these AVX-512F operations only transform the loaded register. Signed
-                // narrowing is intentional: both conversions retain the low 32 bits.
-                let (lo, hi) = unsafe {
-                    (
-                        _mm512_cvtepi64_epi32(packed),
-                        _mm512_cvtepi64_epi32(_mm512_srli_epi64::<32>(packed)),
-                    )
-                };
+                // Signed narrowing is intentional: both conversions retain the low 32 bits.
+                let (lo, hi) = (
+                    _mm512_cvtepi64_epi32(packed),
+                    _mm512_cvtepi64_epi32(_mm512_srli_epi64::<32>(packed)),
+                );
 
                 // SAFETY: `lane_offset` is either 0 or 8, so each unaligned eight-u32 store
                 // remains within its sixteen-element output row.
@@ -157,10 +179,10 @@ mod avx512_u64_adapter {
     }
 
     #[inline]
-    pub(super) fn pack_cv(cv: [[u32; LANES]; 8]) -> [[u64; LANES]; DIGEST_WIDTH] {
+    #[target_feature(enable = "avx512f")]
+    pub(super) unsafe fn pack_cv(cv: &[[u32; LANES]; 8]) -> [[u64; LANES]; DIGEST_WIDTH] {
         let mut output = [[0u64; LANES]; DIGEST_WIDTH];
-        // SAFETY: this module is compiled only with AVX-512F enabled.
-        let high_mask = unsafe { _mm512_set1_epi64(super::encoding::ODD_LANE_MASK as i64) };
+        let high_mask = _mm512_set1_epi64(super::encoding::ODD_LANE_MASK as i64);
 
         for word in 0..DIGEST_WIDTH {
             for half in 0..2 {
@@ -173,13 +195,10 @@ mod avx512_u64_adapter {
                 let hi32 = unsafe {
                     _mm256_loadu_si256(cv[2 * word + 1].as_ptr().add(lane_offset).cast::<__m256i>())
                 };
-                // SAFETY: these AVX-512F operations only transform registers. The high word is
-                // masked to preserve the canonical 63-bit field-element encoding.
-                let packed = unsafe {
-                    let lo64 = _mm512_cvtepu32_epi64(lo32);
-                    let hi64 = _mm512_and_si512(_mm512_cvtepu32_epi64(hi32), high_mask);
-                    _mm512_or_si512(lo64, _mm512_slli_epi64::<32>(hi64))
-                };
+                // Mask the high word to preserve the canonical 63-bit field-element encoding.
+                let lo64 = _mm512_cvtepu32_epi64(lo32);
+                let hi64 = _mm512_and_si512(_mm512_cvtepu32_epi64(hi32), high_mask);
+                let packed = _mm512_or_si512(lo64, _mm512_slli_epi64::<32>(hi64));
 
                 // SAFETY: `lane_offset` is either 0 or 8, so the unaligned eight-u64 store
                 // remains within its sixteen-element output row.
@@ -274,13 +293,20 @@ mod tests {
         }
     }
 
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
+    #[cfg(all(target_arch = "x86_64", any(feature = "std", target_feature = "avx512f")))]
     #[test]
     fn avx512_u64_adapter_matches_generic_layout() {
+        #[cfg(feature = "std")]
+        if !cpu::has_avx512f() {
+            std::eprintln!("skipped: the running CPU lacks AVX-512F");
+            return;
+        }
+
         for batch in 0..32 {
             let block = mixed_packed_u64_block(batch);
             assert_eq!(
-                avx512_u64_adapter::unpack_block(block),
+                // SAFETY: AVX-512F is either enabled crate-wide or checked above at runtime.
+                unsafe { avx512_u64_adapter::unpack_block(&block) },
                 encoding::encode_packed_u64_block(block),
                 "AVX-512 input adapter diverged in batch {batch}",
             );
@@ -288,7 +314,8 @@ mod tests {
             let cv =
                 array::from_fn(|word| array::from_fn(|lane| mixed_u64(batch, word, lane) as u32));
             assert_eq!(
-                avx512_u64_adapter::pack_cv(cv),
+                // SAFETY: AVX-512F is either enabled crate-wide or checked above at runtime.
+                unsafe { avx512_u64_adapter::pack_cv(&cv) },
                 encoding::pack_cv_to_packed_u64s(cv),
                 "AVX-512 output adapter diverged in batch {batch}",
             );
