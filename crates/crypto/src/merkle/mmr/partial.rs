@@ -410,6 +410,17 @@ impl PartialMmr {
             return Err(MmrError::UnknownPeak(path_depth));
         };
 
+        // Ensure the position belongs to the tree selected by the authentication path. Besides
+        // rejecting positions outside the forest, this makes the subtraction below safe: a leaf
+        // in the target tree always follows every larger tree in the forest.
+        let owning_tree = self
+            .forest
+            .leaf_to_corresponding_tree(leaf_pos)
+            .ok_or(MmrError::PositionNotFound(leaf_pos))?;
+        if owning_tree != u32::from(path_depth) {
+            return Err(MmrError::PositionNotFound(leaf_pos));
+        }
+
         // ignore the trees smaller than the target (these elements are position after the current
         // target and don't affect the target leaf_pos)
         let target_forest = self.forest ^ (self.forest & tree.all_smaller_trees_unchecked());
@@ -796,7 +807,7 @@ mod tests {
         vec::Vec,
     };
 
-    use super::{MmrPeaks, PartialMmr};
+    use super::{MerklePath, MmrError, MmrPeaks, PartialMmr};
     use crate::{
         Word,
         merkle::{
@@ -1340,6 +1351,73 @@ mod tests {
         // It should now be tracked and open to the same proof as the full MMR.
         assert!(partial_mmr.is_tracked(0));
         assert_eq!(partial_mmr.open(0).unwrap().unwrap(), proof0);
+    }
+
+    #[test]
+    fn test_partial_mmr_track_rejects_position_path_tree_mismatches() {
+        let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap();
+        let path_for_large_tree = mmr.open(0).unwrap();
+        let path_for_middle_tree = mmr.open(4).unwrap();
+
+        // Position 0 belongs to the depth-2 tree, so using the depth-1 path would underflow when
+        // translating the global position to the tree-relative path index.
+        let mut partial_mmr: PartialMmr = mmr.peaks().into();
+        let result = partial_mmr.track(
+            0,
+            mmr.get(0).unwrap(),
+            path_for_middle_tree.path().merkle_path(),
+        );
+        assert!(matches!(result, Err(MmrError::PositionNotFound(0))));
+        assert!(!partial_mmr.is_tracked(0));
+
+        // Position 4 belongs to the depth-1 tree. The reverse mismatch must be rejected too,
+        // rather than relying on the computed root to happen not to match a peak.
+        let result = partial_mmr.track(
+            4,
+            mmr.get(4).unwrap(),
+            path_for_large_tree.path().merkle_path(),
+        );
+        assert!(matches!(result, Err(MmrError::PositionNotFound(4))));
+        assert!(!partial_mmr.is_tracked(4));
+    }
+
+    #[test]
+    fn test_partial_mmr_track_rejects_position_outside_forest() {
+        let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap();
+        let proof = mmr.open(0).unwrap();
+        let mut partial_mmr: PartialMmr = mmr.peaks().into();
+
+        let result = partial_mmr.track(LEAVES.len(), int_to_node(7), proof.path().merkle_path());
+
+        assert!(matches!(result, Err(MmrError::PositionNotFound(7))));
+        assert!(!partial_mmr.is_tracked(LEAVES.len()));
+    }
+
+    #[test]
+    fn test_partial_mmr_track_preserves_unknown_peak_error() {
+        let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap();
+        let mut partial_mmr: PartialMmr = mmr.peaks().into();
+        let path = MerklePath::new(vec![Word::empty(); 3]);
+
+        let result = partial_mmr.track(0, mmr.get(0).unwrap(), &path);
+
+        assert!(matches!(result, Err(MmrError::UnknownPeak(3))));
+        assert!(!partial_mmr.is_tracked(0));
+    }
+
+    #[test]
+    fn test_partial_mmr_track_valid_proofs_round_trip_across_all_peaks() {
+        let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap();
+
+        for leaf_pos in 0..LEAVES.len() {
+            let leaf = mmr.get(leaf_pos).unwrap();
+            let proof = mmr.open(leaf_pos).unwrap();
+            let mut partial_mmr: PartialMmr = mmr.peaks().into();
+
+            partial_mmr.track(leaf_pos, leaf, proof.path().merkle_path()).unwrap();
+
+            assert_eq!(partial_mmr.open(leaf_pos).unwrap(), Some(proof));
+        }
     }
 
     #[test]
