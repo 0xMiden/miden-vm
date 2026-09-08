@@ -42,7 +42,7 @@
 //! 1. Pick the next unused id (one greater than the current maximum).
 //! 2. Add a row to the table above.
 //! 3. Add a variant to [`BusId`] below.
-//! 4. Bump [`NUM_BUS_IDS`] to match the new variant count.
+//! 4. Set [`NUM_BUS_IDS`] to one greater than the maximum assigned ID.
 //! 5. Reference the variant from the relation type's `BUS` associated const.
 
 /// Domain-separated bus identifier.
@@ -75,11 +75,10 @@ pub enum BusId {
     EidosInit = 22,
 }
 
-/// Number of distinct buses currently registered. Sized so that
-/// [`Challenges::new`](miden_air::lookup::Challenges::new) precomputes
-/// exactly one prefix per [`BusId`] variant (indices 0..=22; `Logic64`/
-/// `Rol64`'s old slots at 2/3 are retired gaps, harmless since ids only
-/// need uniqueness, not contiguity).
+/// Number of bus-prefix slots, one greater than the maximum [`BusId`].
+///
+/// [`Challenges::new`](miden_air::lookup::Challenges::new) precomputes one prefix for each numeric
+/// ID in this range. IDs 2 and 3 are intentionally unused.
 pub const NUM_BUS_IDS: usize = 23;
 const _: () = assert!(NUM_BUS_IDS == BusId::EidosInit as usize + 1);
 
@@ -87,16 +86,13 @@ const _: () = assert!(NUM_BUS_IDS == BusId::EidosInit as usize + 1);
 /// VM emits. Sets the size of the precomputed `β^0..β^{W-1}` table held
 /// by [`Challenges`](miden_air::lookup::Challenges).
 ///
-/// The widest payload is `UintLimbs` at 18 elements (`ptr`, `bound_ptr`,
-/// plus a full 16×16-bit value — no more `offset` field, since each
-/// operand now lives on one row and sends its whole value in a single
-/// message) — the raw limb view the mul chiplet convolves over. Width
-/// costs only precomputed powers of β; encoding stays linear.
+/// The widest payload is `UintLimbs`: `ptr`, `bound_ptr`, and one complete 16-limb value. The
+/// multiplication chiplet consumes this raw limb view. Message width affects only the precomputed
+/// powers of β; encoding remains linear.
 pub const MAX_MESSAGE_WIDTH: usize = 18;
 
-/// Net multiplicity a LogUp bus tuple is provided / consumed with — the
-/// count a chiplet stamps into its trace cells and the demand ledgers
-/// tally per pointer. A plain `u32` (the dedup pass dropped the old
-/// Range16 ceiling on multiplicities); the alias names the role, so a
-/// demand ledger reads `Ptr → ProvideMult` rather than `u32 → u32`.
+/// Net multiplicity with which a LogUp tuple is provided or consumed.
+///
+/// Chiplets store this `u32` count in trace cells, and demand ledgers aggregate it per pointer. The
+/// alias names its semantic role so ledgers read `Ptr → ProvideMult`.
 pub type ProvideMult = u32;

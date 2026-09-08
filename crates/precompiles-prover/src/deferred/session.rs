@@ -25,8 +25,21 @@ use crate::{
     transcript::eidos::EidosDigest,
 };
 
+/// wNAF window for [`msm_from_terms`](DeferredSessionBuilder::msm_from_terms)'s joint-wNAF
+/// addition chain (digits odd, `|d| < 2^{w-1}`, `2^{w-2}` odd multiples per base). A smaller window
+/// suits GLV's ~128-bit halves in isolation. Reusing a base's table across the batch makes ladder
+/// digit density the dominant recurring cost; `w = 5` keeps it low for both the two-base and GLV
+/// four-base MSMs.
 const MSM_WNAF_WINDOW: usize = 5;
 const MAX_TERM_PRESERVING_TERMS: usize = 4096;
+
+/// Cap on the *sum* of fallback term counts across every PairList this session lowers.
+/// [`MAX_TERM_PRESERVING_TERMS`] only bounds one claim at a time — many claims each near that cap
+/// still stack up (a lowering-only PairList doesn't know about sibling claims), so this tracks a
+/// running total and rejects a new claim before it grows the aggregate past this bound. A generous
+/// multiple of the per-claim cap: legitimate batches (e.g. many small ECDSA-style fallback claims)
+/// stay well under it. The aggregate cap prevents splitting one oversized request across many
+/// claims.
 const MAX_TOTAL_TERM_PRESERVING_TERMS: usize = 16 * MAX_TERM_PRESERVING_TERMS;
 
 /// The input ceiling uses the runtime's field-element accounting across the entire batch,

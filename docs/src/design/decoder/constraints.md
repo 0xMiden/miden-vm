@@ -233,7 +233,7 @@ $$
 m_{fmpwrite} = M_{write\_element}(ctx', fmpaddr, clk, [fmpinit])
 $$
 
-In the above, $m_{fmpwrite}$ represents a "write element" memory request equivalent to `mem[fmpaddr] = fmpinit` (in pseudo-code) in the new memory context (*i.e.* the memory context of the callee). Currently $fmpaddr = 2^{32} - 2$, and $fmpinit = 2^{31}$.
+In the above, $m_{fmpwrite}$ represents a "write element" memory request equivalent to `mem[fmpaddr] = fmpinit` (in pseudo-code) in the new memory context (*i.e.* the memory context of the callee). The VM uses $fmpaddr = 2^{32} - 2$ and $fmpinit = 2^{31}$.
 
 $$
 u_{call} = f_{call} \cdot h_{ctrl} \cdot m_{fmpwrite} \text{ | degree} = 6

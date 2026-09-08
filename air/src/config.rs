@@ -439,7 +439,7 @@ mod tests {
     }
 
     /// Transcript domain separation must bind the parameters actually supplied to the config,
-    /// not the Miden VM's current compile-time defaults.
+    /// not the Miden VM's compile-time defaults.
     #[test]
     fn protocol_observation_uses_the_supplied_pcs_params() {
         let params = PcsParams::new(4, 3, 6, 5, 11, 19, 13).expect("valid distinct PCS params");

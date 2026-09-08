@@ -11,9 +11,8 @@
 //! - shared wiring column: ACE wiring + hasher compression link.
 //! - four-Felt hasher result and chaining-value returns.
 //!
-//! [`ChipletLookupBuilder`] builds the shared active flags for this AIR. All current adapters use
-//! the default path, which reads the chiplet selector columns; the hook exists so a future adapter
-//! can override it if a cheaper concrete-row path is worthwhile.
+//! [`ChipletLookupBuilder`] builds the shared active flags from the chiplet selector columns.
+//! Adapters may override the default construction while preserving those flag semantics.
 
 use super::buses::{
     ChipletActiveFlags,
@@ -30,7 +29,7 @@ use crate::{ChipletCols, Felt, lookup::LookupBuilder};
 /// Extension trait the chiplet-trace [`LookupAir`] requires from its [`LookupBuilder`].
 ///
 /// Carries a single hook, [`build_chiplet_active`](Self::build_chiplet_active), for
-/// constructing the shared [`ChipletActiveFlags`] snapshot consumed by the three
+/// constructing the shared [`ChipletActiveFlags`] snapshot consumed by the four
 /// chiplet-trace bus emitters. Symmetric to [`super::main_air::MainLookupBuilder`]; see its
 /// docs for the rationale behind the explicit-impl-no-blanket pattern.
 pub(crate) trait ChipletLookupBuilder: LookupBuilder<F = Felt> {
@@ -53,9 +52,7 @@ pub(crate) trait ChipletLookupBuilder: LookupBuilder<F = Felt> {
 /// Shared context for the chiplet-trace bus emitters.
 ///
 /// Holds the two-row window plus a single [`ChipletActiveFlags`] snapshot built once per
-/// `eval` through [`ChipletLookupBuilder::build_chiplet_active`]. Every emitter reads
-/// `ctx.local`, `ctx.next`, and `ctx.chiplet_active.*` directly; field access, no method
-/// indirection.
+/// `eval` through [`ChipletLookupBuilder::build_chiplet_active`].
 pub(crate) struct ChipletBusContext<'a, LB>
 where
     LB: LookupBuilder<F = Felt>,
