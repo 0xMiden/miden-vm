@@ -781,14 +781,17 @@ impl TranscriptEvalRequires {
             chiplet.len(),
             "ec_msm needs exactly one (base, scalar) pair per claim term",
         );
-        let mut remaining = chiplet;
-        for (base, scalar) in terms {
-            let pos = remaining
-                .iter()
-                .position(|&(b, s)| b == base.point && s == scalar.ptr)
-                .expect("(base, scalar) pair is not a term of this MSM expression");
-            remaining.swap_remove(pos);
-        }
+        // Compare sorted copies to preserve exact multiplicities without a quadratic scan.
+        // The original term order remains unchanged for the committed absorption below.
+        let mut declared =
+            terms.iter().map(|(base, scalar)| (base.point, scalar.ptr)).collect::<Vec<_>>();
+        let mut chiplet = chiplet;
+        declared.sort_unstable();
+        chiplet.sort_unstable();
+        assert_eq!(
+            declared, chiplet,
+            "claim terms do not match this MSM expression (including multiplicity)"
+        );
 
         let blocks: Vec<_> = terms
             .iter()
