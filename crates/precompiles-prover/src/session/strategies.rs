@@ -322,24 +322,40 @@ pub fn joint_wnaf_with_signed_tables(
     let len = digits.iter().map(Vec::len).max().unwrap_or(0);
 
     let mut acc: Option<EcExprPtr> = None;
+    let mut column = Vec::with_capacity(terms.len());
     for i in (0..len).rev() {
         // One shared doubling per column (skipped while acc is still unseeded,
         // so leading all-zero columns cost nothing).
         if let Some(a) = acc {
             acc = Some(session.msm_combine(a, a));
         }
-        // Then each base adds its digit's (signed) table entry at this column.
+        column.clear();
         for ((table, _, negate), base_digits) in terms.iter().zip(&digits) {
             let d = base_digits.get(i).copied().unwrap_or(0);
             if d != 0 {
                 let pos = table.odds[(d.unsigned_abs() as usize - 1) / 2];
                 let want_neg = (d < 0) ^ *negate;
-                let entry = if want_neg { session.msm_neg(pos) } else { pos };
-                acc = Some(match acc {
-                    None => entry, // lazy-seed at the first nonzero digit
-                    Some(a) => session.msm_combine(a, entry),
-                });
+                column.push(if want_neg { session.msm_neg(pos) } else { pos });
             }
+        }
+        // Combining into a growing prefix repeatedly copies its term rows. Reduce this
+        // column in a balanced tree, then add it to the accumulator once: O(m log m) term
+        // rows per column, with the same signed wNAF digits and shared doubling ladder.
+        while column.len() > 1 {
+            let len = column.len();
+            for pair in 0..len / 2 {
+                column[pair] = session.msm_combine(column[2 * pair], column[2 * pair + 1]);
+            }
+            if len % 2 != 0 {
+                column[len / 2] = column[len - 1];
+            }
+            column.truncate(len.div_ceil(2));
+        }
+        if let Some(sum) = column.pop() {
+            acc = Some(match acc {
+                None => sum,
+                Some(a) => session.msm_combine(a, sum),
+            });
         }
     }
     acc.expect("joint_wnaf needs a nonzero scalar")
