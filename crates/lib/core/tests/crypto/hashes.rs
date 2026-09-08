@@ -1,7 +1,5 @@
-use std::sync::Arc;
-
 use miden_assembly::{Assembler, Linkage};
-use miden_core::{Felt, deferred::DeferredState, utils::bytes_to_packed_u32_elements};
+use miden_core::{Felt, utils::bytes_to_packed_u32_elements};
 use miden_core_lib::CoreLibrary;
 use miden_crypto::hash::keccak::Keccak256;
 use miden_processor::{
@@ -9,7 +7,7 @@ use miden_processor::{
     advice::AdviceInputs,
 };
 
-use crate::helpers::{masm_push_felts, masm_store_felts};
+use crate::helpers::{assert_precompile_witness_round_trips, masm_push_felts, masm_store_felts};
 
 const IN_PTR: u32 = 128;
 
@@ -48,7 +46,7 @@ fn core_keccak256_hash_bytes_returns_expected_digest() {
 
     let output =
         run_core_hash_bytes("keccak256", input).expect("keccak256::hash_bytes must execute");
-    assert_deferred_state_round_trips(&output);
+    assert_precompile_witness_round_trips(&output);
     assert_eq!(read_stack_felts(&output, 8), pack_digest(&Keccak256::hash(input)));
 }
 
@@ -57,7 +55,7 @@ fn core_keccak256_hash_returns_expected_digest() {
     let input: Vec<u8> = (0u8..32).collect();
 
     let output = run_core_fixed_hash("keccak256", &input).expect("keccak256::hash must execute");
-    assert_deferred_state_round_trips(&output);
+    assert_precompile_witness_round_trips(&output);
     assert_eq!(read_stack_felts(&output, 8), pack_digest(&Keccak256::hash(&input)));
 }
 
@@ -69,7 +67,7 @@ fn core_keccak256_merge_returns_expected_digest() {
     preimage.extend_from_slice(&right);
 
     let output = run_core_merge("keccak256", &left, &right).expect("keccak256::merge must execute");
-    assert_deferred_state_round_trips(&output);
+    assert_precompile_witness_round_trips(&output);
     assert_eq!(read_stack_felts(&output, 8), pack_digest(&Keccak256::hash(&preimage)));
 }
 
@@ -277,16 +275,4 @@ fn read_stack_felts(output: &ExecutionOutput, len: usize) -> Vec<Felt> {
 
 fn pack_digest(bytes: &[u8]) -> Vec<Felt> {
     bytes_to_packed_u32_elements(bytes)
-}
-
-fn assert_deferred_state_round_trips(output: &ExecutionOutput) {
-    let registry = Arc::new(miden_precompiles::registry());
-    let wire = output.deferred_state.to_wire().expect("deferred state must encode to wire");
-    let rehydrated = DeferredState::from_wire(Arc::clone(&registry), &wire)
-        .expect("deferred wire must rehydrate under miden-precompiles registry");
-    assert_eq!(
-        rehydrated.root(),
-        output.deferred_state.root(),
-        "wire round-trip must preserve the deferred root",
-    );
 }

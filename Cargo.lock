@@ -2777,7 +2777,6 @@ dependencies = [
  "miden-core",
  "miden-core-lib",
  "miden-mast-package",
- "miden-precompiles",
  "miden-processor",
  "miden-prover",
  "miden-test-utils",

@@ -2,7 +2,7 @@ use miden_core::{Felt, Word};
 use miden_precompiles::{CurveId, CurvePrecompile};
 
 use super::helpers::{
-    TRUNCATE_STACK_TO_OUTPUT_PROC, assert_deferred_state_round_trips, expect_precompile_trap,
+    TRUNCATE_STACK_TO_OUTPUT_PROC, assert_precompile_witness_round_trips, expect_precompile_trap,
     read_stack_felts, run_precompile_program,
 };
 
@@ -344,7 +344,7 @@ fn assert_eval_generator(curve: CurveCase) {
     let output = run_precompile_program(&source).expect("curve eval must succeed");
 
     assert_stack_words(&read_stack_felts(&output, 12), &[generator.digest(), x_digest, y_digest]);
-    assert_deferred_state_round_trips(&output);
+    assert_precompile_witness_round_trips(&output);
 }
 
 fn assert_predicates_have_expected_polarity(module: &str) {
@@ -433,7 +433,7 @@ fn assert_constant_digests(curve: CurveCase) {
     let output = run_precompile_program(&source).expect("curve constants must push digests");
 
     assert_stack_words(&read_stack_felts(&output, 8), &[generator.digest(), identity.digest()]);
-    assert_deferred_state_round_trips(&output);
+    assert_precompile_witness_round_trips(&output);
 }
 
 fn run_curve_program(module: &str, body: &str, label: &str) {

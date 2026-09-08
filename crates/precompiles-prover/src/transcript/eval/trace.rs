@@ -902,6 +902,12 @@ impl TranscriptEvalRequires {
         uses
     }
 
+    /// Whether this assertion has an eval row that can bind the public root.
+    pub(crate) fn is_recorded_truth(&self, truth: Truthy) -> bool {
+        self.truth_consumers.contains_key(&truth.id)
+            && !self.external_truths.contains_key(&truth.id)
+    }
+
     fn fresh(&mut self, hash: P2Digest) -> Truthy {
         let id = self.next_id;
         self.next_id = self.next_id.checked_add(1).expect("eval node id overflow");

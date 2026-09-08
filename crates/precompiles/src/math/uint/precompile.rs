@@ -39,13 +39,21 @@ pub enum UintNodeRef {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum UintOp {
+pub enum UintOp {
     Value(UintDomain),
     Binary(UintBinaryOp),
     Eq,
 }
 
 impl UintOp {
+    /// Decodes the operation tag, returning `None` only for a different precompile.
+    pub fn decode_tag(tag: Tag) -> Result<Option<Self>, PrecompileError> {
+        if tag.id() != UintPrecompile::id() {
+            return Ok(None);
+        }
+        Self::decode(tag.args()).map(Some).ok_or(PrecompileError::InvalidNode)
+    }
+
     fn decode(args: [Felt; 3]) -> Option<Self> {
         match args[0].as_canonical_u64() {
             UintPrecompile::VALUE_OP_ID if args[2] == ZERO => {

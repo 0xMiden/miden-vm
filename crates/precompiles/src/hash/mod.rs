@@ -374,12 +374,10 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     let expected = state.register(Node::chunks(expected_chunks).unwrap()).unwrap();
     let assertion_node = HashPrecompile::<H>::assert_node(input.len() as u32, preimage, expected);
     let assertion = state.register(assertion_node).unwrap();
-    state.log_statement(assertion).unwrap();
-    let wire = state.to_wire().expect("hash assertion state should encode");
-    let mut rehydrated = DeferredState::from_wire(
-        Arc::new(PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default())),
-        &wire,
-    )
-    .expect("wire should rehydrate under the hash registry");
-    assert_eq!(rehydrated.evaluate_digest(rehydrated.root()).unwrap(), TRUE_DIGEST);
+    let root = state.log_statement(assertion).unwrap();
+    let witness = state
+        .into_witness()
+        .expect("hash assertion should export")
+        .expect("logged hash assertion is nonempty");
+    assert_eq!(witness.root(), root);
 }

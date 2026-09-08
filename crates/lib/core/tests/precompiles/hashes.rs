@@ -3,7 +3,7 @@ use miden_crypto::hash::keccak::Keccak256;
 use miden_processor::ExecutionError;
 
 use super::helpers::{
-    TRUNCATE_STACK_TO_OUTPUT_PROC, assert_deferred_state_round_trips, masm_store_felts,
+    TRUNCATE_STACK_TO_OUTPUT_PROC, assert_precompile_witness_round_trips, masm_store_felts,
     read_memory_felts, read_stack_felts, run_precompile_program,
 };
 
@@ -92,7 +92,7 @@ fn run_hash_mem(
     );
 
     let output = run_precompile_program(&source)?;
-    assert_deferred_state_round_trips(&output);
+    assert_precompile_witness_round_trips(&output);
     Ok(read_memory_felts(&output, OUT_PTR, DIGEST_FELTS))
 }
 

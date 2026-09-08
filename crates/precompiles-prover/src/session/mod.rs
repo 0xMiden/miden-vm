@@ -289,6 +289,16 @@ impl Session {
         self.eval.ec_is(p, q, &mut self.p2)
     }
 
+    /// Read a canonical value from this Session's uint store.
+    pub(crate) fn uint_value(&self, node: &UintNode) -> U256 {
+        self.uint.store.uint(node.ptr).value
+    }
+
+    /// Whether this claim has an eval row that can bind the public root.
+    pub(crate) fn is_recorded_truth(&self, claim: Truthy) -> bool {
+        self.eval.is_recorded_truth(claim)
+    }
+
     /// The DAG node `R = P − Q` — one `EcBinOp/Sub` row consuming the
     /// *rearranged* `EcGroupAdd(g, R, Q, P)` (`R + Q = P`) at mult 1,
     /// binding `(h, Group, r_ptr)`. One row, one block — the EC parallel

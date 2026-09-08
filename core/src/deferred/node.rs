@@ -490,15 +490,20 @@ impl Node {
             return TRUE_DIGEST;
         }
 
-        let mut state = [ZERO; 12];
-        state[Self::DATA_CHUNK_FELT_LEN..Self::DATA_CHUNK_FELT_LEN + Tag::FELT_LEN]
-            .copy_from_slice(&self.tag.as_word());
-        for chunk in self.payload.as_chunks() {
-            state[0..Self::DATA_CHUNK_FELT_LEN].copy_from_slice(chunk);
-            Poseidon2::apply_permutation(&mut state);
-        }
-        Word::new([state[0], state[1], state[2], state[3]])
+        hash_payload(self.tag, self.payload.as_chunks().iter().copied())
     }
+}
+
+/// Hashes the shared tag-and-chunks commitment layout without constructing a runtime node.
+pub(super) fn hash_payload(tag: Tag, chunks: impl IntoIterator<Item = DataChunk>) -> Digest {
+    let mut state = [ZERO; 12];
+    state[Node::DATA_CHUNK_FELT_LEN..Node::DATA_CHUNK_FELT_LEN + Tag::FELT_LEN]
+        .copy_from_slice(&tag.as_word());
+    for chunk in chunks {
+        state[0..Node::DATA_CHUNK_FELT_LEN].copy_from_slice(&chunk);
+        Poseidon2::apply_permutation(&mut state);
+    }
+    Word::new([state[0], state[1], state[2], state[3]])
 }
 
 // NODE TYPE
