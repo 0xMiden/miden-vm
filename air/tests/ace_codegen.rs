@@ -442,16 +442,10 @@ fn canonical_circuit_matches_every_vm_proof_order() {
     let widths = air_block_widths();
     let canonical_offsets = air_block_offsets(&widths, &ProofOrder::instance_order());
 
-    // Random per-AIR trace values, keyed by canonical (instance-order) physical position.
-    let mut base: Vec<QuadFelt> = fill_inputs(&canonical_layout);
-    for chunk in 0..canonical_layout.counts.num_quotient_chunks {
-        for offset in 0..2 {
-            for coord in 0..EXT_DEGREE {
-                let key = InputKey::QuotientChunkCoord { offset, chunk, coord };
-                base[canonical_layout.index(key).expect("quotient slot")] = QuadFelt::ZERO;
-            }
-        }
-    }
+    // Random per-AIR trace values, keyed by canonical (instance-order) physical position. The
+    // quotient openings stay random as well: the shared `q * v` binding is part of what the
+    // canonical circuit has to reproduce, so it is copied across below instead of zeroed out.
+    let base: Vec<QuadFelt> = fill_inputs(&canonical_layout);
 
     let beta = QuadFelt::from_u64(97);
     let mut canonical_roots: Vec<QuadFelt> = Vec::new();
@@ -477,7 +471,8 @@ fn canonical_circuit_matches_every_vm_proof_order() {
             for offset in 0..2 {
                 for coord in 0..EXT_DEGREE {
                     let key = InputKey::QuotientChunkCoord { offset, chunk, coord };
-                    inputs[one_shot_layout.index(key).expect("quotient slot")] = QuadFelt::ZERO;
+                    inputs[one_shot_layout.index(key).expect("quotient slot")] =
+                        base[canonical_layout.index(key).expect("canonical quotient slot")];
                 }
             }
         }

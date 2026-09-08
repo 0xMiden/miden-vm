@@ -7,10 +7,6 @@ const NUM_QUERIES_MIN = 7
 const NUM_QUERIES_MAX = 150
 const POW_BITS_MAX = 31
 
-# Largest AIR count supported by the shared Lehmer encoding: 12! fits in u32 and 13! does not.
-# Must equal the Rust `miden_ace_codegen::MAX_ORDER_AIRS` constant.
-const MAX_ORDER_AIRS = 12
-
 #! Loads the proof's security parameters from advice into the generic verifier context.
 #!
 #! Advice order: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits].
@@ -176,76 +172,6 @@ pub proc store_dynamically_executed_procedures(hooks: types::VerifierHooks)
     exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr mem_storew_le dropw
     exec.constants::get_procedure_digest_compute_deep_composition_polynomial_queries_ptr mem_storew_le dropw
     # => [...]
-end
-
-#! Returns one canonical AIR's position in the stable height-sorted proof order.
-#!
-#! The proof order sorts the relation's AIRs by ascending log height, with the canonical instance
-#! order breaking ties (a stable sort): earlier AIRs precede the target on equal heights, later
-#! AIRs precede it only on a strictly smaller height. Relation hooks use this to route each AIR's
-#! canonical data to, or read it from, its position in the proof stream.
-#!
-#! Precondition: `target_index < num_airs <= MAX_ORDER_AIRS` and `num_airs >= 2`.
-#!
-#! Input:  [target_index, num_airs, heights_ptr]
-#! Output: [proof_order_position]
-pub proc proof_order_position_from_heights(
-    target_index: u8,
-    num_airs: u8,
-    heights_ptr: types::Address,
-) -> u8
-    dup.1 u32lte.MAX_ORDER_AIRS assert.err="num_airs exceeds supported proof-order range"
-    dup dup.2 u32lt assert.err="target AIR index exceeds relation size"
-
-    # Load the target height.
-    dup.2 dup.1 add mem_load
-    # => [h_k, k, num_airs, heights_ptr]
-
-    push.0.0
-    # => [m = 0, inv = 0, h_k, k, num_airs, heights_ptr]
-
-    # Count earlier AIRs that sort after the target.
-    dup.3 dup.1 u32gt
-    while.true
-        dup.5 dup.1 add mem_load
-        # => [h_m, m, inv, h_k, k, num_airs, heights_ptr]
-
-        dup dup.4 u32gt
-        movup.3 add movdn.2
-
-        drop add.1
-        dup.3 dup.1 u32gt
-    end
-    drop
-    # => [inv, h_k, k, num_airs, heights_ptr]
-
-    # Among the k earlier AIRs, exactly k - inv precede the target.
-    dup.2 dup.1 sub
-    swap
-    # => [inv, pos = k - inv, h_k, k, num_airs, heights_ptr]
-
-    # Count later AIRs with a strictly smaller height.
-    dup.3 add.1
-    dup.5 dup.1 u32gt
-    while.true
-        dup.6 dup.1 add mem_load
-        # => [h_m, m, inv, pos, h_k, k, num_airs, heights_ptr]
-
-        dup dup.5 u32lt
-        movup.4 add movdn.3
-
-        drop add.1
-        dup.5 dup.1 u32gt
-    end
-    drop
-    # => [inv, pos, h_k, k, num_airs, heights_ptr]
-
-    drop
-    # => [pos, h_k, k, num_airs, heights_ptr]
-    swap drop
-    swap drop
-    swap drop
-    swap drop
 end
 
 #! Computes x! for small x.
