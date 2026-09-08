@@ -20,6 +20,9 @@
 
 - [BREAKING] Removed `ExecutionProof::is_complete()` ([#3822](https://github.com/0xMiden/miden-vm/pull/3822)).
 - [BREAKING] Run the MVM and PVM recursive verifiers in isolated execution contexts, preserving caller memory. This changes both verifier MAST roots ([#3832](https://github.com/0xMiden/miden-vm/pull/3832)).
+#### Changes
+
+- [BREAKING] Replaced hydrated precompile witnesses with portable singleton witnesses and moved batching into `Prover::prove_precompiles`, preserving input root order and duplicates. Execution proof and execution witness encodings now use format 2; previous encodings are rejected.
 
 ## v0.32.1 (2026-09-09)
 

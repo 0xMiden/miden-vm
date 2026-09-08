@@ -19,7 +19,7 @@ owns the data model, the root commitment, and the wire format; individual *preco
 meaning of the nodes.
 
 > **Status.** VM proving produces an `ExecutionProof` in either the `Deferred` or `Complete`
-> lifecycle state. A deferred proof carries passive deferred wire, not a hydrated witness. See
+> lifecycle state. A deferred proof carries one portable singleton witness. See
 > [Status and scope](#status-and-scope).
 >
 > For the precise `DeferredState`, precompile, and public API contract, see
@@ -46,7 +46,7 @@ its eventual constraint implementation. This direction is developed in GitHub di
 ## Precompile proof shape
 
 The VM STARK authenticates one deferred root but does not prove its committed claims. See the
-[deferred-proof semantics](./semantics.md) for passive transport, hydration, aggregate precompile
+[deferred-proof semantics](./semantics.md) for portable transport, batch precompile
 proofs, completion, and verification.
 
 ## The model
@@ -173,7 +173,7 @@ execution trace.
 A deferred-evaluation event delegates work the VM does not perform and returns the result through
 advice, making it an **unbound host hint**. Using it soundly requires re-hashing the returned payload
 with VM instructions (and, for the full event, checking the returned tag) and logging a predicate
-that `from_wire` re-checks; a VM `eq`/`assert` over two raw advice results proves nothing about their
+that precompile proving checks; a VM `eq`/`assert` over two raw advice results proves nothing about their
 correctness. Because that obligation is precompile-specific (which predicate to log is the
 precompile's business), deferred evaluation is intentionally *not* exposed as a generic safe `sys`
 procedure. A precompile-specific assembly procedure must use VM instructions to relate the raw event
@@ -195,52 +195,39 @@ The deferred root commitment is a rolling AND-chain. `DeferredState.root` starts
 predicate node. To fold one, the framework registers an AND node
 `{ tag: Tag::AND, payload: prev_root || stmt_digest }` and advances the root to that node's digest.
 The append path first evaluates the statement under the installed registry and rejects missing or
-non-`TRUE` statements. Wire verification does not replay append history; it opens the wire's
-implicit root and evaluates that root directly. The digest is structural: even `AND(TRUE, TRUE)` hashes
+non-`TRUE` statements. Precompile proving opens the committed root and proves its assertions
+directly, without reconstructing append history. The digest is structural: even `AND(TRUE, TRUE)` hashes
 under the distinct capacity `[1, 0, 0, 0]` and is not equal to `TRUE_DIGEST`, though it evaluates
 semantically to `TRUE`.
 
-Hydration checks one fixed point: reconstruct the wire's implicit root and evaluate it to `TRUE`
-under the bundled precompiles. This prepares prover input; it is separate from execution-proof
-decoding and from STARK verification.
+Portable decoding checks the committed graph's structure. Session import then validates the
+operations and assertions needed to prove its root. Neither step rebuilds the execution evaluator.
 
-## Wire format and verification
+## Portable witnesses and verification
 
-The low-level deferred-state transport format is `DeferredStateWire`, not the in-memory
-`DeferredState`. `to_wire` lowers state to a passive, canonical, topologically ordered entry stream:
+`DeferredState::into_witness` consumes runtime state and exports the logged root's reachable closure
+as a `PrecompileWitness`. Empty work is represented by `None`; each witness opens one non-TRUE root.
+The in-memory graph and serialized graph have the same representation:
 
-- wire index `0` is the implicit `TRUE_DIGEST`;
-- `entries[i]` has wire index `i + 1`;
+- index `0` is implicit `TRUE_DIGEST`;
+- `entries[i]` has index `i + 1`;
 - data entries carry literal data chunks;
-- join entries encode both children by index;
-- pair-list entries encode each pair's children by index;
-- structural child indices may reference only `0` or earlier entries;
-- empty `entries` opens `TRUE_DIGEST`; a non-empty wire opens the digest of the last entry.
+- joins carry two backward child indices;
+- pair lists carry ordered pairs of backward child indices;
+- the root is the digest of the final entry.
 
-`to_wire` emits a deterministic child-first DFS of the root-reachable closure, so unreferenced
-orphans are dropped.
+Export uses deterministic child-first DFS and omits unreachable nodes. Checked construction and
+canonical decoding validate framework shapes, nonempty payloads, backward references, reconstructed
+commitments, duplicate-free entries, root reachability, and exact DFS order. They use bounded,
+iterative graph traversal without running the evaluator.
 
-`ExecutionProof::to_bytes` is infallible, and `ExecutionProof::read_from_bytes` decodes canonical
-transport without a registry or hydration. When precompile proving is required, the caller passes
-the deferred status wire to `miden_vm::precompile_witness_from_wire`. Completing the proof preserves
-its compatibility declaration. The hydration step uses the bundled registry and validates the
-wire's implicit root.
-
-Hydration performs structural decoding, a canonicality check, and root evaluation:
-
-1. **structural.** Seed index `0` as the implicit `TRUE_DIGEST`, reconstruct each explicit
-   entry (translating structural child indices back to digests), decode its tag, check that the entry
-   variant and payload shape match the declared `NodeType`, reject explicit `TRUE`, reject duplicate
-   digests, and require structural children to reference only earlier entries;
-2. **canonicality.** Register decoded entries into a fresh state, set the implicit wire root as
-   `state.root`, and require `state.to_wire() == wire`; this rejects dangling nodes,
-   non-root-last encodings, and equivalent-but-reordered topological wire;
-3. **semantic.** Evaluate the implicit wire root under the installed precompiles and require it to
-   equal the canonical `TRUE` node. Evaluation may insert canonical/helper nodes in addition to
-   the wire nodes.
-
-A wire that yields any integrity error is rejected; a faithful one reconstructs a state whose root is
-the wire's implicit root and whose canonical wire output is byte-for-byte identical to the input.
+`ExecutionProof::read_from_bytes` decodes portable material without a precompile registry. A
+prover passes singleton witnesses directly to `Prover::prove_precompiles`, which validates their
+operations and assertions while importing into one Session. Computations may be shared across
+inputs, while each parent operand and each ordered root occurrence retains its proof-binding use.
+The resulting proof carries the exact ordered roots. Completing an execution proof preserves its
+compatibility declaration. See the [API contract](./semantics.md#transport-and-limits) for format
+versions and input limits.
 
 ## Status and scope
 
@@ -248,7 +235,7 @@ This framework is the proof-bound precompile substrate. Execution accumulates ho
 `DeferredState`; `log_deferred` advances its root by folding registered statements with `Tag::AND`.
 The `miden-precompiles` crate supplies the bundled implementations used by core-library facades and
 standard proving. See the [API contract](./semantics.md#proof-obligations-and-composition) for the
-transport, hydration, merge, completion, and verification lifecycle.
+portable transport, batching, completion, and verification lifecycle.
 
 More generic DAG resource accounting remains a follow-up; the external STARK that verifies a
 committed DAG, the **Precompile VM**, is described in GitHub discussion #3005.
