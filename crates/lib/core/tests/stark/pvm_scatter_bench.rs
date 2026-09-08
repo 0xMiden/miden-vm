@@ -620,13 +620,12 @@ fn generated_hook_source(heights: &[u64], ood_ptr: u32) -> String {
         .join("\n");
     format!(
         "use miden::core::stark::constants
-use miden::core::sys::pvm
 use miden::core::sys::pvm::ood_frames
 
 begin
 {stores}
         clk mem_store.{CLK0_PTR}
-        exec.pvm::stage_proof_order_positions
+        exec.ood_frames::stage_proof_order_maps
         exec.ood_frames::stage_ood_scatter_table
         clk mem_store.{CLK2_PTR}
 

@@ -1,12 +1,8 @@
 use miden::core::stark::types
 use miden::core::stark::constants
 use miden::core::stark::random_coin
-use miden::core::stark::utils
 use miden::core::sys::vm::public_inputs
 use miden::core::sys::vm::layout
-
-# Number of AIR instances in the relation, each contributing one boundary value.
-const NUM_AIRS = 4
 
 #! Load one normalized committed LogUp sum and scale both extension coordinates by the AIR's row
 #! count `n = 2^log_height`.
@@ -61,26 +57,22 @@ end
 #! the address `InputKey::AuxBusBoundary(k)` names, with `k` the canonical instance index.
 #!
 #! Every sum is read onto the operand stack before any is written back, so the region is permuted
-#! in place without scratch memory. The AIR heights must already be stored; the sums must already
-#! be absorbed.
+#! in place without scratch memory. The proof-order maps must already be staged; the sums must
+#! already be absorbed.
 #!
 #! Input:  [...]
 #! Output: [...]
 pub proc scatter_aux_bus_boundary()
-    exec.constants::air_trace_length_logs_ptr push.NUM_AIRS push.3
-    exec.utils::proof_order_position_from_heights
+    exec.layout::proof_order_positions_ptr add.3 mem_load
     exec.load_boundary_pair
 
-    exec.constants::air_trace_length_logs_ptr push.NUM_AIRS push.2
-    exec.utils::proof_order_position_from_heights
+    exec.layout::proof_order_positions_ptr add.2 mem_load
     exec.load_boundary_pair
 
-    exec.constants::air_trace_length_logs_ptr push.NUM_AIRS push.1
-    exec.utils::proof_order_position_from_heights
+    exec.layout::proof_order_positions_ptr add.1 mem_load
     exec.load_boundary_pair
 
-    exec.constants::air_trace_length_logs_ptr push.NUM_AIRS push.0
-    exec.utils::proof_order_position_from_heights
+    exec.layout::proof_order_positions_ptr mem_load
     exec.load_boundary_pair
     # => [sigma_prime_0, ..., sigma_prime_3, ...] in canonical instance order
 

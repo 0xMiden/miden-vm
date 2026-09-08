@@ -65,10 +65,7 @@ pub proc execute_constraint_evaluation_check()
     push.MAX_CYCLE_LEN_LOG
     exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace
 
-    exec.layout::auxiliary_ace_inputs_ptr
-    exec.constants::air_trace_length_logs_ptr
-    push.NUM_AIRS
-    exec.constraints_eval_inputs::stage_air_fold_coefficients
+    exec.stage_air_fold_coefficients
 
     exec.load_and_authenticate_ace_circuit
 
@@ -101,4 +98,85 @@ proc load_and_authenticate_ace_circuit
     movup.4 drop
     # => [STREAM_DIGEST, ACE_CIRCUIT_DIGEST]
     assert_eqw.err=ERR_CIRCUIT_DIGEST_MISMATCH
+end
+
+#! Stages AIR k's multi-AIR fold coefficient `beta^(NUM_AIRS - 1 - pos_k)` in its READ slot.
+#!
+#! The native verifier folds the per-AIR roots as a Horner chain over the height-sorted proof
+#! order, so the AIR opened last carries `beta^0` and the one opened first
+#! `beta^(NUM_AIRS - 1)`. Walking `id_by_pos` from the last proof position to the first
+#! produces every power with one multiplication between consecutive positions; each is written
+#! to the slot of whichever AIR sits at that position. `beta` is sampled after the auxiliary
+#! trace, so this runs after `set_up_auxiliary_inputs_ace`, and the proof-order pass
+#! must already have filled `id_by_pos`.
+#!
+#! Inputs:  []
+#! Outputs: []
+proc stage_air_fold_coefficients
+    exec.layout::proof_order_ids_ptr
+    exec.layout::auxiliary_ace_inputs_ptr add.82
+    padw exec.constants::composition_coef_ptr mem_loadw_le drop drop
+    push.0.1
+    # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    # Each step copies its coefficient and destination before storing c0 then c1.
+    # proof position 9: coefficient beta^0 to that AIR's slot
+    dup.5 add.9 mem_load mul.2 dup.5 add
+    # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+    # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.3 dup.3 ext2mul
+    # proof position 8: coefficient beta^1 to that AIR's slot
+    dup.5 add.8 mem_load mul.2 dup.5 add
+    # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+    # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.3 dup.3 ext2mul
+    # proof position 7: coefficient beta^2 to that AIR's slot
+    dup.5 add.7 mem_load mul.2 dup.5 add
+    # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+    # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.3 dup.3 ext2mul
+    # proof position 6: coefficient beta^3 to that AIR's slot
+    dup.5 add.6 mem_load mul.2 dup.5 add
+    # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+    # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.3 dup.3 ext2mul
+    # proof position 5: coefficient beta^4 to that AIR's slot
+    dup.5 add.5 mem_load mul.2 dup.5 add
+    # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+    # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.3 dup.3 ext2mul
+    # proof position 4: coefficient beta^5 to that AIR's slot
+    dup.5 add.4 mem_load mul.2 dup.5 add
+    # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+    # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.3 dup.3 ext2mul
+    # proof position 3: coefficient beta^6 to that AIR's slot
+    dup.5 add.3 mem_load mul.2 dup.5 add
+    # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+    # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.3 dup.3 ext2mul
+    # proof position 2: coefficient beta^7 to that AIR's slot
+    dup.5 add.2 mem_load mul.2 dup.5 add
+    # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+    # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.3 dup.3 ext2mul
+    # proof position 1: coefficient beta^8 to that AIR's slot
+    dup.5 add.1 mem_load mul.2 dup.5 add
+    # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+    # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.3 dup.3 ext2mul
+    # proof position 0: coefficient beta^9 to that AIR's slot
+    dup.5 mem_load mul.2 dup.5 add
+    # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+    # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    drop drop drop drop drop drop
 end

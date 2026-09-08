@@ -25,8 +25,8 @@ use miden_core::{
 };
 
 use super::{
-    f1_sigma_scatter::{heights_for_order, permutations},
     vm_layout_const,
+    vm_sigma_scatter::{heights_for_order, permutations},
 };
 use crate::helpers::read_memory_felt;
 
@@ -643,6 +643,7 @@ use miden::core::sys::vm::ood_frames
 begin
 {stores}
         clk mem_store.{CLK0_PTR}
+        exec.ood_frames::stage_proof_order_maps
         exec.ood_frames::stage_ood_scatter_table
         clk mem_store.{CLK2_PTR}
 

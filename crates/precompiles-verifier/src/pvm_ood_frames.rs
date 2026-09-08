@@ -15,7 +15,9 @@ use alloc::{
 };
 use core::fmt::Write as _;
 
-use miden_ace_codegen::{EXT_DEGREE, InputKey, InputLayout};
+use miden_ace_codegen::{
+    EXT_DEGREE, InputKey, InputLayout, ProofOrderMapsConfig, render_proof_order_maps,
+};
 use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::{BaseAir, LiftedAir};
 use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS};
@@ -61,6 +63,7 @@ impl PvmOodGeometry {
         let mut preprocessed = Vec::with_capacity(NUM_CHIPLETS);
         let mut main = Vec::with_capacity(NUM_CHIPLETS);
         let mut aux = Vec::with_capacity(NUM_CHIPLETS);
+        let mut aux_values = Vec::with_capacity(NUM_CHIPLETS);
         for air in airs.iter() {
             preprocessed.push(
                 <ChipletAir as BaseAir<Felt>>::preprocessed_width(air)
@@ -71,6 +74,13 @@ impl PvmOodGeometry {
                 (<ChipletAir as LiftedAir<Felt, QuadFelt>>::aux_width(air) * EXT_DEGREE)
                     .next_multiple_of(LMCS_ALIGNMENT),
             );
+            aux_values.push(<ChipletAir as LiftedAir<Felt, QuadFelt>>::num_aux_values(air));
+        }
+        if aux_values.as_slice() != [1usize; NUM_CHIPLETS].as_slice() {
+            return Err(format!(
+                "the PVM proof-order boundary scatter requires exactly one auxiliary value per \
+                 chiplet, got {aux_values:?}"
+            ));
         }
         let geometry = Self {
             preprocessed,
@@ -90,6 +100,11 @@ impl PvmOodGeometry {
                 "auxiliary-coordinate",
                 geometry.aux.iter().sum::<usize>(),
                 layout.counts.aux_width * EXT_DEGREE,
+            ),
+            (
+                "auxiliary-boundary",
+                aux_values.iter().sum::<usize>(),
+                layout.counts.num_aux_boundary,
             ),
         ] {
             if derived != actual {
@@ -190,7 +205,7 @@ struct ScatterSource {
     air: usize,
     dst: usize,
     blocks: usize,
-    slot_offset: usize,
+    group_slots_offset: usize,
 }
 
 /// Compile-time shape of the out-of-domain ingest scatter.
@@ -248,7 +263,7 @@ fn pvm_scatter_plan(geometry: &PvmOodGeometry) -> Result<ScatterPlan, String> {
                 widths.len()
             ));
         }
-        let group_slot_offset = OOD_SCATTER_SLOTS_OFFSET + 2 * slot;
+        let group_slots_offset = OOD_SCATTER_SLOTS_OFFSET + 2 * slot;
         let mut canonical = group_base;
         let mut position = 0usize;
         for (air, width) in widths.iter().enumerate() {
@@ -262,7 +277,7 @@ fn pvm_scatter_plan(geometry: &PvmOodGeometry) -> Result<ScatterPlan, String> {
                     air,
                     dst: canonical,
                     blocks,
-                    slot_offset: group_slot_offset,
+                    group_slots_offset,
                 });
                 dispatches.push(ScatterDispatch {
                     group,
@@ -344,9 +359,9 @@ fn scatter_cell_load(offset: usize) -> String {
 /// Loads one chiplet's staged proof-order position, leaving it on the stack.
 fn scatter_position_load(air: usize) -> String {
     if air == 0 {
-        "exec.layout::proof_order_positions_ptr mem_load".into()
+        "dup mem_load".into()
     } else {
-        format!("exec.layout::proof_order_positions_ptr add.{air} mem_load")
+        format!("dup add.{air} mem_load")
     }
 }
 
@@ -355,10 +370,26 @@ fn format_sum(parts: &[usize]) -> String {
 }
 
 /// Renders `asm/sys/pvm/ood_frames.masm` from the chiplet widths.
-pub(crate) fn render_pvm_ood_frames(geometry: &PvmOodGeometry) -> Result<String, String> {
+///
+/// `ids_word_aligned` states whether the `id_by_pos` table starts on a word boundary, which lets
+/// the proof-order pass write complete groups of four IDs with word stores.
+pub(crate) fn render_pvm_ood_frames(
+    geometry: &PvmOodGeometry,
+    ids_word_aligned: bool,
+) -> Result<String, String> {
     let plan = pvm_scatter_plan(geometry)?;
     let row_felts = geometry.row_felts();
     let row_blocks = geometry.row_blocks();
+    let proof_order_maps = render_proof_order_maps(&ProofOrderMapsConfig {
+        num_airs: NUM_CHIPLETS,
+        heights_ptr: "exec.constants::air_trace_length_logs_ptr",
+        pos_by_id_ptr: "exec.layout::proof_order_positions_ptr",
+        id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
+        // Ten heights do not form a single word and are read once per proof.
+        word_load_heights: false,
+        word_store_ids: ids_word_aligned,
+    })
+    .map_err(|err| err.to_string())?;
 
     let pipes = plan
         .lengths
@@ -386,8 +417,7 @@ pub(crate) fn render_pvm_ood_frames(geometry: &PvmOodGeometry) -> Result<String,
         .iter()
         .map(|blocks| {
             format!(
-                "    procref.pipe_{blocks} exec.layout::ood_scatter_table_ptr add.{offset} \
-                 mem_storew_le dropw",
+                "    procref.pipe_{blocks} dup.4 add.{offset} mem_storew_le dropw",
                 offset = plan.digest_offset_for(*blocks),
             )
         })
@@ -400,21 +430,22 @@ pub(crate) fn render_pvm_ood_frames(geometry: &PvmOodGeometry) -> Result<String,
         if sources.is_empty() {
             continue;
         }
-        let mut block =
-            format!("\n    {position}\n    # => [pos]\n", position = scatter_position_load(air),);
+        let mut block = format!(
+            "\n    # AIR {air}: its pair slots start at table + 2 * pos_by_id[{air}]\n    \
+             {position} mul.2 dup.2 add\n    # => [base, pos_ptr, table]\n",
+            position = scatter_position_load(air),
+        );
         for source in sources {
             block += &format!(
                 "    # {group}: {blocks} blocks at row offset {dst}\n    \
-                 push.{dst} dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.{slot} \
-                 mem_store\n    \
-                 exec.layout::ood_scatter_table_ptr add.{digest} dup.1 mul.2 \
-                 exec.layout::ood_scatter_table_ptr add add.{next} mem_store\n",
+                 push.{dst} dup.1 add.{slot} mem_store\n    \
+                 dup.2 add.{digest} dup.1 add.{next} mem_store\n",
                 group = source.group,
                 blocks = source.blocks,
                 dst = source.dst,
-                slot = source.slot_offset,
+                slot = source.group_slots_offset,
                 digest = plan.digest_offset_for(source.blocks),
-                next = source.slot_offset + 1,
+                next = source.group_slots_offset + 1,
             );
         }
         block += "    drop\n";
@@ -457,6 +488,7 @@ pub(crate) fn render_pvm_ood_frames(geometry: &PvmOodGeometry) -> Result<String,
     write!(
         out,
         r#"# GENERATED by `{generated_by}` — do not edit by hand.
+use miden::core::stark::constants
 use miden::core::stark::types
 use miden::core::sys::pvm::layout
 
@@ -469,20 +501,27 @@ use miden::core::sys::pvm::layout
 # split into {segments} segments ({dispatched} of them order-dependent).
 
 {pipes}
+{proof_order_maps}
 #! Stages the proof-order-dependent half of the out-of-domain scatter table.
 #!
 #! The proof commits each chiplet's trace at its position in the height-sorted proof order, while
 #! the canonical constraint circuit reads it at the chiplet's instance offset. Both the canonical
 #! destination and the segment length are compile-time per chiplet; this procedure only routes them
-#! to the stream position the absorbed trace heights put that chiplet in.
+#! to the stream position `stage_proof_order_maps` recorded for that chiplet.
 #!
-#! Must run after the AIR heights are stored and before the first out-of-domain row is ingested.
+#! Must run after the proof-order maps are staged and before the first out-of-domain row is
+#! ingested.
 #!
 #! Inputs:  []
 #! Outputs: []
 pub proc stage_ood_scatter_table()
+    exec.layout::ood_scatter_table_ptr
+    # => [table]
 {digest_staging}
-{order_pass}end
+    exec.layout::proof_order_positions_ptr
+    # => [pos_ptr, table]
+{order_pass}    drop drop
+end
 
 #! Processes one PVM row of out-of-domain evaluations, scattering it to canonical addresses.
 #!
@@ -521,6 +560,7 @@ end
         quotient = geometry.quotient,
         segments = plan.dispatches.len(),
         dispatched = plan.dispatched_slots(),
+        proof_order_maps = proof_order_maps,
         order_pass = order_pass.join(""),
     )
     .expect("writing to String cannot fail");
@@ -564,7 +604,19 @@ mod tests {
     /// The checked-in hook must be exactly what the current chiplet widths render.
     #[test]
     fn generated_pvm_ood_hook_is_up_to_date() {
-        let rendered = render_pvm_ood_frames(&live_geometry()).expect("render the PVM hook");
+        // The generated layout pads `pos_by_id` to a word, so `id_by_pos` is word-aligned.
+        let rendered = render_pvm_ood_frames(&live_geometry(), true).expect("render the PVM hook");
+        assert!(rendered.contains("pub proc stage_proof_order_maps"));
+        assert!(rendered.contains("exec.layout::proof_order_positions_ptr"));
+        assert!(rendered.contains("exec.layout::proof_order_ids_ptr"));
+        assert!(
+            !rendered.contains("aux_source"),
+            "one boundary value per chiplet makes a separate source-address table redundant"
+        );
+        assert!(
+            !rendered.contains("proof_order_position_from_heights"),
+            "the fixed sorting network must replace repeated rank scans"
+        );
         let checked_in = std::fs::read_to_string(HOOK_PATH)
             .unwrap_or_else(|err| panic!("failed to read {HOOK_PATH}: {err}"));
         assert_eq!(

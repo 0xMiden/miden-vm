@@ -32,7 +32,7 @@ const HEIGHTS_PTR: u32 = 1_004;
 /// The canonical AIR occupying each proof position.
 ///
 /// The proof order sorts ascending by log height with the canonical instance index breaking ties,
-/// which is what `stark::utils::proof_order_position_from_heights` computes one AIR at a time.
+/// which is what `sys::vm::ood_frames::stage_proof_order_maps` derives once from the heights.
 fn proof_order(heights: &[u64]) -> Vec<usize> {
     let mut order: Vec<usize> = (0..heights.len()).collect();
     order.sort_by_key(|&air| (heights[air], air));
@@ -102,9 +102,11 @@ fn source(heights: &[u64], scatter: bool) -> String {
         "use miden::core::stark::constants
 use miden::core::sys::vm::aux_trace
 use miden::core::sys::vm::layout
+use miden::core::sys::vm::ood_frames
 
 begin
 {stores}
+    exec.ood_frames::stage_proof_order_maps
 
     push.{s3}.{s2}.{s1}.{s0}
 
@@ -154,16 +156,21 @@ fn run(heights: &[u64], scatter: bool) -> Vec<u64> {
 // TESTS
 // ================================================================================================
 
-/// The scatter resolves one proof position per AIR and addresses the boundary region as
-/// `MIDEN_AIR_COUNT` consecutive pairs. `constraints_regen` pins the `NUM_AIRS` bound itself; what
-/// is pinned here is that the unrolled body and the region it permutes agree with that bound.
+/// The scatter reads one proof position per AIR from the `pos_by_id` map and addresses the
+/// boundary region as `MIDEN_AIR_COUNT` consecutive pairs. `constraints_regen` pins the
+/// `NUM_AIRS` bound itself; what is pinned here is that the unrolled body and the region it
+/// permutes agree with that bound.
 #[test]
 fn the_scatter_covers_every_air_of_the_relation() {
     let aux_trace = include_str!("../../asm/sys/vm/aux_trace.masm");
-    let blocks = aux_trace.matches("exec.utils::proof_order_position_from_heights").count();
+    let blocks = aux_trace.matches("exec.layout::proof_order_positions_ptr").count();
     assert_eq!(
         blocks, MIDEN_AIR_COUNT,
-        "the scatter does not resolve every AIR's proof position"
+        "the scatter does not read every AIR's proof position from the map"
+    );
+    assert!(
+        !aux_trace.contains("proof_order_position_from_heights"),
+        "the aux hook must read the staged map rather than re-rank the heights"
     );
 
     let region =

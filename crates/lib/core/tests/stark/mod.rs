@@ -28,8 +28,7 @@ use rstest::rstest;
 mod ace_circuit;
 mod ace_read_check;
 mod batch_query_gen;
-mod f1_scatter_bench;
-mod f1_sigma_scatter;
+mod proof_order_maps;
 mod pvm_aux_trace;
 mod pvm_deep_queries;
 mod pvm_public_inputs;
@@ -40,8 +39,10 @@ mod pvm_verifier;
 mod pvm_wrapper;
 mod security;
 mod security_math;
+mod vm_scatter_bench;
+mod vm_sigma_scatter;
 
-fn pvm_layout_const(name: &str) -> u32 {
+pub(crate) fn pvm_layout_const(name: &str) -> u32 {
     let source = include_str!("../../asm/sys/pvm/layout.masm");
     let prefix = format!("const {name} = ");
     let value = source
@@ -51,7 +52,7 @@ fn pvm_layout_const(name: &str) -> u32 {
     u32::try_from(value).expect("PVM layout pointer must fit in u32")
 }
 
-fn vm_layout_const(name: &str) -> u32 {
+pub(crate) fn vm_layout_const(name: &str) -> u32 {
     let source = include_str!("../../asm/sys/vm/layout.masm");
     let prefix = format!("const {name} = ");
     let value = source
@@ -178,9 +179,9 @@ fn stark_verifier_e2f4_rejects_corrupted_ace_circuit_stream() {
 /// A forged per-AIR log height must be rejected.
 ///
 /// The transcript-bound per-AIR heights are the verifier's authoritative proof-order input.
-/// `stage_ood_scatter_table`, `scatter_aux_bus_boundary`, and `stage_air_fold_coefficients` derive
-/// positions from them; the first also materializes the out-of-domain routing table. No standalone
-/// order tag is stored. The heights arrive on the advice stack, so
+/// `stage_proof_order_maps` derives both position maps from them once; scatter staging, boundary
+/// placement, and fold-coefficient staging read those maps. No standalone order tag is stored.
+/// The heights arrive on the advice stack, so
 /// `sys/vm/public_inputs.masm` observes them into the Fiat-Shamir transcript: a forged height
 /// diverges the transcript, and the proof cannot survive that divergence.
 ///
@@ -251,9 +252,6 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
     let core_aux_destination = 12 + 2 * proof_position(MidenAir::Core);
     let chiplets_aux_destination = 12 + 2 * proof_position(MidenAir::Chiplets);
 
-    let relation_digest = config::RELATION_DIGEST.map(|value| value.as_canonical_u64());
-    let and8_preprocessed_commitment =
-        and8_preprocessed_commitment().map(|value| value.as_canonical_u64());
     let source = |swap_destinations: bool| {
         let routing_mutation = if swap_destinations {
             format!(
@@ -270,9 +268,9 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
         use miden::core::mem
         use miden::core::sys
         use miden::core::stark::utils
-        use miden::core::stark::constants
         use miden::core::stark::verifier
 
+        use miden::core::sys::vm
         use miden::core::sys::vm::claim
         use miden::core::sys::vm::constraints_eval
         use miden::core::sys::vm::deep_queries
@@ -281,41 +279,11 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
         use miden::core::sys::vm::public_inputs
         use miden::core::sys::vm::aux_trace
 
-        const LOG_HEIGHT_MIN = 6
-        const LOG_HEIGHT_BOUND = 30
-        const AND8_LOOKUP_LOG_HEIGHT = 16
         const KERNEL_COMMITMENT_OFFSET = 4
         const KERNEL_DOMAIN_TAG = 0x01000001
         const FELTS_PER_KERNEL_DIGEST = 4
         const MAX_NUM_KERNEL_PROCEDURES = 255
-        const RELATION_DIGEST_0 = {relation_digest_0}
-        const RELATION_DIGEST_1 = {relation_digest_1}
-        const RELATION_DIGEST_2 = {relation_digest_2}
-        const RELATION_DIGEST_3 = {relation_digest_3}
-        const AND8_PREPROCESSED_TRACE_COM_0 = {and8_preprocessed_commitment_0}
-        const AND8_PREPROCESSED_TRACE_COM_1 = {and8_preprocessed_commitment_1}
-        const AND8_PREPROCESSED_TRACE_COM_2 = {and8_preprocessed_commitment_2}
-        const AND8_PREPROCESSED_TRACE_COM_3 = {and8_preprocessed_commitment_3}
-
-        proc assert_shape_log
-            dup u32assert.err=\"AIR log height must be u32\"
-            dup u32gte.LOG_HEIGHT_MIN assert.err=\"AIR log height below minimum\"
-            dup u32lt.LOG_HEIGHT_BOUND assert.err=\"AIR log height above maximum\"
-            drop
-        end
-
-        proc store_relation_digest
-            push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
-            exec.constants::relation_digest_ptr mem_storew_le
-            dropw
-        end
-
-        proc store_and8_preprocessed_trace_commitment
-            push.AND8_PREPROCESSED_TRACE_COM_3.AND8_PREPROCESSED_TRACE_COM_2.AND8_PREPROCESSED_TRACE_COM_1.AND8_PREPROCESSED_TRACE_COM_0
-            exec.constants::preprocessed_trace_com_ptr mem_storew_le
-            dropw
-        end
-
+        # Mirrors the private `vm::materialize_kernel_witness`; any drift fails the control below.
         proc materialize_kernel_witness
             padw exec.layout::claim_ptr add.KERNEL_COMMITMENT_OFFSET mem_loadw_le
             adv.push_mapvaln
@@ -334,46 +302,6 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
             assert_eqw.err=\"fetched kernel digests do not hash to the claim's kernel commitment\"
         end
 
-        # Mirrors `sys::vm::load_air_context` so this test can vary only two routing destinations.
-        proc load_air_context_under_test
-            adv_push
-            exec.assert_shape_log
-            exec.layout::set_core_trace_length_log
-
-            adv_push
-            exec.assert_shape_log
-            exec.layout::set_chiplets_trace_length_log
-
-            adv_push
-            exec.assert_shape_log
-            exec.layout::set_eidos_compression_trace_length_log
-
-            push.AND8_LOOKUP_LOG_HEIGHT
-            exec.layout::set_and8_lookup_trace_length_log
-
-            exec.layout::get_core_trace_length_log
-            exec.layout::get_chiplets_trace_length_log
-            u32max
-            exec.layout::get_eidos_compression_trace_length_log
-            u32max
-            exec.layout::get_and8_lookup_trace_length_log
-            u32max
-            exec.constants::set_trace_length_log
-
-            exec.ood_frames::stage_ood_scatter_table
-            {routing_mutation}
-            exec.store_relation_digest
-            exec.store_and8_preprocessed_trace_commitment
-            exec.layout::ood_evaluations_ptr
-            exec.constants::set_ood_evaluations_address
-            exec.layout::current_trace_row_ptr
-            exec.constants::set_current_trace_row_address
-            exec.layout::auxiliary_ace_inputs_ptr
-            exec.constants::set_auxiliary_ace_inputs_address
-            exec.layout::aux_rand_elem_ptr
-            exec.constants::set_aux_rand_elem_address
-        end
-
         begin
             exec.layout::claim_commitment_ptr mem_storew_le
             exec.layout::claim_ptr exec.claim::materialize_claim
@@ -381,7 +309,8 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
             exec.utils::load_security_params
             exec.materialize_kernel_witness
             exec.public_inputs::stage_boundary_inputs
-            exec.load_air_context_under_test
+            exec.vm::load_air_context
+            {routing_mutation}
 
             procref.deep_queries::compute_deep_composition_polynomial_queries
             procref.constraints_eval::execute_constraint_evaluation_check
@@ -393,14 +322,6 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
             exec.sys::truncate_stack
         end
     ",
-        relation_digest_0 = relation_digest[0],
-        relation_digest_1 = relation_digest[1],
-        relation_digest_2 = relation_digest[2],
-        relation_digest_3 = relation_digest[3],
-        and8_preprocessed_commitment_0 = and8_preprocessed_commitment[0],
-        and8_preprocessed_commitment_1 = and8_preprocessed_commitment[1],
-        and8_preprocessed_commitment_2 = and8_preprocessed_commitment[2],
-        and8_preprocessed_commitment_3 = and8_preprocessed_commitment[3],
         routing_mutation = routing_mutation,
         )
     };
@@ -1881,21 +1802,22 @@ fn quotient_recomposition_constants_match_derivation() {
 
 /// A relation may stage per-AIR fold coefficients only once its ACE input region holds them.
 ///
-/// `stage_air_fold_coefficients` writes one extension-field coefficient per AIR immediately after
-/// the selector block, at base offsets `FIRST_SELECTOR_OFFSET + SELECTOR_STRIDE * num_airs + 2k`
-/// from the relation's stark-vars base. Only the felts below `ACE_CIRCUIT_STREAM_PTR` belong to
-/// that region; a coefficient past its end lands in the circuit-stream region, where the loader's
-/// next `adv_pipe` silently overwrites it. The memory-map test cannot see this — it compares
-/// *declared* extents, and both regions stay dense and disjoint whether or not the writes stay
-/// inside them — so the bound is asserted here instead, against the procedure's real offsets.
+/// Each generated evaluator's `stage_air_fold_coefficients` writes one extension-field
+/// coefficient per AIR immediately after the selector block, at base offsets
+/// `FIRST_SELECTOR_OFFSET + SELECTOR_STRIDE * num_airs + 2k` from the relation's stark-vars base.
+/// Only the felts below `ACE_CIRCUIT_STREAM_PTR` belong to that region; a coefficient past its
+/// end lands in the circuit-stream region, where the loader's next `adv_pipe` silently overwrites
+/// it. The memory-map test cannot see this — it compares *declared* extents, and both regions
+/// stay dense and disjoint whether or not the writes stay inside them — so the bound is asserted
+/// here instead, against the offset the evaluator actually addresses.
 #[test]
 fn staged_fold_coefficients_fit_the_declared_ace_input_region() {
     const STAGING_PROC: &str = "stage_air_fold_coefficients";
-    const ENTRY_PROC: &str = "set_up_auxiliary_inputs_ace";
+    const OFFSET_SITE: &str = "exec.layout::auxiliary_ace_inputs_ptr add.";
     /// Base felts per staged coefficient (one quadratic-extension element).
     const COEFFICIENT_STRIDE: u32 = 2;
 
-    let staging = include_str!("../../asm/stark/constraints_eval_inputs.masm");
+    let shared = include_str!("../../asm/stark/constraints_eval_inputs.masm");
     let masm_const = |source: &str, name: &str, what: &str| -> u32 {
         let prefix = format!("const {name} = ");
         source
@@ -1904,31 +1826,12 @@ fn staged_fold_coefficients_fit_the_declared_ace_input_region() {
             .unwrap_or_else(|| panic!("missing {what} constant {name}"))
     };
 
-    let first_selector_offset = masm_const(staging, "FIRST_SELECTOR_OFFSET", "staging");
-    let selector_stride = masm_const(staging, "SELECTOR_STRIDE", "staging");
-
-    // Walk the procedure declarations rather than the raw text so a rename of either procedure
-    // fails here instead of turning this guard into a silent no-op.
-    //
-    // Staging can be wired at either of two sites, and both are checked: inside the shared entry
-    // procedure, which stages for *every* relation that calls it, or in a relation's own generated
-    // evaluator, which stages for that relation alone. Watching only one site would let the other
-    // wire a relation past its region unnoticed.
-    let mut declares_staging = false;
-    let mut in_entry = false;
-    let mut shared_entry_stages = false;
-    for line in staging.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) =
-            trimmed.strip_prefix("pub proc ").or_else(|| trimmed.strip_prefix("proc "))
-        {
-            let name = rest.split(['(', ' ']).next().unwrap_or(rest);
-            declares_staging |= name == STAGING_PROC;
-            in_entry = name == ENTRY_PROC;
-        }
-        shared_entry_stages |= in_entry && trimmed.contains(&format!("exec.{STAGING_PROC}"));
-    }
-    assert!(declares_staging, "{STAGING_PROC} is no longer declared");
+    let first_selector_offset = masm_const(shared, "FIRST_SELECTOR_OFFSET", "shared");
+    let selector_stride = masm_const(shared, "SELECTOR_STRIDE", "shared");
+    assert!(
+        !shared.contains(&format!("proc {STAGING_PROC}")),
+        "the shared module must not carry a second fold-coefficient algorithm"
+    );
 
     for (relation, layout_const, evaluator) in [
         (
@@ -1946,30 +1849,47 @@ fn staged_fold_coefficients_fit_the_declared_ace_input_region() {
         let region_felts =
             layout_const("ACE_CIRCUIT_STREAM_PTR") - layout_const("AUXILIARY_ACE_INPUTS_PTR");
 
-        let selectors_end = first_selector_offset + selector_stride * num_airs;
-        assert!(
-            selectors_end <= region_felts,
-            "{relation}: {num_airs} selector triples end at felt {selectors_end}, past the \
-             {region_felts}-felt AUXILIARY_ACE_INPUTS_PTR region"
-        );
-
-        let evaluator_stages = evaluator.lines().any(|line| {
-            line.trim().contains(&format!("exec.constraints_eval_inputs::{STAGING_PROC}"))
-        });
-        if shared_entry_stages || evaluator_stages {
-            let site = if shared_entry_stages {
-                ENTRY_PROC
-            } else {
-                "the generated evaluator"
-            };
-            let coefficients_end = selectors_end + COEFFICIENT_STRIDE * num_airs;
-            assert!(
-                coefficients_end <= region_felts,
-                "{relation}: {site} stages {num_airs} fold coefficients ending at felt \
-                 {coefficients_end}, past the {region_felts}-felt AUXILIARY_ACE_INPUTS_PTR \
-                 region; enlarge the region before wiring the staging call in"
-            );
+        // Walk the procedure declarations rather than the raw text so a rename fails here instead
+        // of turning this guard into a silent no-op.
+        let mut declares_staging = false;
+        let mut in_staging = false;
+        let mut staged_offset = None;
+        for line in evaluator.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) =
+                trimmed.strip_prefix("pub proc ").or_else(|| trimmed.strip_prefix("proc "))
+            {
+                let name = rest.split(['(', ' ']).next().unwrap_or(rest);
+                if name == STAGING_PROC {
+                    assert!(
+                        !trimmed.starts_with("pub "),
+                        "{relation}: {STAGING_PROC} must stay private to the evaluator"
+                    );
+                }
+                declares_staging |= name == STAGING_PROC;
+                in_staging = name == STAGING_PROC;
+            }
+            if in_staging && let Some(offset) = trimmed.strip_prefix(OFFSET_SITE) {
+                staged_offset = offset.parse::<u32>().ok();
+            }
         }
+        assert!(declares_staging, "{relation}: {STAGING_PROC} is no longer declared");
+        let staged_offset =
+            staged_offset.unwrap_or_else(|| panic!("{relation}: {STAGING_PROC} has no offset"));
+
+        let selectors_end = first_selector_offset + selector_stride * num_airs;
+        assert_eq!(
+            staged_offset, selectors_end,
+            "{relation}: the evaluator stages fold coefficients off the slot right after the \
+             selector block"
+        );
+        let coefficients_end = selectors_end + COEFFICIENT_STRIDE * num_airs;
+        assert!(
+            coefficients_end <= region_felts,
+            "{relation}: {num_airs} fold coefficients end at felt {coefficients_end}, past the \
+             {region_felts}-felt AUXILIARY_ACE_INPUTS_PTR region; enlarge the region before \
+             staging them"
+        );
     }
 }
 
