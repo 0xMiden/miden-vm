@@ -204,7 +204,7 @@ end
 #! Outputs: [level, ...]
 #!
 #! Invocation: exec
-pub proc compute_conjectured_security_level(descriptor: types::SecurityDescriptor) -> u32
+pub proc compute_conjectured_security_level(descriptor: types::StackSecurityDescriptor) -> u32
     # Assert the validity envelope documented above. Each comparison also range-checks its
     # operand as a u32. Inputs not used by query or lookup are consumed after validation.
     # Lifted STARK currently has no grinding step before lookup-challenge sampling.

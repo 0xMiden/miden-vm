@@ -39,7 +39,7 @@ use miden::core::stark::utils
 #!
 #! Inputs:  [D0, D1, D2, D3, D4]
 #! Outputs: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
-pub proc verify(hooks: types::VerifierHooks) -> types::ProofParameters
+pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters
 
     #==============================================================================================
     #       I)  Observe proof context and load public inputs

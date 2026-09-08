@@ -28,7 +28,7 @@ end
 #!
 #! Invocation: exec
 pub proc compute_and_store_public_inputs_address(
-    aux_rand_ptr: types::Address,
+    aux_rand_ptr: ptr<types::QuadFelt>,
     num_fixed_len_pi: u32,
 )
     # => [aux_rand_ptr, num_fixed_len_pi, ...]
@@ -47,9 +47,9 @@ end
 #! Invocation: exec
 pub proc load_base_store_extension_double_word_from_mem(
     state: types::PoseidonState,
-    dst: types::Address,
+    dst: ptr<types::QuadFelt>,
     src: types::Address,
-) -> (types::PoseidonState, types::Address, types::Address)
+) -> (types::PoseidonState, ptr<types::QuadFelt>, types::Address)
     dup.13 mem_loadw_le
     exec.constants::tmp1 mem_storew_le
     movup.13 add.4 movdn.13

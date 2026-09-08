@@ -285,11 +285,11 @@ pub proc get_num_fri_layers() -> u8
     push.NUM_FRI_LAYERS_PTR mem_load
 end
 
-pub proc set_remainder_poly_address(value: types::Address)
+pub proc set_remainder_poly_address(value: ptr<types::QuadFelt>)
     push.REMAINDER_POLY_ADDRESS_PTR mem_store
 end
 
-pub proc get_remainder_poly_address() -> types::Address
+pub proc get_remainder_poly_address() -> ptr<types::QuadFelt>
     push.REMAINDER_POLY_ADDRESS_PTR mem_load
 end
 
@@ -301,11 +301,11 @@ pub proc get_trace_length() -> u32
     push.TRACE_LENGTH_PTR mem_load
 end
 
-pub proc set_fri_queries_address(value: types::Address)
+pub proc set_fri_queries_address(value: ptr<word>)
     push.FRI_QUERIES_ADDRESS_PTR mem_store
 end
 
-pub proc get_fri_queries_address() -> types::Address
+pub proc get_fri_queries_address() -> ptr<word>
     push.FRI_QUERIES_ADDRESS_PTR mem_load
 end
 
@@ -362,34 +362,34 @@ pub proc get_folding_pow_bits() -> u8
     push.FOLDING_POW_BITS_PTR mem_load
 end
 
-pub proc main_trace_com_ptr() -> types::Address
+pub proc main_trace_com_ptr() -> ptr<types::Digest>
     push.MAIN_TRACE_COM_PTR
 end
 
-pub proc aux_trace_com_ptr() -> types::Address
+pub proc aux_trace_com_ptr() -> ptr<types::Digest>
     push.AUX_TRACE_COM_PTR
 end
 
-pub proc composition_poly_com_ptr() -> types::Address
+pub proc composition_poly_com_ptr() -> ptr<types::Digest>
     push.COMPOSITION_POLY_COM_PTR
 end
 
 #! Address for the point `z` and its exponentiation `z^N` where `N=trace_len`.
 #!
 #! The word stored is `[z^n_0, z^n_1, z_0, z_1]`.
-pub proc z_ptr() -> types::Address
+pub proc z_ptr() -> ptr<[types::QuadFelt; 2]>
     push.Z_PTR
 end
 
-pub proc zero_word_ptr() -> types::Address
+pub proc zero_word_ptr() -> ptr<word>
     push.ZERO_WORD_PTR
 end
 
-pub proc deep_rand_alpha_nd_ptr() -> types::Address
+pub proc deep_rand_alpha_nd_ptr() -> ptr<types::QuadFelt>
     push.ALPHA_DEEP_ND_PTR
 end
 
-pub proc ood_fixed_term_horner_evaluations_ptr() -> types::Address
+pub proc ood_fixed_term_horner_evaluations_ptr() -> ptr<types::EvaluationPair>
     push.OOD_FIXED_TERM_HORNER_EVALS_PTR
 end
 
@@ -401,38 +401,38 @@ pub proc get_trace_domain_generator() -> felt
     push.TRACE_DOMAIN_GENERATOR_PTR mem_load
 end
 
-pub proc public_inputs_address_ptr() -> types::Address
+pub proc public_inputs_address_ptr() -> ptr<ptr<types::QuadFelt>>
     push.PUBLIC_INPUTS_ADDRESS_PTR
 end
 
 #! Returns the pointer to the capacity word of the Poseidon2-based random coin.
-pub proc c_ptr() -> types::Address
+pub proc c_ptr() -> ptr<word>
     push.C_PTR
 end
 
 #! Returns the pointer to the first rate word of the Poseidon2-based random coin.
-pub proc r1_ptr() -> types::Address
+pub proc r1_ptr() -> ptr<word>
     push.R1_PTR
 end
 
 #! Returns the pointer to the second rate word of the Poseidon2-based random coin.
-pub proc r2_ptr() -> types::Address
+pub proc r2_ptr() -> ptr<word>
     push.R2_PTR
 end
 
-pub proc tmp1() -> types::Address
+pub proc tmp1() -> ptr<word>
     push.TMP1
 end
 
-pub proc tmp2() -> types::Address
+pub proc tmp2() -> ptr<word>
     push.TMP2
 end
 
-pub proc tmp3() -> types::Address
+pub proc tmp3() -> ptr<word>
     push.TMP3
 end
 
-pub proc tmp4() -> types::Address
+pub proc tmp4() -> ptr<word>
     push.TMP4
 end
 
@@ -456,11 +456,11 @@ pub proc assert_valid_order_tag(order_tag_count: u32)
     swap u32lt assert.err="invalid order tag"
 end
 
-pub proc relation_digest_ptr() -> types::Address
+pub proc relation_digest_ptr() -> ptr<types::Digest>
     push.RELATION_DIGEST_PTR
 end
 
-pub proc ace_registry_root_ptr() -> types::Address
+pub proc ace_registry_root_ptr() -> ptr<types::Digest>
     push.ACE_REGISTRY_ROOT_PTR
 end
 
@@ -472,11 +472,11 @@ pub proc random_coin_output_len_ptr() -> types::Address
     push.RANDOM_COIN_OUTPUT_LEN_PTR
 end
 
-pub proc set_ood_evaluations_address(value: types::Address)
+pub proc set_ood_evaluations_address(value: ptr<types::QuadFelt>)
     push.OOD_EVALUATIONS_ADDRESS_PTR mem_store
 end
 
-pub proc get_ood_evaluations_address() -> types::Address
+pub proc get_ood_evaluations_address() -> ptr<types::QuadFelt>
     push.OOD_EVALUATIONS_ADDRESS_PTR mem_load
 end
 
@@ -492,11 +492,11 @@ pub proc fri_verify_state_ptr() -> types::Address
     push.FRI_VERIFY_STATE_PTR
 end
 
-pub proc composition_coef_ptr() -> types::Address
+pub proc composition_coef_ptr() -> ptr<[types::QuadFelt; 2]>
     push.COMPOSITION_COEF_PTR
 end
 
-pub proc deep_rand_coef_ptr() -> types::Address
+pub proc deep_rand_coef_ptr() -> ptr<types::QuadFelt>
     push.DEEP_RAND_CC_PTR
 end
 
@@ -504,23 +504,23 @@ pub proc fri_com_ptr() -> types::Address
     push.FRI_COM_PTR
 end
 
-pub proc get_procedure_digest_compute_deep_composition_polynomial_queries_ptr() -> types::Address
+pub proc get_procedure_digest_compute_deep_composition_polynomial_queries_ptr() -> ptr<types::Digest>
     push.DYNAMIC_PROCEDURE_0_PTR
 end
 
-pub proc get_procedure_digest_execute_constraint_evaluation_check_ptr() -> types::Address
+pub proc get_procedure_digest_execute_constraint_evaluation_check_ptr() -> ptr<types::Digest>
     push.DYNAMIC_PROCEDURE_1_PTR
 end
 
-pub proc get_procedure_digest_process_row_ood_evaluations_ptr() -> types::Address
+pub proc get_procedure_digest_process_row_ood_evaluations_ptr() -> ptr<types::Digest>
     push.DYNAMIC_PROCEDURE_2_PTR
 end
 
-pub proc get_procedure_digest_process_public_inputs_ptr() -> types::Address
+pub proc get_procedure_digest_process_public_inputs_ptr() -> ptr<types::Digest>
     push.DYNAMIC_PROCEDURE_3_PTR
 end
 
-pub proc get_procedure_digest_observe_aux_trace_ptr() -> types::Address
+pub proc get_procedure_digest_observe_aux_trace_ptr() -> ptr<types::Digest>
     push.DYNAMIC_PROCEDURE_4_PTR
 end
 
