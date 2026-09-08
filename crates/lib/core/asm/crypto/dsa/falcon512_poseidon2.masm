@@ -16,6 +16,17 @@ const FALCON_DIV_EVENT = event("miden::core::crypto::dsa::falcon512_poseidon2::f
 # MODULAR REDUCTION FALCON PRIME
 # =============================================================================================
 
+#! Falcon coefficient reduced modulo 12289.
+pub type Coefficient = u16
+#! A 64-bit integer with its high limb on top of the stack.
+pub type WideInteger = struct { hi: u32, lo: u32 }
+#! Falcon nonce, with the second word on top of the stack.
+pub type Nonce = struct { high: word, low: word }
+#! Integer polynomial coefficient (up to 512 * 12288^2), represented in one felt.
+pub type ProductCoefficient = felt
+#! Squared polynomial norm, represented in one felt (may exceed u32).
+pub type SquaredNorm = felt
+
 #! Given dividend ( i.e. a u64 given by its lower and higher u32 decomposition ) on the stack,
 #! this routine computes c = a % M where M = 12289
 #!
@@ -31,7 +42,7 @@ const FALCON_DIV_EVENT = event("miden::core::crypto::dsa::falcon512_poseidon2::f
 #! within the appropriate range i.e., they are u32-s.
 #!
 #! Cycles: 29
-pub proc mod_12289
+pub proc mod_12289(value: WideInteger) -> Coefficient
     emit.FALCON_DIV_EVENT
     # the advice stack contains now [qhi, qlo, r, ...] where q = qhi * 2^32 + qlo is quotient
     # and r is remainder
@@ -99,7 +110,7 @@ end
 #!
 #! Cycles: ~1430
 @locals(8)
-pub proc hash_to_point
+pub proc hash_to_point(c_ptr: ptr<felt>, message: word, nonce: Nonce)
     # Move pointer out of the way
     movdn.12
 
@@ -162,7 +173,7 @@ end
 #!
 #! Cycles: 6785
 @locals(12)
-pub proc load_h_s2_and_product
+pub proc load_h_s2_and_product(ptr: ptr<felt>, public_key: poseidon2::Digest)
     # We will store in local addresses:
     # 1. 0..4 the public key,
     # 2. 4..8 the inverse evaluation point as [tau_inv0, tau_inv1, 0, 0],
@@ -347,7 +358,7 @@ end
 #! Output [norm(e)^2, ...]
 #!
 #! Cycles: 20
-pub proc norm_sq
+pub proc norm_sq(coefficient: Coefficient) -> u32
     dup
     dup mul
     #=> [e^2, e, ...]
@@ -398,7 +409,11 @@ end
 #! Output: [e, ...]
 #!
 #! Cycles: 45
-pub proc diff_mod_M
+pub proc diff_mod_M(
+    pi0: ProductCoefficient,
+    shifted_pi512: ProductCoefficient,
+    c: WideInteger,
+) -> Coefficient
     # 1) Subtract
     sub
     #=> [pi512 + J - pi, c_hi, c_lo, ...]
@@ -464,7 +479,7 @@ end
 #! Output: [norm_sq(s1), ...]
 #!
 #! Cycles: 40450
-pub proc compute_s1_norm_sq
+pub proc compute_s1_norm_sq(pi_ptr: ptr<ProductCoefficient>) -> SquaredNorm
     repeat.128
         # 1) Load the next 4 * 3 coefficients
         # load the next four pi_i
@@ -565,7 +580,7 @@ end
 #! Output: [norm_sq(s2), ...]
 #!
 #! Cycles: 11150
-pub proc compute_s2_norm_sq
+pub proc compute_s2_norm_sq(s2_ptr: ptr<Coefficient>) -> SquaredNorm
     repeat.128
         padw
         dup.4
@@ -624,7 +639,7 @@ end
 #!
 #! Cycles: ~ 59859
 @locals(2560)
-pub proc verify
+pub proc verify(public_key: poseidon2::Digest, message: word)
     # 1) Load the public key polynomial h and the signature polynomial s2 and the product of
     # the two polynomials pi := h * s2 in Z_Q[x]. This also checks that h hashes to the provided
     # digest PK. While loading the polynomials, the first half of the digest of hashing the three
@@ -693,7 +708,10 @@ end
 #! Outputs:
 #!   Operand stack: [PK, MSG, ...]
 #!   Advice stack:  [SIGNATURE]
-pub proc move_sig_from_map_to_adv_stack
+pub proc move_sig_from_map_to_adv_stack(
+    public_key: poseidon2::Digest,
+    message: word,
+) -> (poseidon2::Digest, word)
     dupw.1 dupw.1 hmerge
     #=> [hash(MSG || PK), PK, MSG, ...]
 

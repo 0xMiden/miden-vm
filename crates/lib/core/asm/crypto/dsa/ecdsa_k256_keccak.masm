@@ -19,6 +19,12 @@ const ECDSA_RECOVER_EVENT = event("miden::core::crypto::dsa::ecdsa_k256_keccak::
 # PROCEDURES
 # ================================================================================================
 
+#! Affine public key as little-endian X and Y coordinate limbs, X on top.
+pub type PublicKey = struct { x: k1_base::Value, y: k1_base::Value }
+#! Native EVM recovery witness, with v equal to 27 or 28.
+pub type RecoverySignature = struct { r: k1_scalar::Value, s: k1_scalar::Value, v: u8 }
+type Prehash = struct { limbs: [u32; 8] }
+
 #! Verifies a secp256k1 ECDSA witness using the `miden-crypto::ecdsa_k256_keccak` message,
 #! public-key commitment, and signature-scalar conventions, encoded in the native limb ABI below.
 #! Acceptance intentionally differs from the Rust verifier: high-s witnesses are accepted.
@@ -54,7 +60,7 @@ const ECDSA_RECOVER_EVENT = event("miden::core::crypto::dsa::ecdsa_k256_keccak::
 #!
 #! Invocation: exec
 @locals(24)
-pub proc verify
+pub proc verify(public_key: poseidon2::Digest, message: word)
     locaddr.0
     # => [pubkey_ptr=loc[0], PK_COMM, MSG_WORD, ...]
     exec.load_and_verify_public_key
@@ -114,7 +120,7 @@ end
 #!
 #! Invocation: exec
 @locals(24)
-pub proc verify_bytes
+pub proc verify_bytes(public_key: poseidon2::Digest, message_ptr: ptr<u32>, message_len_bytes: u32)
     locaddr.0
     # => [pubkey_ptr=loc[0], PK_COMM, MSG_PTR, MSG_LEN_BYTES, ...]
     exec.load_and_verify_public_key
@@ -164,7 +170,7 @@ end
 #!
 #! Invocation: exec
 @locals(8)
-pub proc recover
+pub proc recover(message: word, signature_ptr: ptr<RecoverySignature>) -> PublicKey
     locaddr.0 movdn.4
     # => [MSG_WORD, digest_ptr=loc[0], SIG_PTR, ...]
     exec.store_word_u32s_le
@@ -212,7 +218,11 @@ end
 #!
 #! Invocation: exec
 @locals(8)
-pub proc recover_bytes
+pub proc recover_bytes(
+    message_ptr: ptr<u32>,
+    message_len_bytes: u32,
+    signature_ptr: ptr<RecoverySignature>,
+) -> PublicKey
     locaddr.0 movdn.2
     # => [MSG_PTR, MSG_LEN_BYTES, digest_ptr=loc[0], SIG_PTR, ...]
     exec.keccak256::hash_bytes_mem
@@ -232,7 +242,7 @@ end
 #! Input:  [Z_U32[8], pubkey_ptr, ...]
 #! Advice: [SIG_R[8] | SIG_S[8] | ...]
 #! Output: [...]
-proc verify_digest_impl
+proc verify_digest_impl(prehash: Prehash, public_key_ptr: ptr<PublicKey>)
     exec.prepare_verify_inputs
     # => [U1, Q, U2, SIG_R, ...]
     exec.secp256k1::push_generator
@@ -253,7 +263,7 @@ end
 #! The recovery event supplies only the candidate `QX[8] || QY[8]`; all witness data is loaded
 #! independently from memory and the advice point is constrained before it is returned.
 @locals(16)
-proc recover_digest
+proc recover_digest(digest_ptr: ptr<Prehash>, signature_ptr: ptr<RecoverySignature>) -> PublicKey
     emit.ECDSA_RECOVER_EVENT
     # => [digest_ptr, SIG_PTR, ...]  Advice: [QX[8] | QY[8] | ...]
 
@@ -304,7 +314,10 @@ end
 #! Input:  [pubkey_ptr, PK_COMM, ...]
 #! Advice: [QX[8] | QY[8] | ...]
 #! Output: [pubkey_ptr + 16, ...]
-proc load_and_verify_public_key
+proc load_and_verify_public_key(
+    public_key_ptr: ptr<PublicKey>,
+    commitment: poseidon2::Digest,
+) -> ptr<PublicKey>
     # Since there are exactly 16 elements, `hash_elements` has a zero capacity word and requires no
     # partial-block padding. `adv_pipe` exposes each written chunk in the rate slots in the same
     # order that `mem_stream` would read it back from memory.
@@ -334,7 +347,7 @@ end
 #! Preconditions:
 #! - digest_ptr points to DIGEST_U32[8] packed little-endian u32 limbs. Each felt is u32-constrained
 #!   by the Keccak memory interface before `reverse_u32_bytes` consumes it.
-proc load_keccak_digest_as_z
+proc load_keccak_digest_as_z(digest_ptr: ptr<Prehash>) -> Prehash
     repeat.8
         dup mem_load
         exec.reverse_u32_bytes
@@ -355,7 +368,10 @@ end
 #! - Z_U32[8] is the Keccak256 message digest converted to little-endian scalar limbs;
 #! - pubkey_ptr points to QX[8] || QY[8], already bound to PK_COMM by a public verifier;
 #! - SIG_R/S advice is untrusted, loaded canonically by `load_signature_k1`, and checked below.
-proc prepare_verify_inputs
+proc prepare_verify_inputs(
+    prehash: Prehash,
+    public_key_ptr: ptr<PublicKey>,
+) -> (k1_scalar::Expr, secp256k1::Point, k1_scalar::Expr, k1_scalar::Expr)
     exec.k1_scalar::load_reduced_256
     # => [Z, pubkey_ptr, ...]
 
@@ -381,7 +397,10 @@ end
 #!
 #! `SIG_PTR` is word-aligned and addresses `R_LE_U32[8] || S_LE_U32[8] || V`, with V = 27 or 28.
 #! Loading r in both uint domains is sound because scalar canonicality proves `r < n < p`.
-proc load_recovery_signature_k1
+proc load_recovery_signature_k1(
+    z: k1_scalar::Expr,
+    signature_ptr: ptr<RecoverySignature>,
+) -> (k1_scalar::Expr, k1_scalar::Expr, k1_scalar::Expr, k1_base::Expr, i1)
     movup.4
     # => [SIG_PTR, Z, ...]
 
@@ -410,7 +429,7 @@ end
 #!
 #! Advice: [SIG_R[8] | SIG_S[8] | ...]
 #! Output: [SIG_S_SCALAR_VALUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
-proc load_signature_k1
+proc load_signature_k1() -> (k1_scalar::Expr, k1_scalar::Expr)
     exec.load_scalar_k1_from_advice
     # => [SIG_R, ...]
 
@@ -422,7 +441,7 @@ end
 #!
 #! Advice: [VALUE_LO_U32[4] | VALUE_HI_U32[4] | ...]
 #! Output: [VALUE_SCALAR_DIGEST, ...]
-proc load_scalar_k1_from_advice
+proc load_scalar_k1_from_advice() -> k1_scalar::Expr
     adv_pushw
     # => [VALUE_LO_U32[4], ...]
     adv_pushw
@@ -441,7 +460,12 @@ end
 #! SIG_R/S are canonical k1-scalar VALUE digests from the scalar loaders; Z is a k1-scalar
 #! expression digest from `load_reduced_256`; Q originates from `secp256k1::load_mem`. Thus direct
 #! comparison of SIG_R with the pinned zero VALUE digest is sound.
-proc compute_ecdsa_scalars
+proc compute_ecdsa_scalars(
+    s: k1_scalar::Expr,
+    r: k1_scalar::Expr,
+    z: k1_scalar::Expr,
+    q: secp256k1::Point,
+) -> (k1_scalar::Expr, secp256k1::Point, k1_scalar::Expr, k1_scalar::Expr)
     # Inversion rejects s = 0; check r explicitly.
     dupw.1
     exec.k1_scalar::push_zero_digest
@@ -481,7 +505,7 @@ end
 #! - SIG_R_SCALAR_VALUE_DIGEST is a canonical k1 scalar VALUE digest, e.g. from load_signature_k1;
 #! - secp256k1::eval binds VERIFY_POINT_DIGEST to the returned canonical curve VALUE payload;
 #! - after identity rejection succeeds, X_OR_TRUE_DIGEST/Y_OR_TRUE_DIGEST are real coordinate digests.
-proc assert_x_eq_scalar_k1
+proc assert_x_eq_scalar_k1(point: secp256k1::Point, r: k1_scalar::Expr)
     exec.secp256k1::eval
     # => [VERIFY_POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
 
@@ -517,7 +541,7 @@ end
 #!
 #! The x-coordinate is compared without reduction: recovery bytes 27 and 28 select only the
 #! `x(R) = r` branches, not the mathematical recovery-ID branches where `x(R) = r + n`.
-proc assert_recovery_point
+proc assert_recovery_point(point: secp256k1::Point, r: k1_base::Expr, parity: i1)
     # Keep the curve evaluation inline in each final-check mode: placing it behind a non-tail helper
     # adds three cycles to the existing verifier hot path.
     exec.secp256k1::eval
@@ -552,7 +576,7 @@ end
 #!
 #! Input:  [w0, w1, w2, w3, ptr, ...]
 #! Output: [ptr, ...]
-proc store_word_u32s_le
+proc store_word_u32s_le(value: word, ptr: ptr<u32>) -> ptr<u32>
     swap u32split
     # => [w1_lo, w1_hi, w0, w2, w3, ptr, ...]
     movup.2 u32split
@@ -573,7 +597,7 @@ end
 #! Input:  [x, ...]
 #! Output: [byte_reverse(x), ...]
 #! Precondition: x is a u32.
-proc reverse_u32_bytes
+proc reverse_u32_bytes(value: u32) -> u32
     dup u32shr.8 push.0x00FF00FF u32and
     # => [(x >> 8) & 0x00ff00ff, x, ...]
     swap push.0x00FF00FF u32and mul.256

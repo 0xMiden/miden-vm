@@ -1,3 +1,4 @@
+use miden::core::stark::types
 use miden::core::pcs::fri::frie2f4
 use miden::core::pcs::fri::helper
 
@@ -38,7 +39,7 @@ use miden::core::stark::utils
 #!
 #! Inputs:  [D0, D1, D2, D3, D4]
 #! Outputs: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
-pub proc verify
+pub proc verify(hooks: types::VerifierHooks) -> types::ProofParameters
 
     #==============================================================================================
     #       I)  Observe proof context and load public inputs
