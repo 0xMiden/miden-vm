@@ -1,13 +1,12 @@
-use std::sync::Arc;
-
 use miden_assembly::{Assembler, Linkage};
-use miden_core::{Felt, deferred::DeferredState};
+use miden_core::Felt;
 use miden_core_lib::CoreLibrary;
-use miden_precompiles::registry;
 use miden_processor::{
     ContextId, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
     StackInputs, advice::AdviceInputs,
 };
+
+pub use crate::helpers::assert_precompile_witness_round_trips;
 
 pub type U32x8 = [u32; 8];
 
@@ -108,18 +107,6 @@ pub fn masm_store_u32x8(limbs: U32x8, base_addr: u32) -> String {
 pub fn masm_push_u32x8(limbs: U32x8) -> String {
     let limbs = limbs.map(Felt::from_u32);
     format!("push.{}", felt_list(&limbs))
-}
-
-pub fn assert_deferred_state_round_trips(output: &ExecutionOutput) {
-    let registry = Arc::new(registry());
-    let wire = output.deferred_state.to_wire().expect("deferred state must encode to wire");
-    let rehydrated = DeferredState::from_wire(Arc::clone(&registry), &wire)
-        .expect("deferred wire must rehydrate under miden-precompiles registry");
-    assert_eq!(
-        rehydrated.root(),
-        output.deferred_state.root(),
-        "wire round-trip must preserve the deferred root"
-    );
 }
 
 fn read_stack_u32x8(output: &ExecutionOutput) -> U32x8 {

@@ -1,4 +1,4 @@
-use alloc::string::ToString;
+use alloc::{string::ToString, vec, vec::Vec};
 
 use miden_core::proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, VmProof};
 use miden_processor::{
@@ -61,30 +61,24 @@ impl Prover {
     /// Proves only the VM portion of an execution witness.
     ///
     /// If the execution authenticated deferred precompile work, the returned proof carries its
-    /// passive singleton wire for later hydration and proving. Otherwise, it is complete.
+    /// portable singleton witness for later proving. Otherwise, it is complete.
     pub fn prove(&self, witness: ExecutionWitness) -> Result<ExecutionProof, ProverError> {
         let (vm_witness, precompile_witness) = witness.into_parts();
         let vm = self.prove_vm(vm_witness)?;
         let Some(precompile_witness) = precompile_witness else {
             return Ok(ExecutionProof::new(vm, PrecompileStatus::Empty));
         };
-        let precompile = precompile_witness
-            .state()
-            .to_wire()
-            .expect("execution witness state must have canonical deferred wire");
-        Ok(ExecutionProof::new(vm, PrecompileStatus::Deferred(precompile)))
+        Ok(ExecutionProof::new(vm, PrecompileStatus::Deferred(precompile_witness)))
     }
 
     /// Proves a complete execution witness entirely in memory.
     ///
-    /// Both VM and precompile proving consume the hydrated witness directly; the witness is not
-    /// serialized on this local path.
+    /// VM replay and direct precompile import consume the in-memory witness without serialization.
     pub fn prove_full(&self, witness: ExecutionWitness) -> Result<ExecutionProof, ProverError> {
         let (vm_witness, precompile_witness) = witness.into_parts();
         let vm = self.prove_vm(vm_witness)?;
         let precompile = precompile_witness
-            .as_ref()
-            .map(|witness| self.prove_precompile(witness))
+            .map(|witness| self.prove_precompiles(vec![witness]))
             .transpose()?;
         let precompile = match precompile {
             Some(precompile) => PrecompileStatus::Proven(precompile),
@@ -104,24 +98,27 @@ impl Prover {
         self.prove_vm_trace(trace)
     }
 
-    /// Proves one singleton or merged precompile witness without consuming its hydrated DAG.
-    pub fn prove_precompile(
+    /// Proves an owned batch of singleton execution obligations in one STARK.
+    ///
+    /// The proof preserves the input roots in order, including repeated roots. An empty batch
+    /// is rejected. Single-execution proving uses this same path with a one-element vector.
+    pub fn prove_precompiles(
         &self,
-        witness: &PrecompileWitness,
+        witnesses: Vec<PrecompileWitness>,
     ) -> Result<PrecompileProof, ProverError> {
-        let proof = miden_precompiles_prover::prove_deferred_state(witness.state(), self.hash_fn)
-            .map_err(ProverError::PrecompileProofGeneration)?;
-        Ok(PrecompileProof { proof, roots: witness.roots().to_vec() })
+        miden_precompiles_prover::prove_precompiles(witnesses, self.hash_fn)
+            .map_err(ProverError::PrecompileProofGeneration)
     }
 
     #[cfg(feature = "std")]
     fn prove_full_trace(
         &self,
         trace: VmTrace,
-        precompile: Option<&PrecompileWitness>,
+        precompile: Option<PrecompileWitness>,
     ) -> Result<ExecutionProof, ProverError> {
         let vm = self.prove_vm_trace(trace)?;
-        let precompile = precompile.map(|witness| self.prove_precompile(witness)).transpose()?;
+        let precompile =
+            precompile.map(|witness| self.prove_precompiles(vec![witness])).transpose()?;
         let precompile = match precompile {
             Some(precompile) => PrecompileStatus::Proven(precompile),
             None => PrecompileStatus::Empty,
@@ -251,7 +248,7 @@ pub fn prove_sync(
         };
         let stack_outputs = *trace.stack_outputs();
         let proof = prover
-            .prove_full_trace(trace, precompile.as_ref())
+            .prove_full_trace(trace, precompile)
             .map_err(ProverError::into_execution_error)?;
         return Ok((stack_outputs, proof));
     }
@@ -283,7 +280,7 @@ pub enum ProverError {
     VmProofGeneration(#[source] ExecutionError),
     /// The deferred precompile witness could not be proved.
     #[error("failed to prove precompile witness: {0}")]
-    PrecompileProofGeneration(#[source] miden_precompiles_prover::ProveDeferredStateError),
+    PrecompileProofGeneration(#[source] miden_precompiles_prover::PrecompileProvingError),
 }
 
 impl ProverError {

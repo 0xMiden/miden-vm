@@ -1,117 +1,119 @@
+//! Direct checked import of singleton portable witnesses into one private proving session.
+
 use alloc::{
     collections::{BTreeMap, BTreeSet, btree_map::Entry},
+    vec,
     vec::Vec,
 };
 
-use miden_core::deferred::{DataChunk, DeferredState, Digest, Node, TRUE_DIGEST, Tag};
+use miden_core::deferred::{
+    DataChunk, Digest, MAX_DEFERRED_ELEMENTS, MAX_PRECOMPILE_ROOTS, Node, PrecompileWitness,
+    PrecompileWitnessEntry, TRUE_DIGEST, Tag, fold_deferred_root,
+};
 use miden_precompiles::{
-    CurveId, CurveNodeRef, CurvePrecompile, HashAssertNode, Keccak256Precompile, UintDomain,
-    UintNodeRef, UintPrecompile, chunks_to_bytes_exact, n_chunks,
+    CurveBinaryOp, CurveId, CurveOp, Keccak256Precompile, UintBinaryOp, UintDomain, UintOp,
+    chunks_to_bytes_exact, n_chunks,
 };
 
 use crate::{
     ec::{msm::trace::EcExprPtr, trace::EcPointPtr},
-    math::{U256, from_limbs32},
+    math::{U256, from_limbs32, to_limbs32},
     session::{EcNode, Session, Truthy, UintNode, strategies},
     transcript::poseidon2::P2Digest,
 };
 
-/// wNAF window for [`msm_from_terms`](DeferredSessionBuilder::msm_from_terms)'s joint-wNAF
-/// addition chain (digits odd, `|d| < 2^{w-1}`, `2^{w-2}` odd multiples per base). A smaller window
-/// suits GLV's ~128-bit halves in isolation, but `msm_from_terms` now caches a repeating base's
-/// table across the whole batch ([`Self::wnaf_tables`](DeferredSessionBuilder::wnaf_tables)), which
-/// makes the one-time table-build cost a wash and leaves the ladder's per-signature digit density
-/// as the dominant recurring cost — `w = 5` keeps that density low for both the classic 2-base MSM
-/// and GLV's 4-base one.
 const MSM_WNAF_WINDOW: usize = 5;
-
-/// Cap on the term count a PairList may carry into
-/// [`msm_term_preserving_expr`](DeferredSessionBuilder::msm_term_preserving_expr) (the fallback
-/// for a zero scalar or a repeated canonical base). Even with a balanced fold the fallback's row
-/// cost grows as `O(n log n)`, unlike the fast joint ladder's `O(n)`; this bounds that cost before
-/// any fallback rows are built.
 const MAX_TERM_PRESERVING_TERMS: usize = 4096;
-
-/// Cap on the *sum* of fallback term counts across every PairList this session lowers.
-/// [`MAX_TERM_PRESERVING_TERMS`] only bounds one claim at a time — many claims each near that cap
-/// still stack up (a lowering-only PairList doesn't know about sibling claims), so this tracks a
-/// running total and rejects a new claim before it grows the aggregate past this bound. A generous
-/// multiple of the per-claim cap: legitimate batches (e.g. many small ECDSA-style fallback claims)
-/// stay well under it, while an attacker can no longer bypass the per-claim bound by splitting one
-/// oversized ask into many claims.
 const MAX_TOTAL_TERM_PRESERVING_TERMS: usize = 16 * MAX_TERM_PRESERVING_TERMS;
 
-pub(crate) struct DeferredSession {
-    pub(crate) session: Session,
-    pub(crate) root: Truthy,
+/// The input ceiling uses the runtime's field-element accounting across the entire batch,
+/// including repeated inputs. Each pair costs eight elements, so it also bounds total MSM terms
+/// by MAX_DEFERRED_ELEMENTS / 8. Scalars are fixed at 256 bits; balanced reductions in the joint
+/// ladder and fallback bound term-row work by O(n log n) per scalar bit, and sorted exact-multiset
+/// validation takes O(n log n). The fallback's existing per-claim and per-session ceilings remain
+/// in force.
+///
+/// Each chunk element encodes four bytes. Hash input demand is bounded separately by that same
+/// payload capacity, since many distinct hash claims can reference one large chunk payload.
+/// Every declared hash length is charged before sharing, including cache hits. These are input
+/// dimensions, not estimates of trace rows or new weights for arithmetic operations.
+#[derive(Clone, Copy)]
+pub(crate) struct ImportLimits {
+    pub(crate) elements: usize,
+    pub(crate) hash_bytes: usize,
+    pub(crate) roots: usize,
+    pub(crate) fallback_terms_per_node: usize,
+    pub(crate) fallback_terms: usize,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum DeferredSessionError {
-    #[error("missing deferred node {0:?}")]
-    MissingNode(Digest),
-
-    #[error("deferred node {digest:?} is not lowerable as {expected}")]
-    TypeMismatch { digest: Digest, expected: &'static str },
-
-    #[error("malformed deferred node {0:?}")]
-    MalformedNode(Digest),
-
-    #[error("unsupported deferred MSM node {digest:?}: {reason}")]
-    UnsupportedMsm { digest: Digest, reason: &'static str },
-
-    #[error("translated root mismatch: expected {expected:?}, got {actual:?}")]
-    RootMismatch { expected: P2Digest, actual: P2Digest },
-}
-
-pub(crate) fn session_from_deferred_state(
-    state: &DeferredState,
-) -> Result<DeferredSession, DeferredSessionError> {
-    let mut builder = DeferredSessionBuilder {
-        state,
-        session: Session::new(),
-        translated: BTreeMap::new(),
-        wnaf_tables: BTreeMap::new(),
-        glv_endo_tables: BTreeMap::new(),
-        term_preserving_terms_used: 0,
-    };
-
-    let root = builder.translate(state.root())?;
-    let expected = P2Digest::from(state.root());
-    let actual = root.hash();
-    if actual != expected {
-        return Err(DeferredSessionError::RootMismatch { expected, actual });
+impl Default for ImportLimits {
+    fn default() -> Self {
+        Self {
+            elements: MAX_DEFERRED_ELEMENTS,
+            hash_bytes: MAX_DEFERRED_ELEMENTS * size_of::<u32>(),
+            roots: MAX_PRECOMPILE_ROOTS,
+            fallback_terms_per_node: MAX_TERM_PRESERVING_TERMS,
+            fallback_terms: MAX_TOTAL_TERM_PRESERVING_TERMS,
+        }
     }
-
-    Ok(DeferredSession { session: builder.session, root })
 }
 
-struct DeferredSessionBuilder<'a> {
-    state: &'a DeferredState,
+/// Input positions use a zero-based witness number and one-based entry number (zero is TRUE).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WitnessLocation {
+    Entry { witness: usize, entry: usize },
+    Root { witness: usize },
+    Batch,
+}
+
+/// Invalid portable input encountered before proof construction.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SessionInputError {
+    #[error("empty precompile proving request")]
+    Empty,
+    #[error("invalid precompile input at {location:?}: {reason}")]
+    Invalid {
+        location: WitnessLocation,
+        reason: &'static str,
+    },
+    #[error("precompile limit exhausted at {location:?}: {resource}")]
+    Limit {
+        location: WitnessLocation,
+        resource: &'static str,
+    },
+    #[error("commitment mismatch at {location:?}: expected {expected:?}, got {actual:?}")]
+    Commitment {
+        location: WitnessLocation,
+        expected: Digest,
+        actual: Digest,
+    },
+}
+
+pub(crate) struct WitnessSession {
     session: Session,
-    /// Structural identities stay distinct even when their canonical values coincide.
-    translated: BTreeMap<Digest, Translated>,
-    /// A base's plain [`WnafTable`](strategies::WnafTable) (`⟨P×1⟩`), by
-    /// `(point, window)` — so a base recurring across many MSM claims in this
-    /// pass (the ECDSA generator across a batch of signatures) lays its
-    /// table once and every claim that rides it reuses the same one.
-    wnaf_tables: BTreeMap<(EcPointPtr, usize), strategies::WnafTable>,
-    /// A base's GLV endomorphism [`WnafTable`](strategies::WnafTable)
-    /// (`⟨P×λ⟩`), cached the same way as [`Self::wnaf_tables`] — both tables
-    /// are built positive-only (see [`strategies::wnaf_table_endo`]), so a
-    /// recurring base's tables are shared across every claim on it
-    /// regardless of each claim's GLV split signs.
-    glv_endo_tables: BTreeMap<(EcPointPtr, usize), strategies::WnafTable>,
-    /// Running total of term-preserving-fallback terms lowered so far this session, checked
-    /// against [`MAX_TOTAL_TERM_PRESERVING_TERMS`] before each new claim's fallback rows are
-    /// built.
-    term_preserving_terms_used: usize,
+    root: Truthy,
+    roots: Vec<Digest>,
+}
+
+impl WitnessSession {
+    #[cfg(test)]
+    pub(crate) fn finish(self) -> crate::session::SessionTraces {
+        self.session.finish(self.root)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Imported<'a> {
+    True,
+    Chunks(&'a [DataChunk]),
+    Truth(Truthy),
+    Uint(TranslatedUint),
+    Point(TranslatedEc),
 }
 
 #[derive(Debug, Clone, Copy)]
 struct TranslatedUint {
     node: UintNode,
-    value: U256,
     domain: UintDomain,
 }
 
@@ -121,333 +123,484 @@ struct TranslatedEc {
     curve: CurveId,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum Translated {
-    Truthy(Truthy),
-    Uint(TranslatedUint),
-    Ec(TranslatedEc),
+/// Cache entries borrow the original input, without cloning payloads or constructing a new graph.
+struct Cached<'a> {
+    definition: &'a PrecompileWitnessEntry,
+    digests: &'a [Digest],
+    value: Imported<'a>,
 }
 
-#[derive(Clone, Copy)]
-enum ValueKind {
-    Truthy,
-    Uint,
-    Ec,
+struct WitnessImporter {
+    session: Session,
+    wnaf_tables: BTreeMap<(EcPointPtr, usize), strategies::WnafTable>,
+    glv_endo_tables: BTreeMap<(EcPointPtr, usize), strategies::WnafTable>,
+    term_preserving_terms_left: usize,
+    limits: ImportLimits,
+    location: WitnessLocation,
 }
 
-impl ValueKind {
-    fn mismatch(self, digest: Digest) -> DeferredSessionError {
-        DeferredSessionError::TypeMismatch {
-            digest,
-            expected: match self {
-                Self::Truthy => "truthy deferred node",
-                Self::Uint => "uint value",
-                Self::Ec => "curve value",
-            },
-        }
+#[cfg(test)]
+pub(crate) fn session_from_witnesses(
+    witnesses: Vec<PrecompileWitness>,
+) -> Result<WitnessSession, SessionInputError> {
+    import_witnesses(witnesses, ImportLimits::default())
+}
+
+pub(crate) fn prove(
+    witnesses: Vec<PrecompileWitness>,
+    hash_fn: crate::HashFunction,
+) -> Result<crate::PrecompileProof, crate::PrecompileProvingError> {
+    let imported = {
+        let _span = tracing::info_span!("build_session").entered();
+        import_witnesses(witnesses, ImportLimits::default())?
+    };
+    let traces = {
+        let _span = tracing::info_span!("build_trace").entered();
+        imported.session.finish(imported.root)
+    };
+    Ok(crate::PrecompileProof {
+        proof: traces.prove_stark(hash_fn)?,
+        roots: imported.roots,
+    })
+}
+
+pub(crate) fn import_witnesses(
+    witnesses: Vec<PrecompileWitness>,
+    limits: ImportLimits,
+) -> Result<WitnessSession, SessionInputError> {
+    if witnesses.is_empty() {
+        return Err(SessionInputError::Empty);
     }
-}
+    if witnesses.len() > limits.roots {
+        return Err(SessionInputError::Limit {
+            location: WitnessLocation::Batch,
+            resource: "constituent roots",
+        });
+    }
 
-/// A decoded operation, retaining canonical metadata separately from its structural children.
-enum Operation {
-    Zero,
-    And(Digest, Digest),
-    Keccak(HashAssertNode),
-    UintEq(Digest, Digest),
-    EcEq(Digest, Digest),
-    Uint {
-        op: UintNodeRef,
-        value: U256,
-        domain: UintDomain,
-    },
-    Ec {
-        op: CurveNodeRef,
-        curve: CurveId,
-    },
-}
-
-impl<'a> DeferredSessionBuilder<'a> {
-    /// Lower each reachable structural node once. Children are scheduled in the decoder's
-    /// semantic order; a cache hit skips their entire subtree. Keccak chunk payloads are opaque
-    /// to this traversal and are decoded by the assertion lowerer.
-    fn translate(&mut self, root: Digest) -> Result<Truthy, DeferredSessionError> {
-        enum Step {
-            Visit(Digest, ValueKind),
-            Lower(Digest, Operation),
+    // Reserve input/scan work before allocating a Session. Index tables remain local to each
+    // singleton; retaining their commitments lets cache hits compare definitions across inputs.
+    let mut elements_left = limits.elements;
+    let mut hash_bytes_left = limits.hash_bytes;
+    let mut index_tables = Vec::with_capacity(witnesses.len());
+    for (witness_index, witness) in witnesses.iter().enumerate() {
+        let location = WitnessLocation::Root { witness: witness_index };
+        // Root metadata is bounded by limits.roots, including every repeated occurrence.
+        // All but the first occurrence also adds a framework AND node.
+        if witness_index != 0 {
+            reserve(
+                &mut elements_left,
+                Tag::AND.as_word().len() + Node::PACKED_BYTES_PER_CHUNK / size_of::<u32>(),
+                location,
+                "aggregate folds",
+            )?;
         }
-
-        let mut work = Vec::new();
-        work.push(Step::Visit(root, ValueKind::Truthy));
-        while let Some(step) = work.pop() {
-            match step {
-                Step::Visit(digest, kind) => {
-                    if self.translated.contains_key(&digest) {
-                        self.translated(digest, kind)?;
-                        continue;
-                    }
-                    let op = self.decode(digest, kind)?;
-                    // Collect before moving `op` into its completion frame. Reverse the push
-                    // order so the left child (and each MSM point before its scalar) runs first.
-                    let mut children = Vec::new();
-                    match &op {
-                        Operation::And(lhs, rhs) => {
-                            children.extend([(*lhs, ValueKind::Truthy), (*rhs, ValueKind::Truthy)]);
-                        },
-                        Operation::UintEq(lhs, rhs)
-                        | Operation::Uint {
-                            op:
-                                UintNodeRef::Add { lhs, rhs }
-                                | UintNodeRef::Sub { lhs, rhs }
-                                | UintNodeRef::Mul { lhs, rhs },
-                            ..
-                        } => {
-                            children.extend([(*lhs, ValueKind::Uint), (*rhs, ValueKind::Uint)]);
-                        },
-                        Operation::EcEq(lhs, rhs)
-                        | Operation::Ec {
-                            op: CurveNodeRef::Add { lhs, rhs } | CurveNodeRef::Sub { lhs, rhs },
-                            ..
-                        } => {
-                            children.extend([(*lhs, ValueKind::Ec), (*rhs, ValueKind::Ec)]);
-                        },
-                        Operation::Ec { op: CurveNodeRef::Value { x, y, .. }, .. }
-                            if *x != TRUE_DIGEST =>
-                        {
-                            children.extend([(*x, ValueKind::Uint), (*y, ValueKind::Uint)]);
-                        },
-                        Operation::Ec { op: CurveNodeRef::Msm { pairs }, .. } => {
-                            for &(point, scalar) in pairs {
-                                children
-                                    .extend([(point, ValueKind::Ec), (scalar, ValueKind::Uint)]);
-                            }
-                        },
-                        _ => {},
-                    }
-                    work.push(Step::Lower(digest, op));
-                    work.extend(children.into_iter().rev().map(|(d, k)| Step::Visit(d, k)));
-                },
-                Step::Lower(digest, op) => {
-                    let value = self.lower(digest, op)?;
-                    let hash = match value {
-                        Translated::Truthy(node) => node.hash(),
-                        Translated::Uint(value) => value.node.hash(),
-                        Translated::Ec(value) => value.node.hash(),
-                    };
-                    debug_assert_eq!(hash, P2Digest::from(digest));
-                    self.translated.insert(digest, value);
-                },
+        let mut digests = vec![TRUE_DIGEST];
+        for (entry_index, entry) in witness.entries().iter().enumerate() {
+            let location = WitnessLocation::Entry {
+                witness: witness_index,
+                entry: entry_index + 1,
+            };
+            let payloads = match entry {
+                PrecompileWitnessEntry::Data { chunks, .. } => chunks.len(),
+                PrecompileWitnessEntry::Join { .. } => 1,
+                PrecompileWitnessEntry::PairList { pairs, .. } => pairs.len(),
+            };
+            let elements = payloads
+                .checked_mul(Node::PACKED_BYTES_PER_CHUNK / size_of::<u32>())
+                .and_then(|n| n.checked_add(Tag::AND.as_word().len()))
+                .ok_or(SessionInputError::Limit { location, resource: "input elements" })?;
+            reserve(&mut elements_left, elements, location, "input elements")?;
+            if let Some(n_bytes) = Keccak256Precompile::decode_assert_tag(entry.tag())
+                .map_err(|_| SessionInputError::Invalid { location, reason: "invalid hash tag" })?
+            {
+                reserve(&mut hash_bytes_left, n_bytes as usize, location, "hash input bytes")?;
             }
+            digests.push(entry.digest(&digests).map_err(|_| SessionInputError::Invalid {
+                location,
+                reason: "invalid structural commitment",
+            })?);
         }
-        self.truthy(root)
-    }
-
-    fn decode(&self, digest: Digest, kind: ValueKind) -> Result<Operation, DeferredSessionError> {
-        match kind {
-            ValueKind::Truthy => {
-                self.require_truthy_metadata(digest)?;
-                if digest == TRUE_DIGEST {
-                    return Ok(Operation::Zero);
-                }
-                if self.node_tag(digest)? == Tag::AND {
-                    let (lhs, rhs) = self.join_payload(digest)?;
-                    return Ok(Operation::And(lhs, rhs));
-                }
-                if let Some(assertion) = Keccak256Precompile::decode_assert_node(self.node(digest)?)
-                    .map_err(|_| DeferredSessionError::MalformedNode(digest))?
-                {
-                    return Ok(Operation::Keccak(assertion));
-                }
-                match UintPrecompile::decode_node(self.node(digest)?)
-                    .map_err(|_| DeferredSessionError::MalformedNode(digest))?
-                {
-                    Some(UintNodeRef::Eq { lhs, rhs }) => return Ok(Operation::UintEq(lhs, rhs)),
-                    Some(_) => return Err(kind.mismatch(digest)),
-                    None => {},
-                }
-                match CurvePrecompile::decode_node(self.node(digest)?)
-                    .map_err(|_| DeferredSessionError::MalformedNode(digest))?
-                {
-                    Some(CurveNodeRef::Eq { lhs, rhs }) => Ok(Operation::EcEq(lhs, rhs)),
-                    _ => Err(kind.mismatch(digest)),
-                }
-            },
-            ValueKind::Uint => {
-                let (value, domain) = self.canonical_uint_metadata(digest)?;
-                let op = UintPrecompile::decode_node(self.node(digest)?)
-                    .map_err(|_| DeferredSessionError::MalformedNode(digest))?
-                    .ok_or_else(|| kind.mismatch(digest))?;
-                match op {
-                    UintNodeRef::Value { domain: structural_domain, limbs } => {
-                        if structural_domain != domain {
-                            return Err(DeferredSessionError::MalformedNode(digest));
-                        }
-                        debug_assert_eq!(from_limbs32(&limbs), value);
-                    },
-                    UintNodeRef::Eq { .. } => return Err(kind.mismatch(digest)),
-                    _ => {},
-                }
-                Ok(Operation::Uint { op, value, domain })
-            },
-            ValueKind::Ec => {
-                let curve = self.canonical_ec_metadata(digest)?;
-                let op = CurvePrecompile::decode_node(self.node(digest)?)
-                    .map_err(|_| DeferredSessionError::MalformedNode(digest))?
-                    .ok_or_else(|| kind.mismatch(digest))?;
-                match &op {
-                    CurveNodeRef::Value { curve: structural_curve, x, y } => {
-                        if *structural_curve != curve || (*x == TRUE_DIGEST) != (*y == TRUE_DIGEST)
-                        {
-                            return Err(DeferredSessionError::MalformedNode(digest));
-                        }
-                    },
-                    CurveNodeRef::Eq { .. } => return Err(kind.mismatch(digest)),
-                    _ => {},
-                }
-                Ok(Operation::Ec { op, curve })
-            },
-        }
-    }
-
-    /// All semantic children are cached before this operation records any consumer edges.
-    fn lower(&mut self, digest: Digest, op: Operation) -> Result<Translated, DeferredSessionError> {
-        Ok(match op {
-            Operation::Zero => Translated::Truthy(self.session.zero()),
-            Operation::And(lhs, rhs) => {
-                let (lhs, rhs) = (self.truthy(lhs)?, self.truthy(rhs)?);
-                Translated::Truthy(self.session.assert_and(lhs, rhs))
-            },
-            Operation::Keccak(assertion) => {
-                Translated::Truthy(self.translate_keccak_assertion(digest, assertion)?)
-            },
-            Operation::UintEq(lhs, rhs) => {
-                let (lhs, rhs) = (self.uint(lhs)?, self.uint(rhs)?);
-                Translated::Truthy(self.session.uint_is(&lhs.node, &rhs.node))
-            },
-            Operation::EcEq(lhs, rhs) => {
-                let (lhs, rhs) = (self.ec(lhs)?, self.ec(rhs)?);
-                Translated::Truthy(self.session.ec_is(&lhs.node, &rhs.node))
-            },
-            Operation::Uint { op, value, domain } => {
-                let node = match op {
-                    UintNodeRef::Value { .. } => self.session.uint_leaf(value, domain.bound_ptr()),
-                    UintNodeRef::Add { lhs, rhs }
-                    | UintNodeRef::Sub { lhs, rhs }
-                    | UintNodeRef::Mul { lhs, rhs } => {
-                        let (lhs, rhs) = (self.uint(lhs)?, self.uint(rhs)?);
-                        debug_assert_eq!(lhs.domain, rhs.domain);
-                        match op {
-                            UintNodeRef::Add { .. } => self.session.uint_add(&lhs.node, &rhs.node),
-                            UintNodeRef::Sub { .. } => self.session.uint_sub(&lhs.node, &rhs.node),
-                            _ => self.session.uint_mul(&lhs.node, &rhs.node),
-                        }
-                    },
-                    UintNodeRef::Eq { .. } => unreachable!("decoded as value"),
-                };
-                Translated::Uint(TranslatedUint { node, value, domain })
-            },
-            Operation::Ec { op, curve } => {
-                let node = match op {
-                    CurveNodeRef::Value { x, y, .. } => {
-                        if x == TRUE_DIGEST {
-                            self.session.ec_pai(curve.group_ptr())
-                        } else {
-                            let (x, y) = (self.uint(x)?, self.uint(y)?);
-                            debug_assert_eq!(x.domain, curve.base_domain());
-                            debug_assert_eq!(y.domain, curve.base_domain());
-                            self.session.ec_create(curve.group_ptr(), &x.node, &y.node)
-                        }
-                    },
-                    CurveNodeRef::Add { lhs, rhs } | CurveNodeRef::Sub { lhs, rhs } => {
-                        let (lhs, rhs) = (self.ec(lhs)?, self.ec(rhs)?);
-                        debug_assert_eq!(lhs.curve, rhs.curve);
-                        match op {
-                            CurveNodeRef::Add { .. } => self.session.ec_add(&lhs.node, &rhs.node),
-                            _ => self.session.ec_sub(&lhs.node, &rhs.node),
-                        }
-                    },
-                    CurveNodeRef::Msm { pairs } => {
-                        let terms = pairs
-                            .into_iter()
-                            .map(|(p, s)| Ok((self.ec(p)?, self.uint(s)?)))
-                            .collect::<Result<Vec<_>, DeferredSessionError>>()?;
-                        self.msm_from_terms(digest, curve, terms)?
-                    },
-                    CurveNodeRef::Eq { .. } => unreachable!("decoded as value"),
-                };
-                Translated::Ec(TranslatedEc { node, curve })
-            },
-        })
-    }
-
-    fn translated(
-        &self,
-        digest: Digest,
-        kind: ValueKind,
-    ) -> Result<Translated, DeferredSessionError> {
-        match self.translated.get(&digest).copied() {
-            Some(value @ Translated::Truthy(_)) if matches!(kind, ValueKind::Truthy) => Ok(value),
-            Some(value @ Translated::Uint(_)) if matches!(kind, ValueKind::Uint) => Ok(value),
-            Some(value @ Translated::Ec(_)) if matches!(kind, ValueKind::Ec) => Ok(value),
-            Some(_) => Err(kind.mismatch(digest)),
-            None => Err(DeferredSessionError::MissingNode(digest)),
-        }
-    }
-
-    fn truthy(&self, digest: Digest) -> Result<Truthy, DeferredSessionError> {
-        match self.translated(digest, ValueKind::Truthy)? {
-            Translated::Truthy(value) => Ok(value),
-            _ => unreachable!("checked cache type"),
-        }
-    }
-
-    fn uint(&self, digest: Digest) -> Result<TranslatedUint, DeferredSessionError> {
-        match self.translated(digest, ValueKind::Uint)? {
-            Translated::Uint(value) => Ok(value),
-            _ => unreachable!("checked cache type"),
-        }
-    }
-
-    fn ec(&self, digest: Digest) -> Result<TranslatedEc, DeferredSessionError> {
-        match self.translated(digest, ValueKind::Ec)? {
-            Translated::Ec(value) => Ok(value),
-            _ => unreachable!("checked cache type"),
-        }
-    }
-
-    fn translate_keccak_assertion(
-        &mut self,
-        digest: Digest,
-        assertion: HashAssertNode,
-    ) -> Result<Truthy, DeferredSessionError> {
-        let n_bytes = usize::try_from(assertion.n_bytes)
-            .map_err(|_| DeferredSessionError::MalformedNode(digest))?;
-        let input = self.decode_chunks_to_bytes(digest, assertion.preimage_digest, n_bytes)?;
-        let expected = self.decode_keccak_digest_bytes(digest, assertion.expected_digest)?;
-
-        let (actual, claim) = self.session.keccak(&input);
-        let actual = actual.to_u32s().into_iter().flat_map(u32::to_le_bytes).collect::<Vec<_>>();
-        debug_assert_eq!(expected, actual);
-        debug_assert_eq!(claim.hash(), P2Digest::from(digest));
-        Ok(claim)
-    }
-
-    fn msm_from_terms(
-        &mut self,
-        digest: Digest,
-        curve: CurveId,
-        terms: Vec<(TranslatedEc, TranslatedUint)>,
-    ) -> Result<EcNode, DeferredSessionError> {
-        if terms.is_empty() {
-            return Err(DeferredSessionError::UnsupportedMsm {
-                digest,
-                reason: "an empty PairList has no curve context",
+        if digests.last().copied() != Some(witness.root()) {
+            return Err(SessionInputError::Invalid {
+                location,
+                reason: "root commitment mismatch",
             });
         }
+        index_tables.push(digests);
+    }
 
-        if let Some((point, _)) = terms.first() {
-            self.session
-                .constrain_scalar_bound(&point.node, curve.scalar_domain().bound_ptr());
+    let mut import = WitnessImporter {
+        session: Session::new(),
+        wnaf_tables: BTreeMap::new(),
+        glv_endo_tables: BTreeMap::new(),
+        term_preserving_terms_left: limits.fallback_terms,
+        limits,
+        location: WitnessLocation::Batch,
+    };
+    let mut cache: BTreeMap<Digest, Cached<'_>> = BTreeMap::new();
+    let mut roots = Vec::with_capacity(witnesses.len());
+    let mut aggregate = None;
+    for (witness_index, (witness, digests)) in witnesses.iter().zip(&index_tables).enumerate() {
+        let mut entries = Vec::with_capacity(digests.len());
+        entries.push(Imported::True);
+        for (entry_index, entry) in witness.entries().iter().enumerate() {
+            import.location = WitnessLocation::Entry {
+                witness: witness_index,
+                entry: entry_index + 1,
+            };
+            let digest = digests[entry_index + 1];
+            let value = if let Some(previous) = cache.get(&digest) {
+                if !same_definition(entry, digests, previous.definition, previous.digests) {
+                    return Err(import.invalid("conflicting definition for a shared commitment"));
+                }
+                // This exact definition and each of its child commitments were already checked.
+                // Reuse the computation; its later operand uses still count as distinct bindings.
+                previous.value
+            } else {
+                let value = import.entry(entry, &entries)?;
+                let hash = match value {
+                    Imported::True | Imported::Chunks(_) => None,
+                    Imported::Truth(node) => Some(node.hash()),
+                    Imported::Uint(value) => Some(value.node.hash()),
+                    Imported::Point(value) => Some(value.node.hash()),
+                };
+                if let Some(actual) = hash {
+                    import.check_commitment(digest, actual)?;
+                }
+                cache.insert(digest, Cached { definition: entry, digests, value });
+                value
+            };
+            entries.push(value);
         }
+        import.location = WitnessLocation::Root { witness: witness_index };
+        let Some(Imported::Truth(claim)) = entries.last().copied() else {
+            return Err(import.invalid("root is not a true assertion"));
+        };
+        if !import.session.is_recorded_truth(claim) {
+            return Err(import.invalid("bare external assertion cannot be a precompile root"));
+        }
+        import.check_commitment(witness.root(), claim.hash())?;
+        aggregate = Some(match aggregate {
+            None => claim,
+            Some(previous) => import.session.assert_and(previous, claim),
+        });
+        roots.push(witness.root());
+    }
+    let root = aggregate.ok_or(SessionInputError::Empty)?;
+    import.location = WitnessLocation::Batch;
+    import.check_commitment(
+        roots
+            .iter()
+            .copied()
+            .reduce(fold_deferred_root)
+            .ok_or(SessionInputError::Empty)?,
+        root.hash(),
+    )?;
+    Ok(WitnessSession { session: import.session, root, roots })
+}
+
+fn reserve(
+    remaining: &mut usize,
+    amount: usize,
+    location: WitnessLocation,
+    resource: &'static str,
+) -> Result<(), SessionInputError> {
+    *remaining = remaining
+        .checked_sub(amount)
+        .ok_or(SessionInputError::Limit { location, resource })?;
+    Ok(())
+}
+
+fn same_definition(
+    a: &PrecompileWitnessEntry,
+    a_digests: &[Digest],
+    b: &PrecompileWitnessEntry,
+    b_digests: &[Digest],
+) -> bool {
+    if a.tag() != b.tag() {
+        return false;
+    }
+    match (a, b) {
+        (
+            PrecompileWitnessEntry::Data { chunks: a, .. },
+            PrecompileWitnessEntry::Data { chunks: b, .. },
+        ) => a == b,
+        (
+            PrecompileWitnessEntry::Join { lhs: a, rhs: b, .. },
+            PrecompileWitnessEntry::Join { lhs: c, rhs: d, .. },
+        ) => {
+            a_digests[*a as usize] == b_digests[*c as usize]
+                && a_digests[*b as usize] == b_digests[*d as usize]
+        },
+        (
+            PrecompileWitnessEntry::PairList { pairs: a, .. },
+            PrecompileWitnessEntry::PairList { pairs: b, .. },
+        ) => {
+            a.len() == b.len()
+                && a.iter().zip(b).all(|((a, b), (c, d))| {
+                    a_digests[*a as usize] == b_digests[*c as usize]
+                        && a_digests[*b as usize] == b_digests[*d as usize]
+                })
+        },
+        _ => false,
+    }
+}
+
+impl WitnessImporter {
+    fn invalid(&self, reason: &'static str) -> SessionInputError {
+        SessionInputError::Invalid { location: self.location, reason }
+    }
+
+    fn check_commitment(
+        &self,
+        expected: Digest,
+        actual: P2Digest,
+    ) -> Result<(), SessionInputError> {
+        if actual == P2Digest::from(expected) {
+            Ok(())
+        } else {
+            Err(SessionInputError::Commitment {
+                location: self.location,
+                expected,
+                actual: Digest::new(actual.as_array()),
+            })
+        }
+    }
+    fn get<'a>(
+        &self,
+        entries: &[Imported<'a>],
+        index: u32,
+    ) -> Result<Imported<'a>, SessionInputError> {
+        entries
+            .get(index as usize)
+            .copied()
+            .ok_or_else(|| self.invalid("invalid child index"))
+    }
+    fn truth(&mut self, entries: &[Imported<'_>], index: u32) -> Result<Truthy, SessionInputError> {
+        match self.get(entries, index)? {
+            Imported::True => Ok(self.session.zero()),
+            Imported::Truth(value) => Ok(value),
+            _ => Err(self.invalid("expected assertion operand")),
+        }
+    }
+    fn uint(
+        &self,
+        entries: &[Imported<'_>],
+        index: u32,
+    ) -> Result<TranslatedUint, SessionInputError> {
+        match self.get(entries, index)? {
+            Imported::Uint(value) => Ok(value),
+            _ => Err(self.invalid("expected uint operand")),
+        }
+    }
+    fn point(
+        &self,
+        entries: &[Imported<'_>],
+        index: u32,
+    ) -> Result<TranslatedEc, SessionInputError> {
+        match self.get(entries, index)? {
+            Imported::Point(value) => Ok(value),
+            _ => Err(self.invalid("expected curve operand")),
+        }
+    }
+    fn chunks<'a>(
+        &self,
+        entries: &[Imported<'a>],
+        index: u32,
+    ) -> Result<&'a [DataChunk], SessionInputError> {
+        match self.get(entries, index)? {
+            Imported::Chunks(value) => Ok(value),
+            _ => Err(self.invalid("expected chunks operand")),
+        }
+    }
+    fn join(&self, entry: &PrecompileWitnessEntry) -> Result<(u32, u32), SessionInputError> {
+        match entry {
+            PrecompileWitnessEntry::Join { lhs, rhs, .. } => Ok((*lhs, *rhs)),
+            _ => Err(self.invalid("operation requires two children")),
+        }
+    }
+    fn entry<'a>(
+        &mut self,
+        entry: &'a PrecompileWitnessEntry,
+        entries: &[Imported<'a>],
+    ) -> Result<Imported<'a>, SessionInputError> {
+        let tag = entry.tag();
+        if tag == Tag::CHUNKS {
+            return match entry {
+                PrecompileWitnessEntry::Data { chunks, .. } => Ok(Imported::Chunks(chunks)),
+                _ => Err(self.invalid("chunks require data payload")),
+            };
+        }
+        if tag == Tag::AND {
+            let (lhs, rhs) = self.join(entry)?;
+            let lhs = self.truth(entries, lhs)?;
+            let rhs = self.truth(entries, rhs)?;
+            return Ok(Imported::Truth(self.session.assert_and(lhs, rhs)));
+        }
+        if let Some(n_bytes) = Keccak256Precompile::decode_assert_tag(tag)
+            .map_err(|_| self.invalid("invalid hash tag"))?
+        {
+            let (input, expected) = self.join(entry)?;
+            let n_bytes = n_bytes as usize;
+            let input = chunks_to_bytes_exact(
+                self.chunks(entries, input)?,
+                n_chunks(n_bytes as u32).get() as usize,
+                n_bytes,
+            )
+            .map_err(|_| self.invalid("malformed hash input chunks"))?;
+            let expected = chunks_to_bytes_exact(self.chunks(entries, expected)?, 1, 32)
+                .map_err(|_| self.invalid("malformed expected hash chunks"))?;
+            let (actual, claim) = self.session.keccak(&input);
+            if !actual
+                .to_u32s()
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .eq(expected.iter().copied())
+            {
+                return Err(self.invalid("false Keccak assertion"));
+            }
+            return Ok(Imported::Truth(claim));
+        }
+        if let Some(op) =
+            UintOp::decode_tag(tag).map_err(|_| self.invalid("invalid uint tag or domain"))?
+        {
+            return match op {
+                UintOp::Value(domain) => {
+                    let PrecompileWitnessEntry::Data { chunks, .. } = entry else {
+                        return Err(self.invalid("uint value requires data"));
+                    };
+                    let [chunk] = chunks.as_slice() else {
+                        return Err(self.invalid("uint value requires one chunk"));
+                    };
+                    let mut limbs = [0u32; 8];
+                    for (limb, felt) in limbs.iter_mut().zip(chunk) {
+                        *limb = u32::try_from(felt.as_canonical_u64())
+                            .map_err(|_| self.invalid("uint limb exceeds u32"))?;
+                    }
+                    if !domain.is_canonical(&limbs) {
+                        return Err(self.invalid("uint value exceeds its domain"));
+                    }
+                    Ok(Imported::Uint(TranslatedUint {
+                        node: self.session.uint_leaf(from_limbs32(&limbs), domain.bound_ptr()),
+                        domain,
+                    }))
+                },
+                UintOp::Binary(op) => {
+                    let (a, b) = self.join(entry)?;
+                    let a = self.uint(entries, a)?;
+                    let b = self.uint(entries, b)?;
+                    if a.domain != b.domain {
+                        return Err(self.invalid("uint operands have different domains"));
+                    }
+                    let node = match op {
+                        UintBinaryOp::Add => self.session.uint_add(&a.node, &b.node),
+                        UintBinaryOp::Sub => self.session.uint_sub(&a.node, &b.node),
+                        UintBinaryOp::Mul => self.session.uint_mul(&a.node, &b.node),
+                    };
+                    Ok(Imported::Uint(TranslatedUint { node, domain: a.domain }))
+                },
+                UintOp::Eq => {
+                    let (a, b) = self.join(entry)?;
+                    let a = self.uint(entries, a)?;
+                    let b = self.uint(entries, b)?;
+                    if a.domain != b.domain {
+                        return Err(self.invalid("uint equality has different domains"));
+                    }
+                    if a.node.ptr != b.node.ptr {
+                        return Err(self.invalid("false uint equality"));
+                    }
+                    Ok(Imported::Truth(self.session.uint_is(&a.node, &b.node)))
+                },
+            };
+        }
+        if let Some(op) = CurveOp::decode_tag(tag).map_err(|_| self.invalid("invalid curve tag"))? {
+            return match op {
+                CurveOp::Value(curve) => {
+                    let (x, y) = self.join(entry)?;
+                    let node = match (x == 0, y == 0) {
+                        (true, true) => self.session.ec_pai(curve.group_ptr()),
+                        (true, false) | (false, true) => {
+                            return Err(self.invalid("incomplete infinity coordinates"));
+                        },
+                        (false, false) => {
+                            let x = self.uint(entries, x)?;
+                            let y = self.uint(entries, y)?;
+                            if x.domain != curve.base_domain() || y.domain != curve.base_domain() {
+                                return Err(self.invalid("curve coordinates use the wrong domain"));
+                            }
+                            curve
+                                .point_from_affine(
+                                    to_limbs32(self.session.uint_value(&x.node)),
+                                    to_limbs32(self.session.uint_value(&y.node)),
+                                )
+                                .map_err(|_| self.invalid("point is not on the selected curve"))?;
+                            self.session.ec_create(curve.group_ptr(), &x.node, &y.node)
+                        },
+                    };
+                    Ok(Imported::Point(TranslatedEc { node, curve }))
+                },
+                CurveOp::Binary(op) => {
+                    let (a, b) = self.join(entry)?;
+                    let a = self.point(entries, a)?;
+                    let b = self.point(entries, b)?;
+                    if a.curve != b.curve {
+                        return Err(self.invalid("point operands have different curves"));
+                    }
+                    let node = match op {
+                        CurveBinaryOp::Add => self.session.ec_add(&a.node, &b.node),
+                        CurveBinaryOp::Sub => self.session.ec_sub(&a.node, &b.node),
+                    };
+                    Ok(Imported::Point(TranslatedEc { node, curve: a.curve }))
+                },
+                CurveOp::Eq => {
+                    let (a, b) = self.join(entry)?;
+                    let a = self.point(entries, a)?;
+                    let b = self.point(entries, b)?;
+                    if a.curve != b.curve {
+                        return Err(self.invalid("point equality has different curves"));
+                    }
+                    if a.node.point != b.node.point {
+                        return Err(self.invalid("false point equality"));
+                    }
+                    Ok(Imported::Truth(self.session.ec_is(&a.node, &b.node)))
+                },
+                CurveOp::Msm => {
+                    let PrecompileWitnessEntry::PairList { pairs, .. } = entry else {
+                        return Err(self.invalid("MSM requires a pair list"));
+                    };
+                    let &(first, _) = pairs.first().ok_or_else(|| self.invalid("empty MSM"))?;
+                    let curve = self.point(entries, first)?.curve;
+                    let mut terms = Vec::with_capacity(pairs.len());
+                    for &(point, scalar) in pairs {
+                        let point = self.point(entries, point)?;
+                        let scalar = self.uint(entries, scalar)?;
+                        if point.curve != curve {
+                            return Err(self.invalid("MSM mixes curves"));
+                        }
+                        if scalar.domain != curve.scalar_domain() {
+                            return Err(self.invalid("MSM scalar uses the wrong domain"));
+                        }
+                        if self.session.is_pai(&point.node) {
+                            return Err(self.invalid("MSM identity bases are unsupported"));
+                        }
+                        terms.push((point, scalar));
+                    }
+                    let node = self.msm_from_terms(curve, terms)?;
+                    Ok(Imported::Point(TranslatedEc { node, curve }))
+                },
+            };
+        }
+        Err(self.invalid("unsupported precompile operation"))
+    }
+    fn msm_from_terms(
+        &mut self,
+        curve: CurveId,
+        terms: Vec<(TranslatedEc, TranslatedUint)>,
+    ) -> Result<EcNode, SessionInputError> {
+        // The entry decoder checked the nonempty pair list and every operand before lowering.
+        self.session
+            .constrain_scalar_bound(&terms[0].0.node, curve.scalar_domain().bound_ptr());
 
         // Zero scalars are always fine (0·P = 𝒪); repeated canonical bases —
         // including two structurally different point nodes that resolve to
@@ -461,30 +614,28 @@ impl<'a> DeferredSessionBuilder<'a> {
         // declared term (auto-merge never fires across distinct bases), so
         // it stays the default.
         let mut bases = BTreeSet::new();
-        let fast_path_eligible = terms
-            .iter()
-            .all(|(point, scalar)| scalar.value != U256::ZERO && bases.insert(point.node.point));
+        let fast_path_eligible = terms.iter().all(|(point, scalar)| {
+            self.session.uint_value(&scalar.node) != U256::ZERO && bases.insert(point.node.point)
+        });
 
         let expr = if fast_path_eligible {
             self.msm_joint_expr(curve, &terms)
         } else {
-            if terms.len() > MAX_TERM_PRESERVING_TERMS {
-                return Err(DeferredSessionError::UnsupportedMsm {
-                    digest,
-                    reason: "a PairList requiring the term-preserving fallback (a zero scalar \
+            if terms.len() > self.limits.fallback_terms_per_node {
+                return Err(SessionInputError::Limit {
+                    location: self.location,
+                    resource: "a PairList requiring the term-preserving fallback (a zero scalar \
                              or a repeated canonical base) exceeds the maximum supported term \
                              count",
                 });
             }
-            let total = self.term_preserving_terms_used.saturating_add(terms.len());
-            if total > MAX_TOTAL_TERM_PRESERVING_TERMS {
-                return Err(DeferredSessionError::UnsupportedMsm {
-                    digest,
-                    reason: "this session's aggregate term-preserving fallback budget, summed \
-                             across every PairList requiring it, is exhausted",
-                });
-            }
-            self.term_preserving_terms_used = total;
+            reserve(
+                &mut self.term_preserving_terms_left,
+                terms.len(),
+                self.location,
+                "this session's aggregate term-preserving fallback budget, summed \
+                 across every PairList requiring it, is exhausted",
+            )?;
             self.msm_term_preserving_expr(curve, &terms)
         };
 
@@ -497,9 +648,8 @@ impl<'a> DeferredSessionBuilder<'a> {
 
     /// The joint/interleaved addition chain for a PairList whose declared
     /// bases are pairwise distinct and every scalar nonzero. `joint_wnaf`'s
-    /// per-column cost is linear in the term count (unlike Straus's `2^k`
-    /// subset-sum table), so an arbitrary-arity pair-list never needs a
-    /// term-count cap here.
+    /// per-column term-row cost is O(n log n), using a balanced reduction rather than
+    /// repeatedly copying a growing prefix. The batch input budget bounds its term count.
     ///
     /// GLV curves split each term's scalar in half (`glv_joint_wnaf_with_tables`),
     /// trading ~half the ladder height for twice the virtual bases —
@@ -518,7 +668,7 @@ impl<'a> DeferredSessionBuilder<'a> {
     ) -> EcExprPtr {
         let expr_terms = terms
             .iter()
-            .map(|(point, scalar)| (point.node, scalar.value))
+            .map(|(point, scalar)| (point.node, self.session.uint_value(&scalar.node)))
             .collect::<Vec<_>>();
         if curve.endomorphism().is_some() {
             for (base, _) in &expr_terms {
@@ -594,7 +744,8 @@ impl<'a> DeferredSessionBuilder<'a> {
         point: &TranslatedEc,
         scalar: &TranslatedUint,
     ) -> EcExprPtr {
-        if scalar.value == U256::ZERO {
+        let scalar_value = self.session.uint_value(&scalar.node);
+        if scalar_value == U256::ZERO {
             self.session.msm_intro_zero(&point.node)
         } else if curve.endomorphism().is_some() {
             self.ensure_wnaf_table(&point.node, MSM_WNAF_WINDOW);
@@ -603,12 +754,12 @@ impl<'a> DeferredSessionBuilder<'a> {
             let endo = self.glv_endo_tables.get(&(point.node.point, MSM_WNAF_WINDOW)).unwrap();
             strategies::glv_joint_wnaf_with_tables(
                 &mut self.session,
-                &[(plain, Some(endo), scalar.value)],
+                &[(plain, Some(endo), scalar_value)],
             )
         } else {
             self.ensure_wnaf_table(&point.node, MSM_WNAF_WINDOW);
             let table = self.wnaf_tables.get(&(point.node.point, MSM_WNAF_WINDOW)).unwrap();
-            strategies::wnaf_scalarmul(&mut self.session, table, scalar.value)
+            strategies::wnaf_scalarmul(&mut self.session, table, scalar_value)
         }
     }
 
@@ -630,104 +781,5 @@ impl<'a> DeferredSessionBuilder<'a> {
         if let Entry::Vacant(entry) = self.glv_endo_tables.entry((base.point, w)) {
             entry.insert(strategies::wnaf_table_endo(&mut self.session, base, w));
         }
-    }
-
-    fn require_truthy_metadata(&self, digest: Digest) -> Result<(), DeferredSessionError> {
-        let (canonical_digest, canonical_node) = self
-            .state
-            .require_canonical_node(digest)
-            .map_err(|_| DeferredSessionError::MissingNode(digest))?;
-        if canonical_digest != TRUE_DIGEST || !canonical_node.is_true() {
-            return Err(DeferredSessionError::TypeMismatch {
-                digest,
-                expected: "truthy deferred node",
-            });
-        }
-        Ok(())
-    }
-
-    fn canonical_uint_metadata(
-        &self,
-        digest: Digest,
-    ) -> Result<(U256, UintDomain), DeferredSessionError> {
-        let (_, canonical_node) = self
-            .state
-            .require_canonical_node(digest)
-            .map_err(|_| DeferredSessionError::MissingNode(digest))?;
-        match UintPrecompile::decode_node(canonical_node)
-            .map_err(|_| DeferredSessionError::MalformedNode(digest))?
-        {
-            Some(UintNodeRef::Value { domain, limbs }) => Ok((from_limbs32(&limbs), domain)),
-            Some(_) | None => {
-                Err(DeferredSessionError::TypeMismatch { digest, expected: "uint value" })
-            },
-        }
-    }
-
-    fn canonical_ec_metadata(&self, digest: Digest) -> Result<CurveId, DeferredSessionError> {
-        let (_, canonical_node) = self
-            .state
-            .require_canonical_node(digest)
-            .map_err(|_| DeferredSessionError::MissingNode(digest))?;
-        match CurvePrecompile::decode_node(canonical_node)
-            .map_err(|_| DeferredSessionError::MalformedNode(digest))?
-        {
-            Some(CurveNodeRef::Value { curve, .. }) => Ok(curve),
-            Some(_) | None => {
-                Err(DeferredSessionError::TypeMismatch { digest, expected: "curve value" })
-            },
-        }
-    }
-
-    fn node(&self, digest: Digest) -> Result<&'a Node, DeferredSessionError> {
-        self.state.get_node(&digest).ok_or(DeferredSessionError::MissingNode(digest))
-    }
-
-    fn node_tag(&self, digest: Digest) -> Result<Tag, DeferredSessionError> {
-        Ok(self.node(digest)?.tag())
-    }
-
-    fn join_payload(&self, digest: Digest) -> Result<(Digest, Digest), DeferredSessionError> {
-        self.node(digest)?
-            .payload()
-            .as_join()
-            .map_err(|_| DeferredSessionError::MalformedNode(digest))
-    }
-
-    fn chunks_payload(
-        &self,
-        parent: Digest,
-        child: Digest,
-    ) -> Result<&'a [DataChunk], DeferredSessionError> {
-        let node = self.node(child)?;
-        if node.tag() != Tag::CHUNKS {
-            return Err(DeferredSessionError::MalformedNode(parent));
-        }
-        node.payload()
-            .as_data()
-            .map_err(|_| DeferredSessionError::MalformedNode(parent))
-    }
-
-    fn decode_chunks_to_bytes(
-        &self,
-        parent: Digest,
-        child: Digest,
-        n_bytes: usize,
-    ) -> Result<Vec<u8>, DeferredSessionError> {
-        let chunks = self.chunks_payload(parent, child)?;
-        let n_bytes_u32 =
-            u32::try_from(n_bytes).map_err(|_| DeferredSessionError::MalformedNode(parent))?;
-        chunks_to_bytes_exact(chunks, n_chunks(n_bytes_u32).get() as usize, n_bytes)
-            .map_err(|_| DeferredSessionError::MalformedNode(parent))
-    }
-
-    fn decode_keccak_digest_bytes(
-        &self,
-        parent: Digest,
-        child: Digest,
-    ) -> Result<Vec<u8>, DeferredSessionError> {
-        let chunks = self.chunks_payload(parent, child)?;
-        chunks_to_bytes_exact(chunks, 1, 32)
-            .map_err(|_| DeferredSessionError::MalformedNode(parent))
     }
 }

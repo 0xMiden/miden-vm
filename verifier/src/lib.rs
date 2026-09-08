@@ -67,8 +67,8 @@ impl VerifierSupport {
     }
 }
 
-const VERIFIER_SUPPORT_V1: VerifierSupport = VerifierSupport {
-    format: ExecutionProofCompatibility::FORMAT_V1,
+const VERIFIER_SUPPORT_V2: VerifierSupport = VerifierSupport {
+    format: ExecutionProofCompatibility::FORMAT_V2,
     accepted_vm_roots: &[CURRENT_VM_VERIFIER_ROOT],
     accepted_pvm_roots: &[CURRENT_PVM_VERIFIER_ROOT],
 };
@@ -94,9 +94,9 @@ impl Verifier {
     /// Verifies a deferred or complete versioned execution proof against its public claim.
     ///
     /// The VM STARK authenticates the carried precompile root in either state. For a deferred
-    /// proof, the verifier does not inspect the carried `DeferredStateWire`; it verifies the VM
-    /// STARK and returns the authenticated root as an outstanding obligation. The wire is
-    /// prover-side data and is validated separately when converted into a precompile witness.
+    /// proof, the verifier does not inspect the carried `PrecompileWitness`; it verifies the VM
+    /// STARK and returns the authenticated root as an outstanding obligation. The witness's
+    /// assertions are validated separately during precompile proving.
     /// Complete proofs that contain precompile work additionally verify the aggregate precompile
     /// STARK against the VM-authenticated root.
     ///
@@ -114,16 +114,16 @@ impl Verifier {
         proof: &ExecutionProof,
     ) -> Result<VerificationOutcome, VerificationError> {
         match proof.compatibility().format() {
-            ExecutionProofCompatibility::FORMAT_V1 => {
-                VERIFIER_SUPPORT_V1.check(proof)?;
-                self.verify_v1(claim, proof)
+            ExecutionProofCompatibility::FORMAT_V2 => {
+                VERIFIER_SUPPORT_V2.check(proof)?;
+                self.verify_v2(claim, proof)
             },
             format => Err(VerificationError::UnsupportedProofFormat(format)),
         }
     }
 
-    /// Verifies an execution proof encoded with transport format 1.
-    fn verify_v1(
+    /// Verifies an execution proof encoded with transport format 2.
+    fn verify_v2(
         &self,
         claim: &ExecutionClaim,
         proof: &ExecutionProof,
@@ -478,7 +478,7 @@ fn roots_overlap(proof_roots: &[Word], accepted_roots: &[Word]) -> bool {
 mod tests {
     use alloc::{vec, vec::Vec};
 
-    use miden_core::deferred::DeferredStateWire;
+    use miden_core::deferred::{PrecompileWitness, PrecompileWitnessEntry, Tag};
 
     use super::*;
 
@@ -531,7 +531,14 @@ mod tests {
             (
                 ExecutionProof::new(
                     vm_proof(TRUE_DIGEST),
-                    PrecompileStatus::Deferred(DeferredStateWire::default()),
+                    PrecompileStatus::Deferred(
+                        PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
+                            tag: Tag::AND,
+                            lhs: 0,
+                            rhs: 0,
+                        }])
+                        .expect("a logged TRUE is a nonempty obligation"),
+                    ),
                 ),
                 |error| matches!(error, VerificationError::DeferredTrueRoot),
             ),
@@ -672,7 +679,7 @@ mod tests {
         let incompatible_vm = ExecutionProof::from_parts(
             ExecutionProofCompatibility::new(
                 vec![root(100)],
-                VERIFIER_SUPPORT_V1.accepted_pvm_roots.to_vec(),
+                VERIFIER_SUPPORT_V2.accepted_pvm_roots.to_vec(),
             )
             .unwrap(),
             proof.vm().clone(),
@@ -680,7 +687,7 @@ mod tests {
         );
         let incompatible_pvm = ExecutionProof::from_parts(
             ExecutionProofCompatibility::new(
-                VERIFIER_SUPPORT_V1.accepted_vm_roots.to_vec(),
+                VERIFIER_SUPPORT_V2.accepted_vm_roots.to_vec(),
                 vec![root(200)],
             )
             .unwrap(),
@@ -713,7 +720,7 @@ mod tests {
             Felt::new_unchecked(0),
         ]);
         const SUPPORT: VerifierSupport = VerifierSupport {
-            format: ExecutionProofCompatibility::FORMAT_V1,
+            format: ExecutionProofCompatibility::FORMAT_V2,
             accepted_vm_roots: &[OLD_VM_ROOT, CURRENT_VM_VERIFIER_ROOT],
             accepted_pvm_roots: &[OLD_PVM_ROOT, CURRENT_PVM_VERIFIER_ROOT],
         };

@@ -436,13 +436,13 @@ pub enum CurveNodeRef {
 
 /// Recognized curve binary operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CurveBinaryOp {
+pub enum CurveBinaryOp {
     Add,
     Sub,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CurveOp {
+pub enum CurveOp {
     Value(CurveId),
     Binary(CurveBinaryOp),
     Eq,
@@ -450,6 +450,14 @@ enum CurveOp {
 }
 
 impl CurveOp {
+    /// Decodes the operation tag, returning `None` only for a different precompile.
+    pub fn decode_tag(tag: Tag) -> Result<Option<Self>, PrecompileError> {
+        if tag.id() != CurvePrecompile::id() {
+            return Ok(None);
+        }
+        Self::decode(tag.args()).map(Some).ok_or(PrecompileError::InvalidNode)
+    }
+
     fn decode(args: [Felt; 3]) -> Option<Self> {
         match args[0].as_canonical_u64() {
             CurvePrecompile::VALUE_OP_ID if args[2] == ZERO => {

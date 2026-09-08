@@ -1,4 +1,4 @@
-use alloc::{format, sync::Arc, vec::Vec};
+use alloc::{format, vec::Vec};
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
@@ -7,7 +7,7 @@ use miden_air::{
     trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
 use miden_core::{
-    deferred::{DeferredState, DeferredStateWire, Digest, TRUE_DIGEST},
+    deferred::{Digest, TRUE_DIGEST},
     program::ExecutionClaim,
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
@@ -77,9 +77,9 @@ impl ExecutionWitness {
             stack: stack_outputs,
             advice: _,
             memory: _,
-            deferred_state: precompiles,
+            precompile_witness: precompile,
         } = execution_output;
-        let precompile_root = precompiles.root();
+        let precompile_root = precompile.as_ref().map_or(TRUE_DIGEST, PrecompileWitness::root);
         let vm = VmWitness {
             program_info,
             stack_inputs,
@@ -87,10 +87,6 @@ impl ExecutionWitness {
             trace,
             precompile_root,
         };
-        let precompile = (precompile_root != TRUE_DIGEST).then(|| {
-            PrecompileWitness::new(precompiles)
-                .expect("a non-TRUE execution root must produce a singleton precompile witness")
-        });
 
         Self { vm, precompile }
     }
@@ -154,9 +150,8 @@ const EXECUTION_WITNESS_BYTE_READ_BUDGET_MULTIPLIER: usize = 4;
 /// Current wire format version for [`ExecutionWitness`] serialization.
 ///
 /// The version is written as the first byte of every serialized witness. Deserialization only
-/// accepts this exact value, so a future format change only needs to add a new accepted version
-/// and keep the old readers where compatibility matters.
-const EXECUTION_WITNESS_WIRE_VERSION: u8 = 1;
+/// accepts this exact value; older formats are intentionally unsupported.
+const EXECUTION_WITNESS_WIRE_VERSION: u8 = 2;
 
 impl Serializable for ExecutionWitness {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
@@ -165,7 +160,7 @@ impl Serializable for ExecutionWitness {
         match &self.precompile {
             Some(precompile) => {
                 target.write_u8(1);
-                write_precompile_witness(precompile, target);
+                precompile.write_into(target);
             },
             None => target.write_u8(0),
         }
@@ -193,15 +188,8 @@ impl Deserializable for ExecutionWitness {
                 None
             },
             1 => {
-                let witness = read_precompile_witness(source)?;
-                // `read_precompile_witness` only produces singleton witnesses, but do not index
-                // blindly: keep deserialization panic-free even if that invariant changes.
-                let [witness_root] = witness.roots() else {
-                    return Err(DeserializationError::InvalidValue(
-                        "expected a singleton precompile witness".into(),
-                    ));
-                };
-                if *witness_root != vm.precompile_root {
+                let witness = PrecompileWitness::read_from(source)?;
+                if witness.root() != vm.precompile_root {
                     return Err(DeserializationError::InvalidValue(
                         "precompile witness root does not match the VM witness precompile root"
                             .into(),
@@ -302,49 +290,6 @@ impl Deserializable for VmWitness {
             precompile_root: Digest::read_from(source)?,
         })
     }
-}
-
-/// Writes a singleton precompile witness as its ordered roots followed by its canonical deferred
-/// wire.
-fn write_precompile_witness<W: ByteWriter>(witness: &PrecompileWitness, target: &mut W) {
-    let roots = witness.roots();
-    debug_assert_eq!(roots.len(), 1, "only singleton precompile witnesses are serializable");
-    target.write_usize(roots.len());
-    for root in roots {
-        root.write_into(target);
-    }
-    let deferred_wire = witness
-        .state()
-        .to_wire()
-        .expect("deferred state must serialize to canonical wire");
-    deferred_wire.write_into(target);
-}
-
-/// Reads a singleton precompile witness written by [`write_precompile_witness`].
-fn read_precompile_witness<R: ByteReader>(
-    source: &mut R,
-) -> Result<PrecompileWitness, DeserializationError> {
-    let roots = Vec::<Digest>::read_from(source)?;
-    if roots.len() != 1 {
-        return Err(DeserializationError::InvalidValue(
-            "expected a singleton precompile witness".into(),
-        ));
-    }
-    let deferred_wire = DeferredStateWire::read_from(source)?;
-    let deferred_state =
-        DeferredState::from_wire(Arc::new(miden_precompiles::registry()), &deferred_wire).map_err(
-            |err| DeserializationError::InvalidValue(format!("invalid deferred state: {err}")),
-        )?;
-
-    let witness = PrecompileWitness::new(deferred_state).map_err(|err| {
-        DeserializationError::InvalidValue(format!("invalid precompile witness: {err}"))
-    })?;
-    if witness.roots() != roots.as_slice() {
-        return Err(DeserializationError::InvalidValue(
-            "precompile witness roots do not match its deferred state".into(),
-        ));
-    }
-    Ok(witness)
 }
 
 // VM EXECUTION TRACE
