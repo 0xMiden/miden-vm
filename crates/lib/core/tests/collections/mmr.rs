@@ -887,8 +887,8 @@ fn mmr_commitment_from_elements(num_leaves: u64, padded_peak_elements: &[Felt]) 
         [num_leaves as u32, (num_leaves >> 32) as u32, 0],
     );
 
-    for block in padded_peak_elements.chunks_exact(BLOCK_LEN) {
-        cv = Eidos::compress(cv, block.try_into().expect("MMR peaks are block-aligned"));
+    for &block in padded_peak_elements.as_chunks::<BLOCK_LEN>().0 {
+        cv = Eidos::compress(cv, block);
     }
 
     cv

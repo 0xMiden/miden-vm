@@ -634,9 +634,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         builder
             .when_transition()
             .assert_zero(continues.clone() * (msm_idx_next - msm_idx.clone() - AB::Expr::ONE));
-        builder.assert_zero(
-            is_msm_last.clone() * (frame_param1.clone() - msm_idx.clone() - AB::Expr::ONE),
-        );
+        builder.assert_zero(is_msm_last * (frame_param1.clone() - msm_idx - AB::Expr::ONE));
 
         // The claim `expr_ptr` (and its `group_ptr`) are **constant across an
         // absorb run**: every row of a claim names the same expression. This
@@ -745,8 +743,7 @@ where
         // provide (uint-leaf ∪ uint value op, col 2); `out_mult = 0` on the
         // root and padding ⇒ provide nothing.
         let neg_out_mult: LB::Expr = LB::Expr::ZERO - out_mult;
-        let and_provide: LB::Expr =
-            neg_out_mult.clone() * (is_and.clone() + is_zero + is_is.clone());
+        let and_provide: LB::Expr = neg_out_mult.clone() * (is_and + is_zero + is_is.clone());
         let uint_gate: LB::Expr = is_uint_leaf.clone();
         let uint_provide: LB::Expr = neg_out_mult * (is_uint_leaf.clone() + is_value_op);
         // Value-binding tag fork: a pinned leaf binds True (folded into the
@@ -782,7 +779,7 @@ where
         let msm_idx: LB::Expr = local[COL_MSM_IDX].into();
         let chain_head_id = absorption_id.clone() - is_ec_msm.clone() * msm_idx;
         let init_gate = node.clone() - is_ec_msm.clone() + is_msm_head;
-        let output_gate = node.clone() - is_ec_msm.clone() + LB::Expr::from(local[COL_IS_MSM_LAST]);
+        let output_gate = node.clone() - is_ec_msm + LB::Expr::from(local[COL_IS_MSM_LAST]);
 
         // Per-insert mult degrees: the one-hot gates (compression `node`, AND / op
         // consumes) are deg 1; the `−out_mult` provides are deg 2.
