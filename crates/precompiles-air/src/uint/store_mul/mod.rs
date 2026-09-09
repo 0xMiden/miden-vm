@@ -1,26 +1,21 @@
 //! UintStoreMul chiplet — the uint store and the scaled-MAC relation
 //! sharing one row range.
 //!
-//! Store's period (4) divides mul's period (8), so both progress
-//! **simultaneously** on the same rows in disjoint column ranges: main
-//! columns 0..18 are exactly [`UintStoreAir`](crate::uint)'s own layout
-//! (unchanged), columns 18..44 are exactly
-//! [`UintMulAir`](crate::uint::mul)'s own layout (unchanged, shifted by
-//! [`MUL_COL_OFFSET`]). Every 8-row cycle, store completes 2 of its own
-//! 4-row blocks while mul completes 1 of its own 8-row block — both for
-//! real, no mode selector, no cross-gating. Each side keeps its own
-//! constraint degree (`lqd = 1`); nothing here raises it.
+//! Store's period (4) divides mul's period (8), so both progress simultaneously on the same rows
+//! in disjoint column ranges. Main columns 0..18 use [`UintStoreAir`](crate::uint)'s layout, and
+//! columns 18..44 use [`UintMulAir`](crate::uint::mul)'s layout translated by
+//! [`MUL_COL_OFFSET`]. Every 8-row cycle, store completes two 4-row blocks while mul completes one
+//! 8-row block. Both constraint systems are active on every shared row and retain
+//! `log_quotient_degree = 1`.
 //!
 //! Exactly one centered running-sum column is committed per AIR. Column 0 remains store's anchor;
-//! mul's anchor is repacked into an ordinary two-fraction column. The four singleton fractions
-//! other than the retained store anchor are paired across two columns, and every fraction closes
+//! mul's anchor shares an ordinary two-fraction column. The four remaining singleton fractions
+//! are paired across two columns, and every fraction closes
 //! into the same centered residue without raising the constraint degree. Both sides' `id` / `S`
 //! registers remain independent because store and mul are simultaneously live.
 //!
-//! The shared height is `max` of what each side natively needs
-//! (independently `next_power_of_two`-padded, own padding mechanism —
-//! store's self-referential zero blocks, mul's `act = 0` blocks) — not
-//! their sum, since they occupy the same rows.
+//! The shared height is the larger of the two independently power-of-two-padded component heights.
+//! Store pads with self-referential zero blocks; mul pads with inactive (`act = 0`) blocks.
 
 mod aux;
 
@@ -60,7 +55,7 @@ use crate::{
 // COLUMN LAYOUT
 // ================================================================================================
 
-// STORE — main cols 0..18, its own original numbering, unshifted.
+// STORE — main columns 0..18 using UintStoreAir's numbering.
 pub const NUM_CELLS: usize = 16;
 pub const COL_PTR: usize = 16;
 pub const COL_BOUND_PTR: usize = 17;
@@ -78,8 +73,7 @@ const PCOL_V_HI: usize = 1;
 const PCOL_COMP: usize = 2;
 const PCOL_BOUND: usize = 3;
 
-// MUL — main cols 18..44, its own original numbering shifted by
-// `MUL_COL_OFFSET`.
+// MUL — main columns 18..44 using UintMulAir's numbering plus `MUL_COL_OFFSET`.
 pub const MUL_COL_OFFSET: usize = STORE_NUM_MAIN_COLS;
 
 pub const NUM_MAIN_COLS: usize = STORE_NUM_MAIN_COLS + MUL_NUM_MAIN_COLS;
@@ -94,15 +88,15 @@ const _: () = assert!(
 const STORE_TILE_COUNT: usize = MUL_PERIOD / STORE_PERIOD;
 
 // Periodic columns: mul's 8 one-hots + its `S_KEEP` gate first (indices
-// 0..9, unchanged from mul's own reading convention), then store's 4
+// 0..9, following UintMulAir's indexing), then store's 4
 // one-hots (period 4, tiled twice over the shared period-8 domain).
 const PCOL_MUL_S_KEEP: usize = MUL_PERIOD;
 const PCOL_STORE_ROLE_BASE: usize = MUL_PERIOD + 1;
 const NUM_PERIODIC: usize = MUL_PERIOD + 1 + STORE_PERIOD;
 
 // Aux layout: col 0 is store's anchor fraction and the centered running sum. The remaining 46
-// fractions are paired into 23 ordinary columns, including the two repacked columns that absorb
-// the four singleton fractions other than the retained store anchor. Registers stay independent
+// fractions are paired into 23 ordinary columns, including two mixed columns that absorb
+// the four singleton fractions outside the store anchor. Registers stay independent
 // because store and mul are simultaneously live, so their `id` accumulators cannot share a column.
 const REPACKED_COLUMN_SAVINGS: usize = 2;
 pub const NUM_LOGUP_COLS: usize =
@@ -182,7 +176,7 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        // ---- STORE (verbatim from `UintStoreAir::eval`, cols 0..18) ----
+        // ---- STORE (`UintStoreAir::eval` constraints, columns 0..18) ----
         {
             let local: [AB::Var; STORE_NUM_MAIN_COLS] = current_main(builder.main(), 0);
             let next: [AB::Var; STORE_NUM_MAIN_COLS] = next_main(builder.main(), 0);
@@ -289,14 +283,13 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
                 .assert_zero(bound_sel * (gap + ptr_here + AB::Expr::ONE - ptr_next));
         }
 
-        // ---- MUL (verbatim from `UintMulAir::eval`, cols `MUL_COL_OFFSET`..`NUM_MAIN_COLS`) ----
+        // ---- MUL (`UintMulAir::eval` constraints, columns `MUL_COL_OFFSET`..`NUM_MAIN_COLS`) ----
         {
             let local: [AB::Var; MUL_NUM_MAIN_COLS] = current_main(builder.main(), MUL_COL_OFFSET);
             let next: [AB::Var; MUL_NUM_MAIN_COLS] = next_main(builder.main(), MUL_COL_OFFSET);
 
-            // Mul's own periodic reading convention: indices 0..8 = role
-            // one-hots, 8 = `S_KEEP` — unchanged, since mul's periodic
-            // columns sit first in `periodic_columns()`.
+            // UintMulAir periodic indexing: indices 0..8 are role one-hots and index 8 is
+            // `S_KEEP`; these columns lead `periodic_columns()`.
             let sel: [AB::Expr; MUL_PERIOD + 1] = {
                 let p = builder.periodic_values();
                 array::from_fn(|i| p[i].into())
@@ -518,8 +511,7 @@ where
         let val_lo: [LB::Expr; 4] = array::from_fn(|k| local_m[k].into());
         let val_hi: [LB::Expr; 4] = array::from_fn(|k| local_m[4 + k].into());
 
-        // col 0: store's original first fraction column, which drives the composite's centered
-        // accumulator.
+        // col 0: the store anchor column, which drives the composite's centered accumulator.
         builder.next_column(
             |col| {
                 col.group(
@@ -625,8 +617,8 @@ where
                 store_pair_deg,
             );
         }
-        // Pair store's non-anchor raw provide with mul's relocated anchor provide. They retain
-        // their distinct typed buses; only their rational fractions share an auxiliary column.
+        // Pair the store raw provide outside the anchor with the mul anchor provide. Their typed
+        // buses remain distinct; only their rational fractions share an auxiliary column.
         builder.next_column(
             |col| {
                 col.group(

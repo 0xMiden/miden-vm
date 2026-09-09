@@ -41,9 +41,6 @@ use crate::{
 // - Structural (3): chunk_seq_id, absorption_id, act.
 // - Selector (1):   is_head.
 // - Content (8):    f[0..8] — the chunk's 8 u32 felts.
-//
-// See the design notes §"Columns".
-
 /// Sequential chunk index; +1 per row, row 0 = 0. `4·chunk_seq_id` is
 /// the chunk's Memory64 tape base (the chiplet is the sole producer of
 /// its `CHUNK_ADDR_BASE` namespace, so global-sequential is sound).
@@ -91,9 +88,8 @@ pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 1];
 // The single exposed normalized value ([`NUM_LOGUP_VALUES`]) follows the VM-wide LogUp contract in
 // [`crate::logup`]; aggregating the Memory64 + EidosBlock residues into one σ′ is the shared
 // shape, not a chunk-specific choice.
-// The shared public values ([`NUM_PUBLIC_VALUES`]) are the transcript
-// root alone — declared but not read here; the natural last-row closing
-// needs no `inv_n` height input.
+// The shared public values ([`NUM_PUBLIC_VALUES`]) are the transcript root alone; this AIR
+// declares but does not read them.
 
 // AIR
 // ================================================================================================
