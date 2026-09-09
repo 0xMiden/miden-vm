@@ -5,9 +5,9 @@ use miden::core::sys::pvm::layout
 # Per-row OOD layout uses LMCS alignment 8:
 #   preprocessed: 0 + 0 + 0 + 8 + 0 + 0 + 0 + 0 + 0 + 0 = 8 scalar evaluations
 #   main:         104 + 112 + 72 + 8 + 40 + 48 + 32 + 24 + 24 + 48 = 512 scalar evaluations
-#   aux:          48 + 40 + 24 + 8 + 24 + 56 + 8 + 16 + 24 + 32 = 280 scalar evaluations
+#   aux:          40 + 40 + 24 + 8 + 24 + 56 + 8 + 16 + 24 + 32 = 272 scalar evaluations
 #   quotient:     8 scalar evaluations
-# The advice stream supplies 1616 base felts, read as 202 `adv_pipe` blocks,
+# The advice stream supplies 1600 base felts, read as 200 `adv_pipe` blocks,
 # split into 22 segments (20 of them order-dependent).
 
 #! Absorbs 2 advice blocks into the row already targeted by the caller.
@@ -158,9 +158,9 @@ pub proc stage_ood_scatter_table()
     # main: 26 blocks at row offset 16
     push.16 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.4 mem_store
     exec.layout::ood_scatter_table_ptr add.76 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.5 mem_store
-    # aux: 12 blocks at row offset 1040
+    # aux: 10 blocks at row offset 1040
     push.1040 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
-    exec.layout::ood_scatter_table_ptr add.64 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.25 mem_store
+    exec.layout::ood_scatter_table_ptr add.60 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.25 mem_store
     drop
 
     exec.layout::proof_order_positions_ptr add.1 mem_load
@@ -168,8 +168,8 @@ pub proc stage_ood_scatter_table()
     # main: 28 blocks at row offset 224
     push.224 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.4 mem_store
     exec.layout::ood_scatter_table_ptr add.80 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.5 mem_store
-    # aux: 10 blocks at row offset 1136
-    push.1136 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
+    # aux: 10 blocks at row offset 1120
+    push.1120 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
     exec.layout::ood_scatter_table_ptr add.60 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.25 mem_store
     drop
 
@@ -178,8 +178,8 @@ pub proc stage_ood_scatter_table()
     # main: 18 blocks at row offset 448
     push.448 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.4 mem_store
     exec.layout::ood_scatter_table_ptr add.72 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.5 mem_store
-    # aux: 6 blocks at row offset 1216
-    push.1216 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
+    # aux: 6 blocks at row offset 1200
+    push.1200 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
     exec.layout::ood_scatter_table_ptr add.52 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.25 mem_store
     drop
 
@@ -188,8 +188,8 @@ pub proc stage_ood_scatter_table()
     # main: 2 blocks at row offset 592
     push.592 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.4 mem_store
     exec.layout::ood_scatter_table_ptr add.44 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.5 mem_store
-    # aux: 2 blocks at row offset 1264
-    push.1264 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
+    # aux: 2 blocks at row offset 1248
+    push.1248 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
     exec.layout::ood_scatter_table_ptr add.44 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.25 mem_store
     drop
 
@@ -198,8 +198,8 @@ pub proc stage_ood_scatter_table()
     # main: 10 blocks at row offset 608
     push.608 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.4 mem_store
     exec.layout::ood_scatter_table_ptr add.60 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.5 mem_store
-    # aux: 6 blocks at row offset 1280
-    push.1280 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
+    # aux: 6 blocks at row offset 1264
+    push.1264 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
     exec.layout::ood_scatter_table_ptr add.52 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.25 mem_store
     drop
 
@@ -208,8 +208,8 @@ pub proc stage_ood_scatter_table()
     # main: 12 blocks at row offset 688
     push.688 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.4 mem_store
     exec.layout::ood_scatter_table_ptr add.64 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.5 mem_store
-    # aux: 14 blocks at row offset 1328
-    push.1328 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
+    # aux: 14 blocks at row offset 1312
+    push.1312 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
     exec.layout::ood_scatter_table_ptr add.68 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.25 mem_store
     drop
 
@@ -218,8 +218,8 @@ pub proc stage_ood_scatter_table()
     # main: 8 blocks at row offset 784
     push.784 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.4 mem_store
     exec.layout::ood_scatter_table_ptr add.56 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.5 mem_store
-    # aux: 2 blocks at row offset 1440
-    push.1440 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
+    # aux: 2 blocks at row offset 1424
+    push.1424 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
     exec.layout::ood_scatter_table_ptr add.44 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.25 mem_store
     drop
 
@@ -228,8 +228,8 @@ pub proc stage_ood_scatter_table()
     # main: 6 blocks at row offset 848
     push.848 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.4 mem_store
     exec.layout::ood_scatter_table_ptr add.52 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.5 mem_store
-    # aux: 4 blocks at row offset 1456
-    push.1456 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
+    # aux: 4 blocks at row offset 1440
+    push.1440 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
     exec.layout::ood_scatter_table_ptr add.48 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.25 mem_store
     drop
 
@@ -238,8 +238,8 @@ pub proc stage_ood_scatter_table()
     # main: 6 blocks at row offset 896
     push.896 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.4 mem_store
     exec.layout::ood_scatter_table_ptr add.52 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.5 mem_store
-    # aux: 6 blocks at row offset 1488
-    push.1488 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
+    # aux: 6 blocks at row offset 1472
+    push.1472 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
     exec.layout::ood_scatter_table_ptr add.52 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.25 mem_store
     drop
 
@@ -248,8 +248,8 @@ pub proc stage_ood_scatter_table()
     # main: 12 blocks at row offset 944
     push.944 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.4 mem_store
     exec.layout::ood_scatter_table_ptr add.64 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.5 mem_store
-    # aux: 8 blocks at row offset 1536
-    push.1536 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
+    # aux: 8 blocks at row offset 1520
+    push.1520 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.24 mem_store
     exec.layout::ood_scatter_table_ptr add.56 dup.1 mul.2 exec.layout::ood_scatter_table_ptr add add.25 mem_store
     drop
 end
@@ -260,7 +260,7 @@ end
 #!
 #! - 8 preprocessed extension-field slots;
 #! - 512 main extension-field slots across 10 chiplets in proof order;
-#! - 280 auxiliary-coordinate extension-field slots across 10 chiplets in proof order;
+#! - 272 auxiliary-coordinate extension-field slots across 10 chiplets in proof order;
 #! - 8 quotient extension-field slots.
 #!
 #! Each block is stored, folded into the DEEP fixed term with `horner_eval_ext`, and compressed
@@ -269,7 +269,7 @@ end
 #! staged by `stage_ood_scatter_table` supplies.
 #!
 #! Inputs:  [scratch0, scratch1, cv, ptr, alpha_ptr, acc0, acc1]
-#! Outputs: [scratch0, scratch1, cv', ptr + 1616, alpha_ptr, acc0', acc1']
+#! Outputs: [scratch0, scratch1, cv', ptr + 1600, alpha_ptr, acc0', acc1']
 pub proc process_row_ood_evaluations(
     state: types::EidosState,
     evaluation: types::HornerState,
@@ -379,10 +379,10 @@ pub proc process_row_ood_evaluations(
     swap.13 drop
     exec.layout::ood_scatter_table_ptr add.43 mem_load
     dynexec
-    # quotient group, sole occupant: 2 blocks at row offset 1600
-    exec.layout::ood_scatter_table_ptr mem_load add.1600
+    # quotient group, sole occupant: 2 blocks at row offset 1584
+    exec.layout::ood_scatter_table_ptr mem_load add.1584
     swap.13 drop
     exec.pipe_2
-    exec.layout::ood_scatter_table_ptr mem_load add.1616
+    exec.layout::ood_scatter_table_ptr mem_load add.1600
     swap.13 drop
 end
