@@ -1,10 +1,7 @@
-//! Proof order of a multi-AIR relation: Lehmer ranking and the sorting network that derives it.
+//! Proof-order encodings and fixed sorting networks for multi-AIR relations.
 //!
-//! A lifted STARK commits its AIR traces in ascending `(log height, instance index)` order, which
-//! varies per workload. This module names that permutation by its Lehmer rank relative to the
-//! canonical instance order for exhaustive and reference tests. Production MASM verifiers do not
-//! rank: they sort packed `(height, index)` keys with the fixed comparator network generated here,
-//! which the order-maps renderer turns into a branch-free procedure.
+//! This module provides Lehmer encoding for proof-order permutations and the comparator networks
+//! used by the MASM order-map renderer.
 
 /// Largest AIR count whose complete permutation set fits in the `u32` tag space.
 ///
@@ -13,6 +10,10 @@
 pub const MAX_ORDER_AIRS: usize = 12;
 
 /// Compute `n!`.
+///
+/// # Panics
+///
+/// Panics if `n!` overflows `usize`.
 pub const fn factorial(n: usize) -> usize {
     let mut result: usize = 1;
     let mut factor: usize = 2;
@@ -92,8 +93,8 @@ pub(crate) type Comparator = (usize, usize);
 /// The exact schedule is SorterHunter's MIT-licensed `N10L29D8` network, pinned at
 /// <https://github.com/bertdobbelaere/SorterHunter/blob/392762f916688756242d90febced98ad157bc6d2/sorting_networks_extended.html#L185-L195>.
 /// Codish et al. prove that 29 comparators are minimal for ten inputs
-/// (<https://doi.org/10.1016/j.jcss.2015.11.014>). The zero-one test below independently verifies
-/// this particular schedule over all 1,024 Boolean inputs.
+/// (<https://doi.org/10.1016/j.jcss.2015.11.014>). By the zero-one principle, correctness over all
+/// 1,024 Boolean inputs establishes correctness for arbitrary inputs from a totally ordered domain.
 const TEN_INPUT_SORTING_NETWORK: [Comparator; 29] = [
     (0, 8),
     (1, 9),
@@ -136,8 +137,11 @@ const TEN_INPUT_SORTING_NETWORK: [Comparator; 29] = [
 /// is data-oblivious, so a verifier can apply it to untrusted keys with a fixed instruction
 /// sequence. Four inputs take five comparators; ten take 29.
 ///
-/// Panics unless `1 <= num_inputs <= MAX_ORDER_AIRS`; the exhaustive zero-one test below is what
-/// makes the construction trustworthy for every supported size.
+/// # Panics
+///
+/// Panics unless `1 <= num_inputs <= MAX_ORDER_AIRS`.
+///
+/// The returned comparator sequence sorts arbitrary inputs over a totally ordered domain.
 pub(crate) fn sorting_network(num_inputs: usize) -> Vec<Comparator> {
     assert!(
         (1..=MAX_ORDER_AIRS).contains(&num_inputs),
@@ -221,9 +225,8 @@ mod tests {
         }
     }
 
-    /// Zero-one principle: a comparator network sorts every input iff it sorts every 0/1 input.
-    /// Every supported size is swept exhaustively, so the generator is trusted by evidence, not
-    /// by its derivation.
+    /// By the zero-one principle, this exhaustive sweep validates each supported comparator network
+    /// for arbitrary inputs over a totally ordered domain.
     #[test]
     fn sorting_networks_sort_every_boolean_input() {
         for num_inputs in 1..=MAX_ORDER_AIRS {
@@ -268,8 +271,8 @@ mod tests {
         }
     }
 
-    /// The comparator counts are part of the verifier's cycle budget; a generator change must
-    /// surface here rather than only as a MASM diff.
+    /// The comparator counts are part of the verifier's cycle budget and pin the generated MASM
+    /// schedule.
     #[test]
     fn network_sizes_are_pinned() {
         assert_eq!(sorting_network(1).len(), 0);
@@ -291,7 +294,9 @@ mod tests {
     fn air_counts_past_the_tag_space_are_refused() {
         assert_eq!(order_from_tag(0, MAX_ORDER_AIRS + 1), None);
         assert!(order_from_tag(0, MAX_ORDER_AIRS).is_some());
-        assert!(u32::try_from(factorial(MAX_ORDER_AIRS)).is_ok());
-        assert!(u32::try_from(factorial(MAX_ORDER_AIRS + 1)).is_err());
+        let largest_supported_factorial = factorial(MAX_ORDER_AIRS) as u64;
+        let first_unsupported_factorial = largest_supported_factorial * (MAX_ORDER_AIRS as u64 + 1);
+        assert!(u32::try_from(largest_supported_factorial).is_ok());
+        assert!(u32::try_from(first_unsupported_factorial).is_err());
     }
 }

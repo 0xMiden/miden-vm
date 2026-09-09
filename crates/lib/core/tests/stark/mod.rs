@@ -264,7 +264,7 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
             String::new()
         };
         format!(
-        "
+            "
         use miden::core::mem
         use miden::core::sys
         use miden::core::stark::utils
@@ -321,8 +321,7 @@ fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped()
             exec.verifier::verify
             exec.sys::truncate_stack
         end
-    ",
-        routing_mutation = routing_mutation,
+    "
         )
     };
 
