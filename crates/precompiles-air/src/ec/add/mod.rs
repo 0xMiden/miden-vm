@@ -89,7 +89,7 @@
 //!
 //! Columns carry only what gates or names certificates on rows 0–2:
 //! the four operand coordinate ptrs, `a`/`b`/`bound`, the five case
-//! flags, `act` — 23 main columns, 12 LogUp aux columns, 4 periodic
+//! flags, `act` — 21 main columns, 11 LogUp aux columns, 4 periodic
 //! one-hots.
 
 use alloc::{borrow::Cow, vec, vec::Vec};
@@ -203,18 +203,19 @@ pub const COL_ACT: usize = 15;
 pub const COL_MINTS: usize = 16;
 /// Limbs of `r_ptr − p_ptr − 1` (16-bit lo / hi) — the witnessed,
 /// Range16-checked difference proving `r_ptr > p_ptr` on `mints` ops. 0 off
-/// mint ops. Cycle-constant.
+/// mint ops. Hosted on the result row.
 pub const COL_RP_LO: usize = 17;
 pub const COL_RP_HI: usize = 18;
-/// Limbs of `r_ptr − q_ptr − 1` — proving `r_ptr > q_ptr`.
-pub const COL_RQ_LO: usize = 19;
-pub const COL_RQ_HI: usize = 20;
+/// Limbs of `r_ptr − q_ptr − 1` — proving `r_ptr > q_ptr`. Hosted in the same cells
+/// on the term row, visible through the result row's next-row window.
+pub const COL_RQ_LO: usize = COL_RP_LO;
+pub const COL_RQ_HI: usize = COL_RP_HI;
 /// The group's GLV endomorphism `β`/`λ` ptrs (carried only to close the
 /// `EcGroup` consume; the none-sentinel 0 for a group with no
 /// endomorphism).
-pub const COL_BETA_PTR: usize = 21;
-pub const COL_LAMBDA_PTR: usize = 22;
-pub const NUM_MAIN_COLS: usize = 23;
+pub const COL_BETA_PTR: usize = 19;
+pub const COL_LAMBDA_PTR: usize = 20;
+pub const NUM_MAIN_COLS: usize = 21;
 
 /// Block period: one add op = 4 rows.
 pub const PERIOD: usize = 4;
@@ -254,7 +255,7 @@ const PCOL_TERM: usize = 3;
 const NUM_PERIODIC: usize = 4;
 const ROLE_ROWS: [usize; NUM_PERIODIC] = [0, 1, 2, 3];
 
-// Aux: 12 columns, flattened via `frac_col!` over the 21 fractions so
+// Aux: 11 columns, flattened via `frac_col!` over the 19 fractions so
 // every closing constraint stays at degree ≤ 3 → `log_quotient_degree`
 // = 1:
 // - col 0: the `EcGroupAdd` provide, alone.
@@ -266,11 +267,11 @@ const ROLE_ROWS: [usize; NUM_PERIODIC] = [0, 1, 2, 3];
 // - col 6: the generic case's `t`-add + fused `x₃` mul-subtract.
 // - col 7: the shared tail's `e`-subtract + fused `y₃` mul-subtract.
 // - col 8: the double case's fused `x₃` mul-subtract, alone (no partner left to pair).
-// - col 9/10: the closure-cert ptr-ordering Range16 limb pairs.
-// - col 11: the result-membership cert provide, alone.
-const NUM_LOGUP_COLS: usize = 12;
-const AUX_WIDTH: usize = 12;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 2, 1];
+// - col 9: the closure-cert ptr-ordering Range16 limb pair, on result and term rows.
+// - col 10: the result-membership cert provide, alone.
+const NUM_LOGUP_COLS: usize = 11;
+const AUX_WIDTH: usize = 11;
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 1];
 
 // AIR
 // ================================================================================================
@@ -398,8 +399,8 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
         let two_16 = AB::Expr::from(Felt::from(1u32 << 16));
         let rp_lo: AB::Expr = local[COL_RP_LO].into();
         let rp_hi: AB::Expr = local[COL_RP_HI].into();
-        let rq_lo: AB::Expr = local[COL_RQ_LO].into();
-        let rq_hi: AB::Expr = local[COL_RQ_HI].into();
+        let rq_lo: AB::Expr = next[COL_RQ_LO].into();
+        let rq_hi: AB::Expr = next[COL_RQ_HI].into();
         let at_res: AB::Expr = sel[PCOL_RES].clone();
         builder.assert_zero(
             at_res.clone()
@@ -409,11 +410,11 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
         builder
             .assert_zero(at_res * mints * (r_res - q_res - AB::Expr::ONE - rq_lo - two_16 * rq_hi));
 
-        // Cycle-constancy for every metadata column (the term row is the
-        // block's last, so the not_term gate drops exactly at the
+        // Cycle-constancy for metadata, excluding the row-hosted ordering limbs (the term row is
+        // the block's last, so the not_term gate drops exactly at the
         // boundary).
         let not_term: AB::Expr = AB::Expr::ONE - sel[PCOL_TERM].clone();
-        for col in COL_PX..NUM_MAIN_COLS {
+        for col in (COL_PX..COL_RP_LO).chain(COL_BETA_PTR..NUM_MAIN_COLS) {
             let here: AB::Expr = local[col].into();
             let there: AB::Expr = next[col].into();
             builder.assert_zero(not_term.clone() * (there - here));
@@ -472,8 +473,6 @@ where
         let mints: LB::Expr = local[COL_MINTS].into();
         let rp_lo: LB::Expr = local[COL_RP_LO].into();
         let rp_hi: LB::Expr = local[COL_RP_HI].into();
-        let rq_lo: LB::Expr = local[COL_RQ_LO].into();
-        let rq_hi: LB::Expr = local[COL_RQ_HI].into();
         let live: LB::Expr = cancel.clone() + dbl.clone() + generic.clone();
         let tail: LB::Expr = dbl.clone() + generic.clone();
 
@@ -803,27 +802,20 @@ where
             ),
         );
 
-        // ---- col 9/10: the mint columns. Four Range16 consumes for the
+        // ---- col 9: the mint column. Four Range16 consumes per block for the
         //      limbs of r−p−1 and r−q−1 (reconstructed in the main AIR),
         //      proving r_ptr > p_ptr ∧ r_ptr > q_ptr on a mint op — the
         //      well-foundedness the certificate rests on. All gated
-        //      `at_res · mints`: one set per mint block.
-        let gate = sel[PCOL_RES].clone() * mints;
+        //      `(at_res + at_term) · mints`: one limb pair on each row.
+        let gate = (sel[PCOL_RES].clone() + sel[PCOL_TERM].clone()) * mints.clone();
         frac_col!(
             builder,
             "ec-add-mint",
             pair_deg,
-            ("range16-rp-lo", gate.clone(), Range16Msg { w: rp_lo }, f2),
-            ("range16-rp-hi", gate.clone(), Range16Msg { w: rp_hi }, f2),
+            ("range16-order-lo", gate.clone(), Range16Msg { w: rp_lo }, f2),
+            ("range16-order-hi", gate, Range16Msg { w: rp_hi }, f2),
         );
-        frac_col!(
-            builder,
-            "ec-add-mint",
-            pair_deg,
-            ("range16-rq-lo", gate.clone(), Range16Msg { w: rq_lo }, f2),
-            ("range16-rq-hi", gate.clone(), Range16Msg { w: rq_hi }, f2),
-        );
-        // col 11: the result-membership cert provide, alone. −1 per mint
+        // col 10: the result-membership cert provide, alone. −1 per mint
         // op (negative ⇒ provide), naming the fresh result `r` and its
         // group. Consumed by `r`'s point-store row (the point band of
         // `EcPointStoreGroupsAir`), discharging its on-curve obligation
@@ -831,13 +823,14 @@ where
         // is minted by exactly one op.
         let cert_group: LB::Expr = local[CELL_GROUP].into();
         let cert_r: LB::Expr = local[CELL_R].into();
+        let cert_gate = sel[PCOL_RES].clone() * mints;
         frac_col!(
             builder,
             "ec-add-mint",
             single_deg,
             (
                 "provide-ecgroupadd-cert",
-                LB::Expr::ZERO - gate,
+                LB::Expr::ZERO - cert_gate,
                 EcOnCurveCertMsg { group_ptr: cert_group, r_ptr: cert_r },
                 f2
             ),
