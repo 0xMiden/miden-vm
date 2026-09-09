@@ -240,7 +240,7 @@ where
         // Every active row submits one complete Eidos message block. The ChunkChain relation fires
         // only at invocation heads so the semantic owner can provide the initial CV.
         let pos_act: LB::Expr = act.clone();
-        let pos_act_head: LB::Expr = act * is_head.clone();
+        let pos_act_head: LB::Expr = act * is_head;
 
         let interaction_deg = Deg { v: 1, u: 1 };
         let provides_deg = Deg { v: 1, u: 2 };

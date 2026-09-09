@@ -174,7 +174,7 @@ where
     let neg_act: LB::Expr = LB::Expr::ZERO - act.clone();
 
     let pos_act: LB::Expr = act.clone();
-    let pos_act_head: LB::Expr = act * is_head.clone();
+    let pos_act_head: LB::Expr = act * is_head;
 
     let interaction_deg = Deg { v: 1, u: 1 };
     let provides_deg = Deg { v: 1, u: 2 };
@@ -298,7 +298,7 @@ where
 
     let chunks_frame = [
         LB::Expr::from(DEFERRED_CHUNKS_DOMAIN),
-        LB::Expr::from(Felt::from(8u8)) * n_chunks.clone(),
+        LB::Expr::from(Felt::from(8u8)) * n_chunks,
         LB::Expr::ZERO,
         LB::Expr::ZERO,
     ];
