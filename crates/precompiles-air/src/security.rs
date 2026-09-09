@@ -43,7 +43,7 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 
 /// Shape of the chiplet multi-AIR statement used by the security estimator.
 ///
-/// `air_shape_matches_symbolic` checks this stored value against the current chiplet AIRs.
+/// This stored value must equal the shape returned by [`derive_air_shape`].
 pub const AIR_SHAPE: AirShape = AirShape {
     num_composed_constraints: 660,
     max_constraint_degree: 5,
@@ -57,8 +57,8 @@ pub const AIR_SHAPE: AirShape = AirShape {
 
 /// Computes the AIR shape by symbolically evaluating every chiplet AIR.
 ///
-/// Tests compare [`AIR_SHAPE`] with this result. The symbolic pass allocates and evaluates every
-/// chiplet AIR, so [`security_report`] uses the checked constant instead of calling this function.
+/// This allocating pass supports validation and tooling. [`security_report`] uses the stored
+/// [`AIR_SHAPE`] constant.
 pub fn derive_air_shape() -> AirShape {
     let airs = ChipletAir::all();
     let num_airs = airs.len();
