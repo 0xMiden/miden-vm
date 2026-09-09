@@ -650,7 +650,7 @@ mod tests {
             rhs: 0,
         }])
         .unwrap();
-        let root = witness.root();
+        let root = witness.root_unchecked();
         (witness, root)
     }
 

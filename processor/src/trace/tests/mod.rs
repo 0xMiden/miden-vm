@@ -134,7 +134,7 @@ fn non_empty_execution_witness_splits_with_matching_precompile_root() {
 
     let precompile_witness = precompile_witness.expect("logged statement must be retained");
     assert_eq!(vm_witness.claim(), claim);
-    assert_eq!(precompile_witness.root(), precompile_root);
+    assert_eq!(precompile_witness.root_unchecked(), precompile_root);
     let output = FastProcessor::new(stack_inputs).execute_sync(&program, &mut host).unwrap();
     assert_eq!(output.precompile_root(), precompile_root);
     assert_eq!(output.precompile_witness.as_ref(), Some(&precompile_witness));

@@ -244,7 +244,7 @@ impl Host for PvmSettlementHost {
             let available_root = self
                 .precompile_witnesses
                 .iter()
-                .map(PrecompileWitness::root)
+                .map(PrecompileWitness::root_unchecked)
                 .reduce(fold_deferred_root)
                 .expect("settlement requires at least one witness");
             if requested_root != available_root {

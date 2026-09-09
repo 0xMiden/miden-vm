@@ -300,7 +300,7 @@ fn generate_fuzz_seeds() {
         let wire = singleton_witness();
         let vm = VmProof {
             proof: StarkProof::new(Vec::new(), HashFunction::Rpo256),
-            precompile_root: wire.root(),
+            precompile_root: wire.root_unchecked(),
         };
         let proof = ExecutionProof::from_parts(
             ExecutionProofCompatibility::new(Vec::new(), Vec::new()).unwrap(),

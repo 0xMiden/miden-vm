@@ -36,7 +36,7 @@ async fn batch_settles_deferred_obligations_with_one_pvm_proof() {
         prove_ecdsa_execution(&core_lib, valid_fixture(), StackInputs::default());
     let (second_proof, second_claim, second_witness) =
         prove_ecdsa_execution(&core_lib, generator_public_key_fixture(), StackInputs::default());
-    let roots = [first_witness.root(), second_witness.root()];
+    let roots = [first_witness.root_unchecked(), second_witness.root_unchecked()];
     assert_ne!(roots[0], roots[1]);
 
     // Public inputs identify the ordered claims; advice supplies the proofs.

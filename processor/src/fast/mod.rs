@@ -700,9 +700,13 @@ pub struct ExecutionOutput {
 }
 
 impl ExecutionOutput {
-    /// Returns the authenticated deferred root, or TRUE when no statements were logged.
+    /// Returns the carried deferred root, or TRUE when no witness is present.
+    ///
+    /// This does not validate the witness's precompile computations.
     pub fn precompile_root(&self) -> Digest {
-        self.precompile_witness.as_ref().map_or(TRUE_DIGEST, PrecompileWitness::root)
+        self.precompile_witness
+            .as_ref()
+            .map_or(TRUE_DIGEST, PrecompileWitness::root_unchecked)
     }
 }
 

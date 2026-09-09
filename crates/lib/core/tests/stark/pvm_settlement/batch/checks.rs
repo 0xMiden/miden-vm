@@ -38,8 +38,8 @@ async fn batch_root_and_response_checks() {
         prove_ecdsa_execution(&core_lib, valid_fixture(), StackInputs::new(&[Felt::ONE]).unwrap());
     let (plain, plain_claim) = prove_without_precompiles();
     assert_ne!(first_claim.commitment(), repeated_claim.commitment());
-    assert_eq!(first_witness.root(), repeated_witness.root());
-    assert_ne!(first_witness.root(), second_witness.root());
+    assert_eq!(first_witness.root_unchecked(), repeated_witness.root_unchecked());
+    assert_ne!(first_witness.root_unchecked(), second_witness.root_unchecked());
     assert!(matches!(plain.precompile(), PrecompileStatus::Empty));
 
     // [A, TRUE, B, A] must keep both occurrences of A and skip only TRUE.
@@ -51,7 +51,11 @@ async fn batch_root_and_response_checks() {
     ];
     let (stack_inputs, advice_inputs) = batch_inputs(&core_lib, &executions);
 
-    let expected_roots = vec![first_witness.root(), second_witness.root(), repeated_witness.root()];
+    let expected_roots = vec![
+        first_witness.root_unchecked(),
+        second_witness.root_unchecked(),
+        repeated_witness.root_unchecked(),
+    ];
     let expected_root = expected_roots.iter().copied().reduce(fold_deferred_root).unwrap();
     let mut host = PvmSettlementHost::new(
         &core_lib,
