@@ -564,7 +564,7 @@ fn fill_state_lane_row(
             (state_prev, 0, 0)
         } else {
             // Verbatim XORin.
-            (state_prev ^ chunk_lane, 0, 0)
+            (state_prev ^ chunk_lane, 0, chunk_lane)
         };
         write_u64_bytes(r, STATE_NEW_BYTES_RANGE.start, state_new);
         write_u64_bytes(r, CLEARED_BYTES_RANGE.start, cleared);
@@ -592,12 +592,13 @@ fn fill_state_lane_row(
         // matches the lane-16 rate-XORin row's provide at the same
         // Memory64 address (`100·sponge_seq_id − 2484`), so the
         // post-XORin value pinned here must match what the rate
-        // row produced. The `xor-lane16` mult is gated by
+        // row produced. The shared `xor-state` mult is gated by
         // `is_last_block_period`, but trace generation fills the
         // values uniformly for layout consistency.
         let state_prev = post_xorin_this_block[LANE_16];
         write_u64_bytes(r, STATE_PREV_BYTES_RANGE.start, state_prev);
         let state_new = if is_last_block {
+            write_u64_bytes(r, PADDED_BYTES_RANGE.start, PAD_CONST);
             state_prev ^ PAD_CONST
         } else {
             state_prev
