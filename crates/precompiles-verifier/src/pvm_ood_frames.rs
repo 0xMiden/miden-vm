@@ -23,10 +23,10 @@ use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS};
 /// Per-AIR trace regions are padded to this width before concatenation into a commitment group.
 const LMCS_ALIGNMENT: usize = 8;
 
-/// Felts moved by one `adv_pipe`. Numerically equal to [`LMCS_ALIGNMENT`] today, but a distinct
-/// quantity: this bounds block/segment arithmetic and `adv_pipe` destination alignment, while
-/// `LMCS_ALIGNMENT` bounds column-padding widths. If the two ever diverge, block arithmetic must
-/// keep using this constant, not the padding width.
+/// Felts moved by one `adv_pipe`.
+///
+/// This transport width governs block/segment arithmetic and destination alignment;
+/// [`LMCS_ALIGNMENT`] independently governs column-padding widths.
 const ADV_PIPE_BLOCK_FELTS: usize = 8;
 
 /// Felts reserved for the out-of-domain scatter table by `sys/pvm/layout.masm`.
@@ -588,7 +588,7 @@ mod tests {
             quotient: 8,
         };
 
-        // Today's shape: only BytePairAnd8 has preprocessed columns.
+        // The PVM preprocessed commitment group is occupied only by `ChipletAir::BytePairLut`.
         assert!(pvm_scatter_plan(&live_geometry()).is_ok());
         let mut sole = vec![0usize; NUM_CHIPLETS];
         sole[3] = 16;

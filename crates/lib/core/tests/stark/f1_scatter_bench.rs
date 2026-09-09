@@ -55,12 +55,11 @@ const OOD_BASE: u32 = 16_384;
 
 /// Cycle ceiling for the checked-in hook's two-row ingest.
 ///
-/// Absorbing the row costs three cycles per block, so both rows are 2 x 80 x 3 = 480 cycles of
-/// unavoidable work; per-segment dispatch adds about 22 cycles to each of the 10 segments, twice
-/// (measured: 1,087). Guarding the destination pointer once per block instead would add at least
-/// ten cycles to every one of the 160 blocks, landing far above this ceiling - which is the point:
-/// this bound is what makes the mechanism, not merely the addresses, a tested property of the
-/// generated file.
+/// Absorbing the row costs three cycles per block, so both rows are 2 x 70 x 3 = 420 cycles of
+/// unavoidable work; the checked-in segment dispatch ingests both rows in 1,023 cycles. Guarding
+/// the destination pointer once per block would add at least ten cycles to every one of the 140
+/// blocks, landing far above this ceiling. This bound makes the mechanism, not merely the
+/// addresses, a tested property of the generated file.
 const MAX_TWO_ROW_INGEST_CYCLES: u64 = 1_300;
 
 const INITIAL_SPONGE: [u64; 12] = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
@@ -308,7 +307,7 @@ begin
     )
 }
 
-/// Baseline: today's flat ingest, which stores the row in wire order.
+/// Flat-ingest baseline, which stores the row in wire order.
 fn flat_source(row_felts: u32) -> String {
     let blocks = row_felts / BLOCK_FELTS;
     program("", "", &format!("        repeat.{blocks} {ABSORB} end"), row_felts)

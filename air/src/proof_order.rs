@@ -27,12 +27,10 @@ const _: () = assert!(PROOF_ORDER_COUNT <= u32::MAX as usize, "proof-order tags 
 /// placing that AIR's data and weighting its contribution. `tag` is the Lehmer rank of the
 /// permutation relative to [`AIRS`].
 ///
-/// The recursive verifier no longer routes by this rank: it derives each AIR's position directly
-/// from the committed heights (`proof_order_position_from_heights`) rather than looking up a
-/// registry leaf. `tag` and its associated API (`tag`, `from_tag`, `lehmer_rank`, `file_stem`) are
-/// kept as public surface for enumerating every possible order — `order_from_tag` drives
-/// [`ProofOrder::variants`], used by tests that sweep every proof order — and for bounding a
-/// relation's AIR count against [`miden_ace_codegen::MAX_ORDER_AIRS`].
+/// The recursive verifier derives each AIR's position directly from the committed heights with
+/// `proof_order_position_from_heights`. The Lehmer tag API provides a stable encoding for
+/// exhaustive proof-order enumeration. The shared [`miden_ace_codegen::MAX_ORDER_AIRS`] bound
+/// ensures that every supported rank fits in `u32`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProofOrder {
     airs: [MidenAir; MIDEN_AIR_COUNT],
@@ -100,7 +98,7 @@ impl ProofOrder {
         self.tag
     }
 
-    /// Stable descriptive stem for this proof order in tests and reference artifacts.
+    /// Returns a stable diagnostic label for this proof order.
     pub fn file_stem(&self) -> String {
         let mut stem = String::from("constraints_eval_");
         for (i, air) in self.airs.iter().copied().enumerate() {
@@ -137,8 +135,7 @@ fn assert_is_air_permutation(airs: [MidenAir; MIDEN_AIR_COUNT]) {
 
 /// Return the Lehmer tag of an AIR permutation relative to [`AIRS`].
 ///
-/// Delegates to the shared Lehmer ranking retained for exhaustive and reference proof-order
-/// enumeration.
+/// Uses the shared Lehmer ranking for exhaustive proof-order enumeration.
 fn lehmer_rank(airs: [MidenAir; MIDEN_AIR_COUNT]) -> u32 {
     let instance_order: Vec<usize> = airs.iter().map(|air| air.instance_index()).collect();
     order_tag(&instance_order)

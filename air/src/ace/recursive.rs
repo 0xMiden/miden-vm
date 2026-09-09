@@ -31,9 +31,9 @@ fn recursive_verifier_ace_config() -> AceConfig {
 
 /// Encoded recursive-verifier ACE circuit and the metadata consumed by MASM.
 ///
-/// One circuit serves every proof order: proof-order dependence lives entirely in the MASM
-/// verifier's ingest scatter and fold-coefficient staging, not in the circuit itself. The stream
-/// is therefore a single `adv_pipe`-aligned segment with one digest.
+/// One fixed circuit topology serves every proof order. The MASM verifier's ingest scatter and
+/// fold-coefficient staging supply the order-specific data positions and coefficients. The stream
+/// is a single `adv_pipe`-aligned segment with one digest.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecursiveAceCircuit {
     /// Number of ACE READ variables.
@@ -51,9 +51,8 @@ pub struct RecursiveAceCircuit {
 
 /// Builds and encodes the order-invariant recursive-verifier ACE circuit.
 ///
-/// The circuit does not depend on the proof order, so there is nothing to cache across calls
-/// beyond what [`build_canonical_multi_air_ace_circuit`] itself does; a caller that needs the
-/// circuit repeatedly should hold [`shared_recursive_circuit`] rather than call this per proof.
+/// The circuit does not depend on the proof order. Callers that need repeated access should use
+/// [`shared_recursive_circuit`] rather than rebuild it for each proof.
 pub fn build_recursive_verifier_ace_circuit() -> Result<RecursiveAceCircuit, AceError> {
     let circuit = build_canonical_multi_air_ace_circuit(recursive_verifier_ace_config())?;
     let encoded = circuit.to_ace()?;
@@ -94,7 +93,7 @@ pub fn recursive_verifier_input_layout() -> Result<InputLayout, AceError> {
         .clone())
 }
 
-/// The process-wide canonical circuit. There is exactly one, for every proof order.
+/// Returns the process-wide canonical circuit shared by every proof order.
 #[cfg(feature = "std")]
 pub fn shared_recursive_circuit() -> &'static RecursiveAceCircuit {
     static CIRCUIT: std::sync::OnceLock<RecursiveAceCircuit> = std::sync::OnceLock::new();
