@@ -77,12 +77,12 @@ use crate::{
             COL_A_PTR, COL_ABSORPTION_ID, COL_ACT, COL_B_PTR, COL_BOUND_PTR,
             COL_EC_CONTEXT_GROUP_PTR, COL_EC_CREATE_COORD_BOUND_PTR, COL_EC_CREATE_GROUP_PTR,
             COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR, COL_EC_CREATE_Y_PTR, COL_FRAME_PARAM0,
-            COL_FRAME_PARAM1, COL_H_BEGIN, COL_H_END, COL_IS_ADD, COL_IS_AND, COL_IS_EC_CREATE,
-            COL_IS_EC_MSM, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MSM_LAST, COL_IS_MUL,
-            COL_IS_PINNED, COL_IS_SUB, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_ZERO,
-            COL_LHS_BEGIN, COL_LHS_END, COL_MSM_EXPR, COL_MSM_IDX, COL_MSM_IS_HEAD, COL_OUT_MULT,
-            COL_PIN_CLAIM_BOUND_PTR, COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_RHS_BEGIN, COL_RHS_END,
-            COL_UINT_VALUE_BOUND_PTR, DIGEST_WIDTH, NUM_MAIN_COLS, TranscriptEvalAir,
+            COL_FRAME_PARAM1, COL_H_BEGIN, COL_H_END, COL_IS_AND, COL_IS_EC_CREATE, COL_IS_EC_MSM,
+            COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MSM_LAST, COL_IS_MUL, COL_IS_PINNED,
+            COL_IS_SUB, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_LHS_BEGIN, COL_LHS_END, COL_MSM_EXPR,
+            COL_MSM_IDX, COL_MSM_IS_HEAD, COL_OUT_MULT, COL_PIN_CLAIM_BOUND_PTR,
+            COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_RHS_BEGIN, COL_RHS_END, COL_UINT_VALUE_BOUND_PTR,
+            DIGEST_WIDTH, NUM_MAIN_COLS, TranscriptEvalAir,
         },
         nodes::{EcOpId, UintOpId},
     },
@@ -1030,22 +1030,21 @@ pub fn generate_trace(requires: TranscriptEvalRequires, root: Truthy) -> RowMajo
     RowMajorMatrix::new(trace, NUM_MAIN_COLS)
 }
 
-/// The shared op-flag column an op id rides — uint and ec ops map by name
-/// onto one set of columns (the op-family bit disambiguates).
-fn uint_op_col(op: UintOpId) -> usize {
+/// The shared op-flag column an op id rides. Add is derived from the family and other op flags.
+fn uint_op_col(op: UintOpId) -> Option<usize> {
     match op {
-        UintOpId::Add => COL_IS_ADD,
-        UintOpId::Sub => COL_IS_SUB,
-        UintOpId::Mul => COL_IS_MUL,
-        UintOpId::Is => COL_IS_IS,
+        UintOpId::Add => None,
+        UintOpId::Sub => Some(COL_IS_SUB),
+        UintOpId::Mul => Some(COL_IS_MUL),
+        UintOpId::Is => Some(COL_IS_IS),
     }
 }
 
-fn ec_op_col(op: EcOpId) -> usize {
+fn ec_op_col(op: EcOpId) -> Option<usize> {
     match op {
-        EcOpId::Add => COL_IS_ADD,
-        EcOpId::Sub => COL_IS_SUB,
-        EcOpId::Is => COL_IS_IS,
+        EcOpId::Add => None,
+        EcOpId::Sub => Some(COL_IS_SUB),
+        EcOpId::Is => Some(COL_IS_IS),
     }
 }
 
@@ -1110,10 +1109,9 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
     row[COL_ACT] = Felt::ONE;
     row[COL_OUT_MULT] = Felt::from(out_mult);
 
-    // The constant Zero leaf runs no absorption: act + ZERO_HASH (already 0)
-    // + the is_zero flag, compression 0.
+    // The constant Zero leaf runs no absorption. Activity with no stored family flags
+    // derives is_zero = 1; its digest and absorption ID remain zero.
     let Some(Absorbed { hash, absorption_id }) = node.absorbed else {
-        row[COL_IS_ZERO] = Felt::ONE;
         trace.extend(row);
         return;
     };
@@ -1157,7 +1155,9 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
         } => {
             write_children(&mut row, lhs, rhs);
             row[COL_IS_UINT_OP] = Felt::ONE;
-            row[uint_op_col(*op)] = Felt::ONE;
+            if let Some(col) = uint_op_col(*op) {
+                row[col] = Felt::ONE;
+            }
             row[COL_PTR] = Felt::from(*r_ptr); // result ptr
             row[COL_BOUND_PTR] = Felt::from(*bound_ptr);
             row[COL_A_PTR] = Felt::from(*a_ptr);
@@ -1196,7 +1196,9 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
         } => {
             write_children(&mut row, lhs, rhs); // P, Q hashes
             row[COL_IS_EC_OP] = Felt::ONE;
-            row[ec_op_col(*op)] = Felt::ONE;
+            if let Some(col) = ec_op_col(*op) {
+                row[col] = Felt::ONE;
+            }
             row[COL_PTR] = Felt::from(*r_ptr); // result (0 for Is)
             row[COL_A_PTR] = Felt::from(*p_ptr); // P
             row[COL_B_PTR] = Felt::from(*q_ptr); // Q

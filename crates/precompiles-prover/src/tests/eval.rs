@@ -24,10 +24,10 @@ use crate::{
         eidos::{EidosDigest, trace::EidosRequires},
         eval::{
             COL_A_PTR, COL_ACT, COL_B_PTR, COL_BOUND_PTR, COL_EC_CREATE_GROUP_PTR,
-            COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR, COL_EC_CREATE_Y_PTR, COL_H_BEGIN,
-            COL_IS_EC_CREATE, COL_IS_EC_MSM, COL_IS_EC_PAI, COL_IS_MUL, COL_IS_PINNED,
-            COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_ZERO, COL_LHS_BEGIN, COL_MSM_IDX,
-            COL_OUT_MULT, COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_RHS_BEGIN, DIGEST_WIDTH,
+            COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR, COL_EC_CREATE_Y_PTR, COL_FRAME_PARAM0,
+            COL_H_BEGIN, COL_IS_AND, COL_IS_EC_CREATE, COL_IS_EC_MSM, COL_IS_EC_PAI, COL_IS_IS,
+            COL_IS_MUL, COL_IS_PINNED, COL_IS_SUB, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_LHS_BEGIN,
+            COL_MSM_IDX, COL_OUT_MULT, COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_RHS_BEGIN, DIGEST_WIDTH,
             NUM_MAIN_COLS, TranscriptEvalAir,
             trace::{TranscriptEvalRequires, Truthy, generate_trace},
         },
@@ -45,7 +45,7 @@ const TYPED_RELATION_COL: usize = 3;
 fn shape_and_degree_match_design() {
     let air = TranscriptEvalAir;
 
-    assert_eq!(air.width(), 39);
+    assert_eq!(air.width(), 37);
     assert_eq!(air.aux_width(), 12);
     assert_eq!(
         <TranscriptEvalAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(
@@ -252,7 +252,36 @@ fn corruption_non_binary_act() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_non_binary_is_zero() {
-    check_corrupted(0xc1, 3, |main| main.values[COL_IS_ZERO] = Felt::from(2u8), |_| {});
+    // Two individually boolean families derive is_zero = -1. A pinned leaf also
+    // satisfies the root's True-binding gate, isolating the missing-family boolean check.
+    let mut row = vec![Felt::ZERO; NUM_MAIN_COLS];
+    for col in [COL_ACT, COL_IS_AND, COL_IS_UINT_LEAF, COL_IS_PINNED] {
+        row[col] = Felt::ONE;
+    }
+    row.resize(2 * NUM_MAIN_COLS, Felt::ZERO);
+    crate::tests::check_local_inputs(
+        TranscriptEvalAir,
+        &RowMajorMatrix::new(row, NUM_MAIN_COLS),
+        vec![Felt::ZERO; NUM_PUBLIC_VALUES],
+    );
+}
+
+#[test]
+#[should_panic(expected = "constraint not satisfied")]
+fn corruption_non_binary_is_add() {
+    // Sub and Is on a uint-op row derive is_add = -1. Materialize the matching
+    // frame parameter 0 (-1 * Add + Sub + Is = 5) so the derived flag's boolean check rejects it.
+    let mut row = vec![Felt::ZERO; NUM_MAIN_COLS];
+    for col in [COL_ACT, COL_IS_UINT_OP, COL_IS_SUB, COL_IS_IS] {
+        row[col] = Felt::ONE;
+    }
+    row[COL_FRAME_PARAM0] = Felt::from(5u8);
+    row.resize(2 * NUM_MAIN_COLS, Felt::ZERO);
+    crate::tests::check_local_inputs(
+        TranscriptEvalAir,
+        &RowMajorMatrix::new(row, NUM_MAIN_COLS),
+        vec![Felt::ZERO; NUM_PUBLIC_VALUES],
+    );
 }
 
 #[test]
