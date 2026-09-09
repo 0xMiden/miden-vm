@@ -357,7 +357,7 @@ where
         // Eidos frames and their initial chaining values.
         let frame_chunks = [
             LB::Expr::from(DEFERRED_CHUNKS_DOMAIN),
-            LB::Expr::from(Felt::from(8u8)) * n_chunks.clone(),
+            LB::Expr::from(Felt::from(8u8)) * n_chunks,
             LB::Expr::ZERO,
             LB::Expr::ZERO,
         ];
