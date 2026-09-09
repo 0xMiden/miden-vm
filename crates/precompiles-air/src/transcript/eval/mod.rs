@@ -95,7 +95,7 @@ use crate::{
 // MAIN COLUMN LAYOUT
 // ================================================================================================
 //
-// 39 main witness columns:
+// 37 main witness columns:
 //
 // - Structural (2): act, absorption_id.
 // - Hashes (12): lhs[4], rhs[4], h[4].
@@ -128,20 +128,17 @@ pub const COL_RHS_END: usize = COL_RHS_BEGIN + DIGEST_WIDTH;
 pub const COL_H_BEGIN: usize = COL_RHS_END;
 pub const COL_H_END: usize = COL_H_BEGIN + DIGEST_WIDTH;
 
-/// ZERO_HASH-leaf flag. When 1: `h = 0` (pinned), no unhash, no child
-/// consumes — the row provides `Binding(0, True)` only. Boolean.
-pub const COL_IS_ZERO: usize = COL_H_END;
 /// Provide multiplicity for this node's `Binding(h, True)` = number of
 /// parents that consume it (DAG sharing / dedup, mirroring the
 /// Keccak-node band's `out_mult`). A plain count pinned to the consumer
 /// count by `Binding` bus balance — not range-checked (see the design
 /// notes); `0` on the root (no parent) and on inactive rows.
-pub const COL_OUT_MULT: usize = COL_IS_ZERO + 1;
+pub const COL_OUT_MULT: usize = COL_H_END;
 
 // ================================================================
-// Node-family one-hot — exactly one column set per active row,
-// summing to `act`. The two *op* families (uint, EC) carry only a
-// family bit here; *which* op rides the shared op one-hot below.
+// Node-family one-hot — exactly one flag set per active row,
+// summing to `act`; ZERO_HASH is derived by `zero_flag`. The two *op* families (uint, EC) carry
+// only a family bit here; *which* op rides the shared op one-hot below.
 // Terminals (zero / and / leaf / create / pai) carry no op.
 // ================================================================
 
@@ -173,15 +170,14 @@ pub const COL_IS_EC_OP: usize = COL_IS_EC_PAI + 1;
 // Shared op one-hot — the operation on a uint-op OR ec-op row. The two
 // op families never coexist, so one set of columns serves both (the
 // flag-column analogue of the reused ptr columns below). Sums to
-// `is_uint_op + is_ec_op`. `is_mul` is uint-only (EC has no multiply).
-// Op ids differ per family (uint Is=4, EC Is=3), so the frame's operation ID is
-// the family-gated id-weighted sum.
+// `is_uint_op + is_ec_op`; Add is derived by `add_flag`.
+// `is_mul` is uint-only (EC has no multiply).
+// Op ids differ per family (uint Is=4, EC Is=3), so frame parameter 0 is the
+// family-gated id-weighted sum.
 // ================================================================
 
-/// `Add` — `r = a + b` (uint) / `R = P + Q` (EC).
-pub const COL_IS_ADD: usize = COL_IS_EC_OP + 1;
 /// `Sub` — the rearranged add `b + r = a` (uint) / `R + Q = P` (EC).
-pub const COL_IS_SUB: usize = COL_IS_ADD + 1;
+pub const COL_IS_SUB: usize = COL_IS_EC_OP + 1;
 /// `Mul` — `r = a · b` (uint only).
 pub const COL_IS_MUL: usize = COL_IS_SUB + 1;
 /// `Is` — equality predicate, binds `True` (both families).
@@ -302,6 +298,26 @@ pub const COL_MSM_IS_HEAD: usize = COL_MSM_EXPR + 1;
 /// Total number of main witness columns.
 pub const NUM_MAIN_COLS: usize = COL_MSM_IS_HEAD + 1;
 
+/// ZERO_HASH is the remaining active family. Its boolean constraint enforces the family one-hot.
+pub fn zero_flag<E: PrimeCharacteristicRing, V: Copy + Into<E>>(row: &[V]) -> E {
+    row[COL_ACT].into()
+        - row[COL_IS_AND].into()
+        - row[COL_IS_UINT_LEAF].into()
+        - row[COL_IS_UINT_OP].into()
+        - row[COL_IS_EC_CREATE].into()
+        - row[COL_IS_EC_PAI].into()
+        - row[COL_IS_EC_OP].into()
+        - row[COL_IS_EC_MSM].into()
+}
+
+/// Add is the remaining operation in either op family; constrain this expression to be boolean.
+pub fn add_flag<E: PrimeCharacteristicRing, V: Copy + Into<E>>(row: &[V]) -> E {
+    row[COL_IS_UINT_OP].into() + row[COL_IS_EC_OP].into()
+        - row[COL_IS_SUB].into()
+        - row[COL_IS_MUL].into()
+        - row[COL_IS_IS].into()
+}
+
 // PUBLIC VALUES LAYOUT
 // ================================================================================================
 //
@@ -387,7 +403,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
 
         let act: AB::Expr = local[COL_ACT].into();
         let act_next: AB::Expr = next[COL_ACT].into();
-        let is_zero: AB::Expr = local[COL_IS_ZERO].into();
+        let is_zero: AB::Expr = zero_flag(&local);
         let out_mult: AB::Expr = local[COL_OUT_MULT].into();
         let h: [AB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_H_BEGIN + i].into());
 
@@ -400,7 +416,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
 
         // ZERO_HASH leaf: boolean flag, and `h = 0` when set (so a prover
         // can't shortcut a non-zero hash to the `True` base case).
-        builder.assert_bool(local[COL_IS_ZERO]);
+        builder.assert_bool(is_zero.clone());
         for h_i in &h {
             builder.assert_zero(is_zero.clone() * h_i.clone());
         }
@@ -416,7 +432,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // `Binding(h, True)` provide (mult `−out_mult`) contributes 0 on
         // padding. (The root's `out_mult = 0` is not pinned here — it is
         // forced by bus balance: the root has no consumer.)
-        builder.assert_zero((AB::Expr::ONE - act.clone()) * out_mult);
+        builder.assert_zero((AB::Expr::ONE - act) * out_mult);
 
         // Node type is a uniform one-hot over the active row: exactly one
         // of is_and / is_zero / is_uint_leaf / an op family, none on
@@ -455,24 +471,24 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         builder.assert_zero(is_msm_last.clone() * (AB::Expr::ONE - is_ec_msm.clone()));
         // Shared op one-hot: the operation on a uint-op OR ec-op row (the two
         // op families never coexist, so the columns serve both).
-        let is_add: AB::Expr = local[COL_IS_ADD].into();
+        let is_add: AB::Expr = add_flag(&local);
         let is_sub: AB::Expr = local[COL_IS_SUB].into();
         let is_mul: AB::Expr = local[COL_IS_MUL].into();
         let is_is: AB::Expr = local[COL_IS_IS].into();
-        for col in [COL_IS_ADD, COL_IS_SUB, COL_IS_MUL, COL_IS_IS] {
+        builder.assert_bool(is_add.clone());
+        for col in [COL_IS_SUB, COL_IS_MUL, COL_IS_IS] {
             builder.assert_bool(local[col]);
         }
         let is_op = is_add.clone() + is_sub.clone() + is_mul.clone() + is_is.clone();
         // The op one-hot sums to "this is an op row" = is_uint_op + is_ec_op,
         // so a set op flag forces exactly one op family (and conversely).
-        builder.assert_zero(is_op.clone() - is_uint_op.clone() - is_ec_op.clone());
         // EC has no multiply — is_mul only ever rides a uint-op row.
         builder.assert_zero(is_ec_op.clone() * is_mul.clone());
 
         // Row 0 is the public transcript root and must be a True-binding node.
         // This excludes value rows and EcMsm interior absorbs, whose `h` is not
         // a public assertion digest.
-        let root_truthy = is_zero.clone() + is_and.clone() + is_is.clone() + is_pinned.clone();
+        let root_truthy = is_zero + is_and + is_is.clone() + is_pinned.clone();
         builder.when_first_row().assert_zero(root_truthy - AB::Expr::ONE);
 
         // Both create modes (finite + PAI) carry the group in frame parameter 1 and
@@ -491,18 +507,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // degree-1, since `is_is` is one shared flag pulled out of the op
         // sum; spans both families' value-producing ops.
         let is_result_op: AB::Expr = is_op.clone() - is_is.clone();
-        // Activity one-hot: the eight families sum to act.
-        builder.assert_zero(
-            is_and
-                + is_zero
-                + is_uint_leaf.clone()
-                + is_uint_op.clone()
-                + is_ec_create.clone()
-                + is_ec_pai.clone()
-                + is_ec_op.clone()
-                + is_ec_msm.clone()
-                - act,
-        );
+        // The derived zero flag completes the activity one-hot.
         // is_pinned is a leaf-only flag; ptr carries a binding ptr only on
         // uint-leaf / result-op / Ec-create / Ec-pai rows; bound_ptr only
         // where a Uint-typed message reads it (leaf / uint-op / finite create)
@@ -686,10 +691,10 @@ where
         let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
 
         let is_and: LB::Expr = local[COL_IS_AND].into();
-        let is_zero: LB::Expr = local[COL_IS_ZERO].into();
+        let is_zero: LB::Expr = zero_flag(&local);
         let is_uint_leaf: LB::Expr = local[COL_IS_UINT_LEAF].into();
         let is_pinned: LB::Expr = local[COL_IS_PINNED].into();
-        let is_add: LB::Expr = local[COL_IS_ADD].into();
+        let is_add: LB::Expr = add_flag(&local);
         let is_sub: LB::Expr = local[COL_IS_SUB].into();
         let is_mul: LB::Expr = local[COL_IS_MUL].into();
         let is_is: LB::Expr = local[COL_IS_IS].into();

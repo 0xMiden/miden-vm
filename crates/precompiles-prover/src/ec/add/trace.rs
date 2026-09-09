@@ -204,11 +204,12 @@ fn op_block(op: &EcAddOp, mult: ProvideMult, ec: &EcStoreRequires) -> Vec<Felt> 
         set(row, COL_GEN, u32::from(generic));
         set(row, COL_ACT, 1);
         set(row, COL_MINTS, u32::from(op.mints));
-        set(row, COL_RP_LO, rp_lo);
-        set(row, COL_RP_HI, rp_hi);
-        set(row, COL_RQ_LO, rq_lo);
-        set(row, COL_RQ_HI, rq_hi);
     }
+    // Both ordering witnesses fit in the result/term window's shared limb cells.
+    set(ROW_RES, COL_RP_LO, rp_lo);
+    set(ROW_RES, COL_RP_HI, rp_hi);
+    set(ROW_TERM, COL_RQ_LO, rq_lo);
+    set(ROW_TERM, COL_RQ_HI, rq_hi);
     // The `EcGroupAdd` provide multiplicity (term cell 0).
     set(ROW_TERM, TERM_CELL_MULT, mult);
     block.into_iter().flatten().collect()
