@@ -9,6 +9,7 @@
 - Automatically infer procedure calling convention from known protocol ABI attributes ([#3802](https://github.com/0xMiden/miden-vm/pull/3802))
 
 #### Fixes
+- Preserved the public `ParsingError` enum layout while adding protocol ABI attribute checks ([#3802](https://github.com/0xMiden/miden-vm/pull/3802)).
 - Fixed issue where parsing of pointer types dropped address space information ([#3790](https://github.com/0xMiden/miden-vm/pull/3790)).
 
 ## v0.32.0 (2026-09-05)

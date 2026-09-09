@@ -496,7 +496,7 @@ fn apply_procedure_attributes(
             if PROTOCOL_ABI_ATTRIBUTES.contains(&attr.name()) && !attributes.has(attr.name()) {
                 let span = attr.span();
                 if let Some(prev) = protocol_abi_span {
-                    return Err(ParsingError::ConflictingProtocolAbiAttribute { span, prev });
+                    return Err(ParsingError::AttributeConflict { span, prev });
                 }
                 protocol_abi_span = Some(span);
             }
@@ -638,9 +638,9 @@ fn apply_procedure_attributes(
     // Resolve the convention after collecting attributes so annotation order is irrelevant.
     if let Some(attr_span) = protocol_abi_span {
         if cc.is_some_and(|cc| cc != ast::types::CallConv::ComponentModel) {
-            return Err(ParsingError::CallConvAttributeConflict {
-                cc_span: callconv_span.expect("callconv was set without associated span"),
-                attr_span,
+            return Err(ParsingError::AttributeConflict {
+                span: callconv_span.expect("callconv was set without associated span"),
+                prev: attr_span,
             });
         }
         cc = Some(ast::types::CallConv::ComponentModel);
