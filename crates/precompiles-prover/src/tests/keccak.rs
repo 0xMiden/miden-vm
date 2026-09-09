@@ -393,7 +393,7 @@ fn keccak_round_multi_perm_oracle_and_constraints() {
 // ================================================================================================
 
 /// On the first pure-ROL row, forge the otherwise valid byte lookup `Xor(0, 1, 1)` and update the
-/// first rotation limb to preserve the rotation-decomposition identity. The local `r = a`
+/// first rotation limb to preserve the rotation-decomposition identity. The local `x = a`
 /// passthrough constraint must be the remaining reason this trace is rejected.
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
@@ -417,13 +417,10 @@ fn pure_rol_passthrough_rejects_bpl_valid_nonzero_b() {
     crate::tests::check_local(KeccakRoundAir, &main);
 }
 
-/// Corrupting a `rot_limbs` cell on an active ROL row must now be
-/// rejected by the rotation limb-decomposition binding constraint:
-/// without it, `rot_limbs` was only Range16-range-checked, and the
-/// value `memory_provide_c` reconstructs from it (written to the
-/// Memory64 bus as this row's rotated result) could be driven to any
-/// value the prover chose. `SLOT_D_ROL_BEGIN` (round 0, lane 0) is an
-/// active `Op::Rol` row, so `is_rol = act = 1` there.
+/// The rotation limb-decomposition constraint rejects a corrupted `rot_limbs` cell on an active
+/// ROL row. `memory_provide_c` is reconstructed from these limbs and supplies the row's rotated
+/// `Memory64` result. `SLOT_D_ROL_BEGIN` (round 0, lane 0) is an active `Op::Rol` row, so
+/// `is_rol = act = 1` there.
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_rot_limb_breaks_rotation_decomposition_binding() {

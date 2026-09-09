@@ -4,9 +4,6 @@
 //! consumes pointer-level certificates from the uint relation chiplets, so coordinate limbs do not
 //! enter this trace. It constrains the selected case and binds the corresponding certificates to
 //! the result.
-//!
-//! See the design notes for the design.
-//!
 //! ## The case lattice
 //!
 //! | case | condition | result |
@@ -92,7 +89,7 @@
 //!
 //! Columns carry only what gates or names certificates on rows 0–2:
 //! the four operand coordinate ptrs, `a`/`b`/`bound`, the five case
-//! flags, `act` — 21 main columns, 12 LogUp aux columns, 4 periodic
+//! flags, `act` — 23 main columns, 12 LogUp aux columns, 4 periodic
 //! one-hots.
 
 use alloc::{borrow::Cow, vec, vec::Vec};
@@ -123,7 +120,7 @@ use crate::{
 
 /// LogUp message for the [`EcGroupAdd`](BusId::EcGroupAdd) relation: the
 /// 4-tuple `(group_ptr, p_ptr, q_ptr, r_ptr)` asserting `R = P + Q` in
-/// the group. *Provided* here (dormant until ladder / DAG consumers).
+/// the group. Provided here and consumed by transcript-eval and MSM relation AIRs.
 #[derive(Debug, Clone)]
 pub struct EcGroupAddMsg<E> {
     pub group_ptr: E,
@@ -360,9 +357,8 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
 
         // Operand-coordinate ties for the `x₁ = x₂` cases. The coordinate
         // ptr columns are pinned to the operands' stored coordinates by the
-        // res-row `EcPoint` consumes, and the store interns by value, so
-        // these ptr-level equalities are exactly the value equalities the
-        // old `is_b_zero` certificates proved — at degree 2, no UintAdd op:
+        // res-row `EcPoint` consumes, and the store interns by value. These
+        // pointer equalities therefore establish the required value equalities at degree two:
         //  - `x_eq` (double ∨ cancel): `x₁ = x₂`, what makes the tail's `t = x₁ + x₂` the doubling
         //    `2x₁` and grounds the chord/tangent.
         //  - `dbl`: `y₁ = y₂`, which (with `inv·y ≡ b ≠ 0` ⟹ `y ≠ 0`) rules out the `P, −P` cancel

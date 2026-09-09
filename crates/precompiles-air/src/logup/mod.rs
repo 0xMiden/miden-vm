@@ -14,7 +14,7 @@
 //! bus_prefix[bus]    = α + (bus + 1) · β^W
 //! ```
 //!
-//! where `W = `[`MAX_MESSAGE_WIDTH`]. Distinct bus ids live on disjoint
+//! where `W` is [`MAX_MESSAGE_WIDTH`]. Distinct bus ids live on disjoint
 //! `β^W`-spaced offsets, so two `(bus, payload)` pairs collide only on
 //! a vanishing-probability subset of `(α, β)`.
 //!

@@ -4,14 +4,11 @@
 //! keyed by a monotonic `ptr`, range-checks each against a per-value
 //! upper bound `p − 1` (the modulus, itself a stored uint referenced by
 //! `bound_ptr`), and *provides* the value on the
-//! [`UintVal`](crate::relations::BusId::UintVal) (4×32) and
-//! [`UintLimbs`](crate::relations::BusId::UintLimbs) (raw 8×16) buses.
+//! [`UintVal`](crate::relations::BusId::UintVal) (8×32-bit) and
+//! [`UintLimbs`](crate::relations::BusId::UintLimbs) (16×16-bit) buses.
 //! Arithmetic lives in the [`add`] / [`mul`] relation AIRs over those
 //! views; hashing into the transcript is the eval chip's job, which
-//! pulls the 4×32 view below and pins it into its Eidos block lanes.
-//!
-//! See the design notes for the full design.
-//!
+//! pulls the complete 8×32-bit view below and pins it into one Eidos block.
 //! The AIR roots store pointers at `1`; the positive `Range16`-checked gap chain excludes pointer
 //! `0`, reserving it as the unstored-zero sentinel.
 //!
@@ -29,8 +26,8 @@
 //! | 2   | `comp`  | comp lo (8×16-bit)        | comp hi (8×16-bit)                       |
 //! | 3   | `bound` (closing) | 4×32-bit lo (0–3) + γ₀..γ₃ (4–7) | 4×32-bit hi (8–11) + γ₄..γ₆ (12–14) + gap (15) |
 //!
-//! The `v` high row holds both provide multiplicities. The low-row provider reads its multiplicity
-//! from the next row, while the high-row provider reads its multiplicity and limbs locally.
+//! The `v` high row holds both provide multiplicities. The `v` low-row providers read those
+//! multiplicities and the high limbs from the next row.
 //!
 //! A single extension-field register `id` (aux col — see
 //! `REGISTER_COL`) accumulates, per row, the signed `β`-weighted limb
@@ -47,12 +44,15 @@
 //!
 //! `ptr` and `bound_ptr` are cycle-constant per block.
 //!
-//! - **`UintVal`** (aux col 0): the `v` lo row and the `v` hi row *provide* `UintVal(ptr,
-//!   bound_ptr, offset, recombined-4×32)` with multiplicity `−uintval_mult` (both multiplicity
-//!   cells are on `v` hi); the `bound` row *consumes* `UintVal(bound_ptr, bound_ptr, offset,
-//!   direct-4×32)` with `+1` for both offsets. Both ptr-slots of the consume are `bound_ptr`, so it
-//!   only matches a *self-referential* provider — the modulus row. With `uintval_mult` = the
-//!   consumer count, the bus self-balances.
+//! - **`UintVal`** (aux col 0): the `v` lo row provides one `UintVal(ptr, bound_ptr, c0..c7)`
+//!   assembled from its local 16-bit limbs and the next `v` hi row, with multiplicity
+//!   `−uintval_mult`. The `bound` row consumes `UintVal(bound_ptr, bound_ptr, c0..c7)` with
+//!   multiplicity `+1`. Its two pointer fields make this a self-reference to the stored modulus.
+//!   Setting `uintval_mult` to the total consumer count, including stored bound references,
+//!   balances the relation.
+//! - **`UintLimbs`** (last LogUp column): the `v` lo row provides one complete `UintLimbs(ptr,
+//!   bound_ptr, l0..l15)` assembled from the local and next rows, with multiplicity
+//!   `−uintlimbs_mult`.
 //! - **`Range16`**: each `v`/`comp` 16-bit limb is range-checked (16/uint), forcing limbs `< 2¹⁶`
 //!   so the SZ no-wrap bound holds. Provided externally by the byte-pair-LUT chiplet.
 
@@ -187,14 +187,12 @@ pub const COL_BOUND_PTR: usize = NUM_CELLS + 1;
 pub const NUM_MAIN_COLS: usize = NUM_CELLS + 2;
 
 /// `v`-hi-row cell holding the `UintVal` provide multiplicity = consumer
-/// count. One cell serves both halves' provides: the offset-0 provide
-/// (on the `v` lo row) reads it as the *next* row, the offset-1 provide
-/// (on `v` hi itself) reads it locally.
+/// count. The full-value provide fires on the `v` lo row and reads this cell from the next
+/// `v` hi row.
 pub const HUB_CELL_UINTVAL_MULT: usize = 8;
-/// `v`-hi-row cell holding the `UintLimbs` (raw 8×16 view) provide
-/// multiplicity. Counted separately from `uintval_mult`: the raw view
-/// serves the mul chiplet's convolution operands, the 4×32 view serves
-/// eval / add / bound-refs.
+/// `v`-hi-row cell holding the complete 16×16-bit `UintLimbs` provide multiplicity. Counted
+/// separately from `uintval_mult`: this raw-limb view serves the mul chiplet's convolution
+/// operands, while the 8×32-bit `UintVal` view serves full-value consumers.
 pub const HUB_CELL_UINTLIMBS_MULT: usize = 9;
 /// First carry cell of the bound row's low half: γ₀..γ₃ sit in cells
 /// 4–7.
@@ -412,7 +410,7 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreAir {
             .when_transition()
             .assert_zero(bound_sel * (gap + ptr_here + AB::Expr::ONE - ptr_next));
 
-        // Phase 2: LogUp — UintVal (col 0) + Range16.
+        // Phase 2: LogUp — UintVal, Range16, and UintLimbs.
         let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
         lb.finish();
@@ -460,7 +458,7 @@ where
         let neg_mult: LB::Expr = LB::Expr::ZERO - next[HUB_CELL_UINTVAL_MULT].into();
         let neg_limbs_mult: LB::Expr = LB::Expr::ZERO - next[HUB_CELL_UINTLIMBS_MULT].into();
 
-        // 4×32 recombined view, full value: the lo half local (this row
+        // Complete 8×32-bit recombined view: the lo half local (this row
         // is `v` lo), the hi half from `v` hi via `next`.
         let two16: LB::Expr = LB::Expr::from(Felt::from(1u32 << 16));
         let recomb: [LB::Expr; 8] = array::from_fn(|k| {
@@ -471,11 +469,11 @@ where
                 next[2 * k].into() + two16.clone() * next[2 * k + 1].into()
             }
         });
-        // 4×32 direct view, full value: both halves local (this row is
+        // Complete 8×32-bit direct view: both halves local (this row is
         // `bound`, hosting both).
         let direct: [LB::Expr; 8] =
             array::from_fn(|k| if k < 4 { local[k].into() } else { local[4 + k].into() });
-        // Raw 8×16 view, full value: the lo half local, the hi half via
+        // Complete 16×16-bit raw view: the lo half local, the hi half via
         // `next`.
         let raw: [LB::Expr; 16] =
             array::from_fn(|j| if j < 8 { local[j].into() } else { next[j - 8].into() });

@@ -29,17 +29,14 @@ fn interleave_lanes(lane_cells: &[Vec<Felt>; NUM_LANES], height: usize) -> RowMa
 // TRACE GENERATION
 // ================================================================================================
 
-/// Boundary IP for the chiplet's first row. Sponge addresses
-/// `[0, 25)`, `25`, and `26` hold the round-0 lane inputs (natural
-/// row-major: `state[i]` at addr `i`), `RC[0]`, and `zero[0]` (which
-/// coincides with the chiplet-produced zero at slot 1's IP);
-/// trace IPs start here.
+/// Boundary IP for the chiplet's first row. Sponge addresses `[0, 25)` hold the round-0 lane inputs
+/// in natural row-major order, and address 25 holds `RC[0]`. Trace IPs start at 25; address 26 is
+/// the reserved slot's IP.
 pub const IP_BOUNDARY: u64 = 25;
 
-/// Active Keccak rounds per permutation. The full perm cycle is one
-/// longer ([`PERM_CYCLE`]) — the extra round is the dead round whose
-/// 128 IPs space perm N's outputs apart from perm N+1's round-0 inputs
-/// (see "Multi-permutation traces" in the design notes).
+/// Active Keccak rounds per permutation. The full permutation cycle is one round longer
+/// ([`PERM_CYCLE`]); the extra dead round's 128 IPs separate permutation `N`'s outputs from
+/// permutation `N + 1`'s round-0 inputs.
 pub const NUM_ROUNDS: usize = 24;
 
 /// Rows per perm cycle: 24 active rounds + 1 dead round.

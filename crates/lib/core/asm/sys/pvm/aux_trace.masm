@@ -2,7 +2,7 @@ use miden::core::stark::constants
 use miden::core::stark::random_coin
 use miden::core::sys::pvm::layout
 
-# Bus-domain scale factors (`bus_id + 1`) from precompiles-prover/src/relations.rs.
+# Bus-domain scale factors (`bus_id + 1`) from precompiles-air/src/relations.rs.
 const UINT_VAL_BUS_SCALE = 11
 const EC_GROUP_BUS_SCALE = 15
 const MAX_LOGUP_MESSAGE_WIDTH = 18

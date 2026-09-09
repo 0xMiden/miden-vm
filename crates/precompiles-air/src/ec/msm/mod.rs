@@ -10,13 +10,11 @@
 //! merge mod `n`, values add) — and the AIR checks only that each step is sound, never which steps
 //! were taken.
 //!
-//! Layout is **variable-block** (the stack's first): one term per row, an
-//! expression is a maximal run sharing `expr_ptr`, and the allocator chain
-//! `expr_ptr' = expr_ptr + is_boundary` (with `is_boundary` marking the
-//! run's last row) makes expression pointers injective. Expression-level traffic (the `MsmExpr`
-//! head, the value
-//! `EcGroupAdd`, the operand heads, the ordering checks) fires on the
-//! boundary row, where the final cursors are co-resident.
+//! Rows form variable-length expression blocks. Each row stores one term, and each maximal run
+//! sharing `expr_ptr` is one expression. The allocator chain
+//! `expr_ptr' = expr_ptr + is_boundary`, with `is_boundary` marking the run's final row, makes
+//! expression pointers injective. The boundary row carries the expression-level traffic: the
+//! `MsmExpr` head, the value's `EcGroupAdd`, the operand heads, and the ordering checks.
 //!
 //! Soundness rests on **strict pointer ordering** (`a_expr < expr`,
 //! `b_expr < expr` on every combine — grounds the induction against
@@ -240,9 +238,8 @@ pub const COL_NEG_X: usize = 33;
 /// **Resolve** use count — how often this expression is resolved at the
 /// eval `EcMsm` seam. Drives the `MsmClaimTerm` provide (every term row)
 /// and the rest of the `MsmExpr` provide; constant within a run, 0 on
-/// pads. Split from [`COL_MULT`] because the resolve seam consumes the
-/// positionless `MsmClaimTerm` (set match) while combine consumes
-/// `MsmTerm` (by `idx`) — disjoint consumers, distinct multiplicities.
+/// pads. This multiplicity records resolve uses of the positionless `MsmClaimTerm`; [`COL_MULT`]
+/// records combine uses of `MsmTerm` indexed by `idx`.
 pub const COL_CLAIM_MULT: usize = 34;
 /// Family value-relation cells (boundary only). For `neg`, these are the two
 /// y ptrs of `R = (x_a, −y_a)`; for `intro_endo`, they are the shared y ptr

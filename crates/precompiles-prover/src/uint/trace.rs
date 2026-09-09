@@ -76,8 +76,8 @@ fn carries(v32: &[u32; 8], comp32: &[u32; 8]) -> [u16; 7] {
 }
 
 /// Demand ledger for the [`UintVal`](crate::relations::BusId::UintVal) bus:
-/// every consumer — the store's own bound-refs (`require_bound_refs`),
-/// eval uint-leaves, future add / mul — records per-ptr demand, and the
+/// every consumer — including the store's own bound references (`require_bound_refs`), eval uint
+/// leaves, add/mul operands, and MSM literal scalars — records per-ptr demand, and the
 /// store reads the totals for each uint's provide multiplicity. Mirrors
 /// [`BytePairLutRequires`]
 /// for the `Range16` bus.
@@ -102,8 +102,8 @@ impl UintValRequires {
     }
 }
 
-/// Pinned uints occupy the ptr namespace `[1, 2^16)`; ptr 0 is never a store address,
-/// and transients allocate from `2^16` upward (later).
+/// Pinned uints occupy the ptr namespace `[1, 2^16)`; ptr 0 is never a store address, and the
+/// transient namespace starts at `2^16`.
 pub const PIN_NAMESPACE_END: u32 = 1 << 16;
 
 /// `*Requires` accumulator for the UintStore: the interned uints (a
@@ -222,9 +222,8 @@ impl UintStoreRequires {
         self.demand.require(ptr);
     }
 
-    /// Record one external `UintLimbs` (raw 8×16 view) consumer at `ptr` —
-    /// a mul-chiplet convolution operand. One require covers both halves
-    /// (the consumer takes the lo and the hi message exactly once each).
+    /// Record one external consumer of the complete 16×16-bit `UintLimbs` message at `ptr`, as
+    /// used for a mul-chiplet convolution operand.
     pub fn require_uintlimbs(&mut self, ptr: UintPtr) {
         self.limbs_demand.require(ptr);
     }
