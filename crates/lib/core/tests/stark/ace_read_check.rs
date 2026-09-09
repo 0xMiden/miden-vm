@@ -185,9 +185,9 @@ fn extract_ace_inputs(output: &ExecutionOutput, layout: &InputLayout) -> Vec<Qua
 
 /// The proof order the verifier's staged heights induce.
 ///
-/// The order is not recorded anywhere in verifier memory: each site that needs a proof position
-/// resolves it from the per-AIR heights. Those heights are transcript-bound, so deriving the
-/// order from them here reads the same source the verifier itself does.
+/// The verifier stores no standalone proof-order tag. Each site derives positions from the
+/// transcript-bound per-AIR heights; `load_air_context` also materializes the out-of-domain
+/// scatter table from those heights.
 fn extract_order(output: &ExecutionOutput) -> ProofOrder {
     let log_heights: Vec<u8> =
         staged_log_heights(output).into_iter().map(|height| height as u8).collect();
@@ -318,7 +318,7 @@ fn assert_air_selectors_match_trace_metadata(
 /// Each AIR's staged fold coefficient must be `beta^(n - 1 - pos)`, with `pos` that AIR's
 /// position in the height-sorted proof order.
 ///
-/// These slots are what carries the proof order into an otherwise order-invariant circuit: the
+/// These slots are what carry the proof order into an otherwise order-invariant circuit: the
 /// AIR opened last folds with `beta^0` and the one opened first with `beta^(n - 1)`. Keying the
 /// exponent by instance index instead would agree only for the identity order, which most e2e
 /// fixtures are not.

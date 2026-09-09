@@ -303,8 +303,8 @@ fn build_merkle_data(
         advice_map.extend(entries);
     }
 
-    // One canonical circuit serves every proof order, so the verifier authenticates it against the
-    // compiled-in circuit digest rather than reading a registry leaf.
+    // Serve the canonical circuit stream from the advice map under its commitment. MASM pins that
+    // commitment to the compiled-in circuit digest.
     let circuit = shared_pvm_recursive_circuit();
     advice_map.push((circuit.commitment, circuit.instructions.clone()));
 

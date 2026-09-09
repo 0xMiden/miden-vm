@@ -43,11 +43,9 @@ const PVM_LAYOUT_PATH: &str = "../lib/core/asm/sys/pvm/layout.masm";
 const PVM_OOD_FRAMES_PATH: &str = "../lib/core/asm/sys/pvm/ood_frames.masm";
 const PVM_RELATION_MOD_PATH: &str = "../lib/core/asm/sys/pvm/mod.masm";
 
-/// First felt after the VM relation's fixed ACE stream reservation. The PVM's complete READ
-/// section starts here; its aux-randomness anchor is later because four public EF inputs precede
-/// it.
-// The narrowed four-AIR VM evaluator occupies 8,520 felts; place the PVM frame at the next
-// 4-Ki-felt boundary after that stream so the two relation-owned allocations cannot overlap.
+/// Fixed 4-Ki-felt boundary after the VM relation's reserved ACE stream region. The PVM's complete
+/// READ section starts here; its aux-randomness anchor is later because four public EF inputs
+/// precede it.
 const PVM_READ_START: u32 = 3_225_432_064;
 /// Start of the VM relation's next scratch region; the PVM allocation must end before it.
 const NEXT_VM_REGION_START: u32 = 3_238_002_688;

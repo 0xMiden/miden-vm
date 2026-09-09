@@ -40,10 +40,10 @@ const SECURITY_ESTIMATOR_PATH: &str = "asm/stark/security.masm";
 const GENERIC_UTILS_PATH: &str = "asm/stark/utils.masm";
 const LMCS_ALIGNMENT: usize = 8;
 
-/// Felts moved by one `adv_pipe`. Numerically equal to [`LMCS_ALIGNMENT`] today, but a distinct
-/// quantity: this bounds block/segment arithmetic and `adv_pipe` destination alignment, while
-/// `LMCS_ALIGNMENT` bounds column-padding widths. If the two ever diverge, block arithmetic must
-/// keep using this constant, not the padding width.
+/// Felts moved by one `adv_pipe`.
+///
+/// This transport width governs block/segment arithmetic and destination alignment;
+/// [`LMCS_ALIGNMENT`] independently governs column-padding widths.
 const ADV_PIPE_BLOCK_FELTS: usize = 8;
 
 /// Computes the relation digest used by recursive verification.
@@ -78,9 +78,8 @@ fn check() -> Result<(), String> {
 
 /// Generate a full computed snapshot from the current AIR.
 fn compute_artifacts() -> io::Result<ComputedArtifacts> {
-    // One circuit serves every proof order, so there is nothing to build per order and nothing
-    // to cross-check between orders: the proof-order dependence lives in the MASM verifier's
-    // ingest scatter and fold-coefficient staging instead.
+    // The circuit topology is fixed across proof orders; MASM applies proof-order-specific ingest
+    // scatter and fold-coefficient staging.
     let circuit = build_recursive_verifier_ace_circuit()
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
     let input_layout = recursive_verifier_input_layout()
@@ -1355,7 +1354,7 @@ mod tests {
     /// group's slots, so the renderer must refuse it instead of emitting it.
     #[test]
     fn scatter_plan_rejects_partially_occupied_commitment_groups() {
-        // Today's shape: only the last AIR has preprocessed columns.
+        // The VM preprocessed commitment group is occupied only by `MidenAir::And8Lookup`.
         assert!(vm_scatter_plan(&scatter_test_geometry(&[0, 0, 0, 16])).is_ok());
         // Every AIR occupies the group.
         assert!(vm_scatter_plan(&scatter_test_geometry(&[16, 16, 16, 16])).is_ok());
