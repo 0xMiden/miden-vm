@@ -34,7 +34,7 @@ pub use miden_processor::{
     FutureMaybeSend, Host, InputError, PrecompileWitness, ProgramInfo, StackInputs, StackOutputs,
     SyncHost, VmWitness, Word, advice::AdviceInputs, crypto, field, serde, utils,
 };
-pub use prover::{Prover, ProverError, prove_sync};
+pub use prover::{Prover, ProverError, prove_partial_sync, prove_sync};
 
 // STARK PROOF GENERATION
 // ================================================================================================

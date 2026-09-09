@@ -26,7 +26,9 @@ pub use miden_processor::{
     ProgramExecutor, ProgramInfo, StackInputs, SyncHost, VmWitness, ZERO, advice, crypto, field,
     operation::Operation, serde, trace, trace::VmTrace, utils,
 };
-pub use miden_prover::{InputError, Prover, ProverError, StackOutputs, Word, prove_sync};
+pub use miden_prover::{
+    InputError, Prover, ProverError, StackOutputs, Word, prove_partial_sync, prove_sync,
+};
 pub use miden_verifier::{
     AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
     SecurityTerm, VerificationError, VerificationOutcome, Verifier,

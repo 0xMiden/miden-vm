@@ -264,7 +264,7 @@ mod prover_api_lifecycle {
         DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionWitness,
         FastProcessor, HashFunction, PrecompileProof, PrecompileStatus, PrecompileWitness, Program,
         Prover, StackInputs, StackOutputs, StarkProof, VerificationError, Verifier,
-        advice::AdviceInputs, precompile_witness_from_wire, prove_sync,
+        advice::AdviceInputs, precompile_witness_from_wire, prove_partial_sync, prove_sync,
     };
 
     use super::minimum_conjectured_security_level;
@@ -292,7 +292,7 @@ mod prover_api_lifecycle {
         )
     }
 
-    fn u256_witness(value: u64) -> ExecutionWitness {
+    fn u256_program(value: u64) -> Program {
         let precompile_id = precompile_id("uint256");
         let value_tag = Tag::precompile(
             precompile_id,
@@ -335,7 +335,11 @@ mod prover_api_lifecycle {
             word_literal(equality_tag.as_word().into()),
         );
 
-        execute(&assemble(&source))
+        assemble(&source)
+    }
+
+    fn u256_witness(value: u64) -> ExecutionWitness {
+        execute(&u256_program(value))
     }
 
     fn assert_complete(
@@ -392,6 +396,34 @@ mod prover_api_lifecycle {
         // proofs instead of requiring byte-identical encodings.
         assert_complete(&program, stack_inputs, buffered_outputs, &buffered_proof);
         assert_complete(&program, stack_inputs, overlapped_outputs, &overlapped_proof);
+    }
+
+    #[test]
+    fn configured_prove_partial_sync_defers_precompile_work() {
+        let program = u256_program(1);
+        let stack_inputs = StackInputs::default();
+        let prover = Prover::new().with_hash_fn(HashFunction::Blake3_256);
+
+        for overlapped_trace_build in [false, true] {
+            let mut host = DefaultHost::default();
+            let (stack_outputs, proof) = prove_partial_sync(
+                &prover,
+                &program,
+                stack_inputs,
+                AdviceInputs::default(),
+                &mut host,
+                ExecutionOptions::default().with_overlapped_trace_build(overlapped_trace_build),
+            )
+            .expect("partial execute-and-prove should succeed");
+
+            assert!(matches!(proof.precompile(), PrecompileStatus::Deferred(_)));
+            let claim =
+                ExecutionClaim::from_program_info(program.to_info(), stack_inputs, stack_outputs);
+            let outcome = Verifier::new()
+                .verify(&claim, &proof)
+                .expect("partial execution proof should verify");
+            assert_eq!(outcome.outstanding_precompile_root(), Some(proof.vm().precompile_root));
+        }
     }
 
     #[test]

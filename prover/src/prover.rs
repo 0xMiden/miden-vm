@@ -65,14 +65,8 @@ impl Prover {
     pub fn prove(&self, witness: ExecutionWitness) -> Result<ExecutionProof, ProverError> {
         let (vm_witness, precompile_witness) = witness.into_parts();
         let vm = self.prove_vm(vm_witness)?;
-        let Some(precompile_witness) = precompile_witness else {
-            return Ok(ExecutionProof::new(vm, PrecompileStatus::Empty));
-        };
-        let precompile = precompile_witness
-            .state()
-            .to_wire()
-            .expect("execution witness state must have canonical deferred wire");
-        Ok(ExecutionProof::new(vm, PrecompileStatus::Deferred(precompile)))
+        let precompile = Self::defer_precompile(precompile_witness.as_ref());
+        Ok(ExecutionProof::new(vm, precompile))
     }
 
     /// Proves a complete execution witness entirely in memory.
@@ -127,6 +121,27 @@ impl Prover {
             None => PrecompileStatus::Empty,
         };
         Ok(ExecutionProof::new(vm, precompile))
+    }
+
+    #[cfg(feature = "std")]
+    fn prove_partial_trace(
+        &self,
+        trace: VmTrace,
+        precompile: Option<&PrecompileWitness>,
+    ) -> Result<ExecutionProof, ProverError> {
+        let vm = self.prove_vm_trace(trace)?;
+        Ok(ExecutionProof::new(vm, Self::defer_precompile(precompile)))
+    }
+
+    fn defer_precompile(witness: Option<&PrecompileWitness>) -> PrecompileStatus {
+        let Some(witness) = witness else {
+            return PrecompileStatus::Empty;
+        };
+        let wire = witness
+            .state()
+            .to_wire()
+            .expect("execution witness state must have canonical deferred wire");
+        PrecompileStatus::Deferred(wire)
     }
 
     /// Proves a fully materialized VM trace.
@@ -262,6 +277,50 @@ pub fn prove_sync(
     };
     let stack_outputs = *witness.claim().stack_outputs();
     let proof = prover.prove_full(witness).map_err(ProverError::into_execution_error)?;
+    Ok((stack_outputs, proof))
+}
+
+/// Executes a program and proves only its VM trace synchronously.
+///
+/// If execution authenticates deferred precompile work, the returned proof carries its passive
+/// wire for later hydration and proving.
+#[tracing::instrument(name = "prove_program_partial_sync", skip_all)]
+pub fn prove_partial_sync(
+    prover: &Prover,
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl SyncHost,
+    execution_options: ExecutionOptions,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    #[cfg(feature = "std")]
+    let overlapped_trace_build = execution_options.overlapped_trace_build();
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
+        .map_err(ExecutionError::advice_error_no_context)?;
+
+    #[cfg(feature = "std")]
+    if overlapped_trace_build {
+        let (trace, precompile) = {
+            let _span = tracing::info_span!("execute_miden_vm").entered();
+            processor.execute_and_build_trace_sync(
+                program,
+                host,
+                prover.max_prover_memory_bytes(),
+            )?
+        };
+        let stack_outputs = *trace.stack_outputs();
+        let proof = prover
+            .prove_partial_trace(trace, precompile.as_ref())
+            .map_err(ProverError::into_execution_error)?;
+        return Ok((stack_outputs, proof));
+    }
+
+    let witness = {
+        let _span = tracing::info_span!("execute_miden_vm").entered();
+        processor.execute_for_proving_sync(program, host)?
+    };
+    let stack_outputs = *witness.claim().stack_outputs();
+    let proof = prover.prove(witness).map_err(ProverError::into_execution_error)?;
     Ok((stack_outputs, proof))
 }
 
