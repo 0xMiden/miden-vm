@@ -325,8 +325,8 @@ fn proof_order_position_from_heights_matches_the_rust_ranking() {
         heights.swap(i as usize, i as usize + 1);
         cases.push(heights);
     }
-    // The full N=3 partial-tie table (every combination of two heights above/below/equal to the
-    // third), previously pinned against the VM's fixed-count specialization.
+    // The full N=3 partial-tie table covers every combination of two heights
+    // above/below/equal to the third.
     for (a, b, c) in [
         (8, 9, 10),
         (8, 10, 9),

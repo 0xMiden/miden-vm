@@ -79,9 +79,10 @@ fn wire_values() -> Vec<u64> {
 
 /// Absorbs the boundary values the way `observe_aux_trace` does, optionally scattering afterwards.
 ///
-/// The two `padw adv_loadw` / `mem_storew_le` pairs are the production absorb verbatim; only the
-/// transcript observation is replaced by a `dropw`, since the transcript is not what this file
-/// measures. The sentinels sit under the whole sequence and are written back at the end.
+/// The two `padw adv_loadw` / `mem_storew_le` pairs reproduce the production absorb sequence
+/// exactly. Only the transcript observation is replaced by a `dropw`, since the transcript is not
+/// what this file measures. The sentinels sit under the whole sequence and are written back at the
+/// end.
 fn source(heights: &[u64], scatter: bool) -> String {
     let stores = heights
         .iter()
