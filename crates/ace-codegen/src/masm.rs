@@ -281,14 +281,12 @@ mod tests {
         }
     }
 
-    /// A relation whose READ layout has no fold-coefficient slots must get no staging call.
-    ///
-    /// The staged block sits immediately after the selectors, so emitting it for such a relation
-    /// would write past its `auxiliary_ace_inputs_ptr` region. Nothing downstream of the renderer
-    /// can tell the two cases apart, which is why the flag is checked here rather than only where
-    /// it is passed.
+    /// Fold-coefficient staging is emitted exactly when the relation's READ layout reserves
+    /// coefficient slots. The staged block sits immediately after the selectors, so emission must
+    /// match that layout. The relation supplies the layout-dependent choice at this renderer
+    /// boundary.
     #[test]
-    fn fold_coefficient_staging_is_emitted_only_when_the_relation_asks_for_it() {
+    fn fold_coefficient_staging_matches_the_relation_read_layout() {
         let staged = render_masm_constraints_eval(&config(true)).expect("renders");
         assert!(staged.contains(STAGING_CALL), "the staging call is missing when requested");
         assert!(staged.contains(STAGING_PROC), "the staging procedure is missing when requested");
