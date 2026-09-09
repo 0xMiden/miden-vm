@@ -702,7 +702,7 @@ fn interning_reuses_logical_span_and_tallies_multiplicity() {
     assert_eq!(requires.total_cycles(), 2);
 
     let compression = generate_traces(requires).compression;
-    for row in compression.values.chunks_exact(NUM_MAIN_COLS) {
+    for row in compression.values.as_chunks::<NUM_MAIN_COLS>().0 {
         assert_eq!(row[COL_IN_MULTIPLICITY], Felt::from_u8(2));
         assert_eq!(row[COL_OUT_MULTIPLICITY], Felt::from_u8(3));
     }

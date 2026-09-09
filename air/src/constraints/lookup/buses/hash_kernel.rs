@@ -344,7 +344,7 @@ fn stream_xor_limb<LB>(bytes: [LB::Var; 12]) -> LB::Expr
 where
     LB: ChipletLookupBuilder,
 {
-    let xor_bytes: [LB::Expr; 4] = core::array::from_fn(|i| {
+    let xor_bytes: [LB::Expr; 4] = array::from_fn(|i| {
         let lhs: LB::Expr = bytes[i].into();
         let rhs: LB::Expr = bytes[i + 4].into();
         let and: LB::Expr = bytes[i + 8].into();

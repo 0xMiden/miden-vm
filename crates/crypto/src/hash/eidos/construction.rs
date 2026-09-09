@@ -227,7 +227,7 @@ impl Eidos {
     /// This is the packed equivalent of [`Self::merge`].
     #[inline]
     pub fn merge_packed(values: &[PackedDigest; 2]) -> PackedDigest {
-        compress_packed_digest_pair(values, framing::init_packed_cv(0, [0; 3]))
+        compress_packed_digest_pair(values, &framing::init_packed_cv(0, [0; 3]))
     }
 
     /// Hash two digest words as one generic eight-Felt sequence.
@@ -240,7 +240,7 @@ impl Eidos {
     #[inline]
     pub fn hash_two_words_packed(values: &[PackedDigest; 2]) -> PackedDigest {
         let cv = Self::init_packed_chaining_word(GENERIC_FELT_SEQUENCE, BLOCK_LEN as u32);
-        compress_packed_digest_pair(values, cv)
+        compress_packed_digest_pair(values, &cv)
     }
 
     /// Hash two digest words under a typed Felt-sequence domain.
@@ -279,7 +279,7 @@ fn compress_digest_pair(values: &[Word; 2], cv: [u32; 8]) -> Word {
 #[inline]
 fn compress_packed_digest_pair(
     values: &[PackedDigest; 2],
-    cv: PackedChainingValue,
+    cv: &PackedChainingValue,
 ) -> PackedDigest {
     let block = array::from_fn(|i| {
         if i < DIGEST_WIDTH {
@@ -288,7 +288,7 @@ fn compress_packed_digest_pair(
             values[1][i - DIGEST_WIDTH]
         }
     });
-    Eidos::compress_packed(cv, block)
+    compression::compress_packed_felt_cv(cv, &block)
 }
 
 #[inline]
