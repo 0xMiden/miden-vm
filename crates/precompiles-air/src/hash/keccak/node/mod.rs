@@ -28,9 +28,6 @@
 //! namespaces (chunk-tape, sponge rows). `absorption_id_chunks` is
 //! bus-pinned per row (`ChunkChain`) but not constrained across rows —
 //! Eidos is shared with other callers.
-//!
-//! See the design notes for the design and
-//! the design notes for the binding-bus model.
 
 use alloc::vec::Vec;
 use core::array;
@@ -147,8 +144,7 @@ pub const COL_H_KECCAK_END: usize = COL_H_KECCAK_BEGIN + NUM_HASH;
 
 /// Witnessed per-row count of downstream consumers of the
 /// `Binding(H_keccak, True, 0, 0)` provide — a plain count pinned to the
-/// consumer count by `Binding` bus balance (not range-checked; see
-/// the design notes) and pinned to 0 on inactive rows by
+/// consumer count by `Binding` bus balance (not range-checked) and pinned to 0 on inactive rows by
 /// `(1 − act) · out_mult = 0`. Lets a `KeccakNodeRequires` dedupe by
 /// Keccak digest and tally consumers without re-emitting the Binding
 /// tuple per consumer — true dedup, one row per digest at any count.

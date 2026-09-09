@@ -124,28 +124,15 @@ where $n_i$ is AIR $i$'s trace length and $c_{\mathrm{boundary}}$ is the signed 
 once-per-proof interactions derived from public statement data. Boundary contributions are added
 once; they are not scaled by a trace length.
 
-### Natural last-row closure in aggregate precompile proofs
+### Aggregate precompile proof
 
-Native AIRs in the aggregate precompile proof use an equivalent natural last-row form. They anchor
-$a_0(0)=0$, apply
-
-$$
-D_0 \left(a'_0 - \sum_{k=0}^{L-1} a_k\right) - N_0 = 0
-$$
-
-on transition rows, and replace $a'_0$ with a committed unnormalized residue $\sigma$ on the last
-row. This folds the last row's interactions directly into $\sigma$.
-
-The aggregate also reuses the centered Eidos-compression and `And8` components. Its external
-closure adds each native residue directly and multiplies only those reused centered residues by
-their trace lengths before adding the fixed boundary correction. In general, this has the form
+Every AIR in the aggregate precompile proof uses the same normalized cyclic form. Each AIR commits
+$\sigma'_i = \sigma_i / n_i$, and the external closure reconstructs every raw sum by multiplying
+the residue by that AIR's trace length:
 
 $$
-\sum_i n_i\sigma'_i + \sum_j \sigma_j + c_{\mathrm{boundary}} = 0,
+\sum_i n_i\sigma'_i + c_{\mathrm{boundary}} = 0.
 $$
-
-where $i$ ranges over reused centered components and $j$ ranges over natural-closing precompile
-AIRs.
 
 ### Extending the construction to multiple components
 

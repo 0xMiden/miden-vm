@@ -6,9 +6,6 @@
 //! their ptrs to the modular-sum identity and *provides* the
 //! [`UintAdd`](crate::relations::BusId::UintAdd) relation, consumed by the
 //! eval chip's add / sub / neg `UintOp` nodes.
-//!
-//! See the design notes for the full design.
-//!
 //! ## The identity (vertical Schwartz–Zippel)
 //!
 //! `a, b < p ⟹ a + b < 2p`, so at most one modulus subtraction:

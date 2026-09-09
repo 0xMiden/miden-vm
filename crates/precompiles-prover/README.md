@@ -35,7 +35,7 @@ make test-fast
 src/
 ├── lib.rs              crate root
 ├── deferred/session.rs checked singleton batch import
-├── relations.rs        bus-id registry and witness multiplicity types
+├── relations.rs        AIR relation definitions re-export
 ├── math.rs             field and integer helpers
 ├── logup/              shared LogUp framework re-exports
 ├── stark_config.rs     selectable STARK proof-hash configurations (Eidos default)

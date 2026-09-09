@@ -48,7 +48,7 @@ pub const LOG_AND8_LOOKUP_TRACE_HEIGHT: u8 = (2 * BITS_PER_BYTE) as u8;
 
 /// Physical trace height for the byte-pair lookup AIR.
 ///
-/// This AIR uses the wrapped LogUp accumulator, so the last row may carry the real
+/// This AIR uses the centered cyclic LogUp accumulator, so the last row may carry the real
 /// `(255, 255)` byte-pair entry instead of an idle padding row.
 pub const AND8_LOOKUP_TRACE_HEIGHT: usize = 1 << LOG_AND8_LOOKUP_TRACE_HEIGHT;
 

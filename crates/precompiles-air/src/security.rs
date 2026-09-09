@@ -193,8 +193,8 @@ pub const LOOKUP_POW_BITS: u32 = 0;
 /// Number of one-time lookup fractions added at the PVM boundary by the fixed `UintVal` and
 /// `EcGroup` messages.
 ///
-/// `fixed_boundary_fraction_count` derives this value from the fixed messages. A test below checks
-/// that the descriptor constant remains equal to the derived count.
+/// `fixed_boundary_fraction_count` derives this value from the fixed messages; the descriptor
+/// constant must equal the derived count.
 pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 8;
 
 /// The configured challenge-field bound less the lookup round's coefficient, in fixed point.
@@ -215,8 +215,7 @@ pub const DEEP_BASE: u64 = CHALLENGE_FIELD_BITS - DEEP_COEFFICIENT;
 /// blowup, in fixed point.
 ///
 /// The common MASM estimator uses the whole-bit floor of this value when proving that FRI folding
-/// cannot determine the result. Drift tests keep the MASM constant used by that proof synchronized
-/// with this value.
+/// cannot determine the result. Its `FRI_FOLDING_BASE_BITS` constant must equal that floor.
 pub const FOLDING_BASE: u64 =
     CHALLENGE_FIELD_BITS - FOLDING_COEFFICIENT - fixed::from_bits(LOG_BLOWUP as u32);
 
@@ -400,7 +399,7 @@ mod tests {
         assert_eq!(
             fixed_boundary_fraction_count(),
             u64::from(FIXED_BOUNDARY_LOOKUP_TERMS),
-            "fixed boundary shape moved"
+            "fixed boundary shape mismatch"
         );
     }
 
@@ -476,12 +475,12 @@ mod tests {
             assert_eq!(
                 report.security_level(),
                 expected_level,
-                "level moved at log height {log_height}"
+                "unexpected level at log height {log_height}"
             );
             assert_eq!(
                 report.binding_term().label,
                 expected_binding,
-                "binding round moved at log height {log_height}"
+                "unexpected binding round at log height {log_height}"
             );
         }
     }
@@ -546,12 +545,12 @@ mod tests {
             assert_eq!(
                 (*report.terms()).map(|term| term.bits),
                 rounds,
-                "round bits moved at {params:?}, log height {log_height}"
+                "round-bit mismatch at {params:?}, log height {log_height}"
             );
             assert_eq!(
                 report.security_level(),
                 level,
-                "level moved at {params:?}, log height {log_height}"
+                "unexpected level at {params:?}, log height {log_height}"
             );
         }
     }

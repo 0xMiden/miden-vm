@@ -1,38 +1,20 @@
 //! EcGroups chiplet — the short-Weierstrass **group table**.
 //!
-//! One row per group, binding the curve context a consumer resolves
-//! through one ptr: `group_ptr → (a_ptr, b_ptr, bound_ptr,
-//! scalar_bound_ptr)` — the curve params `a`, `b`, the base-field
-//! modulus handle (`bound`, fixing `F_p`), and the **scalar-field
-//! modulus handle** (`scalar_bound`, fixing `F_s` — the group order's
-//! `n − 1`, the modulus future scalar arithmetic
-//! (nondeterministic-addition-chain constraints, ladder exponents) runs
-//! under). Mathematically `(a, b, p)` determines `F_s`, but the chiplet
-//! never computes it: the session records `F_s` when something
-//! *constrains* it, and while nothing does, the cell **vacuously
-//! defaults to the `F_p` handle** — a well-formed stored uint, consumed
-//! by nothing scalar, so the tuple stays total without a none-sentinel
-//! special case.
+//! One row per group binds
+//! `group_ptr → (a_ptr, b_ptr, bound_ptr, scalar_bound_ptr, beta_ptr, lambda_ptr)`. The tuple
+//! identifies the curve parameters, the base-field modulus, the scalar-field modulus, and the GLV
+//! endomorphism parameters. A group without a separately constrained scalar modulus uses
+//! `bound_ptr`; a group without a GLV endomorphism uses the none-sentinel 0 for `beta_ptr` and
+//! `lambda_ptr`.
 //!
-//! The split from the point store keeps each store single-role: no
-//! `is_group` mutex, no dead point cells on group rows, and the group
-//! table is the natural anchor for future group-scoped data (generator
-//! pins, cofactor policy) — extend the tuple here and no point widens.
+//! The group table and point store have separate row layouts. Point rows name their group through
+//! `group_ptr` and recover the complete curve context through the `EcGroup` relation.
 //!
-//! Ptr discipline is the stores' taken to its limit: this chiplet has
-//! **no consume fractions** (the one provide self-gates through its
-//! `mult` cell, zero on pads), so nothing needs an `act` gate — and
-//! with nothing to gate, the ptr chain goes **ungated**:
-//! `ptr' = ptr + 1` on every transition, `ptr = 1` on the first row.
-//! `ptr = row + 1` is then forced for any prover — pads included, which
-//! are simply rows with `mult = 0` — so ptr → tuple is injective by
-//! construction, with no booleanity, no monotonicity, no flag column.
-//! Tracegen preseeds VM-owned fixed curve slots from `CurveId::ALL` (K1 row 1,
-//! R1 row 2, Ed25519 row 3 today).
-//! Everything else about a group — `b ≠ 0`, the params being uints
-//! under `bound` — is certified at the require layer and transitively
-//! by consumers (membership MACs route `a` / `b` through the mul
-//! chiplet's views).
+//! Each row provides one `EcGroup` message with multiplicity `mult`; padding rows use `mult = 0`.
+//! The first row has `ptr = 1`, and every transition enforces `ptr' = ptr + 1`, so every row has a
+//! distinct pointer. Trace generation preloads the VM-owned slots from `CurveId::ALL`. The require
+//! layer and consuming relations establish parameter validity, including `b ≠ 0` and the uint
+//! bindings under `bound_ptr`.
 
 use alloc::vec::Vec;
 
@@ -64,12 +46,10 @@ pub const COL_A_PTR: usize = 1;
 pub const COL_B_PTR: usize = 2;
 /// The base-field modulus ptr (fixes `F_p`).
 pub const COL_BOUND_PTR: usize = 3;
-/// The scalar-field modulus ptr (fixes `F_s`); = `bound_ptr` while no
-/// scalar arithmetic constrains it.
+/// The scalar-field modulus ptr (fixes `F_s`); defaults to `bound_ptr` unless explicitly set.
 pub const COL_SBOUND_PTR: usize = 4;
-/// `EcGroup` provide multiplicity (= consumer count: every point of the
-/// group + every live-case add op); 0 on pad rows — the only liveness
-/// signal this chiplet needs.
+/// `EcGroup` provide multiplicity (the total consumer count); 0 on padding rows — the only
+/// liveness signal this chiplet needs.
 pub const COL_MULT: usize = 5;
 /// The GLV endomorphism base-field constant `β`'s uint ptr (the
 /// none-sentinel 0 for a group with no endomorphism).

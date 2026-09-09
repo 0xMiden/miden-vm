@@ -12,14 +12,11 @@
 //! auxiliary column each. They delegate coordinate canonicity to the [UintStore](crate::uint),
 //! curve membership to three [`UintMul`](crate::relations::BusId::UintMul) MACs sharing a result
 //! pointer, and group-operation field arithmetic to the uint relation chiplets.
-//!
-//! See the design notes for the full design.
-//!
 //! ## Point rows
 //!
 //! A point row binds `point_ptr → (group_ptr, x_ptr, y_ptr, is_pai)`,
 //! *provides* `EcPoint`, *consumes* its group's `EcGroup` tuple (which
-//! certifies the `(a, b, bound, scalar_bound)` cells it carries — for
+//! certifies the `(a, b, bound, scalar_bound, beta, lambda)` cells it carries — for
 //! PAI rows this consume is the *only* thing tying the row to a real
 //! group), and — unless `is_pai` — *consumes* the three
 //! curve-membership MACs
@@ -38,12 +35,10 @@
 //!
 //! ## Ptr discipline
 //!
-//! Groups and points are **separate ptr namespaces**. Group rows are
-//! dense and consecutive, with VM-owned fixed slots preseeded from
-//! `CurveId::ALL` (K1 row 1, R1 row 2, Ed25519 row 3 today); later groups and
-//! points are allocator-assigned. Injectivity is the chain `ptr' = ptr +
-//! 1` gated to the active prefix — no gap column, no `Range16`. `act` is
-//! monotone (pads only at the tail) and all-zero pad rows touch no bus.
+//! Groups and points are **separate ptr namespaces**. Group rows are dense and consecutive over
+//! the full padded trace, with VM-owned fixed slots preseeded from `CurveId::ALL`. Point rows form
+//! a consecutive active prefix followed by all-zero padding rows. Both namespaces start at 1;
+//! neither uses a gap column or `Range16`.
 
 pub mod add;
 pub mod groups;
@@ -78,10 +73,9 @@ use crate::{
 /// 7-tuple `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr,
 /// beta_ptr, lambda_ptr)` binding a short-Weierstrass group to its curve
 /// context — the params (stored uints sharing `bound_ptr`, which fixes
-/// the base field) plus the scalar-field modulus handle (= `bound_ptr`
-/// while nothing constrains it; see [`groups`]) plus the GLV
-/// endomorphism params `β`/`λ` (the none-sentinel 0 for a group with no
-/// endomorphism).
+/// the base field), the resolved scalar-field modulus handle (an ad-hoc group with no assigned
+/// scalar bound carries `bound_ptr` in this field; see [`groups`]), and the GLV endomorphism
+/// parameters `β`/`λ` (the none-sentinel 0 for a group with no endomorphism).
 #[derive(Debug, Clone)]
 pub struct EcGroupMsg<E> {
     pub group_ptr: E,
@@ -160,8 +154,8 @@ pub const COL_A_PTR: usize = 2;
 pub const COL_B_PTR: usize = 3;
 /// The base-field modulus ptr (fixes the field).
 pub const COL_BOUND_PTR: usize = 4;
-/// The group's scalar-field modulus ptr (carried only to close the
-/// `EcGroup` consume; = `bound_ptr` while unconstrained).
+/// The group's resolved scalar-field modulus ptr. An ad-hoc group with no assigned scalar bound
+/// carries `bound_ptr` in this field.
 pub const COL_SBOUND_PTR: usize = 5;
 /// Coordinate uint ptrs (0 when `is_pai`).
 pub const COL_X_PTR: usize = 6;
