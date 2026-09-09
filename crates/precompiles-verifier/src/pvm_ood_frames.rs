@@ -538,17 +538,17 @@ mod tests {
         PvmOodGeometry::from_input_layout(canonical.layout()).expect("PVM out-of-domain geometry")
     }
 
-    /// The measured row geometry, pinned so a chiplet width change surfaces here with the numbers
-    /// the hook was rendered from rather than only as a byte diff.
+    /// Pins the per-chiplet row geometry and dispatch plan derived from the canonical circuit
+    /// layout.
     #[test]
     fn pvm_row_geometry_is_the_one_the_hook_was_rendered_from() {
         let geometry = live_geometry();
         assert_eq!(geometry.preprocessed, vec![0, 0, 0, 8, 0, 0, 0, 0, 0, 0]);
         assert_eq!(geometry.main, vec![104, 112, 72, 8, 40, 48, 32, 24, 24, 48]);
-        assert_eq!(geometry.aux, vec![48, 40, 24, 8, 24, 56, 8, 16, 24, 32]);
+        assert_eq!(geometry.aux, vec![40, 40, 24, 8, 24, 56, 8, 16, 24, 32]);
         assert_eq!(geometry.quotient, 8);
-        assert_eq!(geometry.row_felts(), 1_616);
-        assert_eq!(geometry.row_blocks(), 202);
+        assert_eq!(geometry.row_felts(), 1_600);
+        assert_eq!(geometry.row_blocks(), 200);
 
         let plan = pvm_scatter_plan(&geometry).expect("scatter plan");
         assert_eq!(plan.dispatches.len(), 22, "one segment per occupied per-chiplet block");
