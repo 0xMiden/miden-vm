@@ -6,7 +6,7 @@
 //! the transcript absorb and the DEEP Horner accumulation stay positional over the advice stream,
 //! and only the `adv_pipe` destination is retargeted at segment boundaries.
 //!
-//! This file pins both halves of that mechanism at PVM scale — ten chiplets, 202 blocks, 22
+//! This file pins both halves of that mechanism at PVM scale — ten chiplets, 200 blocks, 22
 //! segments — against the checked-in generated hook:
 //!
 //! - the scatter is *transparent*: the full 16-slot working frame (sponge, pointer, alpha pointer,
@@ -14,8 +14,7 @@
 //!   eight-felt block lands verbatim at its canonical destination;
 //! - the scatter is *dispatched*, not looped: retargeting per segment through `dynexec` costs a
 //!   fraction of the obvious per-block `while` loop over the destination pointer. The cycle
-//!   assertions below exist so that "simplification" is caught here rather than in a proof-cost
-//!   regression.
+//!   assertions enforce this per-segment cost profile and reject a regression to per-block routing.
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
 use miden_core::{
@@ -54,10 +53,10 @@ const OOD_BASE: u32 = 16_384;
 
 /// Cycle ceiling for the checked-in hook's two-row ingest.
 ///
-/// Absorbing the row costs three cycles per block, so both rows are 2 x 202 x 3 = 1,212 cycles of
+/// Absorbing the row costs three cycles per block, so both rows are 2 x 200 x 3 = 1,200 cycles of
 /// unavoidable work; per-segment dispatch adds about 30 cycles to each of the 22 segments, twice
-/// (measured: 2,554). Guarding the destination pointer once per block instead would add at least
-/// ten cycles to every one of the 404 blocks — the per-block loop measures 3,373 cycles for a
+/// (measured: 2,542). Guarding the destination pointer once per block instead would add at least
+/// ten cycles to every one of the 400 blocks — the per-block loop measures 3,345 cycles for a
 /// single row — landing far above this ceiling. The ceiling enforces the per-segment dispatch cost
 /// profile in addition to address correctness.
 const MAX_TWO_ROW_INGEST_CYCLES: u64 = 3_200;
@@ -550,7 +549,7 @@ fn scatter_preserves_the_working_frame_and_lands_blocks_canonically() {
 /// `dynexec` on a per-length `pipe_k` procedure keeps the retarget off the hot path; testing the
 /// destination pointer once per block does not. Under the Eidos transcript one absorbed block
 /// costs three cycles, so a per-block guard is not a small constant on top — it is the dominant
-/// term. This test exists so that "simplifying" the dispatch back into a loop fails here.
+/// term. The asserted ratio separates the per-segment dispatch profile from per-block routing.
 #[test]
 fn dispatched_scatter_stays_far_cheaper_than_a_per_block_loop() {
     let geometry = RowGeometry::pvm();
@@ -589,13 +588,14 @@ fn dispatched_scatter_stays_far_cheaper_than_a_per_block_loop() {
 
     assert!(
         looped - flat >= 3 * (dispatched - flat),
-        "the per-block loop ({looped}) is no longer materially worse than dispatch \
-         ({dispatched}); if the scatter has been rewritten as a loop, revert it"
+        "per-block overhead ({}) must remain at least three times dispatched overhead ({})",
+        looped - flat,
+        dispatched - flat,
     );
     assert!(
         (dispatched - flat) / plan.len() as u64 <= 30,
-        "the scatter costs {} cycles per segment, well past the dispatch mechanism's \
-         ~20 (flat {flat}, dispatched {dispatched})",
+        "the scatter costs {} cycles per segment, above the 30-cycle dispatch ceiling \
+         (flat {flat}, dispatched {dispatched})",
         (dispatched - flat) / plan.len() as u64
     );
 }
