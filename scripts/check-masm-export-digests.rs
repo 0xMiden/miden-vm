@@ -212,7 +212,10 @@ fn compare_procedure(name: &str, previous: &ProcedureInfo, current: &ProcedureIn
 }
 
 fn is_abi_attribute(name: &str) -> bool {
-    matches!(name, "auth_script" | "callconv")
+    matches!(
+        name,
+        "account_procedure" | "auth_script" | "callconv" | "note_script" | "transaction_script"
+    )
 }
 
 /// Compare a pretty-printed signature or type string ignoring struct field labels.
