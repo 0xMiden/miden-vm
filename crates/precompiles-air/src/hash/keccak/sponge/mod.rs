@@ -141,8 +141,8 @@ pub const NUM_MAIN_COLS: usize = 57;
 /// - col 1: Memory64 `rc` + lane-16 0x80 consume / provide.
 /// - col 2: Memory64 `squeeze` (the degree-4 multiplicity, alone → degree 4).
 /// - cols 3–10: one `BytePairLut` triple per byte: pad-row `andnot` + `xor-padding`, and a shared
-///   `xor-state` for pad, verbatim, and lane-16 rows. The normalized operand stays in the existing
-///   padded-byte columns, keeping every message linear.
+///   `xor-state` for pad, verbatim, and lane-16 rows. The normalized operand occupies
+///   [`PADDED_BYTES_RANGE`], keeping every message linear.
 /// - col 11: the KeccakSponge request + the chunk consume (the second degree-4 multiplicity, paired
 ///   → degree 5).
 ///
@@ -198,9 +198,8 @@ impl BaseAir<Felt> for KeccakSpongeAir {
 // The pad-row `BytePairLut` requests need two masks whose values are
 // selected by the unary `b_j` selector bits: `andnot_mask` clears
 // the bytes at and past `byte_offset`, and `padding_mask` places a
-// `0x01` byte at `byte_offset`. The arrays below hold the
-// per-`byte_offset` u32-half constants (kept as the verified source of
-// truth); `eval` extracts each byte from them via [`mask_byte`] and
+// `0x01` byte at `byte_offset`. The arrays below contain the
+// per-`byte_offset` u32-half constants. `eval` extracts each byte from them via [`mask_byte`] and
 // builds `andnot_mask_bytes[i] = Σ_j b_j · mask_byte(ANDNOT_MASK_LO[j],
 // ANDNOT_MASK_HI[j], i)` (and likewise for padding) as a degree-1
 // witness inline.
@@ -678,9 +677,8 @@ where
     let selected_interaction_deg = Deg { v: 3, u: 1 };
     let squeeze_interaction_deg = Deg { v: 4, u: 1 };
     let chunk_interaction_deg = Deg { v: 4, u: 1 };
-    // Direct product batching keeps each original fraction intact. Group
-    // and column hints are exact and validated symbolically in tests; the
-    // entry hints document each multiplicity/denominator degree.
+    // Direct product batching preserves each original fraction. Group and column hints encode the
+    // per-entry multiplicity and denominator degrees listed below.
     let pair_deg = Deg { v: 4, u: 2 };
     let triple_deg = Deg { v: 5, u: 3 };
     let solo_deg = Deg { v: 4, u: 1 };

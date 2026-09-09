@@ -1046,7 +1046,7 @@ pub fn generate_trace(requires: TranscriptEvalRequires, root: Truthy) -> RowMajo
     RowMajorMatrix::new(trace, NUM_MAIN_COLS)
 }
 
-/// The shared op-flag column an op id rides. Add is derived from the family and other op flags.
+/// Returns the shared flag column for a uint operation, or `None` for derived `Add`.
 fn uint_op_col(op: UintOpId) -> Option<usize> {
     match op {
         UintOpId::Add => None,
@@ -1056,6 +1056,7 @@ fn uint_op_col(op: UintOpId) -> Option<usize> {
     }
 }
 
+/// Returns the shared flag column for an EC operation, or `None` for derived `Add`.
 fn ec_op_col(op: EcOpId) -> Option<usize> {
     match op {
         EcOpId::Add => None,
