@@ -26,8 +26,8 @@ use crate::{
     tests::{SessionTracesTestExt, bus_balance::session_stack_residual, verify_deferred},
     transcript::{
         eval::{
-            COL_IS_ADD, COL_IS_MUL, COL_IS_SUB, COL_OUT_MULT, COL_PTR, COL_TAG_ARG0,
-            NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS, TranscriptEvalAir,
+            COL_IS_MUL, COL_IS_SUB, COL_OUT_MULT, COL_PTR, COL_TAG_ARG0,
+            NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS, TranscriptEvalAir, add_flag,
         },
         nodes::UintOpId,
     },
@@ -159,7 +159,8 @@ fn op_dedup_collapses_repeated_nodes() {
     let eval = crate::tests::transcript_eval_main(&traces);
     let r_row = (0..eval.height())
         .find(|row| {
-            eval.values[row * EVAL_NUM_MAIN_COLS + COL_IS_ADD] == Felt::ONE
+            add_flag::<Felt, _>(&eval.values[row * EVAL_NUM_MAIN_COLS..][..EVAL_NUM_MAIN_COLS])
+                == Felt::ONE
                 && eval.values[row * EVAL_NUM_MAIN_COLS + COL_PTR] == Felt::from(r1.ptr.addr())
         })
         .expect("r's op row");
@@ -299,8 +300,13 @@ fn reencoded_op_id_passes_constraints_but_unbalances() {
     let traces = session.finish(root);
 
     let mut tampered = crate::tests::transcript_eval_main(&traces);
-    let row = find_op_row(&tampered, COL_IS_ADD);
-    tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_ADD] = Felt::ZERO;
+    let row = tampered
+        .values
+        .as_chunks::<EVAL_NUM_MAIN_COLS>()
+        .0
+        .iter()
+        .position(|row| add_flag::<Felt, _>(row) == Felt::ONE)
+        .expect("add row");
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_SUB] = Felt::ONE;
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_TAG_ARG0] = Felt::from(UintOpId::Sub as u8);
 

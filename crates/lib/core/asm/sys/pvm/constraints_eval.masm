@@ -11,7 +11,7 @@ use miden::core::sys::pvm::layout
 const NUM_INPUTS_CIRCUIT = 3228
 
 # Number of evaluation gates in the constraint evaluation circuit
-const NUM_EVAL_GATES_CIRCUIT = 11968
+const NUM_EVAL_GATES_CIRCUIT = 11936
 
 # Max cycle length for periodic columns
 const MAX_CYCLE_LEN_LOG = 7
@@ -28,7 +28,7 @@ const NUM_AIRS = 10
 
 # Number of 8-felt blocks in each authenticated ACE circuit segment.
 const ACE_PREFIX_BLOCKS = 588
-const ACE_COMMON_BLOCKS = 1288
+const ACE_COMMON_BLOCKS = 1284
 
 # Quotient recomposition inputs derived from the circuit's quotient arity and the
 # relation's PCS configuration. QUOTIENT_SHIFT_RATIO depends on arity;
@@ -41,10 +41,10 @@ const QUOTIENT_FIRST_WEIGHT = 2704820172613542122
 # Eidos digest of the order-invariant common section of the ACE circuit stream
 # (common ops + root padding). The registry leaf for each ORDER_TAG is
 # merge(H(constants | shuffle ops), ACE_COMMON_COMMITMENT).
-const ACE_COMMON_COMMITMENT_0 = 2363401287938653721
-const ACE_COMMON_COMMITMENT_1 = 6403965880424816766
-const ACE_COMMON_COMMITMENT_2 = 7269808684029710479
-const ACE_COMMON_COMMITMENT_3 = 8160696873028220667
+const ACE_COMMON_COMMITMENT_0 = 4035919369801258008
+const ACE_COMMON_COMMITMENT_1 = 421677921925388916
+const ACE_COMMON_COMMITMENT_2 = 343213392407235543
+const ACE_COMMON_COMMITMENT_3 = 6622589256410632464
 
 # ERRORS
 # =================================================================================================
@@ -105,7 +105,7 @@ proc load_and_authenticate_ace_circuit
     # => [PREFIX_COMMITMENT, ptr, LEAF]
     movup.4
     # => [ptr, PREFIX_COMMITMENT, LEAF]
-    push.10304 exec.eidos::init_chaining_word
+    push.10272 exec.eidos::init_chaining_word
     padw padw
     repeat.ACE_COMMON_BLOCKS
         adv_pipe
