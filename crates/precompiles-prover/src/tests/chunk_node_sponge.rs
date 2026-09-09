@@ -41,7 +41,7 @@ fn layout_and_lookup_shape_match_design() {
         &[3; chunk_node::NUM_AUX_COLS],
     );
     assert_eq!(NUM_MAIN_COLS, 99);
-    assert_eq!(NUM_AUX_COLS, 24);
+    assert_eq!(NUM_AUX_COLS, 18);
     assert_eq!(NUM_AUX_COLS, chunk_node::NUM_AUX_COLS + SPONGE_NUM_AUX_COLS);
     assert_eq!(<ChunkNodeSpongeAir as BaseAir<Felt>>::width(&ChunkNodeSpongeAir), NUM_MAIN_COLS);
     assert_eq!(

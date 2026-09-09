@@ -122,6 +122,8 @@ pub const CHUNK_BYTES_RANGE: Range<usize> = 17..25;
 pub const STATE_PREV_BYTES_RANGE: Range<usize> = 25..33;
 pub const STATE_NEW_BYTES_RANGE: Range<usize> = 33..41;
 pub const CLEARED_BYTES_RANGE: Range<usize> = 41..49;
+/// Shared XOR operand: padded chunk on the pad row, raw chunk on verbatim rows,
+/// and the final 0x80 mask on the last block's lane-16 row.
 pub const PADDED_BYTES_RANGE: Range<usize> = 49..57;
 
 /// Total number of main witness columns (5 structural + 10 padding-state + 2 squeeze-value + 40
@@ -131,23 +133,23 @@ pub const NUM_MAIN_COLS: usize = 57;
 // AUX / PUBLIC LAYOUT
 // ================================================================================================
 
-/// Aux columns. The lookup fractions are flattened directly into 18
+/// Aux columns. The lookup fractions are flattened directly into 12
 /// product-closed columns:
 ///
 /// - col 0 (centered running sum): Memory64 `new-state` + `prev-perm` (the two lowest-degree
 ///   fractions).
 /// - col 1: Memory64 `rc` + lane-16 0x80 consume / provide.
 /// - col 2: Memory64 `squeeze` (the degree-4 multiplicity, alone → degree 4).
-/// - cols 3–16: `BytePairLut` byte requires (8 bytes each) verifying the pad-row `andnot` +
-///   `xor-padding` + `xor-state`, the verbatim `xor-state`, and the lane-16 0x80 `xor` directly
-///   against the byte-lane columns — no intermediate chiplet, at most three fractions per column.
-/// - col 17: the KeccakSponge request + the chunk consume (the second degree-4 multiplicity, paired
+/// - cols 3–10: one `BytePairLut` triple per byte: pad-row `andnot` + `xor-padding`, and a shared
+///   `xor-state` for pad, verbatim, and lane-16 rows. The normalized operand stays in the existing
+///   padded-byte columns, keeping every message linear.
+/// - col 11: the KeccakSponge request + the chunk consume (the second degree-4 multiplicity, paired
 ///   → degree 5).
 ///
 /// The maximum LogUp constraint degree is five, giving `log_quotient_degree = 2`. Reducing it
 /// further would require witness-decomposing the degree-four `squeeze` and `chunk-consume`
 /// multiplicities.
-pub const NUM_AUX_COLS: usize = 18;
+pub const NUM_AUX_COLS: usize = 12;
 
 // One accumulator combines the Memory64, BytePairLut, and KeccakSponge interactions. Encoded bus
 // prefixes keep the three relations distinct under the shared LogUp challenges.
@@ -327,6 +329,7 @@ where
     let p_last: AB::Expr = periodic[PCOL_LAST].into();
     let p_rate_block: AB::Expr = periodic[PCOL_RATE_BLOCK].into();
     let p_capacity: AB::Expr = periodic[PCOL_CAPACITY].into();
+    let p_pad_0x80: AB::Expr = periodic[PCOL_PAD_0X80].into();
     let p_extra: AB::Expr = periodic[PCOL_EXTRA].into();
     let p_state_lane: AB::Expr = p_rate_block.clone() + p_capacity.clone();
 
@@ -360,6 +363,19 @@ where
         let b_j: AB::Expr = local[col].into();
         b_sum += b_j.clone();
         b_weighted += AB::Expr::from(Felt::from(j as u32)) * b_j;
+    }
+
+    // Normalize the shared XOR operand outside the pad row, whose value is pinned by
+    // the two padding lookups. The periodic rate/lane-16 selectors are disjoint, so
+    // these two ties can share one degree-three constraint per byte.
+    let verbatim = p_rate_block.clone() * (AB::Expr::ONE - is_zero_next.clone());
+    let lane16 = p_pad_0x80 * b_sum.clone();
+    for i in 0..8 {
+        let padded: AB::Expr = local[PADDED_BYTES_RANGE.start + i].into();
+        builder.assert_zero(
+            verbatim.clone() * (padded.clone() - chunk_bytes[i].into())
+                + lane16.clone() * (padded - AB::Expr::from(Felt::from(PAD_CONST_BYTES[i]))),
+        );
     }
 
     // Boundary (`when_first_row`) ---------------------------
@@ -533,16 +549,14 @@ where
 // LOOKUP AIR
 // ================================================================================================
 
-/// Exact per-column insert counts. The 40 byte-table fractions occupy
-/// eight pad triples, two verbatim triples plus a pair, and two lane-16
-/// triples plus a pair. The degree-4 `squeeze` remains alone and the
+/// Exact per-column insert counts. The 24 byte-table fractions occupy
+/// eight triples, each sharing its final XOR across all absorption/padding modes.
+/// The degree-4 `squeeze` remains alone and the
 /// degree-4 `chunk-consume` remains paired, keeping every constraint at
 /// degree 5 or below.
 pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [
     2, 3, 1, // Memory64 state, rc/lane-16, squeeze.
-    3, 3, 3, 3, 3, 3, 3, 3, // Pad bytes.
-    3, 3, 2, // Verbatim bytes.
-    3, 3, 2, // Lane-16 bytes.
+    3, 3, 3, 3, 3, 3, 3, 3, // Padding preparation + shared state XOR, per byte.
     2, // KeccakSponge request + chunk consume.
 ];
 
@@ -630,8 +644,8 @@ where
     // Derived multiplicity signals.
     let is_intra: LB::Expr = LB::Expr::ONE - is_first_block.clone();
     let is_first_row_of_invocation: LB::Expr = p_first * is_first_block;
-    let is_pad: LB::Expr = is_zero_next.clone() - is_zero;
-    let is_verbatim: LB::Expr = LB::Expr::ONE - is_zero_next;
+    let is_pad: LB::Expr = is_zero_next - is_zero.clone();
+    let is_absorb: LB::Expr = LB::Expr::ONE - is_zero;
 
     // Per-row address expressions.
     let hundred_seq = LB::Expr::from(Felt::from(100u8)) * sponge_seq_id.clone();
@@ -752,11 +766,12 @@ where
         ),
     );
 
-    // cols 3..11: one three-fraction batch per pad byte. Each batch
+    // cols 3..11: one three-fraction batch per byte. Each batch
     // verifies `andnot` (mask, chunk) -> cleared, `xor-padding`
     // (cleared, padding_mask) -> padded, and `xor-state`
-    // (state_prev, padded) -> state_new.
+    // (state_prev, padded) -> state_new across pad, verbatim, and lane-16 rows.
     let pad_mult = p_rate_block.clone() * is_pad * act.clone();
+    let xor_mult = (p_rate_block.clone() * is_absorb + p_pad_0x80 * b_sum.clone()) * act.clone();
     for i in 0..8 {
         frac_col!(
             builder,
@@ -784,7 +799,7 @@ where
             ),
             (
                 "xor-state",
-                pad_mult.clone(),
+                xor_mult.clone(),
                 BytePairLutMsg::from_xor(
                     state_prev_bytes[i].into(),
                     padded_bytes[i].into(),
@@ -795,146 +810,7 @@ where
         );
     }
 
-    // cols 11..14: verbatim `xor-state` (state_prev, chunk) ->
-    // state_new, grouped 3/3/2.
-    let verbatim_mult = p_rate_block.clone() * is_verbatim * act.clone();
-    for triple in 0..2 {
-        let i0 = triple * 3;
-        let i1 = i0 + 1;
-        let i2 = i0 + 2;
-        frac_col!(
-            builder,
-            "byte-pair-lut",
-            triple_deg,
-            (
-                "xor-state-verbatim",
-                verbatim_mult.clone(),
-                BytePairLutMsg::from_xor(
-                    state_prev_bytes[i0].into(),
-                    chunk_bytes[i0].into(),
-                    state_new_bytes[i0].into(),
-                ),
-                selected_interaction_deg
-            ),
-            (
-                "xor-state-verbatim",
-                verbatim_mult.clone(),
-                BytePairLutMsg::from_xor(
-                    state_prev_bytes[i1].into(),
-                    chunk_bytes[i1].into(),
-                    state_new_bytes[i1].into(),
-                ),
-                selected_interaction_deg
-            ),
-            (
-                "xor-state-verbatim",
-                verbatim_mult.clone(),
-                BytePairLutMsg::from_xor(
-                    state_prev_bytes[i2].into(),
-                    chunk_bytes[i2].into(),
-                    state_new_bytes[i2].into(),
-                ),
-                selected_interaction_deg
-            ),
-        );
-    }
-    frac_col!(
-        builder,
-        "byte-pair-lut",
-        pair_deg,
-        (
-            "xor-state-verbatim",
-            verbatim_mult.clone(),
-            BytePairLutMsg::from_xor(
-                state_prev_bytes[6].into(),
-                chunk_bytes[6].into(),
-                state_new_bytes[6].into(),
-            ),
-            selected_interaction_deg
-        ),
-        (
-            "xor-state-verbatim",
-            verbatim_mult,
-            BytePairLutMsg::from_xor(
-                state_prev_bytes[7].into(),
-                chunk_bytes[7].into(),
-                state_new_bytes[7].into(),
-            ),
-            selected_interaction_deg
-        ),
-    );
-
-    // cols 14..17: lane-16 `xor-lane16` (state_prev, PAD_CONST) ->
-    // state_new, grouped 3/3/2. `PAD_CONST_BYTES` is a plain constant
-    // (not selector-dependent), so the `b` field is a literal per byte.
-    let lane16_mult = p_pad_0x80.clone() * b_sum.clone() * act.clone();
-    for triple in 0..2 {
-        let i0 = triple * 3;
-        let i1 = i0 + 1;
-        let i2 = i0 + 2;
-        frac_col!(
-            builder,
-            "byte-pair-lut",
-            triple_deg,
-            (
-                "xor-lane16",
-                lane16_mult.clone(),
-                BytePairLutMsg::from_xor(
-                    state_prev_bytes[i0].into(),
-                    LB::Expr::from(Felt::from(PAD_CONST_BYTES[i0])),
-                    state_new_bytes[i0].into(),
-                ),
-                selected_interaction_deg
-            ),
-            (
-                "xor-lane16",
-                lane16_mult.clone(),
-                BytePairLutMsg::from_xor(
-                    state_prev_bytes[i1].into(),
-                    LB::Expr::from(Felt::from(PAD_CONST_BYTES[i1])),
-                    state_new_bytes[i1].into(),
-                ),
-                selected_interaction_deg
-            ),
-            (
-                "xor-lane16",
-                lane16_mult.clone(),
-                BytePairLutMsg::from_xor(
-                    state_prev_bytes[i2].into(),
-                    LB::Expr::from(Felt::from(PAD_CONST_BYTES[i2])),
-                    state_new_bytes[i2].into(),
-                ),
-                selected_interaction_deg
-            ),
-        );
-    }
-    frac_col!(
-        builder,
-        "byte-pair-lut",
-        pair_deg,
-        (
-            "xor-lane16",
-            lane16_mult.clone(),
-            BytePairLutMsg::from_xor(
-                state_prev_bytes[6].into(),
-                LB::Expr::from(Felt::from(PAD_CONST_BYTES[6])),
-                state_new_bytes[6].into(),
-            ),
-            selected_interaction_deg
-        ),
-        (
-            "xor-lane16",
-            lane16_mult,
-            BytePairLutMsg::from_xor(
-                state_prev_bytes[7].into(),
-                LB::Expr::from(Felt::from(PAD_CONST_BYTES[7])),
-                state_new_bytes[7].into(),
-            ),
-            selected_interaction_deg
-        ),
-    );
-
-    // col 17: the KeccakSponge request + the chunk consume (a degree-4
+    // col 11: the KeccakSponge request + the chunk consume (a degree-4
     // multiplicity, paired → closing 5). Two independent inserts on
     // different buses, bus-prefix-distinguished encodings keeping the
     // contributions algebraically distinct.

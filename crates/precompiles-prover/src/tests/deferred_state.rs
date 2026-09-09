@@ -481,9 +481,9 @@ fn assert_session_balanced(traces: &SessionTraces, rng: &mut impl Rng) {
 #[test]
 fn merged_chunk_node_sponge_multi_block_checks_and_balances() {
     let mut rng = StdRng::seed_from_u64(0xc0de_5b09);
-    // 137: first byte past the rate boundary (2 blocks, pad in block 2).
+    // 136..144: every padding byte offset after the rate boundary (pad in block 2).
     // 271: rate boundary − 1 across two blocks. 300, 407: overshoot variety.
-    for len in [137usize, 271, 300, 407] {
+    for len in (136usize..144).chain([271, 300, 407]) {
         let input: Vec<u8> = (0..len).map(|i| i as u8).collect();
         let traces = keccak_session_traces(&input);
         // Inspect the production merged band rather than inferring activity from the input. This
