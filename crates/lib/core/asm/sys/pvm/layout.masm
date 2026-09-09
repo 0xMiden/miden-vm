@@ -4,7 +4,7 @@
 ### The ACE READ section is one dense vector of quadratic-extension inputs.
 ### Every boundary below is derived from the PVM circuit's InputLayout; each
 ### input occupies two base-field felts. The complete allocation, including relation-local
-### scratch after the stream, is the half-open range 3225432064..3225451046.
+### scratch after the stream, is the half-open range 3225432064..3225451022.
 ### Per-AIR heights remain in the generic 16-cell array, in ChipletAir::all()
 ### order; the PVM wrapper supplies the relation count and that shared base.
 
@@ -44,23 +44,23 @@ const AUX_BUS_BOUNDARY_PTR = 3225435312
 ### 84 felts: 3225435332..3225435416.
 const AUXILIARY_ACE_INPUTS_PTR = 3225435332
 
-### 14800 felts: 3225435416..3225450216.
+### 14776 felts: 3225435416..3225450192.
 const ACE_CIRCUIT_STREAM_PTR = 3225435416
 
-### 4 felts: 3225450216..3225450220. Stores gamma = beta^18.
-const BUS_GAMMA_PTR = 3225450216
+### 4 felts: 3225450192..3225450196. Stores gamma = beta^18.
+const BUS_GAMMA_PTR = 3225450192
 
-### 4 felts: 3225450220..3225450224. Stores the two-felt fixed-boundary correction; the remaining two felts are reserved.
-const C_TOTAL_PTR = 3225450220
+### 4 felts: 3225450196..3225450200. Stores the two-felt fixed-boundary correction; the remaining two felts are reserved.
+const C_TOTAL_PTR = 3225450196
 
-### 808 felts: 3225450224..3225451032. Stores one opened query row in commitment-group order.
-const CURRENT_TRACE_ROW_PTR = 3225450224
+### 808 felts: 3225450200..3225451008. Stores one opened query row in commitment-group order.
+const CURRENT_TRACE_ROW_PTR = 3225450200
 
-### 4 felts: 3225451032..3225451036. Stores the trusted preprocessed-tree commitment for DEEP openings.
-const PREPROCESSED_COM_PTR = 3225451032
+### 4 felts: 3225451008..3225451012. Stores the trusted preprocessed-tree commitment for DEEP openings.
+const PREPROCESSED_COM_PTR = 3225451008
 
-### 10 felts: 3225451036..3225451046. Stores, by canonical AIR index, the absolute address of its auxiliary boundary value in the proof-ordered buffer.
-const AUX_VALUE_PTRS_PTR = 3225451036
+### 10 felts: 3225451012..3225451022. Stores, by canonical AIR index, the absolute address of its auxiliary boundary value in the proof-ordered buffer.
+const AUX_VALUE_PTRS_PTR = 3225451012
 
 pub proc public_inputs_ptr
     push.PUBLIC_INPUTS_PTR
