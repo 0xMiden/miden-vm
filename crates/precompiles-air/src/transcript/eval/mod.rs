@@ -10,8 +10,9 @@
 //! chiplets) stay ptr-only and never touch `Binding`; this chip hashes
 //! their DAG nodes and ptr-references their relations.
 //!
-//! Node kinds are dispatched by a uniform one-hot `is_and + is_zero +
-//! is_uint_leaf + Σ op-flags = act`: the **Transcript AND-combinator**
+//! Node kinds are dispatched by a uniform family one-hot: `is_and + is_zero + is_uint_leaf +
+//! is_uint_op + is_ec_create + is_ec_pai + is_ec_op + is_ec_msm = act`. The
+//! **Transcript AND-combinator**
 //! hashes `lhs || rhs` with the registered deferred-AND framing, folding two child
 //! `True` bindings; the **uint leaf / pin-claim row**, which hashes a stored uint's
 //! value under either `[UintPrecompile::domain(), VALUE_OP_ID, bound_ptr, 0]`
@@ -434,15 +435,10 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // forced by bus balance: the root has no consumer.)
         builder.assert_zero((AB::Expr::ONE - act) * out_mult);
 
-        // Node type is a uniform one-hot over the active row: exactly one
-        // of is_and / is_zero / is_uint_leaf / an op family, none on
-        // padding — their sum is `act`. Booleans + this sum give mutual
-        // exclusion and keep every bus gate degree-1.
-        // Node family is a one-hot over the active row: exactly one of
-        // is_and / is_zero / is_uint_leaf / is_uint_op / is_ec_create /
-        // is_ec_pai / is_ec_op (none on padding) — their sum is `act`. The
-        // two *op* families carry only a family bit; which operation rides
-        // the shared op one-hot below.
+        // `zero_flag` completes the family one-hot on each active row: is_and + is_zero +
+        // is_uint_leaf + is_uint_op + is_ec_create + is_ec_pai + is_ec_op + is_ec_msm = act. The
+        // two operation families carry only a family bit; the shared op one-hot below selects the
+        // operation.
         let is_and: AB::Expr = local[COL_IS_AND].into();
         let is_uint_leaf: AB::Expr = local[COL_IS_UINT_LEAF].into();
         let is_uint_op: AB::Expr = local[COL_IS_UINT_OP].into();

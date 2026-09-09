@@ -87,9 +87,9 @@
 //! | 2 `res`   | `(r, sbound, group)` | the provide + operand/PAI/group consumes (`p`/`q`/mult @ next) |
 //! | 3 `term`  | `(mult, p, q)` | — (hosts only; the constancy gate drops here) |
 //!
-//! Columns carry only what gates or names certificates on rows 0–2:
-//! the four operand coordinate ptrs, `a`/`b`/`bound`, the five case
-//! flags, `act` — 21 main columns, 11 LogUp aux columns, 4 periodic
+//! The 21 main columns comprise three row-hosted cells, four operand-coordinate pointers, three
+//! curve-parameter pointers, five case flags, `act`, `mints`, two reused ordering-limb cells, and
+//! the beta/lambda pointers. The AIR also uses 11 LogUp auxiliary columns and four periodic
 //! one-hots.
 
 use alloc::{borrow::Cow, vec, vec::Vec};
