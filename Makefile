@@ -343,9 +343,9 @@ regenerate-pvm-constants: ## Regenerate PVM ACE constants and MASM artifacts (pr
 recursive-verifier-regeneration-handoff:
 	@printf '%s\n' \
 		'' \
-		'Post-regeneration handoff (not run automatically):' \
+		'Required manual post-regeneration steps:' \
 		'  1. Rebuild generated MASM docs: MIDEN_BUILD_LIB_DOCS=1 cargo build -p miden-core-lib' \
-		'  2. Update/check embedded roots: cargo test -p miden-core-lib --lib proof_compatibility_roots_match_the_embedded_core_library' \
+		'  2. Check embedded roots: cargo test -p miden-core-lib --lib proof_compatibility_roots_match_the_embedded_core_library' \
 		'  3. Verify the pinned PVM fixture: make check-pvm-proof-fixture' \
 		'Review generated docs; update roots or the fixture only when the corresponding change is intentional.'
 

@@ -494,6 +494,7 @@ fn render_pvm_layout(
     out.push_str(
         "### order; the PVM wrapper supplies the relation count and that shared base.\n\n",
     );
+    out.push_str("use miden::core::stark::types\n\n");
 
     for region in &layout.regions {
         writeln!(
