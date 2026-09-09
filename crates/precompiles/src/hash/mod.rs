@@ -379,5 +379,13 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
         .into_witness()
         .expect("hash assertion should export")
         .expect("logged hash assertion is nonempty");
-    assert_eq!(witness.root(), root);
+    assert_eq!(witness.root_unchecked(), root);
+    assert_eq!(
+        witness
+            .compute_root(Arc::new(
+                PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default()),
+            ))
+            .unwrap(),
+        root
+    );
 }

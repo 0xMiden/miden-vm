@@ -4,7 +4,7 @@
 
 #### Changes
 
-- [BREAKING] Replaced hydrated precompile witnesses with portable singleton witnesses and moved batching into `Prover::prove_precompiles`, preserving input root order and duplicates. Execution proof and execution witness encodings now use format 2; previous encodings are rejected.
+- [BREAKING] Replaced hydrated precompile witnesses with portable singleton witnesses and moved batching into `Prover::prove_precompiles`, preserving input root order and duplicates. Execution proof and execution witness encodings now use format 2; previous encodings are rejected. Deferred verification evaluates the carried witness and checks its recomputed root against the VM obligation. `PrecompileWitness::root` is now `root_unchecked`; use `compute_root(registry)` to check its computations.
 
 ## v0.32.1 (2026-09-09)
 

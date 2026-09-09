@@ -79,7 +79,8 @@ impl ExecutionWitness {
             memory: _,
             precompile_witness: precompile,
         } = execution_output;
-        let precompile_root = precompile.as_ref().map_or(TRUE_DIGEST, PrecompileWitness::root);
+        let precompile_root =
+            precompile.as_ref().map_or(TRUE_DIGEST, PrecompileWitness::root_unchecked);
         let vm = VmWitness {
             program_info,
             stack_inputs,
@@ -189,7 +190,7 @@ impl Deserializable for ExecutionWitness {
             },
             1 => {
                 let witness = PrecompileWitness::read_from(source)?;
-                if witness.root() != vm.precompile_root {
+                if witness.root_unchecked() != vm.precompile_root {
                     return Err(DeserializationError::InvalidValue(
                         "precompile witness root does not match the VM witness precompile root"
                             .into(),

@@ -65,7 +65,7 @@ pub fn assert_precompile_witness_round_trips(output: &ExecutionOutput) {
             .expect("portable precompile witness must round-trip");
     assert_eq!(decoded, output.precompile_witness);
     assert_eq!(
-        decoded.as_ref().map(PrecompileWitness::root).unwrap_or(TRUE_DIGEST),
+        decoded.as_ref().map(PrecompileWitness::root_unchecked).unwrap_or(TRUE_DIGEST),
         output.precompile_root(),
     );
 }

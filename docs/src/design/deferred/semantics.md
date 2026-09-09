@@ -171,7 +171,9 @@ represent inconsistent artifacts. None of these operations establishes validity.
 ordered aggregate folding, and the precompile STARK. It can validate a precompile artifact against
 an expected outstanding root and returns its authenticated security parameters. `Verifier::verify`
 checks the proof's compatibility declaration and execution lifecycle before it verifies the VM
-STARK. It reuses `verify_precompile` for complete proofs. A successful deferred verification returns
+STARK. For deferred proofs, it evaluates the witness and requires its recomputed root to match the
+VM-authenticated root. It reuses `verify_precompile` for complete proofs. A successful deferred
+verification returns
 the authenticated VM security parameters and outstanding root. A successful complete verification
 has no outstanding obligation and, when it includes a precompile proof, also returns the PVM
 security parameters.

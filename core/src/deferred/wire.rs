@@ -2,17 +2,18 @@
 //!
 //! Index zero is implicit TRUE. Every explicit entry references earlier entries, and the final
 //! entry opens the execution root. Decoding checks structure and commitments without evaluating
-//! precompile operations; operation support and assertion truth belong to proving.
+//! precompile operations; operation support and assertion truth require evaluation.
 
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     format,
+    sync::Arc,
     vec::Vec,
 };
 
 use super::{
-    DataChunk, DeferredState, Digest, MAX_DEFERRED_ELEMENTS, Node, NodeType, TRUE_DIGEST, Tag,
-    node::hash_payload,
+    DataChunk, DeferredState, Digest, MAX_DEFERRED_ELEMENTS, Node, NodeType, PrecompileError,
+    PrecompileRegistry, TRUE_DIGEST, Tag, node::hash_payload,
 };
 use crate::{
     Felt, ZERO,
@@ -162,9 +163,68 @@ impl PrecompileWitness {
         Ok(wire)
     }
 
-    /// Returns the one root opened by this portable graph.
-    pub fn root(&self) -> Digest {
+    /// Returns the cached commitment without checking the precompile computations.
+    ///
+    /// Use [`Self::compute_root`] to evaluate the witness and recompute its commitment.
+    pub fn root_unchecked(&self) -> Digest {
         self.root
+    }
+
+    /// Evaluates the witness under `registry` and returns its recomputed root commitment.
+    ///
+    /// Entries must reference only earlier entries or implicit TRUE at index zero. Each node is
+    /// registered in a temporary [`DeferredState`], which checks its shape and computation. The
+    /// final node must evaluate to TRUE. The cached root is not used.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an empty witness, invalid references, unsupported operations, failed
+    /// assertions, or evaluation that exceeds the deferred state budget.
+    pub fn compute_root(
+        &self,
+        registry: Arc<PrecompileRegistry>,
+    ) -> Result<Digest, PrecompileError> {
+        if self.entries.is_empty() {
+            return Err(PrecompileError::InvalidNode);
+        }
+        let mut state = DeferredState::new(registry)?;
+        let mut digests = Vec::with_capacity(self.entries.len() + 1);
+        digests.push(TRUE_DIGEST);
+        for entry in &self.entries {
+            let child = |index: u32| {
+                digests.get(index as usize).copied().ok_or(PrecompileError::InvalidNode)
+            };
+            let node = match entry {
+                WireEntry::Data { tag, chunks } => {
+                    if *tag == Tag::CHUNKS {
+                        Node::chunks(chunks.clone())?
+                    } else {
+                        Node::try_data(*tag, chunks.clone())?
+                    }
+                },
+                WireEntry::Join { tag, lhs, rhs } => {
+                    let (lhs, rhs) = (child(*lhs)?, child(*rhs)?);
+                    if *tag == Tag::AND {
+                        Node::and(lhs, rhs)
+                    } else {
+                        Node::join(*tag, lhs, rhs)?
+                    }
+                },
+                WireEntry::PairList { tag, pairs } => {
+                    let pairs = pairs
+                        .iter()
+                        .map(|&(lhs, rhs)| Ok((child(lhs)?, child(rhs)?)))
+                        .collect::<Result<Vec<_>, PrecompileError>>()?;
+                    Node::try_pair_list(*tag, pairs)?
+                },
+            };
+            digests.push(state.register(node)?);
+        }
+        let root = *digests.last().expect("TRUE seeds the digest table");
+        if state.evaluate_digest(root)? != TRUE_DIGEST {
+            return Err(PrecompileError::AssertionFailed);
+        }
+        Ok(root)
     }
 
     /// Returns canonical child-first entries. Index zero denotes implicit TRUE.
@@ -623,7 +683,7 @@ mod tests {
         let right = Node::try_data(tag(2), alloc::vec![felts(20), felts(30)]).unwrap().digest();
         let claim = Node::join(tag(3), left, left).unwrap().digest();
         assert_eq!(
-            witness.root(),
+            witness.root_unchecked(),
             Node::try_pair_list(tag(4), alloc::vec![(left, right), (claim, claim)])
                 .unwrap()
                 .digest()
@@ -665,6 +725,42 @@ mod tests {
     }
 
     #[test]
+    fn compute_root_ignores_cached_root_and_checks_entries() {
+        let mut witness = PrecompileWitness::from_entries(alloc::vec![WireEntry::Join {
+            tag: Tag::AND,
+            lhs: 0,
+            rhs: 0,
+        }])
+        .unwrap();
+        let expected = witness.root_unchecked();
+        witness.root = TRUE_DIGEST;
+        let registry = Arc::new(PrecompileRegistry::new());
+        assert_eq!(witness.compute_root(registry.clone()).unwrap(), expected);
+
+        for entries in [
+            Vec::new(),
+            alloc::vec![WireEntry::Join { tag: Tag::AND, lhs: 0, rhs: 1 }],
+            alloc::vec![
+                WireEntry::Join { tag: Tag::AND, lhs: 0, rhs: 2 },
+                WireEntry::Join { tag: Tag::AND, lhs: 0, rhs: 0 },
+            ],
+            alloc::vec![WireEntry::PairList { tag: tag(1), pairs: alloc::vec![(0, 1)] }],
+        ] {
+            let malformed = PrecompileWitness { entries, root: expected };
+            assert!(matches!(
+                malformed.compute_root(registry.clone()),
+                Err(PrecompileError::InvalidNode)
+            ));
+        }
+        let value = PrecompileWitness::from_entries(alloc::vec![WireEntry::Data {
+            tag: Tag::CHUNKS,
+            chunks: alloc::vec![felts(10)],
+        }])
+        .unwrap();
+        assert!(matches!(value.compute_root(registry), Err(PrecompileError::AssertionFailed)));
+    }
+
+    #[test]
     fn export_omits_unreachable_state_and_retains_logged_true() {
         let mut empty = DeferredState::default();
         empty.register(Node::chunks(alloc::vec![felts(10)]).unwrap()).unwrap();
@@ -674,7 +770,7 @@ mod tests {
         state.log_statement(TRUE_DIGEST).unwrap();
         let root = state.root();
         let witness = state.into_witness().unwrap().unwrap();
-        assert_eq!(witness.root(), root);
+        assert_eq!(witness.root_unchecked(), root);
         assert_eq!(witness.entries(), &[WireEntry::Join { tag: Tag::AND, lhs: 0, rhs: 0 }]);
     }
 
@@ -689,7 +785,8 @@ mod tests {
         let root = state.root();
         let witness = state.into_witness().unwrap().unwrap();
         assert_eq!(witness.entries().len(), 4_097);
-        assert_eq!(witness.root(), root);
+        assert_eq!(witness.compute_root(Arc::new(PrecompileRegistry::new())).unwrap(), root);
+        assert_eq!(witness.root_unchecked(), root);
         assert_eq!(PrecompileWitness::from_entries(witness.entries().to_vec()).unwrap(), witness);
         assert_eq!(PrecompileWitness::read_from_bytes(&witness.to_bytes()).unwrap(), witness);
     }

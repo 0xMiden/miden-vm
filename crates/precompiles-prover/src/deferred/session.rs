@@ -221,7 +221,7 @@ pub(crate) fn import_witnesses(
                 reason: "invalid structural commitment",
             })?);
         }
-        if digests.last().copied() != Some(witness.root()) {
+        if digests.last().copied() != Some(witness.root_unchecked()) {
             return Err(SessionInputError::Invalid {
                 location,
                 reason: "root commitment mismatch",
@@ -280,12 +280,12 @@ pub(crate) fn import_witnesses(
         if !import.session.is_recorded_truth(claim) {
             return Err(import.invalid("bare external assertion cannot be a precompile root"));
         }
-        import.check_commitment(witness.root(), claim.hash())?;
+        import.check_commitment(witness.root_unchecked(), claim.hash())?;
         aggregate = Some(match aggregate {
             None => claim,
             Some(previous) => import.session.assert_and(previous, claim),
         });
-        roots.push(witness.root());
+        roots.push(witness.root_unchecked());
     }
     let root = aggregate.ok_or(SessionInputError::Empty)?;
     import.location = WitnessLocation::Batch;

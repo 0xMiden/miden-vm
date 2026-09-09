@@ -430,10 +430,10 @@ mod prover_api_lifecycle {
                 .expect("a logged TRUE is a nonempty obligation"),
             ),
         );
-        let unrelated_outcome = Verifier::new()
-            .verify(&one_claim, &unrelated_witness)
-            .expect("deferred verification should authenticate only the VM root");
-        assert_eq!(unrelated_outcome.outstanding_precompile_root(), Some(one_root));
+        assert!(matches!(
+            Verifier::new().verify(&one_claim, &unrelated_witness),
+            Err(VerificationError::DeferredWitnessRootMismatch)
+        ));
 
         let two_witness = u256_witness(2);
         let two_claim = two_witness.claim();
@@ -513,7 +513,7 @@ mod prover_api_lifecycle {
                 proof: StarkProof::new(trailing_vm_bytes, one_deferred.vm().proof.hash_fn()),
                 precompile_root: one_root,
             },
-            unrelated_witness.precompile().clone(),
+            one_deferred.precompile().clone(),
         );
         assert!(matches!(
             verifier.verify(&one_claim, &trailing_vm_proof),
@@ -793,7 +793,7 @@ mod execution_witness_serialization {
             ExecutionWitness::read_from_bytes(&witness_bytes).expect("witness round trip");
         let (_, precompile) = inspected.into_parts();
         let precompile = precompile.expect("deferred execution should carry a precompile witness");
-        let expected_deferred_root = precompile.root();
+        let expected_deferred_root = precompile.root_unchecked();
         let expected_witness = precompile;
 
         let proving =

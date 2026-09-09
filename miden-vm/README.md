@@ -178,7 +178,7 @@ Stack inputs are expected to be ordered as if they would be pushed onto the stac
 Stack outputs are expected to be ordered as if they would be popped off the stack one by one. Thus, the value at the top of the stack is expected to be in the first position of the `stack_outputs`, and the order of the rest of the output elements will also match the order on the stack. This is the reverse of the order of the `stack_inputs`.
 
 The verifier returns `Result<VerificationOutcome, VerificationError>`. A successful deferred outcome
-authenticates an outstanding VM root without checking the carried witness's assertions; a successful
+evaluates the carried witness and authenticates its outstanding VM root; a successful
 complete outcome verifies every applicable STARK. Canonical proof decoding checks portable graph
 structure without a registry. Precompile proving imports each witness directly into a shared Session. See the
 [deferred-proof semantics](../docs/src/design/deferred/semantics.md) for transport and limit

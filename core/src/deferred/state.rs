@@ -5,11 +5,11 @@ use super::{
     PrecompileRegistry, PrecompileWitness, TRUE_DIGEST, Tag,
 };
 
-/// Execution-only deferred graph and eager evaluation state.
+/// Deferred graph and eager evaluation state.
 ///
 /// Registered original nodes, canonical/helper nodes, evaluation memos, the current root, and the
-/// execution budget live here until execution completes. [`Self::into_witness`] exports only the
-/// original root-reachable graph and releases the runtime state.
+/// element budget live here. [`Self::into_witness`] exports only the original root-reachable graph
+/// and releases the state.
 #[derive(Debug, Clone)]
 pub struct DeferredState {
     registry: Arc<PrecompileRegistry>,
