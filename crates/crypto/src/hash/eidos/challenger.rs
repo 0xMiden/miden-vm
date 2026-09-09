@@ -1,7 +1,17 @@
 //! Fiat-Shamir challenger built from Eidos compression.
 //!
-//! The challenger keeps a four-Felt chaining value. It compresses observations in eight-Felt
-//! blocks and uses a transition tag and counter blocks to generate outputs.
+//! The challenger keeps a four-Felt chaining value and buffers observations in eight-Felt blocks.
+//! A full observation block is compressed immediately. To begin sampling, it zero-pads the pending
+//! block, adds `1 + pending_len` to the fourth CV element in the Goldilocks field, and compresses
+//! once. The resulting four CV elements are returned in order.
+//!
+//! Each additional output word adds `9` in the same field and compresses a block containing a
+//! nonzero `u32` counter followed by seven zeros. Observing after sampling preserves the current
+//! CV, discards any unused output elements, and resets the counter. Finalization also discards
+//! unread output elements and returns a freshly generated word. One uninterrupted squeezing phase
+//! can produce `2^32` words; requesting another word panics when the counter is exhausted. This
+//! makes the absorb/squeeze boundary and the number of pending observations part of the transcript
+//! schedule.
 
 use alloc::vec::Vec;
 

@@ -119,6 +119,10 @@ impl Eidos {
     }
 
     /// Hash a byte string with the registered generic byte-string domain.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the byte length does not fit in `u32`.
     #[inline]
     pub fn hash(bytes: &[u8]) -> Word {
         Self::hash_in_domain(bytes, GENERIC_BYTE_STRING)
@@ -127,6 +131,10 @@ impl Eidos {
     /// Hash a byte string under a typed byte-string domain.
     ///
     /// A Felt-sequence or custom-schedule domain cannot be passed to this function.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the byte length does not fit in `u32`.
     pub fn hash_in_domain<D>(bytes: &[u8], _: D) -> Word
     where
         D: EidosDomain<Encoding = ByteString>,
@@ -146,6 +154,10 @@ impl Eidos {
     }
 
     /// Hash a field-element sequence under the registered generic Felt-sequence domain.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the flattened Felt length overflows `usize` or does not fit in `u32`.
     #[inline]
     pub fn hash_elements<E: BasedVectorSpace<Felt>>(elements: &[E]) -> Word {
         Self::hash_elements_in_domain(elements, GENERIC_FELT_SEQUENCE)
@@ -154,6 +166,10 @@ impl Eidos {
     /// Hash a field-element sequence under a typed Felt-sequence domain.
     ///
     /// A byte-string or custom-schedule domain cannot be passed to this function.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the flattened Felt length overflows `usize` or does not fit in `u32`.
     ///
     /// ```compile_fail
     /// use miden_crypto::{Felt, hash::eidos::{Eidos, domains::GENERIC_BYTE_STRING}};
@@ -231,6 +247,10 @@ impl Eidos {
     }
 
     /// Hash a sequence of digest words under the generic Felt-sequence domain.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the flattened Felt length does not fit in `u32`.
     #[inline]
     pub fn merge_many(values: &[Word]) -> Word {
         Self::hash_elements(Word::words_as_elements(values))
