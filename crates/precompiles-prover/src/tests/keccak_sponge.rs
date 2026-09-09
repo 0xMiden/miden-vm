@@ -158,11 +158,8 @@ fn lifted_air_validates_and_layout_matches_spec() {
     assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
     assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
     assert_eq!(layout.num_periodic_columns, NUM_PERIODIC_COLS);
-    assert_eq!(NUM_AUX_COLS, 18);
-    assert_eq!(
-        crate::tests::lookup_column_shape(&air),
-        &[2, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 3, 3, 2, 2],
-    );
+    assert_eq!(NUM_AUX_COLS, 12);
+    assert_eq!(crate::tests::lookup_column_shape(&air), &[2, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 2]);
 
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
@@ -198,7 +195,7 @@ fn periodic_columns_match_program() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // The 48 exact fractions are partitioned across 18 columns with at most
+    // The 32 exact fractions are partitioned across 12 columns with at most
     // three entries each. The degree-4 `squeeze` and `chunk-consume`
     // multiplicities remain low-arity, so every constraint stays at degree 5
     // or below and `log_quotient_degree` remains 2.
@@ -538,4 +535,20 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
     let (sponge_req, _chunk, _p2) = build_sponge_requires(&[Invocation { input: vec![0xab] }]);
     let main = generate_trace(sponge_req);
     crate::tests::check_local(AuxCorruptAir, &main);
+}
+
+#[test]
+fn normalized_xor_operand_is_pinned_on_verbatim_and_lane16_rows() {
+    // A 200-byte message has verbatim absorption at row 0 and final lane-16 padding
+    // at row 32 + 25. Every byte of the shared operand must be tied to its row's source.
+    for row in [0, SPONGE_PERIOD + 25] {
+        for byte in 0..8 {
+            let rejected = std::panic::catch_unwind(|| {
+                corrupt_and_check(0xc0_80, Invocation { input: vec![0x5a; 200] }, |main| {
+                    main.values[row * NUM_MAIN_COLS + PADDED_BYTES_RANGE.start + byte] += Felt::ONE;
+                });
+            });
+            assert!(rejected.is_err(), "forged XOR operand at row {row}, byte {byte}");
+        }
+    }
 }
