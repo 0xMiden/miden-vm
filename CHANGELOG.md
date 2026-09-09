@@ -4,7 +4,7 @@
 
 #### Features
 
-- Added `prove_partial_sync` for synchronous VM proving that leaves precompile work deferred ([protocol#3835](https://github.com/0xMiden/protocol/issues/3835)).
+- Added `prove_partial_sync` for synchronous VM proving that leaves precompile work deferred ([#3815](https://github.com/0xMiden/miden-vm/pull/3815); [protocol#3835](https://github.com/0xMiden/protocol/issues/3835)).
 
 #### Changes
 - Added type signatures for all procedures in the Miden core library ([#3791](https://github.com/0xMiden/miden-vm/pull/3791)). **NOTE:** This changes the package identity of the core library and any packages which dynamically link it. Packages which were assembled against 0.32.0 of the core library will need to be re-assembled (unless they statically linked the core library), otherwise executors that only load the latest version of the core library for you will be unable to resolve the older dependency.
