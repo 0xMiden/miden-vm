@@ -120,7 +120,7 @@ const PREPROCESSED_TRACE_COM_PTR = 3223322740
 
 ### Shared per-AIR log-height scratch. Generic consumers take the base and count as
 ### arguments; each relation owns the meaning of its offsets. The shared proof-order
-### ranking supports at most 12 AIRs, while 16 cells leave aligned headroom.
+### map rendering supports at most 12 AIRs, while 16 cells leave aligned headroom.
 const AIR_TRACE_LENGTH_LOGS_PTR = 3223322744
 const AIR_TRACE_LENGTH_LOGS_CAPACITY = 16
 

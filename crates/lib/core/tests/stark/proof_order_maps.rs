@@ -244,9 +244,8 @@ fn check_generic_renderer_config(num_airs: usize, word_load_heights: bool, word_
     }
 }
 
-/// The renderer's public contract supports every AIR count from two through twelve, not only the
-/// current four- and ten-AIR production layouts. Execute every distinct load/store path so a new
-/// relation cannot be the first caller to exercise unverified stack choreography.
+/// The renderer supports every AIR count from two through twelve. This test executes every
+/// supported count and each load/store mode.
 #[test]
 fn generic_renderer_executes_every_supported_count_and_access_mode() {
     for num_airs in 2..=MAX_ORDER_AIRS {

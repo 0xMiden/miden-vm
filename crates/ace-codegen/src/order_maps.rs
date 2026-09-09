@@ -239,9 +239,10 @@ pub fn render_proof_order_maps(config: &ProofOrderMapsConfig<'_>) -> Result<Stri
     let mut stack = Stack::new();
 
     // The table pointers either sit beneath the keys for the whole pass or are pushed on top of
-    // the sorted keys afterwards. `dup.n` and `movup.n` are single operations only up to index 7
-    // (plus a few odd indices), so pointers stay beneath when keys and pointers together fit that
-    // reach, and go on top otherwise, where each unpacking step lifts the next key above them.
+    // the sorted keys afterwards. The common directly encoded range for `dup.n` and `movup.n`
+    // ends at index 7; deeper indices have operation-specific costs. Pointers therefore stay
+    // beneath when keys and pointers together fit that reach, and go on top otherwise, where each
+    // unpacking step lifts the next key above them.
     let num_pointers = 2;
     let pointers_beneath = num_airs + num_pointers <= 8;
     let push_pointers = |stack: &mut Stack| {
