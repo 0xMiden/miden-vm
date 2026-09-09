@@ -6,7 +6,7 @@
 //! the transcript absorb and the DEEP Horner accumulation stay positional over the advice stream,
 //! and only the `adv_pipe` destination is retargeted at segment boundaries.
 //!
-//! This file pins both halves of that mechanism at PVM scale — ten chiplets, 230 blocks, 22
+//! This file pins both halves of that mechanism at PVM scale — ten chiplets, 202 blocks, 22
 //! segments — against the checked-in generated hook:
 //!
 //! - the scatter is *transparent*: the full 16-slot working frame (sponge, pointer, alpha pointer,
@@ -54,12 +54,12 @@ const OOD_BASE: u32 = 16_384;
 
 /// Cycle ceiling for the checked-in hook's two-row ingest.
 ///
-/// Absorbing the row costs three cycles per block, so both rows are 2 x 230 x 3 = 1,380 cycles of
+/// Absorbing the row costs three cycles per block, so both rows are 2 x 202 x 3 = 1,212 cycles of
 /// unavoidable work; per-segment dispatch adds about 30 cycles to each of the 22 segments, twice
-/// (measured: 2,724). Guarding the destination pointer once per block instead would add at least
-/// ten cycles to every one of the 460 blocks — the per-block loop measures 3,765 cycles for a
-/// single row — landing far above this ceiling. That is the point: this bound is what makes the
-/// mechanism, not merely the addresses, a tested property of the generated file.
+/// (measured: 2,554). Guarding the destination pointer once per block instead would add at least
+/// ten cycles to every one of the 404 blocks — the per-block loop measures 3,373 cycles for a
+/// single row — landing far above this ceiling. The ceiling enforces the per-segment dispatch cost
+/// profile in addition to address correctness.
 const MAX_TWO_ROW_INGEST_CYCLES: u64 = 3_200;
 
 const INITIAL_SPONGE: [u64; 12] = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
@@ -74,9 +74,9 @@ const INITIAL_ACC: [u64; 2] = [7, 9];
 /// Widths are counted in evaluation slots (one per committed base column, or per auxiliary
 /// coordinate); each slot is one extension-field value, hence two felts on the wire.
 ///
-/// `ChipletAir` is not exported from `miden-precompiles-prover`, so these are read back out of the
-/// generated hook's own header rather than re-derived here; `pvm_row_geometry_is_the_one_the_hook
-/// _was_rendered_from` (in that crate) is what ties the header to the chiplet declarations.
+/// This benchmark reads the widths from the checked-in generated hook's header. The verifier-side
+/// `pvm_row_geometry_is_the_one_the_hook_was_rendered_from` test ties that header to the
+/// [`miden_precompiles_air::ChipletAir`] declarations.
 #[derive(Clone, Debug)]
 struct RowGeometry {
     preprocessed: Vec<usize>,

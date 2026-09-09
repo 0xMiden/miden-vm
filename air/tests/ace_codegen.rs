@@ -347,9 +347,8 @@ fn ir_lowering_matches_symbolic_lowering_node_for_node() {
 /// The recursive verifier's canonical entry point must be a thin wrapper over the canonical
 /// builder: same encoding, same commitment, and no dependence on the proof order.
 ///
-/// The order-invariance itself is established by the cross-order fold sweep below; what this pins
-/// is that the production entry point evaluates the very circuit that sweep reasons about, rather
-/// than a separately assembled one that happens to agree today.
+/// The order-invariance itself is established by the cross-order fold sweep below. This test binds
+/// the production entry point to the exact circuit used by that sweep.
 #[test]
 fn recursive_verifier_circuit_matches_the_canonical_builder() {
     use miden_air::ace::{

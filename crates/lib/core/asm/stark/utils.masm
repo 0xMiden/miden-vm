@@ -7,10 +7,8 @@ const NUM_QUERIES_MIN = 7
 const NUM_QUERIES_MAX = 150
 const POW_BITS_MAX = 31
 
-# Largest AIR count a relation may declare. Bounded by the Lehmer rank of a full permutation
-# fitting in u32 (13! overflows it), which the shared ranking still uses to enumerate every
-# proof order for tests, even though the verifier no longer routes by rank. Must match the shared
-# Rust `miden_ace_codegen::MAX_ORDER_AIRS` (enforced by cross-tests).
+# Largest AIR count supported by the shared Lehmer encoding: 12! fits in u32 and 13! does not.
+# Must equal the Rust `miden_ace_codegen::MAX_ORDER_AIRS` constant.
 const MAX_ORDER_AIRS = 12
 
 #! Loads the proof's security parameters from advice into the generic verifier context.
