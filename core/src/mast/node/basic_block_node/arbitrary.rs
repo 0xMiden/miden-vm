@@ -309,9 +309,10 @@ pub struct MastForestParams {
     pub max_dyns: usize,
     /// Guarantees the samples provide.
     pub mode: GenerationMode,
-    /// Procedure hashes of a caller-supplied kernel. When `None`, the kernel is derived from the
-    /// generated procedure roots. Duplicate hashes or more than
-    /// [`KernelDescriptor::MAX_NUM_PROCEDURES`] entries make [`forest_kernel_strategy`] panic.
+    /// Procedure hashes of a caller-supplied kernel. When `None`, the kernel holds exactly the
+    /// digests the emitted syscalls target and is empty without syscalls. Duplicate hashes or more
+    /// than [`KernelDescriptor::MAX_NUM_PROCEDURES`] entries make [`forest_kernel_strategy`]
+    /// panic.
     pub kernel_procedures: Option<Vec<Word>>,
 }
 
@@ -350,105 +351,84 @@ enum ExternalPick {
 struct ForestSeeds {
     basic_blocks: Vec<BasicBlockNode>,
     join_pairs: Vec<(usize, usize)>,
-    split_pairs: Vec<(usize, usize)>,
+    /// Branch indices and the condition pushed before the split (executable mode).
+    splits: Vec<(usize, usize, bool)>,
     loop_indices: Vec<usize>,
     call_indices: Vec<usize>,
-    /// Condition pushed before each split (executable mode).
-    cond_bits: Vec<bool>,
     syscall_picks: Vec<usize>,
     external_picks: Vec<ExternalPick>,
     /// `true` selects `dyncall`, `false` selects `dyn`.
     dyn_selectors: Vec<bool>,
-    /// Which skeleton nodes become procedure roots.
+    /// One flag per skeleton node: whether it becomes a procedure root.
     root_selection: Vec<bool>,
-    /// Which roots join the generated kernel besides syscall targets.
-    kernel_inclusion: Vec<bool>,
 }
 
 fn forest_seeds_strategy(params: &MastForestParams) -> BoxedStrategy<ForestSeeds> {
     let executable = params.mode == GenerationMode::Executable;
     let block_params = BasicBlockNodeParams { executable, ..Default::default() };
     let blocks = (*params.blocks.start()).max(1)..=(*params.blocks.end()).max(1);
-    let caps = params.clone();
+    let external_picks: BoxedStrategy<Vec<ExternalPick>> = if executable {
+        prop::collection::vec(any::<(usize, usize)>(), 0..=params.max_externals)
+            .prop_map(|picks| {
+                picks
+                    .into_iter()
+                    .map(|(root, sibling)| ExternalPick::Local { root, sibling })
+                    .collect()
+            })
+            .boxed()
+    } else {
+        prop::collection::vec(any::<[u32; 4]>(), 0..=params.max_externals)
+            .prop_map(|seeds| seeds.into_iter().map(ExternalPick::Random).collect())
+            .boxed()
+    };
+    let max_dyns = if executable { 0 } else { params.max_dyns };
 
-    prop::collection::vec(any_with::<BasicBlockNode>(block_params), blocks)
-        .prop_flat_map(move |basic_blocks| {
+    (
+        prop::collection::vec(any_with::<BasicBlockNode>(block_params), blocks),
+        (
+            prop::collection::vec(any::<(usize, usize)>(), 0..=params.max_joins),
+            prop::collection::vec(any::<(usize, usize, bool)>(), 0..=params.max_splits),
+            prop::collection::vec(any::<usize>(), 0..=params.max_loops),
+            prop::collection::vec(any::<usize>(), 0..=params.max_calls),
+        ),
+        (
+            prop::collection::vec(any::<usize>(), 0..=params.max_syscalls),
+            external_picks,
+            prop::collection::vec(any::<bool>(), 0..=max_dyns),
+        ),
+    )
+        // Root selection is the one vector that needs an exact size: a flag per skeleton node.
+        .prop_flat_map(|(basic_blocks, control_flow, tail)| {
+            let (join_pairs, splits, loop_indices, call_indices) = &control_flow;
+            let skeleton_nodes = basic_blocks.len()
+                + join_pairs.len()
+                + splits.len()
+                + loop_indices.len()
+                + call_indices.len();
             (
-                Just(basic_blocks),
-                (
-                    0..=caps.max_joins,
-                    0..=caps.max_splits,
-                    0..=caps.max_loops,
-                    0..=caps.max_calls,
-                    0..=caps.max_syscalls,
-                    0..=caps.max_externals,
-                    0..=if executable { 0 } else { caps.max_dyns },
-                ),
+                Just((basic_blocks, control_flow, tail)),
+                prop::collection::vec(any::<bool>(), skeleton_nodes),
             )
         })
-        .prop_flat_map(
-            move |(basic_blocks, (joins, splits, loops, calls, syscalls, externals, dyns))| {
-                // Upper bound on the node count, used to size the selection bit vectors.
-                let max_nodes = basic_blocks.len()
-                    + joins
-                    + 2 * splits
-                    + 2 * loops
-                    + calls
-                    + syscalls
-                    + 2 * externals
-                    + dyns
-                    + 2;
-                let external_picks: BoxedStrategy<Vec<ExternalPick>> = if executable {
-                    prop::collection::vec(any::<(usize, usize)>(), externals)
-                        .prop_map(|picks| {
-                            picks
-                                .into_iter()
-                                .map(|(root, sibling)| ExternalPick::Local { root, sibling })
-                                .collect()
-                        })
-                        .boxed()
-                } else {
-                    prop::collection::vec(any::<[u32; 4]>(), externals)
-                        .prop_map(|seeds| seeds.into_iter().map(ExternalPick::Random).collect())
-                        .boxed()
-                };
-                (
-                    Just(basic_blocks),
-                    (
-                        prop::collection::vec(any::<(usize, usize)>(), joins),
-                        prop::collection::vec(any::<(usize, usize)>(), splits),
-                        prop::collection::vec(any::<usize>(), loops),
-                        prop::collection::vec(any::<usize>(), calls),
-                        prop::collection::vec(any::<bool>(), splits),
-                    ),
-                    (
-                        prop::collection::vec(any::<usize>(), syscalls),
-                        external_picks,
-                        prop::collection::vec(any::<bool>(), dyns),
-                        prop::collection::vec(any::<bool>(), max_nodes),
-                        prop::collection::vec(any::<bool>(), max_nodes),
-                    ),
-                )
-            },
-        )
         .prop_map(
             |(
-                basic_blocks,
-                (join_pairs, split_pairs, loop_indices, call_indices, cond_bits),
-                (syscall_picks, external_picks, dyn_selectors, root_selection, kernel_inclusion),
+                (
+                    basic_blocks,
+                    (join_pairs, splits, loop_indices, call_indices),
+                    (syscall_picks, external_picks, dyn_selectors),
+                ),
+                root_selection,
             )| {
                 ForestSeeds {
                     basic_blocks,
                     join_pairs,
-                    split_pairs,
+                    splits,
                     loop_indices,
                     call_indices,
-                    cond_bits,
                     syscall_picks,
                     external_picks,
                     dyn_selectors,
                     root_selection,
-                    kernel_inclusion,
                 }
             },
         )
@@ -519,20 +499,18 @@ fn build_skeleton(seeds: &ForestSeeds, executable: bool) -> Skeleton {
         })
         .collect();
     let mut conditions = ConditionBlocks::default();
-    let mut cond_bits = seeds.cond_bits.iter().copied();
 
     for &(first, second) in &seeds.join_pairs {
         let join = JoinNodeBuilder::new([choose(&node_ids, first), choose(&node_ids, second)]);
         node_ids.push(forest.push_node(join).expect("join"));
     }
 
-    for &(on_true, on_false) in &seeds.split_pairs {
+    for &(on_true, on_false, condition) in &seeds.splits {
         let split =
             SplitNodeBuilder::new([choose(&node_ids, on_true), choose(&node_ids, on_false)]);
         let mut id = forest.push_node(split).expect("split");
         if executable {
-            let bit = cond_bits.next().unwrap_or(false);
-            id = with_condition(&mut forest, &mut conditions, bit, id);
+            id = with_condition(&mut forest, &mut conditions, condition, id);
         }
         node_ids.push(id);
     }
@@ -627,7 +605,7 @@ fn build_executable_forest(
     promote_unreachable(&mut forest, &mut roots);
 
     let kernel = kernel.cloned().unwrap_or_else(|| {
-        generated_kernel(&forest, &roots, syscall_hashes, &seeds.kernel_inclusion)
+        KernelDescriptor::from_hashes(syscall_hashes).expect("unique hashes within the size limit")
     });
     let forest = forest.build().expect("generated forest is valid");
     (forest, kernel)
@@ -711,29 +689,6 @@ fn add_kernel_syscalls(
         forest.mark_root(syscall);
         roots.push(syscall);
     }
-}
-
-/// Builds the kernel from the syscall targets, then from roots selected by `inclusion` while
-/// room remains. Falls back to the first root, so the kernel is never empty.
-fn generated_kernel(
-    forest: &DenseMastForestBuilder,
-    roots: &[MastNodeId],
-    mut hashes: Vec<Word>,
-    inclusion: &[bool],
-) -> KernelDescriptor {
-    for (&root, &included) in roots.iter().zip(inclusion) {
-        if hashes.len() >= KernelDescriptor::MAX_NUM_PROCEDURES {
-            break;
-        }
-        let digest = digest_of(forest, root);
-        if included && !hashes.contains(&digest) {
-            hashes.push(digest);
-        }
-    }
-    if hashes.is_empty() {
-        hashes.push(digest_of(forest, roots[0]));
-    }
-    KernelDescriptor::from_hashes(hashes).expect("unique hashes within the size limit")
 }
 
 // STRUCTURE-ONLY MODE
@@ -1147,13 +1102,13 @@ mod tests {
         }
 
         #[test]
-        fn generated_kernel_holds_forest_roots(
+        fn generated_kernel_lists_exactly_the_syscall_targets(
             (forest, kernel) in forest_kernel_strategy(executable_params())
         ) {
-            prop_assert!(!kernel.is_empty());
-            for hash in kernel.proc_hashes() {
-                prop_assert!(forest.find_procedure_root(*hash).is_some(), "kernel hash is not a root");
-            }
+            let targets: BTreeSet<Word> =
+                syscalls(&forest).map(|call| forest[call.callee()].digest()).collect();
+            let listed: BTreeSet<Word> = kernel.proc_hashes().iter().copied().collect();
+            prop_assert_eq!(listed, targets);
         }
 
         #[test]
