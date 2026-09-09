@@ -30,8 +30,9 @@ use crate::{
     ec::{
         COL_IS_CERT, EcRequire,
         add::{
-            CELL_R, COL_CANCEL, COL_DBL, COL_GEN, COL_MINTS, COL_PAI_P, COL_PAI_Q, EcGroupAddAir,
-            NUM_MAIN_COLS as ADD_COLS, PERIOD, ROW_RES,
+            CELL_R, COL_CANCEL, COL_DBL, COL_GEN, COL_MINTS, COL_PAI_P, COL_PAI_Q, COL_RP_HI,
+            COL_RP_LO, COL_RQ_HI, COL_RQ_LO, EcGroupAddAir, NUM_MAIN_COLS as ADD_COLS, PERIOD,
+            ROW_RES, ROW_TERM,
             trace::{EcAddRequires, generate_trace as ec_add_trace},
         },
         point_store_groups::{
@@ -615,8 +616,10 @@ fn empty_trace_holds() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // Flattened via `frac_col!` into 12 aux columns (col 0 carries the `EcGroupAdd` provide alone,
-    // cols 8 and 11 each carry a lone leftover
+    assert_eq!(miden_lifted_air::BaseAir::<Felt>::width(&EcGroupAddAir), 21);
+    assert_eq!(miden_lifted_air::LiftedAir::<Felt, QuadFelt>::aux_width(&EcGroupAddAir), 11);
+    // Flattened via `frac_col!` into 11 aux columns (col 0 carries the `EcGroupAdd` provide alone,
+    // cols 8 and 10 each carry a lone leftover
     // fraction, the rest each a pair), so every closing constraint stays
     // at degree ≤ 3 → log_quotient_degree = 1.
     assert_eq!(crate::tests::log_quotient_degree(&EcGroupAddAir), 1);
@@ -847,6 +850,28 @@ fn mint_result_equal_operand_rejected() {
     let mut forged = traces.ec_add_main().clone();
     tamper_cell(&mut forged, ROW_RES, CELL_R, g_pt.addr());
     check_ec_add(&forged);
+}
+
+#[test]
+fn ordering_limbs_on_both_rows_are_range_checked() {
+    let mut k1 = k1_stack();
+    k1.stack.require().add(k1.g_pt, k1.g2_pt, 0);
+    let traces = k1.stack.traces();
+    let mut rng = StdRng::seed_from_u64(0xecad_dc04);
+    traces.check();
+    assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
+
+    for (row, lo, hi) in [(ROW_RES, COL_RP_LO, COL_RP_HI), (ROW_TERM, COL_RQ_LO, COL_RQ_HI)] {
+        let mut forged = traces.ec_add_main().clone();
+        // Preserve lo + 2^16 * hi, so local ordering still holds. The range lookup
+        // must reject the out-of-range limbs for each operand independently.
+        forged.values[row * ADD_COLS + lo] += Felt::from(1u32 << 16);
+        forged.values[row * ADD_COLS + hi] -= Felt::from(1u8);
+        check_ec_add(&forged);
+        let mut mains = traces.mains();
+        mains[4] = &forged;
+        assert_ne!(stack_residual(&mains, &mut rng), 0, "ordering limbs on row {row}");
+    }
 }
 
 #[test]
