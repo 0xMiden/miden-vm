@@ -196,8 +196,8 @@ enum NodeKind {
     Zero,
     /// AND node folding two children's bindings into the node hash.
     And { lhs: EidosDigest, rhs: EidosDigest },
-    /// Uint leaf / explicit pin claim — hashes a stored uint's 8×u32 value (`lo` ‖ `hi`,
-    /// its two 4×32 halves pulled over `UintVal`). Runtime leaves use the uint VALUE frame
+    /// Uint leaf / explicit pin claim — hashes the complete 8×32-bit value carried by one
+    /// `UintVal` message. Runtime leaves use the uint VALUE frame
     /// `[UintPrecompile::domain(), VALUE_OP_ID, bound_ptr, 0]` and bind
     /// `Binding(hash, Uint, ptr, bound_ptr)`. Explicit pin claims use
     /// `(PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr, 0)` with `pin_ptr = ptr` and bind
@@ -909,10 +909,9 @@ impl TranscriptEvalRequires {
 
     /// Record an explicit uint pin claim binding `value` to `Binding(hash, True)`.
     ///
-    /// The frame is `(PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr = ptr, 0)`, and the
-    /// row consumes both
-    /// `UintVal` halves at `ptr`. The returned handle is foldable into the initial/root transcript
-    /// exactly like any [`Truthy`].
+    /// The frame is `(PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr = ptr, 0)`, and the row
+    /// consumes the complete `UintVal` message at `ptr`. The returned handle is foldable into the
+    /// initial/root transcript exactly like any [`Truthy`].
     pub fn pin_uint(
         &mut self,
         ptr: UintPtr,

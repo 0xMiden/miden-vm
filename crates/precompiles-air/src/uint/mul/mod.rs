@@ -4,15 +4,12 @@
 //! A **relation** AIR over the [UintStore](crate::uint): it mints no
 //! value. `a`, `b`, `c`, `r` and the modulus all live in the store —
 //! the convolution operands (`a`, `b`, the modulus) are pulled in over
-//! the raw 8×16 [`UintLimbs`](crate::relations::BusId::UintLimbs) view,
-//! the linear operands (`c`, `r`) over the 4×32
+//! the complete 16×16-bit [`UintLimbs`](crate::relations::BusId::UintLimbs) view,
+//! the linear operands (`c`, `r`) over the complete 8×32-bit
 //! [`UintVal`](crate::relations::BusId::UintVal) view — and this chiplet
 //! ties their ptrs to the MAC identity, *providing* the
-//! [`UintMul`](crate::relations::BusId::UintMul) relation, consumed by the
-//! eval chip's mul `UintOp` nodes (the scaled shapes await the ECC gadget).
-//!
-//! See the design notes for the full design.
-//!
+//! [`UintMul`](crate::relations::BusId::UintMul) relation, consumed by transcript-eval uint nodes
+//! and the EC relation AIRs.
 //! ## The identity (vertical Schwartz–Zippel)
 //!
 //! With the store holding `bound = p − 1`, witnessed quotient `q` and
@@ -24,7 +21,7 @@
 //!
 //! at `t = 2¹⁶`: `a`, `b`, `bound`, `q` are 16-bit limb polynomials
 //! (`q` runs to 17 limbs — `q ≤ κₐ·p + κ_c` overflows 16 for `κₐ ≥ 2`
-//! on a full-size modulus); the linear `c` / `r` enter as their 4×32
+//! on a full-size modulus); the linear `c` / `r` enter as their 8×32-bit
 //! views at even powers (`C(β²) = Σ Cₖβ²ᵏ`). `E(X)` has degree ≤ 31,
 //! so `Γ = −E_pre/(X − t)` has **31 coefficients** `γ₀..γ₃₀`, each
 //! committed sign-offset as `γ'ₖ = γₖ + 2³¹ ∈ [0, 2³²)` in two
@@ -53,10 +50,10 @@
 //! | 1   | `b`  | b's limbs (0–15) | γ spill (16–18) |
 //! | 2   | `p`  | bound's limbs (0–15) | γ spill (16–18) |
 //! | 3   | `q`  | q₀..q₁₆ (0–16) | γ spill (17–18) |
-//! | 4   | `r`  | r's 4×32 halves (0–7) | γ spill (8–18) |
+//! | 4   | `r`  | r's eight 32-bit limbs (0–7) | γ spill (8–18) |
 //! | 5   | `g0` | — | γ (0–18, all cells) |
 //! | 6   | `g1` | — | γ (0–14; 15–18 spare) |
-//! | 7   | `c`  | c's 4×32 halves (0–7) | mult, c_ptr, κ_c, is_sub, κ_c_signed (8–12); γ spill (13–18) |
+//! | 7   | `c`  | c's eight 32-bit limbs (0–7) | mult, c_ptr, κ_c, is_sub, κ_c_signed (8–12); γ spill (13–18) |
 //!
 //! [`GAMMA_SLOTS`] is the shared placement table used by the AIR and trace generator. The `c` row
 //! holds the term metadata and closes the block. Its local contribution has not yet entered `id`,
@@ -296,7 +293,7 @@ const fn gamma_slots() -> [(usize, usize); NUM_GAMMA_SLOTS] {
 
 // Aux layout: col 0 = centered LogUp running sum (the UintMul provide), the raw
 // UintLimbs consumes, Range16 on every cell position, the two κ
-// Range16s, and the 4×32 UintVal consumes, then the Schwartz–Zippel
+// Range16s, and the 8×32-bit UintVal consumes, then the Schwartz–Zippel
 // `id` and staging `S` registers (outside the declared LogUp prefix).
 // FLATTENED to lqd 1: every fraction is an act-gated degree-2
 // multiplicity, paired ≤ 2 per column (col 0 a single fraction; the
@@ -311,7 +308,7 @@ pub(crate) const NUM_LOGUP_COLS: usize = 1 // the UintMul provide
     + NUM_RAW_CONSUME_COLS // the three merged raw UintLimbs consumes (a, b, bound)
     + NUM_RANGE16_COLS // Range16 on every cell position
     + 1 // the two κ Range16s
-    + 1; // the merged 4×32 UintVal consumes (r, c)
+    + 1; // the merged 8×32-bit UintVal consumes (r, c)
 const REG_ID: usize = NUM_LOGUP_COLS;
 const REG_S: usize = NUM_LOGUP_COLS + 1;
 pub const AUX_WIDTH: usize = NUM_LOGUP_COLS + 2;
@@ -425,7 +422,7 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
 
         // Weighted cell sums: the 16-limb operands (a/b/bound, cells
         // 0–15), the 17-limb quotient (cells 0–16), and the linear r/c
-        // operands (4×32 limbs at even powers, cells 0–7).
+        // operands (eight 32-bit limbs at even powers, cells 0–7).
         let full16_sum: AB::ExprEF =
             (0..16).fold(AB::ExprEF::ZERO, |acc, i| acc + bp[i].clone() * AB::Expr::from(local[i]));
         let full_q_sum: AB::ExprEF = (0..NUM_Q_LIMBS)
@@ -446,7 +443,7 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
         let product = s.clone() * full16_sum.clone() * sel[ROW_B].clone();
         // The quotient: S = bound(β) through the `q` row; q(β)·(bound(β)+1).
         let quotient = (s + AB::ExprEF::ONE) * full_q_sum * sel[ROW_Q].clone();
-        // The linear operands: 4×32 limbs at even powers, both halves on
+        // The linear operands: eight 32-bit limbs at even powers, both halves on
         // one row. κ_c_signed is local to the `c` row.
         let linear = val_sum.clone() * (sel[ROW_C].clone() * kappa_c_signed_local.clone())
             - val_sum.clone() * sel[ROW_R].clone();
@@ -806,9 +803,8 @@ where
             },
             pair_deg,
         );
-        // col: the merged 4×32 UintVal consumes (r, then c) — one
-        // message per operand now that both halves are local, so both
-        // fit in a single column.
+        // col: the merged 8×32-bit UintVal consumes (r, then c). Each complete message occupies
+        // one row, so both fit in a single column.
         let val_full: [LB::Expr; 8] = array::from_fn(|i| {
             if i < 4 {
                 val_lo[i].clone()
