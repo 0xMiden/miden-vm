@@ -50,7 +50,7 @@ use crate::{
 const RATE_BYTES: usize = 136;
 /// Keccak rate in 64-bit lanes.
 const RATE_LANES: usize = 17;
-/// Chunk granularity in bytes (one Poseidon-transcript chunk = 256 bits).
+/// Chunk granularity in bytes (one Eidos message block = 256 bits).
 const CHUNK_BYTES: usize = 32;
 /// Chunk granularity in lanes.
 const CHUNK_LANES: usize = CHUNK_BYTES / 8;
