@@ -253,10 +253,10 @@ impl Host for PvmSettlementHost {
                 }
                 .into());
             }
-            if requested_root != self.precompile_witness.root() {
+            if requested_root != self.precompile_witness.root_unchecked() {
                 return Err(SettlementEventError::RootMismatch {
                     requested: requested_root,
-                    available: self.precompile_witness.root(),
+                    available: self.precompile_witness.root_unchecked(),
                 }
                 .into());
             }

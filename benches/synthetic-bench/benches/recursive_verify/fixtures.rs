@@ -326,7 +326,7 @@ fn execute_pvm_workload(workload_path: &Path) -> PrecompileWitness {
 
 fn generate_pvm_proof(witness: PrecompileWitness) -> PrecompileProof {
     eprintln!("proving canonical precompile witness with Poseidon2...");
-    let root = witness.root();
+    let root = witness.root_unchecked();
     let proof = Prover::new()
         .with_hash_fn(HashFunction::Poseidon2)
         .prove_precompiles(vec![witness])
@@ -342,9 +342,9 @@ fn load_pvm_proof(config: &BenchConfig) -> PrecompileProof {
     let cache_key = pvm_proof_cache_key(&workload_path);
     eprintln!("executing canonical 100-Keccak/4-ECDSA workload...");
     let witness = execute_pvm_workload(&workload_path);
-    let cached = config
-        .pvm_proof_cache_dir()
-        .and_then(|cache_dir| load_cached_pvm_proof(cache_dir, cache_key.as_str(), witness.root()));
+    let cached = config.pvm_proof_cache_dir().and_then(|cache_dir| {
+        load_cached_pvm_proof(cache_dir, cache_key.as_str(), witness.root_unchecked())
+    });
     let (proof, cache_status) = if let Some(proof) = cached {
         (proof, "hit")
     } else {

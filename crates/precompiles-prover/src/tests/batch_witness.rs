@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, vec, vec::Vec};
+use alloc::{collections::BTreeMap, sync::Arc, vec, vec::Vec};
 
 use miden_core::{
     Felt,
@@ -9,6 +9,7 @@ use miden_core::{
 };
 use miden_precompiles::{CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile};
 use miden_precompiles_verifier::verify_deferred;
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     HashFunction, SessionInputError, WitnessLocation,
@@ -104,7 +105,7 @@ impl WitnessFixture {
             indices.insert(digest, entries.len() as u32);
         }
         let witness = PrecompileWitness::from_entries(entries).unwrap();
-        assert_eq!(witness.root(), root);
+        assert_eq!(witness.root_unchecked(), root);
         witness
     }
 }
@@ -144,17 +145,40 @@ fn shared_witnesses() -> (PrecompileWitness, PrecompileWitness) {
 }
 
 #[test]
+fn compute_root_evaluates_arithmetic_and_hash_claims() {
+    let registry = Arc::new(miden_precompiles::registry());
+    let (a, b) = shared_witnesses();
+    for witness in [a, b] {
+        assert_eq!(witness.compute_root(registry.clone()).unwrap(), witness.root_unchecked());
+    }
+    let mut fixture = WitnessFixture::new();
+    let one = uint(&mut fixture, UintDomain::U256, 1);
+    let two = uint(&mut fixture, UintDomain::U256, 2);
+    let false_eq = uint_eq(&mut fixture, one, two);
+    let chunks = fixture.register(Node::chunks_from_bytes(b"abc")).unwrap();
+    let false_hash = fixture.register(Keccak256Precompile::assert_node(3, chunks, chunks)).unwrap();
+    for claim in [false_eq, false_hash] {
+        let root = fixture.register(Node::and(TRUE_DIGEST, claim)).unwrap();
+        let error = fixture.open(root).compute_root(registry.clone()).unwrap_err();
+        assert!(matches!(error.root(), miden_core::deferred::PrecompileError::AssertionFailed));
+    }
+}
+
+#[test]
 fn ordered_repeated_batches_prove_and_verify() {
     let (a, b) = shared_witnesses();
     for inputs in [vec![a.clone(), b.clone(), a.clone()], vec![b.clone(), a.clone(), a.clone()]] {
-        let roots: Vec<_> = inputs.iter().map(PrecompileWitness::root).collect();
+        let roots: Vec<_> = inputs.iter().map(PrecompileWitness::root_unchecked).collect();
         let root = roots.iter().copied().reduce(fold_deferred_root).unwrap();
         let proof = crate::prove_precompiles(inputs, HashFunction::Blake3_256).unwrap();
         assert_eq!(proof.roots, roots);
         verify_deferred(&proof.proof, root).unwrap();
         assert!(verify_deferred(&proof.proof, TRUE_DIGEST).is_err());
     }
-    assert_ne!(fold_deferred_root(a.root(), b.root()), fold_deferred_root(b.root(), a.root()));
+    assert_ne!(
+        fold_deferred_root(a.root_unchecked(), b.root_unchecked()),
+        fold_deferred_root(b.root_unchecked(), a.root_unchecked())
+    );
 }
 
 #[test]
@@ -167,6 +191,46 @@ fn shared_subgraphs_keep_local_indices_and_binding_uses() {
     let eq = uint_eq(&mut fixture, value, value);
     let root = fixture.open(eq);
     session_from_witnesses(vec![a.clone(), b, a, root]).unwrap().finish().check();
+}
+
+#[test]
+fn randomized_shared_arithmetic_preserves_assertion_uses() {
+    let mut rng = StdRng::seed_from_u64(0x0da6_3811);
+    for _ in 0..4 {
+        let mut fixture = WitnessFixture::new();
+        let mut values: Vec<_> = (0..4)
+            .map(|_| {
+                let value = rng.random_range(1..32);
+                (uint(&mut fixture, UintDomain::U256, value), value)
+            })
+            .collect();
+        let mut assertions = vec![TRUE_DIGEST];
+        let mut inputs = Vec::new();
+        for step in 0..12 {
+            let (lhs, a) = values[rng.random_range(0..values.len())];
+            let (rhs, b) = values[rng.random_range(0..values.len())];
+            // Small additions keep the independent u32 oracle exact while reusing prior nodes.
+            let sum = fixture
+                .register(
+                    Node::join(UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID), lhs, rhs)
+                        .unwrap(),
+                )
+                .unwrap();
+            let expected = uint(&mut fixture, UintDomain::U256, a + b);
+            let eq = uint_eq(&mut fixture, sum, expected);
+            let shared = assertions[rng.random_range(0..assertions.len())];
+            let assertion = fixture.register(Node::and(eq, shared)).unwrap();
+            fixture.log_statement(assertion).unwrap();
+            values.push((sum, a + b));
+            assertions.push(assertion);
+            if step % 4 == 3 {
+                inputs.push(fixture.witness());
+            }
+        }
+        inputs.insert(1, inputs[2].clone());
+        inputs.push(inputs[0].clone());
+        session_from_witnesses(inputs).unwrap().finish().check();
+    }
 }
 
 #[test]
@@ -264,6 +328,21 @@ fn malformed_semantics_are_located_before_session_operations() {
         .unwrap();
     let chunks = fixture.register(Node::chunks_from_bytes(b"abc")).unwrap();
     let false_hash = fixture.register(Keccak256Precompile::assert_node(3, chunks, chunks)).unwrap();
+    // All remain structurally valid: hash length and byte packing are importer semantics.
+    let short_hash_input =
+        fixture.register(Keccak256Precompile::assert_node(33, chunks, chunks)).unwrap();
+    let nonzero_hash_padding =
+        fixture.register(Keccak256Precompile::assert_node(2, chunks, chunks)).unwrap();
+    let wide_chunks = fixture
+        .register(Node::chunks(vec![[Felt::new(u32::MAX as u64 + 1).unwrap(); 8]]).unwrap())
+        .unwrap();
+    let wide_hash_limb = fixture
+        .register(Keccak256Precompile::assert_node(32, wide_chunks, chunks))
+        .unwrap();
+    let long_chunks = fixture.register(Node::chunks_from_bytes(&[0; 64])).unwrap();
+    let long_hash_output = fixture
+        .register(Keccak256Precompile::assert_node(3, chunks, long_chunks))
+        .unwrap();
     let (valid, _) = shared_witnesses();
     for root in [
         false_eq,
@@ -288,6 +367,24 @@ fn malformed_semantics_are_located_before_session_operations() {
                     location: WitnessLocation::Entry { witness: 1, .. },
                     ..
                 }
+            ),
+            "{error}"
+        );
+    }
+    for (root, expected_reason) in [
+        (short_hash_input, "malformed hash input chunks"),
+        (nonzero_hash_padding, "malformed hash input chunks"),
+        (wide_hash_limb, "malformed hash input chunks"),
+        (long_hash_output, "malformed expected hash chunks"),
+    ] {
+        let error = session_from_witnesses(vec![valid.clone(), fixture.open(root)]).err().unwrap();
+        assert!(
+            matches!(
+                error,
+                SessionInputError::Invalid {
+                    location: WitnessLocation::Entry { witness: 1, .. },
+                    reason,
+                } if reason == expected_reason
             ),
             "{error}"
         );
@@ -349,6 +446,41 @@ fn batch_limits_count_repeated_inputs_and_shared_hash_demand() {
 }
 
 #[test]
+fn distinct_hash_claims_count_shared_payload_demand() {
+    let mut fixture = WitnessFixture::new();
+    // These lengths share one zero-padded input chunk but commit to distinct hash claims.
+    for length in [1, 7, 31] {
+        let hash = keccak(&mut fixture, &[0; 32][..length]);
+        fixture.log_statement(hash).unwrap();
+    }
+    let witness = fixture.witness();
+    let demand = 1 + 7 + 31;
+    assert!(matches!(
+        import_witnesses(
+            vec![witness.clone()],
+            ImportLimits {
+                hash_bytes: demand - 1,
+                ..ImportLimits::default()
+            },
+        ),
+        Err(SessionInputError::Limit {
+            location: WitnessLocation::Entry { witness: 0, .. },
+            resource: "hash input bytes",
+        })
+    ));
+    import_witnesses(
+        vec![witness],
+        ImportLimits {
+            hash_bytes: demand,
+            ..ImportLimits::default()
+        },
+    )
+    .unwrap()
+    .finish()
+    .check();
+}
+
+#[test]
 fn shared_commitment_cannot_change_payload_shape() {
     use miden_precompiles::CurveId;
 
@@ -378,7 +510,14 @@ fn shared_commitment_cannot_change_payload_shape() {
     let (lhs, rhs) = pairs[0];
     entries[changed] = PrecompileWitnessEntry::Join { tag: *tag, lhs, rhs };
     let malformed = PrecompileWitness::from_entries(entries).unwrap();
-    assert_eq!(valid.root(), malformed.root(), "payload bytes commit identically");
+    assert_eq!(
+        valid.root_unchecked(),
+        malformed.root_unchecked(),
+        "payload bytes commit identically"
+    );
+    let registry = Arc::new(miden_precompiles::registry());
+    assert_eq!(valid.compute_root(registry.clone()).unwrap(), valid.root_unchecked());
+    assert!(malformed.compute_root(registry).is_err());
     let error = session_from_witnesses(vec![valid, malformed]).err().unwrap();
     assert!(matches!(error, SessionInputError::Invalid {
         location: WitnessLocation::Entry { witness: 1, entry },
