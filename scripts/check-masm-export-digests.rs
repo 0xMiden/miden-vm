@@ -489,7 +489,10 @@ fn report_commitment(label: &str, previous: &str, current: &str) {
 }
 
 fn is_abi_attribute(name: &str) -> bool {
-    matches!(name, "auth_script" | "callconv")
+    matches!(
+        name,
+        "account_procedure" | "auth_script" | "callconv" | "note_script" | "transaction_script"
+    )
 }
 
 /// Compare a pretty-printed signature or type string ignoring struct field labels.

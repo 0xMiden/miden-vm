@@ -270,6 +270,26 @@ pub enum ParsingError {
         #[label("previously defined here")]
         prev: SourceSpan,
     },
+    #[error("conflicting attributes for procedure definition")]
+    #[diagnostic()]
+    CallConvAttributeConflict {
+        #[label(
+            "conflict occurs because @callconv conflicts with convention implied by other attribute"
+        )]
+        cc_span: SourceSpan,
+        #[label("this attribute implies @callconv(\"component-model\")")]
+        attr_span: SourceSpan,
+    },
+    #[error("conflicting attributes for procedure definition")]
+    #[diagnostic()]
+    ConflictingProtocolAbiAttribute {
+        #[label(
+            "this attribute specifies the protocol ABI of this procedure, but a different ABI was previously specified"
+        )]
+        span: SourceSpan,
+        #[label("this attribute already specifies the protocol ABI for this procedure")]
+        prev: SourceSpan,
+    },
     #[error("conflicting key-value attributes for procedure definition")]
     #[diagnostic()]
     AttributeKeyValueConflict {
