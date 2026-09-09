@@ -29,8 +29,8 @@ const BUS_GAMMA_PTR = 3223322780
 ### Outer-LogUp boundary correction `c_total` (one extension field element, 2 base felts).
 ### Computed in `observe_aux_trace` (step II) from the FS-sampled aux randomness and the
 ### statement values staged before the transcript starts, then asserted via
-### `c_total + aux_sum == 0`. The remaining two cells are reserved so a future word write
-### cannot overwrite unrelated state.
+### `c_total + aux_sum == 0`. The remaining two cells reserve the full word and isolate adjacent
+### state.
 const C_TOTAL_PTR = 3223322784
 
 ### Caller-provided claim commitment. The verifier checks the advice-supplied preimage against it.
