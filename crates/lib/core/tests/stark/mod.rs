@@ -1,6 +1,8 @@
 use std::{array, fmt::Write as _, sync::Arc};
 
-use miden_air::{MIDEN_AIR_COUNT, MidenMultiAir, NUM_PUBLIC_VALUES, ProofOrder, Statement, config};
+use miden_air::{
+    MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, NUM_PUBLIC_VALUES, ProofOrder, Statement, config,
+};
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE, Word,
@@ -175,12 +177,12 @@ fn stark_verifier_e2f4_rejects_corrupted_ace_circuit_stream() {
 
 /// A forged per-AIR log height must be rejected.
 ///
-/// The heights are what carries the proof order into the verifier: `stage_ood_scatter_table`,
-/// `scatter_aux_bus_boundary` and `stage_air_fold_coefficients` each resolve an AIR's proof
-/// position from them, and nothing else in verifier memory records that order. They arrive on the
-/// advice stack, so what makes them unforgeable is that `sys/vm/public_inputs.masm` observes them
-/// into the Fiat-Shamir transcript: a forged height diverges the transcript, and the proof cannot
-/// survive that divergence.
+/// The transcript-bound per-AIR heights are the verifier's authoritative proof-order input.
+/// `stage_ood_scatter_table`, `scatter_aux_bus_boundary`, and `stage_air_fold_coefficients` derive
+/// positions from them; the first also materializes the out-of-domain routing table. No standalone
+/// order tag is stored. The heights arrive on the advice stack, so
+/// `sys/vm/public_inputs.masm` observes them into the Fiat-Shamir transcript: a forged height
+/// diverges the transcript, and the proof cannot survive that divergence.
 ///
 /// The non-vacuity guard at the end is what makes this cover *order* binding rather than height
 /// binding alone: at least one forgery must land the verifier on a different proof order, which is
@@ -222,20 +224,51 @@ fn each_air_log_height_is_transcript_bound() {
 /// `each_air_log_height_is_transcript_bound` above would pass identically against a verifier
 /// whose scatter, sigma placement and fold staging were hard-wired to the identity order, since a
 /// forged height already diverges the transcript regardless of routing. This builds a mutant
-/// `verify_vm_proof` whose scatter table is never staged (transcript binding of the heights is
-/// untouched; only routing is removed) and checks it rejects a fixture whose honest proof order is
-/// non-identity, so the scatter mechanism itself is shown to be load-bearing.
+/// `vm::verify_proof` from a fully staged scatter table, exchanging only the equal-width Core and
+/// Chiplets auxiliary destinations. A paired control from the same source template accepts the
+/// proof with correct routing; the mutant rejects it with only those destinations exchanged,
+/// showing that the routing is load-bearing.
 #[test]
-fn verifier_rejects_a_non_identity_order_when_the_scatter_table_is_unstaged() {
+fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped() {
     let data = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, fib_stack_inputs(), None);
+    let proof_order = expected_order_from_shape(&data);
     assert_ne!(
-        expected_order_from_shape(&data),
+        proof_order,
         ProofOrder::instance_order(),
         "fixture must have a non-identity proof order to exercise scatter routing"
     );
 
-    let source = "
+    let proof_position = |target| {
+        proof_order
+            .airs()
+            .iter()
+            .position(|air| *air == target)
+            .expect("each Miden AIR occurs once in the proof order")
+    };
+    // Auxiliary destinations begin at table offset 12 and occupy two felts per proof position.
+    // Core and Chiplets both use `pipe_2`, so exchanging only these cells keeps every procedure
+    // digest and segment length valid while corrupting the routing permutation.
+    let core_aux_destination = 12 + 2 * proof_position(MidenAir::Core);
+    let chiplets_aux_destination = 12 + 2 * proof_position(MidenAir::Chiplets);
+
+    let relation_digest = config::RELATION_DIGEST.map(|value| value.as_canonical_u64());
+    let and8_preprocessed_commitment =
+        and8_preprocessed_commitment().map(|value| value.as_canonical_u64());
+    let source = |swap_destinations: bool| {
+        let routing_mutation = if swap_destinations {
+            format!(
+                "exec.layout::ood_scatter_table_ptr add.{core_aux_destination} mem_load\n            \
+                 exec.layout::ood_scatter_table_ptr add.{chiplets_aux_destination} mem_load\n            \
+                 exec.layout::ood_scatter_table_ptr add.{core_aux_destination} mem_store\n            \
+                 exec.layout::ood_scatter_table_ptr add.{chiplets_aux_destination} mem_store"
+            )
+        } else {
+            String::new()
+        };
+        format!(
+        "
         use miden::core::mem
+        use miden::core::sys
         use miden::core::stark::utils
         use miden::core::stark::constants
         use miden::core::stark::verifier
@@ -255,14 +288,14 @@ fn verifier_rejects_a_non_identity_order_when_the_scatter_table_is_unstaged() {
         const KERNEL_DOMAIN_TAG = 0x01000001
         const FELTS_PER_KERNEL_DIGEST = 4
         const MAX_NUM_KERNEL_PROCEDURES = 255
-        const RELATION_DIGEST_0 = 7232478355167361721
-        const RELATION_DIGEST_1 = 2288487368701696106
-        const RELATION_DIGEST_2 = 1262608933889613709
-        const RELATION_DIGEST_3 = 6610580325338225009
-        const AND8_PREPROCESSED_TRACE_COM_0 = 8101824786889297799
-        const AND8_PREPROCESSED_TRACE_COM_1 = 5557459202643843712
-        const AND8_PREPROCESSED_TRACE_COM_2 = 8609469204800341145
-        const AND8_PREPROCESSED_TRACE_COM_3 = 5780773595731865481
+        const RELATION_DIGEST_0 = {relation_digest_0}
+        const RELATION_DIGEST_1 = {relation_digest_1}
+        const RELATION_DIGEST_2 = {relation_digest_2}
+        const RELATION_DIGEST_3 = {relation_digest_3}
+        const AND8_PREPROCESSED_TRACE_COM_0 = {and8_preprocessed_commitment_0}
+        const AND8_PREPROCESSED_TRACE_COM_1 = {and8_preprocessed_commitment_1}
+        const AND8_PREPROCESSED_TRACE_COM_2 = {and8_preprocessed_commitment_2}
+        const AND8_PREPROCESSED_TRACE_COM_3 = {and8_preprocessed_commitment_3}
 
         proc assert_shape_log
             dup u32assert.err=\"AIR log height must be u32\"
@@ -301,9 +334,8 @@ fn verifier_rejects_a_non_identity_order_when_the_scatter_table_is_unstaged() {
             assert_eqw.err=\"fetched kernel digests do not hash to the claim's kernel commitment\"
         end
 
-        # Mirrors `sys::vm::load_air_context`, but never stages the out-of-domain scatter table:
-        # heights are still stored and absorbed identically, only routing is removed.
-        proc load_air_context_without_scatter_staging
+        # Mirrors `sys::vm::load_air_context` so this test can vary only two routing destinations.
+        proc load_air_context_under_test
             adv_push
             exec.assert_shape_log
             exec.layout::set_core_trace_length_log
@@ -328,6 +360,8 @@ fn verifier_rejects_a_non_identity_order_when_the_scatter_table_is_unstaged() {
             u32max
             exec.constants::set_trace_length_log
 
+            exec.ood_frames::stage_ood_scatter_table
+            {routing_mutation}
             exec.store_relation_digest
             exec.store_and8_preprocessed_trace_commitment
             exec.layout::ood_evaluations_ptr
@@ -347,7 +381,7 @@ fn verifier_rejects_a_non_identity_order_when_the_scatter_table_is_unstaged() {
             exec.utils::load_security_params
             exec.materialize_kernel_witness
             exec.public_inputs::stage_boundary_inputs
-            exec.load_air_context_without_scatter_staging
+            exec.load_air_context_under_test
 
             procref.deep_queries::compute_deep_composition_polynomial_queries
             procref.constraints_eval::execute_constraint_evaluation_check
@@ -356,18 +390,44 @@ fn verifier_rejects_a_non_identity_order_when_the_scatter_table_is_unstaged() {
             procref.aux_trace::observe_aux_trace
 
             exec.verifier::verify
+            exec.sys::truncate_stack
         end
-    ";
+    ",
+        relation_digest_0 = relation_digest[0],
+        relation_digest_1 = relation_digest[1],
+        relation_digest_2 = relation_digest[2],
+        relation_digest_3 = relation_digest[3],
+        and8_preprocessed_commitment_0 = and8_preprocessed_commitment[0],
+        and8_preprocessed_commitment_1 = and8_preprocessed_commitment[1],
+        and8_preprocessed_commitment_2 = and8_preprocessed_commitment[2],
+        and8_preprocessed_commitment_3 = and8_preprocessed_commitment[3],
+        routing_mutation = routing_mutation,
+        )
+    };
 
+    let control_data = data.clone();
+    let control_source = source(false);
+    let control = build_test!(
+        control_source.as_str(),
+        &control_data.initial_stack(),
+        control_data.advice_stack(),
+        control_data.store,
+        control_data.advice_map
+    );
+    control
+        .execute_for_output()
+        .expect("the paired control with correct scatter destinations must accept the proof");
+
+    let mutated_source = source(true);
     let test = build_test!(
-        source,
+        mutated_source.as_str(),
         &data.initial_stack(),
         data.advice_stack(),
         data.store,
         data.advice_map
     );
     test.execute().expect_err(
-        "verifier must reject a non-identity proof order when the scatter table is unstaged",
+        "verifier must reject a non-identity proof order when two scatter destinations are swapped",
     );
 }
 
@@ -1257,7 +1317,7 @@ fn public_input_transcript_matches_rust_challenger() {
             push.{folding_pow_bits} exec.constants::set_folding_pow_bits
             exec.vm::load_air_context
 
-            # Stage the claim region and commitment the way `verify_vm_proof` leaves them.
+            # Stage the claim region and commitment the way `vm::verify_proof` leaves them.
             push.{NUM_CLAIM_ELEMENTS} exec.layout::claim_ptr exec.copy_advice_to_mem
             push.{ch3}.{ch2}.{ch1}.{ch0}
             exec.layout::claim_commitment_ptr mem_storew_le dropw

@@ -29,9 +29,8 @@ end
 #! Push the four AIR log heights in canonical instance order: Core, Chiplets,
 #! EidosCompression, And8Lookup.
 #!
-#! The order the values these heights weight arrived in does not appear here: the boundary sums
-#! are moved to their canonical addresses before the weighted sum reads them, so pairing is by
-#! canonical instance index on both sides.
+#! Arrival order is irrelevant here: the boundary sums are moved to canonical addresses before
+#! the weighted sum pairs them with these heights.
 #!
 #! Input:  [...]
 #! Output: [log_0, log_1, log_2, log_3, ...]

@@ -113,7 +113,7 @@ end
 #! `fixed_boundary_correction + sum_i(n_i * sigma_prime_i) == 0` coordinate-wise.
 #!
 #! Precondition:  input_len=0 (the main commitment was flushed before this hook).
-#! Postcondition: input_len=4, output_len=0.
+#! Postcondition: input_len=0, output_len=0.
 #!
 #! Input:  [...]
 #! Output: [...]

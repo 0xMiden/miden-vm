@@ -50,8 +50,7 @@ fn precompile_ace_config() -> AceConfig {
 
 /// Builds the ACE circuit in the canonical [`ChipletAir::all`] instance order.
 ///
-/// This independent per-order construction is retained as the reference the order-invariant
-/// circuit is tested against.
+/// This identity-order construction is the reference for the order-invariant circuit.
 #[cfg(test)]
 pub fn build_precompile_multi_air_ace_circuit() -> Result<AceCircuit<QuadFelt>, AceError> {
     let airs = ChipletAir::all();
@@ -81,8 +80,8 @@ pub fn build_canonical_precompile_ace_circuit() -> Result<AceCircuit<QuadFelt>, 
 
 /// Encoded PVM recursive-verifier ACE circuit and the metadata consumed by MASM.
 ///
-/// One circuit serves every proof order, so the stream is a single `adv_pipe`-aligned segment
-/// under one digest rather than a per-order shuffle prefix spliced onto a shared common section.
+/// One circuit serves every proof order. Its single `adv_pipe`-aligned instruction segment is
+/// authenticated under the compiled-in circuit digest.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PvmRecursiveAceCircuit {
     /// Number of ACE READ variables.
@@ -129,7 +128,7 @@ pub fn build_pvm_recursive_verifier_ace_circuit() -> Result<PvmRecursiveAceCircu
     })
 }
 
-/// The process-wide canonical circuit. There is exactly one, for every proof order.
+/// Returns the process-wide canonical circuit shared by every proof order.
 pub fn shared_pvm_recursive_circuit() -> &'static PvmRecursiveAceCircuit {
     static CIRCUIT: std::sync::OnceLock<PvmRecursiveAceCircuit> = std::sync::OnceLock::new();
     CIRCUIT.get_or_init(|| {
@@ -584,7 +583,7 @@ mod tests {
         );
     }
 
-    /// The PVM aux hook reads twelve quadratic-extension component residues as six MASM words.
+    /// The PVM aux hook reads ten quadratic-extension component residues as five MASM words.
     /// Pin the complete per-chiplet shape so a redistribution cannot preserve only the total.
     #[test]
     fn pvm_aux_hook_matches_every_chiplets_boundary_shape() {
