@@ -6,15 +6,11 @@
 //! cleanly in one trace (and the sponge AIR uses the bus's multiset
 //! semantics to overwrite state at absorb boundaries).
 //!
-//! Each row carries its operands and result as byte/limb decompositions
-//! and verifies them directly against the [`BytePairLut`](crate::primitives::byte_pair_lut)
-//! chiplet (byte-wise canonical XOR relations via `BytePairLutMsg`, 16-bit range checks
-//! via `Range16Msg`) — no separate logic/rotate chiplet or intermediate
-//! bus is needed.
-//!
-//! See the design notes for the design rationale (slot
-//! layout, sponge contract, address-space layout, decomposition for
-//! `ρ > 30`).
+//! Each active operation row carries byte decompositions of its operands and canonical XOR, plus
+//! limbs that witness any rotation. `BytePairLutMsg` binds the canonical byte-wise XOR, while
+//! `Range16Msg` and local identities bind the rotated or reconstructed `Memory64` result. The
+//! periodic program below defines the slot and address layout, including the decomposition for
+//! `ρ > 30`.
 
 pub mod program;
 
@@ -48,15 +44,14 @@ use crate::{
 /// trace's first row (sponge addresses [0, 25) hold the round-0 lane
 /// inputs).
 pub const COL_IP: usize = 0;
-/// Source A value, byte-decomposed LSB-first. Range-checked (and, on
-/// rows that read a real logic op, verified against `b_bytes`/`x_bytes`)
-/// via the [`BytePairLutMsg`] requires this chiplet issues directly —
-/// see [`R_BYTES_RANGE`].
+/// Source A value, byte-decomposed LSB-first. Every active non-NOP row range-checks it through
+/// [`BytePairLutMsg`]. Binary logic rows bind it with `b_bytes` and `x_bytes`; pure-ROL rows use
+/// `(a, 0, a)`. See [`R_BYTES_RANGE`].
 pub const A_BYTES_RANGE: Range<usize> = 1..9;
 /// Source B value, byte-decomposed LSB-first. Real second operand only
 /// on rows with `is_xor | is_andnot` active; on pure-ROL and NOP rows
 /// the trace writer stores 0. On active pure-ROL rows, the byte-pair
-/// lookup and the `r = a` passthrough constraint also force this value
+/// lookup and the `x = a` passthrough constraint also force this value
 /// to 0; on inactive rows its lookup multiplicity is 0.
 pub const B_BYTES_RANGE: Range<usize> = 9..17;
 /// Canonical XOR `x = a xor b`, byte-decomposed. Rows without a binary logic operation store
@@ -77,8 +72,7 @@ pub const ROT_LIMBS_RANGE: Range<usize> = 25..33;
 /// is multiplied by `act`, so dead rounds and padding rows contribute
 /// nothing to the Memory64 or BytePairLut buses. The sponge AIR
 /// σ-matches the chiplet's active-rows-only residue; it also forces
-/// `act = 1` at row 0 by providing `RC[0]`, which the chiplet's
-/// slot 1 must consume.
+/// `act = 1` at row 0 by providing `RC[0]`, which the round's iota row consumes.
 pub const COL_ACT: usize = 33;
 
 // All COL_* / *_RANGE indices above are **lane-local** (within one
@@ -115,7 +109,7 @@ pub fn lane_base(lane: usize) -> usize {
 /// the Memory64 destination column reaches degree 4.
 /// - band col 0: memory64 dst provide.
 /// - band col 1: memory64 `src_a` + `src_b` requires.
-/// - band cols 2–3: 8 `BytePairLut` byte requires verifying `r = a OP b` (or `r = a` on pure-ROL
+/// - band cols 2–3: 8 `BytePairLut` byte requires verifying `x = a xor b` (or `x = a` on pure-ROL
 ///   rows — see [`R_BYTES_RANGE`]), four per column.
 /// - band cols 4–5: 8 `Range16` requires on `rot_limbs`, four per column.
 ///
@@ -138,10 +132,10 @@ pub use program::{
 // AIR
 // ================================================================================================
 
-/// Keccak-round chiplet AIR. Period-128 program drives a TAM-style row
-/// `c = ROL(a OP b, s)` against the [`Memory64`](crate::hash::memory64)
-/// bus, verifying each row's operands and result directly against
-/// [`BytePairLut`](crate::primitives::byte_pair_lut).
+/// Keccak-round chiplet AIR. Its period-128 program binds each active operation row's canonical
+/// XOR value against [`BytePairLut`](crate::primitives::byte_pair_lut), constrains the rotated or
+/// reconstructed result locally, and provides each live result through
+/// [`Memory64`](crate::hash::memory64).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KeccakRoundAir;
 
@@ -229,7 +223,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
             // at the cyclic wrap (row N−1 → 0), N−1 lands on slot 127 (any
             // pow2 height ≥ 128), so `p_last = 1` and the constraint is
             // vacuous. The sponge bus forces `act = 1` at row 0 by providing
-            // RC[0] which slot 1 must consume, so no boundary is needed.
+            // RC[0] to the iota row, whose `act` equals the round's through this constraint.
             builder.assert_zero(
                 (AB::Expr::ONE - p_last.clone()) * (AB::Expr::from(next_act) - act.clone()),
             );
@@ -251,12 +245,8 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
             // Rotation limb-decomposition binding: on an active ROL row,
             // `rot_limbs` must be the 16-bit limb decomposition of
             // `(x_half + 2^32)·k` for each half of this row's canonical XOR
-            // (byte-committed above) — the same identity a rotate
-            // chiplet's ROL row enforces, applied to `r` instead of a
-            // value read from elsewhere. Without this, `rot_limbs` is
-            // only Range16-checked (see `eval`'s lookup half) and
-            // `rotated_halves` — which `memory_provide_c` uses to derive
-            // the value written to memory — can be driven to any result.
+            // (byte-committed above). Together with the Range16 interactions, this binds
+            // `rotated_halves`, from which `memory_provide_c` derives the value written to memory.
             //
             // Gated by `act · is_rol`, not `is_rol` alone: `is_rol` is a
             // periodic column and keeps firing on this row's periodic
@@ -421,8 +411,8 @@ where
             // `is_active`: row reads `src_a` (every non-NOP op does, once). A
             // fused XORROL row sets both `is_xor` and `is_rol`, so subtracting
             // the one-hot `is_xorrol` recovers one read per row at degree 1.
-            // This same gate now also drives the row's `BytePairLut` byte
-            // requires — every row that reads `a` at all range-checks it.
+            // This gate also drives the row's `BytePairLut` byte requires, so every row that reads
+            // `a` range-checks it.
             let is_active = act.clone()
                 * (is_xor.clone() + is_andnot.clone() + is_rol.clone() - is_xorrol.clone());
             // `reads_b`: XOR / ANDNOT / fused XORROL all read `src_b`.

@@ -1,17 +1,11 @@
 //! Trace generation for [`UintStoreMulAir`].
 //!
-//! Store and mul each lay their own rows via their standalone trace-gen
-//! (`crate::uint::trace::generate_trace_padded_to`,
-//! [`crate::uint::mul::trace::generate_trace`]) — same block content,
-//! same native padding mechanism (store's self-referential zero blocks,
-//! mul's `act = 0` blocks). Mul routes its store demand first (as the
-//! original dependency order required), producing its own natively
-//! padded height; store is then generated with a block-count floor
-//! matching that height, so it comes out at `max(store's natural
-//! height, mul's natural height)` directly; if mul's own height was the
-//! smaller one, it's zero-extended to match (mul's padding is already
-//! all-zero, so more of it is exactly more native padding). The two
-//! column ranges are then concatenated per row.
+//! Store and mul materialize their standalone layouts in disjoint column ranges through
+//! `crate::uint::trace::generate_trace_padded_to` and
+//! [`crate::uint::mul::trace::generate_trace`]. Mul runs first because it records its store-bus
+//! demand. Store then uses at least `mul_main.height() / STORE_PERIOD` blocks. If store's natural
+//! height is larger, the inactive all-zero mul tail extends to match it. The two column ranges are
+//! concatenated row by row.
 
 use alloc::vec::Vec;
 

@@ -2,12 +2,10 @@
 //! composed into the merged hash chiplet by
 //! [`crate::hash::chunk_node_sponge::ChunkNodeSpongeAir`].
 //!
-//! Both are period-1 (no periodic columns) and their own trace heights
-//! are otherwise unrelated, so they run **simultaneously** on the same
-//! rows in disjoint column ranges: main columns 0..12 are exactly
-//! [`chunk::ChunkAir`]'s own layout (unchanged), columns 12..42 are
-//! exactly [`node::KeccakNodeAir`]'s own layout (unchanged, shifted by
-//! [`NODE_COL_OFFSET`]). No mode selector or cross-gating is introduced.
+//! Both are period-1 (no periodic columns) and run simultaneously on the same rows in disjoint
+//! column ranges. Main columns 0..12 use [`chunk::ChunkAir`]'s layout; columns 12..42 use
+//! [`node::KeccakNodeAir`]'s layout shifted by [`NODE_COL_OFFSET`]. Both layouts are evaluated
+//! directly on every row.
 //!
 //! The 21 lookup interactions are repacked into six columns with shape `[3, 3, 3, 4, 4, 4]`.
 //! Column 0 contains three linear chunk-memory interactions and drives the centered accumulator.

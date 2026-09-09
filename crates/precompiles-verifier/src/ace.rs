@@ -329,7 +329,7 @@ mod tests {
         }
     }
 
-    /// Keep protocol and cost changes visible without reviewing the opaque registry row.
+    /// Pins the factored PVM circuit layout, encoded sizes, and commitment artifacts.
     #[test]
     fn pvm_factored_ace_shape_matches_current_air() {
         let factored = build_precompile_factored_ace_circuit().expect("factored circuit");

@@ -992,7 +992,6 @@ fn msm_resolve_run_expr_must_be_constant() {
     let here = forged.values[row * ncols + COL_MSM_EXPR];
     forged.values[row * ncols + COL_MSM_EXPR] = here + Felt::ONE;
 
-    // Locally valid before the fix (no other constraint reads COL_MSM_EXPR);
-    // the constancy constraint is what now rejects it.
+    // The constancy constraint rejects this mutation.
     check_local_inputs(TranscriptEvalAir, &forged, traces.public_root().as_array().to_vec());
 }
