@@ -35,7 +35,7 @@
 //! - [`super::main_air::MainBusContext`]: two-row window plus the shared [`LookupOpFlags`] instance
 //!   consumed by the 4 main-trace emitters.
 //! - [`super::chiplet_air::ChipletBusContext`]: two-row window plus the shared
-//!   [`ChipletActiveFlags`] snapshot consumed by the 3 chiplet-trace emitters.
+//!   [`ChipletActiveFlags`] snapshot consumed by the 4 chiplet-trace emitters.
 //!
 //! Each context is built once per `eval` through an extension-trait hook
 //! ([`super::main_air::MainLookupBuilder::build_op_flags`] /

@@ -81,10 +81,9 @@ physical columns.
 
 ## Length of auxiliary columns for lookup arguments
 
-Each AIR's LogUp auxiliary trace has the same number of rows as its main trace. The native VM
-execution proof uses a normalized cyclic closure; aggregate precompile proofs use a natural
-last-row closure for their native AIRs. Both closure forms operate over that row domain. Main-trace
-padding follows the AIR's transition and boundary constraints. In the fixed `And8` table, the final
+Each AIR's LogUp auxiliary trace has the same number of rows as its main trace. Both native VM and
+aggregate precompile AIRs use a normalized cyclic closure over that row domain. Main-trace padding
+follows the AIR's transition and boundary constraints. In the fixed `And8` table, the final
 byte-pair row participates in the cyclic closure as a table row.
 
 ## Cost of auxiliary columns for lookup arguments

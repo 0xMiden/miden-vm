@@ -234,8 +234,7 @@ pub const DEEP_BASE: u64 = CHALLENGE_FIELD_BITS - DEEP_COEFFICIENT;
 /// blowup, in fixed point.
 ///
 /// The common MASM estimator uses the whole-bit floor of this value when proving that FRI folding
-/// cannot determine the result. Drift tests keep the MASM constant used by that proof synchronized
-/// with this value.
+/// cannot determine the result. Its `FRI_FOLDING_BASE_BITS` constant must equal that floor.
 pub const FOLDING_BASE: u64 =
     CHALLENGE_FIELD_BITS - FOLDING_COEFFICIENT - fixed::from_bits(config::LOG_BLOWUP as u32);
 
@@ -514,9 +513,9 @@ mod tests {
     #[test]
     fn num_deep_terms_matches_the_pinned_alignment() {
         assert_eq!(num_deep_terms(COMMITMENT_ALIGNMENT), AIR_SHAPE.num_deep_terms.unwrap());
-        assert_eq!(num_deep_terms(1), 274, "Blake3 (alignment 1) DEEP term count moved");
-        assert_eq!(num_deep_terms(8), 282, "algebraic (alignment 8) DEEP term count moved");
-        assert_eq!(num_deep_terms(17), 359, "Keccak (alignment 17) DEEP term count moved");
+        assert_eq!(num_deep_terms(1), 274, "unexpected Blake3 (alignment 1) DEEP term count");
+        assert_eq!(num_deep_terms(8), 282, "unexpected algebraic (alignment 8) DEEP term count");
+        assert_eq!(num_deep_terms(17), 359, "unexpected Keccak (alignment 17) DEEP term count");
     }
 
     /// Parameters built for an MVM proof must reproduce the independent MVM security report.
@@ -540,11 +539,8 @@ mod tests {
         assert_eq!(security_parameters.num_ood_points, NUM_OOD_POINTS);
     }
 
-    /// The deployed preset's computed security level, per trace height, with the round that
-    /// determines it at each. The preset was calibrated against the query phase alone; this test
-    /// checks what it actually computes once the trace-height-dependent rounds are counted, so any
-    /// parameter or AIR change that moves the real figure is visible rather than absorbed into an
-    /// unchanged constant.
+    /// Pins the deployed preset's computed security level and binding term at representative trace
+    /// heights.
     #[test]
     fn deployed_preset_grades_by_trace_height() {
         let params = protocol_params(&config::pcs_params());
@@ -559,12 +555,12 @@ mod tests {
             assert_eq!(
                 report.security_level(),
                 expected_level,
-                "level moved at log height {log_height}"
+                "unexpected level at log height {log_height}"
             );
             assert_eq!(
                 report.binding_term().label,
                 expected_binding,
-                "binding round moved at log height {log_height}"
+                "unexpected binding round at log height {log_height}"
             );
         }
     }
@@ -572,7 +568,7 @@ mod tests {
     /// Every derived Rust security constant, checked against a fixed numeric snapshot.
     ///
     /// This test does not read the MASM source; it checks that the Rust-side values below have not
-    /// silently drifted from the reviewed snapshot.
+    /// silently drifted from the pinned snapshot.
     #[test]
     fn derived_security_constants_match_snapshot() {
         const FP_SHIFT: u32 = 16;
@@ -663,12 +659,12 @@ mod tests {
             assert_eq!(
                 (*report.terms()).map(|term| term.bits),
                 rounds,
-                "round bits moved at {params:?}, log height {log_height}"
+                "round-bit mismatch at {params:?}, log height {log_height}"
             );
             assert_eq!(
                 report.security_level(),
                 level,
-                "level moved at {params:?}, log height {log_height}"
+                "unexpected level at {params:?}, log height {log_height}"
             );
         }
     }
@@ -686,7 +682,7 @@ mod tests {
             })
             .expect("the lookup round must bind at some supported height");
 
-        assert_eq!(crossover, 21, "lookup/query crossover moved");
+        assert_eq!(crossover, 21, "unexpected lookup/query crossover");
     }
 
     /// A proof with the maximum kernel witness reports a lower lookup-round bound than a bare one

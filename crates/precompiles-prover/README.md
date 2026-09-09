@@ -23,7 +23,7 @@ make test-fast
 ```
 src/
 ├── lib.rs              crate root
-├── relations.rs        witness multiplicity types
+├── relations.rs        AIR relation definitions re-export
 ├── math.rs             field and integer helpers
 ├── logup/              shared LogUp framework re-exports
 ├── stark_config.rs     selectable STARK proof-hash configurations (Eidos default)

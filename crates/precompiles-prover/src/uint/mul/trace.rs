@@ -340,7 +340,7 @@ pub(crate) fn op_block(
 ///
 /// The same pass routes each block's store demand (the convolution
 /// operands `a` / `b` / modulus consume the raw `UintLimbs` view, the
-/// linear `c` / `r` the 4×32 `UintVal` view — run it before the store's
+/// linear `c` / `r` the complete 8×32-bit `UintVal` view — run it before the store's
 /// own trace reads its ledger) and drives the `Range16` demand the
 /// chiplet consumes into `bpl`: the 17 `q` limbs, the 62 γ halves and
 /// the two κ cells per op. Padding blocks are act-gated and consume
