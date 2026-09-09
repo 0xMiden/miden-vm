@@ -280,6 +280,10 @@ pub enum GenerationMode {
 /// - each syscall callee is a member of the paired kernel;
 /// - dyn nodes are never emitted (issue #3397 tracks a MASM-level generator for them).
 ///
+/// The `MastForest` `Arbitrary` impl drops the kernel, so in this mode it emits no syscalls and
+/// its samples run under the empty kernel of `Program::new`; [`forest_kernel_strategy`] keeps the
+/// kernel and the syscalls.
+///
 /// With `kernel_procedures` set, syscall callees are external nodes carrying the supplied hashes,
 /// so running them requires the matching kernel forest in the host.
 ///
@@ -296,7 +300,8 @@ pub struct MastForestParams {
     pub max_loops: usize,
     /// Maximum number of call nodes.
     pub max_calls: usize,
-    /// Maximum number of syscall nodes.
+    /// Maximum number of syscall nodes. Forced to `0` by the `MastForest` `Arbitrary` impl in
+    /// [`GenerationMode::Executable`].
     pub max_syscalls: usize,
     /// Maximum number of external nodes.
     pub max_externals: usize,
@@ -799,8 +804,13 @@ impl Arbitrary for MastForest {
     type Parameters = MastForestParams;
     type Strategy = BoxedStrategy<Self>;
 
-    /// Delegates to [`forest_kernel_strategy`] and drops the kernel.
-    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+    /// Samples forests that need no kernel: in [`GenerationMode::Executable`] no syscalls are
+    /// emitted, so every root runs under the empty kernel of `Program::new`. Use
+    /// [`forest_kernel_strategy`] to sample syscalls together with their kernel.
+    fn arbitrary_with(mut params: Self::Parameters) -> Self::Strategy {
+        if params.mode == GenerationMode::Executable {
+            params.max_syscalls = 0;
+        }
         forest_kernel_strategy(params).prop_map(|(forest, _)| forest).boxed()
     }
 }
@@ -1031,6 +1041,14 @@ mod tests {
             forest in any_with::<MastForest>(MastForestParams { max_dyns: 6, ..Default::default() })
         ) {
             prop_assert!(!forest.nodes().iter().any(MastNode::is_dyn));
+        }
+
+        /// Without a paired kernel there is nothing a syscall could target.
+        #[test]
+        fn plain_executable_forests_have_no_syscalls(
+            forest in any_with::<MastForest>(MastForestParams { max_syscalls: 3, ..Default::default() })
+        ) {
+            prop_assert!(syscalls(&forest).next().is_none());
         }
 
         /// Blocks hold only infallible operations and leave the stack depth unchanged, except for
