@@ -207,6 +207,10 @@ Each schedule binds the complete logical length, compresses every complete block
 single partial final block. Empty input compresses one all-zero physical block. A non-empty exact
 multiple of the block width does not append another block.
 
+The logical length must fit in the `u32` parameter lane. The one-shot Rust APIs panic when a byte
+length or flattened Felt length exceeds that limit. Flattening a slice of extension-field elements
+also panics if the length calculation overflows `usize`.
+
 Domain-specific Felt and byte constructions declare their own typed domains. Bytes are therefore
 an encoding family, not one global numeric range: a protocol can register several `ByteString`
 domains inside its namespace without colliding with its `FeltSequence` domains.
@@ -267,8 +271,16 @@ different leaf schedule needs its own registered domain and matching hasher.
 
 The Fiat-Shamir challenger also uses a dedicated schedule. `transcript_init_cv(domain)` creates the
 standard framed initial CV with the registered transcript tag and three zero parameters. The
-relation digest is then absorbed as the first transcript block. VM transcript domains belong in
-the `miden-vm` namespace, not the `miden-crypto` local registry.
+relation digest is then absorbed as the first transcript block. Scalar observations are buffered
+in groups of eight and full buffers are compressed immediately. Sampling zero-pads the pending
+buffer, adds `1 + pending_len` to the fourth CV element in the Goldilocks field, and compresses it.
+The four resulting CV elements are returned in order. Each additional output word adds `9` in the
+same field and compresses `[counter, 0, ..., 0]`, starting at counter one. A new observation
+discards unused output elements and resets the counter while preserving the current CV.
+Finalization also discards unread output elements and returns a freshly generated word. One
+uninterrupted squeezing phase can produce `2^32` words: one with counter zero and one for each
+nonzero `u32` counter. Requesting another word panics. VM transcript domains belong in the
+`miden-vm` namespace, not the `miden-crypto` local registry.
 
 Falcon hash-to-point, AEAD key derivation, and random-coin output generation similarly use named
 custom domains whose schemas define their fixed block and output schedules.
