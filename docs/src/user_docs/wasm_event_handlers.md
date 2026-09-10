@@ -11,8 +11,9 @@ Custom [event](./assembly/events.md) handlers can ship as untrusted WebAssembly 
 
 - A handler module is a core Wasm module. Each handler is an exported function with the signature `() -> ()`.
 - The package's `event_handlers` section carries the module bytes, the ABI version, and a manifest that maps event names to export names. The section is part of the package's dependency commitment: two packages that differ only in handler code have different identities.
-- When the VM emits an event with a registered Wasm handler, the host runs the export in a fresh instance. Handlers are stateless across calls.
-- The handler reads VM state through host functions and buffers advice mutations through host calls. The host applies the mutations only when the handler returns without a trap. A trap — including an explicit `fail` — discards them all.
+- Both `emit` and `trace` can invoke the same registered Wasm handler. Each invocation runs the export in a fresh instance, so handlers are stateless across calls.
+- The handler reads pre-callback VM state and records advice into an isolated child batch. A trap, including an explicit `fail`, discards that child even if the outer host catches the error. Success imports it into the outer callback's pending advice. The processor validates and applies the complete batch only after the outer callback succeeds.
+- `sdk::invocation_kind()` reports `InvocationKind::Event` or `InvocationKind::Trace`. A successful trace must record no advice, including empty or idempotent map writes. `ExecutionOptions::with_trace_delivery(false)` suppresses traces before guest code runs; unknown traces are ignored when delivery is enabled.
 
 Advice a handler produces is an unbound hint, exactly as for native handlers: the program must verify it in-VM before relying on it.
 
@@ -75,34 +76,45 @@ let package = project_assembler.assemble(target_selector, "release")?;
 ## Loading handlers in a host
 
 ```rust
-use miden_wasm_event_handlers::{WasmHandlerLimits, host_library_from_package};
+use miden_processor::{DefaultHost, HostLibrary};
+use miden_wasm_event_handlers::{WasmHandlerLimits, event_handlers_from_package};
 
-let library = host_library_from_package(&package, WasmHandlerLimits::default())?;
+let handlers = event_handlers_from_package(&package, WasmHandlerLimits::default())?;
 let mut host = DefaultHost::default();
-host.load_library(library)?; // registers the MAST forest and the handlers
+host.load_library_with_event_handlers(HostLibrary::from(package.clone()), handlers)?;
 ```
+
+Unified host callbacks and registered handlers receive a portable `EventContext` and a borrowed
+`AdviceRecorder`. Native and Wasm handlers read the first payload element at stack position `0`
+for both invocation kinds. Pending advice is invisible to reads during the callback.
+
+The existing `WasmHandlerModule::handlers`, `handlers_from_package`, and
+`host_library_from_package` helpers retain legacy event-only delivery and their original
+`Arc<dyn miden_processor::event::EventHandler>` list shape. Use `event_handlers` or
+`event_handlers_from_package` with the new registration method for trace delivery.
 
 ## ABI reference
 
-The contract lives in the `miden-event-handler-abi` crate (`ABI_VERSION` is `1`). All host functions are imported from the `miden:event/v1` namespace. A field element crosses the boundary as its canonical little-endian `u64` (less than the field modulus), a `Word` is four of them, and a `MerkleNode` is three words (`value`, `left`, `right`). The extern declarations use those `Felt` and `Word` types directly, because their off-chain memory layout is exactly this encoding. The host validates every element it receives and traps the handler on a non-canonical value; every element the host writes is canonical.
+The contract lives in the `miden-event-handler-abi` crate (`ABI_VERSION` is `2`). All host functions are imported from the `miden:event/v1` namespace. A field element crosses the boundary as its canonical little-endian `u64` (less than the field modulus), a `Word` is four of them, and a `MerkleNode` is three words (`value`, `left`, `right`). The extern declarations use those `Felt` and `Word` types directly, because their off-chain memory layout is exactly this encoding. The host validates every element it receives and traps the handler on a non-canonical value; every element the host writes is canonical.
 
-Version bumps are additive only: a newer ABI version may add host functions but must not change or remove existing ones, so hosts accept every declared version from `1` up to their own. A breaking change gets a new import namespace (`miden:event/v2`) instead.
+Version bumps are additive only: a newer ABI revision may add host functions but must not change or remove existing ones. Hosts accept supported declarations from `1` up to their own version and check that every imported function is available in the declared revision. Revision 2 adds `invocation_kind`; declaring revision 1 while importing it is rejected. Package derivation selects the minimum revision required by a module's imports, so existing modules using only old imports remain revision 1. A breaking change gets a new import namespace (`miden:event/v2`) instead.
 
 **VM memory granularity.** VM memory initializes one word (four elements) at a time, so the `Uninit` status of the memory reads is word-granular: after a program writes any address of a word, the other three addresses of that word read as `Ok` with the value zero. `Uninit` therefore means that no cell of the containing word was ever written, not that the addressed cell alone was never written.
 
 **Memory ownership.** Every pointer is an offset into the guest's own linear memory, which the module must export as `"memory"`. The guest allocates all buffers; the host only reads from and writes into them. Output pointers are validated before the host computes the result, so a bad pointer traps even when the call would otherwise return a status such as `NotFound`.
 
-**Handler stack view.** The `stack_*` functions expose the operand stack without the event-ID slot that `emit` consumed: position `0` is the first handler input, and `stack_depth` reports the operand-stack depth less that one slot. A handler reads the ID of the event it answers with `event_id()`, which reports the event it is registered for.
+**Handler stack view.** The `stack_*` functions exclude the dispatch envelope: one element for `emit`, two for `trace`. Position `0` is the first payload element in either kind, and `stack_depth` excludes those elements. `event_id()` continues to report the handler's manifest binding, even if a host registers it under an alias; `invocation_kind()` reports the actual MASM invocation independently of that binding.
 
-**Queries** mirror the read surface of `ProcessorState`. A call returns a status only when a non-`Ok` outcome is reachable; calls that cannot fail return their value directly (or nothing):
+**Queries** expose the handler's current execution context and explicit root-memory reads. A call returns a status only when a non-`Ok` outcome is reachable; calls that cannot fail return their value directly (or nothing):
 
 | Import | Description |
 | --- | --- |
-| `stack_depth() -> u32` | Depth of the handler's stack view: the operand-stack depth without the event-ID slot. |
+| `stack_depth() -> u32` | Payload-stack depth, excluding the event or trace dispatch envelope. |
 | `stack_get(pos) -> u64` | Element of the handler's stack view, returned directly in canonical form; position `0` is the first handler input (the event ID is not part of the view), positions past the depth read as zero. |
 | `stack_read(start_pos, out, count)` | Batch read of the elements at positions `start_pos..start_pos + count` of the handler's stack view, ordered from the top down. |
 | `clk() -> u64` | Clock cycle. |
-| `event_id() -> u64` | ID of the event the handler was invoked for, in canonical form. |
+| `event_id() -> u64` | Canonical ID of the handler's manifest binding, unchanged by host aliases. |
+| `invocation_kind() -> i32` | `0` for `emit`, `1` for `trace`; available in ABI revision 2. |
 | `is_root_context() -> i32` | `1` when the current execution context is the root context (where kernel state lives), `0` otherwise. The result is a boolean, not a status code. |
 | `mem_get(addr, out) -> status` | One memory element of the current context; `Uninit` when no cell of the memory word that holds the address was ever written. |
 | `mem_read(addr, out, count) -> status` | Batch read of `addr..addr + count`; `Uninit` when the range touches an unwritten memory word, `OutOfBounds` past the `u32` address space. |
@@ -112,7 +124,7 @@ Version bumps are additive only: a newer ABI version may add host functions but 
 | `adv_stack_len() -> u32`, `adv_stack_read(offset, out, count) -> status` | Advice stack; offset `0` is the top. |
 | `adv_map_value_len(key, out_len) -> status`, `adv_map_value_read(key, out, cap, out_len) -> status` | Advice-map reads; `NotFound` when the key has no entry. `adv_map_value_read` writes the element count to `out_len` on success and on `CapacityTooSmall`, so one call (plus at most one retry with a grown buffer) suffices. |
 
-**Mutations** are buffered, return nothing (limit violations trap), and map one-to-one onto the processor's advice mutations:
+**Advice writes** are buffered in a child batch and return nothing (limit violations trap). Repeated stack blocks prepend in call order: writing `[a,b]` and then `[c,d]` yields `[c,d,a,b,old…]`. Empty stack/node extensions record no output, but an empty map value records an entry. Repeated map entries remain available for complete-batch conflict validation; every Wasm map request is charged against its per-call limit even when equal to an earlier entry:
 
 | Import | Description |
 | --- | --- |

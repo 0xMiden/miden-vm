@@ -10,7 +10,7 @@
 //! arithmetic; nothing wraps. Output pointers are validated before the host computes the
 //! result, so a defect traps even when the call would come back with a status.
 
-use alloc::{format, string::String, vec::Vec};
+use alloc::{format, string::String, vec, vec::Vec};
 
 use miden_crypto::{
     field::QuotientMap,
@@ -20,11 +20,14 @@ use miden_crypto::{
         sha2::{Sha256, Sha512},
     },
 };
+use miden_event_handler::{AdviceBatch, EventContext, InvocationKind, MerkleReadError};
 use miden_event_handler_abi::{IMPORT_MODULE, MAX_FAIL_MSG_BYTES, MEMORY_EXPORT, Status, host_fn};
 use miden_processor::{
-    ContextId, Felt, ProcessorState, Word,
-    advice::{AdviceError, AdviceMap, AdviceMutation},
-    crypto::{hash::Poseidon2, merkle::InnerNodeInfo},
+    Felt, Word,
+    crypto::{
+        hash::Poseidon2,
+        merkle::{InnerNodeInfo, NodeIndex},
+    },
 };
 use wasmi::{Caller, Engine, Linker, Memory, StoreLimits, StoreLimitsBuilder};
 
@@ -117,16 +120,15 @@ const FUEL_PER_BLAKE3_BYTE: u64 = 1;
 /// `Store<HostCtx>` lives inside `WasmHandlerModule::call`, on one thread, and wasmi's
 /// `Linker<T>` and its host-function bounds are independent of `T`.
 pub(crate) struct HostCtx {
-    /// A type-erased pointer to the [`ProcessorState`] borrowed for the duration of one handler
+    /// A type-erased pointer to the [`EventContext`] borrowed for the duration of one handler
     /// call. Host functions dereference it only during that call, while the underlying
-    /// `&ProcessorState` borrow is alive; see [`state`].
-    state: *const ProcessorState<'static>,
-    /// The canonical ID of the event the handler was invoked for. Zero for the load-time dry
+    /// `&EventContext` borrow is alive; see [`state`].
+    state: *const EventContext<'static>,
+    /// The canonical event ID from the handler's manifest binding. Zero for the load-time dry
     /// run, which runs no guest code.
     event_id: u64,
-    /// The mutations the handler buffered so far. Returned to the processor only when the
-    /// handler returns without a trap.
-    pub mutations: Vec<AdviceMutation>,
+    /// Child advice imported into the outer recorder only when the guest returns successfully.
+    pub advice: AdviceBatch,
     /// The number of field elements across all buffered mutations.
     mutation_felts: usize,
     /// The maximum for `mutation_felts`; going over it traps.
@@ -146,14 +148,14 @@ impl HostCtx {
     /// `state` may be null for the load-time dry-run instantiation, during which no guest code
     /// runs.
     pub fn new(
-        state: *const ProcessorState<'static>,
+        state: *const EventContext<'static>,
         event_id: u64,
         limits: &WasmHandlerLimits,
     ) -> Self {
         Self {
             state,
             event_id,
-            mutations: Vec::new(),
+            advice: AdviceBatch::new(),
             mutation_felts: 0,
             max_mutation_felts: limits.max_mutation_felts,
             error_msg: None,
@@ -184,16 +186,16 @@ fn trap(msg: impl Into<String>) -> wasmi::Error {
     })
 }
 
-/// Returns the processor state for the current call.
-fn state<'c>(caller: &'c Caller<'_, HostCtx>) -> Result<&'c ProcessorState<'c>, wasmi::Error> {
+/// Returns the event context for the current call.
+fn state<'c>(caller: &'c Caller<'_, HostCtx>) -> Result<&'c EventContext<'c>, wasmi::Error> {
     let ptr = caller.data().state;
     if ptr.is_null() {
         return Err(trap("processor state is not available"));
     }
-    // SAFETY: `WasmHandlerModule::call` derives the pointer from a live `&ProcessorState` and
+    // SAFETY: `WasmHandlerModule::call` derives the pointer from a live `&EventContext` and
     // keeps that borrow alive for the whole call. The returned borrow cannot outlive `caller`,
     // and `caller` cannot outlive the call.
-    Ok(unsafe { &*ptr.cast::<ProcessorState<'c>>() })
+    Ok(unsafe { &*ptr.cast::<EventContext<'c>>() })
 }
 
 /// Returns the guest's exported linear memory.
@@ -323,24 +325,17 @@ const OK: i32 = Status::Ok.as_raw();
 // QUERIES
 // ================================================================================================
 
-/// Returns the depth of the handler's stack view: the operand-stack depth without the event-ID
-/// slot.
+/// Returns the payload-stack depth, excluding the event or trace dispatch envelope.
 fn stack_depth(mut caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL)?;
-    // The VM stack depth is never below 16, so the subtraction cannot underflow; the saturation
-    // keeps the defect harmless if that ever changes.
-    state(&caller).map(|state| state.stack_depth().saturating_sub(1))
+    Ok(state(&caller)?.stack_depth())
 }
 
 /// Returns the operand-stack element at position `pos` of the handler's stack view, in canonical
-/// form; the view starts one slot below the event ID.
+/// form; position zero is the first payload element for either invocation kind.
 fn stack_get(mut caller: Caller<'_, HostCtx>, pos: u32) -> Result<u64, wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + FUEL_PER_FELT)?;
-    // Positions past the stack depth read as zero, so the saturation on a 32-bit host — where
-    // `pos as usize` can already be `usize::MAX` — is harmless.
-    Ok(state(&caller)?
-        .get_stack_item((pos as usize).saturating_add(1))
-        .as_canonical_u64())
+    Ok(state(&caller)?.stack_item(u64::from(pos)).as_canonical_u64())
 }
 
 /// Writes the `count` elements at positions `start_pos..start_pos + count` of the handler's
@@ -357,9 +352,8 @@ fn stack_read(
     // guest memory size when the collection allocates.
     byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
     let state = state(&caller)?;
-    let felts: Vec<Felt> = (0..count as usize)
-        .map(|idx| state.get_stack_item((start_pos as usize).saturating_add(idx).saturating_add(1)))
-        .collect();
+    let mut felts = vec![Felt::ZERO; count as usize];
+    state.read_stack(u64::from(start_pos), &mut felts);
     write_felts(mem.data_mut(&mut caller), out, &felts)
 }
 
@@ -369,16 +363,25 @@ fn clk(mut caller: Caller<'_, HostCtx>) -> Result<u64, wasmi::Error> {
     state(&caller).map(|state| u64::from(state.clock()))
 }
 
-/// Returns the ID of the event the handler was invoked for, in canonical form.
+/// Returns the event ID from the handler's manifest binding, in canonical form.
 fn event_id(mut caller: Caller<'_, HostCtx>) -> Result<u64, wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL)?;
     Ok(caller.data().event_id)
 }
 
+/// Returns the actual MASM invocation kind, independently of the manifest binding.
+fn invocation_kind(mut caller: Caller<'_, HostCtx>) -> Result<i32, wasmi::Error> {
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL)?;
+    state(&caller).map(|context| match context.kind() {
+        InvocationKind::Event => miden_event_handler_abi::InvocationKind::Event.as_raw(),
+        InvocationKind::Trace => miden_event_handler_abi::InvocationKind::Trace.as_raw(),
+    })
+}
+
 /// Returns `1` when the current execution context is the root context, and `0` otherwise.
 fn is_root_context(mut caller: Caller<'_, HostCtx>) -> Result<i32, wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL)?;
-    state(&caller).map(|state| i32::from(state.ctx().is_root()))
+    state(&caller).map(|state| i32::from(state.in_root_context()))
 }
 
 /// Writes the memory element at address `addr` of the current context to `out`, or returns
@@ -395,7 +398,7 @@ fn mem_get(mut caller: Caller<'_, HostCtx>, addr: u32, out: u32) -> Result<i32, 
     // result would be a status.
     byte_range(mem.data(&caller).len(), out, FELT_BYTES, 1)?;
     let state = state(&caller)?;
-    match state.get_mem_value(state.ctx(), addr) {
+    match state.memory_value(u64::from(addr)).map_err(|err| trap(format!("{err}")))? {
         Some(felt) => {
             write_felts(mem.data_mut(&mut caller), out, &[felt])?;
             Ok(OK)
@@ -405,15 +408,15 @@ fn mem_get(mut caller: Caller<'_, HostCtx>, addr: u32, out: u32) -> Result<i32, 
 }
 
 /// Writes the `count` memory elements at addresses `addr..addr + count` to `out`, reading from
-/// `ctx` or, when it is `None`, from the current context. Returns a status when the range is out
-/// of bounds or touches a memory word no cell of which was ever written. Presence is
+/// the root context when requested, or from the current context. Returns a status when the range is
+/// out of bounds or touches a memory word no cell of which was ever written. Presence is
 /// word-granular; see [`mem_get`].
 ///
 /// `mem_read` and `mem_read_root` are both this function, so the single charge here is the whole
 /// fuel charge of one call.
 fn mem_read_range(
     caller: &mut Caller<'_, HostCtx>,
-    ctx: Option<ContextId>,
+    root_context: bool,
     addr: u32,
     out: u32,
     count: u32,
@@ -429,12 +432,16 @@ fn mem_read_range(
         return Ok(Status::OutOfBounds.as_raw());
     }
     let state = state(caller)?;
-    let ctx = ctx.unwrap_or_else(|| state.ctx());
     let mut felts = Vec::with_capacity(count as usize);
     for idx in 0..count {
         // `addr + idx` cannot wrap: the `addr + count` guard above keeps the whole range
         // inside the u32 address space.
-        match state.get_mem_value(ctx, addr + idx) {
+        let value = if root_context {
+            state.memory_value_root(u64::from(addr + idx))
+        } else {
+            state.memory_value(u64::from(addr + idx))
+        };
+        match value.map_err(|err| trap(format!("{err}")))? {
             Some(felt) => felts.push(felt),
             // Every memory word the range touches must be written; use `mem_get` for per-word
             // checks.
@@ -454,7 +461,7 @@ fn mem_read(
     out: u32,
     count: u32,
 ) -> Result<i32, wasmi::Error> {
-    mem_read_range(&mut caller, None, addr, out, count)
+    mem_read_range(&mut caller, false, addr, out, count)
 }
 
 /// Writes the `count` memory elements at addresses `addr..addr + count` of the root context to
@@ -466,7 +473,7 @@ fn mem_read_root(
     out: u32,
     count: u32,
 ) -> Result<i32, wasmi::Error> {
-    mem_read_range(&mut caller, Some(ContextId::root()), addr, out, count)
+    mem_read_range(&mut caller, true, addr, out, count)
 }
 
 /// Charges the fuel of one Merkle-store lookup and decodes its arguments. Returns the guest
@@ -476,7 +483,7 @@ fn merkle_lookup_args(
     root: u32,
     depth: u32,
     index: u64,
-) -> Result<(Memory, Word, Felt, Felt), wasmi::Error> {
+) -> Result<(Memory, Word, NodeIndex), wasmi::Error> {
     // The store lookup probes one node map entry per level, plus one for the root. The
     // eight-felt charge is a shared upper bound for both callers: `merkle_get_node` moves the
     // root in and the node out, while `merkle_has_path` moves only the root in and returns an
@@ -487,8 +494,11 @@ fn merkle_lookup_args(
     )?;
     let mem = memory(caller)?;
     let root = read_word(mem.data(&caller), root)?;
-    let index = felt_arg(index)?;
-    Ok((mem, root, Felt::new_unchecked(u64::from(depth)), index))
+    let position = felt_arg(index)?.as_canonical_u64();
+    let depth = u8::try_from(depth).map_err(|_| trap("invalid merkle node depth/index"))?;
+    let index =
+        NodeIndex::new(depth, position).map_err(|_| trap("invalid merkle node depth/index"))?;
+    Ok((mem, root, index))
 }
 
 /// Writes the Merkle-store node of the tree with root `root` at `depth`/`index` to `out`, or
@@ -500,21 +510,16 @@ fn merkle_get_node(
     index: u64,
     out: u32,
 ) -> Result<i32, wasmi::Error> {
-    let (mem, root, depth, index) = merkle_lookup_args(&mut caller, root, depth, index)?;
+    let (mem, root, index) = merkle_lookup_args(&mut caller, root, depth, index)?;
     // Validate the output pointer before the lookup; see `mem_get`.
     byte_range(mem.data(&caller).len(), out, FELT_BYTES, 4)?;
-    let node = state(&caller)?.advice_provider().get_tree_node(root, depth, index);
+    let node = state(&caller)?.merkle_node(root, index);
     match node {
         Ok(node) => {
             write_felts(mem.data_mut(&mut caller), out, node.as_elements())?;
             Ok(OK)
         },
-        // A position outside the valid range for a Merkle tree is a defect, not a miss.
-        Err(AdviceError::InvalidMerkleTreeNodeIndex { .. }) => {
-            Err(trap("invalid merkle node depth/index"))
-        },
-        Err(AdviceError::MerkleStoreLookupFailed(_)) => Ok(Status::NotFound.as_raw()),
-        Err(err) => Err(trap(format!("{err}"))),
+        Err(MerkleReadError::Lookup(_)) => Ok(Status::NotFound.as_raw()),
     }
 }
 
@@ -526,20 +531,14 @@ fn merkle_has_path(
     depth: u32,
     index: u64,
 ) -> Result<i32, wasmi::Error> {
-    let (_mem, root, depth, index) = merkle_lookup_args(&mut caller, root, depth, index)?;
-    match state(&caller)?.advice_provider().has_merkle_path(root, depth, index) {
-        Ok(has_path) => Ok(i32::from(has_path)),
-        Err(AdviceError::InvalidMerkleTreeNodeIndex { .. }) => {
-            Err(trap("invalid merkle node depth/index"))
-        },
-        Err(err) => Err(trap(format!("{err}"))),
-    }
+    let (_mem, root, index) = merkle_lookup_args(&mut caller, root, depth, index)?;
+    Ok(i32::from(state(&caller)?.has_merkle_path(root, index)))
 }
 
 /// Returns the number of elements on the advice stack.
 fn adv_stack_len(mut caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL)?;
-    state(&caller).map(|state| state.advice_provider().stack_len() as u32)
+    state(&caller).map(|state| state.advice_stack().len() as u32)
 }
 
 /// Writes `count` advice-stack elements starting at `offset` to `out`, or returns
@@ -553,16 +552,11 @@ fn adv_stack_read(
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + u64::from(count) * FUEL_PER_FELT)?;
     let mem = memory(&mut caller)?;
     byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
-    let provider = state(&caller)?.advice_provider();
-    let start = offset as usize;
-    let Some(end) = start.checked_add(count as usize) else {
-        return Ok(Status::OutOfBounds.as_raw());
-    };
-    if end > provider.stack_len() {
+    let start = u64::from(offset);
+    let mut felts = vec![Felt::ZERO; count as usize];
+    if state(&caller)?.read_advice_stack(start, &mut felts).is_err() {
         return Ok(Status::OutOfBounds.as_raw());
     }
-    let felts: Vec<Felt> =
-        provider.stack_iter().skip(start).take(count as usize).copied().collect();
     write_felts(mem.data_mut(&mut caller), out, &felts)?;
     Ok(OK)
 }
@@ -594,8 +588,7 @@ fn adv_map_value_lookup(
     }
     byte_range(data_len, out_len, 4, 1)?;
     let key = read_word(mem.data(&*caller), key)?;
-    let Some(len) = state(caller)?.advice_provider().get_mapped_values(&key).map(<[Felt]>::len)
-    else {
+    let Some(len) = state(caller)?.advice_map().get(&key).map(|values| values.len()) else {
         return Ok(None);
     };
     let count = u32::try_from(len).map_err(|_| trap("advice-map value length overflows u32"))?;
@@ -634,12 +627,12 @@ fn adv_map_value_read(
     if len > cap as usize {
         return Ok(Status::CapacityTooSmall.as_raw());
     }
-    // The value copy, plus the second map probe: the `&ProcessorState` borrow conflicts with
+    // The value copy, plus the second map probe: the `&EventContext` borrow conflicts with
     // `mem.data_mut`, so the read resolves the entry again, and the guest pays for both probes.
     charge_fuel(&mut caller, len as u64 * FUEL_PER_FELT + FUEL_PER_MAP_PROBE)?;
     let values = state(&caller)?
-        .advice_provider()
-        .get_mapped_values(&key)
+        .advice_map()
+        .get(&key)
         .expect("the entry was present above")
         .to_vec();
     write_felts(mem.data_mut(&mut caller), out, &values)?;
@@ -779,10 +772,7 @@ fn adv_stack_extend(
     charge_mutation(caller.data_mut(), len as usize)?;
     let mem = memory(&mut caller)?;
     let felts = read_felts(mem.data(&caller), vals, len)?;
-    caller
-        .data_mut()
-        .mutations
-        .push(AdviceMutation::extend_advice_stack_with(felts));
+    caller.data_mut().advice.recorder().prepend_stack(felts);
     Ok(())
 }
 
@@ -801,9 +791,7 @@ fn adv_map_insert(
     let mem = memory(&mut caller)?;
     let key = read_word(mem.data(&caller), key)?;
     let values = read_felts(mem.data(&caller), vals, len)?;
-    let mut map = AdviceMap::default();
-    map.insert(key, values);
-    caller.data_mut().mutations.push(AdviceMutation::extend_map(map));
+    caller.data_mut().advice.recorder().insert_map_entry(key, values);
     Ok(())
 }
 
@@ -852,7 +840,7 @@ fn merkle_store_extend(
             return Err(trap("merkle node digest does not match hash(left, right)"));
         }
     }
-    caller.data_mut().mutations.push(AdviceMutation::extend_merkle_store(nodes));
+    caller.data_mut().advice.recorder().extend_merkle_store(nodes);
     Ok(())
 }
 
@@ -920,6 +908,7 @@ fn build_linker_with_names(
         host_fn::STACK_READ => stack_read,
         host_fn::CLK => clk,
         host_fn::EVENT_ID => event_id,
+        host_fn::INVOCATION_KIND => invocation_kind,
         host_fn::IS_ROOT_CONTEXT => is_root_context,
         host_fn::MEM_GET => mem_get,
         host_fn::MEM_READ => mem_read,

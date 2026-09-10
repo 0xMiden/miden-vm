@@ -12,6 +12,9 @@ use sdk::Felt;
 /// stack.
 #[sdk::miden_event_handler("test::wasm::add_hundred")]
 fn add_hundred() {
+    if sdk::invocation_kind() != sdk::InvocationKind::Event {
+        sdk::fail("add_hundred requires a regular event");
+    }
     let value = sdk::stack_get(0);
     sdk::adv_stack_extend(&mut [value + Felt::from_u32(100)]);
 }
@@ -29,4 +32,18 @@ fn merge_words() {
     let pair = [sdk::stack_get_word(0), sdk::stack_get_word(4)];
     let digest = sdk::poseidon2_merge(&pair, Felt::ZERO);
     sdk::adv_stack_extend(&mut digest.into_elements());
+}
+
+/// Reports root-context membership and reads the same address from current and root memory.
+#[sdk::miden_event_handler("test::wasm::context_memory")]
+fn context_memory() {
+    let in_root = if sdk::is_root_context() { Felt::ONE } else { Felt::ZERO };
+    let mut values = [in_root, Felt::ZERO, Felt::ZERO];
+    if sdk::mem_read(100, &mut values[1..2]) != sdk::abi::Status::Ok {
+        sdk::fail("current memory read failed");
+    }
+    if sdk::mem_read_root(100, &mut values[2..3]) != sdk::abi::Status::Ok {
+        sdk::fail("root memory read failed");
+    }
+    sdk::adv_stack_extend(&mut values);
 }

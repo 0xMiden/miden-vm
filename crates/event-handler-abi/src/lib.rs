@@ -46,9 +46,10 @@
 ///
 /// Version bumps are additive only: a newer version may add host functions, but must not change
 /// or remove existing ones. Hosts therefore accept every declared version from `1` up to their
-/// own [`ABI_VERSION`]. A breaking change gets a new import namespace (for example
+/// own [`ABI_VERSION`], provided each import exists in the declared revision. Revision 2 adds
+/// `invocation_kind`. A breaking change gets a new import namespace (for example
 /// `miden:event/v2`) instead of a version bump.
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 
 /// The Wasm import module namespace that provides all host functions.
 pub const IMPORT_MODULE: &str = "miden:event/v1";
@@ -81,6 +82,35 @@ pub const FIELD_MODULUS: u64 = 0xffff_ffff_0000_0001;
 /// A message that declares more bytes is truncated to this length. The cap is part of the
 /// contract, so a guest that must keep its whole message readable keeps it under this size.
 pub const MAX_FAIL_MSG_BYTES: u32 = 4096;
+
+// INVOCATION KIND
+// ================================================================================================
+
+/// How MASM invoked the handler. The `invocation_kind` import was added in ABI revision 2.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InvocationKind {
+    /// A regular `emit` invocation, which may supply advice.
+    Event = 0,
+    /// An optional `trace` invocation, which must not supply advice.
+    Trace = 1,
+}
+
+impl InvocationKind {
+    /// Decodes the host query result; unknown values are outside this ABI revision.
+    pub const fn from_raw(raw: i32) -> Option<Self> {
+        match raw {
+            0 => Some(Self::Event),
+            1 => Some(Self::Trace),
+            _ => None,
+        }
+    }
+
+    /// Returns the wire value of this invocation kind.
+    pub const fn as_raw(self) -> i32 {
+        self as i32
+    }
+}
 
 // VALUE TYPES
 // ================================================================================================
@@ -187,6 +217,8 @@ pub mod host_fn {
     pub const CLK: &str = "clk";
     /// See `guest::event_id`.
     pub const EVENT_ID: &str = "event_id";
+    /// See `guest::invocation_kind`; available since ABI revision 2.
+    pub const INVOCATION_KIND: &str = "invocation_kind";
     /// See `guest::is_root_context`.
     pub const IS_ROOT_CONTEXT: &str = "is_root_context";
     /// See `guest::mem_get`.
@@ -235,12 +267,13 @@ pub mod host_fn {
     /// The loader checks each import of a handler module against this set, so the import
     /// count of a loadable module is bounded by it. The host-side linker (`build_linker` in
     /// `miden-wasm-event-handlers`) registers exactly these names; keep the two in sync.
-    pub const ALL: [&str; 26] = [
+    pub const ALL: [&str; 27] = [
         STACK_DEPTH,
         STACK_GET,
         STACK_READ,
         CLK,
         EVENT_ID,
+        INVOCATION_KIND,
         IS_ROOT_CONTEXT,
         MEM_GET,
         MEM_READ,
@@ -263,6 +296,18 @@ pub mod host_fn {
         MERKLE_STORE_EXTEND,
         FAIL,
     ];
+
+    /// Returns the earliest additive ABI revision providing this import, or `None` for an
+    /// unknown name. Package derivation and host validation share this version table.
+    pub fn minimum_abi_version(name: &str) -> Option<u32> {
+        if name == INVOCATION_KIND {
+            Some(2)
+        } else if ALL.contains(&name) {
+            Some(1)
+        } else {
+            None
+        }
+    }
 }
 
 // GUEST IMPORT DECLARATIONS
@@ -284,15 +329,15 @@ pub mod guest {
         // QUERIES
         // ----------------------------------------------------------------------------------------
 
-        /// Returns the depth of the handler's stack view: the operand-stack depth without the
-        /// event-ID slot.
+        /// Returns the payload-stack depth, excluding one dispatch element for `emit` and
+        /// two for `trace`.
         pub fn stack_depth() -> u32;
 
         /// Returns the operand-stack element at position `pos` of the handler's stack view, in
         /// canonical form.
         ///
         /// The view starts at the first handler input: position `0` is the operand-stack
-        /// element just below the event ID, which is not part of the view (see `event_id`).
+        /// payload element after the dispatch envelope, which is not part of the view.
         /// Positions past the view's depth read as zero.
         pub fn stack_get(pos: u32) -> u64;
 
@@ -306,11 +351,19 @@ pub mod guest {
         /// Returns the current clock cycle.
         pub fn clk() -> u64;
 
-        /// Returns the ID of the event the handler was invoked for, in canonical form.
+        /// Returns the canonical event ID of this handler's manifest binding.
         ///
-        /// This is the ID `emit` consumed to dispatch the event. It is not part of the stack
-        /// view the `stack_*` functions expose.
+        /// This value is unchanged when a host registers the handler under an alias. The
+        /// dispatch envelope is not part of the stack view the `stack_*` functions expose.
         pub fn event_id() -> u64;
+
+        /// Returns how MASM invoked the handler: `0` for `emit`, `1` for `trace`.
+        ///
+        /// Added in ABI revision 2. This reports the actual invocation, independently of the
+        /// manifest binding returned by `event_id`. A successful trace must record no advice;
+        /// the processor rejects even idempotent map writes. Hosts may suppress traces before
+        /// invoking the guest at all.
+        pub fn invocation_kind() -> i32;
 
         /// Returns `1` when the current execution context is the root context, and `0`
         /// otherwise.
@@ -494,7 +547,7 @@ mod tests {
         // linker registration in `miden-wasm-event-handlers` must match it name for name, and
         // the WAT import fixture of that crate declares the same set. The count is pinned here,
         // so a new host function cannot reach the linker without this list.
-        assert_eq!(host_fn::ALL.len(), 26);
+        assert_eq!(host_fn::ALL.len(), 27);
         for (index, name) in host_fn::ALL.iter().enumerate() {
             assert!(!name.is_empty(), "a host function name is empty");
             assert!(
