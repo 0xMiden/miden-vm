@@ -93,7 +93,7 @@ engine invokes them when the new callback uses its default fallback and has reco
 Legacy event and trace registrations may share an identity; portable registrations reject any
 existing binding at that identity. `HostLibrary` retains its public legacy shape and event-only
 handler delivery. Use `load_library_with_event_handlers` with a portable handler list for atomic
-library loading and unified delivery. `event::legacy_handler` adapts a portable handler to that path with isolated
+library loading and unified delivery. `event::legacy_handler` adapts a portable handler to legacy registrations with isolated
 failure; direct portable registrations use `event::HandlerRegistry`. For a custom host that routes
 library events before async work, use a portable registry in the new callback or retain the old
 raw-state callback until that registry is migrated. A portable context cannot recreate raw state.

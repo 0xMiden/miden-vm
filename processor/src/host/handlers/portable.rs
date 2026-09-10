@@ -70,13 +70,18 @@ impl core::fmt::Debug for HandlerRegistry {
 /// unified event/trace delivery. A child batch isolates failure before conversion to legacy output.
 pub fn legacy_handler(handler: impl Into<registration::EventHandler>) -> Arc<dyn EventHandler> {
     let handler = handler.into();
-    Arc::new(move |process: &ProcessorState<'_>| {
-        let mut batch = AdviceBatch::new();
-        handler
-            .as_ref()
-            .handle(event_context(process, InvocationKind::Event), &mut batch.recorder())?;
-        Ok(batch_into_mutations(batch))
-    })
+    Arc::new(move |process: &ProcessorState<'_>| invoke_legacy_handler(handler.as_ref(), process))
+}
+
+/// Invokes a borrowed portable handler for a legacy event callback, isolating its output until
+/// success. This supports concrete types retaining their old trait implementation during migration.
+pub fn invoke_legacy_handler(
+    handler: &dyn miden_event_handler::EventHandler,
+    process: &ProcessorState<'_>,
+) -> Result<Vec<AdviceMutation>, EventError> {
+    let mut batch = AdviceBatch::new();
+    handler.handle(event_context(process, InvocationKind::Event), &mut batch.recorder())?;
+    Ok(batch_into_mutations(batch))
 }
 
 pub(crate) fn event_context<'a>(
