@@ -1,4 +1,4 @@
-use std::{sync::Arc, vec};
+use std::vec;
 
 use miden_air::Felt;
 use miden_assembly::{Assembler, Linkage};
@@ -10,6 +10,7 @@ use miden_core::{
     serde::{Deserializable, Serializable},
 };
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
+use miden_event_handler::{AdviceRecorder, EventContext, InvocationKind};
 use miden_processor::{
     DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
@@ -60,7 +61,7 @@ const EVENT_FALCON_SIG_TO_STACK: EventName = EventName::new("test::falcon::sig_t
 /// of a DSA in Miden VM.
 ///
 /// Inputs:
-///   Operand stack: [event_id, PK, MSG, ...]
+///   Event payload: [PK, MSG, ...]
 ///   Advice stack: \[ SIGNATURE \]
 ///
 /// Outputs:
@@ -72,13 +73,17 @@ const EVENT_FALCON_SIG_TO_STACK: EventName = EventName::new("test::falcon::sig_t
 /// - SIGNATURE is the signature being verified.
 ///
 /// The advice provider is expected to contain the private key associated to the public key PK.
-pub fn push_falcon_signature(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-    let pub_key = process.get_stack_word(1);
-    let msg = process.get_stack_word(5);
+pub fn push_falcon_signature(
+    context: EventContext<'_>,
+    advice: &mut AdviceRecorder<'_>,
+) -> Result<(), EventError> {
+    context.kind().require(InvocationKind::Event)?;
+    let pub_key = context.stack_word(0);
+    let msg = context.stack_word(4);
 
-    let pk_sk_felts = process
-        .advice_provider()
-        .get_mapped_values(&pub_key)
+    let pk_sk_felts = context
+        .advice_map()
+        .get(&pub_key)
         .ok_or(FalconError::NoSecretKey { key: pub_key })?;
 
     // Convert felts back to bytes (each felt was a single byte stored as u64)
@@ -91,7 +96,8 @@ pub fn push_falcon_signature(process: &ProcessorState) -> Result<Vec<AdviceMutat
     let signature_result = falcon512_poseidon2::sign(&sk, msg)
         .ok_or(FalconError::MalformedSignatureKey { key_type: "Poseidon2 Falcon512" })?;
 
-    Ok(vec![advice_stack_mutation(signature_result)])
+    advice.prepend_stack(signature_result);
+    Ok(())
 }
 
 // EVENT ERROR
@@ -285,7 +291,10 @@ fn test_move_sig_to_adv_stack() {
     let store = MerkleStore::new();
 
     let test = build_debug_test!(source, &op_stack, &adv_stack, store, advice_map.into_iter())
-        .with_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
+        .with_event_handlers(vec![(
+            EVENT_FALCON_SIG_TO_STACK,
+            miden_processor::event::legacy_handler(push_falcon_signature),
+        )]);
     test.expect_stack(&[])
 }
 
@@ -298,7 +307,10 @@ fn falcon_execution() {
     let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
 
     let test = build_debug_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter())
-        .with_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
+        .with_event_handlers(vec![(
+            EVENT_FALCON_SIG_TO_STACK,
+            miden_processor::event::legacy_handler(push_falcon_signature),
+        )]);
     test.expect_stack(&[])
 }
 
@@ -514,8 +526,10 @@ fn falcon_prove_verify() {
     let stack_inputs = stack_inputs_from_ints(op_stack);
     let advice_inputs = AdviceInputs::default().with_map(advice_map);
     let mut host = DefaultHost::default();
-    host.load_library(&CoreLibrary::default()).expect("failed to load mast forest");
-    host.register_handler(EVENT_FALCON_SIG_TO_STACK, Arc::new(push_falcon_signature))
+    let core_lib = CoreLibrary::default();
+    host.load_library_with_event_handlers(core_lib.package(), core_lib.event_handlers())
+        .expect("failed to load mast forest");
+    host.register_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature)
         .unwrap();
 
     let witness = FastProcessor::new_with_options(stack_inputs, advice_inputs, Default::default())

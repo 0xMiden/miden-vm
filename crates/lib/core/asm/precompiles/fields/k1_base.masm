@@ -386,7 +386,15 @@ end
 #! canonical VALUE node, then proves correctness by logging `eq(mul(X_DIGEST, INV_DIGEST), one)`
 #! into the deferred root using only existing MUL and EQ nodes.
 pub proc inv
+    # Materialize untrusted operand hints while retaining the original digest for validation.
+    adv.evaluate_deferred_payload
+    adv_pushw adv_pushw
+    # => [X_LO, X_HI, X_DIGEST, ...]
+
+    push.BOUND_PTR
     emit.event("miden::precompiles::fields::field_inv")
+    # => [bound_ptr, X_LO, X_HI, X_DIGEST, ...]
+    drop dropw dropw
     # => [X_DIGEST, ...]
 
     adv_pushw
