@@ -4,13 +4,17 @@ use miden_core::{
     Felt,
     deferred::{DeferredError, PrecompileError, TRUE_DIGEST},
 };
-use miden_precompiles::UintSpec;
-use miden_processor::{ExecutionError, ExecutionOutput};
+use miden_core_lib::handlers::precompiles::uint_field_inv::UINT_FIELD_INV_EVENT_NAME;
+use miden_event_handler::{AdviceRecorder, EventContext};
+use miden_precompiles::{UintDomain, UintSpec};
+use miden_processor::{
+    ExecutionError, ExecutionOutput, FastProcessor, StackInputs, advice::AdviceInputs,
+};
 
 use super::helpers::{
     TRUNCATE_STACK_TO_OUTPUT_PROC, U32x8, assert_deferred_state_round_trips, assert_memory_u32x8,
     assert_stack_u32x8, expect_precompile_trap, masm_push_u32x8, masm_store_u32x8,
-    read_memory_felts, run_precompile_program,
+    prepare_precompile_program, read_memory_felts, run_precompile_program,
 };
 
 const MEM_PTR: u32 = 0;
@@ -382,6 +386,9 @@ impl<M: UintSpec> UintModule<M> {
 
     fn assert_prime_field_specific_contract(&self) {
         self.assert_prime_field_identities();
+        self.assert_inverse_expression_preserves_tails();
+        self.expect_forged_inverse_trap();
+        self.expect_invalid_inverse_payloads_trap();
         self.expect_inv_zero_trap();
         self.expect_div_zero_trap();
         self.expect_modulus_as_noncanonical_value_trap();
@@ -390,13 +397,6 @@ impl<M: UintSpec> UintModule<M> {
     fn assert_prime_field_identities(&self) {
         let body = format!(
             "
-            exec.{module}::push_two_digest
-            exec.{module}::inv
-            exec.{module}::push_two_digest
-            exec.{module}::mul
-            exec.{module}::push_one_digest
-            exec.{module}::assert_eq
-
             exec.{module}::push_two_digest
             exec.{module}::push_one_digest
             exec.{module}::div
@@ -443,6 +443,85 @@ impl<M: UintSpec> UintModule<M> {
         );
 
         self.run(&body, "prime-field identities");
+    }
+
+    fn assert_inverse_expression_preserves_tails(&self) {
+        let value = [1, 2, 3, 4, 5, 6, 7, 8];
+        let expected = M::inv(M::add(value, ONE)).unwrap();
+        let source = format!(
+            "{TRUNCATE_STACK_TO_OUTPUT_PROC}
+            use {module_use_path}
+            begin
+                push.99
+                {value}
+                exec.{module}::load
+                exec.{module}::push_one_digest
+                exec.{module}::add
+                exec.{module}::inv
+                exec.{module}::eval
+                exec.truncate_stack_to_output
+            end",
+            module = self.module,
+            module_use_path = self.module_use_path(),
+            value = masm_push_u32x8(value),
+        );
+        let (program, mut host) = prepare_precompile_program(&source);
+        let advice_sentinel = Felt::from_u32(101);
+        let output = FastProcessor::new(StackInputs::default())
+            .with_advice(
+                AdviceInputs::default().with_stack([advice_sentinel].into_iter().collect()),
+            )
+            .unwrap()
+            .execute_sync(&program, &mut host)
+            .expect("inverse of an expression must preserve its stack and advice tails");
+        assert_stack_u32x8(&output, expected);
+        assert_eq!(output.stack.get_element(8), Some(Felt::from_u32(99)));
+        assert_eq!(output.advice.stack(), [advice_sentinel]);
+        assert_deferred_state_round_trips(&output);
+    }
+
+    fn expect_forged_inverse_trap(&self) {
+        let source = self.program(&format!(
+            "exec.{module}::push_two_digest exec.{module}::inv dropw",
+            module = self.module,
+        ));
+        let (program, mut host) = prepare_precompile_program(&source);
+        assert!(host.unregister_event_handler(UINT_FIELD_INV_EVENT_NAME.to_event_id()));
+        host.register_event_handler(
+            UINT_FIELD_INV_EVENT_NAME,
+            |_: EventContext<'_>, advice: &mut AdviceRecorder<'_>| {
+                // One is canonical, but it is not the inverse of the original input two.
+                advice.prepend_stack(ONE.map(Felt::from_u32));
+                Ok(())
+            },
+        )
+        .unwrap();
+        let error = FastProcessor::new(StackInputs::default())
+            .execute_sync(&program, &mut host)
+            .expect_err("the original digest must remain bound to the advised inverse");
+        let ExecutionError::DeferredError { err, .. } = error else {
+            panic!("expected inverse equality failure, got {error:?}");
+        };
+        assert!(matches!(err.root(), PrecompileError::AssertionFailed));
+    }
+
+    fn expect_invalid_inverse_payloads_trap(&self) {
+        let bound = u64::from(UintDomain::from_id(M::ID).unwrap().bound_ptr());
+        let value = ONE.map(u64::from);
+        let mut non_u32 = value;
+        non_u32[7] = 1_u64 << 32;
+        for (selector, limbs) in [
+            (bound, non_u32),
+            (bound, M::ENCODED_MODULUS.map(u64::from)),
+            (u64::from(UintDomain::U256.bound_ptr()), value),
+            (u64::from(u32::MAX) + 1, value),
+        ] {
+            let limbs = limbs.iter().rev().map(u64::to_string).collect::<Vec<_>>().join(".");
+            self.expect_trap(&format!(
+                "push.{limbs} push.{selector} emit.event(\"{UINT_FIELD_INV_EVENT_NAME}\")
+                 drop dropw dropw adv_pushw adv_pushw dropw dropw",
+            ));
+        }
     }
 
     fn expect_inv_zero_trap(&self) {

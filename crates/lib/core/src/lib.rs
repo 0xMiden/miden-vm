@@ -16,19 +16,22 @@ use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_core::{Word, events::EventName, mast::MastForest};
 use miden_mast_package::Package;
-use miden_processor::{HostLibrary, event::EventHandler};
+use miden_processor::{
+    HostLibrary,
+    event::{EventHandler, registration},
+};
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
     aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, handle_aead_decrypt},
-    debug::default_debug_handlers,
+    debug::default_debug_event_handlers,
     ecdsa_k256_keccak::{ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handle_ecdsa_k256_keccak_recover},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
     precompiles::{
         keccak256::{KECCAK256_DIGEST_EVENT_NAME, handle_keccak256_digest},
         uint_field_inv::{UINT_FIELD_INV_EVENT_NAME, handle_uint_field_inv},
     },
-    readonly::readonly_noop_handlers,
+    readonly::readonly_noop_event_handlers,
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
     sorted_array::{
         LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME, handle_lowerbound_array,
@@ -94,7 +97,7 @@ pub const PVM_PROOF_REQUEST_EVENT_NAME: EventName =
 ///
 /// ```rust,ignore
 /// # let core_lib = CoreLibrary::default();
-/// let handlers = core_lib.handlers();
+/// let handlers = core_lib.event_handlers();
 /// // Register handlers with your host...
 /// ```
 ///
@@ -178,39 +181,31 @@ impl CoreLibrary {
     /// Hosts can replace those handlers to route output to a UI, log, no-op handler, or other sink.
     /// Advice debug handlers can expose witness data directly, so hosts must opt into those
     /// explicitly by extending this handler set with
-    /// [`crate::handlers::debug::advice_debug_handlers`].
-    pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
-        let mut handlers: Vec<(EventName, Arc<dyn EventHandler>)> = vec![
-            (SMT_PEEK_EVENT_NAME, miden_processor::event::legacy_handler(handle_smt_peek)),
-            (U64_DIV_EVENT_NAME, miden_processor::event::legacy_handler(handle_u64_div)),
-            (U128_DIV_EVENT_NAME, miden_processor::event::legacy_handler(handle_u128_div)),
-            (U256_DIV_EVENT_NAME, miden_processor::event::legacy_handler(handle_u256_div)),
-            (FALCON_DIV_EVENT_NAME, miden_processor::event::legacy_handler(handle_falcon_div)),
-            (
-                LOWERBOUND_ARRAY_EVENT_NAME,
-                miden_processor::event::legacy_handler(handle_lowerbound_array),
-            ),
-            (
-                LOWERBOUND_KEY_VALUE_EVENT_NAME,
-                miden_processor::event::legacy_handler(handle_lowerbound_key_value),
-            ),
-            (
-                AEAD_DECRYPT_EVENT_NAME,
-                miden_processor::event::legacy_handler(handle_aead_decrypt),
-            ),
-            (
-                ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,
-                miden_processor::event::legacy_handler(handle_ecdsa_k256_keccak_recover),
-            ),
-            (
-                KECCAK256_DIGEST_EVENT_NAME,
-                miden_processor::event::legacy_handler(handle_keccak256_digest),
-            ),
-            (UINT_FIELD_INV_EVENT_NAME, Arc::new(handle_uint_field_inv)),
+    /// [`crate::handlers::debug::advice_debug_event_handlers`].
+    pub fn event_handlers(&self) -> Vec<(EventName, registration::EventHandler)> {
+        let mut handlers: Vec<(EventName, registration::EventHandler)> = vec![
+            (SMT_PEEK_EVENT_NAME, handle_smt_peek.into()),
+            (U64_DIV_EVENT_NAME, handle_u64_div.into()),
+            (U128_DIV_EVENT_NAME, handle_u128_div.into()),
+            (U256_DIV_EVENT_NAME, handle_u256_div.into()),
+            (FALCON_DIV_EVENT_NAME, handle_falcon_div.into()),
+            (LOWERBOUND_ARRAY_EVENT_NAME, handle_lowerbound_array.into()),
+            (LOWERBOUND_KEY_VALUE_EVENT_NAME, handle_lowerbound_key_value.into()),
+            (AEAD_DECRYPT_EVENT_NAME, handle_aead_decrypt.into()),
+            (ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handle_ecdsa_k256_keccak_recover.into()),
+            (KECCAK256_DIGEST_EVENT_NAME, handle_keccak256_digest.into()),
+            (UINT_FIELD_INV_EVENT_NAME, handle_uint_field_inv.into()),
         ];
-        handlers.extend(default_debug_handlers());
-        handlers.extend(readonly_noop_handlers());
+        handlers.extend(default_debug_event_handlers());
+        handlers.extend(readonly_noop_event_handlers());
         handlers
+    }
+
+    /// Returns event-only adapters with the original processor handler signature.
+    /// Use [`Self::event_handlers`] and `DefaultHost::load_library_with_event_handlers` for unified
+    /// emit and trace delivery.
+    pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
+        handlers::legacy_handlers(self.event_handlers())
     }
 }
 

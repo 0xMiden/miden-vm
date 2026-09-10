@@ -103,6 +103,7 @@ tracing-subscriber = { workspace = true, optional = true, features = ["std", "en
 tracing-forest = { workspace = true, optional = true, features = ["ansi", "smallvec"] }
 
 [dev-dependencies]
+miden-event-handler.workspace = true
 assert_cmd = { version = "2.1" }
 criterion = { workspace = true, features = ["async_tokio"] }
 miden-assembly = { workspace = true, features = ["testing"] }

@@ -2834,6 +2834,7 @@ dependencies = [
  "miden-assembly",
  "miden-core",
  "miden-core-lib",
+ "miden-event-handler",
  "miden-mast-package",
  "miden-precompiles",
  "miden-processor",
