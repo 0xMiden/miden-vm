@@ -3,13 +3,8 @@
 //! This handler implements the U64_DIV operation that pushes the result of [u64] division
 //! (both the quotient and the remainder) onto the advice stack.
 
-use alloc::{vec, vec::Vec};
-
-use miden_processor::{
-    ProcessorState,
-    advice::AdviceMutation,
-    event::{EventError, EventName},
-};
+use miden_core::events::EventName;
+use miden_event_handler::{AdviceRecorder, EventContext, EventError, InvocationKind};
 
 use crate::handlers::u64_to_u32_elements;
 
@@ -22,7 +17,7 @@ pub const U64_DIV_EVENT_NAME: EventName = EventName::new("miden::core::math::u64
 /// stack.
 ///
 /// Inputs:
-///   Operand stack: [event_id, b_lo, b_hi, a_lo, a_hi, ...]
+///   Operand stack: [b_lo, b_hi, a_lo, a_hi, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
@@ -35,12 +30,15 @@ pub const U64_DIV_EVENT_NAME: EventName = EventName::new("miden::core::math::u64
 ///
 /// # Errors
 /// Returns an error if the divisor is ZERO.
-pub fn handle_u64_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-    // Read divisor from positions 1 (lo) and 2 (hi) - b is on top of stack
-    let divisor = {
-        let divisor_lo = process.get_stack_item(1).as_canonical_u64();
-        let divisor_hi = process.get_stack_item(2).as_canonical_u64();
+pub fn handle_u64_div(
+    context: EventContext,
+    advice: &mut AdviceRecorder<'_>,
+) -> Result<(), EventError> {
+    context.kind().require(InvocationKind::Event)?;
+    let [divisor_lo, divisor_hi, dividend_lo, dividend_hi] =
+        context.read_stack_array(0).map(|felt| felt.as_canonical_u64());
 
+    let divisor = {
         // Ensure the divisor is a pair of u32 values
         if divisor_lo > u32::MAX.into() {
             return Err(U64DivError::NotU32Value {
@@ -66,11 +64,7 @@ pub fn handle_u64_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, E
         divisor
     };
 
-    // Read dividend from positions 3 (lo) and 4 (hi) - a is below b
     let dividend = {
-        let dividend_lo = process.get_stack_item(3).as_canonical_u64();
-        let dividend_hi = process.get_stack_item(4).as_canonical_u64();
-
         // Ensure the dividend is a pair of u32 values
         if dividend_lo > u32::MAX.into() {
             return Err(U64DivError::NotU32Value {
@@ -98,8 +92,8 @@ pub fn handle_u64_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, E
 
     // MASM reads quotient first with `adv_push adv_push`, so q_lo lands above q_hi.
     // It reads remainder next with the same pattern, so r_lo lands above r_hi.
-    let mutation = AdviceMutation::extend_advice_stack_with([q_hi, q_lo, r_hi, r_lo]);
-    Ok(vec![mutation])
+    advice.prepend_stack([q_hi, q_lo, r_hi, r_lo]);
+    Ok(())
 }
 
 // ERROR TYPES
