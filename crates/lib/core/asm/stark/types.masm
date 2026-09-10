@@ -1,0 +1,99 @@
+#! Shared stack representations used by the recursive STARK verifier.
+
+use {State} from miden::core::crypto::hashes::poseidon2
+
+#! A quadratic extension-field value, with the constant coefficient on top of the stack.
+pub type QuadFelt = struct { c0: felt, c1: felt }
+
+#! Poseidon2 sponge state in operand-stack order.
+pub type PoseidonState = State
+
+# A Poseidon2 commitment or procedure digest.
+pub use {Digest} from miden::core::crypto::hashes::poseidon2
+
+#! A base-field-element address in VM memory.
+pub type Address = ptr<felt>
+
+#! LDE domain metadata in operand-stack order, including its reserved zero cell.
+#! The size can be 2^32 and therefore occupies a felt rather than a u32.
+pub type LdeDomain = struct { size: felt, depth: u8, generator: felt, reserved: felt }
+
+#! The five relation-specific verifier hooks, in execution ABI order.
+pub type VerifierHooks = struct {
+    observe_aux_trace: Digest,
+    process_public_inputs: Digest,
+    process_row_ood_evaluations: Digest,
+    execute_constraint_evaluation_check: Digest,
+    compute_deep_composition_polynomial_queries: Digest,
+}
+
+#! Evaluations at the out-of-domain point and the next trace point.
+pub type EvaluationPair = struct { current: QuadFelt, next: QuadFelt }
+
+#! Streaming Horner evaluation state in operand-stack order.
+pub type HornerState = struct { coefficients: Address, alpha: ptr<QuadFelt>, accumulator: QuadFelt }
+
+#! A FRI query, including its domain point, index, and extension-field evaluation.
+pub type FriQuery = struct { point: felt, index: u32, evaluation: QuadFelt }
+
+#! Transcript-bound proof security parameters.
+pub type ProofParameters = struct {
+    num_queries: u8,
+    query_pow_bits: u8,
+    deep_pow_bits: u8,
+    folding_pow_bits: u8,
+}
+
+#! Security metadata returned by a successfully verified recursive proof.
+pub type SecurityDescriptor = struct {
+    lookup_pow_bits: u8,
+    num_composed_constraints: u16,
+    max_constraint_degree: u8,
+    num_deep_terms: u16,
+    max_message_width: u32,
+    num_lookup_boundary_terms: u16,
+    lookup_fractions_per_row: u32,
+    log_max_height: u8,
+    proof: ProofParameters,
+}
+
+#! The Fast-convention representation of ProofParameters, with one felt per field.
+#! Use this for exec signatures: the unpadded record packs its four u8 fields into one felt.
+#! Explicit byte padding belongs to the memory/Fast layout, not the component-model ABI.
+pub type StackProofParameters = struct {
+    num_queries: u8,
+    num_queries_padding: [u8; 3],
+    query_pow_bits: u8,
+    query_pow_bits_padding: [u8; 3],
+    deep_pow_bits: u8,
+    deep_pow_bits_padding: [u8; 3],
+    folding_pow_bits: u8,
+    folding_pow_bits_padding: [u8; 3],
+}
+
+#! The twelve-felt Fast-convention representation of SecurityDescriptor.
+#! Use this for exec signatures to keep each narrow field in its own felt, including the
+#! nested proof parameters. The unpadded record is appropriate for component-model flattening.
+pub type StackSecurityDescriptor = struct {
+    lookup_pow_bits: u8,
+    lookup_pow_bits_padding: [u8; 3],
+    num_composed_constraints: u16,
+    num_composed_constraints_padding: [u8; 2],
+    max_constraint_degree: u8,
+    max_constraint_degree_padding: [u8; 3],
+    num_deep_terms: u16,
+    num_deep_terms_padding: [u8; 2],
+    max_message_width: u32,
+    num_lookup_boundary_terms: u16,
+    num_lookup_boundary_terms_padding: [u8; 2],
+    lookup_fractions_per_row: u32,
+    log_max_height: u8,
+    log_max_height_padding: [u8; 3],
+    proof: StackProofParameters,
+}
+
+#! Cursor state retained while computing a DEEP query.
+pub type DeepQueryCursor = struct { point: felt, index: u32, query: ptr<word>, end: ptr<word> }
+
+#! A quadratic extension-field value padded with two zero cells to fill a word.
+pub type PaddedQuadFelt = struct { value: QuadFelt, padding: [felt; 2] }

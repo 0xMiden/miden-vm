@@ -27,10 +27,15 @@ const SUB_TAG = [5689961814541250448, 2, 0, 0]
 const MUL_TAG = [5689961814541250448, 3, 0, 0]
 const EQ_TAG = [5689961814541250448, 4, 0, 0]
 
+#! Deferred expression digest for this arithmetic domain.
+pub type Expr = struct { digest: word }
+#! Canonical value as eight little-endian u32 limbs.
+pub type Value = struct { limbs: [u32; 8] }
+
 #! Loads one canonical field value from the operand stack and returns its deferred digest.
 #! Input:  [VALUE_U32[8], ...]
 #! Output: [VALUE_DIGEST, ...]
-pub proc load
+pub proc load(value: Value) -> Expr
     push.VALUE_TAG
     # => [TAG(VALUE), VALUE_LO, VALUE_HI, ...]
     exec.precompiles::register_expr
@@ -43,7 +48,7 @@ end
 #!
 #! `ptr` must address eight consecutive u32-range felts and be word-aligned for the
 #! `mem_stream` used by the deferred data registration helper.
-pub proc load_mem_stream
+pub proc load_mem_stream(ptr: ptr<Value>) -> (Expr, ptr<Value>)
     push.VALUE_TAG
     # => [TAG(VALUE), ptr, ...]
     push.1 movdn.5
@@ -66,7 +71,7 @@ end
 #!
 #! `ptr` must address eight consecutive u32-range felts and be word-aligned for
 #! `load_mem_stream`.
-pub proc load_mem
+pub proc load_mem(ptr: ptr<Value>) -> Expr
     exec.load_mem_stream
     # => [VALUE_DIGEST, ptr+8, ...]
     movup.4 drop
@@ -74,104 +79,104 @@ pub proc load_mem
 end
 
 #! Pushes the registered digest of constant 0.
-pub proc push_zero_digest
+pub proc push_zero_digest() -> Expr
     push.[12235185259047752642, 5208017157183189669, 9292540298032073981, 9511360734710186893]
 end
 
 #! Pushes the raw little-endian u32 limbs of constant 0.
 #! Output: [VALUE_U32[8], ...]
-pub proc push_zero_value
+pub proc push_zero_value() -> Value
     # Inline constant: raw canonical limbs for constant 0.
     push.[0, 0, 0, 0]
     push.[0, 0, 0, 0]
 end
 
 #! Pushes the registered digest of constant 1.
-pub proc push_one_digest
+pub proc push_one_digest() -> Expr
     push.[1878349016959876810, 14778147410693542276, 17251471321497098014, 15346443592607607242]
 end
 
 #! Pushes the raw little-endian u32 limbs of constant 1.
 #! Output: [VALUE_U32[8], ...]
-pub proc push_one_value
+pub proc push_one_value() -> Value
     # Inline constant: raw canonical limbs for constant 1.
     push.[0, 0, 0, 0]
     push.[1, 0, 0, 0]
 end
 
 #! Pushes the registered digest of constant 2.
-pub proc push_two_digest
+pub proc push_two_digest() -> Expr
     push.[862555232448219002, 2034685859822241649, 16259540706235303463, 3114164198420063892]
 end
 
 #! Pushes the raw little-endian u32 limbs of constant 2.
 #! Output: [VALUE_U32[8], ...]
-pub proc push_two_value
+pub proc push_two_value() -> Value
     # Inline constant: raw canonical limbs for constant 2.
     push.[0, 0, 0, 0]
     push.[2, 0, 0, 0]
 end
 
 #! Pushes the registered digest of field constant -1.
-pub proc push_minus_one_digest
+pub proc push_minus_one_digest() -> Expr
     push.[15243480051459133271, 17843269322345526738, 12145311193826078101, 9589873218281865792]
 end
 
 #! Pushes the raw little-endian u32 limbs of field constant -1.
 #! Output: [VALUE_U32[8], ...]
-pub proc push_minus_one_value
+pub proc push_minus_one_value() -> Value
     # Inline constant: raw canonical limbs for field constant -1.
     push.[4294967294, 4294967295, 4294967295, 4294967295]
     push.[3493216576, 3218235020, 2940772411, 3132021990]
 end
 
 #! Pushes the registered digest of field constant 1/2.
-pub proc push_half_digest
+pub proc push_half_digest() -> Expr
     push.[3117130996359462226, 12591859595800097222, 11525497790082521360, 3056786445402242882]
 end
 
 #! Pushes the raw little-endian u32 limbs of field constant 1/2.
 #! Output: [VALUE_U32[8], ...]
-pub proc push_half_value
+pub proc push_half_value() -> Value
     # Inline constant: raw canonical limbs for field constant 1/2.
     push.[4294967295, 4294967295, 4294967295, 2147483647]
     push.[1746608289, 3756601158, 1470386205, 1566010995]
 end
 
 #! Pushes the registered digest of field constant 2^128.
-pub proc push_pow_2_128_digest
+pub proc push_pow_2_128_digest() -> Expr
     push.[5657574597479590030, 17709499123064135804, 11001642194704482477, 14036640129447992881]
 end
 
 #! Pushes the raw little-endian u32 limbs of field constant 2^128.
 #! Output: [VALUE_U32[8], ...]
-pub proc push_pow_2_128_value
+pub proc push_pow_2_128_value() -> Value
     # Inline constant: raw canonical limbs for field constant 2^128.
     push.[1, 0, 0, 0]
     push.[0, 0, 0, 0]
 end
 
 #! Pushes the registered digest of field constant 2^256.
-pub proc push_pow_2_256_digest
+pub proc push_pow_2_256_digest() -> Expr
     push.[9885843177284384005, 5960927280190970865, 8795656961776369767, 12211933890347059166]
 end
 
 #! Pushes the raw little-endian u32 limbs of field constant 2^256.
 #! Output: [VALUE_U32[8], ...]
-pub proc push_pow_2_256_value
+pub proc push_pow_2_256_value() -> Value
     # Inline constant: raw canonical limbs for field constant 2^256.
     push.[1, 0, 0, 0]
     push.[801750719, 1076732275, 1354194884, 1162945305]
 end
 
 #! Pushes the registered digest of field constant 2^384.
-pub proc push_pow_2_384_digest
+pub proc push_pow_2_384_digest() -> Expr
     push.[12333194946496484924, 17790533594305030548, 578769770010356461, 7691803547552539054]
 end
 
 #! Pushes the raw little-endian u32 limbs of field constant 2^384.
 #! Output: [VALUE_U32[8], ...]
-pub proc push_pow_2_384_value
+pub proc push_pow_2_384_value() -> Value
     # Inline constant: raw canonical limbs for field constant 2^384.
     push.[801750720, 1076732275, 1354194884, 1162945305]
     push.[801750719, 1076732275, 1354194884, 1162945305]
@@ -180,7 +185,7 @@ end
 #! Registers `lhs + rhs` and returns the result expression digest.
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [SUM_DIGEST, ...]
-pub proc add
+pub proc add(lhs: Expr, rhs: Expr) -> Expr
     push.ADD_TAG
     # => [TAG(ADD), LHS_DIGEST, RHS_DIGEST, ...]
     exec.precompiles::register_expr
@@ -190,7 +195,7 @@ end
 #! Registers `lhs - rhs` and returns the result expression digest.
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [DIFF_DIGEST, ...]
-pub proc sub
+pub proc sub(lhs: Expr, rhs: Expr) -> Expr
     push.SUB_TAG
     # => [TAG(SUB), LHS_DIGEST, RHS_DIGEST, ...]
     exec.precompiles::register_expr
@@ -200,7 +205,7 @@ end
 #! Registers `lhs * rhs` and returns the result expression digest.
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [PRODUCT_DIGEST, ...]
-pub proc mul
+pub proc mul(lhs: Expr, rhs: Expr) -> Expr
     push.MUL_TAG
     # => [TAG(MUL), LHS_DIGEST, RHS_DIGEST, ...]
     exec.precompiles::register_expr
@@ -214,7 +219,7 @@ end
 #! This does not trap when the two values differ. Each digest is evaluated independently, and each
 #! advised canonical value is bound by logging an equality assertion against the expression that
 #! produced it. The returned bit is derived in MASM by comparing the two canonical field values.
-pub proc is_eq
+pub proc is_eq(lhs: Expr, rhs: Expr) -> i1
     # Evaluate/bind LHS first. `eval` preserves the lower stack, so RHS remains beneath LHS_VALUE.
     exec.eval
     # => [LHS_LO, LHS_HI, RHS_DIGEST, ...]
@@ -244,7 +249,7 @@ end
 #!
 #! This evaluates and binds only the input expression's resulting VALUE digest, then compares that
 #! digest against the registered zero digest. Inequality itself does not trap.
-pub proc is_zero
+pub proc is_zero(value: Expr) -> i1
     exec.push_zero_digest
     # => [ZERO_DIGEST, EXPR_DIGEST, ...]
     exec.is_eq_digest
@@ -257,7 +262,7 @@ end
 #!
 #! This evaluates and binds only the input expression's resulting VALUE digest, then compares that
 #! digest against the registered one digest. Inequality itself does not trap.
-pub proc is_one
+pub proc is_one(value: Expr) -> i1
     exec.push_one_digest
     # => [ONE_DIGEST, EXPR_DIGEST, ...]
     exec.is_eq_digest
@@ -271,7 +276,7 @@ end
 #! Unlike `is_eq`, this does not materialize canonical values. It registers the predicate
 #! `eq(LHS_DIGEST, RHS_DIGEST)` directly; the installed Uint precompile checks equality when the
 #! logged node is evaluated as part of the deferred root.
-pub proc assert_eq
+pub proc assert_eq(lhs: Expr, rhs: Expr)
     push.EQ_TAG
     # => [TAG(EQ), LHS_DIGEST, RHS_DIGEST, ...]
     exec.precompiles::register_expr
@@ -286,7 +291,7 @@ end
 #!
 #! Every 128-bit chunk is canonical in the generated prime fields because 2^128 is smaller than
 #! the field modulus.
-pub proc load_128
+pub proc load_128(chunk: u128) -> Expr
     push.[0, 0, 0, 0] swapw
     # => [CHUNK_U32[4], ZERO_HI_U32[4], ...]
     exec.load
@@ -297,7 +302,7 @@ end
 #! Input:  [ptr, ...]
 #! Output: [FIELD_DIGEST, ...]
 #! Memory layout: ptr[0..4] = chunk limbs; high field limbs are zero.
-pub proc load_128_mem
+pub proc load_128_mem(ptr: ptr<u128>) -> Expr
     padw movup.4 mem_loadw_le
     # => [CHUNK_U32[4], ...]
     exec.load_128
@@ -310,7 +315,7 @@ end
 #!
 #! Registers the expression `lo128 + hi128 * 2^128`, where each half is loaded as a canonical
 #! field value.
-pub proc load_reduced_256
+pub proc load_reduced_256(value: u256) -> Expr
     exec.load_128
     # => [LO_DIGEST, HI_U32[4], ...]
 
@@ -331,7 +336,7 @@ end
 #! Input:  [ptr, ...]
 #! Output: [FIELD_DIGEST, ...]
 #! Memory layout: ptr[0..16] = little-endian u32 limbs of the 512-bit value.
-pub proc load_reduced_512_mem
+pub proc load_reduced_512_mem(ptr: ptr<u32>) -> Expr
     # h = c0. Keep ptr underneath the accumulator for the remaining chunks.
     dup
     # => [ptr, ptr, ...]
@@ -385,7 +390,7 @@ end
 #! The inverse limbs are untrusted host advice. This wrapper registers the advised limbs as a
 #! canonical VALUE node, then proves correctness by logging `eq(mul(X_DIGEST, INV_DIGEST), one)`
 #! into the deferred root using only existing MUL and EQ nodes.
-pub proc inv
+pub proc inv(value: Expr) -> Expr
     emit.event("miden::precompiles::fields::field_inv")
     # => [X_DIGEST, ...]
 
@@ -412,7 +417,7 @@ end
 #! Divides one field element digest by another nonzero field element digest.
 #! Input:  [NUMERATOR_DIGEST, DENOMINATOR_DIGEST, ...]
 #! Output: [QUOTIENT_DIGEST, ...]
-pub proc div
+pub proc div(numerator: Expr, denominator: Expr) -> Expr
     swapw
     # => [DENOMINATOR_DIGEST, NUMERATOR_DIGEST, ...]
     exec.inv
@@ -431,7 +436,7 @@ end
 #! pushes only the canonical value payload to advice. MASM derives a VALUE node digest from
 #! the advised payload, logs `eq(EXPR_DIGEST, VALUE_DIGEST)` to bind it, then compares
 #! `VALUE_DIGEST` with `TARGET_DIGEST` to produce a safe boolean.
-pub proc is_eq_digest
+pub proc is_eq_digest(target: Expr, value: Expr) -> i1
     swapw
     # => [EXPR_DIGEST, TARGET_DIGEST, ...]
 
@@ -474,7 +479,7 @@ end
 #! asserts raw digest equality in the VM. This does not evaluate arbitrary expression digests or
 #! independently prove registration or canonicity; callers must establish that VALUE_DIGEST is an
 #! already proof-bound canonical VALUE node for this domain.
-pub proc open_value
+pub proc open_value(value: Expr) -> Value
     adv.evaluate_deferred_payload
     # => [VALUE_DIGEST, ...]
 
@@ -504,7 +509,7 @@ end
 #! pushes only the canonical value payload to advice. MASM derives a VALUE node digest from the
 #! advised payload, logs `eq(EXPR_DIGEST, VALUE_DIGEST)` to bind the result, then returns the
 #! now-safe canonical value.
-pub proc eval
+pub proc eval(value: Expr) -> Value
     # `adv.evaluate_deferred_payload` leaves EXPR_DIGEST on the operand stack and pushes
     # VALUE_U32[8] to advice. Keep EXPR_DIGEST on stack; no need to copy it to locals.
     adv.evaluate_deferred_payload

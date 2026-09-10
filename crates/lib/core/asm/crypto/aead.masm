@@ -21,6 +21,13 @@ const AEAD_DECRYPT_EVENT=event("miden::core::crypto::aead::decrypt")
 # Procedures
 # ================================================================================================
 
+#! AEAD secret key, in stack element order.
+pub type Key = struct { elements: word }
+#! AEAD initialization vector, in stack element order.
+pub type Nonce = struct { elements: word }
+#! AEAD authentication tag.
+pub type Tag = word
+
 #! Initializes the AEAD state with a key and nonce.
 #!
 #! This procedure sets up the initial Poseidon2 state for AEAD operations. The key and nonce
@@ -34,7 +41,7 @@ const AEAD_DECRYPT_EVENT=event("miden::core::crypto::aead::decrypt")
 #! - nonce is a 4-element (1 word) nonce/IV value
 #! - rate(8) will contain the initial keystream
 #! - capacity(4) constains the capacity portion of the state
-proc init_state
+proc init_state(key: Key, nonce: Nonce) -> poseidon2::State
     # Stack: [key(4), nonce(4), ...]
 
     # Initialize capacity with all zeros
@@ -63,7 +70,7 @@ end
 #!
 #! This procedure replaces the rate with the AD padding block and increments the first
 #! capacity element (domain separation).
-proc process_ad
+proc process_ad(state: poseidon2::State) -> poseidon2::State
     # Drop the existing rate (8 elements)
     dropw dropw
     # => [capacity(4), ...]
@@ -130,7 +137,13 @@ end
 #! Where:
 #! - n = number of field elements encrypted (includes the final padding block)
 #! - For num_blocks data blocks: n = 8 * (num_blocks + 1)
-pub proc encrypt
+pub proc encrypt(
+    key: Key,
+    nonce: Nonce,
+    src_ptr: ptr<felt>,
+    dst_ptr: ptr<felt>,
+    num_blocks: u32,
+) -> Tag
     # Stack: [key(4), nonce(4), src_ptr, dst_ptr, num_blocks, ...]
 
     # Input validation note: This procedure does not validate num_blocks or alignment.
@@ -300,7 +313,7 @@ end
 #! - n = number of field elements in the plaintext (excludes the padding block)
 #! - For num_blocks data blocks: n = 8 * num_blocks
 @locals(8)
-pub proc decrypt
+pub proc decrypt(key: Key, nonce: Nonce, src_ptr: ptr<felt>, dst_ptr: ptr<felt>, num_blocks: u32)
     # Stack: [key(4), nonce(4), src_ptr, dst_ptr, num_blocks, ...]
 
     # Input validation note: This procedure does not validate num_blocks or alignment.
