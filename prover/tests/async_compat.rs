@@ -1,3 +1,6 @@
+// This suite intentionally verifies the retained legacy Host callback during async proving.
+#![allow(deprecated)]
+
 use std::sync::Arc;
 
 use miden_assembly::Assembler;

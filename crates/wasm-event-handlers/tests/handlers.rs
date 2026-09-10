@@ -4,6 +4,9 @@
 //! [`FastProcessor`] state, and check the buffered mutations or the reported errors. No wasm32
 //! toolchain is involved.
 
+// The existing runner fixtures exercise legacy registration adapters; unified cases are below.
+#![allow(deprecated)]
+
 use std::{string::String, sync::Arc, vec::Vec};
 
 use miden_crypto::hash::{

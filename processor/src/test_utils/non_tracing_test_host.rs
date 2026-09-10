@@ -1,3 +1,6 @@
+// Exercises the legacy event callback and default no-op trace callback.
+#![allow(deprecated)]
+
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};

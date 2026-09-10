@@ -1,3 +1,6 @@
+// Compatibility owner for legacy mutations and Host/SyncHost callback forwarding.
+#![allow(deprecated)]
+
 use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
@@ -21,8 +24,10 @@ pub(crate) struct LegacyHostFallback;
 #[error("no event handler registered")]
 pub(crate) struct UnhandledEvent;
 
+#[warn(deprecated)]
 pub(super) mod advice;
 
+#[warn(deprecated)]
 pub mod debug;
 
 pub mod default;
@@ -30,6 +35,7 @@ pub mod default;
 pub mod handlers;
 use handlers::{EventError, TraceError};
 
+#[warn(deprecated)]
 mod mast_forest_store;
 pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStore};
 
@@ -38,6 +44,7 @@ pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStor
 
 /// Any possible way an event can modify the advice provider.
 #[derive(Debug, PartialEq, Eq)]
+#[deprecated(note = "record output with miden_event_handler::AdviceRecorder")]
 pub enum AdviceMutation {
     ExtendStack { stack: AdviceStack },
     ExtendMap { map: AdviceMap },
@@ -151,6 +158,7 @@ pub trait SyncHost: BaseHost {
     /// - Return errors without event names or IDs - the caller will enrich them via
     ///   [`BaseHost::resolve_event()`]
     /// - System events are handled by the VM before and don't call this method
+    #[deprecated(note = "implement handle_event with EventContext and AdviceRecorder")]
     fn on_event(
         &mut self,
         _process: &ProcessorState<'_>,
@@ -170,6 +178,7 @@ pub trait SyncHost: BaseHost {
     /// [`BaseHost::resolve_trace()`].
     ///
     /// [`SystemEvent::TraceEvent`]: miden_core::events::SystemEvent::TraceEvent
+    #[deprecated(note = "implement handle_event and inspect context.kind()")]
     fn on_trace(&mut self, _process: &ProcessorState<'_>) -> Result<(), TraceError> {
         Ok(())
     }
@@ -211,6 +220,7 @@ pub trait Host: BaseHost {
     /// - Return errors without event names or IDs - the caller will enrich them via
     ///   [`BaseHost::resolve_event()`]
     /// - System events are handled by the VM before and don't call this method
+    #[deprecated(note = "implement handle_event with EventContext and AdviceRecorder")]
     fn on_event(
         &mut self,
         _process: &ProcessorState<'_>,
@@ -230,6 +240,7 @@ pub trait Host: BaseHost {
     /// [`BaseHost::resolve_trace()`].
     ///
     /// [`SystemEvent::TraceEvent`]: miden_core::events::SystemEvent::TraceEvent
+    #[deprecated(note = "implement handle_event and inspect context.kind()")]
     fn on_trace(
         &mut self,
         _process: &ProcessorState<'_>,

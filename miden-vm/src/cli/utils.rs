@@ -12,7 +12,7 @@ use miden_mast_package::{
 };
 use miden_processor::{DefaultHost, HostLibrary};
 use miden_prover::serde::Deserializable;
-use miden_wasm_event_handlers::{WasmHandlerLimits, host_library_from_package};
+use miden_wasm_event_handlers::{WasmHandlerLimits, event_handlers_from_package};
 
 use crate::cli::data::{Libraries, ProgramFile};
 
@@ -62,10 +62,10 @@ pub fn load_package_with_handlers(
         }
         loaded_handler_sections.push(section);
     }
-    let library = host_library_from_package(package, WasmHandlerLimits::default())
+    let handlers = event_handlers_from_package(package, WasmHandlerLimits::default())
         .into_diagnostic()
         .wrap_err("Failed to load the package's Wasm event handlers")?;
-    host.load_library(library)
+    host.load_library_with_event_handlers(HostLibrary::from(package.clone()), handlers)
         .into_diagnostic()
         .wrap_err("Failed to register the package's Wasm event handlers")
 }

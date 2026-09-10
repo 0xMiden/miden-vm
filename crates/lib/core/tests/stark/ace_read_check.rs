@@ -164,6 +164,7 @@ fn assert_air_selectors_match_trace_metadata(
 ///
 /// The fixture's trace handlers run as usual, so callers can still observe the verifier's stack
 /// at return.
+#[allow(deprecated)] // Preserve the legacy Test harness trace registrations.
 pub(super) fn execute_and_check(test: &Test) {
     let (program, ..) = test.compile().expect("the verifier fixture must assemble");
     let mut host = DefaultHost::default().with_library(&CoreLibrary::default()).unwrap();
