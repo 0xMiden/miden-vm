@@ -101,6 +101,7 @@ pub const PRE_WRAP7: usize = 4;
 const FELT_INV_TWO: Felt = Felt::new_unchecked(9_223_372_034_707_292_161);
 
 /// Recover `a & b` from `x = a xor b` using `(a + b - x) / 2`.
+#[cfg(test)]
 pub(crate) fn and_result_from_xor<E: Algebra<Felt>>(a: E, b: E, x: E) -> E {
     (a + b - x) * FELT_INV_TWO
 }
