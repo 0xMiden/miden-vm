@@ -185,6 +185,8 @@ pub mod host_fn {
     pub const STACK_READ: &str = "stack_read";
     /// See `guest::clk`.
     pub const CLK: &str = "clk";
+    /// See `guest::event_id`.
+    pub const EVENT_ID: &str = "event_id";
     /// See `guest::is_root_context`.
     pub const IS_ROOT_CONTEXT: &str = "is_root_context";
     /// See `guest::mem_get`.
@@ -233,11 +235,12 @@ pub mod host_fn {
     /// The loader checks each import of a handler module against this set, so the import
     /// count of a loadable module is bounded by it. The host-side linker (`build_linker` in
     /// `miden-wasm-event-handlers`) registers exactly these names; keep the two in sync.
-    pub const ALL: [&str; 25] = [
+    pub const ALL: [&str; 26] = [
         STACK_DEPTH,
         STACK_GET,
         STACK_READ,
         CLK,
+        EVENT_ID,
         IS_ROOT_CONTEXT,
         MEM_GET,
         MEM_READ,
@@ -281,23 +284,33 @@ pub mod guest {
         // QUERIES
         // ----------------------------------------------------------------------------------------
 
-        /// Returns the depth of the operand stack.
+        /// Returns the depth of the handler's stack view: the operand-stack depth without the
+        /// event-ID slot.
         pub fn stack_depth() -> u32;
 
-        /// Returns the operand-stack element at position `pos` in canonical form.
+        /// Returns the operand-stack element at position `pos` of the handler's stack view, in
+        /// canonical form.
         ///
-        /// Position `0` is the top of the stack and holds the event ID. Positions past the stack
-        /// depth read as zero, the same as for native event handlers.
+        /// The view starts at the first handler input: position `0` is the operand-stack
+        /// element just below the event ID, which is not part of the view (see `event_id`).
+        /// Positions past the view's depth read as zero.
         pub fn stack_get(pos: u32) -> u64;
 
-        /// Writes the `count` operand-stack elements at positions
-        /// `start_pos..start_pos + count` to `out`, ordered from the top of the stack down.
+        /// Writes the `count` elements at positions `start_pos..start_pos + count` of the
+        /// handler's stack view to `out`, ordered from the top of the stack down.
         ///
-        /// Positions past the stack depth read as zero.
+        /// The view starts at the first handler input; see `stack_get`. Positions past the
+        /// view's depth read as zero.
         pub fn stack_read(start_pos: u32, out: *mut Felt, count: u32);
 
         /// Returns the current clock cycle.
         pub fn clk() -> u64;
+
+        /// Returns the ID of the event the handler was invoked for, in canonical form.
+        ///
+        /// This is the ID `emit` consumed to dispatch the event. It is not part of the stack
+        /// view the `stack_*` functions expose.
+        pub fn event_id() -> u64;
 
         /// Returns `1` when the current execution context is the root context, and `0`
         /// otherwise.
@@ -481,7 +494,7 @@ mod tests {
         // linker registration in `miden-wasm-event-handlers` must match it name for name, and
         // the WAT import fixture of that crate declares the same set. The count is pinned here,
         // so a new host function cannot reach the linker without this list.
-        assert_eq!(host_fn::ALL.len(), 25);
+        assert_eq!(host_fn::ALL.len(), 26);
         for (index, name) in host_fn::ALL.iter().enumerate() {
             assert!(!name.is_empty(), "a host function name is empty");
             assert!(

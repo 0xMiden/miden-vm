@@ -36,6 +36,7 @@ const IMPORTS: &str = r#"
   (import "miden:event/v1" "stack_get" (func $stack_get (param i32) (result i64)))
   (import "miden:event/v1" "stack_read" (func $stack_read (param i32 i32 i32)))
   (import "miden:event/v1" "clk" (func $clk (result i64)))
+  (import "miden:event/v1" "event_id" (func $event_id (result i64)))
   (import "miden:event/v1" "is_root_context" (func $is_root_context (result i32)))
   (import "miden:event/v1" "mem_get" (func $mem_get (param i32 i32) (result i32)))
   (import "miden:event/v1" "mem_read" (func $mem_read (param i32 i32 i32) (result i32)))
@@ -188,7 +189,7 @@ fn digest_limbs(bytes: &[u8]) -> Vec<Felt> {
 #[test]
 fn stack_item_echoed_to_advice_stack() {
     let wat_src = fixture(
-        "(i64.store (i32.const 0) (call $stack_get (i32.const 1)))
+        "(i64.store (i32.const 0) (call $stack_get (i32.const 0)))
          (call $adv_stack_extend (i32.const 0) (i32.const 1))",
     );
     let module = load(&wat_src);
@@ -202,7 +203,7 @@ fn stack_item_echoed_to_advice_stack() {
 #[test]
 fn stack_word_inserted_into_advice_map() {
     let wat_src = fixture(
-        "(call $stack_read (i32.const 1) (i32.const 0) (i32.const 4))
+        "(call $stack_read (i32.const 0) (i32.const 0) (i32.const 4))
          (call $adv_map_insert (i32.const 0) (i32.const 0) (i32.const 4))",
     );
     let module = load(&wat_src);
@@ -217,9 +218,10 @@ fn stack_word_inserted_into_advice_map() {
 
 #[test]
 fn stack_read_batches_elements() {
-    // Read three elements starting below the top, including positions past the stack depth.
+    // Read three elements starting at the top of the view, including positions past the stack
+    // depth.
     let wat_src = fixture(
-        "(call $stack_read (i32.const 1) (i32.const 0) (i32.const 3))
+        "(call $stack_read (i32.const 0) (i32.const 0) (i32.const 3))
          (call $adv_stack_extend (i32.const 0) (i32.const 3))",
     );
     let module = load(&wat_src);
@@ -229,6 +231,19 @@ fn stack_read_batches_elements() {
 
     let mutations = run(&module, &processor).expect("handler succeeds");
     assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+}
+
+#[test]
+fn event_id_matches_the_dispatched_event() {
+    let wat_src = fixture(
+        "(i64.store (i32.const 0) (call $event_id))
+         (call $adv_stack_extend (i32.const 0) (i32.const 1))",
+    );
+    let module = load(&wat_src);
+    let expected = Felt::new_unchecked(EVENT.to_event_id().as_u64());
+
+    let mutations = run(&module, &processor()).expect("handler succeeds");
+    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with([expected])]);
 }
 
 #[test]
@@ -266,7 +281,9 @@ fn clk_root_context_and_depth_are_visible() {
     let expected = [
         Felt::new_unchecked(u64::from(state.clock())),
         Felt::new_unchecked(u64::from(state.ctx().is_root())),
-        Felt::new_unchecked(u64::from(state.stack_depth())),
+        // The handler's stack view hides the event-ID slot, so its depth is one below the
+        // operand-stack depth.
+        Felt::new_unchecked(u64::from(state.stack_depth() - 1)),
     ];
 
     let mutations = run(&module, &processor).expect("handler succeeds");
@@ -695,7 +712,7 @@ fn concurrent_calls_share_one_module_deterministically() {
     // state. This exercises the Send + Sync claims of the handler and yields the determinism
     // check: identical state must produce identical mutations everywhere.
     let wat_src = fixture(
-        "(i64.store (i32.const 0) (call $stack_get (i32.const 1)))
+        "(i64.store (i32.const 0) (call $stack_get (i32.const 0)))
          (call $adv_stack_extend (i32.const 0) (i32.const 1))",
     );
     let module = load(&wat_src);

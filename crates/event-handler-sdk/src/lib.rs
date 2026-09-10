@@ -9,7 +9,7 @@
 //!
 //! #[sdk::miden_event_handler("myapp::double")]
 //! fn double() {
-//!     let value = sdk::stack_get(1);
+//!     let value = sdk::stack_get(0);
 //!     sdk::adv_stack_extend(&mut [value * Felt::from_u32(2)]);
 //! }
 //! ```

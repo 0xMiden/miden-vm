@@ -7,10 +7,10 @@
 
 use miden_event_handler_sdk as sdk;
 
-/// Reads the stack element below the event ID, doubles it in the field, and pushes the result to
-/// the advice stack.
+/// Reads the first stack input, doubles it in the field, and pushes the result to the advice
+/// stack.
 #[sdk::miden_event_handler("test::project::double")]
 fn double() {
-    let value = sdk::stack_get(1);
+    let value = sdk::stack_get(0);
     sdk::adv_stack_extend(&mut [value + value]);
 }

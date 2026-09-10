@@ -12,18 +12,18 @@ use miden_processor::{
 };
 use miden_wasm_event_handlers::{WasmHandlerLimits, host_library_from_package};
 
-/// A handler that reads the stack element below the event ID, doubles it, and pushes the result
-/// to the advice stack.
+/// A handler that reads the first stack input, doubles it, and pushes the result to the advice
+/// stack.
 const DOUBLE_WAT: &str = r#"(module
   (import "miden:event/v1" "stack_get" (func $stack_get (param i32) (result i64)))
   (import "miden:event/v1" "adv_stack_extend" (func $adv_stack_extend (param i32 i32)))
   (memory (export "memory") 1)
   (func (export "double")
-    (i64.store (i32.const 0) (i64.mul (call $stack_get (i32.const 1)) (i64.const 2)))
+    (i64.store (i32.const 0) (i64.mul (call $stack_get (i32.const 0)) (i64.const 2)))
     (call $adv_stack_extend (i32.const 0) (i32.const 1))))"#;
 
-/// The program emits the event with 5 below the event ID, pops the handler's answer from the
-/// advice stack, and asserts it is 10.
+/// The program emits the event with 5 as the first handler input, pops the handler's answer from
+/// the advice stack, and asserts it is 10.
 const PROGRAM: &str = r#"
 begin
     push.5
@@ -227,9 +227,9 @@ fn rust_guest_merges_words() {
     let section = section_from_module(wasm, WasmHandlerLimits::default())
         .expect("the fixture embeds its manifest");
 
-    // `push.1.2.3.4 push.5.6.7.8` leaves 8 closest to the top of the stack, and the event ID
-    // takes position 0 during the event. The handler's words are therefore the elements at
-    // positions 1..5 and 5..9, top-down.
+    // `push.1.2.3.4 push.5.6.7.8` leaves 8 closest to the top of the stack, and the event ID —
+    // which the handler's stack view hides — takes the operand-stack slot above it. The
+    // handler's words are therefore the view's elements at positions 0..4 and 4..8, top-down.
     let top = Word::new([8, 7, 6, 5].map(Felt::from_u32));
     let bottom = Word::new([4, 3, 2, 1].map(Felt::from_u32));
     let digest = Poseidon2::merge(&[top, bottom]);
