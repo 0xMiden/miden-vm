@@ -14,17 +14,18 @@ use core::{array, borrow::Borrow};
 use compression::{
     EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, EidosCompressionCols,
     constraints::{enforce_footer_rows, enforce_fused_rows},
-    emit_lookup_columns, get_periodic_column_values,
+    emit_lookup_columns,
     layout::{
         BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, F_COMPRESSION_CYCLE_ID_COL, FOOTER_ROWS,
         NUM_COLS as NUM_EIDOS_COMPRESSION_COLS, footer_digest_col, footer_msg_word_col,
         footer_r_col,
     },
-    selectors::EidosCompressionSelectors,
-    universal_cv_word,
 };
 pub use digest::EidosDigest;
 pub use messages::{EidosBlockMsg, EidosInitMsg, EidosOutMsg};
+use miden_air::eidos_compression::core::{
+    EidosCompressionSelectors, get_periodic_column_values, universal_cv_word,
+};
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
@@ -45,7 +46,7 @@ use crate::{
 // MAIN COLUMN LAYOUT
 // ================================================================================================
 
-/// The first 108 columns are the PVM-owned Eidos compression layout.
+/// The first 108 columns use the shared Eidos compression layout.
 pub const COL_EIDOS_COMPRESSION_BEGIN: usize = 0;
 pub const COL_EIDOS_COMPRESSION_END: usize = NUM_EIDOS_COMPRESSION_COLS;
 
