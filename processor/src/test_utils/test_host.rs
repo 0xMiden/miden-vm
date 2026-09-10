@@ -1,3 +1,6 @@
+// Raw snapshots preserve numeric context IDs and test the old callback bridge.
+#![allow(deprecated)]
+
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use miden_core::Felt;

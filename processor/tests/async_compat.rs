@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
+#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host,
     LoadedMastForest, ProcessorState, StackInputs, Word,
@@ -29,6 +30,7 @@ impl BaseHost for YieldingAsyncHost {
     }
 }
 
+#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
 impl Host for YieldingAsyncHost {
     fn get_mast_forest(
         &self,
@@ -402,6 +404,7 @@ async fn cancelling_a_callback_discards_all_pending_advice() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
 async fn forwarding_to_legacy_host_cannot_fall_back_after_staging_advice() {
     use miden_event_handler::{AdviceRecorder, EventContext};
     use miden_processor::SyncHost;

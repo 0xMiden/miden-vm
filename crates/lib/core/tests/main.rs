@@ -5,10 +5,12 @@ extern crate alloc;
 macro_rules! build_test {
     ($source:expr $(, $tail:expr)* $(,)?) => {{
         let core_lib = miden_core_lib::CoreLibrary::default();
+        #[allow(deprecated)] // Preserve the legacy Test harness.
+        let handlers = core_lib.handlers();
         let source = $source;
         miden_utils_testing::build_test_by_mode!(false, source $(, $tail)*)
             .with_library(core_lib.package())
-            .with_event_handlers(core_lib.handlers())
+            .with_event_handlers(handlers)
     }}
 }
 
@@ -17,10 +19,12 @@ macro_rules! build_test {
 macro_rules! build_debug_test {
     ($source:expr $(, $tail:expr)* $(,)?) => {{
         let core_lib = miden_core_lib::CoreLibrary::default();
+        #[allow(deprecated)] // Preserve the legacy Test harness.
+        let handlers = core_lib.handlers();
         let source = $source;
         miden_utils_testing::build_test_by_mode!(true, source $(, $tail)*)
             .with_library(core_lib.package())
-            .with_event_handlers(core_lib.handlers())
+            .with_event_handlers(handlers)
     }}
 }
 

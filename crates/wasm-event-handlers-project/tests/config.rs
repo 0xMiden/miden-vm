@@ -6,6 +6,9 @@
 //! building the `crate` key is covered by the end-to-end test, and the refusal of that key by the
 //! safe processor is covered here, because it costs no build.
 
+// Retain coverage of the legacy packaged host-library factory during migration.
+#![allow(deprecated)]
+
 use std::{fs, path::Path, sync::Arc};
 
 use miden_assembly::{
