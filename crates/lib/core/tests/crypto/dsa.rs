@@ -659,7 +659,8 @@ fn run_core_program(
         .expect("failed to load CoreLibrary into the host");
     if let Some(handler) = recovery_handler {
         assert!(
-            host.replace_handler(ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handler),
+            host.replace_handler(ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handler)
+                .expect("the recovery event name is valid"),
             "the default recovery handler must already be registered",
         );
     }

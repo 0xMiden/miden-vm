@@ -27,10 +27,7 @@ pub use miden_core::{
     program::{ExecutionClaim, MIN_STACK_DEPTH, StackInputs, StackOutputs},
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
-use miden_core::{
-    chiplets::hasher::apply_permutation,
-    events::{EventName, SystemEvent},
-};
+use miden_core::{chiplets::hasher::apply_permutation, events::EventName};
 use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 #[cfg(not(target_family = "wasm"))]
 use miden_processor::trace::build_trace;
@@ -364,18 +361,11 @@ impl Test {
     }
 
     /// Add a handler for a specific event when running the `Host`.
+    ///
+    /// The host registry applies the event name rules (not empty, not reserved, not a duplicate)
+    /// when the test builds the host, so a rejected name panics there.
     pub fn add_event_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) {
-        for (event, handler) in handlers {
-            let event_name = event.as_str();
-            if SystemEvent::from_name(event_name).is_some() {
-                panic!("tried to register handler for reserved system event: {event_name}")
-            }
-            let event_id = event.to_event_id();
-            if self.handlers.iter().any(|(e, _)| e.to_event_id() == event_id) {
-                panic!("handler for event '{event_name}' was already added")
-            }
-            self.handlers.push((event, handler));
-        }
+        self.handlers.extend(handlers);
     }
 
     /// Add a trace handler for a specific event when running the `Host`.
@@ -384,18 +374,11 @@ impl Test {
     }
 
     /// Add trace handlers for specific events when running the `Host`.
+    ///
+    /// The host registry applies the event name rules (not empty, not reserved, not a duplicate)
+    /// when the test builds the host, so a rejected name panics there.
     pub fn add_trace_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn TraceHandler>)>) {
-        for (event, handler) in handlers {
-            let event_name = event.as_str();
-            if SystemEvent::from_name(event_name).is_some() {
-                panic!("tried to register trace handler for reserved system event: {event_name}")
-            }
-            let event_id = event.to_event_id();
-            if self.trace_handlers.iter().any(|(e, _)| e.to_event_id() == event_id) {
-                panic!("trace handler for event '{event_name}' was already added")
-            }
-            self.trace_handlers.push((event, handler));
-        }
+        self.trace_handlers.extend(handlers);
     }
 
     // TEST METHODS
@@ -764,10 +747,15 @@ impl Test {
             host.load_library(library.mast_forest()).unwrap();
         }
         for (event, handler) in &self.handlers {
-            host.register_handler(event.clone(), handler.clone()).unwrap();
+            host.register_handler(event.clone(), handler.clone()).unwrap_or_else(|err| {
+                panic!("Failed to register handler for event '{}': {err}", event.as_str())
+            });
         }
         for (event, handler) in &self.trace_handlers {
-            host.register_trace_handler(event.clone(), handler.clone()).unwrap();
+            host.register_trace_handler(event.clone(), handler.clone())
+                .unwrap_or_else(|err| {
+                    panic!("Failed to register trace handler for event '{}': {err}", event.as_str())
+                });
         }
 
         (program, host, debug_info)

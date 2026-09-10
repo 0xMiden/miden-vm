@@ -171,6 +171,12 @@ impl<'a> ProcessorState<'a> {
         self.processor.stack().iter().rev().copied().collect()
     }
 
+    /// Returns the current depth of the stack, including overflow entries.
+    #[inline(always)]
+    pub fn stack_depth(&self) -> u32 {
+        self.processor.stack_depth()
+    }
+
     /// Returns the element located at the specified context/address, or None if the address hasn't
     /// been accessed previously.
     #[inline(always)]

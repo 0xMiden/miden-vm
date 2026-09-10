@@ -334,6 +334,76 @@ fn cli_run_with_lib() {
     cmd.assert().success();
 }
 
+/// Bundles the `kernel_main.masm` fixture into `<working_dir>/<name>` as a kernel package.
+fn bundle_kernel_package(working_dir: &Path, name: &str) -> PathBuf {
+    let output_file = working_dir.join(name);
+    let mut cmd = bin_under_test(working_dir);
+    cmd.arg("bundle")
+        .arg(fixture("tests/integration/cli/data/kernel_main.masm"))
+        .arg("--kernel")
+        .arg("--output")
+        .arg(&output_file);
+    cmd.assert().success();
+    output_file
+}
+
+#[test]
+fn run_rejects_kernel_for_masp_package() {
+    let working_dir = TempDir::new().unwrap();
+    let package_path = bundle_kernel_package(working_dir.path(), "prog.masp");
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("run")
+        .arg(&package_path)
+        .arg("--kernel")
+        .arg(fixture("tests/integration/cli/data/kernel_main.masm"));
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("does not apply to a `.masp` package"));
+}
+
+#[test]
+fn prove_rejects_kernel_for_masp_package() {
+    let working_dir = TempDir::new().unwrap();
+    let package_path = bundle_kernel_package(working_dir.path(), "prog.masp");
+    // `prove` reads the inferred inputs file before it looks at the program kind.
+    fs::write(working_dir.path().join("prog.inputs"), r#"{"operand_stack":[]}"#).unwrap();
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("prove")
+        .arg(&package_path)
+        .arg("--kernel")
+        .arg(fixture("tests/integration/cli/data/kernel_main.masm"));
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("does not apply to a `.masp` package"));
+}
+
+/// A `.masp` kernel is registered with the host, so its procedures are reachable from a `syscall`.
+#[test]
+fn run_masm_program_honors_a_masp_kernel() {
+    let working_dir = TempDir::new().unwrap();
+    let kernel_path = bundle_kernel_package(working_dir.path(), "kernel.masp");
+
+    let program_path = working_dir.path().join("program.masm");
+    // `kernel_proc` runs `caller`, which requires a `call` frame under the `syscall`.
+    fs::write(
+        &program_path,
+        "proc bar\n    syscall.kernel_proc\nend\n\nbegin\n    call.bar\nend\n",
+    )
+    .unwrap();
+    fs::write(working_dir.path().join("program.inputs"), r#"{"operand_stack":[]}"#).unwrap();
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("run")
+        .arg(&program_path)
+        .arg("--kernel")
+        .arg(&kernel_path)
+        .arg("-n")
+        .arg("1");
+    cmd.assert().success();
+}
+
 #[test]
 fn test_advmap_cli() {
     let working_dir = TempDir::new().unwrap();

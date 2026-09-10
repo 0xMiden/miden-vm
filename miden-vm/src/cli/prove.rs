@@ -1,14 +1,17 @@
 use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
-use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
+use miden_assembly::diagnostics::{Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor};
 use miden_vm::{HashFunction, Prover, internal::InputFile};
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
-    utils::{get_masm_program, get_masp_program, parse_byte_size},
+    utils::{
+        get_masm_program, get_masp_package, load_package_with_handlers,
+        load_program_package_with_handlers, parse_byte_size,
+    },
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -119,20 +122,36 @@ impl ProveCmd {
 
         let input_data = InputFile::read(&self.input_file, &self.program_file)?;
 
-        let host = DefaultHost::default().with_library(&CoreLibrary::default())?;
+        let mut host = DefaultHost::default().with_library(&CoreLibrary::default())?;
         // Use a single match expression to load the program.
-        let (program, package_debug_info, entrypoint_source_node, mut host) = match ext.as_str() {
-            "masp" => (get_masp_program(&self.program_file)?, None, None, host),
-            "masm" => {
-                let (program, package_debug_info, entrypoint_source_node, source_manager) =
-                    get_masm_program(&self.program_file, &libraries, self.kernel_file.as_deref())?;
-                let mut host = host.with_source_manager(source_manager);
-                for library in libraries.libraries.iter().cloned() {
-                    host.load_library(library)
-                        .into_diagnostic()
-                        .wrap_err("Failed to load library")?;
+        let (program, package_debug_info, entrypoint_source_node) = match ext.as_str() {
+            "masp" => {
+                if self.kernel_file.is_some() {
+                    return Err(Report::msg(
+                        "The `--kernel` option does not apply to a `.masp` package: the package fixes its own kernel.",
+                    ));
                 }
-                (program, package_debug_info, entrypoint_source_node, host)
+                let package = get_masp_package(&self.program_file)?;
+                let program = package.try_into_program()?;
+                load_program_package_with_handlers(&mut host, &package)?;
+                (program, None, None)
+            },
+            "masm" => {
+                let (
+                    program,
+                    package_debug_info,
+                    entrypoint_source_node,
+                    source_manager,
+                    kernel_package,
+                ) = get_masm_program(&self.program_file, &libraries, self.kernel_file.as_deref())?;
+                host = host.with_source_manager(source_manager);
+                for library in &libraries.libraries {
+                    load_package_with_handlers(&mut host, library)?;
+                }
+                if let Some(kernel_package) = &kernel_package {
+                    load_package_with_handlers(&mut host, kernel_package)?;
+                }
+                (program, package_debug_info, entrypoint_source_node)
             },
             _ => unreachable!("program file extension was validated above"),
         };

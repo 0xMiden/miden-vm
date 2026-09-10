@@ -34,7 +34,7 @@ push.<felt> emit drop
 
 **System Events** - Built-in events handled by the VM for memory operations, cryptography, math operations, and data structures.
 
-**Custom Events** - Application-defined events for external services, logging, or custom protocols.
+**Custom Events** - Application-defined events for external services, logging, or custom protocols. Custom handlers can be native Rust code registered in the host, or untrusted Wasm modules shipped inside a package; see [Wasm event handlers](../wasm_event_handlers.md).
 
 ### Trace Events (optional read-only events)
 

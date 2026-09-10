@@ -526,7 +526,7 @@ impl crate::prettier::PrettyPrint for SystemEvent {
 
 impl fmt::Display for SystemEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        const PREFIX_LEN: usize = "sys::".len();
+        const PREFIX_LEN: usize = EventName::RESERVED_NAMESPACE.len();
 
         let (_prefix, rest) = Self::LOOKUP[*self as usize].name.split_at(PREFIX_LEN);
         write!(f, "{rest}")
@@ -743,10 +743,11 @@ mod test {
                 looked_up_id.as_u64()
             );
 
-            // Verify name has correct "sys::" prefix
+            // Verify name has the reserved namespace prefix
             assert!(
-                entry.name.starts_with("sys::"),
-                "SystemEvent name should start with 'sys::': {}",
+                entry.name.starts_with(EventName::RESERVED_NAMESPACE),
+                "SystemEvent name should start with '{}': {}",
+                EventName::RESERVED_NAMESPACE,
                 entry.name
             );
 
