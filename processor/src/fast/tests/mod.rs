@@ -48,6 +48,7 @@ use crate::{
 
 mod advice_provider;
 mod all_ops;
+mod event_context;
 mod masm_consistency;
 mod memory;
 

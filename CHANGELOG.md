@@ -4,6 +4,8 @@
 
 #### Features
 
+- Added portable `Host::handle_event` and `SyncHost::handle_event` callbacks, unified registrations, explicit trace-delivery policy, and complete-batch advice completion while preserving legacy host and registration paths ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
+
 - Added the portable `miden-event-handler` crate with one event/trace handler trait, payload-relative `EventContext`, and typed advice recorded into an engine-owned batch ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 
 - Added Wasm-compiled custom event handlers: untrusted Wasm modules ship inside a `.masp` package (`event_handlers` section) and run under the wasmi interpreter on any host. New crates: `miden-event-handler-abi` (host/guest ABI contract), `miden-wasm-event-handlers` (host-side runner with fuel, memory, and mutation limits), `miden-event-handler-sdk` + `miden-event-handler-macros` (Rust guest SDK with manifest emission). Also added `ProcessorState::stack_depth` ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).

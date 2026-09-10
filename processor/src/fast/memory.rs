@@ -2,6 +2,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_air::trace::RowIndex;
 use miden_core::{EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO};
+use miden_event_handler::{EventContextError, MemoryReadMode};
 
 use crate::{ContextId, ExecutionOptions, MemoryAddress, MemoryError, processor::MemoryInterface};
 
@@ -212,6 +213,78 @@ impl Memory {
         let word = self.memory.get(&(ctx, addr)).copied();
 
         Ok(word)
+    }
+
+    /// Reads a contiguous range without allocating or modifying `output` on error.
+    pub(crate) fn read_range_for_event(
+        &self,
+        ctx: ContextId,
+        start: MemoryAddress,
+        output: &mut [Felt],
+        mode: MemoryReadMode,
+    ) -> Result<(), EventContextError> {
+        let start = start.as_u32();
+        let count = output.len();
+        let count_u64 = u64::try_from(count).unwrap_or(u64::MAX);
+        let end = u64::from(start).saturating_add(count_u64);
+        if end > u64::from(u32::MAX) + 1 {
+            return Err(EventContextError::RangeOverflow {
+                start: u64::from(start),
+                count: count_u64,
+            });
+        }
+        if output.is_empty() {
+            return Ok(());
+        }
+
+        let (first_word_addr, offset) = split_addr(start);
+        let (last_word_addr, _) = split_addr((end - 1) as u32);
+        // Scalar, aligned-word, and partial-word reads all need just one lookup.
+        if first_word_addr == last_word_addr {
+            let word = self
+                .memory
+                .get(&(ctx, first_word_addr))
+                .copied()
+                .or((mode == MemoryReadMode::ZeroFilled).then_some(EMPTY_WORD))
+                .ok_or(EventContextError::UninitializedMemory { address: start })?;
+            let offset = offset as usize;
+            output.copy_from_slice(&word.as_elements()[offset..offset + count]);
+            return Ok(());
+        }
+
+        let words = self.memory.range((ctx, first_word_addr)..=(ctx, last_word_addr));
+        if mode == MemoryReadMode::Strict {
+            let mut next = u64::from(first_word_addr);
+            for (&(_, word_addr), _) in words.clone() {
+                if u64::from(word_addr) != next {
+                    break;
+                }
+                next += WORD_SIZE as u64;
+            }
+            if next < end {
+                return Err(EventContextError::UninitializedMemory {
+                    address: (next as u32).max(start),
+                });
+            }
+        }
+
+        let start = u64::from(start);
+        let mut filled = 0;
+        // Validation is complete. Visit each initialized word once, zeroing only the gaps.
+        for (&(_, word_addr), word) in words {
+            let word_addr = u64::from(word_addr);
+            let copy_start = start.max(word_addr);
+            let copy_end = end.min(word_addr + WORD_SIZE as u64);
+            let source_start = (copy_start - word_addr) as usize;
+            let target_start = (copy_start - start) as usize;
+            let copy_len = (copy_end - copy_start) as usize;
+            output[filled..target_start].fill(ZERO);
+            filled = target_start + copy_len;
+            output[target_start..filled]
+                .copy_from_slice(&word.as_elements()[source_start..source_start + copy_len]);
+        }
+        output[filled..].fill(ZERO);
+        Ok(())
     }
 
     // TEST HELPERS

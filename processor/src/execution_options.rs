@@ -10,6 +10,7 @@ use miden_core::program::MIN_STACK_DEPTH;
 /// - `expected_cycles` specifies the number of cycles a program is expected to execute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExecutionOptions {
+    trace_delivery: bool,
     max_cycles: u32,
     expected_cycles: u32,
     core_trace_fragment_size: usize,
@@ -49,6 +50,7 @@ impl Default for ExecutionOptions {
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
             overlapped_trace_build: true,
+            trace_delivery: true,
         }
     }
 }
@@ -150,6 +152,7 @@ impl ExecutionOptions {
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
             overlapped_trace_build: true,
+            trace_delivery: true,
         })
     }
 
@@ -165,6 +168,18 @@ impl ExecutionOptions {
         }
         self.core_trace_fragment_size = size;
         Ok(self)
+    }
+
+    /// Enables or suppresses all trace callbacks (enabled by default). Suppression happens before
+    /// lookup and host work, while preserving VM instructions and cycle accounting. This policy is
+    /// independent of proof-trace recording and also applies to FastProcessor execution.
+    pub fn with_trace_delivery(mut self, enabled: bool) -> Self {
+        self.trace_delivery = enabled;
+        self
+    }
+
+    pub fn trace_delivery(&self) -> bool {
+        self.trace_delivery
     }
 
     // PUBLIC ACCESSORS

@@ -10,10 +10,15 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
+    advice::{AdviceMap, AdviceStack},
+    crypto::merkle::{MerklePath, NodeIndex},
     deferred::DeferredState,
     mast::{ExecutableMastForest, MastForest},
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
+};
+use miden_event_handler::{
+    EventContextError, EventContextProvider, MemoryReadMode, MerkleReadError,
 };
 use miden_mast_package::{
     Package,
@@ -22,7 +27,7 @@ use miden_mast_package::{
 
 use crate::{
     AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, LoadedMastForest,
-    ProcessorState,
+    MemoryAddress, ProcessorState,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
@@ -510,7 +515,7 @@ impl FastProcessor {
         &self.options
     }
 
-    /// Returns a narrowed interface for reading and updating the processor state.
+    /// Returns the raw read-only processor inspection view.
     #[inline(always)]
     pub fn state(&self) -> ProcessorState<'_> {
         ProcessorState { processor: self }
@@ -681,6 +686,76 @@ impl FastProcessor {
         // Update indices.
         self.stack_bot_idx = new_stack_bot_idx;
         self.stack_top_idx = new_stack_top_idx;
+    }
+}
+
+// EVENT CONTEXT ADAPTER
+// ================================================================================================
+
+impl EventContextProvider for FastProcessor {
+    #[inline(always)]
+    fn stack_depth(&self) -> u32 {
+        FastProcessor::stack_depth(self)
+    }
+
+    fn read_stack(&self, start: u64, output: &mut [Felt]) {
+        output.fill(ZERO);
+        let Ok(start) = usize::try_from(start) else {
+            return;
+        };
+        for (target, value) in output.iter_mut().zip(self.stack().iter().rev().skip(start)) {
+            *target = *value;
+        }
+    }
+
+    #[inline(always)]
+    fn read_memory(
+        &self,
+        start: MemoryAddress,
+        output: &mut [Felt],
+        mode: MemoryReadMode,
+    ) -> Result<(), EventContextError> {
+        self.memory.read_range_for_event(self.ctx, start, output, mode)
+    }
+
+    #[inline(always)]
+    fn read_memory_root(
+        &self,
+        start: MemoryAddress,
+        output: &mut [Felt],
+        mode: MemoryReadMode,
+    ) -> Result<(), EventContextError> {
+        self.memory.read_range_for_event(ContextId::root(), start, output, mode)
+    }
+
+    fn memory_snapshot(&self) -> Vec<(MemoryAddress, Felt)> {
+        self.memory.get_memory_state(self.ctx)
+    }
+
+    fn memory_snapshot_root(&self) -> Vec<(MemoryAddress, Felt)> {
+        self.memory.get_memory_state(ContextId::root())
+    }
+
+    #[inline(always)]
+    fn advice_stack(&self) -> &AdviceStack {
+        self.advice.stack_ref()
+    }
+
+    #[inline(always)]
+    fn advice_map(&self) -> &AdviceMap {
+        self.advice.map()
+    }
+
+    fn merkle_node(&self, root: Word, index: NodeIndex) -> Result<Word, MerkleReadError> {
+        self.advice.merkle_store().get_node(root, index).map_err(Into::into)
+    }
+
+    fn merkle_path(&self, root: Word, index: NodeIndex) -> Result<MerklePath, MerkleReadError> {
+        self.advice
+            .merkle_store()
+            .get_path(root, index)
+            .map(|value| value.path)
+            .map_err(Into::into)
     }
 }
 

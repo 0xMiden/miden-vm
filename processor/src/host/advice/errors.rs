@@ -10,6 +10,8 @@ use crate::{Felt, Word, crypto::merkle::MerkleError};
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum AdviceError {
+    #[error("trace callback recorded advice")]
+    TraceAdvice,
     #[error(
         "value for key {} already present in the advice map: previous values were '{prev_values:?}', attempted replacement values were '{new_values:?}'",
         key.to_hex()
