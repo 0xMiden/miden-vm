@@ -1,88 +1,47 @@
 //! Host event handler for generated uint prime-field inverse wrappers.
 
-use alloc::{vec, vec::Vec};
-
-use miden_core::{
-    Felt, Word, ZERO,
-    deferred::{DeferredError, Node},
-    events::EventName,
-};
-use miden_precompiles::{Limbs, UintDomain, UintPrecompile};
-use miden_processor::{
-    ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::EventError,
-};
+use miden_core::{Felt, events::EventName};
+use miden_event_handler::{AdviceRecorder, EventContext, EventError, InvocationKind};
+use miden_precompiles::UintDomain;
 
 /// Event used by generated field uint wrappers to request an inverse witness from the host.
 pub const UINT_FIELD_INV_EVENT_NAME: EventName =
     EventName::new("miden::precompiles::fields::field_inv");
 
-/// Resolves the input uint value digest from deferred state, computes its inverse in the encoded
-/// prime-field domain, and pushes the inverse limbs onto the advice stack for MASM validation.
+/// Reads `[bound_ptr, VALUE_LO, VALUE_HI, ...]` from the event payload and returns inverse limbs
+/// as advice. Generated MASM binds the result to the original expression digest.
 pub fn handle_uint_field_inv(
-    process: &ProcessorState<'_>,
-) -> Result<Vec<AdviceMutation>, EventError> {
-    let input_digest = process.get_stack_word(1);
-    let (_, canonical_node) = process.require_canonical_deferred_node(input_digest)?;
-
-    let tag = canonical_node.tag();
-    let [op_id, bound_ptr, reserved] = tag.args();
-    if op_id.as_canonical_u64() != UintPrecompile::VALUE_OP_ID || reserved != ZERO {
-        return Err(UintFieldInvError::ExpectedUintValue.into());
-    }
-
-    if tag.id() != UintPrecompile::id() {
-        return Err(UintFieldInvError::ExpectedUintPrecompile.into());
-    }
-    let bound_ptr = u32::try_from(bound_ptr.as_canonical_u64())
+    context: EventContext<'_>,
+    advice: &mut AdviceRecorder<'_>,
+) -> Result<(), EventError> {
+    context.kind().require(InvocationKind::Event)?;
+    let bound_ptr = u32::try_from(context.stack_item(0).as_canonical_u64())
         .map_err(|_| UintFieldInvError::UnknownDomain)?;
     let domain = UintDomain::from_bound_ptr(bound_ptr).ok_or(UintFieldInvError::UnknownDomain)?;
     if !domain.is_prime_field() {
         return Err(UintFieldInvError::UnsupportedDomain.into());
     }
 
-    let value = limbs_from_value_node(canonical_node, domain)
-        .map_err(|_| UintFieldInvError::ExpectedUintValue)?;
+    let payload = context.read_stack_array::<8>(1);
+    let mut value = [0u32; 8];
+    for (limb, felt) in value.iter_mut().zip(payload) {
+        *limb = u32::try_from(felt.as_canonical_u64())
+            .map_err(|_| UintFieldInvError::ExpectedUintValue)?;
+    }
+    if !domain.is_canonical(&value) {
+        return Err(UintFieldInvError::ExpectedUintValue.into());
+    }
     let inverse = domain.inv(value).ok_or(UintFieldInvError::ZeroValue)?;
 
     let inverse = inverse.map(Felt::from_u32);
-    let mut advice_stack = AdviceStack::new();
-    // Generated MASM consumes the inverse with two `adv_pushw` calls: low limbs, then high limbs.
-    advice_stack.append_dword([
-        Word::new([inverse[0], inverse[1], inverse[2], inverse[3]]),
-        Word::new([inverse[4], inverse[5], inverse[6], inverse[7]]),
-    ]);
-
-    Ok(vec![AdviceMutation::extend_advice_stack(advice_stack)])
-}
-
-fn limbs_from_value_node(node: &Node, domain: UintDomain) -> Result<Limbs, DeferredError> {
-    let payload = node.payload_for_tag(UintPrecompile::value_tag(domain))?;
-    let limbs = decode_limbs(payload.as_value()?)?;
-    if !domain.is_canonical(&limbs) {
-        return Err(DeferredError::InvalidPayload);
-    }
-    Ok(limbs)
-}
-
-fn decode_limbs(felts: &[Felt; 8]) -> Result<Limbs, DeferredError> {
-    let mut limbs = [0u32; 8];
-    for (i, felt) in felts.iter().enumerate() {
-        let value = felt.as_canonical_u64();
-        if value > u32::MAX as u64 {
-            return Err(DeferredError::InvalidPayload);
-        }
-        limbs[i] = value as u32;
-    }
-    Ok(limbs)
+    // Generated MASM consumes low limbs, then high limbs.
+    advice.prepend_stack(inverse);
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 enum UintFieldInvError {
-    #[error("expected uint precompile tag")]
-    ExpectedUintPrecompile,
-    #[error("expected a canonical uint VALUE node")]
+    #[error("expected a canonical uint value")]
     ExpectedUintValue,
     #[error("unknown uint domain")]
     UnknownDomain,
