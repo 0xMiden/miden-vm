@@ -2226,6 +2226,7 @@ dependencies = [
  "miden-core-lib-codegen",
  "miden-crypto",
  "miden-debug-types",
+ "miden-event-handler",
  "miden-lifted-stark",
  "miden-mast-package",
  "miden-package-registry",

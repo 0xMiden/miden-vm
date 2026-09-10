@@ -4,6 +4,8 @@
 
 #### Features
 
+- Migrated native arithmetic, collection, and observation handlers to payload-relative reads and typed advice recording. Public `handle_*` functions now take `EventContext` and `AdviceRecorder`; legacy library lists and `DebugPrinter` remain usable ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
+
 - Added portable `Host::handle_event` and `SyncHost::handle_event` callbacks, unified registrations, explicit trace-delivery policy, and complete-batch advice completion while preserving legacy host and registration paths ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 
 - Added the portable `miden-event-handler` crate with one event/trace handler trait, payload-relative `EventContext`, and typed advice recorded into an engine-owned batch ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).

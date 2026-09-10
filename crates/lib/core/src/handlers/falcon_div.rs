@@ -3,10 +3,8 @@
 //! This handler implements the FALCON_DIV operation that pushes the result of dividing
 //! a [u64] by the Falcon prime (M = 12289) onto the advice stack.
 
-use alloc::{vec, vec::Vec};
-
 use miden_core::{ZERO, events::EventName};
-use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
+use miden_event_handler::{AdviceRecorder, EventContext, EventError, InvocationKind};
 
 use crate::handlers::u64_to_u32_elements;
 
@@ -23,7 +21,7 @@ pub const FALCON_DIV_EVENT_NAME: EventName =
 /// prime (M = 12289) onto the advice stack.
 ///
 /// Inputs:
-///   Operand stack: [event_id, a1, a0, ...]
+///   Operand stack: [a1, a0, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
@@ -36,9 +34,13 @@ pub const FALCON_DIV_EVENT_NAME: EventName =
 /// # Errors
 /// - Returns an error if the divisor is ZERO.
 /// - Returns an error if either a0 or a1 is not a u32.
-pub fn handle_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-    let dividend_hi = process.get_stack_item(1).as_canonical_u64();
-    let dividend_lo = process.get_stack_item(2).as_canonical_u64();
+pub fn handle_falcon_div(
+    context: EventContext,
+    advice: &mut AdviceRecorder<'_>,
+) -> Result<(), EventError> {
+    context.kind().require(InvocationKind::Event)?;
+    let [dividend_hi, dividend_lo] =
+        context.read_stack_array(0).map(|felt| felt.as_canonical_u64());
 
     if dividend_lo > u32::MAX.into() {
         return Err(FalconDivError::InputNotU32 {
@@ -66,11 +68,11 @@ pub fn handle_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>
     assert_eq!(r_hi, ZERO);
 
     // MASM consumes the remainder after the quotient, with one `adv_push`.
-    let remainder = AdviceMutation::extend_advice_stack_with([r_lo]);
+    advice.prepend_stack([r_lo]);
 
     // MASM reads q_hi then q_lo with `adv_push adv_push`, so q_lo lands on top.
-    let quotient = AdviceMutation::extend_advice_stack_with([q_hi, q_lo]);
-    Ok(vec![remainder, quotient])
+    advice.prepend_stack([q_hi, q_lo]);
+    Ok(())
 }
 
 // ERROR TYPES

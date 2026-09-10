@@ -181,13 +181,19 @@ impl CoreLibrary {
     /// [`crate::handlers::debug::advice_debug_handlers`].
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         let mut handlers: Vec<(EventName, Arc<dyn EventHandler>)> = vec![
-            (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
-            (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
-            (U128_DIV_EVENT_NAME, Arc::new(handle_u128_div)),
-            (U256_DIV_EVENT_NAME, Arc::new(handle_u256_div)),
-            (FALCON_DIV_EVENT_NAME, Arc::new(handle_falcon_div)),
-            (LOWERBOUND_ARRAY_EVENT_NAME, Arc::new(handle_lowerbound_array)),
-            (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
+            (SMT_PEEK_EVENT_NAME, miden_processor::event::legacy_handler(handle_smt_peek)),
+            (U64_DIV_EVENT_NAME, miden_processor::event::legacy_handler(handle_u64_div)),
+            (U128_DIV_EVENT_NAME, miden_processor::event::legacy_handler(handle_u128_div)),
+            (U256_DIV_EVENT_NAME, miden_processor::event::legacy_handler(handle_u256_div)),
+            (FALCON_DIV_EVENT_NAME, miden_processor::event::legacy_handler(handle_falcon_div)),
+            (
+                LOWERBOUND_ARRAY_EVENT_NAME,
+                miden_processor::event::legacy_handler(handle_lowerbound_array),
+            ),
+            (
+                LOWERBOUND_KEY_VALUE_EVENT_NAME,
+                miden_processor::event::legacy_handler(handle_lowerbound_key_value),
+            ),
             (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
             (ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, Arc::new(handle_ecdsa_k256_keccak_recover)),
             (KECCAK256_DIGEST_EVENT_NAME, Arc::new(handle_keccak256_digest)),

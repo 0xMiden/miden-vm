@@ -9,7 +9,7 @@ use alloc::{
 use core::{error::Error, fmt, fmt::Debug};
 
 use miden_core::events::{EventId, EventName};
-pub use portable::{HandlerRegistry, legacy_handler};
+pub use portable::{HandlerRegistry, invoke_legacy_handler, legacy_handler};
 pub(crate) use portable::{event_context, record_mutations};
 
 use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
