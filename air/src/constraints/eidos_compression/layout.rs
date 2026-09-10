@@ -2,7 +2,11 @@
 
 /// Number of main-trace columns in the Eidos compression AIR.
 pub const NUM_COLS: usize = 108;
+/// Number of auxiliary columns used by the shared narrow lookup core.
+pub const NARROW_AUX_COLS: usize = 18;
+/// Number of auxiliary columns used by the complete MVM compression AIR.
 pub const AUX_COLS: usize = 20;
+const _: () = assert!(AUX_COLS == NARROW_AUX_COLS + 2);
 
 pub const ROUNDS: usize = 7;
 pub const FUSED_G_ROWS_PER_ROUND: usize = 4;
@@ -35,11 +39,13 @@ pub const F_HIGH_EVEN_SLOT_BASE: usize = 0;
 pub const F_HIGH_ODD_SLOT_BASE: usize = 4;
 pub const F_OUTPUT_EVEN_SLOT_BASE: usize = 8;
 pub const F_OUTPUT_ODD_SLOT_BASE: usize = 12;
+/// Footer top-bit tuple. Its third field stores position-0-scaled XOR so the lookup slot has one
+/// row-independent normalization; constraints recover the required AND bit affinely.
 pub const F_TOP_BIT_SLOT_BASE_COL: usize = 48;
 const _: () = assert!(F_TOP_BIT_SLOT_BASE_COL.is_multiple_of(BYTE_SLOT_WIDTH));
 pub(crate) const F_TOP_BIT_NARROW_SLOT: usize = F_TOP_BIT_SLOT_BASE_COL / BYTE_SLOT_WIDTH;
 /// Byte position of the fused rotation slot reused by the footer top-bit lookup.
-pub(crate) const F_TOP_BIT_LOOKUP_BYTE_POSITION: usize = F_TOP_BIT_NARROW_SLOT % BYTES_PER_WORD;
+pub const F_TOP_BIT_LOOKUP_BYTE_POSITION: usize = F_TOP_BIT_NARROW_SLOT % BYTES_PER_WORD;
 pub const F_MSG_WORD_SLOTS: usize = 4;
 pub const F_RANGE_SLOTS: usize = 8;
 /// Logical narrow slots used by the eight footer range checks.
@@ -55,7 +61,9 @@ pub const F_RANGE_NARROW_SLOTS: [usize; F_RANGE_SLOTS] = [22, 23, 24, 25, 26, 17
 pub const F_CV_STORAGE_COLS: [usize; 8] = [104, 105, 106, 107, 54, 60, 81, 90];
 pub const F_CV_B_STORAGE_BYTES: [usize; NUM_G] = [2, 0, 3, 2];
 
-pub const F_INTERFACE_TAIL_BASE_COL: usize = 55;
+/// Four physical footer cells reserved for wrapper-defined output or interface values.
+pub const F_OUTPUT_BASE_COL: usize = 55;
+pub const F_INTERFACE_TAIL_BASE_COL: usize = F_OUTPUT_BASE_COL;
 pub const F_INTERFACE_TAIL0_COL: usize = F_INTERFACE_TAIL_BASE_COL;
 pub const F_CLK_COL: usize = F_INTERFACE_TAIL0_COL;
 
@@ -207,10 +215,14 @@ pub const fn footer_future_w_col(footer_row: usize, idx: usize) -> usize {
 }
 
 pub const fn footer_interface_tail_col(idx: usize) -> usize {
+    footer_output_col(idx)
+}
+
+pub const fn footer_output_col(idx: usize) -> usize {
     if idx >= 4 {
-        panic!("footer interface-tail index must be in 0..4");
+        panic!("footer output index must be in 0..4");
     }
-    F_INTERFACE_TAIL_BASE_COL + idx
+    F_OUTPUT_BASE_COL + idx
 }
 
 const _: () = assert!(BLOCK_PERIOD == 32);

@@ -1,19 +1,19 @@
 use std::{vec, vec::Vec};
 
-use miden_air::eidos_compression::testing as mvm;
+use miden_air::eidos_compression::{
+    core::{EidosCompressionSelectors, get_periodic_column_values},
+    testing as mvm,
+};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
 use miden_crypto::stark::air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
-use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use super::{
     constraints::{enforce_footer_rows, enforce_fused_rows},
     layout::{BLOCK_PERIOD, FUSED_G_ROWS, G_COMPRESSION_CYCLE_ID_COL, NUM_COLS},
-    periodic::get_periodic_column_values,
-    selectors::EidosCompressionSelectors,
     testing::generate_felt_trace_block_with_cycle_id,
     trace::EidosCompressionFeltRow,
 };
@@ -141,6 +141,18 @@ fn periodic_row(row_idx: usize) -> Vec<Felt> {
         .collect()
 }
 
+fn mixed_felt(sample: usize, row: usize, window: usize, column: usize) -> Felt {
+    // Scramble the unique coordinate tuple with SplitMix64's finalizer so column and window
+    // differences are not affine across samples.
+    let mut value = (((sample as u64 * BLOCK_PERIOD as u64 + row as u64) * 2 + window as u64)
+        * NUM_COLS as u64
+        + column as u64)
+        .wrapping_add(0x9e37_79b9_7f4a_7c15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    Felt::from_u64(value ^ (value >> 31))
+}
+
 fn eval_main_row(trace: &[EidosCompressionFeltRow], row_idx: usize) -> Vec<Felt> {
     let next_idx = (row_idx + 1).min(trace.len() - 1);
     let local = &trace[row_idx];
@@ -154,16 +166,13 @@ fn eval_main_row(trace: &[EidosCompressionFeltRow], row_idx: usize) -> Vec<Felt>
 }
 
 #[test]
-fn mvm_and_pvm_shared_constraints_match() {
-    assert_eq!(get_periodic_column_values(), mvm::get_periodic_column_values());
-
-    let mut rng = StdRng::seed_from_u64(0x0e1d_05c0_a57a_a1e5);
+fn pvm_wrapper_matches_mvm_mode_zero_constraints() {
     for sample in 0..8 {
         for row_idx in 0..BLOCK_PERIOD {
-            let mut local = core::array::from_fn(|_| Felt::from_u64(rng.random()));
-            let mut next = core::array::from_fn(|_| Felt::from_u64(rng.random()));
+            let mut local = core::array::from_fn(|col| mixed_felt(sample, row_idx, 0, col));
+            let mut next = core::array::from_fn(|col| mixed_felt(sample, row_idx, 1, col));
 
-            // The PVM footer carries a digest, which is the MVM footer's mode-zero interface.
+            // The PVM digest cells and MVM mode-zero output cells occupy the same four columns.
             local[mvm::MVM_MODE_COL] = Felt::ZERO;
             next[mvm::MVM_MODE_COL] = Felt::ZERO;
 
@@ -180,15 +189,16 @@ fn mvm_and_pvm_shared_constraints_match() {
             enforce_fused_rows(&mut pvm_builder, &local, &next, &pvm_selectors);
             enforce_footer_rows(&mut pvm_builder, &local, &next, &pvm_selectors);
 
-            let mut mvm_builder =
+            let mut shared_builder =
                 ConstraintEvalBuilder::new(&local, &next, periodic_values, row_idx, BLOCK_PERIOD);
-            let mvm_selectors =
-                mvm::EidosCompressionSelectors::<Felt>::new(mvm_builder.periodic_values(), 0);
-            mvm::enforce_fused_rows(&mut mvm_builder, &local, &next, &mvm_selectors);
-            mvm::enforce_common_footer_rows(&mut mvm_builder, &local, &next, &mvm_selectors);
+            let shared_selectors =
+                EidosCompressionSelectors::<Felt>::new(shared_builder.periodic_values(), 0);
+            mvm::enforce_fused_rows(&mut shared_builder, &local, &next, &shared_selectors);
+            mvm::enforce_common_footer_rows(&mut shared_builder, &local, &next, &shared_selectors);
 
+            assert!(!pvm_builder.evaluations.is_empty(), "PVM wrapper emitted no constraints");
             assert_eq!(
-                mvm_builder.evaluations, pvm_builder.evaluations,
+                shared_builder.evaluations, pvm_builder.evaluations,
                 "constraint mismatch in sample {sample}, row {row_idx}",
             );
         }
@@ -217,6 +227,4 @@ fn cross_row_cycle_id_constancy_rejects_internal_changes() {
             "unexpected constraint result on forged row {row_idx}",
         );
     }
-
-    assert_eq!(BLOCK_PERIOD, 32);
 }
