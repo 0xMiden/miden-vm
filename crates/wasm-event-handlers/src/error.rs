@@ -129,7 +129,7 @@ pub enum WasmHandlerLoadError {
 }
 
 /// An error raised while a handler runs. Converted into the boxed
-/// [`EventError`](miden_processor::event::EventError) the processor expects, from which it can
+/// [`EventError`](miden_event_handler::EventError) the processor expects, from which it can
 /// be recovered with `downcast_ref`.
 ///
 /// The variants separate the causes, so operators can tell a handler defect
