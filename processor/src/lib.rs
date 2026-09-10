@@ -11,7 +11,7 @@ extern crate std;
 
 use alloc::vec::Vec;
 use core::{
-    fmt::{self, Display, LowerHex},
+    fmt::{self, Display},
     ops::ControlFlow,
 };
 
@@ -68,7 +68,7 @@ pub use host::{
     default::{DefaultHost, HostLibrary},
 };
 pub use miden_core::{
-    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast,
+    EMPTY_WORD, Felt, MemoryAddress, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast,
     program::{
         ExecutionClaim, InputError, KernelDescriptor, MIN_STACK_DEPTH, Program, ProgramInfo,
         StackInputs, StackOutputs,
@@ -90,8 +90,8 @@ pub mod event {
     pub use miden_core::events::*;
 
     pub use crate::host::handlers::{
-        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler, TraceError, TraceHandler,
-        TraceHandlerRegistry,
+        EventError, EventHandler, EventHandlerRegistry, HandlerRegistry, NoopEventHandler,
+        TraceError, TraceHandler, TraceHandlerRegistry, legacy_handler, registration,
     };
 }
 
@@ -374,52 +374,6 @@ impl Deserializable for ContextId {
 impl Display for ContextId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
-    }
-}
-
-// MEMORY ADDRESS
-// ================================================================================================
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct MemoryAddress(u32);
-
-impl From<u32> for MemoryAddress {
-    fn from(addr: u32) -> Self {
-        MemoryAddress(addr)
-    }
-}
-
-impl From<MemoryAddress> for u32 {
-    fn from(value: MemoryAddress) -> Self {
-        value.0
-    }
-}
-
-impl Display for MemoryAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
-
-impl LowerHex for MemoryAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LowerHex::fmt(&self.0, f)
-    }
-}
-
-impl core::ops::Add<MemoryAddress> for MemoryAddress {
-    type Output = Self;
-
-    fn add(self, rhs: MemoryAddress) -> Self::Output {
-        MemoryAddress(self.0 + rhs.0)
-    }
-}
-
-impl core::ops::Add<u32> for MemoryAddress {
-    type Output = Self;
-
-    fn add(self, rhs: u32) -> Self::Output {
-        MemoryAddress(self.0 + rhs)
     }
 }
 
