@@ -60,14 +60,13 @@ end
 #! Where:
 #! - in_ptr:   word-aligned address holding INPUT_U32[⌈len_bytes/4⌉] (unused bytes in the final u32
 #!             and any remaining felts in the final 32-byte CHUNKS block must be 0)
-#! - len_bytes: number of bytes to hash
+#! - len_bytes: number of bytes to hash, at most 1 MiB with the native handler
 #! - out_ptr:  word-aligned destination for DIGEST_U32[8]
 #!
 #! Advice is untrusted: the advised digest is bound by the logged generic hash assertion.
 pub proc hash_bytes_mem
     emit.KECCAK256_DIGEST_EVENT
     # => [in_ptr, len_bytes, out_ptr, ...]
-    #    (handler sees [event_id, in_ptr, len_bytes, ...])
 
     dup.1
     # => [len_bytes, in_ptr, len_bytes, out_ptr, ...]
@@ -93,7 +92,6 @@ end
 pub proc hash_1_chunk_mem
     emit.KECCAK256_DIGEST_EVENT
     # => [in_ptr, len_bytes, out_ptr, ...]
-    #    (handler sees [event_id, in_ptr, len_bytes, ...])
 
     exec.precompiles::register_chunks_mem_1
     # => [PREIMAGE_CHUNKS_DIGEST, len_bytes, out_ptr, ...]
@@ -111,7 +109,6 @@ end
 pub proc hash_2_chunks_mem
     emit.KECCAK256_DIGEST_EVENT
     # => [in_ptr, len_bytes, out_ptr, ...]
-    #    (handler sees [event_id, in_ptr, len_bytes, ...])
 
     exec.precompiles::register_chunks_mem_2
     # => [PREIMAGE_CHUNKS_DIGEST, len_bytes, out_ptr, ...]

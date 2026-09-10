@@ -246,6 +246,8 @@ end
 #! - src_ptr points to ciphertext + encrypted_padding + tag in memory (word-aligned)
 #! - dst_ptr points to where plaintext will be written (word-aligned)
 #! - num_blocks is the number of 8-element plaintext data blocks (NO padding)
+#!   The native handler accepts at most 16 MiB of serialized plaintext field elements, excluding
+#!   padding and tag; the processor's advice budget may impose a lower limit.
 #!
 #! Memory Layout:
 #! - Input at src_ptr: [ciphertext_blocks(num_blocks * 8), encrypted_padding(8), tag(4)]
