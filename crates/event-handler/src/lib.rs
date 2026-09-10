@@ -29,3 +29,10 @@ pub use context::{
 pub use errors::EventContextError;
 pub use handlers::{EventError, EventHandler, NoopHandler, UnsupportedInvocationKind};
 pub use miden_core::{Felt, MemoryAddress, Word};
+
+/// Maximum input size for one bundled native Keccak invocation (1 MiB).
+pub const MAX_KECCAK_INPUT_BYTES: usize = 1 << 20;
+
+/// Maximum serialized plaintext size accepted by bundled native AEAD decryption (16 MiB).
+/// Excludes padding and authentication tag; the processor separately enforces its advice budget.
+pub const MAX_AEAD_PLAINTEXT_BYTES: usize = 16 * 1024 * 1024;

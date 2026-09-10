@@ -194,9 +194,18 @@ impl CoreLibrary {
                 LOWERBOUND_KEY_VALUE_EVENT_NAME,
                 miden_processor::event::legacy_handler(handle_lowerbound_key_value),
             ),
-            (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
-            (ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, Arc::new(handle_ecdsa_k256_keccak_recover)),
-            (KECCAK256_DIGEST_EVENT_NAME, Arc::new(handle_keccak256_digest)),
+            (
+                AEAD_DECRYPT_EVENT_NAME,
+                miden_processor::event::legacy_handler(handle_aead_decrypt),
+            ),
+            (
+                ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,
+                miden_processor::event::legacy_handler(handle_ecdsa_k256_keccak_recover),
+            ),
+            (
+                KECCAK256_DIGEST_EVENT_NAME,
+                miden_processor::event::legacy_handler(handle_keccak256_digest),
+            ),
             (UINT_FIELD_INV_EVENT_NAME, Arc::new(handle_uint_field_inv)),
         ];
         handlers.extend(default_debug_handlers());

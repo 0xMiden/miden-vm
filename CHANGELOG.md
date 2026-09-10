@@ -4,6 +4,8 @@
 
 #### Features
 
+- Migrated native crypto handlers to typed advice with fixed Keccak (1 MiB input) and AEAD (16 MiB plaintext) admission limits. Removed configurable hash-length execution options; AEAD still rejects uninitialized ciphertext, padding, and tags ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
+
 - Migrated native arithmetic, collection, and observation handlers to payload-relative reads and typed advice recording. Public `handle_*` functions now take `EventContext` and `AdviceRecorder`; legacy library lists and `DebugPrinter` remain usable ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 
 - Added portable `Host::handle_event` and `SyncHost::handle_event` callbacks, unified registrations, explicit trace-delivery policy, and complete-batch advice completion while preserving legacy host and registration paths ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).

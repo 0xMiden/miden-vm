@@ -50,6 +50,27 @@ fn test_encrypt_zero_blocks_roundtrip() {
 }
 
 #[test]
+fn test_decrypt_rejects_uninitialized_ciphertext_and_padding() {
+    for missing_word in [1000, 1008] {
+        // One data block, one padding block, and the tag; omit a data or padding word.
+        let stores: String = (1000..1020)
+            .step_by(4)
+            .filter(|&address| address != missing_word)
+            .map(|address| format!("push.0 mem_store.{address} "))
+            .collect();
+        let source = format!(
+            "begin {stores} push.1.2000.1000 padw padw emit.event(\"{AEAD_DECRYPT_EVENT_NAME}\") end"
+        );
+        let Err(miden_processor::ExecutionError::EventError { error, .. }) =
+            build_test!(source.as_str(), &[]).execute()
+        else {
+            panic!("missing ciphertext or padding must fail in the AEAD handler");
+        };
+        assert_eq!(error.to_string(), "failed to read memory region at addr=1000, len=16");
+    }
+}
+
+#[test]
 fn test_encrypt_documented_stack_contract() {
     let sentinels = [0xdead_beef_u64, 0xface_cafe, 0xabad_1dea, 0xbeef_c0de];
     let source = r#"
