@@ -2393,6 +2393,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-event-handler"
+version = "0.34.0"
+dependencies = [
+ "miden-core",
+ "thiserror",
+]
+
+[[package]]
 name = "miden-event-handler-abi"
 version = "0.34.0"
 dependencies = [
