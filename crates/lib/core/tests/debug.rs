@@ -11,6 +11,7 @@ use std::{
 
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{Felt, Word};
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 use miden_core_lib::{
     CoreLibrary,
     handlers::debug::{
@@ -20,6 +21,7 @@ use miden_core_lib::{
     },
 };
 use miden_event_handler::EventContextError;
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, HostLibrary,
     Program, StackInputs, SyncHost,
@@ -54,6 +56,7 @@ impl fmt::Write for SharedBuf {
     }
 }
 
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn debug_handlers_with_writer(writer: SharedBuf) -> Vec<(EventName, Arc<dyn EventHandler>)> {
     let printer: Arc<dyn EventHandler> = Arc::new(DebugPrinter::new(writer));
     vec![
@@ -69,6 +72,7 @@ fn debug_handlers_with_writer(writer: SharedBuf) -> Vec<(EventName, Arc<dyn Even
 /// Assembles `source` against the core library and executes it with a [`DebugPrinter`] writing
 /// into an in-memory buffer (rather than the default stdout one), returning everything printed by
 /// the `print_*` events along with the execution output.
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn run(source: &str, advice: AdviceInputs) -> (String, ExecutionOutput) {
     let core_lib = CoreLibrary::default();
     let assembler = Assembler::default()
@@ -287,6 +291,7 @@ fn print_mem_all_includes_max_u32_cell() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn print_mem_rejects_out_of_bounds_range_end() {
     let source = "
     use miden::core::debug
@@ -330,6 +335,7 @@ fn print_mem_rejects_out_of_bounds_range_end() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn print_mem_rejects_oversized_range() {
     // An explicit range wider than the 1024-address cap is rejected, catching a caller that passes
     // a huge range by accident. Use `print_mem_all` to print the entire memory.
@@ -372,6 +378,7 @@ fn print_mem_rejects_oversized_range() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn print_mem_rejects_full_range() {
     // The cap has no exemption: the full `[0, 2^32)` range is rejected like any other oversized
     // range, so `print_mem` can't be used to bypass the documented 1024-address limit. Printing
@@ -552,6 +559,7 @@ fn print_stack_is_stack_neutral() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn default_core_handlers_include_debug_printers() {
     let core_lib = CoreLibrary::default();
     let handlers = core_lib.handlers();
@@ -576,6 +584,7 @@ fn default_core_handlers_include_debug_printers() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn debug_handlers_compose_with_default_core_handlers() {
     let source = "
     use miden::core::debug
@@ -617,6 +626,7 @@ fn debug_handlers_compose_with_default_core_handlers() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn debug_handlers_include_all_core_debug_events() {
     let handlers = debug_handlers();
 
@@ -650,6 +660,7 @@ fn default_core_handlers_run_print_stack() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn noop_debug_handlers_run_print_stack_without_output() {
     let source = "
     use miden::core::debug

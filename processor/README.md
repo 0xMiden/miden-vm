@@ -88,7 +88,7 @@ that successfully record advice fail with an engine error. Regular callbacks app
 after complete-batch conflict and aggregate-budget validation. Callback error or cancellation
 leaves processor advice unchanged, without rolling back host-owned effects.
 
-Existing raw-state callbacks and exact legacy Arc registration signatures remain usable. The
+Existing raw-state callbacks and exact legacy Arc registration signatures are deprecated and remain usable. The
 engine invokes them when the new callback uses its default fallback and has recorded no advice.
 Legacy event and trace registrations may share an identity; portable registrations reject any
 existing binding at that identity. `HostLibrary` retains its public legacy shape and event-only
@@ -97,3 +97,6 @@ library loading and unified delivery. `event::legacy_handler` adapts a portable 
 failure; direct portable registrations use `event::HandlerRegistry`. For a custom host that routes
 library events before async work, use a portable registry in the new callback or retain the old
 raw-state callback until that registry is migrated. A portable context cannot recreate raw state.
+
+See the [migration guide](../docs/src/user_docs/event_handler_migration.md) for preserved APIs,
+concrete handler changes, and downstream integration.

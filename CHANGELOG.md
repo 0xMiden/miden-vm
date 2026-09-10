@@ -21,6 +21,9 @@
 
 #### Changes
 
+- Deprecated raw-state processor handler, registry, mutation, and callback APIs while preserving
+  their compatibility paths. See the [migration guide](docs/src/user_docs/event_handler_migration.md)
+  for concrete handler changes and retained APIs ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 - Wasm ABI revision 2 adds invocation kind while retaining the v1 namespace and revision-1 declarations.
   Inverse witnesses carry explicit operands while retaining their deferred assertion binding
   ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).

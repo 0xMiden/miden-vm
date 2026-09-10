@@ -103,6 +103,7 @@ impl FastProcessor {
     }
 
     #[inline(always)]
+    #[allow(deprecated)] // Engine-owned fallback to old callbacks.
     pub(super) fn op_emit_sync<F>(
         &mut self,
         host: &mut impl SyncHost,
@@ -156,6 +157,7 @@ impl FastProcessor {
     }
 
     #[inline(always)]
+    #[allow(deprecated)] // Engine-owned fallback to old callbacks.
     pub(super) async fn op_emit<F>(
         &mut self,
         host: &mut impl Host,

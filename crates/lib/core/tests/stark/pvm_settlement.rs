@@ -15,6 +15,7 @@ use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_precompiles_verifier::masm_verifier::{
     PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
 };
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, ExecutionOutput, FastProcessor, FutureMaybeSend, Host,
     LoadedMastForest, ProcessorState, StackInputs, SyncHost,
@@ -227,6 +228,7 @@ impl BaseHost for PvmSettlementHost {
     }
 }
 
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 impl Host for PvmSettlementHost {
     fn get_mast_forest(
         &self,
