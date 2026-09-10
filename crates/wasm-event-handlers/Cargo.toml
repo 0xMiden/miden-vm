@@ -22,6 +22,7 @@ default = ["std"]
 std = [
     "miden-crypto/std",
     "miden-mast-package/std",
+    "miden-event-handler/std",
     "miden-processor/std",
     "thiserror/std",
     "wasmi/std",
@@ -31,6 +32,7 @@ std = [
 # Miden dependencies
 miden-crypto.workspace = true
 miden-event-handler-abi.workspace = true
+miden-event-handler.workspace = true
 miden-mast-package.workspace = true
 miden-processor.workspace = true
 

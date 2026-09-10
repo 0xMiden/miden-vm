@@ -31,7 +31,7 @@
 //! - the host writes only through `*mut` pointers, and keeps no pointer past the call, so no borrow
 //!   outlives the call.
 
-use miden_event_handler_abi::{Felt, MerkleNode, Status, Word, guest};
+use miden_event_handler_abi::{Felt, InvocationKind, MerkleNode, Status, Word, guest};
 
 // CANONICALIZATION
 // ================================================================================================
@@ -65,8 +65,7 @@ fn status(raw: i32) -> Status {
 // QUERIES
 // ================================================================================================
 
-/// Returns the depth of the handler's stack view: the operand-stack depth without the event-ID
-/// slot.
+/// Returns the payload-stack depth, excluding the dispatch elements for `emit` or `trace`.
 pub fn stack_depth() -> u32 {
     // SAFETY: the module contract; the call takes no pointer.
     unsafe { guest::stack_depth() }
@@ -106,11 +105,22 @@ pub fn clk() -> u64 {
     unsafe { guest::clk() }
 }
 
-/// Returns the ID of the event the handler was invoked for.
+/// Returns the event ID of the handler's manifest binding, unchanged by host registration aliases.
 pub fn event_id() -> Felt {
     // SAFETY: the module contract; the call takes no pointer.
     // The host returns a canonical value, which is the plain residue of itself.
     Felt::new_unchecked(unsafe { guest::event_id() })
+}
+
+/// Returns whether MASM invoked this handler through `emit` or `trace`.
+///
+/// Requires ABI revision 2. A trace must not record advice, including idempotent map writes.
+pub fn invocation_kind() -> InvocationKind {
+    // SAFETY: the module contract; the call takes no pointer.
+    match InvocationKind::from_raw(unsafe { guest::invocation_kind() }) {
+        Some(kind) => kind,
+        None => fail("host returned an unknown invocation kind"),
+    }
 }
 
 /// Returns `true` when the current execution context is the root context.

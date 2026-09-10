@@ -1204,6 +1204,7 @@ name = "miden-wasm-event-handlers"
 version = "0.33.0"
 dependencies = [
  "miden-crypto",
+ "miden-event-handler",
  "miden-event-handler-abi",
  "miden-mast-package",
  "miden-processor",

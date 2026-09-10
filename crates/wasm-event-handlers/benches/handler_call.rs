@@ -6,7 +6,7 @@
 //!   invocation) — the price of the stateless instantiate-per-call design. Every fixture exports
 //!   its linear memory, which the loader requires, so this number also includes the allocation and
 //!   zeroing of one 64 KiB page per call. Subtract that term before you read it as the cost of the
-//!   call machinery alone.
+//!   call machinery alone. The call includes the processor registry lookup.
 //! - `guest_arith_100k_iters`: pure guest execution with a known instruction count, giving the
 //!   wall-clock cost of one fuel unit.
 //! - `host_extend_4096_felts` / `host_stack_read_4096_felts`: one host call moving 4096 field
@@ -26,8 +26,12 @@ use std::{sync::Arc, time::Duration};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_event_handler::{AdviceBatch, EventContext, Invocation};
 use miden_event_handler_abi::ABI_VERSION;
-use miden_processor::{DefaultHost, FastProcessor, StackInputs, event::EventName};
+use miden_processor::{
+    DefaultHost, FastProcessor, StackInputs,
+    event::{EventName, HandlerRegistry},
+};
 use miden_wasm_event_handlers::{WasmHandlerLimits, WasmHandlerModule};
 
 const EVENT: EventName = EventName::new("bench::wasm::handler");
@@ -182,13 +186,20 @@ fn bench_handlers(c: &mut Criterion) {
             )
             .expect("bench module loads"),
         );
-        let handlers = module.handlers();
+        let handlers = module.event_handlers();
         let (_, handler) = handlers.first().expect("one handler");
+        let mut registry = HandlerRegistry::new();
+        registry.register(EVENT, handler.clone()).unwrap();
 
         group.bench_function(name, |bencher| {
             bencher.iter(|| {
-                let state = processor.state();
-                std::hint::black_box(handler.on_event(&state).expect("bench handler succeeds"))
+                let context =
+                    EventContext::new(processor, Invocation::event(EVENT.to_event_id(), 0, true));
+                let mut advice = AdviceBatch::new();
+                registry
+                    .handle_event(EVENT.to_event_id(), context, &mut advice.recorder())
+                    .expect("bench handler succeeds");
+                std::hint::black_box(advice)
             })
         });
     }
