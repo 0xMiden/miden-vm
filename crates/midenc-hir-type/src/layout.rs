@@ -516,10 +516,9 @@ impl Type {
     /// the addresses of the individual fields needed from a large structure or array,
     /// and issue loads/stores against those instead.
     ///
-    /// In effect, we reject loads of values that are larger than a single word, as that
-    /// is the largest value which can be worked with on the operand stack of the Miden VM.
+    /// This policy limits a single logical load to one word (four field elements).
     pub fn is_loadable(&self) -> bool {
-        self.size_in_words() <= WORD_SIZE
+        self.size_in_bytes() <= WORD_SIZE
     }
 }
 
@@ -530,6 +529,22 @@ mod tests {
     use smallvec::smallvec;
 
     use crate::*;
+
+    #[test]
+    fn loadability_is_limited_to_one_word() {
+        for (ty, expected) in [
+            (Type::Felt, true),
+            (Type::U128, true),
+            (Type::U256, false),
+            (Type::from(ArrayType::new(Type::Felt, 4)), true),
+            (Type::from(ArrayType::new(Type::Felt, 5)), false),
+            (Type::from(ArrayType::new(Type::U8, 16)), true),
+            (Type::from(ArrayType::new(Type::U8, 17)), false),
+            (Type::from(StructType::new([Type::U128, Type::U8])), false),
+        ] {
+            assert_eq!(ty.is_loadable(), expected, "unexpected loadability for {ty}");
+        }
+    }
 
     #[test]
     fn self_recursive_struct_through_a_pointer_has_a_finite_layout() {

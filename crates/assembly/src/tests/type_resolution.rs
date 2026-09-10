@@ -4,6 +4,59 @@
 use super::*;
 
 #[test]
+fn pointer_address_spaces_survive_package_round_trip() -> TestResult {
+    use miden_assembly_syntax::ast::types::{AddressSpace, PointerType, Type};
+    use miden_mast_package::{Package, PackageExport};
+
+    let context = TestContext::new();
+    let module = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace lib::pointers
+
+        pub proc write(
+            explicit: ptr<u32, addrspace(felt)>,
+            implicit: ptr<u32>,
+            bytes: ptr<u32, addrspace(byte)>,
+            nested: ptr<ptr<u32, addrspace(felt)>, addrspace(byte)>
+        ) -> ptr<u32, addrspace(felt)>
+            nop
+        end
+        "#
+    ))?;
+
+    let package = context.assemble_library("lib", None, module, [])?;
+    let decoded = Package::read_from_bytes(&package.to_bytes()).expect("package should decode");
+    let element_ptr =
+        Type::Ptr(PointerType::new_with_address_space(Type::U32, AddressSpace::Element).into());
+    let byte_ptr =
+        Type::Ptr(PointerType::new_with_address_space(Type::U32, AddressSpace::Byte).into());
+    let nested_ptr = Type::Ptr(
+        PointerType::new_with_address_space(element_ptr.clone(), AddressSpace::Byte).into(),
+    );
+
+    for package in [&package, &decoded] {
+        let signature = package
+            .manifest
+            .exports()
+            .find_map(|export| match export {
+                PackageExport::Procedure(proc) if proc.path.to_string().ends_with("write") => {
+                    proc.signature.as_ref()
+                },
+                _ => None,
+            })
+            .expect("write should be exported with a signature");
+
+        assert_eq!(
+            signature.params(),
+            &[element_ptr.clone(), element_ptr.clone(), byte_ptr.clone(), nested_ptr.clone()]
+        );
+        assert_eq!(signature.results(), core::slice::from_ref(&element_ptr));
+    }
+    Ok(())
+}
+
+#[test]
 fn variadic_procedure_signatures_resolve() -> TestResult {
     use miden_assembly_syntax::ast::types::Type;
     use miden_mast_package::PackageExport;
@@ -320,5 +373,54 @@ fn recursive_type_alias_cycle_is_diagnosed() -> TestResult {
         .assemble_library("lib", None, module, [])
         .expect_err("an alias cycle should be rejected rather than recursing forever");
     assert_diagnostic!(&err, "recursive");
+    Ok(())
+}
+
+#[test]
+fn imported_type_bodies_resolve_in_their_defining_module() -> TestResult {
+    use miden_assembly_syntax::ast::types::Type;
+
+    let context = TestContext::new();
+    let definitions = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace lib::definitions
+
+        pub type Element = u32
+        pub type Alias = Element
+        pub type Record = struct { value: Alias }
+        "#
+    ))?;
+    let consumer = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace lib::consumer
+        use lib::definitions
+
+        pub type Element = felt
+        pub type Alias = felt
+
+        pub proc entry(record: definitions::Record, alias: definitions::Alias, local: Element)
+            nop
+        end
+        "#
+    ))?;
+    let package = context.assemble_library("lib", None, consumer, [definitions])?;
+    let signature = package
+        .manifest
+        .exports()
+        .find_map(|export| match export {
+            PackageExport::Procedure(proc) if proc.path.to_string().ends_with("entry") => {
+                proc.signature.clone()
+            },
+            _ => None,
+        })
+        .expect("entry should be exported with its signature");
+
+    let Type::Struct(record) = &signature.params()[0] else {
+        panic!("expected the imported record");
+    };
+    assert_eq!(record.get().fields()[0].ty, Type::U32);
+    assert_eq!(signature.params()[1..], [Type::U32, Type::Felt]);
     Ok(())
 }
