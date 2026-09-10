@@ -454,10 +454,10 @@ fn mem_get_state_at() {
     assert_eq!(
         mem.get_state_at(ContextId::root(), clk),
         vec![
-            (MemoryAddress(addr_start), word1234[0]),
-            (MemoryAddress(addr_start + 1), word1234[1]),
-            (MemoryAddress(addr_start + 2), word1234[2]),
-            (MemoryAddress(addr_start + 3), word1234[3])
+            (MemoryAddress::new(addr_start), word1234[0]),
+            (MemoryAddress::new(addr_start + 1), word1234[1]),
+            (MemoryAddress::new(addr_start + 2), word1234[2]),
+            (MemoryAddress::new(addr_start + 3), word1234[3])
         ]
     );
     assert_eq!(mem.get_state_at(3.into(), clk), vec![]);
@@ -467,10 +467,10 @@ fn mem_get_state_at() {
     assert_eq!(
         mem.get_state_at(ContextId::root(), clk),
         vec![
-            (MemoryAddress(addr_start), word4567[0]),
-            (MemoryAddress(addr_start + 1), word4567[1]),
-            (MemoryAddress(addr_start + 2), word4567[2]),
-            (MemoryAddress(addr_start + 3), word4567[3])
+            (MemoryAddress::new(addr_start), word4567[0]),
+            (MemoryAddress::new(addr_start + 1), word4567[1]),
+            (MemoryAddress::new(addr_start + 2), word4567[2]),
+            (MemoryAddress::new(addr_start + 3), word4567[3])
         ]
     );
     assert_eq!(mem.get_state_at(3.into(), clk), vec![]);

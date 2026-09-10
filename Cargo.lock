@@ -2694,6 +2694,7 @@ dependencies = [
  "miden-assembly",
  "miden-core",
  "miden-debug-types",
+ "miden-event-handler",
  "miden-mast-package",
  "miden-precompiles",
  "miden-test-serialization-macros",

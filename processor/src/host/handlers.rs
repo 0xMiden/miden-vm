@@ -1,3 +1,5 @@
+mod portable;
+pub mod registration;
 use alloc::{
     boxed::Box,
     collections::{BTreeMap, btree_map::Entry},
@@ -7,6 +9,8 @@ use alloc::{
 use core::{error::Error, fmt, fmt::Debug};
 
 use miden_core::events::{EventId, EventName};
+pub use portable::{HandlerRegistry, legacy_handler};
+pub(crate) use portable::{event_context, record_mutations};
 
 use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
 
