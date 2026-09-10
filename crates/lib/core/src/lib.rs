@@ -195,10 +195,16 @@ impl CoreLibrary {
             ),
             (
                 AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
-                Arc::new(handle_aead_eidos_decrypt_empty_ad),
+                miden_processor::event::legacy_handler(handle_aead_eidos_decrypt_empty_ad),
             ),
-            (ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, Arc::new(handle_ecdsa_k256_keccak_recover)),
-            (KECCAK256_DIGEST_EVENT_NAME, Arc::new(handle_keccak256_digest)),
+            (
+                ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,
+                miden_processor::event::legacy_handler(handle_ecdsa_k256_keccak_recover),
+            ),
+            (
+                KECCAK256_DIGEST_EVENT_NAME,
+                miden_processor::event::legacy_handler(handle_keccak256_digest),
+            ),
             (UINT_FIELD_INV_EVENT_NAME, Arc::new(handle_uint_field_inv)),
         ];
         handlers.extend(default_debug_handlers());

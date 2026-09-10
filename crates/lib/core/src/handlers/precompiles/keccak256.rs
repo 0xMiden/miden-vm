@@ -1,6 +1,6 @@
 //! Host event handler for precompile-backed Keccak-256 wrapper advice.
 
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 use core::mem::size_of;
 
 use miden_core::{
@@ -9,13 +9,9 @@ use miden_core::{
     utils::{bytes_to_packed_u32_elements, packed_u32_elements_to_bytes},
 };
 use miden_crypto::hash::keccak::Keccak256;
-use miden_processor::{
-    ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::EventError,
+use miden_event_handler::{
+    AdviceRecorder, EventContext, EventError, InvocationKind, MAX_KECCAK_INPUT_BYTES,
 };
-
-use crate::handlers::read_uninitialized_memory_region;
 
 /// Event emitted by bundled `miden::precompiles::hashes::keccak256` wrappers to request a
 /// Keccak-256 digest witness from the host.
@@ -27,20 +23,22 @@ const KECCAK256_DIGEST_FELTS: usize = 8;
 
 /// Reads the requested u32-packed memory preimage, computes Keccak-256, and pushes the digest limbs
 /// onto the advice stack for the MASM wrapper to bind with deferred assertions.
+/// Inputs larger than [`MAX_KECCAK_INPUT_BYTES`] are rejected before reading memory or allocating.
 pub fn handle_keccak256_digest(
-    process: &ProcessorState<'_>,
-) -> Result<Vec<AdviceMutation>, EventError> {
-    let ptr = process.get_stack_item(1).as_canonical_u64();
-    let len_bytes = process.get_stack_item(2).as_canonical_u64();
+    context: EventContext<'_>,
+    advice: &mut AdviceRecorder<'_>,
+) -> Result<(), EventError> {
+    context.kind().require(InvocationKind::Event)?;
+    let ptr = context.stack_item(0).as_canonical_u64();
+    let len_bytes = context.stack_item(1).as_canonical_u64();
 
-    let max = process.execution_options().max_hash_len_bytes();
+    let max = MAX_KECCAK_INPUT_BYTES;
     if len_bytes > max as u64 {
         return Err(Keccak256DigestEventError::InputTooLong { len_bytes, max }.into());
     }
-    let len_bytes = usize::try_from(len_bytes)
-        .map_err(|_| Keccak256DigestEventError::InputLengthTooLarge { len_bytes })?;
+    let len_bytes = len_bytes as usize;
 
-    let input = read_memory_packed_u32(process, ptr, len_bytes)?;
+    let input = read_memory_packed_u32(context, ptr, len_bytes)?;
     let digest = <[u8; 32]>::from(Keccak256::hash(&input));
     let digest_felts = bytes_to_packed_u32_elements(&digest);
     if digest_felts.len() != KECCAK256_DIGEST_FELTS {
@@ -51,14 +49,13 @@ pub fn handle_keccak256_digest(
         .into());
     }
 
-    let mut advice_stack = AdviceStack::new();
-    // MASM consumes the digest with two `adv_pushw` calls, low word first and high word second.
-    advice_stack.append_for_adv_pipe(&digest_felts);
-    Ok(vec![AdviceMutation::extend_advice_stack(advice_stack)])
+    // Preserve the VM's sequential word/block consumption order.
+    advice.prepend_stack(digest_felts);
+    Ok(())
 }
 
 fn read_memory_packed_u32(
-    process: &ProcessorState<'_>,
+    context: EventContext<'_>,
     start: u64,
     len_bytes: usize,
 ) -> Result<Vec<u8>, Keccak256DigestEventError> {
@@ -80,8 +77,9 @@ fn read_memory_packed_u32(
         .checked_next_multiple_of(BYTES_PER_U32)
         .ok_or(Keccak256DigestEventError::AddressOverflow { start, len_bytes })?;
 
-    let felts = read_uninitialized_memory_region(process, start, len_felts_u64)
-        .ok_or(Keccak256DigestEventError::MemoryAccessFailed { address: start_u32 })?;
+    let felts = context
+        .memory_slice(start, len_felts_u64)
+        .map_err(|_| Keccak256DigestEventError::MemoryAccessFailed { address: start_u32 })?;
 
     for (offset, felt) in felts.iter().enumerate() {
         let value = felt.as_canonical_u64();
@@ -109,8 +107,6 @@ fn read_memory_packed_u32(
 enum Keccak256DigestEventError {
     #[error("keccak256 input length {len_bytes} bytes exceeds maximum of {max} bytes")]
     InputTooLong { len_bytes: u64, max: usize },
-    #[error("keccak256 input length {len_bytes} exceeds addressable range")]
-    InputLengthTooLarge { len_bytes: u64 },
     #[error(
         "address overflow while reading u32-packed memory: start={start}, len_bytes={len_bytes}"
     )]
