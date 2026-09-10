@@ -63,7 +63,7 @@ fn memory_region_range(start_ptr: u64, len: u64) -> Option<Range<u32>> {
 }
 
 /// Preserves legacy library-list shapes while the authoritative handlers use the portable trait.
-fn legacy_handlers(
+pub(super) fn legacy_handlers(
     handlers: Vec<(
         miden_core::events::EventName,
         miden_processor::event::registration::EventHandler,

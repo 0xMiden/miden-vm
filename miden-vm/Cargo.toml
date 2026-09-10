@@ -102,6 +102,7 @@ tracing-forest = { workspace = true, optional = true, features = ["ansi", "small
 
 [dev-dependencies]
 miden-precompiles.workspace = true
+miden-event-handler.workspace = true
 assert_cmd = { version = "2.1" }
 criterion = { workspace = true, features = ["async_tokio"] }
 miden-assembly = { workspace = true, features = ["testing"] }
