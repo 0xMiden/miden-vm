@@ -24,10 +24,12 @@ use std::{
 };
 
 // Release compatibility has four separate boundaries. Executable compatibility protects
-// exported procedure paths and MAST digests. Fast ABI compatibility protects the number of input
-// and output felts consumed by previously published Fast procedures. Source compatibility reports
-// changes to published nominal signatures, exported types, and source attributes. It is advisory
-// during a release because a patch may preserve the Fast ABI without preserving source syntax.
+// exported procedure paths and MAST digests while reporting source-facing interface corrections
+// alongside the affected procedure. Fast ABI compatibility protects the number of input and
+// output felts consumed by previously published Fast procedures when selected explicitly. Source
+// compatibility reports changes to published nominal signatures, calling conventions, exported
+// types, and source attributes. It is advisory during a release because a patch may preserve the
+// Fast ABI without preserving source syntax.
 // Package compatibility prevents one semantic version from identifying two dependency commitments
 // and reports when old serialized dependents require the previous package to remain archived.
 
@@ -59,14 +61,22 @@ enum ExportInfo {
 struct ProcedureInfo {
     digest: String,
     signature: Option<String>,
-    fast_abi: Option<FastAbiInfo>,
+    calling_convention: Option<String>,
+    felt_layout: Option<FeltLayoutInfo>,
     abi_attributes: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct FastAbiInfo {
+struct FeltLayoutInfo {
     inputs: usize,
     outputs: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProcedureCompatibility {
+    Compatible,
+    InterfaceChanged,
+    ExecutableChanged { interface_changed: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,24 +98,55 @@ impl ProcedureInfo {
         let Self {
             digest,
             signature,
-            fast_abi,
+            calling_convention,
+            felt_layout,
             abi_attributes,
         } = self;
         format!(
-            "procedure digest={digest}, signature={}, fast_abi={}, abi_attributes={}",
+            "procedure digest={digest}, signature={}, callconv={}, felt_layout={}, abi_attributes={}",
             signature.as_deref().unwrap_or("None"),
-            fast_abi
+            calling_convention.as_deref().unwrap_or("None"),
+            felt_layout
                 .as_ref()
-                .map(FastAbiInfo::describe)
+                .map(FeltLayoutInfo::describe)
                 .unwrap_or_else(|| "None".to_string()),
             format_attributes(abi_attributes),
         )
     }
+
+    fn interface_description(&self) -> String {
+        format!(
+            "signature={}, callconv={}, layout={}",
+            self.signature.as_deref().unwrap_or("None"),
+            self.calling_convention.as_deref().unwrap_or("None"),
+            self.felt_layout
+                .as_ref()
+                .map(FeltLayoutInfo::describe)
+                .unwrap_or_else(|| "unknown".to_string()),
+        )
+    }
 }
 
-impl FastAbiInfo {
+impl FeltLayoutInfo {
     fn describe(&self) -> String {
         format!("{} input felts, {} output felts", self.inputs, self.outputs)
+    }
+}
+
+fn classify_procedure_compatibility(
+    previous: &ProcedureInfo,
+    current: &ProcedureInfo,
+) -> ProcedureCompatibility {
+    let interface_changed = previous.calling_convention != current.calling_convention
+        || previous.signature.as_deref().map(canonicalize_type_string)
+            != current.signature.as_deref().map(canonicalize_type_string);
+
+    match (previous.digest == current.digest, interface_changed) {
+        (true, false) => ProcedureCompatibility::Compatible,
+        (true, true) => ProcedureCompatibility::InterfaceChanged,
+        (false, interface_changed) => {
+            ProcedureCompatibility::ExecutableChanged { interface_changed }
+        },
     }
 }
 
@@ -230,7 +271,7 @@ fn compare_compatibility(
 ) -> Result<(), String> {
     let release_check = check == Check::All;
     let checks = match check {
-        Check::All => vec![Check::Executable, Check::FastAbi, Check::Source, Check::Package],
+        Check::All => vec![Check::Executable, Check::Source, Check::Package],
         selected => vec![selected],
     };
     let mut failed = Vec::new();
@@ -249,6 +290,7 @@ fn compare_compatibility(
                 } else {
                     Diagnostic::Error
                 },
+                !release_check,
             ),
             Check::Package => compare_package(previous, current),
             Check::All => unreachable!("all expands to individual checks"),
@@ -279,14 +321,33 @@ fn compare_executable(previous: &Exports, current: &Exports) -> Result<(), Strin
         };
         checked += 1;
         match current.get(name) {
-            Some(ExportInfo::Procedure(current_procedure))
-                if previous_procedure.digest == current_procedure.digest => {},
             Some(ExportInfo::Procedure(current_procedure)) => {
-                println!(
-                    "::error::executable digest changed for {name}: previous={}, current={}",
-                    previous_procedure.digest, current_procedure.digest,
-                );
-                status = Err("executable exports changed".to_string());
+                match classify_procedure_compatibility(previous_procedure, current_procedure) {
+                    ProcedureCompatibility::Compatible => {},
+                    ProcedureCompatibility::InterfaceChanged => {
+                        println!(
+                            "::warning::procedure interface changed for {name} without an executable change; source callers may need updates: previous={}, current={}",
+                            previous_procedure.interface_description(),
+                            current_procedure.interface_description(),
+                        );
+                    },
+                    ProcedureCompatibility::ExecutableChanged { interface_changed } => {
+                        println!(
+                            "::error::procedure executable changed for {name}: MAST root previous={}, current={}; interface={}",
+                            previous_procedure.digest,
+                            current_procedure.digest,
+                            if interface_changed { "changed" } else { "unchanged" },
+                        );
+                        if interface_changed {
+                            println!(
+                                "::error::procedure interface also changed for {name}: previous={}, current={}",
+                                previous_procedure.interface_description(),
+                                current_procedure.interface_description(),
+                            );
+                        }
+                        status = Err("executable exports changed".to_string());
+                    },
+                }
             },
             Some(current_export) => {
                 println!(
@@ -313,18 +374,22 @@ fn compare_fast_abi(previous: &Exports, current: &Exports) -> Result<(), String>
         let ExportInfo::Procedure(previous_procedure) = previous_export else {
             continue;
         };
-        let Some(previous_abi) = &previous_procedure.fast_abi else {
+        if previous_procedure.calling_convention.as_deref() != Some("fast") {
+            continue;
+        }
+        let Some(previous_abi) = &previous_procedure.felt_layout else {
             continue;
         };
         checked += 1;
         match current.get(name) {
             Some(ExportInfo::Procedure(current_procedure))
-                if current_procedure.fast_abi.as_ref() == Some(previous_abi) => {},
+                if current_procedure.calling_convention.as_deref() == Some("fast")
+                    && current_procedure.felt_layout.as_ref() == Some(previous_abi) => {},
             Some(ExportInfo::Procedure(current_procedure)) => {
                 let current_abi = current_procedure
-                    .fast_abi
+                    .felt_layout
                     .as_ref()
-                    .map(FastAbiInfo::describe)
+                    .map(FeltLayoutInfo::describe)
                     .unwrap_or_else(|| "not Fast".to_string());
                 println!(
                     "::error::Fast ABI changed for {name}: previous={}, current={current_abi}",
@@ -346,6 +411,7 @@ fn compare_source(
     previous: &Exports,
     current: &Exports,
     diagnostic: Diagnostic,
+    report_interfaces: bool,
 ) -> Result<(), String> {
     let mut status = Ok(());
     let mut added = 0usize;
@@ -356,7 +422,13 @@ fn compare_source(
             (Some(previous_export), Some(current_export)) if previous_export == current_export => {
             },
             (Some(ExportInfo::Procedure(previous)), Some(ExportInfo::Procedure(current))) => {
-                if compare_source_procedure(&name, previous, current, diagnostic) {
+                if compare_source_procedure(
+                    &name,
+                    previous,
+                    current,
+                    diagnostic,
+                    report_interfaces,
+                ) {
                     status = Err("source exports changed".to_string());
                 }
             },
@@ -405,10 +477,12 @@ fn compare_source_procedure(
     previous: &ProcedureInfo,
     current: &ProcedureInfo,
     diagnostic: Diagnostic,
+    report_interface: bool,
 ) -> bool {
     let mut changed = false;
 
-    if previous.signature.is_some()
+    if report_interface
+        && previous.signature.is_some()
         && canonicalize_type_string(previous.signature.as_deref().unwrap_or(""))
             != canonicalize_type_string(current.signature.as_deref().unwrap_or(""))
     {
@@ -417,6 +491,19 @@ fn compare_source_procedure(
             diagnostic.annotation(),
             previous.signature.as_deref().unwrap_or("None"),
             current.signature.as_deref().unwrap_or("None"),
+        );
+        changed = true;
+    }
+
+    if report_interface
+        && previous.calling_convention.is_some()
+        && previous.calling_convention != current.calling_convention
+    {
+        println!(
+            "::{}::source calling convention changed for {name}: previous={}, current={}",
+            diagnostic.annotation(),
+            previous.calling_convention.as_deref().unwrap_or("None"),
+            current.calling_convention.as_deref().unwrap_or("None"),
         );
         changed = true;
     }
@@ -671,7 +758,8 @@ mod tests {
         ExportInfo::Procedure(ProcedureInfo {
             digest: digest.to_string(),
             signature: None,
-            fast_abi: None,
+            calling_convention: None,
+            felt_layout: None,
             abi_attributes: BTreeMap::new(),
         })
     }
@@ -695,25 +783,81 @@ mod tests {
         assert!(compare_compatibility(Check::All, &previous, &current).is_err());
     }
 
+    fn procedure_info(digest: &str, signature: &str, callconv: &str) -> ProcedureInfo {
+        ProcedureInfo {
+            digest: digest.to_string(),
+            signature: Some(signature.to_string()),
+            calling_convention: Some(callconv.to_string()),
+            felt_layout: Some(FeltLayoutInfo { inputs: 1, outputs: 1 }),
+            abi_attributes: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn procedure_compatibility_accepts_unchanged_root_and_interface() {
+        let previous = procedure_info("0x01", "extern \"fast\" fn(u32) -> u32", "fast");
+        let current = previous.clone();
+
+        assert_eq!(
+            classify_procedure_compatibility(&previous, &current),
+            ProcedureCompatibility::Compatible
+        );
+    }
+
+    #[test]
+    fn procedure_compatibility_warns_for_interface_only_change() {
+        let previous = procedure_info("0x01", "extern \"fast\" fn(u32) -> u32", "fast");
+        let current = procedure_info("0x01", "extern \"fast\" fn(u64) -> u32", "fast");
+
+        assert_eq!(
+            classify_procedure_compatibility(&previous, &current),
+            ProcedureCompatibility::InterfaceChanged
+        );
+    }
+
+    #[test]
+    fn procedure_compatibility_rejects_root_only_change() {
+        let previous = procedure_info("0x01", "extern \"fast\" fn(u32) -> u32", "fast");
+        let current = procedure_info("0x02", "extern \"fast\" fn(u32) -> u32", "fast");
+
+        assert_eq!(
+            classify_procedure_compatibility(&previous, &current),
+            ProcedureCompatibility::ExecutableChanged { interface_changed: false }
+        );
+    }
+
+    #[test]
+    fn procedure_compatibility_rejects_and_reports_combined_change() {
+        let previous = procedure_info("0x01", "extern \"fast\" fn(u32) -> u32", "fast");
+        let current = procedure_info("0x02", "extern \"wasm\" fn(u32) -> u32", "wasm");
+
+        assert_eq!(
+            classify_procedure_compatibility(&previous, &current),
+            ProcedureCompatibility::ExecutableChanged { interface_changed: true }
+        );
+    }
+
     #[test]
     fn fast_abi_compares_total_felt_widths() {
         let old = ProcedureInfo {
             digest: "0x01".to_string(),
             signature: Some("extern \"fast\" fn(u32, u32)".to_string()),
-            fast_abi: Some(FastAbiInfo { inputs: 2, outputs: 0 }),
+            calling_convention: Some("fast".to_string()),
+            felt_layout: Some(FeltLayoutInfo { inputs: 2, outputs: 0 }),
             abi_attributes: BTreeMap::new(),
         };
         let new = ProcedureInfo {
             digest: "0x01".to_string(),
             signature: Some("extern \"fast\" fn(struct pair {u32, u32})".to_string()),
-            fast_abi: Some(FastAbiInfo { inputs: 2, outputs: 0 }),
+            calling_convention: Some("fast".to_string()),
+            felt_layout: Some(FeltLayoutInfo { inputs: 2, outputs: 0 }),
             abi_attributes: BTreeMap::new(),
         };
         let previous = Exports::from([("p".to_string(), ExportInfo::Procedure(old))]);
         let current = Exports::from([("p".to_string(), ExportInfo::Procedure(new))]);
 
         assert_eq!(compare_fast_abi(&previous, &current), Ok(()));
-        assert!(compare_source(&previous, &current, Diagnostic::Error).is_err());
+        assert!(compare_source(&previous, &current, Diagnostic::Error, true).is_err());
     }
 
     #[test]
@@ -721,13 +865,15 @@ mod tests {
         let old = ProcedureInfo {
             digest: "0x01".to_string(),
             signature: Some("extern \"fast\" fn(u32, u32)".to_string()),
-            fast_abi: Some(FastAbiInfo { inputs: 2, outputs: 0 }),
+            calling_convention: Some("fast".to_string()),
+            felt_layout: Some(FeltLayoutInfo { inputs: 2, outputs: 0 }),
             abi_attributes: BTreeMap::new(),
         };
         let new = ProcedureInfo {
             digest: "0x01".to_string(),
             signature: Some("extern \"fast\" fn(struct pair {u32, u32})".to_string()),
-            fast_abi: Some(FastAbiInfo { inputs: 2, outputs: 0 }),
+            calling_convention: Some("fast".to_string()),
+            felt_layout: Some(FeltLayoutInfo { inputs: 2, outputs: 0 }),
             abi_attributes: BTreeMap::new(),
         };
         let previous =
@@ -909,15 +1055,17 @@ mod current {
                     ExportInfo::Procedure(ProcedureInfo {
                         digest: procedure.digest.to_string(),
                         signature: procedure.signature.as_ref().map(PrettyPrint::to_pretty_string),
-                        fast_abi: procedure.signature.as_ref().and_then(|signature| {
-                            (signature.abi.to_string() == "fast").then(|| FastAbiInfo {
-                                inputs: signature.params.iter().map(|ty| ty.size_in_felts()).sum(),
-                                outputs: signature
-                                    .results
-                                    .iter()
-                                    .map(|ty| ty.size_in_felts())
-                                    .sum(),
-                            })
+                        calling_convention: procedure
+                            .signature
+                            .as_ref()
+                            .map(|signature| signature.abi.to_string()),
+                        felt_layout: procedure.signature.as_ref().map(|signature| FeltLayoutInfo {
+                            inputs: signature.params.iter().map(|ty| ty.size_in_felts()).sum(),
+                            outputs: signature
+                                .results
+                                .iter()
+                                .map(|ty| ty.size_in_felts())
+                                .sum(),
                         }),
                         abi_attributes: procedure
                             .attributes
@@ -983,15 +1131,17 @@ mod previous {
                     ExportInfo::Procedure(ProcedureInfo {
                         digest: procedure.digest.to_string(),
                         signature: procedure.signature.as_ref().map(PrettyPrint::to_pretty_string),
-                        fast_abi: procedure.signature.as_ref().and_then(|signature| {
-                            (signature.abi.to_string() == "fast").then(|| FastAbiInfo {
-                                inputs: signature.params.iter().map(|ty| ty.size_in_felts()).sum(),
-                                outputs: signature
-                                    .results
-                                    .iter()
-                                    .map(|ty| ty.size_in_felts())
-                                    .sum(),
-                            })
+                        calling_convention: procedure
+                            .signature
+                            .as_ref()
+                            .map(|signature| signature.abi.to_string()),
+                        felt_layout: procedure.signature.as_ref().map(|signature| FeltLayoutInfo {
+                            inputs: signature.params.iter().map(|ty| ty.size_in_felts()).sum(),
+                            outputs: signature
+                                .results
+                                .iter()
+                                .map(|ty| ty.size_in_felts())
+                                .sum(),
                         }),
                         abi_attributes: procedure
                             .attributes
