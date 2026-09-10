@@ -1,8 +1,6 @@
 use alloc::vec::Vec;
-use core::ops::Range;
 
 use miden_core::Felt;
-use miden_processor::ProcessorState;
 
 pub mod aead_eidos;
 pub mod debug;

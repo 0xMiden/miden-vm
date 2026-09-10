@@ -199,11 +199,17 @@ impl CoreLibrary {
             ),
             (
                 AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
-                Arc::new(handle_aead_eidos_decrypt_empty_ad),
+                miden_processor::event::legacy_handler(handle_aead_eidos_decrypt_empty_ad),
             ),
-            (ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, Arc::new(handle_ecdsa_k256_keccak_recover)),
+            (
+                ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,
+                miden_processor::event::legacy_handler(handle_ecdsa_k256_keccak_recover),
+            ),
+            (
+                KECCAK256_DIGEST_EVENT_NAME,
+                miden_processor::event::legacy_handler(handle_keccak256_digest),
+            ),
             (ECDSA_P256_SHA256_RECOVER_EVENT_NAME, Arc::new(handle_ecdsa_p256_sha256_recover)),
-            (KECCAK256_DIGEST_EVENT_NAME, Arc::new(handle_keccak256_digest)),
             (SHA512_DIGEST_EVENT_NAME, Arc::new(handle_sha512_digest)),
             (SHA256_DIGEST_EVENT_NAME, Arc::new(handle_sha256_digest)),
             (ED25519_DECOMPRESS_EVENT_NAME, Arc::new(handle_ed25519_decompress)),
