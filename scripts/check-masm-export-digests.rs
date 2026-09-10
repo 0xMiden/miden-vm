@@ -28,8 +28,8 @@ use std::{
 // alongside the affected procedure. Fast ABI compatibility protects the number of input and
 // output felts consumed by previously published Fast procedures when selected explicitly. Source
 // compatibility reports changes to published nominal signatures, calling conventions, exported
-// types, and source attributes. It is advisory during a release because a patch may preserve the
-// Fast ABI without preserving source syntax.
+// types, and source attributes. It is advisory during a release when executable MAST roots remain
+// stable.
 // Package compatibility prevents one semantic version from identifying two dependency commitments
 // and reports when old serialized dependents require the previous package to remain archived.
 
@@ -326,25 +326,27 @@ fn compare_executable(previous: &Exports, current: &Exports) -> Result<(), Strin
                     ProcedureCompatibility::Compatible => {},
                     ProcedureCompatibility::InterfaceChanged => {
                         println!(
-                            "::warning::procedure interface changed for {name} without an executable change; source callers may need updates: previous={}, current={}",
+                            "::warning::procedure interface changed for {name} with unchanged MAST root {}; source callers may need updates: previous={}, current={}",
+                            previous_procedure.digest,
                             previous_procedure.interface_description(),
                             current_procedure.interface_description(),
                         );
                     },
-                    ProcedureCompatibility::ExecutableChanged { interface_changed } => {
+                    ProcedureCompatibility::ExecutableChanged { interface_changed: false } => {
                         println!(
-                            "::error::procedure executable changed for {name}: MAST root previous={}, current={}; interface={}",
+                            "::error::procedure executable changed for {name}: MAST root previous={}, current={}; interface unchanged",
+                            previous_procedure.digest, current_procedure.digest,
+                        );
+                        status = Err("executable exports changed".to_string());
+                    },
+                    ProcedureCompatibility::ExecutableChanged { interface_changed: true } => {
+                        println!(
+                            "::error::procedure executable and interface changed for {name}: MAST root previous={}, current={}; interface previous={}, current={}",
                             previous_procedure.digest,
                             current_procedure.digest,
-                            if interface_changed { "changed" } else { "unchanged" },
+                            previous_procedure.interface_description(),
+                            current_procedure.interface_description(),
                         );
-                        if interface_changed {
-                            println!(
-                                "::error::procedure interface also changed for {name}: previous={}, current={}",
-                                previous_procedure.interface_description(),
-                                current_procedure.interface_description(),
-                            );
-                        }
                         status = Err("executable exports changed".to_string());
                     },
                 }
@@ -363,7 +365,7 @@ fn compare_executable(previous: &Exports, current: &Exports) -> Result<(), Strin
             },
         }
     }
-    println!("checked {checked} previously published procedure digests");
+    println!("checked {checked} previously published procedure roots and interfaces");
     status
 }
 
@@ -386,13 +388,15 @@ fn compare_fast_abi(previous: &Exports, current: &Exports) -> Result<(), String>
                 if current_procedure.calling_convention.as_deref() == Some("fast")
                     && current_procedure.felt_layout.as_ref() == Some(previous_abi) => {},
             Some(ExportInfo::Procedure(current_procedure)) => {
-                let current_abi = current_procedure
+                let current_calling_convention =
+                    current_procedure.calling_convention.as_deref().unwrap_or("None");
+                let current_layout = current_procedure
                     .felt_layout
                     .as_ref()
                     .map(FeltLayoutInfo::describe)
-                    .unwrap_or_else(|| "not Fast".to_string());
+                    .unwrap_or_else(|| "unknown".to_string());
                 println!(
-                    "::error::Fast ABI changed for {name}: previous={}, current={current_abi}",
+                    "::error::Fast ABI changed for {name}: previous=callconv=fast, layout={}; current=callconv={current_calling_convention}, layout={current_layout}",
                     previous_abi.describe(),
                 );
                 status = Err("Fast ABI changed".to_string());
@@ -422,13 +426,8 @@ fn compare_source(
             (Some(previous_export), Some(current_export)) if previous_export == current_export => {
             },
             (Some(ExportInfo::Procedure(previous)), Some(ExportInfo::Procedure(current))) => {
-                if compare_source_procedure(
-                    &name,
-                    previous,
-                    current,
-                    diagnostic,
-                    report_interfaces,
-                ) {
+                if compare_source_procedure(&name, previous, current, diagnostic, report_interfaces)
+                {
                     status = Err("source exports changed".to_string());
                 }
             },
@@ -886,6 +885,20 @@ mod tests {
     }
 
     #[test]
+    fn release_allows_fast_layout_change_without_root_change() {
+        let old = procedure_info("0x01", "extern \"fast\" fn(u32) -> u32", "fast");
+        let mut new = procedure_info("0x01", "extern \"fast\" fn(u32, u32) -> u32", "fast");
+        new.felt_layout = Some(FeltLayoutInfo { inputs: 2, outputs: 1 });
+        let previous =
+            PackageInfo::for_test(Exports::from([("p".to_string(), ExportInfo::Procedure(old))]));
+        let current =
+            PackageInfo::for_test(Exports::from([("p".to_string(), ExportInfo::Procedure(new))]));
+
+        assert_eq!(compare_compatibility(Check::All, &previous, &current), Ok(()));
+        assert!(compare_compatibility(Check::FastAbi, &previous, &current).is_err());
+    }
+
+    #[test]
     fn package_change_requires_a_new_version() {
         let previous = PackageInfo::for_test(Exports::new());
         let mut current = previous.clone();
@@ -1061,11 +1074,7 @@ mod current {
                             .map(|signature| signature.abi.to_string()),
                         felt_layout: procedure.signature.as_ref().map(|signature| FeltLayoutInfo {
                             inputs: signature.params.iter().map(|ty| ty.size_in_felts()).sum(),
-                            outputs: signature
-                                .results
-                                .iter()
-                                .map(|ty| ty.size_in_felts())
-                                .sum(),
+                            outputs: signature.results.iter().map(|ty| ty.size_in_felts()).sum(),
                         }),
                         abi_attributes: procedure
                             .attributes
@@ -1137,11 +1146,7 @@ mod previous {
                             .map(|signature| signature.abi.to_string()),
                         felt_layout: procedure.signature.as_ref().map(|signature| FeltLayoutInfo {
                             inputs: signature.params.iter().map(|ty| ty.size_in_felts()).sum(),
-                            outputs: signature
-                                .results
-                                .iter()
-                                .map(|ty| ty.size_in_felts())
-                                .sum(),
+                            outputs: signature.results.iter().map(|ty| ty.size_in_felts()).sum(),
                         }),
                         abi_attributes: procedure
                             .attributes
