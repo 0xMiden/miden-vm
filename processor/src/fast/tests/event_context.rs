@@ -192,6 +192,7 @@ fn dispatch_applies_advice_mutations_all_or_nothing() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback coverage or independent raw inspection.
 fn legacy_bridge_discards_child_writes_when_the_host_catches_failure() {
     use crate::{
         ProcessorState,

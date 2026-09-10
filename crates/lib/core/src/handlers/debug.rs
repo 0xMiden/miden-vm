@@ -318,30 +318,39 @@ fn format_felt_slice(values: &[Felt]) -> String {
 }
 
 /// Legacy event-only handler list; use `default_debug_event_handlers` for unified delivery.
+#[allow(deprecated)] // Legacy facade.
+#[deprecated(note = "use default_debug_event_handlers for unified event and trace delivery")]
 pub fn default_debug_handlers()
 -> Vec<(EventName, alloc::sync::Arc<dyn miden_processor::event::EventHandler>)> {
     super::legacy_handlers(default_debug_event_handlers())
 }
 
 /// Legacy event-only handler list; use `noop_debug_event_handlers` for unified delivery.
+#[allow(deprecated)] // Legacy facade.
+#[deprecated(note = "use noop_debug_event_handlers for unified event and trace delivery")]
 pub fn noop_debug_handlers()
 -> Vec<(EventName, alloc::sync::Arc<dyn miden_processor::event::EventHandler>)> {
     super::legacy_handlers(noop_debug_event_handlers())
 }
 
 /// Legacy event-only handler list; use `debug_event_handlers` for unified delivery.
+#[allow(deprecated)] // Legacy facade.
+#[deprecated(note = "use debug_event_handlers for unified event and trace delivery")]
 pub fn debug_handlers()
 -> Vec<(EventName, alloc::sync::Arc<dyn miden_processor::event::EventHandler>)> {
     super::legacy_handlers(debug_event_handlers())
 }
 
 /// Legacy event-only handler list; use `advice_debug_event_handlers` for unified delivery.
+#[allow(deprecated)] // Legacy facade.
+#[deprecated(note = "use advice_debug_event_handlers for unified event and trace delivery")]
 pub fn advice_debug_handlers()
 -> Vec<(EventName, alloc::sync::Arc<dyn miden_processor::event::EventHandler>)> {
     super::legacy_handlers(advice_debug_event_handlers())
 }
 
 // Preserve DebugPrinter's actual base trait implementation without duplicating its rendering.
+#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
 impl<W: fmt::Write + Send + Sync + 'static> miden_processor::event::EventHandler
     for DebugPrinter<W>
 {

@@ -11,6 +11,7 @@ use miden_core::{
 };
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_event_handler::{AdviceRecorder, EventContext, InvocationKind};
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 use miden_processor::{
     DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
@@ -361,6 +362,7 @@ fn test_mod_12289_larger_value() {
 #[case(0, 12_290)]
 #[case(1, 1)]
 #[case(0xffff_ffff, 0xffff_fffe)]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo: u64) {
     const FALCON_DIV: EventName =
         EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
@@ -371,6 +373,7 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
     // Malicious event handler that always returns remainder = 0.
     // Signature matches the event-handler callback contract.
     #[allow(clippy::unnecessary_wraps)]
+    #[allow(deprecated)] // Adversarial legacy handler fixture.
     fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         let a_hi = process.get_stack_item(1).as_canonical_u64();
         let a_lo = process.get_stack_item(2).as_canonical_u64();
@@ -418,6 +421,7 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn test_mod_12289_rejects_forged_addition_overflow() {
     const FALCON_DIV: EventName =
         EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
@@ -429,6 +433,7 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
 
     // Malicious event handler that forges q/r to trigger the addition-overflow assertion.
     #[allow(clippy::unnecessary_wraps)]
+    #[allow(deprecated)] // Adversarial legacy handler fixture.
     fn malicious_falcon_div(_process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         let q_hi = Felt::new_unchecked(FORGED_Q >> 32);
         let q_lo = Felt::new_unchecked(FORGED_Q & 0xffff_ffff);
@@ -466,11 +471,13 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn test_mod_12289_rejects_non_u32_remainder_advice() {
     const FALCON_DIV: EventName =
         EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
 
     #[allow(clippy::unnecessary_wraps)]
+    #[allow(deprecated)] // Adversarial legacy handler fixture.
     fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         let a_hi = process.get_stack_item(1).as_canonical_u64();
         let a_lo = process.get_stack_item(2).as_canonical_u64();
@@ -570,6 +577,7 @@ fn generate_test(
     (source, op_stack, adv_stack, store, advice_map)
 }
 
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn advice_stack_mutation(values: impl IntoIterator<Item = Felt>) -> AdviceMutation {
     let mut advice_stack = AdviceStack::new();
     advice_stack.append_elements(values);

@@ -544,6 +544,7 @@ fn dynexec_with_procref() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn simple_dyncall() {
     let program_source = "
         proc foo
@@ -658,6 +659,7 @@ fn dyncall_with_syscall_and_caller() {
 // ================================================================================================
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn procref() -> Result<(), Report> {
     let module_source = "
     namespace test::foo

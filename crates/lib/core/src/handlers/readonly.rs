@@ -44,6 +44,8 @@ pub fn readonly_noop_event_handlers() -> Vec<(EventName, registration::EventHand
 }
 
 /// Legacy event-only handler list; use `readonly_noop_event_handlers` for unified delivery.
+#[allow(deprecated)] // Legacy facade.
+#[deprecated(note = "use readonly_noop_event_handlers for unified event and trace delivery")]
 pub fn readonly_noop_handlers()
 -> Vec<(EventName, alloc::sync::Arc<dyn miden_processor::event::EventHandler>)> {
     super::legacy_handlers(readonly_noop_event_handlers())

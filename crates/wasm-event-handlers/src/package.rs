@@ -8,6 +8,7 @@ use miden_mast_package::{
     EventHandlerManifestEntry, EventHandlerSection, EventHandlerSectionError, MAX_HANDLERS,
     MAX_MODULE_BYTES, MAX_NAME_BYTES, Package,
 };
+#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
 use miden_processor::{
     HostLibrary,
     event::{EventHandler, EventName, legacy_handler, registration},
@@ -46,6 +47,8 @@ pub fn event_handlers_from_package(
 ///
 /// # Errors
 /// Same failure conditions as [`event_handlers_from_package`].
+#[allow(deprecated)] // Legacy facade.
+#[deprecated(note = "use portable event_handlers and load_library_with_event_handlers")]
 pub fn handlers_from_package(
     package: &Package,
     limits: WasmHandlerLimits,
@@ -67,6 +70,8 @@ pub fn handlers_from_package(
 ///
 /// # Errors
 /// Same failure conditions as [`handlers_from_package`].
+#[allow(deprecated)] // Legacy facade.
+#[deprecated(note = "use portable event_handlers and load_library_with_event_handlers")]
 pub fn host_library_from_package(
     package: &Arc<Package>,
     limits: WasmHandlerLimits,

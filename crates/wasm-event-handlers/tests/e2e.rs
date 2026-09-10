@@ -1,6 +1,9 @@
 //! End-to-end test: a MASM program emits a custom event, the Wasm handler shipped inside the
 //! package answers through the advice stack, and the program verifies the answer in-VM.
 
+// Retain packaged legacy factory coverage alongside explicit portable package loading.
+#![allow(deprecated)]
+
 use std::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager};

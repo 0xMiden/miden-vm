@@ -6,6 +6,7 @@ use miden_crypto::aead::{
     DataType,
     aead_poseidon2::{AuthTag, EncryptedData, Nonce, SecretKey},
 };
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 use miden_processor::{
     ProcessorState,
     advice::{AdviceMutation, AdviceStack},
@@ -150,6 +151,7 @@ fn test_decrypt_documented_stack_contract() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn test_decrypt_rejects_tampered_final_tag() {
     let seed = [14_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
@@ -393,6 +395,7 @@ fn test_decrypt_with_known_values() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn test_decrypt_rejects_adversarial_plaintext_for_unrelated_ciphertext() {
     let seed = [5_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
@@ -483,6 +486,7 @@ fn test_decrypt_rejects_adversarial_plaintext_for_unrelated_ciphertext() {
     expect_assert_error_code_from_msg!(test, "AEAD ciphertext mismatch");
 }
 
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn advice_stack_mutation(values: Vec<Felt>) -> AdviceMutation {
     let mut advice_stack = AdviceStack::new();
     advice_stack.append_elements(values);

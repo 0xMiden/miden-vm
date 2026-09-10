@@ -306,6 +306,8 @@ impl WasmHandlerModule {
     /// Returns the legacy event-only registrations, preserving the original list type.
     ///
     /// Use [`Self::event_handlers`] for unified event and trace delivery.
+    #[allow(deprecated)] // Legacy facade.
+    #[deprecated(note = "use portable event_handlers and load_library_with_event_handlers")]
     pub fn handlers(
         self: &Arc<Self>,
     ) -> Vec<(EventName, Arc<dyn miden_processor::event::EventHandler>)> {

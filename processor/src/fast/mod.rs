@@ -25,6 +25,7 @@ use miden_mast_package::{
     debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
 
+#[allow(deprecated)] // Raw inspection and the legacy callback bridge.
 use crate::{
     AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, LoadedMastForest,
     MemoryAddress, ProcessorState,
@@ -517,6 +518,7 @@ impl FastProcessor {
 
     /// Returns the raw read-only processor inspection view.
     #[inline(always)]
+    #[allow(deprecated)] // No fake invocation for independent inspection.
     pub fn state(&self) -> ProcessorState<'_> {
         ProcessorState { processor: self }
     }

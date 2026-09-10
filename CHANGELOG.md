@@ -19,6 +19,15 @@
 - [BREAKING] Handler registration now rejects the whole reserved `sys::` event-name prefix and empty event names, not only the known system-event names ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 - Added project-assembler support for Wasm event handlers: `miden-assembly` gains a generic package post-processor mechanism (`PackagePostProcessor`, `PostProcessContext`, `ProjectAssembler::with_package_post_processor`), and the new `miden-wasm-event-handlers-project` crate plugs into it. The plugin reads `[package.metadata.midenc.event-handlers]` from `miden-project.toml` (`crate =` builds a Rust guest crate, `module =` reads a prebuilt module), validates the module with the default `WasmHandlerLimits`, and embeds the `event_handlers` section into every package of the project under assembly (never into source dependencies) ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 
+#### Changes
+
+- Deprecated raw-state processor handler, registry, mutation, and callback APIs while preserving
+  their compatibility paths. See the [migration guide](docs/src/user_docs/event_handler_migration.md)
+  for concrete handler changes and retained APIs ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
+- Wasm ABI revision 2 adds invocation kind while retaining the v1 namespace and revision-1 modules.
+  Inverse witnesses carry explicit operands while retaining their deferred assertion binding
+  ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
+
 #### Fixes
 
 - Zero-extend Hqword system-hash payloads at logical operand-stack depth ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).

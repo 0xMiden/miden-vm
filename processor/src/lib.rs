@@ -80,6 +80,7 @@ pub use trace::{ExecutionWitness, PrecompileWitness, VmWitness};
 pub mod advice {
     pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStack};
 
+    #[allow(deprecated)] // Preserve the original public import paths.
     pub use super::host::{
         AdviceMutation,
         advice::{AdviceError, AdviceProvider},
@@ -89,6 +90,7 @@ pub mod advice {
 pub mod event {
     pub use miden_core::events::*;
 
+    #[allow(deprecated)] // Preserve the original public import paths.
     pub use crate::host::handlers::{
         EventError, EventHandler, EventHandlerRegistry, HandlerRegistry, NoopEventHandler,
         TraceError, TraceHandler, TraceHandlerRegistry, invoke_legacy_handler, legacy_handler,
@@ -112,10 +114,15 @@ pub mod trace;
 /// This struct provides read access to the processor's state, including the stack, memory,
 /// advice provider, and execution context information.
 #[derive(Debug)]
+#[deprecated(
+    note = "event callbacks use miden_event_handler::EventContext; raw inspection remains available during migration"
+)]
 pub struct ProcessorState<'a> {
     processor: &'a FastProcessor,
 }
 
+// Independent processor inspection and the legacy callback bridge still need raw state.
+#[allow(deprecated)]
 impl<'a> ProcessorState<'a> {
     /// Returns a reference to the advice provider.
     #[inline(always)]

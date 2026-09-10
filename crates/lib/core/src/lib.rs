@@ -16,6 +16,7 @@ use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_core::{Word, events::EventName, mast::MastForest};
 use miden_mast_package::Package;
+#[allow(deprecated)] // Original library conversion and event-only list.
 use miden_processor::{
     HostLibrary,
     event::{EventHandler, registration},
@@ -112,6 +113,7 @@ pub struct CoreLibrary {
     package: Arc<Package>,
 }
 
+#[allow(deprecated)]
 impl From<&CoreLibrary> for HostLibrary {
     fn from(core_lib: &CoreLibrary) -> Self {
         Self {
@@ -204,6 +206,8 @@ impl CoreLibrary {
     /// Returns event-only adapters with the original processor handler signature.
     /// Use [`Self::event_handlers`] and `DefaultHost::load_library_with_event_handlers` for unified
     /// emit and trace delivery.
+    #[allow(deprecated)] // Legacy facade.
+    #[deprecated(note = "use event_handlers and DefaultHost::load_library_with_event_handlers")]
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         handlers::legacy_handlers(self.event_handlers())
     }

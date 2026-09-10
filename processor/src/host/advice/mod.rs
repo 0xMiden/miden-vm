@@ -18,6 +18,7 @@ mod errors;
 pub use errors::AdviceError;
 use miden_event_handler::AdviceBatch;
 
+#[allow(deprecated)] // apply_mutations is the compatibility adapter.
 use crate::{ExecutionOptions, host::AdviceMutation, processor::AdviceProviderInterface};
 
 // CONSTANTS
@@ -164,15 +165,14 @@ impl AdviceProvider {
     }
 
     /// Applies legacy mutations through the same whole-batch validation as portable callbacks.
+    #[deprecated(note = "use apply_batch with miden_event_handler::AdviceBatch")]
+    #[allow(deprecated)] // Legacy mutation conversion.
     pub fn apply_mutations(
         &mut self,
         mutations: impl IntoIterator<Item = AdviceMutation>,
     ) -> Result<(), AdviceError> {
         let mut batch = AdviceBatch::new();
-        crate::host::handlers::record_mutations(
-            &mut batch.recorder(),
-            mutations.into_iter().collect(),
-        );
+        crate::host::handlers::record_mutations(&mut batch.recorder(), mutations);
         self.apply_batch(batch)
     }
 
@@ -688,11 +688,14 @@ impl AdviceProvider {
 
     /// Extends the contents of this instance with the contents of an `AdviceInputs`.
     pub fn extend_from_inputs(&mut self, inputs: &AdviceInputs) -> Result<(), AdviceError> {
-        self.apply_mutations([
-            AdviceMutation::extend_advice_stack(inputs.stack()),
-            AdviceMutation::extend_merkle_store(inputs.store().inner_nodes()),
-            AdviceMutation::extend_map(inputs.map().clone()),
-        ])
+        let mut batch = AdviceBatch::new();
+        let mut advice = batch.recorder();
+        advice.prepend_stack(inputs.stack().into_elements());
+        for (key, values) in inputs.map().iter() {
+            advice.insert_map_entry(*key, values.clone());
+        }
+        advice.extend_merkle_store(inputs.store().inner_nodes());
+        self.apply_batch(batch)
     }
 
     /// Consumes `self` and return its parts (stack, map, store).
@@ -745,6 +748,7 @@ impl AdviceProviderInterface for AdviceProvider {
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // Legacy mutation acceptance is intentional coverage.
 mod tests {
     use alloc::{collections::BTreeMap, vec, vec::Vec};
 
