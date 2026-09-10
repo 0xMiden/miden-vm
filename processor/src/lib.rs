@@ -94,7 +94,8 @@ pub mod event {
 
     pub use crate::host::handlers::{
         EventError, EventHandler, EventHandlerRegistry, HandlerRegistry, NoopEventHandler,
-        TraceError, TraceHandler, TraceHandlerRegistry, legacy_handler, registration,
+        TraceError, TraceHandler, TraceHandlerRegistry, invoke_legacy_handler, legacy_handler,
+        registration,
     };
 }
 

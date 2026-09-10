@@ -19,9 +19,10 @@ use miden_core_lib::{
         PRINT_STACK_EVENT_NAME, advice_debug_handlers, debug_handlers, noop_debug_handlers,
     },
 };
+use miden_event_handler::EventContextError;
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, HostLibrary,
-    MemoryError, Program, StackInputs, SyncHost,
+    Program, StackInputs, SyncHost,
     advice::{AdviceInputs, AdviceStack},
     event::{EventHandler, EventName},
 };
@@ -201,7 +202,7 @@ fn print_mem_addr_outputs_procedure_local() {
 }
 
 #[test]
-fn print_mem_addr_reports_uninitialized_cell() {
+fn print_mem_addr_reports_unwritten_cell_as_zero() {
     let source = "
     use miden::core::debug
     begin
@@ -211,12 +212,12 @@ fn print_mem_addr_reports_uninitialized_cell() {
     ";
     let out = run_and_capture(source, AdviceInputs::default());
     assert!(out.contains("Memory state"), "missing header; got:\n{out}");
-    assert!(out.contains("0x00000064: EMPTY"), "expected EMPTY cell; got:\n{out}");
+    assert!(out.contains("0x00000064: 0"), "expected zero cell; got:\n{out}");
 }
 
 #[test]
-fn print_mem_shows_uninitialized_cells_as_empty() {
-    // Every address in an explicit range is enumerated, with uninitialized cells shown as EMPTY,
+fn print_mem_shows_unwritten_cells_as_zero() {
+    // Every address in an explicit range is enumerated, with unwritten cells shown as zero,
     // so gaps in the range don't silently disappear.
     let source = "
     use miden::core::debug
@@ -228,12 +229,11 @@ fn print_mem_shows_uninitialized_cells_as_empty() {
     ";
     let out = run_and_capture(source, AdviceInputs::default());
     assert!(out.contains("0x00000064: 42"), "missing stored value; got:\n{out}");
-    // The `mem_store` initialized the whole word at addresses 100..104; the rest of the requested
-    // range is untouched and must still be listed, as EMPTY.
-    for addr in 104..110u32 {
+    // Both the unwritten neighbours in the stored word and the untouched words must read zero.
+    for addr in 101..110u32 {
         assert!(
-            out.contains(&format!("{addr:#010x}: EMPTY")),
-            "missing EMPTY cell at {addr}; got:\n{out}"
+            out.contains(&format!("{addr:#010x}: 0")),
+            "missing zero cell at {addr}; got:\n{out}"
         );
     }
 }
@@ -272,7 +272,7 @@ fn print_mem_addr_prints_max_u32_cell() {
 
 #[test]
 fn print_mem_all_includes_max_u32_cell() {
-    // Regression: `print_mem_all` lists every initialized cell, so the cell at `u32::MAX` is no
+    // Regression: `print_mem_all` lists every stored cell, so the cell at `u32::MAX` is no
     // longer silently excluded.
     let source = "
     use miden::core::debug
@@ -319,8 +319,10 @@ fn print_mem_rejects_out_of_bounds_range_end() {
         ExecutionOptions::default(),
     ) {
         Err(ExecutionError::EventError { error, .. }) => {
-            let err = error.downcast_ref::<MemoryError>().expect("expected a MemoryError");
-            assert!(matches!(err, MemoryError::AddressOutOfBounds { .. }));
+            let err = error
+                .downcast_ref::<EventContextError>()
+                .expect("expected an EventContextError");
+            assert!(matches!(err, EventContextError::AddressOutOfBounds { .. }));
         },
         Err(err) => panic!("unexpected error type: {err:?}"),
         Ok(_) => panic!("out-of-bounds print_mem range should fail"),

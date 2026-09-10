@@ -3,14 +3,8 @@
 //! This handler implements the U128_DIV operation that pushes the result of [u128] division
 //! (both the quotient and the remainder) onto the advice stack.
 
-use alloc::{vec, vec::Vec};
-
-use miden_core::{Felt, Word};
-use miden_processor::{
-    ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::{EventError, EventName},
-};
+use miden_core::{Felt, events::EventName};
+use miden_event_handler::{AdviceRecorder, EventContext, EventError, InvocationKind};
 
 /// Event name for the u128_div operation.
 pub const U128_DIV_EVENT_NAME: EventName = EventName::new("miden::core::math::u128::u128_div");
@@ -21,7 +15,7 @@ pub const U128_DIV_EVENT_NAME: EventName = EventName::new("miden::core::math::u1
 /// stack.
 ///
 /// Inputs:
-///   Operand stack: [event_id, b0, b1, b2, b3, a0, a1, a2, a3, ...]
+///   Operand stack: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
@@ -36,14 +30,18 @@ pub const U128_DIV_EVENT_NAME: EventName = EventName::new("miden::core::math::u1
 ///
 /// # Errors
 /// Returns an error if the divisor is ZERO or any limb is not a valid u32.
-pub fn handle_u128_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-    let divisor = read_u128_from_stack(process, 1, "divisor")?;
+pub fn handle_u128_div(
+    context: EventContext,
+    advice: &mut AdviceRecorder<'_>,
+) -> Result<(), EventError> {
+    context.kind().require(InvocationKind::Event)?;
+    let divisor = read_u128_from_stack(context, 0, "divisor")?;
 
     if divisor == 0 {
         return Err(U128DivError::DivideByZero.into());
     }
 
-    let dividend = read_u128_from_stack(process, 5, "dividend")?;
+    let dividend = read_u128_from_stack(context, 4, "dividend")?;
 
     let quotient = dividend / divisor;
     let remainder = dividend - quotient * divisor;
@@ -51,24 +49,21 @@ pub fn handle_u128_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, 
     let (q0, q1, q2, q3) = u128_to_u32_felts(quotient);
     let (r0, r1, r2, r3) = u128_to_u32_felts(remainder);
 
-    let mut advice_stack = AdviceStack::new();
-    // MASM consumes remainder with the first `adv_pushw` and quotient with the second one.
-    advice_stack
-        .append_word(Word::new([r0, r1, r2, r3]))
-        .append_word(Word::new([q0, q1, q2, q3]));
-    let mutation = AdviceMutation::extend_advice_stack(advice_stack);
-    Ok(vec![mutation])
+    // MASM consumes remainder before quotient, using two adv_pushw operations.
+    advice.prepend_stack([r0, r1, r2, r3, q0, q1, q2, q3]);
+    Ok(())
 }
 
 /// Reads a u128 value from 4 consecutive stack positions starting at `start`.
 fn read_u128_from_stack(
-    process: &ProcessorState,
-    start: usize,
+    context: EventContext,
+    start: u64,
     name: &'static str,
 ) -> Result<u128, EventError> {
     let mut value: u128 = 0;
-    for i in (0..4).rev() {
-        let limb = process.get_stack_item(start + i).as_canonical_u64();
+    let limbs = context.read_stack_array::<4>(start);
+    for (i, limb) in limbs.into_iter().enumerate().rev() {
+        let limb = limb.as_canonical_u64();
         if limb > u32::MAX as u64 {
             return Err(U128DivError::NotU32Value {
                 value: limb,
