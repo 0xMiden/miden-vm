@@ -1,23 +1,26 @@
 //! Host-side runner for Wasm-compiled Miden VM event handlers.
 //!
 //! A Wasm event handler is an untrusted core Wasm module that ships inside a Miden package. This
-//! crate loads such a module, validates it, and adapts each declared handler to the processor's
-//! [`EventHandler`](miden_processor::event::EventHandler) trait, so that the existing host and
-//! registry machinery runs it like a native handler.
+//! crate loads such a module, validates it, and adapts each declared handler to the portable
+//! [`EventHandler`](miden_event_handler::EventHandler) trait, so that the existing host and
+//! registry machinery runs it like a native handler. Factories return processor-owned
+//! registration handles. Additive ABI revision 2 adds an invocation-kind query.
 //!
 //! # Model
 //!
 //! - [`WasmHandlerModule::new`] parses and validates the module once: only `miden:event/v1` imports
 //!   are allowed, the module must not have a start section, every manifest export must exist with
 //!   signature `() -> ()`, and the manifest must not contain duplicate or reserved event names.
-//! - [`WasmHandlerModule::handlers`] returns one [`WasmEventHandler`] per manifest entry, ready for
-//!   registration in a host (for example through
-//!   [`DefaultHost::load_library`](miden_processor::DefaultHost)).
+//! - [`WasmHandlerModule::event_handlers`] returns one unified handler per manifest entry, ready
+//!   for [`DefaultHost::register_event_handler`](miden_processor::DefaultHost::register_event_handler).
+//!   [`WasmHandlerModule::handlers`] retains the legacy event-only registration list.
 //! - Each event call runs in a fresh store and instance: handlers are stateless across calls. The
 //!   call is metered with fuel, the linear memory is capped, and the total size of buffered advice
 //!   mutations is capped. See [`WasmHandlerLimits`].
-//! - The handler buffers mutations through host calls. The host applies them to the advice provider
-//!   only when the handler returns without a trap; a trap or a `fail` call discards them all.
+//! - The guest records advice into an isolated child batch; a trap or `fail` discards that batch,
+//!   even when the outer host catches the error. A successful call imports the child into the outer
+//!   recorder. The processor validates and applies the complete batch only after the outer callback
+//!   succeeds, and rejects any recorded advice from a successful trace.
 //!
 //! The ABI contract (data types, host functions, failure rules) lives in the
 //! `miden-event-handler-abi` crate.
@@ -47,8 +50,9 @@ pub const GUEST_RUSTFLAGS: &str = "-C target-feature=-simd128";
 
 pub use error::{WasmHandlerLoadError, WasmHandlerRunError};
 pub use module::{WasmEventHandler, WasmHandlerLimits, WasmHandlerModule};
+pub use package::{
+    event_handlers_from_package, handlers_from_package, host_library_from_package,
+    manifest_from_module, section_from_module,
+};
 #[doc(hidden)]
 pub use package::{fuzz_module_statics, fuzz_walk_sections, test_append_manifest_section};
-pub use package::{
-    handlers_from_package, host_library_from_package, manifest_from_module, section_from_module,
-};

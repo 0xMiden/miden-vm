@@ -2941,6 +2941,7 @@ dependencies = [
  "criterion",
  "miden-assembly",
  "miden-crypto",
+ "miden-event-handler",
  "miden-event-handler-abi",
  "miden-mast-package",
  "miden-processor",
