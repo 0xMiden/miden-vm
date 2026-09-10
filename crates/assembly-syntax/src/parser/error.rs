@@ -91,6 +91,7 @@ impl fmt::Display for BinErrorKind {
 // PARSING ERROR
 // ================================================================================================
 
+#[non_exhaustive]
 #[derive(Debug, Default, thiserror::Error, Diagnostic)]
 #[repr(u8)]
 pub enum ParsingError {
