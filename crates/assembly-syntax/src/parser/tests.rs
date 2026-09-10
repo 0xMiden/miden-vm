@@ -822,6 +822,39 @@ fn parser_accepts_checked_in_masm_corpus() {
 }
 
 #[test]
+#[cfg(feature = "std")]
+fn printed_core_library_modules_parse_again() {
+    use crate::debuginfo::DefaultSourceManager;
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let (root, submodules) = read_modules_from_root(
+        repo_root().join("crates/lib/core/asm/mod.masm"),
+        Some(Arc::<Path>::from(Path::new("::miden::core"))),
+        Some(ast::ModuleKind::Library),
+        source_manager.clone(),
+        true,
+    )
+    .unwrap_or_else(|error| panic!("failed to read the core library: {error:?}"));
+
+    let mut failures = Vec::new();
+    for module in core::iter::once(root).chain(submodules) {
+        let printed = module.to_string();
+        if let Err(error) = ModuleParser::new(Some(ast::ModuleKind::Library)).parse_str(
+            None,
+            &printed,
+            source_manager.clone(),
+        ) {
+            failures.push(format!("{:?}: {error:?}", module.path()));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "printed modules failed to parse again:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
 fn parse_import_accepts_unqualified_module_imports() {
     let source = test_source_file("use foo\n");
 
