@@ -71,6 +71,7 @@
 
 - Preserved the public `ParsingError` enum layout while adding protocol ABI attribute checks ([#3812](https://github.com/0xMiden/miden-vm/pull/3812)).
 - Fixed issue where parsing of pointer types dropped address space information ([#3790](https://github.com/0xMiden/miden-vm/pull/3790)).
+- Zero-extend Hqword system-hash payloads at logical operand-stack depth ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 
 ## v0.32.0 (2026-09-05)
 
@@ -83,6 +84,8 @@
 #### Features
 
 #### Fixes
+
+- Zero-extend Hqword system-hash payloads at logical operand-stack depth ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 - Fixed stack overflow in the precompile prover's `translate_truthy`, `translate_uint`, and `translate_ec` by converting them from recursive to iterative post-order traversals. Programs with many `LOGDEFERRED` calls no longer crash ([#3626](https://github.com/0xMiden/miden-vm/issues/3626)).
 
 ## v0.31.1 (2026-09-04)
