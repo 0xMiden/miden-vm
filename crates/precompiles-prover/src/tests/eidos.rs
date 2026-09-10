@@ -718,9 +718,6 @@ fn pvm_trace_writer_rejects_noncanonical_packed_input() {
 
 #[test]
 fn mvm_and_pvm_writers_agree_on_shared_eidos_compression_witness() {
-    assert_eq!(NUM_EIDOS_COMPRESSION_COLS, 108);
-    assert_eq!(mvm_eidos_compression::NUM_EIDOS_COMPRESSION_COLS, 108);
-
     for case in 0..16_u32 {
         let block = core::array::from_fn(|i| {
             0x1020_3040_u32

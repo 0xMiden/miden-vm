@@ -1,16 +1,15 @@
 //! Trace writer for the 32-row Eidos compression layout.
 
+use miden_air::eidos_compression::core::{
+    cv_storage_coefficient, cv_storage_offset, cv_word_base, fused_step_at, initial_working_state,
+    low_output, sum_input_b,
+};
 use miden_core::{
     Felt,
     field::{PrimeField64, batch_inversion_allow_zeros},
 };
 
-use super::{
-    algebra::{cv_storage_coefficient, cv_storage_offset, cv_word_base, sum_input_b},
-    layout::*,
-    model::{initial_working_state, low_output},
-    schedule::fused_step_at,
-};
+use super::layout::*;
 use crate::primitives::byte_pair_lut::eidos::{self as eidos_lookup, Rotation};
 
 /// One row of the Eidos compression main trace over the VM base field.
