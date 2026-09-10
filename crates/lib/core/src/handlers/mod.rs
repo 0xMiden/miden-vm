@@ -25,6 +25,7 @@ fn u64_to_u32_elements(value: u64) -> (Felt, Felt) {
 }
 
 /// Preserves legacy library-list shapes while the authoritative handlers use the portable trait.
+#[allow(deprecated)] // Only the legacy list facades use this conversion.
 pub(super) fn legacy_handlers(
     handlers: Vec<(
         miden_core::events::EventName,

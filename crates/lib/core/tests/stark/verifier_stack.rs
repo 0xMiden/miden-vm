@@ -1,3 +1,6 @@
+// The verifier fixture intentionally observes raw processor state through a legacy trace handler.
+#![allow(deprecated)]
+
 use std::sync::{Arc, OnceLock};
 
 use miden_core::events::EventName;

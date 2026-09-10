@@ -5,6 +5,9 @@
 //! The test needs `cargo` and the `wasm32-unknown-unknown` target, the same prerequisites the
 //! `miden-wasm-event-handlers` end-to-end test has.
 
+// Retain coverage of the legacy packaged host-library factory during migration.
+#![allow(deprecated)]
+
 use std::{
     ops::ControlFlow,
     path::{Path, PathBuf},

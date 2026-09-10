@@ -15,6 +15,7 @@ use miden_crypto::{
 use miden_precompiles::{K1Scalar, SECP256K1_LAMBDA, scalar_mul_mod_n};
 use miden_precompiles_prover::{HashFunction, prove_precompiles};
 use miden_precompiles_verifier::verify_deferred;
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, MemoryError,
     ProcessorState, StackInputs,
@@ -527,6 +528,7 @@ fn run_recover(message: Word, signature: &Signature) -> Result<ExecutionOutput, 
     )
 }
 
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn run_recover_with_native_signature(
     message: Word,
     signature: &[Felt; 17],
@@ -637,6 +639,7 @@ fn run_core_program_with_advice(
     run_core_program(source, advice, None)
 }
 
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn run_core_program(
     source: &str,
     advice: &[Felt],
@@ -678,6 +681,7 @@ fn run_core_program(
     output
 }
 
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn recovery_public_key_handler(public_key: &PublicKey) -> Arc<dyn EventHandler> {
     let elements = public_key_elements(public_key);
     Arc::new(move |_process: &ProcessorState| -> Result<Vec<AdviceMutation>, EventError> {

@@ -1,3 +1,6 @@
+// Dual-registry compatibility: preserve legacy registration, library fields, and routing.
+#![allow(deprecated)]
+
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{
@@ -164,6 +167,7 @@ where
     ///
     /// The handler can be either a closure or a free function with signature
     /// `fn(&mut ProcessorState) -> Result<(), EventHandler>`
+    #[deprecated(note = "use register_event_handler and unregister_event_handler")]
     pub fn register_handler(
         &mut self,
         event: EventName,
@@ -175,6 +179,7 @@ where
 
     /// Un-registers a handler with the given id, returning a flag indicating whether a handler
     /// was previously registered with this id.
+    #[deprecated(note = "use register_event_handler and unregister_event_handler")]
     pub fn unregister_handler(&mut self, id: EventId) -> bool {
         self.event_handlers.unregister(id)
     }
@@ -185,6 +190,7 @@ where
     /// # Errors
     /// Returns an error when the event name is empty or reserved; the host is not changed
     /// then.
+    #[deprecated(note = "use register_event_handler and unregister_event_handler")]
     pub fn replace_handler(
         &mut self,
         event: EventName,
@@ -199,6 +205,7 @@ where
     /// Trace handlers observe VM state for optional, read-only trace events; they cannot mutate the
     /// advice provider. Unhandled trace event IDs are ignored. The handler can be either a closure
     /// or a free function.
+    #[deprecated(note = "use register_event_handler and unregister_event_handler")]
     pub fn register_trace_handler(
         &mut self,
         event: EventName,
@@ -210,6 +217,7 @@ where
 
     /// Un-registers a trace handler with the given id, returning a flag indicating whether a
     /// handler was previously registered with this id.
+    #[deprecated(note = "use register_event_handler and unregister_event_handler")]
     pub fn unregister_trace_handler(&mut self, id: EventId) -> bool {
         self.trace_handlers.unregister(id)
     }
@@ -220,6 +228,7 @@ where
     /// # Errors
     /// Returns an error when the event name is empty or reserved; the host is not changed
     /// then.
+    #[deprecated(note = "use register_event_handler and unregister_event_handler")]
     pub fn replace_trace_handler(
         &mut self,
         event: EventName,
@@ -283,13 +292,7 @@ where
         let event_id = EventId::from_felt(process.get_stack_item(0));
         match self.event_handlers.handle_event(event_id, process) {
             Ok(Some(mutations)) => Ok(mutations),
-            Ok(None) => {
-                #[derive(Debug, thiserror::Error)]
-                #[error("no event handler registered")]
-                struct UnhandledEvent;
-
-                Err(UnhandledEvent.into())
-            },
+            Ok(None) => Err(super::UnhandledEvent.into()),
             Err(e) => Err(e),
         }
     }
@@ -348,6 +351,7 @@ pub struct HostLibrary {
     /// Package-owned debug info that belongs to `mast_forest`.
     pub package_debug_info: Result<Option<PackageDebugInfo>, PackageDebugInfoError>,
     /// List of handlers along with their event names to call them with `emit`.
+    #[deprecated(note = "pass portable handlers to load_library_with_event_handlers")]
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
 }
 
@@ -356,6 +360,7 @@ impl HostLibrary {
     ///
     /// Use this to supply handlers that the source of the library does not provide, for example
     /// the Wasm event handlers of a package.
+    #[deprecated(note = "pass portable handlers to load_library_with_event_handlers")]
     pub fn set_handlers(mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) -> Self {
         self.handlers = handlers;
         self

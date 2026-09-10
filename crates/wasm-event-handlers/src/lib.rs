@@ -50,9 +50,11 @@ pub const GUEST_RUSTFLAGS: &str = "-C target-feature=-simd128";
 
 pub use error::{WasmHandlerLoadError, WasmHandlerRunError};
 pub use module::{WasmEventHandler, WasmHandlerLimits, WasmHandlerModule};
+#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
 pub use package::{
     event_handlers_from_package, handlers_from_package, host_library_from_package,
     manifest_from_module, section_from_module,
 };
 #[doc(hidden)]
+#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
 pub use package::{fuzz_module_statics, fuzz_walk_sections, test_append_manifest_section};

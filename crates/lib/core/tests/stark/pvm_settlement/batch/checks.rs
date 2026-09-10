@@ -1,5 +1,8 @@
 //! Checks for skipped TRUE roots, repeated roots, and proofs of the wrong batch.
 
+// This batch harness intentionally exercises the retained legacy event callback.
+#![allow(deprecated)]
+
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},

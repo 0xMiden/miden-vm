@@ -58,6 +58,18 @@ drop
 
 The bare `trace` instruction takes 3 cycles and leaves the stack unchanged. `trace.MY_TRACE` and `trace.event("...")` are stack-neutral and take 5 cycles.
 
-As an implementation detail, `trace.<trace_id>` lowers to `push.<trace_id> push.<sys::trace_event> emit drop drop`. Plain `trace` lowers to `push.<sys::trace_event> emit drop`. Thus, when the host trace handler runs, `sys::trace_event` is at stack position 0 and the user trace ID is at stack position 1.
+As an implementation detail, `trace.<trace_id>` lowers to `push.<trace_id> push.<sys::trace_event> emit drop drop`. Plain `trace` lowers to `push.<sys::trace_event> emit drop`. In the deprecated raw-state trace callback, `sys::trace_event` is at stack position 0 and the user trace ID is at stack position 1.
 
-On the Rust side, hosts can register trace handlers via `DefaultHost::register_trace_handler`, or implement `SyncHost::on_trace` / `Host::on_trace`. Hosts that do not implement `on_trace` still execute programs containing trace events: the default implementation is a no-op, and trace events are not routed to the regular `on_event` handler.
+On the Rust side, register one portable handler with `DefaultHost::register_event_handler`, or
+implement `SyncHost::handle_event` / `Host::handle_event`. The handler receives `EventContext` and
+`AdviceRecorder` for either kind. `context.kind()` identifies regular events and traces; `id()` is
+the actual invocation identity. Stack reads hide the dispatch envelope, so position zero is the
+first payload element for both kinds. Known handler errors propagate. Recording advice during a
+successful trace is an engine error and applies nothing, including idempotent or empty-map writes.
+
+`ExecutionOptions::with_trace_delivery(false)` suppresses trace callbacks before lookup or host
+work, while retaining instruction execution and cycle accounting. Delivery defaults to enabled,
+including fast execution. Required bookkeeping must use regular events even when it returns no
+advice. The deprecated separate event/trace callbacks and registries remain supported during
+migration; their default trace callback is still a no-op. See the
+[event handler migration guide](../event_handler_migration.md).

@@ -36,6 +36,9 @@
 - [BREAKING] Renamed `auth_empty_ad_expanded_with_scratch` to `auth_empty_ad_expanded_exact` and removed its `scratch_ptr` parameter. Reduced cycle costs in the core library's Eidos AEAD encryption, authentication, and decryption procedures ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
 - Improved lifted STARK prover performance: LogUp fractions are built and accumulated in row chunks with a parallel accumulator scan, and DEEP reduction avoids element-wise buffer swaps and per-height group buffers ([#3851](https://github.com/0xMiden/miden-vm/pull/3851)).
 - Reduced prover peak memory by 13-20% by pruning Merkle layers ([#3872](https://github.com/0xMiden/miden-vm/pull/3872)).
+- Deprecated raw-state processor handler, registry, mutation, and callback APIs while preserving
+  their compatibility paths. See the [migration guide](docs/src/user_docs/event_handler_migration.md)
+  for concrete handler changes and retained APIs ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 - Wasm ABI revision 2 adds invocation kind while retaining the v1 namespace and revision-1 declarations.
   Inverse witnesses carry explicit operands while retaining their deferred assertion binding
   ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).

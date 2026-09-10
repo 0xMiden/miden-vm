@@ -3,7 +3,9 @@ use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use miden_core::events::{EventId, EventName};
 use miden_event_handler::{AdviceBatch, AdviceRecorder, EventContext, Invocation, InvocationKind};
 
+#[allow(deprecated)] // Bounded legacy conversion below.
 use super::{EventError, EventHandler, registration, validate_event_name};
+#[allow(deprecated)]
 use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
 
 /// One portable handler binding per identity, shared by regular events and traces.
@@ -68,6 +70,7 @@ impl core::fmt::Debug for HandlerRegistry {
 ///
 /// This retains legacy event-only delivery. Migrate registrations to [`HandlerRegistry`] for
 /// unified event/trace delivery. A child batch isolates failure before conversion to legacy output.
+#[allow(deprecated)]
 pub fn legacy_handler(handler: impl Into<registration::EventHandler>) -> Arc<dyn EventHandler> {
     let handler = handler.into();
     Arc::new(move |process: &ProcessorState<'_>| invoke_legacy_handler(handler.as_ref(), process))
@@ -75,6 +78,7 @@ pub fn legacy_handler(handler: impl Into<registration::EventHandler>) -> Arc<dyn
 
 /// Invokes a borrowed portable handler for a legacy event callback, isolating its output until
 /// success. This supports concrete types retaining their old trait implementation during migration.
+#[allow(deprecated)]
 pub fn invoke_legacy_handler(
     handler: &dyn miden_event_handler::EventHandler,
     process: &ProcessorState<'_>,
@@ -84,6 +88,7 @@ pub fn invoke_legacy_handler(
     Ok(batch_into_mutations(batch))
 }
 
+#[allow(deprecated)]
 pub(crate) fn event_context<'a>(
     process: &ProcessorState<'a>,
     kind: InvocationKind,
@@ -101,7 +106,11 @@ pub(crate) fn event_context<'a>(
     EventContext::new(process.processor, invocation)
 }
 
-pub(crate) fn record_mutations(advice: &mut AdviceRecorder<'_>, mutations: Vec<AdviceMutation>) {
+#[allow(deprecated)]
+pub(crate) fn record_mutations(
+    advice: &mut AdviceRecorder<'_>,
+    mutations: impl IntoIterator<Item = AdviceMutation>,
+) {
     for mutation in mutations {
         match mutation {
             AdviceMutation::ExtendStack { stack } => advice.prepend_stack(stack.into_elements()),
@@ -117,6 +126,7 @@ pub(crate) fn record_mutations(advice: &mut AdviceRecorder<'_>, mutations: Vec<A
     }
 }
 
+#[allow(deprecated)]
 fn batch_into_mutations(batch: AdviceBatch) -> Vec<AdviceMutation> {
     let (stack, entries, nodes) = batch.into_parts();
     let mut mutations = Vec::with_capacity(entries.len() + 2);

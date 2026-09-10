@@ -361,6 +361,7 @@ fn assert_fold_coefficients_match_the_proof_order(
 ///
 /// The fixture's trace handlers run as usual, so callers can still observe the verifier's stack
 /// at return.
+#[allow(deprecated)] // Preserve the legacy Test harness trace registrations.
 pub(super) fn execute_and_check(test: &Test, proof_stream: &[u64], claim: &[u64]) -> ProofOrder {
     let (program, ..) = test.compile().expect("the verifier fixture must assemble");
     let mut host = DefaultHost::default().with_library(&CoreLibrary::default()).unwrap();
