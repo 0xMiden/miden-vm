@@ -121,6 +121,9 @@ pub(crate) struct HostCtx {
     /// call. Host functions dereference it only during that call, while the underlying
     /// `&ProcessorState` borrow is alive; see [`state`].
     state: *const ProcessorState<'static>,
+    /// The canonical ID of the event the handler was invoked for. Zero for the load-time dry
+    /// run, which runs no guest code.
+    event_id: u64,
     /// The mutations the handler buffered so far. Returned to the processor only when the
     /// handler returns without a trap.
     pub mutations: Vec<AdviceMutation>,
@@ -142,9 +145,14 @@ impl HostCtx {
     ///
     /// `state` may be null for the load-time dry-run instantiation, during which no guest code
     /// runs.
-    pub fn new(state: *const ProcessorState<'static>, limits: &WasmHandlerLimits) -> Self {
+    pub fn new(
+        state: *const ProcessorState<'static>,
+        event_id: u64,
+        limits: &WasmHandlerLimits,
+    ) -> Self {
         Self {
             state,
+            event_id,
             mutations: Vec::new(),
             mutation_felts: 0,
             max_mutation_felts: limits.max_mutation_felts,
@@ -315,20 +323,28 @@ const OK: i32 = Status::Ok.as_raw();
 // QUERIES
 // ================================================================================================
 
-/// Returns the depth of the operand stack.
+/// Returns the depth of the handler's stack view: the operand-stack depth without the event-ID
+/// slot.
 fn stack_depth(mut caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL)?;
-    state(&caller).map(ProcessorState::stack_depth)
+    // The VM stack depth is never below 16, so the subtraction cannot underflow; the saturation
+    // keeps the defect harmless if that ever changes.
+    state(&caller).map(|state| state.stack_depth().saturating_sub(1))
 }
 
-/// Returns the operand-stack element at position `pos` in canonical form.
+/// Returns the operand-stack element at position `pos` of the handler's stack view, in canonical
+/// form; the view starts one slot below the event ID.
 fn stack_get(mut caller: Caller<'_, HostCtx>, pos: u32) -> Result<u64, wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + FUEL_PER_FELT)?;
-    Ok(state(&caller)?.get_stack_item(pos as usize).as_canonical_u64())
+    // Positions past the stack depth read as zero, so the saturation on a 32-bit host — where
+    // `pos as usize` can already be `usize::MAX` — is harmless.
+    Ok(state(&caller)?
+        .get_stack_item((pos as usize).saturating_add(1))
+        .as_canonical_u64())
 }
 
-/// Writes the `count` operand-stack elements at positions `start_pos..start_pos + count` to
-/// `out`, ordered from the top of the stack down.
+/// Writes the `count` elements at positions `start_pos..start_pos + count` of the handler's
+/// stack view to `out`, ordered from the top of the stack down.
 fn stack_read(
     mut caller: Caller<'_, HostCtx>,
     start_pos: u32,
@@ -342,7 +358,7 @@ fn stack_read(
     byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
     let state = state(&caller)?;
     let felts: Vec<Felt> = (0..count as usize)
-        .map(|idx| state.get_stack_item((start_pos as usize).saturating_add(idx)))
+        .map(|idx| state.get_stack_item((start_pos as usize).saturating_add(idx).saturating_add(1)))
         .collect();
     write_felts(mem.data_mut(&mut caller), out, &felts)
 }
@@ -351,6 +367,12 @@ fn stack_read(
 fn clk(mut caller: Caller<'_, HostCtx>) -> Result<u64, wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL)?;
     state(&caller).map(|state| u64::from(state.clock()))
+}
+
+/// Returns the ID of the event the handler was invoked for, in canonical form.
+fn event_id(mut caller: Caller<'_, HostCtx>) -> Result<u64, wasmi::Error> {
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL)?;
+    Ok(caller.data().event_id)
 }
 
 /// Returns `1` when the current execution context is the root context, and `0` otherwise.
@@ -897,6 +919,7 @@ fn build_linker_with_names(
         host_fn::STACK_GET => stack_get,
         host_fn::STACK_READ => stack_read,
         host_fn::CLK => clk,
+        host_fn::EVENT_ID => event_id,
         host_fn::IS_ROOT_CONTEXT => is_root_context,
         host_fn::MEM_GET => mem_get,
         host_fn::MEM_READ => mem_read,

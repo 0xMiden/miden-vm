@@ -65,32 +65,35 @@ fn status(raw: i32) -> Status {
 // QUERIES
 // ================================================================================================
 
-/// Returns the depth of the operand stack.
+/// Returns the depth of the handler's stack view: the operand-stack depth without the event-ID
+/// slot.
 pub fn stack_depth() -> u32 {
     // SAFETY: the module contract; the call takes no pointer.
     unsafe { guest::stack_depth() }
 }
 
-/// Returns the operand-stack element at `pos`. Position `0` holds the event ID; positions past
-/// the stack depth read as zero.
+/// Returns the element at position `pos` of the handler's stack view. Position `0` is the first
+/// handler input; the event ID is not part of the view (see [`event_id`]). Positions past the
+/// view's depth read as zero.
 pub fn stack_get(pos: u32) -> Felt {
     // SAFETY: the module contract; the call takes no pointer.
     // The host returns a canonical value, which is the plain residue of itself.
     Felt::new_unchecked(unsafe { guest::stack_get(pos) })
 }
 
-/// Reads the `out.len()` operand-stack elements at positions `start_pos..start_pos + out.len()`,
-/// ordered from the top of the stack down. Positions past the stack depth read as zero.
+/// Reads the `out.len()` elements at positions `start_pos..start_pos + out.len()` of the
+/// handler's stack view, ordered from the top of the stack down. Positions past the view's depth
+/// read as zero.
 pub fn stack_read(start_pos: u32, out: &mut [Felt]) {
     let len = out.len() as u32;
     // SAFETY: the module contract; `len` is the element count of `out`.
     unsafe { guest::stack_read(start_pos, out.as_mut_ptr(), len) }
 }
 
-/// Returns the word at operand-stack positions `start_pos..start_pos + 4`.
+/// Returns the word at positions `start_pos..start_pos + 4` of the handler's stack view.
 ///
 /// Element `0` of the word is the element at `start_pos`, the one closest to the top of the
-/// stack.
+/// view.
 pub fn stack_get_word(start_pos: u32) -> Word {
     let mut out = [Felt::ZERO; Word::NUM_ELEMENTS];
     stack_read(start_pos, &mut out);
@@ -101,6 +104,13 @@ pub fn stack_get_word(start_pos: u32) -> Word {
 pub fn clk() -> u64 {
     // SAFETY: the module contract; the call takes no pointer.
     unsafe { guest::clk() }
+}
+
+/// Returns the ID of the event the handler was invoked for.
+pub fn event_id() -> Felt {
+    // SAFETY: the module contract; the call takes no pointer.
+    // The host returns a canonical value, which is the plain residue of itself.
+    Felt::new_unchecked(unsafe { guest::event_id() })
 }
 
 /// Returns `true` when the current execution context is the root context.

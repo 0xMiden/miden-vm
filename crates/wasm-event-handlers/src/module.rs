@@ -12,7 +12,7 @@ use miden_mast_package::{MAX_MODULE_BYTES, MIN_ABI_VERSION, validate_manifest_en
 use miden_processor::{
     ProcessorState,
     advice::AdviceMutation,
-    event::{EventError, EventHandler, EventName},
+    event::{EventError, EventHandler, EventId, EventName},
 };
 use wasmi::{CompilationMode, Config, EnforcedLimits, Engine, Instance, Linker, Module, Store};
 
@@ -284,6 +284,7 @@ impl WasmHandlerModule {
                 let handler = WasmEventHandler {
                     module: Arc::clone(self),
                     export: export.clone(),
+                    event_id: event.to_event_id(),
                 };
                 (event.clone(), Arc::new(handler) as Arc<dyn EventHandler>)
             })
@@ -295,7 +296,7 @@ impl WasmHandlerModule {
     /// `() -> ()` signature, and checks that the module exports its linear memory as `memory`.
     /// No guest code runs: start sections were rejected before.
     fn validate_instantiation(&self) -> Result<(), WasmHandlerLoadError> {
-        let mut store = self.new_store(core::ptr::null());
+        let mut store = self.new_store(core::ptr::null(), 0);
         let instance = self
             .linker
             .instantiate_and_start(&mut store, &self.module)
@@ -324,8 +325,8 @@ impl WasmHandlerModule {
 
     /// Creates a fresh store for one call, with the resource limiter installed and the fuel
     /// budget set.
-    fn new_store(&self, state: *const ProcessorState<'static>) -> Store<HostCtx> {
-        let mut store = Store::new(&self.engine, HostCtx::new(state, &self.limits));
+    fn new_store(&self, state: *const ProcessorState<'static>, event_id: u64) -> Store<HostCtx> {
+        let mut store = Store::new(&self.engine, HostCtx::new(state, event_id, &self.limits));
         store.limiter(|ctx| &mut ctx.limits);
         store
             .set_fuel(self.call_fuel())
@@ -339,12 +340,13 @@ impl WasmHandlerModule {
         &self,
         process: &ProcessorState<'_>,
         export: &str,
+        event_id: EventId,
     ) -> Result<Vec<AdviceMutation>, EventError> {
         // Erase the lifetime for storage in the store data. The pointer stays valid for this
         // whole function, which outlives the store; host functions dereference it only while
         // this call runs.
         let state_ptr = core::ptr::from_ref(process).cast::<ProcessorState<'static>>();
-        let mut store = self.new_store(state_ptr);
+        let mut store = self.new_store(state_ptr, event_id.as_u64());
 
         // `instantiate_and_start` runs no guest code here: modules with a start section are
         // rejected at load time.
@@ -625,10 +627,13 @@ pub struct WasmEventHandler {
     module: Arc<WasmHandlerModule>,
     /// The name of the Wasm export this handler runs.
     export: String,
+    /// The ID of the event this handler is registered for; the `event_id` host function
+    /// reports it to the guest.
+    event_id: EventId,
 }
 
 impl EventHandler for WasmEventHandler {
     fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        self.module.call(process, &self.export)
+        self.module.call(process, &self.export, self.event_id)
     }
 }

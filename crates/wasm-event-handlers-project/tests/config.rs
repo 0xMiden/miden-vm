@@ -24,13 +24,13 @@ use tempfile::TempDir;
 // ================================================================================================
 
 /// A handler module that answers `test::project::double`. The WAT mirrors what the guest SDK
-/// compiles to: it reads the stack element below the event ID and answers with twice its value.
+/// compiles to: it reads the first stack input and answers with twice its value.
 const DOUBLE_WAT: &str = r#"(module
   (import "miden:event/v1" "stack_get" (func $stack_get (param i32) (result i64)))
   (import "miden:event/v1" "adv_stack_extend" (func $adv_stack_extend (param i32 i32)))
   (memory (export "memory") 1)
   (func (export "double")
-    (i64.store (i32.const 0) (i64.mul (call $stack_get (i32.const 1)) (i64.const 2)))
+    (i64.store (i32.const 0) (i64.mul (call $stack_get (i32.const 0)) (i64.const 2)))
     (call $adv_stack_extend (i32.const 0) (i32.const 1))))"#;
 
 /// Writes `contents` to `path`, creating the parent directories.

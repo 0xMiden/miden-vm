@@ -26,7 +26,7 @@ use sdk::Felt;
 
 #[sdk::miden_event_handler("myapp::double")]
 fn double() {
-    let value = sdk::stack_get(1); // position 0 holds the event ID
+    let value = sdk::stack_get(0); // position 0 is the first handler input
     sdk::adv_stack_extend(&mut [value * Felt::from_u32(2)]);
 }
 ```
@@ -92,14 +92,17 @@ Version bumps are additive only: a newer ABI version may add host functions but 
 
 **Memory ownership.** Every pointer is an offset into the guest's own linear memory, which the module must export as `"memory"`. The guest allocates all buffers; the host only reads from and writes into them. Output pointers are validated before the host computes the result, so a bad pointer traps even when the call would otherwise return a status such as `NotFound`.
 
+**Handler stack view.** The `stack_*` functions expose the operand stack without the event-ID slot that `emit` consumed: position `0` is the first handler input, and `stack_depth` reports the operand-stack depth less that one slot. A handler reads the ID of the event it answers with `event_id()`, which reports the event it is registered for.
+
 **Queries** mirror the read surface of `ProcessorState`. A call returns a status only when a non-`Ok` outcome is reachable; calls that cannot fail return their value directly (or nothing):
 
 | Import | Description |
 | --- | --- |
-| `stack_depth() -> u32` | Depth of the operand stack. |
-| `stack_get(pos) -> u64` | Operand-stack element, returned directly in canonical form; position `0` holds the event ID, positions past the depth read as zero. |
-| `stack_read(start_pos, out, count)` | Batch read of the elements at positions `start_pos..start_pos + count`, ordered from the top down. |
+| `stack_depth() -> u32` | Depth of the handler's stack view: the operand-stack depth without the event-ID slot. |
+| `stack_get(pos) -> u64` | Element of the handler's stack view, returned directly in canonical form; position `0` is the first handler input (the event ID is not part of the view), positions past the depth read as zero. |
+| `stack_read(start_pos, out, count)` | Batch read of the elements at positions `start_pos..start_pos + count` of the handler's stack view, ordered from the top down. |
 | `clk() -> u64` | Clock cycle. |
+| `event_id() -> u64` | ID of the event the handler was invoked for, in canonical form. |
 | `is_root_context() -> i32` | `1` when the current execution context is the root context (where kernel state lives), `0` otherwise. The result is a boolean, not a status code. |
 | `mem_get(addr, out) -> status` | One memory element of the current context; `Uninit` when no cell of the memory word that holds the address was ever written. |
 | `mem_read(addr, out, count) -> status` | Batch read of `addr..addr + count`; `Uninit` when the range touches an unwritten memory word, `OutOfBounds` past the `u32` address space. |

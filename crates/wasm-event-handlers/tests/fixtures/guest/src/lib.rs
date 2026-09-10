@@ -8,11 +8,11 @@
 use miden_event_handler_sdk as sdk;
 use sdk::Felt;
 
-/// Reads the stack element below the event ID, adds 100 in the field, and pushes the result to
-/// the advice stack.
+/// Reads the first stack input, adds 100 in the field, and pushes the result to the advice
+/// stack.
 #[sdk::miden_event_handler("test::wasm::add_hundred")]
 fn add_hundred() {
-    let value = sdk::stack_get(1);
+    let value = sdk::stack_get(0);
     sdk::adv_stack_extend(&mut [value + Felt::from_u32(100)]);
 }
 
@@ -22,11 +22,11 @@ fn always_panics() {
     panic!("the fixture panicked on purpose");
 }
 
-/// Merges the two stack words below the event ID and pushes the four digest elements to the
-/// advice stack, the digest's first element on top.
+/// Merges the first two stack-input words and pushes the four digest elements to the advice
+/// stack, the digest's first element on top.
 #[sdk::miden_event_handler("test::wasm::merge_words")]
 fn merge_words() {
-    let pair = [sdk::stack_get_word(1), sdk::stack_get_word(5)];
+    let pair = [sdk::stack_get_word(0), sdk::stack_get_word(4)];
     let digest = sdk::poseidon2_merge(&pair, Felt::ZERO);
     sdk::adv_stack_extend(&mut digest.into_elements());
 }
