@@ -1,0 +1,112 @@
+namespace batch
+
+use miden::core::crypto::hashes::poseidon2
+use miden::core::mem
+use miden::core::stark::security
+use miden::core::sys
+use miden::core::sys::pvm
+use miden::core::sys::vm
+use miden::core::word
+
+# The claim count is a runtime input; this limit keeps the example small.
+const MAX_CLAIMS = 4
+const MIN_SECURITY_BITS = 96
+const AND_TAG = [1, 0, 0, 0]
+
+#! Fetches and verifies the MVM proof for a claim, returning its deferred root.
+#!
+#! Inputs:  [CLAIM_COMMITMENT, ...]
+#! Outputs: [DEFERRED_ROOT, ...]
+proc verify_mvm_proof(claim_commitment: word) -> word
+    # The request key selects a proof by verifier and claim, matching the Rust input adapter.
+    dupw procref.vm::verify_proof exec.sys::build_proof_request_key
+    adv.push_mapval dropw
+    exec.vm::verify_proof
+    exec.security::compute_conjectured_security_level
+    u32lt.MIN_SECURITY_BITS assertz.err="MVM proof security is below the required minimum"
+end
+
+#! Appends a deferred root to the batch's ordered AND fold, skipping TRUE (the zero word).
+#! Repeated roots stay in the fold; the PVM prover can share their underlying computation.
+#! Each AND step matches miden_core::deferred::fold_deferred_root.
+#!
+#! Inputs:  [DEFERRED_ROOT, BATCH_ROOT, ...]
+#! Outputs: [BATCH_ROOT', ...]
+proc append_deferred_root(deferred_root: word, batch_root: word) -> word
+    exec.word::testz
+    if.true
+        dropw
+    else
+        swapw exec.word::testz
+        if.true
+            # The first non-TRUE root starts the fold unchanged.
+            dropw
+        else
+            push.AND_TAG movdnw.2
+            # => [BATCH_ROOT, DEFERRED_ROOT, AND_TAG, ...]
+
+            # Hash the AND node without adding deferred work to the batcher's own proof.
+            hperm exec.poseidon2::squeeze_digest
+        end
+    end
+end
+
+#! Verifies a batch of MVM proofs and settles their deferred work with one PVM proof.
+#! CLAIMS_COMMITMENT hashes the ordered list of claim commitments. Each claim identifies a program,
+#! kernel, inputs, and outputs. The runtime count must be even and in 2..=MAX_CLAIMS.
+#!
+#! claims_ptr must point to a word-aligned buffer with room for num_claims words. The buffer must
+#! not overlap the recursive verifiers' working memory.
+#!
+#! Inputs:  [claims_ptr, num_claims, CLAIMS_COMMITMENT, ...]
+#! Outputs: [...]
+pub proc verify_batch(claims_ptr: ptr<word>, num_claims: u32, claims_commitment: word)
+    movdn.5
+    u32assert
+    dup u32gte.2 assert.err="batch must contain at least two execution claims"
+    dup u32lte.MAX_CLAIMS assert.err="batch exceeds the example's claim limit"
+
+    # The host supplies the claim list through advice. Check its hash against the public input
+    # before using it, so the host cannot substitute a different batch.
+    movdn.4 adv.push_mapval
+    dup.5 movup.5
+    # => [num_claims, write_ptr, CLAIMS_COMMITMENT, claim_ptr, ...]
+    exec.mem::pipe_double_words_preimage_to_memory
+    # => [end_ptr, claim_ptr, ...]
+
+    # The root starts at TRUE; end_ptr is just past the last claim.
+    swap padw
+    # => [BATCH_ROOT, claim_ptr, end_ptr, ...]
+
+    push.1
+    while.true
+        # 1. Verify the next MVM proof and obtain its deferred root.
+        padw dup.8 mem_loadw_le
+        exec.verify_mvm_proof
+        # => [DEFERRED_ROOT, BATCH_ROOT, claim_ptr, end_ptr, ...]
+
+        # 2. Add that root to the batch's deferred work.
+        exec.append_deferred_root
+        # => [BATCH_ROOT', claim_ptr, end_ptr, ...]
+
+        movup.4 add.4 movdn.4
+        dup.4 dup.6 neq
+    end
+    movup.4 drop movup.4 drop
+    # => [BATCH_ROOT, ...]
+
+    exec.word::testz
+    if.true
+        # No execution left deferred work, so there is no PVM proof to request.
+        dropw
+    else
+        # 3. Ask the host for one PVM proof of our combined root. This event can suspend
+        # execution while the host obtains the proof. The root stays on the stack.
+        exec.pvm::request_proof
+
+        # 4. Verify the returned proof against that root and enforce the security requirement.
+        exec.pvm::verify_proof
+        exec.security::compute_conjectured_security_level
+        u32lt.MIN_SECURITY_BITS assertz.err="PVM proof security is below the required minimum"
+    end
+end
