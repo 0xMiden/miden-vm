@@ -25,9 +25,7 @@ mod errors;
 mod handlers;
 
 pub use advice::{AdviceBatch, AdviceRecorder};
-pub use context::{
-    EventContext, EventContextProvider, Invocation, InvocationKind, MerkleReadError,
-};
+pub use context::{EventContext, EventContextProvider, Invocation, InvocationKind};
 pub use errors::EventContextError;
 pub use handlers::{EventError, EventHandler, NoopHandler, UnsupportedInvocationKind};
 pub use miden_core::{Felt, MemoryAddress, Word};
