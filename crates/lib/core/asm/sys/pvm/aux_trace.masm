@@ -1,7 +1,32 @@
+use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use miden::core::stark::random_coin
 use miden::core::sys::pvm::layout
+
+#! An address in the PVM fixed environment, carried as a 32-bit bus-message value.
+type EnvironmentPtr = u32
+
+#! One full Poseidon2 rate block.
+type RateBlock = struct { first: word, second: word }
+
+#! Fixed-environment unsigned integer and its domain-bound pointer.
+type UintValPayload = struct {
+    ptr: EnvironmentPtr,
+    bound_ptr: EnvironmentPtr,
+    value: u256,
+}
+
+#! Fixed elliptic-curve group parameters, represented by their environment pointers.
+type EcGroupPayload = struct {
+    group: EnvironmentPtr,
+    a: EnvironmentPtr,
+    b: EnvironmentPtr,
+    bound: EnvironmentPtr,
+    scalar_bound: EnvironmentPtr,
+    beta: EnvironmentPtr,
+    lambda: EnvironmentPtr,
+}
 
 # Bus-domain scale factors (`bus_id + 1`) from precompiles-prover/src/relations.rs.
 const UINT_VAL_BUS_SCALE = 11
@@ -27,7 +52,7 @@ const NUM_AUX_VALUE_WORDS = 5
 #!
 #! Input:  [...]
 #! Output: [...]
-pub proc observe_aux_trace
+pub proc observe_aux_trace()
     # Draw [alpha, beta] and store [beta0, beta1, alpha0, alpha1] at the PVM READ boundary.
     exec.layout::aux_rand_elem_ptr
     exec.random_coin::generate_aux_randomness
@@ -87,7 +112,7 @@ end
 #!
 #! Input:  [R1, R2, ...]
 #! Output: [...]
-proc absorb_full_rate_block
+proc absorb_full_rate_block(block: RateBlock)
     exec.random_coin::get_capacity
     add.8
     movdnw.2
@@ -102,7 +127,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-proc compute_bus_gamma
+proc compute_bus_gamma()
     exec.load_beta
     dup.1 dup.1 ext2mul   # beta^2
     dup.1 dup.1           # retain beta^2
@@ -119,7 +144,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [beta0, beta1, ...]
-proc load_beta
+proc load_beta() -> types::QuadFelt
     exec.layout::aux_rand_elem_ptr add.1 mem_load
     exec.layout::aux_rand_elem_ptr mem_load
 end
@@ -128,7 +153,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [alpha0, alpha1, ...]
-proc load_alpha
+proc load_alpha() -> types::QuadFelt
     exec.layout::aux_rand_elem_ptr add.3 mem_load
     exec.layout::aux_rand_elem_ptr add.2 mem_load
 end
@@ -137,7 +162,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [gamma0, gamma1, ...]
-proc load_gamma
+proc load_gamma() -> types::QuadFelt
     exec.layout::bus_gamma_ptr add.1 mem_load
     exec.layout::bus_gamma_ptr mem_load
 end
@@ -148,7 +173,10 @@ end
 #!
 #! Input:  [beta0, beta1, m0, ..., m9, ...]
 #! Output: [msg0, msg1, beta0, beta1, ...]
-proc fold_uint_val_payload
+proc fold_uint_val_payload(
+    beta: types::QuadFelt,
+    payload: UintValPayload,
+) -> (types::QuadFelt, types::QuadFelt)
     movup.11 push.0 swap
     dup.3 dup.3 ext2mul movup.12 add
     dup.3 dup.3 ext2mul movup.11 add
@@ -168,7 +196,10 @@ end
 #!
 #! Input:  [beta0, beta1, m0, ..., m6, ...]
 #! Output: [msg0, msg1, beta0, beta1, ...]
-proc fold_ec_group_payload
+proc fold_ec_group_payload(
+    beta: types::QuadFelt,
+    payload: EcGroupPayload,
+) -> (types::QuadFelt, types::QuadFelt)
     movup.8 push.0 swap
     dup.3 dup.3 ext2mul movup.9 add
     dup.3 dup.3 ext2mul movup.8 add
@@ -182,7 +213,7 @@ end
 #!
 #! Input:  [i, ...]
 #! Output: [prefix0, prefix1, ...]
-proc compute_bus_prefix
+proc compute_bus_prefix(bus_id_plus_one: u8) -> types::QuadFelt
     exec.load_gamma
     # => [gamma0, gamma1, i, ...]
     dup.2 mul
@@ -197,7 +228,12 @@ end
 #!
 #! Input:  [msg0, msg1, beta0, beta1, sum0, sum1, prefix0, prefix1, ...]
 #! Output: [sum0, sum1, beta0, beta1, prefix0, prefix1, ...]
-proc add_cached_prefix_inverse_to_sum
+proc add_cached_prefix_inverse_to_sum(
+    message: types::QuadFelt,
+    beta: types::QuadFelt,
+    sum: types::QuadFelt,
+    prefix: types::QuadFelt,
+) -> (types::QuadFelt, types::QuadFelt, types::QuadFelt)
     dup.7 dup.7
     ext2add ext2inv
     movup.5 movup.5 ext2add
@@ -212,7 +248,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-proc compute_fixed_boundary_correction
+proc compute_fixed_boundary_correction()
     exec.compute_bus_gamma
     exec.load_beta
     push.0.0

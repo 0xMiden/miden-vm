@@ -2,6 +2,22 @@
 
 ## v0.33.0 (Unreleased)
 
+#### Fixes
+
+- Fixed 46 `\begin{cases}...\end{cases}` blocks in the assembly instruction reference and stack design docs that were missing the `\\` row separator between cases, which broke KaTeX rendering ([#3650](https://github.com/0xMiden/miden-vm/issues/3650)).
+
+## v0.32.1 (2026-09-09)
+
+#### Changes
+
+- Added type signatures for all procedures in the Miden core library ([#3791](https://github.com/0xMiden/miden-vm/pull/3791)). **NOTE:** This changes the package identity of the core library and any packages which dynamically link it. Packages which were assembled against 0.32.0 of the core library will need to be re-assembled (unless they statically linked the core library), otherwise executors that only load the latest version of the core library for you will be unable to resolve the older dependency.
+- Automatically infer procedure calling convention from known protocol ABI attributes ([#3802](https://github.com/0xMiden/miden-vm/pull/3802)).
+
+#### Fixes
+
+- Preserved the public `ParsingError` enum layout while adding protocol ABI attribute checks ([#3812](https://github.com/0xMiden/miden-vm/pull/3812)).
+- Fixed issue where parsing of pointer types dropped address space information ([#3790](https://github.com/0xMiden/miden-vm/pull/3790)).
+
 ## v0.32.0 (2026-09-05)
 
 #### Changes

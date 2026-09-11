@@ -1,3 +1,4 @@
+use miden::core::stark::types
 use miden::core::stark::constants
 
 #! Takes a query index and computes poe := domain_gen^index and x := offset * poe. It also computes
@@ -11,7 +12,12 @@ use miden::core::stark::constants
 #! - poe := domain_gen^index
 #! - x := offset * poe
 #! - Y is a "garbage" word
-proc compute_denominators
+proc compute_denominators(
+    scratch: word,
+    preserved: word,
+    index: u32,
+    query_ptr: ptr<word>,
+) -> (types::EvaluationPair, word, felt, u32, ptr<word>)
     # Compute poe and x.
     exec.constants::get_lde_domain_info_word
     #=> [lde_size, depth, domain_gen, 0, Y, index, query_ptr, ...]
@@ -45,13 +51,19 @@ end
 #! Computes the DEEP query.
 #!
 #! Input: [Z, X, Y, W, query_ptr, ...]
-#! Output: [eval0, eval1, Y, query_ptr, ...]
+#! Output: [eval0, eval1, Y, W, query_ptr, ...]
 #!
 #! where:
 #!
 #! 1. X is [q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1]
 #! 2. W is [q_z_0, q_z_1, q_gz_0, q_gz_1]
-proc divide_and_add
+proc divide_and_add(
+    denominators: types::EvaluationPair,
+    query_evaluations: types::EvaluationPair,
+    cursor: types::DeepQueryCursor,
+    fixed_evaluations: types::EvaluationPair,
+    query_ptr: ptr<word>,
+) -> (types::QuadFelt, types::DeepQueryCursor, types::EvaluationPair, ptr<word>)
     swapw
     #=> [X, Z, Y, W, query_ptr, ...]
     dupw.3
@@ -89,7 +101,7 @@ proc divide_and_add
     #=> [beta_res_gz_0, beta_res_gz_1, res_z_0, res_z_1, Y, query_ptr, ...]
 
     ext2add
-    # => [eval0, eval1, Y, query_ptr, ...]
+    # => [eval0, eval1, Y, W, query_ptr, ...]
 end
 
 #! Prepares the stack for the computation of the DEEP composition polynomial FRI queries.
@@ -108,7 +120,13 @@ end
 #!    storing the computed FRI queries,
 #! 4. `W` is the word `[q_z_0, q_z_1, q_gz_0, q_gz_1]` where `q_z = (q_z_0, q_z_1)` and
 #!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI queries computations.
-pub proc prepare_stack_deep_queries_computation
+pub proc prepare_stack_deep_queries_computation() -> (
+    word,
+    ptr<word>,
+    ptr<word>,
+    types::EvaluationPair,
+    ptr<word>,
+)
     exec.constants::get_fri_queries_address
     # => [query_ptr, ...]
 
@@ -166,7 +184,15 @@ end
 #! 6. `W` is the word `[q_z_0, q_z_1, q_gz_0, q_gz_1]` where `q_z = (q_z_0, q_z_1)` and
 #!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI queries computations.
 #! 7. `?` is a binary flag indicating if there are further queries to process.
-pub proc compute_deep_query
+pub proc compute_deep_query(
+    scratch: word,
+    evaluations: types::EvaluationPair,
+    index: u32,
+    query_ptr: ptr<word>,
+    query_end_ptr: ptr<word>,
+    fixed_evaluations: types::EvaluationPair,
+    queries_ptr: ptr<word>,
+) -> (i1, types::FriQuery, ptr<word>, ptr<word>, types::EvaluationPair, ptr<word>)
     # 1) Compute poe := domain_gen^index, x := offset * poe, and denominators (x - z)
     # and (x - gz).
     exec.compute_denominators
@@ -199,7 +225,7 @@ end
 #! Outputs: [...]
 #!
 #! Invocation: exec
-pub proc compute_deep_composition_polynomial_queries
+pub proc compute_deep_composition_polynomial_queries()
     # Prepare the stack for the core procedure computing the queries
     exec.prepare_stack_deep_queries_computation
     # => [Y, query_ptr, query_end_ptr, W, query_ptr]

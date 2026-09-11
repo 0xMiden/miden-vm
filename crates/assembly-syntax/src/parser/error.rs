@@ -263,11 +263,9 @@ pub enum ParsingError {
     #[error("conflicting attributes for procedure definition")]
     #[diagnostic()]
     AttributeConflict {
-        #[label(
-            "conflict occurs because an attribute with the same name has already been defined"
-        )]
+        #[label("this attribute conflicts with another attribute")]
         span: SourceSpan,
-        #[label("previously defined here")]
+        #[label("conflicting attribute here")]
         prev: SourceSpan,
     },
     #[error("conflicting key-value attributes for procedure definition")]
