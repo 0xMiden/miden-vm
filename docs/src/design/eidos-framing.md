@@ -282,8 +282,14 @@ uninterrupted squeezing phase can produce `2^32` words: one with counter zero an
 nonzero `u32` counter. Requesting another word panics. VM transcript domains belong in the
 `miden-vm` namespace, not the `miden-crypto` local registry.
 
-Falcon hash-to-point, AEAD key derivation, and random-coin output generation similarly use named
-custom domains whose schemas define their fixed block and output schedules.
+Falcon hash-to-point and AEAD key derivation use named custom domains whose schemas define their
+fixed schedules. The random coin derives its internal state under `RANDOM_COIN_STATE` and generates
+each output block under `RANDOM_COIN_OUTPUT` by hashing the state followed by the low and high
+`u32` limbs of a non-wrapping `u64` next-block counter. Reseeding hashes the current state, counter,
+and new seed material before resetting the counter. The stored coin state is message input to each
+output hash; every output hash constructs its own domain- and length-specific chaining value.
+Knowledge of the stored state reveals every counter-mode block derived from it; the construction
+does not provide backtracking resistance within a reseed interval.
 
 ## `miden-crypto` local registry
 
@@ -300,7 +306,7 @@ generated MASM constants.
 | `0x0006` | 1 | `AEAD_CTR_KEY` | `Custom` |
 | `0x0007` | 1 | `AEAD_MAC_KEY` | `Custom` |
 | `0x0008` | 1 | `RANDOM_COIN_STATE` | `FeltSequence` |
-| `0x0009` | 1 | `RANDOM_COIN_OUTPUT` | `Custom` |
+| `0x0009` | 1 | `RANDOM_COIN_OUTPUT` | `FeltSequence` |
 | `0x000a` | 1 | `GENERIC_FELT_SEQUENCE` | `FeltSequence` |
 | `0x000b` | 1 | `LMCS_LEAF` | `Custom` |
 

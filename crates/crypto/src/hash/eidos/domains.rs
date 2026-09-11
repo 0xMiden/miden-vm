@@ -64,14 +64,14 @@ crate::eidos_domain_registry! {
                 version: DomainVersion::numbered(1),
                 encoding: FeltSequence,
                 description: "Eidos random-coin state derivation and reseeding.",
-                schema: "param0 = number of Felts; param1 = 0; param2 = 0; standard Felt-sequence schedule",
+                schema: "param0 = 4 for initialization or 10 for reseeding; param1 = 0; param2 = 0; initialization payload = four-Felt seed; reseed payload = four-Felt coin state, low/high u32 next-block-counter limbs, and four-Felt reseed data",
             }
             pub RANDOM_COIN_OUTPUT: RandomCoinOutputDomain {
                 local_id: 0x0009,
                 version: DomainVersion::numbered(1),
-                encoding: Custom,
-                description: "Eidos random-coin XOF output generation.",
-                schema: "param0 = 4; param1 = 0; param2 = 0; one padded state block followed by raw XOF extraction",
+                encoding: FeltSequence,
+                description: "Eidos random-coin counter-mode output generation.",
+                schema: "param0 = 6; param1 = 0; param2 = 0; payload = four-Felt coin state followed by low/high u32 next-block-counter limbs",
             }
             pub GENERIC_FELT_SEQUENCE: GenericFeltSequenceDomain {
                 local_id: 0x000a,
