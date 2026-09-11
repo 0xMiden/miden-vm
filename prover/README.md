@@ -57,6 +57,14 @@ compatibility.
 Transport, hydration, structural validity, and fixed limits are specified in the
 [deferred-proof semantics](../docs/src/design/deferred/semantics.md).
 
+### Recursive batch settlement
+
+The [batch settlement example](../crates/lib/core/tests/stark/pvm_settlement/batch.rs) verifies
+multiple Miden VM proofs and settles their deferred work with one precompile VM proof. It also
+proves the batcher itself, leaving no deferred work for the recipient. The
+[MASM verification guide](../docs/src/user_docs/core_lib/recursive_verification.md#example-batch-n-executions)
+explains the claim list, ordered root fold, and host request.
+
 ### Synchronous execution and proving
 
 The FastProcessor-backed `prove_sync(&Prover, ...)` function is the direct synchronous path for
