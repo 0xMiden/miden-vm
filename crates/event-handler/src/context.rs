@@ -74,20 +74,6 @@ impl Invocation {
     }
 }
 
-/// Errors returned by typed Merkle-store reads.
-#[derive(Debug, thiserror::Error)]
-pub enum MerkleReadError {
-    /// The requested node or path is not present in the Merkle store.
-    #[error("Merkle store lookup failed: {0}")]
-    Lookup(#[source] MerkleError),
-}
-
-impl From<MerkleError> for MerkleReadError {
-    fn from(error: MerkleError) -> Self {
-        Self::Lookup(error)
-    }
-}
-
 /// Read-only capabilities an execution engine provides to [`EventContext`].
 ///
 /// This public, object-safe engine interface allows processor implementations to supply reads.
@@ -129,9 +115,9 @@ pub trait EventContextProvider: Sync {
 
     fn advice_map(&self) -> &AdviceMap;
 
-    fn merkle_node(&self, root: Word, index: NodeIndex) -> Result<Word, MerkleReadError>;
+    fn merkle_node(&self, root: Word, index: NodeIndex) -> Result<Word, MerkleError>;
 
-    fn merkle_path(&self, root: Word, index: NodeIndex) -> Result<MerklePath, MerkleReadError>;
+    fn merkle_path(&self, root: Word, index: NodeIndex) -> Result<MerklePath, MerkleError>;
 }
 
 /// A read-only, processor-independent view passed by value to registered native handlers.
@@ -438,12 +424,12 @@ impl<'a> EventContext<'a> {
     }
 
     /// Returns a node from the advice Merkle store.
-    pub fn merkle_node(&self, root: Word, index: NodeIndex) -> Result<Word, MerkleReadError> {
+    pub fn merkle_node(&self, root: Word, index: NodeIndex) -> Result<Word, MerkleError> {
         self.provider.merkle_node(root, index)
     }
 
     /// Returns a path from the advice Merkle store.
-    pub fn merkle_path(&self, root: Word, index: NodeIndex) -> Result<MerklePath, MerkleReadError> {
+    pub fn merkle_path(&self, root: Word, index: NodeIndex) -> Result<MerklePath, MerkleError> {
         self.provider.merkle_path(root, index)
     }
 

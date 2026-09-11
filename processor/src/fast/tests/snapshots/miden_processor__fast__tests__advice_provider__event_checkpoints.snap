@@ -25,40 +25,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
             ],
-            stack_words: [
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-            ],
             mem_state: [
                 (
                     MemoryAddress(
@@ -109,40 +75,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
             ],
-            stack_words: [
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-            ],
             mem_state: [
                 (
                     MemoryAddress(
@@ -190,40 +122,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
                 0,
-            ],
-            stack_words: [
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
             ],
             mem_state: [
                 (
@@ -275,40 +173,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
             ],
-            stack_words: [
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-            ],
             mem_state: [
                 (
                     MemoryAddress(
@@ -359,40 +223,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
             ],
-            stack_words: [
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-            ],
             mem_state: [
                 (
                     MemoryAddress(
@@ -442,40 +272,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
                 0,
-            ],
-            stack_words: [
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
             ],
             mem_state: [
                 (
@@ -534,40 +330,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
                 0,
-            ],
-            stack_words: [
-                Word(
-                    [
-                        7,
-                        6,
-                        5,
-                        4,
-                    ],
-                ),
-                Word(
-                    [
-                        3,
-                        2,
-                        1,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
             ],
             mem_state: [
                 (
@@ -634,40 +396,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
             ],
-            stack_words: [
-                Word(
-                    [
-                        6,
-                        5,
-                        4,
-                        3,
-                    ],
-                ),
-                Word(
-                    [
-                        2,
-                        1,
-                        0,
-                        7,
-                    ],
-                ),
-                Word(
-                    [
-                        6,
-                        5,
-                        4,
-                        3,
-                    ],
-                ),
-                Word(
-                    [
-                        2,
-                        1,
-                        0,
-                        0,
-                    ],
-                ),
-            ],
             mem_state: [
                 (
                     MemoryAddress(
@@ -724,40 +452,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
             ],
-            stack_words: [
-                Word(
-                    [
-                        5,
-                        4,
-                        3,
-                        2,
-                    ],
-                ),
-                Word(
-                    [
-                        1,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-            ],
             mem_state: [
                 (
                     MemoryAddress(
@@ -813,40 +507,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
                 0,
-            ],
-            stack_words: [
-                Word(
-                    [
-                        5,
-                        4,
-                        3,
-                        2,
-                    ],
-                ),
-                Word(
-                    [
-                        1,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
             ],
             mem_state: [
                 (
@@ -928,40 +588,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
             ],
-            stack_words: [
-                Word(
-                    [
-                        5,
-                        4,
-                        3,
-                        2,
-                    ],
-                ),
-                Word(
-                    [
-                        1,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-            ],
             mem_state: [
                 (
                     MemoryAddress(
@@ -1042,40 +668,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
             ],
-            stack_words: [
-                Word(
-                    [
-                        5,
-                        4,
-                        3,
-                        2,
-                    ],
-                ),
-                Word(
-                    [
-                        1,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-            ],
             mem_state: [
                 (
                     MemoryAddress(
@@ -1149,40 +741,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
                 0,
-            ],
-            stack_words: [
-                Word(
-                    [
-                        5,
-                        4,
-                        3,
-                        2,
-                    ],
-                ),
-                Word(
-                    [
-                        1,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
             ],
             mem_state: [
                 (
@@ -1279,40 +837,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
                 0,
-            ],
-            stack_words: [
-                Word(
-                    [
-                        5,
-                        4,
-                        3,
-                        2,
-                    ],
-                ),
-                Word(
-                    [
-                        1,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
             ],
             mem_state: [
                 (
@@ -1466,40 +990,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
             ],
-            stack_words: [
-                Word(
-                    [
-                        5,
-                        4,
-                        3,
-                        2,
-                    ],
-                ),
-                Word(
-                    [
-                        1,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-            ],
             mem_state: [
                 (
                     MemoryAddress(
@@ -1603,40 +1093,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
                 0,
-            ],
-            stack_words: [
-                Word(
-                    [
-                        5,
-                        4,
-                        3,
-                        2,
-                    ],
-                ),
-                Word(
-                    [
-                        1,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
             ],
             mem_state: [
                 (
@@ -1765,40 +1221,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
                 0,
-            ],
-            stack_words: [
-                Word(
-                    [
-                        5,
-                        4,
-                        3,
-                        2,
-                    ],
-                ),
-                Word(
-                    [
-                        1,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
             ],
             mem_state: [
                 (
@@ -1951,40 +1373,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
                 0,
-            ],
-            stack_words: [
-                Word(
-                    [
-                        5,
-                        4,
-                        3,
-                        2,
-                    ],
-                ),
-                Word(
-                    [
-                        1,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
             ],
             mem_state: [
                 (
@@ -2139,40 +1527,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
             ],
-            stack_words: [
-                Word(
-                    [
-                        1,
-                        5,
-                        4,
-                        3,
-                    ],
-                ),
-                Word(
-                    [
-                        2,
-                        1,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-            ],
             mem_state: [
                 (
                     MemoryAddress(
@@ -2324,40 +1678,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
                 0,
-            ],
-            stack_words: [
-                Word(
-                    [
-                        5,
-                        4,
-                        3,
-                        2,
-                    ],
-                ),
-                Word(
-                    [
-                        1,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
             ],
             mem_state: [
                 (
@@ -2512,40 +1832,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
             ],
-            stack_words: [
-                Word(
-                    [
-                        0,
-                        5,
-                        4,
-                        3,
-                    ],
-                ),
-                Word(
-                    [
-                        2,
-                        1,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-            ],
             mem_state: [
                 (
                     MemoryAddress(
@@ -2697,40 +1983,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
                 0,
-            ],
-            stack_words: [
-                Word(
-                    [
-                        5,
-                        4,
-                        3,
-                        2,
-                    ],
-                ),
-                Word(
-                    [
-                        1,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
             ],
             mem_state: [
                 (
@@ -2885,40 +2137,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
             ],
-            stack_words: [
-                Word(
-                    [
-                        3,
-                        5,
-                        4,
-                        3,
-                    ],
-                ),
-                Word(
-                    [
-                        2,
-                        1,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-            ],
             mem_state: [
                 (
                     MemoryAddress(
@@ -3070,40 +2288,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
             ],
-            stack_words: [
-                Word(
-                    [
-                        2,
-                        5,
-                        4,
-                        3,
-                    ],
-                ),
-                Word(
-                    [
-                        2,
-                        1,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-            ],
             mem_state: [
                 (
                     MemoryAddress(
@@ -3254,40 +2438,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
                 0,
-            ],
-            stack_words: [
-                Word(
-                    [
-                        1,
-                        5,
-                        4,
-                        3,
-                    ],
-                ),
-                Word(
-                    [
-                        2,
-                        1,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
             ],
             mem_state: [
                 (
@@ -3442,40 +2592,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
             ],
-            stack_words: [
-                Word(
-                    [
-                        0,
-                        5,
-                        4,
-                        3,
-                    ],
-                ),
-                Word(
-                    [
-                        2,
-                        1,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-            ],
             mem_state: [
                 (
                     MemoryAddress(
@@ -3621,40 +2737,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
                 0,
-            ],
-            stack_words: [
-                Word(
-                    [
-                        0,
-                        5,
-                        4,
-                        3,
-                    ],
-                ),
-                Word(
-                    [
-                        2,
-                        1,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
             ],
             mem_state: [
                 (
@@ -3826,40 +2908,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
             ],
-            stack_words: [
-                Word(
-                    [
-                        5,
-                        4,
-                        3,
-                        2,
-                    ],
-                ),
-                Word(
-                    [
-                        1,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-            ],
             mem_state: [
                 (
                     MemoryAddress(
@@ -3939,40 +2987,6 @@ expression: fast_host.snapshots()
                 0,
                 0,
                 0,
-            ],
-            stack_words: [
-                Word(
-                    [
-                        5,
-                        4,
-                        3,
-                        2,
-                    ],
-                ),
-                Word(
-                    [
-                        1,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
-                Word(
-                    [
-                        0,
-                        0,
-                        0,
-                        0,
-                    ],
-                ),
             ],
             mem_state: [
                 (

@@ -20,7 +20,7 @@ use miden_crypto::{
         sha2::{Sha256, Sha512},
     },
 };
-use miden_event_handler::{AdviceBatch, EventContext, InvocationKind, MerkleReadError};
+use miden_event_handler::{AdviceBatch, EventContext, InvocationKind};
 use miden_event_handler_abi::{IMPORT_MODULE, MAX_FAIL_MSG_BYTES, MEMORY_EXPORT, Status, host_fn};
 use miden_processor::{
     Felt, Word,
@@ -519,7 +519,7 @@ fn merkle_get_node(
             write_felts(mem.data_mut(&mut caller), out, node.as_elements())?;
             Ok(OK)
         },
-        Err(MerkleReadError::Lookup(_)) => Ok(Status::NotFound.as_raw()),
+        Err(_) => Ok(Status::NotFound.as_raw()),
     }
 }
 

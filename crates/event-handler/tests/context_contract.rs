@@ -8,7 +8,7 @@ use miden_core::{
 };
 use miden_event_handler::{
     EventContext, EventContextError, EventContextProvider, Invocation, InvocationKind,
-    MemoryReadMode, MerkleReadError,
+    MemoryReadMode,
 };
 
 fn felt(value: u64) -> Felt {
@@ -78,20 +78,20 @@ impl EventContextProvider for FakeProvider {
         &self.advice_map
     }
 
-    fn merkle_node(&self, root: Word, index: NodeIndex) -> Result<Word, MerkleReadError> {
+    fn merkle_node(&self, root: Word, index: NodeIndex) -> Result<Word, MerkleError> {
         if root != self.merkle_root {
-            return Err(MerkleError::RootNotInStore(root).into());
+            return Err(MerkleError::RootNotInStore(root));
         }
         if index == NodeIndex::root() {
             Ok(root)
         } else if index == self.merkle_index {
             Ok(self.merkle_node)
         } else {
-            Err(MerkleError::NodeIndexNotFoundInStore(root, index).into())
+            Err(MerkleError::NodeIndexNotFoundInStore(root, index))
         }
     }
 
-    fn merkle_path(&self, root: Word, index: NodeIndex) -> Result<MerklePath, MerkleReadError> {
+    fn merkle_path(&self, root: Word, index: NodeIndex) -> Result<MerklePath, MerkleError> {
         assert_eq!((root, index), (self.merkle_root, self.merkle_index));
         Ok(self.merkle_path.clone())
     }

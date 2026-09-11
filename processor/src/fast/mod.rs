@@ -11,15 +11,13 @@ use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
     advice::{AdviceMap, AdviceStack},
-    crypto::merkle::{MerklePath, NodeIndex},
+    crypto::merkle::{MerkleError, MerklePath, NodeIndex},
     deferred::DeferredState,
     mast::{ExecutableMastForest, MastForest},
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
-use miden_event_handler::{
-    EventContextError, EventContextProvider, MemoryReadMode, MerkleReadError,
-};
+use miden_event_handler::{EventContextError, EventContextProvider, MemoryReadMode};
 use miden_mast_package::{
     Package,
     debug_info::{DebugSourceNodeId, PackageDebugInfo},
@@ -748,16 +746,12 @@ impl EventContextProvider for FastProcessor {
         self.advice.map()
     }
 
-    fn merkle_node(&self, root: Word, index: NodeIndex) -> Result<Word, MerkleReadError> {
-        self.advice.merkle_store().get_node(root, index).map_err(Into::into)
+    fn merkle_node(&self, root: Word, index: NodeIndex) -> Result<Word, MerkleError> {
+        self.advice.merkle_store().get_node(root, index)
     }
 
-    fn merkle_path(&self, root: Word, index: NodeIndex) -> Result<MerklePath, MerkleReadError> {
-        self.advice
-            .merkle_store()
-            .get_path(root, index)
-            .map(|value| value.path)
-            .map_err(Into::into)
+    fn merkle_path(&self, root: Word, index: NodeIndex) -> Result<MerklePath, MerkleError> {
+        self.advice.merkle_store().get_path(root, index).map(|value| value.path)
     }
 }
 
