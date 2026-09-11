@@ -6,6 +6,7 @@
 
 - Fixed `PartialMmr::track()` panicking when a leaf position did not belong to the tree selected by its authentication path ([#3804](https://github.com/0xMiden/miden-vm/pull/3804)).
 - Fixed 46 `\begin{cases}...\end{cases}` blocks in the assembly instruction reference and stack design docs that were missing the `\\` row separator between cases, which broke KaTeX rendering ([#3650](https://github.com/0xMiden/miden-vm/issues/3650)).
+- [BREAKING] Fixed caller stack preservation in the MVM and PVM MASM verifiers and updated their roots.
 
 ## v0.32.1 (2026-09-09)
 
