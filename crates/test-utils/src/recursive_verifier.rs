@@ -31,7 +31,7 @@ pub struct VerifierData {
 }
 
 impl VerifierData {
-    /// Operand stack for `verify_vm_proof`: `[CLAIM_COMMITMENT]`.
+    /// Operand stack for `vm::verify_proof`: `[CLAIM_COMMITMENT]`.
     pub fn initial_stack(&self) -> [u64; 4] {
         self.claim_commitment.into_elements().map(|felt| felt.as_canonical_u64())
     }
@@ -46,7 +46,7 @@ impl VerifierData {
 ///
 /// Production construction always creates a request package. This test adapter extracts that
 /// package's proof stream back onto the advice stack so low-level verifier tests can invoke
-/// `verify_vm_proof` without also exercising request lookup.
+/// `vm::verify_proof` without also exercising request lookup.
 pub fn generate_advice_inputs(
     verifier_root: Word,
     proof: &ExecutionProof,

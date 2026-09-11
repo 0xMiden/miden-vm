@@ -1,18 +1,61 @@
 # Changelog
 
-## v0.31.0 (TBD)
+## v0.33.0 (Unreleased)
+
+#### Fixes
+
+- Fixed 46 `\begin{cases}...\end{cases}` blocks in the assembly instruction reference and stack design docs that were missing the `\\` row separator between cases, which broke KaTeX rendering ([#3650](https://github.com/0xMiden/miden-vm/issues/3650)).
+
+## v0.32.1 (2026-09-09)
+
+#### Changes
+
+- Added type signatures for all procedures in the Miden core library ([#3791](https://github.com/0xMiden/miden-vm/pull/3791)). **NOTE:** This changes the package identity of the core library and any packages which dynamically link it. Packages which were assembled against 0.32.0 of the core library will need to be re-assembled (unless they statically linked the core library), otherwise executors that only load the latest version of the core library for you will be unable to resolve the older dependency.
+- Automatically infer procedure calling convention from known protocol ABI attributes ([#3802](https://github.com/0xMiden/miden-vm/pull/3802)).
+
+#### Fixes
+
+- Preserved the public `ParsingError` enum layout while adding protocol ABI attribute checks ([#3812](https://github.com/0xMiden/miden-vm/pull/3812)).
+- Fixed issue where parsing of pointer types dropped address space information ([#3790](https://github.com/0xMiden/miden-vm/pull/3790)).
+
+## v0.32.0 (2026-09-05)
+
+#### Changes
+
+- Cached loaded MAST forests in `FastProcessor` so repeated external calls reuse the forest and merge its advice map once ([#3764](https://github.com/0xMiden/miden-vm/pull/3764)).
+- [BREAKING] Removed the trace bus debugger APIs from `miden-air` and the `bus-debugger` feature from `miden-processor` ([#3775](https://github.com/0xMiden/miden-vm/pull/3775)).
+- [BREAKING] Bumped Plonky3 related dependencies to v0.7.0 ([#3778](https://github.com/0xMiden/miden-vm/pull/3778)).
+
+#### Fixes
+- Fixed stack overflow in the precompile prover's `translate_truthy`, `translate_uint`, and `translate_ec` by converting them from recursive to iterative post-order traversals. Programs with many `LOGDEFERRED` calls no longer crash ([#3626](https://github.com/0xMiden/miden-vm/issues/3626)).
+
+## v0.31.1 (2026-09-04)
+
+#### Changes
+
+- Re-exported the security estimator types used in public proof APIs so downstream callers can name them through Miden crates ([#3774](https://github.com/0xMiden/miden-vm/pull/3774)).
+
+## v0.31.0 (2026-09-02)
 
 #### Features
 
+- Added `has_precompiles()` to `ExecutionWitness` and `ExecutionProof` so callers can check for precompile work without consuming the witness or inspecting proof variants ([#3757](https://github.com/0xMiden/miden-vm/pull/3757)).
 - [BREAKING] Added a conjectured security estimator for the main VM and the precompiles VM ([#3688](https://github.com/0xMiden/miden-vm/pull/3688)).
 
 #### Changes
 
+- Cached loaded MAST forests in `FastProcessor` so repeated external calls reuse the forest and merge its advice map once ([#3764](https://github.com/0xMiden/miden-vm/pull/3764)).
 - Split the assembly crate's monolithic `tests.rs` into thematic modules under `crates/assembly/src/tests/` ([#3379](https://github.com/0xMiden/miden-vm/pull/3379)).
+- [BREAKING] Split precompile AIR and verification code from `miden-precompiles-prover` into `miden-precompiles-air` and `miden-precompiles-verifier`. Verifier users no longer build prover-only trace and witness code. Existing PVM proof bytes remain compatible ([#3734](https://github.com/0xMiden/miden-vm/pull/3734)).
+- [BREAKING] Removed the unused `SmtForest` type from `miden-crypto`. Use `LargeSmtForest` for shared SMT storage ([#3746](https://github.com/0xMiden/miden-vm/pull/3746)).
+- [BREAKING] Made native MVM and PVM verifiers return proof security parameters and their MASM counterparts return a common descriptor for a shared estimator, renamed the MVM MASM entry point to `sys::vm::verify_proof` and its root accessor to `vm_recursive_verifier_root`, and removed the legacy query-only estimator ([#3752](https://github.com/0xMiden/miden-vm/pull/3752)).
+- [BREAKING] Added format and compatible VM and PVM verifier roots to `ExecutionProof`. Its precompile state now uses `PrecompileStatus`. Duplicate roots and old unversioned proof bytes are rejected ([#3753](https://github.com/0xMiden/miden-vm/pull/3753)).
 
 #### Fixes
 
 - [BREAKING] Limited bare `exp` to 63 exponent bits. It now lowers to `exp.u63` (72 cycles) and fails for exponents greater than or equal to `2^63`. Existing MAST artifacts containing the previous bare-`exp` lowering must be reassembled to use the new bound ([#3712](https://github.com/0xMiden/miden-vm/pull/3712)).
+- [BREAKING] Relaxes the deferred MSM contract to accept valid edge cases ([#3740](https://github.com/0xMiden/miden-vm/pull/3740)).
+- Hardened `ExecutionWitness` byte decoding with an input-sized budget and rejection of trailing bytes. Added an explicit trusted reader for sparse replay data ([#3758](https://github.com/0xMiden/miden-vm/pull/3758)).
 
 ## v0.30.0 (2026-08-26)
 
@@ -158,6 +201,8 @@
 ## v0.29.0 (2026-08-04)
 
 #### Changes
+- `FastProcessor` `restore_call_state()` and `restore_context()` now return `OperationError::Internal` instead of panicking on empty stacks ([#3371](https://github.com/0xMiden/miden-vm/pull/3371), fixes [#3296](https://github.com/0xMiden/miden-vm/issues/3296)).
+- Added `dup u32lt.64 assert.err` boundary checks to `u64::shl`, `u64::shr`, `u64::rotl`, and `u64::rotr` and updated cycle counts ([#3368](https://github.com/0xMiden/miden-vm/pull/3368), fixes [#3360](https://github.com/0xMiden/miden-vm/issues/3360)).
 
 - [BREAKING] Recursive MASM verification now accepts a claim commitment and authenticates the advice-supplied claim and kernel witness. Rust callers construct request-addressed inputs with `RecursiveVerifierInputs::for_request` ([#3447](https://github.com/0xMiden/miden-vm/pull/3447)).
 

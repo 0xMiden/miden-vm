@@ -46,8 +46,6 @@ latest_release_tag_on_head() {
 
 parse_version "$workspace_version" current
 
-git -C "$repo_root" fetch --tags origin
-
 baseline_tag="$(latest_release_tag_on_head)"
 if [[ -z "$baseline_tag" ]]; then
     echo "No release tag found on the current branch history; skipping MASM root stability check"
@@ -107,11 +105,11 @@ for project in "${projects[@]}"; do
         continue
     fi
 
-    echo "Checking MASM root stability for $relative_project against $baseline_tag"
+    echo "Checking MASM release compatibility for $relative_project against $baseline_tag"
     RUSTC_WRAPPER= rustup run nightly cargo -Zscript \
         "$check_script" \
         "$baseline_project" \
         "$current_project"
 done
 
-echo "MASM procedure roots are stable against $baseline_tag"
+echo "MASM release compatibility checks passed against $baseline_tag"

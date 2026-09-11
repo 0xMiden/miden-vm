@@ -1,4 +1,10 @@
-use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    vec,
+    vec::Vec,
+};
 use core::{cmp::min, ops::ControlFlow};
 
 use miden_air::{Felt, trace::RowIndex};
@@ -15,7 +21,8 @@ use miden_mast_package::{
 };
 
 use crate::{
-    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ProcessorState,
+    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, LoadedMastForest,
+    ProcessorState,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
@@ -122,6 +129,12 @@ pub struct FastProcessor {
 
     /// The advice provider to be used during execution.
     advice: AdviceProvider,
+
+    /// MAST forests loaded during this execution, indexed by their local procedure digests.
+    loaded_mast_forests: BTreeMap<Word, LoadedMastForest>,
+
+    /// Commitments of MAST forests whose advice maps have been merged into the advice provider.
+    merged_mast_forests: BTreeSet<Word>,
 
     /// A map from (context_id, word_address) to the word stored starting at that memory location.
     memory: Memory,
@@ -276,6 +289,8 @@ impl FastProcessor {
 
         Ok(Self {
             advice: AdviceProvider::new(advice_inputs, &options)?,
+            loaded_mast_forests: BTreeMap::new(),
+            merged_mast_forests: BTreeSet::new(),
             stack,
             stack_top_idx,
             stack_bot_idx: stack_top_idx - MIN_STACK_DEPTH,

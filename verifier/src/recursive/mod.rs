@@ -1,12 +1,12 @@
 //! Building the advice a MASM recursive verifier consumes to verify a Miden VM proof.
 //!
-//! `exec.vm::verify_vm_proof` reads a STARK proof from the advice provider in a fixed
+//! `exec.vm::verify_proof` reads a STARK proof from the advice provider in a fixed
 //! order. This module is the producer side of that ABI: it selects the VM component of an
 //! [`ExecutionProof`] and packages it against its [`ExecutionClaim`] into the advice-stack stream,
 //! the Merkle store, and the advice-map entries the verifier consumes. Its authenticated
 //! precompile root is part of the VM statement; a completed precompile STARK is not verified here.
 //!
-//! Before calling `verify_vm_proof`, the consumer places this proof stream on top of the advice
+//! Before calling `vm::verify_proof`, the consumer places this proof stream on top of the advice
 //! stack:
 //!
 //!   security params (nq, query_pow, deep_pow, folding_pow) ->
@@ -15,9 +15,9 @@
 //!   DEEP PoW witness -> FRI rounds -> FRI remainder -> query PoW witness
 //!
 //! [`RecursiveVerifierInputs::for_request`] stores this stream in the advice map under the verifier
-//! and claim commitments. The consumer fetches it before calling `verify_vm_proof`. The consumer
+//! and claim commitments. The consumer fetches it before calling `vm::verify_proof`. The consumer
 //! also supplies the claim commitment; the advice map stores its 40-felt preimage under that
-//! commitment, and `verify_vm_proof` authenticates the preimage before using it. The advice map
+//! commitment, and `vm::verify_proof` authenticates the preimage before using it. The advice map
 //! stores the flattened kernel procedure digests under the kernel commitment as well. Query rows,
 //! the Merkle store, and the ACE circuit are content-addressed too.
 
@@ -64,7 +64,7 @@ type P2ProofData = StarkProofData<Felt, Challenge, P2Config>;
 /// Request-packaged inputs for MASM recursive verification.
 ///
 /// Pass [`Self::claim_commitment`] on the operand stack. The consumer derives the request key,
-/// fetches the proof stream from the advice map, and then invokes `exec.vm::verify_vm_proof`.
+/// fetches the proof stream from the advice map, and then invokes `exec.vm::verify_proof`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RecursiveVerifierInputs {
     advice: AdviceInputs,
@@ -114,14 +114,12 @@ impl RecursiveVerifierInputs {
     }
 }
 
-/// Builds the raw advice consumed by `verify_vm_proof` before request packaging.
+/// Builds the raw advice consumed by `vm::verify_proof` before request packaging.
 fn build_verifier_inputs(
     proof: &ExecutionProof,
     claim: &ExecutionClaim,
 ) -> Result<RecursiveVerifierInputs, RecursiveVerifierInputsError> {
-    let vm = match proof {
-        ExecutionProof::Deferred { vm, .. } | ExecutionProof::Complete { vm, .. } => vm,
-    };
+    let vm = proof.vm();
     let stark = &vm.proof;
     if stark.hash_fn() != HashFunction::Poseidon2 {
         return Err(RecursiveVerifierInputsError::UnsupportedHashFunction(stark.hash_fn()));
@@ -455,7 +453,7 @@ mod tests {
     use miden_core::{
         crypto::merkle::InnerNodeInfo,
         program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
-        proof::{StarkProof as CoreStarkProof, VmProof},
+        proof::{PrecompileStatus, StarkProof as CoreStarkProof, VmProof},
     };
 
     use super::*;
@@ -464,13 +462,13 @@ mod tests {
     /// bytes — the recursive verifier verifies only Poseidon2 STARKs.
     #[test]
     fn recursive_verifier_inputs_reject_non_poseidon2_proofs() {
-        let proof = ExecutionProof::Complete {
-            vm: VmProof {
+        let proof = ExecutionProof::new(
+            VmProof {
                 proof: CoreStarkProof::new(Vec::new(), HashFunction::Blake3_256),
                 precompile_root: Word::default(),
             },
-            precompile: None,
-        };
+            PrecompileStatus::Empty,
+        );
         let claim = ExecutionClaim::from_program_info(
             ProgramInfo::new(Word::default(), KernelDescriptor::default()),
             StackInputs::default(),

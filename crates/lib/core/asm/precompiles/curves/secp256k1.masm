@@ -19,7 +19,12 @@ use miden::core::precompiles::fields::k1_base
 # - raw coordinate digests and raw VALUE payloads are checked at VALUE evaluation boundaries;
 # - ADD/SUB/MSM operands are evaluated to canonical curve/scalar VALUE nodes before arithmetic;
 # - invalid coordinates, wrong-domain coordinate digests, mixed identity payloads, and non-curve
-#   digests fail during deferred registration/evaluation.
+#   digests fail during deferred registration/evaluation;
+# - MSM (`mul_scalar`, `mul_scalar_generator`, `msm_mem`, `msm2`, `msm2_generator`) accepts a zero
+#   scalar for any pair (contributing identity to the sum) and a repeated, or structurally
+#   different but canonically equal, base across pairs; the result may itself be the identity
+#   point. An identity VALUE is rejected as an MSM base, failing the same way the other invalid
+#   cases above do.
 #
 # Notation used below:
 # - DIGEST        = one word [d0, d1, d2, d3], d0 on top of the stack.
@@ -47,10 +52,21 @@ const MSM_TAG = [7090426675861304240, 4, 0, 0]
 const IDENTITY_DIGEST = [851725483206300230, 12830539630061264779, 16983070581150535, 17720054648688775496]
 const GENERATOR_DIGEST = [1154242433106308063, 1742870056894305354, 17990719671958136799, 18281642853465023238]
 
+#! Deferred secp256k1 point expression digest.
+pub type Point = word
+#! Deferred scalar expression digest for scalar multiplication.
+pub type Scalar = word
+#! Canonical coordinate VALUE digest, or TRUE_DIGEST for an identity coordinate.
+pub type Coordinate = word
+#! Canonical point payload in X, Y stack order.
+pub type PointValue = struct { x: Coordinate, y: Coordinate }
+#! An MSM term in point, scalar stack order.
+pub type MsmTerm = struct { point: Point, scalar: Scalar }
+
 #! Constructs an affine curve VALUE node from two coordinate digests.
 #! Input:  [X_DIGEST, Y_DIGEST, ...]
 #! Output: [POINT_DIGEST, ...]
-pub proc load_digest_pair
+pub proc load_digest_pair(value: PointValue) -> Point
     push.VALUE_TAG
     # => [TAG(VALUE), X_DIGEST, Y_DIGEST, ...]
     exec.precompiles::register_expr
@@ -61,7 +77,7 @@ end
 #! Input:  [ptr, ...]
 #! Output: [POINT_DIGEST, ptr+8, ...]
 #! Memory layout: ptr[0..4] = X_DIGEST, ptr[4..8] = Y_DIGEST.
-pub proc load_digest_pair_mem_stream
+pub proc load_digest_pair_mem_stream(ptr: ptr<PointValue>) -> (Point, ptr<PointValue>)
     push.VALUE_TAG
     # => [TAG(VALUE), ptr, ...]
     push.1 movdn.5
@@ -81,7 +97,7 @@ end
 #! Loads two registered coordinate digests from memory and returns the point digest.
 #! Input:  [ptr, ...]
 #! Output: [POINT_DIGEST, ...]
-pub proc load_digest_pair_mem
+pub proc load_digest_pair_mem(ptr: ptr<PointValue>) -> Point
     exec.load_digest_pair_mem_stream
     # => [POINT_DIGEST, ptr+8, ...]
     movup.4 drop
@@ -92,7 +108,7 @@ end
 #! Input:  [ptr, ...]
 #! Output: [POINT_DIGEST, ptr+16, ...]
 #! Memory layout: ptr[0..8] = X_U32[8], ptr[8..16] = Y_U32[8].
-pub proc load_mem_stream
+pub proc load_mem_stream(ptr: ptr<u32>) -> (Point, ptr<u32>)
     # Load Y from ptr+8 while preserving the original ptr underneath.
     dup
     add.8
@@ -114,7 +130,7 @@ end
 #! Loads two consecutive base-field elements from memory as an affine point.
 #! Input:  [ptr, ...]
 #! Output: [POINT_DIGEST, ...]
-pub proc load_mem
+pub proc load_mem(ptr: ptr<u32>) -> Point
     exec.load_mem_stream
     # => [POINT_DIGEST, ptr+16, ...]
     movup.4 drop
@@ -122,19 +138,19 @@ pub proc load_mem
 end
 
 #! Pushes the registered digest of the curve identity point.
-pub proc push_identity
+pub proc push_identity() -> Point
     push.IDENTITY_DIGEST
 end
 
 #! Pushes the registered digest of the conventional curve generator.
-pub proc push_generator
+pub proc push_generator() -> Point
     push.GENERATOR_DIGEST
 end
 
 #! Registers `lhs + rhs` and returns the result expression digest.
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [SUM_DIGEST, ...]
-pub proc add
+pub proc add(lhs: Point, rhs: Point) -> Point
     push.ADD_TAG
     # => [TAG(ADD), LHS_DIGEST, RHS_DIGEST, ...]
     exec.precompiles::register_expr
@@ -144,7 +160,7 @@ end
 #! Registers `lhs - rhs` and returns the result expression digest.
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [DIFF_DIGEST, ...]
-pub proc sub
+pub proc sub(lhs: Point, rhs: Point) -> Point
     push.SUB_TAG
     # => [TAG(SUB), LHS_DIGEST, RHS_DIGEST, ...]
     exec.precompiles::register_expr
@@ -155,7 +171,7 @@ end
 #! Registers `[k]point` for a scalar-field digest.
 #! Input:  [POINT_DIGEST, SCALAR_DIGEST, ...]
 #! Output: [PRODUCT_POINT_DIGEST, ...]
-pub proc mul_scalar
+pub proc mul_scalar(point: Point, scalar: Scalar) -> Point
     push.MSM_TAG
     # => [TAG(MSM), POINT_DIGEST, SCALAR_DIGEST, ...]
     exec.precompiles::register_expr
@@ -165,7 +181,7 @@ end
 #! Registers `[k]GENERATOR` for a scalar-field digest.
 #! Input:  [SCALAR_DIGEST, ...]
 #! Output: [PRODUCT_POINT_DIGEST, ...]
-pub proc mul_scalar_generator
+pub proc mul_scalar_generator(scalar: Scalar) -> Point
     push.GENERATOR_DIGEST
     # => [GENERATOR_DIGEST, SCALAR_DIGEST, ...]
     exec.mul_scalar
@@ -176,7 +192,7 @@ end
 #! Input:  [ptr, n, ...]
 #! Output: [MSM_POINT_DIGEST, ...]
 #! Memory layout: pair i at ptr + 8*i is `[POINT_DIGEST, SCALAR_DIGEST]`.
-pub proc msm_mem
+pub proc msm_mem(ptr: ptr<MsmTerm>, n: u32) -> Point
     push.MSM_TAG
     # => [TAG(MSM), ptr, n, ...]
     exec.precompiles::register_mem
@@ -187,7 +203,7 @@ end
 #! Input:  [POINT0_DIGEST, SCALAR0_DIGEST, POINT1_DIGEST, SCALAR1_DIGEST, ...]
 #! Output: [MSM_POINT_DIGEST, ...]
 @locals(16)
-pub proc msm2
+pub proc msm2(term0: MsmTerm, term1: MsmTerm) -> Point
     loc_storew_le.0 dropw
     loc_storew_le.4 dropw
     loc_storew_le.8 dropw
@@ -201,7 +217,7 @@ end
 #! Registers `[scalar0]GENERATOR + [scalar1]point1` as a two-pair MSM.
 #! Input:  [SCALAR0_DIGEST, SCALAR1_DIGEST, POINT1_DIGEST, ...]
 #! Output: [MSM_POINT_DIGEST, ...]
-pub proc msm2_generator
+pub proc msm2_generator(scalar0: Scalar, scalar1: Scalar, point1: Point) -> Point
     push.GENERATOR_DIGEST
     # => [GENERATOR_DIGEST, SCALAR0_DIGEST, SCALAR1_DIGEST, POINT1_DIGEST, ...]
     movupw.3 movdnw.2
@@ -213,7 +229,7 @@ end
 #! Asserts two curve expressions are equal by logging an EQ predicate into the deferred root.
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [...]
-pub proc assert_eq
+pub proc assert_eq(lhs: Point, rhs: Point)
     push.EQ_TAG
     # => [TAG(EQ), LHS_DIGEST, RHS_DIGEST, ...]
     exec.precompiles::register_expr
@@ -227,7 +243,7 @@ end
 #! Output: [POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, ...]
 #! Advice is untrusted. This wrapper re-hashes the advised VALUE payload with the registered VALUE_TAG and
 #! logs `eq(EXPR_DIGEST, VALUE_DIGEST)` before returning the value digest and coordinate digests.
-pub proc eval
+pub proc eval(point: Point) -> (Point, PointValue)
     adv.evaluate_deferred_payload
     # => [EXPR_DIGEST, ...]
 
@@ -264,7 +280,7 @@ end
 #! Output: [POINT_VALUE_DIGEST, ...]
 #! Advice is untrusted. This is the digest-only form of `eval` for callers that do not need the
 #! coordinate digests.
-proc eval_digest
+proc eval_digest(point: Point) -> Point
     adv.evaluate_deferred_payload
     # => [EXPR_DIGEST, ...]
 
@@ -293,7 +309,7 @@ end
 #! Evaluates two curve expression digests and returns whether their canonical VALUE digests match.
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [is_equal, ...]
-pub proc is_eq
+pub proc is_eq(lhs: Point, rhs: Point) -> i1
     exec.eval_digest
     # => [LHS_VALUE_DIGEST, RHS_DIGEST, ...]
     swapw
@@ -307,7 +323,7 @@ end
 #! Evaluates a curve expression digest and returns whether its canonical VALUE digest matches target.
 #! Input:  [TARGET_DIGEST, EXPR_DIGEST, ...]
 #! Output: [is_equal, ...]
-pub proc is_eq_digest
+pub proc is_eq_digest(target: Point, value: Point) -> i1
     swapw
     # => [EXPR_DIGEST, TARGET_DIGEST, ...]
     exec.eval_digest
@@ -319,7 +335,7 @@ end
 #! Evaluates a curve expression and returns whether it is the identity point.
 #! Input:  [POINT_DIGEST, ...]
 #! Output: [is_identity, ...]
-pub proc is_identity
+pub proc is_identity(point: Point) -> i1
     push.IDENTITY_DIGEST
     # => [IDENTITY_DIGEST, POINT_DIGEST, ...]
     exec.is_eq_digest
@@ -329,14 +345,14 @@ end
 #! Asserts a curve expression equals a target curve expression by logging an EQ predicate.
 #! Input:  [TARGET_DIGEST, EXPR_DIGEST, ...]
 #! Output: [...]
-pub proc assert_eq_digest
+pub proc assert_eq_digest(target: Point, value: Point)
     exec.assert_eq
 end
 
 #! Asserts a curve expression is the identity point.
 #! Input:  [POINT_DIGEST, ...]
 #! Output: [...]
-pub proc assert_identity
+pub proc assert_identity(point: Point)
     push.IDENTITY_DIGEST
     # => [IDENTITY_DIGEST, POINT_DIGEST, ...]
     exec.assert_eq_digest
@@ -345,7 +361,7 @@ end
 #! Evaluates a curve expression and asserts it is not the identity point.
 #! Input:  [POINT_DIGEST, ...]
 #! Output: [...]
-pub proc assert_not_identity
+pub proc assert_not_identity(point: Point)
     exec.eval_digest
     # => [VALUE_DIGEST, ...]
     push.IDENTITY_DIGEST
@@ -358,7 +374,7 @@ end
 #! Negates a point by computing O - P.
 #! Input:  [POINT_DIGEST, ...]
 #! Output: [NEG_POINT_DIGEST, ...]
-pub proc neg
+pub proc neg(point: Point) -> Point
     push.IDENTITY_DIGEST
     # => [IDENTITY_DIGEST, POINT_DIGEST, ...]
     exec.sub
@@ -368,7 +384,7 @@ end
 #! Doubles a point by computing P + P.
 #! Input:  [POINT_DIGEST, ...]
 #! Output: [DOUBLE_POINT_DIGEST, ...]
-pub proc double
+pub proc double(point: Point) -> Point
     dupw
     # => [POINT_DIGEST, POINT_DIGEST, ...]
     exec.add

@@ -1,4 +1,5 @@
 use alloc::{
+    collections::BTreeSet,
     string::{String, ToString},
     vec::Vec,
 };
@@ -7,6 +8,7 @@ use alloc::{
 use proptest::prelude::*;
 
 use crate::{
+    Word,
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
     deferred::{DeferredRoot, DeferredStateWire, MAX_PRECOMPILE_ROOTS},
     serde::{
@@ -14,6 +16,30 @@ use crate::{
         SliceReader,
     },
 };
+
+// CONSTANTS
+// ================================================================================================
+
+/// Hard encoded-size and per-allocation safety ceiling for every STARK proof.
+pub const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
+
+const DEFERRED_PROOF_DISCRIMINANT: u8 = 0;
+const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
+
+/// The recursive VM verifier root declared by proofs from the current prover.
+pub const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
+    crate::Felt::new_unchecked(3472736072004736895),
+    crate::Felt::new_unchecked(9258997376938263475),
+    crate::Felt::new_unchecked(2749074330562194466),
+    crate::Felt::new_unchecked(16770332914073895013),
+]);
+/// The recursive precompile verifier root declared by proofs from the current prover.
+pub const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
+    crate::Felt::new_unchecked(9567976034529193007),
+    crate::Felt::new_unchecked(16098679426107462596),
+    crate::Felt::new_unchecked(270852360285345822),
+    crate::Felt::new_unchecked(12812280715059172950),
+]);
 
 // HASH FUNCTION
 // ================================================================================================
@@ -125,9 +151,6 @@ impl Deserializable for HashFunction {
 // PROOF ARTIFACTS
 // ================================================================================================
 
-/// Hard encoded-size and per-allocation safety ceiling for every STARK proof.
-pub const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
-
 /// A Miden VM STARK proof together with its authenticated precompile obligation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VmProof {
@@ -213,62 +236,180 @@ impl Deserializable for PrecompileProof {
     }
 }
 
-const DEFERRED_PROOF_DISCRIMINANT: u8 = 0;
-const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
+/// The transport format and recursive verifier roots declared by an execution proof.
+///
+/// Verifier roots are listed in chronological order, with the newest root last. Root order does
+/// not affect compatibility checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionProofCompatibility {
+    format: u8,
+    vm_verifier_roots: Vec<Word>,
+    pvm_verifier_roots: Vec<Word>,
+}
 
-/// A Miden VM execution proof, either awaiting precompile proving or complete.
+impl ExecutionProofCompatibility {
+    /// The first execution proof transport format.
+    pub const FORMAT_V1: u8 = 1;
+
+    /// Creates a proof compatibility declaration for format `1`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if either verifier root list contains duplicates.
+    pub fn new(
+        vm_verifier_roots: Vec<Word>,
+        pvm_verifier_roots: Vec<Word>,
+    ) -> Result<Self, ExecutionProofCompatibilityError> {
+        if has_duplicate(&vm_verifier_roots) {
+            return Err(ExecutionProofCompatibilityError::DuplicateVmVerifierRoot);
+        }
+        if has_duplicate(&pvm_verifier_roots) {
+            return Err(ExecutionProofCompatibilityError::DuplicatePvmVerifierRoot);
+        }
+
+        Ok(Self {
+            format: Self::FORMAT_V1,
+            vm_verifier_roots,
+            pvm_verifier_roots,
+        })
+    }
+
+    /// Returns the compatibility declared by proofs produced by the current prover.
+    pub fn current() -> Self {
+        Self::new(alloc::vec![CURRENT_VM_VERIFIER_ROOT], alloc::vec![CURRENT_PVM_VERIFIER_ROOT])
+            .expect("current execution proof compatibility must not contain duplicate roots")
+    }
+
+    /// Returns the transport format.
+    pub const fn format(&self) -> u8 {
+        self.format
+    }
+
+    /// Returns the VM verifier roots which can be used to verify this proof.
+    ///
+    /// The roots are unique and listed in chronological order with the most recent verifier listed
+    /// last.
+    pub fn vm_verifier_roots(&self) -> &[Word] {
+        &self.vm_verifier_roots
+    }
+
+    /// Returns the precompile VM verifier roots which can be used to verify the precompile proof
+    /// associated with this execution proof, if any.
+    ///
+    /// The roots are unique and listed in chronological order with the most recent verifier listed
+    /// last.
+    pub fn pvm_verifier_roots(&self) -> &[Word] {
+        &self.pvm_verifier_roots
+    }
+}
+
+/// Errors returned while constructing execution proof compatibility metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ExecutionProofCompatibilityError {
+    /// The VM verifier root list contains a duplicate.
+    #[error("VM verifier roots must not contain duplicates")]
+    DuplicateVmVerifierRoot,
+    /// The precompile VM verifier root list contains a duplicate.
+    #[error("PVM verifier roots must not contain duplicates")]
+    DuplicatePvmVerifierRoot,
+}
+
+/// The state of precompile work associated with an execution proof.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrecompileStatus {
+    /// The VM made no precompile requests.
+    Empty,
+    /// The VM made precompile requests which have not been proven.
+    Deferred(DeferredStateWire),
+    /// The VM made precompile requests and their proof is available.
+    Proven(PrecompileProof),
+}
+
+/// A versioned Miden VM execution proof.
 ///
 /// This type preserves proof artifacts without establishing their validity.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ExecutionProof {
-    /// The VM STARK and deferred precompile wire are available.
-    Deferred {
-        vm: VmProof,
-        precompile: DeferredStateWire,
-    },
-    /// The proof lifecycle is complete, with an optional precompile proof.
-    Complete {
-        vm: VmProof,
-        precompile: Option<PrecompileProof>,
-    },
+pub struct ExecutionProof {
+    compatibility: ExecutionProofCompatibility,
+    vm: VmProof,
+    precompile: PrecompileStatus,
 }
 
 impl ExecutionProof {
+    /// Creates an execution proof with the compatibility declared by the current prover.
+    pub fn new(vm: VmProof, precompile: PrecompileStatus) -> Self {
+        Self::from_parts(ExecutionProofCompatibility::current(), vm, precompile)
+    }
+
+    /// Creates an execution proof from its compatibility, VM proof, and precompile state.
+    pub const fn from_parts(
+        compatibility: ExecutionProofCompatibility,
+        vm: VmProof,
+        precompile: PrecompileStatus,
+    ) -> Self {
+        Self { compatibility, vm, precompile }
+    }
+
+    /// Returns the compatibility declared by this proof.
+    pub const fn compatibility(&self) -> &ExecutionProofCompatibility {
+        &self.compatibility
+    }
+
+    /// Returns the VM proof.
+    pub const fn vm(&self) -> &VmProof {
+        &self.vm
+    }
+
+    /// Returns the state of the precompile work.
+    pub const fn precompile(&self) -> &PrecompileStatus {
+        &self.precompile
+    }
+
+    /// Splits this proof into its compatibility, VM proof, and precompile state.
+    pub fn into_parts(self) -> (ExecutionProofCompatibility, VmProof, PrecompileStatus) {
+        (self.compatibility, self.vm, self.precompile)
+    }
+
     /// Returns whether this proof has completed its lifecycle transition.
     pub const fn is_complete(&self) -> bool {
-        matches!(self, Self::Complete { .. })
+        !matches!(self.precompile, PrecompileStatus::Deferred(_))
+    }
+
+    /// Returns whether this proof contains precompile work.
+    pub const fn has_precompiles(&self) -> bool {
+        !matches!(self.precompile, PrecompileStatus::Empty)
     }
 
     /// Transitions a deferred proof to complete by attaching a precompile proof.
-    pub fn complete(self, precompile: PrecompileProof) -> Result<Self, ExecutionProofError> {
-        let Self::Deferred { vm, .. } = self else {
+    ///
+    /// This method does not verify the precompile proof or check it against the VM proof. The
+    /// verifier performs those checks.
+    pub fn complete(mut self, precompile: PrecompileProof) -> Result<Self, ExecutionProofError> {
+        if !matches!(self.precompile, PrecompileStatus::Deferred(_)) {
             return Err(ExecutionProofError::AlreadyComplete);
-        };
-        Ok(Self::Complete { vm, precompile: Some(precompile) })
+        }
+        self.precompile = PrecompileStatus::Proven(precompile);
+        Ok(self)
     }
 
-    /// Encodes either state canonically.
-    ///
-    /// Encoding preserves the public enum representation and does not establish proof validity.
+    /// Encodes this proof canonically.
     pub fn to_bytes(&self) -> Vec<u8> {
         Serializable::to_bytes(self)
     }
 
-    /// Decodes an execution proof without hydrating passive deferred wire.
-    ///
-    /// Decoding establishes bounded canonical transport syntax, not proof validity.
+    /// Decodes a complete versioned proof from canonical bytes.
     pub fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
         let proof = <Self as Deserializable>::read_from(&mut reader)?;
 
         if reader.has_more_bytes() {
             return Err(DeserializationError::InvalidValue(
-                "extra bytes after execution proof payload".into(),
+                "extra bytes after versioned proof payload".into(),
             ));
         }
         if proof.to_bytes() != bytes {
             return Err(DeserializationError::InvalidValue(
-                "execution proof bytes are not canonically encoded".into(),
+                "versioned proof bytes are not canonically encoded".into(),
             ));
         }
 
@@ -278,23 +419,63 @@ impl ExecutionProof {
 
 impl Serializable for ExecutionProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        match self {
-            Self::Deferred { vm, precompile } => {
-                target.write_u8(DEFERRED_PROOF_DISCRIMINANT);
-                vm.write_into(target);
-                precompile.write_into(target);
-            },
-            Self::Complete { vm, precompile } => {
-                target.write_u8(COMPLETE_PROOF_DISCRIMINANT);
-                vm.write_into(target);
-                precompile.write_into(target);
-            },
-        }
+        target.write_u8(self.compatibility.format);
+        self.compatibility.vm_verifier_roots.write_into(target);
+        self.compatibility.pvm_verifier_roots.write_into(target);
+        self.write_into_v1(target);
     }
 }
 
 impl Deserializable for ExecutionProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let format = source.read_u8()?;
+        if format != ExecutionProofCompatibility::FORMAT_V1 {
+            return Err(DeserializationError::InvalidValue(format!(
+                "unsupported execution proof format {format}"
+            )));
+        }
+
+        let vm_verifier_roots = Vec::<Word>::read_from(source)?;
+        let pvm_verifier_roots = Vec::<Word>::read_from(source)?;
+        let compatibility = ExecutionProofCompatibility::new(vm_verifier_roots, pvm_verifier_roots)
+            .map_err(|error| DeserializationError::InvalidValue(error.to_string()))?;
+
+        Self::read_from_v1(source, compatibility)
+    }
+
+    fn min_serialized_size() -> usize {
+        u8::min_serialized_size()
+            + Vec::<Word>::min_serialized_size()
+            + Vec::<Word>::min_serialized_size()
+            + ExecutionProof::min_serialized_size_v1()
+    }
+}
+
+impl ExecutionProof {
+    fn write_into_v1<W: ByteWriter>(&self, target: &mut W) {
+        match &self.precompile {
+            PrecompileStatus::Deferred(precompile) => {
+                target.write_u8(DEFERRED_PROOF_DISCRIMINANT);
+                self.vm.write_into(target);
+                precompile.write_into(target);
+            },
+            PrecompileStatus::Empty => {
+                target.write_u8(COMPLETE_PROOF_DISCRIMINANT);
+                self.vm.write_into(target);
+                Option::<PrecompileProof>::None.write_into(target);
+            },
+            PrecompileStatus::Proven(precompile) => {
+                target.write_u8(COMPLETE_PROOF_DISCRIMINANT);
+                self.vm.write_into(target);
+                Some(precompile).write_into(target);
+            },
+        }
+    }
+
+    fn read_from_v1<R: ByteReader>(
+        source: &mut R,
+        compatibility: ExecutionProofCompatibility,
+    ) -> Result<Self, DeserializationError> {
         let discriminant = source.read_u8()?;
         if !matches!(discriminant, DEFERRED_PROOF_DISCRIMINANT | COMPLETE_PROOF_DISCRIMINANT) {
             return Err(DeserializationError::InvalidValue(format!(
@@ -303,20 +484,21 @@ impl Deserializable for ExecutionProof {
         }
 
         let vm = VmProof::read_from(source)?;
-        match discriminant {
+        let precompile = match discriminant {
             DEFERRED_PROOF_DISCRIMINANT => {
-                let precompile = DeferredStateWire::read_from(source)?;
-                Ok(Self::Deferred { vm, precompile })
+                PrecompileStatus::Deferred(DeferredStateWire::read_from(source)?)
             },
-            COMPLETE_PROOF_DISCRIMINANT => {
-                let precompile = Option::<PrecompileProof>::read_from(source)?;
-                Ok(Self::Complete { vm, precompile })
+            COMPLETE_PROOF_DISCRIMINANT => match Option::<PrecompileProof>::read_from(source)? {
+                Some(precompile) => PrecompileStatus::Proven(precompile),
+                None => PrecompileStatus::Empty,
             },
             _ => unreachable!("execution proof discriminant was checked before decoding"),
-        }
+        };
+
+        Ok(Self { compatibility, vm, precompile })
     }
 
-    fn min_serialized_size() -> usize {
+    fn min_serialized_size_v1() -> usize {
         u8::min_serialized_size()
             + VmProof::min_serialized_size()
             + Option::<PrecompileProof>::min_serialized_size()
@@ -393,6 +575,17 @@ impl Deserializable for StarkProof {
     }
 }
 
+// HELPER FUNCTIONS
+// ================================================================================================
+
+fn has_duplicate(roots: &[Word]) -> bool {
+    let mut unique = BTreeSet::new();
+    roots.iter().any(|root| !unique.insert(*root))
+}
+
+// TESTS
+// ================================================================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -432,83 +625,123 @@ mod tests {
         (witness.state().to_wire().unwrap(), witness.roots()[0])
     }
 
-    fn round_trip_execution_proof(proof: &ExecutionProof) {
+    fn versioned(vm: VmProof, precompile: PrecompileStatus) -> ExecutionProof {
+        ExecutionProof::from_parts(
+            ExecutionProofCompatibility::new(vec![root(11), root(12)], vec![root(21)]).unwrap(),
+            vm,
+            precompile,
+        )
+    }
+
+    fn version_prefix() -> Vec<u8> {
+        let compatibility =
+            ExecutionProofCompatibility::new(vec![root(11), root(12)], vec![root(21)]).unwrap();
+        let mut bytes = vec![compatibility.format()];
+        compatibility.vm_verifier_roots().to_vec().write_into(&mut bytes);
+        compatibility.pvm_verifier_roots().to_vec().write_into(&mut bytes);
+        bytes
+    }
+
+    #[test]
+    fn execution_proof_reports_precompile_state() {
+        let (precompile_wire, wire_root) = wire();
+        let deferred = versioned(vm_proof(wire_root), PrecompileStatus::Deferred(precompile_wire));
+        assert!(deferred.has_precompiles());
+
+        let complete_without_precompile = versioned(vm_proof(TRUE_DIGEST), PrecompileStatus::Empty);
+        assert!(!complete_without_precompile.has_precompiles());
+
+        let complete_with_precompile =
+            versioned(vm_proof(root(1)), PrecompileStatus::Proven(precompile_proof(&[root(1)])));
+        assert!(complete_with_precompile.has_precompiles());
+    }
+
+    #[test]
+    fn versioned_proof_round_trips_with_format_first() {
+        let proof = versioned(vm_proof(TRUE_DIGEST), PrecompileStatus::Empty);
+
         let bytes = proof.to_bytes();
         let decoded = ExecutionProof::read_from_bytes(&bytes).unwrap();
-        assert_eq!(&decoded, proof);
+
+        assert_eq!(bytes[0], ExecutionProofCompatibility::FORMAT_V1);
+        assert_eq!(decoded, proof);
+        assert_eq!(decoded.compatibility().format(), ExecutionProofCompatibility::FORMAT_V1);
+        assert_eq!(decoded.compatibility().vm_verifier_roots(), &[root(11), root(12)]);
+        assert_eq!(decoded.compatibility().pvm_verifier_roots(), &[root(21)]);
     }
 
     #[test]
-    fn execution_proof_repository_traits_decode_one_stream_item() {
-        let (precompile_wire, wire_root) = wire();
-        let deferred = ExecutionProof::Deferred {
-            vm: vm_proof(wire_root),
-            precompile: precompile_wire,
-        };
-        let complete = ExecutionProof::Complete {
-            vm: vm_proof(TRUE_DIGEST),
-            precompile: Some(precompile_proof(&[root(1)])),
-        };
-        let mut stream = deferred.to_bytes();
-        complete.write_into(&mut stream);
-        let mut reader = SliceReader::new(&stream);
+    fn versioned_proof_decoder_rejects_unknown_format_before_body() {
+        let error = ExecutionProof::read_from_bytes(&[ExecutionProofCompatibility::FORMAT_V1 + 1])
+            .unwrap_err();
 
-        assert_eq!(ExecutionProof::read_from(&mut reader).unwrap(), deferred);
-        assert_eq!(ExecutionProof::read_from(&mut reader).unwrap(), complete);
-        assert!(!reader.has_more_bytes());
+        assert!(
+            matches!(error, DeserializationError::InvalidValue(message) if message.contains("unsupported execution proof format 2"))
+        );
     }
 
     #[test]
-    fn execution_proof_containers_round_trip_representable_shapes_with_exact_budget() {
-        let complete_without_precompile = ExecutionProof::Complete {
-            vm: vm_proof(TRUE_DIGEST),
-            precompile: None,
-        };
-        let smallest =
-            alloc::vec![complete_without_precompile.clone(), complete_without_precompile.clone(),];
-        let smallest_bytes = smallest.to_bytes();
-        assert_eq!(smallest_bytes.len(), 75);
-        assert_eq!(ExecutionProof::min_serialized_size(), 36);
+    fn versioned_proof_decoder_rejects_trailing_and_noncanonical_bytes() {
+        let proof = versioned(vm_proof(TRUE_DIGEST), PrecompileStatus::Empty);
+        let mut trailing = proof.to_bytes();
+        trailing.push(0);
+        assert!(ExecutionProof::read_from_bytes(&trailing).is_err());
+
+        let canonical = proof.to_bytes();
+        assert_eq!(canonical[1], 5, "two VM roots use a one-byte vint encoding");
+        let mut noncanonical = alloc::vec![canonical[0], 0];
+        noncanonical.extend_from_slice(&2u64.to_le_bytes());
+        noncanonical.extend_from_slice(&canonical[2..]);
+        let error = ExecutionProof::read_from_bytes(&noncanonical).unwrap_err();
+        assert!(
+            matches!(error, DeserializationError::InvalidValue(message) if message.contains("not canonically encoded"))
+        );
+    }
+
+    #[test]
+    fn versioned_proof_decoder_applies_the_input_budget_to_root_lists() {
+        let mut bytes = vec![ExecutionProofCompatibility::FORMAT_V1];
+        bytes.write_usize(usize::MAX);
+
+        let error = ExecutionProof::read_from_bytes(&bytes).unwrap_err();
+        assert!(matches!(error, DeserializationError::InvalidValue(_)));
+    }
+
+    #[test]
+    fn compatibility_constructor_rejects_duplicate_roots() {
         assert_eq!(
-            Vec::<ExecutionProof>::read_from_bytes_with_budget(
-                &smallest_bytes,
-                smallest_bytes.len()
-            )
-            .unwrap(),
-            smallest
+            ExecutionProofCompatibility::new(vec![root(1), root(1)], vec![]),
+            Err(ExecutionProofCompatibilityError::DuplicateVmVerifierRoot)
+        );
+        assert_eq!(
+            ExecutionProofCompatibility::new(vec![], vec![root(2), root(2)]),
+            Err(ExecutionProofCompatibilityError::DuplicatePvmVerifierRoot)
+        );
+    }
+
+    #[test]
+    fn versioned_proof_decoder_rejects_duplicate_roots() {
+        let proof = versioned(vm_proof(TRUE_DIGEST), PrecompileStatus::Empty);
+        let proof_bytes = proof.to_bytes();
+        let body = &proof_bytes[version_prefix().len()..];
+
+        let mut duplicate_vm = vec![ExecutionProofCompatibility::FORMAT_V1];
+        vec![root(1), root(1)].write_into(&mut duplicate_vm);
+        Vec::<Word>::new().write_into(&mut duplicate_vm);
+        duplicate_vm.extend_from_slice(body);
+        let error = ExecutionProof::read_from_bytes(&duplicate_vm).unwrap_err();
+        assert!(
+            matches!(error, DeserializationError::InvalidValue(message) if message.contains("VM verifier roots must not contain duplicates"))
         );
 
-        let (precompile_wire, wire_root) = wire();
-        let malformed_shapes = alloc::vec![
-            ExecutionProof::Deferred {
-                vm: vm_proof(wire_root),
-                precompile: precompile_wire,
-            },
-            complete_without_precompile,
-            ExecutionProof::Complete {
-                vm: vm_proof(root(9)),
-                precompile: Some(precompile_proof(&[])),
-            },
-            ExecutionProof::Complete {
-                vm: vm_proof(root(9)),
-                precompile: Some(precompile_proof(&[root(9), root(9)])),
-            },
-            ExecutionProof::Complete {
-                vm: vm_proof(root(9)),
-                precompile: Some(precompile_proof(&[TRUE_DIGEST])),
-            },
-        ];
-        let bytes = malformed_shapes.to_bytes();
-        let decoded =
-            Vec::<ExecutionProof>::read_from_bytes_with_budget(&bytes, bytes.len()).unwrap();
-        assert_eq!(decoded, malformed_shapes);
-
-        for wrapper in [None, Some(malformed_shapes[0].clone())] {
-            let bytes = wrapper.to_bytes();
-            let decoded =
-                Option::<ExecutionProof>::read_from_bytes_with_budget(&bytes, bytes.len()).unwrap();
-            assert_eq!(decoded, wrapper);
-        }
+        let mut duplicate_pvm = vec![ExecutionProofCompatibility::FORMAT_V1];
+        Vec::<Word>::new().write_into(&mut duplicate_pvm);
+        vec![root(2), root(2)].write_into(&mut duplicate_pvm);
+        duplicate_pvm.extend_from_slice(body);
+        let error = ExecutionProof::read_from_bytes(&duplicate_pvm).unwrap_err();
+        assert!(
+            matches!(error, DeserializationError::InvalidValue(message) if message.contains("PVM verifier roots must not contain duplicates"))
+        );
     }
 
     #[test]
@@ -598,21 +831,16 @@ mod tests {
 
         let (precompile_wire, wire_root) = wire();
         let proofs = [
-            ExecutionProof::Deferred {
-                vm: vm_proof(wire_root),
-                precompile: precompile_wire,
-            },
-            ExecutionProof::Complete {
-                vm: vm_proof(TRUE_DIGEST),
-                precompile: None,
-            },
-            ExecutionProof::Complete {
-                vm: vm_proof(TRUE_DIGEST),
-                precompile: Some(precompile_proof(&[TRUE_DIGEST])),
-            },
+            versioned(vm_proof(wire_root), PrecompileStatus::Deferred(precompile_wire)),
+            versioned(vm_proof(TRUE_DIGEST), PrecompileStatus::Empty),
+            versioned(
+                vm_proof(TRUE_DIGEST),
+                PrecompileStatus::Proven(precompile_proof(&[TRUE_DIGEST])),
+            ),
         ];
-        for proof in &proofs {
-            round_trip_execution_proof(proof);
+        for proof in proofs {
+            let bytes = proof.to_bytes();
+            assert_eq!(ExecutionProof::read_from_bytes(&bytes).unwrap(), proof);
         }
     }
 
@@ -620,30 +848,26 @@ mod tests {
     fn complete_transitions_deferred_proof_without_validating_artifact_shape() {
         let vm = vm_proof(TRUE_DIGEST);
         let precompile = precompile_proof(&[]);
-        let deferred = ExecutionProof::Deferred {
-            vm: vm.clone(),
-            precompile: DeferredStateWire::default(),
-        };
+        let deferred =
+            versioned(vm.clone(), PrecompileStatus::Deferred(DeferredStateWire::default()));
 
         let completed = deferred.complete(precompile.clone()).unwrap();
 
-        let ExecutionProof::Complete {
-            vm: completed_vm,
-            precompile: Some(completed_precompile),
-        } = completed
-        else {
+        let (completed_compatibility, completed_vm, completed_precompile) = completed.into_parts();
+        let PrecompileStatus::Proven(completed_precompile) = completed_precompile else {
             panic!("deferred proof should transition to complete")
         };
+        assert_eq!(
+            completed_compatibility,
+            ExecutionProofCompatibility::new(vec![root(11), root(12)], vec![root(21)]).unwrap()
+        );
         assert_eq!(completed_vm.to_bytes(), vm.to_bytes());
         assert_eq!(completed_precompile.to_bytes(), precompile.to_bytes());
     }
 
     #[test]
     fn complete_rejects_an_already_complete_proof() {
-        let complete = ExecutionProof::Complete {
-            vm: vm_proof(TRUE_DIGEST),
-            precompile: None,
-        };
+        let complete = versioned(vm_proof(TRUE_DIGEST), PrecompileStatus::Empty);
 
         assert!(matches!(
             complete.complete(precompile_proof(&[])),
@@ -652,32 +876,24 @@ mod tests {
     }
 
     #[test]
-    fn execution_proof_transport_rejects_bad_discriminants_trailing_bytes_and_bounds() {
-        assert!(ExecutionProof::read_from_bytes(&[9]).is_err());
+    fn versioned_proof_transport_rejects_bad_discriminants_and_stark_bounds() {
+        let mut bad_discriminant = version_prefix();
+        bad_discriminant.write_u8(9);
+        assert!(ExecutionProof::read_from_bytes(&bad_discriminant).is_err());
 
-        let mut trailing = ExecutionProof::Complete {
-            vm: vm_proof(TRUE_DIGEST),
-            precompile: None,
-        }
-        .to_bytes();
-        trailing.push(0);
-        assert!(ExecutionProof::read_from_bytes(&trailing).is_err());
-
-        let canonical = ExecutionProof::Complete {
-            vm: vm_proof(TRUE_DIGEST),
-            precompile: None,
-        }
-        .to_bytes();
-        assert_eq!(canonical[1], 3, "one STARK byte uses a one-byte vint encoding");
-        let mut noncanonical = alloc::vec![canonical[0], 0];
+        let canonical = versioned(vm_proof(TRUE_DIGEST), PrecompileStatus::Empty).to_bytes();
+        let prefix_len = version_prefix().len();
+        assert_eq!(canonical[prefix_len + 1], 3, "one STARK byte uses a one-byte vint encoding");
+        let mut noncanonical = canonical[..prefix_len + 1].to_vec();
+        noncanonical.push(0);
         noncanonical.extend_from_slice(&1u64.to_le_bytes());
-        noncanonical.extend_from_slice(&canonical[2..]);
+        noncanonical.extend_from_slice(&canonical[prefix_len + 2..]);
         let error = ExecutionProof::read_from_bytes(&noncanonical).unwrap_err();
         assert!(
             matches!(error, DeserializationError::InvalidValue(message) if message.contains("not canonically encoded"))
         );
 
-        let mut oversized_proof = Vec::new();
+        let mut oversized_proof = version_prefix();
         oversized_proof.write_u8(COMPLETE_PROOF_DISCRIMINANT);
         oversized_proof.write_usize(MAX_STARK_PROOF_BYTES + 1);
         let error = ExecutionProof::read_from_bytes(&oversized_proof).unwrap_err();

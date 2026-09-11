@@ -18,7 +18,8 @@ use miden_crypto::{
     utils::hex_to_bytes,
 };
 use miden_precompiles::{K1Scalar, SECP256K1_LAMBDA, scalar_mul_mod_n};
-use miden_precompiles_prover::{HashFunction, prove_deferred_state, verify_deferred};
+use miden_precompiles_prover::{HashFunction, prove_deferred_state};
+use miden_precompiles_verifier::verify_deferred;
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, MemoryError,
     ProcessorState, StackInputs,
@@ -224,7 +225,7 @@ fn core_ecdsa_k256_keccak_verify_accepts_valid_signature() {
     assert_deferred_state_round_trips(&output);
 
     let wire = output.deferred_state.to_wire().expect("deferred state must encode to wire");
-    assert_eq!(wire.to_bytes().len(), 2635);
+    assert_eq!(wire.to_bytes().len(), 2455);
 }
 
 /// Full round trip through the real precompile side prover: `verify` logs a plain 2-base MSM
@@ -335,7 +336,7 @@ fn core_ecdsa_k256_keccak_verify_cycle_baseline() {
     let output = run_core_program_with_advice(&verify_cycle_source(&fixture), &fixture.advice)
         .expect("valid core ECDSA K256/Keccak signature must verify");
     let cycles = output.stack.get_element(0).expect("cycle count").as_canonical_u64();
-    assert_eq!(cycles, 1467);
+    assert_eq!(cycles, 1325);
 }
 
 #[test]

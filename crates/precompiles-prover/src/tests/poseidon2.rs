@@ -268,7 +268,7 @@ fn periodic_columns_have_period_16() {
     let air = Poseidon2Air;
     let cols = <Poseidon2Air as BaseAir<Felt>>::periodic_columns(&air);
     assert_eq!(cols.len(), NUM_PERIODIC_COLS);
-    for c in &cols {
+    for c in cols.iter() {
         assert_eq!(c.len(), PERIOD);
     }
 }

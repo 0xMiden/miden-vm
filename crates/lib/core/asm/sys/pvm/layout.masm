@@ -4,9 +4,11 @@
 ### The ACE READ section is one dense vector of quadratic-extension inputs.
 ### Every boundary below is derived from the PVM circuit's InputLayout; each
 ### input occupies two base-field felts. The complete allocation, including relation-local
-### scratch after the stream, is the half-open range 3225426416..3225444180.
+### scratch after the stream, is the half-open range 3225426416..3225444212.
 ### Per-AIR heights remain in the generic 16-cell array, in ChipletAir::all()
 ### order; the PVM wrapper supplies the relation count and that shared base.
+
+use miden::core::stark::types
 
 ### 8 felts: 3225426416..3225426424.
 const PUBLIC_INPUTS_PTR = 3225426416
@@ -44,57 +46,57 @@ const AUX_BUS_BOUNDARY_PTR = 3225429504
 ### 84 felts: 3225429524..3225429608.
 const AUXILIARY_ACE_INPUTS_PTR = 3225429524
 
-### 13792 felts: 3225429608..3225443400.
+### 13824 felts: 3225429608..3225443432.
 const ACE_CIRCUIT_STREAM_PTR = 3225429608
 
-### 4 felts: 3225443400..3225443404. Stores gamma = beta^18.
-const BUS_GAMMA_PTR = 3225443400
+### 4 felts: 3225443432..3225443436. Stores gamma = beta^18.
+const BUS_GAMMA_PTR = 3225443432
 
-### 4 felts: 3225443404..3225443408. Stores the two-felt fixed-boundary correction; the remaining two felts are reserved.
-const C_TOTAL_PTR = 3225443404
+### 4 felts: 3225443436..3225443440. Stores the two-felt fixed-boundary correction; the remaining two felts are reserved.
+const C_TOTAL_PTR = 3225443436
 
-### 768 felts: 3225443408..3225444176. Stores one opened query row in commitment-group order.
-const CURRENT_TRACE_ROW_PTR = 3225443408
+### 768 felts: 3225443440..3225444208. Stores one opened query row in commitment-group order.
+const CURRENT_TRACE_ROW_PTR = 3225443440
 
-### 4 felts: 3225444176..3225444180. Stores the trusted preprocessed-tree commitment for DEEP openings.
-const PREPROCESSED_COM_PTR = 3225444176
+### 4 felts: 3225444208..3225444212. Stores the trusted preprocessed-tree commitment for DEEP openings.
+const PREPROCESSED_COM_PTR = 3225444208
 
-pub proc public_inputs_ptr
+pub proc public_inputs_ptr() -> types::Address
     push.PUBLIC_INPUTS_PTR
 end
 
-pub proc aux_rand_elem_ptr
+pub proc aux_rand_elem_ptr() -> types::Address
     push.AUX_RAND_ELEM_PTR
 end
 
-pub proc preprocessed_current_ptr
+pub proc preprocessed_current_ptr() -> types::Address
     push.PREPROCESSED_CURRENT_PTR
 end
 
-pub proc aux_bus_boundary_ptr
+pub proc aux_bus_boundary_ptr() -> types::Address
     push.AUX_BUS_BOUNDARY_PTR
 end
 
-pub proc auxiliary_ace_inputs_ptr
+pub proc auxiliary_ace_inputs_ptr() -> types::Address
     push.AUXILIARY_ACE_INPUTS_PTR
 end
 
-pub proc ace_circuit_stream_ptr
+pub proc ace_circuit_stream_ptr() -> types::Address
     push.ACE_CIRCUIT_STREAM_PTR
 end
 
-pub proc bus_gamma_ptr
+pub proc bus_gamma_ptr() -> types::Address
     push.BUS_GAMMA_PTR
 end
 
-pub proc c_total_ptr
+pub proc c_total_ptr() -> types::Address
     push.C_TOTAL_PTR
 end
 
-pub proc current_trace_row_ptr
+pub proc current_trace_row_ptr() -> types::Address
     push.CURRENT_TRACE_ROW_PTR
 end
 
-pub proc preprocessed_com_ptr
+pub proc preprocessed_com_ptr() -> types::Address
     push.PREPROCESSED_COM_PTR
 end

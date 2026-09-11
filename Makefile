@@ -43,6 +43,7 @@ ALL_FEATURES             := --all-features
 WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,registry-tools
 MIDEN_CRYPTO_FUZZ_TARGETS := smt word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
 MIDEN_SERDE_UTILS_FUZZ_TARGETS := primitives collections string vint64 goldilocks budgeted
+EXECUTION_PROOF_FUZZ_LIMITS := -rss_limit_mb=512 -timeout=10
 MIDEN_STARK_TEST_PACKAGES := -p miden-lifted-air -p miden-lifted-stark -p miden-stateful-hasher -p miden-stark-transcript
 
 # Feature sets for executable builds
@@ -61,7 +62,7 @@ FEATURES_assembly-syntax := testing,serde
 FEATURES_core            :=
 FEATURES_vm              := concurrent,executable,internal,testing
 FEATURES_mast-package    := serde
-FEATURES_processor       := concurrent,testing,bus-debugger
+FEATURES_processor       := concurrent,testing
 FEATURES_project         := resolver,serde
 FEATURES_package-registry:= resolver
 FEATURES_prover          := concurrent
@@ -331,11 +332,11 @@ regenerate-constraints: ## Regenerate the checked-in constraint artifacts (MASM 
 
 .PHONY: regenerate-pvm-registry
 regenerate-pvm-registry: ## Regenerate PVM registry and MASM artifacts (~2 min; protocol break)
-	cargo run --release --package miden-precompiles-prover --features registry-tools --bin pvm-registry-regen -- --write
+	cargo run --release --package miden-precompiles-verifier --features registry-tools --bin pvm-registry-regen -- --write
 
 .PHONY: check-pvm-registry
 check-pvm-registry: ## Check PVM registry and MASM artifacts for drift (full recompute)
-	cargo run --release --package miden-precompiles-prover --features registry-tools --bin pvm-registry-regen -- --check
+	cargo run --release --package miden-precompiles-verifier --features registry-tools --bin pvm-registry-regen -- --check
 
 .PHONY: check-constraints
 check-constraints: ## Check the checked-in constraint artifacts for drift
@@ -420,6 +421,10 @@ fuzz-mast-node-info: fuzz-seeds ## Run fuzzing for SerializedMastForest node met
 fuzz-mast-forest-wire-view: fuzz-seeds ## Run fuzzing for MastForestWireView structural inspection
 	@cargo +nightly fuzz run mast_forest_wire_view_new --release --fuzz-dir tools/miden-core-fuzz
 
+.PHONY: fuzz-execution-proof
+fuzz-execution-proof: fuzz-seeds ## Run bounded ExecutionProof deserialization fuzzing
+	@cargo +nightly fuzz run execution_proof_deserialize --release --fuzz-dir tools/miden-core-fuzz -- $(EXECUTION_PROOF_FUZZ_LIMITS) $(FUZZ_ARGS)
+
 .PHONY: fuzz-all
 fuzz-all: fuzz-seeds ## Run all fuzz targets (in sequence)
 	FAILED=0; \
@@ -439,7 +444,7 @@ fuzz-all: fuzz-seeds ## Run all fuzz targets (in sequence)
 	cargo +nightly fuzz run advice_inputs_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run operation_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run operation_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run execution_proof_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run execution_proof_deserialize --release --fuzz-dir tools/miden-core-fuzz -- $(EXECUTION_PROOF_FUZZ_LIMITS) -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run execution_proof_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run execution_witness_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run deferred_state_wire_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \

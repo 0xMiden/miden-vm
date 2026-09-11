@@ -38,12 +38,9 @@ use miden_core::{
 };
 use miden_lifted_air::{BaseAir, LiftedAir, MultiAir, ProverStatement, ReductionError, Statement};
 use miden_lifted_stark::check_constraints;
+use miden_precompiles_verifier::{VerifyError, verify_deferred as verify_precompile};
 
-use crate::{
-    session::{SessionTraces, VerifyError, verify_stark},
-    stark_config::test_challenger,
-    transcript::poseidon2::P2Digest,
-};
+use crate::{session::SessionTraces, stark_config::test_challenger};
 
 pub(crate) type SessionProof = (StarkProof, DeferredRoot);
 
@@ -62,7 +59,7 @@ impl SessionTracesTestExt for SessionTraces {
 }
 
 pub(crate) fn verify_deferred(proof: &SessionProof) -> Result<DeferredRoot, VerifyError> {
-    verify_stark(&proof.0, P2Digest::from(proof.1))?;
+    verify_precompile(&proof.0, proof.1)?;
     Ok(proof.1)
 }
 

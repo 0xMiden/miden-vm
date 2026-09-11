@@ -11,6 +11,13 @@ pub mod u256
 # Framework data tag used for generic CHUNKS nodes: Tag::CHUNKS = [2, 0, 0, 0].
 const CHUNKS_TAG = [2, 0, 0, 0]
 
+#! Deferred node digest.
+pub type Digest = word
+#! Precompile domain and operation tag in stack order.
+pub type Tag = struct { id: felt, args: [felt; 3] }
+#! One deferred payload chunk in stack order; interpretation depends on its tag.
+pub type Payload = struct { lo: word, hi: word }
+
 #! Returns whether two words are equal, consuming both words.
 #!
 #! This helper keeps generated precompile modules independent of `miden-core`. Importing
@@ -26,7 +33,7 @@ const CHUNKS_TAG = [2, 0, 0, 0]
 #! - is_equal is one if the words are equal, and zero otherwise.
 #!
 #! Invocation: exec
-pub proc word_eq
+pub proc word_eq(rhs: word, lhs: word) -> i1
     movup.4 eq swap
     movup.4 eq and swap
     movup.3 eq and
@@ -61,7 +68,7 @@ end
 #!
 #! Input:  [PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
 #! Output: [NODE_DIGEST, ...]
-pub proc digest_expr
+pub proc digest_expr(payload: Payload, tag: Tag) -> Digest
     adv.register_deferred
     hperm
     swapw.2 dropw dropw
@@ -72,7 +79,7 @@ end
 #!
 #! Input:  [TAG, PAYLOAD_LO, PAYLOAD_HI, ...]
 #! Output: [NODE_DIGEST, ...]
-pub proc register_expr
+pub proc register_expr(tag: Tag, payload: Payload) -> Digest
     movdnw.2
     # => [PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
     exec.digest_expr
@@ -86,7 +93,7 @@ end
 #!
 #! Input:  [TAG, PAYLOAD_LO, PAYLOAD_HI, ...]
 #! Output: [NODE_DIGEST, ...]
-pub proc register_value
+pub proc register_value(tag: Tag, payload: Payload) -> Digest
     exec.register_expr
 end
 
@@ -103,7 +110,7 @@ end
 #!
 #! Input:  [TAG, ptr, n_chunks, ...]
 #! Output: [NODE_DIGEST, ...]
-pub proc register_mem
+pub proc register_mem(tag: Tag, ptr: ptr<Payload>, n_chunks: u32) -> Digest
     adv.register_deferred_data
     # => [TAG, ptr, n_chunks, ...]
 
@@ -134,7 +141,7 @@ end
 #!
 #! Input:  [ptr, n_chunks, ...]
 #! Output: [CHUNKS_DIGEST, ...]
-pub proc register_chunks_mem
+pub proc register_chunks_mem(ptr: ptr<Payload>, n_chunks: u32) -> Digest
     push.CHUNKS_TAG
     # => [Tag::CHUNKS=[2,0,0,0], ptr, n_chunks, ...]
     exec.register_mem
@@ -144,7 +151,7 @@ end
 #!
 #! Input:  [ptr, ...]
 #! Output: [CHUNKS_DIGEST, ...]
-pub proc register_chunks_mem_1
+pub proc register_chunks_mem_1(ptr: ptr<Payload>) -> Digest
     push.1 swap push.CHUNKS_TAG
     # => [Tag::CHUNKS=[2,0,0,0], ptr, n_chunks=1, ...]
     adv.register_deferred_data
@@ -164,7 +171,7 @@ end
 #!
 #! Input:  [ptr, ...]
 #! Output: [CHUNKS_DIGEST, ...]
-pub proc register_chunks_mem_2
+pub proc register_chunks_mem_2(ptr: ptr<Payload>) -> Digest
     push.2 swap push.CHUNKS_TAG
     # => [Tag::CHUNKS=[2,0,0,0], ptr, n_chunks=2, ...]
     adv.register_deferred_data
@@ -186,7 +193,7 @@ end
 #!
 #! Input:  [ptr, ...]
 #! Output: [CHUNKS_DIGEST, ...]
-pub proc register_chunks_mem_3
+pub proc register_chunks_mem_3(ptr: ptr<Payload>) -> Digest
     push.3 swap push.CHUNKS_TAG
     # => [Tag::CHUNKS=[2,0,0,0], ptr, n_chunks=3, ...]
     adv.register_deferred_data
@@ -213,7 +220,7 @@ end
 #!
 #! Input:  [NODE_DIGEST, ...]
 #! Output: `[...]` (the deferred commitment root advances; node is folded in)
-pub proc log_deferred
+pub proc log_deferred(node: Digest)
     padw padw movdnw.2
     # => [_, NODE_DIGEST, _, ...]
     log_deferred

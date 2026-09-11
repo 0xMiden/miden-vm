@@ -1242,6 +1242,7 @@ fn builtin_type_for_name(name: &str) -> Option<Type> {
         "u32" => Type::U32,
         "u64" => Type::U64,
         "u128" => Type::U128,
+        "u256" => Type::U256,
         "felt" => Type::Felt,
         _ => return None,
     })

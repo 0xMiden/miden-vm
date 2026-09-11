@@ -12,9 +12,9 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_precompiles::Keccak256Precompile;
-use miden_precompiles_prover::{
-    masm_verifier::{PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError},
-    prove_deferred_state,
+use miden_precompiles_prover::prove_deferred_state;
+use miden_precompiles_verifier::masm_verifier::{
+    PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
 };
 use miden_processor::ExecutionOutput;
 use miden_utils_testing::recursive_verifier::VerifierData;
@@ -23,7 +23,7 @@ use super::{EXAMPLE_FIB_SMALL, fib_stack_inputs, generate_recursive_verifier_dat
 
 #[test]
 fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
-    let verifier_root = pvm_verifier_root();
+    let verifier_root = pvm_verify_proof_root();
     let short_proof = prove_keccak_claim(b"PVM MASM verifier end-to-end fixture");
     let short = PvmRecursiveVerifierInputs::for_request(verifier_root, &short_proof)
         .expect("host adapter must parse the short proof");
@@ -94,7 +94,7 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
     }
 
     let (stack, mut map, store) = short.advice().clone().into_parts();
-    let request_key = proof_request_key(pvm_verifier_root(), short.claim_commitment());
+    let request_key = proof_request_key(pvm_verify_proof_root(), short.claim_commitment());
     let (circuit_key, circuit_values) = map
         .iter()
         .filter(|(key, _)| **key != request_key)
@@ -160,7 +160,7 @@ fn run_pvm_verifier_with_advice(
     advice: &AdviceInputs,
     claim_commitment: Word,
 ) -> Result<ExecutionOutput, miden_processor::ExecutionError> {
-    let request_key = proof_request_key(pvm_verifier_root(), claim_commitment);
+    let request_key = proof_request_key(pvm_verify_proof_root(), claim_commitment);
     assert!(
         advice.map().contains_key(&request_key),
         "test advice must contain the proof stream for the supplied claim"
@@ -184,14 +184,38 @@ fn run_pvm_verifier_with_advice(
 }
 
 fn assert_pvm_security_params(inputs: &PvmRecursiveVerifierInputs, output: &ExecutionOutput) {
-    let mut expected = proof_stream(inputs)[..4].to_vec();
+    use miden_precompiles_air::security;
+
+    const SECURITY_PARAM_COUNT: usize = 4;
+    const NUM_CHIPLETS: usize = 10;
+
+    let stream = proof_stream(inputs);
+    let log_max_height = stream[SECURITY_PARAM_COUNT..SECURITY_PARAM_COUNT + NUM_CHIPLETS]
+        .iter()
+        .copied()
+        .max_by_key(Felt::as_canonical_u64)
+        .expect("the PVM relation has chiplet AIRs");
+    let mut expected = vec![
+        Felt::from_u32(security::LOOKUP_POW_BITS),
+        Felt::from_u32(security::AIR_SHAPE.num_composed_constraints),
+        Felt::from_u32(security::AIR_SHAPE.max_constraint_degree),
+        Felt::from_u32(security::AIR_SHAPE.num_deep_terms.unwrap()),
+        Felt::from_u32(security::AIR_SHAPE.lookup.max_message_width),
+        Felt::from_u32(security::FIXED_BOUNDARY_LOOKUP_TERMS),
+        Felt::from_u32(security::AIR_SHAPE.lookup.fractions_per_row),
+        log_max_height,
+        stream[0],
+        stream[1],
+        stream[2],
+        stream[3],
+    ];
     // The claim occupied the next stack word before verification. Requiring zero padding beneath
-    // the returned parameters proves that the verifier consumed it instead of returning it too.
+    // the returned descriptor proves that the verifier consumed it instead of returning it too.
     expected.extend([Felt::ZERO; 4]);
     assert_eq!(
         output.stack.get_num_elements(expected.len()),
         expected,
-        "the verifier must consume the claim and return only its transcript-bound security parameters",
+        "the verifier must consume the claim and return the common security descriptor",
     );
 }
 
@@ -228,22 +252,22 @@ fn run_interleaved_verifiers(
         use miden::core::sys::pvm
         use miden::core::sys::vm
 
-        proc verify_vm
-            exec.vm::verify_vm_proof
-            dropw dropw
+        proc verify_mvm
+            exec.vm::verify_proof
+            dropw dropw dropw dropw
         end
 
         begin
             {vm_operands}
-            exec.verify_vm
+            exec.verify_mvm
             {pvm_operands}
             exec.pvm::verify_proof
-            dropw
+            dropw dropw dropw
             {vm_operands}
-            exec.verify_vm
+            exec.verify_mvm
             {pvm_operands}
             exec.pvm::verify_proof
-            dropw
+            dropw dropw dropw
         end
         "
     );
@@ -251,7 +275,7 @@ fn run_interleaved_verifiers(
     test.execute().map(|_| ())
 }
 
-fn pvm_verifier_root() -> Word {
+fn pvm_verify_proof_root() -> Word {
     CoreLibrary::default().pvm_recursive_verifier_root()
 }
 
@@ -259,7 +283,7 @@ fn proof_stream(inputs: &PvmRecursiveVerifierInputs) -> &[Felt] {
     inputs
         .advice()
         .map()
-        .get(&proof_request_key(pvm_verifier_root(), inputs.claim_commitment()))
+        .get(&proof_request_key(pvm_verify_proof_root(), inputs.claim_commitment()))
         .expect("PVM request package must contain its proof stream")
 }
 
@@ -268,7 +292,7 @@ fn mutate_proof_stream(
     advice: &mut AdviceInputs,
     mutate: impl FnOnce(&mut Vec<Felt>),
 ) {
-    let key = proof_request_key(pvm_verifier_root(), inputs.claim_commitment());
+    let key = proof_request_key(pvm_verify_proof_root(), inputs.claim_commitment());
     let (stack, mut map, store) = core::mem::take(advice).into_parts();
     let mut stream = map
         .remove(&key)

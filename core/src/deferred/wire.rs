@@ -26,7 +26,7 @@ use crate::{
     Felt, ZERO,
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        SliceReader,
+        SliceReader, read_bounded_len,
     },
 };
 
@@ -567,7 +567,8 @@ impl Serializable for DeferredStateWire {
 
 impl Deserializable for DeferredStateWire {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let entry_count = source.read_usize()?;
+        let entry_count =
+            read_bounded_len(source, "deferred wire entry", WireEntry::min_serialized_size())?;
         if entry_count > MAX_WIRE_ENTRIES {
             return Err(DeserializationError::InvalidValue(format!(
                 "deferred wire contains {entry_count} entries, maximum is {MAX_WIRE_ENTRIES}"
@@ -868,6 +869,21 @@ mod tests {
     fn wire_rejects_over_budget_entry_count() {
         assert!(
             DeferredStateWire::read_from_bytes(&encoded_entry_count(MAX_WIRE_ENTRIES + 1)).is_err()
+        );
+    }
+
+    #[test]
+    fn wire_rejects_entry_count_exceeding_remaining_input_before_allocation() {
+        let err = DeferredStateWire::read_from_bytes(&encoded_entry_count(MAX_WIRE_ENTRIES))
+            .expect_err("entry count without entry bytes should be rejected");
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("unexpected error: {err:?}");
+        };
+        assert!(
+            message.contains("deferred wire entry count")
+                && (message.contains("exceeds budget")
+                    || message.contains("exceeds remaining input")),
+            "unexpected error: {message}"
         );
     }
 

@@ -4,10 +4,7 @@
 
 use std::{collections::HashMap, vec::Vec};
 
-use miden_air::lookup::{
-    Challenges, LookupAir,
-    debug::{check_trace_balance, trace::DebugTraceBuilder},
-};
+use miden_air::lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions};
 use miden_core::{
     Felt,
     field::QuadFelt,
@@ -44,15 +41,15 @@ fn fold_balance<A>(
     challenges: &Challenges<QuadFelt>,
     net: &mut HashMap<QuadFelt, Felt>,
 ) where
-    A: LiftedAir<Felt, QuadFelt>,
-    for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
+    A: LiftedAir<Felt, QuadFelt> + Sync,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
     let periodic = air.periodic_columns();
     let combined = crate::tests::combined_lookup_main(air, main);
     let lookup_main = combined.as_ref().unwrap_or(main);
-    let report = check_trace_balance(air, lookup_main, &periodic, &[], &[], challenges);
-    for u in report.unmatched {
-        *net.entry(u.denom).or_insert(Felt::ZERO) += u.net_multiplicity;
+    let fractions = build_lookup_fractions(air, lookup_main, &periodic, challenges);
+    for &(multiplicity, denom) in fractions.fractions() {
+        *net.entry(denom).or_insert(Felt::ZERO) += multiplicity;
     }
 }
 

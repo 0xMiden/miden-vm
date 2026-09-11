@@ -10,7 +10,9 @@
 //!   identity point is the single canonical value `[TRUE_DIGEST, TRUE_DIGEST]`.
 //! - `ADD` / `SUB`: point addition and subtraction.
 //! - `MSM`: multi-scalar multiplication over one or more structural `(point_digest, scalar_digest)`
-//!   pairs with nonzero scalars and distinct canonical points.
+//!   pairs. A zero scalar and a repeated (or structurally different but canonically equal) base are
+//!   both accepted, and the result may itself be the identity point; an identity `VALUE` is
+//!   rejected as an MSM base by the current evaluator and lowering.
 //! - `EQ`: trapping equality predicate that evaluates to `Node::TRUE` only when both operands
 //!   reduce to the same canonical point.
 //!
@@ -666,6 +668,16 @@ impl CurvePrecompile {
         Ok((point_curve, point, scalar))
     }
 
+    /// Evaluates `Σ sᵢ·Pᵢ` over `pairs`. A zero scalar and a repeated (or
+    /// structurally different but canonically equal) base are both
+    /// mathematically valid — `0·P = 𝒪` and `a·P + b·P = (a + b)·P` — so
+    /// neither is rejected here: `mul_scalar` already returns `Identity` for
+    /// a zero scalar, and `add` already handles an `Identity` operand on
+    /// either side, so accumulating every term (including zero-valued ones)
+    /// through the same fold naturally reaches `Identity` for an all-zero
+    /// pair list. Only a malformed empty list or an identity base is
+    /// rejected: identity is otherwise a valid canonical point `VALUE`, but
+    /// the current evaluator and lowering do not support it as an MSM base.
     fn evaluate_msm(
         pairs: &[(Digest, Digest)],
         context: &mut DeferredContext<'_>,
@@ -675,18 +687,15 @@ impl CurvePrecompile {
         };
 
         let (curve, point, scalar) = Self::evaluate_msm_term(None, point, scalar, context)?;
-        if scalar == [0; 8] || point == CurvePoint::Identity {
+        if point == CurvePoint::Identity {
             return Err(DeferredError::InvalidPayload.into());
         }
         let mut acc = curve.mul_scalar(point, scalar)?;
-        let mut points = Vec::with_capacity(pairs.len());
-        points.push(point);
         for &(point, scalar) in rest {
             let (_, point, scalar) = Self::evaluate_msm_term(Some(curve), point, scalar, context)?;
-            if scalar == [0; 8] || point == CurvePoint::Identity || points.contains(&point) {
+            if point == CurvePoint::Identity {
                 return Err(DeferredError::InvalidPayload.into());
             }
-            points.push(point);
             let term = curve.mul_scalar(point, scalar)?;
             acc = curve.add(acc, term)?;
         }
@@ -1069,7 +1078,9 @@ mod tests {
     }
 
     #[test]
-    fn msm_rejects_duplicate_canonical_points() {
+    fn msm_accepts_repeated_canonical_base() {
+        // a·P + b·P = (a + b)·P: two terms naming the same generator merge
+        // to the same result a single `5·G` term would give.
         let mut state = state();
         let curve = CurveId::Secp256k1;
         let generator = CurvePrecompile::generator_node(curve);
@@ -1082,12 +1093,20 @@ mod tests {
             vec![(generator.digest(), scalar_2.digest()), (generator.digest(), scalar_3.digest())],
         )
         .expect("tag is curve-owned");
+        let expected = CurvePrecompile::value_node(
+            curve,
+            curve
+                .mul_scalar(curve.generator(), [5, 0, 0, 0, 0, 0, 0, 0])
+                .expect("valid scalar multiplication"),
+        );
 
-        assert_invalid_payload(evaluate(&mut state, node));
+        assert_eq!(evaluate(&mut state, node).unwrap(), expected);
     }
 
     #[test]
-    fn msm_rejects_zero_scalar_terms() {
+    fn msm_accepts_zero_scalar_terms() {
+        // 0·P = 𝒪: a zero-scalar term contributes nothing, so a single such
+        // term evaluates to the identity.
         let mut state = state();
         let curve = CurveId::Secp256k1;
         let generator = CurvePrecompile::generator_node(curve);
@@ -1098,8 +1117,58 @@ mod tests {
             vec![(generator.digest(), zero.digest())],
         )
         .expect("tag is curve-owned");
+        let expected = CurvePrecompile::value_node(curve, CurvePoint::Identity);
 
-        assert_invalid_payload(evaluate(&mut state, node));
+        assert_eq!(evaluate(&mut state, node).unwrap(), expected);
+    }
+
+    #[test]
+    fn msm_accepts_mixed_zero_and_nonzero_terms() {
+        let mut state = state();
+        let curve = CurveId::Secp256k1;
+        let generator = CurvePrecompile::generator_node(curve);
+        let two_g = curve
+            .mul_scalar(curve.generator(), [2, 0, 0, 0, 0, 0, 0, 0])
+            .expect("valid scalar multiplication");
+        let two_g_node = register_affine_point(&mut state, curve, two_g);
+        let zero = UintPrecompile::value_node(curve.scalar_domain(), [0; 8]);
+        let scalar_3 = UintPrecompile::value_node(curve.scalar_domain(), [3, 0, 0, 0, 0, 0, 0, 0]);
+        state.register(zero.clone()).expect("scalar must register");
+        state.register(scalar_3.clone()).expect("scalar must register");
+        let node = Node::try_pair_list(
+            CurvePrecompile::msm_tag(),
+            vec![(generator.digest(), zero.digest()), (two_g_node.digest(), scalar_3.digest())],
+        )
+        .expect("tag is curve-owned");
+        let expected = CurvePrecompile::value_node(
+            curve,
+            curve
+                .mul_scalar(two_g, [3, 0, 0, 0, 0, 0, 0, 0])
+                .expect("valid scalar multiplication"),
+        );
+
+        assert_eq!(evaluate(&mut state, node).unwrap(), expected);
+    }
+
+    #[test]
+    fn msm_accepts_multiple_all_zero_terms() {
+        let mut state = state();
+        let curve = CurveId::Secp256k1;
+        let generator = CurvePrecompile::generator_node(curve);
+        let two_g = curve
+            .mul_scalar(curve.generator(), [2, 0, 0, 0, 0, 0, 0, 0])
+            .expect("valid scalar multiplication");
+        let two_g_node = register_affine_point(&mut state, curve, two_g);
+        let zero = UintPrecompile::value_node(curve.scalar_domain(), [0; 8]);
+        state.register(zero.clone()).expect("scalar must register");
+        let node = Node::try_pair_list(
+            CurvePrecompile::msm_tag(),
+            vec![(generator.digest(), zero.digest()), (two_g_node.digest(), zero.digest())],
+        )
+        .expect("tag is curve-owned");
+        let expected = CurvePrecompile::value_node(curve, CurvePoint::Identity);
+
+        assert_eq!(evaluate(&mut state, node).unwrap(), expected);
     }
 
     #[test]

@@ -13,6 +13,7 @@ use miden_core::{
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
+use miden_precompiles_verifier::{VerifyError, verify_deferred};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
@@ -24,13 +25,12 @@ use crate::{
     math::{U256, from_hex, to_limbs32},
     prove_deferred_state,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::{Session, SessionTraces, VerifyError},
+    session::{Session, SessionTraces},
     tests::{
         SessionTracesTestExt, bus_balance::session_stack_residual,
         verify_deferred as verify_session,
     },
     transcript::poseidon2::P2Digest,
-    verify_deferred,
 };
 
 /// A VM synthetic Keccak-only deferred state and the prover-typed view of its root.
@@ -321,17 +321,46 @@ fn deferred_session_translates_curve_claims_for_all_fixed_curves() {
 }
 
 #[test]
-fn deferred_state_rejects_msm_with_all_zero_scalars() {
+fn deferred_state_accepts_msm_with_all_zero_scalars() {
+    // 0·P = 𝒪: end to end through the full deferred-state pipeline
+    // (registry → state → translated session → local bus-balance check),
+    // checked against an independently registered identity point rather
+    // than a self-equality (an MSM claim's translation is not cached, so
+    // comparing it to itself would re-translate — and so re-resolve — the
+    // same claim twice, which is its own, unrelated scenario).
     let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()))
         .expect("full precompile registry initializes");
 
     let curve = CurveId::Secp256k1;
     let point = register_curve_generator(&mut state, curve);
     let scalar = register_uint_value(&mut state, curve.scalar_domain(), U256::ZERO);
-    let msm = VmNode::try_pair_list(CurvePrecompile::msm_tag(), vec![(point, scalar)])
-        .expect("curve msm pair list is non-empty");
+    let msm = register_curve_msm(&mut state, vec![(point, scalar)]);
+    let identity = register_curve_identity(&mut state, curve);
+    let msm_eq = register_curve_op(&mut state, CurvePrecompile::EQ_OP_ID, msm, identity);
+    state.log_statement(msm_eq).expect("all-zero MSM equality logs");
 
-    assert!(state.register(msm).is_err(), "all-zero MSM must be rejected");
+    translated_traces_check(&state);
+}
+
+#[test]
+fn deferred_state_accepts_msm_with_repeated_base() {
+    // a·P + b·P = (a + b)·P, end to end through the full deferred-state
+    // pipeline, checked against an independently registered `5·G`.
+    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()))
+        .expect("full precompile registry initializes");
+
+    let curve = CurveId::Secp256k1;
+    let point = register_curve_generator(&mut state, curve);
+    let two = register_uint_value(&mut state, curve.scalar_domain(), U256::from(2u64));
+    let three = register_uint_value(&mut state, curve.scalar_domain(), U256::from(3u64));
+    let msm = register_curve_msm(&mut state, vec![(point, two), (point, three)]);
+    let five_g = ProjectivePoint::GENERATOR * k256::Scalar::from(5u64);
+    let (fx, fy) = k256_coords(&five_g);
+    let five_g_node = register_curve_point(&mut state, curve, fx, fy);
+    let msm_eq = register_curve_op(&mut state, CurvePrecompile::EQ_OP_ID, msm, five_g_node);
+    state.log_statement(msm_eq).expect("repeated-base MSM equality logs");
+
+    translated_traces_check(&state);
 }
 
 #[test]
@@ -395,7 +424,7 @@ fn prove_deferred_state_proves_non_empty_root() {
 }
 
 /// Each `HashFunction` selects a distinct preprocessed-bundle cache slot
-/// (`session::preprocessed_cache`, keyed by LMCS type). Proving and
+/// (`miden_precompiles_air::preprocessed`, keyed by LMCS type). Proving and
 /// verifying twice per hash function exercises both the cold path (first
 /// call in the process, builds and caches the bundle) and the warm path
 /// (later calls, reused from cache) for every slot, guarding against a

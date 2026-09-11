@@ -77,16 +77,11 @@ use crate::{
 };
 
 mod fixed;
-pub(crate) mod preprocessed_cache;
 mod prove;
 pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
 pub mod statements;
 pub mod strategies;
-pub(crate) use prove::verify_stark;
-pub use prove::{ChipletAir, ChipletMultiAir, VerifyError};
-
-/// Number of chiplets in the stack (= the width of [`SessionTraces::mains`]).
-pub const NUM_CHIPLETS: usize = 10;
+pub use miden_precompiles_air::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS};
 
 /// Stateful builder over the full chiplet stack.
 ///
@@ -321,6 +316,15 @@ impl Session {
         require::intro_endo(&mut self.msm, &mut self.ec, &mut self.uint, point.point)
     }
 
+    /// Promote a stored point `P` to the 1-term MSM expression `⟨P × 0⟩`
+    /// (value = the group's point at infinity) — the zero-scalar leaf, dual
+    /// to [`msm_intro`](Self::msm_intro). Chiplet-internal, like
+    /// [`msm_intro`](Self::msm_intro). Mechanism in
+    /// [`msm::require::intro_zero`](crate::ec::msm::require::intro_zero).
+    pub fn msm_intro_zero(&mut self, point: &EcNode) -> EcExprPtr {
+        require::intro_zero(&mut self.msm, &mut self.ec, &mut self.uint, point.point)
+    }
+
     /// True if `point` is its group's point at infinity, i.e. it has no
     /// finite `(x, y)` coordinates. The GLV endomorphism `φ` has no
     /// coordinate-formula image for the identity, so a caller building a
@@ -336,6 +340,14 @@ impl Session {
     /// [`msm::require::combine`](crate::ec::msm::require::combine).
     pub fn msm_combine(&mut self, a: EcExprPtr, b: EcExprPtr) -> EcExprPtr {
         require::combine(&mut self.msm, &mut self.ec, &mut self.uint, a, b)
+    }
+
+    /// Combine two MSM expressions without merging shared bases — every
+    /// term of both operands survives as its own row, even across a
+    /// repeated base. Mechanism in
+    /// [`msm::require::combine_terms_preserving`](crate::ec::msm::require::combine_terms_preserving).
+    pub fn msm_combine_terms_preserving(&mut self, a: EcExprPtr, b: EcExprPtr) -> EcExprPtr {
+        require::combine_terms_preserving(&mut self.msm, &mut self.ec, &mut self.uint, a, b)
     }
 
     /// Negate an MSM expression: every term's scalar negated (the base
@@ -363,9 +375,14 @@ impl Session {
     /// expression by the bus; each scalar node must be stored under the group's
     /// scalar bound. Bumps the resolve use count on a new eval row.
     ///
-    /// Panics unless the claim is **fully merged** — distinct bases, exactly
-    /// one pair per term — the canonical form that makes the root well-defined
-    /// (an unmerged `P×a, P×b` would hash differently from `P×(a+b)`).
+    /// Panics unless `terms` is in exact 1:1 correspondence with `expr`'s own
+    /// term rows — one pair per chiplet term, each pair a real term of
+    /// `expr` (repeated bases and zero scalars are fine, *as long as* they
+    /// survive as their own row rather than being pre-merged: build `expr`
+    /// with [`msm_combine_terms_preserving`](Self::msm_combine_terms_preserving)
+    /// wherever a declared base might recur, so its rows stay in 1:1
+    /// correspondence with the caller's original terms instead of collapsing
+    /// two claim terms onto one merged row).
     pub fn ec_msm(&mut self, expr: EcExprPtr, terms: &[(EcNode, UintNode)]) -> EcNode {
         self.eval.record_ec_msm(expr, terms, &mut self.msm, &mut self.p2)
     }
