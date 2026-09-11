@@ -360,7 +360,9 @@ impl ExecutionProof {
         &self.vm
     }
 
-    /// Returns the state of the precompile work.
+    /// Returns the precompile data carried by this proof.
+    ///
+    /// This status describes the attached data; it does not establish proof validity.
     pub const fn precompile(&self) -> &PrecompileStatus {
         &self.precompile
     }
@@ -368,11 +370,6 @@ impl ExecutionProof {
     /// Splits this proof into its compatibility, VM proof, and precompile state.
     pub fn into_parts(self) -> (ExecutionProofCompatibility, VmProof, PrecompileStatus) {
         (self.compatibility, self.vm, self.precompile)
-    }
-
-    /// Returns whether this proof has completed its lifecycle transition.
-    pub const fn is_complete(&self) -> bool {
-        !matches!(self.precompile, PrecompileStatus::Deferred(_))
     }
 
     /// Returns whether this proof contains precompile work.
