@@ -313,7 +313,7 @@ impl fmt::Display for IntValue {
             Self::U8(value) => write!(f, "{value}"),
             Self::U16(value) => write!(f, "{value}"),
             Self::U32(value) => write!(f, "{value:#04x}"),
-            Self::Felt(value) => write!(f, "{:#08x}", value.as_canonical_u64().to_be()),
+            Self::Felt(value) => write!(f, "{:#08x}", value.as_canonical_u64()),
         }
     }
 }
@@ -419,5 +419,21 @@ pub(crate) fn shrink_u64_hex(n: u64) -> IntValue {
         IntValue::U32(n as u32)
     } else {
         IntValue::Felt(Felt::new_unchecked(n))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::format;
+
+    use super::*;
+
+    #[test]
+    fn felt_display_preserves_canonical_hex() {
+        // A value that sits above the u32 range so Display takes the Felt arm.
+        // Without `to_be()`, this must print the canonical hex; with the old
+        // byte-swap it printed `0x1000000` instead of `0x100000000`.
+        let value = IntValue::Felt(Felt::new_unchecked(1u64 << 32));
+        assert_eq!(format!("{value}"), "0x100000000");
     }
 }
