@@ -7,6 +7,7 @@ use miden_core::{
     Felt,
     field::{PrimeField64, batch_inversion_allow_zeros},
 };
+use miden_crypto::hash::eidos::encoding::ODD_LANE_MASK;
 
 use super::{
     algebra::{cv_storage_coefficient, cv_storage_offset, cv_word_base, sum_input_b},
@@ -596,7 +597,7 @@ fn packed_message_values(block: [u32; 16]) -> [u64; 8] {
 }
 
 fn packed_output_values(low: [u32; 8]) -> [u64; 4] {
-    core::array::from_fn(|i| pack_pair(low[2 * i], low[2 * i + 1] & 0x7fff_ffff))
+    core::array::from_fn(|i| pack_pair(low[2 * i], low[2 * i + 1] & ODD_LANE_MASK))
 }
 
 fn pack_pair(lo: u32, hi: u32) -> u64 {
