@@ -2,6 +2,10 @@
 
 ## v0.33.0 (Unreleased)
 
+#### Fixes
+
+- Fixed 46 `\begin{cases}...\end{cases}` blocks in the assembly instruction reference and stack design docs that were missing the `\\` row separator between cases, which broke KaTeX rendering ([#3650](https://github.com/0xMiden/miden-vm/issues/3650)).
+
 ## v0.32.1 (2026-09-09)
 
 #### Changes
