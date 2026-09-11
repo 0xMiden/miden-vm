@@ -16,7 +16,7 @@ use crate::{
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         bytes_to_packed_u32_elements, read_sensitive_array,
-        zeroize::{Zeroize, ZeroizeOnDrop},
+        zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing},
     },
 };
 
@@ -95,20 +95,25 @@ impl SecretKey {
 // which ensures that the secret key material is securely zeroized when dropped.
 impl ZeroizeOnDrop for SecretKey {}
 
+#[cfg(test)]
 impl PartialEq for SecretKey {
     fn eq(&self, other: &Self) -> bool {
         use subtle::ConstantTimeEq;
-        self.inner.to_bytes().ct_eq(&other.inner.to_bytes()).into()
+        let self_bytes = Zeroizing::new(self.inner.to_bytes());
+        let other_bytes = Zeroizing::new(other.inner.to_bytes());
+        self_bytes[..].ct_eq(&other_bytes[..]).into()
     }
 }
 
+#[cfg(test)]
 impl Eq for SecretKey {}
 
 // SIGNING KEY
 // ================================================================================================
 
 /// A secret key for EdDSA (Ed25519) signature verification over Curve25519.
-#[derive(Clone, Eq, PartialEq, SilentDebug, SilentDisplay)] // Safe as SecretKey has const-time eq
+#[derive(Clone, SilentDebug, SilentDisplay)]
+#[cfg_attr(test, derive(Eq, PartialEq))] // Safe as SecretKey has const-time eq in tests
 pub struct SigningKey(SecretKey);
 
 impl SigningKey {
@@ -164,7 +169,8 @@ impl Deserializable for SigningKey {
 // ================================================================================================
 
 /// A key for ECDH key exchange over Curve25519
-#[derive(Clone, Eq, PartialEq, SilentDebug, SilentDisplay)] // Safe as SecretKey has const-time eq
+#[derive(Clone, SilentDebug, SilentDisplay)]
+#[cfg_attr(test, derive(Eq, PartialEq))] // Safe as SecretKey has const-time eq in tests
 pub struct KeyExchangeKey(SecretKey);
 
 impl KeyExchangeKey {
@@ -509,7 +515,8 @@ impl Signature {
 
 impl Serializable for SecretKey {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_bytes(&self.inner.to_bytes());
+        let bytes = Zeroizing::new(self.inner.to_bytes());
+        target.write_bytes(&bytes[..]);
     }
 }
 
