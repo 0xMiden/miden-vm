@@ -115,6 +115,15 @@ pub mod core {
             is_missing_rotation_result, row_kind,
         };
     }
+
+    /// Byte-pair rotation relations shared by the MVM and PVM lookup tables.
+    #[doc(hidden)]
+    pub mod rotation_lookup {
+        pub use crate::constraints::and8_lookup::eidos::{
+            BytePairRelation, NUM_RELATIONS, Rotation, contribution, denormalize, normalize,
+            provider_values,
+        };
+    }
 }
 
 /// Test-only access to the shared compression constraints.
