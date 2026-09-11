@@ -169,11 +169,6 @@ pub fn op_non_control_sequence_strategy(
     prop::collection::vec(op_non_control_strategy(), 1..=max_length)
 }
 
-/// Returns true if `op` cannot fail during execution, whatever the VM state.
-pub fn is_infallible_op(op: &Operation) -> bool {
-    stack_delta(op).is_some()
-}
-
 /// Change `op` makes to the stack depth, or `None` if `op` can fail.
 fn stack_delta(op: &Operation) -> Option<i8> {
     match op {
@@ -234,7 +229,7 @@ impl Default for BasicBlockNodeParams {
 }
 
 /// Strategy for the operations of a basic block described by `params`.
-pub fn block_ops_strategy(params: &BasicBlockNodeParams) -> BoxedStrategy<Vec<Operation>> {
+pub(super) fn block_ops_strategy(params: &BasicBlockNodeParams) -> BoxedStrategy<Vec<Operation>> {
     if params.executable {
         let max_len = params.max_ops_len;
         prop::collection::vec(op_infallible_strategy(), 1..=max_len)
