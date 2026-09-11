@@ -5,10 +5,11 @@ sidebar_position: 2
 
 # Deferred state semantics and API contract
 
-`DeferredState` is the host-side state used to evaluate a deferred DAG and maintain its root
-commitment. It is prover input, not cryptographic evidence. A deferred execution proof transports a
-passive `DeferredStateWire`; hydration into a singleton `PrecompileWitness` is a separate façade
-operation.
+`DeferredState` exists during execution to evaluate a deferred DAG and maintain its root commitment.
+Successful execution consumes it and exports the root-reachable graph as one portable
+`PrecompileWitness`, or `None` when the root is `TRUE_DIGEST`. A witness contains graph entries and
+one root, with no evaluator or evaluation cache. Structural validity alone does not establish the
+truth of its assertions.
 
 The simplified state model is:
 
@@ -26,12 +27,12 @@ pub struct DeferredState {
 
 - **Registered** means a digest has an entry in `DeferredState.nodes`. Registration can happen
   through `DeferredState::register`, evaluation storing canonical/helper nodes, `log_statement`
-  storing framework `AND` nodes, or wire rehydration rebuilding entries.
+  storing framework `AND` nodes.
 - **Evaluated** means a registered input digest has been semantically reduced to a canonical node
   under the installed `PrecompileRegistry`. The canonical node is also stored in `nodes` so it can
   be referenced by downstream nodes.
 - **Logged** or **root-reachable** means a registered digest contributes to `DeferredState.root`.
-  Only the root-reachable closure is serialized by `to_wire`; registered/evaluated orphans are
+  Only the root-reachable closure is exported by `into_witness`; registered/evaluated orphans are
   dropped.
 
 ## Registered nodes
@@ -115,7 +116,7 @@ owning `Precompile` with a `DeferredContext`.
 - `ensure_equal(lhs, rhs)` evaluates two children and requires their canonical digests to match.
 - `register(node)` inserts a freshly minted helper node and returns its original digest.
 
-## Root and wire
+## Root and portable export
 
 `root` starts at `TRUE_DIGEST`. `log_statement(stmt_digest)` evaluates the current root and
 statement, requires both to evaluate to `Node::TRUE`, then appends one framework `AND` node:
@@ -124,37 +125,35 @@ statement, requires both to evaluate to `Node::TRUE`, then appends one framework
 next_root = digest(Node::and(previous_root, stmt_digest))
 ```
 
-`to_wire` serializes only the root-reachable closure in canonical child-first order:
+Logging `TRUE` still records this AND node. `into_witness` consumes the execution state and exports
+only its root-reachable closure in canonical child-first order. Index zero is implicit TRUE; data
+entries carry literal chunks, joins carry two backward child indices, and pair lists carry ordered
+pairs of backward child indices. A nonempty witness opens the digest of its last entry.
 
-- data entries carry literal data chunks;
-- join entries emit two child indices;
-- pair-list entries emit pairs of child indices.
-
-The wire root is implicit: empty wire opens `TRUE_DIGEST`, otherwise the root is the digest of the
-final entry. `from_wire(registry, wire)` decodes untrusted wire under `MAX_DEFERRED_ELEMENTS`,
-rejects non-canonical or dangling wire by requiring `state.to_wire() == wire`, then evaluates the
-implicit wire root to `Node::TRUE`. Evaluation may insert canonical/helper nodes in addition to the
-wire nodes.
+Checked construction and decoding reconstruct commitments, reject duplicate or conflicting entries,
+unsupported framework shapes, empty payloads, forward references, unreachable entries, and
+noncanonical traversal order. They do not interpret precompile operations or evaluate assertions.
+Standalone decoding rejects trailing bytes. Completed execution outputs carry this same portable
+representation, and release the runtime state.
 
 ## Proof obligations and composition
 
-`Prover::prove` proves the VM first. A `TRUE_DIGEST` root yields
-`PrecompileStatus::Empty`. Any other root yields `PrecompileStatus::Deferred` with a passive
-`DeferredStateWire`. Canonical proof decoding does not need a registry and does not hydrate that
-wire.
-`Prover::prove_full` proves both stages directly from the in-memory execution witness.
+`Prover::prove` proves the VM first. A `TRUE_DIGEST` root yields `PrecompileStatus::Empty`; any other
+root yields `PrecompileStatus::Deferred` carrying its portable singleton witness. Execution-witness
+construction and decoding require `None` exactly for a TRUE VM root, or one witness with a matching
+root. `Prover::prove_full` proves both stages, using a one-element precompile batch.
 
-For delegated proving, call `miden_vm::precompile_witness_from_wire` explicitly. It applies the
-bundled registry, reconstructs the state, checks canonical wire structure, and evaluates the
-implicit root to `TRUE`. The result is a singleton witness suitable for
-`Prover::prove_precompile`.
+For delegated proving, decode the transported proof and pass its witnesses directly to
+`Prover::prove_precompiles(Vec<PrecompileWitness>)`. The batch must be nonempty. Each input retains its
+own indices, while one private Session shares computations across the batch. Operation support,
+canonical arithmetic values, curve membership, assertion truth, MSM restrictions, and commitments
+are checked during import. A root must have a transcript eval row; a bare external Keccak assertion
+cannot serve as the final root and is rejected without changing its commitment.
 
-`PrecompileWitness::merge` accepts a non-empty vector of singleton witnesses. It preserves exact
-input order and duplicate root multiplicity: `[one, one, two]` remains `[one, one, two]`. A
-one-input merge remains singleton; a multi-root result cannot be merged recursively. DAG nodes may
-be deduplicated, but root occurrences are not. The root count and merged hydrated state are bounded
-by
-the fixed `MAX_PRECOMPILE_ROOTS` and `MAX_DEFERRED_ELEMENTS` hard ceilings.
+The batch preserves exact root order and multiplicity: `[A, B, A]` proves `AND(AND(A, B), A)`.
+Repeated operands and root occurrences count as separate binding uses, even when their computation
+is shared. Structural chunk references and point-at-infinity markers do not consume assertion
+bindings. Witnesses are never merged; batching belongs entirely to proving.
 
 The resulting `PrecompileProof` carries the ordered roots. Their left reduction, beginning with the
 first root, is the statement verified by the aggregate precompile STARK. For one execution proof,
@@ -172,7 +171,9 @@ represent inconsistent artifacts. None of these operations establishes validity.
 ordered aggregate folding, and the precompile STARK. It can validate a precompile artifact against
 an expected outstanding root and returns its authenticated security parameters. `Verifier::verify`
 checks the proof's compatibility declaration and execution lifecycle before it verifies the VM
-STARK. It reuses `verify_precompile` for complete proofs. A successful deferred verification returns
+STARK. For deferred proofs, it evaluates the witness and requires its recomputed root to match the
+VM-authenticated root. It reuses `verify_precompile` for complete proofs. A successful deferred
+verification returns
 the authenticated VM security parameters and outstanding root. A successful complete verification
 has no outstanding obligation and, when it includes a precompile proof, also returns the PVM
 security parameters.
@@ -184,16 +185,19 @@ security parameters.
 rejects trailing bytes, and does not need a registry. The proof stores the transport format and the
 compatible VM and PVM verifier root histories. Decoding selects the format-specific proof decoder.
 Native verification requires a shared VM root and a shared PVM root with the verifier's private
-support policy. Transport preserves the precompile state without validating consistency between
-artifacts. `DeferredStateWire` is passive until the bundled façade hydration step.
+support policy. Transport preserves the portable witness without validating consistency between proof artifacts.
+The execution-proof format is `FORMAT_V2`, execution-witness format is version 2, and portable
+singleton-witness format is version 1. Unsupported versions are rejected; legacy readers are not
+retained.
 
 Canonical binary decoders enforce fixed hard ceilings before allocating declared collections:
 `MAX_STARK_PROOF_BYTES` per inner STARK, `MAX_PRECOMPILE_ROOTS` per ordered root list, and
-`MAX_DEFERRED_ELEMENTS` for deferred wire. Hydration and witness merge also enforce the deferred
-state and root ceilings. These are library safety bounds, not configurable protocol, whole-envelope,
-file, network, or ingestion policy.
+`MAX_DEFERRED_ELEMENTS` for each portable witness. Batch import additionally enforces the root count,
+total input elements, and execution work limits across all inputs, including repeated inputs, so
+computation sharing does not bypass scan limits. These are library safety bounds, not configurable
+protocol, whole-envelope, file, network, or ingestion policy.
 
-Proof and wire artifacts use derived Serde as a representation format. Generic Serde
+Generic serialization traits are representation formats. Generic Serde
 deserialization is not guaranteed to apply the canonical decoder's early allocation bounds and must
 not be treated as a hardened untrusted-input decoder.
 

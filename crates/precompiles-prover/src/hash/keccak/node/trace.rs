@@ -3,8 +3,9 @@
 //! Callers hold a [`KeccakNodeRequires`] accumulator and submit raw
 //! input byte slices via [`KeccakNodeRequires::require`]. The
 //! accumulator dedupes by Keccak digest (`(content, len_bytes)`
-//! identity) — duplicate inputs bump `out_mult` on the existing row
-//! and lay no new sponge / chunk / P2 work. On miss it delegates to
+//! identity) — duplicate inputs reuse the existing row and lay no new
+//! sponge / chunk / P2 work. Session supplies `out_mult` from actual
+//! assertion uses when finishing. On miss the accumulator delegates to
 //! the caller-supplied [`SpongeRequires`], computes the digest-chunk
 //! hash `H_digest_chunks` and the transcript-DAG hash `H_keccak` via
 //! [`Poseidon2Requires`], and records a [`KeccakNodeInvocation`]
@@ -80,10 +81,9 @@ pub struct KeccakNodeInvocation {
     /// this invocation).
     pub sponge_seq_id_head: SpongeSeqId,
     /// Downstream consumer count for the `Binding(H_keccak, True)`
-    /// provide on this row. Range-checked to `[0, 2^16)`; the AIR's
-    /// `(1 − act) · out_mult = 0` constraint pins it to 0 on
-    /// inactive rows. A plain `u32` count — pinned to the `Binding`
-    /// consumer count by bus balance, not range-checked.
+    /// provide on this row. A plain `u32` count pinned to the `Binding`
+    /// consumer count by bus balance, not range-checked. The AIR's
+    /// `(1 − act) · out_mult = 0` constraint pins it to 0 on inactive rows.
     pub out_mult: ProvideMult,
 }
 
@@ -204,12 +204,12 @@ struct NodeRecord {
 /// [`SpongeRequires`] (one-to-one below it) and
 /// [`ChunkRequires`] (one chunk-tape segment per sponge invocation).
 /// Interning by [`KeccakDigest`] collapses two `(input, len_bytes)`-
-/// identical calls into one row with `out_mult` tallied — true dedup,
+/// identical calls into one row with `out_mult` supplied at finish — true dedup,
 /// one row per digest at any consumer count (no range-check, no spill).
 #[derive(Debug, Clone, Default)]
 pub struct KeccakNodeRequires {
     records: Vec<NodeRecord>,
-    /// `keccak_digest → index of its record` (each hit bumps `out_mult`).
+    /// `keccak_digest → index of its record`.
     by_keccak: BTreeMap<KeccakDigest, usize>,
     next_row: u32,
 }
@@ -217,6 +217,14 @@ pub struct KeccakNodeRequires {
 impl KeccakNodeRequires {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Set supply from the Session's actual binding demand.
+    /// Reusing one assertion can require several provides from one computation.
+    pub(crate) fn set_binding_uses(&mut self, uses: &BTreeMap<P2Digest, ProvideMult>) {
+        for record in &mut self.records {
+            record.invocation.out_mult = uses.get(&record.h_keccak).copied().unwrap_or(0);
+        }
     }
 
     /// Register a Keccak invocation. Empty input is supported: it absorbs
@@ -236,12 +244,10 @@ impl KeccakNodeRequires {
     ) -> KeccakNodeOutput {
         let keccak_digest = keccak_oracle(input);
 
-        // True dedup: an identical input bumps the existing row's
-        // consumer count (`out_mult` is a plain `usize`, pinned to the
-        // count by bus balance — no `2^16` cap, no row split).
+        // A repeated computation lays no new work. Binding demand is
+        // recorded separately by the eval layer, when assertions are used.
         if let Some(&idx) = self.by_keccak.get(&keccak_digest) {
-            let rec = &mut self.records[idx];
-            rec.invocation.out_mult += 1;
+            let rec = &self.records[idx];
             return KeccakNodeOutput {
                 keccak_digest,
                 h_keccak: rec.h_keccak,
@@ -292,7 +298,7 @@ impl KeccakNodeRequires {
             perm_seq_id_digest_chunks: digest_chunks_out.head(),
             perm_seq_id_keccak: keccak_out.head(),
             sponge_seq_id_head: sponge_out.sponge_head,
-            out_mult: 1,
+            out_mult: 0,
         };
 
         let node_row = self.next_row;

@@ -1,12 +1,10 @@
-use std::{format, string::String, sync::Arc, vec, vec::Vec};
+use std::{format, string::String, vec, vec::Vec};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
 use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
-    deferred::{
-        DeferredState, Digest, Node as VmNode, PrecompileRegistry, TRUE_DIGEST as VM_TRUE_DIGEST,
-    },
+    deferred::{Digest, Node as VmNode, TRUE_DIGEST as VM_TRUE_DIGEST},
     field::QuadFelt,
     proof::{HashFunction, StarkProof},
 };
@@ -17,26 +15,27 @@ use miden_precompiles_verifier::{VerifyError, verify_deferred};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
-    deferred::{DeferredSession, session_from_deferred_state},
+    PrecompileProvingError,
+    deferred::session::session_from_witnesses,
     hash::{
         chunk_node_sponge::SPONGE_COL_OFFSET,
         keccak::sponge::{COL_ACT as SPONGE_COL_ACT, SPONGE_PERIOD, trace::keccak_oracle},
     },
     math::{U256, from_hex, to_limbs32},
-    prove_deferred_state,
+    prove_precompiles,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::{Session, SessionTraces},
     tests::{
-        SessionTracesTestExt, bus_balance::session_stack_residual,
+        SessionTracesTestExt, batch_witness::WitnessFixture, bus_balance::session_stack_residual,
         verify_deferred as verify_session,
     },
     transcript::poseidon2::P2Digest,
 };
 
-/// A VM synthetic Keccak-only deferred state and the prover-typed view of its root.
+/// A raw Keccak-only portable fixture and the prover-typed view of its root.
 #[derive(Debug)]
-struct SyntheticKeccakDeferredState {
-    state: DeferredState,
+struct SyntheticKeccakWitness {
+    state: WitnessFixture,
     input_digest: Digest,
     expected_digest: Digest,
     assertion_digest: Digest,
@@ -44,13 +43,10 @@ struct SyntheticKeccakDeferredState {
     root: P2Digest,
 }
 
-/// Builds the Keccak-only VM deferred state for `input`:
+/// Builds the Keccak-only committed graph for `input`:
 /// `AND(TRUE_DIGEST, Keccak256Assert(chunks(input), chunks(keccak256(input))))`.
-fn synthetic_keccak_state(input: &[u8]) -> SyntheticKeccakDeferredState {
-    let registry =
-        Arc::new(PrecompileRegistry::new().with_precompile(Keccak256Precompile::default()));
-    let mut state =
-        DeferredState::new(registry).expect("Keccak-only VM deferred state should initialize");
+fn synthetic_keccak_state(input: &[u8]) -> SyntheticKeccakWitness {
+    let mut state = WitnessFixture::new();
 
     let input_digest = state
         .register(VmNode::chunks_from_bytes(input))
@@ -64,7 +60,7 @@ fn synthetic_keccak_state(input: &[u8]) -> SyntheticKeccakDeferredState {
             input_digest,
             expected_digest,
         ))
-        .expect("VM Keccak assertion should evaluate to TRUE");
+        .expect("Keccak assertion should register structurally");
 
     let vm_root = state
         .log_statement(assertion_digest)
@@ -72,7 +68,7 @@ fn synthetic_keccak_state(input: &[u8]) -> SyntheticKeccakDeferredState {
     debug_assert_eq!(vm_root, VmNode::and(VM_TRUE_DIGEST, assertion_digest).digest());
     debug_assert_eq!(state.root(), vm_root);
 
-    SyntheticKeccakDeferredState {
+    SyntheticKeccakWitness {
         state,
         input_digest,
         expected_digest,
@@ -97,7 +93,7 @@ fn len_bytes(input: &[u8]) -> u32 {
     u32::try_from(input.len()).expect("Keccak MVP inputs fit in a VM u32 length tag")
 }
 
-fn register_keccak_assertion(state: &mut DeferredState, input: &[u8]) -> Digest {
+fn register_keccak_assertion(state: &mut WitnessFixture, input: &[u8]) -> Digest {
     let input_digest = state
         .register(VmNode::chunks_from_bytes(input))
         .expect("register Keccak input chunks");
@@ -113,19 +109,19 @@ fn register_keccak_assertion(state: &mut DeferredState, input: &[u8]) -> Digest 
         .expect("matching Keccak assertion registers")
 }
 
-fn register_uint_value(state: &mut DeferredState, domain: UintDomain, value: U256) -> Digest {
+fn register_uint_value(state: &mut WitnessFixture, domain: UintDomain, value: U256) -> Digest {
     state
         .register(UintPrecompile::value_node(domain, to_limbs32(value)))
         .expect("register uint value node")
 }
 
-fn register_uint_op(state: &mut DeferredState, op_id: u64, lhs: Digest, rhs: Digest) -> Digest {
+fn register_uint_op(state: &mut WitnessFixture, op_id: u64, lhs: Digest, rhs: Digest) -> Digest {
     state
         .register(VmNode::join(UintPrecompile::op_tag(op_id), lhs, rhs).expect("uint op tag"))
         .expect("register uint op node")
 }
 
-fn register_curve_point(state: &mut DeferredState, curve: CurveId, x: U256, y: U256) -> Digest {
+fn register_curve_point(state: &mut WitnessFixture, curve: CurveId, x: U256, y: U256) -> Digest {
     let x_digest = register_uint_value(state, curve.base_domain(), x);
     let y_digest = register_uint_value(state, curve.base_domain(), y);
     state
@@ -133,25 +129,25 @@ fn register_curve_point(state: &mut DeferredState, curve: CurveId, x: U256, y: U
         .expect("register curve point value node")
 }
 
-fn register_curve_identity(state: &mut DeferredState, curve: CurveId) -> Digest {
+fn register_curve_identity(state: &mut WitnessFixture, curve: CurveId) -> Digest {
     state
         .register(CurvePrecompile::identity_node(curve))
         .expect("register curve identity node")
 }
 
-fn register_curve_generator(state: &mut DeferredState, curve: CurveId) -> Digest {
+fn register_curve_generator(state: &mut WitnessFixture, curve: CurveId) -> Digest {
     state
         .register(CurvePrecompile::generator_node(curve))
         .expect("register curve generator node")
 }
 
-fn register_curve_op(state: &mut DeferredState, op_id: u64, lhs: Digest, rhs: Digest) -> Digest {
+fn register_curve_op(state: &mut WitnessFixture, op_id: u64, lhs: Digest, rhs: Digest) -> Digest {
     state
         .register(VmNode::join(CurvePrecompile::op_tag(op_id), lhs, rhs).expect("curve op tag"))
         .expect("register curve op node")
 }
 
-fn register_curve_msm(state: &mut DeferredState, pairs: Vec<(Digest, Digest)>) -> Digest {
+fn register_curve_msm(state: &mut WitnessFixture, pairs: Vec<(Digest, Digest)>) -> Digest {
     state
         .register(
             VmNode::try_pair_list(CurvePrecompile::msm_tag(), pairs)
@@ -180,9 +176,8 @@ fn k1_points() -> [(U256, U256); 3] {
     [k256_coords(&g), k256_coords(&g2), k256_coords(&g3)]
 }
 
-fn all_node_vm_state() -> DeferredState {
-    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()))
-        .expect("full precompile registry initializes");
+fn all_node_vm_state() -> WitnessFixture {
+    let mut state = WitnessFixture::new();
 
     let curve = CurveId::Secp256k1;
     let domain = UintDomain::K1Base;
@@ -233,11 +228,17 @@ fn all_node_vm_state() -> DeferredState {
     state
 }
 
-fn translated_traces_check(state: &DeferredState) {
-    let DeferredSession { session, root } = session_from_deferred_state(state).unwrap();
-    assert_eq!(root.hash(), P2Digest::from(state.root()));
-    let traces = session.finish(root);
+fn translated_traces_check(state: &WitnessFixture) {
+    let traces = session_from_witnesses(vec![state.witness()]).unwrap().finish();
+    assert_eq!(traces.public_root(), P2Digest::from(state.root()));
     traces.check();
+}
+
+fn prove_fixture(
+    state: &WitnessFixture,
+    hash_fn: HashFunction,
+) -> Result<StarkProof, PrecompileProvingError> {
+    Ok(prove_precompiles(vec![state.witness()], hash_fn)?.proof)
 }
 
 #[test]
@@ -279,26 +280,12 @@ fn session_public_root_matches_synthetic_deferred_state_for_keccak_inputs() {
 
 #[test]
 fn session_public_root_matches_synthetic_deferred_state_for_all_supported_node_types() {
-    let state = all_node_vm_state();
-    let DeferredSession { session, root } = session_from_deferred_state(&state).unwrap();
-
-    assert_eq!(root.hash(), P2Digest::from(state.root()));
-    let traces = session.finish(root);
-    traces.check();
-}
-
-#[test]
-fn empty_deferred_state_translates_to_true_root() {
-    let state = DeferredState::new(Arc::new(miden_precompiles::registry()))
-        .expect("full precompile registry initializes");
-
-    translated_traces_check(&state);
+    translated_traces_check(&all_node_vm_state());
 }
 
 #[test]
 fn deferred_session_translates_curve_claims_for_all_fixed_curves() {
-    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()))
-        .expect("full precompile registry initializes");
+    let mut state = WitnessFixture::new();
 
     for curve in CurveId::ALL {
         let identity = register_curve_identity(&mut state, curve);
@@ -322,14 +309,8 @@ fn deferred_session_translates_curve_claims_for_all_fixed_curves() {
 
 #[test]
 fn deferred_state_accepts_msm_with_all_zero_scalars() {
-    // 0·P = 𝒪: end to end through the full deferred-state pipeline
-    // (registry → state → translated session → local bus-balance check),
-    // checked against an independently registered identity point rather
-    // than a self-equality (an MSM claim's translation is not cached, so
-    // comparing it to itself would re-translate — and so re-resolve — the
-    // same claim twice, which is its own, unrelated scenario).
-    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()))
-        .expect("full precompile registry initializes");
+    // 0·P = 𝒪, checked against an independently committed identity point.
+    let mut state = WitnessFixture::new();
 
     let curve = CurveId::Secp256k1;
     let point = register_curve_generator(&mut state, curve);
@@ -344,10 +325,8 @@ fn deferred_state_accepts_msm_with_all_zero_scalars() {
 
 #[test]
 fn deferred_state_accepts_msm_with_repeated_base() {
-    // a·P + b·P = (a + b)·P, end to end through the full deferred-state
-    // pipeline, checked against an independently registered `5·G`.
-    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()))
-        .expect("full precompile registry initializes");
+    // a·P + b·P = (a + b)·P, checked against an independently committed `5·G`.
+    let mut state = WitnessFixture::new();
 
     let curve = CurveId::Secp256k1;
     let point = register_curve_generator(&mut state, curve);
@@ -386,9 +365,7 @@ fn trailing_zero_input_changes_root() {
 fn keccak_deferred_state_proof_verifies_and_rejects_trailing_bytes() {
     let input = b"abc";
     let synthetic = synthetic_keccak_state(input);
-    let DeferredSession { session, root } = session_from_deferred_state(&synthetic.state).unwrap();
-    assert_eq!(root.hash(), synthetic.root);
-    let traces = session.finish(root);
+    let traces = session_from_witnesses(vec![synthetic.state.witness()]).unwrap().finish();
     assert_eq!(traces.public_root(), synthetic.root);
 
     let proof = traces.prove();
@@ -396,7 +373,7 @@ fn keccak_deferred_state_proof_verifies_and_rejects_trailing_bytes() {
     verify_session(&proof).expect("Keccak deferred-state proof should verify");
 
     // The proof encoding is exact: an otherwise-valid proof with a trailing byte is rejected.
-    let stark = prove_deferred_state(&synthetic.state, HashFunction::Blake3_256)
+    let stark = prove_fixture(&synthetic.state, HashFunction::Blake3_256)
         .expect("Keccak deferred state should prove");
     let mut proof_bytes = stark.bytes().to_vec();
     proof_bytes.push(0);
@@ -413,7 +390,7 @@ fn keccak_deferred_state_proof_verifies_and_rejects_trailing_bytes() {
 fn prove_deferred_state_proves_non_empty_root() {
     let synthetic = synthetic_keccak_state(b"abc");
 
-    let proof = prove_deferred_state(&synthetic.state, HashFunction::Blake3_256)
+    let proof = prove_fixture(&synthetic.state, HashFunction::Blake3_256)
         .expect("Keccak deferred state should prove");
 
     verify_deferred(&proof, synthetic.vm_root).expect("Keccak deferred-state proof should verify");
@@ -443,7 +420,7 @@ fn prove_deferred_state_round_trips_for_every_hash_function() {
 
     for hash_fn in hash_fns {
         for pass in 0..2 {
-            let proof = prove_deferred_state(&synthetic.state, hash_fn)
+            let proof = prove_fixture(&synthetic.state, hash_fn)
                 .unwrap_or_else(|e| panic!("{hash_fn:?} pass {pass} should prove: {e}"));
             verify_deferred(&proof, synthetic.vm_root)
                 .unwrap_or_else(|e| panic!("{hash_fn:?} pass {pass} should verify: {e}"));
@@ -508,7 +485,7 @@ fn merged_chunk_node_sponge_multi_block_checks_and_balances() {
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn prove_deferred_state_round_trips_for_multi_block_keccak() {
     let synthetic = synthetic_keccak_state(&(0u8..200).collect::<Vec<u8>>());
-    let proof = prove_deferred_state(&synthetic.state, HashFunction::Blake3_256)
+    let proof = prove_fixture(&synthetic.state, HashFunction::Blake3_256)
         .expect("multi-block keccak session should prove");
     verify_deferred(&proof, synthetic.vm_root).expect("multi-block keccak session should verify");
 }

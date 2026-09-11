@@ -1,14 +1,17 @@
-//! Fuzz target for DeferredStateWire deserialization.
-//!
-//! Run with: cargo +nightly fuzz run deferred_state_wire_deserialize --fuzz-dir miden-core-fuzz
-
+//! Fuzz checked portable precompile-witness decoding and canonical transport.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use miden_core::{deferred::DeferredStateWire, serde::Deserializable};
+use miden_core::{
+    deferred::PrecompileWitness,
+    serde::{Deserializable, Serializable},
+};
 
 fuzz_target!(|data: &[u8]| {
-    let _ = DeferredStateWire::read_from_bytes(data);
-    let _ = Vec::<DeferredStateWire>::read_from_bytes(data);
-    let _ = Option::<DeferredStateWire>::read_from_bytes(data);
+    if let Ok(witness) = PrecompileWitness::read_from_bytes(data) {
+        assert_eq!(witness.to_bytes(), data);
+        assert_eq!(PrecompileWitness::read_from_bytes(&witness.to_bytes()).unwrap(), witness);
+    }
+    let _ = Vec::<PrecompileWitness>::read_from_bytes(data);
+    let _ = Option::<PrecompileWitness>::read_from_bytes(data);
 });

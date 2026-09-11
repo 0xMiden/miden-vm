@@ -258,13 +258,13 @@ mod prover_api_lifecycle {
     use miden_assembly::Assembler;
     use miden_core::{
         Felt, Word, ZERO,
-        deferred::{DeferredStateWire, Node, Tag, precompile_id},
+        deferred::{Node, PrecompileWitnessEntry, Tag, precompile_id},
     };
     use miden_vm::{
         DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionWitness,
         FastProcessor, HashFunction, PrecompileProof, PrecompileStatus, PrecompileWitness, Program,
         Prover, StackInputs, StackOutputs, StarkProof, VerificationError, Verifier,
-        advice::AdviceInputs, precompile_witness_from_wire, prove_sync,
+        advice::AdviceInputs, prove_sync,
     };
 
     use super::minimum_conjectured_security_level;
@@ -292,7 +292,7 @@ mod prover_api_lifecycle {
         )
     }
 
-    fn u256_witness(value: u64) -> ExecutionWitness {
+    fn u256_program(value: u64) -> Program {
         let precompile_id = precompile_id("uint256");
         let value_tag = Tag::precompile(
             precompile_id,
@@ -335,7 +335,11 @@ mod prover_api_lifecycle {
             word_literal(equality_tag.as_word().into()),
         );
 
-        execute(&assemble(&source))
+        assemble(&source)
+    }
+
+    fn u256_witness(value: u64) -> ExecutionWitness {
+        execute(&u256_program(value))
     }
 
     fn assert_complete(
@@ -350,52 +354,57 @@ mod prover_api_lifecycle {
             .verify(&claim, proof)
             .expect("complete execution proof should verify");
         assert!(outcome.is_complete());
-        assert!(outcome.precompile_security_parameters().is_none());
+        assert_eq!(
+            outcome.precompile_security_parameters().is_some(),
+            matches!(proof.precompile(), PrecompileStatus::Proven(_)),
+        );
         assert_eq!(minimum_conjectured_security_level(&outcome), 96);
         assert_eq!(outcome.outstanding_precompile_root(), None);
     }
 
     #[test]
     fn configured_prove_sync_matches_buffered_and_overlapped_routes() {
-        let program = assemble("begin push.1 drop end");
         let stack_inputs = StackInputs::default();
         let prover = Prover::new().with_hash_fn(HashFunction::Blake3_256);
         let execution_options = ExecutionOptions::default()
             .with_core_trace_fragment_size(1)
             .expect("one-row trace fragments should be supported");
 
-        let mut buffered_host = DefaultHost::default();
-        let (buffered_outputs, buffered_proof) = prove_sync(
-            &prover,
-            &program,
-            stack_inputs,
-            AdviceInputs::default(),
-            &mut buffered_host,
-            execution_options.with_overlapped_trace_build(false),
-        )
-        .expect("buffered execute-and-prove should succeed");
+        for program in [assemble("begin push.1 drop end"), u256_program(1)] {
+            let mut buffered_host = DefaultHost::default();
+            let (buffered_outputs, buffered_proof) = prove_sync(
+                &prover,
+                &program,
+                stack_inputs,
+                AdviceInputs::default(),
+                &mut buffered_host,
+                execution_options.with_overlapped_trace_build(false),
+            )
+            .expect("buffered execute-and-prove should succeed");
 
-        let mut overlapped_host = DefaultHost::default();
-        let (overlapped_outputs, overlapped_proof) = prove_sync(
-            &prover,
-            &program,
-            stack_inputs,
-            AdviceInputs::default(),
-            &mut overlapped_host,
-            execution_options.with_overlapped_trace_build(true),
-        )
-        .expect("overlapped execute-and-prove should succeed");
+            let mut overlapped_host = DefaultHost::default();
+            let (overlapped_outputs, overlapped_proof) = prove_sync(
+                &prover,
+                &program,
+                stack_inputs,
+                AdviceInputs::default(),
+                &mut overlapped_host,
+                execution_options.with_overlapped_trace_build(true),
+            )
+            .expect("overlapped execute-and-prove should succeed");
 
-        assert_eq!(buffered_outputs, overlapped_outputs);
+            assert_eq!(buffered_outputs, overlapped_outputs);
+            assert_eq!(buffered_proof.vm().precompile_root, overlapped_proof.vm().precompile_root);
 
-        // Parallel proof-of-work grinding may select different valid witnesses, so verify both
-        // proofs instead of requiring byte-identical encodings.
-        assert_complete(&program, stack_inputs, buffered_outputs, &buffered_proof);
-        assert_complete(&program, stack_inputs, overlapped_outputs, &overlapped_proof);
+            // Parallel proof-of-work grinding may select different valid witnesses, so verify both
+            // proofs instead of requiring byte-identical encodings.
+            assert_complete(&program, stack_inputs, buffered_outputs, &buffered_proof);
+            assert_complete(&program, stack_inputs, overlapped_outputs, &overlapped_proof);
+        }
     }
 
     #[test]
-    fn delegated_and_merged_precompile_proving_composes_across_transport() {
+    fn delegated_and_batched_precompile_proving_composes_across_transport() {
         let one_witness = u256_witness(1);
         let one_claim = one_witness.claim();
         let one_deferred = Prover::new()
@@ -410,14 +419,21 @@ mod prover_api_lifecycle {
         assert_eq!(deferred_outcome.outstanding_precompile_root(), Some(one_root));
         assert!(deferred_outcome.precompile_security_parameters().is_none());
 
-        let unrelated_wire = ExecutionProof::new(
+        let unrelated_witness = ExecutionProof::new(
             one_deferred.vm().clone(),
-            PrecompileStatus::Deferred(DeferredStateWire::default()),
+            PrecompileStatus::Deferred(
+                PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
+                    tag: Tag::AND,
+                    lhs: 0,
+                    rhs: 0,
+                }])
+                .expect("a logged TRUE is a nonempty obligation"),
+            ),
         );
-        let unrelated_outcome = Verifier::new()
-            .verify(&one_claim, &unrelated_wire)
-            .expect("deferred verification should authenticate only the VM root");
-        assert_eq!(unrelated_outcome.outstanding_precompile_root(), Some(one_root));
+        assert!(matches!(
+            Verifier::new().verify(&one_claim, &unrelated_witness),
+            Err(VerificationError::DeferredWitnessRootMismatch)
+        ));
 
         let two_witness = u256_witness(2);
         let two_claim = two_witness.claim();
@@ -428,30 +444,27 @@ mod prover_api_lifecycle {
 
         let one_encoded = one_deferred.to_bytes();
         let one_transported = ExecutionProof::read_from_bytes(&one_encoded)
-            .expect("root-one deferred proof transport should decode without hydrating its wire");
+            .expect("root-one deferred proof transport should decode without runtime evaluation");
         let two_transported = ExecutionProof::read_from_bytes(&two_deferred.to_bytes())
-            .expect("root-two deferred proof transport should decode without hydrating its wire");
+            .expect("root-two deferred proof transport should decode without runtime evaluation");
 
-        let PrecompileStatus::Deferred(one_wire) = one_transported.precompile() else {
+        let PrecompileStatus::Deferred(one_precompile) = one_transported.precompile() else {
             panic!("transported root-one proof should remain deferred");
         };
-        let PrecompileStatus::Deferred(two_wire) = two_transported.precompile() else {
+        let PrecompileStatus::Deferred(two_precompile) = two_transported.precompile() else {
             panic!("transported root-two proof should remain deferred");
         };
         let two_root = two_transported.vm().precompile_root;
-        let one_witness = precompile_witness_from_wire(one_wire)
-            .expect("transported root-one wire should hydrate under the standard registry");
-        let two_witness = precompile_witness_from_wire(two_wire)
-            .expect("transported root-two wire should hydrate under the standard registry");
-
-        let merged = PrecompileWitness::merge(vec![one_witness.clone(), one_witness, two_witness])
-            .expect("ordered singleton witnesses should merge");
-        let ordered_roots = vec![one_root, one_root, two_root];
+        let ordered_roots = vec![one_root, two_root, one_root];
 
         let shared_precompile = Prover::new()
             .with_hash_fn(HashFunction::Poseidon2)
-            .prove_precompile(&merged)
-            .expect("merged precompile witness should prove once");
+            .prove_precompiles(vec![
+                one_precompile.clone(),
+                two_precompile.clone(),
+                one_precompile.clone(),
+            ])
+            .expect("portable precompile witnesses should prove in one batch");
         assert_eq!(shared_precompile.roots, ordered_roots);
 
         let verifier = Verifier::new();
@@ -466,14 +479,14 @@ mod prover_api_lifecycle {
         assert_eq!(root_two_security_parameters.conjectured_security_level(), 96);
 
         let mut reordered_precompile = shared_precompile.clone();
-        reordered_precompile.roots.swap(1, 2);
+        reordered_precompile.roots.swap(0, 1);
         assert!(matches!(
             verifier.verify_precompile(&reordered_precompile, one_root),
             Err(VerificationError::PrecompileStarkVerification(_))
         ));
 
         let mut missing_duplicate_precompile = shared_precompile.clone();
-        missing_duplicate_precompile.roots.remove(1);
+        missing_duplicate_precompile.roots.remove(2);
         assert!(matches!(
             verifier.verify_precompile(&missing_duplicate_precompile, one_root),
             Err(VerificationError::PrecompileStarkVerification(_))
@@ -500,7 +513,7 @@ mod prover_api_lifecycle {
                 proof: StarkProof::new(trailing_vm_bytes, one_deferred.vm().proof.hash_fn()),
                 precompile_root: one_root,
             },
-            PrecompileStatus::Deferred(DeferredStateWire::default()),
+            one_deferred.precompile().clone(),
         );
         assert!(matches!(
             verifier.verify(&one_claim, &trailing_vm_proof),
@@ -567,7 +580,7 @@ mod execution_witness_serialization {
     #[cfg(feature = "arbitrary")]
     use miden_utils_testing::proptest::prelude::*;
     use miden_verifier::Verifier;
-    use miden_vm::{ExecutionWitness, Program, precompile_witness_from_wire};
+    use miden_vm::{ExecutionWitness, Program};
 
     fn default_source_manager_host() -> DefaultHost {
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()))
@@ -754,17 +767,17 @@ mod execution_witness_serialization {
     }
 
     #[test]
-    fn test_execution_witness_round_trip_preserves_deferred_wire() {
+    fn test_execution_witness_round_trip_preserves_precompile_witness() {
         std::thread::Builder::new()
-            .name("partial-deferred-wire".into())
+            .name("partial-precompile-witness".into())
             .stack_size(8 * 1024 * 1024)
-            .spawn(execution_witness_round_trip_preserves_deferred_wire)
-            .expect("failed to spawn partial-wire test thread")
+            .spawn(execution_witness_round_trip_preserves_precompile_witness)
+            .expect("failed to spawn partial-witness test thread")
             .join()
-            .expect("partial-wire test thread panicked");
+            .expect("partial-witness test thread panicked");
     }
 
-    fn execution_witness_round_trip_preserves_deferred_wire() {
+    fn execution_witness_round_trip_preserves_precompile_witness() {
         let source = "begin log_deferred end";
         let program = Assembler::default()
             .assemble_program("program", source)
@@ -780,24 +793,21 @@ mod execution_witness_serialization {
             ExecutionWitness::read_from_bytes(&witness_bytes).expect("witness round trip");
         let (_, precompile) = inspected.into_parts();
         let precompile = precompile.expect("deferred execution should carry a precompile witness");
-        let expected_deferred_root = precompile.state().root();
-        let expected_wire = precompile
-            .state()
-            .to_wire()
-            .expect("deferred state should serialize to canonical wire");
+        let expected_deferred_root = precompile.root_unchecked();
+        let expected_witness = precompile;
 
         let proving =
             ExecutionWitness::read_from_bytes(&witness_bytes).expect("witness round trip");
         let proof = Prover::new()
             .with_hash_fn(HashFunction::Blake3_256)
             .prove(proving)
-            .expect("wire-backed partial proof should be produced from the restored witness");
+            .expect("portable partial proof should be produced from the restored witness");
 
         assert!(!proof.is_complete());
-        let miden_vm::PrecompileStatus::Deferred(wire) = proof.precompile() else {
-            panic!("partial proving should keep the deferred proof wire-backed");
+        let miden_vm::PrecompileStatus::Deferred(portable) = proof.precompile() else {
+            panic!("partial proving should keep the deferred proof portable");
         };
-        assert_eq!(wire, &expected_wire);
+        assert_eq!(portable, &expected_witness);
         let claim = ExecutionWitness::read_from_bytes(&witness_bytes)
             .expect("witness round trip")
             .claim();
@@ -805,11 +815,11 @@ mod execution_witness_serialization {
             Verifier::new().verify(&claim, &proof).expect("deferred VM proof should verify");
         assert_eq!(outcome.outstanding_precompile_root(), Some(expected_deferred_root));
 
-        let hydrated = precompile_witness_from_wire(wire)
-            .expect("transported wire should hydrate under the standard registry");
-        assert_eq!(
-            hydrated.state().to_wire().expect("hydrated state should serialize to wire"),
-            expected_wire
-        );
+        let precompile_proof = Prover::new()
+            .with_hash_fn(HashFunction::Blake3_256)
+            .prove_precompiles(vec![portable.clone()])
+            .expect("restored portable witness should prove directly");
+        let complete = proof.complete(precompile_proof).expect("matching proof should complete");
+        assert!(Verifier::new().verify(&claim, &complete).unwrap().is_complete());
     }
 }

@@ -1,18 +1,16 @@
 //! End-to-end verification of a real PVM proof inside MASM.
 
-use std::sync::Arc;
-
 use miden_core::{
     Felt, Word,
     advice::AdviceInputs,
     crypto::hash::Keccak256,
-    deferred::{DeferredState, Node, PrecompileRegistry},
+    deferred::{Node, PrecompileWitness, PrecompileWitnessEntry, Tag},
     program::proof_request_key,
     proof::{HashFunction, PrecompileProof, StarkProof},
 };
 use miden_core_lib::CoreLibrary;
 use miden_precompiles::Keccak256Precompile;
-use miden_precompiles_prover::prove_deferred_state;
+use miden_precompiles_prover::prove_precompiles;
 use miden_precompiles_verifier::masm_verifier::{
     PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
 };
@@ -120,34 +118,33 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
 }
 
 fn prove_keccak_claim(input: &[u8]) -> PrecompileProof {
-    let registry =
-        Arc::new(PrecompileRegistry::new().with_precompile(Keccak256Precompile::default()));
-    let mut state = DeferredState::new(registry).expect("Keccak fixture registry must initialize");
-
-    let input_digest = state
-        .register(Node::chunks_from_bytes(input))
-        .expect("input chunks must register");
+    let input_node = Node::chunks_from_bytes(input);
     let digest_bytes: [u8; 32] = Keccak256::hash(input).into();
     let digest_chunk = core::array::from_fn(|i| {
         Felt::from_u32(u32::from_le_bytes(
             digest_bytes[4 * i..4 * i + 4].try_into().expect("one u32 limb"),
         ))
     });
-    let expected_digest = state
-        .register(Node::chunks([digest_chunk]).expect("digest chunk is non-empty"))
-        .expect("expected digest must register");
-    let assertion = state
-        .register(Keccak256Precompile::assert_node(
-            u32::try_from(input.len()).expect("fixture length fits u32"),
-            input_digest,
-            expected_digest,
-        ))
-        .expect("matching Keccak assertion must register");
-    let root = state.log_statement(assertion).expect("true statement must log");
-
-    let proof = prove_deferred_state(&state, HashFunction::Poseidon2)
-        .expect("fixture must produce a PVM STARK proof");
-    PrecompileProof { proof, roots: vec![root] }
+    let assertion = Keccak256Precompile::assert_node(
+        u32::try_from(input.len()).expect("fixture length fits u32"),
+        input_node.digest(),
+        Node::chunks([digest_chunk]).unwrap().digest(),
+    );
+    let witness = PrecompileWitness::from_entries(vec![
+        PrecompileWitnessEntry::Data {
+            tag: Tag::CHUNKS,
+            chunks: input_node.payload().as_data().unwrap().to_vec(),
+        },
+        PrecompileWitnessEntry::Data {
+            tag: Tag::CHUNKS,
+            chunks: vec![digest_chunk],
+        },
+        PrecompileWitnessEntry::Join { tag: assertion.tag(), lhs: 1, rhs: 2 },
+        PrecompileWitnessEntry::Join { tag: Tag::AND, lhs: 0, rhs: 3 },
+    ])
+    .expect("Keccak fixture has a canonical portable graph");
+    prove_precompiles(vec![witness], HashFunction::Poseidon2)
+        .expect("fixture must produce a PVM STARK proof")
 }
 
 fn run_pvm_verifier(

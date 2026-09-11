@@ -8,9 +8,9 @@ use miden_precompiles::UintSpec;
 use miden_processor::{ExecutionError, ExecutionOutput};
 
 use super::helpers::{
-    TRUNCATE_STACK_TO_OUTPUT_PROC, U32x8, assert_deferred_state_round_trips, assert_memory_u32x8,
-    assert_stack_u32x8, expect_precompile_trap, masm_push_u32x8, masm_store_u32x8,
-    read_memory_felts, run_precompile_program,
+    TRUNCATE_STACK_TO_OUTPUT_PROC, U32x8, assert_memory_u32x8,
+    assert_precompile_witness_round_trips, assert_stack_u32x8, expect_precompile_trap,
+    masm_push_u32x8, masm_store_u32x8, read_memory_felts, run_precompile_program,
 };
 
 const MEM_PTR: u32 = 0;
@@ -175,7 +175,7 @@ impl<M: UintSpec> UintModule<M> {
         let output = run_precompile_program(&source).expect("load/eval roundtrip must succeed");
         assert_stack_u32x8(&output, stack_value);
         assert_memory_u32x8(&output, OUT_PTR, memory_value);
-        assert_deferred_state_round_trips(&output);
+        assert_precompile_witness_round_trips(&output);
     }
 
     fn assert_open_value(&self, expected: U32x8) {
@@ -199,19 +199,18 @@ impl<M: UintSpec> UintModule<M> {
         );
 
         assert_ne!(
-            baseline.deferred_state.root(),
+            baseline.precompile_root(),
             TRUE_DIGEST,
             "open_value test input must be proof-bound by a nonempty deferred root",
         );
         assert_eq!(
-            opened.deferred_state.root(),
-            baseline.deferred_state.root(),
+            opened.precompile_root(),
+            baseline.precompile_root(),
             "open_value must not advance the deferred root",
         );
         assert_eq!(
-            opened.deferred_state.to_wire().expect("opened wire must encode"),
-            baseline.deferred_state.to_wire().expect("baseline wire must encode"),
-            "open_value must not add deferred wire entries",
+            opened.precompile_witness, baseline.precompile_witness,
+            "open_value must not add portable witness entries",
         );
     }
 
@@ -486,7 +485,7 @@ impl<M: UintSpec> UintModule<M> {
         let output = run_precompile_program(&source).unwrap_or_else(|err| {
             panic!("{} {label} must succeed: {err:?}", self.module);
         });
-        assert_deferred_state_round_trips(&output);
+        assert_precompile_witness_round_trips(&output);
         output
     }
 
@@ -507,7 +506,7 @@ impl<M: UintSpec> UintModule<M> {
             panic!("{} {label} must succeed: {err:?}", self.module);
         });
         assert_stack_u32x8(&output, expected);
-        assert_deferred_state_round_trips(&output);
+        assert_precompile_witness_round_trips(&output);
         output
     }
 

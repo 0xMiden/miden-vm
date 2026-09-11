@@ -1,12 +1,7 @@
 use std::sync::Arc;
 
 use miden_assembly::{Assembler, Linkage};
-use miden_core::{
-    Felt,
-    deferred::DeferredState,
-    serde::{Deserializable, Serializable},
-    utils::bytes_to_packed_u32_elements,
-};
+use miden_core::{Felt, serde::Deserializable, utils::bytes_to_packed_u32_elements};
 use miden_core_lib::{
     CoreLibrary, dsa::ecdsa_k256_keccak,
     handlers::ecdsa_k256_keccak::ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,
@@ -18,7 +13,7 @@ use miden_crypto::{
     utils::hex_to_bytes,
 };
 use miden_precompiles::{K1Scalar, SECP256K1_LAMBDA, scalar_mul_mod_n};
-use miden_precompiles_prover::{HashFunction, prove_deferred_state};
+use miden_precompiles_prover::{HashFunction, prove_precompiles};
 use miden_precompiles_verifier::verify_deferred;
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, MemoryError,
@@ -30,7 +25,7 @@ use miden_utils_testing::crypto::Poseidon2;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
 use crate::{
-    helpers::{masm_push_word, masm_store_felts},
+    helpers::{assert_precompile_witness_round_trips, masm_push_word, masm_store_felts},
     support::ecdsa::{
         EcdsaFixture as Fixture, fixture_from_signing_key, generator_public_key_fixture,
         valid_fixture,
@@ -49,7 +44,7 @@ fn core_ecdsa_k256_keccak_recover_returns_public_key() {
         .expect("a valid recoverable signature must return its public key");
 
     assert_eq!(stack_elements::<16>(&output), public_key_elements(&fixture.public_key));
-    assert_deferred_state_round_trips(&output);
+    assert_precompile_witness_round_trips(&output);
     assert_deferred_proof_verifies(&output);
 }
 
@@ -222,16 +217,13 @@ fn core_ecdsa_k256_keccak_verify_accepts_valid_signature() {
     let fixture = valid_fixture();
 
     let output = run_verify(&fixture).expect("valid core ECDSA K256/Keccak signature must verify");
-    assert_deferred_state_round_trips(&output);
-
-    let wire = output.deferred_state.to_wire().expect("deferred state must encode to wire");
-    assert_eq!(wire.to_bytes().len(), 2455);
+    assert_precompile_witness_round_trips(&output);
 }
 
 /// Full round trip through the real precompile side prover: `verify` logs a plain 2-base MSM
 /// claim (`R = u1*G + u2*Q`), and the side prover satisfies it with a GLV-decomposed addition
 /// chain internally (`intro_endo`'s in-circuit `phi(G)`/`phi(Q)` certs, no untrusted advice) --
-/// this proves those claims the deferred state above only checked structurally, then verifies the
+/// this proves those claims already checked eagerly during execution, then verifies the
 /// resulting STARK proof against the same root the main VM committed.
 #[test]
 fn core_ecdsa_k256_keccak_verify_glv_claim_proves_and_verifies() {
@@ -247,7 +239,7 @@ fn core_ecdsa_k256_keccak_verify_bytes_accepts_long_payload() {
 
     let output = run_verify_bytes(&payload, [0x91; 32])
         .expect("signature over a long memory-backed message must verify");
-    assert_deferred_state_round_trips(&output);
+    assert_precompile_witness_round_trips(&output);
 }
 
 #[test]
@@ -263,7 +255,7 @@ fn core_ecdsa_k256_keccak_verify_accepts_generator_public_key() {
     let fixture = generator_public_key_fixture();
 
     let output = run_verify(&fixture).expect("generator public key must verify");
-    assert_deferred_state_round_trips(&output);
+    assert_precompile_witness_round_trips(&output);
 }
 
 /// A public key whose x-coordinate is `G_x`, `beta*G_x`, or `beta^2*G_x` puts it on the secp256k1
@@ -296,9 +288,12 @@ fn core_ecdsa_k256_keccak_verify_accepts_glv_base_repeating_public_keys() {
         let output = run_verify(&fixture)
             .unwrap_or_else(|e| panic!("{name} must verify through the 2-base fallback: {e}"));
 
-        let proof = prove_deferred_state(&output.deferred_state, HashFunction::Blake3_256)
-            .unwrap_or_else(|_| panic!("{name}: the fallback's deferred claims must be provable"));
-        verify_deferred(&proof, output.deferred_state.root()).unwrap_or_else(|_| {
+        let proof = prove_precompiles(
+            vec![output.precompile_witness.clone().expect("execution has deferred work")],
+            HashFunction::Blake3_256,
+        )
+        .unwrap_or_else(|_| panic!("{name}: the fallback's deferred claims must be provable"));
+        verify_deferred(&proof.proof, output.precompile_root()).unwrap_or_else(|_| {
             panic!("{name}: the fallback's deferred proof must verify against the committed root")
         });
     }
@@ -690,22 +685,13 @@ fn recovery_public_key_handler(public_key: &PublicKey) -> Arc<dyn EventHandler> 
     })
 }
 
-fn assert_deferred_state_round_trips(output: &ExecutionOutput) {
-    let registry = Arc::new(miden_precompiles::registry());
-    let wire = output.deferred_state.to_wire().expect("deferred state must encode to wire");
-    let rehydrated = DeferredState::from_wire(Arc::clone(&registry), &wire)
-        .expect("deferred wire must rehydrate under miden-precompiles registry");
-    assert_eq!(
-        rehydrated.root(),
-        output.deferred_state.root(),
-        "wire round-trip must preserve the deferred root",
-    );
-}
-
 fn assert_deferred_proof_verifies(output: &ExecutionOutput) {
-    let proof = prove_deferred_state(&output.deferred_state, HashFunction::Blake3_256)
-        .expect("the GLV-decomposed deferred claims must be provable");
-    verify_deferred(&proof, output.deferred_state.root())
+    let proof = prove_precompiles(
+        vec![output.precompile_witness.clone().expect("execution has deferred work")],
+        HashFunction::Blake3_256,
+    )
+    .expect("the GLV-decomposed deferred claims must be provable");
+    verify_deferred(&proof.proof, output.precompile_root())
         .expect("the GLV-decomposed deferred proof must verify against the committed root");
 }
 

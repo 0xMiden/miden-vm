@@ -139,10 +139,9 @@ impl Session {
     /// the transcript via [`assert_and`](Self::assert_and) /
     /// [`assert_and_fold`](Self::assert_and_fold).
     ///
-    /// Interning is below this layer: identical input collapses onto one
-    /// keccak-node row (its `out_mult` bumped) and lays no fresh sponge /
-    /// chunk / Poseidon2 work — but each call still yields its own handle,
-    /// so the keccak row's `out_mult` matches its eval consumes.
+    /// Identical input shares one Keccak computation and lays no fresh
+    /// sponge / chunk / Poseidon2 work. Every call yields a reusable handle;
+    /// the provider's `out_mult` is set from actual binding uses at finish.
     pub fn keccak(&mut self, input: &[u8]) -> (KeccakDigest, Truthy) {
         // Seven disjoint fields borrowed in one expression — the borrow
         // checker's field-splitting allows it (these are direct field
@@ -290,6 +289,16 @@ impl Session {
         self.eval.ec_is(p, q, &mut self.p2)
     }
 
+    /// Read a canonical value from this Session's uint store.
+    pub(crate) fn uint_value(&self, node: &UintNode) -> U256 {
+        self.uint.store.uint(node.ptr).value
+    }
+
+    /// Whether this claim has an eval row that can bind the public root.
+    pub(crate) fn is_recorded_truth(&self, claim: Truthy) -> bool {
+        self.eval.is_recorded_truth(claim)
+    }
+
     /// The DAG node `R = P − Q` — one `EcBinOp/Sub` row consuming the
     /// *rearranged* `EcGroupAdd(g, R, Q, P)` (`R + Q = P`) at mult 1,
     /// binding `(h, Group, r_ptr)`. One row, one block — the EC parallel
@@ -419,8 +428,8 @@ impl Session {
     }
 
     /// Fold two claims: assert both truthy and bind their AND
-    /// `Hash(a || b || cap_transcript)` into the transcript. Consumes `a`
-    /// and `b`; returns the combined claim.
+    /// `Hash(a || b || cap_transcript)` into the transcript. Records one use
+    /// each of `a` and `b`; returns the combined claim.
     pub fn assert_and(&mut self, a: Truthy, b: Truthy) -> Truthy {
         self.eval.record_and(a, b, &mut self.p2)
     }
@@ -438,8 +447,8 @@ impl Session {
 
     /// Generate every chiplet's main trace and bundle them. `root` is the
     /// transcript's top claim (its hash becomes `public_root`); it must be
-    /// an asserted node, and every other issued handle must already be
-    /// consumed — the eval chip's `generate_trace` panics otherwise.
+    /// a recorded eval node with no parents. Every other issued handle must
+    /// have at least one use — trace generation panics otherwise.
     ///
     /// The sweep runs in dependency order — eval first (its `out_mult`
     /// checks feed BPL), the uint store's Range16 before BPL, BPL last
@@ -457,6 +466,7 @@ impl Session {
 
         let public_root = root.hash();
         self.eval.assert_no_stray_values();
+        self.node.set_binding_uses(&self.eval.external_truth_uses());
         // EcCreate rows hash the group pointer and bind it through their EcPoint consume.
         let eval = trace_span!("eval", eval_trace(self.eval, root));
         let chunk_node_sponge = trace_span!(
