@@ -8,8 +8,9 @@ use crate::{
     session::Session,
     transcript::{
         eval::{
-            COL_BOUND_PTR, COL_IS_PINNED, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_PIN_CLAIM_PIN_PTR,
-            COL_PTR, COL_TAG_ARG1, COL_UINT_VALUE_BOUND_PTR, NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS,
+            COL_BOUND_PTR, COL_IS_PINNED, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_OUT_MULT,
+            COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_TAG_ARG1, COL_UINT_VALUE_BOUND_PTR,
+            NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS,
         },
         nodes::UintOpId,
         poseidon2::{P2Cap, P2Digest, trace::Poseidon2Requires},
@@ -71,6 +72,7 @@ fn pin_claim_rows_commit_pin_ptr_but_vm_uint_rows_commit_bound_ptr() {
     let eq = session.uint_is(&pinned_value_node, &pinned_value_node);
     let root1 = session.assert_and(root0, pin_claim);
     let root = session.assert_and(root1, eq);
+    let root = session.assert_and(root, pin_claim);
 
     let traces = session.finish(root);
     let eval = traces.mains()[4];
@@ -84,6 +86,7 @@ fn pin_claim_rows_commit_pin_ptr_but_vm_uint_rows_commit_bound_ptr() {
         })
         .expect("expected pin row for explicit ptr");
     assert_eq!(row_value(pin_row, COL_PIN_CLAIM_PIN_PTR), Felt::from(PIN_PTR));
+    assert_eq!(row_value(pin_row, COL_OUT_MULT), Felt::from_u32(2));
 
     let value_row = (0..eval.height())
         .find(|&row| {
