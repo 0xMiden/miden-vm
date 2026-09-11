@@ -341,7 +341,8 @@ fn committed_logup_value_is_the_centered_full_sum() {
             byte,
             Felt::from(eidos_lookup::contribution(rotation, byte, a, b)),
         );
-        challenges.encode(relation.bus() as usize, [Felt::from(a), Felt::from(b), value])
+        challenges
+            .encode(eidos_lookup::bus(relation) as usize, [Felt::from(a), Felt::from(b), value])
     }));
 
     let inverses = batch_multiplicative_inverse(&encodings);

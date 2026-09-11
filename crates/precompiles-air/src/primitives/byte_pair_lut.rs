@@ -218,7 +218,7 @@ where
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         challenges.encode(
-            self.relation.bus() as usize,
+            eidos::bus(self.relation) as usize,
             [self.a.clone(), self.b.clone(), self.value.clone()],
         )
     }
