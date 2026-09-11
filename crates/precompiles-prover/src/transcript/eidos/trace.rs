@@ -255,6 +255,100 @@ fn record_message_range_checks(requires: &mut BytePairLutRequires, block: [u32; 
     }
 }
 
+fn write_compression_cycle(
+    cycles: &[CompressionCycle],
+    physical_cycle_id: usize,
+    cycle_rows: &mut [[Felt; NUM_EIDOS_COMPRESSION_COLS]],
+    byte_pairs: &mut BytePairLutRequires,
+) {
+    let (block, cv) = if let Some(cycle) = cycles.get(physical_cycle_id) {
+        let block = unpack_felts::<16>(&cycle.block);
+        let cv = unpack_felts::<8>(cycle.cv_in.as_slice());
+        (block, cv)
+    } else {
+        ([0; 16], [0; 8])
+    };
+
+    record_message_range_checks(byte_pairs, block);
+    let mut recorder = EidosCompressionLookupCounter { requires: byte_pairs };
+    write_felt_trace_block_into_zeroed_with_lookups(
+        cycle_rows,
+        block,
+        cv,
+        physical_cycle_id as u64,
+        &mut recorder,
+    );
+}
+
+fn fill_compression_cycles_sequential(
+    cycles: &[CompressionCycle],
+    rows: &mut [[Felt; NUM_EIDOS_COMPRESSION_COLS]],
+    byte_pairs: &mut BytePairLutRequires,
+) {
+    for (physical_cycle_id, cycle_rows) in
+        rows.as_chunks_mut::<EIDOS_COMPRESSION_CYCLE_LEN>().0.iter_mut().enumerate()
+    {
+        write_compression_cycle(cycles, physical_cycle_id, cycle_rows, byte_pairs);
+    }
+}
+
+/// Each parallel split owns a dense byte-pair lookup accumulator. This minimum amortizes its
+/// initialization and reduction across enough compression cycles.
+#[cfg(feature = "concurrent")]
+const MIN_CYCLES_PER_PARALLEL_CHUNK: usize = 256;
+
+#[cfg(feature = "concurrent")]
+fn fill_compression_cycles_parallel(
+    cycles: &[CompressionCycle],
+    rows: &mut [[Felt; NUM_EIDOS_COMPRESSION_COLS]],
+    byte_pairs: &mut BytePairLutRequires,
+) {
+    use miden_crypto::parallel::*;
+
+    let cycle_count = rows.len() / EIDOS_COMPRESSION_CYCLE_LEN;
+    let cycles_per_chunk =
+        cycle_count.div_ceil(current_num_threads()).max(MIN_CYCLES_PER_PARALLEL_CHUNK);
+    let local_counts = rows
+        .par_chunks_mut(EIDOS_COMPRESSION_CYCLE_LEN * cycles_per_chunk)
+        .enumerate()
+        .par_fold_reduce(
+            BytePairLutRequires::new,
+            |mut counts, (chunk_idx, chunk)| {
+                for (cycle_in_chunk, cycle_rows) in
+                    chunk.as_chunks_mut::<EIDOS_COMPRESSION_CYCLE_LEN>().0.iter_mut().enumerate()
+                {
+                    let physical_cycle_id = chunk_idx * cycles_per_chunk + cycle_in_chunk;
+                    write_compression_cycle(cycles, physical_cycle_id, cycle_rows, &mut counts);
+                }
+                counts
+            },
+            |mut left, right| {
+                left.merge(right);
+                left
+            },
+        );
+    byte_pairs.merge(local_counts);
+}
+
+fn fill_compression_cycles(
+    cycles: &[CompressionCycle],
+    rows: &mut [[Felt; NUM_EIDOS_COMPRESSION_COLS]],
+    byte_pairs: &mut BytePairLutRequires,
+) {
+    #[cfg(feature = "concurrent")]
+    {
+        use miden_crypto::parallel::current_num_threads;
+
+        let cycle_count = rows.len() / EIDOS_COMPRESSION_CYCLE_LEN;
+        if cycle_count >= 2 * MIN_CYCLES_PER_PARALLEL_CHUNK && current_num_threads() > 1 {
+            fill_compression_cycles_parallel(cycles, rows, byte_pairs);
+            return;
+        }
+    }
+
+    fill_compression_cycles_sequential(cycles, rows, byte_pairs);
+}
+
 fn build_eidos_compression_trace(
     cycles: &[CompressionCycle],
     byte_pairs: &mut BytePairLutRequires,
@@ -267,27 +361,7 @@ fn build_eidos_compression_trace(
     let mut values = vec![Felt::ZERO; height * NUM_EIDOS_COMPRESSION_COLS];
     let (rows, remainder) = values.as_chunks_mut::<NUM_EIDOS_COMPRESSION_COLS>();
     debug_assert!(remainder.is_empty());
-    for (physical_cycle_id, cycle_rows) in
-        rows.as_chunks_mut::<EIDOS_COMPRESSION_CYCLE_LEN>().0.iter_mut().enumerate()
-    {
-        let (block, cv) = if let Some(cycle) = cycles.get(physical_cycle_id) {
-            let block = unpack_felts::<16>(&cycle.block);
-            let cv = unpack_felts::<8>(cycle.cv_in.as_slice());
-            (block, cv)
-        } else {
-            ([0; 16], [0; 8])
-        };
-
-        record_message_range_checks(byte_pairs, block);
-        let mut recorder = EidosCompressionLookupCounter { requires: byte_pairs };
-        write_felt_trace_block_into_zeroed_with_lookups(
-            cycle_rows,
-            block,
-            cv,
-            physical_cycle_id as u64,
-            &mut recorder,
-        );
-    }
+    fill_compression_cycles(cycles, rows, byte_pairs);
 
     debug_assert_eq!(cycle_count, rows.len() / EIDOS_COMPRESSION_CYCLE_LEN);
     RowMajorMatrix::new(values, NUM_EIDOS_COMPRESSION_COLS)
