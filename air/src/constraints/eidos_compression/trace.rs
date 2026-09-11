@@ -83,6 +83,10 @@ pub enum EidosCompressionByteLookup {
 
 impl EidosCompressionByteLookup {
     /// Relation whose multiplicity is incremented for this lookup.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a rotation lookup has a byte position outside `0..4`.
     pub fn relation(self) -> BytePairRelation {
         match self {
             Self::And8 => BytePairRelation::CanonicalXor,
@@ -96,6 +100,10 @@ impl EidosCompressionByteLookup {
     }
 
     /// Physical result carried by the compression trace for this lookup.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a rotation lookup has a byte position outside `0..4`.
     pub fn expected_result(self, lhs: u8, rhs: u8) -> u32 {
         match self {
             Self::And8 => u32::from(lhs & rhs),
@@ -139,6 +147,10 @@ impl TraceRow for EidosCompressionFeltRow {
 }
 
 /// Generates one field-valued Eidos compression trace block with physical cycle ID zero.
+///
+/// # Panics
+///
+/// Panics if the mode metadata or a packed input is not a canonical field element.
 pub fn generate_felt_trace_block(
     block: [u32; 16],
     h: [u32; 8],
@@ -147,6 +159,12 @@ pub fn generate_felt_trace_block(
     generate_felt_trace_block_with_cycle_id(block, h, 0, mode)
 }
 
+/// Generates one field-valued Eidos compression trace block with the specified physical cycle ID.
+///
+/// # Panics
+///
+/// Panics if the compression cycle ID, mode metadata, or a packed input is not a canonical field
+/// element.
 pub fn generate_felt_trace_block_with_cycle_id(
     block: [u32; 16],
     h: [u32; 8],
@@ -165,14 +183,14 @@ pub fn generate_felt_trace_block_with_cycle_id(
 
 /// Writes one Eidos compression cycle after clearing its 32-row destination.
 ///
-/// `compression_cycle_id` must be the zero-based physical cycle index in the complete
-/// Eidos compression trace. The AIR pins the first ID to zero, keeps it constant within a cycle,
-/// and increments it between cycles.
+/// `compression_cycle_id` must be the zero-based physical cycle index in the complete Eidos
+/// compression trace. The AIR pins the first ID to zero, keeps it constant within a cycle, and
+/// increments it between cycles.
 ///
 /// # Panics
 ///
-/// Panics if `rows` contains fewer than 32 rows or if trace metadata, including the compression
-/// cycle ID, is not a canonical field element.
+/// Panics if `rows` contains fewer than 32 rows, the compression cycle ID or mode metadata is not a
+/// canonical field element, or a packed input is not canonical.
 pub fn write_felt_trace_block(
     rows: &mut [EidosCompressionFeltRow],
     block: [u32; 16],
@@ -199,16 +217,16 @@ pub fn write_felt_trace_block(
     )
 }
 
-/// Writes one Eidos compression cycle into zeroed rows and records its byte-table
-/// lookups.
+/// Writes one Eidos compression cycle into zeroed rows and records its byte-table lookups.
 ///
 /// Unlike [`write_felt_trace_block`], this function does not clear the destination. Every cell in
-/// the first 32 rows must already be zero so that inactive overlay columns remain canonical.
+/// the first 32 rows must already be zero so that inactive interface columns remain canonical.
 ///
 /// # Panics
 ///
-/// Panics if `rows` contains fewer than 32 rows or if trace metadata, including the compression
-/// cycle ID, is not a canonical field element.
+/// Panics if `rows` contains fewer than 32 rows, the compression cycle ID or mode metadata is not a
+/// canonical field element, or a packed input is not canonical.
+/// In debug builds, it also panics if the first 32 rows contain a nonzero cell.
 pub fn write_felt_trace_block_into_zeroed_with_lookups<R>(
     rows: &mut [EidosCompressionFeltRow],
     block: [u32; 16],
@@ -220,6 +238,44 @@ pub fn write_felt_trace_block_into_zeroed_with_lookups<R>(
 where
     R: ByteLookupRecorder,
 {
+    validate_trace_mode(mode);
+    let mut write_footer_interface = |row: &mut EidosCompressionFeltRow, output: &[u64; 4]| {
+        write_mvm_footer_interface(row, output, mode);
+    };
+    write_core_felt_trace_block_into_zeroed_with_lookups(
+        rows,
+        block,
+        h,
+        compression_cycle_id,
+        recorder,
+        &mut write_footer_interface,
+    )
+}
+
+/// Writes the shared portion of one Eidos compression cycle into zeroed field-valued rows.
+///
+/// `write_footer_interface` receives each footer row and the four packed compression outputs. It
+/// must populate the interface-specific footer cells before the encoder derives the remaining
+/// witness coordinates. Every cell in the first 32 rows must already be zero.
+///
+/// # Panics
+///
+/// Panics if `rows` contains fewer than 32 rows, the compression cycle ID is not a canonical field
+/// element, or a packed input is not canonical.
+/// In debug builds, it also panics if the first 32 rows contain a nonzero cell.
+#[doc(hidden)]
+pub fn write_core_felt_trace_block_into_zeroed_with_lookups<R, W>(
+    rows: &mut [EidosCompressionFeltRow],
+    block: [u32; 16],
+    h: [u32; 8],
+    compression_cycle_id: u64,
+    recorder: &mut R,
+    write_footer_interface: &mut W,
+) -> [u32; 16]
+where
+    R: ByteLookupRecorder,
+    W: FnMut(&mut EidosCompressionFeltRow, &[u64; 4]),
+{
     assert!(
         rows.len() >= BLOCK_PERIOD,
         "32-row EidosCompression writer needs at least one full block",
@@ -228,7 +284,17 @@ where
         rows[..BLOCK_PERIOD].iter().flatten().all(|&value| value == Felt::ZERO),
         "EidosCompression zeroed-row writer received nonzero destination cells",
     );
-    write_trace_rows(rows, block, h, compression_cycle_id, mode, recorder)
+    validate_compression_cycle_id(compression_cycle_id);
+    validate_packed_inputs(&block, &h);
+    write_core_trace_rows_from_state(
+        rows,
+        block,
+        h,
+        initial_working_state(h),
+        compression_cycle_id,
+        recorder,
+        write_footer_interface,
+    )
 }
 
 /// Reassigns the physical cycle ID of an already-written field-valued Eidos compression block.
@@ -272,14 +338,17 @@ where
     debug_assert!(rows.len() >= BLOCK_PERIOD);
     validate_trace_metadata(compression_cycle_id, mode);
     validate_packed_inputs(&block, &h);
-    write_trace_rows_from_state(
+    let mut write_footer_interface = |row: &mut T, output: &[u64; 4]| {
+        write_mvm_footer_interface(row, output, mode);
+    };
+    write_core_trace_rows_from_state(
         rows,
         block,
         h,
         initial_working_state(h),
         compression_cycle_id,
-        mode,
         recorder,
+        &mut write_footer_interface,
     )
 }
 
@@ -295,11 +364,12 @@ fn validate_packed_inputs(block: &[u32; 16], h: &[u32; 8]) {
     }
 }
 
+#[cfg(test)]
 pub(super) fn write_trace_rows_from_state<T, R>(
     rows: &mut [T],
     block: [u32; 16],
     h: [u32; 8],
-    mut v: [u32; 16],
+    v: [u32; 16],
     compression_cycle_id: u64,
     mode: TraceMode,
     recorder: &mut R,
@@ -308,19 +378,27 @@ where
     T: TraceRow,
     R: ByteLookupRecorder,
 {
-    debug_assert_eq!(&v[..8], &h);
-
-    for (row_idx, row) in rows.iter_mut().enumerate().take(FUSED_G_ROWS) {
-        write_fused_g_row(row, row_idx, block, compression_cycle_id, &mut v, recorder);
-    }
-
-    write_footer_rows(rows, block, h, v, compression_cycle_id, mode, recorder);
-    v
+    let mut write_footer_interface = |row: &mut T, output: &[u64; 4]| {
+        write_mvm_footer_interface(row, output, mode);
+    };
+    write_core_trace_rows_from_state(
+        rows,
+        block,
+        h,
+        v,
+        compression_cycle_id,
+        recorder,
+        &mut write_footer_interface,
+    )
 }
 
 fn validate_trace_metadata(compression_cycle_id: u64, mode: TraceMode) {
     validate_compression_cycle_id(compression_cycle_id);
 
+    validate_trace_mode(mode);
+}
+
+fn validate_trace_mode(mode: TraceMode) {
     let metadata = match mode {
         TraceMode::Compression => None,
         TraceMode::CompressionWithMultiplicity { multiplicity } => Some(multiplicity),
@@ -330,6 +408,38 @@ fn validate_trace_metadata(compression_cycle_id: u64, mode: TraceMode) {
         metadata.is_none_or(|value| value < Felt::ORDER_U64),
         "Eidos compression trace metadata must be a canonical field element",
     );
+}
+
+fn write_core_trace_rows_from_state<T, R, W>(
+    rows: &mut [T],
+    block: [u32; 16],
+    h: [u32; 8],
+    mut v: [u32; 16],
+    compression_cycle_id: u64,
+    recorder: &mut R,
+    write_footer_interface: &mut W,
+) -> [u32; 16]
+where
+    T: TraceRow,
+    R: ByteLookupRecorder,
+    W: FnMut(&mut T, &[u64; 4]),
+{
+    debug_assert_eq!(&v[..8], &h);
+
+    for (row_idx, row) in rows.iter_mut().enumerate().take(FUSED_G_ROWS) {
+        write_fused_g_row(row, row_idx, block, compression_cycle_id, &mut v, recorder);
+    }
+
+    write_core_footer_rows(
+        rows,
+        block,
+        h,
+        v,
+        compression_cycle_id,
+        recorder,
+        write_footer_interface,
+    );
+    v
 }
 
 fn validate_compression_cycle_id(compression_cycle_id: u64) {
@@ -384,6 +494,7 @@ fn write_fused_g_row<T, R>(
     }
 }
 
+#[cfg(test)]
 pub(super) fn write_footer_rows<T, R>(
     rows: &mut [T],
     block: [u32; 16],
@@ -396,9 +507,36 @@ pub(super) fn write_footer_rows<T, R>(
     T: TraceRow,
     R: ByteLookupRecorder,
 {
+    let mut write_footer_interface = |row: &mut T, output: &[u64; 4]| {
+        write_mvm_footer_interface(row, output, mode);
+    };
+    write_core_footer_rows(
+        rows,
+        block,
+        h,
+        v,
+        compression_cycle_id,
+        recorder,
+        &mut write_footer_interface,
+    );
+}
+
+fn write_core_footer_rows<T, R, W>(
+    rows: &mut [T],
+    block: [u32; 16],
+    h: [u32; 8],
+    v: [u32; 16],
+    compression_cycle_id: u64,
+    recorder: &mut R,
+    write_footer_interface: &mut W,
+) where
+    T: TraceRow,
+    R: ByteLookupRecorder,
+    W: FnMut(&mut T, &[u64; 4]),
+{
     let low = low_output(v);
     let r_values = packed_message_values(block);
-    let d_values = packed_output_values(low);
+    let output = packed_output_values(low);
     let footer_canonicality = footer_canonicality_witnesses(block, h);
 
     for footer in 0..FOOTER_ROWS {
@@ -411,24 +549,57 @@ pub(super) fn write_footer_rows<T, R>(
         write_footer_r_prefix(row, footer, &r_values);
         write_future_w_queue(row, footer, v);
         write_footer_canonicality(row, footer, &footer_canonicality);
-        row.set_u64(F_COMPRESSION_MULTIPLICITY_COL, mode.compression_multiplicity());
         row.set_u64(F_COMPRESSION_CYCLE_ID_COL, compression_cycle_id);
-
-        match mode {
-            TraceMode::AeadXof { clk } => {
-                row.set_u64(F_MODE_COL, 1);
-                row.set_u64(F_INTERFACE_TAIL0_COL, clk);
-            },
-            TraceMode::Compression | TraceMode::CompressionWithMultiplicity { .. } => {
-                for (idx, &value) in d_values.iter().enumerate() {
-                    row.set_u64(footer_interface_tail_col(idx), value);
-                }
-            },
-        }
+        write_footer_interface(row, &output);
         if footer == 0 {
             write_footer_b_sum_correction(row, v);
         }
         write_footer_cv_coordinates(row, footer, h);
+    }
+}
+
+/// Writes the shared footer cells from an independently supplied final working state.
+///
+/// `write_footer_interface` receives each footer row and the four packed compression outputs. It
+/// must populate the interface-specific footer cells before the encoder derives the remaining
+/// witness coordinates.
+#[doc(hidden)]
+#[cfg(any(test, feature = "testing"))]
+pub fn write_core_felt_footer_rows<R, W>(
+    rows: &mut [EidosCompressionFeltRow],
+    block: [u32; 16],
+    h: [u32; 8],
+    final_v: [u32; 16],
+    compression_cycle_id: u64,
+    recorder: &mut R,
+    write_footer_interface: &mut W,
+) where
+    R: ByteLookupRecorder,
+    W: FnMut(&mut EidosCompressionFeltRow, &[u64; 4]),
+{
+    write_core_footer_rows(
+        rows,
+        block,
+        h,
+        final_v,
+        compression_cycle_id,
+        recorder,
+        write_footer_interface,
+    );
+}
+
+fn write_mvm_footer_interface<T: TraceRow>(row: &mut T, output: &[u64; 4], mode: TraceMode) {
+    row.set_u64(F_COMPRESSION_MULTIPLICITY_COL, mode.compression_multiplicity());
+    match mode {
+        TraceMode::AeadXof { clk } => {
+            row.set_u64(F_MODE_COL, 1);
+            row.set_u64(F_INTERFACE_TAIL0_COL, clk);
+        },
+        TraceMode::Compression | TraceMode::CompressionWithMultiplicity { .. } => {
+            for (idx, &value) in output.iter().enumerate() {
+                row.set_u64(footer_interface_tail_col(idx), value);
+            }
+        },
     }
 }
 
