@@ -2,6 +2,10 @@
 
 ## v0.34.0 (Unreleased)
 
+#### Fixes
+
+- Fixed `IntValue::Felt` Display so it prints canonical hex without byte-swapping ([#3808](https://github.com/0xMiden/miden-vm/pull/3808)).
+
 ## v0.33.0 (2026-09-16)
 
 #### Features
