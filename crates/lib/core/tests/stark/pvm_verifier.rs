@@ -12,14 +12,21 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_precompiles::Keccak256Precompile;
+use miden_precompiles_air::NUM_CHIPLETS;
 use miden_precompiles_prover::prove_deferred_state;
 use miden_precompiles_verifier::masm_verifier::{
     PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
 };
-use miden_processor::ExecutionOutput;
+use miden_processor::{ExecutionError, operation::OperationError};
 use miden_utils_testing::recursive_verifier::VerifierData;
 
-use super::{EXAMPLE_FIB_SMALL, fib_stack_inputs, generate_recursive_verifier_data};
+use super::{
+    EXAMPLE_FIB_SMALL, fib_stack_inputs, generate_recursive_verifier_data,
+    verifier_stack::{CALLER_WORD, VERIFIER_RETURN, VerifierStack},
+};
+use crate::helpers::masm_push_word;
+
+const SECURITY_PARAM_COUNT: usize = 4;
 
 #[test]
 fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
@@ -52,49 +59,45 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
         pvm_order_tag(&long),
         "fixtures must exercise distinct registry leaves",
     );
-    let short_output =
-        run_pvm_verifier(&short).expect("PVM MASM verifier must accept the short proof");
-    assert_pvm_security_params(&short, &short_output);
-    let long_output =
-        run_pvm_verifier(&long).expect("PVM MASM verifier must accept the long proof");
-    assert_pvm_security_params(&long, &long_output);
+    assert_pvm_verifies(&short);
+    assert_pvm_verifies(&long);
+    assert_pvm_rejects_tampering(&short);
 
-    let mut wrong_claim_elements: [u64; 4] = short.claim_commitment().into();
+    let vm = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
+    run_interleaved_verifiers(&vm, &short)
+        .expect("VM/PVM/VM/PVM verification must not leak shared scratch state");
+}
+
+fn assert_pvm_rejects_tampering(inputs: &PvmRecursiveVerifierInputs) {
+    let verifier_root = pvm_verify_proof_root();
+    let mut wrong_claim_elements: [u64; 4] = inputs.claim_commitment().into();
     wrong_claim_elements[0] ^= 1;
     let wrong_claim_commitment =
         Word::try_from(wrong_claim_elements).expect("mutated claim is canonical");
-    let (stack, mut map, store) = short.advice().clone().into_parts();
-    let request_key = proof_request_key(verifier_root, short.claim_commitment());
+    let (stack, mut map, store) = inputs.advice().clone().into_parts();
+    let request_key = proof_request_key(verifier_root, inputs.claim_commitment());
     let proof_stream = map
         .remove(&request_key)
         .expect("PVM request package must contain its proof stream");
     map.insert(proof_request_key(verifier_root, wrong_claim_commitment), proof_stream);
     let wrong_claim_advice = AdviceInputs::new(stack, map, store);
-    assert!(
-        run_pvm_verifier_with_advice(&wrong_claim_advice, wrong_claim_commitment).is_err(),
-        "the proof must not authenticate a different deferred root",
-    );
+    assert_pvm_rejects(&wrong_claim_advice, wrong_claim_commitment);
 
-    let mut wrong_shape = short.advice().clone();
-    mutate_proof_stream(&short, &mut wrong_shape, |stream| stream[4] += Felt::ONE);
-    assert!(
-        run_pvm_verifier_with_advice(&wrong_shape, short.claim_commitment()).is_err(),
-        "the proof must not authenticate different trace-shape metadata",
-    );
+    let mut wrong_shape = inputs.advice().clone();
+    mutate_proof_stream(inputs, &mut wrong_shape, |stream| {
+        stream[SECURITY_PARAM_COUNT] += Felt::ONE
+    });
+    assert_pvm_rejects(&wrong_shape, inputs.claim_commitment());
 
-    for index in 0..4 {
-        let mut wrong_params = short.advice().clone();
-        mutate_proof_stream(&short, &mut wrong_params, |stream| {
+    for index in 0..SECURITY_PARAM_COUNT {
+        let mut wrong_params = inputs.advice().clone();
+        mutate_proof_stream(inputs, &mut wrong_params, |stream| {
             stream[index] += Felt::ONE;
         });
-        assert!(
-            run_pvm_verifier_with_advice(&wrong_params, short.claim_commitment()).is_err(),
-            "security parameter {index} must be bound into the transcript",
-        );
+        assert_pvm_rejects(&wrong_params, inputs.claim_commitment());
     }
 
-    let (stack, mut map, store) = short.advice().clone().into_parts();
-    let request_key = proof_request_key(pvm_verify_proof_root(), short.claim_commitment());
+    let (stack, mut map, store) = inputs.advice().clone().into_parts();
     let (circuit_key, circuit_values) = map
         .iter()
         .filter(|(key, _)| **key != request_key)
@@ -109,14 +112,7 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
     circuit_stream[0] = Felt::from_u8((circuit_stream[0].as_canonical_u64() == 0) as u8);
     map.insert(circuit_key, circuit_stream);
     let corrupt_circuit = AdviceInputs::new(stack, map, store);
-    assert!(
-        run_pvm_verifier_with_advice(&corrupt_circuit, short.claim_commitment()).is_err(),
-        "the selected ACE instruction stream must be authenticated",
-    );
-
-    let vm = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
-    run_interleaved_verifiers(&vm, &short)
-        .expect("VM/PVM/VM/PVM verification must not leak shared scratch state");
+    assert_pvm_rejects(&corrupt_circuit, inputs.claim_commitment());
 }
 
 fn prove_keccak_claim(input: &[u8]) -> PrecompileProof {
@@ -150,79 +146,92 @@ fn prove_keccak_claim(input: &[u8]) -> PrecompileProof {
     PrecompileProof { proof, roots: vec![root] }
 }
 
-fn run_pvm_verifier(
-    inputs: &PvmRecursiveVerifierInputs,
-) -> Result<ExecutionOutput, miden_processor::ExecutionError> {
-    run_pvm_verifier_with_advice(inputs.advice(), inputs.claim_commitment())
-}
-
 fn run_pvm_verifier_with_advice(
     advice: &AdviceInputs,
     claim_commitment: Word,
-) -> Result<ExecutionOutput, miden_processor::ExecutionError> {
+) -> Result<VerifierStack, ExecutionError> {
     let request_key = proof_request_key(pvm_verify_proof_root(), claim_commitment);
     assert!(
         advice.map().contains_key(&request_key),
         "test advice must contain the proof stream for the supplied claim"
     );
-    let source = "
+    let source = format!(
+        "
         use miden::core::sys
         use miden::core::sys::pvm
+
+        const VERIFIER_RETURN = event(\"{VERIFIER_RETURN}\")
+
         begin
             dupw
             procref.pvm::verify_proof
             exec.sys::build_proof_request_key
             adv.push_mapval dropw
             exec.pvm::verify_proof
+            # => [security_descriptor, ...]
+            trace.VERIFIER_RETURN
             exec.sys::truncate_stack
         end
-    ";
-    let initial_stack: [u64; 4] = claim_commitment.into();
-    let mut test = build_test!(source, initial_stack);
+    "
+    );
+    let claim_elements: [u64; 4] = claim_commitment.into();
+    let mut initial_stack = claim_elements.to_vec();
+    initial_stack.extend(CALLER_WORD);
+    let verifier_stack = VerifierStack::default();
+    let mut test = build_test!(source, initial_stack)
+        .with_trace_handler(VERIFIER_RETURN, verifier_stack.clone());
     test.advice_inputs = advice.clone();
-    test.execute_for_output().map(|(output, _)| output)
+    test.execute_for_output()?;
+    Ok(verifier_stack)
 }
 
-fn assert_pvm_security_params(inputs: &PvmRecursiveVerifierInputs, output: &ExecutionOutput) {
+#[track_caller]
+fn assert_pvm_verifies(inputs: &PvmRecursiveVerifierInputs) {
     use miden_precompiles_air::security;
 
-    const SECURITY_PARAM_COUNT: usize = 4;
-    const NUM_CHIPLETS: usize = 10;
+    let verifier_stack = run_pvm_verifier_with_advice(inputs.advice(), inputs.claim_commitment())
+        .expect("PVM MASM verifier rejected a valid proof");
 
     let stream = proof_stream(inputs);
     let log_max_height = stream[SECURITY_PARAM_COUNT..SECURITY_PARAM_COUNT + NUM_CHIPLETS]
         .iter()
-        .copied()
-        .max_by_key(Felt::as_canonical_u64)
+        .map(Felt::as_canonical_u64)
+        .max()
         .expect("the PVM relation has chiplet AIRs");
-    let mut expected = vec![
-        Felt::from_u32(security::LOOKUP_POW_BITS),
-        Felt::from_u32(security::AIR_SHAPE.num_composed_constraints),
-        Felt::from_u32(security::AIR_SHAPE.max_constraint_degree),
-        Felt::from_u32(security::AIR_SHAPE.num_deep_terms.unwrap()),
-        Felt::from_u32(security::AIR_SHAPE.lookup.max_message_width),
-        Felt::from_u32(security::FIXED_BOUNDARY_LOOKUP_TERMS),
-        Felt::from_u32(security::AIR_SHAPE.lookup.fractions_per_row),
+    let expected = [
+        u64::from(security::LOOKUP_POW_BITS),
+        u64::from(security::AIR_SHAPE.num_composed_constraints),
+        u64::from(security::AIR_SHAPE.max_constraint_degree),
+        u64::from(security::AIR_SHAPE.num_deep_terms.unwrap()),
+        u64::from(security::AIR_SHAPE.lookup.max_message_width),
+        u64::from(security::FIXED_BOUNDARY_LOOKUP_TERMS),
+        u64::from(security::AIR_SHAPE.lookup.fractions_per_row),
         log_max_height,
-        stream[0],
-        stream[1],
-        stream[2],
-        stream[3],
+        stream[0].as_canonical_u64(),
+        stream[1].as_canonical_u64(),
+        stream[2].as_canonical_u64(),
+        stream[3].as_canonical_u64(),
     ];
-    // The claim occupied the next stack word before verification. Requiring zero padding beneath
-    // the returned descriptor proves that the verifier consumed it instead of returning it too.
-    expected.extend([Felt::ZERO; 4]);
-    assert_eq!(
-        output.stack.get_num_elements(expected.len()),
-        expected,
-        "the verifier must consume the claim and return the common security descriptor",
+    verifier_stack.assert_outputs_and_caller(&expected);
+}
+
+#[track_caller]
+fn assert_pvm_rejects(advice: &AdviceInputs, claim_commitment: Word) {
+    let error = run_pvm_verifier_with_advice(advice, claim_commitment)
+        .expect_err("PVM MASM verifier accepted an invalid proof");
+    assert!(
+        matches!(
+            error,
+            ExecutionError::OperationError {
+                err: OperationError::FailedAssertion { .. },
+                ..
+            }
+        ),
+        "expected the PVM verifier to fail an assertion, got {error:?}",
     );
 }
 
 fn pvm_order_tag(inputs: &PvmRecursiveVerifierInputs) -> u32 {
-    const SECURITY_PARAM_COUNT: usize = 4;
-    const NUM_CHIPLETS: usize = 10;
-
     let heights = &proof_stream(inputs)[SECURITY_PARAM_COUNT..SECURITY_PARAM_COUNT + NUM_CHIPLETS];
     let mut proof_order: Vec<usize> = (0..NUM_CHIPLETS).collect();
     proof_order.sort_by_key(|&i| (heights[i].as_canonical_u64(), i));
@@ -232,7 +241,7 @@ fn pvm_order_tag(inputs: &PvmRecursiveVerifierInputs) -> u32 {
 fn run_interleaved_verifiers(
     vm: &VerifierData,
     pvm: &PvmRecursiveVerifierInputs,
-) -> Result<(), miden_processor::ExecutionError> {
+) -> Result<(), ExecutionError> {
     let mut advice_stack = Vec::new();
     advice_stack.extend_from_slice(vm.advice_stack());
     advice_stack.extend(proof_stream(pvm).iter().map(Felt::as_canonical_u64));
@@ -244,9 +253,8 @@ fn run_interleaved_verifiers(
     let mut advice_map = vm.advice_map.clone();
     advice_map.extend(pvm.advice().map().iter().map(|(key, values)| (*key, values.to_vec())));
 
-    let vm_operands = push_operands(&vm.initial_stack());
-    let pvm_stack: [u64; 4] = pvm.claim_commitment().into();
-    let pvm_operands = push_operands(&pvm_stack);
+    let vm_operands = masm_push_word(&vm.claim_commitment);
+    let pvm_operands = masm_push_word(&pvm.claim_commitment());
     let source = format!(
         "
         use miden::core::sys::pvm
@@ -301,10 +309,4 @@ fn mutate_proof_stream(
     mutate(&mut stream);
     map.insert(key, stream);
     *advice = AdviceInputs::new(stack, map, store);
-}
-
-/// Push values in reverse so `values[0]` becomes the top operand, matching
-/// `StackInputs::try_from_ints`.
-fn push_operands(values: &[u64]) -> String {
-    values.iter().rev().map(|value| format!("push.{value}\n")).collect()
 }

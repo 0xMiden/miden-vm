@@ -30,6 +30,9 @@ mod pvm_verifier;
 mod pvm_wrapper;
 mod security;
 mod security_math;
+mod verifier_stack;
+
+use verifier_stack::{CALLER_WORD, VERIFIER_RETURN, VerifierStack};
 
 // RECURSIVE VERIFIER TESTS
 // ================================================================================================
@@ -517,37 +520,41 @@ fn stark_verifier_e2f4_request_multi_proof() {
     test.execute_for_output().expect("both content-addressed proofs must verify");
 }
 
-/// Runs `vm::verify_proof` with the claim commitment on the operand stack and the proof stream on
-/// advice. This directly pins the producer and MASM consumption order.
 fn vm_verify_proof_program() -> String {
-    "
+    format!(
+        "
         use miden::core::sys
         use miden::core::sys::vm
 
+        const VERIFIER_RETURN = event(\"{VERIFIER_RETURN}\")
+
         begin
             exec.vm::verify_proof
-            # => [security_descriptor, D]
+            # => [security_descriptor, D, ...]
+            trace.VERIFIER_RETURN
             exec.sys::truncate_stack
         end
-    "
-    .into()
+        "
+    )
 }
 
 fn run_recursive_verifier(data: &VerifierData) {
     use miden_air::security;
 
     let source = vm_verify_proof_program();
+    let mut initial_stack = data.initial_stack().to_vec();
+    initial_stack.extend(CALLER_WORD);
+    let verifier_stack = VerifierStack::default();
     let test = build_test!(
         source.as_str(),
-        &data.initial_stack(),
+        &initial_stack,
         data.advice_stack(),
         data.store.clone(),
         data.advice_map.clone()
-    );
+    )
+    .with_trace_handler(VERIFIER_RETURN, verifier_stack.clone());
     let (output, _host) = test.execute_for_output().expect("recursive verifier execution failed");
 
-    // Pin the full common descriptor and deferred root so any value or ordering drift is caught
-    // across every end-to-end configuration.
     let params = miden_air::config::pcs_params();
     let height_start = 4 + WORD_SIZE;
     let log_max_height = data.proof_stream[height_start..height_start + miden_air::MIDEN_AIR_COUNT]
@@ -578,14 +585,7 @@ fn run_recursive_verifier(data: &VerifierData) {
         params.folding_pow_bits() as u64,
     ];
     expected.extend_from_slice(&data.proof_stream[4..4 + WORD_SIZE]);
-
-    let returned: Vec<u64> = output
-        .stack
-        .get_num_elements(expected.len())
-        .iter()
-        .map(Felt::as_canonical_u64)
-        .collect();
-    assert_eq!(returned, expected, "vm::verify_proof returned the wrong security descriptor");
+    verifier_stack.assert_outputs_and_caller(&expected);
 
     // Cross-check: extract READ section, sanity-check values, evaluate circuit in Rust.
     ace_read_check::cross_check_ace_circuit(&output);
@@ -612,10 +612,7 @@ fn each_security_parameter_is_transcript_bound() {
             data.store.clone(),
             data.advice_map.clone()
         );
-        assert!(
-            test.execute_for_output().is_err(),
-            "verifier accepted a forged security parameter (index {param})"
-        );
+        expect_assert_error_message!(test);
     }
 }
 
