@@ -296,7 +296,7 @@ fn verifier_signatures_match_operand_stack_layout() {
 
     let Some(PackageExport::Type(export)) = package
         .manifest
-        .get_export("::miden::core::crypto::dsa::falcon512_poseidon2::StoredCoefficient")
+        .get_export("::miden::core::crypto::dsa::falcon512_eidos::StoredCoefficient")
     else {
         panic!("missing coefficient memory type");
     };

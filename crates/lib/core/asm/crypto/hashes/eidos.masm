@@ -1,16 +1,16 @@
-# ===== EIDOS HASH PROCEDURES ===================================================================
-
-#! Eidos hash helpers built on the VM-native Eidos compression operation.
-#!
-#! Procedures which operate on a three-word state use the layout `[BLOCK_LO, BLOCK_HI, CV]`.
-#! After `compress`, `CV` contains the updated chaining word.
+# TYPES
+# =================================================================================================
 
 #! An Eidos digest in stack element order.
 pub type Digest = word
 #! An Eidos chaining value in stack element order.
 pub type ChainingValue = word
-#! Eidos compression state, with the first block word at the top of the stack.
+#! Eidos compression state in `[BLOCK_LO, BLOCK_HI, CV]` stack order.
+#! The `compress` instruction replaces `CV` with the updated chaining value.
 pub type State = struct { block_lo: word, block_hi: word, chaining_value: ChainingValue }
+
+# CONSTANTS
+# =================================================================================================
 
 const EIDOS_INIT_CV_0_BASE = 4280581857092829184
 const EIDOS_INIT_CV_1_BASE = 2688637132020383744
@@ -22,6 +22,9 @@ const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_0 = 1271780409803817075
 const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_1 = 5764598326126322987
 const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_2 = 4360610806978597365
 const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_3 = 6175761669194382739
+
+# PROCEDURES
+# =================================================================================================
 
 #! Constructs an Eidos chaining word from a domain tag and three domain-defined
 #! parameters. Every input must fit in a u32. Each occupies the low lane of one packed Felt; the

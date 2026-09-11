@@ -506,6 +506,8 @@ fn render_vm_ood_frames(geometry: &VmGeometry) -> String {
     format!(
         r#"#! VM out-of-domain evaluation helpers.
 
+use miden::core::stark::types
+
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
 #!
 #! Loads one OOD row from advice, absorbs it into the Eidos transcript, and updates the
@@ -513,7 +515,10 @@ fn render_vm_ood_frames(geometry: &VmGeometry) -> String {
 #!
 #! Inputs:  [scratch0, scratch1, cv, ptr, alpha_ptr, acc0, acc1]
 #! Outputs: [scratch0, scratch1, cv', ptr, alpha_ptr, acc0', acc1']
-pub proc process_row_ood_evaluations
+pub proc process_row_ood_evaluations(
+    state: types::EidosState,
+    evaluation: types::HornerState,
+) -> (types::EidosState, types::HornerState)
     # Per-row OOD layout uses LMCS alignment {LMCS_ALIGNMENT}:
     #   preprocessed: {preprocessed} scalar evaluations
     #   main:         {main_parts} = {main} scalar evaluations

@@ -188,10 +188,11 @@ pub proc load_fri_layer_commitments()
     #=> [...]
 end
 
-#! Load and save the remainder polynomial from the advice provider and check that its hash
-#! corresponds to its commitment and reseed with the latter.
+#! Loads the remainder polynomial from advice, stores it in memory, checks its hash against the
+#! commitment, and reseeds the transcript with that commitment.
 #!
-#! Input: [...]
+#! Input: [scratch0, scratch1, scratch2, scratch3, scratch4, scratch5, scratch6, ...]
+#! The seven scratch elements are discarded after the streaming load.
 #! Output: [...]
 pub proc load_and_verify_remainder(scratch: word, scratch0: felt, scratch1: felt, scratch2: felt)
 

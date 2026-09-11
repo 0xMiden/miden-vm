@@ -4,6 +4,27 @@ use miden::core::stark::random_coin
 use miden::core::stark::utils
 use miden::core::sys::pvm::layout
 
+#! An address in the PVM fixed environment, carried as a 32-bit bus-message value.
+type EnvironmentPtr = u32
+
+#! Fixed-environment unsigned integer and its domain-bound pointer.
+type UintValPayload = struct {
+    ptr: EnvironmentPtr,
+    bound_ptr: EnvironmentPtr,
+    value: u256,
+}
+
+#! Fixed elliptic-curve group parameters, represented by their environment pointers.
+type EcGroupPayload = struct {
+    group: EnvironmentPtr,
+    a: EnvironmentPtr,
+    b: EnvironmentPtr,
+    bound: EnvironmentPtr,
+    scalar_bound: EnvironmentPtr,
+    beta: EnvironmentPtr,
+    lambda: EnvironmentPtr,
+}
+
 # Bus-domain scale factors (`bus_id + 1`) from precompiles-prover/src/relations.rs.
 const UINT_VAL_BUS_SCALE = 11
 const EC_GROUP_BUS_SCALE = 15
