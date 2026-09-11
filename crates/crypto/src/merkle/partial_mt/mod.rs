@@ -6,7 +6,7 @@ use alloc::{
 use core::fmt;
 
 use super::{
-    EMPTY_WORD, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, NodeIndex, Poseidon2, Word,
+    EMPTY_WORD, Eidos, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, NodeIndex, Word,
 };
 use crate::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, word_to_hex,
@@ -161,7 +161,7 @@ impl PartialMerkleTree {
                     .get(&index.sibling())
                     .ok_or(MerkleError::NodeIndexNotFoundInTree(index.sibling()))?;
                 // get parent hash
-                let parent = Poseidon2::merge(&index.build_node(*node, *sibling));
+                let parent = Eidos::merge(&index.build_node(*node, *sibling));
 
                 // add index value of the calculated node to the parents layer
                 parent_layer.push(parent_node.position());
@@ -311,7 +311,7 @@ impl PartialMerkleTree {
 
         // traverse to the root, updating the nodes
         let mut index_value = index_value;
-        let node = Poseidon2::merge(&index_value.build_node(value, path[0]));
+        let node = Eidos::merge(&index_value.build_node(value, path[0]));
         let root = path.iter().skip(1).copied().fold(node, |node, hash| {
             index_value.move_up();
             // insert calculated node to the nodes map
@@ -337,7 +337,7 @@ impl PartialMerkleTree {
                 self.leaves.insert(sibling_node);
             }
 
-            Poseidon2::merge(&index_value.build_node(node, hash))
+            Eidos::merge(&index_value.build_node(node, hash))
         });
 
         // if the path set is empty (the root is all ZEROs), set the root to the root of the added
@@ -389,7 +389,7 @@ impl PartialMerkleTree {
         let mut value = value;
         for _ in 0..node_index.depth() {
             let sibling = self.nodes.get(&node_index.sibling()).expect("sibling should exist");
-            value = Poseidon2::merge(&node_index.build_node(value, *sibling));
+            value = Eidos::merge(&node_index.build_node(value, *sibling));
             node_index.move_up();
             self.nodes.insert(node_index, value);
         }

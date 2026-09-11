@@ -1,6 +1,6 @@
 //! Main-trace LogUp lookup AIR.
 //!
-//! Owns the main-trace side of the Miden VM's LogUp argument: four permutation columns, one
+//! Owns the main-trace side of the Miden VM's LogUp argument: four lookup columns, one
 //! per `emit_*` function in [`super::buses`]. This module wires them together via a single
 //! [`MainBusContext`] that carries the two-row window plus a shared [`OpFlags`] instance.
 //!

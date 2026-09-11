@@ -12,19 +12,6 @@ use common::{
     },
 };
 
-benchmark_aead_bytes!(
-    aead_poseidon2,
-    "AEAD Poseidon2",
-    bench_aead_poseidon2_bytes,
-    aead_poseidon2_bytes_group
-);
-benchmark_aead_field!(
-    aead_poseidon2,
-    "AEAD Poseidon2",
-    bench_aead_poseidon2_felts,
-    aead_poseidon2_felts_group
-);
-
 benchmark_aead_bytes!(aead_eidos, "AEAD Eidos", bench_aead_eidos_bytes, aead_eidos_bytes_group);
 benchmark_aead_field!(aead_eidos, "AEAD Eidos", bench_aead_eidos_felts, aead_eidos_felts_group);
 
@@ -44,8 +31,6 @@ benchmark_aead_field!(
 // Running the benchmarks:
 
 criterion_main!(
-    aead_poseidon2_bytes_group,
-    aead_poseidon2_felts_group,
     aead_eidos_bytes_group,
     aead_eidos_felts_group,
     aead_xchacha_bytes_group,

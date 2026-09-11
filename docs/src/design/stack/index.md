@@ -27,12 +27,16 @@ The meaning of the above columns is as follows:
 
 * $s_0 ... s_{15}$ are the columns representing the top $16$ slots of the stack.
 * Column $b_0$ contains the number of items on the stack (i.e., the stack depth). In the above picture, there are 16 items on the stacks, so $b_0 = 16$.
-* Column $b_1$ contains an address of a row in the "overflow table" in which we'll store the data that doesn't fit into the top $16$ slots. When $b_1 = 0$, it means that all stack data fits into the top $16$ slots of the stack.
+* Column $b_1$ contains the address of the top row in the overflow table, which stores data beyond
+  the directly accessible $16$ stack slots. A zero value indicates an empty overflow table.
 * Helper column $h_0$ is used to ensure that stack depth does not drop below $16$. Values in this column are set by the prover non-deterministically to $\frac{1}{b_0-16}$ when $b_0 \neq 16$, and to any other value otherwise.
 
 ### Overflow table
 
-To keep track of the data which doesn't fit into the top $16$ stack slots, we'll use an overflow table. This will be a [virtual table](../lookups/multiset.md#virtual-tables). To represent this table, we'll use a single auxiliary column $p_1$ (named `p1` in the codebase).
+The overflow table stores operand-stack values beyond the $16$ directly accessible slots. It is a
+virtual table implemented by typed [LogUp](../lookups/logup.md) messages. An insertion contributes
+multiplicity $+1$ and a removal contributes multiplicity $-1$; lookup closure requires the two
+multisets to match.
 
 The table itself can be thought of as having 3 columns as illustrated below.
 
@@ -44,32 +48,22 @@ The meaning of the columns is as follows:
 * Column $t_1$ contains the value that overflowed the stack.
 * Column $t_2$ contains the address of the row containing the value that overflowed the stack right before the value in the current row. For example, in the picture above, first value $a$ overflowed the stack, then $b$ overflowed the stack, and then value $c$ overflowed the stack. Thus, row with value $b$ points back to the row with value $a$, and row with value $c$ points back to the row with value $b$.
 
-To reduce a table row to a single value, we'll compute a randomized product of column values as follows:
+Each row is encoded as a domain-separated `StackOverflowTable` message with payload
+$(t_0,t_1,t_2)$:
 
 $$
-r_i = \alpha_0 + \alpha_1 \cdot t_{0, i} + \alpha_2 \cdot t_{1, i} + \alpha_3 \cdot t_{2, i}
+S(t_0,t_1,t_2) = P_{stack\_overflow} + t_0 + \beta t_1 + \beta^2 t_2.
 $$
 
-Then, when row $i$ is added to the table, we'll update the value in the $p_1$ column like so:
+Here $P_{stack\_overflow}$ is the fixed bus prefix for this relation. The table satisfies two
+invariants:
 
-$$
-p_1' = p_1 \cdot r_i
-$$
+* A row is removed only after it has been inserted.
+* Each insertion uses a distinct row address.
 
-Analogously, when row $i$ is removed from the table, we'll update the value in column $p_1$ like so:
-
-$$
-p_1' = \frac{p_1}{r_i}
-$$
-
-The initial value of $p_1$ is set to $1$. Thus, if by the time Miden VM finishes executing a program the table is empty (we added and then removed exactly the same set of rows), $p_1$ will also be equal to $1$.
-
-There are a couple of other rules we'll need to enforce:
-
-* We can delete a row only after the row has been inserted into the table.
-* We can't insert a row with the same address twice into the table (even if the row was inserted and then deleted).
-
-How these are enforced will be described a bit later.
+The [overflow-table constraints](#overflow-table-constraints) assign the current VM clock as each
+inserted row's address and carry its predecessor through $b_1$; the shared LogUp argument binds
+each removal to the corresponding inserted row.
 
 ## Right shift
 
@@ -101,7 +95,7 @@ Overall, during a right shift we do the following:
 
 * Increment stack depth by $1$.
 * Shift stack columns $s_0, ..., s_{14}$ right by $1$ slot.
-* Add a row to the overflow table described by tuple $(clk, s_{15}, b_0)$.
+* Add a row to the overflow table described by tuple $(clk, s_{15}, b_1)$.
 * Set the next value of $b_1$ to the current value of $clk$.
 
 Also, as mentioned previously, the prover sets values in $h_0$ non-deterministically to $\frac{1}{b_0-16}$.
@@ -184,40 +178,17 @@ depth updates are handled by the block stack table constraints.
 
 ### Overflow table constraints
 
-When the stack is shifted to the right, a tuple $(clk, s_{15}, b_1)$ should be added to the overflow table. We will denote value of the row to be added to the table as follows:
+When the stack is shifted to the right, the message $S(clk,s_{15},b_1)$ is added to the overflow
+table with multiplicity $+1$.
 
-$$
-v = \alpha_0 + \alpha_1 \cdot clk + \alpha_2 \cdot s_{15} + \alpha_3 \cdot b_1
-$$
+When the stack is shifted to the left and the overflow table is non-empty,
+$S(b_1,s'_{15},b'_1)$ is removed with multiplicity $-1$. A `DYNCALL` with a non-empty overflow
+table instead removes $S(b_1,s'_{15},h_5)$, because the restored predecessor is staged in decoder
+hasher register $h_5$ while $b'_1$ is reset for the new context. Operations that do not add or
+remove an overflow entry make no `StackOverflowTable` interaction.
 
-When the stack is shifted to the left, a tuple $(b_1, s'_{15}, b'_1)$ should be removed from the overflow table. We will denote value of the row to be removed from the table as follows.
-
-$$
-u = \alpha_0 + \alpha_1 \cdot b_1 + \alpha_2 \cdot s'_{15} + \alpha_3 \cdot b'_1
-$$
-
-When the operation is DYNCALL and the overflow table is non-empty, we also remove one row, but
-the "prev" value comes from decoder hasher state/helper element 5 instead of $b'_1$.
-
-Using the above variables, we can ensure that right and left shifts update the overflow table correctly by enforcing the following constraint:
-
-$$
-p_1' \cdot (u \cdot f_{shl} \cdot f_{ov} + 1-f_{shl} \cdot f_{ov}) = p_1 \cdot (v \cdot f_{shr} + 1-f_{shr}) \text{ | degree} = 9
-$$
-
-For DYNCALL, the same structure applies with $f_{dyncall}$ in place of $f_{shl}$ and with $u$
-defined using the hasher-state "prev" value described above.
-
-The above constraint reduces to the following under various flag conditions:
-
-| Condition                                          | Applied constraint   |
-| -------------------------------------------------- | -------------------- |
-| $f_{shl}=1$, $f_{shr}=0$, $f_{ov}=0$               | $p_1' = p_1$         |
-| $f_{shl}=1$, $f_{shr}=0$, $f_{ov}=1$               | $p_1' \cdot u = p_1$ |
-| $f_{shl}=0$, $f_{shr}=1$, $f_{ov}=1 \text{ or } 0$ | $p_1' = p_1 \cdot v$ |
-| $f_{shl}=0$, $f_{shr}=0$, $f_{ov}=1 \text{ or } 0$ | $p_1' = p_1$         |
-
-Notice that in the case of the left shift, the constraint forces the prover to set the next values of $s_{15}$ and $b_1$ to values $t_1$ and $t_2$ of the row removed from the overflow table.
+For a left shift, the lookup relation binds the next values of $s_{15}$ and $b_1$ to $t_1$ and
+$t_2$ of the removed overflow-table row.
 
 In case of a right shift, we also need to make sure that the next value of $b_1$ is set to the current value of $clk$. This can be done with the following constraint:
 
@@ -256,4 +227,6 @@ $$
 In addition to the constraints described above, we also need to enforce the following boundary constraints:
 * $b_0 = 16$ at the first and at the last row of execution trace.
 * $b_1 = 0$ at the first and at the last row of execution trace.
-* $p_1 = 1$ at the first and at the last row of execution trace.
+
+The LogUp closure additionally requires every inserted overflow message to have a matching
+removal.

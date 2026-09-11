@@ -21,6 +21,9 @@
 
 - Preserved the public `ParsingError` enum layout while adding protocol ABI attribute checks ([#3812](https://github.com/0xMiden/miden-vm/pull/3812)).
 - Fixed issue where parsing of pointer types dropped address space information ([#3790](https://github.com/0xMiden/miden-vm/pull/3790)).
+#### Changes
+
+- [BREAKING] Adopted Eidos as the native hash for VM data, Falcon signatures, AEAD, deferred computation, and proof transcripts, changing digests, verifier roots, and proof layout; `crypto_stream` now derives Eidos XOF blocks and writes expanded u32 ciphertext. Replaced `HPERM`/`adv.insert_hperm` with `COMPRESS`/`adv.insert_compress`; removed `adv.insert_hdword_d`, `sys::hdword_to_map_with_domain`, SMT `LEAF_DOMAIN`, and the Poseidon2-backed `RandomCoin`; and replaced the Poseidon2 core-library hash and AEAD modules with Eidos equivalents. Deferred nodes now use checked `EidosFrame` instead of `Tag`; `adv.evaluate_deferred_tag` is now `adv.evaluate_deferred_frame`; the name-derived IDs of `sys::adv::register_deferred` and `sys::adv::evaluate_deferred` were corrected; `adv.register_deferred` now uses `[CV, PAYLOAD_LO, PAYLOAD_HI]` and `adv.register_deferred_data` uses `[n_chunks, CV, ptr]`; and `precompiles::digest_expr` and `precompiles::register_value` are replaced by `precompiles::register_fixed_expr`. Renamed core `merge_in_domain` to `merge_in_mast_domain` and crypto `merge_in_domain` to `hash_two_words_in_domain`; reassigned IES IDs 2 and 3 from `K256AeadPoseidon2` and `X25519AeadPoseidon2` to `K256AeadEidos` and `X25519AeadEidos`; and bumped MAST serialization to 0.0.5 and Eidos execution witnesses to version 2 ([#3718](https://github.com/0xMiden/miden-vm/pull/3718)).
 
 ## v0.32.0 (2026-09-05)
 
@@ -54,7 +57,6 @@
 - [BREAKING] Removed the unused `SmtForest` type from `miden-crypto`. Use `LargeSmtForest` for shared SMT storage ([#3746](https://github.com/0xMiden/miden-vm/pull/3746)).
 - [BREAKING] Made native MVM and PVM verifiers return proof security parameters and their MASM counterparts return a common descriptor for a shared estimator, renamed the MVM MASM entry point to `sys::vm::verify_proof` and its root accessor to `vm_recursive_verifier_root`, and removed the legacy query-only estimator ([#3752](https://github.com/0xMiden/miden-vm/pull/3752)).
 - [BREAKING] Added format and compatible VM and PVM verifier roots to `ExecutionProof`. Its precompile state now uses `PrecompileStatus`. Duplicate roots and old unversioned proof bytes are rejected ([#3753](https://github.com/0xMiden/miden-vm/pull/3753)).
-
 #### Fixes
 
 - [BREAKING] Limited bare `exp` to 63 exponent bits. It now lowers to `exp.u63` (72 cycles) and fails for exponents greater than or equal to `2^63`. Existing MAST artifacts containing the previous bare-`exp` lowering must be reassembled to use the new bound ([#3712](https://github.com/0xMiden/miden-vm/pull/3712)).

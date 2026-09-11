@@ -87,15 +87,18 @@ flowchart BT
     input --> sub4
 ```
 
-The processor evaluates such a DAG and records its wiring for a logUp argument, which we interpret as a _wiring bus_.
+The processor evaluates such a DAG and records its wiring in a typed LogUp relation, which we
+interpret as a _wiring bus_.
 In each row, the processor can either insert a new node with the next fresh identifier and desired value or request a node's value by providing the identifier of a previously inserted node.
 Whenever the processor creates a new node (when loading a variable or evaluating an operation), it inserts $(id,v)$ onto the wiring bus with its final fan-out count $m$.
 Each later use of that node consumes one copy of $(id,v)$ from the wiring bus.
-At the AIR level, these contributions balance globally across the section; the wiring bus does not require a wire to be produced before it is used.
-By the end of the section, two things must hold:
+The message also includes the section's $(clk, ctx)$ pair, so nodes from different circuit
+evaluations cannot satisfy each other's wiring requests except through a random-encoding collision.
+The relation balances globally and does not require a wire to be produced before it is used.
+Together with the local constraints, it enforces two properties:
 
 1. The final output wire has value 0.
-2. Every inserted tuple has been consumed exactly $m$ times, so the wiring bus is empty.
+2. Every inserted tuple is consumed exactly $m$ times.
 
 ## Trace layout
 
@@ -140,10 +143,10 @@ Within a section, the chiplet reads through a contiguous, word‐aligned memory 
 
 The caller is responsible for writing the inputs and circuit into memory before invoking the chiplet.  
 If the same circuit is evaluated multiple times, the caller must overwrite the input region with the new inputs for each evaluation.  
-To start a circuit evaluation, the caller pushes one chiplet‐bus message:
+To start a circuit evaluation, the caller emits one typed `AceInit` message:
 
 $$
-(\mathsf{ACE\_LABEL},ctx,ptr,clk,n_{read},n_{eval}),
+\operatorname{AceInit}(clk,ctx,ptr,n_{read},n_{eval}),
 $$
 
 where:
@@ -168,7 +171,7 @@ The evaluation is initialized in the first row of the section by setting
 - $s_{block} = 0$, ensuring the evaluation starts by reading variables
 - $ctx, clk, n_{eval}, ptr$ provided by the bus request. $(ctx, clk)$ remain constant for the entire section, while $n_{eval}$ (stored as $N-1$ in the trace) is constant only across the READ block.
 
-In every row, the chiplet the following actions in each block:
+In every row, the chiplet performs the following actions in each block:
 
 **READ** (when $s_{block} = 0$):
 
@@ -183,7 +186,7 @@ In every row, the chiplet the following actions in each block:
 
 - Reads a single field-element $instr$ (an encoded instruction) from memory at $(ctx,ptr,clk)$.
 - Decodes $(op,id_1,id_2)$ from $instr$.
-- Fetches the two input nodes $(id_1,v_1), (id_2, v_2)$ from the wiring bus, consuming one fan-out from each (i.e., with multiplicity $m_i = -1$).
+- Fetches the two input nodes $(id_1,v_1), (id_2, v_2)$ from the wiring bus, consuming one fan-out from each (i.e., with signed updates $e_1 = e_2 = -1$).
 - Computes
   $$
   v_{0} =
@@ -194,11 +197,9 @@ In every row, the chiplet the following actions in each block:
   \end{cases}
   $$
 - Inserts $(id_0,v_{0})$ onto the wiring bus with its final fan-out count $m_0$.
-- Increments $ptr$ by 4 in the next row.
+- Increments $ptr$ by 1 in the next row.
 - If $id_0 = 0$, checks that $v_0 =0$ and ends the evaluation.
 - Otherwise, decrements $id_0$ by 1 in the next row.
-
-_**Note**: Wire bus requests also include the memory access pair $(ctx, clk)$ which ensures that the wires produced by different circuit evaluations are distinct._
 
 ### Example
 
@@ -380,7 +381,8 @@ These constraints apply to all rows within the same section:
 
 ### READ constraints
 
-In a READ block, each row requests a row from memory a word containing two extension field elements $v_0 = (v_{0,0}, v_{0,1})$ and $v_1 = (v_{1,0}, v_{1,1})$.
+In a READ block, each row requests from memory a word containing two extension-field elements
+$v_0 = (v_{0,0}, v_{0,1})$ and $v_1 = (v_{1,0}, v_{1,1})$.
 The [wire bus section](#wire-bus) describes how both of these nodes are inserted into the wire bus.
 
 The only constraint we enforce is that $id_0$ and $id_1$ are consecutive
@@ -420,17 +422,17 @@ The output node is correctly evaluated when:
 The actual instruction is given by the field element $instr$ read from memory. It encodes
 
 - the operation $op$ using 2 bits
-- the ids of $v_1$ and $v_2$ using 30 bits each and are packed as
+- the IDs of $v_1$ and $v_2$, using 30 bits each and packed as
   > $$
-  > instr \gets id_0 + id_1 \cdot 2^{30} + (op+1)\cdot 2^{60}.
+  > instr \gets id_1 + id_2 \cdot 2^{30} + (op+1)\cdot 2^{60}.
   > $$
 
 It is clear from the constraint on $op$ that $op+1$ will always require 2 bits, and that range constraints on $id_1, id_2$ are unnecessary.
-These ids are sent as-is to the wire bus with multiplicity $-1$.
-For the logUp argument to be valid, the section must include a row where a node is added to the circuit with the same id such that the pole $\frac{-1}{w_i}$ can be annihilated.
-The only way to do so is if there exists a corresponding $id_0$ matching the one in the instruction.
-This is ensured by the pointers given by the chiplet bus message initializing the section, and the constraint enforcing it to be strictly increasing in each row.
-Therefore, as long as the trusted circuit contains fewer than $2^{30}$ ids, the $id_1$ and $id_2$ values can never overflow this bound.
+These IDs are consumed as-is from the wire bus with multiplicity $-1$.
+Bus balance requires a matching node provider with the same identifier and value.
+The section bounds supplied by the initialization message and the constrained node-ID sequence
+ensure that the provider uses the corresponding $id_0$.
+Therefore, as long as the trusted circuit contains fewer than $2^{30}$ IDs, the $id_1$ and $id_2$ values can never overflow this bound.
 
 To ensure the circuit has finished evaluating and that the final output value is 0, we enforce that the node with $id_0 = 0$ has value $v_0 = 0$ in the last row of the section.
 
@@ -443,10 +445,10 @@ To ensure the circuit has finished evaluating and that the final output value is
 
 ### Wire bus
 
-Each row of the chip makes up to 3 requests to the circuit's wire bus.
-For $i = 0, 1, 2$, each request has the form $(ctx, clk, id_i, v_{i,0}, v_{i,1})$, which uniquely identifies a wire in the encoded relation.
-The bus balances these requests across the whole section and does not impose an order on them.
-Sending this message to the bus can be viewed as updating the total degree of the node in the graph.
+Each ACE row contributes up to three messages to the circuit's wire bus.
+For $i = 0, 1, 2$, the typed `AceWiring` payload is
+$(clk, ctx, id_i, v_{i,0}, v_{i,1})$.
+Contributing this message updates the represented fan-out balance of the node.
 When performing a READ operation, a node is added to the graph, and we set its degree update $e_i$ to be equal to its final fan-out degree at the end of the evaluation.
 This value is also referred to as the _multiplicity_ $m_i$.
 When a node is used as an input of an arithmetic operation, we set $e_i = - 1$.
@@ -466,49 +468,51 @@ The expression $e_i$ is derived from $m_i$ and the operation flag, so that the w
   > e_2 \gets - f_{eval} \quad \text{| degree} = 1
   > $$
 
-The auxiliary logUp bus column $b_{wire}$ is updated as follows.
-Given random challenges $\alpha_j$ for $j = 0, ..., 5$, let $w_i = \alpha_0 + \alpha_1 \cdot ctx + \alpha_2 \cdot clk + \alpha_3 \cdot id_i + \alpha_4 \cdot v_{i,0} + \alpha_5 \cdot v_{i,1}$ be the randomized node value.
-The value of the bus in the next column is given by
+With the verifier challenges, the message denominator is
 
 > $$
-> b_{wire}' = b_{wire} + \sum_{i=0}^2 \frac{e_i}{w_i},
+> d_i = \operatorname{bus\_prefix}[\mathsf{AceWiring}]
+>     + \beta^0 clk + \beta^1 ctx + \beta^2 id_i
+>     + \beta^3 v_{i,0} + \beta^4 v_{i,1}.
 > $$
 
-The actual constraint is given by normalizing the denominator
+The row contributes $\sum_{i=0}^2 e_i/d_i$. Thus, positive $e_i$ values provide a node's
+declared fan-out and negative values consume it. The shared
+[LogUp construction](../lookups/logup.md) supplies the denominator clearing, cyclic recurrence,
+and global closure.
 
-> $$
-> f_{ace}\cdot \left( (b_{wire} - b_{wire}') \cdot \prod_{i=0}^{2}w_i + \left(e_0 \cdot w_1 \cdot w_2 + e_1 \cdot w_0 \cdot w_2 + e_2 \cdot w_0 \cdot w_1\right)\right) = 0 \quad \text{| degree} = d + 4.
-> $$
+### ACE initialization and memory reads {#chiplet-and-virtual-table-bus}
 
-### Chiplet and Virtual table bus
+On each $f_{start}$ row, the ACE chiplet provides one `AceInit` message with payload
 
-The ACE chiplet initializes a circuit evaluation by responding to a request made by the decoder, through the [chiplet bus](./index.md#chiplets-bus) $b_{chip}$.
-As mentioned earlier, the message corresponds to the tuple, which is sent to the bus only when $f_{start} = 1$.
-$$(\mathsf{ACE_LABEL}, ctx, ptr, clk, n_\text{read}, n_\text{eval}).$$
-The value $n_{read}$ is computed as $id_0 - n_{eval}$, since in the first row, $id_0$ is expected to be equal to the total number of nodes inserted (subtracting 1 since identifiers are indexed from zero, and recalling the trace stores $n_{eval} = N - 1$).
-We refer to the [chiplet bus constraints](./index.md#chiplets-bus-constraints) which describes the constraints for chiplet bus responses.
+$$
+(clk, ctx, ptr, n_\text{read}, n_\text{eval}).
+$$
 
-The requests sent to the memory chiplet cannot use the same chiplet bus, as the decoder requests saturate the degree of constraint over its auxiliary column.
-Instead, we use the [virtual table bus](./index.md#chiplets-virtual-table) $v_{table}$ which extends the chiplet bus.
+The Core AIR's `EVALCIRCUIT` operation consumes the same message. On the first row, $id_0$ is
+the total number of nodes minus one, while the trace stores $n_\text{eval} - 1$. The response
+therefore reconstructs $n_\text{eval}$ and computes
+$n_\text{read} = id_0 + 1 - n_\text{eval}$. The `AceInit` domain separates this payload from
+other [chiplet-bus interactions](./index.md#chiplets-bus-constraints).
+
+ACE memory requests occupy the hash-kernel LogUp column, where they are row-disjoint from its other
+relations and remain within the column's degree bound.
 
 In each row, the chiplet makes one of the two following requests to the memory chiplet depending on which block it is in:
 
-- $(\mathsf{MEMORY\_READ\_WORD\_LABEL}, ctx, ptr, clk, v_{0,0}, v_{0,1}, v_{1,0}, v_{1,1})$, when $f_{read} = 1$.
-- $(\mathsf{MEMORY\_READ\_ELEMENT\_LABEL}, ctx, ptr, clk, instr)$, when $f_{eval} = 1$.
+- `MemoryReadWord` with payload $(ctx, ptr, clk, v_{0,0}, v_{0,1}, v_{1,0}, v_{1,1})$
+  when $f_{read} = 1$.
+- `MemoryReadElement` with payload $(ctx, ptr, clk, instr)$ when $f_{eval} = 1$.
 
 The values are obtained as-is from the current row, except for the instruction which is given by
 
 $$
-instr \gets id_0 + id_1 \cdot 2^{30} + (op+1)\cdot 2^{60}.
+instr \gets id_1 + id_2 \cdot 2^{30} + (op+1)\cdot 2^{60}.
 $$
 
 As mentioned earlier, it encodes a circuit instruction applying the arithmetic operation $op \in \{- ,\times, +\}$ (mapped to the range $[0,1,2]$) to the nodes with identifiers $id_1, id_2 \in [0, 2^{30}[$.
 
-As usual, the messages are randomly reduced using by challenges $\alpha_0, \alpha_1, \ldots$, resulting in the degree-1 expressions
-$u_{mem, read}$ and $u_{mem, eval}$, respectively.
-
-Since the virtual table bus is used exclusively by the chiplets trace, it must be constrained in this chiplet:
-
-> $$
-> f_{ace} \cdot \Big( v_{table}' \cdot \big( f_{read}\cdot w_{mem,read} + f_{eval}\cdot w_{mem,eval} \big) - v_{table}\Big) = 0 \quad | \deg = d+3.
-> $$
+The READ payload is encoded under `MemoryReadWord`; the EVAL payload is encoded under
+`MemoryReadElement`. Each ACE row consumes one matching memory message with contribution $-1/d$,
+and the memory chiplet provides the corresponding $+1/d$. The message domains and complete payload
+encoding are described in [memory row value](./memory.md#memory-row-value).

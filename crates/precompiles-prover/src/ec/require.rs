@@ -135,9 +135,8 @@ impl<'a> EcRequire<'a> {
         pai
     }
 
-    /// A curve point from already-interned handles — the legacy coefficient
-    /// entry retained for direct callers/tests. Creates/dedups the group
-    /// `(a, b, bound)`, then delegates the point work to
+    /// A curve point from already-interned handles. Creates or reuses the group `(a, b, bound)`,
+    /// then delegates the point work to
     /// [`point_on_group`](Self::point_on_group).
     pub fn point_on_curve(
         &mut self,
@@ -153,9 +152,8 @@ impl<'a> EcRequire<'a> {
         (group, point)
     }
 
-    /// The group's point-at-infinity from already-interned curve handles — the
-    /// legacy coefficient entry retained for direct callers/tests.
-    /// Creates/dedups the group `(a, b, bound)`, then delegates to
+    /// The group's point at infinity from already-interned curve handles. Creates or reuses the
+    /// group `(a, b, bound)`, then delegates to
     /// [`pai_on_group`](Self::pai_on_group).
     pub fn pai_on_curve(
         &mut self,
@@ -179,9 +177,8 @@ impl<'a> EcRequire<'a> {
     /// **Interns by relation identity** `(group, p, q)`: a repeat returns
     /// the recorded result and re-derives nothing — no second case
     /// selection, no second set of certificates (its `EcGroupAdd` tuple
-    /// just counts another consumer). The provide multiplicity is 0
-    /// today (the tuple is dormant until the MSM / DAG layer consumes
-    /// it); a consumer would pass its count here.
+    /// just counts another consumer). The multiplicity argument records relation consumers; zero
+    /// leaves the tuple dormant.
     fn add_inner(
         &mut self,
         group: EcGroupPtr,

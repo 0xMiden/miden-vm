@@ -73,7 +73,9 @@ where
         Challenges::<EF>::new(alpha, beta, air.max_message_width(), air.num_bus_ids());
     let periodic = air.periodic_columns();
 
-    let fractions = build_lookup_fractions(air, main, &periodic, &lookup_challenges);
+    let preprocessed = air.preprocessed_trace();
+    let fractions =
+        build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, &lookup_challenges);
 
     let (aux_trace, sigma_prime) = accumulate(&fractions);
     debug_assert_eq!(aux_trace.height(), main.height());
@@ -661,6 +663,92 @@ mod tests {
 
         assert_eq!(aux[1][0], QuadFelt::ZERO);
         assert_eq!(aux[1][1], row1_col1);
+    }
+
+    struct WrappedCenteredFixture {
+        fractions: LookupFractions<Felt, QuadFelt>,
+        row0_col0: QuadFelt,
+        row0_col1: QuadFelt,
+        row1_col0: QuadFelt,
+        row2_col1: QuadFelt,
+    }
+
+    fn wrapped_centered_fixture() -> WrappedCenteredFixture {
+        let one = Felt::new_unchecked(1);
+        let two = Felt::new_unchecked(2);
+        let three = Felt::new_unchecked(3);
+        let four = Felt::new_unchecked(4);
+        let d1 = QuadFelt::new([Felt::new_unchecked(5), Felt::ZERO]);
+        let d2 = QuadFelt::new([Felt::new_unchecked(7), Felt::ZERO]);
+        let d3 = QuadFelt::new([Felt::new_unchecked(11), Felt::ZERO]);
+        let d4 = QuadFelt::new([Felt::new_unchecked(13), Felt::ZERO]);
+
+        let mut fractions = fixture([1, 1], 3);
+        // Row 0: both columns contribute.
+        fractions.fractions.push((one, d1));
+        fractions.counts.push(1);
+        fractions.fractions.push((two, d2));
+        fractions.counts.push(1);
+        // Row 1: only the accumulator column contributes.
+        fractions.fractions.push((three, d3));
+        fractions.counts.push(1);
+        fractions.counts.push(0);
+        // Row 2: only the fraction column contributes, exercising the wrap edge.
+        fractions.counts.push(0);
+        fractions.fractions.push((four, d4));
+        fractions.counts.push(1);
+
+        WrappedCenteredFixture {
+            fractions,
+            row0_col0: d1.try_inverse().unwrap(),
+            row0_col1: d2.try_inverse().unwrap() * two,
+            row1_col0: d3.try_inverse().unwrap() * three,
+            row2_col1: d4.try_inverse().unwrap() * four,
+        }
+    }
+
+    #[test]
+    fn wrapped_centered_accumulator_closes_cyclically() {
+        let fx = wrapped_centered_fixture();
+
+        let (slow, slow_sigma) = accumulate_slow(&fx.fractions);
+        let (fast, fast_sigma) = accumulate(&fx.fractions);
+        assert_matrix_matches_slow(&slow, slow_sigma, &fast, fast_sigma, 2, 3);
+
+        let total = fx.row0_col0 + fx.row0_col1 + fx.row1_col0 + fx.row2_col1;
+        let center = total / QuadFelt::from_u64(3);
+
+        assert_eq!(fast_sigma, center);
+        assert_eq!(fast.get(0, 0), Some(QuadFelt::ZERO));
+        assert_eq!(fast.get(1, 0), Some(fx.row0_col0 + fx.row0_col1 - center));
+        assert_eq!(
+            fast.get(2, 0),
+            Some(fx.row0_col0 + fx.row0_col1 + fx.row1_col0 - center.double())
+        );
+        assert_eq!(fast.get(0, 1), Some(fx.row0_col1));
+        assert_eq!(fast.get(1, 1), Some(QuadFelt::ZERO));
+        assert_eq!(fast.get(2, 1), Some(fx.row2_col1));
+    }
+
+    #[test]
+    fn wrapped_centered_accumulator_rejects_wrong_center() {
+        let fx = wrapped_centered_fixture();
+        let (fast, _sigma) = accumulate(&fx.fractions);
+
+        let true_center =
+            (fx.row0_col0 + fx.row0_col1 + fx.row1_col0 + fx.row2_col1) / QuadFelt::from_u64(3);
+        let wrong_center = true_center + QuadFelt::ONE;
+
+        let last_acc = fast.get(2, 0).expect("row 2 accumulator");
+        let first_acc = fast.get(0, 0).expect("row 0 accumulator");
+        assert_eq!(first_acc, QuadFelt::ZERO);
+
+        // Row 2 has no col0 contribution. A wrong center leaves a nonzero wrap-edge residual.
+        let honest_residual = first_acc - (last_acc + fx.row2_col1) + true_center;
+        let wrong_residual = first_acc - (last_acc + fx.row2_col1) + wrong_center;
+
+        assert_eq!(honest_residual, QuadFelt::ZERO);
+        assert_ne!(wrong_residual, QuadFelt::ZERO);
     }
 
     /// `LookupFractions::from_shape` sizes the flat `fractions` Vec with `num_rows * Σ shape`

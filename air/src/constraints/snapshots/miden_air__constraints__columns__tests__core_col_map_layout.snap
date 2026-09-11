@@ -70,8 +70,4 @@ CoreCols {
         b1: 47,
         h0: 48,
     },
-    range: RangeCols {
-        multiplicity: 49,
-        value: 50,
-    },
 }

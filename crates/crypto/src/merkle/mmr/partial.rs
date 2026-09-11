@@ -7,7 +7,7 @@ use alloc::{
 use super::{MmrDelta, MmrPath, MmrProof};
 use crate::{
     Word,
-    hash::poseidon2::Poseidon2,
+    hash::eidos::Eidos,
     merkle::{
         InnerNodeInfo, MerklePath,
         mmr::{InOrderIndex, MmrError, MmrPeaks, forest::Forest},
@@ -366,7 +366,7 @@ impl PartialMmr {
 
                 // Merge the current layer. The result is either the right element of the next
                 // merge, or a new peak.
-                right = Poseidon2::merge(&[left, right]);
+                right = Eidos::merge(&[left, right]);
 
                 // This iteration merged the left and right nodes, the new value is always used as
                 // the next iteration's right node. Therefore the tracking flags of this iteration
@@ -617,7 +617,7 @@ impl PartialMmr {
                 }
 
                 peak_idx = peak_idx.parent();
-                new = Poseidon2::merge(&[left, right]);
+                new = Eidos::merge(&[left, right]);
                 target = target.next_larger_tree()?;
             }
 
@@ -717,7 +717,7 @@ impl<I: Iterator<Item = (usize, Word)>> Iterator for InnerNodeIterator<'_, I> {
                 } else {
                     (*sibling, node)
                 };
-                let parent = Poseidon2::merge(&[left, right]);
+                let parent = Eidos::merge(&[left, right]);
                 let inner_node = InnerNodeInfo { value: parent, left, right };
 
                 self.stack.push((parent_idx, parent));
@@ -1464,7 +1464,11 @@ mod tests {
         bad_bytes.extend_from_slice(&0usize.to_bytes());
 
         let result = PartialMmr::read_from_bytes(&bad_bytes);
-        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(DeserializationError::InvalidValue(message))
+                if message == "InOrderIndex must be nonzero"
+        ));
     }
 
     #[test]

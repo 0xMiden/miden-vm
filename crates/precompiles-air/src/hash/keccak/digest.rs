@@ -22,7 +22,7 @@ impl KeccakDigest {
     }
 
     /// Lift to the 8-felt `(lo_0, hi_0, lo_1, hi_1, …, lo_3, hi_3)`
-    /// wire format used by Memory64 reads + the digest-chunk P2 absorption.
+    /// wire format used by Memory64 reads + the digest-chunk Eidos absorption.
     pub fn to_felts(self) -> [Felt; 8] {
         let mut out = [Felt::ZERO; 8];
         for (i, &lane) in self.0.iter().enumerate() {

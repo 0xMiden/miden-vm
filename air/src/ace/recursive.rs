@@ -1,20 +1,19 @@
 use alloc::vec::Vec;
 
 use miden_ace_codegen::{
-    AceConfig, AceError, FactoredCircuitFactory, LayoutKind, ShuffleEncodeBuffer,
+    AceConfig, AceError, FactoredCircuitFactory, InputLayout, LayoutKind, ShuffleEncodeBuffer,
 };
-use miden_core::{Felt, Word, crypto::hash::Poseidon2, field::QuadFelt};
+use miden_core::{Felt, Word, crypto::hash::Eidos, field::QuadFelt};
 use miden_crypto::merkle::MerklePath;
 
-use super::multi_air::build_factored_multi_air_ace_circuit;
+use super::multi_air::{FactoredMultiAirCircuit, build_factored_multi_air_ace_circuit};
 use crate::{AIRS, MIDEN_AIR_COUNT, ProofOrder};
 
 /// Number of quotient chunks the recursive verifier and its ACE circuit consume.
 ///
-/// This is the same symbolic derivation the lifted-STARK prover and verifier use. Keeping it
-/// executable matters even though the Miden relation currently derives eight chunks: the MASM
-/// quotient-recomposition inputs are functions of this value, not of the coincidentally equal
-/// blowup factor.
+/// This is the symbolic derivation used by the lifted-STARK prover and verifier. The MASM
+/// quotient-recomposition inputs depend on this value rather than the numerically equal blowup
+/// factor.
 fn recursive_verifier_num_quotient_chunks() -> usize {
     let max_log_quotient_degree = AIRS
         .iter()
@@ -41,8 +40,8 @@ fn recursive_verifier_ace_config() -> AceConfig {
 /// - the order-invariant common section `[common ops | root padding]`, hashed into
 ///   `common_commitment` (the same digest for every proof order).
 ///
-/// The registry leaf and advice-map key is
-/// `commitment = Poseidon2::merge(shuffle_commitment, common_commitment)`.
+/// The registry leaf and advice-map key hashes the two segment commitments as one generic
+/// eight-Felt sequence.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecursiveAceCircuit {
     /// Number of ACE READ variables.
@@ -53,11 +52,11 @@ pub struct RecursiveAceCircuit {
     pub stream_len: usize,
     /// Length in felts of the per-order stream prefix (constants + shuffle section).
     pub shuffle_prefix_len: usize,
-    /// Poseidon2 digest of the per-order prefix.
+    /// Eidos digest of the per-order prefix.
     pub shuffle_commitment: Word,
-    /// Poseidon2 digest of the order-invariant common section.
+    /// Eidos digest of the order-invariant common section.
     pub common_commitment: Word,
-    /// Registry leaf and advice-map key: `merge(shuffle_commitment, common_commitment)`.
+    /// Registry leaf and advice-map key for the two segment commitments.
     pub commitment: Word,
     /// Encoded ACE instruction stream consumed by `eval_circuit`.
     pub instructions: Vec<Felt>,
@@ -65,13 +64,11 @@ pub struct RecursiveAceCircuit {
 
 /// Factory for the recursive-verifier ACE circuits.
 ///
-/// Builds the order-invariant factored composition once; encoding a circuit for a proof
-/// order then costs only the shuffle assembly plus a short resumed hash. Use this over
-/// [`build_recursive_verifier_ace_circuit`] whenever more than one order is needed —
-/// registry construction visits every proof order and must not rebuild the composition
-/// or re-hash the order-invariant stream sections per leaf.
+/// Builds the order-invariant factored composition once and reuses it while assembling the
+/// order-specific circuits. Use this over [`build_recursive_verifier_ace_circuit`] whenever more
+/// than one order is needed so registry construction does not rebuild the composition per leaf.
 pub struct RecursiveAceCircuitFactory {
-    /// The generic factory owns all order-invariant caching (post-constants sponge
+    /// The generic factory owns all order-invariant caching (post-constants chaining
     /// state, common-section digest) and the construction cross-checks; this type only
     /// maps [`ProofOrder`]s onto instance-index permutations.
     inner: FactoredCircuitFactory<QuadFelt>,
@@ -80,9 +77,8 @@ pub struct RecursiveAceCircuitFactory {
 impl RecursiveAceCircuitFactory {
     /// Build the factored composition for the recursive-verifier configuration.
     ///
-    /// Construction runs the generic factory's cross-checks on the canonical order
-    /// (which for the recursive verifier is the identity instance permutation): the
-    /// encode-only shuffle bytes against the assembled stream, and the resumed prefix
+    /// Construction runs the generic Eidos factory's cross-checks on the canonical order:
+    /// the encode-only shuffle bytes against the assembled stream, and the resumed prefix
     /// hash against hashing the full prefix.
     pub fn new() -> Result<Self, AceError> {
         let factored = build_factored_multi_air_ace_circuit(recursive_verifier_ace_config())?;
@@ -100,13 +96,15 @@ impl RecursiveAceCircuitFactory {
         self.inner.factored().layout().counts.num_quotient_chunks
     }
 
+    /// ACE READ layout shared by every recursive-verifier proof order.
+    pub fn input_layout(&self) -> &InputLayout {
+        self.inner.factored().layout()
+    }
+
     /// Compute the registry leaf for one proof order without assembling its circuit.
     ///
-    /// Encodes only the shuffle section into `buffer` and resumes the cached
-    /// post-constants sponge state; see [`FactoredCircuitFactory::leaf_for_order`].
-    /// Equality with [`Self::circuit_for_order`]'s `commitment` is pinned at
-    /// construction (canonical order), in the config golden test (every order), and at
-    /// regen time.
+    /// Encodes only the shuffle section and resumes the cached post-constants Eidos chaining word.
+    /// The returned leaf equals [`Self::circuit_for_order`]'s commitment.
     pub fn leaf_for_order(
         &self,
         order: &ProofOrder,
@@ -117,10 +115,8 @@ impl RecursiveAceCircuitFactory {
 
     /// Assemble, encode, and hash the circuit for one proof order.
     ///
-    /// Only the shuffle section is hashed live (resuming from the cached post-constants
-    /// sponge state); the common-section digest is reused. The resulting commitments are
-    /// definitionally equal to hashing the full stream segments, which
-    /// `recursive_ace_factory_and_factoring_match_the_one_shot_builder` pins per order.
+    /// Only the shuffle section is hashed live; the order-invariant common-section Eidos
+    /// digest is reused.
     pub fn circuit_for_order(&self, order: &ProofOrder) -> Result<RecursiveAceCircuit, AceError> {
         let circuit = self.inner.circuit_for_order(&Self::order_indices(order))?;
         Ok(RecursiveAceCircuit {
@@ -147,14 +143,30 @@ pub(crate) fn shared_recursive_factory() -> &'static RecursiveAceCircuitFactory 
     })
 }
 
+/// One proof order's complete registry entry: the encoded circuit the verifier evaluates and the
+/// leaf-plus-path that authenticates it in the registry tree.
+///
+/// Fields are private so an entry only exists once the constructor's leaf-equals-commitment check
+/// has passed; consume it with [`Self::into_parts`].
+pub struct RecursiveRegistryEntry {
+    circuit: RecursiveAceCircuit,
+    leaf: Word,
+    path: MerklePath,
+}
+
+impl RecursiveRegistryEntry {
+    /// Consumes the entry into `(circuit, leaf, path)`.
+    pub fn into_parts(self) -> (RecursiveAceCircuit, Word, MerklePath) {
+        (self.circuit, self.leaf, self.path)
+    }
+}
+
 /// Derives the circuit and its authentication path for one proof order from a single factory.
 ///
 /// `std` uses the process-wide factory and the cached registry tree; without `std` one
 /// factory and one tree are built for this call and serve both outputs, instead of one
 /// build for the path and another for the circuit.
-pub fn recursive_registry_entry(
-    order: &ProofOrder,
-) -> Result<(RecursiveAceCircuit, MerklePath), AceError> {
+pub fn recursive_registry_entry(order: &ProofOrder) -> Result<RecursiveRegistryEntry, AceError> {
     #[cfg(feature = "std")]
     {
         let circuit = shared_recursive_factory().circuit_for_order(order)?;
@@ -164,7 +176,7 @@ pub fn recursive_registry_entry(
             circuit.commitment, leaf,
             "ACE registry tree drifted from the factory's circuits"
         );
-        Ok((circuit, path))
+        Ok(RecursiveRegistryEntry { circuit, leaf, path })
     }
     #[cfg(not(feature = "std"))]
     {
@@ -177,7 +189,7 @@ pub fn recursive_registry_entry(
             circuit.commitment, leaf,
             "ACE registry tree drifted from the factory's circuits"
         );
-        Ok((circuit, path))
+        Ok(RecursiveRegistryEntry { circuit, leaf, path })
     }
 }
 
@@ -186,16 +198,19 @@ pub fn recursive_registry_entry(
 /// Callers that need several orders should hold a [`RecursiveAceCircuitFactory`] instead;
 /// this rebuilds the composition every call.
 ///
-/// This path bypasses the factory and hashes both stream segments
-/// from scratch, which is what makes it an independent oracle for the factory's cached
-/// prefix state in
-/// `recursive_ace_factory_and_factoring_match_the_one_shot_builder`. Reimplementing it
-/// in terms of the factory would turn that test into a tautology and retire the only guard
-/// on the sponge-resumption arithmetic.
+/// This path builds a fresh factored composition and hashes both stream segments from scratch,
+/// providing a determinism oracle for the reusable factory path.
 pub fn build_recursive_verifier_ace_circuit(
     order: &ProofOrder,
 ) -> Result<RecursiveAceCircuit, AceError> {
     let factored = build_factored_multi_air_ace_circuit(recursive_verifier_ace_config())?;
+    encode_recursive_circuit(&factored, order)
+}
+
+fn encode_recursive_circuit(
+    factored: &FactoredMultiAirCircuit,
+    order: &ProofOrder,
+) -> Result<RecursiveAceCircuit, AceError> {
     let circuit = factored.circuit_for_order(order)?;
     let encoded = circuit.to_ace()?;
     let instructions = encoded.instructions();
@@ -225,9 +240,9 @@ pub fn build_recursive_verifier_ace_circuit(
         });
     }
 
-    let shuffle_commitment = Poseidon2::hash_elements(&instructions[..shuffle_prefix_len]);
-    let common_commitment = Poseidon2::hash_elements(&instructions[shuffle_prefix_len..]);
-    let commitment = Poseidon2::merge(&[shuffle_commitment, common_commitment]);
+    let shuffle_commitment = Eidos::hash_elements(&instructions[..shuffle_prefix_len]);
+    let common_commitment = Eidos::hash_elements(&instructions[shuffle_prefix_len..]);
+    let commitment = Eidos::hash_two_words(&[shuffle_commitment, common_commitment]);
 
     Ok(RecursiveAceCircuit {
         num_inputs: encoded.num_vars(),

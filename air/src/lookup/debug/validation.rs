@@ -5,15 +5,15 @@
 //! `air.validate(layout)`. One short-circuit [`Result<(), ValidationError>`] covers:
 //!
 //! - `num_columns` declared vs observed (the walker counts `next_column` calls).
-//! - Per-group and per-column `Deg { n, d }` declared vs observed (via
+//! - Per-group and per-column `Deg { v, u }` declared vs observed (via
 //!   [`SymbolicExpression::degree_multiple`] on the running `(V, U)`).
 //! - Cached-encoding canonical vs encoded `(V, U)` equivalence, checked by evaluating the symbolic
 //!   difference `U_c·V_e − U_e·V_c` at a random row.
 //! - Simple-group scope: no illegal `insert_encoded` outside the `encoded` closure.
 //!
 //! The global max-degree budget is **not** checked here — the STARK prover's
-//! quotient validation already enforces it and duplicating that check muddies
-//! this module's purpose.
+//! quotient validation already enforces it, and duplicating that check would
+//! blur this module's purpose.
 
 use alloc::vec::Vec;
 use core::{fmt, marker::PhantomData};
@@ -128,6 +128,7 @@ impl fmt::Display for ValidationError {
 /// committed final count) through just to run the self-check.
 #[derive(Clone, Copy, Debug)]
 pub struct ValidateLayout {
+    pub preprocessed_width: usize,
     pub trace_width: usize,
     pub num_public_values: usize,
     pub num_periodic_columns: usize,
@@ -139,7 +140,7 @@ pub struct ValidateLayout {
 impl ValidateLayout {
     fn to_symbolic(self) -> miden_crypto::stark::air::symbolic::AirLayout {
         miden_crypto::stark::air::symbolic::AirLayout {
-            preprocessed_width: 0,
+            preprocessed_width: self.preprocessed_width,
             main_width: self.trace_width,
             num_public_values: self.num_public_values,
             permutation_width: self.permutation_width,
@@ -347,6 +348,7 @@ impl<'ab, 'r> LookupBuilder for ValidationBuilder<'ab, 'r> {
     type PeriodicVar = SymbolicVariable<Felt>;
 
     type MainWindow = <Inner as AirBuilder>::MainWindow;
+    type PreprocessedWindow = <Inner as AirBuilder>::PreprocessedWindow;
 
     type Column<'c>
         = ValidationColumn<'c, 'r>
@@ -355,6 +357,10 @@ impl<'ab, 'r> LookupBuilder for ValidationBuilder<'ab, 'r> {
 
     fn main(&self) -> Self::MainWindow {
         self.ab.main()
+    }
+
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        self.ab.preprocessed()
     }
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {

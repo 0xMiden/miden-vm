@@ -18,12 +18,15 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_crypto::hash::eidos::{EidosDomain, EidosFrame};
+
 use super::{
-    DataChunk, DeferredError, DeferredState, Digest, MAX_DEFERRED_ELEMENTS, Node, NodeType,
-    PrecompileError, PrecompileRegistry, TRUE_DIGEST, Tag,
+    DEFERRED_AND_FRAME, DataChunk, DeferredError, DeferredState, Digest, MAX_DEFERRED_ELEMENTS,
+    Node, NodeType, PrecompileError, PrecompileRegistry, TRUE_DIGEST,
 };
 use crate::{
-    Felt, ZERO,
+    Felt, Word, ZERO,
+    program::domain::DeferredChunksDomain,
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader, read_bounded_len,
@@ -36,7 +39,7 @@ use crate::{
 /// Reserved index for the always-known [`super::TRUE_DIGEST`] / [`super::Node::TRUE`] node.
 const TRUE_INDEX: u32 = 0;
 
-const MAX_WIRE_ENTRIES: usize = MAX_DEFERRED_ELEMENTS / Tag::FELT_LEN;
+const MAX_WIRE_ENTRIES: usize = MAX_DEFERRED_ELEMENTS / EidosFrame::FELT_LEN;
 
 fn reserve_wire_elements(
     remaining_elements: &mut usize,
@@ -71,15 +74,21 @@ fn reserve_wire_payload(
 /// payload order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WireEntry {
-    /// Raw data payload interpreted by the tag's precompile.
+    /// Raw data payload interpreted by the frame's precompile.
     ///
-    /// Rehydration requires at least one chunk. A tag's precompile may assign value semantics to a
-    /// one-chunk payload, but the wire shape itself does not.
-    Data { tag: Tag, chunks: Vec<DataChunk> },
+    /// Rehydration requires at least one chunk. A frame's precompile may assign value semantics to
+    /// a one-chunk payload, but the wire shape itself does not.
+    Data {
+        frame: EidosFrame,
+        chunks: Vec<DataChunk>,
+    },
     /// Two child references resolved against `TRUE_INDEX` or earlier wire indices.
-    Join { tag: Tag, lhs: u32, rhs: u32 },
+    Join { frame: EidosFrame, lhs: u32, rhs: u32 },
     /// Raw structural child-reference pairs. Rehydration requires at least one pair.
-    PairList { tag: Tag, pairs: Vec<(u32, u32)> },
+    PairList {
+        frame: EidosFrame,
+        pairs: Vec<(u32, u32)>,
+    },
 }
 
 // DEFERRED STATE WIRE
@@ -148,7 +157,7 @@ impl DeferredStateWire {
             };
             let payload_elements = payload_count
                 .checked_mul(Node::DATA_CHUNK_FELT_LEN)
-                .and_then(|elements| Tag::FELT_LEN.checked_add(elements))
+                .and_then(|elements| EidosFrame::FELT_LEN.checked_add(elements))
                 .ok_or(IntegrityError::InvalidStructure)?;
             remaining_elements = remaining_elements.checked_sub(payload_elements).ok_or(
                 IntegrityError::DeferredStateTooLarge {
@@ -234,9 +243,13 @@ impl<'a> WireDecoder<'a> {
     fn decode(mut self) -> Result<(Vec<(Digest, Node)>, Digest), IntegrityError> {
         for entry in &self.wire.entries {
             let node = match entry {
-                WireEntry::Data { tag, chunks } => self.decode_data_entry(*tag, chunks)?,
-                WireEntry::Join { tag, lhs, rhs } => self.decode_join_entry(*tag, *lhs, *rhs)?,
-                WireEntry::PairList { tag, pairs } => self.decode_pair_list_entry(*tag, pairs)?,
+                WireEntry::Data { frame, chunks } => self.decode_data_entry(*frame, chunks)?,
+                WireEntry::Join { frame, lhs, rhs } => {
+                    self.decode_join_entry(*frame, *lhs, *rhs)?
+                },
+                WireEntry::PairList { frame, pairs } => {
+                    self.decode_pair_list_entry(*frame, pairs)?
+                },
             };
             self.push_entry(node)?;
         }
@@ -245,38 +258,53 @@ impl<'a> WireDecoder<'a> {
         Ok((self.entries, root))
     }
 
-    fn decode_data_entry(&self, tag: Tag, chunks: &[DataChunk]) -> Result<Node, IntegrityError> {
+    fn decode_data_entry(
+        &self,
+        frame: EidosFrame,
+        chunks: &[DataChunk],
+    ) -> Result<Node, IntegrityError> {
         // The decoded shape — not the wire entry variant — decides whether these payload bytes are
         // data. Semantic chunk-count checks belong to the owning precompile during registration.
         let node_type = self
             .precompiles
-            .decode_node_type(tag)
+            .decode_node_type(frame)
             .map_err(|_| IntegrityError::InvalidStructure)?;
         let NodeType::Data = node_type else {
             return Err(IntegrityError::InvalidStructure);
         };
-        let node = if tag == Tag::CHUNKS {
-            Node::chunks(chunks.to_vec()).map_err(|_| IntegrityError::InvalidStructure)?
+        let node = if frame.domain() == DeferredChunksDomain::TAG {
+            let node =
+                Node::chunks(chunks.to_vec()).map_err(|_| IntegrityError::InvalidStructure)?;
+            if node.frame() != Some(frame) {
+                return Err(IntegrityError::InvalidStructure);
+            }
+            node
         } else {
-            Node::try_data(tag, chunks.to_vec()).map_err(|_| IntegrityError::InvalidStructure)?
+            Node::try_data(frame, chunks.to_vec()).map_err(|_| IntegrityError::InvalidStructure)?
         };
-        node_type.validate_node(&node).map_err(|_| IntegrityError::InvalidStructure)?;
+        self.precompiles
+            .validate_node(&node)
+            .map_err(|_| IntegrityError::InvalidStructure)?;
         Ok(node)
     }
 
-    fn decode_join_entry(&self, tag: Tag, lhs: u32, rhs: u32) -> Result<Node, IntegrityError> {
+    fn decode_join_entry(
+        &self,
+        frame: EidosFrame,
+        lhs: u32,
+        rhs: u32,
+    ) -> Result<Node, IntegrityError> {
         let lhs = self.resolve_index(lhs)?;
         let rhs = self.resolve_index(rhs)?;
-        let node = if tag == Tag::AND {
+        let node = if frame == DEFERRED_AND_FRAME {
             Node::and(lhs, rhs)
         } else {
-            Node::join(tag, lhs, rhs).map_err(|_| IntegrityError::InvalidStructure)?
+            Node::join(frame, lhs, rhs).map_err(|_| IntegrityError::InvalidStructure)?
         };
         let node_type = self
             .precompiles
-            .decode_node_type(node.tag())
+            .validate_node(&node)
             .map_err(|_| IntegrityError::InvalidStructure)?;
-        node_type.validate_node(&node).map_err(|_| IntegrityError::InvalidStructure)?;
         match node_type {
             NodeType::Join => Ok(node),
             NodeType::True | NodeType::Data | NodeType::PairList => {
@@ -287,12 +315,12 @@ impl<'a> WireDecoder<'a> {
 
     fn decode_pair_list_entry(
         &self,
-        tag: Tag,
+        frame: EidosFrame,
         pairs: &[(u32, u32)],
     ) -> Result<Node, IntegrityError> {
         let node_type = self
             .precompiles
-            .decode_node_type(tag)
+            .decode_node_type(frame)
             .map_err(|_| IntegrityError::InvalidStructure)?;
         let NodeType::PairList = node_type else {
             return Err(IntegrityError::InvalidStructure);
@@ -302,8 +330,11 @@ impl<'a> WireDecoder<'a> {
             .iter()
             .map(|(lhs, rhs)| Ok((self.resolve_index(*lhs)?, self.resolve_index(*rhs)?)))
             .collect::<Result<Vec<_>, IntegrityError>>()?;
-        let node = Node::try_pair_list(tag, pairs).map_err(|_| IntegrityError::InvalidStructure)?;
-        node_type.validate_node(&node).map_err(|_| IntegrityError::InvalidStructure)?;
+        let node =
+            Node::try_pair_list(frame, pairs).map_err(|_| IntegrityError::InvalidStructure)?;
+        self.precompiles
+            .validate_node(&node)
+            .map_err(|_| IntegrityError::InvalidStructure)?;
         Ok(node)
     }
 
@@ -414,7 +445,7 @@ impl WireEncoder {
 
         Ok(match self.node_type(state, node)? {
             NodeType::Data => WireEntry::Data {
-                tag: node.tag(),
+                frame: node.frame().ok_or(IntegrityError::InvalidStructure)?,
                 chunks: node
                     .payload()
                     .as_data()
@@ -426,7 +457,11 @@ impl WireEncoder {
                     node.payload().as_join().map_err(|_| IntegrityError::InvalidStructure)?;
                 let lhs = self.index_for(lhs)?;
                 let rhs = self.index_for(rhs)?;
-                WireEntry::Join { tag: node.tag(), lhs, rhs }
+                WireEntry::Join {
+                    frame: node.frame().ok_or(IntegrityError::InvalidStructure)?,
+                    lhs,
+                    rhs,
+                }
             },
             NodeType::PairList => {
                 let pairs =
@@ -435,7 +470,10 @@ impl WireEncoder {
                     .iter()
                     .map(|(lhs, rhs)| Ok((self.index_for(*lhs)?, self.index_for(*rhs)?)))
                     .collect::<Result<Vec<_>, IntegrityError>>()?;
-                WireEntry::PairList { tag: node.tag(), pairs }
+                WireEntry::PairList {
+                    frame: node.frame().ok_or(IntegrityError::InvalidStructure)?,
+                    pairs,
+                }
             },
             NodeType::True => return Err(IntegrityError::InvalidStructure),
         })
@@ -447,7 +485,8 @@ impl WireEncoder {
         digest: Digest,
     ) -> Result<&'a Node, IntegrityError> {
         let node = state.get_node(&digest).ok_or(IntegrityError::InvalidStructure)?;
-        self.node_type(state, node)?
+        state
+            .registry()
             .validate_node(node)
             .map_err(|_| IntegrityError::InvalidStructure)?;
         Ok(node)
@@ -456,7 +495,7 @@ impl WireEncoder {
     fn node_type(&self, state: &DeferredState, node: &Node) -> Result<NodeType, IntegrityError> {
         state
             .registry()
-            .decode_node_type(node.tag())
+            .decode_node_type(node.frame().ok_or(IntegrityError::InvalidStructure)?)
             .map_err(|_| IntegrityError::InvalidStructure)
     }
 
@@ -488,9 +527,9 @@ enum WireEncodeStep {
 impl Serializable for WireEntry {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         match self {
-            Self::Data { tag, chunks } => {
+            Self::Data { frame, chunks } => {
                 target.write_u8(0);
-                tag.write_into(target);
+                frame.as_word().write_into(target);
                 target.write_usize(chunks.len());
                 for chunk in chunks {
                     for felt in chunk {
@@ -498,15 +537,15 @@ impl Serializable for WireEntry {
                     }
                 }
             },
-            Self::Join { tag, lhs, rhs } => {
+            Self::Join { frame, lhs, rhs } => {
                 target.write_u8(1);
-                tag.write_into(target);
+                frame.as_word().write_into(target);
                 target.write_u32(*lhs);
                 target.write_u32(*rhs);
             },
-            Self::PairList { tag, pairs } => {
+            Self::PairList { frame, pairs } => {
                 target.write_u8(2);
-                tag.write_into(target);
+                frame.as_word().write_into(target);
                 target.write_usize(pairs.len());
                 for (lhs, rhs) in pairs {
                     target.write_u32(*lhs);
@@ -600,33 +639,36 @@ fn read_wire_entry<R: ByteReader>(
     let discriminant = source.read_u8()?;
     match discriminant {
         0 => {
-            reserve_wire_elements(remaining_elements, Tag::FELT_LEN)?;
-            let tag = Tag::read_from(source)?;
+            reserve_wire_elements(remaining_elements, EidosFrame::FELT_LEN)?;
+            let frame = read_frame(source)?;
             let chunk_count = source.read_usize()?;
             reserve_wire_payload(remaining_elements, chunk_count)?;
             let chunks = source
                 .read_many_iter::<WireDataChunk>(chunk_count)?
                 .map(|chunk| chunk.map(|chunk| chunk.0))
                 .collect::<Result<_, _>>()?;
-            Ok(WireEntry::Data { tag, chunks })
+            Ok(WireEntry::Data { frame, chunks })
         },
         1 => {
-            reserve_wire_elements(remaining_elements, Tag::FELT_LEN + Node::DATA_CHUNK_FELT_LEN)?;
-            let tag = Tag::read_from(source)?;
+            reserve_wire_elements(
+                remaining_elements,
+                EidosFrame::FELT_LEN + Node::DATA_CHUNK_FELT_LEN,
+            )?;
+            let frame = read_frame(source)?;
             let lhs = source.read_u32()?;
             let rhs = source.read_u32()?;
-            Ok(WireEntry::Join { tag, lhs, rhs })
+            Ok(WireEntry::Join { frame, lhs, rhs })
         },
         2 => {
-            reserve_wire_elements(remaining_elements, Tag::FELT_LEN)?;
-            let tag = Tag::read_from(source)?;
+            reserve_wire_elements(remaining_elements, EidosFrame::FELT_LEN)?;
+            let frame = read_frame(source)?;
             let pair_count = source.read_usize()?;
             reserve_wire_payload(remaining_elements, pair_count)?;
             let pairs = source
                 .read_many_iter::<WirePair>(pair_count)?
                 .map(|pair| pair.map(|pair| pair.0))
                 .collect::<Result<_, _>>()?;
-            Ok(WireEntry::PairList { tag, pairs })
+            Ok(WireEntry::PairList { frame, pairs })
         },
         other => Err(DeserializationError::InvalidValue(format!(
             "invalid deferred wire entry discriminant: {other}"
@@ -634,14 +676,24 @@ fn read_wire_entry<R: ByteReader>(
     }
 }
 
+fn read_frame<R: ByteReader>(source: &mut R) -> Result<EidosFrame, DeserializationError> {
+    EidosFrame::from_word(Word::read_from(source)?)
+        .ok_or_else(|| DeserializationError::InvalidValue("invalid deferred Eidos frame".into()))
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::vec::Vec;
 
+    use miden_crypto::hash::eidos::{DomainTag, EidosFrame};
+
     use super::*;
     use crate::{
         Felt,
-        deferred::{DeferredContext, Payload, Precompile, precompile_id},
+        deferred::{
+            DEFERRED_AND_FRAME, DeferredContext, Payload, Precompile, deferred_chunks_frame,
+            precompile::test_precompile_domain_tag,
+        },
         serde::{ByteWriter, Serializable},
     };
 
@@ -650,10 +702,10 @@ mod tests {
 
     impl PairListFixture {
         const NAME: &'static str = "wire-pair-list-fixture";
+        const DOMAIN: DomainTag = test_precompile_domain_tag(1);
 
-        fn tag() -> Tag {
-            Tag::precompile(precompile_id(Self::NAME), [ZERO; 3])
-                .expect("fixture id is precompile-owned")
+        fn frame() -> EidosFrame {
+            EidosFrame::new(Self::DOMAIN, [0; 3])
         }
     }
 
@@ -662,17 +714,17 @@ mod tests {
             Self::NAME
         }
 
-        fn id(&self) -> Felt {
-            precompile_id(Self::NAME)
+        fn domain(&self) -> DomainTag {
+            Self::DOMAIN
         }
 
-        fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
-            (args == [ZERO; 3]).then_some(NodeType::PairList)
+        fn decode(&self, params: [u32; 3]) -> Option<NodeType> {
+            (params == [0; 3]).then_some(NodeType::PairList)
         }
 
         fn evaluate(
             &self,
-            _args: [Felt; 3],
+            _params: [u32; 3],
             _payload: &Payload,
             _context: &mut DeferredContext<'_>,
         ) -> Result<Node, PrecompileError> {
@@ -684,8 +736,8 @@ mod tests {
         core::array::from_fn(|i| Felt::new_unchecked(seed + i as u64))
     }
 
-    fn tag(seed: u64) -> Tag {
-        Tag::from_word(felts(seed)[..4].try_into().unwrap())
+    fn frame(seed: u8) -> EidosFrame {
+        EidosFrame::new(test_precompile_domain_tag(seed), [u32::from(seed), 0, 0])
     }
 
     fn wire(entries: Vec<WireEntry>) -> DeferredStateWire {
@@ -714,7 +766,10 @@ mod tests {
     fn wire_decoder_accepts_exact_framework_chunks_data() {
         let registry = PrecompileRegistry::new();
         let chunks = alloc::vec![felts(10), felts(20)];
-        let wire = wire(alloc::vec![WireEntry::Data { tag: Tag::CHUNKS, chunks: chunks.clone() }]);
+        let wire = wire(alloc::vec![WireEntry::Data {
+            frame: deferred_chunks_frame(2),
+            chunks: chunks.clone(),
+        }]);
         let node = Node::chunks(chunks).unwrap();
 
         let (entries, root) = WireDecoder::new(&wire, &registry).unwrap().decode().unwrap();
@@ -738,19 +793,25 @@ mod tests {
     #[test]
     fn in_memory_wire_element_limit_accepts_exact_and_rejects_next_entry() {
         let join = WireEntry::Join {
-            tag: Tag::AND,
+            frame: DEFERRED_AND_FRAME,
             lhs: TRUE_INDEX,
             rhs: TRUE_INDEX,
         };
-        let join_elements = Tag::FELT_LEN + Node::DATA_CHUNK_FELT_LEN;
+        let join_elements = EidosFrame::FELT_LEN + Node::DATA_CHUNK_FELT_LEN;
         let join_count = MAX_DEFERRED_ELEMENTS / join_elements;
         let mut entries = alloc::vec![join; join_count];
-        entries.push(WireEntry::Data { tag: Tag::CHUNKS, chunks: Vec::new() });
+        entries.push(WireEntry::Data {
+            frame: deferred_chunks_frame(1),
+            chunks: Vec::new(),
+        });
         let mut wire = DeferredStateWire { entries };
 
         wire.validate_element_limit().unwrap();
 
-        wire.entries.push(WireEntry::Data { tag: Tag::CHUNKS, chunks: Vec::new() });
+        wire.entries.push(WireEntry::Data {
+            frame: deferred_chunks_frame(1),
+            chunks: Vec::new(),
+        });
         assert!(matches!(
             wire.validate_element_limit(),
             Err(IntegrityError::DeferredStateTooLarge { .. })
@@ -759,15 +820,17 @@ mod tests {
 
     #[test]
     fn rehydration_rejects_empty_data_and_pair_list_entries() {
-        let empty_data =
-            wire(alloc::vec![WireEntry::Data { tag: Tag::CHUNKS, chunks: Vec::new() }]);
+        let empty_data = wire(alloc::vec![WireEntry::Data {
+            frame: deferred_chunks_frame(1),
+            chunks: Vec::new(),
+        }]);
         assert!(matches!(
             DeferredState::from_wire(Arc::new(PrecompileRegistry::new()), &empty_data),
             Err(IntegrityError::InvalidStructure)
         ));
 
         let empty_pairs = wire(alloc::vec![WireEntry::PairList {
-            tag: PairListFixture::tag(),
+            frame: PairListFixture::frame(),
             pairs: Vec::new(),
         }]);
         assert!(matches!(
@@ -782,9 +845,9 @@ mod tests {
     #[test]
     fn wire_decoder_rejects_malformed_framework_chunks_data() {
         let registry = PrecompileRegistry::new();
-        let malformed = Tag::from_word([Tag::CHUNKS.id(), Felt::new_unchecked(1), ZERO, ZERO]);
+        let malformed = EidosFrame::new(DeferredChunksDomain::TAG, [1, 1, 0]);
         let wire = wire(alloc::vec![WireEntry::Data {
-            tag: malformed,
+            frame: malformed,
             chunks: alloc::vec![felts(10)],
         }]);
 
@@ -799,16 +862,16 @@ mod tests {
     fn wire_serialize_round_trip_all_entries() {
         assert_wire_round_trips(wire(alloc::vec![
             WireEntry::Data {
-                tag: tag(1),
+                frame: frame(1),
                 chunks: alloc::vec![felts(10)]
             },
             WireEntry::Data {
-                tag: tag(2),
+                frame: frame(2),
                 chunks: alloc::vec![felts(20), felts(30)],
             },
-            WireEntry::Join { tag: tag(3), lhs: 1, rhs: TRUE_INDEX },
+            WireEntry::Join { frame: frame(3), lhs: 1, rhs: TRUE_INDEX },
             WireEntry::PairList {
-                tag: tag(5),
+                frame: frame(5),
                 pairs: alloc::vec![(1, 2), (TRUE_INDEX, 3)],
             },
         ]));
@@ -825,7 +888,7 @@ mod tests {
         assert_eq!(
             state.to_wire().unwrap().entries,
             alloc::vec![WireEntry::Join {
-                tag: Tag::AND,
+                frame: DEFERRED_AND_FRAME,
                 lhs: TRUE_INDEX,
                 rhs: TRUE_INDEX,
             }]
@@ -846,7 +909,7 @@ mod tests {
         assert_eq!(
             wire.entries.last(),
             Some(&WireEntry::Join {
-                tag: Tag::AND,
+                frame: DEFERRED_AND_FRAME,
                 lhs: 4_095,
                 rhs: TRUE_INDEX,
             })
@@ -902,7 +965,7 @@ mod tests {
         let mut bytes = Vec::new();
         bytes.write_usize(1);
         bytes.write_u8(0); // Data entry discriminant
-        tag(1).write_into(&mut bytes);
+        frame(1).as_word().write_into(&mut bytes);
         bytes.write_usize(usize::MAX);
 
         assert!(DeferredStateWire::read_from_bytes(&bytes).is_err());
@@ -913,7 +976,7 @@ mod tests {
         let mut bytes = Vec::new();
         bytes.write_usize(1);
         bytes.write_u8(2); // PairList entry discriminant
-        tag(1).write_into(&mut bytes);
+        frame(1).as_word().write_into(&mut bytes);
         bytes.write_usize(usize::MAX);
 
         assert!(DeferredStateWire::read_from_bytes(&bytes).is_err());

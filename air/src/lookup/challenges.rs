@@ -19,7 +19,7 @@ use miden_core::field::PrimeCharacteristicRing;
 
 /// Encodes multiset/LogUp contributions as **bus_prefix\[bus\] + \<beta, message\>**.
 ///
-/// - `alpha`: randomness base (kept public for direct access by range checker etc.)
+/// - `alpha`: randomness base (kept public for direct access by lookup encoders)
 /// - `beta_powers`: precomputed powers `[beta^0, beta^1, ..., beta^(max_message_width-1)]`
 /// - `bus_prefix`: per-bus domain separation constants `bus_prefix[i] = alpha + (i+1) *
 ///   beta^max_message_width`

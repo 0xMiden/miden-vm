@@ -1,4 +1,4 @@
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
 use miden::core::mem
 use miden::core::word
 
@@ -22,10 +22,89 @@ const LEAF_DEPTH = 64
 # Each key-value pair is two words, and a leaf can hold up to 1024 pairs.
 const MAX_LEAF_SIZE = 8192
 
-# Domain identifier used when hashing SMT leaves. Matches `SmtLeaf::LEAF_DOMAIN` in miden-crypto
-# and is mixed into the Poseidon2 capacity word to domain-separate leaf hashes from ordinary
-# inner Merkle nodes.
-const LEAF_DOMAIN = 0x13af
+# `SMT_BUCKET_LEAF` (tag 0x00000101) initial chaining-word constants. Only the entry count is
+# dynamic.
+const LEAF_INIT_CV_0 = 4280581857092829441
+const LEAF_INIT_CV_1_BASE = 2688637132020383744
+const LEAF_INIT_CV_2 = 1947077364412317696
+const LEAF_INIT_CV_3 = 6620516959492505600
+
+# Eidos chaining word for one key-value pair under `SMT_BUCKET_LEAF`.
+const LEAF_MERGE_INIT_CV = [
+    4280581857092829441,
+    2688637132020383745,
+    1947077364412317696,
+    6620516959492505600
+]
+
+# LEAF HASHING HELPERS
+# =================================================================================================
+
+#! Constructs the `SMT_BUCKET_LEAF` initial chaining word for `num_entries` key-value pairs.
+#!
+#! Input:  [num_entries, ...]
+#! Output: [CV, ...]
+proc init_leaf_chaining_word
+    u32assert.err="SMT leaf entry count must fit in a u32"
+    push.LEAF_INIT_CV_1_BASE add
+    push.LEAF_INIT_CV_3.LEAF_INIT_CV_2
+    movup.2
+    push.LEAF_INIT_CV_0
+end
+
+#! Copies a non-empty, even number of advice words to memory and verifies their SMT leaf hash.
+#!
+#! Input:  [num_words, write_ptr, COMMITMENT, ...]
+#! Output: [write_ptr', ...]
+proc pipe_leaf_preimage_to_memory
+    dup is_odd assertz.err="SMT leaf preimage must contain complete key-value pairs"
+
+    # Each entry contains two words.
+    dup div.2 exec.init_leaf_chaining_word
+    # => [CV, num_words, write_ptr, COMMITMENT, ...]
+
+    # Replace num_words with the end pointer.
+    movup.4 mul.4 dup.5 add movdn.5
+    # => [CV, write_ptr, end_ptr, COMMITMENT, ...]
+
+    padw padw
+    exec.mem::pipe_double_words_to_memory
+    exec.eidos::digest
+    # => [DIGEST, write_ptr', COMMITMENT, ...]
+
+    movup.4 movdn.8
+    assert_eqw.err="SMT leaf preimage does not match its commitment"
+end
+
+#! Hashes a non-empty, block-aligned SMT leaf preimage in memory.
+#!
+#! Input:  [start_ptr, end_ptr, ...]
+#! Output: [DIGEST, ...]
+proc hash_leaf_from_memory
+    dup.1 dup.1 u32assert2 u32gte
+    assert.err="SMT leaf start pointer must not exceed its end pointer"
+
+    dup.1 dup.1 sub
+    dup u32mod.8 assertz.err="SMT leaf preimage must contain complete key-value pairs"
+    u32div.8 exec.init_leaf_chaining_word
+    # => [CV, start_ptr, end_ptr, ...]
+
+    push.0 movdn.6 padw padw
+    exec.eidos::hash_elements_with_state
+end
+
+#! Inserts one key-value pair into the advice map and returns its SMT leaf hash.
+#!
+#! Input:  [K, V, ...]
+#! Output: [DIGEST, K, ...]
+proc hash_and_insert_single_leaf
+    dupw.1 dupw.1
+    push.LEAF_MERGE_INIT_CV movdnw.2
+    adv.insert_compress
+    exec.eidos::compress
+    exec.eidos::digest
+    movupw.2 dropw
+end
 
 # EXPORTS
 # =================================================================================================
@@ -52,7 +131,7 @@ const LEAF_DOMAIN = 0x13af
 #!   Leaf multiple, missing before first key: 224 + 291 * pair_count
 #!   Leaf multiple, missing after last key: 224 + 291 * pair_count
 #!   Leaf multiple, middle keys or insertion points: between the first-key and last-key costs
-pub proc get(key: Key, root: poseidon2::Digest) -> (word, poseidon2::Digest)
+pub proc get(key: Key, root: eidos::Digest) -> (word, eidos::Digest)
     # Prepare for `mtree_get`
     # (6 cycles)
     # => [K[0], K[1], K[2], K[3], R[0], R[1], R[2], R[3]]
@@ -118,7 +197,7 @@ pub proc get(key: Key, root: poseidon2::Digest) -> (word, poseidon2::Digest)
 
             # Hash leaf preimage with domain separation and ensure that it equals node value
             # (28 cycles)
-            push.LEAF_DOMAIN exec.poseidon2::merge_in_domain assert_eqw
+            push.LEAF_MERGE_INIT_CV exec.eidos::merge_with_chaining_word assert_eqw
             # => [V, R]
         else
             # => [leaf_size, NV, K, R]
@@ -163,7 +242,7 @@ end
 #!     insertion after last key: 747 + 498 * pair_count
 #!     no-op removal after last key: 311 + 441 * pair_count
 #!     middle keys or insertion points: between the first-key and last-key costs
-pub proc set(value: word, key: Key, root: poseidon2::Digest) -> (word, poseidon2::Digest)
+pub proc set(value: word, key: Key, root: eidos::Digest) -> (word, eidos::Digest)
     # Prepare stack for mtree_get
     # (5 cycles)
     movupw.2 dup.11 push.LEAF_DEPTH
@@ -215,12 +294,12 @@ pub proc set(value: word, key: Key, root: poseidon2::Digest) -> (word, poseidon2
             drop
             # => [NV, V, K, R]
 
-            # Load the advice-provided single-leaf preimage (K_l, V_l) and assert
-            # hash_in_domain(K_l, V_l, LEAF_DOMAIN) == NV.
+            # Load the advice-provided single-leaf preimage (K_l, V_l) and assert that its
+            # SMT_BUCKET_LEAF hash equals NV.
             adv_pushw adv_pushw
             # => [V_l, K_l, NV, V, K, R]
-            dupw dupw.2 push.LEAF_DOMAIN exec.poseidon2::merge_in_domain
-            # => [hash_in_domain(K_l, V_l, LEAF_DOMAIN), V_l, K_l, NV, V, K, R]
+            dupw dupw.2 push.LEAF_MERGE_INIT_CV exec.eidos::merge_with_chaining_word
+            # => [leaf_hash, V_l, K_l, NV, V, K, R]
             movupw.3 assert_eqw.err="invalid single-leaf preimage: hash does not match node value"
             # => [V_l, K_l, V, K, R]
 
@@ -268,7 +347,7 @@ end
 #! - the tree with the specified root does not exist in the VM's advice provider.
 #!
 #! Cycles: 3 cycles
-pub proc peek(key: Key, root: poseidon2::Digest) -> (Key, poseidon2::Digest)
+pub proc peek(key: Key, root: eidos::Digest) -> (Key, eidos::Digest)
     emit.SMT_PEEK_EVENT
 end
 
@@ -296,10 +375,10 @@ end
 @locals(8192)
 proc get_multi_leaf_value(
     leaf_size: u16,
-    node: poseidon2::Digest,
+    node: eidos::Digest,
     key: Key,
-    root: poseidon2::Digest,
-) -> (word, poseidon2::Digest)
+    root: eidos::Digest,
+) -> (word, eidos::Digest)
     # First, we'll pipe all the pairs in the leaf from the advice stack.
     # We'll need a pointer, the count of words to copy, and a "commitment" that it should hash to.
     # The node value (its hash) is our commitment, and we can just divide `leaf_size` to get the
@@ -319,7 +398,7 @@ proc get_multi_leaf_value(
 
     # Push the leaf domain separator.
     # Cycles: 58 + 3 * num_words
-    push.LEAF_DOMAIN exec.mem::pipe_double_words_preimage_to_memory_with_domain
+    exec.pipe_leaf_preimage_to_memory
     # => [ptr_end, K, R]
 
     locaddr.0
@@ -559,7 +638,7 @@ end
 #! Cycles
 #!   Insert empty value: X cycles
 #!   Insert non-empty value: X cycles
-proc set_empty_leaf(value: word, key: Key, root: poseidon2::Digest) -> (word, poseidon2::Digest)
+proc set_empty_leaf(value: word, key: Key, root: eidos::Digest) -> (word, eidos::Digest)
     # Check if we're inserting the empty value (X cycles)
     padw eqw
     #=> [V == ZERO, ZERO, V, K, R]
@@ -577,14 +656,8 @@ proc set_empty_leaf(value: word, key: Key, root: poseidon2::Digest) -> (word, po
         dropw
         #=> [V, K, R, ...]
 
-        # Update advice map (swap to put K on top for the leaf-domain
-        # hash key hash_in_domain(K || V, LEAF_DOMAIN)).
-        swapw push.LEAF_DOMAIN movdn.8 adv.insert_hdword_d movup.8 drop swapw
-        #=> [V, K, R, ...]
-
-        # Compute hash_in_domain([K, V], LEAF_DOMAIN); the new node value (NV)
-        # (21 cycles)
-        dupw.1 push.LEAF_DOMAIN exec.poseidon2::merge_in_domain
+        # Insert [K, V] into the advice map and compute the new leaf commitment.
+        swapw exec.hash_and_insert_single_leaf
         # => [NV, K, R]
 
         # Prepare stack for `mtree_set` (5 cycles)
@@ -618,8 +691,8 @@ proc set_single_leaf(
     leaf: LeafPreimage,
     value: word,
     key: Key,
-    root: poseidon2::Digest,
-) -> (word, poseidon2::Digest)
+    root: eidos::Digest,
+) -> (word, eidos::Digest)
     # Check if we're inserting or removing a value. V lives at word 2, so dup it
     # without disturbing the validated preimage at words 0-1.
     dupw.2 padw eqw
@@ -659,8 +732,8 @@ proc insert_single_leaf(
     leaf: LeafPreimage,
     value: word,
     key: Key,
-    root: poseidon2::Digest,
-) -> (word, poseidon2::Digest)
+    root: eidos::Digest,
+) -> (word, eidos::Digest)
     # Check if the key stored in the leaf is the same as K
     movupw.3 movupw.2 eqw
     # => [K_l==K, K_l, K, V_l, V, R]
@@ -671,14 +744,8 @@ proc insert_single_leaf(
         dropw
         # => [K, V_l, V, R]
 
-        # Update advice map (swap to put K on top for the leaf-domain
-        # hash key hash_in_domain(K || V, LEAF_DOMAIN)).
-        movupw.2 swapw push.LEAF_DOMAIN movdn.8 adv.insert_hdword_d movup.8 drop swapw
-        # => [V, K, V_l, R]
-
-        # Compute hash_in_domain([K, V], LEAF_DOMAIN); the new node value (NV)
-        # (X cycles)
-        dupw.1 push.LEAF_DOMAIN exec.poseidon2::merge_in_domain
+        # Insert [K, V] into the advice map and compute the new leaf commitment.
+        movupw.2 swapw exec.hash_and_insert_single_leaf
         # => [NV, K, V_l, R]
 
         # Prepare stack to update Merkle store
@@ -720,8 +787,8 @@ proc insert_single_to_multi_leaf(
     key: Key,
     leaf_value: word,
     value: word,
-    root: poseidon2::Digest,
-) -> (word, poseidon2::Digest)
+    root: eidos::Digest,
+) -> (word, eidos::Digest)
 
     # Pairs in leaves are sorted by key, so we need to compare the new key against the existing
     # key.
@@ -818,8 +885,8 @@ proc remove_single_leaf(
     leaf: LeafPreimage,
     value: word,
     key: Key,
-    root: poseidon2::Digest,
-) -> (word, poseidon2::Digest)
+    root: eidos::Digest,
+) -> (word, eidos::Digest)
     # Check if the key stored in the leaf is the same as K
     movupw.3 movupw.2 eqw
     # => [K_l==K, K_l, K, V_l, V, R]
@@ -831,9 +898,8 @@ proc remove_single_leaf(
         dropw
         # => [K, V_l, V, R]
 
-        # Update advice map (swap to put K on top for the leaf-domain
-        # hash key hash_in_domain(K || V, LEAF_DOMAIN)).
-        movupw.2 swapw push.LEAF_DOMAIN movdn.8 adv.insert_hdword_d movup.8 drop swapw
+        # Move the empty replacement value to the top. Empty leaves have no advice preimage.
+        movupw.2
         # => [V, K, V_l, R]
 
         # Prepare the stack for `mtree_set`
@@ -854,7 +920,7 @@ proc remove_single_leaf(
     else
         # Keys don't match; this is a no-op. The advice provider's claims were
         # already verified at the top of `set`: mtree_get bound NV to R at K[3],
-        # and the caller asserted hash_in_domain(K_l, V_l, LEAF_DOMAIN) == NV.
+        # and the caller asserted that the SMT_BUCKET_LEAF hash of (K_l, V_l) equals NV.
         # V is known to be ZERO.
         # => [K_l, K, V_l, V (=ZERO), R]
 
@@ -880,11 +946,11 @@ end
 @locals(8192)
 proc set_multi_leaf(
     leaf_size: u16,
-    node: poseidon2::Digest,
+    node: eidos::Digest,
     value: word,
     key: Key,
-    root: poseidon2::Digest,
-) -> (word, poseidon2::Digest)
+    root: eidos::Digest,
+) -> (word, eidos::Digest)
     # We'll have to pipe all the pairs from the advice stack. Let's get the
     # stack ready for pipe_double_words_preimage_to_memory_with_domain.
 
@@ -907,7 +973,7 @@ proc set_multi_leaf(
     locaddr.0 swap
     # => [num_words, ptr, COM; NV, K, V, leaf_size, R]
 
-    push.LEAF_DOMAIN exec.mem::pipe_double_words_preimage_to_memory_with_domain
+    exec.pipe_leaf_preimage_to_memory
     # => [end_ptr; NV, K, V, leaf_size, R]
 
     movdn.12
@@ -1010,8 +1076,8 @@ proc insert_into_leaf(
     end_ptr: ptr<Entry>,
     value: word,
     key: Key,
-    root: poseidon2::Digest,
-) -> (word, poseidon2::Digest)
+    root: eidos::Digest,
+) -> (word, eidos::Digest)
     # => [key_ptr, start_ptr, end_ptr, V, K, R]
 
     # Ensure we have space to insert without exceeding the maximum size of 1024 k-v pairs.
@@ -1127,8 +1193,8 @@ proc replace_in_multi_leaf(
     end_ptr: ptr<Entry>,
     value: word,
     key: Key,
-    root: poseidon2::Digest,
-) -> (word, poseidon2::Digest)
+    root: eidos::Digest,
+) -> (word, eidos::Digest)
     # => [key_ptr, start_ptr, end_ptr, V, K, R]
 
     add.4
@@ -1200,8 +1266,8 @@ proc remove_in_multi_leaf(
     end_ptr: ptr<Entry>,
     value: word,
     key: Key,
-    root: poseidon2::Digest,
-) -> (word, poseidon2::Digest)
+    root: eidos::Digest,
+) -> (word, eidos::Digest)
     # => [key_ptr, start_ptr, end_ptr, V=EMPTY, K, R]
 
     # LOCALS:
@@ -1286,7 +1352,7 @@ proc memmove_word_range_left_and_advance_ptrs(
     dup.1 neq.0
     # => [nonzero, ovf, read_end - cur_read, cur_read, cur_write]
 
-    # fewer cycles than xor.
+    # This is true exactly when `read_end != cur_read` and subtraction did not underflow.
     u32xor
     # => [anything_to_read, read_end - cur_read, cur_read, cur_write]
 
@@ -1391,14 +1457,14 @@ proc hash_and_insert_mem(
     start_addr: ptr<Entry>,
     end_addr: ptr<Entry>,
     leaf_index: felt,
-    root: poseidon2::Digest,
-) -> (poseidon2::Digest, poseidon2::Digest)
+    root: eidos::Digest,
+) -> (eidos::Digest, eidos::Digest)
     # => [start_addr, end_addr, leaf_index, R, ...]
 
     dup.1 dup.1
     # => [start_addr, end_addr, start_addr, end_addr, leaf_index, R, ...]
 
-    push.LEAF_DOMAIN exec.poseidon2::hash_words_with_domain
+    exec.hash_leaf_from_memory
     # => [NV, start_addr, end_addr, leaf_index, R, ...]
 
     adv.insert_mem

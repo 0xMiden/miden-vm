@@ -1,59 +1,117 @@
-//! Registered domain selectors for protocol-visible hash commitments.
+//! Eidos domains maintained by `miden-vm`.
 //!
-//! This module follows the Miden domain-separation RFC
-//! (<https://github.com/0xMiden/crypto/pull/1026>): consensus-critical domains use **registered
-//! numeric identifiers** rather than hashed strings, packed as
-//!
-//! ```text
-//! selector = (domain_id << 8) | version
-//! ```
-//!
-//! with `domain_id` a registered 24-bit integer (`>= 1`) and `version` an 8-bit per-domain
-//! version (`>= 1`). The selector rides in the second capacity element of the Poseidon2 sponge
-//! (`hash_elements_in_domain`); the first capacity element carries the padding rule, and the third
-//! marks empty input. The fourth capacity element is zero in the initial framing state.
-//!
-//! # Provisional registry entries
-//!
-//! The RFC's draft registry allocates `0x010000..0x01ffff` to miden-vm, with concrete entries
-//! delegated to this repository. These are the range's first entries, to be migrated into the
-//! machine-readable registry when it lands:
-//!
-//! | domain_id  | version | domain |
-//! |------------|---------|-------------------------------------------|
-//! | `0x010000` | 1       | kernel commitment ([`KERNEL_DOMAIN_TAG`](super::KERNEL_DOMAIN_TAG)) |
-//! | `0x010001` | 1       | execution claim ([`CLAIM_DOMAIN_TAG`](super::CLAIM_DOMAIN_TAG)) |
-//! | `0x010002` | 1       | proof request key ([`PROOF_REQUEST_DOMAIN_TAG`](super::PROOF_REQUEST_DOMAIN_TAG)) |
-//!
-//! Selectors share one capacity namespace with the `merge_in_domain` values used for MAST
-//! control-block hashing. Those are opcode-sized (`< 256`) while every registered selector is
-//! `>= 257` (`domain_id >= 1`), so those two ranges cannot collide. Distinctness among registered
-//! selectors is the registry's responsibility: each `domain_id` is allocated once within its
-//! maintainer's range, and the three defined here are pinned distinct by
-//! `registry_entries_are_valid_and_distinct_selectors`.
+//! Numeric tags use the `miden-vm` namespace allocated by `miden-crypto`. MAST control nodes keep
+//! their opcode-based framing; those tags are below 256 and therefore disjoint from every
+//! registered domain tag.
+
+pub use miden_crypto::hash::eidos::DomainTag;
+#[cfg(test)]
+use miden_crypto::hash::eidos::domains::MidenCryptoDomainRegistry;
+use miden_crypto::hash::eidos::{
+    Custom, DomainVersion, FeltSequence, Transcript, domain::EidosDomain, namespace,
+};
 
 use crate::Felt;
 
-/// Registered domain id for the kernel commitment.
-pub const KERNEL_COMMITMENT_DOMAIN_ID: u32 = 0x010000;
+/// Number of Felts in the Falcon product-check transcript payload.
+pub const FALCON_PRODUCT_CHECK_PAYLOAD_LEN: u32 = 8 + 512 + 1024;
 
-/// Registered domain id for the execution-claim commitment.
-pub const EXECUTION_CLAIM_DOMAIN_ID: u32 = 0x010001;
+miden_crypto::eidos_domain_registry! {
+    /// Domains maintained by `miden-vm`.
+    pub registry MidenVmDomainRegistry {
+        namespace: namespace::MIDEN_VM;
+        domains: {
+            pub KERNEL_COMMITMENT: KernelCommitmentDomain {
+                local_id: 0x0000,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "Miden VM kernel commitment.",
+                schema: "param0 = number of Felts; param1 = 0; param2 = 0; payload = procedure digests in canonical order",
+            }
+            pub EXECUTION_CLAIM: ExecutionClaimDomain {
+                local_id: 0x0001,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "Miden VM execution-claim commitment.",
+                schema: "param0 = 40; param1 = 0; param2 = 0; payload = program root || kernel commitment || stack inputs || stack outputs",
+            }
+            pub PROOF_REQUEST: ProofRequestDomain {
+                local_id: 0x0002,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "Miden VM recursive-proof request key.",
+                schema: "param0 = 8; param1 = 0; param2 = 0; payload = claim commitment || verifier root",
+            }
+            pub DEFERRED_AND: DeferredAndDomain {
+                local_id: 0x0003,
+                version: DomainVersion::numbered(1),
+                encoding: Custom,
+                description: "Deferred AND node and rolling-root fold.",
+                schema: "params = [0, 0, 0]; payload = exactly one block containing left digest || right digest",
+            }
+            pub DEFERRED_CHUNKS: DeferredChunksDomain {
+                local_id: 0x0004,
+                version: DomainVersion::numbered(1),
+                encoding: Custom,
+                description: "Deferred framework chunk-list node.",
+                schema: "param0 = encoded Felt length; param1 = 0; param2 = 0; payload = exactly param0 / 8 complete 8-Felt chunks; param0 > 0 and divisible by 8",
+            }
+            pub STARK_TRANSCRIPT: StarkTranscriptDomain {
+                local_id: 0x0005,
+                version: DomainVersion::numbered(1),
+                encoding: Transcript,
+                description: "Miden VM and Precompile VM STARK transcript.",
+                schema: "params = [0, 0, 0]; absorb the relation digest before sampling transcript challenges",
+            }
+            pub KECCAK256_PRECOMPILE: Keccak256PrecompileDomain {
+                local_id: 0x0006,
+                version: DomainVersion::numbered(1),
+                encoding: Custom,
+                description: "Keccak-256 deferred precompile nodes.",
+                schema: "param0 = operation; param1 = preimage length in bytes; param2 = 0; ASSERT payload = exactly one block containing preimage digest || expected digest",
+            }
+            pub UINT256_PRECOMPILE: Uint256PrecompileDomain {
+                local_id: 0x0007,
+                version: DomainVersion::numbered(1),
+                encoding: Custom,
+                description: "Uint256 deferred precompile nodes.",
+                schema: "param0 = operation; VALUE uses param1 = bound pointer and one value block; binary operations use param1 = 0 and one digest-pair block; param2 = 0",
+            }
+            pub CURVE_PRECOMPILE: CurvePrecompileDomain {
+                local_id: 0x0008,
+                version: DomainVersion::numbered(1),
+                encoding: Custom,
+                description: "Elliptic-curve deferred precompile nodes.",
+                schema: "param0 = operation; VALUE uses param1 = group pointer and one digest-pair block; fixed binary operations use param1 = 0 and one digest-pair block; MSM uses param1 = pair count and exactly that many digest-pair blocks; param2 = 0",
+            }
+            pub PVM_UINT_PIN_CLAIM: PvmUintPinClaimDomain {
+                local_id: 0x0009,
+                version: DomainVersion::numbered(1),
+                encoding: Custom,
+                description: "Precompile VM uint pin claim.",
+                schema: "param0 = uint bound pointer; param1 = pin pointer; param2 = 0; payload = exactly one uint value block",
+            }
+            pub FALCON_PRODUCT_CHECK: FalconProductCheckDomain {
+                local_id: 0x000a,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "Falcon512-Eidos polynomial product-check transcript.",
+                schema: "param0 = 1544; param1 = 0; param2 = 0; payload = public-key commitment || zero word || 512 s2 coefficients || 1024 product coefficients",
+            }
+        }
+    }
+}
 
-/// Registered domain id for the proof-request key.
-pub const PROOF_REQUEST_DOMAIN_ID: u32 = 0x010002;
+/// Returns the field-element representation of a typed Eidos domain.
+pub const fn domain_tag<D: EidosDomain>(_: D) -> Felt {
+    D::TAG.as_felt()
+}
 
-/// Packs a registered domain id and per-domain version into a domain selector.
-///
-/// The result is a small integer (`domain_id << 8 | version`), used as the domain element of
-/// `hash_elements_in_domain`.
-pub const fn domain_selector(domain_id: u32, version: u8) -> Felt {
-    assert!(
-        domain_id >= 1 && domain_id < (1 << 24),
-        "domain_id must be a registered 24-bit id"
-    );
-    assert!(version >= 1, "per-domain versions start at 1");
-    Felt::new_unchecked(((domain_id as u64) << 8) | version as u64)
+/// Returns whether `tag` is assigned to a deferred precompile in the VM registry.
+pub(crate) fn is_vm_precompile_domain(tag: DomainTag) -> bool {
+    tag == Keccak256PrecompileDomain::TAG
+        || tag == Uint256PrecompileDomain::TAG
+        || tag == CurvePrecompileDomain::TAG
 }
 
 #[cfg(test)]
@@ -61,25 +119,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_entries_are_valid_and_distinct_selectors() {
-        use crate::program::{CLAIM_DOMAIN_TAG, KERNEL_DOMAIN_TAG, PROOF_REQUEST_DOMAIN_TAG};
+    fn crypto_and_vm_registries_are_disjoint() {
+        for crypto in MidenCryptoDomainRegistry::domains() {
+            assert!(MidenVmDomainRegistry::resolve(crypto.tag).is_none());
+        }
+        for vm in MidenVmDomainRegistry::domains() {
+            assert!(MidenCryptoDomainRegistry::resolve(vm.tag).is_none());
+        }
+    }
 
-        let entries = [
-            (KERNEL_COMMITMENT_DOMAIN_ID, KERNEL_DOMAIN_TAG),
-            (EXECUTION_CLAIM_DOMAIN_ID, CLAIM_DOMAIN_TAG),
-            (PROOF_REQUEST_DOMAIN_ID, PROOF_REQUEST_DOMAIN_TAG),
-        ];
-        for (i, (id, tag)) in entries.iter().enumerate() {
-            assert!(*id >= 1 && *id < (1 << 24), "domain id out of the registered range");
-            assert_eq!(
-                tag.as_canonical_u64(),
-                (u64::from(*id) << 8) | 1,
-                "tag is not the packed selector"
-            );
-            for (other_id, other_tag) in entries.iter().skip(i + 1) {
-                assert_ne!(id, other_id, "registered domain ids must be unique");
-                assert_ne!(tag, other_tag, "registered tags must be unique");
-            }
+    #[test]
+    fn mast_opcodes_are_disjoint_from_registered_tags() {
+        for domain in MidenVmDomainRegistry::domains() {
+            assert!(domain.tag.as_u32() > u8::MAX as u32);
         }
     }
 }

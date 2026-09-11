@@ -167,7 +167,14 @@ Notice that the above constraint has degree $5$.
 
 While the approach described above works, it comes at significant cost. Reading or writing a single value requires $8$ trace cells and $2$ $16$-bit range checks. Assuming a single range check requires roughly $2$ trace cells, the total number of trace cells needed grows to $12$. This is about $6$x worse the simple contiguous write-once memory described earlier.
 
-Miden VM frequently needs to deal with batches of $4$ field elements, which we call _words_. For example, the output of Poseidon2 hash function is a single word. A single 256-bit integer value can be stored as two words (where each element contains one $32$-bit value). Thus, we can optimize for this common use case by making the chiplet handle *words* as opposed to individual elements. That is, memory is still element-addressable in that each memory address stores a single field element, and memory addresses may be read or written individually. However, the chiplet also handles reading and writing elements in batches of four simultaneously, with the restriction that such batches be *word-aligned* addresses (*i.e.* the address is a multiple of 4).
+Miden VM frequently needs to deal with batches of $4$ field elements, which we call _words_. For
+example, an Eidos digest is one word. A single 256-bit integer value can be stored as two words
+(where each element contains one $32$-bit value). Thus, we can optimize for this common use case by
+making the chiplet handle *words* as opposed to individual elements. That is, memory is still
+element-addressable in that each memory address stores a single field element, and memory addresses
+may be read or written individually. However, the chiplet also handles reading and writing elements
+in batches of four simultaneously, with the restriction that such batches be *word-aligned*
+addresses (*i.e.* the address is a multiple of 4).
 
 The layout of Miden VM memory table is shown below:
 
@@ -337,33 +344,32 @@ That is, if $v_i$ is not written to, then either its value needs to be copied ov
 
 #### Chiplets bus constraints {#chiplets-bus-constraints}
 
-Communication between the memory chiplet and the stack is accomplished via the chiplets bus $b_{chip}$. To respond to memory access requests from the stack, we need to multiply the current value in $b_{chip}$ by the value representing a row in the memory table.
+Each active memory row provides one typed [LogUp](../lookups/logup.md) message. The message domain
+identifies the access kind, and the payload identifies the accessed value:
+
+| Access kind | `BusId` | Payload |
+| ----------- | ------- | ------- |
+| element read | `MemoryReadElement` | $(ctx, addr, clk, value)$ |
+| element write | `MemoryWriteElement` | $(ctx, addr, clk, value)$ |
+| word read | `MemoryReadWord` | $(ctx, addr, clk, v_0, v_1, v_2, v_3)$ |
+| word write | `MemoryWriteWord` | $(ctx, addr, clk, v_0, v_1, v_2, v_3)$ |
 
 ##### Memory row value {#memory-row-value}
 
-This value can be computed as follows:
+For a domain $B$ and payload $(x_0, \ldots, x_{k-1})$, the message denominator is
 
 $$
-\begin{align*}
-v_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem} + \alpha_2 \cdot ctx + \alpha_3 \cdot a + \alpha_4 \cdot clk + ew \cdot v_{word} + (1 - ew) \cdot v_{element} \text{ | degree} = 4
-\end{align*}
+d(B; x_0, \ldots, x_{k-1}) = \operatorname{bus\_prefix}[B]
+    + \sum_{i=0}^{k-1} \beta^i x_i.
 $$
 
-where $a = word\_addr + 2 \cdot idx1 + idx0$ and
+The access address is $addr = word\_addr + 2 \cdot idx1 + idx0$. For an element access,
+the payload value is the element selected from $(v_0, v_1, v_2, v_3)$ by $(idx1, idx0)$.
+For a word access, the index bits are constrained to zero and the payload contains all four
+elements.
 
-$$
-\begin{align*}
-v_{word} &= \sum_{j=0}^3(\alpha_{j + 5} \cdot v_j) \text{ | degree} = 1  
-v_{element} &= \alpha_5 \cdot \sum_{i=0}^3 f_i \cdot v_i \text{ | degree} = 3
-\end{align*}
-$$
-
-and where $op_{mem}$ is the appropriate [operation label](./index.md#operation-labels) of the memory access operation.
-
-To ensure that values of memory table rows are included into the chiplets bus, we impose the following constraint:
-
-$$
-b_{chip}' = b_{chip} \cdot v_{mem} \text{ | degree} = 5
-$$
-
-On the stack side, for every memory access request, a corresponding value is divided out of the $b_{chip}$ column. Specifics of how this is done are described [here](../stack/io_ops.md#memory-access-operations).
+The memory row contributes $+1/d$ as the provider. Core operations and chiplet-internal clients,
+including ACE and AEAD stream rows, contribute $-1/d$ for each matching request. The shared LogUp
+closure therefore binds the access kind, context, address, clock, and returned or written value
+without requiring the provider and consumer rows to be adjacent. Stack-side request payloads are
+described in [memory access operations](../stack/io_ops.md#memory-access-operations).

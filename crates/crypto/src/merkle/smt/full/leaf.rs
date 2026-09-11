@@ -3,8 +3,8 @@ use alloc::{string::ToString, vec::Vec};
 use super::EMPTY_WORD;
 use crate::{
     Felt, Word,
-    hash::poseidon2::Poseidon2,
-    merkle::smt::{LEAF_DOMAIN, LeafIndex, MAX_LEAF_ENTRIES, SMT_DEPTH, SmtLeafError},
+    hash::eidos::{Eidos, domains::SMT_BUCKET_LEAF},
+    merkle::smt::{LeafIndex, MAX_LEAF_ENTRIES, SMT_DEPTH, SmtLeafError},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -182,13 +182,8 @@ impl SmtLeaf {
     pub fn hash(&self) -> Word {
         match self {
             SmtLeaf::Empty(_) => EMPTY_WORD,
-            SmtLeaf::Single((key, value)) => {
-                Poseidon2::merge_in_domain(&[*key, *value], LEAF_DOMAIN)
-            },
-            SmtLeaf::Multiple(kvs) => {
-                let elements: Vec<Felt> = kvs.iter().copied().flat_map(kv_to_elements).collect();
-                Poseidon2::hash_elements_in_domain(&elements, LEAF_DOMAIN)
-            },
+            SmtLeaf::Single(entry) => hash_entries(core::slice::from_ref(entry)),
+            SmtLeaf::Multiple(entries) => hash_entries(entries),
         }
     }
 
@@ -416,4 +411,14 @@ pub(crate) fn kv_to_elements((key, value): (Word, Word)) -> impl Iterator<Item =
     let value_elements = value.into_iter();
 
     key_elements.chain(value_elements)
+}
+
+fn hash_entries(entries: &[(Word, Word)]) -> Word {
+    let num_entries = u32::try_from(entries.len()).expect("SMT leaf entry count must fit in a u32");
+    let mut cv = Eidos::init_chaining_word(SMT_BUCKET_LEAF, num_entries);
+    for &(key, value) in entries {
+        let block = core::array::from_fn(|i| if i < 4 { key[i] } else { value[i - 4] });
+        cv = Eidos::compress(cv, block);
+    }
+    cv
 }

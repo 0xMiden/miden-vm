@@ -4,7 +4,10 @@
 
 ### Hash Functions
 
-The `miden-crypto` crate provides several hash functions. Some are "traditional" hash functions, like `BLAKE3`, which are optimized for out-of-STARK performance, while others are algebraic hash functions, like `Rescue Prime`, and are optimized for use inside a STARK. We benchmark these functions alongside constructions used by other proving systems:
+The `miden-crypto` crate provides several hash functions. Some are "traditional" hash functions,
+like `BLAKE3`, which are optimized for use outside a STARK. Others are algebraic hash functions,
+like `Rescue Prime`, which are designed for efficient use inside a STARK. We benchmark these
+functions alongside constructions used by other proving systems:
 
 * **BLAKE3** as specified [here](https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf) and implemented [here](https://github.com/BLAKE3-team/BLAKE3) (with a wrapper exposed via this crate).
 * **SHA3** as specified [here](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.202.pdf) and implemented [here](https://github.com/novifinancial/winterfell/blob/46dce1adf0/crypto/src/hash/sha/mod.rs).
@@ -57,7 +60,7 @@ Notes:
 
 We benchmark the digital signature algorithms provided by `miden-crypto`:
 
-* **Falcon512-Poseidon2** - Falcon512 signature scheme using Poseidon2 for message hashing
+* **Falcon512-Eidos** - Falcon512 signature scheme using Eidos for message hashing
 * **ECDSA over secp256k1** - Elliptic Curve Digital Signature Algorithm using Keccak256 for message hashing
 * **EdDSA over Ed25519** - Edwards-curve Digital Signature Algorithm using SHA-512 for message hashing
 
@@ -66,7 +69,7 @@ For each algorithm, we benchmark three core operations:
 2. **Signing** - Generating a signature for a message
 3. **Verification** - Verifying a signature against a message and public key
 
-#### Falcon512-Poseidon2
+#### Falcon512-Eidos
 
 | Hardware            | Key Generation | Signing | Verification |
 | ------------------- | :------------: | :-----: | :----------: |
@@ -88,7 +91,7 @@ For each algorithm, we benchmark three core operations:
 
 ### Sparse Merkle Tree
 
-We build cryptographic data structures incorporating these hash functions. What follows are benchmarks of operations on sparse Merkle trees (SMTs) which use the `Poseidon2` hash function. We perform a batched modification of 1,000 values in a tree with 1,000,000 leaves.
+We build cryptographic data structures incorporating these hash functions. What follows are benchmarks of operations on sparse Merkle trees (SMTs), which use Eidos. We perform a batched modification of 1,000 values in a tree with 1,000,000 leaves.
 
 ### Scenario 1: SMT Construction (1M pairs)
 
@@ -142,7 +145,7 @@ cargo bench hash
 
 #### Digital Signature Algorithm (DSA) Benchmarks
 
-To run the benchmarks for all DSA implementations (Falcon512-Poseidon2, ECDSA k256, and EdDSA), from the root directory run:
+To run the benchmarks for all DSA implementations (Falcon512-Eidos, ECDSA k256, and EdDSA), from the root directory run:
 
 ```
 cargo bench dsa

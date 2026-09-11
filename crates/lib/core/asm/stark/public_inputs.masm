@@ -39,17 +39,22 @@ pub proc compute_and_store_public_inputs_address(
 end
 
 #! Loads 8 base-field elements from memory, stores them as 8 extension-field elements, and leaves
-#! the base elements in the rate slots for a direct full-rate absorption.
+#! the base elements in the block slots for one complete Eidos compression.
 #!
-#! Input:  [R1, R2, C, dst, src, ...]
-#! Output: [R1', R2', C, dst + 16, src + 8, ...]
+#! Transcript absorption is handled separately (see `sys/vm/public_inputs::absorb_public_inputs`),
+#! so callers may treat the returned `A0`/`A1` words as disposable placeholders.
+#!
+#! Inputs:  [BLOCK_LO, BLOCK_HI, CV, ptr, ...]
+#! Outputs: [A0, A1, CV, ptr + 16, ..]
+#!
+#! where A0 and A1 are the original base element words (from advice).
 #!
 #! Invocation: exec
 pub proc load_base_store_extension_double_word_from_mem(
-    state: types::PoseidonState,
+    state: types::EidosState,
     dst: ptr<types::QuadFelt>,
     src: types::Address,
-) -> (types::PoseidonState, ptr<types::QuadFelt>, types::Address)
+) -> (types::EidosState, ptr<types::QuadFelt>, types::Address)
     dup.13 mem_loadw_le
     exec.constants::tmp1 mem_storew_le
     movup.13 add.4 movdn.13
