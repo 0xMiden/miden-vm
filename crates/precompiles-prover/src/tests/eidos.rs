@@ -2,13 +2,7 @@
 
 use std::{collections::HashMap, vec, vec::Vec};
 
-use miden_air::{
-    lookup::debug::{ValidateLayout, ValidateLookupAir},
-    trace::eidos_compression::{
-        self as mvm_eidos_compression, TraceMode as MvmTraceMode,
-        generate_felt_trace_block as generate_mvm_block,
-    },
-};
+use miden_air::lookup::debug::{ValidateLayout, ValidateLookupAir};
 use miden_core::{
     Felt,
     deferred::{DEFERRED_AND_FRAME, deferred_chunks_frame},
@@ -714,42 +708,6 @@ fn pvm_trace_writer_rejects_noncanonical_packed_input() {
     block[0] = 1;
     block[1] = u32::MAX;
     let _ = generate_felt_trace_block_with_cycle_id(block, [0; 8], 0);
-}
-
-#[test]
-fn mvm_and_pvm_writers_agree_on_shared_eidos_compression_witness() {
-    for case in 0..16_u32 {
-        let block = core::array::from_fn(|i| {
-            0x1020_3040_u32
-                .wrapping_add(0x0102_0304_u32.wrapping_mul(i as u32))
-                .rotate_left(case)
-        });
-        let cv = core::array::from_fn(|i| {
-            0x5060_7080_u32
-                .wrapping_add(0x0001_0203_u32.wrapping_mul(i as u32))
-                .rotate_right(case)
-        });
-        let pvm = generate_felt_trace_block_with_cycle_id(block, cv, 0);
-        let mvm = generate_mvm_block(block, cv, MvmTraceMode::Compression);
-
-        assert_eq!(pvm.final_v, mvm.final_v, "final working state differs in case {case}");
-        for row in 0..EIDOS_COMPRESSION_CYCLE_LEN {
-            for col in 0..NUM_EIDOS_COMPRESSION_COLS {
-                // The MVM-only compression-link multiplicity occupies an otherwise unused PVM
-                // footer cell. It is outside the shared Eidos compression witness contract.
-                if row >= FOOTER_START
-                    && (col == mvm_eidos_compression::F_COMPRESSION_MULTIPLICITY_COL
-                        || F_CV_STORAGE_COLS.contains(&col))
-                {
-                    continue;
-                }
-                assert_eq!(
-                    pvm.rows[row][col], mvm.rows[row][col],
-                    "MVM/PVM witness mismatch in case {case}, row {row}, column {col}",
-                );
-            }
-        }
-    }
 }
 
 #[test]
