@@ -58,8 +58,13 @@ end
 #! claims_ptr must point to a word-aligned buffer with room for num_claims words. The buffer must
 #! not overlap the recursive verifiers' working memory.
 #!
+#! Fails if the claim count is invalid, the claim-list hash does not match, or an MVM or PVM
+#! proof is invalid or has a conjectured security level below MIN_SECURITY_BITS.
+#!
 #! Inputs:  [claims_ptr, num_claims, CLAIMS_COMMITMENT, ...]
 #! Outputs: [...]
+#!
+#! Invocation: exec
 pub proc verify_batch(claims_ptr: ptr<word>, num_claims: u32, claims_commitment: word)
     movdn.5
     u32assert

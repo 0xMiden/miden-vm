@@ -122,16 +122,7 @@ async fn batch_root_and_response_checks() {
     .unwrap()
     .execute_sync(&program, &mut host)
     .expect_err("accepted a claim list with the wrong public hash");
-    assert!(
-        matches!(
-            error,
-            ExecutionError::OperationError {
-                err: OperationError::FailedAssertion { .. },
-                ..
-            }
-        ),
-        "{error}",
-    );
+    assert_failed_assertion(error);
 
     // Three valid claims must fail the even-count requirement.
     let (stack_inputs, advice_inputs) = batch_inputs(&core_lib, &[(&plain, &plain_claim); 3]);
@@ -140,16 +131,7 @@ async fn batch_root_and_response_checks() {
             .unwrap()
             .execute_sync(&program, &mut host)
             .expect_err("accepted an odd number of claims");
-    assert!(
-        matches!(
-            error,
-            ExecutionError::OperationError {
-                err: OperationError::FailedAssertion { .. },
-                ..
-            }
-        ),
-        "{error}",
-    );
+    assert_failed_assertion(error);
 
     // With only TRUE roots, the batch needs no PVM proof. This host has no request handler.
     let (stack_inputs, advice_inputs) = batch_inputs(&core_lib, &[(&plain, &plain_claim); 2]);
@@ -217,6 +199,11 @@ fn assert_rejects_pvm_response(
             .execute_sync(program, &mut host)
             .expect_err("accepted a PVM proof of different deferred work");
     assert_eq!(requests.load(Ordering::Relaxed), 1, "MASM did not receive the PVM response");
+    assert_failed_assertion(error);
+}
+
+#[track_caller]
+fn assert_failed_assertion(error: ExecutionError) {
     assert!(
         matches!(
             error,
