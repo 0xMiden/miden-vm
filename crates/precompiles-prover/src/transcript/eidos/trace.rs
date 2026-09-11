@@ -10,6 +10,7 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_crypto::hash::eidos::Eidos;
+use miden_precompiles_air::primitives::byte_pair_lut::eidos::Rotation;
 
 use super::compression::{
     layout::{BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, NUM_COLS as NUM_EIDOS_COMPRESSION_COLS},
@@ -219,8 +220,11 @@ impl ByteLookupRecorder for EidosCompressionLookupCounter<'_> {
             EidosCompressionByteLookup::And8 => {
                 self.requires.require(BytePairOp::And, lhs, rhs) as u32
             },
-            EidosCompressionByteLookup::Rotation { rotation, byte } => {
-                self.requires.require_eidos_rotation(rotation, byte, lhs, rhs)
+            EidosCompressionByteLookup::Rot12 { byte_position } => {
+                self.requires.require_eidos_rotation(Rotation::Rot12, byte_position, lhs, rhs)
+            },
+            EidosCompressionByteLookup::Rot7 { byte_position } => {
+                self.requires.require_eidos_rotation(Rotation::Rot7, byte_position, lhs, rhs)
             },
         };
         debug_assert_eq!(expected, result);

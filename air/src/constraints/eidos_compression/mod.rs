@@ -124,6 +124,17 @@ pub mod core {
             provider_values,
         };
     }
+
+    /// One-cycle witness encoding for the shared compression layout.
+    #[doc(hidden)]
+    pub mod trace {
+        #[cfg(any(test, feature = "testing"))]
+        pub use super::super::trace::write_core_felt_footer_rows;
+        pub use super::super::trace::{
+            ByteLookupRecorder, EidosCompressionByteLookup, EidosCompressionFeltRow,
+            retag_felt_trace_block_cycle_id, write_core_felt_trace_block_into_zeroed_with_lookups,
+        };
+    }
 }
 
 /// Test-only access to the shared compression constraints.
