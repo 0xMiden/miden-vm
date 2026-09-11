@@ -8,6 +8,8 @@
 ### Per-AIR heights remain in the generic 16-cell array, in ChipletAir::all()
 ### order; the PVM wrapper supplies the relation count and that shared base.
 
+use miden::core::stark::types
+
 ### 8 felts: 3225432064..3225432072.
 const PUBLIC_INPUTS_PTR = 3225432064
 
@@ -98,4 +100,3 @@ end
 pub proc preprocessed_com_ptr() -> types::Address
     push.PREPROCESSED_COM_PTR
 end
-use miden::core::stark::types
