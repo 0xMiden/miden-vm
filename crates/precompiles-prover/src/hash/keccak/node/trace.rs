@@ -51,9 +51,8 @@ use crate::{
 /// One Keccak invocation as seen by this chiplet — everything bundled
 /// into one transcript-DAG node.
 ///
-/// `d` and `h_input_chunks` come from elsewhere (the sponge's reference and
-/// the chunk chiplet's Eidos absorption respectively); see
-/// the design notes for how they line up with the buses.
+/// `d` and `h_input_chunks` come from the sponge's reference and the chunk chiplet's Eidos
+/// absorption, respectively.
 #[derive(Debug, Clone)]
 pub struct KeccakNodeInvocation {
     /// Message byte length.
@@ -106,9 +105,7 @@ impl KeccakNodeInvocation {
 /// invocations. One row per record (interning handled at the
 /// accumulator); trailing rows up to the next power of two are
 /// inactive padding. `out_mult` is a plain consumer count, pinned to
-/// the `Binding` consumer count by bus balance (no range check — see
-/// the design notes), so padding rows (`out_mult = 0`) touch
-/// no bus.
+/// the `Binding` consumer count by bus balance. Padding rows use `out_mult = 0` and touch no bus.
 pub fn generate_trace(requires: KeccakNodeRequires) -> RowMajorMatrix<Felt> {
     let active_rows = requires.total_rows() as usize;
     let height = active_rows.next_power_of_two().max(2);
@@ -122,10 +119,8 @@ pub fn generate_trace(requires: KeccakNodeRequires) -> RowMajorMatrix<Felt> {
     RowMajorMatrix::new(trace, NUM_MAIN_COLS)
 }
 
-/// Older entry-point used by the standalone keccak-node tests, which
-/// build [`KeccakNodeInvocation`]s by hand without the chunk / sponge /
-/// Eidos stack (the AIR's local constraints + LogUp σ recurrence are
-/// agnostic to where the digest bytes come from).
+/// Generates a trace from explicit invocations for standalone keccak-node tests. The local AIR
+/// constraints do not depend on which higher-level component supplied the digest bytes.
 pub fn generate_trace_from_invocations(
     invocations: &[KeccakNodeInvocation],
 ) -> RowMajorMatrix<Felt> {

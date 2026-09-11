@@ -32,8 +32,8 @@ use crate::{
             sponge::trace::SpongeSeqId,
         },
     },
-    logup::{NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
-    transcript::eidos::trace::AbsorptionId,
+    logup::{NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
+    transcript::eidos::trace::testing::forged_absorption_id,
 };
 
 // HELPERS
@@ -46,7 +46,7 @@ fn check_with_invocations(_seed: u64, invocations: &[KeccakNodeInvocation]) {
 
 /// Build a single-invocation example anchored at the row-0 origin. The
 /// concrete `d` / `h_input_chunks` values are arbitrary — `check_constraints`
-/// runs the AIR's local constraints + LogUp σ recurrence, both of
+/// runs the AIR's local constraints plus the centered LogUp recurrence, both of
 /// which are agnostic to the digest bytes (cross-chiplet content
 /// consistency lives at the integration-test layer).
 fn anchored_inv(seed: u64, len_bytes: u32) -> KeccakNodeInvocation {
@@ -56,9 +56,9 @@ fn anchored_inv(seed: u64, len_bytes: u32) -> KeccakNodeInvocation {
         d: core::array::from_fn(|_| rng.random()),
         h_input_chunks: core::array::from_fn(|_| Felt::new(rng.random()).unwrap()),
         chunk_seq_id_head: ChunkSeqId::forged(0),
-        absorption_id_chunks: AbsorptionId::forged(0),
-        absorption_id_digest_chunks: AbsorptionId::forged(100),
-        absorption_id_keccak: AbsorptionId::forged(101),
+        absorption_id_chunks: forged_absorption_id(0),
+        absorption_id_digest_chunks: forged_absorption_id(100),
+        absorption_id_keccak: forged_absorption_id(101),
         sponge_seq_id_head: SpongeSeqId::forged(0),
         out_mult: 1,
     }
@@ -77,13 +77,13 @@ fn next_inv(prev: &KeccakNodeInvocation, seed: u64, len_bytes: u32) -> KeccakNod
         chunk_seq_id_head: ChunkSeqId::forged(
             prev.chunk_seq_id_head.seq() + prev.n_chunks() as u32,
         ),
-        absorption_id_chunks: AbsorptionId::forged(
+        absorption_id_chunks: forged_absorption_id(
             prev.absorption_id_chunks.as_u32() + prev.n_chunks() as u32,
         ),
-        absorption_id_digest_chunks: AbsorptionId::forged(
+        absorption_id_digest_chunks: forged_absorption_id(
             prev.absorption_id_digest_chunks.as_u32() + 1000,
         ),
-        absorption_id_keccak: AbsorptionId::forged(prev.absorption_id_keccak.as_u32() + 1000),
+        absorption_id_keccak: forged_absorption_id(prev.absorption_id_keccak.as_u32() + 1000),
         sponge_seq_id_head: SpongeSeqId::forged(
             prev.sponge_seq_id_head.seq() + 32 * prev.n_sponge_perms() as u32,
         ),
@@ -124,16 +124,14 @@ fn lifted_air_validates_and_layout_matches_spec() {
     assert_eq!(layout.num_public_values, NUM_PUBLIC_VALUES);
     assert_eq!(layout.permutation_width, NUM_AUX_COLS);
     assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
-    assert_eq!(layout.num_permutation_values, NUM_SIGMA_VALUES);
+    assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
     assert_eq!(layout.num_periodic_columns, 0);
 }
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // Flattened via `frac_col!` into 9 aux columns (col 0 the gated
-    // running-sum anchor alone, the rest each a pair of at-most-two
-    // fractions), so every closing constraint stays at degree ≤ 3 →
-    // log_quotient_degree = 1.
+    // The 7-column packing leaves columns 0 and 2 as singletons and pairs the remaining fractions.
+    // Every closing constraint therefore stays at degree ≤ 3 → log_quotient_degree = 1.
     let air = KeccakNodeAir;
     assert_eq!(crate::tests::log_quotient_degree(&air), 1);
 }

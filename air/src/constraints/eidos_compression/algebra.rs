@@ -20,7 +20,7 @@ pub(super) fn pack_pair<E: PrimeCharacteristicRing>(lo: E, hi: E) -> E {
 }
 
 /// Sum of the four B input words represented by one row's rotation-input byte fields.
-pub(super) fn sum_input_b<E, A>(at: A) -> E
+pub fn sum_input_b<E, A>(at: A) -> E
 where
     E: PrimeCharacteristicRing,
     A: Fn(usize) -> E,
@@ -55,7 +55,7 @@ where
 ///
 /// For lanes four through seven the expression is the fused B input. One byte coordinate per lane
 /// is reserved as the footer correction. All eight encodings remain linear in committed cells.
-pub(super) fn universal_cv_word<E, A>(at: A, idx: usize) -> E
+pub fn universal_cv_word<E, A>(at: A, idx: usize) -> E
 where
     E: PrimeCharacteristicRing,
     A: Fn(usize) -> E,
@@ -64,7 +64,7 @@ where
         - cv_storage_offset::<E>(idx)
 }
 
-pub(super) fn cv_word_base<E, A>(at: &A, idx: usize) -> E
+pub fn cv_word_base<E, A>(at: &A, idx: usize) -> E
 where
     E: PrimeCharacteristicRing,
     A: Fn(usize) -> E,
@@ -89,7 +89,7 @@ where
     }
 }
 
-pub(super) fn cv_storage_coefficient<E: PrimeCharacteristicRing>(idx: usize) -> E {
+pub fn cv_storage_coefficient<E: PrimeCharacteristicRing>(idx: usize) -> E {
     if idx < NUM_G {
         E::from_u64(1u64 << 32)
     } else {
@@ -97,7 +97,7 @@ pub(super) fn cv_storage_coefficient<E: PrimeCharacteristicRing>(idx: usize) -> 
     }
 }
 
-pub(super) fn cv_storage_offset<E: PrimeCharacteristicRing>(idx: usize) -> E {
+pub fn cv_storage_offset<E: PrimeCharacteristicRing>(idx: usize) -> E {
     match idx {
         0..NUM_G => E::from_u32(EIDOS_COMPRESSION_IV[idx]),
         NUM_G..8 => E::ZERO,

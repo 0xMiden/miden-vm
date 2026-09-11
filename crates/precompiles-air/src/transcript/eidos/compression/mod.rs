@@ -1,11 +1,9 @@
-//! PVM-owned 32-row Eidos compression core.
+//! PVM adapter for the shared 32-row Eidos compression core.
 //!
-//! The PVM embeds this core in a wider transcript trace and uses a digest footer instead of the
-//! Miden VM's controller and AEAD interface. It shares the compression primitive and byte-pair
-//! table semantics with the VM. A differential test evaluates the common constraints against the
-//! same witness rows in both AIRs.
+//! The PVM embeds the shared core in a wider transcript trace and uses a digest footer instead of
+//! the Miden VM's controller and AEAD interface. This module defines the PVM-specific lookup
+//! namespace, trace writer, and packed-digest binding.
 
-mod algebra;
 pub(crate) mod constraints;
 #[cfg(test)]
 mod constraints_tests;
@@ -14,15 +12,11 @@ pub mod layout;
 #[cfg(test)]
 mod layout_tests;
 mod lookup;
-mod model;
-mod periodic;
-mod schedule;
-pub(crate) mod selectors;
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub mod testing;
 #[doc(hidden)]
 pub mod trace;
 
-pub(super) use algebra::universal_cv_word;
-pub(super) use lookup::{
-    EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, EidosCompressionCols, emit_lookup_columns,
-};
-pub(crate) use periodic::{NUM_PERIODIC_COLUMNS, get_periodic_column_values};
+pub(super) use lookup::{EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, emit_lookup_columns};
+pub(super) use miden_air::eidos_compression::core::EidosCompressionCols;

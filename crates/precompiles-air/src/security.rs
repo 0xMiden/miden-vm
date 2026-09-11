@@ -12,10 +12,7 @@ pub use miden_air::security::{
     AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
     SecurityTerm,
 };
-use miden_air::{
-    MidenAir,
-    security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT},
-};
+use miden_air::security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT};
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, QuadFelt},
@@ -32,10 +29,7 @@ use crate::{
     primitives::byte_pair_lut::BytePairLutAir,
     relations::MAX_MESSAGE_WIDTH,
     stark_config::{LOG_BLOWUP, LOG_FOLDING_ARITY},
-    transcript::{
-        eidos::{EidosCompressionInterfaceAir, EidosCompressionNarrowAir},
-        eval::TranscriptEvalAir,
-    },
+    transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
 
@@ -49,22 +43,22 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 
 /// Shape of the chiplet multi-AIR statement used by the security estimator.
 ///
-/// `air_shape_matches_symbolic` checks this stored value against the current chiplet AIRs.
+/// This stored value must equal the shape returned by [`derive_air_shape`].
 pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 725,
+    num_composed_constraints: 660,
     max_constraint_degree: 5,
     max_combo: NUM_OOD_POINTS,
-    num_deep_terms: Some(922),
+    num_deep_terms: Some(802),
     lookup: LookupShape {
-        fractions_per_row: 287,
+        fractions_per_row: 260,
         max_message_width: 18,
     },
 };
 
 /// Computes the AIR shape by symbolically evaluating every chiplet AIR.
 ///
-/// Tests compare [`AIR_SHAPE`] with this result. The symbolic pass allocates and evaluates every
-/// chiplet AIR, so [`security_report`] uses the checked constant instead of calling this function.
+/// This allocating pass supports validation and tooling. [`security_report`] uses the stored
+/// [`AIR_SHAPE`] constant.
 pub fn derive_air_shape() -> AirShape {
     let airs = ChipletAir::all();
     let num_airs = airs.len();
@@ -199,8 +193,8 @@ pub const LOOKUP_POW_BITS: u32 = 0;
 /// Number of one-time lookup fractions added at the PVM boundary by the fixed `UintVal` and
 /// `EcGroup` messages.
 ///
-/// `fixed_boundary_fraction_count` derives this value from the fixed messages. A test below checks
-/// that the descriptor constant remains equal to the derived count.
+/// `fixed_boundary_fraction_count` derives this value from the fixed messages; the descriptor
+/// constant must equal the derived count.
 pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 8;
 
 /// The configured challenge-field bound less the lookup round's coefficient, in fixed point.
@@ -221,8 +215,7 @@ pub const DEEP_BASE: u64 = CHALLENGE_FIELD_BITS - DEEP_COEFFICIENT;
 /// blowup, in fixed point.
 ///
 /// The common MASM estimator uses the whole-bit floor of this value when proving that FRI folding
-/// cannot determine the result. Drift tests keep the MASM constant used by that proof synchronized
-/// with this value.
+/// cannot determine the result. Its `FRI_FOLDING_BASE_BITS` constant must equal that floor.
 pub const FOLDING_BASE: u64 =
     CHALLENGE_FIELD_BITS - FOLDING_COEFFICIENT - fixed::from_bits(LOG_BLOWUP as u32);
 
@@ -254,13 +247,9 @@ fn fractions_per_row_of(air: ChipletAir) -> usize {
 
     match air {
         ChipletAir::ChunkNodeSponge => shape_of(ChunkNodeSpongeAir),
-        ChipletAir::EidosCompression => {
-            shape_of(EidosCompressionInterfaceAir) + shape_of(EidosCompressionNarrowAir)
-        },
+        ChipletAir::EidosCompression => shape_of(EidosCompressionAir),
         ChipletAir::KeccakRound => shape_of(KeccakRoundAir),
-        ChipletAir::BytePairAnd8 => {
-            shape_of(BytePairLutAir) + MidenAir::And8Lookup.column_shape().iter().sum::<usize>()
-        },
+        ChipletAir::BytePairLut => shape_of(BytePairLutAir),
         ChipletAir::TranscriptEval => shape_of(TranscriptEvalAir),
         ChipletAir::UintStoreMul => shape_of(UintStoreMulAir),
         ChipletAir::UintAdd => shape_of(UintAddAir),
@@ -410,7 +399,7 @@ mod tests {
         assert_eq!(
             fixed_boundary_fraction_count(),
             u64::from(FIXED_BOUNDARY_LOOKUP_TERMS),
-            "fixed boundary shape moved"
+            "fixed boundary shape mismatch"
         );
     }
 
@@ -423,10 +412,10 @@ mod tests {
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
         const SECURITY_CAP_FP: u64 = 8_257_536;
-        const LOOKUP_BASE_FP: u64 = 7_570_268;
-        const COMPOSITION_TERM_FP: u64 = 7_765_893;
+        const LOOKUP_BASE_FP: u64 = 7_579_610;
+        const COMPOSITION_TERM_FP: u64 = 7_774_774;
         const OOD_BASE_FP: u64 = 8_204_623;
-        const DEEP_BASE_FP: u64 = 7_743_166;
+        const DEEP_BASE_FP: u64 = 7_756_350;
         const FOLDING_BASE_FP: u64 = 8_022_589;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
@@ -486,12 +475,12 @@ mod tests {
             assert_eq!(
                 report.security_level(),
                 expected_level,
-                "level moved at log height {log_height}"
+                "unexpected level at log height {log_height}"
             );
             assert_eq!(
                 report.binding_term().label,
                 expected_binding,
-                "binding round moved at log height {log_height}"
+                "unexpected binding round at log height {log_height}"
             );
         }
     }
@@ -507,32 +496,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_177_010, 7_765_893, 7_825_002, 8_257_536, 7_891_517, 6_335_399, 8_257_536],
+                [7_186_348, 7_774_774, 7_825_002, 8_257_536, 7_891_517, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 16),
-                [6_521_691, 7_765_893, 7_170_620, 8_257_536, 7_236_157, 6_335_399, 8_257_536],
+                [6_531_033, 7_774_774, 7_170_620, 8_257_536, 7_236_157, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 19),
-                [6_325_083, 7_765_893, 6_974_013, 8_257_536, 7_039_549, 6_335_399, 8_257_536],
+                [6_334_425, 7_774_774, 6_974_013, 8_257_536, 7_039_549, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_259_547, 7_765_893, 6_908_477, 8_257_536, 6_974_013, 6_335_399, 8_257_536],
+                [6_268_889, 7_774_774, 6_908_477, 8_257_536, 6_974_013, 6_335_399, 8_257_536],
                 95,
             ),
             (
                 (27, 17, 12, 4, 24),
-                [5_997_403, 7_765_893, 6_646_333, 8_257_536, 6_711_869, 6_335_399, 8_257_536],
+                [6_006_745, 7_774_774, 6_646_333, 8_257_536, 6_711_869, 6_335_399, 8_257_536],
                 91,
             ),
             (
                 (7, 0, 0, 0, 16),
-                [6_521_691, 7_765_893, 7_170_620, 7_743_166, 6_974_013, 1_353_667, 8_257_536],
+                [6_531_033, 7_774_774, 7_170_620, 7_756_350, 6_974_013, 1_353_667, 8_257_536],
                 20,
             ),
         ];
@@ -556,12 +545,12 @@ mod tests {
             assert_eq!(
                 (*report.terms()).map(|term| term.bits),
                 rounds,
-                "round bits moved at {params:?}, log height {log_height}"
+                "round-bit mismatch at {params:?}, log height {log_height}"
             );
             assert_eq!(
                 report.security_level(),
                 level,
-                "level moved at {params:?}, log height {log_height}"
+                "unexpected level at {params:?}, log height {log_height}"
             );
         }
     }

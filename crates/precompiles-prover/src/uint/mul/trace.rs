@@ -340,7 +340,7 @@ pub(crate) fn op_block(
 ///
 /// The same pass routes each block's store demand (the convolution
 /// operands `a` / `b` / modulus consume the raw `UintLimbs` view, the
-/// linear `c` / `r` the 4×32 `UintVal` view — run it before the store's
+/// linear `c` / `r` the complete 8×32-bit `UintVal` view — run it before the store's
 /// own trace reads its ledger) and drives the `Range16` demand the
 /// chiplet consumes into `bpl`: the 17 `q` limbs, the 62 γ halves and
 /// the two κ cells per op. Padding blocks are act-gated and consume
@@ -388,7 +388,7 @@ pub(crate) fn build_aux(
     challenges: &[QuadFelt],
 ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
     // Cols 0–2: LogUp running sum + the two fraction columns.
-    let (logup, sigma) = build_logup_aux_trace(&UintMulAir, main, challenges);
+    let (logup, normalized_sum) = build_logup_aux_trace(&UintMulAir, main, challenges);
     let logup_width = logup.width();
     let n = main.height();
     let beta = challenges[1];
@@ -468,5 +468,5 @@ pub(crate) fn build_aux(
         s_reg = s_reg * keep + build;
     }
 
-    (RowMajorMatrix::new(data, AUX_WIDTH), sigma)
+    (RowMajorMatrix::new(data, AUX_WIDTH), normalized_sum)
 }

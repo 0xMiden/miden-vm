@@ -13,10 +13,7 @@
 use std::{collections::HashMap, format, string::String, vec, vec::Vec};
 
 use k256::{ProjectivePoint, Scalar, elliptic_curve::sec1::ToSec1Point};
-use miden_air::{
-    lookup::Challenges,
-    trace::and8_lookup::{AND8_LOOKUP_TRACE_HEIGHT, NUM_AND8_LOOKUP_COLS},
-};
+use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
     field::QuadFelt,
@@ -26,16 +23,16 @@ use miden_lifted_air::{MultiAir, ProverStatement, ReductionError, Statement};
 use miden_lifted_stark::{Preprocessed, ProverInstance, VerifierInstance};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
-// `sigma_sum` closes the subset `MultiAir`'s cross-AIR bus identity for the
-// (ignored) prove round-trip.
+// The subset MultiAir closes its trace-length-weighted bus identity during the ignored prove
+// round-trip.
 use crate::logup::NUM_PUBLIC_VALUES;
 use crate::{
-    composite::extract_band,
     ec::{
         COL_IS_CERT, EcRequire,
         add::{
-            CELL_R, COL_CANCEL, COL_DBL, COL_GEN, COL_MINTS, COL_PAI_P, COL_PAI_Q, EcGroupAddAir,
-            NUM_MAIN_COLS as ADD_COLS, PERIOD, ROW_RES,
+            CELL_R, COL_CANCEL, COL_DBL, COL_GEN, COL_MINTS, COL_PAI_P, COL_PAI_Q, COL_RP_HI,
+            COL_RP_LO, COL_RQ_HI, COL_RQ_LO, EcGroupAddAir, NUM_MAIN_COLS as ADD_COLS, PERIOD,
+            ROW_RES, ROW_TERM,
             trace::{EcAddRequires, generate_trace as ec_add_trace},
         },
         point_store_groups::{
@@ -47,7 +44,7 @@ use crate::{
     math::{U256, from_hex},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::{ChipletAir, byte_pair_and8_trace},
+    session::ChipletAir,
     stark_config::{test_challenger, test_config},
     tests::bus_balance::fold_balance,
     uint::{
@@ -148,12 +145,7 @@ impl EcStack {
         let uint = uint_store_mul_trace(self.store, self.muls, &mut bpl);
         let ec_points_groups = ec_points_groups_trace(self.ec);
         let bpl = bpl_trace(bpl);
-        let and8 = RowMajorMatrix::new(
-            vec![Felt::ZERO; AND8_LOOKUP_TRACE_HEIGHT * NUM_AND8_LOOKUP_COLS],
-            NUM_AND8_LOOKUP_COLS,
-        );
-        let byte_pair_and8 = byte_pair_and8_trace(bpl, and8);
-        EcStackTraces([byte_pair_and8, uint, add, ec_points_groups, ec_add])
+        EcStackTraces([bpl, uint, add, ec_points_groups, ec_add])
     }
 }
 
@@ -164,7 +156,7 @@ struct EcStackTraces([RowMajorMatrix<Felt>; NUM_STACK]);
 /// The subset's AIRs as [`ChipletAir`] variants, in [`NUM_STACK`] order.
 fn stack_airs() -> [ChipletAir; NUM_STACK] {
     [
-        ChipletAir::BytePairAnd8,
+        ChipletAir::BytePairLut,
         ChipletAir::UintStoreMul,
         ChipletAir::UintAdd,
         ChipletAir::EcPointStoreGroups,
@@ -173,11 +165,10 @@ fn stack_airs() -> [ChipletAir; NUM_STACK] {
 }
 
 /// The subset as a [`MultiAir`] over the five [`stack_airs`] in
-/// [`NUM_STACK`] order, closing the same cross-AIR `Σ σ = 0` bus identity
-/// as the full [`ChipletMultiAir`](crate::session::ChipletMultiAir) — the
-/// subset is bus-closed, so the residue sum vanishes. Drives the
-/// [`prove_and_verify`](EcStackTraces::prove_and_verify) round-trip under
-/// 0.26's unified `ProverStatement` / `VerifierInstance` driver.
+/// [`NUM_STACK`] order, closing the same trace-length-weighted LogUp identity as the full
+/// [`ChipletMultiAir`](crate::session::ChipletMultiAir). The subset is bus-closed, so the raw
+/// residue sum reconstructed from its normalized values vanishes. Drives the
+/// [`prove_and_verify`](EcStackTraces::prove_and_verify) round-trip.
 #[derive(Clone, Debug)]
 struct EcStackMultiAir {
     airs: Vec<ChipletAir>,
@@ -204,12 +195,15 @@ impl MultiAir<Felt, QuadFelt> for EcStackMultiAir {
         aux_values: &[&[QuadFelt]],
         log_trace_heights: &[u8],
     ) -> Result<Vec<QuadFelt>, ReductionError> {
-        let and8_height = Felt::new_unchecked(1u64 << log_trace_heights[0]);
-        let mut sigma = aux_values[0][0] + aux_values[0][1] * and8_height;
-        for values in &aux_values[1..] {
-            sigma += values[0];
-        }
-        Ok(vec![sigma])
+        let weighted_sum = aux_values
+            .iter()
+            .zip(log_trace_heights)
+            .map(|(values, &log_height)| {
+                values.iter().copied().sum::<QuadFelt>()
+                    * Felt::new_unchecked(1_u64 << u32::from(log_height))
+            })
+            .sum::<QuadFelt>();
+        Ok(vec![weighted_sum])
     }
 }
 
@@ -293,8 +287,7 @@ impl EcStackTraces {
 fn stack_residual(mains: &[&RowMajorMatrix<Felt>; NUM_STACK], rng: &mut impl Rng) -> usize {
     let challenges = Challenges::new(rand_qf(rng), rand_qf(rng), MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let mut net: HashMap<QuadFelt, (Felt, String)> = HashMap::new();
-    let bpl = extract_band(mains[0], 0..crate::primitives::byte_pair_lut::NUM_MAIN_COLS);
-    fold_balance(&BytePairLutAir, &bpl, &challenges, &mut net);
+    fold_balance(&BytePairLutAir, mains[0], &challenges, &mut net);
     fold_balance(&UintStoreMulAir, mains[1], &challenges, &mut net);
     fold_balance(&UintAddAir, mains[2], &challenges, &mut net);
     fold_balance(&EcPointStoreGroupsAir, mains[3], &challenges, &mut net);
@@ -623,8 +616,10 @@ fn empty_trace_holds() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // Flattened via `frac_col!` into 12 aux columns (col 0 the gated
-    // running-sum anchor alone, cols 8 and 11 each a lone leftover
+    assert_eq!(miden_lifted_air::BaseAir::<Felt>::width(&EcGroupAddAir), 21);
+    assert_eq!(miden_lifted_air::LiftedAir::<Felt, QuadFelt>::aux_width(&EcGroupAddAir), 11);
+    // Flattened via `frac_col!` into 11 aux columns (col 0 carries the `EcGroupAdd` provide alone,
+    // cols 8 and 10 each carry a lone leftover
     // fraction, the rest each a pair), so every closing constraint stays
     // at degree ≤ 3 → log_quotient_degree = 1.
     assert_eq!(crate::tests::log_quotient_degree(&EcGroupAddAir), 1);
@@ -815,12 +810,10 @@ fn forged_result_ptr_unbalances() {
 }
 
 // ============================================================================
-// Closure-certificate soundness. A fresh generic / double result uses one
-// `EcOnCurveCert` instead of the on-curve MAC trio. Its point-store row consumes the
-// certificate, provided only by a genuine mint op (gated `mints`, with
-// the case guard `mints ⟹ generic ∨ double` and the strict ptr ordering
-// `r > p ∧ r > q`). These check the two forgeries the cert's well-foundedness
-// rests on, plus that the cert consume is load-bearing.
+// Closure-certificate soundness. A fresh generic or double result consumes one
+// `EcOnCurveCert`, which only a minting operation may provide. The `mints` gate requires a generic
+// or double case and strict pointer ordering `r > p ∧ r > q`. These tests cover the two relevant
+// forgery attempts and verify that the result consumes the certificate.
 // ============================================================================
 
 #[test]
@@ -857,6 +850,28 @@ fn mint_result_equal_operand_rejected() {
     let mut forged = traces.ec_add_main().clone();
     tamper_cell(&mut forged, ROW_RES, CELL_R, g_pt.addr());
     check_ec_add(&forged);
+}
+
+#[test]
+fn ordering_limbs_on_both_rows_are_range_checked() {
+    let mut k1 = k1_stack();
+    k1.stack.require().add(k1.g_pt, k1.g2_pt, 0);
+    let traces = k1.stack.traces();
+    let mut rng = StdRng::seed_from_u64(0xecad_dc04);
+    traces.check();
+    assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
+
+    for (row, lo, hi) in [(ROW_RES, COL_RP_LO, COL_RP_HI), (ROW_TERM, COL_RQ_LO, COL_RQ_HI)] {
+        let mut forged = traces.ec_add_main().clone();
+        // Preserve lo + 2^16 * hi, so local ordering still holds. The range lookup
+        // must reject the out-of-range limbs for each operand independently.
+        forged.values[row * ADD_COLS + lo] += Felt::from(1u32 << 16);
+        forged.values[row * ADD_COLS + hi] -= Felt::from(1u8);
+        check_ec_add(&forged);
+        let mut mains = traces.mains();
+        mains[4] = &forged;
+        assert_ne!(stack_residual(&mains, &mut rng), 0, "ordering limbs on row {row}");
+    }
 }
 
 #[test]

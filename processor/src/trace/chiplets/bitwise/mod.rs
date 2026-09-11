@@ -5,9 +5,7 @@ use miden_air::{
     AeadStreamCols, BitwiseCols,
     trace::{
         CHIPLETS_STREAM_MODE_COL,
-        and8_lookup::{
-            BYTE_LOOKUP_COUNT_LEN, BYTE_LOOKUP_KIND_AND8, BYTE_PAIR_ROWS, byte_lookup_result,
-        },
+        and8_lookup::{BYTE_LOOKUP_COUNT_LEN, BytePairRelation, byte_pair_count_index},
         chiplets::{
             bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH},
             hasher::CONTROLLER_TRACE_ALIGNMENT,
@@ -461,12 +459,9 @@ fn count_and8_witness(counts: &mut [u64], bytes: [Felt; 12]) {
 }
 
 fn count_and8(counts: &mut [u64], a: u8, b: u8, result: u8) {
-    debug_assert_eq!(
-        byte_lookup_result(BYTE_LOOKUP_KIND_AND8, a, b),
-        result as u32,
-        "AEAD stream witness does not match the byte-pair table",
-    );
-    counts[BYTE_LOOKUP_KIND_AND8 * BYTE_PAIR_ROWS + ((a as usize) << 8) + b as usize] += 1;
+    debug_assert_eq!(a & b, result, "AEAD stream witness does not match the byte-pair table");
+    let count_index = byte_pair_count_index(BytePairRelation::CanonicalXor, a, b);
+    counts[count_index] += 1;
 }
 
 fn canonical_hi_quotient((lo, hi): (u32, u32)) -> Felt {

@@ -1,21 +1,19 @@
-//! Sponge program: 32-slot period encoded as 9 periodic columns.
+//! Sponge program: 32-slot period encoded as 11 periodic columns.
 //!
 //! Each period drives one Keccak permutation. The slot layout is:
 //!
 //! ```text
 //! [ 0, 17)  Rate XORin (lane i = p_idx, RC[i] provide on i ∈ [0, 24))
 //! [17, 25)  Capacity (lane i = p_idx, RC[i] provide on i ∈ [17, 24))
-//! [25, 26)  Lane-16 trailing-`0x80` row (Bitwise64 XOR with 0x80…00)
+//! [25, 26)  Lane-16 trailing-`0x80` row (byte-pair-verified XOR with 0x80…00)
 //! [26, 29)  Extra chunk-consume (last-block overshoot lanes)
 //! [29, 32)  NOP slack
 //! ```
-//!
-//! See the design notes for the design.
-//!
 //! Periodic columns:
 //!
 //! - `p_idx` — integer `[0, 32)`; degree-1 base for address expressions.
 //! - `p_first` — 1 iff `p_idx == 0`; row-0-of-period boundary.
+//! - `p_last` — 1 iff `p_idx == 31`; row-31-of-period boundary.
 //! - `p_rate_block` — 1 iff `p_idx ∈ [0, 17)`; rate XORin rows.
 //! - `p_capacity` — 1 iff `p_idx ∈ [17, 25)`; capacity rows.
 //! - `p_rc_active` — 1 iff `p_idx ∈ [0, 24)`; rows where the sponge provides `RC[p_idx]` to the
@@ -105,8 +103,7 @@ pub const NUM_RC: usize = 24;
 /// Standard FIPS 202 Keccak-f\[1600] round constants, indexed by round.
 ///
 /// Provided by the sponge to the round chiplet on Memory64 at IP
-/// `25 + n·3200 + r·128` for cycle `n`, round `r`. See the design notes
-/// (RC address algebra) and the design notes (sponge contract).
+/// `25 + n·3200 + r·128` for cycle `n`, round `r`.
 pub const KECCAK_RC: [u64; NUM_RC] = [
     0x0000_0000_0000_0001,
     0x0000_0000_0000_8082,

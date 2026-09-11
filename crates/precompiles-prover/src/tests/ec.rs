@@ -58,9 +58,8 @@ fn fold_balance<A>(
     for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
     let periodic = air.periodic_columns();
-    let combined = crate::tests::combined_lookup_main(air, main);
-    let lookup_main = combined.as_ref().unwrap_or(main);
-    let fractions = build_lookup_fractions(air, lookup_main, None, &periodic, challenges);
+    let preprocessed = air.preprocessed_trace();
+    let fractions = build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, challenges);
     for &(multiplicity, denom) in fractions.fractions() {
         *net.entry(denom).or_insert(Felt::ZERO) += multiplicity;
     }
@@ -167,8 +166,8 @@ fn check_groups(main: &RowMajorMatrix<Felt>) {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // Flattened via `frac_col!` into 5 aux columns (col 0 the gated
-    // running-sum anchor alone, col 1 a pair, cols 2-4 each a lone
+    // Flattened via `frac_col!` into 5 aux columns (col 0 carries the point binding alone, col 1 a
+    // pair, cols 2-4 each a lone
     // degree-3 membership MAC), so every closing constraint stays at
     // degree ≤ 3 → log_quotient_degree = 1.
     assert_eq!(crate::tests::log_quotient_degree(&EcPointStoreAir), 1);
@@ -221,10 +220,8 @@ fn ec_stores_hold_and_balance() {
 
 #[test]
 fn ec_store_ed25519_image_torsion_point() {
-    // The ed25519 SW image (the design notes) and its single
-    // rational 2-torsion point (A/3, 0): a finite point whose y is the
-    // stored zero — cleanly distinct from PAI — passing membership with
-    // w = y² = 0. Constants machine-verified against the map derivation.
+    // The ed25519 SW image and its single rational 2-torsion point (A/3, 0): a finite point whose y
+    // is the stored zero — cleanly distinct from PAI — passing membership with w = y² = 0.
     let mut rng = StdRng::seed_from_u64(0xec_25519);
     let bound = from_hex("7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEC");
     let a_w = from_hex("2AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA984914A144");
@@ -270,9 +267,8 @@ fn constrained_scalar_bound_balances() {
 
 #[test]
 fn forged_scalar_bound_unbalances() {
-    // A point row claiming a different scalar bound than its group's:
-    // every local constraint holds, but the 5-tuple EcGroup consume
-    // matches no provide.
+    // A point row claiming a different scalar bound than its group's: every local constraint
+    // holds, but its `EcGroup` consume matches no provide.
     let mut rng = StdRng::seed_from_u64(0xec_f5bad);
     let t = k1_fixture().traces();
     let mut forged = t.points.clone();

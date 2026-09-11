@@ -3,12 +3,6 @@
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use core::ops::Range;
 
-use miden_air::trace::and8_lookup::{
-    AND8_LOOKUP_TRACE_HEIGHT, BYTE_LOOKUP_COUNT_LEN, BYTE_LOOKUP_KIND_AND8, BYTE_LOOKUP_KIND_COUNT,
-    BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7, BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12,
-    BYTE_PAIR_ROWS, NUM_AND8_LOOKUP_COLS, RANGE_CHECK_COUNT_OFFSET, RANGE_CHECK_LOOKUP_COL,
-    byte_lookup_result,
-};
 use miden_core::{
     Felt, Word,
     deferred::EidosFrame,
@@ -16,6 +10,7 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_crypto::hash::eidos::Eidos;
+use miden_precompiles_air::primitives::byte_pair_lut::eidos::Rotation;
 
 use super::compression::{
     layout::{BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, NUM_COLS as NUM_EIDOS_COMPRESSION_COLS},
@@ -25,12 +20,16 @@ use super::compression::{
     },
 };
 use crate::{
+    primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp},
     relations::ProvideMult,
     transcript::eidos::{
-        COL_CHAIN_HEAD_ID, COL_IN_MULTIPLICITY, COL_IS_ABSORB, COL_OUT_MULTIPLICITY, NUM_MAIN_COLS,
-        digest::EidosDigest,
+        COL_CHAIN_HEAD_ID, COL_IN_MULTIPLICITY, COL_IS_CONTINUATION, COL_OUT_MULTIPLICITY,
+        NUM_MAIN_COLS, digest::EidosDigest,
     },
 };
+
+#[cfg(test)]
+pub(crate) mod testing;
 
 // ABSORPTION OUTPUT
 // ================================================================================================
@@ -42,11 +41,6 @@ pub struct AbsorptionId(u32);
 impl AbsorptionId {
     pub fn as_u32(self) -> u32 {
         self.0
-    }
-
-    #[cfg(test)]
-    pub(crate) fn forged(absorption_id: u32) -> Self {
-        Self(absorption_id)
     }
 }
 
@@ -72,10 +66,6 @@ impl AbsorptionSpan {
     pub fn tail(self) -> AbsorptionId {
         AbsorptionId(self.start + self.len - 1)
     }
-
-    pub fn n_cycles(self) -> u32 {
-        self.len
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -87,10 +77,6 @@ pub struct AbsorptionOutput {
 impl AbsorptionOutput {
     pub fn head(&self) -> AbsorptionId {
         self.span.head()
-    }
-
-    pub fn tail(&self) -> AbsorptionId {
-        self.span.tail()
     }
 }
 
@@ -196,34 +182,16 @@ impl EidosRequires {
             rec.out_mult.checked_add(1).expect("Eidos output multiplicity must fit in u32");
         Some(AbsorptionSpan::new(rec.range.clone()))
     }
-
-    pub fn lookup(&self, digest: EidosDigest) -> Option<AbsorptionSpan> {
-        self.by_digest
-            .get(&digest)
-            .map(|&idx| AbsorptionSpan::new(self.absorptions[idx].range.clone()))
-    }
-
-    /// Number of compressions allocated to surrounding transcript buses.
-    pub fn total_cycles(&self) -> u32 {
-        self.next_seq
-    }
 }
 
 // TRACE GENERATION
 // ================================================================================================
 
-/// The integrated PVM Eidos compression trace and its fixed byte-operation lookup trace.
-#[derive(Debug)]
-pub struct EidosTraceBundle {
-    pub compression: RowMajorMatrix<Felt>,
-    pub and8: RowMajorMatrix<Felt>,
-}
-
 #[derive(Debug)]
 struct CompressionCycle {
     in_mult: ProvideMult,
     out_mult: ProvideMult,
-    is_absorb: bool,
+    is_continuation: bool,
     chain_head_id: u32,
     block: [Felt; 8],
     cv_in: Word,
@@ -237,29 +205,29 @@ impl CompressionCycle {
         let col = |absolute: usize| absolute - NUM_EIDOS_COMPRESSION_COLS;
         meta[col(COL_IN_MULTIPLICITY)] = Felt::from(self.in_mult);
         meta[col(COL_OUT_MULTIPLICITY)] = Felt::from(self.out_mult);
-        meta[col(COL_IS_ABSORB)] = Felt::from_u8(self.is_absorb as u8);
+        meta[col(COL_IS_CONTINUATION)] = Felt::from_u8(self.is_continuation as u8);
         meta[col(COL_CHAIN_HEAD_ID)] = Felt::from(self.chain_head_id);
     }
 }
 
 struct EidosCompressionLookupCounter<'a> {
-    counts: &'a mut [u64],
+    requires: &'a mut BytePairLutRequires,
 }
 
 impl ByteLookupRecorder for EidosCompressionLookupCounter<'_> {
     fn record(&mut self, lookup: EidosCompressionByteLookup, lhs: u8, rhs: u8, result: u32) {
-        let kind = match lookup {
-            EidosCompressionByteLookup::And8 => BYTE_LOOKUP_KIND_AND8,
-            EidosCompressionByteLookup::Rot12 { byte } => {
-                BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12[byte]
+        let expected = match lookup {
+            EidosCompressionByteLookup::And8 => {
+                self.requires.require(BytePairOp::And, lhs, rhs) as u32
             },
-            EidosCompressionByteLookup::Rot7 { byte } => {
-                BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7[byte]
+            EidosCompressionByteLookup::Rot12 { byte_position } => {
+                self.requires.require_eidos_rotation(Rotation::Rot12, byte_position, lhs, rhs)
+            },
+            EidosCompressionByteLookup::Rot7 { byte_position } => {
+                self.requires.require_eidos_rotation(Rotation::Rot7, byte_position, lhs, rhs)
             },
         };
-        debug_assert_eq!(byte_lookup_result(kind, lhs, rhs), result);
-        let pair = ((lhs as usize) << 8) + rhs as usize;
-        self.counts[kind * BYTE_PAIR_ROWS + pair] += 1;
+        debug_assert_eq!(expected, result);
     }
 }
 
@@ -279,33 +247,112 @@ fn unpack_felts<const N: usize>(values: &[Felt]) -> [u32; N] {
     words
 }
 
-fn record_message_range_checks(counts: &mut [u64], block: [u32; 16]) {
+fn record_message_range_checks(requires: &mut BytePairLutRequires, block: [u32; 16]) {
     for word in block {
         for limb in [word as u16, (word >> 16) as u16] {
-            counts[RANGE_CHECK_COUNT_OFFSET + limb as usize] += 1;
+            requires.require_range16(limb);
         }
     }
 }
 
-fn build_and8_trace(counts: &[u64]) -> RowMajorMatrix<Felt> {
-    assert_eq!(counts.len(), BYTE_LOOKUP_COUNT_LEN);
-    let mut values = vec![Felt::ZERO; AND8_LOOKUP_TRACE_HEIGHT * NUM_AND8_LOOKUP_COLS];
-    for pair in 0..BYTE_PAIR_ROWS {
-        for kind in 0..BYTE_LOOKUP_KIND_COUNT {
-            let count = counts[kind * BYTE_PAIR_ROWS + pair];
-            assert!(count < Felt::ORDER_U64, "byte lookup multiplicity must be canonical");
-            values[pair * NUM_AND8_LOOKUP_COLS + kind] = Felt::new_unchecked(count);
-        }
-        let count = counts[RANGE_CHECK_COUNT_OFFSET + pair];
-        assert!(count < Felt::ORDER_U64, "range lookup multiplicity must be canonical");
-        values[pair * NUM_AND8_LOOKUP_COLS + RANGE_CHECK_LOOKUP_COL] = Felt::new_unchecked(count);
-    }
-    RowMajorMatrix::new(values, NUM_AND8_LOOKUP_COLS)
-}
-
-fn build_eidos_compression_traces(
+fn write_compression_cycle(
     cycles: &[CompressionCycle],
-) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+    physical_cycle_id: usize,
+    cycle_rows: &mut [[Felt; NUM_EIDOS_COMPRESSION_COLS]],
+    byte_pairs: &mut BytePairLutRequires,
+) {
+    let (block, cv) = if let Some(cycle) = cycles.get(physical_cycle_id) {
+        let block = unpack_felts::<16>(&cycle.block);
+        let cv = unpack_felts::<8>(cycle.cv_in.as_slice());
+        (block, cv)
+    } else {
+        ([0; 16], [0; 8])
+    };
+
+    record_message_range_checks(byte_pairs, block);
+    let mut recorder = EidosCompressionLookupCounter { requires: byte_pairs };
+    write_felt_trace_block_into_zeroed_with_lookups(
+        cycle_rows,
+        block,
+        cv,
+        physical_cycle_id as u64,
+        &mut recorder,
+    );
+}
+
+fn fill_compression_cycles_sequential(
+    cycles: &[CompressionCycle],
+    rows: &mut [[Felt; NUM_EIDOS_COMPRESSION_COLS]],
+    byte_pairs: &mut BytePairLutRequires,
+) {
+    for (physical_cycle_id, cycle_rows) in
+        rows.as_chunks_mut::<EIDOS_COMPRESSION_CYCLE_LEN>().0.iter_mut().enumerate()
+    {
+        write_compression_cycle(cycles, physical_cycle_id, cycle_rows, byte_pairs);
+    }
+}
+
+/// Each parallel split owns a dense byte-pair lookup accumulator. This minimum amortizes its
+/// initialization and reduction across enough compression cycles.
+#[cfg(feature = "concurrent")]
+const MIN_CYCLES_PER_PARALLEL_CHUNK: usize = 256;
+
+#[cfg(feature = "concurrent")]
+fn fill_compression_cycles_parallel(
+    cycles: &[CompressionCycle],
+    rows: &mut [[Felt; NUM_EIDOS_COMPRESSION_COLS]],
+    byte_pairs: &mut BytePairLutRequires,
+) {
+    use miden_crypto::parallel::*;
+
+    let cycle_count = rows.len() / EIDOS_COMPRESSION_CYCLE_LEN;
+    let cycles_per_chunk =
+        cycle_count.div_ceil(current_num_threads()).max(MIN_CYCLES_PER_PARALLEL_CHUNK);
+    let local_counts = rows
+        .par_chunks_mut(EIDOS_COMPRESSION_CYCLE_LEN * cycles_per_chunk)
+        .enumerate()
+        .par_fold_reduce(
+            BytePairLutRequires::new,
+            |mut counts, (chunk_idx, chunk)| {
+                for (cycle_in_chunk, cycle_rows) in
+                    chunk.as_chunks_mut::<EIDOS_COMPRESSION_CYCLE_LEN>().0.iter_mut().enumerate()
+                {
+                    let physical_cycle_id = chunk_idx * cycles_per_chunk + cycle_in_chunk;
+                    write_compression_cycle(cycles, physical_cycle_id, cycle_rows, &mut counts);
+                }
+                counts
+            },
+            |mut left, right| {
+                left.merge(right);
+                left
+            },
+        );
+    byte_pairs.merge(local_counts);
+}
+
+fn fill_compression_cycles(
+    cycles: &[CompressionCycle],
+    rows: &mut [[Felt; NUM_EIDOS_COMPRESSION_COLS]],
+    byte_pairs: &mut BytePairLutRequires,
+) {
+    #[cfg(feature = "concurrent")]
+    {
+        use miden_crypto::parallel::current_num_threads;
+
+        let cycle_count = rows.len() / EIDOS_COMPRESSION_CYCLE_LEN;
+        if cycle_count >= 2 * MIN_CYCLES_PER_PARALLEL_CHUNK && current_num_threads() > 1 {
+            fill_compression_cycles_parallel(cycles, rows, byte_pairs);
+            return;
+        }
+    }
+
+    fill_compression_cycles_sequential(cycles, rows, byte_pairs);
+}
+
+fn build_eidos_compression_trace(
+    cycles: &[CompressionCycle],
+    byte_pairs: &mut BytePairLutRequires,
+) -> RowMajorMatrix<Felt> {
     let real_cycles = cycles.len();
     let height = (real_cycles * EIDOS_COMPRESSION_CYCLE_LEN)
         .next_power_of_two()
@@ -314,38 +361,16 @@ fn build_eidos_compression_traces(
     let mut values = vec![Felt::ZERO; height * NUM_EIDOS_COMPRESSION_COLS];
     let (rows, remainder) = values.as_chunks_mut::<NUM_EIDOS_COMPRESSION_COLS>();
     debug_assert!(remainder.is_empty());
-    let mut counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
-
-    for (physical_cycle_id, cycle_rows) in
-        rows.as_chunks_mut::<EIDOS_COMPRESSION_CYCLE_LEN>().0.iter_mut().enumerate()
-    {
-        let (block, cv) = if let Some(cycle) = cycles.get(physical_cycle_id) {
-            let block = unpack_felts::<16>(&cycle.block);
-            let cv = unpack_felts::<8>(cycle.cv_in.as_slice());
-            (block, cv)
-        } else {
-            ([0; 16], [0; 8])
-        };
-
-        record_message_range_checks(&mut counts, block);
-        let mut recorder = EidosCompressionLookupCounter { counts: &mut counts };
-        write_felt_trace_block_into_zeroed_with_lookups(
-            cycle_rows,
-            block,
-            cv,
-            physical_cycle_id as u64,
-            &mut recorder,
-        );
-    }
+    fill_compression_cycles(cycles, rows, byte_pairs);
 
     debug_assert_eq!(cycle_count, rows.len() / EIDOS_COMPRESSION_CYCLE_LEN);
-    (
-        RowMajorMatrix::new(values, NUM_EIDOS_COMPRESSION_COLS),
-        build_and8_trace(&counts),
-    )
+    RowMajorMatrix::new(values, NUM_EIDOS_COMPRESSION_COLS)
 }
 
-pub fn generate_traces(requires: EidosRequires) -> EidosTraceBundle {
+pub(crate) fn generate_trace_with_byte_lookups(
+    requires: EidosRequires,
+    byte_pairs: &mut BytePairLutRequires,
+) -> RowMajorMatrix<Felt> {
     let cycle_count = requires.absorptions.iter().map(|rec| rec.blocks.len()).sum();
     let mut cycles = Vec::with_capacity(cycle_count);
 
@@ -358,7 +383,7 @@ pub fn generate_traces(requires: EidosRequires) -> EidosTraceBundle {
             cycles.push(CompressionCycle {
                 in_mult: rec.in_mult,
                 out_mult: rec.out_mult,
-                is_absorb: idx > 0,
+                is_continuation: idx > 0,
                 chain_head_id: rec.range.start,
                 block,
                 cv_in: cv,
@@ -369,7 +394,7 @@ pub fn generate_traces(requires: EidosRequires) -> EidosTraceBundle {
         debug_assert_eq!(EidosDigest(cv.into_elements()), rec.digest);
     }
 
-    let (eidos_compression, and8) = build_eidos_compression_traces(&cycles);
+    let eidos_compression = build_eidos_compression_trace(&cycles, byte_pairs);
     let height = eidos_compression.values.len() / eidos_compression.width;
     debug_assert_eq!(height % EIDOS_COMPRESSION_CYCLE_LEN, 0);
     debug_assert!(cycles.len() * EIDOS_COMPRESSION_CYCLE_LEN <= height);
@@ -392,14 +417,7 @@ pub fn generate_traces(requires: EidosRequires) -> EidosTraceBundle {
         }
     }
 
-    EidosTraceBundle {
-        compression: RowMajorMatrix::new(values, NUM_MAIN_COLS),
-        and8,
-    }
-}
-
-pub fn generate_trace(requires: EidosRequires) -> RowMajorMatrix<Felt> {
-    generate_traces(requires).compression
+    RowMajorMatrix::new(values, NUM_MAIN_COLS)
 }
 
 const _: () = assert!(EIDOS_COMPRESSION_CYCLE_LEN == 32);

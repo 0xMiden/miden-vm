@@ -27,7 +27,7 @@ std = [
     "miden-precompiles/std",
     "ruint/std",
 ]
-testing = []
+testing = ["miden-air/testing"]
 
 [dependencies]
 miden-air.workspace = true
@@ -41,4 +41,3 @@ ruint.workspace = true
 
 [dev-dependencies]
 miden-air = { workspace = true, features = ["testing"] }
-rand = { workspace = true, features = ["std_rng"] }

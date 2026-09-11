@@ -2,6 +2,8 @@
 
 use super::layout::*;
 
+const BYTE_SLOTS_PER_STEP: usize = NUM_G * BYTES_PER_WORD;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct LookupSlot<'a, T> {
     pub field0: &'a T,

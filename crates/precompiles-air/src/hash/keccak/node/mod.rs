@@ -28,9 +28,6 @@
 //! namespaces (chunk-tape, sponge rows). `absorption_id_chunks` is
 //! bus-pinned per row (`ChunkChain`) but not constrained across rows —
 //! Eidos is shared with other callers.
-//!
-//! See the design notes for the design and
-//! the design notes for the binding-bus model.
 
 use alloc::vec::Vec;
 use core::array;
@@ -47,13 +44,14 @@ use miden_precompiles::Keccak256Precompile;
 use crate::{
     hash::{chunk::ChunkChainMsg, keccak::sponge::KeccakSpongeMsg, memory64::Memory64Msg},
     logup::{
-        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES, frac_col,
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, frac_col,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
         binding::BindingMsg,
-        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg, initial_cv_from_frame},
+        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
+        initial_cv_from_frame,
     },
     utils::{current_main, next_main},
 };
@@ -146,8 +144,7 @@ pub const COL_H_KECCAK_END: usize = COL_H_KECCAK_BEGIN + NUM_HASH;
 
 /// Witnessed per-row count of downstream consumers of the
 /// `Binding(H_keccak, True, 0, 0)` provide — a plain count pinned to the
-/// consumer count by `Binding` bus balance (not range-checked; see
-/// the design notes) and pinned to 0 on inactive rows by
+/// consumer count by `Binding` bus balance (not range-checked) and pinned to 0 on inactive rows by
 /// `(1 − act) · out_mult = 0`. Lets a `KeccakNodeRequires` dedupe by
 /// Keccak digest and tally consumers without re-emitting the Binding
 /// tuple per consumer — true dedup, one row per digest at any count.
@@ -162,7 +159,7 @@ pub const NUM_MAIN_COLS: usize = COL_OUT_MULT + 1;
 /// Nine aux columns, flattened via `frac_col!` so every closing
 /// constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
 ///
-/// - col 0: `KeccakSponge` provide alone — the gated running-sum anchor.
+/// - col 0: `KeccakSponge` provide alone — the centered running-sum column.
 /// - col 1: `Binding(_, True, 0, 0)` provide + `ChunkChain` consume.
 /// - col 2: `EidosOut(H_input_chunks)` + the chunks-chain initial CV.
 /// - col 3/4: the four `Memory64` D-limb consumes, paired.
@@ -202,7 +199,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -280,9 +277,9 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
         // for the matching shared-namespace argument.
 
         // Phase 2: LogUp argument via the LogUp adapter.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -293,10 +290,6 @@ impl<LB> LookupAir<LB> for KeccakNodeAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -381,7 +374,7 @@ where
         let provides_deg = Deg { v: 1, u: 2 };
         let pair_deg = Deg { v: 3, u: 2 };
 
-        // col 0: KeccakSponge request alone — the gated running-sum anchor.
+        // col 0: KeccakSponge request alone — the centered running-sum column.
         frac_col!(
             builder,
             "handshake-and-chunks-digest",

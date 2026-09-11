@@ -17,6 +17,9 @@
 
 mod algebra;
 
+#[cfg(test)]
+mod test_support;
+
 pub(crate) mod layout;
 
 #[cfg(test)]
@@ -64,6 +67,75 @@ pub(crate) mod views;
 
 #[cfg(test)]
 mod views_tests;
+
+/// Shared 32-row Eidos compression arithmetization used by the MVM and PVM wrappers.
+///
+/// The shared layer excludes the MVM controller and AEAD relations and the PVM chaining interface.
+#[doc(hidden)]
+pub mod core {
+    pub use super::{
+        algebra::{
+            cv_storage_coefficient, cv_storage_offset, cv_word_base, sum_input_b, universal_cv_word,
+        },
+        constraints::{
+            FooterWords, enforce_footer_bridge, enforce_footer_cycle_advance,
+            enforce_footer_cycle_id_transition, enforce_footer_payload, enforce_footer_row_inputs,
+            enforce_footer_transition, enforce_footer_word_bindings, enforce_fused_rows,
+            footer_words, packed_footer_output,
+        },
+        lookup::{
+            EidosCompressionCols, LookupMultiplicitySign, NarrowLookupConfig, XorExpression,
+            emit_narrow_lookup_columns,
+        },
+        model::{initial_working_state, low_output},
+        periodic::get_periodic_column_values,
+        schedule::{FusedStep, fused_step_at},
+        selectors::EidosCompressionSelectors,
+    };
+
+    /// Physical columns and row schedule shared by both compression interfaces.
+    #[doc(hidden)]
+    pub mod layout {
+        pub use super::super::layout::{
+            BLOCK_PERIOD, BYTE_SLOT_WIDTH, BYTES_PER_WORD, F_B_SUM_CORRECTION_COL,
+            F_C_CANON_INV_COL, F_C_CANON_Z_COL, F_COMPRESSION_CYCLE_ID_COL, F_CV_B_STORAGE_BYTES,
+            F_CV_STORAGE_COLS, F_FOOTER_DATA_COLS, F_FUTURE_W_COLS, F_FUTURE_W_WORD_INDICES,
+            F_HIGH_EVEN_SLOT_BASE, F_HIGH_ODD_SLOT_BASE, F_MSG_WORD_SLOTS, F_OUTPUT_BASE_COL,
+            F_OUTPUT_EVEN_SLOT_BASE, F_OUTPUT_ODD_SLOT_BASE, F_R_CANON_INV_BASE_COL,
+            F_R_CANON_Z_BASE_COL, F_RANGE_NARROW_SLOTS, F_RANGE_SLOTS,
+            F_TOP_BIT_LOOKUP_BYTE_POSITION, F_TOP_BIT_MASK, F_TOP_BIT_SLOT_BASE_COL,
+            F_XOR_SLOT_BASE_COL, FOOTER_ROWS, FOOTER_START, FUSED_G_ROWS, FUSED_G_ROWS_PER_ROUND,
+            G_AC_BYTE_SLOT_BASE_COL, G_BD_ROT_SLOT_BASE_COL, G_COMPRESSION_CYCLE_ID_COL,
+            G_K2_BASE_COL, G_K3_BASE_COL, G_MSG_WORD_BASE_COL, MISSING_ROTATION_BYTE,
+            MISSING_ROTATION_G, NARROW_AUX_COLS, NUM_COLS, NUM_G, ROUNDS, RowKind, byte_slot_base,
+            footer_future_w_col, footer_future_w_indices, footer_message_word_index,
+            footer_msg_word_col, footer_output_col, footer_r_col, footer_range_limb_is_high,
+            footer_range_limb_word_index, footer_range_slot_col, footer_xor_slot_col,
+            g_ac_byte_slot_col, g_bd_rot_result_col, g_bd_rot_slot_col, g_k3_col, g_msg_word_col,
+            is_missing_rotation_result, row_kind,
+        };
+    }
+
+    /// Byte-pair rotation relations shared by the MVM and PVM lookup tables.
+    #[doc(hidden)]
+    pub mod rotation_lookup {
+        pub use crate::constraints::and8_lookup::eidos::{
+            BytePairRelation, NUM_RELATIONS, Rotation, contribution, denormalize, normalize,
+            provider_values,
+        };
+    }
+
+    /// One-cycle witness encoding for the shared compression layout.
+    #[doc(hidden)]
+    pub mod trace {
+        #[cfg(any(test, feature = "testing"))]
+        pub use super::super::trace::write_core_felt_footer_rows;
+        pub use super::super::trace::{
+            ByteLookupRecorder, EidosCompressionByteLookup, EidosCompressionFeltRow,
+            retag_felt_trace_block_cycle_id, write_core_felt_trace_block_into_zeroed_with_lookups,
+        };
+    }
+}
 
 /// Test-only access to the shared compression constraints.
 #[cfg(feature = "testing")]
