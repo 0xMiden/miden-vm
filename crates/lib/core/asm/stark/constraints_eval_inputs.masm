@@ -20,8 +20,16 @@ const SELECTOR_STRIDE = 6
 #!   Word 4 (slots 8-9): f, s0
 #!
 #! The multi-AIR layout then appends:
-#!   slot 10: multi-air fold beta (sampled by the generic random coin)
+#!   slot 10: multi-air fold beta (sampled by the generic random coin). Staged for every relation,
+#!            but the canonical circuit folds with the per-AIR MultiAirFoldCoeff slots below
+#!            instead of this challenge directly; it stays a READ slot because AIR k's selector
+#!            triple is pinned at FIRST_SELECTOR_OFFSET + SELECTOR_STRIDE * k, and removing it
+#!            would shift every selector offset and re-mint both relation digests.
 #!   slots 11 + 3k .. 13 + 3k: AIR k's lifted selectors, canonical instance order
+#!
+#! The per-AIR fold coefficients that follow the selectors are staged by each relation's generated
+#! evaluator (`stage_air_fold_coefficients` in `sys/<relation>/constraints_eval.masm`) from the
+#! proof-order maps, after this procedure has run.
 #!
 #! `heights_ptr` addresses the relation's `num_airs` consecutive per-AIR log-height
 #! cells; AIR k's selectors are derived from the height at `heights_ptr + k`.
