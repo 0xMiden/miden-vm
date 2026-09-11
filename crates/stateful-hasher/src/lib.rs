@@ -46,7 +46,16 @@ pub trait StatefulHasher<Item, Out>: Clone {
     /// The internal state type that evolves during absorption.
     type State;
 
-    /// Absorb elements into the state with overwrite-mode and zero-padding semantics if applicable.
+    /// Initializes a fresh state for an input with the given encoded length.
+    ///
+    /// `encoded_len` counts items after any padding performed between calls to
+    /// [`absorb_into`](Self::absorb_into). Callers must invoke this before the first absorption
+    /// when the hasher does not use its state's default value as the initial state. The default
+    /// implementation leaves the state unchanged.
+    fn initialize_state(&self, _state: &mut Self::State, _encoded_len: usize) {}
+
+    /// Absorb elements into an initialized state, using overwrite-mode and zero-padding semantics
+    /// if applicable.
     fn absorb_into(&self, state: &mut Self::State, input: impl IntoIterator<Item = Item>);
 
     /// Squeeze an output from the current state.
@@ -54,7 +63,9 @@ pub trait StatefulHasher<Item, Out>: Clone {
 
     /// One-shot hash of multiple row slices.
     ///
-    /// Creates a fresh state, absorbs all rows, and squeezes the result.
+    /// Creates a default state, absorbs all rows, and squeezes the result. A hasher whose initial
+    /// state is not the default, including one which binds the encoded length, must override this
+    /// method because the default implementation cannot derive a padding-aware encoded length.
     fn hash_rows<'a>(&self, rows: impl IntoIterator<Item = &'a [Item]>) -> Out
     where
         Item: Copy + 'a,

@@ -138,8 +138,8 @@ pub trait Lmcs: Clone {
 
     /// Hash a sequence of field slices into a leaf hash.
     ///
-    /// Inputs are absorbed in order. For salted leaves, append the salt slice to the
-    /// iterator (or call this with a chained iterator).
+    /// Inputs are absorbed in order. Each slice is padded independently to the hasher's
+    /// alignment. For salted leaves, append the salt as its own slice.
     fn hash<'a, I>(&self, rows: I) -> Self::Commitment
     where
         I: IntoIterator<Item = &'a [Self::F]>,

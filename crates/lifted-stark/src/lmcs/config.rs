@@ -9,13 +9,16 @@ use p3_field::PackedValue;
 use p3_matrix::{Matrix, bitrev::BitReversibleMatrix};
 use p3_symmetric::{Hash, PseudoCompressionFunction};
 
-use crate::lmcs::{
-    Lmcs, LmcsError, OpenedRows,
-    lifted_tree::LiftedMerkleTree,
-    merkle_witness::MerkleWitness,
-    proof::{BatchProof, LeafOpening},
-    row_list::RowList,
-    tree_indices::TreeIndices,
+use crate::{
+    lmcs::{
+        Lmcs, LmcsError, OpenedRows,
+        lifted_tree::LiftedMerkleTree,
+        merkle_witness::MerkleWitness,
+        proof::{BatchProof, LeafOpening},
+        row_list::RowList,
+        tree_indices::TreeIndices,
+    },
+    util::align::aligned_len_sum,
 };
 
 /// LMCS configuration holding cryptographic primitives (sponge + compression).
@@ -72,6 +75,49 @@ impl<PF, PD, H, C, const WIDTH: usize, const DIGEST: usize, const SALT_ELEMS: us
     }
 }
 
+impl<PF, PD, H, C, const WIDTH: usize, const DIGEST: usize, const SALT_ELEMS: usize>
+    LmcsConfig<PF, PD, H, C, WIDTH, DIGEST, SALT_ELEMS>
+where
+    PF: PackedValue,
+    PD: PackedValue + Default,
+    H: StatefulHasher<PF::Value, [PD::Value; DIGEST], State = [PD::Value; WIDTH]>
+        + Alignable<PF::Value, PD::Value>,
+{
+    fn initial_state_for_row_lengths(
+        &self,
+        row_lengths: impl IntoIterator<Item = usize>,
+    ) -> [PD::Value; WIDTH] {
+        let encoded_len =
+            aligned_len_sum(row_lengths, <H as Alignable<PF::Value, PD::Value>>::ALIGNMENT);
+        let mut state = [PD::Value::default(); WIDTH];
+        self.sponge.initialize_state(&mut state, encoded_len);
+        state
+    }
+
+    fn hash_rows_from_state<'a>(
+        &self,
+        rows: impl IntoIterator<Item = &'a [PF::Value]>,
+        mut state: [PD::Value; WIDTH],
+    ) -> Hash<PF::Value, PD::Value, DIGEST>
+    where
+        PF::Value: 'a,
+    {
+        for row in rows {
+            self.sponge.absorb_into(&mut state, row.iter().copied());
+        }
+        Hash::from(self.sponge.squeeze(&state))
+    }
+
+    fn hash_opening_from_state(
+        &self,
+        opening: &LeafOpening<PF::Value, SALT_ELEMS>,
+        state: [PD::Value; WIDTH],
+    ) -> Hash<PF::Value, PD::Value, DIGEST> {
+        let salt = (SALT_ELEMS != 0).then_some(opening.salt.as_slice());
+        self.hash_rows_from_state(opening.rows.iter_rows().chain(salt), state)
+    }
+}
+
 impl<PF, PD, H, C, const WIDTH: usize, const DIGEST: usize, const SALT_ELEMS: usize> Lmcs
     for LmcsConfig<PF, PD, H, C, WIDTH, DIGEST, SALT_ELEMS>
 where
@@ -80,6 +126,7 @@ where
     H: StatefulHasher<PF::Value, [PD::Value; DIGEST], State = [PD::Value; WIDTH]>
         + StatefulHasher<PF, [PD; DIGEST], State = [PD; WIDTH]>
         + Alignable<PF::Value, PD::Value>
+        + Alignable<PF, PD>
         + Sync,
     C: PseudoCompressionFunction<[PD::Value; DIGEST], 2>
         + PseudoCompressionFunction<[PD; DIGEST], 2>
@@ -141,12 +188,9 @@ where
         I: IntoIterator<Item = &'a [Self::F]>,
         Self::F: 'a,
     {
-        let mut state = [PD::Value::default(); WIDTH];
-        for row in rows {
-            self.sponge.absorb_into(&mut state, row.iter().cloned());
-        }
-        let digest: [PD::Value; DIGEST] = self.sponge.squeeze(&state);
-        Hash::from(digest)
+        let rows = rows.into_iter().collect::<Vec<_>>();
+        let state = self.initial_state_for_row_lengths(rows.iter().map(|row| row.len()));
+        self.hash_rows_from_state(rows, state)
     }
 
     fn compress(&self, left: Self::Commitment, right: Self::Commitment) -> Self::Commitment {
@@ -186,11 +230,15 @@ where
         // 1. Read one opening per unique leaf and hash it.
         let mut leaf_rows: BTreeMap<usize, RowList<Self::F>> = BTreeMap::new();
         let mut leaf_hashes: Vec<(usize, Self::Commitment)> = Vec::with_capacity(indices.len());
+        // Every opening in the batch has the same shape.
+        let initial_state = self.initial_state_for_row_lengths(
+            widths.iter().copied().chain((SALT_ELEMS != 0).then_some(SALT_ELEMS)),
+        );
 
         for &leaf in indices.iter() {
             let opening =
                 LeafOpening::<_, SALT_ELEMS>::read_from_channel(widths.to_vec(), channel)?;
-            leaf_hashes.push((leaf, opening.leaf_hash(self)));
+            leaf_hashes.push((leaf, self.hash_opening_from_state(&opening, initial_state)));
             leaf_rows.insert(leaf, opening.rows);
         }
 
@@ -229,11 +277,15 @@ where
     {
         let mut openings = BTreeMap::new();
         let mut leaf_hashes: Vec<(usize, Self::Commitment)> = Vec::with_capacity(indices.len());
+        // Every opening in the batch has the same shape.
+        let initial_state = self.initial_state_for_row_lengths(
+            widths.iter().copied().chain((SALT_ELEMS != 0).then_some(SALT_ELEMS)),
+        );
 
         for &leaf in indices.iter() {
             let opening =
                 LeafOpening::<_, SALT_ELEMS>::read_from_channel(widths.to_vec(), channel)?;
-            leaf_hashes.push((leaf, opening.leaf_hash(self)));
+            leaf_hashes.push((leaf, self.hash_opening_from_state(&opening, initial_state)));
             openings.insert(leaf, opening);
         }
 

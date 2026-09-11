@@ -10,6 +10,7 @@
 //! - RPO256
 //! - RPX256
 //! - Poseidon2
+//! - Eidos
 //! - Blake3 variants (256, 192, 160)
 //! - Keccak256
 //!
@@ -23,6 +24,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use miden_crypto::hash::{
     HasherExt,
     blake::{Blake3_192, Blake3_256},
+    eidos::Eidos,
     keccak::Keccak256,
     poseidon2::Poseidon2,
     rpo::Rpo256,
@@ -95,6 +97,27 @@ benchmark_hash_felt!(
     |b: &mut criterion::Bencher, count| {
         let elements = generate_felt_array_sequential(count);
         b.iter(|| Poseidon2::hash_elements(black_box(&elements)))
+    },
+    |count| Some(criterion::Throughput::Elements(count as u64))
+);
+
+// === Eidos Hash Benchmarks ===
+
+// 2-to-1 hash merge
+benchmark_hash_merge!(hash_eidos_merge, "eidos", |b: &mut criterion::Bencher| {
+    let input1 = Eidos::hash(&generate_byte_array_random(32));
+    let input2 = Eidos::hash(&generate_byte_array_random(32));
+    b.iter(|| Eidos::merge(black_box(&[input1, input2])))
+});
+
+// Sequential hashing of Felt elements
+benchmark_hash_felt!(
+    hash_eidos_sequential_felt,
+    "eidos",
+    HASH_ELEMENT_COUNTS,
+    |b: &mut criterion::Bencher, count| {
+        let elements = generate_felt_array_sequential(count);
+        b.iter(|| Eidos::hash_elements(black_box(&elements)))
     },
     |count| Some(criterion::Throughput::Elements(count as u64))
 );
@@ -176,6 +199,9 @@ criterion_group!(
     // Poseidon2 benchmarks
     hash_poseidon2_merge,
     hash_poseidon2_sequential_felt,
+    // Eidos benchmarks
+    hash_eidos_merge,
+    hash_eidos_sequential_felt,
     // Blake3 benchmarks
     hash_blake3_merge,
     hash_blake3_sequential_felt,
