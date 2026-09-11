@@ -2,6 +2,10 @@
 
 ## v0.33.0 (Unreleased)
 
+#### Features
+
+- Added a MASM example that verifies a batch of MVM proofs and settles their deferred work with one PVM proof.
+
 #### Fixes
 
 - Fixed `PartialMmr::from_parts()` and deserialization so they reject tracked leaves without complete authentication paths ([#3809](https://github.com/0xMiden/miden-vm/pull/3809)).

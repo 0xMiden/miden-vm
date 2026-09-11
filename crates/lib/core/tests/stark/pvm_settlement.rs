@@ -5,7 +5,7 @@ use std::sync::Arc;
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     Felt, Word,
-    deferred::{DeferredState, PrecompileWitness, PrecompileWitnessError},
+    deferred::{DeferredState, PrecompileWitness},
     events::{EventId, EventName},
     program::{ExecutionClaim, proof_request_key},
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus},
@@ -24,12 +24,18 @@ use miden_processor::{
 use miden_prover::{Prover, ProverError};
 use miden_verifier::{Verifier, recursive::RecursiveVerifierInputs};
 
-use crate::{helpers::masm_push_word, support::ecdsa::valid_fixture};
+use crate::{
+    helpers::masm_push_word,
+    support::ecdsa::{EcdsaFixture, valid_fixture},
+};
+
+mod batch;
 
 #[tokio::test(flavor = "current_thread")]
 async fn ecdsa_deferred_obligation_is_settled_end_to_end() {
     let core_lib = CoreLibrary::default();
-    let (deferred_proof, claim, deferred_state) = prove_deferred_ecdsa_execution(&core_lib);
+    let (deferred_proof, claim, deferred_state) =
+        prove_ecdsa_execution(&core_lib, valid_fixture(), StackInputs::default());
     let outcome = Verifier::new()
         .verify(&claim, &deferred_proof)
         .expect("the MVM proof must authenticate its deferred obligation");
@@ -39,11 +45,11 @@ async fn ecdsa_deferred_obligation_is_settled_end_to_end() {
 
     let settlement = run_settlement_in_masm(&core_lib, &deferred_proof, &claim, deferred_state)
         .await
-        .expect("the awaited MVM-to-PVM handoff must settle the authenticated deferred root");
+        .expect("failed to settle the deferred root");
     assert_eq!(
         settlement.precompile_proof.roots,
         [deferred_root],
-        "the awaited proof must expose the root authenticated by the MVM verifier",
+        "the PVM proof must cover the MVM verifier's deferred root",
     );
     assert_eq!(
         settlement.output.stack.get_num_elements(4),
@@ -60,11 +66,13 @@ async fn ecdsa_deferred_obligation_is_settled_end_to_end() {
     assert!(outcome.is_complete(), "the PVM proof must discharge the obligation");
 }
 
-fn prove_deferred_ecdsa_execution(
+/// Proves an ECDSA execution and rebuilds its deferred state from the proof's serialized data.
+/// The returned state holds the precompile inputs needed by the PVM prover.
+fn prove_ecdsa_execution(
     core_lib: &CoreLibrary,
+    fixture: EcdsaFixture,
+    stack_inputs: StackInputs,
 ) -> (ExecutionProof, ExecutionClaim, DeferredState) {
-    let fixture = valid_fixture();
-
     let source = format!(
         "
         begin
@@ -87,7 +95,6 @@ fn prove_deferred_ecdsa_execution(
         .expect("core library must load into the host");
     let mut advice_stack = AdviceStack::new();
     advice_stack.append_elements(fixture.advice);
-    let stack_inputs = StackInputs::default();
     let witness = FastProcessor::new_with_options(
         stack_inputs,
         AdviceInputs::default().with_stack(advice_stack),
@@ -97,6 +104,7 @@ fn prove_deferred_ecdsa_execution(
     .execute_for_proving_sync(&program, &mut host)
     .expect("ECDSA execution must produce a proving witness");
     let claim = witness.claim();
+    // The core library's recursive verifiers accept Poseidon2 proofs.
     let proof = Prover::new()
         .with_hash_fn(HashFunction::Poseidon2)
         .prove(witness)
@@ -134,7 +142,9 @@ async fn run_settlement_in_masm(
     let stack_inputs = StackInputs::new(claim_commitment.as_elements())
         .expect("claim commitment must fit the stack");
     let program = assemble_settlement_program(core_lib);
-    let mut host = PvmSettlementHost::new(core_lib, deferred_state);
+    let precompile_witness = PrecompileWitness::new(deferred_state)
+        .expect("the ECDSA execution must have a non-empty witness");
+    let mut host = PvmSettlementHost::new(core_lib, precompile_witness);
 
     let output =
         FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
@@ -150,34 +160,12 @@ async fn run_settlement_in_masm(
 }
 
 fn assemble_settlement_program(core_lib: &CoreLibrary) -> miden_processor::Program {
-    let source = "
-        use miden::core::sys
-        use miden::core::stark::security
-        use miden::core::sys::pvm
-        use miden::core::sys::vm
-
-        begin
-            dupw
-            procref.vm::verify_proof exec.sys::build_proof_request_key
-            adv.push_mapval dropw
-            exec.vm::verify_proof
-
-            # Estimate the MVM proof's security while retaining its authenticated deferred root.
-            # The same estimator accepts the descriptor returned by either verifier.
-            exec.security::compute_conjectured_security_level
-            u32lt.96 assertz
-
-            # Execution awaits the host here. request_proof installs the returned package on the
-            # advice stack; the response remains untrusted until verify_proof passes.
-            exec.pvm::request_proof
-            exec.pvm::verify_proof
-
-            # Estimate the PVM proof from its relation-specific descriptor values.
-            exec.security::compute_conjectured_security_level
-            u32lt.96 assertz
-            exec.sys::truncate_stack
-        end
-        ";
+    let guide =
+        include_str!("../../../../../docs/src/user_docs/core_lib/recursive_verification.md");
+    let (_, example) = guide
+        .split_once("```masm title=\"settle_deferred.masm\"\n")
+        .expect("guide must contain the settlement example");
+    let (source, _) = example.split_once("\n```").expect("settlement code block must be closed");
 
     Assembler::default()
         .with_package(core_lib.package(), Linkage::Dynamic)
@@ -187,16 +175,17 @@ fn assemble_settlement_program(core_lib: &CoreLibrary) -> miden_processor::Progr
         .unwrap_program()
 }
 
+/// Generates a PVM proof from its witness when `pvm::request_proof` emits an event.
 struct PvmSettlementHost {
     inner: DefaultHost,
     event_name: EventName,
     expected_verifier_root: Word,
-    deferred_state: DeferredState,
+    precompile_witness: PrecompileWitness,
     precompile_proof: Option<PrecompileProof>,
 }
 
 impl PvmSettlementHost {
-    fn new(core_lib: &CoreLibrary, deferred_state: DeferredState) -> Self {
+    fn new(core_lib: &CoreLibrary, precompile_witness: PrecompileWitness) -> Self {
         let inner = DefaultHost::default()
             .with_library(core_lib)
             .expect("core library must load into the settlement host");
@@ -204,7 +193,7 @@ impl PvmSettlementHost {
             inner,
             event_name: PVM_PROOF_REQUEST_EVENT_NAME,
             expected_verifier_root: core_lib.pvm_recursive_verifier_root(),
-            deferred_state,
+            precompile_witness,
             precompile_proof: None,
         }
     }
@@ -246,6 +235,8 @@ impl Host for PvmSettlementHost {
                 return SyncHost::on_event(&mut self.inner, process);
             }
 
+            // The event stack is [event_id, verifier_root, deferred_root]. Each root is four
+            // field elements, so the two roots start at positions 1 and 5.
             let verifier_root = process.get_stack_word(1);
             let requested_root = process.get_stack_word(5);
             if verifier_root != self.expected_verifier_root {
@@ -255,10 +246,10 @@ impl Host for PvmSettlementHost {
                 }
                 .into());
             }
-            if requested_root != self.deferred_state.root() {
+            if requested_root != self.precompile_witness.state().root() {
                 return Err(SettlementEventError::RootMismatch {
                     requested: requested_root,
-                    available: self.deferred_state.root(),
+                    available: self.precompile_witness.state().root(),
                 }
                 .into());
             }
@@ -268,15 +259,14 @@ impl Host for PvmSettlementHost {
                 return Err(SettlementEventError::PackageAlreadyLoaded.into());
             }
 
-            // Exercise a genuine suspension point. A production host can await a remote prover or
-            // run the CPU-bound prover on its blocking pool before returning these mutations.
+            // This host yields once, then proves locally. A host using a remote prover could
+            // await its response here.
             tokio::task::yield_now().await;
-            let witness = PrecompileWitness::new(self.deferred_state.clone())
-                .map_err(SettlementEventError::Witness)?;
             let precompile_proof = Prover::new()
                 .with_hash_fn(HashFunction::Poseidon2)
-                .prove_precompile(&witness)
+                .prove_precompile(&self.precompile_witness)
                 .map_err(SettlementEventError::Proving)?;
+            // Package the proof under the request key. MASM fetches it when request_proof returns.
             let package = PvmRecursiveVerifierInputs::for_request(verifier_root, &precompile_proof)
                 .map_err(SettlementEventError::Advice)?;
             let (advice, _) = package.into_parts();
@@ -300,8 +290,6 @@ enum SettlementEventError {
     RootMismatch { requested: Word, available: Word },
     #[error("a PVM proof package was already loaded before the settlement event")]
     PackageAlreadyLoaded,
-    #[error("PVM witness construction failed: {0}")]
-    Witness(#[source] PrecompileWitnessError),
     #[error("PVM proof generation failed: {0}")]
     Proving(#[source] ProverError),
     #[error("PVM recursive-verifier advice construction failed: {0}")]

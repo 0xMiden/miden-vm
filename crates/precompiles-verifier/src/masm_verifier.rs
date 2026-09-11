@@ -14,7 +14,7 @@ use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceStack},
     crypto::merkle::MerkleStore,
-    deferred::DeferredClaim,
+    deferred::{DeferredClaim, MAX_PRECOMPILE_ROOTS},
     field::{BasedVectorSpace, QuadFelt},
     program::proof_request_key,
     proof::{
@@ -49,10 +49,10 @@ use crate::{
 type Challenge = QuadFelt;
 type P2Lmcs = <Poseidon2Config as StarkConfig<Felt, Challenge>>::Lmcs;
 
-/// Request-packaged inputs for MASM recursive verification of a PVM proof.
+/// Inputs for verifying a PVM proof in MASM, stored under its request key.
 ///
-/// Pass [`Self::claim_commitment`] on the operand stack. The consumer derives the request key,
-/// fetches the proof stream from the advice map, and then invokes `exec.pvm::verify_proof`.
+/// The consumer supplies the expected deferred root on the operand stack, fetches the proof
+/// stream from the advice map using the request key, and invokes `exec.pvm::verify_proof`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct PvmRecursiveVerifierInputs {
     advice: AdviceInputs,
@@ -62,9 +62,9 @@ pub struct PvmRecursiveVerifierInputs {
 impl PvmRecursiveVerifierInputs {
     /// Builds a proof package addressed by the verifier and claim commitments.
     ///
-    /// The proof must contain exactly one deferred root. Aggregated precompile proofs require a
-    /// separate authentication of their ordered constituent roots, which the MASM verifier does
-    /// not yet implement. The underlying STARK must use Poseidon2.
+    /// Uses [`PrecompileProof::aggregate_root`] as the proof's claim. The MASM caller must compute
+    /// the expected root from the deferred work it needs to settle and pass that root to
+    /// `pvm::verify_proof`. The STARK proof must use Poseidon2.
     ///
     /// # Errors
     ///
@@ -73,12 +73,15 @@ impl PvmRecursiveVerifierInputs {
         verifier_root: Word,
         proof: &PrecompileProof,
     ) -> Result<Self, PvmRecursiveVerifierInputsError> {
-        let [root] = proof.roots.as_slice() else {
+        if proof.roots.len() > MAX_PRECOMPILE_ROOTS {
             return Err(PvmRecursiveVerifierInputsError::UnsupportedRootCount {
                 roots: proof.roots.len(),
             });
-        };
-        let claim = DeferredClaim::new(*root);
+        }
+        let root = proof
+            .aggregate_root()
+            .ok_or(PvmRecursiveVerifierInputsError::UnsupportedRootCount { roots: 0 })?;
+        let claim = DeferredClaim::new(root);
         let advice = build_verifier_advice(&proof.proof, claim)?;
         Ok(Self::package(verifier_root, claim, advice))
     }
@@ -113,8 +116,8 @@ impl PvmRecursiveVerifierInputs {
 /// Failures while parsing and adapting a PVM proof for the MASM verifier.
 #[derive(Debug, thiserror::Error)]
 pub enum PvmRecursiveVerifierInputsError {
-    /// The current MASM verifier authenticates one deferred root at a time.
-    #[error("the PVM MASM verifier requires exactly one deferred root, found {roots}")]
+    /// The constituent root list is empty or exceeds the library limit.
+    #[error("precompile proof requires 1..={MAX_PRECOMPILE_ROOTS} roots, found {roots}")]
     UnsupportedRootCount { roots: usize },
     /// The MASM verifier implements the Poseidon2 transcript only.
     #[error("the PVM MASM verifier supports Poseidon2 proofs only")]
@@ -423,9 +426,9 @@ mod tests {
     }
 
     #[test]
-    fn recursive_inputs_reject_non_singleton_precompile_proofs() {
+    fn recursive_inputs_reject_invalid_root_counts_before_parsing() {
         let serialized = || SerializedStarkProof::new(Vec::new(), HashFunction::Poseidon2);
-        for roots in [Vec::new(), vec![Word::default(); 2]] {
+        for roots in [Vec::new(), vec![Word::default(); MAX_PRECOMPILE_ROOTS + 1]] {
             let root_count = roots.len();
             let proof = PrecompileProof { proof: serialized(), roots };
             assert!(matches!(

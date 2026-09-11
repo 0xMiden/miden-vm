@@ -10,7 +10,7 @@ use alloc::boxed::Box;
 use miden_air::{MidenMultiAir, PublicInputs, Statement, config, security};
 use miden_core::{
     Felt,
-    deferred::{DeferredRoot, MAX_PRECOMPILE_ROOTS, TRUE_DIGEST, fold_deferred_root},
+    deferred::{DeferredRoot, MAX_PRECOMPILE_ROOTS, TRUE_DIGEST},
     field::QuadFelt,
     proof::{CURRENT_PVM_VERIFIER_ROOT, CURRENT_VM_VERIFIER_ROOT, MAX_STARK_PROOF_BYTES},
 };
@@ -188,12 +188,8 @@ impl Verifier {
         self.validate_precompile(proof, expected_root)?;
         self.preflight_precompile_stark(proof)?;
 
-        let aggregate_root = proof
-            .roots
-            .iter()
-            .copied()
-            .reduce(fold_deferred_root)
-            .expect("precompile roots were checked to be non-empty");
+        let aggregate_root =
+            proof.aggregate_root().expect("precompile roots were checked to be non-empty");
         Ok(miden_precompiles_verifier::verify_deferred(&proof.proof, aggregate_root)?)
     }
 
