@@ -1,4 +1,4 @@
-//! Eidos rotation relations served by the MVM byte-pair table.
+//! Eidos rotation relations shared by the MVM and PVM byte-pair tables.
 //!
 //! Compression rows keep each byte's physical contribution to the rotated word. Lookup messages
 //! divide that contribution by a position-only scale, leaving every message affine in the trace
@@ -7,17 +7,22 @@
 use miden_core::{Felt, field::Algebra};
 
 /// Number of byte-pair relations, excluding the independent range-check relation.
-pub(crate) const NUM_RELATIONS: usize = BytePairRelation::Rot7Pos3 as usize + 1;
+pub const NUM_RELATIONS: usize = BytePairRelation::Rot7Pos3 as usize + 1;
 
-/// Eidos rotation family used by the second half of a Blake G step.
+/// Eidos rotation family used by the second half of a BLAKE3 G function.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum Rotation {
+pub enum Rotation {
     Rot12,
     Rot7,
 }
 
 impl Rotation {
-    pub(crate) const fn from_bits(bits: u32) -> Self {
+    /// Returns the supported Eidos rotation for `bits`.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless `bits` is 7 or 12.
+    pub const fn from_bits(bits: u32) -> Self {
         match bits {
             12 => Self::Rot12,
             7 => Self::Rot7,
@@ -53,7 +58,12 @@ impl BytePairRelation {
         self as usize
     }
 
-    pub(crate) const fn for_rotation(rotation: Rotation, byte_position: usize) -> Self {
+    /// Returns the normalized relation for one byte position of `rotation`.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless `byte_position` is in `0..4`.
+    pub const fn for_rotation(rotation: Rotation, byte_position: usize) -> Self {
         match (rotation, byte_position) {
             (Rotation::Rot12, 0 | 2) | (Rotation::Rot7, 1) => Self::CanonicalXor,
             (Rotation::Rot12, 1) => Self::Rot12Pos1,
@@ -66,20 +76,19 @@ impl BytePairRelation {
     }
 }
 
-/// Actual contribution of one XOR byte to the selected 32-bit rotation.
-pub(crate) const fn contribution(
-    rotation: Rotation,
-    byte_position: usize,
-    lhs: u8,
-    rhs: u8,
-) -> u32 {
+/// Returns one XOR byte's contribution to the selected 32-bit rotation.
+///
+/// # Panics
+///
+/// Panics unless `byte_position` is in `0..4`.
+pub const fn contribution(rotation: Rotation, byte_position: usize, lhs: u8, rhs: u8) -> u32 {
     assert!(byte_position < 4, "Eidos byte position must be in 0..4");
     let word = ((lhs ^ rhs) as u32) << (8 * byte_position);
     word.rotate_right(rotation.bits())
 }
 
-// Keep normalization factors as explicit base-field scalars, matching the PVM byte-pair relation
-// and avoiding backend-dependent lowering.
+// Explicit base-field scalars avoid expanding generic power-of-two operations in the symbolic ACE
+// circuit.
 const INV_TWO_POW_20: Felt = Felt::new_unchecked(18_446_726_477_228_544_001);
 const INV_TWO: Felt = Felt::new_unchecked(9_223_372_034_707_292_161);
 const INV_TWO_POW_4: Felt = Felt::new_unchecked(17_293_822_565_076_172_801);
@@ -108,17 +117,25 @@ const fn normalization_factor(byte_position: usize) -> Felt {
 }
 
 /// Maps an actual rotation contribution to its position-normalized lookup value.
-pub(crate) fn normalize<E: Algebra<Felt>>(byte_position: usize, contribution: E) -> E {
+///
+/// # Panics
+///
+/// Panics unless `byte_position` is in `0..4`.
+pub fn normalize<E: Algebra<Felt>>(byte_position: usize, contribution: E) -> E {
     contribution * normalization_factor(byte_position)
 }
 
 /// Maps a normalized lookup value back to the physical position representation.
-pub(crate) fn denormalize<E: Algebra<Felt>>(byte_position: usize, value: E) -> E {
+///
+/// # Panics
+///
+/// Panics unless `byte_position` is in `0..4`.
+pub fn denormalize<E: Algebra<Felt>>(byte_position: usize, value: E) -> E {
     value * position_scale(byte_position)
 }
 
 /// Returns the six provider values in [`BytePairRelation`] order.
-pub(crate) fn provider_values<E: Algebra<Felt>>(x: E, wrap12: E, wrap7: E) -> [E; NUM_RELATIONS] {
+pub fn provider_values<E: Algebra<Felt>>(x: E, wrap12: E, wrap7: E) -> [E; NUM_RELATIONS] {
     [
         x.clone(),
         normalize(1, wrap12),
