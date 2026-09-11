@@ -345,7 +345,7 @@ enum ExternalPick {
     /// Executable mode: indices into the current roots (target) and nodes (join sibling).
     Local { root: usize, sibling: usize },
     /// Structure-only mode: a random digest.
-    Random([u32; 4]),
+    Random(Word),
 }
 
 /// Raw samples for one forest. Index vectors are reduced modulo the number of candidates when
@@ -380,8 +380,8 @@ fn forest_seeds_strategy(params: &MastForestParams) -> BoxedStrategy<ForestSeeds
             })
             .boxed()
     } else {
-        prop::collection::vec(any::<[u32; 4]>(), 0..=params.max_externals)
-            .prop_map(|seeds| seeds.into_iter().map(ExternalPick::Random).collect())
+        prop::collection::vec(any::<Word>(), 0..=params.max_externals)
+            .prop_map(|digests| digests.into_iter().map(ExternalPick::Random).collect())
             .boxed()
     };
     let max_dyns = if executable { 0 } else { params.max_dyns };
@@ -710,8 +710,7 @@ fn build_structure_only_forest(
 
     let mut digests = BTreeSet::new();
     for pick in &seeds.external_picks {
-        let ExternalPick::Random(seed) = *pick else { continue };
-        let digest = Word::from(seed);
+        let ExternalPick::Random(digest) = *pick else { continue };
         if digests.insert(digest) {
             node_ids.push(forest.push_node(ExternalNodeBuilder::new(digest)).expect("external"));
         }
@@ -776,16 +775,12 @@ impl Arbitrary for MastForest {
 // OTHER ARBITRARY IMPLEMENTATIONS
 // ================================================================================================
 
-fn word_strategy() -> impl Strategy<Value = Word> {
-    any::<[u32; 4]>().prop_map(Word::from)
-}
-
 impl Arbitrary for AdviceMap {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        let key = prop_oneof![Just(Word::default()), word_strategy()];
+        let key = prop_oneof![Just(Word::default()), any::<Word>()];
         let value = prop::collection::vec(any::<u64>(), 1..=4).prop_map(|values| {
             values.into_iter().map(Felt::new_unchecked).collect::<Arc<[Felt]>>()
         });
@@ -825,7 +820,7 @@ impl Arbitrary for KernelDescriptor {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         // Distinct random words, well below `MAX_NUM_PROCEDURES`.
-        prop::collection::btree_set(word_strategy(), 0..=3)
+        prop::collection::btree_set(any::<Word>(), 0..=3)
             .prop_map(|words| {
                 KernelDescriptor::from_hashes(words.into_iter().collect())
                     .expect("Generated kernel should be valid")
