@@ -2,6 +2,7 @@ use miden_core_lib::{
     CoreLibrary,
     handlers::sorted_array::{LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME},
 };
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 use miden_processor::{
     ProcessorState,
     advice::{AdviceMutation, AdviceStack},
@@ -974,6 +975,7 @@ fn build_lib_test(source: &str, op_stack: &[u64]) -> miden_utils_testing::Test {
 #[allow(clippy::unnecessary_wraps)]
 /// Returns `(was_found = false, maybe_value_ptr = 204)` regardless of the actual array. 204 is
 /// past the array's `end_ptr = 112`, so the bounds check must fire.
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn malicious_lowerbound_oob_above(
     _process: &ProcessorState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
@@ -982,6 +984,7 @@ fn malicious_lowerbound_oob_above(
 
 #[allow(clippy::unnecessary_wraps)]
 /// Returns `(was_found = false, maybe_value_ptr = 40)` which is below `start_ptr = 100`.
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn malicious_lowerbound_oob_below(
     _process: &ProcessorState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
@@ -990,12 +993,14 @@ fn malicious_lowerbound_oob_below(
 
 #[allow(clippy::unnecessary_wraps)]
 /// Returns `(was_found = false, maybe_ptr = start_ptr)` regardless of the actual range.
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn malicious_lowerbound_start_ptr(
     _process: &ProcessorState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     Ok(vec![advice_stack_mutation([Felt::new_unchecked(100), Felt::ZERO])])
 }
 
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn advice_stack_mutation(values: impl IntoIterator<Item = Felt>) -> AdviceMutation {
     let mut advice_stack = AdviceStack::new();
     advice_stack.append_elements(values);

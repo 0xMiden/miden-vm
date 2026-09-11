@@ -2,18 +2,16 @@
 
 use alloc::{
     collections::BTreeSet,
+    format,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
 };
 
+use miden_event_handler::{AdviceBatch, AdviceRecorder, EventContext, EventError, EventHandler};
 use miden_event_handler_abi::{ABI_VERSION, IMPORT_MODULE, MEMORY_EXPORT, host_fn};
 use miden_mast_package::{MAX_MODULE_BYTES, MIN_ABI_VERSION, validate_manifest_entries};
-use miden_processor::{
-    ProcessorState,
-    advice::AdviceMutation,
-    event::{EventError, EventHandler, EventId, EventName},
-};
+use miden_processor::event::{EventId, EventName, legacy_handler, registration};
 use wasmi::{CompilationMode, Config, EnforcedLimits, Engine, Instance, Linker, Module, Store};
 
 use crate::{
@@ -101,6 +99,8 @@ pub struct WasmHandlerModule {
     manifest: Vec<(EventName, String)>,
     /// The fuel charge for one instantiation, deducted from the budget of every call.
     instantiation_fuel: u64,
+    /// The earliest additive ABI revision required by the module imports.
+    required_abi_version: u32,
 }
 
 impl WasmHandlerModule {
@@ -134,7 +134,7 @@ impl WasmHandlerModule {
     ) -> Result<Self, WasmHandlerLoadError> {
         // ABI version bumps are additive only, so every version from `MIN_ABI_VERSION` up to the
         // version this crate implements is acceptable. See `miden_event_handler_abi::ABI_VERSION`.
-        if abi_version < MIN_ABI_VERSION || abi_version > ABI_VERSION {
+        if !(MIN_ABI_VERSION..=ABI_VERSION).contains(&abi_version) {
             return Err(WasmHandlerLoadError::AbiVersionMismatch {
                 declared: abi_version,
                 supported: ABI_VERSION,
@@ -198,6 +198,7 @@ impl WasmHandlerModule {
 
         // The import allowlist closes the sandbox: no WASI, no other namespaces.
         let mut import_names = BTreeSet::new();
+        let mut required_abi_version = MIN_ABI_VERSION;
         for import in module.imports() {
             if import.module() != IMPORT_MODULE {
                 return Err(WasmHandlerLoadError::ForbiddenImport {
@@ -210,11 +211,18 @@ impl WasmHandlerModule {
             // resolve, and a module never needs the same import twice, so both are rejected
             // here; the two checks together bound the import count of a loadable module by
             // the host function set.
-            if !host_fn::ALL.contains(&import.name()) {
+            let Some(required) = host_fn::minimum_abi_version(import.name()) else {
                 return Err(WasmHandlerLoadError::UnknownImport {
                     name: import.name().to_string(),
                 });
+            };
+            if required > abi_version {
+                return Err(WasmHandlerLoadError::InvalidModule(format!(
+                    "host import '{}' requires ABI revision {required}, but the module declares {abi_version}",
+                    import.name()
+                )));
             }
+            required_abi_version = required_abi_version.max(required);
             if !import_names.insert(import.name().to_string()) {
                 return Err(WasmHandlerLoadError::DuplicateImport {
                     name: import.name().to_string(),
@@ -266,6 +274,7 @@ impl WasmHandlerModule {
             limits,
             manifest,
             instantiation_fuel,
+            required_abi_version,
         };
         this.validate_instantiation()?;
         Ok(this)
@@ -276,8 +285,11 @@ impl WasmHandlerModule {
         &self.manifest
     }
 
-    /// Returns one registered-handler pair per manifest entry, ready for host registration.
-    pub fn handlers(self: &Arc<Self>) -> Vec<(EventName, Arc<dyn EventHandler>)> {
+    /// Returns one unified handler per manifest entry, accepting regular events and traces.
+    ///
+    /// Register these with `DefaultHost::register_event_handler`. The guest can inspect
+    /// `invocation_kind`; the processor rejects advice recorded during a successful trace.
+    pub fn event_handlers(self: &Arc<Self>) -> Vec<(EventName, registration::EventHandler)> {
         self.manifest
             .iter()
             .map(|(event, export)| {
@@ -286,9 +298,28 @@ impl WasmHandlerModule {
                     export: export.clone(),
                     event_id: event.to_event_id(),
                 };
-                (event.clone(), Arc::new(handler) as Arc<dyn EventHandler>)
+                (event.clone(), handler.into())
             })
             .collect()
+    }
+
+    /// Returns the legacy event-only registrations, preserving the original list type.
+    ///
+    /// Use [`Self::event_handlers`] for unified event and trace delivery.
+    #[allow(deprecated)] // Legacy facade.
+    #[deprecated(note = "use portable event_handlers and load_library_with_event_handlers")]
+    pub fn handlers(
+        self: &Arc<Self>,
+    ) -> Vec<(EventName, Arc<dyn miden_processor::event::EventHandler>)> {
+        self.event_handlers()
+            .into_iter()
+            .map(|(event, handler)| (event, legacy_handler(handler)))
+            .collect()
+    }
+
+    /// The package producer uses the loaded imports to preserve the oldest supported host.
+    pub(crate) fn required_abi_version(&self) -> u32 {
+        self.required_abi_version
     }
 
     /// Dry-run instantiation at load time: resolves every import against the host function set
@@ -325,7 +356,7 @@ impl WasmHandlerModule {
 
     /// Creates a fresh store for one call, with the resource limiter installed and the fuel
     /// budget set.
-    fn new_store(&self, state: *const ProcessorState<'static>, event_id: u64) -> Store<HostCtx> {
+    fn new_store(&self, state: *const EventContext<'static>, event_id: u64) -> Store<HostCtx> {
         let mut store = Store::new(&self.engine, HostCtx::new(state, event_id, &self.limits));
         store.limiter(|ctx| &mut ctx.limits);
         store
@@ -334,18 +365,17 @@ impl WasmHandlerModule {
         store
     }
 
-    /// Runs one handler export against the given processor state and returns the mutations it
-    /// buffered.
+    /// Runs one handler export and returns its isolated pending advice only on success.
     fn call(
         &self,
-        process: &ProcessorState<'_>,
+        context: &EventContext<'_>,
         export: &str,
         event_id: EventId,
-    ) -> Result<Vec<AdviceMutation>, EventError> {
+    ) -> Result<AdviceBatch, EventError> {
         // Erase the lifetime for storage in the store data. The pointer stays valid for this
         // whole function, which outlives the store; host functions dereference it only while
         // this call runs.
-        let state_ptr = core::ptr::from_ref(process).cast::<ProcessorState<'static>>();
+        let state_ptr = core::ptr::from_ref(context).cast::<EventContext<'static>>();
         let mut store = self.new_store(state_ptr, event_id.as_u64());
 
         // `instantiate_and_start` runs no guest code here: modules with a start section are
@@ -360,7 +390,7 @@ impl WasmHandlerModule {
             .map_err(|err| WasmHandlerRunError::Instantiation(err.to_string()))?;
 
         match func.call(&mut store, ()) {
-            Ok(()) => Ok(store.into_data().mutations),
+            Ok(()) => Ok(store.into_data().advice),
             Err(err) => {
                 let data = store.into_data();
                 let run_err = if let Some(msg) = data.error_msg {
@@ -622,18 +652,28 @@ impl core::fmt::Debug for WasmHandlerModule {
 /// An [`EventHandler`] that runs one export of a [`WasmHandlerModule`].
 ///
 /// Each call instantiates the module afresh, so the handler keeps no state between events.
+/// This concrete type implements the portable trait; [`WasmHandlerModule::handlers`] provides
+/// legacy processor trait objects for callers that retain the original event-only interface.
 pub struct WasmEventHandler {
     /// The validated module that holds the export.
     module: Arc<WasmHandlerModule>,
     /// The name of the Wasm export this handler runs.
     export: String,
-    /// The ID of the event this handler is registered for; the `event_id` host function
+    /// The event ID from this handler's manifest binding; the `event_id` host function
     /// reports it to the guest.
     event_id: EventId,
 }
 
 impl EventHandler for WasmEventHandler {
-    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        self.module.call(process, &self.export, self.event_id)
+    fn handle(
+        &self,
+        context: EventContext<'_>,
+        advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
+        // The synchronous store and its borrowed context are gone before importing the child.
+        // A host that catches a guest error therefore retains only its own earlier writes.
+        let child = self.module.call(&context, &self.export, self.event_id)?;
+        advice.import(child);
+        Ok(())
     }
 }

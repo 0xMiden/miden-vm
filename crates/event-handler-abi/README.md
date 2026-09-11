@@ -4,6 +4,10 @@ This crate defines the ABI contract between the Miden VM host and Wasm-compiled 
 
 A Wasm event handler is a core Wasm module that the host runs when the VM emits a custom event.
 It talks to the host only through the functions it imports from the `miden:event/v1` namespace.
+Additive ABI revision 2 adds `invocation_kind` (`Event = 0`, `Trace = 1`) in that same namespace.
+Hosts reject that import when a module declares revision 1. Package tooling derives the earliest
+revision a module's imports require, so existing modules remain compatible with revision 1 hosts.
+The `event_id` query retains its manifest-binding meaning even under host registration aliases.
 
 A field element crosses the wire as its canonical `u64` (less than `FIELD_MODULUS`), little-endian
 in Wasm memory; a word is four of them. The declarations therefore use the off-chain `Felt` and
@@ -16,7 +20,7 @@ SDK wrappers do this.
 The crate contains:
 
 - the value types (`Felt` and `Word`, re-exported from `miden-field`, and the `#[repr(C)]`
-  `MerkleNode`) and the `Status` result code;
+  `MerkleNode`), the `Status` result code, and `InvocationKind`;
 - the ABI constants (`ABI_VERSION`, `IMPORT_MODULE`, `MANIFEST_SECTION_NAME`, `FIELD_MODULUS`);
 - the host function names (`host_fn`);
 - the guest-side extern import declarations (`guest` module, behind the `guest` feature, for

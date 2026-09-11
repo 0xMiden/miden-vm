@@ -72,3 +72,31 @@ To compile with `no_std`, disable default features via `--no-default-features` f
 
 ## License
 This project is dual-licensed under the [MIT](http://opensource.org/licenses/MIT) and [Apache 2.0](https://opensource.org/license/apache-2-0) licenses.
+
+### Portable event callbacks
+
+Use `miden_event_handler::EventHandler` and `DefaultHost::register_event_handler` for one binding
+that receives both regular events and traces. `EventContext` exposes actual invocation identity,
+kind, clock, payload-relative stack reads, and current/root memory and advice reads. Custom hosts
+implement `handle_event(context, advice)` on `Host` or `SyncHost`; async hosts may borrow both across
+`await`. Registered handlers stay synchronous.
+
+`ExecutionOptions::with_trace_delivery(false)` suppresses trace callbacks before lookup or host
+work while retaining VM instructions and cycles. Delivery is enabled by default, including fast
+execution. Unknown traces are ignored by `DefaultHost`; known handler errors propagate. Traces
+that successfully record advice fail with an engine error. Regular callbacks apply advice only
+after complete-batch conflict and aggregate-budget validation. Callback error or cancellation
+leaves processor advice unchanged, without rolling back host-owned effects.
+
+Existing raw-state callbacks and exact legacy Arc registration signatures are deprecated and remain usable. The
+engine invokes them when the new callback uses its default fallback and has recorded no advice.
+Legacy event and trace registrations may share an identity; portable registrations reject any
+existing binding at that identity. `HostLibrary` retains its public legacy shape and event-only
+handler delivery. Use `load_library_with_event_handlers` with a portable handler list for atomic
+library loading and unified delivery. `event::legacy_handler` adapts a portable handler to legacy registrations with isolated
+failure; direct portable registrations use `event::HandlerRegistry`. For a custom host that routes
+library events before async work, use a portable registry in the new callback or retain the old
+raw-state callback until that registry is migrated. A portable context cannot recreate raw state.
+
+See the [migration guide](../docs/src/user_docs/event_handler_migration.md) for preserved APIs,
+concrete handler changes, and downstream integration.

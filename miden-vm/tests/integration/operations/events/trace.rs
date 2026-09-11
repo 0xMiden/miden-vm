@@ -1,11 +1,11 @@
 use std::sync::{Arc, Mutex};
 
 use miden_assembly::Assembler;
+use miden_event_handler::{AdviceRecorder, EventContext, EventError, InvocationKind};
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor, Felt, ProcessorState, Program, StackInputs,
-    StackOutputs,
+    DefaultHost, ExecutionOptions, FastProcessor, Felt, Program, StackInputs, StackOutputs,
     advice::AdviceInputs,
-    event::{EventName, SystemEvent, TraceError},
+    event::{EventName, SystemEvent},
 };
 
 use super::TestHost;
@@ -105,15 +105,15 @@ fn test_trace_handler_registry() {
     let recorded: Arc<Mutex<Vec<u64>>> = Arc::new(Mutex::new(Vec::new()));
     let recorder = {
         let recorded = recorded.clone();
-        move |process: &ProcessorState| -> Result<(), TraceError> {
-            recorded.lock().unwrap().push(process.get_stack_item(1).as_canonical_u64());
+        move |context: EventContext<'_>, _: &mut AdviceRecorder<'_>| -> Result<(), EventError> {
+            context.kind().require(InvocationKind::Trace)?;
+            recorded.lock().unwrap().push(context.id().as_u64());
             Ok(())
         }
     };
 
     let mut host = DefaultHost::default();
-    host.register_trace_handler(EventName::new(trace_name), Arc::new(recorder))
-        .unwrap();
+    host.register_event_handler(EventName::new(trace_name), recorder).unwrap();
 
     FastProcessor::new_with_options(
         StackInputs::default(),

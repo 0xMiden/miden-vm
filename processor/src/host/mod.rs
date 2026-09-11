@@ -1,3 +1,6 @@
+// Compatibility owner for legacy mutations and Host/SyncHost callback forwarding.
+#![allow(deprecated)]
+
 use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
@@ -8,11 +11,23 @@ use miden_core::{
     events::{EventId, EventName},
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
+use miden_event_handler::{AdviceRecorder, EventContext};
 
 use crate::ProcessorState;
 
+// The engine owns raw state and recognizes this private signal only with an empty batch.
+#[derive(Debug, thiserror::Error)]
+#[error("host uses legacy event callbacks")]
+pub(crate) struct LegacyHostFallback;
+
+#[derive(Debug, thiserror::Error)]
+#[error("no event handler registered")]
+pub(crate) struct UnhandledEvent;
+
+#[warn(deprecated)]
 pub(super) mod advice;
 
+#[warn(deprecated)]
 pub mod debug;
 
 pub mod default;
@@ -20,6 +35,7 @@ pub mod default;
 pub mod handlers;
 use handlers::{EventError, TraceError};
 
+#[warn(deprecated)]
 mod mast_forest_store;
 pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStore};
 
@@ -28,6 +44,7 @@ pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStor
 
 /// Any possible way an event can modify the advice provider.
 #[derive(Debug, PartialEq, Eq)]
+#[deprecated(note = "record output with miden_event_handler::AdviceRecorder")]
 pub enum AdviceMutation {
     ExtendStack { stack: AdviceStack },
     ExtendMap { map: AdviceMap },
@@ -115,6 +132,16 @@ impl<T: BaseHost + ?Sized> BaseHost for &mut T {
 
 /// Defines a synchronous interface by which the VM can interact with the host during execution.
 pub trait SyncHost: BaseHost {
+    /// Handles either invocation kind using pre-callback state and typed pending advice.
+    /// The default asks the execution engine to invoke the existing legacy callback instead.
+    fn handle_event(
+        &mut self,
+        _context: EventContext<'_>,
+        _advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
+        Err(LegacyHostFallback.into())
+    }
+
     /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
     /// this digest could not be found in this host.
     fn get_mast_forest(&self, node_digest: &Word) -> Option<LoadedMastForest>;
@@ -131,8 +158,13 @@ pub trait SyncHost: BaseHost {
     /// - Return errors without event names or IDs - the caller will enrich them via
     ///   [`BaseHost::resolve_event()`]
     /// - System events are handled by the VM before and don't call this method
-    fn on_event(&mut self, process: &ProcessorState<'_>)
-    -> Result<Vec<AdviceMutation>, EventError>;
+    #[deprecated(note = "implement handle_event with EventContext and AdviceRecorder")]
+    fn on_event(
+        &mut self,
+        _process: &ProcessorState<'_>,
+    ) -> Result<Vec<AdviceMutation>, EventError> {
+        Err(UnhandledEvent.into())
+    }
 
     /// Handles a trace event emitted from the VM.
     ///
@@ -146,6 +178,7 @@ pub trait SyncHost: BaseHost {
     /// [`BaseHost::resolve_trace()`].
     ///
     /// [`SystemEvent::TraceEvent`]: miden_core::events::SystemEvent::TraceEvent
+    #[deprecated(note = "implement handle_event and inspect context.kind()")]
     fn on_trace(&mut self, _process: &ProcessorState<'_>) -> Result<(), TraceError> {
         Ok(())
     }
@@ -156,6 +189,17 @@ pub trait SyncHost: BaseHost {
 /// This mirrors the historic async host surface while allowing the sync-first core to depend on
 /// [`BaseHost`].
 pub trait Host: BaseHost {
+    /// Handles either invocation kind. The engine discards pending advice on error or cancellation.
+    /// The default preserves legacy callbacks; new implementations may borrow the recorder across
+    /// await, subject to the native Send and relaxed Wasm future bounds.
+    fn handle_event(
+        &mut self,
+        _context: EventContext<'_>,
+        _advice: &mut AdviceRecorder<'_>,
+    ) -> impl FutureMaybeSend<Result<(), EventError>> {
+        async { Err(LegacyHostFallback.into()) }
+    }
+
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 
@@ -176,10 +220,13 @@ pub trait Host: BaseHost {
     /// - Return errors without event names or IDs - the caller will enrich them via
     ///   [`BaseHost::resolve_event()`]
     /// - System events are handled by the VM before and don't call this method
+    #[deprecated(note = "implement handle_event with EventContext and AdviceRecorder")]
     fn on_event(
         &mut self,
-        process: &ProcessorState<'_>,
-    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>>;
+        _process: &ProcessorState<'_>,
+    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+        async { Err(UnhandledEvent.into()) }
+    }
 
     /// Handles a trace event emitted from the VM.
     ///
@@ -193,6 +240,7 @@ pub trait Host: BaseHost {
     /// [`BaseHost::resolve_trace()`].
     ///
     /// [`SystemEvent::TraceEvent`]: miden_core::events::SystemEvent::TraceEvent
+    #[deprecated(note = "implement handle_event and inspect context.kind()")]
     fn on_trace(
         &mut self,
         _process: &ProcessorState<'_>,
@@ -205,6 +253,14 @@ impl<T> Host for T
 where
     T: SyncHost,
 {
+    fn handle_event(
+        &mut self,
+        context: EventContext<'_>,
+        advice: &mut AdviceRecorder<'_>,
+    ) -> impl FutureMaybeSend<Result<(), EventError>> {
+        let result = SyncHost::handle_event(self, context, advice);
+        async move { result }
+    }
     fn get_mast_forest(
         &self,
         node_digest: &Word,

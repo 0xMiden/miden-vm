@@ -37,6 +37,7 @@ use miden_utils_testing::{build_test, stack_inputs_from_ints};
 use rstest::rstest;
 
 use super::*;
+#[allow(deprecated)] // Legacy callback coverage or independent raw inspection.
 use crate::{
     AdviceInputs, BaseHost, DefaultHost, LoadedMastForest, ProcessorState, ProgramExecutor,
     SyncHost,
@@ -48,6 +49,7 @@ use crate::{
 
 mod advice_provider;
 mod all_ops;
+mod event_context;
 mod masm_consistency;
 mod memory;
 
@@ -1537,6 +1539,7 @@ impl BaseHost for CountingMastForestHost {
     }
 }
 
+#[allow(deprecated)] // Legacy callback coverage or independent raw inspection.
 impl SyncHost for CountingMastForestHost {
     fn get_mast_forest(&self, node_digest: &Word) -> Option<LoadedMastForest> {
         self.lookup_count.set(self.lookup_count.get() + 1);
@@ -1575,6 +1578,7 @@ impl BaseHost for MalformedExternalHost {
     }
 }
 
+#[allow(deprecated)] // Legacy callback coverage or independent raw inspection.
 impl SyncHost for MalformedExternalHost {
     fn get_mast_forest(&self, _node_digest: &Word) -> Option<LoadedMastForest> {
         Some(self.loaded_mast_forest.clone())

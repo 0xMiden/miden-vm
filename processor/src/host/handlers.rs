@@ -1,12 +1,20 @@
+// Legacy raw-state contracts; portable registration and callbacks live in sibling modules.
+#![allow(deprecated)]
+
+#[warn(deprecated)]
+mod portable;
+#[warn(deprecated)]
+pub mod registration;
 use alloc::{
-    boxed::Box,
     collections::{BTreeMap, btree_map::Entry},
     sync::Arc,
     vec::Vec,
 };
-use core::{error::Error, fmt, fmt::Debug};
+use core::{fmt, fmt::Debug};
 
 use miden_core::events::{EventId, EventName};
+pub use portable::{HandlerRegistry, invoke_legacy_handler, legacy_handler};
+pub(crate) use portable::{event_context, record_mutations};
 
 use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
 
@@ -18,6 +26,7 @@ use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
 ///
 /// A struct implementing this trait can access its own state, but any output it produces must
 /// be stored in the process's advice provider.
+#[deprecated(note = "use miden_event_handler::EventHandler")]
 pub trait EventHandler: Send + Sync + 'static {
     /// Handles the event when triggered.
     fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError>;
@@ -38,6 +47,7 @@ where
 }
 
 /// A handler which ignores the process state and leaves the `AdviceProvider` unchanged.
+#[deprecated(note = "use miden_event_handler::NoopHandler")]
 pub struct NoopEventHandler;
 
 impl EventHandler for NoopEventHandler {
@@ -49,26 +59,7 @@ impl EventHandler for NoopEventHandler {
 // EVENT ERROR
 // ================================================================================================
 
-/// A generic [`Error`] wrapper allowing handlers to return errors to the Host caller.
-///
-/// Error handlers can define their own [`Error`] type which can be seamlessly converted
-/// into this type since it is a [`Box`].
-///
-/// # Example
-///
-/// ```rust, ignore
-/// pub struct MyError{ /* ... */ };
-///
-/// fn try_something() -> Result<(), MyError> { /* ... */ }
-///
-/// fn my_handler(process: &mut ProcessorState) -> Result<(), HandlerError> {
-///     // ...
-///     try_something()?;
-///     // ...
-///     Ok(())
-/// }
-/// ```
-pub type EventError = Box<dyn Error + Send + Sync + 'static>;
+pub use miden_event_handler::EventError;
 
 // EVENT NAME VALIDATION
 // ================================================================================================
@@ -122,6 +113,7 @@ pub(crate) fn validate_event_name(event: &EventName) -> Result<(), ExecutionErro
 /// }
 /// ```
 #[derive(Default)]
+#[deprecated(note = "use event::HandlerRegistry")]
 pub struct EventHandlerRegistry {
     handlers: BTreeMap<EventId, (EventName, Arc<dyn EventHandler>)>,
 }
@@ -230,6 +222,7 @@ impl Debug for EventHandlerRegistry {
 /// - `trace` expands to `push.<sys::trace_event> emit drop`.
 /// - `trace.CONST` and `trace.event("...")` expand to `push.<trace_id> push.<sys::trace_event> emit
 ///   drop drop`.
+#[deprecated(note = "use miden_event_handler::EventHandler with context.kind()")]
 pub trait TraceHandler: Send + Sync + 'static {
     /// Handles the trace event when triggered.
     fn on_trace(&self, process: &ProcessorState) -> Result<(), TraceError>;
@@ -253,13 +246,14 @@ where
 ///
 /// Handlers should return errors without event names or IDs; the processor enriches them with the
 /// trace event ID and any name registered in the host's trace handler registry.
-pub type TraceError = Box<dyn Error + Send + Sync + 'static>;
+pub type TraceError = EventError;
 
 // TRACE HANDLER REGISTRY
 // ================================================================================================
 
 /// Registry for maintaining trace handlers.
 #[derive(Default)]
+#[deprecated(note = "use event::HandlerRegistry")]
 pub struct TraceHandlerRegistry {
     handlers: BTreeMap<EventId, (EventName, Arc<dyn TraceHandler>)>,
 }

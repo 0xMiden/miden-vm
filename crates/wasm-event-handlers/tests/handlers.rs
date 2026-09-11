@@ -4,6 +4,9 @@
 //! [`FastProcessor`] state, and check the buffered mutations or the reported errors. No wasm32
 //! toolchain is involved.
 
+// The existing runner fixtures exercise legacy registration adapters; unified cases are below.
+#![allow(deprecated)]
+
 use std::{string::String, sync::Arc, vec::Vec};
 
 use miden_crypto::hash::{
@@ -11,15 +14,16 @@ use miden_crypto::hash::{
     keccak::Keccak256,
     sha2::{Sha256, Sha512},
 };
+use miden_event_handler::{AdviceBatch, EventContext, Invocation};
 use miden_event_handler_abi::{ABI_VERSION, Status};
 use miden_processor::{
-    DefaultHost, FastProcessor, Felt, StackInputs, Word,
+    DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs, Word,
     advice::{AdviceInputs, AdviceMap, AdviceMutation, AdviceStack},
     crypto::{
         hash::Poseidon2,
         merkle::{InnerNodeInfo, MerkleStore},
     },
-    event::{EventError, EventName},
+    event::{EventError, EventHandlerRegistry, EventName},
 };
 use miden_wasm_event_handlers::{
     WasmHandlerLimits, WasmHandlerLoadError, WasmHandlerModule, WasmHandlerRunError,
@@ -37,6 +41,7 @@ const IMPORTS: &str = r#"
   (import "miden:event/v1" "stack_read" (func $stack_read (param i32 i32 i32)))
   (import "miden:event/v1" "clk" (func $clk (result i64)))
   (import "miden:event/v1" "event_id" (func $event_id (result i64)))
+  (import "miden:event/v1" "invocation_kind" (func $invocation_kind (result i32)))
   (import "miden:event/v1" "is_root_context" (func $is_root_context (result i32)))
   (import "miden:event/v1" "mem_get" (func $mem_get (param i32 i32) (result i32)))
   (import "miden:event/v1" "mem_read" (func $mem_read (param i32 i32 i32) (result i32)))
@@ -114,7 +119,11 @@ fn run_raw(
         .iter()
         .find(|(event, _)| *event == EVENT)
         .expect("event is in the manifest");
-    handler.on_event(&processor.state())
+    let mut registry = EventHandlerRegistry::new();
+    registry.register(EVENT, handler.clone()).unwrap();
+    registry
+        .handle_event(EVENT.to_event_id(), &processor.state())
+        .map(Option::unwrap)
 }
 
 /// Asserts that the raw event error is the given [`WasmHandlerRunError`] variant.
@@ -187,17 +196,18 @@ fn digest_limbs(bytes: &[u8]) -> Vec<Felt> {
 // ================================================================================================
 
 #[test]
-fn stack_item_echoed_to_advice_stack() {
+fn stack_items_skip_event_metadata() {
     let wat_src = fixture(
         "(i64.store (i32.const 0) (call $stack_get (i32.const 0)))
-         (call $adv_stack_extend (i32.const 0) (i32.const 1))",
+         (i64.store (i32.const 8) (call $stack_get (i32.const 1)))
+         (call $adv_stack_extend (i32.const 0) (i32.const 2))",
     );
     let module = load(&wat_src);
-    let processor = processor_with_stack(&[5, 7]);
-    let expected = processor.state().get_stack_item(1);
+    let processor = processor_with_stack(&[99, 5, 7]);
+    let expected = [Felt::new_unchecked(5), Felt::new_unchecked(7)];
 
     let mutations = run(&module, &processor).expect("handler succeeds");
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with([expected])]);
+    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
 }
 
 #[test]
@@ -208,7 +218,7 @@ fn stack_word_inserted_into_advice_map() {
     );
     let module = load(&wat_src);
     let processor = processor_with_stack(&[1, 2, 3, 4, 5]);
-    let word = processor.state().get_stack_word(1);
+    let word = Word::new([2_u64, 3, 4, 5].map(Felt::new_unchecked));
 
     let mutations = run(&module, &processor).expect("handler succeeds");
     let mut expected = AdviceMap::default();
@@ -218,32 +228,49 @@ fn stack_word_inserted_into_advice_map() {
 
 #[test]
 fn stack_read_batches_elements() {
-    // Read three elements starting at the top of the view, including positions past the stack
-    // depth.
-    let wat_src = fixture(
-        "(call $stack_read (i32.const 0) (i32.const 0) (i32.const 3))
-         (call $adv_stack_extend (i32.const 0) (i32.const 3))",
-    );
-    let module = load(&wat_src);
-    let processor = processor_with_stack(&[9, 8]);
-    let state = processor.state();
-    let expected = [state.get_stack_item(1), state.get_stack_item(2), state.get_stack_item(3)];
-
-    let mutations = run(&module, &processor).expect("handler succeeds");
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+    let processor = processor_with_stack(&[99, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    // Reads use payload-relative offsets and zero-extend past the visible depth, including
+    // ranges crossing the Wasm ABI's maximum position.
+    for (start, expected) in
+        [(0, [1_u64, 2, 3]), (1, [2, 3, 4]), (14, [15, 0, 0]), (u32::MAX, [0, 0, 0])]
+    {
+        let wat_src = fixture(&format!(
+            "(call $stack_read (i32.const {start}) (i32.const 0) (i32.const 3))
+             (call $adv_stack_extend (i32.const 0) (i32.const 3))",
+        ));
+        let module = load(&wat_src);
+        let mutations = run(&module, &processor).expect("handler succeeds");
+        assert_eq!(
+            mutations,
+            vec![AdviceMutation::extend_advice_stack_with(expected.map(Felt::new_unchecked))],
+            "stack read from {start}",
+        );
+    }
 }
 
 #[test]
-fn event_id_matches_the_dispatched_event() {
+fn event_id_comes_from_the_manifest_binding() {
     let wat_src = fixture(
         "(i64.store (i32.const 0) (call $event_id))
          (call $adv_stack_extend (i32.const 0) (i32.const 1))",
     );
     let module = load(&wat_src);
     let expected = Felt::new_unchecked(EVENT.to_event_id().as_u64());
-
-    let mutations = run(&module, &processor()).expect("handler succeeds");
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with([expected])]);
+    // Both the actual invocation ID and an alternate registration name differ from the
+    // manifest binding. Neither changes the ID exposed to the guest.
+    let processor = processor_with_stack(&[42]);
+    let (_, handler) = module.handlers().pop().expect("event is in the manifest");
+    for event in [EVENT, EventName::new("test::wasm::alias")] {
+        let mut registry = EventHandlerRegistry::new();
+        registry
+            .register(event.clone(), handler.clone())
+            .expect("registration succeeds");
+        let mutations = registry
+            .handle_event(event.to_event_id(), &processor.state())
+            .expect("handler succeeds")
+            .expect("event is registered");
+        assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with([expected])]);
+    }
 }
 
 #[test]
@@ -279,8 +306,8 @@ fn clk_root_context_and_depth_are_visible() {
     let processor = processor();
     let state = processor.state();
     let expected = [
-        Felt::new_unchecked(u64::from(state.clock())),
-        Felt::new_unchecked(u64::from(state.ctx().is_root())),
+        Felt::new_unchecked(u64::from(state.clock().as_u32())),
+        Felt::ONE,
         // The handler's stack view hides the event-ID slot, so its depth is one below the
         // operand-stack depth.
         Felt::new_unchecked(u64::from(state.stack_depth() - 1)),
@@ -366,7 +393,7 @@ fn advice_stack_roundtrip() {
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default().with_stack(advice_stack))
         .expect("advice inputs fit");
-    let expected = processor.state().advice_provider().stack();
+    let expected = processor.state().advice_provider().stack().to_vec();
     assert_eq!(expected.len(), 3);
 
     let mutations = run(&module, &processor).expect("handler succeeds");
@@ -498,17 +525,18 @@ fn merkle_store_accepts_consistent_node() {
 }
 
 #[test]
-fn mem_read_root_statuses() {
-    // The root context of a fresh processor has no written cell, so the batch read is Uninit; a
-    // range past the u32 address space is OutOfBounds.
+fn mem_read_root_statuses_leave_output_unchanged() {
+    // Root memory of a fresh processor has no written cell, so the batch read is Uninit; a range
+    // past the u32 address space is OutOfBounds. Neither result overwrites the output sentinel.
     let wat_src = fixture(
-        "(i64.store (i32.const 0)
+        "(i64.store (i32.const 16) (i64.const 99))
+         (i64.store (i32.const 0)
              (i64.extend_i32_u
                  (call $mem_read_root (i32.const 0) (i32.const 16) (i32.const 2))))
          (i64.store (i32.const 8)
              (i64.extend_i32_u
                  (call $mem_read_root (i32.const -1) (i32.const 16) (i32.const 2))))
-         (call $adv_stack_extend (i32.const 0) (i32.const 2))",
+         (call $adv_stack_extend (i32.const 0) (i32.const 3))",
     );
     let module = load(&wat_src);
 
@@ -516,6 +544,7 @@ fn mem_read_root_statuses() {
     let expected = [
         Felt::new_unchecked(Status::Uninit.as_raw() as u64),
         Felt::new_unchecked(Status::OutOfBounds.as_raw() as u64),
+        Felt::from_u32(99),
     ];
     assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
 }
@@ -557,10 +586,9 @@ fn merkle_queries() {
     let statuses = [Felt::new_unchecked(1), Felt::new_unchecked(Status::NotFound.as_raw() as u64)];
     assert_eq!(
         mutations,
-        vec![
-            AdviceMutation::extend_advice_stack_with(left.as_elements().to_vec()),
-            AdviceMutation::extend_advice_stack_with(statuses),
-        ]
+        vec![AdviceMutation::extend_advice_stack_with(
+            statuses.into_iter().chain(left.as_elements().iter().copied())
+        )]
     );
 }
 
@@ -1441,4 +1469,172 @@ fn handlers_register_in_a_default_host() {
     use miden_processor::BaseHost;
     assert_eq!(host.resolve_event(EVENT_A.to_event_id()), Some(&EVENT_A));
     assert_eq!(host.resolve_event(EVENT_B.to_event_id()), Some(&EVENT_B));
+}
+
+#[test]
+fn invocation_kind_import_requires_revision_two() {
+    let wasm = wat::parse_str(fixture("(drop (call $invocation_kind))")).unwrap();
+    let manifest = vec![(EVENT, "handler".to_string())];
+    let error = WasmHandlerModule::new(&wasm, 1, manifest.clone(), WasmHandlerLimits::default())
+        .unwrap_err();
+    assert!(matches!(error, WasmHandlerLoadError::InvalidModule(_)));
+    assert!(error.to_string().contains("invocation_kind"));
+    assert!(error.to_string().contains("requires ABI revision 2"));
+    WasmHandlerModule::new(&wasm, 2, manifest, WasmHandlerLimits::default()).unwrap();
+}
+
+#[test]
+fn one_wasm_registration_handles_emit_and_trace_with_the_same_payload() {
+    use miden_assembly::Assembler;
+
+    let module = load(&fixture(
+        "(if (i64.ne (call $stack_get (i32.const 0)) (i64.const 9)) (then unreachable))
+         (if (i32.eqz (call $invocation_kind))
+           (then
+             (i64.store (i32.const 0) (i64.const 9))
+             (call $adv_stack_extend (i32.const 0) (i32.const 1))))
+         (if (i32.gt_u (call $invocation_kind) (i32.const 1)) (then unreachable))",
+    ));
+    let mut host = DefaultHost::default();
+    for (event, handler) in module.event_handlers() {
+        host.register_event_handler(event, handler).unwrap();
+    }
+    let program = Assembler::default()
+        .assemble_program(
+            "wasm_kinds",
+            format!(
+                r#"begin push.9 emit.event("{EVENT}") adv_push push.9 assert_eq
+                trace.event("{EVENT}") drop end"#,
+            ),
+        )
+        .unwrap()
+        .unwrap_program();
+    FastProcessor::new(StackInputs::default())
+        .execute_sync(&program, &mut host)
+        .unwrap();
+}
+
+#[test]
+fn invocation_kind_and_manifest_binding_are_independent_of_routing_alias() {
+    use miden_processor::event::HandlerRegistry;
+
+    let module = load(&fixture(
+        "(i64.store (i32.const 0) (call $event_id))
+         (i64.store (i32.const 8) (i64.extend_i32_u (call $invocation_kind)))
+         (i64.store (i32.const 16) (call $stack_get (i32.const 0)))
+         (call $adv_stack_extend (i32.const 0) (i32.const 3))",
+    ));
+    let route = EventName::new("test::wasm::alias");
+    let actual = EventName::new("test::wasm::actual").to_event_id();
+    let mut registry = HandlerRegistry::new();
+    let (_, handler) = module.event_handlers().pop().unwrap();
+    registry.register(route.clone(), handler).unwrap();
+    let processor = processor_with_stack(&[7, 8, 9]);
+    for (invocation, kind) in
+        [(Invocation::event(actual, 0, true), 0), (Invocation::trace(actual, 0, true), 1)]
+    {
+        let context = EventContext::new(&processor, invocation);
+        let mut batch = AdviceBatch::new();
+        assert!(
+            registry
+                .handle_event(route.to_event_id(), context, &mut batch.recorder())
+                .unwrap()
+        );
+        let (stack, ..) = batch.into_parts();
+        assert_eq!(
+            stack.into_elements(),
+            vec![
+                Felt::new_unchecked(EVENT.to_event_id().as_u64()),
+                Felt::from_u32(kind),
+                context.stack_item(0),
+            ]
+        );
+    }
+}
+
+#[test]
+fn caught_guest_failure_discards_child_advice_but_preserves_outer_writes() {
+    let left = Word::new([Felt::ONE; 4]);
+    let right = Word::new([Felt::from_u32(2); 4]);
+    let root = Poseidon2::merge(&[left, right]);
+    let module = load(&fixture_with(
+        &format!("(data (i32.const 64) \"{}\")", word_bytes(&[root, left, right])),
+        "(i64.store (i32.const 0) (i64.const 1))
+         (call $adv_stack_extend (i32.const 0) (i32.const 1))
+         (call $adv_map_insert (i32.const 64) (i32.const 0) (i32.const 1))
+         (call $merkle_store_extend (i32.const 64) (i32.const 1))
+         unreachable",
+    ));
+    let (_, child) = module.event_handlers().pop().unwrap();
+    let processor = processor();
+    let context = EventContext::new(&processor, Invocation::event(EVENT.to_event_id(), 0, true));
+    let mut batch = AdviceBatch::new();
+    let mut recorder = batch.recorder();
+    recorder.prepend_stack([Felt::from_u32(77)]);
+    let error = child.as_ref().handle(context, &mut recorder).unwrap_err();
+    assert_run_error!(error, WasmHandlerRunError::Trapped(_));
+    recorder.prepend_stack([Felt::from_u32(88)]);
+    let (stack, entries, nodes) = batch.into_parts();
+    assert_eq!(stack.into_elements(), vec![Felt::from_u32(88), Felt::from_u32(77)]);
+    assert!(entries.is_empty());
+    assert!(nodes.is_empty());
+}
+
+#[test]
+fn trace_output_and_disabled_delivery_follow_the_engine_policy() {
+    use miden_assembly::Assembler;
+
+    // Zero-length stack/node writes record nothing. Empty and idempotent map writes still
+    // record output. A failed callback's own error wins over forbidden trace output.
+    for (body, expected) in [
+        (
+            "(call $adv_stack_extend (i32.const -1) (i32.const 0))
+          (call $merkle_store_extend (i32.const -1) (i32.const 0))",
+            None,
+        ),
+        (
+            "(call $adv_map_insert (i32.const 0) (i32.const 0) (i32.const 0))",
+            Some("TraceAdvice"),
+        ),
+        (
+            "(call $adv_map_insert (i32.const 0) (i32.const 0) (i32.const 1))",
+            Some("TraceAdvice"),
+        ),
+        (
+            "(call $adv_stack_extend (i32.const 0) (i32.const 1)) unreachable",
+            Some("Trapped"),
+        ),
+    ] {
+        let module = load(&fixture(body));
+        let program = Assembler::default()
+            .assemble_program("wasm_trace", format!(r#"begin trace.event("{EVENT}") end"#))
+            .unwrap()
+            .unwrap_program();
+        for enabled in [true, false] {
+            let mut host = DefaultHost::default();
+            for (event, handler) in module.event_handlers() {
+                host.register_event_handler(event, handler).unwrap();
+            }
+            let mut processor = FastProcessor::new(StackInputs::default())
+                .with_options(ExecutionOptions::default().with_trace_delivery(enabled))
+                .unwrap()
+                .with_advice(
+                    AdviceInputs::default().with_map([(Word::default(), vec![Felt::ZERO])]),
+                )
+                .unwrap();
+            let result = processor.execute_mut_sync(&program, &mut host);
+            if let Some(expected) = expected.filter(|_| enabled) {
+                let error = format!("{:?}", result.unwrap_err());
+                assert!(error.contains(expected), "{error}");
+            } else {
+                result.unwrap();
+            }
+            let state = processor.state();
+            assert!(state.advice_provider().stack().is_empty());
+            assert_eq!(
+                state.advice_provider().map().get(&Word::default()).unwrap().as_ref(),
+                &[Felt::ZERO]
+            );
+        }
+    }
 }

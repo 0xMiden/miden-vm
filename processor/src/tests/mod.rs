@@ -1,3 +1,6 @@
+// Shared fixtures intentionally exercise old handlers, coercions, and same-ID trace registration.
+#![allow(deprecated)]
+
 use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly::{

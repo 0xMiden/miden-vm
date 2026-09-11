@@ -1,3 +1,6 @@
+// Dual-registry compatibility: preserve legacy registration, library fields, and routing.
+#![allow(deprecated)]
+
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{
@@ -6,10 +9,12 @@ use miden_core::{
     mast::MastForest,
 };
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
+use miden_event_handler::{AdviceRecorder, EventContext};
 use miden_mast_package::{PackageDebugInfoError, debug_info::PackageDebugInfo};
 
 use super::handlers::{
-    EventError, EventHandler, EventHandlerRegistry, TraceError, TraceHandler, TraceHandlerRegistry,
+    EventError, EventHandler, EventHandlerRegistry, HandlerRegistry, TraceError, TraceHandler,
+    TraceHandlerRegistry, registration,
 };
 use crate::{
     BaseHost, ExecutionError, LoadedMastForest, MastForestStore, MemMastForestStore,
@@ -23,6 +28,7 @@ use crate::{
 #[derive(Debug)]
 pub struct DefaultHost<S: SourceManager = DefaultSourceManager> {
     store: MemMastForestStore,
+    handlers: HandlerRegistry,
     event_handlers: EventHandlerRegistry,
     trace_handlers: TraceHandlerRegistry,
     source_manager: Arc<S>,
@@ -32,6 +38,7 @@ impl Default for DefaultHost {
     fn default() -> Self {
         Self {
             store: MemMastForestStore::default(),
+            handlers: HandlerRegistry::default(),
             event_handlers: EventHandlerRegistry::default(),
             trace_handlers: TraceHandlerRegistry::default(),
             source_manager: Arc::new(DefaultSourceManager::default()),
@@ -51,6 +58,7 @@ where
     {
         DefaultHost::<O> {
             store: self.store,
+            handlers: self.handlers,
             event_handlers: self.event_handlers,
             trace_handlers: self.trace_handlers,
             source_manager,
@@ -67,9 +75,10 @@ where
     /// when its event already has a handler in this host.
     pub fn load_library(&mut self, library: impl Into<HostLibrary>) -> Result<(), ExecutionError> {
         let library = library.into();
+        for (event, _) in &library.handlers {
+            self.check_portable_collision(event)?;
+        }
 
-        // Each successful registration adds a handler that the registry did not have, so
-        // un-registering the added IDs gives back the state before the call.
         let mut registered = Vec::with_capacity(library.handlers.len());
         for (event, handler) in library.handlers {
             let id = event.to_event_id();
@@ -89,6 +98,34 @@ where
         Ok(())
     }
 
+    /// Loads a library using the supplied portable handlers in place of its legacy handler list.
+    /// Each identity receives both invocation kinds. Handler registration and forest loading are
+    /// atomic: any invalid name or collision leaves the host unchanged. Existing `load_library`
+    /// retains legacy event-only delivery, replacement, and separate trace registration semantics.
+    pub fn load_library_with_event_handlers(
+        &mut self,
+        library: impl Into<HostLibrary>,
+        handlers: impl IntoIterator<Item = (EventName, registration::EventHandler)>,
+    ) -> Result<(), ExecutionError> {
+        let library = library.into();
+        let mut registered = Vec::new();
+        for (name, handler) in handlers {
+            let id = name.to_event_id();
+            if let Err(error) = self.register_event_handler(name, handler) {
+                for id in registered {
+                    self.handlers.unregister(id);
+                }
+                return Err(error);
+            }
+            registered.push(id);
+        }
+        self.store.insert_loaded(LoadedMastForest::with_package_debug_info(
+            library.mast_forest,
+            library.package_debug_info,
+        ));
+        Ok(())
+    }
+
     /// Adds a [`HostLibrary`] containing a [`MastForest`] with its list of event handlers.
     /// to the host.
     pub fn with_library(mut self, library: impl Into<HostLibrary>) -> Result<Self, ExecutionError> {
@@ -96,20 +133,53 @@ where
         Ok(self)
     }
 
+    /// Registers one portable handler for both regular events and traces. Identities already
+    /// present in either legacy registry are rejected; kind restrictions belong inside handlers.
+    pub fn register_event_handler(
+        &mut self,
+        name: EventName,
+        handler: impl Into<registration::EventHandler>,
+    ) -> Result<(), ExecutionError> {
+        let id = name.to_event_id();
+        if self.event_handlers.resolve_event(id).is_some()
+            || self.trace_handlers.resolve_trace(id).is_some()
+        {
+            return Err(crate::errors::HostError::DuplicateEventHandler { event: name }.into());
+        }
+        self.handlers.register(name, handler)
+    }
+
+    /// Removes a portable registration for both invocation kinds.
+    pub fn unregister_event_handler(&mut self, id: EventId) -> bool {
+        self.handlers.unregister(id)
+    }
+
+    fn check_portable_collision(&self, event: &EventName) -> Result<(), ExecutionError> {
+        if self.handlers.resolve(event.to_event_id()).is_some() {
+            return Err(
+                crate::errors::HostError::DuplicateEventHandler { event: event.clone() }.into()
+            );
+        }
+        Ok(())
+    }
+
     /// Registers a single [`EventHandler`] into this host.
     ///
     /// The handler can be either a closure or a free function with signature
     /// `fn(&mut ProcessorState) -> Result<(), EventHandler>`
+    #[deprecated(note = "use register_event_handler and unregister_event_handler")]
     pub fn register_handler(
         &mut self,
         event: EventName,
         handler: Arc<dyn EventHandler>,
     ) -> Result<(), ExecutionError> {
+        self.check_portable_collision(&event)?;
         self.event_handlers.register(event, handler)
     }
 
     /// Un-registers a handler with the given id, returning a flag indicating whether a handler
     /// was previously registered with this id.
+    #[deprecated(note = "use register_event_handler and unregister_event_handler")]
     pub fn unregister_handler(&mut self, id: EventId) -> bool {
         self.event_handlers.unregister(id)
     }
@@ -120,11 +190,13 @@ where
     /// # Errors
     /// Returns an error when the event name is empty or reserved; the host is not changed
     /// then.
+    #[deprecated(note = "use register_event_handler and unregister_event_handler")]
     pub fn replace_handler(
         &mut self,
         event: EventName,
         handler: Arc<dyn EventHandler>,
     ) -> Result<bool, ExecutionError> {
+        self.check_portable_collision(&event)?;
         self.event_handlers.replace(event, handler)
     }
 
@@ -133,16 +205,19 @@ where
     /// Trace handlers observe VM state for optional, read-only trace events; they cannot mutate the
     /// advice provider. Unhandled trace event IDs are ignored. The handler can be either a closure
     /// or a free function.
+    #[deprecated(note = "use register_event_handler and unregister_event_handler")]
     pub fn register_trace_handler(
         &mut self,
         event: EventName,
         handler: Arc<dyn TraceHandler>,
     ) -> Result<(), ExecutionError> {
+        self.check_portable_collision(&event)?;
         self.trace_handlers.register(event, handler)
     }
 
     /// Un-registers a trace handler with the given id, returning a flag indicating whether a
     /// handler was previously registered with this id.
+    #[deprecated(note = "use register_event_handler and unregister_event_handler")]
     pub fn unregister_trace_handler(&mut self, id: EventId) -> bool {
         self.trace_handlers.unregister(id)
     }
@@ -153,11 +228,13 @@ where
     /// # Errors
     /// Returns an error when the event name is empty or reserved; the host is not changed
     /// then.
+    #[deprecated(note = "use register_event_handler and unregister_event_handler")]
     pub fn replace_trace_handler(
         &mut self,
         event: EventName,
         handler: Arc<dyn TraceHandler>,
     ) -> Result<bool, ExecutionError> {
+        self.check_portable_collision(&event)?;
         self.trace_handlers.replace(event, handler)
     }
 }
@@ -176,11 +253,15 @@ where
     }
 
     fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
-        self.event_handlers.resolve_event(event_id)
+        self.handlers
+            .resolve(event_id)
+            .or_else(|| self.event_handlers.resolve_event(event_id))
     }
 
     fn resolve_trace(&self, trace_id: EventId) -> Option<&EventName> {
-        self.trace_handlers.resolve_trace(trace_id)
+        self.handlers
+            .resolve(trace_id)
+            .or_else(|| self.trace_handlers.resolve_trace(trace_id))
     }
 }
 
@@ -188,6 +269,18 @@ impl<S> SyncHost for DefaultHost<S>
 where
     S: SourceManager,
 {
+    fn handle_event(
+        &mut self,
+        context: EventContext<'_>,
+        advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
+        if self.handlers.handle_event(context.id(), context, advice)? {
+            Ok(())
+        } else {
+            Err(super::LegacyHostFallback.into())
+        }
+    }
+
     fn get_mast_forest(&self, node_digest: &Word) -> Option<LoadedMastForest> {
         self.store.get(node_digest)
     }
@@ -199,13 +292,7 @@ where
         let event_id = EventId::from_felt(process.get_stack_item(0));
         match self.event_handlers.handle_event(event_id, process) {
             Ok(Some(mutations)) => Ok(mutations),
-            Ok(None) => {
-                #[derive(Debug, thiserror::Error)]
-                #[error("no event handler registered")]
-                struct UnhandledEvent;
-
-                Err(UnhandledEvent.into())
-            },
+            Ok(None) => Err(super::UnhandledEvent.into()),
             Err(e) => Err(e),
         }
     }
@@ -264,6 +351,7 @@ pub struct HostLibrary {
     /// Package-owned debug info that belongs to `mast_forest`.
     pub package_debug_info: Result<Option<PackageDebugInfo>, PackageDebugInfoError>,
     /// List of handlers along with their event names to call them with `emit`.
+    #[deprecated(note = "pass portable handlers to load_library_with_event_handlers")]
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
 }
 
@@ -272,6 +360,7 @@ impl HostLibrary {
     ///
     /// Use this to supply handlers that the source of the library does not provide, for example
     /// the Wasm event handlers of a package.
+    #[deprecated(note = "pass portable handlers to load_library_with_event_handlers")]
     pub fn set_handlers(mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) -> Self {
         self.handlers = handlers;
         self
@@ -337,6 +426,31 @@ mod tests {
 
     use super::{super::handlers::NoopEventHandler, *};
     use crate::errors::HostError;
+
+    #[test]
+    fn portable_library_loading_is_atomic_and_legacy_pairs_stay_separate() {
+        use miden_event_handler::NoopHandler;
+        for invalid in [false, true] {
+            let mut host = DefaultHost::default();
+            let library = library(&[]);
+            let digest = library.mast_forest.local_procedure_digests().next().unwrap();
+            let name = EventName::new("test::portable::library");
+            let second = if invalid { EventName::new("") } else { name.clone() };
+            let handlers = vec![(name.clone(), NoopHandler.into()), (second, NoopHandler.into())];
+            assert!(host.load_library_with_event_handlers(library, handlers).is_err());
+            assert!(host.handlers.resolve(name.to_event_id()).is_none());
+            assert!(host.store.get(&digest).is_none());
+        }
+        let mut host = DefaultHost::default();
+        let name = EventName::new("test::legacy::pair");
+        host.register_handler(name.clone(), Arc::new(NoopEventHandler)).unwrap();
+        host.register_trace_handler(name.clone(), Arc::new(|_: &ProcessorState<'_>| Ok(())))
+            .unwrap();
+        assert!(host.register_event_handler(name.clone(), NoopHandler).is_err());
+        assert!(host.replace_handler(name.clone(), Arc::new(NoopEventHandler)).unwrap());
+        assert!(host.unregister_handler(name.to_event_id()));
+        assert!(host.unregister_trace_handler(name.to_event_id()));
+    }
 
     /// Builds a library with one procedure and one handler per event name.
     fn library(events: &[&'static str]) -> HostLibrary {
