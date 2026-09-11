@@ -1,14 +1,15 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
+    vec,
 };
-use core::ops::RangeInclusive;
+use core::{iter::repeat_n, ops::RangeInclusive};
 
 use proptest::{arbitrary::Arbitrary, prelude::*};
 
 use super::*;
 use crate::{
-    Felt, Word,
+    Felt, ONE, Word,
     advice::AdviceMap,
     mast::{
         CallNodeBuilder, DenseMastForestBuilder, DynNodeBuilder, ExternalNodeBuilder,
@@ -18,183 +19,299 @@ use crate::{
     program::{KernelDescriptor, Program},
 };
 
-// Strategy for operations without immediate values (non-control flow)
+// OPERATIONS
+// ================================================================================================
+
+/// Non-control-flow operations without an immediate value.
+const OPS_NO_IMM: &[Operation] = &[
+    Operation::Add,
+    Operation::Mul,
+    Operation::Neg,
+    Operation::Inv,
+    Operation::Incr,
+    Operation::And,
+    Operation::Or,
+    Operation::Not,
+    Operation::Eq,
+    Operation::Eqz,
+    Operation::Drop,
+    Operation::Pad,
+    Operation::Swap,
+    Operation::SwapW,
+    Operation::SwapW2,
+    Operation::SwapW3,
+    Operation::SwapDW,
+    Operation::MovUp2,
+    Operation::MovUp3,
+    Operation::MovUp4,
+    Operation::MovUp5,
+    Operation::MovUp6,
+    Operation::MovUp7,
+    Operation::MovUp8,
+    Operation::MovDn2,
+    Operation::MovDn3,
+    Operation::MovDn4,
+    Operation::MovDn5,
+    Operation::MovDn6,
+    Operation::MovDn7,
+    Operation::MovDn8,
+    Operation::CSwap,
+    Operation::CSwapW,
+    Operation::Dup0,
+    Operation::Dup1,
+    Operation::Dup2,
+    Operation::Dup3,
+    Operation::Dup4,
+    Operation::Dup5,
+    Operation::Dup6,
+    Operation::Dup7,
+    Operation::Dup9,
+    Operation::Dup11,
+    Operation::Dup13,
+    Operation::Dup15,
+    Operation::MLoad,
+    Operation::MStore,
+    Operation::MLoadW,
+    Operation::MStoreW,
+    Operation::MStream,
+    Operation::Pipe,
+    Operation::AdvPop,
+    Operation::AdvPopW,
+    Operation::U32split,
+    Operation::U32add,
+    Operation::U32sub,
+    Operation::U32mul,
+    Operation::U32div,
+    Operation::U32and,
+    Operation::U32xor,
+    Operation::U32add3,
+    Operation::U32madd,
+    Operation::SDepth,
+    Operation::Caller,
+    Operation::Clk,
+    Operation::Emit,
+    Operation::Ext2Mul,
+    Operation::Expacc,
+    Operation::HPerm,
+];
+
+/// Operations that cannot fail whatever the stack, advice provider, or memory hold, paired with
+/// the change each one makes to the stack depth.
+///
+/// Left out: `Inv` (traps on zero), `And`, `Or`, `Not`, `CSwap` and `CSwapW` (binary operands),
+/// the `U32*` family (u32-range operands), memory and advice operations, `Caller`, `Emit`,
+/// `Assert`, and the crypto/STARK helpers.
+const INFALLIBLE_OPS: &[(Operation, i8)] = &[
+    (Operation::Add, -1),
+    (Operation::Mul, -1),
+    (Operation::Neg, 0),
+    (Operation::Incr, 0),
+    (Operation::Eq, -1),
+    (Operation::Eqz, 0),
+    (Operation::Ext2Mul, 0),
+    (Operation::Expacc, 0),
+    (Operation::Drop, -1),
+    (Operation::Pad, 1),
+    (Operation::Swap, 0),
+    (Operation::SwapW, 0),
+    (Operation::SwapW2, 0),
+    (Operation::SwapW3, 0),
+    (Operation::SwapDW, 0),
+    (Operation::MovUp2, 0),
+    (Operation::MovUp3, 0),
+    (Operation::MovUp4, 0),
+    (Operation::MovUp5, 0),
+    (Operation::MovUp6, 0),
+    (Operation::MovUp7, 0),
+    (Operation::MovUp8, 0),
+    (Operation::MovDn2, 0),
+    (Operation::MovDn3, 0),
+    (Operation::MovDn4, 0),
+    (Operation::MovDn5, 0),
+    (Operation::MovDn6, 0),
+    (Operation::MovDn7, 0),
+    (Operation::MovDn8, 0),
+    (Operation::Dup0, 1),
+    (Operation::Dup1, 1),
+    (Operation::Dup2, 1),
+    (Operation::Dup3, 1),
+    (Operation::Dup4, 1),
+    (Operation::Dup5, 1),
+    (Operation::Dup6, 1),
+    (Operation::Dup7, 1),
+    (Operation::Dup9, 1),
+    (Operation::Dup11, 1),
+    (Operation::Dup13, 1),
+    (Operation::Dup15, 1),
+    (Operation::SDepth, 1),
+    (Operation::Clk, 1),
+];
+
+/// Strategy for operations without immediate values (non-control flow).
 pub fn op_no_imm_strategy() -> impl Strategy<Value = Operation> {
-    prop_oneof![
-        Just(Operation::Add),
-        Just(Operation::Mul),
-        Just(Operation::Neg),
-        Just(Operation::Inv),
-        Just(Operation::Incr),
-        Just(Operation::And),
-        Just(Operation::Or),
-        Just(Operation::Not),
-        Just(Operation::Eq),
-        Just(Operation::Eqz),
-        Just(Operation::Drop),
-        Just(Operation::Pad),
-        Just(Operation::Swap),
-        Just(Operation::SwapW),
-        Just(Operation::SwapW2),
-        Just(Operation::SwapW3),
-        Just(Operation::SwapDW),
-        Just(Operation::MovUp2),
-        Just(Operation::MovUp3),
-        Just(Operation::MovUp4),
-        Just(Operation::MovUp5),
-        Just(Operation::MovUp6),
-        Just(Operation::MovUp7),
-        Just(Operation::MovUp8),
-        Just(Operation::MovDn2),
-        Just(Operation::MovDn3),
-        Just(Operation::MovDn4),
-        Just(Operation::MovDn5),
-        Just(Operation::MovDn6),
-        Just(Operation::MovDn7),
-        Just(Operation::MovDn8),
-        Just(Operation::CSwap),
-        Just(Operation::CSwapW),
-        Just(Operation::Dup0),
-        Just(Operation::Dup1),
-        Just(Operation::Dup2),
-        Just(Operation::Dup3),
-        Just(Operation::Dup4),
-        Just(Operation::Dup5),
-        Just(Operation::Dup6),
-        Just(Operation::Dup7),
-        Just(Operation::Dup9),
-        Just(Operation::Dup11),
-        Just(Operation::Dup13),
-        Just(Operation::Dup15),
-        Just(Operation::MLoad),
-        Just(Operation::MStore),
-        Just(Operation::MLoadW),
-        Just(Operation::MStoreW),
-        Just(Operation::MStream),
-        Just(Operation::Pipe),
-        Just(Operation::AdvPop),
-        Just(Operation::AdvPopW),
-        Just(Operation::U32split),
-        Just(Operation::U32add),
-        Just(Operation::U32sub),
-        Just(Operation::U32mul),
-        Just(Operation::U32div),
-        Just(Operation::U32and),
-        Just(Operation::U32xor),
-        Just(Operation::U32add3),
-        Just(Operation::U32madd),
-        Just(Operation::SDepth),
-        Just(Operation::Caller),
-        Just(Operation::Clk),
-        Just(Operation::Emit),
-        Just(Operation::Ext2Mul),
-        Just(Operation::Expacc),
-        Just(Operation::HPerm),
-        // Note: We exclude Assert here because it has an immediate value (error code)
-    ]
+    prop::sample::select(OPS_NO_IMM)
 }
 
-// Strategy for operations with immediate values
+/// Strategy for operations with immediate values.
 pub fn op_with_imm_strategy() -> impl Strategy<Value = Operation> {
-    prop_oneof![any::<u64>().prop_map(Felt::new_unchecked).prop_map(Operation::Push)]
+    any::<u64>().prop_map(Felt::new_unchecked).prop_map(Operation::Push)
 }
 
-// Strategy for all non-control flow operations
+/// Strategy for all non-control flow operations.
 pub fn op_non_control_strategy() -> impl Strategy<Value = Operation> {
-    prop_oneof![op_no_imm_strategy(), op_with_imm_strategy(),]
+    prop_oneof![op_no_imm_strategy(), op_with_imm_strategy()]
 }
 
-// Strategy for sequences of operations
+/// Strategy for sequences of non-control flow operations.
 pub fn op_non_control_sequence_strategy(
     max_length: usize,
 ) -> impl Strategy<Value = Vec<Operation>> {
     prop::collection::vec(op_non_control_strategy(), 1..=max_length)
 }
 
-// ---------- Parameters ----------
+/// Change `op` makes to the stack depth, or `None` if `op` can fail.
+fn stack_delta(op: &Operation) -> Option<i8> {
+    match op {
+        Operation::Noop => Some(0),
+        Operation::Push(_) => Some(1),
+        _ => INFALLIBLE_OPS
+            .iter()
+            .find(|(candidate, _)| candidate == op)
+            .map(|&(_, delta)| delta),
+    }
+}
 
-/// Parameters for generating BasicBlockNode instances
+fn op_infallible_strategy() -> impl Strategy<Value = Operation> {
+    prop_oneof![
+        prop::sample::select(INFALLIBLE_OPS).prop_map(|(op, _)| op),
+        op_with_imm_strategy(),
+    ]
+}
+
+/// Keeps at most `max_len` of `ops`, skipping operations that would take the stack below its
+/// depth on entry or leave no room for the `Drop`s that restore it, then appends those `Drop`s.
+/// Every operation in `ops` must be infallible.
+fn balance_ops(ops: Vec<Operation>, max_len: usize) -> Vec<Operation> {
+    let mut depth = 0i32;
+    let mut balanced = Vec::with_capacity(max_len);
+    for op in ops {
+        let delta = i32::from(stack_delta(&op).expect("infallible operation"));
+        let next_depth = depth + delta;
+        if next_depth >= 0 && balanced.len() + 1 + next_depth as usize <= max_len {
+            depth = next_depth;
+            balanced.push(op);
+        }
+    }
+    balanced.extend(repeat_n(Operation::Drop, depth as usize));
+    if balanced.is_empty() {
+        balanced.push(Operation::Noop);
+    }
+    balanced
+}
+
+// BASIC BLOCKS
+// ================================================================================================
+
+/// Parameters for generating `BasicBlockNode` instances.
 #[derive(Clone, Debug)]
 pub struct BasicBlockNodeParams {
-    /// Maximum number of operations in a generated basic block
+    /// Maximum number of operations in a generated basic block.
     pub max_ops_len: usize,
+    /// Restricts blocks to infallible operations that leave the stack depth unchanged, so a block
+    /// runs on any operand stack.
+    pub executable: bool,
 }
 
 impl Default for BasicBlockNodeParams {
     fn default() -> Self {
-        Self { max_ops_len: 8 }
+        Self { max_ops_len: 8, executable: false }
     }
 }
 
-// ---------- Arbitrary for BasicBlockNode ----------
+/// Strategy for the operations of a basic block described by `params`.
+pub(super) fn block_ops_strategy(params: &BasicBlockNodeParams) -> BoxedStrategy<Vec<Operation>> {
+    if params.executable {
+        let max_len = params.max_ops_len;
+        prop::collection::vec(op_infallible_strategy(), 1..=max_len)
+            .prop_map(move |ops| balance_ops(ops, max_len))
+            .boxed()
+    } else {
+        op_non_control_sequence_strategy(params.max_ops_len).boxed()
+    }
+}
 
 impl Arbitrary for BasicBlockNode {
     type Parameters = BasicBlockNodeParams;
     type Strategy = BoxedStrategy<Self>;
 
-    fn arbitrary_with(p: Self::Parameters) -> Self::Strategy {
-        // ensure at least 1 op to satisfy BasicBlockNode::new
-        op_non_control_sequence_strategy(p.max_ops_len)
-            .prop_filter_map("non-empty ops", |ops| if ops.is_empty() { None } else { Some(ops) })
-            .prop_map(|ops| BasicBlockNode::new(ops).expect("non-empty ops"))
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+        block_ops_strategy(&params)
+            .prop_map(|ops| BasicBlockNode::new(ops).expect("non-empty operations"))
             .boxed()
     }
 }
 
-// ---------- Optional: MastForest strategy (behind feature gate) ----------
+// FOREST PARAMETERS
+// ================================================================================================
 
-/// Parameters for generating MastForest instances
+/// What a `MastForest` sample guarantees.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GenerationMode {
+    /// Every procedure root runs to completion on any operand stack. See [`MastForestParams`].
+    #[default]
+    Executable,
+    /// Broad structural coverage without execution guarantees: fallible operations, dyn nodes,
+    /// externals with random digests, and syscalls to arbitrary nodes.
+    StructureOnly,
+}
+
+/// Parameters for generating `MastForest` instances via proptest.
 ///
-/// # Execution Compatibility
+/// In [`GenerationMode::Executable`] every procedure root of a sample executes to completion on
+/// any operand stack once the forest is loaded into the host:
 ///
-/// Generated forests will only be executable if certain node types are excluded:
-/// - **Syscalls**: Require matching kernel procedures. Set `max_syscalls = 0` for executable
-///   forests.
-/// - **Externals**: Use random digests that won't match valid procedures. Set `max_externals = 0`
-///   for executable forests.
-/// - **Dyn nodes**: Leave junk on the stack and cannot execute properly. Set `max_dyns = 0` for
-///   executable forests.
+/// - basic blocks hold only infallible operations and leave the stack depth unchanged;
+/// - each split sits behind a block that pushes its condition, and each loop body ends by pushing
+///   `0`, so conditions are binary and loops run exactly once;
+/// - each external resolves to a procedure root of the same forest, and the graph of externals is
+///   acyclic;
+/// - each syscall callee is a member of the paired kernel;
+/// - dyn nodes are never emitted (issue #3397 tracks a MASM-level generator for them).
 ///
-/// The default parameters create executable forests by setting all three of the above to 0.
+/// The `MastForest` `Arbitrary` impl drops the kernel, so in this mode it emits no syscalls and
+/// its samples run under the empty kernel of `Program::new`; [`forest_kernel_strategy`] keeps the
+/// kernel and the syscalls.
 ///
-/// # Non-executable Forests
+/// With `kernel_procedures` set, syscall callees are external nodes carrying the supplied hashes,
+/// so running them requires the matching kernel forest in the host.
 ///
-/// If you want to generate forests for testing assembly or parsing without execution:
-/// - Set `max_syscalls > 0` to include syscall nodes
-/// - Set `max_externals > 0` to include external nodes
-/// - Set `max_dyns > 0` to include dynamic nodes
-///
-/// These forests are useful for testing MAST structure and serialization but will fail during
-/// execution.
+/// Samples of both modes are pruned: every node is reachable from a procedure root.
 #[derive(Clone, Debug)]
 pub struct MastForestParams {
-    /// Range of number of blocks to generate
+    /// Number of basic blocks to generate; a bound of `0` is raised to `1`.
     pub blocks: RangeInclusive<usize>,
-    /// Maximum number of join nodes to generate
+    /// Maximum number of join nodes.
     pub max_joins: usize,
-    /// Maximum number of split nodes to generate
+    /// Maximum number of split nodes.
     pub max_splits: usize,
-    /// Maximum number of loop nodes to generate
+    /// Maximum number of loop nodes.
     pub max_loops: usize,
-    /// Maximum number of call nodes to generate
+    /// Maximum number of call nodes.
     pub max_calls: usize,
-    /// Maximum number of syscall nodes to generate
-    ///
-    /// **Warning**: Syscalls require a properly configured kernel with matching procedure hashes.
-    /// Generated syscalls use random procedure digests and will not execute without providing
-    /// a matching kernel. Set to 0 for executable forests.
+    /// Maximum number of syscall nodes. Forced to `0` by the `MastForest` `Arbitrary` impl in
+    /// [`GenerationMode::Executable`].
     pub max_syscalls: usize,
-    /// Maximum number of external nodes to generate
-    ///
-    /// **Warning**: External nodes use random digests that won't correspond to valid procedures.
-    /// Any program with external nodes will fail to execute. Set to 0 for executable forests.
+    /// Maximum number of external nodes.
     pub max_externals: usize,
-    /// Maximum number of dyn/dyncall nodes to generate
-    ///
-    /// **Warning**: Dyn nodes leave junk on the stack and cannot execute properly.
-    /// These nodes are primarily for testing MAST structure, not execution. Set to 0 for
-    /// executable forests.
+    /// Maximum number of dyn and dyncall nodes. Ignored in [`GenerationMode::Executable`].
     pub max_dyns: usize,
+    /// Guarantees the samples provide.
+    pub mode: GenerationMode,
+    /// Procedure hashes of a caller-supplied kernel. When `None`, the kernel holds exactly the
+    /// digests the emitted syscalls target and is empty without syscalls. Duplicate hashes or more
+    /// than [`KernelDescriptor::MAX_NUM_PROCEDURES`] entries make [`forest_kernel_strategy`]
+    /// panic.
+    pub kernel_procedures: Option<Vec<Word>>,
 }
 
 impl Default for MastForestParams {
@@ -205,351 +322,466 @@ impl Default for MastForestParams {
             max_splits: 1,
             max_loops: 1,
             max_calls: 1,
-            max_syscalls: 0,  // Default to 0 for executable forests
-            max_externals: 0, // Default to 0 for executable forests
-            max_dyns: 0,      // Default to 0 for executable forests
+            max_syscalls: 1,
+            max_externals: 1,
+            max_dyns: 0,
+            mode: GenerationMode::Executable,
+            kernel_procedures: None,
         }
     }
+}
+
+// SEEDS
+// ================================================================================================
+
+/// How an external node picks its digest.
+#[derive(Clone, Copy, Debug)]
+enum ExternalPick {
+    /// Executable mode: indices into the current roots (target) and nodes (join sibling).
+    Local { root: usize, sibling: usize },
+    /// Structure-only mode: a random digest.
+    Random(Word),
+}
+
+/// Raw samples for one forest. Index vectors are reduced modulo the number of candidates when
+/// they are consumed.
+#[derive(Clone, Debug)]
+struct ForestSeeds {
+    basic_blocks: Vec<BasicBlockNode>,
+    join_pairs: Vec<(usize, usize)>,
+    /// Branch indices and the condition pushed before the split (executable mode).
+    splits: Vec<(usize, usize, bool)>,
+    loop_indices: Vec<usize>,
+    call_indices: Vec<usize>,
+    syscall_picks: Vec<usize>,
+    external_picks: Vec<ExternalPick>,
+    /// `true` selects `dyncall`, `false` selects `dyn`.
+    dyn_selectors: Vec<bool>,
+    /// One flag per skeleton node: whether it becomes a procedure root.
+    root_selection: Vec<bool>,
+}
+
+fn forest_seeds_strategy(params: &MastForestParams) -> BoxedStrategy<ForestSeeds> {
+    let executable = params.mode == GenerationMode::Executable;
+    let block_params = BasicBlockNodeParams { executable, ..Default::default() };
+    let blocks = (*params.blocks.start()).max(1)..=(*params.blocks.end()).max(1);
+    let external_picks: BoxedStrategy<Vec<ExternalPick>> = if executable {
+        prop::collection::vec(any::<(usize, usize)>(), 0..=params.max_externals)
+            .prop_map(|picks| {
+                picks
+                    .into_iter()
+                    .map(|(root, sibling)| ExternalPick::Local { root, sibling })
+                    .collect()
+            })
+            .boxed()
+    } else {
+        prop::collection::vec(any::<Word>(), 0..=params.max_externals)
+            .prop_map(|digests| digests.into_iter().map(ExternalPick::Random).collect())
+            .boxed()
+    };
+    let max_dyns = if executable { 0 } else { params.max_dyns };
+
+    (
+        prop::collection::vec(any_with::<BasicBlockNode>(block_params), blocks),
+        (
+            prop::collection::vec(any::<(usize, usize)>(), 0..=params.max_joins),
+            prop::collection::vec(any::<(usize, usize, bool)>(), 0..=params.max_splits),
+            prop::collection::vec(any::<usize>(), 0..=params.max_loops),
+            prop::collection::vec(any::<usize>(), 0..=params.max_calls),
+        ),
+        (
+            prop::collection::vec(any::<usize>(), 0..=params.max_syscalls),
+            external_picks,
+            prop::collection::vec(any::<bool>(), 0..=max_dyns),
+        ),
+    )
+        // Root selection is the one vector that needs an exact size: a flag per skeleton node.
+        .prop_flat_map(|(basic_blocks, control_flow, tail)| {
+            let (join_pairs, splits, loop_indices, call_indices) = &control_flow;
+            let skeleton_nodes = basic_blocks.len()
+                + join_pairs.len()
+                + splits.len()
+                + loop_indices.len()
+                + call_indices.len();
+            (
+                Just((basic_blocks, control_flow, tail)),
+                prop::collection::vec(any::<bool>(), skeleton_nodes),
+            )
+        })
+        .prop_map(
+            |(
+                (
+                    basic_blocks,
+                    (join_pairs, splits, loop_indices, call_indices),
+                    (syscall_picks, external_picks, dyn_selectors),
+                ),
+                root_selection,
+            )| {
+                ForestSeeds {
+                    basic_blocks,
+                    join_pairs,
+                    splits,
+                    loop_indices,
+                    call_indices,
+                    syscall_picks,
+                    external_picks,
+                    dyn_selectors,
+                    root_selection,
+                }
+            },
+        )
+        .boxed()
+}
+
+// SKELETON
+// ================================================================================================
+
+/// Shared part of a sample: basic blocks, control flow, and the initial procedure roots.
+struct Skeleton {
+    forest: DenseMastForestBuilder,
+    /// Nodes that later nodes may reference and that root selection draws from.
+    node_ids: Vec<MastNodeId>,
+    roots: Vec<MastNodeId>,
+}
+
+/// Single-operation blocks pushing `0` or `1`, created on first use. `0` also ends every loop
+/// body, since a loop inspects its condition only after each iteration.
+#[derive(Default)]
+struct ConditionBlocks {
+    zero: Option<MastNodeId>,
+    one: Option<MastNodeId>,
+}
+
+impl ConditionBlocks {
+    fn get(&mut self, forest: &mut DenseMastForestBuilder, bit: bool) -> MastNodeId {
+        let (slot, op) = if bit {
+            (&mut self.one, Operation::Push(ONE))
+        } else {
+            (&mut self.zero, Operation::Pad)
+        };
+        *slot.get_or_insert_with(|| {
+            forest.push_node(BasicBlockNodeBuilder::new(vec![op])).expect("condition block")
+        })
+    }
+}
+
+fn choose(ids: &[MastNodeId], index: usize) -> MastNodeId {
+    ids[index % ids.len()]
+}
+
+fn digest_of(forest: &DenseMastForestBuilder, id: MastNodeId) -> Word {
+    forest.get_node_by_id(id).expect("node id from this builder").digest()
+}
+
+/// Joins a block pushing `bit` in front of `node`, which consumes it as its condition.
+fn with_condition(
+    forest: &mut DenseMastForestBuilder,
+    conditions: &mut ConditionBlocks,
+    bit: bool,
+    node: MastNodeId,
+) -> MastNodeId {
+    let condition = conditions.get(forest, bit);
+    forest
+        .push_node(JoinNodeBuilder::new([condition, node]))
+        .expect("condition join")
+}
+
+fn build_skeleton(seeds: &ForestSeeds, executable: bool) -> Skeleton {
+    let mut forest = DenseMastForestBuilder::new();
+    let empty_forest = MastForest::new();
+    let mut node_ids: Vec<MastNodeId> = seeds
+        .basic_blocks
+        .iter()
+        .map(|block| {
+            forest.push_node(block.clone().to_builder(&empty_forest)).expect("basic block")
+        })
+        .collect();
+    let mut conditions = ConditionBlocks::default();
+
+    for &(first, second) in &seeds.join_pairs {
+        let join = JoinNodeBuilder::new([choose(&node_ids, first), choose(&node_ids, second)]);
+        node_ids.push(forest.push_node(join).expect("join"));
+    }
+
+    for &(on_true, on_false, condition) in &seeds.splits {
+        let split =
+            SplitNodeBuilder::new([choose(&node_ids, on_true), choose(&node_ids, on_false)]);
+        let mut id = forest.push_node(split).expect("split");
+        if executable {
+            id = with_condition(&mut forest, &mut conditions, condition, id);
+        }
+        node_ids.push(id);
+    }
+
+    for &body in &seeds.loop_indices {
+        let mut body = choose(&node_ids, body);
+        if executable {
+            let exit = conditions.get(&mut forest, false);
+            body = forest.push_node(JoinNodeBuilder::new([body, exit])).expect("loop body");
+        }
+        node_ids.push(forest.push_node(LoopNodeBuilder::new(body)).expect("loop"));
+    }
+
+    for &callee in &seeds.call_indices {
+        let call = CallNodeBuilder::new(choose(&node_ids, callee));
+        node_ids.push(forest.push_node(call).expect("call"));
+    }
+
+    let mut roots: Vec<MastNodeId> = node_ids
+        .iter()
+        .copied()
+        .zip(&seeds.root_selection)
+        .filter_map(|(id, &selected)| selected.then_some(id))
+        .collect();
+    if roots.is_empty() {
+        roots.push(node_ids[0]);
+    }
+    for &root in &roots {
+        forest.mark_root(root);
+    }
+
+    Skeleton { forest, node_ids, roots }
+}
+
+/// Marks every node unreachable from `roots` as a root, top-most nodes first.
+fn promote_unreachable(forest: &mut DenseMastForestBuilder, roots: &mut Vec<MastNodeId>) {
+    let mut reachable = BTreeSet::new();
+    for &root in roots.iter() {
+        mark_reachable(forest, root, &mut reachable);
+    }
+    for index in (0..MastNodeContext::node_count(forest) as u32).rev() {
+        let id = MastNodeId::new_unchecked(index);
+        if !reachable.contains(&id) {
+            forest.mark_root(id);
+            roots.push(id);
+            mark_reachable(forest, id, &mut reachable);
+        }
+    }
+}
+
+fn mark_reachable(
+    forest: &DenseMastForestBuilder,
+    from: MastNodeId,
+    reachable: &mut BTreeSet<MastNodeId>,
+) {
+    let mut stack = vec![from];
+    while let Some(id) = stack.pop() {
+        if reachable.insert(id) {
+            forest
+                .get_node_by_id(id)
+                .expect("node id from this builder")
+                .append_children_to(&mut stack);
+        }
+    }
+}
+
+// EXECUTABLE MODE
+// ================================================================================================
+
+fn build_executable_forest(
+    seeds: &ForestSeeds,
+    kernel: Option<&KernelDescriptor>,
+) -> (MastForest, KernelDescriptor) {
+    let Skeleton { mut forest, node_ids, mut roots } = build_skeleton(seeds, true);
+    let mut externals = BTreeMap::new();
+
+    add_local_externals(&mut forest, &node_ids, &mut roots, &mut externals, &seeds.external_picks);
+    let syscall_hashes = match kernel {
+        Some(kernel) => {
+            let hashes = kernel.proc_hashes();
+            add_kernel_syscalls(
+                &mut forest,
+                &mut roots,
+                &mut externals,
+                hashes,
+                &seeds.syscall_picks,
+            );
+            Vec::new()
+        },
+        None => add_local_syscalls(&mut forest, &mut roots, &seeds.syscall_picks),
+    };
+    promote_unreachable(&mut forest, &mut roots);
+
+    let kernel = kernel.cloned().unwrap_or_else(|| {
+        KernelDescriptor::from_hashes(syscall_hashes).expect("unique hashes within the size limit")
+    });
+    let forest = forest.build().expect("generated forest is valid");
+    (forest, kernel)
+}
+
+/// Adds externals resolving to a root of the same forest. Each one is joined with an existing
+/// node, so the external is used by a procedure instead of being a root itself.
+fn add_local_externals(
+    forest: &mut DenseMastForestBuilder,
+    node_ids: &[MastNodeId],
+    roots: &mut Vec<MastNodeId>,
+    externals: &mut BTreeMap<Word, MastNodeId>,
+    picks: &[ExternalPick],
+) {
+    for pick in picks {
+        let ExternalPick::Local { root, sibling } = *pick else {
+            continue;
+        };
+        let digest = digest_of(forest, choose(roots, root));
+        // Dense forests hold at most one external per digest.
+        if externals.contains_key(&digest) {
+            continue;
+        }
+        let external = forest.push_node(ExternalNodeBuilder::new(digest)).expect("external");
+        externals.insert(digest, external);
+        let join = JoinNodeBuilder::new([external, choose(node_ids, sibling)]);
+        let wrapper = forest.push_node(join).expect("external join");
+        forest.mark_root(wrapper);
+        roots.push(wrapper);
+    }
+}
+
+/// Adds syscalls to existing roots and returns the callee digests, which stay within the kernel
+/// size limit.
+fn add_local_syscalls(
+    forest: &mut DenseMastForestBuilder,
+    roots: &mut Vec<MastNodeId>,
+    picks: &[usize],
+) -> Vec<Word> {
+    let mut hashes: Vec<Word> = Vec::new();
+    for &index in picks {
+        // Once the kernel is full, only roots already in it can be called.
+        let full = hashes.len() >= KernelDescriptor::MAX_NUM_PROCEDURES;
+        let callable: Vec<MastNodeId> = roots
+            .iter()
+            .copied()
+            .filter(|&id| !full || hashes.contains(&digest_of(forest, id)))
+            .collect();
+        if callable.is_empty() {
+            continue;
+        }
+        let callee = choose(&callable, index);
+        let digest = digest_of(forest, callee);
+        let syscall = forest.push_node(CallNodeBuilder::new_syscall(callee)).expect("syscall");
+        forest.mark_root(syscall);
+        roots.push(syscall);
+        if !hashes.contains(&digest) {
+            hashes.push(digest);
+        }
+    }
+    hashes
+}
+
+/// Adds syscalls whose callees are externals carrying the supplied kernel hashes.
+fn add_kernel_syscalls(
+    forest: &mut DenseMastForestBuilder,
+    roots: &mut Vec<MastNodeId>,
+    externals: &mut BTreeMap<Word, MastNodeId>,
+    hashes: &[Word],
+    picks: &[usize],
+) {
+    if hashes.is_empty() {
+        return;
+    }
+    for &index in picks {
+        let hash = hashes[index % hashes.len()];
+        let callee = *externals.entry(hash).or_insert_with(|| {
+            forest.push_node(ExternalNodeBuilder::new(hash)).expect("kernel external")
+        });
+        let syscall = forest.push_node(CallNodeBuilder::new_syscall(callee)).expect("syscall");
+        forest.mark_root(syscall);
+        roots.push(syscall);
+    }
+}
+
+// STRUCTURE-ONLY MODE
+// ================================================================================================
+
+fn build_structure_only_forest(
+    seeds: &ForestSeeds,
+    kernel: Option<&KernelDescriptor>,
+) -> (MastForest, KernelDescriptor) {
+    let Skeleton { mut forest, mut node_ids, mut roots } = build_skeleton(seeds, false);
+
+    for &index in &seeds.syscall_picks {
+        let syscall = CallNodeBuilder::new_syscall(choose(&node_ids, index));
+        node_ids.push(forest.push_node(syscall).expect("syscall"));
+    }
+
+    let mut digests = BTreeSet::new();
+    for pick in &seeds.external_picks {
+        let ExternalPick::Random(digest) = *pick else { continue };
+        if digests.insert(digest) {
+            node_ids.push(forest.push_node(ExternalNodeBuilder::new(digest)).expect("external"));
+        }
+    }
+
+    for &dyncall in &seeds.dyn_selectors {
+        let node = if dyncall {
+            DynNodeBuilder::new_dyncall()
+        } else {
+            DynNodeBuilder::new_dyn()
+        };
+        node_ids.push(forest.push_node(node).expect("dyn"));
+    }
+
+    promote_unreachable(&mut forest, &mut roots);
+    let forest = forest.build().expect("generated forest is valid");
+    (forest, kernel.cloned().unwrap_or_default())
+}
+
+// STRATEGIES
+// ================================================================================================
+
+/// Strategy yielding `(MastForest, KernelDescriptor)` pairs. See [`MastForestParams`] for what
+/// each [`GenerationMode`] guarantees.
+///
+/// # Panics
+///
+/// Panics if `params.kernel_procedures` is rejected by [`KernelDescriptor::from_hashes`]. The
+/// check does not depend on the sample, so it runs once here instead of rejecting every sample.
+pub fn forest_kernel_strategy(
+    params: MastForestParams,
+) -> BoxedStrategy<(MastForest, KernelDescriptor)> {
+    let kernel = params.kernel_procedures.clone().map(|hashes| {
+        KernelDescriptor::from_hashes(hashes)
+            .unwrap_or_else(|err| panic!("MastForestParams::kernel_procedures is invalid: {err}"))
+    });
+    let mode = params.mode;
+
+    forest_seeds_strategy(&params)
+        .prop_map(move |seeds| match mode {
+            GenerationMode::Executable => build_executable_forest(&seeds, kernel.as_ref()),
+            GenerationMode::StructureOnly => build_structure_only_forest(&seeds, kernel.as_ref()),
+        })
+        .boxed()
 }
 
 impl Arbitrary for MastForest {
     type Parameters = MastForestParams;
     type Strategy = BoxedStrategy<Self>;
 
-    /// Generates a MastForest with the specified parameters.
-    ///
-    /// # Generated Forest Properties
-    ///
-    /// - **Basic blocks**: Always generated (1..=blocks.end()) with operations
-    /// - **Control flow nodes**: Generated according to max_* parameters, may be 0
-    /// - **Root nodes**: ~1/3 of generated nodes are marked as roots
-    ///
-    /// # Execution Limitations
-    ///
-    /// Generated forests may not be executable depending on parameters:
-    ///
-    /// ## Syscalls (`max_syscalls`)
-    /// - Generated syscalls reference random procedure digests
-    /// - Execution requires a kernel containing matching procedure hashes
-    /// - For executable forests, set `max_syscalls = 0`
-    ///
-    /// ## External Nodes (`max_externals`)
-    /// - Generated with random digests that won't match valid procedures
-    /// - Any program with external nodes will fail during execution
-    /// - For executable forests, set `max_externals = 0`
-    ///
-    /// ## Dynamic Nodes (`max_dyns`)
-    /// - Dyn and dyncall nodes leave junk on the stack
-    /// - These nodes cannot execute properly in practice
-    /// - For executable forests, set `max_dyns = 0`
-    ///
-    /// # Example Usage
-    ///
-    /// ```rust
-    /// use miden_core::mast::{MastForest, arbitrary::MastForestParams};
-    /// use proptest::arbitrary::Arbitrary;
-    ///
-    /// // Generate executable forest (default)
-    /// let forest = MastForest::arbitrary_with(MastForestParams::default());
-    ///
-    /// // Generate forest with non-executable nodes for testing
-    /// let params = MastForestParams {
-    ///     max_syscalls: 2,
-    ///     max_externals: 1,
-    ///     max_dyns: 1,
-    ///     ..Default::default()
-    /// };
-    /// let forest = MastForest::arbitrary_with(params);
-    /// ```
-    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
-        let bb_params = BasicBlockNodeParams { ..Default::default() };
-
-        // Generate nodes in a way that respects topological ordering
-        (
-            // Generate basic blocks first (they have no dependencies)
-            prop::collection::vec(any_with::<BasicBlockNode>(bb_params), 1..=*params.blocks.end()),
-            // Generate control flow node counts within the specified limits
-            (
-                // Generate number of join nodes (0 to max_joins)
-                0..=params.max_joins,
-                // Generate number of split nodes (0 to max_splits)
-                0..=params.max_splits,
-                // Generate number of loop nodes (0 to max_loops)
-                0..=params.max_loops,
-                // Generate number of call nodes (0 to max_calls)
-                0..=params.max_calls,
-                // Generate number of syscall nodes (0 to max_syscalls)
-                0..=params.max_syscalls,
-                // Generate number of external nodes (0 to max_externals)
-                0..=params.max_externals,
-                // Generate number of dyn nodes (0 to max_dyns)
-                0..=params.max_dyns,
-            ),
-        )
-            .prop_flat_map(
-                move |(
-                    basic_blocks,
-                    (
-                        num_joins,
-                        num_splits,
-                        num_loops,
-                        num_calls,
-                        num_syscalls,
-                        num_externals,
-                        num_dyns,
-                    ),
-                )| {
-                    let num_basic_blocks = basic_blocks.len();
-
-                    // Ensure we have enough basic blocks for parents to reference
-                    let max_parent_nodes = num_basic_blocks.saturating_sub(1);
-                    let num_joins = num_joins.min(max_parent_nodes);
-                    let num_splits = num_splits.min(max_parent_nodes);
-                    let num_loops = num_loops.min(num_basic_blocks);
-                    let num_calls = num_calls.min(num_basic_blocks);
-                    let num_syscalls = num_syscalls.min(num_basic_blocks);
-
-                    // Generate indices for creating parent nodes
-                    (
-                        Just(basic_blocks),
-                        Just((
-                            num_joins,
-                            num_splits,
-                            num_loops,
-                            num_calls,
-                            num_syscalls,
-                            num_externals,
-                            num_dyns,
-                        )),
-                        // Generate indices for join nodes (need 2 children each)
-                        prop::collection::vec(any::<(usize, usize)>(), num_joins..=num_joins)
-                            .prop_map(move |pairs| {
-                                pairs
-                                    .into_iter()
-                                    .map(|(a, b)| (a % num_basic_blocks, b % num_basic_blocks))
-                                    .collect::<Vec<_>>()
-                            }),
-                        // Generate indices for split nodes (need 2 children each)
-                        prop::collection::vec(any::<(usize, usize)>(), num_splits..=num_splits)
-                            .prop_map(move |pairs| {
-                                pairs
-                                    .into_iter()
-                                    .map(|(a, b)| (a % num_basic_blocks, b % num_basic_blocks))
-                                    .collect::<Vec<_>>()
-                            }),
-                        // Generate indices for loop nodes (need 1 child each)
-                        prop::collection::vec(any::<usize>(), num_loops..=num_loops).prop_map(
-                            move |indices| {
-                                indices
-                                    .into_iter()
-                                    .map(|i| i % num_basic_blocks)
-                                    .collect::<Vec<_>>()
-                            },
-                        ),
-                        // Generate indices for call nodes (need 1 child each)
-                        prop::collection::vec(any::<usize>(), num_calls..=num_calls).prop_map(
-                            move |indices| {
-                                indices
-                                    .into_iter()
-                                    .map(|i| i % num_basic_blocks)
-                                    .collect::<Vec<_>>()
-                            },
-                        ),
-                        // Generate indices for syscall nodes (need 1 child each)
-                        prop::collection::vec(any::<usize>(), num_syscalls..=num_syscalls)
-                            .prop_map(move |indices| {
-                                indices
-                                    .into_iter()
-                                    .map(|i| i % num_basic_blocks)
-                                    .collect::<Vec<_>>()
-                            }),
-                        // Generate digests for external nodes
-                        prop::collection::vec(any::<[u64; 4]>(), num_externals..=num_externals)
-                            .prop_map(move |digests| {
-                                digests
-                                    .into_iter()
-                                    .map(|[a, b, c, d]| {
-                                        Word::from([
-                                            Felt::new_unchecked(a),
-                                            Felt::new_unchecked(b),
-                                            Felt::new_unchecked(c),
-                                            Felt::new_unchecked(d),
-                                        ])
-                                    })
-                                    .collect::<Vec<_>>()
-                            }),
-                    )
-                },
-            )
-            .prop_map(
-                move |(
-                    basic_blocks,
-                    (
-                        _num_joins,
-                        _num_splits,
-                        _num_loops,
-                        _num_calls,
-                        _num_syscalls,
-                        _num_externals,
-                        num_dyns,
-                    ),
-                    join_pairs,
-                    split_pairs,
-                    loop_indices,
-                    call_indices,
-                    syscall_indices,
-                    external_digests,
-                )| {
-                    let mut forest = DenseMastForestBuilder::new();
-                    let empty_forest = MastForest::new();
-
-                    // 2) Add basic blocks and collect their IDs
-                    let mut basic_block_ids = Vec::new();
-                    for block in basic_blocks {
-                        let builder = block.to_builder(&empty_forest);
-                        let node_id = forest.push_node(builder).expect("Failed to add block");
-                        basic_block_ids.push(node_id);
-                    }
-
-                    // 3) Add control flow nodes in topological order (children already exist)
-                    let mut all_node_ids = basic_block_ids.clone();
-
-                    // Add join nodes
-                    for &(left_idx, right_idx) in &join_pairs {
-                        if left_idx < all_node_ids.len() && right_idx < all_node_ids.len() {
-                            let left_id = all_node_ids[left_idx];
-                            let right_id = all_node_ids[right_idx];
-                            if let Ok(join_id) =
-                                forest.push_node(JoinNodeBuilder::new([left_id, right_id]))
-                            {
-                                all_node_ids.push(join_id);
-                            }
-                        }
-                    }
-
-                    // Add split nodes
-                    for &(true_idx, false_idx) in &split_pairs {
-                        if true_idx < all_node_ids.len() && false_idx < all_node_ids.len() {
-                            let true_id = all_node_ids[true_idx];
-                            let false_id = all_node_ids[false_idx];
-                            if let Ok(split_id) =
-                                forest.push_node(SplitNodeBuilder::new([true_id, false_id]))
-                            {
-                                all_node_ids.push(split_id);
-                            }
-                        }
-                    }
-
-                    // Add loop nodes
-                    for &body_idx in &loop_indices {
-                        if body_idx < all_node_ids.len() {
-                            let body_id = all_node_ids[body_idx];
-                            if let Ok(loop_id) = forest.push_node(LoopNodeBuilder::new(body_id)) {
-                                all_node_ids.push(loop_id);
-                            }
-                        }
-                    }
-
-                    // Add call nodes
-                    for &callee_idx in &call_indices {
-                        if callee_idx < all_node_ids.len() {
-                            let callee_id = all_node_ids[callee_idx];
-                            let call_id =
-                                forest.push_node(CallNodeBuilder::new(callee_id)).unwrap();
-                            all_node_ids.push(call_id);
-                        }
-                    }
-
-                    // Add syscall nodes
-                    // WARNING: These use random procedure digests and will not execute without a
-                    // matching kernel
-                    for &callee_idx in &syscall_indices {
-                        if callee_idx < all_node_ids.len() {
-                            let callee_id = all_node_ids[callee_idx];
-                            let syscall_id =
-                                forest.push_node(CallNodeBuilder::new_syscall(callee_id)).unwrap();
-                            all_node_ids.push(syscall_id);
-                        }
-                    }
-
-                    // Add external nodes
-                    // WARNING: These use random digests that won't match any valid procedures
-                    let mut external_digest_set = BTreeSet::new();
-                    for digest in external_digests {
-                        if !external_digest_set.insert(digest) {
-                            continue;
-                        }
-
-                        if let Ok(external_id) = forest.push_node(ExternalNodeBuilder::new(digest))
-                        {
-                            all_node_ids.push(external_id);
-                        }
-                    }
-
-                    // Add dyn nodes (mix of dyn and dyncall)
-                    // WARNING: These leave junk on the stack and cannot execute properly
-                    for i in 0..num_dyns {
-                        let dyn_id = if i % 2 == 0 {
-                            forest.push_node(DynNodeBuilder::new_dyn()).unwrap()
-                        } else {
-                            forest.push_node(DynNodeBuilder::new_dyncall()).unwrap()
-                        };
-                        all_node_ids.push(dyn_id);
-                    }
-
-                    // 4) Make some nodes roots (but not all, to test internal nodes)
-                    let num_roots = (all_node_ids.len() / 3).max(1); // Make roughly 1/3 of nodes roots
-                    let mut root_digest_set = BTreeSet::new();
-                    for (i, &node_id) in all_node_ids.iter().enumerate() {
-                        if i % (all_node_ids.len() / num_roots.max(1)) == 0
-                            && root_digest_set
-                                .insert(forest.get_node_by_id(node_id).unwrap().digest())
-                        {
-                            forest.mark_root(node_id);
-                        }
-                    }
-
-                    forest.build().expect("generated MAST forest should be valid")
-                },
-            )
-            .boxed()
+    /// Samples forests that need no kernel: in [`GenerationMode::Executable`] no syscalls are
+    /// emitted, so every root runs under the empty kernel of `Program::new`. Use
+    /// [`forest_kernel_strategy`] to sample syscalls together with their kernel.
+    fn arbitrary_with(mut params: Self::Parameters) -> Self::Strategy {
+        if params.mode == GenerationMode::Executable {
+            params.max_syscalls = 0;
+        }
+        forest_kernel_strategy(params).prop_map(|(forest, _)| forest).boxed()
     }
 }
+
+// OTHER ARBITRARY IMPLEMENTATIONS
+// ================================================================================================
 
 impl Arbitrary for AdviceMap {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        // Strategy for generating Word keys
-        let word_strategy = prop_oneof![
-            Just(Word::default()),
-            any::<[u64; 4]>().prop_map(|[a, b, c, d]| Word::new([
-                Felt::new_unchecked(a),
-                Felt::new_unchecked(b),
-                Felt::new_unchecked(c),
-                Felt::new_unchecked(d)
-            ])),
-        ];
-
-        // Strategy for generating Arc<[Felt]> values
-        let felt_array_strategy = prop::collection::vec(any::<u64>(), 1..=4).prop_map(|vals| {
-            let felts: Arc<[Felt]> = vals.into_iter().map(Felt::new_unchecked).collect();
-            felts
+        let key = prop_oneof![Just(Word::default()), any::<Word>()];
+        let value = prop::collection::vec(any::<u64>(), 1..=4).prop_map(|values| {
+            values.into_iter().map(Felt::new_unchecked).collect::<Arc<[Felt]>>()
         });
 
-        // Strategy for generating map entries
-        let entry_strategy = (word_strategy, felt_array_strategy);
-
-        // Strategy for generating the map itself (0 to 10 entries)
-        prop::collection::vec(entry_strategy, 0..=10)
-            .prop_map(|entries| {
-                let mut map = BTreeMap::new();
-                for (key, value) in entries {
-                    map.insert(key, value);
-                }
-                AdviceMap::from(map)
-            })
+        prop::collection::vec((key, value), 0..=10)
+            .prop_map(|entries| AdviceMap::from(entries.into_iter().collect::<BTreeMap<_, _>>()))
             .boxed()
     }
 }
@@ -558,31 +790,22 @@ impl Arbitrary for Program {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
 
+    /// Generates a program whose entrypoint is a single basic block.
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        // Create a simple strategy that generates a basic block and creates a program from it
-        any_with::<BasicBlockNode>(BasicBlockNodeParams {
-            max_ops_len: 4, // Keep it small
-        })
-        .prop_map(|node| {
-            // Create a new MastForest
-            let mut builder = DenseMastForestBuilder::new();
-            let empty_forest = MastForest::new();
+        any_with::<BasicBlockNode>(BasicBlockNodeParams { max_ops_len: 4, ..Default::default() })
+            .prop_map(|node| {
+                let mut builder = DenseMastForestBuilder::new();
+                let node_id = builder
+                    .push_node(node.to_builder(&MastForest::new()))
+                    .expect("Failed to add node");
+                builder.mark_root(node_id);
+                let (forest, remapping) =
+                    builder.build_with_id_map().expect("generated program forest should be valid");
+                let entrypoint = remapping.get(node_id).expect("entrypoint should be retained");
 
-            // Add the node to the forest using builder
-            let node_builder = node.to_builder(&empty_forest);
-            let node_id = builder.push_node(node_builder).expect("Failed to add node");
-            builder.mark_root(node_id);
-            let (forest, remapping) =
-                builder.build_with_id_map().expect("generated program forest should be valid");
-            let entrypoint = remapping.get(node_id).expect("entrypoint should be retained");
-
-            Program::new(Arc::new(forest), entrypoint)
-        })
-        .prop_filter("valid entrypoint", |program| {
-            // Ensure the generated program has a valid procedure entrypoint
-            program.mast_forest().is_procedure_root(program.entrypoint())
-        })
-        .boxed()
+                Program::new(Arc::new(forest), entrypoint)
+            })
+            .boxed()
     }
 }
 
@@ -591,21 +814,329 @@ impl Arbitrary for KernelDescriptor {
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        // Strategy for generating Word vectors
-        let word_strategy = any::<[u64; 4]>().prop_map(|[a, b, c, d]| {
-            Word::new([
-                Felt::new_unchecked(a),
-                Felt::new_unchecked(b),
-                Felt::new_unchecked(c),
-                Felt::new_unchecked(d),
-            ])
-        });
-
-        // Strategy for generating kernel (0 to 3 words to avoid hitting MAX_NUM_PROCEDURES limit)
-        prop::collection::vec(word_strategy, 0..=3)
-            .prop_map(|words: Vec<Word>| {
-                KernelDescriptor::new(&words).expect("Generated kernel should be valid")
+        // Distinct random words, well below `MAX_NUM_PROCEDURES`.
+        prop::collection::btree_set(any::<Word>(), 0..=3)
+            .prop_map(|words| {
+                KernelDescriptor::from_hashes(words.into_iter().collect())
+                    .expect("Generated kernel should be valid")
             })
             .boxed()
+    }
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+    use core::fmt::Debug;
+
+    use proptest::{strategy::ValueTree, test_runner::TestRunner};
+
+    use super::*;
+    use crate::mast::{CallNode, MastNode, OpBatch, SubtreeIterator};
+
+    fn word(seed: u32) -> Word {
+        Word::from([seed, seed + 1, seed + 2, seed + 3])
+    }
+
+    fn sample<T: Debug>(strategy: &BoxedStrategy<T>, runner: &mut TestRunner) -> T {
+        strategy.new_tree(runner).expect("strategy does not reject").current()
+    }
+
+    fn syscalls(forest: &MastForest) -> impl Iterator<Item = &CallNode> {
+        forest.nodes().iter().filter_map(|node| match node {
+            MastNode::Call(call) if call.is_syscall() => Some(call),
+            _ => None,
+        })
+    }
+
+    fn assert_pruned(forest: &MastForest) {
+        let reachable: BTreeSet<MastNodeId> = forest
+            .procedure_roots()
+            .iter()
+            .flat_map(|root| SubtreeIterator::new(root, forest))
+            .collect();
+        assert_eq!(reachable.len(), forest.num_nodes() as usize);
+    }
+
+    fn executable_params() -> MastForestParams {
+        MastForestParams {
+            blocks: 1..=4,
+            max_syscalls: 3,
+            max_externals: 3,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn default_params_select_executable_mode() {
+        let params = MastForestParams::default();
+        assert_eq!(params.mode, GenerationMode::Executable);
+        assert_eq!(params.kernel_procedures, None);
+        assert_eq!((params.max_syscalls, params.max_externals, params.max_dyns), (1, 1, 0));
+    }
+
+    #[test]
+    #[should_panic(expected = "kernel_procedures is invalid")]
+    fn duplicate_kernel_procedures_panic() {
+        let _ = forest_kernel_strategy(MastForestParams {
+            kernel_procedures: Some(vec![word(0), word(0)]),
+            ..Default::default()
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "kernel_procedures is invalid")]
+    fn oversized_kernel_procedures_panic() {
+        let hashes = (0..=KernelDescriptor::MAX_NUM_PROCEDURES as u32).map(word).collect();
+        let _ = forest_kernel_strategy(MastForestParams {
+            kernel_procedures: Some(hashes),
+            ..Default::default()
+        });
+    }
+
+    #[test]
+    fn structure_only_emits_every_node_kind() {
+        let strategy = forest_kernel_strategy(MastForestParams {
+            mode: GenerationMode::StructureOnly,
+            max_syscalls: 3,
+            max_externals: 3,
+            max_dyns: 4,
+            ..Default::default()
+        });
+        let mut runner = TestRunner::default();
+        // dyn, dyncall, external, syscall
+        let mut seen = [false; 4];
+        for _ in 0..256 {
+            let (forest, _) = sample(&strategy, &mut runner);
+            for node in forest.nodes() {
+                match node {
+                    MastNode::Dyn(dyn_node) => seen[usize::from(dyn_node.is_dyncall())] = true,
+                    MastNode::External(_) => seen[2] = true,
+                    MastNode::Call(call) if call.is_syscall() => seen[3] = true,
+                    _ => {},
+                }
+            }
+            if seen.iter().all(|&kind| kind) {
+                return;
+            }
+        }
+        panic!("missing node kinds: {seen:?}");
+    }
+
+    #[test]
+    fn supplied_kernel_syscalls_target_its_hashes() {
+        let hashes = vec![word(1), word(10)];
+        let strategy = forest_kernel_strategy(MastForestParams {
+            kernel_procedures: Some(hashes.clone()),
+            max_syscalls: 3,
+            ..Default::default()
+        });
+        let mut runner = TestRunner::default();
+        let (forest, kernel) = (0..64)
+            .map(|_| sample(&strategy, &mut runner))
+            .find(|(forest, _)| syscalls(forest).next().is_some())
+            .expect("a sample with syscalls");
+
+        assert_eq!(kernel.proc_hashes().len(), hashes.len());
+        for call in syscalls(&forest) {
+            let callee = &forest[call.callee()];
+            assert!(callee.is_external());
+            assert!(kernel.contains_proc(callee.digest()));
+        }
+    }
+
+    #[test]
+    fn empty_supplied_kernel_emits_no_syscalls() {
+        let strategy = forest_kernel_strategy(MastForestParams {
+            kernel_procedures: Some(Vec::new()),
+            max_syscalls: 4,
+            max_calls: 0,
+            ..Default::default()
+        });
+        let mut runner = TestRunner::default();
+        for _ in 0..64 {
+            let (forest, kernel) = sample(&strategy, &mut runner);
+            assert!(kernel.is_empty());
+            assert!(!forest.nodes().iter().any(|node| matches!(node, MastNode::Call(_))));
+        }
+    }
+
+    #[test]
+    fn blocks_range_lower_bound_is_respected() {
+        let strategy = forest_kernel_strategy(MastForestParams {
+            blocks: 4..=4,
+            max_joins: 0,
+            max_splits: 0,
+            max_loops: 0,
+            max_calls: 0,
+            max_syscalls: 0,
+            max_externals: 0,
+            ..Default::default()
+        });
+        let mut runner = TestRunner::default();
+        for _ in 0..16 {
+            let (forest, _) = sample(&strategy, &mut runner);
+            assert_eq!(forest.nodes().iter().filter(|node| node.is_basic_block()).count(), 4);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn executable_forests_have_no_dyn_nodes(
+            forest in any_with::<MastForest>(MastForestParams { max_dyns: 6, ..Default::default() })
+        ) {
+            prop_assert!(!forest.nodes().iter().any(MastNode::is_dyn));
+        }
+
+        /// Without a paired kernel there is nothing a syscall could target.
+        #[test]
+        fn plain_executable_forests_have_no_syscalls(
+            forest in any_with::<MastForest>(MastForestParams { max_syscalls: 3, ..Default::default() })
+        ) {
+            prop_assert!(syscalls(&forest).next().is_none());
+        }
+
+        /// Balancing never pushes an executable block past `max_ops_len`.
+        #[test]
+        fn executable_block_ops_respect_max_ops_len(
+            (max_ops_len, ops) in (1usize..=12).prop_flat_map(|max_ops_len| {
+                let params = BasicBlockNodeParams { max_ops_len, executable: true };
+                (Just(max_ops_len), block_ops_strategy(&params))
+            })
+        ) {
+            prop_assert!(!ops.is_empty() && ops.len() <= max_ops_len, "{ops:?}");
+            let mut depth = 0i32;
+            for op in &ops {
+                depth += i32::from(stack_delta(op).unwrap_or_default());
+                prop_assert!(depth >= 0, "underflow in {ops:?}");
+            }
+            prop_assert_eq!(depth, 0, "unbalanced {:?}", ops);
+        }
+
+        /// Blocks hold only infallible operations and leave the stack depth unchanged, except for
+        /// the single-operation blocks that push a split or loop condition.
+        #[test]
+        fn executable_blocks_are_infallible_and_balanced(
+            forest in any_with::<MastForest>(executable_params())
+        ) {
+            for node in forest.nodes() {
+                let Some(block) = node.get_basic_block() else { continue };
+                let ops: Vec<Operation> =
+                    block.op_batches().iter().flat_map(OpBatch::ops).copied().collect();
+                let mut depth = 0i32;
+                for op in &ops {
+                    let delta = stack_delta(op);
+                    prop_assert!(delta.is_some(), "fallible operation {op:?}");
+                    depth += i32::from(delta.unwrap_or_default());
+                    prop_assert!(depth >= 0, "block underflows its entry depth: {ops:?}");
+                }
+                let real: Vec<Operation> =
+                    ops.iter().copied().filter(|op| *op != Operation::Noop).collect();
+                let pushes_condition = matches!(real[..], [Operation::Pad])
+                    || matches!(real[..], [Operation::Push(value)] if value == ONE);
+                prop_assert!(depth == 0 || (depth == 1 && pushes_condition), "unbalanced block {ops:?}");
+            }
+        }
+
+        #[test]
+        fn externals_resolve_to_a_local_root(
+            forest in any_with::<MastForest>(executable_params())
+        ) {
+            for node in forest.nodes().iter().filter(|node| node.is_external()) {
+                let target = forest.find_procedure_root(node.digest());
+                prop_assert!(
+                    target.is_some_and(|target| !forest[target].is_external()),
+                    "external does not resolve to a local root",
+                );
+            }
+        }
+
+        /// Edges lead from the root containing an external to the root it resolves to.
+        #[test]
+        fn externals_form_a_dag(
+            forest in any_with::<MastForest>(MastForestParams { max_externals: 6, ..Default::default() })
+        ) {
+            fn acyclic(
+                node: MastNodeId,
+                edges: &[(MastNodeId, MastNodeId)],
+                path: &mut BTreeSet<MastNodeId>,
+                done: &mut BTreeSet<MastNodeId>,
+            ) -> bool {
+                if done.contains(&node) {
+                    return true;
+                }
+                if !path.insert(node) {
+                    return false;
+                }
+                let ok = edges
+                    .iter()
+                    .filter(|(source, _)| *source == node)
+                    .all(|&(_, target)| acyclic(target, edges, path, done));
+                path.remove(&node);
+                done.insert(node);
+                ok
+            }
+
+            let roots = forest.procedure_roots();
+            let mut edges = Vec::new();
+            for (index, node) in forest.nodes().iter().enumerate() {
+                if !node.is_external() {
+                    continue;
+                }
+                let id = MastNodeId::new_unchecked(index as u32);
+                let source = roots
+                    .iter()
+                    .copied()
+                    .find(|root| SubtreeIterator::new(root, &forest).any(|reached| reached == id))
+                    .expect("pruned forest");
+                let target = forest.find_procedure_root(node.digest()).expect("resolvable external");
+                edges.push((source, target));
+            }
+
+            let (mut path, mut done) = (BTreeSet::new(), BTreeSet::new());
+            for &root in roots {
+                prop_assert!(acyclic(root, &edges, &mut path, &mut done), "cycle through externals");
+            }
+        }
+
+        #[test]
+        fn syscalls_target_kernel_procedures(
+            (forest, kernel) in forest_kernel_strategy(executable_params())
+        ) {
+            for call in syscalls(&forest) {
+                prop_assert!(kernel.contains_proc(forest[call.callee()].digest()));
+            }
+        }
+
+        #[test]
+        fn generated_kernel_lists_exactly_the_syscall_targets(
+            (forest, kernel) in forest_kernel_strategy(executable_params())
+        ) {
+            let targets: BTreeSet<Word> =
+                syscalls(&forest).map(|call| forest[call.callee()].digest()).collect();
+            let listed: BTreeSet<Word> = kernel.proc_hashes().iter().copied().collect();
+            prop_assert_eq!(listed, targets);
+        }
+
+        #[test]
+        fn executable_forests_are_pruned(forest in any_with::<MastForest>(executable_params())) {
+            assert_pruned(&forest);
+        }
+
+        #[test]
+        fn structure_only_forests_are_pruned(
+            forest in any_with::<MastForest>(MastForestParams {
+                mode: GenerationMode::StructureOnly,
+                max_syscalls: 3,
+                max_externals: 3,
+                max_dyns: 3,
+                ..Default::default()
+            })
+        ) {
+            assert_pruned(&forest);
+        }
     }
 }

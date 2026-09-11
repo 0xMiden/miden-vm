@@ -865,8 +865,6 @@ impl proptest::prelude::Arbitrary for BasicBlockNodeBuilder {
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
-        use super::arbitrary::op_non_control_sequence_strategy;
-
-        op_non_control_sequence_strategy(params.max_ops_len).prop_map(Self::new).boxed()
+        arbitrary::block_ops_strategy(&params).prop_map(Self::new).boxed()
     }
 }

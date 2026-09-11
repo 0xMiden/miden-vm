@@ -49,6 +49,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 miden-assembly = { workspace = true, features = ["testing"] }
+miden-core = { workspace = true, features = ["arbitrary"] }
 tracing = { workspace = true, features = ["std"] }
 tracing-subscriber.workspace = true
 miden-utils-testing.workspace = true
