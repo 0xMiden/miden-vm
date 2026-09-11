@@ -193,15 +193,17 @@ fn op_infallible_strategy() -> impl Strategy<Value = Operation> {
     ]
 }
 
-/// Drops operations that would take the stack below its depth on entry and appends `Drop`s so
-/// the block leaves the depth as it found it. Every operation in `ops` must be infallible.
-fn balance_ops(ops: Vec<Operation>) -> Vec<Operation> {
+/// Keeps at most `max_len` of `ops`, skipping operations that would take the stack below its
+/// depth on entry or leave no room for the `Drop`s that restore it, then appends those `Drop`s.
+/// Every operation in `ops` must be infallible.
+fn balance_ops(ops: Vec<Operation>, max_len: usize) -> Vec<Operation> {
     let mut depth = 0i32;
-    let mut balanced = Vec::with_capacity(ops.len() * 2);
+    let mut balanced = Vec::with_capacity(max_len);
     for op in ops {
         let delta = i32::from(stack_delta(&op).expect("infallible operation"));
-        if depth + delta >= 0 {
-            depth += delta;
+        let next_depth = depth + delta;
+        if next_depth >= 0 && balanced.len() + 1 + next_depth as usize <= max_len {
+            depth = next_depth;
             balanced.push(op);
         }
     }
@@ -234,8 +236,9 @@ impl Default for BasicBlockNodeParams {
 /// Strategy for the operations of a basic block described by `params`.
 pub fn block_ops_strategy(params: &BasicBlockNodeParams) -> BoxedStrategy<Vec<Operation>> {
     if params.executable {
-        prop::collection::vec(op_infallible_strategy(), 1..=params.max_ops_len)
-            .prop_map(balance_ops)
+        let max_len = params.max_ops_len;
+        prop::collection::vec(op_infallible_strategy(), 1..=max_len)
+            .prop_map(move |ops| balance_ops(ops, max_len))
             .boxed()
     } else {
         op_non_control_sequence_strategy(params.max_ops_len).boxed()
@@ -1004,6 +1007,23 @@ mod tests {
             forest in any_with::<MastForest>(MastForestParams { max_syscalls: 3, ..Default::default() })
         ) {
             prop_assert!(syscalls(&forest).next().is_none());
+        }
+
+        /// Balancing never pushes an executable block past `max_ops_len`.
+        #[test]
+        fn executable_block_ops_respect_max_ops_len(
+            (max_ops_len, ops) in (1usize..=12).prop_flat_map(|max_ops_len| {
+                let params = BasicBlockNodeParams { max_ops_len, executable: true };
+                (Just(max_ops_len), block_ops_strategy(&params))
+            })
+        ) {
+            prop_assert!(!ops.is_empty() && ops.len() <= max_ops_len, "{ops:?}");
+            let mut depth = 0i32;
+            for op in &ops {
+                depth += i32::from(stack_delta(op).unwrap_or_default());
+                prop_assert!(depth >= 0, "underflow in {ops:?}");
+            }
+            prop_assert_eq!(depth, 0, "unbalanced {:?}", ops);
         }
 
         /// Blocks hold only infallible operations and leave the stack depth unchanged, except for
