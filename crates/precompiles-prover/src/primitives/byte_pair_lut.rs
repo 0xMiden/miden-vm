@@ -82,6 +82,17 @@ impl BytePairLutRequires {
         self.counts[pair_idx(a, b)].relations[relation.index()] += 1;
     }
 
+    #[cfg(feature = "concurrent")]
+    pub(crate) fn merge(&mut self, other: Self) {
+        debug_assert_eq!(self.counts.len(), other.counts.len());
+        for (target, source) in self.counts.iter_mut().zip(other.counts) {
+            for (target, source) in target.relations.iter_mut().zip(source.relations) {
+                *target += source;
+            }
+            target.range16 += source.range16;
+        }
+    }
+
     /// Raise one require for the [`Range16Msg`] relation on a 16-bit value `w`.
     /// The chiplet splits `w = a + 256·b` (LSB byte first) and bumps the
     /// `range16` multiplicity on the matching row.
