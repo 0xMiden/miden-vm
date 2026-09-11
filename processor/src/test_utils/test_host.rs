@@ -22,7 +22,6 @@ pub struct ProcessorStateSnapshot {
     clk: u32,
     ctx: u32,
     stack_state: Vec<Felt>,
-    stack_words: [Word; 4],
     mem_state: Vec<(crate::MemoryAddress, Felt)>,
 }
 
@@ -32,12 +31,6 @@ impl From<&ProcessorState<'_>> for ProcessorStateSnapshot {
             clk: state.clock().into(),
             ctx: state.ctx().into(),
             stack_state: state.get_stack_state(),
-            stack_words: [
-                state.get_stack_word(0),
-                state.get_stack_word(4),
-                state.get_stack_word(8),
-                state.get_stack_word(12),
-            ],
             mem_state: state.get_mem_state(state.ctx()),
         }
     }
@@ -60,12 +53,6 @@ impl ProcessorStateSnapshot {
             clk: state.clock().into(),
             ctx: state.ctx().into(),
             stack_state,
-            stack_words: [
-                state.get_stack_word(1),
-                state.get_stack_word(5),
-                state.get_stack_word(9),
-                state.get_stack_word(13),
-            ],
             mem_state: state.get_mem_state(state.ctx()),
         }
     }
@@ -86,12 +73,6 @@ impl ProcessorStateSnapshot {
             clk: state.clock().into(),
             ctx: state.ctx().into(),
             stack_state,
-            stack_words: [
-                state.get_stack_word(2),
-                state.get_stack_word(6),
-                state.get_stack_word(10),
-                state.get_stack_word(14),
-            ],
             mem_state: state.get_mem_state(state.ctx()),
         }
     }
