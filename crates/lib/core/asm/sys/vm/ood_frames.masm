@@ -1,5 +1,7 @@
 #! VM out-of-domain evaluation helpers.
 
+use miden::core::stark::types
+
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
 #!
 #! Loads one OOD row from advice, absorbs it into the Eidos transcript, and updates the
@@ -23,4 +25,3 @@ pub proc process_row_ood_evaluations(
         compress
     end
 end
-use miden::core::stark::types
