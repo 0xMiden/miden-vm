@@ -26,6 +26,9 @@ Procedures in the Miden Core Library are organized into modules, each targeting 
 
 For an example of how to invoke procedures from imported modules see [this section](../assembly/code_organization.md#importing-modules). Users should load `CoreLibrary` to access modules under the `miden::core` namespace. Core wrappers may use bundled precompile-backed verification internally, but users should rely on the stable `miden::core::*` facades.
 
+To verify execution proofs and settle deferred precompile work, see
+[Verifying proofs in MASM](./recursive_verification.md).
+
 ## Available modules
 Currently, Miden core library contains just a few modules, which are listed below. Over time, we plan to add many more modules which will include various cryptographic primitives, additional numeric data types and operations, and many others.
 
@@ -35,7 +38,7 @@ Currently, Miden core library contains just a few modules, which are listed belo
 | [miden::core::collections::smt](./collections.md#sparse-merkle-tree)        | Contains procedures for manipulating Sparse Merkle Trees with 4-element keys and values.                                                                         |
 | [miden::core::collections::sorted_array](./collections.md#sorted-array)     | Contains procedures for searching in sorted arrays of words.                                                                                                     |
 | [miden::core::pcs::fri::frie2f4](./pcs/fri.md#fri-extension-2-fold-4)       | Contains procedures for verifying FRI proofs (field extension = 2, folding factor = 4).                                                                          |
-| [miden::core::stark::mod](./stark.md)                                        | Contains procedures and helpers used when verifying STARK proofs inside the VM.                                                                                  |
+| [miden::core::stark](./stark.md)                                        | Contains procedures and helpers used when verifying STARK proofs inside the VM.                                                                                  |
 | [miden::core::crypto::aead](./crypto/aead.md)                               | Contains procedures for authenticated encryption with associated data (AEAD) using Poseidon2 hash.                                                                     |
 | [miden::core::crypto::dsa::ecdsa_k256_keccak](./crypto/dsa.md#ecdsa-secp256k1-keccak256) | Verifies ECDSA advice witnesses and recovers full secp256k1 public keys from native EVM recovery witnesses. |
 | [miden::core::crypto::dsa::falcon512_poseidon2](./crypto/dsa.md#poseidon2-falcon512)     | Contains procedures for verifying Poseidon2 Falcon512 post-quantum signatures.                                                                                         |
@@ -48,5 +51,6 @@ Currently, Miden core library contains just a few modules, which are listed belo
 | [miden::core::math::u256](./math/u256.md)                                   | Contains procedures for working with 256-bit unsigned integers.                                                                                                  |
 | [miden::core::mem](./mem.md)                                                | Contains procedures for working with random access memory.                                                                                                       |
 | [miden::core::sys](./sys.md)                                                | Contains system-level utility procedures.                                                                                                                        |
-| [miden::core::sys::vm](./sys_vm.md)                                         | Contains VM-facing utility procedures needed during Miden VM recursive proof verification.                                                                       |
+| [miden::core::sys::vm](./sys_vm.md)                                         | Verifies MVM execution claims and returns their security descriptors and deferred roots. |
+| [miden::core::sys::pvm](./recursive_verification.md)                         | Requests and verifies precompile proofs to settle deferred roots. |
 | [miden::core::word](./word.md)                                               | Contains utilities for working with words.                                                                                                                       |

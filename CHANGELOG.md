@@ -2,6 +2,10 @@
 
 ## v0.33.0 (Unreleased)
 
+#### Features
+
+- Added a MASM example that verifies a batch of MVM proofs and settles their deferred work with one PVM proof.
+
 #### Fixes
 
 - Fixed `PartialMmr::track()` panicking when a leaf position did not belong to the tree selected by its authentication path ([#3804](https://github.com/0xMiden/miden-vm/pull/3804)).

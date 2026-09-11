@@ -10,7 +10,7 @@ use proptest::prelude::*;
 use crate::{
     Word,
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
-    deferred::{DeferredRoot, DeferredStateWire, MAX_PRECOMPILE_ROOTS},
+    deferred::{DeferredRoot, DeferredStateWire, MAX_PRECOMPILE_ROOTS, fold_deferred_root},
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
@@ -196,6 +196,17 @@ impl Deserializable for VmProof {
 pub struct PrecompileProof {
     pub proof: StarkProof,
     pub roots: Vec<DeferredRoot>,
+}
+
+impl PrecompileProof {
+    /// Computes the aggregate deferred root.
+    ///
+    /// For roots `[A, B, C]`, this hashes `AND(A, B)`, then `AND(result, C)`. Order and
+    /// duplicates matter. A single root is returned unchanged; an empty list returns `None`.
+    /// This method does not verify the proof.
+    pub fn aggregate_root(&self) -> Option<DeferredRoot> {
+        self.roots.iter().copied().reduce(fold_deferred_root)
+    }
 }
 
 impl Serializable for PrecompileProof {
@@ -615,6 +626,24 @@ mod tests {
             proof: dummy_stark_proof(&[2]),
             roots: roots.to_vec(),
         }
+    }
+
+    #[test]
+    fn aggregate_root_preserves_order_grouping_and_duplicates() {
+        let a = root(1);
+        let b = root(2);
+        let c = root(3);
+        let and = |lhs, rhs| Node::and(lhs, rhs).digest();
+
+        assert_eq!(precompile_proof(&[]).aggregate_root(), None);
+        assert_eq!(precompile_proof(&[a]).aggregate_root(), Some(a));
+        assert_eq!(precompile_proof(&[a, b, c]).aggregate_root(), Some(and(and(a, b), c)));
+        assert_ne!(precompile_proof(&[a, b, c]).aggregate_root(), Some(and(a, and(b, c))));
+        assert_ne!(
+            precompile_proof(&[a, b]).aggregate_root(),
+            precompile_proof(&[b, a]).aggregate_root()
+        );
+        assert_eq!(precompile_proof(&[a, b, a]).aggregate_root(), Some(and(and(a, b), a)));
     }
 
     fn wire() -> (DeferredStateWire, DeferredRoot) {
