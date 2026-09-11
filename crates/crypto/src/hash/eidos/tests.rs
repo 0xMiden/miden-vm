@@ -206,8 +206,8 @@ fn merge_in_domain_matches_hash_elements_in_domain() {
     let concat = vec![left[0], left[1], left[2], left[3], right[0], right[1], right[2], right[3]];
 
     assert_eq!(
-        Eidos::merge_in_domain(&[left, right], RANDOM_COIN_STATE),
-        Eidos::hash_elements_in_domain(&concat, RANDOM_COIN_STATE)
+        Eidos::merge_in_domain(&[left, right], TestFeltDomain),
+        Eidos::hash_elements_in_domain(&concat, TestFeltDomain)
     );
 }
 

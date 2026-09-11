@@ -4,7 +4,7 @@
 
 #### Features
 
-- [BREAKING] Added Eidos hashing with typed domain separation, including Eidos-backed IES, random-coin, and length-bound LMCS implementations, native SIMD acceleration, and batched proof-of-work grinding; existing Poseidon2 variants remain available.
+- [BREAKING] Added Eidos hashing with typed domain separation, including Eidos-backed IES, a counter-mode random coin, and length-bound LMCS implementations, native SIMD acceleration, and batched proof-of-work grinding; existing Poseidon2 variants remain available.
 
 #### Fixes
 
