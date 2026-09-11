@@ -1362,21 +1362,15 @@ mod tests {
         // Position 0 belongs to the depth-2 tree, so using the depth-1 path would underflow when
         // translating the global position to the tree-relative path index.
         let mut partial_mmr: PartialMmr = mmr.peaks().into();
-        let result = partial_mmr.track(
-            0,
-            mmr.get(0).unwrap(),
-            path_for_middle_tree.path().merkle_path(),
-        );
+        let result =
+            partial_mmr.track(0, mmr.get(0).unwrap(), path_for_middle_tree.path().merkle_path());
         assert!(matches!(result, Err(MmrError::PositionNotFound(0))));
         assert!(!partial_mmr.is_tracked(0));
 
         // Position 4 belongs to the depth-1 tree. The reverse mismatch must be rejected too,
         // rather than relying on the computed root to happen not to match a peak.
-        let result = partial_mmr.track(
-            4,
-            mmr.get(4).unwrap(),
-            path_for_large_tree.path().merkle_path(),
-        );
+        let result =
+            partial_mmr.track(4, mmr.get(4).unwrap(), path_for_large_tree.path().merkle_path());
         assert!(matches!(result, Err(MmrError::PositionNotFound(4))));
         assert!(!partial_mmr.is_tracked(4));
     }
