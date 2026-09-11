@@ -2,6 +2,10 @@
 
 ## v0.33.0 (Unreleased)
 
+#### Changes
+
+- [BREAKING] Removed `ExecutionProof::is_complete()` ([#3822](https://github.com/0xMiden/miden-vm/pull/3822)).
+
 ## v0.32.1 (2026-09-09)
 
 #### Changes

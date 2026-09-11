@@ -793,7 +793,6 @@ mod execution_witness_serialization {
             .prove(proving)
             .expect("wire-backed partial proof should be produced from the restored witness");
 
-        assert!(!proof.is_complete());
         let miden_vm::PrecompileStatus::Deferred(wire) = proof.precompile() else {
             panic!("partial proving should keep the deferred proof wire-backed");
         };
