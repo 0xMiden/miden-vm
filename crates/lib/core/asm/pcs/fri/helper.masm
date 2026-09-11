@@ -197,30 +197,16 @@ pub proc load_fri_layer_commitments()
     #=> [...]
 end
 
-#! Load and save the remainder polynomial from the advice provider and check that its hash
-#! corresponds to its commitment and reseed with the latter.
+#! Loads the FRI remainder polynomial into memory and absorbs it into the transcript.
 #!
-#! Input: [scratch0, scratch1, scratch2, scratch3, scratch4, scratch5, scratch6, ...]
-#! The seven scratch elements are discarded after the streaming load.
+#! Input: [...]
 #! Output: [...]
-#!
-#! Cycles:
-#!
-#!  1- Remainder polynomial of degree less
-#!     than 64: 157
-#!  2- Remainder polynomial of degree less
-#!     than 128: 191
-pub proc load_and_verify_remainder(scratch: word, scratch0: felt, scratch1: felt, scratch2: felt)
-
-    # `adv_pipe` the remainder codeword
-    ## Get the numbers of FRI layers
+pub proc load_and_verify_remainder()
+    # Each FRI layer uses eight elements: a commitment word and a padded folding challenge.
+    # The remainder coefficients follow these layers in memory.
     exec.constants::get_num_fri_layers
-    ## Compute the correct remainder pointer, note that the remainder poly is laid out just after
-    ## the FRI layer commitments, each saved in a word, and folding challenges, also saved in
-    ## a word, and this explains the multiplication by 8
     mul.8 exec.constants::fri_com_ptr add
-    #=> [fri_com_ptr, 8 * num_fri_layers, ...]
-    ## Store for later use
+    # => [remainder_poly_ptr, ...]
     dup exec.constants::set_remainder_poly_address
     #=> [remainder_poly_ptr, ...]
 
@@ -234,7 +220,7 @@ pub proc load_and_verify_remainder(scratch: word, scratch0: felt, scratch1: felt
         push.0 exec.constants::random_coin_output_len_ptr mem_store
         push.0 exec.constants::random_coin_input_len_ptr mem_store
         exec.random_coin::load_random_coin_state
-        # => [R0, R1, C, remainder_poly_ptr, remainder_size, y, y]
+        # => [R0, R1, C, remainder_poly_ptr, ...]
 
         # adv_load remainder polynomial
         exec.load_fri_remainder_poly_max_degree_plus_1_half
@@ -250,11 +236,11 @@ pub proc load_and_verify_remainder(scratch: word, scratch0: felt, scratch1: felt
         push.0 exec.constants::random_coin_output_len_ptr mem_store
         push.0 exec.constants::random_coin_input_len_ptr mem_store
         exec.random_coin::load_random_coin_state
-        # => [R0, R1, C, remainder_poly_ptr, remainder_size, y, y]
+        # => [R0, R1, C, remainder_poly_ptr, ...]
 
         # adv_load remainder polynomial
         exec.load_fri_remainder_poly_max_degree_plus_1
-        # => [R0, R1, C, remainder_poly_ptr, remainder_size, y, y]
+        # => [R0, R1, C, remainder_end_ptr, ...]
 
         # Update the random coin state with the remainder polynomial digest.
         exec.random_coin::store_random_coin_state
@@ -262,7 +248,7 @@ pub proc load_and_verify_remainder(scratch: word, scratch0: felt, scratch1: felt
         push.8 exec.constants::random_coin_output_len_ptr mem_store
 
     end
-    dropw dropw
+    drop
     #=> [...]
 end
 

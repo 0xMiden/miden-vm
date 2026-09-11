@@ -234,6 +234,9 @@ end
 #! Fails if the advice does not encode a supported PVM proof, or if any transcript, opening,
 #! commitment, constraint, or public-root check fails.
 #!
+#! `security_descriptor` denotes the twelve output fields listed below, with `lookup_pow_bits`
+#! at the top of the stack.
+#!
 #! Inputs:  [D]
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
 #!           max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
