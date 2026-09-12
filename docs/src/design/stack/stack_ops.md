@@ -181,7 +181,7 @@ The `CSWAP` operation pops an element off the stack and if the element is $1$, s
 In the above:
 
 $$
-d = \begin{cases} a, & \text{if}\ c = 0  b, & \text{if}\ c = 1\ \end{cases} e = \begin{cases} b, & \text{if}\ c = 0  a, & \text{if}\ c = 1\ \end{cases}
+d = \begin{cases} a, & \text{if}\ c = 0 \\ b, & \text{if}\ c = 1\ \end{cases} e = \begin{cases} b, & \text{if}\ c = 0 \\ a, & \text{if}\ c = 1\ \end{cases}
 $$
 
 Stack transition for this operation must satisfy the following constraints:
@@ -211,7 +211,7 @@ The `CSWAPW` operation pops an element off the stack and if the element is $1$, 
 In the above:
 
 $$
-D = \begin{cases} A, & \text{if}\ c = 0  B, & \text{if}\ c = 1\ \end{cases} E = \begin{cases} B, & \text{if}\ c = 0  A, & \text{if}\ c = 1\ \end{cases}
+D = \begin{cases} A, & \text{if}\ c = 0 \\ B, & \text{if}\ c = 1\ \end{cases} E = \begin{cases} B, & \text{if}\ c = 0 \\ A, & \text{if}\ c = 1\ \end{cases}
 $$
 
 Stack transition for this operation must satisfy the following constraints:
