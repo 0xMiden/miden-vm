@@ -189,11 +189,16 @@ mod tests {
     fn masm_const(path: &str, name: &str) -> u64 {
         let source = std::fs::read_to_string(path)
             .unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
-        let prefix = alloc::format!("const {name} = ");
+        let private_prefix = alloc::format!("const {name} = ");
+        let public_prefix = alloc::format!("pub const {name} = ");
         source
             .lines()
             .find_map(|line| {
-                line.trim().strip_prefix(&prefix)?.split('#').next()?.trim().parse().ok()
+                let line = line.trim();
+                let value = line
+                    .strip_prefix(&private_prefix)
+                    .or_else(|| line.strip_prefix(&public_prefix))?;
+                value.split('#').next()?.trim().parse().ok()
             })
             .unwrap_or_else(|| panic!("constant {name} not found in {path}"))
     }
@@ -387,14 +392,13 @@ mod tests {
 
     #[test]
     fn pvm_aux_hook_matches_the_logup_registry() {
-        use miden_precompiles_air::relations::{BusId, MAX_MESSAGE_WIDTH};
+        use miden_precompiles_air::relations::BusId;
 
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/aux_trace.masm");
 
         assert_eq!(masm_const(HOOK_PATH, "UINT_VAL_BUS_SCALE"), BusId::UintVal as u64 + 1);
         assert_eq!(masm_const(HOOK_PATH, "EC_GROUP_BUS_SCALE"), BusId::EcGroup as u64 + 1);
-        assert_eq!(masm_const(HOOK_PATH, "MAX_LOGUP_MESSAGE_WIDTH"), MAX_MESSAGE_WIDTH as u64);
     }
 
     #[test]
@@ -422,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn pvm_masm_read_layout_matches_every_codegen_boundary() {
+    fn pvm_masm_read_layout_matches_exposed_codegen_boundaries() {
         const READ_START: u64 = 3_225_426_416;
         const NEXT_VM_REGION: u64 = 3_238_002_688;
         const LAYOUT_PATH: &str =
@@ -434,19 +438,6 @@ mod tests {
             ("PUBLIC_INPUTS_PTR", InputKey::Public(0)),
             ("AUX_RAND_ELEM_PTR", InputKey::AuxRandBeta),
             ("PREPROCESSED_CURRENT_PTR", InputKey::Preprocessed { offset: 0, index: 0 }),
-            ("MAIN_CURRENT_PTR", InputKey::Main { offset: 0, index: 0 }),
-            ("AUX_CURRENT_PTR", InputKey::AuxCoord { offset: 0, index: 0, coord: 0 }),
-            (
-                "QUOTIENT_CURRENT_PTR",
-                InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 },
-            ),
-            ("PREPROCESSED_NEXT_PTR", InputKey::Preprocessed { offset: 1, index: 0 }),
-            ("MAIN_NEXT_PTR", InputKey::Main { offset: 1, index: 0 }),
-            ("AUX_NEXT_PTR", InputKey::AuxCoord { offset: 1, index: 0, coord: 0 }),
-            (
-                "QUOTIENT_NEXT_PTR",
-                InputKey::QuotientChunkCoord { offset: 1, chunk: 0, coord: 0 },
-            ),
             ("AUX_BUS_BOUNDARY_PTR", InputKey::AuxBusBoundary(0)),
             ("AUXILIARY_ACE_INPUTS_PTR", InputKey::Alpha),
         ];

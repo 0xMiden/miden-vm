@@ -597,10 +597,14 @@ fn parse_masm_const<T: core::str::FromStr>(
 where
     T::Err: core::fmt::Debug,
 {
-    let prefix = format!("const {name} = ");
+    let private_prefix = format!("const {name} = ");
+    let public_prefix = format!("pub const {name} = ");
     masm.lines()
         .find_map(|line| {
-            let value = line.trim().strip_prefix(&prefix)?;
+            let line = line.trim();
+            let value = line
+                .strip_prefix(&private_prefix)
+                .or_else(|| line.strip_prefix(&public_prefix))?;
             let value = value.split('#').next().unwrap_or(value).trim();
             value.parse::<T>().ok()
         })
