@@ -157,6 +157,12 @@ impl ChunkRequires {
     pub fn total_chunks(&self) -> u32 {
         self.next_chunk_seq
     }
+
+    pub(crate) fn trace_height(&self) -> Option<usize> {
+        (self.next_chunk_seq as usize)
+            .checked_next_power_of_two()
+            .map(|height| height.max(2))
+    }
 }
 
 // TRACE GENERATION
@@ -181,7 +187,10 @@ pub(crate) fn generate_trace_padded_to(
     min_height: usize,
 ) -> RowMajorMatrix<Felt> {
     let total_chunks = requires.total_chunks() as usize;
-    let height = total_chunks.next_power_of_two().max(2).max(min_height);
+    let height = requires
+        .trace_height()
+        .expect("chunk trace height exceeds the host power-of-two range")
+        .max(min_height);
 
     let mut trace = Vec::with_capacity(height * NUM_MAIN_COLS);
 

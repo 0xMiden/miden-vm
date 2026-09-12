@@ -142,6 +142,14 @@ impl UintStoreRequires {
         }
     }
 
+    pub(crate) fn trace_height(&self) -> Option<usize> {
+        self.uints
+            .len()
+            .checked_next_power_of_two()
+            .map(|blocks| blocks.max(1))?
+            .checked_mul(PERIOD)
+    }
+
     /// Pin a *modulus* at the protocol address `addr ∈ [1, 2^16)` — the
     /// self-referential entry (`bound_ptr == ptr`) every other intern
     /// under that field references. Returns its handle.
@@ -272,7 +280,10 @@ impl Default for UintStoreRequires {
 /// ledger.
 fn padded_blocks(requires: &UintStoreRequires, min_blocks: usize) -> Vec<Uint> {
     let n_real = requires.uints.len();
-    let n_padded = n_real.next_power_of_two().max(1).max(min_blocks);
+    let height = requires
+        .trace_height()
+        .expect("uint store trace height exceeds the host power-of-two range");
+    let n_padded = (height / PERIOD).max(min_blocks);
     let next_ptr = requires.uints.last_key_value().map_or(1, |(&ptr, _)| ptr.0 + 1);
     let pad = (0..n_padded - n_real).map(|i| {
         let ptr = UintPtr(next_ptr + i as u32);

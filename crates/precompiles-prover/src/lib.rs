@@ -13,6 +13,7 @@ use alloc::string::{String, ToString};
 
 use miden_core::deferred::DeferredState;
 pub use miden_core::proof::{HashFunction, StarkProof};
+use miden_precompiles_air::{memory, stark_config::precompile_pcs_params};
 
 pub(crate) mod ec;
 pub(crate) mod hash;
@@ -26,20 +27,60 @@ pub(crate) mod transcript;
 pub(crate) mod uint;
 pub(crate) mod utils;
 
+/// Default maximum memory, in bytes, [`prove_deferred_state`] assumes when no budget is given
+/// explicitly. Callers that own actual proving policy (e.g. `miden-prover`'s `Prover`) are
+/// expected to set their own via [`prove_deferred_state_with_budget`].
+pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 = 64 << 30;
+
 /// Proves the precompile claims accumulated in `state` against its exact deferred root.
 pub fn prove_deferred_state(
     state: &DeferredState,
     hash_fn: HashFunction,
 ) -> Result<StarkProof, ProveDeferredStateError> {
+    prove_deferred_state_with_budget(state, hash_fn, DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES)
+}
+
+/// Same as [`prove_deferred_state`], but with an explicit memory budget instead of the default.
+///
+/// Checks the modelled peak prover memory against `max_prover_memory_bytes` before allocating
+/// chiplet traces or entering the STARK pipeline. The budget applies to this single proof using
+/// `hash_fn`; concurrent proofs require separate budgeting. Session translation precedes the
+/// check.
+pub fn prove_deferred_state_with_budget(
+    state: &DeferredState,
+    hash_fn: HashFunction,
+    max_prover_memory_bytes: u64,
+) -> Result<StarkProof, ProveDeferredStateError> {
     let deferred = {
         let _span = tracing::info_span!("build_session").entered();
         deferred::session_from_deferred_state(state)?
     };
+    let params = precompile_pcs_params();
+    let estimated_bytes = deferred
+        .session
+        .trace_heights()
+        .and_then(|heights| memory::prover_peak_bytes(&heights, &params));
+    check_memory_budget(estimated_bytes, max_prover_memory_bytes)?;
+
     let traces = {
         let _span = tracing::info_span!("build_trace").entered();
         deferred.session.finish(deferred.root)
     };
     Ok(traces.prove_stark(hash_fn)?)
+}
+
+fn check_memory_budget(
+    estimated_bytes: Option<u64>,
+    budget_bytes: u64,
+) -> Result<(), ProveDeferredStateError> {
+    let estimated_bytes = estimated_bytes.ok_or(ProveDeferredStateError::MemoryEstimateOverflow)?;
+    if estimated_bytes > budget_bytes {
+        return Err(ProveDeferredStateError::MemoryBudgetExceeded {
+            estimated_bytes,
+            budget_bytes,
+        });
+    }
+    Ok(())
 }
 
 /// Errors produced while proving deferred precompile claims from VM deferred state.
@@ -48,6 +89,16 @@ pub enum ProveDeferredStateError {
     /// The VM deferred DAG could not be translated into the precompile prover's session model.
     #[error("failed to translate deferred state into a precompile proving session: {0}")]
     Translation(String),
+    /// The prover memory estimate exceeded the host height range or the byte model's `u64` range.
+    #[error("precompile prover memory estimate overflowed")]
+    MemoryEstimateOverflow,
+    /// The modelled peak prover memory for the generated chiplet traces exceeds the configured
+    /// budget.
+    #[error(
+        "estimated precompile prover memory of {estimated_bytes} bytes exceeds the budget of \
+         {budget_bytes} bytes"
+    )]
+    MemoryBudgetExceeded { estimated_bytes: u64, budget_bytes: u64 },
     /// The translated precompile session could not be proved.
     #[error(transparent)]
     Prove(#[from] ProveError),

@@ -36,6 +36,8 @@
 use alloc::{vec, vec::Vec};
 
 pub use miden_core::proof::StarkProof;
+#[cfg(debug_assertions)]
+use miden_core::utils::Matrix;
 use miden_core::{Felt, utils::RowMajorMatrix};
 
 pub use crate::transcript::eval::trace::{EcNode, Truthy, UintNode};
@@ -132,6 +134,30 @@ impl Session {
             };
             self.uint.store.require_uintval(ptr);
         }
+    }
+
+    /// Predict the exact padded main-trace heights without allocating or consuming the session.
+    /// Returns `None` if any height calculation exceeds the host `usize` range.
+    pub fn trace_heights(&self) -> Option<[usize; NUM_CHIPLETS]> {
+        let chunk_node_sponge = self
+            .chunk
+            .trace_height()?
+            .max(self.node.trace_height()?)
+            .max(self.sponge.trace_height()?);
+        let uint = self.uint.store.trace_height()?.max(self.uint.mul.trace_height()?);
+
+        Some([
+            chunk_node_sponge,
+            self.p2.trace_height()?,
+            self.round.trace_height()?,
+            crate::primitives::byte_pair_lut::TRACE_HEIGHT,
+            self.eval.trace_height()?,
+            uint,
+            self.uint.add.trace_height()?,
+            self.ec.store.trace_height()?,
+            self.ec.add.trace_height()?,
+            self.msm.trace_height()?,
+        ])
     }
 
     /// Record a Keccak-256 of `input`. Returns its digest and a [`Truthy`]
@@ -455,6 +481,8 @@ impl Session {
             }};
         }
 
+        #[cfg(debug_assertions)]
+        let predicted_heights = self.trace_heights();
         let public_root = root.hash();
         self.eval.assert_no_stray_values();
         // EcCreate rows hash the group pointer and bind it through their EcPoint consume.
@@ -489,7 +517,7 @@ impl Session {
         let ec = trace_span!("ec_store", ec_store_trace(self.ec.store));
         let bpl = trace_span!("byte_pair_lut", bpl_trace(self.bpl));
 
-        SessionTraces {
+        let traces = SessionTraces {
             chunk_node_sponge,
             p2,
             round,
@@ -501,7 +529,14 @@ impl Session {
             ec_add,
             msm,
             public_root,
-        }
+        };
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(
+            predicted_heights,
+            Some(traces.mains().map(Matrix::height)),
+            "preflight trace heights must match generated traces",
+        );
+        traces
     }
 }
 

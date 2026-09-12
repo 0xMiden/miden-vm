@@ -194,6 +194,12 @@ impl SpongeRequires {
         Self::default()
     }
 
+    pub(crate) fn trace_height(&self) -> Option<usize> {
+        (self.total_active_rows() as usize)
+            .checked_next_power_of_two()
+            .map(|height| height.max(SPONGE_PERIOD))
+    }
+
     /// Register a Keccak invocation. Empty input is supported: it lays
     /// one pad block (`keccak256("")`) and one canonical zero chunk,
     /// consumed by the block loop as a full garbage-tail (the pad fires
@@ -395,11 +401,13 @@ pub(crate) fn generate_trace_padded_to(
     requires: SpongeRequires,
     min_height: usize,
 ) -> RowMajorMatrix<Felt> {
-    let active_rows = requires.total_active_rows() as usize;
     let min_height = min_height
         .checked_next_power_of_two()
         .expect("minimum sponge trace height exceeds the host power-of-two range");
-    let height = active_rows.next_power_of_two().max(SPONGE_PERIOD).max(min_height);
+    let height = requires
+        .trace_height()
+        .expect("sponge trace height exceeds the host power-of-two range")
+        .max(min_height);
 
     let mut trace = Vec::with_capacity(height * NUM_MAIN_COLS);
 

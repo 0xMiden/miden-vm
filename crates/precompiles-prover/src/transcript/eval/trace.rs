@@ -315,6 +315,18 @@ impl TranscriptEvalRequires {
         Self::default()
     }
 
+    pub(crate) fn trace_height(&self) -> Option<usize> {
+        let mut rows =
+            usize::from(self.nodes.iter().any(|node| matches!(node.kind, NodeKind::Zero)));
+        for node in self.nodes.iter().filter(|node| !matches!(node.kind, NodeKind::Zero)) {
+            rows = rows.checked_add(match &node.kind {
+                NodeKind::EcMsm { absorbs, .. } => absorbs.len(),
+                _ => 1,
+            })?;
+        }
+        rows.checked_next_power_of_two().map(|height| height.max(2))
+    }
+
     /// Issue a handle for a `Binding(hash, True)` a downstream chip
     /// provides (the keccak chip today; future Field/Group `Eq` arms). No
     /// eval row — the provider lays the bus provide; the eval chip only
@@ -965,7 +977,10 @@ pub fn generate_trace(requires: TranscriptEvalRequires, root: Truthy) -> RowMajo
     let n_rows = 1
         + rows.iter().map(|(n, _)| node_rows(&n.kind)).sum::<usize>()
         + usize::from(zero_mult > 0);
-    let height = n_rows.next_power_of_two().max(2);
+    let height = requires
+        .trace_height()
+        .expect("eval trace height exceeds the host power-of-two range");
+    debug_assert_eq!(height, n_rows.next_power_of_two().max(2));
     let mut trace = Vec::with_capacity(height * NUM_MAIN_COLS);
 
     push_node_row(&mut trace, root_node, 0);
