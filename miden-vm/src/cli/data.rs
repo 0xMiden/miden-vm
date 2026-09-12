@@ -245,6 +245,18 @@ impl ProgramHash {
         let program_hash_bytes = hex::decode(hash_hex_string)
             .map_err(|err| format!("Failed to convert program hash to bytes {err}"))?;
 
+        // The verify command accepts exactly one serialized Word as the program hash. Word's
+        // deserializer reads one Word from the reader, but does not reject trailing bytes.
+        if program_hash_bytes.len() != Word::SERIALIZED_SIZE {
+            return Err(format!(
+                "Invalid program hash length: expected {} bytes ({} hex characters), \
+                 but received {} bytes",
+                Word::SERIALIZED_SIZE,
+                Word::SERIALIZED_SIZE * 2,
+                program_hash_bytes.len()
+            ));
+        }
+
         // create slice reader from bytes
         let mut program_hash_slice = SliceReader::new(&program_hash_bytes);
 
@@ -283,5 +295,65 @@ impl Libraries {
         }
 
         Ok(Self { libraries })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProgramHash;
+    use miden_core::Felt;
+    use miden_vm::Word;
+
+    #[test]
+    fn program_hash_read_accepts_exact_32_byte_hash() {
+        let hash = "00".repeat(Word::SERIALIZED_SIZE);
+
+        assert_eq!(ProgramHash::read(&hash).unwrap(), Word::empty());
+    }
+
+    #[test]
+    fn program_hash_read_rejects_trailing_bytes() {
+        let hash = "00".repeat(Word::SERIALIZED_SIZE + 1);
+        let err = ProgramHash::read(&hash).unwrap_err();
+
+        assert!(
+            err.contains("Invalid program hash length"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn program_hash_read_rejects_short_hash() {
+        let hash = "00".repeat(Word::SERIALIZED_SIZE - 1);
+        let err = ProgramHash::read(&hash).unwrap_err();
+
+        assert!(
+            err.contains("Invalid program hash length"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn program_hash_read_rejects_malformed_hex() {
+        let err = ProgramHash::read("not-hex").unwrap_err();
+
+        assert!(
+            err.contains("Failed to convert program hash to bytes"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn program_hash_read_preserves_invalid_felt_rejection() {
+        let mut bytes = Vec::with_capacity(Word::SERIALIZED_SIZE);
+        bytes.extend_from_slice(&Felt::ORDER.to_le_bytes());
+        bytes.resize(Word::SERIALIZED_SIZE, 0);
+
+        let err = ProgramHash::read(&hex::encode(bytes)).unwrap_err();
+
+        assert!(
+            err.contains("Failed to deserialize program hash from bytes"),
+            "unexpected error message: {err}"
+        );
     }
 }
