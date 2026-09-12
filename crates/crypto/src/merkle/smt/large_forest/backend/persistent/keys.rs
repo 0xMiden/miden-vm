@@ -60,7 +60,7 @@ impl Serializable for SubtreeKey {
     }
 
     fn get_size_hint(&self) -> usize {
-        size_of::<LineageId>() + size_of::<NodeIndex>()
+        self.lineage.get_size_hint() + self.index.get_size_hint()
     }
 }
 
@@ -70,5 +70,39 @@ impl Deserializable for SubtreeKey {
         let index = NodeIndex::read_from(source)?;
 
         Ok(Self { lineage, index })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::merkle::smt::large_forest::root::LineageId;
+
+    /// `size_of::<NodeIndex>()` includes alignment padding the wire format never carries, so the
+    /// hint has to come from the parts' own hints.
+    #[test]
+    fn subtree_key_size_hint_matches_serialized_len() {
+        let key = SubtreeKey {
+            lineage: LineageId::new([7; 32]),
+            index: NodeIndex::new(8, 42).unwrap(),
+        };
+
+        let bytes = key.to_bytes();
+
+        assert_eq!(bytes.len(), key.get_size_hint());
+        assert_eq!(key, SubtreeKey::read_from_bytes(&bytes).unwrap());
+    }
+
+    #[test]
+    fn leaf_key_size_hint_matches_serialized_len() {
+        let key = LeafKey {
+            lineage: LineageId::new([7; 32]),
+            index: 42,
+        };
+
+        let bytes = key.to_bytes();
+
+        assert_eq!(bytes.len(), key.get_size_hint());
+        assert_eq!(key, LeafKey::read_from_bytes(&bytes).unwrap());
     }
 }

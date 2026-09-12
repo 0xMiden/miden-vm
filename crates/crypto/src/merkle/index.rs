@@ -206,6 +206,12 @@ impl Serializable for NodeIndex {
         target.write_u8(self.depth);
         target.write_u64(self.position);
     }
+
+    fn get_size_hint(&self) -> usize {
+        // `size_of::<NodeIndex>()` is 16: `position` forces 8-byte alignment, so the `u8` depth is
+        // followed by 7 bytes of padding that never reach the wire.
+        size_of::<u8>() + size_of::<u64>()
+    }
 }
 
 impl Deserializable for NodeIndex {
@@ -357,5 +363,14 @@ mod tests {
 
         // depth 63, position 0: scalar = 2^63
         assert_eq!(NodeIndex::make(63, 0).to_scalar_index().unwrap(), 1u64 << 63);
+    }
+
+    proptest! {
+        #[test]
+        fn node_index_size_hint_matches_serialized_len(index in node_index()) {
+            let bytes = index.to_bytes();
+            prop_assert_eq!(bytes.len(), index.get_size_hint());
+            prop_assert_eq!(index, NodeIndex::read_from_bytes(&bytes).unwrap());
+        }
     }
 }
