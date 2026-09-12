@@ -83,18 +83,28 @@ pub const fn range(start: usize, len: usize) -> Range<usize> {
 }
 
 /// Converts and parses a [Bound] into an included u64 value.
-pub fn bound_into_included_u64<I>(bound: Bound<&I>, is_start: bool) -> u64
+///
+/// Returns `None` if the bound cannot be represented as an inclusive `u64` (e.g. an excluded start
+/// bound at `u64::MAX` or an excluded end bound at `0`).
+pub fn bound_into_included_u64<I>(bound: Bound<&I>, is_start: bool) -> Option<u64>
 where
     I: Clone + Into<u64>,
 {
     match bound {
-        Bound::Excluded(i) => i.clone().into().saturating_sub(1),
-        Bound::Included(i) => i.clone().into(),
+        Bound::Excluded(i) => {
+            let val = i.clone().into();
+            if is_start {
+                val.checked_add(1)
+            } else {
+                val.checked_sub(1)
+            }
+        },
+        Bound::Included(i) => Some(i.clone().into()),
         Bound::Unbounded => {
             if is_start {
-                0
+                Some(0)
             } else {
-                u64::MAX
+                Some(u64::MAX)
             }
         },
     }
@@ -194,6 +204,26 @@ mod tests {
             // Should be equal
             prop_assert_eq!(felts, roundtrip_felts);
         }
+    }
+
+    #[test]
+    fn test_bound_into_included_u64() {
+        let val = 10u64;
+        assert_eq!(bound_into_included_u64(Bound::Included(&val), true), Some(10));
+        assert_eq!(bound_into_included_u64(Bound::Included(&val), false), Some(10));
+        assert_eq!(bound_into_included_u64(Bound::Excluded(&val), true), Some(11));
+        assert_eq!(bound_into_included_u64(Bound::Excluded(&val), false), Some(9));
+        assert_eq!(bound_into_included_u64(Bound::<&u64>::Unbounded, true), Some(0));
+        assert_eq!(bound_into_included_u64(Bound::<&u64>::Unbounded, false), Some(u64::MAX));
+
+        // Edge cases: excluded endpoints that yield empty bounds
+        let max_val = u64::MAX;
+        assert_eq!(bound_into_included_u64(Bound::Excluded(&max_val), true), None);
+        assert_eq!(bound_into_included_u64(Bound::Excluded(&max_val), false), Some(u64::MAX - 1));
+
+        let zero_val = 0u64;
+        assert_eq!(bound_into_included_u64(Bound::Excluded(&zero_val), true), Some(1));
+        assert_eq!(bound_into_included_u64(Bound::Excluded(&zero_val), false), None);
     }
 
     #[test]
