@@ -43,7 +43,7 @@
 //! // ... bind AIR configurations + air ordering (see below) ...
 //!
 //! // --- Prove ---
-//! let prover_instance = ProverInstance::new(&config, &prover_statement, None)?;
+//! let mut prover_instance = ProverInstance::new(&config, prover_statement, None)?;
 //! let output = prover_instance.prove(ch)?;
 //!
 //! // --- Verify (identical binding + the same statement) ---
@@ -103,8 +103,8 @@ use crate::{
 // ProverInstance
 // ============================================================================
 
-/// Prover-side bundle: a [`StarkConfig`], a borrowed [`ProverStatement`], and
-/// the optional borrowed [`Preprocessed`] data.
+/// Prover-side bundle containing a [`StarkConfig`], a statement with owned main
+/// traces, and optional borrowed [`Preprocessed`] data.
 ///
 /// Construction validates preprocessed presence parity (and, when present, the
 /// bundle's shape against the AIRs and STARK config), so holding a
@@ -118,7 +118,8 @@ where
     SC: StarkConfig<F, EF>,
 {
     config: &'a SC,
-    prover_statement: &'a ProverStatement<F, EF, MA>,
+    statement: Statement<F, EF, MA>,
+    traces: Option<Vec<RowMajorMatrix<F>>>,
     preprocessed: Option<&'a Preprocessed<F, SC::Lmcs>>,
 }
 
@@ -138,7 +139,7 @@ where
     /// config.
     pub fn new(
         config: &'a SC,
-        prover_statement: &'a ProverStatement<F, EF, MA>,
+        prover_statement: ProverStatement<F, EF, MA>,
         preprocessed: Option<&'a Preprocessed<F, SC::Lmcs>>,
     ) -> Result<Self, PreprocessedValidationError> {
         let expected =
@@ -148,13 +149,30 @@ where
             return Err(PreprocessedValidationError::PresenceMismatch { expected, actual });
         }
         if let Some(p) = preprocessed {
-            validate_preprocessed(config, prover_statement, p)?;
+            validate_preprocessed(config, &prover_statement, p)?;
         }
-        Ok(Self { config, prover_statement, preprocessed })
+        let (statement, traces) = prover_statement.into_parts();
+        Ok(Self {
+            config,
+            statement,
+            traces: Some(traces),
+            preprocessed,
+        })
     }
 
     /// Prove this instance.
-    pub fn prove(&self, challenger: SC::Challenger) -> Result<StarkOutput<F, EF, SC>, ProverError> {
+    ///
+    /// Proving is one-shot: an attempt that passes all input validation
+    /// consumes the instance's main traces (they are released after auxiliary
+    /// trace construction), and any later call returns
+    /// [`ProverError::AlreadyProven`]. A failed attempt does **not** burn the
+    /// instance — every [`ProverError`] check runs before the traces are
+    /// consumed — so a failed attempt can be retried on the same instance with
+    /// a fresh challenger.
+    pub fn prove(
+        &mut self,
+        challenger: SC::Challenger,
+    ) -> Result<StarkOutput<F, EF, SC>, ProverError> {
         prove(self, challenger)
     }
 
@@ -163,14 +181,14 @@ where
         self.config
     }
 
-    /// Borrow the wrapped air-crate prover statement.
-    pub fn prover_statement(&self) -> &ProverStatement<F, EF, MA> {
-        self.prover_statement
-    }
-
     /// Borrow the verifier-side statement (the AIRs + public inputs).
     pub fn statement(&self) -> &Statement<F, EF, MA> {
-        self.prover_statement.statement()
+        &self.statement
+    }
+
+    /// Consume the prover instance and return its verifier-side statement.
+    pub fn into_statement(self) -> Statement<F, EF, MA> {
+        self.statement
     }
 
     /// Commitment to the preprocessed tree, for the verifier's
@@ -178,11 +196,6 @@ where
     /// is none.
     pub fn preprocessed_commitment(&self) -> Option<<SC::Lmcs as Lmcs>::Commitment> {
         self.preprocessed.map(Preprocessed::commitment)
-    }
-
-    /// Borrow the preprocessed bundle, if any.
-    pub(crate) fn preprocessed(&self) -> Option<&Preprocessed<F, SC::Lmcs>> {
-        self.preprocessed
     }
 }
 
@@ -219,6 +232,13 @@ where
 ///   caught by the LDE/commit (panic) or by verification, since the verifier re-derives these
 ///   shapes.
 ///
+/// ## One-shot semantics
+/// The instance's main traces are only *borrowed* while validating; ownership is taken (and the
+/// traces dropped) after every check above has passed and auxiliary construction is done, right
+/// before the quotient/opening phases. Consequently a failed attempt leaves the instance
+/// reusable — `ProverError::AlreadyProven` is returned only after an attempt that already passed
+/// all validation consumed the traces.
+///
 /// # Arguments
 /// - `instance`: the config, the validated prover statement (AIRs, shared `air_inputs`, and per-AIR
 ///   traces, all in instance order), and the optional preprocessed bundle
@@ -228,7 +248,7 @@ where
 /// `Ok(StarkOutput { digest, proof })`, or a [`ProverError`] if validation fails.
 #[instrument(name = "prove", skip_all)]
 pub(crate) fn prove<F, EF, MA, SC>(
-    instance: &ProverInstance<'_, F, EF, MA, SC>,
+    instance: &mut ProverInstance<'_, F, EF, MA, SC>,
     mut challenger: SC::Challenger,
 ) -> Result<StarkOutput<F, EF, SC>, ProverError>
 where
@@ -238,13 +258,18 @@ where
     MA: MultiAir<F, EF>,
 {
     // --- Trust boundary (see doc-block above). -------------------------------
-    let config = instance.config();
-    let prover_statement = instance.prover_statement();
-    let preprocessed = instance.preprocessed();
-    let statement = prover_statement.statement();
+    // Borrow the traces while validating caller inputs below. Ownership is
+    // only taken once every check has passed (at the `drop` after auxiliary
+    // construction), so a failed attempt leaves the instance reusable with
+    // its traces; only a validation-passing attempt consumes them.
+    let traces = instance.traces.as_ref().ok_or(ProverError::AlreadyProven)?;
+    // Field access (not the accessor methods) keeps these borrows disjoint
+    // from `instance.traces`, so the `take` further down type-checks.
+    let config = instance.config;
+    let preprocessed = instance.preprocessed;
+    let statement = &instance.statement;
     let airs = statement.airs();
     let air_inputs = statement.air_inputs();
-    let traces = prover_statement.traces();
     let trace_heights: Vec<usize> = traces.iter().map(Matrix::height).collect();
     let trace_order = TraceOrder::from_trace_heights::<F, EF, _>(airs, &trace_heights)
         .expect("ProverStatement::new should reject malformed heights");
@@ -261,14 +286,7 @@ where
     // order. AIRs are passed as `&MA::Air` (the existing constraint code expects
     // a reference); traces likewise via `&RowMajorMatrix<F>`.
     let air_refs: Vec<&MA::Air> = airs.iter().collect();
-    let trace_refs: Vec<&RowMajorMatrix<F>> = traces.iter().collect();
     let proof_ordered_airs = trace_order.to_proof_order(&air_refs);
-    let proof_ordered_traces = trace_order.to_proof_order(&trace_refs);
-    let proof_ordered: Vec<_> = proof_ordered_airs
-        .iter()
-        .copied()
-        .zip(proof_ordered_traces.iter().copied())
-        .collect();
 
     let log_blowup = config.pcs().log_blowup();
     let log_max_trace_height = trace_order.max_log_height();
@@ -293,9 +311,9 @@ where
     let mut channel = ProverTranscript::new(challenger);
 
     // Infer per-AIR quotient degrees from symbolic analysis (per-AIR optimization).
-    let log_quotient_degrees: Vec<u8> = proof_ordered
+    let log_quotient_degrees: Vec<u8> = proof_ordered_airs
         .iter()
-        .map(|&(air, _)| log_quotient_degree::<F, EF, _>(air))
+        .map(|&air| log_quotient_degree::<F, EF, _>(air))
         .collect();
     let log_quotient_degree = log_quotient_degrees
         .iter()
@@ -327,9 +345,11 @@ where
     //
     // Clone with blowup × capacity so the DFT resize doesn't reallocate.
     let blowup = 1 << log_blowup as usize;
-    let main_traces: Vec<_> = proof_ordered
+    let main_traces: Vec<_> = trace_order
+        .instance_indices()
         .iter()
-        .map(|&(_, trace)| {
+        .map(|&instance_idx| {
+            let trace = &traces[instance_idx as usize];
             let src = &trace.values;
             let mut values = Vec::with_capacity(src.len() * blowup);
             values.extend_from_slice(src);
@@ -342,7 +362,7 @@ where
 
     // 2. Sample randomness, build aux traces, and commit them
     let max_num_randomness =
-        proof_ordered.iter().map(|&(air, _)| air.num_randomness()).max().unwrap_or(0);
+        proof_ordered_airs.iter().map(|air| air.num_randomness()).max().unwrap_or(0);
 
     let randomness: Vec<EF> = (0..max_num_randomness)
         .map(|_| channel.sample_algebra_element::<EF>())
@@ -394,6 +414,18 @@ where
         }
     }
 
+    // All caller-input validation has passed and auxiliary construction was the
+    // last consumer of the main traces. Consume them from the instance and
+    // release their memory before the expensive quotient/opening phases. This
+    // is the one-shot point: every `ProverError` path above ran while the
+    // instance still owned its traces, so only a validation-passing attempt
+    // burns the instance.
+    let traces = instance
+        .traces
+        .take()
+        .expect("traces presence checked at entry; `instance` is exclusively borrowed");
+    drop(traces);
+
     // External assertions are defined in instance-order terms; now reorder aux
     // traces and aux values to proof order for commitment and the prover loop.
     trace_order.reorder_to_proof_in_place(&mut aux_traces_ef);
@@ -437,13 +469,13 @@ where
     let mut accumulator: Vec<EF> = Vec::with_capacity(max_quotient_height * blowup);
 
     // Pre-compute per-AIR constraint layouts.
-    let layouts: Vec<_> = proof_ordered
+    let layouts: Vec<_> = proof_ordered_airs
         .iter()
-        .map(|&(air, _)| get_constraint_layout::<F, EF, _>(air))
+        .map(|&air| get_constraint_layout::<F, EF, _>(air))
         .collect();
 
     info_span!("evaluate constraints").in_scope(|| {
-        for (i, &(air, _)) in proof_ordered.iter().enumerate() {
+        for (i, &air) in proof_ordered_airs.iter().enumerate() {
             let this_log_quotient_degree = log_quotient_degrees[i];
             let this_quotient_degree = 1usize << this_log_quotient_degree;
 
@@ -581,6 +613,11 @@ where
 /// The AIR's structural contract is trusted (see the crate-level trust model).
 #[derive(Debug, Error)]
 pub enum ProverError {
+    /// The instance's main traces were already consumed by a previous
+    /// [`ProverInstance::prove`](crate::ProverInstance::prove) attempt that
+    /// passed all input validation; each instance produces exactly one proof.
+    #[error("a ProverInstance can only produce one proof")]
+    AlreadyProven,
     #[error(transparent)]
     Instance(#[from] InstanceError),
     #[error(transparent)]

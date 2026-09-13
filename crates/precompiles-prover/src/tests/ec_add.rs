@@ -251,7 +251,7 @@ impl EcStackTraces {
         // The subset includes BytePairLut, which declares preprocessed
         // columns, so the bundle is `Some`.
         let preprocessed = Preprocessed::build(prover_statement.statement(), &config);
-        let output = ProverInstance::new(&config, &prover_statement, preprocessed.as_ref())
+        let output = ProverInstance::new(&config, prover_statement, preprocessed.as_ref())
             .expect("preprocessed bundle matches the declared columns")
             .prove(test_challenger())
             .expect("prove");
