@@ -475,8 +475,8 @@ fn prove_precompiles_with_budget_corner_cases() {
         .finish();
     let heights: [usize; NUM_CHIPLETS] = traces.mains().map(Matrix::height);
     let params = precompile_pcs_params();
-    let exact_peak =
-        memory::prover_peak_bytes(&heights, &params).expect("modelled peak fits in u64");
+    let exact_peak = memory::prover_peak_bytes(&heights, &params, HashFunction::Blake3_256)
+        .expect("modelled peak fits in u64");
 
     // At the exact peak, the budget check passes and the state proves.
     prove_precompiles_with_budget(

@@ -160,7 +160,7 @@ pub(crate) fn prove(
     let estimated_bytes = imported
         .session
         .trace_heights()
-        .and_then(|heights| memory::prover_peak_bytes(&heights, &params));
+        .and_then(|heights| memory::prover_peak_bytes(&heights, &params, hash_fn));
     crate::check_memory_budget(estimated_bytes, max_prover_memory_bytes)?;
 
     let traces = {
