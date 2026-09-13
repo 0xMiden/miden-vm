@@ -59,7 +59,7 @@ pub fn prove_deferred_state_with_budget(
     let estimated_bytes = deferred
         .session
         .trace_heights()
-        .and_then(|heights| memory::prover_peak_bytes(&heights, &params));
+        .and_then(|heights| memory::prover_peak_bytes(&heights, &params, hash_fn));
     check_memory_budget(estimated_bytes, max_prover_memory_bytes)?;
 
     let traces = {
