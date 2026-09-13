@@ -12,11 +12,16 @@ use crate::{
         AirBuilder, BaseAir, ExtensionBuilder, InstanceError, LiftedAir, LiftedAirBuilder,
         MultiAir, ProverStatement, Statement, WindowAccess,
     },
+    config::GenericStarkConfig,
     domain::DomainError,
     order::{ShapeError, TraceOrder},
     proof::{TranscriptData, TranscriptError},
-    testing::configs::goldilocks_poseidon2::{
-        Felt, QuadFelt, generate_pow4_trace, prove_and_verify, test_challenger, test_config,
+    testing::{
+        QC_PCS_PARAMS,
+        configs::goldilocks_poseidon2::{
+            Dft, Felt, QuadFelt, generate_pow4_trace, prove_and_verify, test_challenger,
+            test_config, test_lmcs,
+        },
     },
 };
 
@@ -193,6 +198,64 @@ fn single_trace() {
 }
 
 #[test]
+fn prover_instance_consumes_main_traces() {
+    let config = test_config();
+    let prover_statement = tiny_prover_statement(
+        vec![TinyAir::new(vec![])],
+        vec![trace_of_height(4)],
+        vec![Felt::from_u64(START)],
+    )
+    .expect("valid");
+    let mut prover_instance =
+        ProverInstance::new(&config, prover_statement, None).expect("no preprocessed columns");
+
+    prover_instance.prove(test_challenger()).expect("first proof should succeed");
+    let err = prover_instance
+        .prove(test_challenger())
+        .expect_err("main traces should be consumed by the first proof");
+
+    assert!(matches!(err, crate::ProverError::AlreadyProven));
+}
+
+#[test]
+fn failed_validation_leaves_instance_reusable() {
+    // TinyAir's quotient degree is 4 (log_quotient_degree = 2), so a config
+    // with log_blowup = 1 trips the cheap `ConstraintDegreeTooHigh` check,
+    // which runs before the main traces are consumed.
+    let config =
+        GenericStarkConfig::new(QC_PCS_PARAMS, test_lmcs(), Dft::default(), test_challenger());
+    let prover_statement = tiny_prover_statement(
+        vec![TinyAir::new(vec![])],
+        vec![trace_of_height(4)],
+        vec![Felt::from_u64(START)],
+    )
+    .expect("valid");
+    let mut prover_instance =
+        ProverInstance::new(&config, prover_statement, None).expect("no preprocessed columns");
+
+    let err = prover_instance
+        .prove(test_challenger())
+        .expect_err("quotient degree exceeds blowup");
+    assert!(matches!(
+        err,
+        crate::ProverError::Domain(DomainError::ConstraintDegreeTooHigh {
+            log_quotient: 2,
+            log_blowup: 1
+        })
+    ));
+
+    // The failed attempt leaves the instance reusable: the same validation
+    // error — not `AlreadyProven` — surfaces on the retry.
+    let err = prover_instance
+        .prove(test_challenger())
+        .expect_err("retry should fail identically");
+    assert!(matches!(
+        err,
+        crate::ProverError::Domain(DomainError::ConstraintDegreeTooHigh { .. })
+    ));
+}
+
+#[test]
 fn malformed_transcript_is_rejected() {
     let config = test_config();
     let prover_statement = tiny_prover_statement(
@@ -202,13 +265,12 @@ fn malformed_transcript_is_rejected() {
     )
     .expect("valid");
 
-    let output = ProverInstance::new(&config, &prover_statement, None)
-        .expect("no preprocessed columns")
-        .prove(test_challenger())
-        .expect("proving should succeed");
+    let mut prover_instance =
+        ProverInstance::new(&config, prover_statement, None).expect("no preprocessed columns");
+    let output = prover_instance.prove(test_challenger()).expect("proving should succeed");
 
     // Baseline should verify
-    let baseline_statement = VerifierInstance::new(&config, prover_statement.statement(), None)
+    let baseline_statement = VerifierInstance::new(&config, prover_instance.statement(), None)
         .expect("no preprocessed columns");
     let _digest = baseline_statement
         .verify(&output.proof, test_challenger())
@@ -235,14 +297,11 @@ fn malformed_log_trace_heights_is_rejected() {
         vec![Felt::from_u64(START)],
     )
     .expect("valid");
-    let statement = prover_statement.statement();
-    let stark_statement =
-        VerifierInstance::new(&config, statement, None).expect("no preprocessed columns");
-
-    let output = ProverInstance::new(&config, &prover_statement, None)
-        .expect("no preprocessed columns")
-        .prove(test_challenger())
-        .expect("proving should succeed");
+    let mut prover_instance =
+        ProverInstance::new(&config, prover_statement, None).expect("no preprocessed columns");
+    let output = prover_instance.prove(test_challenger()).expect("proving should succeed");
+    let stark_statement = VerifierInstance::new(&config, prover_instance.statement(), None)
+        .expect("no preprocessed columns");
 
     // Poke the `pub(crate)` `log_trace_heights` directly to feed the verifier
     // malformed shapes that bypass `ProverStatement` construction — the cases
@@ -343,10 +402,9 @@ fn air_order_reflects_caller_order() {
     )
     .expect("valid");
 
-    let output = ProverInstance::new(&config, &prover_statement, None)
-        .expect("no preprocessed columns")
-        .prove(test_challenger())
-        .expect("proving should succeed");
+    let mut prover_instance =
+        ProverInstance::new(&config, prover_statement, None).expect("no preprocessed columns");
+    let output = prover_instance.prove(test_challenger()).expect("proving should succeed");
 
     // The proof carries heights in instance order: [height=8, height=4]
     // → [log_h=3, log_h=2]. The proof's AIR ordering itself is implicit
@@ -361,7 +419,7 @@ fn air_order_reflects_caller_order() {
     // (log_h=2) ends up at proof position 0, instance index 0 (log_h=3) at
     // position 1.
     let trace_order = TraceOrder::from_log_heights::<Felt, QuadFelt, _>(
-        prover_statement.statement().airs(),
+        prover_instance.statement().airs(),
         output.proof.log_trace_heights,
     )
     .expect("valid heights");

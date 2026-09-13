@@ -158,12 +158,11 @@ fn external_assertion_holds() {
     let trace = generate_pow4_trace(start, 8);
     let prover_statement = external_prover_statement(input, trace, vec![start], vec![input]);
 
-    let output = ProverInstance::new(&config, &prover_statement, None)
-        .expect("no preprocessed columns")
-        .prove(test_challenger())
-        .expect("proving should succeed");
+    let mut prover_instance =
+        ProverInstance::new(&config, prover_statement, None).expect("no preprocessed columns");
+    let output = prover_instance.prove(test_challenger()).expect("proving should succeed");
 
-    let verifier_digest = VerifierInstance::new(&config, prover_statement.statement(), None)
+    let verifier_digest = VerifierInstance::new(&config, prover_instance.statement(), None)
         .expect("no preprocessed columns")
         .verify(&output.proof, test_challenger())
         .expect("verification should succeed");
@@ -186,12 +185,46 @@ fn missing_external_input_fails_proving() {
     // verifier-side sanity check.
     let broken = external_prover_statement(input, trace, vec![start], vec![]);
 
-    let err = ProverInstance::new(&config, &broken, None)
+    let err = ProverInstance::new(&config, broken, None)
         .expect("no preprocessed columns")
         .prove(test_challenger())
         .expect_err("missing external input should fail proving");
     assert!(
         matches!(err, crate::ProverError::Reduction(_)),
         "expected Reduction, got {err:?}"
+    );
+}
+
+#[test]
+fn failed_prove_leaves_instance_reusable() {
+    let config = test_config();
+
+    let input = Felt::from_u64(42);
+    let start = Felt::from_u64(2);
+
+    let trace = generate_pow4_trace(start, 8);
+    let broken = external_prover_statement(input, trace, vec![start], vec![]);
+
+    let mut prover_instance =
+        ProverInstance::new(&config, broken, None).expect("no preprocessed columns");
+
+    // The first attempt fails on the external-assertion reduction ...
+    let err = prover_instance
+        .prove(test_challenger())
+        .expect_err("missing external input should fail proving");
+    assert!(
+        matches!(err, crate::ProverError::Reduction(_)),
+        "expected Reduction, got {err:?}"
+    );
+
+    // ... but must not consume the instance: the retry reports the same
+    // validation error rather than `AlreadyProven`, so the instance keeps its
+    // traces and can be re-proven after a failed attempt.
+    let err = prover_instance
+        .prove(test_challenger())
+        .expect_err("retry should fail the same way");
+    assert!(
+        matches!(err, crate::ProverError::Reduction(_)),
+        "expected the same Reduction error on retry, got {err:?}"
     );
 }

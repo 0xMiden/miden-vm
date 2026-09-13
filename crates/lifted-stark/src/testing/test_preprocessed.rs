@@ -318,29 +318,29 @@ type TestPreprocessed = Preprocessed<Felt, Lmcs>;
 
 fn prove_with_preprocessed<MA>(
     config: &TestConfig,
-    ps: &ProverStatement<Felt, QuadFelt, MA>,
-) -> (TestOutput, TestPreprocessed)
+    ps: ProverStatement<Felt, QuadFelt, MA>,
+) -> (TestOutput, TestPreprocessed, Statement<Felt, QuadFelt, MA>)
 where
     MA: MultiAir<Felt, QuadFelt>,
 {
     let preprocessed = Preprocessed::build(ps.statement(), config).expect("has preprocessed");
-    let output = ProverInstance::new(config, ps, Some(&preprocessed))
-        .expect("valid preprocessed setup")
-        .prove(test_challenger())
-        .expect("prove succeeds");
-    (output, preprocessed)
+    let mut prover_instance =
+        ProverInstance::new(config, ps, Some(&preprocessed)).expect("valid preprocessed setup");
+    let output = prover_instance.prove(test_challenger()).expect("prove succeeds");
+    let statement = prover_instance.into_statement();
+    (output, preprocessed, statement)
 }
 
 fn verify_and_reparse<MA>(
     config: &TestConfig,
-    ps: &ProverStatement<Felt, QuadFelt, MA>,
+    statement: &Statement<Felt, QuadFelt, MA>,
     output: &TestOutput,
     preprocessed: &TestPreprocessed,
 ) where
     MA: MultiAir<Felt, QuadFelt>,
 {
     let verifier_instance =
-        VerifierInstance::new(config, ps.statement(), Some(preprocessed.commitment()))
+        VerifierInstance::new(config, statement, Some(preprocessed.commitment()))
             .expect("valid preprocessed setup");
     let digest = verifier_instance
         .verify(&output.proof, test_challenger())
@@ -353,13 +353,13 @@ fn verify_and_reparse<MA>(
     assert_eq!(output.digest, reparse_digest);
 }
 
-fn prove_verify_reparse<MA>(ps: &ProverStatement<Felt, QuadFelt, MA>)
+fn prove_verify_reparse<MA>(ps: ProverStatement<Felt, QuadFelt, MA>)
 where
     MA: MultiAir<Felt, QuadFelt>,
 {
     let config = test_config();
-    let (output, preprocessed) = prove_with_preprocessed(&config, ps);
-    verify_and_reparse(&config, ps, &output, &preprocessed);
+    let (output, preprocessed, statement) = prove_with_preprocessed(&config, ps);
+    verify_and_reparse(&config, &statement, &output, &preprocessed);
 }
 
 // ---------------------------------------------------------------------------
@@ -374,10 +374,10 @@ fn single_air_with_preprocessed() {
         vec![row_index_trace(height)],
     );
     let config = test_config();
-    let (output, preprocessed) = prove_with_preprocessed(&config, &ps);
-    verify_and_reparse(&config, &ps, &output, &preprocessed);
+    let (output, preprocessed, statement) = prove_with_preprocessed(&config, ps);
+    verify_and_reparse(&config, &statement, &output, &preprocessed);
 
-    let missing_commitment = VerifierInstance::new(&config, ps.statement(), None);
+    let missing_commitment = VerifierInstance::new(&config, &statement, None);
     assert!(
         matches!(
             missing_commitment,
@@ -398,7 +398,7 @@ fn mixed_airs_preprocessed_at_index_1() {
         vec![squaring_trace(height), row_index_trace(height)],
     );
 
-    prove_verify_reparse(&ps);
+    prove_verify_reparse(ps);
 }
 
 #[test]
@@ -411,7 +411,7 @@ fn rejects_width_mismatch() {
     let config = test_config();
 
     let preprocessed = Preprocessed::build(ps.statement(), &config).expect("has preprocessed");
-    let result = ProverInstance::new(&config, &ps, Some(&preprocessed));
+    let result = ProverInstance::new(&config, ps, Some(&preprocessed));
     assert!(
         matches!(
             result,
@@ -431,7 +431,7 @@ fn rejects_height_mismatch() {
     let config = test_config();
 
     let preprocessed = Preprocessed::build(ps.statement(), &config).expect("has preprocessed");
-    let result = ProverInstance::new(&config, &ps, Some(&preprocessed));
+    let result = ProverInstance::new(&config, ps, Some(&preprocessed));
     assert!(
         matches!(
             result,
@@ -454,7 +454,7 @@ fn rejects_log_blowup_mismatch() {
 
     let mut proving_config = test_config();
     proving_config.pcs = PcsParams::new(2, 2, 2, 0, 0, 2, 0).expect("valid PCS params");
-    let result = ProverInstance::new(&proving_config, &ps, Some(&preprocessed));
+    let result = ProverInstance::new(&proving_config, ps, Some(&preprocessed));
     assert!(
         matches!(
             result,
@@ -477,7 +477,7 @@ fn rejects_wrong_trusted_preprocessed_commitment() {
         vec![row_index_trace(height)],
     );
     let config = test_config();
-    let (output, _preprocessed) = prove_with_preprocessed(&config, &ps);
+    let (output, _preprocessed, statement) = prove_with_preprocessed(&config, ps);
 
     let wrong_ps = prover_statement(
         vec![RowCounterAir {
@@ -488,7 +488,7 @@ fn rejects_wrong_trusted_preprocessed_commitment() {
     let wrong_preprocessed =
         Preprocessed::build(wrong_ps.statement(), &config).expect("has preprocessed");
     let verifier_instance =
-        VerifierInstance::new(&config, ps.statement(), Some(wrong_preprocessed.commitment()))
+        VerifierInstance::new(&config, &statement, Some(wrong_preprocessed.commitment()))
             .expect("presence is valid");
 
     assert!(
@@ -510,7 +510,7 @@ fn preprocessed_shorter_than_max_trace() {
         vec![squaring_trace(8), row_index_trace(4)],
     );
 
-    prove_verify_reparse(&ps);
+    prove_verify_reparse(ps);
 }
 
 #[test]
@@ -525,7 +525,7 @@ fn preprocessed_much_shorter_than_max_trace() {
         vec![squaring_trace(8), row_index_trace(2)],
     );
 
-    prove_verify_reparse(&ps);
+    prove_verify_reparse(ps);
 }
 
 #[test]
@@ -542,5 +542,5 @@ fn preprocessed_multiple_heights_below_max() {
         vec![squaring_trace(8), row_index_trace(4), row_index_trace(2)],
     );
 
-    prove_verify_reparse(&ps);
+    prove_verify_reparse(ps);
 }

@@ -136,8 +136,8 @@ where
     let statement =
         Statement::new(BenchMultiAir { airs }, Vec::new(), Vec::new()).expect("statement");
     let prover_statement = ProverStatement::new(statement, traces).expect("prover statement");
-    let prover_instance =
-        ProverInstance::new(config, &prover_statement, None).expect("no preprocessed columns");
+    let mut prover_instance =
+        ProverInstance::new(config, prover_statement, None).expect("no preprocessed columns");
 
     let output = info_span!("prove")
         .in_scope(|| prover_instance.prove(config.challenger()).expect("proving failed"));
@@ -150,7 +150,7 @@ where
 
     if !cli.no_verify {
         info_span!("verify").in_scope(|| {
-            let digest = VerifierInstance::new(config, prover_statement.statement(), None)
+            let digest = VerifierInstance::new(config, prover_instance.statement(), None)
                 .expect("no preprocessed columns")
                 .verify(&output.proof, config.challenger())
                 .expect("verification failed");

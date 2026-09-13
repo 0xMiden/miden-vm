@@ -70,7 +70,7 @@ where
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
 
     let output: StarkOutput<Felt, QuadFelt, SC> =
-        ProverInstance::new(config, &prover_statement, None)
+        ProverInstance::new(config, prover_statement, None)
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?
             .prove(challenger)
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
