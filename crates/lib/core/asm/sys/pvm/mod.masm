@@ -1,3 +1,4 @@
+use miden::core::stark::types
 pub mod aux_trace
 pub mod constraints_eval
 pub mod deep_queries
@@ -62,7 +63,7 @@ const ACE_REGISTRY_ROOT_3 = 13870270840525555445
 #! Advice order: [h0, ..., h9].
 #! Inputs:  [...]
 #! Outputs: [...]
-pub proc load_air_context
+pub proc load_air_context()
     # [next_height_ptr, max_height]
     push.0
     exec.constants::air_trace_length_logs_ptr
@@ -98,7 +99,11 @@ end
 #!
 #! Inputs:  [min_log_height, next_height_ptr, max_height]
 #! Outputs: [next_height_ptr + 1, max(max_height, height)]
-proc load_air_height
+proc load_air_height(
+    min_log_height: u8,
+    next_height_ptr: types::Address,
+    max_height: u8,
+) -> (types::Address, u8)
     adv_push
     exec.assert_shape_log
     #=> [height, next_height_ptr, max_height]
@@ -117,7 +122,11 @@ end
 #!
 #! Inputs:  [fixed_log_height, next_height_ptr, max_height]
 #! Outputs: [next_height_ptr + 1, max(max_height, height)]
-proc load_fixed_air_height
+proc load_fixed_air_height(
+    fixed_log_height: u8,
+    next_height_ptr: types::Address,
+    max_height: u8,
+) -> (types::Address, u8)
     adv_push
     #=> [height, fixed_log_height, next_height_ptr, max_height]
 
@@ -134,20 +143,20 @@ end
 #!
 #! Inputs:  [height, min_log_height, ...]
 #! Outputs: [height, ...]
-proc assert_shape_log
+proc assert_shape_log(height: felt, min_log_height: u8) -> u8
     u32assert.err="AIR log height must be u32"
     dup u32lte.LOG_HEIGHT_MAX assert.err="AIR log height above maximum"
     dup.1 dup.1 u32lte assert.err="AIR log height below relation minimum"
     swap drop
 end
 
-proc store_relation_digest
+proc store_relation_digest()
     push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
     exec.constants::relation_digest_ptr mem_storew_le
     dropw
 end
 
-proc store_ace_registry_root
+proc store_ace_registry_root()
     push.ACE_REGISTRY_ROOT_3.ACE_REGISTRY_ROOT_2.ACE_REGISTRY_ROOT_1.ACE_REGISTRY_ROOT_0
     exec.constants::ace_registry_root_ptr mem_storew_le
     dropw
@@ -164,7 +173,7 @@ end
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
 #!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
 #!          log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
-proc build_security_descriptor
+proc build_security_descriptor(parameters: types::StackProofParameters) -> types::StackSecurityDescriptor
     exec.constants::get_trace_length_log
     push.LOOKUP_FRACTIONS_PER_ROW
     push.FIXED_BOUNDARY_LOOKUP_TERMS
@@ -197,7 +206,7 @@ end
 #! Outputs: [D]
 #!
 #! Invocation: exec
-pub proc request_proof
+pub proc request_proof(root: types::Digest) -> types::Digest
     dupw
     procref.::miden::core::sys::pvm::verify_proof
     emit.PROOF_REQUEST_EVENT
@@ -231,20 +240,7 @@ end
 #!           log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
 #!
 #! Invocation: exec
-pub proc verify_proof(deferred_root: word) -> (
-    lookup_pow_bits: u32,
-    num_composed_constraints: u32,
-    max_constraint_degree: u32,
-    num_deep_terms: u32,
-    max_message_width: u32,
-    num_lookup_boundary_terms: u32,
-    lookup_fractions_per_row: u32,
-    log_max_height: u32,
-    num_queries: u32,
-    query_pow_bits: u32,
-    deep_pow_bits: u32,
-    folding_pow_bits: u32,
-)
+pub proc verify_proof(deferred_root: types::Digest) -> types::StackSecurityDescriptor
     # --- Prepare PVM verifier state --------------------------------------------------------------
 
     exec.utils::load_security_params

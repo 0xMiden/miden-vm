@@ -472,6 +472,10 @@ fn lower_procedure(
     Ok(ast::Form::Procedure(proc))
 }
 
+/// Protocol ABI attributes imply the component-model calling convention, regardless of their form.
+const PROTOCOL_ABI_ATTRIBUTES: &[&str] =
+    &["account_procedure", "auth_script", "note_script", "transaction_script"];
+
 /// Applies lowered attributes to a procedure while preserving legacy attribute semantics.
 ///
 /// This is responsible for duplicate detection, `@callconv` validation, `@locals` validation, and
@@ -482,11 +486,21 @@ fn apply_procedure_attributes(
     annotations: Vec<ast::Attribute>,
 ) -> Result<(), ParsingError> {
     let mut cc = None;
+    let mut callconv_span = None;
+    let mut protocol_abi_span = None;
     let mut num_locals = None;
     {
         let attributes = procedure.attributes_mut();
 
         for attr in annotations {
+            if PROTOCOL_ABI_ATTRIBUTES.contains(&attr.name()) && !attributes.has(attr.name()) {
+                let span = attr.span();
+                if let Some(prev) = protocol_abi_span {
+                    return Err(ParsingError::AttributeConflict { span, prev });
+                }
+                protocol_abi_span = Some(span);
+            }
+
             match attr {
                 ast::Attribute::KeyValue(kv) => match attributes.entry(kv.id()) {
                     ast::AttributeSetEntry::Vacant(entry) => {
@@ -522,6 +536,7 @@ fn apply_procedure_attributes(
                     },
                 },
                 ast::Attribute::List(list) if list.name() == "callconv" && list.len() == 1 => {
+                    let span = list.span;
                     match attributes.entry(list.id()) {
                         ast::AttributeSetEntry::Vacant(entry) => {
                             let valid_cc = match &list.as_slice()[0] {
@@ -533,13 +548,12 @@ fn apply_procedure_attributes(
                                 },
                                 _ => None,
                             };
+                            callconv_span = Some(span);
                             if let Some(valid_cc) = valid_cc {
                                 cc = Some(valid_cc);
                                 entry.insert(ast::Attribute::List(list));
                             } else {
-                                return Err(ParsingError::UnrecognizedCallConv {
-                                    span: list.span(),
-                                });
+                                return Err(ParsingError::UnrecognizedCallConv { span });
                             }
                         },
                         ast::AttributeSetEntry::Occupied(entry) => {
@@ -619,6 +633,17 @@ fn apply_procedure_attributes(
         if cc.is_some() {
             attributes.remove("callconv");
         }
+    }
+
+    // Resolve the convention after collecting attributes so annotation order is irrelevant.
+    if let Some(attr_span) = protocol_abi_span {
+        if cc.is_some_and(|cc| cc != ast::types::CallConv::ComponentModel) {
+            return Err(ParsingError::AttributeConflict {
+                span: callconv_span.expect("callconv was set without associated span"),
+                prev: attr_span,
+            });
+        }
+        cc = Some(ast::types::CallConv::ComponentModel);
     }
 
     if let Some(num_locals) = num_locals {

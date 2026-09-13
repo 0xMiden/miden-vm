@@ -1,3 +1,4 @@
+use miden::core::stark::types
 use miden::core::stark::constants
 use miden::core::stark::public_inputs
 use miden::core::stark::random_coin
@@ -81,7 +82,7 @@ const BOUNDARY_INPUTS_DEFERRED_OFFSET   = 4
 # CONSTANTS GETTERS
 # =================================================================================================
 
-pub proc get_num_fixed_len_public_inputs
+pub proc get_num_fixed_len_public_inputs() -> u8
     push.NUM_FIXED_LEN_PUBLIC_INPUTS
 end
 
@@ -99,7 +100,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-pub proc process_public_inputs
+pub proc process_public_inputs()
     # Assert precondition: the rate-aligned absorption below bypasses the buffered duplex.
     exec.constants::random_coin_input_len_ptr mem_load
     assertz.err="process_public_inputs: input buffer must be empty"
@@ -135,7 +136,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-pub proc stage_boundary_inputs
+pub proc stage_boundary_inputs()
     # program_digest: claim region (+0) -> boundary_inputs (+0).
     padw exec.layout::claim_ptr mem_loadw_le
     # => [P, ...]
@@ -152,7 +153,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [D, ...]
-pub proc load_deferred_root
+pub proc load_deferred_root() -> types::Digest
     padw exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
 end
 
@@ -167,7 +168,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-proc compute_bus_gamma
+proc compute_bus_gamma()
     exec.push_beta
     # => [β0, β1, ...]
     dup.1 dup.1 ext2mul   # β^2
@@ -183,7 +184,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [β0, β1, ...]
-proc push_beta
+proc push_beta() -> types::QuadFelt
     exec.layout::aux_rand_elem_ptr add.1 mem_load
     exec.layout::aux_rand_elem_ptr mem_load
 end
@@ -192,7 +193,7 @@ end
 #!
 #! Input:  [i, ...]
 #! Output: [p0, p1, ...]
-proc push_alpha_plus_i_gamma
+proc push_alpha_plus_i_gamma(bus_id_plus_one: u8) -> types::QuadFelt
     dup
     exec.layout::bus_gamma_ptr add.1 mem_load mul
     # => [i·γ1, i, ...]
@@ -211,7 +212,7 @@ end
 #!
 #! Input:  [m0, m1, m2, m3, ...]
 #! Output: [msg0, msg1, ...]
-proc fold_digest_word
+proc fold_digest_word(digest: types::Digest) -> types::QuadFelt
     movup.3 push.0 swap
     # => [m3, 0, m0, m1, m2, ...]
     exec.push_beta ext2mul
@@ -233,7 +234,11 @@ end
 #!
 #! Input:  [acc0, acc1, base, N, ...]
 #! Output: [acc0, acc1, ...]   (acc += Σ_i 1 / ((α + γ) + msg(digest_i)))
-proc fold_kernel_digests_into_acc
+proc fold_kernel_digests_into_acc(
+    accumulator: types::QuadFelt,
+    base: types::Address,
+    count: u8,
+) -> types::QuadFelt
     dup.3 push.0 neq
     while.true
         # Loop entry: [acc0, acc1, base, N, ...]
@@ -267,7 +272,7 @@ end
 #!
 #! Input:  [bus_id_plus_one, offset, ...]
 #! Output: [inv_term0, inv_term1, ...]
-proc fold_boundary_word_inv_term
+proc fold_boundary_word_inv_term(bus_id_plus_one: u8, offset: u8) -> types::QuadFelt
     padw
     # => [0, 0, 0, 0, bus_id, offset, ...]
     exec.layout::boundary_inputs_ptr
@@ -301,7 +306,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-pub proc compute_outer_logup_correction
+pub proc compute_outer_logup_correction()
     # γ = β^16 into BUS_GAMMA_PTR.
     exec.compute_bus_gamma
     # => [...]
@@ -351,7 +356,7 @@ end
 #!
 #! Input:  [CLAIM_HASH, ...]
 #! Output: [...]
-proc absorb_claim_and_deferred_into_fs
+proc absorb_claim_and_deferred_into_fs(claim_hash: types::Digest)
     # D from the boundary-inputs window
     padw exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
     # => [D, CLAIM_HASH, ...]
@@ -382,7 +387,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-proc load_public_inputs
+proc load_public_inputs()
     padw padw padw
     # => [SCRATCH(12), ...]
     exec.layout::claim_ptr add.8
@@ -408,7 +413,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-proc observe_miden_air_shape
+proc observe_miden_air_shape()
     exec.layout::get_poseidon2_permutation_trace_length_log
     exec.layout::get_chiplets_trace_length_log
     exec.layout::get_core_trace_length_log

@@ -242,6 +242,26 @@ mod tests {
     }
 
     #[test]
+    fn exported_procedures_have_type_signatures() {
+        use miden_mast_package::PackageExport;
+
+        let core_lib = CoreLibrary::default();
+        let missing: Vec<_> = core_lib
+            .package()
+            .manifest
+            .exports()
+            .filter_map(|export| match export {
+                PackageExport::Procedure(procedure) if procedure.signature.is_none() => {
+                    Some(procedure.path.clone())
+                },
+                _ => None,
+            })
+            .collect();
+
+        assert!(missing.is_empty(), "procedures without binding signatures: {missing:?}");
+    }
+
+    #[test]
     fn test_compile() {
         let core_lib = CoreLibrary::default();
         let exists = core_lib

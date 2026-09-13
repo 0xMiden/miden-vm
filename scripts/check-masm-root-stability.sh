@@ -105,11 +105,11 @@ for project in "${projects[@]}"; do
         continue
     fi
 
-    echo "Checking MASM root stability for $relative_project against $baseline_tag"
+    echo "Checking MASM release compatibility for $relative_project against $baseline_tag"
     RUSTC_WRAPPER= rustup run nightly cargo -Zscript \
         "$check_script" \
         "$baseline_project" \
         "$current_project"
 done
 
-echo "MASM procedure roots are stable against $baseline_tag"
+echo "MASM release compatibility checks passed against $baseline_tag"

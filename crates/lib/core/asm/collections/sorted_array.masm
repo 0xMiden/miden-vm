@@ -1,7 +1,18 @@
 use miden::core::word
 
+# TYPES
+# =================================================================================================
+
+#! A word key and its associated word value in memory.
+pub type Entry = struct { key: word, value: word }
+
+#! The two most significant key elements, in operand stack order.
+pub type HalfKey = struct { suffix: felt, prefix: felt }
+
+
 # CONSTANTS
 # =================================================================================================
+
 const LOWERBOUND_ARRAY_EVENT = event("miden::core::collections::sorted_array::lowerbound_array")
 const LOWERBOUND_KEY_VALUE_EVENT = event("miden::core::collections::sorted_array::lowerbound_key_value")
 
@@ -37,7 +48,11 @@ const LOWERBOUND_KEY_VALUE_EVENT = event("miden::core::collections::sorted_array
 #!   Value doesn't exist and is smaller than all elements: 152 cycles
 #!   Value doesn't exist and is larger than all elements: 150 cycles
 #!   Value doesn't exist: 288 cycles
-pub proc find_word
+pub proc find_word(
+    value: word,
+    start_ptr: ptr<word>,
+    end_ptr: ptr<word>,
+) -> (i1, ptr<word>, ptr<word>, ptr<word>)
     # Call the non-deterministic lowerbound advisor (5 cycles)
     emit.LOWERBOUND_ARRAY_EVENT
     adv_push adv_push
@@ -179,7 +194,7 @@ end
 #! - `start_ptr > end_ptr`
 #! - any adjacent word pair is out of order.
 @locals(1)
-pub proc assert_sorted_words
+pub proc assert_sorted_words(start_ptr: ptr<word>, end_ptr: ptr<word>) -> (ptr<word>, ptr<word>)
     # locals:
     # 0: current_ptr
     dup add.4 loc_store.0
@@ -238,7 +253,11 @@ end
 #! - end_ptr is not double-word-aligned with the start_ptr:
 #!     - `(end_ptr - start_ptr)` must be divisible by 8
 #! - `start_ptr > end_ptr`
-pub proc find_key_value
+pub proc find_key_value(
+    key: word,
+    start_ptr: ptr<Entry>,
+    end_ptr: ptr<Entry>,
+) -> (i1, ptr<Entry>, ptr<Entry>, ptr<Entry>)
     push.1
     # => [use_full_key = 1, KEY, start_ptr, end_ptr]
 
@@ -277,7 +296,11 @@ end
 #! - end_ptr is not double-word-aligned with the start_ptr:
 #!     - `(end_ptr - start_ptr)` must be divisible by 8
 #! - `start_ptr > end_ptr`
-pub proc find_half_key_value
+pub proc find_half_key_value(
+    key: HalfKey,
+    start_ptr: ptr<Entry>,
+    end_ptr: ptr<Entry>,
+) -> (i1, ptr<Entry>, ptr<Entry>, ptr<Entry>)
     # Build KEY with key_prefix at word[3] (most significant in BE) and key_suffix at word[2]
     # word[0] and word[1] are 0 (will be zeroed in half-key comparison anyway)
     push.0 push.0
@@ -328,7 +351,12 @@ end
 #!   Key doesn't exist and is larger than all stored keys: 163 cycles
 #!   Key doesn't exist: 323 cycles
 @locals(1)
-proc find_partial_key_value
+proc find_partial_key_value(
+    key: word,
+    start_ptr: ptr<Entry>,
+    end_ptr: ptr<Entry>,
+    use_full_key: i1,
+) -> (i1, ptr<Entry>, ptr<Entry>, ptr<Entry>)
     # Call the non-deterministic lowerbound advisor (5 cycles)
     emit.LOWERBOUND_KEY_VALUE_EVENT
     # => [KEY, start_ptr, end_ptr, use_full_key]
@@ -495,7 +523,7 @@ end
 #! - `start_ptr > end_ptr`
 #! - any adjacent key pair is out of order.
 @locals(2)
-pub proc assert_sorted_keys
+pub proc assert_sorted_keys(start_ptr: ptr<Entry>, end_ptr: ptr<Entry>) -> (ptr<Entry>, ptr<Entry>)
     # locals:
     # 0: current_ptr
     # 1: use_full_key
@@ -549,7 +577,10 @@ end
 #! - `start_ptr > end_ptr`
 #! - any adjacent half-key pair is out of order.
 @locals(2)
-pub proc assert_sorted_half_keys
+pub proc assert_sorted_half_keys(
+    start_ptr: ptr<Entry>,
+    end_ptr: ptr<Entry>,
+) -> (ptr<Entry>, ptr<Entry>)
     # locals:
     # 0: current_ptr
     # 1: use_full_key
@@ -595,7 +626,7 @@ end
 #! Outputs: [KEY]
 #!
 #! Cycles: 16
-proc load_key
+proc load_key(use_full_key: i1, key_ptr: ptr<Entry>) -> word
     padw movup.5 mem_loadw_le
     # => [w0, w1, w2, w3, use_full_key]
 

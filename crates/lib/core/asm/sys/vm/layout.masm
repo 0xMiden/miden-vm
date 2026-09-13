@@ -1,3 +1,4 @@
+use miden::core::stark::types
 use miden::core::stark::constants
 
 ### Memory-map constants and accessors specific to the Miden VM relation.
@@ -87,81 +88,81 @@ const ACE_CIRCUIT_STREAM_PTR = 3225420376
 ### Scratch row for DEEP query openings: 96 main, 24 auxiliary-coordinate, and 16 quotient felts.
 const CURRENT_TRACE_ROW_PTR = 3238002688
 
-pub proc set_core_trace_length_log
+pub proc set_core_trace_length_log(height: u8)
     exec.constants::air_trace_length_logs_ptr mem_store
 end
 
-pub proc get_core_trace_length_log
+pub proc get_core_trace_length_log() -> u8
     exec.constants::air_trace_length_logs_ptr mem_load
 end
 
-pub proc set_chiplets_trace_length_log
+pub proc set_chiplets_trace_length_log(height: u8)
     exec.constants::air_trace_length_logs_ptr add.1 mem_store
 end
 
-pub proc get_chiplets_trace_length_log
+pub proc get_chiplets_trace_length_log() -> u8
     exec.constants::air_trace_length_logs_ptr add.1 mem_load
 end
 
-pub proc set_poseidon2_permutation_trace_length_log
+pub proc set_poseidon2_permutation_trace_length_log(height: u8)
     exec.constants::air_trace_length_logs_ptr add.2 mem_store
 end
 
-pub proc get_poseidon2_permutation_trace_length_log
+pub proc get_poseidon2_permutation_trace_length_log() -> u8
     exec.constants::air_trace_length_logs_ptr add.2 mem_load
 end
 
 ### Relation-facing pointer accessors used by the generated constraint evaluator.
 ### Keeping the anchors here gives the shared renderer one contract for VM and PVM while
 ### keeping relation-sized regions out of the generic layer.
-pub proc aux_rand_elem_ptr
+pub proc aux_rand_elem_ptr() -> ptr<types::QuadFelt>
     push.AUX_RAND_ELEM_PTR
 end
 
-pub proc aux_bus_boundary_ptr
+pub proc aux_bus_boundary_ptr() -> types::Address
     push.AUX_BUS_BOUNDARY_PTR
 end
 
-pub proc auxiliary_ace_inputs_ptr
+pub proc auxiliary_ace_inputs_ptr() -> types::Address
     push.AUXILIARY_ACE_INPUTS_PTR
 end
 
-pub proc ace_circuit_stream_ptr
+pub proc ace_circuit_stream_ptr() -> types::Address
     push.ACE_CIRCUIT_STREAM_PTR
 end
 
-pub proc ood_evaluations_ptr
+pub proc ood_evaluations_ptr() -> ptr<types::QuadFelt>
     push.OOD_EVALUATIONS_PTR
 end
 
-pub proc current_trace_row_ptr
+pub proc current_trace_row_ptr() -> types::Address
     push.CURRENT_TRACE_ROW_PTR
 end
 
-pub proc bus_gamma_ptr
+pub proc bus_gamma_ptr() -> types::Address
     push.BUS_GAMMA_PTR
 end
 
-pub proc c_total_ptr
+pub proc c_total_ptr() -> types::Address
     push.C_TOTAL_PTR
 end
 
-pub proc boundary_inputs_ptr
+pub proc boundary_inputs_ptr() -> types::Address
     push.BOUNDARY_INPUTS_PTR
 end
 
-pub proc claim_commitment_ptr
+pub proc claim_commitment_ptr() -> ptr<types::Digest>
     push.CLAIM_COMMITMENT_PTR
 end
 
-pub proc claim_ptr
+pub proc claim_ptr() -> types::Address
     push.CLAIM_PTR
 end
 
-pub proc num_kernel_procedures_ptr
+pub proc num_kernel_procedures_ptr() -> types::Address
     push.NUM_KERNEL_PROCEDURES_PTR
 end
 
-pub proc kernel_witness_ptr
+pub proc kernel_witness_ptr() -> types::Address
     push.KERNEL_WITNESS_PTR
 end

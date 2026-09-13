@@ -1,3 +1,4 @@
+use miden::core::stark::types
 use miden::core::stark::constants
 use miden::core::stark::random_coin
 
@@ -26,8 +27,9 @@ use miden::core::stark::random_coin
 #! Precondition: the relation context contains the OOD evaluation base address.
 #!
 #! Inputs:  []
-#! Outputs: []
-pub proc load_and_horner_eval_ood_frames
+#! Outputs: [alpha_0, alpha_1, 0, 0]
+#! The padded non-deterministic DEEP challenge remains as scratch space.
+pub proc load_and_horner_eval_ood_frames() -> types::PaddedQuadFelt
     # --- Load the random challenge used in computing the DEEP polynomial -----
 
     # We use this challenge to compute the constant terms needed in the computation of the DEEP
@@ -110,7 +112,7 @@ pub proc load_and_horner_eval_ood_frames
     # => [acc1]
     neg
     exec.constants::ood_fixed_term_horner_evaluations_ptr add.3 mem_store
-    # => []
+    # => [alpha_0, alpha_1, 0, 0]
 end
 
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
@@ -122,6 +124,9 @@ end
 #!
 #! Inputs:  [R0, R1, C, ptr, alpha_ptr, acc0, acc1]
 #! Outputs: [R0, R1, C, ptr, alpha_ptr, acc0`, acc1`]
-proc process_row_ood_evaluations
+proc process_row_ood_evaluations(
+    state: types::PoseidonState,
+    horner: types::HornerState,
+) -> (types::PoseidonState, types::HornerState)
     exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr dynexec
 end

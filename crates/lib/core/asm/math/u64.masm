@@ -3,7 +3,7 @@
 #! Asserts that both values at the top of the stack are u64 values.
 #! The input values are assumed to be represented using 32 bit limbs, fails if they are not.
 #! This takes 6 cycles.
-proc u32assert4
+proc u32assert4(b: u64, a: u64) -> (u64, u64)
     u32assert2
     movup.3
     movup.3
