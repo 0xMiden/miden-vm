@@ -301,7 +301,7 @@ where
     assert!(num_rows > 0, "LogUp normalization requires a non-empty trace");
     assert!(num_cols > 0, "LogUp requires at least one accumulator column");
 
-    let mut output_data = vec![EF::ZERO; num_rows * num_cols];
+    let mut output_data = EF::zero_vec(num_rows * num_cols);
 
     let flat_fractions = fractions.fractions();
     let flat_counts = fractions.counts();
