@@ -1,6 +1,6 @@
 use std::{
-    env,
-    path::{Component, Path, PathBuf},
+    env, fs,
+    path::{Path, PathBuf},
     time::Instant,
 };
 
@@ -235,50 +235,56 @@ fn paths_are_equal(left: &Path, right: &Path) -> bool {
 
 /// Resolves `path` against the current directory so both sides compare in one form.
 ///
-/// The file itself usually does not exist yet, so only its parent can be canonicalized; that still
-/// resolves symlinked directories. Hard links compare as distinct.
+/// The file itself usually does not exist yet, so the final component is resolved separately from
+/// its parent. This also handles dangling symlinks, which `canonicalize` cannot resolve.
 fn resolve_for_comparison(path: &Path) -> PathBuf {
-    let lexical = normalize_path(&env::current_dir().unwrap_or_default().join(path));
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        env::current_dir().unwrap_or_default().join(path)
+    };
 
-    // A path that already exists resolves fully, which also follows a symlinked file.
-    if let Ok(canonical) = lexical.canonicalize() {
-        return canonical;
-    }
-
-    match (lexical.parent(), lexical.file_name()) {
-        (Some(parent), Some(file_name)) => match parent.canonicalize() {
-            Ok(parent) => parent.join(file_name),
-            Err(_) => lexical,
-        },
-        _ => lexical,
-    }
+    resolve_symlinks(path)
 }
 
-fn normalize_path(path: &Path) -> PathBuf {
-    let is_absolute = path.is_absolute();
-    let mut components = Vec::new();
+fn resolve_symlinks(mut path: PathBuf) -> PathBuf {
+    const MAX_SYMLINKS: usize = 40;
 
-    for component in path.components() {
-        match component {
-            Component::CurDir => {},
-            Component::ParentDir => match components.last() {
-                Some(Component::Normal(_)) => {
-                    components.pop();
-                },
-                Some(Component::ParentDir) | None if !is_absolute => {
-                    components.push(Component::ParentDir);
-                },
-                _ => {},
-            },
-            component => components.push(component),
+    for _ in 0..MAX_SYMLINKS {
+        // A path that already exists resolves fully, including symlinked final components.
+        if let Ok(canonical) = path.canonicalize() {
+            return canonical;
         }
+
+        let Some(parent) = path.parent() else {
+            return path;
+        };
+        let Some(file_name) = path.file_name() else {
+            return path;
+        };
+        let Ok(parent) = parent.canonicalize() else {
+            return path;
+        };
+        let candidate = parent.join(file_name);
+
+        let Ok(metadata) = fs::symlink_metadata(&candidate) else {
+            return candidate;
+        };
+        if !metadata.file_type().is_symlink() {
+            return candidate;
+        }
+
+        let Ok(target) = fs::read_link(&candidate) else {
+            return candidate;
+        };
+        path = if target.is_absolute() {
+            target
+        } else {
+            parent.join(target)
+        };
     }
 
-    let mut normalized = PathBuf::new();
-    for component in components {
-        normalized.push(component.as_os_str());
-    }
-    normalized
+    path
 }
 
 #[cfg(test)]
@@ -348,8 +354,11 @@ mod tests {
     }
 
     #[test]
-    fn paths_are_equal_after_normalizing_dot_and_dot_dot_components() {
-        assert!(paths_are_equal(Path::new("sub/../same.proof"), Path::new("same.proof")));
+    fn paths_are_equal_after_resolving_dot_and_dot_dot_components() {
+        assert!(paths_are_equal(
+            Path::new("src/cli/../cli/prove.rs"),
+            Path::new("src/cli/prove.rs")
+        ));
     }
 
     #[test]

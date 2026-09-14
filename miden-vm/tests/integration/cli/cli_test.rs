@@ -190,11 +190,12 @@ fn prove_rejects_an_explicit_output_that_repeats_the_proof_path() {
 }
 
 #[test]
-fn prove_rejects_an_explicit_output_that_collides_after_path_normalization() {
+fn prove_rejects_an_explicit_output_that_collides_after_resolving_dot_and_dot_dot_components() {
     let working_dir = TempDir::new().unwrap();
     let program_path = working_dir.path().join("program.masm");
     fs::write(&program_path, "begin add end").unwrap();
     fs::write(working_dir.path().join("program.inputs"), r#"{ "operand_stack": [] }"#).unwrap();
+    fs::create_dir(working_dir.path().join("sub")).unwrap();
     let proof_path = working_dir.path().join("same.proof");
     let aliased_proof_path = working_dir.path().join("./sub/../same.proof");
 
@@ -266,6 +267,60 @@ fn prove_rejects_an_explicit_output_reached_through_a_symlinked_proof_path() {
         "placeholder",
         "the symlink target should be left alone when the paths collide"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn prove_rejects_a_default_output_that_is_a_dangling_symlink_to_the_proof() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("program.masm");
+    fs::write(&program_path, "begin add end").unwrap();
+    fs::write(working_dir.path().join("program.inputs"), r#"{ "operand_stack": [] }"#).unwrap();
+
+    let proof_path = working_dir.path().join("custom.proof");
+    let output_path = working_dir.path().join("custom.outputs");
+    std::os::unix::fs::symlink("custom.proof", &output_path).unwrap();
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("prove").arg(&program_path).arg("--proof").arg(&proof_path);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("overwrite"))
+        .stdout(predicate::str::contains("Proving program with hash").not());
+
+    assert!(!proof_path.exists(), "nothing should be written when the paths collide");
+    assert!(output_path.is_symlink(), "the dangling alias should be left untouched");
+}
+
+#[cfg(unix)]
+#[test]
+fn prove_rejects_an_explicit_output_when_dot_dot_crosses_a_symlink() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("program.masm");
+    fs::write(&program_path, "begin add end").unwrap();
+    fs::write(working_dir.path().join("program.inputs"), r#"{ "operand_stack": [] }"#).unwrap();
+
+    let real_dir = working_dir.path().join("real");
+    fs::create_dir(&real_dir).unwrap();
+    fs::create_dir(real_dir.join("sub")).unwrap();
+    std::os::unix::fs::symlink(real_dir.join("sub"), working_dir.path().join("alias")).unwrap();
+
+    let proof_path = real_dir.join("same.proof");
+    let output_path = working_dir.path().join("alias/../same.proof");
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("prove")
+        .arg(&program_path)
+        .arg("--proof")
+        .arg(&proof_path)
+        .arg("--output")
+        .arg(&output_path);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("overwrite"))
+        .stdout(predicate::str::contains("Proving program with hash").not());
+
+    assert!(!proof_path.exists(), "nothing should be written when the paths collide");
 }
 
 #[test]
