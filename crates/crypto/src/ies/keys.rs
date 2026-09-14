@@ -6,7 +6,7 @@ use rand::CryptoRng;
 use super::{IesError, IesScheme, crypto_box::CryptoBox, message::SealedMessage};
 use crate::{
     Felt,
-    aead::{aead_poseidon2::AeadPoseidon2, xchacha::XChaCha},
+    aead::{aead_eidos::AeadEidos, aead_poseidon2::AeadPoseidon2, xchacha::XChaCha},
     dsa::{
         ecdsa_k256_keccak::PUBLIC_KEY_BYTES as K256_PUBLIC_KEY_BYTES,
         eddsa_25519_sha512::PUBLIC_KEY_BYTES as X25519_PUBLIC_KEY_BYTES,
@@ -18,19 +18,23 @@ use crate::{
 // TYPE ALIASES
 // ================================================================================================
 
-/// Instantiation of sealed box using K256 + XChaCha20Poly1305
+/// Sealed-box construction using K256 and XChaCha20-Poly1305.
 type K256XChaCha20Poly1305 = CryptoBox<K256, XChaCha>;
-/// Instantiation of sealed box using X25519 + XChaCha20Poly1305
+/// Sealed-box construction using X25519 and XChaCha20-Poly1305.
 type X25519XChaCha20Poly1305 = CryptoBox<X25519, XChaCha>;
-/// Instantiation of sealed box using K256 + AeadPoseidon2
+/// Sealed-box construction using K256 and Poseidon2 authenticated encryption.
 type K256AeadPoseidon2 = CryptoBox<K256, AeadPoseidon2>;
-/// Instantiation of sealed box using X25519 + AeadPoseidon2
+/// Sealed-box construction using X25519 and Poseidon2 authenticated encryption.
 type X25519AeadPoseidon2 = CryptoBox<X25519, AeadPoseidon2>;
+/// Sealed-box construction using K256 and Eidos authenticated encryption.
+type K256AeadEidos = CryptoBox<K256, AeadEidos>;
+/// Sealed-box construction using X25519 and Eidos authenticated encryption.
+type X25519AeadEidos = CryptoBox<X25519, AeadEidos>;
 
 // HELPER MACROS
 // ================================================================================================
 
-/// Generates seal_bytes_with_associated_data method implementation
+/// Implements byte sealing for each supported scheme.
 macro_rules! impl_seal_bytes_with_associated_data {
     ($($variant:path => $crypto_box:ty, $ephemeral_variant:path;)*) => {
         /// Seals the provided plaintext (represented as bytes) and associated data with this
@@ -67,10 +71,10 @@ macro_rules! impl_seal_bytes_with_associated_data {
     };
 }
 
-/// Generates seal_elements_with_associated_data method implementation
+/// Implements field-element sealing for each supported scheme.
 macro_rules! impl_seal_elements_with_associated_data {
     ($($variant:path => $crypto_box:ty, $ephemeral_variant:path;)*) => {
-        /// Seals the provided plaintext (represented as filed elements) and associated data with
+        /// Seals the provided field elements and associated data with
         /// this sealing key.
         ///
         /// The returned message can be unsealed with the [UnsealingKey] associated with this
@@ -104,7 +108,7 @@ macro_rules! impl_seal_elements_with_associated_data {
     };
 }
 
-/// Generates unseal_bytes_with_associated_data method implementation
+/// Implements byte unsealing for each supported scheme.
 macro_rules! impl_unseal_bytes_with_associated_data {
     ($($variant:path => $crypto_box:ty, $ephemeral_variant:path;)*) => {
         /// Unseals the provided message using this unsealing key and returns the plaintext as bytes.
@@ -120,7 +124,6 @@ macro_rules! impl_unseal_bytes_with_associated_data {
             sealed_message: SealedMessage,
             associated_data: &[u8],
         ) -> Result<Vec<u8>, IesError> {
-            // Check scheme compatibility using constant-time comparison
             let self_algo = self.scheme() as u8;
             let msg_algo = sealed_message.ephemeral_key.scheme() as u8;
 
@@ -149,7 +152,7 @@ macro_rules! impl_unseal_bytes_with_associated_data {
     };
 }
 
-/// Generates unseal_elements_with_associated_data method implementation
+/// Implements field-element unsealing for each supported scheme.
 macro_rules! impl_unseal_elements_with_associated_data {
     ($($variant:path => $crypto_box:ty, $ephemeral_variant:path;)*) => {
         /// Unseals the provided message using this unsealing key and returns the plaintext as field elements.
@@ -165,7 +168,6 @@ macro_rules! impl_unseal_elements_with_associated_data {
             sealed_message: SealedMessage,
             associated_data: &[Felt],
         ) -> Result<Vec<Felt>, IesError> {
-            // Check scheme compatibility
             let self_algo = self.scheme() as u8;
             let msg_algo = sealed_message.ephemeral_key.scheme() as u8;
 
@@ -204,6 +206,8 @@ pub enum SealingKey {
     X25519XChaCha20Poly1305(crate::dsa::eddsa_25519_sha512::PublicKey),
     K256AeadPoseidon2(crate::dsa::ecdsa_k256_keccak::PublicKey),
     X25519AeadPoseidon2(crate::dsa::eddsa_25519_sha512::PublicKey),
+    K256AeadEidos(crate::dsa::ecdsa_k256_keccak::PublicKey),
+    X25519AeadEidos(crate::dsa::eddsa_25519_sha512::PublicKey),
 }
 
 impl SealingKey {
@@ -214,6 +218,8 @@ impl SealingKey {
             SealingKey::X25519XChaCha20Poly1305(_) => IesScheme::X25519XChaCha20Poly1305,
             SealingKey::K256AeadPoseidon2(_) => IesScheme::K256AeadPoseidon2,
             SealingKey::X25519AeadPoseidon2(_) => IesScheme::X25519AeadPoseidon2,
+            SealingKey::K256AeadEidos(_) => IesScheme::K256AeadEidos,
+            SealingKey::X25519AeadEidos(_) => IesScheme::X25519AeadEidos,
         }
     }
 
@@ -234,9 +240,11 @@ impl SealingKey {
         SealingKey::X25519XChaCha20Poly1305 => X25519XChaCha20Poly1305, EphemeralPublicKey::X25519XChaCha20Poly1305;
         SealingKey::K256AeadPoseidon2 => K256AeadPoseidon2, EphemeralPublicKey::K256AeadPoseidon2;
         SealingKey::X25519AeadPoseidon2 => X25519AeadPoseidon2, EphemeralPublicKey::X25519AeadPoseidon2;
+        SealingKey::K256AeadEidos => K256AeadEidos, EphemeralPublicKey::K256AeadEidos;
+        SealingKey::X25519AeadEidos => X25519AeadEidos, EphemeralPublicKey::X25519AeadEidos;
     }
 
-    /// Seals the provided plaintext (represented as filed elements) with this sealing key.
+    /// Seals the provided field elements with this sealing key.
     ///
     /// The returned message can be unsealed with the [UnsealingKey] associated with this sealing
     /// key.
@@ -253,6 +261,8 @@ impl SealingKey {
         SealingKey::X25519XChaCha20Poly1305 => X25519XChaCha20Poly1305, EphemeralPublicKey::X25519XChaCha20Poly1305;
         SealingKey::K256AeadPoseidon2 => K256AeadPoseidon2, EphemeralPublicKey::K256AeadPoseidon2;
         SealingKey::X25519AeadPoseidon2 => X25519AeadPoseidon2, EphemeralPublicKey::X25519AeadPoseidon2;
+        SealingKey::K256AeadEidos => K256AeadEidos, EphemeralPublicKey::K256AeadEidos;
+        SealingKey::X25519AeadEidos => X25519AeadEidos, EphemeralPublicKey::X25519AeadEidos;
     }
 }
 
@@ -271,6 +281,8 @@ impl Serializable for SealingKey {
             SealingKey::X25519XChaCha20Poly1305(key) => key.write_into(target),
             SealingKey::K256AeadPoseidon2(key) => key.write_into(target),
             SealingKey::X25519AeadPoseidon2(key) => key.write_into(target),
+            SealingKey::K256AeadEidos(key) => key.write_into(target),
+            SealingKey::X25519AeadEidos(key) => key.write_into(target),
         }
     }
 }
@@ -297,6 +309,14 @@ impl Deserializable for SealingKey {
                 let key = crate::dsa::eddsa_25519_sha512::PublicKey::read_from(source)?;
                 Ok(SealingKey::X25519AeadPoseidon2(key))
             },
+            IesScheme::K256AeadEidos => {
+                let key = crate::dsa::ecdsa_k256_keccak::PublicKey::read_from(source)?;
+                Ok(SealingKey::K256AeadEidos(key))
+            },
+            IesScheme::X25519AeadEidos => {
+                let key = crate::dsa::eddsa_25519_sha512::PublicKey::read_from(source)?;
+                Ok(SealingKey::X25519AeadEidos(key))
+            },
         }
     }
 }
@@ -310,6 +330,8 @@ pub enum UnsealingKey {
     X25519XChaCha20Poly1305(crate::dsa::eddsa_25519_sha512::KeyExchangeKey),
     K256AeadPoseidon2(crate::dsa::ecdsa_k256_keccak::KeyExchangeKey),
     X25519AeadPoseidon2(crate::dsa::eddsa_25519_sha512::KeyExchangeKey),
+    K256AeadEidos(crate::dsa::ecdsa_k256_keccak::KeyExchangeKey),
+    X25519AeadEidos(crate::dsa::eddsa_25519_sha512::KeyExchangeKey),
 }
 
 impl UnsealingKey {
@@ -320,6 +342,8 @@ impl UnsealingKey {
             UnsealingKey::X25519XChaCha20Poly1305(_) => IesScheme::X25519XChaCha20Poly1305,
             UnsealingKey::K256AeadPoseidon2(_) => IesScheme::K256AeadPoseidon2,
             UnsealingKey::X25519AeadPoseidon2(_) => IesScheme::X25519AeadPoseidon2,
+            UnsealingKey::K256AeadEidos(_) => IesScheme::K256AeadEidos,
+            UnsealingKey::X25519AeadEidos(_) => IesScheme::X25519AeadEidos,
         }
     }
 
@@ -341,6 +365,8 @@ impl UnsealingKey {
         UnsealingKey::X25519XChaCha20Poly1305 => X25519XChaCha20Poly1305, EphemeralPublicKey::X25519XChaCha20Poly1305;
         UnsealingKey::K256AeadPoseidon2 => K256AeadPoseidon2, EphemeralPublicKey::K256AeadPoseidon2;
         UnsealingKey::X25519AeadPoseidon2 => X25519AeadPoseidon2, EphemeralPublicKey::X25519AeadPoseidon2;
+        UnsealingKey::K256AeadEidos => K256AeadEidos, EphemeralPublicKey::K256AeadEidos;
+        UnsealingKey::X25519AeadEidos => X25519AeadEidos, EphemeralPublicKey::X25519AeadEidos;
     }
 
     /// Unseals the provided message using this unsealing key.
@@ -356,6 +382,8 @@ impl UnsealingKey {
         UnsealingKey::X25519XChaCha20Poly1305 => X25519XChaCha20Poly1305, EphemeralPublicKey::X25519XChaCha20Poly1305;
         UnsealingKey::K256AeadPoseidon2 => K256AeadPoseidon2, EphemeralPublicKey::K256AeadPoseidon2;
         UnsealingKey::X25519AeadPoseidon2 => X25519AeadPoseidon2, EphemeralPublicKey::X25519AeadPoseidon2;
+        UnsealingKey::K256AeadEidos => K256AeadEidos, EphemeralPublicKey::K256AeadEidos;
+        UnsealingKey::X25519AeadEidos => X25519AeadEidos, EphemeralPublicKey::X25519AeadEidos;
     }
 }
 
@@ -374,6 +402,8 @@ impl Serializable for UnsealingKey {
             UnsealingKey::X25519XChaCha20Poly1305(key) => key.write_into(target),
             UnsealingKey::K256AeadPoseidon2(key) => key.write_into(target),
             UnsealingKey::X25519AeadPoseidon2(key) => key.write_into(target),
+            UnsealingKey::K256AeadEidos(key) => key.write_into(target),
+            UnsealingKey::X25519AeadEidos(key) => key.write_into(target),
         }
     }
 }
@@ -400,6 +430,14 @@ impl Deserializable for UnsealingKey {
                 let key = crate::dsa::eddsa_25519_sha512::KeyExchangeKey::read_from(source)?;
                 Ok(UnsealingKey::X25519AeadPoseidon2(key))
             },
+            IesScheme::K256AeadEidos => {
+                let key = crate::dsa::ecdsa_k256_keccak::KeyExchangeKey::read_from(source)?;
+                Ok(UnsealingKey::K256AeadEidos(key))
+            },
+            IesScheme::X25519AeadEidos => {
+                let key = crate::dsa::eddsa_25519_sha512::KeyExchangeKey::read_from(source)?;
+                Ok(UnsealingKey::X25519AeadEidos(key))
+            },
         }
     }
 }
@@ -414,38 +452,44 @@ pub(super) enum EphemeralPublicKey {
     X25519XChaCha20Poly1305(crate::ecdh::x25519::EphemeralPublicKey),
     K256AeadPoseidon2(crate::ecdh::k256::EphemeralPublicKey),
     X25519AeadPoseidon2(crate::ecdh::x25519::EphemeralPublicKey),
+    K256AeadEidos(crate::ecdh::k256::EphemeralPublicKey),
+    X25519AeadEidos(crate::ecdh::x25519::EphemeralPublicKey),
 }
 
 impl EphemeralPublicKey {
-    /// Get scheme identifier for this ephemeral key
+    /// Returns the scheme identifier for this ephemeral key.
     pub fn scheme(&self) -> IesScheme {
         match self {
             EphemeralPublicKey::K256XChaCha20Poly1305(_) => IesScheme::K256XChaCha20Poly1305,
             EphemeralPublicKey::X25519XChaCha20Poly1305(_) => IesScheme::X25519XChaCha20Poly1305,
             EphemeralPublicKey::K256AeadPoseidon2(_) => IesScheme::K256AeadPoseidon2,
             EphemeralPublicKey::X25519AeadPoseidon2(_) => IesScheme::X25519AeadPoseidon2,
+            EphemeralPublicKey::K256AeadEidos(_) => IesScheme::K256AeadEidos,
+            EphemeralPublicKey::X25519AeadEidos(_) => IesScheme::X25519AeadEidos,
         }
     }
 
-    /// Serialize to bytes
+    /// Serializes this key to bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
             EphemeralPublicKey::K256XChaCha20Poly1305(key) => key.to_bytes(),
             EphemeralPublicKey::X25519XChaCha20Poly1305(key) => key.to_bytes(),
             EphemeralPublicKey::K256AeadPoseidon2(key) => key.to_bytes(),
             EphemeralPublicKey::X25519AeadPoseidon2(key) => key.to_bytes(),
+            EphemeralPublicKey::K256AeadEidos(key) => key.to_bytes(),
+            EphemeralPublicKey::X25519AeadEidos(key) => key.to_bytes(),
         }
     }
 
-    /// Deserialize from bytes with explicit scheme
+    /// Deserializes an ephemeral key for the specified scheme.
     pub fn from_bytes(scheme: IesScheme, bytes: &[u8]) -> Result<Self, IesError> {
         let expected_len = match scheme {
-            IesScheme::K256XChaCha20Poly1305 | IesScheme::K256AeadPoseidon2 => {
-                K256_PUBLIC_KEY_BYTES
-            },
-            IesScheme::X25519XChaCha20Poly1305 | IesScheme::X25519AeadPoseidon2 => {
-                X25519_PUBLIC_KEY_BYTES
-            },
+            IesScheme::K256XChaCha20Poly1305
+            | IesScheme::K256AeadPoseidon2
+            | IesScheme::K256AeadEidos => K256_PUBLIC_KEY_BYTES,
+            IesScheme::X25519XChaCha20Poly1305
+            | IesScheme::X25519AeadPoseidon2
+            | IesScheme::X25519AeadEidos => X25519_PUBLIC_KEY_BYTES,
         };
 
         if bytes.len() != expected_len {
@@ -471,6 +515,15 @@ impl EphemeralPublicKey {
                     .map_err(|_| IesError::EphemeralPublicKeyDeserializationFailed)?;
                 Ok(EphemeralPublicKey::K256AeadPoseidon2(key))
             },
+            IesScheme::K256AeadEidos => {
+                let key =
+                    <K256 as KeyAgreementScheme>::EphemeralPublicKey::read_from_bytes_with_budget(
+                        bytes,
+                        expected_len,
+                    )
+                    .map_err(|_| IesError::EphemeralPublicKeyDeserializationFailed)?;
+                Ok(EphemeralPublicKey::K256AeadEidos(key))
+            },
             IesScheme::X25519XChaCha20Poly1305 => {
                 let key =
                     <X25519 as KeyAgreementScheme>::EphemeralPublicKey::read_from_bytes_with_budget(
@@ -486,8 +539,17 @@ impl EphemeralPublicKey {
                         bytes,
                         expected_len,
                     )
-                        .map_err(|_| IesError::EphemeralPublicKeyDeserializationFailed)?;
+                    .map_err(|_| IesError::EphemeralPublicKeyDeserializationFailed)?;
                 Ok(EphemeralPublicKey::X25519AeadPoseidon2(key))
+            },
+            IesScheme::X25519AeadEidos => {
+                let key =
+                    <X25519 as KeyAgreementScheme>::EphemeralPublicKey::read_from_bytes_with_budget(
+                        bytes,
+                        expected_len,
+                    )
+                        .map_err(|_| IesError::EphemeralPublicKeyDeserializationFailed)?;
+                Ok(EphemeralPublicKey::X25519AeadEidos(key))
             },
         }
     }
