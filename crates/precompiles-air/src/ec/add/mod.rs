@@ -1,15 +1,9 @@
-//! EcGroupAdd chiplet — adversarially complete point addition over the
-//! [EC stores](crate::ec).
+//! EcGroupAdd chiplet — complete point addition over the [EC stores](crate::ec).
 //!
-//! One op proves `R = P + Q` for **any** stored operands via a
-//! prover-witnessed near-one-hot over five cases. Every predicate and
-//! every piece of field math rides **ptr-level certificate tuples**
-//! consumed from the uint relation chiplets — no coordinate limb ever
-//! enters this trace. This AIR's own job is *proving which case
-//! applies* and tying the right certificate set to the result.
-//!
-//! See the design notes for the design.
-//!
+//! One operation proves `R = P + Q` for any stored operands by selecting from five cases. The AIR
+//! consumes pointer-level certificates from the uint relation chiplets, so coordinate limbs do not
+//! enter this trace. It constrains the selected case and binds the corresponding certificates to
+//! the result.
 //! ## The case lattice
 //!
 //! | case | condition | result |
@@ -48,24 +42,23 @@
 //! `d ≠ 0` — a limb-level certificate carried by the subtraction that's
 //! already there, no separate inverse MAC or witness.
 //!
-//! The λ-float attack (a forged `d = 0` letting an attacker float the
-//! chord slope) dies because a `nz = 1` provide only exists when the
-//! `UintAdd` chiplet's own certificate holds (`d`'s limbs sum to a
+//! A forged `d = 0` cannot leave the chord slope unconstrained because an `nz = 1` provider exists
+//! only when the `UintAdd` chiplet's own certificate holds (`d`'s limbs sum to a
 //! Goldilocks-field-invertible nonzero value — see
 //! [`crate::uint::add`]'s "Nonzero certificate"), deterministically, with
 //! no β-dependent fingerprint and no completeness gap.
 //!
-//! `double` needs **no** analogous `y₁ ≠ 0` witness: its slope pin
+//! `double` needs no separate `y₁ ≠ 0` witness: its slope pin
 //! `2·λ·y₁ ≡ s` with `s = 3·x² + a` is itself the nonzero guard — at
 //! `y₁ = 0` it would force `s = 0`, which a **smooth** curve never permits
-//! (`3·x² + a ≠ 0` at a simple root of `x³ + ax + b`), so the λ-float
-//! attack dies the same way, for free. This rests on curve smoothness
+//! (`3·x² + a ≠ 0` at a simple root of `x³ + ax + b`), so the slope remains constrained. This
+//! relies on curve smoothness
 //! (`4a³ + 27b² ≠ 0`) — the same anchored-curve well-formedness premise as
 //! `b ≠ 0` (both trusted from the require layer / verifier curve anchoring,
 //! not proven in-circuit). For the cofactor-1 curves (secp256k1, P-256,
-//! bn254-G1) it is moot — prime order admits no 2-torsion, so no stored
-//! finite point ever has `y = 0`; it bites only for ed25519's cofactor-8
-//! image, whose smooth 2-torsion point routes through `cancel`.
+//! bn254-G1) prime order admits no 2-torsion, so no stored finite point has `y = 0`. The case is
+//! relevant only to the cofactor-8 image of ed25519, whose smooth 2-torsion point routes through
+//! `cancel`.
 //!
 //! ## Certificates (consumed tuples)
 //!
@@ -94,9 +87,9 @@
 //! | 2 `res`   | `(r, sbound, group)` | the provide + operand/PAI/group consumes (`p`/`q`/mult @ next) |
 //! | 3 `term`  | `(mult, p, q)` | — (hosts only; the constancy gate drops here) |
 //!
-//! Columns carry only what gates or names certificates on rows 0–2:
-//! the four operand coordinate ptrs, `a`/`b`/`bound`, the five case
-//! flags, `act` — 21 main columns, 12 LogUp aux columns, 4 periodic
+//! The 21 main columns comprise three row-hosted cells, four operand-coordinate pointers, three
+//! curve-parameter pointers, five case flags, `act`, `mints`, two reused ordering-limb cells, and
+//! the beta/lambda pointers. The AIR also uses 11 LogUp auxiliary columns and four periodic
 //! one-hots.
 
 use alloc::{borrow::Cow, vec, vec::Vec};
@@ -112,9 +105,9 @@ use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 use crate::{
     ec::{EcGroupMsg, EcPointMsg},
     logup::{
-        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        NUM_SIGMA_VALUES, frac_col,
+        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
+        NUM_RANDOMNESS, frac_col,
     },
     primitives::byte_pair_lut::Range16Msg,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -127,7 +120,7 @@ use crate::{
 
 /// LogUp message for the [`EcGroupAdd`](BusId::EcGroupAdd) relation: the
 /// 4-tuple `(group_ptr, p_ptr, q_ptr, r_ptr)` asserting `R = P + Q` in
-/// the group. *Provided* here (dormant until ladder / DAG consumers).
+/// the group. Provided here and consumed by transcript-eval and MSM relation AIRs.
 #[derive(Debug, Clone)]
 pub struct EcGroupAddMsg<E> {
     pub group_ptr: E,
@@ -210,18 +203,19 @@ pub const COL_ACT: usize = 15;
 pub const COL_MINTS: usize = 16;
 /// Limbs of `r_ptr − p_ptr − 1` (16-bit lo / hi) — the witnessed,
 /// Range16-checked difference proving `r_ptr > p_ptr` on `mints` ops. 0 off
-/// mint ops. Cycle-constant.
+/// mint ops. Hosted on the result row.
 pub const COL_RP_LO: usize = 17;
 pub const COL_RP_HI: usize = 18;
-/// Limbs of `r_ptr − q_ptr − 1` — proving `r_ptr > q_ptr`.
-pub const COL_RQ_LO: usize = 19;
-pub const COL_RQ_HI: usize = 20;
+/// Limbs of `r_ptr − q_ptr − 1` — proving `r_ptr > q_ptr`. Hosted in the same cells
+/// on the term row, visible through the result row's next-row window.
+pub const COL_RQ_LO: usize = COL_RP_LO;
+pub const COL_RQ_HI: usize = COL_RP_HI;
 /// The group's GLV endomorphism `β`/`λ` ptrs (carried only to close the
 /// `EcGroup` consume; the none-sentinel 0 for a group with no
 /// endomorphism).
-pub const COL_BETA_PTR: usize = 21;
-pub const COL_LAMBDA_PTR: usize = 22;
-pub const NUM_MAIN_COLS: usize = 23;
+pub const COL_BETA_PTR: usize = 19;
+pub const COL_LAMBDA_PTR: usize = 20;
+pub const NUM_MAIN_COLS: usize = 21;
 
 /// Block period: one add op = 4 rows.
 pub const PERIOD: usize = 4;
@@ -261,10 +255,10 @@ const PCOL_TERM: usize = 3;
 const NUM_PERIODIC: usize = 4;
 const ROLE_ROWS: [usize; NUM_PERIODIC] = [0, 1, 2, 3];
 
-// Aux: 12 columns, flattened via `frac_col!` over the 21 fractions so
+// Aux: 11 columns, flattened via `frac_col!` over the 19 fractions so
 // every closing constraint stays at degree ≤ 3 → `log_quotient_degree`
 // = 1:
-// - col 0: the `EcGroupAdd` provide, alone — the gated running-sum anchor.
+// - col 0: the `EcGroupAdd` provide, alone.
 // - col 1: the `p` / `q` operand `EcPoint` consumes.
 // - col 2: the live-result and cancel-PAI-result `EcPoint` consumes.
 // - col 3: the `EcGroup` consume + the cancel `y₁+y₂≡0` certificate.
@@ -273,11 +267,11 @@ const ROLE_ROWS: [usize; NUM_PERIODIC] = [0, 1, 2, 3];
 // - col 6: the generic case's `t`-add + fused `x₃` mul-subtract.
 // - col 7: the shared tail's `e`-subtract + fused `y₃` mul-subtract.
 // - col 8: the double case's fused `x₃` mul-subtract, alone (no partner left to pair).
-// - col 9/10: the closure-cert ptr-ordering Range16 limb pairs.
-// - col 11: the result-membership cert provide, alone.
-const NUM_LOGUP_COLS: usize = 12;
-const AUX_WIDTH: usize = 12;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 2, 1];
+// - col 9: the closure-cert ptr-ordering Range16 limb pair, on result and term rows.
+// - col 10: the result-membership cert provide, alone.
+const NUM_LOGUP_COLS: usize = 11;
+const AUX_WIDTH: usize = 11;
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 1];
 
 // AIR
 // ================================================================================================
@@ -318,7 +312,7 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -364,9 +358,8 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
 
         // Operand-coordinate ties for the `x₁ = x₂` cases. The coordinate
         // ptr columns are pinned to the operands' stored coordinates by the
-        // res-row `EcPoint` consumes, and the store interns by value, so
-        // these ptr-level equalities are exactly the value equalities the
-        // old `is_b_zero` certificates proved — at degree 2, no UintAdd op:
+        // res-row `EcPoint` consumes, and the store interns by value. These
+        // pointer equalities therefore establish the required value equalities at degree two:
         //  - `x_eq` (double ∨ cancel): `x₁ = x₂`, what makes the tail's `t = x₁ + x₂` the doubling
         //    `2x₁` and grounds the chord/tangent.
         //  - `dbl`: `y₁ = y₂`, which (with `inv·y ≡ b ≠ 0` ⟹ `y ≠ 0`) rules out the `P, −P` cancel
@@ -406,8 +399,8 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
         let two_16 = AB::Expr::from(Felt::from(1u32 << 16));
         let rp_lo: AB::Expr = local[COL_RP_LO].into();
         let rp_hi: AB::Expr = local[COL_RP_HI].into();
-        let rq_lo: AB::Expr = local[COL_RQ_LO].into();
-        let rq_hi: AB::Expr = local[COL_RQ_HI].into();
+        let rq_lo: AB::Expr = next[COL_RQ_LO].into();
+        let rq_hi: AB::Expr = next[COL_RQ_HI].into();
         let at_res: AB::Expr = sel[PCOL_RES].clone();
         builder.assert_zero(
             at_res.clone()
@@ -417,20 +410,20 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
         builder
             .assert_zero(at_res * mints * (r_res - q_res - AB::Expr::ONE - rq_lo - two_16 * rq_hi));
 
-        // Cycle-constancy for every metadata column (the term row is the
-        // block's last, so the not_term gate drops exactly at the
+        // Cycle-constancy for metadata, excluding the row-hosted ordering limbs (the term row is
+        // the block's last, so the not_term gate drops exactly at the
         // boundary).
         let not_term: AB::Expr = AB::Expr::ONE - sel[PCOL_TERM].clone();
-        for col in COL_PX..NUM_MAIN_COLS {
+        for col in (COL_PX..COL_RP_LO).chain(COL_BETA_PTR..NUM_MAIN_COLS) {
             let here: AB::Expr = local[col].into();
             let there: AB::Expr = next[col].into();
             builder.assert_zero(not_term.clone() * (there - here));
         }
 
         // Phase 2: LogUp.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -441,10 +434,6 @@ impl<LB> LookupAir<LB> for EcGroupAddAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_LOGUP_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -484,8 +473,6 @@ where
         let mints: LB::Expr = local[COL_MINTS].into();
         let rp_lo: LB::Expr = local[COL_RP_LO].into();
         let rp_hi: LB::Expr = local[COL_RP_HI].into();
-        let rq_lo: LB::Expr = local[COL_RQ_LO].into();
-        let rq_hi: LB::Expr = local[COL_RQ_HI].into();
         let live: LB::Expr = cancel.clone() + dbl.clone() + generic.clone();
         let tail: LB::Expr = dbl.clone() + generic.clone();
 
@@ -525,8 +512,7 @@ where
         let single_deg = Deg { v: 1, u: 2 };
         let pair_deg = Deg { v: 3, u: 2 };
 
-        // col 0: the `EcGroupAdd` provide, alone — the gated running-sum
-        // anchor.
+        // col 0: the `EcGroupAdd` provide, alone.
         frac_col!(
             builder,
             "ec-add-bindings",
@@ -816,27 +802,20 @@ where
             ),
         );
 
-        // ---- col 9/10: the mint columns. Four Range16 consumes for the
+        // ---- col 9: the mint column. Four Range16 consumes per block for the
         //      limbs of r−p−1 and r−q−1 (reconstructed in the main AIR),
         //      proving r_ptr > p_ptr ∧ r_ptr > q_ptr on a mint op — the
         //      well-foundedness the certificate rests on. All gated
-        //      `at_res · mints`: one set per mint block.
-        let gate = sel[PCOL_RES].clone() * mints;
+        //      `(at_res + at_term) · mints`: one limb pair on each row.
+        let gate = (sel[PCOL_RES].clone() + sel[PCOL_TERM].clone()) * mints.clone();
         frac_col!(
             builder,
             "ec-add-mint",
             pair_deg,
-            ("range16-rp-lo", gate.clone(), Range16Msg { w: rp_lo }, f2),
-            ("range16-rp-hi", gate.clone(), Range16Msg { w: rp_hi }, f2),
+            ("range16-order-lo", gate.clone(), Range16Msg { w: rp_lo }, f2),
+            ("range16-order-hi", gate, Range16Msg { w: rp_hi }, f2),
         );
-        frac_col!(
-            builder,
-            "ec-add-mint",
-            pair_deg,
-            ("range16-rq-lo", gate.clone(), Range16Msg { w: rq_lo }, f2),
-            ("range16-rq-hi", gate.clone(), Range16Msg { w: rq_hi }, f2),
-        );
-        // col 11: the result-membership cert provide, alone. −1 per mint
+        // col 10: the result-membership cert provide, alone. −1 per mint
         // op (negative ⇒ provide), naming the fresh result `r` and its
         // group. Consumed by `r`'s point-store row (the point band of
         // `EcPointStoreGroupsAir`), discharging its on-curve obligation
@@ -844,13 +823,14 @@ where
         // is minted by exactly one op.
         let cert_group: LB::Expr = local[CELL_GROUP].into();
         let cert_r: LB::Expr = local[CELL_R].into();
+        let cert_gate = sel[PCOL_RES].clone() * mints;
         frac_col!(
             builder,
             "ec-add-mint",
             single_deg,
             (
                 "provide-ecgroupadd-cert",
-                LB::Expr::ZERO - gate,
+                LB::Expr::ZERO - cert_gate,
                 EcOnCurveCertMsg { group_ptr: cert_group, r_ptr: cert_r },
                 f2
             ),

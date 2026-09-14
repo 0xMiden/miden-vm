@@ -2,20 +2,14 @@
 //! composed into the merged hash chiplet by
 //! [`crate::hash::chunk_node_sponge::ChunkNodeSpongeAir`].
 //!
-//! Both are period-1 (no periodic columns) and their own trace heights
-//! are otherwise unrelated, so they run **simultaneously** on the same
-//! rows in disjoint column ranges: main columns 0..12 are exactly
-//! [`chunk::ChunkAir`]'s own layout (unchanged), columns 12..42 are
-//! exactly [`node::KeccakNodeAir`]'s own layout (unchanged, shifted by
-//! [`NODE_COL_OFFSET`]). No mode selector, no cross-gating — each side
-//! keeps its own constraint degree (`lqd = 1`).
+//! Both are period-1 (no periodic columns) and run simultaneously on the same rows in disjoint
+//! column ranges. Main columns 0..12 use [`chunk::ChunkAir`]'s layout; columns 12..42 use
+//! [`node::KeccakNodeAir`]'s layout shifted by [`NODE_COL_OFFSET`]. Both layouts are evaluated
+//! directly on every row.
 //!
-//! Exactly one running-sum column is committed per AIR, so column 0 is
-//! chunk's own anchor fraction, unchanged; keccak-node's own anchor
-//! fraction becomes an ordinary (non-anchor) column instead of folding
-//! into chunk's — both still close into the one shared σ via the
-//! standard `acc_next[0] = Σ acc[i]` recurrence, and neither pays the
-//! degree cost of physically sharing column 0.
+//! The 21 lookup interactions are repacked into six columns with shape `[3, 3, 3, 4, 4, 4]`.
+//! Column 0 contains three linear chunk-memory interactions and drives the centered accumulator.
+//! The three four-interaction columns reach degree five, which is the composite's degree bound.
 
 use core::array;
 
@@ -32,7 +26,8 @@ use crate::{
     logup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, frac_col},
     transcript::{
         binding::BindingMsg,
-        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg, initial_cv_from_frame},
+        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
+        initial_cv_from_frame,
     },
     utils::{current_main, next_main},
 };
@@ -45,25 +40,11 @@ pub const NODE_COL_OFFSET: usize = chunk::NUM_MAIN_COLS;
 
 pub const NUM_MAIN_COLS: usize = chunk::NUM_MAIN_COLS + node::NUM_MAIN_COLS;
 
-/// Aux layout: the chunk columns come first, followed by the Keccak-node columns. Each component
-/// retains its own lookup grouping; only the first chunk column is the shared running-sum anchor.
-pub const NUM_AUX_COLS: usize = chunk::NUM_AUX_COLS + node::NUM_AUX_COLS;
+/// Six auxiliary columns. Together with the sponge's 18 columns, these give the composite its
+/// 24-column auxiliary trace.
+pub const NUM_AUX_COLS: usize = 6;
 
-const fn column_shape() -> [usize; NUM_AUX_COLS] {
-    let mut shape = [0usize; NUM_AUX_COLS];
-    let mut i = 0;
-    while i < chunk::NUM_AUX_COLS {
-        shape[i] = chunk::COLUMN_SHAPE[i];
-        i += 1;
-    }
-    let mut j = 0;
-    while j < node::NUM_AUX_COLS {
-        shape[chunk::NUM_AUX_COLS + j] = node::COLUMN_SHAPE[j];
-        j += 1;
-    }
-    shape
-}
-pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = column_shape();
+pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [3, 3, 3, 4, 4, 4];
 
 // CONSTRAINTS
 // ================================================================================================
@@ -177,13 +158,17 @@ where
     let pos_act_head: LB::Expr = act * is_head;
 
     let interaction_deg = Deg { v: 1, u: 1 };
-    let provides_deg = Deg { v: 1, u: 2 };
-    let pair_deg = Deg { v: 3, u: 2 };
+    let emit_deg = Deg { v: 2, u: 1 };
+    let triple_deg = Deg { v: 3, u: 3 };
+    let emit_triple_deg = Deg { v: 4, u: 3 };
+    let quad_deg = Deg { v: 4, u: 4 };
 
+    // col 0 (running sum): three linear Memory64 interactions. The denominator product has degree
+    // three, so the ungated centered recurrence has degree four.
     frac_col!(
         builder,
         "memory64",
-        provides_deg,
+        triple_deg,
         (
             "lane0",
             neg_act.clone(),
@@ -194,11 +179,6 @@ where
             },
             interaction_deg
         ),
-    );
-    frac_col!(
-        builder,
-        "memory64",
-        pair_deg,
         (
             "lane1",
             neg_act.clone(),
@@ -220,10 +200,15 @@ where
             interaction_deg
         ),
     );
+
+    let neg_act_head: LB::Expr = LB::Expr::ZERO - pos_act_head;
+    // col 1: the remaining chunk interactions. The ChunkChain emission
+    // has degree-2 multiplicity, so this ordinary column has numerator
+    // degree 4 and denominator degree 3.
     frac_col!(
         builder,
         "chunk-flatten",
-        pair_deg,
+        emit_triple_deg,
         (
             "lane3",
             neg_act,
@@ -243,13 +228,6 @@ where
             },
             interaction_deg
         ),
-    );
-
-    let neg_act_head: LB::Expr = LB::Expr::ZERO - pos_act_head;
-    frac_col!(
-        builder,
-        "chunk-chain",
-        provides_deg,
         (
             "emit",
             neg_act_head,
@@ -257,7 +235,7 @@ where
                 chunk_seq_id_head: local[chunk::COL_CHUNK_SEQ_ID].into(),
                 absorption_id_head: absorption_id,
             },
-            interaction_deg
+            emit_deg
         ),
     );
 
@@ -317,11 +295,14 @@ where
     let chunks_initial_cv = initial_cv_from_frame(chunks_frame);
     let digest_chunks_initial_cv = initial_cv_from_frame(digest_chunks_frame);
     let keccak_initial_cv = initial_cv_from_frame(keccak_frame);
+    let addr_lane =
+        |j: u8| -> LB::Expr { digest_addr_base.clone() + LB::Expr::from(Felt::from(j)) };
 
+    // col 2: node request, truth binding, and chunk-chain consume.
     frac_col!(
         builder,
         "handshake-and-chunks-digest",
-        provides_deg,
+        triple_deg,
         (
             "ks-request",
             neg_act.clone(),
@@ -332,11 +313,6 @@ where
             },
             interaction_deg
         ),
-    );
-    frac_col!(
-        builder,
-        "handshake-and-chunks-digest",
-        pair_deg,
         (
             "binding-truth",
             neg_out_mult,
@@ -353,10 +329,12 @@ where
             interaction_deg
         ),
     );
+
+    // col 3: the input-chunks boundary and the first two D limbs.
     frac_col!(
         builder,
-        "handshake-and-chunks-digest",
-        pair_deg,
+        "input-chunks-and-d-limbs",
+        quad_deg,
         (
             "eidos-out-h-input-chunks",
             pos_act.clone(),
@@ -376,14 +354,6 @@ where
             },
             interaction_deg
         ),
-    );
-
-    let addr_lane =
-        |j: u8| -> LB::Expr { digest_addr_base.clone() + LB::Expr::from(Felt::from(j)) };
-    frac_col!(
-        builder,
-        "memory64-d-limbs",
-        pair_deg,
         (
             "d-lane-0",
             pos_act_x2.clone(),
@@ -405,10 +375,12 @@ where
             interaction_deg
         ),
     );
+
+    // col 4: the remaining D limbs and the digest-chunks block and initial CV.
     frac_col!(
         builder,
-        "memory64-d-limbs",
-        pair_deg,
+        "d-limbs-and-digest-chunks",
+        quad_deg,
         (
             "d-lane-2",
             pos_act_x2.clone(),
@@ -429,12 +401,6 @@ where
             },
             interaction_deg
         ),
-    );
-
-    frac_col!(
-        builder,
-        "digest-chunks-eidos",
-        pair_deg,
         (
             "eidos-block",
             pos_act.clone(),
@@ -445,7 +411,7 @@ where
             interaction_deg
         ),
         (
-            "eidos-init",
+            "eidos-init-digest-chunks",
             pos_act.clone(),
             EidosInitMsg {
                 compression_id: absorption_id_digest_chunks.clone(),
@@ -454,12 +420,14 @@ where
             interaction_deg
         ),
     );
+
+    // col 5: the digest-chunks output and the Keccak block, initial CV, and output.
     frac_col!(
         builder,
-        "digest-chunks-eidos",
-        provides_deg,
+        "digest-and-keccak-eidos",
+        quad_deg,
         (
-            "eidos-out",
+            "eidos-out-digest-chunks",
             pos_act.clone(),
             EidosOutMsg {
                 chain_head_id: absorption_id_digest_chunks.clone(),
@@ -468,14 +436,8 @@ where
             },
             interaction_deg
         ),
-    );
-
-    frac_col!(
-        builder,
-        "keccak-eidos",
-        pair_deg,
         (
-            "eidos-block",
+            "eidos-block-keccak",
             pos_act.clone(),
             EidosBlockMsg {
                 compression_id: absorption_id_keccak.clone(),
@@ -490,7 +452,7 @@ where
             interaction_deg
         ),
         (
-            "eidos-init",
+            "eidos-init-keccak",
             pos_act.clone(),
             EidosInitMsg {
                 compression_id: absorption_id_keccak.clone(),
@@ -498,13 +460,8 @@ where
             },
             interaction_deg
         ),
-    );
-    frac_col!(
-        builder,
-        "keccak-eidos",
-        provides_deg,
         (
-            "eidos-out",
+            "eidos-out-keccak",
             pos_act,
             EidosOutMsg {
                 chain_head_id: absorption_id_keccak.clone(),

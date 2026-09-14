@@ -6,7 +6,7 @@ use miden_air::{
     CoreCols, DecoderCols, StackCols, SystemCols,
     trace::{
         chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP_FELT,
-        decoder::{NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_USER_OP_HELPERS},
+        decoder::{NUM_OP_BATCH_ENCODING_COLS, NUM_OP_BITS, NUM_USER_OP_HELPERS},
     },
 };
 use miden_core::{
@@ -44,9 +44,8 @@ struct DecoderRow {
     /// The index of the operation within its operation group, or 0 if this is not a row containing
     /// an operation in a basic block.
     pub op_index: Felt,
-    /// The operation batch flags, encoding the number of groups present in the current operation
-    /// batch.
-    pub op_batch_flags: [Felt; NUM_OP_BATCH_FLAGS],
+    /// The two-column encoding of the number of groups in the current operation batch.
+    pub op_batch_encoding: [Felt; NUM_OP_BATCH_ENCODING_COLS],
 }
 
 impl DecoderRow {
@@ -62,7 +61,7 @@ impl DecoderRow {
             in_basic_block: false,
             group_count: ZERO,
             op_index: ZERO,
-            op_batch_flags: [ZERO; NUM_OP_BATCH_FLAGS],
+            op_batch_encoding: [ZERO; NUM_OP_BATCH_ENCODING_COLS],
         }
     }
 
@@ -92,7 +91,7 @@ impl DecoderRow {
             in_basic_block: false,
             group_count,
             op_index: ZERO,
-            op_batch_flags: get_op_batch_flags(group_count)?,
+            op_batch_encoding: get_op_batch_encoding(group_count)?,
         })
     }
 
@@ -125,7 +124,7 @@ impl DecoderRow {
             in_basic_block: true,
             group_count: basic_block_ctx.group_count_in_block,
             op_index: Felt::from_u32(op_idx_in_group as u32),
-            op_batch_flags: [ZERO; NUM_OP_BATCH_FLAGS],
+            op_batch_encoding: [ZERO; NUM_OP_BATCH_ENCODING_COLS],
         }
     }
 }
@@ -523,10 +522,9 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         decoder.group_count = decoder_row.group_count;
         decoder.in_span = if decoder_row.in_basic_block { ONE } else { ZERO };
 
-        // Batch flag columns - all 0 for control flow operations
-        for i in 0..NUM_OP_BATCH_FLAGS {
-            decoder.batch_flags[i] = decoder_row.op_batch_flags[i];
-        }
+        let [full_batch, batch_size_code] = decoder_row.op_batch_encoding;
+        decoder.full_batch = full_batch;
+        decoder.batch_size_code = batch_size_code;
 
         // Extra bit columns
         let bit6 = Felt::from_u8((opcode >> 6) & 1);
@@ -563,8 +561,10 @@ impl<'a> CoreTraceGenerationTracer<'a> {
 // HELPERS
 // ===============================================================================================
 
-/// Returns op batch flags for the specified group count.
-fn get_op_batch_flags(num_groups_left: Felt) -> Result<[Felt; 3], ExecutionError> {
+/// Returns the operation-batch encoding for the specified group count.
+fn get_op_batch_encoding(
+    num_groups_left: Felt,
+) -> Result<[Felt; NUM_OP_BATCH_ENCODING_COLS], ExecutionError> {
     use miden_air::trace::decoder::{
         OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS,
     };
