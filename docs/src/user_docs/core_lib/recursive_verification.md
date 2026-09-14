@@ -12,10 +12,10 @@ deferred root.
 
 | Procedure | Input stack | Output stack |
 | --- | --- | --- |
-| `sys::vm::verify_proof` | `[C, ...]` | `[security_descriptor, D, ...]` |
+| `sys::vm::verify_proof` | `[C, ...]` | `[security_descriptor(12), D, ...]` |
 | `sys::pvm::request_proof` | `[D, ...]` | `[D, ...]` |
-| `sys::pvm::verify_proof` | `[D, ...]` | `[security_descriptor, ...]` |
-| `stark::security::compute_conjectured_security_level` | `[security_descriptor, ...]` | `[level, ...]` |
+| `sys::pvm::verify_proof` | `[D, ...]` | `[security_descriptor(12), ...]` |
+| `stark::security::compute_conjectured_security_level` | `[security_descriptor(12), ...]` | `[level, ...]` |
 
 Both verifiers consume their proof data from the advice stack.
 
@@ -77,7 +77,7 @@ begin
     procref.vm::verify_proof exec.sys::build_proof_request_key
     adv.push_mapval dropw
     exec.vm::verify_proof
-    # => [security_descriptor, D, ...]
+    # => [security_descriptor(12), D, ...]
 
     exec.security::compute_conjectured_security_level
     # => [level, D, ...]
@@ -87,7 +87,7 @@ begin
     # Request a proof for the root returned by the MVM verifier.
     exec.pvm::request_proof
     exec.pvm::verify_proof
-    # => [security_descriptor, ...]
+    # => [security_descriptor(12), ...]
 
     exec.security::compute_conjectured_security_level
     u32lt.MIN_SECURITY_BITS assertz.err="PVM proof security is below the required minimum"
