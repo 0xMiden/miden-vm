@@ -26,6 +26,11 @@ required-features = ["std"]
 
 [[bench]]
 harness           = false
+name              = "eidos_challenger"
+required-features = ["std"]
+
+[[bench]]
+harness           = false
 name              = "hash"
 required-features = ["std"]
 
