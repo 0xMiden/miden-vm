@@ -8,6 +8,7 @@
 #### Changes
 
 - Avoided element-wise buffer swaps during mixed-height DEEP reduction.
+- Reduced DEEP matrices across commitments in ascending height order to avoid separate group buffers.
 
 #### Fixes
 
