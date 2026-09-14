@@ -27,7 +27,7 @@ use miden_core::{
 };
 use miden_crypto::stark::air::LiftedAir;
 
-use super::{Challenges, LookupAir, ProverLookupBuilder, prover::build_lookup_fractions};
+use super::{Challenges, LookupAir, ProverLookupBuilder, prover::build_lookup_fraction_chunk};
 
 /// Rows per chunk for fraction accumulation and centered scanning.
 pub(crate) const ACCUMULATE_ROWS_PER_CHUNK: usize = 512;
@@ -35,15 +35,11 @@ pub(crate) const ACCUMULATE_ROWS_PER_CHUNK: usize = 512;
 // TOP-LEVEL DRIVER
 // ================================================================================================
 
-/// Generic `LiftedAir::build_aux_trace` body for any `LiftedAir + LookupAir` AIR.
+/// Build the auxiliary trace and its normalized sum `sigma_prime = sigma / num_rows`.
 ///
-/// Sources `alpha`, `beta`, `max_message_width`, `num_bus_ids`, and periodic columns from the AIR,
-/// runs collection + normalized cyclic accumulation, and returns
-/// `(aux_trace, vec![sigma_prime])`, where `sigma_prime = sigma / num_rows`.
-///
-/// The challenges ordering (`challenges[0] = alpha`, `challenges[1] = beta`) mirrors the
-/// constraint-path adapter's `ConstraintLookupBuilder::new` so prover- and constraint-path
-/// challenges line up.
+/// Returns `(aux_trace, vec![sigma_prime])`. The first two `challenges` are `alpha` and `beta`,
+/// in the same order as the constraint builder. Each task collects and accumulates one row
+/// chunk, releasing its fractions before the global centered prefix scan.
 pub fn build_logup_aux_trace<A, F, EF>(
     air: &A,
     main: &RowMajorMatrix<F>,
@@ -62,20 +58,44 @@ where
         "build_logup_aux_trace expects at least 2 challenges (alpha, beta), got {}",
         challenges.len(),
     );
-    assert!(main.height() > 0, "LogUp normalization requires a non-empty trace");
+    let num_rows = main.height();
+    assert!(num_rows > 0, "LogUp normalization requires a non-empty trace");
 
     let alpha = challenges[0];
     let beta = challenges[1];
     let lookup_challenges =
         Challenges::<EF>::new(alpha, beta, air.max_message_width(), air.num_bus_ids());
     let periodic = air.periodic_columns();
+    let num_cols = air.column_shape().len();
+    assert!(num_cols > 0, "LogUp requires at least one accumulator column");
 
-    let fractions = build_lookup_fractions(air, main, &periodic, &lookup_challenges);
+    let mut output = EF::zero_vec(num_rows * num_cols);
+    let mut row_totals = vec![EF::ZERO; num_rows];
+    let chunk_rows = ACCUMULATE_ROWS_PER_CHUNK;
 
-    let (aux_trace, sigma_prime) = accumulate(&fractions);
-    debug_assert_eq!(aux_trace.height(), main.height());
+    #[cfg(feature = "concurrent")]
+    use miden_crypto::parallel::*;
+    #[cfg(feature = "concurrent")]
+    let chunks = output
+        .par_chunks_mut(chunk_rows * num_cols)
+        .zip(row_totals.par_chunks_mut(chunk_rows));
+    #[cfg(not(feature = "concurrent"))]
+    let chunks = output.chunks_mut(chunk_rows * num_cols).zip(row_totals.chunks_mut(chunk_rows));
 
-    (aux_trace, vec![sigma_prime])
+    chunks.enumerate().for_each(|(chunk_idx, (out, totals))| {
+        let row_lo = chunk_idx * chunk_rows;
+        let chunk = build_lookup_fraction_chunk(
+            air,
+            main,
+            &periodic,
+            &lookup_challenges,
+            row_lo..row_lo + totals.len(),
+        );
+        accumulate_fraction_chunk(chunk.fractions(), chunk.counts(), num_cols, out, totals);
+    });
+
+    let sigma_prime = write_centered_accumulator(&row_totals, &mut output, num_cols);
+    (RowMajorMatrix::new(output, num_cols), vec![sigma_prime])
 }
 
 // LOOKUP FRACTIONS
@@ -96,8 +116,7 @@ where
 ///
 /// Row `r`'s contribution to column `c` is the slice
 /// `fractions[prefix .. prefix + counts[r * num_cols + c]]`, where `prefix` is the running
-/// sum of earlier `counts` entries. The accumulator walks rows in order with a single
-/// cursor — no separate offset array, no gather.
+/// sum of earlier `counts` entries. Each accumulation chunk walks its rows with a single cursor.
 ///
 /// No padding, no fixed stride: a row that contributes zero fractions to a column writes
 /// zero entries and records `counts.push(0)`.
@@ -228,9 +247,7 @@ where
         for (col, &count) in row_counts.iter().enumerate() {
             let mut sum = EF::ZERO;
             for &(m, d) in &flat_fractions[cursor..cursor + count] {
-                let d_inv = d
-                    .try_inverse()
-                    .expect("LogUp denominator must be non-zero (bus_prefix is never zero)");
+                let d_inv = d.try_inverse().expect("LogUp denominator must be non-zero");
                 sum += d_inv * m;
             }
             per_row_value[col] = sum;
@@ -319,9 +336,8 @@ where
     debug_assert_eq!(row_frac_offsets.len(), num_rows + 1);
     debug_assert_eq!(row_frac_offsets[num_rows], flat_fractions.len());
 
-    // Phase 1 operates on rows 0..num_rows of the output buffer. It writes fraction
-    // columns (i > 0) and leaves col 0 untouched (still zero). The side buffer
-    // row_totals collects t(r) = Σᵢ fᵢ(r) for phase 2's normalization and centered scan.
+    // Phase 1 writes fraction columns and row totals. Phase 2 fills column 0 with the
+    // centered accumulator.
     let frac_region = &mut output_data[..num_rows * num_cols];
     let mut row_totals: Vec<EF> = vec![EF::ZERO; num_rows];
 
@@ -330,44 +346,11 @@ where
     let phase1 = |(chunk_idx, (chunk_out, totals_slice)): (usize, (&mut [EF], &mut [EF]))| {
         let row_lo = chunk_idx * rows_per_chunk;
         let row_hi = (row_lo + rows_per_chunk).min(num_rows);
-        let chunk_rows = row_hi - row_lo;
         let frac_lo = row_frac_offsets[row_lo];
         let frac_hi = row_frac_offsets[row_hi];
         let chunk_fracs = &flat_fractions[frac_lo..frac_hi];
         let chunk_counts = &flat_counts[row_lo * num_cols..row_hi * num_cols];
-        debug_assert_eq!(chunk_out.len(), chunk_rows * num_cols);
-        debug_assert_eq!(totals_slice.len(), chunk_rows);
-
-        if chunk_fracs.is_empty() {
-            return;
-        }
-
-        // Batch-invert and scale: scratch[j] = mⱼ · dⱼ⁻¹ (ready to sum).
-        let mut scratch: Vec<EF> = vec![EF::ZERO; chunk_fracs.len()];
-        invert_and_scale(chunk_fracs, &mut scratch);
-
-        let mut per_row_value: Vec<EF> = vec![EF::ZERO; num_cols];
-        let mut cursor = 0usize;
-        for row_in_chunk in 0..chunk_rows {
-            let row_counts = &chunk_counts[row_in_chunk * num_cols..(row_in_chunk + 1) * num_cols];
-            let out_row_base = row_in_chunk * num_cols;
-
-            // f_i(r) = sum_j scratch[j] (scratch already holds m_j * d_j^-1).
-            for (col, &count) in row_counts.iter().enumerate() {
-                let end = cursor + count;
-                let sum = scratch[cursor..end].iter().copied().sum();
-                per_row_value[col] = sum;
-                cursor = end;
-            }
-
-            // output[r][i] = fᵢ(r) for fraction columns i > 0.
-            let out_row = &mut chunk_out[out_row_base..out_row_base + num_cols];
-            out_row[1..].copy_from_slice(&per_row_value[1..]);
-
-            // t(r) = Σᵢ fᵢ(r), consumed by phase 2.
-            totals_slice[row_in_chunk] = per_row_value.iter().copied().sum();
-        }
-        debug_assert_eq!(cursor, chunk_fracs.len());
+        accumulate_fraction_chunk(chunk_fracs, chunk_counts, num_cols, chunk_out, totals_slice);
     };
 
     #[cfg(not(feature = "concurrent"))]
@@ -390,6 +373,41 @@ where
 
     let sigma_prime = write_centered_accumulator(&row_totals, &mut output_data, num_cols);
     (RowMajorMatrix::new(output_data, num_cols), sigma_prime)
+}
+
+/// Write fraction columns and row totals into zero-initialized chunk buffers.
+fn accumulate_fraction_chunk<F: Field, EF: ExtensionField<F>>(
+    fractions: &[(F, EF)],
+    counts: &[usize],
+    num_cols: usize,
+    output: &mut [EF],
+    totals: &mut [EF],
+) {
+    debug_assert_eq!(counts.len(), totals.len() * num_cols);
+    debug_assert_eq!(output.len(), counts.len());
+    if fractions.is_empty() {
+        return;
+    }
+
+    let mut scratch = vec![EF::ZERO; fractions.len()];
+    invert_and_scale(fractions, &mut scratch);
+    let mut cursor = 0;
+    for ((row_counts, out), total) in
+        counts.chunks_exact(num_cols).zip(output.chunks_exact_mut(num_cols)).zip(totals)
+    {
+        let mut row_total = EF::ZERO;
+        for (column, &count) in row_counts.iter().enumerate() {
+            let end = cursor + count;
+            let value = scratch[cursor..end].iter().copied().sum::<EF>();
+            if column > 0 {
+                out[column] = value;
+            }
+            row_total += value;
+            cursor = end;
+        }
+        *total = row_total;
+    }
+    debug_assert_eq!(cursor, fractions.len());
 }
 
 /// Write centered prefix sums to column 0 and return the mean row total.
@@ -479,8 +497,7 @@ fn compute_row_frac_offsets(flat_counts: &[usize], num_rows: usize, num_cols: us
 ///
 /// # Panics
 ///
-/// Panics if the denominator product is zero (would indicate an upstream bug — individual
-/// `dⱼ` are never zero because of the nonzero `bus_prefix[bus]` term).
+/// Panics if any denominator is zero.
 fn invert_and_scale<F, EF>(chunk_fracs: &[(F, EF)], scratch: &mut [EF])
 where
     F: Field,
@@ -500,7 +517,7 @@ where
     // One field inversion — amortised over the whole chunk.
     let mut running_inv = scratch[scratch.len() - 1]
         .try_inverse()
-        .expect("LogUp denominator product must be non-zero (bus_prefix is never zero)");
+        .expect("LogUp denominator product must be non-zero");
 
     // Backward sweep: scratch[i] = mᵢ · dᵢ⁻¹.
     //
@@ -823,5 +840,14 @@ mod tests {
         assert_eq!(aux.height(), 1);
         assert_eq!(aux.get(0, 0).unwrap(), QuadFelt::ZERO);
         assert_eq!(sigma_prime, contribution);
+    }
+
+    #[test]
+    #[should_panic(expected = "LogUp denominator product must be non-zero")]
+    fn accumulate_rejects_zero_denominator() {
+        let mut fractions = fixture([1, 1], 1);
+        fractions.fractions.push((Felt::ONE, QuadFelt::ZERO));
+        fractions.counts.extend([1, 0]);
+        let _ = accumulate(&fractions);
     }
 }
