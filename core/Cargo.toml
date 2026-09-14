@@ -39,7 +39,7 @@ std = [
     "miden-utils-sync/std",
     "thiserror/std",
 ]
-arbitrary = ["dep:proptest"]
+arbitrary = ["dep:proptest", "miden-crypto/arbitrary"]
 testing = ["arbitrary"]
 fuzzing = []
 
@@ -61,6 +61,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 criterion = { workspace = true }
+miden-crypto = { workspace = true, features = ["arbitrary"] }
 insta.workspace = true
 miden-test-serialization-macros.workspace = true
 proptest.workspace = true
