@@ -8,6 +8,7 @@
 
 #### Fixes
 
+- Fixed `IntValue::Felt` Display so it prints canonical hex without byte-swapping ([#3808](https://github.com/0xMiden/miden-vm/pull/3808)).
 - Fixed `PartialMmr::from_parts()` and deserialization so they reject tracked leaves without complete authentication paths ([#3809](https://github.com/0xMiden/miden-vm/pull/3809)).
 - Fixed `PartialMmr::track()` panicking when a leaf position did not belong to the tree selected by its authentication path ([#3804](https://github.com/0xMiden/miden-vm/pull/3804)).
 - [BREAKING] Fixed `bound_into_included_u64` converting excluded start bounds in the wrong direction. The function now returns `Option<u64>` and uses `None` when an exclusive endpoint has no inclusive `u64` value ([#3589](https://github.com/0xMiden/miden-vm/pull/3589)).
