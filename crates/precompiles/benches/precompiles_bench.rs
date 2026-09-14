@@ -12,8 +12,11 @@ use support::{
     verify_once,
 };
 
-const PROOF_HASHES: [(&str, HashFunction); 2] =
-    [("blake3", HashFunction::Blake3_256), ("poseidon2", HashFunction::Poseidon2)];
+const PROOF_HASHES: [(&str, HashFunction); 3] = [
+    ("eidos", HashFunction::Eidos),
+    ("blake3", HashFunction::Blake3_256),
+    ("poseidon2", HashFunction::Poseidon2),
+];
 
 fn env_usize(name: &str, default: usize) -> usize {
     std::env::var(name).map_or(default, |raw| {

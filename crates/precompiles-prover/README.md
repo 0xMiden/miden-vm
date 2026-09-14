@@ -26,12 +26,12 @@ src/
 ├── relations.rs        global relation-tag (bus-id) registry
 ├── math.rs             field and integer helpers
 ├── logup/              LogUp encoding + natural last-row σ-closing adapter
-├── stark_config.rs     Poseidon2 STARK configuration
+├── stark_config.rs     selectable STARK proof-hash configurations (Eidos default)
 ├── utils.rs            shared field-element helpers
 ├── session/            orchestration facade + addition-chain strategies
 ├── primitives/         shared bit / lookup primitives (byte_pair_lut, bitwise64)
 ├── hash/               Keccak round / sponge / node + chunk + Memory64 bus
-├── transcript/         poseidon2 (the hash) + eval (the transcript DAG chip)
+├── transcript/         native 32-row Eidos compression + transcript DAG evaluation
 ├── uint/               256-bit store + add / mul relation chiplets
 ├── ec/                 group table, point store, group-law add, and msm/
 └── tests/              per-chiplet + integration tests

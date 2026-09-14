@@ -95,9 +95,11 @@ mod tests {
     use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
 
     use crate::{
-        ChipletsAir, Felt, MidenAir, NUM_PUBLIC_VALUES,
+        ChipletsAir, EidosCompressionAir, Felt, MidenAir, NUM_EIDOS_COMPRESSION_COLS,
+        NUM_PUBLIC_VALUES,
         constraints::{
             columns::{NUM_CHIPLETS_COLS, NUM_CORE_COLS},
+            eidos_compression::lookup::EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE,
             lookup::{
                 BusId, MIDEN_MAX_MESSAGE_WIDTH, chiplet_air::CHIPLET_COLUMN_SHAPE,
                 main_air::MAIN_COLUMN_SHAPE,
@@ -139,8 +141,8 @@ mod tests {
         };
 
         // In-trace side: the root END row's removal, with the four conditions documented in
-        // `emit_core_boundary` (addr_next=0 via HALT; halt_next=1 ⇒ is_first_child=0; root
-        // not a loop ⇒ is_loop_body=0; child_hash = h_0 = program_hash).
+        // `emit_core_boundary` (addr_next=0 via HALT; halt_next=1 so is_first_child=0; root
+        // not a loop so is_loop_body=0; child_hash = h_0 = program_hash).
         let root_end = BlockHashMsg::End {
             parent: Felt::ZERO,
             child_hash: program_hash,
@@ -159,6 +161,7 @@ mod tests {
     #[test]
     fn core_air_lookup_validates() {
         let layout = ValidateLayout {
+            preprocessed_width: 0,
             trace_width: NUM_CORE_COLS,
             num_public_values: NUM_PUBLIC_VALUES,
             num_periodic_columns: 0,
@@ -175,6 +178,7 @@ mod tests {
     fn chiplets_air_lookup_validates() {
         let num_periodic = ChipletsAir.periodic_columns().len();
         let layout = ValidateLayout {
+            preprocessed_width: 0,
             trace_width: NUM_CHIPLETS_COLS,
             num_public_values: NUM_PUBLIC_VALUES,
             num_periodic_columns: num_periodic,
@@ -184,5 +188,37 @@ mod tests {
         };
         ValidateLookupAir::validate(&MidenAir::Chiplets, layout)
             .unwrap_or_else(|err| panic!("ChipletsAir LookupAir validation failed: {err}"));
+    }
+    #[test]
+    fn eidos_compression_air_lookup_validates() {
+        let num_periodic = EidosCompressionAir.periodic_columns().len();
+        let layout = ValidateLayout {
+            preprocessed_width: 0,
+            trace_width: NUM_EIDOS_COMPRESSION_COLS,
+            num_public_values: NUM_PUBLIC_VALUES,
+            num_periodic_columns: num_periodic,
+            permutation_width: EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len(),
+            num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
+            num_permutation_values: 1,
+        };
+        ValidateLookupAir::validate(&MidenAir::EIDOS_COMPRESSION, layout)
+            .unwrap_or_else(|err| panic!("EidosCompressionAir LookupAir validation failed: {err}"));
+    }
+
+    #[test]
+    fn and8_lookup_air_lookup_validates() {
+        let layout = ValidateLayout {
+            preprocessed_width:
+                crate::constraints::and8_lookup::columns::NUM_AND8_LOOKUP_PREPROCESSED_COLS,
+            trace_width: crate::constraints::and8_lookup::columns::NUM_AND8_LOOKUP_COLS,
+            num_public_values: NUM_PUBLIC_VALUES,
+            num_periodic_columns: 0,
+            permutation_width:
+                crate::constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE.len(),
+            num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
+            num_permutation_values: 1,
+        };
+        ValidateLookupAir::validate(&MidenAir::AND8_LOOKUP, layout)
+            .unwrap_or_else(|err| panic!("And8LookupAir LookupAir validation failed: {err}"));
     }
 }

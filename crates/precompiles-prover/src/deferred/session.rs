@@ -3,7 +3,11 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_core::deferred::{DataChunk, DeferredState, Digest, Node, TRUE_DIGEST, Tag};
+use miden_core::{
+    deferred::{DEFERRED_AND_FRAME, DataChunk, DeferredState, Digest, Node, TRUE_DIGEST},
+    program::domain::DeferredChunksDomain,
+};
+use miden_crypto::hash::eidos::EidosDomain;
 use miden_precompiles::{
     CurveId, CurveNodeRef, CurvePrecompile, HashAssertNode, Keccak256Precompile, UintDomain,
     UintNodeRef, UintPrecompile, chunks_to_bytes_exact, n_chunks,
@@ -13,16 +17,14 @@ use crate::{
     ec::{msm::trace::EcExprPtr, trace::EcPointPtr},
     math::{U256, from_limbs32},
     session::{EcNode, Session, Truthy, UintNode, strategies},
-    transcript::poseidon2::P2Digest,
+    transcript::eidos::EidosDigest,
 };
 
 /// wNAF window for [`msm_from_terms`](DeferredSessionBuilder::msm_from_terms)'s joint-wNAF
 /// addition chain (digits odd, `|d| < 2^{w-1}`, `2^{w-2}` odd multiples per base). A smaller window
-/// suits GLV's ~128-bit halves in isolation, but `msm_from_terms` now caches a repeating base's
-/// table across the whole batch ([`Self::wnaf_tables`](DeferredSessionBuilder::wnaf_tables)), which
-/// makes the one-time table-build cost a wash and leaves the ladder's per-signature digit density
-/// as the dominant recurring cost — `w = 5` keeps that density low for both the classic 2-base MSM
-/// and GLV's 4-base one.
+/// suits GLV's ~128-bit halves in isolation. Reusing a base's table across the batch makes ladder
+/// digit density the dominant recurring cost; `w = 5` keeps it low for both the two-base and GLV
+/// four-base MSMs.
 const MSM_WNAF_WINDOW: usize = 5;
 
 /// Cap on the term count a PairList may carry into
@@ -37,8 +39,8 @@ const MAX_TERM_PRESERVING_TERMS: usize = 4096;
 /// still stack up (a lowering-only PairList doesn't know about sibling claims), so this tracks a
 /// running total and rejects a new claim before it grows the aggregate past this bound. A generous
 /// multiple of the per-claim cap: legitimate batches (e.g. many small ECDSA-style fallback claims)
-/// stay well under it, while an attacker can no longer bypass the per-claim bound by splitting one
-/// oversized ask into many claims.
+/// stay well under it. The aggregate cap prevents splitting one oversized request across many
+/// claims.
 const MAX_TOTAL_TERM_PRESERVING_TERMS: usize = 16 * MAX_TERM_PRESERVING_TERMS;
 
 pub(crate) struct DeferredSession {
@@ -61,7 +63,10 @@ pub(crate) enum DeferredSessionError {
     UnsupportedMsm { digest: Digest, reason: &'static str },
 
     #[error("translated root mismatch: expected {expected:?}, got {actual:?}")]
-    RootMismatch { expected: P2Digest, actual: P2Digest },
+    RootMismatch {
+        expected: EidosDigest,
+        actual: EidosDigest,
+    },
 }
 
 pub(crate) fn session_from_deferred_state(
@@ -76,7 +81,7 @@ pub(crate) fn session_from_deferred_state(
     };
 
     let root = builder.translate_truthy(state.root())?;
-    let expected = P2Digest::from(state.root());
+    let expected = EidosDigest::from(state.root());
     let actual = root.hash();
     if actual != expected {
         return Err(DeferredSessionError::RootMismatch { expected, actual });
@@ -85,8 +90,7 @@ pub(crate) fn session_from_deferred_state(
     Ok(DeferredSession { session: builder.session, root })
 }
 
-// TODO: Add translator-level value caches if repeated traversal becomes measurable. Truthy
-// handles must remain uncached because they are linear session handles consumed by folds.
+// Truthy handles are linear session values consumed by folds and must not be cached.
 struct DeferredSessionBuilder<'a> {
     state: &'a DeferredState,
     session: Session,
@@ -146,8 +150,7 @@ impl<'a> DeferredSessionBuilder<'a> {
                         continue;
                     }
 
-                    let tag = self.node_tag(digest)?;
-                    if tag == Tag::AND {
+                    if self.node(digest)?.frame() == Some(DEFERRED_AND_FRAME) {
                         let (lhs, rhs) = self.join_payload(digest)?;
                         work.push(Step::CombineAnd(digest));
                         // Push rhs first so lhs is visited first (LIFO).
@@ -164,7 +167,7 @@ impl<'a> DeferredSessionBuilder<'a> {
                     let rhs = values.pop().expect("rhs missing from value stack");
                     let lhs = values.pop().expect("lhs missing from value stack");
                     let node = self.session.assert_and(lhs, rhs);
-                    debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                    debug_assert_eq!(node.hash(), EidosDigest::from(digest));
                     values.push(node);
                 },
             }
@@ -190,7 +193,7 @@ impl<'a> DeferredSessionBuilder<'a> {
                 let lhs = self.translate_uint(lhs)?;
                 let rhs = self.translate_uint(rhs)?;
                 let node = self.session.uint_is(&lhs.node, &rhs.node);
-                debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                debug_assert_eq!(node.hash(), EidosDigest::from(digest));
                 return Ok(node);
             },
             Some(_) => {
@@ -209,7 +212,7 @@ impl<'a> DeferredSessionBuilder<'a> {
                 let lhs = self.translate_ec(lhs)?;
                 let rhs = self.translate_ec(rhs)?;
                 let node = self.session.ec_is(&lhs.node, &rhs.node);
-                debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                debug_assert_eq!(node.hash(), EidosDigest::from(digest));
                 Ok(node)
             },
             Some(_) | None => {
@@ -260,7 +263,7 @@ impl<'a> DeferredSessionBuilder<'a> {
                             }
                             debug_assert_eq!(from_limbs32(&limbs), value);
                             let node = self.session.uint_leaf(value, domain.bound_ptr());
-                            debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                            debug_assert_eq!(node.hash(), EidosDigest::from(digest));
                             values.push(TranslatedUint { node, value, domain });
                         },
                         Some(UintNodeRef::Add { lhs, rhs }) => {
@@ -291,7 +294,7 @@ impl<'a> DeferredSessionBuilder<'a> {
                     let lhs = values.pop().expect("lhs missing from value stack");
                     debug_assert_eq!(lhs.domain, rhs.domain);
                     let node = self.session.uint_add(&lhs.node, &rhs.node);
-                    debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                    debug_assert_eq!(node.hash(), EidosDigest::from(digest));
                     values.push(TranslatedUint { node, value, domain });
                 },
                 Step::CombineSub { digest, value, domain } => {
@@ -299,7 +302,7 @@ impl<'a> DeferredSessionBuilder<'a> {
                     let lhs = values.pop().expect("lhs missing from value stack");
                     debug_assert_eq!(lhs.domain, rhs.domain);
                     let node = self.session.uint_sub(&lhs.node, &rhs.node);
-                    debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                    debug_assert_eq!(node.hash(), EidosDigest::from(digest));
                     values.push(TranslatedUint { node, value, domain });
                 },
                 Step::CombineMul { digest, value, domain } => {
@@ -307,7 +310,7 @@ impl<'a> DeferredSessionBuilder<'a> {
                     let lhs = values.pop().expect("lhs missing from value stack");
                     debug_assert_eq!(lhs.domain, rhs.domain);
                     let node = self.session.uint_mul(&lhs.node, &rhs.node);
-                    debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                    debug_assert_eq!(node.hash(), EidosDigest::from(digest));
                     values.push(TranslatedUint { node, value, domain });
                 },
             }
@@ -361,7 +364,7 @@ impl<'a> DeferredSessionBuilder<'a> {
                                     self.session.ec_create(curve.group_ptr(), &x.node, &y.node)
                                 },
                             };
-                            debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                            debug_assert_eq!(node.hash(), EidosDigest::from(digest));
                             values.push(TranslatedEc { node, curve });
                         },
                         Some(CurveNodeRef::Add { lhs, rhs }) => {
@@ -395,7 +398,7 @@ impl<'a> DeferredSessionBuilder<'a> {
                     let lhs = values.pop().expect("lhs missing from value stack");
                     debug_assert_eq!(lhs.curve, rhs.curve);
                     let node = self.session.ec_add(&lhs.node, &rhs.node);
-                    debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                    debug_assert_eq!(node.hash(), EidosDigest::from(digest));
                     values.push(TranslatedEc { node, curve });
                 },
                 Step::CombineSub { digest, curve } => {
@@ -403,7 +406,7 @@ impl<'a> DeferredSessionBuilder<'a> {
                     let lhs = values.pop().expect("lhs missing from value stack");
                     debug_assert_eq!(lhs.curve, rhs.curve);
                     let node = self.session.ec_sub(&lhs.node, &rhs.node);
-                    debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                    debug_assert_eq!(node.hash(), EidosDigest::from(digest));
                     values.push(TranslatedEc { node, curve });
                 },
                 Step::VisitScalar(scalar_digest) => {
@@ -416,7 +419,7 @@ impl<'a> DeferredSessionBuilder<'a> {
                         values.drain(pi..).zip(scalar_values.drain(si..)).collect()
                     };
                     let node = self.msm_from_terms(digest, curve, terms)?;
-                    debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                    debug_assert_eq!(node.hash(), EidosDigest::from(digest));
                     values.push(TranslatedEc { node, curve });
                 },
             }
@@ -439,7 +442,7 @@ impl<'a> DeferredSessionBuilder<'a> {
         let (actual, claim) = self.session.keccak(&input);
         let actual = actual.to_u32s().into_iter().flat_map(u32::to_le_bytes).collect::<Vec<_>>();
         debug_assert_eq!(expected, actual);
-        debug_assert_eq!(claim.hash(), P2Digest::from(digest));
+        debug_assert_eq!(claim.hash(), EidosDigest::from(digest));
         Ok(claim)
     }
 
@@ -695,10 +698,6 @@ impl<'a> DeferredSessionBuilder<'a> {
         self.state.get_node(&digest).ok_or(DeferredSessionError::MissingNode(digest))
     }
 
-    fn node_tag(&self, digest: Digest) -> Result<Tag, DeferredSessionError> {
-        Ok(self.node(digest)?.tag())
-    }
-
     fn join_payload(&self, digest: Digest) -> Result<(Digest, Digest), DeferredSessionError> {
         self.node(digest)?
             .payload()
@@ -712,7 +711,7 @@ impl<'a> DeferredSessionBuilder<'a> {
         child: Digest,
     ) -> Result<&'a [DataChunk], DeferredSessionError> {
         let node = self.node(child)?;
-        if node.tag() != Tag::CHUNKS {
+        if node.frame().is_none_or(|frame| frame.domain() != DeferredChunksDomain::TAG) {
             return Err(DeferredSessionError::MalformedNode(parent));
         }
         node.payload()

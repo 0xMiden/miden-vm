@@ -127,4 +127,37 @@ mod tests {
             "EVALCIRCUIT must preserve the visible stack"
         );
     }
+
+    #[test]
+    fn logdeferred_allows_top_word_rewrite_but_rejects_tail_mutations() {
+        let mut local = generate_test_row(opcodes::LOGDEFERRED.into());
+        let mut next = generate_test_row(0);
+
+        for i in 0..16 {
+            local.stack.top[i] = Felt::new_unchecked(100 + i as u64);
+            next.stack.top[i] = local.stack.top[i];
+        }
+
+        // The opcode replaces the top word with the new deferred root.
+        for i in 0..4 {
+            next.stack.top[i] = Felt::new_unchecked(200 + i as u64);
+        }
+
+        let evaluations = eval_stack_general(&local, &next);
+        assert!(
+            evaluations.iter().all(|value| *value == QuadFelt::ZERO),
+            "LOGDEFERRED must allow the top word to be replaced"
+        );
+
+        for i in 4..16 {
+            let mut mutated = next.clone();
+            mutated.stack.top[i] += Felt::ONE;
+
+            let evaluations = eval_stack_general(&local, &mutated);
+            assert!(
+                evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+                "LOGDEFERRED must preserve stack position {i}"
+            );
+        }
+    }
 }

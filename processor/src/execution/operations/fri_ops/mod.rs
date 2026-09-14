@@ -187,7 +187,7 @@ const EIGHT: Felt = Felt::new_unchecked(8);
 const TWO_INV: Felt = Felt::new_unchecked(9223372034707292161);
 
 // Pre-computed powers of 1/tau, where tau is the generator of multiplicative subgroup of size 4
-// (i.e., tau is the 4th root of unity). Correctness of these constants is checked in the test at
+// (tau is the 4th root of unity). Correctness of these constants is checked in the test at
 // the end of this module.
 const TAU_INV: Felt = Felt::new_unchecked(18446462594437873665); // tau^{-1}
 const TAU2_INV: Felt = Felt::new_unchecked(18446744069414584320); // tau^{-2}

@@ -32,6 +32,8 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
+      - name: Check generated precompile MASM
+        run: make check-precompile-masm
       - name: Build tests
         run: make test-build NEXTEST_PROFILE=ci
       - name: test
@@ -243,6 +245,8 @@ jobs:
         run: rustup update --no-self-update
       - name: Check PVM registry and MASM artifacts for drift (full 10! recompute)
         run: make check-pvm-registry
+      - name: Check pinned PVM proof fixture for drift
+        run: make check-pvm-proof-fixture
 
   run-examples:
     name: run masm examples

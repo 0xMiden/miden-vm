@@ -1,10 +1,15 @@
-use miden_core::{Felt, Word};
+use miden_core::{
+    Felt, Word,
+    deferred::{DeferredError, PrecompileError},
+};
 use miden_precompiles::{CurveId, CurvePrecompile};
 
 use super::helpers::{
     TRUNCATE_STACK_TO_OUTPUT_PROC, assert_deferred_state_round_trips, expect_precompile_trap,
-    read_stack_felts, run_precompile_program,
+    expect_precompile_trap_with_processor, read_stack_felts, run_precompile_program,
 };
+
+const REGISTER_DATA_CV_OFFSET: usize = 2;
 
 #[derive(Clone, Copy)]
 struct CurveCase {
@@ -29,6 +34,7 @@ fn supported_curves_satisfy_public_contract() {
         assert_scalar_mul_wrappers(curve);
         assert_zero_scalar_mul_evaluates_to_identity(curve);
         assert_eval_generator(curve);
+        assert_digest_pair_memory_loader(curve);
         assert_predicates_have_expected_polarity(curve.module);
         assert_identity_assertions_have_expected_polarity(curve.module);
         assert_msm2_zero_scalar_expression_term(curve);
@@ -38,6 +44,112 @@ fn supported_curves_satisfy_public_contract() {
         assert_msm2_rejects_identity_base(curve);
         assert_msm_mem_multi_term_with_zero_scalar_and_duplicate_base(curve);
     }
+}
+
+#[test]
+fn msm_mem_runtime_frames_match_pair_counts() {
+    for curve in supported_curves() {
+        for n_pairs in [1, 3] {
+            let source = curve_msm_mem_source(curve, n_pairs, 1);
+            let (error, processor) = expect_precompile_trap_with_processor(&source);
+            assert!(
+                matches!(
+                    error,
+                    miden_processor::ExecutionError::MemoryError {
+                        err: miden_processor::MemoryError::UnalignedWordAccess { addr: 1, .. },
+                        ..
+                    }
+                ),
+                "{} {n_pairs}-pair msm_mem returned the wrong error: {error:?}",
+                curve.module,
+            );
+            assert_eq!(
+                processor.stack_get_word(REGISTER_DATA_CV_OFFSET),
+                CurvePrecompile::msm_frame(n_pairs).initial_chaining_word(),
+                "{} msm_mem injected {n_pairs} into the wrong CV lane",
+                curve.module,
+            );
+        }
+    }
+}
+
+#[test]
+fn msm_mem_rejects_zero_pairs() {
+    for curve in supported_curves() {
+        let error = expect_curve_msm_mem_trap(curve, 0);
+        let miden_processor::ExecutionError::DeferredError { err, .. } = error else {
+            panic!("{} zero-pair msm_mem returned the wrong error: {error:?}", curve.module);
+        };
+        assert!(
+            matches!(err.root(), PrecompileError::InvalidNode),
+            "{} zero-pair msm_mem returned {err:?}",
+            curve.module,
+        );
+    }
+}
+
+#[test]
+fn msm_mem_max_count_reaches_state_size_check() {
+    for curve in supported_curves() {
+        let source = curve_msm_mem_source(curve, u32::MAX, 0);
+        let (error, processor) = expect_precompile_trap_with_processor(&source);
+        assert_eq!(
+            processor.stack_get_word(REGISTER_DATA_CV_OFFSET),
+            CurvePrecompile::msm_frame(u32::MAX).initial_chaining_word(),
+            "{} msm_mem injected u32::MAX into the wrong CV lane",
+            curve.module,
+        );
+        let miden_processor::ExecutionError::DeferredError { err, .. } = error else {
+            panic!("{} maximum-count msm_mem returned the wrong error: {error:?}", curve.module);
+        };
+        let PrecompileError::Other(DeferredError::DeferredStateTooLarge { num_elements, max }) =
+            err.root()
+        else {
+            panic!("{} maximum-count msm_mem returned {err:?}", curve.module);
+        };
+        assert!(num_elements > max);
+    }
+}
+
+fn expect_curve_msm_mem_trap(curve: CurveCase, n_pairs: u32) -> miden_processor::ExecutionError {
+    expect_precompile_trap(&curve_msm_mem_source(curve, n_pairs, 0))
+}
+
+fn curve_msm_mem_source(curve: CurveCase, n_pairs: u32, ptr: u32) -> String {
+    format!(
+        "
+        use miden::core::precompiles::curves::{module}
+        begin
+            push.{n_pairs} push.{ptr}
+            exec.{module}::msm_mem
+        end
+        ",
+        module = curve.module,
+    )
+}
+
+fn assert_digest_pair_memory_loader(curve: CurveCase) {
+    let module = curve.module;
+    let ptr = 1000;
+    let next_ptr = ptr + 8;
+    let body = format!(
+        "
+        exec.{module}::push_generator
+        exec.{module}::eval
+        dropw
+        mem_storew_le.{ptr} dropw
+        mem_storew_le.{} dropw
+
+        push.{ptr}
+        exec.{module}::load_digest_pair_mem_stream
+        movup.4 eq.{next_ptr} assert
+        exec.{module}::push_generator
+        exec.{module}::assert_eq
+        ",
+        ptr + 4,
+    );
+
+    run_curve_program(module, &body, "digest-pair memory loader");
 }
 
 fn assert_arithmetic_assertions(module: &str) {

@@ -4,7 +4,7 @@ use super::{
     super::instruction::{ID_BITS, MAX_ID},
     *,
 };
-use crate::{Felt, ZERO, crypto::hash::Poseidon2};
+use crate::{Felt, ZERO, crypto::hash::Eidos};
 
 #[derive(Debug)]
 pub enum EncodingError {
@@ -41,7 +41,7 @@ impl EncodedCircuit {
     /// Computes the hash of all circuit constants and instructions.
     #[expect(dead_code)]
     fn raw_circuit_hash(&self) -> Word {
-        Poseidon2::hash_elements(&self.encoded_circuit)
+        Eidos::hash_elements(&self.encoded_circuit)
     }
 
     /// Returns the number of constants in the circuit.

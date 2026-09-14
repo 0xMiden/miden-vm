@@ -119,16 +119,16 @@ impl MastNodeExt for CallNode {
     /// whether the node represents a simple call or a syscall - i.e.,:
     /// ```
     /// # use miden_core::mast::CallNode;
-    /// # use miden_crypto::{Word, hash::poseidon2::Poseidon2 as Hasher};
+    /// # use miden_core::{Word, chiplets::hasher};
     /// # let callee_digest = Word::default();
-    /// Hasher::merge_in_domain(&[callee_digest, Word::default()], CallNode::CALL_DOMAIN);
+    /// hasher::merge_in_mast_domain(&[callee_digest, Word::default()], CallNode::CALL_DOMAIN);
     /// ```
     /// or
     /// ```
     /// # use miden_core::mast::CallNode;
-    /// # use miden_crypto::{Word, hash::poseidon2::Poseidon2 as Hasher};
+    /// # use miden_core::{Word, chiplets::hasher};
     /// # let callee_digest = Word::default();
-    /// Hasher::merge_in_domain(&[callee_digest, Word::default()], CallNode::SYSCALL_DOMAIN);
+    /// hasher::merge_in_mast_domain(&[callee_digest, Word::default()], CallNode::SYSCALL_DOMAIN);
     /// ```
     fn digest(&self) -> Word {
         self.digest
@@ -210,7 +210,7 @@ impl CallNodeBuilder {
                 CallNode::CALL_DOMAIN
             };
 
-            hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
+            hasher::merge_in_mast_domain(&[callee_digest, Word::default()], domain)
         };
 
         Ok(CallNode {
@@ -257,7 +257,7 @@ impl MastForestContributor for CallNodeBuilder {
                 CallNode::CALL_DOMAIN
             };
 
-            hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
+            hasher::merge_in_mast_domain(&[callee_digest, Word::default()], domain)
         };
 
         fingerprint_with_child_fingerprints(node_digest, &[self.callee], context, hash_by_node_id)

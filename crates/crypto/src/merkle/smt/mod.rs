@@ -9,7 +9,7 @@ use core::{
 use super::{EmptySubtreeRoots, InnerNodeInfo, MerkleError, NodeIndex, SparseMerklePath};
 use crate::{
     EMPTY_WORD, Map, Set, Word,
-    hash::poseidon2::Poseidon2,
+    hash::eidos::Eidos,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -53,7 +53,6 @@ mod simple;
 pub use simple::{SimpleSmt, SimpleSmtProof};
 
 mod partial;
-use miden_field::Felt;
 pub use partial::{PartialSmt, UniqueNodes};
 // CONSTANTS
 // ================================================================================================
@@ -63,9 +62,6 @@ pub const SMT_MIN_DEPTH: u8 = 1;
 
 /// Maximum supported depth.
 pub const SMT_MAX_DEPTH: u8 = 64;
-
-/// The felt used as a domain separator when hashing leaves in merkle trees.
-pub const LEAF_DOMAIN: Felt = Felt::new_unchecked(0x13af);
 
 // SPARSE MERKLE TREE
 // ================================================================================================
@@ -405,7 +401,7 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
             } else {
                 (node_hash, right)
             };
-            node_hash = Poseidon2::merge(&[left, right]);
+            node_hash = Eidos::merge(&[left, right]);
 
             if node_hash == *EmptySubtreeRoots::entry(DEPTH, node_depth) {
                 // If a subtree is empty, then can remove the inner node, since it's equal to the
@@ -580,7 +576,7 @@ pub struct InnerNode {
 
 impl InnerNode {
     pub fn hash(&self) -> Word {
-        Poseidon2::merge(&[self.left, self.right])
+        Eidos::merge(&[self.left, self.right])
     }
 }
 

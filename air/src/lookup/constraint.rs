@@ -1,7 +1,7 @@
-//! Constraint-path adapter for the closure-based lookup API.
+//! Constraint-path adapter for the closure-based LogUp API.
 //!
-//! Implements [`LookupBuilder`] over any `LiftedAirBuilder`. Each column's
-//! constraints are emitted inline during [`LookupBuilder::next_column`].
+//! The adapter turns each row's interactions into cross-multiplied `(V, U)` pairs. Fraction
+//! columns check `U · aux − V = 0`; column 0 is the running accumulator.
 //!
 //! ## LogUp constraint structure
 //!
@@ -114,6 +114,7 @@ where
     type PeriodicVar = AB::PeriodicVar;
 
     type MainWindow = AB::MainWindow;
+    type PreprocessedWindow = AB::PreprocessedWindow;
 
     type Column<'a>
         = ConstraintColumn<'a, AB>
@@ -123,6 +124,10 @@ where
 
     fn main(&self) -> Self::MainWindow {
         self.ab.main()
+    }
+
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        self.ab.preprocessed()
     }
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {

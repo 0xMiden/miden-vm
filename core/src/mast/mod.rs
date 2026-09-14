@@ -66,7 +66,6 @@ pub use node::{
 use crate::{
     Felt, Word,
     advice::AdviceMap,
-    crypto::hash::Poseidon2,
     serde::{ByteWriter, Deserializable, DeserializationError, Serializable},
     utils::{DenseIdMap, Idx, IndexVec, hash_string_to_word},
 };
@@ -465,8 +464,8 @@ fn remove_nodes(
 }
 
 fn empty_mast_forest_commitment() -> MastForestCommitment {
-    let interface_commitment = Poseidon2::merge_many(&[]);
-    let dependency_commitment = Poseidon2::merge_many(&[]);
+    let interface_commitment = crate::chiplets::hasher::merge_many(&[]);
+    let dependency_commitment = crate::chiplets::hasher::merge_many(&[]);
     let advice_commitment = AdviceMap::default().commitment();
     MastForestCommitment::new(interface_commitment, dependency_commitment, advice_commitment)
 }
@@ -477,7 +476,7 @@ fn compute_nodes_commitment(
 ) -> Word {
     let mut digests: Vec<Word> = node_ids.iter().map(|&id| nodes[id].digest()).collect();
     digests.sort_unstable();
-    Poseidon2::merge_many(&digests)
+    crate::chiplets::hasher::merge_many(&digests)
 }
 
 fn compute_dependency_commitment(nodes: &IndexVec<MastNodeId, MastNode>) -> Word {
@@ -487,7 +486,7 @@ fn compute_dependency_commitment(nodes: &IndexVec<MastNodeId, MastNode>) -> Word
         .map(MastNodeExt::digest)
         .collect();
     digests.sort_unstable();
-    Poseidon2::merge_many(&digests)
+    crate::chiplets::hasher::merge_many(&digests)
 }
 
 impl MastForestCommitment {
@@ -496,7 +495,7 @@ impl MastForestCommitment {
         dependency_commitment: Word,
         advice_commitment: Word,
     ) -> Self {
-        let commitment = Poseidon2::merge_many(&[
+        let commitment = crate::chiplets::hasher::merge_many(&[
             interface_commitment,
             dependency_commitment,
             advice_commitment,
@@ -748,11 +747,7 @@ impl MastForest {
 
             // Check topological ordering and compute digest.
             let computed_digest = match node {
-                MastNode::Block(block) => {
-                    let op_groups: Vec<Felt> =
-                        block.op_batches().iter().flat_map(|batch| *batch.groups()).collect();
-                    hasher::hash_elements(&op_groups)
-                },
+                MastNode::Block(block) => node::hash_op_batches(block.op_batches()),
                 MastNode::Join(join) => {
                     let left_id = join.first();
                     let right_id = join.second();
@@ -761,7 +756,7 @@ impl MastForest {
 
                     let left_digest = computed_hashes[left_id.0 as usize];
                     let right_digest = computed_hashes[right_id.0 as usize];
-                    hasher::merge_in_domain(&[left_digest, right_digest], JoinNode::DOMAIN)
+                    hasher::merge_in_mast_domain(&[left_digest, right_digest], JoinNode::DOMAIN)
                 },
                 MastNode::Split(split) => {
                     let true_id = split.on_true();
@@ -771,14 +766,14 @@ impl MastForest {
 
                     let true_digest = computed_hashes[true_id.0 as usize];
                     let false_digest = computed_hashes[false_id.0 as usize];
-                    hasher::merge_in_domain(&[true_digest, false_digest], SplitNode::DOMAIN)
+                    hasher::merge_in_mast_domain(&[true_digest, false_digest], SplitNode::DOMAIN)
                 },
                 MastNode::Loop(loop_node) => {
                     let body_id = loop_node.body();
                     check_no_forward_ref(node_id, body_id)?;
 
                     let body_digest = computed_hashes[body_id.0 as usize];
-                    hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN)
+                    hasher::merge_in_mast_domain(&[body_digest, Word::default()], LoopNode::DOMAIN)
                 },
                 MastNode::Call(call) => {
                     let callee_id = call.callee();
@@ -790,7 +785,7 @@ impl MastForest {
                     } else {
                         CallNode::CALL_DOMAIN
                     };
-                    hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
+                    hasher::merge_in_mast_domain(&[callee_digest, Word::default()], domain)
                 },
                 MastNode::Dyn(dyn_node) => {
                     if dyn_node.is_dyncall() {

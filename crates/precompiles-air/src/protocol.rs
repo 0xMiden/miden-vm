@@ -1,7 +1,8 @@
 /// Relation digest binding the PVM ACE registry root into the Fiat-Shamir transcript.
+#[rustfmt::skip]
 pub const PVM_RELATION_DIGEST: [u64; 4] = [
-    12484196935672772437,
-    3477320138365322110,
-    6979635564408716733,
-    16634898497425374784,
+    633615241386053379,
+    6818949423248397543,
+    654203574064780635,
+    3481185357538818934,
 ];

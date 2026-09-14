@@ -3,13 +3,17 @@ This crate contains *algebraic intermediate representation* (AIR) of Miden VM ex
 
 AIR is a STARK-specific format of describing a computation. It consists of defining a set of constraints expressed as low-degree polynomials. Miden prover evaluates these polynomials over an execution trace produced by Miden processor and includes the results in the execution proof. To verify the proof, the verifier checks that the constraints are evaluated correctly against the execution trace committed to by the prover.
 
-Internally, Miden VM AIR is separated into several components:
-* AIR for the [decoder](https://docs.miden.xyz/miden-vm/design/decoder), which is responsible for decoding instructions and managing control flow.
-* AIR for the [stack](https://docs.miden.xyz/miden-vm/design/stack), which is responsible for executing instructions against the operand stack.
-* AIR for the [range checker](https://docs.miden.xyz/miden-vm/design/range), which is responsible for checking if field elements contain values smaller than $2^{16}$.
-* AIR for the [chiplets module](https://docs.miden.xyz/miden-vm/design/chiplets), which contains specialized circuits responsible for handling complex computations (e.g., hashing) as well as random access memory.
+Miden VM is a four-AIR statement:
 
-These different components are tied together using multiset checks similar to the ones used in [PLONK](https://hackmd.io/@relgabizon/ByFgSDA7D).
+* `CoreAir` contains the [decoder](https://docs.miden.xyz/miden-vm/design/decoder), operand
+  [stack](https://docs.miden.xyz/miden-vm/design/stack), and system constraints.
+* `ChipletsAir` contains the stacked hash controller, bitwise, memory, ACE, and kernel-ROM
+  chiplets.
+* `EidosCompressionAir` proves the 32-row Eidos compression computations requested by the hash controller.
+* `And8LookupAir` is a fixed byte-pair table for byte AND, Eidos compression rotation contributions, and
+  [16-bit range checks](https://docs.miden.xyz/miden-vm/design/range).
+
+These AIRs and their internal components are tied together with typed LogUp relations.
 
 All AIR constraints for Miden VM are described in detail in the [design](https://docs.miden.xyz/miden-vm/design) section of Miden VM documentation.
 
