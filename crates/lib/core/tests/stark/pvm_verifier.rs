@@ -119,7 +119,7 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
         .expect("VM/PVM/VM/PVM verification must not leak shared scratch state");
 }
 
-fn prove_keccak_claim(input: &[u8]) -> PrecompileProof {
+pub(super) fn prove_keccak_claim(input: &[u8]) -> PrecompileProof {
     let registry =
         Arc::new(PrecompileRegistry::new().with_precompile(Keccak256Precompile::default()));
     let mut state = DeferredState::new(registry).expect("Keccak fixture registry must initialize");

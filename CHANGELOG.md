@@ -2,6 +2,10 @@
 
 ## v0.33.0 (Unreleased)
 
+#### Changes
+
+- [BREAKING] Run the MVM and PVM recursive verifiers in isolated execution contexts, preserving caller memory. This changes both verifier MAST roots ([#3832](https://github.com/0xMiden/miden-vm/pull/3832)).
+
 #### Fixes
 
 - Fixed `PartialMmr::from_parts()` and deserialization so they reject tracked leaves without complete authentication paths ([#3809](https://github.com/0xMiden/miden-vm/pull/3809)).

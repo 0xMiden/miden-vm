@@ -21,6 +21,7 @@ use rstest::rstest;
 mod ace_circuit;
 mod ace_read_check;
 mod batch_query_gen;
+mod isolation;
 mod pvm_aux_trace;
 mod pvm_deep_queries;
 mod pvm_ood_frames;
@@ -392,7 +393,7 @@ fn request_consumer_source() -> String {
             # 3) Verify the claim; vm::verify_proof returns the common security descriptor followed
             #    by the deferred obligation.
             exec.vm::verify_proof
-            # => [security_descriptor, D]
+            # => [security_descriptor(12), D]
 
             # 4) Compute the security level and enforce the consumer's threshold.
             exec.security::compute_conjectured_security_level
@@ -431,8 +432,7 @@ fn request_flow_binds_proof_to_claim() {
         intended.store.clone(),
         advice_map
     );
-    let (output, _) = ok.execute_for_output().expect("the matching proof must verify");
-    ace_read_check::cross_check_ace_circuit(&output);
+    ok.execute_for_output().expect("the matching proof must verify");
 
     // Substitution: a different claim's proof under the same key fails against the consumer's
     // claim — the advice provider cannot pass off another proof. The intended claim's own
@@ -499,7 +499,7 @@ fn stark_verifier_e2f4_request_multi_proof() {
             dupw
             procref.vm::verify_proof exec.sys::build_proof_request_key
             adv.push_mapval dropw                        # => [CLAIM_COMMITMENT]
-            exec.vm::verify_proof                        # => [security_descriptor, D]
+            exec.vm::verify_proof                        # => [security_descriptor(12), D]
             exec.security::compute_conjectured_security_level # => [level, D]
             u32lt.96 assertz.err=\"proof security level is below the accepted target\"
             # => [D]
@@ -526,7 +526,7 @@ fn vm_verify_proof_program() -> String {
 
         begin
             exec.vm::verify_proof
-            # => [security_descriptor, D]
+            # => [security_descriptor(12), D]
             exec.sys::truncate_stack
         end
     "
@@ -544,7 +544,7 @@ fn run_recursive_verifier(data: &VerifierData) {
         data.store.clone(),
         data.advice_map.clone()
     );
-    let (output, _host) = test.execute_for_output().expect("recursive verifier execution failed");
+    let output = ace_read_check::execute_and_check(&test);
 
     // Pin the full common descriptor and deferred root so any value or ordering drift is caught
     // across every end-to-end configuration.
@@ -579,16 +579,8 @@ fn run_recursive_verifier(data: &VerifierData) {
     ];
     expected.extend_from_slice(&data.proof_stream[4..4 + WORD_SIZE]);
 
-    let returned: Vec<u64> = output
-        .stack
-        .get_num_elements(expected.len())
-        .iter()
-        .map(Felt::as_canonical_u64)
-        .collect();
+    let returned: Vec<u64> = output.iter().map(Felt::as_canonical_u64).collect();
     assert_eq!(returned, expected, "vm::verify_proof returned the wrong security descriptor");
-
-    // Cross-check: extract READ section, sanity-check values, evaluate circuit in Rust.
-    ace_read_check::cross_check_ace_circuit(&output);
 }
 
 /// Each of the four security parameters (num_queries, query_pow_bits, deep_pow_bits,

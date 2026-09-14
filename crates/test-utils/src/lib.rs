@@ -672,7 +672,8 @@ impl Test {
     /// verifier logic, or precompile request handling).
     #[cfg(not(target_family = "wasm"))]
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
-        let (program, mut host, _debug_info) = self.get_program_and_host();
+        let (program, mut host, debug_info) = self.get_program_and_host();
+        let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
         let stack_inputs = stack_inputs_from_ints(pub_inputs);
         let processor = new_vm_default_processor(
             stack_inputs,
@@ -680,7 +681,13 @@ impl Test {
             ExecutionOptions::default(),
         )
         .unwrap();
-        let witness = processor.execute_for_proving_sync(&program, &mut host).unwrap();
+        let witness = if let Some(debug_info) = debug_info.as_ref() {
+            processor
+                .execute_for_proving_with_package_debug_info_sync(&program, debug_info, &mut host)
+        } else {
+            processor.execute_for_proving_sync(&program, &mut host)
+        }
+        .unwrap();
         let stack_outputs = *witness.claim().stack_outputs();
         let proof = Prover::new()
             .with_hash_fn(miden_core::proof::HashFunction::Blake3_256)
