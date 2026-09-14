@@ -6,22 +6,20 @@ use alloc::{
 };
 use std::{fs, io, println};
 
-use miden_ace_codegen::{EXT_DEGREE, InputKey, InputLayout};
-use miden_air::{
-    AIRS, MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, NUM_PUBLIC_VALUES, PROOF_ORDER_COUNT,
-    ProofOrder, Statement,
-    ace::RecursiveAceCircuitFactory,
-    config::{ACE_CIRCUIT_REGISTRY_DEPTH, relation_digest},
+use miden_ace_codegen::{
+    EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, ProofOrderMapsConfig,
+    render_proof_order_maps,
 };
-use miden_core::{Felt, Word, field::QuadFelt, program::KernelDescriptor};
-use miden_crypto::{
-    hash::eidos::Eidos,
-    merkle::MerkleTree,
-    stark::{
-        Preprocessed, QuotientRecompositionInputs,
-        air::{BaseAir, LiftedAir},
-        quotient_recomposition_inputs,
-    },
+use miden_air::{
+    AIRS, MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, NUM_PUBLIC_VALUES, Statement,
+    ace::{build_recursive_verifier_ace_circuit, recursive_verifier_input_layout},
+    config::relation_digest,
+};
+use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt, program::KernelDescriptor};
+use miden_crypto::stark::{
+    Preprocessed, QuotientRecompositionInputs,
+    air::{BaseAir, LiftedAir},
+    quotient_recomposition_inputs,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -31,14 +29,12 @@ pub enum Mode {
 }
 
 const PROTOCOL_ID: u64 = 1;
-const ACE_REGISTRY_PADDING_DOMAIN: u64 = 0xace;
-const ACE_REGISTRY_LEAF_COUNT: usize = 1 << ACE_CIRCUIT_REGISTRY_DEPTH;
 const AIR_CONFIG_PATH: &str = "../../../air/src/config.rs";
 const CONSTRAINTS_EVAL_PATH: &str = "asm/sys/vm/constraints_eval.masm";
 const RELATION_DIGEST_PATH: &str = "asm/sys/vm/mod.masm";
 const VERIFIER_LIB_PATH: &str = "../../../verifier/src/lib.rs";
-const VM_AUX_TRACE_PATH: &str = "asm/sys/vm/aux_trace.masm";
 const VM_LAYOUT_PATH: &str = "asm/sys/vm/layout.masm";
+const STARK_CONSTANTS_PATH: &str = "asm/stark/constants.masm";
 const VM_OOD_FRAMES_PATH: &str = "asm/sys/vm/ood_frames.masm";
 const VM_DEEP_QUERIES_PATH: &str = "asm/sys/vm/deep_queries.masm";
 const VM_PUBLIC_INPUTS_PATH: &str = "asm/sys/vm/public_inputs.masm";
@@ -47,13 +43,15 @@ const SECURITY_ESTIMATOR_PATH: &str = "asm/stark/security.masm";
 const GENERIC_UTILS_PATH: &str = "asm/stark/utils.masm";
 const LMCS_ALIGNMENT: usize = 8;
 
-/// Computes the relation digest used by recursive verification.
-pub fn compute_relation_digest(registry_root: &[Felt; 4]) -> [Felt; 4] {
-    relation_digest(PROTOCOL_ID, &Word::new(*registry_root))
-}
+/// Felts moved by one `adv_pipe`.
+///
+/// This transport width governs block/segment arithmetic and destination alignment;
+/// [`LMCS_ALIGNMENT`] independently governs column-padding widths.
+const ADV_PIPE_BLOCK_FELTS: usize = 8;
 
-fn native_padding_leaf() -> Word {
-    Eidos::hash_elements(&[Felt::new_unchecked(ACE_REGISTRY_PADDING_DOMAIN)])
+/// Computes the relation digest used by recursive verification.
+pub fn compute_relation_digest(circuit_digest: &[Felt; 4]) -> [Felt; 4] {
+    relation_digest(PROTOCOL_ID, &Word::new(*circuit_digest))
 }
 
 /// Runs write (`--write`) or staleness-check (`--check`) mode.
@@ -83,13 +81,14 @@ fn check() -> Result<(), String> {
 
 /// Generate a full computed snapshot from the current AIR.
 fn compute_artifacts() -> io::Result<ComputedArtifacts> {
-    let mut order_artifacts = Vec::new();
-    // One factored build serves every proof order. Each order still assembles and encodes the
-    // full stream, but the factory avoids rebuilding the composition and rehashing the common
-    // section.
-    let factory = RecursiveAceCircuitFactory::new()
+    // The circuit topology is fixed across proof orders; MASM applies proof-order-specific ingest
+    // scatter and fold-coefficient staging.
+    let circuit = build_recursive_verifier_ace_circuit()
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-    let num_quotient_chunks = factory.num_quotient_chunks();
+    let input_layout = recursive_verifier_input_layout()
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+
+    let num_quotient_chunks = input_layout.counts.num_quotient_chunks;
     if !num_quotient_chunks.is_power_of_two() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -101,94 +100,22 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
         miden_air::config::pcs_params().log_blowup(),
     )
     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-    // Retain the first order's common-section bytes and require exact equality for later orders.
-    // Comparing cached digests alone would not establish that the emitted sections are equal.
-    let mut common_section: Option<Vec<Felt>> = None;
-    let mut leaf_buffer = miden_ace_codegen::ShuffleEncodeBuffer::new();
-    for order in ProofOrder::variants() {
-        let circuit = factory
-            .circuit_for_order(&order)
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
 
-        // Recompute the registry leaf through the registry-builder API and require it to agree
-        // with the assembled circuit before deriving the root.
-        let registry_leaf = factory
-            .leaf_for_order(&order, &mut leaf_buffer)
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-        if registry_leaf != circuit.commitment {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "encode-only registry leaf diverges from the assembled circuit for {}",
-                    order.file_stem()
-                ),
-            ));
-        }
-
-        let common = &circuit.instructions[circuit.shuffle_prefix_len..];
-        match &common_section {
-            None => {
-                if Eidos::hash_elements(common) != circuit.common_commitment {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "ACE common-section digest does not match the emitted common section",
-                    ));
-                }
-                common_section = Some(common.to_vec());
-            },
-            Some(reference) => {
-                if common != reference.as_slice() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!(
-                            "ACE common section is not order-invariant: differs for {}",
-                            order.file_stem()
-                        ),
-                    ));
-                }
-            },
-        }
-
-        order_artifacts.push(OrderArtifact {
-            order,
-            num_inputs: circuit.num_inputs,
-            num_eval_gates: circuit.num_eval_gates,
-            stream_len: circuit.stream_len,
-            shuffle_prefix_len: circuit.shuffle_prefix_len,
-            common_commitment: word_to_array(circuit.common_commitment),
-            circuit_commitment: word_to_array(circuit.commitment),
-        });
-    }
-    if order_artifacts.len() != PROOF_ORDER_COUNT {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "proof-order variant count does not match PROOF_ORDER_COUNT",
-        ));
-    }
-
-    ensure_uniform_circuit_metadata(&order_artifacts)?;
-    let registry = AceCircuitRegistry::from_order_artifacts(&order_artifacts)?;
-    let registry_root = registry.root;
-    let relation_digest = compute_relation_digest(&registry_root);
-    let preprocessed_commitment = compute_eidos_preprocessed_commitment()?;
-    let constraints_eval = render_constraints_eval_file(&order_artifacts, quotient_inputs)?;
-    let vm_geometry = VmGeometry::from_input_layout(factory.input_layout())?;
+    let circuit_digest = word_to_array(circuit.commitment);
+    let relation_digest = compute_relation_digest(&circuit_digest);
+    let vm_geometry = VmGeometry::from_input_layout(&input_layout)?;
+    let constraints_eval = render_constraints_eval_file(&circuit, quotient_inputs, &vm_geometry)?;
     let vm_layout = render_vm_layout(&vm_geometry)?;
-    let vm_ood_frames = render_vm_ood_frames(&vm_geometry);
+    let vm_ood_frames = render_vm_ood_frames(&vm_geometry)?;
     let vm_deep_queries = render_vm_deep_queries(&vm_geometry)?;
+
+    let preprocessed_commitment = compute_eidos_preprocessed_commitment()?;
 
     let mut relation_mod = read_file(RELATION_DIGEST_PATH)?;
     for (i, elem) in relation_digest.iter().enumerate() {
         replace_masm_const(
             &mut relation_mod,
             &format!("RELATION_DIGEST_{i}"),
-            &elem.as_canonical_u64().to_string(),
-        )?;
-    }
-    for (i, elem) in registry_root.iter().enumerate() {
-        replace_masm_const(
-            &mut relation_mod,
-            &format!("ACE_REGISTRY_ROOT_{i}"),
             &elem.as_canonical_u64().to_string(),
         )?;
     }
@@ -201,7 +128,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     }
     let mut air_config = read_file(AIR_CONFIG_PATH)?;
     replace_felt_array_const(&mut air_config, "RELATION_DIGEST", &relation_digest)?;
-    replace_felt_array_const(&mut air_config, "ACE_CIRCUIT_REGISTRY_ROOT", &registry_root)?;
+    replace_felt_array_const(&mut air_config, "ACE_CIRCUIT_DIGEST", &circuit_digest)?;
 
     let mut verifier_lib = read_file(VERIFIER_LIB_PATH)?;
     replace_u64_array_const(
@@ -210,17 +137,13 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
         &preprocessed_commitment,
     )?;
 
-    let first = order_artifacts.first().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "at least one ACE circuit is required")
-    })?;
-    ensure_vm_ace_stream_fits(first.stream_len, &vm_layout)?;
+    ensure_vm_ace_stream_fits(circuit.stream_len, &vm_layout)?;
 
     Ok(ComputedArtifacts {
-        num_inputs: first.num_inputs,
-        num_eval_gates: first.num_eval_gates,
-        prefix_rows: first.shuffle_prefix_len / 8,
-        common_rows: (first.stream_len - first.shuffle_prefix_len) / 8,
-        registry_root,
+        num_inputs: circuit.num_inputs,
+        num_eval_gates: circuit.num_eval_gates,
+        stream_blocks: circuit.stream_len / 8,
+        circuit_digest,
         relation_digest,
         preprocessed_commitment,
         constraints_eval,
@@ -286,7 +209,13 @@ fn check_vm_ace_stream_capacity(
     Ok(())
 }
 
+/// Felts reserved for the out-of-domain scatter table by `sys/vm/layout.masm`.
+const OOD_SCATTER_TABLE_FELTS: usize = 64;
+/// Offset, in felts from the table base, of the first `(destination, digest address)` pair.
+const OOD_SCATTER_SLOTS_OFFSET: usize = 4;
+
 struct VmGeometry {
+    preprocessed_widths: Vec<usize>,
     preprocessed_width: usize,
     main_widths: Vec<usize>,
     main_width: usize,
@@ -306,14 +235,18 @@ struct VmGeometry {
     auxiliary_ace_inputs_ptr: usize,
     ace_circuit_stream_ptr: usize,
     current_trace_row_ptr: usize,
+    ood_scatter_table_ptr: usize,
+    /// Felt offset of AIR 0's fold-coefficient slot from `auxiliary_ace_inputs_ptr`.
+    fold_coefficient_offset: usize,
 }
 
 impl VmGeometry {
     fn from_input_layout(input_layout: &InputLayout) -> io::Result<Self> {
-        let preprocessed_width: usize = AIRS
+        let preprocessed_widths: Vec<_> = AIRS
             .iter()
             .map(|air| BaseAir::<Felt>::preprocessed_width(air).next_multiple_of(LMCS_ALIGNMENT))
-            .sum();
+            .collect();
+        let preprocessed_width: usize = preprocessed_widths.iter().sum();
         let main_widths: Vec<_> = AIRS
             .iter()
             .map(|air| BaseAir::<Felt>::width(air).next_multiple_of(LMCS_ALIGNMENT))
@@ -327,6 +260,17 @@ impl VmGeometry {
             })
             .collect();
         let aux_width: usize = aux_widths.iter().sum();
+        let aux_values: Vec<_> =
+            AIRS.iter().map(LiftedAir::<Felt, QuadFelt>::num_aux_values).collect();
+        if aux_values.as_slice() != [1usize; MIDEN_AIR_COUNT].as_slice() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "the VM proof-order boundary scatter requires exactly one auxiliary value per \
+                     AIR, got {aux_values:?}"
+                ),
+            ));
+        }
         let quotient_width = input_layout.counts.num_quotient_chunks * EXT_DEGREE;
         let row_width = preprocessed_width + main_width + aux_width + quotient_width;
 
@@ -334,6 +278,11 @@ impl VmGeometry {
             ("preprocessed", preprocessed_width, input_layout.counts.preprocessed_width),
             ("main", main_width, input_layout.counts.width),
             ("auxiliary-coordinate", aux_width, input_layout.counts.aux_width * EXT_DEGREE),
+            (
+                "auxiliary-boundary",
+                aux_values.iter().sum::<usize>(),
+                input_layout.counts.num_aux_boundary,
+            ),
         ] {
             if derived != actual {
                 return Err(io::Error::new(
@@ -353,10 +302,10 @@ impl VmGeometry {
             ("quotient", quotient_width),
             ("ACE row", row_width),
         ] {
-            if !width.is_multiple_of(LMCS_ALIGNMENT) {
+            if !width.is_multiple_of(ADV_PIPE_BLOCK_FELTS) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("VM {name} width {width} is not {LMCS_ALIGNMENT}-felt aligned"),
+                    format!("VM {name} width {width} is not {ADV_PIPE_BLOCK_FELTS}-felt aligned"),
                 ));
             }
         }
@@ -368,6 +317,57 @@ impl VmGeometry {
         let current_trace_row_ptr =
             parse_masm_const::<usize>(&layout, "CURRENT_TRACE_ROW_PTR", VM_LAYOUT_PATH)
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        if !current_trace_row_ptr.is_multiple_of(ADV_PIPE_BLOCK_FELTS) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "the VM current-trace-row base {current_trace_row_ptr} is not \
+                     {ADV_PIPE_BLOCK_FELTS}-felt aligned, which `adv_pipe` requires"
+                ),
+            ));
+        }
+        // The scatter table is verifier scratch that must stay clear of the ACE READ section.
+        let ood_scatter_table_ptr =
+            parse_masm_const::<usize>(&layout, "OOD_SCATTER_TABLE_PTR", VM_LAYOUT_PATH)
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        if !ood_scatter_table_ptr.is_multiple_of(4) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "the VM out-of-domain scatter table base {ood_scatter_table_ptr} is not \
+                     4-felt (word) aligned, which its `mem_storew_le`/`dynexec` entries require"
+                ),
+            ));
+        }
+        if ood_scatter_table_ptr + OOD_SCATTER_TABLE_FELTS > aux_rand_elem_ptr {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "the {OOD_SCATTER_TABLE_FELTS}-felt out-of-domain scatter table at \
+                     {ood_scatter_table_ptr} runs into the ACE READ section at {aux_rand_elem_ptr}"
+                ),
+            ));
+        }
+        // Its lower neighbour is the kernel digest witness, one word per supported kernel
+        // procedure written by `materialize_kernel_witness`; the table must start at or after its
+        // end.
+        let kernel_witness_ptr =
+            parse_masm_const::<usize>(&layout, "KERNEL_WITNESS_PTR", VM_LAYOUT_PATH)
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        let kernel_witness_end = kernel_witness_ptr
+            .checked_add(WORD_SIZE * KernelDescriptor::MAX_NUM_PROCEDURES)
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "the kernel witness end overflows")
+            })?;
+        if ood_scatter_table_ptr < kernel_witness_end {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "the out-of-domain scatter table at {ood_scatter_table_ptr} overlaps the \
+                     kernel digest witness, which ends at {kernel_witness_end}"
+                ),
+            ));
+        }
 
         let aux_rand_index = require_input_index(input_layout, InputKey::AuxRandBeta)?;
         let ood_index =
@@ -377,6 +377,13 @@ impl VmGeometry {
         let aux_bus_boundary_index =
             require_input_index(input_layout, InputKey::AuxBusBoundary(0))?;
         let auxiliary_ace_inputs_index = require_input_index(input_layout, InputKey::Alpha)?;
+        let fold_coefficient_index =
+            require_input_index(input_layout, InputKey::MultiAirFoldCoeff(0))?;
+        let fold_coefficient_offset = input_layout_extent(
+            auxiliary_ace_inputs_index,
+            fold_coefficient_index,
+            "fold coefficients",
+        )?;
 
         let ood_row_felts = input_layout_extent(ood_index, next_ood_index, "current OOD row")?;
         let ood_frame_felts = input_layout_extent(ood_index, aux_bus_boundary_index, "OOD frame")?;
@@ -401,6 +408,7 @@ impl VmGeometry {
         let ace_circuit_stream_ptr = input_ptr(input_layout.total_inputs, "ACE circuit stream")?;
 
         Ok(Self {
+            preprocessed_widths,
             preprocessed_width,
             main_widths,
             main_width,
@@ -410,16 +418,18 @@ impl VmGeometry {
             row_width,
             ood_row_felts,
             ood_frame_felts,
-            preprocessed_pipe_blocks: preprocessed_width / LMCS_ALIGNMENT,
-            main_pipe_blocks: main_width / LMCS_ALIGNMENT,
-            aux_pipe_blocks: aux_width / LMCS_ALIGNMENT,
-            quotient_pipe_blocks: quotient_width / LMCS_ALIGNMENT,
-            ood_pipe_blocks: ood_row_felts / LMCS_ALIGNMENT,
+            preprocessed_pipe_blocks: preprocessed_width / ADV_PIPE_BLOCK_FELTS,
+            main_pipe_blocks: main_width / ADV_PIPE_BLOCK_FELTS,
+            aux_pipe_blocks: aux_width / ADV_PIPE_BLOCK_FELTS,
+            quotient_pipe_blocks: quotient_width / ADV_PIPE_BLOCK_FELTS,
+            ood_pipe_blocks: ood_row_felts / ADV_PIPE_BLOCK_FELTS,
             ood_evaluations_ptr,
             aux_bus_boundary_ptr,
             auxiliary_ace_inputs_ptr,
             ace_circuit_stream_ptr,
             current_trace_row_ptr,
+            ood_scatter_table_ptr,
+            fold_coefficient_offset,
         })
     }
 }
@@ -457,6 +467,7 @@ fn input_layout_ptr(
 }
 
 fn render_vm_layout(geometry: &VmGeometry) -> io::Result<String> {
+    let plan = vm_scatter_plan(geometry)?;
     let mut layout = read_file(VM_LAYOUT_PATH)?;
     for (name, value) in [
         ("OOD_EVALUATIONS_PTR", geometry.ood_evaluations_ptr),
@@ -467,6 +478,46 @@ fn render_vm_layout(geometry: &VmGeometry) -> io::Result<String> {
     ] {
         replace_masm_const(&mut layout, name, &value.to_string())?;
     }
+
+    replace_comment_before_const(
+        &mut layout,
+        "OOD_SCATTER_TABLE_PTR",
+        &format!(
+            "### Out-of-domain ingest scatter table and proof-order maps, immediately after the VM \
+             control\n\
+             ### frame. Reserves {OOD_SCATTER_TABLE_FELTS} felts:\n\
+             ###\n\
+             ###   +0            base address of the out-of-domain row being ingested\n\
+             ###   +4  .. +{pairs_end}    per proof position, in stream order: (row-relative \
+             destination, digest address)\n\
+             ###   +{digests} .. +{digests_end}    `pipe_k` procedure digests reached by `dynexec`, \
+             one word each\n\
+             ###   +{positions} .. +{positions_end}    `pos_by_id`: each AIR's proof position, in \
+             instance order\n\
+             ###   +{ids} .. +{ids_end}    `id_by_pos`: the AIR committed at each proof position\n\
+             ###\n\
+             ### The internal offsets and the reserve's sufficiency are owned by the regeneration \
+             tool, which\n\
+             ### derives them from the AIR widths and fills `sys/vm/ood_frames.masm` accordingly.",
+            pairs_end = plan.digest_offset - 1,
+            digests = plan.digest_offset,
+            digests_end = plan.maps_offset - 1,
+            positions = plan.maps_offset,
+            positions_end = plan.maps_offset + MIDEN_AIR_COUNT - 1,
+            ids = plan.maps_offset + MIDEN_AIR_COUNT,
+            ids_end = plan.maps_offset + 2 * MIDEN_AIR_COUNT - 1,
+        ),
+    )?;
+
+    let positions_ptr =
+        geometry.ood_scatter_table_ptr.checked_add(plan.maps_offset).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "VM proof-order map overflows")
+        })?;
+    let ids_ptr = positions_ptr.checked_add(MIDEN_AIR_COUNT).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "VM proof-order map overflows")
+    })?;
+    replace_masm_const(&mut layout, "PROOF_ORDER_POSITIONS_PTR", &positions_ptr.to_string())?;
+    replace_masm_const(&mut layout, "PROOF_ORDER_IDS_PTR", &ids_ptr.to_string())?;
 
     replace_line_with_prefix(
         &mut layout,
@@ -510,36 +561,375 @@ fn render_vm_layout(geometry: &VmGeometry) -> io::Result<String> {
     Ok(layout)
 }
 
-fn render_vm_ood_frames(geometry: &VmGeometry) -> String {
-    format!(
-        r#"#! VM out-of-domain evaluation helpers.
+/// One per-AIR segment of one commitment group, together with how the hook reaches it.
+struct ScatterDispatch {
+    /// Commitment group this segment belongs to.
+    group: &'static str,
+    /// Canonical destination, in felts from the row base.
+    dst: usize,
+    /// Segment length in `adv_pipe` blocks.
+    blocks: usize,
+    /// Position of this segment within its commitment group on the wire.
+    position: usize,
+    /// Stream position in the runtime table, or `None` when the geometry fixes the segment's
+    /// place on the wire regardless of the proof order.
+    slot: Option<usize>,
+}
 
+/// Where AIR `air`'s segment of one commitment group must land, and which table slot names it.
+struct ScatterSource {
+    group: &'static str,
+    air: usize,
+    dst: usize,
+    blocks: usize,
+    group_slots_offset: usize,
+}
+
+/// Compile-time shape of the out-of-domain ingest scatter.
+struct ScatterPlan {
+    /// Stream-order dispatches for one row.
+    dispatches: Vec<ScatterDispatch>,
+    /// Per-AIR sources the order pass routes into the runtime table.
+    sources: Vec<ScatterSource>,
+    /// Distinct segment lengths, ascending; one `pipe_k` procedure each.
+    lengths: Vec<usize>,
+    /// Offset, in felts from the table base, of the first `pipe_k` digest word.
+    digest_offset: usize,
+    /// Offset, in felts from the table base, of the proof-order maps: `pos_by_id` followed by
+    /// `id_by_pos`, one felt per AIR each.
+    maps_offset: usize,
+}
+
+impl ScatterPlan {
+    /// Felt offset from the table base of the `pipe_k` digest covering `blocks`.
+    fn digest_offset_for(&self, blocks: usize) -> usize {
+        let index = self
+            .lengths
+            .iter()
+            .position(|length| *length == blocks)
+            .expect("every segment length has a pipe procedure");
+        self.digest_offset + WORD_FELTS * index
+    }
+}
+
+const WORD_FELTS: usize = 4;
+
+/// Derives the scatter's compile-time shape from the AIR widths.
+///
+/// A commitment group holding at most one non-empty segment carries no proof-order freedom: its
+/// occupant is always alone on the wire and always lands at the same canonical address, so it is
+/// dispatched directly rather than through the table. The quotient matrix is relation-wide, not
+/// per-AIR, and is likewise fixed.
+fn vm_scatter_plan(geometry: &VmGeometry) -> io::Result<ScatterPlan> {
+    let groups = [
+        ("preprocessed", &geometry.preprocessed_widths),
+        ("main", &geometry.main_widths),
+        ("aux", &geometry.aux_widths),
+    ];
+    let mut dispatches = Vec::new();
+    let mut sources = Vec::new();
+    let mut group_base = 0usize;
+    let mut slot = 0usize;
+
+    for (group, widths) in groups {
+        let occupied = widths.iter().filter(|width| **width > 0).count();
+        // Slots of one group are contiguous and indexed by proof position, so every source in
+        // the group shares this base and adds `2 * pos` at run time. `pos` ranks the AIR among
+        // *all* AIRs, which indexes the group's slots only when every AIR occupies the group. A
+        // partially occupied group would need the rank among occupants instead, which the proof
+        // order does not directly give; refuse to emit rather than silently address past the
+        // group's slots.
+        if occupied > 1 && occupied != widths.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "the {group} commitment group is occupied by {occupied} of {} AIRs; the \
+                     out-of-domain scatter indexes its table by proof-order position, which \
+                     requires every AIR to occupy the group",
+                    widths.len()
+                ),
+            ));
+        }
+        let group_slots_offset = OOD_SCATTER_SLOTS_OFFSET + 2 * slot;
+        let mut canonical = group_base;
+        let mut position = 0usize;
+        for (air, width) in widths.iter().enumerate() {
+            if *width == 0 {
+                continue;
+            }
+            let blocks = width * EXT_DEGREE / ADV_PIPE_BLOCK_FELTS;
+            if occupied > 1 {
+                sources.push(ScatterSource {
+                    group,
+                    air,
+                    dst: canonical,
+                    blocks,
+                    group_slots_offset,
+                });
+                dispatches.push(ScatterDispatch {
+                    group,
+                    dst: canonical,
+                    blocks,
+                    position,
+                    slot: Some(slot),
+                });
+                slot += 1;
+            } else {
+                dispatches.push(ScatterDispatch {
+                    group,
+                    dst: canonical,
+                    blocks,
+                    position,
+                    slot: None,
+                });
+            }
+            position += 1;
+            canonical += width * EXT_DEGREE;
+        }
+        group_base += widths.iter().sum::<usize>() * EXT_DEGREE;
+    }
+    dispatches.push(ScatterDispatch {
+        group: "quotient",
+        dst: group_base,
+        position: 0,
+        blocks: geometry.quotient_width * EXT_DEGREE / ADV_PIPE_BLOCK_FELTS,
+        slot: None,
+    });
+
+    let mut lengths: Vec<_> = dispatches.iter().map(|dispatch| dispatch.blocks).collect();
+    lengths.sort_unstable();
+    lengths.dedup();
+
+    // Digest words must be word-aligned, so they follow the pair table at the next word boundary.
+    let digest_offset = (OOD_SCATTER_SLOTS_OFFSET + 2 * slot).next_multiple_of(WORD_FELTS);
+    // The proof-order maps follow the digests: `pos_by_id`, then `id_by_pos`.
+    let maps_offset = digest_offset + WORD_FELTS * lengths.len();
+    let required = maps_offset + 2 * MIDEN_AIR_COUNT;
+    if required > OOD_SCATTER_TABLE_FELTS {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "the out-of-domain scatter table and proof-order maps need {required} felts but \
+                 OOD_SCATTER_TABLE_PTR reserves {OOD_SCATTER_TABLE_FELTS}"
+            ),
+        ));
+    }
+    if dispatches.iter().map(|dispatch| dispatch.blocks).sum::<usize>() != geometry.ood_pipe_blocks
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the scatter dispatch table does not cover exactly one out-of-domain row",
+        ));
+    }
+
+    Ok(ScatterPlan {
+        dispatches,
+        sources,
+        lengths,
+        digest_offset,
+        maps_offset,
+    })
+}
+
+/// Emits `push.OFFSET`-free addressing of one table cell, leaving its value on the stack.
+fn scatter_cell_load(offset: usize) -> String {
+    if offset == 0 {
+        "exec.layout::ood_scatter_table_ptr mem_load".into()
+    } else {
+        format!("exec.layout::ood_scatter_table_ptr add.{offset} mem_load")
+    }
+}
+
+/// Loads one AIR's staged proof-order position, leaving it on the stack.
+fn scatter_position_load(air: usize) -> String {
+    if air == 0 {
+        "dup mem_load".into()
+    } else {
+        format!("dup add.{air} mem_load")
+    }
+}
+
+fn render_vm_ood_frames(geometry: &VmGeometry) -> io::Result<String> {
+    let plan = vm_scatter_plan(geometry)?;
+    // Word reads and writes need word-aligned bases; the pass falls back to single-cell accesses
+    // otherwise, so alignment is a layout fact checked here, not an assumption.
+    let stark_constants = read_file(STARK_CONSTANTS_PATH)?;
+    let heights_ptr = parse_masm_const::<usize>(
+        &stark_constants,
+        "AIR_TRACE_LENGTH_LOGS_PTR",
+        STARK_CONSTANTS_PATH,
+    )
+    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let ids_ptr = geometry
+        .ood_scatter_table_ptr
+        .checked_add(plan.maps_offset)
+        .and_then(|ptr| ptr.checked_add(MIDEN_AIR_COUNT))
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "VM proof-order map overflows")
+        })?;
+    let proof_order_maps = render_proof_order_maps(&ProofOrderMapsConfig {
+        num_airs: MIDEN_AIR_COUNT,
+        heights_ptr: "exec.constants::air_trace_length_logs_ptr",
+        pos_by_id_ptr: "exec.layout::proof_order_positions_ptr",
+        id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
+        word_load_heights: heights_ptr.is_multiple_of(WORD_FELTS),
+        word_store_ids: ids_ptr.is_multiple_of(WORD_FELTS),
+    })
+    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+
+    let pipes = plan
+        .lengths
+        .iter()
+        .map(|blocks| {
+            format!(
+                "#! Absorbs {blocks} advice blocks into the row already targeted by the caller.\n\
+                 #!\n\
+                 #! Inputs:  [scratch0, scratch1, cv, ptr, alpha_ptr, acc0, acc1]\n\
+                 #! Outputs: [scratch0, scratch1, cv', ptr + {felts}, alpha_ptr, acc0', acc1']\n\
+                 proc pipe_{blocks}\n    \
+                 repeat.{blocks}\n        \
+                 adv_pipe\n        \
+                 horner_eval_ext\n        \
+                 compress\n    \
+                 end\nend\n",
+                felts = blocks * ADV_PIPE_BLOCK_FELTS,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let digest_staging = plan
+        .lengths
+        .iter()
+        .map(|blocks| {
+            format!(
+                "    procref.pipe_{blocks} dup.4 add.{offset} mem_storew_le dropw",
+                offset = plan.digest_offset_for(*blocks),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut order_pass = Vec::new();
+    for air in 0..MIDEN_AIR_COUNT {
+        let sources: Vec<_> = plan.sources.iter().filter(|source| source.air == air).collect();
+        if sources.is_empty() {
+            continue;
+        }
+        let mut block = format!(
+            "\n    # AIR {air}: its pair slots start at table + 2 * pos_by_id[{air}]\n    \
+             {position} mul.2 dup.2 add\n    # => [base, pos_ptr, table]\n",
+            position = scatter_position_load(air),
+        );
+        for source in sources {
+            block += &format!(
+                "    # {group}: {blocks} blocks at row offset {dst}\n    \
+                 push.{dst} dup.1 add.{slot} mem_store\n    \
+                 dup.2 add.{digest} dup.1 add.{next} mem_store\n",
+                group = source.group,
+                blocks = source.blocks,
+                dst = source.dst,
+                slot = source.group_slots_offset,
+                digest = plan.digest_offset_for(source.blocks),
+                next = source.group_slots_offset + 1,
+            );
+        }
+        block += "    drop\n";
+        order_pass.push(block);
+    }
+
+    let ingest = plan
+        .dispatches
+        .iter()
+        .map(|dispatch| match dispatch.slot {
+            // The proof order decides which AIR sits here, so both the destination and the
+            // segment length come from the table the order pass filled.
+            Some(slot) => format!(
+                "    # {group} group, proof position {position}\n    \
+                 exec.layout::ood_scatter_table_ptr dup add.{pair} mem_load swap mem_load \
+                 add\n    swap.13 drop\n    {digest}\n    dynexec",
+                group = dispatch.group,
+                position = dispatch.position,
+                pair = OOD_SCATTER_SLOTS_OFFSET + 2 * slot,
+                digest = scatter_cell_load(OOD_SCATTER_SLOTS_OFFSET + 2 * slot + 1),
+            ),
+            None => format!(
+                "    # {group} group, sole occupant: {blocks} blocks at row offset {dst}\n    \
+                 exec.layout::ood_scatter_table_ptr mem_load{offset}\n    swap.13 drop\n    \
+                 exec.pipe_{blocks}",
+                group = dispatch.group,
+                dst = dispatch.dst,
+                offset = if dispatch.dst == 0 {
+                    String::new()
+                } else {
+                    format!(" add.{}", dispatch.dst)
+                },
+                blocks = dispatch.blocks,
+            ),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(format!(
+        r#"# GENERATED by `cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write` — do not edit by hand.
+use miden::core::stark::constants
 use miden::core::stark::types
+use miden::core::sys::vm::layout
+
+# Number of AIR instances in the relation.
+const NUM_AIRS = {num_airs}
+
+# Per-row OOD layout uses LMCS alignment {LMCS_ALIGNMENT}:
+#   preprocessed: {preprocessed_parts} = {preprocessed} scalar evaluations
+#   main:         {main_parts} = {main} scalar evaluations
+#   aux:          {aux_parts} = {aux} scalar evaluations
+#   quotient:     {quotient} scalar evaluations
+# The advice stream supplies {ood_felts} base felts, read as {pipe_blocks} `adv_pipe` blocks.
+
+{pipes}
+{proof_order_maps}
+#! Stages the proof-order-dependent half of the out-of-domain scatter table.
+#!
+#! The proof commits each AIR's trace at its position in the height-sorted proof order, while the
+#! constraint circuit reads it at the AIR's canonical instance offset. Both the canonical
+#! destination and the segment length are compile-time per AIR; this procedure only routes them to
+#! the stream position `stage_proof_order_maps` recorded for that AIR.
+#!
+#! Must run after the proof-order maps are staged and before the first out-of-domain row is
+#! ingested.
+#!
+#! Inputs:  []
+#! Outputs: []
+pub proc stage_ood_scatter_table()
+    exec.layout::ood_scatter_table_ptr
+    # => [table]
+{digest_staging}
+    exec.layout::proof_order_positions_ptr
+    # => [pos_ptr, table]
+{order_pass}    drop drop
+end
 
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
 #!
-#! Loads one OOD row from advice, absorbs it into the Eidos transcript, and updates the
-#! Horner accumulator used by the DEEP fixed terms.
+#! Loads one OOD row from advice, absorbs it into the Eidos transcript, and updates the Horner
+#! accumulator used by the DEEP fixed terms. Both stay positional over the advice stream; the only
+#! thing the proof order moves is where each segment is stored, which the table staged by
+#! `stage_ood_scatter_table` supplies.
 #!
 #! Inputs:  [scratch0, scratch1, cv, ptr, alpha_ptr, acc0, acc1]
-#! Outputs: [scratch0, scratch1, cv', ptr, alpha_ptr, acc0', acc1']
+#! Outputs: [scratch0, scratch1, cv', ptr + {ood_felts}, alpha_ptr, acc0', acc1']
 pub proc process_row_ood_evaluations(
     state: types::EidosState,
     evaluation: types::HornerState,
 ) -> (types::EidosState, types::HornerState)
-    # Per-row OOD layout uses LMCS alignment {LMCS_ALIGNMENT}:
-    #   preprocessed: {preprocessed} scalar evaluations
-    #   main:         {main_parts} = {main} scalar evaluations
-    #   aux:          {aux_parts} = {aux} scalar evaluations
-    #   quotient:     {quotient} scalar evaluations
-    # The advice stream supplies {ood_felts} base felts, read as {pipe_blocks} `adv_pipe` blocks.
-    repeat.{pipe_blocks}
-        adv_pipe
-        horner_eval_ext
-        compress
-    end
+    dup.12 exec.layout::ood_scatter_table_ptr mem_store
+{ingest}
+    exec.layout::ood_scatter_table_ptr mem_load add.{ood_felts}
+    swap.13 drop
 end
 "#,
+        num_airs = MIDEN_AIR_COUNT,
+        preprocessed_parts = format_sum(&geometry.preprocessed_widths),
         preprocessed = geometry.preprocessed_width,
         main_parts = format_sum(&geometry.main_widths),
         main = geometry.main_width,
@@ -548,7 +938,9 @@ end
         quotient = geometry.quotient_width,
         ood_felts = geometry.ood_row_felts,
         pipe_blocks = geometry.ood_pipe_blocks,
-    )
+        proof_order_maps = proof_order_maps,
+        order_pass = order_pass.join(""),
+    ))
 }
 
 fn render_vm_deep_queries(geometry: &VmGeometry) -> io::Result<String> {
@@ -684,140 +1076,44 @@ fn write_artifacts(artifact: &ComputedArtifacts) -> io::Result<()> {
     write_file(VM_OOD_FRAMES_PATH, &artifact.vm_ood_frames)?;
     write_file(VM_DEEP_QUERIES_PATH, &artifact.vm_deep_queries)?;
     println!(
-        "wrote asm/sys/vm/constraints_eval.masm ({} inputs, {} eval gates, repeat.{}+{})",
-        artifact.num_inputs, artifact.num_eval_gates, artifact.prefix_rows, artifact.common_rows
+        "wrote asm/sys/vm/constraints_eval.masm ({} inputs, {} eval gates, repeat.{})",
+        artifact.num_inputs, artifact.num_eval_gates, artifact.stream_blocks
     );
-    println!(
-        "wrote asm/sys/vm/mod.masm (relation digest, ACE registry root, and preprocessed commitment)"
-    );
-    println!("wrote air/src/config.rs (relation digest and ACE registry)");
+    println!("wrote asm/sys/vm/mod.masm (relation digest and preprocessed commitment)");
+    println!("wrote air/src/config.rs (relation digest and ACE circuit digest)");
     println!("wrote verifier/src/lib.rs (preprocessed commitment)");
     println!("wrote VM recursive-verifier layout, OOD-frame, and DEEP-query geometry");
     println!("done - run `cargo test -p miden-air --lib` to update the insta snapshot");
     Ok(())
 }
 
-fn ensure_uniform_circuit_metadata(order_artifacts: &[OrderArtifact]) -> io::Result<()> {
-    let Some(first) = order_artifacts.first() else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "at least one ACE circuit is required",
-        ));
-    };
-
-    for artifact in &order_artifacts[1..] {
-        if artifact.num_inputs != first.num_inputs
-            || artifact.num_eval_gates != first.num_eval_gates
-            || artifact.stream_len != first.stream_len
-            || artifact.shuffle_prefix_len != first.shuffle_prefix_len
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("ACE circuit metadata differs for {}", artifact.order.file_stem()),
-            ));
-        }
-        if artifact.common_commitment != first.common_commitment {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("ACE common-section digest differs for {}", artifact.order.file_stem()),
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-fn word_from_array(elements: [Felt; 4]) -> Word {
-    Word::new(elements)
-}
-
 fn word_to_array(word: Word) -> [Felt; 4] {
     [word[0], word[1], word[2], word[3]]
 }
 
-struct AceCircuitRegistry {
-    root: [Felt; 4],
-    #[cfg_attr(not(test), allow(dead_code))]
-    leaves: Vec<Word>,
-}
-
-impl AceCircuitRegistry {
-    fn from_order_artifacts(order_artifacts: &[OrderArtifact]) -> io::Result<Self> {
-        let active_leaf_count = PROOF_ORDER_COUNT;
-        if active_leaf_count > ACE_REGISTRY_LEAF_COUNT {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "ACE circuit registry is too small for the supported proof orders",
-            ));
-        }
-
-        let mut leaves = alloc::vec![native_padding_leaf(); ACE_REGISTRY_LEAF_COUNT];
-        let mut seen = vec![false; active_leaf_count];
-
-        for artifact in order_artifacts {
-            let tag = artifact.order.tag() as usize;
-            if tag >= active_leaf_count {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("proof-order tag {tag} is outside the active registry range"),
-                ));
-            }
-            if seen[tag] {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("duplicate proof-order tag {tag}"),
-                ));
-            }
-
-            seen[tag] = true;
-            leaves[tag] = word_from_array(artifact.circuit_commitment);
-        }
-
-        if let Some(missing_tag) = seen.iter().position(|&is_seen| !is_seen) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("missing ACE circuit commitment for proof-order tag {missing_tag}"),
-            ));
-        }
-
-        let tree = MerkleTree::new(&leaves).map_err(|err| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("failed to build ACE circuit registry: {err}"),
-            )
-        })?;
-
-        Ok(Self { root: word_to_array(tree.root()), leaves })
-    }
-}
-
 fn render_constraints_eval_file(
-    order_artifacts: &[OrderArtifact],
+    circuit: &miden_air::ace::RecursiveAceCircuit,
     quotient_inputs: QuotientRecompositionInputs<Felt>,
+    geometry: &VmGeometry,
 ) -> io::Result<String> {
-    let Some(first) = order_artifacts.first() else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "at least one ACE circuit is required",
-        ));
-    };
-    let max_cycle_len_log = max_periodic_cycle_len_log();
-    let h_common = first.common_commitment;
-
     miden_ace_codegen::render_masm_constraints_eval(&miden_ace_codegen::MasmConstraintsEvalConfig {
         generated_by: "cargo run -p miden-core-lib --features constraints-tools --bin \
                            regenerate-constraints -- --write",
         layout_module: "miden::core::sys::vm::layout",
-        num_inputs: first.num_inputs,
-        num_eval_gates: first.num_eval_gates,
-        stream_len: first.stream_len,
-        shuffle_prefix_len: first.shuffle_prefix_len,
-        max_cycle_len_log,
-        registry_depth: ACE_CIRCUIT_REGISTRY_DEPTH,
-        order_tag_count: PROOF_ORDER_COUNT,
+        num_inputs: circuit.num_inputs,
+        num_eval_gates: circuit.num_eval_gates,
+        stream_len: circuit.stream_len,
+        max_cycle_len_log: max_periodic_cycle_len_log(),
         num_airs: MIDEN_AIR_COUNT,
+        // The VM's canonical READ layout reserves one fold-coefficient slot per AIR, so its
+        // evaluator stages them from the proof-order maps; that block is what makes the circuit
+        // order-invariant.
+        fold_coefficients: Some(FoldCoefficientStaging {
+            id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
+            coefficient_offset: geometry.fold_coefficient_offset,
+        }),
         quotient_inputs,
-        common_commitment: Word::new(h_common),
+        circuit_digest: circuit.commitment,
     })
     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))
 }
@@ -863,10 +1159,10 @@ fn relation_digest_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), 
     if miden_air::config::RELATION_DIGEST != expected {
         return Err("RELATION_DIGEST in air/src/config.rs is stale".into());
     }
-    if miden_air::config::ACE_CIRCUIT_REGISTRY_ROOT != artifact.registry_root {
+    if miden_air::config::ACE_CIRCUIT_DIGEST != artifact.circuit_digest {
         return Err(
-            "ACE_CIRCUIT_REGISTRY_ROOT in air/src/config.rs is stale (the root binds every \
-             registry leaf; leaves are recomputed at runtime and are not checked in)"
+            "ACE_CIRCUIT_DIGEST in air/src/config.rs is stale (it binds the transcript to the \
+             one circuit the recursive verifier evaluates)"
                 .into(),
         );
     }
@@ -881,17 +1177,6 @@ fn relation_digest_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), 
 
     if masm_digest != expected {
         return Err("RELATION_DIGEST in sys/vm/mod.masm is stale".into());
-    }
-
-    let mut masm_registry_root: [Felt; 4] = [Felt::ZERO; 4];
-    for (i, slot) in masm_registry_root.iter_mut().enumerate() {
-        let name = format!("ACE_REGISTRY_ROOT_{i}");
-        *slot =
-            parse_masm_const::<u64>(&masm, &name, "sys/vm/mod.masm").map(Felt::new_unchecked)?;
-    }
-
-    if masm_registry_root != artifact.registry_root {
-        return Err("ACE registry root in sys/vm/mod.masm is stale".into());
     }
 
     let mut masm_preprocessed_commitment = [Felt::ZERO; 4];
@@ -909,20 +1194,12 @@ fn relation_digest_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), 
         return Err("EIDOS_PREPROCESSED_COMMITMENT in verifier/src/lib.rs is stale".into());
     }
 
-    // `derive_order_tag` sweeps this many AIRs and weights each inversion by
-    // `(NUM_MIDEN_AIRS - 1 - pos)!`, so a stale value silently mis-ranks proof orders.
-    let num_miden_airs = parse_masm_const::<usize>(&masm, "NUM_MIDEN_AIRS", "sys/vm/mod.masm")?;
-    if num_miden_airs != MIDEN_AIR_COUNT {
-        return Err("NUM_MIDEN_AIRS in sys/vm/mod.masm is stale".into());
-    }
-
-    // The VM aux hook dispatches the three weighted boundary sums by proof-order tag. Keep its
-    // active-tag bound tied to the same AIR-derived order count as the generated evaluator.
-    let aux_trace = read_file(VM_AUX_TRACE_PATH).map_err(|e| e.to_string())?;
-    let order_tag_count =
-        parse_masm_const::<usize>(&aux_trace, "ORDER_TAG_COUNT", VM_AUX_TRACE_PATH)?;
-    if order_tag_count != PROOF_ORDER_COUNT {
-        return Err("ORDER_TAG_COUNT in sys/vm/aux_trace.masm is stale".into());
+    // The generated map/scatter hook is specialized to one block per AIR. A stale value would
+    // leave an AIR without a routed out-of-domain segment.
+    let ood_frames = read_file(VM_OOD_FRAMES_PATH).map_err(|e| e.to_string())?;
+    let scatter_airs = parse_masm_const::<usize>(&ood_frames, "NUM_AIRS", VM_OOD_FRAMES_PATH)?;
+    if scatter_airs != MIDEN_AIR_COUNT {
+        return Err("NUM_AIRS in sys/vm/ood_frames.masm is stale".into());
     }
 
     Ok(())
@@ -1131,50 +1408,97 @@ fn replace_felt_array_const(
     name: &str,
     values: &[Felt; 4],
 ) -> io::Result<()> {
-    let marker = format!("pub const {name}:");
-    let start = content
-        .find(&marker)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{name} not found")))?;
-    let init_marker = " = [";
-    let init_start =
-        content[start..].find(init_marker).map(|idx| start + idx).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, format!("{name} initializer not found"))
-        })?;
-    let block_start = init_start + init_marker.len();
-    let block_end =
-        content[block_start..].find("];").map(|idx| idx + block_start).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, format!("{name} terminator not found"))
-        })?;
-    let mut new_block: String = values
+    let mut body: String = values
         .iter()
         .map(|f| format!("\n    Felt::new_unchecked({}),", f.as_canonical_u64()))
         .collect();
-    new_block.push('\n');
-    content.replace_range(block_start..block_end, &new_block);
-    Ok(())
+    body.push('\n');
+    replace_rust_array_const(content, "pub const", name, &body)
 }
 
 fn replace_u64_array_const(content: &mut String, name: &str, values: &[Felt; 4]) -> io::Result<()> {
-    let marker = format!("const {name}:");
-    let start = content
-        .find(&marker)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{name} not found")))?;
-    let init_marker = " = [";
-    let init_start =
-        content[start..].find(init_marker).map(|idx| start + idx).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, format!("{name} initializer not found"))
-        })?;
-    let block_start = init_start + init_marker.len();
-    let block_end =
-        content[block_start..].find("];").map(|idx| idx + block_start).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, format!("{name} terminator not found"))
-        })?;
-    let mut new_block: String = values
+    let mut body: String = values
         .iter()
         .map(|value| format!("\n    {},", value.as_canonical_u64()))
         .collect();
-    new_block.push('\n');
-    content.replace_range(block_start..block_end, &new_block);
+    body.push('\n');
+    replace_rust_array_const(content, "const", name, &body)
+}
+
+fn replace_rust_array_const(
+    content: &mut String,
+    declaration_prefix: &str,
+    name: &str,
+    body: &str,
+) -> io::Result<()> {
+    let marker = format!("{declaration_prefix} {name}:");
+    let start = content
+        .find(&marker)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{name} not found")))?;
+    if content[start + marker.len()..].contains(&marker) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{name} is declared more than once"),
+        ));
+    }
+
+    // These generated declarations keep `=` on the declaration line, while rustfmt may put the
+    // opening bracket on the next line. Anchoring the assignment to that line prevents a malformed
+    // declaration from borrowing an initializer from a later item.
+    let declaration_end = content[start..]
+        .find('\n')
+        .map(|offset| start + offset)
+        .unwrap_or(content.len());
+    let assign = content[start + marker.len()..declaration_end]
+        .find('=')
+        .map(|offset| start + marker.len() + offset)
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, format!("{name} initializer not found"))
+        })?;
+
+    let init_start = content[assign + 1..]
+        .find(|character: char| !character.is_whitespace())
+        .map(|offset| assign + 1 + offset)
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, format!("{name} initializer not found"))
+        })?;
+    if content.as_bytes()[init_start] != b'[' {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{name} initializer not found"),
+        ));
+    }
+
+    // rustfmt either closes a short array on the opening line or places the top-level `];` at
+    // column zero. Array body lines are indented. Stop at the first other unindented line so a
+    // malformed target cannot consume syntax (including brackets in strings or comments) from a
+    // later item.
+    let first_line_end = content[init_start..]
+        .find('\n')
+        .map(|offset| init_start + offset)
+        .unwrap_or(content.len());
+    let mut terminator_end = content[init_start..first_line_end]
+        .find("];")
+        .map(|offset| init_start + offset + 2);
+    let mut line_start = first_line_end.saturating_add(1);
+    while terminator_end.is_none() && line_start < content.len() {
+        let line_end = content[line_start..]
+            .find('\n')
+            .map(|offset| line_start + offset)
+            .unwrap_or(content.len());
+        let line = &content[line_start..line_end];
+        if line.starts_with("];") {
+            terminator_end = Some(line_start + 2);
+        } else if !line.is_empty() && !line.as_bytes().first().is_some_and(u8::is_ascii_whitespace)
+        {
+            break;
+        }
+        line_start = line_end.saturating_add(1);
+    }
+    let terminator_end = terminator_end.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::NotFound, format!("{name} terminator not found"))
+    })?;
+    content.replace_range(assign..terminator_end, &format!("= [{body}];"));
     Ok(())
 }
 
@@ -1193,9 +1517,8 @@ fn write_file(rel_path: &str, contents: &str) -> io::Result<()> {
 struct ComputedArtifacts {
     num_inputs: usize,
     num_eval_gates: usize,
-    prefix_rows: usize,
-    common_rows: usize,
-    registry_root: [Felt; 4],
+    stream_blocks: usize,
+    circuit_digest: [Felt; 4],
     relation_digest: [Felt; 4],
     preprocessed_commitment: [Felt; 4],
     constraints_eval: String,
@@ -1207,76 +1530,108 @@ struct ComputedArtifacts {
     vm_deep_queries: String,
 }
 
-struct OrderArtifact {
-    order: ProofOrder,
-    num_inputs: usize,
-    num_eval_gates: usize,
-    stream_len: usize,
-    shuffle_prefix_len: usize,
-    common_commitment: [Felt; 4],
-    circuit_commitment: [Felt; 4],
-}
-
 #[cfg(test)]
 mod tests {
-    use alloc::string::ToString;
+    use alloc::{string::ToString, vec};
 
     use super::*;
 
     #[test]
-    fn ace_registry_places_commitments_by_order_tag() {
-        let artifacts = dummy_artifacts();
-        let registry = AceCircuitRegistry::from_order_artifacts(&artifacts).unwrap();
+    fn generated_rust_array_replacement_is_rustfmt_safe_and_fails_closed() {
+        type Replacer = fn(&mut String, &str, &[Felt; 4]) -> io::Result<()>;
 
-        for artifact in artifacts {
-            assert_eq!(
-                registry.leaves[artifact.order.tag() as usize],
-                word_from_array(artifact.circuit_commitment)
-            );
+        let values = [1, 2, 3, 4].map(Felt::new_unchecked);
+        for (replace, name, declaration, body, following) in [
+            (
+                replace_felt_array_const as Replacer,
+                "RELATION_DIGEST",
+                "pub const RELATION_DIGEST: [Felt; 4]",
+                "\n    Felt::new_unchecked(1),\n    Felt::new_unchecked(2),\n    \
+                 Felt::new_unchecked(3),\n    Felt::new_unchecked(4),\n",
+                "pub(crate) const UNTOUCHED: &str = \"];\";\n",
+            ),
+            (
+                replace_u64_array_const as Replacer,
+                "EIDOS_PREPROCESSED_COMMITMENT",
+                "const EIDOS_PREPROCESSED_COMMITMENT: [u64; 4]",
+                "\n    1,\n    2,\n    3,\n    4,\n",
+                "const UNTOUCHED: [u64; 4] = [9, 9, 9, 9];\n",
+            ),
+        ] {
+            let mut wrapped = format!("{declaration} =\n    [0, 0, 0, 0];\n\n{following}");
+            replace(&mut wrapped, name, &values).unwrap();
+            assert_eq!(wrapped, format!("{declaration} = [{body}];\n\n{following}"));
+
+            let mut malformed = format!("{declaration} = [0, 0, 0, 0;\n\n{following}");
+            let original = malformed.clone();
+            let error = replace(&mut malformed, name, &values).unwrap_err();
+            assert!(error.to_string().contains("terminator not found"));
+            assert_eq!(malformed, original);
+
+            let mut duplicate =
+                format!("{declaration} = [0, 0, 0, 0];\n{declaration} = [0, 0, 0, 0];\n");
+            let original = duplicate.clone();
+            let error = replace(&mut duplicate, name, &values).unwrap_err();
+            assert!(error.to_string().contains("declared more than once"));
+            assert_eq!(duplicate, original);
         }
     }
 
+    /// A group every AIR occupies is indexed correctly by proof-order position, and one with a
+    /// single occupant needs no table at all. Anything between the two would address past the
+    /// group's slots, so the renderer must refuse it instead of emitting it.
     #[test]
-    fn ace_registry_uses_padding_leaves_outside_supported_orders() {
-        let registry = AceCircuitRegistry::from_order_artifacts(&dummy_artifacts()).unwrap();
+    fn scatter_plan_rejects_partially_occupied_commitment_groups() {
+        // The VM preprocessed commitment group is occupied only by `MidenAir::And8Lookup`.
+        assert!(vm_scatter_plan(&scatter_test_geometry(&[0, 0, 0, 16])).is_ok());
+        // Every AIR occupies the group.
+        assert!(vm_scatter_plan(&scatter_test_geometry(&[16, 16, 16, 16])).is_ok());
+        // Two of four: the proof-order position no longer indexes the group's slots.
+        let Err(partial) = vm_scatter_plan(&scatter_test_geometry(&[16, 0, 0, 16])) else {
+            panic!("a partially occupied group must be refused");
+        };
+        assert!(
+            partial
+                .to_string()
+                .contains("preprocessed commitment group is occupied by 2 of 4"),
+            "unexpected refusal: {partial}"
+        );
+    }
 
-        for index in PROOF_ORDER_COUNT..ACE_REGISTRY_LEAF_COUNT {
-            assert_eq!(registry.leaves[index], native_padding_leaf());
+    /// A geometry whose only meaningful axis is the preprocessed occupancy under test.
+    fn scatter_test_geometry(preprocessed_widths: &[usize]) -> VmGeometry {
+        let preprocessed_widths = preprocessed_widths.to_vec();
+        let main_widths = vec![8; preprocessed_widths.len()];
+        let aux_widths = vec![8; preprocessed_widths.len()];
+        let preprocessed_width: usize = preprocessed_widths.iter().sum();
+        let main_width: usize = main_widths.iter().sum();
+        let aux_width: usize = aux_widths.iter().sum();
+        let quotient_width = 8;
+        let row_width = preprocessed_width + main_width + aux_width + quotient_width;
+        VmGeometry {
+            preprocessed_widths,
+            preprocessed_width,
+            main_widths,
+            main_width,
+            aux_widths,
+            aux_width,
+            quotient_width,
+            row_width,
+            ood_row_felts: row_width * EXT_DEGREE,
+            ood_frame_felts: 2 * row_width * EXT_DEGREE,
+            preprocessed_pipe_blocks: preprocessed_width / ADV_PIPE_BLOCK_FELTS,
+            main_pipe_blocks: main_width / ADV_PIPE_BLOCK_FELTS,
+            aux_pipe_blocks: aux_width / ADV_PIPE_BLOCK_FELTS,
+            quotient_pipe_blocks: quotient_width / ADV_PIPE_BLOCK_FELTS,
+            ood_pipe_blocks: row_width * EXT_DEGREE / ADV_PIPE_BLOCK_FELTS,
+            ood_evaluations_ptr: 0,
+            aux_bus_boundary_ptr: 0,
+            auxiliary_ace_inputs_ptr: 0,
+            ace_circuit_stream_ptr: 0,
+            current_trace_row_ptr: 0,
+            ood_scatter_table_ptr: 0,
+            fold_coefficient_offset: 0,
         }
-    }
-
-    #[test]
-    fn ace_registry_rejects_missing_and_duplicate_tags() {
-        let mut missing = dummy_artifacts();
-        missing.pop();
-        assert!(AceCircuitRegistry::from_order_artifacts(&missing).is_err());
-
-        let mut duplicate = dummy_artifacts();
-        duplicate[1].order = duplicate[0].order.clone();
-        assert!(AceCircuitRegistry::from_order_artifacts(&duplicate).is_err());
-    }
-
-    fn dummy_artifacts() -> Vec<OrderArtifact> {
-        ProofOrder::variants()
-            .into_iter()
-            .map(|order| {
-                let tag = order.tag() as u64;
-                OrderArtifact {
-                    order,
-                    num_inputs: 1,
-                    num_eval_gates: 1,
-                    stream_len: 16,
-                    shuffle_prefix_len: 8,
-                    common_commitment: [Felt::ZERO; 4],
-                    circuit_commitment: [
-                        Felt::new_unchecked(tag + 1),
-                        Felt::new_unchecked(tag + 2),
-                        Felt::new_unchecked(tag + 3),
-                        Felt::new_unchecked(tag + 4),
-                    ],
-                }
-            })
-            .collect()
     }
 
     #[test]
@@ -1299,8 +1654,8 @@ mod tests {
 
     #[test]
     fn deep_query_loader_repeats_follow_air_geometry() {
-        let factory = RecursiveAceCircuitFactory::new().expect("recursive ACE factory");
-        let geometry = VmGeometry::from_input_layout(factory.input_layout()).expect("VM geometry");
+        let layout = recursive_verifier_input_layout().expect("recursive ACE input layout");
+        let geometry = VmGeometry::from_input_layout(&layout).expect("VM geometry");
         let deep_queries = render_vm_deep_queries(&geometry).expect("render DEEP-query loaders");
 
         for (proc_name, expected) in [

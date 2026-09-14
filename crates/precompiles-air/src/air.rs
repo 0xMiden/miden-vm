@@ -433,9 +433,8 @@ mod tests {
         );
     }
 
-    /// The chiplet instance order fixes proof-order tie-breaks, registry tags, and the
-    /// relation digest. Intentional changes require regenerated protocol constants and a
-    /// breaking changelog entry.
+    /// The chiplet instance order fixes proof-order tie-breaks and the relation digest.
+    /// Intentional changes require regenerated protocol constants and a breaking changelog entry.
     #[test]
     fn chiplet_instance_order_is_protocol_pinned() {
         let pinned = [
@@ -453,7 +452,7 @@ mod tests {
         assert_eq!(
             ChipletAir::all(),
             pinned,
-            "chiplet instance order moved; regenerate the PVM ACE registry for an intentional \
+            "chiplet instance order moved; run `make regenerate-pvm-constants` for an intentional \
              protocol break"
         );
     }

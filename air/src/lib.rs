@@ -109,9 +109,7 @@ mod export {
 }
 
 pub use export::*;
-pub use proof_order::{
-    AIRS, MIDEN_AIR_COUNT, PROOF_ORDER_COUNT, PROOF_ORDER_REGISTRY_DEPTH, ProofOrder,
-};
+pub use proof_order::{AIRS, MIDEN_AIR_COUNT, PROOF_ORDER_COUNT, ProofOrder};
 
 // MIDEN AIR BUILDER
 // ================================================================================================
