@@ -356,5 +356,5 @@ pub proc verify_proof(claim_commitment: types::Digest) -> (types::StackSecurityD
     swapw
     # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, D, ...]
     exec.build_security_descriptor
-    # => [security_descriptor, D, ...]
+    # => [security_descriptor(12), D, ...]
 end
