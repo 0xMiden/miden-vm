@@ -7,6 +7,7 @@
 - [BREAKING] Add a precompile prover memory budget, with a 64GiB default ([#3799](https://github.com/0xMiden/miden-vm/pull/3799)).
 #### Changes
 
+- Parallelized the centered LogUp accumulator scan across row chunks.
 - Avoided element-wise buffer swaps during mixed-height DEEP reduction.
 - Reduced DEEP matrices across commitments in ascending height order to avoid separate group buffers.
 

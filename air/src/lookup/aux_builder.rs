@@ -29,10 +29,7 @@ use miden_crypto::stark::air::LiftedAir;
 
 use super::{Challenges, LookupAir, ProverLookupBuilder, prover::build_lookup_fractions};
 
-/// Row-chunk granularity for the fused accumulator. Matches
-/// [`crate::trace::main_trace::ROW_MAJOR_CHUNK_SIZE`] so we stay consistent with the
-/// repo's row-major tuning: ~512 rows × avg shape ~3 ≈ 1.5 K fractions per chunk and
-/// ~24 KiB of chunk-local scratch, comfortably L1-resident on any modern x86/arm core.
+/// Rows per chunk for fraction accumulation and centered scanning.
 pub(crate) const ACCUMULATE_ROWS_PER_CHUNK: usize = 512;
 
 // TOP-LEVEL DRIVER
@@ -291,8 +288,9 @@ where
 /// `fᵢ(r)` for every `(row, col)`, writes fraction columns into the output matrix, and
 /// records the row total `t(r) = Σᵢ fᵢ(r)` into a side buffer.
 ///
-/// **Phase 2 (sequential).** Compute `sigma_prime`, then scan `t(r) - sigma_prime` to fill the
-/// accumulator column. This step is inherently sequential but touches only one scalar per row.
+/// **Phase 2.** Compute `sigma_prime`, then fill the accumulator with centered prefix sums.
+/// Concurrent builds scan multiple chunks independently; a single chunk or serial build uses
+/// a direct scan.
 pub fn accumulate<F, EF>(fractions: &LookupFractions<F, EF>) -> (RowMajorMatrix<EF>, EF)
 where
     F: Field,
@@ -345,7 +343,6 @@ where
         }
 
         // Batch-invert and scale: scratch[j] = mⱼ · dⱼ⁻¹ (ready to sum).
-        // Allocated once per chunk (~1.5 K elements ≈ 24 KiB, L1-resident).
         let mut scratch: Vec<EF> = vec![EF::ZERO; chunk_fracs.len()];
         invert_and_scale(chunk_fracs, &mut scratch);
 
@@ -391,26 +388,68 @@ where
             .for_each(phase1);
     }
 
-    // Phase 2: reduce the global sum, then scan the centered row totals. The parallel-iterator
-    // shim uses Rayon when concurrency is enabled and executes sequentially otherwise. The
-    // accumulator scan remains sequential because each row depends on its predecessor.
+    let sigma_prime = write_centered_accumulator(&row_totals, &mut output_data, num_cols);
+    (RowMajorMatrix::new(output_data, num_cols), sigma_prime)
+}
+
+/// Write centered prefix sums to column 0 and return the mean row total.
+fn write_centered_accumulator<EF: Field>(
+    row_totals: &[EF],
+    output: &mut [EF],
+    num_cols: usize,
+) -> EF {
     use miden_crypto::parallel::*;
-    let sigma: EF = row_totals.par_iter().copied().sum();
+
+    let num_rows = row_totals.len();
+    debug_assert_eq!(output.len(), num_rows * num_cols);
     let n_inv = EF::from_usize(num_rows)
         .try_inverse()
         .expect("LogUp trace length must be non-zero in the field");
-    let sigma_prime = sigma * n_inv;
+    let scan_rows = |totals: &[EF], out: &mut [EF], mut acc: EF, mean: EF| {
+        for (row, &total) in out.chunks_mut(num_cols).zip(totals) {
+            row[0] = acc;
+            acc += total - mean;
+        }
+    };
 
-    // Writing the current accumulator before updating gives a(0) = 0 and leaves the final update
-    // as the cyclic last-to-first edge.
-    let mut acc = EF::ZERO;
-    for r in 0..num_rows {
-        output_data[r * num_cols] = acc;
-        acc += row_totals[r] - sigma_prime;
-    }
-    debug_assert_eq!(acc, EF::ZERO, "normalized LogUp accumulator must close cyclically");
+    let chunk_rows = ACCUMULATE_ROWS_PER_CHUNK;
+    let sigma_prime = if cfg!(feature = "concurrent") && num_rows > chunk_rows {
+        let mut chunk_prefixes: Vec<EF> = row_totals
+            .par_chunks(chunk_rows)
+            .map(|chunk| chunk.iter().copied().sum())
+            .collect();
 
-    (RowMajorMatrix::new(output_data, num_cols), sigma_prime)
+        // Each entry becomes the sum of all preceding chunks.
+        let mut sigma = EF::ZERO;
+        for total in &mut chunk_prefixes {
+            let next = sigma + *total;
+            *total = sigma;
+            sigma = next;
+        }
+        let sigma_prime = sigma * n_inv;
+
+        output
+            .par_chunks_mut(chunk_rows * num_cols)
+            .zip(row_totals.par_chunks(chunk_rows))
+            .zip(chunk_prefixes)
+            .enumerate()
+            .for_each(|(chunk_idx, ((out, totals), prefix))| {
+                let row_lo = chunk_idx * chunk_rows;
+                let start = prefix - EF::from_usize(row_lo) * sigma_prime;
+                scan_rows(totals, out, start, sigma_prime);
+            });
+        sigma_prime
+    } else {
+        let sigma_prime = row_totals.par_iter().copied().sum::<EF>() * n_inv;
+        scan_rows(row_totals, output, EF::ZERO, sigma_prime);
+        sigma_prime
+    };
+    debug_assert_eq!(
+        output[(num_rows - 1) * num_cols] + row_totals[num_rows - 1] - sigma_prime,
+        EF::ZERO,
+        "normalized LogUp accumulator must close cyclically"
+    );
+    sigma_prime
 }
 
 /// Forward scan over the flat `counts` buffer producing per-row fraction-start offsets.
@@ -466,7 +505,7 @@ where
     // Backward sweep: scratch[i] = mᵢ · dᵢ⁻¹.
     //
     // Loop invariant (entering iteration i, for i = n-1 down to 1):
-    //     running_inv = (dᵢ · dᵢ₊₁ · … · dₙ₋₁)⁻¹
+    //     running_inv = (d₀ · d₁ · … · dᵢ)⁻¹
     //     scratch[i-1] = d₀ · d₁ · … · dᵢ₋₁  (left over from the forward pass)
     //
     // Then:
@@ -681,16 +720,11 @@ mod tests {
         assert!(fx.counts.is_empty());
     }
 
-    /// Single-chunk random cross-check: a tiny fixture (32 rows) exercises one phase-1 fused
-    /// Montgomery/walk chunk followed by the global normalization and centered scan.
+    /// A full single chunk matches the per-fraction reference.
     #[test]
     fn accumulate_matches_accumulate_slow_random() {
         const SHAPE: [usize; 3] = [2, 1, 3];
-        const NUM_ROWS: usize = 32;
-        const _: () = assert!(
-            NUM_ROWS < ACCUMULATE_ROWS_PER_CHUNK,
-            "must stay in one chunk to test phase 1",
-        );
+        const NUM_ROWS: usize = ACCUMULATE_ROWS_PER_CHUNK;
 
         let fx = random_fixture(&SHAPE, NUM_ROWS, 0x00c0_ffee_beef_c0de);
         let (slow, slow_sigma_prime) = accumulate_slow(&fx);
@@ -705,26 +739,26 @@ mod tests {
         );
     }
 
-    /// Multi-chunk regression test: a fixture spanning multiple
-    /// [`ACCUMULATE_ROWS_PER_CHUNK`]-row chunks exercises parallel row-total computation followed
-    /// by global normalization and the centered scan. The trailing `+ 7` rows make the last chunk
-    /// shorter and catch off-by-one errors in the chunk bounds.
+    /// Compare accumulation across full chunks and a partial final chunk.
     #[test]
     fn accumulate_multi_chunk_matches_accumulate_slow() {
-        const SHAPE: [usize; 4] = [1, 2, 3, 1];
-        const NUM_ROWS: usize = ACCUMULATE_ROWS_PER_CHUNK * 3 + 7;
-
-        let fx = random_fixture(&SHAPE, NUM_ROWS, 0xdead_beef_cafe_babe);
-        let (slow, slow_sigma_prime) = accumulate_slow(&fx);
-        let (fast, fast_sigma_prime) = accumulate(&fx);
-        assert_matrix_matches_slow(
-            &slow,
-            slow_sigma_prime,
-            &fast,
-            fast_sigma_prime,
-            SHAPE.len(),
-            NUM_ROWS,
-        );
+        let cases: &[(&[usize], usize)] = &[
+            (&[1], ACCUMULATE_ROWS_PER_CHUNK * 2),
+            (&[1, 2, 3, 1], ACCUMULATE_ROWS_PER_CHUNK * 3 + 7),
+        ];
+        for &(shape, num_rows) in cases {
+            let fx = random_fixture(shape, num_rows, 0xdead_beef_cafe_babe);
+            let (slow, slow_sigma_prime) = accumulate_slow(&fx);
+            let (fast, fast_sigma_prime) = accumulate(&fx);
+            assert_matrix_matches_slow(
+                &slow,
+                slow_sigma_prime,
+                &fast,
+                fast_sigma_prime,
+                shape.len(),
+                num_rows,
+            );
+        }
     }
 
     /// Normalization is undefined for an empty trace.
@@ -781,9 +815,9 @@ mod tests {
     fn accumulate_single_row_commits_its_row_total() {
         let denominator = QuadFelt::from_u32(11);
         let contribution = denominator.try_inverse().unwrap().double();
-        let mut fx = fixture([1, 1], 1);
+        let mut fx = LookupFractions::from_shape(vec![1], 1);
         fx.fractions.push((Felt::from_u32(2), denominator));
-        fx.counts.extend([1, 0]);
+        fx.counts.push(1);
 
         let (aux, sigma_prime) = accumulate(&fx);
         assert_eq!(aux.height(), 1);
