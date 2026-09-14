@@ -395,7 +395,7 @@ fn request_consumer_source() -> String {
             # 3) Verify the claim; vm::verify_proof returns the common security descriptor followed
             #    by the deferred obligation.
             exec.vm::verify_proof
-            # => [security_descriptor, D]
+            # => [security_descriptor(12), D]
 
             # 4) Compute the security level and enforce the consumer's threshold.
             exec.security::compute_conjectured_security_level
@@ -502,7 +502,7 @@ fn stark_verifier_e2f4_request_multi_proof() {
             dupw
             procref.vm::verify_proof exec.sys::build_proof_request_key
             adv.push_mapval dropw                        # => [CLAIM_COMMITMENT]
-            exec.vm::verify_proof                        # => [security_descriptor, D]
+            exec.vm::verify_proof                        # => [security_descriptor(12), D]
             exec.security::compute_conjectured_security_level # => [level, D]
             u32lt.96 assertz.err=\"proof security level is below the accepted target\"
             # => [D]
@@ -530,7 +530,7 @@ fn vm_verify_proof_program() -> String {
 
         begin
             exec.vm::verify_proof
-            # => [security_descriptor, D, ...]
+            # => [security_descriptor(12), D, ...]
             trace.VERIFIER_RETURN
             exec.sys::truncate_stack
         end

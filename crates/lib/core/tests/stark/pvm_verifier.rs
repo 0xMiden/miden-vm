@@ -168,7 +168,7 @@ fn run_pvm_verifier_with_advice(
             exec.sys::build_proof_request_key
             adv.push_mapval dropw
             exec.pvm::verify_proof
-            # => [security_descriptor, ...]
+            # => [security_descriptor(12), ...]
             trace.VERIFIER_RETURN
             exec.sys::truncate_stack
         end

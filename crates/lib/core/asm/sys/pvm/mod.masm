@@ -234,7 +234,7 @@ end
 #! Fails if the advice does not encode a supported PVM proof, or if any transcript, opening,
 #! commitment, constraint, or public-root check fails.
 #!
-#! `security_descriptor` denotes the twelve output fields listed below, with `lookup_pow_bits`
+#! `security_descriptor(12)` denotes the twelve output fields listed below, with `lookup_pow_bits`
 #! at the top of the stack.
 #!
 #! Inputs:  [D]
@@ -266,5 +266,5 @@ pub proc verify_proof(deferred_root: types::Digest) -> types::StackSecurityDescr
     # --- Return result ---------------------------------------------------------------------------
 
     exec.build_security_descriptor
-    # => [security_descriptor, ...]
+    # => [security_descriptor(12), ...]
 end
