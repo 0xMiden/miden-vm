@@ -5,6 +5,7 @@
 #### Fixes
 
 - Fixed `IntValue::Felt` Display so it prints canonical hex without byte-swapping ([#3808](https://github.com/0xMiden/miden-vm/pull/3808)).
+- [BREAKING] Changed `ProverInstance::new()` to take ownership of `ProverStatement`. `ProverInstance::prove()` now consumes the instance and returns its verifier statement with the proof. The prover can now release the main traces after their final use. This reduced measured peak memory by about 7 percent ([#3833](https://github.com/0xMiden/miden-vm/pull/3833)).
 
 ## v0.33.0 (2026-09-16)
 
@@ -16,6 +17,7 @@
 - Added a MASM example that verifies a batch of MVM proofs and settles their deferred work with one PVM proof ([#3823](https://github.com/0xMiden/miden-vm/pull/3823)).
 #### Fixes
 
+- Reduced measured peak prover memory by about 7 percent by releasing main traces after their final use ([#3833](https://github.com/0xMiden/miden-vm/pull/3833)).
 - Fixed `PartialMmr::from_parts()` and deserialization so they reject tracked leaves without complete authentication paths ([#3809](https://github.com/0xMiden/miden-vm/pull/3809)).
 - Fixed exponential traversal of shared deferred-state DAGs during precompile prover session construction by caching translated nodes and counting shared claim uses ([#3798](https://github.com/0xMiden/miden-vm/pull/3798)).
 - Fixed `PartialMmr::track()` panicking when a leaf position did not belong to the tree selected by its authentication path ([#3804](https://github.com/0xMiden/miden-vm/pull/3804)).
