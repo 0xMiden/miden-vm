@@ -31,6 +31,9 @@ const LOG_HEIGHT_MAX = 29
 # Offset of K in the P | K | I | O claim encoding.
 const KERNEL_COMMITMENT_OFFSET = 4
 
+# Offset of D in the P | D boundary-input block.
+const DEFERRED_ROOT_OFFSET = 4
+
 # Domain tag for the kernel commitment: the registered selector
 # (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (0x010000 << 8) | 1, per the Miden
 # domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
@@ -309,6 +312,9 @@ end
 #! The returned deferred root is bound by the verified statement. The caller must settle it or
 #! include it in its own statement. `D == TRUE_DIGEST` means no deferred statements were logged.
 #!
+#! Verification runs in an isolated execution context, preserving caller memory and stack elements
+#! below the claim commitment.
+#!
 #! Inputs:  [CLAIM_COMMITMENT, ...]
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
 #!           max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
@@ -322,19 +328,45 @@ end
 #!
 #! Invocation: exec
 pub proc verify_proof(claim_commitment: types::Digest) -> (types::StackSecurityDescriptor, types::Digest)
+    # Reserve the callee's 16-element argument/result window above the caller's live stack.
+    padw padw padw
+    # => [pad(12), CLAIM_COMMITMENT, ...]
+    swapw.3
+    # => [CLAIM_COMMITMENT, pad(12), ...]
+
+    call.verify_proof_inner
+    # => [security_descriptor(12), D, ...]
+end
+
+#! Verifies a Miden VM execution proof against the supplied claim commitment.
+#!
+#! Inputs:  [CLAIM_COMMITMENT, pad(12)]
+#! Outputs: [security_descriptor(12), D]
+#!
+#! Invocation: call
+proc verify_proof_inner(claim_commitment: types::Digest) -> (types::StackSecurityDescriptor, types::Digest)
     # --- Authenticate execution claim -----------------------------------------------------------
 
     # Preserve the commitment until public inputs are absorbed after transcript initialization.
     exec.layout::claim_commitment_ptr mem_storew_le
+    # => [CLAIM_COMMITMENT, pad(12)]
+
     exec.layout::claim_ptr exec.claim::materialize_claim
-    # => [...]
+    # => [scratch(16)]
 
     # --- Prepare MVM verifier state --------------------------------------------------------------
 
     exec.utils::load_security_params
+    # => [scratch(16)]
+
     exec.materialize_kernel_witness
+    # => [scratch(16)]
+
     exec.public_inputs::stage_boundary_inputs
+    # => [scratch(16)]
+
     exec.load_air_context
+    # => [scratch(16)]
 
     # --- Verify ----------------------------------------------------------------------------------
 
@@ -344,17 +376,25 @@ pub proc verify_proof(claim_commitment: types::Digest) -> (types::StackSecurityD
     procref.ood_frames::process_row_ood_evaluations
     procref.public_inputs::process_public_inputs
     procref.aux_trace::observe_aux_trace
-    # => [D0, D1, D2, D3, D4]
+    # => [D0, D1, D2, D3, D4, scratch(16)]
 
     exec.verifier::verify
-    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, scratch(16)]
 
     # --- Return result ---------------------------------------------------------------------------
 
-    exec.public_inputs::load_deferred_root
-    # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
-    swapw
-    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, D, ...]
     exec.build_security_descriptor
-    # => [security_descriptor(12), D, ...]
+    # => [security_descriptor(12), scratch(16)]
+
+    # Leave one scratch word for the deferred root.
+    repeat.3
+        movupw.3
+        dropw
+    end
+    # => [security_descriptor(12), scratch(4)]
+
+    swapw.3
+    exec.layout::boundary_inputs_ptr add.DEFERRED_ROOT_OFFSET mem_loadw_le
+    swapw.3
+    # => [security_descriptor(12), D]
 end

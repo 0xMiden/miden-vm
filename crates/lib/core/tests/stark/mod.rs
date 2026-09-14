@@ -21,6 +21,7 @@ use rstest::rstest;
 mod ace_circuit;
 mod ace_read_check;
 mod batch_query_gen;
+mod isolation;
 mod pvm_aux_trace;
 mod pvm_deep_queries;
 mod pvm_ood_frames;
@@ -434,8 +435,7 @@ fn request_flow_binds_proof_to_claim() {
         intended.store.clone(),
         advice_map
     );
-    let (output, _) = ok.execute_for_output().expect("the matching proof must verify");
-    ace_read_check::cross_check_ace_circuit(&output);
+    ok.execute_for_output().expect("the matching proof must verify");
 
     // Substitution: a different claim's proof under the same key fails against the consumer's
     // claim — the advice provider cannot pass off another proof. The intended claim's own
@@ -553,7 +553,7 @@ fn run_recursive_verifier(data: &VerifierData) {
         data.advice_map.clone()
     )
     .with_trace_handler(VERIFIER_RETURN, verifier_stack.clone());
-    let (output, _host) = test.execute_for_output().expect("recursive verifier execution failed");
+    ace_read_check::execute_and_check(&test);
 
     let params = miden_air::config::pcs_params();
     let height_start = 4 + WORD_SIZE;
@@ -586,9 +586,6 @@ fn run_recursive_verifier(data: &VerifierData) {
     ];
     expected.extend_from_slice(&data.proof_stream[4..4 + WORD_SIZE]);
     verifier_stack.assert_outputs_and_caller(&expected);
-
-    // Cross-check: extract READ section, sanity-check values, evaluate circuit in Rust.
-    ace_read_check::cross_check_ace_circuit(&output);
 }
 
 /// Each of the four security parameters (num_queries, query_pow_bits, deep_pow_bits,

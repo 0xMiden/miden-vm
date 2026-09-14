@@ -115,7 +115,7 @@ fn assert_pvm_rejects_tampering(inputs: &PvmRecursiveVerifierInputs) {
     assert_pvm_rejects(&corrupt_circuit, inputs.claim_commitment());
 }
 
-fn prove_keccak_claim(input: &[u8]) -> PrecompileProof {
+pub(super) fn prove_keccak_claim(input: &[u8]) -> PrecompileProof {
     let registry =
         Arc::new(PrecompileRegistry::new().with_precompile(Keccak256Precompile::default()));
     let mut state = DeferredState::new(registry).expect("Keccak fixture registry must initialize");

@@ -55,8 +55,7 @@ end
 #! CLAIMS_COMMITMENT hashes the ordered list of claim commitments. Each claim identifies a program,
 #! kernel, inputs, and outputs. The runtime count must be even and in 2..=MAX_CLAIMS.
 #!
-#! claims_ptr must point to a word-aligned buffer with room for num_claims words. The buffer must
-#! not overlap the recursive verifiers' working memory.
+#! claims_ptr must point to a word-aligned buffer with room for num_claims words.
 #!
 #! Fails if the claim count is invalid, the claim-list hash does not match, or an MVM or PVM
 #! proof is invalid or has a conjectured security level below MIN_SECURITY_BITS.
