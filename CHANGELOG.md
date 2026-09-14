@@ -5,6 +5,9 @@
 #### Features
 
 - [BREAKING] Add a precompile prover memory budget, with a 64GiB default ([#3799](https://github.com/0xMiden/miden-vm/pull/3799)).
+#### Changes
+
+- Avoided element-wise buffer swaps during mixed-height DEEP reduction.
 
 #### Fixes
 

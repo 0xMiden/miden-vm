@@ -363,7 +363,8 @@ fn accumulate_matrices<F: Field, EF: ExtensionField<F>, M: Matrix<F>, C: AsRef<[
                 .par_chunks_mut(scaling_factor)
                 .zip(acc[..active_height].par_iter())
                 .for_each(|(chunk, &val)| chunk.fill(val));
-            acc[..height].swap_with_slice(&mut scratch[..height]);
+            // Only the active prefix is live; scratch is resized before reuse.
+            core::mem::swap(&mut acc, &mut scratch);
         }
 
         // SIMD path using horizontal packing.
@@ -427,9 +428,41 @@ mod tests {
     use alloc::vec;
 
     use p3_field::{PrimeCharacteristicRing, dot_product};
+    use p3_matrix::dense::RowMajorMatrix;
+    use rand::{RngExt, SeedableRng, distr::StandardUniform, prelude::SmallRng};
 
     use super::*;
     use crate::testing::configs::goldilocks_poseidon2::{Felt, QuadFelt};
+
+    #[test]
+    fn mixed_height_reduction_matches_explicit_lifting() {
+        let rng = &mut SmallRng::seed_from_u64(927);
+        let matrices: Vec<_> = [1, 2, 8, 8, 32]
+            .into_iter()
+            .enumerate()
+            .map(|(i, height)| RowMajorMatrix::<Felt>::rand(rng, height, 2 * i + 1))
+            .collect();
+        let coeffs: Vec<Vec<QuadFelt>> = matrices
+            .iter()
+            .map(|matrix| (0..matrix.width()).map(|_| rng.sample(StandardUniform)).collect())
+            .collect();
+        let n = matrices.last().unwrap().height();
+        let expected: Vec<QuadFelt> = (0..n)
+            .map(|row| {
+                zip(&matrices, &coeffs)
+                    .map(|(matrix, coeffs)| {
+                        let source_row = row / (n / matrix.height());
+                        dot_product(
+                            coeffs.iter().copied(),
+                            matrix.row(source_row).unwrap().into_iter(),
+                        )
+                    })
+                    .sum()
+            })
+            .collect();
+        let refs: Vec<_> = matrices.iter().collect();
+        assert_eq!(accumulate_matrices(&refs, &coeffs), expected);
+    }
 
     /// `reduce_with_powers` (Horner) must match explicit negative coeffs + dot product.
     #[test]
