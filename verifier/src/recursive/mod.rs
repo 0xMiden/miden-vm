@@ -293,7 +293,7 @@ fn build_advice(
 
     advice_stack.push(pcs.query_pow_witness);
 
-    let (store, advice_map) = build_merkle_data(config, stark, &heights.proof_order)?;
+    let (store, advice_map) = build_merkle_data(stark, &heights.proof_order)?;
 
     let advice = AdviceInputs::default()
         .with_stack(advice_stack.into())
@@ -362,12 +362,10 @@ where
 /// entries (for the advice map). The verifier fetches authentication paths with `mtree_get` and
 /// leaf data with `adv.push_mapval`.
 fn build_merkle_data(
-    config: &P2Config,
     stark: &StarkProof<Challenge, P2Lmcs>,
     proof_order: &ProofOrder,
 ) -> Result<MerkleAdvice, RecursiveVerifierInputsError> {
     let pcs = &stark.pcs_proof;
-    let lmcs = config.lmcs();
 
     let mut store = MerkleStore::new();
     let mut advice_map = Vec::new();
@@ -375,7 +373,7 @@ fn build_merkle_data(
     // DEEP openings (one BatchProof per commitment: main, aux, quotient), then FRI openings
     // (one per FRI round).
     for batch_proof in pcs.deep_witnesses.iter().chain(pcs.fri_witnesses.iter()) {
-        let (tree, entries) = batch_proof_to_merkle(lmcs, batch_proof)?;
+        let (tree, entries) = batch_proof_to_merkle::<P2Lmcs>(batch_proof)?;
         store.extend(tree.inner_nodes());
         advice_map.extend(entries);
     }
@@ -398,7 +396,6 @@ fn build_merkle_data(
 /// Converts a `BatchProof` into a `PartialMerkleTree` (for the store) and its
 /// `leaf_hash -> leaf_data` advice-map entries.
 fn batch_proof_to_merkle<L>(
-    lmcs: &L,
     batch_proof: &L::BatchProof,
 ) -> Result<(PartialMerkleTree, Vec<(Word, Vec<Felt>)>), RecursiveVerifierInputsError>
 where
@@ -421,7 +418,10 @@ where
         )?;
 
         let leaf_data: Vec<Felt> = rows.as_slice().to_vec();
-        let leaf_word: Word = Word::new(lmcs.hash(rows.iter_rows()).into());
+        let leaf_hash = *batch_proof.leaf_hash(index).ok_or(
+            RecursiveVerifierInputsError::InvalidProofShape("missing leaf hash for query index"),
+        )?;
+        let leaf_word = Word::new(leaf_hash.into());
         let merkle_path =
             MerklePath::new(siblings.into_iter().map(|c| Word::new(c.into())).collect());
 

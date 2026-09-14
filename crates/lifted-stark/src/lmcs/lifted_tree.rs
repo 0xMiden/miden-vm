@@ -2,7 +2,7 @@ use alloc::{vec, vec::Vec};
 use core::{array, mem};
 
 use miden_stark_transcript::ProverChannel;
-use miden_stateful_hasher::StatefulHasher;
+use miden_stateful_hasher::{Alignable, StatefulHasher};
 use p3_field::PackedValue;
 use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use p3_maybe_rayon::{iter, prelude::*};
@@ -10,7 +10,10 @@ use p3_symmetric::{Hash, PseudoCompressionFunction};
 use p3_util::{log2_strict_usize, reverse_bits_len};
 use tracing::info_span;
 
-use crate::lmcs::{LmcsTree, proof::LeafOpening, row_list::RowList, tree_indices::TreeIndices};
+use crate::{
+    lmcs::{LmcsTree, proof::LeafOpening, row_list::RowList, tree_indices::TreeIndices},
+    util::align::aligned_len_sum,
+};
 
 /// A uniform binary Merkle tree whose leaves are constructed from matrices with power-of-two
 /// heights.
@@ -196,7 +199,8 @@ where
     /// - Matrices are sorted by height (shortest to tallest).
     ///
     /// `alignment` controls transcript padding only; it does not affect the commitment.
-    /// LMCS does not enforce that padded columns are zero.
+    /// The hasher's own alignment determines the encoded leaf length and commitment padding. LMCS
+    /// does not enforce that transcript-padding columns are zero.
     ///
     /// Panics if `leaves` is empty.
     pub fn build_with_alignment<DomainM, PF, PD, H, C, const WIDTH: usize>(
@@ -212,6 +216,8 @@ where
         PD: PackedValue<Value = D>,
         H: StatefulHasher<F, [D; DIGEST_ELEMS], State = [D; WIDTH]>
             + StatefulHasher<PF, [PD; DIGEST_ELEMS], State = [PD; WIDTH]>
+            + Alignable<F, D>
+            + Alignable<PF, PD>
             + Sync,
         C: PseudoCompressionFunction<[D; DIGEST_ELEMS], 2>
             + PseudoCompressionFunction<[PD; DIGEST_ELEMS], 2>
@@ -219,7 +225,26 @@ where
     {
         const { assert!(PF::WIDTH == PD::WIDTH) }
         assert!(!leaves.is_empty(), "cannot commit empty batch");
-        debug_assert!(alignment > 0, "alignment must be non-zero");
+        assert_ne!(alignment, 0, "alignment must be non-zero");
+
+        let scalar_alignment = <H as Alignable<F, D>>::ALIGNMENT;
+        let packed_alignment = <H as Alignable<PF, PD>>::ALIGNMENT;
+        assert_eq!(
+            scalar_alignment, packed_alignment,
+            "scalar and packed hasher alignments must match"
+        );
+
+        // Matrix widths and salt width are shared by every leaf, so derive the initial state once.
+        let encoded_len = aligned_len_sum(
+            leaves.iter().map(Matrix::width).chain(salt.as_ref().map(Matrix::width)),
+            scalar_alignment,
+        );
+        let mut initial_state = [D::default(); WIDTH];
+        <H as StatefulHasher<F, [D; DIGEST_ELEMS]>>::initialize_state(
+            h,
+            &mut initial_state,
+            encoded_len,
+        );
 
         let leaves: Vec<M> =
             leaves.into_iter().map(BitReversibleMatrix::bit_reverse_rows).collect();
@@ -228,7 +253,11 @@ where
         let leaf_digests: Vec<[PD::Value; DIGEST_ELEMS]> =
             info_span!("hash leaves").in_scope(|| {
                 let mut leaf_states: Vec<[PD::Value; WIDTH]> =
-                    build_leaf_states_upsampled::<PF, PD, M, H, WIDTH, DIGEST_ELEMS>(&leaves, h);
+                    build_leaf_states_upsampled::<PF, PD, M, H, WIDTH, DIGEST_ELEMS>(
+                        &leaves,
+                        h,
+                        initial_state,
+                    );
 
                 // Absorb salt into states using SIMD-parallelized path (no-op when salt is None)
                 if let Some(ref salt_matrix) = salt {
@@ -365,6 +394,7 @@ where
 fn build_leaf_states_upsampled<PF, PD, M, H, const WIDTH: usize, const DIGEST_ELEMS: usize>(
     matrices: &[M],
     sponge: &H,
+    initial_state: [PD::Value; WIDTH],
 ) -> Vec<[PD::Value; WIDTH]>
 where
     PF: PackedValue,
@@ -382,9 +412,8 @@ where
     // - states: Per-leaf scalar states (one per final row), maintained across matrices.
     // - scratch_states: Temporary buffer used when duplicating states during upsampling.
     // `repeat_n` initializes these large buffers in parallel when concurrency is enabled.
-    let default_state = [PD::Value::default(); WIDTH];
     let mut states = info_span!("alloc states", final_height, width = WIDTH)
-        .in_scope(|| iter::repeat_n(default_state, final_height).collect::<Vec<_>>());
+        .in_scope(|| iter::repeat_n(initial_state, final_height).collect::<Vec<_>>());
     // Allocated lazily on first upsampling: single-matrix trees (quotient, FRI
     // rounds) never need the scratch buffer.
     let mut scratch_states: Vec<[PD::Value; WIDTH]> = Vec::new();
@@ -402,7 +431,7 @@ where
 
             if scratch_states.is_empty() {
                 scratch_states = info_span!("alloc scratch", final_height)
-                    .in_scope(|| iter::repeat_n(default_state, final_height).collect::<Vec<_>>());
+                    .in_scope(|| iter::repeat_n(initial_state, final_height).collect::<Vec<_>>());
             }
 
             // Copy `states` into `scratch_states`, repeating each entry `scaling_factor` times
@@ -558,7 +587,7 @@ mod tests {
     use crate::{
         lmcs::tests::build_leaves_single,
         testing::configs::goldilocks_poseidon2::{
-            self as gl, DIGEST, Felt, PackedFelt, RATE, Sponge,
+            self as gl, DIGEST, Felt, PackedFelt, RATE, Sponge, WIDTH,
         },
         util::align::aligned_len,
     };
@@ -637,8 +666,11 @@ mod tests {
         matrices: &[RowMajorMatrix<Felt>],
         sponge: &Sponge,
     ) -> Vec<[Felt; DIGEST]> {
-        let mut states =
-            build_leaf_states_upsampled::<PackedFelt, PackedFelt, _, _, _, _>(matrices, sponge);
+        let mut states = build_leaf_states_upsampled::<PackedFelt, PackedFelt, _, _, _, _>(
+            matrices,
+            sponge,
+            [Felt::ZERO; WIDTH],
+        );
         states.iter_mut().map(|s| sponge.squeeze(s)).collect()
     }
 
