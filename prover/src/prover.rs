@@ -19,21 +19,29 @@ use crate::{config, prove_stark};
 pub struct Prover {
     hash_fn: HashFunction,
     max_prover_memory_bytes: u64,
+    max_precompile_prover_memory_bytes: u64,
 }
 
 impl Prover {
     /// Default maximum memory, in bytes, this prover is permitted to allocate for a proof over a
     /// VM execution trace.
     ///
-    /// This bounds only the lifted-STARK Miden VM proof modelled by `miden_air::memory`; it does
-    /// not cover the precompile prover's memory footprint.
+    /// This bounds only the lifted-STARK Miden VM proof modelled by `miden_air::memory`; the
+    /// precompile prover's memory footprint is bounded separately by
+    /// [`max_precompile_prover_memory_bytes`](Self::max_precompile_prover_memory_bytes).
     pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = trace::DEFAULT_MAX_PROVER_MEMORY_BYTES;
+
+    /// Default maximum memory, in bytes, this prover is permitted to allocate for a proof over a
+    /// precompile witness.
+    pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 =
+        miden_precompiles_prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES;
 
     /// Creates a prover with the canonical proof-generation configuration.
     pub const fn new() -> Self {
         Self {
             hash_fn: HashFunction::Blake3_256,
             max_prover_memory_bytes: Self::DEFAULT_MAX_PROVER_MEMORY_BYTES,
+            max_precompile_prover_memory_bytes: Self::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
         }
     }
 
@@ -56,6 +64,23 @@ impl Prover {
     /// over a VM execution trace.
     pub const fn max_prover_memory_bytes(&self) -> u64 {
         self.max_prover_memory_bytes
+    }
+
+    /// Sets the maximum memory, in bytes, this prover is permitted to allocate for a proof over a
+    /// precompile witness.
+    #[must_use]
+    pub const fn with_max_precompile_prover_memory_bytes(
+        mut self,
+        max_precompile_prover_memory_bytes: u64,
+    ) -> Self {
+        self.max_precompile_prover_memory_bytes = max_precompile_prover_memory_bytes;
+        self
+    }
+
+    /// Returns the maximum memory, in bytes, this prover is permitted to allocate for a proof
+    /// over a precompile witness.
+    pub const fn max_precompile_prover_memory_bytes(&self) -> u64 {
+        self.max_precompile_prover_memory_bytes
     }
 
     /// Proves only the VM portion of an execution witness.
@@ -109,8 +134,12 @@ impl Prover {
         &self,
         witness: &PrecompileWitness,
     ) -> Result<PrecompileProof, ProverError> {
-        let proof = miden_precompiles_prover::prove_deferred_state(witness.state(), self.hash_fn)
-            .map_err(ProverError::PrecompileProofGeneration)?;
+        let proof = miden_precompiles_prover::prove_deferred_state_with_budget(
+            witness.state(),
+            self.hash_fn,
+            self.max_precompile_prover_memory_bytes,
+        )
+        .map_err(ProverError::PrecompileProofGeneration)?;
         Ok(PrecompileProof { proof, roots: witness.roots().to_vec() })
     }
 
@@ -317,5 +346,85 @@ mod tests {
 
         let prover = prover.with_max_prover_memory_bytes(1 << 20);
         assert_eq!(prover.max_prover_memory_bytes(), 1 << 20);
+    }
+
+    #[test]
+    fn prover_uses_canonical_precompile_memory_budget_and_allows_override() {
+        let prover = Prover::new();
+        assert_eq!(
+            prover.max_precompile_prover_memory_bytes(),
+            Prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES
+        );
+
+        let prover = prover.with_max_precompile_prover_memory_bytes(1 << 20);
+        assert_eq!(prover.max_precompile_prover_memory_bytes(), 1 << 20);
+    }
+
+    /// A minimal non-`TRUE` precompile witness: no keccak/uint/EC ops, just the fixed session
+    /// installs plus one trivial `AND` node. Its chiplet traces still have nonzero (fixed-minimum)
+    /// heights, so it is enough to exercise the memory-budget check without a full precompile
+    /// execution fixture.
+    fn trivial_precompile_witness() -> PrecompileWitness {
+        use alloc::sync::Arc;
+
+        use miden_core::deferred::{DeferredState, Node, PrecompileRegistry, TRUE_DIGEST};
+
+        let registry = Arc::new(PrecompileRegistry::new());
+        let mut state =
+            DeferredState::new(registry).expect("empty registry state should initialize");
+        let statement = state
+            .register(Node::and(TRUE_DIGEST, TRUE_DIGEST))
+            .expect("trivial AND node should register");
+        state
+            .log_statement(statement)
+            .expect("trivial statement should log into the deferred root");
+        PrecompileWitness::new(state).expect("non-TRUE root should construct a witness")
+    }
+
+    #[test]
+    fn prove_precompile_applies_the_configured_memory_budget() {
+        let witness = trivial_precompile_witness();
+
+        // A 1-byte budget must reject even the minimal chiplet trace shapes, and the returned
+        // error carries the exact modelled peak alongside the configured budget.
+        let err = Prover::new()
+            .with_max_precompile_prover_memory_bytes(1)
+            .prove_precompile(&witness)
+            .expect_err("a 1-byte budget must reject even the minimal chiplet trace shapes");
+        let ProverError::PrecompileProofGeneration(
+            miden_precompiles_prover::ProveDeferredStateError::MemoryBudgetExceeded {
+                estimated_bytes,
+                budget_bytes: 1,
+            },
+        ) = err
+        else {
+            panic!("expected MemoryBudgetExceeded {{ budget_bytes: 1, .. }}, got: {err:?}");
+        };
+
+        // A budget equal to the exact modelled peak succeeds.
+        Prover::new()
+            .with_max_precompile_prover_memory_bytes(estimated_bytes)
+            .prove_precompile(&witness)
+            .expect("a budget equal to the exact modelled peak must succeed");
+
+        // A budget one byte under the exact modelled peak fails with the same typed error.
+        let err = Prover::new()
+            .with_max_precompile_prover_memory_bytes(estimated_bytes - 1)
+            .prove_precompile(&witness)
+            .expect_err("a budget one byte under the exact modelled peak must fail");
+        assert!(
+            matches!(
+                err,
+                ProverError::PrecompileProofGeneration(
+                    miden_precompiles_prover::ProveDeferredStateError::MemoryBudgetExceeded {
+                        estimated_bytes: e,
+                        budget_bytes: b,
+                    }
+                ) if e == estimated_bytes && b == estimated_bytes - 1
+            ),
+            "expected MemoryBudgetExceeded {{ estimated_bytes: {estimated_bytes}, budget_bytes: {} }}, \
+             got: {err:?}",
+            estimated_bytes - 1
+        );
     }
 }

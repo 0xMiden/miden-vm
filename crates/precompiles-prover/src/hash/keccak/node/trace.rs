@@ -111,8 +111,9 @@ impl KeccakNodeInvocation {
 /// the design notes), so padding rows (`out_mult = 0`) touch
 /// no bus.
 pub fn generate_trace(requires: KeccakNodeRequires) -> RowMajorMatrix<Felt> {
-    let active_rows = requires.total_rows() as usize;
-    let height = active_rows.next_power_of_two().max(2);
+    let height = requires
+        .trace_height()
+        .expect("keccak-node trace height exceeds the host power-of-two range");
     let mut trace = Vec::with_capacity(height * NUM_MAIN_COLS);
 
     for rec in &requires.records {
@@ -217,6 +218,12 @@ pub struct KeccakNodeRequires {
 impl KeccakNodeRequires {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn trace_height(&self) -> Option<usize> {
+        (self.total_rows() as usize)
+            .checked_next_power_of_two()
+            .map(|height| height.max(2))
     }
 
     /// Register a Keccak invocation. Empty input is supported: it absorbs
