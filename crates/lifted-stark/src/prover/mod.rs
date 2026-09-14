@@ -414,12 +414,8 @@ where
         }
     }
 
-    // All caller-input validation has passed and auxiliary construction was the
-    // last consumer of the main traces. Consume them from the instance and
-    // release their memory before the expensive quotient/opening phases. This
-    // is the one-shot point: every `ProverError` path above ran while the
-    // instance still owned its traces, so only a validation-passing attempt
-    // burns the instance.
+    // Auxiliary trace construction is the last use of the main traces. Release
+    // them before the quotient and opening phases.
     let traces = instance
         .traces
         .take()
@@ -615,7 +611,7 @@ where
 pub enum ProverError {
     /// The instance's main traces were already consumed by a previous
     /// [`ProverInstance::prove`](crate::ProverInstance::prove) attempt that
-    /// passed all input validation; each instance produces exactly one proof.
+    /// passed all input validation; each instance produces at most one proof.
     #[error("a ProverInstance can only produce one proof")]
     AlreadyProven,
     #[error(transparent)]
