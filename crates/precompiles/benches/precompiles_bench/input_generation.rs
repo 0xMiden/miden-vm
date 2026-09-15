@@ -2,17 +2,21 @@ use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceStack},
 };
-use miden_core_lib::dsa::ecdsa_k256_keccak;
-use miden_crypto::dsa::ecdsa_k256_keccak::SigningKey;
+use miden_core_lib::dsa::{ecdsa_k256_keccak, eddsa_25519_sha512};
+use miden_crypto::dsa::{
+    ecdsa_k256_keccak::SigningKey, eddsa_25519_sha512::SigningKey as Ed25519Key,
+};
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
 pub const DEFAULT_KECCAKS: usize = 100;
 pub const DEFAULT_ECDSAS: usize = 4;
+pub const DEFAULT_EDDSAS: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrecompileWorkload {
     pub keccaks: usize,
     pub ecdsas: usize,
+    pub eddsas: usize,
 }
 
 impl Default for PrecompileWorkload {
@@ -20,6 +24,7 @@ impl Default for PrecompileWorkload {
         Self {
             keccaks: DEFAULT_KECCAKS,
             ecdsas: DEFAULT_ECDSAS,
+            eddsas: DEFAULT_EDDSAS,
         }
     }
 }
@@ -31,7 +36,7 @@ pub(crate) fn generate_advice_inputs(workload: PrecompileWorkload) -> AdviceInpu
     for i in 0..workload.ecdsas {
         let sk = SigningKey::with_rng(&mut rng);
         let pk = sk.public_key();
-        let message = ecdsa_message(i as u64);
+        let message = signature_message(i as u64);
         let signature = sk.sign(message);
         assert!(
             pk.verify(message, &signature),
@@ -43,18 +48,34 @@ pub(crate) fn generate_advice_inputs(workload: PrecompileWorkload) -> AdviceInpu
         advice_stack.append_for_adv_pipe(&ecdsa_k256_keccak::encode_signature(&pk, &signature));
     }
 
-    // The message and public-key commitment words, plus `encode_signature`'s output (32 felts of
-    // PK/SIG, already a multiple of 8 -- no padding needed).
+    for i in 0..workload.eddsas {
+        let sk = Ed25519Key::with_rng(&mut rng);
+        let pk = sk.public_key();
+        let message = signature_message(i as u64);
+        let signature = sk.sign(message);
+        assert!(
+            pk.verify(message, &signature),
+            "generated Ed25519 fixture must verify before passing it to MASM",
+        );
+
+        advice_stack.append_word(message);
+        advice_stack.append_word(eddsa_25519_sha512::public_key_commitment(&pk));
+        advice_stack.append_for_adv_pipe(&eddsa_25519_sha512::encode_signature(&pk, &signature));
+    }
+
+    // Each fixture contains message/commitment words followed by the scheme's native PK/SIG
+    // witness. Both witness lengths are multiples of 8, so adv_pipe requires no padding.
     let felts_per_ecdsa = 8 + 32;
+    let felts_per_eddsa = 8 + 24;
     assert_eq!(
         advice_stack.len(),
-        workload.ecdsas * felts_per_ecdsa,
-        "unexpected ECDSA advice length",
+        workload.ecdsas * felts_per_ecdsa + workload.eddsas * felts_per_eddsa,
+        "unexpected signature advice length",
     );
     AdviceInputs::default().with_stack(advice_stack)
 }
 
-fn ecdsa_message(index: u64) -> Word {
+fn signature_message(index: u64) -> Word {
     Word::new([
         Felt::new_unchecked(0x0001_0203_0405_0607 + index),
         Felt::new_unchecked(0x0809_0a0b_0c0d_0e0f + index * 3),

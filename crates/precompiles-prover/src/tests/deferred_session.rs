@@ -1,7 +1,11 @@
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_core::deferred::{DeferredState, Node, TRUE_DIGEST};
-use miden_precompiles::{CurveId, CurvePoint, CurvePrecompile, UintDomain, UintPrecompile};
+use miden_crypto::hash::{keccak::Keccak256, sha2::Sha512};
+use miden_precompiles::{
+    CurveId, CurvePoint, CurvePrecompile, Keccak256Precompile, Sha512Precompile, UintDomain,
+    UintPrecompile,
+};
 
 use crate::{
     deferred::{DeferredSession, session_from_deferred_state},
@@ -17,6 +21,35 @@ fn limbs(value: u32) -> [u32; 8] {
     let mut limbs = [0; 8];
     limbs[0] = value;
     limbs
+}
+
+#[test]
+fn deferred_session_binds_full_sha512_digests_in_a_mixed_hash_session() {
+    let mut state = state();
+    // [1] and [1,0] share raw zero-padded CHUNKS but have different lengths/digests. Repeating
+    // [1] exercises multiplicities, and 112 bytes requires a second SHA padding block.
+    for input in [vec![1], vec![1, 0], vec![1], vec![0xa5; 112]] {
+        let preimage = state.register(Node::chunks_from_bytes(&input)).unwrap();
+        let expected = state
+            .register(Node::chunks_from_bytes(Sha512::hash(&input).as_bytes()))
+            .unwrap();
+        let assertion = state
+            .register(Sha512Precompile::assert_node(input.len() as u32, preimage, expected))
+            .unwrap();
+        state.log_statement(assertion).unwrap();
+    }
+    // Keccak must remain able to reuse the raw Eidos span without sharing SHA's block IDs.
+    let preimage = state.register(Node::chunks_from_bytes(&[1])).unwrap();
+    let expected = state
+        .register(Node::chunks_from_bytes(Keccak256::hash(&[1]).as_bytes()))
+        .unwrap();
+    let assertion =
+        state.register(Keccak256Precompile::assert_node(1, preimage, expected)).unwrap();
+    state.log_statement(assertion).unwrap();
+
+    let DeferredSession { session, root } = session_from_deferred_state(&state)
+        .expect("SHA-512 assertions must lower with their exact 64-byte expected digest");
+    session.finish(root).check();
 }
 
 #[test]
@@ -136,6 +169,54 @@ fn register_affine_curve_value(
     let point = CurvePrecompile::affine_node_from_digests(curve, x.digest(), y.digest());
     state.register(point.clone()).expect("point must register");
     point
+}
+
+#[test]
+fn deferred_session_proves_ed25519_msm_with_mixed_torsion() {
+    let mut state = state();
+    let curve = CurveId::Ed25519;
+    // (486662/3, 0) is the short-Weierstrass image of the order-two point. The
+    // prime subgroup order l must preserve it: [l](B+T)=T, rather than the identity.
+    let torsion = curve
+        .point_from_affine(
+            to_limbs32(from_hex(
+                "2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaad2451",
+            )),
+            limbs(0),
+        )
+        .unwrap();
+    let mixed = curve.add(curve.generator(), torsion).unwrap();
+    let mixed = register_affine_curve_value(&mut state, curve, mixed);
+    let torsion = register_affine_curve_value(&mut state, curve, torsion);
+    let subgroup_order = UintPrecompile::value_node(
+        UintDomain::Ed25519Order,
+        to_limbs32(from_hex("1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3ed")),
+    );
+    state.register(subgroup_order.clone()).unwrap();
+    let msm = curve_msm_node(vec![(mixed.clone(), subgroup_order)]);
+    state.register(msm.clone()).unwrap();
+    register_curve_equality(&mut state, msm, torsion);
+
+    // [8l-1]P+P=0 also exercises scalar reduction modulo the full order and the
+    // group-law exceptional cases reached by a mixed-torsion MSM ladder.
+    let order_minus_one = UintPrecompile::value_node(
+        UintDomain::Ed25519Order,
+        to_limbs32(from_hex("80000000000000000000000000000000a6f7cef517bce6b2c09318d2e7ae9f67")),
+    );
+    state.register(order_minus_one.clone()).unwrap();
+    let negative = curve_msm_node(vec![(mixed.clone(), order_minus_one)]);
+    state.register(negative.clone()).unwrap();
+    let sum = Node::join(
+        CurvePrecompile::op_frame(CurvePrecompile::ADD_OP_ID),
+        negative.digest(),
+        mixed.digest(),
+    )
+    .unwrap();
+    register_curve_equality(&mut state, sum, CurvePrecompile::identity_node(curve));
+
+    let DeferredSession { session, root } = session_from_deferred_state(&state)
+        .expect("Ed25519 MSMs must lower under the full group order");
+    session.finish(root).check();
 }
 
 #[test]

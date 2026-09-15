@@ -4,6 +4,7 @@
 
 #### Features
 
+- [BREAKING] Added proven SHA-512 hashing and Ed25519 signature verification to the precompile VM and core library. SHA-512 has an independent AIR with short periodic tables; the updated PVM relation and recursive verifier require new precompile proofs ([#3747](https://github.com/0xMiden/miden-vm/issues/3747)).
 - [BREAKING] Added Eidos hashing with typed domain separation, including Eidos-backed IES, a counter-mode random coin, and length-bound LMCS implementations, native SIMD acceleration, and batched proof-of-work grinding; existing Poseidon2 variants remain available.
 
 #### Fixes

@@ -8,8 +8,8 @@ use miden_vm::HashFunction;
 mod support;
 
 use support::{
-    DEFAULT_ECDSAS, DEFAULT_KECCAKS, PrecompileFixture, PrecompileWorkload, prove_once_with_hash,
-    verify_once,
+    DEFAULT_ECDSAS, DEFAULT_EDDSAS, DEFAULT_KECCAKS, PrecompileFixture, PrecompileWorkload,
+    prove_once_with_hash, verify_once,
 };
 
 const PROOF_HASHES: [(&str, HashFunction); 3] = [
@@ -37,12 +37,13 @@ fn precompiles_bench(c: &mut Criterion) {
     let workload = PrecompileWorkload {
         keccaks: env_usize("PRECOMPILE_BENCH_KECCAKS", DEFAULT_KECCAKS),
         ecdsas: env_usize("PRECOMPILE_BENCH_ECDSAS", DEFAULT_ECDSAS),
+        eddsas: env_usize("PRECOMPILE_BENCH_EDDSAS", DEFAULT_EDDSAS),
     };
     let fixture = PrecompileFixture::generate(workload);
 
     let mut group = c.benchmark_group(format!(
-        "precompiles/ecdsa{}_keccak{}",
-        workload.ecdsas, workload.keccaks,
+        "precompiles/ecdsa{}_eddsa{}_keccak{}",
+        workload.ecdsas, workload.eddsas, workload.keccaks,
     ));
     group.sample_size(sample_size);
     group.measurement_time(Duration::from_secs(env_u64("PRECOMPILE_BENCH_MEASUREMENT_SECS", 60)));

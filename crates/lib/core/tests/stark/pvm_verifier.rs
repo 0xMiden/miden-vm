@@ -11,7 +11,7 @@ use miden_core::{
     proof::{HashFunction, PrecompileProof, StarkProof},
 };
 use miden_core_lib::CoreLibrary;
-use miden_precompiles::Keccak256Precompile;
+use miden_precompiles::{Keccak256Precompile, Sha512Precompile};
 use miden_precompiles_prover::prove_deferred_state;
 use miden_precompiles_verifier::masm_verifier::{
     PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
@@ -20,6 +20,72 @@ use miden_processor::ExecutionOutput;
 use miden_utils_testing::recursive_verifier::VerifierData;
 
 use super::{EXAMPLE_FIB_SMALL, fib_stack_inputs, generate_recursive_verifier_data};
+
+const VERIFY_SOURCE: &str = "
+    use miden::core::sys
+    use miden::core::sys::pvm
+    begin
+        dupw
+        procref.pvm::verify_proof
+        exec.sys::build_proof_request_key
+        adv.push_mapval dropw
+        exec.pvm::verify_proof
+        exec.sys::truncate_stack
+    end
+";
+
+#[test]
+fn pvm_keccak_only_recursive_verifier_cost_is_bounded() {
+    let proof = prove_keccak_claim(&[0x61; 32]);
+    let inputs = PvmRecursiveVerifierInputs::for_request(pvm_verify_proof_root(), &proof)
+        .expect("host adapter must parse the proof");
+    let initial_stack: [u64; 4] = inputs.claim_commitment().into();
+    let mut test = build_test!(VERIFY_SOURCE, initial_stack);
+    test.advice_inputs = inputs.advice().clone();
+    let trace = test.execute().expect("Keccak-only PVM proof must verify");
+    let summary = trace.trace_len_summary();
+    eprintln!("Keccak-only PVM recursive trace: {summary:?}");
+    assert!(
+        summary.padded_trace_len() <= 1 << 18,
+        "SHA-512's fixed program must not force Keccak-only recursion back to 2^19 rows"
+    );
+}
+
+#[test]
+fn pvm_verifies_sha512_and_mixed_hash_claims() {
+    use miden_crypto::hash::sha2::Sha512;
+
+    for mixed in [false, true] {
+        let mut state = DeferredState::new(Arc::new(miden_precompiles::registry())).unwrap();
+        // 112 bytes requires two SHA-512 padding blocks; Keccak still needs only one.
+        let input = [0xa5; 112];
+        let preimage = state.register(Node::chunks_from_bytes(&input)).unwrap();
+        let expected = state
+            .register(Node::chunks_from_bytes(Sha512::hash(&input).as_bytes()))
+            .unwrap();
+        let assertion =
+            state.register(Sha512Precompile::assert_node(112, preimage, expected)).unwrap();
+        state.log_statement(assertion).unwrap();
+        if mixed {
+            let expected = state
+                .register(Node::chunks_from_bytes(Keccak256::hash(&input).as_bytes()))
+                .unwrap();
+            let assertion = state
+                .register(Keccak256Precompile::assert_node(112, preimage, expected))
+                .unwrap();
+            state.log_statement(assertion).unwrap();
+        }
+        let proof = PrecompileProof {
+            proof: prove_deferred_state(&state, HashFunction::Eidos).unwrap(),
+            roots: vec![state.root()],
+        };
+        let inputs =
+            PvmRecursiveVerifierInputs::for_request(pvm_verify_proof_root(), &proof).unwrap();
+        let output = run_pvm_verifier(&inputs)
+            .expect("SHA-512 and Keccak must compose in the recursive verifier");
+        assert_pvm_security_params(&inputs, &output);
+    }
+}
 
 #[test]
 fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
@@ -75,12 +141,12 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
         "the proof must not authenticate a different deferred root",
     );
 
-    // The ten heights are the sole carrier of proof order into the OOD scatter table, the sigma
+    // The eleven heights are the sole carrier of proof order into the OOD scatter table, the sigma
     // scatter, and fold staging. Chiplet 3's height is verifier-fixed (its stream slot must equal
     // a constant, so forging it fails a shape check rather than exercising order binding); every
     // other chiplet's height is advice-supplied and must be transcript-bound.
     const SECURITY_PARAM_COUNT: usize = 4;
-    const NUM_CHIPLETS: usize = 10;
+    const NUM_CHIPLETS: usize = 11;
     const FIXED_CHIPLET: usize = 3;
 
     let honest_order = pvm_proof_order(&short);
@@ -194,20 +260,8 @@ fn run_pvm_verifier_with_advice(
         advice.map().contains_key(&request_key),
         "test advice must contain the proof stream for the supplied claim"
     );
-    let source = "
-        use miden::core::sys
-        use miden::core::sys::pvm
-        begin
-            dupw
-            procref.pvm::verify_proof
-            exec.sys::build_proof_request_key
-            adv.push_mapval dropw
-            exec.pvm::verify_proof
-            exec.sys::truncate_stack
-        end
-    ";
     let initial_stack: [u64; 4] = claim_commitment.into();
-    let mut test = build_test!(source, initial_stack);
+    let mut test = build_test!(VERIFY_SOURCE, initial_stack);
     test.advice_inputs = advice.clone();
     test.execute_for_output().map(|(output, _)| output)
 }
@@ -216,7 +270,7 @@ fn assert_pvm_security_params(inputs: &PvmRecursiveVerifierInputs, output: &Exec
     use miden_precompiles_air::security;
 
     const SECURITY_PARAM_COUNT: usize = 4;
-    const NUM_CHIPLETS: usize = 10;
+    const NUM_CHIPLETS: usize = 11;
 
     let stream = proof_stream(inputs);
     let log_max_height = stream[SECURITY_PARAM_COUNT..SECURITY_PARAM_COUNT + NUM_CHIPLETS]
@@ -252,7 +306,7 @@ fn assert_pvm_security_params(inputs: &PvmRecursiveVerifierInputs, output: &Exec
 /// ties.
 fn pvm_proof_order(inputs: &PvmRecursiveVerifierInputs) -> Vec<usize> {
     const SECURITY_PARAM_COUNT: usize = 4;
-    const NUM_CHIPLETS: usize = 10;
+    const NUM_CHIPLETS: usize = 11;
 
     let heights = &proof_stream(inputs)[SECURITY_PARAM_COUNT..SECURITY_PARAM_COUNT + NUM_CHIPLETS];
     let mut proof_order: Vec<usize> = (0..NUM_CHIPLETS).collect();

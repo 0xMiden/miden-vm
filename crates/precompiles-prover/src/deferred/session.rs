@@ -9,8 +9,8 @@ use miden_core::{
 };
 use miden_crypto::hash::eidos::EidosDomain;
 use miden_precompiles::{
-    CurveId, CurveNodeRef, CurvePrecompile, HashAssertNode, Keccak256Precompile, UintDomain,
-    UintNodeRef, UintPrecompile, chunks_to_bytes_exact, n_chunks,
+    CurveId, CurveNodeRef, CurvePrecompile, HashAssertNode, Keccak256Precompile, Sha512Precompile,
+    UintDomain, UintNodeRef, UintPrecompile, chunks_to_bytes_exact, n_chunks,
 };
 
 use crate::{
@@ -177,13 +177,18 @@ impl<'a> DeferredSessionBuilder<'a> {
         Ok(values.pop().expect("value stack empty after traversal"))
     }
 
-    /// Translates a non-AND truthy leaf node (keccak assertion, uint equality, or curve
+    /// Translates a non-AND truthy leaf node (hash assertion, uint equality, or curve
     /// equality).
     fn translate_truthy_leaf(&mut self, digest: Digest) -> Result<Truthy, DeferredSessionError> {
         if let Some(assertion) = Keccak256Precompile::decode_assert_node(self.node(digest)?)
             .map_err(|_| DeferredSessionError::MalformedNode(digest))?
         {
             return self.translate_keccak_assertion(digest, assertion);
+        }
+        if let Some(assertion) = Sha512Precompile::decode_assert_node(self.node(digest)?)
+            .map_err(|_| DeferredSessionError::MalformedNode(digest))?
+        {
+            return self.translate_sha512_assertion(digest, assertion);
         }
 
         match UintPrecompile::decode_node(self.node(digest)?)
@@ -443,6 +448,29 @@ impl<'a> DeferredSessionBuilder<'a> {
         let actual = actual.to_u32s().into_iter().flat_map(u32::to_le_bytes).collect::<Vec<_>>();
         debug_assert_eq!(expected, actual);
         debug_assert_eq!(claim.hash(), EidosDigest::from(digest));
+        Ok(claim)
+    }
+
+    fn translate_sha512_assertion(
+        &mut self,
+        digest: Digest,
+        assertion: HashAssertNode,
+    ) -> Result<Truthy, DeferredSessionError> {
+        let n_bytes = usize::try_from(assertion.n_bytes)
+            .map_err(|_| DeferredSessionError::MalformedNode(digest))?;
+        let input = self.decode_chunks_to_bytes(digest, assertion.preimage_digest, n_bytes)?;
+        let expected = self.decode_chunks_to_bytes(
+            digest,
+            assertion.expected_digest,
+            Sha512Precompile::DIGEST_BYTES,
+        )?;
+        let (actual, claim) = self.session.sha512(&input);
+        if expected != actual || claim.hash() != EidosDigest::from(digest) {
+            return Err(DeferredSessionError::RootMismatch {
+                expected: EidosDigest::from(digest),
+                actual: claim.hash(),
+            });
+        }
         Ok(claim)
     }
 

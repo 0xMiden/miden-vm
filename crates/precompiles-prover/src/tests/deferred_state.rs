@@ -467,7 +467,7 @@ fn prove_deferred_state_round_trips_for_every_hash_function() {
     }
 }
 
-/// Reconstruct the full ten-chiplet LogUp balance, including verifier-side fixed-boundary
+/// Reconstruct the full eleven-chiplet LogUp balance, including verifier-side fixed-boundary
 /// consumes. This checks the generated traces against each AIR's lookup evaluator;
 /// relation-level tests cover the external balance assertion separately.
 fn assert_session_balanced(traces: &SessionTraces, rng: &mut impl Rng) {

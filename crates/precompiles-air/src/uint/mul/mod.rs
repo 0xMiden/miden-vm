@@ -91,6 +91,7 @@ use miden_core::{
 };
 use miden_crypto::stark::air::ExtensionBuilder;
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_utils_sync::LazyLock;
 
 use crate::{
     logup::{
@@ -339,6 +340,17 @@ pub const GAMMA_OFFSET: u32 = 1 << 31;
 #[derive(Debug, Default, Clone, Copy)]
 pub struct UintMulAir;
 
+static PERIODIC_COLUMNS: LazyLock<Vec<Vec<Felt>>> = LazyLock::new(|| {
+    (0..PERIOD)
+        .map(|row| {
+            let mut col = vec![Felt::ZERO; PERIOD];
+            col[row] = Felt::ONE;
+            col
+        })
+        .chain(core::iter::once(S_KEEP.iter().map(|&g| Felt::from(g as u32)).collect()))
+        .collect()
+});
+
 impl BaseAir<Felt> for UintMulAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
@@ -349,21 +361,15 @@ impl BaseAir<Felt> for UintMulAir {
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        // One one-hot per row role, then the S-keep gate.
-        Cow::Owned(
-            (0..PERIOD)
-                .map(|row| {
-                    let mut col = vec![Felt::ZERO; PERIOD];
-                    col[row] = Felt::ONE;
-                    col
-                })
-                .chain(core::iter::once(S_KEEP.iter().map(|&g| Felt::from(g as u32)).collect()))
-                .collect(),
-        )
+        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
     }
 }
 
 impl LiftedAir<Felt, QuadFelt> for UintMulAir {
+    fn max_periodic_length(&self) -> usize {
+        PERIOD
+    }
+
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }

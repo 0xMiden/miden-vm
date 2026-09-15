@@ -20,6 +20,35 @@ The module exposes the following procedures:
 | --------- | ----------- |
 | `verify` | Verifies a signature against a public key and a message. The procedure gets the hash of the public key and the hash of the message via the operand stack. The signature is expected to be provided via the advice provider.<br /><br />The signature is valid if and only if the procedure returns.<br /><br />Stack inputs: `[PK, MSG, ...]`<br />Advice stack inputs: `[SIGNATURE]`<br />Outputs: `[...]`<br /><br />Where `PK` is the hash of the public key and `MSG` is the hash of the message, and `SIGNATURE` is the signature being verified. Both hashes are expected to be computed using Eidos. |
 
+## Ed25519 SHA512
+
+Module `miden::core::crypto::dsa::eddsa_25519_sha512` verifies ordinary Ed25519 signatures. It proves
+`SHA-512(R || A || M)` and the exact signature equation, including canonical point encodings,
+`s < l`, and rejection of small-order public keys and signature points. It does not implement
+Ed25519ph or Ed25519ctx.
+
+| Procedure | Stack inputs | Description |
+|-----------|--------------|-------------|
+| `verify` | `[PK_COMM, MSG_WORD, ...]` | Verifies the 32 little-endian bytes of `MSG_WORD`. |
+| `verify_bytes` | `[PK_COMM, MSG_PTR, MSG_LEN_BYTES, SCRATCH_PTR, ...]` | Verifies an arbitrary-length message in memory, using caller-provided scratch. |
+
+Both procedures consume advice `[A[8] || R[8] || S[8]]`, with each element containing four bytes of
+the RFC 8032 encoding as a little-endian `u32`. `PK_COMM` is the Eidos commitment to the eight
+compressed-public-key limbs, matching `miden-crypto::PublicKey::to_commitment`. Helpers in
+`miden-core-lib::dsa::eddsa_25519_sha512` construct the commitment and advice. The signature is an
+uncommitted witness; callers needing to bind a particular signature must commit to its encoding.
+Successful verification consumes the inputs and pushes no result; invalid input traps.
+
+The MASM verifier has a stricter acceptance policy than `miden-crypto::PublicKey::verify`: it
+rejects noncanonical point encodings and small-order `A` or `R`, while that API uses dalek's
+non-strict verification. A signature accepted off-chain by the latter may therefore trap in MASM.
+
+For `verify_bytes`, both pointers must be word-aligned. Pack message bytes four per felt as
+little-endian `u32` values, with zero unused bytes and felts through the final 32-byte chunk. Scratch
+requires `16 + 8*max(1,ceil(MSG_LEN_BYTES/32))` felts and is overwritten. The complete padded message
+and scratch ranges must be disjoint and lie below the verifier's local frame; parent-frame locals
+are supported. `MSG_LEN_BYTES + 64` must fit the configured `max_hash_len_bytes` execution limit.
+
 ## ECDSA secp256k1 Keccak256
 
 Module `miden::core::crypto::dsa::ecdsa_k256_keccak` verifies secp256k1 ECDSA relations for messages hashed with Keccak256. Its `verify` procedures consume an uncommitted signature witness from advice. Its `recover` procedures instead bind a memory-backed native EVM recovery witness and return the recovered affine public key. All procedures intentionally accept high-s signatures.

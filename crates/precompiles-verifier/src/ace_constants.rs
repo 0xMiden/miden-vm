@@ -22,32 +22,35 @@ pub(crate) const GENERATED_BY: &str = "cargo run -p miden-precompiles-verifier -
 /// `ChipletMultiAir::eval_external`. Changes to those semantics require a protocol-version bump.
 /// The Miden VM and PVM use distinct protocol versions.
 #[cfg(any(test, feature = "constants-tools"))]
-pub(crate) const PVM_PROTOCOL_ID: u64 = 2;
+pub(crate) const PVM_PROTOCOL_ID: u64 = 3;
 
 /// Relation digest binding the accepted circuit into the Fiat-Shamir transcript
 /// (raw canonical u64 limbs): `Eidos(PVM_PROTOCOL_ID || PVM_ACE_CIRCUIT_DIGEST)`.
 #[cfg(any(test, feature = "constants-tools", feature = "std"))]
+#[rustfmt::skip]
 pub const PVM_RELATION_DIGEST: [u64; 4] = [
-    4446998535751267906,
-    846455477672247373,
-    7053340542946749351,
-    5541321162928849377,
+    5068506138349158236,
+    3096859863508403779,
+    8056360380802670828,
+    8834268846199267217,
 ];
 
 /// Eidos digest of the order-invariant PVM ACE circuit's instruction stream (raw canonical u64
 /// limbs).
 #[cfg(any(test, feature = "constants-tools"))]
+#[rustfmt::skip]
 pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [
-    3274689563102992995,
-    6567210677493607157,
-    6079462231756854207,
-    1589912216956176661,
+    91506530112370334,
+    1561278345149339342,
+    6337628469977529531,
+    91833348568504772,
 ];
 
 /// Commitment to the preprocessed (setup) trace tree under the Eidos config (raw canonical
 /// u64 limbs). A trusted verifier input, not proof data: an in-VM verifier cannot rebuild the
 /// bundle, so it observes this pinned value into the transcript.
 #[cfg(any(test, feature = "constants-tools"))]
+#[rustfmt::skip]
 pub const PVM_PREPROCESSED_COMMITMENT: [u64; 4] = [
     7435130241103350969,
     2209492810180294937,
@@ -58,7 +61,7 @@ pub const PVM_PREPROCESSED_COMMITMENT: [u64; 4] = [
 /// Encoded circuit shape: (READ variables, evaluation gates, stream length in felts). An in-VM
 /// verifier needs these as compile-time constants to size its reads and its ACE evaluation.
 #[cfg(any(test, feature = "constants-tools"))]
-pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (3188, 10056, 13088);
+pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (4838, 15012, 20920);
 
 /// Computes the relation digest binding an ACE circuit commitment into the Fiat-Shamir transcript.
 #[cfg(any(test, feature = "constants-tools"))]

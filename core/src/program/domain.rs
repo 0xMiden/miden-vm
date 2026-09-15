@@ -98,6 +98,13 @@ miden_crypto::eidos_domain_registry! {
                 description: "Falcon512-Eidos polynomial product-check transcript.",
                 schema: "param0 = 1544; param1 = 0; param2 = 0; payload = public-key commitment || zero word || 512 s2 coefficients || 1024 product coefficients",
             }
+            pub SHA512_PRECOMPILE: Sha512PrecompileDomain {
+                local_id: 0x000b,
+                version: DomainVersion::numbered(1),
+                encoding: Custom,
+                description: "SHA-512 deferred precompile nodes.",
+                schema: "param0 = operation; param1 = preimage length in bytes; param2 = 0; ASSERT payload = exactly one block containing preimage digest || expected digest",
+            }
         }
     }
 }
@@ -110,6 +117,7 @@ pub const fn domain_tag<D: EidosDomain>(_: D) -> Felt {
 /// Returns whether `tag` is assigned to a deferred precompile in the VM registry.
 pub(crate) fn is_vm_precompile_domain(tag: DomainTag) -> bool {
     tag == Keccak256PrecompileDomain::TAG
+        || tag == Sha512PrecompileDomain::TAG
         || tag == Uint256PrecompileDomain::TAG
         || tag == CurvePrecompileDomain::TAG
 }
