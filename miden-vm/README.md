@@ -18,11 +18,11 @@ their choice. However, compilers to help with this have not been developed yet. 
 primary way to write programs for Miden VM is to use
 [Miden assembly](../crates/assembly/).
 
-Miden assembler compiles assembly source code in a [program MAST](https://docs.miden.xyz/miden-vm/design/programs), which is represented by a `Program` struct. It is possible to construct a `Program` struct manually, but we don't recommend this approach because it is tedious, error-prone, and requires an in-depth understanding of VM internals. All examples throughout these docs use assembly syntax.
+Miden assembler compiles assembly source code in a [program MAST](https://docs.miden.xyz/miden-vm/design/programs/), which is represented by a `Program` struct. It is possible to construct a `Program` struct manually, but we don't recommend this approach because it is tedious, error-prone, and requires an in-depth understanding of VM internals. All examples throughout these docs use assembly syntax.
 
 #### Program hash
 
-All Miden programs can be reduced to a single 32-byte value, called program hash. Once a `Program` object is constructed, you can access this hash via `Program::hash()` method. This hash value is used by a verifier when they verify program execution. This ensures that the verifier verifies execution of a specific program (e.g. a program which the prover had committed to previously). The methodology for computing program hash is described [here](https://docs.miden.xyz/miden-vm/design/programs#program-hash-computation).
+All Miden programs can be reduced to a single 32-byte value, called program hash. Once a `Program` object is constructed, you can access this hash via `Program::hash()` method. This hash value is used by a verifier when they verify program execution. This ensures that the verifier verifies execution of a specific program (e.g. a program which the prover had committed to previously). The methodology for computing program hash is described [here](https://docs.miden.xyz/miden-vm/design/programs/#program-hash-computation).
 
 ### Inputs / outputs
 
@@ -296,7 +296,7 @@ If you want to execute, prove, and verify programs on Miden VM, but don't want t
 
 ### Compiling Miden VM
 
-First, make sure you have Rust [installed](https://www.rust-lang.org/tools/install). The current version of Miden VM requires Rust version **1.96** or later.
+First, make sure you have Rust [installed](https://rust-lang.org/tools/install/). The current version of Miden VM requires Rust version **1.96** or later.
 
 Then, to compile Miden VM into a binary, run the following `make` command:
 
@@ -387,4 +387,4 @@ When compiled with `concurrent` feature enabled, the VM will generate STARK proo
 Internally, we use [rayon](https://github.com/rayon-rs/rayon) for parallel computations. To control the number of threads used to generate a STARK proof, you can use `RAYON_NUM_THREADS` environment variable.
 
 ## License
-This project is dual-licensed under the [MIT](http://opensource.org/licenses/MIT) and [Apache 2.0](https://opensource.org/license/apache-2-0) licenses.
+This project is dual-licensed under the [MIT](https://opensource.org/license/MIT) and [Apache 2.0](https://opensource.org/license/apache-2.0) licenses.
