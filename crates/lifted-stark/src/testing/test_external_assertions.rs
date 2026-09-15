@@ -158,12 +158,12 @@ fn external_assertion_holds() {
     let trace = generate_pow4_trace(start, 8);
     let prover_statement = external_prover_statement(input, trace, vec![start], vec![input]);
 
-    let output = ProverInstance::new(&config, &prover_statement, None)
-        .expect("no preprocessed columns")
-        .prove(test_challenger())
-        .expect("proving should succeed");
+    let prover_instance =
+        ProverInstance::new(&config, prover_statement, None).expect("no preprocessed columns");
+    let (output, statement) =
+        prover_instance.prove(test_challenger()).expect("proving should succeed");
 
-    let verifier_digest = VerifierInstance::new(&config, prover_statement.statement(), None)
+    let verifier_digest = VerifierInstance::new(&config, &statement, None)
         .expect("no preprocessed columns")
         .verify(&output.proof, test_challenger())
         .expect("verification should succeed");
@@ -186,10 +186,11 @@ fn missing_external_input_fails_proving() {
     // verifier-side sanity check.
     let broken = external_prover_statement(input, trace, vec![start], vec![]);
 
-    let err = ProverInstance::new(&config, &broken, None)
+    let err = ProverInstance::new(&config, broken, None)
         .expect("no preprocessed columns")
         .prove(test_challenger())
-        .expect_err("missing external input should fail proving");
+        .err()
+        .expect("missing external input should fail proving");
     assert!(
         matches!(err, crate::ProverError::Reduction(_)),
         "expected Reduction, got {err:?}"

@@ -132,5 +132,5 @@ fn multi_trace_with_aux_padding() {
 
     let prover_statement = padding_prover_statement(width, aux_width, start);
 
-    prove_and_verify_statement(&prover_statement);
+    prove_and_verify_statement(prover_statement);
 }
