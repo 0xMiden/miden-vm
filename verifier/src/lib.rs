@@ -109,7 +109,8 @@ impl Verifier {
     ///
     /// # Errors
     ///
-    /// Returns an error if the proof structure is invalid or a required STARK rejects.
+    /// Returns an error if the proof structure is invalid, a required STARK rejects, deferred
+    /// witness evaluation fails, or the witness root does not match the VM-authenticated root.
     pub fn verify(
         &self,
         claim: &ExecutionClaim,

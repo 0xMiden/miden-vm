@@ -33,7 +33,7 @@ make test-fast
 ```
 src/
 ├── lib.rs              crate root
-├── witness.rs          checked singleton batch import
+├── deferred/session.rs checked singleton batch import
 ├── relations.rs        global relation-tag (bus-id) registry
 ├── math.rs             field and integer helpers
 ├── logup/              LogUp encoding + natural last-row σ-closing adapter

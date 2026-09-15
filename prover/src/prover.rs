@@ -102,6 +102,10 @@ impl Prover {
     ///
     /// The proof preserves the input roots in order, including repeated roots. An empty batch
     /// is rejected. Single-execution proving uses this same path with a one-element vector.
+    ///
+    /// Batch-wide limits are checked during import, before STARK generation. Individually valid
+    /// witnesses may exceed these limits when combined. Input accounting counts each supplied
+    /// occurrence before sharing computations, including repeated data across witnesses.
     pub fn prove_precompiles(
         &self,
         witnesses: Vec<PrecompileWitness>,
