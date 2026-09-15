@@ -53,7 +53,7 @@ mod tests {
         let mut b = Graph::builder();
         let x = b.leaf(Leaf::Main { offset: 0, index: 0 });
         let ch = b.leaf(Leaf::Challenge(0));
-        let (s, _) = b.op(Class::Base, OpKind::Add, x, Some(x));
+        let s = b.op(Class::Base, OpKind::Add, x, Some(x));
         b.op(Class::Base, OpKind::Add, x, Some(x)); // dedupes: no new node
         let xe = b.leaf(Leaf::ExtBase(s));
         b.op(Class::Ext, OpKind::Mul, xe, Some(ch));

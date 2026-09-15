@@ -10,12 +10,7 @@
 //! the checked-in file's own template; the real coverage for those two paths is the value
 //! comparison above, not the byte comparison.
 
-use std::{
-    fmt::Write as _,
-    format, io, println,
-    string::{String, ToString},
-    vec::Vec,
-};
+use std::{fmt::Write as _, format, io, println, string::String, vec::Vec};
 
 use miden_ace_codegen::{
     EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, MasmConstraintsEvalConfig,
@@ -131,7 +126,7 @@ struct CircuitShape {
 
 impl PvmReadLayout {
     /// Derive every READ-region boundary from the circuit's own `InputLayout`.
-    fn from_input_layout(layout: &InputLayout) -> Result<Self, String> {
+    fn from_input_layout(layout: &InputLayout) -> Self {
         let boundary_specs = [
             ("PUBLIC_INPUTS_PTR", InputKey::Public(0)),
             ("AUX_RAND_ELEM_PTR", InputKey::AuxRandBeta),
@@ -155,59 +150,58 @@ impl PvmReadLayout {
 
         let mut boundaries = Vec::with_capacity(boundary_specs.len() + 1);
         for &(constant, key) in &boundary_specs {
-            let index = layout.index(key).ok_or_else(|| {
-                format!("PVM ACE layout is missing boundary {constant} ({key:?})")
-            })?;
-            let felt_offset = u32::try_from(index.checked_mul(2).ok_or_else(|| {
-                format!("PVM ACE layout boundary {constant} overflows its felt offset")
-            })?)
-            .map_err(|_| format!("PVM ACE layout boundary {constant} exceeds u32 memory"))?;
+            let index = layout.index(key).unwrap_or_else(|| {
+                panic!("PVM ACE layout is missing boundary {constant} ({key:?})")
+            });
+            let felt_offset = u32::try_from(index.checked_mul(2).unwrap_or_else(|| {
+                panic!("PVM ACE layout boundary {constant} overflows its felt offset")
+            }))
+            .unwrap_or_else(|_| panic!("PVM ACE layout boundary {constant} exceeds u32 memory"));
             let ptr = PVM_READ_START
                 .checked_add(felt_offset)
-                .ok_or_else(|| format!("PVM ACE layout boundary {constant} overflows u32"))?;
+                .unwrap_or_else(|| panic!("PVM ACE layout boundary {constant} overflows u32"));
             boundaries.push((constant, ptr));
         }
 
-        if boundaries.first().map(|(_, ptr)| *ptr) != Some(PVM_READ_START) {
-            return Err("PVM public inputs must begin at the complete READ-section anchor".into());
-        }
-        if boundaries.windows(2).any(|pair| pair[0].1 >= pair[1].1) {
-            return Err("PVM ACE READ-region boundaries are not strictly increasing".into());
-        }
+        assert!(
+            boundaries.first().map(|(_, ptr)| *ptr) == Some(PVM_READ_START),
+            "PVM public inputs must begin at the complete READ-section anchor"
+        );
+        assert!(
+            boundaries.windows(2).all(|pair| pair[0].1 < pair[1].1),
+            "PVM ACE READ-region boundaries are not strictly increasing"
+        );
 
         let read_extent = u32::try_from(
-            layout
-                .total_inputs
-                .checked_mul(2)
-                .ok_or_else(|| "PVM ACE READ extent overflows usize".to_string())?,
+            layout.total_inputs.checked_mul(2).expect("PVM ACE READ extent overflows usize"),
         )
-        .map_err(|_| "PVM ACE READ extent exceeds u32 memory".to_string())?;
+        .expect("PVM ACE READ extent exceeds u32 memory");
         let stream_ptr = PVM_READ_START
             .checked_add(read_extent)
-            .ok_or_else(|| "PVM ACE stream pointer overflows u32".to_string())?;
+            .expect("PVM ACE stream pointer overflows u32");
         boundaries.push(("ACE_CIRCUIT_STREAM_PTR", stream_ptr));
 
         // The staged fold coefficients live at the end of the auxiliary-input region; a region
         // that ended before them would silently overwrite the ACE stream reservation.
-        let fold_coefficients_end =
-            layout.index(InputKey::MultiAirFoldCoeff(NUM_CHIPLETS - 1)).ok_or_else(|| {
-                "PVM ACE layout is missing its last fold-coefficient slot".to_string()
-            })? + 1;
-        if fold_coefficients_end > layout.total_inputs {
-            return Err("PVM fold coefficients fall outside the declared READ section".into());
-        }
+        let fold_coefficients_end = layout
+            .index(InputKey::MultiAirFoldCoeff(NUM_CHIPLETS - 1))
+            .expect("PVM ACE layout is missing its last fold-coefficient slot")
+            + 1;
+        assert!(
+            fold_coefficients_end <= layout.total_inputs,
+            "PVM fold coefficients fall outside the declared READ section"
+        );
         let alpha_index = layout
             .index(InputKey::Alpha)
-            .ok_or_else(|| "PVM ACE layout is missing its stark-vars base".to_string())?;
-        let first_fold_coefficient =
-            layout.index(InputKey::MultiAirFoldCoeff(0)).ok_or_else(|| {
-                "PVM ACE layout is missing its first fold-coefficient slot".to_string()
-            })?;
+            .expect("PVM ACE layout is missing its stark-vars base");
+        let first_fold_coefficient = layout
+            .index(InputKey::MultiAirFoldCoeff(0))
+            .expect("PVM ACE layout is missing its first fold-coefficient slot");
         let fold_coefficient_offset = first_fold_coefficient
             .checked_sub(alpha_index)
-            .ok_or_else(|| "PVM fold coefficients precede the stark-vars base".to_string())?
+            .expect("PVM fold coefficients precede the stark-vars base")
             .checked_mul(EXT_DEGREE)
-            .ok_or_else(|| "PVM fold-coefficient felt offset overflows usize".to_string())?;
+            .expect("PVM fold-coefficient felt offset overflows usize");
 
         let regions = boundaries
             .windows(2)
@@ -220,45 +214,41 @@ impl PvmReadLayout {
 
         let current_row_start = layout
             .index(InputKey::Preprocessed { offset: 0, index: 0 })
-            .ok_or_else(|| "PVM ACE layout is missing the current-row start".to_string())?;
+            .expect("PVM ACE layout is missing the current-row start");
         let next_row_start = layout
             .index(InputKey::Preprocessed { offset: 1, index: 0 })
-            .ok_or_else(|| "PVM ACE layout is missing the next-row start".to_string())?;
+            .expect("PVM ACE layout is missing the next-row start");
         let query_row_felts = u32::try_from(
             next_row_start
                 .checked_sub(current_row_start)
-                .ok_or_else(|| "PVM next-row boundary precedes the current row".to_string())?,
+                .expect("PVM next-row boundary precedes the current row"),
         )
-        .map_err(|_| "PVM query row exceeds u32 memory".to_string())?;
+        .expect("PVM query row exceeds u32 memory");
 
-        Ok(Self {
+        Self {
             regions,
             stream_ptr,
             query_row_felts,
             fold_coefficient_offset,
-        })
+        }
     }
 }
 
 /// Build the canonical circuit and derive every generated artifact from it.
 fn compute() -> Result<GeneratedArtifacts, String> {
-    let circuit = build_pvm_recursive_verifier_ace_circuit().map_err(|e| format!("{e}"))?;
-    let input_layout = crate::ace::build_canonical_precompile_ace_circuit()
-        .map_err(|e| format!("{e}"))?
-        .layout()
-        .clone();
-    let read_layout = PvmReadLayout::from_input_layout(&input_layout)?;
+    let circuit = build_pvm_recursive_verifier_ace_circuit();
+    let input_layout = &circuit.input_layout;
+    let read_layout = PvmReadLayout::from_input_layout(input_layout);
     let num_quotient_chunks = input_layout.counts.num_quotient_chunks;
-    if !num_quotient_chunks.is_power_of_two() {
-        return Err(format!(
-            "PVM quotient chunk count {num_quotient_chunks} is not a power of two"
-        ));
-    }
+    assert!(
+        num_quotient_chunks.is_power_of_two(),
+        "PVM quotient chunk count {num_quotient_chunks} is not a power of two"
+    );
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
         miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup(),
     )
-    .map_err(|err| err.to_string())?;
+    .expect("PVM quotient arity must fit the PCS blowup");
 
     let shape = CircuitShape {
         num_inputs: circuit.num_inputs,
@@ -269,21 +259,21 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     let relation_digest = relation_digest_for_circuit(&circuit_digest);
     let preprocessed_commitment = preprocessed_commitment(relation_digest);
 
-    let geometry = PvmOodGeometry::from_input_layout(&input_layout)?;
-    let scatter_table_layout = pvm_scatter_table_layout(&geometry)?;
-    let layout_masm = render_pvm_layout(&read_layout, shape.stream_len, &scatter_table_layout)?;
-    let stream_len = u32::try_from(shape.stream_len)
-        .map_err(|_| "PVM ACE stream length exceeds u32 memory".to_string())?;
-    let scratch = pvm_scratch_allocation(&read_layout, stream_len)?;
+    let geometry = PvmOodGeometry::from_input_layout(input_layout);
+    let scatter_table_layout = pvm_scatter_table_layout(&geometry);
+    let layout_masm = render_pvm_layout(&read_layout, shape.stream_len, &scatter_table_layout);
+    let stream_len =
+        u32::try_from(shape.stream_len).expect("PVM ACE stream length exceeds u32 memory");
+    let scratch = pvm_scratch_allocation(&read_layout, stream_len);
     let ood_frames_masm =
-        render_pvm_ood_frames(&geometry, scratch.proof_order_ids_ptr.is_multiple_of(4))?;
+        render_pvm_ood_frames(&geometry, scratch.proof_order_ids_ptr.is_multiple_of(4));
     let deep_queries_masm = render_pvm_deep_queries(&geometry)?;
     let constraints_eval_masm = render_pvm_constraints_eval(
         shape,
         circuit_digest,
         quotient_inputs,
         read_layout.fold_coefficient_offset,
-    )?;
+    );
 
     let mut relation_mod_masm = read_generated_file(PVM_RELATION_MOD_PATH)?;
     for (prefix, word) in [
@@ -383,57 +373,49 @@ struct PvmScratchAllocation {
 
 /// Lays out the scratch regions after a `stream_len`-felt circuit stream, checking every
 /// alignment their MASM consumers rely on.
-fn pvm_scratch_allocation(
-    layout: &PvmReadLayout,
-    stream_len: u32,
-) -> Result<PvmScratchAllocation, String> {
+fn pvm_scratch_allocation(layout: &PvmReadLayout, stream_len: u32) -> PvmScratchAllocation {
     let stream_end = layout
         .stream_ptr
         .checked_add(stream_len)
-        .ok_or_else(|| "PVM ACE stream allocation overflows u32".to_string())?;
+        .expect("PVM ACE stream allocation overflows u32");
     let bus_gamma_ptr = stream_end;
-    let c_total_ptr = bus_gamma_ptr
-        .checked_add(4)
-        .ok_or_else(|| "PVM bus-gamma allocation overflows u32".to_string())?;
+    let c_total_ptr = bus_gamma_ptr.checked_add(4).expect("PVM bus-gamma allocation overflows u32");
     let current_trace_row_ptr = c_total_ptr
         .checked_add(4)
-        .ok_or_else(|| "PVM boundary-correction allocation overflows u32".to_string())?;
-    if !current_trace_row_ptr.is_multiple_of(8) {
-        return Err(format!(
-            "PVM current-trace-row base {current_trace_row_ptr} is not 8-felt aligned, which \
+        .expect("PVM boundary-correction allocation overflows u32");
+    assert!(
+        current_trace_row_ptr.is_multiple_of(8),
+        "PVM current-trace-row base {current_trace_row_ptr} is not 8-felt aligned, which \
              `adv_pipe` requires"
-        ));
-    }
+    );
     let preprocessed_com_ptr = current_trace_row_ptr
         .checked_add(layout.query_row_felts)
-        .ok_or_else(|| "PVM current-row allocation overflows u32".to_string())?;
+        .expect("PVM current-row allocation overflows u32");
     let ood_scatter_table_ptr = preprocessed_com_ptr
         .checked_add(4)
-        .ok_or_else(|| "PVM preprocessed-commitment allocation overflows u32".to_string())?;
-    if !ood_scatter_table_ptr.is_multiple_of(4) {
-        return Err(format!(
-            "PVM out-of-domain scatter table base {ood_scatter_table_ptr} is not 4-felt \
+        .expect("PVM preprocessed-commitment allocation overflows u32");
+    assert!(
+        ood_scatter_table_ptr.is_multiple_of(4),
+        "PVM out-of-domain scatter table base {ood_scatter_table_ptr} is not 4-felt \
              (word) aligned, which its `mem_storew_le`/`dynexec` entries require"
-        ));
-    }
+    );
     let proof_order_positions_ptr = ood_scatter_table_ptr
         .checked_add(OOD_SCATTER_TABLE_FELTS)
-        .ok_or_else(|| "PVM out-of-domain scatter table overflows u32".to_string())?;
+        .expect("PVM out-of-domain scatter table overflows u32");
     // The ten live `pos_by_id` cells are padded to a whole word so that `id_by_pos`, which the
     // proof-order pass writes with word stores, starts word-aligned.
     let proof_order_ids_ptr = proof_order_positions_ptr
         .checked_add(PROOF_ORDER_POSITIONS_FELTS)
-        .ok_or_else(|| "PVM proof-order position table overflows u32".to_string())?;
+        .expect("PVM proof-order position table overflows u32");
     let allocation_end = proof_order_ids_ptr
         .checked_add(NUM_CHIPLETS as u32)
-        .ok_or_else(|| "PVM proof-order id table overflows u32".to_string())?;
-    if allocation_end > NEXT_VM_REGION_START {
-        return Err(format!(
-            "PVM ACE allocation {PVM_READ_START}..{allocation_end} reaches the VM scratch region starting at {NEXT_VM_REGION_START}"
-        ));
-    }
+        .expect("PVM proof-order id table overflows u32");
+    assert!(
+        allocation_end <= NEXT_VM_REGION_START,
+        "PVM ACE allocation {PVM_READ_START}..{allocation_end} reaches the VM scratch region starting at {NEXT_VM_REGION_START}"
+    );
 
-    Ok(PvmScratchAllocation {
+    PvmScratchAllocation {
         stream_end,
         bus_gamma_ptr,
         c_total_ptr,
@@ -443,16 +425,15 @@ fn pvm_scratch_allocation(
         proof_order_positions_ptr,
         proof_order_ids_ptr,
         allocation_end,
-    })
+    }
 }
 
 fn render_pvm_layout(
     layout: &PvmReadLayout,
     stream_len: usize,
     scatter_table: &PvmScatterTableLayout,
-) -> Result<String, String> {
-    let stream_len = u32::try_from(stream_len)
-        .map_err(|_| "PVM ACE stream length exceeds u32 memory".to_string())?;
+) -> String {
+    let stream_len = u32::try_from(stream_len).expect("PVM ACE stream length exceeds u32 memory");
     let PvmScratchAllocation {
         stream_end,
         bus_gamma_ptr,
@@ -463,20 +444,20 @@ fn render_pvm_layout(
         proof_order_positions_ptr,
         proof_order_ids_ptr,
         allocation_end,
-    } = pvm_scratch_allocation(layout, stream_len)?;
+    } = pvm_scratch_allocation(layout, stream_len);
     let proof_order_padding = PROOF_ORDER_POSITIONS_FELTS - NUM_CHIPLETS as u32;
     let pair_end = scatter_table
         .proof_order_pairs
         .end
         .checked_sub(1)
         .filter(|end| *end >= scatter_table.proof_order_pairs.start)
-        .ok_or_else(|| "PVM scatter-table pair range is empty".to_string())?;
+        .expect("PVM scatter-table pair range is empty");
     let digest_end = scatter_table
         .pipe_digests
         .end
         .checked_sub(1)
         .filter(|end| *end >= scatter_table.pipe_digests.start)
-        .ok_or_else(|| "PVM scatter-table digest range is empty".to_string())?;
+        .expect("PVM scatter-table digest range is empty");
 
     let mut out = String::new();
     writeln!(out, "# GENERATED by `{GENERATED_BY}` — do not edit by hand.")
@@ -591,7 +572,7 @@ fn render_pvm_layout(
         "\npub proc proof_order_ids_ptr() -> types::Address\n    push.PROOF_ORDER_IDS_PTR\nend\n",
     );
 
-    Ok(out)
+    out
 }
 
 fn render_pvm_constraints_eval(
@@ -599,8 +580,8 @@ fn render_pvm_constraints_eval(
     circuit_digest: Word,
     quotient_inputs: QuotientRecompositionInputs<Felt>,
     fold_coefficient_offset: usize,
-) -> Result<String, String> {
-    let max_cycle_len_log = max_periodic_cycle_len_log()?;
+) -> String {
+    let max_cycle_len_log = max_periodic_cycle_len_log();
     render_masm_constraints_eval(&MasmConstraintsEvalConfig {
         generated_by: GENERATED_BY,
         layout_module: "miden::core::sys::pvm::layout",
@@ -616,7 +597,6 @@ fn render_pvm_constraints_eval(
         quotient_inputs,
         circuit_digest,
     })
-    .map_err(|err| err.to_string())
 }
 
 fn render_pvm_deep_queries(geometry: &PvmOodGeometry) -> Result<String, String> {
@@ -630,11 +610,10 @@ fn apply_pvm_deep_query_geometry(
     geometry: &PvmOodGeometry,
 ) -> Result<(), String> {
     for (blocks_name, init_cv_name, width) in geometry.deep_query_groups() {
-        if !width.is_multiple_of(EIDOS_BLOCK_WIDTH) {
-            return Err(format!(
-                "PVM {blocks_name} width {width} is not {EIDOS_BLOCK_WIDTH}-felt aligned"
-            ));
-        }
+        assert!(
+            width.is_multiple_of(EIDOS_BLOCK_WIDTH),
+            "PVM {blocks_name} width {width} is not {EIDOS_BLOCK_WIDTH}-felt aligned"
+        );
         replace_masm_const(
             deep_queries,
             blocks_name,
@@ -643,7 +622,7 @@ fn apply_pvm_deep_query_geometry(
         )?;
 
         let encoded_len = u32::try_from(width)
-            .map_err(|_| format!("PVM {init_cv_name} LMCS encoded length exceeds u32"))?;
+            .unwrap_or_else(|_| panic!("PVM {init_cv_name} LMCS encoded length exceeds u32"));
         let init_cv = Eidos::init_chaining_word(LMCS_LEAF, encoded_len);
         replace_masm_const(
             deep_queries,
@@ -655,17 +634,18 @@ fn apply_pvm_deep_query_geometry(
     Ok(())
 }
 
-fn max_periodic_cycle_len_log() -> Result<u32, String> {
+fn max_periodic_cycle_len_log() -> u32 {
     let max_len = ChipletAir::all()
         .iter()
         .flat_map(|air| <ChipletAir as BaseAir<Felt>>::periodic_columns(air).into_owned())
         .map(|column| column.len())
         .max()
         .unwrap_or(1);
-    if !max_len.is_power_of_two() {
-        return Err("maximum PVM AIR periodic cycle length is not a power of two".into());
-    }
-    Ok(max_len.ilog2())
+    assert!(
+        max_len.is_power_of_two(),
+        "maximum PVM AIR periodic cycle length is not a power of two"
+    );
+    max_len.ilog2()
 }
 
 fn check(artifacts: &GeneratedArtifacts) -> Result<(), String> {
@@ -860,11 +840,10 @@ mod tests {
 
     #[test]
     fn pvm_proof_order_tables_are_disjoint_and_word_aligned() {
-        let canonical = crate::ace::build_canonical_precompile_ace_circuit().unwrap();
-        let read_layout = PvmReadLayout::from_input_layout(canonical.layout()).unwrap();
-        let circuit = crate::ace::build_pvm_recursive_verifier_ace_circuit().unwrap();
+        let circuit = crate::ace::build_pvm_recursive_verifier_ace_circuit();
+        let read_layout = PvmReadLayout::from_input_layout(&circuit.input_layout);
         let stream_len = u32::try_from(circuit.stream_len).unwrap();
-        let scratch = pvm_scratch_allocation(&read_layout, stream_len).unwrap();
+        let scratch = pvm_scratch_allocation(&read_layout, stream_len);
 
         assert!(scratch.proof_order_positions_ptr.is_multiple_of(4));
         assert!(scratch.proof_order_ids_ptr.is_multiple_of(4));
@@ -982,8 +961,8 @@ mod tests {
 
     #[test]
     fn checked_in_pvm_deep_query_geometry_is_idempotent_under_rendering() {
-        let canonical = crate::ace::build_canonical_precompile_ace_circuit().unwrap();
-        let geometry = PvmOodGeometry::from_input_layout(canonical.layout()).unwrap();
+        let canonical = crate::ace::build_canonical_precompile_ace_circuit();
+        let geometry = PvmOodGeometry::from_input_layout(canonical.layout());
         let checked_in = read_generated_file(PVM_DEEP_QUERIES_PATH).unwrap();
 
         assert_eq!(render_pvm_deep_queries(&geometry).unwrap(), checked_in);
@@ -991,8 +970,8 @@ mod tests {
 
     #[test]
     fn pvm_deep_query_renderer_repairs_block_count_and_lmcs_cv_together() {
-        let canonical = crate::ace::build_canonical_precompile_ace_circuit().unwrap();
-        let geometry = PvmOodGeometry::from_input_layout(canonical.layout()).unwrap();
+        let canonical = crate::ace::build_canonical_precompile_ace_circuit();
+        let geometry = PvmOodGeometry::from_input_layout(canonical.layout());
         let expected = read_generated_file(PVM_DEEP_QUERIES_PATH).unwrap();
         let mut stale = expected.clone();
 

@@ -12,11 +12,10 @@ use super::{
     builder::DagBuilder,
     ir::{NodeId, PeriodicColumn, PeriodicColumnData, SparseTerm},
 };
-use crate::layout::{InputKey, InputLayout};
+use crate::layout::InputKey;
 
 pub(super) fn build_periodic_nodes<EF>(
     builder: &mut DagBuilder<EF>,
-    layout: &InputLayout,
     periodic: &PeriodicColumnData<EF>,
     shared_period: usize,
 ) -> Vec<NodeId>
@@ -26,11 +25,6 @@ where
     if periodic.num_columns() == 0 {
         return Vec::new();
     }
-
-    assert!(
-        layout.index(InputKey::ZK).is_some(),
-        "layout must include ZK for periodic columns"
-    );
 
     assert!(
         shared_period.is_power_of_two(),

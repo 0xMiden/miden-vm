@@ -12,10 +12,7 @@
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::field::ExtensionField;
 
-use crate::{
-    AceError,
-    circuit::{AceCircuit, AceNode, AceOp, AceOpNode},
-};
+use crate::circuit::{AceCircuit, AceNode, AceOp, AceOpNode};
 
 // NOTE: `num_vars`/`num_const_nodes` count extension-field (EF) nodes, while the
 // instruction stream (`instructions.len()`) is measured in base field elements.
@@ -25,10 +22,10 @@ const BASE_FELTS_PER_EF: usize = crate::EXT_DEGREE;
 /// Number of EF nodes read per ACE READ row (two EF per row).
 const ACE_READ_ROW_EF_NODES: usize = 2;
 /// Constants are padded to an even number of EF nodes (full READ rows).
-pub(crate) const CONST_EF_ALIGN: usize = 2;
+const CONST_EF_ALIGN: usize = 2;
 /// Instruction stream padding unit in base felts (adv_pipe block size), so that
 /// the constants+ops stream can be read in aligned chunks.
-pub(crate) const ADV_PIPE_BLOCK_FELTS: usize = 8;
+const ADV_PIPE_BLOCK_FELTS: usize = 8;
 /// Maximum number of circuit nodes accepted by the ACE runtime.
 ///
 /// Packed node ids occupy 30 bits, but `eval_circuit` requires the total number of READ and EVAL
@@ -104,7 +101,7 @@ impl EncodedCircuit {
 /// The chiplet numbers nodes downward from `num_nodes - 1`: inputs first, then constants,
 /// then operations.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct StreamGeometry {
+struct StreamGeometry {
     input_start: usize,
     constants_start: usize,
     ops_start: usize,
@@ -115,77 +112,60 @@ impl StreamGeometry {
     /// constants are rounded up to full READ rows and the constants+ops stream is padded
     /// to whole `adv_pipe` blocks. The single authority for this arithmetic: `to_ace` derives
     /// every node id from here rather than repeating the padding rules inline.
-    pub(crate) fn from_counts(num_inputs: usize, num_constants: usize, num_ops: usize) -> Self {
-        let num_const_nodes = num_constants.next_multiple_of(CONST_EF_ALIGN);
-        let const_felts = num_const_nodes * BASE_FELTS_PER_EF;
-        let num_ops_padded =
-            (const_felts + num_ops).next_multiple_of(ADV_PIPE_BLOCK_FELTS) - const_felts;
-        Self::new(num_inputs, num_const_nodes, num_ops_padded)
-    }
+    fn from_counts(num_inputs: usize, num_constants: usize, num_ops: usize) -> Self {
+        assert!(num_ops > 0, "ACE circuit has no operations to encode");
+        assert!(
+            num_inputs.is_multiple_of(ACE_READ_ROW_EF_NODES),
+            "ACE READ layout must be aligned to two EF nodes (use LayoutKind::Masm or pad inputs)"
+        );
+        let num_constants = num_constants
+            .checked_next_multiple_of(CONST_EF_ALIGN)
+            .expect("ACE constant padding overflow");
+        let const_felts = num_constants
+            .checked_mul(BASE_FELTS_PER_EF)
+            .expect("ACE constant stream length overflow");
+        let stream_felts = const_felts
+            .checked_add(num_ops)
+            .and_then(|len| len.checked_next_multiple_of(ADV_PIPE_BLOCK_FELTS))
+            .expect("ACE instruction stream padding overflow");
+        let num_ops = stream_felts - const_felts;
+        let num_nodes = num_inputs
+            .checked_add(num_constants)
+            .and_then(|num_vars| num_vars.checked_add(num_ops))
+            .expect("ACE circuit node count overflow");
+        assert!(
+            num_nodes <= MAX_NUM_ACE_NODES,
+            "ACE circuit has {num_nodes} nodes, must be less than 2^30"
+        );
 
-    /// Derive the bases from the final (padded) node counts.
-    fn new(num_inputs: usize, num_constants: usize, num_ops: usize) -> Self {
-        let num_nodes = num_inputs + num_constants + num_ops;
         let input_start = num_nodes - 1;
         let constants_start = input_start - num_inputs;
         let ops_start = constants_start - num_constants;
         Self { input_start, constants_start, ops_start }
     }
 
-    /// Number of input nodes in the READ section.
-    fn num_inputs(&self) -> usize {
-        self.input_start - self.constants_start
-    }
-
     /// Number of constant nodes (EF), including READ-row padding.
-    pub(crate) fn num_const_nodes(&self) -> usize {
+    fn num_const_nodes(&self) -> usize {
         self.constants_start - self.ops_start
     }
 
     /// Number of operations, including the trailing block padding.
-    pub(crate) fn num_padded_ops(&self) -> usize {
+    fn num_padded_ops(&self) -> usize {
         self.ops_start + 1
     }
 
-    /// Total nodes these bases were derived from.
-    fn num_nodes(&self) -> usize {
-        self.input_start + 1
-    }
-
-    /// Reject shapes the ACE chiplet cannot consume: READ layouts that do not fill whole
-    /// rows, and node counts beyond the id-packing bound.
-    pub(crate) fn validate(&self) -> Result<(), AceError> {
-        if !self.num_inputs().is_multiple_of(ACE_READ_ROW_EF_NODES) {
-            return Err(AceError::InvalidInputLayout {
-                message: "ACE READ layout must be aligned to two EF nodes (use LayoutKind::Masm or pad inputs)"
-                    .to_string(),
-            });
-        }
-        if self.num_nodes() > MAX_NUM_ACE_NODES {
-            return Err(AceError::InvalidInputLayout {
-                message: format!(
-                    "ACE circuit has {} nodes, must be less than 2^30",
-                    self.num_nodes()
-                ),
-            });
-        }
-        Ok(())
-    }
-
-    fn node_id(&self, node: AceNode) -> Result<u64, AceError> {
+    fn node_id(&self, node: AceNode) -> u64 {
         let id = match node {
             AceNode::Input(idx) => self.input_start.checked_sub(idx),
             AceNode::Constant(idx) => self.constants_start.checked_sub(idx),
             AceNode::Operation(idx) => self.ops_start.checked_sub(idx),
         }
-        .ok_or_else(|| AceError::InvalidInputLayout {
-            message: format!("ACE circuit node index out of range: {node:?}"),
-        })?;
-        Ok(id as u64)
+        .unwrap_or_else(|| panic!("ACE circuit node index out of range: {node:?}"));
+        id as u64
     }
 
     /// Pack one operation as `lhs_id + rhs_id * 2^30 + op_tag * 2^60`.
-    pub(crate) fn encode_operation(&self, op: &AceOpNode) -> Result<Felt, AceError> {
+    fn encode_operation(&self, op: &AceOpNode) -> Felt {
         const RHS_NODE_OFFSET: u64 = 1 << 30;
         const OP_TAG_OFFSET: u64 = 1 << 60;
         let tag = match op.op {
@@ -193,9 +173,9 @@ impl StreamGeometry {
             AceOp::Mul => 1,
             AceOp::Add => 2,
         };
-        let lhs_id = self.node_id(op.lhs)?;
-        let rhs_id = self.node_id(op.rhs)?;
-        Ok(Felt::new_unchecked(lhs_id + rhs_id * RHS_NODE_OFFSET + tag * OP_TAG_OFFSET))
+        let lhs_id = self.node_id(op.lhs);
+        let rhs_id = self.node_id(op.rhs);
+        Felt::new_unchecked(lhs_id + rhs_id * RHS_NODE_OFFSET + tag * OP_TAG_OFFSET)
     }
 }
 
@@ -204,23 +184,19 @@ where
     EF: ExtensionField<Felt>,
 {
     /// Encode the circuit into the ACE chiplet format.
-    pub fn to_ace(&self) -> Result<EncodedCircuit, AceError> {
+    ///
+    /// Panics if the READ layout is unaligned, the circuit exceeds the node bound, or its
+    /// root is not the final operation.
+    pub fn to_ace(&self) -> EncodedCircuit {
         let num_input_nodes = self.layout.total_inputs;
         let num_op_nodes = self.operations.len();
-        if num_op_nodes == 0 {
-            return Err(AceError::InvalidInputLayout {
-                message: "ACE circuit has no operations to encode".to_string(),
-            });
-        }
-        if self.root != AceNode::Operation(num_op_nodes - 1) {
-            return Err(AceError::InvalidInputLayout {
-                message: "ACE circuit root must be the last operation before padding".to_string(),
-            });
-        }
-
         let geometry =
             StreamGeometry::from_counts(num_input_nodes, self.constants.len(), num_op_nodes);
-        geometry.validate()?;
+        assert_eq!(
+            self.root,
+            AceNode::Operation(num_op_nodes - 1),
+            "ACE circuit root must be the last operation before padding"
+        );
 
         // The instruction stream is measured in base felts:
         // - constants are EF-encoded (2 base felts each)
@@ -238,7 +214,7 @@ where
         instructions.resize(num_const_felts, Felt::ZERO);
 
         for op in &self.operations {
-            instructions.push(geometry.encode_operation(op)?);
+            instructions.push(geometry.encode_operation(op));
         }
 
         // The ACE chiplet checks the last EVAL row. Padding preserves zero-ness by repeatedly
@@ -251,13 +227,13 @@ where
                 lhs: last_node,
                 rhs: last_node,
             };
-            instructions.push(geometry.encode_operation(&dummy_op)?);
+            instructions.push(geometry.encode_operation(&dummy_op));
             last_node_index += 1;
         }
 
         let num_vars = num_input_nodes + num_const_nodes;
         let num_ops = geometry.num_padded_ops();
-        Ok(EncodedCircuit { num_vars, num_ops, instructions })
+        EncodedCircuit { num_vars, num_ops, instructions }
     }
 
     /// Return true if inputs/constants/ops satisfy chiplet padding rules:
@@ -273,5 +249,23 @@ where
         let const_felts = self.constants.len() * BASE_FELTS_PER_EF;
         let op_felts = self.operations.len();
         (const_felts + op_felts).is_multiple_of(ADV_PIPE_BLOCK_FELTS)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StreamGeometry;
+
+    #[test]
+    fn stream_geometry_enforces_the_node_id_packing_bound() {
+        // Valid streams have an even node count because READ and EVAL rows are word-aligned.
+        // Thus, 2^30 - 2 is the largest realizable shape below the runtime's strict 2^30 bound.
+        StreamGeometry::from_counts((1 << 30) - 8, 2, 4);
+        assert!(
+            std::panic::catch_unwind(|| {
+                StreamGeometry::from_counts((1 << 30) - 6, 2, 4);
+            })
+            .is_err()
+        );
     }
 }

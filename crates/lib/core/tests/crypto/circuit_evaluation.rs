@@ -100,15 +100,14 @@ fn multi_air_eval_circuit_masm() {
     let circuit = miden_air::ace::build_multi_air_ace_circuit_for_order(
         config,
         &miden_air::ProofOrder::instance_order(),
-    )
-    .unwrap();
+    );
     let layout = circuit.layout().clone();
 
     let mut inputs = fill_inputs(&layout);
     adjust_quotient_to_zero(&circuit, &layout, &mut inputs);
-    assert_eq!(circuit.eval(&inputs).expect("circuit eval"), QuadFelt::ZERO);
+    assert_eq!(circuit.eval(&inputs), QuadFelt::ZERO);
 
-    let encoded = circuit.to_ace().unwrap();
+    let encoded = circuit.to_ace();
     let mut memory_felts = Vec::with_capacity(inputs.len() * 2 + encoded.size_in_felt());
     for value in &inputs {
         memory_felts.extend_from_slice(value.as_basis_coefficients_slice());
@@ -172,7 +171,7 @@ fn adjust_quotient_to_zero(
     layout: &miden_ace_codegen::InputLayout,
     inputs: &mut [QuadFelt],
 ) {
-    let root = circuit.eval(inputs).expect("circuit eval");
+    let root = circuit.eval(inputs);
     if root == QuadFelt::ZERO {
         return;
     }
@@ -199,7 +198,7 @@ fn find_nonzero_quotient_slope(
                 .expect("quotient coord exists");
             let original = inputs[idx];
             inputs[idx] = original + QuadFelt::ONE;
-            let slope = circuit.eval(inputs).expect("circuit eval") - root;
+            let slope = circuit.eval(inputs) - root;
             inputs[idx] = original;
             if slope != QuadFelt::ZERO {
                 return Some((idx, slope));

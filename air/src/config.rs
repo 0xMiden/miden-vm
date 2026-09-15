@@ -357,8 +357,7 @@ mod tests {
     /// ```
     #[test]
     fn relation_digest_matches_current_air() {
-        let circuit =
-            ace::build_recursive_verifier_ace_circuit().expect("recursive-verifier ACE circuit");
+        let circuit = ace::build_recursive_verifier_ace_circuit();
         let commitment: Vec<u64> = circuit.commitment.iter().map(Felt::as_canonical_u64).collect();
 
         let digest = super::relation_digest(PROTOCOL_ID, &circuit.commitment);

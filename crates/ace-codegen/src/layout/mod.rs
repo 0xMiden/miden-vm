@@ -58,6 +58,5 @@ mod plan;
 mod policy;
 
 pub use keys::InputKey;
-pub(crate) use keys::InputKeyMapper;
 pub use plan::{InputCounts, InputLayout};
 pub(crate) use plan::{InputRegion, LayoutRegions, MultiAirIndices, StarkVarIndices};

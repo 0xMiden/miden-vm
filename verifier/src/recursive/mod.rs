@@ -400,9 +400,7 @@ fn build_merkle_data(
     }
     #[cfg(not(feature = "std"))]
     {
-        let circuit = miden_air::ace::build_recursive_verifier_ace_circuit().map_err(|_| {
-            RecursiveVerifierInputsError::InvalidProofShape("failed to build recursive ACE circuit")
-        })?;
+        let circuit = miden_air::ace::build_recursive_verifier_ace_circuit();
         debug_assert_eq!(
             circuit.commitment,
             Word::from(config::ACE_CIRCUIT_DIGEST),

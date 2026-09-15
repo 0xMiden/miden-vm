@@ -6,6 +6,10 @@
 
 - [BREAKING] Added Eidos hashing with typed domain separation, including Eidos-backed IES, a counter-mode random coin, and length-bound LMCS implementations, native SIMD acceleration, and batched proof-of-work grinding; existing Poseidon2 variants remain available.
 
+#### Changes
+
+- [BREAKING] Removed `miden_ace_codegen::AceError`: compiler builders, encoding, off-VM evaluation, and renderers return values directly and panic on invalid AIRs or compiler configurations. Processor evaluation of guest-memory circuits remains fallible.
+
 #### Fixes
 
 - Fixed `PartialMmr::from_parts()` and deserialization so they reject tracked leaves without complete authentication paths ([#3809](https://github.com/0xMiden/miden-vm/pull/3809)).

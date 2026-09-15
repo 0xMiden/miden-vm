@@ -441,18 +441,18 @@ mod tests {
         let mut b = GraphBuilder::new();
         let cur = b.leaf(Leaf::Main { offset: 0, index: 0 });
         let next = b.leaf(Leaf::Main { offset: 1, index: 0 });
-        let (diff, _) = b.op(Class::Base, OpKind::Sub, next, Some(cur));
+        let diff = b.op(Class::Base, OpKind::Sub, next, Some(cur));
         let first = b.leaf(Leaf::IsFirst);
-        let (gated, _) = b.op(Class::Base, OpKind::Mul, first, Some(diff));
-        let (neg, _) = b.op(Class::Base, OpKind::Neg, gated, None);
+        let gated = b.op(Class::Base, OpKind::Mul, first, Some(diff));
+        let neg = b.op(Class::Base, OpKind::Neg, gated, None);
         let public = b.leaf(Leaf::Public(2));
         let periodic = b.leaf(Leaf::Periodic(1));
-        let (sum, _) = b.op(Class::Base, OpKind::Add, public, Some(periodic));
+        let sum = b.op(Class::Base, OpKind::Add, public, Some(periodic));
         let last = b.leaf(Leaf::IsLast);
         let transition = b.leaf(Leaf::IsTransition);
-        let (edges, _) = b.op(Class::Base, OpKind::Mul, last, Some(transition));
+        let edges = b.op(Class::Base, OpKind::Mul, last, Some(transition));
         let three = b.leaf(Leaf::BaseConst(3));
-        let (offset, _) = b.op(Class::Base, OpKind::Add, edges, Some(three));
+        let offset = b.op(Class::Base, OpKind::Add, edges, Some(three));
         let graph = b.freeze();
 
         // Local order (neg, sum, offset) deliberately differs from global order
@@ -520,17 +520,17 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
         let mut b = GraphBuilder::new();
         let aux = b.leaf(Leaf::Aux { offset: 0, index: 0 });
         let alpha = b.leaf(Leaf::Challenge(0));
-        let (acc, _) = b.op(Class::Ext, OpKind::Add, aux, Some(alpha));
+        let acc = b.op(Class::Ext, OpKind::Add, aux, Some(alpha));
         let main = b.leaf(Leaf::Main { offset: 0, index: 1 });
         let lift = b.leaf(Leaf::ExtBase(main));
-        let (flip, _) = b.op(Class::Ext, OpKind::Mul, lift, Some(acc));
-        let (sub_promote, _) = b.op(Class::Ext, OpKind::Sub, lift, Some(acc));
-        let (sub_plain, _) = b.op(Class::Ext, OpKind::Sub, acc, Some(lift));
-        let (neg_promote, _) = b.op(Class::Ext, OpKind::Neg, lift, None);
+        let flip = b.op(Class::Ext, OpKind::Mul, lift, Some(acc));
+        let sub_promote = b.op(Class::Ext, OpKind::Sub, lift, Some(acc));
+        let sub_plain = b.op(Class::Ext, OpKind::Sub, acc, Some(lift));
+        let neg_promote = b.op(Class::Ext, OpKind::Neg, lift, None);
         let seven = b.leaf(Leaf::ExtConst([7, 0]));
-        let (shifted, _) = b.op(Class::Ext, OpKind::Add, sub_promote, Some(seven));
+        let shifted = b.op(Class::Ext, OpKind::Add, sub_promote, Some(seven));
         let bound = b.leaf(Leaf::PermValue(0));
-        let (closed, _) = b.op(Class::Ext, OpKind::Sub, shifted, Some(bound));
+        let closed = b.op(Class::Ext, OpKind::Sub, shifted, Some(bound));
         let graph = b.freeze();
 
         let cons = constraints(
@@ -589,7 +589,7 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
     fn duplicate_global_index_is_rejected() {
         let mut b = GraphBuilder::new();
         let x = b.leaf(Leaf::Main { offset: 0, index: 0 });
-        let (r, _) = b.op(Class::Base, OpKind::Neg, x, None);
+        let r = b.op(Class::Base, OpKind::Neg, x, None);
         let graph = b.freeze();
         let cons = constraints(vec![(r, 0), (r, 0)], vec![]);
         emit_module(

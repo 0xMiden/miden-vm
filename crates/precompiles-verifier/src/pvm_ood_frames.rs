@@ -58,7 +58,7 @@ pub(crate) struct PvmOodGeometry {
 impl PvmOodGeometry {
     /// Derives the row geometry from the chiplet declarations and cross-checks it against the
     /// circuit's own input layout.
-    pub(crate) fn from_input_layout(layout: &InputLayout) -> Result<Self, String> {
+    pub(crate) fn from_input_layout(layout: &InputLayout) -> Self {
         let airs = ChipletAir::all();
         let mut preprocessed = Vec::with_capacity(NUM_CHIPLETS);
         let mut main = Vec::with_capacity(NUM_CHIPLETS);
@@ -76,12 +76,11 @@ impl PvmOodGeometry {
             );
             aux_values.push(<ChipletAir as LiftedAir<Felt, QuadFelt>>::num_aux_values(air));
         }
-        if aux_values.as_slice() != [1usize; NUM_CHIPLETS].as_slice() {
-            return Err(format!(
-                "the PVM proof-order boundary scatter requires exactly one auxiliary value per \
+        assert!(
+            aux_values.as_slice() == [1usize; NUM_CHIPLETS].as_slice(),
+            "the PVM proof-order boundary scatter requires exactly one auxiliary value per \
                  chiplet, got {aux_values:?}"
-            ));
-        }
+        );
         let geometry = Self {
             preprocessed,
             main,
@@ -107,41 +106,38 @@ impl PvmOodGeometry {
                 layout.counts.num_aux_boundary,
             ),
         ] {
-            if derived != actual {
-                return Err(format!(
-                    "chiplet-derived {name} width {derived} disagrees with the PVM ACE input \
+            assert!(
+                derived == actual,
+                "chiplet-derived {name} width {derived} disagrees with the PVM ACE input \
                      layout width {actual}"
-                ));
-            }
+            );
         }
 
         // The row the hook pipes must be exactly the row the circuit reads.
         let current = layout
             .index(InputKey::Preprocessed { offset: 0, index: 0 })
-            .ok_or_else(|| "PVM ACE layout is missing the current-row start".to_string())?;
+            .expect("PVM ACE layout is missing the current-row start");
         let next = layout
             .index(InputKey::Preprocessed { offset: 1, index: 0 })
-            .ok_or_else(|| "PVM ACE layout is missing the next-row start".to_string())?;
+            .expect("PVM ACE layout is missing the next-row start");
         let layout_felts = next
             .checked_sub(current)
             .and_then(|slots| slots.checked_mul(EXT_DEGREE))
-            .ok_or_else(|| "PVM next-row boundary precedes the current row".to_string())?;
-        if layout_felts != geometry.row_felts() {
-            return Err(format!(
-                "the PVM ACE layout has {layout_felts} felts per out-of-domain row but the \
+            .expect("PVM next-row boundary precedes the current row");
+        assert!(
+            layout_felts == geometry.row_felts(),
+            "the PVM ACE layout has {layout_felts} felts per out-of-domain row but the \
                  chiplet widths require {}",
-                geometry.row_felts()
-            ));
-        }
-        if !geometry.row_felts().is_multiple_of(ADV_PIPE_BLOCK_FELTS) {
-            return Err(format!(
-                "the PVM out-of-domain row is {} felts, which is not {ADV_PIPE_BLOCK_FELTS}-felt \
+            geometry.row_felts()
+        );
+        assert!(
+            geometry.row_felts().is_multiple_of(ADV_PIPE_BLOCK_FELTS),
+            "the PVM out-of-domain row is {} felts, which is not {ADV_PIPE_BLOCK_FELTS}-felt \
                  aligned",
-                geometry.row_felts()
-            ));
-        }
+            geometry.row_felts()
+        );
 
-        Ok(geometry)
+        geometry
     }
 
     fn groups(&self) -> [(&'static str, &Vec<usize>); 3] {
@@ -258,7 +254,7 @@ impl ScatterPlan {
 /// occupant is always alone on the wire and always lands at the same canonical address, so it is
 /// dispatched directly rather than through the table. The quotient matrix is relation-wide, not
 /// per-chiplet, and is likewise fixed.
-fn pvm_scatter_plan(geometry: &PvmOodGeometry) -> Result<ScatterPlan, String> {
+fn pvm_scatter_plan(geometry: &PvmOodGeometry) -> ScatterPlan {
     let mut dispatches = Vec::new();
     let mut sources = Vec::new();
     let mut group_base = 0usize;
@@ -272,14 +268,13 @@ fn pvm_scatter_plan(geometry: &PvmOodGeometry) -> Result<ScatterPlan, String> {
         // group. A partially occupied group would need the rank among occupants instead, which
         // the proof order does not directly give; refuse to emit rather than silently address
         // past the group's slots.
-        if occupied > 1 && occupied != widths.len() {
-            return Err(format!(
-                "the {group} commitment group is occupied by {occupied} of {} chiplets; the \
+        assert!(
+            occupied <= 1 || occupied == widths.len(),
+            "the {group} commitment group is occupied by {occupied} of {} chiplets; the \
                  out-of-domain scatter indexes its table by proof-order position, which requires \
                  every chiplet to occupy the group",
-                widths.len()
-            ));
-        }
+            widths.len()
+        );
         let group_slots_offset = OOD_SCATTER_SLOTS_OFFSET + 2 * slot;
         let mut canonical = group_base;
         let mut position = 0usize;
@@ -328,11 +323,11 @@ fn pvm_scatter_plan(geometry: &PvmOodGeometry) -> Result<ScatterPlan, String> {
 
     // `adv_pipe` writes double words, so every retargeted destination must stay aligned.
     if let Some(bad) = dispatches.iter().find(|d| !d.dst.is_multiple_of(ADV_PIPE_BLOCK_FELTS)) {
-        return Err(format!(
+        panic!(
             "the {} segment at row offset {} is not {ADV_PIPE_BLOCK_FELTS}-felt aligned, which \
              `adv_pipe` requires of its destination",
             bad.group, bad.dst
-        ));
+        );
     }
 
     let mut lengths: Vec<_> = dispatches.iter().map(|dispatch| dispatch.blocks).collect();
@@ -342,31 +337,28 @@ fn pvm_scatter_plan(geometry: &PvmOodGeometry) -> Result<ScatterPlan, String> {
     // Digest words must be word-aligned, so they follow the pair table at the next word boundary.
     let digest_offset = (OOD_SCATTER_SLOTS_OFFSET + 2 * slot).next_multiple_of(WORD_FELTS);
     let required = digest_offset + WORD_FELTS * lengths.len();
-    if required > OOD_SCATTER_TABLE_FELTS as usize {
-        return Err(format!(
-            "the PVM out-of-domain scatter table needs {required} felts but \
+    assert!(
+        required <= OOD_SCATTER_TABLE_FELTS as usize,
+        "the PVM out-of-domain scatter table needs {required} felts but \
              OOD_SCATTER_TABLE_PTR reserves {OOD_SCATTER_TABLE_FELTS}"
-        ));
-    }
-    if dispatches.iter().map(|dispatch| dispatch.blocks).sum::<usize>() != geometry.row_blocks() {
-        return Err("the PVM scatter dispatch table does not cover exactly one out-of-domain row"
-            .to_string());
-    }
+    );
+    assert!(
+        dispatches.iter().map(|dispatch| dispatch.blocks).sum::<usize>() == geometry.row_blocks(),
+        "the PVM scatter dispatch table does not cover exactly one out-of-domain row"
+    );
 
-    Ok(ScatterPlan {
+    ScatterPlan {
         dispatches,
         sources,
         lengths,
         digest_offset,
-    })
+    }
 }
 
 /// Derives the occupied scatter-table ranges from the same plan that renders the ingest hook.
 #[cfg(feature = "constants-tools")]
-pub(crate) fn pvm_scatter_table_layout(
-    geometry: &PvmOodGeometry,
-) -> Result<PvmScatterTableLayout, String> {
-    Ok(pvm_scatter_plan(geometry)?.table_layout())
+pub(crate) fn pvm_scatter_table_layout(geometry: &PvmOodGeometry) -> PvmScatterTableLayout {
+    pvm_scatter_plan(geometry).table_layout()
 }
 
 // RENDERING
@@ -398,11 +390,8 @@ fn format_sum(parts: &[usize]) -> String {
 ///
 /// `ids_word_aligned` states whether the `id_by_pos` table starts on a word boundary, which lets
 /// the proof-order pass write complete groups of four IDs with word stores.
-pub(crate) fn render_pvm_ood_frames(
-    geometry: &PvmOodGeometry,
-    ids_word_aligned: bool,
-) -> Result<String, String> {
-    let plan = pvm_scatter_plan(geometry)?;
+pub(crate) fn render_pvm_ood_frames(geometry: &PvmOodGeometry, ids_word_aligned: bool) -> String {
+    let plan = pvm_scatter_plan(geometry);
     let row_felts = geometry.row_felts();
     let row_blocks = geometry.row_blocks();
     let proof_order_maps = render_proof_order_maps(&ProofOrderMapsConfig {
@@ -413,8 +402,7 @@ pub(crate) fn render_pvm_ood_frames(
         // Ten heights do not form a single word and are read once per proof.
         word_load_heights: false,
         word_store_ids: ids_word_aligned,
-    })
-    .map_err(|err| err.to_string())?;
+    });
 
     let pipes = plan
         .lengths
@@ -589,7 +577,7 @@ end
         order_pass = order_pass.join(""),
     )
     .expect("writing to String cannot fail");
-    Ok(out)
+    out
 }
 
 #[cfg(test)]
@@ -603,8 +591,8 @@ mod tests {
         concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/ood_frames.masm");
 
     pub(crate) fn live_geometry() -> PvmOodGeometry {
-        let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
-        PvmOodGeometry::from_input_layout(canonical.layout()).expect("PVM out-of-domain geometry")
+        let canonical = build_canonical_precompile_ace_circuit();
+        PvmOodGeometry::from_input_layout(canonical.layout())
     }
 
     /// Pins the per-chiplet row geometry and dispatch plan derived from the canonical circuit
@@ -619,7 +607,7 @@ mod tests {
         assert_eq!(geometry.row_felts(), 1_600);
         assert_eq!(geometry.row_blocks(), 200);
 
-        let plan = pvm_scatter_plan(&geometry).expect("scatter plan");
+        let plan = pvm_scatter_plan(&geometry);
         assert_eq!(plan.dispatches.len(), 22, "one segment per occupied per-chiplet block");
         assert_eq!(plan.dispatched_slots(), 20, "main and aux are the order-dependent groups");
         assert_eq!(plan.lengths, vec![2, 4, 6, 8, 10, 12, 14, 18, 26, 28]);
@@ -636,7 +624,7 @@ mod tests {
     #[test]
     fn generated_pvm_ood_hook_is_up_to_date() {
         // The generated layout pads `pos_by_id` to a word, so `id_by_pos` is word-aligned.
-        let rendered = render_pvm_ood_frames(&live_geometry(), true).expect("render the PVM hook");
+        let rendered = render_pvm_ood_frames(&live_geometry(), true);
         assert!(rendered.contains("pub proc stage_proof_order_maps"));
         assert!(rendered.contains("exec.layout::proof_order_positions_ptr"));
         assert!(rendered.contains("exec.layout::proof_order_ids_ptr"));
@@ -660,6 +648,7 @@ mod tests {
     /// single occupant needs no table at all. Anything between the two would address past the
     /// group's slots, so the renderer must refuse it instead of emitting it.
     #[test]
+    #[should_panic(expected = "preprocessed commitment group is occupied by 2 of 10")]
     fn scatter_plan_rejects_partially_occupied_commitment_groups() {
         // A geometry whose only meaningful axis is the preprocessed occupancy under test: the
         // uniform main and aux widths keep the `pipe_k` set small enough that the reserve, which
@@ -672,28 +661,23 @@ mod tests {
         };
 
         // The PVM preprocessed commitment group is occupied only by `ChipletAir::BytePairLut`.
-        assert!(pvm_scatter_plan(&live_geometry()).is_ok());
+        pvm_scatter_plan(&live_geometry());
         let mut sole = vec![0usize; NUM_CHIPLETS];
         sole[3] = 16;
-        assert!(pvm_scatter_plan(&with_preprocessed(sole)).is_ok());
+        pvm_scatter_plan(&with_preprocessed(sole));
         // Every chiplet occupies the group.
-        assert!(pvm_scatter_plan(&with_preprocessed(vec![16; NUM_CHIPLETS])).is_ok());
+        pvm_scatter_plan(&with_preprocessed(vec![16; NUM_CHIPLETS]));
 
         let mut partial = vec![0usize; NUM_CHIPLETS];
         partial[0] = 16;
         partial[3] = 16;
-        let Err(error) = pvm_scatter_plan(&with_preprocessed(partial)) else {
-            panic!("a partially occupied group must be refused");
-        };
-        assert!(
-            error.contains("preprocessed commitment group is occupied by 2 of 10"),
-            "unexpected refusal: {error}"
-        );
+        pvm_scatter_plan(&with_preprocessed(partial));
     }
 
     /// The reserve is a fixed constant in the generated layout, so the renderer — not the
     /// verifier at run time — is what must notice when the plan outgrows it.
     #[test]
+    #[should_panic(expected = "OOD_SCATTER_TABLE_PTR reserves")]
     fn scatter_plan_refuses_to_outgrow_the_reserved_table() {
         let base = live_geometry();
         // Give every chiplet a distinct main and aux width, so the `pipe_k` set grows a word at a
@@ -704,20 +688,16 @@ mod tests {
             aux: (0..NUM_CHIPLETS).map(|i| 8 * (i + 1)).collect(),
             quotient: base.quotient,
         };
-        let Err(error) = pvm_scatter_plan(&geometry) else {
-            panic!("a plan past the reserve must be refused");
-        };
-        assert!(error.contains("OOD_SCATTER_TABLE_PTR reserves"), "unexpected refusal: {error}");
+        pvm_scatter_plan(&geometry);
     }
 
     /// The row the hook pipes is the row the circuit reads; a drifted width must fail closed.
     #[test]
     fn geometry_derivation_cross_checks_the_input_layout() {
-        let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
+        let canonical = build_canonical_precompile_ace_circuit();
         let layout = canonical.layout();
-        assert!(PvmOodGeometry::from_input_layout(layout).is_ok());
         assert_eq!(
-            PvmOodGeometry::from_input_layout(layout).expect("geometry").row_felts() / 2,
+            PvmOodGeometry::from_input_layout(layout).row_felts() / 2,
             layout.counts.preprocessed_width
                 + layout.counts.width
                 + layout.counts.aux_width * EXT_DEGREE
