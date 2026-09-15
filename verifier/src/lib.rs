@@ -94,9 +94,9 @@ impl Verifier {
     /// Verifies a deferred or complete versioned execution proof against its public claim.
     ///
     /// The VM STARK authenticates the carried precompile root in either state. For a deferred
-    /// proof, the verifier evaluates the carried `PrecompileWitness`, checks that its recomputed
-    /// root matches the VM root, and verifies the VM STARK. It returns the authenticated root as an
-    /// outstanding obligation until a precompile STARK is supplied.
+    /// proof, the verifier first verifies the VM STARK, then evaluates the carried
+    /// `PrecompileWitness` and checks that its recomputed root matches the VM root. It returns the
+    /// authenticated root as an outstanding obligation until a precompile STARK is supplied.
     /// Complete proofs that contain precompile work additionally verify the aggregate precompile
     /// STARK against the VM-authenticated root.
     ///
@@ -130,13 +130,10 @@ impl Verifier {
     ) -> Result<VerificationOutcome, VerificationError> {
         let vm = proof.vm();
         let (outstanding_root, precompile) = match proof.precompile() {
-            PrecompileStatus::Deferred(witness) => {
+            PrecompileStatus::Deferred(_) => {
                 let root = vm.precompile_root;
                 if root == TRUE_DIGEST {
                     return Err(VerificationError::DeferredTrueRoot);
-                }
-                if witness.compute_root(Arc::new(miden_precompiles::registry()))? != root {
-                    return Err(VerificationError::DeferredWitnessRootMismatch);
                 }
                 (Some(root), None)
             },
@@ -159,6 +156,12 @@ impl Verifier {
         }
 
         let vm_security_parameters = self.verify_vm(claim, vm)?;
+        // Authenticate the VM statement before performing potentially expensive witness evaluation.
+        if let PrecompileStatus::Deferred(witness) = proof.precompile()
+            && witness.compute_root(Arc::new(miden_precompiles::registry()))? != vm.precompile_root
+        {
+            return Err(VerificationError::DeferredWitnessRootMismatch);
+        }
         let precompile_security_parameters = precompile
             .map(|precompile| self.verify_precompile(precompile, vm.precompile_root))
             .transpose()?;
@@ -539,11 +542,8 @@ mod tests {
             .expect("a logged TRUE is a nonempty obligation"),
         );
         let cases: Vec<(ExecutionProof, CheckError)> = vec![
-            (ExecutionProof::new(vm_proof(TRUE_DIGEST), deferred.clone()), |error| {
+            (ExecutionProof::new(vm_proof(TRUE_DIGEST), deferred), |error| {
                 matches!(error, VerificationError::DeferredTrueRoot)
-            }),
-            (ExecutionProof::new(vm_proof(required), deferred), |error| {
-                matches!(error, VerificationError::DeferredWitnessRootMismatch)
             }),
             (complete(required, Some(vec![])), |error| {
                 matches!(error, VerificationError::EmptyPrecompileRoots)
@@ -576,7 +576,7 @@ mod tests {
     }
 
     #[test]
-    fn deferred_verification_rejects_false_assertion_with_matching_root() {
+    fn invalid_vm_stark_is_rejected_before_deferred_witness_evaluation() {
         use miden_precompiles::{UintDomain, UintPrecompile};
 
         let witness = PrecompileWitness::from_entries(vec![
@@ -596,14 +596,18 @@ mod tests {
             PrecompileWitnessEntry::Join { tag: Tag::AND, lhs: 0, rhs: 3 },
         ])
         .unwrap();
+        // Evaluating this witness first would reject its false assertion instead of the VM STARK.
+        assert!(matches!(
+            witness.compute_root(Arc::new(miden_precompiles::registry())),
+            Err(error) if matches!(error.root(), PrecompileError::AssertionFailed)
+        ));
         let proof = ExecutionProof::new(
             vm_proof(witness.root_unchecked()),
             PrecompileStatus::Deferred(witness),
         );
         assert!(matches!(
             Verifier::new().verify(&claim(), &proof),
-            Err(VerificationError::DeferredWitnessEvaluation(error))
-                if matches!(error.root(), PrecompileError::AssertionFailed)
+            Err(VerificationError::StarkVerificationError(..))
         ));
     }
 
