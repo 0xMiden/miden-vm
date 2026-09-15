@@ -12,11 +12,9 @@ use miden_processor::{
     HostLibrary,
     event::{EventHandler, EventName},
 };
+use wasmparser::{Parser, Payload};
 
-use crate::{
-    WasmHandlerLimits, WasmHandlerLoadError, WasmHandlerModule,
-    module::{HEADER_LEN, module_statics, read_leb_u32, walk_wasm_sections},
-};
+use crate::{WasmHandlerLimits, WasmHandlerLoadError, WasmHandlerModule, module::module_statics};
 
 /// Loads the package's `event_handlers` section, validates the Wasm module, and returns one
 /// registered-handler pair per manifest entry.
@@ -67,13 +65,13 @@ pub fn host_library_from_package(
 /// `event_handlers` section without a hand-written manifest.
 ///
 /// The module is untrusted input, so the derivation stays inside the section caps of the package
-/// format: a module over [`MAX_MODULE_BYTES`] is refused before the walk, and the record loop
+/// format: a module over [`MAX_MODULE_BYTES`] is refused before the parse, and the record loop
 /// stops at [`MAX_HANDLERS`] entries and at names over [`MAX_NAME_BYTES`].
 ///
 /// # Errors
 /// Returns [`WasmHandlerLoadError::ModuleTooLarge`] when the module is over the size cap, and
-/// [`WasmHandlerLoadError::InvalidModule`] when the section layout or a manifest record is
-/// malformed.
+/// [`WasmHandlerLoadError::InvalidModule`] when the binary does not parse or a manifest record
+/// is malformed.
 ///
 /// Returns [`WasmHandlerLoadError::InvalidManifest`] for the three manifest rules this function
 /// applies to the records themselves: an empty event or export name, a name over
@@ -86,23 +84,18 @@ pub fn manifest_from_module(
 ) -> Result<Vec<EventHandlerManifestEntry>, WasmHandlerLoadError> {
     check_module_size(wasm)?;
 
-    // Only the manifest sections are collected, so the other custom sections of the module cost
-    // no allocation here.
-    let mut manifests = Vec::new();
-    let mut malformed = false;
-    walk_wasm_sections(wasm, |id, payload, _| match classify_section(id, payload) {
-        SectionKind::Manifest(records) => manifests.push(records),
-        SectionKind::Other => {},
-        SectionKind::Malformed => malformed = true,
-    })
-    .ok_or_else(|| WasmHandlerLoadError::InvalidModule("malformed section layout".to_string()))?;
-    if malformed {
-        return Err(WasmHandlerLoadError::InvalidModule("malformed custom section".to_string()));
-    }
-
+    // wasmparser borrows the section contents, so the other sections of the module cost no
+    // allocation here.
     let mut entries = Vec::new();
-    for records in manifests {
-        parse_manifest_records(records, &mut entries)?;
+    for payload in Parser::new(0).parse_all(wasm) {
+        let payload = payload.map_err(|err| {
+            WasmHandlerLoadError::InvalidModule(format!("malformed section layout: {err}"))
+        })?;
+        if let Payload::CustomSection(section) = payload
+            && section.name() == MANIFEST_SECTION_NAME
+        {
+            parse_manifest_records(section.data(), &mut entries)?;
+        }
     }
     Ok(entries)
 }
@@ -164,29 +157,30 @@ pub fn section_from_module(
 
 /// Returns `wasm` without its `miden:event-manifest` custom sections.
 ///
-/// The result keeps the 8-byte header and every other top-level section, with their bytes
-/// unchanged. Returns `None` when the section layout is malformed.
+/// The result keeps the 8-byte header and every other top-level section with its contents
+/// unchanged; the size prefix of each kept section is re-encoded minimally, which toolchain
+/// output already is. Returns `None` when the binary does not parse.
 fn strip_manifest_sections(wasm: &[u8]) -> Option<Vec<u8>> {
+    /// The length of the Wasm binary header (magic + version).
+    const HEADER_LEN: usize = 8;
+
     let mut out = Vec::with_capacity(wasm.len());
     out.extend_from_slice(wasm.get(..HEADER_LEN)?);
-
-    let mut malformed = false;
-    walk_wasm_sections(wasm, |id, payload, section| {
-        let is_manifest = match classify_section(id, payload) {
-            SectionKind::Manifest(_) => true,
-            SectionKind::Other => false,
-            SectionKind::Malformed => {
-                malformed = true;
-                false
-            },
-        };
-        if !is_manifest {
-            // The copy holds the section ID and the size prefix as they were encoded.
-            out.extend_from_slice(&wasm[section]);
+    for payload in Parser::new(0).parse_all(wasm) {
+        let payload = payload.ok()?;
+        if let Payload::CustomSection(section) = &payload
+            && section.name() == MANIFEST_SECTION_NAME
+        {
+            continue;
         }
-    })?;
-    if malformed {
-        return None;
+        // `as_section` reports every top-level section with the range of its contents; the
+        // per-function `CodeSectionEntry` payloads return `None`, and the code section itself
+        // is covered once by `CodeSectionStart`.
+        if let Some((id, range)) = payload.as_section() {
+            out.push(id);
+            out.extend_from_slice(&leb_u32(range.len() as u32));
+            out.extend_from_slice(wasm.get(range)?);
+        }
     }
     Some(out)
 }
@@ -202,21 +196,16 @@ fn check_module_size(wasm: &[u8]) -> Result<(), WasmHandlerLoadError> {
     Ok(())
 }
 
-/// Fuzzing support: returns `true` when the top-level section walk of `wasm` succeeds and every
-/// custom section splits into a name and content.
+/// Fuzzing support: returns `true` when the wasmparser pass the manifest readers use parses
+/// `wasm` completely.
 ///
 /// Differential fuzzing checks this against wasmi's validator: the load path conservatively
-/// rejects modules whose walk fails, so any module wasmi validates must also walk. Not part of
-/// the public API.
+/// rejects a module that does not parse, and this crate pins wasmparser to the version wasmi
+/// validates with, so any module wasmi validates must parse. A disagreement means the two
+/// wasmparser versions drifted apart. Not part of the public API.
 #[doc(hidden)]
 pub fn fuzz_walk_sections(wasm: &[u8]) -> bool {
-    let mut custom_sections_ok = true;
-    let walked = walk_wasm_sections(wasm, |id, payload, _| {
-        // The shared classifier is the one definition of a malformed custom section, so the
-        // fuzz pin follows every future change of that rule.
-        custom_sections_ok &= !matches!(classify_section(id, payload), SectionKind::Malformed);
-    });
-    walked.is_some() && custom_sections_ok
+    Parser::new(0).parse_all(wasm).all(|payload| payload.is_ok())
 }
 
 /// Fuzzing support: returns `true` when the loader's static analysis of `wasm` accepts the
@@ -266,43 +255,6 @@ fn leb_u32(mut value: u32) -> Vec<u8> {
         }
         out.push(byte | 0x80);
     }
-}
-
-/// What one top-level section of a Wasm binary is to the manifest readers.
-enum SectionKind<'a> {
-    /// A `miden:event-manifest` custom section, holding its records.
-    Manifest(&'a [u8]),
-    /// Any other section.
-    Other,
-    /// A custom section whose payload does not split into a name and a content.
-    Malformed,
-}
-
-/// Classifies one top-level section for the manifest readers.
-///
-/// The reader that collects the records and the reader that strips the sections share this
-/// predicate, so they cannot drift apart on what a manifest section is or on how a malformed
-/// custom section is treated.
-fn classify_section(id: u8, payload: &[u8]) -> SectionKind<'_> {
-    // Custom sections have ID 0; their payload starts with a LEB128-prefixed name.
-    if id != 0 {
-        return SectionKind::Other;
-    }
-    match split_custom_section(payload) {
-        Some((name, records)) if name == MANIFEST_SECTION_NAME.as_bytes() => {
-            SectionKind::Manifest(records)
-        },
-        Some(_) => SectionKind::Other,
-        None => SectionKind::Malformed,
-    }
-}
-
-/// Splits a custom-section payload into its name and its content.
-fn split_custom_section(payload: &[u8]) -> Option<(&[u8], &[u8])> {
-    let (name_len, name_start) = read_leb_u32(payload, 0)?;
-    let content_start = name_start.checked_add(name_len as usize)?;
-    let name = payload.get(name_start..content_start)?;
-    Some((name, payload.get(content_start..)?))
 }
 
 /// Parses concatenated manifest records: one version byte, then the event name and the export

@@ -15,6 +15,7 @@ use miden_processor::{
     event::{EventError, EventHandler, EventId, EventName},
 };
 use wasmi::{CompilationMode, Config, EnforcedLimits, Engine, Instance, Linker, Module, Store};
+use wasmparser::{Parser, Payload};
 
 use crate::{
     error::{HostTrap, HostTrapKind, WasmHandlerLoadError, WasmHandlerRunError},
@@ -410,76 +411,7 @@ fn classify_trap(err: &wasmi::Error, fuel: u64) -> WasmHandlerRunError {
     }
 }
 
-/// Decodes a LEB128 value from `data` at `pos` into a `u64`; returns the value and the next
-/// position.
-///
-/// `max_shift` bounds the encoding length: the read stops with `None` when a continuation byte
-/// asks for a shift of `max_shift` or more.
-fn read_leb(data: &[u8], mut pos: usize, max_shift: u32) -> Option<(u64, usize)> {
-    let mut value: u64 = 0;
-    let mut shift = 0u32;
-    loop {
-        let byte = *data.get(pos)?;
-        pos += 1;
-        value |= u64::from(byte & 0x7f) << shift;
-        if byte & 0x80 == 0 {
-            break;
-        }
-        shift += 7;
-        if shift >= max_shift {
-            return None;
-        }
-    }
-    Some((value, pos))
-}
-
-/// Decodes a LEB128-encoded `u32` from `data` at `pos`; returns the value and the next
-/// position.
-///
-/// An encoding over five bytes returns `None`, and so does a five-byte encoding whose value
-/// does not fit a `u32`.
-pub(crate) fn read_leb_u32(data: &[u8], pos: usize) -> Option<(u32, usize)> {
-    let (value, pos) = read_leb(data, pos, 35)?;
-    u32::try_from(value).ok().map(|value| (value, pos))
-}
-
-/// The length of the Wasm binary header (magic + version).
-pub(crate) const HEADER_LEN: usize = 8;
-
-/// Walks the top-level sections of a Wasm binary, calling `visit` with each section ID, its
-/// payload, and the range of the whole section in `wasm` (the ID byte, the size prefix, and the
-/// payload). The range lets a caller copy a section back out unchanged.
-///
-/// Returns `None` when the walk meets a malformed layout.
-pub(crate) fn walk_wasm_sections<'a>(
-    wasm: &'a [u8],
-    mut visit: impl FnMut(u8, &'a [u8], core::ops::Range<usize>),
-) -> Option<()> {
-    if wasm.len() < HEADER_LEN {
-        return None;
-    }
-    let mut pos = HEADER_LEN;
-    while pos < wasm.len() {
-        let id = wasm[pos];
-        let (size, payload_start) = read_leb_u32(wasm, pos + 1)?;
-        let payload_end = payload_start.checked_add(size as usize)?;
-        visit(id, wasm.get(payload_start..payload_end)?, pos..payload_end);
-        pos = payload_end;
-    }
-    Some(())
-}
-
-/// Decodes a LEB128-encoded `u64` from `data` at `pos`; returns the value and the next
-/// position.
-///
-/// At the last shift (63), the bits of an over-long encoding drop silently instead of
-/// returning `None`. This is harmless here: the reader runs after `Module::new` validated the
-/// binary, and its result only feeds the instantiation-cost upper bound.
-fn read_leb_u64(data: &[u8], pos: usize) -> Option<(u64, usize)> {
-    read_leb(data, pos, 70)
-}
-
-/// The load-time facts one walk of the module sections provides.
+/// The load-time facts one wasmparser pass over the module provides.
 pub(crate) struct ModuleStatics {
     /// The fuel charge for one instantiation.
     pub instantiation_fuel: u64,
@@ -498,19 +430,12 @@ pub(crate) struct ModuleStatics {
 /// passive data segments as if they were copied. The element section charges per encoded byte
 /// at its own, much higher rate; see `ELEMENT_FUEL_PER_BYTE` below.
 ///
-/// Returns `None` when a section does not parse, which `WasmHandlerModule::new` reports as an
-/// invalid module.
+/// The pass reads the binary with wasmparser, which this crate pins to the version wasmi
+/// validates with, so the declared sizes cannot be read differently from how wasmi reads them;
+/// the `wasm_section_walk_differential` fuzz target hunts for drift between the two. Returns
+/// `None` when the binary does not parse, which `WasmHandlerModule::new` reports as an invalid
+/// module.
 pub(crate) fn module_statics(wasm: &[u8]) -> Option<ModuleStatics> {
-    /// The section ID of the table section, whose elements instantiation allocates.
-    const TABLE_SECTION_ID: u8 = 4;
-    /// The section ID of the memory section, whose pages instantiation allocates.
-    const MEMORY_SECTION_ID: u8 = 5;
-    /// The section ID of the element section, whose segments instantiation materializes.
-    const ELEMENT_SECTION_ID: u8 = 9;
-    /// The section ID of the data section, whose segments instantiation materializes.
-    const DATA_SECTION_ID: u8 = 11;
-    /// The section ID of the start section.
-    const START_SECTION_ID: u8 = 8;
     /// The size of one Wasm linear-memory page.
     const PAGE_BYTES: u64 = 65536;
     /// The size of one table element (a reference) on a 64-bit host.
@@ -527,29 +452,33 @@ pub(crate) fn module_statics(wasm: &[u8]) -> Option<ModuleStatics> {
 
     let mut bytes: u64 = 0;
     let mut element_fuel: u64 = 0;
-    let mut malformed = false;
     let mut has_start_section = false;
-    walk_wasm_sections(wasm, |id, payload, _| match id {
-        MEMORY_SECTION_ID => match limits_min_total(payload, false) {
-            Some(pages) => bytes = bytes.saturating_add(pages.saturating_mul(PAGE_BYTES)),
-            None => malformed = true,
-        },
-        TABLE_SECTION_ID => match limits_min_total(payload, true) {
-            Some(elems) => bytes = bytes.saturating_add(elems.saturating_mul(TABLE_ELEMENT_BYTES)),
-            None => malformed = true,
-        },
-        DATA_SECTION_ID => {
-            bytes = bytes.saturating_add(payload.len() as u64);
-        },
-        ELEMENT_SECTION_ID => {
-            element_fuel = element_fuel
-                .saturating_add((payload.len() as u64).saturating_mul(ELEMENT_FUEL_PER_BYTE));
-        },
-        START_SECTION_ID => has_start_section = true,
-        _ => {},
-    })?;
-    if malformed {
-        return None;
+    for payload in Parser::new(0).parse_all(wasm) {
+        match payload.ok()? {
+            Payload::MemorySection(memories) => {
+                for memory in memories {
+                    bytes = bytes.saturating_add(memory.ok()?.initial.saturating_mul(PAGE_BYTES));
+                }
+            },
+            Payload::TableSection(tables) => {
+                for table in tables {
+                    bytes = bytes
+                        .saturating_add(table.ok()?.ty.initial.saturating_mul(TABLE_ELEMENT_BYTES));
+                }
+            },
+            // Both segment sections charge for their whole contents, segment headers included:
+            // the rate is per encoded byte, as an upper bound that needs no per-segment parsing.
+            Payload::DataSection(data) => {
+                bytes = bytes.saturating_add(data.range().len() as u64);
+            },
+            Payload::ElementSection(elements) => {
+                element_fuel = element_fuel.saturating_add(
+                    (elements.range().len() as u64).saturating_mul(ELEMENT_FUEL_PER_BYTE),
+                );
+            },
+            Payload::StartSection { .. } => has_start_section = true,
+            _ => {},
+        }
     }
     Some(ModuleStatics {
         instantiation_fuel: bytes
@@ -558,53 +487,6 @@ pub(crate) fn module_statics(wasm: &[u8]) -> Option<ModuleStatics> {
             .saturating_add(element_fuel),
         has_start_section,
     })
-}
-
-/// Sums the limit minimums of a memory or table section payload: the pages (memory) or
-/// elements (table) allocated at instantiation. `skip_reftype` skips the reference-type byte
-/// that leads each table entry.
-fn limits_min_total(payload: &[u8], skip_reftype: bool) -> Option<u64> {
-    let (count, mut pos) = read_leb_u32(payload, 0)?;
-    let mut total: u64 = 0;
-    for _ in 0..count {
-        if skip_reftype {
-            // A table's reference type is one byte in the short form (0x70 funcref,
-            // 0x6F externref). With the reference-types feature this loader enables, wasmi
-            // also validates the long-form encoding 0x63 0x70 / 0x63 0x6F — `(ref null
-            // func/extern)` — whose heaptype is an s33 LEB. wasmi 1.1.0 rejects every other
-            // encoding (0x64, GC heap types, type indices, the 0x40 table-with-initializer
-            // form), so the match below covers all of them.
-            //
-            // The default branch fails closed: a wasmi upgrade that admits one more encoding
-            // must not make this walk mis-read the bytes that follow and under-meter the
-            // instantiation. A false rejection is visible to the differential fuzz target
-            // (`wasm_section_walk_differential`); a wrong fuel value is not.
-            let reftype = *payload.get(pos)?;
-            pos += 1;
-            match reftype {
-                0x70 | 0x6f => {},
-                0x63 => {
-                    let (_, next) = read_leb_u64(payload, pos)?;
-                    pos = next;
-                },
-                _ => return None,
-            }
-        }
-        let flags = *payload.get(pos)?;
-        pos += 1;
-        // Valid limit flags: bit 0 = maximum present, bit 1 = shared, bit 2 = 64-bit.
-        if flags > 0b111 {
-            return None;
-        }
-        let (min, next) = read_leb_u64(payload, pos)?;
-        pos = next;
-        if flags & 1 != 0 {
-            let (_, next) = read_leb_u64(payload, pos)?;
-            pos = next;
-        }
-        total = total.saturating_add(min);
-    }
-    Some(total)
 }
 
 impl core::fmt::Debug for WasmHandlerModule {
