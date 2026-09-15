@@ -306,7 +306,7 @@ fn build_merkle_data(
     // Serve the canonical circuit stream from the advice map under its commitment. MASM pins that
     // commitment to the compiled-in circuit digest.
     let circuit = shared_pvm_recursive_circuit();
-    advice_map.push((circuit.commitment, circuit.instructions.clone()));
+    advice_map.push((circuit.commitment(), circuit.encoded().instructions().to_vec()));
 
     Ok((store, advice_map))
 }

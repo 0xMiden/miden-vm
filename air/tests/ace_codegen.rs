@@ -357,14 +357,11 @@ fn recursive_verifier_circuit_matches_the_canonical_builder() {
     });
     let encoded = canonical.to_ace();
 
-    assert_eq!(produced.num_inputs, encoded.num_vars());
-    assert_eq!(produced.num_eval_gates, encoded.num_eval_rows());
-    assert_eq!(produced.stream_len, encoded.size_in_felt());
-    assert_eq!(produced.instructions, encoded.instructions());
-    assert_eq!(produced.commitment, Eidos::hash_elements(encoded.instructions()));
+    assert_eq!(produced.encoded(), &encoded);
+    assert_eq!(produced.layout(), canonical.layout());
 
     // The stream is loaded with `adv_pipe`, which consumes eight felts per iteration.
-    assert!(produced.stream_len.is_multiple_of(8));
+    assert!(produced.encoded().size_in_felt().is_multiple_of(8));
 
     // Calling it twice must be deterministic.
     let produced_again = build_recursive_verifier_ace_circuit();
@@ -373,6 +370,11 @@ fn recursive_verifier_circuit_matches_the_canonical_builder() {
     // The cached circuit is what the advice builder serves, and it is reachable across crates.
     #[cfg(feature = "std")]
     assert_eq!(*miden_air::ace::shared_recursive_circuit(), produced);
+
+    // The owned path serves the same bytes and cached commitment without retaining the artifact.
+    let (commitment, instructions) = produced_again.into_advice_entry();
+    assert_eq!(commitment, Eidos::hash_elements(encoded.instructions()));
+    assert_eq!(instructions, encoded.instructions());
 }
 
 /// Recompute each AIR's aligned block widths in the combined READ layout.

@@ -245,21 +245,23 @@ mod tests {
     /// else: its digest is what the compiled-in PVM circuit commitment has to pin.
     #[test]
     fn pvm_recursive_circuit_matches_the_canonical_builder() {
-        let encoded = build_canonical_precompile_ace_circuit().to_ace();
+        let canonical = build_canonical_precompile_ace_circuit();
+        let encoded = canonical.to_ace();
         let produced = build_pvm_recursive_verifier_ace_circuit();
 
-        assert_eq!(produced.num_inputs, encoded.num_vars());
-        assert_eq!(produced.num_eval_gates, encoded.num_eval_rows());
-        assert_eq!(produced.stream_len, encoded.size_in_felt());
-        assert_eq!(produced.instructions.as_slice(), encoded.instructions());
-        assert_eq!(produced.commitment, Eidos::hash_elements(encoded.instructions()));
+        assert_eq!(produced.encoded(), &encoded);
+        assert_eq!(produced.layout(), canonical.layout());
         assert!(
-            produced.stream_len.is_multiple_of(8),
+            produced.encoded().size_in_felt().is_multiple_of(8),
             "the stream must fill whole adv_pipe blocks"
         );
 
         // The cached circuit is what a repeated caller evaluates, and it is built the same way.
         assert_eq!(*shared_pvm_recursive_circuit(), produced);
+
+        let (commitment, instructions) = produced.into_advice_entry();
+        assert_eq!(commitment, Eidos::hash_elements(encoded.instructions()));
+        assert_eq!(instructions, encoded.instructions());
     }
 
     /// The canonical circuit is order-invariant: a proof order is carried entirely by its READ
@@ -468,10 +470,10 @@ mod tests {
             "layout_inputs: {}\nnum_vars: {}\nnum_eval_gates: {}\nstream_len: \
              {}\ncircuit_digest: {:?}\nrelation_digest: {:?}",
             canonical.layout().total_inputs,
-            circuit.num_inputs,
-            circuit.num_eval_gates,
-            circuit.stream_len,
-            circuit.commitment.iter().map(Felt::as_canonical_u64).collect::<Vec<_>>(),
+            circuit.encoded().num_vars(),
+            circuit.encoded().num_eval_rows(),
+            circuit.encoded().size_in_felt(),
+            circuit.commitment().iter().map(Felt::as_canonical_u64).collect::<Vec<_>>(),
             PVM_RELATION_DIGEST,
         );
 
@@ -485,7 +487,7 @@ mod tests {
     #[test]
     fn pvm_ace_circuit_digest_matches_canonical_circuit() {
         let circuit = build_pvm_recursive_verifier_ace_circuit();
-        let actual: Vec<u64> = circuit.commitment.iter().map(Felt::as_canonical_u64).collect();
+        let actual: Vec<u64> = circuit.commitment().iter().map(Felt::as_canonical_u64).collect();
         assert_eq!(
             actual, PVM_ACE_CIRCUIT_DIGEST,
             "PVM_ACE_CIRCUIT_DIGEST is stale relative to the canonical circuit's commitment"

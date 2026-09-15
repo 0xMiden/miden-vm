@@ -38,7 +38,7 @@ const MAX_NUM_ACE_NODES: usize = (1 << 30) - 1;
 /// helpers for stream sizing. `num_vars` counts extension-field nodes
 /// (inputs + constants + padding). `num_ops` and `num_eval_rows` count
 /// base-field operation rows (including padding ops).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EncodedCircuit {
     num_vars: usize,
     num_ops: usize,
@@ -79,6 +79,11 @@ impl EncodedCircuit {
     /// Raw instruction stream (constants + ops).
     pub fn instructions(&self) -> &[Felt] {
         &self.instructions
+    }
+
+    /// Transfer ownership of the instruction stream.
+    pub(crate) fn into_instructions(self) -> Vec<Felt> {
+        self.instructions
     }
 
     /// Instruction stream length in base field elements.

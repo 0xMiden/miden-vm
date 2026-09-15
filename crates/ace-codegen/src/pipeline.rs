@@ -202,7 +202,6 @@ where
         (LayoutKind::Native, true) => InputLayout::new_multi_air(counts, config.num_airs),
         (LayoutKind::Masm, true) => InputLayout::new_masm_multi_air(counts, config.num_airs),
     };
-    layout.validate();
 
     let (graph, constraints) = capture(air);
     let periodic_data = (!periodic_columns.is_empty())
@@ -288,11 +287,6 @@ where
     A: LiftedAir<Felt, QuadFelt>,
 {
     assert_ne!(config.num_quotient_chunks, 0, "num_quotient_chunks must be > 0");
-    let num_randomness = air.num_randomness();
-    assert_eq!(
-        num_randomness, 2,
-        "AIR must declare exactly 2 randomness challenges (alpha, beta), got {num_randomness}"
-    );
 
     InputCounts {
         preprocessed_width: air.preprocessed_width(),
@@ -300,7 +294,7 @@ where
         aux_width: air.aux_width(),
         num_aux_boundary: air.num_aux_values(),
         num_public: air.num_public_values(),
-        num_randomness,
+        num_randomness: air.num_randomness(),
         num_quotient_chunks: config.num_quotient_chunks,
     }
 }

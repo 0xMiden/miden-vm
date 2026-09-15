@@ -9,6 +9,7 @@
 #### Changes
 
 - [BREAKING] Removed `miden_ace_codegen::AceError`: compiler builders, encoding, off-VM evaluation, and renderers return values directly and panic on invalid AIRs or compiler configurations. Processor evaluation of guest-memory circuits remains fallible.
+- [BREAKING] Recursive ACE circuit artifacts now expose immutable encoding, layout, and commitment accessors instead of public fields; `into_advice_entry()` transfers the committed instruction stream without copying it.
 
 #### Fixes
 

@@ -83,7 +83,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     // The circuit topology is fixed across proof orders; MASM applies proof-order-specific ingest
     // scatter and fold-coefficient staging.
     let circuit = build_recursive_verifier_ace_circuit();
-    let input_layout = &circuit.input_layout;
+    let input_layout = circuit.layout();
 
     let num_quotient_chunks = input_layout.counts.num_quotient_chunks;
     assert!(
@@ -96,7 +96,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     )
     .expect("canonical verifier quotient parameters must be valid");
 
-    let circuit_digest = word_to_array(circuit.commitment);
+    let circuit_digest = word_to_array(circuit.commitment());
     let relation_digest = compute_relation_digest(&circuit_digest);
     let vm_geometry = VmGeometry::from_input_layout(input_layout)?;
     let constraints_eval = render_constraints_eval_file(&circuit, quotient_inputs, &vm_geometry);
@@ -132,12 +132,12 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
         &preprocessed_commitment,
     )?;
 
-    ensure_vm_ace_stream_fits(circuit.stream_len, &vm_layout)?;
+    ensure_vm_ace_stream_fits(circuit.encoded().size_in_felt(), &vm_layout)?;
 
     Ok(ComputedArtifacts {
-        num_inputs: circuit.num_inputs,
-        num_eval_gates: circuit.num_eval_gates,
-        stream_blocks: circuit.stream_len / 8,
+        num_inputs: circuit.encoded().num_vars(),
+        num_eval_gates: circuit.encoded().num_eval_rows(),
+        stream_blocks: circuit.encoded().size_in_felt() / 8,
         circuit_digest,
         relation_digest,
         preprocessed_commitment,
@@ -1027,9 +1027,9 @@ fn render_constraints_eval_file(
         generated_by: "cargo run -p miden-core-lib --features constraints-tools --bin \
                            regenerate-constraints -- --write",
         layout_module: "miden::core::sys::vm::layout",
-        num_inputs: circuit.num_inputs,
-        num_eval_gates: circuit.num_eval_gates,
-        stream_len: circuit.stream_len,
+        num_inputs: circuit.encoded().num_vars(),
+        num_eval_gates: circuit.encoded().num_eval_rows(),
+        stream_len: circuit.encoded().size_in_felt(),
         max_cycle_len_log: max_periodic_cycle_len_log(),
         num_airs: MIDEN_AIR_COUNT,
         // The VM's canonical READ layout reserves one fold-coefficient slot per AIR, so its
@@ -1040,7 +1040,7 @@ fn render_constraints_eval_file(
             coefficient_offset: geometry.fold_coefficient_offset,
         }),
         quotient_inputs,
-        circuit_digest: circuit.commitment,
+        circuit_digest: circuit.commitment(),
     })
 }
 

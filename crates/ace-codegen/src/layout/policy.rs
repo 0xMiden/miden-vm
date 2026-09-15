@@ -225,7 +225,7 @@ impl InputLayout {
             builder.align(end_align);
         }
 
-        Self {
+        let layout = Self {
             regions: LayoutRegions {
                 public_values,
                 randomness,
@@ -257,7 +257,9 @@ impl InputLayout {
             },
             total_inputs: builder.offset,
             counts,
-        }
+        };
+        layout.validate();
+        layout
     }
 }
 

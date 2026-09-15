@@ -237,7 +237,7 @@ impl PvmReadLayout {
 /// Build the canonical circuit and derive every generated artifact from it.
 fn compute() -> Result<GeneratedArtifacts, String> {
     let circuit = build_pvm_recursive_verifier_ace_circuit();
-    let input_layout = &circuit.input_layout;
+    let input_layout = circuit.layout();
     let read_layout = PvmReadLayout::from_input_layout(input_layout);
     let num_quotient_chunks = input_layout.counts.num_quotient_chunks;
     assert!(
@@ -251,11 +251,11 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     .expect("PVM quotient arity must fit the PCS blowup");
 
     let shape = CircuitShape {
-        num_inputs: circuit.num_inputs,
-        num_eval_gates: circuit.num_eval_gates,
-        stream_len: circuit.stream_len,
+        num_inputs: circuit.encoded().num_vars(),
+        num_eval_gates: circuit.encoded().num_eval_rows(),
+        stream_len: circuit.encoded().size_in_felt(),
     };
-    let circuit_digest = circuit.commitment;
+    let circuit_digest = circuit.commitment();
     let relation_digest = relation_digest_for_circuit(&circuit_digest);
     let preprocessed_commitment = preprocessed_commitment(relation_digest);
 
@@ -841,8 +841,8 @@ mod tests {
     #[test]
     fn pvm_proof_order_tables_are_disjoint_and_word_aligned() {
         let circuit = crate::ace::build_pvm_recursive_verifier_ace_circuit();
-        let read_layout = PvmReadLayout::from_input_layout(&circuit.input_layout);
-        let stream_len = u32::try_from(circuit.stream_len).unwrap();
+        let read_layout = PvmReadLayout::from_input_layout(circuit.layout());
+        let stream_len = u32::try_from(circuit.encoded().size_in_felt()).unwrap();
         let scratch = pvm_scratch_allocation(&read_layout, stream_len);
 
         assert!(scratch.proof_order_positions_ptr.is_multiple_of(4));
