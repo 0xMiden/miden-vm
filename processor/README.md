@@ -40,14 +40,13 @@ The `FastProcessor` is designed for fast program execution with minimal overhead
 
 * **Pure execution** via `FastProcessor::execute()`: Executes a program without generating any trace-related metadata. This mode is optimized for maximum performance when proof generation is not required.
 * **Witness-producing execution** via `FastProcessor::execute_for_proving()` /
-  `FastProcessor::execute_for_proving_sync()`: Executes a program while collecting the complete
-  post-execution `ExecutionWitness`.
+`FastProcessor::execute_for_proving_sync()`: Executes a program while collecting the complete
+post-execution `ExecutionWitness`.
 
 ### Trace generation with `build_trace()`
 After execution with `FastProcessor::execute_for_proving*()`, split the returned
 `ExecutionWitness` and pass its `VmWitness` to `build_trace()`. When the `concurrent` feature is
 enabled, trace generation is parallelized for improved performance.
-
 
 The trace consists of several sections:
 * The decoder, which tracks instruction decoding and control flow.
@@ -59,7 +58,7 @@ These sections are connected via two buses:
 * The range-checker bus, which links stack and chiplets modules with the range-checker.
 * The chiplet bus, which links stack and the decoder with the chiplets module.
 
-A much more in-depth description of Miden VM design is available [here](https://docs.miden.xyz/miden-vm/design).
+A much more in-depth description of Miden VM design is available [here](https://docs.miden.xyz/miden-vm/design/).
 
 ## Crate features
 Miden processor can be compiled with the following features:
@@ -71,4 +70,4 @@ tests.
 To compile with `no_std`, disable default features via `--no-default-features` flag, in which case only the `wasm32-unknown-unknown` and `wasm32-wasip1` targets are officially supported.
 
 ## License
-This project is dual-licensed under the [MIT](http://opensource.org/licenses/MIT) and [Apache 2.0](https://opensource.org/license/apache-2-0) licenses.
+This project is dual-licensed under the [MIT](https://opensource.org/license/MIT) and [Apache 2.0](https://opensource.org/license/apache-2.0) licenses.
