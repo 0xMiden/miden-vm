@@ -97,5 +97,4 @@ Internally, we use [rayon](https://github.com/rayon-rs/rayon) for parallel compu
 proof.
 
 ## License
-This project is dual-licensed under the [MIT](http://opensource.org/licenses/MIT) and
-[Apache 2.0](https://opensource.org/license/apache-2-0) licenses.
+This project is dual-licensed under the [MIT](https://opensource.org/license/MIT) and [Apache 2.0](https://opensource.org/license/apache-2.0) licenses.
