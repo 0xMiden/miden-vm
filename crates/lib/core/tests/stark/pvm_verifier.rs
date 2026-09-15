@@ -129,8 +129,13 @@ fn assert_pvm_rejects_tampering(inputs: &PvmRecursiveVerifierInputs) {
         .max_by_key(|(_, values)| values.len())
         .map(|(key, values)| (*key, values.to_vec()))
         .expect("adapter must include the selected ACE stream");
-    assert!(
-        circuit_values.len() > 10_000,
+    let stream_blocks: usize = include_str!("../../asm/sys/pvm/constraints_eval.masm")
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("const ACE_STREAM_BLOCKS = ")?.parse().ok())
+        .expect("the generated PVM evaluator declares its stream length");
+    assert_eq!(
+        circuit_values.len(),
+        8 * stream_blocks,
         "the largest content-addressed value must be the ACE instruction stream"
     );
     let mut circuit_stream = circuit_values;
