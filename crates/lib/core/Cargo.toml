@@ -54,6 +54,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+curve25519-dalek.workspace = true
 miden-ace-codegen.workspace = true
 miden-air.workspace = true
 miden-assembly = { workspace = true, features = ["testing"] }

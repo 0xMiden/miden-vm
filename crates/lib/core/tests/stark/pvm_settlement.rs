@@ -9,8 +9,10 @@ use miden_core::{
     events::{EventId, EventName},
     program::{ExecutionClaim, proof_request_key},
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus},
+    serde::Deserializable,
 };
-use miden_core_lib::{CoreLibrary, PVM_PROOF_REQUEST_EVENT_NAME};
+use miden_core_lib::{CoreLibrary, PVM_PROOF_REQUEST_EVENT_NAME, dsa::eddsa_25519_sha512};
+use miden_crypto::dsa::eddsa_25519_sha512::SigningKey as Ed25519SigningKey;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_precompiles_verifier::masm_verifier::{
     PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
@@ -27,15 +29,15 @@ use miden_verifier::{Verifier, recursive::RecursiveVerifierInputs};
 use crate::{helpers::masm_push_word, support::ecdsa::valid_fixture};
 
 #[tokio::test(flavor = "current_thread")]
-async fn ecdsa_deferred_obligation_is_settled_end_to_end() {
+async fn mixed_signatures_deferred_obligation_is_settled_end_to_end() {
     let core_lib = CoreLibrary::default();
-    let (deferred_proof, claim, deferred_state) = prove_deferred_ecdsa_execution(&core_lib);
+    let (deferred_proof, claim, deferred_state) = prove_deferred_signature_execution(&core_lib);
     let outcome = Verifier::new()
         .verify(&claim, &deferred_proof)
         .expect("the MVM proof must authenticate its deferred obligation");
     let deferred_root = outcome
         .outstanding_precompile_root()
-        .expect("the ECDSA execution must retain a deferred obligation");
+        .expect("the signature execution must retain a deferred obligation");
 
     let settlement = run_settlement_in_masm(&core_lib, &deferred_proof, &claim, deferred_state)
         .await
@@ -60,10 +62,12 @@ async fn ecdsa_deferred_obligation_is_settled_end_to_end() {
     assert!(outcome.is_complete(), "the PVM proof must discharge the obligation");
 }
 
-fn prove_deferred_ecdsa_execution(
+fn prove_deferred_signature_execution(
     core_lib: &CoreLibrary,
 ) -> (ExecutionProof, ExecutionClaim, DeferredState) {
     let fixture = valid_fixture();
+    let ed25519_key = Ed25519SigningKey::read_from_bytes(&[0xed; 32]).unwrap();
+    let ed25519_commitment = eddsa_25519_sha512::public_key_commitment(&ed25519_key.public_key());
 
     let source = format!(
         "
@@ -71,38 +75,44 @@ fn prove_deferred_ecdsa_execution(
             {}
             {}
             exec.::miden::core::crypto::dsa::ecdsa_k256_keccak::verify
+            {}
+            {}
+            exec.::miden::core::crypto::dsa::eddsa_25519_sha512::verify
         end
         ",
         masm_push_word(&fixture.message),
         masm_push_word(&fixture.public_key_commitment),
+        masm_push_word(&fixture.message),
+        masm_push_word(&ed25519_commitment),
     );
     let program = Assembler::default()
         .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("core library must link")
-        .assemble_program("ecdsa_deferred_settlement", source)
-        .expect("ECDSA settlement fixture must assemble")
+        .assemble_program("mixed_signatures_deferred_settlement", source)
+        .expect("signature settlement fixture must assemble")
         .unwrap_program();
     let mut host = DefaultHost::default()
         .with_library(core_lib)
         .expect("core library must load into the host");
     let mut advice_stack = AdviceStack::new();
     advice_stack.append_elements(fixture.advice);
+    advice_stack.append_elements(eddsa_25519_sha512::sign(&ed25519_key, fixture.message));
     let stack_inputs = StackInputs::default();
     let witness = FastProcessor::new_with_options(
         stack_inputs,
         AdviceInputs::default().with_stack(advice_stack),
         ExecutionOptions::default(),
     )
-    .expect("ECDSA advice must fit provider limits")
+    .expect("signature advice must fit provider limits")
     .execute_for_proving_sync(&program, &mut host)
-    .expect("ECDSA execution must produce a proving witness");
+    .expect("signature execution must produce a proving witness");
     let claim = witness.claim();
     let proof = Prover::new()
         .with_hash_fn(HashFunction::Eidos)
         .prove(witness)
-        .expect("ECDSA execution must produce a deferred MVM proof");
+        .expect("signature execution must produce a deferred MVM proof");
     let PrecompileStatus::Deferred(precompile) = proof.precompile() else {
-        panic!("ECDSA execution must retain deferred precompile work")
+        panic!("signature execution must retain deferred precompile work")
     };
     let deferred_state =
         DeferredState::from_wire(Arc::new(miden_precompiles::registry()), precompile)

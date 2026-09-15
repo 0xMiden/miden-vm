@@ -31,6 +31,18 @@ All stack inputs and output digests are represented on the stack as `u32` arrays
 | hash   | Computes Keccak256 hash of a single 256-bit input.<br /><br />Input: `[INPUT_U32[8], ...]`<br />Output: `[DIGEST_U32[8], ...]`<br /><br />Where:<br />- `DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[32])`<br />- `INPUT_U32[8] = [i_0, ..., i_7] = [INPUT_LO, INPUT_HI] ~ INPUT_U8[32]` with `u32` packing<br /> |
 | merge   | Merges two 256-bit digests via Keccak256 hash.<br /><br />Input: `[INPUT_L_U32[8], INPUT_R_U32[8], ...]`<br />Output: `[DIGEST_U32[8], ...]`<br /><br />Where:<br />- `INPUT_L_U32[8] = [l_0, ..., l_7] = [INPUT_L_LO, INPUT_L_HI] ~ INPUT_L_U8[32]`<br />- `INPUT_R_U32[8] = [r_0, ..., r_7] = [INPUT_R_LO, INPUT_R_HI] ~ INPUT_R_U8[32]`<br />- `DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_L_U8[32] concatenated with INPUT_R_U8[32])`<br /> |
 
+## SHA512
+
+Module `miden::core::precompiles::hashes::sha512` provides deferred SHA-512 hashing. Its
+`hash_bytes_mem` procedure consumes `[in_ptr, len_bytes, out_ptr, ...]` and writes the complete
+64-byte digest as sixteen little-endian packed `u32` felts at `out_ptr`.
+
+Both pointers must be word-aligned. Input bytes use the same packed representation, with zero
+unused bytes and felts in the final 32-byte chunk. The byte length must fit the configured
+`max_hash_len_bytes` execution limit. Input and output ranges may overlap. The logged deferred
+assertion binds the exact input length and all 64 output bytes; completing the execution proof
+also proves the SHA-512 computation.
+
 ## SHA256
 Module `miden::core::crypto::hashes::sha256` contains procedures for computing hashes using [SHA256](https://en.wikipedia.org/wiki/SHA-2) hash function. The input and output elements are assumed to contain one 32-bit value per element.
 

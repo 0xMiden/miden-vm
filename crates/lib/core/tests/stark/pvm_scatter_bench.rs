@@ -6,7 +6,7 @@
 //! the transcript absorb and the DEEP Horner accumulation stay positional over the advice stream,
 //! and only the `adv_pipe` destination is retargeted at segment boundaries.
 //!
-//! This file pins both halves of that mechanism at PVM scale — ten chiplets, 200 blocks, 22
+//! This file pins both halves of that mechanism at PVM scale — eleven chiplets, 226 blocks, 24
 //! segments — against the checked-in generated hook:
 //!
 //! - the scatter is *transparent*: the full 16-slot working frame (sponge, pointer, alpha pointer,
@@ -33,7 +33,7 @@ use crate::helpers::read_memory_felt;
 /// Felts moved by one `adv_pipe`.
 const BLOCK_FELTS: u32 = 8;
 /// Chiplet instances in `ChipletAir::all()` order.
-const NUM_CHIPLETS: usize = 10;
+const NUM_CHIPLETS: usize = miden_precompiles_air::NUM_CHIPLETS;
 
 // HARNESS MEMORY MAP
 // ================================================================================================
@@ -53,10 +53,10 @@ const OOD_BASE: u32 = 16_384;
 
 /// Cycle ceiling for the checked-in hook's two-row ingest.
 ///
-/// Absorbing the row costs three cycles per block, so both rows are 2 x 200 x 3 = 1,200 cycles of
-/// unavoidable work; per-segment dispatch adds about 30 cycles to each of the 22 segments, twice
-/// (measured: 2,542). Guarding the destination pointer once per block instead would add at least
-/// ten cycles to every one of the 400 blocks — the per-block loop measures 3,345 cycles for a
+/// Absorbing the row costs three cycles per block, so both rows are 2 x 226 x 3 = 1,356 cycles of
+/// unavoidable work; per-segment dispatch adds about 30 cycles to each of the 24 segments, twice
+/// (measured: 2,820). Guarding the destination pointer once per block instead would add at least
+/// ten cycles to every one of the 452 blocks — the per-block loop measures 3,762 cycles for a
 /// single row — landing far above this ceiling. The ceiling enforces the per-segment dispatch cost
 /// profile in addition to address correctness.
 const MAX_TWO_ROW_INGEST_CYCLES: u64 = 3_200;
@@ -245,7 +245,7 @@ fn proof_order(heights: &[u64]) -> Vec<usize> {
 fn height_fixtures() -> Vec<Vec<u64>> {
     let mut fixtures: Vec<Vec<u64>> =
         structured_orders().iter().map(|order| heights_for_order(order)).collect();
-    fixtures.push(vec![18, 18, 16, 18, 18, 16, 18, 18, 18, 16]);
+    fixtures.push(vec![18, 18, 16, 18, 18, 16, 18, 18, 18, 16, 18]);
     fixtures
 }
 
@@ -504,15 +504,15 @@ fn pvm_row_geometry_matches_the_generated_hook() {
     assert_eq!(blocks, geometry.row_felts() / BLOCK_FELTS, "the declared block count is stale");
 
     let plan = geometry.scatter_plan(&(0..NUM_CHIPLETS).collect::<Vec<_>>());
-    assert_eq!(plan.len(), 22, "the PVM row is 22 segments");
+    assert_eq!(plan.len(), 24, "the PVM row is 24 segments");
     assert_eq!(
         plan.iter().filter(|d| d.slot.is_some()).count(),
-        20,
+        22,
         "main and aux are the order-dependent groups"
     );
     assert_eq!(
         HOOK.matches("\n    dynexec").count(),
-        20,
+        22,
         "the generated hook does not dispatch every order-dependent segment"
     );
 }
@@ -555,7 +555,7 @@ fn dispatched_scatter_stays_far_cheaper_than_a_per_block_loop() {
     let geometry = RowGeometry::pvm();
     let row_felts = geometry.row_felts();
     let row = synthetic_row(row_felts);
-    let order = proof_order(&[20, 17, 14, 16, 11, 21, 13, 18, 12, 15]);
+    let order = proof_order(&[20, 17, 14, 16, 11, 21, 13, 18, 12, 15, 19]);
     let segments = geometry.segments(&order);
     let plan = geometry.scatter_plan(&order);
     let mut lengths: Vec<u32> = plan.iter().map(|dispatch| dispatch.blocks).collect();

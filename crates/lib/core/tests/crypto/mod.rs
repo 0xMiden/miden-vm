@@ -1,4 +1,5 @@
 mod dsa;
+mod eddsa;
 mod falcon;
 
 mod aead_eidos;
