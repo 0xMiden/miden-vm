@@ -146,13 +146,13 @@ where
 {
     let config = test_config();
 
-    let mut prover_instance = crate::ProverInstance::new(&config, prover_statement, None)
+    let prover_instance = crate::ProverInstance::new(&config, prover_statement, None)
         .expect("no preprocessed columns");
-    let output = prover_instance.prove(test_challenger()).expect("proving should succeed");
+    let (output, statement) =
+        prover_instance.prove(test_challenger()).expect("proving should succeed");
 
     let verifier_instance =
-        crate::VerifierInstance::new(&config, prover_instance.statement(), None)
-            .expect("no preprocessed columns");
+        crate::VerifierInstance::new(&config, &statement, None).expect("no preprocessed columns");
     let verifier_digest = verifier_instance
         .verify(&output.proof, test_challenger())
         .expect("verification should succeed");

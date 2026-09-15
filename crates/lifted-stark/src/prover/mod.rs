@@ -43,14 +43,14 @@
 //! // ... bind AIR configurations + air ordering (see below) ...
 //!
 //! // --- Prove ---
-//! let mut prover_instance = ProverInstance::new(&config, prover_statement, None)?;
-//! let output = prover_instance.prove(ch)?;
+//! let prover_instance = ProverInstance::new(&config, prover_statement, None)?;
+//! let (output, statement) = prover_instance.prove(ch)?;
 //!
 //! // --- Verify (identical binding + the same statement) ---
 //! let mut ch = Challenger::new(perm);
 //! ch.observe_slice(&b"MY_APP_V1".map(|b| F::from_u8(b)));
 //! ch.observe(F::from_u8(config.pcs().log_blowup()));
-//! let verifier_instance = VerifierInstance::new(&config, prover_instance.statement(), None)?;
+//! let verifier_instance = VerifierInstance::new(&config, &statement, None)?;
 //! let verifier_digest = verifier_instance.verify(&output.proof, ch)?;
 //! assert_eq!(output.digest, verifier_digest);
 //! ```
@@ -119,7 +119,7 @@ where
 {
     config: &'a SC,
     statement: Statement<F, EF, MA>,
-    traces: Option<Vec<RowMajorMatrix<F>>>,
+    traces: Vec<RowMajorMatrix<F>>,
     preprocessed: Option<&'a Preprocessed<F, SC::Lmcs>>,
 }
 
@@ -152,27 +152,14 @@ where
             validate_preprocessed(config, &prover_statement, p)?;
         }
         let (statement, traces) = prover_statement.into_parts();
-        Ok(Self {
-            config,
-            statement,
-            traces: Some(traces),
-            preprocessed,
-        })
+        Ok(Self { config, statement, traces, preprocessed })
     }
 
-    /// Prove this instance.
-    ///
-    /// Proving is one-shot: an attempt that passes all input validation
-    /// consumes the instance's main traces (they are released after auxiliary
-    /// trace construction), and any later call returns
-    /// [`ProverError::AlreadyProven`]. A failed attempt does **not** burn the
-    /// instance — every [`ProverError`] check runs before the traces are
-    /// consumed — so a failed attempt can be retried on the same instance with
-    /// a fresh challenger.
+    /// Consume this instance and return the proof with its verifier statement.
     pub fn prove(
-        &mut self,
+        self,
         challenger: SC::Challenger,
-    ) -> Result<StarkOutput<F, EF, SC>, ProverError> {
+    ) -> Result<(StarkOutput<F, EF, SC>, Statement<F, EF, MA>), ProverError> {
         prove(self, challenger)
     }
 
@@ -232,42 +219,25 @@ where
 ///   caught by the LDE/commit (panic) or by verification, since the verifier re-derives these
 ///   shapes.
 ///
-/// ## One-shot semantics
-/// The instance's main traces are only *borrowed* while validating; ownership is taken (and the
-/// traces dropped) after every check above has passed and auxiliary construction is done, right
-/// before the quotient/opening phases. Consequently a failed attempt leaves the instance
-/// reusable — `ProverError::AlreadyProven` is returned only after an attempt that already passed
-/// all validation consumed the traces.
-///
 /// # Arguments
 /// - `instance`: the config, the validated prover statement (AIRs, shared `air_inputs`, and per-AIR
 ///   traces, all in instance order), and the optional preprocessed bundle
 /// - `challenger`: Fiat-Shamir challenger pre-bound to protocol parameters and AIR configurations
 ///
 /// # Returns
-/// `Ok(StarkOutput { digest, proof })`, or a [`ProverError`] if validation fails.
+/// `Ok((StarkOutput { digest, proof }, statement))`, or a [`ProverError`] if validation fails.
 #[instrument(name = "prove", skip_all)]
 pub(crate) fn prove<F, EF, MA, SC>(
-    instance: &mut ProverInstance<'_, F, EF, MA, SC>,
+    instance: ProverInstance<'_, F, EF, MA, SC>,
     mut challenger: SC::Challenger,
-) -> Result<StarkOutput<F, EF, SC>, ProverError>
+) -> Result<(StarkOutput<F, EF, SC>, Statement<F, EF, MA>), ProverError>
 where
     F: TwoAdicField,
     EF: ExtensionField<F>,
     SC: StarkConfig<F, EF>,
     MA: MultiAir<F, EF>,
 {
-    // --- Trust boundary (see doc-block above). -------------------------------
-    // Borrow the traces while validating caller inputs below. Ownership is
-    // only taken once every check has passed (at the `drop` after auxiliary
-    // construction), so a failed attempt leaves the instance reusable with
-    // its traces; only a validation-passing attempt consumes them.
-    let traces = instance.traces.as_ref().ok_or(ProverError::AlreadyProven)?;
-    // Field access (not the accessor methods) keeps these borrows disjoint
-    // from `instance.traces`, so the `take` further down type-checks.
-    let config = instance.config;
-    let preprocessed = instance.preprocessed;
-    let statement = &instance.statement;
+    let ProverInstance { config, statement, traces, preprocessed } = instance;
     let airs = statement.airs();
     let air_inputs = statement.air_inputs();
     let trace_heights: Vec<usize> = traces.iter().map(Matrix::height).collect();
@@ -416,10 +386,6 @@ where
 
     // Auxiliary trace construction is the last use of the main traces. Release
     // them before the quotient and opening phases.
-    let traces = instance
-        .traces
-        .take()
-        .expect("traces presence checked at entry; `instance` is exclusively borrowed");
     drop(traces);
 
     // External assertions are defined in instance-order terms; now reorder aux
@@ -602,18 +568,13 @@ where
         log_trace_heights: trace_order.log_heights().to_vec(),
         transcript,
     };
-    Ok(StarkOutput { digest, proof })
+    Ok((StarkOutput { digest, proof }, statement))
 }
 
 /// Errors from proving — runtime validation failures of caller-supplied data.
 /// The AIR's structural contract is trusted (see the crate-level trust model).
 #[derive(Debug, Error)]
 pub enum ProverError {
-    /// The instance's main traces were already consumed by a previous
-    /// [`ProverInstance::prove`](crate::ProverInstance::prove) attempt that
-    /// passed all input validation; each instance produces at most one proof.
-    #[error("a ProverInstance can only produce one proof")]
-    AlreadyProven,
     #[error(transparent)]
     Instance(#[from] InstanceError),
     #[error(transparent)]

@@ -324,10 +324,9 @@ where
     MA: MultiAir<Felt, QuadFelt>,
 {
     let preprocessed = Preprocessed::build(ps.statement(), config).expect("has preprocessed");
-    let mut prover_instance =
+    let prover_instance =
         ProverInstance::new(config, ps, Some(&preprocessed)).expect("valid preprocessed setup");
-    let output = prover_instance.prove(test_challenger()).expect("prove succeeds");
-    let statement = prover_instance.into_statement();
+    let (output, statement) = prover_instance.prove(test_challenger()).expect("prove succeeds");
     (output, preprocessed, statement)
 }
 

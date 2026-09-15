@@ -69,7 +69,7 @@ where
         ProverStatement::new(statement, vec![core_trace, chiplets_trace, poseidon2_trace])
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
 
-    let output: StarkOutput<Felt, QuadFelt, SC> =
+    let (output, _statement): (StarkOutput<Felt, QuadFelt, SC>, _) =
         ProverInstance::new(config, prover_statement, None)
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?
             .prove(challenger)
