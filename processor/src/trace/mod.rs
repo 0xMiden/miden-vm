@@ -248,6 +248,11 @@ impl VmWitness {
         )
     }
 
+    /// Returns whether this witness authenticates deferred precompile work.
+    pub fn has_precompiles(&self) -> bool {
+        self.precompile_root != TRUE_DIGEST
+    }
+
     /// Takes the hasher replay out, leaving an empty buffered one.
     ///
     /// The streaming path uses this to drop the replay's channel sender once execution has

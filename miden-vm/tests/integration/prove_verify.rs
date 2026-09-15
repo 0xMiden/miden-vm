@@ -356,6 +356,38 @@ mod prover_api_lifecycle {
     }
 
     #[test]
+    fn vm_witness_can_be_proved_directly() {
+        let program = assemble("begin push.1 drop end");
+        let witness = execute(&program);
+        let claim = witness.claim();
+        let (vm_witness, precompile_witness) = witness.into_parts();
+        assert!(precompile_witness.is_none());
+
+        let proof = Prover::new()
+            .with_hash_fn(HashFunction::Blake3_256)
+            .prove_vm_witness(vm_witness)
+            .expect("VM witness should prove directly");
+
+        assert!(matches!(proof.precompile(), PrecompileStatus::Empty));
+        let outcome = Verifier::new()
+            .verify(&claim, &proof)
+            .expect("direct VM witness proof should verify");
+        assert!(outcome.is_complete());
+    }
+
+    #[test]
+    fn direct_vm_witness_proving_rejects_precompile_work() {
+        let (vm_witness, precompile_witness) = u256_witness(1).into_parts();
+        assert!(precompile_witness.is_some());
+
+        let error = Prover::new()
+            .prove_vm_witness(vm_witness)
+            .expect_err("VM witness with precompile work should be rejected");
+
+        assert!(matches!(error, miden_vm::ProverError::VmWitnessHasPrecompiles));
+    }
+
+    #[test]
     fn configured_prove_sync_matches_buffered_and_overlapped_routes() {
         let program = assemble("begin push.1 drop end");
         let stack_inputs = StackInputs::default();
