@@ -151,8 +151,9 @@ const EXECUTION_WITNESS_BYTE_READ_BUDGET_MULTIPLIER: usize = 4;
 /// Current wire format version for [`ExecutionWitness`] serialization.
 ///
 /// The version is written as the first byte of every serialized witness. Deserialization only
-/// accepts this exact value; older formats are intentionally unsupported.
-const EXECUTION_WITNESS_WIRE_VERSION: u8 = 2;
+/// accepts this exact value, so a future format change only needs to add a new accepted version
+/// and keep the old readers where compatibility matters.
+const EXECUTION_WITNESS_WIRE_VERSION: u8 = 1;
 
 impl Serializable for ExecutionWitness {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
@@ -534,13 +535,15 @@ mod wire_tests {
         let mut bytes = deferred_witness_bytes();
         assert!(ExecutionWitness::read_from_bytes(&bytes).is_ok());
 
-        // Rejected versions are checked before decoding replay or witness payloads.
-        for version in [0, 1, super::EXECUTION_WITNESS_WIRE_VERSION + 1] {
-            bytes[0] = version;
-            let err = ExecutionWitness::read_from_bytes(&bytes)
-                .expect_err("unsupported witness format must be rejected");
-            assert!(format!("{err:?}").contains("unsupported execution witness wire version"));
-        }
+        // The first byte of the wire is the format version; any other value must be rejected
+        // before any payload is parsed.
+        bytes[0] = bytes[0].wrapping_add(1);
+        let err = ExecutionWitness::read_from_bytes(&bytes)
+            .expect_err("witness with an unknown wire version should be rejected");
+        assert!(
+            format!("{err:?}").contains("unsupported execution witness wire version"),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]

@@ -186,9 +186,9 @@ rejects trailing bytes, and does not need a registry. The proof stores the trans
 compatible VM and PVM verifier root histories. Decoding selects the format-specific proof decoder.
 Native verification requires a shared VM root and a shared PVM root with the verifier's private
 support policy. Transport preserves the portable witness without validating consistency between proof artifacts.
-The execution-proof format is `FORMAT_V2`, execution-witness format is version 2, and portable
-singleton-witness format is version 1. Unsupported versions are rejected; legacy readers are not
-retained.
+Execution proofs, execution witnesses, and portable singleton witnesses use format version 1.
+The execution-proof and execution-witness encodings change in place; compatibility with previous
+witness encodings is not preserved.
 
 Canonical binary decoders enforce fixed hard ceilings before allocating declared collections:
 `MAX_STARK_PROOF_BYTES` per inner STARK, `MAX_PRECOMPILE_ROOTS` per ordered root list, and
