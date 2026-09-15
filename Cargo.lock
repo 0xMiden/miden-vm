@@ -2931,6 +2931,7 @@ dependencies = [
  "miden-processor",
  "thiserror",
  "wasmi",
+ "wasmparser 0.239.0",
  "wat",
 ]
 

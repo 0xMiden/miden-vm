@@ -41,6 +41,8 @@ thiserror.workspace = true
 # the feature, SIMD acceptance would follow `cfg!(feature = "simd")` — any crate in a
 # consumer's dependency graph could then flip it through Cargo feature unification.
 wasmi = { workspace = true, features = ["simd"] }
+# Pinned to wasmi's own wasmparser version; see the workspace manifest.
+wasmparser.workspace = true
 
 [dev-dependencies]
 miden-assembly.workspace = true

@@ -989,19 +989,31 @@ fn long_form_table_reftype_is_accepted_by_the_section_walk() {
 }
 
 #[test]
-fn unknown_table_reftype_is_refused_by_the_section_walk() {
-    // The same module with an unknown reference-type byte (0x71). wasmi rejects it today, so the
-    // static walk must reject it as well: a lead byte it cannot read makes every following byte
-    // ambiguous, and a wrong instantiation charge would be silent.
+fn unsupported_table_reftype_is_refused_at_load() {
+    // The same module with a GC heap-type shorthand (0x71, `nullref`) that wasmi 1.1 does not
+    // accept. wasmparser parses the encoding — it is the same version wasmi validates with, so
+    // the static analysis reads the declared sizes correctly either way — and the load still
+    // fails, because wasmi's validation runs before the static analysis.
     let mut wasm = b"\x00\x61\x73\x6d\x01\x00\x00\x00".to_vec();
     wasm.extend_from_slice(&[0x04, 0x04, 0x01, 0x71, 0x00, 0x01]);
     assert!(
         wasmi::Module::new(&wasmi::Engine::default(), &wasm).is_err(),
         "the fixture must stay wasmi-invalid"
     );
+    let err = WasmHandlerModule::new(&wasm, ABI_VERSION, Vec::new(), WasmHandlerLimits::default())
+        .unwrap_err();
+    assert!(matches!(err, WasmHandlerLoadError::InvalidModule(_)), "unexpected error: {err}");
+}
+
+#[test]
+fn a_truncated_table_section_is_refused_by_the_static_analysis() {
+    // A table section that declares one entry and ends inside it does not parse, so the static
+    // analysis fails closed instead of guessing an instantiation charge.
+    let mut wasm = b"\x00\x61\x73\x6d\x01\x00\x00\x00".to_vec();
+    wasm.extend_from_slice(&[0x04, 0x02, 0x01, 0x63]);
     assert!(
         !miden_wasm_event_handlers::fuzz_module_statics(&wasm),
-        "the section walk must fail closed on an unknown reference type"
+        "the static analysis must fail closed on an unparseable table section"
     );
 }
 

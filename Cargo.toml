@@ -227,6 +227,10 @@ wycheproof-ng-core = { version = "0.2.0", default-features = false }
 wycheproof-ng-dh = { version = "0.2.0", default-features = false }
 wycheproof-ng-eddsa = { version = "0.2.0", default-features = false }
 wasmi = { version = "1.1", default-features = false }
+# Keep the version in sync with wasmi's own wasmparser dependency: the handler loader's static
+# analysis must read Wasm binaries exactly the way wasmi validates them. The
+# wasm_section_walk_differential fuzz target hunts for drift between the two.
+wasmparser = { version = "0.239.0", default-features = false }
 wat = { version = "1.0" }
 
 [workspace.lints.rust]
