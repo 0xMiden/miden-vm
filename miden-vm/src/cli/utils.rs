@@ -7,10 +7,10 @@ use miden_assembly::{
 use miden_core::program::Program;
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::{
-    Package,
+    EventHandlerSection, Package,
     debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
-use miden_processor::DefaultHost;
+use miden_processor::{DefaultHost, HostLibrary};
 use miden_prover::serde::Deserializable;
 use miden_wasm_event_handlers::{WasmHandlerLimits, host_library_from_package};
 
@@ -34,13 +34,34 @@ pub fn get_masp_package(path: &Path) -> Result<Arc<Package>, Report> {
 /// unregistered, because the processor cannot depend on the Wasm handler runner. This function
 /// routes the package through that runner, so every package the CLI loads answers its own events.
 ///
+/// A project attaches one handler section to every target it builds, so two packages of the same
+/// project — an executable and its embedded kernel, or a `-l` sibling — carry identical
+/// sections, and the host would reject the second registration of every event. An identical
+/// section is benign (same module, same manifest), so a package whose section is already in
+/// `loaded_handler_sections` registers its MAST forest and debug info only. Differing sections
+/// that share an event name still fail loudly.
+///
 /// # Errors
 /// Returns an error when the handler module of the package fails validation, or when the host
-/// already holds a handler for one of the events the package declares.
+/// already holds a different handler for one of the events the package declares.
 pub fn load_package_with_handlers(
     host: &mut DefaultHost,
     package: &Arc<Package>,
+    loaded_handler_sections: &mut Vec<EventHandlerSection>,
 ) -> Result<(), Report> {
+    let section = package
+        .event_handlers()
+        .into_diagnostic()
+        .wrap_err("Failed to load the package's Wasm event handlers")?;
+    if let Some(section) = section {
+        if loaded_handler_sections.contains(&section) {
+            return host
+                .load_library(HostLibrary::from(package.clone()))
+                .into_diagnostic()
+                .wrap_err("Failed to register the package's MAST forest");
+        }
+        loaded_handler_sections.push(section);
+    }
     let library = host_library_from_package(package, WasmHandlerLimits::default())
         .into_diagnostic()
         .wrap_err("Failed to load the package's Wasm event handlers")?;
@@ -58,10 +79,11 @@ pub fn load_package_with_handlers(
 pub fn load_program_package_with_handlers(
     host: &mut DefaultHost,
     package: &Arc<Package>,
+    loaded_handler_sections: &mut Vec<EventHandlerSection>,
 ) -> Result<(), Report> {
-    load_package_with_handlers(host, package)?;
+    load_package_with_handlers(host, package, loaded_handler_sections)?;
     if let Some(kernel_package) = package.try_embedded_kernel_package()? {
-        load_package_with_handlers(host, &Arc::from(kernel_package))?;
+        load_package_with_handlers(host, &Arc::from(kernel_package), loaded_handler_sections)?;
     }
     Ok(())
 }

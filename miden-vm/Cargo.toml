@@ -108,7 +108,9 @@ criterion = { workspace = true, features = ["async_tokio"] }
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-processor = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
+miden-wasm-event-handlers = { workspace = true, features = ["std"] }
 predicates = { version = "3.1" }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 walkdir.workspace = true
+wat.workspace = true

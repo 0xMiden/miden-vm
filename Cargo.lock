@@ -2873,6 +2873,7 @@ dependencies = [
  "tracing-forest",
  "tracing-subscriber",
  "walkdir",
+ "wat",
 ]
 
 [[package]]

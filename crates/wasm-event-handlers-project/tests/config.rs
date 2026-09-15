@@ -113,6 +113,46 @@ end
     manifest_path
 }
 
+/// Writes a project with a kernel library target and an executable target that links it, both of
+/// which get the `double` handler module, and returns the manifest path.
+fn write_kernel_and_bin_project(root: &Path) -> std::path::PathBuf {
+    let manifest_path = root.join("miden-project.toml");
+    write(
+        &manifest_path,
+        r#"[package]
+name = "handlerkernelapp"
+version = "1.0.0"
+
+[package.metadata.midenc.event-handlers]
+module = "handlers.wasm"
+
+[lib]
+kind = "kernel"
+path = "kernel.masm"
+
+[[bin]]
+name = "main"
+path = "main.masm"
+"#,
+    );
+    write(
+        &root.join("kernel.masm"),
+        r#"pub proc foo
+    caller
+end
+"#,
+    );
+    write(
+        &root.join("main.masm"),
+        r#"begin
+    syscall.foo
+end
+"#,
+    );
+    write_handler_module(root);
+    manifest_path
+}
+
 /// Assembles a target of the project at `manifest_path` with the processor registered.
 fn assemble(
     manifest_path: &Path,
@@ -177,6 +217,32 @@ fn the_section_attaches_to_every_target_of_the_package() {
             package.name,
         );
     }
+}
+
+/// An executable and the kernel it embeds are two targets of one project, so the section attaches
+/// to both and the embedded copy is identical to the outer one. A consumer that loads the
+/// executable meets the same handler set twice.
+#[test]
+fn an_executable_and_its_project_kernel_carry_the_identical_section() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_kernel_and_bin_project(tempdir.path());
+
+    let package = assemble(&manifest_path, ProjectTargetSelector::Executable("main"))
+        .expect("the executable target assembles");
+    let section = package
+        .event_handlers()
+        .expect("the section decodes")
+        .expect("the executable package carries the section");
+    let kernel = package
+        .try_embedded_kernel_package()
+        .expect("the embedded kernel package decodes")
+        .expect("the executable package embeds its project kernel");
+
+    assert_eq!(
+        kernel.event_handlers().expect("the kernel section decodes"),
+        Some(section),
+        "the embedded kernel must carry the section of the executable, byte for byte",
+    );
 }
 
 #[test]

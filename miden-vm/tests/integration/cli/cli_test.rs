@@ -2,10 +2,15 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::Arc,
 };
 
 use assert_cmd::prelude::*;
+use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_mast_package::Package;
+use miden_wasm_event_handlers::{
+    WasmHandlerLimits, section_from_module, test_append_manifest_section,
+};
 use predicates::prelude::*;
 use tempfile::TempDir;
 
@@ -401,6 +406,57 @@ fn run_masm_program_honors_a_masp_kernel() {
         .arg(&kernel_path)
         .arg("-n")
         .arg("1");
+    cmd.assert().success();
+}
+
+/// A handler module the loader accepts: it exports linear memory and a `() -> ()` handler.
+const HANDLER_WAT: &str = r#"(module
+  (memory (export "memory") 1)
+  (func (export "handler")))"#;
+
+/// A project attaches one handler section to every target it builds, so an executable and the
+/// project kernel it embeds carry the identical section. The CLI must run such a package: it
+/// registers the handlers once and takes only the MAST forest of the second package.
+#[test]
+fn run_loads_a_masp_whose_kernel_shares_the_handler_section() {
+    let working_dir = TempDir::new().unwrap();
+
+    // The section a project build would attach to both targets.
+    let wasm = test_append_manifest_section(
+        wat::parse_str(HANDLER_WAT).expect("the fixture WAT parses"),
+        &[("test::cli::event", "handler")],
+    );
+    let section = section_from_module(wasm, WasmHandlerLimits::default())
+        .expect("the handler module derives a section");
+
+    // The kernel carries the section before it is embedded, so the executable's kernel dependency
+    // commits to the kernel package the CLI later reads back.
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let kernel = Assembler::new(source_manager.clone())
+        .assemble_kernel_from_root("kernel", fixture("tests/integration/cli/data/kernel_main.masm"))
+        .expect("the kernel assembles");
+    let kernel = Arc::new(
+        kernel
+            .with_event_handlers(&section)
+            .expect("the kernel package takes the section"),
+    );
+
+    // Assembling against the kernel package embeds it and records the matching kernel dependency,
+    // the way a project build does.
+    let mut package = Assembler::with_kernel(source_manager, kernel)
+        .expect("the assembler takes the kernel package")
+        .assemble_program("program", "begin push.1 drop end")
+        .expect("the program assembles");
+    package
+        .attach_event_handlers(&section)
+        .expect("the executable package takes the section");
+
+    let package_path = working_dir.path().join("prog.masp");
+    package.write_to_file(&package_path).unwrap();
+    fs::write(working_dir.path().join("prog.inputs"), r#"{"operand_stack":[]}"#).unwrap();
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("run").arg(&package_path).arg("-n").arg("1");
     cmd.assert().success();
 }
 

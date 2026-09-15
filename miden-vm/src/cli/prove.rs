@@ -133,7 +133,7 @@ impl ProveCmd {
                 }
                 let package = get_masp_package(&self.program_file)?;
                 let program = package.try_into_program()?;
-                load_program_package_with_handlers(&mut host, &package)?;
+                load_program_package_with_handlers(&mut host, &package, &mut Vec::new())?;
                 (program, None, None)
             },
             "masm" => {
@@ -145,11 +145,16 @@ impl ProveCmd {
                     kernel_package,
                 ) = get_masm_program(&self.program_file, &libraries, self.kernel_file.as_deref())?;
                 host = host.with_source_manager(source_manager);
+                let mut loaded_handler_sections = Vec::new();
                 for library in &libraries.libraries {
-                    load_package_with_handlers(&mut host, library)?;
+                    load_package_with_handlers(&mut host, library, &mut loaded_handler_sections)?;
                 }
                 if let Some(kernel_package) = &kernel_package {
-                    load_package_with_handlers(&mut host, kernel_package)?;
+                    load_package_with_handlers(
+                        &mut host,
+                        kernel_package,
+                        &mut loaded_handler_sections,
+                    )?;
                 }
                 (program, package_debug_info, entrypoint_source_node)
             },
