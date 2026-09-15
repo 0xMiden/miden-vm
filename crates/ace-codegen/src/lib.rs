@@ -16,8 +16,12 @@
 //! use miden_air::ChipletsAir;
 //!
 //! let config = AceConfig { num_quotient_chunks: 8, layout: LayoutKind::Masm, num_airs: 1 };
-//! let circuit = build_ace_circuit_for_air(&ChipletsAir, config)?;
+//! let circuit = build_ace_circuit_for_air(&ChipletsAir, config);
 //! ```
+//!
+//! AIRs and compiler layouts are code-owned: invalid configurations or broken compiler
+//! invariants panic, including in release builds. These off-VM builders and evaluators do
+//! not validate guest-provided circuits; the processor performs checked runtime evaluation.
 //!
 //! Module map (data flow):
 //! - `pipeline`: public entry points that orchestrate layout + DAG + circuit emission.
@@ -25,6 +29,7 @@
 //! - `circuit`: off-VM circuit representation (inputs/constants/ops/root).
 //! - `layout`: READ-section layout and index mapping.
 //! - `encode`: ACE stream encoding + padding rules.
+//! - `artifact`: encoded recursive-verifier circuits with their READ layouts and metadata.
 //! - `masm`: shared renderer for relation-local MASM constraint evaluators.
 //! - `randomness`: challenge input planning for layouts + DAG lowering.
 //! - `quotient`: barycentric quotient recomposition helpers (used by DAG + tests).
@@ -37,6 +42,7 @@ mod circuit;
 mod dag;
 
 // Input layout and encoding.
+mod artifact;
 mod encode;
 mod layout;
 mod masm;
@@ -56,15 +62,6 @@ mod unit_tests;
 /// Extension field degree (quadratic extension for Miden VM).
 pub const EXT_DEGREE: usize = 2;
 
-/// Errors returned by ACE codegen.
-#[derive(Debug, thiserror::Error)]
-pub enum AceError {
-    #[error("invalid input length: expected {expected}, got {got}")]
-    InvalidInputLength { expected: usize, got: usize },
-    #[error("invalid input layout: {message}")]
-    InvalidInputLayout { message: String },
-}
-
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
@@ -73,6 +70,7 @@ pub mod testing;
 #[cfg(any(test, feature = "testing"))]
 pub use crate::dag::{PeriodicColumnData, build_verifier_dag, build_verifier_dag_from_ir};
 pub use crate::{
+    artifact::RecursiveCircuit,
     circuit::{AceCircuit, emit_circuit},
     dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
     encode::EncodedCircuit,

@@ -72,73 +72,64 @@ pub enum InputKey {
     },
 }
 
-/// Canonical InputKey -> index mapping for a given layout.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct InputKeyMapper<'a> {
-    pub(super) layout: &'a InputLayout,
-}
-
-impl InputKeyMapper<'_> {
-    /// Return the input index for a key, if it exists in the layout.
-    pub(crate) fn index_of(self, key: InputKey) -> Option<usize> {
-        let layout = self.layout;
+impl InputLayout {
+    /// Map a logical `InputKey` into the flat input index, if present.
+    pub fn index(&self, key: InputKey) -> Option<usize> {
         match key {
-            InputKey::Public(i) => layout.regions.public_values.index(i),
-            InputKey::AuxRandAlpha => Some(layout.aux_rand_alpha),
-            InputKey::AuxRandBeta => Some(layout.aux_rand_beta),
-            InputKey::MultiAirFoldBeta => layout.stark.multi_air_fold_beta_index(),
+            InputKey::Public(i) => self.regions.public_values.index(i),
+            InputKey::AuxRandAlpha => Some(self.aux_rand_alpha),
+            InputKey::AuxRandBeta => Some(self.aux_rand_beta),
+            InputKey::MultiAirFoldBeta => self.stark.multi_air_fold_beta_index(),
             // Present in the READ layout only under a canonical composition; the per-order
             // oracle composition leaves `fold_coeff_start` unset and this falls through to
             // `None`, since `build_multi_air_ace_circuit` bakes each AIR's fold coefficient
             // into that order's circuit gates directly instead of reading it.
-            InputKey::MultiAirFoldCoeff(i) => layout.stark.multi_air_fold_coeff_index(i),
+            InputKey::MultiAirFoldCoeff(i) => self.stark.multi_air_fold_coeff_index(i),
             InputKey::Preprocessed { offset, index } => match offset {
-                0 => layout.regions.preprocessed_curr.index(index),
-                1 => layout.regions.preprocessed_next.index(index),
+                0 => self.regions.preprocessed_curr.index(index),
+                1 => self.regions.preprocessed_next.index(index),
                 _ => None,
             },
             InputKey::Main { offset, index } => match offset {
-                0 => layout.regions.main_curr.index(index),
-                1 => layout.regions.main_next.index(index),
+                0 => self.regions.main_curr.index(index),
+                1 => self.regions.main_next.index(index),
                 _ => None,
             },
             InputKey::AuxCoord { offset, index, coord } => {
-                if index >= layout.counts.aux_width || coord >= EXT_DEGREE {
+                if index >= self.counts.aux_width || coord >= EXT_DEGREE {
                     return None;
                 }
                 let local = index * EXT_DEGREE + coord;
                 match offset {
-                    0 => layout.regions.aux_curr.index(local),
-                    1 => layout.regions.aux_next.index(local),
+                    0 => self.regions.aux_curr.index(local),
+                    1 => self.regions.aux_next.index(local),
                     _ => None,
                 }
             },
-            InputKey::AuxBusBoundary(i) => layout.regions.aux_bus_boundary.index(i),
-            InputKey::Reserved => Some(layout.stark.reserved),
-            InputKey::Alpha => Some(layout.stark.alpha),
-            InputKey::ZPowN => Some(layout.stark.z_pow_n),
-            InputKey::ZK => Some(layout.stark.z_k),
-            InputKey::IsFirst => Some(layout.stark.is_first),
-            InputKey::IsLast => Some(layout.stark.is_last),
-            InputKey::IsTransition => Some(layout.stark.is_transition),
-            InputKey::IsFirstAir(i) => {
-                layout.stark.air_selector_index(i, AIR_SELECTOR_FIRST_OFFSET)
-            },
-            InputKey::IsLastAir(i) => layout.stark.air_selector_index(i, AIR_SELECTOR_LAST_OFFSET),
+            InputKey::AuxBusBoundary(i) => self.regions.aux_bus_boundary.index(i),
+            InputKey::Reserved => Some(self.stark.reserved),
+            InputKey::Alpha => Some(self.stark.alpha),
+            InputKey::ZPowN => Some(self.stark.z_pow_n),
+            InputKey::ZK => Some(self.stark.z_k),
+            InputKey::IsFirst => Some(self.stark.is_first),
+            InputKey::IsLast => Some(self.stark.is_last),
+            InputKey::IsTransition => Some(self.stark.is_transition),
+            InputKey::IsFirstAir(i) => self.stark.air_selector_index(i, AIR_SELECTOR_FIRST_OFFSET),
+            InputKey::IsLastAir(i) => self.stark.air_selector_index(i, AIR_SELECTOR_LAST_OFFSET),
             InputKey::IsTransitionAir(i) => {
-                layout.stark.air_selector_index(i, AIR_SELECTOR_TRANSITION_OFFSET)
+                self.stark.air_selector_index(i, AIR_SELECTOR_TRANSITION_OFFSET)
             },
-            InputKey::Weight0 => Some(layout.stark.weight0),
-            InputKey::F => Some(layout.stark.f),
-            InputKey::S0 => Some(layout.stark.s0),
+            InputKey::Weight0 => Some(self.stark.weight0),
+            InputKey::F => Some(self.stark.f),
+            InputKey::S0 => Some(self.stark.s0),
             InputKey::QuotientChunkCoord { offset, chunk, coord } => {
-                if chunk >= layout.counts.num_quotient_chunks || coord >= EXT_DEGREE {
+                if chunk >= self.counts.num_quotient_chunks || coord >= EXT_DEGREE {
                     return None;
                 }
                 let idx = chunk * EXT_DEGREE + coord;
                 match offset {
-                    0 => layout.regions.quotient_curr.index(idx),
-                    1 => layout.regions.quotient_next.index(idx),
+                    0 => self.regions.quotient_curr.index(idx),
+                    1 => self.regions.quotient_next.index(idx),
                     _ => None,
                 }
             },

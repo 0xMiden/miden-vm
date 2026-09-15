@@ -391,25 +391,23 @@ fn build_merkle_data(
     {
         let circuit = miden_air::ace::shared_recursive_circuit();
         debug_assert_eq!(
-            circuit.commitment,
+            circuit.commitment(),
             Word::from(config::ACE_CIRCUIT_DIGEST),
             "the freshly built ACE circuit's commitment disagrees with the compiled-in \
              ACE_CIRCUIT_DIGEST; run `make regenerate-constraints`"
         );
-        advice_map.push((circuit.commitment, circuit.instructions.clone()));
+        advice_map.push((circuit.commitment(), circuit.encoded().instructions().to_vec()));
     }
     #[cfg(not(feature = "std"))]
     {
-        let circuit = miden_air::ace::build_recursive_verifier_ace_circuit().map_err(|_| {
-            RecursiveVerifierInputsError::InvalidProofShape("failed to build recursive ACE circuit")
-        })?;
+        let circuit = miden_air::ace::build_recursive_verifier_ace_circuit();
         debug_assert_eq!(
-            circuit.commitment,
+            circuit.commitment(),
             Word::from(config::ACE_CIRCUIT_DIGEST),
             "the freshly built ACE circuit's commitment disagrees with the compiled-in \
              ACE_CIRCUIT_DIGEST; run `make regenerate-constraints`"
         );
-        advice_map.push((circuit.commitment, circuit.instructions));
+        advice_map.push(circuit.into_advice_entry());
     }
 
     Ok((store, advice_map))

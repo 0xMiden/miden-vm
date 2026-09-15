@@ -150,7 +150,7 @@ where
 {
     let mut builder = DagBuilder::<EF>::new();
     let periodic_nodes = match periodic {
-        Some(data) => build_periodic_nodes(&mut builder, layout, data, shared_period),
+        Some(data) => build_periodic_nodes(&mut builder, data, shared_period),
         None => Vec::new(),
     };
     let alpha = builder.input(InputKey::Alpha);

@@ -2052,7 +2052,6 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "proptest",
- "thiserror",
 ]
 
 [[package]]

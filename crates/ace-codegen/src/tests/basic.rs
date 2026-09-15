@@ -385,11 +385,11 @@ fn multi_air_uses_proof_order_offsets_and_stable_selectors() {
         AceConfig {
             num_quotient_chunks: 1,
             layout: LayoutKind::Masm,
-            num_airs: 3,
+            // Multi-AIR builders derive the count from `airs`, independently of this setting.
+            num_airs: 1,
         },
         4,
-    )
-    .unwrap();
+    );
 
     assert_eq!(
         (
@@ -442,8 +442,8 @@ fn multi_air_uses_proof_order_offsets_and_stable_selectors() {
     }
 
     // Stable accumulators are 10, 33, and 65; proof order [2, 0, 1] folds to 6,633.
-    assert_eq!(circuit.eval(&inputs).unwrap(), ef(6_633));
-    circuit.to_ace().expect("multi-AIR root must be MASM encodable");
+    assert_eq!(circuit.eval(&inputs), ef(6_633));
+    circuit.to_ace();
 }
 
 #[test]
@@ -461,8 +461,7 @@ fn mixed_air_periods_use_one_shared_basis() {
             num_airs: 2,
         },
         1,
-    )
-    .unwrap();
+    );
     let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
     let z_k = ef(3);
     set_input(&circuit, &mut inputs, InputKey::ZK, z_k);
@@ -474,7 +473,7 @@ fn mixed_air_periods_use_one_shared_basis() {
     }
     let period_four = eval_periodic_values(&airs[0].periodic_columns(), period_four_point)[0];
     let period_thirty_two = eval_periodic_values(&airs[1].periodic_columns(), z_k)[0];
-    assert_eq!(circuit.eval(&inputs).unwrap(), period_four * ef(7) + period_thirty_two);
+    assert_eq!(circuit.eval(&inputs), period_four * ef(7) + period_thirty_two);
     assert_ne!(period_four, eval_periodic_values(&airs[0].periodic_columns(), z_k)[0]);
 }
 
@@ -487,9 +486,15 @@ fn multi_air_rejects_invalid_proof_orders() {
         num_airs: 2,
     };
 
-    assert!(build_multi_air_ace_circuit(&airs, &[0], config, 2).is_err());
-    assert!(build_multi_air_ace_circuit(&airs, &[0, 0], config, 2).is_err());
-    assert!(build_multi_air_ace_circuit(&airs, &[0, 2], config, 2).is_err());
+    for proof_order in [&[0][..], &[0, 0], &[0, 2]] {
+        assert!(
+            std::panic::catch_unwind(|| {
+                build_multi_air_ace_circuit(&airs, proof_order, config, 2);
+            })
+            .is_err(),
+            "invalid proof order {proof_order:?} must panic"
+        );
+    }
 }
 
 #[test]
@@ -500,7 +505,7 @@ fn test_preprocessed_entries_lower_to_input_keys() {
         layout: LayoutKind::Native,
         num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config);
 
     assert_eq!(artifacts.layout.counts.preprocessed_width, 1);
     assert!(artifacts.layout.index(InputKey::Preprocessed { offset: 0, index: 0 }).is_some());
@@ -523,15 +528,15 @@ fn test_preprocessed_inputs_affect_dag_and_circuit_eval() {
         layout: LayoutKind::Native,
         num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config);
     let layout = artifacts.layout.clone();
     let mut inputs = vec![EF::ZERO; layout.total_inputs];
     inputs[layout.index(InputKey::Preprocessed { offset: 0, index: 0 }).unwrap()] = ef(13);
     inputs[layout.index(InputKey::Preprocessed { offset: 1, index: 0 }).unwrap()] = ef(17);
 
-    let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
-    let dag_value = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
-    let circuit_value = circuit.eval(&inputs).expect("circuit eval");
+    let circuit = emit_circuit(&artifacts.dag, layout.clone());
+    let dag_value = eval_dag(&artifacts.dag, &inputs, &layout);
+    let circuit_value = circuit.eval(&inputs);
 
     assert_eq!(dag_value, ef(30));
     assert_eq!(circuit_value, dag_value);
@@ -545,7 +550,7 @@ fn test_verifier_dag_matches_manual_eval() {
         layout: LayoutKind::Native,
         num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config);
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
@@ -576,7 +581,7 @@ fn test_verifier_dag_matches_manual_eval() {
     let vanishing = z_pow_n - EF::ONE;
     let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
 
-    let actual = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
+    let actual = eval_dag(&artifacts.dag, &inputs, &layout);
     assert_eq!(actual, expected);
 }
 
@@ -593,7 +598,7 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
         layout: LayoutKind::Native,
         num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config);
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
@@ -624,11 +629,11 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
     let vanishing = z_pow_n - EF::ONE;
     let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
 
-    let actual = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
+    let actual = eval_dag(&artifacts.dag, &inputs, &layout);
     assert_eq!(actual, expected);
 
-    let circuit = emit_circuit(&artifacts.dag, layout).unwrap();
-    let circuit_value = circuit.eval(&inputs).expect("circuit eval");
+    let circuit = emit_circuit(&artifacts.dag, layout);
+    let circuit_value = circuit.eval(&inputs);
     assert_eq!(circuit_value, actual);
 }
 
@@ -640,17 +645,18 @@ fn test_emitted_circuit_matches_dag_eval() {
         layout: LayoutKind::Native,
         num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config);
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
 
-    let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
-    let dag_value = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
-    let circuit_value = circuit.eval(&inputs).expect("circuit eval");
+    let circuit = emit_circuit(&artifacts.dag, layout.clone());
+    let dag_value = eval_dag(&artifacts.dag, &inputs, &layout);
+    let circuit_value = circuit.eval(&inputs);
     assert_eq!(circuit_value, dag_value);
 }
 
 #[test]
+#[should_panic(expected = "num_airs must be at least 1")]
 fn pipeline_rejects_zero_airs() {
     let air = MockAir;
     let config = AceConfig {
@@ -659,14 +665,11 @@ fn pipeline_rejects_zero_airs() {
         num_airs: 0,
     };
 
-    let err = build_ace_dag_for_air(&air, config).unwrap_err();
-    assert!(
-        matches!(err, crate::AceError::InvalidInputLayout { .. }),
-        "expected InvalidInputLayout, got {err:?}"
-    );
+    build_ace_dag_for_air(&air, config);
 }
 
 #[test]
+#[should_panic(expected = "num_quotient_chunks must be > 0")]
 fn pipeline_rejects_zero_quotient_chunks() {
     let air = MockAir;
     let config = AceConfig {
@@ -675,11 +678,7 @@ fn pipeline_rejects_zero_quotient_chunks() {
         num_airs: 1,
     };
 
-    let err = build_ace_dag_for_air(&air, config).unwrap_err();
-    assert!(
-        matches!(err, crate::AceError::InvalidInputLayout { .. }),
-        "expected InvalidInputLayout, got {err:?}"
-    );
+    build_ace_dag_for_air(&air, config);
 }
 
 #[test]
@@ -690,26 +689,13 @@ fn test_encoded_circuit_structure() {
         layout: LayoutKind::Native,
         num_airs: 1,
     };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let artifacts = build_ace_dag_for_air(&air, config);
     let layout = artifacts.layout.clone();
-    let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
+    let circuit = emit_circuit(&artifacts.dag, layout.clone());
 
-    let encoded = circuit.to_ace().unwrap();
+    let encoded = circuit.to_ace();
     assert!(encoded.size_in_felt().is_multiple_of(8));
     assert_eq!(encoded.num_inputs(), layout.total_inputs);
-}
-
-#[test]
-fn stream_geometry_rejects_the_node_id_packing_bound() {
-    use crate::encode::StreamGeometry;
-
-    // Valid streams have an even node count because READ and EVAL rows are word-aligned. Thus,
-    // 2^30 - 2 is the largest realizable shape below the runtime's strict 2^30-wire bound.
-    let below_limit = StreamGeometry::from_counts((1 << 30) - 8, 2, 4);
-    assert!(below_limit.validate().is_ok(), "the largest aligned shape must validate");
-
-    let at_limit = StreamGeometry::from_counts((1 << 30) - 6, 2, 4);
-    assert!(at_limit.validate().is_err(), "a shape with 2^30 nodes must be rejected");
 }
 
 #[test]
@@ -749,11 +735,11 @@ fn canonical_multi_air_folds_by_per_air_read_coefficients() {
         AceConfig {
             num_quotient_chunks: 1,
             layout: LayoutKind::Masm,
-            num_airs: 3,
+            // Multi-AIR builders derive the count from `airs`, independently of this setting.
+            num_airs: 1,
         },
         4,
-    )
-    .unwrap();
+    );
 
     assert_eq!(
         (
@@ -799,10 +785,10 @@ fn canonical_multi_air_folds_by_per_air_read_coefficients() {
                 ef(coefficient),
             );
         }
-        assert_eq!(circuit.eval(&inputs).unwrap(), ef(expected));
+        assert_eq!(circuit.eval(&inputs), ef(expected));
     }
 
-    circuit.to_ace().expect("canonical multi-AIR root must be MASM encodable");
+    circuit.to_ace();
 }
 
 #[test]
@@ -823,12 +809,11 @@ fn canonical_multi_air_circuit_evaluates_without_panic() {
             num_airs: 5,
         },
         8,
-    )
-    .expect("canonical circuit");
+    );
 
     // Fill every slot — including the fold-coefficient slots — with deterministic non-zero
     // values. The circuit is not expected to evaluate to zero; this only checks that every
     // DAG input reference is in range.
     let inputs = fill_inputs(circuit.layout());
-    let _root = circuit.eval(&inputs).expect("canonical circuit eval must not panic");
+    let _root = circuit.eval(&inputs);
 }

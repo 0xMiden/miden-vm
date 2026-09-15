@@ -12,8 +12,7 @@ use miden_ace_codegen::{
 };
 use miden_air::{
     AIRS, MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, NUM_PUBLIC_VALUES, Statement,
-    ace::{build_recursive_verifier_ace_circuit, recursive_verifier_input_layout},
-    config::relation_digest,
+    ace::build_recursive_verifier_ace_circuit, config::relation_digest,
 };
 use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt, program::KernelDescriptor};
 use miden_crypto::stark::{
@@ -83,33 +82,29 @@ fn check() -> Result<(), String> {
 fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     // The circuit topology is fixed across proof orders; MASM applies proof-order-specific ingest
     // scatter and fold-coefficient staging.
-    let circuit = build_recursive_verifier_ace_circuit()
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-    let input_layout = recursive_verifier_input_layout()
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    let circuit = build_recursive_verifier_ace_circuit();
+    let input_layout = circuit.layout();
 
     let num_quotient_chunks = input_layout.counts.num_quotient_chunks;
-    if !num_quotient_chunks.is_power_of_two() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("quotient chunk count {num_quotient_chunks} is not a power of two"),
-        ));
-    }
+    assert!(
+        num_quotient_chunks.is_power_of_two(),
+        "quotient chunk count {num_quotient_chunks} is not a power of two"
+    );
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
         miden_air::config::pcs_params().log_blowup(),
     )
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    .expect("canonical verifier quotient parameters must be valid");
 
-    let circuit_digest = word_to_array(circuit.commitment);
+    let circuit_digest = word_to_array(circuit.commitment());
     let relation_digest = compute_relation_digest(&circuit_digest);
-    let vm_geometry = VmGeometry::from_input_layout(&input_layout)?;
-    let constraints_eval = render_constraints_eval_file(&circuit, quotient_inputs, &vm_geometry)?;
+    let vm_geometry = VmGeometry::from_input_layout(input_layout)?;
+    let constraints_eval = render_constraints_eval_file(&circuit, quotient_inputs, &vm_geometry);
     let vm_layout = render_vm_layout(&vm_geometry)?;
     let vm_ood_frames = render_vm_ood_frames(&vm_geometry)?;
     let vm_deep_queries = render_vm_deep_queries(&vm_geometry)?;
 
-    let preprocessed_commitment = compute_eidos_preprocessed_commitment()?;
+    let preprocessed_commitment = compute_eidos_preprocessed_commitment();
 
     let mut relation_mod = read_file(RELATION_DIGEST_PATH)?;
     for (i, elem) in relation_digest.iter().enumerate() {
@@ -137,12 +132,12 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
         &preprocessed_commitment,
     )?;
 
-    ensure_vm_ace_stream_fits(circuit.stream_len, &vm_layout)?;
+    ensure_vm_ace_stream_fits(circuit.encoded().size_in_felt(), &vm_layout)?;
 
     Ok(ComputedArtifacts {
-        num_inputs: circuit.num_inputs,
-        num_eval_gates: circuit.num_eval_gates,
-        stream_blocks: circuit.stream_len / 8,
+        num_inputs: circuit.encoded().num_vars(),
+        num_eval_gates: circuit.encoded().num_eval_rows(),
+        stream_blocks: circuit.encoded().size_in_felt() / 8,
         circuit_digest,
         relation_digest,
         preprocessed_commitment,
@@ -156,7 +151,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     })
 }
 
-fn compute_eidos_preprocessed_commitment() -> io::Result<[Felt; 4]> {
+fn compute_eidos_preprocessed_commitment() -> [Felt; 4] {
     let config = miden_air::config::eidos_config(
         miden_air::config::pcs_params(),
         miden_air::config::RELATION_DIGEST,
@@ -166,16 +161,12 @@ fn compute_eidos_preprocessed_commitment() -> io::Result<[Felt; 4]> {
         vec![Felt::ZERO; NUM_PUBLIC_VALUES],
         vec![],
     )
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-    let preprocessed = Preprocessed::build(&statement, &config).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "canonical verifier statement has no preprocessed trace",
-        )
-    })?;
+    .expect("canonical verifier statement must be valid");
+    let preprocessed = Preprocessed::build(&statement, &config)
+        .expect("canonical verifier statement has no preprocessed trace");
     let commitment: [u64; 4] = preprocessed.commitment().into();
 
-    Ok(commitment.map(Felt::new_unchecked))
+    commitment.map(Felt::new_unchecked)
 }
 
 fn ensure_vm_ace_stream_fits(stream_len: usize, vm_layout: &str) -> io::Result<()> {
@@ -186,27 +177,19 @@ fn ensure_vm_ace_stream_fits(stream_len: usize, vm_layout: &str) -> io::Result<(
     let pvm_start = parse_masm_const::<usize>(&pvm_layout, "PUBLIC_INPUTS_PTR", PVM_LAYOUT_PATH)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
-    check_vm_ace_stream_capacity(stream_start, pvm_start, stream_len)
+    check_vm_ace_stream_capacity(stream_start, pvm_start, stream_len);
+    Ok(())
 }
 
-fn check_vm_ace_stream_capacity(
-    stream_start: usize,
-    pvm_start: usize,
-    stream_len: usize,
-) -> io::Result<()> {
-    let capacity = pvm_start.checked_sub(stream_start).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "PVM allocation starts before the VM ACE stream")
-    })?;
-    if stream_len > capacity {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "VM ACE stream requires {stream_len} felts but its fixed reservation holds \
+fn check_vm_ace_stream_capacity(stream_start: usize, pvm_start: usize, stream_len: usize) {
+    let capacity = pvm_start
+        .checked_sub(stream_start)
+        .expect("PVM allocation starts before the VM ACE stream");
+    assert!(
+        stream_len <= capacity,
+        "VM ACE stream requires {stream_len} felts but its fixed reservation holds \
                  {capacity}"
-            ),
-        ));
-    }
-    Ok(())
+    );
 }
 
 /// Felts reserved for the out-of-domain scatter table by `sys/vm/layout.masm`.
@@ -262,15 +245,11 @@ impl VmGeometry {
         let aux_width: usize = aux_widths.iter().sum();
         let aux_values: Vec<_> =
             AIRS.iter().map(LiftedAir::<Felt, QuadFelt>::num_aux_values).collect();
-        if aux_values.as_slice() != [1usize; MIDEN_AIR_COUNT].as_slice() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "the VM proof-order boundary scatter requires exactly one auxiliary value per \
+        assert!(
+            aux_values.as_slice() == [1usize; MIDEN_AIR_COUNT].as_slice(),
+            "the VM proof-order boundary scatter requires exactly one auxiliary value per \
                      AIR, got {aux_values:?}"
-                ),
-            ));
-        }
+        );
         let quotient_width = input_layout.counts.num_quotient_chunks * EXT_DEGREE;
         let row_width = preprocessed_width + main_width + aux_width + quotient_width;
 
@@ -284,15 +263,11 @@ impl VmGeometry {
                 input_layout.counts.num_aux_boundary,
             ),
         ] {
-            if derived != actual {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!(
-                        "AIR-derived {name} width {derived} disagrees with ACE input layout width \
+            assert!(
+                derived == actual,
+                "AIR-derived {name} width {derived} disagrees with ACE input layout width \
                          {actual}"
-                    ),
-                ));
-            }
+            );
         }
 
         for (name, width) in [
@@ -302,12 +277,10 @@ impl VmGeometry {
             ("quotient", quotient_width),
             ("ACE row", row_width),
         ] {
-            if !width.is_multiple_of(ADV_PIPE_BLOCK_FELTS) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("VM {name} width {width} is not {ADV_PIPE_BLOCK_FELTS}-felt aligned"),
-                ));
-            }
+            assert!(
+                width.is_multiple_of(ADV_PIPE_BLOCK_FELTS),
+                "VM {name} width {width} is not {ADV_PIPE_BLOCK_FELTS}-felt aligned"
+            );
         }
 
         let layout = read_file(VM_LAYOUT_PATH)?;
@@ -317,37 +290,28 @@ impl VmGeometry {
         let current_trace_row_ptr =
             parse_masm_const::<usize>(&layout, "CURRENT_TRACE_ROW_PTR", VM_LAYOUT_PATH)
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-        if !current_trace_row_ptr.is_multiple_of(ADV_PIPE_BLOCK_FELTS) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "the VM current-trace-row base {current_trace_row_ptr} is not \
+        assert!(
+            current_trace_row_ptr.is_multiple_of(ADV_PIPE_BLOCK_FELTS),
+            "the VM current-trace-row base {current_trace_row_ptr} is not \
                      {ADV_PIPE_BLOCK_FELTS}-felt aligned, which `adv_pipe` requires"
-                ),
-            ));
-        }
+        );
         // The scatter table is verifier scratch that must stay clear of the ACE READ section.
         let ood_scatter_table_ptr =
             parse_masm_const::<usize>(&layout, "OOD_SCATTER_TABLE_PTR", VM_LAYOUT_PATH)
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-        if !ood_scatter_table_ptr.is_multiple_of(4) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "the VM out-of-domain scatter table base {ood_scatter_table_ptr} is not \
+        assert!(
+            ood_scatter_table_ptr.is_multiple_of(4),
+            "the VM out-of-domain scatter table base {ood_scatter_table_ptr} is not \
                      4-felt (word) aligned, which its `mem_storew_le`/`dynexec` entries require"
-                ),
-            ));
-        }
-        if ood_scatter_table_ptr + OOD_SCATTER_TABLE_FELTS > aux_rand_elem_ptr {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "the {OOD_SCATTER_TABLE_FELTS}-felt out-of-domain scatter table at \
+        );
+        assert!(
+            ood_scatter_table_ptr
+                .checked_add(OOD_SCATTER_TABLE_FELTS)
+                .expect("VM scatter table end overflows")
+                <= aux_rand_elem_ptr,
+            "the {OOD_SCATTER_TABLE_FELTS}-felt out-of-domain scatter table at \
                      {ood_scatter_table_ptr} runs into the ACE READ section at {aux_rand_elem_ptr}"
-                ),
-            ));
-        }
+        );
         // Its lower neighbour is the kernel digest witness, one word per supported kernel
         // procedure written by `materialize_kernel_witness`; the table must start at or after its
         // end.
@@ -356,56 +320,45 @@ impl VmGeometry {
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
         let kernel_witness_end = kernel_witness_ptr
             .checked_add(WORD_SIZE * KernelDescriptor::MAX_NUM_PROCEDURES)
-            .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "the kernel witness end overflows")
-            })?;
-        if ood_scatter_table_ptr < kernel_witness_end {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "the out-of-domain scatter table at {ood_scatter_table_ptr} overlaps the \
+            .expect("the kernel witness end overflows");
+        assert!(
+            ood_scatter_table_ptr >= kernel_witness_end,
+            "the out-of-domain scatter table at {ood_scatter_table_ptr} overlaps the \
                      kernel digest witness, which ends at {kernel_witness_end}"
-                ),
-            ));
-        }
+        );
 
-        let aux_rand_index = require_input_index(input_layout, InputKey::AuxRandBeta)?;
+        let aux_rand_index = require_input_index(input_layout, InputKey::AuxRandBeta);
         let ood_index =
-            require_input_index(input_layout, InputKey::Preprocessed { offset: 0, index: 0 })?;
+            require_input_index(input_layout, InputKey::Preprocessed { offset: 0, index: 0 });
         let next_ood_index =
-            require_input_index(input_layout, InputKey::Preprocessed { offset: 1, index: 0 })?;
-        let aux_bus_boundary_index =
-            require_input_index(input_layout, InputKey::AuxBusBoundary(0))?;
-        let auxiliary_ace_inputs_index = require_input_index(input_layout, InputKey::Alpha)?;
+            require_input_index(input_layout, InputKey::Preprocessed { offset: 1, index: 0 });
+        let aux_bus_boundary_index = require_input_index(input_layout, InputKey::AuxBusBoundary(0));
+        let auxiliary_ace_inputs_index = require_input_index(input_layout, InputKey::Alpha);
         let fold_coefficient_index =
-            require_input_index(input_layout, InputKey::MultiAirFoldCoeff(0))?;
+            require_input_index(input_layout, InputKey::MultiAirFoldCoeff(0));
         let fold_coefficient_offset = input_layout_extent(
             auxiliary_ace_inputs_index,
             fold_coefficient_index,
             "fold coefficients",
-        )?;
+        );
 
-        let ood_row_felts = input_layout_extent(ood_index, next_ood_index, "current OOD row")?;
-        let ood_frame_felts = input_layout_extent(ood_index, aux_bus_boundary_index, "OOD frame")?;
-        if ood_row_felts != row_width * EXT_DEGREE || ood_frame_felts != 2 * ood_row_felts {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "ACE input layout has {ood_row_felts} felts per OOD row and \
+        let ood_row_felts = input_layout_extent(ood_index, next_ood_index, "current OOD row");
+        let ood_frame_felts = input_layout_extent(ood_index, aux_bus_boundary_index, "OOD frame");
+        assert!(
+            ood_row_felts == row_width * EXT_DEGREE && ood_frame_felts == 2 * ood_row_felts,
+            "ACE input layout has {ood_row_felts} felts per OOD row and \
                      {ood_frame_felts} per frame; AIR widths require {} and {}",
-                    row_width * EXT_DEGREE,
-                    2 * row_width * EXT_DEGREE,
-                ),
-            ));
-        }
+            row_width * EXT_DEGREE,
+            2 * row_width * EXT_DEGREE
+        );
 
         let input_ptr =
             |index, label| input_layout_ptr(aux_rand_elem_ptr, aux_rand_index, index, label);
-        let ood_evaluations_ptr = input_ptr(ood_index, "OOD evaluations")?;
-        let aux_bus_boundary_ptr = input_ptr(aux_bus_boundary_index, "aux bus boundary")?;
+        let ood_evaluations_ptr = input_ptr(ood_index, "OOD evaluations");
+        let aux_bus_boundary_ptr = input_ptr(aux_bus_boundary_index, "aux bus boundary");
         let auxiliary_ace_inputs_ptr =
-            input_ptr(auxiliary_ace_inputs_index, "auxiliary ACE inputs")?;
-        let ace_circuit_stream_ptr = input_ptr(input_layout.total_inputs, "ACE circuit stream")?;
+            input_ptr(auxiliary_ace_inputs_index, "auxiliary ACE inputs");
+        let ace_circuit_stream_ptr = input_ptr(input_layout.total_inputs, "ACE circuit stream");
 
         Ok(Self {
             preprocessed_widths,
@@ -434,40 +387,27 @@ impl VmGeometry {
     }
 }
 
-fn require_input_index(input_layout: &InputLayout, key: InputKey) -> io::Result<usize> {
-    input_layout.index(key).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("VM ACE input layout is missing {key:?}"),
-        )
-    })
+fn require_input_index(input_layout: &InputLayout, key: InputKey) -> usize {
+    input_layout
+        .index(key)
+        .unwrap_or_else(|| panic!("VM ACE input layout is missing {key:?}"))
 }
 
-fn input_layout_extent(start: usize, end: usize, label: &str) -> io::Result<usize> {
+fn input_layout_extent(start: usize, end: usize, label: &str) -> usize {
     end.checked_sub(start)
         .and_then(|slots| slots.checked_mul(EXT_DEGREE))
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("VM ACE {label} extent is reversed or overflows"),
-            )
-        })
+        .unwrap_or_else(|| panic!("VM ACE {label} extent is reversed or overflows"))
 }
 
-fn input_layout_ptr(
-    base_ptr: usize,
-    base_index: usize,
-    index: usize,
-    label: &str,
-) -> io::Result<usize> {
-    let offset = input_layout_extent(base_index, index, label)?;
-    base_ptr.checked_add(offset).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("VM ACE {label} pointer overflows"))
-    })
+fn input_layout_ptr(base_ptr: usize, base_index: usize, index: usize, label: &str) -> usize {
+    let offset = input_layout_extent(base_index, index, label);
+    base_ptr
+        .checked_add(offset)
+        .unwrap_or_else(|| panic!("VM ACE {label} pointer overflows"))
 }
 
 fn render_vm_layout(geometry: &VmGeometry) -> io::Result<String> {
-    let plan = vm_scatter_plan(geometry)?;
+    let plan = vm_scatter_plan(geometry);
     let mut layout = read_file(VM_LAYOUT_PATH)?;
     for (name, value) in [
         ("OOD_EVALUATIONS_PTR", geometry.ood_evaluations_ptr),
@@ -509,13 +449,13 @@ fn render_vm_layout(geometry: &VmGeometry) -> io::Result<String> {
         ),
     )?;
 
-    let positions_ptr =
-        geometry.ood_scatter_table_ptr.checked_add(plan.maps_offset).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "VM proof-order map overflows")
-        })?;
-    let ids_ptr = positions_ptr.checked_add(MIDEN_AIR_COUNT).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "VM proof-order map overflows")
-    })?;
+    let positions_ptr = geometry
+        .ood_scatter_table_ptr
+        .checked_add(plan.maps_offset)
+        .expect("VM proof-order map overflows");
+    let ids_ptr = positions_ptr
+        .checked_add(MIDEN_AIR_COUNT)
+        .expect("VM proof-order map overflows");
     replace_masm_const(&mut layout, "PROOF_ORDER_POSITIONS_PTR", &positions_ptr.to_string())?;
     replace_masm_const(&mut layout, "PROOF_ORDER_IDS_PTR", &ids_ptr.to_string())?;
 
@@ -620,7 +560,7 @@ const WORD_FELTS: usize = 4;
 /// occupant is always alone on the wire and always lands at the same canonical address, so it is
 /// dispatched directly rather than through the table. The quotient matrix is relation-wide, not
 /// per-AIR, and is likewise fixed.
-fn vm_scatter_plan(geometry: &VmGeometry) -> io::Result<ScatterPlan> {
+fn vm_scatter_plan(geometry: &VmGeometry) -> ScatterPlan {
     let groups = [
         ("preprocessed", &geometry.preprocessed_widths),
         ("main", &geometry.main_widths),
@@ -639,17 +579,13 @@ fn vm_scatter_plan(geometry: &VmGeometry) -> io::Result<ScatterPlan> {
         // partially occupied group would need the rank among occupants instead, which the proof
         // order does not directly give; refuse to emit rather than silently address past the
         // group's slots.
-        if occupied > 1 && occupied != widths.len() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "the {group} commitment group is occupied by {occupied} of {} AIRs; the \
+        assert!(
+            occupied <= 1 || occupied == widths.len(),
+            "the {group} commitment group is occupied by {occupied} of {} AIRs; the \
                      out-of-domain scatter indexes its table by proof-order position, which \
                      requires every AIR to occupy the group",
-                    widths.len()
-                ),
-            ));
-        }
+            widths.len()
+        );
         let group_slots_offset = OOD_SCATTER_SLOTS_OFFSET + 2 * slot;
         let mut canonical = group_base;
         let mut position = 0usize;
@@ -705,30 +641,24 @@ fn vm_scatter_plan(geometry: &VmGeometry) -> io::Result<ScatterPlan> {
     // The proof-order maps follow the digests: `pos_by_id`, then `id_by_pos`.
     let maps_offset = digest_offset + WORD_FELTS * lengths.len();
     let required = maps_offset + 2 * MIDEN_AIR_COUNT;
-    if required > OOD_SCATTER_TABLE_FELTS {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "the out-of-domain scatter table and proof-order maps need {required} felts but \
+    assert!(
+        required <= OOD_SCATTER_TABLE_FELTS,
+        "the out-of-domain scatter table and proof-order maps need {required} felts but \
                  OOD_SCATTER_TABLE_PTR reserves {OOD_SCATTER_TABLE_FELTS}"
-            ),
-        ));
-    }
-    if dispatches.iter().map(|dispatch| dispatch.blocks).sum::<usize>() != geometry.ood_pipe_blocks
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "the scatter dispatch table does not cover exactly one out-of-domain row",
-        ));
-    }
+    );
+    assert!(
+        dispatches.iter().map(|dispatch| dispatch.blocks).sum::<usize>()
+            == geometry.ood_pipe_blocks,
+        "the scatter dispatch table does not cover exactly one out-of-domain row"
+    );
 
-    Ok(ScatterPlan {
+    ScatterPlan {
         dispatches,
         sources,
         lengths,
         digest_offset,
         maps_offset,
-    })
+    }
 }
 
 /// Emits `push.OFFSET`-free addressing of one table cell, leaving its value on the stack.
@@ -750,7 +680,7 @@ fn scatter_position_load(air: usize) -> String {
 }
 
 fn render_vm_ood_frames(geometry: &VmGeometry) -> io::Result<String> {
-    let plan = vm_scatter_plan(geometry)?;
+    let plan = vm_scatter_plan(geometry);
     // Word reads and writes need word-aligned bases; the pass falls back to single-cell accesses
     // otherwise, so alignment is a layout fact checked here, not an assumption.
     let stark_constants = read_file(STARK_CONSTANTS_PATH)?;
@@ -764,9 +694,7 @@ fn render_vm_ood_frames(geometry: &VmGeometry) -> io::Result<String> {
         .ood_scatter_table_ptr
         .checked_add(plan.maps_offset)
         .and_then(|ptr| ptr.checked_add(MIDEN_AIR_COUNT))
-        .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "VM proof-order map overflows")
-        })?;
+        .expect("VM proof-order map overflows");
     let proof_order_maps = render_proof_order_maps(&ProofOrderMapsConfig {
         num_airs: MIDEN_AIR_COUNT,
         heights_ptr: "exec.constants::air_trace_length_logs_ptr",
@@ -774,8 +702,7 @@ fn render_vm_ood_frames(geometry: &VmGeometry) -> io::Result<String> {
         id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
         word_load_heights: heights_ptr.is_multiple_of(WORD_FELTS),
         word_store_ids: ids_ptr.is_multiple_of(WORD_FELTS),
-    })
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    });
 
     let pipes = plan
         .lengths
@@ -1095,14 +1022,14 @@ fn render_constraints_eval_file(
     circuit: &miden_air::ace::RecursiveAceCircuit,
     quotient_inputs: QuotientRecompositionInputs<Felt>,
     geometry: &VmGeometry,
-) -> io::Result<String> {
+) -> String {
     miden_ace_codegen::render_masm_constraints_eval(&miden_ace_codegen::MasmConstraintsEvalConfig {
         generated_by: "cargo run -p miden-core-lib --features constraints-tools --bin \
                            regenerate-constraints -- --write",
         layout_module: "miden::core::sys::vm::layout",
-        num_inputs: circuit.num_inputs,
-        num_eval_gates: circuit.num_eval_gates,
-        stream_len: circuit.stream_len,
+        num_inputs: circuit.encoded().num_vars(),
+        num_eval_gates: circuit.encoded().num_eval_rows(),
+        stream_len: circuit.encoded().size_in_felt(),
         max_cycle_len_log: max_periodic_cycle_len_log(),
         num_airs: MIDEN_AIR_COUNT,
         // The VM's canonical READ layout reserves one fold-coefficient slot per AIR, so its
@@ -1113,9 +1040,8 @@ fn render_constraints_eval_file(
             coefficient_offset: geometry.fold_coefficient_offset,
         }),
         quotient_inputs,
-        circuit_digest: circuit.commitment,
+        circuit_digest: circuit.commitment(),
     })
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))
 }
 
 fn max_periodic_cycle_len_log() -> u32 {
@@ -1581,21 +1507,14 @@ mod tests {
     /// single occupant needs no table at all. Anything between the two would address past the
     /// group's slots, so the renderer must refuse it instead of emitting it.
     #[test]
+    #[should_panic(expected = "preprocessed commitment group is occupied by 2 of 4")]
     fn scatter_plan_rejects_partially_occupied_commitment_groups() {
         // The VM preprocessed commitment group is occupied only by `MidenAir::And8Lookup`.
-        assert!(vm_scatter_plan(&scatter_test_geometry(&[0, 0, 0, 16])).is_ok());
+        vm_scatter_plan(&scatter_test_geometry(&[0, 0, 0, 16]));
         // Every AIR occupies the group.
-        assert!(vm_scatter_plan(&scatter_test_geometry(&[16, 16, 16, 16])).is_ok());
+        vm_scatter_plan(&scatter_test_geometry(&[16, 16, 16, 16]));
         // Two of four: the proof-order position no longer indexes the group's slots.
-        let Err(partial) = vm_scatter_plan(&scatter_test_geometry(&[16, 0, 0, 16])) else {
-            panic!("a partially occupied group must be refused");
-        };
-        assert!(
-            partial
-                .to_string()
-                .contains("preprocessed commitment group is occupied by 2 of 4"),
-            "unexpected refusal: {partial}"
-        );
+        vm_scatter_plan(&scatter_test_geometry(&[16, 0, 0, 16]));
     }
 
     /// A geometry whose only meaningful axis is the preprocessed occupancy under test.
@@ -1635,26 +1554,24 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "requires 101 felts")]
     fn vm_ace_stream_capacity_accepts_exact_fit_and_rejects_overflow() {
         let stream_start = 1_000;
         let pvm_start = 1_100;
 
-        check_vm_ace_stream_capacity(stream_start, pvm_start, 100).expect("exact fit");
-        let error = check_vm_ace_stream_capacity(stream_start, pvm_start, 101)
-            .expect_err("one felt beyond the reservation must fail");
-        assert!(error.to_string().contains("requires 101 felts"));
+        check_vm_ace_stream_capacity(stream_start, pvm_start, 100);
+        check_vm_ace_stream_capacity(stream_start, pvm_start, 101);
     }
 
     #[test]
+    #[should_panic(expected = "PVM allocation starts before")]
     fn vm_ace_stream_capacity_rejects_reversed_anchors() {
-        let error = check_vm_ace_stream_capacity(1_100, 1_000, 0)
-            .expect_err("the PVM allocation must follow the VM stream");
-        assert!(error.to_string().contains("PVM allocation starts before"));
+        check_vm_ace_stream_capacity(1_100, 1_000, 0);
     }
 
     #[test]
     fn deep_query_loader_repeats_follow_air_geometry() {
-        let layout = recursive_verifier_input_layout().expect("recursive ACE input layout");
+        let layout = miden_air::ace::recursive_verifier_input_layout();
         let geometry = VmGeometry::from_input_layout(&layout).expect("VM geometry");
         let deep_queries = render_vm_deep_queries(&geometry).expect("render DEEP-query loaders");
 

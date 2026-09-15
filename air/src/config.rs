@@ -357,17 +357,21 @@ mod tests {
     /// ```
     #[test]
     fn relation_digest_matches_current_air() {
-        let circuit =
-            ace::build_recursive_verifier_ace_circuit().expect("recursive-verifier ACE circuit");
-        let commitment: Vec<u64> = circuit.commitment.iter().map(Felt::as_canonical_u64).collect();
+        let circuit = ace::build_recursive_verifier_ace_circuit();
+        let commitment: Vec<u64> =
+            circuit.commitment().iter().map(Felt::as_canonical_u64).collect();
 
-        let digest = super::relation_digest(PROTOCOL_ID, &circuit.commitment);
+        let digest = super::relation_digest(PROTOCOL_ID, &circuit.commitment());
         let expected: Vec<u64> = digest.iter().map(Felt::as_canonical_u64).collect();
 
         let snapshot = format!(
             "num_inputs: {}\nnum_eval_gates: {}\nstream_len: {}\ncircuit_digest: {:?}\n\
              relation_digest: {:?}",
-            circuit.num_inputs, circuit.num_eval_gates, circuit.stream_len, commitment, expected,
+            circuit.encoded().num_vars(),
+            circuit.encoded().num_eval_rows(),
+            circuit.encoded().size_in_felt(),
+            commitment,
+            expected,
         );
         insta::assert_snapshot!(snapshot);
 
@@ -386,7 +390,7 @@ mod tests {
     #[test]
     fn ace_circuit_digest_matches_canonical_circuit() {
         let expected: Vec<u64> = ace::shared_recursive_circuit()
-            .commitment
+            .commitment()
             .iter()
             .map(Felt::as_canonical_u64)
             .collect();

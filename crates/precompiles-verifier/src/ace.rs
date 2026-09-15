@@ -9,14 +9,16 @@
 //! The cross-chiplet LogUp identity enforced by `ChipletMultiAir::eval_external` remains an
 //! external multi-AIR assertion.
 
-use alloc::{format, vec::Vec};
+#[cfg(test)]
+use alloc::vec::Vec;
 
+pub use miden_ace_codegen::RecursiveCircuit as PvmRecursiveAceCircuit;
 #[cfg(test)]
 use miden_ace_codegen::build_multi_air_ace_circuit;
-use miden_ace_codegen::{
-    AceCircuit, AceConfig, AceError, LayoutKind, build_canonical_multi_air_ace_circuit,
-};
-use miden_core::{Felt, Word, field::QuadFelt};
+use miden_ace_codegen::{AceCircuit, AceConfig, LayoutKind, build_canonical_multi_air_ace_circuit};
+#[cfg(test)]
+use miden_core::Word;
+use miden_core::{Felt, field::QuadFelt};
 use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS};
 
 // MULTI-AIR ACE CIRCUIT
@@ -52,7 +54,7 @@ fn precompile_ace_config() -> AceConfig {
 ///
 /// This identity-order construction is the reference for the order-invariant circuit.
 #[cfg(test)]
-pub fn build_precompile_multi_air_ace_circuit() -> Result<AceCircuit<QuadFelt>, AceError> {
+pub fn build_precompile_multi_air_ace_circuit() -> AceCircuit<QuadFelt> {
     let airs = ChipletAir::all();
     let proof_order: Vec<_> = (0..airs.len()).collect();
 
@@ -70,7 +72,7 @@ pub fn build_precompile_multi_air_ace_circuit() -> Result<AceCircuit<QuadFelt>, 
 /// fold coefficient from a dedicated slot, so one circuit serves every proof ordering. The caller
 /// lands each proof-ordered trace segment on its canonical address and stages the chiplet at proof
 /// position `k` with the coefficient `beta^(NUM_CHIPLETS - 1 - k)`.
-pub fn build_canonical_precompile_ace_circuit() -> Result<AceCircuit<QuadFelt>, AceError> {
+pub fn build_canonical_precompile_ace_circuit() -> AceCircuit<QuadFelt> {
     let airs = ChipletAir::all();
     build_canonical_multi_air_ace_circuit(&airs, precompile_ace_config(), LMCS_ALIGNMENT)
 }
@@ -78,63 +80,18 @@ pub fn build_canonical_precompile_ace_circuit() -> Result<AceCircuit<QuadFelt>, 
 // RECURSIVE VERIFIER CIRCUIT
 // ================================================================================================
 
-/// Encoded PVM recursive-verifier ACE circuit and the metadata consumed by MASM.
-///
-/// One circuit serves every proof order. Its single `adv_pipe`-aligned instruction segment is
-/// authenticated under the compiled-in circuit digest.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PvmRecursiveAceCircuit {
-    /// Number of ACE READ variables.
-    pub num_inputs: usize,
-    /// Number of ACE EVAL rows.
-    pub num_eval_gates: usize,
-    /// Encoded instruction stream length in base-field elements.
-    pub stream_len: usize,
-    /// Eidos digest of the full instruction stream: the advice-map key and the value pinned by
-    /// the compiled-in circuit digest.
-    pub commitment: Word,
-    /// Encoded ACE instruction stream consumed by `eval_circuit`.
-    pub instructions: Vec<Felt>,
-}
-
 /// Builds and encodes the order-invariant PVM recursive-verifier ACE circuit.
 ///
 /// A caller that needs the circuit per proof should hold [`shared_pvm_recursive_circuit`] rather
 /// than rebuild it here.
-pub fn build_pvm_recursive_verifier_ace_circuit() -> Result<PvmRecursiveAceCircuit, AceError> {
-    let encoded = build_canonical_precompile_ace_circuit()?.to_ace()?;
-    let instructions = encoded.instructions();
-    let stream_len = encoded.size_in_felt();
-    if stream_len != instructions.len() {
-        return Err(AceError::InvalidInputLayout {
-            message: format!(
-                "ACE circuit stream length ({stream_len}) does not match instruction count ({})",
-                instructions.len()
-            ),
-        });
-    }
-    if !stream_len.is_multiple_of(8) {
-        return Err(AceError::InvalidInputLayout {
-            message: "ACE circuit stream must be 8-felt aligned for adv_pipe".into(),
-        });
-    }
-
-    Ok(PvmRecursiveAceCircuit {
-        num_inputs: encoded.num_vars(),
-        num_eval_gates: encoded.num_eval_rows(),
-        stream_len,
-        commitment: encoded.circuit_hash(),
-        instructions: instructions.to_vec(),
-    })
+pub fn build_pvm_recursive_verifier_ace_circuit() -> PvmRecursiveAceCircuit {
+    PvmRecursiveAceCircuit::from_circuit(build_canonical_precompile_ace_circuit())
 }
 
 /// Returns the process-wide canonical circuit shared by every proof order.
 pub fn shared_pvm_recursive_circuit() -> &'static PvmRecursiveAceCircuit {
     static CIRCUIT: std::sync::OnceLock<PvmRecursiveAceCircuit> = std::sync::OnceLock::new();
-    CIRCUIT.get_or_init(|| {
-        build_pvm_recursive_verifier_ace_circuit()
-            .expect("PVM recursive-verifier ACE circuit must build")
-    })
+    CIRCUIT.get_or_init(build_pvm_recursive_verifier_ace_circuit)
 }
 
 /// Returns [`ChipletAir::all`] instance indices in committed-trace order.
@@ -288,24 +245,23 @@ mod tests {
     /// else: its digest is what the compiled-in PVM circuit commitment has to pin.
     #[test]
     fn pvm_recursive_circuit_matches_the_canonical_builder() {
-        let encoded = build_canonical_precompile_ace_circuit()
-            .expect("canonical circuit")
-            .to_ace()
-            .expect("canonical circuit must be MASM encodable");
-        let produced = build_pvm_recursive_verifier_ace_circuit().expect("recursive circuit");
+        let canonical = build_canonical_precompile_ace_circuit();
+        let encoded = canonical.to_ace();
+        let produced = build_pvm_recursive_verifier_ace_circuit();
 
-        assert_eq!(produced.num_inputs, encoded.num_vars());
-        assert_eq!(produced.num_eval_gates, encoded.num_eval_rows());
-        assert_eq!(produced.stream_len, encoded.size_in_felt());
-        assert_eq!(produced.instructions.as_slice(), encoded.instructions());
-        assert_eq!(produced.commitment, Eidos::hash_elements(encoded.instructions()));
+        assert_eq!(produced.encoded(), &encoded);
+        assert_eq!(produced.layout(), canonical.layout());
         assert!(
-            produced.stream_len.is_multiple_of(8),
+            produced.encoded().size_in_felt().is_multiple_of(8),
             "the stream must fill whole adv_pipe blocks"
         );
 
         // The cached circuit is what a repeated caller evaluates, and it is built the same way.
         assert_eq!(*shared_pvm_recursive_circuit(), produced);
+
+        let (commitment, instructions) = produced.into_advice_entry();
+        assert_eq!(commitment, Eidos::hash_elements(encoded.instructions()));
+        assert_eq!(instructions, encoded.instructions());
     }
 
     /// The canonical circuit is order-invariant: a proof order is carried entirely by its READ
@@ -320,7 +276,7 @@ mod tests {
 
         let airs = ChipletAir::all();
         let config = precompile_ace_config();
-        let canonical = build_canonical_precompile_ace_circuit().expect("canonical circuit");
+        let canonical = build_canonical_precompile_ace_circuit();
         let canonical_layout = canonical.layout().clone();
 
         // Only one chiplet declares preprocessed columns, so its block starts at zero under every
@@ -356,10 +312,9 @@ mod tests {
                     .expect("canonical fold-coefficient slot");
                 canonical_inputs[index] = beta.exp_u64((NUM_CHIPLETS - 1 - position) as u64);
             }
-            let canonical_root = canonical.eval(&canonical_inputs).expect("canonical evaluation");
+            let canonical_root = canonical.eval(&canonical_inputs);
 
-            let per_order = build_multi_air_ace_circuit(&airs, order, config, LMCS_ALIGNMENT)
-                .expect("per-order circuit");
+            let per_order = build_multi_air_ace_circuit(&airs, order, config, LMCS_ALIGNMENT);
             let per_order_layout = per_order.layout().clone();
             let proof_offsets = chiplet_block_offsets(&widths, order);
 
@@ -429,7 +384,7 @@ mod tests {
 
             assert_eq!(
                 canonical_root,
-                per_order.eval(&inputs).expect("per-order evaluation"),
+                per_order.eval(&inputs),
                 "the canonical circuit does not reproduce the per-order fold for {order:?}"
             );
             roots.push(canonical_root);
@@ -489,9 +444,8 @@ mod tests {
             expected_chunks,
             "the ACE circuit must read exactly the quotient chunks the proof carries"
         );
-        let per_order =
-            build_precompile_multi_air_ace_circuit().expect("per-order multi-AIR ACE circuit");
-        let canonical = build_canonical_precompile_ace_circuit().expect("canonical ACE circuit");
+        let per_order = build_precompile_multi_air_ace_circuit();
+        let canonical = build_canonical_precompile_ace_circuit();
         assert_eq!(per_order.layout().counts.num_quotient_chunks, expected_chunks);
         assert_eq!(canonical.layout().counts.num_quotient_chunks, expected_chunks);
     }
@@ -499,7 +453,7 @@ mod tests {
     /// Keep protocol and cost changes visible as numbers rather than only as a digest diff.
     #[test]
     fn pvm_canonical_ace_shape_matches_current_air() {
-        let canonical = build_canonical_precompile_ace_circuit().expect("canonical circuit");
+        let canonical = build_canonical_precompile_ace_circuit();
         // BytePairLut is the only chiplet with a preprocessed trace, so the combined
         // preprocessed region must be nonempty.
         assert!(canonical.layout().counts.preprocessed_width > 0);
@@ -511,15 +465,15 @@ mod tests {
             .sum();
         assert_eq!(canonical.layout().counts.num_aux_boundary, num_aux_values);
 
-        let circuit = build_pvm_recursive_verifier_ace_circuit().expect("recursive circuit");
+        let circuit = build_pvm_recursive_verifier_ace_circuit();
         let snapshot = format!(
             "layout_inputs: {}\nnum_vars: {}\nnum_eval_gates: {}\nstream_len: \
              {}\ncircuit_digest: {:?}\nrelation_digest: {:?}",
             canonical.layout().total_inputs,
-            circuit.num_inputs,
-            circuit.num_eval_gates,
-            circuit.stream_len,
-            circuit.commitment.iter().map(Felt::as_canonical_u64).collect::<Vec<_>>(),
+            circuit.encoded().num_vars(),
+            circuit.encoded().num_eval_rows(),
+            circuit.encoded().size_in_felt(),
+            circuit.commitment().iter().map(Felt::as_canonical_u64).collect::<Vec<_>>(),
             PVM_RELATION_DIGEST,
         );
 
@@ -532,8 +486,8 @@ mod tests {
     /// constant never committed to.
     #[test]
     fn pvm_ace_circuit_digest_matches_canonical_circuit() {
-        let circuit = build_pvm_recursive_verifier_ace_circuit().expect("recursive circuit");
-        let actual: Vec<u64> = circuit.commitment.iter().map(Felt::as_canonical_u64).collect();
+        let circuit = build_pvm_recursive_verifier_ace_circuit();
+        let actual: Vec<u64> = circuit.commitment().iter().map(Felt::as_canonical_u64).collect();
         assert_eq!(
             actual, PVM_ACE_CIRCUIT_DIGEST,
             "PVM_ACE_CIRCUIT_DIGEST is stale relative to the canonical circuit's commitment"
@@ -603,7 +557,7 @@ mod tests {
 
         // The scatter permutes the region the circuit reads, so it must be exactly one slot per
         // exposed value.
-        let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
+        let canonical = build_canonical_precompile_ace_circuit();
         let layout = canonical.layout();
         let base = layout.index(InputKey::AuxBusBoundary(0)).expect("boundary base");
         let alpha = layout.index(InputKey::Alpha).expect("auxiliary inputs base");
@@ -659,7 +613,7 @@ mod tests {
         const LAYOUT_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/layout.masm");
 
-        let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
+        let canonical = build_canonical_precompile_ace_circuit();
         let layout = canonical.layout();
         let boundaries = [
             ("PUBLIC_INPUTS_PTR", InputKey::Public(0)),
@@ -733,7 +687,7 @@ mod tests {
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/deep_queries.masm");
 
-        let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
+        let canonical = build_canonical_precompile_ace_circuit();
         let layout = canonical.layout();
         let index = |key| layout.index(key).unwrap_or_else(|| panic!("missing {key:?}"));
 
@@ -943,7 +897,7 @@ mod tests {
         const EVALUATOR_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/constraints_eval.masm");
 
-        let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
+        let canonical = build_canonical_precompile_ace_circuit();
         let num_chunks = canonical.layout().counts.num_quotient_chunks;
         assert!(num_chunks.is_power_of_two());
         let expected = miden_lifted_stark::quotient_recomposition_inputs::<Felt>(

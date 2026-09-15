@@ -131,7 +131,7 @@ impl<'a> Walker<'a> {
             Class::Base => self.naive_base.bump(op),
             Class::Ext => self.naive_ext.bump(op),
         }
-        self.builder.op(class, op, x, y).0
+        self.builder.op(class, op, x, y)
     }
 
     fn base_child(&mut self, c: &Arc<SymbolicExpression<Felt>>) -> NodeId {

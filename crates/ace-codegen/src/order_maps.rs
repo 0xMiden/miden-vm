@@ -14,10 +14,7 @@
 
 use std::{format, string::String, vec::Vec};
 
-use crate::{
-    AceError,
-    proof_order::{MAX_ORDER_AIRS, PROOF_ORDER_KEY_STRIDE, sorting_network},
-};
+use crate::proof_order::{MAX_ORDER_AIRS, PROOF_ORDER_KEY_STRIDE, sorting_network};
 
 /// Relation-specific inputs to [`render_proof_order_maps`].
 #[derive(Clone, Debug)]
@@ -43,23 +40,18 @@ pub struct ProofOrderMapsConfig<'a> {
 struct Stack {
     items: Vec<String>,
     ops: Vec<String>,
-    /// Set when an index beyond the directly addressable 16 stack slots was requested.
-    out_of_reach: bool,
 }
 
 impl Stack {
     fn new() -> Self {
-        Self {
-            items: Vec::new(),
-            ops: Vec::new(),
-            out_of_reach: false,
-        }
+        Self { items: Vec::new(), ops: Vec::new() }
     }
 
     fn reach(&mut self, index: usize) {
-        if index >= 16 {
-            self.out_of_reach = true;
-        }
+        assert!(
+            index < 16,
+            "proof-order pass stack index {index} exceeds the 16 directly addressable slots"
+        );
     }
 
     /// Removes the top two tracked items, refusing to model a consumption of the caller's stack.
@@ -218,20 +210,16 @@ impl Stack {
 /// writes exactly `num_airs` cells into each table. It must run after the heights have been
 /// bounded: the packed keys assume every height is a validated `u32` below
 /// `2^32 / PROOF_ORDER_KEY_STRIDE`.
-pub fn render_proof_order_maps(config: &ProofOrderMapsConfig<'_>) -> Result<String, AceError> {
+pub fn render_proof_order_maps(config: &ProofOrderMapsConfig<'_>) -> String {
     let num_airs = config.num_airs;
-    if !(2..=MAX_ORDER_AIRS).contains(&num_airs) {
-        return Err(AceError::InvalidInputLayout {
-            message: format!("proof-order maps need 2..={MAX_ORDER_AIRS} AIRs, got {num_airs}"),
-        });
-    }
-    if config.word_load_heights && num_airs != 4 {
-        return Err(AceError::InvalidInputLayout {
-            message: format!(
-                "word-loading proof-order heights requires exactly four AIRs, got {num_airs}"
-            ),
-        });
-    }
+    assert!(
+        (2..=MAX_ORDER_AIRS).contains(&num_airs),
+        "proof-order maps need 2..={MAX_ORDER_AIRS} AIRs, got {num_airs}"
+    );
+    assert!(
+        !config.word_load_heights || num_airs == 4,
+        "word-loading proof-order heights requires exactly four AIRs, got {num_airs}"
+    );
     let network = sorting_network(num_airs);
     let stride = PROOF_ORDER_KEY_STRIDE;
 
@@ -258,7 +246,7 @@ pub fn render_proof_order_maps(config: &ProofOrderMapsConfig<'_>) -> Result<Stri
 
     // Keys: AIR i's key is `stride * height_i + i`, laid out so that AIR 0's key ends on top and
     // index `i` of the stack holds AIR `i`.
-    if config.word_load_heights && num_airs == 4 {
+    if config.word_load_heights {
         // One word read leaves the four heights in memory order, AIR 0 on top; each key is formed
         // on top and rotated beneath the others, which restores that order once all four are done.
         stack.padw();
@@ -388,16 +376,8 @@ pub fn render_proof_order_maps(config: &ProofOrderMapsConfig<'_>) -> Result<Stri
         stack.drop();
     }
     lines.push(stack.line(4));
-    if stack.out_of_reach {
-        return Err(AceError::InvalidInputLayout {
-            message: format!(
-                "the proof-order pass for {num_airs} AIRs needs more than the 16 directly \
-                 addressable stack slots"
-            ),
-        });
-    }
 
-    Ok(format!(
+    format!(
         "#! Derives the height-sorted proof order once and materializes its two inverse maps.\n\
          #!\n\
          #! Packs each AIR's key as `{stride} * log_height + instance_index`, sorts the keys with a \
@@ -418,7 +398,7 @@ pub fn render_proof_order_maps(config: &ProofOrderMapsConfig<'_>) -> Result<Stri
          end\n",
         comparators = network.len(),
         body = lines.join("\n"),
-    ))
+    )
 }
 
 fn describe(stack: &Stack) -> String {
@@ -442,7 +422,7 @@ mod tests {
 
     #[test]
     fn renders_one_comparator_line_per_network_entry() {
-        let masm = render_proof_order_maps(&config()).expect("renders");
+        let masm = render_proof_order_maps(&config());
         assert_eq!(masm.matches("u32lt cswap").count(), sorting_network(4).len());
         assert_eq!(masm.matches("u32and.15").count(), 4);
         assert!(masm.starts_with("#! Derives the height-sorted proof order"));
@@ -455,17 +435,17 @@ mod tests {
         maximum.num_airs = MAX_ORDER_AIRS;
         maximum.word_load_heights = false;
         maximum.word_store_ids = true;
-        render_proof_order_maps(&maximum).expect("the maximum supported AIR count must render");
+        render_proof_order_maps(&maximum);
 
         let mut too_few = config();
         too_few.num_airs = 1;
-        assert!(render_proof_order_maps(&too_few).is_err());
+        assert!(std::panic::catch_unwind(|| render_proof_order_maps(&too_few)).is_err());
         let mut too_many = config();
         too_many.num_airs = MAX_ORDER_AIRS + 1;
-        assert!(render_proof_order_maps(&too_many).is_err());
+        assert!(std::panic::catch_unwind(|| render_proof_order_maps(&too_many)).is_err());
 
         let mut invalid_word_load = config();
         invalid_word_load.num_airs = 8;
-        assert!(render_proof_order_maps(&invalid_word_load).is_err());
+        assert!(std::panic::catch_unwind(|| render_proof_order_maps(&invalid_word_load)).is_err());
     }
 }

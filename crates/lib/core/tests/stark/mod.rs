@@ -1100,7 +1100,7 @@ fn advice_map_value_mut(data: &mut VerifierData, key: Word) -> &mut Vec<Felt> {
 /// One circuit serves every proof order, so this is the canonical circuit's own digest — the
 /// same value `build_merkle_data` keys the advice entry with and the loader pins the stream to.
 fn recursive_circuit_key() -> Word {
-    miden_air::ace::shared_recursive_circuit().commitment
+    miden_air::ace::shared_recursive_circuit().commitment()
 }
 
 // EXAMPLE PROGRAMS

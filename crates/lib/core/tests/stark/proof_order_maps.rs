@@ -170,7 +170,6 @@ fn check_generic_renderer_config(num_airs: usize, word_load_heights: bool, word_
         word_load_heights,
         word_store_ids,
     })
-    .expect("every supported generic configuration must render")
     .replacen("pub proc stage_proof_order_maps", "proc stage_proof_order_maps", 1);
 
     let height_stores = heights

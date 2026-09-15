@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_ace_codegen::{AceCircuit, AceConfig, AceError};
+use miden_ace_codegen::{AceCircuit, AceConfig};
 use miden_core::field::QuadFelt;
 
 use crate::{AIRS, HandwrittenMidenAir, ProofOrder};
@@ -17,7 +17,7 @@ const LMCS_ALIGNMENT: usize = 8;
 pub fn build_multi_air_ace_circuit_for_order(
     config: AceConfig,
     order: &ProofOrder,
-) -> Result<AceCircuit<QuadFelt>, AceError> {
+) -> AceCircuit<QuadFelt> {
     let airs = AIRS.map(HandwrittenMidenAir);
     let proof_order: Vec<usize> = order.airs().iter().map(|air| air.instance_index()).collect();
     miden_ace_codegen::build_multi_air_ace_circuit(&airs, &proof_order, config, LMCS_ALIGNMENT)
@@ -28,9 +28,7 @@ pub fn build_multi_air_ace_circuit_for_order(
 /// Unlike [`build_multi_air_ace_circuit_for_order`] there is exactly one circuit — no per-order
 /// construction — because every AIR's trace data sits at a canonical offset and its fold
 /// coefficient has its own READ slot.
-pub fn build_canonical_multi_air_ace_circuit(
-    config: AceConfig,
-) -> Result<AceCircuit<QuadFelt>, AceError> {
+pub fn build_canonical_multi_air_ace_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
     let airs = AIRS.map(HandwrittenMidenAir);
     miden_ace_codegen::build_canonical_multi_air_ace_circuit(&airs, config, LMCS_ALIGNMENT)
 }
@@ -49,7 +47,7 @@ mod tests {
             layout: LayoutKind::Masm,
             num_airs: MIDEN_AIR_COUNT,
         };
-        let circuit = build_canonical_multi_air_ace_circuit(config).expect("canonical circuit");
+        let circuit = build_canonical_multi_air_ace_circuit(config);
         let layout = circuit.layout();
 
         for air_index in 0..MIDEN_AIR_COUNT {
@@ -62,7 +60,7 @@ mod tests {
 
         // The extra fold-coefficient slots must not break the READ-section alignment the
         // recursive verifier's `adv_pipe` ingestion relies on.
-        let encoded = circuit.to_ace().expect("canonical circuit must be MASM encodable");
+        let encoded = circuit.to_ace();
         assert!(
             encoded.size_in_felt().is_multiple_of(8),
             "encoded canonical circuit must be 8-felt aligned for adv_pipe"

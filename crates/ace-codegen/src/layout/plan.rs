@@ -1,6 +1,6 @@
 use core::num::NonZeroUsize;
 
-use super::{InputKey, SELECTORS_PER_AIR};
+use super::SELECTORS_PER_AIR;
 use crate::EXT_DEGREE;
 
 /// A contiguous region of inputs within the ACE READ layout.
@@ -18,7 +18,7 @@ impl InputRegion {
 }
 
 /// Counts needed to build the ACE input layout.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InputCounts {
     /// Width of the preprocessed trace.
     pub preprocessed_width: usize,
@@ -108,7 +108,7 @@ pub(crate) struct MultiAirIndices {
 }
 
 /// ACE input layout for circuit evaluation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InputLayout {
     /// Grouped regions for the ACE input layout.
     pub(crate) regions: LayoutRegions,
@@ -125,15 +125,6 @@ pub struct InputLayout {
 }
 
 impl InputLayout {
-    pub(crate) fn mapper(&self) -> super::InputKeyMapper<'_> {
-        super::InputKeyMapper { layout: self }
-    }
-
-    /// Map a logical `InputKey` into the flat input index, if present.
-    pub fn index(&self, key: InputKey) -> Option<usize> {
-        self.mapper().index_of(key)
-    }
-
     /// Validate internal layout invariants.
     pub(crate) fn validate(&self) {
         let mut max_end = 0usize;
