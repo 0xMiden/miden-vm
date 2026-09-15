@@ -88,7 +88,7 @@ The contract lives in the `miden-event-handler-abi` crate (`ABI_VERSION` is `1`)
 
 Version bumps are additive only: a newer ABI version may add host functions but must not change or remove existing ones, so hosts accept every declared version from `1` up to their own. A breaking change gets a new import namespace (`miden:event/v2`) instead.
 
-**VM memory granularity.** VM memory initializes one word (four elements) at a time, so the `Uninit` status of the memory reads is word-granular: after a program writes any address of a word, the other three addresses of that word read as `Ok` with the value zero. `Uninit` therefore means that no cell of the containing word was ever written, not that the addressed cell alone was never written.
+**VM memory reads.** VM memory is zero-filled: an address the program never wrote reads as zero, the same value the program itself observes there. The memory reads of the ABI follow that contract, so they report no "unwritten" condition — the only status a memory read returns is `OutOfBounds`, for a bulk range that goes past the `u32` address space.
 
 **Memory ownership.** Every pointer is an offset into the guest's own linear memory, which the module must export as `"memory"`. The guest allocates all buffers; the host only reads from and writes into them. Output pointers are validated before the host computes the result, so a bad pointer traps even when the call would otherwise return a status such as `NotFound`.
 
@@ -104,8 +104,8 @@ Version bumps are additive only: a newer ABI version may add host functions but 
 | `clk() -> u64` | Clock cycle. |
 | `event_id() -> u64` | ID of the event the handler was invoked for, in canonical form. |
 | `is_root_context() -> i32` | `1` when the current execution context is the root context (where kernel state lives), `0` otherwise. The result is a boolean, not a status code. |
-| `mem_get(addr, out) -> status` | One memory element of the current context; `Uninit` when no cell of the memory word that holds the address was ever written. |
-| `mem_read(addr, out, count) -> status` | Batch read of `addr..addr + count`; `Uninit` when the range touches an unwritten memory word, `OutOfBounds` past the `u32` address space. |
+| `mem_get(addr) -> u64` | One memory element of the current context, returned directly in canonical form; memory the program never wrote reads as zero. |
+| `mem_read(addr, out, count) -> status` | Batch read of `addr..addr + count`; memory the program never wrote reads as zero, `OutOfBounds` when the range goes past the `u32` address space. |
 | `mem_read_root(addr, out, count) -> status` | The same batch read for the root context, for example kernel state read from a handler that runs in another context. |
 | `merkle_get_node(root, depth, index, out) -> status` | Merkle-store node of the tree with root `root`; `NotFound` when the store has no such tree or node. |
 | `merkle_has_path(root, depth, index) -> i32` | `1` when the Merkle store has a path for that node, `0` when it has not. The result is a boolean, not a status code: do not put it through `Status::from_raw`, because `1` is also the raw value of `Status::OutOfBounds`. |
@@ -132,7 +132,7 @@ Version bumps are additive only: a newer ABI version may add host functions but 
 | `sha512(data, len, out)` | SHA-512 digest of `len` bytes (64 bytes out). |
 | `blake3(data, len, out)` | BLAKE3 digest of `len` bytes (32 bytes out). |
 
-**Failure.** `fail(msg_ptr, msg_len)` records an error message and traps; the host reads at most `MAX_FAIL_MSG_BYTES` (4,096) bytes of the message and truncates the rest. Status codes cover conditions a correct handler can meet (`OutOfBounds`, `NotFound`, `Uninit`, `CapacityTooSmall`). Defects always trap: pointer ranges outside the guest memory or with overflowing arithmetic, non-canonical field elements (`>= 2^64 - 2^32 + 1`), and mutation-size violations.
+**Failure.** `fail(msg_ptr, msg_len)` records an error message and traps; the host reads at most `MAX_FAIL_MSG_BYTES` (4,096) bytes of the message and truncates the rest. Status codes cover conditions a correct handler can meet (`OutOfBounds`, `NotFound`, `CapacityTooSmall`). Defects always trap: pointer ranges outside the guest memory or with overflowing arithmetic, non-canonical field elements (`>= 2^64 - 2^32 + 1`), and mutation-size violations.
 
 ## Limits and validation
 

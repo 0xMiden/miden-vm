@@ -29,7 +29,7 @@
 //! # Failure rules
 //!
 //! Host functions return a [`Status`] code for conditions a correct handler can meet at run time
-//! (a missing advice-map key, an uninitialized memory cell). The host traps the handler for
+//! (a missing advice-map key, an out-of-bounds bulk-read range). The host traps the handler for
 //! conditions that only a defective or hostile handler can create:
 //!
 //! - a pointer range outside the guest memory, or one whose `ptr + len` computation overflows;
@@ -132,14 +132,8 @@ pub enum Status {
     OutOfBounds = 1,
     /// The advice map has no entry for the given key.
     NotFound = 2,
-    /// No cell of the memory word that holds the address was ever written.
-    ///
-    /// VM memory initializes one word (four elements) at a time, so this status is word-granular:
-    /// a cell that shares its word with a written cell reads as [`Status::Ok`] with the value
-    /// zero.
-    Uninit = 3,
     /// The output buffer capacity is smaller than the value length.
-    CapacityTooSmall = 4,
+    CapacityTooSmall = 3,
 }
 
 impl Status {
@@ -151,8 +145,7 @@ impl Status {
             0 => Some(Self::Ok),
             1 => Some(Self::OutOfBounds),
             2 => Some(Self::NotFound),
-            3 => Some(Self::Uninit),
-            4 => Some(Self::CapacityTooSmall),
+            3 => Some(Self::CapacityTooSmall),
             _ => None,
         }
     }
@@ -319,31 +312,28 @@ pub mod guest {
         /// The result is a plain boolean, not a [`crate::Status`].
         pub fn is_root_context() -> i32;
 
-        /// Writes the memory element at address `addr` of the current context to `out`.
+        /// Returns the memory element at address `addr` of the current context, in canonical
+        /// form.
         ///
-        /// Returns `Status::Uninit` when no cell of the memory word that holds `addr` was ever
-        /// written; `out` is not changed in that case. VM memory initializes one word (four
-        /// elements) at a time, so presence is word-granular: after a write to any address of a
-        /// word, the other three addresses of that word read as `Status::Ok` with the value zero.
-        pub fn mem_get(addr: u32, out: *mut Felt) -> i32;
+        /// Memory the program never wrote reads as zero, the same value the program itself
+        /// observes: VM memory is zero-filled.
+        pub fn mem_get(addr: u32) -> u64;
 
         /// Writes the `count` memory elements at addresses `addr..addr + count` of the current
         /// context to `out`.
         ///
-        /// Returns `Status::OutOfBounds` when `addr + count` goes past the `u32` address space,
-        /// and `Status::Uninit` when the range touches a memory word no cell of which was ever
-        /// written; `out` is not changed in either case. Presence is word-granular, as for
-        /// `mem_get`. Use `mem_get` for a per-word presence check.
+        /// Memory the program never wrote reads as zero; see `mem_get`. Returns
+        /// `Status::OutOfBounds` when `addr + count` goes past the `u32` address space; `out`
+        /// is not changed in that case.
         pub fn mem_read(addr: u32, out: *mut Felt, count: u32) -> i32;
 
         /// Writes the `count` memory elements at addresses `addr..addr + count` of the root
         /// context to `out`.
         ///
         /// The same contract as `mem_read`, for the root context — where kernel state lives —
-        /// from a handler that runs in another context. Returns `Status::OutOfBounds` when
-        /// `addr + count` goes past the `u32` address space, and `Status::Uninit` when the
-        /// range touches a memory word no cell of which was ever written; `out` is not changed
-        /// in either case.
+        /// from a handler that runs in another context. Memory the program never wrote reads as
+        /// zero; see `mem_get`. Returns `Status::OutOfBounds` when `addr + count` goes past the
+        /// `u32` address space; `out` is not changed in that case.
         pub fn mem_read_root(addr: u32, out: *mut Felt, count: u32) -> i32;
 
         /// Writes the Merkle-store node of the tree with root `root` at `depth`/`index` to
@@ -526,18 +516,12 @@ mod tests {
 
     #[test]
     fn status_roundtrip() {
-        let all = [
-            Status::Ok,
-            Status::OutOfBounds,
-            Status::NotFound,
-            Status::Uninit,
-            Status::CapacityTooSmall,
-        ];
+        let all = [Status::Ok, Status::OutOfBounds, Status::NotFound, Status::CapacityTooSmall];
         for status in all {
             assert_eq!(Status::from_raw(status.as_raw()), Some(status));
         }
         assert_eq!(Status::from_raw(-1), None);
-        assert_eq!(Status::from_raw(5), None);
+        assert_eq!(Status::from_raw(4), None);
         assert!(Status::Ok.is_ok());
         assert!(!Status::NotFound.is_ok());
     }

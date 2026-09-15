@@ -121,34 +121,27 @@ pub fn is_root_context() -> bool {
     unsafe { guest::is_root_context() != 0 }
 }
 
-/// Returns the memory element at `addr` of the current context, or `None` when no cell of the
-/// memory word that holds `addr` was ever written.
+/// Returns the memory element at `addr` of the current context.
 ///
-/// VM memory initializes one word (four elements) at a time, so presence is word-granular: after
-/// a write to any address of a word, the other three addresses of that word give `Some(0)`.
-pub fn mem_get(addr: u32) -> Option<Felt> {
-    let mut out = Felt::ZERO;
-    // SAFETY: the module contract; the host writes one element into the local `out`.
-    match status(unsafe { guest::mem_get(addr, &mut out) }) {
-        Status::Ok => Some(out),
-        Status::Uninit => None,
-        _ => fail("mem_get failed"),
-    }
+/// Memory the program never wrote reads as zero, the same value the program itself observes.
+pub fn mem_get(addr: u32) -> Felt {
+    // SAFETY: the module contract; the call takes no pointer.
+    // The host returns a canonical value, which is the plain residue of itself.
+    Felt::new_unchecked(unsafe { guest::mem_get(addr) })
 }
 
 /// Reads the `out.len()` memory elements at addresses `addr..addr + out.len()` of the current
 /// context.
 ///
-/// Returns [`Status::OutOfBounds`] when the range goes past the `u32` address space and
-/// [`Status::Uninit`] when the range touches a memory word no cell of which was ever written;
-/// `out` is unchanged in both cases. Presence is word-granular, as for [`mem_get`]. Use
-/// [`mem_get`] for a per-word presence check.
-pub fn mem_read(addr: u32, out: &mut [Felt]) -> Status {
+/// Memory the program never wrote reads as zero, as for [`mem_get`]. Returns `false` when the
+/// range goes past the `u32` address space; `out` is unchanged then.
+pub fn mem_read(addr: u32, out: &mut [Felt]) -> bool {
     let len = out.len() as u32;
     // SAFETY: the module contract; `len` is the element count of `out`.
     let raw = unsafe { guest::mem_read(addr, out.as_mut_ptr(), len) };
     match status(raw) {
-        result @ (Status::Ok | Status::Uninit | Status::OutOfBounds) => result,
+        Status::Ok => true,
+        Status::OutOfBounds => false,
         _ => fail("mem_read failed"),
     }
 }
@@ -158,12 +151,13 @@ pub fn mem_read(addr: u32, out: &mut [Felt]) -> Status {
 ///
 /// The same contract as [`mem_read`], for the root context — where kernel state lives — from a
 /// handler that runs in another context.
-pub fn mem_read_root(addr: u32, out: &mut [Felt]) -> Status {
+pub fn mem_read_root(addr: u32, out: &mut [Felt]) -> bool {
     let len = out.len() as u32;
     // SAFETY: the module contract; `len` is the element count of `out`.
     let raw = unsafe { guest::mem_read_root(addr, out.as_mut_ptr(), len) };
     match status(raw) {
-        result @ (Status::Ok | Status::Uninit | Status::OutOfBounds) => result,
+        Status::Ok => true,
+        Status::OutOfBounds => false,
         _ => fail("mem_read_root failed"),
     }
 }
