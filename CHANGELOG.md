@@ -5,6 +5,7 @@
 #### Features
 
 - [BREAKING] Added Eidos hashing with typed domain separation, including Eidos-backed IES, a counter-mode random coin, and length-bound LMCS implementations, native SIMD acceleration, and batched proof-of-work grinding; existing Poseidon2 variants remain available.
+- [BREAKING] ACE circuits evaluate periodic columns over one shared Lagrange basis per period, shrinking the VM recursive-verifier circuit stream by 8% and the PVM stream by 31%; both relation digests change.
 
 #### Fixes
 
