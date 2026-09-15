@@ -93,6 +93,19 @@ impl Prover {
         Ok(ExecutionProof::new(vm, precompile))
     }
 
+    /// Proves a VM witness that does not authenticate deferred precompile work.
+    ///
+    /// The returned execution proof has an empty precompile status. Use [`Self::prove`] or
+    /// [`Self::prove_full`] when the original execution witness contains precompile work.
+    pub fn prove_vm_witness(&self, witness: VmWitness) -> Result<ExecutionProof, ProverError> {
+        if witness.has_precompiles() {
+            return Err(ProverError::VmWitnessHasPrecompiles);
+        }
+
+        let vm = self.prove_vm(witness)?;
+        Ok(ExecutionProof::new(vm, PrecompileStatus::Empty))
+    }
+
     /// Materializes and proves the VM trace represented by `witness`.
     fn prove_vm(&self, witness: VmWitness) -> Result<VmProof, ProverError> {
         let trace = {
@@ -275,6 +288,9 @@ impl Default for Prover {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ProverError {
+    /// The VM witness authenticates deferred precompile work that this proving path cannot carry.
+    #[error("VM witness contains deferred precompile work")]
+    VmWitnessHasPrecompiles,
     /// The processor witness could not be materialized into a valid execution trace.
     #[error("failed to materialize VM execution trace: {0}")]
     TraceGeneration(#[source] ExecutionError),
@@ -289,6 +305,7 @@ pub enum ProverError {
 impl ProverError {
     fn into_execution_error(self) -> ExecutionError {
         match self {
+            Self::VmWitnessHasPrecompiles => ExecutionError::ProvingError(self.to_string()),
             Self::TraceGeneration(error) | Self::VmProofGeneration(error) => error,
             Self::PrecompileProofGeneration(error) => {
                 ExecutionError::ProvingError(error.to_string())
