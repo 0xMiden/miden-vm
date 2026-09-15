@@ -13,6 +13,7 @@
 - Fixed `PartialMmr::track()` panicking when a leaf position did not belong to the tree selected by its authentication path ([#3804](https://github.com/0xMiden/miden-vm/pull/3804)).
 - [BREAKING] Fixed `bound_into_included_u64` converting excluded start bounds in the wrong direction. The function now returns `Option<u64>` and uses `None` when an exclusive endpoint has no inclusive `u64` value ([#3589](https://github.com/0xMiden/miden-vm/pull/3589)).
 - Fixed 46 `\begin{cases}...\end{cases}` blocks in the assembly instruction reference and stack design docs that were missing the `\\` row separator between cases, which broke KaTeX rendering ([#3650](https://github.com/0xMiden/miden-vm/issues/3650)).
+- [BREAKING] Fixed stack overflows when parsing deeply nested constant and type expressions by rejecting nesting beyond 256 levels ([#3700](https://github.com/0xMiden/miden-vm/pull/3700)).
 
 #### Changes
 
