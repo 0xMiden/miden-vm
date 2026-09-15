@@ -5,7 +5,7 @@ use std::sync::Arc;
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     Felt, Word,
-    deferred::{DeferredState, PrecompileWitness, PrecompileWitnessError},
+    deferred::PrecompileWitness,
     events::{EventId, EventName},
     program::{ExecutionClaim, proof_request_key},
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus},
@@ -29,7 +29,7 @@ use crate::{helpers::masm_push_word, support::ecdsa::valid_fixture};
 #[tokio::test(flavor = "current_thread")]
 async fn ecdsa_deferred_obligation_is_settled_end_to_end() {
     let core_lib = CoreLibrary::default();
-    let (deferred_proof, claim, deferred_state) = prove_deferred_ecdsa_execution(&core_lib);
+    let (deferred_proof, claim, precompile_witness) = prove_deferred_ecdsa_execution(&core_lib);
     let outcome = Verifier::new()
         .verify(&claim, &deferred_proof)
         .expect("the MVM proof must authenticate its deferred obligation");
@@ -37,7 +37,7 @@ async fn ecdsa_deferred_obligation_is_settled_end_to_end() {
         .outstanding_precompile_root()
         .expect("the ECDSA execution must retain a deferred obligation");
 
-    let settlement = run_settlement_in_masm(&core_lib, &deferred_proof, &claim, deferred_state)
+    let settlement = run_settlement_in_masm(&core_lib, &deferred_proof, &claim, precompile_witness)
         .await
         .expect("the awaited MVM-to-PVM handoff must settle the authenticated deferred root");
     assert_eq!(
@@ -62,7 +62,7 @@ async fn ecdsa_deferred_obligation_is_settled_end_to_end() {
 
 fn prove_deferred_ecdsa_execution(
     core_lib: &CoreLibrary,
-) -> (ExecutionProof, ExecutionClaim, DeferredState) {
+) -> (ExecutionProof, ExecutionClaim, PrecompileWitness) {
     let fixture = valid_fixture();
 
     let source = format!(
@@ -104,11 +104,9 @@ fn prove_deferred_ecdsa_execution(
     let PrecompileStatus::Deferred(precompile) = proof.precompile() else {
         panic!("ECDSA execution must retain deferred precompile work")
     };
-    let deferred_state =
-        DeferredState::from_wire(Arc::new(miden_precompiles::registry()), precompile)
-            .expect("the execution's deferred wire must hydrate under the standard registry");
+    let precompile_witness = precompile.clone();
 
-    (proof, claim, deferred_state)
+    (proof, claim, precompile_witness)
 }
 
 struct SettlementResult {
@@ -120,7 +118,7 @@ async fn run_settlement_in_masm(
     core_lib: &CoreLibrary,
     deferred_proof: &ExecutionProof,
     claim: &ExecutionClaim,
-    deferred_state: DeferredState,
+    precompile_witness: PrecompileWitness,
 ) -> Result<SettlementResult, miden_processor::ExecutionError> {
     let vm = RecursiveVerifierInputs::for_request(
         core_lib.vm_recursive_verifier_root(),
@@ -134,7 +132,7 @@ async fn run_settlement_in_masm(
     let stack_inputs = StackInputs::new(claim_commitment.as_elements())
         .expect("claim commitment must fit the stack");
     let program = assemble_settlement_program(core_lib);
-    let mut host = PvmSettlementHost::new(core_lib, deferred_state);
+    let mut host = PvmSettlementHost::new(core_lib, precompile_witness);
 
     let output =
         FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
@@ -191,12 +189,12 @@ struct PvmSettlementHost {
     inner: DefaultHost,
     event_name: EventName,
     expected_verifier_root: Word,
-    deferred_state: DeferredState,
+    precompile_witness: PrecompileWitness,
     precompile_proof: Option<PrecompileProof>,
 }
 
 impl PvmSettlementHost {
-    fn new(core_lib: &CoreLibrary, deferred_state: DeferredState) -> Self {
+    fn new(core_lib: &CoreLibrary, precompile_witness: PrecompileWitness) -> Self {
         let inner = DefaultHost::default()
             .with_library(core_lib)
             .expect("core library must load into the settlement host");
@@ -204,7 +202,7 @@ impl PvmSettlementHost {
             inner,
             event_name: PVM_PROOF_REQUEST_EVENT_NAME,
             expected_verifier_root: core_lib.pvm_recursive_verifier_root(),
-            deferred_state,
+            precompile_witness,
             precompile_proof: None,
         }
     }
@@ -255,10 +253,10 @@ impl Host for PvmSettlementHost {
                 }
                 .into());
             }
-            if requested_root != self.deferred_state.root() {
+            if requested_root != self.precompile_witness.root_unchecked() {
                 return Err(SettlementEventError::RootMismatch {
                     requested: requested_root,
-                    available: self.deferred_state.root(),
+                    available: self.precompile_witness.root_unchecked(),
                 }
                 .into());
             }
@@ -271,11 +269,9 @@ impl Host for PvmSettlementHost {
             // Exercise a genuine suspension point. A production host can await a remote prover or
             // run the CPU-bound prover on its blocking pool before returning these mutations.
             tokio::task::yield_now().await;
-            let witness = PrecompileWitness::new(self.deferred_state.clone())
-                .map_err(SettlementEventError::Witness)?;
             let precompile_proof = Prover::new()
                 .with_hash_fn(HashFunction::Poseidon2)
-                .prove_precompile(&witness)
+                .prove_precompiles(vec![self.precompile_witness.clone()])
                 .map_err(SettlementEventError::Proving)?;
             let package = PvmRecursiveVerifierInputs::for_request(verifier_root, &precompile_proof)
                 .map_err(SettlementEventError::Advice)?;
@@ -300,8 +296,6 @@ enum SettlementEventError {
     RootMismatch { requested: Word, available: Word },
     #[error("a PVM proof package was already loaded before the settlement event")]
     PackageAlreadyLoaded,
-    #[error("PVM witness construction failed: {0}")]
-    Witness(#[source] PrecompileWitnessError),
     #[error("PVM proof generation failed: {0}")]
     Proving(#[source] ProverError),
     #[error("PVM recursive-verifier advice construction failed: {0}")]

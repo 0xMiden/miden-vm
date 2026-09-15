@@ -5,6 +5,7 @@
 //! code easy to scan during audit.
 
 mod aux_register;
+mod batch_witness;
 mod binding;
 mod bus_balance;
 mod byte_pair_lut;

@@ -9,10 +9,11 @@ extern crate alloc;
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
-use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
-use miden_core::deferred::DeferredState;
-pub use miden_core::proof::{HashFunction, StarkProof};
+pub use deferred::session::{SessionInputError, WitnessLocation};
+use miden_core::deferred::PrecompileWitness;
+pub use miden_core::proof::{HashFunction, PrecompileProof, StarkProof};
 
 pub(crate) mod ec;
 pub(crate) mod hash;
@@ -26,37 +27,24 @@ pub(crate) mod transcript;
 pub(crate) mod uint;
 pub(crate) mod utils;
 
-/// Proves the precompile claims accumulated in `state` against its exact deferred root.
-pub fn prove_deferred_state(
-    state: &DeferredState,
+/// Proves an owned batch of singleton execution obligations in one STARK.
+///
+/// The returned roots preserve input order and repetitions. Empty batches are rejected. The
+/// importer validates portable semantics and enforces batch-wide input and lowering limits.
+pub fn prove_precompiles(
+    witnesses: Vec<PrecompileWitness>,
     hash_fn: HashFunction,
-) -> Result<StarkProof, ProveDeferredStateError> {
-    let deferred = {
-        let _span = tracing::info_span!("build_session").entered();
-        deferred::session_from_deferred_state(state)?
-    };
-    let traces = {
-        let _span = tracing::info_span!("build_trace").entered();
-        deferred.session.finish(deferred.root)
-    };
-    Ok(traces.prove_stark(hash_fn)?)
+) -> Result<PrecompileProof, PrecompileProvingError> {
+    deferred::session::prove(witnesses, hash_fn)
 }
 
-/// Errors produced while proving deferred precompile claims from VM deferred state.
+/// Errors produced while importing and proving portable precompile claims.
 #[derive(Debug, thiserror::Error)]
-pub enum ProveDeferredStateError {
-    /// The VM deferred DAG could not be translated into the precompile prover's session model.
-    #[error("failed to translate deferred state into a precompile proving session: {0}")]
-    Translation(String),
-    /// The translated precompile session could not be proved.
+pub enum PrecompileProvingError {
+    #[error(transparent)]
+    Input(#[from] SessionInputError),
     #[error(transparent)]
     Prove(#[from] ProveError),
-}
-
-impl From<deferred::DeferredSessionError> for ProveDeferredStateError {
-    fn from(error: deferred::DeferredSessionError) -> Self {
-        Self::Translation(error.to_string())
-    }
 }
 
 /// Errors produced by serialized precompile STARK proof generation.

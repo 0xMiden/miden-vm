@@ -10,7 +10,7 @@ use proptest::prelude::*;
 use crate::{
     Word,
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
-    deferred::{DeferredRoot, DeferredStateWire, MAX_PRECOMPILE_ROOTS},
+    deferred::{DeferredRoot, MAX_PRECOMPILE_ROOTS, PrecompileWitness},
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
@@ -320,7 +320,7 @@ pub enum PrecompileStatus {
     /// The VM made no precompile requests.
     Empty,
     /// The VM made precompile requests which have not been proven.
-    Deferred(DeferredStateWire),
+    Deferred(PrecompileWitness),
     /// The VM made precompile requests and their proof is available.
     Proven(PrecompileProof),
 }
@@ -483,7 +483,7 @@ impl ExecutionProof {
         let vm = VmProof::read_from(source)?;
         let precompile = match discriminant {
             DEFERRED_PROOF_DISCRIMINANT => {
-                PrecompileStatus::Deferred(DeferredStateWire::read_from(source)?)
+                PrecompileStatus::Deferred(PrecompileWitness::read_from(source)?)
             },
             COMPLETE_PROOF_DISCRIMINANT => match Option::<PrecompileProof>::read_from(source)? {
                 Some(precompile) => PrecompileStatus::Proven(precompile),
@@ -588,7 +588,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        deferred::{DeferredState, Node, PrecompileWitness, TRUE_DIGEST},
+        deferred::{PrecompileWitnessEntry, TRUE_DIGEST, Tag},
         serde::ByteWriter,
     };
 
@@ -614,12 +614,15 @@ mod tests {
         }
     }
 
-    fn wire() -> (DeferredStateWire, DeferredRoot) {
-        let mut state = DeferredState::default();
-        let statement = state.register(Node::and(TRUE_DIGEST, TRUE_DIGEST)).unwrap();
-        state.log_statement(statement).unwrap();
-        let witness = PrecompileWitness::new(state).unwrap();
-        (witness.state().to_wire().unwrap(), witness.roots()[0])
+    fn wire() -> (PrecompileWitness, DeferredRoot) {
+        let witness = PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
+            tag: Tag::AND,
+            lhs: 0,
+            rhs: 0,
+        }])
+        .unwrap();
+        let root = witness.root_unchecked();
+        (witness, root)
     }
 
     fn versioned(vm: VmProof, precompile: PrecompileStatus) -> ExecutionProof {
@@ -845,8 +848,7 @@ mod tests {
     fn complete_transitions_deferred_proof_without_validating_artifact_shape() {
         let vm = vm_proof(TRUE_DIGEST);
         let precompile = precompile_proof(&[]);
-        let deferred =
-            versioned(vm.clone(), PrecompileStatus::Deferred(DeferredStateWire::default()));
+        let deferred = versioned(vm.clone(), PrecompileStatus::Deferred(wire().0));
 
         let completed = deferred.complete(precompile.clone()).unwrap();
 
