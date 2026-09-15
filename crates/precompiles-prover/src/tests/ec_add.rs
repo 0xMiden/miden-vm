@@ -251,15 +251,12 @@ impl EcStackTraces {
         // The subset includes BytePairLut, which declares preprocessed
         // columns, so the bundle is `Some`.
         let preprocessed = Preprocessed::build(prover_statement.statement(), &config);
-        let output = ProverInstance::new(&config, prover_statement, preprocessed.as_ref())
-            .expect("preprocessed bundle matches the declared columns")
-            .prove(test_challenger())
-            .expect("prove");
+        let (output, statement) =
+            ProverInstance::new(&config, prover_statement, preprocessed.as_ref())
+                .expect("preprocessed bundle matches the declared columns")
+                .prove(test_challenger())
+                .expect("prove");
 
-        let statement =
-            Statement::new(EcStackMultiAir::new(), Self::dummy_air_inputs(), Vec::new())
-                .expect("subset statement inputs are valid");
-        let preprocessed = Preprocessed::build(&statement, &config);
         let digest = VerifierInstance::new(
             &config,
             &statement,
