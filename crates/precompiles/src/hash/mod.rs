@@ -16,6 +16,7 @@ use miden_crypto::hash::eidos::{DomainTag, EidosDomain, EidosFrame};
 use crate::codec::{chunks_to_bytes_exact, n_chunks};
 
 pub mod keccak256;
+pub mod sha512;
 
 // HASH FUNCTION
 // ================================================================================================
@@ -63,6 +64,9 @@ impl<H> Default for HashPrecompile<H> {
 impl<H: HashFunction> HashPrecompile<H> {
     /// Local operation discriminant of the assertion frame.
     pub const ASSERT_OP_ID: u32 = ASSERT_DISC;
+
+    /// Number of bytes in this hash function's digest.
+    pub const DIGEST_BYTES: usize = H::DIGEST_FELTS * size_of::<u32>();
 
     /// Returns this precompile's registered domain.
     pub const fn domain() -> DomainTag {
@@ -161,7 +165,7 @@ impl<H: HashFunction> Precompile for HashPrecompile<H> {
             context,
             expected_digest,
             Self::digest_chunks(),
-            H::DIGEST_FELTS * size_of::<u32>(),
+            Self::DIGEST_BYTES,
         )?;
 
         if expected != H::hash(&preimage) {
@@ -369,4 +373,41 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
             .unwrap(),
         root
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::sync::Arc;
+
+    use miden_core::deferred::{DeferredState, Node, TRUE_DIGEST};
+
+    use super::sha512::Sha512Precompile;
+
+    #[test]
+    fn standard_registry_verifies_both_sha512_digest_chunks() {
+        // SHA-512("abc"); a change to either half must invalidate the whole assertion.
+        let digest = [
+            0xdd, 0xaf, 0x35, 0xa1, 0x93, 0x61, 0x7a, 0xba, 0xcc, 0x41, 0x73, 0x49, 0xae, 0x20,
+            0x41, 0x31, 0x12, 0xe6, 0xfa, 0x4e, 0x89, 0xa9, 0x7e, 0xa2, 0x0a, 0x9e, 0xee, 0xe6,
+            0x4b, 0x55, 0xd3, 0x9a, 0x21, 0x92, 0x99, 0x2a, 0x27, 0x4f, 0xc1, 0xa8, 0x36, 0xba,
+            0x3c, 0x23, 0xa3, 0xfe, 0xeb, 0xbd, 0x45, 0x4d, 0x44, 0x23, 0x64, 0x3c, 0xe8, 0x0e,
+            0x2a, 0x9a, 0xc9, 0x4f, 0xa5, 0x4c, 0xa4, 0x9f,
+        ];
+        for corrupt in [None, Some(0), Some(32), Some(63)] {
+            let mut state = DeferredState::new(Arc::new(crate::registry())).unwrap();
+            let input = state.register(Node::chunks_from_bytes(b"abc")).unwrap();
+            let mut expected = digest;
+            if let Some(index) = corrupt {
+                expected[index] ^= 1;
+            }
+            let expected = state.register(Node::chunks_from_bytes(&expected)).unwrap();
+            let result = state.register(Sha512Precompile::assert_node(3, input, expected));
+            if corrupt.is_none() {
+                let assertion = result.expect("standard registry must support SHA-512");
+                assert_eq!(state.evaluate_digest(assertion).unwrap(), TRUE_DIGEST);
+            } else {
+                assert!(result.is_err(), "every SHA-512 digest byte must be checked");
+            }
+        }
+    }
 }

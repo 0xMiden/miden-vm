@@ -9,7 +9,7 @@ use self::input_generation::generate_advice_inputs;
 
 #[path = "input_generation.rs"]
 pub mod input_generation;
-pub use input_generation::{DEFAULT_ECDSAS, DEFAULT_KECCAKS, PrecompileWorkload};
+pub use input_generation::{DEFAULT_ECDSAS, DEFAULT_EDDSAS, DEFAULT_KECCAKS, PrecompileWorkload};
 
 #[derive(Clone)]
 pub struct PrecompileFixture {
@@ -20,7 +20,7 @@ pub struct PrecompileFixture {
 
 impl PrecompileFixture {
     pub fn generate(workload: PrecompileWorkload) -> Self {
-        let source = generate_program_source(workload.ecdsas);
+        let source = generate_program_source(workload);
         let core_lib = CoreLibrary::default();
         let program = Assembler::default()
             .with_package(core_lib.package(), miden_vm::assembly::Linkage::Dynamic)
@@ -43,9 +43,10 @@ fn generate_stack_inputs(workload: PrecompileWorkload) -> StackInputs {
         .expect("single Keccak count should fit on the operand stack")
 }
 
-fn generate_program_source(ecdsas: usize) -> String {
+fn generate_program_source(workload: PrecompileWorkload) -> String {
     format!(
         r#"use miden::core::crypto::dsa::ecdsa_k256_keccak
+use miden::core::crypto::dsa::eddsa_25519_sha512
 use miden::core::crypto::hashes::keccak256
 
 begin
@@ -70,8 +71,15 @@ begin
         padw adv_loadw
         exec.ecdsa_k256_keccak::verify
     end
+    repeat.{eddsas}
+        padw adv_loadw
+        padw adv_loadw
+        exec.eddsa_25519_sha512::verify
+    end
 end
 "#,
+        ecdsas = workload.ecdsas,
+        eddsas = workload.eddsas,
     )
 }
 

@@ -275,6 +275,7 @@ mod tests {
             ("EcPointStoreGroups", 1),
             ("EcGroupAdd", 1),
             ("EcMsm", 1),
+            ("Sha512", 2),
         ];
 
         let derived: Vec<(String, u8)> = ChipletAir::all()
@@ -307,6 +308,14 @@ mod tests {
     /// Keep protocol and cost changes visible as numbers rather than only as a digest diff.
     #[test]
     fn pvm_canonical_ace_shape_matches_current_air() {
+        assert!(
+            ChipletAir::all().iter().all(|air| {
+                <ChipletAir as miden_lifted_air::LiftedAir<Felt, QuadFelt>>::max_periodic_length(
+                    air,
+                ) <= 128
+            }),
+            "long periodic tables make every recursive proof pay for dense SHA program polynomials"
+        );
         let canonical = build_canonical_precompile_ace_circuit().expect("canonical circuit");
         // BytePairLut is the only chiplet with a preprocessed trace, so the combined
         // preprocessed region must be nonempty.
@@ -320,6 +329,10 @@ mod tests {
         assert_eq!(canonical.layout().counts.num_aux_boundary, num_aux_values);
 
         let circuit = build_pvm_recursive_verifier_ace_circuit().expect("recursive circuit");
+        assert!(
+            circuit.num_eval_gates < 32_768,
+            "the SHA program must not restore the 97,576-gate fixed verifier cost"
+        );
         let snapshot = format!(
             "layout_inputs: {}\nnum_vars: {}\nnum_eval_gates: {}\nstream_len: \
              {}\ncircuit_digest: {:?}\nrelation_digest: {:?}",
@@ -387,7 +400,8 @@ mod tests {
         );
     }
 
-    /// The PVM aux hook reads ten quadratic-extension component residues as five MASM words.
+    /// The PVM aux hook reads eleven quadratic-extension component residues as five MASM words and
+    /// a tail.
     /// Pin the complete per-chiplet shape so a redistribution cannot preserve only the total.
     #[test]
     fn pvm_aux_hook_matches_every_chiplets_boundary_shape() {
@@ -405,20 +419,21 @@ mod tests {
         );
         assert_eq!(
             derived.iter().sum::<usize>(),
-            2 * masm_const(HOOK_PATH, "NUM_AUX_VALUE_WORDS") as usize,
+            (2 * masm_const(HOOK_PATH, "NUM_AUX_VALUE_WORDS")
+                + masm_const(HOOK_PATH, "NUM_AUX_TAIL_VALUES")) as usize,
             "the MASM hook must read every normalized LogUp value exactly once"
         );
 
-        // The scatter permutes the region the circuit reads, so it must be exactly one slot per
-        // exposed value.
+        // The scatter permutes the region the circuit reads, so it must be one slot per exposed
+        // value plus the word-alignment padding the hook zeroes.
         let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
         let layout = canonical.layout();
         let base = layout.index(InputKey::AuxBusBoundary(0)).expect("boundary base");
         let alpha = layout.index(InputKey::Alpha).expect("auxiliary inputs base");
         assert_eq!(
             alpha - base,
-            derived.iter().sum::<usize>(),
-            "the circuit's boundary region is not one slot per exposed value"
+            derived.iter().sum::<usize>().next_multiple_of(2),
+            "the circuit's boundary region is not one word-aligned slot per exposed value"
         );
     }
 
@@ -812,9 +827,10 @@ mod tests {
             .eval_external(&challenges, &[Felt::ZERO; 4], &[], &aux_refs, &[0; NUM_CHIPLETS])
             .expect("fixture denominators are non-zero");
         let expected = match crate::ace_constants::PVM_PROTOCOL_ID {
-            2 => QuadFelt::new([
-                Felt::new_unchecked(17_120_654_257_594_545_925),
-                Felt::new_unchecked(12_713_559_468_620_802_518),
+            // Fixed secp256k1 and Ed25519 boundary denominators plus one value per chiplet.
+            3 => QuadFelt::new([
+                Felt::new_unchecked(1_139_532_885_139_658_914),
+                Felt::new_unchecked(11_241_382_758_453_267_529),
             ]),
             version => panic!("add an external-assertion vector for protocol version {version}"),
         };
@@ -837,6 +853,7 @@ mod tests {
             ChipletAir::EcPointStoreGroups,
             ChipletAir::EcGroupAdd,
             ChipletAir::EcMsm,
+            ChipletAir::Sha512,
         ];
         assert_eq!(
             ChipletAir::all(),
