@@ -61,6 +61,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Check benchmark runner preflight
+        run: |
+          bash -n scripts/bench_eidos_vs_poseidon2.sh
+          python3 -m unittest discover -s scripts/tests -v
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       # Do not pin taiki-e's moving tool shortcut tags by hash. Pin a released

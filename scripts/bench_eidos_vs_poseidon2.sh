@@ -25,6 +25,7 @@ CGROUP_CPU_LIMITS="unavailable"
 CGROUP_STAT_DIR=""
 HUGETLB_MODE="not-controlled"
 LIBC_VERSION="unavailable"
+THP_POLICY_FILE="/sys/kernel/mm/transparent_hugepage/enabled"
 PROFILE_ENABLED="${EIDOS_BENCH_PROFILE:-0}"
 PROFILE_EVENTS="${EIDOS_BENCH_PERF_EVENTS:-}"
 
@@ -65,14 +66,14 @@ Usage:
 --aws-campaign
          Run the complete AWS scaling matrix. Every host runs native code with
          malloc huge pages disabled and enabled. x86_64 hosts additionally run
-         x86-64-v3 and x86-64-v4 with huge pages enabled. The mode configures
-         kernel THP to madvise when necessary and creates one compact archive
-         containing the metadata, summaries, TSV files, and logs from all arms.
+         x86-64-v3 and x86-64-v4 with huge pages enabled. Creates one compact
+         archive containing the metadata, summaries, TSV files, and logs from
+         all arms.
 --aws-profile
          Profile the native, huge-page-enabled recursive scaling matrix at up
-         to 64 physical cores. The script installs Linux perf tooling when
-         needed, records prover span timings and hardware/resource counters,
-         and emits one compact archive for the host.
+         to 64 physical cores. Requires perf, numactl, and GNU time to be
+         installed. Records prover span timings and available hardware/resource
+         counters, and emits one compact archive for the host.
 
 --threads N            Rayon/build threads. Default: 16, matching #3306/#3307.
                        With a scaling mode or AWS campaign, cap execution at N
@@ -85,19 +86,33 @@ Usage:
 --repeats N            Override the mode's number of measured runs.
 --cpu-profile PROFILE  Rust target CPU: native, x86-64-v3, or x86-64-v4.
                        Default: native.
---dry-run              Validate a scaling host or AWS campaign without creating
-                       worktrees or running benchmarks.
+--dry-run              Validate a scaling host or AWS campaign without running
+                       benchmarks or creating worktrees, result directories,
+                       or archives.
 --eidos-rev REV        Eidos commit or branch. Default: current HEAD.
 
 The script benchmarks detached worktrees at the pinned Poseidon2 base of PR #3718
 and the selected Eidos revision. Composition scaling keeps its worktrees and caches
 for later runs; the other modes remove their temporary worktrees on exit.
 
-Scaling campaigns require an explicit malloc huge-page arm on every host:
+Scaling and AWS modes require Linux with glibc, lscpu, taskset, numactl, and
+cgroup v2 with no CPU quota. Host configuration and tool installation are manual.
+For --scaling and --composition-scaling, select a malloc huge-page arm:
   GLIBC_TUNABLES=glibc.malloc.hugetlb=0  # requested off
   GLIBC_TUNABLES=glibc.malloc.hugetlb=1  # requested on
-Kernel THP must be set to madvise so these two arms remain interpretable.
+Set /sys/kernel/mm/transparent_hugepage/enabled to madvise before running these
+modes so the two malloc arms remain interpretable. AWS modes select the malloc
+arms automatically. Configure perf permissions separately when profiling;
+unavailable counters are reported and skipped. At least one counter is required.
 EOF
+}
+
+require_madvise_thp() {
+  [[ -r "$THP_POLICY_FILE" ]] || die "cannot read kernel THP policy at $THP_POLICY_FILE"
+  local policy
+  policy="$(< "$THP_POLICY_FILE")"
+  [[ "$policy" == *"[madvise]"* ]] ||
+    die "kernel THP policy is '$policy'; set $THP_POLICY_FILE to madvise before running --$MODE"
 }
 
 run_aws_campaign() {
@@ -110,33 +125,27 @@ run_aws_campaign() {
     command -v "$command" >/dev/null 2>&1 || die "--aws-campaign requires $command"
   done
 
-  local thp_policy="/sys/kernel/mm/transparent_hugepage/enabled"
-  [[ -r "$thp_policy" ]] || die "cannot read $thp_policy"
-  if ! grep -q '\[madvise\]' "$thp_policy"; then
-    command -v sudo >/dev/null 2>&1 ||
-      die "transparent huge pages are not in madvise mode and sudo is unavailable"
-    echo "[campaign] setting kernel transparent huge pages to madvise"
-    sudo sh -c "echo madvise > '$thp_policy'" ||
-      die "could not set transparent huge pages to madvise"
-  fi
+  require_madvise_thp
 
   local campaign_id campaign_dir campaign_archive driver_commit
-  campaign_id="$(date -u +%Y%m%d-%H%M%S)-$$"
-  campaign_dir="$ROOT/target/eidos-vs-poseidon2/aws-campaign-$campaign_id"
-  campaign_archive="$campaign_dir.tar.gz"
-  driver_commit="$(git -C "$ROOT" rev-parse HEAD)"
-  mkdir -p "$campaign_dir/arms"
+  if (( DRY_RUN == 0 )); then
+    campaign_id="$(date -u +%Y%m%d-%H%M%S)-$$"
+    campaign_dir="$ROOT/target/eidos-vs-poseidon2/aws-campaign-$campaign_id"
+    campaign_archive="$campaign_dir.tar.gz"
+    driver_commit="$(git -C "$ROOT" rev-parse HEAD)"
+    mkdir -p "$campaign_dir/arms"
 
-  {
-    echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    echo "driver_commit=$driver_commit"
-    echo "eidos_revision=$EIDOS_REV"
-    echo "architecture=$(uname -m)"
-    echo "hostname=$(hostname)"
-    echo "thp_policy=$(cat "$thp_policy")"
-  } > "$campaign_dir/metadata.txt"
-  LC_ALL=C lscpu > "$campaign_dir/lscpu.txt"
-  cp /proc/meminfo "$campaign_dir/memory.txt"
+    {
+      echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      echo "driver_commit=$driver_commit"
+      echo "eidos_revision=$EIDOS_REV"
+      echo "architecture=$(uname -m)"
+      echo "hostname=$(hostname)"
+      echo "thp_policy=$(< "$THP_POLICY_FILE")"
+    } > "$campaign_dir/metadata.txt"
+    LC_ALL=C lscpu > "$campaign_dir/lscpu.txt"
+    cp /proc/meminfo "$campaign_dir/memory.txt"
+  fi
 
   local arms=("hugetlb0-native:0:native" "hugetlb1-native:1:native")
   if [[ "$(uname -m)" == "x86_64" ]]; then
@@ -145,25 +154,22 @@ run_aws_campaign() {
   fi
 
   local arm label hugetlb profile arm_log run_dir artifact_dir path
-  local child_args=()
+  local child_command=()
   for arm in "${arms[@]}"; do
     IFS=: read -r label hugetlb profile <<< "$arm"
-    arm_log="$campaign_dir/$label.log"
     echo "[campaign] starting $label"
-    child_args=(--scaling --cpu-profile "$profile" --eidos-rev "$EIDOS_REV")
-    (( THREADS_EXPLICIT == 0 )) || child_args+=(--threads "$THREADS")
-    [[ -z "$WARMUPS_OVERRIDE" ]] || child_args+=(--warmups "$WARMUPS_OVERRIDE")
-    [[ -z "$REPEATS_OVERRIDE" ]] || child_args+=(--repeats "$REPEATS_OVERRIDE")
-    (( DRY_RUN == 0 )) || child_args+=(--dry-run)
-    GLIBC_TUNABLES="glibc.malloc.hugetlb=$hugetlb" \
-      "$RUNNER_PATH" \
-        "${child_args[@]}" \
-        2>&1 | tee "$arm_log"
-
+    child_command=(env "GLIBC_TUNABLES=glibc.malloc.hugetlb=$hugetlb"
+      "$RUNNER_PATH" --scaling --cpu-profile "$profile" --eidos-rev "$EIDOS_REV")
+    (( THREADS_EXPLICIT == 0 )) || child_command+=(--threads "$THREADS")
+    [[ -z "$WARMUPS_OVERRIDE" ]] || child_command+=(--warmups "$WARMUPS_OVERRIDE")
+    [[ -z "$REPEATS_OVERRIDE" ]] || child_command+=(--repeats "$REPEATS_OVERRIDE")
     if (( DRY_RUN == 1 )); then
+      "${child_command[@]}" --dry-run
       echo "[campaign] preflight passed for $label"
       continue
     fi
+    arm_log="$campaign_dir/$label.log"
+    "${child_command[@]}" 2>&1 | tee "$arm_log"
     run_dir="$(sed -n 's/^results: //p' "$arm_log" | tail -n 1)"
     [[ -n "$run_dir" && -d "$run_dir" ]] ||
       die "could not locate the result directory for $label"
@@ -179,79 +185,27 @@ run_aws_campaign() {
     echo "[campaign] finished $label"
   done
 
+  (( DRY_RUN == 0 )) || return 0
   echo "finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$campaign_dir/metadata.txt"
   tar -czf "$campaign_archive" -C "$(dirname "$campaign_dir")" "$(basename "$campaign_dir")"
   echo "campaign results: $campaign_dir"
   echo "campaign archive: $campaign_archive"
 }
 
-PROFILE_PERF_PARANOID_ORIGINAL=""
-PROFILE_PERF_PARANOID_CHANGED=0
-
-run_as_root() {
-  if (( EUID == 0 )); then
-    "$@"
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo "$@"
-  else
-    return 127
-  fi
-}
-
-restore_profile_sysctl() {
-  if (( PROFILE_PERF_PARANOID_CHANGED == 1 )); then
-    run_as_root sysctl -q -w \
-      "kernel.perf_event_paranoid=$PROFILE_PERF_PARANOID_ORIGINAL" || true
-  fi
-}
-
 profile_perf_works() {
   command -v perf >/dev/null 2>&1 && perf --version 2>/dev/null | grep -q '^perf version'
 }
 
-install_profile_tools() {
-  local need_packages=0
-  profile_perf_works || need_packages=1
-  command -v numactl >/dev/null 2>&1 || need_packages=1
-  [[ -x /usr/bin/time ]] || need_packages=1
-  (( need_packages == 0 )) && return
-
-  (( EUID == 0 )) || command -v sudo >/dev/null 2>&1 ||
-    die "profiling tools are missing and neither root nor sudo access is available"
-
-  if command -v apt-get >/dev/null 2>&1; then
-    echo "[profile] installing perf, numactl, and GNU time with apt"
-    run_as_root apt-get update
-    run_as_root apt-get install -y linux-tools-common numactl time
-    if ! profile_perf_works; then
-      run_as_root apt-get install -y "linux-tools-$(uname -r)" ||
-        run_as_root apt-get install -y linux-tools-aws
-    fi
-  elif command -v dnf >/dev/null 2>&1; then
-    echo "[profile] installing perf, numactl, and GNU time with dnf"
-    run_as_root dnf install -y perf numactl time
-  elif command -v yum >/dev/null 2>&1; then
-    echo "[profile] installing perf, numactl, and GNU time with yum"
-    run_as_root yum install -y perf numactl time
-  else
-    die "profiling needs perf, numactl, and GNU time; unsupported package manager"
-  fi
-
-  profile_perf_works || die "perf is unavailable after package installation"
-  command -v numactl >/dev/null 2>&1 || die "numactl is unavailable after package installation"
-  [[ -x /usr/bin/time ]] || die "GNU time is unavailable after package installation"
+require_profile_tools() {
+  profile_perf_works || die "install working Linux perf tooling before running --aws-profile"
+  command -v numactl >/dev/null 2>&1 || die "install numactl before running --aws-profile"
+  [[ -x /usr/bin/time ]] || die "install GNU time at /usr/bin/time before running --aws-profile"
 }
 
 profile_event_works() {
-  local event="$1" output
-  output="$(mktemp /tmp/miden-perf-event.XXXXXX)"
-  if perf stat -x ';' -e "$event" -o "$output" -- true >/dev/null 2>&1 &&
-    ! grep -Eq '<not supported>|<not counted>|No permission|not permitted' "$output"; then
-    rm -f "$output"
-    return 0
-  fi
-  rm -f "$output"
-  return 1
+  local output
+  output="$(LC_ALL=C perf stat -x ';' -e "$1" -- true 2>&1)" || return 1
+  ! grep -Eq '<not supported>|<not counted>|No permission|not permitted' <<< "$output"
 }
 
 select_profile_events() {
@@ -266,19 +220,14 @@ select_profile_events() {
   )
   local selected=()
 
-  if ! profile_event_works cycles:u && [[ -r /proc/sys/kernel/perf_event_paranoid ]]; then
-    PROFILE_PERF_PARANOID_ORIGINAL="$(< /proc/sys/kernel/perf_event_paranoid)"
-    if run_as_root sysctl -q -w kernel.perf_event_paranoid=1; then
-      PROFILE_PERF_PARANOID_CHANGED=1
-      trap restore_profile_sysctl EXIT
-    fi
-  fi
-
   for event in "${software_events[@]}" "${hardware_events[@]}"; do
     if profile_event_works "$event"; then
       selected+=("$event")
     else
       echo "[profile] perf event unavailable: $event" >&2
+      if [[ "$event" == "cycles:u" ]]; then
+        echo "[profile] check perf permissions and kernel.perf_event_paranoid for hardware counters" >&2
+      fi
     fi
   done
   ((${#selected[@]} > 0)) || die "perf exposes none of the requested profiling events"
@@ -294,17 +243,19 @@ run_aws_profile() {
   for command in git lscpu tar tee; do
     command -v "$command" >/dev/null 2>&1 || die "--aws-profile requires $command"
   done
-  install_profile_tools
+  require_madvise_thp
+  require_profile_tools
   select_profile_events
 
-  local thp_policy="/sys/kernel/mm/transparent_hugepage/enabled"
-  [[ -r "$thp_policy" ]] || die "cannot read $thp_policy"
-  if ! grep -q '\[madvise\]' "$thp_policy"; then
-    (( EUID == 0 )) || command -v sudo >/dev/null 2>&1 ||
-      die "transparent huge pages are not in madvise mode and root access is unavailable"
-    echo "[profile] setting kernel transparent huge pages to madvise"
-    run_as_root sh -c "echo madvise > '$thp_policy'" ||
-      die "could not set transparent huge pages to madvise"
+  local child_command=(env EIDOS_BENCH_PROFILE=1
+    "EIDOS_BENCH_PERF_EVENTS=$PROFILE_EVENTS" GLIBC_TUNABLES=glibc.malloc.hugetlb=1
+    "$RUNNER_PATH" --scaling --cpu-profile native --eidos-rev "$EIDOS_REV")
+  (( THREADS_EXPLICIT == 0 )) || child_command+=(--threads "$THREADS")
+  child_command+=(--warmups "${WARMUPS_OVERRIDE:-1}" --repeats "${REPEATS_OVERRIDE:-3}")
+  if (( DRY_RUN == 1 )); then
+    "${child_command[@]}" --dry-run
+    echo "[profile] preflight passed"
+    return
   fi
 
   local profile_id profile_dir profile_archive profile_log run_dir path driver_commit
@@ -321,10 +272,9 @@ run_aws_profile() {
     echo "eidos_revision=$EIDOS_REV"
     echo "architecture=$(uname -m)"
     echo "hostname=$(hostname)"
-    echo "thp_policy=$(cat "$thp_policy")"
+    echo "thp_policy=$(< "$THP_POLICY_FILE")"
     echo "perf=$(perf --version)"
     echo "perf_events=$PROFILE_EVENTS"
-    echo "perf_event_paranoid_original=${PROFILE_PERF_PARANOID_ORIGINAL:-unchanged}"
     if [[ -r /proc/sys/kernel/perf_event_paranoid ]]; then
       echo "perf_event_paranoid=$(< /proc/sys/kernel/perf_event_paranoid)"
     fi
@@ -333,21 +283,8 @@ run_aws_profile() {
   cp /proc/meminfo "$profile_dir/memory.txt"
   perf list > "$profile_dir/perf-list.txt" 2>&1 || true
 
-  local child_args=(--scaling --cpu-profile native --eidos-rev "$EIDOS_REV")
-  (( THREADS_EXPLICIT == 0 )) || child_args+=(--threads "$THREADS")
-  child_args+=(--warmups "${WARMUPS_OVERRIDE:-1}")
-  child_args+=(--repeats "${REPEATS_OVERRIDE:-3}")
-  (( DRY_RUN == 0 )) || child_args+=(--dry-run)
+  "${child_command[@]}" 2>&1 | tee "$profile_log"
 
-  EIDOS_BENCH_PROFILE=1 \
-    EIDOS_BENCH_PERF_EVENTS="$PROFILE_EVENTS" \
-    GLIBC_TUNABLES=glibc.malloc.hugetlb=1 \
-    "$RUNNER_PATH" "${child_args[@]}" 2>&1 | tee "$profile_log"
-
-  if (( DRY_RUN == 1 )); then
-    echo "[profile] preflight passed"
-    return
-  fi
   run_dir="$(sed -n 's/^results: //p' "$profile_log" | tail -n 1)"
   [[ -n "$run_dir" && -d "$run_dir" ]] ||
     die "could not locate the profiling result directory"
@@ -428,6 +365,13 @@ done
   die "--warmups must be a non-negative integer"
 [[ -z "$REPEATS_OVERRIDE" || "$REPEATS_OVERRIDE" =~ ^[1-9][0-9]*$ ]] ||
   die "--repeats must be a positive integer"
+command -v git >/dev/null 2>&1 || die "missing required command: git"
+git -C "$ROOT" cat-file -e "$BASE_COMMIT^{commit}" 2>/dev/null ||
+  die "pinned base $BASE_COMMIT is unavailable"
+CANDIDATE_COMMIT="$(git -C "$ROOT" rev-parse --verify "$EIDOS_REV^{commit}" 2>/dev/null)" ||
+  die "Eidos revision $EIDOS_REV is unavailable"
+git -C "$ROOT" merge-base --is-ancestor "$BASE_COMMIT" "$CANDIDATE_COMMIT" ||
+  die "pinned base is not an ancestor of Eidos revision $EIDOS_REV"
 if [[ "$MODE" == "aws-campaign" ]]; then
   [[ -z "$MVM_COUNTS_RAW" ]] || die "--aws-campaign does not accept --mvm-counts"
   [[ "$CPU_PROFILE" == "native" ]] || die "--aws-campaign selects CPU profiles automatically"
@@ -471,18 +415,19 @@ if [[ "$MODE" != "scaling" && "$MODE" != "composition-scaling" ]]; then
   (( DRY_RUN == 0 )) || die "--dry-run is supported only with a scaling mode"
 fi
 
-for command in cargo git perl awk sed cmp tee rustc; do
+for command in cargo perl awk sed cmp tee rustc; do
   command -v "$command" >/dev/null 2>&1 || die "missing required command: $command"
 done
-if [[ "$MODE" == "composition-scaling" ]]; then
-  for command in flock tar; do
-    command -v "$command" >/dev/null 2>&1 || die "composition-scaling requires $command"
-  done
-fi
 if command -v ldd >/dev/null 2>&1; then
   LIBC_VERSION="$(ldd --version 2>&1 | sed -n '1p' || true)"
 fi
 if [[ "$MODE" == "scaling" || "$MODE" == "composition-scaling" ]]; then
+  [[ "$(uname -s)" == "Linux" ]] || die "--$MODE requires Linux"
+  if [[ "$MODE" == "composition-scaling" ]]; then
+    for command in flock tar; do
+      command -v "$command" >/dev/null 2>&1 || die "composition-scaling requires $command"
+    done
+  fi
   hugetlb_settings=()
   IFS=: read -r -a tunables <<< "${GLIBC_TUNABLES:-}"
   for tunable in "${tunables[@]}"; do
@@ -497,22 +442,8 @@ if [[ "$MODE" == "scaling" || "$MODE" == "composition-scaling" ]]; then
   esac
   [[ "$LIBC_VERSION" == *GLIBC* || "$LIBC_VERSION" == *"GNU libc"* ]] ||
     die "scaling modes require glibc with the malloc hugetlb tunable"
-  [[ -r /sys/kernel/mm/transparent_hugepage/enabled ]] ||
-    die "scaling modes cannot read the kernel transparent-hugepage policy"
-  if ! grep -q '\[madvise\]' /sys/kernel/mm/transparent_hugepage/enabled; then
-    [[ "$MODE" == "composition-scaling" ]] ||
-      die "scaling modes require kernel transparent huge pages in madvise mode"
-    echo "[setup] setting kernel transparent huge pages to madvise"
-    run_as_root sh -c 'echo madvise > /sys/kernel/mm/transparent_hugepage/enabled' ||
-      die "could not set transparent huge pages to madvise"
-  fi
+  require_madvise_thp
 fi
-git -C "$ROOT" cat-file -e "$BASE_COMMIT^{commit}" 2>/dev/null ||
-  die "pinned base $BASE_COMMIT is unavailable"
-CANDIDATE_COMMIT="$(git -C "$ROOT" rev-parse --verify "$EIDOS_REV^{commit}" 2>/dev/null)" ||
-  die "Eidos revision $EIDOS_REV is unavailable"
-git -C "$ROOT" merge-base --is-ancestor "$BASE_COMMIT" "$CANDIDATE_COMMIT" ||
-  die "pinned base is not an ancestor of Eidos revision $EIDOS_REV"
 
 if command -v sha256sum >/dev/null 2>&1; then
   SHA256_IMPL="sha256sum"
@@ -881,7 +812,11 @@ if (( DRY_RUN == 1 )); then
   echo "LLC domains:      $LLC_DOMAIN_COUNT"
   echo "cgroup limits:    $CGROUP_CPU_LIMITS"
   echo "malloc THP:       $HUGETLB_MODE"
+  echo "kernel THP:       $(< "$THP_POLICY_FILE")"
   echo "libc:             $LIBC_VERSION"
+  if (( PROFILE_ENABLED == 1 )); then
+    echo "perf events:      $PROFILE_EVENTS"
+  fi
   exit 0
 fi
 if [[ "$MODE" == "composition-scaling" ]]; then
@@ -1309,8 +1244,8 @@ done
   if command -v getconf >/dev/null 2>&1; then
     echo "page_size=$(getconf PAGE_SIZE 2>/dev/null || echo unavailable)"
   fi
-  if [[ -r /sys/kernel/mm/transparent_hugepage/enabled ]]; then
-    echo "transparent_hugepage=$(< /sys/kernel/mm/transparent_hugepage/enabled)"
+  if [[ -r "$THP_POLICY_FILE" ]]; then
+    echo "transparent_hugepage=$(< "$THP_POLICY_FILE")"
   fi
   echo "runner_sha256=$RUNNER_SHA"
   echo "fixture_manifest_sha256=$(sha256_file "$FIXTURE_ROOT/SHA256SUMS")"
