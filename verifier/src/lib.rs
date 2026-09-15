@@ -69,8 +69,8 @@ impl VerifierSupport {
     }
 }
 
-const VERIFIER_SUPPORT_V2: VerifierSupport = VerifierSupport {
-    format: ExecutionProofCompatibility::FORMAT_V2,
+const VERIFIER_SUPPORT_V1: VerifierSupport = VerifierSupport {
+    format: ExecutionProofCompatibility::FORMAT_V1,
     accepted_vm_roots: &[CURRENT_VM_VERIFIER_ROOT],
     accepted_pvm_roots: &[CURRENT_PVM_VERIFIER_ROOT],
 };
@@ -117,16 +117,16 @@ impl Verifier {
         proof: &ExecutionProof,
     ) -> Result<VerificationOutcome, VerificationError> {
         match proof.compatibility().format() {
-            ExecutionProofCompatibility::FORMAT_V2 => {
-                VERIFIER_SUPPORT_V2.check(proof)?;
-                self.verify_v2(claim, proof)
+            ExecutionProofCompatibility::FORMAT_V1 => {
+                VERIFIER_SUPPORT_V1.check(proof)?;
+                self.verify_v1(claim, proof)
             },
             format => Err(VerificationError::UnsupportedProofFormat(format)),
         }
     }
 
-    /// Verifies an execution proof encoded with transport format 2.
-    fn verify_v2(
+    /// Verifies an execution proof encoded with transport format 1.
+    fn verify_v1(
         &self,
         claim: &ExecutionClaim,
         proof: &ExecutionProof,
@@ -725,7 +725,7 @@ mod tests {
         let incompatible_vm = ExecutionProof::from_parts(
             ExecutionProofCompatibility::new(
                 vec![root(100)],
-                VERIFIER_SUPPORT_V2.accepted_pvm_roots.to_vec(),
+                VERIFIER_SUPPORT_V1.accepted_pvm_roots.to_vec(),
             )
             .unwrap(),
             proof.vm().clone(),
@@ -733,7 +733,7 @@ mod tests {
         );
         let incompatible_pvm = ExecutionProof::from_parts(
             ExecutionProofCompatibility::new(
-                VERIFIER_SUPPORT_V2.accepted_vm_roots.to_vec(),
+                VERIFIER_SUPPORT_V1.accepted_vm_roots.to_vec(),
                 vec![root(200)],
             )
             .unwrap(),
@@ -766,7 +766,7 @@ mod tests {
             Felt::new_unchecked(0),
         ]);
         const SUPPORT: VerifierSupport = VerifierSupport {
-            format: ExecutionProofCompatibility::FORMAT_V2,
+            format: ExecutionProofCompatibility::FORMAT_V1,
             accepted_vm_roots: &[OLD_VM_ROOT, CURRENT_VM_VERIFIER_ROOT],
             accepted_pvm_roots: &[OLD_PVM_ROOT, CURRENT_PVM_VERIFIER_ROOT],
         };
