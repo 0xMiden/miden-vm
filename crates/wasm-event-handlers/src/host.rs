@@ -381,33 +381,19 @@ fn is_root_context(mut caller: Caller<'_, HostCtx>) -> Result<i32, wasmi::Error>
     state(&caller).map(|state| i32::from(state.ctx().is_root()))
 }
 
-/// Writes the memory element at address `addr` of the current context to `out`, or returns
-/// [`Status::Uninit`] when no cell of the memory word that holds `addr` was ever written.
-///
-/// VM memory initializes one word (four elements) at a time, so presence is word-granular: after
-/// a write to any address of a word, the other three addresses of that word give [`Status::Ok`]
-/// with the value zero.
-fn mem_get(mut caller: Caller<'_, HostCtx>, addr: u32, out: u32) -> Result<i32, wasmi::Error> {
+/// Returns the memory element at address `addr` of the current context, in canonical form;
+/// memory the program never wrote reads as zero, the same value the program itself observes.
+fn mem_get(mut caller: Caller<'_, HostCtx>, addr: u32) -> Result<u64, wasmi::Error> {
     // One element = one memory-map probe plus one moved felt.
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + FUEL_PER_MAP_PROBE + FUEL_PER_FELT)?;
-    let mem = memory(&mut caller)?;
-    // Output pointers are validated before the lookup, so a defect traps even when the
-    // result would be a status.
-    byte_range(mem.data(&caller).len(), out, FELT_BYTES, 1)?;
     let state = state(&caller)?;
-    match state.get_mem_value(state.ctx(), addr) {
-        Some(felt) => {
-            write_felts(mem.data_mut(&mut caller), out, &[felt])?;
-            Ok(OK)
-        },
-        None => Ok(Status::Uninit.as_raw()),
-    }
+    Ok(state.get_mem_value(state.ctx(), addr).unwrap_or(Felt::ZERO).as_canonical_u64())
 }
 
 /// Writes the `count` memory elements at addresses `addr..addr + count` to `out`, reading from
-/// `ctx` or, when it is `None`, from the current context. Returns a status when the range is out
-/// of bounds or touches a memory word no cell of which was ever written. Presence is
-/// word-granular; see [`mem_get`].
+/// `ctx` or, when it is `None`, from the current context. Memory the program never wrote reads
+/// as zero; see [`mem_get`]. Returns [`Status::OutOfBounds`] when the range goes past the `u32`
+/// address space.
 ///
 /// `mem_read` and `mem_read_root` are both this function, so the single charge here is the whole
 /// fuel charge of one call.
@@ -434,20 +420,14 @@ fn mem_read_range(
     for idx in 0..count {
         // `addr + idx` cannot wrap: the `addr + count` guard above keeps the whole range
         // inside the u32 address space.
-        match state.get_mem_value(ctx, addr + idx) {
-            Some(felt) => felts.push(felt),
-            // Every memory word the range touches must be written; use `mem_get` for per-word
-            // checks.
-            None => return Ok(Status::Uninit.as_raw()),
-        }
+        felts.push(state.get_mem_value(ctx, addr + idx).unwrap_or(Felt::ZERO));
     }
     write_felts(mem.data_mut(caller), out, &felts)?;
     Ok(OK)
 }
 
 /// Writes the `count` memory elements at addresses `addr..addr + count` of the current context
-/// to `out`, or returns a status when the range is out of bounds or touches an unwritten memory
-/// word.
+/// to `out`, or returns a status when the range is out of bounds.
 fn mem_read(
     mut caller: Caller<'_, HostCtx>,
     addr: u32,
@@ -458,8 +438,7 @@ fn mem_read(
 }
 
 /// Writes the `count` memory elements at addresses `addr..addr + count` of the root context to
-/// `out`, or returns a status when the range is out of bounds or touches an unwritten memory
-/// word.
+/// `out`, or returns a status when the range is out of bounds.
 fn mem_read_root(
     mut caller: Caller<'_, HostCtx>,
     addr: u32,
@@ -501,7 +480,7 @@ fn merkle_get_node(
     out: u32,
 ) -> Result<i32, wasmi::Error> {
     let (mem, root, depth, index) = merkle_lookup_args(&mut caller, root, depth, index)?;
-    // Validate the output pointer before the lookup; see `mem_get`.
+    // Validate the output pointer before the lookup; see `mem_read_range`.
     byte_range(mem.data(&caller).len(), out, FELT_BYTES, 4)?;
     let node = state(&caller)?.advice_provider().get_tree_node(root, depth, index);
     match node {
@@ -588,7 +567,7 @@ fn adv_map_value_lookup(
     charge_fuel(caller, HOST_CALL_BASE_FUEL + 4 * FUEL_PER_FELT + FUEL_PER_MAP_PROBE)?;
     let mem = memory(caller)?;
     let data_len = mem.data(&*caller).len();
-    // Validate the output pointers before the lookup; see `mem_get`.
+    // Validate the output pointers before the lookup; see `mem_read_range`.
     if let Some((out, cap)) = value_buf {
         byte_range(data_len, out, FELT_BYTES, cap)?;
     }
@@ -658,7 +637,7 @@ fn poseidon2_merge(
 ) -> Result<(), wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + FUEL_PER_POSEIDON2_PERM + 12 * FUEL_PER_FELT)?;
     let mem = memory(&mut caller)?;
-    // Validate the output pointer before the hash; see `mem_get`.
+    // Validate the output pointer before the hash; see `mem_read_range`.
     byte_range(mem.data(&caller).len(), out, FELT_BYTES, 4)?;
     let felts = read_felts(mem.data(&caller), pair, 8)?;
     let word = |at: usize| Word::new([felts[at], felts[at + 1], felts[at + 2], felts[at + 3]]);
@@ -687,7 +666,7 @@ fn poseidon2_hash(
         + u64::from(count) * FUEL_PER_FELT;
     charge_fuel(&mut caller, fuel)?;
     let mem = memory(&mut caller)?;
-    // Validate the output pointer before the hash; see `mem_get`.
+    // Validate the output pointer before the hash; see `mem_read_range`.
     byte_range(mem.data(&caller).len(), out, FELT_BYTES, 4)?;
     let felts = read_felts(mem.data(&caller), elems, count)?;
     // A hash in domain zero is the plain hash: the domain goes into a capacity element that is
@@ -721,7 +700,7 @@ fn hash_bytes<const N: usize>(
         HOST_CALL_BASE_FUEL + HASH_BASE_FUEL + u64::from(len) * fuel_per_byte,
     )?;
     let mem = memory(&mut caller)?;
-    // Validate the output pointer before the hash; see `mem_get`.
+    // Validate the output pointer before the hash; see `mem_read_range`.
     byte_range(mem.data(&caller).len(), out, 1, N as u32)?;
     let range = byte_range(mem.data(&caller).len(), data, 1, len)?;
     let digest = hash(&mem.data(&caller)[range]);

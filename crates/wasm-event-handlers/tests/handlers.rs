@@ -38,7 +38,7 @@ const IMPORTS: &str = r#"
   (import "miden:event/v1" "clk" (func $clk (result i64)))
   (import "miden:event/v1" "event_id" (func $event_id (result i64)))
   (import "miden:event/v1" "is_root_context" (func $is_root_context (result i32)))
-  (import "miden:event/v1" "mem_get" (func $mem_get (param i32 i32) (result i32)))
+  (import "miden:event/v1" "mem_get" (func $mem_get (param i32) (result i64)))
   (import "miden:event/v1" "mem_read" (func $mem_read (param i32 i32 i32) (result i32)))
   (import "miden:event/v1" "mem_read_root" (func $mem_read_root (param i32 i32 i32) (result i32)))
   (import "miden:event/v1" "merkle_get_node" (func $merkle_get_node (param i32 i32 i64 i32) (result i32)))
@@ -247,22 +247,28 @@ fn event_id_matches_the_dispatched_event() {
 }
 
 #[test]
-fn mem_read_reports_uninit_and_out_of_bounds() {
-    // Fresh memory: a batch over unwritten cells is Uninit; a range past the u32 address space
-    // is OutOfBounds.
+fn mem_read_zero_fills_and_reports_out_of_bounds() {
+    // Fresh memory: an in-bounds batch over cells the program never wrote is `Ok` and reads as
+    // zero; a range past the u32 address space is OutOfBounds. The two read elements go on the
+    // advice stack after the statuses, and the sentinels the guest puts in the output buffer
+    // first prove that the host wrote the zeros instead of leaving the buffer as it was.
     let wat_src = fixture(
-        "(i64.store (i32.const 0)
+        "(i64.store (i32.const 16) (i64.const 7))
+         (i64.store (i32.const 24) (i64.const 7))
+         (i64.store (i32.const 0)
              (i64.extend_i32_u (call $mem_read (i32.const 0) (i32.const 16) (i32.const 2))))
          (i64.store (i32.const 8)
              (i64.extend_i32_u (call $mem_read (i32.const -1) (i32.const 16) (i32.const 2))))
-         (call $adv_stack_extend (i32.const 0) (i32.const 2))",
+         (call $adv_stack_extend (i32.const 0) (i32.const 4))",
     );
     let module = load(&wat_src);
 
     let mutations = run(&module, &processor()).expect("handler succeeds");
     let expected = [
-        Felt::new_unchecked(Status::Uninit.as_raw() as u64),
+        Felt::new_unchecked(Status::Ok.as_raw() as u64),
         Felt::new_unchecked(Status::OutOfBounds.as_raw() as u64),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
     ];
     assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
 }
@@ -291,37 +297,32 @@ fn clk_root_context_and_depth_are_visible() {
 }
 
 #[test]
-fn mem_get_reports_uninitialized_memory() {
+fn mem_get_reads_unwritten_memory_as_zero() {
     let wat_src = fixture(
-        "(i64.store (i32.const 0)
-             (i64.extend_i32_u (call $mem_get (i32.const 0) (i32.const 8))))
+        "(i64.store (i32.const 0) (call $mem_get (i32.const 0)))
          (call $adv_stack_extend (i32.const 0) (i32.const 1))",
     );
     let module = load(&wat_src);
     let processor = processor();
 
     let mutations = run(&module, &processor).expect("handler succeeds");
-    let status = Felt::new_unchecked(Status::Uninit.as_raw() as u64);
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with([status])]);
+    let zero = Felt::new_unchecked(0);
+    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with([zero])]);
 }
 
 #[test]
-fn mem_get_presence_is_word_granular() {
+fn mem_get_zero_fills_across_word_boundaries() {
     use miden_assembly::{Assembler, DefaultSourceManager};
 
-    // VM memory initializes one word (four elements) at a time, so after the program writes
-    // address 0, address 1 reads as `Ok` with the value zero, and only the next word (address 4)
-    // is `Uninit`. The handler needs a program to write that word, so this test runs the whole
-    // VM instead of calling the handler against a fresh state.
-    //
-    // The sentinel at address 0 of the guest memory proves that the host wrote the zero, instead
-    // of leaving the output buffer as it was.
+    // The zero fill is uniform: it does not stop at the word the program touched. After the
+    // program writes address 0, the handler reads that value back, and both address 1 (the same
+    // memory word) and address 4 (a word the program never touched) read as zero — the same
+    // values the program itself observes. The handler needs a program to write a word, so this
+    // test runs the whole VM instead of calling the handler against a fresh state.
     let wat_src = fixture(
-        "(i64.store (i32.const 0) (i64.const 7))
-         (i64.store (i32.const 8)
-             (i64.extend_i32_u (call $mem_get (i32.const 1) (i32.const 0))))
-         (i64.store (i32.const 16)
-             (i64.extend_i32_u (call $mem_get (i32.const 4) (i32.const 24))))
+        "(i64.store (i32.const 0) (call $mem_get (i32.const 0)))
+         (i64.store (i32.const 8) (call $mem_get (i32.const 1)))
+         (i64.store (i32.const 16) (call $mem_get (i32.const 4)))
          (call $adv_stack_extend (i32.const 0) (i32.const 3))",
     );
     let module = load(&wat_src);
@@ -331,13 +332,11 @@ fn mem_get_presence_is_word_granular() {
         begin
             push.1 mem_store.0
             emit.event("{event}")
+            adv_push push.1 assert_eq
             adv_push push.0 assert_eq
-            adv_push push.{ok} assert_eq
-            adv_push push.{uninit} assert_eq
+            adv_push push.0 assert_eq
         end"#,
         event = EVENT.as_str(),
-        ok = Status::Ok.as_raw(),
-        uninit = Status::Uninit.as_raw(),
     );
     let package = Assembler::new(Arc::new(DefaultSourceManager::default()))
         .assemble_program("wasm_handler_partial_word", source)
@@ -350,7 +349,7 @@ fn mem_get_presence_is_word_granular() {
     }
     FastProcessor::new(StackInputs::default())
         .execute_sync(&program, &mut host)
-        .expect("the unwritten cell of a written word reads as Ok with the value zero");
+        .expect("memory the program never wrote reads as zero, inside and outside a written word");
 }
 
 #[test]
@@ -498,24 +497,29 @@ fn merkle_store_accepts_consistent_node() {
 }
 
 #[test]
-fn mem_read_root_statuses() {
-    // The root context of a fresh processor has no written cell, so the batch read is Uninit; a
-    // range past the u32 address space is OutOfBounds.
+fn mem_read_root_zero_fills_and_reports_out_of_bounds() {
+    // The root context of a fresh processor has no written cell, so the in-bounds batch read is
+    // `Ok` and reads as zero; a range past the u32 address space is OutOfBounds. The sentinels
+    // in the output buffer prove that the host wrote the zeros.
     let wat_src = fixture(
-        "(i64.store (i32.const 0)
+        "(i64.store (i32.const 16) (i64.const 7))
+         (i64.store (i32.const 24) (i64.const 7))
+         (i64.store (i32.const 0)
              (i64.extend_i32_u
                  (call $mem_read_root (i32.const 0) (i32.const 16) (i32.const 2))))
          (i64.store (i32.const 8)
              (i64.extend_i32_u
                  (call $mem_read_root (i32.const -1) (i32.const 16) (i32.const 2))))
-         (call $adv_stack_extend (i32.const 0) (i32.const 2))",
+         (call $adv_stack_extend (i32.const 0) (i32.const 4))",
     );
     let module = load(&wat_src);
 
     let mutations = run(&module, &processor()).expect("handler succeeds");
     let expected = [
-        Felt::new_unchecked(Status::Uninit.as_raw() as u64),
+        Felt::new_unchecked(Status::Ok.as_raw() as u64),
         Felt::new_unchecked(Status::OutOfBounds.as_raw() as u64),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
     ];
     assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
 }
