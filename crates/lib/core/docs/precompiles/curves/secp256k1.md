@@ -11,8 +11,8 @@
 | push_generator | Pushes the registered digest of the conventional curve generator.<br /> |
 | add | Registers `lhs + rhs` and returns the result expression digest.<br />Input:  [LHS_DIGEST, RHS_DIGEST, ...]<br />Output: [SUM_DIGEST, ...]<br /> |
 | sub | Registers `lhs - rhs` and returns the result expression digest.<br />Input:  [LHS_DIGEST, RHS_DIGEST, ...]<br />Output: [DIFF_DIGEST, ...]<br /> |
-| mul_scalar | Registers `[k]point` for a scalar-field digest.<br />Input:  [POINT_DIGEST, SCALAR_DIGEST, ...]<br />Output: [PRODUCT_POINT_DIGEST, ...]<br /> |
-| mul_scalar_generator | Registers `[k]GENERATOR` for a scalar-field digest.<br />Input:  [SCALAR_DIGEST, ...]<br />Output: [PRODUCT_POINT_DIGEST, ...]<br /> |
+| mul_scalar | Registers `[k]point` for a digest in the curve's scalar domain.<br />That domain is the scalar field for prime-order curves and the complete-order ring for<br />cofactor curves.<br />Input:  [POINT_DIGEST, SCALAR_DIGEST, ...]<br />Output: [PRODUCT_POINT_DIGEST, ...]<br /> |
+| mul_scalar_generator | Registers `[k]GENERATOR` for a digest in the curve's scalar domain.<br />Input:  [SCALAR_DIGEST, ...]<br />Output: [PRODUCT_POINT_DIGEST, ...]<br /> |
 | msm_mem | Registers an MSM PairList staged in memory.<br />Input:  [ptr, n, ...]<br />Output: [MSM_POINT_DIGEST, ...]<br />Memory layout: pair i at ptr + 8*i is `[POINT_DIGEST, SCALAR_DIGEST]`.<br /> |
 | msm2 | Registers a two-pair MSM from stack operands.<br />Input:  [POINT0_DIGEST, SCALAR0_DIGEST, POINT1_DIGEST, SCALAR1_DIGEST, ...]<br />Output: [MSM_POINT_DIGEST, ...]<br /> |
 | msm2_generator | Registers `[scalar0]GENERATOR + [scalar1]point1` as a two-pair MSM.<br />Input:  [SCALAR0_DIGEST, SCALAR1_DIGEST, POINT1_DIGEST, ...]<br />Output: [MSM_POINT_DIGEST, ...]<br /> |

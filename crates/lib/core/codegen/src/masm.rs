@@ -103,7 +103,7 @@ fn render_uint_constants(config: &UintMasmConfig) -> Result<String, String> {
     }
 
     if !domain.is_prime_field() {
-        return Err(format!("{} must be marked as a prime-field domain", config.title));
+        return Ok(String::new());
     }
 
     let minus_one = constant(domain.minus_one(), domain);
@@ -134,7 +134,7 @@ fn render_uint_constants(config: &UintMasmConfig) -> Result<String, String> {
 }
 
 fn render_uint_extra_procs(config: &UintMasmConfig) -> Result<String, String> {
-    if config.domain == UintDomain::U256 {
+    if config.domain == UintDomain::U256 || !config.domain.is_prime_field() {
         Ok(String::new())
     } else {
         render_template(FIELD_EXTRA_OPS_TEMPLATE, &[])
@@ -165,6 +165,7 @@ fn render_curve(config: &CurveMasmConfig) -> Result<String, String> {
         ("TEMPLATE_PATH", CURVE_TEMPLATE_PATH.to_string()),
         ("REGENERATE_COMMAND", REGENERATE_COMMAND.to_string()),
         ("TITLE", config.title.to_string()),
+        ("POINT_CURVE", config.title.to_ascii_lowercase()),
         ("BASE_FIELD_MODULE", config.base_field_module.to_string()),
         ("BASE_FIELD_DESCRIPTION", config.base_field_description.to_string()),
         ("PRECOMPILE_ID", CurvePrecompile::domain().as_u32().to_string()),
@@ -338,11 +339,19 @@ struct GeneratedFile {
 }
 
 fn domain_kind(domain: UintDomain) -> &'static str {
-    if domain == UintDomain::U256 { "UINT" } else { "FIELD" }
+    match domain {
+        UintDomain::U256 => "UINT",
+        UintDomain::Ed25519Order => "RING",
+        _ => "FIELD",
+    }
 }
 
 fn value_kind(domain: UintDomain) -> &'static str {
-    if domain == UintDomain::U256 { "uint" } else { "field" }
+    if domain == UintDomain::U256 || domain == UintDomain::Ed25519Order {
+        "uint"
+    } else {
+        "field"
+    }
 }
 
 fn encoded_modulus_note(domain: UintDomain) -> &'static str {
@@ -378,6 +387,21 @@ impl UintMasmConfig {
                 title: "SECP256K1 SCALAR-FIELD",
                 domain,
             },
+            UintDomain::Ed25519Base => Self {
+                path: "asm/fields/ed25519_base.masm",
+                title: "ED25519 BASE-FIELD",
+                domain,
+            },
+            UintDomain::Ed25519Scalar => Self {
+                path: "asm/fields/ed25519_scalar.masm",
+                title: "ED25519 SCALAR-FIELD",
+                domain,
+            },
+            UintDomain::Ed25519Order => Self {
+                path: "asm/fields/ed25519_order.masm",
+                title: "ED25519 ORDER",
+                domain,
+            },
         }
     }
 }
@@ -399,6 +423,13 @@ impl CurveMasmConfig {
                 title: "SECP256K1",
                 base_field_module: "k1_base",
                 base_field_description: "secp256k1 base-field",
+                curve,
+            },
+            CurveId::Ed25519 => Self {
+                path: "asm/curves/ed25519.masm",
+                title: "ED25519",
+                base_field_module: "ed25519_base",
+                base_field_description: "Ed25519 base-field",
                 curve,
             },
         }
@@ -427,7 +458,12 @@ mod tests {
         assert_eq!(fs::read_to_string(&unrelated_file).unwrap(), "keep me");
         assert!(out_dir.join("asm/u256.masm").exists());
         assert!(out_dir.join("asm/fields/k1_base.masm").exists());
+        assert!(out_dir.join("asm/fields/k1_scalar.masm").exists());
+        assert!(out_dir.join("asm/fields/ed25519_base.masm").exists());
+        assert!(out_dir.join("asm/fields/ed25519_scalar.masm").exists());
+        assert!(out_dir.join("asm/fields/ed25519_order.masm").exists());
         assert!(out_dir.join("asm/curves/secp256k1.masm").exists());
+        assert!(out_dir.join("asm/curves/ed25519.masm").exists());
 
         fs::remove_dir_all(&out_dir).unwrap();
     }

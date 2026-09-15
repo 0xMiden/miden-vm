@@ -60,7 +60,7 @@ const MSM_BASE_CV_3 = {{MSM_BASE_CV_3}}
 const IDENTITY_DIGEST = {{IDENTITY_DIGEST}}
 const GENERATOR_DIGEST = {{GENERATOR_DIGEST}}
 
-#! Deferred secp256k1 point expression digest.
+#! Deferred {{POINT_CURVE}} point expression digest.
 pub type Point = word
 #! Deferred scalar expression digest for scalar multiplication.
 pub type Scalar = word
@@ -191,7 +191,9 @@ pub proc sub(lhs: Point, rhs: Point) -> Point
 end
 
 
-#! Registers `[k]point` for a scalar-field digest.
+#! Registers `[k]point` for a digest in the curve's scalar domain.
+#! That domain is the scalar field for prime-order curves and the complete-order ring for
+#! cofactor curves.
 #! Input:  [POINT_DIGEST, SCALAR_DIGEST, ...]
 #! Output: [PRODUCT_POINT_DIGEST, ...]
 pub proc mul_scalar(point: Point, scalar: Scalar) -> Point
@@ -201,7 +203,7 @@ pub proc mul_scalar(point: Point, scalar: Scalar) -> Point
     # => [PRODUCT_POINT_DIGEST, ...]
 end
 
-#! Registers `[k]GENERATOR` for a scalar-field digest.
+#! Registers `[k]GENERATOR` for a digest in the curve's scalar domain.
 #! Input:  [SCALAR_DIGEST, ...]
 #! Output: [PRODUCT_POINT_DIGEST, ...]
 pub proc mul_scalar_generator(scalar: Scalar) -> Point
