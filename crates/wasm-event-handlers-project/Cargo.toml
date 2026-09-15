@@ -25,7 +25,7 @@ miden-project = { workspace = true, features = ["std", "serde"] }
 miden-wasm-event-handlers = { workspace = true, features = ["std"] }
 
 # External dependencies
-serde_json = { workspace = true, features = ["std"] }
+cargo_metadata = { workspace = true }
 
 [dev-dependencies]
 # `testing` provides the in-memory package cache the project assembler needs.

@@ -6,6 +6,7 @@ use std::{
     process::Command,
 };
 
+use cargo_metadata::{Message, TargetKind};
 use miden_assembly::diagnostics::Report;
 use miden_wasm_event_handlers::GUEST_RUSTFLAGS;
 
@@ -15,9 +16,6 @@ const TARGET: &str = "wasm32-unknown-unknown";
 /// The advice a message carries when the toolchain may lack the Wasm target.
 const TARGET_HINT: &str =
     "if the target is missing, run `rustup target add wasm32-unknown-unknown`";
-
-/// The cargo target kind of the handler module.
-const CDYLIB_TARGET_KIND: &str = "cdylib";
 
 /// Builds the Rust guest crate at `crate_dir` and returns the bytes of the Wasm module it
 /// produces.
@@ -77,7 +75,9 @@ pub(crate) fn build(crate_dir: &Path) -> Result<Vec<u8>, Report> {
         )));
     }
 
-    let mut artifacts = wasm_artifacts(&output.stdout);
+    // The plugin canonicalizes `crate_dir`, and cargo reports an absolute canonical manifest
+    // path, so the two spellings match.
+    let mut artifacts = wasm_artifacts(&output.stdout, &crate_dir.join("Cargo.toml"));
     match artifacts.len() {
         1 => std::fs::read(&artifacts[0]).map_err(|error| {
             Report::msg(format!(
@@ -115,43 +115,37 @@ fn cargo() -> OsString {
     std::env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"))
 }
 
-/// Collects the Wasm artifacts of the `cdylib` targets a cargo JSON message stream reports.
+/// Collects the Wasm artifacts the guest crate's own `cdylib` targets contribute to a cargo JSON
+/// message stream.
 ///
 /// The artifact paths come from cargo's `compiler-artifact` messages rather than from the crate
 /// name, because the crate name is not the file name: cargo replaces `-` with `_`, and a manifest
 /// can rename the library target.
 ///
-/// Only the `cdylib` targets count. The build already limits itself to the library target with
-/// `--lib`, so this filter is defense in depth: it keeps the artifact of a library target that
-/// declares more crate types than `cdylib`, or of a dependency, out of the result.
-fn wasm_artifacts(stdout: &[u8]) -> Vec<PathBuf> {
+/// Only the artifacts of the guest crate itself count, matched by `manifest_path`, so the artifact
+/// of a dependency is never taken. Of those, only the `cdylib` targets count: a library target
+/// built without the `cdylib` crate type contributes nothing, which keeps the crate-type error
+/// of the caller accurate.
+fn wasm_artifacts(stdout: &[u8], manifest_path: &Path) -> Vec<PathBuf> {
     let mut artifacts = Vec::new();
-    for line in stdout.split(|byte| *byte == b'\n') {
-        let Ok(message) = serde_json::from_slice::<serde_json::Value>(line) else {
+    // `parse_stream` reports a line that is not a cargo message as `Message::TextLine` and fails
+    // only on an I/O error, so a build output interleaved with plain text costs no artifact.
+    for message in Message::parse_stream(stdout).flatten() {
+        let Message::CompilerArtifact(artifact) = message else {
             continue;
         };
-        if message.get("reason").and_then(serde_json::Value::as_str) != Some("compiler-artifact") {
+        if artifact.manifest_path.as_std_path() != manifest_path {
             continue;
         }
-        let is_cdylib = message
-            .get("target")
-            .and_then(|target| target.get("kind"))
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|kinds| {
-                kinds.iter().any(|kind| kind.as_str() == Some(CDYLIB_TARGET_KIND))
-            });
-        if !is_cdylib {
+        if !artifact.target.kind.contains(&TargetKind::CDyLib) {
             continue;
         }
-        let Some(filenames) = message.get("filenames").and_then(serde_json::Value::as_array) else {
-            continue;
-        };
         artifacts.extend(
-            filenames
+            artifact
+                .filenames
                 .iter()
-                .filter_map(serde_json::Value::as_str)
-                .filter(|name| name.ends_with(".wasm"))
-                .map(PathBuf::from),
+                .filter(|name| name.extension() == Some("wasm"))
+                .map(|name| name.clone().into_std_path_buf()),
         );
     }
     artifacts
@@ -166,30 +160,44 @@ mod tests {
 
     #[test]
     fn artifacts_come_from_the_compiler_artifact_messages() {
-        let stdout = br#"{"reason":"compiler-artifact","target":{"kind":["lib"]},"filenames":["/out/libdep.rlib"]}
-{"reason":"build-script-executed","target":{"kind":["custom-build"]},"filenames":["/out/ignored.wasm"]}
-{"reason":"compiler-artifact","target":{"kind":["cdylib"]},"filenames":["/out/guest.wasm","/out/guest.d"]}
+        let stdout = br#"{"reason":"build-script-executed","package_id":"path+file:///guest#guest@0.1.0","linked_libs":[],"linked_paths":[],"cfgs":[],"env":[],"out_dir":"/out/build/guest-1/out"}
+{"reason":"compiler-artifact","package_id":"path+file:///guest#guest@0.1.0","manifest_path":"/guest/Cargo.toml","target":{"kind":["cdylib"],"crate_types":["cdylib"],"name":"guest","src_path":"/guest/src/lib.rs","edition":"2021","doc":false,"doctest":false,"test":true},"profile":{"opt_level":"3","debuginfo":0,"debug_assertions":false,"overflow_checks":false,"test":false},"features":[],"filenames":["/out/guest.wasm","/out/guest.d"],"executable":null,"fresh":false}
 not json
+{"reason":"build-finished","success":true}
 "#;
-        assert_eq!(wasm_artifacts(stdout), vec![PathBuf::from("/out/guest.wasm")]);
+        let artifacts = wasm_artifacts(stdout, Path::new("/guest/Cargo.toml"));
+        assert_eq!(artifacts, vec![PathBuf::from("/out/guest.wasm")]);
     }
 
     #[test]
     fn only_the_cdylib_artifacts_count() {
         // `--lib` keeps a `src/main.rs` binary out of the build; the filter is defense in depth.
-        let stdout = br#"{"reason":"compiler-artifact","target":{"kind":["bin"]},"filenames":["/out/guest-bin.wasm"]}
-{"reason":"compiler-artifact","target":{"kind":["cdylib"]},"filenames":["/out/guest.wasm"]}
+        let stdout = br#"{"reason":"compiler-artifact","package_id":"path+file:///guest#guest@0.1.0","manifest_path":"/guest/Cargo.toml","target":{"kind":["bin"],"crate_types":["bin"],"name":"guest","src_path":"/guest/src/main.rs","edition":"2021","doc":true,"doctest":false,"test":true},"profile":{"opt_level":"3","debuginfo":0,"debug_assertions":false,"overflow_checks":false,"test":false},"features":[],"filenames":["/out/guest-bin.wasm"],"executable":"/out/guest-bin.wasm","fresh":false}
+{"reason":"compiler-artifact","package_id":"path+file:///guest#guest@0.1.0","manifest_path":"/guest/Cargo.toml","target":{"kind":["cdylib"],"crate_types":["cdylib"],"name":"guest","src_path":"/guest/src/lib.rs","edition":"2021","doc":false,"doctest":false,"test":true},"profile":{"opt_level":"3","debuginfo":0,"debug_assertions":false,"overflow_checks":false,"test":false},"features":[],"filenames":["/out/guest.wasm"],"executable":null,"fresh":false}
 "#;
-        assert_eq!(wasm_artifacts(stdout), vec![PathBuf::from("/out/guest.wasm")]);
+        let artifacts = wasm_artifacts(stdout, Path::new("/guest/Cargo.toml"));
+        assert_eq!(artifacts, vec![PathBuf::from("/out/guest.wasm")]);
     }
 
     #[test]
     fn a_multi_kind_library_target_gives_its_wasm_artifact_only() {
         // A `[lib]` with crate-type = ["cdylib", "rlib"] reports one message with both kinds and
         // both files; only the `.wasm` is the handler module.
-        let stdout = br#"{"reason":"compiler-artifact","target":{"kind":["cdylib","rlib"]},"filenames":["/out/guest.wasm","/out/libguest.rlib"]}
+        let stdout = br#"{"reason":"compiler-artifact","package_id":"path+file:///guest#guest@0.1.0","manifest_path":"/guest/Cargo.toml","target":{"kind":["cdylib","rlib"],"crate_types":["cdylib","rlib"],"name":"guest","src_path":"/guest/src/lib.rs","edition":"2021","doc":true,"doctest":true,"test":true},"profile":{"opt_level":"3","debuginfo":0,"debug_assertions":false,"overflow_checks":false,"test":false},"features":[],"filenames":["/out/guest.wasm","/out/libguest.rlib"],"executable":null,"fresh":false}
 "#;
-        assert_eq!(wasm_artifacts(stdout), vec![PathBuf::from("/out/guest.wasm")]);
+        let artifacts = wasm_artifacts(stdout, Path::new("/guest/Cargo.toml"));
+        assert_eq!(artifacts, vec![PathBuf::from("/out/guest.wasm")]);
+    }
+
+    #[test]
+    fn a_dependency_artifact_is_excluded() {
+        // A dependency that is a `cdylib` of its own reports a `.wasm` too; the manifest path is
+        // what tells the two apart.
+        let stdout = br#"{"reason":"compiler-artifact","package_id":"path+file:///deps/other#other@0.1.0","manifest_path":"/deps/other/Cargo.toml","target":{"kind":["cdylib"],"crate_types":["cdylib"],"name":"other","src_path":"/deps/other/src/lib.rs","edition":"2021","doc":false,"doctest":false,"test":true},"profile":{"opt_level":"3","debuginfo":0,"debug_assertions":false,"overflow_checks":false,"test":false},"features":[],"filenames":["/out/other.wasm"],"executable":null,"fresh":false}
+{"reason":"compiler-artifact","package_id":"path+file:///guest#guest@0.1.0","manifest_path":"/guest/Cargo.toml","target":{"kind":["cdylib"],"crate_types":["cdylib"],"name":"guest","src_path":"/guest/src/lib.rs","edition":"2021","doc":false,"doctest":false,"test":true},"profile":{"opt_level":"3","debuginfo":0,"debug_assertions":false,"overflow_checks":false,"test":false},"features":[],"filenames":["/out/guest.wasm"],"executable":null,"fresh":false}
+"#;
+        let artifacts = wasm_artifacts(stdout, Path::new("/guest/Cargo.toml"));
+        assert_eq!(artifacts, vec![PathBuf::from("/out/guest.wasm")]);
     }
 
     #[test]
