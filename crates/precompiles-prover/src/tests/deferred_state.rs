@@ -4,7 +4,7 @@ use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
 use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
-    deferred::{Digest, Node as VmNode, TRUE_DIGEST as VM_TRUE_DIGEST},
+    deferred::{Digest, Node as VmNode, PrecompileWitness, TRUE_DIGEST as VM_TRUE_DIGEST},
     field::QuadFelt,
     proof::{HashFunction, StarkProof},
     serde::{Deserializable, Serializable},
@@ -249,12 +249,10 @@ fn shared_truthy_dag_from_wire_proves_and_verifies() {
     for _ in 0..8 {
         state.log_statement(state.root()).unwrap();
     }
-    let bytes = state.to_wire().unwrap().to_bytes();
-    let wire = miden_core::deferred::DeferredStateWire::read_from_bytes(&bytes).unwrap();
-    let state = DeferredState::from_wire(Arc::new(miden_precompiles::registry()), &wire).unwrap();
-    let DeferredSession { session, root } = session_from_deferred_state(&state).unwrap();
-    assert_eq!(root.hash(), P2Digest::from(state.root()));
-    let traces = session.finish(root);
+    let bytes = state.witness().to_bytes();
+    let witness = PrecompileWitness::read_from_bytes(&bytes).unwrap();
+    let traces = session_from_witnesses(vec![witness]).unwrap().finish();
+    assert_eq!(traces.public_root(), P2Digest::from(state.root()));
     traces.check();
     let verified = verify_session(&traces.prove()).expect("shared truthy DAG proof must verify");
     assert_eq!(verified, state.root());
