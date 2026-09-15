@@ -99,7 +99,7 @@ fn check_wire_session(state: WitnessFixture) -> SessionTraces {
     let witness = state.witness();
     let witness =
         PrecompileWitness::read_from_bytes(&witness.to_bytes()).expect("witness must decode");
-    assert_eq!(witness.root(), state.root());
+    assert_eq!(witness.root_unchecked(), state.root());
     let traces = session_from_witnesses(vec![witness]).expect("shared DAG must lower").finish();
     traces.check();
     traces
