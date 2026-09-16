@@ -220,3 +220,35 @@ wycheproof-ng-eddsa = { version = "0.2.0", default-features = false }
 
 [workspace.lints.rust]
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }
+
+# Plonky3 with the completed-block DFT callback, applied to the 0.7.0 release
+# (0xMiden/Plonky3 branch perf/dft-on-v0.7.0; upstream: https://github.com/Plonky3/Plonky3/pull/2148).
+# Every p3 crate in the graph must come from this one source. Remove when a release ships the callback.
+[patch.crates-io]
+p3-air = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-batch-stark = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-blake3 = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-blake3-air = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-bn254 = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-challenger = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-commit = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-dft = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-field = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-fri = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-goldilocks = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-keccak = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-keccak-air = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-lookup = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-matrix = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-maybe-rayon = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-mds = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-merkle-tree = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-mersenne-31 = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-multilinear-util = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-poseidon1 = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-poseidon2 = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-poseidon2-air = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-security = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-symmetric = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-uni-stark = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
+p3-util = { git = "https://github.com/0xMiden/Plonky3", rev = "977ed63b2a66f47f16b27c09f42e984c05411d62" }
