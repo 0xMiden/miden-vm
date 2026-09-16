@@ -475,6 +475,7 @@ impl VerificationOutcome {
 
 /// Errors that can occur during proof verification.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum VerificationError {
     #[error("conjectured security level is {actual} bits, below the required {required} bits")]
     InsufficientSecurityLevel { actual: u32, required: u32 },
