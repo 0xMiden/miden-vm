@@ -25,6 +25,7 @@ miden-project = { workspace = true, features = ["std", "serde"] }
 miden-wasm-event-handlers = { workspace = true, features = ["std"] }
 
 # External dependencies
+blake3 = { workspace = true }
 cargo_metadata = { workspace = true }
 
 [dev-dependencies]

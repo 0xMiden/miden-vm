@@ -2965,6 +2965,7 @@ dependencies = [
 name = "miden-wasm-event-handlers-project"
 version = "0.31.0"
 dependencies = [
+ "blake3",
  "cargo_metadata",
  "miden-assembly",
  "miden-mast-package",
