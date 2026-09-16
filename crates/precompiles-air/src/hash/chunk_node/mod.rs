@@ -40,8 +40,8 @@ pub const NODE_COL_OFFSET: usize = chunk::NUM_MAIN_COLS;
 
 pub const NUM_MAIN_COLS: usize = chunk::NUM_MAIN_COLS + node::NUM_MAIN_COLS;
 
-/// Six auxiliary columns. Together with the sponge's 18 columns, these give the composite its
-/// 24-column auxiliary trace.
+/// Six auxiliary columns. Together with the sponge's 12 columns, these give the composite its
+/// 18-column auxiliary trace.
 pub const NUM_AUX_COLS: usize = 6;
 
 pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [3, 3, 3, 4, 4, 4];

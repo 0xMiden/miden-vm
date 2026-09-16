@@ -453,6 +453,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn preprocessed_table_matches_the_mvm_byte_pair_table() {
+        // Both verifiers commit to the same byte-pair matrix, including its column order.
+        let mvm = miden_air::and8_lookup::preprocessed_trace();
+        let pvm = preprocessed_table();
+        assert_eq!(mvm.width, pvm.width);
+        assert_eq!(mvm.values, pvm.values);
+    }
+
+    #[test]
     fn affine_logic_reconstruction_matches_byte_operations() {
         for (a, b) in [(0u8, 0u8), (1, 2), (5, 3), (0xab, 0xcd), (255, 255)] {
             let a_felt = Felt::from(a);

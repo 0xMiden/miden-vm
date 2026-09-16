@@ -16,7 +16,7 @@ use super::{
 use crate::{
     constraints::{
         and8_lookup::eidos as eidos_lookup,
-        lookup::messages::{AeadEidosCompressionOutputPairMsg, BusId},
+        lookup::messages::{AeadEidosCompressionOutputPairMsg, BusId, byte_pair_relation_bus},
     },
     lookup::{
         Challenges, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, LookupMessage,
@@ -119,14 +119,11 @@ const FOOTER_OUTPUT_BATCH2_DEG: Deg = Deg { v: 3, u: 2 };
 #[derive(Copy, Clone, Debug)]
 #[doc(hidden)]
 pub struct NarrowLookupConfig {
-    /// Bus carrying bytewise AND relations.
-    pub and8_bus: usize,
+    /// Bus carrying each normalized byte-pair relation. The canonical XOR relation's bus also
+    /// carries the bytewise AND lookups.
+    pub relation_bus: fn(eidos_lookup::BytePairRelation) -> usize,
     /// Bus carrying 16-bit range checks.
     pub range_check_bus: usize,
-    /// Rotation-relation bus selected for each byte position in a rotate-by-12 step.
-    pub rot12_buses: [usize; BYTES_PER_WORD],
-    /// Rotation-relation bus selected for each byte position in a rotate-by-7 step.
-    pub rot7_buses: [usize; BYTES_PER_WORD],
     /// Bus carrying scheduled message words.
     pub message_word_bus: usize,
     /// Sign of byte-table and range-check multiplicities.
@@ -135,6 +132,18 @@ pub struct NarrowLookupConfig {
     pub xor_expression: XorExpression,
     /// Diagnostic label for a paired lookup column.
     pub pair_name: &'static str,
+}
+
+impl NarrowLookupConfig {
+    /// Bus carrying bytewise AND relations.
+    fn and8_bus(&self) -> usize {
+        (self.relation_bus)(eidos_lookup::BytePairRelation::CanonicalXor)
+    }
+
+    /// Bus of the relation serving `byte_position` of a `rotation` step.
+    fn rotation_bus(&self, rotation: eidos_lookup::Rotation, byte_position: usize) -> usize {
+        (self.relation_bus)(eidos_lookup::BytePairRelation::for_rotation(rotation, byte_position))
+    }
 }
 
 /// Sign applied to byte-table and range-check lookup multiplicities.
@@ -157,21 +166,13 @@ pub enum XorExpression {
     RepeatedSubtraction,
 }
 
+fn mvm_relation_bus(relation: eidos_lookup::BytePairRelation) -> usize {
+    byte_pair_relation_bus(relation) as usize
+}
+
 const MVM_NARROW_LOOKUP_CONFIG: NarrowLookupConfig = NarrowLookupConfig {
-    and8_bus: BusId::And8Lookup as usize,
+    relation_bus: mvm_relation_bus,
     range_check_bus: BusId::RangeCheck as usize,
-    rot12_buses: [
-        BusId::And8Lookup as usize,
-        BusId::EidosCompressionRot12Pos1 as usize,
-        BusId::And8Lookup as usize,
-        BusId::EidosCompressionRot12Pos3 as usize,
-    ],
-    rot7_buses: [
-        BusId::EidosCompressionRot7Pos0 as usize,
-        BusId::And8Lookup as usize,
-        BusId::EidosCompressionRot7Pos2 as usize,
-        BusId::EidosCompressionRot7Pos3 as usize,
-    ],
     message_word_bus: BusId::EidosCompressionMessageWord as usize,
     table_multiplicity_sign: LookupMultiplicitySign::Negative,
     xor_expression: XorExpression::DoubleAnd,
@@ -401,12 +402,16 @@ where
 
     match spec.fused_bus {
         NarrowSlotBus::And8 => {
-            encoded += group.bus_prefix(config.and8_bus) * fused.clone();
+            encoded += group.bus_prefix(config.and8_bus()) * fused.clone();
         },
         NarrowSlotBus::Rotation(byte) => {
             let byte_position = byte as usize;
-            encoded += group.bus_prefix(config.rot12_buses[byte_position]) * selectors.is_ab();
-            encoded += group.bus_prefix(config.rot7_buses[byte_position]) * selectors.is_cd();
+            encoded += group
+                .bus_prefix(config.rotation_bus(eidos_lookup::Rotation::Rot12, byte_position))
+                * selectors.is_ab();
+            encoded += group
+                .bus_prefix(config.rotation_bus(eidos_lookup::Rotation::Rot7, byte_position))
+                * selectors.is_cd();
         },
         NarrowSlotBus::MessageWord => {
             let activity = if matches!(spec.footer_bus, Some(NarrowSlotBus::MessageWord)) {
@@ -423,7 +428,7 @@ where
 
     match spec.footer_bus {
         Some(NarrowSlotBus::And8) => {
-            encoded += group.bus_prefix(config.and8_bus) * footer.clone();
+            encoded += group.bus_prefix(config.and8_bus()) * footer.clone();
         },
         Some(NarrowSlotBus::RangeCheck) => {
             encoded += group.bus_prefix(config.range_check_bus) * footer.clone();

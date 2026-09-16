@@ -850,6 +850,40 @@ fn mint_result_equal_operand_rejected() {
 }
 
 #[test]
+#[should_panic(expected = "constraint")]
+fn mint_result_equal_q_rejected_by_q_ordering_alone() {
+    // G + 2G (q > p) forged so r := q. Re-witnessing r − p − 1 as q − p − 1 keeps the `r > p`
+    // equation satisfied, so only `r > q` (r − q − 1 = −1) can reject the block.
+    let mut k1 = k1_stack();
+    k1.stack.require().add(k1.g_pt, k1.g2_pt, 0);
+    let (p, q) = (k1.g_pt.addr(), k1.g2_pt.addr());
+    let traces = k1.stack.traces();
+
+    let mut forged = traces.ec_add_main().clone();
+    tamper_cell(&mut forged, ROW_RES, CELL_R, q);
+    tamper_cell(&mut forged, ROW_RES, COL_RP_LO, (q - p - 1) & 0xffff);
+    tamper_cell(&mut forged, ROW_RES, COL_RP_HI, (q - p - 1) >> 16);
+    check_ec_add(&forged);
+}
+
+#[test]
+#[should_panic(expected = "constraint")]
+fn mint_result_equal_p_rejected_by_p_ordering_alone() {
+    // 2G + G (p > q) forged so r := p. Re-witnessing r − q − 1 as p − q − 1 on the term row
+    // keeps the `r > q` equation satisfied, so only `r > p` (r − p − 1 = −1) can reject it.
+    let mut k1 = k1_stack();
+    k1.stack.require().add(k1.g2_pt, k1.g_pt, 0);
+    let (p, q) = (k1.g2_pt.addr(), k1.g_pt.addr());
+    let traces = k1.stack.traces();
+
+    let mut forged = traces.ec_add_main().clone();
+    tamper_cell(&mut forged, ROW_RES, CELL_R, p);
+    tamper_cell(&mut forged, ROW_TERM, COL_RQ_LO, (p - q - 1) & 0xffff);
+    tamper_cell(&mut forged, ROW_TERM, COL_RQ_HI, (p - q - 1) >> 16);
+    check_ec_add(&forged);
+}
+
+#[test]
 fn ordering_limbs_on_both_rows_are_range_checked() {
     let mut k1 = k1_stack();
     k1.stack.require().add(k1.g_pt, k1.g2_pt, 0);
