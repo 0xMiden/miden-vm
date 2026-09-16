@@ -199,8 +199,10 @@ end
 
 #! Loads the FRI remainder polynomial into memory and absorbs it into the transcript.
 #!
-#! Input: [...]
-#! Output: [...]
+#! Inputs:  [...]
+#! Outputs: [...]
+#!
+#! Invocation: exec
 pub proc load_and_verify_remainder()
     # Each FRI layer uses eight elements: a commitment word and a padded folding challenge.
     # The remainder coefficients follow these layers in memory.

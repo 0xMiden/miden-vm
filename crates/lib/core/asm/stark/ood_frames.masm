@@ -28,6 +28,8 @@ use miden::core::stark::random_coin
 #!
 #! Inputs:  []
 #! Outputs: []
+#!
+#! Invocation: exec
 pub proc load_and_horner_eval_ood_frames()
     # --- Load the random challenge used in computing the DEEP polynomial -----
 
