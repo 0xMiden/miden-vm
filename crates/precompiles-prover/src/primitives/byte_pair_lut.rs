@@ -93,6 +93,26 @@ impl BytePairLutRequires {
         }
     }
 
+    /// Adds `other`'s multiplicities `factor` times.
+    ///
+    /// Padding cycles are identical, so their lookups are recorded once and added with the
+    /// padding count as the factor.
+    pub(crate) fn merge_scaled(&mut self, other: &Self, factor: ProvideMult) {
+        debug_assert_eq!(self.counts.len(), other.counts.len());
+        let scaled_add = |target: &mut ProvideMult, source: ProvideMult| {
+            *target = source
+                .checked_mul(factor)
+                .and_then(|scaled| target.checked_add(scaled))
+                .expect("byte-pair multiplicity overflow");
+        };
+        for (target, source) in self.counts.iter_mut().zip(&other.counts) {
+            for (target, source) in target.relations.iter_mut().zip(source.relations) {
+                scaled_add(target, source);
+            }
+            scaled_add(&mut target.range16, source.range16);
+        }
+    }
+
     /// Raise one require for the [`Range16Msg`] relation on a 16-bit value `w`.
     /// The chiplet splits `w = a + 256·b` (LSB byte first) and bumps the
     /// `range16` multiplicity on the matching row.

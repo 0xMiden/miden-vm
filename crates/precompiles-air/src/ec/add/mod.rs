@@ -85,7 +85,7 @@
 //! | 0 `slope` | `(slope_aux, λ, t)` | slope + predicate certs (local), tail certs (cells @ next) |
 //! | 1 `tail`  | `(y₃, e, x₃)` | the two fused mul-subtracts + the live result consume (`r`/`group` @ next) |
 //! | 2 `res`   | `(r, sbound, group)` | the provide + operand/PAI/group consumes (`p`/`q`/mult @ next) |
-//! | 3 `term`  | `(mult, p, q)` | — (hosts only; the constancy gate drops here) |
+//! | 3 `term`  | `(mult, p, q)` | the two `Range16` consumes of the `r − q − 1` limbs (the constancy gate drops here) |
 //!
 //! The 21 main columns comprise three row-hosted cells, four operand-coordinate pointers, three
 //! curve-parameter pointers, five case flags, `act`, `mints`, two reused ordering-limb cells, and

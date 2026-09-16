@@ -117,6 +117,7 @@ end
 #! `derive_order_tag_from_heights` leaves the proof order in `tmp1..tmp3`. Reading those ten
 #! entries in reverse address order yields the canonical AIR indices in proof order. Each AIR
 #! exposes one quadratic-extension value, so the boundary pointer advances by two felts per AIR.
+#! Every index is checked against `NUM_CHIPLETS` before it selects a pointer slot.
 #!
 #! Inputs:  [...]
 #! Outputs: [...]
@@ -128,6 +129,8 @@ proc materialize_aux_value_ptrs
     repeat.NUM_CHIPLETS
         dup mem_load
         # => [air_index, reverse_order_ptr, next_value_ptr, ...]
+
+        dup u32lt.NUM_CHIPLETS assert.err="PVM proof order index is out of range"
 
         dup
         exec.layout::aux_value_ptrs_ptr add
