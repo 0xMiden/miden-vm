@@ -204,7 +204,8 @@ impl<EF> PeriodicColumnData<EF> {
         }
 
         // A period adopts the shared basis when the columns that are cheaper over it save more
-        // than the basis itself costs. Other columns keep their standalone form.
+        // than the basis itself costs. Other columns keep their standalone form. A repeated
+        // column counts once, since the DAG shares the nodes of identical columns.
         let mut periods: Vec<usize> = periodic_columns.iter().map(Vec::len).collect();
         periods.sort_unstable();
         periods.dedup();
@@ -212,8 +213,11 @@ impl<EF> PeriodicColumnData<EF> {
             let savings: usize = periodic_columns
                 .iter()
                 .zip(&basis_costs)
-                .filter(|(col, _)| col.len() == period)
-                .filter_map(|(_, cost)| *cost)
+                .enumerate()
+                .filter(|&(index, (col, _))| {
+                    col.len() == period && !periodic_columns[..index].contains(col)
+                })
+                .filter_map(|(_, (_, cost))| *cost)
                 .map(|(basis, standalone)| standalone.saturating_sub(basis))
                 .sum();
             if period < 2 || savings <= basis_overhead_felts(period) {
@@ -332,7 +336,7 @@ fn combination_cost<F: TwoAdicField>(offset: F, classes: &[(F, Vec<usize>)]) -> 
 /// Stream cost of combining a column over its period's basis. Returns `None` for constant
 /// columns, which never need a basis.
 fn basis_column_cost<F: TwoAdicField>(col: &[F]) -> Option<usize> {
-    if col.len() < 2 {
+    if col.windows(2).all(|pair| pair[0] == pair[1]) {
         return None;
     }
     let (offset, classes) = basis_combination(col);

@@ -319,7 +319,7 @@ fn shared_basis_columns() -> Vec<Vec<F>> {
     let mut columns: Vec<Vec<F>> = (0..SHARED_BASIS_COLUMNS)
         .map(|column| {
             (0..32u64)
-                .map(|row| F::new_unchecked((row * (column as u64 + 3) + column as u64) % 5))
+                .map(|row| F::new_unchecked((row * (column as u64 + 3) + column as u64) % 17))
                 .collect()
         })
         .collect();
@@ -776,6 +776,31 @@ fn test_shared_lagrange_basis_periodic_path_matches_manual_eval() {
 
     let circuit = emit_circuit(&artifacts.dag, layout).unwrap();
     assert_eq!(circuit.eval(&inputs).expect("circuit eval"), actual);
+}
+
+/// Constant columns and repeats of another column add nothing to the basis savings of their
+/// period: the DAG folds a constant column to a single constant and shares a repeat's nodes. A
+/// lone one-hot column saves too little over the period-8 basis to adopt it, and adding either
+/// kind of column must not change that.
+#[test]
+fn test_constant_and_repeated_periodic_columns_do_not_count_toward_shared_basis() {
+    use crate::dag::{PeriodicColumn, PeriodicColumnData};
+
+    let mut one_hot = vec![F::ZERO; 8];
+    one_hot[5] = F::ONE;
+    let with_constants =
+        vec![one_hot.clone(), vec![F::new_unchecked(2); 8], vec![F::new_unchecked(3); 8]];
+    let repeated = vec![one_hot; 4];
+
+    for (case, columns) in [("constant", with_constants), ("repeated", repeated)] {
+        let data = PeriodicColumnData::<EF>::from_periodic_columns(columns);
+        assert!(
+            data.columns()
+                .iter()
+                .all(|column| !matches!(column, PeriodicColumn::Basis { .. })),
+            "{case} columns must not push a period onto the shared basis"
+        );
+    }
 }
 
 #[test]
