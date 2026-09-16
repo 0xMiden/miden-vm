@@ -263,8 +263,8 @@ mod prover_api_lifecycle {
     use miden_vm::{
         DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionWitness,
         FastProcessor, HashFunction, PrecompileProof, PrecompileStatus, PrecompileWitness, Program,
-        Prover, StackInputs, StackOutputs, StarkProof, VerificationError, Verifier,
-        advice::AdviceInputs, prove_sync,
+        Prover, StackInputs, StackOutputs, StarkProof, VerificationError, VerificationOutcome,
+        Verifier, advice::AdviceInputs, prove_sync,
     };
 
     use super::minimum_conjectured_security_level;
@@ -340,6 +340,32 @@ mod prover_api_lifecycle {
 
     fn u256_witness(value: u64) -> ExecutionWitness {
         execute(&u256_program(value))
+    }
+
+    fn assert_execution_security_levels(
+        claim: &ExecutionClaim,
+        proof: &ExecutionProof,
+        expected: &VerificationOutcome,
+    ) {
+        let actual = minimum_conjectured_security_level(expected);
+        for minimum in [None, Some(0), Some(actual - 1), Some(actual), Some(actual + 1)] {
+            let verifier = minimum
+                .map(|minimum| {
+                    Verifier::new().with_min_conjectured_security_level_per_stark(minimum)
+                })
+                .unwrap_or_default();
+            let result = verifier.verify(claim, proof);
+            if let Some(required) = minimum.filter(|minimum| *minimum > actual) {
+                assert!(matches!(
+                    result,
+                    Err(VerificationError::InsufficientSecurityLevel { actual: found, required: min })
+                        if found == actual && min == required
+                ));
+            } else {
+                // Enforcing a minimum must preserve all authenticated parameters and obligations.
+                assert_eq!(result.expect("sufficient security should be accepted"), *expected);
+            }
+        }
     }
 
     fn assert_complete(
@@ -450,6 +476,7 @@ mod prover_api_lifecycle {
             .expect("deferred VM proof should verify");
         assert_eq!(deferred_outcome.outstanding_precompile_root(), Some(one_root));
         assert!(deferred_outcome.precompile_security_parameters().is_none());
+        assert_execution_security_levels(&one_claim, &one_deferred, &deferred_outcome);
 
         // This unrelated witness would fail evaluation because its final node is data, not TRUE.
         // Reject its root mismatch before reaching that evaluation failure.
@@ -466,6 +493,17 @@ mod prover_api_lifecycle {
         assert!(matches!(
             Verifier::new().verify(&one_claim, &unrelated_witness),
             Err(VerificationError::DeferredWitnessRootMismatch)
+        ));
+
+        // Insufficient VM security must reject before checking the unrelated witness.
+        let actual = deferred_outcome.vm_security_parameters().conjectured_security_level();
+        let required = actual + 1;
+        assert!(matches!(
+            Verifier::new()
+                .with_min_conjectured_security_level_per_stark(required)
+                .verify(&one_claim, &unrelated_witness),
+            Err(VerificationError::InsufficientSecurityLevel { actual: found, required: min })
+                if found == actual && min == required
         ));
 
         let two_witness = u256_witness(2);
@@ -505,6 +543,25 @@ mod prover_api_lifecycle {
             .verify_precompile(&shared_precompile, one_root)
             .expect("shared precompile proof should directly verify root one");
         assert_eq!(root_one_security_parameters.conjectured_security_level(), 96);
+
+        let actual = root_one_security_parameters.conjectured_security_level();
+        for required in [0, actual - 1, actual, actual + 1] {
+            let result = Verifier::new()
+                .with_min_conjectured_security_level_per_stark(required)
+                .verify_precompile(&shared_precompile, one_root);
+            if required > actual {
+                assert!(matches!(
+                    result,
+                    Err(VerificationError::InsufficientSecurityLevel { actual: found, required: min })
+                        if found == actual && min == required
+                ));
+            } else {
+                assert_eq!(
+                    result.expect("sufficient precompile security should be accepted"),
+                    root_one_security_parameters
+                );
+            }
+        }
 
         let root_two_security_parameters = verifier
             .verify_precompile(&shared_precompile, two_root)
@@ -589,6 +646,7 @@ mod prover_api_lifecycle {
         );
         assert_eq!(minimum_conjectured_security_level(&one_outcome), 96);
         assert_eq!(minimum_conjectured_security_level(&two_outcome), 96);
+        assert_execution_security_levels(&one_claim, &one_complete, &one_outcome);
     }
 }
 

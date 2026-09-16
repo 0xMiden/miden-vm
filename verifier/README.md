@@ -23,8 +23,21 @@ Stack inputs are in push order (the last value is on top), while stack outputs a
 first value is on top).
 
 `Verifier::verify` returns a `VerificationOutcome` containing the authenticated security parameters
-of each STARK component actually verified. Callers estimate the corresponding security levels and
-apply their own policy. Deferred verification exposes the authenticated obligation through
+of each STARK component actually verified. Use
+`Verifier::new().with_min_conjectured_security_level_per_stark(required_bits)` to require a minimum
+conjectured security level for each STARK, including standalone `verify_precompile` calls. The VM's
+authenticated parameters are checked before native deferred-witness evaluation; complete proofs
+also check the precompile STARK's authenticated parameters. A level equal to the minimum is
+accepted. Insufficient security returns
+`VerificationError::InsufficientSecurityLevel { actual, required }`.
+
+This per-STARK minimum is not an end-to-end security guarantee. For example, a proof with two
+96-bit STARKs provides about 95 bits under the union bound. Callers that require 96 bits for the
+complete proof need extra margin.
+
+By default, no minimum is enforced. Successful results always retain the actual authenticated
+parameters, so callers can estimate the corresponding security levels themselves. Deferred
+verification exposes the authenticated obligation through
 `outstanding_precompile_root()`; complete verification returns no outstanding root. See the
 [deferred-proof semantics](../docs/src/design/deferred/semantics.md) for the full proof policy.
 
