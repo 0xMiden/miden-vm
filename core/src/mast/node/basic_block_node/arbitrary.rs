@@ -95,56 +95,57 @@ const OPS_NO_IMM: &[Operation] = &[
     Operation::HPerm,
 ];
 
-/// Operations that cannot fail whatever the stack, advice provider, or memory hold, paired with
-/// the change each one makes to the stack depth.
+/// Operations that cannot fail whatever the stack, advice provider, or memory hold. Their stack
+/// effect comes from [`Operation::increments_stack_size`] and
+/// [`Operation::decrements_stack_size`].
 ///
 /// Left out: `Inv` (traps on zero), `And`, `Or`, `Not`, `CSwap` and `CSwapW` (binary operands),
 /// the `U32*` family (u32-range operands), memory and advice operations, `Caller`, `Emit`,
 /// `Assert`, and the crypto/STARK helpers.
-const INFALLIBLE_OPS: &[(Operation, i8)] = &[
-    (Operation::Add, -1),
-    (Operation::Mul, -1),
-    (Operation::Neg, 0),
-    (Operation::Incr, 0),
-    (Operation::Eq, -1),
-    (Operation::Eqz, 0),
-    (Operation::Ext2Mul, 0),
-    (Operation::Expacc, 0),
-    (Operation::Drop, -1),
-    (Operation::Pad, 1),
-    (Operation::Swap, 0),
-    (Operation::SwapW, 0),
-    (Operation::SwapW2, 0),
-    (Operation::SwapW3, 0),
-    (Operation::SwapDW, 0),
-    (Operation::MovUp2, 0),
-    (Operation::MovUp3, 0),
-    (Operation::MovUp4, 0),
-    (Operation::MovUp5, 0),
-    (Operation::MovUp6, 0),
-    (Operation::MovUp7, 0),
-    (Operation::MovUp8, 0),
-    (Operation::MovDn2, 0),
-    (Operation::MovDn3, 0),
-    (Operation::MovDn4, 0),
-    (Operation::MovDn5, 0),
-    (Operation::MovDn6, 0),
-    (Operation::MovDn7, 0),
-    (Operation::MovDn8, 0),
-    (Operation::Dup0, 1),
-    (Operation::Dup1, 1),
-    (Operation::Dup2, 1),
-    (Operation::Dup3, 1),
-    (Operation::Dup4, 1),
-    (Operation::Dup5, 1),
-    (Operation::Dup6, 1),
-    (Operation::Dup7, 1),
-    (Operation::Dup9, 1),
-    (Operation::Dup11, 1),
-    (Operation::Dup13, 1),
-    (Operation::Dup15, 1),
-    (Operation::SDepth, 1),
-    (Operation::Clk, 1),
+const INFALLIBLE_OPS: &[Operation] = &[
+    Operation::Add,
+    Operation::Mul,
+    Operation::Neg,
+    Operation::Incr,
+    Operation::Eq,
+    Operation::Eqz,
+    Operation::Ext2Mul,
+    Operation::Expacc,
+    Operation::Drop,
+    Operation::Pad,
+    Operation::Swap,
+    Operation::SwapW,
+    Operation::SwapW2,
+    Operation::SwapW3,
+    Operation::SwapDW,
+    Operation::MovUp2,
+    Operation::MovUp3,
+    Operation::MovUp4,
+    Operation::MovUp5,
+    Operation::MovUp6,
+    Operation::MovUp7,
+    Operation::MovUp8,
+    Operation::MovDn2,
+    Operation::MovDn3,
+    Operation::MovDn4,
+    Operation::MovDn5,
+    Operation::MovDn6,
+    Operation::MovDn7,
+    Operation::MovDn8,
+    Operation::Dup0,
+    Operation::Dup1,
+    Operation::Dup2,
+    Operation::Dup3,
+    Operation::Dup4,
+    Operation::Dup5,
+    Operation::Dup6,
+    Operation::Dup7,
+    Operation::Dup9,
+    Operation::Dup11,
+    Operation::Dup13,
+    Operation::Dup15,
+    Operation::SDepth,
+    Operation::Clk,
 ];
 
 /// Strategy for operations without immediate values (non-control flow).
@@ -171,21 +172,20 @@ pub fn op_non_control_sequence_strategy(
 
 /// Change `op` makes to the stack depth, or `None` if `op` can fail.
 fn stack_delta(op: &Operation) -> Option<i8> {
-    match op {
-        Operation::Noop => Some(0),
-        Operation::Push(_) => Some(1),
-        _ => INFALLIBLE_OPS
-            .iter()
-            .find(|(candidate, _)| candidate == op)
-            .map(|&(_, delta)| delta),
+    if !matches!(op, Operation::Noop | Operation::Push(_)) && !INFALLIBLE_OPS.contains(op) {
+        return None;
     }
+    Some(if op.increments_stack_size() {
+        1
+    } else if op.decrements_stack_size() {
+        -1
+    } else {
+        0
+    })
 }
 
 fn op_infallible_strategy() -> impl Strategy<Value = Operation> {
-    prop_oneof![
-        prop::sample::select(INFALLIBLE_OPS).prop_map(|(op, _)| op),
-        op_with_imm_strategy(),
-    ]
+    prop_oneof![prop::sample::select(INFALLIBLE_OPS), op_with_imm_strategy(),]
 }
 
 /// Keeps at most `max_len` of `ops`, skipping operations that would take the stack below its
