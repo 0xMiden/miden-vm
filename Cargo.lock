@@ -2402,6 +2402,7 @@ dependencies = [
  "miden-lifted-air",
  "miden-stark-transcript",
  "miden-stateful-hasher",
+ "miden-utils-sync",
  "p3-blake3",
  "p3-blake3-air",
  "p3-challenger",

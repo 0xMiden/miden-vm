@@ -81,10 +81,14 @@ pub(crate) mod tree_indices;
 #[cfg(test)]
 mod tests;
 
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 
 use miden_stark_transcript::{ProverChannel, TranscriptError, VerifierChannel};
-use p3_matrix::{Matrix, bitrev::BitReversibleMatrix};
+use p3_matrix::{
+    Dimensions, Matrix,
+    bitrev::BitReversibleMatrix,
+    dense::{RowMajorMatrix, RowMajorMatrixView},
+};
 use proof::BatchProofView;
 use row_list::RowList;
 use thiserror::Error;
@@ -98,6 +102,12 @@ use crate::util::align::aligned_len;
 
 /// Opened rows keyed by tree or query index, returned by LMCS opening APIs.
 pub type OpenedRows<F> = BTreeMap<usize, RowList<F>>;
+
+/// Consumes completed rows in physical bit-reversed order, starting at the given row index.
+pub type BlockConsumer<'a, F> = dyn Fn(usize, RowMajorMatrixView<'_, F>) + Sync + 'a;
+
+/// Creates a consumer for the producer's chosen block height.
+pub type BlockConsumerFactory<'a, F> = Box<dyn FnOnce(usize) -> Box<BlockConsumer<'a, F>> + 'a>;
 
 // ============================================================================
 // Traits
@@ -135,6 +145,36 @@ pub trait Lmcs: Clone {
         &self,
         leaves: Vec<M>,
     ) -> Self::Tree<M::BitRev>;
+
+    /// Append a final matrix while consuming its completed blocks, then build an aligned tree.
+    ///
+    /// `leaves` and the produced matrix use physical bit-reversed order, with non-decreasing
+    /// power-of-two heights. `dimensions` describes the final matrix. `produce` is called once.
+    /// When given a factory, it must call it once with a positive power-of-two block height
+    /// dividing the final height. It must then publish every final row exactly once to the
+    /// returned consumer, in aligned blocks of that height, and finish all callbacks before
+    /// returning. Consumer calls may run concurrently and in any order. Published values must
+    /// match the returned matrix and cannot be modified afterward. Callback panics must propagate
+    /// out of `produce`.
+    ///
+    /// The default implementation calls `produce` without a factory and delegates to
+    /// [`Self::build_aligned_tree`].
+    fn build_aligned_tree_with_blocks<P>(
+        &self,
+        mut leaves: Vec<RowMajorMatrix<Self::F>>,
+        dimensions: Dimensions,
+        produce: P,
+    ) -> Self::Tree<RowMajorMatrix<Self::F>>
+    where
+        P: FnOnce(Option<BlockConsumerFactory<'_, Self::F>>) -> RowMajorMatrix<Self::F>,
+    {
+        let matrix = produce(None);
+        assert_eq!(matrix.dimensions(), dimensions, "producer returned wrong dimensions");
+        leaves.push(matrix);
+        self.build_aligned_tree(
+            leaves.into_iter().map(BitReversibleMatrix::bit_reverse_rows).collect(),
+        )
+    }
 
     /// Hash a sequence of field slices into a leaf hash.
     ///
