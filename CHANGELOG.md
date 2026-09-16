@@ -5,6 +5,7 @@
 #### Features
 
 - Added `Prover::prove_vm_witness()` so callers can prove a split `VmWitness` without deferred precompile work ([#3837](https://github.com/0xMiden/miden-vm/pull/3837)).
+- Added optional per-STARK minimum conjectured security enforcement with `Verifier::with_min_security_level`, rejecting insufficient VM security before native deferred-witness evaluation ([#3850](https://github.com/0xMiden/miden-vm/pull/3850)).
 - [BREAKING] Added Eidos hashing with typed domain separation, including Eidos-backed IES, a counter-mode random coin, and length-bound LMCS implementations, native SIMD acceleration, and batched proof-of-work grinding; existing Poseidon2 variants remain available.
 - Added a MASM example that verifies a batch of MVM proofs and settles their deferred work with one PVM proof ([#3823](https://github.com/0xMiden/miden-vm/pull/3823)).
 #### Fixes

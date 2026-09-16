@@ -82,14 +82,28 @@ const VERIFIER_SUPPORT_V2: VerifierSupport = VerifierSupport {
 #[derive(Debug, Clone)]
 pub struct Verifier {
     precompile_registry: Arc<PrecompileRegistry>,
+    min_security_level: Option<u32>,
 }
 
 impl Verifier {
-    /// Creates a verifier with the canonical precompile registry and verification limits.
+    /// Creates a verifier with the canonical precompile registry and verification limits, and no
+    /// minimum security level.
     pub fn new() -> Self {
         Self {
             precompile_registry: Arc::new(miden_precompiles::registry()),
+            min_security_level: None,
         }
+    }
+
+    /// Requires at least `min_security_level` bits of conjectured security for each verified STARK.
+    ///
+    /// The minimum applies independently to the VM STARK and any supplied precompile STARK,
+    /// including standalone calls to [`Self::verify_precompile`]. It is checked using authenticated
+    /// parameters after each STARK verifies. The VM check precedes deferred witness evaluation.
+    /// Successful results still return the actual authenticated security parameters.
+    pub fn with_min_security_level(mut self, min_security_level: u32) -> Self {
+        self.min_security_level = Some(min_security_level);
+        self
     }
 
     /// Returns the compatibility declared by proofs produced by the current prover.
@@ -109,12 +123,14 @@ impl Verifier {
     /// The outcome reports the authenticated security parameters of the components actually
     /// verified and any precompile root that remains outstanding. Callers can use
     /// [`ProofSecurityParameters::conjectured_security_level`] to estimate each verified proof's
-    /// conjectured security level, then apply their own acceptance policy.
+    /// conjectured security level. If configured, the minimum security level is enforced for each
+    /// verified STARK, before evaluating a deferred witness in the VM's case.
     ///
     /// # Errors
     ///
     /// Returns an error if the proof structure is invalid, a required STARK rejects, deferred
-    /// witness evaluation fails, or the witness root does not match the VM-authenticated root.
+    /// witness evaluation fails, the witness root does not match the VM-authenticated root, or a
+    /// verified STARK's conjectured security level is below the configured minimum.
     pub fn verify(
         &self,
         claim: &ExecutionClaim,
@@ -163,7 +179,9 @@ impl Verifier {
         }
 
         let vm_security_parameters = self.verify_vm(claim, vm)?;
-        // Authenticate the VM statement before performing potentially expensive witness evaluation.
+        self.check_security_level(&vm_security_parameters)?;
+        // Authenticate the VM statement and enforce the configured minimum security before
+        // performing potentially expensive witness evaluation.
         if let PrecompileStatus::Deferred(witness) = proof.precompile()
             && (witness.root_unchecked() != vm.precompile_root
                 || witness.compute_root(Arc::clone(&self.precompile_registry))?
@@ -187,14 +205,15 @@ impl Verifier {
     /// The expected root may occur anywhere in the proof's ordered constituent roots. All roots,
     /// including compatible extras and duplicate occurrences, are folded from the first root to
     /// derive the aggregate precompile STARK statement. On success, this returns the precompile
-    /// STARK's authenticated security parameters.
+    /// STARK's authenticated security parameters, after enforcing the configured minimum security
+    /// level, if any.
     ///
     /// The expected root and every constituent root must differ from [`TRUE_DIGEST`].
     ///
     /// # Errors
     ///
     /// Returns an error if the artifact shape or expected-root coverage is invalid, or if the
-    /// precompile STARK rejects.
+    /// precompile STARK rejects or its conjectured security level is below the configured minimum.
     pub fn verify_precompile(
         &self,
         proof: &PrecompileProof,
@@ -205,7 +224,23 @@ impl Verifier {
 
         let aggregate_root =
             proof.aggregate_root().expect("precompile roots were checked to be non-empty");
-        Ok(miden_precompiles_verifier::verify_deferred(&proof.proof, aggregate_root)?)
+        let security_parameters =
+            miden_precompiles_verifier::verify_deferred(&proof.proof, aggregate_root)?;
+        self.check_security_level(&security_parameters)?;
+        Ok(security_parameters)
+    }
+
+    fn check_security_level(
+        &self,
+        parameters: &ProofSecurityParameters,
+    ) -> Result<(), VerificationError> {
+        if let Some(required) = self.min_security_level {
+            let actual = parameters.conjectured_security_level();
+            if actual < required {
+                return Err(VerificationError::InsufficientSecurityLevel { actual, required });
+            }
+        }
+        Ok(())
     }
 
     fn validate_precompile(
@@ -438,6 +473,8 @@ impl VerificationOutcome {
 /// Errors that can occur during proof verification.
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
+    #[error("conjectured security level is {actual} bits, below the required {required} bits")]
+    InsufficientSecurityLevel { actual: u32, required: u32 },
     #[error("execution proof format {0} is not supported")]
     UnsupportedProofFormat(u8),
     #[error("execution proof does not name a compatible VM verifier")]
