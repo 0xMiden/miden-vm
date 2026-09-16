@@ -22,6 +22,9 @@
 #### Changes
 
 - [BREAKING] Made the public `ParsingError` enum `#[non_exhaustive]` and restored separate variants for protocol ABI conflicts ([#3859](https://github.com/0xMiden/miden-vm/pull/3859)).
+#### Changes
+
+- [BREAKING] Warn when a private assembly constant is unused ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
 
 ## v0.33.0 (2026-09-16)
 
@@ -61,8 +64,6 @@
 - Fixed issue where parsing of pointer types dropped address space information ([#3790](https://github.com/0xMiden/miden-vm/pull/3790)).
 
 ## v0.32.0 (2026-09-05)
-
-- [BREAKING] Warn when a private assembly constant is unused ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
 
 #### Changes
 
