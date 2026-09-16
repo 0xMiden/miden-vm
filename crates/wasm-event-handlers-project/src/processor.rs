@@ -1,7 +1,8 @@
 //! The package post-processor that attaches the `event_handlers` section.
 
 use std::{
-    collections::{BTreeMap, btree_map::Entry},
+    collections::BTreeMap,
+    path::Path,
     sync::{Mutex, PoisonError},
 };
 
@@ -29,8 +30,10 @@ use crate::{
 /// host policy, so a host may still run stricter ones.
 ///
 /// One project assembles several targets, and the processor runs once per assembled package. The
-/// module is built, read, and derived once per source path: the outcome, success or failure, is
-/// memoized for the life of the processor.
+/// module bytes are produced on every run — a file read, or a `cargo` build that is a fast no-op
+/// when the guest crate did not change — and only the derivation is memoized, keyed by those
+/// bytes. An edited source therefore publishes its new section instead of the previous one, and a
+/// failure is never memoized, so a fixed source builds on the next run.
 ///
 /// # One package per host
 ///
@@ -41,14 +44,19 @@ use crate::{
 /// answers an event.
 #[derive(Debug, Default)]
 pub struct WasmEventHandlerProcessor {
-    /// The derived section per handler source (the variant and the resolved path together, so
-    /// a `crate` and a `module` entry that name one path do not share an outcome).
+    /// The derived section per handler source, together with the hash of the module bytes it was
+    /// derived from.
     ///
-    /// A failure is memoized as its message, because a build error is not clonable. The message
-    /// carries no manifest path — the caller prefixes the manifest of the package it is
-    /// processing, so a shared source reports against the right project. The lock is held
-    /// across the derivation, so `cargo` runs at most once per source.
-    derived: Mutex<BTreeMap<HandlerSource, Result<EventHandlerSection, String>>>,
+    /// The key is the whole source (the variant and the resolved path together, so a `crate` and
+    /// a `module` entry that name one path do not share an outcome), and the hash keys the
+    /// content: an entry serves a later call only when the source produces exactly the bytes the
+    /// entry came from, which keeps a stale section out of a build that follows an edit.
+    ///
+    /// Only a success is kept. A failure is re-attempted on the next call, so a source the
+    /// developer fixes builds without a new processor.
+    ///
+    /// The lock is held across the whole call, so `cargo` runs one guest build at a time.
+    derived: Mutex<BTreeMap<HandlerSource, (blake3::Hash, EventHandlerSection)>>,
 }
 
 impl WasmEventHandlerProcessor {
@@ -57,18 +65,29 @@ impl WasmEventHandlerProcessor {
         Self::default()
     }
 
-    /// Returns the section `source` gives, deriving it on the first call for that source.
+    /// Returns the section `source` gives.
     ///
-    /// The error is the bare failure message, without a manifest label.
+    /// The module bytes are produced on every call — a file read, or an incremental `cargo` build
+    /// that does no work for an unchanged guest crate — and only the derivation, the dry-load
+    /// included, is skipped when they are the bytes the memoized section came from.
+    ///
+    /// The error is the bare failure message, without a manifest label: the caller prefixes the
+    /// manifest of the package it is processing, so a source two projects share reports against
+    /// the right one.
     fn section(&self, source: &HandlerSource) -> Result<EventHandlerSection, String> {
         let mut derived = self.derived.lock().unwrap_or_else(PoisonError::into_inner);
-        let outcome = match derived.entry(source.clone()) {
-            Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => {
-                entry.insert(derive(source).map_err(|error| format!("{error:#}")))
-            },
-        };
-        outcome.clone()
+
+        let wasm = module_bytes(source).map_err(|error| format!("{error:#}"))?;
+        let hash = blake3::hash(&wasm);
+        if let Some((derived_from, section)) = derived.get(source)
+            && *derived_from == hash
+        {
+            return Ok(section.clone());
+        }
+
+        let section = derive(source.path(), wasm).map_err(|error| format!("{error:#}"))?;
+        derived.insert(source.clone(), (hash, section.clone()));
+        Ok(section)
     }
 }
 
@@ -101,19 +120,26 @@ impl PackagePostProcessor for WasmEventHandlerProcessor {
     }
 }
 
-/// Produces the module `source` names and derives its `event_handlers` section.
+/// Produces the bytes of the module `source` names: a guest crate is built, a prebuilt module is
+/// read.
 ///
 /// Errors name the source path but not the manifest: the caller adds the manifest label of the
 /// package it is processing.
-fn derive(source: &HandlerSource) -> Result<EventHandlerSection, Report> {
-    let path = source.path();
-    let wasm = match source {
-        HandlerSource::GuestCrate(crate_dir) => guest::build(crate_dir)?,
+fn module_bytes(source: &HandlerSource) -> Result<Vec<u8>, Report> {
+    match source {
+        HandlerSource::GuestCrate(crate_dir) => guest::build(crate_dir),
         HandlerSource::Module(module) => std::fs::read(module).map_err(|error| {
             Report::msg(format!("cannot read the handler module '{}': {error}", module.display()))
-        })?,
-    };
+        }),
+    }
+}
 
+/// Derives the `event_handlers` section of the module `wasm` holds, which the source at `path`
+/// produced.
+///
+/// Errors name the source path but not the manifest: the caller adds the manifest label of the
+/// package it is processing.
+fn derive(path: &Path, wasm: Vec<u8>) -> Result<EventHandlerSection, Report> {
     let section = section_from_module(wasm, WasmHandlerLimits::default()).map_err(|error| {
         Report::msg(format!("the handler module of '{}' is not valid: {error}", path.display()))
     })?;

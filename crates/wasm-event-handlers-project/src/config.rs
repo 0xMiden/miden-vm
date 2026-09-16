@@ -21,7 +21,8 @@ const MODULE_KEY: &str = "module";
 /// Where the handler module of a package comes from.
 ///
 /// The whole value — the variant and the path — identifies one way of producing the module, so
-/// it is also the memoization key of the derived section.
+/// it is also the key the derived section is memoized under (together with the hash of the module
+/// bytes it came from).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum HandlerSource {
     /// A Rust guest crate directory, which is built for `wasm32-unknown-unknown`.

@@ -24,8 +24,11 @@
 //!
 //! # Toolchain
 //!
-//! The `crate` key needs `cargo` and the `wasm32-unknown-unknown` target. The processor builds the
-//! guest crate once per project assembly, whatever number of targets the project holds.
+//! The `crate` key needs `cargo` and the `wasm32-unknown-unknown` target. The processor runs the
+//! build once per assembled package, and the builds of one project assembly run one at a time;
+//! cargo is incremental, so every build after the first one does no work until the guest crate
+//! changes. A processor that meets the module it already derived a section from — the bytes hash
+//! to the same value — reuses that section instead of deriving it again.
 //!
 //! The build pins [`GUEST_RUSTFLAGS`](miden_wasm_event_handlers::GUEST_RUSTFLAGS) through
 //! `RUSTFLAGS`, so the module is the same whatever the environment of the caller holds. By cargo

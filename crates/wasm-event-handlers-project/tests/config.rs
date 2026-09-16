@@ -23,8 +23,11 @@ use tempfile::TempDir;
 // FIXTURES
 // ================================================================================================
 
-/// A handler module that answers `test::project::double`. The WAT mirrors what the guest SDK
-/// compiles to: it reads the first stack input and answers with twice its value.
+/// The event the `double` handler module answers.
+const DOUBLE_EVENT: &str = "test::project::double";
+
+/// A handler module that answers [`DOUBLE_EVENT`]. The WAT mirrors what the guest SDK compiles
+/// to: it reads the first stack input and answers with twice its value.
 const DOUBLE_WAT: &str = r#"(module
   (import "miden:event/v1" "stack_get" (func $stack_get (param i32) (result i64)))
   (import "miden:event/v1" "adv_stack_extend" (func $adv_stack_extend (param i32 i32)))
@@ -41,11 +44,32 @@ fn write(path: &Path, contents: &str) {
 
 /// Writes the `double` handler module, with its manifest record, next to the manifest.
 fn write_handler_module(root: &Path) {
+    write_handler_module_for(root, DOUBLE_EVENT);
+}
+
+/// Writes the handler module that answers `event`, with its manifest record, next to the
+/// manifest, replacing any module already there.
+///
+/// The code is the `double` one whatever the event name: the name is what the section reports, so
+/// it is enough to tell two modules apart.
+fn write_handler_module_for(root: &Path, event: &str) {
     let wasm = test_append_manifest_section(
         wat::parse_str(DOUBLE_WAT).expect("the fixture WAT parses"),
-        &[("test::project::double", "double")],
+        &[(event, "double")],
     );
     fs::write(root.join("handlers.wasm"), wasm).unwrap();
+}
+
+/// Returns the event names of the handler section `package` carries.
+fn events(package: &MastPackage) -> Vec<String> {
+    package
+        .event_handlers()
+        .expect("the section decodes")
+        .expect("the package carries the section")
+        .handlers
+        .iter()
+        .map(|entry| entry.event.as_str().to_string())
+        .collect()
 }
 
 /// Writes a library-only project whose manifest holds `metadata`, and returns the manifest path.
@@ -196,12 +220,7 @@ fn a_prebuilt_module_attaches_to_the_package() {
 
     let package = assemble(&manifest_path, ProjectTargetSelector::Library)
         .expect("the prebuilt module attaches");
-    let section = package
-        .event_handlers()
-        .expect("the section decodes")
-        .expect("the package carries the section");
-    let events: Vec<_> = section.handlers.iter().map(|entry| entry.event.as_str()).collect();
-    assert_eq!(events, ["test::project::double"]);
+    assert_eq!(events(&package), [DOUBLE_EVENT]);
 }
 
 #[test]
@@ -403,8 +422,8 @@ fn a_second_handler_section_is_an_error() {
     assert!(error.contains("miden-project.toml"), "unexpected error: {error}");
 }
 
-/// Lends one processor to several assemblers, so a test can observe the memoization a single
-/// processor instance does across the packages it post-processes.
+/// Lends one processor to several assemblers, so a test can observe what a single processor
+/// instance carries across the packages it post-processes.
 struct SharedProcessor(Arc<WasmEventHandlerProcessor>);
 
 impl PackagePostProcessor for SharedProcessor {
@@ -417,8 +436,21 @@ impl PackagePostProcessor for SharedProcessor {
     }
 }
 
+/// Assembles the library target of the project at `manifest_path` with `processor`, which the
+/// caller keeps across assemblies.
+fn assemble_shared(
+    processor: &Arc<WasmEventHandlerProcessor>,
+    manifest_path: &Path,
+) -> Result<Arc<MastPackage>, Report> {
+    let mut registry = TestRegistry::default();
+    let mut project_assembler =
+        Assembler::default().for_project_at_path(manifest_path, &mut registry)?;
+    project_assembler.with_package_post_processor(SharedProcessor(processor.clone()));
+    project_assembler.assemble(ProjectTargetSelector::Library, "dev")
+}
+
 #[test]
-fn a_source_path_is_read_once_per_processor() {
+fn a_changed_module_publishes_the_new_section() {
     let tempdir = TempDir::new().unwrap();
     let manifest_path = write_project(
         tempdir.path(),
@@ -427,27 +459,51 @@ fn a_source_path_is_read_once_per_processor() {
     write_handler_module(tempdir.path());
 
     let processor = Arc::new(WasmEventHandlerProcessor::new());
-    let mut first_registry = TestRegistry::default();
-    let mut first = Assembler::default()
-        .for_project_at_path(&manifest_path, &mut first_registry)
-        .unwrap();
-    first.with_package_post_processor(SharedProcessor(processor.clone()));
-    first
-        .assemble(ProjectTargetSelector::Library, "dev")
+    let first = assemble_shared(&processor, &manifest_path)
         .expect("the first assembly derives the section");
+    assert_eq!(events(&first), [DOUBLE_EVENT]);
 
-    // The memoized section outlives the source content, so a second assembly with the same
-    // processor must not read the file again — garbage in it would fail the build. A guest
-    // crate is memoized the same way, which is what keeps `cargo` to one run per source. (The
-    // file stays in place: the resolved path is canonicalized, which needs it to exist.)
+    // The developer edits the handlers between two builds. The second build must ship what the
+    // module holds now, not the section the processor derived before the edit.
+    write_handler_module_for(tempdir.path(), "test::project::triple");
+    let second = assemble_shared(&processor, &manifest_path)
+        .expect("the second assembly derives the edited module");
+    assert_eq!(events(&second), ["test::project::triple"]);
+}
+
+#[test]
+fn a_broken_module_fails_the_next_assembly() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
+    );
+    write_handler_module(tempdir.path());
+
+    let processor = Arc::new(WasmEventHandlerProcessor::new());
+    assemble_shared(&processor, &manifest_path).expect("the first assembly derives the section");
+
     fs::write(tempdir.path().join("handlers.wasm"), b"not a wasm module").unwrap();
-    let mut second_registry = TestRegistry::default();
-    let mut second = Assembler::default()
-        .for_project_at_path(&manifest_path, &mut second_registry)
-        .unwrap();
-    second.with_package_post_processor(SharedProcessor(processor));
-    let package = second
-        .assemble(ProjectTargetSelector::Library, "dev")
-        .expect("the second assembly reuses the memoized section");
-    assert!(package.event_handlers().expect("the section decodes").is_some());
+    let error = assemble_shared(&processor, &manifest_path)
+        .expect_err("a broken module must fail the build, whatever the processor derived before")
+        .to_string();
+    assert!(error.contains("is not valid"), "unexpected error: {error}");
+}
+
+#[test]
+fn a_fixed_module_recovers_after_a_failure() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
+    );
+    fs::write(tempdir.path().join("handlers.wasm"), b"not a wasm module").unwrap();
+
+    let processor = Arc::new(WasmEventHandlerProcessor::new());
+    assemble_shared(&processor, &manifest_path).expect_err("the broken module fails the build");
+
+    // A failure is not memoized, so the developer who fixes the module needs no new processor.
+    write_handler_module(tempdir.path());
+    let package = assemble_shared(&processor, &manifest_path).expect("the fixed module assembles");
+    assert_eq!(events(&package), [DOUBLE_EVENT]);
 }
