@@ -4,8 +4,8 @@ Precompiles let Miden programs make claims about expensive computations without 
 directly in the VM trace, while still binding those claims into the VM proof. This page covers the
 VM-side mechanics: wrappers register deferred nodes, bind their digests to circuit-visible data, and
 log statement digests that evaluate to `TRUE`. `VmProof` authenticates the resulting root. Deferred
-execution proofs transport passive wire; the [deferred-proof semantics](../deferred/semantics.md)
-define hydration, proving, completion, and verification.
+execution proofs transport portable singleton witnesses; the [deferred-proof semantics](../deferred/semantics.md)
+define batch proving, completion, and verification.
 
 Concrete proof-bound implementations live in the `miden-precompiles` crate. Their MASM support
 modules are currently internal implementation detail used by core-library facades and tests.
@@ -23,11 +23,11 @@ modules are currently internal implementation detail used by core-library facade
   through `init()`.
 - **`PrecompileRegistry`** — The host/framework dispatcher for trusted precompile implementations.
   The type remains in `miden-core` so the framework does not depend on concrete implementations.
-- **`DeferredState`** — The host-side DAG witness accumulated during execution. It tracks
-  registered nodes, evaluates them under the registry, and maintains the rolling deferred root.
-- **`DeferredStateWire`** — The passive canonical opening transported by a deferred execution proof.
-  Proof decoding does not hydrate it. `miden_vm::precompile_witness_from_wire` explicitly applies
-  the bundled registry and validates it when precompile proving is required.
+- **`DeferredState`** — Execution state that tracks registered nodes, evaluates them under the
+  registry, and maintains the rolling deferred root. Completion consumes and releases this state.
+- **`PrecompileWitness`** — One portable canonical root opening carried by execution outputs and
+  deferred proofs. Decoding checks its structure. `Prover::prove_precompiles` imports an owned batch
+  directly into one Session to validate and prove the assertions.
 - **Deferred root** — A single digest public value. Each logged statement appends
   `Node::AND(previous_root, statement_digest)` and advances the root to that node digest.
 
@@ -45,7 +45,7 @@ modules are currently internal implementation detail used by core-library facade
 3. **Wrapper evaluates only through explicit predicates** – When a wrapper uses
    `adv.evaluate_deferred*` to obtain host-computed canonical data, it must use VM instructions to
    relate that advice to values established independently of it, then log a statement digest that
-   bundled hydration can re-evaluate before precompile proving.
+   precompile proving checks against the committed operands.
 4. **`log_deferred` folds a statement** – The opcode expects `STMNT` at stack offsets `4..8`.
    `STMNT` must already be registered in `DeferredState` and evaluate to `TRUE`. The constrained
    Poseidon2 permutation computes `ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, Tag::AND]))`, and
@@ -96,4 +96,4 @@ Proving, verification, transport, and resource policy are specified in the
 - [Deferred computation](../deferred/index.md) – deferred DAG, wire, and proof lifecycle.
 - [`log_deferred` instruction](../../user_docs/assembly/instruction_reference.md) – stack
   behaviour and opcode semantics.
-- `DeferredStateWire` implementation (`core/src/deferred/wire.rs`) – passive canonical opening.
+- `PrecompileWitness` implementation (`core/src/deferred/wire.rs`) – portable canonical opening.

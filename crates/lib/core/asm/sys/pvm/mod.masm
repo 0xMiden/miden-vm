@@ -234,18 +234,53 @@ end
 #! Fails if the advice does not encode a supported PVM proof, or if any transcript, opening,
 #! commitment, constraint, or public-root check fails.
 #!
-#! Inputs:  [D]
+#! `security_descriptor(12)` denotes the twelve output fields listed below, with `lookup_pow_bits`
+#! at the top of the stack.
+#!
+#! Verification runs in an isolated execution context, preserving caller memory and stack elements
+#! below D.
+#!
+#! Inputs:  [D, ...]
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
 #!           max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
-#!           log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+#!           log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 #!
 #! Invocation: exec
 pub proc verify_proof(deferred_root: types::Digest) -> types::StackSecurityDescriptor
+    # Reserve the callee's 16-element argument/result window above the caller's live stack.
+    padw padw padw
+    # => [pad(12), D, ...]
+    swapw.3
+    # => [D, pad(12), ...]
+
+    call.verify_proof_inner
+    # => [security_descriptor(12), scratch(4), ...]
+
+    # Remove the unused return word.
+    movupw.3
+    # => [scratch(4), security_descriptor(12), ...]
+    dropw
+    # => [security_descriptor(12), ...]
+end
+
+#! Verifies a PVM proof against the supplied deferred root.
+#!
+#! Inputs:  [D, pad(12)]
+#! Outputs: [security_descriptor(12), scratch(4)]
+#!
+#! Invocation: call
+proc verify_proof_inner(deferred_root: types::Digest) -> types::StackSecurityDescriptor
     # --- Prepare PVM verifier state --------------------------------------------------------------
 
     exec.utils::load_security_params
+    # => [D, pad(12)]
+
+    # Consuming D leaves scratch at the VM's minimum stack depth of 16.
     exec.public_inputs::stage_public_root
+    # => [scratch(16)]
+
     exec.load_air_context
+    # => [scratch(16)]
 
     # --- Verify ----------------------------------------------------------------------------------
 
@@ -255,13 +290,20 @@ pub proc verify_proof(deferred_root: types::Digest) -> types::StackSecurityDescr
     procref.ood_frames::process_row_ood_evaluations
     procref.public_inputs::process_public_inputs
     procref.aux_trace::observe_aux_trace
-    # => [D0, D1, D2, D3, D4]
+    # => [D0, D1, D2, D3, D4, scratch(16)]
 
     exec.verifier::verify
-    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, scratch(16)]
 
     # --- Return result ---------------------------------------------------------------------------
 
     exec.build_security_descriptor
-    # => [security_descriptor, ...]
+    # => [security_descriptor(12), scratch(16)]
+
+    # Remove three unused words below the descriptor to leave a 16-element call frame.
+    repeat.3
+        movupw.3
+        dropw
+    end
+    # => [security_descriptor(12), scratch(4)]
 end

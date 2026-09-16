@@ -1996,9 +1996,8 @@ mod tests {
         )
     }
 
-    /// The precompiled Falcon-field tables must equal what the generic trait derivation produces
-    /// from the primitive root — the same self-check idiom that guards hand-copied constants
-    /// elsewhere in the codebase.
+    /// The precomputed Falcon-field tables must equal the generic trait derivation from the
+    /// primitive root.
     #[test]
     fn felt_tables_match_their_generic_derivation() {
         assert_eq!(FELT_BITREVERSED_POWERS.to_vec(), FalconFelt::bitreversed_powers(512));

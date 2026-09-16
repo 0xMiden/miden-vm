@@ -9,10 +9,10 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt, TwoAdicField},
 };
+use miden_core_lib::CoreLibrary;
 use miden_crypto::field::Field;
-use miden_processor::ExecutionOutput;
-
-use crate::helpers::read_memory_felt;
+use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor};
+use miden_utils_testing::Test;
 
 // MASM MEMORY LAYOUT
 // ================================================================================================
@@ -65,8 +65,8 @@ fn ace_read_pointers_match_masm_layout() {
 ///
 /// Each pair of consecutive base felts forms one extension field element.
 /// The returned vector has `layout.total_inputs` entries.
-fn extract_ace_inputs(output: &ExecutionOutput, layout: &InputLayout) -> Vec<QuadFelt> {
-    let pi_ptr = read_memory_felt(output, PUBLIC_INPUTS_ADDRESS_PTR).as_canonical_u64() as u32;
+fn extract_ace_inputs(read: &impl Fn(u32) -> Felt, layout: &InputLayout) -> Vec<QuadFelt> {
+    let pi_ptr = read(PUBLIC_INPUTS_ADDRESS_PTR).as_canonical_u64() as u32;
 
     assert!(
         pi_ptr < AUX_RAND_ELEM_PTR,
@@ -76,17 +76,11 @@ fn extract_ace_inputs(output: &ExecutionOutput, layout: &InputLayout) -> Vec<Qua
     (0..layout.total_inputs)
         .map(|i| {
             let addr = pi_ptr + (i as u32) * 2;
-            let c0 = read_memory_felt(output, addr);
-            let c1 = read_memory_felt(output, addr + 1);
+            let c0 = read(addr);
+            let c1 = read(addr + 1);
             QuadFelt::new([c0, c1])
         })
         .collect()
-}
-
-fn extract_order(output: &ExecutionOutput) -> ProofOrder {
-    let tag = read_memory_felt(output, ORDER_TAG_PTR).as_canonical_u64();
-    ProofOrder::from_tag(tag as u32)
-        .unwrap_or_else(|| panic!("invalid order tag in recursive verifier memory: {tag}"))
 }
 
 // INPUT CHECKS
@@ -129,12 +123,11 @@ fn sanity_check_ace_inputs(inputs: &[QuadFelt], layout: &InputLayout) {
 /// This oracle does not share the MASM inversion schedule, so swapped or incorrectly reconstructed
 /// inverses fail before the circuit cross-evaluation.
 fn assert_air_selectors_match_trace_metadata(
-    output: &ExecutionOutput,
+    read: &impl Fn(u32) -> Felt,
     inputs: &[QuadFelt],
     layout: &InputLayout,
 ) {
     let get = |key: InputKey| -> QuadFelt { inputs[layout.index(key).expect("missing key")] };
-    let read = |addr| read_memory_felt(output, addr);
     let z = QuadFelt::new([read(Z_PTR + 2), read(Z_PTR + 3)]);
     let max_log = read(TRACE_LENGTH_LOG_PTR).as_canonical_u64() as u32;
 
@@ -167,24 +160,51 @@ fn assert_air_selectors_match_trace_metadata(
 // CROSS-EVALUATION
 // ================================================================================================
 
-/// Evaluate the Rust ACE circuit against the READ section left in MASM memory.
-pub fn cross_check_ace_circuit(output: &ExecutionOutput) -> ProofOrder {
+/// Runs an MVM verifier fixture and checks the ACE inputs it leaves in the verifier's context.
+///
+/// The fixture's trace handlers run as usual, so callers can still observe the verifier's stack
+/// at return.
+pub(super) fn execute_and_check(test: &Test) {
+    let (program, ..) = test.compile().expect("the verifier fixture must assemble");
+    let mut host = DefaultHost::default().with_library(&CoreLibrary::default()).unwrap();
+    for (event, handler) in &test.trace_handlers {
+        host.register_trace_handler(event.clone(), handler.clone()).unwrap();
+    }
+    let mut processor = FastProcessor::new_with_options(
+        test.stack_inputs,
+        test.advice_inputs.clone(),
+        ExecutionOptions::default(),
+    )
+    .unwrap();
+    let mut verifier_context = None;
+    let mut resume = Some(processor.get_initial_resume_context(&program).unwrap());
+    while let Some(next) = resume {
+        resume = processor.step_sync(&mut host, next).expect("recursive verification failed");
+        let ctx = processor.state().ctx();
+        // The verifier is the first child context in these fixtures.
+        if !ctx.is_root() {
+            verifier_context.get_or_insert(ctx);
+        }
+    }
+
+    let ctx = verifier_context.expect("the verifier must enter an isolated context");
+    let read = |addr| processor.memory().read_element(ctx, Felt::from_u32(addr)).unwrap();
     let config = AceConfig {
         num_quotient_chunks: 8,
         layout: LayoutKind::Masm,
         num_airs: MIDEN_AIR_COUNT,
     };
 
-    let order = extract_order(output);
+    let tag = read(ORDER_TAG_PTR).as_canonical_u64();
+    let order = ProofOrder::from_tag(tag as u32)
+        .unwrap_or_else(|| panic!("invalid order tag in recursive verifier memory: {tag}"));
     let circuit =
         build_multi_air_ace_circuit_for_order(config, &order).expect("multi-AIR ace circuit");
     let layout = circuit.layout();
 
-    let inputs = extract_ace_inputs(output, layout);
-    assert_eq!(inputs.len(), layout.total_inputs, "extracted input count mismatch");
-
+    let inputs = extract_ace_inputs(&read, layout);
     sanity_check_ace_inputs(&inputs, layout);
-    assert_air_selectors_match_trace_metadata(output, &inputs, layout);
+    assert_air_selectors_match_trace_metadata(&read, &inputs, layout);
 
     let result = circuit.eval(&inputs).expect("ACE eval failed");
     assert!(
@@ -192,6 +212,4 @@ pub fn cross_check_ace_circuit(output: &ExecutionOutput) -> ProofOrder {
         "ACE cross-evaluation is non-zero: {result:?}\n\
          MASM verifier populated the READ section incorrectly."
     );
-
-    order
 }

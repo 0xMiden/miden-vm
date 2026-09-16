@@ -5,8 +5,9 @@ sidebar_position: 7
 
 # miden::core::stark
 
-Namespace `miden::core::stark` bundles procedures and helper utilities that are used when verifying STARK proofs inside the VM.
-These helpers expose constants, memory layout pointers, and routines shared across the STARK verification pipeline.
+`miden::core::stark` contains the verification routines shared by the MVM and PVM verifiers,
+including the security estimator. [Verifying proofs in MASM](./recursive_verification.md) explains
+how to call those verifiers and check that their proofs meet your application's security policy.
 
 ## Modules
 
