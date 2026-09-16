@@ -101,7 +101,10 @@ impl Verifier {
     /// including standalone calls to [`Self::verify_precompile`]. It is checked using authenticated
     /// parameters after each STARK verifies. The VM check precedes deferred witness evaluation.
     /// Successful results still return the actual authenticated security parameters.
-    pub fn with_min_security_level(mut self, min_security_level: u32) -> Self {
+    pub fn with_min_conjectured_security_level_per_stark(
+        mut self,
+        min_security_level: u32,
+    ) -> Self {
         self.min_security_level = Some(min_security_level);
         self
     }

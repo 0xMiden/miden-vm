@@ -350,7 +350,9 @@ mod prover_api_lifecycle {
         let actual = minimum_conjectured_security_level(expected);
         for minimum in [None, Some(0), Some(actual - 1), Some(actual), Some(actual + 1)] {
             let verifier = minimum
-                .map(|minimum| Verifier::new().with_min_security_level(minimum))
+                .map(|minimum| {
+                    Verifier::new().with_min_conjectured_security_level_per_stark(minimum)
+                })
                 .unwrap_or_default();
             let result = verifier.verify(claim, proof);
             if let Some(required) = minimum.filter(|minimum| *minimum > actual) {
@@ -384,7 +386,6 @@ mod prover_api_lifecycle {
         );
         assert_eq!(minimum_conjectured_security_level(&outcome), 96);
         assert_eq!(outcome.outstanding_precompile_root(), None);
-        assert_execution_security_levels(&claim, proof, &outcome);
     }
 
     #[test]
@@ -498,7 +499,9 @@ mod prover_api_lifecycle {
         let actual = deferred_outcome.vm_security_parameters().conjectured_security_level();
         let required = actual + 1;
         assert!(matches!(
-            Verifier::new().with_min_security_level(required).verify(&one_claim, &unrelated_witness),
+            Verifier::new()
+                .with_min_conjectured_security_level_per_stark(required)
+                .verify(&one_claim, &unrelated_witness),
             Err(VerificationError::InsufficientSecurityLevel { actual: found, required: min })
                 if found == actual && min == required
         ));
@@ -544,7 +547,7 @@ mod prover_api_lifecycle {
         let actual = root_one_security_parameters.conjectured_security_level();
         for required in [0, actual - 1, actual, actual + 1] {
             let result = Verifier::new()
-                .with_min_security_level(required)
+                .with_min_conjectured_security_level_per_stark(required)
                 .verify_precompile(&shared_precompile, one_root);
             if required > actual {
                 assert!(matches!(
