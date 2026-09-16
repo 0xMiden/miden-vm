@@ -451,15 +451,16 @@ mod prover_api_lifecycle {
         assert_eq!(deferred_outcome.outstanding_precompile_root(), Some(one_root));
         assert!(deferred_outcome.precompile_security_parameters().is_none());
 
+        // This unrelated witness would fail evaluation because its final node is data, not TRUE.
+        // Reject its root mismatch before reaching that evaluation failure.
         let unrelated_witness = ExecutionProof::new(
             one_deferred.vm().clone(),
             PrecompileStatus::Deferred(
-                PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
-                    tag: Tag::AND,
-                    lhs: 0,
-                    rhs: 0,
+                PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Data {
+                    tag: Tag::CHUNKS,
+                    chunks: vec![[ZERO; 8]],
                 }])
-                .expect("a logged TRUE is a nonempty obligation"),
+                .expect("data is a structurally valid witness"),
             ),
         );
         assert!(matches!(

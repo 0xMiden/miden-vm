@@ -165,7 +165,9 @@ impl Verifier {
         let vm_security_parameters = self.verify_vm(claim, vm)?;
         // Authenticate the VM statement before performing potentially expensive witness evaluation.
         if let PrecompileStatus::Deferred(witness) = proof.precompile()
-            && witness.compute_root(Arc::clone(&self.precompile_registry))? != vm.precompile_root
+            && (witness.root_unchecked() != vm.precompile_root
+                || witness.compute_root(Arc::clone(&self.precompile_registry))?
+                    != vm.precompile_root)
         {
             return Err(VerificationError::DeferredWitnessRootMismatch);
         }
