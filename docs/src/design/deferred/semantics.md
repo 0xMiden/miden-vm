@@ -183,12 +183,13 @@ security parameters.
 
 `ExecutionProof::to_bytes` is infallible. `ExecutionProof::read_from_bytes` checks canonical syntax,
 rejects trailing bytes, and does not need a registry. The proof stores the transport format and the
-compatible VM and PVM verifier root histories. Decoding selects the format-specific proof decoder.
-Native verification requires a shared VM root and a shared PVM root with the verifier's private
-support policy. Transport preserves the portable witness without validating consistency between proof artifacts.
-Execution proofs, execution witnesses, and portable singleton witnesses use format version 1.
-The execution-proof and execution-witness encodings change in place; compatibility with previous
-witness encodings is not preserved.
+compatible VM and PVM verifier root histories. Native verification requires a shared VM root and a
+shared PVM root with the verifier's private support policy. Transport preserves the portable
+witness without validating consistency between proof artifacts.
+
+`ExecutionProof` and `ExecutionWitness` use encoding version 2; `PrecompileWitness` uses version 1.
+Each canonical decoder accepts only its supported version and rejects other versions before
+decoding their payloads. Previous encodings and conversion between formats are not supported.
 
 Canonical binary decoders enforce fixed hard ceilings before allocating declared collections:
 `MAX_STARK_PROOF_BYTES` per inner STARK, `MAX_PRECOMPILE_ROOTS` per ordered root list, and

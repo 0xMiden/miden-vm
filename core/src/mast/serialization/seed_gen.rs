@@ -333,7 +333,7 @@ fn generate_fuzz_seeds() {
     // Execution proof seeds for malicious verifier-root length prefixes.
     {
         let mut oversized_vm_roots = Vec::new();
-        oversized_vm_roots.write_u8(ExecutionProofCompatibility::FORMAT_V1);
+        oversized_vm_roots.write_u8(ExecutionProofCompatibility::FORMAT_V2);
         oversized_vm_roots.write_usize(usize::MAX);
         write_seed(
             "execution_proof_deserialize",
@@ -342,7 +342,7 @@ fn generate_fuzz_seeds() {
         );
 
         let mut oversized_pvm_roots = Vec::new();
-        oversized_pvm_roots.write_u8(ExecutionProofCompatibility::FORMAT_V1);
+        oversized_pvm_roots.write_u8(ExecutionProofCompatibility::FORMAT_V2);
         oversized_pvm_roots.write_usize(0);
         oversized_pvm_roots.write_usize(usize::MAX);
         write_seed(
@@ -355,7 +355,7 @@ fn generate_fuzz_seeds() {
     // Execution proof seed for malicious VM STARK length-prefix deserialization.
     {
         let mut oversized_proof_len = Vec::new();
-        oversized_proof_len.write_u8(ExecutionProofCompatibility::FORMAT_V1);
+        oversized_proof_len.write_u8(ExecutionProofCompatibility::FORMAT_V2);
         oversized_proof_len.write_usize(0); // VM verifier roots.
         oversized_proof_len.write_usize(0); // PVM verifier roots.
         oversized_proof_len.write_u8(1); // Complete execution proof discriminant.
