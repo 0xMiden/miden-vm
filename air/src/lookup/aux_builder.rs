@@ -73,14 +73,10 @@ where
     let mut row_totals = vec![EF::ZERO; num_rows];
     let chunk_rows = ACCUMULATE_ROWS_PER_CHUNK;
 
-    #[cfg(feature = "concurrent")]
     use miden_crypto::parallel::*;
-    #[cfg(feature = "concurrent")]
     let chunks = output
         .par_chunks_mut(chunk_rows * num_cols)
         .zip(row_totals.par_chunks_mut(chunk_rows));
-    #[cfg(not(feature = "concurrent"))]
-    let chunks = output.chunks_mut(chunk_rows * num_cols).zip(row_totals.chunks_mut(chunk_rows));
 
     chunks.enumerate().for_each(|(chunk_idx, (out, totals))| {
         let row_lo = chunk_idx * chunk_rows;
