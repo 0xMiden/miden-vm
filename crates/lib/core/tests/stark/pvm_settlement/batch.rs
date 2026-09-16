@@ -10,7 +10,7 @@ use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     Felt, Word,
     crypto::hash::Poseidon2,
-    deferred::{PrecompileWitness, TRUE_DIGEST},
+    deferred::{TRUE_DIGEST, fold_deferred_root},
     program::ExecutionClaim,
     proof::{ExecutionProof, HashFunction, PrecompileStatus},
 };
@@ -31,27 +31,22 @@ async fn batch_settles_deferred_obligations_with_one_pvm_proof() {
     let core_lib = CoreLibrary::default();
     let program = assemble_batch(&core_lib);
 
-    // Each returned state contains the precompile inputs needed by the host.
-    let (first_proof, first_claim, first_state) =
+    // Each returned witness contains the precompile inputs needed by the host.
+    let (first_proof, first_claim, first_witness) =
         prove_ecdsa_execution(&core_lib, valid_fixture(), StackInputs::default());
-    let (second_proof, second_claim, second_state) =
+    let (second_proof, second_claim, second_witness) =
         prove_ecdsa_execution(&core_lib, generator_public_key_fixture(), StackInputs::default());
-    let roots = [first_state.root(), second_state.root()];
+    let roots = [first_witness.root_unchecked(), second_witness.root_unchecked()];
     assert_ne!(roots[0], roots[1]);
 
     // Public inputs identify the ordered claims; advice supplies the proofs.
     let (stack_inputs, advice_inputs) =
         batch_inputs(&core_lib, &[(&first_proof, &first_claim), (&second_proof, &second_claim)]);
 
-    // Combine the data for D1 and D2. Merging does not create a proof: the host waits for
-    // the MASM request before proving D = digest(AND(D1, D2)).
-    let merged = PrecompileWitness::merge(vec![
-        PrecompileWitness::new(first_state).unwrap(),
-        PrecompileWitness::new(second_state).unwrap(),
-    ])
-    .expect("failed to merge the precompile witnesses");
-    let expected_root = merged.state().root();
-    let mut host = PvmSettlementHost::new(&core_lib, merged);
+    // Keep D1 and D2 in order. The host waits for the MASM request before proving
+    // D = digest(AND(D1, D2)) from their portable witnesses.
+    let expected_root = fold_deferred_root(roots[0], roots[1]);
+    let mut host = PvmSettlementHost::new(&core_lib, vec![first_witness, second_witness]);
 
     // Execution awaits the PVM proof, then MASM verifies it against the combined root.
     let witness =

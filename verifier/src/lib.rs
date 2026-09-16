@@ -5,12 +5,14 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::boxed::Box;
+use alloc::{boxed::Box, sync::Arc};
 
 use miden_air::{MidenMultiAir, PublicInputs, Statement, config, security};
 use miden_core::{
     Felt,
-    deferred::{DeferredRoot, MAX_PRECOMPILE_ROOTS, TRUE_DIGEST},
+    deferred::{
+        DeferredRoot, MAX_PRECOMPILE_ROOTS, PrecompileError, PrecompileRegistry, TRUE_DIGEST,
+    },
     field::QuadFelt,
     proof::{CURRENT_PVM_VERIFIER_ROOT, CURRENT_VM_VERIFIER_ROOT, MAX_STARK_PROOF_BYTES},
 };
@@ -67,8 +69,8 @@ impl VerifierSupport {
     }
 }
 
-const VERIFIER_SUPPORT_V1: VerifierSupport = VerifierSupport {
-    format: ExecutionProofCompatibility::FORMAT_V1,
+const VERIFIER_SUPPORT_V2: VerifierSupport = VerifierSupport {
+    format: ExecutionProofCompatibility::FORMAT_V2,
     accepted_vm_roots: &[CURRENT_VM_VERIFIER_ROOT],
     accepted_pvm_roots: &[CURRENT_PVM_VERIFIER_ROOT],
 };
@@ -77,13 +79,17 @@ const VERIFIER_SUPPORT_V1: VerifierSupport = VerifierSupport {
 // ================================================================================================
 
 /// Verifier for deferred and complete Miden execution proofs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Verifier;
+#[derive(Debug, Clone)]
+pub struct Verifier {
+    precompile_registry: Arc<PrecompileRegistry>,
+}
 
 impl Verifier {
-    /// Creates a verifier with the canonical verification limits.
-    pub const fn new() -> Self {
-        Self
+    /// Creates a verifier with the canonical precompile registry and verification limits.
+    pub fn new() -> Self {
+        Self {
+            precompile_registry: Arc::new(miden_precompiles::registry()),
+        }
     }
 
     /// Returns the compatibility declared by proofs produced by the current prover.
@@ -94,9 +100,9 @@ impl Verifier {
     /// Verifies a deferred or complete versioned execution proof against its public claim.
     ///
     /// The VM STARK authenticates the carried precompile root in either state. For a deferred
-    /// proof, the verifier does not inspect the carried `DeferredStateWire`; it verifies the VM
-    /// STARK and returns the authenticated root as an outstanding obligation. The wire is
-    /// prover-side data and is validated separately when converted into a precompile witness.
+    /// proof, the verifier first verifies the VM STARK, then evaluates the carried
+    /// `PrecompileWitness` and checks that its recomputed root matches the VM root. It returns the
+    /// authenticated root as an outstanding obligation until a precompile STARK is supplied.
     /// Complete proofs that contain precompile work additionally verify the aggregate precompile
     /// STARK against the VM-authenticated root.
     ///
@@ -107,23 +113,24 @@ impl Verifier {
     ///
     /// # Errors
     ///
-    /// Returns an error if the proof structure is invalid or a required STARK rejects.
+    /// Returns an error if the proof structure is invalid, a required STARK rejects, deferred
+    /// witness evaluation fails, or the witness root does not match the VM-authenticated root.
     pub fn verify(
         &self,
         claim: &ExecutionClaim,
         proof: &ExecutionProof,
     ) -> Result<VerificationOutcome, VerificationError> {
         match proof.compatibility().format() {
-            ExecutionProofCompatibility::FORMAT_V1 => {
-                VERIFIER_SUPPORT_V1.check(proof)?;
-                self.verify_v1(claim, proof)
+            ExecutionProofCompatibility::FORMAT_V2 => {
+                VERIFIER_SUPPORT_V2.check(proof)?;
+                self.verify_v2(claim, proof)
             },
             format => Err(VerificationError::UnsupportedProofFormat(format)),
         }
     }
 
-    /// Verifies an execution proof encoded with transport format 1.
-    fn verify_v1(
+    /// Verifies an execution proof encoded with transport format 2.
+    fn verify_v2(
         &self,
         claim: &ExecutionClaim,
         proof: &ExecutionProof,
@@ -156,6 +163,14 @@ impl Verifier {
         }
 
         let vm_security_parameters = self.verify_vm(claim, vm)?;
+        // Authenticate the VM statement before performing potentially expensive witness evaluation.
+        if let PrecompileStatus::Deferred(witness) = proof.precompile()
+            && (witness.root_unchecked() != vm.precompile_root
+                || witness.compute_root(Arc::clone(&self.precompile_registry))?
+                    != vm.precompile_root)
+        {
+            return Err(VerificationError::DeferredWitnessRootMismatch);
+        }
         let precompile_security_parameters = precompile
             .map(|precompile| self.verify_precompile(precompile, vm.precompile_root))
             .transpose()?;
@@ -433,6 +448,10 @@ pub enum VerificationError {
     StarkVerificationError(Word, #[source] Box<StarkVerificationError>),
     #[error("a deferred execution proof cannot authenticate TRUE_DIGEST")]
     DeferredTrueRoot,
+    #[error("deferred witness root does not match the VM obligation")]
+    DeferredWitnessRootMismatch,
+    #[error("deferred witness evaluation failed: {0}")]
+    DeferredWitnessEvaluation(#[from] PrecompileError),
     #[error("a precompile proof must contain at least one constituent root")]
     EmptyPrecompileRoots,
     #[error("precompile proof contains too many roots: found {roots}, maximum is {max}")]
@@ -474,7 +493,7 @@ fn roots_overlap(proof_roots: &[Word], accepted_roots: &[Word]) -> bool {
 mod tests {
     use alloc::{vec, vec::Vec};
 
-    use miden_core::deferred::DeferredStateWire;
+    use miden_core::deferred::{PrecompileWitness, PrecompileWitnessEntry, Tag};
 
     use super::*;
 
@@ -523,14 +542,18 @@ mod tests {
         type CheckError = fn(VerificationError) -> bool;
 
         let required = root(1);
+        let deferred = PrecompileStatus::Deferred(
+            PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
+                tag: Tag::AND,
+                lhs: 0,
+                rhs: 0,
+            }])
+            .expect("a logged TRUE is a nonempty obligation"),
+        );
         let cases: Vec<(ExecutionProof, CheckError)> = vec![
-            (
-                ExecutionProof::new(
-                    vm_proof(TRUE_DIGEST),
-                    PrecompileStatus::Deferred(DeferredStateWire::default()),
-                ),
-                |error| matches!(error, VerificationError::DeferredTrueRoot),
-            ),
+            (ExecutionProof::new(vm_proof(TRUE_DIGEST), deferred), |error| {
+                matches!(error, VerificationError::DeferredTrueRoot)
+            }),
             (complete(required, Some(vec![])), |error| {
                 matches!(error, VerificationError::EmptyPrecompileRoots)
             }),
@@ -559,6 +582,42 @@ mod tests {
             let error = Verifier::new().verify(&claim(), &proof).unwrap_err();
             assert!(check(error));
         }
+    }
+
+    #[test]
+    fn invalid_vm_stark_is_rejected_before_deferred_witness_evaluation() {
+        use miden_precompiles::{UintDomain, UintPrecompile};
+
+        let witness = PrecompileWitness::from_entries(vec![
+            PrecompileWitnessEntry::Data {
+                tag: UintPrecompile::value_tag(UintDomain::U256),
+                chunks: vec![[Felt::from_u32(0); 8]],
+            },
+            PrecompileWitnessEntry::Data {
+                tag: UintPrecompile::value_tag(UintDomain::U256),
+                chunks: vec![core::array::from_fn(|i| Felt::from_u32(u32::from(i == 0)))],
+            },
+            PrecompileWitnessEntry::Join {
+                tag: UintPrecompile::op_tag(UintPrecompile::EQ_OP_ID),
+                lhs: 1,
+                rhs: 2,
+            },
+            PrecompileWitnessEntry::Join { tag: Tag::AND, lhs: 0, rhs: 3 },
+        ])
+        .unwrap();
+        // Evaluating this witness first would reject its false assertion instead of the VM STARK.
+        assert!(matches!(
+            witness.compute_root(Arc::new(miden_precompiles::registry())),
+            Err(error) if matches!(error.root(), PrecompileError::AssertionFailed)
+        ));
+        let proof = ExecutionProof::new(
+            vm_proof(witness.root_unchecked()),
+            PrecompileStatus::Deferred(witness),
+        );
+        assert!(matches!(
+            Verifier::new().verify(&claim(), &proof),
+            Err(VerificationError::StarkVerificationError(..))
+        ));
     }
 
     #[test]
@@ -668,7 +727,7 @@ mod tests {
         let incompatible_vm = ExecutionProof::from_parts(
             ExecutionProofCompatibility::new(
                 vec![root(100)],
-                VERIFIER_SUPPORT_V1.accepted_pvm_roots.to_vec(),
+                VERIFIER_SUPPORT_V2.accepted_pvm_roots.to_vec(),
             )
             .unwrap(),
             proof.vm().clone(),
@@ -676,7 +735,7 @@ mod tests {
         );
         let incompatible_pvm = ExecutionProof::from_parts(
             ExecutionProofCompatibility::new(
-                VERIFIER_SUPPORT_V1.accepted_vm_roots.to_vec(),
+                VERIFIER_SUPPORT_V2.accepted_vm_roots.to_vec(),
                 vec![root(200)],
             )
             .unwrap(),
@@ -709,7 +768,7 @@ mod tests {
             Felt::new_unchecked(0),
         ]);
         const SUPPORT: VerifierSupport = VerifierSupport {
-            format: ExecutionProofCompatibility::FORMAT_V1,
+            format: ExecutionProofCompatibility::FORMAT_V2,
             accepted_vm_roots: &[OLD_VM_ROOT, CURRENT_VM_VERIFIER_ROOT],
             accepted_pvm_roots: &[OLD_PVM_ROOT, CURRENT_PVM_VERIFIER_ROOT],
         };

@@ -1,17 +1,15 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use super::{
-    DeferredError, DeferredStateWire, Digest, IntegrityError, MAX_DEFERRED_ELEMENTS, Node,
-    NodeType, PrecompileError, PrecompileRegistry, TRUE_DIGEST, Tag,
+    DeferredError, Digest, IntegrityError, MAX_DEFERRED_ELEMENTS, Node, NodeType, PrecompileError,
+    PrecompileRegistry, PrecompileWitness, TRUE_DIGEST, Tag,
 };
 
-/// In-memory witness for deferred-DAG verification.
+/// Deferred graph and eager evaluation state.
 ///
-/// The state keeps registered nodes, host-side evaluation memos, and the current deferred root.
-/// Evaluation memos are valid only under the same [`PrecompileRegistry`] semantics used to populate
-/// them. The state is intentionally not serialized directly. [`DeferredStateWire`] is the retained
-/// low-level transport representation, and [`Self::from_wire`] rebuilds this state only after
-/// registry checks, canonical wire checks, and root evaluation.
+/// Registered original nodes, canonical/helper nodes, evaluation memos, the current root, and the
+/// element budget live here. [`Self::into_witness`] exports only the original root-reachable graph
+/// and releases the state.
 #[derive(Debug, Clone)]
 pub struct DeferredState {
     registry: Arc<PrecompileRegistry>,
@@ -134,34 +132,6 @@ impl DeferredState {
         self.get_canonical_node(digest).ok_or(PrecompileError::MissingNode)
     }
 
-    pub fn nodes(&self) -> &BTreeMap<Digest, Node> {
-        &self.nodes
-    }
-
-    /// Rebuilds this state from its root-reachable DAG.
-    ///
-    /// Registered and memoized orphans are dropped, and the fixed element budget is recomputed from
-    /// the retained nodes. Precompile initialization and evaluation use the installed registry.
-    pub(crate) fn compact(self) -> Result<Self, PrecompileError> {
-        let root = self.root;
-        let mut compacted = Self::new(Arc::clone(&self.registry))?;
-        compacted.import_reachable_from(&self, root)?;
-        compacted.root = root;
-        Ok(compacted)
-    }
-
-    /// Merges `other` into this state and reduces their roots in order.
-    ///
-    /// Root-reachable nodes from `other` are re-registered under this state's registry, so shared
-    /// nodes are deduplicated without serializing either state. This state's remaining node budget
-    /// applies to imported nodes.
-    pub(crate) fn merge(mut self, other: Self) -> Result<Self, PrecompileError> {
-        let other_root = other.root();
-        self.import_reachable_from(&other, other_root)?;
-        self.log_statement(other_root)?;
-        Ok(self)
-    }
-
     /// Returns the approximate number of field elements occupied by registered deferred nodes.
     pub fn num_elements(&self) -> usize {
         self.nodes
@@ -276,57 +246,15 @@ impl DeferredState {
         self.evals.get(&digest).copied().ok_or(PrecompileError::MissingNode)
     }
 
-    /// Serializes the root-reachable DAG into compact canonical wire form.
+    /// Consumes completed execution state and exports its root-reachable portable graph.
     ///
-    /// Only nodes reachable from `root` are emitted; registered or memoized orphans are dropped.
-    /// The installed `PrecompileRegistry` determines each node's shape, so graph edges are never
-    /// inferred from opaque payload bytes. Encoding preserves the state representation and does not
-    /// establish its validity; failures to materialize canonical wire are returned to the caller.
-    pub fn to_wire(&self) -> Result<DeferredStateWire, IntegrityError> {
-        DeferredStateWire::from_state(self)
-    }
-
-    /// Rebuilds and verifies a deferred state from untrusted wire data.
-    ///
-    /// The wire root is implicit: empty wire opens [`TRUE_DIGEST`], otherwise the root is the
-    /// digest of the final entry. Rehydration rejects non-canonical or dangling wire, then
-    /// evaluates the implicit root to TRUE under the installed precompiles. The wire remains a
-    /// passive transport representation; this supported low-level operation is the explicit seam
-    /// that establishes semantic validity under a caller-selected registry.
-    pub fn from_wire(
-        registry: Arc<PrecompileRegistry>,
-        wire: &DeferredStateWire,
-    ) -> Result<Self, IntegrityError> {
-        wire.rehydrate(registry)
-    }
-
-    fn import_reachable_from(
-        &mut self,
-        source: &DeferredState,
-        root: Digest,
-    ) -> Result<(), PrecompileError> {
-        let mut pending = alloc::vec![(root, false)];
-        while let Some((digest, children_imported)) = pending.pop() {
-            if digest == TRUE_DIGEST {
-                continue;
-            }
-
-            let node = source.nodes.get(&digest).ok_or(PrecompileError::MissingNode)?;
-            if let Some(existing) = self.nodes.get(&digest) {
-                if existing != node {
-                    return Err(DeferredError::ConflictingNode.into());
-                }
-                continue;
-            }
-
-            if children_imported {
-                self.register(node.clone())?;
-            } else {
-                pending.push((digest, true));
-                pending.extend(node.children().map(|child| (child, false)));
-            }
+    /// Executions without logged work return `None`. Export preserves original node commitments
+    /// and omits unreachable nodes and evaluation caches; it does not serialize through bytes.
+    pub fn into_witness(self) -> Result<Option<PrecompileWitness>, IntegrityError> {
+        if self.root == TRUE_DIGEST {
+            return Ok(None);
         }
-        Ok(())
+        PrecompileWitness::from_state(&self).map(Some)
     }
 
     fn validate_node_for_insertion(&self, node: &Node) -> Result<NodeType, PrecompileError> {
@@ -394,9 +322,7 @@ impl DeferredState {
 /// Capability object passed to precompiles during recursive evaluation.
 ///
 /// Precompiles do not own the DAG; they receive this handle to evaluate registered children and to
-/// register helper nodes referenced by compound canonicals. The verifier reuses the same path
-/// during [`DeferredState::from_wire`], so prover and verifier agree on how witnesses are
-/// reconstructed.
+/// register helper nodes referenced by compound canonicals during execution.
 pub struct DeferredContext<'a> {
     state: &'a mut DeferredState,
 }
@@ -416,8 +342,8 @@ impl<'a> DeferredContext<'a> {
 
     /// Evaluates a registered child digest and returns the canonical node digest.
     ///
-    /// The `nodes` membership check keeps local evaluation reproducible by `to_wire` and
-    /// rehydration; memoization is transparent to precompile implementations. Use
+    /// The `nodes` membership check preserves the registered child closure; memoization is
+    /// transparent to precompile implementations. Use
     /// [`Self::get_node`] with the returned digest to inspect the canonical node contents.
     pub fn evaluate_digest(&mut self, digest: Digest) -> Result<Digest, PrecompileError> {
         self.state.evaluate_digest(digest)
@@ -508,72 +434,5 @@ mod tests {
 
         assert!(matches!(error.root(), PrecompileError::AssertionFailed));
         assert_eq!(state.get_canonical_digest(digest), None);
-    }
-
-    fn framework_state(statement_depth: usize) -> DeferredState {
-        let mut state = DeferredState::default();
-        let mut statement = TRUE_DIGEST;
-        for _ in 0..statement_depth {
-            statement = state.register(Node::and(statement, TRUE_DIGEST)).unwrap();
-        }
-        state.log_statement(statement).unwrap();
-        state
-    }
-
-    #[test]
-    fn merge_reduces_roots_in_order_and_deduplicates_nodes() {
-        let first = framework_state(1);
-        let second = framework_state(2);
-        let first_root = first.root();
-        let second_root = second.root();
-        let total_nodes = first.nodes().len() + second.nodes().len();
-
-        let merged = first.merge(second).unwrap();
-
-        assert_eq!(merged.root(), Node::and(first_root, second_root).digest());
-        assert!(merged.nodes().len() < total_nodes);
-    }
-
-    #[test]
-    fn merge_preserves_order_and_duplicate_multiplicity() {
-        let first = framework_state(1);
-        let second = framework_state(2);
-        let first_root = first.root();
-        let second_root = second.root();
-
-        let ordered = first.clone().merge(second.clone()).unwrap();
-        let reordered = second.merge(first.clone()).unwrap();
-        let duplicate = first.clone().merge(first).unwrap();
-
-        assert_eq!(ordered.root(), Node::and(first_root, second_root).digest());
-        assert_eq!(reordered.root(), Node::and(second_root, first_root).digest());
-        assert_eq!(duplicate.root(), Node::and(first_root, first_root).digest());
-        assert_ne!(ordered.root(), reordered.root());
-        assert_ne!(duplicate.root(), first_root);
-    }
-
-    #[test]
-    fn merge_enforces_the_combined_element_limit() {
-        let mut first = framework_state(1);
-        let second = framework_state(2);
-        first.remaining_elements = 0;
-
-        let error = first.merge(second).unwrap_err();
-
-        assert!(matches!(
-            error.root(),
-            PrecompileError::Other(DeferredError::DeferredStateTooLarge { .. })
-        ));
-    }
-
-    #[test]
-    fn merge_combines_exact_roots_without_filtering_true() {
-        let settled = DeferredState::default();
-        let unsettled = framework_state(1);
-        let unsettled_root = unsettled.root();
-
-        let merged = settled.merge(unsettled).unwrap();
-
-        assert_eq!(merged.root(), Node::and(TRUE_DIGEST, unsettled_root).digest());
     }
 }

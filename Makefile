@@ -448,7 +448,6 @@ fuzz-all: fuzz-seeds ## Run all fuzz targets (in sequence)
 	cargo +nightly fuzz run execution_proof_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run execution_witness_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run deferred_state_wire_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run deferred_state_wire_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run package_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run package_semantic_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run project_toml_parse --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \

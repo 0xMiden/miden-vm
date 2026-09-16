@@ -1,22 +1,22 @@
-use alloc::{sync::Arc, vec, vec::Vec};
+use alloc::{vec, vec::Vec};
 
 use miden_core::{
     Felt,
-    deferred::{DeferredState, DeferredStateWire, Node, PrecompileRegistry, TRUE_DIGEST, Tag},
+    deferred::{Node, PrecompileWitness, TRUE_DIGEST, Tag},
     serde::{ByteWriter, Deserializable, Serializable},
 };
 use miden_precompiles::{CurveId, CurvePoint, CurvePrecompile, UintDomain, UintPrecompile};
 
 use crate::{
-    deferred::{DeferredSession, session_from_deferred_state},
+    deferred::session::session_from_witnesses,
     math::{U256, from_hex, to_limbs32},
     session::SessionTraces,
+    tests::batch_witness::WitnessFixture,
     transcript::eval::{COL_ACT, COL_IS_AND, COL_OUT_MULT},
 };
 
-fn state() -> DeferredState {
-    DeferredState::new(Arc::new(miden_precompiles::registry()))
-        .expect("precompile init must succeed")
+fn state() -> WitnessFixture {
+    WitnessFixture::new()
 }
 
 fn limbs(value: u32) -> [u32; 8] {
@@ -69,9 +69,10 @@ fn deferred_session_lowers_shared_ec_dag_from_wire() {
 
 #[test]
 fn deferred_session_lowers_exponential_and_dag_from_raw_wire() {
-    for depth in [0_u32, 1, 4, 64] {
+    for depth in [1_u32, 2, 4, 64] {
         // Start from untrusted bytes, not an in-memory state or private wire fields.
         let mut bytes = Vec::new();
+        bytes.write_u8(PrecompileWitness::WIRE_VERSION);
         bytes.write_usize(depth as usize);
         for previous_index in 0..depth {
             bytes.write_u8(1); // Join entry
@@ -79,10 +80,10 @@ fn deferred_session_lowers_exponential_and_dag_from_raw_wire() {
             bytes.write_u32(previous_index);
             bytes.write_u32(previous_index);
         }
-        let wire = DeferredStateWire::read_from_bytes(&bytes).unwrap();
-        let state = DeferredState::from_wire(Arc::new(PrecompileRegistry::new()), &wire).unwrap();
-        assert_eq!(state.to_wire().unwrap().to_bytes(), bytes);
-        let traces = check_wire_session(state);
+        let witness = PrecompileWitness::read_from_bytes(&bytes).unwrap();
+        assert_eq!(witness.to_bytes(), bytes);
+        let traces = session_from_witnesses(vec![witness]).unwrap().finish();
+        traces.check();
         let eval = traces.mains()[4];
         let rows = eval.values.chunks_exact(eval.width).collect::<Vec<_>>();
         assert_eq!(rows.iter().filter(|row| row[COL_ACT] == Felt::ONE).count(), depth as usize + 1);
@@ -94,15 +95,12 @@ fn deferred_session_lowers_exponential_and_dag_from_raw_wire() {
     }
 }
 
-fn check_wire_session(state: DeferredState) -> SessionTraces {
-    let wire = state.to_wire().expect("state must serialize");
-    let wire = DeferredStateWire::read_from_bytes(&wire.to_bytes()).expect("wire must decode");
-    let rehydrated = DeferredState::from_wire(Arc::new(miden_precompiles::registry()), &wire)
-        .expect("shared DAG must pass wire validation and evaluation");
-    assert_eq!(rehydrated.root(), state.root());
-    let DeferredSession { session, root } =
-        session_from_deferred_state(&rehydrated).expect("shared DAG must lower");
-    let traces = session.finish(root);
+fn check_wire_session(state: WitnessFixture) -> SessionTraces {
+    let witness = state.witness();
+    let witness =
+        PrecompileWitness::read_from_bytes(&witness.to_bytes()).expect("witness must decode");
+    assert_eq!(witness.root_unchecked(), state.root());
+    let traces = session_from_witnesses(vec![witness]).expect("shared DAG must lower").finish();
     traces.check();
     traces
 }
@@ -127,7 +125,8 @@ fn deferred_session_lowers_uint_equality_assertion() {
     let eq = state.register(eq).expect("equality must register");
     state.log_statement(eq).expect("equality must log");
 
-    session_from_deferred_state(&state).expect("uint equality should lower into a session");
+    session_from_witnesses(vec![state.witness()])
+        .expect("uint equality should lower into a session");
 }
 
 #[test]
@@ -153,10 +152,11 @@ fn deferred_session_lowers_curve_equality_assertion() {
     let eq = state.register(eq).expect("equality must register");
     state.log_statement(eq).expect("equality must log");
 
-    session_from_deferred_state(&state).expect("curve equality should lower into a session");
+    session_from_witnesses(vec![state.witness()])
+        .expect("curve equality should lower into a session");
 }
 
-fn register_curve_equality(state: &mut DeferredState, lhs: Node, rhs: Node) {
+fn register_curve_equality(state: &mut WitnessFixture, lhs: Node, rhs: Node) {
     let lhs = state.register(lhs).expect("lhs must register");
     let rhs = state.register(rhs).expect("rhs must register");
     let eq = Node::join(CurvePrecompile::op_tag(CurvePrecompile::EQ_OP_ID), lhs, rhs)
@@ -186,9 +186,9 @@ fn deferred_session_lowers_nested_one_term_msm() {
     state.register(outer.clone()).expect("outer MSM must register");
     register_curve_equality(&mut state, outer, generator);
 
-    let DeferredSession { session, root } =
-        session_from_deferred_state(&state).expect("nested MSM claims should lower");
-    session.finish(root).check();
+    let imported =
+        session_from_witnesses(vec![state.witness()]).expect("nested MSM claims should lower");
+    imported.finish().check();
 }
 
 #[test]
@@ -203,13 +203,13 @@ fn deferred_session_reuses_identical_msm_claim_in_trace() {
     let msm = curve_msm_node(vec![(generator, one)]);
     register_curve_equality(&mut state, msm.clone(), msm);
 
-    let DeferredSession { session, root } =
-        session_from_deferred_state(&state).expect("repeated MSM claim should lower");
-    session.finish(root).check();
+    let imported =
+        session_from_witnesses(vec![state.witness()]).expect("repeated MSM claim should lower");
+    imported.finish().check();
 }
 
 fn register_affine_curve_value(
-    state: &mut DeferredState,
+    state: &mut WitnessFixture,
     curve: CurveId,
     point: CurvePoint,
 ) -> Node {
@@ -239,7 +239,7 @@ fn deferred_session_lowers_zero_scalar_msm() {
     let msm = curve_msm_node(vec![(generator, zero)]);
     register_curve_equality(&mut state, msm.clone(), msm);
 
-    session_from_deferred_state(&state).expect("zero-scalar MSM should lower");
+    session_from_witnesses(vec![state.witness()]).expect("zero-scalar MSM should lower");
 }
 
 #[test]
@@ -258,7 +258,7 @@ fn deferred_session_lowers_duplicate_base_msm() {
     let msm = curve_msm_node(vec![(generator.clone(), two), (generator, three)]);
     register_curve_equality(&mut state, msm.clone(), msm);
 
-    session_from_deferred_state(&state).expect("duplicate-base MSM should lower");
+    session_from_witnesses(vec![state.witness()]).expect("duplicate-base MSM should lower");
 }
 
 #[test]
@@ -282,7 +282,7 @@ fn deferred_session_lowers_mixed_zero_and_nonzero_msm() {
     let msm = curve_msm_node(vec![(generator, zero), (two_g, three)]);
     register_curve_equality(&mut state, msm.clone(), msm);
 
-    session_from_deferred_state(&state).expect("mixed zero/nonzero MSM should lower");
+    session_from_witnesses(vec![state.witness()]).expect("mixed zero/nonzero MSM should lower");
 }
 
 #[test]
@@ -304,7 +304,7 @@ fn deferred_session_lowers_all_zero_msm_with_multiple_terms() {
     let msm = curve_msm_node(vec![(generator, zero.clone()), (two_g, zero)]);
     register_curve_equality(&mut state, msm.clone(), msm);
 
-    session_from_deferred_state(&state).expect("all-zero MSM should lower");
+    session_from_witnesses(vec![state.witness()]).expect("all-zero MSM should lower");
 }
 
 #[test]
@@ -326,7 +326,8 @@ fn deferred_session_lowers_repeated_base_coefficients_that_cancel() {
     let msm = curve_msm_node(vec![(generator.clone(), k_node), (generator, n_minus_k_node)]);
     register_curve_equality(&mut state, msm.clone(), msm);
 
-    session_from_deferred_state(&state).expect("cancelling repeated-base MSM should lower");
+    session_from_witnesses(vec![state.witness()])
+        .expect("cancelling repeated-base MSM should lower");
 }
 
 #[test]
@@ -358,7 +359,7 @@ fn deferred_session_lowers_structurally_different_nodes_at_the_same_canonical_po
     let msm = Node::try_pair_list(CurvePrecompile::msm_tag(), pairs).expect("tag is curve-owned");
     register_curve_equality(&mut state, msm.clone(), msm);
 
-    session_from_deferred_state(&state)
+    session_from_witnesses(vec![state.witness()])
         .expect("MSM over structurally different same-point nodes should lower");
 }
 
@@ -376,7 +377,16 @@ fn deferred_session_inputs_reject_identity_base_msm() {
     state.register(two.clone()).expect("scalar must register");
 
     let msm = curve_msm_node(vec![(identity, one), (generator, two)]);
-    assert!(state.register(msm).is_err(), "identity-base MSM must be rejected");
+    let root = state.register(msm).unwrap();
+    state.log_statement(root).unwrap();
+    let error = session_from_witnesses(vec![state.witness()]).err().unwrap();
+    assert!(matches!(
+        error,
+        crate::SessionInputError::Invalid {
+            reason: "MSM identity bases are unsupported",
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -397,7 +407,7 @@ fn deferred_session_lowers_large_msm_without_panicking() {
     let msm = curve_msm_node(pairs);
     register_curve_equality(&mut state, msm.clone(), msm);
 
-    session_from_deferred_state(&state).expect("large MSM should lower");
+    session_from_witnesses(vec![state.witness()]).expect("large MSM should lower");
 }
 
 fn run_on_small_stack(f: impl FnOnce() + Send + 'static) {
@@ -412,11 +422,11 @@ fn run_on_small_stack(f: impl FnOnce() + Send + 'static) {
 #[test]
 fn translate_truthy_deep_and_spine_does_not_stackoverflow() {
     run_on_small_stack(|| {
-        let mut state = DeferredState::default();
+        let mut state = WitnessFixture::new();
         for _ in 0..512 {
             state.log_statement(TRUE_DIGEST).unwrap();
         }
-        session_from_deferred_state(&state)
+        session_from_witnesses(vec![state.witness()])
             .expect("deep AND spine must lower without stack overflow");
     });
 }
@@ -444,7 +454,7 @@ fn translate_uint_deep_add_chain_does_not_stackoverflow() {
         let msm = curve_msm_node(vec![(generator, current)]);
         state.register(msm.clone()).expect("MSM must register");
         register_curve_equality(&mut state, msm.clone(), msm);
-        session_from_deferred_state(&state)
+        session_from_witnesses(vec![state.witness()])
             .expect("deep uint add chain must lower without stack overflow");
     });
 }
@@ -466,7 +476,7 @@ fn translate_ec_deep_nested_msm_does_not_stackoverflow() {
             current = next;
         }
         register_curve_equality(&mut state, current.clone(), current);
-        session_from_deferred_state(&state)
+        session_from_witnesses(vec![state.witness()])
             .expect("deep nested MSM must lower without stack overflow");
     });
 }

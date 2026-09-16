@@ -8,7 +8,7 @@ use std::sync::{
 use miden_assembly::Assembler;
 use miden_core::{
     Felt, Word,
-    deferred::PrecompileWitness,
+    deferred::fold_deferred_root,
     program::{ExecutionClaim, proof_request_key},
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus},
 };
@@ -29,17 +29,17 @@ use crate::support::ecdsa::{generator_public_key_fixture, valid_fixture};
 async fn batch_root_and_response_checks() {
     let core_lib = CoreLibrary::default();
     let program = assemble_batch(&core_lib);
-    let (first, first_claim, first_state) =
+    let (first, first_claim, first_witness) =
         prove_ecdsa_execution(&core_lib, valid_fixture(), StackInputs::default());
-    let (second, second_claim, second_state) =
+    let (second, second_claim, second_witness) =
         prove_ecdsa_execution(&core_lib, generator_public_key_fixture(), StackInputs::default());
     // A different public input gives a different claim with the same ECDSA work.
-    let (repeated, repeated_claim, repeated_state) =
+    let (repeated, repeated_claim, repeated_witness) =
         prove_ecdsa_execution(&core_lib, valid_fixture(), StackInputs::new(&[Felt::ONE]).unwrap());
     let (plain, plain_claim) = prove_without_precompiles();
     assert_ne!(first_claim.commitment(), repeated_claim.commitment());
-    assert_eq!(first_state.root(), repeated_state.root());
-    assert_ne!(first_state.root(), second_state.root());
+    assert_eq!(first_witness.root_unchecked(), repeated_witness.root_unchecked());
+    assert_ne!(first_witness.root_unchecked(), second_witness.root_unchecked());
     assert!(matches!(plain.precompile(), PrecompileStatus::Empty));
 
     // [A, TRUE, B, A] must keep both occurrences of A and skip only TRUE.
@@ -51,16 +51,16 @@ async fn batch_root_and_response_checks() {
     ];
     let (stack_inputs, advice_inputs) = batch_inputs(&core_lib, &executions);
 
-    let first_witness = PrecompileWitness::new(first_state).unwrap();
-    let merged = PrecompileWitness::merge(vec![
-        first_witness.clone(),
-        PrecompileWitness::new(second_state).unwrap(),
-        PrecompileWitness::new(repeated_state).unwrap(),
-    ])
-    .unwrap();
-    let expected_roots = merged.roots().to_vec();
-    let expected_root = merged.state().root();
-    let mut host = PvmSettlementHost::new(&core_lib, merged);
+    let expected_roots = vec![
+        first_witness.root_unchecked(),
+        second_witness.root_unchecked(),
+        repeated_witness.root_unchecked(),
+    ];
+    let expected_root = expected_roots.iter().copied().reduce(fold_deferred_root).unwrap();
+    let mut host = PvmSettlementHost::new(
+        &core_lib,
+        vec![first_witness.clone(), second_witness, repeated_witness],
+    );
 
     let witness = FastProcessor::new_with_options(
         stack_inputs,
@@ -95,7 +95,7 @@ async fn batch_root_and_response_checks() {
     // A proof of A alone leaves part of the batch's work unproved.
     let missing_witnesses = Prover::new()
         .with_hash_fn(HashFunction::Poseidon2)
-        .prove_precompile(&first_witness)
+        .prove_precompiles(vec![first_witness])
         .unwrap();
     assert_rejects_pvm_response(
         &core_lib,

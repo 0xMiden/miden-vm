@@ -20,6 +20,8 @@
 
 - [BREAKING] Removed `ExecutionProof::is_complete()` ([#3822](https://github.com/0xMiden/miden-vm/pull/3822)).
 - [BREAKING] Run the MVM and PVM recursive verifiers in isolated execution contexts, preserving caller memory. This changes both verifier MAST roots ([#3832](https://github.com/0xMiden/miden-vm/pull/3832)).
+- [BREAKING] Replaced hydrated precompile witnesses with portable singleton witnesses and moved batching into `Prover::prove_precompiles`, preserving input root order and duplicates. Deferred verification evaluates the carried witness and checks its recomputed root against the VM obligation. `PrecompileWitness::root_unchecked()` returns the structural commitment; `compute_root(registry)` validates the computations ([#3811](https://github.com/0xMiden/miden-vm/pull/3811)).
+- [BREAKING] Bumped `ExecutionProof` and `ExecutionWitness` transport formats to version 2. Version-1 execution proofs and witnesses from v0.32.1 are rejected, including those without precompile work. No legacy reader or conversion is provided. Producer and consumer upgrades must be coordinated; retained proofs and proving jobs can be discarded and regenerated at the upgrade boundary ([#3811](https://github.com/0xMiden/miden-vm/pull/3811)).
 
 ## v0.32.1 (2026-09-09)
 
