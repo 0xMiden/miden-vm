@@ -10,7 +10,9 @@ use alloc::{boxed::Box, sync::Arc};
 use miden_air::{MidenMultiAir, PublicInputs, Statement, config, security};
 use miden_core::{
     Felt,
-    deferred::{DeferredRoot, MAX_PRECOMPILE_ROOTS, PrecompileError, TRUE_DIGEST},
+    deferred::{
+        DeferredRoot, MAX_PRECOMPILE_ROOTS, PrecompileError, PrecompileRegistry, TRUE_DIGEST,
+    },
     field::QuadFelt,
     proof::{CURRENT_PVM_VERIFIER_ROOT, CURRENT_VM_VERIFIER_ROOT, MAX_STARK_PROOF_BYTES},
 };
@@ -77,13 +79,17 @@ const VERIFIER_SUPPORT_V2: VerifierSupport = VerifierSupport {
 // ================================================================================================
 
 /// Verifier for deferred and complete Miden execution proofs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Verifier;
+#[derive(Debug, Clone)]
+pub struct Verifier {
+    precompile_registry: Arc<PrecompileRegistry>,
+}
 
 impl Verifier {
-    /// Creates a verifier with the canonical verification limits.
-    pub const fn new() -> Self {
-        Self
+    /// Creates a verifier with the canonical precompile registry and verification limits.
+    pub fn new() -> Self {
+        Self {
+            precompile_registry: Arc::new(miden_precompiles::registry()),
+        }
     }
 
     /// Returns the compatibility declared by proofs produced by the current prover.
@@ -159,7 +165,7 @@ impl Verifier {
         let vm_security_parameters = self.verify_vm(claim, vm)?;
         // Authenticate the VM statement before performing potentially expensive witness evaluation.
         if let PrecompileStatus::Deferred(witness) = proof.precompile()
-            && witness.compute_root(Arc::new(miden_precompiles::registry()))? != vm.precompile_root
+            && witness.compute_root(Arc::clone(&self.precompile_registry))? != vm.precompile_root
         {
             return Err(VerificationError::DeferredWitnessRootMismatch);
         }
