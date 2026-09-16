@@ -6,6 +6,7 @@
 
 - Added `Prover::prove_vm_witness()` so callers can prove a split `VmWitness` without deferred precompile work ([#3837](https://github.com/0xMiden/miden-vm/pull/3837)).
 - [BREAKING] Added Eidos hashing with typed domain separation, including Eidos-backed IES, a counter-mode random coin, and length-bound LMCS implementations, native SIMD acceleration, and batched proof-of-work grinding; existing Poseidon2 variants remain available.
+- Added a MASM example that verifies a batch of MVM proofs and settles their deferred work with one PVM proof ([#3823](https://github.com/0xMiden/miden-vm/pull/3823)).
 
 #### Fixes
 
@@ -14,6 +15,7 @@
 - Fixed `PartialMmr::track()` panicking when a leaf position did not belong to the tree selected by its authentication path ([#3804](https://github.com/0xMiden/miden-vm/pull/3804)).
 - [BREAKING] Fixed `bound_into_included_u64` converting excluded start bounds in the wrong direction. The function now returns `Option<u64>` and uses `None` when an exclusive endpoint has no inclusive `u64` value ([#3589](https://github.com/0xMiden/miden-vm/pull/3589)).
 - Fixed 46 `\begin{cases}...\end{cases}` blocks in the assembly instruction reference and stack design docs that were missing the `\\` row separator between cases, which broke KaTeX rendering ([#3650](https://github.com/0xMiden/miden-vm/issues/3650)).
+- [BREAKING] Fixed caller stack preservation in the MVM and PVM MASM verifiers and updated their roots ([#3823](https://github.com/0xMiden/miden-vm/pull/3823)).
 
 #### Changes
 
