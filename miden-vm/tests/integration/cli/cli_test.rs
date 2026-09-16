@@ -455,6 +455,21 @@ fn run_loads_a_masp_whose_kernel_shares_the_handler_section() {
     package.write_to_file(&package_path).unwrap();
     fs::write(working_dir.path().join("prog.inputs"), r#"{"operand_stack":[]}"#).unwrap();
 
+    // The run below exercises the handler deduplication only if the round-tripped package
+    // still yields its embedded kernel — a digest-pairing break would surface as an error
+    // there and skip the second handler load. Pin that precondition, so this test cannot
+    // pass vacuously.
+    let round_tripped = Package::deserialize_from_file(&package_path).unwrap();
+    let embedded_kernel = round_tripped
+        .try_embedded_kernel_package()
+        .expect("the embedded kernel must decode with a matching dependency digest")
+        .expect("the package must embed its kernel");
+    assert_eq!(
+        embedded_kernel.event_handlers().expect("the kernel section decodes"),
+        Some(section),
+        "the embedded kernel must carry the same handler section as the outer package",
+    );
+
     let mut cmd = bin_under_test(working_dir.path());
     cmd.arg("run").arg(&package_path).arg("-n").arg("1");
     cmd.assert().success();
