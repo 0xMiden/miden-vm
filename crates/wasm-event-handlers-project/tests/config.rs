@@ -11,7 +11,7 @@ use miden_assembly::{
     Assembler, PackagePostProcessor, PostProcessContext, ProjectTargetSelector,
     diagnostics::Report, testing::TestRegistry,
 };
-use miden_mast_package::Package as MastPackage;
+use miden_mast_package::{MAX_MODULE_BYTES, Package as MastPackage};
 use miden_processor::DefaultHost;
 // The tests write the manifest records the guest SDK macro normally writes.
 use miden_wasm_event_handlers::{
@@ -353,6 +353,38 @@ fn a_missing_module_file_is_an_error() {
 
     let error = assemble_library_error(&manifest_path);
     assert!(error.contains("cannot read the handler module"), "unexpected error: {error}");
+    assert!(error.contains("handlers.wasm"), "unexpected error: {error}");
+}
+
+#[test]
+fn an_oversized_module_is_refused_before_parsing() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
+    );
+    // A module over the cap of the `event_handlers` section can never ship, so the build refuses
+    // it on its size alone, without parsing it.
+    fs::write(tempdir.path().join("handlers.wasm"), vec![0u8; MAX_MODULE_BYTES + 1]).unwrap();
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(error.contains("over the"), "unexpected error: {error}");
+    assert!(error.contains("-byte limit"), "unexpected error: {error}");
+}
+
+#[test]
+fn a_non_regular_module_file_is_refused() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
+    );
+    // A directory is the file kind a test can create portably; the rule also covers the kinds a
+    // test cannot, such as a device or a FIFO, where a plain read would never return.
+    fs::create_dir(tempdir.path().join("handlers.wasm")).unwrap();
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(error.contains("is not a regular file"), "unexpected error: {error}");
     assert!(error.contains("handlers.wasm"), "unexpected error: {error}");
 }
 

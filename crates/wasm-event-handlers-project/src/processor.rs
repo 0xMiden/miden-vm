@@ -12,7 +12,7 @@ use miden_wasm_event_handlers::{WasmHandlerLimits, section_from_module};
 
 use crate::{
     config::{self, HandlerSource},
-    guest,
+    guest, module,
 };
 
 /// Attaches the Wasm handler module a project manifest declares to every package of the project
@@ -121,15 +121,16 @@ impl PackagePostProcessor for WasmEventHandlerProcessor {
 }
 
 /// Produces the bytes of the module `source` names: a guest crate is built, a prebuilt module is
-/// read.
+/// read. Either way the bytes come through [`module::read`], so nothing over the handler module
+/// size cap is loaded.
 ///
 /// Errors name the source path but not the manifest: the caller adds the manifest label of the
 /// package it is processing.
 fn module_bytes(source: &HandlerSource) -> Result<Vec<u8>, Report> {
     match source {
         HandlerSource::GuestCrate(crate_dir) => guest::build(crate_dir),
-        HandlerSource::Module(module) => std::fs::read(module).map_err(|error| {
-            Report::msg(format!("cannot read the handler module '{}': {error}", module.display()))
+        HandlerSource::Module(path) => module::read(path, |error| {
+            format!("cannot read the handler module '{}': {error}", path.display())
         }),
     }
 }

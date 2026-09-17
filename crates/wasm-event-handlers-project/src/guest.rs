@@ -30,8 +30,9 @@ const TARGET_HINT: &str =
 ///
 /// # Errors
 /// Returns an error when `cargo` is not available, when the build fails (the message carries the
-/// captured build output), or when the build does not produce exactly one Wasm artifact. A crate
-/// with no library target fails in the build, with cargo's own message.
+/// captured build output), when the build does not produce exactly one Wasm artifact, or when that
+/// artifact goes over the handler module size cap. A crate with no library target fails in the
+/// build, with cargo's own message.
 pub(crate) fn build(crate_dir: &Path) -> Result<Vec<u8>, Report> {
     if !crate_dir.is_dir() {
         return Err(Report::msg(format!(
@@ -79,11 +80,8 @@ pub(crate) fn build(crate_dir: &Path) -> Result<Vec<u8>, Report> {
     // path, so the two spellings match.
     let mut artifacts = wasm_artifacts(&output.stdout, &crate_dir.join("Cargo.toml"));
     match artifacts.len() {
-        1 => std::fs::read(&artifacts[0]).map_err(|error| {
-            Report::msg(format!(
-                "failed to read the Wasm handler module '{}': {error}",
-                artifacts[0].display()
-            ))
+        1 => crate::module::read(&artifacts[0], |error| {
+            format!("failed to read the Wasm handler module '{}': {error}", artifacts[0].display())
         }),
         // A crate with no library target at all does not reach this arm: `--lib` makes cargo
         // itself fail the build with its own "no library targets" message.
