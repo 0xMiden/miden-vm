@@ -367,6 +367,14 @@ impl RoundRequires {
         Self::default()
     }
 
+    pub(crate) fn trace_height(&self) -> Option<usize> {
+        let perms_per_lane = (self.total_perms() as usize).max(1).div_ceil(NUM_LANES);
+        perms_per_lane
+            .checked_mul(PERM_CYCLE)?
+            .checked_next_power_of_two()
+            .map(|height| height.max(2))
+    }
+
     /// Append one round's `state_in`. The sponge submits these in
     /// `(perm, round)` lex order — 24 per permutation — using
     /// [`keccak_round`](crate::hash::keccak::reference::keccak_round)
@@ -412,7 +420,9 @@ pub fn generate_trace(
     // Whole permutations split across lanes in contiguous blocks; the busiest
     // lane sets the height.
     let perms_per_lane = num_perms.max(1).div_ceil(NUM_LANES);
-    let height = (perms_per_lane * PERM_CYCLE).next_power_of_two().max(2);
+    let height = requires
+        .trace_height()
+        .expect("keccak-round trace height exceeds the host power-of-two range");
     let program = slots();
 
     // Memory keyed by absolute IP — each perm owns a fixed address range
