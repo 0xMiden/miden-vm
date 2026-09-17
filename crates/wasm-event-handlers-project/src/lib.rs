@@ -37,6 +37,7 @@
 
 mod config;
 mod guest;
+mod module;
 mod processor;
 
 pub use self::processor::WasmEventHandlerProcessor;
