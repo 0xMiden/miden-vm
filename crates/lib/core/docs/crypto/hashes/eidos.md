@@ -2,7 +2,7 @@
 ## miden::core::crypto::hashes::eidos
 | Procedure | Description |
 | ----------- | ------------- |
-| init_chaining_word_with_params | Constructs an Eidos chaining word from a domain tag and three domain-defined<br />parameters. Every input must fit in a u32. Each occupies the low lane of one packed Felt; the<br />corresponding high lane is a fixed masked IV word.<br /><br />Input:  [domain_tag, param0, param1, param2, ...]<br />Output: [CV, ...]<br /><br />Invocation: exec<br /> |
+| init_chaining_word_with_params | Constructs an Eidos chaining word from a domain tag and three domain-defined<br />parameters. Every input must fit in a u32. Each occupies the low lane of one packed Felt; the<br />corresponding high lane is a fixed BLAKE3 IV word.<br /><br />Input:  [domain_tag, param0, param1, param2, ...]<br />Output: [CV, ...]<br /><br />Invocation: exec<br /> |
 | empty_felt_sequence_digest | Returns the Eidos digest of an empty generic Felt sequence.<br /><br />Input:  [...]<br />Output: [DIGEST, ...]<br /><br />Invocation: exec<br /> |
 | init_chaining_word | Constructs `Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, n)`.<br />`n` must fit in a u32.<br /><br />Input:  [n, ...]<br />Output: [CV, ...]<br /><br />Invocation: exec<br /> |
 | init_chaining_word_in_domain | Constructs an initial chaining word from a runtime domain tag and `n`.<br />Both values must fit in a u32. The caller is responsible for registry and schema validation.<br /><br />Input:  [n, domain_tag, ...]<br />Output: [CV, ...]<br /><br />Invocation: exec<br /> |

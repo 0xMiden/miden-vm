@@ -9,9 +9,9 @@ pub mod vm
 
 # Eidos chaining word for one proof-request key block under the registered domain tag 0x01000201.
 const PROOF_REQUEST_INIT_CV = [
-    4280581857109606913,
-    2688637132020383752,
-    1947077364412317696,
+    13503953893964382721,
+    11912009168875159560,
+    11170449401267093504,
     6620516959492505600
 ]
 

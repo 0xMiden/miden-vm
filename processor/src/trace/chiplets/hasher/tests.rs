@@ -260,15 +260,13 @@ fn compression_writer_preserves_processor_eidos_compression_contract() {
     assert_eq!(rows.as_slice(), expected.rows.as_slice());
     assert_eq!(final_v, expected.final_v);
 
-    let packed_output: [Felt; 4] = core::array::from_fn(|i| {
-        let lo = final_v[2 * i] ^ final_v[8 + 2 * i];
-        let hi = final_v[2 * i + 1] ^ final_v[8 + 2 * i + 1];
-        eidos_compression::pack(lo, hi)
+    let finalized_output: [Felt; 4] = core::array::from_fn(|i| {
+        rows[EIDOS_COMPRESSION_CYCLE_LEN - 1][footer_interface_tail_col(i)]
     });
 
     let mut expected_state = init_state;
     eidos_compression::compress_state(&mut expected_state);
-    assert_eq!(packed_output, core::array::from_fn(|i| expected_state[BLOCK_LEN + i]));
+    assert_eq!(finalized_output, core::array::from_fn(|i| expected_state[BLOCK_LEN + i]));
 }
 
 #[test]

@@ -74,8 +74,8 @@ impl EidosFrame {
 
     /// Recovers a frame from an initial chaining word produced by Eidos framing.
     ///
-    /// The fixed high lanes must match the masked Eidos IV. Registry membership and
-    /// domain-specific parameter rules are not checked.
+    /// The fixed high lanes must match the Eidos IV. Registry membership and domain-specific
+    /// parameter rules are not checked.
     pub fn from_initial_chaining_word(word: Word) -> Option<Self> {
         let lanes = encoding::word_to_cv(word);
         let expected = framing::init_cv(lanes[0], [lanes[2], lanes[4], lanes[6]]);

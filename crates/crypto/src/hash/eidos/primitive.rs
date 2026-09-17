@@ -1,9 +1,8 @@
 //! Goldilocks-tailored BLAKE3 compression.
 //!
-//! Eidos uses BLAKE3's seven-round compression schedule with fixed parameter words.
-//! `compress` clears the top bit of odd output lanes so the 8-word chaining
-//! value packs losslessly into four Goldilocks field elements:
-//! `pack(lo, hi) = ((hi & 0x7fff_ffff) << 32) | lo`.
+//! Eidos uses BLAKE3's seven-round compression schedule with fixed parameter words. `compress`
+//! maps the full sixteen-word XOF output to four canonical Goldilocks field elements with a fixed
+//! linear finalizer.
 
 mod blake3_schedule;
 
@@ -12,67 +11,34 @@ pub(super) const PACKED_LANES: usize = blake3_schedule::PACKED_LANES;
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 pub(super) use blake3_schedule::cpu;
 
-use super::encoding::ODD_LANE_MASK;
-
-#[inline(always)]
-fn apply_output_mask(cv: &mut [u32; 8]) {
-    cv[1] &= ODD_LANE_MASK;
-    cv[3] &= ODD_LANE_MASK;
-    cv[5] &= ODD_LANE_MASK;
-    cv[7] &= ODD_LANE_MASK;
-}
-
-#[inline(always)]
-fn apply_packed_output_mask<const LANES: usize>(cv: &mut [[u32; LANES]; 8]) {
-    for word in [1, 3, 5, 7] {
-        for lane in cv[word].iter_mut() {
-            *lane &= ODD_LANE_MASK;
-        }
-    }
-}
+#[cfg(test)]
+use super::finalizer::finalize_packed_to_cv;
+use super::finalizer::{finalize_packed_native_to_cv, finalize_to_cv};
 
 /// Goldilocks-tailored BLAKE3 compression.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub(super) struct CompressionCore;
 
 impl CompressionCore {
-    /// Apply the Eidos compression core and mask the odd output lanes.
+    /// Apply the Eidos compression core and its Goldilocks matrix finalizer.
     ///
-    /// The input chaining value may contain arbitrary `u32` lanes. The
-    /// Goldilocks subspace mask is an output-finalization rule, not an input
-    /// invariant.
+    /// The input chaining value may contain arbitrary `u32` lanes, including lane pairs that do
+    /// not encode canonical field elements. Every output lane pair encodes a canonical Goldilocks
+    /// element.
     pub(super) fn compress(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
-        let mut cv_new = Self::compress_raw(cv, block);
-        apply_output_mask(&mut cv_new);
-        cv_new
+        finalize_to_cv(&Self::compress_raw_xof(cv, block))
     }
 
-    /// Apply the compression function without the Goldilocks output mask.
-    ///
-    /// Returns the eight folded BLAKE3-derived output words:
-    ///
-    /// ```text
-    /// out[i] = v[i] ^ v[i + 8]
-    /// ```
-    ///
-    /// These are the words consumed by [`Self::compress`] before odd-lane masking.
-    /// This is a raw compression output, not an Eidos digest. Callers that build a construction
-    /// from it must bind the construction's complete context into the input CV.
-    pub fn compress_raw(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
-        blake3_schedule::compress_raw(cv, block)
-    }
-
-    /// Return the full 16-word XOF output (low half || high half), without the Goldilocks output
-    /// mask.
+    /// Return the full 16-word XOF output (low half || high half), before matrix finalization.
     ///
     /// ```text
     /// out[i]     = v[i] ^ v[i + 8]    (i in 0..8)   // standard CV fold (low half)
     /// out[i + 8] = v[i + 8] ^ cv[i]   (i in 0..8)   // BLAKE3 XOF feed-forward (high half)
     /// ```
     ///
-    /// The low half is [`Self::compress_raw`]. The high half is BLAKE3's XOF feed-forward. This is
-    /// raw XOF material, not a canonical field digest. Callers that expose it as XOF output must
-    /// bind the construction's complete context into the input CV.
+    /// The low half is BLAKE3's chaining-value fold. The high half is BLAKE3's XOF feed-forward.
+    /// This is raw XOF material, not a canonical field digest. Callers that expose it as XOF output
+    /// must bind the construction's complete context into the input CV.
     pub fn compress_raw_xof(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
         blake3_schedule::compress_raw_xof(cv, block)
     }
@@ -86,9 +52,7 @@ impl CompressionCore {
         cv: [[u32; LANES]; 8],
         block: [[u32; LANES]; 16],
     ) -> [[u32; LANES]; 8] {
-        let mut cv_new = blake3_schedule::compress_packed(cv, block);
-        apply_packed_output_mask(&mut cv_new);
-        cv_new
+        finalize_packed_to_cv(&blake3_schedule::compress_packed_raw_xof(cv, block))
     }
 
     /// Apply compression to one logical packed batch using the selected native backend.
@@ -97,27 +61,16 @@ impl CompressionCore {
         cv: &[[u32; PACKED_LANES]; 8],
         block: &[[u32; PACKED_LANES]; 16],
     ) -> [[u32; PACKED_LANES]; 8] {
-        let mut cv_new = blake3_schedule::compress_packed_native(cv, block);
-        apply_packed_output_mask(&mut cv_new);
-        cv_new
+        finalize_packed_native_to_cv(&blake3_schedule::compress_packed_native_raw_xof(cv, block))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Felt, field::PrimeField64};
 
-    /// A chaining value whose odd lanes already fit the field-packing mask.
-    const TEST_CV: [u32; 8] = [
-        0x6a09_e667,
-        0x3b67_ae85, // IV[1] with top bit cleared
-        0x3c6e_f372,
-        0x254f_f53a, // IV[3] with top bit cleared
-        0x0000_0000,
-        0x1b05_688c, // IV[5] with top bit cleared
-        0x0000_0000,
-        0x5be0_cd19, // IV[7] (top bit already 0)
-    ];
+    const TEST_CV: [u32; 8] = IV;
 
     fn test_block() -> [u32; 16] {
         core::array::from_fn(|i| 0x1020_3040u32.wrapping_add((i as u32).wrapping_mul(0x0102_0304)))
@@ -137,10 +90,6 @@ mod tests {
             out.copy_from_slice(&word.to_le_bytes());
         }
         bytes
-    }
-
-    fn reference_core_with_p(cv: [u32; 8], block: [u32; 16], p: [u32; 4]) -> [u32; 8] {
-        blake3_schedule::compress_raw_with_parameter_words(cv, block, p)
     }
 
     fn reference_core_xof_with_p(cv: [u32; 8], block: [u32; 16], p: [u32; 4]) -> [u32; 16] {
@@ -165,13 +114,6 @@ mod tests {
         out
     }
 
-    fn mask_odd_lanes(cv: &mut [u32; 8]) {
-        cv[1] &= ODD_LANE_MASK;
-        cv[3] &= ODD_LANE_MASK;
-        cv[5] &= ODD_LANE_MASK;
-        cv[7] &= ODD_LANE_MASK;
-    }
-
     #[test]
     fn reference_core_matches_standard_blake3_compression() {
         let cv = TEST_CV;
@@ -181,13 +123,13 @@ mod tests {
         let flags = 0x0bu8;
 
         let official = standard_blake3_compress(cv, block, counter, block_len, flags);
-        let reference = reference_core_with_p(
+        let reference = reference_core_xof_with_p(
             cv,
             block,
             [counter as u32, (counter >> 32) as u32, block_len as u32, flags as u32],
         );
 
-        assert_eq!(reference, official);
+        assert_eq!(reference[..8], official);
     }
 
     #[test]
@@ -204,29 +146,19 @@ mod tests {
     }
 
     #[test]
-    fn eidos_compression_is_blake3_core_with_fixed_iv_tail_and_mask() {
+    fn eidos_compression_is_blake3_core_with_fixed_iv_tail_and_matrix_finalizer() {
         let cv = TEST_CV;
         let block = test_block();
-        let mut expected = reference_core_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
-
-        mask_odd_lanes(&mut expected);
+        let raw_xof = reference_core_xof_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
+        let expected = finalize_to_cv(&raw_xof);
 
         assert_eq!(CompressionCore::compress(cv, block), expected);
     }
 
+    /// Checks the selected XOF path against the portable scalar reference over many pseudo-random
+    /// inputs, not just a single fixed vector.
     #[test]
-    fn compress_raw_is_blake3_fold_with_fixed_iv_tail() {
-        let cv = TEST_CV;
-        let block = test_block();
-        let expected = reference_core_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
-
-        assert_eq!(CompressionCore::compress_raw(cv, block), expected);
-    }
-
-    /// Checks the selected raw and XOF paths against the portable scalar reference over many
-    /// pseudo-random inputs, not just the single fixed vector above.
-    #[test]
-    fn compress_raw_and_xof_match_scalar_reference_over_random_inputs() {
+    fn compress_raw_xof_matches_scalar_reference_over_random_inputs() {
         let mut state = 0x243f_6a88_85a3_08d3u64;
         let mut next_u32 = || {
             state ^= state << 13;
@@ -238,9 +170,6 @@ mod tests {
         for _ in 0..10_000 {
             let cv: [u32; 8] = core::array::from_fn(|_| next_u32());
             let block: [u32; 16] = core::array::from_fn(|_| next_u32());
-
-            let expected_raw = reference_core_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
-            assert_eq!(CompressionCore::compress_raw(cv, block), expected_raw);
 
             let expected_xof = reference_core_xof_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
             assert_eq!(CompressionCore::compress_raw_xof(cv, block), expected_xof);
@@ -279,37 +208,30 @@ mod tests {
         let cv = TEST_CV;
         let block = test_block();
         let xof = CompressionCore::compress_raw_xof(cv, block);
-
-        // Low half is identical to the folded raw output.
-        assert_eq!(&xof[..8], &CompressionCore::compress_raw(cv, block));
-
-        // Full 16 words match the BLAKE3 XOF reference with Eidos's fixed IV tail.
         let expected = reference_core_xof_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
         assert_eq!(xof, expected);
     }
 
     #[test]
-    fn compress_raw_then_mask_matches_compress() {
+    fn raw_xof_then_matrix_finalizer_matches_compress() {
         let cv = TEST_CV;
         let block = test_block();
-        let mut raw = CompressionCore::compress_raw(cv, block);
+        let raw_xof = CompressionCore::compress_raw_xof(cv, block);
 
-        apply_output_mask(&mut raw);
-
-        assert_eq!(raw, CompressionCore::compress(cv, block));
+        assert_eq!(finalize_to_cv(&raw_xof), CompressionCore::compress(cv, block));
     }
 
     #[test]
-    fn compress_accepts_unmasked_input_cv_lanes() {
+    fn compress_accepts_noncanonical_input_cv_lane_pairs() {
+        // The first pair encodes the Goldilocks modulus itself and the second encodes `u64::MAX`.
         let mut cv = TEST_CV;
-        cv[1] |= 0x8000_0000;
-        cv[3] |= 0x8000_0000;
-        cv[5] |= 0x8000_0000;
-        cv[7] |= 0x8000_0000;
+        cv[0] = 1;
+        cv[1] = u32::MAX;
+        cv[2] = u32::MAX;
+        cv[3] = u32::MAX;
         let block = test_block();
-        let mut expected = reference_core_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
-
-        mask_odd_lanes(&mut expected);
+        let raw_xof = reference_core_xof_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
+        let expected = finalize_to_cv(&raw_xof);
 
         assert_eq!(CompressionCore::compress(cv, block), expected);
     }
@@ -318,22 +240,24 @@ mod tests {
     fn standard_blake3_compression_is_not_eidos_compression() {
         let cv = TEST_CV;
         let block = test_block();
-        let mut standard = standard_blake3_compress(cv, block, 0, 64, 0);
-
-        mask_odd_lanes(&mut standard);
+        let standard = standard_blake3_compress(cv, block, 0, 64, 0);
 
         assert_ne!(CompressionCore::compress(cv, block), standard);
     }
 
     #[test]
-    fn compress_output_lives_in_252_bit_subspace() {
-        let block: [u32; 16] = core::array::from_fn(|i| i as u32 + 1);
-        let cv_new = CompressionCore::compress(TEST_CV, block);
-
-        assert_eq!(cv_new[1] & !ODD_LANE_MASK, 0, "cv_new[1] top bit must be 0");
-        assert_eq!(cv_new[3] & !ODD_LANE_MASK, 0, "cv_new[3] top bit must be 0");
-        assert_eq!(cv_new[5] & !ODD_LANE_MASK, 0, "cv_new[5] top bit must be 0");
-        assert_eq!(cv_new[7] & !ODD_LANE_MASK, 0, "cv_new[7] top bit must be 0");
+    fn compress_outputs_canonical_full_field_elements() {
+        let mut saw_high_bit = false;
+        for nonce in 0..64u32 {
+            let block: [u32; 16] = core::array::from_fn(|i| (i as u32 + 1).wrapping_mul(nonce + 1));
+            let cv_new = CompressionCore::compress(TEST_CV, block);
+            for pair in cv_new.as_slice().as_chunks::<2>().0 {
+                let value = pair[0] as u64 + ((pair[1] as u64) << 32);
+                assert!(value < Felt::ORDER_U64);
+                saw_high_bit |= pair[1] & 0x8000_0000 != 0;
+            }
+        }
+        assert!(saw_high_bit, "matrix output must reach the upper half of the field");
     }
 
     #[test]

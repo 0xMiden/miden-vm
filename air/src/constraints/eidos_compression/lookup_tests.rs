@@ -8,13 +8,13 @@ use miden_core::{
 
 use super::{
     algebra::{cv_storage_coefficient, universal_cv_word},
-    constraints_tests::eval_main_row,
+    finalizer::matrix_accumulator_rows,
     layout::*,
     lookup::{
         EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, FOOTER_INPUT_COLUMN, FOOTER_OUTPUT_COLUMN,
         NARROW_BATCH_COLUMNS,
     },
-    model::low_output,
+    model::raw_xof_output,
     narrow::NARROW_SLOTS,
     periodic::{P_IS_AB, P_IS_CD, P_IS_FOOTER, get_periodic_column_values},
     schedule::fused_step_at,
@@ -22,7 +22,7 @@ use super::{
         EidosCompressionLookupAir, EidosCompressionMode, EidosCompressionRow, NarrowLookup,
         NarrowLookupKind, OverlayRelationKind, generate_trace_block_with_cycle_id, lookup_plan,
     },
-    trace::{TraceMode, generate_felt_trace_block_with_cycle_id},
+    trace::TraceMode,
 };
 #[cfg(feature = "std")]
 use crate::lookup::debug::{ValidateLayout, ValidateLookupAir};
@@ -214,17 +214,14 @@ fn add_to_raw_cell(cell: &mut u64, delta: Felt) {
 }
 
 fn compression_link_fields(block: [u32; 16], h: [u32; 8], final_v: [u32; 16]) -> [Felt; 16] {
-    let low = low_output(final_v);
+    let digest = matrix_accumulator_rows(raw_xof_output(final_v, h))[3];
     core::array::from_fn(|idx| match idx {
         0..=7 => pack_pair(block[2 * idx], block[2 * idx + 1]),
         8..=11 => {
             let pair = idx - 8;
             pack_pair(h[2 * pair], h[2 * pair + 1])
         },
-        12..=15 => {
-            let pair = idx - 12;
-            pack_pair(low[2 * pair], low[2 * pair + 1] & 0x7fff_ffff)
-        },
+        12..=15 => digest[idx - 12],
         _ => unreachable!(),
     })
 }
@@ -261,11 +258,11 @@ fn lookup_plan_and_column_liveness_match_the_20_column_design() {
     assert!(later.overlay_relations.is_empty());
 
     let footer0 = lookup_plan(FOOTER_START, EidosCompressionMode::Compression);
-    assert_eq!(footer0.narrow.len(), 29);
+    assert_eq!(footer0.narrow.len(), 28);
     assert!(footer0.overlay_relations.is_empty());
 
     let footer3 = lookup_plan(BLOCK_PERIOD - 1, EidosCompressionMode::Compression);
-    assert_eq!(footer3.narrow.len(), 29);
+    assert_eq!(footer3.narrow.len(), 28);
     assert_eq!(footer3.overlay_relations.len(), 2);
     assert_eq!(footer3.overlay_relations[0].kind, OverlayRelationKind::FullCv);
     assert_eq!(footer3.overlay_relations[0].sign, 1);
@@ -387,52 +384,6 @@ fn compact_messages_and_derived_rotation_encode_expected_relations() {
             );
         }
     }
-}
-
-#[test]
-fn top_bit_overlay_lookup_rejects_the_other_locally_valid_branch() {
-    let mut trace =
-        generate_felt_trace_block_with_cycle_id(test_block(), test_h(), 0, TraceMode::Compression);
-    let honest = RowMajorMatrix::new(trace.rows.iter().flatten().copied().collect(), NUM_COLS);
-
-    let footer = BLOCK_PERIOD - 1;
-    let row = &mut trace.rows[footer];
-    let a = row[F_TOP_BIT_SLOT_BASE_COL];
-    let mask = Felt::from_u8(F_TOP_BIT_MASK);
-    let valid_h = Felt::from_u8((a.as_canonical_u64() as u8) & F_TOP_BIT_MASK);
-    let wrong_h = mask - valid_h;
-    let wrong_x = a + mask - wrong_h.double();
-    row[F_TOP_BIT_SLOT_BASE_COL + 2] =
-        eidos_lookup::denormalize(F_TOP_BIT_LOOKUP_BYTE_POSITION, wrong_x);
-
-    // Keep the packed digest and its overlapping atomic-CV coordinate unchanged while selecting
-    // the other locally valid boolean branch.
-    let digest_delta = -Felt::from_u64(1 << 56) * (wrong_h - valid_h);
-    row[footer_interface_tail_col(FOOTER_ROWS - 1)] += digest_delta;
-    row[F_CV_STORAGE_COLS[0]] -= digest_delta / Felt::from_u16(1 << 8);
-
-    for row in 0..BLOCK_PERIOD {
-        assert!(
-            eval_main_row(&trace.rows, row).iter().all(|&value| value == Felt::ZERO),
-            "locally valid top-bit branch failed on row {row}",
-        );
-    }
-
-    let forged = RowMajorMatrix::new(trace.rows.iter().flatten().copied().collect(), NUM_COLS);
-    let honest_fractions = lookup_fractions(&honest);
-    let forged_fractions = lookup_fractions(&forged);
-    let challenges = lookup_challenges();
-    let correct_x = Felt::from_u8((a.as_canonical_u64() as u8) ^ F_TOP_BIT_MASK);
-    let encode = |x| challenges.encode(BusId::And8Lookup as usize, [a, mask, x]);
-    let column = F_TOP_BIT_NARROW_SLOT / 2;
-
-    assert!(
-        fractions_at(&honest_fractions, footer, column).contains(&(-Felt::ONE, encode(correct_x))),
-    );
-    assert!(
-        fractions_at(&forged_fractions, footer, column).contains(&(-Felt::ONE, encode(wrong_x))),
-    );
-    assert_ne!(lookup_sigma(&honest), lookup_sigma(&forged));
 }
 
 #[test]
@@ -606,8 +557,8 @@ fn derived_rotation_cannot_cancel_a_mutated_stored_contribution() {
     let mutated = lookup_fractions(&felt_matrix_from_rows(&rows));
     assert_eq!(fractions_at(&mutated, 0, 31 / 2), fractions_at(&honest_fractions, 0, 31 / 2));
     assert_ne!(
-        fractions_at(&mutated, 0, F_TOP_BIT_NARROW_SLOT / 2),
-        fractions_at(&honest_fractions, 0, F_TOP_BIT_NARROW_SLOT / 2),
+        fractions_at(&mutated, 0, G_BD_ROT_SLOT_BASE_COL / BYTE_SLOT_WIDTH / 2),
+        fractions_at(&honest_fractions, 0, G_BD_ROT_SLOT_BASE_COL / BYTE_SLOT_WIDTH / 2),
     );
     assert_ne!(lookup_sigma(&felt_matrix_from_rows(&rows)), honest_sigma);
 }
@@ -635,7 +586,7 @@ fn dedicated_rotation_bus_encodes_the_normalized_physical_contribution() {
         [a, b, eidos_lookup::normalize(byte, wrong_physical)],
     );
 
-    let narrow_slot = F_TOP_BIT_NARROW_SLOT + byte;
+    let narrow_slot = G_BD_ROT_SLOT_BASE_COL / BYTE_SLOT_WIDTH + byte;
     assert!(fractions_at(&fractions, row, narrow_slot / 2).contains(&(-Felt::ONE, expected)));
     assert_ne!(
         lookup_sigma(&felt_matrix_from_rows(&honest.rows)),

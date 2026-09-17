@@ -27,8 +27,8 @@ use crate::{Felt, Word, field::BasedVectorSpace};
 /// their `Felt` counterparts. Other `u64` values are split into their two limbs without reduction;
 /// this deterministic extension is not a separate registered message domain.
 ///
-/// Digests occupy a 252-bit packed subspace and therefore provide at most 126 bits of generic
-/// collision resistance.
+/// The four-field-element digest provides approximately 128 bits of generic collision resistance
+/// when Eidos is modeled as a random oracle.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Eidos;
 
@@ -37,8 +37,8 @@ impl Eidos {
     ///
     /// This is the raw compression layer underlying the Eidos hash construction. It does not add
     /// domain separation, length binding, padding, or any other message framing. The input CV may
-    /// contain arbitrary canonical field elements; only the output CV is restricted to Eidos's
-    /// 252-bit packed subspace.
+    /// contain arbitrary canonical field elements. Compression returns four canonical Goldilocks
+    /// field elements.
     #[inline]
     pub fn compress(cv: Word, block: [Felt; BLOCK_LEN]) -> Word {
         compression::compress_felt_block(cv, block)
@@ -91,8 +91,8 @@ impl Eidos {
     /// Construct an initial chaining value from a registered domain tag and three parameters.
     ///
     /// The domain defines the construction and the meaning of its parameters. Every supplied
-    /// value occupies one complete low u32 lane; the corresponding high lane is a fixed masked IV
-    /// word.
+    /// value occupies one complete low `u32` lane; the corresponding high lane is a fixed BLAKE3
+    /// IV word.
     #[inline]
     pub fn init_chaining_word_with_params<D: EidosDomain>(_: D, params: [u32; 3]) -> Word {
         EidosFrame::new(D::TAG, params).initial_chaining_word()

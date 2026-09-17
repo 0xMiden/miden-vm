@@ -60,9 +60,9 @@ pub const fn deferred_chunks_frame(n_chunks: u32) -> EidosFrame {
 /// `DEFERRED_AND_FRAME.initial_chaining_word()`. It is spelled out
 /// so the consensus-critical value remains a `const` usable by AIR definitions.
 pub const DEFERRED_AND_INIT_CV: Word = Word::new([
-    Felt::new_unchecked(4280581857109607169),
-    Felt::new_unchecked(2688637132020383744),
-    Felt::new_unchecked(1947077364412317696),
+    Felt::new_unchecked(13503953893964382977),
+    Felt::new_unchecked(11912009168875159552),
+    Felt::new_unchecked(11170449401267093504),
     Felt::new_unchecked(6620516959492505600),
 ]);
 
