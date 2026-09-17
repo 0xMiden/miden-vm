@@ -37,7 +37,7 @@ fn security_parameters(
 }
 
 /// Checks the lookup slack bound at every coefficient and every remainder where either the exact
-/// or bounded fractional-bit decision can change.
+/// or bounded borrow decision can change.
 #[test]
 fn lookup_slack_bound_is_conservative_at_every_transition() {
     use miden_precompiles_air::security as pvm;
@@ -53,48 +53,33 @@ fn lookup_slack_bound_is_conservative_at_every_transition() {
     };
 
     for a in 2..=COEFFICIENT_MAX {
-        let (q, g, bounded_slack) = bound(a);
+        let (q, _, bounded_slack) = bound(a);
         let exact_slack = q * security::FIXED_POINT_ONE - fixed::ceil_log2(a);
 
         assert!(
             bounded_slack <= exact_slack,
             "slack bound exceeds the exact slack at {a}: {bounded_slack} > {exact_slack}"
         );
-        assert_eq!(exact_slack == 0, g == 0, "zero slack must coincide with a power of two at {a}");
 
         let remainders = [
             0,
             65_535,
-            bounded_slack.saturating_sub(2),
             bounded_slack.saturating_sub(1),
             bounded_slack,
             bounded_slack + 1,
-            bounded_slack + 2,
-            exact_slack.saturating_sub(2),
             exact_slack.saturating_sub(1),
             exact_slack,
             exact_slack + 1,
-            exact_slack + 2,
         ];
         for r_f in remainders.into_iter().filter(|r_f| *r_f <= 65_535) {
-            let exact_bit: i64 = if exact_slack >= r_f + 2 {
-                1
-            } else if exact_slack == 0 && r_f == 65_535 {
-                -1
-            } else {
-                0
-            };
-            let bounded_bit: i64 = if bounded_slack >= r_f + 2 {
-                1
-            } else if g == 0 && r_f == 65_535 {
-                -1
-            } else {
-                0
-            };
+            // The field size is a whole number of bits, so the Q16 remainder is `slack - r_f`
+            // and a negative remainder borrows one bit.
+            let exact_borrow = exact_slack < r_f;
+            let bounded_borrow = bounded_slack < r_f;
             assert!(
-                bounded_bit <= exact_bit && exact_bit - bounded_bit <= 1,
-                "fractional-bit decision out of band at A = {a}, remainder {r_f}: bounded \
-                 {bounded_bit} vs exact {exact_bit}"
+                bounded_borrow || !exact_borrow,
+                "borrow decision overstates the level at A = {a}, remainder {r_f}: bounded \
+                 {bounded_borrow} vs exact {exact_borrow}"
             );
         }
     }
@@ -112,7 +97,7 @@ fn lookup_slack_bound_is_conservative_at_every_transition() {
                 .div_ceil(1 << log_height);
             let remainder = correction % security::FIXED_POINT_ONE;
             assert!(
-                mvm_bound >= remainder + 2,
+                mvm_bound >= remainder,
                 "MVM lookup decision is inconclusive at height {log_height} with \
                  {num_kernel_procedures} kernel procedures"
             );
@@ -128,7 +113,7 @@ fn lookup_slack_bound_is_conservative_at_every_transition() {
             .div_ceil(u64::from(pvm_shape.fractions_per_row))
             .div_ceil(1 << log_height);
         assert_eq!(correction, 1, "PVM correction moved at height {log_height}");
-        assert!(pvm_bound >= correction + 2);
+        assert!(pvm_bound >= correction);
     }
 
     // The largest lookup coefficient and boundary correction can occur together when the
@@ -142,7 +127,7 @@ fn lookup_slack_bound_is_conservative_at_every_transition() {
         minimum_base = minimum_base.min(base);
         assert!(base >= 2, "lookup base falls below two at height {log_height}");
     }
-    assert_eq!(minimum_base, 13);
+    assert_eq!(minimum_base, 14);
 }
 
 /// Checks that the five terms omitted by the MASM estimator remain above the lookup term.
