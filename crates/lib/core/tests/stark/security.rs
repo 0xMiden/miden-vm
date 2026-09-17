@@ -333,7 +333,7 @@ fn common_security_estimator_wires_each_computed_round() {
     };
 
     let cases = [
-        // floor(7 * 193381 / 65536) + 0 = 20.
+        // floor(7 * 193382 / 65536) + 0 = 20.
         (
             "query",
             SecurityDescriptor {
@@ -343,9 +343,10 @@ fn common_security_estimator_wires_each_computed_round() {
             },
             20,
         ),
-        // A = 257 (the envelope floor): base = 127 - 9 - 6 = 112 and slack recovery fires. The
-        // omitted rounds are at their least secure accepted values: composition and DEEP are 114
-        // bits, OOD is 118 bits, and folding is 116 bits. Lookup remains the minimum at 113.
+        // A = 257 (the envelope floor): base = 128 - 9 - 6 = 113 and the slack covers the
+        // remainder. The omitted rounds are at their least secure accepted values: composition and
+        // DEEP are 115 bits, OOD is 118 bits, and folding is 116 bits. Lookup remains the minimum
+        // at 113.
         (
             "dominated-round envelope corner",
             SecurityDescriptor {
@@ -359,9 +360,9 @@ fn common_security_estimator_wires_each_computed_round() {
             113,
         ),
         // The MVM lookup shape at height 22: A = 504, b = 1477 + 11 = 1488, R = 1, so the slack
-        // bound recovers the fractional bit exactly: 127 - 9 - 22 - 0 + 1 = 97.
+        // bound covers the remainder and nothing is borrowed: 128 - 9 - 22 - 0 = 97.
         (
-            "lookup with slack recovery",
+            "lookup with a covered remainder",
             SecurityDescriptor {
                 log_max_height: 22,
                 max_message_width: 16,
@@ -373,10 +374,10 @@ fn common_security_estimator_wires_each_computed_round() {
         ),
         // A synthetic envelope corner on the MVM lookup shape (deployed boundary terms reach
         // only 258): R = 216_110 = 3 * 65536 + 19_502, so r_w = 3 and the 1,488-unit slack
-        // cannot cover the remainder: 127 - 9 - 6 - 3 + 0. The recovery is not universal on
-        // this shape; it depends on the remainder.
+        // cannot cover the remainder: 128 - 9 - 6 - 3 - 1. Whether this shape borrows depends
+        // on the remainder.
         (
-            "lookup with whole-bit correction and no recovery",
+            "lookup with whole-bit correction and a borrow",
             SecurityDescriptor {
                 max_message_width: 16,
                 lookup_fractions_per_row: 28,
@@ -387,7 +388,7 @@ fn common_security_estimator_wires_each_computed_round() {
         ),
         // The largest correction allowed by the envelope, combined with its largest coefficient:
         // A = 65_536 and R = 6_051_072 = 92 * 65_536 + 21_760 at height 6. Since A is a power of
-        // two, no slack is recovered: 127 - 16 - 6 - 92.
+        // two, the slack is zero and the remainder borrows: 128 - 16 - 6 - 92 - 1.
         (
             "lookup at the correction bound",
             SecurityDescriptor {
@@ -415,7 +416,7 @@ fn common_security_estimator_wires_each_computed_round() {
 /// Checks the conservative lookup approximation on shapes not produced by either verifier.
 ///
 /// For some synthetic shapes, the lower bound on the logarithmic slack is too small to determine
-/// whether the native calculation adds a fractional bit. The first three cases pin examples where
+/// whether the native calculation borrows a bit. The first three cases pin examples where
 /// MASM returns exactly one bit less. The following grid checks that MASM never returns more than
 /// the native estimator and never differs by more than one bit. Each grid point is checked against
 /// the estimator's `base >= 2` requirement before execution. Unsupported inputs are tested
@@ -461,7 +462,7 @@ fn slack_bound_never_overstates_and_loses_at_most_one_bit() {
                 let q = u64::from(64 - (coefficient - 1).leading_zeros());
                 let r_w = correction_fp(boundary, frac, h) >> 16;
                 assert!(
-                    127 - q - h >= r_w + 2,
+                    128 - q - h >= r_w + 2,
                     "grid design error: h={h} width={width} frac={frac} boundary={boundary} is \
                      outside the estimator envelope"
                 );
