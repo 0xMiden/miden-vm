@@ -404,48 +404,24 @@ mod tests {
 
     #[test]
     fn prove_precompiles_applies_the_configured_memory_budget() {
-        let witness = trivial_precompile_witness();
-
         // A 1-byte budget must reject even the minimal chiplet trace shapes, and the returned
-        // error carries the exact modelled peak alongside the configured budget.
+        // error carries the configured budget. Exact-boundary behavior is covered by
+        // `miden-precompiles-prover`.
         let err = Prover::new()
             .with_max_precompile_prover_memory_bytes(1)
-            .prove_precompiles(vec![witness.clone()])
+            .prove_precompiles(vec![trivial_precompile_witness()])
             .expect_err("a 1-byte budget must reject even the minimal chiplet trace shapes");
-        let ProverError::PrecompileProofGeneration(
-            miden_precompiles_prover::PrecompileProvingError::MemoryBudgetExceeded {
-                estimated_bytes,
-                budget_bytes: 1,
-            },
-        ) = err
-        else {
-            panic!("expected MemoryBudgetExceeded {{ budget_bytes: 1, .. }}, got: {err:?}");
-        };
-
-        // A budget equal to the exact modelled peak succeeds.
-        Prover::new()
-            .with_max_precompile_prover_memory_bytes(estimated_bytes)
-            .prove_precompiles(vec![witness.clone()])
-            .expect("a budget equal to the exact modelled peak must succeed");
-
-        // A budget one byte under the exact modelled peak fails with the same typed error.
-        let err = Prover::new()
-            .with_max_precompile_prover_memory_bytes(estimated_bytes - 1)
-            .prove_precompiles(vec![witness])
-            .expect_err("a budget one byte under the exact modelled peak must fail");
         assert!(
             matches!(
                 err,
                 ProverError::PrecompileProofGeneration(
                     miden_precompiles_prover::PrecompileProvingError::MemoryBudgetExceeded {
-                        estimated_bytes: e,
-                        budget_bytes: b,
+                        budget_bytes: 1,
+                        ..
                     }
-                ) if e == estimated_bytes && b == estimated_bytes - 1
+                )
             ),
-            "expected MemoryBudgetExceeded {{ estimated_bytes: {estimated_bytes}, budget_bytes: {} }}, \
-             got: {err:?}",
-            estimated_bytes - 1
+            "expected MemoryBudgetExceeded {{ budget_bytes: 1, .. }}, got: {err:?}"
         );
     }
 }
