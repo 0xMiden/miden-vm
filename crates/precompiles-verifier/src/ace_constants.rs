@@ -22,26 +22,26 @@ pub(crate) const GENERATED_BY: &str = "cargo run -p miden-precompiles-verifier -
 /// `ChipletMultiAir::eval_external`. Changes to those semantics require a protocol-version bump.
 /// The Miden VM and PVM use distinct protocol versions.
 #[cfg(any(test, feature = "constants-tools"))]
-pub(crate) const PVM_PROTOCOL_ID: u64 = 2;
+pub(crate) const PVM_PROTOCOL_ID: u64 = 3;
 
 /// Relation digest binding the accepted circuit into the Fiat-Shamir transcript
 /// (raw canonical u64 limbs): `Eidos(PVM_PROTOCOL_ID || PVM_ACE_CIRCUIT_DIGEST)`.
 #[cfg(any(test, feature = "constants-tools", feature = "std"))]
 pub const PVM_RELATION_DIGEST: [u64; 4] = [
-    8996100461975768507,
-    7398559924011247406,
-    4343325592718847901,
-    2953431145764568487,
+    3572755875051429858,
+    5840077752273017891,
+    2756106967724707343,
+    1419975416171868023,
 ];
 
 /// Eidos digest of the order-invariant PVM ACE circuit's instruction stream (raw canonical u64
 /// limbs).
 #[cfg(any(test, feature = "constants-tools"))]
 pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [
-    3433779400624465363,
-    1490476891390972031,
-    8681615346458055185,
-    6971025809828159986,
+    4011966172618855956,
+    7434159599062106470,
+    3403715354608181837,
+    1919555920767830404,
 ];
 
 /// Commitment to the preprocessed (setup) trace tree under the Eidos config (raw canonical
@@ -58,7 +58,7 @@ pub const PVM_PREPROCESSED_COMMITMENT: [u64; 4] = [
 /// Encoded circuit shape: (READ variables, evaluation gates, stream length in felts). An in-VM
 /// verifier needs these as compile-time constants to size its reads and its ACE evaluation.
 #[cfg(any(test, feature = "constants-tools"))]
-pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (1942, 8540, 9080);
+pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (2432, 11248, 12344);
 
 /// Computes the relation digest binding an ACE circuit commitment into the Fiat-Shamir transcript.
 #[cfg(any(test, feature = "constants-tools"))]

@@ -9,8 +9,8 @@ use miden_core::{
 };
 use miden_crypto::hash::eidos::EidosDomain;
 use miden_precompiles::{
-    CurveId, CurveNodeRef, CurvePrecompile, HashAssertNode, Keccak256Precompile, UintDomain,
-    UintNodeRef, UintPrecompile, chunks_to_bytes_exact, n_chunks,
+    CurveId, CurveNodeRef, CurvePrecompile, HashAssertNode, Keccak256Precompile, Sha512Precompile,
+    UintDomain, UintNodeRef, UintPrecompile, chunks_to_bytes_exact, n_chunks,
 };
 
 use crate::{
@@ -158,6 +158,7 @@ enum Operation {
     Zero,
     And(Digest, Digest),
     Keccak(HashAssertNode),
+    Sha512(HashAssertNode),
     UintEq(Digest, Digest),
     EcEq(Digest, Digest),
     Uint {
@@ -173,8 +174,8 @@ enum Operation {
 
 impl<'a> DeferredSessionBuilder<'a> {
     /// Lower each reachable structural node once. Children are scheduled in the decoder's
-    /// semantic order; a cache hit skips their entire subtree. Keccak chunk payloads are opaque
-    /// to this traversal and are decoded by the assertion lowerer.
+    /// semantic order; a cache hit skips their entire subtree. Hash-assertion chunk payloads are
+    /// opaque to this traversal and are decoded by the assertion lowerer.
     fn translate(&mut self, root: Digest) -> Result<Truthy, DeferredSessionError> {
         enum Step {
             Visit(Digest, ValueKind),
@@ -262,6 +263,11 @@ impl<'a> DeferredSessionBuilder<'a> {
                 {
                     return Ok(Operation::Keccak(assertion));
                 }
+                if let Some(assertion) = Sha512Precompile::decode_assert_node(self.node(digest)?)
+                    .map_err(|_| DeferredSessionError::MalformedNode(digest))?
+                {
+                    return Ok(Operation::Sha512(assertion));
+                }
                 match UintPrecompile::decode_node(self.node(digest)?)
                     .map_err(|_| DeferredSessionError::MalformedNode(digest))?
                 {
@@ -323,6 +329,9 @@ impl<'a> DeferredSessionBuilder<'a> {
             },
             Operation::Keccak(assertion) => {
                 Translated::Truthy(self.translate_keccak_assertion(digest, assertion)?)
+            },
+            Operation::Sha512(assertion) => {
+                Translated::Truthy(self.translate_sha512_assertion(digest, assertion)?)
             },
             Operation::UintEq(lhs, rhs) => {
                 let (lhs, rhs) = (self.uint(lhs)?, self.uint(rhs)?);
@@ -433,6 +442,29 @@ impl<'a> DeferredSessionBuilder<'a> {
         let actual = actual.to_u32s().into_iter().flat_map(u32::to_le_bytes).collect::<Vec<_>>();
         debug_assert_eq!(expected, actual);
         debug_assert_eq!(claim.hash(), EidosDigest::from(digest));
+        Ok(claim)
+    }
+
+    fn translate_sha512_assertion(
+        &mut self,
+        digest: Digest,
+        assertion: HashAssertNode,
+    ) -> Result<Truthy, DeferredSessionError> {
+        let n_bytes = usize::try_from(assertion.n_bytes)
+            .map_err(|_| DeferredSessionError::MalformedNode(digest))?;
+        let input = self.decode_chunks_to_bytes(digest, assertion.preimage_digest, n_bytes)?;
+        let expected = self.decode_chunks_to_bytes(
+            digest,
+            assertion.expected_digest,
+            Sha512Precompile::DIGEST_BYTES,
+        )?;
+        let (actual, claim) = self.session.sha512(&input);
+        if expected != actual || claim.hash() != EidosDigest::from(digest) {
+            return Err(DeferredSessionError::RootMismatch {
+                expected: EidosDigest::from(digest),
+                actual: claim.hash(),
+            });
+        }
         Ok(claim)
     }
 

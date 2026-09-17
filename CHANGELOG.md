@@ -5,6 +5,7 @@
 #### Features
 
 - Added `Prover::prove_vm_witness()` so callers can prove a split `VmWitness` without deferred precompile work ([#3837](https://github.com/0xMiden/miden-vm/pull/3837)).
+- [BREAKING] Added proven SHA-512 hashing and Ed25519 signature verification to the precompile VM and core library ([#3867](https://github.com/0xMiden/miden-vm/issues/3867)).
 - [BREAKING] Added Eidos hashing with typed domain separation, including Eidos-backed IES, a counter-mode random coin, and length-bound LMCS implementations, native SIMD acceleration, and batched proof-of-work grinding; existing Poseidon2 variants remain available.
 - [BREAKING] Share one Lagrange basis across periodic columns of a period ([#3847](https://github.com/0xMiden/miden-vm/pull/3847)).
 

@@ -35,10 +35,10 @@ pub const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
 ]);
 /// The recursive precompile verifier root declared by proofs from the current prover.
 pub const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(3881985232165170829),
-    crate::Felt::new_unchecked(765528972951713077),
-    crate::Felt::new_unchecked(6485897407670602413),
-    crate::Felt::new_unchecked(2496707976965615444),
+    crate::Felt::new_unchecked(5197279015254254646),
+    crate::Felt::new_unchecked(4728516070188228214),
+    crate::Felt::new_unchecked(3642301949030399008),
+    crate::Felt::new_unchecked(4500086254449704486),
 ]);
 
 // HASH FUNCTION

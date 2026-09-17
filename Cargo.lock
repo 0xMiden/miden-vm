@@ -2193,6 +2193,7 @@ name = "miden-core-lib"
 version = "0.33.0"
 dependencies = [
  "criterion",
+ "curve25519-dalek",
  "env_logger",
  "fs-err",
  "miden-ace-codegen",
@@ -2310,7 +2311,12 @@ dependencies = [
  "ed25519-dalek",
  "hex",
  "k256",
+ "miden-assembly",
+ "miden-core",
+ "miden-core-lib",
  "miden-crypto",
+ "miden-precompiles",
+ "miden-processor",
  "wycheproof-ng-core",
  "wycheproof-ng-dh",
  "wycheproof-ng-eddsa",
@@ -2530,6 +2536,7 @@ dependencies = [
  "miden-lifted-air",
  "miden-lifted-stark",
  "miden-precompiles",
+ "miden-utils-sync",
  "p3-security",
  "ruint",
 ]

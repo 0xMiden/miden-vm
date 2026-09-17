@@ -1,4 +1,4 @@
-mod helpers;
+pub(crate) mod helpers;
 mod uint_fixtures;
 
 mod curve;
