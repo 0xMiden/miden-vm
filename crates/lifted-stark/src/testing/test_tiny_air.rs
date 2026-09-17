@@ -417,25 +417,27 @@ fn periodic_columns_three_traces() {
 #[test]
 fn block_hashing_preserves_proof_transcript() {
     let mut config = test_config();
-    let statement = tiny_prover_statement(
-        vec![TinyAir::new([4]), TinyAir::new([2])],
-        vec![trace_of_height(64), trace_of_height(8)],
-        vec![Felt::from_u64(START)],
-    )
-    .unwrap();
+    let prover_statement = || {
+        tiny_prover_statement(
+            vec![TinyAir::new([4]), TinyAir::new([2])],
+            vec![trace_of_height(64), trace_of_height(8)],
+            vec![Felt::from_u64(START)],
+        )
+        .unwrap()
+    };
     let prove = |config: &_| {
-        ProverInstance::new(config, &statement, None)
+        ProverInstance::new(config, prover_statement(), None)
             .unwrap()
             .prove(test_challenger())
             .unwrap()
     };
-    let eager = prove(&config);
+    let (eager, _) = prove(&config);
     config.hash_lde_blocks = true;
-    let blocks = prove(&config);
+    let (blocks, statement) = prove(&config);
     assert_eq!(blocks.proof.transcript.as_slices(), eager.proof.transcript.as_slices());
     assert_eq!(blocks.digest, eager.digest);
     config.hash_lde_blocks = false;
-    let digest = VerifierInstance::new(&config, statement.statement(), None)
+    let digest = VerifierInstance::new(&config, &statement, None)
         .unwrap()
         .verify(&blocks.proof, test_challenger())
         .unwrap();
