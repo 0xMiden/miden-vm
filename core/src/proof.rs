@@ -28,17 +28,17 @@ const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
 
 /// The recursive VM verifier root declared by proofs from the current prover.
 pub const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(4864302171741440127),
-    crate::Felt::new_unchecked(114641799177939704),
-    crate::Felt::new_unchecked(4382529662557240053),
-    crate::Felt::new_unchecked(4714568474733121098),
+    crate::Felt::new_unchecked(3_330_269_156_774_475_508),
+    crate::Felt::new_unchecked(784_537_764_631_445_578),
+    crate::Felt::new_unchecked(10_515_496_802_180_945_039),
+    crate::Felt::new_unchecked(11_826_948_721_115_825_706),
 ]);
 /// The recursive precompile verifier root declared by proofs from the current prover.
 pub const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(7738138594446457421),
-    crate::Felt::new_unchecked(6291510471693675510),
-    crate::Felt::new_unchecked(7148095059565652490),
-    crate::Felt::new_unchecked(4193507341579785338),
+    crate::Felt::new_unchecked(16_466_015_239_860_489_345),
+    crate::Felt::new_unchecked(6_704_775_996_407_069_091),
+    crate::Felt::new_unchecked(10_954_801_373_034_377_219),
+    crate::Felt::new_unchecked(17_791_880_867_127_747_806),
 ]);
 
 // HASH FUNCTION
@@ -62,7 +62,7 @@ pub enum HashFunction {
     Poseidon2 = 0x04,
     /// Keccak hash function with 256-bit output.
     Keccak = 0x05,
-    /// Eidos hash function with 252-bit packed output.
+    /// Eidos hash function with a four-element Goldilocks digest.
     Eidos = 0x06,
 }
 
@@ -75,7 +75,7 @@ impl HashFunction {
             HashFunction::Rpx256 => Rpx256::COLLISION_RESISTANCE,
             HashFunction::Poseidon2 => Poseidon2::COLLISION_RESISTANCE,
             HashFunction::Keccak => 128,
-            HashFunction::Eidos => 126,
+            HashFunction::Eidos => 128,
         }
     }
 }

@@ -20,20 +20,11 @@ pub(super) const MERKLE_NODE_INIT_CV: [u32; 8] = init_cv(0, [0; 3]);
 
 /// Construct an Eidos initial chaining value from the BLAKE3 IV layout.
 ///
-/// The tag and three domain-defined parameters occupy the four even u32 lanes. The four
-/// odd lanes are fixed and masked, so the initial CV is already in the same 252-bit subspace as
-/// every Eidos compression output. Each parameter may use its complete u32 lane.
+/// The tag and three domain-defined parameters occupy the four even `u32` lanes. The four odd
+/// lanes are fixed from the BLAKE3 IV. Each low/high pair is a canonical Goldilocks element, and
+/// every parameter may use its complete `u32` lane.
 pub(super) const fn init_cv(tag: u32, params: [u32; 3]) -> [u32; 8] {
-    [
-        tag,
-        IV[1] & encoding::ODD_LANE_MASK,
-        params[0],
-        IV[3] & encoding::ODD_LANE_MASK,
-        params[1],
-        IV[5] & encoding::ODD_LANE_MASK,
-        params[2],
-        IV[7] & encoding::ODD_LANE_MASK,
-    ]
+    [tag, IV[1], params[0], IV[3], params[1], IV[5], params[2], IV[7]]
 }
 
 #[inline]
@@ -112,13 +103,13 @@ mod tests {
         for (tag, params) in [(0, [0, 0, 0]), (u32::MAX, [u32::MAX; 3]), (7, [42, 11, 9])] {
             let cv = init_cv(tag, params);
             assert_eq!(cv[0], tag);
-            assert_eq!(cv[1], IV[1] & encoding::ODD_LANE_MASK);
+            assert_eq!(cv[1], IV[1]);
             assert_eq!(cv[2], params[0]);
-            assert_eq!(cv[3], IV[3] & encoding::ODD_LANE_MASK);
+            assert_eq!(cv[3], IV[3]);
             assert_eq!(cv[4], params[1]);
-            assert_eq!(cv[5], IV[5] & encoding::ODD_LANE_MASK);
+            assert_eq!(cv[5], IV[5]);
             assert_eq!(cv[6], params[2]);
-            assert_eq!(cv[7], IV[7] & encoding::ODD_LANE_MASK);
+            assert_eq!(cv[7], IV[7]);
         }
     }
 

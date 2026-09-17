@@ -5,12 +5,12 @@ use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder, WindowAccess};
 
 use super::{
     algebra::{pack_pair, pack_u32_le, sum_input_b, universal_cv_word, xor_from_and},
+    finalizer::matrix_partial,
     layout::*,
     lookup::{FOOTER_INPUT_COLUMN, FOOTER_OUTPUT_COLUMN},
     schedule::{EIDOS_COMPRESSION_IV, G_IDX_COL, G_IDX_DIAG, LaneMap},
     selectors::EidosCompressionSelectors,
 };
-use crate::constraints::and8_lookup::eidos as eidos_lookup;
 
 /// Enforces all constraints which are active on the 28 fused Eidos compression rows of each cycle.
 pub fn enforce_fused_rows<AB>(
@@ -119,7 +119,7 @@ pub(crate) fn enforce_footer_rows<AB>(
         let is_footer = selectors.is_footer();
         let words = footer_words::<AB>(local);
 
-        enforce_footer_word_bindings::<AB>(builder, local, is_footer.clone(), &words);
+        enforce_footer_word_bindings::<AB>(builder, is_footer.clone(), &words);
 
         let mode = AB::Expr::from(local[F_MODE_COL]);
         let compression_multiplicity = AB::Expr::from(local[F_COMPRESSION_MULTIPLICITY_COL]);
@@ -127,10 +127,16 @@ pub(crate) fn enforce_footer_rows<AB>(
         builder.when(is_footer.clone()).assert_zero(mode.clone() * inactive);
         builder.when(is_footer.clone()).assert_zero(mode * compression_multiplicity);
         enforce_footer_payload::<AB>(builder, local, is_footer, &words);
+        enforce_matrix_accumulator_initialization(
+            builder,
+            local,
+            selectors,
+            AB::Expr::ONE - AB::Expr::from(local[F_MODE_COL]),
+            &words,
+        );
 
         for footer in 0..FOOTER_ROWS {
             enforce_footer_row_inputs::<AB>(builder, local, selectors, footer, &words);
-            enforce_mvm_footer_output::<AB>(builder, local, selectors, footer, &words);
         }
 
         for idx in 1..4 {
@@ -144,6 +150,14 @@ pub(crate) fn enforce_footer_rows<AB>(
     for footer in 0..FOOTER_ROWS - 1 {
         let gate = selectors.is_footer_row(footer);
         enforce_footer_transition::<AB>(builder, local, next, gate.clone(), footer);
+        enforce_matrix_accumulator_transition(
+            builder,
+            local,
+            next,
+            gate.clone(),
+            AB::Expr::ONE - AB::Expr::from(local[F_MODE_COL]),
+            footer,
+        );
 
         builder
             .when(gate.clone())
@@ -152,6 +166,11 @@ pub(crate) fn enforce_footer_rows<AB>(
             AB::Expr::from(local[F_COMPRESSION_MULTIPLICITY_COL])
                 - AB::Expr::from(next[F_COMPRESSION_MULTIPLICITY_COL]),
         );
+        // In AEAD mode the first interface cell holds the requesting clock instead of a
+        // finalizer accumulator. It keys the output-pair lookups on all four footer rows.
+        builder
+            .when(gate.clone() * AB::Expr::from(local[F_MODE_COL]))
+            .assert_eq(AB::Expr::from(local[F_CLK_COL]), AB::Expr::from(next[F_CLK_COL]));
         enforce_footer_cycle_id_transition::<AB>(builder, local, next, gate);
     }
 
@@ -174,17 +193,25 @@ pub(crate) fn enforce_common_footer_rows<AB>(
 
     let is_footer = selectors.is_footer();
     let words = footer_words::<AB>(local);
-    enforce_footer_word_bindings::<AB>(builder, local, is_footer.clone(), &words);
+    enforce_footer_word_bindings::<AB>(builder, is_footer.clone(), &words);
     enforce_footer_payload::<AB>(builder, local, is_footer, &words);
+    enforce_matrix_accumulator_initialization(builder, local, selectors, AB::Expr::ONE, &words);
 
     for footer in 0..FOOTER_ROWS {
         enforce_footer_row_inputs::<AB>(builder, local, selectors, footer, &words);
-        enforce_mvm_footer_output::<AB>(builder, local, selectors, footer, &words);
     }
 
     for footer in 0..FOOTER_ROWS - 1 {
         let gate = selectors.is_footer_row(footer);
         enforce_footer_transition::<AB>(builder, local, next, gate.clone(), footer);
+        enforce_matrix_accumulator_transition(
+            builder,
+            local,
+            next,
+            gate.clone(),
+            AB::Expr::ONE,
+            footer,
+        );
         enforce_footer_cycle_id_transition::<AB>(builder, local, next, gate);
     }
 
@@ -236,7 +263,6 @@ pub fn enforce_footer_bridge<AB>(
 
 pub fn enforce_footer_word_bindings<AB>(
     builder: &mut AB,
-    local: &[AB::Var],
     is_footer: AB::Expr,
     words: &FooterWords<AB::Expr>,
 ) where
@@ -246,15 +272,8 @@ pub fn enforce_footer_word_bindings<AB>(
         .when(is_footer.clone())
         .assert_zero(words.high_even_duplicate.clone() - words.v_high_even.clone());
     builder
-        .when(is_footer.clone())
+        .when(is_footer)
         .assert_zero(words.high_odd_duplicate.clone() - words.v_high_odd.clone());
-    builder
-        .when(is_footer.clone())
-        .assert_zero(AB::Expr::from(local[F_TOP_BIT_SLOT_BASE_COL]) - words.out_odd_byte3.clone());
-    builder.when(is_footer).assert_zero(
-        AB::Expr::from(local[F_TOP_BIT_SLOT_BASE_COL + 1])
-            - AB::Expr::from_u64(F_TOP_BIT_MASK as u64),
-    );
 }
 
 pub fn enforce_footer_payload<AB>(
@@ -265,11 +284,6 @@ pub fn enforce_footer_payload<AB>(
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    let top_bit = footer_top_bit::<AB>(local);
-    builder
-        .when(is_footer.clone())
-        .assert_zero(top_bit.clone() * (top_bit - AB::Expr::from_u64(F_TOP_BIT_MASK as u64)));
-
     for word_slot in 0..F_MSG_WORD_SLOTS {
         let word = AB::Expr::from(local[footer_msg_word_col(word_slot)]);
         let lo = AB::Expr::from(local[footer_range_slot_col(2 * word_slot, 0)]);
@@ -343,12 +357,6 @@ pub fn enforce_footer_transition<AB>(
         builder
             .when(gate.clone())
             .assert_zero(cv_word::<AB>(local, idx) - cv_word::<AB>(next, idx));
-    }
-    for idx in 0..=footer {
-        builder.when(gate.clone()).assert_eq(
-            AB::Expr::from(local[footer_output_col(idx)]),
-            AB::Expr::from(next[footer_output_col(idx)]),
-        );
     }
     for (idx, expected) in consumed.into_iter().enumerate() {
         builder
@@ -471,29 +479,46 @@ pub fn enforce_footer_row_inputs<AB>(
         .assert_zero(cv_word::<AB>(local, 2 * footer + 1) - words.h_odd.clone());
 }
 
-fn enforce_mvm_footer_output<AB>(
+pub fn enforce_matrix_accumulator_initialization<AB>(
     builder: &mut AB,
     local: &[AB::Var],
     selectors: &EidosCompressionSelectors<AB::Expr>,
-    footer: usize,
+    active: AB::Expr,
     words: &FooterWords<AB::Expr>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    let gate = selectors.is_footer_row(footer);
-    let packed_output = packed_footer_output::<AB>(local, words);
-    builder
-        .when(gate * (AB::Expr::ONE - AB::Expr::from(local[F_MODE_COL])))
-        .assert_eq(AB::Expr::from(local[footer_interface_tail_col(footer)]), packed_output);
+    let raw_words = words.raw_xof_words();
+    let gate = selectors.is_footer_row(0) * active;
+    for output in 0..4 {
+        builder.when(gate.clone()).assert_eq(
+            AB::Expr::from(local[footer_output_col(output)]),
+            matrix_partial(0, &raw_words, output),
+        );
+    }
 }
 
-pub fn packed_footer_output<AB>(local: &[AB::Var], words: &FooterWords<AB::Expr>) -> AB::Expr
-where
+pub fn enforce_matrix_accumulator_transition<AB>(
+    builder: &mut AB,
+    local: &[AB::Var],
+    next: &[AB::Var],
+    gate: AB::Expr,
+    active: AB::Expr,
+    footer: usize,
+) where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    let top_bit_masked = footer_top_bit::<AB>(local);
-    let masked_odd = words.out_odd.clone() - AB::Expr::from_u64(1 << 24) * top_bit_masked;
-    pack_pair(words.out_even.clone(), masked_odd)
+    debug_assert!(footer < FOOTER_ROWS - 1);
+    let next_words = footer_words::<AB>(next);
+    let raw_words = next_words.raw_xof_words();
+    let gate = gate * active;
+    for output in 0..4 {
+        builder.when(gate.clone()).assert_eq(
+            AB::Expr::from(next[footer_output_col(output)]),
+            AB::Expr::from(local[footer_output_col(output)])
+                + matrix_partial(footer + 1, &raw_words, output),
+        );
+    }
 }
 
 fn enforce_canonical_pair<AB>(
@@ -511,17 +536,6 @@ fn enforce_canonical_pair<AB>(
     builder.assert_zero(h.clone() * inv + z.clone() - AB::Expr::ONE);
     builder.assert_zero(z.clone() * h);
     builder.assert_zero(z * lo);
-}
-
-fn footer_top_bit<AB>(row: &[AB::Var]) -> AB::Expr
-where
-    AB: LiftedAirBuilder<F = Felt>,
-{
-    let a = AB::Expr::from(row[F_TOP_BIT_SLOT_BASE_COL]);
-    let b = AB::Expr::from(row[F_TOP_BIT_SLOT_BASE_COL + 1]);
-    let scaled_x = AB::Expr::from(row[F_TOP_BIT_SLOT_BASE_COL + 2]);
-    let x = eidos_lookup::normalize(F_TOP_BIT_LOOKUP_BYTE_POSITION, scaled_x);
-    (a + b - x).halve()
 }
 
 fn input_word<AB>(row: &[AB::Var], lane_map: &LaneMap, word_idx: usize, d_rotation: u32) -> AB::Expr
@@ -589,20 +603,31 @@ pub struct FooterWords<E> {
     h_odd: E,
     out_even: E,
     out_odd: E,
-    out_odd_byte3: E,
+    high_out_even: E,
+    high_out_odd: E,
+}
+
+impl<E: Clone> FooterWords<E> {
+    fn raw_xof_words(&self) -> [E; 4] {
+        [
+            self.out_even.clone(),
+            self.out_odd.clone(),
+            self.high_out_even.clone(),
+            self.high_out_odd.clone(),
+        ]
+    }
 }
 
 pub fn footer_words<AB>(row: &[AB::Var]) -> FooterWords<AB::Expr>
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    let (v_high_even, h_even, _) = footer_xor_word::<AB>(row, F_HIGH_EVEN_SLOT_BASE);
-    let (v_high_odd, h_odd, _) = footer_xor_word::<AB>(row, F_HIGH_ODD_SLOT_BASE);
+    let (v_high_even, h_even, high_out_even) = footer_xor_word::<AB>(row, F_HIGH_EVEN_SLOT_BASE);
+    let (v_high_odd, h_odd, high_out_odd) = footer_xor_word::<AB>(row, F_HIGH_ODD_SLOT_BASE);
     let (v_low_even, high_even_duplicate, out_even) =
         footer_xor_word::<AB>(row, F_OUTPUT_EVEN_SLOT_BASE);
     let (v_low_odd, high_odd_duplicate, out_odd) =
         footer_xor_word::<AB>(row, F_OUTPUT_ODD_SLOT_BASE);
-    let out_odd_byte3 = footer_xor_byte::<AB>(row, F_OUTPUT_ODD_SLOT_BASE + 3);
 
     FooterWords {
         v_low_even,
@@ -615,7 +640,8 @@ where
         h_odd,
         out_even,
         out_odd,
-        out_odd_byte3,
+        high_out_even,
+        high_out_odd,
     }
 }
 

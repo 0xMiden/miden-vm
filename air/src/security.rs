@@ -65,7 +65,7 @@ pub const COMMITMENT_ALIGNMENT: usize = config::SPONGE_RATE;
 /// This is stored rather than derived during verification. `air_shape_matches_symbolic` checks it
 /// against the shape obtained by symbolically evaluating the AIRs.
 pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 674,
+    num_composed_constraints: 680,
     max_constraint_degree: 9,
     max_combo: NUM_OOD_POINTS,
     num_deep_terms: Some(282),
@@ -175,7 +175,9 @@ pub const BITS_PER_QUERY: u64 =
 
 /// Collision resistance of the canonical Eidos commitment hash, in whole bits.
 ///
-/// Eidos exposes a 252-bit packed digest, so birthday collisions cost 126 bits.
+/// Eidos exposes four Goldilocks elements, so generic birthday collisions cost approximately 128
+/// bits when Eidos is modeled as a random oracle. The estimator applies the exact
+/// field-cardinality cap separately.
 pub const COLLISION_RESISTANCE: u32 = miden_core::proof::HashFunction::Eidos.collision_resistance();
 
 /// Upper bound on every reported level, in fixed point.
@@ -574,9 +576,9 @@ mod tests {
         const FP_SHIFT: u32 = 16;
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
-        const SECURITY_CAP_FP: u64 = 8_257_536;
+        const SECURITY_CAP_FP: u64 = 8_388_606;
         const LOOKUP_BASE_FP: u64 = 7_703_405;
-        const COMPOSITION_TERM_FP: u64 = 7_772_790;
+        const COMPOSITION_TERM_FP: u64 = 7_771_952;
         const OOD_BASE_FP: u64 = 8_161_888;
         const DEEP_BASE_FP: u64 = 7_855_172;
         const FOLDING_BASE_FP: u64 = 8_022_589;
@@ -610,32 +612,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_310_132, 7_772_790, 7_776_509, 8_257_536, 7_891_517, 6_335_399, 8_257_536],
+                [7_310_132, 7_771_952, 7_776_509, 8_388_606, 7_891_517, 6_335_399, 8_388_606],
                 96,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_392_684, 7_772_790, 6_860_180, 8_257_536, 6_974_013, 6_335_399, 8_257_536],
+                [6_392_684, 7_771_952, 6_860_180, 8_388_606, 6_974_013, 6_335_399, 8_388_606],
                 96,
             ),
             (
                 (27, 17, 12, 4, 23),
-                [6_196_076, 7_772_790, 6_663_572, 8_257_536, 6_777_405, 6_335_399, 8_257_536],
+                [6_196_076, 7_771_952, 6_663_572, 8_388_606, 6_777_405, 6_335_399, 8_388_606],
                 94,
             ),
             (
                 (27, 17, 12, 4, 29),
-                [5_802_860, 7_772_790, 6_270_356, 8_257_536, 6_384_189, 6_335_399, 8_257_536],
+                [5_802_860, 7_771_952, 6_270_356, 8_388_606, 6_384_189, 6_335_399, 8_388_606],
                 88,
             ),
             (
                 (7, 0, 0, 0, 20),
-                [6_392_684, 7_772_790, 6_860_180, 7_855_172, 6_711_869, 1_353_667, 8_257_536],
+                [6_392_684, 7_771_952, 6_860_180, 7_855_172, 6_711_869, 1_353_667, 8_388_606],
                 20,
             ),
             (
                 (150, 31, 31, 31, 29),
-                [5_802_860, 7_772_790, 6_270_356, 8_257_536, 8_153_661, 8_257_536, 8_257_536],
+                [5_802_860, 7_771_952, 6_270_356, 8_388_606, 8_153_661, 8_388_606, 8_388_606],
                 88,
             ),
         ];

@@ -43,9 +43,10 @@ The plaintext limbs are XORed with these lanes. One compression encrypts eight f
 ciphertext stores each `u32` result as one field element, so ciphertext has twice as many elements
 as plaintext.
 
-Field addition is not suitable here. A normal Eidos digest element is below `2^63`, so adding it as
-a field mask would expose information about an arbitrary plaintext element. XOR with the raw output
-lanes avoids that bias.
+The stream interface uses the compression core's raw `u32` XOF lanes rather than its field
+outputs. Limbwise XOR is an exact involution on those lanes and encrypts eight field elements
+per compression. Field outputs form Eidos chaining values and digests; the raw lanes supply
+keystream material.
 
 ## Authentication
 
@@ -73,11 +74,10 @@ when authentication fails.
 
 ## Usage limits
 
-A masked Eidos word contains four elements from a set of size `2^63`. Under the Eidos PRF
-assumption, `r` and `s` are independent values from a set `A` of size `2^126` inside the quadratic
-extension field. For each possible valid tag, a nonzero difference polynomial of degree at most
-`D` has at most `D` roots. Counting over the extension field and the `|A|^2` possible pairs `(r, s)`
-gives the conservative bound
+Under the Eidos PRF assumption, the MAC-key word consists of four independent uniform field
+elements, so `r` and `s` are independent uniform values in the quadratic extension field. For each
+possible valid tag, a nonzero difference polynomial of degree at most `D` has at most `D` roots
+among the more than `2^127` elements of that field. This gives the conservative bound
 
 ```text
 Pr[successful forgery] < D / 2^124

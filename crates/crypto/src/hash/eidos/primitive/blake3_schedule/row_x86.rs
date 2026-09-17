@@ -4,8 +4,8 @@
 //! Eidos's fixed parameter-word tail (`v[12..16] = IV[4..8]`, without counter, block length, or
 //! flags) to a `[u32; 16]` message block using four diagonalized 128-bit rows.
 //!
-//! SSE2 is part of the x86_64 architectural baseline, so the plain `compress_raw`/
-//! `compress_raw_xof` below run unconditionally on x86_64 with no runtime feature check.
+//! SSE2 is part of the x86_64 architectural baseline, so the plain `compress_raw_xof` below runs
+//! unconditionally on x86_64 without runtime feature detection.
 //!
 //! The AVX-512F/VL-targeted variant uses the same algorithm with access to XMM16-31, reducing
 //! register spills without changing the logical width. Both variants are emitted from the same
@@ -229,39 +229,6 @@ define_compress_pre!(
     compress_pre_avx512vl
 );
 
-/// Returns the raw eight-word CV fold with Eidos compression's fixed parameter words:
-/// `out[i] = v[i] ^ v[i + 8]`.
-///
-/// Generated twice (see module docs): a plain SSE2 variant needing no runtime feature check, and
-/// an `avx512f,avx512vl`-attributed variant for a wider register file.
-macro_rules! define_compress_raw {
-    ($(#[$attr:meta])* $name:ident, $compress_pre:ident) => {
-        $(#[$attr])*
-        #[inline]
-        pub(super) unsafe fn $name(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 8] {
-            unsafe {
-                let [row0, row1, row2, row3] = $compress_pre(cv, block);
-                let mut out = [0u32; 8];
-                storeu(xor(row0, row2), out.as_mut_ptr());
-                storeu(xor(row1, row3), out.as_mut_ptr().add(4));
-                out
-            }
-        }
-    };
-}
-
-define_compress_raw!(
-    #[cfg(any(feature = "std", not(target_feature = "avx512vl")))]
-    compress_raw_impl,
-    compress_pre
-);
-define_compress_raw!(
-    #[cfg(any(feature = "std", target_feature = "avx512vl"))]
-    #[target_feature(enable = "avx512f,avx512vl")]
-    compress_raw_avx512vl,
-    compress_pre_avx512vl
-);
-
 /// Returns the raw sixteen-word XOF fold with Eidos compression's fixed parameter words:
 /// `out[i] = v[i] ^ v[i + 8]` for `i < 8`, `out[i] = v[i] ^ cv[i - 8]` for `i >= 8`.
 ///
@@ -298,15 +265,6 @@ define_compress_raw_xof!(
     compress_raw_xof_avx512vl,
     compress_pre_avx512vl
 );
-
-/// Returns the raw eight-word CV fold with Eidos compression's fixed parameter words. Needs no
-/// runtime feature check: SSE2 is part of the x86_64 architectural baseline.
-#[cfg(any(feature = "std", not(target_feature = "avx512vl")))]
-#[inline]
-pub(super) fn compress_raw(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 8] {
-    // SAFETY: SSE2 is part of the x86_64 architectural baseline.
-    unsafe { compress_raw_impl(cv, block) }
-}
 
 /// Returns the raw sixteen-word XOF fold with Eidos compression's fixed parameter words. Needs no
 /// runtime feature check: SSE2 is part of the x86_64 architectural baseline.

@@ -25,7 +25,7 @@ const NUM_CLAIM_ELEMENTS = 40
 
 # Initial CV for the claim commitment:
 # init(EXECUTION_CLAIM = 0x01000101, [40, 0, 0]).
-const CLAIM_INIT_CV = [4280581857109606657, 2688637132020383784, 1947077364412317696, 6620516959492505600]
+const CLAIM_INIT_CV = [13503953893964382465, 11912009168875159592, 11170449401267093504, 6620516959492505600]
 
 #! Fetches a claim preimage from the advice map, copies it into memory, and checks its commitment.
 #!
