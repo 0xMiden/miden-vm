@@ -18,6 +18,7 @@ use crate::{Assembler, ast::Module};
 
 mod build_provenance;
 mod dependency_graph;
+mod post_process;
 mod providers;
 mod runtime_dependencies;
 mod target_selector;
@@ -27,6 +28,7 @@ use self::{
     runtime_dependencies::RuntimeDependencies,
 };
 pub use self::{
+    post_process::{PackagePostProcessor, PostProcessContext},
     providers::{MasmSourceProvider, ProjectSourceProvider, TargetAssemblyContext},
     target_selector::ProjectTargetSelector,
 };
@@ -73,6 +75,7 @@ impl Assembler {
             project: package,
             source_provider: SourceProviderRegistry::new(providers),
             dependency_graph,
+            post_processors: Vec::new(),
             store,
         })
     }
@@ -108,6 +111,7 @@ impl Assembler {
             project,
             source_provider: SourceProviderRegistry::new(providers),
             dependency_graph,
+            post_processors: Vec::new(),
             store,
         })
     }
@@ -229,6 +233,8 @@ pub struct ProjectAssembler<'a, S: PackageCache> {
     project: Arc<ProjectPackage>,
     dependency_graph: DependencyGraph,
     source_provider: SourceProviderRegistry,
+    /// Package post-processors, run in registration order. Empty by default.
+    post_processors: Vec<Box<dyn PackagePostProcessor>>,
     store: &'a mut S,
 }
 
@@ -241,6 +247,23 @@ where
         provider: impl ProjectSourceProvider + 'static,
     ) -> &mut Self {
         self.source_provider.with_source_provider(provider);
+        self
+    }
+
+    /// Registers a [`PackagePostProcessor`].
+    ///
+    /// The assembler runs the registered processors in registration order on every package of
+    /// the project under assembly — the selected target and its required library — after the
+    /// source provider's post-processing hook and before the package is frozen and cached.
+    /// Source dependencies are never post-processed: their packages must be complete as their
+    /// own projects build them, and a dependency manifest must not direct work in the
+    /// dependent's build. Manually-provided sources skip all post-assembly hooks, processors
+    /// included. The default processor list is empty.
+    pub fn with_package_post_processor(
+        &mut self,
+        processor: impl PackagePostProcessor + 'static,
+    ) -> &mut Self {
+        self.post_processors.push(Box::new(processor));
         self
     }
 
@@ -491,7 +514,13 @@ where
 
         // We don't apply post-assembly hooks when assembling manually-provided sources
         if !manually_provided_sources {
-            self.apply_post_assembly_hooks(&mut package, project.clone(), target, profile)?;
+            self.apply_post_assembly_hooks(
+                &mut package,
+                project.clone(),
+                target,
+                profile,
+                package_role,
+            )?;
         }
 
         let package = Arc::from(package);
@@ -855,11 +884,24 @@ where
         project: Arc<ProjectPackage>,
         target: &Target,
         profile: &Profile,
+        package_role: InterruptedTargetRole,
     ) -> Result<(), Report> {
         let (provider, context) =
             self.get_provider_and_target_assembly_context(&project, target, profile)?;
 
         provider.post_process_package(package, &context)?;
+
+        // Registered processors run only on the packages of the project under assembly, never on
+        // source dependencies: a dependency package must be complete as its own project builds
+        // it, and a dependency manifest must not direct work in the dependent's build. This also
+        // keeps dependency packages identical whether they are assembled fresh or reused from a
+        // package store, because the store's provenance does not cover processor inputs.
+        if !matches!(package_role, InterruptedTargetRole::Dependency) {
+            let post_context = PostProcessContext { assembly: &context };
+            for processor in &self.post_processors {
+                processor.post_process(package, &post_context)?;
+            }
+        }
 
         Ok(())
     }

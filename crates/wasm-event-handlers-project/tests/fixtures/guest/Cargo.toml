@@ -1,0 +1,15 @@
+[package]
+name = "miden-wasm-handler-project-fixture"
+version = "0.0.0"
+description = "Test fixture: the Rust guest crate a project manifest declares through 'crate ='"
+publish = false
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+miden-event-handler-sdk = { path = "../../../../event-handler-sdk", features = [
+    "bump-allocator",
+    "panic-handler",
+] }
