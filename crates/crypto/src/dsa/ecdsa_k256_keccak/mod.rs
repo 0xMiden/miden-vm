@@ -455,12 +455,9 @@ impl Signature {
 
 impl Serializable for SecretKey {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        let mut buffer = Zeroizing::new(Vec::with_capacity(SECRET_KEY_BYTES));
         let sk_bytes: Zeroizing<[u8; SECRET_KEY_BYTES]> =
             Zeroizing::new(self.inner.to_bytes().into());
-        buffer.extend_from_slice(&sk_bytes[..]);
-
-        target.write_bytes(&buffer);
+        target.write_bytes(&sk_bytes[..]);
     }
 }
 

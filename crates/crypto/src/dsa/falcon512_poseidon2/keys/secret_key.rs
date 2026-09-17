@@ -276,7 +276,7 @@ impl SecretKey {
     ///
     /// [1]: <https://github.com/algorand/falcon/blob/main/falcon-det.pdf>
     fn generate_seed(&self, message: &Word) -> [u8; 32] {
-        let mut buffer = Vec::with_capacity(1 + SK_LEN + Word::SERIALIZED_SIZE);
+        let mut buffer = Zeroizing::new(Vec::with_capacity(1 + SK_LEN + Word::SERIALIZED_SIZE));
         buffer.push(LOG_N);
         // Bind the serialized key so the temporary holding it is wiped, not just `buffer`.
         let sk_bytes = Zeroizing::new(self.to_bytes());
@@ -284,9 +284,6 @@ impl SecretKey {
         buffer.extend_from_slice(&message.to_bytes());
 
         let digest = Blake3_256::hash(&buffer);
-
-        // Zeroize the buffer as it contains secret key material
-        buffer.zeroize();
 
         digest.into()
     }
