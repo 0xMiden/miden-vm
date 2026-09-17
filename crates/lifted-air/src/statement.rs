@@ -301,6 +301,11 @@ where
     pub fn traces(&self) -> &[RowMajorMatrix<F>] {
         &self.traces
     }
+
+    /// Split this value into the verifier-side statement and owned main traces.
+    pub fn into_parts(self) -> (Statement<F, EF, MA>, Vec<RowMajorMatrix<F>>) {
+        (self.statement, self.traces)
+    }
 }
 
 // ============================================================================

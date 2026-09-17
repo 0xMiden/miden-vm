@@ -2,9 +2,18 @@
 
 ## v0.34.0 (Unreleased)
 
+#### Features
+
+- [BREAKING] Add a precompile prover memory budget, with a 64GiB default ([#3799](https://github.com/0xMiden/miden-vm/pull/3799)).
+
 #### Fixes
 
 - Fixed `IntValue::Felt` Display so it prints canonical hex without byte-swapping ([#3808](https://github.com/0xMiden/miden-vm/pull/3808)).
+- [BREAKING] Changed `ProverInstance::new()` to take ownership of `ProverStatement`. `ProverInstance::prove()` now consumes the instance and returns its verifier statement with the proof. The prover can now release the main traces after their final use. This reduced measured peak memory by about 7 percent ([#3833](https://github.com/0xMiden/miden-vm/pull/3833)).
+
+#### Changes
+
+- Reworked the `MastForest` `Arbitrary` impl. `GenerationMode::Executable` (the default) yields forests whose procedure roots run to completion on any operand stack: infallible, stack-balanced basic blocks, binary split and loop conditions, externals that resolve to local roots, and syscalls into a paired `KernelDescriptor` exposed through `forest_kernel_strategy`. `GenerationMode::StructureOnly` keeps the permissive behavior ([#3158](https://github.com/0xMiden/miden-vm/pull/3158)).
 
 #### Changes
 
@@ -18,6 +27,7 @@
 - [BREAKING] Added optional per-STARK minimum conjectured security enforcement with `Verifier::with_min_conjectured_security_level_per_stark`, rejecting insufficient VM security before native deferred-witness evaluation ([#3850](https://github.com/0xMiden/miden-vm/pull/3850)).
 - [BREAKING] Added Eidos hashing with typed domain separation, including Eidos-backed IES, a counter-mode random coin, and length-bound LMCS implementations, native SIMD acceleration, and batched proof-of-work grinding; existing Poseidon2 variants remain available.
 - Added a MASM example that verifies a batch of MVM proofs and settles their deferred work with one PVM proof ([#3823](https://github.com/0xMiden/miden-vm/pull/3823)).
+
 #### Fixes
 
 - Fixed `PartialMmr::from_parts()` and deserialization so they reject tracked leaves without complete authentication paths ([#3809](https://github.com/0xMiden/miden-vm/pull/3809)).
@@ -53,6 +63,8 @@
 - Cached loaded MAST forests in `FastProcessor` so repeated external calls reuse the forest and merge its advice map once ([#3764](https://github.com/0xMiden/miden-vm/pull/3764)).
 - [BREAKING] Removed the trace bus debugger APIs from `miden-air` and the `bus-debugger` feature from `miden-processor` ([#3775](https://github.com/0xMiden/miden-vm/pull/3775)).
 - [BREAKING] Bumped Plonky3 related dependencies to v0.7.0 ([#3778](https://github.com/0xMiden/miden-vm/pull/3778)).
+
+#### Features
 
 #### Fixes
 - Fixed stack overflow in the precompile prover's `translate_truthy`, `translate_uint`, and `translate_ec` by converting them from recursive to iterative post-order traversals. Programs with many `LOGDEFERRED` calls no longer crash ([#3626](https://github.com/0xMiden/miden-vm/issues/3626)).
