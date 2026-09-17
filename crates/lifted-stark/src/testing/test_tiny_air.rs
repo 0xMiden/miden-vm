@@ -202,14 +202,14 @@ fn malformed_transcript_is_rejected() {
     )
     .expect("valid");
 
-    let output = ProverInstance::new(&config, &prover_statement, None)
-        .expect("no preprocessed columns")
-        .prove(test_challenger())
-        .expect("proving should succeed");
+    let prover_instance =
+        ProverInstance::new(&config, prover_statement, None).expect("no preprocessed columns");
+    let (output, statement) =
+        prover_instance.prove(test_challenger()).expect("proving should succeed");
 
     // Baseline should verify
-    let baseline_statement = VerifierInstance::new(&config, prover_statement.statement(), None)
-        .expect("no preprocessed columns");
+    let baseline_statement =
+        VerifierInstance::new(&config, &statement, None).expect("no preprocessed columns");
     let _digest = baseline_statement
         .verify(&output.proof, test_challenger())
         .expect("baseline proof should verify");
@@ -235,14 +235,12 @@ fn malformed_log_trace_heights_is_rejected() {
         vec![Felt::from_u64(START)],
     )
     .expect("valid");
-    let statement = prover_statement.statement();
+    let prover_instance =
+        ProverInstance::new(&config, prover_statement, None).expect("no preprocessed columns");
+    let (output, statement) =
+        prover_instance.prove(test_challenger()).expect("proving should succeed");
     let stark_statement =
-        VerifierInstance::new(&config, statement, None).expect("no preprocessed columns");
-
-    let output = ProverInstance::new(&config, &prover_statement, None)
-        .expect("no preprocessed columns")
-        .prove(test_challenger())
-        .expect("proving should succeed");
+        VerifierInstance::new(&config, &statement, None).expect("no preprocessed columns");
 
     // Poke the `pub(crate)` `log_trace_heights` directly to feed the verifier
     // malformed shapes that bypass `ProverStatement` construction — the cases
@@ -343,10 +341,10 @@ fn air_order_reflects_caller_order() {
     )
     .expect("valid");
 
-    let output = ProverInstance::new(&config, &prover_statement, None)
-        .expect("no preprocessed columns")
-        .prove(test_challenger())
-        .expect("proving should succeed");
+    let prover_instance =
+        ProverInstance::new(&config, prover_statement, None).expect("no preprocessed columns");
+    let (output, statement) =
+        prover_instance.prove(test_challenger()).expect("proving should succeed");
 
     // The proof carries heights in instance order: [height=8, height=4]
     // → [log_h=3, log_h=2]. The proof's AIR ordering itself is implicit
@@ -361,7 +359,7 @@ fn air_order_reflects_caller_order() {
     // (log_h=2) ends up at proof position 0, instance index 0 (log_h=3) at
     // position 1.
     let trace_order = TraceOrder::from_log_heights::<Felt, QuadFelt, _>(
-        prover_statement.statement().airs(),
+        statement.airs(),
         output.proof.log_trace_heights,
     )
     .expect("valid heights");

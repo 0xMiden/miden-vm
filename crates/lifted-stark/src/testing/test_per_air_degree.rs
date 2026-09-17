@@ -209,7 +209,7 @@ fn one_chunk_quadratic_quotient_proves() {
     let statement =
         Statement::new(TwoTraceMultiAir::new(vec![air]), Vec::new(), Vec::new()).unwrap();
     let prover_statement = ProverStatement::new(statement, vec![trace]).unwrap();
-    prove_and_verify_statement(&prover_statement);
+    prove_and_verify_statement(prover_statement);
 }
 
 fn run_upsample_case(low_power: u64, low_height: usize, high_power: u64, high_height: usize) {
@@ -222,7 +222,7 @@ fn run_upsample_case(low_power: u64, low_height: usize, high_power: u64, high_he
     let statement =
         Statement::new(TwoTraceMultiAir::new(vec![low, high]), Vec::new(), Vec::new()).unwrap();
     let prover_statement = ProverStatement::new(statement, vec![t_low, t_high]).unwrap();
-    prove_and_verify_statement(&prover_statement);
+    prove_and_verify_statement(prover_statement);
 }
 
 #[test]
@@ -251,5 +251,5 @@ fn upsample_fires_with_periodic_columns() {
     let statement =
         Statement::new(TwoTraceMultiAir::new(vec![low, high]), Vec::new(), Vec::new()).unwrap();
     let prover_statement = ProverStatement::new(statement, vec![t_low, t_high]).unwrap();
-    prove_and_verify_statement(&prover_statement);
+    prove_and_verify_statement(prover_statement);
 }
