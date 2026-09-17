@@ -69,6 +69,7 @@ jobs:
             --exclude "^file://"
             --exclude "github.com/0xMiden/.*"
             --exclude "medium.com"
+            --exclude "^https://eprint[.]iacr[.]org/"
             docs/src/**/*.md
             **/*.md
         env:
@@ -82,10 +83,41 @@ jobs:
             exit 1
           fi
 
-      - name: Open issue on failure (only if fail-fast is false)
+      - name: Report broken links (only if fail-fast is false)
         if: steps.lychee.outputs.exit_code != '0' && steps.flags.outputs.fail_fast != 'true'
-        uses: peter-evans/create-issue-from-file@fca9117c27cdc29c6c4db3b86c48e4115a786710 # v6.0.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REPORT_PATH: ./lychee/out.md
         with:
-          title: Link Checker Report
-          content-filepath: ./lychee/out.md
-          labels: documentation
+          script: |
+            const fs = require('fs');
+            const title = 'Link Checker Report';
+            const body = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            const openIssues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              sort: 'created',
+              direction: 'asc',
+              per_page: 100,
+            });
+            const existingIssue = openIssues.find(
+              (issue) => !issue.pull_request && issue.title === title,
+            );
+
+            if (existingIssue) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['documentation'],
+              });
+            }
