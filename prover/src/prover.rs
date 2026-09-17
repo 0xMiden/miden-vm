@@ -1,4 +1,4 @@
-use alloc::string::ToString;
+use alloc::{string::ToString, vec, vec::Vec};
 
 use miden_core::proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, VmProof};
 use miden_processor::{
@@ -19,21 +19,29 @@ use crate::{config, prove_stark};
 pub struct Prover {
     hash_fn: HashFunction,
     max_prover_memory_bytes: u64,
+    max_precompile_prover_memory_bytes: u64,
 }
 
 impl Prover {
     /// Default maximum memory, in bytes, this prover is permitted to allocate for a proof over a
     /// VM execution trace.
     ///
-    /// This bounds only the lifted-STARK Miden VM proof modelled by `miden_air::memory`; it does
-    /// not cover the precompile prover's memory footprint.
+    /// This bounds only the lifted-STARK Miden VM proof modelled by `miden_air::memory`; the
+    /// precompile prover's memory footprint is bounded separately by
+    /// [`max_precompile_prover_memory_bytes`](Self::max_precompile_prover_memory_bytes).
     pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = trace::DEFAULT_MAX_PROVER_MEMORY_BYTES;
+
+    /// Default maximum memory, in bytes, this prover is permitted to allocate for a proof over a
+    /// precompile witness.
+    pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 =
+        miden_precompiles_prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES;
 
     /// Creates a prover with the canonical proof-generation configuration.
     pub const fn new() -> Self {
         Self {
             hash_fn: HashFunction::Blake3_256,
             max_prover_memory_bytes: Self::DEFAULT_MAX_PROVER_MEMORY_BYTES,
+            max_precompile_prover_memory_bytes: Self::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
         }
     }
 
@@ -58,39 +66,63 @@ impl Prover {
         self.max_prover_memory_bytes
     }
 
+    /// Sets the maximum memory, in bytes, this prover is permitted to allocate for a proof over a
+    /// precompile witness.
+    #[must_use]
+    pub const fn with_max_precompile_prover_memory_bytes(
+        mut self,
+        max_precompile_prover_memory_bytes: u64,
+    ) -> Self {
+        self.max_precompile_prover_memory_bytes = max_precompile_prover_memory_bytes;
+        self
+    }
+
+    /// Returns the maximum memory, in bytes, this prover is permitted to allocate for a proof
+    /// over a precompile witness.
+    pub const fn max_precompile_prover_memory_bytes(&self) -> u64 {
+        self.max_precompile_prover_memory_bytes
+    }
+
     /// Proves only the VM portion of an execution witness.
     ///
     /// If the execution authenticated deferred precompile work, the returned proof carries its
-    /// passive singleton wire for later hydration and proving. Otherwise, it is complete.
+    /// portable singleton witness for later proving. Otherwise, it is complete.
     pub fn prove(&self, witness: ExecutionWitness) -> Result<ExecutionProof, ProverError> {
         let (vm_witness, precompile_witness) = witness.into_parts();
         let vm = self.prove_vm(vm_witness)?;
         let Some(precompile_witness) = precompile_witness else {
             return Ok(ExecutionProof::new(vm, PrecompileStatus::Empty));
         };
-        let precompile = precompile_witness
-            .state()
-            .to_wire()
-            .expect("execution witness state must have canonical deferred wire");
-        Ok(ExecutionProof::new(vm, PrecompileStatus::Deferred(precompile)))
+        Ok(ExecutionProof::new(vm, PrecompileStatus::Deferred(precompile_witness)))
     }
 
     /// Proves a complete execution witness entirely in memory.
     ///
-    /// Both VM and precompile proving consume the hydrated witness directly; the witness is not
-    /// serialized on this local path.
+    /// VM replay and direct precompile import consume the in-memory witness without serialization.
     pub fn prove_full(&self, witness: ExecutionWitness) -> Result<ExecutionProof, ProverError> {
         let (vm_witness, precompile_witness) = witness.into_parts();
         let vm = self.prove_vm(vm_witness)?;
         let precompile = precompile_witness
-            .as_ref()
-            .map(|witness| self.prove_precompile(witness))
+            .map(|witness| self.prove_precompiles(vec![witness]))
             .transpose()?;
         let precompile = match precompile {
             Some(precompile) => PrecompileStatus::Proven(precompile),
             None => PrecompileStatus::Empty,
         };
         Ok(ExecutionProof::new(vm, precompile))
+    }
+
+    /// Proves a VM witness that does not authenticate deferred precompile work.
+    ///
+    /// The returned execution proof has an empty precompile status. Use [`Self::prove`] or
+    /// [`Self::prove_full`] when the original execution witness contains precompile work.
+    pub fn prove_vm_witness(&self, witness: VmWitness) -> Result<ExecutionProof, ProverError> {
+        if witness.has_precompiles() {
+            return Err(ProverError::VmWitnessHasPrecompiles);
+        }
+
+        let vm = self.prove_vm(witness)?;
+        Ok(ExecutionProof::new(vm, PrecompileStatus::Empty))
     }
 
     /// Materializes and proves the VM trace represented by `witness`.
@@ -104,24 +136,35 @@ impl Prover {
         self.prove_vm_trace(trace)
     }
 
-    /// Proves one singleton or merged precompile witness without consuming its hydrated DAG.
-    pub fn prove_precompile(
+    /// Proves an owned batch of singleton execution obligations in one STARK.
+    ///
+    /// The proof preserves the input roots in order, including repeated roots. An empty batch
+    /// is rejected. Single-execution proving uses this same path with a one-element vector.
+    ///
+    /// Batch-wide limits are checked during import, before STARK generation. Individually valid
+    /// witnesses may exceed these limits when combined. Input accounting counts each supplied
+    /// occurrence before sharing computations, including repeated data across witnesses.
+    pub fn prove_precompiles(
         &self,
-        witness: &PrecompileWitness,
+        witnesses: Vec<PrecompileWitness>,
     ) -> Result<PrecompileProof, ProverError> {
-        let proof = miden_precompiles_prover::prove_deferred_state(witness.state(), self.hash_fn)
-            .map_err(ProverError::PrecompileProofGeneration)?;
-        Ok(PrecompileProof { proof, roots: witness.roots().to_vec() })
+        miden_precompiles_prover::prove_precompiles_with_budget(
+            witnesses,
+            self.hash_fn,
+            self.max_precompile_prover_memory_bytes,
+        )
+        .map_err(ProverError::PrecompileProofGeneration)
     }
 
     #[cfg(feature = "std")]
     fn prove_full_trace(
         &self,
         trace: VmTrace,
-        precompile: Option<&PrecompileWitness>,
+        precompile: Option<PrecompileWitness>,
     ) -> Result<ExecutionProof, ProverError> {
         let vm = self.prove_vm_trace(trace)?;
-        let precompile = precompile.map(|witness| self.prove_precompile(witness)).transpose()?;
+        let precompile =
+            precompile.map(|witness| self.prove_precompiles(vec![witness])).transpose()?;
         let precompile = match precompile {
             Some(precompile) => PrecompileStatus::Proven(precompile),
             None => PrecompileStatus::Empty,
@@ -251,7 +294,7 @@ pub fn prove_sync(
         };
         let stack_outputs = *trace.stack_outputs();
         let proof = prover
-            .prove_full_trace(trace, precompile.as_ref())
+            .prove_full_trace(trace, precompile)
             .map_err(ProverError::into_execution_error)?;
         return Ok((stack_outputs, proof));
     }
@@ -275,6 +318,9 @@ impl Default for Prover {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ProverError {
+    /// The VM witness authenticates deferred precompile work that this proving path cannot carry.
+    #[error("VM witness contains deferred precompile work")]
+    VmWitnessHasPrecompiles,
     /// The processor witness could not be materialized into a valid execution trace.
     #[error("failed to materialize VM execution trace: {0}")]
     TraceGeneration(#[source] ExecutionError),
@@ -283,12 +329,13 @@ pub enum ProverError {
     VmProofGeneration(#[source] ExecutionError),
     /// The deferred precompile witness could not be proved.
     #[error("failed to prove precompile witness: {0}")]
-    PrecompileProofGeneration(#[source] miden_precompiles_prover::ProveDeferredStateError),
+    PrecompileProofGeneration(#[source] miden_precompiles_prover::PrecompileProvingError),
 }
 
 impl ProverError {
     fn into_execution_error(self) -> ExecutionError {
         match self {
+            Self::VmWitnessHasPrecompiles => ExecutionError::ProvingError(self.to_string()),
             Self::TraceGeneration(error) | Self::VmProofGeneration(error) => error,
             Self::PrecompileProofGeneration(error) => {
                 ExecutionError::ProvingError(error.to_string())
@@ -317,5 +364,64 @@ mod tests {
 
         let prover = prover.with_max_prover_memory_bytes(1 << 20);
         assert_eq!(prover.max_prover_memory_bytes(), 1 << 20);
+    }
+
+    #[test]
+    fn prover_uses_canonical_precompile_memory_budget_and_allows_override() {
+        let prover = Prover::new();
+        assert_eq!(
+            prover.max_precompile_prover_memory_bytes(),
+            Prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES
+        );
+
+        let prover = prover.with_max_precompile_prover_memory_bytes(1 << 20);
+        assert_eq!(prover.max_precompile_prover_memory_bytes(), 1 << 20);
+    }
+
+    /// A minimal non-`TRUE` precompile witness: no keccak/uint/EC ops, just the fixed session
+    /// installs plus one trivial `AND` node. Its chiplet traces still have nonzero (fixed-minimum)
+    /// heights, so it is enough to exercise the memory-budget check without a full precompile
+    /// execution fixture.
+    fn trivial_precompile_witness() -> PrecompileWitness {
+        use alloc::sync::Arc;
+
+        use miden_core::deferred::{DeferredState, Node, PrecompileRegistry, TRUE_DIGEST};
+
+        let registry = Arc::new(PrecompileRegistry::new());
+        let mut state =
+            DeferredState::new(registry).expect("empty registry state should initialize");
+        let statement = state
+            .register(Node::and(TRUE_DIGEST, TRUE_DIGEST))
+            .expect("trivial AND node should register");
+        state
+            .log_statement(statement)
+            .expect("trivial statement should log into the deferred root");
+        state
+            .into_witness()
+            .expect("trivial deferred state should export")
+            .expect("non-TRUE root should export a witness")
+    }
+
+    #[test]
+    fn prove_precompiles_applies_the_configured_memory_budget() {
+        // A 1-byte budget must reject even the minimal chiplet trace shapes, and the returned
+        // error carries the configured budget. Exact-boundary behavior is covered by
+        // `miden-precompiles-prover`.
+        let err = Prover::new()
+            .with_max_precompile_prover_memory_bytes(1)
+            .prove_precompiles(vec![trivial_precompile_witness()])
+            .expect_err("a 1-byte budget must reject even the minimal chiplet trace shapes");
+        assert!(
+            matches!(
+                err,
+                ProverError::PrecompileProofGeneration(
+                    miden_precompiles_prover::PrecompileProvingError::MemoryBudgetExceeded {
+                        budget_bytes: 1,
+                        ..
+                    }
+                )
+            ),
+            "expected MemoryBudgetExceeded {{ budget_bytes: 1, .. }}, got: {err:?}"
+        );
     }
 }

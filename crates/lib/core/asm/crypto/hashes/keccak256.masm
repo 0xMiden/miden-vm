@@ -18,6 +18,9 @@ use miden::core::precompiles::hashes::keccak256
 # PROCEDURES
 # ================================================================================================
 
+#! Keccak256 digest, packed as eight little-endian u32 limbs.
+pub type Digest = struct { limbs: [u32; 8] }
+
 #! Computes Keccak256 hash of data stored in memory.
 #!
 #! Input: [ptr, len_bytes, ...]
@@ -29,7 +32,7 @@ use miden::core::precompiles::hashes::keccak256
 #! - INPUT_U32[len_u32] ~ INPUT_U8[len_bytes] with u32 packing (unused bytes in final u32 must be 0)
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
 @locals(8)
-pub proc hash_bytes
+pub proc hash_bytes(ptr: ptr<u32>, len_bytes: u32) -> Digest
     locaddr.0 movdn.2
     # => [ptr, len_bytes, out_ptr=loc[0], ...]
     dup.2 movdn.3
@@ -54,7 +57,7 @@ end
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[32])
 #! - INPUT_U32[8] = [i_0, ..., i_7] = [INPUT_LO, INPUT_HI] ~ INPUT_U8[32] with u32 packing
 @locals(8)
-pub proc hash
+pub proc hash(input: Digest) -> Digest
     # Stage INPUT_U32[8] at loc[0..8], using the pointer as a short cursor and recovering the base.
     locaddr.0
     # => [out_ptr, INPUT_U32[8], ...]
@@ -89,7 +92,7 @@ end
 #! - INPUT_R_U32[8] = [r_0, ..., r_7] = [INPUT_R_LO, INPUT_R_HI] ~ INPUT_R_U8[32]
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_L_U8[32] || INPUT_R_U8[32])
 @locals(16)
-pub proc merge
+pub proc merge(left: Digest, right: Digest) -> Digest
     # Stage INPUT_L || INPUT_R at loc[0..16], using locaddr.0 as a cursor and recovering the base.
     locaddr.0
     # => [out_ptr, INPUT_L_U32[8], INPUT_R_U32[8], ...]

@@ -1,3 +1,4 @@
+use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
@@ -10,7 +11,10 @@ use miden::core::crypto::hashes::poseidon2
 #! Inputs:  [R0, R1, C, ptr, alpha_ptr, acc0, acc1]
 #! Outputs: [R0, R1, C, ptr, alpha_ptr, acc0`, acc1`]
 #!
-pub proc process_row_ood_evaluations
+pub proc process_row_ood_evaluations(
+    state: types::PoseidonState,
+    evaluation: types::HornerState,
+) -> (types::PoseidonState, types::HornerState)
     # Per-row OOD layout matches the LMCS aligned wire format (alignment = 8 for
     # Poseidon2). Per row:
     #   main:       56 + 24 + 16 = 96 EF slots

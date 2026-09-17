@@ -1,3 +1,6 @@
+
+pub type AdviceMapKey = word
+
 # PRINT-STYLE DEBUGGING
 # ================================================================================================
 
@@ -31,7 +34,7 @@ const MAX_FELT_VALUE = 18446744069414584320
 #! Outputs: []
 #!
 #! Cycles: 3
-pub proc print_stack
+pub proc print_stack()
     emit.PRINT_STACK_EVENT
 end
 
@@ -50,7 +53,7 @@ end
 #! entire memory of the current context.
 #!
 #! Cycles: 5
-pub proc print_mem
+pub proc print_mem(start: ptr<felt>, end: ptr<felt>)
     emit.PRINT_MEM_EVENT
     # => [start, end, ...]
     drop drop
@@ -68,7 +71,7 @@ end
 #! An uninitialized cell is shown as `EMPTY`.
 #!
 #! Cycles: 6
-pub proc print_mem_addr
+pub proc print_mem_addr(addr: ptr<felt>)
     dup add.1 swap
     # => [addr, addr+1, ...]
     emit.PRINT_MEM_EVENT
@@ -83,7 +86,7 @@ end
 #! Only initialized memory cells are listed.
 #!
 #! Cycles: 3
-pub proc print_mem_all
+pub proc print_mem_all()
     emit.PRINT_MEM_ALL_EVENT
 end
 
@@ -97,7 +100,7 @@ end
 #! - end is the (exclusive) end index of the range to print.
 #!
 #! Cycles: 5
-pub proc print_adv_stack
+pub proc print_adv_stack(start: felt, end: felt)
     emit.PRINT_ADV_STACK_EVENT
     # => [start, end, ...]
     drop drop
@@ -109,7 +112,7 @@ end
 #! Outputs: []
 #!
 #! Cycles: 7
-pub proc print_adv_stack_all
+pub proc print_adv_stack_all()
     push.MAX_FELT_VALUE push.0
     emit.PRINT_ADV_STACK_EVENT
     # => [0, MAX_FELT_VALUE, ...]
@@ -122,7 +125,7 @@ end
 #! Outputs: []
 #!
 #! Cycles: 3
-pub proc print_adv_map_all
+pub proc print_adv_map_all()
     emit.PRINT_ADV_MAP_EVENT
 end
 
@@ -136,7 +139,7 @@ end
 #! - KEY is the word used as the advice map key.
 #!
 #! Cycles: 7
-pub proc print_adv_map_item
+pub proc print_adv_map_item(key: AdviceMapKey)
     emit.PRINT_ADV_MAP_ITEM_EVENT
     # => [KEY, ...]
     dropw

@@ -41,7 +41,10 @@ use thiserror::Error;
 // IES SCHEME
 // ================================================================================================
 
-/// Supported schemes for IES
+/// Supported IES schemes.
+///
+/// The discriminant is serialized in keys and sealed messages. Existing values must not be
+/// changed or reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum IesScheme {
@@ -49,6 +52,8 @@ pub enum IesScheme {
     X25519XChaCha20Poly1305 = 1,
     K256AeadPoseidon2 = 2,
     X25519AeadPoseidon2 = 3,
+    K256AeadEidos = 4,
+    X25519AeadEidos = 5,
 }
 
 impl TryFrom<u8> for IesScheme {
@@ -59,6 +64,8 @@ impl TryFrom<u8> for IesScheme {
             1 => Ok(IesScheme::X25519XChaCha20Poly1305),
             2 => Ok(IesScheme::K256AeadPoseidon2),
             3 => Ok(IesScheme::X25519AeadPoseidon2),
+            4 => Ok(IesScheme::K256AeadEidos),
+            5 => Ok(IesScheme::X25519AeadEidos),
             _ => Err(IesError::UnsupportedScheme),
         }
     }
@@ -83,6 +90,8 @@ impl IesScheme {
             IesScheme::X25519XChaCha20Poly1305 => "X25519+XChaCha20-Poly1305",
             IesScheme::K256AeadPoseidon2 => "K256+AeadPoseidon2",
             IesScheme::X25519AeadPoseidon2 => "X25519+AeadPoseidon2",
+            IesScheme::K256AeadEidos => "K256+AeadEidos",
+            IesScheme::X25519AeadEidos => "X25519+AeadEidos",
         }
     }
 }

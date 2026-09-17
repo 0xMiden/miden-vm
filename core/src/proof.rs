@@ -10,7 +10,7 @@ use proptest::prelude::*;
 use crate::{
     Word,
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
-    deferred::{DeferredRoot, DeferredStateWire, MAX_PRECOMPILE_ROOTS},
+    deferred::{DeferredRoot, MAX_PRECOMPILE_ROOTS, PrecompileWitness, fold_deferred_root},
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
@@ -28,17 +28,17 @@ const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
 
 /// The recursive VM verifier root declared by proofs from the current prover.
 pub const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(3472736072004736895),
-    crate::Felt::new_unchecked(9258997376938263475),
-    crate::Felt::new_unchecked(2749074330562194466),
-    crate::Felt::new_unchecked(16770332914073895013),
+    crate::Felt::new_unchecked(7434262842308815738),
+    crate::Felt::new_unchecked(8308347286077348452),
+    crate::Felt::new_unchecked(5536370215252113983),
+    crate::Felt::new_unchecked(12836609874872806107),
 ]);
 /// The recursive precompile verifier root declared by proofs from the current prover.
 pub const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(9567976034529193007),
-    crate::Felt::new_unchecked(16098679426107462596),
-    crate::Felt::new_unchecked(270852360285345822),
-    crate::Felt::new_unchecked(12812280715059172950),
+    crate::Felt::new_unchecked(12831523712082380442),
+    crate::Felt::new_unchecked(17828351797951166499),
+    crate::Felt::new_unchecked(7688574826409945056),
+    crate::Felt::new_unchecked(3055905288509180742),
 ]);
 
 // HASH FUNCTION
@@ -198,6 +198,17 @@ pub struct PrecompileProof {
     pub roots: Vec<DeferredRoot>,
 }
 
+impl PrecompileProof {
+    /// Computes the aggregate deferred root.
+    ///
+    /// For roots `[A, B, C]`, this hashes `AND(A, B)`, then `AND(result, C)`. Order and
+    /// duplicates matter. A single root is returned unchanged; an empty list returns `None`.
+    /// This method does not verify the proof.
+    pub fn aggregate_root(&self) -> Option<DeferredRoot> {
+        self.roots.iter().copied().reduce(fold_deferred_root)
+    }
+}
+
 impl Serializable for PrecompileProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.proof.write_into(target);
@@ -248,10 +259,10 @@ pub struct ExecutionProofCompatibility {
 }
 
 impl ExecutionProofCompatibility {
-    /// The first execution proof transport format.
-    pub const FORMAT_V1: u8 = 1;
+    /// Execution proof transport format carrying portable singleton witnesses.
+    pub const FORMAT_V2: u8 = 2;
 
-    /// Creates a proof compatibility declaration for format `1`.
+    /// Creates a proof compatibility declaration for format `2`.
     ///
     /// # Errors
     ///
@@ -268,7 +279,7 @@ impl ExecutionProofCompatibility {
         }
 
         Ok(Self {
-            format: Self::FORMAT_V1,
+            format: Self::FORMAT_V2,
             vm_verifier_roots,
             pvm_verifier_roots,
         })
@@ -320,7 +331,7 @@ pub enum PrecompileStatus {
     /// The VM made no precompile requests.
     Empty,
     /// The VM made precompile requests which have not been proven.
-    Deferred(DeferredStateWire),
+    Deferred(PrecompileWitness),
     /// The VM made precompile requests and their proof is available.
     Proven(PrecompileProof),
 }
@@ -360,7 +371,9 @@ impl ExecutionProof {
         &self.vm
     }
 
-    /// Returns the state of the precompile work.
+    /// Returns the precompile data carried by this proof.
+    ///
+    /// This status describes the attached data; it does not establish proof validity.
     pub const fn precompile(&self) -> &PrecompileStatus {
         &self.precompile
     }
@@ -368,11 +381,6 @@ impl ExecutionProof {
     /// Splits this proof into its compatibility, VM proof, and precompile state.
     pub fn into_parts(self) -> (ExecutionProofCompatibility, VmProof, PrecompileStatus) {
         (self.compatibility, self.vm, self.precompile)
-    }
-
-    /// Returns whether this proof has completed its lifecycle transition.
-    pub const fn is_complete(&self) -> bool {
-        !matches!(self.precompile, PrecompileStatus::Deferred(_))
     }
 
     /// Returns whether this proof contains precompile work.
@@ -422,14 +430,14 @@ impl Serializable for ExecutionProof {
         target.write_u8(self.compatibility.format);
         self.compatibility.vm_verifier_roots.write_into(target);
         self.compatibility.pvm_verifier_roots.write_into(target);
-        self.write_into_v1(target);
+        self.write_into_v2(target);
     }
 }
 
 impl Deserializable for ExecutionProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let format = source.read_u8()?;
-        if format != ExecutionProofCompatibility::FORMAT_V1 {
+        if format != ExecutionProofCompatibility::FORMAT_V2 {
             return Err(DeserializationError::InvalidValue(format!(
                 "unsupported execution proof format {format}"
             )));
@@ -440,19 +448,19 @@ impl Deserializable for ExecutionProof {
         let compatibility = ExecutionProofCompatibility::new(vm_verifier_roots, pvm_verifier_roots)
             .map_err(|error| DeserializationError::InvalidValue(error.to_string()))?;
 
-        Self::read_from_v1(source, compatibility)
+        Self::read_from_v2(source, compatibility)
     }
 
     fn min_serialized_size() -> usize {
         u8::min_serialized_size()
             + Vec::<Word>::min_serialized_size()
             + Vec::<Word>::min_serialized_size()
-            + ExecutionProof::min_serialized_size_v1()
+            + ExecutionProof::min_serialized_size_v2()
     }
 }
 
 impl ExecutionProof {
-    fn write_into_v1<W: ByteWriter>(&self, target: &mut W) {
+    fn write_into_v2<W: ByteWriter>(&self, target: &mut W) {
         match &self.precompile {
             PrecompileStatus::Deferred(precompile) => {
                 target.write_u8(DEFERRED_PROOF_DISCRIMINANT);
@@ -472,7 +480,7 @@ impl ExecutionProof {
         }
     }
 
-    fn read_from_v1<R: ByteReader>(
+    fn read_from_v2<R: ByteReader>(
         source: &mut R,
         compatibility: ExecutionProofCompatibility,
     ) -> Result<Self, DeserializationError> {
@@ -486,7 +494,7 @@ impl ExecutionProof {
         let vm = VmProof::read_from(source)?;
         let precompile = match discriminant {
             DEFERRED_PROOF_DISCRIMINANT => {
-                PrecompileStatus::Deferred(DeferredStateWire::read_from(source)?)
+                PrecompileStatus::Deferred(PrecompileWitness::read_from(source)?)
             },
             COMPLETE_PROOF_DISCRIMINANT => match Option::<PrecompileProof>::read_from(source)? {
                 Some(precompile) => PrecompileStatus::Proven(precompile),
@@ -498,7 +506,7 @@ impl ExecutionProof {
         Ok(Self { compatibility, vm, precompile })
     }
 
-    fn min_serialized_size_v1() -> usize {
+    fn min_serialized_size_v2() -> usize {
         u8::min_serialized_size()
             + VmProof::min_serialized_size()
             + Option::<PrecompileProof>::min_serialized_size()
@@ -591,7 +599,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        deferred::{DeferredState, Node, PrecompileWitness, TRUE_DIGEST},
+        deferred::{Node, PrecompileWitnessEntry, TRUE_DIGEST, Tag},
         serde::ByteWriter,
     };
 
@@ -617,12 +625,33 @@ mod tests {
         }
     }
 
-    fn wire() -> (DeferredStateWire, DeferredRoot) {
-        let mut state = DeferredState::default();
-        let statement = state.register(Node::and(TRUE_DIGEST, TRUE_DIGEST)).unwrap();
-        state.log_statement(statement).unwrap();
-        let witness = PrecompileWitness::new(state).unwrap();
-        (witness.state().to_wire().unwrap(), witness.roots()[0])
+    #[test]
+    fn aggregate_root_preserves_order_grouping_and_duplicates() {
+        let a = root(1);
+        let b = root(2);
+        let c = root(3);
+        let and = |lhs, rhs| Node::and(lhs, rhs).digest();
+
+        assert_eq!(precompile_proof(&[]).aggregate_root(), None);
+        assert_eq!(precompile_proof(&[a]).aggregate_root(), Some(a));
+        assert_eq!(precompile_proof(&[a, b, c]).aggregate_root(), Some(and(and(a, b), c)));
+        assert_ne!(precompile_proof(&[a, b, c]).aggregate_root(), Some(and(a, and(b, c))));
+        assert_ne!(
+            precompile_proof(&[a, b]).aggregate_root(),
+            precompile_proof(&[b, a]).aggregate_root()
+        );
+        assert_eq!(precompile_proof(&[a, b, a]).aggregate_root(), Some(and(and(a, b), a)));
+    }
+
+    fn wire() -> (PrecompileWitness, DeferredRoot) {
+        let witness = PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
+            tag: Tag::AND,
+            lhs: 0,
+            rhs: 0,
+        }])
+        .unwrap();
+        let root = witness.root_unchecked();
+        (witness, root)
     }
 
     fn versioned(vm: VmProof, precompile: PrecompileStatus) -> ExecutionProof {
@@ -663,21 +692,20 @@ mod tests {
         let bytes = proof.to_bytes();
         let decoded = ExecutionProof::read_from_bytes(&bytes).unwrap();
 
-        assert_eq!(bytes[0], ExecutionProofCompatibility::FORMAT_V1);
+        assert_eq!(bytes[0], ExecutionProofCompatibility::FORMAT_V2);
         assert_eq!(decoded, proof);
-        assert_eq!(decoded.compatibility().format(), ExecutionProofCompatibility::FORMAT_V1);
+        assert_eq!(decoded.compatibility().format(), ExecutionProofCompatibility::FORMAT_V2);
         assert_eq!(decoded.compatibility().vm_verifier_roots(), &[root(11), root(12)]);
         assert_eq!(decoded.compatibility().pvm_verifier_roots(), &[root(21)]);
     }
 
     #[test]
     fn versioned_proof_decoder_rejects_unknown_format_before_body() {
-        let error = ExecutionProof::read_from_bytes(&[ExecutionProofCompatibility::FORMAT_V1 + 1])
-            .unwrap_err();
-
-        assert!(
-            matches!(error, DeserializationError::InvalidValue(message) if message.contains("unsupported execution proof format 2"))
-        );
+        for version in [0, 1, ExecutionProofCompatibility::FORMAT_V2 + 1] {
+            let error = ExecutionProof::read_from_bytes(&[version]).unwrap_err();
+            assert!(matches!(error, DeserializationError::InvalidValue(message)
+                if message.contains("unsupported execution proof format")));
+        }
     }
 
     #[test]
@@ -700,7 +728,7 @@ mod tests {
 
     #[test]
     fn versioned_proof_decoder_applies_the_input_budget_to_root_lists() {
-        let mut bytes = vec![ExecutionProofCompatibility::FORMAT_V1];
+        let mut bytes = vec![ExecutionProofCompatibility::FORMAT_V2];
         bytes.write_usize(usize::MAX);
 
         let error = ExecutionProof::read_from_bytes(&bytes).unwrap_err();
@@ -725,7 +753,7 @@ mod tests {
         let proof_bytes = proof.to_bytes();
         let body = &proof_bytes[version_prefix().len()..];
 
-        let mut duplicate_vm = vec![ExecutionProofCompatibility::FORMAT_V1];
+        let mut duplicate_vm = vec![ExecutionProofCompatibility::FORMAT_V2];
         vec![root(1), root(1)].write_into(&mut duplicate_vm);
         Vec::<Word>::new().write_into(&mut duplicate_vm);
         duplicate_vm.extend_from_slice(body);
@@ -734,7 +762,7 @@ mod tests {
             matches!(error, DeserializationError::InvalidValue(message) if message.contains("VM verifier roots must not contain duplicates"))
         );
 
-        let mut duplicate_pvm = vec![ExecutionProofCompatibility::FORMAT_V1];
+        let mut duplicate_pvm = vec![ExecutionProofCompatibility::FORMAT_V2];
         Vec::<Word>::new().write_into(&mut duplicate_pvm);
         vec![root(2), root(2)].write_into(&mut duplicate_pvm);
         duplicate_pvm.extend_from_slice(body);
@@ -848,8 +876,7 @@ mod tests {
     fn complete_transitions_deferred_proof_without_validating_artifact_shape() {
         let vm = vm_proof(TRUE_DIGEST);
         let precompile = precompile_proof(&[]);
-        let deferred =
-            versioned(vm.clone(), PrecompileStatus::Deferred(DeferredStateWire::default()));
+        let deferred = versioned(vm.clone(), PrecompileStatus::Deferred(wire().0));
 
         let completed = deferred.complete(precompile.clone()).unwrap();
 

@@ -1,3 +1,4 @@
+use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 use miden::core::mem
 
@@ -37,7 +38,7 @@ const NUM_CLAIM_WORDS = NUM_CLAIM_ELEMENTS // 4
 #!
 #! Inputs:  [claim_ptr, CLAIM_COMMITMENT, ...]
 #! Outputs: [...]
-pub proc materialize_claim
+pub proc materialize_claim(claim_ptr: types::Address, commitment: types::Digest)
     # Use CLAIM_COMMITMENT as the advice-map key while preserving claim_ptr.
     movdn.4
     adv.push_mapvaln
@@ -63,7 +64,7 @@ end
 #! Where:
 #! - claim_ptr is the word-aligned address of the claim region.
 #! - CLAIM_HASH is the domain-tagged Poseidon2 hash of the 40-element encoding.
-pub proc claim_commitment
+pub proc claim_commitment(claim_ptr: types::Address) -> types::Digest
     push.CLAIM_DOMAIN_TAG push.NUM_CLAIM_ELEMENTS movup.2
     # => [claim_ptr, NUM_CLAIM_ELEMENTS, CLAIM_DOMAIN_TAG, ...]
     exec.poseidon2::hash_elements_in_domain

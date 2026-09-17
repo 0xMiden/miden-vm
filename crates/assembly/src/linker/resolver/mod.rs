@@ -216,6 +216,18 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
         context: SourceSpan,
         gid: GlobalItemIndex,
     ) -> Result<Option<types::TypeTemplate>, LinkerError> {
+        // A referenced declaration's body belongs to its defining module. Reborrow the shared
+        // cache so nested references and recursive groups retain their state, while the caller's
+        // module remains available for subsequent expressions in its signature.
+        if self.current_module != gid.module {
+            return Resolver {
+                resolver: self.resolver,
+                cache: self.cache,
+                current_module: gid.module,
+            }
+            .get_type(context, gid);
+        }
+
         if let Some(cached) = self.cache.types.get(&gid) {
             return Ok(Some(types::TypeTemplate::Type(cached.clone())));
         }

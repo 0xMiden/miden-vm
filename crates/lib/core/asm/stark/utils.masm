@@ -1,3 +1,4 @@
+use miden::core::stark::types
 use miden::core::stark::constants
 
 # Accepted transcript-bound security-parameter envelope for the recursive verifier. These bounds
@@ -30,7 +31,7 @@ const FACTORIAL_11 = 39916800
 #! Advice order: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits].
 #! Inputs:  [...]
 #! Outputs: [...]
-pub proc load_security_params
+pub proc load_security_params()
     adv_push exec.constants::set_number_queries
     adv_push exec.constants::set_query_pow_bits
     adv_push exec.constants::set_deep_pow_bits
@@ -42,7 +43,7 @@ end
 #! Input: [log2(domain_size), ..]
 #! Output: [domain_gen, ..]
 #! Cycles: 63
-pub proc compute_lde_generator
+pub proc compute_lde_generator(log_domain_size: u8) -> felt
     push.32
     swap
     sub
@@ -60,7 +61,7 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-pub proc validate_inputs
+pub proc validate_inputs()
     # The query upper bound is a soft restriction imposed by the current verifier memory layout.
     exec.constants::get_number_queries
     dup u32lte.NUM_QUERIES_MAX assert.err="num_queries must be at most 150"
@@ -100,7 +101,7 @@ end
 #! Input: [index, pow2_shift, ...]
 #! Output: [rev_index, ...]
 #! Cycles: 78
-pub proc bit_reverse_len_parallel
+pub proc bit_reverse_len_parallel(index: u32, pow2_shift: u32) -> u32
     u32wrapping_mul
 
     # Step 1: swap adjacent bits
@@ -145,7 +146,7 @@ end
 #! Outputs: [...]
 #!
 #! Invocation: exec
-pub proc execute_constraint_evaluation_check
+pub proc execute_constraint_evaluation_check()
     exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr dynexec
 end
 
@@ -158,7 +159,7 @@ end
 #! Outputs: [...]
 #!
 #! Invocation: exec
-pub proc observe_aux_trace
+pub proc observe_aux_trace()
     exec.constants::get_procedure_digest_observe_aux_trace_ptr dynexec
 end
 
@@ -166,7 +167,7 @@ end
 #!
 #! Input: [D0, D1, D2, D3, D4, ...]
 #! Output: [...]
-pub proc store_dynamically_executed_procedures
+pub proc store_dynamically_executed_procedures(hooks: types::VerifierHooks)
     exec.constants::get_procedure_digest_observe_aux_trace_ptr mem_storew_le dropw
     exec.constants::get_procedure_digest_process_public_inputs_ptr mem_storew_le dropw
     exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr mem_storew_le dropw
@@ -199,7 +200,7 @@ end
 #!
 #! Input:  [num_airs, heights_ptr]
 #! Output: [tag]
-pub proc derive_order_tag_from_heights
+pub proc derive_order_tag_from_heights(num_airs: u8, heights_ptr: types::Address) -> u32
     dup u32lte.MAX_ORDER_AIRS assert.err="num_airs exceeds supported order-tag range"
 
     # Store 0! through 11! in tmp1..tmp3. The complete table is fixed by MAX_ORDER_AIRS and avoids
@@ -286,7 +287,7 @@ end
 #!
 #! Input:  [x]
 #! Output: [x!]
-pub proc factorial
+pub proc factorial(value: u8) -> felt
     push.1 swap
     dup neq.0
     while.true

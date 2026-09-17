@@ -2,6 +2,10 @@ use miden::core::mem
 use miden::core::crypto::hashes::poseidon2
 use miden::core::math::u64
 
+#! Element address of an MMR header, followed by its variable-length peak array.
+pub type MmrPtr = ptr<felt>
+
+
 #! Loads the leaf at the absolute `pos` in the MMR.
 #!
 #! This MMR implementation supports only u32 positions.
@@ -13,7 +17,7 @@ use miden::core::math::u64
 #! Stack transition:
 #! Input: [pos, mmr_ptr, ...]
 #! Output: [N, ...] where `N` is the leaf and `R` is the MMR peak that owns the leaf.
-pub proc get
+pub proc get(pos: u32, mmr_ptr: MmrPtr) -> word
   # load the num_leaves of the MMR (2 cycles)
   dup.1 mem_load
   # stack: [num_leaves, pos, mmr_ptr, ...]
@@ -90,7 +94,7 @@ end
 #! Input: [num_leaves, ...]
 #! Output: [num_peaks, ...]
 #! Cycles: 32
-pub proc num_leaves_to_num_peaks
+pub proc num_leaves_to_num_peaks(num_leaves: u32) -> u8
   # count number of peaks (32 cycles)
   u32popcnt
   # => [count, ...]
@@ -102,7 +106,7 @@ end
 #! Input: [num_peaks, ...]
 #! Output: [len, ...]
 #! Cycles: 19
-pub proc num_peaks_to_message_size
+pub proc num_peaks_to_message_size(num_peaks: u8) -> u8
   # the peaks are padded to a minimum length of 16 (10 cycles)
   push.16 u32max
   # => [count_min, ...]
@@ -130,7 +134,7 @@ end
 #! Cycles: 215 + 9 * extra_peak_pair cycles
 #!    where `extra_peak_pair` is the number of peak pairs in addition to the
 #!    first 16 peaks, i.e. `round_up((num_of_peaks - 16) / 2)`
-pub proc unpack
+pub proc unpack(hash: poseidon2::Digest, mmr_ptr: MmrPtr)
   # load the preimage and its size to the advice_stack (0 cycles)
   adv.push_mapvaln adv_push
   # operand_stack => [preimage_size, HASH, mmr_ptr, ...]
@@ -172,7 +176,7 @@ end
 #! Cycles: 198 + 6 * extra_peak_pair cycles
 #!    where `extra_peak_pair` is the number of peak pairs in addition to the
 #!    first 16 peaks, i.e. `round_up((num_of_peaks - 16) / 2)`
-pub proc pack
+pub proc pack(mmr_ptr: MmrPtr) -> poseidon2::Digest
   # load num_leaves (2 cycles)
   dup mem_load
   # => [num_leaves, mmr_ptr, ...]
@@ -211,7 +215,7 @@ end
 #! Input: [EL, mmr_ptr, ...]
 #! Output: [...]
 #! Cycles: 145 + 39 * peak_merges
-pub proc add
+pub proc add(element: word, mmr_ptr: MmrPtr)
   # get num_leaves (2 cycles)
   dup.4 mem_load
   # => [num_leaves, EL, mmr_ptr]

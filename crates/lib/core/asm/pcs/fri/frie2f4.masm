@@ -1,3 +1,4 @@
+use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use miden::core::pcs::fri::helper
@@ -7,7 +8,24 @@ use miden::core::pcs::fri::helper
 #!
 #! Input:  [layer_ptr, layer_ptr, poe, p, e0, e1, layer_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 #! Output: [is_not_last_layer, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne0, ne1, layer_ptr+8, rem_ptr, x, x, x, x, x, x, x, x, ...]
-pub proc verify_query_layer
+pub proc verify_query_layer(
+    layer_ptr0: types::Address,
+    layer_ptr1: types::Address,
+    query: types::FriQuery,
+    layer_ptr: types::Address,
+    rem_ptr: types::Address,
+    scratch0: word,
+    scratch1: word,
+) -> (
+    i1,
+    types::Address,
+    types::Address,
+    types::FriQuery,
+    types::Address,
+    types::Address,
+    word,
+    word,
+)
 
     # Load layer commitment C and layer metadata.
     swapdw
@@ -97,7 +115,11 @@ end
 #! - layer_ptr is the memory address of the layer data (Merkle tree root, alpha etc.) for the next
 #!   layer.
 #! - rem_ptr is the memory address of the remainder polynomial.
-pub proc verify_query_64
+pub proc verify_query_64(
+    query: types::FriQuery,
+    layer_ptr: types::Address,
+    rem_ptr: types::Address,
+) -> (word, word, word)
 
     # Prepare the stack to match the shape expected by `verify_query_layer`.
     dup.5
@@ -153,7 +175,11 @@ end
 #! - layer_ptr is the memory address of the layer data (Merkle tree root, alpha etc.) for the next
 #!   layer.
 #! - rem_ptr is the memory address of the remainder polynomial.
-pub proc verify_query_128
+pub proc verify_query_128(
+    query: types::FriQuery,
+    layer_ptr: types::Address,
+    rem_ptr: types::Address,
+) -> (word, word, word)
 
     # Prepare the stack to match the shape expected by `verify_query_layer`.
     dup.5
@@ -222,7 +248,12 @@ end
 #! This means for example that:
 #! 1. rem_ptr - 4 points to the last [d_size, t_depth, alpha0, alpha1] word.
 #! 2. layer_ptr - 4 points to the last (poe, p, e0, e1) word.
-proc verify_64
+proc verify_64(
+    query_ptr: types::Address,
+    layer_ptr: types::Address,
+    rem_ptr: types::Address,
+    generator: felt,
+)
 
     # Store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries.
     exec.constants::fri_verify_state_ptr mem_storew_le
@@ -296,7 +327,12 @@ end
 #! This means for example that:
 #! 1. rem_ptr - 4 points to the last [d_size, t_depth, alpha0, alpha1] word.
 #! 2. layer_ptr - 4 points to the last (poe, p, e0, e1) word.
-proc verify_128
+proc verify_128(
+    query_ptr: types::Address,
+    layer_ptr: types::Address,
+    rem_ptr: types::Address,
+    generator: felt,
+)
 
     # Store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries.
     exec.constants::fri_verify_state_ptr mem_storew_le
@@ -346,7 +382,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-pub proc verify
+pub proc verify()
     # Get domain generator and pointer to the remainder polynomial.
     exec.constants::get_lde_domain_generator
     exec.constants::get_remainder_poly_address

@@ -942,12 +942,11 @@ macro_rules! benchmark_word_conversions {
 
 /// Generates comprehensive AEAD benchmarks for bytes operations.
 ///
-/// This macro creates benchmarks for encryption and decryption operations
-/// using the new standardized approach with consistent data generation,
-/// throughput measurement, and reduced boilerplate.
+/// This macro creates encryption and decryption benchmarks with consistent data generation and
+/// throughput measurement.
 ///
 /// # Arguments
-/// * `$aead_module` - The AEAD module name (e.g., aead_poseidon2)
+/// * `$aead_module` - The AEAD module name
 /// * `$group_prefix` - Human-readable prefix for benchmark group names
 /// * `$bytes_fn` - The name of the benchmark function to generate for bytes
 /// * `$group_ident` - The identifier for the criterion group
@@ -1025,12 +1024,11 @@ macro_rules! benchmark_aead_bytes {
 
 /// Generates comprehensive AEAD benchmarks for field elements.
 ///
-/// This macro creates benchmarks for encryption and decryption operations
-/// using the new standardized approach with consistent data generation,
-/// throughput measurement, and reduced boilerplate.
+/// This macro creates encryption and decryption benchmarks with consistent data generation and
+/// throughput measurement.
 ///
 /// # Arguments
-/// * `$aead_module` - The AEAD module name (e.g., aead_poseidon2)
+/// * `$aead_module` - The AEAD module name
 /// * `$group_prefix` - Human-readable prefix for benchmark group names
 /// * `$felts_fn` - The name of the benchmark function to generate for Felts
 /// * `$group_ident` - The identifier for the criterion group

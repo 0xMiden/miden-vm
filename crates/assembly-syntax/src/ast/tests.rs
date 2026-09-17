@@ -7,7 +7,7 @@ use pretty_assertions::assert_eq;
 use crate::{
     Felt, PathBuf, assert_diagnostic, assert_diagnostic_lines,
     ast::{types::Type, *},
-    parser::{IntValue, WordValue},
+    parser::{IntValue, PushValue, WordValue},
     regex, source_file,
     testing::SyntaxTestContext,
 };
@@ -1847,4 +1847,224 @@ end
     );
     assert_eq!(context.parse_forms(source)?, forms);
     Ok(())
+}
+
+#[test]
+fn test_implied_call_convention() -> Result<(), Report> {
+    let context = SyntaxTestContext::new();
+    let source = source_file!(
+        &context,
+        r#"
+@account_procedure
+pub proc foo() -> i1
+    push.1
+end
+"#
+    );
+
+    let Form::Procedure(mut proc) = typed_export!(
+        foo,
+        0,
+        function_ty!( => TypeExpr::Primitive(Span::unknown(Type::I1))),
+        block!(inst!(Push(PushValue::Int(IntValue::U8(1)).into())))
+    ) else {
+        unreachable!()
+    };
+    proc.signature_mut().unwrap().cc = types::CallConv::ComponentModel;
+    let proc = Form::Procedure(proc.with_attributes([Attribute::Marker(id!(account_procedure))]));
+    let forms = module!(proc);
+    assert_eq!(context.parse_forms(source)?, forms);
+    Ok(())
+}
+
+#[test]
+fn test_protocol_abi_attribute_forms_imply_calling_convention() -> Result<(), Report> {
+    for name in ["account_procedure", "auth_script", "note_script", "transaction_script"] {
+        for metadata in ["", "(value)", "(role = \"custom\")"] {
+            let context = SyntaxTestContext::new();
+            let source = source_file!(
+                &context,
+                format!("@{name}{metadata}\npub proc foo() -> i1\n    push.1\nend\n")
+            );
+            let forms = context.parse_forms(source)?;
+            let Form::Procedure(proc) = &forms[0] else {
+                panic!("expected procedure")
+            };
+            assert_eq!(proc.signature().unwrap().cc, types::CallConv::ComponentModel);
+            assert_eq!(
+                proc.attributes().get(name).unwrap().to_string(),
+                format!("@{name}{metadata}")
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn test_protocol_abi_matching_callconv_in_either_order() -> Result<(), Report> {
+    for name in ["account_procedure", "auth_script", "note_script", "transaction_script"] {
+        for metadata in ["", "(value)", "(role = \"custom\")"] {
+            let abi = format!("@{name}{metadata}");
+            let cc = r#"@callconv("component-model")"#;
+            for annotations in [format!("{abi}\n{cc}"), format!("{cc}\n{abi}")] {
+                let context = SyntaxTestContext::new();
+                let source = source_file!(
+                    &context,
+                    format!("{annotations}\npub proc foo() -> i1\n    push.1\nend\n")
+                );
+                let forms = context.parse_forms(source)?;
+                let Form::Procedure(proc) = &forms[0] else {
+                    panic!("expected procedure")
+                };
+                assert_eq!(proc.signature().unwrap().cc, types::CallConv::ComponentModel);
+                assert!(proc.attributes().has(name));
+                assert!(!proc.attributes().has("callconv"));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn test_protocol_abi_conflicting_callconv_in_either_order() {
+    for name in ["account_procedure", "auth_script", "note_script", "transaction_script"] {
+        for metadata in ["", "(value)", "(role = \"custom\")"] {
+            let abi = format!("@{name}{metadata}");
+            for cc in [r#"@callconv("C")"#, "@callconv(fast)"] {
+                for annotations in [format!("{abi}\n{cc}"), format!("{cc}\n{abi}")] {
+                    let context = SyntaxTestContext::new();
+                    let source = source_file!(
+                        &context,
+                        format!("{annotations}\npub proc foo() -> i1\n    push.1\nend\n")
+                    );
+                    let error = context.parse_forms(source).expect_err(&annotations);
+                    assert_diagnostic!(error, "this attribute conflicts with another attribute");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_protocol_abi_conflicting_attribute_forms_are_rejected() {
+    for first in ["account_procedure", "auth_script", "note_script", "transaction_script"] {
+        for second in ["account_procedure", "auth_script", "note_script", "transaction_script"] {
+            if first == second {
+                continue;
+            }
+            for first_meta in ["", "(value)", "(role = \"custom\")"] {
+                for second_meta in ["", "(value)", "(role = \"custom\")"] {
+                    let context = SyntaxTestContext::new();
+                    let annotations = format!("@{first}{first_meta}\n@{second}{second_meta}");
+                    let source = source_file!(
+                        &context,
+                        format!("{annotations}\npub proc foo() -> i1\n    push.1\nend\n")
+                    );
+                    let error = context.parse_forms(source).expect_err(&annotations);
+                    assert_diagnostic!(error, "this attribute conflicts with another attribute");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_protocol_abi_key_value_attributes_can_merge() -> Result<(), Report> {
+    let context = SyntaxTestContext::new();
+    let source = source_file!(
+        &context,
+        r#"
+@auth_script(role = "custom")
+@auth_script(version = 1)
+pub proc foo() -> i1
+    push.1
+end
+"#
+    );
+    let forms = context.parse_forms(source)?;
+    let Form::Procedure(proc) = &forms[0] else {
+        panic!("expected procedure")
+    };
+    assert_eq!(proc.signature().unwrap().cc, types::CallConv::ComponentModel);
+    assert_eq!(
+        proc.attributes().get("auth_script").unwrap().to_string(),
+        r#"@auth_script(role = "custom", version = 1)"#
+    );
+    Ok(())
+}
+
+#[test]
+fn test_conflicting_implied_calling_convention_is_rejected() {
+    let context = SyntaxTestContext::new();
+    let source = source_file!(
+        &context,
+        r#"
+@account_procedure
+@callconv("C")
+proc foo() -> i1
+    push.1
+end
+
+begin
+    exec.foo
+end
+"#
+    );
+
+    let error = context
+        .parse_program_source_file(source)
+        .expect_err("expected diagnostic to be raised, but parsing succeeded");
+
+    assert_diagnostic_lines!(
+        error,
+        "conflicting attributes for procedure definition",
+        regex!(r#",-\[test[\d]+:2:1\]"#),
+        "1 |",
+        "2 | @account_procedure",
+        "  : ^^^^^^^^^|^^^^^^^^",
+        "  :          `-- conflicting attribute here",
+        "3 | @callconv(\"C\")",
+        "  : ^^^^^^^|^^^^^^",
+        "  :        `-- this attribute conflicts with another attribute",
+        "4 | proc foo() -> i1",
+        "  `----"
+    );
+}
+
+#[test]
+fn test_conflicting_protocol_abi_is_rejected() {
+    let context = SyntaxTestContext::new();
+    let source = source_file!(
+        &context,
+        r#"
+@account_procedure
+@note_script
+proc foo() -> i1
+    push.1
+end
+
+begin
+    exec.foo
+end
+"#
+    );
+
+    let error = context
+        .parse_program_source_file(source)
+        .expect_err("expected diagnostic to be raised, but parsing succeeded");
+
+    assert_diagnostic_lines!(
+        error,
+        "conflicting attributes for procedure definition",
+        regex!(r#",-\[test[\d]+:2:1\]"#),
+        "1 |",
+        "2 | @account_procedure",
+        "  : ^^^^^^^^^|^^^^^^^^",
+        "  :          `-- conflicting attribute here",
+        "3 | @note_script",
+        "  : ^^^^^^|^^^^^",
+        "  :       `-- this attribute conflicts with another attribute",
+        "4 | proc foo() -> i1",
+        "  `----"
+    );
 }

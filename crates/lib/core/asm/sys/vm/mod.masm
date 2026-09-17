@@ -1,3 +1,4 @@
+use miden::core::stark::types
 pub mod aux_trace
 pub mod claim
 pub mod constraints_eval
@@ -29,6 +30,9 @@ const LOG_HEIGHT_MAX = 29
 
 # Offset of K in the P | K | I | O claim encoding.
 const KERNEL_COMMITMENT_OFFSET = 4
+
+# Offset of D in the P | D boundary-input block.
+const DEFERRED_ROOT_OFFSET = 4
 
 # Domain tag for the kernel commitment: the registered selector
 # (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (0x010000 << 8) | 1, per the Miden
@@ -62,7 +66,7 @@ const ACE_REGISTRY_ROOT_3 = 12106900609136090006
 #!
 #! Writes the trace shape, proof-order tag, relation commitments, and fixed OOD/query-row
 #! addresses to verifier memory.
-pub proc load_air_context
+pub proc load_air_context()
     adv_push
     exec.assert_shape_log
     exec.layout::set_core_trace_length_log
@@ -93,7 +97,7 @@ pub proc load_air_context
     exec.constants::set_current_trace_row_address
 end
 
-proc assert_shape_log
+proc assert_shape_log(height: felt) -> u8
     dup u32assert.err="AIR log height must be u32"
     dup u32gte.LOG_HEIGHT_MIN assert.err="AIR log height below minimum"
     dup u32lte.LOG_HEIGHT_MAX assert.err="AIR log height above maximum"
@@ -123,7 +127,7 @@ end
 #!
 #! Input:  []
 #! Output: [tag]
-proc derive_order_tag
+proc derive_order_tag() -> u8
     push.0.0
     # => [k = 0, tag = 0]
 
@@ -184,7 +188,7 @@ end
 #!
 #! Input:  [x]
 #! Output: [x!]
-proc factorial
+proc factorial(x: u8) -> u8
     push.1 swap
     # => [x, acc = 1]
     dup push.0 neq
@@ -200,14 +204,14 @@ proc factorial
     # => [acc]
 end
 
-proc store_relation_digest
+proc store_relation_digest()
     push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
     exec.constants::relation_digest_ptr mem_storew_le
     # Relation metadata is memory-only; leave the caller stack unchanged.
     dropw
 end
 
-proc store_ace_registry_root
+proc store_ace_registry_root()
     push.ACE_REGISTRY_ROOT_3.ACE_REGISTRY_ROOT_2.ACE_REGISTRY_ROOT_1.ACE_REGISTRY_ROOT_0
     exec.constants::ace_registry_root_ptr mem_storew_le
     # Relation metadata is memory-only; leave the caller stack unchanged.
@@ -220,7 +224,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-proc materialize_kernel_witness
+proc materialize_kernel_witness()
     padw exec.layout::claim_ptr add.KERNEL_COMMITMENT_OFFSET mem_loadw_le
     # => [K, ...]
     adv.push_mapvaln
@@ -262,7 +266,7 @@ end
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
 #!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
 #!          log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
-proc build_security_descriptor
+proc build_security_descriptor(parameters: types::StackProofParameters) -> types::StackSecurityDescriptor
     exec.constants::get_trace_length_log
     push.LOOKUP_FRACTIONS_PER_ROW
     exec.layout::num_kernel_procedures_ptr mem_load
@@ -308,6 +312,9 @@ end
 #! The returned deferred root is bound by the verified statement. The caller must settle it or
 #! include it in its own statement. `D == TRUE_DIGEST` means no deferred statements were logged.
 #!
+#! Verification runs in an isolated execution context, preserving caller memory and stack elements
+#! below the claim commitment.
+#!
 #! Inputs:  [CLAIM_COMMITMENT, ...]
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
 #!           max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
@@ -320,34 +327,46 @@ end
 #! - D is the deferred root bound by the verified statement.
 #!
 #! Invocation: exec
-pub proc verify_proof(claim_commitment: word) -> (
-    lookup_pow_bits: u32,
-    num_composed_constraints: u32,
-    max_constraint_degree: u32,
-    num_deep_terms: u32,
-    max_message_width: u32,
-    num_lookup_boundary_terms: u32,
-    lookup_fractions_per_row: u32,
-    log_max_height: u32,
-    num_queries: u32,
-    query_pow_bits: u32,
-    deep_pow_bits: u32,
-    folding_pow_bits: u32,
-    deferred_root: word,
-)
+pub proc verify_proof(claim_commitment: types::Digest) -> (types::StackSecurityDescriptor, types::Digest)
+    # Reserve the callee's 16-element argument/result window above the caller's live stack.
+    padw padw padw
+    # => [pad(12), CLAIM_COMMITMENT, ...]
+    swapw.3
+    # => [CLAIM_COMMITMENT, pad(12), ...]
+
+    call.verify_proof_inner
+    # => [security_descriptor(12), D, ...]
+end
+
+#! Verifies a Miden VM execution proof against the supplied claim commitment.
+#!
+#! Inputs:  [CLAIM_COMMITMENT, pad(12)]
+#! Outputs: [security_descriptor(12), D]
+#!
+#! Invocation: call
+proc verify_proof_inner(claim_commitment: types::Digest) -> (types::StackSecurityDescriptor, types::Digest)
     # --- Authenticate execution claim -----------------------------------------------------------
 
     # Preserve the commitment until public inputs are absorbed after transcript initialization.
     exec.layout::claim_commitment_ptr mem_storew_le
+    # => [CLAIM_COMMITMENT, pad(12)]
+
     exec.layout::claim_ptr exec.claim::materialize_claim
-    # => [...]
+    # => [scratch(16)]
 
     # --- Prepare MVM verifier state --------------------------------------------------------------
 
     exec.utils::load_security_params
+    # => [scratch(16)]
+
     exec.materialize_kernel_witness
+    # => [scratch(16)]
+
     exec.public_inputs::stage_boundary_inputs
+    # => [scratch(16)]
+
     exec.load_air_context
+    # => [scratch(16)]
 
     # --- Verify ----------------------------------------------------------------------------------
 
@@ -357,17 +376,25 @@ pub proc verify_proof(claim_commitment: word) -> (
     procref.ood_frames::process_row_ood_evaluations
     procref.public_inputs::process_public_inputs
     procref.aux_trace::observe_aux_trace
-    # => [D0, D1, D2, D3, D4]
+    # => [D0, D1, D2, D3, D4, scratch(16)]
 
     exec.verifier::verify
-    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, scratch(16)]
 
     # --- Return result ---------------------------------------------------------------------------
 
-    exec.public_inputs::load_deferred_root
-    # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
-    swapw
-    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, D, ...]
     exec.build_security_descriptor
-    # => [security_descriptor, D, ...]
+    # => [security_descriptor(12), scratch(16)]
+
+    # Leave one scratch word for the deferred root.
+    repeat.3
+        movupw.3
+        dropw
+    end
+    # => [security_descriptor(12), scratch(4)]
+
+    swapw.3
+    exec.layout::boundary_inputs_ptr add.DEFERRED_ROOT_OFFSET mem_loadw_le
+    swapw.3
+    # => [security_descriptor(12), D]
 end

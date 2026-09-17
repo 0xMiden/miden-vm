@@ -1,15 +1,57 @@
 # Changelog
 
-## v0.33.0 (Unreleased)
+## v0.34.0 (Unreleased)
 
 #### Features
 
+- [BREAKING] Add a precompile prover memory budget, with a 64GiB default ([#3799](https://github.com/0xMiden/miden-vm/pull/3799)).
 - Added Wasm-compiled custom event handlers: untrusted Wasm modules ship inside a `.masp` package (`event_handlers` section) and run under the wasmi interpreter on any host. New crates: `miden-event-handler-abi` (host/guest ABI contract), `miden-wasm-event-handlers` (host-side runner with fuel, memory, and mutation limits), `miden-event-handler-sdk` + `miden-event-handler-macros` (Rust guest SDK with manifest emission). Also added `ProcessorState::stack_depth` ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 - [BREAKING] The package dependency commitment now binds the `event_handlers` section (next to the account-component metadata), and the semantic sections enter its preimage in a canonical order, so the dependency commitment of a package that carries handlers changes ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 - [BREAKING] `DefaultHost::replace_handler` and `DefaultHost::replace_trace_handler` now return `Result<bool, ExecutionError>` instead of `bool`, because the event name is validated before the handler is registered ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 - [BREAKING] Added the `EmptyEventName` variant to `HostError`. The enum is not `non_exhaustive`, so downstream exhaustive matches must handle it ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 - [BREAKING] Handler registration now rejects the whole reserved `sys::` event-name prefix and empty event names, not only the known system-event names ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 - Added project-assembler support for Wasm event handlers: `miden-assembly` gains a generic package post-processor mechanism (`PackagePostProcessor`, `PostProcessContext`, `ProjectAssembler::with_package_post_processor`), and the new `miden-wasm-event-handlers-project` crate plugs into it. The plugin reads `[package.metadata.midenc.event-handlers]` from `miden-project.toml` (`crate =` builds a Rust guest crate, `module =` reads a prebuilt module), validates the module with the default `WasmHandlerLimits`, and embeds the `event_handlers` section into every package of the project under assembly (never into source dependencies) ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
+
+#### Fixes
+
+- Fixed `IntValue::Felt` Display so it prints canonical hex without byte-swapping ([#3808](https://github.com/0xMiden/miden-vm/pull/3808)).
+
+## v0.33.0 (2026-09-16)
+
+#### Features
+
+- Added `Prover::prove_vm_witness()` so callers can prove a split `VmWitness` without deferred precompile work ([#3837](https://github.com/0xMiden/miden-vm/pull/3837)).
+- [BREAKING] Added optional per-STARK minimum conjectured security enforcement with `Verifier::with_min_conjectured_security_level_per_stark`, rejecting insufficient VM security before native deferred-witness evaluation ([#3850](https://github.com/0xMiden/miden-vm/pull/3850)).
+- [BREAKING] Added Eidos hashing with typed domain separation, including Eidos-backed IES, a counter-mode random coin, and length-bound LMCS implementations, native SIMD acceleration, and batched proof-of-work grinding; existing Poseidon2 variants remain available.
+- Added a MASM example that verifies a batch of MVM proofs and settles their deferred work with one PVM proof ([#3823](https://github.com/0xMiden/miden-vm/pull/3823)).
+
+#### Fixes
+
+- Fixed `PartialMmr::from_parts()` and deserialization so they reject tracked leaves without complete authentication paths ([#3809](https://github.com/0xMiden/miden-vm/pull/3809)).
+- Fixed exponential traversal of shared deferred-state DAGs during precompile prover session construction by caching translated nodes and counting shared claim uses ([#3798](https://github.com/0xMiden/miden-vm/pull/3798)).
+- Fixed `PartialMmr::track()` panicking when a leaf position did not belong to the tree selected by its authentication path ([#3804](https://github.com/0xMiden/miden-vm/pull/3804)).
+- [BREAKING] Fixed `bound_into_included_u64` converting excluded start bounds in the wrong direction. The function now returns `Option<u64>` and uses `None` when an exclusive endpoint has no inclusive `u64` value ([#3589](https://github.com/0xMiden/miden-vm/pull/3589)).
+- Fixed 46 `\begin{cases}...\end{cases}` blocks in the assembly instruction reference and stack design docs that were missing the `\\` row separator between cases, which broke KaTeX rendering ([#3650](https://github.com/0xMiden/miden-vm/issues/3650)).
+- [BREAKING] Fixed caller stack preservation in the MVM and PVM MASM verifiers and updated their roots ([#3823](https://github.com/0xMiden/miden-vm/pull/3823)).
+
+#### Changes
+
+- [BREAKING] Removed `ExecutionProof::is_complete()` ([#3822](https://github.com/0xMiden/miden-vm/pull/3822)).
+- [BREAKING] Run the MVM and PVM recursive verifiers in isolated execution contexts, preserving caller memory. This changes both verifier MAST roots ([#3832](https://github.com/0xMiden/miden-vm/pull/3832)).
+- [BREAKING] Replaced hydrated precompile witnesses with portable singleton witnesses and moved batching into `Prover::prove_precompiles`, preserving input root order and duplicates. Deferred verification evaluates the carried witness and checks its recomputed root against the VM obligation. `PrecompileWitness::root_unchecked()` returns the structural commitment; `compute_root(registry)` validates the computations ([#3811](https://github.com/0xMiden/miden-vm/pull/3811)).
+- [BREAKING] Bumped `ExecutionProof` and `ExecutionWitness` transport formats to version 2. Version-1 execution proofs and witnesses from v0.32.1 are rejected, including those without precompile work. No legacy reader or conversion is provided. Producer and consumer upgrades must be coordinated; retained proofs and proving jobs can be discarded and regenerated at the upgrade boundary ([#3811](https://github.com/0xMiden/miden-vm/pull/3811)).
+
+## v0.32.1 (2026-09-09)
+
+#### Changes
+
+- Added type signatures for all procedures in the Miden core library ([#3791](https://github.com/0xMiden/miden-vm/pull/3791)). **NOTE:** This changes the package identity of the core library and any packages which dynamically link it. Packages which were assembled against 0.32.0 of the core library will need to be re-assembled (unless they statically linked the core library), otherwise executors that only load the latest version of the core library for you will be unable to resolve the older dependency.
+- Automatically infer procedure calling convention from known protocol ABI attributes ([#3802](https://github.com/0xMiden/miden-vm/pull/3802)).
+
+#### Fixes
+
+- Preserved the public `ParsingError` enum layout while adding protocol ABI attribute checks ([#3812](https://github.com/0xMiden/miden-vm/pull/3812)).
+- Fixed issue where parsing of pointer types dropped address space information ([#3790](https://github.com/0xMiden/miden-vm/pull/3790)).
 
 ## v0.32.0 (2026-09-05)
 
@@ -18,6 +60,8 @@
 - Cached loaded MAST forests in `FastProcessor` so repeated external calls reuse the forest and merge its advice map once ([#3764](https://github.com/0xMiden/miden-vm/pull/3764)).
 - [BREAKING] Removed the trace bus debugger APIs from `miden-air` and the `bus-debugger` feature from `miden-processor` ([#3775](https://github.com/0xMiden/miden-vm/pull/3775)).
 - [BREAKING] Bumped Plonky3 related dependencies to v0.7.0 ([#3778](https://github.com/0xMiden/miden-vm/pull/3778)).
+
+#### Features
 
 #### Fixes
 - Fixed stack overflow in the precompile prover's `translate_truthy`, `translate_uint`, and `translate_ec` by converting them from recursive to iterative post-order traversals. Programs with many `LOGDEFERRED` calls no longer crash ([#3626](https://github.com/0xMiden/miden-vm/issues/3626)).

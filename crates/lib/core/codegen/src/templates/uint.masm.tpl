@@ -27,10 +27,15 @@ const SUB_TAG = {{SUB_TAG}}
 const MUL_TAG = {{MUL_TAG}}
 const EQ_TAG = {{EQ_TAG}}
 
+#! Deferred expression digest for this arithmetic domain.
+pub type Expr = struct { digest: word }
+#! Canonical value as eight little-endian u32 limbs.
+pub type Value = struct { limbs: [u32; 8] }
+
 #! Loads one canonical {{VALUE_KIND}} value from the operand stack and returns its deferred digest.
 #! Input:  [VALUE_U32[8], ...]
 #! Output: [VALUE_DIGEST, ...]
-pub proc load
+pub proc load(value: Value) -> Expr
     push.VALUE_TAG
     # => [TAG(VALUE), VALUE_LO, VALUE_HI, ...]
     exec.precompiles::register_expr
@@ -43,7 +48,7 @@ end
 #!
 #! `ptr` must address eight consecutive u32-range felts and be word-aligned for the
 #! `mem_stream` used by the deferred data registration helper.
-pub proc load_mem_stream
+pub proc load_mem_stream(ptr: ptr<Value>) -> (Expr, ptr<Value>)
     push.VALUE_TAG
     # => [TAG(VALUE), ptr, ...]
     push.1 movdn.5
@@ -66,7 +71,7 @@ end
 #!
 #! `ptr` must address eight consecutive u32-range felts and be word-aligned for
 #! `load_mem_stream`.
-pub proc load_mem
+pub proc load_mem(ptr: ptr<Value>) -> Expr
     exec.load_mem_stream
     # => [VALUE_DIGEST, ptr+8, ...]
     movup.4 drop
@@ -74,39 +79,39 @@ pub proc load_mem
 end
 
 #! Pushes the registered digest of constant 0.
-pub proc push_zero_digest
+pub proc push_zero_digest() -> Expr
     push.{{ZERO_DIGEST}}
 end
 
 #! Pushes the raw little-endian u32 limbs of constant 0.
 #! Output: [VALUE_U32[8], ...]
-pub proc push_zero_value
+pub proc push_zero_value() -> Value
     # Inline constant: raw canonical limbs for constant 0.
     push.{{ZERO_HI_WORD}}
     push.{{ZERO_LO_WORD}}
 end
 
 #! Pushes the registered digest of constant 1.
-pub proc push_one_digest
+pub proc push_one_digest() -> Expr
     push.{{ONE_DIGEST}}
 end
 
 #! Pushes the raw little-endian u32 limbs of constant 1.
 #! Output: [VALUE_U32[8], ...]
-pub proc push_one_value
+pub proc push_one_value() -> Value
     # Inline constant: raw canonical limbs for constant 1.
     push.{{ONE_HI_WORD}}
     push.{{ONE_LO_WORD}}
 end
 
 #! Pushes the registered digest of constant 2.
-pub proc push_two_digest
+pub proc push_two_digest() -> Expr
     push.{{TWO_DIGEST}}
 end
 
 #! Pushes the raw little-endian u32 limbs of constant 2.
 #! Output: [VALUE_U32[8], ...]
-pub proc push_two_value
+pub proc push_two_value() -> Value
     # Inline constant: raw canonical limbs for constant 2.
     push.{{TWO_HI_WORD}}
     push.{{TWO_LO_WORD}}
@@ -116,7 +121,7 @@ end
 #! Registers `lhs + rhs` and returns the result expression digest.
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [SUM_DIGEST, ...]
-pub proc add
+pub proc add(lhs: Expr, rhs: Expr) -> Expr
     push.ADD_TAG
     # => [TAG(ADD), LHS_DIGEST, RHS_DIGEST, ...]
     exec.precompiles::register_expr
@@ -126,7 +131,7 @@ end
 #! Registers `lhs - rhs` and returns the result expression digest.
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [DIFF_DIGEST, ...]
-pub proc sub
+pub proc sub(lhs: Expr, rhs: Expr) -> Expr
     push.SUB_TAG
     # => [TAG(SUB), LHS_DIGEST, RHS_DIGEST, ...]
     exec.precompiles::register_expr
@@ -136,7 +141,7 @@ end
 #! Registers `lhs * rhs` and returns the result expression digest.
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [PRODUCT_DIGEST, ...]
-pub proc mul
+pub proc mul(lhs: Expr, rhs: Expr) -> Expr
     push.MUL_TAG
     # => [TAG(MUL), LHS_DIGEST, RHS_DIGEST, ...]
     exec.precompiles::register_expr
@@ -150,7 +155,7 @@ end
 #! This does not trap when the two values differ. Each digest is evaluated independently, and each
 #! advised canonical value is bound by logging an equality assertion against the expression that
 #! produced it. The returned bit is derived in MASM by comparing the two canonical {{VALUE_KIND}} values.
-pub proc is_eq
+pub proc is_eq(lhs: Expr, rhs: Expr) -> i1
     # Evaluate/bind LHS first. `eval` preserves the lower stack, so RHS remains beneath LHS_VALUE.
     exec.eval
     # => [LHS_LO, LHS_HI, RHS_DIGEST, ...]
@@ -180,7 +185,7 @@ end
 #!
 #! This evaluates and binds only the input expression's resulting VALUE digest, then compares that
 #! digest against the registered zero digest. Inequality itself does not trap.
-pub proc is_zero
+pub proc is_zero(value: Expr) -> i1
     exec.push_zero_digest
     # => [ZERO_DIGEST, EXPR_DIGEST, ...]
     exec.is_eq_digest
@@ -193,7 +198,7 @@ end
 #!
 #! This evaluates and binds only the input expression's resulting VALUE digest, then compares that
 #! digest against the registered one digest. Inequality itself does not trap.
-pub proc is_one
+pub proc is_one(value: Expr) -> i1
     exec.push_one_digest
     # => [ONE_DIGEST, EXPR_DIGEST, ...]
     exec.is_eq_digest
@@ -207,7 +212,7 @@ end
 #! Unlike `is_eq`, this does not materialize canonical values. It registers the predicate
 #! `eq(LHS_DIGEST, RHS_DIGEST)` directly; the installed Uint precompile checks equality when the
 #! logged node is evaluated as part of the deferred root.
-pub proc assert_eq
+pub proc assert_eq(lhs: Expr, rhs: Expr)
     push.EQ_TAG
     # => [TAG(EQ), LHS_DIGEST, RHS_DIGEST, ...]
     exec.precompiles::register_expr
@@ -225,7 +230,7 @@ end
 #! pushes only the canonical value payload to advice. MASM derives a VALUE node digest from
 #! the advised payload, logs `eq(EXPR_DIGEST, VALUE_DIGEST)` to bind it, then compares
 #! `VALUE_DIGEST` with `TARGET_DIGEST` to produce a safe boolean.
-pub proc is_eq_digest
+pub proc is_eq_digest(target: Expr, value: Expr) -> i1
     swapw
     # => [EXPR_DIGEST, TARGET_DIGEST, ...]
 
@@ -268,7 +273,7 @@ end
 #! asserts raw digest equality in the VM. This does not evaluate arbitrary expression digests or
 #! independently prove registration or canonicity; callers must establish that VALUE_DIGEST is an
 #! already proof-bound canonical VALUE node for this domain.
-pub proc open_value
+pub proc open_value(value: Expr) -> Value
     adv.evaluate_deferred_payload
     # => [VALUE_DIGEST, ...]
 
@@ -298,7 +303,7 @@ end
 #! pushes only the canonical value payload to advice. MASM derives a VALUE node digest from the
 #! advised payload, logs `eq(EXPR_DIGEST, VALUE_DIGEST)` to bind the result, then returns the
 #! now-safe canonical value.
-pub proc eval
+pub proc eval(value: Expr) -> Value
     # `adv.evaluate_deferred_payload` leaves EXPR_DIGEST on the operand stack and pushes
     # VALUE_U32[8] to advice. Keep EXPR_DIGEST on stack; no need to copy it to locals.
     adv.evaluate_deferred_payload

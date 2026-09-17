@@ -10,7 +10,6 @@ use miden_core::{
     Felt, Word,
     advice::AdviceInputs,
     crypto::hash::Blake3_256,
-    deferred::DeferredState,
     field::QuotientMap,
     program::ExecutionClaim,
     proof::{PrecompileProof, PrecompileStatus},
@@ -288,7 +287,7 @@ fn store_cached_pvm_proof(cache_dir: &Path, cache_key: &str, proof: &PrecompileP
         .unwrap_or_else(|err| panic!("write cached PVM proof {}: {err}", path.display()));
 }
 
-fn execute_pvm_workload(workload_path: &Path) -> DeferredState {
+fn execute_pvm_workload(workload_path: &Path) -> PrecompileWitness {
     let source = std::fs::read_to_string(workload_path)
         .unwrap_or_else(|err| panic!("read {}: {err}", workload_path.display()));
     let input_file = InputFile::read(&None, workload_path)
@@ -320,19 +319,20 @@ fn execute_pvm_workload(workload_path: &Path) -> DeferredState {
             .expect("construct processor for canonical PVM workload")
             .execute_sync(&program, &mut host)
             .expect("execute canonical PVM workload");
-    output.deferred_state
+    output
+        .precompile_witness
+        .expect("canonical workload must produce deferred work")
 }
 
-fn generate_pvm_proof(deferred_state: &DeferredState) -> PrecompileProof {
-    eprintln!("proving canonical deferred state with Poseidon2...");
-    let witness = PrecompileWitness::new(deferred_state.clone())
-        .expect("canonical workload must produce a precompile witness");
+fn generate_pvm_proof(witness: PrecompileWitness) -> PrecompileProof {
+    eprintln!("proving canonical precompile witness with Poseidon2...");
+    let root = witness.root_unchecked();
     let proof = Prover::new()
         .with_hash_fn(HashFunction::Poseidon2)
-        .prove_precompile(&witness)
-        .expect("prove canonical deferred state");
+        .prove_precompiles(vec![witness])
+        .expect("prove canonical precompile witness");
     Verifier::new()
-        .verify_precompile(&proof, deferred_state.root())
+        .verify_precompile(&proof, root)
         .expect("verify generated PVM proof natively");
     proof
 }
@@ -341,14 +341,14 @@ fn load_pvm_proof(config: &BenchConfig) -> PrecompileProof {
     let workload_path = canonical_pvm_workload_path();
     let cache_key = pvm_proof_cache_key(&workload_path);
     eprintln!("executing canonical 100-Keccak/4-ECDSA workload...");
-    let deferred_state = execute_pvm_workload(&workload_path);
+    let witness = execute_pvm_workload(&workload_path);
     let cached = config.pvm_proof_cache_dir().and_then(|cache_dir| {
-        load_cached_pvm_proof(cache_dir, cache_key.as_str(), deferred_state.root())
+        load_cached_pvm_proof(cache_dir, cache_key.as_str(), witness.root_unchecked())
     });
     let (proof, cache_status) = if let Some(proof) = cached {
         (proof, "hit")
     } else {
-        let proof = generate_pvm_proof(&deferred_state);
+        let proof = generate_pvm_proof(witness);
         if let Some(cache_dir) = config.pvm_proof_cache_dir() {
             store_cached_pvm_proof(cache_dir, cache_key.as_str(), &proof);
         }

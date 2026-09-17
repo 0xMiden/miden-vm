@@ -229,6 +229,13 @@ impl Poseidon2Requires {
         Self::default()
     }
 
+    pub(crate) fn trace_height(&self) -> Option<usize> {
+        (self.next_seq as usize)
+            .checked_mul(PERIOD)?
+            .checked_next_power_of_two()
+            .map(|height| height.max(PERIOD))
+    }
+
     /// Compute the absorption digest of `(cap, blocks)` without
     /// recording it. Useful for callers that intern at their own layer
     /// (e.g. a top-level orchestrator keys its dedup map on this
@@ -369,7 +376,9 @@ impl Poseidon2Requires {
 /// the design notes); the chiplet consumes no `Range16`.
 pub fn generate_trace(requires: Poseidon2Requires) -> RowMajorMatrix<Felt> {
     let total_cycles = requires.next_seq as usize;
-    let height = (total_cycles * PERIOD).next_power_of_two().max(PERIOD);
+    let height = requires
+        .trace_height()
+        .expect("Poseidon2 trace height exceeds the host power-of-two range");
     let num_cycles = height / PERIOD;
 
     let mut trace = Vec::with_capacity(height * NUM_MAIN_COLS);

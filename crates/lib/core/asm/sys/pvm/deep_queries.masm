@@ -1,3 +1,4 @@
+use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use miden::core::stark::deep_queries
@@ -32,7 +33,13 @@ const LEAF_VALUE_MISMATCH = "hash of leaf pre-image does not match leaf value fr
 #!
 #! Inputs:  [Y, query_ptr, query_end_ptr, W, query_ptr]
 #! Outputs: []
-pub proc compute_deep_composition_polynomial_queries
+pub proc compute_deep_composition_polynomial_queries(
+    scratch: word,
+    query_ptr: ptr<word>,
+    query_end_ptr: ptr<word>,
+    fixed_terms: types::EvaluationPair,
+    queries_start: ptr<word>,
+)
     # The verifier checks earlier that there is at least one query.
     push.1
     while.true
@@ -54,7 +61,10 @@ end
 #!
 #! Inputs:  [Y, query_ptr]
 #! Outputs: [Y, q_x_0, q_x_1, q_x_0, q_x_1, index, query_ptr]
-proc load_query_row
+proc load_query_row(
+    scratch: word,
+    query_ptr: ptr<word>,
+) -> (word, types::EvaluationPair, u32, ptr<word>)
     exec.process_preprocessed_trace
     #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
@@ -75,7 +85,10 @@ end
 #! Starts the row reduction with the setup-fixed preprocessed trace. The Merkle lookup uses
 #! `index & ((1 << 19) - 1)`, while the original full-depth index remains on the stack for the
 #! other commitment groups and the final DEEP-domain evaluation.
-proc process_preprocessed_trace
+proc process_preprocessed_trace(
+    scratch: word,
+    query_ptr: ptr<word>,
+) -> (word, types::HornerState, u8, u32, ptr<word>)
     # Load [index, full_depth, index, 0] from the query word.
     dup.4 mem_loadw_le
     #=> [index, full_depth, y, y, query_ptr]
@@ -105,7 +118,10 @@ proc process_preprocessed_trace
     assert_eqw.err=LEAF_VALUE_MISMATCH
 end
 
-proc load_preprocessed_trace
+proc load_preprocessed_trace(
+    state: types::PoseidonState,
+    evaluation: types::HornerState,
+) -> (types::PoseidonState, types::HornerState)
     repeat.PREPROCESSED_ROW_DOUBLE_WORDS
         adv_pipe
         horner_eval_base
@@ -116,7 +132,13 @@ end
 # MAIN TRACE
 # =================================================================================================
 
-proc process_main_trace
+proc process_main_trace(
+    scratch: word,
+    evaluation: types::HornerState,
+    depth: u8,
+    index: u32,
+    query_ptr: ptr<word>,
+) -> (word, types::HornerState, u8, u32, ptr<word>)
     exec.constants::main_trace_com_ptr mem_loadw_le
 
     dup.9 dup.9
@@ -132,7 +154,10 @@ proc process_main_trace
     assert_eqw.err=LEAF_VALUE_MISMATCH
 end
 
-proc load_main_trace
+proc load_main_trace(
+    state: types::PoseidonState,
+    evaluation: types::HornerState,
+) -> (types::PoseidonState, types::HornerState)
     repeat.MAIN_ROW_DOUBLE_WORDS
         adv_pipe
         horner_eval_base
@@ -143,7 +168,13 @@ end
 # AUXILIARY TRACE
 # =================================================================================================
 
-proc process_aux_trace
+proc process_aux_trace(
+    scratch: word,
+    evaluation: types::HornerState,
+    depth: u8,
+    index: u32,
+    query_ptr: ptr<word>,
+) -> (word, types::HornerState, u8, u32, ptr<word>)
     exec.constants::aux_trace_com_ptr mem_loadw_le
 
     dup.9 dup.9
@@ -159,7 +190,10 @@ proc process_aux_trace
     assert_eqw.err=LEAF_VALUE_MISMATCH
 end
 
-proc load_aux_trace
+proc load_aux_trace(
+    state: types::PoseidonState,
+    evaluation: types::HornerState,
+) -> (types::PoseidonState, types::HornerState)
     repeat.AUX_ROW_DOUBLE_WORDS
         adv_pipe
         horner_eval_base
@@ -170,7 +204,13 @@ end
 # QUOTIENT TRACE
 # =================================================================================================
 
-proc process_quotient_trace
+proc process_quotient_trace(
+    scratch: word,
+    evaluation: types::HornerState,
+    depth: u8,
+    index: u32,
+    query_ptr: ptr<word>,
+) -> (word, types::HornerState, u32, ptr<word>)
     exec.constants::composition_poly_com_ptr mem_loadw_le
 
     dup.9 movup.9
@@ -187,7 +227,10 @@ proc process_quotient_trace
     assert_eqw.err=LEAF_VALUE_MISMATCH
 end
 
-proc load_quotient_trace
+proc load_quotient_trace(
+    state: types::PoseidonState,
+    evaluation: types::HornerState,
+) -> (types::PoseidonState, types::HornerState)
     repeat.QUOTIENT_ROW_DOUBLE_WORDS
         adv_pipe
         horner_eval_base

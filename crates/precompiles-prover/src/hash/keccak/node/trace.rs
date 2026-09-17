@@ -111,8 +111,9 @@ impl KeccakNodeInvocation {
 /// the design notes), so padding rows (`out_mult = 0`) touch
 /// no bus.
 pub fn generate_trace(requires: KeccakNodeRequires) -> RowMajorMatrix<Felt> {
-    let active_rows = requires.total_rows() as usize;
-    let height = active_rows.next_power_of_two().max(2);
+    let height = requires
+        .trace_height()
+        .expect("keccak-node trace height exceeds the host power-of-two range");
     let mut trace = Vec::with_capacity(height * NUM_MAIN_COLS);
 
     for rec in &requires.records {
@@ -219,6 +220,21 @@ impl KeccakNodeRequires {
         Self::default()
     }
 
+    pub(crate) fn trace_height(&self) -> Option<usize> {
+        (self.total_rows() as usize)
+            .checked_next_power_of_two()
+            .map(|height| height.max(2))
+    }
+
+    /// Count additional uses of an already registered claim without repeating its hashing work.
+    pub(crate) fn add_consumers(&mut self, row: u32, consumers: ProvideMult) {
+        let invocation = &mut self.records[row as usize].invocation;
+        invocation.out_mult = invocation
+            .out_mult
+            .checked_add(consumers)
+            .expect("too many Keccak claim consumers");
+    }
+
     /// Register a Keccak invocation. Empty input is supported: it absorbs
     /// one pad block (`keccak256("")`) and the chunk layer lays one
     /// canonical zero chunk, so the chunk-content P2 chain tail this node
@@ -241,7 +257,8 @@ impl KeccakNodeRequires {
         // count by bus balance — no `2^16` cap, no row split).
         if let Some(&idx) = self.by_keccak.get(&keccak_digest) {
             let rec = &mut self.records[idx];
-            rec.invocation.out_mult += 1;
+            rec.invocation.out_mult =
+                rec.invocation.out_mult.checked_add(1).expect("too many Keccak claim consumers");
             return KeccakNodeOutput {
                 keccak_digest,
                 h_keccak: rec.h_keccak,
