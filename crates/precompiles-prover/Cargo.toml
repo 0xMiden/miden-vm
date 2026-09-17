@@ -52,3 +52,4 @@ k256 = { workspace = true, features = ["arithmetic"] }
 miden-air = { workspace = true, features = ["std"] }
 miden-precompiles-verifier = { workspace = true, features = ["std"] }
 rand = { workspace = true, features = ["std_rng"] }
+tracing = { workspace = true, features = ["std"] }
