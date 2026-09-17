@@ -1938,7 +1938,10 @@ fn test_protocol_abi_conflicting_callconv_in_either_order() {
                         format!("{annotations}\npub proc foo() -> i1\n    push.1\nend\n")
                     );
                     let error = context.parse_forms(source).expect_err(&annotations);
-                    assert_diagnostic!(error, "this attribute conflicts with another attribute");
+                    assert_diagnostic!(
+                        error,
+                        "@callconv conflicts with convention implied by other attribute"
+                    );
                 }
             }
         }
@@ -1961,7 +1964,7 @@ fn test_protocol_abi_conflicting_attribute_forms_are_rejected() {
                         format!("{annotations}\npub proc foo() -> i1\n    push.1\nend\n")
                     );
                     let error = context.parse_forms(source).expect_err(&annotations);
-                    assert_diagnostic!(error, "this attribute conflicts with another attribute");
+                    assert_diagnostic!(error, "a different ABI was previously specified");
                 }
             }
         }
@@ -2022,10 +2025,10 @@ end
         "1 |",
         "2 | @account_procedure",
         "  : ^^^^^^^^^|^^^^^^^^",
-        "  :          `-- conflicting attribute here",
+        "  :          `-- this attribute implies @callconv(\"component-model\")",
         "3 | @callconv(\"C\")",
         "  : ^^^^^^^|^^^^^^",
-        "  :        `-- this attribute conflicts with another attribute",
+        "  :        `-- conflict occurs because @callconv conflicts with convention implied by other attribute",
         "4 | proc foo() -> i1",
         "  `----"
     );
@@ -2060,10 +2063,10 @@ end
         "1 |",
         "2 | @account_procedure",
         "  : ^^^^^^^^^|^^^^^^^^",
-        "  :          `-- conflicting attribute here",
+        "  :          `-- this attribute already specifies the protocol ABI for this procedure",
         "3 | @note_script",
         "  : ^^^^^^|^^^^^",
-        "  :       `-- this attribute conflicts with another attribute",
+        "  :       `-- this attribute specifies the protocol ABI of this procedure, but a different ABI was previously specified",
         "4 | proc foo() -> i1",
         "  `----"
     );
