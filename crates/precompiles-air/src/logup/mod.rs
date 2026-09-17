@@ -30,10 +30,9 @@
 //! transition/last gate costs +1 degree over the older ungated σ/n-cyclic
 //! form; 0.26's per-AIR quotient coset absorbs it.
 //!
-//! Prover-side: [`build_logup_aux_trace`] runs miden's stock `build_lookup_fractions` +
-//! normalized `accumulate`, adds `r * sigma_prime` back to column 0 to recover the plain running
-//! sum (`aux[r] = Σ_{i<r} delta_i`), and commits `sigma = n * sigma_prime`. Fraction columns are
-//! kept verbatim.
+//! Prover-side: [`build_logup_aux_trace`] uses the shared centered trace builder, adds
+//! `r * sigma_prime` to column 0 to recover the plain running sum (`aux[r] = Σ_{i<r} delta_i`),
+//! and commits `sigma = n * sigma_prime`. Fraction columns retain their per-row values.
 //!
 //! ## Encoding
 //!

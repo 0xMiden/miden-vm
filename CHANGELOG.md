@@ -5,6 +5,9 @@
 #### Features
 
 - [BREAKING] Add a precompile prover memory budget, with a 64GiB default ([#3799](https://github.com/0xMiden/miden-vm/pull/3799)).
+#### Changes
+
+- Improved lifted STARK prover performance: LogUp fractions are built and accumulated in row chunks with a parallel accumulator scan, and DEEP reduction avoids element-wise buffer swaps and per-height group buffers ([#3851](https://github.com/0xMiden/miden-vm/pull/3851)).
 
 #### Fixes
 
@@ -15,6 +18,10 @@
 #### Changes
 
 - Reworked the `MastForest` `Arbitrary` impl. `GenerationMode::Executable` (the default) yields forests whose procedure roots run to completion on any operand stack: infallible, stack-balanced basic blocks, binary split and loop conditions, externals that resolve to local roots, and syscalls into a paired `KernelDescriptor` exposed through `forest_kernel_strategy`. `GenerationMode::StructureOnly` keeps the permissive behavior ([#3158](https://github.com/0xMiden/miden-vm/pull/3158)).
+
+#### Changes
+
+- [BREAKING] Made the public `ParsingError` enum `#[non_exhaustive]` and restored separate variants for protocol ABI conflicts ([#3859](https://github.com/0xMiden/miden-vm/pull/3859)).
 
 ## v0.33.0 (2026-09-16)
 
