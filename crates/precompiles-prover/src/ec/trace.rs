@@ -179,6 +179,18 @@ impl EcStoreRequires {
         Self::default()
     }
 
+    pub(crate) fn trace_height(&self) -> Option<usize> {
+        Some(self.groups_trace_height()?.max(self.points_trace_height()?))
+    }
+
+    fn groups_trace_height(&self) -> Option<usize> {
+        self.groups.len().checked_next_power_of_two().map(|height| height.max(2))
+    }
+
+    fn points_trace_height(&self) -> Option<usize> {
+        self.points.len().checked_next_power_of_two().map(|height| height.max(2))
+    }
+
     /// Bind a group to its curve params (uints sharing the modulus at
     /// `bound`). VM-owned fixed curves return their preseeded row with a
     /// canonical scalar bound; ad-hoc groups start vacuous. **Deduped by
@@ -388,7 +400,10 @@ pub(crate) fn groups_trace_padded_to(
     min_height: usize,
 ) -> RowMajorMatrix<Felt> {
     debug_assert!(min_height == 0 || min_height.is_power_of_two());
-    let height = requires.groups.len().next_power_of_two().max(2).max(min_height);
+    let height = requires
+        .groups_trace_height()
+        .expect("EC groups trace height exceeds the host power-of-two range")
+        .max(min_height);
     let mut vals = Vec::with_capacity(height * G_NUM_MAIN_COLS);
 
     for i in 0..height {
@@ -415,7 +430,9 @@ pub(crate) fn groups_trace_padded_to(
 /// (ptr = row + 1), padded to a power-of-two height (min 2) with
 /// all-zero (`act = 0`) rows that touch no bus.
 pub(crate) fn points_trace(requires: &EcStoreRequires) -> RowMajorMatrix<Felt> {
-    let height = requires.points.len().next_power_of_two().max(2);
+    let height = requires
+        .points_trace_height()
+        .expect("EC points trace height exceeds the host power-of-two range");
     let mut vals = Vec::with_capacity(height * NUM_MAIN_COLS);
 
     for (i, point) in requires.points.iter().enumerate() {

@@ -91,9 +91,8 @@ impl SessionTraces {
         let mut challenger = config.challenger();
         observe_protocol_params(config.pcs(), &mut challenger);
 
-        let output: StarkOutput<Felt, QuadFelt, SC> =
-            ProverInstance::new(config, &prover_statement, Some(preprocessed))?
-                .prove(challenger)?;
+        let (output, _statement): (StarkOutput<Felt, QuadFelt, SC>, _) =
+            ProverInstance::new(config, prover_statement, Some(preprocessed))?.prove(challenger)?;
 
         let proof_encoding_config = wincode::config::Configuration::default();
         let proof_bytes = <SerdeCompat<StarkProofData<Felt, QuadFelt, SC>> as wincode::config::Serialize<

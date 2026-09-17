@@ -181,6 +181,14 @@ impl EcMsmRequires {
         Self::default()
     }
 
+    pub(crate) fn trace_height(&self) -> Option<usize> {
+        let rows = self
+            .exprs
+            .iter()
+            .try_fold(0usize, |rows, expr| rows.checked_add(expr.rows.len()))?;
+        rows.max(1).checked_next_power_of_two().map(|height| height.max(2))
+    }
+
     /// The expression a prior `intro` of `base` produced, if any — a repeat
     /// reuses it instead of laying a second `⟨base × 1⟩`.
     pub fn lookup_intro(&self, base: EcPointPtr) -> Option<EcExprPtr> {
@@ -633,8 +641,10 @@ pub fn generate_trace(
     store: &mut UintStoreRequires,
     bpl: &mut BytePairLutRequires,
 ) -> RowMajorMatrix<Felt> {
-    let n_real: usize = requires.exprs.iter().map(|e| e.rows.len()).sum();
-    let height = n_real.max(1).next_power_of_two().max(2);
+    let n_real: usize = requires.exprs.iter().map(|expr| expr.rows.len()).sum();
+    let height = requires
+        .trace_height()
+        .expect("EC-MSM trace height exceeds the host power-of-two range");
     let mut vals = Vec::with_capacity(height * NUM_MAIN_COLS);
 
     for (e_idx, e) in requires.exprs.iter().enumerate() {
