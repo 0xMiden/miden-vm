@@ -16,7 +16,9 @@ use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
 
 mod errors;
 pub use errors::AdviceError;
+use miden_event_handler::AdviceBatch;
 
+#[allow(deprecated)] // apply_mutations is the compatibility adapter.
 use crate::{ExecutionOptions, host::AdviceMutation, processor::AdviceProviderInterface};
 
 // CONSTANTS
@@ -154,90 +156,68 @@ impl AdviceProvider {
         Ok(())
     }
 
-    #[cfg(test)]
-    #[expect(dead_code)]
+    pub(crate) fn stack_ref(&self) -> &AdviceStack {
+        &self.stack
+    }
+
     pub(crate) fn merkle_store(&self) -> &MerkleStore {
         &self.store
     }
 
-    /// Applies the mutations given in order to the `AdviceProvider`.
+    /// Applies legacy mutations through the same whole-batch validation as portable callbacks.
+    #[deprecated(note = "use apply_batch with miden_event_handler::AdviceBatch")]
+    #[allow(deprecated)] // Legacy mutation conversion.
     pub fn apply_mutations(
         &mut self,
         mutations: impl IntoIterator<Item = AdviceMutation>,
     ) -> Result<(), AdviceError> {
-        let mutations = mutations.into_iter().collect::<Vec<_>>();
-        self.validate_mutations(&mutations)?;
-        mutations.into_iter().try_for_each(|mutation| self.apply_mutation(mutation))
+        let mut batch = AdviceBatch::new();
+        crate::host::handlers::record_mutations(&mut batch.recorder(), mutations);
+        self.apply_batch(batch)
     }
 
-    fn validate_mutations(&self, mutations: &[AdviceMutation]) -> Result<(), AdviceError> {
-        let mut added_bytes = 0usize;
+    /// Validates the complete batch before mutating any category. After admission, application is
+    /// synchronous and infallible; equal map repeats are charged once and all duplicates are
+    /// checked.
+    pub fn apply_batch(&mut self, batch: AdviceBatch) -> Result<(), AdviceError> {
+        let (stack, entries, nodes) = batch.into_parts();
+        let mut added_bytes = Self::felt_bytes(stack.len())?;
         let mut new_map_entries = BTreeMap::<Word, &[Felt]>::new();
-        let mut new_merkle_nodes = BTreeSet::new();
-
-        for mutation in mutations {
-            match mutation {
-                AdviceMutation::ExtendStack { stack } => {
-                    let added = Self::felt_bytes(stack.len())?;
-                    added_bytes = added_bytes
-                        .checked_add(added)
-                        .ok_or_else(|| self.budget_error(usize::MAX))?;
-                },
-                AdviceMutation::ExtendMap { map } => {
-                    for (key, values) in map.iter() {
-                        let values = values.as_ref();
-                        let existing_values = self
-                            .map
-                            .get(key)
-                            .map(AsRef::as_ref)
-                            .or_else(|| new_map_entries.get(key).copied());
-                        if let Some(existing_values) = existing_values {
-                            if existing_values != values {
-                                return Err(AdviceError::MapKeyAlreadyPresent {
-                                    key: *key,
-                                    prev_values: existing_values.to_vec(),
-                                    new_values: values.to_vec(),
-                                });
-                            }
-                            continue;
-                        }
-
-                        new_map_entries.insert(*key, values);
-                        let added = Self::map_entry_bytes(values.len())?;
-                        added_bytes = added_bytes
-                            .checked_add(added)
-                            .ok_or_else(|| self.budget_error(usize::MAX))?;
-                    }
-                },
-                AdviceMutation::ExtendMerkleStore { inner_nodes } => {
-                    for node in inner_nodes {
-                        if !self.store.contains_internal_node(node.value)
-                            && new_merkle_nodes.insert(node.value)
-                        {
-                            added_bytes = added_bytes
-                                .checked_add(INTERNAL_NODE_SIZE_BYTES)
-                                .ok_or_else(|| self.budget_error(usize::MAX))?;
-                        }
-                    }
-                },
+        for (key, values) in &entries {
+            let values = values.as_ref();
+            let existing = self
+                .map
+                .get(key)
+                .map(AsRef::as_ref)
+                .or_else(|| new_map_entries.get(key).copied());
+            if let Some(existing) = existing {
+                if existing != values {
+                    return Err(AdviceError::MapKeyAlreadyPresent {
+                        key: *key,
+                        prev_values: existing.to_vec(),
+                        new_values: values.to_vec(),
+                    });
+                }
+            } else {
+                new_map_entries.insert(*key, values);
+                added_bytes = added_bytes
+                    .checked_add(Self::map_entry_bytes(values.len())?)
+                    .ok_or_else(|| self.budget_error(usize::MAX))?;
             }
         }
+        let added_nodes = self.store.new_internal_node_count(nodes.iter().map(|node| node.value));
+        added_bytes = added_bytes
+            .checked_add(Self::merkle_node_bytes(added_nodes)?)
+            .ok_or_else(|| self.budget_error(usize::MAX))?;
+        self.check_advice_size_addition(added_bytes)?;
 
-        self.check_advice_size_addition(added_bytes)
-    }
-
-    fn apply_mutation(&mut self, mutation: AdviceMutation) -> Result<(), AdviceError> {
-        match mutation {
-            AdviceMutation::ExtendStack { stack } => {
-                self.extend_advice_stack(stack)?;
-            },
-            AdviceMutation::ExtendMap { map } => {
-                self.extend_map(&map)?;
-            },
-            AdviceMutation::ExtendMerkleStore { inner_nodes } => {
-                self.extend_merkle_store(inner_nodes)?;
-            },
+        self.stack.prepend_stack(stack);
+        for (key, values) in entries {
+            self.map.entry(key).or_insert(values);
         }
+        self.store.extend(nodes);
+        self.merkle_store_node_count += added_nodes;
+        self.advice_size_bytes += added_bytes;
         Ok(())
     }
 
@@ -708,11 +688,14 @@ impl AdviceProvider {
 
     /// Extends the contents of this instance with the contents of an `AdviceInputs`.
     pub fn extend_from_inputs(&mut self, inputs: &AdviceInputs) -> Result<(), AdviceError> {
-        self.apply_mutations([
-            AdviceMutation::extend_advice_stack(inputs.stack()),
-            AdviceMutation::extend_merkle_store(inputs.store().inner_nodes()),
-            AdviceMutation::extend_map(inputs.map().clone()),
-        ])
+        let mut batch = AdviceBatch::new();
+        let mut advice = batch.recorder();
+        advice.prepend_stack(inputs.stack().into_elements());
+        for (key, values) in inputs.map().iter() {
+            advice.insert_map_entry(*key, values.clone());
+        }
+        advice.extend_merkle_store(inputs.store().inner_nodes());
+        self.apply_batch(batch)
     }
 
     /// Consumes `self` and return its parts (stack, map, store).
@@ -765,12 +748,14 @@ impl AdviceProviderInterface for AdviceProvider {
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // Legacy mutation acceptance is intentional coverage.
 mod tests {
     use alloc::{collections::BTreeMap, vec, vec::Vec};
 
     use miden_core::WORD_SIZE;
+    use miden_event_handler::AdviceBatch;
 
-    use super::AdviceProvider;
+    use super::{AdviceProvider, INTERNAL_NODE_SIZE_BYTES};
     use crate::{
         AdviceInputs, ExecutionOptions, Felt, Word,
         advice::{AdviceError, AdviceMap, AdviceMutation, AdviceStack},
@@ -1142,6 +1127,58 @@ mod tests {
 
         assert!(provider.apply_mutations(mutations).is_err());
         assert_eq!(provider, before);
+    }
+
+    #[test]
+    fn complete_batches_validate_all_categories_before_application() {
+        let key = make_leaf(90);
+        let tree = MerkleTree::new([make_leaf(80), make_leaf(81)]).unwrap();
+        for conflict in 0..4 {
+            let mut provider = AdviceProvider::default();
+            if conflict == 2 {
+                provider.insert_into_map(key, vec![Felt::ZERO]).unwrap();
+            }
+            if conflict == 3 {
+                let limit = provider.advice_size_bytes + INTERNAL_NODE_SIZE_BYTES;
+                provider
+                    .set_options(&ExecutionOptions::default().with_max_advice_size_bytes(limit))
+                    .unwrap();
+            }
+            let before = provider.clone();
+            let mut batch = AdviceBatch::new();
+            batch.recorder().prepend_stack([Felt::ONE]);
+            batch.recorder().insert_map_entry(key, vec![Felt::ONE]);
+            batch.recorder().extend_merkle_store(tree.inner_nodes());
+            if conflict == 0 {
+                batch.recorder().insert_map_entry(key, vec![Felt::ZERO]);
+            } else if conflict == 1 {
+                let mut child = AdviceBatch::new();
+                child.recorder().insert_map_entry(key, vec![Felt::ZERO]);
+                batch.recorder().import(child);
+            }
+            assert!(provider.apply_batch(batch).is_err(), "case {conflict}");
+            assert_eq!(provider, before, "case {conflict}");
+        }
+    }
+
+    #[test]
+    fn equal_pending_and_live_entries_use_one_budget_allocation() {
+        let key = make_leaf(90);
+        let mut provider = AdviceProvider::default();
+        let required = provider.advice_size_bytes + AdviceProvider::map_entry_bytes(1).unwrap();
+        provider
+            .set_options(&ExecutionOptions::default().with_max_advice_size_bytes(required))
+            .unwrap();
+        for _ in 0..2 {
+            let mut batch = AdviceBatch::new();
+            batch.recorder().insert_map_entry(key, vec![Felt::ONE]);
+            let mut child = AdviceBatch::new();
+            child.recorder().insert_map_entry(key, vec![Felt::ONE]);
+            batch.recorder().import(child);
+            provider.apply_batch(batch).unwrap();
+            assert_eq!(provider.advice_size_bytes, required);
+            assert_eq!(provider.map.len(), 1);
+        }
     }
 
     #[test]

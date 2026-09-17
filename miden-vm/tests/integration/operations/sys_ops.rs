@@ -1,3 +1,4 @@
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 use miden_processor::{
     ExecutionError, ProcessorState, ZERO,
     event::{EventName, NoopEventHandler},
@@ -85,6 +86,7 @@ fn assert_eq_fail() {
 // ================================================================================================
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn emit() {
     // Compute the event ID from the event name
     let event_name = EventName::new("test::emit");
@@ -106,6 +108,7 @@ fn emit_trace_event_without_handler() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn emit_trace_event_with_handler() {
     let trace_name = "test::emit_trace::handler";
 

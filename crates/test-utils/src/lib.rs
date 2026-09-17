@@ -31,11 +31,13 @@ use miden_core::{chiplets::hasher::apply_permutation, events::EventName};
 use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 #[cfg(not(target_family = "wasm"))]
 use miden_processor::trace::build_trace;
+#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
 pub use miden_processor::{
     ContextId, ExecutionError, ProcessorState,
     advice::{AdviceInputs, AdviceProvider, AdviceStack},
     trace::VmTrace,
 };
+#[allow(deprecated)] // Legacy Test storage and builders.
 use miden_processor::{
     DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionWitness, FastProcessor, Program,
     event::{EventHandler, TraceHandler},
@@ -241,6 +243,7 @@ macro_rules! assert_assembler_diagnostic {
 ///   which contains the specified substring.
 /// - Execution error test: check that running a program compiled from the given source causes an
 ///   ExecutionError which contains the specified substring.
+#[allow(deprecated)] // Preserve exact public fields and external struct literals.
 pub struct Test {
     pub source_manager: Arc<DefaultSourceManager>,
     pub source: Arc<SourceFile>,
@@ -254,6 +257,7 @@ pub struct Test {
     pub add_modules: Vec<(Arc<Path>, String)>,
 }
 
+#[allow(deprecated)] // Preserve the existing test harness and its legacy builder signatures.
 impl Test {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
@@ -863,6 +867,7 @@ impl Test {
 }
 
 #[cfg(all(test, feature = "std", not(target_family = "wasm")))]
+#[allow(deprecated)] // Tests exercise the supported legacy harness callbacks.
 mod tests {
     use std::{
         panic::{AssertUnwindSafe, catch_unwind},

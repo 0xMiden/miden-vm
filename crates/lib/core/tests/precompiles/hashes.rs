@@ -1,5 +1,7 @@
 use miden_core::{Felt, utils::bytes_to_packed_u32_elements};
+use miden_core_lib::handlers::precompiles::keccak256::KECCAK256_DIGEST_EVENT_NAME;
 use miden_crypto::hash::keccak::Keccak256;
+use miden_event_handler::MAX_KECCAK_INPUT_BYTES;
 use miden_processor::ExecutionError;
 
 use super::helpers::{
@@ -28,6 +30,31 @@ fn keccak_hash_bytes_mem_handles_short_preimages() {
     let keccak = run_hash_mem("keccak256", "hash_bytes_mem", input, 0)
         .expect("keccak256::hash_bytes_mem must execute");
     assert_eq!(keccak, pack_digest(&Keccak256::hash(input)));
+}
+
+#[test]
+fn keccak_input_limit_is_inclusive_and_checked_before_memory() {
+    // An unaligned pointer makes the exact-limit case stop before allocating the preimage.
+    for (len_bytes, expected) in [
+        (
+            MAX_KECCAK_INPUT_BYTES,
+            "address 1 is not word-aligned (must be divisible by 4)".to_owned(),
+        ),
+        (
+            MAX_KECCAK_INPUT_BYTES + 1,
+            format!(
+                "keccak256 input length {} bytes exceeds maximum of {MAX_KECCAK_INPUT_BYTES} bytes",
+                MAX_KECCAK_INPUT_BYTES + 1
+            ),
+        ),
+    ] {
+        let source =
+            format!("begin push.{len_bytes}.1 emit.event(\"{KECCAK256_DIGEST_EVENT_NAME}\") end");
+        let Err(ExecutionError::EventError { error, .. }) = run_precompile_program(&source) else {
+            panic!("Keccak input should fail before reading memory");
+        };
+        assert_eq!(error.to_string(), expected);
+    }
 }
 
 #[test]

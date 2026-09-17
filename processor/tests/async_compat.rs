@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
+#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host,
     LoadedMastForest, ProcessorState, StackInputs, Word,
@@ -29,6 +30,7 @@ impl BaseHost for YieldingAsyncHost {
     }
 }
 
+#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
 impl Host for YieldingAsyncHost {
     fn get_mast_forest(
         &self,
@@ -173,4 +175,281 @@ async fn execute_async_supports_async_only_host_traces() {
 
     assert_eq!(host.trace_calls, 1);
     assert_eq!(output.stack.get_num_elements(16).len(), 16);
+}
+
+const BOOKKEEPING: EventName = EventName::new("test::bookkeeping");
+
+struct PortableAsyncHost {
+    handlers: miden_processor::event::HandlerRegistry,
+    calls: Vec<(miden_event_handler::InvocationKind, Felt)>,
+    before_await: usize,
+}
+
+impl BaseHost for PortableAsyncHost {
+    fn get_label_and_source_file(&self, _: &Location) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        (SourceSpan::UNKNOWN, None)
+    }
+}
+
+impl Host for PortableAsyncHost {
+    fn get_mast_forest(&self, _: &Word) -> impl FutureMaybeSend<Option<LoadedMastForest>> {
+        async { None }
+    }
+
+    fn handle_event(
+        &mut self,
+        context: miden_event_handler::EventContext<'_>,
+        advice: &mut miden_event_handler::AdviceRecorder<'_>,
+    ) -> impl FutureMaybeSend<Result<(), EventError>> {
+        let registered = self.handlers.handle_event(context.id(), context, advice);
+        if matches!(&registered, Ok(false)) {
+            self.before_await += 1;
+        }
+        async move {
+            if registered? {
+                return Ok(());
+            }
+            tokio::task::yield_now().await;
+            self.calls.push((context.kind(), context.stack_item(0)));
+            if context.kind() == miden_event_handler::InvocationKind::Event
+                && context.id() != BOOKKEEPING.to_event_id()
+            {
+                advice.prepend_stack([context.stack_item(0)]);
+                // Reads continue to see pre-callback state after writes and across await.
+                tokio::task::yield_now().await;
+                assert!(context.advice_stack().is_empty());
+            }
+            Ok(())
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn portable_async_borrows_and_trace_suppression_preserve_regular_delivery() {
+    use miden_event_handler::InvocationKind;
+    let program = Assembler::default()
+        .assemble_program(
+            "program",
+            r#"
+        begin push.7 emit.event("test::portable") trace.event("test::portable") drop end
+    "#,
+        )
+        .unwrap()
+        .unwrap_program();
+    for trace_delivery in [true, false] {
+        let mut host = PortableAsyncHost {
+            handlers: Default::default(),
+            calls: vec![],
+            before_await: 0,
+        };
+        let output = FastProcessor::new_with_options(
+            StackInputs::default(),
+            AdviceInputs::default(),
+            ExecutionOptions::default().with_trace_delivery(trace_delivery),
+        )
+        .unwrap()
+        .execute(&program, &mut host)
+        .await
+        .unwrap();
+        assert_eq!(host.calls[0], (InvocationKind::Event, Felt::from_u32(7)));
+        assert_eq!(host.calls.len(), if trace_delivery { 2 } else { 1 });
+        assert_eq!(host.before_await, host.calls.len());
+        if trace_delivery {
+            assert_eq!(host.calls[1], (InvocationKind::Trace, Felt::from_u32(7)));
+        }
+        assert_eq!(output.stack.get_num_elements(16).len(), 16);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn registry_runs_before_async_fallback_and_bookkeeping_survives_trace_suppression() {
+    use miden_event_handler::{AdviceRecorder, EventContext, InvocationKind};
+    let mut host = PortableAsyncHost {
+        handlers: Default::default(),
+        calls: vec![],
+        before_await: 0,
+    };
+    host.handlers
+        .register(
+            EventName::new("test::registered"),
+            |context: EventContext<'_>, advice: &mut AdviceRecorder<'_>| {
+                context.kind().require(InvocationKind::Event)?;
+                advice.prepend_stack([context.stack_item(0)]);
+                Ok(())
+            },
+        )
+        .unwrap();
+    let program = Assembler::default()
+        .assemble_program(
+            "program",
+            format!(
+                r#"begin push.9 emit.event("test::registered") adv_push push.9 assert_eq drop
+        emit.event("{BOOKKEEPING}") trace.event("test::registered") end"#
+            ),
+        )
+        .unwrap()
+        .unwrap_program();
+    let output = FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default().with_trace_delivery(false),
+    )
+    .unwrap()
+    .execute(&program, &mut host)
+    .await
+    .unwrap();
+    assert_eq!(host.before_await, 1);
+    assert_eq!(host.calls, [(InvocationKind::Event, Felt::ZERO)]);
+    assert!(output.advice.stack().is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn non_send_sync_host_adapts_to_native_send_future() {
+    use std::{cell::Cell, rc::Rc};
+
+    use miden_event_handler::{AdviceBatch, AdviceRecorder, EventContext, Invocation};
+    use miden_processor::SyncHost;
+    struct LocalHost(Rc<Cell<usize>>);
+    impl BaseHost for LocalHost {
+        fn get_label_and_source_file(&self, _: &Location) -> (SourceSpan, Option<Arc<SourceFile>>) {
+            (SourceSpan::UNKNOWN, None)
+        }
+    }
+    impl SyncHost for LocalHost {
+        fn get_mast_forest(&self, _: &Word) -> Option<LoadedMastForest> {
+            None
+        }
+        fn handle_event(
+            &mut self,
+            _: EventContext<'_>,
+            advice: &mut AdviceRecorder<'_>,
+        ) -> Result<(), EventError> {
+            self.0.set(self.0.get() + 1);
+            advice.prepend_stack([Felt::ONE]);
+            Ok(())
+        }
+    }
+    fn assert_send<T: Send>(future: T) -> T {
+        future
+    }
+    let processor = FastProcessor::new(StackInputs::default());
+    let context = EventContext::new(
+        &processor,
+        Invocation::event(EventName::new("test::local").to_event_id(), 0, true),
+    );
+    let mut batch = AdviceBatch::new();
+    let calls = Rc::new(Cell::new(0));
+    let mut host = LocalHost(calls.clone());
+    assert_send(Host::handle_event(&mut host, context, &mut batch.recorder()))
+        .await
+        .unwrap();
+    assert_eq!(calls.get(), 1);
+    assert_eq!(batch.into_parts().0.into_elements(), vec![Felt::ONE]);
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test(flavor = "current_thread")]
+async fn cancelling_a_callback_discards_all_pending_advice() {
+    use std::{
+        future::{Future, pending},
+        task::{Context, Poll, Waker},
+    };
+
+    use miden_event_handler::{AdviceRecorder, EventContext};
+    use miden_processor::crypto::merkle::MerkleTree;
+    struct PendingHost;
+    impl BaseHost for PendingHost {
+        fn get_label_and_source_file(&self, _: &Location) -> (SourceSpan, Option<Arc<SourceFile>>) {
+            (SourceSpan::UNKNOWN, None)
+        }
+    }
+    impl Host for PendingHost {
+        fn get_mast_forest(&self, _: &Word) -> impl FutureMaybeSend<Option<LoadedMastForest>> {
+            async { None }
+        }
+        fn handle_event(
+            &mut self,
+            _: EventContext<'_>,
+            advice: &mut AdviceRecorder<'_>,
+        ) -> impl FutureMaybeSend<Result<(), EventError>> {
+            async move {
+                advice.prepend_stack([Felt::ONE]);
+                advice.insert_map_entry(Word::default(), vec![Felt::ONE]);
+                let tree = MerkleTree::new([
+                    Word::new([Felt::from_u32(3); 4]),
+                    Word::new([Felt::from_u32(4); 4]),
+                ])
+                .unwrap();
+                advice.extend_merkle_store(tree.inner_nodes());
+                pending().await
+            }
+        }
+    }
+    let program = Assembler::default()
+        .assemble_program("program", r#"begin emit.event("test::pending") end"#)
+        .unwrap()
+        .unwrap_program();
+    let initial = FastProcessor::new(StackInputs::default()).into_parts().0;
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let mut host = PendingHost;
+    {
+        let mut future = std::pin::pin!(processor.execute_mut(&program, &mut host));
+        assert!(matches!(
+            future.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Pending
+        ));
+    }
+    let actual = processor.into_parts().0;
+    assert_eq!(actual, initial);
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
+async fn forwarding_to_legacy_host_cannot_fall_back_after_staging_advice() {
+    use miden_event_handler::{AdviceRecorder, EventContext};
+    use miden_processor::SyncHost;
+    struct ForwardingHost {
+        inner: DefaultHost,
+        legacy_calls: usize,
+    }
+    impl BaseHost for ForwardingHost {
+        fn get_label_and_source_file(&self, _: &Location) -> (SourceSpan, Option<Arc<SourceFile>>) {
+            (SourceSpan::UNKNOWN, None)
+        }
+    }
+    impl SyncHost for ForwardingHost {
+        fn get_mast_forest(&self, _: &Word) -> Option<LoadedMastForest> {
+            None
+        }
+        fn handle_event(
+            &mut self,
+            context: EventContext<'_>,
+            advice: &mut AdviceRecorder<'_>,
+        ) -> Result<(), EventError> {
+            advice.prepend_stack([Felt::ONE]);
+            SyncHost::handle_event(&mut self.inner, context, advice)
+        }
+        fn on_event(&mut self, _: &ProcessorState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
+            self.legacy_calls += 1;
+            Ok(vec![])
+        }
+    }
+    let program = Assembler::default()
+        .assemble_program("program", r#"begin emit.event("test::fallback") end"#)
+        .unwrap()
+        .unwrap_program();
+    for asynchronous in [false, true] {
+        let mut host = ForwardingHost {
+            inner: DefaultHost::default(),
+            legacy_calls: 0,
+        };
+        let processor = FastProcessor::new(StackInputs::default());
+        let result = if asynchronous {
+            processor.execute(&program, &mut host).await
+        } else {
+            processor.execute_sync(&program, &mut host)
+        };
+        assert!(result.is_err());
+        assert_eq!(host.legacy_calls, 0);
+    }
 }

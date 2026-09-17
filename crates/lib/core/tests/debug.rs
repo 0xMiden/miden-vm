@@ -11,6 +11,7 @@ use std::{
 
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{Felt, Word};
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 use miden_core_lib::{
     CoreLibrary,
     handlers::debug::{
@@ -19,9 +20,11 @@ use miden_core_lib::{
         PRINT_STACK_EVENT_NAME, advice_debug_handlers, debug_handlers, noop_debug_handlers,
     },
 };
+use miden_event_handler::EventContextError;
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, HostLibrary,
-    MemoryError, Program, StackInputs, SyncHost,
+    Program, StackInputs, SyncHost,
     advice::{AdviceInputs, AdviceStack},
     event::{EventHandler, EventName},
 };
@@ -53,6 +56,7 @@ impl fmt::Write for SharedBuf {
     }
 }
 
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn debug_handlers_with_writer(writer: SharedBuf) -> Vec<(EventName, Arc<dyn EventHandler>)> {
     let printer: Arc<dyn EventHandler> = Arc::new(DebugPrinter::new(writer));
     vec![
@@ -68,6 +72,7 @@ fn debug_handlers_with_writer(writer: SharedBuf) -> Vec<(EventName, Arc<dyn Even
 /// Assembles `source` against the core library and executes it with a [`DebugPrinter`] writing
 /// into an in-memory buffer (rather than the default stdout one), returning everything printed by
 /// the `print_*` events along with the execution output.
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn run(source: &str, advice: AdviceInputs) -> (String, ExecutionOutput) {
     let core_lib = CoreLibrary::default();
     let assembler = Assembler::default()
@@ -201,7 +206,7 @@ fn print_mem_addr_outputs_procedure_local() {
 }
 
 #[test]
-fn print_mem_addr_reports_uninitialized_cell() {
+fn print_mem_addr_reports_unwritten_cell_as_zero() {
     let source = "
     use miden::core::debug
     begin
@@ -211,12 +216,12 @@ fn print_mem_addr_reports_uninitialized_cell() {
     ";
     let out = run_and_capture(source, AdviceInputs::default());
     assert!(out.contains("Memory state"), "missing header; got:\n{out}");
-    assert!(out.contains("0x00000064: EMPTY"), "expected EMPTY cell; got:\n{out}");
+    assert!(out.contains("0x00000064: 0"), "expected zero cell; got:\n{out}");
 }
 
 #[test]
-fn print_mem_shows_uninitialized_cells_as_empty() {
-    // Every address in an explicit range is enumerated, with uninitialized cells shown as EMPTY,
+fn print_mem_shows_unwritten_cells_as_zero() {
+    // Every address in an explicit range is enumerated, with unwritten cells shown as zero,
     // so gaps in the range don't silently disappear.
     let source = "
     use miden::core::debug
@@ -228,12 +233,11 @@ fn print_mem_shows_uninitialized_cells_as_empty() {
     ";
     let out = run_and_capture(source, AdviceInputs::default());
     assert!(out.contains("0x00000064: 42"), "missing stored value; got:\n{out}");
-    // The `mem_store` initialized the whole word at addresses 100..104; the rest of the requested
-    // range is untouched and must still be listed, as EMPTY.
-    for addr in 104..110u32 {
+    // Both the unwritten neighbours in the stored word and the untouched words must read zero.
+    for addr in 101..110u32 {
         assert!(
-            out.contains(&format!("{addr:#010x}: EMPTY")),
-            "missing EMPTY cell at {addr}; got:\n{out}"
+            out.contains(&format!("{addr:#010x}: 0")),
+            "missing zero cell at {addr}; got:\n{out}"
         );
     }
 }
@@ -272,7 +276,7 @@ fn print_mem_addr_prints_max_u32_cell() {
 
 #[test]
 fn print_mem_all_includes_max_u32_cell() {
-    // Regression: `print_mem_all` lists every initialized cell, so the cell at `u32::MAX` is no
+    // Regression: `print_mem_all` lists every stored cell, so the cell at `u32::MAX` is no
     // longer silently excluded.
     let source = "
     use miden::core::debug
@@ -287,6 +291,7 @@ fn print_mem_all_includes_max_u32_cell() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn print_mem_rejects_out_of_bounds_range_end() {
     let source = "
     use miden::core::debug
@@ -319,8 +324,10 @@ fn print_mem_rejects_out_of_bounds_range_end() {
         ExecutionOptions::default(),
     ) {
         Err(ExecutionError::EventError { error, .. }) => {
-            let err = error.downcast_ref::<MemoryError>().expect("expected a MemoryError");
-            assert!(matches!(err, MemoryError::AddressOutOfBounds { .. }));
+            let err = error
+                .downcast_ref::<EventContextError>()
+                .expect("expected an EventContextError");
+            assert!(matches!(err, EventContextError::AddressOutOfBounds { .. }));
         },
         Err(err) => panic!("unexpected error type: {err:?}"),
         Ok(_) => panic!("out-of-bounds print_mem range should fail"),
@@ -328,6 +335,7 @@ fn print_mem_rejects_out_of_bounds_range_end() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn print_mem_rejects_oversized_range() {
     // An explicit range wider than the 1024-address cap is rejected, catching a caller that passes
     // a huge range by accident. Use `print_mem_all` to print the entire memory.
@@ -370,6 +378,7 @@ fn print_mem_rejects_oversized_range() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn print_mem_rejects_full_range() {
     // The cap has no exemption: the full `[0, 2^32)` range is rejected like any other oversized
     // range, so `print_mem` can't be used to bypass the documented 1024-address limit. Printing
@@ -550,6 +559,7 @@ fn print_stack_is_stack_neutral() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn default_core_handlers_include_debug_printers() {
     let core_lib = CoreLibrary::default();
     let handlers = core_lib.handlers();
@@ -574,6 +584,7 @@ fn default_core_handlers_include_debug_printers() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn debug_handlers_compose_with_default_core_handlers() {
     let source = "
     use miden::core::debug
@@ -615,6 +626,7 @@ fn debug_handlers_compose_with_default_core_handlers() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn debug_handlers_include_all_core_debug_events() {
     let handlers = debug_handlers();
 
@@ -648,6 +660,7 @@ fn default_core_handlers_run_print_stack() {
 }
 
 #[test]
+#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn noop_debug_handlers_run_print_stack_without_output() {
     let source = "
     use miden::core::debug

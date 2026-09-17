@@ -7,7 +7,7 @@
 #! of VM state (operand stack, memory, advice stack, or advice map). A range-based procedure may
 #! share an event with its full-state variant when the full-state behavior can be represented as
 #! an unbounded range (e.g. the advice stack); memory uses a dedicated full-state event because
-#! `print_mem` enumerates its (capped) range while `print_mem_all` lists only initialized cells.
+#! `print_mem` enumerates its (capped) range while `print_mem_all` omits unwritten words.
 #! These are ordinary `emit` events and carry no MAST/decorator cost, and they print whenever
 #! invoked.
 
@@ -45,7 +45,7 @@ end
 #! - start is the (inclusive) start address of the range to print.
 #! - end is the (exclusive) end address of the range to print.
 #!
-#! Every address in the range is printed, with uninitialized cells shown as `EMPTY`. The range may
+#! Every address in the range is printed, with unwritten cells shown as zero. The range may
 #! span at most 1024 addresses; a wider range aborts execution. Use `print_mem_all` to print the
 #! entire memory of the current context.
 #!
@@ -65,7 +65,7 @@ end
 #! Where:
 #! - addr is the address of the memory cell to print.
 #!
-#! An uninitialized cell is shown as `EMPTY`.
+#! An unwritten cell is shown as zero.
 #!
 #! Cycles: 6
 pub proc print_mem_addr
@@ -80,7 +80,7 @@ end
 #! Inputs:  []
 #! Outputs: []
 #!
-#! Only initialized memory cells are listed.
+#! Only stored memory cells are listed; unwritten words are omitted.
 #!
 #! Cycles: 3
 pub proc print_mem_all

@@ -102,7 +102,7 @@ end
 #!
 #! No result word is pushed. The procedure traps if:
 #! - `MSG_PTR` is not word-aligned.
-#! - `MSG_LEN_BYTES` exceeds the configured `max_hash_len_bytes` execution limit.
+#! - `MSG_LEN_BYTES` exceeds the fixed 1 MiB native Keccak input limit.
 #! - a message-memory felt is not a valid u32.
 #! - unused message bytes or felts in the final 32-byte chunk are nonzero.
 #! - public-key or signature limbs are malformed, the public key is invalid/off-curve, the signature
@@ -199,7 +199,7 @@ end
 #!
 #! Panics if:
 #! - `MSG_PTR` or `SIG_PTR` is not word-aligned.
-#! - `MSG_LEN_BYTES` exceeds the configured `max_hash_len_bytes` execution limit.
+#! - `MSG_LEN_BYTES` exceeds the fixed 1 MiB native Keccak input limit.
 #! - a message-memory felt is not a u32, or final-chunk padding is nonzero.
 #! - a signature limb is not a u32, or `r` or `s` is zero or not a canonical secp256k1 scalar.
 #! - `V` is not 27 or 28.

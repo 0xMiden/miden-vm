@@ -1,12 +1,12 @@
-use alloc::vec::Vec;
 use core::ops::ControlFlow;
 
 use miden_core::events::{EventId, SystemEvent};
+use miden_event_handler::{AdviceBatch, InvocationKind};
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
     BaseHost, Host, SyncHost,
-    advice::AdviceMutation,
+    advice::AdviceError,
     errors::{
         MapExecErrWithOpIdx, PackageSourceDebugContext, advice_error_with_context,
         advice_error_with_package_source_context, event_error_with_context,
@@ -14,7 +14,10 @@ use crate::{
     },
     event::EventError,
     fast::{BreakReason, FastProcessor},
-    host::handlers::TraceError,
+    host::{
+        LegacyHostFallback,
+        handlers::{event_context, record_mutations},
+    },
 };
 
 mod deferred_handlers;
@@ -42,19 +45,25 @@ impl FastProcessor {
     }
 
     #[inline(always)]
-    fn apply_host_event_mutations<F>(
+    fn complete_host_event<F>(
         &mut self,
         host: &impl BaseHost,
         op_idx: usize,
         event_id: EventId,
-        mutations: Result<Vec<AdviceMutation>, EventError>,
+        kind: InvocationKind,
+        result: Result<(), EventError>,
+        batch: AdviceBatch,
         package_debug_info: Option<&PackageDebugInfo>,
         source_node_id: Option<DebugSourceNodeId>,
     ) -> ControlFlow<BreakReason<F>> {
-        let mutations = match mutations {
-            Ok(mutations) => mutations,
+        match result {
+            Ok(()) => (),
             Err(err) => {
-                let event_name = host.resolve_event(event_id).cloned();
+                let event_name = match kind {
+                    InvocationKind::Event => host.resolve_event(event_id),
+                    InvocationKind::Trace => host.resolve_trace(event_id),
+                }
+                .cloned();
                 let context = package_source_context(package_debug_info, source_node_id);
                 if let Some(context) = context {
                     return ControlFlow::Break(BreakReason::Err(
@@ -74,7 +83,12 @@ impl FastProcessor {
             },
         };
 
-        match self.advice.apply_mutations(mutations) {
+        let applied = match kind {
+            InvocationKind::Trace if !batch.is_empty() => Err(AdviceError::TraceAdvice),
+            InvocationKind::Trace => Ok(()),
+            InvocationKind::Event => self.advice.apply_batch(batch),
+        };
+        match applied {
             Ok(()) => ControlFlow::Continue(()),
             Err(err) => {
                 let context = package_source_context(package_debug_info, source_node_id);
@@ -88,42 +102,8 @@ impl FastProcessor {
         }
     }
 
-    /// `trace_id` refers to the event defined by the user, which is on the stack below
-    /// `SystemEvent::TraceEvent`.
-    fn handle_trace_result<F>(
-        &mut self,
-        host: &impl BaseHost,
-        op_idx: usize,
-        trace_id: EventId,
-        result: Result<(), TraceError>,
-        package_debug_info: Option<&PackageDebugInfo>,
-        source_node_id: Option<DebugSourceNodeId>,
-    ) -> ControlFlow<BreakReason<F>> {
-        match result {
-            Ok(()) => ControlFlow::Continue(()),
-            Err(err) => {
-                let event_name = host.resolve_trace(trace_id).cloned();
-                let context = package_source_context(package_debug_info, source_node_id);
-                if let Some(context) = context {
-                    return ControlFlow::Break(BreakReason::Err(
-                        event_error_with_package_source_context(
-                            err,
-                            context,
-                            host,
-                            Some(op_idx),
-                            trace_id,
-                            event_name,
-                        ),
-                    ));
-                }
-                ControlFlow::Break(BreakReason::Err(event_error_with_context(
-                    err, trace_id, event_name,
-                )))
-            },
-        }
-    }
-
     #[inline(always)]
+    #[allow(deprecated)] // Engine-owned fallback to old callbacks.
     pub(super) fn op_emit_sync<F>(
         &mut self,
         host: &mut impl SyncHost,
@@ -131,49 +111,53 @@ impl FastProcessor {
         package_debug_info: Option<&PackageDebugInfo>,
         source_node_id: Option<DebugSourceNodeId>,
     ) -> ControlFlow<BreakReason<F>> {
-        let event_id = EventId::from_felt(self.stack_get(0));
-
-        match SystemEvent::from_event_id(event_id) {
-            // `SystemEvent::TraceEvent` is forwarded to the hosts trace handler.
-            Some(SystemEvent::TraceEvent) => {
-                let processor_state = self.state();
-                let result = host.on_trace(&processor_state);
-                // The trace id is below `SystemEvent::TraceEvent`.
-                let trace_id = EventId::from_felt(self.stack_get(1));
-                self.handle_trace_result(
+        let raw_id = EventId::from_felt(self.stack_get(0));
+        let kind = match SystemEvent::from_event_id(raw_id) {
+            Some(SystemEvent::TraceEvent) if !self.options.trace_delivery() => {
+                return ControlFlow::Continue(());
+            },
+            Some(SystemEvent::TraceEvent) => InvocationKind::Trace,
+            Some(system_event) => {
+                return self.handle_system_event(
+                    system_event,
                     host,
                     op_idx,
-                    trace_id,
-                    result,
                     package_debug_info,
                     source_node_id,
-                )
+                );
             },
-            // Other system events are handled directly.
-            Some(system_event) => self.handle_system_event(
-                system_event,
-                host,
-                op_idx,
-                package_debug_info,
-                source_node_id,
-            ),
-            // If it's not a system event, forward it to the host.
-            None => {
-                let processor_state = self.state();
-                let mutations = host.on_event(&processor_state);
-                self.apply_host_event_mutations(
-                    host,
-                    op_idx,
-                    event_id,
-                    mutations,
-                    package_debug_info,
-                    source_node_id,
-                )
-            },
+            None => InvocationKind::Event,
+        };
+        let state = self.state();
+        let context = event_context(&state, kind);
+        let event_id = context.id();
+        let mut batch = AdviceBatch::new();
+        let mut result = host.handle_event(context, &mut batch.recorder());
+        // Only the engine can bridge a portable callback to full legacy state. Never retain
+        // advice staged by a callback that requested fallback after recording output.
+        if batch.is_empty() && result.as_ref().is_err_and(|error| error.is::<LegacyHostFallback>())
+        {
+            result = match kind {
+                InvocationKind::Event => host
+                    .on_event(&state)
+                    .map(|mutations| record_mutations(&mut batch.recorder(), mutations)),
+                InvocationKind::Trace => host.on_trace(&state),
+            };
         }
+        self.complete_host_event(
+            host,
+            op_idx,
+            event_id,
+            kind,
+            result,
+            batch,
+            package_debug_info,
+            source_node_id,
+        )
     }
 
     #[inline(always)]
+    #[allow(deprecated)] // Engine-owned fallback to old callbacks.
     pub(super) async fn op_emit<F>(
         &mut self,
         host: &mut impl Host,
@@ -181,46 +165,50 @@ impl FastProcessor {
         package_debug_info: Option<&PackageDebugInfo>,
         source_node_id: Option<DebugSourceNodeId>,
     ) -> ControlFlow<BreakReason<F>> {
-        let event_id = EventId::from_felt(self.stack_get(0));
-
-        match SystemEvent::from_event_id(event_id) {
-            // `SystemEvent::TraceEvent` is forwarded to the hosts trace handler.
-            Some(SystemEvent::TraceEvent) => {
-                let processor_state = self.state();
-                let result = host.on_trace(&processor_state).await;
-                // The trace id is below `SystemEvent::TraceEvent`.
-                let trace_id = EventId::from_felt(self.stack_get(1));
-                self.handle_trace_result(
+        let raw_id = EventId::from_felt(self.stack_get(0));
+        let kind = match SystemEvent::from_event_id(raw_id) {
+            Some(SystemEvent::TraceEvent) if !self.options.trace_delivery() => {
+                return ControlFlow::Continue(());
+            },
+            Some(SystemEvent::TraceEvent) => InvocationKind::Trace,
+            Some(system_event) => {
+                return self.handle_system_event(
+                    system_event,
                     host,
                     op_idx,
-                    trace_id,
-                    result,
                     package_debug_info,
                     source_node_id,
-                )
+                );
             },
-            // Other system events are handled directly.
-            Some(system_event) => self.handle_system_event(
-                system_event,
-                host,
-                op_idx,
-                package_debug_info,
-                source_node_id,
-            ),
-            // If it's not a system event, forward it to the host.
-            None => {
-                let processor_state = self.state();
-                let mutations = host.on_event(&processor_state).await;
-                self.apply_host_event_mutations(
-                    host,
-                    op_idx,
-                    event_id,
-                    mutations,
-                    package_debug_info,
-                    source_node_id,
-                )
-            },
+            None => InvocationKind::Event,
+        };
+        let state = self.state();
+        let context = event_context(&state, kind);
+        let event_id = context.id();
+        let mut batch = AdviceBatch::new();
+        let mut result = host.handle_event(context, &mut batch.recorder()).await;
+        // Only the engine can bridge a portable callback to full legacy state. Never retain
+        // advice staged by a callback that requested fallback after recording output.
+        if batch.is_empty() && result.as_ref().is_err_and(|error| error.is::<LegacyHostFallback>())
+        {
+            result = match kind {
+                InvocationKind::Event => host
+                    .on_event(&state)
+                    .await
+                    .map(|mutations| record_mutations(&mut batch.recorder(), mutations)),
+                InvocationKind::Trace => host.on_trace(&state).await,
+            };
         }
+        self.complete_host_event(
+            host,
+            op_idx,
+            event_id,
+            kind,
+            result,
+            batch,
+            package_debug_info,
+            source_node_id,
+        )
     }
 }
 
