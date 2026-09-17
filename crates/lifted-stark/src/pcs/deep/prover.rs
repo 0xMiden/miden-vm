@@ -218,8 +218,8 @@ impl<EF> DeepPoly<EF> {
             let uniform_height =
                 matrices_groups.iter().flat_map(|g| g.iter()).all(|m| m.height() == n);
 
-            let mut neg_column_coeffs_iter = neg_column_coeffs.iter();
             let mut neg_f_reduced = if uniform_height {
+                let mut neg_column_coeffs_iter = neg_column_coeffs.iter();
                 let mut acc = EF::zero_vec(n);
                 let mut packed_coeffs: Vec<EF::ExtensionPacking> = Vec::new();
                 for (matrices_group, &size) in zip(matrices_groups.iter(), &group_sizes) {
@@ -247,16 +247,14 @@ impl<EF> DeepPoly<EF> {
                 }
                 acc
             } else {
-                zip(matrices_groups.iter(), &group_sizes)
-                    .map(|(matrices_group, &size)| {
-                        let group_coeffs: Vec<&Vec<EF>> =
-                            neg_column_coeffs_iter.by_ref().take(size).collect();
-                        accumulate_matrices(matrices_group, &group_coeffs)
-                    })
-                    // Combine groups of different heights; `add_lifted` lifts the shorter
-                    // buffer onto the taller one before adding.
-                    .reduce(|a, b| add_lifted(w, a, b))
-                    .unwrap_or_else(|| EF::zero_vec(n))
+                // Preserve commitment-order coefficients when reordering matrices.
+                let mut matrices: Vec<_> = matrices_groups
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .zip(neg_column_coeffs.iter().map(Vec::as_slice))
+                    .collect();
+                accumulate_matrices(&mut matrices)
             };
 
             // Pre-compute βʲ for all N points
@@ -315,35 +313,28 @@ impl<EF> DeepPoly<EF> {
     }
 }
 
-/// Accumulate `f_reduced(X) = Σᵢ α^{W−1−i}·fᵢ(X)` across matrices of varying heights.
+/// Accumulate a weighted sum of matrices of varying heights.
 ///
 /// In bit-reversed order, the lifted polynomial `f(Xʳ)` repeats each evaluation r times
 /// (because adjacent bit-reversed indices differ only in their low bits, mapping to points
 /// that are r-th roots of the same value). This lets us upsample by repetition instead of
 /// recomputing the lifted polynomial: when crossing a height boundary, repeat entries to
-/// match the new height, then continue accumulating. Matrices must be sorted by ascending
-/// height.
-fn accumulate_matrices<F: Field, EF: ExtensionField<F>, M: Matrix<F>, C: AsRef<[EF]>>(
-    matrices: &[&M],
-    coeffs: &[C],
+/// match the new height, then continue accumulating. Matrices and their coefficients
+/// are sorted together by ascending height.
+fn accumulate_matrices<F: Field, EF: ExtensionField<F>, M: Matrix<F>>(
+    matrices: &mut [(&M, &[EF])],
 ) -> Vec<EF> {
-    debug_assert!(
-        matrices.windows(2).all(|w| w[0].height() <= w[1].height()),
-        "matrices must be sorted by ascending height"
-    );
-    let n = matrices.last().unwrap().height();
+    matrices.sort_unstable_by_key(|(matrix, _)| matrix.height());
+    let n = matrices.last().unwrap().0.height();
 
     let mut acc = EF::zero_vec(n);
-    // When all matrices in this group share a single height,
-    // it is a tad more efficient to skip preallocating the buffer.
     let mut scratch: Vec<EF> = Vec::new();
     let w = F::Packing::WIDTH;
     let mut packed_coeffs: Vec<EF::ExtensionPacking> = Vec::new();
 
-    let mut active_height = matrices.first().unwrap().height();
+    let mut active_height = matrices.first().unwrap().0.height();
 
-    for (&matrix, coeffs) in zip(matrices, coeffs) {
-        let coeffs = coeffs.as_ref();
+    for &(matrix, coeffs) in matrices.iter() {
         let height = matrix.height();
         debug_assert!(height.is_power_of_two(), "matrix height must be a power of two");
         debug_assert!(
@@ -363,7 +354,8 @@ fn accumulate_matrices<F: Field, EF: ExtensionField<F>, M: Matrix<F>, C: AsRef<[
                 .par_chunks_mut(scaling_factor)
                 .zip(acc[..active_height].par_iter())
                 .for_each(|(chunk, &val)| chunk.fill(val));
-            acc[..height].swap_with_slice(&mut scratch[..height]);
+            // Only the active prefix is live; scratch is resized before reuse.
+            core::mem::swap(&mut acc, &mut scratch);
         }
 
         // SIMD path using horizontal packing.
@@ -394,42 +386,46 @@ fn accumulate_matrices<F: Field, EF: ExtensionField<F>, M: Matrix<F>, C: AsRef<[
     acc
 }
 
-/// Sum two DEEP reduced-eval buffers whose power-of-two heights may differ, lifting
-/// the shorter onto the taller by bit-reversed nearest-neighbor repetition
-/// (`long[j*r + k] += short[j]`). Returns the taller buffer, reused in place — no fresh
-/// allocation. `w` is the base-field packing width for the equal-height SIMD add.
-///
-/// `reduce` folds groups left-to-right, so a short group (e.g. a setup-fixed
-/// preprocessed tree, opened first) is lifted into the first full-height group it meets.
-fn add_lifted<EF: Field>(w: usize, a: Vec<EF>, b: Vec<EF>) -> Vec<EF> {
-    let (mut long, short) = if a.len() >= b.len() { (a, b) } else { (b, a) };
-    debug_assert!(
-        !short.is_empty() && long.len() % short.len() == 0,
-        "DEEP group heights must be nested powers of two"
-    );
-    let r = long.len() / short.len();
-    if r == 1 {
-        long.par_chunks_mut(w)
-            .zip(short.par_chunks(w))
-            .for_each(|(x, y)| EF::add_slices(x, y));
-    } else {
-        // `short[j]` covers the `r` contiguous slots `[j*r, (j+1)*r)` of the taller
-        // buffer — the bit-reversed nearest-neighbor lift, fused with the add.
-        long.par_chunks_mut(r)
-            .zip(short.par_iter())
-            .for_each(|(chunk, &v)| chunk.iter_mut().for_each(|x| *x += v));
-    }
-    long
-}
-
 #[cfg(test)]
 mod tests {
     use alloc::vec;
 
     use p3_field::{PrimeCharacteristicRing, dot_product};
+    use p3_matrix::dense::RowMajorMatrix;
+    use rand::{RngExt, SeedableRng, distr::StandardUniform, prelude::SmallRng};
 
     use super::*;
     use crate::testing::configs::goldilocks_poseidon2::{Felt, QuadFelt};
+
+    #[test]
+    fn mixed_height_reduction_matches_explicit_lifting() {
+        let rng = &mut SmallRng::seed_from_u64(927);
+        let matrices: Vec<_> = [1, 8, 2, 32, 8]
+            .into_iter()
+            .enumerate()
+            .map(|(i, height)| RowMajorMatrix::<Felt>::rand(rng, height, 2 * i + 1))
+            .collect();
+        let coeffs: Vec<Vec<QuadFelt>> = matrices
+            .iter()
+            .map(|matrix| (0..matrix.width()).map(|_| rng.sample(StandardUniform)).collect())
+            .collect();
+        let n = matrices.iter().map(Matrix::height).max().unwrap();
+        let expected: Vec<QuadFelt> = (0..n)
+            .map(|row| {
+                zip(&matrices, &coeffs)
+                    .map(|(matrix, coeffs)| {
+                        let source_row = row / (n / matrix.height());
+                        dot_product(
+                            coeffs.iter().copied(),
+                            matrix.row(source_row).unwrap().into_iter(),
+                        )
+                    })
+                    .sum()
+            })
+            .collect();
+        let mut pairs: Vec<_> = matrices.iter().zip(coeffs.iter().map(Vec::as_slice)).collect();
+        assert_eq!(accumulate_matrices(&mut pairs), expected);
+    }
 
     /// `reduce_with_powers` (Horner) must match explicit negative coeffs + dot product.
     #[test]

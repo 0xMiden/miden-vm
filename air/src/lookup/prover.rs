@@ -5,7 +5,7 @@
 //! [`LookupFractions`].
 
 use alloc::{vec, vec::Vec};
-use core::borrow::Borrow;
+use core::{borrow::Borrow, ops::Range};
 
 use miden_core::{
     field::{ExtensionField, Field},
@@ -32,7 +32,7 @@ where
     main: RowWindow<'a, F>,
     periodic_values: &'a [F],
     challenges: &'a Challenges<EF>,
-    /// Dense per-column fraction buffers shared across all rows.
+    /// Flat fractions and per-column counts shared across the collected rows.
     fractions: &'a mut LookupFractions<F, EF>,
     column_idx: usize,
 }
@@ -50,8 +50,8 @@ where
     ///   this once outside the row loop and passes a shared reference here).
     /// - `air`: the lookup shape (used only for a debug assertion that `fractions.num_columns() ==
     ///   air.num_columns()`; the builder never calls `air.eval` itself).
-    /// - `fractions`: dense per-column fraction buffers, sized once via
-    ///   [`LookupFractions::from_shape`] and re-used across every row of the same trace.
+    /// - `fractions`: fraction and count buffers, sized via [`LookupFractions::from_shape`] and
+    ///   reused across the collected rows.
     ///
     /// # Panics
     ///
@@ -84,8 +84,8 @@ where
 // BUILD LOOKUP FRACTIONS DRIVER
 // ================================================================================================
 
-/// Walk a complete main trace through [`ProverLookupBuilder`] and return the dense
-/// [`LookupFractions`] buffer the collection phase produces.
+/// Walk a complete main trace through [`ProverLookupBuilder`] and return its packed fractions
+/// and per-column counts.
 ///
 /// Generic over the base field `F` and extension field `EF`. The caller supplies the
 /// main trace and periodic columns. This function does row slicing, periodic-column
@@ -118,34 +118,11 @@ where
     for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
 {
     let num_rows = main_trace.height();
-    let width = main_trace.width();
-    let flat: &[F] = main_trace.values.borrow();
-
-    let shape = air.column_shape().to_vec();
-
-    // Fill one chunk of rows into a fresh per-chunk `LookupFractions`.
-    let process_chunk = |row_lo: usize, row_hi: usize| -> LookupFractions<F, EF> {
-        // The caller builds challenges and the fraction buffer once. Each row creates this cheap
-        // adapter, calls `air.eval(&mut lb)`, then records per-column counts for accumulation.
-        let mut chunk = LookupFractions::from_shape(shape.clone(), row_hi - row_lo);
-        let mut periodic_row: Vec<F> = vec![F::ZERO; periodic_columns.len()];
-        for r in row_lo..row_hi {
-            let curr = &flat[r * width..(r + 1) * width];
-            let nxt_idx = (r + 1) % num_rows;
-            let next = &flat[nxt_idx * width..(nxt_idx + 1) * width];
-            let window = RowWindow::from_two_rows(curr, next);
-            for (i, col) in periodic_columns.iter().enumerate() {
-                periodic_row[i] = col[r % col.len()];
-            }
-            let mut lb =
-                ProverLookupBuilder::new(window, &periodic_row, challenges, air, &mut chunk);
-            air.eval(&mut lb);
-        }
-        chunk
-    };
+    let process_chunk =
+        |rows| build_lookup_fraction_chunk(air, main_trace, periodic_columns, challenges, rows);
 
     #[cfg(not(feature = "concurrent"))]
-    let fractions = process_chunk(0, num_rows);
+    let fractions = process_chunk(0..num_rows);
 
     // Concatenation after parallel processing preserves global row order because chunks
     // tile `0..num_rows` contiguously and each chunk's `fractions` / `counts` are
@@ -154,6 +131,7 @@ where
     let fractions = {
         use miden_crypto::parallel::*;
 
+        let shape = air.column_shape().to_vec();
         let num_cols = shape.len();
         let rows_per_chunk = crate::lookup::aux_builder::ACCUMULATE_ROWS_PER_CHUNK;
         let num_chunks = num_rows.div_ceil(rows_per_chunk);
@@ -163,7 +141,7 @@ where
             .map(|chunk_idx| {
                 let row_lo = chunk_idx * rows_per_chunk;
                 let row_hi = (row_lo + rows_per_chunk).min(num_rows);
-                process_chunk(row_lo, row_hi)
+                process_chunk(row_lo..row_hi)
             })
             .collect();
 
@@ -184,6 +162,38 @@ where
         "counts buffer should have exactly num_rows * num_cols entries after collection",
     );
     fractions
+}
+
+/// Collect a row range using global periodic offsets and cyclic next-row windows.
+pub(super) fn build_lookup_fraction_chunk<A, F, EF>(
+    air: &A,
+    main_trace: &RowMajorMatrix<F>,
+    periodic_columns: &[Vec<F>],
+    challenges: &Challenges<EF>,
+    rows: Range<usize>,
+) -> LookupFractions<F, EF>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
+{
+    let num_rows = main_trace.height();
+    let width = main_trace.width();
+    let flat: &[F] = main_trace.values.borrow();
+    let mut chunk = LookupFractions::from_shape(air.column_shape().to_vec(), rows.len());
+    let mut periodic_row = vec![F::ZERO; periodic_columns.len()];
+    for r in rows {
+        let curr = &flat[r * width..(r + 1) * width];
+        let nxt_idx = (r + 1) % num_rows;
+        let next = &flat[nxt_idx * width..(nxt_idx + 1) * width];
+        let window = RowWindow::from_two_rows(curr, next);
+        for (i, col) in periodic_columns.iter().enumerate() {
+            periodic_row[i] = col[r % col.len()];
+        }
+        let mut lb = ProverLookupBuilder::new(window, &periodic_row, challenges, air, &mut chunk);
+        air.eval(&mut lb);
+    }
+    chunk
 }
 
 impl<'a, F, EF> LookupBuilder for ProverLookupBuilder<'a, F, EF>
@@ -454,7 +464,7 @@ mod tests {
     use std::{vec, vec::Vec};
 
     use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
-    use miden_crypto::stark::air::RowWindow;
+    use miden_crypto::stark::air::{RowWindow, WindowAccess};
 
     use super::*;
     use crate::{
@@ -462,10 +472,7 @@ mod tests {
         lookup::{Deg, LookupAir, accumulate_slow, message::LookupMessage},
     };
 
-    /// Minimal `LookupMessage` used by [`SmokeAir`] to drive a `Vec::push` into the
-    /// prover builder's fraction buffer. Encodes to `bus_prefix[0] + β⁰·value`, which is
-    /// always non-zero for non-trivial challenges (so `accumulate_slow` can `try_inverse`
-    /// without blowing up).
+    /// Encodes to `bus_prefix[0] + value`; the fixture's challenges keep it nonzero.
     #[derive(Clone, Copy, Debug)]
     struct SmokeMsg {
         value: Felt,
@@ -564,8 +571,7 @@ mod tests {
 
         let air = SmokeAir;
 
-        // Any reasonable non-zero challenges — SmokeMsg encodes to `bus_prefix[0] + v`
-        // which is non-zero as long as the challenges are.
+        // These challenges give nonzero denominators for all three fixture messages.
         let alpha = QuadFelt::new([Felt::new_unchecked(7), Felt::new_unchecked(11)]);
         let beta = QuadFelt::new([Felt::new_unchecked(13), Felt::new_unchecked(17)]);
         // SmokeAir hard-codes `max_message_width = 1` / `num_bus_ids = 1` in its
@@ -641,5 +647,70 @@ mod tests {
         for &entry in &aux[1] {
             assert_eq!(entry, delta1);
         }
+    }
+
+    struct WindowAir;
+
+    impl LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>> for WindowAir {
+        fn num_columns(&self) -> usize {
+            1
+        }
+
+        fn column_shape(&self) -> &[usize] {
+            &[1]
+        }
+
+        fn max_message_width(&self) -> usize {
+            1
+        }
+
+        fn num_bus_ids(&self) -> usize {
+            1
+        }
+
+        fn eval(&self, builder: &mut ProverLookupBuilder<'_, Felt, QuadFelt>) {
+            let main = builder.main();
+            let value = main.current_slice()[0]
+                + main.next_slice()[0].double()
+                + builder.periodic_values()[0];
+            builder.next_column(
+                |col| {
+                    col.group(
+                        "window",
+                        |group| {
+                            group.add("row", Felt::ONE, || SmokeMsg { value }, Deg { v: 0, u: 0 });
+                        },
+                        Deg { v: 0, u: 0 },
+                    );
+                },
+                Deg { v: 0, u: 0 },
+            );
+        }
+    }
+
+    #[test]
+    fn fraction_chunk_preserves_row_windows_and_periodic_offsets() {
+        let period = 2 * crate::lookup::aux_builder::ACCUMULATE_ROWS_PER_CHUNK;
+        let num_rows = period + 1;
+        let main = RowMajorMatrix::new(
+            (0..num_rows).map(|row| Felt::from_usize(3 * row + 1)).collect(),
+            1,
+        );
+        let periodic = vec![(0..period).map(Felt::from_usize).collect()];
+        let challenges = Challenges::new(QuadFelt::from_u32(7), QuadFelt::from_u32(13), 1, 1);
+        // Start inside the trace and include the last-to-first edge.
+        let rows = period / 2 - 1..num_rows;
+        let actual =
+            build_lookup_fraction_chunk(&WindowAir, &main, &periodic, &challenges, rows.clone());
+        let expected: Vec<_> = rows
+            .map(|row| {
+                let value = main.values[row]
+                    + main.values[(row + 1) % num_rows].double()
+                    + Felt::from_usize(row % period);
+                (Felt::ONE, challenges.bus_prefix[0] + value)
+            })
+            .collect();
+        assert_eq!(actual.counts(), vec![1; expected.len()]);
+        assert_eq!(actual.fractions(), expected);
     }
 }
