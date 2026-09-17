@@ -70,7 +70,7 @@ where
     assert!(num_cols > 0, "LogUp requires at least one accumulator column");
 
     let mut output = EF::zero_vec(num_rows * num_cols);
-    let mut row_totals = vec![EF::ZERO; num_rows];
+    let mut row_totals = EF::zero_vec(num_rows);
     let chunk_rows = ACCUMULATE_ROWS_PER_CHUNK;
 
     use miden_crypto::parallel::*;
@@ -223,7 +223,7 @@ where
     let num_rows = fractions.num_rows();
     assert!(num_rows > 0, "LogUp normalization requires a non-empty trace");
     assert!(num_cols > 0, "LogUp requires at least one accumulator column");
-    let mut aux: Vec<Vec<EF>> = (0..num_cols).map(|_| vec![EF::ZERO; num_rows]).collect();
+    let mut aux: Vec<Vec<EF>> = (0..num_cols).map(|_| EF::zero_vec(num_rows)).collect();
 
     let flat_fractions = fractions.fractions();
     let flat_counts = fractions.counts();
@@ -236,7 +236,7 @@ where
     );
 
     let mut per_row_value = vec![EF::ZERO; num_cols];
-    let mut row_totals = vec![EF::ZERO; num_rows];
+    let mut row_totals = EF::zero_vec(num_rows);
 
     let mut cursor = 0usize;
     for (row, row_counts) in flat_counts.chunks(num_cols).enumerate() {
@@ -335,7 +335,7 @@ where
     // Phase 1 writes fraction columns and row totals. Phase 2 fills column 0 with the
     // centered accumulator.
     let frac_region = &mut output_data[..num_rows * num_cols];
-    let mut row_totals: Vec<EF> = vec![EF::ZERO; num_rows];
+    let mut row_totals: Vec<EF> = EF::zero_vec(num_rows);
 
     let rows_per_chunk = ACCUMULATE_ROWS_PER_CHUNK;
 
