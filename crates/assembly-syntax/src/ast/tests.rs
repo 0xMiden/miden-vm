@@ -2101,6 +2101,32 @@ end
 }
 
 #[test]
+fn test_quoted_parameter_name_roundtrip_formatting() {
+    let expected = "\
+namespace $exec
+
+proc foo(\"param-name\": felt)
+    drop
+end
+
+begin
+    push.1
+    exec.foo
+end
+";
+
+    let context = SyntaxTestContext::default();
+    let source = source_file!(&context, expected);
+    let module = context.parse_program_source_file(source).unwrap_or_else(|err| panic!("{err}"));
+    let formatted = module.to_string();
+    assert_eq!(formatted, expected);
+
+    let source = source_file!(&context, formatted);
+    let reparsed = context.parse_program_source_file(source).unwrap_or_else(|err| panic!("{err}"));
+    assert_eq!(reparsed.to_string(), expected);
+}
+
+#[test]
 fn test_function_type_prints_parameter_names() {
     use crate::prettier::PrettyPrint;
 

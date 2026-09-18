@@ -442,13 +442,15 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             return Ok((None, self.parse_variadic_type()));
         }
 
-        if !matches!(self.current().as_ref().map(SyntaxToken::kind), Some(SyntaxKind::Ident))
-            || self.peek_kind(1) != Some(SyntaxKind::Colon)
+        if !matches!(
+            self.current().as_ref().map(SyntaxToken::kind),
+            Some(SyntaxKind::Ident | SyntaxKind::QuotedIdent)
+        ) || self.peek_kind(1) != Some(SyntaxKind::Colon)
         {
             return Err(self.invalid_syntax("expected a named procedure parameter"));
         }
 
-        let name = self.expect_ident("expected a named procedure parameter")?;
+        let name = self.bump().expect("parameter name token should be present");
         let name = self.context.lower_ident_token(&name)?;
         self.bump();
         Ok((Some(name), self.parse_type_expr()?))
