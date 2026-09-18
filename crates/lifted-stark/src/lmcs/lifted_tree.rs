@@ -18,8 +18,8 @@ use crate::{
 /// Number of lowest digest layers, leaf hashes included, that a tree does not store.
 ///
 /// Stored digests shrink by a factor of `2^PRUNED_LAYERS`. In exchange, opening rebuilds the
-/// `2^PRUNED_LAYERS`-leaf subtree under every queried leaf, which costs `2^PRUNED_LAYERS` leaf
-/// hashes per distinct subtree.
+/// subtree containing each queried leaf, rooted at its deepest stored ancestor. That costs up to
+/// `2^PRUNED_LAYERS` leaf hashes per distinct subtree (fewer for shorter trees).
 const PRUNED_LAYERS: usize = 4;
 
 /// A uniform binary Merkle tree whose leaves are constructed from matrices with power-of-two
@@ -92,8 +92,8 @@ pub struct LiftedMerkleTree<F, D, M, const DIGEST_ELEMS: usize, const SALT_ELEMS
     /// powers of two. Each matrix's rows are absorbed into sponge states that are
     /// maintained and upsampled across matrices of increasing height.
     ///
-    /// This vector is retained for inspection or re-opening of the tree; it is not used
-    /// after construction time.
+    /// Openings read their rows from these matrices and rehash them to rebuild the digest
+    /// layers the tree does not store.
     pub(crate) leaves: Vec<M>,
 
     /// Stored hash layers (digest arrays) in top-down order: index 0 is the root (one hash).
@@ -409,8 +409,7 @@ where
     where
         L: Lmcs<F = F>,
     {
-        let widths = self.leaves.iter().map(Matrix::width).collect();
-        let rows = self.collect_rows(domain_index, widths);
+        let rows = self.rows(domain_index);
         let salt = self.salt.is_some().then(|| self.salt(domain_index));
         lmcs.hash(rows.iter_rows().chain(salt.as_ref().map(<[F; SALT_ELEMS]>::as_slice)))
     }
