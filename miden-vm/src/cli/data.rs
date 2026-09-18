@@ -176,19 +176,19 @@ pub struct ProofFile;
 
 /// Helper methods to interact with proof file
 impl ProofFile {
+    /// Resolves the proof path from the optional proof and program paths.
+    pub fn resolve_path(proof_path: &Option<PathBuf>, program_path: &Path) -> PathBuf {
+        proof_path.clone().unwrap_or_else(|| program_path.with_extension("proof"))
+    }
+
     /// Read stark proof from file
     #[instrument(name = "read_proof_file",
-        fields(path = %proof_path.clone().unwrap_or(program_path.with_extension("proof")).display()), skip_all)]
+        fields(path = %ProofFile::resolve_path(proof_path, program_path).display()), skip_all)]
     pub fn read(
         proof_path: &Option<PathBuf>,
         program_path: &Path,
     ) -> Result<ExecutionProof, String> {
-        // If proof_path has been provided then use this as path.  Alternatively we will
-        // replace the program_path extension with `.proof` and use this as a default.
-        let path = match proof_path {
-            Some(path) => path.clone(),
-            None => program_path.with_extension("proof"),
-        };
+        let path = Self::resolve_path(proof_path, program_path);
 
         // read the file to bytes
         let file = fs::read(&path)
@@ -202,19 +202,14 @@ impl ProofFile {
     /// Write stark proof to file
     #[instrument(name = "write_data_to_proof_file",
                  fields(
-                    path = %proof_path.clone().unwrap_or(program_path.with_extension("proof")).display(),
+                    path = %ProofFile::resolve_path(proof_path, program_path).display(),
                     size = Empty), skip_all)]
     pub fn write(
         proof: ExecutionProof,
         proof_path: &Option<PathBuf>,
         program_path: &Path,
     ) -> Result<(), String> {
-        // If proof_path has been provided then use this as path.  Alternatively we will
-        // replace the program_path extension with `.proof` and use this as a default.
-        let path = match proof_path {
-            Some(path) => path.clone(),
-            None => program_path.with_extension("proof"),
-        };
+        let path = Self::resolve_path(proof_path, program_path);
 
         let proof_bytes = proof.to_bytes();
         tracing::Span::current()
