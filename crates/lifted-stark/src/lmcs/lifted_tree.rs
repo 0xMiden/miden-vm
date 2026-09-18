@@ -11,9 +11,16 @@ use p3_util::{log2_strict_usize, reverse_bits_len};
 use tracing::info_span;
 
 use crate::{
-    lmcs::{LmcsTree, proof::LeafOpening, row_list::RowList, tree_indices::TreeIndices},
+    lmcs::{Lmcs, LmcsTree, proof::LeafOpening, row_list::RowList, tree_indices::TreeIndices},
     util::align::aligned_len_sum,
 };
+
+/// Number of lowest digest layers, leaf hashes included, that a tree does not store.
+///
+/// Stored digests shrink by a factor of `2^PRUNED_LAYERS`. In exchange, opening rebuilds the
+/// `2^PRUNED_LAYERS`-leaf subtree under every queried leaf, which costs `2^PRUNED_LAYERS` leaf
+/// hashes per distinct subtree.
+const PRUNED_LAYERS: usize = 4;
 
 /// A uniform binary Merkle tree whose leaves are constructed from matrices with power-of-two
 /// heights.
@@ -89,12 +96,12 @@ pub struct LiftedMerkleTree<F, D, M, const DIGEST_ELEMS: usize, const SALT_ELEMS
     /// after construction time.
     pub(crate) leaves: Vec<M>,
 
-    /// All hash layers (digest arrays) in top-down order: index 0 is the root
-    /// (one hash) and the last layer contains the leaf hashes.
+    /// Stored hash layers (digest arrays) in top-down order: index 0 is the root (one hash).
     ///
     /// This matches the top-down depth convention of [`NodeId`](crate::lmcs::node_id::NodeId):
     /// `digest_layers[d]` has `2^d` entries, so `digest_layers[node.depth()][node.position()]`
-    /// gives direct access.
+    /// gives direct access. The lowest `min(PRUNED_LAYERS, depth)` layers, leaf hashes included,
+    /// are not stored; openings rebuild the parts they need from `leaves` and `salt`.
     pub(crate) digest_layers: Vec<Vec<[D; DIGEST_ELEMS]>>,
 
     /// Salt matrix for hiding commitment. Each row contains `SALT_ELEMS` random field elements.
@@ -155,8 +162,12 @@ where
     /// that require zero padding must check the opened rows explicitly.
     ///
     /// Leaf openings are written in **sorted tree index order** (ascending, deduplicated).
-    fn prove_batch<Ch>(&self, indices: &TreeIndices, channel: &mut Ch)
+    ///
+    /// Sibling hashes below the stored layers are rebuilt with `lmcs`, which must be the
+    /// configuration that built this tree; panics otherwise.
+    fn prove_batch<L, Ch>(&self, lmcs: &L, indices: &TreeIndices, channel: &mut Ch)
     where
+        L: Lmcs<F = F, Commitment = Hash<F, D, DIGEST_ELEMS>>,
         Ch: ProverChannel<F = F, Commitment = Hash<F, D, DIGEST_ELEMS>>,
     {
         let tree_log_height = log2_strict_usize(self.height()) as u8;
@@ -175,10 +186,24 @@ where
             opening.write_to_channel(channel);
         }
 
+        let tree_depth = tree_log_height as usize;
+        let stored_depth = self.digest_layers.len() - 1;
+        let pruned_subtrees = self.rebuild_pruned_subtrees(lmcs, indices);
+
         // Emit missing sibling hashes left-to-right, bottom-to-top.
         for sibling in indices.missing_siblings() {
-            let hash = self.digest_layers[sibling.depth()][sibling.position()];
-            channel.hint_commitment(Hash::from(hash));
+            let (depth, position) = (sibling.depth(), sibling.position());
+            let hash = if depth <= stored_depth {
+                Hash::from(self.digest_layers[depth][position])
+            } else {
+                let shift = depth - stored_depth;
+                let subtree = pruned_subtrees
+                    .binary_search_by_key(&(position >> shift), |(ancestor, _)| *ancestor)
+                    .map(|i| &pruned_subtrees[i].1)
+                    .expect("a missing sibling lies under a queried leaf's stored ancestor");
+                subtree[tree_depth - depth][position & ((1 << shift) - 1)]
+            };
+            channel.hint_commitment(hash);
         }
     }
 }
@@ -291,8 +316,15 @@ where
 
         // Build digest layers by repeatedly compressing until we reach the root,
         // then reverse so index 0 = root, matching the top-down NodeId convention.
+        // The lowest `PRUNED_LAYERS` layers are dropped as soon as their parents exist.
         let digest_layers = info_span!("compress tree layers").in_scope(|| {
-            let mut digest_layers = vec![leaf_digests];
+            let pruned_layers = PRUNED_LAYERS.min(log2_strict_usize(leaf_digests.len()));
+            let mut lowest_stored = leaf_digests;
+            for _ in 0..pruned_layers {
+                lowest_stored = compress_uniform::<PD, C, DIGEST_ELEMS>(&lowest_stored, c);
+            }
+
+            let mut digest_layers = vec![lowest_stored];
             loop {
                 let prev_layer = digest_layers.last().unwrap();
                 if prev_layer.len() == 1 {
@@ -369,6 +401,71 @@ where
             elems.resize(elems.len() + padded_len - m.width(), F::default());
         }
         RowList::new(elems, widths)
+    }
+
+    /// Hash the leaf at `domain_index` the way tree construction does: every matrix row (unpadded),
+    /// then the salt when present.
+    fn hash_leaf<L>(&self, lmcs: &L, domain_index: usize) -> L::Commitment
+    where
+        L: Lmcs<F = F>,
+    {
+        let widths = self.leaves.iter().map(Matrix::width).collect();
+        let rows = self.collect_rows(domain_index, widths);
+        let salt = self.salt.is_some().then(|| self.salt(domain_index));
+        lmcs.hash(rows.iter_rows().chain(salt.as_ref().map(<[F; SALT_ELEMS]>::as_slice)))
+    }
+
+    /// Rebuild the unstored subtree under the deepest stored ancestor of every leaf in `indices`.
+    ///
+    /// Returns `(position, layers)` pairs sorted by the ancestor's position in the deepest stored
+    /// layer. `layers[l]` holds the subtree's nodes `l` levels above the leaves, so `layers[0]` is
+    /// its leaf hashes; the stored ancestor itself is not included. Empty when no layer is pruned.
+    ///
+    /// Panics if a rebuilt subtree does not hash to its stored ancestor, which happens when `lmcs`
+    /// is not the configuration that built this tree.
+    fn rebuild_pruned_subtrees<L>(
+        &self,
+        lmcs: &L,
+        indices: &TreeIndices,
+    ) -> Vec<(usize, Vec<Vec<L::Commitment>>)>
+    where
+        L: Lmcs<F = F, Commitment = Hash<F, D, DIGEST_ELEMS>>,
+    {
+        let stored_depth = self.digest_layers.len() - 1;
+        let pruned_layers = log2_strict_usize(self.height()) - stored_depth;
+        if pruned_layers == 0 {
+            return Vec::new();
+        }
+
+        // `indices` is sorted, so equal ancestors are adjacent.
+        let mut ancestors: Vec<usize> = indices.iter().map(|&leaf| leaf >> pruned_layers).collect();
+        ancestors.dedup();
+
+        ancestors
+            .into_iter()
+            .map(|ancestor| {
+                let first_leaf = ancestor << pruned_layers;
+                let mut layer: Vec<L::Commitment> = (first_leaf..first_leaf + (1 << pruned_layers))
+                    .map(|leaf| self.hash_leaf(lmcs, leaf))
+                    .collect();
+                let mut layers = Vec::with_capacity(pruned_layers);
+                while layer.len() > 1 {
+                    let parents = layer
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|&[left, right]| lmcs.compress(left, right))
+                        .collect();
+                    layers.push(mem::replace(&mut layer, parents));
+                }
+                assert!(
+                    layer[0] == Hash::from(self.digest_layers[stored_depth][ancestor]),
+                    "rebuilt subtree does not hash to the stored tree; \
+                     open with the LMCS configuration that built it",
+                );
+                (ancestor, layers)
+            })
+            .collect()
     }
 }
 
@@ -585,9 +682,12 @@ mod tests {
 
     use super::*;
     use crate::{
-        lmcs::tests::build_leaves_single,
+        lmcs::{
+            hiding_config::HidingLmcsConfig,
+            tests::{build_leaves_single, roundtrip_open_batch},
+        },
         testing::configs::goldilocks_poseidon2::{
-            self as gl, DIGEST, Felt, PackedFelt, RATE, Sponge, WIDTH,
+            self as gl, Compress, DIGEST, Felt, PackedFelt, RATE, Sponge, WIDTH,
         },
         util::align::aligned_len,
     };
@@ -704,5 +804,52 @@ mod tests {
             let leaves_single = build_leaves_single(&matrix_single, &sponge);
             assert_eq!(leaves, leaves_single);
         }
+    }
+
+    /// Trees keep only the layers above their lowest `PRUNED_LAYERS` (the memory saving), and
+    /// openings rebuild the missing siblings from the committed rows. Every opening must still
+    /// verify against the root: a rebuilt leaf that hashes differently from construction (row
+    /// lifting, alignment, salt) would produce an invalid proof.
+    #[test]
+    fn pruned_trees_open_against_their_roots() {
+        let (_, sponge, compress) = gl::test_components();
+        let lmcs = gl::test_lmcs();
+        let hiding = HidingLmcsConfig::<
+            PackedFelt,
+            PackedFelt,
+            Sponge,
+            Compress,
+            SmallRng,
+            WIDTH,
+            DIGEST,
+            4,
+        >::new(sponge, compress, SmallRng::seed_from_u64(1));
+        let mut rng = SmallRng::seed_from_u64(2);
+
+        // Lifted matrices, 2^8 leaves. The queries share a pruned subtree (16, 17, 30), sit alone
+        // in one (100), and cover both ends of the tree.
+        let matrices: Vec<RowMajorMatrix<Felt>> = [(32, 3), (128, RATE + 1), (256, 2 * RATE)]
+            .into_iter()
+            .map(|(h, w)| RowMajorMatrix::rand(&mut rng, h, w))
+            .collect();
+        let indices = [0, 16, 17, 30, 100, 255];
+        let stored_layers = 8 - PRUNED_LAYERS + 1;
+
+        let tree = lmcs.build_tree(matrices.clone());
+        assert_eq!(tree.digest_layers.len(), stored_layers);
+        roundtrip_open_batch(&lmcs, &tree, &indices).expect("pruned opening should verify");
+
+        let aligned = lmcs.build_aligned_tree(matrices.clone());
+        assert_eq!(aligned.digest_layers.len(), stored_layers);
+        roundtrip_open_batch(&lmcs, &aligned, &indices).expect("aligned opening should verify");
+
+        let salted = hiding.build_tree(matrices);
+        assert_eq!(salted.digest_layers.len(), stored_layers);
+        roundtrip_open_batch(&hiding, &salted, &indices).expect("salted opening should verify");
+
+        // A tree no taller than 2^PRUNED_LAYERS keeps only its root.
+        let short = lmcs.build_tree(vec![RowMajorMatrix::<Felt>::rand(&mut rng, 8, 3)]);
+        assert_eq!(short.digest_layers.len(), 1);
+        roundtrip_open_batch(&lmcs, &short, &[2, 5]).expect("short opening should verify");
     }
 }
