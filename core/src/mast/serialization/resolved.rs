@@ -254,7 +254,7 @@ impl<'a> ResolvedSerializedForest<'a> {
         self.digests.digest_at(self.bytes, &self.layout, index, entry)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     pub(super) fn digest_slot_at(&self, index: usize) -> usize {
         self.digests.slot_by_node[index] as usize
     }

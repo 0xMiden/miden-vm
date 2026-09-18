@@ -4,7 +4,6 @@ use alloc::vec::Vec;
 use proptest::prelude::*;
 
 use super::*;
-use crate::rand::test_utils::rand_vector;
 
 // SHA-256 TESTS
 // ================================================================================================
@@ -12,13 +11,13 @@ use crate::rand::test_utils::rand_vector;
 #[test]
 fn sha256_hash_elements() {
     // test multiple of 8
-    let elements = rand_vector::<Felt>(16);
+    let elements: Vec<Felt> = (0..16).map(|_| rand::random()).collect();
     let expected = compute_expected_sha256_element_hash(&elements);
     let actual: [u8; DIGEST256_BYTES] = hash_elements_256(&elements);
     assert_eq!(&expected, &actual);
 
     // test not multiple of 8
-    let elements = rand_vector::<Felt>(17);
+    let elements: Vec<Felt> = (0..17).map(|_| rand::random()).collect();
     let expected = compute_expected_sha256_element_hash(&elements);
     let actual: [u8; DIGEST256_BYTES] = hash_elements_256(&elements);
     assert_eq!(&expected, &actual);
@@ -78,13 +77,13 @@ fn test_sha256_nist_test_vectors() {
 #[test]
 fn sha512_hash_elements() {
     // test multiple of 16
-    let elements = rand_vector::<Felt>(32);
+    let elements: Vec<Felt> = (0..32).map(|_| rand::random()).collect();
     let expected = compute_expected_sha512_element_hash(&elements);
     let actual: [u8; DIGEST512_BYTES] = hash_elements_512(&elements);
     assert_eq!(&expected, &actual);
 
     // test not multiple of 16
-    let elements = rand_vector::<Felt>(17);
+    let elements: Vec<Felt> = (0..17).map(|_| rand::random()).collect();
     let expected = compute_expected_sha512_element_hash(&elements);
     let actual: [u8; DIGEST512_BYTES] = hash_elements_512(&elements);
     assert_eq!(&expected, &actual);

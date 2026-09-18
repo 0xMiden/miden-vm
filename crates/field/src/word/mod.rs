@@ -17,6 +17,11 @@ use miden_serde_utils::{
 };
 #[cfg(not(all(target_family = "wasm", miden)))]
 use p3_field::integers::QuotientMap;
+#[cfg(not(all(target_family = "wasm", miden)))]
+use rand::{
+    Rng,
+    distr::{Distribution, StandardUniform},
+};
 use thiserror::Error;
 
 use super::Felt;
@@ -50,6 +55,14 @@ pub struct Word {
     //
     // see sdk/base-macros/wit/miden.wit in the compiler repo, so we have to define it like that
     // here.
+}
+
+#[cfg(not(all(target_family = "wasm", miden)))]
+impl Distribution<Word> for StandardUniform {
+    #[inline]
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Word {
+        Word::new(core::array::from_fn(|_| self.sample(rng)))
+    }
 }
 
 // Compile-time assertions to ensure `Word` has the same layout as `[Felt; 4]`. This is relied upon
@@ -777,7 +790,7 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            prop::array::uniform4(any::<Felt>()).prop_map(Word::new).no_shrink().boxed()
+            prop::array::uniform4(any::<Felt>()).prop_map(Word::new).boxed()
         }
     }
 }

@@ -9,6 +9,8 @@ use alloc::vec::Vec;
 
 use assert_matches::assert_matches;
 use itertools::Itertools;
+use rand::{RngExt, SeedableRng};
+use rand_chacha::ChaCha20Rng;
 
 use crate::{
     EMPTY_WORD, Word,
@@ -20,7 +22,6 @@ use crate::{
             root::{LineageId, TreeEntry, TreeWithRoot},
         },
     },
-    rand::test_utils::ContinuousRng,
 };
 
 // CONSTRUCTION
@@ -45,23 +46,23 @@ fn new() -> Result<()> {
 #[test]
 fn open() -> Result<()> {
     let mut backend = InMemoryBackend::new();
-    let mut rng = ContinuousRng::new([0x42; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x42; 32]);
 
     // When we `open` for a lineage that has never been added to the backend, it should yield an
     // error.
-    let ne_lineage: LineageId = rng.value();
-    let random_key: Word = rng.value();
+    let ne_lineage: LineageId = rng.random();
+    let random_key: Word = rng.random();
     let result = backend.open(ne_lineage, random_key);
     assert!(result.is_err());
     assert_matches!(result.unwrap_err(), BackendError::UnknownLineage(l) if l == ne_lineage);
 
     // Let's now add a tree with a few items in it to the forest.
-    let lineage_1: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
-    let key_1: Word = rng.value();
-    let value_1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2: Word = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
+    let key_1: Word = rng.random();
+    let value_1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2: Word = rng.random();
 
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(key_1, value_1);
@@ -91,23 +92,23 @@ fn open() -> Result<()> {
 #[test]
 fn get() -> Result<()> {
     let mut backend = InMemoryBackend::new();
-    let mut rng = ContinuousRng::new([0x71; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x71; 32]);
 
     // When we `get` for a lineage that has never been added to the backend, it should yield an
     // error.
-    let ne_lineage: LineageId = rng.value();
-    let random_key: Word = rng.value();
+    let ne_lineage: LineageId = rng.random();
+    let random_key: Word = rng.random();
     let result = backend.get(ne_lineage, random_key);
     assert!(result.is_err());
     assert_matches!(result.unwrap_err(), BackendError::UnknownLineage(l) if l == ne_lineage);
 
     // Let's now add a tree with a few items in it to the forest.
-    let lineage_1: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
-    let key_1: Word = rng.value();
-    let value_1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2: Word = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
+    let key_1: Word = rng.random();
+    let value_1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2: Word = rng.random();
 
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(key_1, value_1);
@@ -135,21 +136,21 @@ fn get() -> Result<()> {
 #[test]
 fn version() -> Result<()> {
     let mut backend = InMemoryBackend::new();
-    let mut rng = ContinuousRng::new([0x96; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x96; 32]);
 
     // Getting the version for a lineage that the backend doesn't know about should yield an error.
-    let ne_lineage: LineageId = rng.value();
+    let ne_lineage: LineageId = rng.random();
     let result = backend.version(ne_lineage);
     assert!(result.is_err());
     assert_matches!(result.unwrap_err(), BackendError::UnknownLineage(l) if l == ne_lineage);
 
     // Let's now shove a tree into the backend.
-    let lineage_1: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
-    let key_1: Word = rng.value();
-    let value_1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2: Word = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
+    let key_1: Word = rng.random();
+    let value_1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2: Word = rng.random();
 
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(key_1, value_1);
@@ -166,37 +167,37 @@ fn version() -> Result<()> {
 #[test]
 fn lineages() -> Result<()> {
     let mut backend = InMemoryBackend::new();
-    let mut rng = ContinuousRng::new([0x91; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x91; 32]);
 
     // Initially there should be no lineages.
     assert_eq!(backend.lineages()?.count(), 0);
 
     // We'll use the same data for each tree here to simplify the test.
-    let key_1: Word = rng.value();
-    let value_1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2: Word = rng.value();
+    let key_1: Word = rng.random();
+    let value_1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(key_1, value_1);
     operations.add_insert(key_2, value_2);
 
-    let version: VersionId = rng.value();
+    let version: VersionId = rng.random();
 
     // Let's start by adding one lineage and checking that the iterator contains it.
-    let lineage_1: LineageId = rng.value();
+    let lineage_1: LineageId = rng.random();
     backend.add_lineage(lineage_1, version, operations.clone())?;
     assert_eq!(backend.lineages()?.count(), 1);
     assert!(backend.lineages()?.contains(&lineage_1));
 
     // We add another
-    let lineage_2: LineageId = rng.value();
+    let lineage_2: LineageId = rng.random();
     backend.add_lineage(lineage_2, version, operations.clone())?;
     assert_eq!(backend.lineages()?.count(), 2);
     assert!(backend.lineages()?.contains(&lineage_1));
     assert!(backend.lineages()?.contains(&lineage_2));
 
     // And yet another
-    let lineage_3: LineageId = rng.value();
+    let lineage_3: LineageId = rng.random();
     backend.add_lineage(lineage_3, version, operations.clone())?;
     assert_eq!(backend.lineages()?.count(), 3);
     assert!(backend.lineages()?.contains(&lineage_1));
@@ -209,23 +210,23 @@ fn lineages() -> Result<()> {
 #[test]
 fn trees() -> Result<()> {
     let mut backend = InMemoryBackend::new();
-    let mut rng = ContinuousRng::new([0x91; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x91; 32]);
 
     // Initially there should be no lineages.
     assert_eq!(backend.lineages()?.count(), 0);
 
     // We need individual trees and versions here to check on the roots, so let's add our first
     // tree.
-    let key_1_1: Word = rng.value();
-    let value_1_1: Word = rng.value();
-    let key_1_2: Word = rng.value();
-    let value_1_2: Word = rng.value();
+    let key_1_1: Word = rng.random();
+    let value_1_1: Word = rng.random();
+    let key_1_2: Word = rng.random();
+    let value_1_2: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(key_1_1, value_1_1);
     operations.add_insert(key_1_2, value_1_2);
 
-    let lineage_1: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
 
     backend.add_lineage(lineage_1, version_1, operations)?;
 
@@ -242,16 +243,16 @@ fn trees() -> Result<()> {
     );
 
     // Let's add another tree.
-    let key_2_1: Word = rng.value();
-    let value_2_1: Word = rng.value();
-    let key_2_2: Word = rng.value();
-    let value_2_2: Word = rng.value();
+    let key_2_1: Word = rng.random();
+    let value_2_1: Word = rng.random();
+    let key_2_2: Word = rng.random();
+    let value_2_2: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(key_2_1, value_2_1);
     operations.add_insert(key_2_2, value_2_2);
 
-    let lineage_2: LineageId = rng.value();
-    let version_2: VersionId = rng.value();
+    let lineage_2: LineageId = rng.random();
+    let version_2: VersionId = rng.random();
 
     backend.add_lineage(lineage_2, version_2, operations)?;
 
@@ -273,16 +274,16 @@ fn trees() -> Result<()> {
     );
 
     // Let's add one more, just as a sanity check.
-    let key_3_1: Word = rng.value();
-    let value_3_1: Word = rng.value();
-    let key_3_2: Word = rng.value();
-    let value_3_2: Word = rng.value();
+    let key_3_1: Word = rng.random();
+    let value_3_1: Word = rng.random();
+    let key_3_2: Word = rng.random();
+    let value_3_2: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(key_3_1, value_3_1);
     operations.add_insert(key_3_2, value_3_2);
 
-    let lineage_3: LineageId = rng.value();
-    let version_3: VersionId = rng.value();
+    let lineage_3: LineageId = rng.random();
+    let version_3: VersionId = rng.random();
 
     backend.add_lineage(lineage_3, version_3, operations)?;
 
@@ -314,28 +315,28 @@ fn trees() -> Result<()> {
 #[test]
 fn entry_count() -> Result<()> {
     let mut backend = InMemoryBackend::new();
-    let mut rng = ContinuousRng::new([0x67; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x67; 32]);
 
     // It should yield an error for a lineage that doesn't exist.
-    let ne_lineage: LineageId = rng.value();
+    let ne_lineage: LineageId = rng.random();
     let result = backend.entry_count(ne_lineage);
     assert!(result.is_err());
     assert_matches!(result.unwrap_err(), BackendError::UnknownLineage(l) if l == ne_lineage);
 
-    let version: VersionId = rng.value();
+    let version: VersionId = rng.random();
 
     // Let's start by adding a new lineage with an entirely empty tree.
-    let lineage_1: LineageId = rng.value();
+    let lineage_1: LineageId = rng.random();
     backend.add_lineage(lineage_1, version, SmtUpdateBatch::default())?;
 
     // When queried, this should yield zero entries.
     assert_eq!(backend.entry_count(lineage_1)?, 0);
 
     // Now let's modify that tree to add entries.
-    let key_1_1: Word = rng.value();
-    let value_1_1: Word = rng.value();
-    let key_1_2: Word = rng.value();
-    let value_1_2: Word = rng.value();
+    let key_1_1: Word = rng.random();
+    let value_1_1: Word = rng.random();
+    let key_1_2: Word = rng.random();
+    let value_1_2: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(key_1_1, value_1_1);
     operations.add_insert(key_1_2, value_1_2);
@@ -351,10 +352,10 @@ fn entry_count() -> Result<()> {
 #[test]
 fn entries() -> Result<()> {
     let mut backend = InMemoryBackend::new();
-    let mut rng = ContinuousRng::new([0x67; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x67; 32]);
 
     // It should yield an error for a lineage that doesn't exist.
-    let ne_lineage: LineageId = rng.value();
+    let ne_lineage: LineageId = rng.random();
     let result = backend.entries(ne_lineage);
     assert!(result.is_err());
     match result {
@@ -365,21 +366,21 @@ fn entries() -> Result<()> {
     }
     drop(result); // Forget the borrow.
 
-    let version: VersionId = rng.value();
+    let version: VersionId = rng.random();
 
     // If we add an empty lineage, the iterator should yield no items.
-    let lineage_1: LineageId = rng.value();
+    let lineage_1: LineageId = rng.random();
     backend.add_lineage(lineage_1, version, SmtUpdateBatch::default())?;
     assert_eq!(backend.entries(lineage_1)?.count(), 0);
 
     // So let's add some entries.
-    let key_1_1: Word = rng.value();
-    let value_1_1: Word = rng.value();
-    let key_1_2: Word = rng.value();
-    let value_1_2: Word = rng.value();
-    let mut key_1_3: Word = rng.value();
+    let key_1_1: Word = rng.random();
+    let value_1_1: Word = rng.random();
+    let key_1_2: Word = rng.random();
+    let value_1_2: Word = rng.random();
+    let mut key_1_3: Word = rng.random();
     key_1_3[3] = key_1_1[3];
-    let value_1_3: Word = rng.value();
+    let value_1_3: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(key_1_1, value_1_1);
     operations.add_insert(key_1_2, value_1_2);
@@ -399,11 +400,11 @@ fn entries() -> Result<()> {
 #[test]
 fn add_lineage() -> Result<()> {
     let mut backend = InMemoryBackend::new();
-    let mut rng = ContinuousRng::new([0x76; 32]);
-    let version: VersionId = rng.value();
+    let mut rng = ChaCha20Rng::from_seed([0x76; 32]);
+    let version: VersionId = rng.random();
 
     // We should be able to add a lineage without actually changing the empty tree.
-    let lineage_1: LineageId = rng.value();
+    let lineage_1: LineageId = rng.random();
     backend.add_lineage(lineage_1, version, SmtUpdateBatch::default())?;
     assert_eq!(backend.entry_count(lineage_1)?, 0);
 
@@ -413,15 +414,15 @@ fn add_lineage() -> Result<()> {
     assert_matches!(result.unwrap_err(), BackendError::DuplicateLineage(l) if l == lineage_1);
 
     // But we should also be able to add lineages that _contain data_ from the get-go.
-    let key_2_1: Word = rng.value();
-    let value_2_1: Word = rng.value();
-    let key_2_2: Word = rng.value();
-    let value_2_2: Word = rng.value();
+    let key_2_1: Word = rng.random();
+    let value_2_1: Word = rng.random();
+    let key_2_2: Word = rng.random();
+    let value_2_2: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(key_2_1, value_2_1);
     operations.add_insert(key_2_2, value_2_2);
 
-    let lineage_2: LineageId = rng.value();
+    let lineage_2: LineageId = rng.random();
     let root = backend.add_lineage(lineage_2, version, operations)?;
     assert_eq!(backend.entry_count(lineage_2)?, 2);
 
@@ -439,21 +440,21 @@ fn add_lineage() -> Result<()> {
 #[test]
 fn add_lineages() -> Result<()> {
     let mut backend = InMemoryBackend::new();
-    let mut rng = ContinuousRng::new([0xa1; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0xa1; 32]);
 
     // An empty batch should return an empty result and leave the backend unchanged.
-    let version: VersionId = rng.value();
+    let version: VersionId = rng.random();
     let result = backend.add_lineages(version, SmtForestUpdateBatch::empty())?;
     assert!(result.is_empty());
     assert_eq!(backend.lineages()?.count(), 0);
     assert_eq!(backend.trees()?.count(), 0);
 
     // A single lineage with two inserts should work correctly.
-    let lineage_1: LineageId = rng.value();
-    let key_1_1: Word = rng.value();
-    let value_1_1: Word = rng.value();
-    let key_1_2: Word = rng.value();
-    let value_1_2: Word = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let key_1_1: Word = rng.random();
+    let value_1_1: Word = rng.random();
+    let key_1_2: Word = rng.random();
+    let value_1_2: Word = rng.random();
 
     let mut batch = SmtForestUpdateBatch::empty();
     batch.operations(lineage_1).add_insert(key_1_1, value_1_1);
@@ -473,22 +474,22 @@ fn add_lineages() -> Result<()> {
     // Reset backend for multi-lineage test.
     let mut backend = InMemoryBackend::new();
 
-    let lineage_a: LineageId = rng.value();
-    let lineage_b: LineageId = rng.value();
-    let lineage_c: LineageId = rng.value();
+    let lineage_a: LineageId = rng.random();
+    let lineage_b: LineageId = rng.random();
+    let lineage_c: LineageId = rng.random();
 
-    let key_a_1: Word = rng.value();
-    let value_a_1: Word = rng.value();
-    let key_a_2: Word = rng.value();
-    let value_a_2: Word = rng.value();
-    let key_b_1: Word = rng.value();
-    let value_b_1: Word = rng.value();
-    let key_b_2: Word = rng.value();
-    let value_b_2: Word = rng.value();
-    let key_c_1: Word = rng.value();
-    let value_c_1: Word = rng.value();
-    let key_c_2: Word = rng.value();
-    let value_c_2: Word = rng.value();
+    let key_a_1: Word = rng.random();
+    let value_a_1: Word = rng.random();
+    let key_a_2: Word = rng.random();
+    let value_a_2: Word = rng.random();
+    let key_b_1: Word = rng.random();
+    let value_b_1: Word = rng.random();
+    let key_b_2: Word = rng.random();
+    let value_b_2: Word = rng.random();
+    let key_c_1: Word = rng.random();
+    let value_c_1: Word = rng.random();
+    let key_c_2: Word = rng.random();
+    let value_c_2: Word = rng.random();
 
     let mut batch = SmtForestUpdateBatch::empty();
     batch.operations(lineage_a).add_insert(key_a_1, value_a_1);
@@ -535,17 +536,17 @@ fn add_lineages() -> Result<()> {
 
     // Duplicate lineage error and atomicity: pre-add one lineage, then try a batch containing it.
     let mut backend = InMemoryBackend::new();
-    let existing_lineage: LineageId = rng.value();
-    let new_lineage: LineageId = rng.value();
+    let existing_lineage: LineageId = rng.random();
+    let new_lineage: LineageId = rng.random();
 
     let mut ops = SmtUpdateBatch::default();
-    ops.add_insert(rng.value(), rng.value());
+    ops.add_insert(rng.random(), rng.random());
     backend.add_lineage(existing_lineage, version, ops)?;
     let backend_before = backend.clone();
 
     let mut batch = SmtForestUpdateBatch::empty();
-    batch.operations(existing_lineage).add_insert(rng.value(), rng.value());
-    batch.operations(new_lineage).add_insert(rng.value(), rng.value());
+    batch.operations(existing_lineage).add_insert(rng.random(), rng.random());
+    batch.operations(new_lineage).add_insert(rng.random(), rng.random());
 
     let result = backend.add_lineages(version, batch);
     assert!(result.is_err());
@@ -563,24 +564,24 @@ fn add_lineages() -> Result<()> {
 #[test]
 fn update_tree() -> Result<()> {
     let mut backend = InMemoryBackend::new();
-    let mut rng = ContinuousRng::new([0x76; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x76; 32]);
 
     // Updating a lineage that does not exist should result in an error.
-    let ne_lineage: LineageId = rng.value();
-    let result = backend.update_tree(ne_lineage, rng.value(), SmtUpdateBatch::default());
+    let ne_lineage: LineageId = rng.random();
+    let result = backend.update_tree(ne_lineage, rng.random(), SmtUpdateBatch::default());
     assert!(result.is_err());
     assert_matches!(result.unwrap_err(), BackendError::UnknownLineage(l) if l == ne_lineage);
 
     // So let's add an actual lineage.
-    let key_1_1: Word = rng.value();
-    let value_1_1: Word = rng.value();
-    let key_1_2: Word = rng.value();
-    let value_1_2: Word = rng.value();
+    let key_1_1: Word = rng.random();
+    let value_1_1: Word = rng.random();
+    let key_1_2: Word = rng.random();
+    let value_1_2: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(key_1_1, value_1_1);
     operations.add_insert(key_1_2, value_1_2);
-    let lineage_1: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
 
     backend.add_lineage(lineage_1, version_1, operations)?;
 
@@ -594,8 +595,8 @@ fn update_tree() -> Result<()> {
 
     // Now let's add another node to the tree! Note that reusing the same version does not matter;
     // version consistency is enforced by the FOREST and not the backend.
-    let key_1_3: Word = rng.value();
-    let value_1_3: Word = rng.value();
+    let key_1_3: Word = rng.random();
+    let value_1_3: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(key_1_3, value_1_3);
     let backend_revs_1 = backend.update_tree(lineage_1, version_1, operations)?;
@@ -625,16 +626,16 @@ fn update_tree() -> Result<()> {
 #[test]
 fn apply_mutations_returns_reversion_data() -> Result<()> {
     let mut backend = InMemoryBackend::new();
-    let mut rng = ContinuousRng::new([0x77; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x77; 32]);
 
-    let lineage: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
-    let version_2: VersionId = rng.value();
-    let key_1: Word = rng.value();
-    let value_1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2: Word = rng.value();
-    let value_3: Word = rng.value();
+    let lineage: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
+    let version_2: VersionId = rng.random();
+    let key_1: Word = rng.random();
+    let value_1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2: Word = rng.random();
+    let value_3: Word = rng.random();
 
     let mut initial = SmtUpdateBatch::default();
     initial.add_insert(key_1, value_1);
@@ -669,15 +670,15 @@ fn apply_mutations_returns_reversion_data() -> Result<()> {
 #[test]
 fn apply_mutations_rejects_stale_prepared_update() -> Result<()> {
     let mut backend = InMemoryBackend::new();
-    let mut rng = ContinuousRng::new([0xa5; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0xa5; 32]);
 
-    let lineage: LineageId = rng.value();
-    let key_1: Word = rng.value();
-    let value_1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2: Word = rng.value();
-    let key_3: Word = rng.value();
-    let value_3: Word = rng.value();
+    let lineage: LineageId = rng.random();
+    let key_1: Word = rng.random();
+    let value_1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2: Word = rng.random();
+    let key_3: Word = rng.random();
+    let value_3: Word = rng.random();
 
     let mut initial = SmtUpdateBatch::default();
     initial.add_insert(key_1, value_1);
@@ -704,22 +705,22 @@ fn apply_mutations_rejects_stale_prepared_update() -> Result<()> {
 #[test]
 fn update_forest() -> Result<()> {
     let mut backend = InMemoryBackend::new();
-    let mut rng = ContinuousRng::new([0x76; 32]);
-    let version: VersionId = rng.value();
+    let mut rng = ChaCha20Rng::from_seed([0x76; 32]);
+    let version: VersionId = rng.random();
 
     // Let's start by adding two trees to the forest.
-    let lineage_1: LineageId = rng.value();
-    let key_1_1: Word = rng.value();
-    let value_1_1: Word = rng.value();
-    let key_1_2: Word = rng.value();
-    let value_1_2: Word = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let key_1_1: Word = rng.random();
+    let value_1_1: Word = rng.random();
+    let key_1_2: Word = rng.random();
+    let value_1_2: Word = rng.random();
     let mut operations_1 = SmtUpdateBatch::default();
     operations_1.add_insert(key_1_1, value_1_1);
     operations_1.add_insert(key_1_2, value_1_2);
 
-    let lineage_2: LineageId = rng.value();
-    let key_2_1: Word = rng.value();
-    let value_2_1: Word = rng.value();
+    let lineage_2: LineageId = rng.random();
+    let key_2_1: Word = rng.random();
+    let value_2_1: Word = rng.random();
     let mut operations_2 = SmtUpdateBatch::default();
     operations_2.add_insert(key_2_1, value_2_1);
 
@@ -741,10 +742,10 @@ fn update_forest() -> Result<()> {
     assert!(backend.trees()?.any(|e| e.root() == tree_2.root()));
 
     // Let's do a batch modification to start with, doing an insert into both trees.
-    let key_1_3: Word = rng.value();
-    let value_1_3: Word = rng.value();
-    let key_2_2: Word = rng.value();
-    let value_2_2: Word = rng.value();
+    let key_1_3: Word = rng.random();
+    let value_1_3: Word = rng.random();
+    let key_2_2: Word = rng.random();
+    let value_2_2: Word = rng.random();
 
     let mut forest_ops = SmtForestUpdateBatch::empty();
     forest_ops.operations(lineage_1).add_insert(key_1_3, value_1_3);
@@ -761,9 +762,9 @@ fn update_forest() -> Result<()> {
     assert!(backend.trees()?.any(|e| e.root() == tree_2.root()));
 
     // We should see an error when performing operations on a lineage that does not exist...
-    let ne_lineage: LineageId = rng.value();
-    let key_1_4: Word = rng.value();
-    let value_1_4: Word = rng.value();
+    let ne_lineage: LineageId = rng.random();
+    let key_1_4: Word = rng.random();
+    let value_1_4: Word = rng.random();
 
     let mut forest_ops = SmtForestUpdateBatch::empty();
     forest_ops.operations(lineage_1).add_insert(key_1_4, value_1_4);

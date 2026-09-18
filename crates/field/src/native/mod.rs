@@ -721,12 +721,15 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            let canonical = (0u64..Felt::ORDER).prop_map(Felt::new_unchecked).boxed();
-            // Goldilocks uses representation where values above the field order are valid and
-            // represent wrapped field elements. Generate such values 1/5 of the time to exercise
-            // this behavior.
-            let non_canonical = (Felt::ORDER..=u64::MAX).prop_map(Felt::new_unchecked).boxed();
-            prop_oneof![4 => canonical, 1 => non_canonical].no_shrink().boxed()
+            (0u64..Felt::ORDER).prop_map(Felt::new_unchecked).boxed()
         }
     }
+
+    /// Generates field elements with non-canonical representations.
+    pub fn arb_felt_noncanonical() -> impl Strategy<Value = Felt> {
+        (Felt::ORDER..=u64::MAX).prop_map(Felt::new_unchecked)
+    }
 }
+
+#[cfg(all(any(test, feature = "arbitrary"), not(all(target_family = "wasm", miden))))]
+pub use arbitrary::arb_felt_noncanonical;
