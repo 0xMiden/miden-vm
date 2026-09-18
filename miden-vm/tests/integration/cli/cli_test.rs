@@ -92,6 +92,31 @@ fn prove_command() -> (TempDir, Command) {
     (working_dir, cmd)
 }
 
+/// Asserts that `proof_path` holds a proof and not the outputs file that used to replace it.
+///
+/// The outputs are a couple of hundred bytes of JSON; a proof is tens of kilobytes of binary.
+fn assert_proof_survived(proof_path: &Path) {
+    let proof = fs::read(proof_path).expect("the proof should have been written");
+    assert!(
+        proof.len() > 1024 && !proof.starts_with(b"{"),
+        "the proof was replaced by a {} byte outputs file",
+        proof.len()
+    );
+}
+
+/// Returns true when the filesystem under `dir` treats `name` and `alias` as one file.
+///
+/// Case-insensitive and normalization-insensitive filesystems do; ext4 does not, and there the
+/// aliasing branch of the tests below cannot be reached.
+fn filesystem_aliases(dir: &Path, name: &str, alias: &str) -> bool {
+    let probe_dir = dir.join("alias-probe");
+    fs::create_dir(&probe_dir).unwrap();
+    fs::write(probe_dir.join(name), "probe").unwrap();
+    let aliased = probe_dir.join(alias).exists();
+    fs::remove_dir_all(&probe_dir).unwrap();
+    aliased
+}
+
 #[test]
 fn prove_writes_outputs_next_to_a_custom_proof_file() {
     let (working_dir, mut cmd) = prove_command();
@@ -110,6 +135,157 @@ fn prove_writes_outputs_next_to_a_custom_proof_file() {
         !working_dir.path().join("program.outputs").exists(),
         "the outputs should not be left behind next to the program"
     );
+}
+
+#[test]
+fn prove_keeps_a_proof_file_that_the_outputs_would_overwrite() {
+    let (working_dir, mut cmd) = prove_command();
+    let proof_path = working_dir.path().join("custom.outputs");
+
+    cmd.arg("--proof").arg(&proof_path);
+    cmd.assert()
+        .failure()
+        // The diagnostic renderer hard-wraps long messages, so match single words that cannot
+        // be split across lines (the same reason the tests above match the path in fragments).
+        .stderr(predicate::str::contains("overwrite"));
+
+    assert_proof_survived(&proof_path);
+}
+
+#[test]
+fn prove_accepts_an_outputs_shaped_proof_file_when_output_is_explicit() {
+    let (working_dir, mut cmd) = prove_command();
+    let proof_path = working_dir.path().join("custom.outputs");
+    let output_path = working_dir.path().join("elsewhere.outputs");
+
+    cmd.arg("--proof").arg(&proof_path).arg("--output").arg(&output_path);
+    cmd.assert().success();
+
+    assert_proof_survived(&proof_path);
+    assert!(output_path.exists(), "the outputs should go where --output asked");
+}
+
+#[test]
+fn prove_handles_an_outputs_path_that_differs_from_the_proof_only_in_case() {
+    let (working_dir, mut cmd) = prove_command();
+    let proof_path = working_dir.path().join("custom.OUTPUTS");
+    let output_path = working_dir.path().join("custom.outputs");
+
+    cmd.arg("--proof").arg(&proof_path);
+
+    if filesystem_aliases(working_dir.path(), "custom.OUTPUTS", "custom.outputs") {
+        cmd.assert().failure().stderr(predicate::str::contains("overwrite"));
+        assert_proof_survived(&proof_path);
+    } else {
+        cmd.assert().success();
+        assert_proof_survived(&proof_path);
+        assert!(output_path.exists(), "the two names are separate files here");
+    }
+}
+
+#[test]
+fn prove_handles_an_outputs_path_that_differs_from_the_proof_only_in_unicode_normalization() {
+    let (working_dir, mut cmd) = prove_command();
+    // The same grapheme twice: composed, then decomposed as `e` plus a combining acute accent.
+    let composed = "\u{e9}.proof";
+    let decomposed = "e\u{301}.proof";
+    let proof_path = working_dir.path().join(decomposed);
+    let output_path = working_dir.path().join(composed);
+
+    cmd.arg("--proof").arg(&proof_path).arg("--output").arg(&output_path);
+
+    if filesystem_aliases(working_dir.path(), decomposed, composed) {
+        cmd.assert().failure().stderr(predicate::str::contains("overwrite"));
+        assert_proof_survived(&proof_path);
+    } else {
+        cmd.assert().success();
+        assert_proof_survived(&proof_path);
+        assert!(output_path.exists(), "the two spellings are separate files here");
+    }
+}
+
+#[test]
+fn prove_keeps_the_proof_when_an_explicit_output_repeats_its_path() {
+    let (working_dir, mut cmd) = prove_command();
+    let proof_path = working_dir.path().join("same.proof");
+
+    cmd.arg("--proof").arg(&proof_path).arg("--output").arg(&proof_path);
+    cmd.assert().failure().stderr(predicate::str::contains("overwrite"));
+
+    assert_proof_survived(&proof_path);
+}
+
+#[test]
+fn prove_keeps_the_proof_when_an_explicit_output_collides_through_dot_dot_components() {
+    let (working_dir, mut cmd) = prove_command();
+    fs::create_dir(working_dir.path().join("sub")).unwrap();
+    let proof_path = working_dir.path().join("same.proof");
+    let aliased_proof_path = working_dir.path().join("./sub/../same.proof");
+
+    cmd.arg("--proof").arg(&aliased_proof_path).arg("--output").arg(&proof_path);
+    cmd.assert().failure().stderr(predicate::str::contains("overwrite"));
+
+    assert_proof_survived(&proof_path);
+}
+
+#[test]
+fn prove_keeps_the_proof_when_an_explicit_output_repeats_its_path_in_absolute_form() {
+    let (working_dir, mut cmd) = prove_command();
+    let proof_path = working_dir.path().join("same.proof");
+
+    // The command runs with `working_dir` as its current directory, so the relative --proof and
+    // the absolute --output name the same file.
+    cmd.arg("--proof").arg("same.proof").arg("--output").arg(&proof_path);
+    cmd.assert().failure().stderr(predicate::str::contains("overwrite"));
+
+    assert_proof_survived(&proof_path);
+}
+
+#[cfg(unix)]
+#[test]
+fn prove_keeps_the_proof_when_an_explicit_output_is_reached_through_a_symlinked_proof_path() {
+    let (working_dir, mut cmd) = prove_command();
+    let proof_path = working_dir.path().join("same.proof");
+    std::os::unix::fs::symlink(&proof_path, working_dir.path().join("alias.proof")).unwrap();
+
+    cmd.arg("--proof").arg("alias.proof").arg("--output").arg(&proof_path);
+    cmd.assert().failure().stderr(predicate::str::contains("overwrite"));
+
+    assert_proof_survived(&proof_path);
+}
+
+#[cfg(unix)]
+#[test]
+fn prove_keeps_the_proof_when_the_default_output_is_a_symlink_to_it() {
+    let (working_dir, mut cmd) = prove_command();
+    let proof_path = working_dir.path().join("custom.proof");
+    let output_path = working_dir.path().join("custom.outputs");
+    // The link dangles until the proof is written, which is what the check has to survive.
+    std::os::unix::fs::symlink("custom.proof", &output_path).unwrap();
+
+    cmd.arg("--proof").arg(&proof_path);
+    cmd.assert().failure().stderr(predicate::str::contains("overwrite"));
+
+    assert_proof_survived(&proof_path);
+    assert!(output_path.is_symlink(), "the alias should be left untouched");
+}
+
+#[cfg(unix)]
+#[test]
+fn prove_keeps_the_proof_when_an_explicit_output_crosses_a_symlink_with_dot_dot() {
+    let (working_dir, mut cmd) = prove_command();
+    let real_dir = working_dir.path().join("real");
+    fs::create_dir(&real_dir).unwrap();
+    fs::create_dir(real_dir.join("sub")).unwrap();
+    std::os::unix::fs::symlink(real_dir.join("sub"), working_dir.path().join("alias")).unwrap();
+
+    let proof_path = real_dir.join("same.proof");
+    let output_path = working_dir.path().join("alias/../same.proof");
+
+    cmd.arg("--proof").arg(&proof_path).arg("--output").arg(&output_path);
+    cmd.assert().failure().stderr(predicate::str::contains("overwrite"));
+
+    assert_proof_survived(&proof_path);
 }
 
 #[test]

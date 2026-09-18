@@ -1,4 +1,8 @@
-use std::{path::PathBuf, time::Instant};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::Instant,
+};
 
 use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
@@ -180,19 +184,25 @@ impl ProveCmd {
         // write proof to file
         ProofFile::write(proof, &self.proof_file, &self.program_file).map_err(Report::msg)?;
 
-        // provide outputs
-        if let Some(output_path) = &self.output_file {
-            // write all outputs to specified file.
-            OutputFile::write(&stack_outputs, output_path).map_err(Report::msg)?;
-        } else {
-            // if no output path was provided, get the stack outputs for printing to the screen.
+        // Whether the outputs path names the proof is a question only the filesystem can answer,
+        // and only now that the proof exists: resolving both paths folds away symlinks, `..`
+        // components, case-insensitive names and Unicode normalization in one step.
+        let proof_path = self.resolved_proof_path();
+        let output_path = self.output_file.clone().unwrap_or_else(|| self.default_output_path());
+        if resolve_to_same_file(&output_path, &proof_path) {
+            return Err(Report::msg(format!(
+                "The outputs file `{}` would overwrite the proof file `{}`. The proof was kept; \
+                 re-run with a different --proof or --output path to get the outputs.",
+                output_path.display(),
+                proof_path.display()
+            )));
+        }
+
+        OutputFile::write(&stack_outputs, &output_path).map_err(Report::msg)?;
+
+        // without --output the outputs file is not where the user is looking, so print the stack
+        if self.output_file.is_none() {
             let stack = stack_outputs.get_num_elements(self.num_outputs).to_vec();
-
-            // write all outputs to default location if none was provided
-            let default_output_path = self.default_output_path();
-            OutputFile::write(&stack_outputs, &default_output_path).map_err(Report::msg)?;
-
-            // print stack outputs to screen.
             println!("Output: {stack:?}");
         }
 
@@ -207,6 +217,18 @@ impl ProveCmd {
     /// Derives verify's default outputs path from the resolved proof path.
     fn default_output_path(&self) -> PathBuf {
         self.resolved_proof_path().with_extension("outputs")
+    }
+}
+
+/// Returns true when both paths resolve to the same existing file.
+///
+/// This runs after the proof has been written, so the proof side always resolves. An outputs path
+/// that does not resolve names a file that does not exist yet, which therefore cannot be the proof.
+/// Hard links are the one alias this cannot see: they share no resolved path.
+fn resolve_to_same_file(output_path: &Path, proof_path: &Path) -> bool {
+    match (fs::canonicalize(output_path), fs::canonicalize(proof_path)) {
+        (Ok(output_path), Ok(proof_path)) => output_path == proof_path,
+        _ => false,
     }
 }
 
@@ -261,5 +283,34 @@ mod tests {
             prove_cmd("dir/program.masm", Some("out/custom.outputs")).default_output_path(),
             PathBuf::from("out/custom.outputs")
         );
+    }
+
+    #[test]
+    fn resolve_to_same_file_sees_through_a_symlinked_proof_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+
+        #[cfg(unix)]
+        {
+            let alias_path = dir.path().join("alias.proof");
+            std::os::unix::fs::symlink(&proof_path, &alias_path).unwrap();
+            assert!(resolve_to_same_file(&alias_path, &proof_path));
+        }
+
+        // negative control: with `sub` missing there is nothing to resolve `..` against
+        assert!(!resolve_to_same_file(&dir.path().join("./sub/../same.proof"), &proof_path));
+
+        fs::create_dir(dir.path().join("sub")).unwrap();
+        assert!(resolve_to_same_file(&dir.path().join("./sub/../same.proof"), &proof_path));
+    }
+
+    #[test]
+    fn resolve_to_same_file_ignores_an_outputs_path_that_does_not_exist_yet() {
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+
+        assert!(!resolve_to_same_file(&dir.path().join("same.outputs"), &proof_path));
     }
 }
