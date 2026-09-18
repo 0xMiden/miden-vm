@@ -8,6 +8,7 @@
 #### Changes
 
 - Improved lifted STARK prover performance: LogUp fractions are built and accumulated in row chunks with a parallel accumulator scan, and DEEP reduction avoids element-wise buffer swaps and per-height group buffers ([#3851](https://github.com/0xMiden/miden-vm/pull/3851)).
+- [BREAKING] Warn when a private assembly constant is unused ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
 
 #### Fixes
 
@@ -22,10 +23,6 @@
 #### Changes
 
 - [BREAKING] Made the public `ParsingError` enum `#[non_exhaustive]` and restored separate variants for protocol ABI conflicts ([#3859](https://github.com/0xMiden/miden-vm/pull/3859)).
-#### Changes
-
-- [BREAKING] Warn when a private assembly constant is unused ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
-
 ## v0.33.0 (2026-09-16)
 
 #### Features
