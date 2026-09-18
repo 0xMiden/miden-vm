@@ -55,4 +55,4 @@ jobs:
         with:
           advanced-security: false
           config: zizmor.yml
-          version: 1.23.1
+          version: 1.25.0
