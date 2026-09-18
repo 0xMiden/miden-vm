@@ -21,7 +21,7 @@ use miden_processor::{
     serde::{Deserializable, Serializable},
 };
 use miden_wasm_event_handlers::{WasmHandlerLimits, host_library_from_package};
-use miden_wasm_event_handlers_project::WasmEventHandlerProcessor;
+use miden_wasm_event_handlers_project::WasmEventHandlerCargoBuildProcessor;
 
 /// The name of the one event the fixture guest crate handles.
 const EVENT: &str = "test::project::double";
@@ -56,7 +56,7 @@ fn a_project_build_ships_a_working_wasm_handler() {
     let mut project_assembler = Assembler::default()
         .for_project_at_path_with_providers(&manifest_path, &mut registry, providers())
         .expect("the fixture project loads");
-    project_assembler.with_package_post_processor(WasmEventHandlerProcessor::new());
+    project_assembler.with_package_post_processor(WasmEventHandlerCargoBuildProcessor::new());
 
     let package = project_assembler
         .assemble(ProjectTargetSelector::Executable("main"), "release")
@@ -76,8 +76,10 @@ fn a_project_build_ships_a_working_wasm_handler() {
         .expect("the handler's advice satisfies the in-VM check");
 }
 
-/// The call shape midenc drives: a pre-loaded project plus `assemble_interruptible`. The test
-/// pins that surface, so a change to it fails here rather than in the compiler repository.
+/// The call shape midenc drives: a pre-loaded project plus `assemble_interruptible`, with
+/// `with_package_post_processor(WasmEventHandlerCargoBuildProcessor::new())` — the processor that
+/// builds a guest crate, which is what a local compiler on the developer's own project needs. The
+/// test pins that surface, so a change to it fails here rather than in the compiler repository.
 #[test]
 fn the_midenc_call_shape_embeds_the_handlers() {
     let manifest_path = fixture_manifest();
@@ -90,7 +92,7 @@ fn the_midenc_call_shape_embeds_the_handlers() {
     let mut project_assembler = Assembler::new(source_manager)
         .for_project_with_providers(project, &mut registry, providers())
         .expect("the project assembler is configured");
-    project_assembler.with_package_post_processor(WasmEventHandlerProcessor::new());
+    project_assembler.with_package_post_processor(WasmEventHandlerCargoBuildProcessor::new());
 
     match project_assembler
         .assemble_interruptible(ProjectTargetSelector::Executable("main"), "release")

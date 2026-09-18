@@ -13,10 +13,10 @@ use miden_project::Package as ProjectPackage;
 pub(crate) const TABLE: &str = "midenc.event-handlers";
 
 /// The key that names a Rust guest crate directory.
-const CRATE_KEY: &str = "crate";
+pub(crate) const CRATE_KEY: &str = "crate";
 
 /// The key that names a prebuilt core-Wasm module.
-const MODULE_KEY: &str = "module";
+pub(crate) const MODULE_KEY: &str = "module";
 
 /// Where the handler module of a package comes from.
 ///

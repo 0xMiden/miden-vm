@@ -52,7 +52,7 @@ Set exactly one of the two keys. Both keys, no key, an unknown key, or a value t
 
 Every package of the project therefore carries the same, full handler set. A host registers the handlers of **one** package of a project: a host that loads the handlers of a second package of the same project fails with a duplicate-handler error, because both packages declare the same events. The failure is deliberate — a silent second registration would hide which package answers an event.
 
-Use `crate` to build the handlers together with the project. The key needs `cargo` and the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`) on the machine that builds the project. The build is a release build of only the crate's library target — binaries and examples of the guest crate are not built — so give the crate a `[lib]` with `crate-type = ["cdylib"]`. It writes into a target directory of its own below the guest crate, and it sets `-C target-feature=-simd128` itself, so no `.cargo/config.toml` of the guest crate is necessary for that flag.
+Use `crate` to build the handlers together with the project. The key needs `cargo` and the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`) on the machine that builds the project. It also needs a host that opted into building it: serving the key is equivalent to running `cargo build` on the source the project manifest references, with the permissions of the assembler process — build scripts and procedural macros run native code — so only `WasmEventHandlerCargoBuildProcessor` serves it (see below). The build is a release build of only the crate's library target — binaries and examples of the guest crate are not built — so give the crate a `[lib]` with `crate-type = ["cdylib"]`. It writes into a target directory of its own below the guest crate, and it sets `-C target-feature=-simd128` itself, so no `.cargo/config.toml` of the guest crate is necessary for that flag.
 
 The build pins those flags through `RUSTFLAGS`, which keeps the module the same whatever the environment of the caller holds. By cargo precedence `RUSTFLAGS` replaces the `[target.*] rustflags` of the guest crate's own `.cargo/config.toml`, so a guest crate must not depend on flags it sets there; state what the crate needs in the crate itself.
 
@@ -62,13 +62,18 @@ The manifest of the section comes from the module's own `miden:event-manifest` r
 
 The build also validates the module: it applies the same load rules a host applies, with the **default** `WasmHandlerLimits`. A forbidden import, a SIMD instruction, a start section, a missing or wrongly-typed export, or an instantiation charge over the fuel budget therefore fails the build instead of every host that later loads the package. Limits stay host policy: a host can run stricter limits than the default and refuse a module this validation accepted. See [Determinism across hosts](#determinism-across-hosts).
 
-The project assembler holds no knowledge of event handlers. The `miden-wasm-event-handlers-project` crate supplies it as a package post-processor, which the toolchain registers:
+The project assembler holds no knowledge of event handlers. The `miden-wasm-event-handlers-project` crate supplies it as a package post-processor, which the toolchain registers. The crate has two processors, and the one a host registers decides whether assembly may run native code:
+
+- `WasmEventHandlerProcessor` serves the `module` key only. It reads a prebuilt module, and a manifest that declares `crate` fails the build with an error that names the other processor, so registering it never executes code from the assembled project. The module itself stays untrusted but sandboxed input: it is validated at build time and runs under wasmi.
+- `WasmEventHandlerCargoBuildProcessor` serves both keys. Registering it is equivalent to running `cargo build` on the source the project manifest references, with the permissions of the assembler process: build scripts and procedural macros run native code. Register it only when the assembled source is trusted — a local compiler building the developer's own project. A host that assembles source supplied by other users must register `WasmEventHandlerProcessor` instead, which refuses guest-crate builds.
+
+A local compiler builds guest crates, so it registers the cargo-building one:
 
 ```rust
-use miden_wasm_event_handlers_project::WasmEventHandlerProcessor;
+use miden_wasm_event_handlers_project::WasmEventHandlerCargoBuildProcessor;
 
 let mut project_assembler = assembler.for_project_at_path(&manifest_path, &mut registry)?;
-project_assembler.with_package_post_processor(WasmEventHandlerProcessor::new());
+project_assembler.with_package_post_processor(WasmEventHandlerCargoBuildProcessor::new());
 let package = project_assembler.assemble(target_selector, "release")?;
 ```
 
