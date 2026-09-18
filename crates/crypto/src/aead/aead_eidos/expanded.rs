@@ -37,8 +37,7 @@ type QuadFelt = BinomialExtensionField<Felt, 2>;
 /// Domain-separates `(key, nonce)` and compresses to a CTR chaining value via
 /// Eidos.
 ///
-/// The returned word lies in Eidos's 252-bit output subspace and is used as the input CV for
-/// keystream generation.
+/// The returned word is used as the input CV for keystream generation.
 pub fn derive_ctr_key(key: Word, nonce: Word) -> Word {
     let init = Eidos::init_chaining_word(AEAD_CTR_KEY, 0);
     Eidos::compress(init, [key[0], key[1], key[2], key[3], nonce[0], nonce[1], nonce[2], nonce[3]])
@@ -359,16 +358,16 @@ mod tests {
 
         let ciphertext = encrypt_felts_expanded(key(), nonce(), &plaintext);
         let expected = vec![
-            Felt::from_u32(0xc555_f5bf),
-            Felt::from_u32(0x3d65_054b),
-            Felt::from_u32(0x96bf_7e43),
-            Felt::from_u32(0xc786_a974),
-            Felt::from_u32(0xb499_c0c9),
-            Felt::from_u32(0x685c_4336),
-            Felt::from_u32(0x5e74_1803),
-            Felt::from_u32(0x15e3_9b29),
-            Felt::from_u32(0x023b_a875),
-            Felt::from_u32(0x950b_3e4a),
+            Felt::from_u32(0xd19c_495b),
+            Felt::from_u32(0x2946_01f6),
+            Felt::from_u32(0xd314_61c0),
+            Felt::from_u32(0xd1dd_3159),
+            Felt::from_u32(0xe803_9782),
+            Felt::from_u32(0x8d53_64cb),
+            Felt::from_u32(0xa17c_d4c6),
+            Felt::from_u32(0x7a7f_a85a),
+            Felt::from_u32(0x2320_f4ea),
+            Felt::from_u32(0x9445_d184),
         ];
 
         assert_eq!(ciphertext, expected);
@@ -388,8 +387,8 @@ mod tests {
         let ciphertext = encrypt_felts_expanded(key(), nonce(), &plaintext);
         let tag = auth_tag_expanded(key(), nonce(), &associated_data, &ciphertext);
         let expected = [
-            Felt::new_unchecked(12694519460593773971),
-            Felt::new_unchecked(15828218946601660542),
+            Felt::new_unchecked(5_939_184_944_309_788_531),
+            Felt::new_unchecked(11_270_343_291_295_136_491),
         ];
 
         assert_eq!(tag, expected);

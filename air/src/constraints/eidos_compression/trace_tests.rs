@@ -2,8 +2,9 @@ use miden_core::{Felt, field::PrimeField64};
 
 use super::{
     algebra::{cv_storage_coefficient, missing_rotation_result, universal_cv_word},
+    finalizer::matrix_accumulator_rows,
     layout::*,
-    model::{initial_working_state, low_output},
+    model::{initial_working_state, raw_xof_output},
     schedule::fused_step_at,
     test_support::{
         EidosCompressionRow, execute_fused_rounds, generate_trace_block,
@@ -292,27 +293,12 @@ fn footer_overlay_rows_materialize_expected_surface() {
     let h = test_h();
     let clk = 12345;
     let trace = generate_trace_block(block, h, TraceMode::AeadXof { clk });
-    let low = low_output(trace.final_v);
     let xof = xof_lanes(trace.final_v, h);
     let r_values: [u64; 8] = core::array::from_fn(|i| pack_pair(block[2 * i], block[2 * i + 1]));
     for footer in 0..FOOTER_ROWS {
         let row = FooterOverlayRow::new(&trace.rows[FOOTER_START + footer], footer);
-        let even = 2 * footer;
-        let odd = even + 1;
 
-        assert_footer_xor_slots(&row, footer, h, trace.final_v, low, xof);
-        assert_slot(
-            row.top_bit_slot(),
-            [
-                low[odd].to_le_bytes()[3] as u64,
-                F_TOP_BIT_MASK as u64,
-                eidos_lookup::denormalize(
-                    F_TOP_BIT_LOOKUP_BYTE_POSITION,
-                    Felt::from(low[odd].to_le_bytes()[3] ^ F_TOP_BIT_MASK),
-                )
-                .as_canonical_u64(),
-            ],
-        );
+        assert_footer_xor_slots(&row, footer, h, trace.final_v, xof);
         for word_slot in 0..F_MSG_WORD_SLOTS {
             let msg_idx = footer_message_word_index(footer, word_slot);
             assert_eq!(*row.msg_word(word_slot), block[msg_idx] as u64);
@@ -358,15 +344,13 @@ fn compression_footer_rows_carry_request_multiplicity() {
         TraceMode::CompressionWithMultiplicity { multiplicity: 3 },
     );
 
-    let low = low_output(trace.final_v);
-    let d_values: [u64; 4] =
-        core::array::from_fn(|i| pack_pair(low[2 * i], low[2 * i + 1] & 0x7fff_ffff));
-    for footer in 0..FOOTER_ROWS {
+    let matrix_rows = matrix_accumulator_rows(raw_xof_output(trace.final_v, test_h()));
+    for (footer, expected) in matrix_rows.iter().enumerate() {
         let row = FooterOverlayRow::new(&trace.rows[FOOTER_START + footer], footer);
         assert_eq!(*row.compression_multiplicity(), 3);
         assert_eq!(*row.mode(), 0);
-        for (idx, &value) in d_values.iter().enumerate() {
-            assert_eq!(*row.interface_tail(idx), value);
+        for (idx, value) in expected.iter().enumerate() {
+            assert_eq!(*row.interface_tail(idx), value.as_canonical_u64());
         }
     }
 }
@@ -396,7 +380,6 @@ fn assert_footer_xor_slots(
     footer: usize,
     h: [u32; 8],
     v: [u32; 16],
-    low: [u32; 8],
     xof: [u32; 16],
 ) {
     let even = 2 * footer;
@@ -404,8 +387,8 @@ fn assert_footer_xor_slots(
     let words = [
         (v[8 + even], h[even], xof[8 + even], F_HIGH_EVEN_SLOT_BASE),
         (v[8 + odd], h[odd], xof[8 + odd], F_HIGH_ODD_SLOT_BASE),
-        (v[even], v[8 + even], low[even], F_OUTPUT_EVEN_SLOT_BASE),
-        (v[odd], v[8 + odd], low[odd], F_OUTPUT_ODD_SLOT_BASE),
+        (v[even], v[8 + even], xof[even], F_OUTPUT_EVEN_SLOT_BASE),
+        (v[odd], v[8 + odd], xof[odd], F_OUTPUT_ODD_SLOT_BASE),
     ];
 
     for (lhs, rhs, _xor, slot_base) in words {

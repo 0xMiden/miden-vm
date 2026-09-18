@@ -2,8 +2,7 @@
 //!
 //! This module does not add Eidos framing, domain separation, length binding, or padding. The
 //! caller supplies both the chaining value and one complete block. Arbitrary canonical field
-//! elements are accepted in the input CV; only the output CV is placed in Eidos's 252-bit packed
-//! subspace.
+//! elements are accepted in the input CV, and outputs range over the whole field.
 
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 use super::primitive::cpu;
@@ -182,8 +181,6 @@ mod avx512_u64_adapter {
     #[target_feature(enable = "avx512f")]
     pub(super) unsafe fn pack_cv(cv: &[[u32; LANES]; 8]) -> [[u64; LANES]; DIGEST_WIDTH] {
         let mut output = [[0u64; LANES]; DIGEST_WIDTH];
-        let high_mask = _mm512_set1_epi64(super::encoding::ODD_LANE_MASK as i64);
-
         for word in 0..DIGEST_WIDTH {
             for half in 0..2 {
                 let lane_offset = half * HALF_LANES;
@@ -195,9 +192,8 @@ mod avx512_u64_adapter {
                 let hi32 = unsafe {
                     _mm256_loadu_si256(cv[2 * word + 1].as_ptr().add(lane_offset).cast::<__m256i>())
                 };
-                // Mask the high word to preserve the canonical 63-bit field-element encoding.
                 let lo64 = _mm512_cvtepu32_epi64(lo32);
-                let hi64 = _mm512_and_si512(_mm512_cvtepu32_epi64(hi32), high_mask);
+                let hi64 = _mm512_cvtepu32_epi64(hi32);
                 let packed = _mm512_or_si512(lo64, _mm512_slli_epi64::<32>(hi64));
 
                 // SAFETY: `lane_offset` is either 0 or 8, so the unaligned eight-u64 store
@@ -219,9 +215,51 @@ mod avx512_u64_adapter {
 mod tests {
     use core::array;
 
+    use proptest::prelude::*;
+
     use super::*;
+
+    /// Canonical field elements, weighted towards the top of the field where limb pairs are
+    /// largest.
+    fn felt() -> impl Strategy<Value = Felt> {
+        prop_oneof![
+            4 => (0..Felt::ORDER).prop_map(Felt::new_unchecked),
+            1 => (Felt::ORDER - 1024..Felt::ORDER).prop_map(Felt::new_unchecked),
+            1 => Just(Felt::ZERO),
+        ]
+    }
+
+    /// Built from vectors so that the strategies' state lives on the heap, not the test stack.
+    fn packed_inputs() -> impl Strategy<Value = (PackedChainingValue, PackedBlock)> {
+        let cv = proptest::collection::vec(felt(), DIGEST_WIDTH * PACKED_LANES).prop_map(|felts| {
+            array::from_fn(|word| array::from_fn(|lane| felts[word * PACKED_LANES + lane]))
+        });
+        let block = proptest::collection::vec(felt(), BLOCK_LEN * PACKED_LANES).prop_map(|felts| {
+            array::from_fn(|element| array::from_fn(|lane| felts[element * PACKED_LANES + lane]))
+        });
+        (cv, block)
+    }
+
+    proptest! {
+        /// Packed compression through the public API equals scalar compression, lane by lane,
+        /// whichever backend this machine dispatches to.
+        #[test]
+        fn packed_compression_matches_scalar_lanes_on_random_inputs(
+            (packed_cv, packed_block) in packed_inputs(),
+        ) {
+            let packed = super::super::Eidos::compress_packed(packed_cv, packed_block);
+            for lane in 0..PACKED_LANES {
+                let cv = Word::new(array::from_fn(|word| packed_cv[word][lane]));
+                let block = array::from_fn(|element| packed_block[element][lane]);
+                let scalar = super::super::Eidos::compress(cv, block);
+                let actual = Word::new(array::from_fn(|word| packed[word][lane]));
+                prop_assert_eq!(actual, scalar, "packed lane {} diverged", lane);
+            }
+        }
+    }
+
     #[test]
-    fn raw_compression_accepts_unmasked_input_cv() {
+    fn raw_compression_accepts_arbitrary_canonical_input_cv() {
         let cv = Word::new([
             Felt::new_unchecked(0x8000_0001_0000_0021),
             Felt::new_unchecked(0x0000_0043_8000_0022),

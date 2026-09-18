@@ -15,23 +15,23 @@ const FALCON_DIV_EVENT = event("miden::core::crypto::dsa::falcon512_eidos::falco
 
 # Eidos chaining word for the registered Falcon hash-to-point domain and an empty framed prefix.
 const FALCON_H2P_INIT_CV = [
-    4280581857092830209,
-    2688637132020383744,
-    1947077364412317696,
+    13503953893947606017,
+    11912009168875159552,
+    11170449401267093504,
     6620516959492505600
 ]
 # Eidos chaining word for the registered 512-Felt Falcon public-key commitment.
 const FALCON_PUBLIC_KEY_INIT_CV = [
-    4280581857092830465,
-    2688637132020384256,
-    1947077364412317696,
+    13503953893947606273,
+    11912009168875160064,
+    11170449401267093504,
     6620516959492505600
 ]
 # Eidos chaining word for the VM-registered 1,544-Felt Falcon product-check transcript.
 const FALCON_PRODUCT_INIT_CV = [
-    4280581857109608961,
-    2688637132020385288,
-    1947077364412317696,
+    13503953893964384769,
+    11912009168875161096,
+    11170449401267093504,
     6620516959492505600
 ]
 

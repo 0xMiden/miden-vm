@@ -392,7 +392,7 @@ fn advice_insert_hqword() {
         adv.insert_hqword
 
         # Hash the four words with Eidos length binding for 16 input felts.
-        push.6620516959492505600.1947077364412317696.2688637132020383760.4280581857092831745
+        push.6620516959492505600.11170449401267093504.11912009168875159568.13503953893947607553
         movdnw.2
         compress
         dropw dropw

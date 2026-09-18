@@ -155,9 +155,8 @@ impl EidosRandomCoin {
             let value = self.output[self.current].as_canonical_u64();
             self.current += 1;
 
-            // Masked Eidos outputs already have uniform low-u32 limbs under the pseudorandom-output
-            // assumption. For a uniform Goldilocks-field output, p - 1 is the sole extra preimage
-            // of zero; removing it leaves exactly 2^32 - 1 preimages for every u32 value.
+            // For a uniform Goldilocks-field output, p - 1 is the sole extra preimage of zero.
+            // Removing it leaves exactly 2^32 - 1 preimages for every u32 value.
             if value != Felt::ORDER - 1 {
                 return value as u32;
             }
@@ -278,7 +277,7 @@ mod tests {
         assert_eq!(coin.state, initial_state);
         assert_eq!(coin.output, expected);
         assert_eq!(coin.counter, 1);
-        assert_eq!(actual, [3_343_138_332, 3_182_666_834, 3_956_264_476, 4_003_292_457]);
+        assert_eq!(actual, [3_711_809_674, 821_891_614, 3_389_909_935, 846_030_174]);
     }
 
     #[test]
@@ -360,7 +359,7 @@ mod tests {
         coin.reseed(data);
 
         let actual: [u32; OUTPUT_FELTS] = core::array::from_fn(|_| coin.random());
-        assert_eq!(actual, [3_145_282_389, 2_211_610_295, 3_232_936_185, 3_064_838_016]);
+        assert_eq!(actual, [3_491_564_135, 773_475_409, 4_007_125_810, 3_909_701_995]);
     }
 
     #[test]

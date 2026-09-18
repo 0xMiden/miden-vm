@@ -13,7 +13,7 @@ fn compress() {
 }
 
 #[test]
-fn compress_accepts_unmasked_input_cv() {
+fn compress_accepts_arbitrary_canonical_input_cv() {
     let stack_inputs = [
         1,
         2,

@@ -7,9 +7,9 @@ pub type MmrPtr = ptr<felt>
 
 # `MMR_PEAKS` (tag 0x00000201) initial chaining-word constants. Only the u32 leaf count is dynamic
 # in the VM.
-const MMR_PEAKS_INIT_CV_0 = 4280581857092829697
-const MMR_PEAKS_INIT_CV_1_BASE = 2688637132020383744
-const MMR_PEAKS_INIT_CV_2 = 1947077364412317696
+const MMR_PEAKS_INIT_CV_0 = 13503953893947605505
+const MMR_PEAKS_INIT_CV_1_BASE = 11912009168875159552
+const MMR_PEAKS_INIT_CV_2 = 11170449401267093504
 const MMR_PEAKS_INIT_CV_3 = 6620516959492505600
 
 #! Constructs the `MMR_PEAKS` initial chaining word for `num_leaves`.

@@ -39,13 +39,6 @@ pub const F_HIGH_EVEN_SLOT_BASE: usize = 0;
 pub const F_HIGH_ODD_SLOT_BASE: usize = 4;
 pub const F_OUTPUT_EVEN_SLOT_BASE: usize = 8;
 pub const F_OUTPUT_ODD_SLOT_BASE: usize = 12;
-/// Footer top-bit tuple. Its third field stores position-0-scaled XOR so the lookup slot has one
-/// row-independent normalization; constraints recover the required AND bit affinely.
-pub const F_TOP_BIT_SLOT_BASE_COL: usize = 48;
-const _: () = assert!(F_TOP_BIT_SLOT_BASE_COL.is_multiple_of(BYTE_SLOT_WIDTH));
-pub(crate) const F_TOP_BIT_NARROW_SLOT: usize = F_TOP_BIT_SLOT_BASE_COL / BYTE_SLOT_WIDTH;
-/// Byte position of the fused rotation slot reused by the footer top-bit lookup.
-pub const F_TOP_BIT_LOOKUP_BYTE_POSITION: usize = F_TOP_BIT_NARROW_SLOT % BYTES_PER_WORD;
 pub const F_MSG_WORD_SLOTS: usize = 4;
 pub const F_RANGE_SLOTS: usize = 8;
 /// Logical narrow slots used by the eight footer range checks.
@@ -96,7 +89,6 @@ pub const F_R_CANON_Z_BASE_COL: usize = G_K3_BASE_COL + 1;
 pub const F_C_CANON_Z_COL: usize = G_K3_BASE_COL + 3;
 /// Free footer-0 coordinate used by the fused-to-footer total-B bridge.
 pub const F_B_SUM_CORRECTION_COL: usize = F_CV_STORAGE_COLS[7];
-pub const F_TOP_BIT_MASK: u8 = 128;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum RowKind {

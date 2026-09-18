@@ -5,9 +5,9 @@
 //! [`Eidos::compress`](crate::hash::eidos::Eidos::compress) compresses one complete block under a
 //! caller-supplied chaining value and adds no framing.
 //!
-//! Eidos digests occupy a 252-bit packed subspace: the high bit of each odd Eidos compression
-//! output lane is cleared before two `u32` lanes are packed into one Goldilocks field element. The
-//! resulting generic collision-resistance bound is 126 bits.
+//! Eidos compression produces four canonical Goldilocks field elements. These outputs form the
+//! next chaining value and give an approximately 128-bit generic collision-resistance bound when
+//! Eidos is modeled as a random oracle.
 
 mod challenger;
 mod compression;
@@ -15,6 +15,7 @@ mod construction;
 pub mod domain;
 pub mod domains;
 pub mod encoding;
+mod finalizer;
 mod frame;
 mod framing;
 mod lmcs;
@@ -30,6 +31,8 @@ pub use domain::{
     DomainTag, DomainVersion, EidosDomain, EidosDomainRegistry, EidosEncoding, FeltSequence,
     NAMESPACE_REGISTRY, Transcript, namespace, render_masm_constants,
 };
+#[doc(hidden)]
+pub use finalizer::FINALIZER_MATRIX;
 pub use frame::EidosFrame;
 pub use lmcs::{EidosLmcs, config as lmcs_config};
 
@@ -56,8 +59,7 @@ type PackedU32ChainingValue = [[u32; PACKED_LANES]; 8];
 
 /// One packed Eidos chaining value, with one independent CV per logical packed lane.
 ///
-/// Raw compression accepts arbitrary canonical field elements here; callers must not assume that
-/// an input CV already lies in Eidos's 252-bit output subspace.
+/// Raw compression accepts arbitrary canonical field elements here.
 pub type PackedChainingValue = [PackedFelt; DIGEST_WIDTH];
 
 /// One packed Eidos digest, with one independent digest per logical packed lane.

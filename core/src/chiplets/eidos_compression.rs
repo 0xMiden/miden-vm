@@ -98,7 +98,7 @@ pub fn compress_state(state: &mut [Felt; STATE_WIDTH]) -> [u32; STATE_WORDS] {
 /// ```
 ///
 /// Returns all 16 u32 keystream lanes as `low[0..8] || high[0..8]`, where
-/// `low[i] = v[i] ^ v[i+8]` (the unmasked compression-core fold) and
+/// `low[i] = v[i] ^ v[i+8]` (the BLAKE3 chaining-value fold) and
 /// `high[i] = v[i+8] ^ cv[i]` (the BLAKE3 XOF feed-forward against the input CV).
 ///
 /// The 16 lanes exceed the 12-Felt window, so they are returned for direct bus

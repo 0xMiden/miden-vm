@@ -2,7 +2,8 @@ use miden_core::{Felt, Word};
 use miden_crypto::hash::eidos::Eidos;
 
 use super::{
-    model::low_output,
+    finalizer::matrix_accumulator_rows,
+    model::raw_xof_output,
     test_support::{execute_fused_rounds, execute_unfused_rounds, xof_lanes},
 };
 
@@ -49,13 +50,6 @@ fn unpack_block(block: [Felt; BLOCK_WIDTH]) -> [u32; 16] {
     })
 }
 
-fn pack_word(cv: [u32; 8]) -> Word {
-    Word::new(core::array::from_fn(|i| {
-        let high = cv[2 * i + 1] & 0x7fff_ffff;
-        Felt::new_unchecked(((high as u64) << 32) | cv[2 * i] as u64)
-    }))
-}
-
 #[test]
 fn fused_schedule_matches_unfused_schedule() {
     let block = unpack_block(test_block());
@@ -70,7 +64,7 @@ fn fused_schedule_matches_vm_compression_output() {
     let h = unpack_word(test_cv_word());
     let fused_v = execute_fused_rounds(block, h);
 
-    let actual_word = pack_word(low_output(fused_v));
+    let actual_word = Word::new(matrix_accumulator_rows(raw_xof_output(fused_v, h))[3]);
     let expected_word = Eidos::compress(test_cv_word(), test_block());
 
     assert_eq!(actual_word, expected_word);

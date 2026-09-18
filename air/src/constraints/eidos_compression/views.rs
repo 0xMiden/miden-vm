@@ -107,10 +107,6 @@ impl<'a, T> FooterOverlayRow<'a, T> {
         LookupSlot::new(self.cols, footer_xor_slot_col(slot, 0))
     }
 
-    pub fn top_bit_slot(&self) -> LookupSlot<'a, T> {
-        LookupSlot::new(self.cols, F_TOP_BIT_SLOT_BASE_COL)
-    }
-
     pub fn msg_word(&self, word: usize) -> &'a T {
         debug_assert!(word < F_MSG_WORD_SLOTS);
         self.col(footer_msg_word_col(word))

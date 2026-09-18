@@ -6,12 +6,12 @@ use miden_core::{
     Felt,
     field::{PrimeField64, batch_inversion_allow_zeros},
 };
-use miden_crypto::hash::eidos::encoding::ODD_LANE_MASK;
 
 use super::{
     algebra::{cv_storage_coefficient, cv_storage_offset, cv_word_base, sum_input_b},
+    finalizer::matrix_accumulator_rows,
     layout::*,
-    model::{initial_working_state, low_output},
+    model::{initial_working_state, raw_xof_output},
     schedule::fused_step_at,
 };
 use crate::constraints::and8_lookup::eidos::{self as eidos_lookup, BytePairRelation, Rotation};
@@ -254,9 +254,9 @@ where
 
 /// Writes the shared portion of one Eidos compression cycle into zeroed field-valued rows.
 ///
-/// `write_footer_interface` receives each footer row and the four packed compression outputs. It
-/// must populate the interface-specific footer cells before the encoder derives the remaining
-/// witness coordinates. Every cell in the first 32 rows must already be zero.
+/// `write_footer_interface` receives each footer row and that row's four field-output accumulator
+/// values. It must populate the interface-specific footer cells before the encoder derives the
+/// remaining witness coordinates. Every cell in the first 32 rows must already be zero.
 ///
 /// # Panics
 ///
@@ -534,22 +534,19 @@ fn write_core_footer_rows<T, R, W>(
     R: ByteLookupRecorder,
     W: FnMut(&mut T, &[u64; 4]),
 {
-    let low = low_output(v);
+    let matrix_rows = matrix_accumulator_rows(raw_xof_output(v, h));
     let r_values = packed_message_values(block);
-    let output = packed_output_values(low);
     let footer_canonicality = footer_canonicality_witnesses(block, h);
 
     for footer in 0..FOOTER_ROWS {
         let row = &mut rows[FOOTER_START + footer];
-        let odd = 2 * footer + 1;
-
         write_footer_xor_slots(row, footer, h, v, recorder);
-        write_top_bit_slot(row, low[odd], recorder);
         write_footer_message_group(row, footer, block);
         write_footer_r_prefix(row, footer, &r_values);
         write_future_w_queue(row, footer, v);
         write_footer_canonicality(row, footer, &footer_canonicality);
         row.set_u64(F_COMPRESSION_CYCLE_ID_COL, compression_cycle_id);
+        let output = matrix_rows[footer].map(|value| value.as_canonical_u64());
         write_footer_interface(row, &output);
         if footer == 0 {
             write_footer_b_sum_correction(row, v);
@@ -560,9 +557,9 @@ fn write_core_footer_rows<T, R, W>(
 
 /// Writes the shared footer cells from an independently supplied final working state.
 ///
-/// `write_footer_interface` receives each footer row and the four packed compression outputs. It
-/// must populate the interface-specific footer cells before the encoder derives the remaining
-/// witness coordinates.
+/// `write_footer_interface` receives each footer row and that row's four field-output accumulator
+/// values. It must populate the interface-specific footer cells before the encoder derives the
+/// remaining witness coordinates.
 #[doc(hidden)]
 #[cfg(any(test, feature = "testing"))]
 pub fn write_core_felt_footer_rows<R, W>(
@@ -641,25 +638,6 @@ fn write_footer_xor_slots<T, R>(
             );
         }
     }
-}
-
-fn write_top_bit_slot<T, R>(row: &mut T, odd_output: u32, recorder: &mut R)
-where
-    T: TraceRow,
-    R: ByteLookupRecorder,
-{
-    let top_byte = odd_output.to_le_bytes()[3];
-    let masked = top_byte & F_TOP_BIT_MASK;
-    // This footer tuple overlays rotation byte position zero. Store the position-scaled XOR so
-    // fused and footer rows share the same normalization in the lookup projection.
-    let x = Felt::from(top_byte ^ F_TOP_BIT_MASK);
-    let scaled_x = eidos_lookup::denormalize(F_TOP_BIT_LOOKUP_BYTE_POSITION, x).as_canonical_u64();
-    write_lookup_slot(
-        row,
-        F_TOP_BIT_SLOT_BASE_COL,
-        [top_byte as u64, F_TOP_BIT_MASK as u64, scaled_x],
-    );
-    recorder.record(EidosCompressionByteLookup::And8, top_byte, F_TOP_BIT_MASK, masked as u32);
 }
 
 fn write_footer_message_group<T: TraceRow>(row: &mut T, footer: usize, block: [u32; 16]) {
@@ -795,10 +773,6 @@ fn write_lookup_slot<T: TraceRow>(row: &mut T, base: usize, values: [u64; BYTE_S
 
 fn packed_message_values(block: [u32; 16]) -> [u64; 8] {
     core::array::from_fn(|i| pack_pair(block[2 * i], block[2 * i + 1]))
-}
-
-fn packed_output_values(low: [u32; 8]) -> [u64; 4] {
-    core::array::from_fn(|i| pack_pair(low[2 * i], low[2 * i + 1] & ODD_LANE_MASK))
 }
 
 fn pack_pair(lo: u32, hi: u32) -> u64 {
