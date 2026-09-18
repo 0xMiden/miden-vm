@@ -209,6 +209,7 @@
 - Replaced custom release version comparisons with Rust `semver` and added Rust tests. Added release preparation and recovery instructions in `docs/RELEASING.md` ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
 - Separated synthetic CodSpeed compilation from measurement while retaining the optimized profile and benchmark coverage. The executable builds on an ARM64 8x runner using Ubuntu 22.04, and SMT benchmarks run independently ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
 - [BREAKING] Store inline-call frames as operation ranges instead of per-operation rows. Package debug-info version 4 preserves inline chains across clears, control flow, and dynamic or external boundaries without expanding them during decoding ([#3956](https://github.com/0xMiden/miden-vm/pull/3956)).
+- Fixed `prove` writing the default outputs file next to the program instead of the proof, and refused an outputs path that names the proof file, so the proof is never replaced ([#3760](https://github.com/0xMiden/miden-vm/pull/3760)).
 
 ## v0.35.0 (2026-10-01)
 
