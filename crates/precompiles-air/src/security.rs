@@ -12,7 +12,9 @@ pub use miden_air::security::{
     AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
     SecurityTerm,
 };
-use miden_air::security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT};
+use miden_air::security::{
+    CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT, OOD_POW_BITS,
+};
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, QuadFelt},
@@ -47,12 +49,16 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 pub const AIR_SHAPE: AirShape = AirShape {
     num_composed_constraints: 591,
     max_constraint_degree: 5,
+    num_quotient_chunks: 4,
     max_combo: NUM_OOD_POINTS,
     num_deep_terms: Some(770),
-    lookup: LookupShape {
-        fractions_per_row: 247,
-        max_message_width: 18,
-    },
+    lookup: Some(LOOKUP_SHAPE),
+};
+
+/// Lookup argument shape of the chiplet multi-AIR statement, as stored in [`AIR_SHAPE`].
+pub const LOOKUP_SHAPE: LookupShape = LookupShape {
+    fractions_per_row: 247,
+    max_message_width: 18,
 };
 
 /// Computes the AIR shape by symbolically evaluating every chiplet AIR.
@@ -83,12 +89,13 @@ pub fn derive_air_shape() -> AirShape {
         // single-AIR statement needs no cross-AIR batching challenge.
         num_composed_constraints: (num_constraints + num_airs - 1) as u32,
         max_constraint_degree: max_constraint_degree as u32,
+        num_quotient_chunks: quotient_chunk_count(max_constraint_degree) as u32,
         max_combo: NUM_OOD_POINTS,
         num_deep_terms: Some(num_columns as u32 + NUM_OOD_POINTS),
-        lookup: LookupShape {
+        lookup: Some(LookupShape {
             fractions_per_row: fractions_per_row as u32,
             max_message_width: MAX_MESSAGE_WIDTH as u32,
-        },
+        }),
     }
 }
 
@@ -122,9 +129,13 @@ fn column_count(air: &ChipletAir, alignment: usize) -> usize {
 /// Committed base columns in the quotient group: one chunk per unit of degree above the vanishing
 /// polynomial, rounded up to a power of two, committed as a single extension-valued matrix.
 fn quotient_column_count(max_constraint_degree: usize, alignment: usize) -> usize {
-    let chunks = max_constraint_degree.saturating_sub(1).max(1).next_power_of_two();
+    aligned(quotient_chunk_count(max_constraint_degree) * EXTENSION_DEGREE, alignment)
+}
 
-    aligned(chunks * EXTENSION_DEGREE, alignment)
+/// Committed quotient chunks: one per unit of degree above the vanishing polynomial, rounded up to
+/// a power of two.
+fn quotient_chunk_count(max_constraint_degree: usize) -> usize {
+    max_constraint_degree.saturating_sub(1).max(1).next_power_of_two()
 }
 
 /// Pads a committed width up to the commitment scheme's column alignment.
@@ -157,7 +168,7 @@ pub const SECURITY_CAP: u64 = deployed_instance(0).cap();
 
 /// Q16 upper bound on the log2 of the lookup round's error coefficient.
 pub const LOOKUP_COEFFICIENT: u64 = fixed::ceil_log2(
-    (AIR_SHAPE.lookup.max_message_width as u64 + 2) * AIR_SHAPE.lookup.fractions_per_row as u64,
+    (LOOKUP_SHAPE.max_message_width as u64 + 2) * LOOKUP_SHAPE.fractions_per_row as u64,
 );
 
 /// Q16 upper bound on the log2 of the constraint-composition round's error coefficient.
@@ -279,7 +290,7 @@ fn fixed_boundary_fraction_count() -> u64 {
 fn fixed_boundary_correction(log_max_height: u32) -> u64 {
     let numerator = fixed_boundary_fraction_count() * LOG2_E;
     numerator
-        .div_ceil(AIR_SHAPE.lookup.fractions_per_row as u64)
+        .div_ceil(LOOKUP_SHAPE.fractions_per_row as u64)
         .div_ceil(1u64 << log_max_height)
 }
 
@@ -304,6 +315,7 @@ pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
         log_folding_arity: u32::from(params.log_folding_arity()),
         num_queries: params.num_queries() as u32,
         query_pow_bits: params.query_pow_bits() as u32,
+        ood_pow_bits: OOD_POW_BITS,
         deep_pow_bits: params.deep_pow_bits() as u32,
         folding_pow_bits: params.folding_pow_bits() as u32,
         // The chiplet stack samples its lookup challenges directly after the main-trace
@@ -496,32 +508,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_191_195, 7_785_215, 7_825_002, 8_388_606, 7_891_517, 6_335_399, 8_388_606],
+                [7_191_195, 7_785_215, 7_825_002, 7_956_807, 7_891_517, 6_335_399, 8_388_606],
                 96,
             ),
             (
                 (27, 17, 12, 4, 16),
-                [6_535_882, 7_785_215, 7_170_620, 8_388_606, 7_236_157, 6_335_399, 8_388_606],
+                [6_535_882, 7_785_215, 7_170_620, 7_301_447, 7_236_157, 6_335_399, 8_388_606],
                 96,
             ),
             (
                 (27, 17, 12, 4, 19),
-                [6_339_274, 7_785_215, 6_974_013, 8_388_606, 7_039_549, 6_335_399, 8_388_606],
+                [6_339_274, 7_785_215, 6_974_013, 7_104_839, 7_039_549, 6_335_399, 8_388_606],
                 96,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_273_738, 7_785_215, 6_908_477, 8_388_606, 6_974_013, 6_335_399, 8_388_606],
+                [6_273_738, 7_785_215, 6_908_477, 7_039_303, 6_974_013, 6_335_399, 8_388_606],
                 95,
             ),
             (
                 (27, 17, 12, 4, 24),
-                [6_011_594, 7_785_215, 6_646_333, 8_388_606, 6_711_869, 6_335_399, 8_388_606],
+                [6_011_594, 7_785_215, 6_646_333, 6_777_159, 6_711_869, 6_335_399, 8_388_606],
                 91,
             ),
             (
                 (7, 0, 0, 0, 16),
-                [6_535_882, 7_785_215, 7_170_620, 7_760_199, 6_974_013, 1_353_667, 8_388_606],
+                [6_535_882, 7_785_215, 7_170_620, 6_515_015, 6_974_013, 1_353_667, 8_388_606],
                 20,
             ),
         ];

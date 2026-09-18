@@ -158,11 +158,11 @@ fn vm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 6]) {
         end
         ",
         lookup_pow_bits = security::LOOKUP_POW_BITS,
-        max_message_width = security::AIR_SHAPE.lookup.max_message_width,
+        max_message_width = security::LOOKUP_SHAPE.max_message_width,
         num_composed_constraints = security::AIR_SHAPE.num_composed_constraints,
         max_constraint_degree = security::AIR_SHAPE.max_constraint_degree,
         num_deep_terms = security::AIR_SHAPE.num_deep_terms.unwrap(),
-        fractions_per_row = security::AIR_SHAPE.lookup.fractions_per_row,
+        fractions_per_row = security::LOOKUP_SHAPE.fractions_per_row,
         core_boundary_terms = security::CORE_BOUNDARY_LOOKUP_TERMS,
     );
     let levels = run_sweep_grid(&adapter, &push_args, outer_bound, inner_bound);
@@ -256,11 +256,11 @@ fn vm_security_descriptor(
         deep_pow_bits: u64::from(deep_pow_bits),
         folding_pow_bits: u64::from(folding_pow_bits),
         log_max_height: u64::from(log_max_height),
-        max_message_width: u64::from(security::AIR_SHAPE.lookup.max_message_width),
+        max_message_width: u64::from(security::LOOKUP_SHAPE.max_message_width),
         num_composed_constraints: u64::from(security::AIR_SHAPE.num_composed_constraints),
         max_constraint_degree: u64::from(security::AIR_SHAPE.max_constraint_degree),
         num_deep_terms: u64::from(security::AIR_SHAPE.num_deep_terms.unwrap()),
-        lookup_fractions_per_row: u64::from(security::AIR_SHAPE.lookup.fractions_per_row),
+        lookup_fractions_per_row: u64::from(security::LOOKUP_SHAPE.fractions_per_row),
         num_lookup_boundary_terms: u64::from(
             security::CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
         ),
@@ -290,8 +290,10 @@ fn native_level(descriptor: &SecurityDescriptor) -> u64 {
     params.air_shape.num_composed_constraints = descriptor.num_composed_constraints as u32;
     params.air_shape.max_constraint_degree = descriptor.max_constraint_degree as u32;
     params.air_shape.num_deep_terms = Some(descriptor.num_deep_terms as u32);
-    params.air_shape.lookup.fractions_per_row = descriptor.lookup_fractions_per_row as u32;
-    params.air_shape.lookup.max_message_width = descriptor.max_message_width as u32;
+    params.air_shape.lookup = Some(security::LookupShape {
+        fractions_per_row: descriptor.lookup_fractions_per_row as u32,
+        max_message_width: descriptor.max_message_width as u32,
+    });
     params.num_lookup_boundary_terms = descriptor.num_lookup_boundary_terms as u32;
     u64::from(params.conjectured_security_report().security_level())
 }
@@ -309,11 +311,11 @@ fn run_estimator(descriptor: SecurityDescriptor) -> Result<u64, miden_processor:
         .map(|(output, _)| output.stack.get_num_elements(1)[0].as_canonical_u64())
 }
 
-/// Exercises each branch used to compute the query and lookup terms.
+/// Exercises each branch used to compute the query, lookup, and DEEP terms.
 ///
 /// These descriptors are synthetic, but all of them satisfy the estimator's input bounds. Each
 /// comment derives the expected result, which is also checked against the native estimator. The
-/// tests for the input bounds and native dominance calculation cover the five terms omitted by the
+/// tests for the input bounds and native dominance calculation cover the four terms omitted by the
 /// MASM procedure.
 #[test]
 fn common_security_estimator_wires_each_computed_round() {
@@ -344,8 +346,8 @@ fn common_security_estimator_wires_each_computed_round() {
             20,
         ),
         // A = 257 (the envelope floor): base = 127 - 9 - 6 = 112 and slack recovery fires. The
-        // omitted rounds are at their least secure accepted values: composition and DEEP are 114
-        // bits, OOD is 118 bits, and folding is 116 bits. Lookup remains the minimum at 113.
+        // omitted rounds are at their least secure accepted values: composition is 114 bits,
+        // OOD is 118 bits, and folding is 116 bits. DEEP binds at 105 bits.
         (
             "dominated-round envelope corner",
             SecurityDescriptor {
@@ -356,7 +358,7 @@ fn common_security_estimator_wires_each_computed_round() {
                 num_deep_terms: 8192,
                 ..baseline
             },
-            113,
+            105,
         ),
         // The MVM lookup shape at height 22: A = 504, b = 1477 + 11 = 1488, R = 1, so the slack
         // bound recovers the fractional bit exactly: 127 - 9 - 22 - 0 + 1 = 97.
@@ -651,16 +653,16 @@ fn recursive_verifier_ranges_fit_security_estimator_envelope() {
     for (name, width, frac, boundary, h_min) in [
         (
             "MVM",
-            u64::from(vm::AIR_SHAPE.lookup.max_message_width),
-            u64::from(vm::AIR_SHAPE.lookup.fractions_per_row),
+            u64::from(vm::LOOKUP_SHAPE.max_message_width),
+            u64::from(vm::LOOKUP_SHAPE.fractions_per_row),
             u64::from(vm::CORE_BOUNDARY_LOOKUP_TERMS)
                 + miden_core::program::KernelDescriptor::MAX_NUM_PROCEDURES as u64,
             MVM_LOG_HEIGHT_MIN,
         ),
         (
             "PVM",
-            u64::from(pvm::AIR_SHAPE.lookup.max_message_width),
-            u64::from(pvm::AIR_SHAPE.lookup.fractions_per_row),
+            u64::from(pvm::LOOKUP_SHAPE.max_message_width),
+            u64::from(pvm::LOOKUP_SHAPE.fractions_per_row),
             u64::from(pvm::FIXED_BOUNDARY_LOOKUP_TERMS),
             PVM_LOG_HEIGHT_MIN,
         ),
@@ -789,11 +791,11 @@ fn pvm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 5]) {
         end
         ",
         lookup_pow_bits = security::LOOKUP_POW_BITS,
-        max_message_width = security::AIR_SHAPE.lookup.max_message_width,
+        max_message_width = security::LOOKUP_SHAPE.max_message_width,
         num_composed_constraints = security::AIR_SHAPE.num_composed_constraints,
         max_constraint_degree = security::AIR_SHAPE.max_constraint_degree,
         num_deep_terms = security::AIR_SHAPE.num_deep_terms.unwrap(),
-        fractions_per_row = security::AIR_SHAPE.lookup.fractions_per_row,
+        fractions_per_row = security::LOOKUP_SHAPE.fractions_per_row,
         boundary_terms = security::FIXED_BOUNDARY_LOOKUP_TERMS,
     );
     let levels = run_sweep_grid(&adapter, &push_args, outer_bound, inner_bound);
