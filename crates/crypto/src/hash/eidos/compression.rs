@@ -215,7 +215,49 @@ mod avx512_u64_adapter {
 mod tests {
     use core::array;
 
+    use proptest::prelude::*;
+
     use super::*;
+
+    /// Canonical field elements, weighted towards the top of the field where limb pairs are
+    /// largest.
+    fn felt() -> impl Strategy<Value = Felt> {
+        prop_oneof![
+            4 => (0..Felt::ORDER).prop_map(Felt::new_unchecked),
+            1 => (Felt::ORDER - 1024..Felt::ORDER).prop_map(Felt::new_unchecked),
+            1 => Just(Felt::ZERO),
+        ]
+    }
+
+    /// Built from vectors so that the strategies' state lives on the heap, not the test stack.
+    fn packed_inputs() -> impl Strategy<Value = (PackedChainingValue, PackedBlock)> {
+        let cv = proptest::collection::vec(felt(), DIGEST_WIDTH * PACKED_LANES).prop_map(|felts| {
+            array::from_fn(|word| array::from_fn(|lane| felts[word * PACKED_LANES + lane]))
+        });
+        let block = proptest::collection::vec(felt(), BLOCK_LEN * PACKED_LANES).prop_map(|felts| {
+            array::from_fn(|element| array::from_fn(|lane| felts[element * PACKED_LANES + lane]))
+        });
+        (cv, block)
+    }
+
+    proptest! {
+        /// Packed compression through the public API equals scalar compression, lane by lane,
+        /// whichever backend this machine dispatches to.
+        #[test]
+        fn packed_compression_matches_scalar_lanes_on_random_inputs(
+            (packed_cv, packed_block) in packed_inputs(),
+        ) {
+            let packed = super::super::Eidos::compress_packed(packed_cv, packed_block);
+            for lane in 0..PACKED_LANES {
+                let cv = Word::new(array::from_fn(|word| packed_cv[word][lane]));
+                let block = array::from_fn(|element| packed_block[element][lane]);
+                let scalar = super::super::Eidos::compress(cv, block);
+                let actual = Word::new(array::from_fn(|word| packed[word][lane]));
+                prop_assert_eq!(actual, scalar, "packed lane {} diverged", lane);
+            }
+        }
+    }
+
     #[test]
     fn raw_compression_accepts_arbitrary_canonical_input_cv() {
         let cv = Word::new([
