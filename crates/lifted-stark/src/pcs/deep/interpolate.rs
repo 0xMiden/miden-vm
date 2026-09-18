@@ -162,15 +162,16 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, const N: usize> PointQuotients<F, E
         let _span = info_span!("PointQuotients::new", n = coset_points.len()).entered();
         let n_points = coset_points.len();
 
-        // Invert the differences [z₀ − x, z₁ − x, …] one block of domain points at a time, so only
-        // a block of differences is alive per task rather than a table as large as the output.
+        // Invert the differences [z₀ − x, z₁ − x, …] one block of domain points at a time, so each
+        // task holds at most one block of differences.
         let mut invs_flat = EF::zero_vec(N * n_points);
-        invs_flat.par_chunks_mut(N * BLOCK).zip(coset_points.par_chunks(BLOCK)).for_each(
-            |(invs, xs)| {
+        invs_flat
+            .par_chunks_mut(N * BLOCK)
+            .zip(coset_points.par_chunks(BLOCK))
+            .for_each(|(invs, xs)| {
                 let diffs: Vec<EF> = xs.iter().flat_map(|&x| points.map(|z| z - x).0).collect();
                 invs.copy_from_slice(&batch_multiplicative_inverse(&diffs));
-            },
-        );
+            });
         // SAFETY: `reconstitute_from_base` requires:
         // - Same alignment: `FieldArray<EF, N>` is `#[repr(transparent)]` over `[EF; N]`, so it has
         //   the same alignment as `EF`.
