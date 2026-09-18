@@ -78,6 +78,40 @@ fn prove_rejects_missing_inferred_inputs_file() {
         .stderr(predicate::str::contains("No such file or directory"));
 }
 
+/// Builds a working directory holding a program and its inputs, and a `prove` command that runs
+/// inside it against that program. Each test then adds only the paths it is about.
+fn prove_command() -> (TempDir, Command) {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("program.masm");
+    fs::write(&program_path, "begin add end").unwrap();
+    fs::write(working_dir.path().join("program.inputs"), r#"{ "operand_stack": [] }"#).unwrap();
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("prove").arg(&program_path);
+
+    (working_dir, cmd)
+}
+
+#[test]
+fn prove_writes_outputs_next_to_a_custom_proof_file() {
+    let (working_dir, mut cmd) = prove_command();
+    let proof_dir = working_dir.path().join("out");
+    fs::create_dir(&proof_dir).unwrap();
+
+    cmd.arg("--proof").arg(proof_dir.join("custom.proof"));
+    cmd.assert().success();
+
+    assert!(proof_dir.join("custom.proof").exists(), "the proof belongs where --proof asked");
+    assert!(
+        proof_dir.join("custom.outputs").exists(),
+        "the outputs belong next to the proof, which is where `verify` looks for them"
+    );
+    assert!(
+        !working_dir.path().join("program.outputs").exists(),
+        "the outputs should not be left behind next to the program"
+    );
+}
+
 #[test]
 fn prove_rejects_invalid_program_extension_before_inferred_inputs_file() {
     let working_dir = TempDir::new().unwrap();

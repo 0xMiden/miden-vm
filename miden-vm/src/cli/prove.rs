@@ -189,7 +189,7 @@ impl ProveCmd {
             let stack = stack_outputs.get_num_elements(self.num_outputs).to_vec();
 
             // write all outputs to default location if none was provided
-            let default_output_path = self.program_file.with_extension("outputs");
+            let default_output_path = self.default_output_path();
             OutputFile::write(&stack_outputs, &default_output_path).map_err(Report::msg)?;
 
             // print stack outputs to screen.
@@ -197,5 +197,69 @@ impl ProveCmd {
         }
 
         Ok(())
+    }
+
+    /// Resolves the proof path the same way as ProofFile::write.
+    fn resolved_proof_path(&self) -> PathBuf {
+        ProofFile::resolve_path(&self.proof_file, &self.program_file)
+    }
+
+    /// Derives verify's default outputs path from the resolved proof path.
+    fn default_output_path(&self) -> PathBuf {
+        self.resolved_proof_path().with_extension("outputs")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prove_cmd(program_file: &str, proof_file: Option<&str>) -> ProveCmd {
+        ProveCmd {
+            program_file: PathBuf::from(program_file),
+            expected_cycles: 64,
+            input_file: None,
+            library_paths: Vec::new(),
+            max_cycles: ExecutionOptions::MAX_CYCLES,
+            max_prover_memory: Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES,
+            num_outputs: 16,
+            output_file: None,
+            proof_file: proof_file.map(PathBuf::from),
+            hasher: "blake3-256".to_string(),
+            security: "96bits".to_string(),
+            kernel_file: None,
+        }
+    }
+
+    #[test]
+    fn default_output_path_follows_the_program_when_no_proof_is_given() {
+        assert_eq!(
+            prove_cmd("dir/program.masm", None).default_output_path(),
+            PathBuf::from("dir/program.outputs")
+        );
+    }
+
+    #[test]
+    fn default_output_path_follows_a_custom_proof_path() {
+        assert_eq!(
+            prove_cmd("dir/program.masm", Some("out/custom.proof")).default_output_path(),
+            PathBuf::from("out/custom.outputs")
+        );
+    }
+
+    #[test]
+    fn default_output_path_handles_an_extensionless_proof_path() {
+        assert_eq!(
+            prove_cmd("dir/program.masm", Some("out/custom")).default_output_path(),
+            PathBuf::from("out/custom.outputs")
+        );
+    }
+
+    #[test]
+    fn default_output_path_collides_with_a_proof_path_that_is_already_an_outputs_path() {
+        assert_eq!(
+            prove_cmd("dir/program.masm", Some("out/custom.outputs")).default_output_path(),
+            PathBuf::from("out/custom.outputs")
+        );
     }
 }
