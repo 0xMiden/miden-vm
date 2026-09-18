@@ -538,8 +538,8 @@ fn prove_deferred_state_round_trips_for_every_hash_function() {
 /// `eval_external` is tested separately in `session::prove`.
 fn assert_session_balanced(traces: &SessionTraces, rng: &mut impl Rng) {
     let challenges = Challenges::new(
-        QuadFelt::new([Felt::new(rng.random()).unwrap(), Felt::new(rng.random()).unwrap()]),
-        QuadFelt::new([Felt::new(rng.random()).unwrap(), Felt::new(rng.random()).unwrap()]),
+        QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()]),
+        QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()]),
         MAX_MESSAGE_WIDTH,
         NUM_BUS_IDS,
     );

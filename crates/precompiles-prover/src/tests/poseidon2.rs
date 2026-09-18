@@ -37,7 +37,7 @@ use crate::{
 // ================================================================================================
 
 fn random_chunk(rng: &mut impl Rng) -> [Felt; 4] {
-    core::array::from_fn(|_| Felt::new(rng.random()).unwrap())
+    core::array::from_fn(|_| rng.random::<Felt>())
 }
 
 fn random_block(rng: &mut impl Rng) -> ([Felt; 4], [Felt; 4]) {

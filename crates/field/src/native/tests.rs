@@ -11,7 +11,7 @@ use p3_field::{
 use proptest::prelude::*;
 use rand::{SeedableRng, distr::Distribution, rngs::SmallRng};
 
-use super::{Felt, Goldilocks};
+use super::{Felt, Goldilocks, arb_felt_noncanonical};
 
 /// A minimal hasher used to validate that `Felt` hashes identically to `Goldilocks`.
 #[derive(Default)]
@@ -43,6 +43,12 @@ impl Hasher for U64Hasher {
 unsafe fn felt_from_raw_u64(raw: u64) -> Felt {
     // SAFETY: Felt is repr(transparent) over Goldilocks, which is repr(transparent) over u64.
     unsafe { core::mem::transmute_copy(&raw) }
+}
+
+#[inline]
+fn felt_to_raw_u64(value: Felt) -> u64 {
+    // SAFETY: Felt is repr(transparent) over Goldilocks, which is repr(transparent) over u64.
+    unsafe { core::mem::transmute_copy(&value) }
 }
 
 proptest! {
@@ -205,6 +211,18 @@ proptest! {
         let g = <rand::distr::StandardUniform as Distribution<Goldilocks>>::sample(&rand::distr::StandardUniform, &mut rng1);
         let f = <rand::distr::StandardUniform as Distribution<Felt>>::sample(&rand::distr::StandardUniform, &mut rng2);
         prop_assert_eq!(f, g);
+    }
+
+    #[test]
+    fn arbitrary_felt_is_canonical(value in any::<Felt>()) {
+        prop_assert!(felt_to_raw_u64(value) < Felt::ORDER);
+    }
+
+    #[test]
+    fn noncanonical_felt_strategy_uses_noncanonical_representations(
+        value in arb_felt_noncanonical(),
+    ) {
+        prop_assert!(felt_to_raw_u64(value) >= Felt::ORDER);
     }
 
     /// `ext_square` agrees with `ext_mul(a, a, _)` and with `Goldilocks`'s own specialized
