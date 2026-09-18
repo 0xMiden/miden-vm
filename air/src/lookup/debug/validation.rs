@@ -168,6 +168,10 @@ where
     // `ExtEntry::Challenge { index: 0/1 }` back to these concrete values.
     let current: Vec<Felt> = (0..layout.trace_width).map(|_| random_felt()).collect();
     let next: Vec<Felt> = (0..layout.trace_width).map(|_| random_felt()).collect();
+    let preprocessed_current: Vec<Felt> =
+        (0..layout.preprocessed_width).map(|_| random_felt()).collect();
+    let preprocessed_next: Vec<Felt> =
+        (0..layout.preprocessed_width).map(|_| random_felt()).collect();
     let periodic: Vec<Felt> = (0..layout.num_periodic_columns).map(|_| random_felt()).collect();
     let alpha = QuadFelt::new([random_felt(), random_felt()]);
     let beta = QuadFelt::new([random_felt(), random_felt()]);
@@ -176,6 +180,8 @@ where
     let row_valuation = RowValuation {
         current: &current,
         next: &next,
+        preprocessed_current: &preprocessed_current,
+        preprocessed_next: &preprocessed_next,
         periodic: &periodic,
         alpha,
         beta,
@@ -216,6 +222,8 @@ where
 struct RowValuation<'r> {
     current: &'r [Felt],
     next: &'r [Felt],
+    preprocessed_current: &'r [Felt],
+    preprocessed_next: &'r [Felt],
     periodic: &'r [Felt],
     /// `Challenge[0]` in any `SymbolicExpressionExt` tree.
     alpha: QuadFelt,
@@ -241,14 +249,14 @@ impl<'r> RowValuation<'r> {
                 BaseEntry::Main { offset: 0 } => self.current[*index],
                 BaseEntry::Main { offset: 1 } => self.next[*index],
                 BaseEntry::Periodic => self.periodic[*index],
-                BaseEntry::Main { offset } => {
-                    panic!("unexpected main offset {offset} in LookupAir::eval")
+                BaseEntry::Preprocessed { offset: 0 } => self.preprocessed_current[*index],
+                BaseEntry::Preprocessed { offset: 1 } => self.preprocessed_next[*index],
+                BaseEntry::Main { offset } | BaseEntry::Preprocessed { offset } => {
+                    panic!("unexpected {entry:?} offset {offset} in LookupAir::eval")
                 },
-                // LookupBuilder doesn't expose preprocessed or public values, and
-                // LookupAir::eval can't construct these leaves.
-                BaseEntry::Preprocessed { .. } | BaseEntry::Public => {
-                    panic!("unexpected {entry:?} leaf in LookupAir::eval")
-                },
+                // LookupBuilder doesn't expose public values, and LookupAir::eval can't
+                // construct these leaves.
+                BaseEntry::Public => panic!("unexpected {entry:?} leaf in LookupAir::eval"),
             },
             // Selector leaves are only produced by `AirBuilder::is_first_row` / etc.,
             // which LookupBuilder does not expose.

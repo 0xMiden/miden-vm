@@ -9,8 +9,8 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt, TwoAdicField},
 };
-use miden_crypto::field::Field;
 use miden_core_lib::CoreLibrary;
+use miden_crypto::field::Field;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor};
 use miden_utils_testing::Test;
 
@@ -168,8 +168,7 @@ fn extract_order(read: &impl Fn(u32) -> Felt) -> ProofOrder {
 /// Assert critical Fiat-Shamir-derived values are non-zero.
 fn sanity_check_ace_inputs(read: &impl Fn(u32) -> Felt, inputs: &[QuadFelt], layout: &InputLayout) {
     let get = |key: InputKey| -> QuadFelt { inputs[layout.index(key).expect("missing key")] };
-    let read_quad =
-        |addr| QuadFelt::new([read(addr), read(addr + 1)]);
+    let read_quad = |addr| QuadFelt::new([read(addr), read(addr + 1)]);
 
     // Fiat-Shamir challenges
     assert!(!get(InputKey::Alpha).is_zero(), "alpha is zero");

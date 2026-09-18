@@ -6,11 +6,13 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_core::deferred::{
-    DEFERRED_AND_FRAME, DataChunk, Digest, MAX_DEFERRED_ELEMENTS, MAX_PRECOMPILE_ROOTS, Node, PrecompileWitness,
-    PrecompileWitnessEntry, TRUE_DIGEST, fold_deferred_root,
+use miden_core::{
+    deferred::{
+        DEFERRED_AND_FRAME, DataChunk, Digest, MAX_DEFERRED_ELEMENTS, MAX_PRECOMPILE_ROOTS, Node,
+        PrecompileWitness, PrecompileWitnessEntry, TRUE_DIGEST, fold_deferred_root,
+    },
+    program::domain::DeferredChunksDomain,
 };
-use miden_core::program::domain::DeferredChunksDomain;
 use miden_crypto::hash::eidos::{EidosDomain, EidosFrame};
 use miden_precompiles::{
     CurveBinaryOp, CurveId, CurveOp, Keccak256Precompile, UintBinaryOp, UintDomain, UintOp,
@@ -235,8 +237,10 @@ pub(crate) fn import_witnesses(
                 .and_then(|n| n.checked_add(EidosFrame::FELT_LEN))
                 .ok_or(SessionInputError::Limit { location, resource: "input elements" })?;
             reserve(&mut elements_left, elements, location, "input elements")?;
-            if let Some(n_bytes) = Keccak256Precompile::decode_assert_frame(entry.frame())
-                .map_err(|_| SessionInputError::Invalid { location, reason: "invalid hash frame" })?
+            if let Some(n_bytes) =
+                Keccak256Precompile::decode_assert_frame(entry.frame()).map_err(|_| {
+                    SessionInputError::Invalid { location, reason: "invalid hash frame" }
+                })?
             {
                 reserve(&mut hash_bytes_left, n_bytes as usize, location, "hash input bytes")?;
             }
@@ -538,7 +542,9 @@ impl WitnessImporter {
                 },
             };
         }
-        if let Some(op) = CurveOp::decode_frame(frame).map_err(|_| self.invalid("invalid curve frame"))? {
+        if let Some(op) =
+            CurveOp::decode_frame(frame).map_err(|_| self.invalid("invalid curve frame"))?
+        {
             return match op {
                 CurveOp::Value(curve) => {
                     let (x, y) = self.join(entry)?;
@@ -589,10 +595,13 @@ impl WitnessImporter {
                     }
                     Ok(Imported::Truth(self.session.ec_is(&a.node, &b.node)))
                 },
-                CurveOp::Msm => {
+                CurveOp::Msm(n_pairs) => {
                     let PrecompileWitnessEntry::PairList { pairs, .. } = entry else {
                         return Err(self.invalid("MSM requires a pair list"));
                     };
+                    if pairs.len() != n_pairs as usize {
+                        return Err(self.invalid("MSM pair count does not match its frame"));
+                    }
                     let &(first, _) = pairs.first().ok_or_else(|| self.invalid("empty MSM"))?;
                     let curve = self.point(entries, first)?.curve;
                     let mut terms = Vec::with_capacity(pairs.len());

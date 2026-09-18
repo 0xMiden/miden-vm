@@ -28,17 +28,17 @@ const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
 
 /// The recursive VM verifier root declared by proofs from the current prover.
 pub const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(351571624330827146),
-    crate::Felt::new_unchecked(5944944888574091447),
-    crate::Felt::new_unchecked(2335602036514923076),
-    crate::Felt::new_unchecked(5299378808488175218),
+    crate::Felt::new_unchecked(1921841441639794791),
+    crate::Felt::new_unchecked(5437394083573172853),
+    crate::Felt::new_unchecked(159524831088806275),
+    crate::Felt::new_unchecked(5112744933988373543),
 ]);
 /// The recursive precompile verifier root declared by proofs from the current prover.
 pub const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(9214523356769468220),
-    crate::Felt::new_unchecked(3812767987979435817),
-    crate::Felt::new_unchecked(7192336225287278195),
-    crate::Felt::new_unchecked(7673737432728942643),
+    crate::Felt::new_unchecked(4120330617486754481),
+    crate::Felt::new_unchecked(7616871213845388887),
+    crate::Felt::new_unchecked(8657821251876017598),
+    crate::Felt::new_unchecked(6586055234885977841),
 ]);
 
 // HASH FUNCTION
@@ -605,7 +605,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        deferred::{Node, PrecompileWitnessEntry, TRUE_DIGEST, Tag},
+        deferred::{DEFERRED_AND_FRAME, Node, PrecompileWitnessEntry, TRUE_DIGEST},
         serde::ByteWriter,
     };
 
@@ -658,7 +658,7 @@ mod tests {
 
     fn wire() -> (PrecompileWitness, DeferredRoot) {
         let witness = PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
-            tag: Tag::AND,
+            frame: DEFERRED_AND_FRAME,
             lhs: 0,
             rhs: 0,
         }])

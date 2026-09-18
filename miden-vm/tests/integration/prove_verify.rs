@@ -342,7 +342,7 @@ mod prover_api_lifecycle {
     use miden_assembly::Assembler;
     use miden_core::{
         Felt, Word, ZERO,
-        deferred::{Node, PrecompileWitnessEntry},
+        deferred::{Node, PrecompileWitnessEntry, deferred_chunks_frame},
     };
     use miden_precompiles::{UintDomain, UintPrecompile};
     use miden_vm::{
@@ -555,7 +555,7 @@ mod prover_api_lifecycle {
             one_deferred.vm().clone(),
             PrecompileStatus::Deferred(
                 PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Data {
-                    tag: Tag::CHUNKS,
+                    frame: deferred_chunks_frame(1),
                     chunks: vec![[ZERO; 8]],
                 }])
                 .expect("data is a structurally valid witness"),
@@ -737,7 +737,7 @@ mod execution_witness_serialization {
         DefaultHost, FastProcessor, HostLibrary, StackInputs, advice::AdviceInputs,
         trace::build_trace,
     };
-    use miden_prover::{Prover, serde::Serializable};
+    use miden_prover::{HashFunction, Prover, serde::Serializable};
     #[cfg(feature = "arbitrary")]
     use miden_utils_testing::proptest::prelude::*;
     use miden_verifier::Verifier;

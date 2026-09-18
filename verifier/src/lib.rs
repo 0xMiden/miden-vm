@@ -612,7 +612,7 @@ fn roots_overlap(proof_roots: &[Word], accepted_roots: &[Word]) -> bool {
 mod tests {
     use alloc::{vec, vec::Vec};
 
-    use miden_core::deferred::{PrecompileWitness, PrecompileWitnessEntry, Tag};
+    use miden_core::deferred::{DEFERRED_AND_FRAME, PrecompileWitness, PrecompileWitnessEntry};
 
     use super::*;
 
@@ -663,7 +663,7 @@ mod tests {
         let required = root(1);
         let deferred = PrecompileStatus::Deferred(
             PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
-                tag: Tag::AND,
+                frame: DEFERRED_AND_FRAME,
                 lhs: 0,
                 rhs: 0,
             }])
@@ -709,19 +709,23 @@ mod tests {
 
         let witness = PrecompileWitness::from_entries(vec![
             PrecompileWitnessEntry::Data {
-                tag: UintPrecompile::value_tag(UintDomain::U256),
+                frame: UintPrecompile::value_frame(UintDomain::U256),
                 chunks: vec![[Felt::from_u32(0); 8]],
             },
             PrecompileWitnessEntry::Data {
-                tag: UintPrecompile::value_tag(UintDomain::U256),
+                frame: UintPrecompile::value_frame(UintDomain::U256),
                 chunks: vec![core::array::from_fn(|i| Felt::from_u32(u32::from(i == 0)))],
             },
             PrecompileWitnessEntry::Join {
-                tag: UintPrecompile::op_tag(UintPrecompile::EQ_OP_ID),
+                frame: UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID),
                 lhs: 1,
                 rhs: 2,
             },
-            PrecompileWitnessEntry::Join { tag: Tag::AND, lhs: 0, rhs: 3 },
+            PrecompileWitnessEntry::Join {
+                frame: DEFERRED_AND_FRAME,
+                lhs: 0,
+                rhs: 3,
+            },
         ])
         .unwrap();
         // Evaluating this witness first would reject its false assertion instead of the VM STARK.

@@ -276,7 +276,7 @@ impl Node {
         })
     }
 
-    fn chunks_frame_for_len(n_chunks: usize) -> Result<EidosFrame, DeferredError> {
+    pub(super) fn chunks_frame_for_len(n_chunks: usize) -> Result<EidosFrame, DeferredError> {
         let n_chunks = u32::try_from(n_chunks).map_err(|_| DeferredError::InvalidPayload)?;
         if n_chunks == 0 || n_chunks > u32::MAX / Self::DATA_CHUNK_FELT_LEN as u32 {
             return Err(DeferredError::InvalidPayload);
@@ -379,7 +379,7 @@ impl Node {
         }
     }
 
-    fn require_precompile_frame(frame: EidosFrame) -> Result<EidosFrame, DeferredError> {
+    pub(super) fn require_precompile_frame(frame: EidosFrame) -> Result<EidosFrame, DeferredError> {
         if frame.domain() == DeferredAndDomain::TAG || frame.domain() == DeferredChunksDomain::TAG {
             return Err(DeferredError::InvalidFrame);
         }

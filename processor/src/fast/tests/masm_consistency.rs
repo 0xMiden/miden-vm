@@ -412,7 +412,7 @@ fn test_log_deferred_correctness() {
 /// Tests that successive `log_deferred` calls fold registered DAG roots in execution order.
 #[test]
 fn successive_log_deferred_calls_build_an_ordered_and_chain() {
-    use miden_core::deferred::{DEFERRED_AND_FRAME, Node, TRUE_DIGEST};
+    use miden_core::deferred::{DEFERRED_AND_FRAME, Node, PrecompileWitnessEntry, TRUE_DIGEST};
 
     let first_node = Node::and(TRUE_DIGEST, TRUE_DIGEST);
     let first_statement = first_node.digest();
@@ -445,17 +445,28 @@ fn successive_log_deferred_calls_build_an_ordered_and_chain() {
     let execution_output = processor.execute_sync(&program, &mut DefaultHost::default()).unwrap();
 
     assert_eq!(execution_output.stack.get_word(0), Some(expected_root));
-    assert_eq!(execution_output.deferred_state.root(), expected_root);
+    let witness = execution_output
+        .precompile_witness
+        .as_ref()
+        .expect("log_deferred leaves a precompile witness");
+    assert_eq!(witness.root_unchecked(), expected_root);
+    // Rebuild the entry digests child-first and check both AND steps bind the expected children.
+    let mut digests = vec![TRUE_DIGEST];
+    for entry in witness.entries() {
+        let digest = entry.digest(&digests).expect("witness entries are structurally valid");
+        digests.push(digest);
+    }
     for (digest, expected_children) in [
         (first_root, (TRUE_DIGEST, first_statement)),
         (expected_root, (first_root, second_statement)),
     ] {
-        let node = execution_output
-            .deferred_state
-            .get_node(&digest)
-            .expect("log_deferred must store its AND node");
-        assert_eq!(node.frame(), Some(DEFERRED_AND_FRAME));
-        assert_eq!(node.payload().as_join(), Ok(expected_children));
+        let index = digests.iter().position(|d| *d == digest).expect("AND node is in the witness");
+        match &witness.entries()[index - 1] {
+            PrecompileWitnessEntry::Join { frame, lhs, rhs } if *frame == DEFERRED_AND_FRAME => {
+                assert_eq!((digests[*lhs as usize], digests[*rhs as usize]), expected_children);
+            },
+            other => panic!("log_deferred must store an AND join, found {other:?}"),
+        }
     }
     for (offset, expected) in stack_inputs[8..].iter().enumerate() {
         assert_eq!(

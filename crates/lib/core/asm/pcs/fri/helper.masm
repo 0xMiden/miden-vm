@@ -79,11 +79,11 @@ pub proc evaluate_fri_remainder_poly_max_degree_plus_1(
     end
 end
 
-#! Compute the number of FRI layers given log2 of the size of LDE domain. It also computes the
-#! LDE domain generator and, from it, the trace generator and store these for later use.
+#! Computes and stores the number of FRI layers and the remainder polynomial size from the LDE
+#! domain size.
 #!
 #! Input: [...]
-#! Output: [num_fri_layers, ...]
+#! Output: [...]
 pub proc generate_fri_parameters()
     # Load FRI verifier data
     padw exec.constants::get_lde_domain_info_word

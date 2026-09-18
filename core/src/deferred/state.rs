@@ -3,8 +3,8 @@ use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use miden_crypto::hash::eidos::{EidosDomain, EidosFrame};
 
 use super::{
-    DEFERRED_AND_FRAME, DeferredError, Digest, IntegrityError, MAX_DEFERRED_ELEMENTS, Node, NodeType,
-    PrecompileError, PrecompileRegistry, PrecompileWitness, TRUE_DIGEST,
+    DEFERRED_AND_FRAME, DeferredError, Digest, IntegrityError, MAX_DEFERRED_ELEMENTS, Node,
+    NodeType, PrecompileError, PrecompileRegistry, PrecompileWitness, TRUE_DIGEST,
 };
 use crate::program::domain::DeferredChunksDomain;
 

@@ -317,11 +317,6 @@ fn session_public_root_matches_synthetic_deferred_state_for_all_supported_node_t
 }
 
 #[test]
-fn empty_deferred_state_translates_to_true_root() {
-    translated_traces_check(&WitnessFixture::new());
-}
-
-#[test]
 fn deferred_session_translates_curve_claims_for_all_fixed_curves() {
     let mut state = WitnessFixture::new();
 

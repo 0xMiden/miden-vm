@@ -318,8 +318,11 @@ fn build_eidos_compression_traces(
     height: usize,
 ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
     let real_cycles = cycles.len();
-    debug_assert!(height.is_power_of_two() && height % EIDOS_COMPRESSION_CYCLE_LEN == 0);
-    assert!(real_cycles * EIDOS_COMPRESSION_CYCLE_LEN <= height, "compression cycles exceed the predicted trace height");
+    debug_assert!(height.is_power_of_two() && height.is_multiple_of(EIDOS_COMPRESSION_CYCLE_LEN));
+    assert!(
+        real_cycles * EIDOS_COMPRESSION_CYCLE_LEN <= height,
+        "compression cycles exceed the predicted trace height"
+    );
     let cycle_count = height / EIDOS_COMPRESSION_CYCLE_LEN;
     let mut values = vec![Felt::ZERO; height * NUM_EIDOS_COMPRESSION_COLS];
     let (rows, remainder) = values.as_chunks_mut::<NUM_EIDOS_COMPRESSION_COLS>();

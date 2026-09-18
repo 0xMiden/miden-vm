@@ -4,7 +4,9 @@ use miden_core::{
     Felt, Word,
     advice::AdviceInputs,
     crypto::hash::Keccak256,
-    deferred::{Node, PrecompileWitness, PrecompileWitnessEntry, Tag},
+    deferred::{
+        DEFERRED_AND_FRAME, Node, PrecompileWitness, PrecompileWitnessEntry, deferred_chunks_frame,
+    },
     program::proof_request_key,
     proof::{HashFunction, PrecompileProof, StarkProof},
 };
@@ -128,15 +130,26 @@ pub(super) fn prove_keccak_claim(input: &[u8]) -> PrecompileProof {
     );
     let witness = PrecompileWitness::from_entries(vec![
         PrecompileWitnessEntry::Data {
-            tag: Tag::CHUNKS,
+            frame: deferred_chunks_frame(
+                u32::try_from(input_node.payload().as_data().unwrap().len())
+                    .expect("fixture chunk count fits u32"),
+            ),
             chunks: input_node.payload().as_data().unwrap().to_vec(),
         },
         PrecompileWitnessEntry::Data {
-            tag: Tag::CHUNKS,
+            frame: deferred_chunks_frame(1),
             chunks: vec![digest_chunk],
         },
-        PrecompileWitnessEntry::Join { tag: assertion.tag(), lhs: 1, rhs: 2 },
-        PrecompileWitnessEntry::Join { tag: Tag::AND, lhs: 0, rhs: 3 },
+        PrecompileWitnessEntry::Join {
+            frame: assertion.frame().expect("assertion nodes carry a frame"),
+            lhs: 1,
+            rhs: 2,
+        },
+        PrecompileWitnessEntry::Join {
+            frame: DEFERRED_AND_FRAME,
+            lhs: 0,
+            rhs: 3,
+        },
     ])
     .expect("Keccak fixture has a canonical portable graph");
     prove_precompiles(vec![witness], HashFunction::Eidos)

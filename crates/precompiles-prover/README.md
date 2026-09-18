@@ -14,7 +14,7 @@ and shares computations across inputs. It builds the chiplet traces and serializ
 bound to the ordered fold of the constituent roots. No runtime evaluator or merged witness is built.
 
 Empty batches and bare external assertion roots are rejected. Batch input uses the existing
-`MAX_DEFERRED_ELEMENTS` ceiling for tags and payloads, including repeated inputs and aggregate AND
+`MAX_DEFERRED_ELEMENTS` ceiling for frames and payloads, including repeated inputs and aggregate AND
 nodes. `MAX_PRECOMPILE_ROOTS` bounds every root occurrence. Total declared hash input is separately
 bounded to four bytes per allowed element, so sharing one large payload cannot hide repeated hash
 work. MSM lowering retains its existing per-claim and aggregate fallback term limits; the input

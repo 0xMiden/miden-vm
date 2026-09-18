@@ -30,8 +30,8 @@ where
     A: LiftedAir<F, EF>,
     for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
 {
-    // Preprocessed columns are already prepended to `main` by the only AIR which uses them
-    // (BytePairLut); passing them a second time would shift its lookup column indices.
+    // PVM lookups read preprocessed columns from `main` itself (BytePairLut prepends its fixed
+    // table), so no separate preprocessed window is supplied.
     let (mut aux_trace, mut aux_values) =
         miden_air::lookup::build_logup_aux_trace_with_preprocessed(air, main, None, challenges);
     let sigma_prime = aux_values[0];
@@ -80,7 +80,7 @@ mod tests {
         main.values[512 * width..1024 * width].fill(Felt::ZERO);
         let challenges = [QuadFelt::new([Felt::from_u32(7), Felt::ONE]), QuadFelt::from_u32(13)];
         let lookup_challenges = lookup_challenges_from_slice(&challenges);
-        let fractions = build_lookup_fractions(&air, &main, &[], &lookup_challenges);
+        let fractions = build_lookup_fractions(&air, &main, None, &[], &lookup_challenges);
         let (expected, mean) = accumulate_slow(&fractions);
         let (actual, aux_values) = build_logup_aux_trace(&air, &main, &challenges);
 

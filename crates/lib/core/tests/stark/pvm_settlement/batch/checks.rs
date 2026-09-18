@@ -94,7 +94,7 @@ async fn batch_root_and_response_checks() {
 
     // A proof of A alone leaves part of the batch's work unproved.
     let missing_witnesses = Prover::new()
-        .with_hash_fn(HashFunction::Poseidon2)
+        .with_hash_fn(HashFunction::Eidos)
         .prove_precompiles(vec![first_witness])
         .unwrap();
     assert_rejects_pvm_response(
@@ -157,7 +157,7 @@ fn prove_without_precompiles() -> (ExecutionProof, ExecutionClaim) {
     .execute_for_proving_sync(&program, &mut DefaultHost::default())
     .unwrap();
     let claim = witness.claim();
-    let proof = Prover::new().with_hash_fn(HashFunction::Poseidon2).prove(witness).unwrap();
+    let proof = Prover::new().with_hash_fn(HashFunction::Eidos).prove(witness).unwrap();
     (proof, claim)
 }
 

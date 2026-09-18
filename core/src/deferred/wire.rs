@@ -11,11 +11,11 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_crypto::hash::eidos::{EidosDomain, EidosFrame};
+use miden_crypto::hash::eidos::{Eidos, EidosDomain, EidosFrame};
 
 use super::{
-    DEFERRED_AND_FRAME, DataChunk, DeferredState, Digest, MAX_DEFERRED_ELEMENTS, Node, NodeType, PrecompileError,
-    PrecompileRegistry, TRUE_DIGEST,
+    DEFERRED_AND_FRAME, DataChunk, DeferredState, Digest, MAX_DEFERRED_ELEMENTS, Node, NodeType,
+    PrecompileError, PrecompileRegistry, TRUE_DIGEST,
 };
 use crate::{
     Felt, Word, ZERO,
@@ -67,15 +67,21 @@ fn reserve_wire_payload(
 /// payload order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WireEntry {
-    /// Raw data payload interpreted by the tag's precompile.
+    /// Raw data payload interpreted by the frame's precompile.
     ///
-    /// The payload requires at least one chunk. A tag's precompile may assign value semantics to a
-    /// one-chunk payload, but the wire shape itself does not.
-    Data { frame: EidosFrame, chunks: Vec<DataChunk> },
+    /// The payload requires at least one chunk. The frame's precompile may assign value semantics
+    /// to a one-chunk payload, but the wire shape itself does not.
+    Data {
+        frame: EidosFrame,
+        chunks: Vec<DataChunk>,
+    },
     /// Two child references resolved against `TRUE_INDEX` or earlier wire indices.
     Join { frame: EidosFrame, lhs: u32, rhs: u32 },
     /// Raw structural child-reference pairs, with at least one pair.
-    PairList { frame: EidosFrame, pairs: Vec<(u32, u32)> },
+    PairList {
+        frame: EidosFrame,
+        pairs: Vec<(u32, u32)>,
+    },
 }
 
 impl WireEntry {
@@ -119,36 +125,40 @@ impl WireEntry {
         }
         let frame = self.frame();
         let invalid = |_| IntegrityError::InvalidStructure;
-        let node = match self {
+        let mut cv = frame.initial_chaining_word();
+        let pair = |lhs: u32, rhs: u32| {
+            let [l0, l1, l2, l3] = digests[lhs as usize].into_elements();
+            let [r0, r1, r2, r3] = digests[rhs as usize].into_elements();
+            [l0, l1, l2, l3, r0, r1, r2, r3]
+        };
+        match self {
             Self::Data { chunks, .. } if !chunks.is_empty() => {
                 if frame.domain() == DeferredChunksDomain::TAG {
-                    let node = Node::chunks(chunks.clone()).map_err(invalid)?;
-                    if node.frame() != Some(frame) {
+                    if Node::chunks_frame_for_len(chunks.len()).map_err(invalid)? != frame {
                         return Err(IntegrityError::InvalidStructure);
                     }
-                    node
                 } else {
-                    Node::try_data(frame, chunks.clone()).map_err(invalid)?
+                    Node::require_precompile_frame(frame).map_err(invalid)?;
+                }
+                for &chunk in chunks {
+                    cv = Eidos::compress(cv, chunk);
                 }
             },
             Self::Join { lhs, rhs, .. } => {
-                let (lhs, rhs) = (digests[*lhs as usize], digests[*rhs as usize]);
-                if frame == DEFERRED_AND_FRAME {
-                    Node::and(lhs, rhs)
-                } else {
-                    Node::join(frame, lhs, rhs).map_err(invalid)?
+                if frame != DEFERRED_AND_FRAME {
+                    Node::require_precompile_frame(frame).map_err(invalid)?;
                 }
+                cv = Eidos::compress(cv, pair(*lhs, *rhs));
             },
             Self::PairList { pairs, .. } if !pairs.is_empty() => {
-                let pairs: Vec<(Digest, Digest)> = pairs
-                    .iter()
-                    .map(|&(lhs, rhs)| (digests[lhs as usize], digests[rhs as usize]))
-                    .collect();
-                Node::try_pair_list(frame, pairs).map_err(invalid)?
+                Node::require_precompile_frame(frame).map_err(invalid)?;
+                for &(lhs, rhs) in pairs {
+                    cv = Eidos::compress(cv, pair(lhs, rhs));
+                }
             },
             _ => return Err(IntegrityError::InvalidStructure),
-        };
-        Ok(node.digest())
+        }
+        Ok(cv)
     }
 }
 
@@ -742,7 +752,10 @@ mod tests {
         let malformed_and = EidosFrame::new(DEFERRED_AND_FRAME.domain(), [1, 0, 0]);
         let cases = [
             Vec::new(),
-            alloc::vec![WireEntry::Data { frame: deferred_chunks_frame(1), chunks: Vec::new() }],
+            alloc::vec![WireEntry::Data {
+                frame: deferred_chunks_frame(1),
+                chunks: Vec::new()
+            }],
             alloc::vec![WireEntry::PairList { frame: frame(1), pairs: Vec::new() }],
             alloc::vec![WireEntry::Data {
                 frame: DEFERRED_AND_FRAME,
@@ -752,12 +765,36 @@ mod tests {
                 frame: deferred_chunks_frame(2),
                 chunks: alloc::vec![felts(10)]
             }],
-            alloc::vec![WireEntry::Join { frame: deferred_chunks_frame(1), lhs: 0, rhs: 0 }],
+            alloc::vec![WireEntry::Join {
+                frame: deferred_chunks_frame(1),
+                lhs: 0,
+                rhs: 0
+            }],
             alloc::vec![WireEntry::Join { frame: malformed_and, lhs: 0, rhs: 0 }],
-            alloc::vec![WireEntry::Join { frame: DEFERRED_AND_FRAME, lhs: 0, rhs: 1 }],
-            alloc::vec![leaf(), leaf(), WireEntry::Join { frame: DEFERRED_AND_FRAME, lhs: 1, rhs: 2 }],
+            alloc::vec![WireEntry::Join {
+                frame: DEFERRED_AND_FRAME,
+                lhs: 0,
+                rhs: 1
+            }],
+            alloc::vec![
+                leaf(),
+                leaf(),
+                WireEntry::Join {
+                    frame: DEFERRED_AND_FRAME,
+                    lhs: 1,
+                    rhs: 2
+                }
+            ],
             alloc::vec![leaf(), other()],
-            alloc::vec![leaf(), other(), WireEntry::Join { frame: DEFERRED_AND_FRAME, lhs: 2, rhs: 1 }],
+            alloc::vec![
+                leaf(),
+                other(),
+                WireEntry::Join {
+                    frame: DEFERRED_AND_FRAME,
+                    lhs: 2,
+                    rhs: 1
+                }
+            ],
         ];
         for entries in cases {
             let bytes = encoded_entries(&entries);
@@ -781,12 +818,27 @@ mod tests {
 
         for entries in [
             Vec::new(),
-            alloc::vec![WireEntry::Join { frame: DEFERRED_AND_FRAME, lhs: 0, rhs: 1 }],
+            alloc::vec![WireEntry::Join {
+                frame: DEFERRED_AND_FRAME,
+                lhs: 0,
+                rhs: 1
+            }],
             alloc::vec![
-                WireEntry::Join { frame: DEFERRED_AND_FRAME, lhs: 0, rhs: 2 },
-                WireEntry::Join { frame: DEFERRED_AND_FRAME, lhs: 0, rhs: 0 },
+                WireEntry::Join {
+                    frame: DEFERRED_AND_FRAME,
+                    lhs: 0,
+                    rhs: 2
+                },
+                WireEntry::Join {
+                    frame: DEFERRED_AND_FRAME,
+                    lhs: 0,
+                    rhs: 0
+                },
             ],
-            alloc::vec![WireEntry::PairList { frame: frame(1), pairs: alloc::vec![(0, 1)] }],
+            alloc::vec![WireEntry::PairList {
+                frame: frame(1),
+                pairs: alloc::vec![(0, 1)]
+            }],
         ] {
             let malformed = PrecompileWitness { entries, root: expected };
             assert!(matches!(
@@ -813,7 +865,14 @@ mod tests {
         let root = state.root();
         let witness = state.into_witness().unwrap().unwrap();
         assert_eq!(witness.root_unchecked(), root);
-        assert_eq!(witness.entries(), &[WireEntry::Join { frame: DEFERRED_AND_FRAME, lhs: 0, rhs: 0 }]);
+        assert_eq!(
+            witness.entries(),
+            &[WireEntry::Join {
+                frame: DEFERRED_AND_FRAME,
+                lhs: 0,
+                rhs: 0
+            }]
+        );
     }
 
     #[test]
@@ -859,7 +918,10 @@ mod tests {
                 frame: deferred_chunks_frame(1),
                 chunks: alloc::vec![felts(10)],
             },
-            WireEntry::PairList { frame: frame(1), pairs: alloc::vec![(0, 0)] },
+            WireEntry::PairList {
+                frame: frame(1),
+                pairs: alloc::vec![(0, 0)],
+            },
         ];
         for entry in entries {
             let witness = PrecompileWitness::from_entries(alloc::vec![entry]).unwrap();
@@ -904,9 +966,12 @@ mod tests {
 
     #[test]
     fn in_memory_entries_enforce_the_execution_element_limit() {
-        let join = WireEntry::Join { frame: DEFERRED_AND_FRAME, lhs: 0, rhs: 0 };
-        let mut entries =
-            alloc::vec![join; MAX_DEFERRED_ELEMENTS / (EidosFrame::FELT_LEN + Node::DATA_CHUNK_FELT_LEN)];
+        let join = WireEntry::Join {
+            frame: DEFERRED_AND_FRAME,
+            lhs: 0,
+            rhs: 0,
+        };
+        let mut entries = alloc::vec![join; MAX_DEFERRED_ELEMENTS / (EidosFrame::FELT_LEN + Node::DATA_CHUNK_FELT_LEN)];
         // Budget validation runs before hashing, so a repeated-entry allocation cannot bypass it.
         entries.push(WireEntry::Data {
             frame: deferred_chunks_frame(1),
@@ -929,7 +994,7 @@ mod tests {
             let mut bytes = alloc::vec![PrecompileWitness::WIRE_VERSION];
             bytes.write_usize(1);
             bytes.write_u8(discriminant);
-            frame(1).write_into(&mut bytes);
+            frame(1).as_word().write_into(&mut bytes);
             bytes.write_usize(usize::MAX);
             assert!(PrecompileWitness::read_from_bytes(&bytes).is_err());
         }

@@ -265,8 +265,8 @@ where
             RowWindow::from_two_rows(empty_row, empty_row)
         } else {
             let curr = &preprocessed_flat[r * preprocessed_width..(r + 1) * preprocessed_width];
-            let next =
-                &preprocessed_flat[nxt_idx * preprocessed_width..(nxt_idx + 1) * preprocessed_width];
+            let next = &preprocessed_flat
+                [nxt_idx * preprocessed_width..(nxt_idx + 1) * preprocessed_width];
             RowWindow::from_two_rows(curr, next)
         };
         for (i, col) in periodic_columns.iter().enumerate() {
@@ -816,7 +816,6 @@ mod tests {
         }
     }
 
-
     struct WindowAir;
 
     impl LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>> for WindowAir {
@@ -868,8 +867,14 @@ mod tests {
         let challenges = Challenges::new(QuadFelt::from_u32(7), QuadFelt::from_u32(13), 1, 1);
         // Start inside the trace and include the last-to-first edge.
         let rows = period / 2 - 1..num_rows;
-        let actual =
-            build_lookup_fraction_chunk(&WindowAir, &main, None, &periodic, &challenges, rows.clone());
+        let actual = build_lookup_fraction_chunk(
+            &WindowAir,
+            &main,
+            None,
+            &periodic,
+            &challenges,
+            rows.clone(),
+        );
         let expected: Vec<_> = rows
             .map(|row| {
                 let value = main.values[row]
@@ -916,6 +921,5 @@ mod tests {
             assert_eq!(multiplicity, Felt::ONE);
             assert_eq!(denominator, SmokeMsg { value: row_tag }.encode(&challenges));
         }
-    
     }
 }

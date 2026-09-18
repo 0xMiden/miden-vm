@@ -1,8 +1,5 @@
 use miden_assembly::{Assembler, Linkage};
-use miden_core::{
-    Felt,
-    deferred::{DeferredState, TRUE_DIGEST},
-};
+use miden_core::{Felt, deferred::TRUE_DIGEST};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
     ContextId, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
@@ -87,7 +84,11 @@ fn log_deferred_wrapper_consumes_digest_and_preserves_tail() {
         .expect("log_deferred wrapper should accept TRUE_DIGEST");
 
     assert_eq!(read_stack_felts(&output, tail.len()), tail);
-    assert_ne!(output.deferred_state.root(), TRUE_DIGEST);
+    let witness = output
+        .precompile_witness
+        .as_ref()
+        .expect("log_deferred leaves a precompile witness");
+    assert_ne!(witness.root_unchecked(), TRUE_DIGEST);
 }
 
 pub fn expect_precompile_trap(source: &str) -> ExecutionError {

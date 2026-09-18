@@ -847,7 +847,7 @@ fn run_recursive_verifier(data: &VerifierData) -> ProofOrder {
         data.advice_map.clone()
     )
     .with_trace_handler(VERIFIER_RETURN, verifier_stack.clone());
-    ace_read_check::execute_and_check(&test, &data.proof_stream, &data.claim_advice);
+    let order = ace_read_check::execute_and_check(&test, &data.proof_stream, &data.claim_advice);
 
     // Pin the full common descriptor and deferred root so any value or ordering drift is caught
     // across every end-to-end configuration.
@@ -883,6 +883,7 @@ fn run_recursive_verifier(data: &VerifierData) -> ProofOrder {
     ];
     expected.extend_from_slice(&data.proof_stream[4..4 + WORD_SIZE]);
     verifier_stack.assert_outputs_and_caller(&expected);
+    order
 }
 
 /// Derives the expected proof order from the log heights carried in the proof stream.

@@ -8,7 +8,7 @@ use std::println;
 use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
-    deferred::{PrecompileWitness, PrecompileWitnessEntry, TRUE_DIGEST, Tag},
+    deferred::{DEFERRED_AND_FRAME, PrecompileWitness, PrecompileWitnessEntry, TRUE_DIGEST},
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest},
     operations::Operation,
     program::{KernelDescriptor, Program, StackInputs, StackOutputs},
@@ -257,7 +257,7 @@ fn generate_fuzz_seeds() {
     // Portable singleton precompile witnesses, including rejected empty and oversized payloads.
     let singleton_witness = || {
         PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
-            tag: Tag::AND,
+            frame: DEFERRED_AND_FRAME,
             lhs: 0,
             rhs: 0,
         }])

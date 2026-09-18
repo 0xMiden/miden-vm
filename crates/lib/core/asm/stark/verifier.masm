@@ -132,12 +132,8 @@ pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters
     exec.random_coin::check_deep_pow_and_generate_deep_composition_random_coefficients
 
     #============================================
-    #   2) Compute constants needed for computing
-    #       FRI queries. These are:
-    #       -   LDE domain generator.
-    #       -   Trace domain generator `g`.
-    #       -   `gz`.
-    #       -   Number of FRI layers.
+    #   2) Compute and store the number of FRI
+    #      layers and the remainder polynomial size.
     #============================================
 
     exec.helper::generate_fri_parameters
@@ -153,8 +149,8 @@ pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters
     # => [...]
 
     #============================================
-    #   4) Load and check commitment to remainder
-    #      polynomial.
+    #   4) Load the remainder polynomial and absorb
+    #      it into the transcript.
     #============================================
 
     exec.helper::load_and_verify_remainder

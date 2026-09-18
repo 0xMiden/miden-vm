@@ -55,8 +55,8 @@ where
     build_logup_aux_trace_with_preprocessed(air, main, preprocessed.as_ref(), challenges)
 }
 
-/// [`build_logup_aux_trace`] with the preprocessed trace supplied by the caller instead of taken
-/// from the AIR. Callers whose preprocessed columns are already part of `main` pass `None`.
+/// [`build_logup_aux_trace`] with the preprocessed window supplied by the caller. An AIR whose
+/// lookup reads its preprocessed columns from `main` itself passes `None`.
 pub fn build_logup_aux_trace_with_preprocessed<A, F, EF>(
     air: &A,
     main: &RowMajorMatrix<F>,

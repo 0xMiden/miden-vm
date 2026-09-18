@@ -12,7 +12,7 @@ use miden_core::{
 };
 use miden_crypto::hash::keccak::Keccak256;
 use miden_precompiles::Keccak256Precompile;
-use miden_precompiles_prover::prove_deferred_state;
+use miden_precompiles_prover::prove_precompiles;
 use miden_precompiles_verifier::verify_deferred;
 
 const PROOF_PATH: &str = "../precompiles-verifier/tests/fixtures/pvm_eidos_v0_31.bin";
@@ -52,14 +52,19 @@ fn run(mode: Mode) -> Result<(), String> {
     ensure_sequential_prover()?;
 
     let state = fixture_state()?;
-    let proof = prove_deferred_state(&state, HashFunction::Eidos)
-        .map_err(|error| format!("generate proof: {error}"))?;
-    verify_deferred(&proof, state.root())
-        .map_err(|error| format!("verify generated proof: {error}"))?;
+    let root = state.root();
+    let witness = state
+        .into_witness()
+        .map_err(|error| format!("open fixture witness: {error}"))?
+        .ok_or("fixture state has deferred work")?;
+    let proof = prove_precompiles(vec![witness], HashFunction::Eidos)
+        .map_err(|error| format!("generate proof: {error}"))?
+        .proof;
+    verify_deferred(&proof, root).map_err(|error| format!("verify generated proof: {error}"))?;
 
     let proof_path = fixture_path(PROOF_PATH);
     let root_path = fixture_path(ROOT_PATH);
-    let root = render_root(state.root());
+    let root = render_root(root);
 
     match mode {
         Mode::Check => {
