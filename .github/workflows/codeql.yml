@@ -45,6 +45,8 @@ jobs:
             python=true
             rust=true
           else
+            changed_paths="${RUNNER_TEMP}/codeql-changed-paths"
+            git diff --name-only -z "${BASE_SHA}...${HEAD_SHA}" > "${changed_paths}"
             while IFS= read -r -d '' path; do
               case "${path}" in
                 .github/actions/*|.github/workflows/*)
@@ -63,7 +65,7 @@ jobs:
                   rust=true
                   ;;
               esac
-            done < <(git diff --name-only -z "${BASE_SHA}...${HEAD_SHA}")
+            done < "${changed_paths}"
           fi
 
           {
@@ -147,7 +149,7 @@ jobs:
   gate:
     name: CodeQL gate
     needs: [classify, actions, python, rust]
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-slim
     permissions: {}
     steps:
