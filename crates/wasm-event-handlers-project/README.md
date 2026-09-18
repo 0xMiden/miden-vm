@@ -1,18 +1,30 @@
 # miden-wasm-event-handlers-project
 
-A `PackagePostProcessor` plugin for the Miden project assembler. It reads the
-`[package.metadata.midenc.event-handlers]` table of a `miden-project.toml` manifest, produces the
-handler module the table names, and attaches the `event_handlers` section to every package of the
+`PackagePostProcessor` plugins for the Miden project assembler. They read the
+`[package.metadata.midenc.event-handlers]` table of a `miden-project.toml` manifest, produce the
+handler module the table names, and attach the `event_handlers` section to every package of the
 project under assembly (its root target and its required libraries, whatever the target type).
 Source dependencies are never post-processed.
 
-The project assembler knows nothing about event handlers; register the processor to opt in:
+The project assembler knows nothing about event handlers; register a processor to opt in. The
+crate has two, and the one a host registers decides whether assembly may run native code:
+
+- `WasmEventHandlerProcessor` serves the `module` key only. It reads a prebuilt module, and a
+  manifest that declares `crate` fails the build, so registering it never executes code from the
+  assembled project.
+- `WasmEventHandlerCargoBuildProcessor` serves both keys. Registering it is equivalent to running
+  `cargo build` on the source the project manifest references, with the permissions of the
+  assembler process: build scripts and procedural macros run native code. Register it only when the
+  assembled source is trusted — a local compiler building the developer's own project. A host that
+  assembles source supplied by other users registers `WasmEventHandlerProcessor` instead.
 
 ```rust,ignore
-use miden_wasm_event_handlers_project::WasmEventHandlerProcessor;
+use miden_wasm_event_handlers_project::WasmEventHandlerCargoBuildProcessor;
 
 let mut project_assembler = assembler.for_project_at_path(&manifest_path, &mut registry)?;
-project_assembler.with_package_post_processor(WasmEventHandlerProcessor::new());
+// A local compiler building the developer's own project; a host that assembles source supplied by
+// other users registers `WasmEventHandlerProcessor` here.
+project_assembler.with_package_post_processor(WasmEventHandlerCargoBuildProcessor::new());
 let package = project_assembler.assemble(target_selector, "release")?;
 ```
 

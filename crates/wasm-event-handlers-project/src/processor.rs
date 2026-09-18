@@ -1,4 +1,4 @@
-//! The package post-processor that attaches the `event_handlers` section.
+//! The package post-processors that attach the `event_handlers` section.
 
 use std::{
     collections::BTreeMap,
@@ -11,39 +11,115 @@ use miden_mast_package::{EventHandlerSection, Package as MastPackage};
 use miden_wasm_event_handlers::{WasmHandlerLimits, section_from_module};
 
 use crate::{
-    config::{self, HandlerSource},
+    config::{self, CRATE_KEY, HandlerSource, MODULE_KEY},
     guest, module,
 };
 
-/// Attaches the Wasm handler module a project manifest declares to every package of the project
-/// under assembly (its root target and its required libraries, whatever the target type).
+// PROCESSORS
+// ================================================================================================
+
+/// Attaches the prebuilt Wasm handler module a project manifest declares to every package of the
+/// project under assembly (its root target and its required libraries, whatever the target type).
 /// Source dependencies are never post-processed.
 ///
-/// The processor reads `[package.metadata.midenc.event-handlers]` (see the [crate] documentation
-/// for the schema). It builds the guest crate, or reads the prebuilt module, derives the
-/// `event_handlers` section from the module's own manifest records, and attaches the section to
-/// the package. A package that declares no such table passes through unchanged.
+/// The processor reads `[package.metadata.midenc.event-handlers]` and serves the `module` key
+/// only: it reads the module file, derives the `event_handlers` section from the module's own
+/// manifest records, and attaches the section to the package. A package that declares no such
+/// table passes through unchanged. See the [crate] documentation for the schema, the validation,
+/// the memoization, and the one-package-per-host rule.
 ///
-/// The derived section is checked against [`WasmHandlerLimits::default`] at build time, so a
-/// forbidden import, a SIMD instruction, a start section, a bad export, or an over-budget
-/// instantiation fails the build instead of every host that later loads the package. Limits are
-/// host policy, so a host may still run stricter ones.
+/// # Security
 ///
-/// One project assembles several targets, and the processor runs once per assembled package. The
-/// module bytes are produced on every run — a file read, or a `cargo` build that is a fast no-op
-/// when the guest crate did not change — and only the derivation is memoized, keyed by those
-/// bytes. An edited source therefore publishes its new section instead of the previous one, and a
-/// failure is never memoized, so a fixed source builds on the next run.
+/// A manifest that declares `crate` fails the build here, because building a guest crate means
+/// running `cargo build` on that source. [`WasmEventHandlerCargoBuildProcessor`] is the processor
+/// that does it, and the refusal names it. Registering this processor therefore never executes
+/// code from the assembled project.
 ///
-/// # One package per host
-///
-/// Every package of a project carries the same, full handler set, so a host registers the
-/// handlers of ONE package of a project. A host that loads the handlers of a second package of
-/// the same project fails with a duplicate-handler error, because the two packages declare the
-/// same events. The failure is deliberate: a silent second registration would hide which package
-/// answers an event.
+/// The module it reads is untrusted but sandboxed input: it is validated against the default
+/// [`WasmHandlerLimits`] at build time and runs under wasmi at execution time.
 #[derive(Debug, Default)]
 pub struct WasmEventHandlerProcessor {
+    /// The sections this processor derived, and the flow that attaches them.
+    sections: SectionProvider,
+}
+
+impl WasmEventHandlerProcessor {
+    /// Creates a processor with an empty memoization cache.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl PackagePostProcessor for WasmEventHandlerProcessor {
+    fn post_process(
+        &self,
+        package: &mut MastPackage,
+        context: &PostProcessContext<'_>,
+    ) -> Result<(), Report> {
+        self.sections.attach(package, context, GuestCrates::Refused)
+    }
+}
+
+/// Attaches the Wasm handler module a project manifest declares to every package of the project
+/// under assembly (its root target and its required libraries, whatever the target type). Source
+/// dependencies are never post-processed.
+///
+/// The processor reads `[package.metadata.midenc.event-handlers]` and serves both keys: it builds
+/// the guest crate of a `crate` key, or reads the module file of a `module` key, derives the
+/// `event_handlers` section from the module's own manifest records, and attaches the section to
+/// the package. A package that declares no such table passes through unchanged. See the [crate]
+/// documentation for the schema, the toolchain the `crate` key needs, the validation, the
+/// memoization, and the one-package-per-host rule.
+///
+/// # Security
+///
+/// Registering this processor is equivalent to running `cargo build` on the source the project
+/// manifest references, with the permissions of the assembler process: build scripts and
+/// procedural macros run native code. Register it only when the assembled source is trusted — a
+/// local compiler building the developer's own project. A host that assembles source supplied by
+/// other users must register [`WasmEventHandlerProcessor`] instead, which refuses guest-crate
+/// builds.
+#[derive(Debug, Default)]
+pub struct WasmEventHandlerCargoBuildProcessor {
+    /// The sections this processor derived, and the flow that attaches them.
+    sections: SectionProvider,
+}
+
+impl WasmEventHandlerCargoBuildProcessor {
+    /// Creates a processor with an empty memoization cache.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl PackagePostProcessor for WasmEventHandlerCargoBuildProcessor {
+    fn post_process(
+        &self,
+        package: &mut MastPackage,
+        context: &PostProcessContext<'_>,
+    ) -> Result<(), Report> {
+        self.sections.attach(package, context, GuestCrates::Built)
+    }
+}
+
+// SHARED SECTION PROVIDER
+// ================================================================================================
+
+/// What a processor does with the guest crate a `crate` key names: the one difference between the
+/// two processors.
+#[derive(Debug, Clone, Copy)]
+enum GuestCrates {
+    /// The crate is built, which runs `cargo build` on the source it names.
+    Built,
+    /// The crate fails the build, so the processor serves a prebuilt module only.
+    Refused,
+}
+
+/// The post-process flow the two processors share: it produces the module bytes of the handler
+/// source a manifest declares, derives the `event_handlers` section from them, and attaches the
+/// section to the package under assembly.
+#[derive(Debug, Default)]
+struct SectionProvider {
     /// The derived section per handler source, together with the hash of the module bytes it was
     /// derived from.
     ///
@@ -59,10 +135,53 @@ pub struct WasmEventHandlerProcessor {
     derived: Mutex<BTreeMap<HandlerSource, (blake3::Hash, EventHandlerSection)>>,
 }
 
-impl WasmEventHandlerProcessor {
-    /// Creates a processor with an empty memoization cache.
-    pub fn new() -> Self {
-        Self::default()
+impl SectionProvider {
+    /// Attaches to `package` the section the manifest of the package under assembly declares.
+    ///
+    /// `guest_crates` decides what a `crate` key gives. A refusal is reported as soon as the
+    /// source is known, before any build and before any memoization, so a processor that does not
+    /// build guest crates never runs `cargo`.
+    fn attach(
+        &self,
+        package: &mut MastPackage,
+        context: &PostProcessContext<'_>,
+        guest_crates: GuestCrates,
+    ) -> Result<(), Report> {
+        let assembly = context.assembly;
+        let manifest_path = assembly.manifest_path;
+        let Some(source) =
+            config::read(assembly.package.as_ref(), manifest_path, assembly.project_root.as_ref())?
+        else {
+            return Ok(());
+        };
+
+        if matches!(guest_crates, GuestCrates::Refused)
+            && let HandlerSource::GuestCrate(crate_dir) = &source
+        {
+            return Err(config::error(
+                manifest_path,
+                format!(
+                    "key '{CRATE_KEY}' names the guest crate '{}', and building it means running \
+                     `cargo build` on that source, which this processor refuses; register \
+                     `WasmEventHandlerCargoBuildProcessor` to build guest crates, or set \
+                     '{MODULE_KEY}' to a module another build produced",
+                    crate_dir.display(),
+                ),
+            ));
+        }
+
+        let section =
+            self.section(&source).map_err(|message| config::error(manifest_path, message))?;
+        // The attachment refuses a package that already has the section, which keeps a second
+        // producer of the section visible instead of silently replacing the first.
+        package.attach_event_handlers(&section).map_err(|error| {
+            Report::msg(format!(
+                "{}: cannot attach the Wasm handlers of '{}' to package '{}': {error}",
+                config::label(manifest_path),
+                source.path().display(),
+                package.name,
+            ))
+        })
     }
 
     /// Returns the section `source` gives.
@@ -88,35 +207,6 @@ impl WasmEventHandlerProcessor {
         let section = derive(source.path(), wasm).map_err(|error| format!("{error:#}"))?;
         derived.insert(source.clone(), (hash, section.clone()));
         Ok(section)
-    }
-}
-
-impl PackagePostProcessor for WasmEventHandlerProcessor {
-    fn post_process(
-        &self,
-        package: &mut MastPackage,
-        context: &PostProcessContext<'_>,
-    ) -> Result<(), Report> {
-        let assembly = context.assembly;
-        let manifest_path = assembly.manifest_path;
-        let Some(source) =
-            config::read(assembly.package.as_ref(), manifest_path, assembly.project_root.as_ref())?
-        else {
-            return Ok(());
-        };
-
-        let section =
-            self.section(&source).map_err(|message| config::error(manifest_path, message))?;
-        // The attachment refuses a package that already has the section, which keeps a second
-        // producer of the section visible instead of silently replacing the first.
-        package.attach_event_handlers(&section).map_err(|error| {
-            Report::msg(format!(
-                "{}: cannot attach the Wasm handlers of '{}' to package '{}': {error}",
-                config::label(manifest_path),
-                source.path().display(),
-                package.name,
-            ))
-        })
     }
 }
 

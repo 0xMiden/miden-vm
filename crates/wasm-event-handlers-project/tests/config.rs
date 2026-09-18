@@ -3,7 +3,8 @@
 //!
 //! These tests drive the real project assembler, so they pin what a developer sees from a build.
 //! They declare handler modules with the `module` key, so none of them needs a Rust toolchain;
-//! the `crate` key is covered by the end-to-end test.
+//! building the `crate` key is covered by the end-to-end test, and the refusal of that key by the
+//! safe processor is covered here, because it costs no build.
 
 use std::{fs, path::Path, sync::Arc};
 
@@ -17,7 +18,9 @@ use miden_processor::DefaultHost;
 use miden_wasm_event_handlers::{
     WasmHandlerLimits, host_library_from_package, test_append_manifest_section,
 };
-use miden_wasm_event_handlers_project::WasmEventHandlerProcessor;
+use miden_wasm_event_handlers_project::{
+    WasmEventHandlerCargoBuildProcessor, WasmEventHandlerProcessor,
+};
 use tempfile::TempDir;
 
 // FIXTURES
@@ -177,16 +180,26 @@ end
     manifest_path
 }
 
-/// Assembles a target of the project at `manifest_path` with the processor registered.
-fn assemble(
+/// Assembles a target of the project at `manifest_path` with `processor` registered.
+fn assemble_with(
     manifest_path: &Path,
     target: ProjectTargetSelector<'_>,
+    processor: impl PackagePostProcessor + 'static,
 ) -> Result<Arc<MastPackage>, Report> {
     let mut registry = TestRegistry::default();
     let mut project_assembler =
         Assembler::default().for_project_at_path(manifest_path, &mut registry)?;
-    project_assembler.with_package_post_processor(WasmEventHandlerProcessor::new());
+    project_assembler.with_package_post_processor(processor);
     project_assembler.assemble(target, "dev")
+}
+
+/// Assembles a target of the project at `manifest_path` with the safe processor registered, the
+/// one every `module` test drives.
+fn assemble(
+    manifest_path: &Path,
+    target: ProjectTargetSelector<'_>,
+) -> Result<Arc<MastPackage>, Report> {
+    assemble_with(manifest_path, target, WasmEventHandlerProcessor::new())
 }
 
 /// Assembles the library target of the project at `manifest_path` and returns the error message.
@@ -220,6 +233,47 @@ fn a_prebuilt_module_attaches_to_the_package() {
 
     let package = assemble(&manifest_path, ProjectTargetSelector::Library)
         .expect("the prebuilt module attaches");
+    assert_eq!(events(&package), [DOUBLE_EVENT]);
+}
+
+/// The safe processor reads a prebuilt module only. A `crate` key means a `cargo build` of the
+/// source the manifest names, so it fails the build, and the message names the processor that
+/// does build guest crates.
+#[test]
+fn the_safe_processor_refuses_a_guest_crate() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\ncrate = \"handlers\"\n",
+    );
+    // The guest crate directory is never created: the refusal comes before any build, so there is
+    // nothing to build.
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(
+        error.contains("WasmEventHandlerCargoBuildProcessor"),
+        "unexpected error: {error}"
+    );
+    assert!(error.contains("cargo build"), "unexpected error: {error}");
+}
+
+/// The cargo-building processor serves both keys, so a prebuilt module needs no toolchain there
+/// either.
+#[test]
+fn the_cargo_build_processor_accepts_a_prebuilt_module() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
+    );
+    write_handler_module(tempdir.path());
+
+    let package = assemble_with(
+        &manifest_path,
+        ProjectTargetSelector::Library,
+        WasmEventHandlerCargoBuildProcessor::new(),
+    )
+    .expect("the prebuilt module attaches");
     assert_eq!(events(&package), [DOUBLE_EVENT]);
 }
 
