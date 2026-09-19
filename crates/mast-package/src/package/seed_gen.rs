@@ -318,6 +318,26 @@ fn generate_fuzz_seeds() {
         &package_with_debug_info.to_bytes(),
     );
 
+    let root = package_with_debug_info.mast.procedure_roots()[0];
+    let root_digest = package_with_debug_info.mast[root].digest().to_bytes();
+    let mut package_with_spoofed_mast_hash = package_with_debug_info.to_bytes();
+    let root_digest_offset = package_with_spoofed_mast_hash
+        .windows(root_digest.len())
+        .position(|window| window == root_digest)
+        .expect("seed package should contain its MAST root digest");
+    package_with_spoofed_mast_hash[root_digest_offset] ^= 1;
+    let trusted_package = Package::read_from_bytes_trusted(&package_with_spoofed_mast_hash)
+        .expect("trusted seed read should accept the spoofed MAST hash");
+    assert!(trusted_package.debug_info().unwrap().is_some());
+    let error = Package::read_from_bytes(&package_with_spoofed_mast_hash)
+        .expect_err("untrusted seed read should reject the spoofed MAST hash");
+    assert!(error.to_string().contains("hash mismatch for node"));
+    write_seed(
+        "package_semantic_deserialize",
+        "package_with_spoofed_mast_hash.bin",
+        &package_with_spoofed_mast_hash,
+    );
+
     let mut kernel_with_debug_info = package_with_debug_info.clone();
     kernel_with_debug_info.name = PackageId::from("seed_kernel");
     kernel_with_debug_info.kind = TargetType::Kernel;
