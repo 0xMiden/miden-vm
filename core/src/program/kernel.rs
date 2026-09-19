@@ -73,7 +73,7 @@ impl KernelDescriptor {
     /// Creates a kernel from raw hashes without enforcing constructor invariants.
     ///
     /// This is only intended for tests that need intentionally malformed kernels.
-    #[cfg(all(test, feature = "std"))]
+    #[cfg(test)]
     pub(crate) fn from_hashes_unchecked(hashes: Vec<Word>) -> Self {
         Self(hashes)
     }

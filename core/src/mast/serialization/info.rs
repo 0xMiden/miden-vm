@@ -1,6 +1,5 @@
 use super::{NodeDataOffset, basic_blocks::BasicBlockDataDecoder};
 #[cfg(test)]
-#[cfg(all(test, feature = "std"))]
 use crate::mast::node::MastNodeExt;
 use crate::{
     mast::{MastForestContributor, MastNode, MastNodeId, Word, node::MastNodeBuilder},
@@ -314,7 +313,7 @@ impl MastNodeInfo {
     /// Constructs a new [`MastNodeInfo`] from a [`MastNode`], along with an `ops_offset`
     ///
     /// For non-basic block nodes, `ops_offset` is ignored, and should be set to 0.
-    #[cfg(all(test, feature = "std"))]
+    #[cfg(test)]
     pub(super) fn new(mast_node: &MastNode, ops_offset: NodeDataOffset) -> Self {
         Self {
             entry: MastNodeEntry::new(mast_node, ops_offset),

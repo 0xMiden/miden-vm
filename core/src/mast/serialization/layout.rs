@@ -128,7 +128,7 @@ impl ForestLayout {
         self.basic_block_len
     }
 
-    #[cfg(all(test, feature = "std"))]
+    #[cfg(test)]
     pub(super) fn node_entry_offset(&self) -> usize {
         self.node_entry_offset
     }

@@ -60,7 +60,7 @@ impl UntrustedMastForestReadOptions {
         self
     }
 
-    #[cfg(all(test, feature = "std"))]
+    #[cfg(test)]
     pub(crate) fn with_validation_allocation_budget(mut self, budget: usize) -> Self {
         self.validation_allocation_budget = Some(budget);
         self

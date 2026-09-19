@@ -87,7 +87,7 @@
 //!   [`crate::mast::UntrustedMastForest::read_from_bytes_with_options`]: untrusted parsing plus
 //!   later validation before use.
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 use alloc::string::ToString;
 use alloc::{boxed::Box, format, vec::Vec};
 use core::{mem::size_of, panic::Location};
@@ -124,10 +124,10 @@ use resolved::{ResolvedSerializedForest, basic_block_offset_for_node_index};
 mod basic_blocks;
 use basic_blocks::{BasicBlockDataBuilder, basic_block_data_len};
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 mod seed_gen;
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 mod tests;
 
 // TYPE ALIASES
@@ -656,7 +656,7 @@ impl MastForestView for MastForest {
 // TEST HELPERS
 // ================================================================================================
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 impl MastForestWireView<'_> {
     fn debug_info_offset(&self) -> usize {
         self.advice_map.end_offset()
@@ -681,12 +681,12 @@ impl MastForestWireView<'_> {
     }
 }
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 fn read_u8_at(bytes: &[u8], offset: &mut usize) -> Result<u8, DeserializationError> {
     read_slice_at(bytes, offset, 1).map(|slice| slice[0])
 }
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 fn read_array_at<const N: usize>(
     bytes: &[u8],
     offset: &mut usize,
@@ -697,7 +697,7 @@ fn read_array_at<const N: usize>(
     Ok(result)
 }
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 fn read_slice_at<'a>(
     bytes: &'a [u8],
     offset: &mut usize,
@@ -715,7 +715,7 @@ fn read_slice_at<'a>(
 }
 
 // NOTE: Mirrors ByteReader::read_usize (vint64) decoding to preserve wire compatibility.
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 fn read_usize_at(bytes: &[u8], offset: &mut usize) -> Result<usize, DeserializationError> {
     if *offset >= bytes.len() {
         return Err(DeserializationError::UnexpectedEOF);
