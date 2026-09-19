@@ -87,6 +87,8 @@ impl<EF> DeepPoly<EF> {
         let quotient = PointQuotients::new(FieldArray::from(eval_points), &coset_points);
         let batched_evals = info_span!("evaluate at OOD points")
             .in_scope(|| quotient.batch_eval_lifted(&matrices_groups, &coset_points, log_blowup));
+        // DEEP assembly reads only the point quotients, not the domain points themselves.
+        drop(coset_points);
 
         let (deep_poly, _evals) =
             Self::from_evals::<L, M, N, Ch>(params, trace_trees, batched_evals, &quotient, channel);
