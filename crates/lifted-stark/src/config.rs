@@ -42,6 +42,14 @@ pub trait StarkConfig<F: TwoAdicField, EF: ExtensionField<F>>: Clone {
     fn dft(&self) -> &Self::Dft;
     /// Create a fresh challenger for a new proof/verification.
     fn challenger(&self) -> Self::Challenger;
+
+    /// Hash completed blocks of the final trace LDE during its computation.
+    ///
+    /// Disabled by default. This changes prover scheduling only, preserving commitments and proofs.
+    /// LMCS implementations without block support use eager hashing.
+    fn hash_lde_blocks(&self) -> bool {
+        false
+    }
 }
 
 /// Generic [`StarkConfig`] implementation.
@@ -54,6 +62,8 @@ pub struct GenericStarkConfig<F, EF, L, Dft, Ch> {
     pub lmcs: L,
     pub dft: Dft,
     pub challenger: Ch,
+    /// Whether to hash completed blocks during the final trace LDE. Defaults to `false`.
+    pub hash_lde_blocks: bool,
     _phantom: PhantomData<fn() -> (F, EF)>,
 }
 
@@ -64,6 +74,7 @@ impl<F, EF, L, Dft, Ch> GenericStarkConfig<F, EF, L, Dft, Ch> {
             lmcs,
             dft,
             challenger,
+            hash_lde_blocks: false,
             _phantom: PhantomData,
         }
     }
@@ -77,6 +88,7 @@ impl<F, EF, L: Clone, Dft: Clone, Ch: Clone> Clone for GenericStarkConfig<F, EF,
             lmcs: self.lmcs.clone(),
             dft: self.dft.clone(),
             challenger: self.challenger.clone(),
+            hash_lde_blocks: self.hash_lde_blocks,
             _phantom: PhantomData,
         }
     }
@@ -109,5 +121,9 @@ where
 
     fn challenger(&self) -> Ch {
         self.challenger.clone()
+    }
+
+    fn hash_lde_blocks(&self) -> bool {
+        self.hash_lde_blocks
     }
 }

@@ -287,3 +287,93 @@ fn batch_proof_handles_empty_or_oob() {
     assert!(opening.salt.is_empty());
     assert_eq!(batch.witness.path(0).unwrap().len(), 2);
 }
+
+#[test]
+fn block_consumer_preserves_salted_openings() {
+    use p3_field::PackedValue;
+    use p3_matrix::dense::RowMajorMatrixView;
+    use p3_maybe_rayon::prelude::*;
+
+    let lanes = PackedFelt::WIDTH.max(2);
+    let mut rng = SmallRng::seed_from_u64(42);
+    for (shapes, block_rows) in [
+        (vec![(1, 3)], 1),
+        (vec![(1, 3), (4, 9), (4, 7), (16 * lanes, 17)], 1),
+        (vec![(1, 3), (4, 9), (4, 7), (16 * lanes, 17)], 4 * lanes),
+    ] {
+        let mut matrices: Vec<_> = shapes
+            .into_iter()
+            .map(|(height, width)| RowMajorMatrix::rand(&mut rng, height, width))
+            .collect();
+        let lmcs = hiding_lmcs(rng.clone());
+        // Both constructions must use the same salt.
+        let eager_lmcs = lmcs.clone();
+        let expected = eager_lmcs.build_aligned_tree(
+            matrices.iter().map(|matrix| matrix.as_view().bit_reverse_rows()).collect(),
+        );
+        let expected_root = expected.root();
+        let indices = [0, expected.height() / 2, expected.height() - 1];
+        let (expected_proof, _) = roundtrip_open_batch(&eager_lmcs, &expected, &indices).unwrap();
+        drop(expected);
+        let matrix = matrices.pop().unwrap();
+        let actual =
+            lmcs.build_aligned_tree_with_blocks(matrices, matrix.dimensions(), |make_consumer| {
+                let consume = make_consumer.unwrap()(block_rows);
+                matrix
+                    .values
+                    .par_chunks_exact(block_rows * matrix.width())
+                    .enumerate()
+                    .rev()
+                    .for_each(|(index, values)| {
+                        consume(
+                            index * block_rows,
+                            RowMajorMatrixView::new(values, matrix.width()),
+                        );
+                    });
+                matrix
+            });
+        assert_eq!(actual.root(), expected_root);
+        let (actual_proof, _) = roundtrip_open_batch(&lmcs, &actual, &indices).unwrap();
+        assert_eq!(actual_proof.as_slices(), expected_proof.as_slices());
+    }
+}
+
+#[test]
+#[should_panic(expected = "missing block")]
+fn block_consumer_rejects_missing_block() {
+    let matrix = RowMajorMatrix::new_col(vec![Felt::ONE; 2]);
+    gl::test_lmcs().build_aligned_tree_with_blocks(vec![], matrix.dimensions(), |make_consumer| {
+        make_consumer.unwrap()(1)(0, matrix.split_rows(1).0);
+        matrix
+    });
+}
+
+#[test]
+#[should_panic(expected = "duplicate block")]
+fn block_consumer_rejects_duplicate_block() {
+    let matrix = RowMajorMatrix::new_col(vec![Felt::ONE; 2]);
+    gl::test_lmcs().build_aligned_tree_with_blocks(vec![], matrix.dimensions(), |make_consumer| {
+        let consume = make_consumer.unwrap()(1);
+        let block = matrix.split_rows(1).0;
+        consume(0, block);
+        consume(0, block);
+        matrix
+    });
+}
+
+#[test]
+#[should_panic(expected = "missing block")]
+fn block_consumer_rejects_unused_factory() {
+    let matrix = RowMajorMatrix::new_col(vec![Felt::ONE; 2]);
+    gl::test_lmcs().build_aligned_tree_with_blocks(vec![], matrix.dimensions(), |_| matrix);
+}
+
+#[test]
+#[should_panic(expected = "block height must be a power of two")]
+fn block_consumer_rejects_invalid_height() {
+    let matrix = RowMajorMatrix::new_col(vec![Felt::ONE; 4]);
+    gl::test_lmcs().build_aligned_tree_with_blocks(vec![], matrix.dimensions(), |make_consumer| {
+        let _consume = make_consumer.unwrap()(3);
+        matrix
+    });
+}
