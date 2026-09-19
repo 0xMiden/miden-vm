@@ -3,9 +3,12 @@
 use miden_serde_utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
-
 #[cfg(test)]
-use crate::rand::Randomizable;
+use rand::{
+    Rng, RngExt,
+    distr::{Distribution, StandardUniform},
+};
+
 use crate::{
     Word,
     merkle::smt::{LeafIndex, SMT_DEPTH},
@@ -73,12 +76,9 @@ impl Deserializable for LineageId {
 }
 
 #[cfg(test)]
-impl Randomizable for LineageId {
-    const VALUE_SIZE: usize = size_of::<Self>();
-
-    fn from_random_bytes(source: &[u8]) -> Option<Self> {
-        let bytes = Randomizable::from_random_bytes(source)?;
-        Some(Self::new(bytes))
+impl Distribution<LineageId> for StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> LineageId {
+        LineageId::new(rng.random())
     }
 }
 
@@ -118,17 +118,9 @@ impl core::fmt::Display for TreeId {
 }
 
 #[cfg(test)]
-impl Randomizable for TreeId {
-    const VALUE_SIZE: usize = size_of::<Self>();
-
-    fn from_random_bytes(source: &[u8]) -> Option<Self> {
-        const LINEAGE_SIZE: usize = size_of::<LineageId>();
-        const VERSION_SIZE: usize = size_of::<VersionId>();
-        let domain = Randomizable::from_random_bytes(source.get(..LINEAGE_SIZE)?)?;
-        let version = Randomizable::from_random_bytes(
-            source.get(LINEAGE_SIZE..LINEAGE_SIZE + VERSION_SIZE)?,
-        )?;
-        Some(Self::new(domain, version))
+impl Distribution<TreeId> for StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> TreeId {
+        TreeId::new(rng.random(), rng.random())
     }
 }
 

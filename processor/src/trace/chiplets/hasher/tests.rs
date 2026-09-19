@@ -21,7 +21,6 @@ use miden_core::{
     field::{PrimeCharacteristicRing, PrimeField64},
     mast::OpBatch,
 };
-use miden_utils_testing::rand::rand_array;
 
 use super::{
     ChipletTraceFragment, Digest, Felt, Hasher, HasherState, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW,
@@ -36,7 +35,7 @@ use super::{
 fn hasher_permute() {
     // --- test one permutation (HPERM) ---
     let mut hasher = Hasher::default();
-    let init_state: HasherState = rand_array();
+    let init_state: HasherState = rand::random();
 
     let (addr, final_state) = hasher.permute(init_state);
     assert_eq!(ONE, addr);
@@ -60,8 +59,8 @@ fn hasher_permute() {
 #[test]
 fn hasher_permute_two() {
     let mut hasher = Hasher::default();
-    let init_state1: HasherState = rand_array();
-    let init_state2: HasherState = rand_array();
+    let init_state1: HasherState = rand::random();
+    let init_state2: HasherState = rand::random();
 
     let (addr1, final_state1) = hasher.permute(init_state1);
     let (addr2, final_state2) = hasher.permute(init_state2);
@@ -340,7 +339,7 @@ fn hasher_update_merkle_root() {
 fn poseidon2_trace_structure() {
     // One request produces one multiplicity-1 cycle plus one zero-multiplicity padding cycle.
     let mut hasher = Hasher::default();
-    let init_state: HasherState = rand_array();
+    let init_state: HasherState = rand::random();
     let (addr, result) = hasher.permute(init_state);
 
     // Verify returned address and permuted state
@@ -396,7 +395,7 @@ fn poseidon2_trace_structure() {
 fn poseidon2_trace_deduplication() {
     // Two requests with the same input share one multiplicity-2 cycle.
     let mut hasher = Hasher::default();
-    let init_state: HasherState = rand_array();
+    let init_state: HasherState = rand::random();
     let (addr1, result1) = hasher.permute(init_state);
     let (addr2, result2) = hasher.permute(init_state); // same state
 
@@ -417,8 +416,8 @@ fn poseidon2_trace_deduplication() {
 
 #[test]
 fn hash_memoization_control_blocks() {
-    let h1: Digest = rand_array::<Felt, 4>().into();
-    let h2: Digest = rand_array::<Felt, 4>().into();
+    let h1: Digest = rand::random::<[Felt; 4]>().into();
+    let h2: Digest = rand::random::<[Felt; 4]>().into();
     let domain = Felt::from_u8(7); // arbitrary domain
 
     // Compute the expected hash
