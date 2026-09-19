@@ -247,10 +247,9 @@ impl Package {
         // Read custom sections
         let sections = Vec::<Section>::read_from(source)?;
 
-        let mut package = Self {
+        let package = Self {
             name,
             version,
-            mast_forest_commitment: Default::default(),
             description,
             kind,
             mast,
@@ -272,7 +271,6 @@ impl Package {
                 .compute_interface_commitment()
                 .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
         }
-        package.recompute_mast_commitment();
 
         Ok(package)
     }

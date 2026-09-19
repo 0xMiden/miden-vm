@@ -80,8 +80,6 @@ pub struct Package {
     pub name: PackageId,
     /// An optional semantic version for the package
     pub version: Version,
-    /// The commitment to the underlying MAST forest.
-    mast_forest_commitment: Word,
     /// An optional description of the package
     pub description: Option<String>,
     /// The project target type which produced this package
@@ -146,10 +144,9 @@ impl Package {
             }
         }
 
-        let mut package = Self {
+        let package = Self {
             name,
             version,
-            mast_forest_commitment: Default::default(),
             description: None,
             kind,
             mast,
@@ -159,7 +156,6 @@ impl Package {
         };
 
         package.compute_interface_commitment()?;
-        package.recompute_mast_commitment();
 
         Ok(package)
     }
@@ -184,10 +180,6 @@ impl Package {
         Ok(self.mast.compute_nodes_commitment(node_ids.iter()))
     }
 
-    fn recompute_mast_commitment(&mut self) {
-        self.mast_forest_commitment = self.mast.commitment();
-    }
-
     /// Produces a new library with the existing [`MastForest`] and where all key/values in the
     /// provided advice map are added to the internal advice map.
     pub fn with_advice_map(mut self, advice_map: AdviceMap) -> Self {
@@ -198,7 +190,6 @@ impl Package {
     /// Extends the advice map of this library
     pub fn extend_advice_map(&mut self, advice_map: AdviceMap) {
         self.mast = Arc::new(self.mast.as_ref().clone().with_advice_map(advice_map));
-        self.recompute_mast_commitment();
     }
 
     /// Removes all package-owned debug information from this package.
@@ -245,7 +236,7 @@ impl Package {
     /// Returns the commitment to the package's MAST forest.
     #[inline]
     pub fn mast_forest_commitment(&self) -> Word {
-        self.mast_forest_commitment
+        self.mast.commitment()
     }
 
     /// Returns the commitment to the package's code.
