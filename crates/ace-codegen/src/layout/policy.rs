@@ -27,7 +27,7 @@ struct LayoutPolicy {
     end_align: Option<Alignment>,
 }
 
-/// Whether the layout includes the slots needed to combine multiple AIR instances.
+/// Selects single-AIR inputs or per-AIR selectors and fold coefficients.
 #[derive(Clone, Copy)]
 enum AirComposition {
     Single,
@@ -44,18 +44,21 @@ impl AirComposition {
     fn extra_stark_slots(self) -> usize {
         match self {
             Self::Single => 0,
-            Self::Multi { air_count } => 1 + air_count.get() * SELECTORS_PER_AIR,
+            Self::Multi { air_count } => air_count.get() * (SELECTORS_PER_AIR + 1),
         }
     }
 
     fn multi_air_indices(self, stark_start: usize, base_slots: usize) -> Option<MultiAirIndices> {
         match self {
             Self::Single => None,
-            Self::Multi { air_count } => Some(MultiAirIndices {
-                air_count,
-                fold_beta: stark_start + base_slots,
-                selector_start: stark_start + base_slots + 1,
-            }),
+            Self::Multi { air_count } => {
+                let selector_start = stark_start + base_slots;
+                Some(MultiAirIndices {
+                    air_count,
+                    selector_start,
+                    fold_coeff_start: selector_start + air_count.get() * SELECTORS_PER_AIR,
+                })
+            },
         }
     }
 }
@@ -85,7 +88,7 @@ impl LayoutPolicy {
             quotient: Alignment::DoubleWord,
             aux_bus_boundary: Alignment::Word,
             stark_vars: Alignment::Word,
-            end_align: Some(Alignment::Word),
+            end_align: Some(Alignment::DoubleWord),
         }
     }
 }
@@ -238,10 +241,8 @@ mod tests {
     fn multi_air_layout_indexes_air_slots() {
         let layout = InputLayout::new_masm_multi_air(test_counts(), 3);
 
-        let beta = layout.index(InputKey::MultiAirFoldBeta).unwrap();
-
         let first0 = layout.index(InputKey::IsFirstAir(0)).unwrap();
-        assert_eq!(first0, beta + 1);
+        assert_eq!(first0, layout.regions.stark_vars.offset + 10);
         assert_eq!(layout.index(InputKey::IsLastAir(0)), Some(first0 + 1));
         assert_eq!(layout.index(InputKey::IsTransitionAir(0)), Some(first0 + 2));
         assert_eq!(layout.index(InputKey::IsFirstAir(1)), Some(first0 + 3));
@@ -253,5 +254,42 @@ mod tests {
     #[should_panic(expected = "multi-AIR layout requires at least one AIR")]
     fn multi_air_layout_rejects_zero_airs() {
         let _ = InputLayout::new_masm_multi_air(test_counts(), 0);
+    }
+
+    #[test]
+    fn canonical_multi_air_layout_adds_fold_coefficient_slots_after_selectors() {
+        let layout = InputLayout::new_masm_multi_air(test_counts(), 3);
+
+        // One `adv_pipe` block carries four extension-field slots (eight base-field felts).
+        assert!(layout.total_inputs.is_multiple_of(4));
+
+        let first_selector = layout.index(InputKey::IsFirstAir(0)).unwrap();
+        assert_eq!(first_selector, layout.regions.stark_vars.offset + 10);
+
+        // Selectors occupy 3 AIRs * 3 selectors = 9 EF slots after the prologue.
+        let last_selector = layout.index(InputKey::IsTransitionAir(2)).unwrap();
+        assert_eq!(last_selector, first_selector + 8);
+
+        // Each fold coefficient occupies one EF slot immediately after the selectors.
+        let coeff0 = layout.index(InputKey::MultiAirFoldCoeff(0)).unwrap();
+        assert_eq!(coeff0, last_selector + 1);
+        assert_eq!(layout.index(InputKey::MultiAirFoldCoeff(1)), Some(coeff0 + 1));
+        assert_eq!(layout.index(InputKey::MultiAirFoldCoeff(2)), Some(coeff0 + 2));
+        assert_eq!(layout.index(InputKey::MultiAirFoldCoeff(3)), None);
+
+        // MASM uses felt offsets: 20 for the prologue, then 6 per AIR for selectors.
+        let stark_base = layout.regions.stark_vars.offset;
+        assert_eq!((coeff0 - stark_base) * crate::EXT_DEGREE, 20 + 6 * 3);
+
+        layout.validate();
+    }
+
+    #[test]
+    fn canonical_multi_air_native_layout_has_fold_coefficient_slots() {
+        let layout = InputLayout::new_multi_air(test_counts(), 2);
+        assert!(layout.index(InputKey::MultiAirFoldCoeff(0)).is_some());
+        assert!(layout.index(InputKey::MultiAirFoldCoeff(1)).is_some());
+        assert_eq!(layout.index(InputKey::MultiAirFoldCoeff(2)), None);
+        layout.validate();
     }
 }

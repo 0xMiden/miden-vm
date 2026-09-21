@@ -24,10 +24,10 @@ use miden_crypto::{
 /// Precompile prover STARK configuration with pre-filled common type parameters.
 pub type PrecompileStarkConfig<L, Ch> = miden_air::config::MidenStarkConfig<L, Ch>;
 
-/// Relation digest binding the PVM ACE registry root into the Fiat-Shamir transcript.
+/// Relation digest binding the canonical PVM ACE circuit into the Fiat-Shamir transcript.
 ///
-/// The generated raw limbs live with the registry data; this public field-valued view is the
-/// value passed to every production PVM configuration.
+/// The generated raw limbs live with the canonical ACE constants; this public field-valued view
+/// is the value passed to every production PVM configuration.
 pub const PRECOMPILE_RELATION_DIGEST: RelationDigest = {
     let [d0, d1, d2, d3] = crate::PVM_RELATION_DIGEST;
     [

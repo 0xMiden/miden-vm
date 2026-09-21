@@ -1,12 +1,8 @@
 use miden::core::stark::types
 use miden::core::stark::constants
 
-# Base-field offsets from the relation's `stark_vars_ptr` into the stark-vars block. The
-# fixed prologue occupies EF slots 0-9 (base offsets 0-19); slot 10 (offset 20) is the
-# multi-air fold challenge; AIR `k`'s selector triple starts at offset 22 + 6k, in the
-# relation's canonical instance order.
-const MULTI_AIR_FOLD_BETA_OFFSET = 20
-const FIRST_SELECTOR_OFFSET = 22
+# AIR k's selector triple follows the ten-slot prologue in canonical instance order.
+const FIRST_SELECTOR_OFFSET = 20
 const SELECTOR_STRIDE = 6
 
 #! Sets up the multi-AIR ACE input layout shared by relation verifiers.
@@ -19,9 +15,12 @@ const SELECTOR_STRIDE = 6
 #!   Word 3 (slots 6-7): reserved, weight0
 #!   Word 4 (slots 8-9): f, s0
 #!
-#! The multi-AIR layout then appends:
-#!   slot 10: multi-air fold beta (sampled by the generic random coin)
-#!   slots 11 + 3k .. 13 + 3k: AIR k's lifted selectors, canonical instance order
+#! The global selector slots in words 1-2 are unused by multi-AIR circuits. The per-AIR
+#! selectors start at slot 10: AIR k occupies slots 10 + 3k through 12 + 3k.
+#!
+#! The per-AIR fold coefficients that follow the selectors are staged by each relation's generated
+#! evaluator (`stage_air_fold_coefficients` in `sys/<relation>/constraints_eval.masm`) from the
+#! proof-order maps, after this procedure has run.
 #!
 #! `heights_ptr` addresses the relation's `num_airs` consecutive per-AIR log-height
 #! cells; AIR k's selectors are derived from the height at `heights_ptr + k`.
@@ -80,16 +79,6 @@ pub proc set_up_auxiliary_inputs_ace(
     padw exec.constants::composition_coef_ptr mem_loadw_le
     # => [alpha0, alpha1, beta0, beta1, max_cycle_len_log, ...]
 
-    # multi-air fold beta.
-    dup.3 dup.3
-    # => [beta0, beta1, alpha0, alpha1, beta0, beta1, max_cycle_len_log, ...]
-    push.0.0
-    movup.3 movup.3
-    # => [beta0, beta1, 0, 0, alpha0, alpha1, beta0, beta1, max_cycle_len_log, ...]
-    loc_load.0 add.MULTI_AIR_FOLD_BETA_OFFSET
-    mem_storew_le dropw
-    # => [alpha0, alpha1, beta0, beta1, max_cycle_len_log, ...]
-
     # alpha, z^N.
     movup.3 movup.3
     push.0.0 exec.constants::z_ptr mem_loadw_le
@@ -120,57 +109,16 @@ pub proc set_up_auxiliary_inputs_ace(
     movup.7 movup.7
     # => [alpha0, alpha1, z_n_0, z_n_1, z_k_0, z_k_1, z_0, z_1, ...]
 
-    loc_load.0
-    mem_storew_le
+    loc_load.0 mem_storew_le dropw
+    # => [z_k_0, z_k_1, z_0, z_1, num_airs, heights_ptr, ...]
+
+    # Store z_k with zero in the unused global-selector slot beside it.
+    push.0.0 movup.3 movup.3
+    loc_load.0 add.4 mem_storew_le dropw
     drop drop
-    # => [z_n_0, z_n_1, z_k_0, z_k_1, z_0, z_1, ...]
+    # => [num_airs, heights_ptr, ...]
 
-    # is_first, is_last, is_transition.
-    sub.1
-    # => [van_0, van_1, z_k_0, z_k_1, z_0, z_1, ...]
-
-    dup.5 dup.5
-    # => [z_0, z_1, van_0, van_1, z_k_0, z_k_1, z_0, z_1, ...]
-    sub.1 ext2inv
-    # => [inv_z1_0, inv_z1_1, van_0, van_1, z_k_0, z_k_1, z_0, z_1, ...]
-    dup.3 dup.3
-    # => [van_0, van_1, inv_z1_0, inv_z1_1, van_0, van_1, z_k_0, z_k_1, z_0, z_1, ...]
-    ext2mul
-    # => [is_first_0, is_first_1, van_0, van_1, z_k_0, z_k_1, z_0, z_1, ...]
-
-    movup.5 movup.5
-    # => [z_k_0, z_k_1, is_first_0, is_first_1, van_0, van_1, z_0, z_1, ...]
-    loc_load.0 add.4
-    mem_storew_le
-    dropw
-    # => [van_0, van_1, z_0, z_1, ...]
-
-    exec.constants::get_trace_domain_generator
-    inv
-    # => [g_inv, van_0, van_1, z_0, z_1, ...]
-    movup.3 swap sub
-    # => [is_trans_0, van_0, van_1, z_1, ...]
-    movup.3
-    swap
-    # => [is_trans_0, is_trans_1, van_0, van_1, ...]
-
-    dup.1 dup.1
-    # => [is_trans_0, is_trans_1, is_trans_0, is_trans_1, van_0, van_1, ...]
-    ext2inv
-    # => [inv_t_0, inv_t_1, is_trans_0, is_trans_1, van_0, van_1, ...]
-    movup.5 movup.5
-    # => [van_0, van_1, inv_t_0, inv_t_1, is_trans_0, is_trans_1, ...]
-    ext2mul
-    # => [is_last_0, is_last_1, is_trans_0, is_trans_1, ...]
-
-    loc_load.0 add.8
-    mem_storew_le
-    dropw
-    # => [...]
-
-    # Per-AIR lifted selectors: AIR k's triple at offset FIRST_SELECTOR_OFFSET + 6k,
-    # from the log height at heights_ptr + k.
-    # => [num_airs, heights_ptr]
+    # AIR k's selectors use its canonical log-height cell at heights_ptr + k.
     push.0
     # => [k = 0, num_airs, heights_ptr]
     dup.1 dup.1 u32gt

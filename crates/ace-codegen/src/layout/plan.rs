@@ -97,10 +97,10 @@ pub(crate) struct StarkVarIndices {
 pub(crate) struct MultiAirIndices {
     /// Number of AIR instances represented in the layout.
     pub air_count: NonZeroUsize,
-    /// Multi-AIR fold beta slot.
-    pub fold_beta: usize,
     /// First per-AIR selector slot.
     pub selector_start: usize,
+    /// First per-AIR fold-coefficient slot.
+    pub fold_coeff_start: usize,
 }
 
 /// ACE input layout for circuit evaluation.
@@ -197,9 +197,11 @@ impl InputLayout {
         check("f", self.stark.f);
         check("s0", self.stark.s0);
         if let Some(multi_air) = self.stark.multi_air {
-            check("multi_air_fold_beta", multi_air.fold_beta);
             for i in 0..(multi_air.air_count.get() * SELECTORS_PER_AIR) {
                 check("air_selector", multi_air.selector_start + i);
+            }
+            for i in 0..multi_air.air_count.get() {
+                check("fold_coeff", multi_air.fold_coeff_start + i);
             }
         }
 
@@ -217,8 +219,10 @@ impl InputLayout {
 }
 
 impl StarkVarIndices {
-    pub(crate) fn multi_air_fold_beta_index(&self) -> Option<usize> {
-        self.multi_air.map(|multi_air| multi_air.fold_beta)
+    pub(crate) fn multi_air_fold_coeff_index(&self, air_index: usize) -> Option<usize> {
+        let multi_air = self.multi_air?;
+        let start = multi_air.fold_coeff_start;
+        (air_index < multi_air.air_count.get()).then_some(start + air_index)
     }
 
     pub(crate) fn air_selector_index(

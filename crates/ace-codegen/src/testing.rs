@@ -7,7 +7,7 @@
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::{
-    field::{ExtensionField, Field, TwoAdicField},
+    field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField},
     stark::{
         air::symbolic::{
             BaseEntry, BaseLeaf, ConstraintLayout, ExtEntry, ExtLeaf, SymbolicExpression,
@@ -17,7 +17,97 @@ use miden_crypto::{
     },
 };
 
-use crate::{AceDag, AceError, InputKey, InputLayout};
+use crate::{AceDag, AceError, InputCounts, InputKey, InputLayout};
+
+/// Evaluates a multi-AIR relation from symbolic constraints, independently of DAG lowering.
+///
+/// Inputs use canonical AIR offsets with each trace region padded to `trace_alignment` base
+/// felts. Selectors are per-AIR; periodic columns use the largest period across the AIR set.
+/// `proof_order` must be a permutation of the AIR indices. The shared quotient binding is
+/// subtracted once, after the beta-Horner fold.
+pub fn eval_multi_air_constraints<A>(
+    airs: &[A],
+    layout: &InputLayout,
+    inputs: &[QuadFelt],
+    proof_order: &[usize],
+    beta: QuadFelt,
+    trace_alignment: usize,
+) -> QuadFelt
+where
+    A: miden_crypto::stark::air::LiftedAir<Felt, QuadFelt>,
+{
+    use miden_crypto::stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
+
+    let periods: Vec<_> = airs.iter().map(|air| air.periodic_columns()).collect();
+    let shared_period =
+        periods.iter().flat_map(|cols| cols.iter().map(Vec::len)).max().unwrap_or(1);
+    let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
+    let (mut preprocessed, mut main, mut aux, mut boundary) = (0, 0, 0, 0);
+    let mut roots = Vec::with_capacity(airs.len());
+    for (i, air) in airs.iter().enumerate() {
+        let counts = InputCounts {
+            preprocessed_width: air.preprocessed_width(),
+            width: air.width(),
+            aux_width: air.aux_width(),
+            num_aux_boundary: air.num_aux_values(),
+            num_public: air.num_public_values(),
+            num_randomness: layout.counts.num_randomness,
+            num_quotient_chunks: layout.counts.num_quotient_chunks,
+        };
+        let local = InputLayout::new(counts);
+        let mut values = vec![QuadFelt::ZERO; local.total_inputs];
+        for (dst, src, offset) in [
+            (local.regions.public_values, layout.regions.public_values, 0),
+            (local.regions.randomness, layout.regions.randomness, 0),
+            (local.regions.preprocessed_curr, layout.regions.preprocessed_curr, preprocessed),
+            (local.regions.preprocessed_next, layout.regions.preprocessed_next, preprocessed),
+            (local.regions.main_curr, layout.regions.main_curr, main),
+            (local.regions.main_next, layout.regions.main_next, main),
+            (local.regions.aux_curr, layout.regions.aux_curr, aux),
+            (local.regions.aux_next, layout.regions.aux_next, aux),
+            (local.regions.aux_bus_boundary, layout.regions.aux_bus_boundary, boundary),
+        ] {
+            values[dst.offset..dst.offset + dst.width]
+                .copy_from_slice(&inputs[src.offset + offset..src.offset + offset + dst.width]);
+        }
+        for (dst, src) in [
+            (InputKey::Alpha, InputKey::Alpha),
+            (InputKey::IsFirst, InputKey::IsFirstAir(i)),
+            (InputKey::IsLast, InputKey::IsLastAir(i)),
+            (InputKey::IsTransition, InputKey::IsTransitionAir(i)),
+        ] {
+            values[local.index(dst).unwrap()] = inputs[layout.index(src).unwrap()];
+        }
+        let mut builder = SymbolicAirBuilder::<Felt, QuadFelt>::new(AirLayout {
+            preprocessed_width: counts.preprocessed_width,
+            main_width: counts.width,
+            num_public_values: counts.num_public,
+            permutation_width: counts.aux_width,
+            num_permutation_challenges: counts.num_randomness,
+            num_permutation_values: counts.num_aux_boundary,
+            num_periodic_columns: periods[i].len(),
+        });
+        air.eval(&mut builder);
+        let period = periods[i].iter().map(Vec::len).max().unwrap_or(1);
+        let periodic_values =
+            eval_periodic_values(&periods[i], z_k.exp_u64((shared_period / period) as u64));
+        roots.push(eval_folded_constraints(
+            &builder.base_constraints(),
+            &builder.extension_constraints(),
+            &builder.constraint_layout(),
+            &values,
+            &local,
+            &periodic_values,
+        ));
+        preprocessed += counts.preprocessed_width.next_multiple_of(trace_alignment);
+        main += counts.width.next_multiple_of(trace_alignment);
+        aux += (counts.aux_width * crate::EXT_DEGREE).next_multiple_of(trace_alignment);
+        boundary += counts.num_aux_boundary;
+    }
+    let folded = proof_order.iter().fold(QuadFelt::ZERO, |acc, &i| acc * beta + roots[i]);
+    let vanishing = inputs[layout.index(InputKey::ZPowN).unwrap()] - QuadFelt::ONE;
+    folded - eval_quotient::<Felt, QuadFelt>(layout, inputs) * vanishing
+}
 
 /// Deterministic input filler for layout-sized buffers.
 ///

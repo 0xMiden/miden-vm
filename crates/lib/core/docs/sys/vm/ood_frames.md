@@ -1,7 +1,7 @@
-VM out-of-domain evaluation helpers.<br />
-
 
 ## miden::core::sys::vm::ood_frames
 | Procedure | Description |
 | ----------- | ------------- |
-| process_row_ood_evaluations | Processes the out-of-domain (OOD) evaluations of all committed polynomials.<br /><br />Loads one OOD row from advice, absorbs it into the Eidos transcript, and updates the<br />Horner accumulator used by the DEEP fixed terms.<br /><br />Inputs:  [scratch0, scratch1, cv, ptr, alpha_ptr, acc0, acc1]<br />Outputs: [scratch0, scratch1, cv', ptr, alpha_ptr, acc0', acc1']<br /> |
+| stage_proof_order_maps | Derives the height-sorted proof order once and materializes its two inverse maps.<br /><br />Packs each AIR's key as `16 * log_height + instance_index`, sorts the keys with a fixed<br />5-comparator network (data-oblivious: one `cswap` per comparator), and unpacks them into<br />`id_by_pos` (instance index at each proof position) and `pos_by_id` (proof position of each<br />instance). Equal heights order by instance index, exactly like the native `TraceOrder`.<br /><br />Must run after every height has been bounded; keys are compared as u32 values.<br /><br />Inputs:  []<br />Outputs: []<br />Invocation: exec<br /> |
+| stage_ood_scatter_table | Stages canonical destinations and pipe-procedure addresses by proof position.<br /><br />Must run after `stage_proof_order_maps` and before ingesting the first OOD row.<br /><br />Inputs:  []<br />Outputs: []<br />Invocation: exec<br /> |
+| process_row_ood_evaluations | Loads one OOD row from advice and scatters it to canonical AIR addresses.<br /><br />The wire groups are preprocessed, main, auxiliary coordinates, and quotient. Each per-AIR<br />group arrives in proof order. Eidos absorption and DEEP Horner accumulation follow wire order;<br />the staged scatter table determines the memory destinations. The returned rate is the last<br />absorbed block. Call `stage_ood_scatter_table` before ingesting the first row.<br /><br />Inputs:  [rate(8), cv(4), ptr, alpha_ptr, acc0, acc1]<br />Outputs: [rate'(8), cv'(4), ptr + 560, alpha_ptr, acc0', acc1']<br />Invocation: exec<br /> |
