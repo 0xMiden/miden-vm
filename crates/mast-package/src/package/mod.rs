@@ -80,8 +80,6 @@ pub struct Package {
     pub name: PackageId,
     /// An optional semantic version for the package
     pub version: Version,
-    /// The commitment to the underlying MAST forest.
-    mast_forest_commitment: Word,
     /// An optional description of the package
     pub description: Option<String>,
     /// The project target type which produced this package
@@ -100,6 +98,101 @@ pub struct Package {
     /// sections before marking them trusted. Trusted local/cache readers and in-process package
     /// construction may defer debug validation until [`Package::debug_info`] is called.
     debug_sections_trusted: bool,
+}
+
+struct PackageCommitment<'a> {
+    package: &'a Package,
+}
+
+impl<'a> PackageCommitment<'a> {
+    fn new(package: &'a Package) -> Self {
+        Self { package }
+    }
+
+    fn interface_commitment(&self) -> Result<Word, ManifestValidationError> {
+        let mut node_ids = Vec::with_capacity(self.package.manifest.num_exports());
+        for export in self.package.manifest.exports() {
+            if let PackageExport::Procedure(export) = export {
+                if let Some(node_id) = export.node {
+                    node_ids.push(node_id);
+                } else {
+                    node_ids.push(
+                        self.package.mast.find_procedure_root(export.digest).ok_or_else(|| {
+                            ManifestValidationError::MissingProcedureMast {
+                                path: export.path.clone(),
+                                digest: export.digest,
+                            }
+                        })?,
+                    );
+                }
+            }
+        }
+
+        Ok(self.package.mast.compute_nodes_commitment(node_ids.iter()))
+    }
+
+    fn mast_forest_commitment(&self) -> Word {
+        self.package.mast.commitment()
+    }
+
+    fn code_commitment(&self) -> Word {
+        let interface_commitment =
+            self.interface_commitment().expect("package manifest exports were validated");
+        Self::merge_commitments(
+            b"miden.package.code.v1",
+            interface_commitment,
+            self.mast_forest_commitment(),
+        )
+    }
+
+    fn dependency_commitment(&self) -> Word {
+        let mut bytes = Vec::new();
+        bytes.write_bytes(b"miden.package.dependency.v1");
+        self.code_commitment().write_into(&mut bytes);
+        self.package.name.write_into(&mut bytes);
+        self.package.version.to_string().write_into(&mut bytes);
+        bytes.write_u8(self.package.kind.into());
+        self.package.manifest.write_into(&mut bytes);
+        self.write_dependency_commitment_sections(&mut bytes);
+        Poseidon2::hash(&bytes)
+    }
+
+    fn write_dependency_commitment_sections<W: ByteWriter>(&self, target: &mut W) {
+        let sections = self
+            .package
+            .sections
+            .iter()
+            .filter(|section| section.id == SectionId::ACCOUNT_COMPONENT_METADATA)
+            .collect::<Vec<_>>();
+        target.write_usize(sections.len());
+        for section in sections {
+            section.write_into(target);
+        }
+    }
+
+    fn artifacts_commitment(&self) -> Word {
+        let mut bytes = Vec::new();
+        bytes.write_bytes(b"miden.package.artifacts.v1");
+        self.package.write_header_into(&mut bytes);
+        self.package.write_trailer_into(&mut bytes);
+        Poseidon2::hash(&bytes)
+    }
+
+    fn commitment(&self) -> Word {
+        Self::merge_commitments(
+            b"miden.package.v1",
+            self.code_commitment(),
+            self.artifacts_commitment(),
+        )
+    }
+
+    fn merge_commitments(domain: &[u8], left: Word, right: Word) -> Word {
+        let mut bytes = Vec::new();
+        bytes.write_bytes(domain);
+        left.write_into(&mut bytes);
+        right.write_into(&mut bytes);
+        Poseidon2::hash(&bytes)
+    }
 }
 
 /// Construction
@@ -146,10 +239,9 @@ impl Package {
             }
         }
 
-        let mut package = Self {
+        let package = Self {
             name,
             version,
-            mast_forest_commitment: Default::default(),
             description: None,
             kind,
             mast,
@@ -158,34 +250,9 @@ impl Package {
             debug_sections_trusted: true,
         };
 
-        package.compute_interface_commitment()?;
-        package.recompute_mast_commitment();
+        package.interface_commitment()?;
 
         Ok(package)
-    }
-
-    fn compute_interface_commitment(&self) -> Result<Word, ManifestValidationError> {
-        let mut node_ids = Vec::with_capacity(self.manifest.num_exports());
-        for export in self.manifest.exports() {
-            if let PackageExport::Procedure(export) = export {
-                if let Some(node_id) = export.node {
-                    node_ids.push(node_id);
-                } else {
-                    node_ids.push(self.mast.find_procedure_root(export.digest).ok_or_else(
-                        || ManifestValidationError::MissingProcedureMast {
-                            path: export.path.clone(),
-                            digest: export.digest,
-                        },
-                    )?);
-                }
-            }
-        }
-
-        Ok(self.mast.compute_nodes_commitment(node_ids.iter()))
-    }
-
-    fn recompute_mast_commitment(&mut self) {
-        self.mast_forest_commitment = self.mast.commitment();
     }
 
     /// Produces a new library with the existing [`MastForest`] and where all key/values in the
@@ -198,7 +265,6 @@ impl Package {
     /// Extends the advice map of this library
     pub fn extend_advice_map(&mut self, advice_map: AdviceMap) {
         self.mast = Arc::new(self.mast.as_ref().clone().with_advice_map(advice_map));
-        self.recompute_mast_commitment();
     }
 
     /// Removes all package-owned debug information from this package.
@@ -239,26 +305,20 @@ impl Package {
 
     /// Returns the commitment to the exported procedure roots used by the linker.
     pub fn interface_commitment(&self) -> Result<Word, ManifestValidationError> {
-        self.compute_interface_commitment()
+        PackageCommitment::new(self).interface_commitment()
     }
 
     /// Returns the commitment to the package's MAST forest.
     #[inline]
     pub fn mast_forest_commitment(&self) -> Word {
-        self.mast_forest_commitment
+        PackageCommitment::new(self).mast_forest_commitment()
     }
 
     /// Returns the commitment to the package's code.
     ///
     /// This binds the public interface to the complete MAST forest which implements it.
     pub fn code_commitment(&self) -> Word {
-        let interface_commitment =
-            self.interface_commitment().expect("package manifest exports were validated");
-        Self::merge_commitments(
-            b"miden.package.code.v1",
-            interface_commitment,
-            self.mast_forest_commitment(),
-        )
+        PackageCommitment::new(self).code_commitment()
     }
 
     /// Returns the commitment used to identify this package during dependency resolution.
@@ -266,53 +326,17 @@ impl Package {
     /// This binds the package code, identity, manifest, and sections which affect package use.
     /// Optional debug data, descriptions, and opaque custom sections are excluded.
     pub fn dependency_commitment(&self) -> Word {
-        let mut bytes = Vec::new();
-        bytes.write_bytes(b"miden.package.dependency.v1");
-        self.code_commitment().write_into(&mut bytes);
-        self.name.write_into(&mut bytes);
-        self.version.to_string().write_into(&mut bytes);
-        bytes.write_u8(self.kind.into());
-        self.manifest.write_into(&mut bytes);
-        self.write_dependency_commitment_sections(&mut bytes);
-        Poseidon2::hash(&bytes)
-    }
-
-    fn write_dependency_commitment_sections<W: ByteWriter>(&self, target: &mut W) {
-        let sections = self
-            .sections
-            .iter()
-            .filter(|section| section.id == SectionId::ACCOUNT_COMPONENT_METADATA)
-            .collect::<Vec<_>>();
-        target.write_usize(sections.len());
-        for section in sections {
-            section.write_into(target);
-        }
+        PackageCommitment::new(self).dependency_commitment()
     }
 
     /// Returns the commitment to all serialized package data outside the MAST forest.
     pub fn artifacts_commitment(&self) -> Word {
-        let mut bytes = Vec::new();
-        bytes.write_bytes(b"miden.package.artifacts.v1");
-        self.write_header_into(&mut bytes);
-        self.write_trailer_into(&mut bytes);
-        Poseidon2::hash(&bytes)
+        PackageCommitment::new(self).artifacts_commitment()
     }
 
     /// Returns the commitment to the complete package.
     pub fn commitment(&self) -> Word {
-        Self::merge_commitments(
-            b"miden.package.v1",
-            self.code_commitment(),
-            self.artifacts_commitment(),
-        )
-    }
-
-    fn merge_commitments(domain: &[u8], left: Word, right: Word) -> Word {
-        let mut bytes = Vec::new();
-        bytes.write_bytes(domain);
-        left.write_into(&mut bytes);
-        right.write_into(&mut bytes);
-        Poseidon2::hash(&bytes)
+        PackageCommitment::new(self).commitment()
     }
 
     /// Returns true if this package was produced for an executable target
@@ -1645,6 +1669,8 @@ mod tests {
     #[test]
     fn package_commitment_layers_handle_advice_map_changes() {
         let package = build_kernel_package("kernel");
+        assert_eq!(package.mast_forest_commitment(), package.mast_forest().commitment());
+
         let package_commitment = package.commitment();
         let interface_commitment = package.interface_commitment().unwrap();
         let code_commitment = package.code_commitment();
