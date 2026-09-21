@@ -77,12 +77,7 @@ pub mod core {
         algebra::{
             cv_storage_coefficient, cv_storage_offset, cv_word_base, sum_input_b, universal_cv_word,
         },
-        constraints::{
-            FooterWords, enforce_footer_bridge, enforce_footer_cycle_advance,
-            enforce_footer_cycle_id_transition, enforce_footer_payload, enforce_footer_row_inputs,
-            enforce_footer_transition, enforce_footer_word_bindings, enforce_fused_rows,
-            footer_words, packed_footer_output,
-        },
+        constraints::{enforce_core_footer_rows, enforce_fused_rows},
         lookup::{
             EidosCompressionCols, LookupMultiplicitySign, NarrowLookupConfig, XorExpression,
             emit_narrow_lookup_columns,
