@@ -156,17 +156,22 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, const N: usize> PointQuotients<F, E
     /// `gK` also avoids `H`. If a caller uses a different domain relationship, it must
     /// additionally ensure points are outside the trace domain.
     pub fn new(points: FieldArray<EF, N>, coset_points: &[F]) -> Self {
+        // Domain points per inversion block.
+        const BLOCK: usize = 1024;
+
         let _span = info_span!("PointQuotients::new", n = coset_points.len()).entered();
         let n_points = coset_points.len();
 
-        // Compute differences in parallel: for each domain point x, compute [z₀ - x, z₁ - x, ...]
-        let diffs: Vec<FieldArray<EF, N>> =
-            coset_points.par_iter().map(|&x| points.map(|z| z - x)).collect();
-
-        // Flatten FieldArray slice for batch inversion (zero-copy), then reconstitute.
-        let diffs_flat = FieldArray::as_raw_slice(&diffs).as_flattened();
-        let invs_flat = batch_multiplicative_inverse(diffs_flat);
-        debug_assert_eq!(invs_flat.len(), N * n_points);
+        // Invert the differences [z₀ − x, z₁ − x, …] one block of domain points at a time, so each
+        // task holds at most one block of differences.
+        let mut invs_flat = EF::zero_vec(N * n_points);
+        invs_flat
+            .par_chunks_mut(N * BLOCK)
+            .zip(coset_points.par_chunks(BLOCK))
+            .for_each(|(invs, xs)| {
+                let diffs: Vec<EF> = xs.iter().flat_map(|&x| points.map(|z| z - x).0).collect();
+                invs.copy_from_slice(&batch_multiplicative_inverse(&diffs));
+            });
         // SAFETY: `reconstitute_from_base` requires:
         // - Same alignment: `FieldArray<EF, N>` is `#[repr(transparent)]` over `[EF; N]`, so it has
         //   the same alignment as `EF`.
