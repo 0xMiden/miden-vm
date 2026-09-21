@@ -24,6 +24,13 @@ command() {
 }
 git() {
   [[ "$1" != -C ]] || shift 2
+  if [[ -n "${BENCH_TEST_GIT_REPO:-}" ]]; then
+    case "$1" in
+      cat-file|merge-base|rev-parse) builtin command git -C "$BENCH_TEST_GIT_REPO" "$@" ;;
+      *) unexpected_call git "$@" ;;
+    esac
+    return
+  fi
   case "$1" in
     cat-file|merge-base) return 0 ;;
     rev-parse)
@@ -166,6 +173,10 @@ class BenchmarkPreflightTests(unittest.TestCase):
                 if mode == "aws-campaign":
                     self.assertIn("preflight passed for hugetlb0-native", output)
                     self.assertIn("preflight passed for hugetlb1-native", output)
+
+    def test_pinned_baseline_is_available_and_ancestor_of_head(self):
+        code, output = self.run_runner("scaling", BENCH_TEST_GIT_REPO=str(REPO))
+        self.assertEqual(code, 0, output)
 
     def test_wrong_thp_policy_reports_setup_without_writing(self):
         self.thp.write_text("always madvise [never]\n")
