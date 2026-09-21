@@ -28,7 +28,7 @@ use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inp
 use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS, security as pvm_security};
 
 use crate::{
-    ace::build_pvm_recursive_verifier_ace_circuit,
+    ace::{PvmRecursiveAceCircuit, build_canonical_precompile_ace_circuit},
     ace_constants::{
         GENERATED_BY, PVM_ACE_CIRCUIT_DIGEST, PVM_CIRCUIT_SHAPE, PVM_PREPROCESSED_COMMITMENT,
         PVM_RELATION_DIGEST, relation_digest_for_circuit,
@@ -242,12 +242,11 @@ impl PvmReadLayout {
 
 /// Build the canonical circuit and derive every generated artifact from it.
 fn compute() -> Result<GeneratedArtifacts, String> {
-    let circuit = build_pvm_recursive_verifier_ace_circuit().map_err(|e| format!("{e}"))?;
-    let input_layout = crate::ace::build_canonical_precompile_ace_circuit()
-        .map_err(|e| format!("{e}"))?
-        .layout()
-        .clone();
-    let read_layout = PvmReadLayout::from_input_layout(&input_layout)?;
+    let source = build_canonical_precompile_ace_circuit().map_err(|e| format!("{e}"))?;
+    let input_layout = source.layout();
+    let circuit = PvmRecursiveAceCircuit::try_from(source.to_ace().map_err(|e| format!("{e}"))?)
+        .map_err(|e| format!("{e}"))?;
+    let read_layout = PvmReadLayout::from_input_layout(input_layout)?;
     let num_quotient_chunks = input_layout.counts.num_quotient_chunks;
     if !num_quotient_chunks.is_power_of_two() {
         return Err(format!(
@@ -269,7 +268,7 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     let relation_digest = relation_digest_for_circuit(&circuit_digest);
     let preprocessed_commitment = preprocessed_commitment(relation_digest);
 
-    let geometry = PvmOodGeometry::from_input_layout(&input_layout)?;
+    let geometry = PvmOodGeometry::from_input_layout(input_layout)?;
     let scatter_table_layout = pvm_scatter_table_layout(&geometry)?;
     let layout_masm = render_pvm_layout(&read_layout, shape.stream_len, &scatter_table_layout)?;
     let stream_len = u32::try_from(shape.stream_len)
@@ -609,10 +608,10 @@ fn render_pvm_constraints_eval(
         stream_len: shape.stream_len,
         max_cycle_len_log,
         num_airs: NUM_CHIPLETS,
-        fold_coefficients: Some(FoldCoefficientStaging {
+        fold_coefficients: FoldCoefficientStaging {
             id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
             coefficient_offset: fold_coefficient_offset,
-        }),
+        },
         quotient_inputs,
         circuit_digest,
     })

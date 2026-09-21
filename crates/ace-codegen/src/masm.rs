@@ -28,12 +28,8 @@ pub struct MasmConstraintsEvalConfig<'a> {
     pub max_cycle_len_log: u32,
     /// Number of AIR instances in the relation.
     pub num_airs: usize,
-    /// How the evaluator stages one multi-AIR fold coefficient per AIR, or `None` for a relation
-    /// whose ACE READ layout reserves no coefficient slots.
-    ///
-    /// The staged block sits immediately after the selectors, so a relation without those slots
-    /// would write past its `auxiliary_ace_inputs_ptr` region.
-    pub fold_coefficients: Option<FoldCoefficientStaging<'a>>,
+    /// Stages one fold coefficient per AIR at its canonical READ slot.
+    pub fold_coefficients: FoldCoefficientStaging<'a>,
     /// Relation-local inputs for reconstructing the quotient from its chunks.
     pub quotient_inputs: QuotientRecompositionInputs<Felt>,
     /// Eidos digest of the circuit-stream the relation accepts.
@@ -130,13 +126,8 @@ pub fn render_masm_constraints_eval(
     let stream_init_cv = Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, stream_felts);
     let circuit_digest = config.circuit_digest;
     let quotient = config.quotient_inputs;
-    let (fold_coefficient_call, fold_coefficient_proc) = match &config.fold_coefficients {
-        Some(staging) => (
-            "\n    exec.stage_air_fold_coefficients\n".to_string(),
-            format!("\n{}", render_fold_coefficient_staging(staging, config.num_airs)),
-        ),
-        None => (String::new(), String::new()),
-    };
+    let fold_coefficient_proc =
+        render_fold_coefficient_staging(&config.fold_coefficients, config.num_airs);
 
     Ok(format!(
         concat!(
@@ -193,7 +184,7 @@ pub fn render_masm_constraints_eval(
             "    push.NUM_AIRS\n",
             "    push.MAX_CYCLE_LEN_LOG\n",
             "    exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace\n",
-            "{fold_coefficient_call}\n",
+            "\n    exec.stage_air_fold_coefficients\n\n",
             "    exec.load_and_authenticate_ace_circuit\n\n",
             "    push.NUM_EVAL_GATES_CIRCUIT\n",
             "    push.NUM_INPUTS_CIRCUIT\n",
@@ -224,7 +215,7 @@ pub fn render_masm_constraints_eval(
             "    # => [STREAM_DIGEST, ACE_CIRCUIT_DIGEST]\n",
             "    assert_eqw.err=ERR_CIRCUIT_DIGEST_MISMATCH\n",
             "end\n",
-            "{fold_coefficient_proc}",
+            "\n{fold_coefficient_proc}",
         ),
         generated_by = config.generated_by,
         layout_module = config.layout_module,
@@ -236,7 +227,6 @@ pub fn render_masm_constraints_eval(
         quotient_shift_ratio = quotient.shift_ratio.as_canonical_u64(),
         quotient_first_shift = quotient.first_shift.as_canonical_u64(),
         quotient_first_weight = quotient.first_weight.as_canonical_u64(),
-        fold_coefficient_call = fold_coefficient_call,
         fold_coefficient_proc = fold_coefficient_proc,
         stream_init_cv_0 = stream_init_cv[0].as_canonical_u64(),
         stream_init_cv_1 = stream_init_cv[1].as_canonical_u64(),
@@ -256,10 +246,7 @@ mod tests {
 
     use super::{FoldCoefficientStaging, MasmConstraintsEvalConfig, render_masm_constraints_eval};
 
-    const STAGING_CALL: &str = "exec.stage_air_fold_coefficients";
-    const STAGING_PROC: &str = "proc stage_air_fold_coefficients";
-
-    fn config(stages_fold_coefficients: bool) -> MasmConstraintsEvalConfig<'static> {
+    fn config() -> MasmConstraintsEvalConfig<'static> {
         MasmConstraintsEvalConfig {
             generated_by: "test",
             layout_module: "miden::core::sys::test::layout",
@@ -268,10 +255,10 @@ mod tests {
             stream_len: 64,
             max_cycle_len_log: 5,
             num_airs: 4,
-            fold_coefficients: stages_fold_coefficients.then_some(FoldCoefficientStaging {
+            fold_coefficients: FoldCoefficientStaging {
                 id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
-                coefficient_offset: 46,
-            }),
+                coefficient_offset: 44,
+            },
             quotient_inputs: QuotientRecompositionInputs {
                 shift_ratio: Felt::new_unchecked(2),
                 first_shift: Felt::new_unchecked(3),
@@ -281,46 +268,10 @@ mod tests {
         }
     }
 
-    /// Fold-coefficient staging is emitted exactly when the relation's READ layout reserves
-    /// coefficient slots. The staged block sits immediately after the selectors, so emission must
-    /// match that layout. The relation supplies the layout-dependent choice at this renderer
-    /// boundary.
-    #[test]
-    fn fold_coefficient_staging_matches_the_relation_read_layout() {
-        let staged = render_masm_constraints_eval(&config(true)).expect("renders");
-        assert!(staged.contains(STAGING_CALL), "the staging call is missing when requested");
-        assert!(staged.contains(STAGING_PROC), "the staging procedure is missing when requested");
-        assert!(
-            !staged.contains(&format!("pub {STAGING_PROC}")),
-            "the staging procedure is evaluator-private"
-        );
-        // One multiplication between consecutive positions; four AIRs, four writes.
-        assert_eq!(staged.matches("ext2mul").count(), 3);
-        assert_eq!(staged.matches("add.1 mem_store").count(), 4);
-        assert!(staged.contains("exec.layout::auxiliary_ace_inputs_ptr add.46"));
-
-        let bare = render_masm_constraints_eval(&config(false)).expect("renders");
-        assert!(
-            !bare.contains(STAGING_CALL) && !bare.contains(STAGING_PROC),
-            "the staging leaked into a relation without fold-coefficient slots"
-        );
-
-        // Only the staging block may differ: both relations run the same setup, authentication,
-        // and evaluation.
-        for shared in [
-            "exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace",
-            "exec.load_and_authenticate_ace_circuit",
-            "assert_eqw.err=ERR_CIRCUIT_DIGEST_MISMATCH",
-        ] {
-            assert!(bare.contains(shared), "{shared} is missing from the unstaged evaluator");
-            assert!(staged.contains(shared), "{shared} is missing from the staged evaluator");
-        }
-    }
-
     /// The single authenticated segment must be a whole number of `adv_pipe` blocks.
     #[test]
     fn a_misaligned_stream_is_refused() {
-        let mut config = config(true);
+        let mut config = config();
         config.stream_len = 60;
         assert!(render_masm_constraints_eval(&config).is_err());
     }

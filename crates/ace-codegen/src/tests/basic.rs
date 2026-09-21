@@ -15,9 +15,9 @@ use miden_crypto::{
 use super::common::{eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient};
 use crate::{
     AceCircuit, AceConfig, InputKey, InputLayout, LayoutKind,
-    circuit::{AceNode, emit_circuit},
+    circuit::emit_circuit,
     dag::NodeKind,
-    pipeline::{build_ace_dag_for_air, build_multi_air_ace_circuit},
+    pipeline::{build_ace_dag_for_air, build_canonical_multi_air_ace_circuit},
 };
 
 // Base and extension field types for tests.
@@ -352,7 +352,7 @@ fn build_inputs(layout: &InputLayout) -> Vec<EF> {
 }
 
 #[test]
-fn multi_air_uses_proof_order_offsets_and_stable_selectors() {
+fn multi_air_uses_canonical_offsets_and_stable_selectors() {
     let airs = [
         TestAir {
             preprocessed: 1,
@@ -379,13 +379,11 @@ fn multi_air_uses_proof_order_offsets_and_stable_selectors() {
             ..TestAir::simple()
         },
     ];
-    let circuit = build_multi_air_ace_circuit(
+    let circuit = build_canonical_multi_air_ace_circuit(
         &airs,
-        &[2, 0, 1],
         AceConfig {
             num_quotient_chunks: 1,
             layout: LayoutKind::Masm,
-            num_airs: 3,
         },
         4,
     )
@@ -403,46 +401,56 @@ fn multi_air_uses_proof_order_offsets_and_stable_selectors() {
 
     let values = [
         (InputKey::Alpha, 1),
-        (InputKey::MultiAirFoldBeta, 10),
         (InputKey::IsFirstAir(0), 2),
         (InputKey::IsLastAir(1), 3),
         (InputKey::IsTransitionAir(2), 5),
-        (InputKey::Preprocessed { offset: 0, index: 4 }, 3),
-        (InputKey::Preprocessed { offset: 0, index: 9 }, 4),
-        (InputKey::Preprocessed { offset: 0, index: 2 }, 7),
-        (InputKey::Main { offset: 0, index: 8 }, 2),
-        (InputKey::Main { offset: 0, index: 14 }, 7),
-        (InputKey::Main { offset: 0, index: 4 }, 6),
+        (InputKey::Preprocessed { offset: 0, index: 0 }, 3),
+        (InputKey::Preprocessed { offset: 0, index: 5 }, 4),
+        (InputKey::Preprocessed { offset: 0, index: 10 }, 7),
+        (InputKey::Main { offset: 0, index: 0 }, 2),
+        (InputKey::Main { offset: 0, index: 6 }, 7),
+        (InputKey::Main { offset: 0, index: 12 }, 6),
     ];
-    let offset_only = [
-        InputKey::AuxCoord { offset: 0, index: 4, coord: 0 },
-        InputKey::AuxCoord { offset: 0, index: 7, coord: 1 },
-        InputKey::AuxCoord { offset: 0, index: 2, coord: 0 },
-        InputKey::AuxBusBoundary(1),
-        InputKey::AuxBusBoundary(3),
-        InputKey::AuxBusBoundary(0),
-    ];
-    let references: Vec<_> = circuit
-        .operations
-        .iter()
-        .flat_map(|op| [op.lhs, op.rhs])
-        .filter_map(|node| match node {
-            AceNode::Input(index) => Some(index),
-            _ => None,
-        })
-        .collect();
-    for key in values.iter().map(|&(key, _)| key).chain(offset_only) {
-        let index = circuit.layout().index(key).unwrap();
-        assert!(references.contains(&index), "missing {key:?}");
-    }
-
     let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
-    for (key, value) in values {
+    for (key, value) in values.into_iter().chain([
+        (InputKey::AuxCoord { offset: 0, index: 0, coord: 0 }, 2),
+        (InputKey::AuxCoord { offset: 0, index: 3, coord: 1 }, 3),
+        (InputKey::AuxCoord { offset: 0, index: 6, coord: 0 }, 5),
+        (InputKey::AuxBusBoundary(0), 7),
+        (InputKey::AuxBusBoundary(2), 11),
+        (InputKey::AuxBusBoundary(3), 13),
+        (InputKey::ZPowN, 19),
+        (InputKey::Weight0, 7),
+        (InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 }, 2),
+        (InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 1 }, 3),
+    ]) {
         set_input(&circuit, &mut inputs, key, ef(value));
     }
 
-    // Stable accumulators are 10, 33, and 65; proof order [2, 0, 1] folds to 6,633.
-    assert_eq!(circuit.eval(&inputs).unwrap(), ef(6_633));
+    // The per-AIR constraints give 19, 44 + 3u and 83, where u is the extension-field basis.
+    // With one quotient chunk, q*v = 7 * (2 + 3u) * (19 - 1) = 252 + 378u.
+    let quotient_binding = EF::new([F::from_u64(252), F::from_u64(378)]);
+    for (order, coefficients, expected) in [
+        ([2, 0, 1], [10, 1, 100], EF::new([F::from_u64(8_534), F::from_u64(3)])),
+        ([0, 1, 2], [100, 10, 1], EF::new([F::from_u64(2_423), F::from_u64(30)])),
+    ] {
+        for (i, coefficient) in coefficients.into_iter().enumerate() {
+            set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(i), ef(coefficient));
+        }
+        let expected = expected - quotient_binding;
+        assert_eq!(circuit.eval(&inputs).unwrap(), expected);
+        assert_eq!(
+            crate::testing::eval_multi_air_constraints(
+                &airs,
+                circuit.layout(),
+                &inputs,
+                &order,
+                ef(10),
+                4,
+            ),
+            expected,
+        );
+    }
     circuit.to_ace().expect("multi-AIR root must be MASM encodable");
 }
 
@@ -452,13 +460,11 @@ fn mixed_air_periods_use_one_shared_basis() {
         TestAir { period: 4, ..TestAir::simple() },
         TestAir { period: 32, ..TestAir::simple() },
     ];
-    let circuit = build_multi_air_ace_circuit(
+    let circuit = build_canonical_multi_air_ace_circuit(
         &airs,
-        &[0, 1],
         AceConfig {
             num_quotient_chunks: 1,
             layout: LayoutKind::Native,
-            num_airs: 2,
         },
         1,
     )
@@ -466,7 +472,8 @@ fn mixed_air_periods_use_one_shared_basis() {
     let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
     let z_k = ef(3);
     set_input(&circuit, &mut inputs, InputKey::ZK, z_k);
-    set_input(&circuit, &mut inputs, InputKey::MultiAirFoldBeta, ef(7));
+    set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(0), ef(7));
+    set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(1), ef(1));
 
     let mut period_four_point = z_k;
     for _ in 0..3 {
@@ -474,22 +481,32 @@ fn mixed_air_periods_use_one_shared_basis() {
     }
     let period_four = eval_periodic_values(&airs[0].periodic_columns(), period_four_point)[0];
     let period_thirty_two = eval_periodic_values(&airs[1].periodic_columns(), z_k)[0];
-    assert_eq!(circuit.eval(&inputs).unwrap(), period_four * ef(7) + period_thirty_two);
+    let expected = period_four * ef(7) + period_thirty_two;
+    assert_eq!(circuit.eval(&inputs).unwrap(), expected);
+    assert_eq!(
+        crate::testing::eval_multi_air_constraints(
+            &airs,
+            circuit.layout(),
+            &inputs,
+            &[0, 1],
+            ef(7),
+            1,
+        ),
+        expected,
+    );
     assert_ne!(period_four, eval_periodic_values(&airs[0].periodic_columns(), z_k)[0]);
 }
 
 #[test]
-fn multi_air_rejects_invalid_proof_orders() {
-    let airs = [TestAir::simple(), TestAir::simple()];
+fn multi_air_rejects_empty_airs_and_invalid_alignment() {
     let config = AceConfig {
         num_quotient_chunks: 1,
         layout: LayoutKind::Native,
-        num_airs: 2,
     };
-
-    assert!(build_multi_air_ace_circuit(&airs, &[0], config, 2).is_err());
-    assert!(build_multi_air_ace_circuit(&airs, &[0, 0], config, 2).is_err());
-    assert!(build_multi_air_ace_circuit(&airs, &[0, 2], config, 2).is_err());
+    let airs = [TestAir { aux: 1, ..TestAir::simple() }];
+    assert!(build_canonical_multi_air_ace_circuit::<TestAir>(&[], config, 2).is_err());
+    assert!(build_canonical_multi_air_ace_circuit(&airs, config, 0).is_err());
+    assert!(build_canonical_multi_air_ace_circuit(&airs, config, 3).is_err());
 }
 
 #[test]
@@ -498,7 +515,6 @@ fn test_preprocessed_entries_lower_to_input_keys() {
     let config = AceConfig {
         num_quotient_chunks: 1,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air(&air, config).unwrap();
 
@@ -521,7 +537,6 @@ fn test_preprocessed_inputs_affect_dag_and_circuit_eval() {
     let config = AceConfig {
         num_quotient_chunks: 1,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -543,7 +558,6 @@ fn test_verifier_dag_matches_manual_eval() {
     let config = AceConfig {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -591,7 +605,6 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
     let config = AceConfig {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -638,7 +651,6 @@ fn test_emitted_circuit_matches_dag_eval() {
     let config = AceConfig {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -651,28 +663,11 @@ fn test_emitted_circuit_matches_dag_eval() {
 }
 
 #[test]
-fn pipeline_rejects_zero_airs() {
-    let air = MockAir;
-    let config = AceConfig {
-        num_quotient_chunks: 2,
-        layout: LayoutKind::Native,
-        num_airs: 0,
-    };
-
-    let err = build_ace_dag_for_air(&air, config).unwrap_err();
-    assert!(
-        matches!(err, crate::AceError::InvalidInputLayout { .. }),
-        "expected InvalidInputLayout, got {err:?}"
-    );
-}
-
-#[test]
 fn pipeline_rejects_zero_quotient_chunks() {
     let air = MockAir;
     let config = AceConfig {
         num_quotient_chunks: 0,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
 
     let err = build_ace_dag_for_air(&air, config).unwrap_err();
@@ -688,7 +683,6 @@ fn test_encoded_circuit_structure() {
     let config = AceConfig {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -713,122 +707,29 @@ fn stream_geometry_rejects_the_node_id_packing_bound() {
 }
 
 #[test]
-fn canonical_multi_air_folds_by_per_air_read_coefficients() {
-    use crate::pipeline::build_canonical_multi_air_ace_circuit;
-
-    // Same fixture as `multi_air_uses_proof_order_offsets_and_stable_selectors`, so the
-    // per-AIR accumulators below are the ones hand-computed there.
-    let airs = [
-        TestAir {
-            preprocessed: 1,
-            main: 1,
-            aux: 1,
-            boundaries: 1,
-            selector: Selector::First,
-            ..TestAir::simple()
-        },
-        TestAir {
-            preprocessed: 2,
-            main: 3,
-            aux: 2,
-            boundaries: 2,
-            selector: Selector::Last,
-            ..TestAir::simple()
-        },
-        TestAir {
-            preprocessed: 3,
-            main: 5,
-            aux: 3,
-            boundaries: 1,
-            selector: Selector::Transition,
-            ..TestAir::simple()
-        },
-    ];
-    let circuit = build_canonical_multi_air_ace_circuit(
-        &airs,
-        AceConfig {
-            num_quotient_chunks: 1,
-            layout: LayoutKind::Masm,
-            num_airs: 3,
-        },
-        4,
-    )
-    .unwrap();
-
-    assert_eq!(
-        (
-            circuit.layout().counts.preprocessed_width,
-            circuit.layout().counts.width,
-            circuit.layout().counts.aux_width,
-            circuit.layout().counts.num_aux_boundary,
-        ),
-        (12, 16, 8, 4)
-    );
-
-    // Trace regions sit at canonical (instance-order) offsets: preprocessed blocks start at
-    // 0/4/8, main blocks at 0/4/8, so the last column of each AIR lands where indexed below.
-    // The values are chosen to reproduce the stable accumulators 10, 33 and 65.
-    let values = [
-        (InputKey::Alpha, 1),
-        (InputKey::IsFirstAir(0), 2),
-        (InputKey::IsLastAir(1), 3),
-        (InputKey::IsTransitionAir(2), 5),
-        (InputKey::Preprocessed { offset: 0, index: 0 }, 3),
-        (InputKey::Main { offset: 0, index: 0 }, 2),
-        (InputKey::Preprocessed { offset: 0, index: 5 }, 4),
-        (InputKey::Main { offset: 0, index: 6 }, 7),
-        (InputKey::Preprocessed { offset: 0, index: 10 }, 7),
-        (InputKey::Main { offset: 0, index: 12 }, 6),
-    ];
-
-    // The proof order lives entirely in the fold coefficients: the AIR at proof position `k`
-    // carries `beta^(N - 1 - k)`. With beta = 10, proof order [2, 0, 1] weights instances
-    // 0/1/2 by 10/1/100 and proof order [0, 1, 2] by 100/10/1. Both expectations are the
-    // Horner folds `build_multi_air_ace_circuit` produces for those orders on the same
-    // accumulators.
-    for (coefficients, expected) in [([10, 1, 100], 6_633), ([100, 10, 1], 1_395)] {
+fn canonical_builder_air_count_is_independent_of_order_maps() {
+    for num_airs in [1, crate::MAX_ORDER_AIRS + 1] {
+        let airs = vec![TestAir::simple(); num_airs];
+        let circuit = build_canonical_multi_air_ace_circuit(
+            &airs,
+            AceConfig {
+                num_quotient_chunks: 1,
+                layout: LayoutKind::Masm,
+            },
+            8,
+        )
+        .expect("canonical circuit");
         let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
-        for (key, value) in values {
-            set_input(&circuit, &mut inputs, key, ef(value));
-        }
-        for (air_index, coefficient) in coefficients.into_iter().enumerate() {
+        for i in 0..num_airs {
             set_input(
                 &circuit,
                 &mut inputs,
-                InputKey::MultiAirFoldCoeff(air_index),
-                ef(coefficient),
+                InputKey::Main { offset: 0, index: 8 * i },
+                ef((i + 1) as u64),
             );
+            set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(i), EF::ONE);
         }
-        assert_eq!(circuit.eval(&inputs).unwrap(), ef(expected));
+        assert_eq!(circuit.eval(&inputs).unwrap(), ef((num_airs * (num_airs + 1) / 2) as u64));
+        circuit.to_ace().expect("canonical circuit must encode");
     }
-
-    circuit.to_ace().expect("canonical multi-AIR root must be MASM encodable");
-}
-
-#[test]
-fn canonical_multi_air_circuit_evaluates_without_panic() {
-    use crate::{pipeline::build_canonical_multi_air_ace_circuit, testing::fill_inputs};
-
-    let airs: [TestAir; 5] = core::array::from_fn(|i| TestAir {
-        main: 2 + i,
-        aux: 1 + (i % 2),
-        boundaries: 1,
-        ..TestAir::simple()
-    });
-    let circuit = build_canonical_multi_air_ace_circuit(
-        &airs,
-        AceConfig {
-            num_quotient_chunks: 8,
-            layout: LayoutKind::Masm,
-            num_airs: 5,
-        },
-        8,
-    )
-    .expect("canonical circuit");
-
-    // Fill every slot — including the fold-coefficient slots — with deterministic non-zero
-    // values. The circuit is not expected to evaluate to zero; this only checks that every
-    // DAG input reference is in range.
-    let inputs = fill_inputs(circuit.layout());
-    let _root = circuit.eval(&inputs).expect("canonical circuit eval must not panic");
 }

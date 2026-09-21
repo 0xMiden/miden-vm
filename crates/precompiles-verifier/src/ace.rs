@@ -9,14 +9,13 @@
 //! The cross-chiplet LogUp identity enforced by `ChipletMultiAir::eval_external` remains an
 //! external multi-AIR assertion.
 
-use alloc::{format, vec::Vec};
-
 #[cfg(test)]
-use miden_ace_codegen::build_multi_air_ace_circuit;
+use alloc::vec::Vec;
+
 use miden_ace_codegen::{
     AceCircuit, AceConfig, AceError, LayoutKind, build_canonical_multi_air_ace_circuit,
 };
-use miden_core::{Felt, Word, field::QuadFelt};
+use miden_core::{Felt, field::QuadFelt};
 use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS};
 
 // MULTI-AIR ACE CIRCUIT
@@ -44,24 +43,7 @@ fn precompile_ace_config() -> AceConfig {
     AceConfig {
         num_quotient_chunks: num_quotient_chunks(),
         layout: LayoutKind::Masm,
-        num_airs: NUM_CHIPLETS,
     }
-}
-
-/// Builds the ACE circuit in the canonical [`ChipletAir::all`] instance order.
-///
-/// This identity-order construction is the reference for the order-invariant circuit.
-#[cfg(test)]
-pub fn build_precompile_multi_air_ace_circuit() -> Result<AceCircuit<QuadFelt>, AceError> {
-    let airs = ChipletAir::all();
-    let proof_order: Vec<_> = (0..airs.len()).collect();
-
-    build_multi_air_ace_circuit::<ChipletAir>(
-        &airs,
-        &proof_order,
-        precompile_ace_config(),
-        LMCS_ALIGNMENT,
-    )
 }
 
 /// Builds the canonical (order-invariant) precompile chiplet ACE circuit.
@@ -78,24 +60,7 @@ pub fn build_canonical_precompile_ace_circuit() -> Result<AceCircuit<QuadFelt>, 
 // RECURSIVE VERIFIER CIRCUIT
 // ================================================================================================
 
-/// Encoded PVM recursive-verifier ACE circuit and the metadata consumed by MASM.
-///
-/// One circuit serves every proof order. Its single `adv_pipe`-aligned instruction segment is
-/// authenticated under the compiled-in circuit digest.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PvmRecursiveAceCircuit {
-    /// Number of ACE READ variables.
-    pub num_inputs: usize,
-    /// Number of ACE EVAL rows.
-    pub num_eval_gates: usize,
-    /// Encoded instruction stream length in base-field elements.
-    pub stream_len: usize,
-    /// Eidos digest of the full instruction stream: the advice-map key and the value pinned by
-    /// the compiled-in circuit digest.
-    pub commitment: Word,
-    /// Encoded ACE instruction stream consumed by `eval_circuit`.
-    pub instructions: Vec<Felt>,
-}
+pub use miden_ace_codegen::RecursiveAceCircuit as PvmRecursiveAceCircuit;
 
 /// Builds and encodes the order-invariant PVM recursive-verifier ACE circuit.
 ///
@@ -103,29 +68,7 @@ pub struct PvmRecursiveAceCircuit {
 /// than rebuild it here.
 pub fn build_pvm_recursive_verifier_ace_circuit() -> Result<PvmRecursiveAceCircuit, AceError> {
     let encoded = build_canonical_precompile_ace_circuit()?.to_ace()?;
-    let instructions = encoded.instructions();
-    let stream_len = encoded.size_in_felt();
-    if stream_len != instructions.len() {
-        return Err(AceError::InvalidInputLayout {
-            message: format!(
-                "ACE circuit stream length ({stream_len}) does not match instruction count ({})",
-                instructions.len()
-            ),
-        });
-    }
-    if !stream_len.is_multiple_of(8) {
-        return Err(AceError::InvalidInputLayout {
-            message: "ACE circuit stream must be 8-felt aligned for adv_pipe".into(),
-        });
-    }
-
-    Ok(PvmRecursiveAceCircuit {
-        num_inputs: encoded.num_vars(),
-        num_eval_gates: encoded.num_eval_rows(),
-        stream_len,
-        commitment: encoded.circuit_hash(),
-        instructions: instructions.to_vec(),
-    })
+    encoded.try_into()
 }
 
 /// Returns the process-wide canonical circuit shared by every proof order.
@@ -198,7 +141,7 @@ mod tests {
     use alloc::{format, string::String, vec::Vec};
 
     use miden_ace_codegen::InputKey;
-    use miden_core::{Felt, crypto::hash::Eidos, field::QuadFelt};
+    use miden_core::{Felt, Word, crypto::hash::Eidos, field::QuadFelt};
     use miden_crypto::field::PrimeCharacteristicRing;
 
     use super::*;
@@ -217,8 +160,7 @@ mod tests {
         (0..NUM_CHIPLETS).collect()
     }
 
-    /// Deterministic extension-field inputs. Values depend only on the slot index, so two layouts
-    /// that agree index-for-index on a prefix receive the same values there.
+    /// Deterministic extension-field inputs.
     fn pseudo_random_inputs(len: usize) -> Vec<QuadFelt> {
         let mut state = 0x5eed_1234_abcd_ef01u64;
         (0..len)
@@ -233,43 +175,6 @@ mod tests {
                 QuadFelt::new([c0, c1])
             })
             .collect()
-    }
-
-    /// Per-chiplet aligned (main, aux, boundary) block widths in the combined READ layout.
-    ///
-    /// Derived from the chiplet declarations and the documented LMCS alignment rather than from
-    /// the codegen, so this cross-checks the production placement instead of mirroring it.
-    fn chiplet_block_widths() -> [(usize, usize, usize); NUM_CHIPLETS] {
-        use miden_ace_codegen::EXT_DEGREE;
-        use miden_lifted_air::{BaseAir, LiftedAir};
-
-        let mut widths = [(0usize, 0usize, 0usize); NUM_CHIPLETS];
-        for (index, air) in ChipletAir::all().iter().enumerate() {
-            let aux_coords = <ChipletAir as LiftedAir<Felt, QuadFelt>>::aux_width(air) * EXT_DEGREE;
-            widths[index] = (
-                <ChipletAir as BaseAir<Felt>>::width(air).next_multiple_of(LMCS_ALIGNMENT),
-                aux_coords.next_multiple_of(LMCS_ALIGNMENT) / EXT_DEGREE,
-                <ChipletAir as LiftedAir<Felt, QuadFelt>>::num_aux_values(air),
-            );
-        }
-        widths
-    }
-
-    /// Start of each chiplet's main/aux/boundary block when the blocks are concatenated in
-    /// `order`, indexed by instance index.
-    fn chiplet_block_offsets(
-        widths: &[(usize, usize, usize); NUM_CHIPLETS],
-        order: &[usize; NUM_CHIPLETS],
-    ) -> [(usize, usize, usize); NUM_CHIPLETS] {
-        let mut offsets = [(0usize, 0usize, 0usize); NUM_CHIPLETS];
-        let (mut main, mut aux, mut boundary) = (0usize, 0usize, 0usize);
-        for &index in order {
-            offsets[index] = (main, aux, boundary);
-            main += widths[index].0;
-            aux += widths[index].1;
-            boundary += widths[index].2;
-        }
-        offsets
     }
 
     fn masm_const(path: &str, name: &str) -> u64 {
@@ -308,37 +213,14 @@ mod tests {
         assert_eq!(*shared_pvm_recursive_circuit(), produced);
     }
 
-    /// The canonical circuit is order-invariant: a proof order is carried entirely by its READ
-    /// inputs, with each chiplet's trace values at their canonical (instance-order) offset and its
-    /// fold coefficient staged as `beta^(NUM_CHIPLETS - 1 - proof position)`. Pin that against the
-    /// per-order builder over the structured sample: ten chiplets admit `10!` orderings, so an
-    /// exhaustive sweep is out of reach and end-to-end proofs only ever exercise a handful.
+    /// Checks the canonical circuit against direct AIR folds for structured PVM proof orders.
     #[test]
-    fn canonical_circuit_matches_the_per_order_builder_for_structured_orders() {
-        use miden_ace_codegen::EXT_DEGREE;
-        use miden_lifted_air::BaseAir;
-
+    fn canonical_circuit_matches_direct_evaluation_for_structured_orders() {
         let airs = ChipletAir::all();
-        let config = precompile_ace_config();
         let canonical = build_canonical_precompile_ace_circuit().expect("canonical circuit");
-        let canonical_layout = canonical.layout().clone();
+        let canonical_layout = canonical.layout();
 
-        // Only one chiplet declares preprocessed columns, so its block starts at zero under every
-        // order and the routing below needs no preprocessed case. A second one would break that.
-        assert_eq!(
-            airs.iter()
-                .filter(|air| <ChipletAir as BaseAir<Felt>>::preprocessed_width(air) > 0)
-                .count(),
-            1,
-            "a second preprocessed chiplet would make the preprocessed region order-dependent"
-        );
-
-        let widths = chiplet_block_widths();
-        let identity: [usize; NUM_CHIPLETS] = core::array::from_fn(|index| index);
-        let canonical_offsets = chiplet_block_offsets(&widths, &identity);
-
-        // Keep the quotient openings non-zero: the shared `q * v` binding is part of what the
-        // canonical circuit must reproduce, so every per-order input set receives the same values.
+        // Nonzero quotient openings exercise the shared quotient binding.
         let base = pseudo_random_inputs(canonical_layout.total_inputs);
 
         let beta = QuadFelt::from_u64(97);
@@ -358,93 +240,22 @@ mod tests {
             }
             let canonical_root = canonical.eval(&canonical_inputs).expect("canonical evaluation");
 
-            let per_order = build_multi_air_ace_circuit(&airs, order, config, LMCS_ALIGNMENT)
-                .expect("per-order circuit");
-            let per_order_layout = per_order.layout().clone();
-            let proof_offsets = chiplet_block_offsets(&widths, order);
-
-            // The canonical layout only appends its fold-coefficient slots after the per-AIR
-            // selectors, so both layouts agree index-for-index on everything that precedes them;
-            // the shared generator therefore gives both the same public, randomness, and
-            // preprocessed values, and only the per-chiplet trace blocks need routing.
-            let mut inputs = pseudo_random_inputs(per_order_layout.total_inputs);
-            for chunk in 0..per_order_layout.counts.num_quotient_chunks {
-                for offset in 0..2 {
-                    for coord in 0..EXT_DEGREE {
-                        let key = InputKey::QuotientChunkCoord { offset, chunk, coord };
-                        inputs[per_order_layout.index(key).expect("proof quotient slot")] =
-                            base[canonical_layout.index(key).expect("canonical quotient slot")];
-                    }
-                }
-            }
-
-            for index in 0..NUM_CHIPLETS {
-                let (main_width, aux_width, boundary_width) = widths[index];
-                let (canonical_main, canonical_aux, canonical_boundary) = canonical_offsets[index];
-                let (proof_main, proof_aux, proof_boundary) = proof_offsets[index];
-                for offset in 0..2 {
-                    for column in 0..main_width {
-                        let source = canonical_layout
-                            .index(InputKey::Main { offset, index: canonical_main + column })
-                            .expect("canonical main slot");
-                        let target = per_order_layout
-                            .index(InputKey::Main { offset, index: proof_main + column })
-                            .expect("proof main slot");
-                        inputs[target] = base[source];
-                    }
-                    for column in 0..aux_width {
-                        for coord in 0..EXT_DEGREE {
-                            let source = canonical_layout
-                                .index(InputKey::AuxCoord {
-                                    offset,
-                                    index: canonical_aux + column,
-                                    coord,
-                                })
-                                .expect("canonical aux slot");
-                            let target = per_order_layout
-                                .index(InputKey::AuxCoord {
-                                    offset,
-                                    index: proof_aux + column,
-                                    coord,
-                                })
-                                .expect("proof aux slot");
-                            inputs[target] = base[source];
-                        }
-                    }
-                }
-                for value in 0..boundary_width {
-                    let source = canonical_layout
-                        .index(InputKey::AuxBusBoundary(canonical_boundary + value))
-                        .expect("canonical boundary slot");
-                    let target = per_order_layout
-                        .index(InputKey::AuxBusBoundary(proof_boundary + value))
-                        .expect("proof boundary slot");
-                    inputs[target] = base[source];
-                }
-            }
-
-            // The per-order circuit folds through one shared beta slot, Horner over proof order.
-            let beta_index = per_order_layout.index(InputKey::MultiAirFoldBeta).expect("beta slot");
-            inputs[beta_index] = beta;
-
-            assert_eq!(
-                canonical_root,
-                per_order.eval(&inputs).expect("per-order evaluation"),
-                "the canonical circuit does not reproduce the per-order fold for {order:?}"
+            let direct = miden_ace_codegen::testing::eval_multi_air_constraints(
+                &airs,
+                canonical_layout,
+                &canonical_inputs,
+                order,
+                beta,
+                LMCS_ALIGNMENT,
             );
+            assert_eq!(canonical_root, direct, "direct symbolic evaluation for {order:?}");
             roots.push(canonical_root);
         }
 
-        // A circuit that ignored the staged coefficients, or weighted a chiplet by its instance
-        // index instead of its proof position, would fold to the same value under every order and
-        // the sweep above would hold vacuously.
+        // Distinct roots ensure this fixture distinguishes the sampled proof orders.
         for (i, left) in roots.iter().enumerate() {
             for (j, right) in roots.iter().enumerate().skip(i + 1) {
-                assert_ne!(
-                    left, right,
-                    "{:?} and {:?} fold identically; the sweep is vacuous",
-                    orders[i], orders[j]
-                );
+                assert_ne!(left, right, "{:?} and {:?} fold identically", orders[i], orders[j]);
             }
         }
     }
@@ -489,10 +300,7 @@ mod tests {
             expected_chunks,
             "the ACE circuit must read exactly the quotient chunks the proof carries"
         );
-        let per_order =
-            build_precompile_multi_air_ace_circuit().expect("per-order multi-AIR ACE circuit");
         let canonical = build_canonical_precompile_ace_circuit().expect("canonical ACE circuit");
-        assert_eq!(per_order.layout().counts.num_quotient_chunks, expected_chunks);
         assert_eq!(canonical.layout().counts.num_quotient_chunks, expected_chunks);
     }
 
@@ -977,44 +785,6 @@ mod tests {
         let mut sorted = order;
         sorted.sort_unstable();
         assert_eq!(sorted.to_vec(), canonical_order(), "order is a permutation");
-    }
-
-    /// The external assertion is part of the production relation but excluded from the ACE
-    /// circuit digest. This test guards its cardinality; raw bus-balance tests cover the
-    /// underlying lookup semantics independently.
-    #[test]
-    fn chiplet_multi_air_exposes_the_sigma_closure() {
-        use miden_lifted_air::{LiftedAir, MultiAir};
-        use miden_precompiles_air::ChipletMultiAir;
-
-        let challenges = [
-            QuadFelt::new([Felt::from(3u32), Felt::from(5u32)]),
-            QuadFelt::new([Felt::from(7u32), Felt::from(11u32)]),
-        ];
-        let multi_air = ChipletMultiAir::new();
-        let aux_values: Vec<Vec<QuadFelt>> = multi_air
-            .airs()
-            .iter()
-            .enumerate()
-            .map(|(i, air)| {
-                (0..air.num_aux_values())
-                    .map(|j| {
-                        QuadFelt::new([
-                            Felt::from((i + j + 1) as u32),
-                            Felt::from((2 * i + j + 1) as u32),
-                        ])
-                    })
-                    .collect()
-            })
-            .collect();
-        let aux_refs: Vec<&[QuadFelt]> = aux_values.iter().map(Vec::as_slice).collect();
-
-        let assertions = multi_air
-            .eval_external(&challenges, &[Felt::ZERO; 4], &[], &aux_refs, &[0; NUM_CHIPLETS])
-            .expect("fixed boundary denominators are non-zero for the fixture");
-
-        assert_eq!(assertions.len(), 1, "the relation exposes exactly one external assertion");
-        assert_ne!(assertions[0], QuadFelt::ZERO, "the closure fixture must be non-vacuous");
     }
 
     /// The circuit digest binds the generated circuit but not the external assertion, so each

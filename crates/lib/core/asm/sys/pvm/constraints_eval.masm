@@ -8,7 +8,7 @@ use miden::core::sys::pvm::layout
 # =================================================================================================
 
 # Number of READ variables (inputs + constants) for the constraint evaluation circuit.
-const NUM_INPUTS_CIRCUIT = 3188
+const NUM_INPUTS_CIRCUIT = 3184
 
 # Number of evaluation gates in the constraint evaluation circuit
 const NUM_EVAL_GATES_CIRCUIT = 10056
@@ -38,10 +38,10 @@ const QUOTIENT_FIRST_WEIGHT = 2704820172613542122
 
 # Eidos digest of the ACE circuit stream this relation accepts. One circuit serves
 # every proof order, so it is the advice-map key and the value the loader pins.
-const ACE_CIRCUIT_DIGEST_0 = 3274689563102992995
-const ACE_CIRCUIT_DIGEST_1 = 6567210677493607157
-const ACE_CIRCUIT_DIGEST_2 = 6079462231756854207
-const ACE_CIRCUIT_DIGEST_3 = 1589912216956176661
+const ACE_CIRCUIT_DIGEST_0 = 4782152923095806202
+const ACE_CIRCUIT_DIGEST_1 = 1419164574494939053
+const ACE_CIRCUIT_DIGEST_2 = 596154966188098381
+const ACE_CIRCUIT_DIGEST_3 = 8627574699746549962
 
 # ERRORS
 # =================================================================================================
@@ -114,7 +114,7 @@ end
 #! Outputs: []
 proc stage_air_fold_coefficients
     exec.layout::proof_order_ids_ptr
-    exec.layout::auxiliary_ace_inputs_ptr add.82
+    exec.layout::auxiliary_ace_inputs_ptr add.80
     padw exec.constants::composition_coef_ptr mem_loadw_le drop drop
     push.0.1
     # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]

@@ -7,12 +7,14 @@ use alloc::{
 use std::{fs, io, println};
 
 use miden_ace_codegen::{
-    EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, ProofOrderMapsConfig,
-    render_proof_order_maps,
+    EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, OodScatterPlan,
+    ProofOrderMapsConfig, render_proof_order_maps,
 };
 use miden_air::{
     AIRS, MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, NUM_PUBLIC_VALUES, Statement,
-    ace::{build_recursive_verifier_ace_circuit, recursive_verifier_input_layout},
+    ace::{
+        RecursiveAceCircuit, build_canonical_multi_air_ace_circuit, recursive_verifier_ace_config,
+    },
     config::relation_digest,
 };
 use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt, program::KernelDescriptor};
@@ -83,10 +85,15 @@ fn check() -> Result<(), String> {
 fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     // The circuit topology is fixed across proof orders; MASM applies proof-order-specific ingest
     // scatter and fold-coefficient staging.
-    let circuit = build_recursive_verifier_ace_circuit()
+    let source = build_canonical_multi_air_ace_circuit(recursive_verifier_ace_config())
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-    let input_layout = recursive_verifier_input_layout()
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    let input_layout = source.layout();
+    let circuit = RecursiveAceCircuit::try_from(
+        source
+            .to_ace()
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?,
+    )
+    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
 
     let num_quotient_chunks = input_layout.counts.num_quotient_chunks;
     if !num_quotient_chunks.is_power_of_two() {
@@ -103,7 +110,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
 
     let circuit_digest = word_to_array(circuit.commitment);
     let relation_digest = compute_relation_digest(&circuit_digest);
-    let vm_geometry = VmGeometry::from_input_layout(&input_layout)?;
+    let vm_geometry = VmGeometry::from_input_layout(input_layout)?;
     let constraints_eval = render_constraints_eval_file(&circuit, quotient_inputs, &vm_geometry)?;
     let vm_layout = render_vm_layout(&vm_geometry)?;
     let vm_ood_frames = render_vm_ood_frames(&vm_geometry)?;
@@ -211,8 +218,6 @@ fn check_vm_ace_stream_capacity(
 
 /// Felts reserved for the out-of-domain scatter table by `sys/vm/layout.masm`.
 const OOD_SCATTER_TABLE_FELTS: usize = 64;
-/// Offset, in felts from the table base, of the first `(destination, digest address)` pair.
-const OOD_SCATTER_SLOTS_OFFSET: usize = 4;
 
 struct VmGeometry {
     preprocessed_widths: Vec<usize>,
@@ -499,18 +504,18 @@ fn render_vm_layout(geometry: &VmGeometry) -> io::Result<String> {
              ### The internal offsets and the reserve's sufficiency are owned by the regeneration \
              tool, which\n\
              ### derives them from the AIR widths and fills `sys/vm/ood_frames.masm` accordingly.",
-            pairs_end = plan.digest_offset - 1,
-            digests = plan.digest_offset,
-            digests_end = plan.maps_offset - 1,
-            positions = plan.maps_offset,
-            positions_end = plan.maps_offset + MIDEN_AIR_COUNT - 1,
-            ids = plan.maps_offset + MIDEN_AIR_COUNT,
-            ids_end = plan.maps_offset + 2 * MIDEN_AIR_COUNT - 1,
+            pairs_end = plan.pipe_digests().start - 1,
+            digests = plan.pipe_digests().start,
+            digests_end = plan.table_felts() - 1,
+            positions = plan.table_felts(),
+            positions_end = plan.table_felts() + MIDEN_AIR_COUNT - 1,
+            ids = plan.table_felts() + MIDEN_AIR_COUNT,
+            ids_end = plan.table_felts() + 2 * MIDEN_AIR_COUNT - 1,
         ),
     )?;
 
     let positions_ptr =
-        geometry.ood_scatter_table_ptr.checked_add(plan.maps_offset).ok_or_else(|| {
+        geometry.ood_scatter_table_ptr.checked_add(plan.table_felts()).ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidData, "VM proof-order map overflows")
         })?;
     let ids_ptr = positions_ptr.checked_add(MIDEN_AIR_COUNT).ok_or_else(|| {
@@ -561,192 +566,26 @@ fn render_vm_layout(geometry: &VmGeometry) -> io::Result<String> {
     Ok(layout)
 }
 
-/// One per-AIR segment of one commitment group, together with how the hook reaches it.
-struct ScatterDispatch {
-    /// Commitment group this segment belongs to.
-    group: &'static str,
-    /// Canonical destination, in felts from the row base.
-    dst: usize,
-    /// Segment length in `adv_pipe` blocks.
-    blocks: usize,
-    /// Position of this segment within its commitment group on the wire.
-    position: usize,
-    /// Stream position in the runtime table, or `None` when the geometry fixes the segment's
-    /// place on the wire regardless of the proof order.
-    slot: Option<usize>,
-}
-
-/// Where AIR `air`'s segment of one commitment group must land, and which table slot names it.
-struct ScatterSource {
-    group: &'static str,
-    air: usize,
-    dst: usize,
-    blocks: usize,
-    group_slots_offset: usize,
-}
-
-/// Compile-time shape of the out-of-domain ingest scatter.
-struct ScatterPlan {
-    /// Stream-order dispatches for one row.
-    dispatches: Vec<ScatterDispatch>,
-    /// Per-AIR sources the order pass routes into the runtime table.
-    sources: Vec<ScatterSource>,
-    /// Distinct segment lengths, ascending; one `pipe_k` procedure each.
-    lengths: Vec<usize>,
-    /// Offset, in felts from the table base, of the first `pipe_k` digest word.
-    digest_offset: usize,
-    /// Offset, in felts from the table base, of the proof-order maps: `pos_by_id` followed by
-    /// `id_by_pos`, one felt per AIR each.
-    maps_offset: usize,
-}
-
-impl ScatterPlan {
-    /// Felt offset from the table base of the `pipe_k` digest covering `blocks`.
-    fn digest_offset_for(&self, blocks: usize) -> usize {
-        let index = self
-            .lengths
-            .iter()
-            .position(|length| *length == blocks)
-            .expect("every segment length has a pipe procedure");
-        self.digest_offset + WORD_FELTS * index
-    }
-}
-
 const WORD_FELTS: usize = 4;
 
-/// Derives the scatter's compile-time shape from the AIR widths.
-///
-/// A commitment group holding at most one non-empty segment carries no proof-order freedom: its
-/// occupant is always alone on the wire and always lands at the same canonical address, so it is
-/// dispatched directly rather than through the table. The quotient matrix is relation-wide, not
-/// per-AIR, and is likewise fixed.
-fn vm_scatter_plan(geometry: &VmGeometry) -> io::Result<ScatterPlan> {
-    let groups = [
-        ("preprocessed", &geometry.preprocessed_widths),
-        ("main", &geometry.main_widths),
-        ("aux", &geometry.aux_widths),
-    ];
-    let mut dispatches = Vec::new();
-    let mut sources = Vec::new();
-    let mut group_base = 0usize;
-    let mut slot = 0usize;
-
-    for (group, widths) in groups {
-        let occupied = widths.iter().filter(|width| **width > 0).count();
-        // Slots of one group are contiguous and indexed by proof position, so every source in
-        // the group shares this base and adds `2 * pos` at run time. `pos` ranks the AIR among
-        // *all* AIRs, which indexes the group's slots only when every AIR occupies the group. A
-        // partially occupied group would need the rank among occupants instead, which the proof
-        // order does not directly give; refuse to emit rather than silently address past the
-        // group's slots.
-        if occupied > 1 && occupied != widths.len() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "the {group} commitment group is occupied by {occupied} of {} AIRs; the \
-                     out-of-domain scatter indexes its table by proof-order position, which \
-                     requires every AIR to occupy the group",
-                    widths.len()
-                ),
-            ));
-        }
-        let group_slots_offset = OOD_SCATTER_SLOTS_OFFSET + 2 * slot;
-        let mut canonical = group_base;
-        let mut position = 0usize;
-        for (air, width) in widths.iter().enumerate() {
-            if *width == 0 {
-                continue;
-            }
-            let blocks = width * EXT_DEGREE / ADV_PIPE_BLOCK_FELTS;
-            if occupied > 1 {
-                sources.push(ScatterSource {
-                    group,
-                    air,
-                    dst: canonical,
-                    blocks,
-                    group_slots_offset,
-                });
-                dispatches.push(ScatterDispatch {
-                    group,
-                    dst: canonical,
-                    blocks,
-                    position,
-                    slot: Some(slot),
-                });
-                slot += 1;
-            } else {
-                dispatches.push(ScatterDispatch {
-                    group,
-                    dst: canonical,
-                    blocks,
-                    position,
-                    slot: None,
-                });
-            }
-            position += 1;
-            canonical += width * EXT_DEGREE;
-        }
-        group_base += widths.iter().sum::<usize>() * EXT_DEGREE;
-    }
-    dispatches.push(ScatterDispatch {
-        group: "quotient",
-        dst: group_base,
-        position: 0,
-        blocks: geometry.quotient_width * EXT_DEGREE / ADV_PIPE_BLOCK_FELTS,
-        slot: None,
-    });
-
-    let mut lengths: Vec<_> = dispatches.iter().map(|dispatch| dispatch.blocks).collect();
-    lengths.sort_unstable();
-    lengths.dedup();
-
-    // Digest words must be word-aligned, so they follow the pair table at the next word boundary.
-    let digest_offset = (OOD_SCATTER_SLOTS_OFFSET + 2 * slot).next_multiple_of(WORD_FELTS);
-    // The proof-order maps follow the digests: `pos_by_id`, then `id_by_pos`.
-    let maps_offset = digest_offset + WORD_FELTS * lengths.len();
-    let required = maps_offset + 2 * MIDEN_AIR_COUNT;
+fn vm_scatter_plan(geometry: &VmGeometry) -> io::Result<OodScatterPlan> {
+    let plan = OodScatterPlan::new(
+        &geometry.preprocessed_widths,
+        &geometry.main_widths,
+        &geometry.aux_widths,
+        geometry.quotient_width,
+    )
+    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    let required = plan.table_felts() + 2 * MIDEN_AIR_COUNT;
     if required > OOD_SCATTER_TABLE_FELTS {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "the out-of-domain scatter table and proof-order maps need {required} felts but \
-                 OOD_SCATTER_TABLE_PTR reserves {OOD_SCATTER_TABLE_FELTS}"
+                "the scatter table and proof-order maps need {required} felts but reserve {OOD_SCATTER_TABLE_FELTS}"
             ),
         ));
     }
-    if dispatches.iter().map(|dispatch| dispatch.blocks).sum::<usize>() != geometry.ood_pipe_blocks
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "the scatter dispatch table does not cover exactly one out-of-domain row",
-        ));
-    }
-
-    Ok(ScatterPlan {
-        dispatches,
-        sources,
-        lengths,
-        digest_offset,
-        maps_offset,
-    })
-}
-
-/// Emits `push.OFFSET`-free addressing of one table cell, leaving its value on the stack.
-fn scatter_cell_load(offset: usize) -> String {
-    if offset == 0 {
-        "exec.layout::ood_scatter_table_ptr mem_load".into()
-    } else {
-        format!("exec.layout::ood_scatter_table_ptr add.{offset} mem_load")
-    }
-}
-
-/// Loads one AIR's staged proof-order position, leaving it on the stack.
-fn scatter_position_load(air: usize) -> String {
-    if air == 0 {
-        "dup mem_load".into()
-    } else {
-        format!("dup add.{air} mem_load")
-    }
+    Ok(plan)
 }
 
 fn render_vm_ood_frames(geometry: &VmGeometry) -> io::Result<String> {
@@ -762,7 +601,7 @@ fn render_vm_ood_frames(geometry: &VmGeometry) -> io::Result<String> {
     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     let ids_ptr = geometry
         .ood_scatter_table_ptr
-        .checked_add(plan.maps_offset)
+        .checked_add(plan.table_felts())
         .and_then(|ptr| ptr.checked_add(MIDEN_AIR_COUNT))
         .ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidData, "VM proof-order map overflows")
@@ -777,98 +616,7 @@ fn render_vm_ood_frames(geometry: &VmGeometry) -> io::Result<String> {
     })
     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
 
-    let pipes = plan
-        .lengths
-        .iter()
-        .map(|blocks| {
-            format!(
-                "#! Absorbs {blocks} advice blocks into the row already targeted by the caller.\n\
-                 #!\n\
-                 #! Inputs:  [scratch0, scratch1, cv, ptr, alpha_ptr, acc0, acc1]\n\
-                 #! Outputs: [scratch0, scratch1, cv', ptr + {felts}, alpha_ptr, acc0', acc1']\n\
-                 proc pipe_{blocks}\n    \
-                 repeat.{blocks}\n        \
-                 adv_pipe\n        \
-                 horner_eval_ext\n        \
-                 compress\n    \
-                 end\nend\n",
-                felts = blocks * ADV_PIPE_BLOCK_FELTS,
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let digest_staging = plan
-        .lengths
-        .iter()
-        .map(|blocks| {
-            format!(
-                "    procref.pipe_{blocks} dup.4 add.{offset} mem_storew_le dropw",
-                offset = plan.digest_offset_for(*blocks),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let mut order_pass = Vec::new();
-    for air in 0..MIDEN_AIR_COUNT {
-        let sources: Vec<_> = plan.sources.iter().filter(|source| source.air == air).collect();
-        if sources.is_empty() {
-            continue;
-        }
-        let mut block = format!(
-            "\n    # AIR {air}: its pair slots start at table + 2 * pos_by_id[{air}]\n    \
-             {position} mul.2 dup.2 add\n    # => [base, pos_ptr, table]\n",
-            position = scatter_position_load(air),
-        );
-        for source in sources {
-            block += &format!(
-                "    # {group}: {blocks} blocks at row offset {dst}\n    \
-                 push.{dst} dup.1 add.{slot} mem_store\n    \
-                 dup.2 add.{digest} dup.1 add.{next} mem_store\n",
-                group = source.group,
-                blocks = source.blocks,
-                dst = source.dst,
-                slot = source.group_slots_offset,
-                digest = plan.digest_offset_for(source.blocks),
-                next = source.group_slots_offset + 1,
-            );
-        }
-        block += "    drop\n";
-        order_pass.push(block);
-    }
-
-    let ingest = plan
-        .dispatches
-        .iter()
-        .map(|dispatch| match dispatch.slot {
-            // The proof order decides which AIR sits here, so both the destination and the
-            // segment length come from the table the order pass filled.
-            Some(slot) => format!(
-                "    # {group} group, proof position {position}\n    \
-                 exec.layout::ood_scatter_table_ptr dup add.{pair} mem_load swap mem_load \
-                 add\n    swap.13 drop\n    {digest}\n    dynexec",
-                group = dispatch.group,
-                position = dispatch.position,
-                pair = OOD_SCATTER_SLOTS_OFFSET + 2 * slot,
-                digest = scatter_cell_load(OOD_SCATTER_SLOTS_OFFSET + 2 * slot + 1),
-            ),
-            None => format!(
-                "    # {group} group, sole occupant: {blocks} blocks at row offset {dst}\n    \
-                 exec.layout::ood_scatter_table_ptr mem_load{offset}\n    swap.13 drop\n    \
-                 exec.pipe_{blocks}",
-                group = dispatch.group,
-                dst = dispatch.dst,
-                offset = if dispatch.dst == 0 {
-                    String::new()
-                } else {
-                    format!(" add.{}", dispatch.dst)
-                },
-                blocks = dispatch.blocks,
-            ),
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let procedures = plan.render(&proof_order_maps);
 
     Ok(format!(
         r#"# GENERATED by `cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write` — do not edit by hand.
@@ -886,48 +634,7 @@ const NUM_AIRS = {num_airs}
 #   quotient:     {quotient} scalar evaluations
 # The advice stream supplies {ood_felts} base felts, read as {pipe_blocks} `adv_pipe` blocks.
 
-{pipes}
-{proof_order_maps}
-#! Stages the proof-order-dependent half of the out-of-domain scatter table.
-#!
-#! The proof commits each AIR's trace at its position in the height-sorted proof order, while the
-#! constraint circuit reads it at the AIR's canonical instance offset. Both the canonical
-#! destination and the segment length are compile-time per AIR; this procedure only routes them to
-#! the stream position `stage_proof_order_maps` recorded for that AIR.
-#!
-#! Must run after the proof-order maps are staged and before the first out-of-domain row is
-#! ingested.
-#!
-#! Inputs:  []
-#! Outputs: []
-pub proc stage_ood_scatter_table()
-    exec.layout::ood_scatter_table_ptr
-    # => [table]
-{digest_staging}
-    exec.layout::proof_order_positions_ptr
-    # => [pos_ptr, table]
-{order_pass}    drop drop
-end
-
-#! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
-#!
-#! Loads one OOD row from advice, absorbs it into the Eidos transcript, and updates the Horner
-#! accumulator used by the DEEP fixed terms. Both stay positional over the advice stream; the only
-#! thing the proof order moves is where each segment is stored, which the table staged by
-#! `stage_ood_scatter_table` supplies.
-#!
-#! Inputs:  [scratch0, scratch1, cv, ptr, alpha_ptr, acc0, acc1]
-#! Outputs: [scratch0, scratch1, cv', ptr + {ood_felts}, alpha_ptr, acc0', acc1']
-pub proc process_row_ood_evaluations(
-    state: types::EidosState,
-    evaluation: types::HornerState,
-) -> (types::EidosState, types::HornerState)
-    dup.12 exec.layout::ood_scatter_table_ptr mem_store
-{ingest}
-    exec.layout::ood_scatter_table_ptr mem_load add.{ood_felts}
-    swap.13 drop
-end
-"#,
+{procedures}"#,
         num_airs = MIDEN_AIR_COUNT,
         preprocessed_parts = format_sum(&geometry.preprocessed_widths),
         preprocessed = geometry.preprocessed_width,
@@ -938,8 +645,6 @@ end
         quotient = geometry.quotient_width,
         ood_felts = geometry.ood_row_felts,
         pipe_blocks = geometry.ood_pipe_blocks,
-        proof_order_maps = proof_order_maps,
-        order_pass = order_pass.join(""),
     ))
 }
 
@@ -1092,7 +797,7 @@ fn word_to_array(word: Word) -> [Felt; 4] {
 }
 
 fn render_constraints_eval_file(
-    circuit: &miden_air::ace::RecursiveAceCircuit,
+    circuit: &RecursiveAceCircuit,
     quotient_inputs: QuotientRecompositionInputs<Felt>,
     geometry: &VmGeometry,
 ) -> io::Result<String> {
@@ -1108,10 +813,10 @@ fn render_constraints_eval_file(
         // The VM's canonical READ layout reserves one fold-coefficient slot per AIR, so its
         // evaluator stages them from the proof-order maps; that block is what makes the circuit
         // order-invariant.
-        fold_coefficients: Some(FoldCoefficientStaging {
+        fold_coefficients: FoldCoefficientStaging {
             id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
             coefficient_offset: geometry.fold_coefficient_offset,
-        }),
+        },
         quotient_inputs,
         circuit_digest: circuit.commitment,
     })
@@ -1654,8 +1359,9 @@ mod tests {
 
     #[test]
     fn deep_query_loader_repeats_follow_air_geometry() {
-        let layout = recursive_verifier_input_layout().expect("recursive ACE input layout");
-        let geometry = VmGeometry::from_input_layout(&layout).expect("VM geometry");
+        let circuit = build_canonical_multi_air_ace_circuit(recursive_verifier_ace_config())
+            .expect("recursive ACE circuit");
+        let geometry = VmGeometry::from_input_layout(circuit.layout()).expect("VM geometry");
         let deep_queries = render_vm_deep_queries(&geometry).expect("render DEEP-query loaders");
 
         for (proc_name, expected) in [

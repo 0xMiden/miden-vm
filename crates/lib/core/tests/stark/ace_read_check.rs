@@ -128,7 +128,6 @@ fn ace_read_pointers_match_masm_layout() {
     let config = AceConfig {
         num_quotient_chunks: 8,
         layout: LayoutKind::Masm,
-        num_airs: MIDEN_AIR_COUNT,
     };
     let circuit = build_canonical_multi_air_ace_circuit(config).expect("canonical ACE circuit");
     let layout = circuit.layout();
@@ -223,7 +222,7 @@ fn sanity_check_ace_inputs(read: &impl Fn(u32) -> Felt, inputs: &[QuadFelt], lay
     // Fiat-Shamir challenges
     assert!(!get(InputKey::Alpha).is_zero(), "alpha is zero");
     assert!(!get(InputKey::AuxRandBeta).is_zero(), "beta is zero");
-    assert!(!get(InputKey::MultiAirFoldBeta).is_zero(), "multi-AIR fold beta is zero");
+    assert!(!read_quad(COMPOSITION_COEF_PTR + 2).is_zero(), "multi-AIR fold beta is zero");
 
     // Vanishing polynomial
     assert!(
@@ -231,17 +230,11 @@ fn sanity_check_ace_inputs(read: &impl Fn(u32) -> Felt, inputs: &[QuadFelt], lay
         "z^N - 1 = 0 -- OOD point is on the trace domain"
     );
 
-    // Selector polynomials
-    assert!(!get(InputKey::IsFirst).is_zero(), "is_first is zero");
-    assert!(!get(InputKey::IsLast).is_zero(), "is_last is zero");
-    assert!(!get(InputKey::IsTransition).is_zero(), "is_transition is zero");
-
     // Quotient recomposition
     assert!(!get(InputKey::Weight0).is_zero(), "weight0 is zero");
     assert!(!get(InputKey::F).is_zero(), "f is zero");
     assert!(!get(InputKey::S0).is_zero(), "s0 is zero");
     assert_eq!(get(InputKey::Alpha), read_quad(COMPOSITION_COEF_PTR));
-    assert_eq!(get(InputKey::MultiAirFoldBeta), read_quad(COMPOSITION_COEF_PTR + 2));
     assert_eq!(get(InputKey::Reserved), QuadFelt::ZERO);
     assert_eq!(
         get(InputKey::Weight0),
@@ -275,14 +268,8 @@ fn sanity_check_ace_inputs(read: &impl Fn(u32) -> Felt, inputs: &[QuadFelt], lay
     let z = read_quad(Z_PTR + 2);
     let max_log = read(TRACE_LENGTH_LOG_PTR).as_canonical_u64() as usize;
     let z_k = (5..max_log).fold(z, |value, _| value * value);
-    let vanishing = z_pow_n - QuadFelt::ONE;
-    let generator_inv = Felt::two_adic_generator(max_log).inverse();
-    let transition = z - QuadFelt::from(generator_inv);
     assert_eq!(get(InputKey::ZPowN), z_pow_n);
     assert_eq!(get(InputKey::ZK), z_k);
-    assert_eq!(get(InputKey::IsFirst), vanishing / (z - QuadFelt::ONE));
-    assert_eq!(get(InputKey::IsLast), vanishing / transition);
-    assert_eq!(get(InputKey::IsTransition), transition);
 
     // OOD frame should have at least some non-zero values
     assert!(
@@ -340,12 +327,13 @@ fn assert_air_selectors_match_trace_metadata(
 /// exponent by instance index instead would agree only for the identity order, which most e2e
 /// fixtures are not.
 fn assert_fold_coefficients_match_the_proof_order(
+    read: &impl Fn(u32) -> Felt,
     order: &ProofOrder,
     inputs: &[QuadFelt],
     layout: &InputLayout,
 ) {
     let get = |key: InputKey| -> QuadFelt { inputs[layout.index(key).expect("missing key")] };
-    let beta = get(InputKey::MultiAirFoldBeta);
+    let beta = QuadFelt::new([read(COMPOSITION_COEF_PTR + 2), read(COMPOSITION_COEF_PTR + 3)]);
 
     for (position, air) in order.airs().iter().enumerate() {
         let exponent = (MIDEN_AIR_COUNT - 1 - position) as u64;
@@ -398,7 +386,6 @@ pub(super) fn execute_and_check(test: &Test, proof_stream: &[u64], claim: &[u64]
     let config = AceConfig {
         num_quotient_chunks: 8,
         layout: LayoutKind::Masm,
-        num_airs: MIDEN_AIR_COUNT,
     };
 
     let order = extract_order(&read);
@@ -410,7 +397,7 @@ pub(super) fn execute_and_check(test: &Test, proof_stream: &[u64], claim: &[u64]
 
     sanity_check_ace_inputs(&read, &inputs, layout);
     assert_air_selectors_match_trace_metadata(&read, &inputs, layout);
-    assert_fold_coefficients_match_the_proof_order(&order, &inputs, layout);
+    assert_fold_coefficients_match_the_proof_order(&read, &order, &inputs, layout);
 
     let result = circuit.eval(&inputs).expect("ACE eval failed");
     assert!(

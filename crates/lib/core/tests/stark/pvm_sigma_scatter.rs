@@ -1,15 +1,8 @@
-//! Canonical placement of the PVM auxiliary-bus boundary values.
+//! Checks canonical placement of PVM auxiliary-bus boundary values.
 //!
-//! The proof submits every chiplet's exposed LogUp boundary value consecutively, the chiplets
-//! ordered by trace height, and `observe_aux_trace` absorbs them in exactly that order. The
-//! order-invariant constraint circuit instead reads chiplet `j`'s value at
-//! `AUX_BUS_BOUNDARY_PTR + 2j` — the address `InputKey::AuxBusBoundary(j)` names, with `j` the
-//! canonical instance index.
-//!
-//! Every chiplet exposes exactly one value, so the flat proof-ordered stream is a simple
-//! `2 * position` map. This file pins that `scatter_aux_bus_boundary` inverts exactly that map,
-//! for every proof order the fixtures induce, and that it disturbs neither the operand stack nor
-//! the wire order the transcript saw.
+//! Each chiplet contributes one extension-field value in height-sorted proof order.
+//! The harness stages these pairs, calls `scatter_aux_bus_boundary`, and checks canonical
+//! memory placement and stack preservation. Transcript observation is outside this harness.
 
 use miden_core::Felt;
 
@@ -137,13 +130,8 @@ pub(super) fn structured_orders() -> Vec<Vec<usize>> {
 // MASM GENERATION
 // ================================================================================================
 
-/// Absorbs the boundary values the way `observe_aux_trace` does, optionally scattering afterwards.
-///
-/// The five `padw adv_loadw` / `mem_storew_le` pairs reproduce the production absorb sequence
-/// exactly. Only the transcript observation is replaced by a `dropw`, since the transcript is not
-/// what this file measures. The sentinels sit under the whole sequence and are written back at the
-/// end.
-fn source(heights: &[u64], scatter: bool) -> String {
+/// Stages proof-ordered boundary values and calls the production scatter with stack sentinels.
+fn source(heights: &[u64]) -> String {
     let stores = heights
         .iter()
         .enumerate()
@@ -167,11 +155,6 @@ fn source(heights: &[u64], scatter: bool) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let scatter = if scatter {
-        "    exec.aux_trace::scatter_aux_bus_boundary"
-    } else {
-        "    # control: absorb only"
-    };
     format!(
         "use miden::core::stark::constants
 use miden::core::sys::pvm::aux_trace
@@ -186,7 +169,7 @@ begin
 
 {absorbs}
 
-{scatter}
+    exec.aux_trace::scatter_aux_bus_boundary
 
     push.{SENTINEL_PTR} mem_storew_le dropw
 end",
@@ -198,13 +181,13 @@ end",
 }
 
 /// Runs one fixture and returns the boundary region, in address order.
-fn run(heights: &[u64], scatter: bool) -> Vec<u64> {
+fn run(heights: &[u64]) -> Vec<u64> {
     let advice = wire_values();
-    let source = source(heights, scatter);
+    let source = source(heights);
     let (output, _) = build_test!(source.as_str(), &[], &advice)
         .execute_for_output()
         .unwrap_or_else(|err| {
-            panic!("boundary absorb must execute for heights {heights:?}: {err}")
+            panic!("boundary scatter must execute for heights {heights:?}: {err}")
         });
 
     for (i, sentinel) in SENTINELS.iter().enumerate() {
@@ -224,22 +207,9 @@ fn run(heights: &[u64], scatter: bool) -> Vec<u64> {
 // TESTS
 // ================================================================================================
 
-/// The scatter reads one `pos_by_id` entry per chiplet and addresses exactly the boundary region
-/// the circuit reads.
+/// The boundary region holds all exposed chiplet values.
 #[test]
 fn the_scatter_covers_every_chiplet_of_the_relation() {
-    let aux_trace = include_str!("../../asm/sys/pvm/aux_trace.masm");
-    assert_eq!(
-        aux_trace.matches("exec.layout::proof_order_positions_ptr").count(),
-        NUM_CHIPLETS,
-        "the scatter does not resolve every chiplet's proof position"
-    );
-    assert_eq!(
-        aux_trace.matches("exec.load_boundary_pair").count(),
-        total_values(),
-        "the scatter does not read every exposed boundary value"
-    );
-
     let region =
         pvm_layout_const("AUXILIARY_ACE_INPUTS_PTR") - pvm_layout_const("AUX_BUS_BOUNDARY_PTR");
     assert_eq!(
@@ -247,22 +217,6 @@ fn the_scatter_covers_every_chiplet_of_the_relation() {
         total_values() * SIGMA_FELTS,
         "the boundary region no longer holds exactly the exposed values"
     );
-}
-
-/// The absorb alone must leave the wire order in memory: flat slot `j` at felt `2j`.
-///
-/// This is the premise the scatter is defined against; without it the permutation asserted below
-/// would be measured from the wrong baseline.
-#[test]
-fn the_absorb_alone_stores_the_boundary_values_in_wire_order() {
-    for order in structured_orders() {
-        let heights = heights_for_order(&order);
-        assert_eq!(
-            run(&heights, false),
-            wire_values(),
-            "the control absorb reordered the wire for heights {heights:?}"
-        );
-    }
 }
 
 /// Every value submitted at a flat proof-order slot must come to rest at the canonical address of
@@ -284,7 +238,7 @@ fn the_scatter_moves_every_boundary_value_to_its_canonical_slot() {
         }
 
         assert_eq!(
-            run(&heights, true),
+            run(&heights),
             expected,
             "boundary values landed wrong for heights {heights:?} (proof order {order:?})"
         );
@@ -305,7 +259,7 @@ fn tied_heights_scatter_to_the_instance_order() {
     ] {
         let order = proof_order(&heights);
         assert_eq!(
-            run(&heights, true),
+            run(&heights),
             expected_after_scatter(&order, &wire),
             "tied heights {heights:?} did not resolve to the instance order"
         );

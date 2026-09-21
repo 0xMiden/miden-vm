@@ -15,7 +15,7 @@
 //! use miden_ace_codegen::{AceConfig, LayoutKind, build_ace_circuit_for_air};
 //! use miden_air::ChipletsAir;
 //!
-//! let config = AceConfig { num_quotient_chunks: 8, layout: LayoutKind::Masm, num_airs: 1 };
+//! let config = AceConfig { num_quotient_chunks: 8, layout: LayoutKind::Masm };
 //! let circuit = build_ace_circuit_for_air(&ChipletsAir, config)?;
 //! ```
 //!
@@ -31,6 +31,7 @@
 //! - `proof_order`: Lehmer ranking and the sorting network of a relation's committed-trace
 //!   orderings.
 //! - `order_maps`: shared renderer for the MASM proof-order pass that materializes inverse maps.
+//! - `ood_scatter`: shared OOD scatter planning and MASM procedure generation.
 
 // Core IR and lowering.
 mod circuit;
@@ -40,6 +41,7 @@ mod dag;
 mod encode;
 mod layout;
 mod masm;
+mod ood_scatter;
 mod order_maps;
 mod proof_order;
 mod quotient;
@@ -75,13 +77,14 @@ pub use crate::dag::{PeriodicColumnData, build_verifier_dag, build_verifier_dag_
 pub use crate::{
     circuit::{AceCircuit, emit_circuit},
     dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
-    encode::EncodedCircuit,
+    encode::{EncodedCircuit, RecursiveAceCircuit},
     layout::{InputCounts, InputKey, InputLayout},
     masm::{FoldCoefficientStaging, MasmConstraintsEvalConfig, render_masm_constraints_eval},
+    ood_scatter::OodScatterPlan,
     order_maps::{ProofOrderMapsConfig, render_proof_order_maps},
     pipeline::{
         AceArtifacts, AceConfig, LayoutKind, build_ace_circuit_for_air, build_ace_dag_for_air,
-        build_canonical_multi_air_ace_circuit, build_multi_air_ace_circuit,
+        build_canonical_multi_air_ace_circuit,
     },
     proof_order::{MAX_ORDER_AIRS, factorial, order_from_tag, order_tag},
 };

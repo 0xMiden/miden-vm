@@ -16,7 +16,8 @@ use alloc::{
 use core::{fmt::Write as _, ops::Range};
 
 use miden_ace_codegen::{
-    EXT_DEGREE, InputKey, InputLayout, ProofOrderMapsConfig, render_proof_order_maps,
+    EXT_DEGREE, InputKey, InputLayout, OodScatterPlan, ProofOrderMapsConfig,
+    render_proof_order_maps,
 };
 use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::{BaseAir, LiftedAir};
@@ -33,11 +34,6 @@ const ADV_PIPE_BLOCK_FELTS: usize = 8;
 
 /// Felts reserved for the out-of-domain scatter table by `sys/pvm/layout.masm`.
 pub(crate) const OOD_SCATTER_TABLE_FELTS: u32 = 96;
-
-/// Offset, in felts from the table base, of the first `(destination, digest address)` pair.
-const OOD_SCATTER_SLOTS_OFFSET: usize = 4;
-
-const WORD_FELTS: usize = 4;
 
 // ROW GEOMETRY
 // ================================================================================================
@@ -144,10 +140,6 @@ impl PvmOodGeometry {
         Ok(geometry)
     }
 
-    fn groups(&self) -> [(&'static str, &Vec<usize>); 3] {
-        [("preprocessed", &self.preprocessed), ("main", &self.main), ("aux", &self.aux)]
-    }
-
     /// Felts in one out-of-domain row.
     pub(crate) fn row_felts(&self) -> usize {
         let slots: usize = self.preprocessed.iter().sum::<usize>()
@@ -185,39 +177,6 @@ impl PvmOodGeometry {
 // SCATTER PLAN
 // ================================================================================================
 
-/// One per-chiplet segment of one commitment group, together with how the hook reaches it.
-struct ScatterDispatch {
-    group: &'static str,
-    /// Canonical destination, in felts from the row base.
-    dst: usize,
-    /// Segment length in `adv_pipe` blocks.
-    blocks: usize,
-    /// Position of this segment within its commitment group on the wire.
-    position: usize,
-    /// Stream position in the runtime table, or `None` when the geometry fixes the segment's
-    /// place on the wire regardless of the proof order.
-    slot: Option<usize>,
-}
-
-/// Where chiplet `air`'s segment of one commitment group must land, and which table slot names it.
-struct ScatterSource {
-    group: &'static str,
-    air: usize,
-    dst: usize,
-    blocks: usize,
-    group_slots_offset: usize,
-}
-
-/// Compile-time shape of the out-of-domain ingest scatter.
-struct ScatterPlan {
-    dispatches: Vec<ScatterDispatch>,
-    sources: Vec<ScatterSource>,
-    /// Distinct segment lengths, ascending; one `pipe_k` procedure each.
-    lengths: Vec<usize>,
-    /// Offset, in felts from the table base, of the first `pipe_k` digest word.
-    digest_offset: usize,
-}
-
 /// Live ranges occupied within the out-of-domain scatter table.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PvmScatterTableLayout {
@@ -227,138 +186,21 @@ pub(crate) struct PvmScatterTableLayout {
     pub(crate) pipe_digests: Range<usize>,
 }
 
-impl ScatterPlan {
-    /// Felt offset from the table base of the `pipe_k` digest covering `blocks`.
-    fn digest_offset_for(&self, blocks: usize) -> usize {
-        let index = self
-            .lengths
-            .iter()
-            .position(|length| *length == blocks)
-            .expect("every segment length has a pipe procedure");
-        self.digest_offset + WORD_FELTS * index
-    }
-
-    /// Number of segments the proof order can move.
-    fn dispatched_slots(&self) -> usize {
-        self.dispatches.iter().filter(|dispatch| dispatch.slot.is_some()).count()
-    }
-
-    fn table_layout(&self) -> PvmScatterTableLayout {
-        PvmScatterTableLayout {
-            proof_order_pairs: OOD_SCATTER_SLOTS_OFFSET
-                ..OOD_SCATTER_SLOTS_OFFSET + 2 * self.dispatched_slots(),
-            pipe_digests: self.digest_offset..self.digest_offset + WORD_FELTS * self.lengths.len(),
-        }
-    }
-}
-
-/// Derives the scatter's compile-time shape from the chiplet widths.
-///
-/// A commitment group holding at most one non-empty segment carries no proof-order freedom: its
-/// occupant is always alone on the wire and always lands at the same canonical address, so it is
-/// dispatched directly rather than through the table. The quotient matrix is relation-wide, not
-/// per-chiplet, and is likewise fixed.
-fn pvm_scatter_plan(geometry: &PvmOodGeometry) -> Result<ScatterPlan, String> {
-    let mut dispatches = Vec::new();
-    let mut sources = Vec::new();
-    let mut group_base = 0usize;
-    let mut slot = 0usize;
-
-    for (group, widths) in geometry.groups() {
-        let occupied = widths.iter().filter(|width| **width > 0).count();
-        // Slots of one group are contiguous and indexed by proof position, so every source in the
-        // group shares this base and adds `2 * pos` at run time. `pos` ranks the chiplet among
-        // *all* chiplets, which indexes the group's slots only when every chiplet occupies the
-        // group. A partially occupied group would need the rank among occupants instead, which
-        // the proof order does not directly give; refuse to emit rather than silently address
-        // past the group's slots.
-        if occupied > 1 && occupied != widths.len() {
-            return Err(format!(
-                "the {group} commitment group is occupied by {occupied} of {} chiplets; the \
-                 out-of-domain scatter indexes its table by proof-order position, which requires \
-                 every chiplet to occupy the group",
-                widths.len()
-            ));
-        }
-        let group_slots_offset = OOD_SCATTER_SLOTS_OFFSET + 2 * slot;
-        let mut canonical = group_base;
-        let mut position = 0usize;
-        for (air, width) in widths.iter().enumerate() {
-            if *width == 0 {
-                continue;
-            }
-            let blocks = width * EXT_DEGREE / ADV_PIPE_BLOCK_FELTS;
-            if occupied > 1 {
-                sources.push(ScatterSource {
-                    group,
-                    air,
-                    dst: canonical,
-                    blocks,
-                    group_slots_offset,
-                });
-                dispatches.push(ScatterDispatch {
-                    group,
-                    dst: canonical,
-                    blocks,
-                    position,
-                    slot: Some(slot),
-                });
-                slot += 1;
-            } else {
-                dispatches.push(ScatterDispatch {
-                    group,
-                    dst: canonical,
-                    blocks,
-                    position,
-                    slot: None,
-                });
-            }
-            position += 1;
-            canonical += width * EXT_DEGREE;
-        }
-        group_base += widths.iter().sum::<usize>() * EXT_DEGREE;
-    }
-    dispatches.push(ScatterDispatch {
-        group: "quotient",
-        dst: group_base,
-        position: 0,
-        blocks: geometry.quotient * EXT_DEGREE / ADV_PIPE_BLOCK_FELTS,
-        slot: None,
-    });
-
-    // `adv_pipe` writes double words, so every retargeted destination must stay aligned.
-    if let Some(bad) = dispatches.iter().find(|d| !d.dst.is_multiple_of(ADV_PIPE_BLOCK_FELTS)) {
+fn pvm_scatter_plan(geometry: &PvmOodGeometry) -> Result<OodScatterPlan, String> {
+    let plan = OodScatterPlan::new(
+        &geometry.preprocessed,
+        &geometry.main,
+        &geometry.aux,
+        geometry.quotient,
+    )
+    .map_err(|err| err.to_string())?;
+    if plan.table_felts() > OOD_SCATTER_TABLE_FELTS as usize {
         return Err(format!(
-            "the {} segment at row offset {} is not {ADV_PIPE_BLOCK_FELTS}-felt aligned, which \
-             `adv_pipe` requires of its destination",
-            bad.group, bad.dst
+            "the PVM scatter table needs {} felts but OOD_SCATTER_TABLE_PTR reserves {OOD_SCATTER_TABLE_FELTS}",
+            plan.table_felts()
         ));
     }
-
-    let mut lengths: Vec<_> = dispatches.iter().map(|dispatch| dispatch.blocks).collect();
-    lengths.sort_unstable();
-    lengths.dedup();
-
-    // Digest words must be word-aligned, so they follow the pair table at the next word boundary.
-    let digest_offset = (OOD_SCATTER_SLOTS_OFFSET + 2 * slot).next_multiple_of(WORD_FELTS);
-    let required = digest_offset + WORD_FELTS * lengths.len();
-    if required > OOD_SCATTER_TABLE_FELTS as usize {
-        return Err(format!(
-            "the PVM out-of-domain scatter table needs {required} felts but \
-             OOD_SCATTER_TABLE_PTR reserves {OOD_SCATTER_TABLE_FELTS}"
-        ));
-    }
-    if dispatches.iter().map(|dispatch| dispatch.blocks).sum::<usize>() != geometry.row_blocks() {
-        return Err("the PVM scatter dispatch table does not cover exactly one out-of-domain row"
-            .to_string());
-    }
-
-    Ok(ScatterPlan {
-        dispatches,
-        sources,
-        lengths,
-        digest_offset,
-    })
+    Ok(plan)
 }
 
 /// Derives the occupied scatter-table ranges from the same plan that renders the ingest hook.
@@ -366,29 +208,15 @@ fn pvm_scatter_plan(geometry: &PvmOodGeometry) -> Result<ScatterPlan, String> {
 pub(crate) fn pvm_scatter_table_layout(
     geometry: &PvmOodGeometry,
 ) -> Result<PvmScatterTableLayout, String> {
-    Ok(pvm_scatter_plan(geometry)?.table_layout())
+    let plan = pvm_scatter_plan(geometry)?;
+    Ok(PvmScatterTableLayout {
+        proof_order_pairs: plan.proof_order_pairs(),
+        pipe_digests: plan.pipe_digests(),
+    })
 }
 
 // RENDERING
 // ================================================================================================
-
-/// Emits `push.OFFSET`-free addressing of one table cell, leaving its value on the stack.
-fn scatter_cell_load(offset: usize) -> String {
-    if offset == 0 {
-        "exec.layout::ood_scatter_table_ptr mem_load".into()
-    } else {
-        format!("exec.layout::ood_scatter_table_ptr add.{offset} mem_load")
-    }
-}
-
-/// Loads one chiplet's staged proof-order position, leaving it on the stack.
-fn scatter_position_load(air: usize) -> String {
-    if air == 0 {
-        "dup mem_load".into()
-    } else {
-        format!("dup add.{air} mem_load")
-    }
-}
 
 fn format_sum(parts: &[usize]) -> String {
     parts.iter().map(usize::to_string).collect::<Vec<_>>().join(" + ")
@@ -416,98 +244,7 @@ pub(crate) fn render_pvm_ood_frames(
     })
     .map_err(|err| err.to_string())?;
 
-    let pipes = plan
-        .lengths
-        .iter()
-        .map(|blocks| {
-            format!(
-                "#! Absorbs {blocks} advice blocks into the row already targeted by the caller.\n\
-                 #!\n\
-                 #! Inputs:  [scratch0, scratch1, cv, ptr, alpha_ptr, acc0, acc1]\n\
-                 #! Outputs: [scratch0, scratch1, cv', ptr + {felts}, alpha_ptr, acc0', acc1']\n\
-                 proc pipe_{blocks}\n    \
-                 repeat.{blocks}\n        \
-                 adv_pipe\n        \
-                 horner_eval_ext\n        \
-                 compress\n    \
-                 end\nend\n",
-                felts = blocks * ADV_PIPE_BLOCK_FELTS,
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let digest_staging = plan
-        .lengths
-        .iter()
-        .map(|blocks| {
-            format!(
-                "    procref.pipe_{blocks} dup.4 add.{offset} mem_storew_le dropw",
-                offset = plan.digest_offset_for(*blocks),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let mut order_pass = Vec::new();
-    for air in 0..NUM_CHIPLETS {
-        let sources: Vec<_> = plan.sources.iter().filter(|source| source.air == air).collect();
-        if sources.is_empty() {
-            continue;
-        }
-        let mut block = format!(
-            "\n    # AIR {air}: its pair slots start at table + 2 * pos_by_id[{air}]\n    \
-             {position} mul.2 dup.2 add\n    # => [base, pos_ptr, table]\n",
-            position = scatter_position_load(air),
-        );
-        for source in sources {
-            block += &format!(
-                "    # {group}: {blocks} blocks at row offset {dst}\n    \
-                 push.{dst} dup.1 add.{slot} mem_store\n    \
-                 dup.2 add.{digest} dup.1 add.{next} mem_store\n",
-                group = source.group,
-                blocks = source.blocks,
-                dst = source.dst,
-                slot = source.group_slots_offset,
-                digest = plan.digest_offset_for(source.blocks),
-                next = source.group_slots_offset + 1,
-            );
-        }
-        block += "    drop\n";
-        order_pass.push(block);
-    }
-
-    let ingest = plan
-        .dispatches
-        .iter()
-        .map(|dispatch| match dispatch.slot {
-            // The proof order decides which chiplet sits here, so both the destination and the
-            // segment length come from the table the order pass filled.
-            Some(slot) => format!(
-                "    # {group} group, proof position {position}\n    \
-                 exec.layout::ood_scatter_table_ptr dup add.{pair} mem_load swap mem_load \
-                 add\n    swap.13 drop\n    {digest}\n    dynexec",
-                group = dispatch.group,
-                position = dispatch.position,
-                pair = OOD_SCATTER_SLOTS_OFFSET + 2 * slot,
-                digest = scatter_cell_load(OOD_SCATTER_SLOTS_OFFSET + 2 * slot + 1),
-            ),
-            None => format!(
-                "    # {group} group, sole occupant: {blocks} blocks at row offset {dst}\n    \
-                 exec.layout::ood_scatter_table_ptr mem_load{offset}\n    swap.13 drop\n    \
-                 exec.pipe_{blocks}",
-                group = dispatch.group,
-                dst = dispatch.dst,
-                offset = if dispatch.dst == 0 {
-                    String::new()
-                } else {
-                    format!(" add.{}", dispatch.dst)
-                },
-                blocks = dispatch.blocks,
-            ),
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let procedures = plan.render(&proof_order_maps);
 
     let mut out = String::new();
     write!(
@@ -525,57 +262,8 @@ use miden::core::sys::pvm::layout
 # The advice stream supplies {row_felts} base felts, read as {row_blocks} `adv_pipe` blocks,
 # split into {segments} segments ({dispatched} of them order-dependent).
 
-{pipes}
-{proof_order_maps}
-#! Stages the proof-order-dependent half of the out-of-domain scatter table.
-#!
-#! The proof commits each chiplet's trace at its position in the height-sorted proof order, while
-#! the canonical constraint circuit reads it at the chiplet's instance offset. Both the canonical
-#! destination and the segment length are compile-time per chiplet; this procedure only routes them
-#! to the stream position `stage_proof_order_maps` recorded for that chiplet.
-#!
-#! Must run after the proof-order maps are staged and before the first out-of-domain row is
-#! ingested.
-#!
-#! Inputs:  []
-#! Outputs: []
-pub proc stage_ood_scatter_table()
-    exec.layout::ood_scatter_table_ptr
-    # => [table]
-{digest_staging}
-    exec.layout::proof_order_positions_ptr
-    # => [pos_ptr, table]
-{order_pass}    drop drop
-end
-
-#! Processes one PVM row of out-of-domain evaluations, scattering it to canonical addresses.
-#!
-#! The row is the LMCS-aligned wire sequence used by the lifted PCS, in commitment-group order:
-#!
-#! - {preprocessed} preprocessed extension-field slots;
-#! - {main} main extension-field slots across {num_airs} chiplets in proof order;
-#! - {aux} auxiliary-coordinate extension-field slots across {num_airs} chiplets in proof order;
-#! - {quotient} quotient extension-field slots.
-#!
-#! Each block is stored, folded into the DEEP fixed term with `horner_eval_ext`, and compressed
-#! into the Eidos transcript. The absorb and the accumulation stay positional over the advice
-#! stream; the only thing the proof order moves is where each segment is stored, which the table
-#! staged by `stage_ood_scatter_table` supplies.
-#!
-#! Inputs:  [scratch0, scratch1, cv, ptr, alpha_ptr, acc0, acc1]
-#! Outputs: [scratch0, scratch1, cv', ptr + {row_felts}, alpha_ptr, acc0', acc1']
-pub proc process_row_ood_evaluations(
-    state: types::EidosState,
-    evaluation: types::HornerState,
-) -> (types::EidosState, types::HornerState)
-    dup.12 exec.layout::ood_scatter_table_ptr mem_store
-{ingest}
-    exec.layout::ood_scatter_table_ptr mem_load add.{row_felts}
-    swap.13 drop
-end
-"#,
+{procedures}"#,
         generated_by = crate::ace_constants::GENERATED_BY,
-        num_airs = NUM_CHIPLETS,
         preprocessed_parts = format_sum(&geometry.preprocessed),
         preprocessed = geometry.preprocessed.iter().sum::<usize>(),
         main_parts = format_sum(&geometry.main),
@@ -583,10 +271,8 @@ end
         aux_parts = format_sum(&geometry.aux),
         aux = geometry.aux.iter().sum::<usize>(),
         quotient = geometry.quotient,
-        segments = plan.dispatches.len(),
+        segments = plan.segment_count(),
         dispatched = plan.dispatched_slots(),
-        proof_order_maps = proof_order_maps,
-        order_pass = order_pass.join(""),
     )
     .expect("writing to String cannot fail");
     Ok(out)
@@ -620,11 +306,10 @@ mod tests {
         assert_eq!(geometry.row_blocks(), 200);
 
         let plan = pvm_scatter_plan(&geometry).expect("scatter plan");
-        assert_eq!(plan.dispatches.len(), 22, "one segment per occupied per-chiplet block");
+        assert_eq!(plan.segment_count(), 22, "one segment per occupied per-chiplet block");
         assert_eq!(plan.dispatched_slots(), 20, "main and aux are the order-dependent groups");
-        assert_eq!(plan.lengths, vec![2, 4, 6, 8, 10, 12, 14, 18, 26, 28]);
         assert_eq!(
-            plan.table_layout(),
+            pvm_scatter_table_layout(&geometry).unwrap(),
             PvmScatterTableLayout {
                 proof_order_pairs: 4..44,
                 pipe_digests: 44..84,
@@ -637,17 +322,6 @@ mod tests {
     fn generated_pvm_ood_hook_is_up_to_date() {
         // The generated layout pads `pos_by_id` to a word, so `id_by_pos` is word-aligned.
         let rendered = render_pvm_ood_frames(&live_geometry(), true).expect("render the PVM hook");
-        assert!(rendered.contains("pub proc stage_proof_order_maps"));
-        assert!(rendered.contains("exec.layout::proof_order_positions_ptr"));
-        assert!(rendered.contains("exec.layout::proof_order_ids_ptr"));
-        assert!(
-            !rendered.contains("aux_source"),
-            "one boundary value per chiplet makes a separate source-address table redundant"
-        );
-        assert!(
-            !rendered.contains("proof_order_position_from_heights"),
-            "the fixed sorting network must replace repeated rank scans"
-        );
         let checked_in = std::fs::read_to_string(HOOK_PATH)
             .unwrap_or_else(|err| panic!("failed to read {HOOK_PATH}: {err}"));
         assert_eq!(

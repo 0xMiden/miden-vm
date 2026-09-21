@@ -11,9 +11,9 @@
 mod multi_air;
 mod recursive;
 
-pub use multi_air::{build_canonical_multi_air_ace_circuit, build_multi_air_ace_circuit_for_order};
+pub use multi_air::build_canonical_multi_air_ace_circuit;
 #[cfg(feature = "std")]
 pub use recursive::shared_recursive_circuit;
 pub use recursive::{
-    RecursiveAceCircuit, build_recursive_verifier_ace_circuit, recursive_verifier_input_layout,
+    RecursiveAceCircuit, build_recursive_verifier_ace_circuit, recursive_verifier_ace_config,
 };

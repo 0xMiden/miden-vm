@@ -14,8 +14,6 @@ pub enum InputKey {
     AuxRandAlpha,
     /// Aux randomness beta supplied as an input.
     AuxRandBeta,
-    /// Challenge used to fold per-AIR constraint roots in proof order.
-    MultiAirFoldBeta,
     /// Fold coefficient for the AIR instance at the given index.
     ///
     /// Has a real READ-layout slot. Each relation's generated evaluator
@@ -86,11 +84,6 @@ impl InputKeyMapper<'_> {
             InputKey::Public(i) => layout.regions.public_values.index(i),
             InputKey::AuxRandAlpha => Some(layout.aux_rand_alpha),
             InputKey::AuxRandBeta => Some(layout.aux_rand_beta),
-            InputKey::MultiAirFoldBeta => layout.stark.multi_air_fold_beta_index(),
-            // Present in the READ layout only under a canonical composition; the per-order
-            // oracle composition leaves `fold_coeff_start` unset and this falls through to
-            // `None`, since `build_multi_air_ace_circuit` bakes each AIR's fold coefficient
-            // into that order's circuit gates directly instead of reading it.
             InputKey::MultiAirFoldCoeff(i) => layout.stark.multi_air_fold_coeff_index(i),
             InputKey::Preprocessed { offset, index } => match offset {
                 0 => layout.regions.preprocessed_curr.index(index),

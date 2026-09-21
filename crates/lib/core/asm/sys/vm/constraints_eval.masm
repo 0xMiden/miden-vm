@@ -38,10 +38,10 @@ const QUOTIENT_FIRST_WEIGHT = 8868329529835627796
 
 # Eidos digest of the ACE circuit stream this relation accepts. One circuit serves
 # every proof order, so it is the advice-map key and the value the loader pins.
-const ACE_CIRCUIT_DIGEST_0 = 4750678884012070358
-const ACE_CIRCUIT_DIGEST_1 = 7527550081110780464
-const ACE_CIRCUIT_DIGEST_2 = 3559099128752756335
-const ACE_CIRCUIT_DIGEST_3 = 7795140197938060971
+const ACE_CIRCUIT_DIGEST_0 = 3943868058913158222
+const ACE_CIRCUIT_DIGEST_1 = 1667161638981262072
+const ACE_CIRCUIT_DIGEST_2 = 441171816768957650
+const ACE_CIRCUIT_DIGEST_3 = 828109291750263699
 
 # ERRORS
 # =================================================================================================
@@ -114,7 +114,7 @@ end
 #! Outputs: []
 proc stage_air_fold_coefficients
     exec.layout::proof_order_ids_ptr
-    exec.layout::auxiliary_ace_inputs_ptr add.46
+    exec.layout::auxiliary_ace_inputs_ptr add.44
     padw exec.constants::composition_coef_ptr mem_loadw_le drop drop
     push.0.1
     # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]

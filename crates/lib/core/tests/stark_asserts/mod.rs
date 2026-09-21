@@ -261,7 +261,7 @@ fn check_pow_invalid_has_message() {
 // walk against the Rust power oracle.
 
 /// Base offset, in felts from the relation's stark-vars base, of AIR 0's selector triple.
-const FIRST_SELECTOR_OFFSET: u32 = 22;
+const FIRST_SELECTOR_OFFSET: u32 = 20;
 /// Felts per AIR in the selector block (three EF-valued selectors).
 const SELECTOR_STRIDE: u32 = 6;
 
@@ -547,16 +547,13 @@ fn stage_air_fold_coefficients_offset_matches_the_canonical_ace_layout() {
     };
 
     for num_airs in 2..=miden_ace_codegen::MAX_ORDER_AIRS {
-        let layout = InputLayout::new_masm_canonical_multi_air(counts, num_airs);
-        let first_selector = layout
-            .index(InputKey::IsFirstAir(0))
-            .expect("canonical layout has per-AIR selectors");
+        let layout = InputLayout::new_masm_multi_air(counts, num_airs);
+        let stark_base = layout.index(InputKey::Alpha).expect("alpha starts the stark-vars block");
         for k in 0..num_airs {
             let coeff = layout
                 .index(InputKey::MultiAirFoldCoeff(k))
                 .expect("canonical layout has per-AIR fold coefficients");
-            let layout_offset =
-                FIRST_SELECTOR_OFFSET as usize + (coeff - first_selector) * EXT_DEGREE;
+            let layout_offset = (coeff - stark_base) * EXT_DEGREE;
             let masm_offset = FIRST_SELECTOR_OFFSET as usize
                 + SELECTOR_STRIDE as usize * num_airs
                 + EXT_DEGREE * k;

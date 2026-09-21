@@ -48,6 +48,41 @@ pub struct EncodedCircuit {
     instructions: Vec<Felt>,
 }
 
+/// Encoded recursive-verifier circuit and the metadata consumed by MASM.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecursiveAceCircuit {
+    /// Number of ACE READ variables, including constants and padding.
+    pub num_inputs: usize,
+    /// Number of ACE EVAL rows.
+    pub num_eval_gates: usize,
+    /// Instruction stream length in base-field elements.
+    pub stream_len: usize,
+    /// Eidos commitment authenticating the complete instruction stream.
+    pub commitment: Word,
+    /// Encoded instructions consumed by `eval_circuit`.
+    pub instructions: Vec<Felt>,
+}
+
+impl TryFrom<EncodedCircuit> for RecursiveAceCircuit {
+    type Error = AceError;
+
+    fn try_from(encoded: EncodedCircuit) -> Result<Self, Self::Error> {
+        let stream_len = encoded.size_in_felt();
+        if !stream_len.is_multiple_of(ADV_PIPE_BLOCK_FELTS) {
+            return Err(AceError::InvalidInputLayout {
+                message: "ACE circuit stream must be 8-felt aligned for adv_pipe".into(),
+            });
+        }
+        Ok(Self {
+            num_inputs: encoded.num_vars(),
+            num_eval_gates: encoded.num_eval_rows(),
+            stream_len,
+            commitment: encoded.circuit_hash(),
+            instructions: encoded.instructions,
+        })
+    }
+}
+
 impl EncodedCircuit {
     /// Number of ACE READ rows (two EF nodes per row).
     pub fn num_read_rows(&self) -> usize {
