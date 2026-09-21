@@ -95,7 +95,7 @@ where
                 let products = basis_cache
                     .entry(log_pow_col)
                     .or_insert_with(|| BasisProducts::new(builder, z_col, basis));
-                // Positive classes first, so a subtracted class never starts from zero.
+                // Process coefficients other than -1 first, then subtract the -1 groups.
                 let mut sum = builder.constant(*offset);
                 for subtract in [false, true] {
                     for class in classes {
@@ -161,9 +161,12 @@ where
 /// Prefix and suffix products of a subgroup's linear factors `point - roots[k]`, from which every
 /// Lagrange basis element is assembled without inversion.
 ///
-/// The prefix chain is seeded with the inverse period, so `prefix[j] * suffix[j]` is
-/// `period_inv * Π_{k != j} (point - roots[k])`. Elements are built on demand: emission keeps every
-/// node, so an element no column reads must not be created.
+/// `prefix[j]` contains the factors before position `j`, scaled by the inverse period;
+/// `suffix[j]` contains those after it. Thus `prefix[j] * suffix[j]` omits the factor at `j`.
+/// For period four, writing `d_k = point - roots[k]` gives
+/// `L_2 = roots[2] * ((d_0*d_1)/4) * d_3`; the division uses the precomputed inverse period.
+/// Elements are built on demand: emission keeps every node, so an element no column reads must
+/// not be created.
 struct BasisProducts {
     prefix: Vec<NodeId>,
     suffix: Vec<NodeId>,

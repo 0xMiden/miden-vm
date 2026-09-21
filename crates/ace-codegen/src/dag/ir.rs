@@ -116,7 +116,7 @@ impl<EF> LagrangeBasis<EF> {
 
 /// The in-circuit evaluation form chosen for a single periodic column.
 ///
-/// The cheapest representation is selected from the column values when the data is built; the
+/// The representation is selected from the column values using estimated circuit costs; the
 /// lowering emits nodes for whichever form each column carries.
 #[derive(Debug, Clone)]
 pub(crate) enum PeriodicColumn<EF> {
@@ -157,14 +157,18 @@ pub struct PeriodicColumnData<EF> {
 }
 
 impl<EF> PeriodicColumnData<EF> {
-    /// Convert periodic columns (evaluations) into their cheapest in-circuit form.
+    /// Choose an in-circuit form for each periodic column using estimated costs.
     ///
-    /// Each column is first lowered to whichever of two standalone representations yields the
-    /// smaller circuit: dense monomial-basis coefficients (via an inverse DFT) evaluated by
-    /// Horner, or a sparse Lagrange form over the column's nonzero evaluations. Columns of one
-    /// period may instead share that period's Lagrange basis, whose fixed cost is paid
-    /// once; a period adopts the basis only when its columns' combined savings exceed that cost.
-    /// The choice depends only on the column values, so it is fixed at construction.
+    /// Each column starts with dense Horner or sparse Lagrange evaluation, whichever has the
+    /// lower estimated operation count. Columns of the same period may instead share one
+    /// Lagrange basis. Prefix/suffix products reuse factors when building the basis, equal column
+    /// values share a multiplication, and a constant offset leaves only corrections to evaluate.
+    /// This is useful for columns with repeated values or mostly constant entries.
+    ///
+    /// For each period, sum positive estimated savings over distinct, nonconstant columns. Use
+    /// sharing only if that sum exceeds the estimated basis setup cost, and switch only columns
+    /// whose individual estimates improve. The estimates include arithmetic and constant storage,
+    /// but do not capture every simplification or shared expression in the final DAG.
     pub fn from_periodic_columns<F>(periodic_columns: Vec<Vec<F>>) -> Self
     where
         F: TwoAdicField,
@@ -277,11 +281,13 @@ fn basis_overhead_felts(period: usize) -> usize {
     5 * period + CONSTANT_FELTS * (period + 1)
 }
 
-/// Chooses how a column combines basis elements: either every nonzero value class with its value
-/// as coefficient, or, since the basis sums to one, the dominant nonzero value `d` as the offset
-/// with every other class (including zeros) weighted by `value - d`. Returns the cheaper form as
-/// `(offset, [(coefficient, indices)])`, classes ordered by first index and zero coefficients
-/// omitted.
+/// Estimates combinations with two offsets: zero and the dominant value (the most frequent
+/// nonzero value). Only these offsets are tried; zero wins ties. Positions with equal
+/// `value - offset` share a coefficient, and zero coefficients are omitted.
+///
+/// Since the basis sums to one, `[1, 1, 1, 0, 1, 6, 1, 1]` becomes `1 - L_3 + 5*L_5`
+/// with offset one. Returns the form with lower estimated cost as
+/// `(offset, [(coefficient, indices)])`, with classes ordered by first index.
 fn basis_combination<F: TwoAdicField>(col: &[F]) -> (F, Vec<(F, Vec<usize>)>) {
     let mut classes: Vec<(F, Vec<usize>)> = Vec::new();
     for (index, &value) in col.iter().enumerate() {
