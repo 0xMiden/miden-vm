@@ -267,7 +267,10 @@ mod tests {
     use crate::{
         ChipletCols, MemoryCols,
         constraints::chiplets::selectors::{ChipletFlags, build_chiplet_selectors},
-        trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, CHIPLETS_WIDTH, TRACE_WIDTH},
+        trace::{
+            AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, CHIPLETS_DATA_WIDTH, CHIPLETS_MODE_COL,
+            TRACE_WIDTH,
+        },
     };
 
     struct ConstraintEvalBuilder {
@@ -326,6 +329,11 @@ mod tests {
             Felt::ONE
         }
 
+        fn is_transition_window(&self, size: usize) -> Self::Expr {
+            assert_eq!(size, 2, "memory tests use two-row transition windows");
+            self.is_transition()
+        }
+
         fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
             self.evaluations.push(QuadFelt::from(x.into()));
         }
@@ -381,8 +389,8 @@ mod tests {
 
     fn memory_row() -> ChipletCols<Felt> {
         ChipletCols {
-            chiplets: [Felt::ZERO; CHIPLETS_WIDTH - 1],
             chip_clk: Felt::ONE,
+            chiplets: [Felt::ZERO; CHIPLETS_DATA_WIDTH],
         }
     }
 
@@ -613,12 +621,14 @@ mod tests {
     // bitwise section, so an empty bitwise section skipped the initialization and let a malicious
     // prover forge a read of never-written memory.
 
-    /// Builds a `ChipletCols` row with the given top-level selector prefix `[s0..s4]`.
-    fn row_with_selectors(selectors: [u64; 5]) -> ChipletCols<Felt> {
+    /// Builds a `ChipletCols` row with `[s_ctrl, stream_mode, s1, s2, s3, s4]`.
+    fn row_with_selectors(selectors: [u64; 6]) -> ChipletCols<Felt> {
         let mut row = memory_row();
-        for (slot, value) in row.chiplets[..5].iter_mut().zip(selectors) {
+        let [s_ctrl, stream_mode, s1, s2, s3, s4] = selectors;
+        for (slot, value) in row.chiplets[..5].iter_mut().zip([s_ctrl, s1, s2, s3, s4]) {
             *slot = Felt::new_unchecked(value);
         }
+        row.chiplets[CHIPLETS_MODE_COL] = Felt::new_unchecked(stream_mode);
         row
     }
 
@@ -635,9 +645,9 @@ mod tests {
     #[test]
     fn memory_first_row_init_enforced_when_bitwise_empty() {
         // Empty-bitwise layout: the memory section begins directly after a controller row, so the
-        // first memory row is entered at a controller -> memory boundary ([0..] -> [1,1,0,..]).
-        let controller = row_with_selectors([0, 0, 0, 0, 0]);
-        let mut first_memory = row_with_selectors([1, 1, 0, 0, 0]);
+        // first memory row is entered at a controller -> memory boundary.
+        let controller = row_with_selectors([1, 0, 0, 0, 0, 0]);
+        let mut first_memory = row_with_selectors([0, 0, 1, 0, 0, 0]);
         memory_cols(&mut first_memory).is_read = Felt::ONE; // fresh read: every value must be zero
 
         let flags = memory_flags_for_window(&controller, &first_memory);
@@ -667,16 +677,16 @@ mod tests {
     #[test]
     fn memory_next_is_first_marks_only_the_entry_row() {
         // Non-empty bitwise: the bitwise -> memory boundary still fires.
-        let bitwise = row_with_selectors([1, 0, 0, 0, 0]);
-        let memory = row_with_selectors([1, 1, 0, 0, 0]);
+        let bitwise = row_with_selectors([0, 0, 0, 0, 0, 0]);
+        let memory = row_with_selectors([0, 0, 1, 0, 0, 0]);
         assert_eq!(memory_flags_for_window(&bitwise, &memory).next_is_first, Felt::ONE);
 
         // An interior memory -> memory transition is not a section start.
-        let memory_next = row_with_selectors([1, 1, 0, 0, 0]);
+        let memory_next = row_with_selectors([0, 0, 1, 0, 0, 0]);
         assert_eq!(memory_flags_for_window(&memory, &memory_next).next_is_first, Felt::ZERO);
 
         // A memory -> ACE transition is not a memory section start.
-        let ace = row_with_selectors([1, 1, 1, 0, 0]);
+        let ace = row_with_selectors([0, 0, 1, 1, 0, 0]);
         assert_eq!(memory_flags_for_window(&memory, &ace).next_is_first, Felt::ZERO);
     }
 }

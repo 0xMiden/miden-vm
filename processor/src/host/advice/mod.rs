@@ -6,10 +6,8 @@ use alloc::{
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap, AdviceStack},
-    crypto::{
-        hash::Poseidon2,
-        merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
-    },
+    chiplets::hasher,
+    crypto::merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
 };
 #[cfg(test)]
 use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
@@ -662,7 +660,7 @@ impl AdviceProvider {
     /// It is not checked whether a Merkle tree for either of the specified roots can be found in
     /// this advice provider.
     pub fn merge_roots(&mut self, lhs: Word, rhs: Word) -> Result<Word, AdviceError> {
-        let root = Poseidon2::merge(&[lhs, rhs]);
+        let root = hasher::merge(&[lhs, rhs]);
         let added = self.store.new_internal_node_count([root]);
         self.check_merkle_store_node_addition(added)?;
 
@@ -1025,6 +1023,23 @@ mod tests {
         ));
 
         assert_eq!(provider.merkle_store_node_count, base_node_count);
+    }
+
+    #[test]
+    fn merkle_store_merge_counts_existing_parent_once() {
+        let lhs = make_leaf(0);
+        let rhs = make_leaf(4);
+        let mut store = MerkleStore::default();
+        let root = store.merge_roots(lhs, rhs).unwrap();
+        let node_count = store.num_internal_nodes();
+        let max_advice_size = AdviceProvider::merkle_node_bytes(node_count).unwrap();
+        let options = ExecutionOptions::default().with_max_advice_size_bytes(max_advice_size);
+        let mut provider =
+            AdviceProvider::new(AdviceInputs::default().with_merkle_store(store), &options)
+                .unwrap();
+
+        assert_eq!(provider.merge_roots(lhs, rhs).unwrap(), root);
+        assert_eq!(provider.merkle_store_node_count, node_count);
     }
 
     #[test]

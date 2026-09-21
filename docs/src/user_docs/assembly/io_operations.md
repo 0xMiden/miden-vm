@@ -77,40 +77,47 @@ The second category injects new data into the advice provider or updates host-si
 
 System events can push data onto the advice stack, insert data into the advice map, or update host-side deferred state. One exception is `sys::trace_event`: it is a non-mutating system event used only to signal optional, read-only trace events to the host. See the [events documentation](./events.md#trace-events-optional-read-only-events) for details.
 
-For deferred DAG instructions, `TAG` and every digest are one word (4 field elements), while one
-data chunk is 8 field elements (two words).
+For deferred DAG instructions, the initial `CV`, the frame returned by evaluation, and every digest
+each occupy one word (4 field elements). `CV` is derived from
+`(domain_tag, param0, param1, param2)`. The selected domain defines the three parameters. One data
+chunk is 8 field elements (two words).
 
-Registration interprets payloads by the decoded tag shape:
+Registration interprets payloads by the node type selected by the frame:
 
-- `adv.register_deferred` reads one stack-resident payload block from `PAYLOAD_LO || PAYLOAD_HI`:
-  - data tags interpret it as one data chunk;
-  - join tags interpret it as `lhs_digest || rhs_digest`;
-  - pair-list tags interpret it as one `lhs_digest || rhs_digest` pair.
+- `adv.register_deferred` reads `CV` and one stack-resident payload block from
+  `PAYLOAD_LO || PAYLOAD_HI`:
+  - data frames interpret it as one data chunk;
+  - precompile-owned join frames interpret it as `lhs_digest || rhs_digest`;
+  - pair-list frames interpret it as one `lhs_digest || rhs_digest` pair.
 - `adv.register_deferred_data` reads exactly `n_chunks` blocks from word-aligned `ptr`:
-  - data tags interpret them as opaque data chunks;
-  - pair-list tags interpret them as `lhs_digest || rhs_digest` pairs;
-  - join tags require `n_chunks == 1` and interpret the chunk as `lhs_digest || rhs_digest`.
+  - data frames interpret them as opaque data chunks;
+  - pair-list frames interpret them as `lhs_digest || rhs_digest` pairs;
+  - precompile-owned join frames require `n_chunks == 1` and interpret the chunk as
+    `lhs_digest || rhs_digest`.
+
+Framework-owned AND and `TRUE` nodes are not accepted by either generic registration instruction.
+Rolling AND nodes are constructed by `log_deferred`.
 
 The register arguments are visible in the VM execution trace, but the event does not constrain the
 host-side registration. `adv.register_deferred_data` additionally performs direct host reads without
 adding AIR memory accesses. Neither register instruction returns the node digest, so proof-relevant
-code must compute it with VM instructions from the exact same tag and stack payload or ordered memory
+code must compute it with VM instructions from the exact same CV and stack payload or ordered memory
 chunk sequence.
 
 Evaluation advice is also shape-dependent:
 
-- `adv.evaluate_deferred` pushes the canonical tag and payload as advice. The tag is first in
+- `adv.evaluate_deferred` pushes the canonical frame and payload as advice. The frame is first in
   advice-pop order, so for a single 8-felt payload `adv_pushw adv_pushw adv_pushw` leaves
-  `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` on the operand stack.
-- `adv.evaluate_deferred_tag` pushes only the canonical tag.
+  `[PAYLOAD_LO, PAYLOAD_HI, FRAME, ...]` on the operand stack.
+- `adv.evaluate_deferred_frame` pushes only the canonical frame.
 - `adv.evaluate_deferred_payload` pushes only the canonical payload:
   - data chunks use advice pop order `HIGH` then `LOW`, so `adv_pushw adv_pushw` leaves `LOW` above
     `HIGH` on the operand stack;
   - join payloads leave `lhs_digest` above `rhs_digest` after two `adv_pushw`s;
   - `TRUE` emits no payload advice.
-- `TRUE` emits `Tag::TRUE` for tag-only/full evaluation.
+- `TRUE` emits one zero word in the frame slot for frame-only or full evaluation.
 
-All deferred-evaluation outputs, including tag-only output, are host hints. Before proof-relevant
+All deferred-evaluation outputs, including frame-only output, are host hints. Before proof-relevant
 use, code must relate them with VM instructions to values established independently of that advice.
 
 | Instruction           | Stack_input        | Stack_output       | Notes                                                                                                                                                                                                                                                                |
@@ -120,16 +127,15 @@ use, code must relate them with VM instructions to values established independen
 | adv.push_mapvaln <br /> adv.push_mapvaln._p_ | [K, ... ]          | [K, ... ]          | Pushes a list of field elements together with the number of elements onto the advice stack (`[n, ele1, ele2, ...]`, where `n` is the number of elements in the list). The list is looked up in the advice map using word $K$ as the key. <br /><br /> If padding _p_ is provided as an immediate value, the list of field elements obtained from the advice map will be padded with zeros, increasing its length to the next multiple of _p_, excluding _num_values_, e.g. `[5, 1, 2, 3, 4, 5, 0, 0, 0]`. _num_values_ in that case will be the initial number of values in the list. <br /> Valid options for the padding value are $0$, $4$, and $8$. Using $0$ explicitly shows that no padding will be added. If no padding is provided, it is assumed to be $0$. <br /><br /> Fails if $p \notin \{0, 4, 8\}$ |
 | adv.has_mapkey                               | [K, ... ]          | [K, ... ]          | Pushes `1` on the advice stack if the key placed at the top of the operand stack exists in the advice map, or `0` otherwise.                                                                                                                                         |
 | adv.push_mtnode                              | [d, i, R, ... ]    | [d, i, R, ... ]    | Pushes a node of a Merkle tree with root $R$ at depth $d$ and index $i$ from Merkle store onto the advice stack.                                                                                                                                                     |
-| adv.register_deferred                        | [PAYLOAD_LO, PAYLOAD_HI, TAG, ...] | [PAYLOAD_LO, PAYLOAD_HI, TAG, ...] | Registers and eagerly evaluates an operand-stack deferred node. Produces no advice output. |
-| adv.register_deferred_data                   | [TAG, ptr, n_chunks, ...] | [TAG, ptr, n_chunks, ...] | Registers and eagerly evaluates a memory-backed deferred node. Produces no advice output. |
-| adv.evaluate_deferred                        | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes its canonical tag and payload felts onto the advice stack. |
-| adv.evaluate_deferred_tag                    | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes only its canonical tag onto the advice stack. |
+| adv.register_deferred                        | [CV, PAYLOAD_LO, PAYLOAD_HI, ...] | [CV, PAYLOAD_LO, PAYLOAD_HI, ...] | Registers and eagerly evaluates an operand-stack deferred node. Produces no advice output. |
+| adv.register_deferred_data                   | [n_chunks, CV, ptr, ...] | [n_chunks, CV, ptr, ...] | Registers and eagerly evaluates a memory-backed deferred node. Produces no advice output. |
+| adv.evaluate_deferred                        | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes its canonical frame and payload felts onto the advice stack. |
+| adv.evaluate_deferred_frame                  | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes only its canonical frame onto the advice stack. |
 | adv.evaluate_deferred_payload                | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes only its canonical payload felts onto the advice stack. |
 | adv.insert_mem                               | [K, a, b, ... ]    | [K, a, b, ... ]    | Reads words $data \leftarrow mem[a] .. mem[b]$ from memory, and save the data into $advice\_map[K] \leftarrow data$.                                                                                                                                                 |
-| adv.insert_hdword                            | [A, B, ... ]       | [A, B, ... ]       | Reads top two words from the stack, computes a key as $K \leftarrow hash(A \|\| B, domain=0)$ (top word first), and saves the data into $advice\_map[K] \leftarrow [A, B]$. Note: to compute the same key in MASM, use `hmerge`.                                       |
-| adv.insert_hdword_d                          | [A, B, d, ... ]    | [A, B, d, ... ]    | Reads top two words from the stack, computes a key as $K \leftarrow hash(A \|\| B, domain=d)$ (top word first), and saves the data into $advice\_map[K] \leftarrow [A, B]$. $d$ is the domain value.                                                                   |
+| adv.insert_hdword                            | [A, B, ... ]       | [A, B, ... ]       | Reads the top two words, uses the generic eight-Felt `hmerge` as the key, and saves $advice\_map[K] \leftarrow [A, B]$. |
 | adv.insert_hqword                            | [A, B, C, D, ... ] | [A, B, C, D, ... ] | Reads top four words from the stack, computes a key as $K \leftarrow hash\_elements([A, B, C, D])$, and saves the data into $advice\_map[K] \leftarrow [A, B, C, D]$.                                                                                                  |
-| adv.insert_hperm                             | [R0, R1, C, ...]   | [R0, R1, C, ...]   | Reads top three words from the stack, computes a key as $K \leftarrow permute(R0, R1, C).digest$, and saves data into $advice\_map[K] \leftarrow [R0, R1]$.                                                                                                              |
+| adv.insert_compress                         | [BLOCK_LO, BLOCK_HI, CV, ...] | [BLOCK_LO, BLOCK_HI, CV, ...] | Reads the top 12 elements, computes $K \leftarrow Eidos::compress(CV, BLOCK_LO \|\| BLOCK_HI)$, and saves $advice\_map[K] \leftarrow [BLOCK_LO, BLOCK_HI]$. |
 
 ### Random access memory
 
@@ -145,7 +151,7 @@ Memory is guaranteed to be initialized to zeros. Thus, when reading from memory 
 | mem_store <br /> - _(2 cycles)_ <br /> mem_store._a_ <br /> - _(3-4 cycles)_         | [a, v, ... ]          | [ ... ]             | $v \rightarrow mem[a]$ <br /> Pops the top element off the stack and stores it in memory at address $a$. If $a$ is provided via the stack, it is removed from the stack first. <br /> Fails if $a \ge 2^{32}$                                                                                                                                                                               |
 | mem_storew_be <br /> - _(9 cycles)_ <br /> mem_storew_be._a_ <br /> - _(8-9 cycles)_ | [a, A, ... ]          | [A, ... ]           | $A \rightarrow mem[a..(a+4)]$ <br /> Stores the top four elements of the stack in big-endian (reversed) order in memory starting at address $a$, such that the top of stack is placed at `mem[a+3]`. Equivalent to `reversew mem_storew_le reversew`. If $a$ is provided via the stack, it is removed from the stack first. <br /> Fails if $a \ge 2^{32}$, or if $a$ is not a multiple of 4 |
 | mem_storew_le <br /> - _(1 cycle)_ <br /> mem_storew_le._a_ <br /> - _(2-3 cycles)_  | [a, A, ... ]          | [A, ... ]           | $A \rightarrow mem[a..(a+4)]$ <br /> Stores the top four elements of the stack in little-endian (memory) order in memory starting at address $a$, such that the top of stack is placed at `mem[a]`. If $a$ is provided via the stack, it is removed from the stack first. <br /> Fails if $a \ge 2^{32}$, or if $a$ is not a multiple of 4                                                  |
-| mem_stream <br /> - _(1 cycle)_                                                      | [A, B, C, a, ... ]  | [D, E, C, a', ... ] | $[D, E] \leftarrow [mem[a..(a+4)], mem[(a+4)..(a+8)]]$ <br /> $a' \leftarrow a + 8$ <br /> Read two sequential words from memory starting at address $a$ and overwrites R0 and R1 of the sponge state.                                                                                                                                                                      |
+| mem_stream <br /> - _(1 cycle)_                                                      | [BLOCK_LO, BLOCK_HI, CV, a, ... ]  | [BLOCK_LO', BLOCK_HI', CV, a', ... ] | $[BLOCK\_LO', BLOCK\_HI'] \leftarrow [mem[a..(a+4)], mem[(a+4)..(a+8)]]$ <br /> $a' \leftarrow a + 8$ <br /> Reads two sequential words from memory starting at address $a$, replacing the block words while preserving the Eidos chaining word.                                                                                                                                                                      |
 
 The second way to access memory is via procedure locals using the instructions listed below. These instructions are available only in procedure context. The number of locals available to a given procedure must be specified at [procedure declaration](./code_organization.md#procedures) time, and trying to access more locals than was declared will result in a compile-time error. A procedure can have at most $2^{16}$ locals, and the total number of locals available to all procedures at runtime is limited to $2^{31} - 1$. The assembler internally always rounds up the number of declared locals to the nearest multiple of 4.
 

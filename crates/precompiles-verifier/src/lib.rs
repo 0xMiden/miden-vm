@@ -27,27 +27,26 @@ pub use verify::{VerifyError, verify_deferred};
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec;
+    use alloc::{vec, vec::Vec};
 
     use miden_core::{Felt, Word, deferred::TRUE_DIGEST, proof::MAX_STARK_PROOF_BYTES};
 
     use super::*;
 
     #[test]
-    fn verifies_pinned_poseidon2_proof() {
-        const PROOF_BYTES: &[u8] = include_bytes!("../tests/fixtures/pvm_poseidon2_v0_31.bin");
-        let root = Word::new(
-            [
-                8727402973153492738,
-                13033997996299931781,
-                5394599319400709983,
-                17469579631022355290,
-            ]
-            .map(Felt::new_unchecked),
-        );
-        let proof = StarkProof::new(PROOF_BYTES.to_vec(), HashFunction::Poseidon2);
+    fn verifies_pinned_eidos_proof() {
+        const PROOF_BYTES: &[u8] = include_bytes!("../tests/fixtures/pvm_eidos_v0_31.bin");
+        const ROOT: &str = include_str!("../tests/fixtures/pvm_eidos_v0_31.root");
+        let root: [Felt; 4] = ROOT
+            .split_ascii_whitespace()
+            .map(|value| Felt::new_unchecked(value.parse().expect("root element must be a u64")))
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("fixture root must contain four elements");
+        let root = Word::new(root);
+        let proof = StarkProof::new(PROOF_BYTES.to_vec(), HashFunction::Eidos);
 
-        verify_deferred(&proof, root).expect("pinned poseidon2 proof must verify");
+        verify_deferred(&proof, root).expect("pinned Eidos proof must verify");
         assert!(verify_deferred(&proof, TRUE_DIGEST).is_err());
     }
 

@@ -1,5 +1,5 @@
 use miden_assembly::{Assembler, Linkage};
-use miden_core::Felt;
+use miden_core::{Felt, deferred::TRUE_DIGEST};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
     ContextId, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
@@ -61,8 +61,64 @@ pub fn run_precompile_program_with_stack(
     output
 }
 
+#[test]
+fn log_deferred_wrapper_consumes_digest_and_preserves_tail() {
+    let tail = [
+        Felt::new_unchecked(9),
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(13),
+        Felt::new_unchecked(14),
+        Felt::new_unchecked(15),
+        Felt::new_unchecked(16),
+        Felt::new_unchecked(17),
+        Felt::new_unchecked(18),
+        Felt::new_unchecked(19),
+        Felt::new_unchecked(20),
+    ];
+    let stack = TRUE_DIGEST.as_elements().iter().copied().chain(tail).collect::<Vec<_>>();
+    let source = "begin exec.::miden::core::precompiles::log_deferred end";
+
+    let output = run_precompile_program_with_stack(source, &stack)
+        .expect("log_deferred wrapper should accept TRUE_DIGEST");
+
+    assert_eq!(read_stack_felts(&output, tail.len()), tail);
+    let witness = output
+        .precompile_witness
+        .as_ref()
+        .expect("log_deferred leaves a precompile witness");
+    assert_ne!(witness.root_unchecked(), TRUE_DIGEST);
+}
+
 pub fn expect_precompile_trap(source: &str) -> ExecutionError {
     run_precompile_program(source).expect_err("expected precompile program to trap")
+}
+
+pub fn expect_precompile_trap_with_processor(source: &str) -> (ExecutionError, FastProcessor) {
+    let core_lib = CoreLibrary::default();
+    let mut assembler = Assembler::default();
+    assembler
+        .link_package(core_lib.package(), Linkage::Dynamic)
+        .expect("failed to link core library package");
+    let program = assembler
+        .assemble_program("precompile_test", source)
+        .expect("failed to assemble precompile test program")
+        .unwrap_program();
+
+    let mut host = DefaultHost::default()
+        .with_library(&core_lib)
+        .expect("failed to load CoreLibrary into the host");
+    let mut processor = FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .expect("processor construction");
+    let error = processor
+        .execute_mut_sync(&program, &mut host)
+        .expect_err("expected precompile program to trap");
+    (error, processor)
 }
 
 pub fn read_stack_felts(output: &ExecutionOutput, len: usize) -> Vec<Felt> {

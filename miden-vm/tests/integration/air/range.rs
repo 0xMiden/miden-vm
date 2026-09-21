@@ -22,7 +22,7 @@ fn range_check_multi() {
 }
 
 /// Range checks the result of 1 + u32::MAX - 1, which is u32::MAX. Therefore, it requires range
-/// checks for u16::MAX, the last value in the range checker's 16-bit section.
+/// checks for u16::MAX, the largest 16-bit value in the byte-pair table.
 #[test]
 fn range_check_u16max() {
     let asm_op = "u32overflowing_add";

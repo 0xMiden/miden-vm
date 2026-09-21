@@ -1,6 +1,6 @@
 use alloc::{string::ToString, vec::Vec};
 
-use miden_crypto::Word;
+use miden_crypto::{Word, hash::eidos::EidosDomain};
 
 use crate::{
     chiplets::hasher,
@@ -10,10 +10,8 @@ use crate::{
 // CONSTANTS
 // ================================================================================================
 
-/// Domain tag for the kernel commitment: the registered selector
-/// `(KERNEL_COMMITMENT_DOMAIN_ID << 8) | 1` (see the [`domain`](super::domain) module).
-pub const KERNEL_DOMAIN_TAG: crate::Felt =
-    super::domain::domain_selector(super::domain::KERNEL_COMMITMENT_DOMAIN_ID, 1);
+/// Registered domain tag for the kernel commitment.
+pub const KERNEL_DOMAIN_TAG: crate::Felt = super::domain::KernelCommitmentDomain::TAG.as_felt();
 
 // KERNEL
 // ================================================================================================
@@ -103,11 +101,13 @@ impl KernelDescriptor {
     /// This is the fixed-size identifier observed by the recursive verifier in place of the raw
     /// digest list. The encoding is normative:
     /// - element order is this descriptor's canonical procedure order (fixed at construction);
-    /// - the Sponge2 padding rule (<https://eprint.iacr.org/2024/911>) places `len % rate` in the
-    ///   first capacity element, preventing ambiguity between a partial block and its zero-padded
-    ///   form.
+    /// - Eidos initializes its chaining word from the registered domain and exact logical length,
+    ///   preventing ambiguity between a partial block and its zero-padded form.
     pub fn commitment(&self) -> Word {
-        hasher::hash_elements_in_domain(Word::words_as_elements(&self.0), KERNEL_DOMAIN_TAG)
+        hasher::hash_elements_in_domain(
+            Word::words_as_elements(&self.0),
+            super::domain::KERNEL_COMMITMENT,
+        )
     }
 }
 
@@ -146,6 +146,7 @@ mod tests {
     use super::KernelDescriptor;
     use crate::{
         Felt, Word,
+        program::domain,
         serde::{ByteWriter, Deserializable, Serializable, SliceReader},
     };
 
@@ -153,10 +154,10 @@ mod tests {
     fn empty_kernel_commitment_matches_known_vector() {
         let expected = Word::from(
             [
-                10_678_183_036_892_554_090,
-                6_699_253_321_301_458_898,
-                8_322_157_849_099_770_532,
-                10_578_726_887_207_403_211,
+                2_800_031_795_450_362_562,
+                441_236_128_080_735_558,
+                73_356_828_092_899_391,
+                3_409_657_121_718_151_847,
             ]
             .map(Felt::new_unchecked),
         );
@@ -165,7 +166,7 @@ mod tests {
         assert_eq!(empty.commitment(), expected);
         assert_eq!(
             empty.commitment(),
-            crate::chiplets::hasher::hash_elements_in_domain(&[], super::KERNEL_DOMAIN_TAG)
+            crate::chiplets::hasher::hash_elements_in_domain(&[], domain::KERNEL_COMMITMENT)
         );
     }
 

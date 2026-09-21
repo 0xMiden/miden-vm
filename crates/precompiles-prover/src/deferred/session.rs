@@ -6,10 +6,14 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_core::deferred::{
-    DataChunk, Digest, MAX_DEFERRED_ELEMENTS, MAX_PRECOMPILE_ROOTS, Node, PrecompileWitness,
-    PrecompileWitnessEntry, TRUE_DIGEST, Tag, fold_deferred_root,
+use miden_core::{
+    deferred::{
+        DEFERRED_AND_FRAME, DataChunk, Digest, MAX_DEFERRED_ELEMENTS, MAX_PRECOMPILE_ROOTS, Node,
+        PrecompileWitness, PrecompileWitnessEntry, TRUE_DIGEST, fold_deferred_root,
+    },
+    program::domain::DeferredChunksDomain,
 };
+use miden_crypto::hash::eidos::{EidosDomain, EidosFrame};
 use miden_precompiles::{
     CurveBinaryOp, CurveId, CurveOp, Keccak256Precompile, UintBinaryOp, UintDomain, UintOp,
     chunks_to_bytes_exact, n_chunks,
@@ -20,11 +24,24 @@ use crate::{
     ec::{msm::trace::EcExprPtr, trace::EcPointPtr},
     math::{U256, from_limbs32, to_limbs32},
     session::{EcNode, Session, Truthy, UintNode, strategies},
-    transcript::poseidon2::P2Digest,
+    transcript::eidos::EidosDigest,
 };
 
+/// wNAF window for [`msm_from_terms`](DeferredSessionBuilder::msm_from_terms)'s joint-wNAF
+/// addition chain (digits odd, `|d| < 2^{w-1}`, `2^{w-2}` odd multiples per base). A smaller window
+/// suits GLV's ~128-bit halves in isolation. Reusing a base's table across the batch makes ladder
+/// digit density the dominant recurring cost; `w = 5` keeps it low for both the two-base and GLV
+/// four-base MSMs.
 const MSM_WNAF_WINDOW: usize = 5;
 const MAX_TERM_PRESERVING_TERMS: usize = 4096;
+
+/// Cap on the *sum* of fallback term counts across every PairList this session lowers.
+/// [`MAX_TERM_PRESERVING_TERMS`] only bounds one claim at a time — many claims each near that cap
+/// still stack up (a lowering-only PairList doesn't know about sibling claims), so this tracks a
+/// running total and rejects a new claim before it grows the aggregate past this bound. A generous
+/// multiple of the per-claim cap: legitimate batches (e.g. many small ECDSA-style fallback claims)
+/// stay well under it. The aggregate cap prevents splitting one oversized request across many
+/// claims.
 const MAX_TOTAL_TERM_PRESERVING_TERMS: usize = 16 * MAX_TERM_PRESERVING_TERMS;
 
 /// The input ceiling uses the runtime's field-element accounting across the entire batch,
@@ -199,7 +216,7 @@ pub(crate) fn import_witnesses(
         if witness_index != 0 {
             reserve(
                 &mut elements_left,
-                Tag::AND.as_word().len() + Node::PACKED_BYTES_PER_CHUNK / size_of::<u32>(),
+                EidosFrame::FELT_LEN + Node::PACKED_BYTES_PER_CHUNK / size_of::<u32>(),
                 location,
                 "aggregate folds",
             )?;
@@ -217,11 +234,13 @@ pub(crate) fn import_witnesses(
             };
             let elements = payloads
                 .checked_mul(Node::PACKED_BYTES_PER_CHUNK / size_of::<u32>())
-                .and_then(|n| n.checked_add(Tag::AND.as_word().len()))
+                .and_then(|n| n.checked_add(EidosFrame::FELT_LEN))
                 .ok_or(SessionInputError::Limit { location, resource: "input elements" })?;
             reserve(&mut elements_left, elements, location, "input elements")?;
-            if let Some(n_bytes) = Keccak256Precompile::decode_assert_tag(entry.tag())
-                .map_err(|_| SessionInputError::Invalid { location, reason: "invalid hash tag" })?
+            if let Some(n_bytes) =
+                Keccak256Precompile::decode_assert_frame(entry.frame()).map_err(|_| {
+                    SessionInputError::Invalid { location, reason: "invalid hash frame" }
+                })?
             {
                 reserve(&mut hash_bytes_left, n_bytes as usize, location, "hash input bytes")?;
             }
@@ -327,7 +346,7 @@ fn same_definition(
     b: &PrecompileWitnessEntry,
     b_digests: &[Digest],
 ) -> bool {
-    if a.tag() != b.tag() {
+    if a.frame() != b.frame() {
         return false;
     }
     match (a, b) {
@@ -364,9 +383,9 @@ impl WitnessImporter {
     fn check_commitment(
         &self,
         expected: Digest,
-        actual: P2Digest,
+        actual: EidosDigest,
     ) -> Result<(), SessionInputError> {
-        if actual == P2Digest::from(expected) {
+        if actual == EidosDigest::from(expected) {
             Ok(())
         } else {
             Err(SessionInputError::Commitment {
@@ -434,21 +453,21 @@ impl WitnessImporter {
         entry: &'a PrecompileWitnessEntry,
         entries: &[Imported<'a>],
     ) -> Result<Imported<'a>, SessionInputError> {
-        let tag = entry.tag();
-        if tag == Tag::CHUNKS {
+        let frame = entry.frame();
+        if frame.domain() == DeferredChunksDomain::TAG {
             return match entry {
                 PrecompileWitnessEntry::Data { chunks, .. } => Ok(Imported::Chunks(chunks)),
                 _ => Err(self.invalid("chunks require data payload")),
             };
         }
-        if tag == Tag::AND {
+        if frame == DEFERRED_AND_FRAME {
             let (lhs, rhs) = self.join(entry)?;
             let lhs = self.truth(entries, lhs)?;
             let rhs = self.truth(entries, rhs)?;
             return Ok(Imported::Truth(self.session.assert_and(lhs, rhs)));
         }
-        if let Some(n_bytes) = Keccak256Precompile::decode_assert_tag(tag)
-            .map_err(|_| self.invalid("invalid hash tag"))?
+        if let Some(n_bytes) = Keccak256Precompile::decode_assert_frame(frame)
+            .map_err(|_| self.invalid("invalid hash frame"))?
         {
             let (input, expected) = self.join(entry)?;
             let n_bytes = n_bytes as usize;
@@ -472,7 +491,7 @@ impl WitnessImporter {
             return Ok(Imported::Truth(claim));
         }
         if let Some(op) =
-            UintOp::decode_tag(tag).map_err(|_| self.invalid("invalid uint tag or domain"))?
+            UintOp::decode_frame(frame).map_err(|_| self.invalid("invalid uint frame or domain"))?
         {
             return match op {
                 UintOp::Value(domain) => {
@@ -523,7 +542,9 @@ impl WitnessImporter {
                 },
             };
         }
-        if let Some(op) = CurveOp::decode_tag(tag).map_err(|_| self.invalid("invalid curve tag"))? {
+        if let Some(op) =
+            CurveOp::decode_frame(frame).map_err(|_| self.invalid("invalid curve frame"))?
+        {
             return match op {
                 CurveOp::Value(curve) => {
                     let (x, y) = self.join(entry)?;
@@ -574,10 +595,13 @@ impl WitnessImporter {
                     }
                     Ok(Imported::Truth(self.session.ec_is(&a.node, &b.node)))
                 },
-                CurveOp::Msm => {
+                CurveOp::Msm(n_pairs) => {
                     let PrecompileWitnessEntry::PairList { pairs, .. } = entry else {
                         return Err(self.invalid("MSM requires a pair list"));
                     };
+                    if pairs.len() != n_pairs as usize {
+                        return Err(self.invalid("MSM pair count does not match its frame"));
+                    }
                     let &(first, _) = pairs.first().ok_or_else(|| self.invalid("empty MSM"))?;
                     let curve = self.point(entries, first)?.curve;
                     let mut terms = Vec::with_capacity(pairs.len());

@@ -58,7 +58,7 @@ pub struct LookupOpFlags<E> {
     dyn_op: E,
     dyncall: E,
     push: E,
-    hperm: E,
+    compress: E,
     mpverify: E,
     mstream: E,
     pipe: E,
@@ -145,7 +145,7 @@ where
         // -- Degree-5 subset --------------------------------------------------------------
         let deg5_extra: E = decoder.extra[0].into();
         let deg5 = |op: u8| -> E { deg5_extra.clone() * b3210[get_op_index(op)].clone() };
-        let hperm = deg5(opcodes::HPERM);
+        let compress = deg5(opcodes::COMPRESS);
         let mpverify = deg5(opcodes::MPVERIFY);
         let pipe = deg5(opcodes::PIPE);
         let mstream = deg5(opcodes::MSTREAM);
@@ -237,7 +237,7 @@ where
             dyn_op,
             dyncall,
             push,
-            hperm,
+            compress,
             mpverify,
             mstream,
             pipe,
@@ -298,7 +298,7 @@ impl LookupOpFlags<Felt> {
             opcodes::DYN => f.dyn_op = Felt::ONE,
             opcodes::DYNCALL => f.dyncall = Felt::ONE,
             opcodes::PUSH => f.push = Felt::ONE,
-            opcodes::HPERM => f.hperm = Felt::ONE,
+            opcodes::COMPRESS => f.compress = Felt::ONE,
             opcodes::MPVERIFY => f.mpverify = Felt::ONE,
             opcodes::MSTREAM => f.mstream = Felt::ONE,
             opcodes::PIPE => f.pipe = Felt::ONE,
@@ -384,7 +384,7 @@ impl LookupOpFlags<Felt> {
             dyn_op: Felt::ZERO,
             dyncall: Felt::ZERO,
             push: Felt::ZERO,
-            hperm: Felt::ZERO,
+            compress: Felt::ZERO,
             mpverify: Felt::ZERO,
             mstream: Felt::ZERO,
             pipe: Felt::ZERO,
@@ -449,7 +449,7 @@ impl LookupOpFlags<Felt> {
             dyn_op,
             dyncall,
             push,
-            hperm,
+            compress,
             mpverify,
             mstream,
             pipe,
@@ -527,7 +527,7 @@ accessors!(
     dyn_op,
     dyncall,
     push,
-    hperm,
+    compress,
     mpverify,
     mstream,
     pipe,
@@ -760,7 +760,7 @@ mod tests {
             ("end", opcodes::END, LookupOpFlags::<Felt>::end),
             ("dyn", opcodes::DYN, LookupOpFlags::<Felt>::dyn_op),
             ("dyncall", opcodes::DYNCALL, LookupOpFlags::<Felt>::dyncall),
-            ("hperm", opcodes::HPERM, LookupOpFlags::<Felt>::hperm),
+            ("compress", opcodes::COMPRESS, LookupOpFlags::<Felt>::compress),
             ("mpverify", opcodes::MPVERIFY, LookupOpFlags::<Felt>::mpverify),
             ("mrupdate", opcodes::MRUPDATE, LookupOpFlags::<Felt>::mrupdate),
             ("mload", opcodes::MLOAD, LookupOpFlags::<Felt>::mload),
@@ -827,7 +827,7 @@ mod tests {
             dyn_op,
             dyncall,
             push,
-            hperm,
+            compress,
             mpverify,
             mstream,
             pipe,

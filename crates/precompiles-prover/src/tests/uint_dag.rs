@@ -7,7 +7,7 @@
 //! lands equal values on one ptr. Around it: node dedup / `out_mult`
 //! accounting, the stray-claim policy, and the forgeries the pointered
 //! relations must catch (a forged result ptr; a re-encoded op id that
-//! passes every local constraint and dies on the Poseidon2 cap bus).
+//! passes every local constraint and dies on the Eidos frame relation).
 
 use miden_air::lookup::Challenges;
 use miden_core::{
@@ -26,7 +26,7 @@ use crate::{
     tests::{SessionTracesTestExt, bus_balance::session_stack_residual, verify_deferred},
     transcript::{
         eval::{
-            COL_IS_ADD, COL_IS_MUL, COL_IS_SUB, COL_OUT_MULT, COL_PTR, COL_TAG_ARG0,
+            COL_FRAME_PARAM0, COL_IS_ADD, COL_IS_MUL, COL_IS_SUB, COL_OUT_MULT, COL_PTR,
             NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS, TranscriptEvalAir,
         },
         nodes::UintOpId,
@@ -108,12 +108,12 @@ fn horner_sign_alternation_full_stack() {
     let root = session.assert_and_fold([claim]);
     let traces = session.finish(root);
 
-    // 22 eval rows (AND + zero + 6 leaves + 13 value ops + Is) pad to 32; fixed
-    // uints live only in the store and verifier boundary correction, not eval rows.
-    // The add relation count is unchanged; mul no longer has its own main
-    // (shares the store's merged trace at index 5).
+    // The standalone eval AIR's 22 rows naturally pad to 32; fixed uints live only in the store
+    // and verifier boundary correction, not eval rows.
+    // Mul shares the store's merged trace at index 5; add uses its own trace.
     let mains = traces.mains();
-    assert_eq!(mains[4].height(), 32, "eval: 22 rows pad to 32");
+    let eval = crate::tests::transcript_eval_main(&traces);
+    assert_eq!(eval.height(), 32, "eval trace pads independently to 32 rows");
     assert_eq!(mains[6].height(), 16, "uint-add: 7 two-row blocks pad to 8");
 
     traces.check();
@@ -155,7 +155,7 @@ fn op_dedup_collapses_repeated_nodes() {
     let mains = traces.mains();
     assert_eq!(mains[6].height(), 4, "uint-add: exactly two two-row blocks");
     // r's single row carries out_mult 2 (consumed twice by w).
-    let eval = mains[4];
+    let eval = crate::tests::transcript_eval_main(&traces);
     let r_row = (0..eval.height())
         .find(|row| {
             eval.values[row * EVAL_NUM_MAIN_COLS + COL_IS_ADD] == Felt::ONE
@@ -261,23 +261,24 @@ fn forged_result_ptr_unbalances() {
     let mut rng = StdRng::seed_from_u64(0xf043_0001);
     let traces = mul_statement(&mut rng);
 
-    let mut tampered = traces.mains()[4].clone();
+    let mut tampered = crate::tests::transcript_eval_main(&traces);
     let row = find_op_row(&tampered, COL_IS_MUL);
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_PTR] += Felt::ONE;
 
+    let composite = crate::tests::with_transcript_eval_main(&traces, tampered);
     let mut mains = traces.mains();
-    mains[4] = &tampered;
+    mains[4] = &composite;
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let residual = session_stack_residual(&mains, &[], &challenges);
     assert!(!residual.is_empty(), "a forged r_ptr must unbalance the bus");
 }
 
-/// Re-encoding an op's discriminant — flag *and* `tag_arg0` swapped
+/// Re-encoding an op's discriminant — flag *and* frame parameter 0 swapped
 /// consistently from `Add` to `Sub` — passes every local constraint
-/// (the one-hot, the cap materialization, the ptr pins). What rejects it
-/// is the bus: the row's cap message no longer matches the Poseidon2
-/// perm that produced its hash, and the `UintAdd` consume re-wires to a
+/// (the one-hot, the frame materialization, the ptr pins). What rejects it
+/// is the bus: the row's initial-CV message no longer matches the Eidos
+/// compression that produced its hash, and the `UintAdd` consume re-wires to a
 /// tuple no chiplet proved. The op id lives in the *hash*, not in local
 /// algebra.
 #[test]
@@ -296,19 +297,20 @@ fn reencoded_op_id_passes_constraints_but_unbalances() {
     let root = session.assert_and_fold([claim]);
     let traces = session.finish(root);
 
-    let mut tampered = traces.mains()[4].clone();
+    let mut tampered = crate::tests::transcript_eval_main(&traces);
     let row = find_op_row(&tampered, COL_IS_ADD);
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_ADD] = Felt::ZERO;
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_SUB] = Felt::ONE;
-    tampered.values[row * EVAL_NUM_MAIN_COLS + COL_TAG_ARG0] = Felt::from(UintOpId::Sub as u8);
+    tampered.values[row * EVAL_NUM_MAIN_COLS + COL_FRAME_PARAM0] = Felt::from(UintOpId::Sub as u8);
 
     // Locally indistinguishable from an honest Sub row… (the eval chip's
     // local check needs the honest transcript root it pins in row 0).
     crate::tests::check_local_inputs(TranscriptEvalAir, &tampered, traces.air_inputs());
 
-    // …but the bus refuses the re-encoded cap + re-wired relation.
+    // …but the bus refuses the re-encoded frame and re-wired relation.
+    let composite = crate::tests::with_transcript_eval_main(&traces, tampered);
     let mut mains = traces.mains();
-    mains[4] = &tampered;
+    mains[4] = &composite;
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let residual = session_stack_residual(&mains, &[], &challenges);
