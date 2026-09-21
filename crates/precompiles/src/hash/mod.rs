@@ -134,6 +134,11 @@ impl<H: HashFunction> Precompile for HashPrecompile<H> {
         matches!(params, [ASSERT_DISC, _, 0]).then_some(NodeType::Join)
     }
 
+    fn validate_payload(&self, _params: [u32; 3], _payload: &Payload) -> bool {
+        // The registry checks the Join shape; child contents are checked during evaluation.
+        true
+    }
+
     fn evaluate(
         &self,
         params: [u32; 3],

@@ -738,6 +738,9 @@ end
 #! - `num_blocks = 0` is a valid no-op.
 #! - counter blocks used with the same `K_CTR` must not repeat.
 #!
+#! The returned counter is a Felt so it can represent `2^32`, the exhausted sentinel. This value
+#! cannot be passed as an input counter, even when `num_blocks = 0`.
+#!
 #! Panics if:
 #! - either pointer, `counter`, or `num_blocks` does not fit in a u32;
 #! - either pointer is not word-aligned;
@@ -752,7 +755,7 @@ pub proc encrypt_blocks_stream(
     destination: ptr<felt>,
     counter: u32,
     num_blocks: u32,
-) -> (CtrKey, ptr<felt>, ptr<felt>, u32)
+) -> (CtrKey, ptr<felt>, ptr<felt>, felt)
     # Validate the complete input and output ranges before the first write. Per-block checks alone
     # do not prevent an early expanded-ciphertext block from overwriting a later plaintext block.
     dup.4 exec.assert_aead_pointer loc_store.0
@@ -844,6 +847,9 @@ end
 #! - `dst_ptr` addresses `2 * num_felts` writable ciphertext-limb Felts.
 #! - counter blocks used with the same `K_CTR` must not repeat.
 #!
+#! The returned counter is a Felt so it can represent `2^32`, the exhausted sentinel. This value
+#! cannot be passed as an input counter, even when `num_felts = 0`.
+#!
 #! Panics if:
 #! - either pointer, `counter`, or `num_felts` does not fit in a u32;
 #! - either pointer is not word-aligned;
@@ -858,7 +864,7 @@ pub proc encrypt_felts_expanded(
     destination: ptr<felt>,
     counter: u32,
     num_felts: u32,
-) -> (CtrKey, ptr<felt>, ptr<felt>, u32)
+) -> (CtrKey, ptr<felt>, ptr<felt>, felt)
     # Validate the complete input and output ranges before the full-block or tail path writes.
     dup.4 exec.assert_aead_pointer loc_store.28
     dup.5 exec.assert_aead_pointer loc_store.29

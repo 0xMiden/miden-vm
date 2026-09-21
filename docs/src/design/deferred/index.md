@@ -88,16 +88,18 @@ plus the rules that give them meaning. Think of it as a small typed sub-language
 DAG. Concrete proof-bound precompiles live in the `miden-precompiles` crate; their MASM support
 code is an internal implementation detail.
 
-A precompile supplies three things:
+A precompile defines the following methods:
 
 - `decode(params) -> Option<NodeType>` checks which constructor a frame names and what
   structural shape it carries. Payload data is not available yet.
-  The returned shape drives registration and wire handling, but exact data/pair-list arity is
-  semantic and is checked during precompile evaluation:
+  The returned shape drives registration and wire handling:
   - `NodeType::Data` declares a non-empty opaque data payload.
   - `NodeType::Join` declares one payload block containing two child digests.
   - `NodeType::PairList` declares a non-empty list of structural `lhs || rhs` digest pairs.
   - `NodeType::True` is reserved for the framework TRUE sentinel; a precompile must not return it.
+- `validate_payload(params, payload) -> bool` checks any fixed or parameter-dependent number of
+  data chunks or digest pairs. This method is required and runs after shape validation, before
+  insertion. Returning `false` rejects the node with `InvalidNode`.
 - `evaluate(params, payload, …) -> Result<Node>` computes a node's **canonical form**. The
   common roles are: validate a canonical value represented as data (its canonical is itself),
   evaluate an operation (evaluate the child canonicals, then combine), or check a predicate
@@ -135,15 +137,15 @@ memory chunk sequence in a precompile-specific assembly procedure.
 
 | Event (`adv.*`)            | Operand stack in                 | Effect |
 | -------------------------- | -------------------------------- | ------ |
-| `register_deferred`        | `[CV, PAYLOAD_LO, PAYLOAD_HI, ...]` | Recovers the frame from the initial chaining word `CV`, registers one stack-resident 8-felt payload block, and evaluates the node immediately. The frame determines whether the block is data, two child digests for a precompile-owned join, or one digest pair. Precompile evaluation rejects a frame whose semantics require another payload shape or arity. Structural children may reference only registered nodes or `TRUE_DIGEST`. The event returns nothing; code that uses the digest must compress the same block from the same `CV`. |
+| `register_deferred`        | `[CV, PAYLOAD_LO, PAYLOAD_HI, ...]` | Recovers the frame from the initial chaining word `CV`, registers one stack-resident 8-felt payload block, and evaluates the node immediately. The frame determines whether the block is data, two child digests for a precompile-owned join, or one digest pair. Registration rejects an incompatible payload shape or arity before insertion. Structural children may reference only registered nodes or `TRUE_DIGEST`. The event returns nothing; code that uses the digest must compress the same block from the same `CV`. |
 | `register_deferred_data`   | `[n_chunks, CV, ptr, ...]`        | Recovers the frame from `CV`, reads `n_chunks` non-empty 8-felt blocks from word-aligned memory, registers the corresponding data, pair-list, or one-block precompile-owned join node, and evaluates it immediately. The event returns nothing; code that uses the digest must hash the same memory range from the same `CV`. |
 | `evaluate_deferred`        | `[NODE_DIGEST, ...]`               | Looks the node up, evaluates it to canonical form, and pushes its frame and payload felts onto the **advice stack**. For a non-TRUE node, the frame is first in advice-pop order; for a single 8-felt payload, `adv_pushw adv_pushw adv_pushw` leaves `[PAYLOAD_LO, PAYLOAD_HI, FRAME, ...]` on the operand stack. `TRUE` emits one zero word in the frame slot. |
 | `evaluate_deferred_frame`  | `[NODE_DIGEST, ...]`               | Looks the node up, evaluates it to canonical form, and pushes its frame onto the **advice stack**. `TRUE` emits one zero word in the frame slot. |
 | `evaluate_deferred_payload` | `[NODE_DIGEST, ...]`              | Looks the node up, evaluates it to canonical form, and pushes only the canonical payload felts onto the **advice stack**. For each 8-felt data chunk, advice is arranged as `HIGH` then `LOW` so `adv_pushw adv_pushw` leaves `LOW` on top and `HIGH` beneath it; chunks preserve canonical chunk order. Join payloads use the same two-word LIFO convention, leaving `lhs_digest` above `rhs_digest` after two `adv_pushw`s. `TRUE` emits no advice. |
 
 `register_*` validate the decoded shape, require non-empty data and pair lists, and check child
-closure for structural payloads. Exact data or pair-list arity is enforced only when the frame's
-precompile-specific semantics define one. Registration stores the original node under its digest,
+closure for structural payloads. The precompile's `validate_payload` checks any required data or
+pair-list arity before insertion. Registration stores the original node under its digest,
 evaluates it immediately, and fails immediately if semantic evaluation fails.
 
 The generic registration events accept precompile-owned nodes and framework CHUNKS nodes, but not

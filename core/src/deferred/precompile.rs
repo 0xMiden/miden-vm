@@ -55,15 +55,16 @@ pub trait Precompile: Send + Sync {
     /// only interprets the frame's domain-defined parameters.
     fn decode(&self, params: [u32; 3]) -> Option<NodeType>;
 
-    /// Applies payload checks beyond the declared [`NodeType`] before insertion.
+    /// Checks payload arity before node insertion.
     ///
-    /// This is called after [`Self::decode`] accepts `params` and the payload matches the returned
-    /// outer shape. [`NodeType::Data`] and [`NodeType::PairList`] guarantee only non-emptiness, not
-    /// arity. Implementors must reject every unsupported fixed or parameter-dependent arity here
-    /// or in [`Self::evaluate`]. The default performs no additional checks.
-    fn validate_payload(&self, _params: [u32; 3], _payload: &Payload) -> bool {
-        true
-    }
+    /// The registry calls this after [`Self::decode`] accepts `params` and the payload matches the
+    /// declared [`NodeType`]. Implementations must check any fixed or parameter-dependent number of
+    /// data chunks or digest pairs here. Returning `false` rejects the node with
+    /// [`PrecompileError::InvalidNode`].
+    ///
+    /// A [`NodeType::Join`] already contains exactly two child digests. Checks on the values of
+    /// referenced children belong in [`Self::evaluate`].
+    fn validate_payload(&self, params: [u32; 3], payload: &Payload) -> bool;
 
     /// Evaluates one owned node to its canonical form.
     ///

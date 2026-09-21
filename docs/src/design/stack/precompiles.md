@@ -74,7 +74,8 @@ Proving, verification, transport, and resource policy are specified in the
     the stack-supplied `n_chunks` determines how many chunks are read.
   - `NodeType::Join` reads `lhs_digest || rhs_digest`.
   - `NodeType::PairList` accepts one or more `lhs_digest || rhs_digest` chunks. A domain that
-    encodes a pair count in its parameters must check the actual payload length during evaluation.
+    encodes a pair count in its parameters must check that count in `validate_payload`, before
+    insertion.
 - `log_deferred` stack effect: `[STMNT, ...] -> [ROOT_NEW, ...]`. The precompile wrapper drops
   `ROOT_NEW` after the root transition has been constrained.
 - Input and memory layouts are precompile-specific. Core-library wrappers define the native formats

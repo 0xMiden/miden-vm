@@ -473,13 +473,12 @@ impl Node {
 
 /// Framework shape a precompile declares for a recognized frame.
 ///
-/// The shape tells registration and wire validation whether a body is non-empty opaque data, two
-/// child digests, or a non-empty list of digest pairs. It intentionally does not carry
-/// data/pair-list arity. Any semantic length encoded by a frame parameter, such as a hash preimage
-/// byte length, is checked by the owning precompile during validation or evaluation. `True` is the
-/// framework sentinel owned exclusively by [`Node::TRUE`];
-/// precompiles never declare it. Predicate status is not a shape; predicates succeed by evaluating
-/// to [`Node::TRUE`].
+/// Registration and wire encoding use this shape to distinguish opaque data from child digests.
+/// For data and pair lists, [`Precompile::validate_payload`](super::Precompile::validate_payload)
+/// checks the number of chunks or pairs before insertion.
+///
+/// `True` is reserved for [`Node::TRUE`]; precompiles must not declare it. Predicates declare their
+/// input shape and return [`Node::TRUE`] when evaluation succeeds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeType {
     /// The framework TRUE sentinel, with no data payload.

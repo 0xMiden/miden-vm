@@ -276,6 +276,11 @@ impl Precompile for UintPrecompile {
         Some(op.node_type())
     }
 
+    fn validate_payload(&self, _params: [u32; 3], payload: &Payload) -> bool {
+        // Values contain eight limbs; binary operations contain two child digests.
+        payload.as_chunks().len() == 1
+    }
+
     fn evaluate(
         &self,
         params: [u32; 3],
@@ -379,16 +384,19 @@ mod tests {
     }
 
     #[test]
-    fn data_shape_does_not_bypass_one_chunk_value_semantics() {
-        let domain = UintDomain::K1Base;
-        let frame = UintPrecompile::value_frame(domain);
+    fn registration_rejects_multi_chunk_values() {
+        let frame = UintPrecompile::value_frame(UintDomain::K1Base);
         let node = Node::try_data(frame, alloc::vec![[ZERO; 8], [ZERO; 8]])
             .expect("multi-chunk data is structurally valid");
-        let precompile = UintPrecompile;
-        assert_eq!(precompile.decode(frame.params()), Some(NodeType::Data));
-
+        let digest = node.digest();
         let mut state = state();
-        assert_invalid_payload(state.register(node));
+        let remaining = state.remaining_elements();
+
+        let error = state.register(node).unwrap_err();
+
+        assert!(matches!(error.root(), PrecompileError::InvalidNode), "{error:?}");
+        assert!(state.get_node(&digest).is_none());
+        assert_eq!(state.remaining_elements(), remaining);
     }
 
     #[test]

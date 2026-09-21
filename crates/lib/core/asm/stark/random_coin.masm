@@ -616,15 +616,15 @@ end
 # COEFFICIENT GENERATION
 # =============================================================================================
 
-#! Draw a list of random extension field elements related to the auxiliary segment of the execution
-#! trace and store them.
-#!
 #! Draws alpha and beta for the LogUp multiset hash
-#! `h(m) = alpha + \sum_{i=0}^{|m| - 1} m_i * beta^i`.
+#! `h(m) = alpha + \sum_{i=0}^{|m| - 1} m_i * beta^i` and stores them at the address returned by
+#! `constants::get_aux_rand_elem_address`.
 #!
 #! Input: [...]
 #! Output: [...]
-pub proc generate_aux_randomness(aux_rand_ptr: ptr<types::QuadFelt>)
+#!
+#! Invocation: exec
+pub proc generate_aux_randomness()
 
     exec.sample_ext
     exec.sample_ext

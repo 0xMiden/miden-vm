@@ -166,6 +166,10 @@ mod tests {
             (params == [0; 3]).then_some(NodeType::Data)
         }
 
+        fn validate_payload(&self, _params: [u32; 3], payload: &Payload) -> bool {
+            payload.as_value().is_ok()
+        }
+
         fn evaluate(
             &self,
             _params: [u32; 3],

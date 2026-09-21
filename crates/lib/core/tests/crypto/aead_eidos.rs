@@ -12,9 +12,10 @@ use miden_crypto::{
     },
 };
 use miden_processor::{
-    ProcessorState,
+    ExecutionError, ProcessorState,
     advice::AdviceMutation,
     event::{EventError, EventHandler},
+    operation::OperationError,
 };
 
 const SRC_PTR: u64 = 1000;
@@ -504,21 +505,33 @@ fn encrypt_entry_points_reject_expanded_length_overflow() {
 fn encrypt_entry_points_validate_counter_schedule() {
     let max_counter = u64::from(u32::MAX);
 
-    assert_encrypt_counter_accepts("encrypt_blocks_stream", max_counter, 1, 8, 16);
+    assert_encrypt_exhausts_counter("encrypt_blocks_stream", max_counter, 1, 8, 16);
     assert_encrypt_counter_rejected(
-        "encrypt_blocks_stream counter range",
         "encrypt_blocks_stream",
         max_counter,
         2,
+        "AEAD counter range exceeds u32",
     );
 
-    assert_encrypt_counter_accepts("encrypt_felts_expanded", max_counter, 1, 1, 2);
+    assert_encrypt_exhausts_counter("encrypt_felts_expanded", max_counter, 1, 1, 2);
+    assert_encrypt_exhausts_counter("encrypt_felts_expanded", max_counter, 8, 8, 16);
     assert_encrypt_counter_rejected(
-        "encrypt_felts_expanded counter range",
         "encrypt_felts_expanded",
         max_counter,
         9,
+        "AEAD counter range exceeds u32",
     );
+
+    for procedure in ["encrypt_blocks_stream", "encrypt_felts_expanded"] {
+        for count in [0, 1] {
+            assert_encrypt_counter_rejected(
+                procedure,
+                max_counter + 1,
+                count,
+                "AEAD counter must fit in a u32",
+            );
+        }
+    }
 }
 
 #[test]
@@ -1355,7 +1368,7 @@ fn assert_encrypt_local_frame_rejected(procedure: &str, src_ptr: u64, dst_ptr: u
     expect_assert_error_code_from_msg!(test, "AEAD memory ranges must stay below the local frame");
 }
 
-fn assert_encrypt_counter_accepts(
+fn assert_encrypt_exhausts_counter(
     procedure: &str,
     counter: u64,
     count: u64,
@@ -1367,6 +1380,7 @@ fn assert_encrypt_counter_accepts(
     let ctr_key_elements = derive_ctr_key(key, nonce).into_elements();
     let expected_src = SRC_PTR + src_advance;
     let expected_dst = DST_PTR + dst_advance;
+    let exhausted_counter = u64::from(u32::MAX) + 1;
     let source = format!(
         "
     use miden::core::crypto::aead_eidos
@@ -1386,8 +1400,8 @@ fn assert_encrypt_counter_accepts(
         assert_eq.err=\"source pointer must advance by the plaintext length\"
         push.{expected_dst}
         assert_eq.err=\"destination pointer must advance by the ciphertext length\"
-        push.{U32_ADDRESS_SPACE_END}
-        assert_eq.err=\"the returned counter may be one past u32::MAX\"
+        push.{exhausted_counter}
+        assert_eq.err=\"the returned counter must be one past u32::MAX\"
     end
     "
     );
@@ -1395,7 +1409,12 @@ fn assert_encrypt_counter_accepts(
     build_test!(source.as_str(), &[]).expect_stack(&[]);
 }
 
-fn assert_encrypt_counter_rejected(case: &str, procedure: &str, counter: u64, count: u64) {
+fn assert_encrypt_counter_rejected(
+    procedure: &str,
+    counter: u64,
+    count: u64,
+    expected_error: &str,
+) {
     let key = word([1, 2, 3, 4]);
     let nonce = word([0x10, 0x20, 0x30, 0x40]);
     let ctr_key_elements = derive_ctr_key(key, nonce).into_elements();
@@ -1415,7 +1434,16 @@ fn assert_encrypt_counter_rejected(case: &str, procedure: &str, counter: u64, co
     "
     );
 
-    assert!(build_test!(source.as_str(), &[]).execute().is_err(), "{case} must be rejected");
+    let test = build_test!(source.as_str(), &[]);
+    let expected_code = miden_core::mast::error_code_from_msg(expected_error);
+    miden_utils_testing::expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { err_code, .. }
+                | OperationError::U32AssertionFailed { err_code, .. },
+            ..
+        } if err_code == expected_code
+    );
 }
 
 fn assert_decrypt_rejected_before_event(

@@ -234,6 +234,9 @@ mod tests {
             }
             Some(NodeType::Data)
         }
+        fn validate_payload(&self, _params: [u32; 3], payload: &Payload) -> bool {
+            payload.as_value().is_ok()
+        }
         fn evaluate(
             &self,
             params: [u32; 3],
@@ -257,6 +260,9 @@ mod tests {
         }
         fn decode(&self, _params: [u32; 3]) -> Option<NodeType> {
             Some(NodeType::True)
+        }
+        fn validate_payload(&self, _params: [u32; 3], _payload: &Payload) -> bool {
+            unreachable!("registry must reject precompile-owned NodeType::True")
         }
         fn evaluate(
             &self,
