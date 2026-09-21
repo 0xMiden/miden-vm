@@ -176,7 +176,7 @@ where
     // Run the FRI commit and query phases, writing the proof to the transcript.
     let mut channel = ProverTranscript::new(challenger.clone());
     let fri_polys = FriPolys::<F, EF, _>::new(&params, lmcs, &domain, evals.clone(), &mut channel);
-    fri_polys.prove_queries(&params, tree_indices.clone(), &mut channel);
+    fri_polys.prove_queries(&params, lmcs, tree_indices.clone(), &mut channel);
     let (_digest, transcript) = channel.finalize();
 
     // Verify the proof before exporting it as test vectors. The verifier consumes a fresh view of

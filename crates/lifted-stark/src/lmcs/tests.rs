@@ -70,7 +70,7 @@ where
 
     let (prover_digest, transcript) = {
         let mut prover_channel = gl::prover_channel();
-        tree.prove_batch(&tree_indices, &mut prover_channel);
+        tree.prove_batch(lmcs, &tree_indices, &mut prover_channel);
         prover_channel.finalize()
     };
     let opened_rows =
@@ -269,7 +269,7 @@ fn batch_proof_handles_empty_or_oob() {
 
     let idx0 = TreeIndices::new([0], log_max_height).unwrap();
     let mut prover_channel = gl::prover_channel();
-    tree.prove_batch(&idx0, &mut prover_channel);
+    tree.prove_batch(&lmcs, &idx0, &mut prover_channel);
     let (_, transcript) = prover_channel.finalize();
 
     // Empty indices → no openings parsed.
