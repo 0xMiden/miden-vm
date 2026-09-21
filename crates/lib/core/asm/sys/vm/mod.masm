@@ -16,7 +16,7 @@ use miden::core::stark::verifier
 # zero because Lifted STARK does not grind lookup challenges.
 const LOOKUP_POW_BITS = 0
 const MAX_MESSAGE_WIDTH = 16
-const NUM_COMPOSED_CONSTRAINTS = 674
+const NUM_COMPOSED_CONSTRAINTS = 680
 const MAX_CONSTRAINT_DEGREE = 9
 const NUM_DEEP_TERMS = 282
 const LOOKUP_FRACTIONS_PER_ROW = 78     # matches AIR_SHAPE.lookup.fractions_per_row

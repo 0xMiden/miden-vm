@@ -80,7 +80,6 @@ pub mod core {
             cv_storage_coefficient, cv_storage_offset, cv_word_base, sum_input_b, universal_cv_word,
         },
         constraints::{enforce_core_footer_rows, enforce_fused_rows},
-        finalizer::{matrix_accumulator_rows, matrix_partial},
         lookup::{
             EidosCompressionCols, LookupMultiplicitySign, NarrowLookupConfig, XorExpression,
             emit_narrow_lookup_columns,

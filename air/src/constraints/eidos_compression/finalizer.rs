@@ -23,7 +23,11 @@ const fn raw_xof_word_index(footer: usize, local_word: usize) -> usize {
 }
 
 /// Contribution of one footer's four raw XOF words to one matrix output.
-pub fn matrix_partial<E>(footer: usize, raw_words: &[E; RAW_WORDS_PER_FOOTER], output: usize) -> E
+pub(super) fn matrix_partial<E>(
+    footer: usize,
+    raw_words: &[E; RAW_WORDS_PER_FOOTER],
+    output: usize,
+) -> E
 where
     E: PrimeCharacteristicRing,
 {
@@ -36,7 +40,7 @@ where
 }
 
 /// Running matrix-finalizer values stored on the four footer rows.
-pub fn matrix_accumulator_rows(raw_xof: [u32; 16]) -> [[Felt; 4]; FOOTER_ROWS] {
+pub(super) fn matrix_accumulator_rows(raw_xof: [u32; 16]) -> [[Felt; 4]; FOOTER_ROWS] {
     let mut rows = [[Felt::ZERO; 4]; FOOTER_ROWS];
     let mut running = [Felt::ZERO; 4];
     for footer in 0..FOOTER_ROWS {
@@ -53,8 +57,6 @@ pub fn matrix_accumulator_rows(raw_xof: [u32; 16]) -> [[Felt; 4]; FOOTER_ROWS] {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::field::PrimeField64;
-
     use super::*;
 
     #[test]
@@ -68,6 +70,5 @@ mod tests {
         });
 
         assert_eq!(rows[3], direct);
-        assert!(direct.iter().all(|value| value.as_canonical_u64() < Felt::ORDER_U64));
     }
 }

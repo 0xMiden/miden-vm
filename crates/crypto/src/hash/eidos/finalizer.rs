@@ -118,6 +118,7 @@ fn reduce_u128(value: u128) -> u64 {
 /// Output words `2 * j` and `2 * j + 1` are the low and high limbs of canonical coordinate `j`.
 #[inline(always)]
 pub(super) fn finalize_to_cv(input: &[u32; 16]) -> [u32; 8] {
+    // Sixteen u64-by-u32 products sum to less than 2^100.
     let mut accumulators = [0u128; 4];
     for (column, &word) in input.iter().enumerate() {
         let word = word as u128;
@@ -148,7 +149,7 @@ pub(super) fn finalize_to_cv(input: &[u32; 16]) -> [u32; 8] {
     ),
     all(target_arch = "wasm32", not(target_feature = "simd128")),
     all(
-        not(target_arch = "aarch64"),
+        not(all(target_arch = "aarch64", target_feature = "neon")),
         not(target_arch = "x86_64"),
         not(target_arch = "wasm32"),
     ),
@@ -212,7 +213,7 @@ pub(super) fn finalize_packed_to_cv<const LANES: usize>(
 /// `2^39`. A carry out of the addition is worth `2^32 - 1`, a borrow from the subtraction costs
 /// `2^32 - 1`, and one conditional subtraction of `p` makes the result canonical.
 #[cfg(any(
-    target_arch = "aarch64",
+    all(target_arch = "aarch64", target_feature = "neon"),
     all(
         target_arch = "x86_64",
         any(
@@ -224,7 +225,7 @@ pub(super) fn finalize_packed_to_cv<const LANES: usize>(
 ))]
 mod limbs {
     use super::FINALIZER_MATRIX;
-    #[cfg(any(target_arch = "aarch64", test))]
+    #[cfg(any(all(target_arch = "aarch64", target_feature = "neon"), test))]
     use super::reduce_u128;
 
     pub(super) const LIMB_BITS: u32 = 22;
@@ -254,7 +255,7 @@ mod limbs {
     /// Returns the canonical value of `s0 + 2^22 * s1 + 2^44 * s2`.
     ///
     /// Every input must be below `2^58`.
-    #[cfg(any(target_arch = "aarch64", test))]
+    #[cfg(any(all(target_arch = "aarch64", target_feature = "neon"), test))]
     #[inline(always)]
     pub(super) fn recombine(s0: u64, s1: u64, s2: u64) -> u64 {
         debug_assert!(s0 < 1 << 58 && s1 < 1 << 58 && s2 < 1 << 58);
@@ -262,12 +263,12 @@ mod limbs {
     }
 }
 
-/// Computes [`finalize_packed_to_cv`] with the backend selected for the target.
+/// Applies the finalizer lane by lane with the backend selected for the target.
 #[inline(always)]
 pub(super) fn finalize_packed_native_to_cv(
     input: &[[u32; super::PACKED_LANES]; 16],
 ) -> [[u32; super::PACKED_LANES]; 8] {
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
     {
         aarch64_neon::finalize(input)
     }
@@ -323,7 +324,7 @@ pub(super) fn finalize_packed_native_to_cv(
     }
 
     #[cfg(all(
-        not(target_arch = "aarch64"),
+        not(all(target_arch = "aarch64", target_feature = "neon")),
         not(all(target_arch = "x86_64", feature = "std")),
         not(all(target_arch = "x86_64", not(feature = "std"), target_feature = "avx512f")),
         not(all(
@@ -372,7 +373,7 @@ mod packed_field {
 
 #[cfg(all(target_arch = "x86_64", any(feature = "std", target_feature = "avx512f"),))]
 mod x86_64_avx512_reduce {
-    //! Reduction shared by the AVX-512 backends; see [`limbs`](super::limbs) for the derivation.
+    //! Reduction shared by the AVX-512 backends, using `2^64 = 2^32 - 1 (mod p)`.
 
     use core::arch::x86_64::*;
 
@@ -758,14 +759,13 @@ mod x86_64_avx2 {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
 mod aarch64_neon {
     //! aarch64 finalizer built on NEON widening multiply-accumulate.
     //!
     //! Each pass covers four lanes and all four matrix rows: one `umlal` adds the products of a
     //! coefficient limb with two lanes to a `u64` accumulator pair. The three limb sums of every
-    //! output are recombined and reduced in scalar code. The output equals
-    //! `finalize_packed_to_cv`, which the tests use as the reference.
+    //! output are recombined and reduced in scalar code.
 
     use core::arch::aarch64::*;
 
@@ -794,7 +794,7 @@ mod aarch64_neon {
         let mut output = [[0u32; 16]; 8];
         for first_lane in (0..16).step_by(4) {
             let mut sums = [[[0u64; 4]; 3]; 4];
-            // SAFETY: NEON is part of the aarch64 baseline. Every load reads four words of a
+            // SAFETY: NEON is enabled for this target. Every load reads four words of a
             // sixteen-word row or a four-word limb vector, and every store writes two words of a
             // four-word sum array.
             unsafe {
@@ -907,7 +907,7 @@ mod tests {
     #[cfg(any(
         all(target_arch = "wasm32", target_feature = "simd128"),
         all(target_arch = "x86_64", feature = "std"),
-        target_arch = "aarch64",
+        all(target_arch = "aarch64", target_feature = "neon"),
     ))]
     fn assert_packed_finalizer_matches(
         mut finalizer: impl FnMut(&[[u32; 16]; 16]) -> [[u32; 16]; 8],
@@ -1068,7 +1068,7 @@ mod tests {
 
     /// Largest sum of sixteen products of a limb and a `u32` word.
     #[cfg(any(
-        target_arch = "aarch64",
+        all(target_arch = "aarch64", target_feature = "neon"),
         all(
             target_arch = "x86_64",
             any(
@@ -1081,7 +1081,7 @@ mod tests {
     const MAX_LIMB_SUM: u64 = 16 * ((1 << limbs::LIMB_BITS) - 1) * (u32::MAX as u64);
 
     #[cfg(any(
-        target_arch = "aarch64",
+        all(target_arch = "aarch64", target_feature = "neon"),
         all(
             target_arch = "x86_64",
             any(
@@ -1108,7 +1108,7 @@ mod tests {
     }
 
     #[cfg(any(
-        target_arch = "aarch64",
+        all(target_arch = "aarch64", target_feature = "neon"),
         all(
             target_arch = "x86_64",
             any(
@@ -1146,7 +1146,7 @@ mod tests {
     }
 
     #[cfg(any(
-        target_arch = "aarch64",
+        all(target_arch = "aarch64", target_feature = "neon"),
         all(
             target_arch = "x86_64",
             any(
@@ -1434,7 +1434,7 @@ mod tests {
         });
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
     #[test]
     fn aarch64_neon_finalizer_matches_scalar_lanes() {
         assert_packed_finalizer_matches(aarch64_neon::finalize);

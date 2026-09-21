@@ -105,8 +105,9 @@ impl EidosChallenger {
 
     /// Samples `bits` low bits from the next sampled field element.
     ///
-    /// The result is not exactly uniform because the field order `p` is not a multiple of
-    /// `2^bits`: every value has probability within `1/p` of `2^-bits`.
+    /// For a uniform field sample, each result has probability within `1/p` of `2^-bits`,
+    /// where `p` is the field order. For positive `bits`, the distribution is not exactly uniform
+    /// because `p` is not a multiple of `2^bits`.
     ///
     /// A zero-bit request consumes one field element and returns zero.
     pub fn sample_bits(&mut self, bits: usize) -> usize {

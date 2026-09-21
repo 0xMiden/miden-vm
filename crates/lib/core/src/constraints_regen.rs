@@ -119,6 +119,9 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     let preprocessed_commitment = compute_eidos_preprocessed_commitment()?;
 
     let mut relation_mod = read_file(RELATION_DIGEST_PATH)?;
+    for (name, value) in vm_security_descriptor_literals() {
+        replace_masm_const(&mut relation_mod, name, &value.to_string())?;
+    }
     for (i, elem) in relation_digest.iter().enumerate() {
         replace_masm_const(
             &mut relation_mod,
@@ -1031,7 +1034,21 @@ pub fn security_masm_matches_air() -> Result<(), String> {
         return Err(format!("MAX_POW_BITS in {SECURITY_ESTIMATOR_PATH} is stale"));
     }
 
-    let descriptor_literals: [(&str, u64); 9] = [
+    for (name, expected) in vm_security_descriptor_literals()
+        .into_iter()
+        .chain([("LOG_HEIGHT_MAX", estimator_heights)])
+    {
+        let actual = parse_masm_const::<u64>(&wrapper, name, RELATION_DIGEST_PATH)?;
+        if actual != expected {
+            return Err(format!("{name} in {RELATION_DIGEST_PATH} is stale"));
+        }
+    }
+
+    Ok(())
+}
+
+fn vm_security_descriptor_literals() -> [(&'static str, u64); 8] {
+    [
         ("LOOKUP_POW_BITS", miden_air::security::LOOKUP_POW_BITS as u64),
         (
             "MAX_MESSAGE_WIDTH",
@@ -1060,17 +1077,7 @@ pub fn security_masm_matches_air() -> Result<(), String> {
             miden_air::security::AIR_SHAPE.lookup.fractions_per_row as u64,
         ),
         ("MAX_NUM_KERNEL_PROCEDURES", KernelDescriptor::MAX_NUM_PROCEDURES as u64),
-        ("LOG_HEIGHT_MAX", estimator_heights),
-    ];
-
-    for (name, expected) in descriptor_literals {
-        let actual = parse_masm_const::<u64>(&wrapper, name, RELATION_DIGEST_PATH)?;
-        if actual != expected {
-            return Err(format!("{name} in {RELATION_DIGEST_PATH} is stale"));
-        }
-    }
-
-    Ok(())
+    ]
 }
 
 fn parse_masm_const<T: core::str::FromStr>(

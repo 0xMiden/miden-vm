@@ -42,9 +42,9 @@ pub struct ProofSecurityParameters {
 /// Size of the challenge field in Q16 bits, counted as its bit length.
 ///
 /// The challenge field is the quadratic extension of the Goldilocks base field, so it has `p^2`
-/// elements and a bit length of 128. Since `p^2 = 2^128 * (1 - 2^-32)^2`, this nominal size exceeds
-/// `log2(p^2)` by less than `7e-10` bits. The MASM estimator relies on this value being a whole
-/// number of bits.
+/// elements, where `p = 2^64 - 2^32 + 1`. Its bit length is 128, which exceeds `log2(p^2)` by
+/// less than `7e-10` bits. This is a nominal security-estimation convention, not a lower bound on
+/// the exact field size. The MASM estimator requires a whole number of bits.
 pub const CHALLENGE_FIELD_BITS: u64 =
     fixed::from_bits(EXTENSION_DEGREE as u32 * (u64::BITS - Felt::ORDER_U64.leading_zeros()));
 
