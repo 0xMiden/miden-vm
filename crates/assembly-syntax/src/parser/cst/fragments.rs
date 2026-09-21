@@ -444,14 +444,17 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
 
         if !matches!(
             self.current().as_ref().map(SyntaxToken::kind),
-            Some(SyntaxKind::Ident | SyntaxKind::QuotedIdent)
+            Some(SyntaxKind::Ident | SyntaxKind::QuotedIdent | SyntaxKind::QuotedString)
         ) || self.peek_kind(1) != Some(SyntaxKind::Colon)
         {
             return Err(self.invalid_syntax("expected a named procedure parameter"));
         }
 
         let name = self.bump().expect("parameter name token should be present");
-        let name = self.context.lower_ident_token(&name)?;
+        let name = match name.kind() {
+            SyntaxKind::QuotedString => self.context.lower_escaped_ident_token(&name)?,
+            _ => self.context.lower_ident_token(&name)?,
+        };
         self.bump();
         Ok((Some(name), self.parse_type_expr()?))
     }

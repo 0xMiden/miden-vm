@@ -2101,29 +2101,31 @@ end
 }
 
 #[test]
-fn test_quoted_parameter_name_roundtrip_formatting() {
-    let expected = "\
-namespace $exec
-
-proc foo(\"param-name\": felt)
-    drop
-end
-
-begin
-    push.1
-    exec.foo
-end
-";
+fn test_parameter_names_roundtrip_formatting() {
+    use crate::prettier::PrettyPrint;
 
     let context = SyntaxTestContext::default();
-    let source = source_file!(&context, expected);
-    let module = context.parse_program_source_file(source).unwrap_or_else(|err| panic!("{err}"));
-    let formatted = module.to_string();
-    assert_eq!(formatted, expected);
+    for name in ["param-name", "123", "pärám", "a\"b", "a\\b"] {
+        let name = Ident::new(name).unwrap();
+        let signature = FunctionType::new(
+            types::CallConv::Fast,
+            vec![TypeExpr::Primitive(Span::unknown(Type::Felt))],
+            vec![],
+        )
+        .with_arg_names(vec![Some(name.clone())]);
+        let expected = format!(
+            "namespace $exec\n\nproc foo{}\n    drop\nend\n\nbegin\n    push.1\n    exec.foo\nend\n",
+            signature.to_pretty_string()
+        );
 
-    let source = source_file!(&context, formatted);
-    let reparsed = context.parse_program_source_file(source).unwrap_or_else(|err| panic!("{err}"));
-    assert_eq!(reparsed.to_string(), expected);
+        let source = source_file!(&context, expected.clone());
+        let module = context
+            .parse_program_source_file(source)
+            .unwrap_or_else(|err| panic!("{name}: {err}"));
+        assert_eq!(module.to_string(), expected);
+        let procedure = module.procedures().next().unwrap();
+        assert_eq!(procedure.signature().unwrap().arg_names, [Some(name)]);
+    }
 }
 
 #[test]
