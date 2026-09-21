@@ -204,7 +204,7 @@ fn pvm_scatter_plan(geometry: &PvmOodGeometry) -> Result<OodScatterPlan, String>
 }
 
 /// Derives the occupied scatter-table ranges from the same plan that renders the ingest hook.
-#[cfg(feature = "constants-tools")]
+#[cfg(any(test, feature = "constants-tools"))]
 pub(crate) fn pvm_scatter_table_layout(
     geometry: &PvmOodGeometry,
 ) -> Result<PvmScatterTableLayout, String> {

@@ -197,6 +197,7 @@ end
 #!
 #! Inputs:  []
 #! Outputs: []
+#! Invocation: exec
 pub proc stage_ood_scatter_table()
     exec.layout::ood_scatter_table_ptr
     # => [table]
@@ -254,6 +255,7 @@ end
 #!
 #! Inputs:  [rate(8), cv(4), ptr, alpha_ptr, acc0, acc1]
 #! Outputs: [rate'(8), cv'(4), ptr + {row_felts}, alpha_ptr, acc0', acc1']
+#! Invocation: exec
 pub proc process_row_ood_evaluations(
     state: types::EidosState,
     evaluation: types::HornerState,

@@ -413,6 +413,7 @@ pub fn render_proof_order_maps(config: &ProofOrderMapsConfig<'_>) -> Result<Stri
          #!\n\
          #! Inputs:  []\n\
          #! Outputs: []\n\
+         #! Invocation: exec\n\
          pub proc stage_proof_order_maps()\n\
          {body}\n\
          end\n",
