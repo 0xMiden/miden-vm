@@ -308,6 +308,88 @@ impl LiftedAir<F, EF> for MockPeriodicAir {
     }
 }
 
+/// Many period-32 small-integer columns, so their period adopts the shared Lagrange basis, next
+/// to a mostly-one column combined through the basis complement, a constant column, and a sparse
+/// period-128 column that keep their standalone forms.
+struct MockSharedBasisAir;
+
+const SHARED_BASIS_COLUMNS: usize = 12;
+
+fn shared_basis_columns() -> Vec<Vec<F>> {
+    let mut columns: Vec<Vec<F>> = (0..SHARED_BASIS_COLUMNS)
+        .map(|column| {
+            (0..32u64)
+                .map(|row| F::new_unchecked((row * (column as u64 + 3) + column as u64) % 17))
+                .collect()
+        })
+        .collect();
+    let mut mostly_one = vec![F::ONE; 32];
+    mostly_one[3] = F::ZERO;
+    mostly_one[20] = F::new_unchecked(6);
+    columns.push(mostly_one);
+    columns.push(vec![F::new_unchecked(9)]);
+    let mut sparse = vec![F::ZERO; 128];
+    sparse[17] = F::new_unchecked(23);
+    columns.push(sparse);
+    columns
+}
+
+impl BaseAir<F> for MockSharedBasisAir {
+    fn width(&self) -> usize {
+        1
+    }
+
+    fn num_public_values(&self) -> usize {
+        1
+    }
+
+    fn periodic_columns(&self) -> Cow<'_, [Vec<F>]> {
+        Cow::Owned(shared_basis_columns())
+    }
+}
+
+impl LiftedAir<F, EF> for MockSharedBasisAir {
+    fn num_randomness(&self) -> usize {
+        2
+    }
+
+    fn aux_width(&self) -> usize {
+        1
+    }
+
+    fn num_aux_values(&self) -> usize {
+        1
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), vec![EF::ZERO])
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+        let main = builder.main();
+        let a = main.current_slice()[0];
+        let pub0 = builder.public_values()[0];
+        let rand0 = builder.permutation_randomness()[0];
+        let aux0 = builder.permutation().current_slice()[0];
+        let periodic: Vec<AB::ExprEF> =
+            builder.periodic_values().iter().map(|value| (*value).into().into()).collect();
+
+        builder.assert_zero(a.into() + pub0.into());
+        builder.assert_zero_ext(rand0.into() + aux0.into());
+        let a_expr: AB::Expr = a.into();
+        let a_ext: AB::ExprEF = a_expr.into();
+        for value in periodic {
+            builder.assert_zero_ext(value * a_ext.clone());
+        }
+    }
+}
+
 fn ef(x: u64) -> EF {
     EF::from(F::new_unchecked(x))
 }
@@ -643,6 +725,94 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
     let circuit = emit_circuit(&artifacts.dag, layout).unwrap();
     let circuit_value = circuit.eval(&inputs).expect("circuit eval");
     assert_eq!(circuit_value, actual);
+}
+
+/// The shared-basis lowering must agree with the independent dense reference, and the
+/// representation choice must actually exercise it alongside the standalone forms.
+#[test]
+fn test_shared_lagrange_basis_periodic_path_matches_manual_eval() {
+    use crate::dag::{PeriodicColumn, PeriodicColumnData};
+
+    let data = PeriodicColumnData::<EF>::from_periodic_columns(shared_basis_columns());
+    let columns = data.columns();
+    assert!(
+        columns[..SHARED_BASIS_COLUMNS]
+            .iter()
+            .all(|column| matches!(column, PeriodicColumn::Basis { period: 32, .. })),
+        "dense small-integer columns of one period must share its basis"
+    );
+    assert!(
+        matches!(&columns[SHARED_BASIS_COLUMNS], PeriodicColumn::Basis { offset, .. } if *offset == EF::ONE),
+        "a mostly-one column must be combined through the basis complement"
+    );
+    assert!(matches!(columns[SHARED_BASIS_COLUMNS + 2], PeriodicColumn::Sparse { .. }));
+
+    let air = MockSharedBasisAir;
+    let config = AceConfig {
+        num_quotient_chunks: 2,
+        layout: LayoutKind::Native,
+    };
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let layout = artifacts.layout.clone();
+    let inputs = build_inputs(&layout);
+    let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
+    let periodic_columns = air.periodic_columns();
+    let periodic_values = eval_periodic_values(&periodic_columns, z_k);
+
+    let air_layout = AirLayout {
+        preprocessed_width: 0,
+        main_width: layout.counts.width,
+        num_public_values: layout.counts.num_public,
+        permutation_width: layout.counts.aux_width,
+        num_permutation_challenges: layout.counts.num_randomness,
+        num_permutation_values: air.num_aux_values(),
+        num_periodic_columns: periodic_columns.len(),
+    };
+    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
+    air.eval(&mut builder);
+
+    let acc = eval_folded_constraints(
+        &builder.base_constraints(),
+        &builder.extension_constraints(),
+        &builder.constraint_layout(),
+        &inputs,
+        &layout,
+        &periodic_values,
+    );
+    let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
+    let vanishing = z_pow_n - EF::ONE;
+    let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
+
+    let actual = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
+    assert_eq!(actual, expected);
+
+    let circuit = emit_circuit(&artifacts.dag, layout).unwrap();
+    assert_eq!(circuit.eval(&inputs).expect("circuit eval"), actual);
+}
+
+/// Constant columns and repeats of another column add nothing to the basis savings of their
+/// period: the DAG folds a constant column to a single constant and shares a repeat's nodes. A
+/// lone one-hot column saves too little over the period-8 basis to adopt it, and adding either
+/// kind of column must not change that.
+#[test]
+fn test_constant_and_repeated_periodic_columns_do_not_count_toward_shared_basis() {
+    use crate::dag::{PeriodicColumn, PeriodicColumnData};
+
+    let mut one_hot = vec![F::ZERO; 8];
+    one_hot[5] = F::ONE;
+    let with_constants =
+        vec![one_hot.clone(), vec![F::new_unchecked(2); 8], vec![F::new_unchecked(3); 8]];
+    let repeated = vec![one_hot; 4];
+
+    for (case, columns) in [("constant", with_constants), ("repeated", repeated)] {
+        let data = PeriodicColumnData::<EF>::from_periodic_columns(columns);
+        assert!(
+            data.columns()
+                .iter()
+                .all(|column| !matches!(column, PeriodicColumn::Basis { .. })),
+            "{case} columns must not push a period onto the shared basis"
+        );
+    }
 }
 
 #[test]
