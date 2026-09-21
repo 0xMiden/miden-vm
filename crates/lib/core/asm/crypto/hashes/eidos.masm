@@ -171,10 +171,10 @@ pub proc copy_digest(state: State) -> (Digest, State)
     dupw.2
 end
 
-#! Hashes the memory `start_addr` to `end_addr` given a three-word VM hasher state.
+#! Absorbs complete 8-Felt blocks from `[start_addr, end_addr)` into the supplied state.
 #!
-#! This requires that `end_addr = start_addr + 8n` where n = {0, 1, 2 ...}, otherwise the procedure
-#! will enter an infinite loop.
+#! An empty range preserves the state. A non-empty range may end at 2^32, immediately after
+#! the last memory address.
 #!
 #! Input: [BLOCK_LO, BLOCK_HI, CV, start_addr, end_addr, ...]
 #! Output: [BLOCK_LO', BLOCK_HI', CV', start_addr', end_addr, ...]
@@ -185,12 +185,33 @@ end
 #! - `BLOCK_HI` is the second preserved block word (positions 4-7).
 #! - `CV` is the current chaining word (positions 8-11).
 #!
+#! Panics if:
+#! - `start_addr` is not a word-aligned u32 address.
+#! - `end_addr < start_addr` or `end_addr > 2^32`.
+#! - the range length is not a multiple of eight.
+#!
 #! Invocation: exec
 pub proc absorb_double_words_from_memory(
     state: State,
     start_addr: ptr<felt>,
     end_addr: ptr<felt>,
 ) -> (State, ptr<felt>, ptr<felt>)
+    dup.13 dup.13
+    u32assert.err="start address must fit in a u32"
+    dup u32mod.4 assertz.err="start address must be word-aligned"
+    # => [start_addr, end_addr, STATE(12), start_addr, end_addr, ...]
+
+    dup.1 dup.1 neq
+    if.true
+        # Check the last accessed address to allow an exclusive end address of 2^32.
+        swap sub.1 u32assert2.err="hash range exceeds the u32 address space"
+        dup.1 dup.1 u32lte assert.err="start address must not exceed end address"
+        # The range length is one more than last_addr - start_addr.
+        swap sub u32mod.8 eq.7 assert.err="range length must be a multiple of 8"
+    else
+        drop drop
+    end
+
     dup.13 dup.13 neq
     while.true
         mem_stream exec.compress
@@ -235,6 +256,8 @@ pub proc hash_words_with_domain(domain: u32, start_addr: ptr<felt>, end_addr: pt
 
     dup.1 dup.1 u32assert2 u32gte assert
     # => [start_addr, end_addr, domain, ...]
+
+    dup.1 u32mod.4 assertz.err="end address must be word-aligned"
 
     dup.1 dup.1 sub
     # => [num_elements, start_addr, end_addr, domain, ...]
@@ -388,25 +411,24 @@ pub proc prepare_hasher_state(
     end
 end
 
-#! Computes hash of Felt values starting at the specified memory address using the provided hasher
-#! state.
+#! Completes an Eidos stream with complete blocks and an optional partial block from memory.
 #!
-#! This procedure divides the hashing process into two parts: hashing pairs of words using
-#! `absorb_double_words_from_memory` procedure and hashing the remaining values with `compress`
-#! procedure.
-#! An empty continuation returns the supplied chaining word unchanged.
+#! For a framed hash, the caller must initialize the stream with the correct domain and total
+#! length. An empty continuation returns the supplied chaining word unchanged. Unused tail elements
+#! are read from memory but replaced with zeros before compression.
 #!
-#! Inputs:  [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8]
+#! Inputs:  [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, remainder]
 #! Outputs: [HASH]
 #!
 #! Where:
-#! - ptr is the memory address of the first element to be hashed. This address must be
-#!   word-aligned - i.e., divisible by 4.
-#! - BLOCK_LO and BLOCK_HI are block words, and CV is the current chaining word.
-#! - end_pairs_addr is the memory address at which the pairs of words end.
-#! - num_elements%8 is the number of elements that did not fit into word pairs and should be
-#!   hashed separately.
-#! - HASH is the resulting hash of the provided memory values.
+#! - `BLOCK_LO` and `BLOCK_HI` are block words; `CV` is the current chaining word.
+#! - `[ptr, end_pairs_addr)` contains the complete blocks and must satisfy the range
+#!   requirements of `absorb_double_words_from_memory`.
+#! - `remainder` is the number of elements in the partial block at `end_pairs_addr`, from 0 to 7.
+#! - `HASH` is the final chaining word.
+#!
+#! Panics if the complete-block range is invalid, `remainder` exceeds seven, or a non-empty
+#! tail's 8-Felt memory read would exceed the u32 address space.
 #!
 #! Invocation: exec
 pub proc hash_elements_with_state(
@@ -415,6 +437,16 @@ pub proc hash_elements_with_state(
     end_pairs_addr: ptr<felt>,
     remainder: u8,
 ) -> Digest
+    dup.14 u32assert.err="remainder must fit in a u32"
+    u32lt.8 assert.err="remainder must be less than 8"
+
+    dup.14 neq.0
+    if.true
+        dup.13 u32assert.err="hash tail address must fit in a u32"
+        u32overflowing_add.7 assertz.err="hash tail exceeds the u32 address space"
+        drop
+    end
+
     # hash every pair of words
     exec.absorb_double_words_from_memory
     # => [BLOCK_LO, BLOCK_HI, CV', ptr', end_pairs_addr, num_elements%8]
@@ -431,7 +463,7 @@ pub proc hash_elements_with_state(
     else
         # load the remaining double word
         mem_stream
-        # => [BLOCK_LO, BLOCK_HI, CV', ptr'+2, end_pairs_addr, num_elements%8]
+        # => [BLOCK_LO, BLOCK_HI, CV', ptr'+8, end_pairs_addr, num_elements%8]
 
         # clean the stack
         movup.12 drop movup.12 drop

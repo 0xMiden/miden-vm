@@ -1,11 +1,13 @@
 use miden_assembly::Linkage;
 use miden_processor::{
-    ContextId, DefaultHost, FastProcessor, Felt, ONE, Program, StackInputs, Word, ZERO,
-    trace::RowIndex,
+    ContextId, DefaultHost, ExecutionError, FastProcessor, Felt, ONE, Program, StackInputs, Word,
+    ZERO, operation::OperationError, trace::RowIndex,
 };
 use miden_utils_testing::{
-    AdviceStack, build_expected_compress, build_expected_hash, felt_slice_to_ints,
+    AdviceStack, build_expected_compress, build_expected_hash, expect_exec_error_matches,
+    felt_slice_to_ints,
 };
+use rstest::rstest;
 
 #[test]
 fn test_memcopy_words_fails_on_overlap() {
@@ -212,10 +214,11 @@ fn test_memcopy_elements() {
     }
 }
 
-#[test]
-fn test_pipe_double_words_to_memory() {
-    let start_addr = 1000;
-    let end_addr = 1008;
+#[rstest]
+#[case(1000)]
+#[case(u32::MAX - 7)]
+fn test_pipe_double_words_to_memory(#[case] start_addr: u32) {
+    let end_addr = u64::from(start_addr) + 8;
     let source = format!(
         "
         use miden::core::mem
@@ -233,23 +236,11 @@ fn test_pipe_double_words_to_memory() {
     );
 
     let operand_stack = &[];
-    let data = &[1, 2, 3, 4, 5, 6, 7, 8];
-    let compressed = build_expected_compress(&[1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0]);
-    let expected_state = [
-        Felt::new_unchecked(1),
-        Felt::new_unchecked(2),
-        Felt::new_unchecked(3),
-        Felt::new_unchecked(4),
-        Felt::new_unchecked(5),
-        Felt::new_unchecked(6),
-        Felt::new_unchecked(7),
-        Felt::new_unchecked(8),
-        compressed[8],
-        compressed[9],
-        compressed[10],
-        compressed[11],
-    ];
-    let mut expected_stack = felt_slice_to_ints(&expected_state);
+    // Preserve the frame pointer when the destination includes the final memory word.
+    let data = &[1, 2, 3, 4, 5, 6, miden_core::FMP_INIT_VALUE.as_canonical_u64(), 8];
+    let mut state = [0; 12];
+    state[..8].copy_from_slice(data);
+    let mut expected_stack = felt_slice_to_ints(&build_expected_compress(&state));
     expected_stack.push(end_addr);
     build_test!(source, operand_stack, &data).expect_stack_and_memory(
         &expected_stack,
@@ -314,6 +305,72 @@ fn test_pipe_words_to_memory() {
         mem_addr,
         data,
     );
+}
+
+#[rstest]
+#[case::partial_block(1000, 1004, "copy range length must be a multiple of 8")]
+#[case::reversed(1008, 1000, "write pointer must not exceed end pointer")]
+#[case::unaligned(1001, 1009, "write pointer must be word-aligned")]
+#[case::wide_start(1 << 32, 1 << 32, "write pointer must fit in a u32")]
+#[case::wide_end(1000, (1 << 32) + 8, "copy range exceeds the u32 address space")]
+fn pipe_double_words_rejects_invalid_range_before_reading_advice(
+    #[case] start: u64,
+    #[case] end: u64,
+    #[case] message: &str,
+) {
+    let source = format!(
+        "use miden::core::mem
+        begin
+            push.{end}.{start}
+            padw padw padw
+            exec.mem::pipe_double_words_to_memory
+        end"
+    );
+    // Empty advice distinguishes range rejection from entering the copying loop.
+    let test = build_test!(source.as_str(), &[]);
+    let expected_code = miden_core::mast::error_code_from_msg(message);
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { err_code, .. }
+                | OperationError::U32AssertionFailed { err_code, .. },
+            ..
+        } if err_code == expected_code
+    );
+}
+
+#[rstest]
+#[case::generic("push.8.1073741823 exec.mem::pipe_words_to_memory")]
+#[case::domain("push.8.1073741823.42 exec.mem::pipe_words_to_memory_in_domain")]
+fn pipe_words_rejects_tail_overflow_before_reading_advice(#[case] invocation: &str) {
+    // The complete-block prefix ends at 2^32, leaving no room for the final word.
+    let source = format!("use miden::core::mem begin {invocation} end");
+    let test = build_test!(source.as_str(), &[]);
+    let expected_code =
+        miden_core::mast::error_code_from_msg("copy tail address must fit in a u32");
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::U32AssertionFailed { err_code, .. },
+            ..
+        } if err_code == expected_code
+    );
+}
+
+#[test]
+fn pipe_double_words_empty_preserves_state_and_advice() {
+    let source = "use miden::core::mem
+        use miden::core::sys
+        begin
+            push.1000.1000
+            push.12.11.10.9.8.7.6.5.4.3.2.1
+            exec.mem::pipe_double_words_to_memory
+            adv_push eq.99 assert
+            exec.sys::truncate_stack
+        end";
+    let mut expected: Vec<u64> = (1..=12).collect();
+    expected.push(1000);
+    build_test!(source, &[], &[99]).expect_stack(&expected);
 }
 
 #[test]

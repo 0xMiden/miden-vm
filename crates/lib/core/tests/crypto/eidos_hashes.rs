@@ -1,7 +1,36 @@
 use miden_core::{Felt, Word, chiplets::eidos_compression};
 use miden_crypto::hash::eidos::{Eidos, domain::EidosDomain, domains::GenericFeltSequenceDomain};
-use miden_processor::{ExecutionError, ZERO, operation::OperationError};
+use miden_processor::{
+    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs, ZERO,
+    operation::OperationError,
+};
 use miden_utils_testing::{build_expected_hash, expect_exec_error_matches};
+use rstest::rstest;
+
+fn assert_hash_input_error(source: &str, message: &str) {
+    let (program, ..) = build_test!(source, &[]).compile().unwrap();
+    let mut host = DefaultHost::default()
+        .with_library(&miden_core_lib::CoreLibrary::default())
+        .unwrap();
+    // A missing range check must fail the test without running an unbounded absorption loop.
+    let options =
+        ExecutionOptions::new(Some(2_048), 64, ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE)
+            .unwrap();
+    let error = FastProcessor::new(StackInputs::default())
+        .with_options(options)
+        .unwrap()
+        .execute_sync(&program, &mut host)
+        .unwrap_err();
+    match error {
+        ExecutionError::OperationError {
+            err:
+                OperationError::FailedAssertion { err_code, .. }
+                | OperationError::U32AssertionFailed { err_code, .. },
+            ..
+        } => assert_eq!(err_code, miden_core::mast::error_code_from_msg(message)),
+        error => panic!("expected input assertion {message:?}, got {error:?}"),
+    }
+}
 
 fn raw_absorb_double_words(values: &[u64]) -> Vec<u64> {
     assert_eq!(values.len() % 8, 0);
@@ -549,26 +578,37 @@ fn test_hash_odd_words() {
     build_test!(odd_words, &[]).expect_stack(&odd_hash);
 }
 
-#[test]
-fn test_absorb_double_words_from_memory() {
+#[rstest]
+#[case(1000)]
+#[case(u32::MAX as u64 - 7)]
+fn test_absorb_double_words_from_memory(#[case] start: u64) {
     // With mem_storew_le: push.D.C.B.A stores [A, B, C, D]
-    let even_words = "
+    let end = start + 8;
+    let second_word = start + 4;
+    let even_words = format!(
+        "
     use miden::core::sys
     use miden::core::crypto::hashes::eidos
 
     begin
-        push.0.0.0.1.1000 mem_storew_le dropw
-        push.0.0.1.0.1004 mem_storew_le dropw
+        push.0.0.0.1.{start} mem_storew_le dropw
+        push.0.0.1.0.{second_word} mem_storew_le dropw
 
-        push.1008      # end address
-        push.1000      # start address
+        push.{end}    # end address
+        push.{start}  # start address
         padw padw padw # hasher state
         exec.eidos::absorb_double_words_from_memory
+
+        # The final memory word contains the VM frame pointer. Restore it before using locals.
+        push.{fmp_init}.{fmp_addr} mem_store
 
         # truncate stack
         exec.sys::truncate_stack
     end
-    ";
+    ",
+        fmp_init = miden_core::FMP_INIT_VALUE.as_canonical_u64(),
+        fmp_addr = miden_core::FMP_ADDR.as_canonical_u64(),
+    );
 
     // push.0.0.0.1 stores [1, 0, 0, 0], push.0.0.1.0 stores [0, 1, 0, 0]
     #[rustfmt::skip]
@@ -578,10 +618,36 @@ fn test_absorb_double_words_from_memory() {
     ]);
 
     // start and end addr
-    even_hash.push(1008);
-    even_hash.push(1008);
+    even_hash.push(end);
+    even_hash.push(end);
 
-    build_test!(even_words, &[]).expect_stack(&even_hash);
+    build_test!(even_words.as_str(), &[]).expect_stack(&even_hash);
+}
+
+#[rstest]
+#[case::partial_block(1000, 1004, "range length must be a multiple of 8")]
+#[case::reversed(1008, 1000, "start address must not exceed end address")]
+#[case::unaligned(1001, 1009, "start address must be word-aligned")]
+#[case::unaligned_empty(1001, 1001, "start address must be word-aligned")]
+#[case::wide_start(1 << 32, 1 << 32, "start address must fit in a u32")]
+#[case::wide_end(1000, (1 << 32) + 8, "hash range exceeds the u32 address space")]
+fn test_absorb_rejects_invalid_range(#[case] start: u64, #[case] end: u64, #[case] message: &str) {
+    let source = format!(
+        "use miden::core::crypto::hashes::eidos
+        begin
+            push.{end}.{start}
+            padw padw padw
+            exec.eidos::absorb_double_words_from_memory
+        end"
+    );
+    assert_hash_input_error(&source, message);
+}
+
+#[test]
+fn test_hash_words_rejects_unaligned_end() {
+    let source = "use miden::core::crypto::hashes::eidos
+        begin push.1001.1000 exec.eidos::hash_words end";
+    assert_hash_input_error(source, "end address must be word-aligned");
 }
 
 #[test]
@@ -847,6 +913,77 @@ fn test_hash_elements_with_state_empty_suffix_returns_current_cv() {
     ";
 
     build_test!(source, &[]).expect_stack(&[11, 22, 33, 44]);
+}
+
+#[rstest]
+#[case(8, "remainder must be less than 8")]
+#[case(255, "remainder must be less than 8")]
+#[case((1 << 32) + 1, "remainder must fit in a u32")]
+fn test_hash_elements_with_state_rejects_invalid_remainder(
+    #[case] remainder: u64,
+    #[case] message: &str,
+) {
+    let source = format!(
+        "use miden::core::crypto::hashes::eidos
+        begin
+            push.{remainder}.4294967296.0
+            padw padw padw
+            exec.eidos::hash_elements_with_state
+        end"
+    );
+    assert_hash_input_error(&source, message);
+}
+
+#[rstest]
+#[case(4, (1 << 32) - 4, "hash tail exceeds the u32 address space")]
+#[case(0, 1 << 32, "hash tail address must fit in a u32")]
+fn test_hash_elements_with_state_rejects_tail_overflow_before_absorbing(
+    #[case] start: u64,
+    #[case] end: u64,
+    #[case] message: &str,
+) {
+    let source = format!(
+        "use miden::core::crypto::hashes::eidos
+        begin
+            push.1.{end}.{start}
+            padw padw padw
+            exec.eidos::hash_elements_with_state
+        end"
+    );
+    assert_hash_input_error(&source, message);
+}
+
+#[test]
+fn test_hash_elements_with_state_tail_at_end_of_memory() {
+    let cv = Word::from([11u32, 22, 33, 44]);
+    for remainder in 1..8 {
+        let source = format!(
+            "use miden::core::sys
+            use miden::core::crypto::hashes::eidos
+            begin
+                push.4.3.2.1.4294967288 mem_storew_le dropw
+                push.8.7.6.5.4294967292 mem_storew_le dropw
+                push.{remainder}.4294967288.4294967288
+                push.44.33.22.11
+                exec.eidos::init_with_chaining_word
+                exec.eidos::hash_elements_with_state
+                # Restore the frame pointer before truncate_stack uses local memory.
+                push.{fmp_init}.{fmp_addr} mem_store
+                exec.sys::truncate_stack
+            end",
+            fmp_init = miden_core::FMP_INIT_VALUE.as_canonical_u64(),
+            fmp_addr = miden_core::FMP_ADDR.as_canonical_u64(),
+        );
+        let block = core::array::from_fn(|i| {
+            if i < remainder {
+                Felt::from_u32(i as u32 + 1)
+            } else {
+                ZERO
+            }
+        });
+        let expected = word_elements(Eidos::compress(cv, block));
+        build_test!(source.as_str(), &[]).expect_stack(&expected);
+    }
 }
 
 #[test]

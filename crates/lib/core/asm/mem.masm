@@ -134,7 +134,7 @@ end
 #! Copies an even number of words from the advice stack to memory, updating the Eidos state.
 #!
 #! Inputs:  [BLOCK_LO, BLOCK_HI, CV, write_ptr, end_ptr]
-#! Outputs: [BLOCK_LO', BLOCK_HI', CV', write_ptr]
+#! Outputs: [BLOCK_LO', BLOCK_HI', CV', write_ptr']
 #!
 #! Where:
 #! - BLOCK_LO is the first preserved block word (positions 0-3, on top of stack).
@@ -142,14 +142,34 @@ end
 #! - CV is the current chaining word (positions 8-11).
 #! - write_ptr is the memory pointer where the words will be copied.
 #! - end_ptr is the memory pointer where the copying should end.
+#! - write_ptr' equals end_ptr.
 #!
-#! Notice that the `end_ptr - write_ptr` value must be positive and a multiple of 8.
+#! An empty range preserves the state and consumes no advice. A non-empty range may end at 2^32.
 #!
+#! Panics if `write_ptr` is not a word-aligned u32 address, `end_ptr < write_ptr`,
+#! `end_ptr > 2^32`, or the range length is not a multiple of eight.
+#!
+#! Invocation: exec
 pub proc pipe_double_words_to_memory(
     state: eidos::State,
     write_ptr: ptr<word>,
     end_ptr: ptr<word>,
 ) -> (eidos::State, ptr<word>)
+  dup.13 dup.13
+  u32assert.err="write pointer must fit in a u32"
+  dup u32mod.4 assertz.err="write pointer must be word-aligned"
+
+  dup.1 dup.1 neq
+  if.true
+    # Validate the last written address, allowing an exclusive end pointer of 2^32.
+    swap sub.1 u32assert2.err="copy range exceeds the u32 address space"
+    dup.1 dup.1 u32lte assert.err="write pointer must not exceed end pointer"
+    # The range length is one more than last_addr - write_ptr.
+    swap sub u32mod.8 eq.7 assert.err="copy range length must be a multiple of 8"
+  else
+    drop drop
+  end
+
   dup.13 dup.13 neq
 
   # loop until write_ptr reaches end_ptr
@@ -171,6 +191,13 @@ end
 # Inputs:  [CV, write_ptr, end_ptr, needs_padding]
 # Outputs: [BLOCK_LO, BLOCK_HI, CV', write_ptr']
 proc pipe_words_to_memory_with_cv
+  # Validate the final word before consuming advice for the complete blocks.
+  dup.6 neq.0
+  if.true
+    dup.5 u32assert.err="copy tail address must fit in a u32"
+    drop
+  end
+
   # Set the two block words to zero and compress all complete blocks.
   padw padw
   exec.pipe_double_words_to_memory
@@ -207,6 +234,10 @@ end
 #! - write_ptr' is the memory pointer to the end of the copied words.
 #! - BLOCK_LO and BLOCK_HI are the final preserved block words; CV is the final digest.
 #!
+#! Panics if the destination is not a word-aligned range in the u32 address space or the
+#! input length in Felts exceeds a u32. Invalid destination ranges consume no advice.
+#!
+#! Invocation: exec
 pub proc pipe_words_to_memory(num_words: u32, write_ptr: ptr<word>) -> (eidos::State, ptr<word>)
   dup eq.0
   if.true
@@ -246,6 +277,11 @@ end
 #! - write_ptr is the word-aligned destination address.
 #! - write_ptr' points immediately after the copied words.
 #! - DIGEST matches `Eidos::hash_elements_in_domain` over the copied felts.
+#!
+#! Panics if the domain or input length in Felts exceeds a u32, or the destination is not a
+#! word-aligned range in the u32 address space. Invalid destination ranges consume no advice.
+#!
+#! Invocation: exec
 pub proc pipe_words_to_memory_in_domain(
     domain: u32,
     num_words: u32,
