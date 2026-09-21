@@ -10,9 +10,10 @@ use super::{
     schedule::{EIDOS_COMPRESSION_IV, G_IDX_COL, G_IDX_DIAG, LaneMap},
     selectors::EidosCompressionSelectors,
 };
+use crate::constraints::and8_lookup::eidos as eidos_lookup;
 
 /// Enforces all constraints which are active on the 28 fused Eidos compression rows of each cycle.
-pub(crate) fn enforce_fused_rows<AB>(
+pub fn enforce_fused_rows<AB>(
     builder: &mut AB,
     local: &[AB::Var],
     next: &[AB::Var],
@@ -125,7 +126,13 @@ pub(crate) fn enforce_footer_rows<AB>(
         let inactive = AB::Expr::ONE - mode.clone();
         builder.when(is_footer.clone()).assert_zero(mode.clone() * inactive);
         builder.when(is_footer.clone()).assert_zero(mode * compression_multiplicity);
-        enforce_footer_payload::<AB>(builder, local, selectors, is_footer, &words);
+        enforce_footer_payload::<AB>(builder, local, is_footer, &words);
+
+        for footer in 0..FOOTER_ROWS {
+            enforce_footer_row_inputs::<AB>(builder, local, selectors, footer, &words);
+            let packed_output = packed_footer_output::<AB>(local, &words);
+            enforce_mvm_footer_output::<AB>(builder, local, selectors, footer, packed_output);
+        }
 
         for idx in 1..4 {
             builder
@@ -164,12 +171,36 @@ pub(crate) fn enforce_common_footer_rows<AB>(
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
+    enforce_core_footer_rows(builder, local, next, selectors, |builder, footer, packed_output| {
+        enforce_mvm_footer_output(builder, local, selectors, footer, packed_output);
+    });
+}
+
+/// Enforces the shared footer constraints and delegates output binding to the caller.
+///
+/// `enforce_output` receives each footer index and its packed compression output, after that
+/// row's input bindings. It must gate its assertions with `selectors.is_footer_row(footer)`.
+pub fn enforce_core_footer_rows<AB>(
+    builder: &mut AB,
+    local: &[AB::Var],
+    next: &[AB::Var],
+    selectors: &EidosCompressionSelectors<AB::Expr>,
+    mut enforce_output: impl FnMut(&mut AB, usize, AB::Expr),
+) where
+    AB: LiftedAirBuilder<F = Felt>,
+{
     enforce_footer_bridge::<AB>(builder, local, next, selectors);
 
     let is_footer = selectors.is_footer();
     let words = footer_words::<AB>(local);
     enforce_footer_word_bindings::<AB>(builder, local, is_footer.clone(), &words);
-    enforce_footer_payload::<AB>(builder, local, selectors, is_footer, &words);
+    enforce_footer_payload::<AB>(builder, local, is_footer, &words);
+
+    for footer in 0..FOOTER_ROWS {
+        enforce_footer_row_inputs::<AB>(builder, local, selectors, footer, &words);
+        let packed_output = packed_footer_output::<AB>(local, &words);
+        enforce_output(builder, footer, packed_output);
+    }
 
     for footer in 0..FOOTER_ROWS - 1 {
         let gate = selectors.is_footer_row(footer);
@@ -249,13 +280,12 @@ fn enforce_footer_word_bindings<AB>(
 fn enforce_footer_payload<AB>(
     builder: &mut AB,
     local: &[AB::Var],
-    selectors: &EidosCompressionSelectors<AB::Expr>,
     is_footer: AB::Expr,
     words: &FooterWords<AB::Expr>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    let top_bit = AB::Expr::from(local[F_TOP_BIT_SLOT_BASE_COL + 2]);
+    let top_bit = footer_top_bit::<AB>(local);
     builder
         .when(is_footer.clone())
         .assert_zero(top_bit.clone() * (top_bit - AB::Expr::from_u64(F_TOP_BIT_MASK as u64)));
@@ -297,10 +327,6 @@ fn enforce_footer_payload<AB>(
         AB::Expr::from(local[F_C_CANON_INV_COL]),
         AB::Expr::from(local[F_C_CANON_Z_COL]),
     );
-
-    for footer in 0..FOOTER_ROWS {
-        enforce_footer_row_locals::<AB>(builder, local, selectors, footer, words);
-    }
 }
 
 fn enforce_footer_transition<AB>(
@@ -340,8 +366,8 @@ fn enforce_footer_transition<AB>(
     }
     for idx in 0..=footer {
         builder.when(gate.clone()).assert_eq(
-            AB::Expr::from(local[footer_interface_tail_col(idx)]),
-            AB::Expr::from(next[footer_interface_tail_col(idx)]),
+            AB::Expr::from(local[footer_output_col(idx)]),
+            AB::Expr::from(next[footer_output_col(idx)]),
         );
     }
     for (idx, expected) in consumed.into_iter().enumerate() {
@@ -447,7 +473,7 @@ fn enforce_transition_for_maps<AB>(
     }
 }
 
-fn enforce_footer_row_locals<AB>(
+fn enforce_footer_row_inputs<AB>(
     builder: &mut AB,
     local: &[AB::Var],
     selectors: &EidosCompressionSelectors<AB::Expr>,
@@ -457,20 +483,36 @@ fn enforce_footer_row_locals<AB>(
     AB: LiftedAirBuilder<F = Felt>,
 {
     let gate = selectors.is_footer_row(footer);
-    let top_bit_masked = AB::Expr::from(local[F_TOP_BIT_SLOT_BASE_COL + 2]);
-
     builder
         .when(gate.clone())
         .assert_zero(cv_word::<AB>(local, 2 * footer) - words.h_even.clone());
     builder
-        .when(gate.clone())
+        .when(gate)
         .assert_zero(cv_word::<AB>(local, 2 * footer + 1) - words.h_odd.clone());
+}
 
-    let masked_odd = words.out_odd.clone() - AB::Expr::from_u64(1 << 24) * top_bit_masked;
-    let packed_output = pack_pair(words.out_even.clone(), masked_odd);
+fn enforce_mvm_footer_output<AB>(
+    builder: &mut AB,
+    local: &[AB::Var],
+    selectors: &EidosCompressionSelectors<AB::Expr>,
+    footer: usize,
+    packed_output: AB::Expr,
+) where
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    let gate = selectors.is_footer_row(footer);
     builder
         .when(gate * (AB::Expr::ONE - AB::Expr::from(local[F_MODE_COL])))
         .assert_eq(AB::Expr::from(local[footer_interface_tail_col(footer)]), packed_output);
+}
+
+fn packed_footer_output<AB>(local: &[AB::Var], words: &FooterWords<AB::Expr>) -> AB::Expr
+where
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    let top_bit_masked = footer_top_bit::<AB>(local);
+    let masked_odd = words.out_odd.clone() - AB::Expr::from_u64(1 << 24) * top_bit_masked;
+    pack_pair(words.out_even.clone(), masked_odd)
 }
 
 fn enforce_canonical_pair<AB>(
@@ -488,6 +530,17 @@ fn enforce_canonical_pair<AB>(
     builder.assert_zero(h.clone() * inv + z.clone() - AB::Expr::ONE);
     builder.assert_zero(z.clone() * h);
     builder.assert_zero(z * lo);
+}
+
+fn footer_top_bit<AB>(row: &[AB::Var]) -> AB::Expr
+where
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    let a = AB::Expr::from(row[F_TOP_BIT_SLOT_BASE_COL]);
+    let b = AB::Expr::from(row[F_TOP_BIT_SLOT_BASE_COL + 1]);
+    let scaled_x = AB::Expr::from(row[F_TOP_BIT_SLOT_BASE_COL + 2]);
+    let x = eidos_lookup::normalize(F_TOP_BIT_LOOKUP_BYTE_POSITION, scaled_x);
+    (a + b - x).halve()
 }
 
 fn input_word<AB>(row: &[AB::Var], lane_map: &LaneMap, word_idx: usize, d_rotation: u32) -> AB::Expr
@@ -542,7 +595,7 @@ where
     }
 }
 
-#[derive(Clone)]
+/// Decomposed footer words consumed by the compression constraints.
 struct FooterWords<E> {
     v_low_even: E,
     v_low_odd: E,

@@ -67,7 +67,7 @@ use crate::{
     transcript::{
         eidos::{
             EidosDigest,
-            trace::{EidosRequires, generate_traces as eidos_compression_trace},
+            trace::{EidosRequires, generate_trace_with_byte_lookups as eidos_compression_trace},
         },
         eval::trace::{TranscriptEvalRequires, generate_trace as eval_trace},
         nodes::UintOpId,
@@ -78,10 +78,8 @@ use crate::{
     },
 };
 
-mod composite;
 mod fixed;
 mod prove;
-pub(crate) use composite::byte_pair_and8_trace;
 pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
 pub mod statements;
 pub mod strategies;
@@ -427,9 +425,9 @@ impl Session {
         self.eval.record_ec_msm(expr, terms, &mut self.msm, &mut self.eidos)
     }
 
-    /// Number of MSM expressions laid so far (intros + combines + negs) — a
-    /// chain-cost diagnostic, e.g. to compare addition-chain
-    /// [`strategies`]. Not a DAG quantity.
+    /// Number of MSM expressions laid so far (intros + endomorphism intros +
+    /// combines + negs) — a chain-cost diagnostic, e.g. to compare
+    /// addition-chain [`strategies`]. Not a DAG quantity.
     pub fn msm_expr_count(&self) -> usize {
         self.msm.expr_count()
     }
@@ -509,7 +507,7 @@ impl Session {
             chunk_node_sponge_trace(self.chunk, self.node, self.sponge)
         );
         let eidos_compression =
-            trace_span!("eidos_compression", eidos_compression_trace(self.eidos));
+            trace_span!("eidos_compression", eidos_compression_trace(self.eidos, &mut self.bpl));
         let round = trace_span!("keccak_round", round_trace(self.round, &mut self.bpl));
         // The relation traces route their store demand as they lay, so
         // they run before the store reads its provide multiplicities;
@@ -533,15 +531,13 @@ impl Session {
         let ec_add =
             trace_span!("ec_add", ec_add_trace(self.ec.add, &mut self.ec.store, &mut self.bpl));
         let ec = trace_span!("ec_store", ec_store_trace(self.ec.store));
-        let bpl = trace_span!("byte_pair_lut", bpl_trace(self.bpl));
-        let byte_pair_and8 =
-            trace_span!("byte_pair_and8", byte_pair_and8_trace(bpl, eidos_compression.and8));
+        let byte_pair_lut = trace_span!("byte_pair_lut", bpl_trace(self.bpl));
 
         let traces = SessionTraces {
             chunk_node_sponge,
-            eidos_compression: eidos_compression.compression,
+            eidos_compression,
             round,
-            byte_pair_and8,
+            byte_pair_lut,
             eval,
             uint,
             add,
@@ -573,7 +569,7 @@ pub struct SessionTraces {
     chunk_node_sponge: RowMajorMatrix<Felt>,
     eidos_compression: RowMajorMatrix<Felt>,
     round: RowMajorMatrix<Felt>,
-    byte_pair_and8: RowMajorMatrix<Felt>,
+    byte_pair_lut: RowMajorMatrix<Felt>,
     eval: RowMajorMatrix<Felt>,
     uint: RowMajorMatrix<Felt>,
     add: RowMajorMatrix<Felt>,
@@ -585,7 +581,7 @@ pub struct SessionTraces {
 
 impl SessionTraces {
     /// The ten main traces in canonical chiplet order: chunk-node-sponge, Eidos compression,
-    /// Keccak round, byte-pair plus And8 lookup, transcript eval, uint-store-mul,
+    /// Keccak round, canonical byte-pair lookup, transcript eval, uint-store-mul,
     /// uint-add, ec-point-store-groups, ec-add, and ec-msm. The AIRs, provers, and public values a
     /// caller assembles must line up with this order.
     pub fn mains(&self) -> [&RowMajorMatrix<Felt>; NUM_CHIPLETS] {
@@ -593,7 +589,7 @@ impl SessionTraces {
             &self.chunk_node_sponge,
             &self.eidos_compression,
             &self.round,
-            &self.byte_pair_and8,
+            &self.byte_pair_lut,
             &self.eval,
             &self.uint,
             &self.add,
@@ -611,7 +607,7 @@ impl SessionTraces {
             self.chunk_node_sponge,
             self.eidos_compression,
             self.round,
-            self.byte_pair_and8,
+            self.byte_pair_lut,
             self.eval,
             self.uint,
             self.add,
@@ -621,10 +617,8 @@ impl SessionTraces {
         ]
     }
 
-    /// The VM's shared public inputs (0.26 `air_inputs`): the 4-felt
-    /// transcript root. All AIRs declare it (`num_public_values = 4`); only
-    /// the eval chip reads it (pinning its row-0 hash). The old `inv_n` slot
-    /// is gone — the natural last-row closing needs no per-AIR height input.
+    /// The VM's shared public inputs: the four-felt transcript root. All AIRs declare it
+    /// (`num_public_values = 4`); only the transcript-eval chip reads it and pins its row-0 hash.
     pub fn air_inputs(&self) -> Vec<Felt> {
         self.public_root.as_array().to_vec()
     }

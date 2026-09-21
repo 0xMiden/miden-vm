@@ -21,6 +21,7 @@ const CURRENT_TRACE_ROW_ADDRESS_PTR: u32 = 3_223_322_771;
 const BYTE_PAIR_LUT_AIR_INDEX: usize = 3;
 const MIN_LOG_HEIGHTS: [u64; 10] = [5, 5, 7, 16, 1, 3, 1, 1, 2, 1];
 const HEIGHTS: [u64; 10] = [16, 7, 12, 16, 11, 7, 10, 12, 13, 14];
+const AUX_VALUE_COUNTS: [u32; 10] = [1; 10];
 
 fn masm_const(source: &str, name: &str) -> u64 {
     let prefix = format!("const {name} = ");
@@ -73,6 +74,23 @@ fn pvm_wrapper_stores_heights_order_tag_and_registry_metadata() {
     proof_order.sort_by_key(|&i| (HEIGHTS[i], i));
     let expected_tag = miden_ace_codegen::order_tag(&proof_order);
     assert_eq!(read_memory_felt(&output, ORDER_TAG_PTR), Felt::from_u32(expected_tag));
+
+    let aux_bus_boundary_ptr = pvm_layout_const("AUX_BUS_BOUNDARY_PTR");
+    let mut next_value_ptr = aux_bus_boundary_ptr;
+    let mut expected_value_ptrs = [0_u32; 10];
+    for &air_index in &proof_order {
+        expected_value_ptrs[air_index] = next_value_ptr;
+        next_value_ptr += 2 * AUX_VALUE_COUNTS[air_index];
+    }
+    assert_eq!(next_value_ptr, aux_bus_boundary_ptr + 20);
+    let aux_value_ptrs_ptr = pvm_layout_const("AUX_VALUE_PTRS_PTR");
+    for (air_index, expected) in expected_value_ptrs.into_iter().enumerate() {
+        assert_eq!(
+            read_memory_felt(&output, aux_value_ptrs_ptr + air_index as u32),
+            Felt::from_u32(expected),
+            "AIR {air_index} auxiliary-value pointer was not materialized"
+        );
+    }
 
     for (base, expected) in [
         (RELATION_DIGEST_PTR, pvm_word("RELATION_DIGEST")),

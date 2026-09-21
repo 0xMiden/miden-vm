@@ -128,17 +128,13 @@ impl<LB> LookupAir<LB> for MainLookupAir
 where
     LB: MainLookupBuilder,
 {
-    fn num_columns(&self) -> usize {
-        MAIN_COLUMN_SHAPE.len()
-    }
-
     fn column_shape(&self) -> &[usize] {
         &MAIN_COLUMN_SHAPE
     }
 
     fn max_message_width(&self) -> usize {
         // The widest main-trace payload is `HasherMsg::State` (addr, node_index, 12 state lanes).
-        // `MIDEN_MAX_MESSAGE_WIDTH = 16` is kept for MASM transcript alignment.
+        // The recursive verifier uses `beta^16` as the bus-domain offset, so this width must be 16.
         super::messages::MIDEN_MAX_MESSAGE_WIDTH
     }
 

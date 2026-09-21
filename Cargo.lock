@@ -2531,7 +2531,6 @@ dependencies = [
  "miden-lifted-stark",
  "miden-precompiles",
  "p3-security",
- "rand 0.10.2",
  "ruint",
 ]
 

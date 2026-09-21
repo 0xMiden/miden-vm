@@ -5,14 +5,14 @@
 //! active row evaluates one node: it hashes the node's preimage on
 //! Eidos and settles the node's `Binding`-bus tuple. The eval chip
 //! is the sole provider of the `Binding` bus, except the Keccak-node
-//! band of `ChunkNodeSpongeAir`, which fuses its own terminal keccak
-//! `True` (there is no transient Keccak — see the design notes). Domain
-//! chiplets (the `UintStore`, `UintAdd` / `UintMul`, EC store/add/MSM
+//! band of `ChunkNodeSpongeAir`, which provides its terminal Keccak `True` binding directly.
+//! Domain chiplets (the `UintStore`, `UintAdd` / `UintMul`, EC store/add/MSM
 //! chiplets) stay ptr-only and never touch `Binding`; this chip hashes
 //! their DAG nodes and ptr-references their relations.
 //!
-//! Node kinds are dispatched by a uniform one-hot `is_and + is_zero +
-//! is_uint_leaf + Σ op-flags = act`: the **Transcript AND-combinator**
+//! Node kinds are dispatched by a uniform family one-hot: `is_and + is_zero + is_uint_leaf +
+//! is_uint_op + is_ec_create + is_ec_pai + is_ec_op + is_ec_msm = act`. The
+//! **Transcript AND-combinator**
 //! hashes `lhs || rhs` with the registered deferred-AND framing, folding two child
 //! `True` bindings; the **uint leaf / pin-claim row**, which hashes a stored uint's
 //! value under either `[UintPrecompile::domain(), VALUE_OP_ID, bound_ptr, 0]`
@@ -32,9 +32,10 @@
 //! - **root** (first row): same unhash + consumes, but `out_mult = 0` (no parent) ⇒ provides
 //!   nothing, *absorbing* the Binding σ; its `h` is pinned to `public_root` by `when_first_row`. No
 //!   separate flag is needed — `out_mult = 0` is forced by bus balance.
-//! - **uint leaf** (`is_uint_leaf = 1`): unhash the uint's 4×32 value → `h` under its VALUE or pin
-//!   frame; consume both `UintVal` halves; provide `Binding(h, True)` when `is_pinned` (folded into
-//!   the spine) else `Binding(h, Uint, ptr, bound_ptr)` (a transient value-binding).
+//! - **uint leaf** (`is_uint_leaf = 1`): unhash the uint's 8×32-bit limb value → `h` under its
+//!   VALUE or pin frame; consume one complete `UintVal` message; provide `Binding(h, True)` when
+//!   `is_pinned` (folded into the spine) else `Binding(h, Uint, ptr, bound_ptr)` (a transient
+//!   value-binding).
 //! - **uint op** (one of the op flags): unhash `lhs||rhs` → `h` under the uint operation frame;
 //!   consume the children's `Uint` bindings at the witnessed `a_ptr` / `b_ptr` and row `bound_ptr`
 //!   (`Is` forces `b_ptr = a_ptr` — equality asserted by the bus); consume one relation tuple
@@ -53,12 +54,9 @@
 //!   as any node's child.
 //!
 //! Bus balance: every node's `out_mult` equals its consumer count, so the
-//! `Binding` σ nets to zero internally — the only external anchor is the
+//! `Binding` relation balances internally — the only external anchor is the
 //! first-row `h = public_root`. An empty transcript is `is_zero = 1` on
 //! the first row: `public_root = 0`, nothing provided or consumed.
-//!
-//! See the design notes for the binding-bus model and
-//! the design notes for the node formats.
 
 use alloc::vec::Vec;
 use core::array;
@@ -81,13 +79,14 @@ use crate::{
         msm::{MsmClaimTermMsg, MsmExprMsg},
     },
     logup::{
-        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_RANDOMNESS, NUM_SIGMA_VALUES, frac_col,
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
         binding::{BindingMsg, ValueTag},
-        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg, initial_cv_from_frame},
+        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
+        initial_cv_from_frame,
         nodes::UintOpId,
     },
     uint::{UintValMsg, add::UintAddMsg, mul::UintMulMsg},
@@ -97,7 +96,7 @@ use crate::{
 // MAIN COLUMN LAYOUT
 // ================================================================================================
 //
-// 42 main witness columns:
+// 37 main witness columns:
 //
 // - Structural (2): act, absorption_id.
 // - Hashes (12): lhs[4], rhs[4], h[4].
@@ -130,20 +129,17 @@ pub const COL_RHS_END: usize = COL_RHS_BEGIN + DIGEST_WIDTH;
 pub const COL_H_BEGIN: usize = COL_RHS_END;
 pub const COL_H_END: usize = COL_H_BEGIN + DIGEST_WIDTH;
 
-/// ZERO_HASH-leaf flag. When 1: `h = 0` (pinned), no unhash, no child
-/// consumes — the row provides `Binding(0, True)` only. Boolean.
-pub const COL_IS_ZERO: usize = COL_H_END;
 /// Provide multiplicity for this node's `Binding(h, True)` = number of
 /// parents that consume it (DAG sharing / dedup, mirroring the
 /// Keccak-node band's `out_mult`). A plain count pinned to the consumer
 /// count by `Binding` bus balance — not range-checked (see the design
 /// notes); `0` on the root (no parent) and on inactive rows.
-pub const COL_OUT_MULT: usize = COL_IS_ZERO + 1;
+pub const COL_OUT_MULT: usize = COL_H_END;
 
 // ================================================================
-// Node-family one-hot — exactly one column set per active row,
-// summing to `act`. The two *op* families (uint, EC) carry only a
-// family bit here; *which* op rides the shared op one-hot below.
+// Node-family one-hot — exactly one flag set per active row,
+// summing to `act`; ZERO_HASH is derived by `zero_flag`. The two *op* families (uint, EC) carry
+// only a family bit here; *which* op rides the shared op one-hot below.
 // Terminals (zero / and / leaf / create / pai) carry no op.
 // ================================================================
 
@@ -175,15 +171,14 @@ pub const COL_IS_EC_OP: usize = COL_IS_EC_PAI + 1;
 // Shared op one-hot — the operation on a uint-op OR ec-op row. The two
 // op families never coexist, so one set of columns serves both (the
 // flag-column analogue of the reused ptr columns below). Sums to
-// `is_uint_op + is_ec_op`. `is_mul` is uint-only (EC has no multiply).
-// Op ids differ per family (uint Is=4, EC Is=3), so the frame's operation ID is
-// the family-gated id-weighted sum.
+// `is_uint_op + is_ec_op`; Add is derived by `add_flag`.
+// `is_mul` is uint-only (EC has no multiply).
+// Op ids differ per family (uint Is=4, EC Is=3), so frame parameter 0 is the
+// family-gated id-weighted sum.
 // ================================================================
 
-/// `Add` — `r = a + b` (uint) / `R = P + Q` (EC).
-pub const COL_IS_ADD: usize = COL_IS_EC_OP + 1;
 /// `Sub` — the rearranged add `b + r = a` (uint) / `R + Q = P` (EC).
-pub const COL_IS_SUB: usize = COL_IS_ADD + 1;
+pub const COL_IS_SUB: usize = COL_IS_EC_OP + 1;
 /// `Mul` — `r = a · b` (uint only).
 pub const COL_IS_MUL: usize = COL_IS_SUB + 1;
 /// `Is` — equality predicate, binds `True` (both families).
@@ -272,8 +267,8 @@ pub const COL_EC_CREATE_Y_PTR: usize = COL_B_PTR;
 // `is_msm_last` (the boundary). Reuses lhs/rhs = (Pᵢ.hash, sᵢ.hash),
 // h = this term's Eidos compression output, a_ptr/b_ptr = (Pᵢ_ptr, sᵢ_ptr),
 // ptr = val_ptr (the claim's value point), group_ptr = the group, bound_ptr =
-// the scalar bound. The run is one contiguous VM-style Eidos absorption span
-// (the design notes): see [`COL_MSM_IS_HEAD`].
+// the scalar bound. The run is one contiguous VM-style Eidos absorption span; see
+// [`COL_MSM_IS_HEAD`].
 // ================================================================
 
 /// EcMsm family flag — set on every absorb row of an MSM-claim run. In
@@ -304,13 +299,33 @@ pub const COL_MSM_IS_HEAD: usize = COL_MSM_EXPR + 1;
 /// Total number of main witness columns.
 pub const NUM_MAIN_COLS: usize = COL_MSM_IS_HEAD + 1;
 
+/// ZERO_HASH is the remaining active family. Its boolean constraint enforces the family one-hot.
+pub fn zero_flag<E: PrimeCharacteristicRing, V: Copy + Into<E>>(row: &[V]) -> E {
+    row[COL_ACT].into()
+        - row[COL_IS_AND].into()
+        - row[COL_IS_UINT_LEAF].into()
+        - row[COL_IS_UINT_OP].into()
+        - row[COL_IS_EC_CREATE].into()
+        - row[COL_IS_EC_PAI].into()
+        - row[COL_IS_EC_OP].into()
+        - row[COL_IS_EC_MSM].into()
+}
+
+/// Add is the remaining operation in either op family; constrain this expression to be boolean.
+pub fn add_flag<E: PrimeCharacteristicRing, V: Copy + Into<E>>(row: &[V]) -> E {
+    row[COL_IS_UINT_OP].into() + row[COL_IS_EC_OP].into()
+        - row[COL_IS_SUB].into()
+        - row[COL_IS_MUL].into()
+        - row[COL_IS_IS].into()
+}
+
 // PUBLIC VALUES LAYOUT
 // ================================================================================================
 //
 // `[public_root[0], …, public_root[3]]` — just the transcript's target root
 // (`PUBLIC_ROOT_BEGIN = 0`).
 
-/// Index of the first `public_root` felt in the shared `air_inputs` vector.
+/// Index of the first `public_root` felt in the shared public-input (`air_inputs`) vector.
 pub const PUBLIC_ROOT_BEGIN: usize = 0;
 pub const PUBLIC_ROOT_END: usize = PUBLIC_ROOT_BEGIN + DIGEST_WIDTH;
 /// Total public-values count: the 4-felt `public_root`. Equals
@@ -320,28 +335,25 @@ pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
 // AUX LAYOUT
 // ================================================================================================
 //
-// 15 aux columns, flattened via `frac_col!` so every closing constraint
-// stays at degree ≤ 3 → `log_quotient_degree = 1`, one bus-relation pool
-// per column pairing (matching every other flattened chiplet's
-// convention):
+// 12 aux columns. Simultaneous interactions are product-batched; the
+// mutually exclusive typed relations in col 3 share a direct group. Every
+// closing constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
 //
-// - col 0:  Binding bus, True path — `consume-lhs`, alone (the gated running-sum anchor).
+// - col 0:  Binding bus `consume-lhs` + the linear, head-aware terminal `EidosOut`.
 // - col 1:  `consume-rhs` + `provide-h` (the True-binding provide, heavy — a degree-2 message).
-// - col 2:  Eidos message block + initial CV.
-// - col 3:  terminal `EidosOut`.
-// - col 4:  Binding bus, value path — `consume-uint`, alone (one full-value `UintVal` message).
-// - col 5:  `provide-binding`, alone (heavy — a transient-scaled degree-2 message).
-// - col 6:  Binding bus, op-children path — `consume-lhs-uint` + `consume-rhs-uint`.
-// - col 7:  `consume-uintadd`, alone (heavy — a role-mixed degree-2 message).
-// - col 8:  `consume-uintmul`, alone (no partner left to pair).
-// - col 9:  Binding bus, Group path — `consume-p` + `consume-q`.
-// - col 10: `provide-group`, alone (heavy).
-// - col 11: `consume-ecpoint`, alone (no partner left to pair).
-// - col 12: `consume-ecgroupadd`, alone (heavy — a role-mixed degree-2 message).
-// - col 13: EcMsm continuation — `consume-base-group` + `consume-scalar-uint`.
-// - col 14: EcMsm continuation — `consume-msmclaimterm` + `consume-msmexpr`.
-pub const NUM_AUX_COLS: usize = 15;
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 1, 1, 1, 2, 1, 1, 2, 1, 1, 1, 2, 2];
+// - col 2:  Eidos block + initial CV.
+// - col 3:  Typed value relations — one of `consume-uint`, `consume-uintmul`, or `consume-ecpoint`
+//   on their mutually exclusive row families.
+// - col 4:  `provide-binding`, alone (heavy — a transient-scaled degree-2 message).
+// - col 5:  Binding bus, op-children path — `consume-lhs-uint` + `consume-rhs-uint`.
+// - col 6:  `consume-uintadd`, alone (heavy — a role-mixed degree-2 message).
+// - col 7:  Binding bus, Group path — `consume-p` + `consume-q`.
+// - col 8:  `provide-group`, alone (heavy).
+// - col 9:  `consume-ecgroupadd`, alone (heavy — a role-mixed degree-2 message).
+// - col 10: EcMsm continuation — `consume-base-group` + `consume-scalar-uint`.
+// - col 11: EcMsm continuation — `consume-msmclaimterm` + `consume-msmexpr`.
+pub const NUM_AUX_COLS: usize = 12;
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [2, 2, 2, 1, 1, 2, 1, 2, 1, 1, 2, 2];
 
 // AIR
 // ================================================================================================
@@ -373,7 +385,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -392,7 +404,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
 
         let act: AB::Expr = local[COL_ACT].into();
         let act_next: AB::Expr = next[COL_ACT].into();
-        let is_zero: AB::Expr = local[COL_IS_ZERO].into();
+        let is_zero: AB::Expr = zero_flag(&local);
         let out_mult: AB::Expr = local[COL_OUT_MULT].into();
         let h: [AB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_H_BEGIN + i].into());
 
@@ -405,7 +417,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
 
         // ZERO_HASH leaf: boolean flag, and `h = 0` when set (so a prover
         // can't shortcut a non-zero hash to the `True` base case).
-        builder.assert_bool(local[COL_IS_ZERO]);
+        builder.assert_bool(is_zero.clone());
         for h_i in &h {
             builder.assert_zero(is_zero.clone() * h_i.clone());
         }
@@ -421,17 +433,12 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // `Binding(h, True)` provide (mult `−out_mult`) contributes 0 on
         // padding. (The root's `out_mult = 0` is not pinned here — it is
         // forced by bus balance: the root has no consumer.)
-        builder.assert_zero((AB::Expr::ONE - act.clone()) * out_mult);
+        builder.assert_zero((AB::Expr::ONE - act) * out_mult);
 
-        // Node type is a uniform one-hot over the active row: exactly one
-        // of is_and / is_zero / is_uint_leaf / an op family, none on
-        // padding — their sum is `act`. Booleans + this sum give mutual
-        // exclusion and keep every bus gate degree-1.
-        // Node family is a one-hot over the active row: exactly one of
-        // is_and / is_zero / is_uint_leaf / is_uint_op / is_ec_create /
-        // is_ec_pai / is_ec_op (none on padding) — their sum is `act`. The
-        // two *op* families carry only a family bit; which operation rides
-        // the shared op one-hot below.
+        // `zero_flag` completes the family one-hot on each active row: is_and + is_zero +
+        // is_uint_leaf + is_uint_op + is_ec_create + is_ec_pai + is_ec_op + is_ec_msm = act. The
+        // two operation families carry only a family bit; the shared op one-hot below selects the
+        // operation.
         let is_and: AB::Expr = local[COL_IS_AND].into();
         let is_uint_leaf: AB::Expr = local[COL_IS_UINT_LEAF].into();
         let is_uint_op: AB::Expr = local[COL_IS_UINT_OP].into();
@@ -460,24 +467,24 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         builder.assert_zero(is_msm_last.clone() * (AB::Expr::ONE - is_ec_msm.clone()));
         // Shared op one-hot: the operation on a uint-op OR ec-op row (the two
         // op families never coexist, so the columns serve both).
-        let is_add: AB::Expr = local[COL_IS_ADD].into();
+        let is_add: AB::Expr = add_flag(&local);
         let is_sub: AB::Expr = local[COL_IS_SUB].into();
         let is_mul: AB::Expr = local[COL_IS_MUL].into();
         let is_is: AB::Expr = local[COL_IS_IS].into();
-        for col in [COL_IS_ADD, COL_IS_SUB, COL_IS_MUL, COL_IS_IS] {
+        builder.assert_bool(is_add.clone());
+        for col in [COL_IS_SUB, COL_IS_MUL, COL_IS_IS] {
             builder.assert_bool(local[col]);
         }
         let is_op = is_add.clone() + is_sub.clone() + is_mul.clone() + is_is.clone();
         // The op one-hot sums to "this is an op row" = is_uint_op + is_ec_op,
         // so a set op flag forces exactly one op family (and conversely).
-        builder.assert_zero(is_op.clone() - is_uint_op.clone() - is_ec_op.clone());
         // EC has no multiply — is_mul only ever rides a uint-op row.
         builder.assert_zero(is_ec_op.clone() * is_mul.clone());
 
         // Row 0 is the public transcript root and must be a True-binding node.
         // This excludes value rows and EcMsm interior absorbs, whose `h` is not
         // a public assertion digest.
-        let root_truthy = is_zero.clone() + is_and.clone() + is_is.clone() + is_pinned.clone();
+        let root_truthy = is_zero + is_and + is_is.clone() + is_pinned.clone();
         builder.when_first_row().assert_zero(root_truthy - AB::Expr::ONE);
 
         // Both create modes (finite + PAI) carry the group in frame parameter 1 and
@@ -496,18 +503,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // degree-1, since `is_is` is one shared flag pulled out of the op
         // sum; spans both families' value-producing ops.
         let is_result_op: AB::Expr = is_op.clone() - is_is.clone();
-        // Activity one-hot: the eight families sum to act.
-        builder.assert_zero(
-            is_and
-                + is_zero
-                + is_uint_leaf.clone()
-                + is_uint_op.clone()
-                + is_ec_create.clone()
-                + is_ec_pai.clone()
-                + is_ec_op.clone()
-                + is_ec_msm.clone()
-                - act,
-        );
+        // The derived zero flag completes the activity one-hot.
         // is_pinned is a leaf-only flag; ptr carries a binding ptr only on
         // uint-leaf / result-op / Ec-create / Ec-pai rows; bound_ptr only
         // where a Uint-typed message reads it (leaf / uint-op / finite create)
@@ -629,6 +625,10 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // decoupled from the chiplet's `idx`.
         let msm_idx: AB::Expr = local[COL_MSM_IDX].into();
         let msm_idx_next: AB::Expr = next[COL_MSM_IDX].into();
+        // Keep the position cell canonical off MSM rows. Besides ruling out
+        // irrelevant witness freedom, this makes `absorption_id - msm_idx` a
+        // linear expression for the head-aware terminal relation.
+        builder.assert_zero((AB::Expr::ONE - is_ec_msm.clone()) * msm_idx.clone());
         builder.when_first_row().assert_zero(is_ec_msm * msm_idx.clone());
         builder.when_transition().assert_zero(starts * msm_idx_next.clone());
         builder
@@ -636,16 +636,12 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
             .assert_zero(continues.clone() * (msm_idx_next - msm_idx.clone() - AB::Expr::ONE));
         builder.assert_zero(is_msm_last * (frame_param1.clone() - msm_idx - AB::Expr::ONE));
 
-        // The claim `expr_ptr` (and its `group_ptr`) are **constant across an
-        // absorb run**: every row of a claim names the same expression. This
-        // is load-bearing, not cosmetic — each absorb row attributes its term
-        // via `MsmClaimTerm(msm_expr, …)`, while the boundary binds the node's
-        // value and witnessed group via `MsmExpr(msm_expr, group, val, k)`. If
-        // `msm_expr` could vary mid-run a prover could hash one expression's
-        // terms (a correct, root-matching hash) while binding the node to
-        // *another* expression's value — a forged value under a correct hash,
-        // which root-comparison cannot catch. Holding `group_ptr` constant
-        // aligns the boundary `MsmExpr` with the whole run.
+        // The claim's `expr_ptr` and `group_ptr` are constant across an absorb run. Each absorb row
+        // attributes its term through `MsmClaimTerm(msm_expr, …)`, while the boundary binds the
+        // node's value and group through `MsmExpr(msm_expr, group, val, k)`. Without constancy, a
+        // prover could hash the terms of one expression while binding the node to another
+        // expression's value. Holding `group_ptr` constant also aligns the boundary message with
+        // the complete run.
         let msm_expr: AB::Expr = local[COL_MSM_EXPR].into();
         let msm_expr_next: AB::Expr = next[COL_MSM_EXPR].into();
         let group_local: AB::Expr = local[COL_EC_CONTEXT_GROUP_PTR].into();
@@ -661,10 +657,10 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
             .when_transition()
             .assert_zero(continues * (group_next_const - group_local));
 
-        // Evaluate this AIR's LogUp relations through the cyclic adapter.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        // Evaluate this AIR's LogUp relations through the shared adapter.
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -675,10 +671,6 @@ impl<LB> LookupAir<LB> for TranscriptEvalAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -695,10 +687,10 @@ where
         let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
 
         let is_and: LB::Expr = local[COL_IS_AND].into();
-        let is_zero: LB::Expr = local[COL_IS_ZERO].into();
+        let is_zero: LB::Expr = zero_flag(&local);
         let is_uint_leaf: LB::Expr = local[COL_IS_UINT_LEAF].into();
         let is_pinned: LB::Expr = local[COL_IS_PINNED].into();
-        let is_add: LB::Expr = local[COL_IS_ADD].into();
+        let is_add: LB::Expr = add_flag(&local);
         let is_sub: LB::Expr = local[COL_IS_SUB].into();
         let is_mul: LB::Expr = local[COL_IS_MUL].into();
         let is_is: LB::Expr = local[COL_IS_IS].into();
@@ -724,7 +716,7 @@ where
         let h: [LB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_H_BEGIN + i].into());
 
         // Uint value ops (bind Uint, not True). Shared `is_is` spans both
-        // families, so gate to uint — degree-2, within col 2's budget.
+        // families, so gate to uint — degree-2, within col 4's budget.
         let is_value_op: LB::Expr = is_uint_op.clone() * (LB::Expr::ONE - is_is.clone());
         // Node-type gates: the compression fires on every hashing node (AND ∪
         // uint-leaf ∪ uint-op ∪ create ∪ ec-op ∪ EcMsm); the AND child
@@ -739,8 +731,8 @@ where
         let op_lhs_gate: LB::Expr = is_uint_op.clone();
         let op_rhs_gate: LB::Expr = is_uint_op.clone();
         // Provide multiplicity `−out_mult` (supply), split between the True
-        // provide (AND ∪ ZERO ∪ Is — either family, col 0) and the Uint
-        // provide (uint-leaf ∪ uint value op, col 2); `out_mult = 0` on the
+        // provide (AND ∪ ZERO ∪ Is — either family, col 1) and the Uint
+        // provide (uint-leaf ∪ uint value op, col 4); `out_mult = 0` on the
         // root and padding ⇒ provide nothing.
         let neg_out_mult: LB::Expr = LB::Expr::ZERO - out_mult;
         let and_provide: LB::Expr = neg_out_mult.clone() * (is_and + is_zero + is_is.clone());
@@ -777,46 +769,56 @@ where
         });
         let is_msm_head: LB::Expr = local[COL_MSM_IS_HEAD].into();
         let msm_idx: LB::Expr = local[COL_MSM_IDX].into();
-        let chain_head_id = absorption_id.clone() - is_ec_msm.clone() * msm_idx;
+        let chain_head_id = absorption_id.clone() - msm_idx;
         let init_gate = node.clone() - is_ec_msm.clone() + is_msm_head;
         let output_gate = node.clone() - is_ec_msm + LB::Expr::from(local[COL_IS_MSM_LAST]);
 
-        // Per-insert mult degrees: the one-hot gates (compression `node`, AND / op
-        // consumes) are deg 1; the `−out_mult` provides are deg 2.
-        let one_deg = Deg { v: 1, u: 1 };
-        let two_deg = Deg { v: 2, u: 1 };
-        // Per-insert message degrees beyond 1: the value provide's
-        // `transient`-scaled fields and the role-mixed UintAdd consume are
-        // deg 2 (denominator 2).
-        let mixed_deg = Deg { v: 1, u: 2 };
-        // Column-level degree hints (documentation only, not framework-
-        // checked): a lone fraction anchoring the running sum, or a pair.
-        let single_deg = Deg { v: 1, u: 2 };
-        let pair_deg = Deg { v: 3, u: 2 };
+        // Exact (numerator, denominator) degrees for the interaction forms
+        // below. ValidateLookupAir checks the group and column declarations.
+        let linear_deg = Deg { v: 1, u: 1 };
+        let selected_mult_deg = Deg { v: 2, u: 1 };
+        let selected_relation_deg = Deg { v: 1, u: 2 };
+        let value_provide_deg = Deg { v: 3, u: 2 };
+        let mixed_relation_deg = Deg { v: 2, u: 2 };
+        let group_provide_deg = Deg { v: 3, u: 1 };
+        let linear_pair_deg = Deg { v: 2, u: 2 };
+        let selected_pair_deg = Deg { v: 3, u: 2 };
 
-        // col 0: Binding bus, True path — consume-lhs alone, the gated
-        // running-sum anchor.
+        // col 0 (paired, lqd-1): Binding bus, True path — consume-lhs —
+        // plus the terminal Eidos relation. `msm_idx` is constrained to zero
+        // off MSM rows, so the propagated head `absorption_id - msm_idx`
+        // keeps every EidosOut field linear.
         frac_col!(
             builder,
-            "binding-and",
-            single_deg,
-            ("consume-lhs", and_gate.clone(), BindingMsg::truth(lhs.clone()), one_deg),
+            "binding-and-eidos-out",
+            linear_pair_deg,
+            ("consume-lhs", and_gate.clone(), BindingMsg::truth(lhs.clone()), linear_deg),
+            (
+                "eidos-out",
+                output_gate,
+                EidosOutMsg {
+                    chain_head_id,
+                    compression_id: absorption_id.clone(),
+                    digest: h.clone()
+                },
+                linear_deg
+            ),
         );
         // col 1 (paired, lqd-1): consume-rhs (AND rows) + provide-h (the
         // True-binding provide on AND / zero / Is rows).
         frac_col!(
             builder,
             "binding-and",
-            pair_deg,
-            ("consume-rhs", and_gate, BindingMsg::truth(rhs.clone()), one_deg),
-            ("provide-h", and_provide, BindingMsg::truth(h.clone()), two_deg),
+            selected_pair_deg,
+            ("consume-rhs", and_gate, BindingMsg::truth(rhs.clone()), linear_deg),
+            ("provide-h", and_provide, BindingMsg::truth(h.clone()), selected_mult_deg),
         );
 
         // col 2: every hashing row supplies a block; chain heads also supply the initial CV.
         frac_col!(
             builder,
             "unhash-eidos",
-            pair_deg,
+            linear_pair_deg,
             (
                 "eidos-block",
                 node.clone(),
@@ -824,7 +826,7 @@ where
                     compression_id: absorption_id.clone(),
                     block: message,
                 },
-                one_deg
+                linear_deg
             ),
             (
                 "eidos-init",
@@ -833,53 +835,71 @@ where
                     compression_id: absorption_id.clone(),
                     initial_cv,
                 },
-                one_deg
+                linear_deg
             ),
         );
 
-        // col 3: static nodes and MSM tails consume the terminal digest.
-        frac_col!(
-            builder,
-            "unhash-eidos",
-            single_deg,
-            (
-                "eidos-out",
-                output_gate,
-                EidosOutMsg {
-                    chain_head_id,
-                    compression_id: absorption_id,
-                    digest: h.clone()
-                },
-                mixed_deg
-            ),
+        // col 3: one typed relation consume. The node-family and operation
+        // one-hots make the UintVal, UintMul, and EcPoint selectors mutually
+        // exclusive, so their direct group preserves the selected fraction
+        // without product-batching the three denominators.
+        builder.next_column(
+            |col| {
+                col.group(
+                    "typed-value-relations",
+                    |g| {
+                        g.add(
+                            "consume-uint",
+                            uint_gate,
+                            || UintValMsg {
+                                ptr: ptr.clone(),
+                                bound_ptr: bound_ptr.clone(),
+                                limbs: array::from_fn(|i| {
+                                    if i < 4 { lhs[i].clone() } else { rhs[i - 4].clone() }
+                                }),
+                            },
+                            selected_relation_deg,
+                        );
+                        g.add(
+                            "consume-uintmul",
+                            is_mul.clone(),
+                            || UintMulMsg {
+                                kappa_a: LB::Expr::ONE,
+                                kappa_c: LB::Expr::ZERO,
+                                a_ptr: a_ptr.clone(),
+                                b_ptr: b_ptr.clone(),
+                                c_ptr: bound_ptr.clone(),
+                                r_ptr: ptr.clone(),
+                                bound_ptr: bound_ptr.clone(),
+                                is_sub: LB::Expr::ZERO,
+                            },
+                            selected_relation_deg,
+                        );
+                        g.add(
+                            "consume-ecpoint",
+                            is_create.clone(),
+                            || EcPointMsg {
+                                point_ptr: local[COL_EC_CREATE_POINT_PTR].into(),
+                                group_ptr: local[COL_EC_CREATE_GROUP_PTR].into(),
+                                x_ptr: local[COL_EC_CREATE_X_PTR].into(),
+                                y_ptr: local[COL_EC_CREATE_Y_PTR].into(),
+                                is_pai: local[COL_IS_EC_PAI].into(),
+                            },
+                            selected_relation_deg,
+                        );
+                    },
+                    selected_relation_deg,
+                );
+            },
+            selected_relation_deg,
         );
-
-        // col 4: Binding bus, value path — consume the complete 4×32+4×32 `UintVal` chain message
-        // on leaf rows.
-        frac_col!(
-            builder,
-            "binding-uint",
-            single_deg,
-            (
-                "consume-uint",
-                uint_gate,
-                UintValMsg {
-                    ptr: ptr.clone(),
-                    bound_ptr: bound_ptr.clone(),
-                    limbs: array::from_fn(|i| {
-                        if i < 4 { lhs[i].clone() } else { rhs[i - 4].clone() }
-                    }),
-                },
-                one_deg
-            ),
-        );
-        // col 5: provide the row's binding (leaf ∪ value op), alone (heavy
+        // col 4: provide the row's binding (leaf ∪ value op), alone (heavy
         // — a transient-scaled degree-2 message): True if pinned (→
         // spine), else Uint.
         frac_col!(
             builder,
             "binding-uint",
-            single_deg,
+            value_provide_deg,
             (
                 "provide-binding",
                 uint_provide,
@@ -889,11 +909,11 @@ where
                     ptr: transient.clone() * ptr.clone(),
                     bound_ptr: transient * bound_ptr.clone(),
                 },
-                two_deg
+                value_provide_deg
             ),
         );
 
-        // col 6 (paired, lqd-1): Binding bus, op-children path — consume
+        // col 5 (paired, lqd-1): Binding bus, op-children path — consume
         // the lhs / rhs `Uint` bindings at the witnessed a_ptr / b_ptr. Raw
         // degree-1 fields: the op gates zero the mults off op rows, so no
         // field scaling is needed (an `Is` row's b_ptr = a_ptr — the
@@ -901,7 +921,7 @@ where
         frac_col!(
             builder,
             "binding-op-children",
-            pair_deg,
+            linear_pair_deg,
             (
                 "consume-lhs-uint",
                 op_lhs_gate.clone() + is_ec_create.clone(),
@@ -911,7 +931,7 @@ where
                     ptr: a_ptr.clone(),
                     bound_ptr: bound_ptr.clone(),
                 },
-                one_deg
+                linear_deg
             ),
             (
                 "consume-rhs-uint",
@@ -922,17 +942,17 @@ where
                     ptr: b_ptr.clone(),
                     bound_ptr: bound_ptr.clone(),
                 },
-                one_deg
+                linear_deg
             ),
         );
 
-        // col 7: the UintAdd relation consume, alone (heavy — a role-mixed
+        // col 6: the UintAdd relation consume, alone (heavy — a role-mixed
         // degree-2 message). Serves add / sub with the roles mixed per-op
         // (sub is the arrangement b + r = a).
         frac_col!(
             builder,
             "uint-relations",
-            single_deg,
+            mixed_relation_deg,
             (
                 "consume-uintadd",
                 is_uint_op.clone() * (is_add.clone() + is_sub.clone()),
@@ -943,50 +963,18 @@ where
                     c_ptr: is_add.clone() * ptr.clone() + is_sub.clone() * a_ptr.clone(),
                     nz: LB::Expr::ZERO,
                 },
-                mixed_deg
+                mixed_relation_deg
             ),
         );
-        // col 8: the UintMul relation consume, alone (no partner left to
-        // pair). Serves mul with the κ slots pinned to the constants 1 / 0
-        // and the modulus as the dummy c_ptr.
-        frac_col!(
-            builder,
-            "uint-relations",
-            single_deg,
-            (
-                "consume-uintmul",
-                is_mul,
-                UintMulMsg {
-                    kappa_a: LB::Expr::ONE,
-                    kappa_c: LB::Expr::ZERO,
-                    a_ptr,
-                    b_ptr,
-                    c_ptr: bound_ptr.clone(),
-                    r_ptr: ptr,
-                    bound_ptr,
-                    is_sub: LB::Expr::ZERO,
-                },
-                one_deg
-            ),
-        );
-
         // The EC columns read their fields fresh from `local` (cheap Copy
-        // reads), so the uint columns above are free to move their copies.
+        // reads), so the earlier columns are free to move their copies.
         let g_lhs: [LB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_LHS_BEGIN + i].into());
         let g_rhs: [LB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_RHS_BEGIN + i].into());
         let g_h: [LB::Expr; DIGEST_WIDTH] = array::from_fn(|i| local[COL_H_BEGIN + i].into());
         let ec_value_ptr: LB::Expr = local[COL_PTR].into();
         let ec_op_lhs_ptr: LB::Expr = local[COL_A_PTR].into();
         let ec_op_rhs_ptr: LB::Expr = local[COL_B_PTR].into();
-        let create_point_ptr: LB::Expr = local[COL_EC_CREATE_POINT_PTR].into();
-        let create_x_ptr: LB::Expr = local[COL_EC_CREATE_X_PTR].into();
-        let create_y_ptr: LB::Expr = local[COL_EC_CREATE_Y_PTR].into();
-        // Create / PAI rows commit the group selector in the curve VALUE frame;
-        // EcPoint consumes the same physical cell so the hash frame and point
-        // group agree.
-        let create_group_ptr: LB::Expr = local[COL_EC_CREATE_GROUP_PTR].into();
         let ec_context_group_ptr: LB::Expr = local[COL_EC_CONTEXT_GROUP_PTR].into();
-        let create_is_pai: LB::Expr = local[COL_IS_EC_PAI].into();
         // An EcMsm boundary binds its value point as a `Group` node — it
         // rides the same Group provide as create / result ops.
         let g_is_msm_last: LB::Expr = local[COL_IS_MSM_LAST].into();
@@ -1000,72 +988,50 @@ where
         let g_out_mult: LB::Expr = local[COL_OUT_MULT].into();
         let g_neg_out_mult: LB::Expr = LB::Expr::ZERO - g_out_mult;
 
-        // col 9 (paired, lqd-1): Binding bus, Group path — consume the P / Q
+        // col 7 (paired, lqd-1): Binding bus, Group path — consume the P / Q
         // operand `Group` bindings (group add / sub / is). `Is` binds
-        // `True` (col 0), only consuming here.
+        // `True` (col 1), only consuming here.
         frac_col!(
             builder,
             "binding-group",
-            pair_deg,
+            linear_pair_deg,
             (
                 // Every ec op consumes its P operand binding.
                 "consume-p",
                 is_ec_op.clone(),
                 BindingMsg::group(g_lhs.clone(), ec_op_lhs_ptr.clone()),
-                one_deg
+                linear_deg
             ),
             (
                 // Binary ec ops (add / sub / is) consume Q.
                 "consume-q",
                 ec_binary.clone(),
                 BindingMsg::group(g_rhs.clone(), ec_op_rhs_ptr.clone()),
-                one_deg
+                linear_deg
             ),
         );
-        // col 10: provide the created / result point's `Group` binding
+        // col 8: provide the created / result point's `Group` binding
         // (create ∪ add/sub), alone (heavy). Create / pai / result-binding
         // ec ops (not Is, which binds True) provide their result binding.
         frac_col!(
             builder,
             "binding-group",
-            single_deg,
+            group_provide_deg,
             (
                 "provide-group",
                 g_neg_out_mult * (is_create.clone() + ec_result.clone() + g_is_msm_last.clone()),
                 BindingMsg::group(g_h.clone(), ec_value_ptr.clone()),
-                two_deg
+                group_provide_deg
             ),
         );
 
-        // col 11: EcPoint pins an EcCreate / PAI point to the group
-        // committed in frame parameter 1, alone (no partner left to pair).
-        frac_col!(
-            builder,
-            "ec-relations",
-            single_deg,
-            (
-                "consume-ecpoint",
-                is_create.clone(),
-                EcPointMsg {
-                    // Finite create: (pt, group, x, y, 0).
-                    // PAI: (pai, group, 0, 0, 1). The group
-                    // is the same physical cell as frame parameter 1.
-                    point_ptr: create_point_ptr.clone(),
-                    group_ptr: create_group_ptr.clone(),
-                    x_ptr: create_x_ptr.clone(),
-                    y_ptr: create_y_ptr.clone(),
-                    is_pai: create_is_pai.clone(),
-                },
-                one_deg
-            ),
-        );
-        // col 12: EcGroupAdd ties an EcBinOp Add/Sub's operands and result,
+        // col 9: EcGroupAdd ties an EcBinOp Add/Sub's operands and result,
         // alone (heavy — a role-mixed degree-2 message).
         // COL_EC_CONTEXT_GROUP_PTR is only live for the binop/MSM paths.
         frac_col!(
             builder,
             "ec-relations",
-            single_deg,
+            mixed_relation_deg,
             (
                 "consume-ecgroupadd",
                 ec_result.clone(),
@@ -1082,11 +1048,11 @@ where
                     r_ptr: is_add.clone() * ec_value_ptr.clone()
                         + is_sub.clone() * ec_op_lhs_ptr.clone(),
                 },
-                mixed_deg
+                mixed_relation_deg
             ),
         );
 
-        // col 13/14: the EcMsm continuation-run consumes. Per row: the
+        // col 10/11: the EcMsm continuation-run consumes. Per row: the
         // `Pᵢ` `Group` binding + the `sᵢ` `Uint` binding (tying the compression
         // block to real child nodes) + `MsmClaimTerm(expr, Pᵢ, sᵢ)`
         // (positionless — tying to the chiplet's term *set*, so the absorb
@@ -1107,12 +1073,12 @@ where
         frac_col!(
             builder,
             "ec-msm-absorb",
-            pair_deg,
+            linear_pair_deg,
             (
                 "consume-base-group",
                 m_msm.clone(),
                 BindingMsg::group(m_lhs, m_a.clone()),
-                one_deg
+                linear_deg
             ),
             (
                 "consume-scalar-uint",
@@ -1123,13 +1089,13 @@ where
                     ptr: m_b.clone(),
                     bound_ptr: m_bound,
                 },
-                one_deg
+                linear_deg
             ),
         );
         frac_col!(
             builder,
             "ec-msm-absorb",
-            pair_deg,
+            linear_pair_deg,
             // Positionless set match: the claim's terms, any order — so the
             // absorb (hash) order is the caller's, not the chiplet's `idx`.
             (
@@ -1140,7 +1106,7 @@ where
                     base_ptr: m_a,
                     scalar_ptr: m_b
                 },
-                one_deg
+                linear_deg
             ),
             (
                 "consume-msmexpr",
@@ -1151,7 +1117,7 @@ where
                     val_ptr: m_val,
                     k: m_idx + LB::Expr::ONE,
                 },
-                one_deg
+                linear_deg
             ),
         );
     }

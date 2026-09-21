@@ -25,8 +25,8 @@ use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use crate::{
     hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},
     logup::{
-        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES, frac_col,
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, frac_col,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::eidos::EidosBlockMsg,
@@ -41,9 +41,6 @@ use crate::{
 // - Structural (3): chunk_seq_id, absorption_id, act.
 // - Selector (1):   is_head.
 // - Content (8):    f[0..8] — the chunk's 8 u32 felts.
-//
-// See the design notes §"Columns".
-
 /// Sequential chunk index; +1 per row, row 0 = 0. `4·chunk_seq_id` is
 /// the chunk's Memory64 tape base (the chiplet is the sole producer of
 /// its `CHUNK_ADDR_BASE` namespace, so global-sequential is sound).
@@ -79,7 +76,7 @@ pub const NUM_MAIN_COLS: usize = COL_F_END;
 
 /// Four aux columns, flattened via `frac_col!` so every closing
 /// constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
-/// - col 0: `lane0` alone — the gated running-sum anchor.
+/// - col 0: `lane0` alone — the centered running-sum column.
 /// - col 1: `lane1` + `lane2` (Memory64).
 /// - col 2: `lane3` (Memory64) + one Eidos message block.
 /// - col 3: `emit` alone (ChunkChain, no partner left to pair).
@@ -88,12 +85,11 @@ pub const NUM_AUX_COLS: usize = 4;
 /// Per-column fraction counts, matching the pairing above.
 pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 1];
 
-// The single exposed σ ([`NUM_SIGMA_VALUES`]) follows the VM-wide σ
-// contract in [`crate::logup`]; aggregating the Memory64 + EidosBlock
-// residues into one σ is the shared shape, not a chunk-specific choice.
-// The shared public values ([`NUM_PUBLIC_VALUES`]) are the transcript
-// root alone — declared but not read here; the natural last-row closing
-// needs no `inv_n` height input.
+// The single exposed normalized value ([`NUM_LOGUP_VALUES`]) follows the VM-wide LogUp contract in
+// [`crate::logup`]; aggregating the Memory64 + EidosBlock residues into one σ′ is the shared
+// shape, not a chunk-specific choice.
+// The shared public values ([`NUM_PUBLIC_VALUES`]) are the transcript root alone; this AIR
+// declares but does not read them.
 
 // AIR
 // ================================================================================================
@@ -127,7 +123,7 @@ impl LiftedAir<Felt, QuadFelt> for ChunkAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -186,9 +182,9 @@ impl LiftedAir<Felt, QuadFelt> for ChunkAir {
         builder.assert_zero(is_head * (AB::Expr::ONE - act));
 
         // Phase 2: LogUp argument via the LogUp adapter.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -199,10 +195,6 @@ impl<LB> LookupAir<LB> for ChunkAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -246,7 +238,7 @@ where
         let provides_deg = Deg { v: 1, u: 2 };
         let pair_deg = Deg { v: 3, u: 2 };
 
-        // col 0: lane0 alone — the gated running-sum anchor.
+        // col 0: lane0 alone — the centered running-sum column.
         frac_col!(
             builder,
             "memory64",

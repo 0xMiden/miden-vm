@@ -45,9 +45,8 @@ fn fold_balance<A>(
     for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
     let periodic = air.periodic_columns();
-    let combined = crate::tests::combined_lookup_main(air, main);
-    let lookup_main = combined.as_ref().unwrap_or(main);
-    let fractions = build_lookup_fractions(air, lookup_main, None, &periodic, challenges);
+    let preprocessed = air.preprocessed_trace();
+    let fractions = build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, challenges);
     for &(multiplicity, denom) in fractions.fractions() {
         *net.entry(denom).or_insert(Felt::ZERO) += multiplicity;
     }
@@ -263,13 +262,12 @@ fn mul_rejects_wrong_result() {
 }
 
 #[test]
-fn mul_q_range_checks_are_load_bearing() {
+fn mul_q_range_checks_reject_an_oversized_limb() {
     // Re-encode the same quotient value with a 17-bit limb pair
     // (q'₀ = q₀ + 2¹⁶, q'₁ = q₁ − 1): the synthetic division still
-    // closes — q(t) is unchanged, so the SZ identity holds and
-    // check_constraints PASSES. Only the Range16 consume of the oversized
-    // limb has no provider: the forged block must surface as a bus
-    // residual, proving the range checks (not the identity) reject it.
+    // closes because q(t) is unchanged, so the local constraints still hold. Only the `Range16`
+    // request for the oversized limb has no provider; the forged block must therefore produce a
+    // bus residual.
     let mut rng = StdRng::seed_from_u64(0x9_f0e6e);
     let bound = random_modulus(&mut rng);
     let a = random_uint_below(&mut rng, bound);
@@ -309,10 +307,7 @@ fn mul_q_range_checks_are_load_bearing() {
     fold_balance(&UintStoreAir, &store_main, &challenges, &mut net);
     fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
     let residual = net.values().filter(|m| **m != Felt::ZERO).count();
-    assert_ne!(
-        residual, 0,
-        "an oversized q limb must unbalance Range16 — the checks are load-bearing",
-    );
+    assert_ne!(residual, 0, "an oversized q limb must unbalance Range16",);
 }
 
 #[test]
