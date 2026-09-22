@@ -44,8 +44,7 @@ enum EidosChallengerMode {
 /// Generic Eidos challenger.
 ///
 /// This type supports scalar observation for Plonky3 challenger traits.
-/// Each sampled base-field element comes from one packed 63-bit Eidos digest word rather than the
-/// full Goldilocks field range.
+/// Each sampled base-field element is one coordinate of an Eidos field output.
 #[derive(Clone, Debug)]
 pub struct EidosChallenger {
     cv: Word,
@@ -105,6 +104,10 @@ impl EidosChallenger {
     }
 
     /// Samples `bits` low bits from the next sampled field element.
+    ///
+    /// For a uniform field sample, each result has probability within `1/p` of `2^-bits`,
+    /// where `p` is the field order. For positive `bits`, the distribution is not exactly uniform
+    /// because `p` is not a multiple of `2^bits`.
     ///
     /// A zero-bit request consumes one field element and returns zero.
     pub fn sample_bits(&mut self, bits: usize) -> usize {

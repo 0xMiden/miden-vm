@@ -45,7 +45,7 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 ///
 /// This stored value must equal the shape returned by [`derive_air_shape`].
 pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 660,
+    num_composed_constraints: 663,
     max_constraint_degree: 5,
     max_combo: NUM_OOD_POINTS,
     num_deep_terms: Some(802),
@@ -410,13 +410,13 @@ mod tests {
     fn derived_security_constants_match_snapshot() {
         const FP_SHIFT: u32 = 16;
         const FP_ONE: u64 = 65_536;
-        const BITS_PER_QUERY_FP: u64 = 193_381;
-        const SECURITY_CAP_FP: u64 = 8_257_536;
-        const LOOKUP_BASE_FP: u64 = 7_579_610;
-        const COMPOSITION_TERM_FP: u64 = 7_774_774;
-        const OOD_BASE_FP: u64 = 8_204_623;
-        const DEEP_BASE_FP: u64 = 7_756_350;
-        const FOLDING_BASE_FP: u64 = 8_022_589;
+        const BITS_PER_QUERY_FP: u64 = 193_382;
+        const SECURITY_CAP_FP: u64 = 8_388_608;
+        const LOOKUP_BASE_FP: u64 = 7_579_612;
+        const COMPOSITION_TERM_FP: u64 = 7_774_347;
+        const OOD_BASE_FP: u64 = 8_204_625;
+        const DEEP_BASE_FP: u64 = 7_756_352;
+        const FOLDING_BASE_FP: u64 = 8_022_591;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
         assert_eq!(FIXED_POINT_FRACTIONAL_BITS, FP_SHIFT, "FP_SHIFT is stale");
@@ -496,32 +496,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_186_348, 7_774_774, 7_825_002, 8_257_536, 7_891_517, 6_335_399, 8_257_536],
+                [7_186_350, 7_774_347, 7_825_004, 8_388_608, 7_891_519, 6_335_426, 8_388_608],
                 96,
             ),
             (
                 (27, 17, 12, 4, 16),
-                [6_531_033, 7_774_774, 7_170_620, 8_257_536, 7_236_157, 6_335_399, 8_257_536],
+                [6_531_035, 7_774_347, 7_170_622, 8_388_608, 7_236_159, 6_335_426, 8_388_608],
                 96,
             ),
             (
                 (27, 17, 12, 4, 19),
-                [6_334_425, 7_774_774, 6_974_013, 8_257_536, 7_039_549, 6_335_399, 8_257_536],
+                [6_334_427, 7_774_347, 6_974_015, 8_388_608, 7_039_551, 6_335_426, 8_388_608],
                 96,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_268_889, 7_774_774, 6_908_477, 8_257_536, 6_974_013, 6_335_399, 8_257_536],
+                [6_268_891, 7_774_347, 6_908_479, 8_388_608, 6_974_015, 6_335_426, 8_388_608],
                 95,
             ),
             (
                 (27, 17, 12, 4, 24),
-                [6_006_745, 7_774_774, 6_646_333, 8_257_536, 6_711_869, 6_335_399, 8_257_536],
+                [6_006_747, 7_774_347, 6_646_335, 8_388_608, 6_711_871, 6_335_426, 8_388_608],
                 91,
             ),
             (
                 (7, 0, 0, 0, 16),
-                [6_531_033, 7_774_774, 7_170_620, 7_756_350, 6_974_013, 1_353_667, 8_257_536],
+                [6_531_035, 7_774_347, 7_170_622, 7_756_352, 6_974_015, 1_353_674, 8_388_608],
                 20,
             ),
         ];

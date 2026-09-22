@@ -23,7 +23,6 @@ fn footer_overlay_fits_108_columns_without_collisions() {
     for footer in 0..FOOTER_ROWS {
         let mut used = [false; NUM_COLS];
         mark_range(&mut used, F_XOR_SLOT_BASE_COL..G_BD_ROT_SLOT_BASE_COL);
-        mark_range(&mut used, F_TOP_BIT_SLOT_BASE_COL..F_TOP_BIT_SLOT_BASE_COL + BYTE_SLOT_WIDTH);
         for limb in 0..F_RANGE_SLOTS {
             for field in 0..BYTE_SLOT_WIDTH {
                 mark_col(&mut used, footer_range_slot_col(limb, field));
@@ -55,7 +54,7 @@ fn footer_overlay_fits_108_columns_without_collisions() {
         mark_range(&mut used, F_R_CANON_Z_BASE_COL..F_R_CANON_Z_BASE_COL + 2);
         mark_col(&mut used, F_C_CANON_Z_COL);
 
-        let expected = if footer == 0 { 105 } else { 104 };
+        let expected = if footer == 0 { 102 } else { 101 };
         assert_eq!(used.into_iter().filter(|&live| live).count(), expected, "footer {footer}");
     }
 }

@@ -11,6 +11,7 @@ use super::{
         enforce_footer_rows, enforce_fused_rows, enforce_inactive_footer_input_aux,
         enforce_inactive_footer_output_aux,
     },
+    finalizer::matrix_accumulator_rows,
     layout::*,
     lookup::{FOOTER_INPUT_COLUMN, FOOTER_OUTPUT_COLUMN},
     model::initial_working_state,
@@ -27,7 +28,6 @@ use super::{
 };
 use crate::{
     Felt, HandwrittenMidenAir, MidenAir,
-    constraints::and8_lookup::eidos::normalize,
     lookup::{ConstraintLookupBuilder, LookupAir},
 };
 
@@ -349,25 +349,20 @@ fn footer_xor_word_value(row: &EidosCompressionFeltRow, slot_base: usize) -> u32
     u32::from_le_bytes(bytes)
 }
 
-fn rewrite_footer_d_prefix(trace: &mut [EidosCompressionFeltRow], footer: usize) {
-    let origin = FOOTER_START + footer;
-    let row = &trace[origin];
-    let out_even = footer_xor_word_value(row, F_OUTPUT_EVEN_SLOT_BASE);
-    let out_odd = footer_xor_word_value(row, F_OUTPUT_ODD_SLOT_BASE);
-    let top_bit = footer_top_bit_value(row);
-    let masked_odd = out_odd - (top_bit << 24);
-    let packed = Felt::from_u32(out_even) + Felt::from_u64(1 << 32) * Felt::from_u32(masked_odd);
-
-    for later_footer in footer..FOOTER_ROWS {
-        trace[FOOTER_START + later_footer][footer_interface_tail_col(footer)] = packed;
+fn rewrite_matrix_accumulators(trace: &mut [EidosCompressionFeltRow]) {
+    let mut raw_xof = [0u32; 16];
+    for footer in 0..FOOTER_ROWS {
+        let row = &trace[FOOTER_START + footer];
+        raw_xof[2 * footer] = footer_xor_word_value(row, F_OUTPUT_EVEN_SLOT_BASE);
+        raw_xof[2 * footer + 1] = footer_xor_word_value(row, F_OUTPUT_ODD_SLOT_BASE);
+        raw_xof[8 + 2 * footer] = footer_xor_word_value(row, F_HIGH_EVEN_SLOT_BASE);
+        raw_xof[8 + 2 * footer + 1] = footer_xor_word_value(row, F_HIGH_ODD_SLOT_BASE);
     }
-}
-
-fn footer_top_bit_value(row: &EidosCompressionFeltRow) -> u32 {
-    let a = row[F_TOP_BIT_SLOT_BASE_COL];
-    let b = row[F_TOP_BIT_SLOT_BASE_COL + 1];
-    let x = normalize(F_TOP_BIT_LOOKUP_BYTE_POSITION, row[F_TOP_BIT_SLOT_BASE_COL + 2]);
-    (a + b - x).halve().as_canonical_u64() as u32
+    for (footer, accumulators) in matrix_accumulator_rows(raw_xof).into_iter().enumerate() {
+        for (output, value) in accumulators.into_iter().enumerate() {
+            trace[FOOTER_START + footer][footer_interface_tail_col(output)] = value;
+        }
+    }
 }
 
 #[test]
@@ -384,7 +379,6 @@ fn air_constraint_mutation_matrix_rejects_each_witness_family() {
         ("footer bridge", FOOTER_START, footer_future_w_col(0, 0), FUSED_G_ROWS - 1),
         ("footer B-sum bridge", FOOTER_START, F_B_SUM_CORRECTION_COL, FUSED_G_ROWS - 1),
         ("footer xor duplicate", FOOTER_START, footer_xor_slot_col(8, 1), FOOTER_START),
-        ("footer top byte", FOOTER_START, F_TOP_BIT_SLOT_BASE_COL, FOOTER_START),
         ("footer CV correction", FOOTER_START, F_CV_STORAGE_COLS[0], FOOTER_START),
         ("footer message word", FOOTER_START, footer_msg_word_col(0), FOOTER_START),
         ("footer range limb", FOOTER_START, footer_range_slot_col(0, 0), FOOTER_START),
@@ -830,8 +824,57 @@ fn air_footer_constraints_pin_current_message_cv_and_tail_values() {
 
             trace.rows[origin][col] += Felt::ONE;
             let next = (origin + 1).min(BLOCK_PERIOD - 1);
-            assert_any_nonzero(&eval_footer_row(&trace.rows[origin], &trace.rows[next], origin));
+            let rejected_here = eval_footer_row(&trace.rows[origin], &trace.rows[next], origin)
+                .iter()
+                .any(|&value| value != Felt::ZERO);
+            let rejected_before = footer > 0
+                && eval_footer_row(&trace.rows[origin - 1], &trace.rows[origin], origin - 1)
+                    .iter()
+                    .any(|&value| value != Felt::ZERO);
+            assert!(rejected_here || rejected_before, "column {col} floated on footer {footer}");
         }
+    }
+}
+
+#[test]
+fn air_matrix_finalizer_pins_every_accumulator_coordinate() {
+    let trace = generate_felt_trace_block(test_block(), test_h(), TraceMode::Compression);
+
+    for footer in 0..FOOTER_ROWS {
+        for output in 0..4 {
+            let mut forged = trace.rows;
+            forged[FOOTER_START + footer][footer_output_col(output)] += Felt::ONE;
+
+            let evaluated_row = if footer == 0 {
+                FOOTER_START
+            } else {
+                FOOTER_START + footer - 1
+            };
+            assert_any_nonzero(&eval_footer_row(
+                &forged[evaluated_row],
+                &forged[evaluated_row + 1],
+                evaluated_row,
+            ));
+        }
+    }
+}
+
+#[test]
+fn air_matrix_finalizer_accepts_full_field_outputs() {
+    let trace = (0..256u32)
+        .find_map(|nonce| {
+            let mut block = test_block();
+            block[0] = block[0].wrapping_add(nonce);
+            let trace = generate_felt_trace_block(block, test_h(), TraceMode::Compression);
+            trace.rows[BLOCK_PERIOD - 1][F_OUTPUT_BASE_COL..F_OUTPUT_BASE_COL + 4]
+                .iter()
+                .any(|value| value.as_canonical_u64() >= 1 << 63)
+                .then_some(trace)
+        })
+        .expect("the matrix finalizer should reach the upper half of the field");
+
+    for row in 0..BLOCK_PERIOD {
+        assert_all_zero(&eval_main_row(&trace.rows, row));
     }
 }
 
@@ -845,44 +888,9 @@ fn air_footer_constraints_pin_output_high_word_bindings() {
         let rhs = (trace.rows[origin][byte_base + 1].as_canonical_u64() as u8) ^ 1;
         trace.rows[origin][byte_base + 1] = Felt::from_u8(rhs);
         trace.rows[origin][byte_base + 2] = Felt::from_u8(lhs & rhs);
-        rewrite_footer_d_prefix(&mut trace.rows, 0);
+        rewrite_matrix_accumulators(&mut trace.rows);
 
-        for row_idx in FOOTER_START..BLOCK_PERIOD {
-            let next_idx = (row_idx + 1).min(BLOCK_PERIOD - 1);
-            let rejected = eval_footer_row(&trace.rows[row_idx], &trace.rows[next_idx], row_idx)
-                .iter()
-                .any(|&value| value != Felt::ZERO);
-            assert_eq!(
-                rejected,
-                row_idx == origin,
-                "output slot {slot_base} had an unexpected result on row {row_idx}",
-            );
-        }
-    }
-}
-
-#[test]
-fn air_footer_constraints_pin_top_bit_mask() {
-    let mut trace = generate_felt_trace_block(test_block(), test_h(), TraceMode::Compression);
-    let footer = (0..FOOTER_ROWS)
-        .find(|&footer| footer_top_bit_value(&trace.rows[FOOTER_START + footer]) == 128)
-        .expect("test vector must exercise an odd output word with its top bit set");
-    let origin = FOOTER_START + footer;
-
-    trace.rows[origin][F_TOP_BIT_SLOT_BASE_COL + 1] = Felt::ZERO;
-    trace.rows[origin][F_TOP_BIT_SLOT_BASE_COL + 2] = Felt::ZERO;
-    rewrite_footer_d_prefix(&mut trace.rows, footer);
-
-    for row_idx in FOOTER_START..BLOCK_PERIOD {
-        let next_idx = (row_idx + 1).min(BLOCK_PERIOD - 1);
-        let rejected = eval_footer_row(&trace.rows[row_idx], &trace.rows[next_idx], row_idx)
-            .iter()
-            .any(|&value| value != Felt::ZERO);
-        assert_eq!(
-            rejected,
-            row_idx == origin,
-            "top-bit-mask forgery had an unexpected result on row {row_idx}",
-        );
+        assert_any_nonzero(&eval_footer_row(&trace.rows[origin], &trace.rows[origin + 1], origin));
     }
 }
 
@@ -955,12 +963,6 @@ fn air_footer_constraints_pin_mode_persistence() {
         generate_felt_trace_block(test_block(), test_h(), TraceMode::AeadXof { clk: 19 });
     let footer3 = &mut trace.rows[BLOCK_PERIOD - 1];
     footer3[F_MODE_COL] = Felt::ZERO;
-    let out_even = footer_xor_word_value(footer3, F_OUTPUT_EVEN_SLOT_BASE);
-    let out_odd = footer_xor_word_value(footer3, F_OUTPUT_ODD_SLOT_BASE);
-    let top_bit = footer_top_bit_value(footer3);
-    let masked_odd = out_odd - (top_bit << 24);
-    footer3[footer_interface_tail_col(FOOTER_ROWS - 1)] =
-        Felt::from_u32(out_even) + Felt::from_u64(1 << 32) * Felt::from_u32(masked_odd);
 
     for row_idx in FOOTER_START..BLOCK_PERIOD {
         let next_idx = (row_idx + 1).min(BLOCK_PERIOD - 1);
@@ -1018,7 +1020,7 @@ fn air_footer_state_band_pins_every_cross_row_value() {
             );
         }
 
-        for idx in 0..=footer {
+        for idx in 0..4 {
             let mut forged_next = *next;
             forged_next[footer_interface_tail_col(idx)] += Felt::ONE;
             assert!(

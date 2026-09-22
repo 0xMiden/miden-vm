@@ -17,6 +17,8 @@
 
 mod algebra;
 
+mod finalizer;
+
 #[cfg(test)]
 mod test_support;
 
@@ -82,7 +84,7 @@ pub mod core {
             EidosCompressionCols, LookupMultiplicitySign, NarrowLookupConfig, XorExpression,
             emit_narrow_lookup_columns,
         },
-        model::{initial_working_state, low_output},
+        model::{initial_working_state, raw_xof_output},
         periodic::get_periodic_column_values,
         schedule::{FusedStep, fused_step_at},
         selectors::EidosCompressionSelectors,
@@ -97,9 +99,8 @@ pub mod core {
             F_CV_STORAGE_COLS, F_FOOTER_DATA_COLS, F_FUTURE_W_COLS, F_FUTURE_W_WORD_INDICES,
             F_HIGH_EVEN_SLOT_BASE, F_HIGH_ODD_SLOT_BASE, F_MSG_WORD_SLOTS, F_OUTPUT_BASE_COL,
             F_OUTPUT_EVEN_SLOT_BASE, F_OUTPUT_ODD_SLOT_BASE, F_R_CANON_INV_BASE_COL,
-            F_R_CANON_Z_BASE_COL, F_RANGE_NARROW_SLOTS, F_RANGE_SLOTS,
-            F_TOP_BIT_LOOKUP_BYTE_POSITION, F_TOP_BIT_MASK, F_TOP_BIT_SLOT_BASE_COL,
-            F_XOR_SLOT_BASE_COL, FOOTER_ROWS, FOOTER_START, FUSED_G_ROWS, FUSED_G_ROWS_PER_ROUND,
+            F_R_CANON_Z_BASE_COL, F_RANGE_NARROW_SLOTS, F_RANGE_SLOTS, F_XOR_SLOT_BASE_COL,
+            FOOTER_ROWS, FOOTER_START, FUSED_G_ROWS, FUSED_G_ROWS_PER_ROUND,
             G_AC_BYTE_SLOT_BASE_COL, G_BD_ROT_SLOT_BASE_COL, G_COMPRESSION_CYCLE_ID_COL,
             G_K2_BASE_COL, G_K3_BASE_COL, G_MSG_WORD_BASE_COL, MISSING_ROTATION_BYTE,
             MISSING_ROTATION_G, NARROW_AUX_COLS, NUM_COLS, NUM_G, ROUNDS, RowKind, byte_slot_base,

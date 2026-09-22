@@ -39,12 +39,14 @@ pub struct ProofSecurityParameters {
     pub num_lookup_boundary_terms: u32,
 }
 
-/// Conservative Q16 lower bound on the log2 of the challenge-field cardinality.
+/// Size of the challenge field in Q16 bits, counted as its bit length.
 ///
-/// The challenge field is the quadratic extension of the Goldilocks base field. This value doubles
-/// the rounded-down Q16 value for the base field. Rounding before doubling keeps the result
-/// conservative.
-pub const CHALLENGE_FIELD_BITS: u64 = EXTENSION_DEGREE as u64 * fixed::floor_log2(Felt::ORDER_U64);
+/// The challenge field is the quadratic extension of the Goldilocks base field, so it has `p^2`
+/// elements, where `p = 2^64 - 2^32 + 1`. Its bit length is 128, which exceeds `log2(p^2)` by
+/// less than `7e-10` bits. This is a nominal security-estimation convention, not a lower bound on
+/// the exact field size. The MASM estimator requires a whole number of bits.
+pub const CHALLENGE_FIELD_BITS: u64 =
+    fixed::from_bits(EXTENSION_DEGREE as u32 * (u64::BITS - Felt::ORDER_U64.leading_zeros()));
 
 /// Number of out-of-domain points opened per committed column.
 ///
@@ -65,7 +67,7 @@ pub const COMMITMENT_ALIGNMENT: usize = config::SPONGE_RATE;
 /// This is stored rather than derived during verification. `air_shape_matches_symbolic` checks it
 /// against the shape obtained by symbolically evaluating the AIRs.
 pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 674,
+    num_composed_constraints: 680,
     max_constraint_degree: 9,
     max_combo: NUM_OOD_POINTS,
     num_deep_terms: Some(282),
@@ -175,7 +177,9 @@ pub const BITS_PER_QUERY: u64 =
 
 /// Collision resistance of the canonical Eidos commitment hash, in whole bits.
 ///
-/// Eidos exposes a 252-bit packed digest, so birthday collisions cost 126 bits.
+/// Eidos exposes four Goldilocks elements, so generic birthday collisions cost approximately 128
+/// bits when Eidos is modeled as a random oracle. The estimator separately caps every level by
+/// the challenge-field size.
 pub const COLLISION_RESISTANCE: u32 = miden_core::proof::HashFunction::Eidos.collision_resistance();
 
 /// Upper bound on every reported level, in fixed point.
@@ -573,13 +577,13 @@ mod tests {
     fn derived_security_constants_match_snapshot() {
         const FP_SHIFT: u32 = 16;
         const FP_ONE: u64 = 65_536;
-        const BITS_PER_QUERY_FP: u64 = 193_381;
-        const SECURITY_CAP_FP: u64 = 8_257_536;
-        const LOOKUP_BASE_FP: u64 = 7_703_405;
-        const COMPOSITION_TERM_FP: u64 = 7_772_790;
-        const OOD_BASE_FP: u64 = 8_161_888;
-        const DEEP_BASE_FP: u64 = 7_855_172;
-        const FOLDING_BASE_FP: u64 = 8_022_589;
+        const BITS_PER_QUERY_FP: u64 = 193_382;
+        const SECURITY_CAP_FP: u64 = 8_388_608;
+        const LOOKUP_BASE_FP: u64 = 7_703_407;
+        const COMPOSITION_TERM_FP: u64 = 7_771_954;
+        const OOD_BASE_FP: u64 = 8_161_890;
+        const DEEP_BASE_FP: u64 = 7_855_174;
+        const FOLDING_BASE_FP: u64 = 8_022_591;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
         assert_eq!(FIXED_POINT_FRACTIONAL_BITS, FP_SHIFT, "FP_SHIFT is stale");
@@ -610,32 +614,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_310_132, 7_772_790, 7_776_509, 8_257_536, 7_891_517, 6_335_399, 8_257_536],
+                [7_310_134, 7_771_954, 7_776_511, 8_388_608, 7_891_519, 6_335_426, 8_388_608],
                 96,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_392_684, 7_772_790, 6_860_180, 8_257_536, 6_974_013, 6_335_399, 8_257_536],
+                [6_392_686, 7_771_954, 6_860_182, 8_388_608, 6_974_015, 6_335_426, 8_388_608],
                 96,
             ),
             (
                 (27, 17, 12, 4, 23),
-                [6_196_076, 7_772_790, 6_663_572, 8_257_536, 6_777_405, 6_335_399, 8_257_536],
+                [6_196_078, 7_771_954, 6_663_574, 8_388_608, 6_777_407, 6_335_426, 8_388_608],
                 94,
             ),
             (
                 (27, 17, 12, 4, 29),
-                [5_802_860, 7_772_790, 6_270_356, 8_257_536, 6_384_189, 6_335_399, 8_257_536],
+                [5_802_862, 7_771_954, 6_270_358, 8_388_608, 6_384_191, 6_335_426, 8_388_608],
                 88,
             ),
             (
                 (7, 0, 0, 0, 20),
-                [6_392_684, 7_772_790, 6_860_180, 7_855_172, 6_711_869, 1_353_667, 8_257_536],
+                [6_392_686, 7_771_954, 6_860_182, 7_855_174, 6_711_871, 1_353_674, 8_388_608],
                 20,
             ),
             (
                 (150, 31, 31, 31, 29),
-                [5_802_860, 7_772_790, 6_270_356, 8_257_536, 8_153_661, 8_257_536, 8_257_536],
+                [5_802_862, 7_771_954, 6_270_358, 8_388_608, 8_153_663, 8_388_608, 8_388_608],
                 88,
             ),
         ];

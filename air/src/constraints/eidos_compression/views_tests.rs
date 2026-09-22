@@ -43,7 +43,6 @@ fn footer_overlay_view_exposes_footer_and_message_surface() {
 
     assert_slot(row.xor_slot(0), 0);
     assert_slot(row.xor_slot(15), 45);
-    assert_slot(row.top_bit_slot(), F_TOP_BIT_SLOT_BASE_COL);
     assert_eq!(*row.msg_word(0), G_MSG_WORD_BASE_COL);
     assert_eq!(*row.msg_word(3), G_MSG_WORD_BASE_COL + 3);
     assert_slot(row.range_slot(0), footer_range_slot_col(0, 0));

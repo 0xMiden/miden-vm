@@ -277,10 +277,10 @@ mod signing_key {
             Felt::new_unchecked(0x483ada77),
         ];
         const COMMITMENT: Word = Word::new([
-            Felt::new_unchecked(4055336113355715215),
-            Felt::new_unchecked(2301365777748037833),
-            Felt::new_unchecked(3660111797499859423),
-            Felt::new_unchecked(3205015468615122082),
+            Felt::new_unchecked(3_569_877_779_064_327_332),
+            Felt::new_unchecked(15_663_145_977_760_072_691),
+            Felt::new_unchecked(18_395_758_686_285_462_909),
+            Felt::new_unchecked(13_266_005_521_855_119_968),
         ]);
 
         assert_eq!(public_key.to_bytes(), COMPRESSED_SEC1);

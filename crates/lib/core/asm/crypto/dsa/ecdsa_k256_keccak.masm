@@ -9,9 +9,9 @@ const ECDSA_RECOVER_EVENT = event("miden::core::crypto::dsa::ecdsa_k256_keccak::
 
 # Generic Felt-sequence Eidos chaining word for the 16-Felt public-key preimage.
 const PUBLIC_KEY_INIT_CV = [
-    4280581857092831745,
-    2688637132020383760,
-    1947077364412317696,
+    13503953893947607553,
+    11912009168875159568,
+    11170449401267093504,
     6620516959492505600
 ]
 

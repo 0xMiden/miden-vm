@@ -4,7 +4,6 @@ use super::{
     Custom, DomainTag, DomainVersion, Eidos, EidosDomain, FeltSequence,
     domain::namespace,
     domains::{GENERIC_FELT_SEQUENCE, RANDOM_COIN_STATE},
-    encoding::ODD_LANE_MASK,
     primitive::IV,
 };
 use crate::{Felt, Word};
@@ -52,32 +51,32 @@ fn assert_digest(actual: Word, expected: [u64; 4]) {
 fn frozen_eidos_vectors() {
     assert_digest(
         Eidos::hash_elements::<Felt>(&[]),
-        [0x11a6458b66a84073, 0x4ffff7a2ad92252b, 0x3c84006ce9b051f5, 0x55b4b6847dcdfd93],
+        [0xd797d82493c946e7, 0x7ebffc6a929e8a05, 0x16010584c8181053, 0xcf1e8c0aa7223e1e],
     );
     assert_digest(
         Eidos::hash(&[]),
-        [0x2864baae4689a79a, 0x3b41d3365c3c8860, 0x07fea97b08976abc, 0x3ac995324799df08],
+        [0xddd50d531bbb1983, 0xd2cdfac3a28b34e0, 0xb90f9a512419754b, 0x01cc5eec6a1190b7],
     );
     assert_digest(
         Eidos::hash_elements(&felts_seq(3)),
-        [0x17cf960fb0322da4, 0x307f9ec74ec5b4d7, 0x798ca1783855c9ec, 0x61909a51c2d68383],
+        [0xd0b97de765f5c3a3, 0x870aec2466e7ebb2, 0xa3dcc5c6b7646454, 0x44a1bbd537d22435],
     );
     assert_digest(
         Eidos::hash(b"abc"),
-        [0x365b33e5d73475c7, 0x7842d2a7da672026, 0x080ccab96956c05a, 0x1c431bb11d6f35ee],
+        [0x11c3eb2d730c8d26, 0x241280e23aec5017, 0xc065fdebf76c7a4e, 0x9f0fbcfe49303be9],
     );
     assert_digest(
         Eidos::hash_elements_in_domain(&felts_seq(4), RANDOM_COIN_STATE),
-        [0x275e1958ad7c08dc, 0x12b8f7731460be11, 0x29718531efa9484b, 0x4e32493e94faf462],
+        [0x46ed35f2fed3b2c0, 0x6901c4915a6eae43, 0xfaebee485c688740, 0x45f439f08633b281],
     );
     assert_digest(
         Eidos::hash_elements(&felts_seq(9)),
-        [0x4d59f4c52d792900, 0x79244370f96f6467, 0x748d893146975bd4, 0x3fda88c89a46ce40],
+        [0xeff260cce7e01134, 0xf1640e1a9256dae3, 0x7f8c54b883859269, 0x7de7a2a349715543],
     );
     let bytes: Vec<u8> = (0..65).map(|i| i as u8).collect();
     assert_digest(
         Eidos::hash(&bytes),
-        [0x0a3700b1a8d0e65c, 0x389e810e5f3cdab2, 0x36cd639c19ced5e9, 0x4e8a2f58fb01c8ac],
+        [0x711221caef67e3a5, 0x1064bf7504a6166f, 0xb2f4ee115db4ba18, 0x4013d585171a9ef2],
     );
 }
 
@@ -143,13 +142,13 @@ fn generic_initializer_has_the_exact_lane_layout() {
         lanes,
         [
             TestParameterizedDomain::TAG.as_u32(),
-            IV[1] & ODD_LANE_MASK,
+            IV[1],
             params[0],
-            IV[3] & ODD_LANE_MASK,
+            IV[3],
             params[1],
-            IV[5] & ODD_LANE_MASK,
+            IV[5],
             params[2],
-            IV[7] & ODD_LANE_MASK,
+            IV[7],
         ]
     );
     assert_eq!(
@@ -184,19 +183,7 @@ fn merkle_initializer_has_zero_in_every_injected_lane() {
         .try_into()
         .unwrap();
 
-    assert_eq!(
-        lanes,
-        [
-            0,
-            IV[1] & ODD_LANE_MASK,
-            0,
-            IV[3] & ODD_LANE_MASK,
-            0,
-            IV[5] & ODD_LANE_MASK,
-            0,
-            IV[7] & ODD_LANE_MASK,
-        ]
-    );
+    assert_eq!(lanes, [0, IV[1], 0, IV[3], 0, IV[5], 0, IV[7],]);
 }
 
 #[test]
@@ -279,7 +266,7 @@ fn frozen_merge_and_challenger_vectors() {
     let merged = Eidos::merge(&[word([1, 2, 3, 4]), word([5, 6, 7, 8])]);
     assert_digest(
         merged,
-        [0x4d75748c8d801fcb, 0x08777791a35ff853, 0x1b245de8521c0075, 0x24e16f44209db86c],
+        [0xfe7a59b6012eed49, 0xa2fd18f77489a861, 0x515597f58df3a925, 0x76fc83521d811d94],
     );
 
     let mut challenger = MidenEidosChallenger::new(word([1, 2, 3, 4]), word([10, 11, 12, 13]));
@@ -290,20 +277,10 @@ fn frozen_merge_and_challenger_vectors() {
     let second = Word::new(core::array::from_fn(|_| CanSample::<Felt>::sample(&mut challenger)));
     assert_digest(
         first,
-        [
-            9064457378334718372,
-            5425353699759013086,
-            1604522722744930894,
-            6404602263707938109,
-        ],
+        [0x24afc1417b2c9705, 0xe50ebeda7c4150d5, 0xaa56fdf200cd0931, 0x7644e8ccafb0faab],
     );
     assert_digest(
         second,
-        [
-            4259844014858609293,
-            8079007960973284947,
-            8487760873676030018,
-            4187353069166526105,
-        ],
+        [0xf5e6fcd81b5e2f34, 0x310c14646ccba39c, 0x79caf2002df0472c, 0x2a3dba755f3449c8],
     );
 }

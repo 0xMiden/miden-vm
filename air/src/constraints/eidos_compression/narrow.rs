@@ -68,7 +68,7 @@ use NarrowSlotBus::{And8, RangeCheck, Rotation};
 /// Complete narrow-slot layout shared by the Miden VM and PVM compression AIRs.
 ///
 /// Slots 0 through 15 are And8 tuples. Slots 16 through 31 are rotation tuples on fused rows and
-/// are selectively reused for footer And8 and range checks. Slots 32 through 35 carry message
+/// are selectively reused for footer range checks. Slots 32 through 35 carry message
 /// words.
 pub const NARROW_SLOTS: [NarrowSlotSpec; 36] = [
     stored(0, And8, Some(And8)),
@@ -87,7 +87,7 @@ pub const NARROW_SLOTS: [NarrowSlotSpec; 36] = [
     stored(13, And8, Some(And8)),
     stored(14, And8, Some(And8)),
     stored(15, And8, Some(And8)),
-    stored(16, Rotation(0), Some(And8)),
+    stored(16, Rotation(0), None),
     stored(17, Rotation(1), Some(RangeCheck)),
     stored(18, Rotation(2), None),
     stored(19, Rotation(3), None),

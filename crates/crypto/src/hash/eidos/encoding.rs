@@ -1,23 +1,17 @@
 //! Canonical encoding between Eidos compression lanes and Goldilocks field elements.
 //!
-//! Raw compression inputs are decoded losslessly from canonical field elements. Eidos output CVs
-//! use a different, intentionally lossy operation: bit 31 of every odd output lane is
-//! cleared before each lane pair is packed into a field element. Keeping those operations
-//! distinct prevents callers from accidentally treating an arbitrary input CV as an Eidos output.
-//! These lane-order and packing rules are protocol-visible: changing them changes Eidos digests.
+//! Raw compression inputs and Eidos field outputs use the same lossless low/high-limb
+//! representation of canonical field elements. These lane-order and packing rules are
+//! protocol-visible: changing them changes Eidos digests.
 
 use core::array;
 
 use super::{BLOCK_LEN, DIGEST_WIDTH};
 use crate::{Felt, Word};
 
-/// Mask applied to odd output lanes before packing an Eidos output CV.
-pub const ODD_LANE_MASK: u32 = 0x7fff_ffff;
-
 /// Decode a canonical field element into its low and high `u32` lanes.
 ///
-/// This is lossless for every canonical Goldilocks field element. It does not require the element
-/// to have been produced by [`pack_output_felt`].
+/// This is lossless for every canonical Goldilocks field element.
 #[inline]
 pub fn unpack_felt(felt: Felt) -> (u32, u32) {
     let value = felt.as_canonical_u64();
@@ -26,7 +20,7 @@ pub fn unpack_felt(felt: Felt) -> (u32, u32) {
 
 /// Decode a four-Felt word into an arbitrary eight-lane Eidos chaining value.
 ///
-/// No output-subspace mask is applied to the input.
+/// Each low/high lane pair of the result encodes the corresponding canonical field element.
 #[inline]
 pub fn word_to_cv(word: Word) -> [u32; 8] {
     let (a, b) = unpack_felt(word[0]);
@@ -44,8 +38,8 @@ pub fn felts_to_block(block: [Felt; BLOCK_LEN]) -> [u32; 16] {
 
 /// Pack two lanes from an Eidos output CV into one canonical field element.
 ///
-/// Bit 31 of `hi` is cleared. This operation is for compression outputs and completed digests,
-/// not for round-tripping arbitrary compression inputs.
+/// The low/high lane pair must encode a canonical Goldilocks element. This precondition is
+/// checked only when debug assertions are enabled.
 #[inline]
 pub fn pack_output_felt(lo: u32, hi: u32) -> Felt {
     Felt::new_unchecked(pack_output_pair_u64(lo, hi))
@@ -53,7 +47,8 @@ pub fn pack_output_felt(lo: u32, hi: u32) -> Felt {
 
 /// Pack an eight-lane Eidos output CV into a four-Felt word.
 ///
-/// Bit 31 of each odd lane is cleared.
+/// Each low/high lane pair must encode a canonical Goldilocks element. This precondition is
+/// checked only when debug assertions are enabled.
 #[inline]
 pub fn output_cv_to_word(cv: [u32; 8]) -> Word {
     Word::new([
@@ -66,7 +61,9 @@ pub fn output_cv_to_word(cv: [u32; 8]) -> Word {
 
 #[inline]
 pub(super) const fn pack_output_pair_u64(lo: u32, hi: u32) -> u64 {
-    (((hi & ODD_LANE_MASK) as u64) << 32) | lo as u64
+    let value = ((hi as u64) << 32) | lo as u64;
+    debug_assert!(value < Felt::ORDER, "Eidos output must be a canonical Goldilocks element");
+    value
 }
 
 #[inline]
@@ -223,27 +220,19 @@ mod tests {
     }
 
     #[test]
-    fn output_packing_masks_only_odd_lane_top_bits() {
-        let cv = [
-            0x1234_5678,
-            0xffff_ffff,
-            0x2345_6789,
-            0x8000_0000,
-            0x3456_789a,
-            0x7fff_ffff,
-            0x4567_89ab,
-            0,
-        ];
+    fn output_packing_preserves_canonical_lane_pairs() {
+        let cv = [0x1234_5678, 0x9234_5678, 0x2345_6789, 0x8000_0000, 0, u32::MAX, 0x4567_89ab, 0];
         let packed = output_cv_to_word(cv);
         let decoded = word_to_cv(packed);
 
-        assert_eq!(decoded[0], cv[0]);
-        assert_eq!(decoded[2], cv[2]);
-        assert_eq!(decoded[4], cv[4]);
-        assert_eq!(decoded[6], cv[6]);
-        for odd in [1, 3, 5, 7] {
-            assert_eq!(decoded[odd], cv[odd] & ODD_LANE_MASK);
-        }
+        assert_eq!(decoded, cv);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "Eidos output must be a canonical Goldilocks element")]
+    fn output_packing_debug_asserts_canonicality() {
+        let _ = pack_output_felt(1, u32::MAX);
     }
 
     #[test]

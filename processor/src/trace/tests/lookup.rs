@@ -346,9 +346,9 @@ fn lookup_constraints_close_for_fibonacci_span() {
 
 #[test]
 fn eidos_compression_lookup_row_shape_matches_expected_interactions() {
-    const CANONICAL_REQUESTS_PER_BLOCK: u64 = 684;
+    const CANONICAL_REQUESTS_PER_BLOCK: u64 = 680;
     const REQUESTS_PER_DEDICATED_ROTATION_RELATION: u64 = 56;
-    const BYTE_LOOKUP_REQUESTS_PER_EIDOS_COMPRESSION_BLOCK: u64 = 964;
+    const BYTE_LOOKUP_REQUESTS_PER_EIDOS_COMPRESSION_BLOCK: u64 = 960;
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
     let (_, _, eidos_compression_matrix, and8_matrix) = trace.main_trace().clone_air_matrices();
@@ -453,7 +453,7 @@ fn eidos_compression_lookup_row_shape_matches_expected_interactions() {
 fn expected_eidos_compression_narrow_interactions_at_cycle_row(cycle_row: usize) -> usize {
     match cycle_row {
         0..=27 => 36,
-        28..=31 => 29,
+        28..=31 => 28,
         _ => unreachable!("cycle row must be in 0..{EIDOS_COMPRESSION_CYCLE_LEN}"),
     }
 }
@@ -479,8 +479,8 @@ fn expected_eidos_compression_fraction_entry_range_at_cycle_row(
                 + if cycle_row == 31 { 4 } else { 2 };
             expected..=expected
         },
-        31 if compression_multiplicity != Felt::ZERO => 31..=31,
-        31 => 30..=30,
+        31 if compression_multiplicity != Felt::ZERO => 30..=30,
+        31 => 29..=29,
         _ => {
             let expected = expected_eidos_compression_narrow_interactions_at_cycle_row(cycle_row);
             expected..=expected
@@ -491,7 +491,7 @@ fn expected_eidos_compression_fraction_entry_range_at_cycle_row(
 #[test]
 fn eidos_compression_lookup_ledger_fits_narrow_slot_cap() {
     const SLOTS_PER_BATCH_COLUMN: usize = 2;
-    const COMPRESSION_DENOMINATORS_PER_BLOCK: usize = 1127;
+    const COMPRESSION_DENOMINATORS_PER_BLOCK: usize = 1123;
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
     let (_, _, eidos_compression_matrix, _) = trace.main_trace().clone_air_matrices();

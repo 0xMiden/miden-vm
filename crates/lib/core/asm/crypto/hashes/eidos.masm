@@ -12,23 +12,23 @@ pub type State = struct { block_lo: word, block_hi: word, chaining_value: Chaini
 # CONSTANTS
 # =================================================================================================
 
-const EIDOS_INIT_CV_0_BASE = 4280581857092829184
-const EIDOS_INIT_CV_1_BASE = 2688637132020383744
-const EIDOS_INIT_CV_2_BASE = 1947077364412317696
+const EIDOS_INIT_CV_0_BASE = 13503953893947604992
+const EIDOS_INIT_CV_1_BASE = 11912009168875159552
+const EIDOS_INIT_CV_2_BASE = 11170449401267093504
 const EIDOS_INIT_CV_3_BASE = 6620516959492505600
 const GENERIC_FELT_SEQUENCE_DOMAIN_TAG = 0x00000a01
 
-const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_0 = 1271780409803817075
-const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_1 = 5764598326126322987
-const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_2 = 4360610806978597365
-const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_3 = 6175761669194382739
+const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_0 = 15535123091247679207
+const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_1 = 9133296103987251717
+const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_2 = 1585554611661967443
+const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_3 = 14924520192534003230
 
 # PROCEDURES
 # =================================================================================================
 
 #! Constructs an Eidos chaining word from a domain tag and three domain-defined
 #! parameters. Every input must fit in a u32. Each occupies the low lane of one packed Felt; the
-#! corresponding high lane is a fixed masked IV word.
+#! corresponding high lane is a fixed BLAKE3 IV word.
 #!
 #! Input:  [domain_tag, param0, param1, param2, ...]
 #! Output: [CV, ...]

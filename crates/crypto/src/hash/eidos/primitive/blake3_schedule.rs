@@ -1,9 +1,9 @@
 //! Local BLAKE3 compression schedule used by Eidos.
 //!
 //! This module owns only the raw BLAKE3 round schedule and architecture-specific packed
-//! backends. Eidos compression output masking, field packing, and Eidos framing stay in
-//! `primitive.rs` and `framing.rs`. The local schedule accepts batches of caller-supplied chaining
-//! values and message blocks and exposes the raw CV and XOF folds required by Eidos.
+//! backends. Eidos output finalization, field packing, and framing are defined in `finalizer.rs`,
+//! `encoding.rs`, and `framing.rs`. The local schedule accepts batches of caller-supplied chaining
+//! values and message blocks and exposes the raw XOF fold required by Eidos.
 
 #[cfg(any(
     test,
@@ -64,9 +64,9 @@ pub(super) const PACKED_LANES: usize = 16;
 fn compress_via_sub_batches<const W: usize>(
     cv: &[[u32; PACKED_LANES]; 8],
     block: &[[u32; PACKED_LANES]; 16],
-    f: impl Fn([[u32; W]; 8], [[u32; W]; 16]) -> [[u32; W]; 8],
-) -> [[u32; PACKED_LANES]; 8] {
-    let mut out = [[0u32; PACKED_LANES]; 8];
+    f: impl Fn([[u32; W]; 8], [[u32; W]; 16]) -> [[u32; W]; 16],
+) -> [[u32; PACKED_LANES]; 16] {
+    let mut out = [[0u32; PACKED_LANES]; 16];
     for chunk in 0..(PACKED_LANES / W) {
         let base = chunk * W;
         let sub_cv: [[u32; W]; 8] =
@@ -117,22 +117,22 @@ mod native_backend {
     };
 
     #[inline]
-    pub(super) fn compress(
+    pub(super) fn compress_raw_xof(
         cv: &[[u32; PACKED_LANES]; 8],
         block: &[[u32; PACKED_LANES]; 16],
-    ) -> [[u32; PACKED_LANES]; 8] {
+    ) -> [[u32; PACKED_LANES]; 16] {
         if cpu::has_avx512f() {
             // SAFETY: `cpu::has_avx512f` confirmed AVX-512F support on the running CPU.
-            unsafe { x86_64_avx512::compress_packed_16(*cv, *block) }
+            unsafe { x86_64_avx512::compress_packed_16_raw_xof(*cv, *block) }
         } else if cpu::has_avx2() {
             compress_via_sub_batches::<8>(cv, block, |cv, block| {
                 // SAFETY: `cpu::has_avx2` confirmed AVX2 support on the running CPU.
-                unsafe { x86_64_avx2::compress_packed_8(cv, block) }
+                unsafe { x86_64_avx2::compress_packed_8_raw_xof(cv, block) }
             })
         } else {
             compress_via_sub_batches::<4>(cv, block, |cv, block| {
                 // SAFETY: SSE2 is part of the x86_64 architectural baseline.
-                unsafe { x86_64_sse2::compress_packed_4(cv, block) }
+                unsafe { x86_64_sse2::compress_packed_4_raw_xof(cv, block) }
             })
         }
     }
@@ -143,13 +143,13 @@ mod native_backend {
     use super::PACKED_LANES;
 
     #[inline(always)]
-    pub(super) fn compress(
+    pub(super) fn compress_raw_xof(
         cv: &[[u32; PACKED_LANES]; 8],
         block: &[[u32; PACKED_LANES]; 16],
-    ) -> [[u32; PACKED_LANES]; 8] {
+    ) -> [[u32; PACKED_LANES]; 16] {
         // SAFETY: this module only compiles when `target_feature = "avx512f"` is enabled
         // crate-wide (e.g. via `-C target-cpu=native` or `-C target-feature=+avx512f`).
-        unsafe { super::x86_64_avx512::compress_packed_16(*cv, *block) }
+        unsafe { super::x86_64_avx512::compress_packed_16_raw_xof(*cv, *block) }
     }
 }
 
@@ -163,14 +163,14 @@ mod native_backend {
     use super::{PACKED_LANES, compress_via_sub_batches};
 
     #[inline(always)]
-    pub(super) fn compress(
+    pub(super) fn compress_raw_xof(
         cv: &[[u32; PACKED_LANES]; 8],
         block: &[[u32; PACKED_LANES]; 16],
-    ) -> [[u32; PACKED_LANES]; 8] {
+    ) -> [[u32; PACKED_LANES]; 16] {
         compress_via_sub_batches::<8>(cv, block, |cv, block| {
             // SAFETY: this module only compiles when `target_feature = "avx2"` is enabled
             // crate-wide (e.g. via `-C target-cpu=native` or `-C target-feature=+avx2`).
-            unsafe { super::x86_64_avx2::compress_packed_8(cv, block) }
+            unsafe { super::x86_64_avx2::compress_packed_8_raw_xof(cv, block) }
         })
     }
 }
@@ -185,13 +185,13 @@ mod native_backend {
     use super::{PACKED_LANES, compress_via_sub_batches};
 
     #[inline(always)]
-    pub(super) fn compress(
+    pub(super) fn compress_raw_xof(
         cv: &[[u32; PACKED_LANES]; 8],
         block: &[[u32; PACKED_LANES]; 16],
-    ) -> [[u32; PACKED_LANES]; 8] {
+    ) -> [[u32; PACKED_LANES]; 16] {
         compress_via_sub_batches::<4>(cv, block, |cv, block| {
             // SAFETY: SSE2 is part of the x86_64 architectural baseline.
-            unsafe { super::x86_64_sse2::compress_packed_4(cv, block) }
+            unsafe { super::x86_64_sse2::compress_packed_4_raw_xof(cv, block) }
         })
     }
 }
@@ -201,18 +201,18 @@ mod native_backend {
     use super::PACKED_LANES;
 
     #[inline(always)]
-    pub(super) fn compress(
+    pub(super) fn compress_raw_xof(
         cv: &[[u32; PACKED_LANES]; 8],
         block: &[[u32; PACKED_LANES]; 16],
-    ) -> [[u32; PACKED_LANES]; 8] {
+    ) -> [[u32; PACKED_LANES]; 16] {
         #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
         {
-            super::compress_via_sub_batches::<4>(cv, block, super::neon::compress_packed_4)
+            super::compress_via_sub_batches::<4>(cv, block, super::neon::compress_packed_4_raw_xof)
         }
 
         #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
         {
-            super::compress_packed(*cv, *block)
+            super::compress_packed_raw_xof(*cv, *block)
         }
     }
 }
@@ -224,20 +224,9 @@ mod row_dispatch {
     use super::{cpu, row_x86};
 
     #[inline]
-    pub(super) fn compress_raw(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 8] {
-        if cpu::has_avx512vl() {
-            // SAFETY: `cpu::has_avx512vl` confirmed AVX-512F and AVX-512VL support on the running
-            // CPU.
-            unsafe { row_x86::compress_raw_avx512vl(cv, block) }
-        } else {
-            row_x86::compress_raw(cv, block)
-        }
-    }
-
-    #[inline]
     pub(super) fn compress_raw_xof(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 16] {
         if cpu::has_avx512vl() {
-            // SAFETY: see `compress_raw` above.
+            // SAFETY: `cpu::has_avx512vl` confirmed AVX-512F and AVX-512VL support.
             unsafe { row_x86::compress_raw_xof_avx512vl(cv, block) }
         } else {
             row_x86::compress_raw_xof(cv, block)
@@ -339,33 +328,6 @@ fn permuted_state_with_parameter_words(
     v
 }
 
-/// Returns the raw eight-word CV fold with Eidos compression's fixed parameter words.
-pub(super) fn compress_raw(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
-    #[cfg(all(target_arch = "x86_64", feature = "std"))]
-    {
-        row_dispatch::compress_raw(&cv, &block)
-    }
-
-    #[cfg(all(target_arch = "x86_64", not(feature = "std"), target_feature = "avx512vl"))]
-    {
-        // SAFETY: this module only compiles when `target_feature = "avx512vl"` (and its
-        // prerequisite `"avx512f"`) are enabled crate-wide (e.g. via `-C target-cpu=native` or
-        // explicit `+avx512f,+avx512vl`).
-        unsafe { row_x86::compress_raw_avx512vl(&cv, &block) }
-    }
-
-    #[cfg(all(target_arch = "x86_64", not(feature = "std"), not(target_feature = "avx512vl")))]
-    {
-        row_x86::compress_raw(&cv, &block)
-    }
-
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        let v = permuted_state_with_parameter_words(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
-        array::from_fn(|i| v[i] ^ v[i + 8])
-    }
-}
-
 /// Returns the raw 16-word XOF fold with Eidos compression's fixed parameter words.
 pub(super) fn compress_raw_xof(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
     #[cfg(all(target_arch = "x86_64", feature = "std"))]
@@ -375,7 +337,9 @@ pub(super) fn compress_raw_xof(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
 
     #[cfg(all(target_arch = "x86_64", not(feature = "std"), target_feature = "avx512vl"))]
     {
-        // SAFETY: see `compress_raw` above.
+        // SAFETY: this branch only compiles when `target_feature = "avx512vl"` (and its
+        // prerequisite `"avx512f"`) are enabled crate-wide (e.g. via `-C target-cpu=native` or
+        // explicit `+avx512f,+avx512vl`).
         unsafe { row_x86::compress_raw_xof_avx512vl(&cv, &block) }
     }
 
@@ -392,16 +356,6 @@ pub(super) fn compress_raw_xof(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
 }
 
 #[cfg(test)]
-pub(super) fn compress_raw_with_parameter_words(
-    cv: [u32; 8],
-    block: [u32; 16],
-    parameter_words: [u32; 4],
-) -> [u32; 8] {
-    let v = permuted_state_with_parameter_words(cv, block, parameter_words);
-    array::from_fn(|i| v[i] ^ v[i + 8])
-}
-
-#[cfg(test)]
 pub(super) fn compress_raw_xof_with_parameter_words(
     cv: [u32; 8],
     block: [u32; 16],
@@ -411,19 +365,19 @@ pub(super) fn compress_raw_xof_with_parameter_words(
     array::from_fn(|i| if i < 8 { v[i] ^ v[i + 8] } else { v[i] ^ cv[i - 8] })
 }
 
-/// Applies the raw BLAKE3 schedule to several independent lanes.
+/// Applies the raw BLAKE3 schedule to several independent lanes and returns the full XOF fold.
 ///
-/// Lane `i` of the result is identical to `compress_raw(cv_i, block_i)`, where
+/// Lane `i` of the result is identical to `compress_raw_xof(cv_i, block_i)`, where
 /// `cv_i[j] = cv[j][i]` and `block_i[j] = block[j][i]`.
 #[cfg(any(
     test,
     all(target_arch = "aarch64", not(target_feature = "neon")),
     not(any(target_arch = "aarch64", target_arch = "x86_64")),
 ))]
-pub(super) fn compress_packed<const LANES: usize>(
+pub(super) fn compress_packed_raw_xof<const LANES: usize>(
     cv: [[u32; LANES]; 8],
     block: [[u32; LANES]; 16],
-) -> [[u32; LANES]; 8] {
+) -> [[u32; LANES]; 16] {
     let mut v = [[0u32; LANES]; 16];
     v[..8].copy_from_slice(&cv);
     for i in 0..8 {
@@ -441,16 +395,22 @@ pub(super) fn compress_packed<const LANES: usize>(
         g_packed(&mut v, 3, 4, 9, 14, block[s[14]], block[s[15]]);
     }
 
-    array::from_fn(|i| xor_packed(v[i], v[i + 8]))
+    array::from_fn(|i| {
+        if i < 8 {
+            xor_packed(v[i], v[i + 8])
+        } else {
+            xor_packed(v[i], cv[i - 8])
+        }
+    })
 }
 
-/// Applies the raw BLAKE3 schedule to one logical packed batch using the selected native backend.
+/// Applies the raw BLAKE3 schedule to one logical packed batch and returns the full XOF fold.
 #[inline]
-pub(super) fn compress_packed_native(
+pub(super) fn compress_packed_native_raw_xof(
     cv: &[[u32; PACKED_LANES]; 8],
     block: &[[u32; PACKED_LANES]; 16],
-) -> [[u32; PACKED_LANES]; 8] {
-    native_backend::compress(cv, block)
+) -> [[u32; PACKED_LANES]; 16] {
+    native_backend::compress_raw_xof(cv, block)
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -462,7 +422,7 @@ macro_rules! define_x86_packed_compress {
         pub(super) unsafe fn $name(
             cv: [[u32; $lanes]; 8],
             block: [[u32; $lanes]; 16],
-        ) -> [[u32; $lanes]; 8] {
+        ) -> [[u32; $lanes]; 16] {
             let mut v0 = load(&cv[0]);
             let mut v1 = load(&cv[1]);
             let mut v2 = load(&cv[2]);
@@ -601,6 +561,14 @@ macro_rules! define_x86_packed_compress {
                 store(xor(v5, v13)),
                 store(xor(v6, v14)),
                 store(xor(v7, v15)),
+                store(xor(v8, load(&cv[0]))),
+                store(xor(v9, load(&cv[1]))),
+                store(xor(v10, load(&cv[2]))),
+                store(xor(v11, load(&cv[3]))),
+                store(xor(v12, load(&cv[4]))),
+                store(xor(v13, load(&cv[5]))),
+                store(xor(v14, load(&cv[6]))),
+                store(xor(v15, load(&cv[7]))),
             ]
         }
     };
@@ -662,7 +630,7 @@ mod x86_64_sse2 {
         unsafe { _mm_or_si128(_mm_srli_epi32::<7>(x), _mm_slli_epi32::<25>(x)) }
     }
 
-    define_x86_packed_compress!(compress_packed_4, 4);
+    define_x86_packed_compress!(compress_packed_4_raw_xof, 4);
 }
 
 #[cfg(all(
@@ -738,7 +706,7 @@ mod x86_64_avx2 {
 
     define_x86_packed_compress!(
         #[target_feature(enable = "avx2")]
-        compress_packed_8,
+        compress_packed_8_raw_xof,
         8
     );
 }
@@ -798,7 +766,7 @@ mod x86_64_avx512 {
 
     define_x86_packed_compress!(
         #[target_feature(enable = "avx512f")]
-        compress_packed_16,
+        compress_packed_16_raw_xof,
         16
     );
 }
@@ -857,7 +825,10 @@ mod neon {
     }
 
     #[inline(always)]
-    pub(super) fn compress_packed_4(cv: [[u32; 4]; 8], block: [[u32; 4]; 16]) -> [[u32; 4]; 8] {
+    pub(super) fn compress_packed_4_raw_xof(
+        cv: [[u32; 4]; 8],
+        block: [[u32; 4]; 16],
+    ) -> [[u32; 4]; 16] {
         let mut v0 = load(&cv[0]);
         let mut v1 = load(&cv[1]);
         let mut v2 = load(&cv[2]);
@@ -997,6 +968,14 @@ mod neon {
             store(xor(v5, v13)),
             store(xor(v6, v14)),
             store(xor(v7, v15)),
+            store(xor(v8, load(&cv[0]))),
+            store(xor(v9, load(&cv[1]))),
+            store(xor(v10, load(&cv[2]))),
+            store(xor(v11, load(&cv[3]))),
+            store(xor(v12, load(&cv[4]))),
+            store(xor(v13, load(&cv[5]))),
+            store(xor(v14, load(&cv[6]))),
+            store(xor(v15, load(&cv[7]))),
         ]
     }
 }
@@ -1025,11 +1004,20 @@ mod tests {
     fn sub_batches_reassemble_lanes_in_order() {
         let mut state = 0x1234_5678_9abc_def0u64;
         let (cv, block) = random_packed::<PACKED_LANES>(&mut state);
-        let expected = compress_packed::<PACKED_LANES>(cv, block);
+        let expected = compress_packed_raw_xof::<PACKED_LANES>(cv, block);
 
-        assert_eq!(compress_via_sub_batches::<4>(&cv, &block, compress_packed::<4>), expected);
-        assert_eq!(compress_via_sub_batches::<8>(&cv, &block, compress_packed::<8>), expected);
-        assert_eq!(compress_via_sub_batches::<16>(&cv, &block, compress_packed::<16>), expected);
+        assert_eq!(
+            compress_via_sub_batches::<4>(&cv, &block, compress_packed_raw_xof::<4>),
+            expected
+        );
+        assert_eq!(
+            compress_via_sub_batches::<8>(&cv, &block, compress_packed_raw_xof::<8>),
+            expected
+        );
+        assert_eq!(
+            compress_via_sub_batches::<16>(&cv, &block, compress_packed_raw_xof::<16>),
+            expected
+        );
     }
 
     /// Each x86_64 backend is checked directly rather than through the runtime dispatcher, so one
@@ -1041,7 +1029,7 @@ mod tests {
         const PARAMETER_WORDS: [u32; 4] = [IV[4], IV[5], IV[6], IV[7]];
 
         fn assert_packed_backend_matches_reference<const W: usize>(
-            backend: impl Fn([[u32; W]; 8], [[u32; W]; 16]) -> [[u32; W]; 8],
+            backend: impl Fn([[u32; W]; 8], [[u32; W]; 16]) -> [[u32; W]; 16],
         ) {
             let mut state = 0x9e37_79b9_7f4a_7c15u64;
             for _ in 0..512 {
@@ -1051,25 +1039,18 @@ mod tests {
                     let cv_lane: [u32; 8] = array::from_fn(|word| cv[word][lane]);
                     let block_lane: [u32; 16] = array::from_fn(|word| block[word][lane]);
                     let expected =
-                        compress_raw_with_parameter_words(cv_lane, block_lane, PARAMETER_WORDS);
-                    let actual: [u32; 8] = array::from_fn(|word| out[word][lane]);
+                        compress_raw_xof_with_parameter_words(cv_lane, block_lane, PARAMETER_WORDS);
+                    let actual: [u32; 16] = array::from_fn(|word| out[word][lane]);
                     assert_eq!(actual, expected, "lane {lane} diverged");
                 }
             }
         }
 
-        fn assert_row_variant_matches_reference(
-            raw: impl Fn(&[u32; 8], &[u32; 16]) -> [u32; 8],
-            xof: impl Fn(&[u32; 8], &[u32; 16]) -> [u32; 16],
-        ) {
+        fn assert_row_variant_matches_reference(xof: impl Fn(&[u32; 8], &[u32; 16]) -> [u32; 16]) {
             let mut state = 0x0123_4567_89ab_cdefu64;
             for _ in 0..2048 {
                 let cv: [u32; 8] = array::from_fn(|_| next_u32(&mut state));
                 let block: [u32; 16] = array::from_fn(|_| next_u32(&mut state));
-                assert_eq!(
-                    raw(&cv, &block),
-                    compress_raw_with_parameter_words(cv, block, PARAMETER_WORDS)
-                );
                 assert_eq!(
                     xof(&cv, &block),
                     compress_raw_xof_with_parameter_words(cv, block, PARAMETER_WORDS)
@@ -1081,7 +1062,7 @@ mod tests {
         fn sse2_packed_backend_matches_reference() {
             assert_packed_backend_matches_reference::<4>(|cv, block| {
                 // SAFETY: SSE2 is part of the x86_64 architectural baseline.
-                unsafe { x86_64_sse2::compress_packed_4(cv, block) }
+                unsafe { x86_64_sse2::compress_packed_4_raw_xof(cv, block) }
             });
         }
 
@@ -1093,7 +1074,7 @@ mod tests {
             }
             assert_packed_backend_matches_reference::<8>(|cv, block| {
                 // SAFETY: `cpu::has_avx2` confirmed AVX2 support on the running CPU.
-                unsafe { x86_64_avx2::compress_packed_8(cv, block) }
+                unsafe { x86_64_avx2::compress_packed_8_raw_xof(cv, block) }
             });
         }
 
@@ -1105,13 +1086,13 @@ mod tests {
             }
             assert_packed_backend_matches_reference::<16>(|cv, block| {
                 // SAFETY: `cpu::has_avx512f` confirmed AVX-512F support on the running CPU.
-                unsafe { x86_64_avx512::compress_packed_16(cv, block) }
+                unsafe { x86_64_avx512::compress_packed_16_raw_xof(cv, block) }
             });
         }
 
         #[test]
         fn sse2_row_variant_matches_reference() {
-            assert_row_variant_matches_reference(row_x86::compress_raw, row_x86::compress_raw_xof);
+            assert_row_variant_matches_reference(row_x86::compress_raw_xof);
         }
 
         #[test]
@@ -1120,17 +1101,11 @@ mod tests {
                 std::eprintln!("skipped: the running CPU lacks AVX-512VL");
                 return;
             }
-            assert_row_variant_matches_reference(
-                |cv, block| {
-                    // SAFETY: `cpu::has_avx512vl` confirmed AVX-512F and AVX-512VL support on the
-                    // running CPU.
-                    unsafe { row_x86::compress_raw_avx512vl(cv, block) }
-                },
-                |cv, block| {
-                    // SAFETY: see above.
-                    unsafe { row_x86::compress_raw_xof_avx512vl(cv, block) }
-                },
-            );
+            assert_row_variant_matches_reference(|cv, block| {
+                // SAFETY: `cpu::has_avx512vl` confirmed AVX-512F and AVX-512VL support on the
+                // running CPU.
+                unsafe { row_x86::compress_raw_xof_avx512vl(cv, block) }
+            });
         }
     }
 }

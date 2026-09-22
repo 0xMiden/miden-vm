@@ -636,14 +636,16 @@ mod tests {
         let fractional_bits = pvm_security::FIXED_POINT_FRACTIONAL_BITS;
         let fixed_point_one = pvm_security::FIXED_POINT_ONE;
         let field_bits = miden_air::security::CHALLENGE_FIELD_BITS;
-        let field_ceiling = field_bits.div_ceil(fixed_point_one) * fixed_point_one;
+        // The MASM lookup term carries no fractional field component.
+        assert!(
+            field_bits.is_multiple_of(fixed_point_one),
+            "CHALLENGE_FIELD_BITS = {field_bits} is not a whole number of bits",
+        );
         for (name, expected) in [
             ("FP_SHIFT", u64::from(fractional_bits)),
             ("FP_ONE", fixed_point_one),
-            ("MAX_Q16_FRACTION", fixed_point_one - 1),
             ("BITS_PER_QUERY_FP", pvm_security::BITS_PER_QUERY),
             ("CHALLENGE_FIELD_WHOLE_BITS", field_bits >> fractional_bits),
-            ("CHALLENGE_FIELD_OFFSET_FP", field_ceiling - field_bits),
             ("SECURITY_CAP_BITS", pvm_security::SECURITY_CAP >> fractional_bits),
             ("FRI_FOLDING_BASE_BITS", pvm_security::FOLDING_BASE >> fractional_bits),
             ("LOG2_E_FP", pvm_security::LOG2_E),

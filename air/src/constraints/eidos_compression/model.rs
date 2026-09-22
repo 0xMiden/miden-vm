@@ -2,8 +2,10 @@
 
 use super::schedule::EIDOS_COMPRESSION_IV;
 
-pub fn low_output(v: [u32; 16]) -> [u32; 8] {
-    core::array::from_fn(|i| v[i] ^ v[i + 8])
+/// Returns the sixteen raw XOF words for final working state `v` and input chaining value `h`:
+/// the chaining-value fold followed by the XOF feed-forward.
+pub fn raw_xof_output(v: [u32; 16], h: [u32; 8]) -> [u32; 16] {
+    core::array::from_fn(|i| if i < 8 { v[i] ^ v[i + 8] } else { v[i] ^ h[i - 8] })
 }
 
 pub fn initial_working_state(h: [u32; 8]) -> [u32; 16] {

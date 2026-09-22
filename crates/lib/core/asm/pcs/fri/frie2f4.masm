@@ -4,7 +4,7 @@ use miden::core::stark::constants
 use miden::core::pcs::fri::helper
 
 # Initial CV for the Eidos LMCS leaf hasher over one opened FRI row (8 Felts).
-const FRI_ROW_HASH_INIT_CV = [4280581857092832001, 2688637132020383752, 1947077364412317696, 6620516959492505600]
+const FRI_ROW_HASH_INIT_CV = [13503953893947607809, 11912009168875159560, 11170449401267093504, 6620516959492505600]
 const FRI_LAYER_LEAF_DIGEST_MISMATCH = "FRI layer leaf hash mismatch"
 
 #! Checks that, for a query with index p at layer i, the folding procedure to create layer (i + 1)

@@ -221,8 +221,12 @@ jobs:
             'avx2' 'avx512f avx512vl'; then
             failed=1
           fi
-          if ! check_backend AVX-512F/VL '+avx2,+avx512f,+avx512vl' \
-            'avx2 avx512f avx512vl' ''; then
+          if ! check_backend AVX-512F/VL '+avx2,+avx512f,+avx512vl,-avx512ifma' \
+            'avx2 avx512f avx512vl' 'avx512ifma'; then
+            failed=1
+          fi
+          if ! check_backend 'AVX-512 IFMA' '+avx2,+avx512f,+avx512vl,+avx512ifma' \
+            'avx2 avx512f avx512vl avx512ifma' ''; then
             failed=1
           fi
           exit "${failed}"

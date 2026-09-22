@@ -119,6 +119,9 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     let preprocessed_commitment = compute_eidos_preprocessed_commitment()?;
 
     let mut relation_mod = read_file(RELATION_DIGEST_PATH)?;
+    for (name, value) in vm_security_descriptor_literals() {
+        replace_masm_const(&mut relation_mod, name, &value.to_string())?;
+    }
     for (i, elem) in relation_digest.iter().enumerate() {
         replace_masm_const(
             &mut relation_mod,
@@ -957,14 +960,15 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     let fractional_bits = miden_air::security::FIXED_POINT_FRACTIONAL_BITS;
     let fixed_point_one = miden_air::security::FIXED_POINT_ONE;
     let field_bits = miden_air::security::CHALLENGE_FIELD_BITS;
-    let field_ceiling = field_bits.div_ceil(fixed_point_one) * fixed_point_one;
-    let shared_literals: [(&str, u64); 10] = [
+    // The MASM lookup term carries no fractional field component.
+    if !field_bits.is_multiple_of(fixed_point_one) {
+        return Err(format!("CHALLENGE_FIELD_BITS = {field_bits} is not a whole number of bits"));
+    }
+    let shared_literals: [(&str, u64); 8] = [
         ("FP_SHIFT", u64::from(fractional_bits)),
         ("FP_ONE", fixed_point_one),
-        ("MAX_Q16_FRACTION", fixed_point_one - 1),
         ("BITS_PER_QUERY_FP", miden_air::security::BITS_PER_QUERY),
         ("CHALLENGE_FIELD_WHOLE_BITS", field_bits >> fractional_bits),
-        ("CHALLENGE_FIELD_OFFSET_FP", field_ceiling - field_bits),
         ("SECURITY_CAP_BITS", miden_air::security::SECURITY_CAP >> fractional_bits),
         ("FRI_FOLDING_BASE_BITS", miden_air::security::FOLDING_BASE >> fractional_bits),
         ("LOG2_E_FP", miden_air::security::LOG2_E),
@@ -1030,7 +1034,21 @@ pub fn security_masm_matches_air() -> Result<(), String> {
         return Err(format!("MAX_POW_BITS in {SECURITY_ESTIMATOR_PATH} is stale"));
     }
 
-    let descriptor_literals: [(&str, u64); 9] = [
+    for (name, expected) in vm_security_descriptor_literals()
+        .into_iter()
+        .chain([("LOG_HEIGHT_MAX", estimator_heights)])
+    {
+        let actual = parse_masm_const::<u64>(&wrapper, name, RELATION_DIGEST_PATH)?;
+        if actual != expected {
+            return Err(format!("{name} in {RELATION_DIGEST_PATH} is stale"));
+        }
+    }
+
+    Ok(())
+}
+
+fn vm_security_descriptor_literals() -> [(&'static str, u64); 8] {
+    [
         ("LOOKUP_POW_BITS", miden_air::security::LOOKUP_POW_BITS as u64),
         (
             "MAX_MESSAGE_WIDTH",
@@ -1059,17 +1077,7 @@ pub fn security_masm_matches_air() -> Result<(), String> {
             miden_air::security::AIR_SHAPE.lookup.fractions_per_row as u64,
         ),
         ("MAX_NUM_KERNEL_PROCEDURES", KernelDescriptor::MAX_NUM_PROCEDURES as u64),
-        ("LOG_HEIGHT_MAX", estimator_heights),
-    ];
-
-    for (name, expected) in descriptor_literals {
-        let actual = parse_masm_const::<u64>(&wrapper, name, RELATION_DIGEST_PATH)?;
-        if actual != expected {
-            return Err(format!("{name} in {RELATION_DIGEST_PATH} is stale"));
-        }
-    }
-
-    Ok(())
+    ]
 }
 
 fn parse_masm_const<T: core::str::FromStr>(
