@@ -6,7 +6,7 @@ use std::{
     process::Command,
 };
 
-use cargo_metadata::{Message, TargetKind};
+use cargo_metadata::{Message, MetadataCommand, TargetKind};
 use miden_assembly::diagnostics::Report;
 use miden_wasm_event_handlers::GUEST_RUSTFLAGS;
 
@@ -23,16 +23,17 @@ const TARGET_HINT: &str =
 /// The crate must produce exactly one `.wasm` artifact from a `cdylib` target, which a `[lib]`
 /// with `crate-type = ["cdylib"]` gives. The build passes `--lib`, so the other targets of the
 /// crate, such as a binary or an example, are not built at all: they cannot fail the handler
-/// build and they cost no build time. The build is a release build for `wasm32-unknown-unknown`
-/// and writes into a dedicated directory under the guest crate, so it never shares a target
-/// directory, and therefore never shares a build lock, with the build that runs the project
-/// assembler.
+/// build and they cost no build time. It also names the package explicitly, so a guest crate that
+/// is a workspace root of its own builds its own library rather than the default members of that
+/// workspace. The build is a release build for `wasm32-unknown-unknown` and writes into a
+/// dedicated directory under the guest crate, so it never shares a target directory, and therefore
+/// never shares a build lock, with the build that runs the project assembler.
 ///
 /// # Errors
-/// Returns an error when `cargo` is not available, when the build fails (the message carries the
-/// captured build output), when the build does not produce exactly one Wasm artifact, or when that
-/// artifact goes over the handler module size cap. A crate with no library target fails in the
-/// build, with cargo's own message.
+/// Returns an error when `cargo` is not available, when `crate_dir` holds no package of its own,
+/// when the build fails (the message carries the captured build output), when the build does not
+/// produce exactly one Wasm artifact, or when that artifact goes over the handler module size cap.
+/// A crate with no library target fails in the build, with cargo's own message.
 pub(crate) fn build(crate_dir: &Path) -> Result<Vec<u8>, Report> {
     if !crate_dir.is_dir() {
         return Err(Report::msg(format!(
@@ -40,6 +41,11 @@ pub(crate) fn build(crate_dir: &Path) -> Result<Vec<u8>, Report> {
             crate_dir.display()
         )));
     }
+
+    // The plugin canonicalizes `crate_dir`, and cargo reports an absolute canonical manifest
+    // path, so the two spellings match.
+    let manifest_path = crate_dir.join("Cargo.toml");
+    let package_name = package_name(crate_dir, &manifest_path)?;
 
     // The dedicated target directory carries the name of the metadata table that requested the
     // build.
@@ -57,6 +63,11 @@ pub(crate) fn build(crate_dir: &Path) -> Result<Vec<u8>, Report> {
         // build.
         .args(["build", "--lib", "--release", "--target", TARGET, "--message-format"])
         .arg("json-render-diagnostics")
+        // The package is selected by name: at a workspace root, `--lib` alone follows
+        // `workspace.default-members`, which can build an unrelated member and skip the package
+        // the manifest names entirely.
+        .arg("--package")
+        .arg(&package_name)
         .arg("--target-dir")
         .arg(&target_dir)
         .output()
@@ -76,9 +87,7 @@ pub(crate) fn build(crate_dir: &Path) -> Result<Vec<u8>, Report> {
         )));
     }
 
-    // The plugin canonicalizes `crate_dir`, and cargo reports an absolute canonical manifest
-    // path, so the two spellings match.
-    let mut artifacts = wasm_artifacts(&output.stdout, &crate_dir.join("Cargo.toml"));
+    let mut artifacts = wasm_artifacts(&output.stdout, &manifest_path);
     match artifacts.len() {
         1 => crate::module::read(&artifacts[0], |error| {
             format!("failed to read the Wasm handler module '{}': {error}", artifacts[0].display())
@@ -103,6 +112,45 @@ pub(crate) fn build(crate_dir: &Path) -> Result<Vec<u8>, Report> {
             )))
         },
     }
+}
+
+/// Returns the name of the package the manifest at `manifest_path` declares, which the build then
+/// selects with `--package`.
+///
+/// # Errors
+/// Returns an error when `cargo metadata` fails, or when `crate_dir` holds no package of its own,
+/// which is what a virtual workspace manifest — a `Cargo.toml` with workspace members but no
+/// `[package]` table — gives.
+fn package_name(crate_dir: &Path, manifest_path: &Path) -> Result<String, Report> {
+    let metadata = MetadataCommand::new()
+        // The same cargo the build runs, so a `CARGO` override applies to both invocations.
+        .cargo_path(cargo())
+        .current_dir(crate_dir)
+        .manifest_path(manifest_path)
+        // The package name comes from the manifest alone, so dependency resolution — and with it
+        // any registry access — is not needed.
+        .no_deps()
+        .exec()
+        .map_err(|error| {
+            Report::msg(format!(
+                "failed to read the cargo metadata of the Wasm handler guest crate '{}': {error}; \
+                 cargo must be installed and the crate manifest must be valid",
+                crate_dir.display()
+            ))
+        })?;
+
+    metadata
+        .packages
+        .iter()
+        .find(|package| package.manifest_path.as_std_path() == manifest_path)
+        .map(|package| package.name.to_string())
+        .ok_or_else(|| {
+            Report::msg(format!(
+                "the Wasm handler guest crate path '{}' is not a package; its Cargo.toml declares \
+                 no [package] table, so it names a workspace only",
+                crate_dir.display()
+            ))
+        })
 }
 
 /// Returns the cargo executable the guest build runs.
