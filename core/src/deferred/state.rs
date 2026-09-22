@@ -420,6 +420,8 @@ mod tests {
         deferred::{Payload, Precompile, WorkClass, WorkItem, precompile_id},
     };
 
+    const REJECTING_WORK: WorkClass = WorkClass::new("rejecting");
+
     #[derive(Debug, Clone, Copy)]
     struct RejectingPrecompile;
 
@@ -432,12 +434,16 @@ mod tests {
             precompile_id(self.name())
         }
 
+        fn work_classes(&self) -> &'static [WorkClass] {
+            &[REJECTING_WORK]
+        }
+
         fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
             (args == [ZERO; 3]).then_some(NodeType::Data)
         }
 
         fn work(&self, _args: [Felt; 3], _payload: &Payload) -> Result<WorkItem, PrecompileError> {
-            Ok(WorkItem::new(WorkClass::new("rejecting"), 1))
+            Ok(WorkItem::new(REJECTING_WORK, 1))
         }
 
         fn evaluate(

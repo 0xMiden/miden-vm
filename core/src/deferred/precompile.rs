@@ -6,7 +6,7 @@
 
 use alloc::{format, vec::Vec};
 
-use super::{DeferredContext, Node, NodeType, Payload, PrecompileError, WorkItem};
+use super::{DeferredContext, Node, NodeType, Payload, PrecompileError, WorkClass, WorkItem};
 use crate::{Felt, utils::hash_string_to_word};
 
 // PRECOMPILE TRAIT
@@ -24,6 +24,9 @@ pub trait Precompile: Send + Sync {
     /// The registry validates this against [`precompile_id`] and rejects framework-reserved ids,
     /// turning id drift into a setup-time failure.
     fn id(&self) -> Felt;
+
+    /// Returns the work classes this precompile may produce.
+    fn work_classes(&self) -> &'static [WorkClass];
 
     /// Canonical constants this precompile wants registered before execution.
     ///

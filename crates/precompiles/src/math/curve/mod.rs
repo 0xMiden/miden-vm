@@ -48,7 +48,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
-        PrecompileError, TRUE_DIGEST, Tag, WorkItem, precompile_id,
+        PrecompileError, TRUE_DIGEST, Tag, WorkClass, WorkItem, precompile_id,
     },
 };
 
@@ -820,6 +820,10 @@ impl Precompile for CurvePrecompile {
 
     fn id(&self) -> Felt {
         Self::id()
+    }
+
+    fn work_classes(&self) -> &'static [WorkClass] {
+        &[crate::CURVE_WORK, crate::MSM_WORK]
     }
 
     fn init(&self) -> Vec<Node> {

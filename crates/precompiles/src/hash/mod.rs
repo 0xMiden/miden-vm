@@ -12,7 +12,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredContext, Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag,
-        WorkItem, precompile_id,
+        WorkClass, WorkItem, precompile_id,
     },
 };
 
@@ -134,6 +134,10 @@ impl<H: HashFunction> Precompile for HashPrecompile<H> {
 
     fn id(&self) -> Felt {
         Self::id()
+    }
+
+    fn work_classes(&self) -> &'static [WorkClass] {
+        &[crate::HASH_WORK]
     }
 
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {

@@ -6,7 +6,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
-        PrecompileError, Tag, WorkItem, precompile_id,
+        PrecompileError, Tag, WorkClass, WorkItem, precompile_id,
     },
 };
 
@@ -251,6 +251,10 @@ impl Precompile for UintPrecompile {
 
     fn id(&self) -> Felt {
         Self::id()
+    }
+
+    fn work_classes(&self) -> &'static [WorkClass] {
+        &[crate::UINT_WORK]
     }
 
     fn init(&self) -> Vec<Node> {

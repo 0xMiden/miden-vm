@@ -5,7 +5,7 @@ use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use super::precompile::{Precompile, precompile_id};
 use crate::{
     Felt,
-    deferred::{DeferredContext, Node, NodeType, PrecompileError, Tag, WorkItem},
+    deferred::{DeferredContext, Node, NodeType, PrecompileError, Tag, WorkClass, WorkItem},
 };
 
 /// Installed set of precompiles for deferred-node validation and evaluation.
@@ -37,6 +37,19 @@ impl PrecompileRegistry {
     /// Returns whether this registry contains no installed precompiles.
     pub fn is_empty(&self) -> bool {
         self.precompiles.is_empty()
+    }
+
+    /// Returns the work classes used by installed precompiles.
+    pub fn work_classes(&self) -> Vec<WorkClass> {
+        let mut classes = Vec::new();
+        for precompile in self.precompiles.values() {
+            for &class in precompile.work_classes() {
+                if !classes.contains(&class) {
+                    classes.push(class);
+                }
+            }
+        }
+        classes
     }
 
     /// Adds a precompile to the registry and returns `self` for chaining.
@@ -172,6 +185,8 @@ mod tests {
         deferred::{DeferredState, Payload, WorkClass, WorkItem},
     };
 
+    const FIXTURE_WORK: WorkClass = WorkClass::new("fixture");
+
     /// Minimal honest precompile fixture for registry-routing tests.
     ///
     /// Names control ids, so duplicate names exercise duplicate-id handling. Non-zero arguments
@@ -197,6 +212,9 @@ mod tests {
         fn id(&self) -> Felt {
             precompile_id(self.name())
         }
+        fn work_classes(&self) -> &'static [WorkClass] {
+            &[FIXTURE_WORK]
+        }
         fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
             if args != [ZERO; 3] {
                 return None;
@@ -204,7 +222,7 @@ mod tests {
             Some(NodeType::Data)
         }
         fn work(&self, _args: [Felt; 3], _payload: &Payload) -> Result<WorkItem, PrecompileError> {
-            Ok(WorkItem::new(WorkClass::new("fixture"), 1))
+            Ok(WorkItem::new(FIXTURE_WORK, 1))
         }
         fn evaluate(
             &self,
@@ -229,6 +247,9 @@ mod tests {
         }
         fn id(&self) -> Felt {
             precompile_id(self.name())
+        }
+        fn work_classes(&self) -> &'static [WorkClass] {
+            &[]
         }
         fn decode(&self, _args: [Felt; 3]) -> Option<NodeType> {
             Some(NodeType::True)

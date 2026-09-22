@@ -14,7 +14,8 @@ use alloc::{
 
 use super::{
     DataChunk, DeferredState, Digest, MAX_DEFERRED_ELEMENTS, Node, NodeType, PrecompileError,
-    PrecompileLimits, PrecompileRegistry, PrecompileWork, TRUE_DIGEST, Tag, node::hash_payload,
+    PrecompileLimitError, PrecompileLimits, PrecompileRegistry, PrecompileWork, TRUE_DIGEST, Tag,
+    node::hash_payload,
 };
 use crate::{
     Felt, ZERO,
@@ -166,6 +167,11 @@ impl PrecompileWitness {
         registry: Arc<PrecompileRegistry>,
         limits: &PrecompileLimits,
     ) -> Result<PreparedWitness, PreparationError> {
+        for class in registry.work_classes() {
+            if limits.class(class).is_none() {
+                return Err(PrecompileLimitError::MissingClass { class }.into());
+            }
+        }
         if self.entries.is_empty() {
             return Err(IntegrityError::InvalidStructure.into());
         }
@@ -365,7 +371,7 @@ pub enum PreparationError {
     #[error(transparent)]
     Precompile(#[from] PrecompileError),
     #[error(transparent)]
-    Limit(#[from] super::PrecompileLimitError),
+    Limit(#[from] PrecompileLimitError),
 }
 
 // INTEGRITY ERROR
