@@ -5,7 +5,7 @@ use miden_air::{CoreCols, PublicInputs};
 use miden_core::{
     Felt,
     program::{ExecutionClaim, StackOutputs},
-    proof::{ExecutionProof, HashFunction, StarkProof, VmProof},
+    proof::{ExecutionProof, HashFunction, PrecompileStatus, StarkProof, VmProof},
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_processor::trace::VmTrace;
@@ -151,13 +151,13 @@ impl ReproTrace {
         proof_bytes: Vec<u8>,
         outputs: StackOutputs,
     ) -> Result<VerificationOutcome, VerificationError> {
-        let proof = ExecutionProof::Complete {
-            vm: VmProof {
+        let proof = ExecutionProof::new(
+            VmProof {
                 proof: StarkProof::new(proof_bytes, HashFunction::Poseidon2),
                 precompile_root: self.precompile_root,
             },
-            precompile: None,
-        };
+            PrecompileStatus::Empty,
+        );
         let claim =
             ExecutionClaim::from_program_info(self.program_info.clone(), self.init_stack, outputs);
         Verifier::new().verify(&claim, &proof)

@@ -18,6 +18,7 @@
   matching `SPAN`, `RESPAN`, or `END` operation. This changes Miden VM proofs and AIR relation
   digests. The VM recursive-verifier MAST root also changes, so consumers that pin it must update
   ([#3883](https://github.com/0xMiden/miden-vm/pull/3883)).
+- [BREAKING] Closed decoder AIR soundness gaps in caller-frame restoration, DYNCALL stack transitions, span and `REPEAT` adjacency, reserved opcode slots, and repeated-loop body authentication. This changes the block-stack and `END` APIs, AIR relation digest, and ACE registry roots, invalidating older proofs.
 - Fixed Falcon512 `ntru_gen` so oversized NTRU solution coefficients are rejected against the encoding bound before `i16` narrowing, instead of panicking in `try_into` ([#3857](https://github.com/0xMiden/miden-vm/pull/3857)).
 - Fixed `IntValue::Felt` Display so it prints canonical hex without byte-swapping ([#3808](https://github.com/0xMiden/miden-vm/pull/3808)).
 - [BREAKING] Changed `ProverInstance::new()` to take ownership of `ProverStatement`. `ProverInstance::prove()` now consumes the instance and returns its verifier statement with the proof. The prover can now release the main traces after their final use. This reduced measured peak memory by about 7 percent ([#3833](https://github.com/0xMiden/miden-vm/pull/3833)).
@@ -202,11 +203,6 @@
 - Added u32 checks before sorted array pointers from advice are used in arithmetic or memory access, and corrected the `sys::drop_stack_top` MASM signature ([#3711](https://github.com/0xMiden/miden-vm/pull/3711)).
 - [BREAKING] Fixed stack overflows when parsing deeply nested MASM control flow by rejecting nesting beyond 256 levels ([#3674](https://github.com/0xMiden/miden-vm/pull/3674)).
 - [BREAKING] Constrained the stack overflow pointer on every VM transition, preventing forged traces from consuming overflow rows out of order ([#3684](https://github.com/0xMiden/miden-vm/pull/3684)).
-- [BREAKING] Authenticated block-stack caller frames and completed DYNCALL's stack constraints. This changes the block-stack and `END` APIs, AIR relation digest, and ACE registry root, invalidating older proofs.
-- [BREAKING] Enforced decoder span-entry, span-exit, and `REPEAT` predecessor adjacency. This changes the AIR relation digest and ACE registry root, invalidating older proofs.
-- [BREAKING] Rejected unused degree-5 opcode 95 and completed the stack route for unused opcode 6. This changes the AIR relation digest and ACE registry root, invalidating older proofs.
-- [BREAKING] Constrained `REPEAT` to re-enter the same loop parent address. This changes the AIR relation digest and ACE registry root, invalidating older proofs.
-- [BREAKING] Authenticated repeated loop-body digests against the committing `LOOP` row, so `REPEAT` no longer adds a block-hash entry for the body digest it claims. This changes the AIR relation digest and ACE registry root, invalidating older proofs.
 - [BREAKING] Fixed `U32DIV` AIR constraints by directly range-checking the quotient and remainder ([#3604](https://github.com/0xMiden/miden-vm/pull/3604)).
 - [BREAKING] Constrained `MPVERIFY` and `MRUPDATE` depths to `[1, 64]` and canonicalized reconstructed Merkle-path indices, preventing depth-64 paths from authenticating different leaves at the same field-valued index. Execution rejects out-of-range depths with the new public `OperationError::MerkleDepthOutOfRange` variant ([#3671](https://github.com/0xMiden/miden-vm/pull/3671)).
 - Fixed `crypto_stream` rejecting double-word memory ranges ending exactly at `2^32`, even though

@@ -159,10 +159,9 @@ fn relabelled_dyncall_end_is_rejected() {
 }
 
 /// Control: relabel the END and carry the context forward, but leave `h4 = 16`. The DYNCALL
-/// addition remains a caller-frame entry, so the continuation removal matches no addition. The
-/// continuation preservation rules also reject carrying the callee context forward. This is a
-/// combined regression control; the entry-kind tag is isolated in
-/// `block_stack_entry_kind_repro`.
+/// addition remains a caller-frame entry, so the continuation removal matches no addition.
+/// Carrying the callee context forward satisfies continuation preservation; rejection comes
+/// from the block-stack relation. The entry-kind tag is isolated in `block_stack_entry_kind_repro`.
 #[test]
 fn relabel_without_degenerating_the_addition_is_rejected() {
     let f = build_fixture();
@@ -176,7 +175,7 @@ fn relabel_without_degenerating_the_addition_is_rejected() {
     assert!(
         result.is_err(),
         "with h4 = 16, relabelling the caller-frame END and carrying the callee context forward \
-         must be rejected by the entry-kind tag and continuation preservation: {result:?}"
+         must be rejected by the block-stack relation: {result:?}"
     );
 }
 

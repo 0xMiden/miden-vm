@@ -442,8 +442,8 @@ const _: () = assert!(BLOCK_STACK_ENTRY_KIND_OFFSET < MIDEN_MAX_MESSAGE_WIDTH);
 /// `CallerFrame` additionally records the caller state that CALL/SYSCALL/DYNCALL save and their
 /// matching END restores. Its semantic payload is
 /// `[caller_ctx, caller_stack_depth, caller_overflow_addr, caller_fn_hash[4]]`. It has no loop
-/// marker: caller frames and LOOP continuations are disjoint entry kinds. The encoder writes a
-/// constant zero into the shared layout's former `is_loop` slot.
+/// marker: caller frames and LOOP continuations are disjoint entry kinds. The encoder writes zero
+/// to the shared layout's `is_loop` slot.
 ///
 /// The variants are a tagged union within one bus: a dedicated payload slot authenticates which
 /// END behavior the corresponding insertion authorized. They must not be modeled as an untagged,

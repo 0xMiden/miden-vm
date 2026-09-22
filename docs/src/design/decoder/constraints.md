@@ -426,55 +426,52 @@ the block-stack contributions must be zero, proving multiset equality between in
 tagged messages. The compiled constraint has degree $9$.
 
 ## Block hash table constraints
-As described [previously](./index.md#block-hash-table), when the VM starts executing a new program block, it adds hashes of the block's children to the block hash table. And when the VM finishes executing a block, it removes the block's hash from the block hash table. This means that the block hash table gets updated when we execute the `JOIN`, `SPLIT`, `LOOP`, `DYN`, and `END` operations (executing `SPAN` operation does not affect the block hash table because a *basic* block has no children). `REPEAT` re-enters a loop body that the `LOOP` operation already accounted for, so it does not add an entry of its own.
+As described [previously](./index.md#block-hash-table), when the VM starts executing a new program block, it adds hashes of the block's children to the block hash table. And when the VM finishes executing a block, it removes the block's hash from the block hash table. This means that the block hash table gets updated when we execute the `JOIN`, `SPLIT`, `LOOP`, `DYN`, `DYNCALL`, `CALL`, `SYSCALL`, and `END` operations (executing `SPAN` operation does not affect the block hash table because a *basic* block has no children). `REPEAT` re-enters a loop body that the `LOOP` operation already accounted for, so it does not add an entry of its own.
 
-Adding and removing entries to/from the block hash table is accomplished as follows:
-* To add an entry, we multiply the value in column $p_2$ by a value representing a tuple `(prnt_id, block_hash, is_first_child, is_loop_body)`. A constraint to enforce this would look as $p_2' = p_2 \cdot v$, where $v$ is the value representing the row to be added.
-* To remove an entry, we divide the value in column $p_2$ by a value representing a tuple `(prnt_id, block_hash, is_first_child, is_loop_body)`. A constraint to enforce this would look as $p_2' \cdot u = p_2$, where $u$ is the value representing the row to be removed.
-
-To simplify constraint descriptions, we define a generic message for a block hash entry:
+The block-hash relation is part of a LogUp lookup column. Each insertion contributes $f/d$ and
+each removal contributes $-f/d$, where $f$ is the operation flag and $d$ encodes the entry. Define
+the denominator for one block-hash entry as:
 
 $$
-m(parent, h_0..h_3, is\_first, is\_loop\_body) =
-\alpha_0 + \alpha_1 \cdot parent + \sum_{i=0}^3(\alpha_{i+2} \cdot h_i)
-+ \alpha_6 \cdot is\_first + \alpha_7 \cdot is\_loop\_body
+d(parent, h_0..h_3, is\_first, is\_loop\_body) =
+\alpha_{block\_hash} + \sum_{i=0}^3 \beta^i h_i
++ \beta^4 parent + \beta^5 is\_first + \beta^6 is\_loop\_body.
 $$
 
 Using this, we define the left and right child messages for a `JOIN` as:
 
 $$
-ch_1 = m(a', h_0..h_3, 1, 0) \qquad
-ch_2 = m(a', h_4..h_7, 0, 0)
+d_{left} = d(a', h_0..h_3, 1, 0) \qquad
+d_{right} = d(a', h_4..h_7, 0, 0)
 $$
 
 Graphically, this looks like so:
 
 ![air_decoder_left_right_child](../../img/design/decoder/constraints/air_decoder_left_right_child.png)
 
-Using the above variables, we define row values to be added to and removed from the block hash table as follows.
-
 When `JOIN` operation is executed, hashes of both child nodes are added to the block hash table:
 
 $$
-v_{join} = f_{join} \cdot ch_1 \cdot ch_2  \text{ | degree} = 7
+L_{join} = f_{join}\left(\frac{1}{d_{left}} + \frac{1}{d_{right}}\right).
 $$
 
 When `SPLIT` operation is executed and the top of the stack is $1$, hash of the *true* branch is added to the block hash table; when the top of the stack is $0$, hash of the *false* branch is added:
 
 $$
-v_{split} = f_{split} \cdot m\left(
+L_{split} = \frac{f_{split}}{d\left(
 a',\; s_0 h_0 + (1-s_0)h_4,\ldots,s_0 h_3 + (1-s_0)h_7,\; 0,\; 0
-\right) \text{ | degree} = 7
+\right)}.
 $$
 
-When `LOOP` operation is executed, the hash of the loop body is unconditionally added to the
-block hash table (with `is_loop_body = 1`), since the body is always entered for the first
-iteration. The entry is added with multiplicity $gc$, the value of the `group_count` column on
-the `LOOP` row, which the prover sets to the number of body `END` rows that return to this loop
-instance. A single `LOOP` row therefore accounts for every iteration of that loop:
+When `LOOP` operation is executed, its row contributes the loop-body hash with
+`is_loop_body = 1` and multiplicity $gc$, the value of the `group_count` column. The lookup
+balance equates $gc$ with the number of body `END` rows that return to this loop instance. For an
+honestly executed do-while loop this count is at least one; the LOOP-to-END adjacency constraint
+prevents a malicious trace from skipping the body with a zero count. A single `LOOP` row therefore
+accounts for every iteration:
 
 $$
-v_{loop} = gc \cdot f_{loop} \cdot m(a', h_0..h_3, 0, 1) \text{ | degree} = 6
+L_{loop} = \frac{gc \cdot f_{loop}}{d(a', h_0..h_3, 0, 1)}.
 $$
 
 `REPEAT` does not add anything to the block hash table. Were it to add the digest carried on its
@@ -490,7 +487,8 @@ added to the block hash table. In all cases, this child is found in the first ha
 of the decoder hasher state.
 
 $$
-v_{allcalls} = (f_{dyn} + f_{dyncall} + f_{call} + f_{syscall}) \cdot m(a', h_0..h_3, 0, 0)  \text{ | degree} = 6
+L_{allcalls} = \frac{f_{dyn} + f_{dyncall} + f_{call} + f_{syscall}}
+{d(a', h_0..h_3, 0, 0)}.
 $$
 
 When `END` operation is executed, the hash of the completed block is removed from the block
@@ -501,23 +499,14 @@ constraint forbids `END → RESPAN`, so excluding it would let an adversarial tr
 false-positive `is_first_child = 1`. The `is_loop_body` flag is read from $h_4$.
 
 $$
-u_{end} = f_{end} \cdot m(a', h_0..h_3, 1 - (f_{end}' + f_{repeat}' + f_{respan}' + f_{halt}'), h_4) \text{ | } \text{degree} = 8
+L_{end} = -\frac{f_{end}}
+{d(a', h_0..h_3, 1 - (f_{end}' + f_{repeat}' + f_{respan}' + f_{halt}'), h_4)}.
 $$
 
-Using the above definitions, we can describe the constraint for updating the block hash table as follows:
-
-> $$
-> p_2' \cdot (u_{end} + 1 - f_{end}) = 
-> p_2 \cdot (v_{join} + v_{split} + v_{loop} + v_{allcalls} + 1 - (f_{join} + f_{split} + f_{loop} + f_{dyn} + f_{dyncall} + f_{call} + f_{syscall}))
-> $$
-
-We need to add $1$ and subtract the sum of the relevant operation flags from each side to ensure that when none of the flags is set to $1$, the above constraint reduces to $p_2' = p_2$.
-
-The degree of this constraint is $9$.
-
-In addition to the above transition constraint, the last value in the column is $1$
-(i.e., the block hash table is empty). The initial program-hash boundary constraint
-is planned but not enforced yet.
+The lookup builder combines these terms with the op-group interactions that share the column and
+cross-multiplies the active denominators. The resulting transition constraint has degree $9$. A
+boundary contribution inserts $(parent=0, child\_hash=program\_hash, 0, 0)$, which balances the
+root block's `END` removal and binds the relation to the claimed program hash.
 
 ## Basic block
 Basic block constraints ensure proper decoding of basic blocks. In addition to the block stack table constraints and block hash table constraints described previously, decoding of basic blocks requires constraints described below.

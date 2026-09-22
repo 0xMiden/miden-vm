@@ -7,7 +7,7 @@
 //!
 //! - `clk`: VM execution clock (clk[0] = 0, clk' = clk + 1)
 //! - `ctx`: Execution context ID (determines memory context isolation)
-//! - `fn_hash[0..3]`: Current function digest (identifies executing procedure)
+//! - `fn_hash` (four elements): Current function digest (identifies executing procedure)
 //!
 //! ## Context Transitions
 //!
@@ -23,7 +23,7 @@
 //!
 //! | Operation                       | fn_hash'           | Description                 |
 //! |---------------------------------|--------------------|-----------------------------|
-//! | CALL or DYNCALL                 | decoder_h[0..3]    | Load new procedure hash     |
+//! | CALL or DYNCALL                 | decoder h0..h3     | Load new procedure hash     |
 //! | Caller-frame END                | (from block stack) | Restore previous hash       |
 //! | Continuation END                | fn_hash            | Unchanged                   |
 //! | Other ops (incl. DYN, SYSCALL)  | fn_hash            | Unchanged                   |
@@ -268,23 +268,8 @@ mod tests {
         );
     }
 
-    // GATE-LEVEL TESTS FOR THE CALLER-FRAME RESTORATION SELECTOR
-    // --------------------------------------------------------------------------------------
-    //
-    // `ctx` and `fn_hash` are preserved on every transition except an END that closes a
-    // CALL/DYNCALL/SYSCALL block, where the block-stack relation restores them instead. These
-    // two tests pin both halves of that mask directly, without going through a full proof:
-    // a continuation END must preserve, a caller-frame END must permit restoration.
-    //
-    // The mask previously keyed on the bare END flag, which made it vacuous at *every* END and
-    // left both columns free at ordinary ones.
-
-    /// Evaluates the system constraints on a mid-trace transition.
-    ///
-    /// Uses the shared harness rather than the local one above, because that one reports
-    /// `is_first_row = 1` — which fires the boundary constraints demanding `ctx = 0` and a zero
-    /// `fn_hash`, drowning out whatever the END logic does. These tests are about an interior
-    /// transition, so they need `first_row = 0, transition = 1`.
+    /// Evaluates the system constraints on an interior transition, excluding first-row boundary
+    /// constraints from these caller-frame restoration tests.
     fn eval_system(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {
         use crate::constraints::stack::test_utils::ConstraintEvalBuilder as SharedBuilder;
         let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);

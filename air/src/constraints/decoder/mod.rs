@@ -290,8 +290,7 @@ pub fn enforce_main<AB>(
     // block-hash relation includes it in the END key. A value of one can match only a LoopBody
     // entry emitted by the unique LOOP row that owns `addr_next`; a value of zero can match only a
     // non-loop child entry. The block-stack relation separately authenticates the END's
-    // child-to-parent edge. Keeping this provenance argument next to the apparent free lane avoids
-    // mistaking booleanity alone for the required semantic binding.
+    // child-to-parent edge.
 
     // END followed by REPEAT: carry the block hash (h0..h3) and the is_loop_body flag
     // (h4) into the next row so the loop body can be re-entered.
@@ -301,8 +300,7 @@ pub fn enforce_main<AB>(
         // - LOOP may not jump directly to END and skip its do-while body with multiplicity zero.
         //
         // The op bits and `e0`/`e1` are constrained, so every op flag is boolean and both terms
-        // are boolean products. Their sum therefore vanishes only when both vanish. That is what
-        // rules out cancellation, rather than REPEAT and END being unable to share the next row.
+        // are boolean products. Over the Goldilocks field, their sum vanishes only when both do.
         let invalid_repeat_predecessor = op_flags.repeat_next() * op_flags.end().not();
         let skipped_loop_body = op_flags.loop_op() * op_flags.end_next();
         builder
