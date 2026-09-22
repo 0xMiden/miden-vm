@@ -13,3 +13,15 @@ miden-event-handler-sdk = { path = "../../../../event-handler-sdk", features = [
     "bump-allocator",
     "panic-handler",
 ] }
+
+# The guest crate is a standalone workspace: it compiles only for its real target (wasm32), so it
+# needs no host-build cfg-gating, and it is not part of the main workspace's linting or formatting.
+#
+# It is also a workspace *root* on purpose, with a decoy as the only default member: a guest crate
+# a developer writes may well be one, and then a build that selects no package builds the default
+# members and skips the guest library entirely. The plugin therefore names the package explicitly,
+# and every end-to-end test exercises that here. Add new fixture crates as members.
+[workspace]
+resolver = "3"
+members = ["decoy"]
+default-members = ["decoy"]
