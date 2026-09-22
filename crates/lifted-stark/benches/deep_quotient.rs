@@ -53,6 +53,7 @@ fn bench_deep_quotient(c: &mut Criterion) {
         // Precompute coset points (LDE domain matches max matrix height)
         let domain = canonical_domain::<Felt>(log_lde_height, 0);
         let coset_points = domain.lde_coset().bit_reversed_points();
+        let interpolation_points = &coset_points[..coset_points.len() >> LOG_BLOWUP];
 
         // Get matrix references from trees (stored as BitReversedMatrixView after build_tree)
         let matrices_refs: Vec<Vec<_>> =
@@ -64,7 +65,7 @@ fn bench_deep_quotient(c: &mut Criterion) {
             b.iter(|| {
                 let z: QuadFelt = rng.sample(StandardUniform);
                 let quotient =
-                    PointQuotients::<Felt, QuadFelt, 1>::new(FieldArray([z]), &coset_points);
+                    PointQuotients::<Felt, QuadFelt, 1>::new(FieldArray([z]), interpolation_points);
                 black_box(quotient.batch_eval_lifted(&matrices_refs, &coset_points, LOG_BLOWUP))
             });
         });
@@ -75,8 +76,10 @@ fn bench_deep_quotient(c: &mut Criterion) {
             b.iter(|| {
                 let z1: QuadFelt = rng.sample(StandardUniform);
                 let z2: QuadFelt = rng.sample(StandardUniform);
-                let quotient =
-                    PointQuotients::<Felt, QuadFelt, 2>::new(FieldArray([z1, z2]), &coset_points);
+                let quotient = PointQuotients::<Felt, QuadFelt, 2>::new(
+                    FieldArray([z1, z2]),
+                    interpolation_points,
+                );
                 black_box(quotient.batch_eval_lifted(&matrices_refs, &coset_points, LOG_BLOWUP))
             });
         });

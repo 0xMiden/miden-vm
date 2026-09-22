@@ -25,8 +25,8 @@
 //!
 //! # Point quotients
 //! We precompute `qᵢ(zⱼ) = 1/(zⱼ − xᵢ)` for all domain points `xᵢ` and all
-//! opening points `zⱼ` using batch inversion (Montgomery's trick). This single
-//! table is reused for:
+//! opening points `zⱼ` using batch inversion (Montgomery's trick). The prover
+//! builds a trace-sized table for interpolation and bounded blocks for DEEP assembly:
 //! - barycentric weights: `wᵢ(zⱼ) = zⱼ · (qᵢ(zⱼ) − 1/zⱼ)`
 //! - DEEP quotients: `(f(zⱼ) − f(X)) / (zⱼ − X)`
 //!
@@ -135,7 +135,7 @@ impl<T: Send + Sync + Clone, M: Matrix<T>> Matrix<T> for RowPrefix<'_, M> {
 /// Precomputed `1/(zⱼ − xᵢ)` for N evaluation points.
 ///
 /// This enables batched `O(d)` barycentric evaluation and DEEP quotient construction
-/// without repeating inversions.
+/// using batch inversion.
 pub struct PointQuotients<F: TwoAdicField, EF: ExtensionField<F>, const N: usize> {
     /// The evaluation points `[z₀, z₁, ..., z_{N-1}]`.
     points: FieldArray<EF, N>,
@@ -159,7 +159,7 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, const N: usize> PointQuotients<F, E
         // Domain points per inversion block.
         const BLOCK: usize = 1024;
 
-        let _span = info_span!("PointQuotients::new", n = coset_points.len()).entered();
+        let _span = debug_span!("PointQuotients::new", n = coset_points.len()).entered();
         let n_points = coset_points.len();
 
         // Invert the differences [z₀ − x, z₁ − x, …] one block of domain points at a time, so each
@@ -575,6 +575,15 @@ mod tests {
         // Evaluate at both points using PointQuotients<2>
         let pq = PointQuotients::<Felt, QuadFelt, 2>::new(FieldArray([z1, z2]), &coset_points_br);
         let result = pq.batch_eval_lifted(&matrices_groups, &coset_points_br, log_blowup);
+        // Interpolation only needs the trace-sized prefix of the inverse table,
+        // including when smaller matrices are lifted into the same LDE domain.
+        let prefix = PointQuotients::<Felt, QuadFelt, 2>::new(
+            FieldArray([z1, z2]),
+            &coset_points_br[..n >> log_blowup],
+        );
+        let prefix_result =
+            prefix.batch_eval_lifted(&matrices_groups, &coset_points_br, log_blowup);
+        assert_eq!(prefix_result.as_slice(), result.as_slice());
         let rows: Vec<&[FieldArray<QuadFelt, 2>]> = result.iter_rows().collect();
         assert_eq!(rows.len(), 2, "expected 2 matrix rows");
 

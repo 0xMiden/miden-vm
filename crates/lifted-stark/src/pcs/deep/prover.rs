@@ -84,14 +84,23 @@ impl<EF> DeepPoly<EF> {
         let matrices_groups: Vec<Vec<&M>> =
             trace_trees.iter().map(|tree| tree.leaves().iter().collect()).collect();
 
-        let quotient = PointQuotients::new(FieldArray::from(eval_points), &coset_points);
-        let batched_evals = info_span!("evaluate at OOD points")
-            .in_scope(|| quotient.batch_eval_lifted(&matrices_groups, &coset_points, log_blowup));
-        // DEEP assembly reads only the point quotients, not the domain points themselves.
-        drop(coset_points);
+        let batched_evals = info_span!("evaluate at OOD points").in_scope(|| {
+            // Interpolation reads only the trace-sized prefix of the LDE domain.
+            // Release these inverses before assembling the DEEP quotient in blocks.
+            let trace_height = lde_height >> log_blowup;
+            let quotient =
+                PointQuotients::new(FieldArray::from(eval_points), &coset_points[..trace_height]);
+            quotient.batch_eval_lifted(&matrices_groups, &coset_points, log_blowup)
+        });
 
-        let (deep_poly, _evals) =
-            Self::from_evals::<L, M, N, Ch>(params, trace_trees, batched_evals, &quotient, channel);
+        let (deep_poly, _evals) = Self::from_evals::<L, M, N, Ch>(
+            params,
+            trace_trees,
+            batched_evals,
+            eval_points,
+            &coset_points,
+            channel,
+        );
         deep_poly
     }
 
@@ -103,7 +112,8 @@ impl<EF> DeepPoly<EF> {
     /// - `batched_evals`: One row per matrix, each row holding `FieldArray<EF, N>` per column.
     ///   Widths match the unpadded matrices; alignment padding is applied lazily during channel
     ///   writes and Horner reduction.
-    /// - `quotient`: Precomputed `1/(zⱼ − xᵢ)` for all opening points zⱼ and domain points xᵢ.
+    /// - `eval_points`: The N opening points zⱼ.
+    /// - `coset_points`: LDE domain points xᵢ in bit-reversed order.
     ///
     /// Returns the constructed `DeepPoly` and the (unaligned) `batched_evals` for test inspection.
     ///
@@ -118,7 +128,8 @@ impl<EF> DeepPoly<EF> {
         params: DeepParams,
         trace_trees: &[&L::Tree<M>],
         batched_evals: RowList<FieldArray<EF, N>>,
-        quotient: &PointQuotients<L::F, EF, N>,
+        eval_points: [EF; N],
+        coset_points: &[L::F],
         channel: &mut Ch,
     ) -> (Self, RowList<FieldArray<EF, N>>)
     where
@@ -169,8 +180,7 @@ impl<EF> DeepPoly<EF> {
             batched_evals.iter_aligned(alignment).rev().horner(challenge_columns);
 
         let w = <L::F as Field>::Packing::WIDTH;
-        let point_quotient = &quotient.point_quotient;
-        let n = point_quotient.len();
+        let n = coset_points.len();
 
         let group_sizes: Vec<usize> = matrices_groups.iter().map(Vec::len).collect();
         let widths: Vec<usize> =
@@ -263,50 +273,48 @@ impl<EF> DeepPoly<EF> {
             let point_coeffs: [EF; N] =
                 core::array::from_fn(|j| challenge_points.exp_u64(j as u64));
 
-            // Transform neg_f_reduced in-place into deep_evals.
-            // Q(x) = Σⱼ βʲ·qⱼ(x)·(f_reduced(zⱼ) + neg_f_reduced(x))
-            if w == 1 || n < w {
-                neg_f_reduced
-                    .par_iter_mut()
-                    .zip(point_quotient.par_iter())
-                    .for_each(|(neg, q)| {
-                        let mut result = q[0] * (f_reduced_at_points[0] + *neg);
-                        for j in 1..N {
-                            result += point_coeffs[j] * q[j] * (f_reduced_at_points[j] + *neg);
+            // Invert and consume a bounded block of denominators at a time. Keeping
+            // only base-field domain points avoids a full-domain extension-field table.
+            let f_reduced_packed: [EF::ExtensionPacking; N] =
+                f_reduced_at_points.0.map(EF::ExtensionPacking::from);
+            let point_coeffs_packed: [EF::ExtensionPacking; N] =
+                point_coeffs.map(EF::ExtensionPacking::from);
+            let block = 1024.max(w);
+            neg_f_reduced
+                .par_chunks_mut(block)
+                .zip(coset_points.par_chunks(block))
+                .for_each(|(neg_block, xs)| {
+                    let quotient = PointQuotients::new(FieldArray::from(eval_points), xs);
+                    let point_quotient = &quotient.point_quotient;
+                    // Q(x) = Σⱼ βʲ·qⱼ(x)·(f_reduced(zⱼ) + neg_f_reduced(x))
+                    if w == 1 || neg_block.len() < w {
+                        for (neg, q) in zip(neg_block, point_quotient) {
+                            let mut result = q[0] * (f_reduced_at_points[0] + *neg);
+                            for j in 1..N {
+                                result += point_coeffs[j] * q[j] * (f_reduced_at_points[j] + *neg);
+                            }
+                            *neg = result;
                         }
-                        *neg = result;
-                    });
-            } else {
-                let f_reduced_packed: [EF::ExtensionPacking; N] =
-                    f_reduced_at_points.0.map(EF::ExtensionPacking::from);
-                let point_coeffs_packed: [EF::ExtensionPacking; N] =
-                    point_coeffs.map(EF::ExtensionPacking::from);
-
-                neg_f_reduced
-                    .par_chunks_exact_mut(w)
-                    .zip(point_quotient.par_chunks_exact(w))
-                    .for_each(|(neg_chunk, q_chunk)| {
-                        let neg_p = EF::ExtensionPacking::from_ext_slice(neg_chunk);
-
-                        // Transpose quotients: q_chunk[lane][point] -> q_packed[point] packs all
-                        // lanes
-                        let q_packed: [EF::ExtensionPacking; N] =
-                            EF::ExtensionPacking::pack_ext_columns(FieldArray::as_raw_slice(
-                                q_chunk,
-                            ));
-
-                        // First point (j=0) has coefficient β⁰ = 1, compute directly
-                        let mut result_p = q_packed[0] * (f_reduced_packed[0] + neg_p);
-
-                        // Remaining points (j>0) multiply by βʲ
-                        for j in 1..N {
-                            result_p += point_coeffs_packed[j]
-                                * q_packed[j]
-                                * (f_reduced_packed[j] + neg_p);
+                    } else {
+                        for (neg_chunk, q_chunk) in
+                            zip(neg_block.chunks_exact_mut(w), point_quotient.chunks_exact(w))
+                        {
+                            let neg_p = EF::ExtensionPacking::from_ext_slice(neg_chunk);
+                            // Transpose quotients: q_chunk[lane][point] -> q_packed[point].
+                            let q_packed: [EF::ExtensionPacking; N] =
+                                EF::ExtensionPacking::pack_ext_columns(FieldArray::as_raw_slice(
+                                    q_chunk,
+                                ));
+                            let mut result_p = q_packed[0] * (f_reduced_packed[0] + neg_p);
+                            for j in 1..N {
+                                result_p += point_coeffs_packed[j]
+                                    * q_packed[j]
+                                    * (f_reduced_packed[j] + neg_p);
+                            }
+                            result_p.to_ext_slice(neg_chunk);
                         }
-                        result_p.to_ext_slice(neg_chunk);
-                    });
-            }
+                    }
+                });
 
             neg_f_reduced // now contains deep_evals
         });

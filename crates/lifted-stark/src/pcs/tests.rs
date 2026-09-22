@@ -193,3 +193,18 @@ fn test_pcs_cases() {
         "should reject high-degree polynomial"
     );
 }
+
+#[test]
+fn pcs_roundtrip_across_deep_inverse_blocks() {
+    let lmcs = test_lmcs();
+    let params = test_params();
+    let log_blowup = params.log_blowup;
+    let shift = LiftedDomain::<Felt>::canonical_lde_shift(10 + log_blowup).unwrap();
+    let rng = &mut SmallRng::seed_from_u64(812);
+    // A 4096-point LDE crosses several inverse blocks. Mixed heights also check
+    // that lifting keeps the quotient and domain-point indices aligned.
+    let short = random_lde_matrix(rng, 8, log_blowup, 2, shift);
+    let tall = random_lde_matrix(rng, 10, log_blowup, 3, shift);
+    let tree = lmcs.build_aligned_tree(vec![short.bit_reverse_rows(), tall.bit_reverse_rows()]);
+    run_pcs_case(&params, &[tree], 813).expect("DEEP inverse blocks preserve PCS verification");
+}
