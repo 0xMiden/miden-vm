@@ -74,6 +74,12 @@ A `REPEAT` operation must be preceded by an `END` operation:
 > f_{repeat}' \cdot (1 - f_{end}) = 0 \text{ | degree} = 8
 > $$
 
+The first row has no predecessor, so it cannot be a `REPEAT` operation:
+
+> $$
+> f_{repeat} = 0 \text{ on the first row}
+> $$
+
 When `RESPAN` operation is executed, we need to make sure that the block ID is incremented by $2$:
 
 > $$

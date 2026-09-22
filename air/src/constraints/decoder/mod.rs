@@ -307,6 +307,9 @@ pub fn enforce_main<AB>(
             .when_transition()
             .assert_zero(invalid_repeat_predecessor + skipped_loop_body);
 
+        // The first row has no END predecessor, so it cannot be REPEAT.
+        builder.when_first_row().assert_zero(op_flags.repeat());
+
         let gate = op_flags.end() * op_flags.repeat_next();
         let builder = &mut builder.when(gate);
         for i in 0..5 {

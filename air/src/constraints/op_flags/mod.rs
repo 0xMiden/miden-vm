@@ -626,7 +626,7 @@ where
         //
         // Control flow operations are the only operations that can execute when outside a basic
         // block (i.e., when in_span = 0). This is enforced by the decoder constraint:
-        //   (1 - in_span) * (1 - control_flow) = 0
+        //   in_span + control_flow = 1
         //
         // Control flow operations (must include ALL of these):
         // - Block starters: SPAN, JOIN, SPLIT, LOOP
@@ -718,7 +718,7 @@ where
     /// - Dynamic execution: DYN, DYNCALL
     /// - Procedure calls: CALL, SYSCALL
     ///
-    /// Used by the decoder constraint: `(1 - in_span) * (1 - control_flow) = 0`
+    /// Used by the decoder constraint: `in_span + control_flow = 1`
     ///
     /// Degree: 3
     #[inline(always)]
