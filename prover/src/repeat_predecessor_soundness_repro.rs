@@ -7,8 +7,7 @@ use miden_core::{
     Felt,
     mast::{BasicBlockNodeBuilder, LoopNodeBuilder, MastForest},
     operations::Operation,
-    program::Program,
-    program::StackOutputs,
+    program::{Program, StackOutputs},
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_processor::{DefaultHost, FastProcessor, StackInputs};
@@ -108,7 +107,7 @@ fn build_forged_repeat_injection_trace() -> ForgedRepeatTrace {
     let two_iteration_trace = execute(&two_iteration_loop, &[0, 1]);
 
     let (mut core, mut chiplets, mut poseidon2) = victim_trace.main_trace().to_air_matrices();
-    let (repeat_core, _, _) = two_iteration_trace.main_trace().to_air_matrices();
+    let (repeat_core, ..) = two_iteration_trace.main_trace().to_air_matrices();
     let (body_core, body_chiplets, body_poseidon2) =
         one_iteration_trace.main_trace().to_air_matrices();
 
@@ -155,7 +154,7 @@ fn build_direct_repeat_without_body_hash_evidence_trace() -> ForgedRepeatTrace {
     let two_iteration_trace = execute(&two_iteration_loop, &[0, 1]);
 
     let (mut core, chiplets, poseidon2) = victim_trace.main_trace().to_air_matrices();
-    let (repeat_core, _, _) = two_iteration_trace.main_trace().to_air_matrices();
+    let (repeat_core, ..) = two_iteration_trace.main_trace().to_air_matrices();
 
     // Keep the illegal in-span -> REPEAT transition, but do not add the matching injected body
     // block or hash-chiplet evidence. This isolates the early-exit half from the free digest half.

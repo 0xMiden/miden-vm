@@ -210,12 +210,8 @@ where
         let u32_add3_madd_group = u32_rc_op.clone() * bits[3][1].clone() * bits[2][1].clone();
         let is_loop = decoder.end_block_flags().is_loop;
         let end_loop = end.clone() * is_loop;
-        let left_shift = prefix_010
-            + u32_add3_madd_group
-            + split.clone()
-            + repeat.clone()
-            + end_loop
-            + dyn_op.clone();
+        let left_shift =
+            prefix_010 + u32_add3_madd_group + split.clone() + repeat + end_loop + dyn_op.clone();
 
         // overflow = (b0 - 16) * h0, degree 2 (uses stack columns, not decoder).
         let b0: E = stack.b0.into();

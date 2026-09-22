@@ -13,8 +13,8 @@
 //!   overflow address in decoder helper columns and uses a dedicated overflow-table interaction.
 //! - the stack-overflow bus branch that would bind `s15'` for DYNCALL is gated on `dyncall() *
 //!   overflow()`, and `overflow() = (b0 - 16) * h0` is 0 exactly when the depth is 16.
-//! - the output boundary binds `s15` to the claimed output, which the forgery changes to match
-//!   the forged trace.
+//! - the output boundary binds `s15` to the claimed output, which the forgery changes to match the
+//!   forged trace.
 //!
 //! So a DYNCALL executed at depth 16 -- the ordinary case, no overflow -- leaves the callee's
 //! bottom stack slot a free variable. The value sits at a live position of the callee's fresh
