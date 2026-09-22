@@ -30,6 +30,12 @@
 //! at most one handler module, and the section attaches to every target the package assembles.
 //! When the table is absent a processor changes nothing.
 //!
+//! The two processors differ in where a `module` path may resolve. Under
+//! [`WasmEventHandlerProcessor`] it must resolve inside the project root, so the assembler embeds
+//! no file from outside the project it assembles; under [`WasmEventHandlerCargoBuildProcessor`] it
+//! may resolve anywhere, because that processor already builds project source, so bounding the
+//! path would add no safety, and a module another build produced out of tree is a normal input.
+//!
 //! # Toolchain
 //!
 //! The `crate` key needs `cargo` and the `wasm32-unknown-unknown` target, and only

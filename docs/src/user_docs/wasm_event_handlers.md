@@ -56,7 +56,7 @@ Use `crate` to build the handlers together with the project. The key needs `carg
 
 The build pins those flags through `RUSTFLAGS`, which keeps the module the same whatever the environment of the caller holds. By cargo precedence `RUSTFLAGS` replaces the `[target.*] rustflags` of the guest crate's own `.cargo/config.toml`, so a guest crate must not depend on flags it sets there; state what the crate needs in the crate itself.
 
-Use `module` to ship a module that another build produced. The build reads the file and does not compile anything.
+Use `module` to ship a module that another build produced. The build reads the file and does not compile anything. Where the path may point depends on the processor: under `WasmEventHandlerProcessor` it must resolve inside the project root, so an absolute path, a `..` escape, or a symlink out of the project stops the build; `WasmEventHandlerCargoBuildProcessor` accepts a module from anywhere (see below).
 
 The manifest of the section comes from the module's own `miden:event-manifest` records, so a module whose functions carry no `#[miden_event_handler("...")]` attribute stops the build.
 
@@ -64,8 +64,8 @@ The build also validates the module: it applies the same load rules a host appli
 
 The project assembler holds no knowledge of event handlers. The `miden-wasm-event-handlers-project` crate supplies it as a package post-processor, which the toolchain registers. The crate has two processors, and the one a host registers decides whether assembly may run native code:
 
-- `WasmEventHandlerProcessor` serves the `module` key only. It reads a prebuilt module, and a manifest that declares `crate` fails the build with an error that names the other processor, so registering it never executes code from the assembled project. The module itself stays untrusted but sandboxed input: it is validated at build time and runs under wasmi.
-- `WasmEventHandlerCargoBuildProcessor` serves both keys. Registering it is equivalent to running `cargo build` on the source the project manifest references, with the permissions of the assembler process: build scripts and procedural macros run native code. Register it only when the assembled source is trusted — a local compiler building the developer's own project. A host that assembles source supplied by other users must register `WasmEventHandlerProcessor` instead, which refuses guest-crate builds.
+- `WasmEventHandlerProcessor` serves the `module` key only. It reads a prebuilt module, and a manifest that declares `crate` fails the build with an error that names the other processor, so registering it never executes code from the assembled project. The `module` path must also resolve inside the project root, so a hostile manifest cannot make the assembler embed a file from elsewhere on the host into the package it produces. The module itself stays untrusted but sandboxed input: it is validated at build time and runs under wasmi.
+- `WasmEventHandlerCargoBuildProcessor` serves both keys. Registering it is equivalent to running `cargo build` on the source the project manifest references, with the permissions of the assembler process: build scripts and procedural macros run native code. Register it only when the assembled source is trusted — a local compiler building the developer's own project. A host that assembles source supplied by other users must register `WasmEventHandlerProcessor` instead, which refuses guest-crate builds. This processor puts no bound on the `module` path: it already builds project source, so bounding the path would add no safety, and an out-of-tree prebuilt module is a legitimate workflow.
 
 A local compiler builds guest crates, so it registers the cargo-building one:
 

@@ -11,12 +11,16 @@ crate has two, and the one a host registers decides whether assembly may run nat
 
 - `WasmEventHandlerProcessor` serves the `module` key only. It reads a prebuilt module, and a
   manifest that declares `crate` fails the build, so registering it never executes code from the
-  assembled project.
+  assembled project. The `module` path must resolve inside the project root, so the assembler
+  embeds no file from outside the project it assembles.
 - `WasmEventHandlerCargoBuildProcessor` serves both keys. Registering it is equivalent to running
   `cargo build` on the source the project manifest references, with the permissions of the
   assembler process: build scripts and procedural macros run native code. Register it only when the
   assembled source is trusted — a local compiler building the developer's own project. A host that
-  assembles source supplied by other users registers `WasmEventHandlerProcessor` instead.
+  assembles source supplied by other users registers `WasmEventHandlerProcessor` instead. This
+  processor does not restrict where the `module` path resolves: it already builds project source,
+  so bounding the path would add no safety, and an out-of-tree prebuilt module is a legitimate
+  input.
 
 ```rust,ignore
 use miden_wasm_event_handlers_project::WasmEventHandlerCargoBuildProcessor;
