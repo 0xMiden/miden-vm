@@ -12,10 +12,14 @@ pub use miden_air::security::{
     AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
     SecurityTerm,
 };
-use miden_air::security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT};
+use miden_air::security::{
+    CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT, EIDOS_CHALLENGE_SAMPLE_BITS,
+    security_report_with_hash,
+};
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, QuadFelt},
+    proof::HashFunction,
 };
 use miden_crypto::stark::pcs::PcsParams;
 use miden_lifted_air::{BaseAir, ConstraintCounts, ConstraintDegrees, LiftedAir};
@@ -197,27 +201,27 @@ pub const LOOKUP_POW_BITS: u32 = 0;
 /// constant must equal the derived count.
 pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 8;
 
-/// The configured challenge-field bound less the lookup round's coefficient, in fixed point.
-pub const LOOKUP_BASE: u64 = CHALLENGE_FIELD_BITS - LOOKUP_COEFFICIENT;
+/// The Eidos challenge-support bound less the lookup round's coefficient, in fixed point.
+pub const LOOKUP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - LOOKUP_COEFFICIENT;
 
-/// The configured challenge-field bound less the constraint-composition round's coefficient, in
+/// The Eidos challenge-support bound less the constraint-composition round's coefficient, in
 /// fixed point.
-pub const COMPOSITION_TERM: u64 = CHALLENGE_FIELD_BITS - COMPOSITION_COEFFICIENT;
+pub const COMPOSITION_TERM: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - COMPOSITION_COEFFICIENT;
 
-/// The configured challenge-field bound less the out-of-domain round's coefficient, in fixed
+/// The Eidos challenge-support bound less the out-of-domain round's coefficient, in fixed
 /// point.
-pub const OOD_BASE: u64 = CHALLENGE_FIELD_BITS - OOD_COEFFICIENT;
+pub const OOD_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - OOD_COEFFICIENT;
 
-/// The configured challenge-field bound less the DEEP round's coefficient, in fixed point.
-pub const DEEP_BASE: u64 = CHALLENGE_FIELD_BITS - DEEP_COEFFICIENT;
+/// The Eidos challenge-support bound less the DEEP round's coefficient, in fixed point.
+pub const DEEP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - DEEP_COEFFICIENT;
 
-/// The configured challenge-field bound less the FRI folding round's coefficient and fixed
+/// The Eidos challenge-support bound less the FRI folding round's coefficient and fixed
 /// blowup, in fixed point.
 ///
 /// The common MASM estimator uses the whole-bit floor of this value when proving that FRI folding
 /// cannot determine the result. Its `FRI_FOLDING_BASE_BITS` constant must equal that floor.
 pub const FOLDING_BASE: u64 =
-    CHALLENGE_FIELD_BITS - FOLDING_COEFFICIENT - fixed::from_bits(LOG_BLOWUP as u32);
+    EIDOS_CHALLENGE_SAMPLE_BITS - FOLDING_COEFFICIENT - fixed::from_bits(LOG_BLOWUP as u32);
 
 /// `log2(e)`, rounded down, in Q16 fixed point.
 pub const LOG2_E: u64 = fixed::LOG2_E;
@@ -314,12 +318,12 @@ pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
 /// Builds PVM security parameters from values obtained during proof verification.
 ///
 /// `log_max_height` and `alignment` must come from successful STARK verification, and
-/// `collision_resistance` from the commitment hash used to verify the proof.
+/// `hash_fn` from the configuration used to verify the proof, including its challenger.
 pub fn proof_security_parameters(
     pcs_params: &PcsParams,
     log_max_height: u32,
     alignment: usize,
-    collision_resistance: u32,
+    hash_fn: HashFunction,
 ) -> ProofSecurityParameters {
     ProofSecurityParameters {
         protocol_params: protocol_params(pcs_params),
@@ -327,8 +331,9 @@ pub fn proof_security_parameters(
         instance_shape: InstanceShape {
             log_max_height,
             field_bits: CHALLENGE_FIELD_BITS,
-            collision_resistance,
+            collision_resistance: hash_fn.collision_resistance(),
         },
+        hash_fn,
         air_shape: AirShape {
             num_deep_terms: Some(num_deep_terms(alignment)),
             ..AIR_SHAPE
@@ -350,13 +355,13 @@ pub fn proof_security_parameters(
 /// estimator's contract.
 pub fn security_report(params: &ProtocolParams, log_max_height: u32) -> SecurityReport {
     let instance = deployed_instance(log_max_height);
-    let report = p3_security::budget::security_report(params, &instance, &AIR_SHAPE);
+    let report = security_report_with_hash(params, &instance, &AIR_SHAPE, HashFunction::Eidos);
     apply_fixed_boundary_correction(report, log_max_height)
 }
 
 /// Computes an Eidos chiplet-stack proof's conjectured security level, in bits.
 pub fn conjectured_security_level(params: &PcsParams, log_max_height: u32) -> u32 {
-    proof_security_parameters(params, log_max_height, COMMITMENT_ALIGNMENT, COLLISION_RESISTANCE)
+    proof_security_parameters(params, log_max_height, COMMITMENT_ALIGNMENT, HashFunction::Eidos)
         .conjectured_security_level()
 }
 
@@ -372,9 +377,9 @@ pub fn conjectured_security_level_for_alignment(
     params: &PcsParams,
     log_max_height: u32,
     alignment: usize,
-    collision_resistance: u32,
+    hash_fn: HashFunction,
 ) -> u32 {
-    proof_security_parameters(params, log_max_height, alignment, collision_resistance)
+    proof_security_parameters(params, log_max_height, alignment, hash_fn)
         .conjectured_security_level()
 }
 
@@ -412,11 +417,11 @@ mod tests {
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
         const SECURITY_CAP_FP: u64 = 8_257_536;
-        const LOOKUP_BASE_FP: u64 = 7_579_610;
-        const COMPOSITION_TERM_FP: u64 = 7_774_774;
-        const OOD_BASE_FP: u64 = 8_204_623;
-        const DEEP_BASE_FP: u64 = 7_756_350;
-        const FOLDING_BASE_FP: u64 = 8_022_589;
+        const LOOKUP_BASE_FP: u64 = 7_448_540;
+        const COMPOSITION_TERM_FP: u64 = 7_643_704;
+        const OOD_BASE_FP: u64 = 8_073_553;
+        const DEEP_BASE_FP: u64 = 7_625_280;
+        const FOLDING_BASE_FP: u64 = 7_891_519;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
         assert_eq!(FIXED_POINT_FRACTIONAL_BITS, FP_SHIFT, "FP_SHIFT is stale");
@@ -448,7 +453,7 @@ mod tests {
         let pcs_params = precompile_pcs_params();
         let expected_protocol_params = protocol_params(&pcs_params);
         let security_parameters =
-            proof_security_parameters(&pcs_params, 19, COMMITMENT_ALIGNMENT, COLLISION_RESISTANCE);
+            proof_security_parameters(&pcs_params, 19, COMMITMENT_ALIGNMENT, HashFunction::Eidos);
 
         assert_eq!(
             security_parameters.conjectured_security_report(),
@@ -467,9 +472,9 @@ mod tests {
 
         for (log_height, expected_level, expected_binding) in [
             (16, 96, QUERY_LABEL),
-            (18, 96, QUERY_LABEL),
-            (20, 95, LOOKUP_LABEL),
-            (24, 91, LOOKUP_LABEL),
+            (18, 95, LOOKUP_LABEL),
+            (20, 93, LOOKUP_LABEL),
+            (24, 89, LOOKUP_LABEL),
         ] {
             let report = security_report(&params, log_height);
             assert_eq!(
@@ -496,32 +501,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_186_348, 7_774_774, 7_825_002, 8_257_536, 7_891_517, 6_335_399, 8_257_536],
+                [7_055_278, 7_643_704, 7_693_931, 8_257_536, 7_760_447, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 16),
-                [6_531_033, 7_774_774, 7_170_620, 8_257_536, 7_236_157, 6_335_399, 8_257_536],
+                [6_399_963, 7_643_704, 7_039_549, 8_257_536, 7_105_087, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 19),
-                [6_334_425, 7_774_774, 6_974_013, 8_257_536, 7_039_549, 6_335_399, 8_257_536],
-                96,
+                [6_203_355, 7_643_704, 6_842_942, 8_257_536, 6_908_479, 6_335_399, 8_257_536],
+                94,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_268_889, 7_774_774, 6_908_477, 8_257_536, 6_974_013, 6_335_399, 8_257_536],
-                95,
+                [6_137_819, 7_643_704, 6_777_406, 8_257_536, 6_842_943, 6_335_399, 8_257_536],
+                93,
             ),
             (
                 (27, 17, 12, 4, 24),
-                [6_006_745, 7_774_774, 6_646_333, 8_257_536, 6_711_869, 6_335_399, 8_257_536],
-                91,
+                [5_875_675, 7_643_704, 6_515_262, 8_257_536, 6_580_799, 6_335_399, 8_257_536],
+                89,
             ),
             (
                 (7, 0, 0, 0, 16),
-                [6_531_033, 7_774_774, 7_170_620, 7_756_350, 6_974_013, 1_353_667, 8_257_536],
+                [6_399_963, 7_643_704, 7_039_549, 7_625_280, 6_842_943, 1_353_667, 8_257_536],
                 20,
             ),
         ];

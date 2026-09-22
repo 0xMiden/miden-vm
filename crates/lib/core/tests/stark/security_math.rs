@@ -27,7 +27,7 @@ fn security_parameters(
         log_max_height,
         0,
         security::COMMITMENT_ALIGNMENT,
-        security::COLLISION_RESISTANCE,
+        miden_core::proof::HashFunction::Eidos,
     );
     parameters.protocol_params = protocol_params;
     parameters.instance_shape.log_max_height = log_max_height;
@@ -77,22 +77,10 @@ fn lookup_slack_bound_is_conservative_at_every_transition() {
             exact_slack + 2,
         ];
         for r_f in remainders.into_iter().filter(|r_f| *r_f <= 65_535) {
-            let exact_bit: i64 = if exact_slack >= r_f + 2 {
-                1
-            } else if exact_slack == 0 && r_f == 65_535 {
-                -1
-            } else {
-                0
-            };
-            let bounded_bit: i64 = if bounded_slack >= r_f + 2 {
-                1
-            } else if g == 0 && r_f == 65_535 {
-                -1
-            } else {
-                0
-            };
+            let exact_bit = i64::from(exact_slack < r_f);
+            let bounded_bit = i64::from(bounded_slack < r_f);
             assert!(
-                bounded_bit <= exact_bit && exact_bit - bounded_bit <= 1,
+                bounded_bit >= exact_bit && bounded_bit - exact_bit <= 1,
                 "fractional-bit decision out of band at A = {a}, remainder {r_f}: bounded \
                  {bounded_bit} vs exact {exact_bit}"
             );
@@ -112,7 +100,7 @@ fn lookup_slack_bound_is_conservative_at_every_transition() {
                 .div_ceil(1 << log_height);
             let remainder = correction % security::FIXED_POINT_ONE;
             assert!(
-                mvm_bound >= remainder + 2,
+                mvm_bound >= remainder,
                 "MVM lookup decision is inconclusive at height {log_height} with \
                  {num_kernel_procedures} kernel procedures"
             );
@@ -128,21 +116,21 @@ fn lookup_slack_bound_is_conservative_at_every_transition() {
             .div_ceil(u64::from(pvm_shape.fractions_per_row))
             .div_ceil(1 << log_height);
         assert_eq!(correction, 1, "PVM correction moved at height {log_height}");
-        assert!(pvm_bound >= correction + 2);
+        assert!(pvm_bound >= correction);
     }
 
     // The largest lookup coefficient and boundary correction can occur together when the
     // fractions-per-row count is one. Check every accepted height to show that the estimator's
-    // `base >= 2` assertion follows from the preceding envelope bounds.
-    let field_whole_bits = security::CHALLENGE_FIELD_BITS >> fixed::FRACTIONAL_BITS;
+    // `base >= 1` assertion follows from the preceding envelope bounds.
+    let field_whole_bits = security::EIDOS_CHALLENGE_SAMPLE_BITS >> fixed::FRACTIONAL_BITS;
     let mut minimum_base = u64::MAX;
     for log_height in 6..=29 {
         let correction = (4_096 * security::LOG2_E).div_ceil(1 << log_height);
         let base = field_whole_bits - 16 - log_height - (correction >> fixed::FRACTIONAL_BITS);
         minimum_base = minimum_base.min(base);
-        assert!(base >= 2, "lookup base falls below two at height {log_height}");
+        assert!(base >= 1, "lookup base falls below one at height {log_height}");
     }
-    assert_eq!(minimum_base, 13);
+    assert_eq!(minimum_base, 12);
 }
 
 /// Checks that the five terms omitted by the MASM estimator remain above the lookup term.
@@ -235,7 +223,7 @@ fn deep_and_fri_grinding_only_raise_their_rounds() {
             ..base
         },
         29,
-        security::COLLISION_RESISTANCE,
+        miden_core::proof::HashFunction::Eidos,
         255,
     );
     let zero_deep = term_bits(&zero, DEEP_COMPOSITION_LABEL);
@@ -249,7 +237,7 @@ fn deep_and_fri_grinding_only_raise_their_rounds() {
                 ..base
             },
             29,
-            security::COLLISION_RESISTANCE,
+            miden_core::proof::HashFunction::Eidos,
             255,
         );
         assert_eq!(
@@ -265,7 +253,7 @@ fn deep_and_fri_grinding_only_raise_their_rounds() {
                 ..base
             },
             29,
-            security::COLLISION_RESISTANCE,
+            miden_core::proof::HashFunction::Eidos,
             255,
         );
         assert_eq!(

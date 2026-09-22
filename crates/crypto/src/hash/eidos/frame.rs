@@ -69,13 +69,13 @@ impl EidosFrame {
     /// Derives the initial chaining word for this frame.
     #[inline]
     pub fn initial_chaining_word(self) -> Word {
-        encoding::output_cv_to_word(framing::init_cv(self.domain.as_u32(), self.params))
+        encoding::mask_and_pack_word(framing::init_cv(self.domain.as_u32(), self.params))
     }
 
     /// Recovers a frame from an initial chaining word produced by Eidos framing.
     ///
-    /// The fixed high lanes must match the masked Eidos IV. Registry membership and
-    /// domain-specific parameter rules are not checked.
+    /// The fixed high lanes must match those set by [`Self::initial_chaining_word`]. Registry
+    /// membership and domain-specific parameter rules are not checked.
     pub fn from_initial_chaining_word(word: Word) -> Option<Self> {
         let lanes = encoding::word_to_cv(word);
         let expected = framing::init_cv(lanes[0], [lanes[2], lanes[4], lanes[6]]);
@@ -149,7 +149,7 @@ mod tests {
             let original = lanes[index];
             lanes[index] ^= 1;
             assert_eq!(
-                EidosFrame::from_initial_chaining_word(encoding::output_cv_to_word(lanes)),
+                EidosFrame::from_initial_chaining_word(encoding::mask_and_pack_word(lanes)),
                 None
             );
             lanes[index] = original;

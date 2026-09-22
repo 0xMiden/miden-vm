@@ -956,15 +956,12 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     // relation and the generic verifier.
     let fractional_bits = miden_air::security::FIXED_POINT_FRACTIONAL_BITS;
     let fixed_point_one = miden_air::security::FIXED_POINT_ONE;
-    let field_bits = miden_air::security::CHALLENGE_FIELD_BITS;
-    let field_ceiling = field_bits.div_ceil(fixed_point_one) * fixed_point_one;
-    let shared_literals: [(&str, u64); 10] = [
+    let sample_bits = miden_air::security::EIDOS_CHALLENGE_SAMPLE_BITS;
+    let shared_literals: [(&str, u64); 8] = [
         ("FP_SHIFT", u64::from(fractional_bits)),
         ("FP_ONE", fixed_point_one),
-        ("MAX_Q16_FRACTION", fixed_point_one - 1),
         ("BITS_PER_QUERY_FP", miden_air::security::BITS_PER_QUERY),
-        ("CHALLENGE_FIELD_WHOLE_BITS", field_bits >> fractional_bits),
-        ("CHALLENGE_FIELD_OFFSET_FP", field_ceiling - field_bits),
+        ("CHALLENGE_SAMPLE_BITS", sample_bits >> fractional_bits),
         ("SECURITY_CAP_BITS", miden_air::security::SECURITY_CAP >> fractional_bits),
         ("FRI_FOLDING_BASE_BITS", miden_air::security::FOLDING_BASE >> fractional_bits),
         ("LOG2_E_FP", miden_air::security::LOG2_E),

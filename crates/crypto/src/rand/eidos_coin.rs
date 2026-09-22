@@ -91,6 +91,9 @@ impl EidosRandomCoin {
 
     /// Draws a uniformly distributed base-field element.
     ///
+    /// This samples the full Goldilocks field, whereas `EidosChallenger::sample_felt` samples only
+    /// values below `2^63`.
+    ///
     /// # Panics
     ///
     /// Panics if output generation requires another block after the `u64` block counter is
@@ -155,8 +158,8 @@ impl EidosRandomCoin {
             let value = self.output[self.current].as_canonical_u64();
             self.current += 1;
 
-            // Masked Eidos outputs already have uniform low-u32 limbs under the pseudorandom-output
-            // assumption. For a uniform Goldilocks-field output, p - 1 is the sole extra preimage
+            // Eidos outputs have uniform low-u32 limbs under the pseudorandom-output assumption.
+            // For a uniform Goldilocks-field output, p - 1 is the sole extra preimage
             // of zero; removing it leaves exactly 2^32 - 1 preimages for every u32 value.
             if value != Felt::ORDER - 1 {
                 return value as u32;

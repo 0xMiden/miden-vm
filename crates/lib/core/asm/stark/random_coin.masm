@@ -1,5 +1,8 @@
 #! Random coin procedures for the STARK verifier.
 #!
+#! Field samples are below 2^63, and quadratic-extension samples have two such coefficients.
+#! These transcript procedures use restricted sampling, unlike Rust EidosRandomCoin field draws.
+#!
 #! The `eidos_*` procedures implement the Eidos challenger. Unprefixed sampling and observe
 #! helpers are recursive-verifier entry points over that state machine.
 #! The `eidos_absorb_*` block helpers require an empty absorb buffer. Use `eidos_observe_*` to

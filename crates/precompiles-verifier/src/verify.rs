@@ -40,7 +40,7 @@ pub fn verify_deferred(
         &precompile_pcs_params(),
         log_max_height,
         alignment,
-        proof.hash_fn().collision_resistance(),
+        proof.hash_fn(),
     ))
 }
 

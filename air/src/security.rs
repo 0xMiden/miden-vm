@@ -4,13 +4,19 @@
 //! estimator to use it without evaluating the AIRs symbolically. [`derive_air_shape`] performs
 //! that evaluation in Rust, and `air_shape_matches_symbolic` checks the stored value against it.
 
-use miden_core::field::{BasedVectorSpace, PrimeField64, QuadFelt};
+use miden_core::{
+    field::{BasedVectorSpace, PrimeField64, QuadFelt},
+    proof::HashFunction,
+};
 use miden_crypto::stark::pcs::PcsParams;
 /// Security-estimation types used by verified Miden proofs.
 pub use p3_security::budget::{
     AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
 };
-use p3_security::{budget::report::LOOKUP_LABEL, fixed};
+use p3_security::{
+    budget::report::{COLLISION_LABEL, LOOKUP_LABEL, OUT_OF_DOMAIN_LABEL, QUERY_LABEL},
+    fixed,
+};
 
 use crate::{
     AIRS, ConstraintCounts, ConstraintDegrees, Felt, HandwrittenMidenAir, MidenAir, config,
@@ -31,6 +37,8 @@ pub struct ProofSecurityParameters {
     pub log_final_degree: u32,
     /// Instance shape derived from the proof and its commitment scheme.
     pub instance_shape: InstanceShape,
+    /// Verified proof-hash configuration, which also selects the Fiat-Shamir challenger.
+    pub hash_fn: HashFunction,
     /// Security-relevant shape of the AIR relation and commitment scheme.
     pub air_shape: AirShape,
     /// Number of out-of-domain points opened per committed column.
@@ -45,6 +53,52 @@ pub struct ProofSecurityParameters {
 /// the rounded-down Q16 value for the base field. Rounding before doubling keeps the result
 /// conservative.
 pub const CHALLENGE_FIELD_BITS: u64 = EXTENSION_DEGREE as u64 * fixed::floor_log2(Felt::ORDER_U64);
+
+/// Size of the Eidos quadratic-extension challenge support, in Q16 bits.
+///
+/// Each basis coefficient is a uniform 63-bit integer under the Eidos pseudorandomness assumption,
+/// so the support has `2^126` elements. Root-counting bounds use this size; the FRI query rate uses
+/// the cardinality of the field in which the polynomials are defined instead.
+pub const EIDOS_CHALLENGE_SAMPLE_BITS: u64 = fixed::from_bits(63 * EXTENSION_DEGREE as u32);
+
+/// Computes conjectured security bounds for the proof's hash and challenger configuration.
+///
+/// Eidos root-counting bounds use its 126-bit sampling support. The FRI query rate still uses
+/// `instance.field_bits`, and the commitment cap uses `instance.collision_resistance`.
+pub fn security_report_with_hash(
+    params: &ProtocolParams,
+    instance: &InstanceShape,
+    air: &AirShape,
+    hash_fn: HashFunction,
+) -> SecurityReport {
+    match hash_fn {
+        HashFunction::Eidos => {},
+        HashFunction::Blake3_256
+        | HashFunction::Rpo256
+        | HashFunction::Rpx256
+        | HashFunction::Poseidon2
+        | HashFunction::Keccak => {
+            return p3_security::budget::security_report(params, instance, air);
+        },
+    }
+    let sampling_instance = InstanceShape {
+        field_bits: EIDOS_CHALLENGE_SAMPLE_BITS,
+        ..*instance
+    };
+    let report = p3_security::budget::security_report(params, &sampling_instance, air);
+    let cap = instance.cap();
+    let query_bits = u64::from(params.num_queries)
+        * fixed::bits_per_query(params.log_blowup, instance.field_bits)
+        + fixed::from_bits(params.query_pow_bits);
+    SecurityReport::new((*report.terms()).map(|term| match term.label {
+        QUERY_LABEL => SecurityTerm::new(QUERY_LABEL, query_bits.min(cap)),
+        COLLISION_LABEL => SecurityTerm::new(COLLISION_LABEL, cap),
+        // OOD rejection removes only base-field points. At most 2^63 of the 2^126 Eidos
+        // candidates are in the base field; one Q16 unit conservatively covers this conditioning.
+        OUT_OF_DOMAIN_LABEL => SecurityTerm::new(OUT_OF_DOMAIN_LABEL, term.bits.saturating_sub(1)),
+        _ => term,
+    }))
+}
 
 /// Number of out-of-domain points opened per committed column.
 ///
@@ -176,7 +230,7 @@ pub const BITS_PER_QUERY: u64 =
 /// Collision resistance of the canonical Eidos commitment hash, in whole bits.
 ///
 /// Eidos exposes a 252-bit packed digest, so birthday collisions cost 126 bits.
-pub const COLLISION_RESISTANCE: u32 = miden_core::proof::HashFunction::Eidos.collision_resistance();
+pub const COLLISION_RESISTANCE: u32 = HashFunction::Eidos.collision_resistance();
 
 /// Upper bound on every reported level, in fixed point.
 pub const SECURITY_CAP: u64 = deployed_instance(0).cap();
@@ -216,27 +270,27 @@ pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << config::LOG_FOL
 /// lookup-grinding parameter.
 pub const LOOKUP_POW_BITS: u32 = 0;
 
-/// The configured challenge-field bound less the lookup round's coefficient, in fixed point.
-pub const LOOKUP_BASE: u64 = CHALLENGE_FIELD_BITS - LOOKUP_COEFFICIENT;
+/// The Eidos challenge-support bound less the lookup round's coefficient, in fixed point.
+pub const LOOKUP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - LOOKUP_COEFFICIENT;
 
-/// The configured challenge-field bound less the constraint-composition round's coefficient, in
+/// The Eidos challenge-support bound less the constraint-composition round's coefficient, in
 /// fixed point.
-pub const COMPOSITION_TERM: u64 = CHALLENGE_FIELD_BITS - COMPOSITION_COEFFICIENT;
+pub const COMPOSITION_TERM: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - COMPOSITION_COEFFICIENT;
 
-/// The configured challenge-field bound less the out-of-domain round's coefficient, in fixed
+/// The Eidos challenge-support bound less the out-of-domain round's coefficient, in fixed
 /// point.
-pub const OOD_BASE: u64 = CHALLENGE_FIELD_BITS - OOD_COEFFICIENT;
+pub const OOD_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - OOD_COEFFICIENT;
 
-/// The configured challenge-field bound less the DEEP round's coefficient, in fixed point.
-pub const DEEP_BASE: u64 = CHALLENGE_FIELD_BITS - DEEP_COEFFICIENT;
+/// The Eidos challenge-support bound less the DEEP round's coefficient, in fixed point.
+pub const DEEP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - DEEP_COEFFICIENT;
 
-/// The configured challenge-field bound less the FRI folding round's coefficient and fixed
+/// The Eidos challenge-support bound less the FRI folding round's coefficient and fixed
 /// blowup, in fixed point.
 ///
 /// The common MASM estimator uses the whole-bit floor of this value when proving that FRI folding
 /// cannot determine the result. Its `FRI_FOLDING_BASE_BITS` constant must equal that floor.
 pub const FOLDING_BASE: u64 =
-    CHALLENGE_FIELD_BITS - FOLDING_COEFFICIENT - fixed::from_bits(config::LOG_BLOWUP as u32);
+    EIDOS_CHALLENGE_SAMPLE_BITS - FOLDING_COEFFICIENT - fixed::from_bits(config::LOG_BLOWUP as u32);
 
 /// The instance shape of a deployed Miden VM proof at the given maximum AIR log height.
 const fn deployed_instance(log_max_height: u32) -> InstanceShape {
@@ -299,10 +353,11 @@ impl ProofSecurityParameters {
     /// instance, and AIR shapes. Callers must use parameters returned by the verifier that
     /// authenticated the proof rather than values assembled independently.
     pub fn conjectured_security_report(&self) -> SecurityReport {
-        let report = p3_security::budget::security_report(
+        let report = security_report_with_hash(
             &self.protocol_params,
             &self.instance_shape,
             &self.air_shape,
+            self.hash_fn,
         );
         let correction = lookup_boundary_correction(
             self.num_lookup_boundary_terms,
@@ -321,14 +376,14 @@ impl ProofSecurityParameters {
 /// Builds MVM security parameters from values obtained during proof verification.
 ///
 /// `log_max_height` and `alignment` must come from successful STARK verification,
-/// `num_kernel_procedures` from the authenticated execution claim, and `collision_resistance`
-/// from the commitment hash used to verify the proof.
+/// `num_kernel_procedures` from the authenticated execution claim, and `hash_fn`
+/// from the configuration used to verify the proof, including its challenger.
 pub fn proof_security_parameters(
     pcs_params: &PcsParams,
     log_max_height: u32,
     num_kernel_procedures: u32,
     alignment: usize,
-    collision_resistance: u32,
+    hash_fn: HashFunction,
 ) -> ProofSecurityParameters {
     mvm_security_parameters_from_protocol(
         protocol_params(pcs_params),
@@ -336,7 +391,7 @@ pub fn proof_security_parameters(
         log_max_height,
         num_kernel_procedures,
         alignment,
-        collision_resistance,
+        hash_fn,
     )
 }
 
@@ -346,7 +401,7 @@ fn mvm_security_parameters_from_protocol(
     log_max_height: u32,
     num_kernel_procedures: u32,
     alignment: usize,
-    collision_resistance: u32,
+    hash_fn: HashFunction,
 ) -> ProofSecurityParameters {
     ProofSecurityParameters {
         protocol_params,
@@ -354,8 +409,9 @@ fn mvm_security_parameters_from_protocol(
         instance_shape: InstanceShape {
             log_max_height,
             field_bits: CHALLENGE_FIELD_BITS,
-            collision_resistance,
+            collision_resistance: hash_fn.collision_resistance(),
         },
+        hash_fn,
         air_shape: AirShape {
             num_deep_terms: Some(num_deep_terms(alignment)),
             ..AIR_SHAPE
@@ -400,7 +456,7 @@ pub fn conjectured_security_level(
         log_max_height,
         num_kernel_procedures,
         COMMITMENT_ALIGNMENT,
-        COLLISION_RESISTANCE,
+        HashFunction::Eidos,
     )
     .conjectured_security_level()
 }
@@ -415,7 +471,7 @@ pub fn conjectured_security_level(
 /// `num_deep_terms(COMMITMENT_ALIGNMENT)` equals `AIR_SHAPE.num_deep_terms` —
 /// `num_deep_terms_matches_the_pinned_alignment` checks it). The native verifier calls this for
 /// every hash function, including the non-algebraic ones the recursive verifier never sees, and
-/// supplies that hash function's collision resistance separately.
+/// supplies the hash configuration to select both the collision bound and the sampling support.
 pub fn conjectured_security_level_for_alignment(
     num_queries: u32,
     query_pow_bits: u32,
@@ -424,7 +480,7 @@ pub fn conjectured_security_level_for_alignment(
     log_max_height: u32,
     num_kernel_procedures: u32,
     alignment: usize,
-    collision_resistance: u32,
+    hash_fn: HashFunction,
 ) -> u32 {
     let protocol = ProtocolParams {
         log_blowup: config::LOG_BLOWUP as u32,
@@ -441,7 +497,7 @@ pub fn conjectured_security_level_for_alignment(
         log_max_height,
         num_kernel_procedures,
         alignment,
-        collision_resistance,
+        hash_fn,
     )
     .conjectured_security_level()
 }
@@ -469,20 +525,21 @@ pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
 ///
 /// `log_max_height` is the largest AIR trace height in the proof; the Fiat-Shamir transcript binds
 /// every AIR's log height, so a prover cannot understate it to inflate the reported level.
-/// `collision_resistance` is that of the commitment hash, in bits. `num_kernel_procedures` is the
-/// proof's kernel procedure count, transcript-bound through the kernel witness.
+/// `hash_fn` selects the commitment collision bound and challenger sampling support.
+/// `num_kernel_procedures` is the proof's kernel procedure count, transcript-bound through the
+/// kernel witness.
 pub fn security_report(
     params: &ProtocolParams,
     log_max_height: u32,
-    collision_resistance: u32,
+    hash_fn: HashFunction,
     num_kernel_procedures: u32,
 ) -> SecurityReport {
     let instance = InstanceShape {
         log_max_height,
         field_bits: CHALLENGE_FIELD_BITS,
-        collision_resistance,
+        collision_resistance: hash_fn.collision_resistance(),
     };
-    let report = p3_security::budget::security_report(params, &instance, &AIR_SHAPE);
+    let report = security_report_with_hash(params, &instance, &AIR_SHAPE, hash_fn);
     let correction = lookup_boundary_correction(
         CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
         AIR_SHAPE.lookup.fractions_per_row,
@@ -494,6 +551,93 @@ pub fn security_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Power-of-two error coefficients make the root-counting bounds exact without using the
+    /// estimator's logarithm implementation. The collision cap must be applied after sampling.
+    #[test]
+    fn eidos_root_counts_use_the_sampling_support_before_capping() {
+        use p3_security::budget::report::{COMPOSITION_LABEL, DEEP_COMPOSITION_LABEL};
+
+        let params = ProtocolParams {
+            num_queries: 150,
+            query_pow_bits: 31,
+            deep_pow_bits: 0,
+            ..protocol_params(&config::pcs_params())
+        };
+        let air = AirShape {
+            num_composed_constraints: 1024,
+            num_deep_terms: Some(1024),
+            lookup: LookupShape {
+                max_message_width: 6,
+                fractions_per_row: 128,
+            },
+            ..AIR_SHAPE
+        };
+        let instance = deployed_instance(20);
+        let report = security_report_with_hash(&params, &instance, &air, HashFunction::Eidos);
+        for (label, bits) in [
+            // The lookup coefficient is (6 + 2) * 128 = 2^10, at height 2^20:
+            // error <= 2^30 / 2^126 = 2^-96.
+            (LOOKUP_LABEL, 96u32),
+            // Each batching coefficient is 2^10, so error <= 2^10 / 2^126 = 2^-116.
+            (COMPOSITION_LABEL, 116),
+            (DEEP_COMPOSITION_LABEL, 116),
+        ] {
+            assert_eq!(
+                report.terms().iter().find(|term| term.label == label).unwrap().bits,
+                u64::from(bits) * 65_536,
+                "wrong sampling denominator for {label}"
+            );
+        }
+
+        // A lower commitment-security assumption caps the 116-bit batching bound at 100.
+        // Subtracting two bits from an already capped report would incorrectly give 98.
+        let capped = security_report_with_hash(
+            &params,
+            &InstanceShape { collision_resistance: 100, ..instance },
+            &air,
+            HashFunction::Eidos,
+        );
+        assert_eq!(
+            capped.terms().iter().find(|term| term.label == COMPOSITION_LABEL).unwrap().bits,
+            100 * 65_536
+        );
+
+        let full_field = p3_security::budget::security_report(&params, &instance, &air);
+        assert_eq!(
+            report.terms().iter().find(|term| term.label == QUERY_LABEL),
+            full_field.terms().iter().find(|term| term.label == QUERY_LABEL),
+            "the FRI query rate must retain the ambient field size"
+        );
+    }
+
+    #[test]
+    fn full_field_challengers_preserve_their_security_bounds() {
+        let params = protocol_params(&config::pcs_params());
+        for hash_fn in [
+            HashFunction::Blake3_256,
+            HashFunction::Rpo256,
+            HashFunction::Rpx256,
+            HashFunction::Poseidon2,
+            HashFunction::Keccak,
+        ] {
+            let parameters = proof_security_parameters(&config::pcs_params(), 20, 0, 8, hash_fn);
+            assert_eq!(parameters.hash_fn, hash_fn);
+            assert_eq!(
+                parameters.instance_shape.collision_resistance,
+                hash_fn.collision_resistance()
+            );
+            assert_eq!(
+                security_report_with_hash(&params, &parameters.instance_shape, &AIR_SHAPE, hash_fn),
+                p3_security::budget::security_report(
+                    &params,
+                    &parameters.instance_shape,
+                    &AIR_SHAPE
+                ),
+                "full-field sampling changed for {hash_fn:?}"
+            );
+        }
+    }
 
     /// Checks that [`AIR_SHAPE`] matches the current AIRs. A stale shape can make the reported
     /// security level differ from the level implied by the relation being verified.
@@ -528,12 +672,12 @@ mod tests {
             22,
             255,
             COMMITMENT_ALIGNMENT,
-            COLLISION_RESISTANCE,
+            HashFunction::Eidos,
         );
 
         assert_eq!(
             security_parameters.conjectured_security_report(),
-            security_report(&expected_protocol_params, 22, COLLISION_RESISTANCE, 255)
+            security_report(&expected_protocol_params, 22, HashFunction::Eidos, 255)
         );
         assert_eq!(security_parameters.log_final_degree, u32::from(pcs_params.log_final_degree()));
         assert_eq!(security_parameters.num_ood_points, NUM_OOD_POINTS);
@@ -546,12 +690,13 @@ mod tests {
         let params = protocol_params(&config::pcs_params());
 
         for (log_height, expected_level, expected_binding) in [
-            (20, 96, p3_security::budget::report::QUERY_LABEL),
-            (22, 95, LOOKUP_LABEL),
-            (24, 93, LOOKUP_LABEL),
-            (29, 88, LOOKUP_LABEL),
+            (18, 96, QUERY_LABEL),
+            (20, 95, LOOKUP_LABEL),
+            (22, 93, LOOKUP_LABEL),
+            (24, 91, LOOKUP_LABEL),
+            (29, 86, LOOKUP_LABEL),
         ] {
-            let report = security_report(&params, log_height, 128, 0);
+            let report = security_report(&params, log_height, HashFunction::Eidos, 0);
             assert_eq!(
                 report.security_level(),
                 expected_level,
@@ -575,11 +720,11 @@ mod tests {
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
         const SECURITY_CAP_FP: u64 = 8_257_536;
-        const LOOKUP_BASE_FP: u64 = 7_703_405;
-        const COMPOSITION_TERM_FP: u64 = 7_772_790;
-        const OOD_BASE_FP: u64 = 8_161_888;
-        const DEEP_BASE_FP: u64 = 7_855_172;
-        const FOLDING_BASE_FP: u64 = 8_022_589;
+        const LOOKUP_BASE_FP: u64 = 7_572_335;
+        const COMPOSITION_TERM_FP: u64 = 7_641_720;
+        const OOD_BASE_FP: u64 = 8_030_818;
+        const DEEP_BASE_FP: u64 = 7_724_102;
+        const FOLDING_BASE_FP: u64 = 7_891_519;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
         assert_eq!(FIXED_POINT_FRACTIONAL_BITS, FP_SHIFT, "FP_SHIFT is stale");
@@ -610,33 +755,33 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_310_132, 7_772_790, 7_776_509, 8_257_536, 7_891_517, 6_335_399, 8_257_536],
+                [7_179_062, 7_641_720, 7_645_438, 8_257_536, 7_760_447, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_392_684, 7_772_790, 6_860_180, 8_257_536, 6_974_013, 6_335_399, 8_257_536],
-                96,
+                [6_261_614, 7_641_720, 6_729_109, 8_257_536, 6_842_943, 6_335_399, 8_257_536],
+                95,
             ),
             (
                 (27, 17, 12, 4, 23),
-                [6_196_076, 7_772_790, 6_663_572, 8_257_536, 6_777_405, 6_335_399, 8_257_536],
-                94,
+                [6_065_006, 7_641_720, 6_532_501, 8_257_536, 6_646_335, 6_335_399, 8_257_536],
+                92,
             ),
             (
                 (27, 17, 12, 4, 29),
-                [5_802_860, 7_772_790, 6_270_356, 8_257_536, 6_384_189, 6_335_399, 8_257_536],
-                88,
+                [5_671_790, 7_641_720, 6_139_285, 8_257_536, 6_253_119, 6_335_399, 8_257_536],
+                86,
             ),
             (
                 (7, 0, 0, 0, 20),
-                [6_392_684, 7_772_790, 6_860_180, 7_855_172, 6_711_869, 1_353_667, 8_257_536],
+                [6_261_614, 7_641_720, 6_729_109, 7_724_102, 6_580_799, 1_353_667, 8_257_536],
                 20,
             ),
             (
                 (150, 31, 31, 31, 29),
-                [5_802_860, 7_772_790, 6_270_356, 8_257_536, 8_153_661, 8_257_536, 8_257_536],
-                88,
+                [5_671_790, 7_641_720, 6_139_285, 8_257_536, 8_022_591, 8_257_536, 8_257_536],
+                86,
             ),
         ];
 
@@ -654,7 +799,7 @@ mod tests {
                 folding_pow_bits,
                 ..base
             };
-            let report = security_report(&params, log_height, COLLISION_RESISTANCE, 0);
+            let report = security_report(&params, log_height, HashFunction::Eidos, 0);
 
             assert_eq!(
                 (*report.terms()).map(|term| term.bits),
@@ -669,20 +814,20 @@ mod tests {
         }
     }
 
-    /// The lookup round overtakes the query phase as the bottleneck somewhere in the low twenties,
-    /// which is what makes the computed security level height-dependent at all. This test checks
-    /// the crossover height against a fixed value: below it the preset reaches its design target,
-    /// above it it does not.
+    /// Pins the height at which lookup overtakes the deployed preset's query bound.
     #[test]
-    fn lookup_round_overtakes_the_query_phase_in_the_low_twenties() {
+    fn lookup_round_overtakes_the_query_phase_at_height_nineteen() {
         let params = protocol_params(&config::pcs_params());
         let crossover = (6..=30)
             .find(|&log_height| {
-                security_report(&params, log_height, 128, 0).binding_term().label == LOOKUP_LABEL
+                security_report(&params, log_height, HashFunction::Eidos, 0)
+                    .binding_term()
+                    .label
+                    == LOOKUP_LABEL
             })
             .expect("the lookup round must bind at some supported height");
 
-        assert_eq!(crossover, 21, "unexpected lookup/query crossover");
+        assert_eq!(crossover, 19, "unexpected lookup/query crossover");
     }
 
     /// A proof with the maximum kernel witness reports a lower lookup-round bound than a bare one
@@ -695,8 +840,8 @@ mod tests {
         };
 
         let params = protocol_params(&config::pcs_params());
-        let bare = lookup_bits(security_report(&params, 6, 128, 0));
-        let full_kernel = lookup_bits(security_report(&params, 6, 128, 255));
+        let bare = lookup_bits(security_report(&params, 6, HashFunction::Eidos, 0));
+        let full_kernel = lookup_bits(security_report(&params, 6, HashFunction::Eidos, 255));
         assert!(
             full_kernel < bare,
             "a full kernel witness should lower the lookup round's bound, got {full_kernel} vs \

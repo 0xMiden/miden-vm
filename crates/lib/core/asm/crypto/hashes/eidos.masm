@@ -1,7 +1,8 @@
 # TYPES
 # =================================================================================================
 
-#! An Eidos digest in stack element order.
+#! An Eidos digest in stack element order: four values below 2^63, with a 126-bit generic
+#! collision-resistance ceiling. Digest elements are not uniform over the Goldilocks field.
 pub type Digest = word
 #! An Eidos chaining value in stack element order.
 pub type ChainingValue = word

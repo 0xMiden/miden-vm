@@ -29,6 +29,8 @@ use crate::{Felt, Word, field::BasedVectorSpace};
 ///
 /// Digests occupy a 252-bit packed subspace and therefore provide at most 126 bits of generic
 /// collision resistance.
+/// Digest coordinates are below `2^63`; use [`crate::rand::EidosRandomCoin`] when uniform
+/// field samples are required. See the [module documentation](super) for the output contract.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Eidos;
 
@@ -151,7 +153,7 @@ impl Eidos {
             }
         }
 
-        encoding::output_cv_to_word(cv)
+        encoding::mask_and_pack_word(cv)
     }
 
     /// Hash a field-element sequence under the registered generic Felt-sequence domain.
@@ -219,7 +221,7 @@ impl Eidos {
     /// use [`Self::merge`] directly.
     #[inline]
     pub fn merkle_node_init_chaining_word() -> Word {
-        encoding::output_cv_to_word(MERKLE_NODE_INIT_CV)
+        encoding::mask_and_pack_word(MERKLE_NODE_INIT_CV)
     }
 
     /// Compress two packed digest words as reserved Merkle inner nodes in every packed lane.
@@ -273,7 +275,7 @@ fn compress_digest_pair(values: &[Word; 2], cv: [u32; 8]) -> Word {
             values[1][i - DIGEST_WIDTH]
         }
     });
-    encoding::output_cv_to_word(compression::compress_cv(cv, encoding::encode_felt_block(&block)))
+    encoding::mask_and_pack_word(compression::compress_cv(cv, encoding::encode_felt_block(&block)))
 }
 
 #[inline]
@@ -309,7 +311,7 @@ where
         Felt::ZERO,
         |cv, block| compression::compress_cv(cv, encoding::encode_felt_block(&block)),
     );
-    encoding::output_cv_to_word(cv).into()
+    encoding::mask_and_pack_word(cv).into()
 }
 
 fn hash_u64_iter_with_len<I>(iter: I, len: usize) -> [u64; DIGEST_WIDTH]
@@ -498,11 +500,11 @@ mod tests {
         let felt_cv = framing::init_cv(GenericFeltSequenceDomain::TAG.as_u32(), [0; 3]);
         assert_eq!(
             Eidos::hash(&[]),
-            encoding::output_cv_to_word(compression::compress_cv(byte_cv, [0; 16]))
+            encoding::mask_and_pack_word(compression::compress_cv(byte_cv, [0; 16]))
         );
         assert_eq!(
             Eidos::hash_elements::<Felt>(&[]),
-            encoding::output_cv_to_word(compression::compress_cv(felt_cv, [0; 16]))
+            encoding::mask_and_pack_word(compression::compress_cv(felt_cv, [0; 16]))
         );
         assert_ne!(Eidos::hash(&[]), Eidos::hash_elements::<Felt>(&[]));
     }

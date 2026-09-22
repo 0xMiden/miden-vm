@@ -10,6 +10,8 @@ value. Domain tags are allocated rather than derived by hashing names. Rust APIs
 as a type, and downstream MASM constants can be generated from the same declarations.
 
 This document specifies Eidos framing and the domain-registry contract.
+The [security and usage guide](./eidos-security.md) specifies the digest output distribution and
+its consequences for commitments, sampling, and encryption.
 
 ## Construction overview
 

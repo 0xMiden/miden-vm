@@ -176,7 +176,9 @@ In the benchmarks below, the VM executes the same Blake3 example program for 2<s
 ### Recursion-friendly proofs
 
 Eidos is Miden VM's native hash. It is derived from BLAKE3 and tailored for efficient execution
-inside the VM while retaining fast native execution on conventional processors.
+inside the VM while retaining fast native execution on conventional processors. Its digests have
+a 126-bit generic collision-resistance ceiling; see the
+[Eidos security and usage guide](docs/src/design/eidos-security.md).
 
 The historical comparison below uses the optional Poseidon2 STARK proof-hash configuration. It
 predates the native Eidos cutover and does not describe the current VM hash topology:

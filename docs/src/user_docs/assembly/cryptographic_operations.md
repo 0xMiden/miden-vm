@@ -12,6 +12,10 @@ Eidos is the native hash function of Miden VM. It absorbs 8 field elements at a 
 compression and carries a 4-element chaining value. Each native `compress` request is one VM
 cycle and one 32-row block in the standalone Eidos compression AIR.
 
+An Eidos digest has four elements below `2^63`, giving a generic collision-resistance ceiling of
+126 bits. These elements are not uniform over the Goldilocks field. See
+[Eidos security and usage](../../design/eidos-security.md) before using hash outputs as randomness.
+
 | Instruction                      | Stack input        | Stack output      | Notes |
 | -------------------------------- | ------------------ | ----------------- | ----- |
 | hash <br /> - *(18 cycles)*      | [A, ...]           | [B, ...]          | Computes the Eidos hash of one word. The 4-element input length is bound into the initial chaining value. |

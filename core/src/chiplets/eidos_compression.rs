@@ -5,7 +5,7 @@
 //! raw compression and encoding to the canonical interfaces in `miden-crypto`.
 
 pub use miden_crypto::hash::eidos::encoding::{
-    felts_to_block as unpack_block, pack_output_felt as pack, unpack_felt as unpack,
+    felts_to_block as unpack_block, mask_and_pack_felt as pack, unpack_felt as unpack,
     word_to_cv as unpack_word,
 };
 use miden_crypto::{

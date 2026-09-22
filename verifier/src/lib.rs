@@ -389,7 +389,7 @@ impl Verifier {
                 log_max_height,
                 num_kernel_procedures,
                 alignment,
-                stark.hash_fn().collision_resistance(),
+                stark.hash_fn(),
             )
         })
     }

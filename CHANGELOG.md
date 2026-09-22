@@ -8,11 +8,13 @@
 
 #### Changes
 
+- [BREAKING] Security-parameter builders take the proof-hash configuration instead of a collision-bit count; renamed the lossy Eidos packing helpers to `mask_and_pack_felt` and `mask_and_pack_word`.
 - Improved lifted STARK prover performance: LogUp fractions are built and accumulated in row chunks with a parallel accumulator scan, and DEEP reduction avoids element-wise buffer swaps and per-height group buffers ([#3851](https://github.com/0xMiden/miden-vm/pull/3851)).
 - Reduced prover peak memory by 13-20% by pruning Merkle layers ([#3872](https://github.com/0xMiden/miden-vm/pull/3872)).
 
 #### Fixes
 
+- Corrected native and recursive Eidos proof-security estimates to account for restricted Fiat-Shamir challenges. Eidos has a 126-bit generic collision-resistance ceiling and restricted field outputs; see the [security and usage guide](docs/src/design/eidos-security.md).
 - Fixed Falcon512 `ntru_gen` so oversized NTRU solution coefficients are rejected against the encoding bound before `i16` narrowing, instead of panicking in `try_into` ([#3857](https://github.com/0xMiden/miden-vm/pull/3857)).
 - Fixed `IntValue::Felt` Display so it prints canonical hex without byte-swapping ([#3808](https://github.com/0xMiden/miden-vm/pull/3808)).
 - [BREAKING] Changed `ProverInstance::new()` to take ownership of `ProverStatement`. `ProverInstance::prove()` now consumes the instance and returns its verifier statement with the proof. The prover can now release the main traces after their final use. This reduced measured peak memory by about 7 percent ([#3833](https://github.com/0xMiden/miden-vm/pull/3833)).
