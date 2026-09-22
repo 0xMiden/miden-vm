@@ -42,10 +42,10 @@ const QUOTIENT_FIRST_WEIGHT = 8868329529835627796
 # Poseidon2 digest of the order-invariant common section of the ACE circuit stream
 # (common ops + root padding). The registry leaf for each ORDER_TAG is
 # merge(H(constants | shuffle ops), ACE_COMMON_COMMITMENT).
-const ACE_COMMON_COMMITMENT_0 = 12219740681290956869
-const ACE_COMMON_COMMITMENT_1 = 4622123471444412033
-const ACE_COMMON_COMMITMENT_2 = 8504359799583469631
-const ACE_COMMON_COMMITMENT_3 = 87246567374956747
+const ACE_COMMON_COMMITMENT_0 = 8372829834958108887
+const ACE_COMMON_COMMITMENT_1 = 13274951668503499255
+const ACE_COMMON_COMMITMENT_2 = 6240697350567090283
+const ACE_COMMON_COMMITMENT_3 = 11294581568686772123
 
 # ERRORS
 # =================================================================================================
