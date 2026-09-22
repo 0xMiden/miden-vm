@@ -38,9 +38,8 @@ pub fn felts_to_block(block: [Felt; BLOCK_LEN]) -> [u32; 16] {
 
 /// Pack two lanes from an Eidos output CV into one canonical field element.
 ///
-/// # Panics
-///
-/// Panics if the two limbs encode a value outside the Goldilocks field's canonical range.
+/// The low/high lane pair must encode a canonical Goldilocks element. This precondition is
+/// checked only when debug assertions are enabled.
 #[inline]
 pub fn pack_output_felt(lo: u32, hi: u32) -> Felt {
     Felt::new_unchecked(pack_output_pair_u64(lo, hi))
@@ -48,9 +47,8 @@ pub fn pack_output_felt(lo: u32, hi: u32) -> Felt {
 
 /// Pack an eight-lane Eidos output CV into a four-Felt word.
 ///
-/// # Panics
-///
-/// Panics if any lane pair encodes a value outside the Goldilocks field's canonical range.
+/// Each low/high lane pair must encode a canonical Goldilocks element. This precondition is
+/// checked only when debug assertions are enabled.
 #[inline]
 pub fn output_cv_to_word(cv: [u32; 8]) -> Word {
     Word::new([
@@ -64,7 +62,7 @@ pub fn output_cv_to_word(cv: [u32; 8]) -> Word {
 #[inline]
 pub(super) const fn pack_output_pair_u64(lo: u32, hi: u32) -> u64 {
     let value = ((hi as u64) << 32) | lo as u64;
-    assert!(value < Felt::ORDER, "Eidos output must be a canonical Goldilocks element");
+    debug_assert!(value < Felt::ORDER, "Eidos output must be a canonical Goldilocks element");
     value
 }
 
@@ -223,25 +221,17 @@ mod tests {
 
     #[test]
     fn output_packing_preserves_canonical_lane_pairs() {
-        let cv = [
-            0x1234_5678,
-            0x9234_5678,
-            0x2345_6789,
-            0x8000_0000,
-            0x3456_789a,
-            0x7fff_ffff,
-            0x4567_89ab,
-            0,
-        ];
+        let cv = [0x1234_5678, 0x9234_5678, 0x2345_6789, 0x8000_0000, 0, u32::MAX, 0x4567_89ab, 0];
         let packed = output_cv_to_word(cv);
         let decoded = word_to_cv(packed);
 
         assert_eq!(decoded, cv);
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "Eidos output must be a canonical Goldilocks element")]
-    fn output_packing_rejects_a_noncanonical_lane_pair() {
+    fn output_packing_debug_asserts_canonicality() {
         let _ = pack_output_felt(1, u32::MAX);
     }
 

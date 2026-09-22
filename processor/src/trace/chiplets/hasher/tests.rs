@@ -50,33 +50,33 @@ use super::{
 
 #[test]
 fn hasher_compress_one() {
-    // --- test one controller compression ---
-    let mut hasher = Hasher::default();
-    let init_state = random_state_with_packed_cv();
+    for init_state in [rand_array(), [Felt::NEG_ONE; hasher::STATE_WIDTH]] {
+        let mut hasher = Hasher::default();
 
-    let (addr, final_state) = hasher.compress(init_state);
-    assert_eq!(ONE, addr);
+        let (addr, final_state) = hasher.compress(init_state);
+        assert_eq!(ONE, addr);
 
-    let expected_state = compress_state(init_state);
-    assert_eq!(expected_state, final_state);
+        let expected_state = compress_state(init_state);
+        assert_eq!(expected_state, final_state);
 
-    let trace = build_trace(hasher);
+        let trace = build_trace(hasher);
 
-    // Controller region: 1 row, padded to the chiplet alignment boundary.
-    // Compression segment: one real compression cycle.
-    let compression_start = controller_len(1);
-    assert_eq!(trace[0].len(), compression_start + EIDOS_COMPRESSION_CYCLE_LEN);
+        // Controller region: 1 row, padded to the chiplet alignment boundary.
+        // Compression segment: one real compression cycle.
+        let compression_start = controller_len(1);
+        assert_eq!(trace[0].len(), compression_start + EIDOS_COMPRESSION_CYCLE_LEN);
 
-    check_controller_row(&trace, 0, LINEAR_HASH, &init_state, ZERO, ONE, ZERO, ZERO, ONE);
+        check_controller_row(&trace, 0, LINEAR_HASH, &init_state, ZERO, ONE, ZERO, ZERO, ONE);
 
-    check_compression_block(&trace, compression_start, &init_state, ONE);
+        check_compression_block(&trace, compression_start, &init_state, ONE);
+    }
 }
 
 #[test]
 fn hasher_compress_two() {
     let mut hasher = Hasher::default();
-    let init_state1 = random_state_with_packed_cv();
-    let init_state2 = random_state_with_packed_cv();
+    let init_state1: HasherState = rand_array();
+    let init_state2: HasherState = rand_array();
 
     let (addr1, final_state1) = hasher.compress(init_state1);
     let (addr2, final_state2) = hasher.compress(init_state2);
@@ -219,7 +219,7 @@ fn hasher_update_merkle_root() {
 fn compression_segment_structure() {
     // One COMPRESS yields one compression block with multiplicity 1.
     let mut hasher = Hasher::default();
-    let init_state = random_state_with_packed_cv();
+    let init_state: HasherState = rand_array();
     let (addr, result) = hasher.compress(init_state);
 
     // Verify returned address and compressed state
@@ -238,7 +238,7 @@ fn compression_segment_structure() {
 #[cfg(feature = "testing")]
 #[test]
 fn compression_writer_preserves_processor_eidos_compression_contract() {
-    let init_state = random_state_with_packed_cv();
+    let init_state: HasherState = rand_array();
     let block = eidos_compression::unpack_block(core::array::from_fn(|i| init_state[i]));
     let cv = Digest::new(core::array::from_fn(|i| init_state[BLOCK_LEN + i]));
     let h = eidos_compression::unpack_word(cv);
@@ -273,7 +273,7 @@ fn compression_writer_preserves_processor_eidos_compression_contract() {
 fn compression_deduplication() {
     // Two identical COMPRESS inputs collapse to one compression block with multiplicity 2.
     let mut hasher = Hasher::default();
-    let init_state = random_state_with_packed_cv();
+    let init_state: HasherState = rand_array();
     let (addr1, result1) = hasher.compress(init_state);
     let (addr2, result2) = hasher.compress(init_state); // same state
 
@@ -739,14 +739,6 @@ fn footer_cv_pair(trace: &[Vec<Felt>], row: usize) -> Felt {
 
 fn compress_state(mut state: HasherState) -> HasherState {
     hasher::compress_state(&mut state);
-    state
-}
-
-fn random_state_with_packed_cv() -> HasherState {
-    let mut state: HasherState = rand_array();
-    for value in &mut state[BLOCK_LEN..] {
-        *value = Felt::new_unchecked(value.as_canonical_u64() & 0x7fff_ffff_ffff_ffff);
-    }
     state
 }
 

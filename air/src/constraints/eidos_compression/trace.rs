@@ -242,11 +242,12 @@ where
     let mut write_footer_interface = |row: &mut EidosCompressionFeltRow, output: &[u64; 4]| {
         write_mvm_footer_interface(row, output, mode);
     };
-    write_core_felt_trace_block_into_zeroed_with_lookups(
+    write_felt_trace_block_with_interface(
         rows,
         block,
         h,
         compression_cycle_id,
+        !matches!(mode, TraceMode::AeadXof { .. }),
         recorder,
         &mut write_footer_interface,
     )
@@ -276,6 +277,30 @@ where
     R: ByteLookupRecorder,
     W: FnMut(&mut EidosCompressionFeltRow, &[u64; 4]),
 {
+    write_felt_trace_block_with_interface(
+        rows,
+        block,
+        h,
+        compression_cycle_id,
+        true,
+        recorder,
+        write_footer_interface,
+    )
+}
+
+fn write_felt_trace_block_with_interface<R, W>(
+    rows: &mut [EidosCompressionFeltRow],
+    block: [u32; 16],
+    h: [u32; 8],
+    compression_cycle_id: u64,
+    finalize_output: bool,
+    recorder: &mut R,
+    write_footer_interface: &mut W,
+) -> [u32; 16]
+where
+    R: ByteLookupRecorder,
+    W: FnMut(&mut EidosCompressionFeltRow, &[u64; 4]),
+{
     assert!(
         rows.len() >= BLOCK_PERIOD,
         "32-row EidosCompression writer needs at least one full block",
@@ -292,6 +317,7 @@ where
         h,
         initial_working_state(h),
         compression_cycle_id,
+        finalize_output,
         recorder,
         write_footer_interface,
     )
@@ -347,6 +373,7 @@ where
         h,
         initial_working_state(h),
         compression_cycle_id,
+        !matches!(mode, TraceMode::AeadXof { .. }),
         recorder,
         &mut write_footer_interface,
     )
@@ -387,6 +414,7 @@ where
         h,
         v,
         compression_cycle_id,
+        !matches!(mode, TraceMode::AeadXof { .. }),
         recorder,
         &mut write_footer_interface,
     )
@@ -416,6 +444,7 @@ fn write_core_trace_rows_from_state<T, R, W>(
     h: [u32; 8],
     mut v: [u32; 16],
     compression_cycle_id: u64,
+    finalize_output: bool,
     recorder: &mut R,
     write_footer_interface: &mut W,
 ) -> [u32; 16]
@@ -436,6 +465,7 @@ where
         h,
         v,
         compression_cycle_id,
+        finalize_output,
         recorder,
         write_footer_interface,
     );
@@ -516,6 +546,7 @@ pub(super) fn write_footer_rows<T, R>(
         h,
         v,
         compression_cycle_id,
+        !matches!(mode, TraceMode::AeadXof { .. }),
         recorder,
         &mut write_footer_interface,
     );
@@ -527,6 +558,7 @@ fn write_core_footer_rows<T, R, W>(
     h: [u32; 8],
     v: [u32; 16],
     compression_cycle_id: u64,
+    finalize_output: bool,
     recorder: &mut R,
     write_footer_interface: &mut W,
 ) where
@@ -534,7 +566,12 @@ fn write_core_footer_rows<T, R, W>(
     R: ByteLookupRecorder,
     W: FnMut(&mut T, &[u64; 4]),
 {
-    let matrix_rows = matrix_accumulator_rows(raw_xof_output(v, h));
+    // AEAD uses the raw XOF words and stores its clock instead of matrix accumulators.
+    let matrix_rows = if finalize_output {
+        matrix_accumulator_rows(raw_xof_output(v, h))
+    } else {
+        [[Felt::ZERO; 4]; FOOTER_ROWS]
+    };
     let r_values = packed_message_values(block);
     let footer_canonicality = footer_canonicality_witnesses(block, h);
 
@@ -580,6 +617,7 @@ pub fn write_core_felt_footer_rows<R, W>(
         h,
         final_v,
         compression_cycle_id,
+        true,
         recorder,
         write_footer_interface,
     );
