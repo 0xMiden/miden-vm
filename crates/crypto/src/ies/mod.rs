@@ -43,15 +43,15 @@ use thiserror::Error;
 
 /// Supported IES wire schemes.
 ///
-/// The discriminant is serialized in keys and sealed messages. Changing an assigned value requires
-/// a wire-format migration.
+/// The discriminant is serialized in keys and sealed messages. Assigned values must not be reused.
+/// IDs 2 and 3 are reserved for the unsupported Poseidon2 schemes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum IesScheme {
     K256XChaCha20Poly1305 = 0,
     X25519XChaCha20Poly1305 = 1,
-    K256AeadEidos = 2,
-    X25519AeadEidos = 3,
+    K256AeadEidos = 4,
+    X25519AeadEidos = 5,
 }
 
 impl TryFrom<u8> for IesScheme {
@@ -60,8 +60,8 @@ impl TryFrom<u8> for IesScheme {
         match value {
             0 => Ok(IesScheme::K256XChaCha20Poly1305),
             1 => Ok(IesScheme::X25519XChaCha20Poly1305),
-            2 => Ok(IesScheme::K256AeadEidos),
-            3 => Ok(IesScheme::X25519AeadEidos),
+            4 => Ok(IesScheme::K256AeadEidos),
+            5 => Ok(IesScheme::X25519AeadEidos),
             _ => Err(IesError::UnsupportedScheme),
         }
     }

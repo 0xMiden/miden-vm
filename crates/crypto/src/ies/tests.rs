@@ -1037,13 +1037,15 @@ mod keys_serialization_tests {
 
     #[test]
     fn scheme_tags_are_stable_and_distinct() {
-        let tags = [
-            IesScheme::K256XChaCha20Poly1305 as u8,
-            IesScheme::X25519XChaCha20Poly1305 as u8,
-            IesScheme::K256AeadEidos as u8,
-            IesScheme::X25519AeadEidos as u8,
-        ];
-        assert_eq!(tags, [0, 1, 2, 3]);
+        for (tag, scheme) in [
+            (0, IesScheme::K256XChaCha20Poly1305),
+            (1, IesScheme::X25519XChaCha20Poly1305),
+            (4, IesScheme::K256AeadEidos),
+            (5, IesScheme::X25519AeadEidos),
+        ] {
+            assert_eq!(u8::from(scheme), tag);
+            assert_eq!(IesScheme::try_from(tag).unwrap(), scheme);
+        }
     }
 
     #[test]
@@ -1061,28 +1063,41 @@ mod keys_serialization_tests {
     }
 
     #[test]
-    fn sealing_from_bytes_rejects_unknown_scheme() {
-        let bytes = vec![0xff];
-
-        match <SealingKey as Deserializable>::read_from_bytes(&bytes) {
-            Err(DeserializationError::InvalidValue(msg)) => {
-                assert!(msg.contains("Unsupported IES scheme"), "unexpected error message: {msg}");
-            },
-            Err(err) => panic!("unexpected error: {err:?}"),
-            Ok(_) => panic!("expected unsupported scheme error"),
+    fn sealing_from_bytes_rejects_retired_and_unknown_schemes() {
+        for tag in [2, 3, 0xff] {
+            match SealingKey::read_from_bytes(&[tag]) {
+                Err(DeserializationError::InvalidValue(msg)) => {
+                    assert!(msg.contains("Unsupported IES scheme"), "unexpected error: {msg}");
+                },
+                Err(err) => panic!("unexpected error for scheme {tag}: {err:?}"),
+                Ok(_) => panic!("accepted unsupported scheme {tag}"),
+            }
         }
     }
 
     #[test]
-    fn unsealing_from_bytes_rejects_unknown_scheme() {
-        let bytes = vec![0xff];
+    fn unsealing_from_bytes_rejects_retired_and_unknown_schemes() {
+        for tag in [2, 3, 0xff] {
+            match UnsealingKey::read_from_bytes(&[tag]) {
+                Err(DeserializationError::InvalidValue(msg)) => {
+                    assert!(msg.contains("Unsupported IES scheme"), "unexpected error: {msg}");
+                },
+                Err(err) => panic!("unexpected error for scheme {tag}: {err:?}"),
+                Ok(_) => panic!("accepted unsupported scheme {tag}"),
+            }
+        }
+    }
 
-        match <UnsealingKey as Deserializable>::read_from_bytes(&bytes) {
-            Err(DeserializationError::InvalidValue(msg)) => {
-                assert!(msg.contains("Unsupported IES scheme"), "unexpected error message: {msg}");
-            },
-            Err(err) => panic!("unexpected error: {err:?}"),
-            Ok(_) => panic!("expected unsupported scheme error"),
+    #[test]
+    fn sealed_message_from_bytes_rejects_retired_and_unknown_schemes() {
+        for tag in [2, 3, 0xff] {
+            match SealedMessage::read_from_bytes(&[tag]) {
+                Err(DeserializationError::InvalidValue(msg)) => {
+                    assert!(msg.contains("Unsupported scheme"), "unexpected error: {msg}");
+                },
+                Err(err) => panic!("unexpected error for scheme {tag}: {err:?}"),
+                Ok(_) => panic!("accepted unsupported scheme {tag}"),
+            }
         }
     }
 }

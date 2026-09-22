@@ -32,6 +32,9 @@ pub use large::{
     RocksDbSnapshotStorage, RocksDbStorage, RocksDbTuningOptions, RocksDbWriteBufferManagerBudget,
 };
 
+#[cfg(feature = "rocksdb")]
+mod persistent_hash;
+
 mod large_forest;
 pub use large_forest::{
     AppliedLineageMutation, Backend, BackendError, BackendReader, Config as ForestConfig,

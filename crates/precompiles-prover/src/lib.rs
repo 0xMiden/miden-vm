@@ -15,7 +15,6 @@ pub use deferred::session::{SessionInputError, WitnessLocation};
 use miden_core::deferred::PrecompileWitness;
 pub use miden_core::proof::{HashFunction, PrecompileProof, StarkProof};
 
-pub(crate) mod composite;
 pub(crate) mod ec;
 pub(crate) mod hash;
 pub(crate) mod logup;

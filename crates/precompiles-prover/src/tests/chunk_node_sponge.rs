@@ -15,7 +15,6 @@ use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
-    composite::extract_band,
     hash::{
         chunk::{self, ChunkAir, trace::ChunkRequires},
         chunk_node,
@@ -32,7 +31,9 @@ use crate::{
     logup::{Challenges, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    tests::{assert_same_rational_fold, log_quotient_degree, sum_rational_folds},
+    tests::{
+        assert_same_rational_fold, log_quotient_degree, sum_rational_folds, utils::extract_band,
+    },
     transcript::eidos::trace::EidosRequires,
 };
 

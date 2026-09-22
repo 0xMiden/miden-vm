@@ -17,12 +17,11 @@ use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
-    composite::extract_band,
     logup::{NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
     math::{U256, from_limbs16, mac_reduce, to_limbs16, to_limbs32},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    tests::{add_rational_folds, assert_same_rational_fold},
+    tests::{add_rational_folds, assert_same_rational_fold, utils::extract_band},
     uint::{
         CARRY_HI_BEGIN, CARRY_LO_BEGIN, COL_PTR, NUM_MAIN_COLS, PERIOD, TERM_CELL_GAP,
         UintStoreAir,
