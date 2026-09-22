@@ -17,9 +17,17 @@ pub fn format_syntax(config: &Config, root: &SyntaxNode) -> String {
     let (entries, tail) = analyze_children(source.syntax());
 
     for entry in entries {
+        let item = Item::cast(entry.node.clone()).expect("expected top-level item");
+        // A doc comment on the first line documents the module, so keep an item doc off it.
+        if lines.is_empty()
+            && entry.blank_lines_before > 0
+            && entry.leading_comments.is_empty()
+            && matches!(item, Item::Doc(_))
+        {
+            lines.push(String::new());
+        }
         emit_leading_layout(&mut lines, &entry, 0);
 
-        let item = Item::cast(entry.node).expect("expected top-level item");
         let mut rendered = render_item(&item, 0, config);
         if let Some(comment) = entry.trailing_comment {
             append_inline_comment(&mut rendered, &comment);
@@ -1779,9 +1787,12 @@ mod tests {
     use std::{
         fs,
         path::{Path, PathBuf},
+        sync::Arc,
     };
 
+    use miden_assembly_syntax::parser::ModuleParser;
     use miden_assembly_syntax_cst::parse_text;
+    use miden_debug_types::DefaultSourceManager;
 
     use super::{Config, format_syntax};
 
@@ -1866,7 +1877,7 @@ end
         ]
     }
 
-    fn assert_format_idempotent(input: &str, label: impl core::fmt::Display) {
+    fn assert_format_idempotent(input: &str, label: impl core::fmt::Display) -> String {
         let config = Config::default();
         let parse = parse_text(input);
         assert!(
@@ -1885,6 +1896,18 @@ end
 
         let reformatted = format_syntax(&config, &reparsed.syntax());
         assert_eq!(reformatted, formatted, "formatter was not idempotent for {label}");
+        formatted
+    }
+
+    fn print_parsed_module(source: &str, label: impl core::fmt::Display) -> String {
+        ModuleParser::new(None)
+            .parse_str(
+                Some(miden_assembly_syntax::Path::new("::formatter_test")),
+                source,
+                Arc::new(DefaultSourceManager::default()),
+            )
+            .unwrap_or_else(|error| panic!("failed to parse {label}: {error:?}"))
+            .to_string()
     }
 
     #[test]
@@ -1905,8 +1928,21 @@ end
         for path in files {
             let source = fs::read_to_string(&path)
                 .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
-            assert_format_idempotent(&source, path.display());
+            let formatted = assert_format_idempotent(&source, path.display());
+            assert_eq!(
+                print_parsed_module(&formatted, path.display()),
+                print_parsed_module(&source, path.display()),
+                "formatting changed what {} parses to",
+                path.display()
+            );
         }
+    }
+
+    #[test]
+    fn keeps_a_leading_item_doc_off_the_first_line() {
+        let source = "\n#! item doc\nproc foo\n    push.1\nend\n";
+        let formatted = format_syntax(&Config::default(), &parse_text(source).syntax());
+        assert_eq!(formatted, source);
     }
 
     #[test]

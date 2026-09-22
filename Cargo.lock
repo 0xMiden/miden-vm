@@ -2363,6 +2363,7 @@ name = "miden-format"
 version = "0.34.0"
 dependencies = [
  "clap",
+ "miden-assembly-syntax",
  "miden-assembly-syntax-cst",
  "miden-debug-types",
  "serde",
