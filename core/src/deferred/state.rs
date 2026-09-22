@@ -33,8 +33,21 @@ impl DeferredState {
         Ok(state)
     }
 
+    /// Creates an admitted-witness evaluator whose untrusted input was already resource checked.
+    pub(super) fn new_for_prepared(
+        registry: Arc<PrecompileRegistry>,
+    ) -> Result<Self, PrecompileError> {
+        let mut state = Self::empty_with_limit(registry, usize::MAX);
+        state.initialize_precompile_nodes()?;
+        Ok(state)
+    }
+
     /// Creates a state seeded only with framework basics.
     fn empty(registry: Arc<PrecompileRegistry>) -> Self {
+        Self::empty_with_limit(registry, MAX_DEFERRED_ELEMENTS)
+    }
+
+    fn empty_with_limit(registry: Arc<PrecompileRegistry>, remaining_elements: usize) -> Self {
         let mut nodes = BTreeMap::new();
         nodes.insert(TRUE_DIGEST, Node::TRUE);
 
@@ -46,7 +59,7 @@ impl DeferredState {
             nodes,
             root: TRUE_DIGEST,
             evals,
-            remaining_elements: MAX_DEFERRED_ELEMENTS,
+            remaining_elements,
         }
     }
 
@@ -286,6 +299,29 @@ impl DeferredState {
         }
     }
 
+    /// Inserts a node whose digest was established by [`PrecompileWitness::prepare`].
+    pub(super) fn insert_prepared_node(
+        &mut self,
+        digest: Digest,
+        node: Node,
+    ) -> Result<(), PrecompileError> {
+        match self.nodes.get(&digest) {
+            Some(existing) if existing == &node => Ok(()),
+            Some(_) => Err(DeferredError::ConflictingNode.into()),
+            None => {
+                let required = node.storage_felt_len();
+                self.remaining_elements = self.remaining_elements.checked_sub(required).ok_or(
+                    DeferredError::DeferredStateTooLarge {
+                        num_elements: required,
+                        max: self.remaining_elements,
+                    },
+                )?;
+                self.nodes.insert(digest, node);
+                Ok(())
+            },
+        }
+    }
+
     /// Records an evaluation memo and stores its canonical node in `nodes` for downstream
     /// references.
     fn record_eval(
@@ -381,7 +417,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt, ZERO,
-        deferred::{Payload, Precompile, precompile_id},
+        deferred::{Payload, Precompile, WorkClass, WorkItem, precompile_id},
     };
 
     #[derive(Debug, Clone, Copy)]
@@ -398,6 +434,10 @@ mod tests {
 
         fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
             (args == [ZERO; 3]).then_some(NodeType::Data)
+        }
+
+        fn work(&self, _args: [Felt; 3], _payload: &Payload) -> Result<WorkItem, PrecompileError> {
+            Ok(WorkItem::new(WorkClass::new("rejecting"), 1))
         }
 
         fn evaluate(

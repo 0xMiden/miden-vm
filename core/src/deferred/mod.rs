@@ -14,6 +14,7 @@ mod precompile;
 mod precompile_registry;
 mod state;
 mod wire;
+mod work;
 
 use alloc::boxed::Box;
 
@@ -22,7 +23,14 @@ pub use node::{DataChunk, Digest, Node, NodeType, Payload, TRUE_DIGEST, Tag};
 pub use precompile::{Precompile, precompile_id};
 pub use precompile_registry::PrecompileRegistry;
 pub use state::{DeferredContext, DeferredState};
-pub use wire::{IntegrityError, PrecompileWitness, WireEntry as PrecompileWitnessEntry};
+pub use wire::{
+    IntegrityError, PrecompileWitness, PreparationError, PreparedNode, PreparedWitness,
+    WireEntry as PrecompileWitnessEntry,
+};
+pub use work::{
+    PrecompileLimitError, PrecompileLimits, PrecompileWork, WorkClass, WorkItem, WorkLimit,
+    WorkSummary,
+};
 
 use crate::Word;
 

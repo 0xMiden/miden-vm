@@ -5,7 +5,7 @@ use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use super::precompile::{Precompile, precompile_id};
 use crate::{
     Felt,
-    deferred::{DeferredContext, Node, NodeType, PrecompileError, Tag},
+    deferred::{DeferredContext, Node, NodeType, PrecompileError, Tag, WorkItem},
 };
 
 /// Installed set of precompiles for deferred-node validation and evaluation.
@@ -120,6 +120,18 @@ impl PrecompileRegistry {
         Ok(node_type)
     }
 
+    /// Declares the work represented by a validated precompile-owned node.
+    pub(crate) fn work(&self, node: &Node) -> Result<WorkItem, PrecompileError> {
+        let tag = node.tag();
+        if tag.is_framework_reserved() {
+            return Err(PrecompileError::InvalidNode);
+        }
+        let precompile = self.precompiles.get(&tag.id()).ok_or(PrecompileError::InvalidNode)?;
+        precompile
+            .work(tag.args(), node.payload())
+            .map_err(|source| PrecompileError::with_precompile(precompile.name(), source))
+    }
+
     /// Evaluates a node through the precompile selected by its tag id.
     ///
     /// Failures are wrapped with the owning precompile's name so callers can distinguish routing
@@ -157,7 +169,7 @@ mod tests {
     use super::*;
     use crate::{
         ONE, ZERO,
-        deferred::{DeferredState, Payload},
+        deferred::{DeferredState, Payload, WorkClass, WorkItem},
     };
 
     /// Minimal honest precompile fixture for registry-routing tests.
@@ -191,6 +203,9 @@ mod tests {
             }
             Some(NodeType::Data)
         }
+        fn work(&self, _args: [Felt; 3], _payload: &Payload) -> Result<WorkItem, PrecompileError> {
+            Ok(WorkItem::new(WorkClass::new("fixture"), 1))
+        }
         fn evaluate(
             &self,
             args: [Felt; 3],
@@ -217,6 +232,9 @@ mod tests {
         }
         fn decode(&self, _args: [Felt; 3]) -> Option<NodeType> {
             Some(NodeType::True)
+        }
+        fn work(&self, _args: [Felt; 3], _payload: &Payload) -> Result<WorkItem, PrecompileError> {
+            unreachable!("registry must reject precompile-owned NodeType::True")
         }
         fn evaluate(
             &self,

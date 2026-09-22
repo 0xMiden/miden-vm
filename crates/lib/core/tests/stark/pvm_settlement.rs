@@ -244,7 +244,15 @@ impl Host for PvmSettlementHost {
             let available_root = self
                 .precompile_witnesses
                 .iter()
-                .map(PrecompileWitness::root_unchecked)
+                .map(|witness| {
+                    witness
+                        .prepare(
+                            Arc::new(miden_precompiles::registry()),
+                            &miden_precompiles::default_precompile_limits(),
+                        )
+                        .expect("execution-produced witness must prepare")
+                        .root()
+                })
                 .reduce(fold_deferred_root)
                 .expect("settlement requires at least one witness");
             if requested_root != available_root {
