@@ -340,12 +340,13 @@ where
 
     // Build aux traces in instance order. The output shapes are trusted (see
     // trust contract above); a malformed output is caught downstream by the
-    // LDE/commit or by verification.
+    // LDE/commit or by verification. Consume each main trace so it is released
+    // as soon as its auxiliary trace has been built.
     let aux_inputs = statement.aux_inputs();
     let (mut aux_traces_ef, mut all_aux_values): (Vec<_>, Vec<_>) = info_span!("build aux traces")
         .in_scope(|| {
             airs.par_iter()
-                .zip(traces.par_iter())
+                .zip(traces.into_par_iter())
                 .map(|(air, main)| {
                     let num_randomness = air.num_randomness();
                     debug_assert!(
@@ -353,7 +354,7 @@ where
                         "AIR requested more aux randomness than the shared challenge pool contains",
                     );
                     let (trace, values) = air.build_aux_trace(
-                        main,
+                        &main,
                         air_inputs,
                         aux_inputs,
                         &randomness[..num_randomness],
@@ -383,10 +384,6 @@ where
             return Err(ProverError::ExternalAssertionFailed { assertion: k });
         }
     }
-
-    // Auxiliary trace construction is the last use of the main traces. Release
-    // them before the quotient and opening phases.
-    drop(traces);
 
     // External assertions are defined in instance-order terms; now reorder aux
     // traces and aux values to proof order for commitment and the prover loop.
