@@ -22,7 +22,7 @@ pub(crate) fn generate_trace(requires: EidosRequires) -> RowMajorMatrix<Felt> {
 
 /// Deterministic compression cycles with distinct blocks, chaining values, and metadata.
 fn synthetic_cycles(count: usize) -> alloc::vec::Vec<super::CompressionCycle> {
-    use miden_core::{Word, field::PrimeCharacteristicRing};
+    use miden_core::Word;
 
     (0..count)
         .map(|cycle| super::CompressionCycle {
@@ -43,8 +43,6 @@ fn synthetic_cycles(count: usize) -> alloc::vec::Vec<super::CompressionCycle> {
 #[test]
 fn compression_trace_matches_regenerated_cycles() {
     use alloc::vec;
-
-    use miden_core::field::PrimeCharacteristicRing;
 
     use super::{
         EIDOS_COMPRESSION_CYCLE_LEN, NUM_EIDOS_COMPRESSION_COLS, build_eidos_compression_trace,
@@ -87,8 +85,6 @@ fn compression_trace_matches_regenerated_cycles() {
 fn padding_copies_match_regenerated_cycles() {
     use alloc::vec;
 
-    use miden_core::field::PrimeCharacteristicRing;
-
     use super::{
         EIDOS_COMPRESSION_CYCLE_LEN, NUM_EIDOS_COMPRESSION_COLS, fill_padding_cycles,
         write_compression_cycle,
@@ -129,8 +125,6 @@ fn padding_copies_match_regenerated_cycles() {
 #[test]
 fn parallel_cycle_fill_matches_sequential_trace_and_lookups() {
     use alloc::vec;
-
-    use miden_core::field::PrimeCharacteristicRing;
 
     use super::{
         EIDOS_COMPRESSION_CYCLE_LEN, NUM_EIDOS_COMPRESSION_COLS, fill_compression_cycles_parallel,

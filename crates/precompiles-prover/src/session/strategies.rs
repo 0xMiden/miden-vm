@@ -1,29 +1,12 @@
-//! Pre-packaged MSM addition-chain strategies, layered on the Session's
-//! MSM levers ([`msm_intro`](Session::msm_intro) /
-//! [`msm_combine`](Session::msm_combine) / [`msm_neg`](Session::msm_neg)).
+//! MSM addition-chain strategies over [`Session`].
 //!
-//! Building a good addition chain for a multi-scalar multiplication is
-//! NP-hard in general, so there is no single right chain — only heuristics
-//! (Straus / Shamir, wNAF, GLV, Pippenger, …). The EcMsm chiplet is
-//! deliberately **strategy-agnostic**: it checks only that each `combine`
-//! is sound, never *which* chain produced the claim. So these helpers are
-//! optional conveniences — a caller may use one, roll their own, or mix —
-//! and they live *beside* the Session (free functions over `&mut Session`)
-//! rather than on it, keeping the Session's own surface DAG-level.
-//!
-//! Two shapes here. [`straus`] / [`joint_naf`] are **joint** strategies: one
-//! interleaved double-and-add over a table of *all* the bases — good when
-//! the bases are unrelated and used once. The **wNAF** path is **separate**:
-//! [`wnaf_table`] precomputes one base's odd multiples into a [`WnafTable`]
-//! (stage 1), and [`wnaf_scalarmul`] takes that table as input to lay `k·P`
-//! (stage 2). Splitting it lets a **recurring base reuse its table** — the
-//! generator `G` across an N-batch of `kᵢ·G + …` is precomputed once and
-//! every instance rides it (the table's combines bus-dedup to one copy).
-//!
-//! Each returns the combined [`EcExprPtr`]; tie it to a claimed point with
-//! [`Session::ec_msm`].
+//! [`wnaf_table`] precomputes a base's odd multiples. The resulting [`WnafTable`] can be
+//! reused by [`wnaf_scalarmul`] or [`joint_wnaf_with_tables`] across multiple claims.
+//! Each strategy returns an [`EcExprPtr`]; bind it to a claimed point with [`Session::ec_msm`].
 
-use alloc::{vec, vec::Vec};
+#[cfg(test)]
+use alloc::vec;
+use alloc::vec::Vec;
 
 use miden_precompiles::glv_decompose;
 
@@ -50,6 +33,7 @@ use crate::{
 /// the table is `2ᵏ`. Panics if `terms` is empty, `k > 16`, or every scalar
 /// is zero. (A zero scalar wastes its base's intro + table entries; drop
 /// such terms before calling.)
+#[cfg(test)]
 pub fn straus(session: &mut Session, terms: &[(EcNode, U256)]) -> EcExprPtr {
     let k = terms.len();
     assert!(k >= 1, "an MSM needs at least one base");
@@ -110,6 +94,7 @@ pub fn straus(session: &mut Session, terms: &[(EcNode, U256)]) -> EcExprPtr {
 /// A 2-base strategy (the signed table is `3ᵏ`-ish): `terms` must hold
 /// exactly two `(base, scalar value)` pairs. Returns the combined MSM
 /// expression. Panics if `terms.len() != 2` or both scalars are zero.
+#[cfg(test)]
 pub fn joint_naf(session: &mut Session, terms: &[(EcNode, U256)]) -> EcExprPtr {
     assert_eq!(terms.len(), 2, "joint_naf is a 2-base strategy");
 
@@ -252,6 +237,7 @@ pub fn wnaf_scalarmul(session: &mut Session, table: &WnafTable, k: U256) -> EcEx
 /// generator's, built once with [`wnaf_table`]) is reused across the batch
 /// rather than rebuilt per term. Returns the combined MSM expression. Panics
 /// if `terms` is empty.
+#[cfg(test)]
 pub fn wnaf_msm(session: &mut Session, terms: &[(&WnafTable, U256)]) -> EcExprPtr {
     let mut acc: Option<EcExprPtr> = None;
     for &(table, k) in terms {
@@ -288,6 +274,7 @@ pub fn wnaf_msm(session: &mut Session, terms: &[(&WnafTable, U256)]) -> EcExprPt
 /// signatures — build its table once with [`wnaf_table`] and drive the same
 /// interleaved ladder with [`joint_wnaf_with_tables`] instead, so the
 /// recurring base's table is laid once rather than rebuilt per call.
+#[cfg(test)]
 pub fn joint_wnaf(session: &mut Session, terms: &[(EcNode, U256)], w: usize) -> EcExprPtr {
     let tables: Vec<WnafTable> = terms.iter().map(|(p, _)| wnaf_table(session, p, w)).collect();
     let table_terms: Vec<(&WnafTable, U256)> =
@@ -295,7 +282,7 @@ pub fn joint_wnaf(session: &mut Session, terms: &[(EcNode, U256)], w: usize) -> 
     joint_wnaf_with_tables(session, &table_terms)
 }
 
-/// The interleaved wNAF ladder behind [`joint_wnaf`], taking already-built
+/// An interleaved wNAF ladder taking already-built
 /// [`WnafTable`]s instead of building one per base — lets a caller reuse a
 /// recurring base's table (built once via [`wnaf_table`]) across many MSM
 /// claims instead of rebuilding it per claim. Each table drives its own digit
@@ -415,6 +402,7 @@ pub fn glv_joint_wnaf_with_tables(
 /// Non-adjacent form of `k` (digits LSB-first, each in `{−1, 0, 1}`, no two
 /// adjacent nonzero) — ~⅓ density vs binary's ½. `d = 2 − (k mod 4)` on the
 /// odd steps (`k mod 4 ∈ {1, 3} → d ∈ {1, −1}`), then `k ← (k − d)/2`.
+#[cfg(test)]
 fn naf(mut k: U256) -> Vec<i8> {
     let one = U256::from(1u64);
     let mut out = Vec::new();
@@ -434,8 +422,7 @@ fn naf(mut k: U256) -> Vec<i8> {
 /// Width-`w` non-adjacent form of `k` (digits LSB-first): each nonzero digit
 /// is **odd** with `|d| < 2^{w-1}`, separated by ≥ `w−1` zeros — density
 /// ≈ `1/(w+1)`. On an odd step `d = k mods 2^w` (the signed low `w` bits),
-/// then `k ← k − d` (now even); every step halves `k`. (The `w = 2` case is
-/// [`naf`].) `w ≤ 8`, so each digit fits an `i8`.
+/// then `k ← k − d` (now even); every step halves `k`. `w ≤ 8`, so each digit fits an `i8`.
 fn wnaf(mut k: U256, w: usize) -> Vec<i8> {
     let half = 1u64 << (w - 1); // 2^{w-1}
     let modulus = 1u64 << w; // 2^w

@@ -7,7 +7,7 @@
 use std::{vec, vec::Vec};
 
 use miden_air::lookup::{
-    LookupAir, LookupFractions, ProverLookupBuilder, build_lookup_fractions,
+    LookupFractions, build_lookup_fractions,
     debug::{ValidateLayout, ValidateLookupAir},
 };
 use miden_core::{

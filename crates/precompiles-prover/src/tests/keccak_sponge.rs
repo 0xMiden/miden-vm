@@ -8,10 +8,7 @@
 
 use std::{borrow::Cow, vec, vec::Vec};
 
-use miden_air::lookup::{
-    LookupAir, ProverLookupBuilder,
-    debug::{ValidateLayout, ValidateLookupAir},
-};
+use miden_air::lookup::debug::{ValidateLayout, ValidateLookupAir};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},

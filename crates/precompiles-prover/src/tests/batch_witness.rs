@@ -3,8 +3,8 @@ use alloc::{collections::BTreeMap, sync::Arc, vec, vec::Vec};
 use miden_core::{
     Felt,
     deferred::{
-        DEFERRED_AND_FRAME, DeferredError, Digest, Node, Precompile, PrecompileWitness,
-        PrecompileWitnessEntry, TRUE_DIGEST, fold_deferred_root,
+        DeferredError, Digest, Node, Precompile, PrecompileWitness, PrecompileWitnessEntry,
+        TRUE_DIGEST, fold_deferred_root,
     },
 };
 use miden_crypto::hash::eidos::{DomainTag, DomainVersion, EidosFrame, namespace};

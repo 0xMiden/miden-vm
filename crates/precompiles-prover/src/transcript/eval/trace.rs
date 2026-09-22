@@ -3,7 +3,7 @@
 //! The transcript is built **explicitly** from [`Truthy`] and
 //! [`UintNode`] handles. A `Truthy` stands for a `Binding(hash, True)`
 //! claim — issued for a binding a downstream chip provides
-//! ([`issue`](TranscriptEvalRequires::issue), e.g. the keccak chip's
+//! ([`issue_keccak`](TranscriptEvalRequires::issue_keccak) for the Keccak chip's
 //! `Binding(H_keccak, True)`), as a `ZERO_HASH` leaf
 //! ([`zero`](TranscriptEvalRequires::zero)), for an explicit uint pin
 //! claim, or by the `Is` predicate. A `UintNode` stands for a
@@ -41,11 +41,10 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use miden_core::{
     Felt,
     deferred::{DEFERRED_AND_FRAME, Digest, EidosFrame, fold_deferred_root},
-    field::QuadFelt,
     program::domain::PvmUintPinClaimDomain,
     utils::RowMajorMatrix,
 };
-use miden_crypto::hash::eidos::{Eidos, EidosDomain};
+use miden_crypto::hash::eidos::Eidos;
 use miden_precompiles::{CurveId, CurvePrecompile, UintDomain, UintPrecompile};
 
 use crate::{
@@ -54,7 +53,6 @@ use crate::{
         msm::trace::{EcExprPtr, EcMsmRequires},
         trace::{EcGroupPtr, EcPointPtr},
     },
-    logup::build_logup_aux_trace,
     relations::ProvideMult,
     transcript::{
         eidos::{
@@ -70,7 +68,7 @@ use crate::{
             COL_IS_SUB, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_LHS_BEGIN, COL_LHS_END, COL_MSM_EXPR,
             COL_MSM_IDX, COL_MSM_IS_HEAD, COL_OUT_MULT, COL_PIN_CLAIM_BOUND_PTR,
             COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_RHS_BEGIN, COL_RHS_END, COL_UINT_VALUE_BOUND_PTR,
-            DIGEST_WIDTH, NUM_MAIN_COLS, TranscriptEvalAir,
+            DIGEST_WIDTH, NUM_MAIN_COLS,
         },
         nodes::{EcOpId, UintOpId},
     },
@@ -328,6 +326,7 @@ impl TranscriptEvalRequires {
     /// Issues a handle for a `Binding(hash, True)` provided by another chiplet. The provider emits
     /// the bus entry; the eval chip consumes it only when the handle is folded, so no eval row is
     /// added.
+    #[cfg(test)]
     pub fn issue(&mut self, hash: EidosDigest) -> Truthy {
         self.fresh(hash)
     }
@@ -371,11 +370,8 @@ impl TranscriptEvalRequires {
         out
     }
 
-    /// Record a uint value row (shared by [`uint_leaf`](Self::uint_leaf) and
-    /// [`pin_uint`](Self::pin_uint)): drive the Eidos absorption of `lo ‖ hi` under either
-    /// the runtime uint VALUE frame or the explicit pin-claim frame, then push the row. Returns
-    /// the
-    /// node id + hash.
+    /// Records a uint value row under the runtime VALUE frame or explicit pin-claim frame.
+    /// Returns the node ID and its Eidos digest.
     fn push_uint_leaf(
         &mut self,
         ptr: UintPtr,
@@ -919,6 +915,7 @@ impl TranscriptEvalRequires {
     /// The frame is `(PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr = ptr, 0)`, and the row
     /// consumes the complete `UintVal` message at `ptr`. The returned handle is foldable into the
     /// initial/root transcript exactly like any [`Truthy`].
+    #[cfg(test)]
     pub fn pin_uint(
         &mut self,
         ptr: UintPtr,
@@ -1230,17 +1227,4 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
 /// Row 0's `h[4]` columns (the first-row root pin) as a digest.
 fn root_hash(trace: &[Felt]) -> EidosDigest {
     EidosDigest(core::array::from_fn(|i| trace[COL_H_BEGIN + i]))
-}
-
-// PROVER
-// ================================================================================================
-
-/// Aux-trace builder for [`TranscriptEvalAir`] — the generic
-/// [`build_logup_aux_trace`] driver. Called by the AIR's
-/// `LiftedAir::build_aux_trace`.
-pub(crate) fn build_aux(
-    main: &RowMajorMatrix<Felt>,
-    challenges: &[QuadFelt],
-) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    build_logup_aux_trace(&TranscriptEvalAir, main, challenges)
 }

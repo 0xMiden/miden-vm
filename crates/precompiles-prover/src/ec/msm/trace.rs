@@ -1,4 +1,4 @@
-//! [`EcMsmAir`] trace generation, the recording accumulator, and the
+//! [`super::EcMsmAir`] trace generation, the recording accumulator, and the
 //! LogUp aux builder.
 //!
 //! Each expression lays a run of term rows (`intro`, `intro_zero`, and `intro_endo`: one;
@@ -9,8 +9,10 @@
 
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 
-use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
+use miden_core::{Felt, utils::RowMajorMatrix};
 
+#[cfg(test)]
+use super::EcMsmAir;
 use super::{
     COL_A_DIFF_HI, COL_A_DIFF_LO, COL_A_EXPR, COL_A_PTR, COL_ACT, COL_B_DIFF_HI, COL_B_DIFF_LO,
     COL_B_EXPR, COL_B_PTR, COL_BASE, COL_BASE_A, COL_BASE_B, COL_BETA_PTR, COL_BOUND_PTR,
@@ -18,11 +20,10 @@ use super::{
     COL_GROUP_PTR, COL_I, COL_IDX, COL_IS_BOUNDARY, COL_IS_COMBINE, COL_IS_INTRO,
     COL_IS_INTRO_ZERO, COL_IS_NEG, COL_J, COL_LAMBDA_PTR, COL_MULT, COL_NEG_MINTED, COL_NEG_X,
     COL_NEG_YA, COL_NEG_YR, COL_S_A, COL_S_B, COL_SBOUND_PTR, COL_SCALAR, COL_TAKE_A, COL_TAKE_B,
-    COL_TAKE_BOTH, COL_VAL, COL_VAL_A, COL_VAL_B, EcMsmAir, NUM_MAIN_COLS,
+    COL_TAKE_BOTH, COL_VAL, COL_VAL_A, COL_VAL_B, NUM_MAIN_COLS,
 };
 use crate::{
     ec::trace::{EcGroupPtr, EcPointPtr},
-    logup::build_logup_aux_trace,
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::ProvideMult,
     uint::trace::{UintPtr, UintStoreRequires},
@@ -603,6 +604,7 @@ impl EcMsmRequires {
 
     /// Count of recorded expressions (ordinary, zero, and endomorphism intros; combines; and
     /// negs) — the chain-cost diagnostic for comparing addition-chain strategies.
+    #[cfg(test)]
     pub fn expr_count(&self) -> usize {
         self.exprs.len()
     }
@@ -781,18 +783,6 @@ pub fn generate_trace(
     }
 
     RowMajorMatrix::new(vals, NUM_MAIN_COLS)
-}
-
-// PROVER
-// ================================================================================================
-
-/// Witness-bearing companion to [`EcMsmAir`] — the aux trace is exactly
-/// the LogUp columns (no register).
-pub(crate) fn build_aux(
-    main: &RowMajorMatrix<Felt>,
-    challenges: &[QuadFelt],
-) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    build_logup_aux_trace(&EcMsmAir, main, challenges)
 }
 
 #[cfg(test)]

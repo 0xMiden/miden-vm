@@ -22,7 +22,6 @@ use alloc::{collections::BTreeMap, vec, vec::Vec};
 use miden_core::{
     Felt,
     deferred::{Digest, Node},
-    field::QuadFelt,
     utils::RowMajorMatrix,
 };
 use miden_precompiles::Keccak256Precompile;
@@ -32,14 +31,13 @@ use crate::{
         chunk::trace::{ChunkRequires, ChunkSeqId},
         keccak::{
             digest::KeccakDigest,
-            node::{KeccakNodeAir, NUM_HASH, NUM_MAIN_COLS},
+            node::{NUM_HASH, NUM_MAIN_COLS},
             round::RoundRequires,
             sponge::trace::{
                 Invocation as SpongeInvocation, SpongeRequires, SpongeSeqId, keccak_oracle,
             },
         },
     },
-    logup::build_logup_aux_trace,
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::ProvideMult,
     transcript::eidos::{
@@ -122,6 +120,7 @@ pub fn generate_trace(requires: KeccakNodeRequires) -> RowMajorMatrix<Felt> {
 
 /// Generates a trace from explicit invocations for standalone keccak-node tests. The local AIR
 /// constraints do not depend on which higher-level component supplied the digest bytes.
+#[cfg(test)]
 pub fn generate_trace_from_invocations(
     invocations: &[KeccakNodeInvocation],
 ) -> RowMajorMatrix<Felt> {
@@ -136,10 +135,7 @@ pub fn generate_trace_from_invocations(
     RowMajorMatrix::new(trace, NUM_MAIN_COLS)
 }
 
-/// Append one invocation's row to `trace` in column order: act,
-/// sponge_seq_id_head, n_sponge_perms, chunk_seq_id_head, n_chunks,
-/// absorption_id_chunks, len_bytes, absorption_id_digest_chunks, absorption_id_keccak,
-/// d[8], h_input_chunks[4], h_digest_chunks[4], h_keccak[4], out_mult.
+/// Appends one invocation's row, including its digest-chunk and assertion hashes.
 fn push_row(trace: &mut Vec<Felt>, inv: &KeccakNodeInvocation) {
     let len_bytes = Felt::from(inv.len_bytes);
     let d_felts: [Felt; 8] = inv.d.map(Felt::from);
@@ -191,8 +187,6 @@ pub struct KeccakNodeOutput {
 struct NodeRecord {
     invocation: KeccakNodeInvocation,
     h_keccak: EidosDigest,
-    #[allow(dead_code)]
-    keccak_digest: KeccakDigest,
 }
 
 /// Top-level dedup point for Keccak invocations. Pairs with
@@ -313,7 +307,7 @@ impl KeccakNodeRequires {
         let node_row = self.next_row;
         self.next_row += 1;
         let idx = self.records.len();
-        self.records.push(NodeRecord { invocation, h_keccak, keccak_digest });
+        self.records.push(NodeRecord { invocation, h_keccak });
         self.by_keccak.insert(keccak_digest, idx);
 
         KeccakNodeOutput { keccak_digest, h_keccak, node_row }
@@ -323,16 +317,4 @@ impl KeccakNodeRequires {
     pub fn total_rows(&self) -> u32 {
         self.next_row
     }
-}
-
-// PROVER
-// ================================================================================================
-
-/// Witness-bearing companion to [`KeccakNodeAir`]. The aux trace is
-/// produced by the generic [`build_logup_aux_trace`] driver.
-pub(crate) fn build_aux(
-    main: &RowMajorMatrix<Felt>,
-    challenges: &[QuadFelt],
-) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    build_logup_aux_trace(&KeccakNodeAir, main, challenges)
 }

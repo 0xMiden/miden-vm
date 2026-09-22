@@ -17,14 +17,12 @@ repository.workspace = true
 default = ["std"]
 concurrent = [
     "std",
-    "miden-air/concurrent",
     "miden-crypto/concurrent",
     "miden-lifted-stark/concurrent",
     "miden-precompiles-air/concurrent",
 ]
 fixture-tools = ["std", "dep:miden-precompiles-verifier"]
 std = [
-    "miden-air/std",
     "miden-core/std",
     "miden-crypto/std",
     "miden-precompiles-air/std",
@@ -33,7 +31,6 @@ std = [
 ]
 
 [dependencies]
-miden-air.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-lifted-air.workspace = true

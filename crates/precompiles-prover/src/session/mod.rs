@@ -13,14 +13,13 @@
 //! demand before the store; BPL last, since every chiplet feeds it).
 //! Callers [`keccak`](Session::keccak) inputs into
 //! [`Truthy`] claim handles, fold them into the transcript with
-//! [`assert_and`](Session::assert_and) /
-//! [`assert_and_fold`](Session::assert_and_fold), and
+//! [`assert_and`](Session::assert_and), and
 //! [`finish`](Session::finish) the chosen root into a [`SessionTraces`]
 //! bundle.
 //!
 //! **The public surface is DAG-aware only**: what a runner populating the
 //! statement from serialized deferred precompile calls needs — `keccak`,
-//! explicit `pin_uint`, the [`UintNode`] value ops (`uint_leaf`, `uint_add` / `uint_sub` /
+//! the [`UintNode`] value ops (`uint_leaf`, `uint_add` / `uint_sub` /
 //! `uint_mul`, the `uint_is` predicate), and the `Truthy`
 //! folds. Each value op lays one eval uint-op node over its
 //! children's hashes with the relation op recorded underneath; results
@@ -35,7 +34,6 @@
 
 use alloc::{vec, vec::Vec};
 
-pub use miden_core::proof::StarkProof;
 #[cfg(debug_assertions)]
 use miden_core::utils::Matrix;
 use miden_core::{Felt, utils::RowMajorMatrix};
@@ -80,10 +78,14 @@ use crate::{
 
 mod fixed;
 mod prove;
+#[cfg(test)]
 pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
+#[cfg(test)]
 pub mod statements;
 pub mod strategies;
-pub use miden_precompiles_air::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS};
+#[cfg(test)]
+pub use miden_precompiles_air::ChipletAir;
+pub(crate) use miden_precompiles_air::NUM_CHIPLETS;
 
 /// Stateful builder over the full chiplet stack.
 ///
@@ -162,8 +164,7 @@ impl Session {
 
     /// Record a Keccak-256 of `input`. Returns its digest and a [`Truthy`]
     /// handle to the `Binding(H_keccak, True)` claim — fold the handle into
-    /// the transcript via [`assert_and`](Self::assert_and) /
-    /// [`assert_and_fold`](Self::assert_and_fold).
+    /// the transcript via [`assert_and`](Self::assert_and).
     ///
     /// Interning is below this layer: identical input collapses onto one
     /// keccak-node row (its `out_mult` bumped) and lays no fresh sponge /
@@ -195,6 +196,7 @@ impl Session {
     /// by [`Session::new`] and should not be pinned manually; ordinary runtime constants should use
     /// [`uint_leaf`](Self::uint_leaf) instead. The modulus itself is a self-referential pin
     /// (`bound_ptr == ptr`).
+    #[cfg(test)]
     pub fn pin_uint(&mut self, ptr: u32, value: U256, bound_ptr: u32) -> Truthy {
         let handle = if ptr == bound_ptr {
             self.uint.store.pin_modulus(ptr, value)
@@ -216,10 +218,7 @@ impl Session {
     /// bound as `Binding(h, Uint, ptr, bound_ptr)`. One leaf node per stored
     /// uint: re-leafing a value returns the same shared-use handle.
     ///
-    /// Unlike [`pin_uint`](Self::pin_uint), nothing about a *store
-    /// address* is committed — the hash carries the value itself; pin
-    /// separately if the statement needs `store[ptr] = value` in the
-    /// root. The modulus must already be interned (it is itself a pin).
+    /// The hash commits to the value, not its store address. The modulus must already be pinned.
     pub fn uint_leaf(&mut self, value: U256, bound_ptr: u32) -> UintNode {
         let bound = self.uint.store.pinned(bound_ptr);
         let ptr = self.uint.store.intern(value, bound);
@@ -283,9 +282,8 @@ impl Session {
     /// Declare the **scalar field** of `point`'s group: from here its MSM
     /// scalars (and the shared-base merge `mod`) live under the modulus
     /// pinned at `sbound_ptr` — the curve order `n`, not the base field `p`.
-    /// Recording metadata only (no DAG node — name a *pinned* modulus ptr,
-    /// e.g. via [`pin_uint`](Self::pin_uint)); call it **before** laying any
-    /// MSM whose scalar arithmetic must be sound `mod n` (e.g. binding a GLV
+    /// Records metadata only, using an already-pinned modulus pointer. Call it **before** laying
+    /// any MSM whose scalar arithmetic must be sound `mod n` (e.g. binding a GLV
     /// split `u ≡ uₐ + uᵦ·λ (mod n)`, where the split's scalar nodes must be
     /// the very ones the MSM consumes). Idempotent on the same handle.
     pub fn constrain_scalar_bound(&mut self, point: &EcNode, sbound_ptr: u32) {
@@ -428,6 +426,7 @@ impl Session {
     /// Number of MSM expressions laid so far (intros + endomorphism intros +
     /// combines + negs) — a chain-cost diagnostic, e.g. to compare
     /// addition-chain [`strategies`]. Not a DAG quantity.
+    #[cfg(test)]
     pub fn msm_expr_count(&self) -> usize {
         self.msm.expr_count()
     }
@@ -436,6 +435,7 @@ impl Session {
     /// off-circuit cross-checks (e.g. against a reference MSM) until the
     /// eval resolve seam binds the value in-circuit. Panics if the value is
     /// the point at infinity.
+    #[cfg(test)]
     pub fn msm_value_coords(&self, expr: EcExprPtr) -> (U256, U256) {
         let val = self.msm.value(expr);
         let (_, coords) = self.ec.store.point_params(val);
@@ -443,15 +443,12 @@ impl Session {
         (self.uint.store.uint(x).value, self.uint.store.uint(y).value)
     }
 
-    /// Delegate a value op to the eval layer's [`uint_op`]
-    /// (TranscriptEvalRequires::uint_op), lending it the uint recording
-    /// layer and the Eidos accumulator (disjoint field borrows).
+    /// Records a uint operation and its Eidos commitment in the eval layer.
     fn uint_op(&mut self, op: UintOpId, a: &UintNode, b: &UintNode) -> UintNode {
         self.eval.uint_op(op, a, b, self.uint.require(), &mut self.eidos)
     }
 
-    /// A `ZERO_HASH` leaf claim — the trivial truthy, and the usual base
-    /// for [`assert_and_fold`](Self::assert_and_fold).
+    /// A `ZERO_HASH` leaf claim: the trivial truthy used to start a fold of claims.
     pub fn zero(&mut self) -> Truthy {
         self.eval.zero()
     }
@@ -466,6 +463,7 @@ impl Session {
     /// Left-fold claims into the transcript from a `ZERO_HASH` base:
     /// `Hash(… Hash(Hash(0, h₀), h₁) …, hₙ)`. `assert_and_fold(keccaks)`
     /// reproduces the left-leaning spine.
+    #[cfg(test)]
     pub fn assert_and_fold(&mut self, handles: impl IntoIterator<Item = Truthy>) -> Truthy {
         let mut acc = self.zero();
         for h in handles {
@@ -624,6 +622,7 @@ impl SessionTraces {
     }
 
     /// The transcript root committed by the eval chip.
+    #[cfg(test)]
     pub fn public_root(&self) -> EidosDigest {
         self.public_root
     }

@@ -15,7 +15,7 @@
 //! stay at `−act` (mult 1 per active row): each chunk row has
 //! exactly one downstream hasher consumer by CR-dedup invariant.
 //!
-//! [`generate_trace`] takes a `&ChunkRequires` and walks the recorded
+//! [`generate_trace_padded_to`] consumes a `ChunkRequires` and walks the recorded
 //! invocations in allocation order, emitting one row per chunk;
 //! trailing rows are inactive (`act = 0`) with `chunk_seq_id` and
 //! `absorption_id` continuing `+1` to satisfy the relaxed chain on dead
@@ -27,13 +27,11 @@ use core::ops::Range;
 use miden_core::{
     Felt,
     deferred::{Node, deferred_chunks_frame},
-    field::QuadFelt,
     utils::RowMajorMatrix,
 };
 
 use crate::{
-    hash::chunk::{ChunkAir, NUM_F, NUM_MAIN_COLS},
-    logup::build_logup_aux_trace,
+    hash::chunk::{NUM_F, NUM_MAIN_COLS},
     transcript::eidos::{
         digest::EidosDigest,
         trace::{AbsorptionSpan, EidosRequires},
@@ -174,20 +172,20 @@ impl ChunkRequires {
 // TRACE GENERATION
 // ================================================================================================
 
+/// Builds the main trace at its natural height.
+#[cfg(test)]
+pub fn generate_trace(requires: ChunkRequires) -> RowMajorMatrix<Felt> {
+    generate_trace_padded_to(requires, 0)
+}
+
 /// Build the chunk chiplet's main trace from the recorded
 /// invocations. Walks records in allocation order, stamping each at
 /// its `chunk_seq_id_range.start`; trailing rows up to the next power
 /// of two are inactive (`act = 0`), with `chunk_seq_id` and
 /// `absorption_id` continuing `+1` to satisfy the relaxed chain on
 /// dead rows. Returns a 12-column trace.
-pub fn generate_trace(requires: ChunkRequires) -> RowMajorMatrix<Felt> {
-    generate_trace_padded_to(requires, 0)
-}
-
-/// Same as [`generate_trace`], but the trace height is at least `min_height`
-/// (still rounded up to a power of two) — lets a caller sharing this
-/// chiplet's row range with another AIR (see `hash::chunk_node`) pad chunk's
-/// trace up to match the other side's height.
+///
+/// The height is at least `min_height`, which must be zero or a power of two.
 pub(crate) fn generate_trace_padded_to(
     requires: ChunkRequires,
     min_height: usize,
@@ -239,16 +237,4 @@ pub(crate) fn generate_trace_padded_to(
 
     debug_assert_eq!(trace.len(), height * NUM_MAIN_COLS);
     RowMajorMatrix::new(trace, NUM_MAIN_COLS)
-}
-
-// PROVER
-// ================================================================================================
-
-/// Build the chunk chiplet's aux trace via the generic
-/// [`build_logup_aux_trace`] driver.
-pub(crate) fn build_aux(
-    main: &RowMajorMatrix<Felt>,
-    challenges: &[QuadFelt],
-) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    build_logup_aux_trace(&ChunkAir, main, challenges)
 }

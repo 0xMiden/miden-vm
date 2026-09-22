@@ -27,7 +27,7 @@ use crate::{
     transcript::eidos::EidosDigest,
 };
 
-/// wNAF window for [`msm_from_terms`](DeferredSessionBuilder::msm_from_terms)'s joint-wNAF
+/// wNAF window for [`msm_from_terms`](WitnessImporter::msm_from_terms)'s joint-wNAF
 /// addition chain (digits odd, `|d| < 2^{w-1}`, `2^{w-2}` odd multiples per base). A smaller window
 /// suits GLV's ~128-bit halves in isolation. Reusing a base's table across the batch makes ladder
 /// digit density the dominant recurring cost; `w = 5` keeps it low for both the two-base and GLV

@@ -1,8 +1,4 @@
-//! Reusable example statements over the [`Session`] facade.
-//!
-//! The constructions here are *statements*, not chiplets: pure drivers of
-//! the public DAG surface, shared between the test suite and the
-//! `src/bin/` benches so a construction is written (and audited) once.
+//! Test workloads over the [`Session`] facade.
 
 use alloc::vec::Vec;
 

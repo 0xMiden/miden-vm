@@ -13,13 +13,13 @@
 //! len_bytes)` identity); below this layer, chunks duplicate per
 //! invocation (CR-dedup invariant).
 //!
-//! [`generate_trace`] takes a `&SpongeRequires` and walks records in
+//! [`generate_trace_padded_to`] consumes a `SpongeRequires` and walks records in
 //! allocation order, stamping the 57-column trace; trailing rows up
 //! to the next power of two are inactive (`act = 0`).
 
 use alloc::vec::Vec;
 
-use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
+use miden_core::{Felt, utils::RowMajorMatrix};
 
 use crate::{
     hash::{
@@ -31,13 +31,12 @@ use crate::{
             sponge::{
                 CHUNK_BYTES_RANGE, CLEARED_BYTES_RANGE, COL_ACT, COL_B_BEGIN, COL_BYTES_LEFT,
                 COL_CHUNK_PTR, COL_IS_CHUNK_AVAIL, COL_IS_FIRST_BLOCK_OF_INVOCATION, COL_IS_ZERO,
-                COL_SPONGE_SEQ_ID, COL_STATE_OUT_LO, KeccakSpongeAir, NUM_MAIN_COLS,
-                PADDED_BYTES_RANGE, SPONGE_PERIOD, STATE_NEW_BYTES_RANGE, STATE_PREV_BYTES_RANGE,
+                COL_SPONGE_SEQ_ID, COL_STATE_OUT_LO, NUM_MAIN_COLS, PADDED_BYTES_RANGE,
+                SPONGE_PERIOD, STATE_NEW_BYTES_RANGE, STATE_PREV_BYTES_RANGE,
                 program::{EXTRA_BLOCK_BEGIN, NOP_SLACK_BEGIN},
             },
         },
     },
-    logup::build_logup_aux_trace,
     primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp, require_logic64},
     transcript::eidos::{
         digest::EidosDigest,
@@ -175,7 +174,7 @@ struct SpongeRecord {
 /// caller-supplied [`ChunkRequires`] to lay the chunk-tape segment,
 /// runs the Keccak-f permutations as a trace-gen oracle, allocates a
 /// fresh `sponge_seq_id` range, and records the per-block snapshots
-/// [`generate_trace`] later replays.
+/// [`generate_trace_padded_to`] later replays.
 ///
 /// No dedup at this layer — the Keccak-node chiplet above owns the
 /// dedup point.
@@ -380,21 +379,19 @@ fn compute_block_snapshots(inv: &Invocation, layout: &InvocationLayout) -> Vec<B
 // TRACE GENERATION
 // ================================================================================================
 
+/// Builds the main trace at its natural height.
+#[cfg(test)]
+pub fn generate_trace(requires: SpongeRequires) -> RowMajorMatrix<Felt> {
+    generate_trace_padded_to(requires, 0)
+}
+
 /// Build the sponge chiplet's main trace from the recorded
 /// invocations. Walks records in allocation order, stamping
 /// `SPONGE_PERIOD` rows per block; trailing rows up to the next power
 /// of two are inactive (`act = 0`). Returns a [`NUM_MAIN_COLS`]-column
 /// trace.
-pub fn generate_trace(requires: SpongeRequires) -> RowMajorMatrix<Felt> {
-    generate_trace_padded_to(requires, 0)
-}
-
-/// Same as [`generate_trace`], but the trace height is at least `min_height`
-/// (still rounded up to a power of two) — lets a caller sharing this
-/// chiplet's row range with another AIR (see `hash::chunk_node_sponge`) pad
-/// the sponge's trace up to match the other side's height. Pads past the
-/// natural height are the sponge's own trailing inactive rows (`act = 0`,
-/// the `sponge_seq_id` / `bytes_left` chains continued).
+///
+/// The height is at least `min_height`, rounded up to a power of two.
 pub(crate) fn generate_trace_padded_to(
     requires: SpongeRequires,
     min_height: usize,
@@ -528,7 +525,7 @@ fn pack_chunk_tape(inv: &Invocation) -> impl Iterator<Item = u64> + '_ {
 }
 
 /// Same as [`pack_chunk_tape`] but driven by an explicit byte slice +
-/// lane count — used by [`generate_trace`] which holds the bytes in
+/// lane count — used by [`generate_trace_padded_to`] which holds the bytes in
 /// each [`SpongeRecord`] but rebuilds the iterator per record.
 fn pack_chunk_tape_from_bytes(input: &[u8], chunk_lanes: usize) -> impl Iterator<Item = u64> + '_ {
     input
@@ -640,19 +637,6 @@ fn andnot_mask(byte_offset: usize) -> u64 {
 /// at the pad position.
 fn padding_mask(byte_offset: usize) -> u64 {
     1u64 << (8 * byte_offset)
-}
-
-// PROVER
-// ================================================================================================
-
-/// Build the aux trace for [`KeccakSpongeAir`]. The aux trace is
-/// produced by the generic [`build_logup_aux_trace`] driver — no
-/// chiplet-specific aux-trace code lives here.
-pub(crate) fn build_aux(
-    main: &RowMajorMatrix<Felt>,
-    challenges: &[QuadFelt],
-) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    build_logup_aux_trace(&KeccakSpongeAir, main, challenges)
 }
 
 #[cfg(test)]
