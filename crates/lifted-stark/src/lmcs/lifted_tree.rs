@@ -249,6 +249,8 @@ where
             + Sync,
     {
         const { assert!(PF::WIDTH == PD::WIDTH) }
+        const { assert!(PF::WIDTH.is_power_of_two()) }
+        const { assert!(PD::WIDTH.is_power_of_two()) }
         assert!(!leaves.is_empty(), "cannot commit empty batch");
         assert_ne!(alignment, 0, "alignment must be non-zero");
 
@@ -273,10 +275,22 @@ where
 
         let leaves: Vec<M> =
             leaves.into_iter().map(BitReversibleMatrix::bit_reverse_rows).collect();
+        if let Some(salt) = &salt {
+            assert_eq!(salt.height(), leaves.last().unwrap().height());
+            debug_assert_eq!(salt.width(), SALT_ELEMS);
+        }
 
         // Build leaf hashes: absorb all matrix rows into sponge states, then squeeze.
         let leaf_digests: Vec<[PD::Value; DIGEST_ELEMS]> =
             info_span!("hash leaves").in_scope(|| {
+                if leaves.first().unwrap().height() == leaves.last().unwrap().height() {
+                    return hash_uniform_leaves::<PF, PD, _, _, WIDTH, DIGEST_ELEMS>(
+                        &leaves,
+                        salt.as_ref(),
+                        h,
+                        initial_state,
+                    );
+                }
                 let mut leaf_states: Vec<[PD::Value; WIDTH]> =
                     build_leaf_states_upsampled::<PF, PD, M, H, WIDTH, DIGEST_ELEMS>(
                         &leaves,
@@ -504,15 +518,10 @@ where
     const { assert!(PD::WIDTH.is_power_of_two()) };
     let final_height = validate_heights(matrices.iter().map(|d| d.dimensions().height));
 
-    // Memory buffers:
-    // - states: Per-leaf scalar states (one per final row), maintained across matrices.
-    // - scratch_states: Temporary buffer used when duplicating states during upsampling.
-    // `repeat_n` initializes these large buffers in parallel when concurrency is enabled.
+    // Per-leaf scalar states, maintained across matrices. Upsampling reuses this
+    // allocation; `repeat_n` initializes it in parallel when concurrency is enabled.
     let mut states = info_span!("alloc states", final_height, width = WIDTH)
         .in_scope(|| iter::repeat_n(initial_state, final_height).collect::<Vec<_>>());
-    // Allocated lazily on first upsampling: single-matrix trees (quotient, FRI
-    // rounds) never need the scratch buffer.
-    let mut scratch_states: Vec<[PD::Value; WIDTH]> = Vec::new();
 
     let mut active_height = matrices.first().unwrap().height();
 
@@ -524,23 +533,22 @@ where
         // E.g., [s0, s1] with scaling_factor=2 → [s0, s0, s1, s1]
         if height > active_height {
             let scaling_factor = height / active_height;
+            let log_scaling = log2_strict_usize(scaling_factor);
 
-            if scratch_states.is_empty() {
-                scratch_states = info_span!("alloc scratch", final_height)
-                    .in_scope(|| iter::repeat_n(initial_state, final_height).collect::<Vec<_>>());
-            }
-
-            // Copy `states` into `scratch_states`, repeating each entry `scaling_factor` times
-            // so we keep the accumulated sponge states aligned with the taller matrix.
+            // Fill disjoint bands from the end. A band's source prefix stays
+            // untouched until all its parallel writes finish, then we expand that
+            // prefix in turn. State 0 is already in its final position.
             info_span!("upsample states", from = active_height, to = height).in_scope(|| {
-                scratch_states[..height]
-                    .par_chunks_mut(scaling_factor)
-                    .zip(states[..active_height].par_iter())
-                    .for_each(|(chunk, state)| chunk.fill(*state));
+                let mut end = height;
+                while end > 1 {
+                    let source_len = end.div_ceil(scaling_factor);
+                    let (source, destination) = states[..end].split_at_mut(source_len);
+                    destination.par_iter_mut().enumerate().for_each(|(i, state)| {
+                        *state = source[(source_len + i) >> log_scaling];
+                    });
+                    end = source_len;
+                }
             });
-
-            // Copy upsampled states back to canonical buffer
-            mem::swap(&mut scratch_states, &mut states);
         }
 
         // Absorb the rows of the matrix into the extended state vector
@@ -552,6 +560,57 @@ where
     }
 
     states
+}
+
+/// Hash equal-height matrices without storing a sponge state for every leaf.
+/// Matrix boundaries still get their own absorption padding, followed by the salt.
+fn hash_uniform_leaves<PF, PD, M, H, const WIDTH: usize, const DIGEST_ELEMS: usize>(
+    matrices: &[M],
+    salt: Option<&RowMajorMatrix<PF::Value>>,
+    sponge: &H,
+    initial_state: [PD::Value; WIDTH],
+) -> Vec<[PD::Value; DIGEST_ELEMS]>
+where
+    PF: PackedValue,
+    PD: PackedValue,
+    M: Matrix<PF::Value>,
+    H: StatefulHasher<PF::Value, [PD::Value; DIGEST_ELEMS], State = [PD::Value; WIDTH]>
+        + StatefulHasher<PF, [PD; DIGEST_ELEMS], State = [PD; WIDTH]>
+        + Sync,
+{
+    let height = validate_heights(matrices.iter().map(Matrix::height));
+    debug_assert!(matrices.iter().all(|m| m.height() == height));
+    debug_assert!(salt.is_none_or(|salt| salt.height() == height));
+    let mut digests = vec![[PD::Value::default(); DIGEST_ELEMS]; height];
+    if height < PF::WIDTH || PF::WIDTH == 1 {
+        digests.par_iter_mut().enumerate().for_each(|(row, digest)| {
+            let mut state = initial_state;
+            for matrix in matrices {
+                sponge.absorb_into(&mut state, matrix.row(row).unwrap());
+            }
+            if let Some(salt) = salt {
+                sponge.absorb_into(&mut state, salt.row(row).unwrap());
+            }
+            *digest = sponge.squeeze(&state);
+        });
+    } else {
+        digests.par_chunks_mut(PF::WIDTH).enumerate().for_each(|(packed_idx, chunk)| {
+            let mut state: [PD; WIDTH] = initial_state.map(|value| PD::from_fn(|_| value));
+            let row = packed_idx * PF::WIDTH;
+            for matrix in matrices {
+                sponge.absorb_into(&mut state, matrix.vertically_packed_row::<PF>(row));
+            }
+            if let Some(salt) = salt {
+                sponge.absorb_into(&mut state, salt.vertically_packed_row::<PF>(row));
+            }
+            let packed_digest: [PD; DIGEST_ELEMS] = sponge.squeeze(&state);
+            PD::unpack_into(&packed_digest, chunk);
+        });
+    }
+    // The matrices are in bit-reversed row order; Merkle leaves use domain order.
+    let mut digest_rows = p3_matrix::dense::RowMajorMatrixViewMut::new(digests.as_mut_slice(), 1);
+    p3_matrix::util::reverse_matrix_index_bits(&mut digest_rows);
+    digests
 }
 
 /// Incorporate one matrix's row-wise contribution into the running per-leaf states.
@@ -701,6 +760,9 @@ mod tests {
             // Multiple heights (must be ascending)
             vec![(2, 3), (4, 5), (8, rate)],
             vec![(1, 5), (1, 3), (2, 7), (4, 1), (8, rate + 1)],
+            // Large jumps exercise repeated copying without overwriting source states.
+            vec![(1, 3), (16, rate + 1), (1024, rate - 1)],
+            vec![(64, rate), (128, rate + 1), (1024, rate - 1)],
             // Packing boundary tests
             vec![(pack_width / 2, rate - 1), (pack_width, rate), (pack_width * 2, rate + 3)],
             vec![(pack_width, rate + 5), (pack_width * 2, 25)],
@@ -803,6 +865,60 @@ mod tests {
             let leaves_single = build_leaves_single(&matrix_single, &sponge);
             assert_eq!(leaves, leaves_single);
         }
+    }
+
+    #[test]
+    fn streamed_uniform_leaves_match_full_state_hashing() {
+        let (_, sponge, _) = gl::test_components();
+        let mut rng = SmallRng::seed_from_u64(817);
+        for height in [1, 2, 16, 128] {
+            let matrices = vec![
+                RowMajorMatrix::<Felt>::rand(&mut rng, height, RATE - 1),
+                RowMajorMatrix::<Felt>::rand(&mut rng, height, RATE + 1),
+            ];
+            let salt = RowMajorMatrix::<Felt>::rand(&mut rng, height, 4);
+            for salt in [None, Some(&salt)] {
+                // Independent full-state path checks matrix padding, salt, SIMD
+                // lane order, and the final bit reversal of streamed leaf hashes.
+                let initial = [Felt::ONE; WIDTH];
+                let mut states = build_leaf_states_upsampled::<PackedFelt, PackedFelt, _, _, _, _>(
+                    &matrices, &sponge, initial,
+                );
+                if let Some(salt) = salt {
+                    absorb_matrix::<PackedFelt, PackedFelt, _, _, WIDTH, DIGEST>(
+                        &mut states,
+                        salt,
+                        &sponge,
+                    );
+                }
+                let mut expected: Vec<_> =
+                    states.iter().map(|state| sponge.squeeze(state)).collect();
+                p3_util::reverse_slice_index_bits(&mut expected);
+                let actual = hash_uniform_leaves::<PackedFelt, PackedFelt, _, _, WIDTH, DIGEST>(
+                    &matrices, salt, &sponge, initial,
+                );
+                assert_eq!(actual, expected);
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn uniform_tree_rejects_short_salt() {
+        let (_, sponge, compress) = gl::test_components();
+        let mut rng = SmallRng::seed_from_u64(818);
+        let matrices = vec![RowMajorMatrix::<Felt>::rand(&mut rng, 16, RATE)];
+        let salt = RowMajorMatrix::<Felt>::rand(&mut rng, 8, 4);
+        // Packed row access can wrap a short salt matrix; reject it at construction
+        // so every opening can recover the salt actually used by its leaf.
+        let _ = LiftedMerkleTree::<Felt, Felt, _, DIGEST, 4>::build_with_alignment::<
+            _,
+            PackedFelt,
+            PackedFelt,
+            _,
+            _,
+            WIDTH,
+        >(&sponge, &compress, matrices, Some(salt), RATE);
     }
 
     /// Trees keep only the layers above their lowest `PRUNED_LAYERS` (the memory saving), and
