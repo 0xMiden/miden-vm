@@ -243,7 +243,8 @@ where
 
     /// Stream all FRI query proofs into a transcript channel.
     ///
-    /// `tree_indices` are natural domain indices (sorted and deduplicated).
+    /// `tree_indices` are natural domain indices (sorted and deduplicated). `lmcs` must be the
+    /// configuration passed to [`Self::new`].
     ///
     /// Each FRI folding round groups `arity` domain points into a coset and reduces the domain
     /// size by `arity`. The committed matrix row is selected by the low bits of the original
@@ -253,6 +254,7 @@ where
     pub fn prove_queries<Ch>(
         &self,
         params: &FriParams,
+        lmcs: &L,
         mut tree_indices: TreeIndices,
         channel: &mut Ch,
     ) where
@@ -263,7 +265,7 @@ where
         // Shrink indices by log_arity per round, reusing the allocation.
         for tree in &self.folded_trees {
             tree_indices.shrink_depth(log_arity);
-            tree.prove_batch(&tree_indices, channel);
+            tree.prove_batch(lmcs, &tree_indices, channel);
         }
     }
 }

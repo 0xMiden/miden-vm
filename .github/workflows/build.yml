@@ -12,6 +12,10 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
+
 jobs:
   no-std:
     name: Build for no-std
@@ -62,7 +66,7 @@ jobs:
           rustup toolchain install --no-self-update
           rustup target add wasm32-wasip1
       - name: Install wasmtime
-        uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2.87.8
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: wasmtime-cli@45.0.2
       - name: Run packed Goldilocks/Poseidon2 vs scalar tests under WASM SIMD128

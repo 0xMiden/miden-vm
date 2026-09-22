@@ -10,7 +10,7 @@ permissions: {}
 
 jobs:
   notify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
 
     permissions: {}
 
