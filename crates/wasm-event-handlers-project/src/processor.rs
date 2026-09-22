@@ -24,9 +24,10 @@ use crate::{
 ///
 /// The processor reads `[package.metadata.midenc.event-handlers]` and serves the `module` key
 /// only: it reads the module file, derives the `event_handlers` section from the module's own
-/// manifest records, and attaches the section to the package. A package that declares no such
-/// table passes through unchanged. See the [crate] documentation for the schema, the validation,
-/// the memoization, and the one-package-per-host rule.
+/// manifest records, and attaches the section to the package. The module path must resolve inside
+/// the project root. A package that declares no such table passes through unchanged. See the
+/// [crate] documentation for the schema, the validation, the memoization, and the
+/// one-package-per-host rule.
 ///
 /// # Security
 ///
@@ -34,6 +35,11 @@ use crate::{
 /// running `cargo build` on that source. [`WasmEventHandlerCargoBuildProcessor`] is the processor
 /// that does it, and the refusal names it. Registering this processor therefore never executes
 /// code from the assembled project.
+///
+/// A `module` path that resolves outside the project root fails the build too: an absolute path,
+/// a `..` escape, or a symlink out of the project would otherwise make the assembler embed any
+/// file it can read into the package it produces, which is what a host that assembles source
+/// supplied by other users must not offer.
 ///
 /// The module it reads is untrusted but sandboxed input: it is validated against the default
 /// [`WasmHandlerLimits`] at build time and runs under wasmi at execution time.
@@ -79,6 +85,10 @@ impl PackagePostProcessor for WasmEventHandlerProcessor {
 /// local compiler building the developer's own project. A host that assembles source supplied by
 /// other users must register [`WasmEventHandlerProcessor`] instead, which refuses guest-crate
 /// builds.
+///
+/// Unlike that processor, this one puts no bound on where the `module` path resolves: a build that
+/// already runs arbitrary code from the project gains nothing from a path restriction, and a
+/// module a separate build produced out of tree is a legitimate workflow here.
 #[derive(Debug, Default)]
 pub struct WasmEventHandlerCargoBuildProcessor {
     /// The sections this processor derived, and the flow that attaches them.
@@ -140,7 +150,8 @@ impl SectionProvider {
     ///
     /// `guest_crates` decides what a `crate` key gives. A refusal is reported as soon as the
     /// source is known, before any build and before any memoization, so a processor that does not
-    /// build guest crates never runs `cargo`.
+    /// build guest crates never runs `cargo`. A processor that refuses guest crates also bounds a
+    /// `module` key to the project root, so it reads no file outside the project it assembles.
     fn attach(
         &self,
         package: &mut MastPackage,
@@ -168,6 +179,32 @@ impl SectionProvider {
                     crate_dir.display(),
                 ),
             ));
+        }
+
+        if matches!(guest_crates, GuestCrates::Refused)
+            && let HandlerSource::Module(module_path) = &source
+        {
+            // The project root bounds what this processor reads, so a hostile manifest cannot make
+            // the assembler embed a file from elsewhere on the host into the package it produces.
+            // `config::read` canonicalizes a path that exists, so `..` segments and symlinks are
+            // already resolved here; a path that does not exist keeps its joined form, but then the
+            // read below fails and nothing is disclosed. A root that does not canonicalize keeps
+            // its given form, which can only deny.
+            let root = assembly
+                .project_root
+                .canonicalize()
+                .unwrap_or_else(|_| assembly.project_root.to_path_buf());
+            if !module_path.starts_with(&root) {
+                return Err(config::error(
+                    manifest_path,
+                    format!(
+                        "key '{MODULE_KEY}' resolves to '{}', outside the project root '{}'; this \
+                         processor reads modules from inside the project only",
+                        module_path.display(),
+                        root.display(),
+                    ),
+                ));
+            }
         }
 
         let section =

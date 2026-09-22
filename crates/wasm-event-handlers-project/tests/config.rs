@@ -193,6 +193,15 @@ fn assemble_with(
     project_assembler.assemble(target, "dev")
 }
 
+/// Returns the metadata table that points `module` at the handler module of `dir`, by absolute
+/// path.
+fn absolute_module_metadata(dir: &Path) -> String {
+    format!(
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"{}\"\n",
+        dir.join("handlers.wasm").display()
+    )
+}
+
 /// Assembles a target of the project at `manifest_path` with the safe processor registered, the
 /// one every `module` test drives.
 fn assemble(
@@ -274,6 +283,58 @@ fn the_cargo_build_processor_accepts_a_prebuilt_module() {
         WasmEventHandlerCargoBuildProcessor::new(),
     )
     .expect("the prebuilt module attaches");
+    assert_eq!(events(&package), [DOUBLE_EVENT]);
+}
+
+/// The safe processor reads modules from inside the project only. An absolute path out of the
+/// project would otherwise make the assembler embed any file it can read into the package it
+/// produces, which a host that assembles source supplied by other users must not offer.
+#[test]
+fn the_safe_processor_refuses_a_module_outside_the_project_root() {
+    let project_dir = TempDir::new().unwrap();
+    let outside_dir = TempDir::new().unwrap();
+    write_handler_module(outside_dir.path());
+    let manifest_path =
+        write_project(project_dir.path(), &absolute_module_metadata(outside_dir.path()));
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(error.contains("outside the project root"), "unexpected error: {error}");
+    assert!(error.contains("handlers.wasm"), "unexpected error: {error}");
+}
+
+/// The containment rule holds for a relative escape too: the path is canonicalized before it is
+/// checked, so a `..` segment cannot walk out of the project.
+#[test]
+fn the_safe_processor_refuses_a_dotdot_module_escape() {
+    let tempdir = TempDir::new().unwrap();
+    // The module is a sibling of the project directory, so only an escape reaches it.
+    write_handler_module(tempdir.path());
+    let manifest_path = write_project(
+        &tempdir.path().join("project"),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"../handlers.wasm\"\n",
+    );
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(error.contains("outside the project root"), "unexpected error: {error}");
+}
+
+/// The cargo-building processor takes a module from anywhere, deliberately: it already builds the
+/// source the project names, so bounding the path adds no safety, and a module another build
+/// produced out of tree is a legitimate input.
+#[test]
+fn the_cargo_build_processor_accepts_a_module_outside_the_project_root() {
+    let project_dir = TempDir::new().unwrap();
+    let outside_dir = TempDir::new().unwrap();
+    write_handler_module(outside_dir.path());
+    let manifest_path =
+        write_project(project_dir.path(), &absolute_module_metadata(outside_dir.path()));
+
+    let package = assemble_with(
+        &manifest_path,
+        ProjectTargetSelector::Library,
+        WasmEventHandlerCargoBuildProcessor::new(),
+    )
+    .expect("the cargo-building processor puts no bound on the module path");
     assert_eq!(events(&package), [DOUBLE_EVENT]);
 }
 
