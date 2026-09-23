@@ -2,7 +2,11 @@ use std::sync::Arc;
 
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
-    Felt, Word, events::EventName, mast::error_code_from_msg, utils::bytes_to_packed_u32_elements,
+    Felt, Word,
+    deferred::{DeferredError, PrecompileError},
+    events::EventName,
+    mast::error_code_from_msg,
+    utils::bytes_to_packed_u32_elements,
 };
 use miden_core_lib::{
     CoreLibrary,
@@ -14,7 +18,8 @@ use miden_core_lib::{
 };
 use miden_crypto::hash::{eidos::Eidos, sha2::Sha256};
 use miden_precompiles::{
-    CurveId, CurvePoint, Limbs, ONE_LIMBS, P256Base, P256Scalar, UintDomain, ZERO_LIMBS,
+    CurveId, CurvePoint, Limbs, ONE_LIMBS, P256Base, P256Scalar, UintDomain, UintPrecompile,
+    ZERO_LIMBS,
 };
 use miden_precompiles_prover::{HashFunction, prove_precompiles};
 use miden_precompiles_verifier::verify_deferred;
@@ -39,6 +44,18 @@ const INVALID_COMMITMENT: &str = "invalid public key commitment";
 const INVALID_RECOVERY_BYTE: &str = "invalid ECDSA recovery byte: expected 0 or 1";
 const R_IS_ZERO: &str = "invalid ECDSA signature: r is zero";
 const RECOVERY_X_MISMATCH: &str = "ECDSA recovery point x-coordinate does not equal r";
+
+/// sqrt(B) mod p, so (0, SQRT_B) is a P-256 point.
+const SQRT_B: Limbs = [
+    0x174f_93f4,
+    0x28bf_856a,
+    0x1dae_8717,
+    0x541c_2af3,
+    0x84a0_6bb6,
+    0x2433_bd5d,
+    0x0e2f_83d7,
+    0x6648_5c78,
+];
 
 // VERIFY
 // ================================================================================================
@@ -121,14 +138,18 @@ fn p256_verify_traps_on_off_curve_public_key() {
 
 #[test]
 fn p256_verify_traps_on_noncanonical_public_key_coordinate() {
-    // x = p is the smallest noncanonical encoding. The commitment binds the tampered limbs, so
-    // only the canonical coordinate loader can reject them.
+    // x = p is the smallest noncanonical encoding of the on-curve point (0, sqrt(B)). The
+    // commitment binds the tampered limbs, so only the canonical coordinate loader can reject them.
     let mut fixture = valid_fixture();
     fixture.advice[..8].copy_from_slice(&limbs_to_felts(P256Base::MODULUS));
+    fixture.advice[8..16].copy_from_slice(&limbs_to_felts(SQRT_B));
     fixture.public_key_commitment = Eidos::hash_elements(&fixture.advice[..16]);
 
     let err = run_verify(&fixture).expect_err("a noncanonical public-key coordinate must trap");
-    assert!(!is_failed_assertion(&err, INVALID_COMMITMENT), "{err:?}");
+    assert!(
+        is_invalid_uint_value(&err),
+        "expected the uint VALUE check to fail, got {err:?}"
+    );
 }
 
 #[test]
@@ -276,6 +297,22 @@ fn p256_verify_accepts_and_recover_rejects_x_reduced_point() {
         ),
         RECOVERY_X_MISMATCH,
     );
+
+    // Encoding r as x(R) = r + n is canonical in the base field and passes the exact-x check, so
+    // only the canonical scalar loader stops recovery from returning Q.
+    let mut unreduced_r = recovery_signature;
+    unreduced_r[..8].copy_from_slice(&limbs_to_felts(x));
+    let err = run_recover_with_native_signature(
+        message,
+        &unreduced_r,
+        SIGNATURE_PTR,
+        Some(recovery_public_key_handler(public_key)),
+    )
+    .expect_err("recovery must reject r >= n");
+    assert!(
+        is_invalid_uint_value(&err),
+        "expected the uint VALUE check to fail, got {err:?}"
+    );
 }
 
 #[test]
@@ -311,6 +348,44 @@ fn p256_recover_bytes_respects_partial_final_word() {
         .expect("message byte length must exclude zero padding in the final memory word");
 
     assert_eq!(stack_elements::<16>(&output), public_key_elements(signing_key.verifying_key()));
+}
+
+#[test]
+fn p256_recover_bytes_traps_on_nonzero_bytes_past_message_length() {
+    let message = [0x11, 0x22, 0x33, 0x44, 0x55];
+    let signing_key = signing_key();
+    let prehash: [u8; 32] = Sha256::hash(&message).into();
+    let (signature, recovery_id) = signing_key.sign_prehash_recoverable(&prehash);
+    let signature = native_recovery_signature(&signature, recovery_id);
+    let signer = public_key_elements(signing_key.verifying_key());
+    let memory = bytes_to_packed_u32_elements(&message);
+    assert_eq!(memory.len(), 2);
+    for handler in [None, Some(sha256_digest_handler(&message))] {
+        let output = run_recover_bytes_with_memory(&message, &memory, &signature, handler)
+            .expect("the zero-padded message must recover its signer");
+        assert_eq!(stack_elements::<16>(&output), signer);
+    }
+
+    // Byte 5 is the second byte of the u32 limb that holds the final message byte.
+    let mut same_limb = memory.clone();
+    same_limb[1] = Felt::from_u32(0x0000_ff55);
+    // The message occupies felts 0 and 1 of its single 8-felt chunk.
+    let mut later_felt = memory;
+    later_felt.resize(8, Felt::ZERO);
+    later_felt[7] = Felt::from_u32(1);
+
+    for (name, tampered) in [("byte 5 in the final limb", same_limb), ("felt 7", later_felt)] {
+        run_recover_bytes_with_memory(&message, &tampered, &signature, None).expect_err(name);
+        // A host that hashes only the first MSG_LEN bytes leaves rejection to the deferred
+        // SHA-256 validation of the registered chunks.
+        run_recover_bytes_with_memory(
+            &message,
+            &tampered,
+            &signature,
+            Some(sha256_digest_handler(&message)),
+        )
+        .expect_err(name);
+    }
 }
 
 #[test]
@@ -735,6 +810,16 @@ fn run_recover_bytes(
     message: &[u8],
     signature: &[Felt; 17],
 ) -> Result<ExecutionOutput, ExecutionError> {
+    run_recover_bytes_with_memory(message, &bytes_to_packed_u32_elements(message), signature, None)
+}
+
+/// Recovers from `signature` over `message` with `memory` stored at the message pointer.
+fn run_recover_bytes_with_memory(
+    message: &[u8],
+    memory: &[Felt],
+    signature: &[Felt; 17],
+    handler: Option<HandlerOverride>,
+) -> Result<ExecutionOutput, ExecutionError> {
     let source = format!(
         r#"
         begin
@@ -747,12 +832,12 @@ fn run_recover_bytes(
             exec.::miden::core::sys::truncate_stack
         end
         "#,
-        message_stores = masm_store_felts(&bytes_to_packed_u32_elements(message), MESSAGE_PTR),
+        message_stores = masm_store_felts(memory, MESSAGE_PTR),
         signature_stores = masm_store_felts(signature, SIGNATURE_PTR),
         len_bytes = message.len(),
     );
 
-    run_core_program(&source, &[], None)
+    run_core_program(&source, &[], handler)
 }
 
 /// A replacement for one default core-library event handler.
@@ -835,6 +920,18 @@ fn is_failed_assertion(err: &ExecutionError, message: &str) -> bool {
             err: OperationError::FailedAssertion { err_code, .. },
             ..
         } if *err_code == error_code_from_msg(message)
+    )
+}
+
+/// Whether `err` is the uint precompile rejecting a noncanonical VALUE encoding.
+fn is_invalid_uint_value(err: &ExecutionError) -> bool {
+    matches!(
+        err,
+        ExecutionError::DeferredError {
+            err: PrecompileError::Precompile { name, source },
+            ..
+        } if *name == UintPrecompile::NAME
+            && matches!(**source, PrecompileError::Other(DeferredError::InvalidPayload))
     )
 }
 
