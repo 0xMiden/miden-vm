@@ -60,7 +60,7 @@ The bare `trace` instruction takes 3 cycles and leaves the stack unchanged. `tra
 
 As an implementation detail, `trace.<trace_id>` lowers to `push.<trace_id> push.<sys::trace_event> emit drop drop`. Plain `trace` lowers to `push.<sys::trace_event> emit drop`. In the deprecated raw-state trace callback, `sys::trace_event` is at stack position 0 and the user trace ID is at stack position 1.
 
-On the Rust side, register one portable handler with `DefaultHost::register_event_handler`, or
+On the Rust side, register one portable handler with `DefaultHost::register_handler`, or
 implement `SyncHost::handle_event` / `Host::handle_event`. The handler receives `EventContext` and
 `AdviceRecorder` for either kind. `context.kind()` identifies regular events and traces; `id()` is
 the actual invocation identity. Stack reads hide the dispatch envelope, so position zero is the
