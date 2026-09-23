@@ -354,9 +354,9 @@ The `LOOP` operation has do-while semantics: the body is entered unconditionally
 
 1. Adds a continuation `(blk, prnt, 1)` to the block stack table (the `1` indicates that the
    loop's body is expected to be executed).
-2. Adds a tuple `(blk, loop_body_hash, 0, 1)` to the block hash table, once per iteration of the
-   loop. The multiplicity is read from the `group_count` column of the `LOOP` row, which the
-   prover sets to the number of times the body's `END` returns to this loop.
+2. Adds one weighted tuple `(blk, loop_body_hash, 0, 1)` to the block hash table. Its multiplicity
+   comes from the `group_count` column of the `LOOP` row, which the prover sets to the number of
+   times the body's `END` returns to this loop.
 3. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and the padded input $[h_0, ..., h_3, 0, 0, 0, 0]$.
 
 The `LOOP` operation does not read or pop the stack.
@@ -472,10 +472,9 @@ When the VM executes a `REPEAT` operation, it does the following:
 1. Checks whether register $h_4$ is set to $1$. If it isn't (i.e., we are not in a loop), the execution fails.
 2. Pops the stack. If the popped value is not $1$, the execution fails.
 
-`REPEAT` does not add anything to the block hash table: the `LOOP` operation already added the
-body's hash once per iteration. The entry the next iteration's `END` removes is therefore always
-one that `LOOP` committed to, rather than one `REPEAT` produced from the digest carried on its own
-row.
+`REPEAT` does not add anything to the block hash table: the `LOOP` row's weighted body-hash entry
+already covers every iteration. The next iteration's `END` must therefore remove a digest that
+`LOOP` committed to; `REPEAT` cannot supply a substitute from the digest carried on its own row.
 
 #### RESPAN operation
 
@@ -571,9 +570,14 @@ As described previously, when the VM executes a `SPLIT` operation, only the hash
 
 A *loop* block has do-while semantics: the body is entered unconditionally for the first iteration, and the trailing condition the body leaves on top of the stack determines whether the VM executes another iteration (`REPEAT`) or exits (`END`).
 
-When the VM executes a `LOOP` operation, it adds the hash of the loop's body to the block hash table once for every iteration the loop will run, and adds a row to the block stack table with the `is_loop` value set to $1$. The `LOOP` operation itself does not read or pop the stack.
+When the VM executes a `LOOP` operation, it adds one weighted body-hash entry whose multiplicity
+equals the number of body executions. It also adds a row to the block stack table with `is_loop`
+set to $1$. The `LOOP` operation itself does not read or pop the stack.
 
-To clear the block hash table, the VM needs to execute the loop body once per added entry (executing the `END` operation for the loop body block will remove one corresponding row from the block hash table). After the loop body is executed, if the top of the stack is $1$, the VM executes a `REPEAT` operation (executing `REPEAT` operation when the top of the stack is $0$ will result in an error) and runs the body again, consuming one more of the entries `LOOP` added. Since every entry originates at the `LOOP` row, each iteration must execute the body that `LOOP` committed to.
+Each execution of the body ends with an `END` that removes one unit of the weighted body-hash
+entry. If the trailing condition is $1$, the VM executes `REPEAT` and enters the body again; a
+`REPEAT` with a trailing condition of $0$ fails. Since `REPEAT` adds no block-hash entry, each
+iteration must execute the body that `LOOP` committed to.
 
 This process is illustrated on the diagram below.
 

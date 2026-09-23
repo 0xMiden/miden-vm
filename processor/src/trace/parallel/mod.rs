@@ -395,7 +395,7 @@ fn generate_core_trace_row_major(
         &system_rows,
         &first_stack_top,
     );
-    set_loop_body_multiplicities(&mut core_trace_data, total_core_trace_rows);
+    set_loop_body_multiplicities(&mut core_trace_data, total_core_trace_rows)?;
 
     // Run batch inversion on stack's H0 helper column, processing each fragment in parallel.
     // This must be done after fixup_stack_and_system_rows since that function overwrites the first
@@ -445,9 +445,12 @@ fn generate_core_trace_row_major(
 /// the multiplicity for every iteration of the dynamic loop instance. This is the honest aggregate
 /// count; AIR soundness also relies on the decoder/address/block-stack provenance constraints to
 /// prevent forged same-key END rows or dynamic-address reuse.
-fn set_loop_body_multiplicities(core_trace_data: &mut [Felt], num_rows: usize) {
+fn set_loop_body_multiplicities(
+    core_trace_data: &mut [Felt],
+    num_rows: usize,
+) -> Result<(), ExecutionError> {
     if num_rows < 2 {
-        return;
+        return Ok(());
     }
 
     let mut loop_body_counts = BTreeMap::<u64, u64>::new();
@@ -483,12 +486,17 @@ fn set_loop_body_multiplicities(core_trace_data: &mut [Felt], num_rows: usize) {
                 core_trace_data[(row_idx + 1) * width..(row_idx + 2) * width].borrow();
             next.decoder.addr.as_canonical_u64()
         };
-        let body_count = loop_body_counts.get(&loop_addr).copied().unwrap_or(0);
+        let body_count = loop_body_counts
+            .get(&loop_addr)
+            .copied()
+            .ok_or(ExecutionError::Internal("dynamic LOOP has no matching body END"))?;
 
         let row: &mut CoreCols<Felt> =
             core_trace_data[row_idx * width..(row_idx + 1) * width].borrow_mut();
         row.decoder.group_count = Felt::new_unchecked(body_count);
     }
+
+    Ok(())
 }
 
 fn decode_opcode(op_bits: &[Felt; NUM_OP_BITS]) -> u8 {

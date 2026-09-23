@@ -317,8 +317,11 @@ impl MainTrace {
         self.core_row(i).decoder.batch_flags
     }
 
-    /// Returns the operation group count. This indicates the number of operation that remain
-    /// to be executed in the current span block.
+    /// Returns the decoder's `group_count` value at row i.
+    ///
+    /// On SPAN, RESPAN, and in-span rows, this tracks the operation groups remaining in the
+    /// current basic block. On LOOP rows, it counts body executions and supplies the block-hash
+    /// lookup multiplicity.
     pub fn group_count(&self, i: RowIndex) -> Felt {
         self.core_row(i).decoder.group_count
     }
