@@ -1,5 +1,4 @@
 use std::{
-    fs,
     path::{Path, PathBuf},
     time::Instant,
 };
@@ -185,8 +184,8 @@ impl ProveCmd {
         ProofFile::write(proof, &self.proof_file, &self.program_file).map_err(Report::msg)?;
 
         // Whether the outputs path names the proof is a question only the filesystem can answer,
-        // and only now that the proof exists: resolving both paths folds away symlinks, `..`
-        // components, case-insensitive names and Unicode normalization in one step.
+        // and only now that the proof exists: comparing file identity sees through symlinks, `..`
+        // components, case-insensitive names, Unicode normalization and hard links in one step.
         let proof_path = self.resolved_proof_path();
         let output_path = self.output_file.clone().unwrap_or_else(|| self.default_output_path());
         if resolve_to_same_file(&output_path, &proof_path) {
@@ -220,20 +219,18 @@ impl ProveCmd {
     }
 }
 
-/// Returns true when both paths resolve to the same existing file.
+/// Returns true when both paths name the same existing file.
 ///
-/// This runs after the proof has been written, so the proof side always resolves. An outputs path
-/// that does not resolve names a file that does not exist yet, which therefore cannot be the proof.
-/// Hard links are the one alias this cannot see: they share no resolved path.
+/// This runs after the proof has been written, so the proof side always exists. An outputs path
+/// that cannot be opened names a file that does not exist yet, which therefore cannot be the proof.
 fn resolve_to_same_file(output_path: &Path, proof_path: &Path) -> bool {
-    match (fs::canonicalize(output_path), fs::canonicalize(proof_path)) {
-        (Ok(output_path), Ok(proof_path)) => output_path == proof_path,
-        _ => false,
-    }
+    same_file::is_same_file(output_path, proof_path).unwrap_or(false)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     fn prove_cmd(program_file: &str, proof_file: Option<&str>) -> ProveCmd {
@@ -303,6 +300,22 @@ mod tests {
 
         fs::create_dir(dir.path().join("sub")).unwrap();
         assert!(resolve_to_same_file(&dir.path().join("./sub/../same.proof"), &proof_path));
+    }
+
+    #[test]
+    fn resolve_to_same_file_sees_through_a_hard_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+
+        // negative control: a copy has the same contents but is a different file
+        let copy_path = dir.path().join("copy.proof");
+        fs::copy(&proof_path, &copy_path).unwrap();
+        assert!(!resolve_to_same_file(&copy_path, &proof_path));
+
+        let link_path = dir.path().join("link.proof");
+        fs::hard_link(&proof_path, &link_path).unwrap();
+        assert!(resolve_to_same_file(&link_path, &proof_path));
     }
 
     #[test]
