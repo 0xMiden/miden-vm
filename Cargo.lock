@@ -2312,6 +2312,7 @@ dependencies = [
 name = "miden-crypto-wycheproof-tests"
 version = "1.0.0"
 dependencies = [
+ "der",
  "ed25519-dalek",
  "hex",
  "k256",
