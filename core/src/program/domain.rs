@@ -105,6 +105,13 @@ miden_crypto::eidos_domain_registry! {
                 description: "SHA-512 deferred precompile nodes.",
                 schema: "param0 = operation; param1 = preimage length in bytes; param2 = 0; ASSERT payload = exactly one block containing preimage digest || expected digest",
             }
+            pub SHA256_PRECOMPILE: Sha256PrecompileDomain {
+                local_id: 0x000c,
+                version: DomainVersion::numbered(1),
+                encoding: Custom,
+                description: "SHA-256 deferred precompile nodes.",
+                schema: "param0 = operation; param1 = preimage length in bytes; param2 = 0; ASSERT payload = exactly one block containing preimage digest || expected digest",
+            }
         }
     }
 }
@@ -118,6 +125,7 @@ pub const fn domain_tag<D: EidosDomain>(_: D) -> Felt {
 pub(crate) fn is_vm_precompile_domain(tag: DomainTag) -> bool {
     tag == Keccak256PrecompileDomain::TAG
         || tag == Sha512PrecompileDomain::TAG
+        || tag == Sha256PrecompileDomain::TAG
         || tag == Uint256PrecompileDomain::TAG
         || tag == CurvePrecompileDomain::TAG
 }

@@ -16,6 +16,7 @@ use miden_crypto::hash::eidos::{DomainTag, EidosDomain, EidosFrame};
 use crate::codec::{chunks_to_bytes_exact, n_chunks};
 
 pub mod keccak256;
+pub mod sha256;
 pub mod sha512;
 
 // HASH FUNCTION
