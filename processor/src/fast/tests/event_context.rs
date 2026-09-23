@@ -190,7 +190,7 @@ fn dispatch_applies_advice_mutations_all_or_nothing() {
     let mut processor =
         FastProcessor::new(StackInputs::default()).with_advice(advice_inputs).unwrap();
     let mut host = DefaultHost::default();
-    host.register_event_handler(event.clone(), |_: EventContext, advice: &mut AdviceRecorder| {
+    host.register_handler(event.clone(), |_: EventContext, advice: &mut AdviceRecorder| {
         advice.prepend_stack([felt(99)]);
         advice.insert_map_entry(Word::default(), vec![ONE]);
         Ok(())
@@ -208,8 +208,10 @@ fn dispatch_applies_advice_mutations_all_or_nothing() {
 }
 
 #[test]
-#[allow(deprecated)] // Legacy callback coverage or independent raw inspection.
+#[allow(deprecated)] // Verifies isolation when a legacy callback catches a portable child failure.
 fn legacy_bridge_discards_child_writes_when_the_host_catches_failure() {
+    #[allow(deprecated)] // This regression exercises the legacy callback's mutation output.
+    use crate::advice::AdviceMutation;
     use crate::{
         ProcessorState,
         event::{EventError, legacy_handler},
@@ -223,7 +225,7 @@ fn legacy_bridge_discards_child_writes_when_the_host_catches_failure() {
     );
     let name = EventName::new("test::caught_child");
     let mut host = DefaultHost::default();
-    host.register_handler(
+    host.register_legacy_handler(
         name.clone(),
         Arc::new(move |state: &ProcessorState<'_>| {
             assert!(helper.on_event(state).is_err());

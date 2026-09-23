@@ -1,14 +1,10 @@
-// Exercises the legacy event callback and default no-op trace callback.
-#![allow(deprecated)]
-
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
-use crate::{
-    BaseHost, LoadedMastForest, ProcessorState, SyncHost, Word, advice::AdviceMutation,
-    event::EventError,
-};
+use crate::{BaseHost, LoadedMastForest, SyncHost, Word, event::EventError};
+#[allow(deprecated)] // This fixture tests the retained event callback.
+use crate::{ProcessorState, advice::AdviceMutation};
 
 /// A minimal testing host that records regular events.
 ///
@@ -56,6 +52,7 @@ impl BaseHost for NonTracingTestHost {
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // Verifies the old callback and default trace behavior.
 impl SyncHost for NonTracingTestHost {
     fn get_mast_forest(&self, _node_digest: &Word) -> Option<LoadedMastForest> {
         // This host only runs self-contained programs; external MAST forests are not resolved.

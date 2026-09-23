@@ -2,26 +2,27 @@ use std::sync::Arc;
 
 use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
-#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host,
-    LoadedMastForest, ProcessorState, StackInputs, Word,
-    advice::{AdviceInputs, AdviceMutation},
+    LoadedMastForest, StackInputs, Word,
+    advice::AdviceInputs,
     event::{EventError, EventName, TraceError},
 };
+#[allow(deprecated)] // The compatibility fixtures implement retained raw callbacks.
+use miden_processor::{ProcessorState, advice::AdviceMutation};
 
-struct YieldingAsyncHost {
+struct YieldingLegacyAsyncHost {
     event_calls: usize,
     trace_calls: usize,
 }
 
-impl YieldingAsyncHost {
+impl YieldingLegacyAsyncHost {
     fn new() -> Self {
         Self { event_calls: 0, trace_calls: 0 }
     }
 }
 
-impl BaseHost for YieldingAsyncHost {
+impl BaseHost for YieldingLegacyAsyncHost {
     fn get_label_and_source_file(
         &self,
         _location: &Location,
@@ -30,8 +31,7 @@ impl BaseHost for YieldingAsyncHost {
     }
 }
 
-#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
-impl Host for YieldingAsyncHost {
+impl Host for YieldingLegacyAsyncHost {
     fn get_mast_forest(
         &self,
         _node_digest: &Word,
@@ -39,6 +39,7 @@ impl Host for YieldingAsyncHost {
         async { None }
     }
 
+    #[allow(deprecated)] // Verifies the retained async event callback.
     fn on_event(
         &mut self,
         _process: &ProcessorState<'_>,
@@ -50,6 +51,7 @@ impl Host for YieldingAsyncHost {
         }
     }
 
+    #[allow(deprecated)] // Verifies the retained async trace callback.
     fn on_trace(
         &mut self,
         _process: &ProcessorState<'_>,
@@ -153,7 +155,7 @@ async fn execute_async_supports_async_only_host_events() {
         .expect("program should compile")
         .unwrap_program();
 
-    let mut host = YieldingAsyncHost::new();
+    let mut host = YieldingLegacyAsyncHost::new();
     let output = FastProcessor::new(StackInputs::default())
         .execute(&program, &mut host)
         .await
@@ -167,7 +169,7 @@ async fn execute_async_supports_async_only_host_events() {
 async fn execute_async_supports_async_only_host_traces() {
     let program = emit_trace_program();
 
-    let mut host = YieldingAsyncHost::new();
+    let mut host = YieldingLegacyAsyncHost::new();
     let output = FastProcessor::new(StackInputs::default())
         .execute(&program, &mut host)
         .await
@@ -404,7 +406,6 @@ async fn cancelling_a_callback_discards_all_pending_advice() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
 async fn forwarding_to_legacy_host_cannot_fall_back_after_staging_advice() {
     use miden_event_handler::{AdviceRecorder, EventContext};
     use miden_processor::SyncHost;
@@ -429,6 +430,7 @@ async fn forwarding_to_legacy_host_cannot_fall_back_after_staging_advice() {
             advice.prepend_stack([Felt::ONE]);
             SyncHost::handle_event(&mut self.inner, context, advice)
         }
+        #[allow(deprecated)] // Detects forbidden legacy fallback after portable advice staging.
         fn on_event(&mut self, _: &ProcessorState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
             self.legacy_calls += 1;
             Ok(vec![])

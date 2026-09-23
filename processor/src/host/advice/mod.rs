@@ -748,7 +748,6 @@ impl AdviceProviderInterface for AdviceProvider {
 }
 
 #[cfg(test)]
-#[allow(deprecated)] // Legacy mutation acceptance is intentional coverage.
 mod tests {
     use alloc::{collections::BTreeMap, vec, vec::Vec};
 
@@ -756,9 +755,11 @@ mod tests {
     use miden_event_handler::AdviceBatch;
 
     use super::{AdviceProvider, INTERNAL_NODE_SIZE_BYTES};
+    #[allow(deprecated)] // Only the legacy mutation adapter tests use this type.
+    use crate::advice::AdviceMutation;
     use crate::{
         AdviceInputs, ExecutionOptions, Felt, Word,
-        advice::{AdviceError, AdviceMap, AdviceMutation, AdviceStack},
+        advice::{AdviceError, AdviceMap, AdviceStack},
         crypto::merkle::{MerkleStore, MerkleTree},
     };
 
@@ -805,6 +806,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Verifies the retained legacy mutation adapter.
     fn typed_advice_stack_mutation_prepends_values() {
         let mut initial_stack = AdviceStack::new();
         initial_stack.append_elements([Felt::new_unchecked(3), Felt::new_unchecked(4)]);
@@ -1091,6 +1093,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Verifies the retained legacy mutation adapter.
     fn mutation_batches_are_atomic() {
         let base = AdviceProvider::default().advice_size_bytes;
         let options = ExecutionOptions::default()
@@ -1107,6 +1110,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Verifies the retained legacy mutation adapter.
     fn mutation_batches_are_atomic_on_map_conflict() {
         let key = make_leaf(0);
         let mut provider = AdviceProvider::new(
