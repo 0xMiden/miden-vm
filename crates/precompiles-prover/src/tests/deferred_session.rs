@@ -563,3 +563,33 @@ fn translate_ec_deep_nested_msm_does_not_stackoverflow() {
             .expect("deep nested MSM must lower without stack overflow");
     });
 }
+
+#[test]
+fn deferred_session_proves_p256_msm_and_equality() {
+    let mut state = state();
+    let curve = CurveId::P256;
+    let generator = CurvePrecompile::generator_node(curve);
+    let three_g = register_affine_curve_value(
+        &mut state,
+        curve,
+        curve.mul_scalar(curve.generator(), limbs(3)).unwrap(),
+    );
+    let two = UintPrecompile::value_node(UintDomain::P256Scalar, limbs(2));
+    let n_minus_one =
+        UintPrecompile::value_node(UintDomain::P256Scalar, UintDomain::P256Scalar.minus_one());
+    state.register(two.clone()).unwrap();
+    state.register(n_minus_one.clone()).unwrap();
+    // 2·(3G) + (n−1)·G = 5G.
+    let msm = curve_msm_node(vec![(three_g, two), (generator, n_minus_one)]);
+    state.register(msm.clone()).unwrap();
+    let five_g = register_affine_curve_value(
+        &mut state,
+        curve,
+        curve.mul_scalar(curve.generator(), limbs(5)).unwrap(),
+    );
+    register_curve_equality(&mut state, msm, five_g);
+
+    let imported = session_from_witnesses(vec![state.witness()])
+        .expect("P-256 MSMs must lower through the non-GLV path");
+    imported.finish().check();
+}
