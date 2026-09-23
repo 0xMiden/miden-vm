@@ -201,7 +201,7 @@ pub const LOOKUP_POW_BITS: u32 = 0;
 ///
 /// `fixed_boundary_fraction_count` derives this value from the fixed messages; the descriptor
 /// constant must equal the derived count.
-pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 14;
+pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 19;
 
 /// The Eidos challenge-support bound less the lookup round's coefficient, in fixed point.
 pub const LOOKUP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - LOOKUP_COEFFICIENT;
@@ -504,7 +504,7 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_043_633, 7_626_109, 7_693_931, 8_257_536, 7_760_447, 6_335_399, 8_257_536],
+                [7_043_608, 7_626_109, 7_693_931, 8_257_536, 7_760_447, 6_335_399, 8_257_536],
                 96,
             ),
             (

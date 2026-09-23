@@ -827,10 +827,10 @@ mod tests {
             .eval_external(&challenges, &[Felt::ZERO; 4], &[], &aux_refs, &[0; NUM_CHIPLETS])
             .expect("fixture denominators are non-zero");
         let expected = match crate::ace_constants::PVM_PROTOCOL_ID {
-            // Fixed secp256k1 and Ed25519 boundary denominators plus one value per chiplet.
+            // Fixed secp256k1, Ed25519 and P-256 boundary denominators plus one value per chiplet.
             3 => QuadFelt::new([
-                Felt::new_unchecked(1_139_532_885_139_658_914),
-                Felt::new_unchecked(11_241_382_758_453_267_529),
+                Felt::new_unchecked(13_307_287_383_580_918_154),
+                Felt::new_unchecked(9_765_647_450_999_344_310),
             ]),
             version => panic!("add an external-assertion vector for protocol version {version}"),
         };

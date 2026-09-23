@@ -8,7 +8,8 @@ mod spec;
 pub use self::{
     domain::{
         ED25519_BASE_BOUND_PTR, ED25519_ORDER_BOUND_PTR, ED25519_SCALAR_BOUND_PTR,
-        K1_BASE_BOUND_PTR, K1_SCALAR_BOUND_PTR, U256_BOUND_PTR, UintDomain,
+        K1_BASE_BOUND_PTR, K1_SCALAR_BOUND_PTR, P256_BASE_BOUND_PTR, P256_SCALAR_BOUND_PTR,
+        U256_BOUND_PTR, UintDomain,
     },
     precompile::{UintBinaryOp, UintNodeRef, UintOp, UintPrecompile},
     spec::{Limbs, ONE_LIMBS, TWO_LIMBS, UintSpec, ZERO_LIMBS},
