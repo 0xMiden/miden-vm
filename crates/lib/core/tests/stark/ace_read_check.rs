@@ -162,14 +162,12 @@ fn assert_air_selectors_match_trace_metadata(
 
 /// Runs an MVM verifier fixture and checks the ACE inputs it leaves in the verifier's context.
 ///
-/// The fixture's trace handlers run as usual, so callers can still observe the verifier's stack
-/// at return.
-pub(super) fn execute_and_check(test: &Test) {
+/// Registers the supplied trace observer so callers can inspect the verifier's stack at return.
+pub(super) fn execute_and_check(test: &Test, verifier_stack: super::VerifierStack) {
     let (program, ..) = test.compile().expect("the verifier fixture must assemble");
-    let mut host = DefaultHost::default().with_library(&CoreLibrary::default()).unwrap();
-    for (event, handler) in &test.trace_handlers {
-        host.register_trace_handler(event.clone(), handler.clone()).unwrap();
-    }
+    let core_lib = CoreLibrary::default();
+    let mut host = DefaultHost::default().with_library(core_lib.host_library()).unwrap();
+    host.register_handler(super::VERIFIER_RETURN, verifier_stack).unwrap();
     let mut processor = FastProcessor::new_with_options(
         test.stack_inputs,
         test.advice_inputs.clone(),
@@ -180,7 +178,7 @@ pub(super) fn execute_and_check(test: &Test) {
     let mut resume = Some(processor.get_initial_resume_context(&program).unwrap());
     while let Some(next) = resume {
         resume = processor.step_sync(&mut host, next).expect("recursive verification failed");
-        let ctx = processor.state().ctx();
+        let ctx = processor.ctx();
         // The verifier is the first child context in these fixtures.
         if !ctx.is_root() {
             verifier_context.get_or_insert(ctx);

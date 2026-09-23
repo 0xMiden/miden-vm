@@ -592,7 +592,7 @@ fn simple_dyncall() {
     let test = build_test!(program_source)
         .with_stack_inputs(stack_init)
         .with_library(core_lib.package())
-        .with_event_handlers(core_lib.handlers());
+        .with_handlers(core_lib.event_handlers());
 
     test.expect_stack(&[6]);
 
@@ -708,7 +708,7 @@ fn procref() -> Result<(), Report> {
     let core_lib = CoreLibrary::default();
     let test = build_test!(source, &[])
         .with_library(core_lib.package())
-        .with_event_handlers(core_lib.handlers());
+        .with_handlers(core_lib.event_handlers());
 
     // procref pushes element[0] on top
     // Word from procedure_digests stores elements in BE order (word[0] = high)

@@ -552,8 +552,8 @@ fn run_recursive_verifier(data: &VerifierData) {
         data.store.clone(),
         data.advice_map.clone()
     )
-    .with_trace_handler(VERIFIER_RETURN, verifier_stack.clone());
-    ace_read_check::execute_and_check(&test);
+    .with_handler(VERIFIER_RETURN, verifier_stack.clone());
+    ace_read_check::execute_and_check(&test, verifier_stack.clone());
 
     let params = miden_air::config::pcs_params();
     let height_start = 4 + WORD_SIZE;

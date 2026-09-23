@@ -16,14 +16,16 @@ use miden_core_lib::{
     handlers::debug::{
         DebugPrinter, PRINT_ADV_MAP_EVENT_NAME, PRINT_ADV_MAP_ITEM_EVENT_NAME,
         PRINT_ADV_STACK_EVENT_NAME, PRINT_MEM_ALL_EVENT_NAME, PRINT_MEM_EVENT_NAME,
-        PRINT_STACK_EVENT_NAME, advice_debug_handlers, debug_handlers, noop_debug_handlers,
+        PRINT_STACK_EVENT_NAME, advice_debug_event_handlers, debug_event_handlers,
+        noop_debug_event_handlers,
     },
 };
+use miden_event_handler::{EventContextError, EventHandler};
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, HostLibrary,
-    MemoryError, Program, StackInputs, SyncHost,
+    DefaultHost, EventLibrary, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
+    Program, StackInputs, SyncHost,
     advice::{AdviceInputs, AdviceStack},
-    event::{EventHandler, EventName},
+    event::{EventName, registration},
 };
 
 // HARNESS
@@ -53,15 +55,15 @@ impl fmt::Write for SharedBuf {
     }
 }
 
-fn debug_handlers_with_writer(writer: SharedBuf) -> Vec<(EventName, Arc<dyn EventHandler>)> {
+fn debug_handlers_with_writer(writer: SharedBuf) -> Vec<(EventName, registration::EventHandler)> {
     let printer: Arc<dyn EventHandler> = Arc::new(DebugPrinter::new(writer));
     vec![
-        (PRINT_STACK_EVENT_NAME, printer.clone()),
-        (PRINT_MEM_EVENT_NAME, printer.clone()),
-        (PRINT_MEM_ALL_EVENT_NAME, printer.clone()),
-        (PRINT_ADV_STACK_EVENT_NAME, printer.clone()),
-        (PRINT_ADV_MAP_EVENT_NAME, printer.clone()),
-        (PRINT_ADV_MAP_ITEM_EVENT_NAME, printer),
+        (PRINT_STACK_EVENT_NAME, registration::EventHandler::shared(printer.clone())),
+        (PRINT_MEM_EVENT_NAME, registration::EventHandler::shared(printer.clone())),
+        (PRINT_MEM_ALL_EVENT_NAME, registration::EventHandler::shared(printer.clone())),
+        (PRINT_ADV_STACK_EVENT_NAME, registration::EventHandler::shared(printer.clone())),
+        (PRINT_ADV_MAP_EVENT_NAME, registration::EventHandler::shared(printer.clone())),
+        (PRINT_ADV_MAP_ITEM_EVENT_NAME, registration::EventHandler::shared(printer)),
     ]
 }
 
@@ -79,12 +81,12 @@ fn run(source: &str, advice: AdviceInputs) -> (String, ExecutionOutput) {
         .unwrap_program();
 
     let buf = Arc::new(Mutex::new(String::new()));
-    let host_lib = HostLibrary {
-        mast_forest: core_lib.mast_forest().clone(),
-        package_debug_info: Ok(None),
-        handlers: debug_handlers_with_writer(SharedBuf(buf.clone())),
-    };
-    let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
+    let mut host = DefaultHost::default()
+        .with_library(EventLibrary {
+            handlers: debug_handlers_with_writer(SharedBuf(buf.clone())),
+            ..core_lib.host_library()
+        })
+        .expect("failed to load host lib");
 
     let output = execute_sync(
         &program,
@@ -119,7 +121,7 @@ fn run_with_default_core_handlers(source: &str, advice: AdviceInputs) -> Executi
         .expect("failed to assemble program")
         .unwrap_program();
     let mut host = DefaultHost::default()
-        .with_library(&core_lib)
+        .with_library(core_lib.host_library())
         .expect("failed to load core library handlers");
 
     execute_sync(&program, StackInputs::default(), advice, &mut host, ExecutionOptions::default())
@@ -201,7 +203,7 @@ fn print_mem_addr_outputs_procedure_local() {
 }
 
 #[test]
-fn print_mem_addr_reports_uninitialized_cell() {
+fn print_mem_addr_reports_unwritten_cell_as_zero() {
     let source = "
     use miden::core::debug
     begin
@@ -211,12 +213,12 @@ fn print_mem_addr_reports_uninitialized_cell() {
     ";
     let out = run_and_capture(source, AdviceInputs::default());
     assert!(out.contains("Memory state"), "missing header; got:\n{out}");
-    assert!(out.contains("0x00000064: EMPTY"), "expected EMPTY cell; got:\n{out}");
+    assert!(out.contains("0x00000064: 0"), "expected zero cell; got:\n{out}");
 }
 
 #[test]
-fn print_mem_shows_uninitialized_cells_as_empty() {
-    // Every address in an explicit range is enumerated, with uninitialized cells shown as EMPTY,
+fn print_mem_shows_unwritten_cells_as_zero() {
+    // Every address in an explicit range is enumerated, with unwritten cells shown as zero,
     // so gaps in the range don't silently disappear.
     let source = "
     use miden::core::debug
@@ -228,12 +230,11 @@ fn print_mem_shows_uninitialized_cells_as_empty() {
     ";
     let out = run_and_capture(source, AdviceInputs::default());
     assert!(out.contains("0x00000064: 42"), "missing stored value; got:\n{out}");
-    // The `mem_store` initialized the whole word at addresses 100..104; the rest of the requested
-    // range is untouched and must still be listed, as EMPTY.
-    for addr in 104..110u32 {
+    // Both the unwritten neighbours in the stored word and the untouched words must read zero.
+    for addr in 101..110u32 {
         assert!(
-            out.contains(&format!("{addr:#010x}: EMPTY")),
-            "missing EMPTY cell at {addr}; got:\n{out}"
+            out.contains(&format!("{addr:#010x}: 0")),
+            "missing zero cell at {addr}; got:\n{out}"
         );
     }
 }
@@ -272,7 +273,7 @@ fn print_mem_addr_prints_max_u32_cell() {
 
 #[test]
 fn print_mem_all_includes_max_u32_cell() {
-    // Regression: `print_mem_all` lists every initialized cell, so the cell at `u32::MAX` is no
+    // Regression: `print_mem_all` lists every stored cell, so the cell at `u32::MAX` is no
     // longer silently excluded.
     let source = "
     use miden::core::debug
@@ -304,12 +305,12 @@ fn print_mem_rejects_out_of_bounds_range_end() {
         .assemble_program("program", source)
         .expect("failed to assemble program")
         .unwrap_program();
-    let host_lib = HostLibrary {
-        mast_forest: core_lib.mast_forest().clone(),
-        package_debug_info: Ok(None),
-        handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
-    };
-    let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
+    let mut host = DefaultHost::default()
+        .with_library(EventLibrary {
+            handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
+            ..core_lib.host_library()
+        })
+        .expect("failed to load host lib");
 
     match execute_sync(
         &program,
@@ -319,8 +320,10 @@ fn print_mem_rejects_out_of_bounds_range_end() {
         ExecutionOptions::default(),
     ) {
         Err(ExecutionError::EventError { error, .. }) => {
-            let err = error.downcast_ref::<MemoryError>().expect("expected a MemoryError");
-            assert!(matches!(err, MemoryError::AddressOutOfBounds { .. }));
+            let err = error
+                .downcast_ref::<EventContextError>()
+                .expect("expected an EventContextError");
+            assert!(matches!(err, EventContextError::AddressOutOfBounds { .. }));
         },
         Err(err) => panic!("unexpected error type: {err:?}"),
         Ok(_) => panic!("out-of-bounds print_mem range should fail"),
@@ -347,12 +350,12 @@ fn print_mem_rejects_oversized_range() {
         .assemble_program("program", source)
         .expect("failed to assemble program")
         .unwrap_program();
-    let host_lib = HostLibrary {
-        mast_forest: core_lib.mast_forest().clone(),
-        package_debug_info: Ok(None),
-        handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
-    };
-    let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
+    let mut host = DefaultHost::default()
+        .with_library(EventLibrary {
+            handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
+            ..core_lib.host_library()
+        })
+        .expect("failed to load host lib");
 
     match execute_sync(
         &program,
@@ -390,12 +393,12 @@ fn print_mem_rejects_full_range() {
         .assemble_program("program", source)
         .expect("failed to assemble program")
         .unwrap_program();
-    let host_lib = HostLibrary {
-        mast_forest: core_lib.mast_forest().clone(),
-        package_debug_info: Ok(None),
-        handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
-    };
-    let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
+    let mut host = DefaultHost::default()
+        .with_library(EventLibrary {
+            handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
+            ..core_lib.host_library()
+        })
+        .expect("failed to load host lib");
 
     match execute_sync(
         &program,
@@ -552,7 +555,7 @@ fn print_stack_is_stack_neutral() {
 #[test]
 fn default_core_handlers_include_debug_printers() {
     let core_lib = CoreLibrary::default();
-    let handlers = core_lib.handlers();
+    let handlers = core_lib.event_handlers();
 
     for debug_event in [PRINT_STACK_EVENT_NAME, PRINT_MEM_EVENT_NAME, PRINT_MEM_ALL_EVENT_NAME] {
         assert!(
@@ -594,14 +597,11 @@ fn debug_handlers_compose_with_default_core_handlers() {
         .expect("failed to assemble program")
         .unwrap_program();
 
-    let mut handlers = core_lib.handlers();
-    handlers.extend(advice_debug_handlers());
-    let host_lib = HostLibrary {
-        mast_forest: core_lib.mast_forest().clone(),
-        package_debug_info: Ok(None),
-        handlers,
-    };
-    let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
+    let mut handlers = core_lib.event_handlers();
+    handlers.extend(advice_debug_event_handlers());
+    let mut host = DefaultHost::default()
+        .with_library(EventLibrary { handlers, ..core_lib.host_library() })
+        .expect("failed to load host lib");
 
     let output = execute_sync(
         &program,
@@ -616,7 +616,7 @@ fn debug_handlers_compose_with_default_core_handlers() {
 
 #[test]
 fn debug_handlers_include_all_core_debug_events() {
-    let handlers = debug_handlers();
+    let handlers = debug_event_handlers();
 
     for debug_event in [
         PRINT_STACK_EVENT_NAME,
@@ -628,7 +628,7 @@ fn debug_handlers_include_all_core_debug_events() {
     ] {
         assert!(
             handlers.iter().any(|(event, _)| event == &debug_event),
-            "{debug_event:?} should be registered by debug_handlers()"
+            "{debug_event:?} should be registered by debug_event_handlers()"
         );
     }
 }
@@ -666,12 +666,12 @@ fn noop_debug_handlers_run_print_stack_without_output() {
         .assemble_program("program", source)
         .expect("failed to assemble program")
         .unwrap_program();
-    let host_lib = HostLibrary {
-        mast_forest: core_lib.mast_forest().clone(),
-        package_debug_info: Ok(None),
-        handlers: noop_debug_handlers(),
-    };
-    let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
+    let mut host = DefaultHost::default()
+        .with_library(EventLibrary {
+            handlers: noop_debug_event_handlers(),
+            ..core_lib.host_library()
+        })
+        .expect("failed to load host lib");
 
     let output = execute_sync(
         &program,

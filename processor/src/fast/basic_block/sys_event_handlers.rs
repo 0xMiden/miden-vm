@@ -181,23 +181,14 @@ fn insert_hdword_into_adv_map(
 /// Where A is at positions 1-4, B at 5-8, C at 9-12, D at 13-16.
 /// KEY is computed as `hash_elements([A, B, C, D].concat())` (two-round absorption).
 fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
-    // Stack: [event_id, A, B, C, D, ...] where A is at positions 1-4, B at 5-8, etc.
-    let a = processor.stack_get_word(1);
-    let b = processor.stack_get_word(5);
-    let c = processor.stack_get_word(9);
-    let d = processor.stack_get_word_safe(13);
+    // Read below the event ID, zero-padding values missing from the logical stack.
+    let mut values = [ZERO; 4 * WORD_SIZE];
+    for (value, stack_item) in values.iter_mut().zip(processor.stack().iter().rev().skip(1)) {
+        *value = *stack_item;
+    }
 
-    // Hash in natural stack order [A, B, C, D].
-    let key = Poseidon2::hash_elements(&[*a, *b, *c, *d].concat());
-
-    // Store values in [A, B, C, D] order.
-    let mut values = Vec::with_capacity(4 * WORD_SIZE);
-    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(a));
-    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(b));
-    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(c));
-    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(d));
-
-    processor.advice.insert_into_map(key, values)?;
+    let key = Poseidon2::hash_elements(&values);
+    processor.advice.insert_into_map(key, values.to_vec())?;
     Ok(())
 }
 
@@ -589,6 +580,25 @@ mod tests {
             .get_mapped_values(&expected_key)
             .expect("key should be present in advice map");
         assert_eq!(stored_values, expected_values.as_slice());
+    }
+
+    #[test]
+    fn insert_hqword_into_adv_map_zero_extends_below_logical_stack() {
+        // The event ID plus 15 arguments fill the minimum logical stack. The final payload
+        // element must be zero, rather than read from the backing buffer below the logical stack.
+        let stack_values = stack_with_values(15, 1);
+        let mut processor = FastProcessor::new(StackInputs::new(&stack_values).unwrap());
+        processor.stack[processor.stack_bot_idx - 1] = Felt::new_unchecked(999);
+
+        insert_hqword_into_adv_map(&mut processor).unwrap();
+
+        let mut expected_values: Vec<Felt> = (1_u64..=15).map(Felt::new_unchecked).collect();
+        expected_values.push(ZERO);
+        let expected_key = Poseidon2::hash_elements(&expected_values);
+        assert_eq!(
+            processor.advice.get_mapped_values(&expected_key),
+            Some(expected_values.as_slice())
+        );
     }
 
     #[test]

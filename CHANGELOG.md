@@ -5,6 +5,14 @@
 #### Features
 
 - [BREAKING] Add a precompile prover memory budget, with a 64GiB default ([#3799](https://github.com/0xMiden/miden-vm/pull/3799)).
+- Migrated native crypto handlers to typed advice with fixed Keccak (1 MiB input) and AEAD (16 MiB plaintext) admission limits. Removed configurable hash-length execution options; AEAD now treats unwritten ciphertext, padding, and tags as zero-valued memory and validates those values normally ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
+
+- Migrated native arithmetic, collection, and observation handlers to payload-relative reads and typed advice recording. Public `handle_*` functions now take `EventContext` and `AdviceRecorder`; legacy library lists and `DebugPrinter` remain usable ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
+
+- Added portable `Host::handle_event` and `SyncHost::handle_event` callbacks, unified registrations, explicit trace-delivery policy, and complete-batch advice completion while preserving legacy host and registration paths ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
+
+- Added the portable `miden-event-handler` crate with one event/trace handler trait, payload-relative `EventContext`, and typed advice recorded into an engine-owned batch. Operand-stack reads zero-extend; all ordinary memory reads return zero for unwritten cells, with errors only for invalid addresses, alignment, or ranges. Missing advice remains meaningful ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
+
 - Added Wasm-compiled custom event handlers: untrusted Wasm modules ship inside a `.masp` package (`event_handlers` section) and run under the wasmi interpreter on any host. New crates: `miden-event-handler-abi` (host/guest ABI contract), `miden-wasm-event-handlers` (host-side runner with fuel, memory, and mutation limits), `miden-event-handler-sdk` + `miden-event-handler-macros` (Rust guest SDK with manifest emission). Also added `ProcessorState::stack_depth` ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 - [BREAKING] The package dependency commitment now binds the `event_handlers` section (next to the account-component metadata), and the semantic sections enter its preimage in a canonical order, so the dependency commitment of a package that carries handlers changes ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 - [BREAKING] `DefaultHost::replace_handler` and `DefaultHost::replace_trace_handler` now return `Result<bool, ExecutionError>` instead of `bool`, because the event name is validated before the handler is registered ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
@@ -16,6 +24,12 @@
 
 - Improved lifted STARK prover performance: LogUp fractions are built and accumulated in row chunks with a parallel accumulator scan, and DEEP reduction avoids element-wise buffer swaps and per-height group buffers ([#3851](https://github.com/0xMiden/miden-vm/pull/3851)).
 - Reduced prover peak memory by 13-20% by pruning Merkle layers ([#3872](https://github.com/0xMiden/miden-vm/pull/3872)).
+- Deprecated raw-state processor handler, registry, mutation, and callback APIs while preserving
+  their compatibility paths. See the [migration guide](docs/src/user_docs/event_handler_migration.md)
+  for concrete handler changes and retained APIs ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
+- Wasm ABI revision 2 adds invocation kind while retaining the v1 namespace and revision-1 declarations.
+  Inverse witnesses carry explicit operands while retaining their deferred assertion binding
+  ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 
 #### Fixes
 
@@ -67,6 +81,7 @@
 
 - Preserved the public `ParsingError` enum layout while adding protocol ABI attribute checks ([#3812](https://github.com/0xMiden/miden-vm/pull/3812)).
 - Fixed issue where parsing of pointer types dropped address space information ([#3790](https://github.com/0xMiden/miden-vm/pull/3790)).
+- Zero-extend Hqword system-hash payloads at logical operand-stack depth ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 
 ## v0.32.0 (2026-09-05)
 
@@ -79,6 +94,8 @@
 #### Features
 
 #### Fixes
+
+- Zero-extend Hqword system-hash payloads at logical operand-stack depth ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 - Fixed stack overflow in the precompile prover's `translate_truthy`, `translate_uint`, and `translate_ec` by converting them from recursive to iterative post-order traversals. Programs with many `LOGDEFERRED` calls no longer crash ([#3626](https://github.com/0xMiden/miden-vm/issues/3626)).
 
 ## v0.31.1 (2026-09-04)

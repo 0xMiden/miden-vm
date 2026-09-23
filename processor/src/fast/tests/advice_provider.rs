@@ -160,10 +160,28 @@ fn test_advice_provider() {
     };
 
     let mut fast_host = TestHost::with_kernel_forest(kernel_lib.mast_forest().clone());
-    let processor = FastProcessor::new(StackInputs::default())
+    let mut processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits");
-    let fast_stack_outputs = processor.execute_sync(&program, &mut fast_host).unwrap().stack;
+    let mut resume_context = processor.get_initial_resume_context(&program).unwrap();
+    loop {
+        let event_count = fast_host.event_handler.len();
+        let ctx = processor.ctx();
+        let next = processor.step_sync(&mut fast_host, resume_context).unwrap();
+        if fast_host.event_handler.len() != event_count {
+            // Numeric context IDs belong to processor inspection, not the portable event API.
+            // The dynamic call runs in context 219; exec/dynexec and syscalls use the root context.
+            let event_id = *fast_host.event_handler.last().unwrap();
+            let expected_ctx = if event_id == 100 { 219 } else { 0 };
+            assert_eq!(u32::from(ctx), expected_ctx, "context at event {event_id}");
+        }
+        match next {
+            Some(next) => resume_context = next,
+            None => break,
+        }
+    }
+    let fast_stack_outputs =
+        StackOutputs::new(&processor.stack().iter().rev().copied().collect::<Vec<_>>()).unwrap();
 
     // check outputs
     insta::assert_debug_snapshot!("stack_outputs", fast_stack_outputs);

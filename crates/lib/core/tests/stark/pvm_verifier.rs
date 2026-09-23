@@ -175,8 +175,8 @@ fn run_pvm_verifier_with_advice(
     let mut initial_stack = claim_elements.to_vec();
     initial_stack.extend(CALLER_WORD);
     let verifier_stack = VerifierStack::default();
-    let mut test = build_test!(source, initial_stack)
-        .with_trace_handler(VERIFIER_RETURN, verifier_stack.clone());
+    let mut test =
+        build_test!(source, initial_stack).with_handler(VERIFIER_RETURN, verifier_stack.clone());
     test.advice_inputs = advice.clone();
     test.execute_for_output()?;
     Ok(verifier_stack)

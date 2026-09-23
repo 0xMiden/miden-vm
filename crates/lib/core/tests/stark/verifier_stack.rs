@@ -1,10 +1,7 @@
 use std::sync::{Arc, OnceLock};
 
 use miden_core::events::EventName;
-use miden_processor::{
-    ProcessorState,
-    event::{TraceError, TraceHandler},
-};
+use miden_event_handler::{AdviceRecorder, EventContext, EventError, EventHandler, InvocationKind};
 
 // Zero padding would hide dropped caller data.
 pub(super) const CALLER_WORD: [u64; 4] = [101, 102, 103, 104];
@@ -16,13 +13,16 @@ pub(super) struct VerifierStack {
     values: Arc<OnceLock<Vec<u64>>>,
 }
 
-impl TraceHandler for VerifierStack {
-    fn on_trace(&self, process: &ProcessorState) -> Result<(), TraceError> {
-        // trace places the system event ID and trace ID above the verifier's stack.
-        let values = process
-            .get_stack_state()
+impl EventHandler for VerifierStack {
+    fn handle(
+        &self,
+        context: EventContext<'_>,
+        _advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
+        context.kind().require(InvocationKind::Trace)?;
+        let values = context
+            .stack_snapshot()
             .into_iter()
-            .skip(2)
             .map(|value| value.as_canonical_u64())
             .collect();
         self.values

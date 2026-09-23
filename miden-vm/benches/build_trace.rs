@@ -66,8 +66,9 @@ fn build_trace(c: &mut Criterion) {
 
                     bench.to_async(Runtime::new().unwrap()).iter_batched(
                         || {
+                            let core_lib = CoreLibrary::default();
                             let host = DefaultHost::default()
-                                .with_library(&CoreLibrary::default())
+                                .with_library(core_lib.host_library())
                                 .unwrap();
 
                             let processor = FastProcessor::new_with_options(

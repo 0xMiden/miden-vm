@@ -92,6 +92,11 @@ Input at `src_ptr`:
 - The encrypted padding is at: `src_ptr + (num_blocks * 8)`
 - The tag is at: `src_ptr + (num_blocks + 1) * 8`
 
+The host reads ciphertext, encrypted padding, and the tag using the VM's zero-filled memory
+contract. Unwritten elements have the same value and decryption behavior as explicitly stored zeros;
+there is no separate requirement to write every input word. Authentication and padding validation
+still apply, so an unwritten region is not automatically valid ciphertext.
+
 Output at `dst_ptr`:
 ```
 [plaintext_block_0(8), ..., plaintext_block_n(8)]

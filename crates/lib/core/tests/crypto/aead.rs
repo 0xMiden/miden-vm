@@ -1,16 +1,10 @@
-use std::sync::Arc;
-
 use miden_air::Felt;
 use miden_core_lib::handlers::aead_decrypt::AEAD_DECRYPT_EVENT_NAME;
 use miden_crypto::aead::{
-    DataType,
+    DataType, EncryptionError,
     aead_poseidon2::{AuthTag, EncryptedData, Nonce, SecretKey},
 };
-use miden_processor::{
-    ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::{EventError, EventHandler},
-};
+use miden_event_handler::{AdviceRecorder, EventContext, EventError};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 
@@ -47,6 +41,81 @@ fn test_encrypt_zero_blocks_roundtrip() {
 
     let test = build_test!(source, &[]);
     test.execute().expect("AEAD zero-block roundtrip failed");
+}
+
+#[test]
+fn test_decrypt_accepts_unwritten_zero_ciphertext() {
+    let mut rng = ChaCha20Rng::from_seed([15_u8; 32]);
+    let key = SecretKey::with_rng(&mut rng);
+    let nonce = Nonce::with_rng(&mut rng);
+
+    // The first ciphertext block is plaintext plus the initial keystream. Negating that
+    // keystream constructs a valid authenticated ciphertext with an entirely zero data block.
+    let zero_encrypted = key
+        .encrypt_elements_with_nonce(&[Felt::ZERO; 8], &[], nonce.clone())
+        .expect("encryption failed");
+    let plaintext: Vec<_> = zero_encrypted.ciphertext()[..8].iter().map(|value| -*value).collect();
+    let encrypted = key
+        .encrypt_elements_with_nonce(&plaintext, &[], nonce)
+        .expect("encryption failed");
+    assert_eq!(&encrypted.ciphertext()[..8], &[Felt::ZERO; 8]);
+    let expected_plaintext: Vec<_> = plaintext.iter().map(Felt::as_canonical_u64).collect();
+    let key_elements = key.to_elements();
+    let nonce_elements: [Felt; 4] = encrypted.nonce().clone().into();
+
+    for write_zero_block in [false, true] {
+        let stores: String = encrypted
+            .ciphertext()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| write_zero_block || *index >= 2)
+            .map(|(index, word)| {
+                format!("push.{word:?} push.{} mem_storew_le dropw ", 1000 + index * 4)
+            })
+            .collect();
+        let source = format!(
+            "
+            use miden::core::crypto::aead
+            begin
+                {stores}
+                push.{tag:?} push.1016 mem_storew_le dropw
+                push.1.2000.1000
+                push.{nonce_elements:?}
+                push.{key_elements:?}
+                exec.aead::decrypt
+            end
+            ",
+            tag = encrypted.auth_tag().to_elements(),
+        );
+        build_test!(source.as_str(), &[]).expect_stack_and_memory(&[], 2000, &expected_plaintext);
+    }
+}
+
+#[test]
+fn test_decrypt_authenticates_unwritten_zero_ciphertext_padding_and_tag() {
+    for missing_word in [None, Some(1000), Some(1008), Some(1016)] {
+        // Written and unwritten zeros have the same values and must fail authentication in
+        // the same way, including when the omitted word belongs to padding or the tag.
+        let stores: String = (1000..1020)
+            .step_by(4)
+            .filter(|&address| Some(address) != missing_word)
+            .map(|address| format!("push.0 mem_store.{address} "))
+            .collect();
+        let source = format!(
+            "begin {stores} push.1.2000.1000 padw padw emit.event(\"{AEAD_DECRYPT_EVENT_NAME}\") end"
+        );
+        let Err(miden_processor::ExecutionError::EventError { error, .. }) =
+            build_test!(source.as_str(), &[]).execute()
+        else {
+            panic!("the zero ciphertext/tag pair must fail authentication");
+        };
+        assert!(matches!(
+            error.downcast_ref::<EncryptionError>(),
+            Some(EncryptionError::InvalidAuthTag)
+        ));
+    }
 }
 
 #[test]
@@ -182,19 +251,15 @@ fn test_decrypt_rejects_tampered_final_tag() {
 
     let mut test = build_test!(source.as_str(), &[]);
     let valid_plaintext = plaintext;
-    let malicious_handler: Arc<dyn EventHandler> =
-        Arc::new(move |_process: &ProcessorState| -> Result<Vec<AdviceMutation>, EventError> {
-            Ok(vec![advice_stack_mutation(valid_plaintext.clone())])
-        });
-
-    let decrypt_event_id = AEAD_DECRYPT_EVENT_NAME.to_event_id();
-    let mut replaced_default_handler = false;
-    for (event, handler) in &mut test.handlers {
-        if event.to_event_id() == decrypt_event_id {
-            *handler = malicious_handler.clone();
-            replaced_default_handler = true;
-        }
-    }
+    let replaced_default_handler = test.replace_handler(
+        AEAD_DECRYPT_EVENT_NAME,
+        move |_context: EventContext<'_>,
+              advice: &mut AdviceRecorder<'_>|
+              -> Result<(), EventError> {
+            advice.prepend_stack(valid_plaintext.clone());
+            Ok(())
+        },
+    );
     assert!(
         replaced_default_handler,
         "AEAD decrypt handler should be registered by build_test"
@@ -441,31 +506,21 @@ fn test_decrypt_rejects_adversarial_plaintext_for_unrelated_ciphertext() {
 
     let mut test = build_test!(source.as_str(), &[]);
     let adversarial_plaintext = plaintext;
-    let malicious_handler: Arc<dyn EventHandler> =
-        Arc::new(move |_process: &ProcessorState| -> Result<Vec<AdviceMutation>, EventError> {
-            Ok(vec![advice_stack_mutation(adversarial_plaintext.clone())])
-        });
-
-    let decrypt_event_id = AEAD_DECRYPT_EVENT_NAME.to_event_id();
-    let mut replaced_default_handler = false;
-    for (event, handler) in &mut test.handlers {
-        if event.to_event_id() == decrypt_event_id {
-            *handler = malicious_handler.clone();
-            replaced_default_handler = true;
-        }
-    }
+    let replaced_default_handler = test.replace_handler(
+        AEAD_DECRYPT_EVENT_NAME,
+        move |_context: EventContext<'_>,
+              advice: &mut AdviceRecorder<'_>|
+              -> Result<(), EventError> {
+            advice.prepend_stack(adversarial_plaintext.clone());
+            Ok(())
+        },
+    );
     assert!(
         replaced_default_handler,
         "AEAD decrypt handler should be registered by build_test"
     );
 
     expect_assert_error_code_from_msg!(test, "AEAD ciphertext mismatch");
-}
-
-fn advice_stack_mutation(values: Vec<Felt>) -> AdviceMutation {
-    let mut advice_stack = AdviceStack::new();
-    advice_stack.append_elements(values);
-    AdviceMutation::extend_advice_stack(advice_stack)
 }
 
 #[test]

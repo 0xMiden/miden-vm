@@ -1,4 +1,4 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::vec::Vec;
 
 use miden_air::trace::{
     chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
@@ -7,6 +7,7 @@ use miden_air::trace::{
         OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS,
     },
 };
+use miden_event_handler::NoopHandler;
 
 /// Column index of `ctx` within the per-section system trace extracted by
 /// [`extract_system_trace`]. Matches `SystemCols::ctx`.
@@ -34,8 +35,7 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, ProcessorState,
-    event::{NoopEventHandler, TraceError},
+    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor,
     trace::{VmTrace, build_trace},
 };
 
@@ -1627,12 +1627,8 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
     )
     .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
-    host.register_handler(EMIT_EVENT, Arc::new(NoopEventHandler)).unwrap();
-    host.register_trace_handler(
-        TRACE_EVENT,
-        Arc::new(|_: &ProcessorState| -> Result<(), TraceError> { Ok(()) }),
-    )
-    .unwrap();
+    host.register_handler(EMIT_EVENT, NoopHandler).unwrap();
+    host.register_handler(TRACE_EVENT, NoopHandler).unwrap();
 
     let execution_witness = processor.execute_for_proving_sync(program, &mut host).unwrap();
     let (vm_witness, _) = execution_witness.into_parts();

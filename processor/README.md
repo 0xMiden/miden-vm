@@ -72,3 +72,37 @@ To compile with `no_std`, disable default features via `--no-default-features` f
 
 ## License
 This project is dual-licensed under the [MIT](http://opensource.org/licenses/MIT) and [Apache 2.0](https://opensource.org/license/apache-2-0) licenses.
+
+### Portable event callbacks
+
+Use `miden_event_handler::EventHandler` and `DefaultHost::register_handler` for one binding
+that receives both regular events and traces. `EventContext` exposes actual invocation identity,
+kind, clock, payload-relative stack reads, and current/root memory and advice reads. Custom hosts
+implement `handle_event(context, advice)` on `Host` or `SyncHost`; async hosts may borrow both across
+`await`. Registered handlers stay synchronous.
+
+`ExecutionOptions::with_trace_delivery(false)` suppresses trace callbacks before lookup or host
+work while retaining VM instructions and cycles. Delivery is enabled by default, including fast
+execution. Unknown traces are ignored by `DefaultHost`; known handler errors propagate. Traces
+that successfully record advice fail with an engine error. Regular callbacks apply advice only
+after complete-batch conflict and aggregate-budget validation. Callback error or cancellation
+leaves processor advice unchanged, without rolling back host-owned effects.
+
+Load complete portable libraries with `load_library` or `with_library`: use
+`CoreLibrary::host_library()` for the core library and
+`miden_wasm_event_handlers::event_library_from_package` for a Wasm package. These factories return
+an `EventLibrary` containing the forest, debug information, and unified handlers. Loading is atomic
+if a registration fails. Use `EventLibrary::new` to supply those parts for a custom library.
+
+Existing raw-state callbacks remain available through the deprecated compatibility paths. The
+engine invokes them when the new callback uses its default fallback and has recorded no advice.
+`register_legacy_handler` retains the legacy `Arc` signature, and `load_legacy_library` accepts
+`HostLibrary` with its legacy fields and event-only delivery. Legacy event and trace registrations
+may share an identity; portable registrations reject any existing binding at that identity.
+`event::legacy_handler` adapts a portable handler to legacy registrations with isolated failure;
+direct portable registrations use `event::HandlerRegistry`. For a custom host that routes library
+events before async work, use a portable registry in the new callback or retain the old raw-state
+callback until that registry is migrated. A portable context cannot recreate raw state.
+
+See the [migration guide](../docs/src/user_docs/event_handler_migration.md) for preserved APIs,
+concrete handler changes, and downstream integration.

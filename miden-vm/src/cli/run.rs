@@ -153,7 +153,8 @@ fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
 
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
     let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
-    let mut host = DefaultHost::default().with_library(&CoreLibrary::default())?;
+    let core_lib = CoreLibrary::default();
+    let mut host = DefaultHost::default().with_library(core_lib.host_library())?;
     load_program_package_with_handlers(&mut host, &package, &mut Vec::new())?;
 
     let program_hash: [u8; 32] = program.hash().into();
@@ -209,7 +210,8 @@ fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
     let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
     let mut host = DefaultHost::default().with_source_manager(source_manager);
-    host.load_library(&CoreLibrary::default())
+    let core_lib = CoreLibrary::default();
+    host.load_library(core_lib.host_library())
         .into_diagnostic()
         .wrap_err("Failed to load core library")?;
     let mut loaded_handler_sections = Vec::new();

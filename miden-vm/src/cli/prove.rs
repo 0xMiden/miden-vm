@@ -122,7 +122,8 @@ impl ProveCmd {
 
         let input_data = InputFile::read(&self.input_file, &self.program_file)?;
 
-        let mut host = DefaultHost::default().with_library(&CoreLibrary::default())?;
+        let core_lib = CoreLibrary::default();
+        let mut host = DefaultHost::default().with_library(core_lib.host_library())?;
         // Use a single match expression to load the program.
         let (program, package_debug_info, entrypoint_source_node) = match ext.as_str() {
             "masp" => {

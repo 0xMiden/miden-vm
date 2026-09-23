@@ -3,7 +3,7 @@ use miden_core::Felt;
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
     ContextId, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
-    StackInputs, advice::AdviceInputs,
+    Program, StackInputs, advice::AdviceInputs,
 };
 
 pub use crate::helpers::assert_precompile_witness_round_trips;
@@ -32,19 +32,7 @@ pub fn run_precompile_program_with_stack(
     stack: &[Felt],
 ) -> Result<ExecutionOutput, ExecutionError> {
     let stack_inputs = StackInputs::new(stack).expect("invalid precompile test stack inputs");
-    let core_lib = CoreLibrary::default();
-    let mut assembler = Assembler::default();
-    assembler
-        .link_package(core_lib.package(), Linkage::Dynamic)
-        .expect("failed to link core library package");
-    let program = assembler
-        .assemble_program("precompile_test", source)
-        .expect("failed to assemble precompile test program")
-        .unwrap_program();
-
-    let mut host = DefaultHost::default()
-        .with_library(&core_lib)
-        .expect("failed to load CoreLibrary into the host");
+    let (program, mut host) = prepare_precompile_program(source);
 
     let output = FastProcessor::new_with_options(
         stack_inputs,
@@ -59,6 +47,24 @@ pub fn run_precompile_program_with_stack(
     }
 
     output
+}
+
+pub fn prepare_precompile_program(source: &str) -> (Program, DefaultHost) {
+    let core_lib = CoreLibrary::default();
+    let mut assembler = Assembler::default();
+    assembler
+        .link_package(core_lib.package(), Linkage::Dynamic)
+        .expect("failed to link core library package");
+    let program = assembler
+        .assemble_program("precompile_test", source)
+        .expect("failed to assemble precompile test program")
+        .unwrap_program();
+
+    let mut host = DefaultHost::default();
+    host.load_library(core_lib.host_library())
+        .expect("failed to load CoreLibrary into the host");
+
+    (program, host)
 }
 
 pub fn expect_precompile_trap(source: &str) -> ExecutionError {

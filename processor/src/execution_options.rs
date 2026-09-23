@@ -10,6 +10,7 @@ use miden_core::program::MIN_STACK_DEPTH;
 /// - `expected_cycles` specifies the number of cycles a program is expected to execute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExecutionOptions {
+    trace_delivery: bool,
     max_cycles: u32,
     expected_cycles: u32,
     core_trace_fragment_size: usize,
@@ -18,8 +19,6 @@ pub struct ExecutionOptions {
     /// Whether the synchronous prover may overlap hasher-chiplet trace building with program
     /// execution (std-only; the sequential path is used on no_std regardless).
     overlapped_trace_build: bool,
-    /// Maximum number of input bytes allowed for a single hash precompile invocation.
-    max_hash_len_bytes: usize,
     /// Maximum number of continuations allowed on the continuation stack at any point during
     /// execution.
     max_num_continuations: usize,
@@ -44,11 +43,11 @@ impl Default for ExecutionOptions {
             expected_cycles: MIN_TRACE_LEN as u32,
             core_trace_fragment_size: Self::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
             max_advice_size_bytes: Self::DEFAULT_MAX_ADVICE_SIZE_BYTES,
-            max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
             overlapped_trace_build: true,
+            trace_delivery: true,
         }
     }
 }
@@ -65,10 +64,6 @@ impl ExecutionOptions {
 
     /// Default maximum combined logical size of the advice provider. Set to 16 MiB.
     pub const DEFAULT_MAX_ADVICE_SIZE_BYTES: usize = 16 * 1024 * 1024;
-
-    /// Default maximum number of input bytes for a single hash precompile invocation.
-    /// Set to 2^20 (1 MB).
-    pub const DEFAULT_MAX_HASH_LEN_BYTES: usize = 1 << 20;
 
     /// Default maximum number of continuations allowed on the continuation stack.
     /// Set to 2^16 (65536).
@@ -145,11 +140,11 @@ impl ExecutionOptions {
             expected_cycles,
             core_trace_fragment_size,
             max_advice_size_bytes: Self::DEFAULT_MAX_ADVICE_SIZE_BYTES,
-            max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
             overlapped_trace_build: true,
+            trace_delivery: true,
         })
     }
 
@@ -165,6 +160,18 @@ impl ExecutionOptions {
         }
         self.core_trace_fragment_size = size;
         Ok(self)
+    }
+
+    /// Enables or suppresses all trace callbacks (enabled by default). Suppression happens before
+    /// lookup and host work, while preserving VM instructions and cycle accounting. This policy is
+    /// independent of proof-trace recording and also applies to FastProcessor execution.
+    pub fn with_trace_delivery(mut self, enabled: bool) -> Self {
+        self.trace_delivery = enabled;
+        self
+    }
+
+    pub fn trace_delivery(&self) -> bool {
+        self.trace_delivery
     }
 
     // PUBLIC ACCESSORS
@@ -196,12 +203,6 @@ impl ExecutionOptions {
         self.max_advice_size_bytes
     }
 
-    /// Returns the maximum number of input bytes allowed for a single hash precompile invocation.
-    #[inline]
-    pub fn max_hash_len_bytes(&self) -> usize {
-        self.max_hash_len_bytes
-    }
-
     /// Sets whether the synchronous prover may overlap hasher-chiplet trace building with program
     /// execution (defaults to `true`; ignored on no_std, which always uses the sequential path).
     /// When enabled, overlap is opportunistic. A caller with no separate Rayon worker uses compact
@@ -219,12 +220,6 @@ impl ExecutionOptions {
     /// Sets the maximum combined logical size, in bytes, of the advice provider.
     pub fn with_max_advice_size_bytes(mut self, size: usize) -> Self {
         self.max_advice_size_bytes = size;
-        self
-    }
-
-    /// Sets the maximum number of input bytes allowed for a single hash precompile invocation.
-    pub fn with_max_hash_len_bytes(mut self, size: usize) -> Self {
-        self.max_hash_len_bytes = size;
         self
     }
 

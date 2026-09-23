@@ -3,20 +3,12 @@
 //! The handler supplies a candidate public key as advice. The calling MASM procedure treats that
 //! key as untrusted and constrains it against the exact digest and signature stored in VM memory.
 
-use alloc::{vec, vec::Vec};
-
-use miden_core::{Felt, events::EventName, utils::packed_u32_elements_to_bytes};
+use miden_core::{Felt, WORD_SIZE, events::EventName, utils::packed_u32_elements_to_bytes};
 use miden_crypto::{
     SequentialCommit,
     dsa::ecdsa_k256_keccak::{PublicKey, Signature},
 };
-use miden_processor::{
-    ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::EventError,
-};
-
-use crate::handlers::read_uninitialized_memory_region;
+use miden_event_handler::{AdviceRecorder, EventContext, EventError, InvocationKind};
 
 /// Event emitted when the ECDSA recovery procedures need a candidate public key.
 pub const ECDSA_K256_KECCAK_RECOVER_EVENT_NAME: EventName =
@@ -29,7 +21,7 @@ const SCALAR_LIMBS: usize = 8;
 /// Recovers a candidate secp256k1 public key from the digest and native EVM recovery witness in VM
 /// memory.
 ///
-/// Expected event payload (excluding the event ID):
+/// Expected event payload:
 ///
 /// ```text
 /// [DIGEST_PTR, SIG_PTR, ...]
@@ -40,15 +32,25 @@ const SCALAR_LIMBS: usize = 8;
 /// native memory format is distinct from external EVM wire bytes, whose scalar components are
 /// fixed-width big-endian byte strings.
 pub fn handle_ecdsa_k256_keccak_recover(
-    process: &ProcessorState<'_>,
-) -> Result<Vec<AdviceMutation>, EventError> {
-    let digest_ptr = process.get_stack_item(1).as_canonical_u64();
-    let signature_ptr = process.get_stack_item(2).as_canonical_u64();
+    context: EventContext<'_>,
+    advice: &mut AdviceRecorder<'_>,
+) -> Result<(), EventError> {
+    context.kind().require(InvocationKind::Event)?;
+    let [digest_ptr, signature_ptr] =
+        context.read_stack_array(0).map(|felt| felt.as_canonical_u64());
 
-    let digest_felts = read_uninitialized_memory_region(process, digest_ptr, DIGEST_FELTS)
-        .ok_or(RecoveryEventError::InvalidDigestPointer { digest_ptr })?;
-    let signature_felts = read_uninitialized_memory_region(process, signature_ptr, SIGNATURE_FELTS)
-        .ok_or(RecoveryEventError::InvalidSignaturePointer { signature_ptr })?;
+    if !digest_ptr.is_multiple_of(WORD_SIZE as u64) {
+        return Err(RecoveryEventError::InvalidDigestPointer { digest_ptr }.into());
+    }
+    let digest_felts = context
+        .memory_slice(digest_ptr, DIGEST_FELTS)
+        .map_err(|_| RecoveryEventError::InvalidDigestPointer { digest_ptr })?;
+    if !signature_ptr.is_multiple_of(WORD_SIZE as u64) {
+        return Err(RecoveryEventError::InvalidSignaturePointer { signature_ptr }.into());
+    }
+    let signature_felts = context
+        .memory_slice(signature_ptr, SIGNATURE_FELTS)
+        .map_err(|_| RecoveryEventError::InvalidSignaturePointer { signature_ptr })?;
 
     validate_u32_limbs(&digest_felts, digest_ptr)?;
     validate_u32_limbs(&signature_felts[..2 * SCALAR_LIMBS], signature_ptr)?;
@@ -77,10 +79,9 @@ pub fn handle_ecdsa_k256_keccak_recover(
 
     let public_key_elements = public_key.to_elements();
     debug_assert_eq!(public_key_elements.len(), 16);
-    let mut advice_stack = AdviceStack::new();
-    advice_stack.append_for_adv_pipe(&public_key_elements);
-
-    Ok(vec![AdviceMutation::extend_advice_stack(advice_stack)])
+    // Preserve the VM's sequential word/block consumption order.
+    advice.prepend_stack(public_key_elements);
+    Ok(())
 }
 
 fn write_scalar_bytes(limbs: &[Felt], output: &mut [u8]) {
