@@ -37,7 +37,6 @@ use crate::{
     advice::{AdviceInputs, AdviceProvider},
     continuation_stack::ContinuationStack,
     errors::MapExecErr,
-    processor::{Processor, SystemInterface},
     trace::RowIndex,
 };
 
@@ -65,7 +64,7 @@ pub use host::{
     BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestStore, MemMastForestStore,
     SyncHost,
     debug::{StdoutWriter, format_value, write_interval, write_stack},
-    default::{DefaultHost, HostLibrary},
+    default::{DefaultHost, EventLibrary, HostLibrary},
 };
 pub use miden_core::{
     EMPTY_WORD, Felt, MemoryAddress, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast,

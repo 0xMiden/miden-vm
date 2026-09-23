@@ -15,12 +15,10 @@ extern crate alloc;
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_core::{Word, events::EventName, mast::MastForest};
-use miden_mast_package::Package;
+use miden_mast_package::{Package, PackageDebugInfoError};
 #[allow(deprecated)] // Original library conversion and event-only list.
-use miden_processor::{
-    HostLibrary,
-    event::{EventHandler, registration},
-};
+use miden_processor::event::EventHandler;
+use miden_processor::{EventLibrary, HostLibrary, event::registration};
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
@@ -176,6 +174,16 @@ impl CoreLibrary {
             .expect("the conjectured security estimator is exported from the core library")
     }
 
+    /// Returns the core library's forest, debug information, and portable event/trace handlers.
+    pub fn host_library(&self) -> EventLibrary {
+        let package_debug_info = match self.package.debug_info() {
+            Ok(debug_info) => Ok(debug_info),
+            Err(PackageDebugInfoError::UntrustedSections) => Ok(None),
+            Err(err) => Err(err),
+        };
+        EventLibrary::new(self.mast_forest().clone(), package_debug_info, self.event_handlers())
+    }
+
     /// Returns the default event handlers required by the core library.
     ///
     /// Stack and memory print-style debug handlers write to stdout by default. These handlers can
@@ -204,10 +212,10 @@ impl CoreLibrary {
     }
 
     /// Returns event-only adapters with the original processor handler signature.
-    /// Use [`Self::event_handlers`] and `DefaultHost::load_library_with_event_handlers` for unified
+    /// Use [`Self::host_library`] and `DefaultHost::load_library` for unified
     /// emit and trace delivery.
     #[allow(deprecated)] // Legacy facade.
-    #[deprecated(note = "use event_handlers and DefaultHost::load_library_with_event_handlers")]
+    #[deprecated(note = "use host_library and DefaultHost::load_library")]
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         handlers::legacy_handlers(self.event_handlers())
     }

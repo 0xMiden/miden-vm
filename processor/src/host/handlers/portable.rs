@@ -35,6 +35,18 @@ impl HandlerRegistry {
         Ok(())
     }
 
+    /// Replaces a binding for both invocation kinds, returning whether one existed.
+    /// Invalid names leave the registry unchanged.
+    pub fn replace(
+        &mut self,
+        name: EventName,
+        handler: impl Into<registration::EventHandler>,
+    ) -> Result<bool, ExecutionError> {
+        validate_event_name(&name)?;
+        let id = name.to_event_id();
+        Ok(self.handlers.insert(id, (name, handler.into())).is_some())
+    }
+
     pub fn unregister(&mut self, id: EventId) -> bool {
         self.handlers.remove(&id).is_some()
     }
@@ -89,10 +101,7 @@ pub fn invoke_legacy_handler(
 }
 
 #[allow(deprecated)]
-pub(crate) fn event_context<'a>(
-    process: &ProcessorState<'a>,
-    kind: InvocationKind,
-) -> EventContext<'a> {
+fn event_context<'a>(process: &ProcessorState<'a>, kind: InvocationKind) -> EventContext<'a> {
     let clock = process.clock().as_u32();
     let in_root_context = process.ctx() == crate::ContextId::root();
     let invocation = match kind {

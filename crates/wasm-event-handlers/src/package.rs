@@ -6,12 +6,13 @@ use alloc::{format, string::ToString, sync::Arc, vec::Vec};
 use miden_event_handler_abi::{ABI_VERSION, MANIFEST_RECORD_VERSION, MANIFEST_SECTION_NAME};
 use miden_mast_package::{
     EventHandlerManifestEntry, EventHandlerSection, EventHandlerSectionError, MAX_HANDLERS,
-    MAX_MODULE_BYTES, MAX_NAME_BYTES, Package,
+    MAX_MODULE_BYTES, MAX_NAME_BYTES, Package, PackageDebugInfoError,
 };
-#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
+#[allow(deprecated)] // The retained event-only factory returns the old handler trait.
+use miden_processor::event::EventHandler;
 use miden_processor::{
-    HostLibrary,
-    event::{EventHandler, EventName, legacy_handler, registration},
+    EventLibrary, HostLibrary,
+    event::{EventName, legacy_handler, registration},
 };
 use wasmparser::{Parser, Payload};
 
@@ -39,6 +40,25 @@ pub fn event_handlers_from_package(
     Ok(module.event_handlers())
 }
 
+/// Builds a complete portable library with the package's forest, debug information, and Wasm
+/// handlers. The returned library supports both regular events and traces when loaded with
+/// [`DefaultHost::load_library`](miden_processor::DefaultHost::load_library).
+///
+/// # Errors
+/// Same failure conditions as [`event_handlers_from_package`].
+pub fn event_library_from_package(
+    package: &Arc<Package>,
+    limits: WasmHandlerLimits,
+) -> Result<EventLibrary, WasmHandlerLoadError> {
+    let handlers = event_handlers_from_package(package, limits)?;
+    let package_debug_info = match package.debug_info() {
+        Ok(debug_info) => Ok(debug_info),
+        Err(PackageDebugInfoError::UntrustedSections) => Ok(None),
+        Err(err) => Err(err),
+    };
+    Ok(EventLibrary::new(package.mast_forest().clone(), package_debug_info, handlers))
+}
+
 /// Loads legacy event-only registrations, preserving the original shared-handler list type.
 ///
 /// Use [`event_handlers_from_package`] to register handlers for both regular events and traces.
@@ -46,7 +66,7 @@ pub fn event_handlers_from_package(
 /// # Errors
 /// Same failure conditions as [`event_handlers_from_package`].
 #[allow(deprecated)] // Legacy facade.
-#[deprecated(note = "use portable event_handlers and load_library_with_event_handlers")]
+#[deprecated(note = "use event_library_from_package and DefaultHost::load_library")]
 pub fn handlers_from_package(
     package: &Package,
     limits: WasmHandlerLimits,
@@ -60,16 +80,15 @@ pub fn handlers_from_package(
 /// Builds a [`HostLibrary`] from a package: its MAST forest, its debug info, and the Wasm event
 /// handlers of its `event_handlers` section, if any.
 ///
-/// Load the result into a host with
-/// [`DefaultHost::load_library`](miden_processor::DefaultHost::load_library), which registers
-/// the handlers next to the MAST forest. This retains legacy event-only delivery. To handle traces
-/// too, pass `HostLibrary::from(package.clone())` and the [`event_handlers_from_package`] list to
-/// `DefaultHost::load_library_with_event_handlers`, which loads them atomically.
+/// Load the result with
+/// [`DefaultHost::load_legacy_library`](miden_processor::DefaultHost::load_legacy_library).
+/// This retains legacy event-only delivery. Use [`event_library_from_package`] for unified
+/// event and trace delivery.
 ///
 /// # Errors
 /// Same failure conditions as [`handlers_from_package`].
 #[allow(deprecated)] // Legacy facade.
-#[deprecated(note = "use portable event_handlers and load_library_with_event_handlers")]
+#[deprecated(note = "use event_library_from_package and DefaultHost::load_library")]
 pub fn host_library_from_package(
     package: &Arc<Package>,
     limits: WasmHandlerLimits,
