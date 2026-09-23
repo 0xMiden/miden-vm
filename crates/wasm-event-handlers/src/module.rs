@@ -288,8 +288,12 @@ impl WasmHandlerModule {
 
     /// Returns one unified handler per manifest entry, accepting regular events and traces.
     ///
-    /// Register these with `DefaultHost::register_event_handler`. The guest can inspect
-    /// `invocation_kind`; the processor rejects advice recorded during a successful trace.
+    /// Register these with
+    /// [`DefaultHost::register_handler`](miden_processor::DefaultHost::register_handler). For a
+    /// complete package library, use [`crate::event_library_from_package`] with
+    /// [`DefaultHost::load_library`](miden_processor::DefaultHost::load_library).
+    /// The guest can inspect `invocation_kind`; the processor rejects advice recorded during
+    /// a successful trace.
     pub fn event_handlers(self: &Arc<Self>) -> Vec<(EventName, registration::EventHandler)> {
         self.manifest
             .iter()
@@ -308,7 +312,9 @@ impl WasmHandlerModule {
     ///
     /// Use [`Self::event_handlers`] for unified event and trace delivery.
     #[allow(deprecated)] // Legacy facade.
-    #[deprecated(note = "use portable event_handlers and load_library_with_event_handlers")]
+    #[deprecated(
+        note = "use event_handlers with DefaultHost::register_handler, or event_library_from_package with DefaultHost::load_library"
+    )]
     pub fn handlers(
         self: &Arc<Self>,
     ) -> Vec<(EventName, Arc<dyn miden_processor::event::EventHandler>)> {

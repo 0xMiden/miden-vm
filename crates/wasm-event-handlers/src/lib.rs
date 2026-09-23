@@ -12,7 +12,9 @@
 //!   are allowed, the module must not have a start section, every manifest export must exist with
 //!   signature `() -> ()`, and the manifest must not contain duplicate or reserved event names.
 //! - [`WasmHandlerModule::event_handlers`] returns one unified handler per manifest entry, ready
-//!   for [`DefaultHost::register_event_handler`](miden_processor::DefaultHost::register_event_handler).
+//!   for [`DefaultHost::register_handler`](miden_processor::DefaultHost::register_handler).
+//!   [`event_library_from_package`] pairs those handlers with the package forest and debug info for
+//!   [`DefaultHost::load_library`](miden_processor::DefaultHost::load_library).
 //!   [`WasmHandlerModule::handlers`] retains the legacy event-only registration list.
 //! - Each event call runs in a fresh store and instance: handlers are stateless across calls. The
 //!   call is metered with fuel, the linear memory is capped, and the total size of buffered advice
@@ -50,11 +52,11 @@ pub const GUEST_RUSTFLAGS: &str = "-C target-feature=-simd128";
 
 pub use error::{WasmHandlerLoadError, WasmHandlerRunError};
 pub use module::{WasmEventHandler, WasmHandlerLimits, WasmHandlerModule};
-#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
 pub use package::{
-    event_handlers_from_package, handlers_from_package, host_library_from_package,
-    manifest_from_module, section_from_module,
+    event_handlers_from_package, event_library_from_package, manifest_from_module,
+    section_from_module,
 };
 #[doc(hidden)]
-#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
 pub use package::{fuzz_module_statics, fuzz_walk_sections, test_append_manifest_section};
+#[allow(deprecated)] // Preserve the original event-only package factories.
+pub use package::{handlers_from_package, host_library_from_package};
