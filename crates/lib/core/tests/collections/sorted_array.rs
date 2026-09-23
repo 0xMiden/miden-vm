@@ -2,12 +2,7 @@ use miden_core_lib::{
     CoreLibrary,
     handlers::sorted_array::{LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME},
 };
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
-use miden_processor::{
-    ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::EventError,
-};
+use miden_event_handler::{AdviceRecorder, EventContext, EventError};
 
 use super::*;
 
@@ -765,7 +760,7 @@ fn test_find_word_rejects_oob_pointer_above_end() {
     "
     );
     let test = build_lib_test(&source, &[])
-        .with_event_handler(LOWERBOUND_ARRAY_EVENT_NAME, malicious_lowerbound_oob_above);
+        .with_handler(LOWERBOUND_ARRAY_EVENT_NAME, malicious_lowerbound_oob_above);
 
     assert!(
         test.execute().is_err(),
@@ -794,7 +789,7 @@ fn test_find_word_rejects_oob_pointer_below_start() {
     "
     );
     let test = build_lib_test(&source, &[])
-        .with_event_handler(LOWERBOUND_ARRAY_EVENT_NAME, malicious_lowerbound_oob_below);
+        .with_handler(LOWERBOUND_ARRAY_EVENT_NAME, malicious_lowerbound_oob_below);
 
     assert!(
         test.execute().is_err(),
@@ -830,7 +825,7 @@ fn test_find_partial_key_value_rejects_oob_pointer_above_end() {
     );
 
     let test = build_lib_test(&source, &[])
-        .with_event_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_oob_above);
+        .with_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_oob_above);
 
     assert!(
         test.execute().is_err(),
@@ -866,7 +861,7 @@ fn test_find_partial_key_value_rejects_oob_pointer_below_start() {
     );
 
     let test = build_lib_test(&source, &[])
-        .with_event_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_oob_below);
+        .with_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_oob_below);
 
     assert!(
         test.execute().is_err(),
@@ -896,7 +891,7 @@ fn test_assert_sorted_words_rejects_false_miss_on_unsorted_array() {
     );
 
     let test = build_lib_test(&source, &[])
-        .with_event_handler(LOWERBOUND_ARRAY_EVENT_NAME, malicious_lowerbound_start_ptr);
+        .with_handler(LOWERBOUND_ARRAY_EVENT_NAME, malicious_lowerbound_start_ptr);
 
     test.execute().expect_err("words must be sorted");
 }
@@ -926,7 +921,7 @@ fn test_assert_sorted_keys_rejects_false_miss_on_unsorted_keys() {
     );
 
     let test = build_lib_test(&source, &[])
-        .with_event_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_start_ptr);
+        .with_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_start_ptr);
 
     test.execute().expect_err("keys must be sorted");
 }
@@ -956,7 +951,7 @@ fn test_assert_sorted_half_keys_rejects_false_miss_on_unsorted_half_keys() {
     );
 
     let test = build_lib_test(&source, &[])
-        .with_event_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_start_ptr);
+        .with_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_start_ptr);
 
     test.execute().expect_err("half-keys must be sorted");
 }
@@ -965,44 +960,40 @@ fn test_assert_sorted_half_keys_rejects_false_miss_on_unsorted_half_keys() {
 // ================================================================================================
 
 /// Builds a test with the core library and no event handlers.
-fn build_lib_test(source: &str, op_stack: &[u64]) -> miden_utils_testing::Test {
+fn build_lib_test(source: &str, op_stack: &[u64]) -> miden_utils_testing::EventTest {
     let core_lib = CoreLibrary::default();
     miden_utils_testing::build_test_by_mode!(false, source, op_stack)
         .with_library(core_lib.package())
+        .into()
 }
 
-// Signatures match the event-handler callback type required by `with_event_handler`.
 #[allow(clippy::unnecessary_wraps)]
 /// Returns `(was_found = false, maybe_value_ptr = 204)` regardless of the actual array. 204 is
 /// past the array's `end_ptr = 112`, so the bounds check must fire.
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn malicious_lowerbound_oob_above(
-    _process: &ProcessorState,
-) -> Result<Vec<AdviceMutation>, EventError> {
-    Ok(vec![advice_stack_mutation([Felt::new_unchecked(204), Felt::ZERO])])
+    _context: EventContext<'_>,
+    advice: &mut AdviceRecorder<'_>,
+) -> Result<(), EventError> {
+    advice.prepend_stack([Felt::new_unchecked(204), Felt::ZERO]);
+    Ok(())
 }
 
 #[allow(clippy::unnecessary_wraps)]
 /// Returns `(was_found = false, maybe_value_ptr = 40)` which is below `start_ptr = 100`.
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn malicious_lowerbound_oob_below(
-    _process: &ProcessorState,
-) -> Result<Vec<AdviceMutation>, EventError> {
-    Ok(vec![advice_stack_mutation([Felt::new_unchecked(40), Felt::ZERO])])
+    _context: EventContext<'_>,
+    advice: &mut AdviceRecorder<'_>,
+) -> Result<(), EventError> {
+    advice.prepend_stack([Felt::new_unchecked(40), Felt::ZERO]);
+    Ok(())
 }
 
 #[allow(clippy::unnecessary_wraps)]
 /// Returns `(was_found = false, maybe_ptr = start_ptr)` regardless of the actual range.
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn malicious_lowerbound_start_ptr(
-    _process: &ProcessorState,
-) -> Result<Vec<AdviceMutation>, EventError> {
-    Ok(vec![advice_stack_mutation([Felt::new_unchecked(100), Felt::ZERO])])
-}
-
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
-fn advice_stack_mutation(values: impl IntoIterator<Item = Felt>) -> AdviceMutation {
-    let mut advice_stack = AdviceStack::new();
-    advice_stack.append_elements(values);
-    AdviceMutation::extend_advice_stack(advice_stack)
+    _context: EventContext<'_>,
+    advice: &mut AdviceRecorder<'_>,
+) -> Result<(), EventError> {
+    advice.prepend_stack([Felt::new_unchecked(100), Felt::ZERO]);
+    Ok(())
 }

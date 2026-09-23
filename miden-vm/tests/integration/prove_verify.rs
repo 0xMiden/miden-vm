@@ -186,7 +186,7 @@ fn test_keccak_precompile_wrapper_prove_verify_final() {
     let stack_inputs = StackInputs::default();
     let advice_inputs = AdviceInputs::default();
     let mut host = DefaultHost::default()
-        .with_library(&core_lib)
+        .with_library(core_lib.host_library())
         .expect("failed to load CoreLibrary into the host");
 
     let witness =
@@ -664,7 +664,7 @@ mod execution_witness_serialization {
         operations::Operation,
     };
     use miden_processor::{
-        DefaultHost, FastProcessor, HostLibrary, StackInputs, advice::AdviceInputs,
+        DefaultHost, EventLibrary, FastProcessor, StackInputs, advice::AdviceInputs,
         trace::build_trace,
     };
     use miden_prover::{HashFunction, Prover, serde::Serializable};
@@ -677,13 +677,13 @@ mod execution_witness_serialization {
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()))
     }
 
-    fn create_simple_library() -> HostLibrary {
+    fn create_simple_library() -> EventLibrary {
         let mut mast_forest = MastForest::new();
         let swap_block = BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap])
             .add_to_forest(&mut mast_forest)
             .unwrap();
         mast_forest.make_root(swap_block);
-        HostLibrary::from(Arc::new(mast_forest))
+        EventLibrary::from(Arc::new(mast_forest))
     }
 
     fn external_lib_proc_digest() -> Word {

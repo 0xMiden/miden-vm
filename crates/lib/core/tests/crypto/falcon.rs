@@ -10,13 +10,11 @@ use miden_core::{
     serde::{Deserializable, Serializable},
 };
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
-use miden_event_handler::{AdviceRecorder, EventContext, InvocationKind};
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
+use miden_event_handler::{AdviceRecorder, EventContext, EventError, InvocationKind};
 use miden_processor::{
-    DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program,
-    advice::{AdviceInputs, AdviceMutation, AdviceStack},
+    DefaultHost, ExecutionError, FastProcessor, Program,
+    advice::{AdviceInputs, AdviceStack},
     crypto::random::RandomCoin,
-    event::EventError,
     operation::OperationError,
 };
 #[cfg(feature = "arbitrary")]
@@ -292,10 +290,7 @@ fn test_move_sig_to_adv_stack() {
     let store = MerkleStore::new();
 
     let test = build_debug_test!(source, &op_stack, &adv_stack, store, advice_map.into_iter())
-        .with_event_handlers(vec![(
-            EVENT_FALCON_SIG_TO_STACK,
-            miden_processor::event::legacy_handler(push_falcon_signature),
-        )]);
+        .with_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
     test.expect_stack(&[])
 }
 
@@ -308,10 +303,7 @@ fn falcon_execution() {
     let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
 
     let test = build_debug_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter())
-        .with_event_handlers(vec![(
-            EVENT_FALCON_SIG_TO_STACK,
-            miden_processor::event::legacy_handler(push_falcon_signature),
-        )]);
+        .with_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
     test.expect_stack(&[])
 }
 
@@ -362,7 +354,6 @@ fn test_mod_12289_larger_value() {
 #[case(0, 12_290)]
 #[case(1, 1)]
 #[case(0xffff_ffff, 0xffff_fffe)]
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo: u64) {
     const FALCON_DIV: EventName =
         EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
@@ -373,19 +364,21 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
     // Malicious event handler that always returns remainder = 0.
     // Signature matches the event-handler callback contract.
     #[allow(clippy::unnecessary_wraps)]
-    #[allow(deprecated)] // Adversarial legacy handler fixture.
-    fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let a_hi = process.get_stack_item(1).as_canonical_u64();
-        let a_lo = process.get_stack_item(2).as_canonical_u64();
+    fn malicious_falcon_div(
+        context: EventContext<'_>,
+        advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
+        let a_hi = context.stack_item(0).as_canonical_u64();
+        let a_lo = context.stack_item(1).as_canonical_u64();
         let a = (a_hi << 32) | a_lo;
 
         let q = a.wrapping_mul(M_INV);
         let q_hi = Felt::new_unchecked(q >> 32);
         let q_lo = Felt::new_unchecked(q & 0xffff_ffff);
 
-        let remainder = advice_stack_mutation([ZERO]);
-        let quotient = advice_stack_mutation([q_hi, q_lo]);
-        Ok(vec![remainder, quotient])
+        advice.prepend_stack([ZERO]);
+        advice.prepend_stack([q_hi, q_lo]);
+        Ok(())
     }
 
     let source = "
@@ -407,7 +400,7 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
     let core_lib = CoreLibrary::default();
     let test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack)
         .with_library(core_lib.package())
-        .with_event_handler(FALCON_DIV, malicious_falcon_div);
+        .with_handler(FALCON_DIV, malicious_falcon_div);
 
     // Hardened mod_12289 must reject forged advice.
     expect_exec_error_matches!(
@@ -421,7 +414,6 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
 }
 
 #[test]
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn test_mod_12289_rejects_forged_addition_overflow() {
     const FALCON_DIV: EventName =
         EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
@@ -433,14 +425,16 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
 
     // Malicious event handler that forges q/r to trigger the addition-overflow assertion.
     #[allow(clippy::unnecessary_wraps)]
-    #[allow(deprecated)] // Adversarial legacy handler fixture.
-    fn malicious_falcon_div(_process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn malicious_falcon_div(
+        _context: EventContext<'_>,
+        advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
         let q_hi = Felt::new_unchecked(FORGED_Q >> 32);
         let q_lo = Felt::new_unchecked(FORGED_Q & 0xffff_ffff);
 
-        let remainder = advice_stack_mutation([Felt::new_unchecked(FORGED_R)]);
-        let quotient = advice_stack_mutation([q_hi, q_lo]);
-        Ok(vec![remainder, quotient])
+        advice.prepend_stack([Felt::new_unchecked(FORGED_R)]);
+        advice.prepend_stack([q_hi, q_lo]);
+        Ok(())
     }
 
     let source = "
@@ -458,7 +452,7 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
     let core_lib = CoreLibrary::default();
     let test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack)
         .with_library(core_lib.package())
-        .with_event_handler(FALCON_DIV, malicious_falcon_div);
+        .with_handler(FALCON_DIV, malicious_falcon_div);
 
     expect_exec_error_matches!(
         test,
@@ -471,16 +465,17 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
 }
 
 #[test]
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn test_mod_12289_rejects_non_u32_remainder_advice() {
     const FALCON_DIV: EventName =
         EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
 
     #[allow(clippy::unnecessary_wraps)]
-    #[allow(deprecated)] // Adversarial legacy handler fixture.
-    fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let a_hi = process.get_stack_item(1).as_canonical_u64();
-        let a_lo = process.get_stack_item(2).as_canonical_u64();
+    fn malicious_falcon_div(
+        context: EventContext<'_>,
+        advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
+        let a_hi = context.stack_item(0).as_canonical_u64();
+        let a_lo = context.stack_item(1).as_canonical_u64();
         let dividend = (a_hi << 32) | a_lo;
         let quotient = dividend / M;
 
@@ -488,9 +483,9 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
         let q_lo = Felt::new_unchecked(quotient & 0xffff_ffff);
         let forged_remainder = Felt::new_unchecked(Felt::ORDER_U64 - 1);
 
-        let remainder = advice_stack_mutation([forged_remainder]);
-        let quotient = advice_stack_mutation([q_hi, q_lo]);
-        Ok(vec![remainder, quotient])
+        advice.prepend_stack([forged_remainder]);
+        advice.prepend_stack([q_hi, q_lo]);
+        Ok(())
     }
 
     let source = "
@@ -506,7 +501,7 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
     let core_lib = CoreLibrary::default();
     let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
     test.libraries.push(core_lib.package());
-    test.add_event_handler(FALCON_DIV, malicious_falcon_div);
+    let test = test.with_handler(FALCON_DIV, malicious_falcon_div);
 
     expect_exec_error_matches!(
         test,
@@ -534,10 +529,8 @@ fn falcon_prove_verify() {
     let advice_inputs = AdviceInputs::default().with_map(advice_map);
     let mut host = DefaultHost::default();
     let core_lib = CoreLibrary::default();
-    host.load_library_with_event_handlers(core_lib.package(), core_lib.event_handlers())
-        .expect("failed to load mast forest");
-    host.register_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature)
-        .unwrap();
+    host.load_library(core_lib.host_library()).expect("failed to load mast forest");
+    host.register_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature).unwrap();
 
     let witness = FastProcessor::new_with_options(stack_inputs, advice_inputs, Default::default())
         .expect("processor advice inputs should fit advice map limits")
@@ -575,13 +568,6 @@ fn generate_test(
     let store = MerkleStore::new();
 
     (source, op_stack, adv_stack, store, advice_map)
-}
-
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
-fn advice_stack_mutation(values: impl IntoIterator<Item = Felt>) -> AdviceMutation {
-    let mut advice_stack = AdviceStack::new();
-    advice_stack.append_elements(values);
-    AdviceMutation::extend_advice_stack(advice_stack)
 }
 
 // HELPER FUNCTIONS

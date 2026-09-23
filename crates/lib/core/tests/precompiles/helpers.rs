@@ -61,7 +61,7 @@ pub fn prepare_precompile_program(source: &str) -> (Program, DefaultHost) {
         .unwrap_program();
 
     let mut host = DefaultHost::default();
-    host.load_library_with_event_handlers(core_lib.package(), core_lib.event_handlers())
+    host.load_library(core_lib.host_library())
         .expect("failed to load CoreLibrary into the host");
 
     (program, host)

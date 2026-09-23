@@ -4,9 +4,6 @@
 //! [`FastProcessor`] state, and check the buffered mutations or the reported errors. No wasm32
 //! toolchain is involved.
 
-// The existing runner fixtures exercise legacy registration adapters; unified cases are below.
-#![allow(deprecated)]
-
 use std::{string::String, sync::Arc, vec::Vec};
 
 use miden_crypto::hash::{
@@ -18,16 +15,53 @@ use miden_event_handler::{AdviceBatch, EventContext, Invocation};
 use miden_event_handler_abi::{ABI_VERSION, Status};
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs, Word,
-    advice::{AdviceInputs, AdviceMap, AdviceMutation, AdviceStack},
+    advice::{AdviceInputs, AdviceMap, AdviceStack},
     crypto::{
         hash::Poseidon2,
         merkle::{InnerNodeInfo, MerkleStore},
     },
-    event::{EventError, EventHandlerRegistry, EventName},
+    event::{EventError, EventName, HandlerRegistry},
 };
 use miden_wasm_event_handlers::{
     WasmHandlerLimits, WasmHandlerLoadError, WasmHandlerModule, WasmHandlerRunError,
 };
+
+/// Observable, typed output from one portable invocation.
+#[derive(Debug, PartialEq)]
+enum RecordedAdvice {
+    Stack(AdviceStack),
+    Map(AdviceMap),
+    Merkle(Vec<InnerNodeInfo>),
+}
+
+impl RecordedAdvice {
+    fn extend_advice_stack_with(values: impl IntoIterator<Item = Felt>) -> Self {
+        let mut stack = AdviceStack::new();
+        stack.append_elements(values);
+        Self::Stack(stack)
+    }
+
+    fn extend_map(map: AdviceMap) -> Self {
+        Self::Map(map)
+    }
+
+    fn extend_merkle_store(nodes: impl IntoIterator<Item = InnerNodeInfo>) -> Self {
+        Self::Merkle(nodes.into_iter().collect())
+    }
+
+    fn from_batch(batch: AdviceBatch) -> Vec<Self> {
+        let (stack, entries, nodes) = batch.into_parts();
+        let mut output = Vec::new();
+        if !stack.is_empty() {
+            output.push(Self::Stack(stack));
+        }
+        output.extend(entries.into_iter().map(|entry| Self::Map(AdviceMap::from_iter([entry]))));
+        if !nodes.is_empty() {
+            output.push(Self::Merkle(nodes));
+        }
+        output
+    }
+}
 
 // FIXTURE HELPERS
 // ================================================================================================
@@ -104,7 +138,7 @@ fn try_load(
 fn run(
     module: &Arc<WasmHandlerModule>,
     processor: &FastProcessor,
-) -> Result<Vec<AdviceMutation>, String> {
+) -> Result<Vec<RecordedAdvice>, String> {
     run_raw(module, processor).map_err(|err| err.to_string())
 }
 
@@ -113,17 +147,18 @@ fn run(
 fn run_raw(
     module: &Arc<WasmHandlerModule>,
     processor: &FastProcessor,
-) -> Result<Vec<AdviceMutation>, EventError> {
-    let handlers = module.handlers();
+) -> Result<Vec<RecordedAdvice>, EventError> {
+    let handlers = module.event_handlers();
     let (_, handler) = handlers
         .iter()
         .find(|(event, _)| *event == EVENT)
         .expect("event is in the manifest");
-    let mut registry = EventHandlerRegistry::new();
+    let mut registry = HandlerRegistry::new();
     registry.register(EVENT, handler.clone()).unwrap();
-    registry
-        .handle_event(EVENT.to_event_id(), &processor.state())
-        .map(Option::unwrap)
+    let mut batch = AdviceBatch::new();
+    let context = EventContext::new(processor, Invocation::event(EVENT.to_event_id(), 0, true));
+    assert!(registry.handle_event(EVENT.to_event_id(), context, &mut batch.recorder())?);
+    Ok(RecordedAdvice::from_batch(batch))
 }
 
 /// Asserts that the raw event error is the given [`WasmHandlerRunError`] variant.
@@ -207,7 +242,7 @@ fn stack_items_skip_event_metadata() {
     let expected = [Felt::new_unchecked(5), Felt::new_unchecked(7)];
 
     let mutations = run(&module, &processor).expect("handler succeeds");
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+    assert_eq!(mutations, vec![RecordedAdvice::extend_advice_stack_with(expected)]);
 }
 
 #[test]
@@ -223,7 +258,7 @@ fn stack_word_inserted_into_advice_map() {
     let mutations = run(&module, &processor).expect("handler succeeds");
     let mut expected = AdviceMap::default();
     expected.insert(word, vec![word[0], word[1], word[2], word[3]]);
-    assert_eq!(mutations, vec![AdviceMutation::extend_map(expected)]);
+    assert_eq!(mutations, vec![RecordedAdvice::extend_map(expected)]);
 }
 
 #[test]
@@ -242,7 +277,7 @@ fn stack_read_batches_elements() {
         let mutations = run(&module, &processor).expect("handler succeeds");
         assert_eq!(
             mutations,
-            vec![AdviceMutation::extend_advice_stack_with(expected.map(Felt::new_unchecked))],
+            vec![RecordedAdvice::extend_advice_stack_with(expected.map(Felt::new_unchecked))],
             "stack read from {start}",
         );
     }
@@ -259,17 +294,22 @@ fn event_id_comes_from_the_manifest_binding() {
     // Both the actual invocation ID and an alternate registration name differ from the
     // manifest binding. Neither changes the ID exposed to the guest.
     let processor = processor_with_stack(&[42]);
-    let (_, handler) = module.handlers().pop().expect("event is in the manifest");
+    let (_, handler) = module.event_handlers().pop().expect("event is in the manifest");
     for event in [EVENT, EventName::new("test::wasm::alias")] {
-        let mut registry = EventHandlerRegistry::new();
+        let mut registry = HandlerRegistry::new();
         registry
             .register(event.clone(), handler.clone())
             .expect("registration succeeds");
-        let mutations = registry
-            .handle_event(event.to_event_id(), &processor.state())
-            .expect("handler succeeds")
-            .expect("event is registered");
-        assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with([expected])]);
+        let mut batch = AdviceBatch::new();
+        let context =
+            EventContext::new(&processor, Invocation::event(event.to_event_id(), 0, true));
+        assert!(
+            registry
+                .handle_event(event.to_event_id(), context, &mut batch.recorder())
+                .expect("handler succeeds")
+        );
+        let mutations = RecordedAdvice::from_batch(batch);
+        assert_eq!(mutations, vec![RecordedAdvice::extend_advice_stack_with([expected])]);
     }
 }
 
@@ -295,7 +335,7 @@ fn memory_ranges_zero_fill_and_preserve_outputs_on_invalid_bounds() {
         let expected =
             [Status::Ok.as_raw() as u64, Status::OutOfBounds.as_raw() as u64, 0, 0, 99, 100]
                 .map(Felt::new_unchecked);
-        assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+        assert_eq!(mutations, vec![RecordedAdvice::extend_advice_stack_with(expected)]);
     }
 }
 
@@ -309,17 +349,16 @@ fn clk_root_context_and_depth_are_visible() {
     );
     let module = load(&wat_src);
     let processor = processor();
-    let state = processor.state();
     let expected = [
-        Felt::new_unchecked(u64::from(state.clock().as_u32())),
+        Felt::new_unchecked(u64::from(processor.clock().as_u32())),
         Felt::ONE,
         // The handler's stack view hides the event-ID slot, so its depth is one below the
         // operand-stack depth.
-        Felt::new_unchecked(u64::from(state.stack_depth() - 1)),
+        Felt::new_unchecked(u64::from(processor.stack_depth() - 1)),
     ];
 
     let mutations = run(&module, &processor).expect("handler succeeds");
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+    assert_eq!(mutations, vec![RecordedAdvice::extend_advice_stack_with(expected)]);
 }
 
 #[test]
@@ -332,7 +371,7 @@ fn mem_get_returns_zero_for_unwritten_memory() {
     let processor = processor();
 
     let mutations = run(&module, &processor).expect("handler succeeds");
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with([Felt::ZERO])]);
+    assert_eq!(mutations, vec![RecordedAdvice::extend_advice_stack_with([Felt::ZERO])]);
 }
 
 #[test]
@@ -376,7 +415,7 @@ fn memory_reads_agree_for_written_zeros_and_unwritten_cells() {
     let program = package.unwrap_program();
 
     let mut host = DefaultHost::default();
-    for (event, handler) in module.handlers() {
+    for (event, handler) in module.event_handlers() {
         host.register_handler(event, handler).expect("registration succeeds");
     }
     FastProcessor::new(StackInputs::default())
@@ -397,11 +436,11 @@ fn advice_stack_roundtrip() {
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default().with_stack(advice_stack))
         .expect("advice inputs fit");
-    let expected = processor.state().advice_provider().stack().to_vec();
+    let expected = processor.advice_provider().stack().to_vec();
     assert_eq!(expected.len(), 3);
 
     let mutations = run(&module, &processor).expect("handler succeeds");
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+    assert_eq!(mutations, vec![RecordedAdvice::extend_advice_stack_with(expected)]);
 }
 
 #[test]
@@ -420,7 +459,7 @@ fn advice_stack_read_out_of_bounds_status() {
 
     let mutations = run(&module, &processor).expect("handler succeeds");
     let status = Felt::new_unchecked(Status::OutOfBounds.as_raw() as u64);
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with([status])]);
+    assert_eq!(mutations, vec![RecordedAdvice::extend_advice_stack_with([status])]);
 }
 
 #[test]
@@ -448,7 +487,7 @@ fn advice_map_value_read_after_len() {
         .expect("advice inputs fit");
 
     let mutations = run(&module, &processor).expect("handler succeeds");
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(values)]);
+    assert_eq!(mutations, vec![RecordedAdvice::extend_advice_stack_with(values)]);
 }
 
 #[test]
@@ -464,7 +503,7 @@ fn advice_map_missing_key_status() {
 
     let mutations = run(&module, &processor).expect("handler succeeds");
     let status = Felt::new_unchecked(Status::NotFound.as_raw() as u64);
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with([status])]);
+    assert_eq!(mutations, vec![RecordedAdvice::extend_advice_stack_with([status])]);
 }
 
 #[test]
@@ -495,7 +534,7 @@ fn adv_map_value_read_reports_the_count_when_the_capacity_is_too_small() {
         Felt::new_unchecked(Status::CapacityTooSmall.as_raw() as u64),
         Felt::new_unchecked(3),
     ];
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+    assert_eq!(mutations, vec![RecordedAdvice::extend_advice_stack_with(expected)]);
 }
 
 #[test]
@@ -531,7 +570,7 @@ fn merkle_store_accepts_consistent_node() {
 
     let mutations = run(&module, &processor).expect("handler succeeds");
     let node = InnerNodeInfo { value, left, right };
-    assert_eq!(mutations, vec![AdviceMutation::extend_merkle_store([node])]);
+    assert_eq!(mutations, vec![RecordedAdvice::extend_merkle_store([node])]);
 }
 
 // MERKLE QUERY TESTS
@@ -571,7 +610,7 @@ fn merkle_queries() {
     let statuses = [Felt::new_unchecked(1), Felt::new_unchecked(Status::NotFound.as_raw() as u64)];
     assert_eq!(
         mutations,
-        vec![AdviceMutation::extend_advice_stack_with(
+        vec![RecordedAdvice::extend_advice_stack_with(
             statuses.into_iter().chain(left.as_elements().iter().copied())
         )]
     );
@@ -597,7 +636,7 @@ fn poseidon2_merge_matches_native() {
     let expected = Poseidon2::merge(&[a, b]);
     assert_eq!(
         mutations,
-        vec![AdviceMutation::extend_advice_stack_with(expected.as_elements().to_vec())]
+        vec![RecordedAdvice::extend_advice_stack_with(expected.as_elements().to_vec())]
     );
 }
 
@@ -618,7 +657,7 @@ fn poseidon2_merge_in_domain_matches_native() {
     let expected = Poseidon2::merge_in_domain(&[a, b], Felt::new_unchecked(7));
     assert_eq!(
         mutations,
-        vec![AdviceMutation::extend_advice_stack_with(expected.as_elements().to_vec())]
+        vec![RecordedAdvice::extend_advice_stack_with(expected.as_elements().to_vec())]
     );
 }
 
@@ -639,7 +678,7 @@ fn poseidon2_hash_matches_native() {
     let expected = Poseidon2::hash_elements(&felts);
     assert_eq!(
         mutations,
-        vec![AdviceMutation::extend_advice_stack_with(expected.as_elements().to_vec())]
+        vec![RecordedAdvice::extend_advice_stack_with(expected.as_elements().to_vec())]
     );
 }
 
@@ -658,7 +697,7 @@ fn poseidon2_permute_matches_native() {
 
     let mutations = run(&module, &processor()).expect("handler succeeds");
     Poseidon2::apply_permutation(&mut expected);
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+    assert_eq!(mutations, vec![RecordedAdvice::extend_advice_stack_with(expected)]);
 }
 
 #[test]
@@ -672,7 +711,7 @@ fn keccak256_matches_native() {
 
     let mutations = run(&module, &processor()).expect("handler succeeds");
     let expected = digest_limbs(Keccak256::hash(b"abc").as_bytes());
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+    assert_eq!(mutations, vec![RecordedAdvice::extend_advice_stack_with(expected)]);
 }
 
 #[test]
@@ -686,7 +725,7 @@ fn sha256_matches_native() {
 
     let mutations = run(&module, &processor()).expect("handler succeeds");
     let expected = digest_limbs(Sha256::hash(b"abc").as_bytes());
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+    assert_eq!(mutations, vec![RecordedAdvice::extend_advice_stack_with(expected)]);
 }
 
 #[test]
@@ -700,7 +739,7 @@ fn sha512_matches_native() {
 
     let mutations = run(&module, &processor()).expect("handler succeeds");
     let expected = digest_limbs(Sha512::hash(b"abc").as_bytes());
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+    assert_eq!(mutations, vec![RecordedAdvice::extend_advice_stack_with(expected)]);
 }
 
 #[test]
@@ -714,7 +753,7 @@ fn blake3_matches_native() {
 
     let mutations = run(&module, &processor()).expect("handler succeeds");
     let expected = digest_limbs(Blake3_256::hash(b"abc").as_bytes());
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+    assert_eq!(mutations, vec![RecordedAdvice::extend_advice_stack_with(expected)]);
 }
 
 #[test]
@@ -764,10 +803,10 @@ fn stateless_across_calls() {
     let module = load(&wat_src);
     let processor = processor();
 
-    let one = AdviceMutation::extend_advice_stack_with([Felt::new_unchecked(1)]);
+    let one = RecordedAdvice::extend_advice_stack_with([Felt::new_unchecked(1)]);
     // Both calls observe a fresh instance, so the counter restarts at zero each time.
     assert_eq!(run(&module, &processor).expect("first call succeeds"), vec![one]);
-    let one = AdviceMutation::extend_advice_stack_with([Felt::new_unchecked(1)]);
+    let one = RecordedAdvice::extend_advice_stack_with([Felt::new_unchecked(1)]);
     assert_eq!(run(&module, &processor).expect("second call succeeds"), vec![one]);
 }
 
@@ -1186,7 +1225,7 @@ fn the_advice_map_read_fits_its_exact_charge() {
     );
     let mutations = run(&module, &adv_map_read_processor()).expect("handler succeeds");
     let expected: Vec<Felt> = ADV_MAP_READ_VALUES.into_iter().map(Felt::new_unchecked).collect();
-    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+    assert_eq!(mutations, vec![RecordedAdvice::extend_advice_stack_with(expected)]);
 }
 
 #[test]
@@ -1464,7 +1503,7 @@ fn handlers_register_in_a_default_host() {
     );
 
     let mut host = DefaultHost::default();
-    for (event, handler) in module.handlers() {
+    for (event, handler) in module.event_handlers() {
         host.register_handler(event, handler).expect("registration succeeds");
     }
     use miden_processor::BaseHost;
@@ -1498,7 +1537,7 @@ fn one_wasm_registration_handles_emit_and_trace_with_the_same_payload() {
     ));
     let mut host = DefaultHost::default();
     for (event, handler) in module.event_handlers() {
-        host.register_event_handler(event, handler).unwrap();
+        host.register_handler(event, handler).unwrap();
     }
     let program = Assembler::default()
         .assemble_program(
@@ -1614,7 +1653,7 @@ fn trace_output_and_disabled_delivery_follow_the_engine_policy() {
         for enabled in [true, false] {
             let mut host = DefaultHost::default();
             for (event, handler) in module.event_handlers() {
-                host.register_event_handler(event, handler).unwrap();
+                host.register_handler(event, handler).unwrap();
             }
             let mut processor = FastProcessor::new(StackInputs::default())
                 .with_options(ExecutionOptions::default().with_trace_delivery(enabled))
@@ -1630,10 +1669,9 @@ fn trace_output_and_disabled_delivery_follow_the_engine_policy() {
             } else {
                 result.unwrap();
             }
-            let state = processor.state();
-            assert!(state.advice_provider().stack().is_empty());
+            assert!(processor.advice_provider().stack().is_empty());
             assert_eq!(
-                state.advice_provider().map().get(&Word::default()).unwrap().as_ref(),
+                processor.advice_provider().map().get(&Word::default()).unwrap().as_ref(),
                 &[Felt::ZERO]
             );
         }

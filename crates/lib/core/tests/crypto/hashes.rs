@@ -251,7 +251,7 @@ fn run_core_program(source: &str) -> Result<ExecutionOutput, ExecutionError> {
         .unwrap_program();
 
     let mut host = DefaultHost::default()
-        .with_library(&core_lib)
+        .with_library(core_lib.host_library())
         .expect("failed to load CoreLibrary into the host");
 
     let processor = FastProcessor::new_with_options(

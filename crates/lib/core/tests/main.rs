@@ -5,12 +5,11 @@ extern crate alloc;
 macro_rules! build_test {
     ($source:expr $(, $tail:expr)* $(,)?) => {{
         let core_lib = miden_core_lib::CoreLibrary::default();
-        #[allow(deprecated)] // Preserve the legacy Test harness.
-        let handlers = core_lib.handlers();
+        let handlers = core_lib.event_handlers();
         let source = $source;
         miden_utils_testing::build_test_by_mode!(false, source $(, $tail)*)
             .with_library(core_lib.package())
-            .with_event_handlers(handlers)
+            .with_handlers(handlers)
     }}
 }
 
@@ -19,12 +18,11 @@ macro_rules! build_test {
 macro_rules! build_debug_test {
     ($source:expr $(, $tail:expr)* $(,)?) => {{
         let core_lib = miden_core_lib::CoreLibrary::default();
-        #[allow(deprecated)] // Preserve the legacy Test harness.
-        let handlers = core_lib.handlers();
+        let handlers = core_lib.event_handlers();
         let source = $source;
         miden_utils_testing::build_test_by_mode!(true, source $(, $tail)*)
             .with_library(core_lib.package())
-            .with_event_handlers(handlers)
+            .with_handlers(handlers)
     }}
 }
 
@@ -178,7 +176,7 @@ fn core_library_load_registers_precompile_handlers() {
 
     let core_lib = CoreLibrary::default();
     let mut host = DefaultHost::default();
-    host.load_library(&core_lib).expect("failed to load core library");
+    host.load_library(core_lib.host_library()).expect("failed to load core library");
 
     for event in [
         KECCAK256_DIGEST_EVENT_NAME,

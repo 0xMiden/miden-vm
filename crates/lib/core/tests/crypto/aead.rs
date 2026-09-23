@@ -1,17 +1,10 @@
-use std::sync::Arc;
-
 use miden_air::Felt;
 use miden_core_lib::handlers::aead_decrypt::AEAD_DECRYPT_EVENT_NAME;
 use miden_crypto::aead::{
     DataType, EncryptionError,
     aead_poseidon2::{AuthTag, EncryptedData, Nonce, SecretKey},
 };
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
-use miden_processor::{
-    ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::{EventError, EventHandler},
-};
+use miden_event_handler::{AdviceRecorder, EventContext, EventError};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 
@@ -205,7 +198,6 @@ fn test_decrypt_documented_stack_contract() {
 }
 
 #[test]
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn test_decrypt_rejects_tampered_final_tag() {
     let seed = [14_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
@@ -259,19 +251,15 @@ fn test_decrypt_rejects_tampered_final_tag() {
 
     let mut test = build_test!(source.as_str(), &[]);
     let valid_plaintext = plaintext;
-    let malicious_handler: Arc<dyn EventHandler> =
-        Arc::new(move |_process: &ProcessorState| -> Result<Vec<AdviceMutation>, EventError> {
-            Ok(vec![advice_stack_mutation(valid_plaintext.clone())])
-        });
-
-    let decrypt_event_id = AEAD_DECRYPT_EVENT_NAME.to_event_id();
-    let mut replaced_default_handler = false;
-    for (event, handler) in &mut test.handlers {
-        if event.to_event_id() == decrypt_event_id {
-            *handler = malicious_handler.clone();
-            replaced_default_handler = true;
-        }
-    }
+    let replaced_default_handler = test.replace_handler(
+        AEAD_DECRYPT_EVENT_NAME,
+        move |_context: EventContext<'_>,
+              advice: &mut AdviceRecorder<'_>|
+              -> Result<(), EventError> {
+            advice.prepend_stack(valid_plaintext.clone());
+            Ok(())
+        },
+    );
     assert!(
         replaced_default_handler,
         "AEAD decrypt handler should be registered by build_test"
@@ -449,7 +437,6 @@ fn test_decrypt_with_known_values() {
 }
 
 #[test]
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn test_decrypt_rejects_adversarial_plaintext_for_unrelated_ciphertext() {
     let seed = [5_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
@@ -519,32 +506,21 @@ fn test_decrypt_rejects_adversarial_plaintext_for_unrelated_ciphertext() {
 
     let mut test = build_test!(source.as_str(), &[]);
     let adversarial_plaintext = plaintext;
-    let malicious_handler: Arc<dyn EventHandler> =
-        Arc::new(move |_process: &ProcessorState| -> Result<Vec<AdviceMutation>, EventError> {
-            Ok(vec![advice_stack_mutation(adversarial_plaintext.clone())])
-        });
-
-    let decrypt_event_id = AEAD_DECRYPT_EVENT_NAME.to_event_id();
-    let mut replaced_default_handler = false;
-    for (event, handler) in &mut test.handlers {
-        if event.to_event_id() == decrypt_event_id {
-            *handler = malicious_handler.clone();
-            replaced_default_handler = true;
-        }
-    }
+    let replaced_default_handler = test.replace_handler(
+        AEAD_DECRYPT_EVENT_NAME,
+        move |_context: EventContext<'_>,
+              advice: &mut AdviceRecorder<'_>|
+              -> Result<(), EventError> {
+            advice.prepend_stack(adversarial_plaintext.clone());
+            Ok(())
+        },
+    );
     assert!(
         replaced_default_handler,
         "AEAD decrypt handler should be registered by build_test"
     );
 
     expect_assert_error_code_from_msg!(test, "AEAD ciphertext mismatch");
-}
-
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
-fn advice_stack_mutation(values: Vec<Felt>) -> AdviceMutation {
-    let mut advice_stack = AdviceStack::new();
-    advice_stack.append_elements(values);
-    AdviceMutation::extend_advice_stack(advice_stack)
 }
 
 #[test]

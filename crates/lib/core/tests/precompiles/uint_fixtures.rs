@@ -486,8 +486,8 @@ impl<M: UintSpec> UintModule<M> {
             module = self.module,
         ));
         let (program, mut host) = prepare_precompile_program(&source);
-        assert!(host.unregister_event_handler(UINT_FIELD_INV_EVENT_NAME.to_event_id()));
-        host.register_event_handler(
+        assert!(host.unregister_handler(UINT_FIELD_INV_EVENT_NAME.to_event_id()));
+        host.register_handler(
             UINT_FIELD_INV_EVENT_NAME,
             |_: EventContext<'_>, advice: &mut AdviceRecorder<'_>| {
                 // One is canonical, but it is not the inverse of the original input two.

@@ -12,15 +12,15 @@ use miden_crypto::{
     hash::keccak::Keccak256,
     utils::hex_to_bytes,
 };
+use miden_event_handler::{AdviceRecorder, EventContext, EventError, EventHandler};
 use miden_precompiles::{K1Scalar, SECP256K1_LAMBDA, scalar_mul_mod_n};
 use miden_precompiles_prover::{HashFunction, prove_precompiles};
 use miden_precompiles_verifier::verify_deferred;
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, MemoryError,
-    ProcessorState, StackInputs,
-    advice::{AdviceInputs, AdviceMutation, AdviceStack},
-    event::{EventError, EventHandler},
+    DefaultHost, EventLibrary, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
+    MemoryError, StackInputs,
+    advice::{AdviceInputs, AdviceStack},
+    event::registration,
 };
 use miden_utils_testing::crypto::Poseidon2;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
@@ -527,7 +527,6 @@ fn run_recover(message: Word, signature: &Signature) -> Result<ExecutionOutput, 
     )
 }
 
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn run_recover_with_native_signature(
     message: Word,
     signature: &[Felt; 17],
@@ -638,7 +637,6 @@ fn run_core_program_with_advice(
     run_core_program(source, advice, None)
 }
 
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn run_core_program(
     source: &str,
     advice: &[Felt],
@@ -652,16 +650,17 @@ fn run_core_program(
         .expect("failed to assemble core ECDSA test program")
         .unwrap_program();
 
-    let mut host = DefaultHost::default()
-        .with_library(&core_lib)
-        .expect("failed to load CoreLibrary into the host");
+    let mut handlers = core_lib.event_handlers();
     if let Some(handler) = recovery_handler {
-        assert!(
-            host.replace_handler(ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handler)
-                .expect("the recovery event name is valid"),
-            "the default recovery handler must already be registered",
-        );
+        let (_, registered) = handlers
+            .iter_mut()
+            .find(|(name, _)| *name == ECDSA_K256_KECCAK_RECOVER_EVENT_NAME)
+            .expect("the default recovery handler must already be registered");
+        *registered = registration::EventHandler::shared(handler);
     }
+    let mut host = DefaultHost::default()
+        .with_library(EventLibrary { handlers, ..core_lib.host_library() })
+        .expect("failed to load CoreLibrary into the host");
 
     let mut advice_stack = AdviceStack::new();
     advice_stack.append_elements(advice.iter().copied());
@@ -680,14 +679,16 @@ fn run_core_program(
     output
 }
 
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn recovery_public_key_handler(public_key: &PublicKey) -> Arc<dyn EventHandler> {
     let elements = public_key_elements(public_key);
-    Arc::new(move |_process: &ProcessorState| -> Result<Vec<AdviceMutation>, EventError> {
-        let mut advice_stack = AdviceStack::new();
-        advice_stack.append_for_adv_pipe(&elements);
-        Ok(vec![AdviceMutation::extend_advice_stack(advice_stack)])
-    })
+    Arc::new(
+        move |_context: EventContext<'_>,
+              advice: &mut AdviceRecorder<'_>|
+              -> Result<(), EventError> {
+            advice.prepend_stack(elements);
+            Ok(())
+        },
+    )
 }
 
 fn assert_deferred_proof_verifies(output: &ExecutionOutput) {

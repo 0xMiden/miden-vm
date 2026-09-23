@@ -22,7 +22,7 @@ use rstest::{fixture, rstest};
 
 use super::*;
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, HostLibrary,
+    AdviceInputs, DefaultHost, EventLibrary, ExecutionOptions, FastProcessor,
     trace::trace_state::{HasherOp, MemoryReadsReplay},
 };
 
@@ -580,13 +580,13 @@ fn miri_repro_uninitialized_tail_read_during_h0_inversion() {
 }
 
 /// Creates a library with a single procedure containing just a SWAP operation.
-fn create_simple_library() -> HostLibrary {
+fn create_simple_library() -> EventLibrary {
     let mut mast_forest = MastForest::new();
     let swap_block = BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap])
         .add_to_forest(&mut mast_forest)
         .unwrap();
     mast_forest.make_root(swap_block);
-    HostLibrary::from(Arc::new(mast_forest))
+    EventLibrary::from(Arc::new(mast_forest))
 }
 
 /// (join (
