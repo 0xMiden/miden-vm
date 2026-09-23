@@ -19,6 +19,7 @@ const SMT: &str = include_str!("../../asm/collections/smt.masm");
 const MMR: &str = include_str!("../../asm/collections/mmr.masm");
 const FALCON: &str = include_str!("../../asm/crypto/dsa/falcon512_eidos.masm");
 const ECDSA_K256_KECCAK: &str = include_str!("../../asm/crypto/dsa/ecdsa_k256_keccak.masm");
+const ECDSA_P256_SHA256: &str = include_str!("../../asm/crypto/dsa/ecdsa_p256_sha256.masm");
 const EDDSA_25519_SHA512: &str = include_str!("../../asm/crypto/dsa/eddsa_25519_sha512.masm");
 const AEAD: &str = include_str!("../../asm/crypto/aead_eidos.masm");
 const PRECOMPILES: &str = include_str!("../../asm/precompiles/mod.masm");
@@ -177,6 +178,11 @@ fn masm_initial_chaining_words_match_rust() {
     );
     assert_word(
         ECDSA_K256_KECCAK,
+        "PUBLIC_KEY_INIT_CV",
+        Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, (4 * Word::NUM_ELEMENTS) as u32),
+    );
+    assert_word(
+        ECDSA_P256_SHA256,
         "PUBLIC_KEY_INIT_CV",
         Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, (4 * Word::NUM_ELEMENTS) as u32),
     );
