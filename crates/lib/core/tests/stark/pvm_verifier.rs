@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
+use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     Felt, Word,
-    advice::AdviceInputs,
+    advice::{AdviceInputs, AdviceStack},
     crypto::hash::Keccak256,
     deferred::{
         DEFERRED_AND_FRAME, DeferredState, Node, PrecompileWitness, PrecompileWitnessEntry,
@@ -12,22 +13,34 @@ use miden_core::{
     },
     program::proof_request_key,
     proof::{HashFunction, PrecompileProof, StarkProof},
+    serde::Deserializable,
+    utils::bytes_to_packed_u32_elements,
 };
-use miden_core_lib::CoreLibrary;
+use miden_core_lib::{
+    CoreLibrary,
+    dsa::{ecdsa_p256_sha256, eddsa_25519_sha512},
+};
+use miden_crypto::dsa::eddsa_25519_sha512::SigningKey as Ed25519SigningKey;
 use miden_precompiles::{Keccak256Precompile, Sha256Precompile, Sha512Precompile};
 use miden_precompiles_air::NUM_CHIPLETS;
 use miden_precompiles_prover::prove_precompiles;
 use miden_precompiles_verifier::masm_verifier::{
     PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
 };
-use miden_processor::{ExecutionError, operation::OperationError};
+use miden_processor::{
+    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs,
+    operation::OperationError,
+};
 use miden_utils_testing::recursive_verifier::VerifierData;
 
 use super::{
     EXAMPLE_FIB_SMALL, fib_stack_inputs, generate_recursive_verifier_data,
     verifier_stack::{CALLER_WORD, VERIFIER_RETURN, VerifierStack},
 };
-use crate::helpers::masm_push_word;
+use crate::{
+    helpers::{masm_push_word, masm_store_felts},
+    support::ecdsa::valid_fixture,
+};
 
 const SECURITY_PARAM_COUNT: usize = 4;
 
@@ -111,6 +124,86 @@ fn pvm_verifies_sha256_claims() {
     state.log_statement(assertion).unwrap();
     let witness = state.into_witness().unwrap().expect("the state logs a hash claim");
     let proof = prove_precompiles(vec![witness], HashFunction::Eidos).unwrap();
+    let inputs = PvmRecursiveVerifierInputs::for_request(pvm_verify_proof_root(), &proof).unwrap();
+    assert_pvm_verifies(&inputs);
+}
+
+/// One PVM proof of a core-library execution that exercises every deferred precompile: ECDSA
+/// secp256k1 verification (Keccak and a secp256k1 MSM), Ed25519 verification (SHA-512 and an
+/// Ed25519 MSM), ECDSA P-256 verification (SHA-256 and a P-256 MSM), and SHA-256 at its
+/// padding boundaries and across multiple blocks.
+#[test]
+fn pvm_verifies_a_session_mixing_every_precompile() {
+    const SHA256_LENGTHS: [usize; 6] = [0, 55, 56, 64, 120, 1000];
+    // Each message gets its own zero-initialized buffer, so every final chunk is zero-padded.
+    const SHA256_BUFFER_BASE: u32 = 1 << 12;
+    const SHA256_BUFFER_STRIDE: u32 = 1 << 8;
+
+    let core_lib = CoreLibrary::default();
+    let k256 = valid_fixture();
+    let ed25519_key = Ed25519SigningKey::read_from_bytes(&[0xed; 32]).unwrap();
+    let p256_key = p256::ecdsa::SigningKey::from_slice(&[7; 32]).unwrap();
+
+    let mut sha256_calls = String::new();
+    for (index, len) in SHA256_LENGTHS.into_iter().enumerate() {
+        let message: Vec<u8> =
+            (0..len).map(|i| (i as u8).wrapping_mul(29).wrapping_add(3)).collect();
+        let ptr = SHA256_BUFFER_BASE + SHA256_BUFFER_STRIDE * index as u32;
+        sha256_calls.push_str(&format!(
+            "{stores}\n            push.{ptr} push.{len} push.{ptr}\n            \
+             exec.::miden::core::precompiles::hashes::sha256::hash_bytes_mem\n            ",
+            stores = masm_store_felts(&bytes_to_packed_u32_elements(&message), ptr),
+        ));
+    }
+    let source = format!(
+        "
+        begin
+            {message}
+            {k256_commitment}
+            exec.::miden::core::crypto::dsa::ecdsa_k256_keccak::verify
+            {message}
+            {ed25519_commitment}
+            exec.::miden::core::crypto::dsa::eddsa_25519_sha512::verify
+            {message}
+            {p256_commitment}
+            exec.::miden::core::crypto::dsa::ecdsa_p256_sha256::verify
+            {sha256_calls}
+        end
+        ",
+        message = masm_push_word(&k256.message),
+        k256_commitment = masm_push_word(&k256.public_key_commitment),
+        ed25519_commitment =
+            masm_push_word(&eddsa_25519_sha512::public_key_commitment(&ed25519_key.public_key())),
+        p256_commitment =
+            masm_push_word(&ecdsa_p256_sha256::public_key_commitment(p256_key.verifying_key())),
+    );
+    let program = Assembler::default()
+        .with_package(core_lib.package(), Linkage::Dynamic)
+        .unwrap()
+        .assemble_program("pvm_mixed_session", source)
+        .unwrap()
+        .unwrap_program();
+    let mut advice = AdviceStack::new();
+    advice.append_elements(k256.advice);
+    advice.append_elements(eddsa_25519_sha512::sign(&ed25519_key, k256.message));
+    advice.append_elements(ecdsa_p256_sha256::sign(&p256_key, k256.message));
+    let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
+    let output = FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default().with_stack(advice),
+        ExecutionOptions::default(),
+    )
+    .unwrap()
+    .execute_sync(&program, &mut host)
+    .expect("the mixed execution must succeed");
+    assert!(output.advice.stack().is_empty(), "the execution must consume its advice");
+
+    let proof = prove_precompiles(
+        vec![output.precompile_witness.clone().expect("the execution logs deferred claims")],
+        HashFunction::Eidos,
+    )
+    .expect("the mixed session must be provable");
+    assert_eq!(proof.roots, [output.precompile_root()], "the proof must cover the execution");
     let inputs = PvmRecursiveVerifierInputs::for_request(pvm_verify_proof_root(), &proof).unwrap();
     assert_pvm_verifies(&inputs);
 }
