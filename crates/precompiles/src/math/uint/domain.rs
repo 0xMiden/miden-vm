@@ -165,6 +165,8 @@ impl UintDomain {
             Self::Ed25519Base => UintDomainKind::Field,
             Self::Ed25519Scalar => UintDomainKind::Field,
             Self::Ed25519Order => UintDomainKind::Ring,
+            Self::P256Base => UintDomainKind::Field,
+            Self::P256Scalar => UintDomainKind::Field,
         }
     }
 

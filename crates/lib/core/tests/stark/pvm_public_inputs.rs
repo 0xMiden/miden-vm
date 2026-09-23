@@ -16,7 +16,7 @@ const RANDOM_COIN_CV_PTR: u32 = 3_223_322_668;
 const RANDOM_COIN_INPUT_LEN_PTR: u32 = 3_223_322_767;
 const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3_223_322_768;
 const ROOT: [u64; 4] = [101, 102, 103, 104];
-const HEIGHTS: [u64; 11] = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+const HEIGHTS: [u64; 12] = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
 const MAIN_COMMITMENT: [u64; 4] = [201, 202, 203, 204];
 
 fn pvm_masm_const(name: &str) -> u64 {
@@ -55,6 +55,7 @@ fn stage_statement_and_shape() -> String {
         push.{h8} exec.constants::air_trace_length_logs_ptr add.8 mem_store
         push.{h9} exec.constants::air_trace_length_logs_ptr add.9 mem_store
         push.{h10} exec.constants::air_trace_length_logs_ptr add.10 mem_store
+        push.{h11} exec.constants::air_trace_length_logs_ptr add.11 mem_store
         "#,
         root0 = root[0],
         root1 = root[1],
@@ -71,6 +72,7 @@ fn stage_statement_and_shape() -> String {
         h8 = heights[8],
         h9 = heights[9],
         h10 = heights[10],
+        h11 = heights[11],
     )
 }
 
@@ -149,7 +151,7 @@ fn pvm_public_input_hook_matches_the_rust_challenger() {
     challenger.observe_slice(&ROOT.map(Felt::new_unchecked));
     challenger.observe(Felt::ZERO); // max_aux_inputs
     challenger.observe(Felt::ZERO); // aux_inputs.len()
-    challenger.observe(Felt::from_u8(11));
+    challenger.observe(Felt::from_u8(12));
     challenger.observe_slice(&HEIGHTS.map(Felt::new_unchecked));
     challenger.observe_slice(&MAIN_COMMITMENT.map(Felt::new_unchecked));
     let mut cv_oracle = challenger.clone();
