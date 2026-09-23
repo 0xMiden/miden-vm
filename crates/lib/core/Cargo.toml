@@ -50,6 +50,7 @@ miden-ace-codegen = { workspace = true, optional = true }
 miden-constraint-compiler = { workspace = true, optional = true }
 
 # External dependencies
+p256 = { workspace = true, features = ["ecdsa"] }
 thiserror.workspace = true
 
 [dev-dependencies]
