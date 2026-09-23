@@ -1,6 +1,3 @@
-// Compatibility owner for legacy mutations and Host/SyncHost callback forwarding.
-#![allow(deprecated)]
-
 use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
@@ -13,6 +10,7 @@ use miden_core::{
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_event_handler::{AdviceRecorder, EventContext};
 
+#[allow(deprecated)] // Retained raw-state callback signatures.
 use crate::ProcessorState;
 
 // The engine owns raw state and recognizes this private signal only with an empty batch.
@@ -24,10 +22,8 @@ pub(crate) struct LegacyHostFallback;
 #[error("no event handler registered")]
 pub(crate) struct UnhandledEvent;
 
-#[warn(deprecated)]
 pub(super) mod advice;
 
-#[warn(deprecated)]
 pub mod debug;
 
 pub mod default;
@@ -35,7 +31,6 @@ pub mod default;
 pub mod handlers;
 use handlers::{EventError, TraceError};
 
-#[warn(deprecated)]
 mod mast_forest_store;
 pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStore};
 
@@ -51,6 +46,7 @@ pub enum AdviceMutation {
     ExtendMerkleStore { inner_nodes: Vec<InnerNodeInfo> },
 }
 
+#[allow(deprecated)] // Constructors retained for downstream legacy callbacks.
 impl AdviceMutation {
     pub fn extend_advice_stack(stack: AdviceStack) -> Self {
         Self::ExtendStack { stack }
@@ -158,6 +154,7 @@ pub trait SyncHost: BaseHost {
     /// - Return errors without event names or IDs - the caller will enrich them via
     ///   [`BaseHost::resolve_event()`]
     /// - System events are handled by the VM before and don't call this method
+    #[allow(deprecated)] // Retained legacy mutation return type.
     #[deprecated(note = "implement handle_event with EventContext and AdviceRecorder")]
     fn on_event(
         &mut self,
@@ -178,6 +175,7 @@ pub trait SyncHost: BaseHost {
     /// [`BaseHost::resolve_trace()`].
     ///
     /// [`SystemEvent::TraceEvent`]: miden_core::events::SystemEvent::TraceEvent
+    #[allow(deprecated)] // Retained raw-state trace callback signature.
     #[deprecated(note = "implement handle_event and inspect context.kind()")]
     fn on_trace(&mut self, _process: &ProcessorState<'_>) -> Result<(), TraceError> {
         Ok(())
@@ -220,6 +218,7 @@ pub trait Host: BaseHost {
     /// - Return errors without event names or IDs - the caller will enrich them via
     ///   [`BaseHost::resolve_event()`]
     /// - System events are handled by the VM before and don't call this method
+    #[allow(deprecated)] // Retained legacy mutation return type.
     #[deprecated(note = "implement handle_event with EventContext and AdviceRecorder")]
     fn on_event(
         &mut self,
@@ -240,6 +239,7 @@ pub trait Host: BaseHost {
     /// [`BaseHost::resolve_trace()`].
     ///
     /// [`SystemEvent::TraceEvent`]: miden_core::events::SystemEvent::TraceEvent
+    #[allow(deprecated)] // Retained raw-state trace callback signature.
     #[deprecated(note = "implement handle_event and inspect context.kind()")]
     fn on_trace(
         &mut self,
@@ -269,6 +269,7 @@ where
         async move { result }
     }
 
+    #[allow(deprecated)] // Forward the retained synchronous callback.
     fn on_event(
         &mut self,
         process: &ProcessorState<'_>,
@@ -277,6 +278,7 @@ where
         async move { result }
     }
 
+    #[allow(deprecated)] // Forward the retained synchronous trace callback.
     fn on_trace(
         &mut self,
         process: &ProcessorState<'_>,
@@ -307,6 +309,7 @@ pub trait FutureMaybeSend<O>: Future<Output = O> + Send {}
 impl<T, O> FutureMaybeSend<O> for T where T: Future<Output = O> + Send {}
 
 #[cfg(test)]
+#[allow(deprecated)] // Compatibility tests for legacy AdviceMutation constructors.
 mod tests {
     use super::{AdviceMutation, AdviceStack, Felt};
 

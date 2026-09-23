@@ -1,9 +1,4 @@
-// Legacy raw-state contracts; portable registration and callbacks live in sibling modules.
-#![allow(deprecated)]
-
-#[warn(deprecated)]
 mod portable;
-#[warn(deprecated)]
 pub mod registration;
 use alloc::{
     collections::{BTreeMap, btree_map::Entry},
@@ -13,10 +8,14 @@ use alloc::{
 use core::{fmt, fmt::Debug};
 
 use miden_core::events::{EventId, EventName};
+pub(crate) use portable::record_mutations;
 pub use portable::{HandlerRegistry, invoke_legacy_handler, legacy_handler};
-pub(crate) use portable::{event_context, record_mutations};
 
-use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
+use crate::ExecutionError;
+#[allow(deprecated)] // Retained raw-state handler signatures.
+use crate::ProcessorState;
+#[allow(deprecated)] // Legacy event callbacks return mutation lists.
+use crate::advice::AdviceMutation;
 
 // EVENT HANDLER TRAIT
 // ================================================================================================
@@ -27,6 +26,7 @@ use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
 /// A struct implementing this trait can access its own state, but any output it produces must
 /// be stored in the process's advice provider.
 #[deprecated(note = "use miden_event_handler::EventHandler")]
+#[allow(deprecated)] // Retained raw-state handler compatibility.
 pub trait EventHandler: Send + Sync + 'static {
     /// Handles the event when triggered.
     fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError>;
@@ -34,6 +34,7 @@ pub trait EventHandler: Send + Sync + 'static {
 
 /// Default implementation for both free functions and closures with signature
 /// `fn(&ProcessorState) -> Result<Vec<AdviceMutation>, EventError>`
+#[allow(deprecated)] // Retained raw-state handler compatibility.
 impl<F> EventHandler for F
 where
     F: for<'a> Fn(&'a ProcessorState) -> Result<Vec<AdviceMutation>, EventError>
@@ -50,6 +51,7 @@ where
 #[deprecated(note = "use miden_event_handler::NoopHandler")]
 pub struct NoopEventHandler;
 
+#[allow(deprecated)] // Retained raw-state handler compatibility.
 impl EventHandler for NoopEventHandler {
     fn on_event(&self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(Vec::new())
@@ -114,10 +116,12 @@ pub(crate) fn validate_event_name(event: &EventName) -> Result<(), ExecutionErro
 /// ```
 #[derive(Default)]
 #[deprecated(note = "use event::HandlerRegistry")]
+#[allow(deprecated)] // Retained raw-state handler compatibility.
 pub struct EventHandlerRegistry {
     handlers: BTreeMap<EventId, (EventName, Arc<dyn EventHandler>)>,
 }
 
+#[allow(deprecated)] // Retained raw-state handler compatibility.
 impl EventHandlerRegistry {
     pub fn new() -> Self {
         Self { handlers: BTreeMap::new() }
@@ -200,6 +204,7 @@ impl EventHandlerRegistry {
     }
 }
 
+#[allow(deprecated)] // Retained raw-state handler compatibility.
 impl Debug for EventHandlerRegistry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let events: Vec<_> = self.handlers.values().map(|(event, _)| event).collect();
@@ -225,11 +230,13 @@ impl Debug for EventHandlerRegistry {
 #[deprecated(note = "use miden_event_handler::EventHandler with context.kind()")]
 pub trait TraceHandler: Send + Sync + 'static {
     /// Handles the trace event when triggered.
+    #[allow(deprecated)] // Retained raw-state trace callback signature.
     fn on_trace(&self, process: &ProcessorState) -> Result<(), TraceError>;
 }
 
 /// Default implementation for both free functions and closures with signature
 /// `fn(&ProcessorState) -> Result<(), TraceError>`
+#[allow(deprecated)] // Retained raw-state handler compatibility.
 impl<F> TraceHandler for F
 where
     F: for<'a> Fn(&'a ProcessorState) -> Result<(), TraceError> + Send + Sync + 'static,
@@ -254,10 +261,12 @@ pub type TraceError = EventError;
 /// Registry for maintaining trace handlers.
 #[derive(Default)]
 #[deprecated(note = "use event::HandlerRegistry")]
+#[allow(deprecated)] // Retained raw-state handler compatibility.
 pub struct TraceHandlerRegistry {
     handlers: BTreeMap<EventId, (EventName, Arc<dyn TraceHandler>)>,
 }
 
+#[allow(deprecated)] // Retained raw-state handler compatibility.
 impl TraceHandlerRegistry {
     pub fn new() -> Self {
         Self { handlers: BTreeMap::new() }
@@ -338,6 +347,7 @@ impl TraceHandlerRegistry {
     }
 }
 
+#[allow(deprecated)] // Retained raw-state handler compatibility.
 impl Debug for TraceHandlerRegistry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let traces: Vec<_> = self.handlers.values().map(|(event, _)| event).collect();
@@ -346,6 +356,7 @@ impl Debug for TraceHandlerRegistry {
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // Regressions for the retained raw-state registries and host API.
 mod tests {
     use alloc::{sync::Arc, vec::Vec};
 
@@ -633,32 +644,35 @@ mod tests {
 
         // `replace_handler` reports whether a prior handler existed; before any registration it
         // returns false but registers the handler.
-        let existed = host.replace_handler(NAME, Arc::new(NoopEventHandler)).unwrap();
+        let existed = host.replace_legacy_handler(NAME, Arc::new(NoopEventHandler)).unwrap();
         assert!(!existed, "replace before register should report no prior handler");
         assert_eq!(host.resolve_event(id), Some(&NAME));
 
         // A second replace now observes the prior handler.
-        assert!(host.replace_handler(NAME, Arc::new(NoopEventHandler)).unwrap());
+        assert!(host.replace_legacy_handler(NAME, Arc::new(NoopEventHandler)).unwrap());
 
         // Re-registering the same event directly is rejected.
         assert!(matches!(
-            host.register_handler(NAME, Arc::new(NoopEventHandler)),
+            host.register_legacy_handler(NAME, Arc::new(NoopEventHandler)),
             Err(ExecutionError::HostError(HostError::DuplicateEventHandler { .. }))
         ));
 
-        assert!(host.unregister_handler(id));
+        assert!(host.unregister_legacy_handler(id));
         assert!(host.resolve_event(id).is_none());
-        assert!(!host.unregister_handler(id));
+        assert!(!host.unregister_legacy_handler(id));
     }
 
     #[test]
     fn replace_handler_rejects_invalid_names_without_panicking() {
         let mut host = DefaultHost::default();
         assert!(
-            host.replace_handler(EventName::new("sys::nope"), Arc::new(NoopEventHandler))
+            host.replace_legacy_handler(EventName::new("sys::nope"), Arc::new(NoopEventHandler))
                 .is_err()
         );
-        assert!(host.replace_handler(EventName::new(""), Arc::new(NoopEventHandler)).is_err());
+        assert!(
+            host.replace_legacy_handler(EventName::new(""), Arc::new(NoopEventHandler))
+                .is_err()
+        );
         assert!(
             host.replace_trace_handler(EventName::new("sys::nope"), Arc::new(NoopTraceHandler))
                 .is_err()
