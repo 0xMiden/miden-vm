@@ -2795,6 +2795,7 @@ dependencies = [
  "miden-assembly-syntax",
  "miden-core",
  "miden-crypto",
+ "miden-event-handler",
  "miden-mast-package",
  "miden-processor",
  "miden-prover",

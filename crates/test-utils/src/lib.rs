@@ -14,7 +14,9 @@ use alloc::{
 };
 
 use miden_air::{CoreCols, DecoderCols, RangeCols, StackCols, SystemCols};
-use miden_assembly::{Linkage, diagnostics::reporting::PrintDiagnostic};
+use miden_assembly::Linkage;
+#[cfg(not(target_family = "wasm"))]
+use miden_assembly::diagnostics::reporting::PrintDiagnostic;
 pub use miden_assembly::{
     Path,
     debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
@@ -29,19 +31,22 @@ pub use miden_core::{
 };
 use miden_core::{chiplets::hasher::apply_permutation, events::EventName};
 use miden_mast_package::{Package, debug_info::PackageDebugInfo};
+#[allow(deprecated)] // Preserve the raw processor-state re-export for downstream tests.
+pub use miden_processor::ProcessorState;
+#[allow(deprecated)] // These old traits remain in the public Test fields and builders.
+use miden_processor::event::{EventHandler, TraceHandler};
 #[cfg(not(target_family = "wasm"))]
 use miden_processor::trace::build_trace;
-#[allow(deprecated)] // Legacy compatibility or independent raw inspection.
 pub use miden_processor::{
-    ContextId, ExecutionError, ProcessorState,
+    ContextId, ExecutionError,
     advice::{AdviceInputs, AdviceProvider, AdviceStack},
     trace::VmTrace,
 };
-#[allow(deprecated)] // Legacy Test storage and builders.
+#[cfg(not(target_family = "wasm"))]
 use miden_processor::{
-    DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionWitness, FastProcessor, Program,
-    event::{EventHandler, TraceHandler},
+    DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionWitness, FastProcessor,
 };
+use miden_processor::{Program, event::registration};
 pub use miden_prover::Prover;
 pub use miden_verifier::Verifier;
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
@@ -252,17 +257,159 @@ pub struct Test {
     pub advice_inputs: AdviceInputs,
     pub in_tracing_mode: bool,
     pub libraries: Vec<Arc<Package>>,
+    #[deprecated(note = "use EventTest::with_handler or EventTest::with_handlers")]
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
+    #[deprecated(note = "use EventTest::with_handler or EventTest::with_handlers")]
     pub trace_handlers: Vec<(EventName, Arc<dyn TraceHandler>)>,
     pub add_modules: Vec<(Arc<Path>, String)>,
 }
 
-#[allow(deprecated)] // Preserve the existing test harness and its legacy builder signatures.
+// Both containers delegate execution and assertions to the same borrowed runner.
+macro_rules! test_execution_methods {
+    () => {
+        /// Builds a final stack from the provided stack-ordered array and asserts that executing
+        /// the test will result in the expected final stack state.
+        #[cfg(not(target_family = "wasm"))]
+        #[track_caller]
+        pub fn expect_stack(&self, final_stack: &[u64]) {
+            self.run().expect_stack(final_stack)
+        }
+
+        /// Executes the test and validates that the process memory has the elements of
+        /// `expected_mem` at address `mem_start_addr` and that the end of the stack execution trace
+        /// matches the `final_stack`.
+        #[cfg(not(target_family = "wasm"))]
+        #[track_caller]
+        pub fn expect_stack_and_memory(
+            &self,
+            final_stack: &[u64],
+            mem_start_addr: u32,
+            expected_mem: &[u64],
+        ) {
+            self.run().expect_stack_and_memory(final_stack, mem_start_addr, expected_mem)
+        }
+
+        /// Asserts that executing the test inside a proptest results in the expected final stack
+        /// state. The proptest will return a test failure instead of panicking if the assertion
+        /// condition fails.
+        #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
+        pub fn prop_expect_stack(
+            &self,
+            final_stack: &[u64],
+        ) -> Result<(), proptest::prelude::TestCaseError> {
+            self.run().prop_expect_stack(final_stack)
+        }
+
+        /// Executes the test with the provided stack inputs and asserts the final stack state.
+        ///
+        /// This preserves the same execution coverage as [`expect_stack`](Self::expect_stack):
+        /// traced execution, step/resume execution comparison, and trace construction are all still
+        /// run.
+        #[cfg(not(target_family = "wasm"))]
+        #[track_caller]
+        pub fn expect_stack_with_inputs(&self, stack_inputs: &[u64], final_stack: &[u64]) {
+            self.run().expect_stack_with_inputs(stack_inputs, final_stack)
+        }
+
+        /// Compiles the test's source to a Program and executes it with the tests inputs. Returns a
+        /// resulting execution trace or error.
+        ///
+        /// Internally, this also checks that traced execution and step/resume execution agree on
+        /// the stack outputs.
+        #[cfg(not(target_family = "wasm"))]
+        #[track_caller]
+        pub fn execute(&self) -> Result<VmTrace, ExecutionError> {
+            self.run().execute()
+        }
+
+        /// Compiles the test's source and executes it with the provided stack inputs.
+        ///
+        /// This uses the same traced execution, step/resume comparison, and trace construction path
+        /// as [`execute`](Self::execute).
+        #[cfg(not(target_family = "wasm"))]
+        #[track_caller]
+        pub fn execute_with_stack_inputs(
+            &self,
+            stack_inputs: &[u64],
+        ) -> Result<VmTrace, ExecutionError> {
+            self.run().execute_with_stack_inputs(stack_inputs)
+        }
+
+        /// Compiles the test's source to a Program and executes it with the tests inputs.
+        ///
+        /// Returns the [`ExecutionOutput`] once execution is finished.
+        #[cfg(not(target_family = "wasm"))]
+        pub fn execute_for_output(&self) -> Result<(ExecutionOutput, DefaultHost), ExecutionError> {
+            self.run().execute_for_output()
+        }
+
+        /// Compiles the test's code into a program, then generates and verifies a STARK proof of
+        /// execution. When `test_fail` is true, forces a failure by modifying the first output.
+        ///
+        /// Prefer [`check_constraints`](Self::check_constraints) for constraint validation — it is
+        /// much faster and provides better error diagnostics. Use this method only when you need to
+        /// exercise the full STARK prove/verify pipeline (e.g., testing proof serialization,
+        /// verifier logic, or precompile request handling).
+        #[cfg(not(target_family = "wasm"))]
+        pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
+            self.run().prove_and_verify(pub_inputs, test_fail)
+        }
+
+        /// Executes the test program and checks all AIR constraints without generating a STARK
+        /// proof.
+        ///
+        /// This is the recommended way to validate constraints in tests. It delegates to
+        /// [`VmTrace::check_constraints`], which is much faster than the
+        /// full prove/verify pipeline and provides better error diagnostics. Use
+        /// [`prove_and_verify`](Self::prove_and_verify) only when you need to exercise the
+        /// complete STARK proof generation and verification flow.
+        ///
+        /// # Panics
+        ///
+        /// Panics if execution fails or if any AIR constraint evaluates to nonzero on any row.
+        #[cfg(not(target_family = "wasm"))]
+        #[track_caller]
+        pub fn check_constraints(&self) {
+            self.run().check_constraints()
+        }
+
+        /// Returns the last state of the stack after executing a test.
+        #[cfg(not(target_family = "wasm"))]
+        #[track_caller]
+        pub fn get_last_stack_state(&self) -> StackOutputs {
+            self.run().get_last_stack_state()
+        }
+    };
+}
+
 impl Test {
+    /// Adds a portable binding and returns a test that owns portable handlers explicitly.
+    pub fn with_handler(
+        self,
+        event: EventName,
+        handler: impl Into<registration::EventHandler>,
+    ) -> EventTest {
+        EventTest::from(self).with_handler(event, handler)
+    }
+
+    /// Adds portable bindings for both regular events and traces.
+    pub fn with_handlers(
+        self,
+        handlers: impl IntoIterator<Item = (EventName, registration::EventHandler)>,
+    ) -> EventTest {
+        EventTest::from(self).with_handlers(handlers)
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    fn run(&self) -> TestRun<'_> {
+        TestRun { test: self, handlers: &[] }
+    }
+
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
     /// Creates the simplest possible new test, with only a source string and no inputs.
+    #[allow(deprecated)] // Initialize retained compatibility fields.
     pub fn new(name: &str, source: &str, in_tracing_mode: bool) -> Self {
         let source_manager = Arc::new(DefaultSourceManager::default());
         let source = source_manager.load(SourceLanguage::Masm, name.into(), source.to_string());
@@ -317,12 +464,16 @@ impl Test {
     }
 
     /// Adds a handler for a specific event when running the `Host`.
+    #[allow(deprecated)] // Compatibility storage or builder.
+    #[deprecated(note = "use EventTest::with_handler or EventTest::with_handlers")]
     pub fn with_event_handler(mut self, event: EventName, handler: impl EventHandler) -> Self {
         self.add_event_handler(event, handler);
         self
     }
 
     /// Adds handlers for specific events when running the `Host`.
+    #[allow(deprecated)] // Compatibility storage or builder.
+    #[deprecated(note = "use EventTest::with_handler or EventTest::with_handlers")]
     pub fn with_event_handlers(
         mut self,
         handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
@@ -332,12 +483,16 @@ impl Test {
     }
 
     /// Adds a trace handler for a specific trace event when running the `Host`.
+    #[allow(deprecated)] // Compatibility storage or builder.
+    #[deprecated(note = "use EventTest::with_handler or EventTest::with_handlers")]
     pub fn with_trace_handler(mut self, event: EventName, handler: impl TraceHandler) -> Self {
         self.add_trace_handler(event, handler);
         self
     }
 
     /// Adds trace handlers for specific trace events when running the `Host`.
+    #[allow(deprecated)] // Compatibility storage or builder.
+    #[deprecated(note = "use EventTest::with_handler or EventTest::with_handlers")]
     pub fn with_trace_handlers(
         mut self,
         handlers: Vec<(EventName, Arc<dyn TraceHandler>)>,
@@ -360,6 +515,8 @@ impl Test {
     }
 
     /// Add a handler for a specific event when running the `Host`.
+    #[allow(deprecated)] // Compatibility storage or builder.
+    #[deprecated(note = "use EventTest::with_handler or EventTest::with_handlers")]
     pub fn add_event_handler(&mut self, event: EventName, handler: impl EventHandler) {
         self.add_event_handlers(vec![(event, Arc::new(handler))]);
     }
@@ -368,11 +525,15 @@ impl Test {
     ///
     /// The host registry applies the event name rules (not empty, not reserved, not a duplicate)
     /// when the test builds the host, so a rejected name panics there.
+    #[allow(deprecated)] // Compatibility storage or builder.
+    #[deprecated(note = "use EventTest::with_handler or EventTest::with_handlers")]
     pub fn add_event_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) {
         self.handlers.extend(handlers);
     }
 
     /// Add a trace handler for a specific event when running the `Host`.
+    #[allow(deprecated)] // Compatibility storage or builder.
+    #[deprecated(note = "use EventTest::with_handler or EventTest::with_handlers")]
     pub fn add_trace_handler(&mut self, event: EventName, handler: impl TraceHandler) {
         self.add_trace_handlers(vec![(event, Arc::new(handler))]);
     }
@@ -381,108 +542,13 @@ impl Test {
     ///
     /// The host registry applies the event name rules (not empty, not reserved, not a duplicate)
     /// when the test builds the host, so a rejected name panics there.
+    #[allow(deprecated)] // Compatibility storage or builder.
+    #[deprecated(note = "use EventTest::with_handler or EventTest::with_handlers")]
     pub fn add_trace_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn TraceHandler>)>) {
         self.trace_handlers.extend(handlers);
     }
 
-    // TEST METHODS
-    // --------------------------------------------------------------------------------------------
-
-    /// Builds a final stack from the provided stack-ordered array and asserts that executing the
-    /// test will result in the expected final stack state.
-    #[cfg(not(target_family = "wasm"))]
-    #[track_caller]
-    pub fn expect_stack(&self, final_stack: &[u64]) {
-        let result = stack_outputs_as_int_vec(&self.get_last_stack_state());
-        let expected = resize_to_min_stack_depth(final_stack);
-        assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
-    }
-
-    /// Executes the test and validates that the process memory has the elements of `expected_mem`
-    /// at address `mem_start_addr` and that the end of the stack execution trace matches the
-    /// `final_stack`.
-    #[cfg(not(target_family = "wasm"))]
-    #[track_caller]
-    pub fn expect_stack_and_memory(
-        &self,
-        final_stack: &[u64],
-        mem_start_addr: u32,
-        expected_mem: &[u64],
-    ) {
-        // compile the program
-        let (program, host, _debug_info) = self.get_program_and_host();
-        let mut host = host.with_source_manager(self.source_manager.clone());
-
-        // execute the test
-        let processor = new_vm_default_processor(
-            self.stack_inputs,
-            self.advice_inputs.clone(),
-            ExecutionOptions::default(),
-        )
-        .expect("test processor should initialize with default precompiles");
-        let execution_output = processor.execute_sync(&program, &mut host).unwrap();
-
-        // validate the memory state
-        for (addr, mem_value) in ((mem_start_addr as usize)
-            ..(mem_start_addr as usize + expected_mem.len()))
-            .zip(expected_mem.iter())
-        {
-            let mem_state = execution_output
-                .memory
-                .read_element(ContextId::root(), Felt::from_u32(addr as u32))
-                .unwrap();
-            assert_eq!(
-                *mem_value,
-                mem_state.as_canonical_u64(),
-                "Expected memory [{}] => {:?}, found {:?}",
-                addr,
-                mem_value,
-                mem_state
-            );
-        }
-
-        // validate the stack state from the same execution as the memory assertions
-        let result = stack_outputs_as_int_vec(&execution_output.stack);
-        let expected = resize_to_min_stack_depth(final_stack);
-        assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
-    }
-
-    /// Asserts that executing the test inside a proptest results in the expected final stack state.
-    /// The proptest will return a test failure instead of panicking if the assertion condition
-    /// fails.
-    #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
-    pub fn prop_expect_stack(
-        &self,
-        final_stack: &[u64],
-    ) -> Result<(), proptest::prelude::TestCaseError> {
-        let result = stack_outputs_as_int_vec(&self.get_last_stack_state());
-        proptest::prop_assert_eq!(resize_to_min_stack_depth(final_stack), result);
-
-        Ok(())
-    }
-
-    /// Executes the test with the provided stack inputs and asserts the final stack state.
-    ///
-    /// This preserves the same execution coverage as [`expect_stack`](Self::expect_stack): traced
-    /// execution, step/resume execution comparison, and trace construction are all still run.
-    #[cfg(not(target_family = "wasm"))]
-    #[track_caller]
-    pub fn expect_stack_with_inputs(&self, stack_inputs: &[u64], final_stack: &[u64]) {
-        let trace = self
-            .execute_with_stack_inputs(stack_inputs)
-            .inspect_err(|_err| {
-                #[cfg(feature = "std")]
-                std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
-            })
-            .expect("failed to execute");
-
-        let result = stack_outputs_as_int_vec(&trace.last_stack_state());
-        let expected = resize_to_min_stack_depth(final_stack);
-        assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
-    }
-
-    // UTILITY METHODS
-    // --------------------------------------------------------------------------------------------
+    test_execution_methods!();
 
     /// Compiles a test's source and returns the resulting Program together with the associated
     /// kernel library (when specified).
@@ -557,32 +623,250 @@ impl Test {
         Ok(result)
     }
 
-    /// Compiles the test's source to a Program and executes it with the tests inputs. Returns a
-    /// resulting execution trace or error.
-    ///
-    /// Internally, this also checks that traced execution and step/resume execution agree on the
-    /// stack outputs.
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(feature = "std", not(target_family = "wasm")))]
+    fn compile_cache_key(&self) -> CompileCacheKey {
+        CompileCacheKey {
+            source_manager: Arc::as_ptr(&self.source_manager) as usize,
+            source: SourceCacheKey::from_source_file(self.source.as_ref()),
+            kernel_source: self.kernel_source.as_deref().map(SourceCacheKey::from_source_file),
+            add_modules: self
+                .add_modules
+                .iter()
+                .map(|(path, source)| (path.to_string(), source.clone()))
+                .collect(),
+            library_digests: self
+                .libraries
+                .iter()
+                .map(|library| library.dependency_commitment())
+                .collect(),
+        }
+    }
+}
+
+/// A test with explicit portable handler bindings shared by regular events and traces.
+///
+/// Source, inputs, libraries, and compilation are shared with [`Test`]. Its legacy fields and
+/// builders remain available for compatibility; portable handlers are stored separately here.
+pub struct EventTest {
+    test: Test,
+    pub handlers: Vec<(EventName, registration::EventHandler)>,
+}
+
+impl From<Test> for EventTest {
+    fn from(test: Test) -> Self {
+        Self { test, handlers: Vec::new() }
+    }
+}
+
+impl core::ops::Deref for EventTest {
+    type Target = Test;
+
+    fn deref(&self) -> &Test {
+        &self.test
+    }
+}
+
+impl core::ops::DerefMut for EventTest {
+    fn deref_mut(&mut self) -> &mut Test {
+        &mut self.test
+    }
+}
+
+impl EventTest {
+    /// Creates a test with no inputs or handler bindings.
+    pub fn new(name: &str, source: &str, in_tracing_mode: bool) -> Self {
+        Test::new(name, source, in_tracing_mode).into()
+    }
+
+    /// Adds one binding for either invocation kind.
+    pub fn with_handler(
+        mut self,
+        event: EventName,
+        handler: impl Into<registration::EventHandler>,
+    ) -> Self {
+        self.handlers.push((event, handler.into()));
+        self
+    }
+
+    /// Adds bindings for either invocation kind. Names are checked when execution builds the host.
+    pub fn with_handlers(
+        mut self,
+        handlers: impl IntoIterator<Item = (EventName, registration::EventHandler)>,
+    ) -> Self {
+        self.handlers.extend(handlers);
+        self
+    }
+
+    /// Replaces an existing binding, returning whether it was present.
+    pub fn replace_handler(
+        &mut self,
+        name: EventName,
+        handler: impl Into<registration::EventHandler>,
+    ) -> bool {
+        let Some((_, registered)) = self
+            .handlers
+            .iter_mut()
+            .find(|(registered_name, _)| registered_name.to_event_id() == name.to_event_id())
+        else {
+            return false;
+        };
+        *registered = handler.into();
+        true
+    }
+
+    /// Adds kernel source while retaining portable bindings.
     #[track_caller]
-    pub fn execute(&self) -> Result<VmTrace, ExecutionError> {
+    pub fn with_kernel(mut self, kernel_source: impl ToString) -> Self {
+        self.test = self.test.with_kernel(kernel_source);
+        self
+    }
+
+    /// Adds named kernel source while retaining portable bindings.
+    pub fn with_kernel_source(
+        mut self,
+        kernel_name: impl Into<String>,
+        kernel_source: impl ToString,
+    ) -> Self {
+        self.test = self.test.with_kernel_source(kernel_name, kernel_source);
+        self
+    }
+
+    /// Sets stack-ordered inputs while retaining portable bindings.
+    #[track_caller]
+    pub fn with_stack_inputs(mut self, stack_inputs: impl AsRef<[u64]>) -> Self {
+        self.test = self.test.with_stack_inputs(stack_inputs);
+        self
+    }
+
+    /// Adds a library to link during assembly.
+    pub fn with_library(mut self, package: Arc<Package>) -> Self {
+        self.test = self.test.with_library(package);
+        self
+    }
+
+    /// Adds an extra module to link during assembly.
+    pub fn with_module(mut self, path: impl AsRef<Path>, source: impl ToString) -> Self {
+        self.test = self.test.with_module(path, source);
+        self
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    fn run(&self) -> TestRun<'_> {
+        TestRun {
+            test: &self.test,
+            handlers: &self.handlers,
+        }
+    }
+
+    test_execution_methods!();
+}
+
+#[cfg(not(target_family = "wasm"))]
+struct TestRun<'a> {
+    test: &'a Test,
+    handlers: &'a [(EventName, registration::EventHandler)],
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl core::ops::Deref for TestRun<'_> {
+    type Target = Test;
+
+    fn deref(&self) -> &Test {
+        self.test
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl TestRun<'_> {
+    #[track_caller]
+    fn expect_stack(&self, final_stack: &[u64]) {
+        let result = stack_outputs_as_int_vec(&self.get_last_stack_state());
+        let expected = resize_to_min_stack_depth(final_stack);
+        assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
+    }
+
+    #[track_caller]
+    fn expect_stack_and_memory(
+        &self,
+        final_stack: &[u64],
+        mem_start_addr: u32,
+        expected_mem: &[u64],
+    ) {
+        // compile the program
+        let (program, host, _debug_info) = self.get_program_and_host();
+        let mut host = host.with_source_manager(self.source_manager.clone());
+
+        // execute the test
+        let processor = new_vm_default_processor(
+            self.stack_inputs,
+            self.advice_inputs.clone(),
+            ExecutionOptions::default(),
+        )
+        .expect("test processor should initialize with default precompiles");
+        let execution_output = processor.execute_sync(&program, &mut host).unwrap();
+
+        // validate the memory state
+        for (addr, mem_value) in ((mem_start_addr as usize)
+            ..(mem_start_addr as usize + expected_mem.len()))
+            .zip(expected_mem.iter())
+        {
+            let mem_state = execution_output
+                .memory
+                .read_element(ContextId::root(), Felt::from_u32(addr as u32))
+                .unwrap();
+            assert_eq!(
+                *mem_value,
+                mem_state.as_canonical_u64(),
+                "Expected memory [{}] => {:?}, found {:?}",
+                addr,
+                mem_value,
+                mem_state
+            );
+        }
+
+        // validate the stack state from the same execution as the memory assertions
+        let result = stack_outputs_as_int_vec(&execution_output.stack);
+        let expected = resize_to_min_stack_depth(final_stack);
+        assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
+    }
+
+    #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
+    fn prop_expect_stack(
+        &self,
+        final_stack: &[u64],
+    ) -> Result<(), proptest::prelude::TestCaseError> {
+        let result = stack_outputs_as_int_vec(&self.get_last_stack_state());
+        proptest::prop_assert_eq!(resize_to_min_stack_depth(final_stack), result);
+
+        Ok(())
+    }
+
+    #[track_caller]
+    fn expect_stack_with_inputs(&self, stack_inputs: &[u64], final_stack: &[u64]) {
+        let trace = self
+            .execute_with_stack_inputs(stack_inputs)
+            .inspect_err(|_err| {
+                #[cfg(feature = "std")]
+                std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
+            })
+            .expect("failed to execute");
+
+        let result = stack_outputs_as_int_vec(&trace.last_stack_state());
+        let expected = resize_to_min_stack_depth(final_stack);
+        assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
+    }
+
+    #[track_caller]
+    fn execute(&self) -> Result<VmTrace, ExecutionError> {
         self.execute_with_stack_inputs_inner(self.stack_inputs)
     }
 
-    /// Compiles the test's source and executes it with the provided stack inputs.
-    ///
-    /// This uses the same traced execution, step/resume comparison, and trace construction path as
-    /// [`execute`](Self::execute).
-    #[cfg(not(target_family = "wasm"))]
     #[track_caller]
-    pub fn execute_with_stack_inputs(
-        &self,
-        stack_inputs: &[u64],
-    ) -> Result<VmTrace, ExecutionError> {
+    fn execute_with_stack_inputs(&self, stack_inputs: &[u64]) -> Result<VmTrace, ExecutionError> {
         let stack_inputs = stack_inputs_from_ints(stack_inputs.iter().copied());
         self.execute_with_stack_inputs_inner(stack_inputs)
     }
 
-    #[cfg(not(target_family = "wasm"))]
     #[track_caller]
     fn execute_with_stack_inputs_inner(
         &self,
@@ -626,11 +910,7 @@ impl Test {
         })
     }
 
-    /// Compiles the test's source to a Program and executes it with the tests inputs.
-    ///
-    /// Returns the [`ExecutionOutput`] once execution is finished.
-    #[cfg(not(target_family = "wasm"))]
-    pub fn execute_for_output(&self) -> Result<(ExecutionOutput, DefaultHost), ExecutionError> {
+    fn execute_for_output(&self) -> Result<(ExecutionOutput, DefaultHost), ExecutionError> {
         let (program, host, debug_info) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
@@ -650,15 +930,7 @@ impl Test {
         }
     }
 
-    /// Compiles the test's code into a program, then generates and verifies a STARK proof of
-    /// execution. When `test_fail` is true, forces a failure by modifying the first output.
-    ///
-    /// Prefer [`check_constraints`](Self::check_constraints) for constraint validation — it is
-    /// much faster and provides better error diagnostics. Use this method only when you need to
-    /// exercise the full STARK prove/verify pipeline (e.g., testing proof serialization,
-    /// verifier logic, or precompile request handling).
-    #[cfg(not(target_family = "wasm"))]
-    pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
+    fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
         let (program, mut host, debug_info) = self.get_program_and_host();
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
         let stack_inputs = stack_inputs_from_ints(pub_inputs);
@@ -701,20 +973,8 @@ impl Test {
         }
     }
 
-    /// Executes the test program and checks all AIR constraints without generating a STARK proof.
-    ///
-    /// This is the recommended way to validate constraints in tests. It delegates to
-    /// [`VmTrace::check_constraints`], which is much faster than the
-    /// full prove/verify pipeline and provides better error diagnostics. Use
-    /// [`prove_and_verify`](Self::prove_and_verify) only when you need to exercise the
-    /// complete STARK proof generation and verification flow.
-    ///
-    /// # Panics
-    ///
-    /// Panics if execution fails or if any AIR constraint evaluates to nonzero on any row.
-    #[cfg(not(target_family = "wasm"))]
     #[track_caller]
-    pub fn check_constraints(&self) {
+    fn check_constraints(&self) {
         let trace = self
             .execute()
             .inspect_err(|_err| {
@@ -725,10 +985,8 @@ impl Test {
         trace.check_constraints();
     }
 
-    /// Returns the last state of the stack after executing a test.
-    #[cfg(not(target_family = "wasm"))]
     #[track_caller]
-    pub fn get_last_stack_state(&self) -> StackOutputs {
+    fn get_last_stack_state(&self) -> StackOutputs {
         let trace = self
             .execute()
             .inspect_err(|_err| {
@@ -743,11 +1001,7 @@ impl Test {
     // HELPERS
     // ------------------------------------------------------------------------------------------
 
-    /// Returns the program and host for the test.
-    ///
-    /// The host is initialized with the advice inputs provided in the test, as well as the kernel
-    /// and library MAST forests.
-    #[cfg(not(target_family = "wasm"))]
+    #[allow(deprecated)] // Compatibility storage or builder.
     fn get_program_and_host(&self) -> (Program, DefaultHost, Option<PackageDebugInfo>) {
         let (program, kernel, debug_info) = self.compile().expect("Failed to compile test source.");
         let mut host = DefaultHost::default();
@@ -757,10 +1011,11 @@ impl Test {
         for library in &self.libraries {
             host.load_library(library.mast_forest()).unwrap();
         }
-        for (event, handler) in &self.handlers {
-            host.register_handler(event.clone(), handler.clone()).unwrap_or_else(|err| {
-                panic!("Failed to register handler for event '{}': {err}", event.as_str())
-            });
+        for (event, handler) in &self.test.handlers {
+            host.register_legacy_handler(event.clone(), handler.clone())
+                .unwrap_or_else(|err| {
+                    panic!("Failed to register handler for event '{}': {err}", event.as_str())
+                });
         }
         for (event, handler) in &self.trace_handlers {
             host.register_trace_handler(event.clone(), handler.clone())
@@ -768,11 +1023,15 @@ impl Test {
                     panic!("Failed to register trace handler for event '{}': {err}", event.as_str())
                 });
         }
+        for (event, handler) in self.handlers {
+            host.register_handler(event.clone(), handler.clone()).unwrap_or_else(|err| {
+                panic!("Failed to register handler for event '{}': {err}", event.as_str())
+            });
+        }
 
         (program, host, debug_info)
     }
 
-    #[cfg(not(target_family = "wasm"))]
     fn assert_result_with_step_execution(
         &self,
         stack_inputs: StackInputs,
@@ -852,29 +1111,9 @@ impl Test {
             compare_error_diagnostics,
         );
     }
-
-    #[cfg(all(feature = "std", not(target_family = "wasm")))]
-    fn compile_cache_key(&self) -> CompileCacheKey {
-        CompileCacheKey {
-            source_manager: Arc::as_ptr(&self.source_manager) as usize,
-            source: SourceCacheKey::from_source_file(self.source.as_ref()),
-            kernel_source: self.kernel_source.as_deref().map(SourceCacheKey::from_source_file),
-            add_modules: self
-                .add_modules
-                .iter()
-                .map(|(path, source)| (path.to_string(), source.clone()))
-                .collect(),
-            library_digests: self
-                .libraries
-                .iter()
-                .map(|library| library.dependency_commitment())
-                .collect(),
-        }
-    }
 }
 
 #[cfg(all(test, feature = "std", not(target_family = "wasm")))]
-#[allow(deprecated)] // Tests exercise the supported legacy harness callbacks.
 mod tests {
     use std::{
         panic::{AssertUnwindSafe, catch_unwind},
@@ -884,7 +1123,10 @@ mod tests {
         },
     };
 
+    use miden_event_handler::{AdviceRecorder, EventContext, InvocationKind};
+    #[allow(deprecated)] // Retained legacy handler regression.
     use miden_processor::{advice::AdviceMutation, event::EventError};
+    use pretty_assertions::assert_eq;
 
     use super::*;
 
@@ -931,7 +1173,8 @@ mod tests {
     }
 
     #[test]
-    fn expect_stack_and_memory_executes_once() {
+    #[allow(deprecated)] // Verify the retained legacy builder and callback behavior.
+    fn legacy_expect_stack_and_memory_executes_once() {
         const EVENT_NAME: EventName = EventName::new("test::expect_stack_and_memory::once");
 
         let invocations = Arc::new(AtomicUsize::new(0));
@@ -955,6 +1198,76 @@ mod tests {
             .expect_stack_and_memory(&[], 1000, &[42]);
 
         core::assert_eq!(1, invocations.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn portable_bindings_reach_output_and_traced_execution() {
+        const EVENT: EventName = EventName::new("test::portable");
+        let source = alloc::format!(
+            "begin emit.event(\"{EVENT}\") adv_push trace.event(\"{EVENT}\") swap drop end"
+        );
+        let trace_calls = Arc::new(AtomicUsize::new(0));
+        let handler_trace_calls = trace_calls.clone();
+        let handler = move |context: EventContext<'_>, advice: &mut AdviceRecorder<'_>| {
+            match context.kind() {
+                InvocationKind::Event => advice.prepend_stack([Felt::from_u32(42)]),
+                InvocationKind::Trace => {
+                    assert_eq!(context.stack_item(0), Felt::from_u32(42));
+                    handler_trace_calls.fetch_add(1, Ordering::SeqCst);
+                },
+            }
+            Ok(())
+        };
+        let mut test = Test::new("main", &source, true)
+            .with_handler(EVENT, handler)
+            .with_stack_inputs([]);
+        test.expect_stack(&[42]);
+        test.expect_stack_with_inputs(&[], &[42]);
+        assert_eq!(
+            test.execute_for_output().unwrap().0.stack.get_element(0),
+            Some(Felt::from_u32(42))
+        );
+        // Each traced assertion also checks step/resume execution; output executes once.
+        assert_eq!(trace_calls.load(Ordering::SeqCst), 5);
+
+        // Replacement must affect both complete execution and the step/resume comparison.
+        assert!(test.replace_handler(
+            EVENT,
+            |context: EventContext<'_>, advice: &mut AdviceRecorder<'_>| {
+                if context.kind() == InvocationKind::Event {
+                    advice.prepend_stack([Felt::from_u32(7)]);
+                }
+                Ok(())
+            }
+        ));
+        test.expect_stack(&[7]);
+    }
+
+    #[test]
+    #[allow(deprecated)] // Verify both old public fields and independent legacy registries.
+    fn legacy_fields_keep_event_and_trace_bindings_separate() {
+        const EVENT: EventName = EventName::new("test::legacy");
+        let source = alloc::format!("begin emit.event(\"{EVENT}\") trace.event(\"{EVENT}\") end");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let trace_calls = calls.clone();
+        let mut test = Test::new("main", &source, true).with_trace_handler(
+            EVENT,
+            move |process: &ProcessorState| {
+                assert_eq!(process.get_stack_item(1), EVENT.to_event_id().as_felt());
+                trace_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        );
+        test.handlers.push((
+            EVENT,
+            Arc::new(|process: &ProcessorState| {
+                assert_eq!(process.get_stack_item(0), EVENT.to_event_id().as_felt());
+                Ok(Vec::new())
+            }),
+        ));
+        assert_eq!(test.trace_handlers.len(), 1);
+        test.execute_for_output().unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }
 
@@ -994,6 +1307,7 @@ pub fn stack_inputs_from_ints(values: impl IntoIterator<Item = u64>) -> StackInp
     StackInputs::new(&values).expect("stack inputs should fit the VM stack")
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn stack_outputs_as_int_vec(outputs: &StackOutputs) -> Vec<u64> {
     outputs.iter().map(Felt::as_canonical_u64).collect()
 }
