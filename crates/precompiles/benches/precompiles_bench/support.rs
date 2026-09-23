@@ -92,9 +92,8 @@ begin
         exec.ecdsa_p256_sha256::verify
     end
 
-    # SHA-256 fixtures write their own message bytes to a fixed scratch buffer; the digest is
-    # supplied by the precompile's event handler, which hashes real memory, not advice-supplied
-    # data.
+    # SHA-256 fixtures pipe their message bytes from advice into a fixed scratch buffer; the
+    # precompile's event handler supplies the digest by hashing that buffer.
     repeat.{sha256_64bs}
         push.{sha256_64b_ptr}
         repeat.2
