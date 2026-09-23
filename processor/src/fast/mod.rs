@@ -23,10 +23,11 @@ use miden_mast_package::{
     debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
 
-#[allow(deprecated)] // Raw inspection and the legacy callback bridge.
+#[allow(deprecated)] // Raw state inspection remains available through FastProcessor::state.
+use crate::ProcessorState;
 use crate::{
     AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, LoadedMastForest,
-    MemoryAddress, ProcessorState,
+    MemoryAddress,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
@@ -499,6 +500,24 @@ impl FastProcessor {
     #[inline(always)]
     pub fn stack_depth(&self) -> u32 {
         (self.stack_top_idx - self.stack_bot_idx) as u32
+    }
+
+    /// Returns the current execution context ID.
+    #[inline(always)]
+    pub fn ctx(&self) -> ContextId {
+        self.ctx
+    }
+
+    /// Returns the current clock cycle.
+    #[inline(always)]
+    pub fn clock(&self) -> RowIndex {
+        self.clk
+    }
+
+    /// Returns a reference to the advice provider.
+    #[inline(always)]
+    pub fn advice_provider(&self) -> &AdviceProvider {
+        &self.advice
     }
 
     /// Returns a reference to the processor's memory.

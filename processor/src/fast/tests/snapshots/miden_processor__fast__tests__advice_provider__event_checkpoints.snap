@@ -6,7 +6,7 @@ expression: fast_host.snapshots()
     0: [
         ProcessorStateSnapshot {
             clk: 10,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 0,
                 0,
@@ -56,7 +56,7 @@ expression: fast_host.snapshots()
     1: [
         ProcessorStateSnapshot {
             clk: 17,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 0,
                 0,
@@ -104,7 +104,7 @@ expression: fast_host.snapshots()
         },
         ProcessorStateSnapshot {
             clk: 33,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 0,
                 0,
@@ -154,7 +154,7 @@ expression: fast_host.snapshots()
     2: [
         ProcessorStateSnapshot {
             clk: 49,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 0,
                 0,
@@ -204,7 +204,7 @@ expression: fast_host.snapshots()
     3: [
         ProcessorStateSnapshot {
             clk: 69,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 0,
                 0,
@@ -254,7 +254,7 @@ expression: fast_host.snapshots()
     4: [
         ProcessorStateSnapshot {
             clk: 92,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 0,
                 0,
@@ -304,7 +304,7 @@ expression: fast_host.snapshots()
     5: [
         ProcessorStateSnapshot {
             clk: 122,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 7,
                 6,
@@ -362,7 +362,7 @@ expression: fast_host.snapshots()
     6: [
         ProcessorStateSnapshot {
             clk: 143,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 6,
                 5,
@@ -427,7 +427,7 @@ expression: fast_host.snapshots()
     7: [
         ProcessorStateSnapshot {
             clk: 156,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 5,
                 4,
@@ -483,7 +483,7 @@ expression: fast_host.snapshots()
     8: [
         ProcessorStateSnapshot {
             clk: 169,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 5,
                 4,
@@ -563,7 +563,7 @@ expression: fast_host.snapshots()
     9: [
         ProcessorStateSnapshot {
             clk: 176,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 5,
                 4,
@@ -643,7 +643,7 @@ expression: fast_host.snapshots()
     10: [
         ProcessorStateSnapshot {
             clk: 179,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 5,
                 4,
@@ -723,7 +723,7 @@ expression: fast_host.snapshots()
     11: [
         ProcessorStateSnapshot {
             clk: 191,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 5,
                 4,
@@ -819,7 +819,7 @@ expression: fast_host.snapshots()
         },
         ProcessorStateSnapshot {
             clk: 258,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 5,
                 4,
@@ -965,7 +965,7 @@ expression: fast_host.snapshots()
     12: [
         ProcessorStateSnapshot {
             clk: 202,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 5,
                 4,
@@ -1069,7 +1069,7 @@ expression: fast_host.snapshots()
     13: [
         ProcessorStateSnapshot {
             clk: 234,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 5,
                 4,
@@ -1197,7 +1197,7 @@ expression: fast_host.snapshots()
     14: [
         ProcessorStateSnapshot {
             clk: 271,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 5,
                 4,
@@ -1349,7 +1349,7 @@ expression: fast_host.snapshots()
     15: [
         ProcessorStateSnapshot {
             clk: 303,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 5,
                 4,
@@ -1501,7 +1501,7 @@ expression: fast_host.snapshots()
     16: [
         ProcessorStateSnapshot {
             clk: 313,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 1,
                 5,
@@ -1654,7 +1654,7 @@ expression: fast_host.snapshots()
     17: [
         ProcessorStateSnapshot {
             clk: 321,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 5,
                 4,
@@ -1806,7 +1806,7 @@ expression: fast_host.snapshots()
     18: [
         ProcessorStateSnapshot {
             clk: 330,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 0,
                 5,
@@ -1959,7 +1959,7 @@ expression: fast_host.snapshots()
     19: [
         ProcessorStateSnapshot {
             clk: 338,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 5,
                 4,
@@ -2111,7 +2111,7 @@ expression: fast_host.snapshots()
     20: [
         ProcessorStateSnapshot {
             clk: 355,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 3,
                 5,
@@ -2262,7 +2262,7 @@ expression: fast_host.snapshots()
         },
         ProcessorStateSnapshot {
             clk: 367,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 2,
                 5,
@@ -2413,7 +2413,7 @@ expression: fast_host.snapshots()
         },
         ProcessorStateSnapshot {
             clk: 379,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 1,
                 5,
@@ -2566,7 +2566,7 @@ expression: fast_host.snapshots()
     21: [
         ProcessorStateSnapshot {
             clk: 393,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 0,
                 5,
@@ -2719,7 +2719,7 @@ expression: fast_host.snapshots()
     22: [
         ProcessorStateSnapshot {
             clk: 475,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 0,
                 5,
@@ -2889,7 +2889,7 @@ expression: fast_host.snapshots()
     100: [
         ProcessorStateSnapshot {
             clk: 225,
-            ctx: 219,
+            in_root_context: false,
             stack_state: [
                 5,
                 4,
@@ -2963,7 +2963,7 @@ expression: fast_host.snapshots()
     101: [
         ProcessorStateSnapshot {
             clk: 294,
-            ctx: 0,
+            in_root_context: true,
             stack_state: [
                 5,
                 4,
