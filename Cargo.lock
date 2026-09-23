@@ -2321,6 +2321,7 @@ dependencies = [
  "miden-crypto",
  "miden-precompiles",
  "miden-processor",
+ "p256",
  "wycheproof-ng-core",
  "wycheproof-ng-dh",
  "wycheproof-ng-ecdsa",
@@ -2829,6 +2830,7 @@ dependencies = [
  "miden-core-lib",
  "miden-crypto",
  "miden-vm",
+ "p256",
  "rand_chacha 0.10.0",
 ]
 
