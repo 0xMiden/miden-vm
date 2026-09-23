@@ -1,79 +1,46 @@
-// Raw snapshots preserve numeric context IDs and test the old callback bridge.
-#![allow(deprecated)]
-
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use miden_core::Felt;
 use miden_debug_types::{
     DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
 };
+use miden_event_handler::{AdviceRecorder, EventContext, InvocationKind};
 
+#[allow(deprecated)] // Retained public conversion from the deprecated raw state view.
+use crate::ProcessorState;
 use crate::{
-    BaseHost, LoadedMastForest, MastForestStore, MemMastForestStore, ProcessorState, SyncHost,
-    Word,
-    advice::AdviceMutation,
-    event::{EventError, TraceError},
-    mast::MastForest,
+    BaseHost, LoadedMastForest, MastForestStore, MemMastForestStore, SyncHost, Word,
+    event::EventError, mast::MastForest,
 };
 
 /// A snapshot of the processor state for consistency checking between processors.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessorStateSnapshot {
     clk: u32,
-    ctx: u32,
+    in_root_context: bool,
     stack_state: Vec<Felt>,
     mem_state: Vec<(crate::MemoryAddress, Felt)>,
 }
 
+#[allow(deprecated)] // Retained public conversion from the deprecated raw state view.
 impl From<&ProcessorState<'_>> for ProcessorStateSnapshot {
     fn from(state: &ProcessorState) -> Self {
         ProcessorStateSnapshot {
             clk: state.clock().into(),
-            ctx: state.ctx().into(),
+            in_root_context: state.ctx() == crate::ContextId::root(),
             stack_state: state.get_stack_state(),
             mem_state: state.get_mem_state(state.ctx()),
         }
     }
 }
 
-impl ProcessorStateSnapshot {
-    /// Captures the user-visible state at an `emit` checkpoint.
-    ///
-    /// The checkpoint pattern used by tests is `push.<event> emit drop`, so the host observes the
-    /// event ID at the top of the stack. The checkpoint snapshot skips that synthetic stack item to
-    /// match the state after the trailing `drop`, and to preserve the old trace-decorator test
-    /// shape.
-    fn from_emit_checkpoint(state: &ProcessorState) -> Self {
-        let mut stack_state = state.get_stack_state();
-        if !stack_state.is_empty() {
-            stack_state.remove(0);
-        }
-
-        ProcessorStateSnapshot {
-            clk: state.clock().into(),
-            ctx: state.ctx().into(),
-            stack_state,
-            mem_state: state.get_mem_state(state.ctx()),
-        }
-    }
-
-    /// Captures the user-visible state at a trace checkpoint.
-    ///
-    /// The checkpoint pattern used by tests is `push.<trace_id> push.<sys::trace_event> emit drop
-    /// drop`, so the host observes the `SystemEvent::TraceEvent` id at the top of the stack  and
-    /// the trace id below it (position 1). The checkpoint snapshot skips both synthetic stack items
-    /// to match the state after the trailing `drop drop`.
-    fn from_trace_checkpoint(state: &ProcessorState) -> Self {
-        let mut stack_state = state.get_stack_state();
-        if stack_state.len() >= 2 {
-            stack_state.drain(0..2);
-        }
-
-        ProcessorStateSnapshot {
-            clk: state.clock().into(),
-            ctx: state.ctx().into(),
-            stack_state,
-            mem_state: state.get_mem_state(state.ctx()),
+impl From<EventContext<'_>> for ProcessorStateSnapshot {
+    fn from(context: EventContext<'_>) -> Self {
+        Self {
+            clk: context.clock(),
+            in_root_context: context.in_root_context(),
+            stack_state: context.stack_snapshot(),
+            mem_state: context.memory_snapshot(),
         }
     }
 }
@@ -167,23 +134,18 @@ where
         self.store.get(node_digest)
     }
 
-    fn on_event(&mut self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let event_id = process.get_stack_item(0).as_canonical_u64();
-        self.event_handler.push(event_id);
-        self.snapshots
-            .entry(event_id)
-            .or_default()
-            .push(ProcessorStateSnapshot::from_emit_checkpoint(process));
-        Ok(Vec::new())
-    }
-
-    fn on_trace(&mut self, process: &ProcessorState) -> Result<(), TraceError> {
-        let trace_id = process.get_stack_item(1).as_canonical_u64();
-        self.trace_handler.push(trace_id);
-        self.trace_snapshots
-            .entry(trace_id)
-            .or_default()
-            .push(ProcessorStateSnapshot::from_trace_checkpoint(process));
+    fn handle_event(
+        &mut self,
+        context: EventContext<'_>,
+        _advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
+        let id = context.id().as_u64();
+        let (handler, snapshots) = match context.kind() {
+            InvocationKind::Event => (&mut self.event_handler, &mut self.snapshots),
+            InvocationKind::Trace => (&mut self.trace_handler, &mut self.trace_snapshots),
+        };
+        handler.push(id);
+        snapshots.entry(id).or_default().push(context.into());
         Ok(())
     }
 }

@@ -1,7 +1,7 @@
 use core::ops::ControlFlow;
 
 use miden_core::events::{EventId, SystemEvent};
-use miden_event_handler::{AdviceBatch, InvocationKind};
+use miden_event_handler::{AdviceBatch, EventContext, Invocation, InvocationKind};
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
@@ -14,10 +14,7 @@ use crate::{
     },
     event::EventError,
     fast::{BreakReason, FastProcessor},
-    host::{
-        LegacyHostFallback,
-        handlers::{event_context, record_mutations},
-    },
+    host::{LegacyHostFallback, handlers::record_mutations},
 };
 
 mod deferred_handlers;
@@ -128,8 +125,15 @@ impl FastProcessor {
             },
             None => InvocationKind::Event,
         };
-        let state = self.state();
-        let context = event_context(&state, kind);
+        let clock = self.clock().as_u32();
+        let in_root_context = self.ctx() == crate::ContextId::root();
+        let invocation = match kind {
+            InvocationKind::Event => Invocation::event(raw_id, clock, in_root_context),
+            InvocationKind::Trace => {
+                Invocation::trace(EventId::from_felt(self.stack_get(1)), clock, in_root_context)
+            },
+        };
+        let context = EventContext::new(self, invocation);
         let event_id = context.id();
         let mut batch = AdviceBatch::new();
         let mut result = host.handle_event(context, &mut batch.recorder());
@@ -137,6 +141,7 @@ impl FastProcessor {
         // advice staged by a callback that requested fallback after recording output.
         if batch.is_empty() && result.as_ref().is_err_and(|error| error.is::<LegacyHostFallback>())
         {
+            let state = self.state();
             result = match kind {
                 InvocationKind::Event => host
                     .on_event(&state)
@@ -182,8 +187,15 @@ impl FastProcessor {
             },
             None => InvocationKind::Event,
         };
-        let state = self.state();
-        let context = event_context(&state, kind);
+        let clock = self.clock().as_u32();
+        let in_root_context = self.ctx() == crate::ContextId::root();
+        let invocation = match kind {
+            InvocationKind::Event => Invocation::event(raw_id, clock, in_root_context),
+            InvocationKind::Trace => {
+                Invocation::trace(EventId::from_felt(self.stack_get(1)), clock, in_root_context)
+            },
+        };
+        let context = EventContext::new(self, invocation);
         let event_id = context.id();
         let mut batch = AdviceBatch::new();
         let mut result = host.handle_event(context, &mut batch.recorder()).await;
@@ -191,6 +203,7 @@ impl FastProcessor {
         // advice staged by a callback that requested fallback after recording output.
         if batch.is_empty() && result.as_ref().is_err_and(|error| error.is::<LegacyHostFallback>())
         {
+            let state = self.state();
             result = match kind {
                 InvocationKind::Event => host
                     .on_event(&state)
