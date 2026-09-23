@@ -274,6 +274,23 @@ fn build_forged_early_iteration_trace() -> ForgedLoopTrace {
 }
 
 #[test]
+fn honest_repeated_loop_verifies() {
+    let program = build_loop_program(vec![Operation::Not, Operation::Not]);
+    let trace = execute(&program, &[1, 1, 0]);
+    let main = trace.main_trace();
+    assert!(
+        (0..main.core_height())
+            .any(|row| main.get_op_code(RowIndex::from(row)) == Felt::from_u8(opcodes::REPEAT)),
+        "fixture must execute REPEAT"
+    );
+
+    let outcome = ReproTrace::new(&trace)
+        .prove_and_verify_current()
+        .expect("honest loop must verify");
+    assert!(outcome.is_complete(), "honest loop proof must verify completely");
+}
+
+#[test]
 fn forged_early_loop_iteration_body_is_rejected() {
     let forged = build_forged_early_iteration_trace();
 

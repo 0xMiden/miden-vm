@@ -459,22 +459,19 @@ When the VM executes a `HALT` operation, it does the following:
 
 #### REPEAT operation
 
-Before a `REPEAT` operation is executed by the VM, it must immediately follow an
-`END` operation, which copies values in registers $h_0, ..., h_4$ to the next row
-as shown in the diagram below.
+`REPEAT` immediately follows an `END` whose $h_4$ identifies the completed node as a loop body.
+The processor fills the `REPEAT` row with the body hash and flag as shown below. The decoder AIR
+checks the preceding `END` flag; it does not require the helper values to be copied.
 
 ![decoder_repeat_operation](../../img/design/decoder/decoder_repeat_operation.png)
 
 In the above diagram, `blk` is the ID of the loop's body and `prnt` is the ID of the loop.
 
-When the VM executes a `REPEAT` operation, it does the following:
-
-1. Checks whether register $h_4$ is set to $1$. If it isn't (i.e., we are not in a loop), the execution fails.
-2. Pops the stack. If the popped value is not $1$, the execution fails.
+The `REPEAT` operation pops a loop condition of $1$ from the operand stack.
 
 `REPEAT` does not add anything to the block hash table: the `LOOP` row's weighted body-hash entry
 already covers every iteration. The next iteration's `END` must therefore remove a digest that
-`LOOP` committed to; `REPEAT` cannot supply a substitute from the digest carried on its own row.
+`LOOP` committed to; `REPEAT` cannot supply a substitute from its helper registers.
 
 #### RESPAN operation
 

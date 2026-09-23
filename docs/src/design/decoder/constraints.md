@@ -56,27 +56,25 @@ When a `DYN` operation is executed, the second half of the hasher registers
 > f_{dyn} \cdot h_i = 0 \text { for } i \in [4, 8) \text{ | degree} = 6
 > $$
 
-When `REPEAT` operation is executed, the value at the top of the operand stack must be $1$:
+A `REPEAT` operation requires $1$ at the top of the operand stack:
 
 > $$
 > f_{repeat} \cdot (1 - s_0) = 0 \text{ | degree} = 5
 > $$
 
-Also, when `REPEAT` operation is executed, the value in $h_4$ column (the `is_loop_body` flag), must be set to $1$. This ensures that `REPEAT` operation can be executed only inside a loop:
+On each transition, `REPEAT` must follow an `END` whose $h_4$ marks the completed node as a loop
+body. The block-hash relation authenticates this flag on the `END` row:
 
 > $$
-> f_{repeat} \cdot (1 - h_4) = 0 \text{ | degree} = 5
+> f_{repeat}' \cdot (1 - f_{end} \cdot h_4) = 0 \text{ | degree} = 9
 > $$
 
-On each transition, `REPEAT` must follow `END`, and `LOOP` cannot jump directly to
-`END` and skip its body:
+`LOOP` cannot transition directly to `END`; that would skip the body if its body-hash
+multiplicity were zero:
 
 > $$
-> f_{repeat}' \cdot (1 - f_{end}) + f_{loop} \cdot f_{end}' = 0
+> f_{loop} \cdot f_{end}' = 0 \text{ | degree} = 9
 > $$
-
-Over any field of characteristic other than 2, the boolean products can sum to zero only when
-both are zero.
 
 The first row has no predecessor, so it cannot be a `REPEAT` operation:
 
@@ -94,12 +92,6 @@ When `END` operation is executed and we are exiting a *loop* block (i.e., `is_lo
 
 > $$
 > f_{end} \cdot h_5 \cdot s_0 = 0 \text{ | degree} = 6
-> $$
-
-Also, when `END` operation is executed and the next operation is `REPEAT`, values in $h_0, ..., h_4$ (the hash of the current block and the `is_loop_body` flag) must be copied to the next row:
-
-> $$
-> f_{end} \cdot f_{repeat}' \cdot (h_i' - h_i) = 0 \text { for } i \in [0, 5) \text{ | degree} = 9
 > $$
 
 A `HALT` instruction can be followed only by another `HALT` instruction:
@@ -124,26 +116,25 @@ We also use two extra columns ($e_0$, $e_1$) for degree reduction in the operati
 flag computation:
 
 > $$
-> e_0 - b_6 \cdot (1 - b_5) \cdot b_4 = 0 \text{ | degree} = 4
+> e_0 - b_6 \cdot (1 - b_5) \cdot b_4 = 0 \text{ | degree} = 3
 > $$
 
 > $$
-> e_1 - b_6 \cdot b_5 = 0 \text{ | degree} = 3
+> e_1 - b_6 \cdot b_5 = 0 \text{ | degree} = 2
 > $$
 
-Finally, we enforce opcode-prefix constraints needed for flag construction. These eliminate
-unused opcode prefixes so that only valid op-code prefixes are allowed:
+Since $e_0$ selects prefix `101`, $b_6 - e_0$ selects prefixes `100` and `11`. The two terms below
+select disjoint opcode groups: the first forces $b_0 = 0$ for prefixes `100` and `11`, and the
+second rejects opcode $95$ under prefix `101`:
 
 > $$
-> b_6 \cdot (1 - b_5) \cdot (1 - b_4) \cdot b_0 = 0 \text{ | degree} = 4
+> (b_6 - e_0 + e_0 \cdot b_3 \cdot b_2 \cdot b_1) \cdot b_0 = 0 \text{ | degree} = 5
 > $$
 
-> $$
-> b_6 \cdot b_5 \cdot b_0 = 0 \text{ | degree} = 3
-> $$
+Prefix `11` also requires $b_1 = 0$:
 
 > $$
-> b_6 \cdot b_5 \cdot b_1 = 0 \text{ | degree} = 3
+> e_1 \cdot b_1 = 0 \text{ | degree} = 2
 > $$
 
 When the value in `in_span` column is set to $1$, control flow operations cannot be executed on the VM, but when `in_span` flag is $0$, only control flow operations can be executed on the VM:
@@ -484,7 +475,7 @@ $$
 L_{loop} = \frac{gc \cdot f_{loop}}{d(a', h_0..h_3, 0, 1)}.
 $$
 
-`REPEAT` does not add anything to the block hash table. Were it to add the digest carried on its
+`REPEAT` does not add anything to the block hash table. Were it to add the digest supplied on its
 own row, a forged body `END` could be cancelled by the `REPEAT` that follows it, and the loop body
 executed by an iteration would no longer have to be the body that `LOOP` committed to.
 

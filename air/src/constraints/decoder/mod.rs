@@ -8,7 +8,7 @@
 //! 1. **In-span constraints**: Ensure the in-span flag transitions correctly.
 //! 2. **Op-bit binary constraints**: Ensure operation bits are binary.
 //! 3. **Extra columns (e0, e1)**: Degree-reduction columns for operation flag computation.
-//! 4. **Opcode-bit group constraints**: Eliminate unused opcode prefixes.
+//! 4. **Opcode-bit group constraints**: Reject unused encodings in the upper prefix groups.
 //! 5. **General opcode-semantic constraints**: Per-operation invariants (SPLIT/LOOP, DYN, REPEAT,
 //!    END, HALT).
 //! 6. **Group count constraints**: Group-count transitions inside basic blocks.
@@ -178,10 +178,8 @@ pub fn enforce_main<AB>(
     // =============================================
     // Extra columns (e0, e1) — degree reduction
     // =============================================
-    // Without these columns, operation flags for the upper opcode groups (U32, VeryHigh)
-    // would require products of up to 7 bits (degree 7), exceeding the constraint system's
-    // degree budget. By precomputing e0 and e1 in the trace and constraining them here,
-    // the op_flags module can reference these degree-1 columns instead.
+    // e0 and e1 reduce flag degrees for prefixes 101 and 11 so their operation-specific
+    // constraints fit the degree-9 budget.
     //
     //   e0 = b6 · (1 - b5) · b4    selects the "101" prefix (degree-5 ops)
     //   e1 = b6 · b5               selects the "11" prefix (degree-4 ops)
@@ -197,30 +195,22 @@ pub fn enforce_main<AB>(
     // =============================================
     // Opcode-bit group constraints
     // =============================================
-    // Certain opcode prefixes have unused bit positions that must be zero to prevent
-    // invalid opcodes from being encoded. Both opcode groups use e0/e1 for degree reduction:
+    // Restrict unused opcode encodings in the upper prefix groups:
     //
-    //   Prefix  | b6 b5 b4 | Meaning     | Constraint
-    //   --------+----------+-------------+--------------------
-    //   U32     | 1  0  0  | 8 U32 ops   | b0 = 0
-    //   High    | 1  0  1  | 15 high ops | not all b0..b3 = 1
-    //   VeryHi  | 1  1  *  | 8 hi ops    | b0 = b1 = 0
+    //   b6 b5 b4 | Constraint
+    //   ---------+----------------------
+    //   1  0  0  | b0 = 0
+    //   1  0  1  | exclude opcode 95
+    //   1  1  *  | b0 = b1 = 0
     //
-    // The U32 prefix is computed as b6·(1-b5)·(1-b4) = b6 - e1 - e0 (degree 1).
-    // The VeryHi prefix is b6·b5 = e1 (degree 1).
+    // With Boolean opcode bits and constrained e0, b6 - e0 selects prefixes 100 and 11,
+    // disjoint from e0's 101 prefix. Under prefix 101, b0 is forbidden only for slot 95.
+    let prefix_100_or_11 = b6 - e0;
+    let prefix_101_with_low_bits_111 = e0 * b3 * b2 * b1;
+    builder.when(prefix_100_or_11 + prefix_101_with_low_bits_111).assert_zero(b0);
 
-    // When U32 prefix is active, b0 must be zero.
-    builder.when(b6 - e1 - e0).assert_zero(b0);
-
-    // Reject the unused degree-5 slot 95 (0b101_1111).
-    builder.when(e0).assert_zero(b3 * b2 * b1 * b0);
-
-    // When VeryHi prefix is active, both b0 and b1 must be zero.
-    {
-        let builder = &mut builder.when(e1);
-        builder.assert_zero(b0);
-        builder.assert_zero(b1);
-    }
+    // Prefix 11 also requires b1 = 0.
+    builder.when(e1).assert_zero(b1);
 
     // =============================================
     // General opcode-semantic constraints
@@ -232,9 +222,8 @@ pub fn enforce_main<AB>(
     // SPLIT     | s0 in {0, 1}                        | s0 selects true/false branch
     // DYN       | h4 = h5 = h6 = h7 = 0               | callee digest lives in h0..h3 only
     // REPEAT    | s0 = 1                              | loop condition must be true
-    // REPEAT    | is_loop_body (h4) = 1               | must be inside an active loop body
     // END+loop  | is_loop (h5) => s0 = 0              | exiting loop: condition became false
-    // END+REP'  | h0'..h4' = h0..h4                   | carry block hash + loop flag for re-entry
+    // END+REP'  | is_loop_body (h4) = 1               | REPEAT follows a loop-body END
     // HALT      | f_halt => f_halt'                   | absorbing / terminal state
 
     // SPLIT: branch selector must be binary.
@@ -259,14 +248,8 @@ pub fn enforce_main<AB>(
         builder.when(overflow.not()).assert_zero(hasher_state[5]);
     }
 
-    // REPEAT: top-of-stack must be 1 (loop condition true) and we must be inside an
-    // active loop body (is_loop_body = h4 = 1).
-    {
-        let loop_condition = local.stack.get(0);
-        let builder = &mut builder.when(op_flags.repeat());
-        builder.assert_one(loop_condition);
-        builder.assert_one(is_loop_body);
-    }
+    // REPEAT consumes a true loop condition.
+    builder.when(op_flags.repeat()).assert_one(local.stack.get(0));
 
     // END inside a loop: when ending a loop block (is_loop = h5 = 1), top-of-stack must
     // be 0 — the loop exits because the condition became false.
@@ -292,30 +275,20 @@ pub fn enforce_main<AB>(
     // non-loop child entry. The block-stack relation separately authenticates the END's
     // child-to-parent edge.
 
-    // END followed by REPEAT: carry the block hash (h0..h3) and the is_loop_body flag
-    // (h4) into the next row so the loop body can be re-entered.
-    {
-        // Two invalid edges share one constraint:
-        // - only END may precede REPEAT;
-        // - LOOP may not jump directly to END and skip its do-while body with multiplicity zero.
-        //
-        // The op bits and `e0`/`e1` are constrained, so every op flag is boolean and both terms
-        // are boolean products. Over the Goldilocks field, their sum vanishes only when both do.
-        let invalid_repeat_predecessor = op_flags.repeat_next() * op_flags.end().not();
-        let skipped_loop_body = op_flags.loop_op() * op_flags.end_next();
-        builder
-            .when_transition()
-            .assert_zero(invalid_repeat_predecessor + skipped_loop_body);
+    // REPEAT can follow only a loop-body END; its own h0..h4 do not authorize the next body.
+    builder
+        .when_transition()
+        .when(op_flags.repeat_next())
+        .assert_one(op_flags.end() * is_loop_body);
 
-        // The first row has no END predecessor, so it cannot be REPEAT.
-        builder.when_first_row().assert_zero(op_flags.repeat());
+    // Prevent LOOP -> END, which would skip the body when its lookup multiplicity is zero.
+    builder
+        .when_transition()
+        .when(op_flags.loop_op())
+        .assert_zero(op_flags.end_next());
 
-        let gate = op_flags.end() * op_flags.repeat_next();
-        let builder = &mut builder.when(gate);
-        for i in 0..5 {
-            builder.assert_eq(hasher_state_next[i], hasher_state[i]);
-        }
-    }
+    // The first row has no END predecessor, so it cannot be REPEAT.
+    builder.when_first_row().assert_zero(op_flags.repeat());
 
     // HALT is absorbing: once entered, the VM stays in HALT for all remaining rows.
     builder.when_transition().when(op_flags.halt()).assert_one(op_flags.halt_next());
@@ -648,10 +621,9 @@ mod tests {
         row
     }
 
-    fn valid_repeat_row() -> CoreCols<Felt> {
+    fn repeat_row_with_true_condition() -> CoreCols<Felt> {
         let mut row = generate_test_row(opcodes::REPEAT.into());
         row.stack.top[0] = Felt::ONE;
-        row.decoder.hasher_state[4] = Felt::ONE;
         row
     }
 
@@ -662,7 +634,7 @@ mod tests {
     }
 
     #[test]
-    fn honest_decoder_adjacency_pairs_are_accepted() {
+    fn permitted_decoder_adjacency_pairs_are_accepted() {
         let (in_span_local, in_span_next) = honest_in_span_pair();
         assert!(
             decoder_accepts(&in_span_local, &in_span_next),
@@ -697,17 +669,27 @@ mod tests {
         }
 
         let mut end = generate_test_row(opcodes::END.into());
-        let mut repeat = valid_repeat_row();
+        let mut repeat = repeat_row_with_true_condition();
         end.stack.top[0] = Felt::ONE;
         end.decoder.hasher_state[4] = Felt::ONE;
-        repeat.decoder.hasher_state[4] = end.decoder.hasher_state[4];
-        assert!(decoder_accepts(&end, &repeat), "END -> REPEAT must remain legal");
+        repeat.decoder.hasher_state[0] = Felt::new_unchecked(7);
+        assert!(
+            decoder_accepts(&end, &repeat),
+            "a loop-body END may precede REPEAT without copying its helper lanes"
+        );
+
+        end.stack.top[0] = Felt::ZERO;
+        end.decoder.hasher_state[5] = Felt::ONE;
+        assert!(
+            decoder_accepts(&end, &repeat),
+            "the completed loop body may itself be a nested LOOP"
+        );
     }
 
     #[test]
     fn malformed_decoder_adjacency_pairs_are_rejected() {
         let (mut in_span, _) = honest_in_span_pair();
-        let mut repeat = valid_repeat_row();
+        let mut repeat = repeat_row_with_true_condition();
         repeat.decoder.addr = in_span.decoder.addr;
         assert!(
             !decoder_accepts(&in_span, &repeat),
@@ -716,6 +698,12 @@ mod tests {
 
         let loop_row = generate_test_row(opcodes::LOOP.into());
         assert!(!decoder_accepts(&loop_row, &repeat), "REPEAT's predecessor must be END");
+
+        let non_loop_body_end = generate_test_row(opcodes::END.into());
+        assert!(
+            !decoder_accepts(&non_loop_body_end, &repeat_row_with_true_condition()),
+            "REPEAT must follow an END marked as a loop body"
+        );
 
         let end = generate_test_row(opcodes::END.into());
         let mut illegal_entry = generate_test_row(opcodes::NOOP.into());
@@ -747,19 +735,17 @@ mod tests {
     }
 
     #[test]
-    fn unused_degree5_opcode_slot_is_rejected() {
+    fn opcode_prefix_boundaries() {
         let (mut local, next) = honest_in_span_pair();
-        set_opcode(&mut local, opcodes::LOGDEFERRED.into());
-        assert!(
-            decoder_accepts(&local, &next),
-            "the last assigned degree-5 opcode must remain accepted"
-        );
+        for opcode in [opcodes::U32ADD, opcodes::LOGDEFERRED, opcodes::MRUPDATE] {
+            set_opcode(&mut local, opcode.into());
+            assert!(decoder_accepts(&local, &next), "opcode {opcode} must be accepted");
+        }
 
-        set_opcode(&mut local, 95);
-        assert!(
-            !decoder_accepts(&local, &next),
-            "unused degree-5 opcode slot 95 must be rejected"
-        );
+        for opcode in [65, 95, 97, 98] {
+            set_opcode(&mut local, opcode);
+            assert!(!decoder_accepts(&local, &next), "unused opcode {opcode} must be rejected");
+        }
     }
 
     /// END entry-kind selectors must encode exactly one valid semantic kind.

@@ -62,8 +62,17 @@ We organize the opcode slots into $4$ groups as shown below and also introduce t
 In the above:
 * Operation flags for operations in the first group (with prefix `0`), are computed using all $7$ op bits, and thus their degree is $7$.
 * Operation flags for operations in the second group (with prefix `100`), are computed using only the first $6$ op bits, and thus their degree is $6$.
-* Operation flags for opcode slots in the third group (with prefix `101`), are computed using all $7$ op bits. We use the extra register $e_0$ (which is set to $b_6 \cdot (1-b_5) \cdot b_4$) to reduce the degree by $2$. Thus, the degree of op flags in this group is $5$. This group has $16$ slots, but only $15$ admissible opcodes; slot $95$ is rejected below.
+* Operation flags for opcode slots in the third group (with prefix `101`), are computed using all $7$ op bits. We use the extra register $e_0$ (which is set to $b_6 \cdot (1-b_5) \cdot b_4$) to reduce the degree by $2$. Thus, the degree of op flags in this group is $5$. This group has $16$ slots, but slot $95$ is unused.
 * Operation flags for operations in the fourth group (with prefix `11`), are computed using only the first $5$ op bits. We use the extra register $e_1$ (which is set to $b_6 \cdot b_5$) to reduce the degree by $1$. Thus, the degree of op flags in this group is $4$.
+
+The decoder shares one $b_0$ constraint across the three upper groups:
+
+$$
+(b_6 - e_0 + e_0 \cdot b_3 \cdot b_2 \cdot b_1) \cdot b_0 = 0 \text{ | degree} = 5
+$$
+
+For prefixes `100` and `11`, $b_6 - e_0 = 1$, so $b_0$ must be zero. For prefix `101`, $e_0 = 1$,
+and the second term rejects opcode $95$. The two terms select disjoint opcode groups.
 
 How operations are distributed between these $4$ groups is described in the sections below.
 
@@ -172,11 +181,8 @@ The degree of this flag is $3$, which is acceptable for a selector for degree $5
 | `U32ADD3`    |     $76$     |   `100_1100`    | [u32 ops](./u32_ops.md) |     $6$     |
 | `U32MADD`    |     $78$     |   `100_1110`    | [u32 ops](./u32_ops.md) |     $6$     |
 
-As mentioned previously, the last bit of the opcode is not used in computation of the flag for these operations. We force this bit to always be set to $0$ with the following constraint:
-
-$$
-b_6 \cdot (1 - b_5) \cdot (1 - b_4) \cdot b_0 = 0 \text{ | degree} = 4
-$$
+The last bit is unused for these operations. The shared $b_0$ constraint above fixes it to zero for
+prefix `100`.
 
 Putting these operations into a group with flag degree $6$ is important for two other reasons:
 * Constraints for the `U32SPLIT` operation have degree $3$. Thus, the degree of the op flag for this operation cannot exceed $6$.
@@ -209,18 +215,14 @@ This group contains operations which require constraints with degree up to $3$. 
 Note that the `SPLIT` and `LOOP` operations share the common prefix `101010` and can be detected together with a flag of degree $4$ (using $e_0$ for degree reduction). Only `SPLIT` shifts the stack to the left, however: `LOOP` is do-while and reads no stack input — see [LOOP block decoding](../decoder/index.md#loop-block-decoding).
 
 
-Also, we need to make sure that `extra` register $e_0$, which is used to reduce the flag degree by $2$, is set to $1$ when $b_6 = 1$, $b_5 = 0$, and $b_4 = 1$:
+The defining constraint for $e_0$ is:
 
 $$
 e_0 - b_6 \cdot (1 - b_5) \cdot b_4 = 0 \text{ | degree} = 3
 $$
 
-The final slot in this group (`101_1111`, opcode $95$) is unused and is rejected with the
-following constraint:
-
-$$
-e_0 \cdot b_3 \cdot b_2 \cdot b_1 \cdot b_0 = 0 \text{ | degree} = 5
-$$
+The final slot in this group (`101_1111`, opcode $95$) is unused and is rejected by the shared
+$b_0$ constraint above.
 
 ### Very high-degree operations
 This group contains operations which require constraints with degree up to $5$.
@@ -236,17 +238,14 @@ This group contains operations which require constraints with degree up to $5$.
 | `RESPAN`     |    $120$     |   `111_1000`    | [Flow control ops](../decoder/index.md) |     $4$     |
 | `HALT`       |    $124$     |   `111_1100`    | [Flow control ops](../decoder/index.md) |     $4$     |
 
-As mentioned previously, the last two bits of the opcode are not used in computation of the flag for these operations. We force these bits to always be set to $0$ with the following constraints:
+The last two bits are unused for these operations. The shared constraint fixes $b_0$; $b_1$ is
+fixed by:
 
 $$
-b_6 \cdot b_5 \cdot b_0 = 0 \text{ | degree} = 3
+e_1 \cdot b_1 = 0 \text{ | degree} = 2
 $$
 
-$$
-b_6 \cdot b_5 \cdot b_1 = 0 \text{ | degree} = 3
-$$
-
-Also, we need to make sure that `extra` register $e_1$, which is used to reduce the flag degree by $1$, is set to $1$ when both $b_6$ and $b_5$ columns are set to $1$:
+The defining constraint for $e_1$ is:
 
 $$
 e_1 - b_6 \cdot b_5 = 0 \text{ | degree} = 2
