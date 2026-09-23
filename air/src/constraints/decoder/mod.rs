@@ -571,7 +571,7 @@ mod tests {
         operations::opcodes,
     };
 
-    use super::enforce_main;
+    use super::{CONTROLLER_ROWS_PER_PERM_FELT, enforce_main};
     use crate::{
         CoreCols,
         constraints::{
@@ -580,18 +580,15 @@ mod tests {
         },
     };
 
-    fn decoder_constraints_hold(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> bool {
-        let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
-        let mut builder = ConstraintEvalBuilder::new();
-        enforce_main(&mut builder, local, next, &op_flags);
-        builder.evaluations.into_iter().all(|value| value == QuadFelt::ZERO)
-    }
-
     fn eval_decoder(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {
         let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
         let mut builder = ConstraintEvalBuilder::new();
         enforce_main(&mut builder, local, next, &op_flags);
         builder.evaluations
+    }
+
+    fn decoder_accepts(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> bool {
+        eval_decoder(local, next).iter().all(|v| *v == QuadFelt::ZERO)
     }
 
     #[test]
@@ -607,7 +604,7 @@ mod tests {
         next.decoder.group_count = Felt::from_u8(3);
 
         assert!(
-            !decoder_constraints_hold(&local, &next),
+            !decoder_accepts(&local, &next),
             "leaving a span without END or RESPAN must violate the decoder AIR",
         );
     }
@@ -623,13 +620,9 @@ mod tests {
         next.decoder.group_count = Felt::from_u8(3);
 
         assert!(
-            !decoder_constraints_hold(&local, &next),
+            !decoder_accepts(&local, &next),
             "entering a span without SPAN or RESPAN must violate the decoder AIR",
         );
-    }
-
-    fn decoder_accepts(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> bool {
-        eval_decoder(local, next).iter().all(|v| *v == QuadFelt::ZERO)
     }
 
     fn honest_in_span_pair() -> (CoreCols<Felt>, CoreCols<Felt>) {
@@ -682,6 +675,14 @@ mod tests {
         first_op.decoder.in_span = Felt::ONE;
         first_op.decoder.group_count = Felt::ONE;
         assert!(decoder_accepts(&span, &first_op), "SPAN must be allowed to enter a basic block");
+
+        let mut respan = span_row_with_single_group();
+        set_opcode(&mut respan, opcodes::RESPAN.into());
+        first_op.decoder.addr = respan.decoder.addr + CONTROLLER_ROWS_PER_PERM_FELT;
+        assert!(
+            decoder_accepts(&respan, &first_op),
+            "RESPAN must be allowed to enter the next batch"
+        );
 
         for exit_opcode in [opcodes::END, opcodes::RESPAN] {
             let mut in_span = generate_test_row(opcodes::NOOP.into());

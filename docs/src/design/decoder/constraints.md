@@ -68,11 +68,15 @@ Also, when `REPEAT` operation is executed, the value in $h_4$ column (the `is_lo
 > f_{repeat} \cdot (1 - h_4) = 0 \text{ | degree} = 5
 > $$
 
-A `REPEAT` operation must be preceded by an `END` operation:
+On each transition, `REPEAT` must follow `END`, and `LOOP` cannot jump directly to
+`END` and skip its body:
 
 > $$
-> f_{repeat}' \cdot (1 - f_{end}) = 0 \text{ | degree} = 8
+> f_{repeat}' \cdot (1 - f_{end}) + f_{loop} \cdot f_{end}' = 0
 > $$
+
+Over any field of characteristic other than 2, the boolean products can sum to zero only when
+both are zero.
 
 The first row has no predecessor, so it cannot be a `REPEAT` operation:
 
@@ -534,35 +538,15 @@ is binary, $sp$ is also binary.
 > sp = 0 \text{ on the first row}
 > $$
 
-When executing `SPAN` or `RESPAN`, the next value of $sp$ must be set to $1$:
+On each transition, `SPAN` and `RESPAN` are followed by an in-span row. An
+in-span row remains inside unless the next operation is `END` or `RESPAN`:
 
 > $$
-> f_{span} \cdot (1 - sp') = 0 \text{ | degree} = 6
+> sp' = f_{span} + f_{respan} + sp \cdot (1 - f_{end}' - f_{respan}')
 > $$
 
-> $$
-> f_{respan} \cdot (1 - sp') = 0 \text{ | degree} = 5
-> $$
-
-Since these flags are mutually exclusive, we can also merge them into one constraint:
-
-> $$
-> (f_{span} + f_{respan}) \cdot (1 - sp') = 0 \text{ | degree} = 6
-> $$
-
-Conversely, a row with $sp' = 1$ must follow either a row already inside a
-basic block or an explicit `SPAN`/`RESPAN` operation:
-
-> $$
-> sp' \cdot (1 - f_{span} - f_{respan} - sp) = 0 \text{ | degree} = 6
-> $$
-
-A row inside a basic block may only stay inside the block, or exit through
-`END`/`RESPAN`:
-
-> $$
-> sp \cdot (1 - sp' - f_{end}' - f_{respan}') = 0 \text{ | degree} = 5
-> $$
+The first-row constraint above handles the start of the trace separately from
+this transition rule.
 
 ### Block address constraints
 When we are inside a *basic* block, values in block address columns (denoted as $a$) must remain the same. The same is true when executing `REPEAT`, which re-enters the same loop parent for another body iteration. This can be enforced with the following constraint:
