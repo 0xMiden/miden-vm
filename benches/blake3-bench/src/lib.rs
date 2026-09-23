@@ -100,8 +100,9 @@ pub fn execution_options() -> ExecutionOptions {
 }
 
 pub fn default_host() -> DefaultHost {
+    let core_lib = CoreLibrary::default();
     DefaultHost::default()
-        .with_library(&CoreLibrary::default())
+        .with_library(core_lib.host_library())
         .expect("failed to load core library into host")
 }
 

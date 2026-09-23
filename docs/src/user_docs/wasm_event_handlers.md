@@ -81,12 +81,12 @@ let package = project_assembler.assemble(target_selector, "release")?;
 ## Loading handlers in a host
 
 ```rust
-use miden_processor::{DefaultHost, HostLibrary};
-use miden_wasm_event_handlers::{WasmHandlerLimits, event_handlers_from_package};
+use miden_processor::DefaultHost;
+use miden_wasm_event_handlers::{WasmHandlerLimits, event_library_from_package};
 
-let handlers = event_handlers_from_package(&package, WasmHandlerLimits::default())?;
+let library = event_library_from_package(&package, WasmHandlerLimits::default())?;
 let mut host = DefaultHost::default();
-host.load_library_with_event_handlers(HostLibrary::from(package.clone()), handlers)?;
+host.load_library(library)?;
 ```
 
 Unified host callbacks and registered handlers receive a portable `EventContext` and a borrowed

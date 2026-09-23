@@ -228,7 +228,7 @@ fn build_recursive_verifier_case(
 fn recursive_host() -> DefaultHost {
     let core_lib = CoreLibrary::default();
     let mut host = DefaultHost::default();
-    host.load_library(&core_lib).expect("load core library");
+    host.load_library(core_lib.host_library()).expect("load core library");
     host
 }
 
