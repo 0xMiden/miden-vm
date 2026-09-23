@@ -239,7 +239,7 @@ fn ec_dag_double_proves() {
 // the cross-chiplet bus: a mismatched or dangling provide.
 // ============================================================================
 
-/// Net unmatched LogUp denominators across the full eleven-chiplet
+/// Net unmatched LogUp denominators across the full twelve-chiplet
 /// stack (0 ⟺ every bus closes), with the `eval` main replaced by
 /// `eval_main`.
 fn dag_residual(

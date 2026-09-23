@@ -1,4 +1,4 @@
-//! Orchestration facade over the eleven-chiplet stack: the Keccak
+//! Orchestration facade over the twelve-chiplet stack: the Keccak
 //! transcript, the uint store and its arithmetic relations, and the EC
 //! layer (group table + point store + group-law add).
 //!
@@ -59,6 +59,10 @@ use crate::{
             round::{RoundRequires, generate_trace as round_trace},
             sponge::trace::SpongeRequires,
         },
+        sha256::{
+            compression::Sha256CompressionRequires, io::Sha256IoRequires,
+            trace::generate_trace as sha256_trace,
+        },
         sha512::{
             compression::Sha512CompressionRequires, io::Sha512IoRequires,
             trace::generate_trace as sha512_trace,
@@ -106,6 +110,8 @@ pub struct Session {
     node: KeccakNodeRequires,
     sha512_compression: Sha512CompressionRequires,
     sha512_io: Sha512IoRequires,
+    sha256_compression: Sha256CompressionRequires,
+    sha256_io: Sha256IoRequires,
     eval: TranscriptEvalRequires,
     uint: UintStores,
     ec: EcStores,
@@ -123,6 +129,8 @@ impl Session {
             node: KeccakNodeRequires::new(),
             sha512_compression: Sha512CompressionRequires::new(),
             sha512_io: Sha512IoRequires::new(),
+            sha256_compression: Sha256CompressionRequires::new(),
+            sha256_io: Sha256IoRequires::new(),
             eval: TranscriptEvalRequires::new(),
             uint: UintStores::new(),
             ec: EcStores::new(),
@@ -168,6 +176,7 @@ impl Session {
             self.ec.add.trace_height()?,
             self.msm.trace_height()?,
             self.sha512_compression.trace_height()?,
+            self.sha256_compression.trace_height()?,
         ])
     }
 
@@ -199,6 +208,12 @@ impl Session {
     pub fn sha512(&mut self, input: &[u8]) -> ([u8; 64], Truthy) {
         let out = self.sha512_io.require(input, &mut self.sha512_compression, &mut self.eidos);
         (out.digest, self.eval.issue_sha512(out.h_sha512, out.invocation))
+    }
+
+    /// Record SHA-256 and return all 32 digest bytes with its foldable assertion handle.
+    pub fn sha256(&mut self, input: &[u8]) -> ([u8; 32], Truthy) {
+        let out = self.sha256_io.require(input, &mut self.sha256_compression, &mut self.eidos);
+        (out.digest, self.eval.issue_sha256(out.h_sha256, out.invocation))
     }
 
     /// Record an explicit uint pin claim at protocol address `ptr ∈ [1, 2^16)` under the modulus
@@ -516,6 +531,9 @@ impl Session {
         for (invocation, consumers) in self.eval.additional_sha512_uses() {
             self.sha512_io.add_consumers(invocation, consumers);
         }
+        for (invocation, consumers) in self.eval.additional_sha256_uses() {
+            self.sha256_io.add_consumers(invocation, consumers);
+        }
         // EcCreate rows hash the group pointer and bind it through their EcPoint consume.
         let eval = trace_span!("eval", eval_trace(self.eval, root));
         let chunk_node_sponge = trace_span!(
@@ -527,6 +545,10 @@ impl Session {
         let sha512 = trace_span!(
             "sha512",
             sha512_trace(self.sha512_compression, self.sha512_io, &mut self.bpl)
+        );
+        let sha256 = trace_span!(
+            "sha256",
+            sha256_trace(self.sha256_compression, self.sha256_io, &mut self.bpl)
         );
         let round = trace_span!("keccak_round", round_trace(self.round, &mut self.bpl));
         // The relation traces route their store demand as they lay, so
@@ -565,6 +587,7 @@ impl Session {
             ec_add,
             msm,
             sha512,
+            sha256,
             public_root,
         };
         #[cfg(debug_assertions)]
@@ -583,7 +606,7 @@ impl Default for Session {
     }
 }
 
-/// The eleven chiplet main traces plus the transcript root, ready to
+/// The twelve chiplet main traces plus the transcript root, ready to
 /// feed `prove_multi` or a bus-balance check.
 #[derive(Debug)]
 pub struct SessionTraces {
@@ -598,14 +621,15 @@ pub struct SessionTraces {
     ec_add: RowMajorMatrix<Felt>,
     msm: RowMajorMatrix<Felt>,
     sha512: RowMajorMatrix<Felt>,
+    sha256: RowMajorMatrix<Felt>,
     public_root: EidosDigest,
 }
 
 impl SessionTraces {
-    /// The eleven main traces in canonical chiplet order: chunk-node-sponge, Eidos compression,
+    /// The twelve main traces in canonical chiplet order: chunk-node-sponge, Eidos compression,
     /// Keccak round, canonical byte-pair lookup, transcript eval, uint-store-mul,
-    /// uint-add, ec-point-store-groups, ec-add, ec-msm, and SHA-512. The AIRs, provers, and public
-    /// values a caller assembles must line up with this order.
+    /// uint-add, ec-point-store-groups, ec-add, ec-msm, SHA-512, and SHA-256. The AIRs, provers,
+    /// and public values a caller assembles must line up with this order.
     pub fn mains(&self) -> [&RowMajorMatrix<Felt>; NUM_CHIPLETS] {
         [
             &self.chunk_node_sponge,
@@ -619,10 +643,11 @@ impl SessionTraces {
             &self.ec_add,
             &self.msm,
             &self.sha512,
+            &self.sha256,
         ]
     }
 
-    /// The eleven main traces by value in [`mains`](Self::mains) order,
+    /// The twelve main traces by value in [`mains`](Self::mains) order,
     /// consuming the bundle — lets the prover take ownership rather than
     /// clone the (potentially large) traces.
     pub fn into_mains(self) -> Vec<RowMajorMatrix<Felt>> {
@@ -638,6 +663,7 @@ impl SessionTraces {
             self.ec_add,
             self.msm,
             self.sha512,
+            self.sha256,
         ]
     }
 

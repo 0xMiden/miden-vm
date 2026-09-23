@@ -169,7 +169,7 @@ fn proof_order(heights: &[u64]) -> Vec<usize> {
 fn height_fixtures() -> Vec<Vec<u64>> {
     let mut fixtures: Vec<Vec<u64>> =
         structured_orders().iter().map(|order| heights_for_order(order)).collect();
-    fixtures.push(vec![18, 18, 16, 18, 18, 16, 18, 18, 18, 16, 18]);
+    fixtures.push(vec![18, 18, 16, 18, 18, 16, 18, 18, 18, 16, 18, 16]);
     fixtures
 }
 

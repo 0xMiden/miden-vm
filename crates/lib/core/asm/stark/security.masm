@@ -89,7 +89,7 @@ end
 #! The procedure subtracts one when b < r_f. Because b <= s, it cannot overstate the native
 #! bound and can understate it by at most one bit. For MVM, A = (16 + 2) * 78 = 1404 gives
 #! b = 34404, while R is at most 4887 (258 boundary terms at height 6). For PVM,
-#! A = (18 + 2) * 294 = 5880 gives b = 30448 and R = 1 at every supported height. Hence
+#! A = (18 + 2) * 331 = 6620 gives b = 19883 and R = 1 at every supported height. Hence
 #! b >= r_f for both deployed shapes, so this decision is exact throughout their ranges.
 #!
 #! The accepted coefficient range is 257..=65536. Each factor is also limited to 65536 so their

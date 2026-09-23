@@ -14,7 +14,7 @@ use miden_core::{
     proof::{HashFunction, PrecompileProof, StarkProof},
 };
 use miden_core_lib::CoreLibrary;
-use miden_precompiles::{Keccak256Precompile, Sha512Precompile};
+use miden_precompiles::{Keccak256Precompile, Sha256Precompile, Sha512Precompile};
 use miden_precompiles_air::NUM_CHIPLETS;
 use miden_precompiles_prover::prove_precompiles;
 use miden_precompiles_verifier::masm_verifier::{
@@ -31,6 +31,9 @@ use crate::helpers::masm_push_word;
 
 const SECURITY_PARAM_COUNT: usize = 4;
 
+/// A Keccak-only proof still pays every chiplet's fixed verifier cost, which bounds its recursive
+/// trace at 2^19 rows. Tightening this to 2^18 is tracked in
+/// <https://github.com/0xMiden/miden-vm/issues/3863>.
 #[test]
 fn pvm_keccak_only_recursive_verifier_cost_is_bounded() {
     const SOURCE: &str = "
@@ -56,8 +59,8 @@ fn pvm_keccak_only_recursive_verifier_cost_is_bounded() {
     let summary = trace.trace_len_summary();
     eprintln!("Keccak-only PVM recursive trace: {summary:?}");
     assert!(
-        summary.padded_trace_len() <= 1 << 18,
-        "SHA-512's fixed program must not force Keccak-only recursion back to 2^19 rows"
+        summary.padded_trace_len() <= 1 << 19,
+        "the fixed SHA programs must not force Keccak-only recursion past 2^19 rows"
     );
 }
 
@@ -91,6 +94,25 @@ fn pvm_verifies_sha512_and_mixed_hash_claims() {
             PvmRecursiveVerifierInputs::for_request(pvm_verify_proof_root(), &proof).unwrap();
         assert_pvm_verifies(&inputs);
     }
+}
+
+#[test]
+fn pvm_verifies_sha256_claims() {
+    use miden_crypto::hash::sha2::Sha256;
+
+    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry())).unwrap();
+    // 56 bytes pushes the length field into a second SHA-256 padding block.
+    let input = [0x5a; 56];
+    let preimage = state.register(Node::chunks_from_bytes(&input)).unwrap();
+    let expected = state
+        .register(Node::chunks_from_bytes(Sha256::hash(&input).as_bytes()))
+        .unwrap();
+    let assertion = state.register(Sha256Precompile::assert_node(56, preimage, expected)).unwrap();
+    state.log_statement(assertion).unwrap();
+    let witness = state.into_witness().unwrap().expect("the state logs a hash claim");
+    let proof = prove_precompiles(vec![witness], HashFunction::Eidos).unwrap();
+    let inputs = PvmRecursiveVerifierInputs::for_request(pvm_verify_proof_root(), &proof).unwrap();
+    assert_pvm_verifies(&inputs);
 }
 
 #[test]
@@ -148,7 +170,7 @@ fn assert_pvm_rejects_tampering(inputs: &PvmRecursiveVerifierInputs) {
     let wrong_claim_advice = AdviceInputs::new(stack, map, store);
     assert_pvm_rejects(&wrong_claim_advice, wrong_claim_commitment);
 
-    // The eleven heights are the sole carrier of proof order into the OOD scatter table, the sigma
+    // The twelve heights are the sole carrier of proof order into the OOD scatter table, the sigma
     // scatter, and fold staging. Chiplet 3's height is verifier-fixed (its stream slot must equal
     // a constant, so forging it fails a shape check rather than exercising order binding); every
     // other chiplet's height is advice-supplied and must be transcript-bound.

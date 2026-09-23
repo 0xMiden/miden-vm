@@ -18,19 +18,20 @@ const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3_223_322_768;
 const RANDOM_COIN_COUNTER_PTR: u32 = 3_223_322_769;
 const INITIAL_CV: [u64; 4] = [19, 20, 21, 22];
 const COMMITMENT: [u64; 4] = [31, 32, 33, 34];
-type LogHeights = [u8; 11];
+type LogHeights = [u8; 12];
 
 // BytePairLut is fixed at 2^16. The other entries meet their AIRs' minimum heights while
 // exercising distinct proof-order positions, including an equal-height tie.
-const EQUAL_EIDOS_BYTE_PAIR_HEIGHTS: LogHeights = [8, 16, 7, 16, 5, 9, 10, 11, 12, 13, 14];
-const EIDOS_PRECEDES_ORDINARY_HEIGHTS: LogHeights = [8, 5, 7, 16, 6, 9, 10, 11, 12, 13, 14];
-const BYTE_PAIR_PRECEDES_EIDOS_HEIGHTS: LogHeights = [18, 17, 19, 16, 20, 21, 22, 23, 24, 25, 26];
+const EQUAL_EIDOS_BYTE_PAIR_HEIGHTS: LogHeights = [8, 16, 7, 16, 5, 9, 10, 11, 12, 13, 14, 15];
+const EIDOS_PRECEDES_ORDINARY_HEIGHTS: LogHeights = [8, 5, 7, 16, 6, 9, 10, 11, 12, 13, 14, 15];
+const BYTE_PAIR_PRECEDES_EIDOS_HEIGHTS: LogHeights =
+    [18, 17, 19, 16, 20, 21, 22, 23, 24, 25, 26, 27];
 const PROOF_ORDER_CASES: [(&str, LogHeights); 3] = [
     ("equal Eidos and byte-pair heights", EQUAL_EIDOS_BYTE_PAIR_HEIGHTS),
     ("Eidos before ordinary AIRs", EIDOS_PRECEDES_ORDINARY_HEIGHTS),
     ("BytePairLut before Eidos", BYTE_PAIR_PRECEDES_EIDOS_HEIGHTS),
 ];
-const AUX_VALUE_WIDTHS: [usize; 11] = [1; 11];
+const AUX_VALUE_WIDTHS: [usize; 12] = [1; 12];
 
 fn random_coin_setup_masm() -> String {
     let cv = INITIAL_CV;
@@ -109,20 +110,14 @@ fn hook_source(log_heights: &LogHeights) -> String {
         begin
             {}
             exec.ood_frames::stage_proof_order_maps
-            # The odd value count leaves one extension element of ACE alignment padding.
-            push.99.{padding_0} mem_store
-            push.99.{padding_1} mem_store
             exec.aux_trace::observe_aux_trace
         end
         "#,
-        setup_masm(log_heights),
-        padding_0 = pvm_layout_const("AUX_BUS_BOUNDARY_PTR") + 22,
-        padding_1 = pvm_layout_const("AUX_BUS_BOUNDARY_PTR") + 23,
+        setup_masm(log_heights)
     )
 }
 
-/// Reference transcript path using the public buffered API for the same six advice words and final
-/// pair.
+/// Reference transcript path using the public buffered word API for the same seven advice words.
 fn reference_source(log_heights: &LogHeights) -> String {
     format!(
         r#"
@@ -154,9 +149,9 @@ fn reference_source(log_heights: &LogHeights) -> String {
             padw adv_loadw
             exec.layout::aux_bus_boundary_ptr add.16 mem_storew_le
             exec.random_coin::observe_word
-
-            adv_push exec.random_coin::observe_felt
-            adv_push exec.random_coin::observe_felt
+            padw adv_loadw
+            exec.layout::aux_bus_boundary_ptr add.20 mem_storew_le
+            exec.random_coin::observe_word
         end
         "#,
         setup_masm(log_heights)
@@ -259,15 +254,15 @@ fn fixed_boundary_correction(alpha: QuadFelt, beta: QuadFelt) -> QuadFelt {
     })
 }
 
-fn proof_order(log_heights: &LogHeights) -> [usize; 11] {
+fn proof_order(log_heights: &LogHeights) -> [usize; 12] {
     let mut order = core::array::from_fn(|index| index);
     order.sort_by_key(|&index| (log_heights[index], index));
     order
 }
 
-fn balanced_normalized_sums(correction: QuadFelt, log_heights: &LogHeights) -> [Vec<QuadFelt>; 11] {
+fn balanced_normalized_sums(correction: QuadFelt, log_heights: &LogHeights) -> [Vec<QuadFelt>; 12] {
     let mut next = 1u32;
-    let mut normalized_sums: [Vec<QuadFelt>; 11] = core::array::from_fn(|air_index| {
+    let mut normalized_sums: [Vec<QuadFelt>; 12] = core::array::from_fn(|air_index| {
         (0..AUX_VALUE_WIDTHS[air_index])
             .map(|_| {
                 let value = QuadFelt::new([Felt::from_u32(next), Felt::from_u32(next + 1)]);
@@ -279,21 +274,21 @@ fn balanced_normalized_sums(correction: QuadFelt, log_heights: &LogHeights) -> [
 
     // Reserve a single-width AIR as the balancing term, then apply the same trace-length weighting
     // as `MultiAir::eval_external`.
-    normalized_sums[10][0] = QuadFelt::ZERO;
+    normalized_sums[11][0] = QuadFelt::ZERO;
     let partial =
         normalized_sums.iter().enumerate().fold(QuadFelt::ZERO, |sum, (index, values)| {
             let n = Felt::new_unchecked(1u64 << log_heights[index]);
             sum + values.iter().copied().sum::<QuadFelt>() * n
         });
-    let balancing_n_inv = Felt::new_unchecked(1u64 << log_heights[10])
+    let balancing_n_inv = Felt::new_unchecked(1u64 << log_heights[11])
         .try_inverse()
         .expect("nonzero trace length");
-    normalized_sums[10][0] = (-correction - partial) * balancing_n_inv;
+    normalized_sums[11][0] = (-correction - partial) * balancing_n_inv;
     normalized_sums
 }
 
 fn proof_ordered_normalized_sums(
-    values: &[Vec<QuadFelt>; 11],
+    values: &[Vec<QuadFelt>; 12],
     log_heights: &LogHeights,
 ) -> Vec<QuadFelt> {
     proof_order(log_heights)
@@ -302,7 +297,7 @@ fn proof_ordered_normalized_sums(
         .collect()
 }
 
-fn advice(normalized_sums: &[Vec<QuadFelt>; 11], log_heights: &LogHeights) -> Vec<u64> {
+fn advice(normalized_sums: &[Vec<QuadFelt>; 12], log_heights: &LogHeights) -> Vec<u64> {
     let ordered = proof_ordered_normalized_sums(normalized_sums, log_heights);
     COMMITMENT
         .into_iter()
@@ -351,14 +346,6 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
         let gamma = (0..18).fold(QuadFelt::ONE, |acc, _| acc * beta);
         let expected_gamma: &[Felt] = gamma.as_basis_coefficients_slice();
         let bus_gamma_ptr = pvm_layout_const("BUS_GAMMA_PTR");
-        for offset in 22..24 {
-            assert_eq!(
-                read_memory_felt(&hook_output, pvm_layout_const("AUX_BUS_BOUNDARY_PTR") + offset),
-                Felt::ZERO,
-                "{case}: ACE alignment padding must not retain memory from an earlier verification"
-            );
-        }
-
         assert_eq!(
             read_memory_felt(&hook_output, bus_gamma_ptr),
             expected_gamma[0],
@@ -426,9 +413,9 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
 fn pvm_aux_hook_rejects_an_unbalanced_normalized_sum() {
     let log_heights = EIDOS_PRECEDES_ORDINARY_HEIGHTS;
     let (alpha, beta) = sampled_challenges(&log_heights);
-    for index in [4, 10] {
-        // Cover a full-word value and the final partial block: omitting the tail from the
-        // external identity must fail even when the other ten values balance.
+    for index in [4, 11] {
+        // Cover an inner value and the last value: omitting the final word from the external
+        // identity must fail even when the other eleven values balance.
         let mut normalized_sums =
             balanced_normalized_sums(fixed_boundary_correction(alpha, beta), &log_heights);
         normalized_sums[index][0] += QuadFelt::ONE;

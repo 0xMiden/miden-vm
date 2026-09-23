@@ -30,11 +30,9 @@ const EC_GROUP_BUS_SCALE = 15
 const MAX_LOGUP_MESSAGE_WIDTH = 18
 
 # Number of chiplet instances in the relation, each contributing one boundary value.
-const NUM_CHIPLETS = 11
-# Words spanned by the first ten proof-ordered, two-felt normalized boundary sums.
-const NUM_AUX_VALUE_WORDS = 5
-# Normalized boundary sums past the last complete word.
-const NUM_AUX_TAIL_VALUES = 1
+const NUM_CHIPLETS = 12
+# Words spanned by the twelve proof-ordered, two-felt normalized boundary sums.
+const NUM_AUX_VALUE_WORDS = 6
 
 #! Load one normalized committed LogUp sum and scale both extension coordinates by the chiplet's
 #! row count `n = 2^log_height`.
@@ -82,6 +80,9 @@ end
 #! Input:  [...]
 #! Output: [...]
 pub proc scatter_aux_bus_boundary()
+    exec.layout::proof_order_positions_ptr add.11 mem_load
+    exec.load_boundary_pair
+
     exec.layout::proof_order_positions_ptr add.10 mem_load
     exec.load_boundary_pair
 
@@ -114,28 +115,24 @@ pub proc scatter_aux_bus_boundary()
 
     exec.layout::proof_order_positions_ptr mem_load
     exec.load_boundary_pair
-    # => [sigma_prime_0, ..., sigma_prime_10, ...] in canonical instance order
+    # => [sigma_prime_0, ..., sigma_prime_11, ...] in canonical instance order
 
     exec.layout::aux_bus_boundary_ptr mem_storew_le dropw
     exec.layout::aux_bus_boundary_ptr add.4 mem_storew_le dropw
     exec.layout::aux_bus_boundary_ptr add.8 mem_storew_le dropw
     exec.layout::aux_bus_boundary_ptr add.12 mem_storew_le dropw
     exec.layout::aux_bus_boundary_ptr add.16 mem_storew_le dropw
-
-    # The odd value count leaves two cells of word-alignment padding before the next ACE READ
-    # region. Zero them so a sequential verification cannot read a stale value there.
-    push.0.0 movup.3 movup.3
     exec.layout::aux_bus_boundary_ptr add.20 mem_storew_le dropw
 end
 
-#! Observes the PVM auxiliary trace commitment and its eleven normalized LogUp values.
+#! Observes the PVM auxiliary trace commitment and its twelve normalized LogUp values.
 #!
 #! The advice provider supplies the commitment followed by each chiplet's exposed value in proof
 #! order. Every chiplet exposes one `sigma_prime = sigma / n`, which is weighted by that chiplet's
 #! trace length before closing the external LogUp identity.
 #!
-#! The stream is 26 base felts: the four-felt commitment followed by twenty-two LogUp-value
-#! coordinates. It fills three Eidos rate blocks and leaves a two-felt tail buffered, matching the
+#! The stream is 28 base felts: the four-felt commitment followed by twenty-four LogUp-value
+#! coordinates. It fills three Eidos rate blocks and leaves a four-felt tail buffered, matching the
 #! lifted-STARK transcript before it samples composition challenges.
 #!
 #! Once absorbed, the values are moved to the canonical addresses the constraint circuit reads
@@ -145,7 +142,7 @@ end
 #! `fixed_boundary_correction + sum_i(n_i * sigma_prime_i) == 0` coordinate-wise.
 #!
 #! Precondition:  input_len=0 (the main commitment was flushed before this hook).
-#! Postcondition: input_len=2, output_len=0.
+#! Postcondition: input_len=4, output_len=0.
 #!
 #! Input:  [...]
 #! Output: [...]
@@ -158,7 +155,7 @@ pub proc observe_aux_trace()
 
     exec.constants::random_coin_input_len_ptr mem_load
     assertz.err="PVM observe_aux_trace: input buffer must be empty"
-    # Store and absorb the commitment plus all eleven proof-ordered boundary values.
+    # Store and absorb the commitment plus all twelve proof-ordered boundary values.
     padw adv_loadw
     exec.constants::aux_trace_com_ptr mem_storew_le
     exec.random_coin::eidos_observe_word
@@ -179,16 +176,12 @@ pub proc observe_aux_trace()
     padw adv_loadw
     exec.layout::aux_bus_boundary_ptr add.16 mem_storew_le
     exec.random_coin::eidos_observe_word
-
-    adv_push adv_push swap
-    # => [sigma_prime_10_0, sigma_prime_10_1, ...]
-    dup exec.layout::aux_bus_boundary_ptr add.20 mem_store
-    dup.1 exec.layout::aux_bus_boundary_ptr add.21 mem_store
-    exec.random_coin::eidos_observe_felt
-    exec.random_coin::eidos_observe_felt
+    padw adv_loadw
+    exec.layout::aux_bus_boundary_ptr add.20 mem_storew_le
+    exec.random_coin::eidos_observe_word
 
     exec.constants::random_coin_input_len_ptr mem_load
-    push.2 assert_eq.err="PVM observe_aux_trace: boundary transcript framing drifted"
+    push.4 assert_eq.err="PVM observe_aux_trace: boundary transcript framing drifted"
     exec.constants::random_coin_output_len_ptr mem_load
     assertz.err="PVM observe_aux_trace: observed input exposed stale output"
 
@@ -229,6 +222,9 @@ pub proc observe_aux_trace()
     ext2add
 
     exec.constants::air_trace_length_logs_ptr add.10 mem_load push.20 exec.load_weighted_aux_sum
+    ext2add
+
+    exec.constants::air_trace_length_logs_ptr add.11 mem_load push.22 exec.load_weighted_aux_sum
     ext2add
 
     exec.layout::c_total_ptr add.1 mem_load
