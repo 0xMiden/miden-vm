@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use der::{Decode, DecodeValue, Header, Reader, Sequence, asn1::UintRef};
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     Felt,
@@ -12,9 +13,11 @@ use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, StackInputs}
 use p256::ecdsa::{Signature, VerifyingKey, signature::hazmat::PrehashVerifier};
 use wycheproof_ng_core::TestResult;
 
-/// Run arbitrary-byte vectors through the public MASM ABI without prevalidating their scalars in
-/// Rust. Evaluating each successful run's precompile witness also checks the native precompile
-/// relation.
+/// Run arbitrary-byte vectors through the public MASM ABI. Rust rejects only undecodable public
+/// keys and signatures that are not strict DER or whose integers exceed 256 bits; every other r and
+/// s reaches MASM as raw little-endian u32 limbs, so zero and out-of-range scalars are rejected by
+/// the MASM canonical scalar loaders and nonzero checks. Evaluating each successful run's
+/// precompile witness also checks the native precompile relation.
 #[test]
 fn p256_wycheproof_vectors_verify_in_masm() {
     let vectors =
@@ -49,6 +52,7 @@ end
     let mut valid = 0;
     let mut invalid = 0;
     let mut acceptable = 0;
+    let mut invalid_in_masm = 0;
 
     for group in vectors.test_groups {
         let public_key = match VerifyingKey::from_sec1_bytes(group.key.key.as_ref()) {
@@ -66,19 +70,19 @@ end
             },
         };
         let public_key_commitment = ecdsa_p256_sha256::public_key_commitment(&public_key);
+        let point = public_key.to_sec1_point(false);
+        let public_key_limbs = [point.x(), point.y()]
+            .map(|coordinate| be_to_le_limbs(&(*coordinate.expect("uncompressed point")).into()));
 
         for test in group.tests {
             let id = test.tc_id;
-            let signature = match Signature::from_der(test.sig.as_ref()) {
-                Ok(signature) => signature,
-                Err(_) => {
-                    assert!(
-                        !matches!(test.result, TestResult::Valid),
-                        "tcId {id}: DER decoding failed for a valid vector"
-                    );
-                    invalid += 1;
-                    continue;
-                },
+            let Some((r, s)) = der_scalars(test.sig.as_ref()) else {
+                assert!(
+                    !matches!(test.result, TestResult::Valid),
+                    "tcId {id}: DER decoding failed for a valid vector"
+                );
+                invalid += 1;
+                continue;
             };
 
             let mut message = bytes_to_packed_u32_elements(test.msg.as_ref());
@@ -88,7 +92,9 @@ end
             advice.append_for_adv_pipe(&message);
             advice.append_elements([Felt::from_u32(test.msg.len() as u32)]);
             advice.append_word(public_key_commitment);
-            advice.append_elements(ecdsa_p256_sha256::encode_signature(&public_key, &signature));
+            advice.append_elements(public_key_limbs.into_iter().flatten());
+            advice.append_elements(be_to_le_limbs(&r));
+            advice.append_elements(be_to_le_limbs(&s));
             let mut host = DefaultHost::default().with_library(&library).unwrap();
             let result = FastProcessor::new_with_options(
                 StackInputs::default(),
@@ -105,15 +111,18 @@ end
                 },
                 TestResult::Invalid => {
                     invalid += 1;
+                    invalid_in_masm += 1;
                     assert!(result.is_err(), "tcId {id}: invalid signature accepted");
                 },
                 TestResult::Acceptable => {
                     acceptable += 1;
                     // The MASM contract follows FIPS 186-5/EIP-7951: r and s only need to lie in
-                    // [1, n), and high-s witnesses are accepted, matching a plain prehash-verify
-                    // policy call against the parsed key and DER-decoded signature.
+                    // [1, n), and high-s witnesses are accepted, matching a range-checked
+                    // signature and a plain prehash-verify policy call against the parsed key.
                     let digest: [u8; 32] = Sha256::hash(test.msg.as_ref()).into();
-                    let policy_accepts = public_key.verify_prehash(&digest, &signature).is_ok();
+                    let policy_accepts = Signature::from_scalars(r, s).is_ok_and(|signature| {
+                        public_key.verify_prehash(&digest, &signature).is_ok()
+                    });
                     assert_eq!(
                         result.is_ok(),
                         policy_accepts,
@@ -135,7 +144,54 @@ end
         }
     }
     assert!(valid > 0 && invalid > 0);
+    // Zero and out-of-range scalars, such as r = n or r = 5 + n with x(R) = 5, reach MASM.
+    assert_eq!(invalid_in_masm, INVALID_VECTORS_IN_MASM, "invalid vectors checked by MASM");
     eprintln!(
-        "P-256/SHA-256 MASM Wycheproof: {valid} valid, {invalid} invalid, {acceptable} acceptable"
+        "P-256/SHA-256 MASM Wycheproof: {valid} valid, {invalid} invalid ({invalid_in_masm} \
+         rejected by MASM), {acceptable} acceptable"
     );
+}
+
+/// Invalid vectors whose signature is strict DER with integers of at most 256 bits.
+const INVALID_VECTORS_IN_MASM: usize = 75;
+
+/// `ECDSA-Sig-Value ::= SEQUENCE { r INTEGER, s INTEGER }` with non-negative integers.
+struct DerScalars<'a> {
+    r: UintRef<'a>,
+    s: UintRef<'a>,
+}
+
+impl<'a> DecodeValue<'a> for DerScalars<'a> {
+    type Error = der::Error;
+
+    fn decode_value<R: Reader<'a>>(reader: &mut R, _header: Header) -> der::Result<Self> {
+        Ok(Self {
+            r: UintRef::decode(reader)?,
+            s: UintRef::decode(reader)?,
+        })
+    }
+}
+
+impl<'a> Sequence<'a> for DerScalars<'a> {}
+
+/// Returns the big-endian r and s of a strict-DER ECDSA signature without range-checking them
+/// against the group order, or `None` if the encoding is not strict DER or either integer is wider
+/// than 256 bits.
+fn der_scalars(signature: &[u8]) -> Option<([u8; 32], [u8; 32])> {
+    let DerScalars { r, s } = DerScalars::from_der(signature).ok()?;
+    Some((left_pad_32(r.as_bytes())?, left_pad_32(s.as_bytes())?))
+}
+
+fn left_pad_32(bytes: &[u8]) -> Option<[u8; 32]> {
+    let mut padded = [0; 32];
+    padded[32_usize.checked_sub(bytes.len())?..].copy_from_slice(bytes);
+    Some(padded)
+}
+
+/// Converts a 32-byte big-endian integer into eight little-endian u32 limbs.
+fn be_to_le_limbs(bytes: &[u8; 32]) -> [Felt; 8] {
+    core::array::from_fn(|i| {
+        let offset = 28 - 4 * i;
+        Felt::from_u32(u32::from_be_bytes(bytes[offset..offset + 4].try_into().expect("u32 limb")))
+    })
 }

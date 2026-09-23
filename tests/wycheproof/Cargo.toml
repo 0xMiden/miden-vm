@@ -11,6 +11,7 @@ version.workspace      = true
 doctest = false
 
 [dev-dependencies]
+der                 = { workspace = true }
 ed25519-dalek       = { workspace = true }
 hex                 = { features = ["alloc"], workspace = true }
 k256                = { features = ["alloc", "ecdh", "ecdsa", "pkcs8"], workspace = true }
