@@ -28,10 +28,10 @@ const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
 
 /// The recursive VM verifier root declared by proofs from the current prover.
 pub const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(7434262842308815738),
-    crate::Felt::new_unchecked(8308347286077348452),
-    crate::Felt::new_unchecked(5536370215252113983),
-    crate::Felt::new_unchecked(12836609874872806107),
+    crate::Felt::new_unchecked(3767532996114378369),
+    crate::Felt::new_unchecked(17540758684399510482),
+    crate::Felt::new_unchecked(7587120924377548940),
+    crate::Felt::new_unchecked(3275590811078431094),
 ]);
 /// The recursive precompile verifier root declared by proofs from the current prover.
 pub const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([

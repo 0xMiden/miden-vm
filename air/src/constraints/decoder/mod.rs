@@ -151,8 +151,8 @@ pub fn enforce_main<AB>(
     //   in_span = 0 on control-flow rows (SPAN, RESPAN, END, JOIN, SPLIT, LOOP, etc.).
     //
     // in_span is pinned to 1 - f_ctrl on every row by the control-flow constraint at
-    // the end of this function (in_span + f_ctrl = 1), so in_span cannot become 1
-    // without a preceding SPAN or RESPAN that sets in_span' = 1 on the next row.
+    // the end of this function (in_span + f_ctrl = 1). The transition constraint below links
+    // adjacent rows so that spans can only be entered and exited through the intended operations.
 
     // Execution starts outside any basic block.
     builder.when_first_row().assert_zero(in_span);
@@ -160,11 +160,15 @@ pub fn enforce_main<AB>(
     // The in-span flag is binary.
     builder.assert_bool(in_span);
 
-    // After SPAN, next row enters a basic block.
-    builder.when(op_flags.span()).assert_one(in_span_next);
+    // SPAN/RESPAN enter a span; END/RESPAN exit one.
+    let enters_span = op_flags.span() + op_flags.respan();
+    let exits_span_next = op_flags.end_next() + op_flags.respan_next();
+    let continues_span = in_span * exits_span_next.not();
 
-    // After RESPAN, next row stays in a basic block.
-    builder.when(op_flags.respan()).assert_one(in_span_next);
+    // Gate this row-to-row rule for defense in depth, so correctness does not rely on the cyclic
+    // final-to-first instance. That instance would also hold: the final HALT row has in_span = 0,
+    // and the first row independently constrains in_span = 0.
+    builder.when_transition().assert_eq(in_span_next, enters_span + continues_span);
 
     // =============================================
     // Op-bit binary constraints
@@ -501,4 +505,63 @@ pub fn enforce_main<AB>(
     // HALT rows and the absorbing transition constraint keeps them there; this constraint
     // makes it explicit in the AIR.
     builder.when_last_row().assert_one(op_flags.halt());
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_core::{
+        Felt, ONE,
+        field::{PrimeCharacteristicRing, QuadFelt},
+        operations::opcodes,
+    };
+
+    use super::enforce_main;
+    use crate::{
+        CoreCols,
+        constraints::{
+            op_flags::{OpFlags, generate_test_row},
+            stack::test_utils::ConstraintEvalBuilder,
+        },
+    };
+
+    fn decoder_constraints_hold(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> bool {
+        let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+        let mut builder = ConstraintEvalBuilder::new();
+        enforce_main(&mut builder, local, next, &op_flags);
+        builder.evaluations.into_iter().all(|value| value == QuadFelt::ZERO)
+    }
+
+    #[test]
+    fn decoder_rejects_exit_from_span_without_end_or_respan() {
+        let mut local = generate_test_row(opcodes::EQ.into());
+        local.decoder.in_span = ONE;
+        local.decoder.addr = ONE;
+        local.decoder.group_count = Felt::from_u8(3);
+        local.decoder.hasher_state[0] = Felt::from_u8(opcodes::ASSERT);
+
+        let mut next = generate_test_row(opcodes::SPAN.into());
+        next.decoder.addr = ONE;
+        next.decoder.group_count = Felt::from_u8(3);
+
+        assert!(
+            !decoder_constraints_hold(&local, &next),
+            "leaving a span without END or RESPAN must violate the decoder AIR",
+        );
+    }
+
+    #[test]
+    fn decoder_rejects_entry_into_span_without_span_or_respan() {
+        let mut local = generate_test_row(opcodes::REPEAT.into());
+        local.stack.top[0] = ONE;
+        local.decoder.hasher_state[4] = ONE;
+
+        let mut next = generate_test_row(opcodes::NOOP.into());
+        next.decoder.in_span = ONE;
+        next.decoder.group_count = Felt::from_u8(3);
+
+        assert!(
+            !decoder_constraints_hold(&local, &next),
+            "entering a span without SPAN or RESPAN must violate the decoder AIR",
+        );
+    }
 }
