@@ -19,7 +19,7 @@ use crate::{
 
 #[test]
 fn test_sbox() {
-    let state = [rand::random::<Felt>(); STATE_WIDTH];
+    let state = rand::random::<[Felt; STATE_WIDTH]>();
 
     let mut expected = state;
     expected.iter_mut().for_each(|v| *v = v.exp_const_u64::<ALPHA>());
@@ -32,7 +32,7 @@ fn test_sbox() {
 
 #[test]
 fn test_inv_sbox() {
-    let state = [rand::random::<Felt>(); STATE_WIDTH];
+    let state = rand::random::<[Felt; STATE_WIDTH]>();
 
     let mut expected = state;
     expected.iter_mut().for_each(|v| *v = v.exp_const_u64::<INV_ALPHA>());
@@ -45,7 +45,7 @@ fn test_inv_sbox() {
 
 #[test]
 fn hash_elements_vs_merge() {
-    let elements = [rand::random::<Felt>(); 8];
+    let elements = rand::random::<[Felt; 8]>();
 
     let digests: [Word; 2] = [
         Word::new(elements[..4].try_into().unwrap()),
@@ -59,7 +59,7 @@ fn hash_elements_vs_merge() {
 
 #[test]
 fn merge_vs_merge_in_domain() {
-    let elements = [rand::random::<Felt>(); 8];
+    let elements = rand::random::<[Felt; 8]>();
 
     let digests: [Word; 2] = [
         Word::new(elements[..4].try_into().unwrap()),
@@ -131,7 +131,7 @@ fn hash_padding_no_extra_permutation_call() {
 
 #[test]
 fn hash_elements_padding() {
-    let e1 = [rand::random::<Felt>(); 2];
+    let e1 = rand::random::<[Felt; 2]>();
     let e2 = [e1[0], e1[1], ZERO];
 
     let r1 = Rpo256::hash_elements(&e1);

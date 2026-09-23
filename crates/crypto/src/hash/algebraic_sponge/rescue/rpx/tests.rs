@@ -18,7 +18,7 @@ const EXT_ROUND_TEST_ITERS: usize = 5_000_000;
 
 #[test]
 fn hash_elements_vs_merge() {
-    let elements = [rand::random::<Felt>(); 8];
+    let elements = rand::random::<[Felt; 8]>();
 
     let digests: [Word; 2] = [
         Word::new(elements[..4].try_into().unwrap()),
@@ -32,7 +32,7 @@ fn hash_elements_vs_merge() {
 
 #[test]
 fn merge_vs_merge_in_domain() {
-    let elements = [rand::random::<Felt>(); 8];
+    let elements = rand::random::<[Felt; 8]>();
 
     let digests: [Word; 2] = [
         Word::new(elements[..4].try_into().unwrap()),
@@ -82,7 +82,7 @@ fn hash_padding() {
 
 #[test]
 fn hash_elements_padding() {
-    let e1 = [rand::random::<Felt>(); 2];
+    let e1 = rand::random::<[Felt; 2]>();
     let e2 = [e1[0], e1[1], ZERO];
 
     let r1 = Rpx256::hash_elements(&e1);

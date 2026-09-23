@@ -345,7 +345,7 @@ fn test_op_expacc() {
 
 #[test]
 fn test_op_ext2mul() {
-    let [a0, a1, b0, b1] = [rand::random::<Felt>(); 4];
+    let [a0, a1, b0, b1] = rand::random::<[Felt; 4]>();
 
     let mut processor = FastProcessor::new(StackInputs::new(&[b0, b1, a0, a1]).unwrap());
 

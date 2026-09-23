@@ -316,7 +316,7 @@ mod tests {
     };
 
     fn random_digest() -> Word {
-        Word::new([rand::random(); 4])
+        Word::new(rand::random())
     }
 
     #[test]
