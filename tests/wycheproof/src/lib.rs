@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod ed25519_masm;
+#[cfg(test)]
+mod p256_masm;
 
 #[cfg(test)]
 mod tests {
