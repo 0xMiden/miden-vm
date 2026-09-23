@@ -5,47 +5,69 @@ use miden::core::stark::constants
 ###
 ### The per-AIR log heights live in the generic array (`constants::air_trace_length_logs_ptr`);
 ### this module only fixes which AIR occupies which offset: core 0, chiplets 1,
-### poseidon2_permutation 2 — the canonical instance order the proof order sorts against.
+### Eidos compression 2, and And8 lookup 3 — the canonical instance order the proof order sorts
+### against.
 ###
 ### The generic verifier in `stark/` owns the addresses it dereferences; everything
 ### named after this relation's AIRs, statement, or bus lives here so the generic layer
 ### carries no relation vocabulary and a second relation is a sibling module.
 ###
-### The VM control frame occupies the half-open range 3223322764..3223323864, immediately
+### The VM control frame occupies the half-open range 3223322776..3223323864, immediately
 ### after the generic verifier frame. It contains relation metadata, the authenticated claim,
 ### boundary inputs, and the maximum 255-word kernel witness.
 
 ### Number of kernel procedures in the authenticated witness.
-const NUM_KERNEL_PROCEDURES_PTR = 3223322764
+const NUM_KERNEL_PROCEDURES_PTR = 3223322776
 
 ### Reserved alignment cells before the word-aligned scratch region.
-const CONTROL_ALIGNMENT_PADDING_PTR = 3223322765
+const CONTROL_ALIGNMENT_PADDING_PTR = 3223322777
 
 ### gamma = beta^MAX_MESSAGE_WIDTH for per-bus domain separation.
 ### Stored as [gamma0, gamma1, 0, 0] (one extension field element, word-aligned).
 ### Computed in `observe_aux_trace` (step II) from the FS-sampled aux randomness.
-const BUS_GAMMA_PTR = 3223322768
+const BUS_GAMMA_PTR = 3223322780
 ### Outer-LogUp boundary correction `c_total` (one extension field element, 2 base felts).
 ### Computed in `observe_aux_trace` (step II) from the FS-sampled aux randomness and the
 ### statement values staged before the transcript starts, then asserted via
-### `c_total + aux_sum == 0`. The remaining two cells are reserved so a future word write
-### cannot overwrite unrelated state.
-const C_TOTAL_PTR = 3223322772
+### `c_total + aux_sum == 0`. The remaining two cells reserve the full word and isolate adjacent
+### state.
+const C_TOTAL_PTR = 3223322784
 
 ### Caller-provided claim commitment. The verifier checks the advice-supplied preimage against it.
-const CLAIM_COMMITMENT_PTR = 3223322776
+const CLAIM_COMMITMENT_PTR = 3223322788
 
 ### Verifier-owned claim preimage (40 felts: P | K | I | O).
-const CLAIM_PTR = 3223322780
+const CLAIM_PTR = 3223322792
 
 ### Reserved cells preserving the established boundary and witness anchors.
-const BOUNDARY_ANCHOR_PADDING_PTR = 3223322820
+const BOUNDARY_ANCHOR_PADDING_PTR = 3223322832
 
 ### Boundary block [program_digest | deferred_root].
 const BOUNDARY_INPUTS_PTR = 3223322836
 
 ### Kernel digest witness (up to 255 word-aligned procedure digests).
 const KERNEL_WITNESS_PTR = 3223322844
+
+### Out-of-domain ingest scatter table and proof-order maps, immediately after the VM control
+### frame. Reserves 64 felts:
+###
+###   +0            base address of the out-of-domain row being ingested
+###   +4  .. +19    per proof position, in stream order: (row-relative destination, digest address)
+###   +20 .. +43    `pipe_k` procedure digests reached by `dynexec`, one word each
+###   +44 .. +47    `pos_by_id`: each AIR's proof position, in instance order
+###   +48 .. +51    `id_by_pos`: the AIR committed at each proof position
+###
+### The internal offsets and the reserve's sufficiency are owned by the regeneration tool, which
+### derives them from the AIR widths and fills `sys/vm/ood_frames.masm` accordingly.
+const OOD_SCATTER_TABLE_PTR = 3223323864
+
+### Proof-order maps inside the reserve above, staged once per proof by
+### `sys/vm/ood_frames.masm::stage_proof_order_maps` from the transcript-bound AIR heights.
+### `pos_by_id[k]` is AIR `k`'s position in the height-sorted proof order; `id_by_pos[p]` is the
+### AIR committed at proof position `p`. The scatter staging and the auxiliary-boundary placement
+### read `pos_by_id`; the fold-coefficient staging reads `id_by_pos`.
+const PROOF_ORDER_POSITIONS_PTR = 3223323908
+const PROOF_ORDER_IDS_PTR = 3223323912
 
 ## VM ACE READ section
 ##
@@ -56,36 +78,42 @@ const KERNEL_WITNESS_PTR = 3223322844
 ##   pi_ptr             -->  [ stack I/O public inputs  ]
 ##   AUX_RAND_ELEM_PTR  -->  [ aux randomness           ]  4 felts
 ##                           [ alignment pad            ]  4 felts
-##   OOD_EVALUATIONS_PTR --> [ OOD evaluations          ]  544 felts
-##   AUX_BUS_BOUNDARY_PTR -> [ three LogUp finals       ]  6 felts + 2 padding
+##   OOD_EVALUATIONS_PTR --> [ OOD evaluations          ]  1120 felts
+##   AUX_BUS_BOUNDARY_PTR -> [ four LogUp finals        ]  8 felts
 ##   AUXILIARY_ACE_INPUTS_PTR
-##                       --> [ fixed stark vars         ]  slots 0..10
-##                           [ core selectors           ]  slots 11..13
-##                           [ chiplets selectors       ]  slots 14..16
-##                           [ Poseidon2 selectors      ]  slots 17..19
+##                       --> [ fixed stark vars         ]  slots 0..9
+##                           [ core selectors           ]  slots 10..12
+##                           [ chiplets selectors       ]  slots 13..15
+##                           [ Eidos compression selectors        ]  slots 16..18
+##                           [ And8 selectors           ]  slots 19..21
+##                           [ per-AIR fold coefficients]  slots 22..25
+##                           [ alignment pad            ]  slots 26..27
 ##   ACE_CIRCUIT_STREAM_PTR
-##                       --> [ stream + reserved tail   ]  6040 felts
+##                       --> [ stream + reserved tail up to the fixed PVM allocation ]
 
 ### Two extension-field elements: beta followed by alpha, four base felts total.
 const AUX_RAND_ELEM_PTR = 3225419776
 
-### OOD evaluations in the VM ACE READ section. The LMCS-aligned current and next rows each occupy
-### 272 felts: 96 main EF slots, 24 aux-coordinate EF slots, and 16 quotient EF slots.
+### OOD evaluations in the VM ACE READ section. Each aligned current/next row has
+### 280 scalar evaluations: 8 preprocessed, 192 main, 64 auxiliary-coordinate, and 16
+### quotient. Each evaluation is quadratic-extension valued, so advice supplies 560 base felts
+### per row.
 const OOD_EVALUATIONS_PTR = 3225419784
 
-### Three LogUp finals in proof order, padded from 6 to 8 base felts.
-const AUX_BUS_BOUNDARY_PTR = 3225420328
+### Four LogUp finals, one per AIR in canonical instance order (8 base felts). The proof submits
+### them in the height-sorted proof order; `sys/vm/aux_trace.masm` scatters them here.
+const AUX_BUS_BOUNDARY_PTR = 3225420904
 
-### Twenty extension-field stark-var slots: 11 fixed slots followed by three selector slots
-### for each of the VM's core, chiplets, and Poseidon2-permutation AIRs.
-const AUXILIARY_ACE_INPUTS_PTR = 3225420336
+### Twenty-eight extension-field stark-var slots: 10 fixed slots, three selector slots and one
+### multi-air fold coefficient for each of the four AIRs, and two alignment slots.
+const AUXILIARY_ACE_INPUTS_PTR = 3225420912
 
-### Factored ACE circuit stream, sized by the generated evaluator's `ACE_PREFIX_BLOCKS` and
-### `ACE_COMMON_BLOCKS`. The region reserves 6040 felts; the tail beyond the stream keeps the
-### PVM READ section's base address (`sys/pvm/layout.masm`) fixed.
-const ACE_CIRCUIT_STREAM_PTR = 3225420376
+### ACE circuit stream, sized by the generated evaluator's `ACE_STREAM_BLOCKS`. The reserved tail
+### beyond the stream keeps the PVM READ section's base address (`sys/pvm/layout.masm`) fixed.
+const ACE_CIRCUIT_STREAM_PTR = 3225420968
 
-### Scratch row for DEEP query openings: 96 main, 24 auxiliary-coordinate, and 16 quotient felts.
+### Scratch row for DEEP query openings: 8 preprocessed, 192 main, 64
+### auxiliary-coordinate, and 16 quotient felts (280 total).
 const CURRENT_TRACE_ROW_PTR = 3238002688
 
 pub proc set_core_trace_length_log(height: u8)
@@ -104,12 +132,20 @@ pub proc get_chiplets_trace_length_log() -> u8
     exec.constants::air_trace_length_logs_ptr add.1 mem_load
 end
 
-pub proc set_poseidon2_permutation_trace_length_log(height: u8)
+pub proc set_eidos_compression_trace_length_log(height: u8)
     exec.constants::air_trace_length_logs_ptr add.2 mem_store
 end
 
-pub proc get_poseidon2_permutation_trace_length_log() -> u8
+pub proc get_eidos_compression_trace_length_log() -> u8
     exec.constants::air_trace_length_logs_ptr add.2 mem_load
+end
+
+pub proc set_and8_lookup_trace_length_log(height: u8)
+    exec.constants::air_trace_length_logs_ptr add.3 mem_store
+end
+
+pub proc get_and8_lookup_trace_length_log() -> u8
+    exec.constants::air_trace_length_logs_ptr add.3 mem_load
 end
 
 ### Relation-facing pointer accessors used by the generated constraint evaluator.
@@ -133,6 +169,18 @@ end
 
 pub proc ood_evaluations_ptr() -> ptr<types::QuadFelt>
     push.OOD_EVALUATIONS_PTR
+end
+
+pub proc ood_scatter_table_ptr() -> types::Address
+    push.OOD_SCATTER_TABLE_PTR
+end
+
+pub proc proof_order_positions_ptr() -> types::Address
+    push.PROOF_ORDER_POSITIONS_PTR
+end
+
+pub proc proof_order_ids_ptr() -> types::Address
+    push.PROOF_ORDER_IDS_PTR
 end
 
 pub proc current_trace_row_ptr() -> types::Address

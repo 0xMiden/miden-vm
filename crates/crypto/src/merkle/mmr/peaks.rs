@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use crate::{
     Felt, Word, ZERO,
-    hash::poseidon2::Poseidon2,
+    hash::eidos::{BLOCK_LEN, Eidos, domains::MMR_PEAKS},
     merkle::mmr::{Forest, MmrError, MmrProof},
 };
 
@@ -116,24 +116,20 @@ impl MmrPeaks {
         (self.forest, self.peaks)
     }
 
-    /// Hashes the forest leaf count and peaks.
-    ///
-    /// The procedure will:
-    /// - Prefix the preimage with `[num_leaves, 0, 0, 0]` to bind the forest shape.
-    /// - Flatten and pad the peaks to a vector of Felts.
-    /// - Hash the vector of Felts.
+    /// Hashes the padded peaks while binding the forest leaf count into the initial chaining word.
     pub fn hash_peaks(&self) -> Word {
         let padded_peaks = self.flatten_and_pad_peaks();
-        let mut elements = Vec::with_capacity(Word::NUM_ELEMENTS + padded_peaks.len());
-        elements.extend_from_slice(&[
-            Felt::new_unchecked(self.num_leaves() as u64),
-            ZERO,
-            ZERO,
-            ZERO,
-        ]);
-        elements.extend_from_slice(&padded_peaks);
+        let num_leaves = self.num_leaves() as u64;
+        let mut cv = Eidos::init_chaining_word_with_params(
+            MMR_PEAKS,
+            [num_leaves as u32, (num_leaves >> 32) as u32, 0],
+        );
 
-        Poseidon2::hash_elements(&elements)
+        for block in padded_peaks.chunks_exact(BLOCK_LEN) {
+            cv = Eidos::compress(cv, block.try_into().expect("MMR peaks are block-aligned"));
+        }
+
+        cv
     }
 
     /// Verifies the Merkle opening proof.
@@ -155,8 +151,8 @@ impl MmrPeaks {
     ///
     /// The procedure will:
     /// - Flatten the vector of Words into a vector of Felts.
-    /// - Pad the peaks with ZERO to an even number of words, this removes the need to handle
-    ///   Poseidon2 padding.
+    /// - Pad the peaks with ZERO to an even number of words, keeping every Eidos absorption on a
+    ///   whole two-word block boundary.
     /// - Pad the peaks to a minimum length of 16 words, which reduces the constant cost of hashing.
     pub fn flatten_and_pad_peaks(&self) -> Vec<Felt> {
         let num_peaks = self.peaks.len();

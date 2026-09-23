@@ -2,9 +2,9 @@
 
 use libfuzzer_sys::fuzz_target;
 use miden_crypto::{
+    dsa::falcon512_eidos::PublicKey,
+    ies::{SealedMessage, SealingKey},
     utils::Deserializable,
-    dsa::falcon512_poseidon2::PublicKey,
-    ies::{SealingKey, SealedMessage},
 };
 
 fuzz_target!(|data: &[u8]| {

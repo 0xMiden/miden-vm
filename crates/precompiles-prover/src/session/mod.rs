@@ -5,29 +5,28 @@
 //! [`Session`] owns the per-chiplet `*Requires` accumulators and lends
 //! them to the recording layers that do the wiring — the six-`&mut`
 //! [`KeccakNodeRequires::require`] call, the eval layer's node entries
-//! (which drive their own Poseidon2 absorptions and the
+//! (which drive their own framed Eidos absorptions and the
 //! [`UintRequire`](crate::uint::UintRequire) relation recording) — and
 //! owns the dependency-ordered trace-gen sweep (eval before its
-//! Poseidon2 / BPL demand; round before BPL (round drives its per-row
+//! Eidos / BPL demand; round before BPL (round drives its per-row
 //! `BytePairLut` byte-check demand directly); the arithmetic ops' store
 //! demand before the store; BPL last, since every chiplet feeds it).
 //! Callers [`keccak`](Session::keccak) inputs into
 //! [`Truthy`] claim handles, fold them into the transcript with
-//! [`assert_and`](Session::assert_and) /
-//! [`assert_and_fold`](Session::assert_and_fold), and
+//! [`assert_and`](Session::assert_and), and
 //! [`finish`](Session::finish) the chosen root into a [`SessionTraces`]
 //! bundle.
 //!
 //! **The public surface is DAG-aware only**: what a runner populating the
 //! statement from serialized deferred precompile calls needs — `keccak`,
-//! explicit `pin_uint`, the [`UintNode`] value ops (`uint_leaf`, `uint_add` / `uint_sub` /
+//! the [`UintNode`] value ops (`uint_leaf`, `uint_add` / `uint_sub` /
 //! `uint_mul`, the `uint_is` predicate), and the `Truthy`
 //! folds. Each value op lays one eval uint-op node over its
 //! children's hashes with the relation op recorded underneath; results
 //! intern with canonical `(value, modulus)` dedup, so equal values share
 //! a ptr — the `uint_is` completeness contract — and nodes intern by
 //! `(op, child hashes)` in the eval layer, mirroring keccak interning.
-//! Ptrs themselves never surface in the API or any cap.
+//! Result pointers stay in binding and relation messages rather than operation frames.
 //!
 //! This produces traces only. Assembling the AIRs and provers and calling
 //! `prove_multi` (or a bus-balance check) is the caller's job — that's
@@ -35,7 +34,6 @@
 
 use alloc::{vec, vec::Vec};
 
-pub use miden_core::proof::StarkProof;
 #[cfg(debug_assertions)]
 use miden_core::utils::Matrix;
 use miden_core::{Felt, utils::RowMajorMatrix};
@@ -65,12 +63,12 @@ use crate::{
     math::{U256, from_limbs32, to_limbs32},
     primitives::byte_pair_lut::{BytePairLutRequires, generate_trace as bpl_trace},
     transcript::{
+        eidos::{
+            EidosDigest,
+            trace::{EidosRequires, generate_trace_with_byte_lookups as eidos_compression_trace},
+        },
         eval::trace::{TranscriptEvalRequires, generate_trace as eval_trace},
         nodes::UintOpId,
-        poseidon2::{
-            P2Digest,
-            trace::{Poseidon2Requires, generate_trace as p2_trace},
-        },
     },
     uint::{
         UintStores, add::trace::generate_trace as uint_add_trace,
@@ -80,10 +78,14 @@ use crate::{
 
 mod fixed;
 mod prove;
+#[cfg(test)]
 pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
+#[cfg(test)]
 pub mod statements;
 pub mod strategies;
-pub use miden_precompiles_air::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS};
+#[cfg(test)]
+pub use miden_precompiles_air::ChipletAir;
+pub(crate) use miden_precompiles_air::NUM_CHIPLETS;
 
 /// Stateful builder over the full chiplet stack.
 ///
@@ -92,7 +94,7 @@ pub use miden_precompiles_air::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS};
 /// the final [`finish`](Self::finish).
 #[derive(Debug)]
 pub struct Session {
-    p2: Poseidon2Requires,
+    eidos: EidosRequires,
     chunk: ChunkRequires,
     round: RoundRequires,
     bpl: BytePairLutRequires,
@@ -107,7 +109,7 @@ pub struct Session {
 impl Session {
     pub fn new() -> Self {
         let mut session = Self {
-            p2: Poseidon2Requires::new(),
+            eidos: EidosRequires::new(),
             chunk: ChunkRequires::new(),
             round: RoundRequires::new(),
             bpl: BytePairLutRequires::new(),
@@ -148,7 +150,7 @@ impl Session {
 
         Some([
             chunk_node_sponge,
-            self.p2.trace_height()?,
+            self.eidos.trace_height()?,
             self.round.trace_height()?,
             crate::primitives::byte_pair_lut::TRACE_HEIGHT,
             self.eval.trace_height()?,
@@ -162,12 +164,11 @@ impl Session {
 
     /// Record a Keccak-256 of `input`. Returns its digest and a [`Truthy`]
     /// handle to the `Binding(H_keccak, True)` claim — fold the handle into
-    /// the transcript via [`assert_and`](Self::assert_and) /
-    /// [`assert_and_fold`](Self::assert_and_fold).
+    /// the transcript via [`assert_and`](Self::assert_and).
     ///
     /// Interning is below this layer: identical input collapses onto one
     /// keccak-node row (its `out_mult` bumped) and lays no fresh sponge /
-    /// chunk / Poseidon2 work — but each call still yields its own handle,
+    /// chunk / Eidos work — but each call still yields its own handle,
     /// whose uses are counted and forwarded to the provider at `finish`.
     pub fn keccak(&mut self, input: &[u8]) -> (KeccakDigest, Truthy) {
         // Seven disjoint fields borrowed in one expression — the borrow
@@ -179,7 +180,7 @@ impl Session {
             &mut self.chunk,
             &mut self.round,
             &mut self.bpl,
-            &mut self.p2,
+            &mut self.eidos,
         );
         let handle = self.eval.issue_keccak(out.h_keccak, out.node_row);
         (out.keccak_digest, handle)
@@ -189,11 +190,13 @@ impl Session {
     /// pinned at `bound_ptr`.
     ///
     /// This installs the value in the uint store, hashes `lo[4] || hi[4]` under the manual
-    /// pin-claim cap `(UINT_PIN_CLAIM_TAG, bound_ptr, ptr, 0)`, consumes both `UintVal` halves at
-    /// `ptr`, and returns the foldable [`Truthy`] for `Binding(h_pin, True)`. Default fixed domains
-    /// and curve coefficients are already installed by [`Session::new`] and should not be pinned
-    /// manually; ordinary runtime constants should use [`uint_leaf`](Self::uint_leaf) instead. The
-    /// modulus itself is a self-referential pin (`bound_ptr == ptr`).
+    /// pin-claim frame `(PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, ptr, 0)`, consumes both
+    /// `UintVal` halves at `ptr`, and returns the foldable [`Truthy`] for
+    /// `Binding(h_pin, True)`. Default fixed domains and curve coefficients are already installed
+    /// by [`Session::new`] and should not be pinned manually; ordinary runtime constants should use
+    /// [`uint_leaf`](Self::uint_leaf) instead. The modulus itself is a self-referential pin
+    /// (`bound_ptr == ptr`).
+    #[cfg(test)]
     pub fn pin_uint(&mut self, ptr: u32, value: U256, bound_ptr: u32) -> Truthy {
         let handle = if ptr == bound_ptr {
             self.uint.store.pin_modulus(ptr, value)
@@ -203,7 +206,7 @@ impl Session {
         };
         let bound = self.uint.store.pinned(bound_ptr);
         self.eval
-            .pin_uint(handle, bound, to_limbs32(value), &mut self.uint.store, &mut self.p2)
+            .pin_uint(handle, bound, to_limbs32(value), &mut self.uint.store, &mut self.eidos)
     }
 
     /// Commit a uint value into the DAG as a *transient* uint leaf —
@@ -211,22 +214,19 @@ impl Session {
     /// [`uint_mul`](Self::uint_mul) / [`uint_is`](Self::uint_is). The
     /// value is interned with canonical `(value, modulus)` dedup (a value
     /// value equal to a pinned constant lands on the pin's ptr), hashed
-    /// under the VM uint value cap `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]`, and bound
-    /// as `Binding(h, Uint, ptr, bound_ptr)`. One leaf node per stored
+    /// under the uint VALUE frame `[UintPrecompile::domain(), VALUE_OP_ID, bound_ptr, 0]`, and
+    /// bound as `Binding(h, Uint, ptr, bound_ptr)`. One leaf node per stored
     /// uint: re-leafing a value returns the same shared-use handle.
     ///
-    /// Unlike [`pin_uint`](Self::pin_uint), nothing about a *store
-    /// address* is committed — the hash carries the value itself; pin
-    /// separately if the statement needs `store[ptr] = value` in the
-    /// root. The modulus must already be interned (it is itself a pin).
+    /// The hash commits to the value, not its store address. The modulus must already be pinned.
     pub fn uint_leaf(&mut self, value: U256, bound_ptr: u32) -> UintNode {
         let bound = self.uint.store.pinned(bound_ptr);
         let ptr = self.uint.store.intern(value, bound);
         self.eval
-            .uint_leaf(ptr, bound, to_limbs32(value), &mut self.uint.store, &mut self.p2)
+            .uint_leaf(ptr, bound, to_limbs32(value), &mut self.uint.store, &mut self.eidos)
     }
 
-    /// The DAG node `a + b mod p`: hashes the uint `Add` op cap over the children's hashes,
+    /// The DAG node `a + b mod p`: hashes the children's hashes under the uint `Add` frame,
     /// consumes their `Uint` bindings plus one [`UintAdd`](crate::relations::BusId::UintAdd)
     /// relation tuple carrying the shared bound, and binds the reduced sum. Returns the result's
     /// shared-use handle.
@@ -256,13 +256,13 @@ impl Session {
     /// would be unprovable); completeness across distinct DAG shapes is
     /// the canonical interning above.
     pub fn uint_is(&mut self, a: &UintNode, b: &UintNode) -> Truthy {
-        self.eval.record_is(a, b, &mut self.p2)
+        self.eval.record_is(a, b, &mut self.eidos)
     }
 
     /// Create a curve point `(x, y)` on the fixed short-Weierstrass group
     /// selected by `group_ptr`. The group row is preseeded in the EC store;
     /// its `(a, b, bound)` metadata supplies the curve parameters and
-    /// coordinate field, while `group_ptr` is the curve cap selector. Proves
+    /// coordinate field, while `group_ptr` is the curve-context selector. Proves
     /// on-curve membership and binds `(h, Group, point_ptr)`.
     /// Returns the shared-use [`EcNode`]. Panics if `(x, y)` is not on the
     /// group or if the coordinate nodes are not stored under the group's base
@@ -276,15 +276,14 @@ impl Session {
             "coordinates must be stored under the group's base-field modulus",
         );
         self.eval
-            .ec_create(group_ptr, x, y, self.ec.require(self.uint.require()), &mut self.p2)
+            .ec_create(group_ptr, x, y, self.ec.require(self.uint.require()), &mut self.eidos)
     }
 
     /// Declare the **scalar field** of `point`'s group: from here its MSM
     /// scalars (and the shared-base merge `mod`) live under the modulus
     /// pinned at `sbound_ptr` — the curve order `n`, not the base field `p`.
-    /// Recording metadata only (no DAG node — name a *pinned* modulus ptr,
-    /// e.g. via [`pin_uint`](Self::pin_uint)); call it **before** laying any
-    /// MSM whose scalar arithmetic must be sound `mod n` (e.g. binding a GLV
+    /// Records metadata only, using an already-pinned modulus pointer. Call it **before** laying
+    /// any MSM whose scalar arithmetic must be sound `mod n` (e.g. binding a GLV
     /// split `u ≡ uₐ + uᵦ·λ (mod n)`, where the split's scalar nodes must be
     /// the very ones the MSM consumes). Idempotent on the same handle.
     pub fn constrain_scalar_bound(&mut self, point: &EcNode, sbound_ptr: u32) {
@@ -297,14 +296,15 @@ impl Session {
     pub fn ec_pai(&mut self, group_ptr: u32) -> EcNode {
         let group = EcGroupPtr::from_addr(group_ptr);
         let _ = self.ec.store.group_params(group);
-        self.eval.ec_pai(group_ptr, self.ec.require(self.uint.require()), &mut self.p2)
+        self.eval
+            .ec_pai(group_ptr, self.ec.require(self.uint.require()), &mut self.eidos)
     }
 
     /// The DAG node `R = P + Q`: consumes one
     /// [`EcGroupAdd`](crate::relations::BusId::EcGroupAdd) relation tuple
     /// (the group law, provided at mult 1) and binds `(h, Group, r_ptr)`.
     pub fn ec_add(&mut self, p: &EcNode, q: &EcNode) -> EcNode {
-        self.eval.ec_add(p, q, self.ec.require(self.uint.require()), &mut self.p2)
+        self.eval.ec_add(p, q, self.ec.require(self.uint.require()), &mut self.eidos)
     }
 
     /// The `is` predicate over points: asserts `P ≡ Q` (point-ptr
@@ -313,7 +313,7 @@ impl Session {
     /// `(h, True)`. Fold the returned [`Truthy`] into the root. Panics if
     /// the points differ.
     pub fn ec_is(&mut self, p: &EcNode, q: &EcNode) -> Truthy {
-        self.eval.ec_is(p, q, &mut self.p2)
+        self.eval.ec_is(p, q, &mut self.eidos)
     }
 
     /// Read a canonical value from this Session's uint store.
@@ -331,7 +331,7 @@ impl Session {
     /// binding `(h, Group, r_ptr)`. One row, one block — the EC parallel
     /// of uint sub.
     pub fn ec_sub(&mut self, p: &EcNode, q: &EcNode) -> EcNode {
-        self.eval.ec_sub(p, q, self.ec.require(self.uint.require()), &mut self.p2)
+        self.eval.ec_sub(p, q, self.ec.require(self.uint.require()), &mut self.eidos)
     }
 
     /// Promote a stored point to the 1-term MSM expression `⟨P × 1⟩` (value
@@ -395,7 +395,7 @@ impl Session {
 
     /// The DAG node `R = Σ sᵢ·Pᵢ` — resolve a symbolic MSM expression into a
     /// curve point on the transcript. Lays the eval `EcMsm` node (the
-    /// chaining sponge over the claim's `(Pᵢ, sᵢ)` terms), binding its value
+    /// Eidos compression chain over the claim's `(Pᵢ, sᵢ)` terms), binding its value
     /// as a `Group` point. A third point-producing EC node beside
     /// [`ec_create`](Self::ec_create) and [`ec_add`](Self::ec_add); compare
     /// it to a claimed point with [`ec_is`](Self::ec_is) (or feed it onward
@@ -420,12 +420,13 @@ impl Session {
     /// correspondence with the caller's original terms instead of collapsing
     /// two claim terms onto one merged row).
     pub fn ec_msm(&mut self, expr: EcExprPtr, terms: &[(EcNode, UintNode)]) -> EcNode {
-        self.eval.record_ec_msm(expr, terms, &mut self.msm, &mut self.p2)
+        self.eval.record_ec_msm(expr, terms, &mut self.msm, &mut self.eidos)
     }
 
-    /// Number of MSM expressions laid so far (intros + combines + negs) — a
-    /// chain-cost diagnostic, e.g. to compare addition-chain
-    /// [`strategies`]. Not a DAG quantity.
+    /// Number of MSM expressions laid so far (intros + endomorphism intros +
+    /// combines + negs) — a chain-cost diagnostic, e.g. to compare
+    /// addition-chain [`strategies`]. Not a DAG quantity.
+    #[cfg(test)]
     pub fn msm_expr_count(&self) -> usize {
         self.msm.expr_count()
     }
@@ -434,6 +435,7 @@ impl Session {
     /// off-circuit cross-checks (e.g. against a reference MSM) until the
     /// eval resolve seam binds the value in-circuit. Panics if the value is
     /// the point at infinity.
+    #[cfg(test)]
     pub fn msm_value_coords(&self, expr: EcExprPtr) -> (U256, U256) {
         let val = self.msm.value(expr);
         let (_, coords) = self.ec.store.point_params(val);
@@ -441,29 +443,27 @@ impl Session {
         (self.uint.store.uint(x).value, self.uint.store.uint(y).value)
     }
 
-    /// Delegate a value op to the eval layer's [`uint_op`]
-    /// (TranscriptEvalRequires::uint_op), lending it the uint recording
-    /// layer and the Poseidon2 accumulator (disjoint field borrows).
+    /// Records a uint operation and its Eidos commitment in the eval layer.
     fn uint_op(&mut self, op: UintOpId, a: &UintNode, b: &UintNode) -> UintNode {
-        self.eval.uint_op(op, a, b, self.uint.require(), &mut self.p2)
+        self.eval.uint_op(op, a, b, self.uint.require(), &mut self.eidos)
     }
 
-    /// A `ZERO_HASH` leaf claim — the trivial truthy, and the usual base
-    /// for [`assert_and_fold`](Self::assert_and_fold).
+    /// A `ZERO_HASH` leaf claim: the trivial truthy used to start a fold of claims.
     pub fn zero(&mut self) -> Truthy {
         self.eval.zero()
     }
 
-    /// Fold two claims: assert both truthy and bind their AND
-    /// `Hash(a || b || cap_transcript)` into the transcript. Counts one use of each child
-    /// (two uses when they are the same claim); returns the shared-use combined claim.
+    /// Fold two claims: assert both truthy and bind their framed Eidos AND-node digest into the
+    /// transcript. Counts one use of each child (two uses when they are the same claim);
+    /// returns the shared-use combined claim.
     pub fn assert_and(&mut self, a: Truthy, b: Truthy) -> Truthy {
-        self.eval.record_and(a, b, &mut self.p2)
+        self.eval.record_and(a, b, &mut self.eidos)
     }
 
     /// Left-fold claims into the transcript from a `ZERO_HASH` base:
     /// `Hash(… Hash(Hash(0, h₀), h₁) …, hₙ)`. `assert_and_fold(keccaks)`
     /// reproduces the left-leaning spine.
+    #[cfg(test)]
     pub fn assert_and_fold(&mut self, handles: impl IntoIterator<Item = Truthy>) -> Truthy {
         let mut acc = self.zero();
         for h in handles {
@@ -504,7 +504,8 @@ impl Session {
             "chunk_node_sponge",
             chunk_node_sponge_trace(self.chunk, self.node, self.sponge)
         );
-        let p2 = trace_span!("poseidon2", p2_trace(self.p2));
+        let eidos_compression =
+            trace_span!("eidos_compression", eidos_compression_trace(self.eidos, &mut self.bpl));
         let round = trace_span!("keccak_round", round_trace(self.round, &mut self.bpl));
         // The relation traces route their store demand as they lay, so
         // they run before the store reads its provide multiplicities;
@@ -528,13 +529,13 @@ impl Session {
         let ec_add =
             trace_span!("ec_add", ec_add_trace(self.ec.add, &mut self.ec.store, &mut self.bpl));
         let ec = trace_span!("ec_store", ec_store_trace(self.ec.store));
-        let bpl = trace_span!("byte_pair_lut", bpl_trace(self.bpl));
+        let byte_pair_lut = trace_span!("byte_pair_lut", bpl_trace(self.bpl));
 
         let traces = SessionTraces {
             chunk_node_sponge,
-            p2,
+            eidos_compression,
             round,
-            bpl,
+            byte_pair_lut,
             eval,
             uint,
             add,
@@ -564,29 +565,29 @@ impl Default for Session {
 #[derive(Debug)]
 pub struct SessionTraces {
     chunk_node_sponge: RowMajorMatrix<Felt>,
-    p2: RowMajorMatrix<Felt>,
+    eidos_compression: RowMajorMatrix<Felt>,
     round: RowMajorMatrix<Felt>,
-    bpl: RowMajorMatrix<Felt>,
+    byte_pair_lut: RowMajorMatrix<Felt>,
     eval: RowMajorMatrix<Felt>,
     uint: RowMajorMatrix<Felt>,
     add: RowMajorMatrix<Felt>,
     ec: RowMajorMatrix<Felt>,
     ec_add: RowMajorMatrix<Felt>,
     msm: RowMajorMatrix<Felt>,
-    public_root: P2Digest,
+    public_root: EidosDigest,
 }
 
 impl SessionTraces {
-    /// The ten main traces in canonical chiplet order: chunk-node-sponge,
-    /// poseidon2, round, byte_pair_lut, eval, uint-store-mul, uint-add,
-    /// ec-point-store-groups, ec-add, ec-msm. The AIRs, provers, and
-    /// public values a caller assembles must line up with this order.
+    /// The ten main traces in canonical chiplet order: chunk-node-sponge, Eidos compression,
+    /// Keccak round, canonical byte-pair lookup, transcript eval, uint-store-mul,
+    /// uint-add, ec-point-store-groups, ec-add, and ec-msm. The AIRs, provers, and public values a
+    /// caller assembles must line up with this order.
     pub fn mains(&self) -> [&RowMajorMatrix<Felt>; NUM_CHIPLETS] {
         [
             &self.chunk_node_sponge,
-            &self.p2,
+            &self.eidos_compression,
             &self.round,
-            &self.bpl,
+            &self.byte_pair_lut,
             &self.eval,
             &self.uint,
             &self.add,
@@ -602,9 +603,9 @@ impl SessionTraces {
     pub fn into_mains(self) -> Vec<RowMajorMatrix<Felt>> {
         vec![
             self.chunk_node_sponge,
-            self.p2,
+            self.eidos_compression,
             self.round,
-            self.bpl,
+            self.byte_pair_lut,
             self.eval,
             self.uint,
             self.add,
@@ -614,16 +615,15 @@ impl SessionTraces {
         ]
     }
 
-    /// The VM's shared public inputs (0.26 `air_inputs`): the 4-felt
-    /// transcript root. All AIRs declare it (`num_public_values = 4`); only
-    /// the eval chip reads it (pinning its row-0 hash). The old `inv_n` slot
-    /// is gone — the natural last-row closing needs no per-AIR height input.
+    /// The VM's shared public inputs: the four-felt transcript root. All AIRs declare it
+    /// (`num_public_values = 4`); only the transcript-eval chip reads it and pins its row-0 hash.
     pub fn air_inputs(&self) -> Vec<Felt> {
         self.public_root.as_array().to_vec()
     }
 
     /// The transcript root committed by the eval chip.
-    pub fn public_root(&self) -> P2Digest {
+    #[cfg(test)]
+    pub fn public_root(&self) -> EidosDigest {
         self.public_root
     }
 }

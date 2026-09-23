@@ -19,6 +19,7 @@ use crate::{
         smt::{
             InnerNode, Map, SmtLeaf,
             large::{IN_MEMORY_DEPTH, LargeSmt, subtree::Subtree},
+            persistent_hash::ensure_hash_scheme,
         },
     },
     utils::{Deserializable, Serializable},
@@ -89,6 +90,10 @@ impl RocksDbStorage {
     /// and applies various RocksDB options for performance, such as caching, bloom filters,
     /// and compaction strategies tailored for SMT workloads.
     ///
+    /// The stored hash-scheme marker must match the current empty SMT root. A missing marker is
+    /// initialized only if every column family is empty. Rebuild incompatible stores from their
+    /// key-value entries into a new database.
+    ///
     /// The default profile uses:
     /// - a 1 GiB block cache shared by this database's column families
     /// - up to 512 open files
@@ -99,6 +104,8 @@ impl RocksDbStorage {
     /// # Errors
     /// Returns `StorageError::Backend` if the database cannot be opened or configured,
     /// for example, due to path issues, permissions, or RocksDB internal errors.
+    /// Returns [`StorageError::IncompatibleHashScheme`] if the marker differs or a nonempty
+    /// database has no marker.
     pub fn open(config: RocksDbConfig) -> StorageResult<Self> {
         let tuning_options = &config.tuning_options;
 
@@ -227,10 +234,12 @@ impl RocksDbStorage {
         // Open the database with our tuned CFs
         let db = DB::open_cf_descriptors(&db_opts, config.path, cfs)?;
 
-        Ok(Self {
+        let storage = Self {
             db: Arc::new(db),
             durability_mode: config.durability_mode,
-        })
+        };
+        ensure_hash_scheme(&storage.db)?;
+        Ok(storage)
     }
 
     /// Syncs the RocksDB database to disk.
@@ -1882,6 +1891,87 @@ impl Iterator for RocksDbSnapshotSubtreeIterator<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::merkle::smt::{EmptySubtreeRoots, SMT_DEPTH, persistent_hash::HASH_SCHEME_KEY};
+
+    fn open_raw_db(path: &std::path::Path) -> DB {
+        let options = Options::default();
+        let families = DB::list_cf(&options, path).unwrap();
+        DB::open_cf(&options, path, families).unwrap()
+    }
+
+    #[test]
+    fn hash_scheme_is_persisted_on_creation() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = RocksDbConfig::new(dir.path()).with_cache_size(1 << 20);
+        drop(RocksDbStorage::open(config.clone()).unwrap());
+
+        let db = open_raw_db(dir.path());
+        assert_eq!(
+            db.get(HASH_SCHEME_KEY).unwrap().unwrap(),
+            EmptySubtreeRoots::entry(SMT_DEPTH, 0).to_bytes()
+        );
+        drop(db);
+        let storage = RocksDbStorage::open(config).unwrap();
+        assert!(!storage.has_leaves().unwrap());
+    }
+
+    #[test]
+    fn unmarked_nonempty_storage_is_rejected_without_relabeling() {
+        for family in [
+            "default",
+            LEAVES_CF,
+            SUBTREE_16_CF,
+            SUBTREE_24_CF,
+            SUBTREE_32_CF,
+            SUBTREE_40_CF,
+            SUBTREE_48_CF,
+            SUBTREE_56_CF,
+            METADATA_CF,
+            IN_MEM_DEPTH_CF,
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let config = RocksDbConfig::new(dir.path()).with_cache_size(1 << 20);
+            drop(RocksDbStorage::open(config.clone()).unwrap());
+
+            let db = open_raw_db(dir.path());
+            db.delete(HASH_SCHEME_KEY).unwrap();
+            db.put_cf(db.cf_handle(family).unwrap(), b"legacy key", b"legacy value")
+                .unwrap();
+            drop(db);
+
+            assert!(
+                matches!(RocksDbStorage::open(config), Err(StorageError::IncompatibleHashScheme)),
+                "accepted unmarked data in {family}"
+            );
+
+            let db = open_raw_db(dir.path());
+            assert!(db.get(HASH_SCHEME_KEY).unwrap().is_none());
+            assert_eq!(
+                db.get_cf(db.cf_handle(family).unwrap(), b"legacy key").unwrap().unwrap(),
+                b"legacy value"
+            );
+        }
+    }
+
+    #[test]
+    fn incompatible_hash_scheme_is_rejected_even_for_an_empty_tree() {
+        for marker in [vec![], vec![0; 32]] {
+            let dir = tempfile::tempdir().unwrap();
+            let config = RocksDbConfig::new(dir.path()).with_cache_size(1 << 20);
+            drop(RocksDbStorage::open(config.clone()).unwrap());
+
+            let db = open_raw_db(dir.path());
+            db.put(HASH_SCHEME_KEY, &marker).unwrap();
+            drop(db);
+
+            assert!(matches!(
+                RocksDbStorage::open(config),
+                Err(StorageError::IncompatibleHashScheme)
+            ));
+            let db = open_raw_db(dir.path());
+            assert_eq!(db.get(HASH_SCHEME_KEY).unwrap().unwrap(), marker);
+        }
+    }
 
     #[test]
     fn config_defaults() {

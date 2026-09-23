@@ -9,7 +9,7 @@
 //! The encoded stream concatenates constants (EF) followed by operations
 //! (base-field), then pads to an `adv_pipe` block boundary.
 
-use miden_core::{Felt, Word, crypto::hash::Poseidon2};
+use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::field::ExtensionField;
 
 use crate::{
@@ -46,6 +46,41 @@ pub struct EncodedCircuit {
     num_vars: usize,
     num_ops: usize,
     instructions: Vec<Felt>,
+}
+
+/// Encoded recursive-verifier circuit and the metadata consumed by MASM.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecursiveAceCircuit {
+    /// Number of ACE READ variables, including constants and padding.
+    pub num_inputs: usize,
+    /// Number of ACE EVAL rows.
+    pub num_eval_gates: usize,
+    /// Instruction stream length in base-field elements.
+    pub stream_len: usize,
+    /// Eidos commitment authenticating the complete instruction stream.
+    pub commitment: Word,
+    /// Encoded instructions consumed by `eval_circuit`.
+    pub instructions: Vec<Felt>,
+}
+
+impl TryFrom<EncodedCircuit> for RecursiveAceCircuit {
+    type Error = AceError;
+
+    fn try_from(encoded: EncodedCircuit) -> Result<Self, Self::Error> {
+        let stream_len = encoded.size_in_felt();
+        if !stream_len.is_multiple_of(ADV_PIPE_BLOCK_FELTS) {
+            return Err(AceError::InvalidInputLayout {
+                message: "ACE circuit stream must be 8-felt aligned for adv_pipe".into(),
+            });
+        }
+        Ok(Self {
+            num_inputs: encoded.num_vars(),
+            num_eval_gates: encoded.num_eval_rows(),
+            stream_len,
+            commitment: encoded.circuit_hash(),
+            instructions: encoded.instructions,
+        })
+    }
 }
 
 impl EncodedCircuit {
@@ -89,21 +124,20 @@ impl EncodedCircuit {
         self.instructions.len()
     }
 
-    /// Poseidon2 digest of the whole instruction stream.
+    /// Eidos digest of the whole instruction stream.
     ///
-    /// Note this is not the recursive verifier's registry leaf: a factored circuit is committed
-    /// as `merge(H(constants | shuffle), H(common))` over the two stream segments.
+    /// This single value is the circuit's commitment: the advice-map key under which the
+    /// recursive verifier streams the instructions, and the value it checks against the
+    /// compiled-in circuit digest.
     pub fn circuit_hash(&self) -> Word {
-        Poseidon2::hash_elements(self.instructions())
+        Eidos::hash_elements(self.instructions())
     }
 }
 
 /// Node-id bases and operation packing for one encoded circuit shape.
 ///
 /// The chiplet numbers nodes downward from `num_nodes - 1`: inputs first, then constants,
-/// then operations. Every circuit assembled from one factored composition shares these
-/// bases, so a caller that only wants part of the stream can encode it without building
-/// the whole circuit — see `FactoredMultiAirCircuit::encode_shuffle_section_for_order`.
+/// then operations.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct StreamGeometry {
     input_start: usize,
@@ -114,8 +148,8 @@ pub(crate) struct StreamGeometry {
 impl StreamGeometry {
     /// Derive the bases from UNPADDED counts, applying the chiplet padding rules:
     /// constants are rounded up to full READ rows and the constants+ops stream is padded
-    /// to whole `adv_pipe` blocks. The single authority for this arithmetic — `to_ace`
-    /// and `emit_factored_circuit` must agree on node ids, so both derive them here.
+    /// to whole `adv_pipe` blocks. The single authority for this arithmetic: `to_ace` derives
+    /// every node id from here rather than repeating the padding rules inline.
     pub(crate) fn from_counts(num_inputs: usize, num_constants: usize, num_ops: usize) -> Self {
         let num_const_nodes = num_constants.next_multiple_of(CONST_EF_ALIGN);
         let const_felts = num_const_nodes * BASE_FELTS_PER_EF;
@@ -154,8 +188,7 @@ impl StreamGeometry {
     }
 
     /// Reject shapes the ACE chiplet cannot consume: READ layouts that do not fill whole
-    /// rows, and node counts beyond the id-packing bound. Shared by `to_ace` and the
-    /// encode-only registry path so the two cannot drift apart.
+    /// rows, and node counts beyond the id-packing bound.
     pub(crate) fn validate(&self) -> Result<(), AceError> {
         if !self.num_inputs().is_multiple_of(ACE_READ_ROW_EF_NODES) {
             return Err(AceError::InvalidInputLayout {

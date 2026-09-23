@@ -5,15 +5,23 @@
 #### Features
 
 - [BREAKING] Add a precompile prover memory budget, with a 64GiB default ([#3799](https://github.com/0xMiden/miden-vm/pull/3799)).
+- [BREAKING] Share one Lagrange basis across periodic columns of a period ([#3847](https://github.com/0xMiden/miden-vm/pull/3847)).
 
 #### Changes
 
+- [BREAKING] Adopted Eidos as the native hash for VM data, Falcon signatures, AEAD, deferred computation, and proof transcripts, changing digests, verifier roots, and proof layout; `crypto_stream` now derives Eidos XOF blocks and writes expanded u32 ciphertext. Replaced `HPERM`/`adv.insert_hperm` with `COMPRESS`/`adv.insert_compress`; removed `adv.insert_hdword_d`, `sys::hdword_to_map_with_domain`, SMT `LEAF_DOMAIN`, and the Poseidon2-backed `RandomCoin`; and replaced the Poseidon2 core-library hash and AEAD modules with Eidos equivalents. Deferred nodes now use checked `EidosFrame` instead of `Tag`; `adv.evaluate_deferred_tag` is now `adv.evaluate_deferred_frame`; the name-derived IDs of `sys::adv::register_deferred` and `sys::adv::evaluate_deferred` were corrected; `adv.register_deferred` now uses `[CV, PAYLOAD_LO, PAYLOAD_HI]` and `adv.register_deferred_data` uses `[n_chunks, CV, ptr]`; and `precompiles::digest_expr` and `precompiles::register_value` are replaced by `precompiles::register_fixed_expr`. Renamed core `merge_in_domain` to `merge_in_mast_domain` and crypto `merge_in_domain` to `hash_two_words_in_domain`; removed the Poseidon2 IES schemes while preserving Eidos wire IDs 4 and 5; and bumped MAST serialization to 0.0.5 and Eidos execution witnesses to version 2 ([#3718](https://github.com/0xMiden/miden-vm/pull/3718)).
+- [BREAKING] Normalized every PVM AIR's committed LogUp sum by its trace length and reduced native and precompile VM trace widths using shared centered LogUp, compact byte-pair tables, and narrower decoder and chiplet layouts. Updated the native and recursive closures and verifier artifacts; this changes both proof relations ([#3756](https://github.com/0xMiden/miden-vm/pull/3756)).
+- [BREAKING] Replaced the per-proof-order ACE circuit registries with one order-invariant circuit per relation, changing circuit and relation digests, verifier roots, and recursive proof fixtures ([#3762](https://github.com/0xMiden/miden-vm/pull/3762)).
+- [BREAKING] Replaced repeated recursive-verifier proof-order ranking with one generated map pass, changing the VM and PVM recursive-verifier artifacts and roots; replaced `MasmConstraintsEvalConfig::stages_fold_coefficients: bool` with `fold_coefficients: Option<FoldCoefficientStaging>`.
+- [BREAKING] RocksDB SMT stores reject incompatible or unmarked nonempty databases. Rebuild these stores from key-value entries.
+- [BREAKING] Security-parameter builders take the proof-hash configuration instead of a collision-bit count; renamed the lossy Eidos packing helpers to `mask_and_pack_felt` and `mask_and_pack_word`.
 - Improved lifted STARK prover performance: LogUp fractions are built and accumulated in row chunks with a parallel accumulator scan, and DEEP reduction avoids element-wise buffer swaps and per-height group buffers ([#3851](https://github.com/0xMiden/miden-vm/pull/3851)).
 - [BREAKING] Reduced prover peak memory by 13-20% by pruning Merkle layers ([#3872](https://github.com/0xMiden/miden-vm/pull/3872)).
 - Added Eidos wasm32 SIMD128 backend ([#3881](https://github.com/0xMiden/miden-vm/pull/3881)).
 
 #### Fixes
 
+- Corrected native and recursive Eidos proof-security estimates to account for restricted Fiat-Shamir challenges. Eidos has a 126-bit generic collision-resistance ceiling and restricted field outputs; see the [security and usage guide](docs/src/design/eidos-security.md).
 - Fixed Falcon512 `ntru_gen` so oversized NTRU solution coefficients are rejected against the encoding bound before `i16` narrowing, instead of panicking in `try_into` ([#3857](https://github.com/0xMiden/miden-vm/pull/3857)).
 - Fixed `IntValue::Felt` Display so it prints canonical hex without byte-swapping ([#3808](https://github.com/0xMiden/miden-vm/pull/3808)).
 - [BREAKING] Changed `ProverInstance::new()` to take ownership of `ProverStatement`. `ProverInstance::prove()` now consumes the instance and returns its verifier statement with the proof. The prover can now release the main traces after their final use. This reduced measured peak memory by about 7 percent ([#3833](https://github.com/0xMiden/miden-vm/pull/3833)).
@@ -97,7 +105,6 @@
 - [BREAKING] Removed the unused `SmtForest` type from `miden-crypto`. Use `LargeSmtForest` for shared SMT storage ([#3746](https://github.com/0xMiden/miden-vm/pull/3746)).
 - [BREAKING] Made native MVM and PVM verifiers return proof security parameters and their MASM counterparts return a common descriptor for a shared estimator, renamed the MVM MASM entry point to `sys::vm::verify_proof` and its root accessor to `vm_recursive_verifier_root`, and removed the legacy query-only estimator ([#3752](https://github.com/0xMiden/miden-vm/pull/3752)).
 - [BREAKING] Added format and compatible VM and PVM verifier roots to `ExecutionProof`. Its precompile state now uses `PrecompileStatus`. Duplicate roots and old unversioned proof bytes are rejected ([#3753](https://github.com/0xMiden/miden-vm/pull/3753)).
-
 #### Fixes
 
 - [BREAKING] Limited bare `exp` to 63 exponent bits. It now lowers to `exp.u63` (72 cycles) and fails for exponents greater than or equal to `2^63`. Existing MAST artifacts containing the previous bare-`exp` lowering must be reassembled to use the new bound ([#3712](https://github.com/0xMiden/miden-vm/pull/3712)).

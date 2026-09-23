@@ -9,7 +9,7 @@ use crate::math::uint::{Limbs, UintSpec};
 pub struct K1Scalar;
 
 impl K1Scalar {
-    /// Stable local domain selector carried in uint precompile tags.
+    /// Stable local identifier used for uint-domain metadata.
     pub const ID: Felt = Felt::new_unchecked(2);
 
     /// Modulus of the secp256k1 scalar field, little-endian u32 limbs.

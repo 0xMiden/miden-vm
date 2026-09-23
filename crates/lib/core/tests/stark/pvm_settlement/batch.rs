@@ -9,7 +9,7 @@
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     Felt, Word,
-    crypto::hash::Poseidon2,
+    chiplets::hasher,
     deferred::{TRUE_DIGEST, fold_deferred_root},
     program::ExecutionClaim,
     proof::{ExecutionProof, HashFunction, PrecompileStatus},
@@ -64,7 +64,7 @@ async fn batch_settles_deferred_obligations_with_one_pvm_proof() {
     // separate precompile proof.
     let batch_claim = witness.claim();
     let batch_proof = Prover::new()
-        .with_hash_fn(HashFunction::Poseidon2)
+        .with_hash_fn(HashFunction::Eidos)
         .prove(witness)
         .expect("failed to prove the batcher");
     assert!(matches!(batch_proof.precompile(), PrecompileStatus::Empty));
@@ -73,7 +73,9 @@ async fn batch_settles_deferred_obligations_with_one_pvm_proof() {
         .verify(&batch_claim, &batch_proof)
         .expect("batch proof verification failed");
     assert!(outcome.is_complete());
-    assert!(outcome.vm_security_parameters().conjectured_security_level() >= 96);
+    // At 2^20 rows, Eidos's lookup bound gives the outer proof about 95.54 bits.
+    // The inner proofs meet the separate 96-bit requirement enforced in batch.masm.
+    assert!(outcome.vm_security_parameters().conjectured_security_level() >= 95);
 }
 
 fn assemble_batch(core_lib: &CoreLibrary) -> Program {
@@ -114,7 +116,7 @@ fn batch_inputs(
 ) -> (StackInputs, AdviceInputs) {
     let commitments: Vec<_> = executions.iter().map(|(_, claim)| claim.commitment()).collect();
     let claim_elements = Word::words_as_elements(&commitments);
-    let batch_commitment = Poseidon2::hash_elements(claim_elements);
+    let batch_commitment = hasher::hash_elements(claim_elements);
     let mut inputs = vec![Felt::from_u32(executions.len().try_into().unwrap())];
     inputs.extend_from_slice(batch_commitment.as_elements());
     let stack_inputs = StackInputs::new(&inputs).unwrap();

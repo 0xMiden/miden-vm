@@ -60,6 +60,33 @@ fn load_empty() -> Result<()> {
 }
 
 #[test]
+fn load_rejects_incompatible_hash_storage() -> Result<()> {
+    use crate::merkle::smt::{StorageError, persistent_hash::HASH_SCHEME_KEY};
+
+    for marker in [None, Some([0; 32])] {
+        let path = tempdir()?;
+        let config = Config::new(path.path())?;
+        let db = PersistentBackend::build_db_with_options(&config)?;
+        if let Some(marker) = marker {
+            db.put(HASH_SCHEME_KEY, marker)?;
+        } else {
+            let cf = db.cf_handle(super::SUBTREE_00_CF).unwrap();
+            db.put_cf(cf, b"legacy key", b"legacy subtree")?;
+        }
+        drop(db);
+
+        match PersistentBackend::load(config) {
+            Err(BackendError::Internal(error)) => assert!(matches!(
+                error.downcast_ref::<StorageError>(),
+                Some(StorageError::IncompatibleHashScheme)
+            )),
+            _ => panic!("expected incompatible hash scheme error"),
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn load_extant() -> Result<()> {
     // We start by creating an empty backend and populating it with some lineages.
     let (path, mut backend) = default_backend()?;

@@ -23,15 +23,16 @@ use miden_lifted_air::{MultiAir, ProverStatement, ReductionError, Statement};
 use miden_lifted_stark::{Preprocessed, ProverInstance, VerifierInstance};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
-// `sigma_sum` closes the subset `MultiAir`'s cross-AIR bus identity for the
-// (ignored) prove round-trip.
-use crate::logup::{NUM_PUBLIC_VALUES, sigma_sum};
+// The subset MultiAir closes its trace-length-weighted bus identity during the ignored prove
+// round-trip.
+use crate::logup::NUM_PUBLIC_VALUES;
 use crate::{
     ec::{
         COL_IS_CERT, EcRequire,
         add::{
-            CELL_R, COL_CANCEL, COL_DBL, COL_GEN, COL_MINTS, COL_PAI_P, COL_PAI_Q, EcGroupAddAir,
-            NUM_MAIN_COLS as ADD_COLS, PERIOD, ROW_RES,
+            CELL_R, COL_CANCEL, COL_DBL, COL_GEN, COL_MINTS, COL_PAI_P, COL_PAI_Q, COL_RP_HI,
+            COL_RP_LO, COL_RQ_HI, COL_RQ_LO, EcGroupAddAir, NUM_MAIN_COLS as ADD_COLS, PERIOD,
+            ROW_RES, ROW_TERM,
             trace::{EcAddRequires, generate_trace as ec_add_trace},
         },
         point_store_groups::{
@@ -143,7 +144,8 @@ impl EcStack {
         let ec_add = ec_add_trace(self.ec_add, &mut self.ec, &mut bpl);
         let uint = uint_store_mul_trace(self.store, self.muls, &mut bpl);
         let ec_points_groups = ec_points_groups_trace(self.ec);
-        EcStackTraces([bpl_trace(bpl), uint, add, ec_points_groups, ec_add])
+        let bpl = bpl_trace(bpl);
+        EcStackTraces([bpl, uint, add, ec_points_groups, ec_add])
     }
 }
 
@@ -163,11 +165,10 @@ fn stack_airs() -> [ChipletAir; NUM_STACK] {
 }
 
 /// The subset as a [`MultiAir`] over the five [`stack_airs`] in
-/// [`NUM_STACK`] order, closing the same cross-AIR `Σ σ = 0` bus identity
-/// as the full [`ChipletMultiAir`](crate::session::ChipletMultiAir) — the
-/// subset is bus-closed, so the residue sum vanishes. Drives the
-/// [`prove_and_verify`](EcStackTraces::prove_and_verify) round-trip under
-/// 0.26's unified `ProverStatement` / `VerifierInstance` driver.
+/// [`NUM_STACK`] order, closing the same trace-length-weighted LogUp identity as the full
+/// [`ChipletMultiAir`](crate::session::ChipletMultiAir). The subset is bus-closed, so the raw
+/// residue sum reconstructed from its normalized values vanishes. Drives the
+/// [`prove_and_verify`](EcStackTraces::prove_and_verify) round-trip.
 #[derive(Clone, Debug)]
 struct EcStackMultiAir {
     airs: Vec<ChipletAir>,
@@ -192,9 +193,17 @@ impl MultiAir<Felt, QuadFelt> for EcStackMultiAir {
         _air_inputs: &[Felt],
         _aux_inputs: &[Felt],
         aux_values: &[&[QuadFelt]],
-        _log_trace_heights: &[u8],
+        log_trace_heights: &[u8],
     ) -> Result<Vec<QuadFelt>, ReductionError> {
-        Ok(vec![sigma_sum(aux_values)])
+        let weighted_sum = aux_values
+            .iter()
+            .zip(log_trace_heights)
+            .map(|(values, &log_height)| {
+                values.iter().copied().sum::<QuadFelt>()
+                    * Felt::new_unchecked(1_u64 << u32::from(log_height))
+            })
+            .sum::<QuadFelt>();
+        Ok(vec![weighted_sum])
     }
 }
 
@@ -604,8 +613,10 @@ fn empty_trace_holds() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // Flattened via `frac_col!` into 12 aux columns (col 0 the gated
-    // running-sum anchor alone, cols 8 and 11 each a lone leftover
+    assert_eq!(miden_lifted_air::BaseAir::<Felt>::width(&EcGroupAddAir), 21);
+    assert_eq!(miden_lifted_air::LiftedAir::<Felt, QuadFelt>::aux_width(&EcGroupAddAir), 11);
+    // Flattened via `frac_col!` into 11 aux columns (col 0 carries the `EcGroupAdd` provide alone,
+    // cols 8 and 10 each carry a lone leftover
     // fraction, the rest each a pair), so every closing constraint stays
     // at degree ≤ 3 → log_quotient_degree = 1.
     assert_eq!(crate::tests::log_quotient_degree(&EcGroupAddAir), 1);
@@ -796,12 +807,10 @@ fn forged_result_ptr_unbalances() {
 }
 
 // ============================================================================
-// Closure-certificate soundness (Phase 2). A fresh generic / double result
-// no longer pays the on-curve MAC trio — its point-store row consumes one
-// `EcOnCurveCert`, provided only by a genuine mint op (gated `mints`, with
-// the case guard `mints ⟹ generic ∨ double` and the strict ptr ordering
-// `r > p ∧ r > q`). These check the two forgeries the cert's well-foundedness
-// rests on, plus that the cert consume is load-bearing.
+// Closure-certificate soundness. A fresh generic or double result consumes one
+// `EcOnCurveCert`, which only a minting operation may provide. The `mints` gate requires a generic
+// or double case and strict pointer ordering `r > p ∧ r > q`. These tests cover the two relevant
+// forgery attempts and verify that the result consumes the certificate.
 // ============================================================================
 
 #[test]
@@ -838,6 +847,62 @@ fn mint_result_equal_operand_rejected() {
     let mut forged = traces.ec_add_main().clone();
     tamper_cell(&mut forged, ROW_RES, CELL_R, g_pt.addr());
     check_ec_add(&forged);
+}
+
+#[test]
+#[should_panic(expected = "constraint")]
+fn mint_result_equal_q_rejected_by_q_ordering_alone() {
+    // G + 2G (q > p) forged so r := q. Re-witnessing r − p − 1 as q − p − 1 keeps the `r > p`
+    // equation satisfied, so only `r > q` (r − q − 1 = −1) can reject the block.
+    let mut k1 = k1_stack();
+    k1.stack.require().add(k1.g_pt, k1.g2_pt, 0);
+    let (p, q) = (k1.g_pt.addr(), k1.g2_pt.addr());
+    let traces = k1.stack.traces();
+
+    let mut forged = traces.ec_add_main().clone();
+    tamper_cell(&mut forged, ROW_RES, CELL_R, q);
+    tamper_cell(&mut forged, ROW_RES, COL_RP_LO, (q - p - 1) & 0xffff);
+    tamper_cell(&mut forged, ROW_RES, COL_RP_HI, (q - p - 1) >> 16);
+    check_ec_add(&forged);
+}
+
+#[test]
+#[should_panic(expected = "constraint")]
+fn mint_result_equal_p_rejected_by_p_ordering_alone() {
+    // 2G + G (p > q) forged so r := p. Re-witnessing r − q − 1 as p − q − 1 on the term row
+    // keeps the `r > q` equation satisfied, so only `r > p` (r − p − 1 = −1) can reject it.
+    let mut k1 = k1_stack();
+    k1.stack.require().add(k1.g2_pt, k1.g_pt, 0);
+    let (p, q) = (k1.g2_pt.addr(), k1.g_pt.addr());
+    let traces = k1.stack.traces();
+
+    let mut forged = traces.ec_add_main().clone();
+    tamper_cell(&mut forged, ROW_RES, CELL_R, p);
+    tamper_cell(&mut forged, ROW_TERM, COL_RQ_LO, (p - q - 1) & 0xffff);
+    tamper_cell(&mut forged, ROW_TERM, COL_RQ_HI, (p - q - 1) >> 16);
+    check_ec_add(&forged);
+}
+
+#[test]
+fn ordering_limbs_on_both_rows_are_range_checked() {
+    let mut k1 = k1_stack();
+    k1.stack.require().add(k1.g_pt, k1.g2_pt, 0);
+    let traces = k1.stack.traces();
+    let mut rng = StdRng::seed_from_u64(0xecad_dc04);
+    traces.check();
+    assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
+
+    for (row, lo, hi) in [(ROW_RES, COL_RP_LO, COL_RP_HI), (ROW_TERM, COL_RQ_LO, COL_RQ_HI)] {
+        let mut forged = traces.ec_add_main().clone();
+        // Preserve lo + 2^16 * hi, so local ordering still holds. The range lookup
+        // must reject the out-of-range limbs for each operand independently.
+        forged.values[row * ADD_COLS + lo] += Felt::from(1u32 << 16);
+        forged.values[row * ADD_COLS + hi] -= Felt::from(1u8);
+        check_ec_add(&forged);
+        let mut mains = traces.mains();
+        mains[4] = &forged;
+        assert_ne!(stack_residual(&mains, &mut rng), 0, "ordering limbs on row {row}");
+    }
 }
 
 #[test]

@@ -4,7 +4,7 @@
 //!
 //! - [`LookupBuilder`] — the top-level handle mirroring the subset of `LiftedAirBuilder` a lookup
 //!   author actually needs (trace access plus per-column scoping). It hides `assert_*` / `when_*` /
-//!   permutation plumbing and does not expose the verifier challenges.
+//!   permutation-column details and does not expose the verifier challenges.
 //! - [`LookupColumn`] — per-column handle returned by [`LookupBuilder::next_column`]. It owns the
 //!   boundary between groups; its only job is to open a group (either the simple path or the
 //!   cached-encoding dual path).
@@ -32,11 +32,8 @@ use super::message::LookupMessage;
 
 /// Expected post-flag `(V, U)` contribution for one interaction or scope.
 ///
-/// Every builder method takes a `Deg` as its last argument so authors can
-/// declare the expected degrees inline. Production adapters ignore the value
-/// (it is `Copy` and dead-code-eliminated after inlining). A debug adapter
-/// can compare the declared degrees against the symbolic expression it just
-/// accumulated and panic with the interaction's `name` if they disagree.
+/// Every builder method takes a `Deg` so debug adapters can check declared degrees against the
+/// symbolic expression they just accumulated. Production adapters ignore it.
 ///
 /// - `v`: degree of the numerator (`V`) contribution after multiplying by the surrounding flag.
 /// - `u`: degree of the denominator (`U`) contribution after multiplying by the surrounding flag.
@@ -55,9 +52,9 @@ use super::message::LookupMessage;
 /// - **Batch outer** ([`LookupGroup::batch`]): the post-flag contribution the *whole* batch makes
 ///   to the enclosing group's `(V_g, U_g)` — `(deg(N) + deg(f), deg(D) + deg(f))` where `(N, D)` is
 ///   the running pair the inner-loop body accumulates and `f` is the batch flag. The pre-flag `(N,
-///   D)` is mechanically derivable from the inner-loop body — `((k − 1) · d_v, k · d_v)` for `k`
-///   interactions of inner denominator degree `d_v` — so it is documented inline at each batch site
-///   rather than carried in the struct.
+///   D)` follows from the inner-loop body — `((k − 1) · d_v, k · d_v)` for `k` interactions of
+///   inner denominator degree `d_v` — so it is documented inline at each batch site rather than
+///   carried in the struct.
 ///
 /// - **Group / column scope** ([`LookupColumn::group`], `group_with_cached_encoding`,
 ///   [`LookupBuilder::next_column`]): the total post-flag `(V, U)` contribution of the group /
@@ -74,31 +71,13 @@ pub struct Deg {
 
 /// The trace-reading handle handed to a [`super::LookupAir`] implementation.
 ///
-/// `LookupBuilder` deliberately mirrors the subset of `LiftedAirBuilder`'s
-/// associated types needed to read `main` and `periodic_values`. It is
-/// **not** a sub-trait of `AirBuilder`: the constraint
-/// emission surface (`assert_zero` / `when_first_row` / …) and the
-/// permutation column plumbing stay hidden, which keeps the simple lookup
-/// path free of challenge access.
+/// `LookupBuilder` exposes trace access and per-column scoping. It hides constraint emission,
+/// permutation columns, and challenge access from lookup authors.
 ///
 /// Implementors must not shortcut the per-column scoping: a [`super::LookupAir`]
 /// author that opens `n` columns must issue exactly `n` calls to
-/// [`LookupBuilder::next_column`], matching [`super::LookupAir::num_columns`].
-///
-/// ## Associated-type layout
-///
-/// The base-field stack (`F`, `Expr`, `Var`) and extension-field stack
-/// (`EF`, `ExprEF`, `VarEF`) mirror the upstream `AirBuilder` /
-/// `ExtensionBuilder` split one-for-one; `Algebra<Var>` on `Expr` lets the
-/// lookup author multiply main-trace variables with arbitrary expressions
-/// without crossing trait boundaries. `PeriodicVar` / `MainWindow` come
-/// from `AirBuilder` and are passed through the adapter unchanged.
-///
-/// The per-column handle is a generic associated type
-/// ([`Self::Column`](Self::Column)) so that each `column(...)` call can
-/// borrow from `self` without outliving the closure. Its bound pins the
-/// expression and extension-variable types to keep them in sync with the
-/// outer builder.
+/// [`LookupBuilder::next_column`], matching the length of
+/// [`super::LookupAir::column_shape`].
 pub trait LookupBuilder: Sized {
     // --- base field stack (copied from AirBuilder) ---
 
@@ -137,8 +116,7 @@ pub trait LookupBuilder: Sized {
 
     // --- auxiliary trace access types ---
 
-    /// Periodic column value at the current row (copied from
-    /// `AirBuilder::PeriodicVar`).
+    /// Periodic column value at the current row.
     type PeriodicVar: Into<Self::Expr> + Copy;
 
     /// Two-row window over the main trace, returned as-is from the
@@ -147,6 +125,9 @@ pub trait LookupBuilder: Sized {
     /// and pass either to `borrow`-based view types without re-reading
     /// the handle.
     type MainWindow: WindowAccess<Self::Var> + Clone;
+
+    /// Two-row preprocessed trace window. Empty for AIRs without preprocessed columns.
+    type PreprocessedWindow: WindowAccess<Self::Var> + Clone;
 
     /// Per-column handle opened by [`Self::next_column`]. Holds the adapter's per-column
     /// state (running `(V, U)` on the constraint path, fraction collector on the prover
@@ -159,6 +140,9 @@ pub trait LookupBuilder: Sized {
 
     /// Two-row main trace window. Pass-through to the wrapped builder.
     fn main(&self) -> Self::MainWindow;
+
+    /// Two-row preprocessed trace window.
+    fn preprocessed(&self) -> &Self::PreprocessedWindow;
 
     /// Periodic column values at the current row.
     fn periodic_values(&self) -> &[Self::PeriodicVar];
@@ -334,6 +318,41 @@ pub trait LookupGroup {
         deg: Deg,
     );
 
+    /// Open an ungated batch of two pre-encoded linear denominators.
+    ///
+    /// This is the selected-slot pattern used by the Eidos compression AIR: row selection lives in
+    /// the two multiplicities, and the batch contributes `(m₀ · D₁ + m₁ · D₀) / (D₀ · D₁)`.
+    fn selected_batch2_encoded(
+        &mut self,
+        name: &'static str,
+        slot0_name: &'static str,
+        slot0_multiplicity: Self::Expr,
+        slot0_encoded: impl FnOnce() -> Self::ExprEF,
+        slot1_name: &'static str,
+        slot1_multiplicity: Self::Expr,
+        slot1_encoded: impl FnOnce() -> Self::ExprEF,
+    ) {
+        self.batch(
+            name,
+            Self::Expr::ONE,
+            |batch| {
+                batch.insert_encoded(
+                    slot0_name,
+                    slot0_multiplicity,
+                    slot0_encoded,
+                    Deg { v: 1, u: 1 },
+                );
+                batch.insert_encoded(
+                    slot1_name,
+                    slot1_multiplicity,
+                    slot1_encoded,
+                    Deg { v: 1, u: 1 },
+                );
+            },
+            Deg { v: 2, u: 2 },
+        );
+    }
+
     // ---- encoding primitives (cached-encoding path only) ----
 
     /// Precomputed powers `[β⁰, β¹, …, β^(W-1)]`, where
@@ -365,9 +384,7 @@ pub trait LookupGroup {
     /// `bus_prefix[bus_id] = α + (bus_id + 1) · β^W` for the given
     /// coarse bus ID.
     ///
-    /// Returns an owned [`Self::ExprEF`] by cloning the entry — the
-    /// underlying storage is a `Box<[ExprEF]>` on the adapter and
-    /// `ExprEF` is typically a ring element, so cloning is cheap.
+    /// Returns an owned [`Self::ExprEF`] by cloning the adapter entry.
     ///
     /// # Panics
     ///

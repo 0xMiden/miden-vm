@@ -4,9 +4,10 @@ use miden_core::{
     Felt,
     deferred::{
         DeferredError, Digest, Node, Precompile, PrecompileWitness, PrecompileWitnessEntry,
-        TRUE_DIGEST, Tag, fold_deferred_root,
+        TRUE_DIGEST, fold_deferred_root,
     },
 };
+use miden_crypto::hash::eidos::{DomainTag, DomainVersion, EidosFrame, namespace};
 use miden_precompiles::{CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile};
 use miden_precompiles_verifier::verify_deferred;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
@@ -73,7 +74,7 @@ impl WitnessFixture {
                 continue;
             }
             let node = &self.nodes[&digest];
-            let tag = node.tag();
+            let frame = node.frame().expect("non-TRUE nodes carry a frame");
             let children = if let Ok((lhs, rhs)) = node.payload().as_join() {
                 vec![(lhs, rhs)]
             } else {
@@ -88,16 +89,16 @@ impl WitnessFixture {
                 continue;
             }
             let entry = if let Ok(chunks) = node.payload().as_data() {
-                PrecompileWitnessEntry::Data { tag, chunks: chunks.to_vec() }
+                PrecompileWitnessEntry::Data { frame, chunks: chunks.to_vec() }
             } else if let Ok((lhs, rhs)) = node.payload().as_join() {
                 PrecompileWitnessEntry::Join {
-                    tag,
+                    frame,
                     lhs: indices[&lhs],
                     rhs: indices[&rhs],
                 }
             } else {
                 PrecompileWitnessEntry::PairList {
-                    tag,
+                    frame,
                     pairs: children.iter().map(|(lhs, rhs)| (indices[lhs], indices[rhs])).collect(),
                 }
             };
@@ -118,7 +119,7 @@ fn uint(fixture: &mut WitnessFixture, domain: UintDomain, value: u32) -> Digest 
 
 fn uint_eq(fixture: &mut WitnessFixture, a: Digest, b: Digest) -> Digest {
     fixture
-        .register(Node::join(UintPrecompile::op_tag(UintPrecompile::EQ_OP_ID), a, b).unwrap())
+        .register(Node::join(UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID), a, b).unwrap())
         .unwrap()
 }
 
@@ -212,7 +213,7 @@ fn randomized_shared_arithmetic_preserves_assertion_uses() {
             // Small additions keep the independent u32 oracle exact while reusing prior nodes.
             let sum = fixture
                 .register(
-                    Node::join(UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID), lhs, rhs)
+                    Node::join(UintPrecompile::op_frame(UintPrecompile::ADD_OP_ID), lhs, rhs)
                         .unwrap(),
                 )
                 .unwrap();
@@ -254,13 +255,14 @@ fn malformed_semantics_are_located_before_session_operations() {
     let false_eq = uint_eq(&mut fixture, one, two);
     let wrong_domain = fixture
         .register(
-            Node::join(UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID), one, field_one).unwrap(),
+            Node::join(UintPrecompile::op_frame(UintPrecompile::ADD_OP_ID), one, field_one)
+                .unwrap(),
         )
         .unwrap();
     let bad_limb = fixture
         .register(
             Node::value(
-                UintPrecompile::value_tag(UintDomain::U256),
+                UintPrecompile::value_frame(UintDomain::U256),
                 [Felt::new_unchecked(u32::MAX as u64 + 1); 8],
             )
             .unwrap(),
@@ -269,7 +271,14 @@ fn malformed_semantics_are_located_before_session_operations() {
     let unknown = fixture
         .register(
             Node::value(
-                Tag::precompile(Felt::from_u32(77), [Felt::ZERO; 3]).unwrap(),
+                EidosFrame::new(
+                    DomainTag::new(
+                        namespace::MIDEN_ECOSYSTEM,
+                        u16::MAX,
+                        DomainVersion::numbered(77),
+                    ),
+                    [0; 3],
+                ),
                 [Felt::ZERO; 8],
             )
             .unwrap(),
@@ -277,7 +286,7 @@ fn malformed_semantics_are_located_before_session_operations() {
         .unwrap();
     let wrong_shape = fixture
         .register(
-            Node::value(UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID), [Felt::ZERO; 8])
+            Node::value(UintPrecompile::op_frame(UintPrecompile::ADD_OP_ID), [Felt::ZERO; 8])
                 .unwrap(),
         )
         .unwrap();
@@ -291,7 +300,7 @@ fn malformed_semantics_are_located_before_session_operations() {
     let modulus = fixture
         .register(
             Node::value(
-                UintPrecompile::value_tag(UintDomain::K1Base),
+                UintPrecompile::value_frame(UintDomain::K1Base),
                 miden_precompiles::K1Base::MODULUS.map(Felt::from_u32),
             )
             .unwrap(),
@@ -300,7 +309,7 @@ fn malformed_semantics_are_located_before_session_operations() {
     let above_modulus = fixture
         .register(
             Node::value(
-                UintPrecompile::value_tag(UintDomain::K1Base),
+                UintPrecompile::value_frame(UintDomain::K1Base),
                 [Felt::from_u32(u32::MAX); 8],
             )
             .unwrap(),
@@ -317,13 +326,14 @@ fn malformed_semantics_are_located_before_session_operations() {
     let identity = fixture.register(CurvePrecompile::identity_node(curve)).unwrap();
     let false_point_eq = fixture
         .register(
-            Node::join(CurvePrecompile::op_tag(CurvePrecompile::EQ_OP_ID), generator, identity)
+            Node::join(CurvePrecompile::op_frame(CurvePrecompile::EQ_OP_ID), generator, identity)
                 .unwrap(),
         )
         .unwrap();
     let wrong_scalar_domain = fixture
         .register(
-            Node::try_pair_list(CurvePrecompile::msm_tag(), vec![(generator, field_one)]).unwrap(),
+            Node::try_pair_list(CurvePrecompile::msm_frame(1), vec![(generator, field_one)])
+                .unwrap(),
         )
         .unwrap();
     let chunks = fixture.register(Node::chunks_from_bytes(b"abc")).unwrap();
@@ -489,12 +499,13 @@ fn shared_commitment_cannot_change_payload_shape() {
     let generator = fixture.register(CurvePrecompile::generator_node(CurveId::Secp256k1)).unwrap();
     let msm = fixture
         .register(
-            Node::try_pair_list(CurvePrecompile::msm_tag(), vec![(generator, scalar)]).unwrap(),
+            Node::try_pair_list(CurvePrecompile::msm_frame(1), vec![(generator, scalar)]).unwrap(),
         )
         .unwrap();
     let eq = fixture
         .register(
-            Node::join(CurvePrecompile::op_tag(CurvePrecompile::EQ_OP_ID), msm, generator).unwrap(),
+            Node::join(CurvePrecompile::op_frame(CurvePrecompile::EQ_OP_ID), msm, generator)
+                .unwrap(),
         )
         .unwrap();
     fixture.log_statement(eq).unwrap();
@@ -504,11 +515,11 @@ fn shared_commitment_cannot_change_payload_shape() {
         .iter()
         .position(|entry| matches!(entry, PrecompileWitnessEntry::PairList { .. }))
         .unwrap();
-    let PrecompileWitnessEntry::PairList { tag, pairs } = &entries[changed] else {
+    let PrecompileWitnessEntry::PairList { frame, pairs } = &entries[changed] else {
         unreachable!()
     };
     let (lhs, rhs) = pairs[0];
-    entries[changed] = PrecompileWitnessEntry::Join { tag: *tag, lhs, rhs };
+    entries[changed] = PrecompileWitnessEntry::Join { frame: *frame, lhs, rhs };
     let malformed = PrecompileWitness::from_entries(entries).unwrap();
     assert_eq!(
         valid.root_unchecked(),
@@ -536,15 +547,18 @@ fn fallback_msm_limits_apply_across_distinct_claims() {
     for count in [1, 2] {
         let msm = fixture
             .register(
-                Node::try_pair_list(CurvePrecompile::msm_tag(), vec![(generator, zero); count])
-                    .unwrap(),
+                Node::try_pair_list(
+                    CurvePrecompile::msm_frame(u32::try_from(count).expect("count fits u32")),
+                    vec![(generator, zero); count],
+                )
+                .unwrap(),
             )
             .unwrap();
         let identity =
             fixture.register(CurvePrecompile::identity_node(CurveId::Secp256k1)).unwrap();
         let eq = fixture
             .register(
-                Node::join(CurvePrecompile::op_tag(CurvePrecompile::EQ_OP_ID), msm, identity)
+                Node::join(CurvePrecompile::op_frame(CurvePrecompile::EQ_OP_ID), msm, identity)
                     .unwrap(),
             )
             .unwrap();

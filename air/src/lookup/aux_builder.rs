@@ -15,8 +15,8 @@
 //!
 //! Summing the cyclic recurrence gives `num_rows * sigma_prime = sigma`. The single committed
 //! auxiliary value is therefore `sigma_prime`, not a terminal accumulator row. This centered
-//! cyclic recurrence instantiates the additive coboundary construction from §3, “A cohomological
-//! sumcheck argument,” of [Darlin: Recursive Proofs using Marlin].
+//! cyclic recurrence instantiates the additive coboundary construction from §3, *A cohomological
+//! sumcheck argument*, of [Darlin: Recursive Proofs using Marlin].
 //!
 //! [Darlin: Recursive Proofs using Marlin]: https://eprint.iacr.org/2021/930
 use alloc::{vec, vec::Vec};
@@ -65,6 +65,7 @@ where
     let beta = challenges[1];
     let lookup_challenges =
         Challenges::<EF>::new(alpha, beta, air.max_message_width(), air.num_bus_ids());
+    let preprocessed = air.preprocessed_trace();
     let periodic = air.periodic_columns();
     let num_cols = air.column_shape().len();
     assert!(num_cols > 0, "LogUp requires at least one accumulator column");
@@ -83,6 +84,7 @@ where
         let chunk = build_lookup_fraction_chunk(
             air,
             main,
+            preprocessed.as_ref(),
             &periodic,
             &lookup_challenges,
             row_lo..row_lo + totals.len(),
@@ -243,7 +245,9 @@ where
         for (col, &count) in row_counts.iter().enumerate() {
             let mut sum = EF::ZERO;
             for &(m, d) in &flat_fractions[cursor..cursor + count] {
-                let d_inv = d.try_inverse().expect("LogUp denominator must be non-zero");
+                let d_inv = d
+                    .try_inverse()
+                    .expect("LogUp denominator must be non-zero for the sampled challenges");
                 sum += d_inv * m;
             }
             per_row_value[col] = sum;
@@ -493,7 +497,7 @@ fn compute_row_frac_offsets(flat_counts: &[usize], num_rows: usize, num_cols: us
 ///
 /// # Panics
 ///
-/// Panics if any denominator is zero.
+/// Panics if any denominator is zero for the sampled challenges.
 fn invert_and_scale<F, EF>(chunk_fracs: &[(F, EF)], scratch: &mut [EF])
 where
     F: Field,
@@ -513,7 +517,7 @@ where
     // One field inversion — amortised over the whole chunk.
     let mut running_inv = scratch[scratch.len() - 1]
         .try_inverse()
-        .expect("LogUp denominator product must be non-zero");
+        .expect("LogUp denominator product must be non-zero for the sampled challenges");
 
     // Backward sweep: scratch[i] = mᵢ · dᵢ⁻¹.
     //
@@ -551,6 +555,52 @@ mod tests {
         Felt,
         lookup::{LookupAir, LookupBuilder},
     };
+
+    /// The chunked driver, over an AIR whose lookup reads a separate preprocessed window, matches
+    /// slow accumulation of the same fractions. The And8 lookup's 2^16-row trace spans many
+    /// accumulation chunks; a zero-multiplicity middle block and a live final row cover chunk
+    /// boundaries and the cyclic closing edge.
+    #[test]
+    fn chunked_driver_matches_slow_accumulation_with_preprocessed_window() {
+        use miden_crypto::stark::air::BaseAir;
+
+        use crate::{
+            MidenAir,
+            logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
+            lookup::build_lookup_fractions,
+        };
+
+        let air = MidenAir::AND8_LOOKUP;
+        let preprocessed = air.preprocessed_trace().expect("And8 lookup has a preprocessed table");
+        let num_rows = preprocessed.height();
+        let width = air.width();
+        let mut main = RowMajorMatrix::new(
+            (0..num_rows * width).map(|i| Felt::from_usize(i % 17 + 1)).collect(),
+            width,
+        );
+        main.values[512 * width..(num_rows - 1) * width].fill(Felt::ZERO);
+        let challenges = [QuadFelt::new([Felt::from_u32(7), Felt::ONE]), QuadFelt::from_u32(13)];
+        let lookup_challenges =
+            Challenges::new(challenges[0], challenges[1], MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
+        let fractions = build_lookup_fractions(
+            &air,
+            &main,
+            Some(&preprocessed),
+            &air.periodic_columns(),
+            &lookup_challenges,
+        );
+        let (expected, sigma_prime) = accumulate_slow(&fractions);
+        let (actual, aux_values) = build_logup_aux_trace(&air, &main, &challenges);
+
+        assert_eq!(aux_values, [sigma_prime]);
+        assert_eq!(actual.height(), num_rows);
+        assert_eq!(actual.width(), expected.len());
+        for (row_idx, row) in actual.values.chunks_exact(actual.width()).enumerate() {
+            for (column, &value) in row.iter().enumerate() {
+                assert_eq!(value, expected[column][row_idx], "row {row_idx}, column {column}");
+            }
+        }
+    }
 
     // Small deterministic LCG — reproducible stream for random-fixture cross-check tests.
     // We don't need cryptographic quality, just determinism.
@@ -631,16 +681,13 @@ mod tests {
     }
 
     /// Minimal `LookupAir` used to drive `LookupFractions::from_shape` without pulling in the
-    /// real Miden air. Only `num_columns()` and `column_shape()` are exercised; the
-    /// other methods return sentinel values and `eval` is a no-op.
+    /// real Miden AIR. Only `column_shape()` is relevant; the other methods return sentinel values
+    /// and `eval` is a no-op.
     struct FakeAir {
         shape: [usize; 2],
     }
 
     impl<LB: LookupBuilder> LookupAir<LB> for FakeAir {
-        fn num_columns(&self) -> usize {
-            self.shape.len()
-        }
         fn column_shape(&self) -> &[usize] {
             &self.shape
         }
@@ -713,6 +760,92 @@ mod tests {
 
         assert_eq!(aux[1][0], QuadFelt::ZERO);
         assert_eq!(aux[1][1], row1_col1);
+    }
+
+    struct WrappedCenteredFixture {
+        fractions: LookupFractions<Felt, QuadFelt>,
+        row0_col0: QuadFelt,
+        row0_col1: QuadFelt,
+        row1_col0: QuadFelt,
+        row2_col1: QuadFelt,
+    }
+
+    fn wrapped_centered_fixture() -> WrappedCenteredFixture {
+        let one = Felt::new_unchecked(1);
+        let two = Felt::new_unchecked(2);
+        let three = Felt::new_unchecked(3);
+        let four = Felt::new_unchecked(4);
+        let d1 = QuadFelt::new([Felt::new_unchecked(5), Felt::ZERO]);
+        let d2 = QuadFelt::new([Felt::new_unchecked(7), Felt::ZERO]);
+        let d3 = QuadFelt::new([Felt::new_unchecked(11), Felt::ZERO]);
+        let d4 = QuadFelt::new([Felt::new_unchecked(13), Felt::ZERO]);
+
+        let mut fractions = fixture([1, 1], 3);
+        // Row 0: both columns contribute.
+        fractions.fractions.push((one, d1));
+        fractions.counts.push(1);
+        fractions.fractions.push((two, d2));
+        fractions.counts.push(1);
+        // Row 1: only the accumulator column contributes.
+        fractions.fractions.push((three, d3));
+        fractions.counts.push(1);
+        fractions.counts.push(0);
+        // Row 2: only the fraction column contributes, exercising the wrap edge.
+        fractions.counts.push(0);
+        fractions.fractions.push((four, d4));
+        fractions.counts.push(1);
+
+        WrappedCenteredFixture {
+            fractions,
+            row0_col0: d1.try_inverse().unwrap(),
+            row0_col1: d2.try_inverse().unwrap() * two,
+            row1_col0: d3.try_inverse().unwrap() * three,
+            row2_col1: d4.try_inverse().unwrap() * four,
+        }
+    }
+
+    #[test]
+    fn wrapped_centered_accumulator_closes_cyclically() {
+        let fx = wrapped_centered_fixture();
+
+        let (slow, slow_sigma) = accumulate_slow(&fx.fractions);
+        let (fast, fast_sigma) = accumulate(&fx.fractions);
+        assert_matrix_matches_slow(&slow, slow_sigma, &fast, fast_sigma, 2, 3);
+
+        let total = fx.row0_col0 + fx.row0_col1 + fx.row1_col0 + fx.row2_col1;
+        let center = total / QuadFelt::from_u64(3);
+
+        assert_eq!(fast_sigma, center);
+        assert_eq!(fast.get(0, 0), Some(QuadFelt::ZERO));
+        assert_eq!(fast.get(1, 0), Some(fx.row0_col0 + fx.row0_col1 - center));
+        assert_eq!(
+            fast.get(2, 0),
+            Some(fx.row0_col0 + fx.row0_col1 + fx.row1_col0 - center.double())
+        );
+        assert_eq!(fast.get(0, 1), Some(fx.row0_col1));
+        assert_eq!(fast.get(1, 1), Some(QuadFelt::ZERO));
+        assert_eq!(fast.get(2, 1), Some(fx.row2_col1));
+    }
+
+    #[test]
+    fn wrapped_centered_accumulator_rejects_wrong_center() {
+        let fx = wrapped_centered_fixture();
+        let (fast, _sigma) = accumulate(&fx.fractions);
+
+        let true_center =
+            (fx.row0_col0 + fx.row0_col1 + fx.row1_col0 + fx.row2_col1) / QuadFelt::from_u64(3);
+        let wrong_center = true_center + QuadFelt::ONE;
+
+        let last_acc = fast.get(2, 0).expect("row 2 accumulator");
+        let first_acc = fast.get(0, 0).expect("row 0 accumulator");
+        assert_eq!(first_acc, QuadFelt::ZERO);
+
+        // Row 2 has no col0 contribution. A wrong center leaves a nonzero wrap-edge residual.
+        let honest_residual = first_acc - (last_acc + fx.row2_col1) + true_center;
+        let wrong_residual = first_acc - (last_acc + fx.row2_col1) + wrong_center;
+
+        assert_eq!(honest_residual, QuadFelt::ZERO);
+        assert_ne!(wrong_residual, QuadFelt::ZERO);
     }
 
     /// `LookupFractions::from_shape` sizes the flat `fractions` Vec with `num_rows * Σ shape`

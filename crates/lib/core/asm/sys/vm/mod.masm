@@ -16,10 +16,10 @@ use miden::core::stark::verifier
 # zero because Lifted STARK does not grind lookup challenges.
 const LOOKUP_POW_BITS = 0
 const MAX_MESSAGE_WIDTH = 16
-const NUM_COMPOSED_CONSTRAINTS = 427
+const NUM_COMPOSED_CONSTRAINTS = 674
 const MAX_CONSTRAINT_DEGREE = 9
-const NUM_DEEP_TERMS = 138
-const LOOKUP_FRACTIONS_PER_ROW = 28     # matches AIR_SHAPE.lookup.fractions_per_row
+const NUM_DEEP_TERMS = 282
+const LOOKUP_FRACTIONS_PER_ROW = 78     # matches AIR_SHAPE.lookup.fractions_per_row
 const CORE_BOUNDARY_LOOKUP_TERMS = 3    # emit_core_boundary: block-hash seed + 2 log-deferred terms
 
 # Bounds on an AIR log trace height, matching `assert_shape_log`. They reject invalid relation
@@ -34,37 +34,37 @@ const KERNEL_COMMITMENT_OFFSET = 4
 # Offset of D in the P | D boundary-input block.
 const DEFERRED_ROOT_OFFSET = 4
 
-# Domain tag for the kernel commitment: the registered selector
-# (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (0x010000 << 8) | 1, per the Miden
-# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
-# Must match miden_core::program::KERNEL_DOMAIN_TAG (enforced by cross-tests).
+# Domain tag for the kernel commitment:
+# (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (0x010000 << 8) | 1.
+# Must match miden_core::program::KERNEL_DOMAIN_TAG.
 const KERNEL_DOMAIN_TAG = 0x01000001
 
 const FELTS_PER_KERNEL_DIGEST = 4
 
 # Must match KernelDescriptor::MAX_NUM_PROCEDURES.
 const MAX_NUM_KERNEL_PROCEDURES = 255
-# Number of AIR instances contributing to the proof order.
-const NUM_MIDEN_AIRS = 3
+const AND8_LOOKUP_LOG_HEIGHT = 16
 
-# RELATION_DIGEST = hash(PROTOCOL_ID, ACE_REGISTRY_ROOT).
-const RELATION_DIGEST_0 = 8509919582315365814
-const RELATION_DIGEST_1 = 12865978328275266043
-const RELATION_DIGEST_2 = 12073117316737140237
-const RELATION_DIGEST_3 = 5647109555087128169
+# RELATION_DIGEST = Eidos::hash_elements([PROTOCOL_ID, ACE_CIRCUIT_DIGEST]).
+const RELATION_DIGEST_0 = 171792994158872433
+const RELATION_DIGEST_1 = 1904375954973517033
+const RELATION_DIGEST_2 = 6369443497222576761
+const RELATION_DIGEST_3 = 1598011024911555914
 
-# Root of the accepted ACE circuit registry. Leaves are indexed by ORDER_TAG.
-const ACE_REGISTRY_ROOT_0 = 8563712008625779037
-const ACE_REGISTRY_ROOT_1 = 2346635758357605862
-const ACE_REGISTRY_ROOT_2 = 17725435322360039753
-const ACE_REGISTRY_ROOT_3 = 12106900609136090006
+# Commitment to the canonical And8 preprocessed table under the Eidos LMCS setup.
+const AND8_PREPROCESSED_TRACE_COM_0 = 7435130241103350969
+const AND8_PREPROCESSED_TRACE_COM_1 = 2209492810180294937
+const AND8_PREPROCESSED_TRACE_COM_2 = 2763208909109372110
+const AND8_PREPROCESSED_TRACE_COM_3 = 5080896414781165458
 
 #! Loads the VM-specific AIR context used by the generic STARK verifier.
 #!
 #! Advice supplies log heights in fixed instance order:
-#!   [log_core, log_chiplets, log_poseidon2_permutation]
+#!   [log_core, log_chiplets, log_eidos_compression]
 #!
-#! Writes the trace shape, proof-order tag, relation commitments, and fixed OOD/query-row
+#! The And8 lookup height is fixed verifier setup.
+#!
+#! Writes the trace shape, proof-order routing, relation commitments, and fixed OOD/query-row
 #! addresses to verifier memory.
 pub proc load_air_context()
     adv_push
@@ -77,24 +77,37 @@ pub proc load_air_context()
 
     adv_push
     exec.assert_shape_log
-    exec.layout::set_poseidon2_permutation_trace_length_log
+    exec.layout::set_eidos_compression_trace_length_log
+
+    push.AND8_LOOKUP_LOG_HEIGHT
+    exec.layout::set_and8_lookup_trace_length_log
 
     exec.layout::get_core_trace_length_log
     exec.layout::get_chiplets_trace_length_log
     u32max
-    exec.layout::get_poseidon2_permutation_trace_length_log
+    exec.layout::get_eidos_compression_trace_length_log
+    u32max
+    exec.layout::get_and8_lookup_trace_length_log
     u32max
     exec.constants::set_trace_length_log
 
-    exec.derive_order_tag
-    exec.constants::set_order_tag
+    # Derive the height-sorted proof order once from the heights stored above, then route each
+    # AIR's canonical out-of-domain destination to its proof-order stream position. The heights are
+    # unchanged from here on, so both run once per proof; the auxiliary-boundary placement and the
+    # fold-coefficient staging reuse the same maps.
+    exec.ood_frames::stage_proof_order_maps
+    exec.ood_frames::stage_ood_scatter_table
 
     exec.store_relation_digest
-    exec.store_ace_registry_root
+    exec.store_and8_preprocessed_trace_commitment
     exec.layout::ood_evaluations_ptr
     exec.constants::set_ood_evaluations_address
     exec.layout::current_trace_row_ptr
     exec.constants::set_current_trace_row_address
+    exec.layout::auxiliary_ace_inputs_ptr
+    exec.constants::set_auxiliary_ace_inputs_address
+    exec.layout::aux_rand_elem_ptr
+    exec.constants::set_aux_rand_elem_address
 end
 
 proc assert_shape_log(height: felt) -> u8
@@ -104,106 +117,6 @@ proc assert_shape_log(height: felt) -> u8
     drop
 end
 
-#! Derives the Lehmer proof-order tag of the height-sorted proof order.
-#!
-#! The proof order sorts the AIRs by ascending log height; the canonical instance order
-#! breaks ties (a stable sort). For each canonical AIR k with log height h_k:
-#!
-#!   inv_k   = #{m < k : h_m > h_k}     inversions contributed by AIR k
-#!   after_k = #{m > k : h_m < h_k}
-#!   pos_k   = k - inv_k + after_k      position of AIR k in the proof order
-#!   tag    += inv_k * (NUM_MIDEN_AIRS - 1 - pos_k)!
-#!
-#! The comparisons are branch-free (flag products), so the derivation is a flat
-#! NUM_MIDEN_AIRS^2 comparison sweep plus one small factorial per AIR.
-#!
-#! `pos_k` is always in `0 .. NUM_MIDEN_AIRS - 1` (inv_k <= k and k + after_k <= N - 1), so the
-#! factorial argument never underflows the field.
-#!
-#! This VM-local specialization keeps the three-AIR loop bounds compile-time constants. New
-#! relations should use `stark::utils::derive_order_tag_from_heights`; tests pin both paths to the
-#! same Rust ranking. Changing the VM AIR set requires updating `NUM_MIDEN_AIRS`, its relation
-#! layout accessors, and the public-input schema; regeneration checks pin those copies.
-#!
-#! Input:  []
-#! Output: [tag]
-proc derive_order_tag() -> u8
-    push.0.0
-    # => [k = 0, tag = 0]
-
-    repeat.NUM_MIDEN_AIRS
-        dup exec.constants::air_trace_length_logs_ptr add mem_load
-        # => [h_k, k, tag]
-
-        push.0.0 push.0
-        # => [m = 0, inv = 0, after = 0, h_k, k, tag]
-
-        repeat.NUM_MIDEN_AIRS
-            dup exec.constants::air_trace_length_logs_ptr add mem_load
-            # => [h_m, m, inv, after, h_k, k, tag]
-
-            # inv += (m < k) * (h_m > h_k)
-            dup dup.5 u32gt
-            dup.2 dup.7 u32lt
-            mul
-            # => [flag, h_m, m, inv, after, h_k, k, tag]
-            movup.3 add movdn.2
-            # => [h_m, m, inv', after, h_k, k, tag]
-
-            # after += (m > k) * (h_m < h_k)
-            dup dup.5 u32lt
-            dup.2 dup.7 u32gt
-            mul
-            # => [flag, h_m, m, inv, after, h_k, k, tag]
-            movup.4 add movdn.3
-            # => [h_m, m, inv, after', h_k, k, tag]
-
-            drop add.1
-            # => [m + 1, inv, after, h_k, k, tag]
-        end
-        drop
-        # => [inv, after, h_k, k, tag]
-
-        # pos = k - inv + after
-        dup.3 dup.1 sub
-        movup.2 add
-        # => [pos, inv, h_k, k, tag]
-
-        # tag += inv * (NUM_MIDEN_AIRS - 1 - pos)!
-        push.NUM_MIDEN_AIRS sub.1 swap sub
-        exec.factorial
-        mul
-        # => [inv * weight, h_k, k, tag]
-        movup.3 add movdn.2
-        # => [h_k, k, tag']
-
-        drop add.1
-        # => [k + 1, tag']
-    end
-    drop
-    # => [tag]
-end
-
-#! Computes x! for small x.
-#!
-#! Input:  [x]
-#! Output: [x!]
-proc factorial(x: u8) -> u8
-    push.1 swap
-    # => [x, acc = 1]
-    dup push.0 neq
-    while.true
-        # => [x, acc] with x > 0
-        dup movup.2 mul
-        # => [acc * x, x]
-        swap sub.1
-        # => [x - 1, acc']
-        dup push.0 neq
-    end
-    drop
-    # => [acc]
-end
-
 proc store_relation_digest()
     push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
     exec.constants::relation_digest_ptr mem_storew_le
@@ -211,10 +124,9 @@ proc store_relation_digest()
     dropw
 end
 
-proc store_ace_registry_root()
-    push.ACE_REGISTRY_ROOT_3.ACE_REGISTRY_ROOT_2.ACE_REGISTRY_ROOT_1.ACE_REGISTRY_ROOT_0
-    exec.constants::ace_registry_root_ptr mem_storew_le
-    # Relation metadata is memory-only; leave the caller stack unchanged.
+proc store_and8_preprocessed_trace_commitment
+    push.AND8_PREPROCESSED_TRACE_COM_3.AND8_PREPROCESSED_TRACE_COM_2.AND8_PREPROCESSED_TRACE_COM_1.AND8_PREPROCESSED_TRACE_COM_0
+    exec.constants::preprocessed_trace_com_ptr mem_storew_le
     dropw
 end
 

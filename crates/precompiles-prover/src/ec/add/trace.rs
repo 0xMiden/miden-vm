@@ -10,18 +10,16 @@
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
+use miden_core::{Felt, utils::RowMajorMatrix};
 
 use super::{
     CELL_GROUP, CELL_R, CELL_SBOUND, COL_A_PTR, COL_ACT, COL_B_PTR, COL_BETA_PTR, COL_BOUND_PTR,
     COL_CANCEL, COL_DBL, COL_GEN, COL_LAMBDA_PTR, COL_MINTS, COL_PAI_P, COL_PAI_Q, COL_PX, COL_PY,
-    COL_QX, COL_QY, COL_RP_HI, COL_RP_LO, COL_RQ_HI, COL_RQ_LO, EcGroupAddAir, NUM_CELLS,
-    NUM_MAIN_COLS, PERIOD, ROW_RES, ROW_SLOPE, ROW_TAIL, ROW_TERM, TERM_CELL_MULT, TERM_CELL_P,
-    TERM_CELL_Q,
+    COL_QX, COL_QY, COL_RP_HI, COL_RP_LO, COL_RQ_HI, COL_RQ_LO, NUM_CELLS, NUM_MAIN_COLS, PERIOD,
+    ROW_RES, ROW_SLOPE, ROW_TAIL, ROW_TERM, TERM_CELL_MULT, TERM_CELL_P, TERM_CELL_Q,
 };
 use crate::{
     ec::trace::{EcGroupPtr, EcPointPtr, EcStoreRequires},
-    logup::build_logup_aux_trace,
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::ProvideMult,
     uint::trace::UintPtr,
@@ -118,6 +116,7 @@ pub struct EcAddRequires {
 }
 
 impl EcAddRequires {
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -208,11 +207,12 @@ fn op_block(op: &EcAddOp, mult: ProvideMult, ec: &EcStoreRequires) -> Vec<Felt> 
         set(row, COL_GEN, u32::from(generic));
         set(row, COL_ACT, 1);
         set(row, COL_MINTS, u32::from(op.mints));
-        set(row, COL_RP_LO, rp_lo);
-        set(row, COL_RP_HI, rp_hi);
-        set(row, COL_RQ_LO, rq_lo);
-        set(row, COL_RQ_HI, rq_hi);
     }
+    // Both ordering witnesses fit in the result/term window's shared limb cells.
+    set(ROW_RES, COL_RP_LO, rp_lo);
+    set(ROW_RES, COL_RP_HI, rp_hi);
+    set(ROW_TERM, COL_RQ_LO, rq_lo);
+    set(ROW_TERM, COL_RQ_HI, rq_hi);
     // The `EcGroupAdd` provide multiplicity (term cell 0).
     set(ROW_TERM, TERM_CELL_MULT, mult);
     block.into_iter().flatten().collect()
@@ -262,16 +262,4 @@ pub fn generate_trace(
     // Padding blocks: all-zero (act = 0) rows that touch no bus.
     vals.resize(height * NUM_MAIN_COLS, Felt::ZERO);
     RowMajorMatrix::new(vals, NUM_MAIN_COLS)
-}
-
-// PROVER
-// ================================================================================================
-
-/// Witness-bearing companion to [`EcGroupAddAir`] — the aux trace is
-/// exactly the LogUp columns (no fingerprint, no inverse cells).
-pub(crate) fn build_aux(
-    main: &RowMajorMatrix<Felt>,
-    challenges: &[QuadFelt],
-) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    build_logup_aux_trace(&EcGroupAddAir, main, challenges)
 }

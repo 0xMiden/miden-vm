@@ -4,20 +4,22 @@ expression: col_map!(BitwiseCols)
 ---
 BitwiseCols {
     op_flag: 0,
-    a: 1,
-    b: 2,
-    a_bits: [
+    a_bytes: [
+        1,
+        2,
         3,
         4,
+    ],
+    b_bytes: [
         5,
         6,
-    ],
-    b_bits: [
         7,
         8,
+    ],
+    and_bytes: [
         9,
         10,
+        11,
+        12,
     ],
-    prev_output: 11,
-    output: 12,
 }

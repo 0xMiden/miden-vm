@@ -29,25 +29,20 @@ fn interleave_lanes(lane_cells: &[Vec<Felt>; NUM_LANES], height: usize) -> RowMa
 // TRACE GENERATION
 // ================================================================================================
 
-/// Boundary IP for the chiplet's first row. Sponge addresses
-/// `[0, 25)`, `25`, and `26` hold the round-0 lane inputs (natural
-/// row-major: `state[i]` at addr `i`), `RC[0]`, and `zero[0]` (which
-/// coincides with the chiplet-produced zero at slot 1's IP);
-/// trace IPs start here.
+/// Boundary IP for the chiplet's first row. Sponge addresses `[0, 25)` hold the round-0 lane inputs
+/// in natural row-major order, and address 25 holds `RC[0]`. Trace IPs start at 25; address 26 is
+/// the reserved slot's IP.
 pub const IP_BOUNDARY: u64 = 25;
 
-/// Active Keccak rounds per permutation. The full perm cycle is one
-/// longer ([`PERM_CYCLE`]) — the extra round is the dead round whose
-/// 128 IPs space perm N's outputs apart from perm N+1's round-0 inputs
-/// (see "Multi-permutation traces" in the design notes).
+/// Active Keccak rounds per permutation. The full permutation cycle is one round longer
+/// ([`PERM_CYCLE`]); the extra dead round's 128 IPs separate permutation `N`'s outputs from
+/// permutation `N + 1`'s round-0 inputs.
 pub const NUM_ROUNDS: usize = 24;
 
 /// Rows per perm cycle: 24 active rounds + 1 dead round.
 pub const PERM_CYCLE: usize = (NUM_ROUNDS + 1) * ROUND_PERIOD;
 
-/// Split the logic result computation from the (optional) rotate, since
-/// the merged row needs both `r` (byte-committed, BPL-checked) and the
-/// final `c` (written to memory) separately.
+/// Compute the operation result used by the memory write and, when present, the rotation.
 fn simulate_logic(op: Op, a: u64, b: u64) -> u64 {
     match op {
         Op::Nop | Op::Rol(_) => a,
@@ -122,9 +117,11 @@ fn push_row(
     // gate exactly: every non-NOP op reads `src_a` once, so `is_active`
     // reduces to `act && reads_a` (NOP is the only op that reads nothing).
     let reads_a = !matches!(spec.op, Op::Nop);
-    let is_rol = matches!(spec.op, Op::Rol(_) | Op::XorRol(_));
     let b_eff = if logic_active { b } else { 0 };
     let r = simulate_logic(spec.op, a, b_eff);
+    // The lookup-facing byte band always stores the canonical XOR relation. ANDNOT is recovered
+    // from `(a, b, a xor b)` by an affine identity in the AIR.
+    let x = a ^ b_eff;
     if act && reads_a {
         let bpl_op = if is_andnot { BytePairOp::AndNot } else { BytePairOp::Xor };
         require_logic64(bpl_req, bpl_op, a, b_eff);
@@ -144,10 +141,9 @@ fn push_row(
     trace.push(Felt::new(ip).expect("ip fits in canonical Goldilocks"));
     trace.extend(bytes_le(a));
     trace.extend(bytes_le(b_eff));
-    trace.extend(bytes_le(r));
+    trace.extend(bytes_le(x));
     trace.extend(rot_limbs.map(Felt::from));
     trace.push(Felt::from(act as u8));
-    let _ = is_rol;
 }
 
 /// Build the main trace for `states.len()` stacked Keccak-f\[1600]
@@ -166,6 +162,7 @@ fn push_row(
 /// populated directly from the computed values, sufficient for row-local
 /// `check_constraints` (the `BytePairLut` interaction is a cross-AIR bus
 /// concern, checked separately by the session-level bus-balance tests).
+#[cfg(test)]
 pub fn generate_trace_from_states(
     states: &[[u64; 25]],
     rcs: &[u64; NUM_ROUNDS],
@@ -174,6 +171,7 @@ pub fn generate_trace_from_states(
     generate_trace_from_states_inner(states, rcs, &mut scratch)
 }
 
+#[cfg(test)]
 fn generate_trace_from_states_inner(
     states: &[[u64; 25]],
     rcs: &[u64; NUM_ROUNDS],
@@ -270,6 +268,7 @@ fn generate_trace_from_states_inner(
 /// the χ-XOR / ι output slots of round 23 of cycle n — lane (0, 0) at
 /// slot 103 (ι output), the other 24 lanes at slots 104..128 in
 /// row-major lane index order.
+#[cfg(test)]
 pub fn extract_outputs(states: &[[u64; 25]], rcs: &[u64; NUM_ROUNDS]) -> Vec<[u64; 25]> {
     assert!(!states.is_empty(), "at least one perm required");
     let num_perms = states.len();
@@ -336,6 +335,7 @@ pub fn extract_outputs(states: &[[u64; 25]], rcs: &[u64; NUM_ROUNDS]) -> Vec<[u6
 }
 
 /// Single-perm convenience wrapper around [`extract_outputs`].
+#[cfg(test)]
 pub fn extract_output(state: &[u64; 25], rcs: &[u64; NUM_ROUNDS]) -> [u64; 25] {
     extract_outputs(core::slice::from_ref(state), rcs)
         .into_iter()
@@ -378,10 +378,8 @@ impl RoundRequires {
     /// Append one round's `state_in`. The sponge submits these in
     /// `(perm, round)` lex order — 24 per permutation — using
     /// [`keccak_round`](crate::hash::keccak::reference::keccak_round)
-    /// to evolve state between submissions. Only round 0 of each perm
-    /// is load-bearing for memory seeding; rounds 1–23 are derivative
-    /// and currently informational (a future debug build could
-    /// cross-check them against the simulator).
+    /// to evolve state between submissions. Round 0 seeds the permutation's memory reads; the
+    /// remaining input states are derived from the preceding rounds.
     pub fn require_round(&mut self, state_in: [u64; 25]) {
         self.rounds.push(state_in);
     }

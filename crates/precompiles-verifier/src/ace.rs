@@ -2,29 +2,21 @@
 //!
 //! The relation uses [`ChipletAir::all`] as its stable instance order and canonical ACE fold order,
 //! and aligns each per-AIR trace region to eight base-field elements. The lifted STARK proof
-//! commits traces in ascending height order, which varies per workload, so the recursive verifier
-//! needs one circuit per realizable ordering.
+//! commits traces in ascending height order, which varies per workload, but one order-invariant
+//! circuit serves every ordering: the verifier lands each proof-ordered segment at the canonical
+//! address the circuit reads it from and stages each chiplet's fold coefficient by proof position.
 //!
-//! Those circuits share an order-invariant common section. A short per-order shuffle routes the
-//! proof-order inputs onto its canonical wires, making a registry over every ordering tractable.
 //! The cross-chiplet LogUp identity enforced by `ChipletMultiAir::eval_external` remains an
 //! external multi-AIR assertion.
 
-#[cfg(any(test, feature = "registry-tools"))]
+#[cfg(test)]
 use alloc::vec::Vec;
 
-#[cfg(feature = "std")]
-use miden_ace_codegen::order_tag;
-#[cfg(test)]
-use miden_ace_codegen::{AceCircuit, build_multi_air_ace_circuit};
 use miden_ace_codegen::{
-    AceConfig, AceError, FactoredMultiAirCircuit, LayoutKind, RegistryLayout,
-    build_factored_multi_air_ace_circuit,
+    AceCircuit, AceConfig, AceError, LayoutKind, build_canonical_multi_air_ace_circuit,
 };
 use miden_core::{Felt, field::QuadFelt};
 use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS};
-
-use crate::ace_registry::PVM_REGISTRY_ROW_DEPTH;
 
 // MULTI-AIR ACE CIRCUIT
 // ================================================================================================
@@ -51,35 +43,41 @@ fn precompile_ace_config() -> AceConfig {
     AceConfig {
         num_quotient_chunks: num_quotient_chunks(),
         layout: LayoutKind::Masm,
-        num_airs: NUM_CHIPLETS,
     }
 }
 
-/// Builds the ACE circuit in the canonical [`ChipletAir::all`] instance order.
+/// Builds the canonical (order-invariant) precompile chiplet ACE circuit.
 ///
-/// This independent, unfactored construction is retained as a reference for testing the factored
-/// circuit assembly.
-#[cfg(test)]
-pub fn build_precompile_multi_air_ace_circuit() -> Result<AceCircuit<QuadFelt>, AceError> {
+/// Every chiplet's trace regions sit at its [`ChipletAir::all`] offset and every chiplet reads its
+/// fold coefficient from a dedicated slot, so one circuit serves every proof ordering. The caller
+/// lands each proof-ordered trace segment on its canonical address and stages the chiplet at proof
+/// position `k` with the coefficient `beta^(NUM_CHIPLETS - 1 - k)`.
+pub fn build_canonical_precompile_ace_circuit() -> Result<AceCircuit<QuadFelt>, AceError> {
     let airs = ChipletAir::all();
-    let proof_order: Vec<_> = (0..airs.len()).collect();
-
-    build_multi_air_ace_circuit::<ChipletAir>(
-        &airs,
-        &proof_order,
-        precompile_ace_config(),
-        LMCS_ALIGNMENT,
-    )
+    build_canonical_multi_air_ace_circuit(&airs, precompile_ace_config(), LMCS_ALIGNMENT)
 }
 
-/// Builds the factored ACE composition for the precompile chiplet multi-AIR relation.
+// RECURSIVE VERIFIER CIRCUIT
+// ================================================================================================
+
+pub use miden_ace_codegen::RecursiveAceCircuit as PvmRecursiveAceCircuit;
+
+/// Builds and encodes the order-invariant PVM recursive-verifier ACE circuit.
 ///
-/// Build this once and assemble per-order circuits from it with
-/// [`FactoredMultiAirCircuit::circuit_for_order`].
-pub fn build_precompile_factored_ace_circuit() -> Result<FactoredMultiAirCircuit<QuadFelt>, AceError>
-{
-    let airs = ChipletAir::all();
-    build_factored_multi_air_ace_circuit(&airs, precompile_ace_config(), LMCS_ALIGNMENT)
+/// A caller that needs the circuit per proof should hold [`shared_pvm_recursive_circuit`] rather
+/// than rebuild it here.
+pub fn build_pvm_recursive_verifier_ace_circuit() -> Result<PvmRecursiveAceCircuit, AceError> {
+    let encoded = build_canonical_precompile_ace_circuit()?.to_ace()?;
+    encoded.try_into()
+}
+
+/// Returns the process-wide canonical circuit shared by every proof order.
+pub fn shared_pvm_recursive_circuit() -> &'static PvmRecursiveAceCircuit {
+    static CIRCUIT: std::sync::OnceLock<PvmRecursiveAceCircuit> = std::sync::OnceLock::new();
+    CIRCUIT.get_or_init(|| {
+        build_pvm_recursive_verifier_ace_circuit()
+            .expect("PVM recursive-verifier ACE circuit must build")
+    })
 }
 
 /// Returns [`ChipletAir::all`] instance indices in committed-trace order.
@@ -89,36 +87,10 @@ pub fn proof_order_from_log_heights(log_heights: &[u8; NUM_CHIPLETS]) -> [usize;
     order
 }
 
-// ORDER TAGS
-// ================================================================================================
-
-/// Registry layout of the precompile relation: one leaf per proof ordering of the ten
-/// chiplets, with the checked-in node row at depth 12 (see [`crate::ace_registry`]).
-pub const PVM_REGISTRY_LAYOUT: RegistryLayout =
-    match RegistryLayout::new(NUM_CHIPLETS, PVM_REGISTRY_ROW_DEPTH) {
-        Some(layout) => layout,
-        None => panic!("the PVM registry row must sit above the leaves"),
-    };
-
-/// Number of proof orderings of the precompile chiplets (`NUM_CHIPLETS!`).
-pub const PVM_ORDER_COUNT: usize = PVM_REGISTRY_LAYOUT.order_count();
-
-/// Smallest Merkle tree depth covering every proof-order tag.
-#[cfg(any(test, feature = "registry-tools"))]
-pub const PVM_ACE_REGISTRY_DEPTH: usize = PVM_REGISTRY_LAYOUT.tree_depth();
-
-const _: () = assert!(PVM_ORDER_COUNT <= u32::MAX as usize, "order tags must fit in u32");
-
-/// Registry tag for the ordering the proof commits its traces in.
-#[cfg(feature = "std")]
-pub fn order_tag_from_log_heights(log_heights: &[u8; NUM_CHIPLETS]) -> u32 {
-    order_tag(&proof_order_from_log_heights(log_heights))
-}
-
-/// Orders used by registry and semantic checks: identity, reversal, adjacent swaps, each chiplet
+/// Orders used by semantic checks: identity, reversal, adjacent swaps, each chiplet
 /// moved to either end, and a deterministic random sample. The sample includes non-involutions,
 /// where the source and destination permutations differ.
-#[cfg(any(test, feature = "registry-tools"))]
+#[cfg(test)]
 pub(crate) fn structured_orders() -> Vec<[usize; NUM_CHIPLETS]> {
     let identity: [usize; NUM_CHIPLETS] = core::array::from_fn(|i| i);
     let mut orders = Vec::new();
@@ -168,12 +140,14 @@ pub(crate) fn structured_orders() -> Vec<[usize; NUM_CHIPLETS]> {
 mod tests {
     use alloc::{format, string::String, vec::Vec};
 
-    use miden_ace_codegen::{InputKey, order_from_tag, order_tag};
-    use miden_core::{Felt, Word, field::QuadFelt};
-    use miden_crypto::field::BasedVectorSpace;
+    use miden_ace_codegen::InputKey;
+    use miden_core::{Felt, Word, crypto::hash::Eidos, field::QuadFelt};
+    use miden_crypto::field::PrimeCharacteristicRing;
 
     use super::*;
-    use crate::ace_registry::{PVM_ACE_REGISTRY_ROOT, PVM_CIRCUIT_SHAPE, PVM_RELATION_DIGEST};
+    use crate::ace_constants::{
+        PVM_ACE_CIRCUIT_DIGEST, PVM_CIRCUIT_SHAPE, PVM_RELATION_DIGEST, relation_digest_for_circuit,
+    };
 
     const PVM_WRAPPER_PATH: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/mod.masm");
@@ -184,6 +158,23 @@ mod tests {
 
     fn canonical_order() -> Vec<usize> {
         (0..NUM_CHIPLETS).collect()
+    }
+
+    /// Deterministic extension-field inputs.
+    fn pseudo_random_inputs(len: usize) -> Vec<QuadFelt> {
+        let mut state = 0x5eed_1234_abcd_ef01u64;
+        (0..len)
+            .map(|_| {
+                let mut next = || {
+                    state =
+                        state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                    Felt::from((state >> 33) as u32)
+                };
+                let c0 = next();
+                let c1 = next();
+                QuadFelt::new([c0, c1])
+            })
+            .collect()
     }
 
     fn masm_const(path: &str, name: &str) -> u64 {
@@ -198,51 +189,75 @@ mod tests {
             .unwrap_or_else(|| panic!("constant {name} not found in {path}"))
     }
 
+    /// The encoded recursive-verifier circuit must be the canonical builder's output and nothing
+    /// else: its digest is what the compiled-in PVM circuit commitment has to pin.
     #[test]
-    fn precompile_factored_circuit_matches_unfactored_for_structured_orders() {
+    fn pvm_recursive_circuit_matches_the_canonical_builder() {
+        let encoded = build_canonical_precompile_ace_circuit()
+            .expect("canonical circuit")
+            .to_ace()
+            .expect("canonical circuit must be MASM encodable");
+        let produced = build_pvm_recursive_verifier_ace_circuit().expect("recursive circuit");
+
+        assert_eq!(produced.num_inputs, encoded.num_vars());
+        assert_eq!(produced.num_eval_gates, encoded.num_eval_rows());
+        assert_eq!(produced.stream_len, encoded.size_in_felt());
+        assert_eq!(produced.instructions.as_slice(), encoded.instructions());
+        assert_eq!(produced.commitment, Eidos::hash_elements(encoded.instructions()));
+        assert!(
+            produced.stream_len.is_multiple_of(8),
+            "the stream must fill whole adv_pipe blocks"
+        );
+
+        // The cached circuit is what a repeated caller evaluates, and it is built the same way.
+        assert_eq!(*shared_pvm_recursive_circuit(), produced);
+    }
+
+    /// Checks the canonical circuit against direct AIR folds for structured PVM proof orders.
+    #[test]
+    fn canonical_circuit_matches_direct_evaluation_for_structured_orders() {
         let airs = ChipletAir::all();
-        let factored = build_precompile_factored_ace_circuit().expect("factored circuit");
+        let canonical = build_canonical_precompile_ace_circuit().expect("canonical circuit");
+        let canonical_layout = canonical.layout();
 
-        let mut values = alloc::vec![];
-        for order in structured_orders() {
-            let assembled = factored.circuit_for_order(&order).expect("assembled circuit");
-            let reference =
-                build_multi_air_ace_circuit(&airs, &order, precompile_ace_config(), LMCS_ALIGNMENT)
-                    .expect("unfactored circuit");
+        // Nonzero quotient openings exercise the shared quotient binding.
+        let base = pseudo_random_inputs(canonical_layout.total_inputs);
 
-            let mut state = 0x5eed_1234_abcd_ef01u64;
-            let inputs: Vec<QuadFelt> = (0..assembled.layout().total_inputs)
-                .map(|_| {
-                    state =
-                        state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-                    let c0 = Felt::from((state >> 33) as u32);
-                    state =
-                        state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-                    let c1 = Felt::from((state >> 33) as u32);
-                    QuadFelt::new([c0, c1])
-                })
-                .collect();
-            assert!(
-                inputs.iter().any(|value| {
-                    <QuadFelt as BasedVectorSpace<Felt>>::as_basis_coefficients_slice(value)[1]
-                        != Felt::ZERO
-                }),
-                "semantic comparison must exercise the extension field"
+        let beta = QuadFelt::from_u64(97);
+        // Duplicate orders would evaluate identically and defeat the non-vacuity check below.
+        let mut orders = structured_orders();
+        orders.sort_unstable();
+        orders.dedup();
+
+        let mut roots = Vec::with_capacity(orders.len());
+        for order in &orders {
+            let mut canonical_inputs = base.clone();
+            for (position, &air_index) in order.iter().enumerate() {
+                let index = canonical_layout
+                    .index(InputKey::MultiAirFoldCoeff(air_index))
+                    .expect("canonical fold-coefficient slot");
+                canonical_inputs[index] = beta.exp_u64((NUM_CHIPLETS - 1 - position) as u64);
+            }
+            let canonical_root = canonical.eval(&canonical_inputs).expect("canonical evaluation");
+
+            let direct = miden_ace_codegen::testing::eval_multi_air_constraints(
+                &airs,
+                canonical_layout,
+                &canonical_inputs,
+                order,
+                beta,
+                LMCS_ALIGNMENT,
             );
-
-            let value = assembled.eval(&inputs).expect("factored evaluation");
-            assert_eq!(
-                value,
-                reference.eval(&inputs).expect("unfactored evaluation"),
-                "factored and unfactored circuits disagree for {order:?}"
-            );
-            values.push(value);
+            assert_eq!(canonical_root, direct, "direct symbolic evaluation for {order:?}");
+            roots.push(canonical_root);
         }
 
-        assert!(
-            values.iter().any(|value| *value != values[0]),
-            "structured orders must not all evaluate identically"
-        );
+        // Distinct roots ensure this fixture distinguishes the sampled proof orders.
+        for (i, left) in roots.iter().enumerate() {
+            for (j, right) in roots.iter().enumerate().skip(i + 1) {
+                assert_ne!(left, right, "{:?} and {:?} fold identically", orders[i], orders[j]);
+            }
+        }
     }
 
     /// Pin the complete quotient-degree vector, not merely its maximum: otherwise a chiplet could
@@ -251,7 +266,7 @@ mod tests {
     fn quotient_chunks_match_the_symbolic_derivation() {
         const EXPECTED: [(&str, u8); NUM_CHIPLETS] = [
             ("ChunkNodeSponge", 2),
-            ("Poseidon2", 2),
+            ("EidosCompression", 1),
             ("KeccakRound", 2),
             ("BytePairLut", 1),
             ("TranscriptEval", 1),
@@ -285,84 +300,94 @@ mod tests {
             expected_chunks,
             "the ACE circuit must read exactly the quotient chunks the proof carries"
         );
-        let unfactored =
-            build_precompile_multi_air_ace_circuit().expect("unfactored multi-AIR ACE circuit");
-        let factored = build_precompile_factored_ace_circuit().expect("factored ACE circuit");
-        assert_eq!(unfactored.layout().counts.num_quotient_chunks, expected_chunks);
-        assert_eq!(factored.layout().counts.num_quotient_chunks, expected_chunks);
+        let canonical = build_canonical_precompile_ace_circuit().expect("canonical ACE circuit");
+        assert_eq!(canonical.layout().counts.num_quotient_chunks, expected_chunks);
     }
 
+    /// Keep protocol and cost changes visible as numbers rather than only as a digest diff.
     #[test]
-    fn pvm_order_tags_round_trip_for_structured_and_boundary_cases() {
-        for tag in [0u32, 1, (PVM_ORDER_COUNT - 2) as u32, (PVM_ORDER_COUNT - 1) as u32] {
-            let order = order_from_tag(tag, NUM_CHIPLETS).expect("tag in range");
-            assert_eq!(order_tag(&order), tag, "round trip fails at tag {tag}");
-        }
-        assert_eq!(order_from_tag(PVM_ORDER_COUNT as u32, NUM_CHIPLETS), None);
-        let identity: [usize; NUM_CHIPLETS] = core::array::from_fn(|i| i);
-        assert_eq!(order_tag(&identity), 0, "the identity order must be tag 0");
-        assert_eq!(order_from_tag(0, NUM_CHIPLETS).as_deref(), Some(identity.as_slice()));
-
-        for order in structured_orders() {
-            let tag = order_tag(&order);
-            assert_eq!(
-                order_from_tag(tag, NUM_CHIPLETS).as_deref(),
-                Some(order.as_slice()),
-                "decoder does not invert the encoder for {order:?} (tag {tag})"
-            );
-        }
-    }
-
-    /// Pin the standard lexicographic Lehmer convention independently of the decoder. Inverse
-    /// rank/unrank implementations can agree while assigning every registry leaf the wrong tag.
-    #[test]
-    fn pvm_order_tags_match_known_lehmer_vectors() {
-        let cases = [
-            ([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 0),
-            ([9, 8, 7, 6, 5, 4, 3, 2, 1, 0], 3_628_799),
-            ([1, 2, 3, 4, 5, 6, 7, 8, 9, 0], 409_113),
-            ([2, 0, 9, 1, 8, 3, 7, 4, 6, 5], 761_659),
-        ];
-
-        for (order, expected) in cases {
-            assert_eq!(order_tag(&order), expected, "unexpected tag for {order:?}");
-        }
-    }
-
-    /// Keep protocol and cost changes visible without reviewing the opaque registry row.
-    #[test]
-    fn pvm_factored_ace_shape_matches_current_air() {
-        let factored = build_precompile_factored_ace_circuit().expect("factored circuit");
-        assert_eq!(factored.num_airs(), NUM_CHIPLETS);
+    fn pvm_canonical_ace_shape_matches_current_air() {
+        let canonical = build_canonical_precompile_ace_circuit().expect("canonical circuit");
         // BytePairLut is the only chiplet with a preprocessed trace, so the combined
-        // preprocessed region must be nonempty and routed by the shuffle section.
-        assert!(factored.layout().counts.preprocessed_width > 0);
-        assert_eq!(factored.layout().counts.num_aux_boundary, NUM_CHIPLETS);
+        // preprocessed region must be nonempty.
+        assert!(canonical.layout().counts.preprocessed_width > 0);
+        let num_aux_values: usize = ChipletAir::all()
+            .iter()
+            .map(|air| {
+                <ChipletAir as miden_lifted_air::LiftedAir<Felt, QuadFelt>>::num_aux_values(air)
+            })
+            .sum();
+        assert_eq!(canonical.layout().counts.num_aux_boundary, num_aux_values);
 
-        let factory =
-            miden_ace_codegen::FactoredCircuitFactory::new(factored).expect("factored factory");
-        let circuit = factory
-            .circuit_for_order(&canonical_order())
-            .expect("canonical encoded circuit");
-        let word = |value: Word| value.iter().map(Felt::as_canonical_u64).collect::<Vec<_>>();
+        let circuit = build_pvm_recursive_verifier_ace_circuit().expect("recursive circuit");
         let snapshot = format!(
             "layout_inputs: {}\nnum_vars: {}\nnum_eval_gates: {}\nstream_len: \
-             {}\nshuffle_prefix_len: {}\ncommon_commitment: {:?}\nregistry_root: \
-             {:?}\nrelation_digest: {:?}",
-            factory.factored().layout().total_inputs,
-            circuit.encoded.num_vars(),
-            circuit.encoded.num_eval_rows(),
-            circuit.encoded.instructions().len(),
-            circuit.shuffle_prefix_len,
-            word(circuit.common_commitment),
-            PVM_ACE_REGISTRY_ROOT,
+             {}\ncircuit_digest: {:?}\nrelation_digest: {:?}",
+            canonical.layout().total_inputs,
+            circuit.num_inputs,
+            circuit.num_eval_gates,
+            circuit.stream_len,
+            circuit.commitment.iter().map(Felt::as_canonical_u64).collect::<Vec<_>>(),
             PVM_RELATION_DIGEST,
         );
 
         insta::assert_snapshot!(snapshot);
     }
 
-    /// The PVM aux hook reads ten quadratic-extension sigmas as five MASM words.
+    /// The compiled-in circuit digest must equal the commitment of the canonical circuit the PVM
+    /// recursive verifier actually evaluates: it is what binds the transcript to that circuit, so
+    /// any drift between them would let a proof be verified against a circuit the protocol
+    /// constant never committed to.
+    #[test]
+    fn pvm_ace_circuit_digest_matches_canonical_circuit() {
+        let circuit = build_pvm_recursive_verifier_ace_circuit().expect("recursive circuit");
+        let actual: Vec<u64> = circuit.commitment.iter().map(Felt::as_canonical_u64).collect();
+        assert_eq!(
+            actual, PVM_ACE_CIRCUIT_DIGEST,
+            "PVM_ACE_CIRCUIT_DIGEST is stale relative to the canonical circuit's commitment"
+        );
+    }
+
+    /// `PVM_RELATION_DIGEST` must be the algebraic binding of the protocol id to the circuit
+    /// digest, not merely a value pinned independently: this is what a mutated circuit digest
+    /// with a stale relation digest would otherwise leave uncaught.
+    #[test]
+    fn pvm_relation_digest_binds_the_circuit_digest() {
+        let circuit_digest = Word::new(PVM_ACE_CIRCUIT_DIGEST.map(Felt::new_unchecked));
+        let expected: Vec<u64> = relation_digest_for_circuit(&circuit_digest)
+            .iter()
+            .map(Felt::as_canonical_u64)
+            .collect();
+        assert_eq!(
+            PVM_RELATION_DIGEST.to_vec(),
+            expected,
+            "PVM_RELATION_DIGEST does not bind PVM_ACE_CIRCUIT_DIGEST via relation_digest_for_circuit"
+        );
+    }
+
+    /// The VM and PVM relations must use distinct protocol ids and land on distinct digests, so
+    /// a proof produced for one relation can never be replayed against the other's recursive
+    /// verifier.
+    #[test]
+    fn pvm_domain_is_separated_from_vm() {
+        assert_ne!(
+            crate::ace_constants::PVM_PROTOCOL_ID,
+            1,
+            "PVM must not reuse the VM protocol id"
+        );
+        assert_ne!(
+            PVM_RELATION_DIGEST,
+            miden_air::config::RELATION_DIGEST.map(|felt| felt.as_canonical_u64()),
+            "PVM_RELATION_DIGEST must not collide with the VM's RELATION_DIGEST"
+        );
+        assert_ne!(
+            PVM_ACE_CIRCUIT_DIGEST,
+            miden_air::config::ACE_CIRCUIT_DIGEST.map(|felt| felt.as_canonical_u64()),
+            "PVM_ACE_CIRCUIT_DIGEST must not collide with the VM's ACE_CIRCUIT_DIGEST"
+        );
+    }
+
+    /// The PVM aux hook reads ten quadratic-extension component residues as five MASM words.
     /// Pin the complete per-chiplet shape so a redistribution cannot preserve only the total.
     #[test]
     fn pvm_aux_hook_matches_every_chiplets_boundary_shape() {
@@ -376,12 +401,24 @@ mod tests {
         assert_eq!(
             derived,
             alloc::vec![1; NUM_CHIPLETS],
-            "the PVM aux hook assumes exactly one sigma from every chiplet"
+            "the PVM aux hook boundary shape drifted"
         );
         assert_eq!(
             derived.iter().sum::<usize>(),
             2 * masm_const(HOOK_PATH, "NUM_AUX_VALUE_WORDS") as usize,
-            "the MASM hook must read every chiplet sigma exactly once"
+            "the MASM hook must read every normalized LogUp value exactly once"
+        );
+
+        // The scatter permutes the region the circuit reads, so it must be exactly one slot per
+        // exposed value.
+        let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
+        let layout = canonical.layout();
+        let base = layout.index(InputKey::AuxBusBoundary(0)).expect("boundary base");
+        let alpha = layout.index(InputKey::Alpha).expect("auxiliary inputs base");
+        assert_eq!(
+            alpha - base,
+            derived.iter().sum::<usize>(),
+            "the circuit's boundary region is not one slot per exposed value"
         );
     }
 
@@ -402,10 +439,12 @@ mod tests {
         use miden_lifted_air::MultiAir;
         use miden_precompiles_air::ChipletMultiAir;
 
-        use crate::ace_registry::PVM_PREPROCESSED_COMMITMENT;
+        use crate::ace_constants::PVM_PREPROCESSED_COMMITMENT;
 
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/public_inputs.masm");
+        const RELATION_PATH: &str =
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/mod.masm");
 
         let multi_air = ChipletMultiAir::new();
         assert_eq!(masm_const(HOOK_PATH, "NUM_PUBLIC_VALUES"), multi_air.num_air_inputs() as u64);
@@ -414,7 +453,7 @@ mod tests {
         assert_eq!(masm_const(HOOK_PATH, "NUM_CHIPLETS"), multi_air.airs().len() as u64);
         for (i, expected) in PVM_PREPROCESSED_COMMITMENT.into_iter().enumerate() {
             assert_eq!(
-                masm_const(HOOK_PATH, &alloc::format!("PREPROCESSED_COMMITMENT_{i}")),
+                masm_const(RELATION_PATH, &alloc::format!("PREPROCESSED_COMMITMENT_{i}")),
                 expected,
                 "PVM trusted setup commitment limb {i} drifted"
             );
@@ -423,13 +462,13 @@ mod tests {
 
     #[test]
     fn pvm_masm_read_layout_matches_every_codegen_boundary() {
-        const READ_START: u64 = 3_225_426_416;
+        const READ_START: u64 = 3_225_432_064;
         const NEXT_VM_REGION: u64 = 3_238_002_688;
         const LAYOUT_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/layout.masm");
 
-        let factored = build_precompile_factored_ace_circuit().expect("PVM factored circuit");
-        let layout = factored.layout();
+        let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
+        let layout = canonical.layout();
         let boundaries = [
             ("PUBLIC_INPUTS_PTR", InputKey::Public(0)),
             ("AUX_RAND_ELEM_PTR", InputKey::AuxRandBeta),
@@ -502,8 +541,8 @@ mod tests {
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/deep_queries.masm");
 
-        let factored = build_precompile_factored_ace_circuit().expect("PVM factored circuit");
-        let layout = factored.layout();
+        let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
+        let layout = canonical.layout();
         let index = |key| layout.index(key).unwrap_or_else(|| panic!("missing {key:?}"));
 
         let preprocessed = index(InputKey::Main { offset: 0, index: 0 })
@@ -541,25 +580,67 @@ mod tests {
         );
     }
 
+    #[test]
+    fn pvm_wrapper_matches_the_relation_contract() {
+        use miden_core::utils::Matrix;
+        use miden_lifted_air::{BaseAir, LiftedAir};
+
+        assert_eq!(masm_const(PVM_WRAPPER_PATH, "NUM_CHIPLETS"), NUM_CHIPLETS as u64);
+        let airs = ChipletAir::all();
+        let derived_minima: Vec<u64> = airs
+            .iter()
+            .map(|air| {
+                let periodic_min = air.max_periodic_length().max(2);
+                let preprocessed_min =
+                    air.preprocessed_trace().map(|trace| trace.height()).unwrap_or(0);
+                let min_height = periodic_min.max(preprocessed_min);
+                assert!(min_height.is_power_of_two());
+                let log_height = min_height.ilog2();
+                if let Some(fixed) = air.fixed_log_height() {
+                    assert_eq!(fixed, log_height, "fixed AIR height drifted from its trace");
+                }
+                u64::from(log_height)
+            })
+            .collect();
+        let masm_minima: Vec<u64> = airs
+            .iter()
+            .enumerate()
+            .map(|(i, air)| {
+                // Fixed-height instances are pinned as equalities in the wrapper; the shared
+                // derivation still supplies the same value.
+                let name = match air.fixed_log_height() {
+                    Some(_) => alloc::format!("FIXED_LOG_HEIGHT_{i}"),
+                    None => alloc::format!("MIN_LOG_HEIGHT_{i}"),
+                };
+                masm_const(PVM_WRAPPER_PATH, &name)
+            })
+            .collect();
+        assert_eq!(masm_minima, derived_minima, "PVM wrapper per-AIR lower bounds drifted",);
+        for (i, expected) in PVM_RELATION_DIGEST.into_iter().enumerate() {
+            assert_eq!(
+                masm_const(PVM_WRAPPER_PATH, &alloc::format!("RELATION_DIGEST_{i}")),
+                expected,
+                "PVM wrapper RELATION_DIGEST limb {i} drifted"
+            );
+        }
+    }
+
     /// Checks the common estimator constants and bounds against the PVM configuration.
     ///
     /// Comparing only the final native and MASM levels would not detect a stale bound for a round
-    /// that does not currently determine the result.
+    /// that does not determine the result.
     #[test]
     fn pvm_security_masm_matches_air() {
         use miden_precompiles_air::security as pvm_security;
 
         let fractional_bits = pvm_security::FIXED_POINT_FRACTIONAL_BITS;
         let fixed_point_one = pvm_security::FIXED_POINT_ONE;
-        let field_bits = miden_air::security::CHALLENGE_FIELD_BITS;
-        let field_ceiling = field_bits.div_ceil(fixed_point_one) * fixed_point_one;
+        let sample_bits = miden_air::security::EIDOS_CHALLENGE_SAMPLE_BITS;
         for (name, expected) in [
             ("FP_SHIFT", u64::from(fractional_bits)),
             ("FP_ONE", fixed_point_one),
-            ("MAX_Q16_FRACTION", fixed_point_one - 1),
             ("BITS_PER_QUERY_FP", pvm_security::BITS_PER_QUERY),
-            ("CHALLENGE_FIELD_WHOLE_BITS", field_bits >> fractional_bits),
-            ("CHALLENGE_FIELD_OFFSET_FP", field_ceiling - field_bits),
+            ("CHALLENGE_SAMPLE_BITS", sample_bits >> fractional_bits),
             ("SECURITY_CAP_BITS", pvm_security::SECURITY_CAP >> fractional_bits),
             ("FRI_FOLDING_BASE_BITS", pvm_security::FOLDING_BASE >> fractional_bits),
             ("LOG2_E_FP", pvm_security::LOG2_E),
@@ -577,8 +658,8 @@ mod tests {
         }
 
         // The estimator omits five native security terms only while the PVM shape satisfies these
-        // bounds. `air_shape_matches_symbolic` checks the stored shape against the chiplet AIRs;
-        // the checks below fail if that shape leaves the estimator envelope.
+        // bounds. `pvm_canonical_ace_shape_matches_current_air` checks the stored shape against the
+        // chiplet AIRs; the checks below fail if that shape leaves the estimator envelope.
         let air_shape = pvm_security::AIR_SHAPE;
         let lookup_coefficient = (u64::from(air_shape.lookup.max_message_width) + 2)
             * u64::from(air_shape.lookup.fractions_per_row);
@@ -663,85 +744,12 @@ mod tests {
     }
 
     #[test]
-    fn pvm_wrapper_matches_the_relation_contract() {
-        use miden_core::utils::Matrix;
-        use miden_lifted_air::{BaseAir, LiftedAir};
-
-        assert_eq!(masm_const(PVM_WRAPPER_PATH, "NUM_CHIPLETS"), NUM_CHIPLETS as u64);
-
-        let airs = ChipletAir::all();
-        let derived_minima: Vec<u64> = airs
-            .iter()
-            .map(|air| {
-                let periodic_min = air.max_periodic_length().max(2);
-                let preprocessed_min =
-                    air.preprocessed_trace().map(|trace| trace.height()).unwrap_or(0);
-                let min_height = periodic_min.max(preprocessed_min);
-                assert!(min_height.is_power_of_two());
-                let log_height = min_height.ilog2();
-                if let Some(fixed) = air.fixed_log_height() {
-                    assert_eq!(fixed, log_height, "fixed AIR height drifted from its trace");
-                }
-                u64::from(log_height)
-            })
-            .collect();
-        let masm_minima: Vec<u64> = airs
-            .iter()
-            .enumerate()
-            .map(|(i, air)| {
-                // Fixed-height instances are pinned as equalities in the wrapper; the shared
-                // derivation still supplies the same value.
-                let name = match air.fixed_log_height() {
-                    Some(_) => alloc::format!("FIXED_LOG_HEIGHT_{i}"),
-                    None => alloc::format!("MIN_LOG_HEIGHT_{i}"),
-                };
-                masm_const(PVM_WRAPPER_PATH, &name)
-            })
-            .collect();
-        assert_eq!(masm_minima, derived_minima, "PVM wrapper per-AIR lower bounds drifted",);
-        for (prefix, expected) in [
-            ("RELATION_DIGEST", PVM_RELATION_DIGEST),
-            ("ACE_REGISTRY_ROOT", PVM_ACE_REGISTRY_ROOT),
-        ] {
-            for (i, expected) in expected.into_iter().enumerate() {
-                assert_eq!(
-                    masm_const(PVM_WRAPPER_PATH, &alloc::format!("{prefix}_{i}")),
-                    expected,
-                    "PVM wrapper {prefix} limb {i} drifted"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn pvm_ood_hook_matches_the_codegen_row_span() {
-        const HOOK_PATH: &str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/ood_frames.masm");
-
-        let factored = build_precompile_factored_ace_circuit().expect("PVM factored circuit");
-        let layout = factored.layout();
-        let current = layout
-            .index(InputKey::Preprocessed { offset: 0, index: 0 })
-            .expect("preprocessed current boundary");
-        let next = layout
-            .index(InputKey::Preprocessed { offset: 1, index: 0 })
-            .expect("preprocessed next boundary");
-        let row_felts = 2 * (next - current);
-        assert_eq!(row_felts % 8, 0, "the aligned OOD row must fill whole adv_pipe blocks");
-        assert_eq!(
-            masm_const(HOOK_PATH, "OOD_ROW_DOUBLE_WORDS"),
-            (row_felts / 8) as u64,
-            "the PVM OOD hook must consume exactly one generated READ row"
-        );
-    }
-
-    #[test]
     fn pvm_masm_quotient_inputs_match_the_stark_domain() {
         const EVALUATOR_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/constraints_eval.masm");
 
-        let factored = build_precompile_factored_ace_circuit().expect("PVM factored circuit");
-        let num_chunks = factored.layout().counts.num_quotient_chunks;
+        let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
+        let num_chunks = canonical.layout().counts.num_quotient_chunks;
         assert!(num_chunks.is_power_of_two());
         let expected = miden_lifted_stark::quotient_recomposition_inputs::<Felt>(
             num_chunks.ilog2() as u8,
@@ -764,14 +772,6 @@ mod tests {
     }
 
     #[test]
-    fn registry_layout_matches_the_chiplet_count() {
-        assert_eq!(PVM_ORDER_COUNT, 3_628_800);
-        assert_eq!(PVM_ACE_REGISTRY_DEPTH, 22);
-        assert_eq!(PVM_REGISTRY_LAYOUT.leaves_per_subtree(), 1024);
-        assert_eq!(PVM_REGISTRY_LAYOUT.row_len(), 4096);
-    }
-
-    #[test]
     fn proof_order_sorts_by_height_then_instance_index() {
         let mut log_heights = [10u8; NUM_CHIPLETS];
         assert_eq!(proof_order_from_log_heights(&log_heights).to_vec(), canonical_order());
@@ -782,5 +782,67 @@ mod tests {
         let mut sorted = order;
         sorted.sort_unstable();
         assert_eq!(sorted.to_vec(), canonical_order(), "order is a permutation");
+    }
+
+    /// The circuit digest binds the generated circuit but not the external assertion, so each
+    /// protocol version pins that assertion's exact value on a fixed, non-zero fixture. The
+    /// fixture is spelled out rather than derived from `num_aux_values`, so a change to either
+    /// the assertion's semantics or the relation's aux shape lands here instead of silently
+    /// producing a different input.
+    #[test]
+    fn external_assertion_matches_the_protocol_version() {
+        use miden_lifted_air::MultiAir;
+        use miden_precompiles_air::ChipletMultiAir;
+
+        let challenges = [
+            QuadFelt::new([Felt::from(3u32), Felt::from(5u32)]),
+            QuadFelt::new([Felt::from(7u32), Felt::from(11u32)]),
+        ];
+        let aux_values: Vec<Vec<QuadFelt>> = (0..NUM_CHIPLETS)
+            .map(|i| {
+                alloc::vec![QuadFelt::new([
+                    Felt::from((i + 1) as u32),
+                    Felt::from((2 * i + 1) as u32)
+                ])]
+            })
+            .collect();
+        let aux_refs: Vec<&[QuadFelt]> = aux_values.iter().map(Vec::as_slice).collect();
+
+        let actual = ChipletMultiAir::new()
+            .eval_external(&challenges, &[Felt::ZERO; 4], &[], &aux_refs, &[0; NUM_CHIPLETS])
+            .expect("fixture denominators are non-zero");
+        let expected = match crate::ace_constants::PVM_PROTOCOL_ID {
+            2 => QuadFelt::new([
+                Felt::new_unchecked(17_120_654_257_594_545_925),
+                Felt::new_unchecked(12_713_559_468_620_802_518),
+            ]),
+            version => panic!("add an external-assertion vector for protocol version {version}"),
+        };
+
+        assert_eq!(actual.as_slice(), &[expected]);
+    }
+
+    /// The chiplet instance order fixes proof-order tie-breaks and the relation digest.
+    /// Intentional changes require regenerated protocol constants and a breaking changelog entry.
+    #[test]
+    fn chiplet_instance_order_is_protocol_pinned() {
+        let pinned = [
+            ChipletAir::ChunkNodeSponge,
+            ChipletAir::EidosCompression,
+            ChipletAir::KeccakRound,
+            ChipletAir::BytePairLut,
+            ChipletAir::TranscriptEval,
+            ChipletAir::UintStoreMul,
+            ChipletAir::UintAdd,
+            ChipletAir::EcPointStoreGroups,
+            ChipletAir::EcGroupAdd,
+            ChipletAir::EcMsm,
+        ];
+        assert_eq!(
+            ChipletAir::all(),
+            pinned,
+            "chiplet instance order moved; run `make regenerate-pvm-constants` for an \
+             intentional protocol break"
+        );
     }
 }

@@ -2,11 +2,11 @@ mod basic_block_node;
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-pub(crate) use basic_block_node::collect_immediate_placements;
 pub use basic_block_node::{
     BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, BasicBlockNodeBuilder,
     GROUP_SIZE as OP_GROUP_SIZE, OpBatch,
 };
+pub(crate) use basic_block_node::{collect_immediate_placements, hash_op_batches};
 use derive_more::From;
 use miden_utils_core_derive::MastNodeExt;
 

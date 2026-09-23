@@ -12,7 +12,7 @@ use crate::{
     logup::LookupMessage,
     primitives::byte_pair_lut::BytePairLutAir,
     session::{ChipletAir, NUM_CHIPLETS, fixed_ecgroup_msgs, fixed_uintval_msgs},
-    transcript::{eval::TranscriptEvalAir, poseidon2::Poseidon2Air},
+    transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
 
@@ -29,9 +29,8 @@ pub(crate) fn fold_balance<A>(
     for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
     let periodic = air.periodic_columns();
-    let combined = crate::tests::combined_lookup_main(air, main);
-    let lookup_main = combined.as_ref().unwrap_or(main);
-    let fractions = build_lookup_fractions(air, lookup_main, &periodic, challenges);
+    let preprocessed = air.preprocessed_trace();
+    let fractions = build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, challenges);
     for &(multiplicity, denom) in fractions.fractions() {
         net.entry(denom)
             .or_insert_with(|| (Felt::ZERO, core::any::type_name::<A>().into()))
@@ -65,11 +64,11 @@ fn fold_fixed_messages<M>(
 }
 
 /// Net the canonical full session stack, including verifier-side fixed-boundary consumes.
-pub(crate) fn session_stack_residual(
+pub(crate) fn session_stack_net(
     mains: &[&RowMajorMatrix<Felt>; NUM_CHIPLETS],
     replacements: &[(usize, &RowMajorMatrix<Felt>)],
     challenges: &Challenges<QuadFelt>,
-) -> Vec<(Felt, String)> {
+) -> HashMap<QuadFelt, (Felt, String)> {
     let mut net = HashMap::new();
     for (idx, air) in ChipletAir::all().into_iter().enumerate() {
         let main = replacements
@@ -80,7 +79,9 @@ pub(crate) fn session_stack_residual(
             ChipletAir::ChunkNodeSponge => {
                 fold_balance(&ChunkNodeSpongeAir, main, challenges, &mut net)
             },
-            ChipletAir::Poseidon2 => fold_balance(&Poseidon2Air, main, challenges, &mut net),
+            ChipletAir::EidosCompression => {
+                fold_balance(&EidosCompressionAir, main, challenges, &mut net)
+            },
             ChipletAir::KeccakRound => fold_balance(&KeccakRoundAir, main, challenges, &mut net),
             ChipletAir::BytePairLut => fold_balance(&BytePairLutAir, main, challenges, &mut net),
             ChipletAir::TranscriptEval => {
@@ -96,5 +97,17 @@ pub(crate) fn session_stack_residual(
         }
     }
     fold_fixed_boundary_external_balance(challenges, &mut net);
-    net.into_values().filter(|(m, _)| *m != Felt::ZERO).collect()
+    net
+}
+
+/// Return the nonzero entries from the canonical full session stack balance.
+pub(crate) fn session_stack_residual(
+    mains: &[&RowMajorMatrix<Felt>; NUM_CHIPLETS],
+    replacements: &[(usize, &RowMajorMatrix<Felt>)],
+    challenges: &Challenges<QuadFelt>,
+) -> Vec<(Felt, String)> {
+    session_stack_net(mains, replacements, challenges)
+        .into_values()
+        .filter(|(m, _)| *m != Felt::ZERO)
+        .collect()
 }

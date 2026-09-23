@@ -5,7 +5,8 @@ Miden VM execution proofs.
 
 The public entry point is `prove_precompiles(Vec<PrecompileWitness>, HashFunction)`. It consumes
 singleton execution witnesses and returns one `PrecompileProof`, preserving input root order and
-repetitions. The chiplet and session modules remain private.
+repetitions. The AIR definitions live in `miden-precompiles-air`; this crate owns witness
+generation and proof orchestration. The chiplet and session modules remain private.
 
 ## What's here
 
@@ -14,7 +15,7 @@ and shares computations across inputs. It builds the chiplet traces and serializ
 bound to the ordered fold of the constituent roots. No runtime evaluator or merged witness is built.
 
 Empty batches and bare external assertion roots are rejected. Batch input uses the existing
-`MAX_DEFERRED_ELEMENTS` ceiling for tags and payloads, including repeated inputs and aggregate AND
+`MAX_DEFERRED_ELEMENTS` ceiling for frames and payloads, including repeated inputs and aggregate AND
 nodes. `MAX_PRECOMPILE_ROOTS` bounds every root occurrence. Total declared hash input is separately
 bounded to four bytes per allowed element, so sharing one large payload cannot hide repeated hash
 work. MSM lowering retains its existing per-claim and aggregate fallback term limits; the input
@@ -34,16 +35,16 @@ make test-fast
 src/
 ├── lib.rs              crate root
 ├── deferred/session.rs checked singleton batch import
-├── relations.rs        global relation-tag (bus-id) registry
+├── relations.rs        AIR relation definitions re-export
 ├── math.rs             field and integer helpers
-├── logup/              LogUp encoding + natural last-row σ-closing adapter
-├── stark_config.rs     Poseidon2 STARK configuration
+├── logup/              shared LogUp framework re-exports
+├── stark_config.rs     selectable STARK proof-hash configurations (Eidos default)
 ├── utils.rs            shared field-element helpers
 ├── session/            orchestration facade + addition-chain strategies
-├── primitives/         shared bit / lookup primitives (byte_pair_lut, bitwise64)
-├── hash/               Keccak round / sponge / node + chunk + Memory64 bus
-├── transcript/         poseidon2 (the hash) + eval (the transcript DAG chip)
-├── uint/               256-bit store + add / mul relation chiplets
-├── ec/                 group table, point store, group-law add, and msm/
+├── primitives/         byte-pair lookup witness collection
+├── hash/               Keccak, chunk, and Memory64 witness generation
+├── transcript/         Eidos-compression and transcript-DAG witnesses
+├── uint/               256-bit store, add, and mul witnesses
+├── ec/                 group, point-store, group-add, and MSM witnesses
 └── tests/              per-chiplet + integration tests
 ```

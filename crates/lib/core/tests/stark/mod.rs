@@ -1,11 +1,18 @@
 use std::{array, fmt::Write as _, sync::Arc};
 
+use miden_air::{
+    MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, NUM_PUBLIC_VALUES, ProofOrder, Statement, config,
+};
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE, Word,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
     program::{ExecutionClaim, KernelDescriptor, NUM_CLAIM_ELEMENTS},
     proof::HashFunction,
+};
+use miden_crypto::stark::{
+    Preprocessed, StarkConfig,
+    challenger::{CanObserve, FieldChallenger},
 };
 use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, Program, ProgramInfo};
@@ -22,18 +29,42 @@ mod ace_circuit;
 mod ace_read_check;
 mod batch_query_gen;
 mod isolation;
+mod proof_order_maps;
 mod pvm_aux_trace;
 mod pvm_deep_queries;
-mod pvm_ood_frames;
 mod pvm_public_inputs;
+mod pvm_scatter_bench;
 mod pvm_settlement;
+mod pvm_sigma_scatter;
 mod pvm_verifier;
 mod pvm_wrapper;
 mod security;
 mod security_math;
 mod verifier_stack;
+mod vm_scatter_bench;
+mod vm_sigma_scatter;
 
 use verifier_stack::{CALLER_WORD, VERIFIER_RETURN, VerifierStack};
+
+pub(crate) fn pvm_layout_const(name: &str) -> u32 {
+    let source = include_str!("../../asm/sys/pvm/layout.masm");
+    let prefix = format!("const {name} = ");
+    let value = source
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(&prefix)?.parse::<u64>().ok())
+        .unwrap_or_else(|| panic!("missing generated PVM layout constant {name}"));
+    u32::try_from(value).expect("PVM layout pointer must fit in u32")
+}
+
+pub(crate) fn vm_layout_const(name: &str) -> u32 {
+    let source = include_str!("../../asm/sys/vm/layout.masm");
+    let prefix = format!("const {name} = ");
+    let value = source
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(&prefix)?.parse::<u64>().ok())
+        .unwrap_or_else(|| panic!("missing generated VM layout constant {name}"));
+    u32::try_from(value).expect("VM layout pointer must fit in u32")
+}
 
 // RECURSIVE VERIFIER TESTS
 // ================================================================================================
@@ -98,26 +129,258 @@ fn stark_verifier_e2f4_with_max_kernel() {
 
 #[test]
 fn stark_verifier_e2f4_with_deferred_root() {
-    let data = generate_recursive_verifier_data(EXAMPLE_LOG_DEFERRED, fib_stack_inputs(), None);
+    let data =
+        generate_recursive_verifier_data(EXAMPLE_LOG_DEFERRED, log_deferred_stack_inputs(), None);
     run_recursive_verifier(&data);
 }
 
 #[test]
+fn stark_verifier_e2f4_with_kernel_flipped_order() {
+    let inputs = fib_stack_inputs();
+    let data = generate_recursive_verifier_data(
+        EXAMPLE_FIB_KERNEL_LARGE,
+        inputs,
+        Some(KERNEL_SINGLE_PROC),
+    );
+    let order = run_recursive_verifier(&data);
+    let expected = expected_order_from_shape(&data);
+
+    assert_eq!(order, expected);
+    assert_ne!(order, ProofOrder::instance_order());
+}
+
+#[test]
+fn stark_verifier_e2f4_derives_the_shape_proof_order_for_small_proofs() {
+    let equal_height = generate_recursive_verifier_data(EXAMPLE_EQUAL_HEIGHTS, vec![], None);
+    let core_heavy = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, fib_stack_inputs(), None);
+
+    let equal_height_order = run_recursive_verifier(&equal_height);
+    let core_heavy_order = run_recursive_verifier(&core_heavy);
+
+    assert_eq!(equal_height_order, expected_order_from_shape(&equal_height));
+    assert_eq!(core_heavy_order, expected_order_from_shape(&core_heavy));
+}
+
+#[test]
+fn stark_verifier_e2f4_rejects_missing_ace_circuit_stream() {
+    let mut data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
+    let circuit_key = recursive_circuit_key();
+    data.advice_map.retain(|(key, _)| *key != circuit_key);
+
+    assert_recursive_verifier_rejects(data, "missing ACE circuit stream should fail");
+}
+
+#[test]
+fn stark_verifier_e2f4_rejects_corrupted_ace_circuit_stream() {
+    let mut data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
+    let circuit_key = recursive_circuit_key();
+    let stream = advice_map_value_mut(&mut data, circuit_key);
+    stream[0] += Felt::ONE;
+
+    assert_recursive_verifier_rejects(data, "corrupted ACE circuit stream should fail");
+}
+
+/// A forged per-AIR log height must be rejected.
+///
+/// The transcript-bound per-AIR heights are the verifier's authoritative proof-order input.
+/// `stage_proof_order_maps` derives both position maps from them once; scatter staging, boundary
+/// placement, and fold-coefficient staging read those maps. No standalone order tag is stored.
+/// The heights arrive on the advice stack, so
+/// `sys/vm/public_inputs.masm` observes them into the Fiat-Shamir transcript: a forged height
+/// diverges the transcript, and the proof cannot survive that divergence.
+///
+/// The non-vacuity guard at the end is what makes this cover *order* binding rather than height
+/// binding alone: at least one forgery must land the verifier on a different proof order, which is
+/// exactly the case a verifier that took the heights on trust would scatter wrongly for.
+#[test]
+fn each_air_log_height_is_transcript_bound() {
+    /// Proof-stream index of the first advice-supplied log height: 4 security parameters and the
+    /// 4-felt deferred root precede it.
+    const FIRST_LOG_HEIGHT: usize = 8;
+    /// The And8Lookup height is verifier-fixed setup, so only the others come from the proof.
+    const ADVICE_SUPPLIED_HEIGHTS: usize = MIDEN_AIR_COUNT - 1;
+
+    let base = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, fib_stack_inputs(), None);
+    let honest_order = expected_order_from_shape(&base);
+    let mut reordering_forgeries = 0usize;
+
+    for air in 0..ADVICE_SUPPLIED_HEIGHTS {
+        let mut data = base.clone();
+        // Raise the height rather than lower it: `assert_shape_log`'s bounds stay satisfied either
+        // way, so rejection cannot be explained by the structural check firing first.
+        data.proof_stream[FIRST_LOG_HEIGHT + air] += 1;
+        if expected_order_from_shape(&data) != honest_order {
+            reordering_forgeries += 1;
+        }
+
+        assert_recursive_verifier_rejects(
+            data,
+            &format!("verifier accepted a forged log height for AIR {air}"),
+        );
+    }
+
+    assert!(
+        reordering_forgeries > 0,
+        "no forged height moved the proof order, so this fixture cannot cover order binding"
+    );
+}
+
+/// The negative direction of order binding cannot be explained by transcript divergence alone:
+/// `each_air_log_height_is_transcript_bound` above would pass identically against a verifier
+/// whose scatter, sigma placement and fold staging were hard-wired to the identity order, since a
+/// forged height already diverges the transcript regardless of routing. This builds a mutant
+/// `vm::verify_proof` from a fully staged scatter table, exchanging only the equal-width Core and
+/// Chiplets auxiliary destinations. A paired control from the same source template accepts the
+/// proof with correct routing; the mutant rejects it with only those destinations exchanged,
+/// showing that the routing is load-bearing.
+#[test]
+fn verifier_rejects_a_non_identity_order_when_scatter_destinations_are_swapped() {
+    let data = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, fib_stack_inputs(), None);
+    let proof_order = expected_order_from_shape(&data);
+    assert_ne!(
+        proof_order,
+        ProofOrder::instance_order(),
+        "fixture must have a non-identity proof order to exercise scatter routing"
+    );
+
+    let proof_position = |target| {
+        proof_order
+            .airs()
+            .iter()
+            .position(|air| *air == target)
+            .expect("each Miden AIR occurs once in the proof order")
+    };
+    // Auxiliary destinations begin at table offset 12 and occupy two felts per proof position.
+    // Core and Chiplets both use `pipe_2`, so exchanging only these cells keeps every procedure
+    // digest and segment length valid while corrupting the routing permutation.
+    let core_aux_destination = 12 + 2 * proof_position(MidenAir::Core);
+    let chiplets_aux_destination = 12 + 2 * proof_position(MidenAir::Chiplets);
+
+    let source = |swap_destinations: bool| {
+        let routing_mutation = if swap_destinations {
+            format!(
+                "exec.layout::ood_scatter_table_ptr add.{core_aux_destination} mem_load\n            \
+                 exec.layout::ood_scatter_table_ptr add.{chiplets_aux_destination} mem_load\n            \
+                 exec.layout::ood_scatter_table_ptr add.{core_aux_destination} mem_store\n            \
+                 exec.layout::ood_scatter_table_ptr add.{chiplets_aux_destination} mem_store"
+            )
+        } else {
+            String::new()
+        };
+        format!(
+            "
+        use miden::core::mem
+        use miden::core::sys
+        use miden::core::stark::utils
+        use miden::core::stark::verifier
+
+        use miden::core::sys::vm
+        use miden::core::sys::vm::claim
+        use miden::core::sys::vm::constraints_eval
+        use miden::core::sys::vm::deep_queries
+        use miden::core::sys::vm::layout
+        use miden::core::sys::vm::ood_frames
+        use miden::core::sys::vm::public_inputs
+        use miden::core::sys::vm::aux_trace
+
+        const KERNEL_COMMITMENT_OFFSET = 4
+        const KERNEL_DOMAIN_TAG = 0x01000001
+        const FELTS_PER_KERNEL_DIGEST = 4
+        const MAX_NUM_KERNEL_PROCEDURES = 255
+        # Mirrors the private `vm::materialize_kernel_witness`; any drift fails the control below.
+        proc materialize_kernel_witness
+            padw exec.layout::claim_ptr add.KERNEL_COMMITMENT_OFFSET mem_loadw_le
+            adv.push_mapvaln
+            adv_push
+            u32assert.err=\"kernel witness length must fit in a u32\"
+            dup u32mod.FELTS_PER_KERNEL_DIGEST
+            assertz.err=\"kernel witness length must be word-aligned\"
+            div.FELTS_PER_KERNEL_DIGEST
+            dup u32lte.MAX_NUM_KERNEL_PROCEDURES
+            assert.err=\"number of kernel procedures exceeds KernelDescriptor::MAX_NUM_PROCEDURES\"
+            dup exec.layout::num_kernel_procedures_ptr mem_store
+            exec.layout::kernel_witness_ptr swap
+            push.KERNEL_DOMAIN_TAG
+            exec.mem::pipe_words_to_memory_in_domain
+            movup.4 drop
+            assert_eqw.err=\"fetched kernel digests do not hash to the claim's kernel commitment\"
+        end
+
+        begin
+            exec.layout::claim_commitment_ptr mem_storew_le
+            exec.layout::claim_ptr exec.claim::materialize_claim
+
+            exec.utils::load_security_params
+            exec.materialize_kernel_witness
+            exec.public_inputs::stage_boundary_inputs
+            exec.vm::load_air_context
+            {routing_mutation}
+
+            procref.deep_queries::compute_deep_composition_polynomial_queries
+            procref.constraints_eval::execute_constraint_evaluation_check
+            procref.ood_frames::process_row_ood_evaluations
+            procref.public_inputs::process_public_inputs
+            procref.aux_trace::observe_aux_trace
+
+            exec.verifier::verify
+            exec.sys::truncate_stack
+        end
+    "
+        )
+    };
+
+    let control_data = data.clone();
+    let control_source = source(false);
+    let control = build_test!(
+        control_source.as_str(),
+        &control_data.initial_stack(),
+        control_data.advice_stack(),
+        control_data.store,
+        control_data.advice_map
+    );
+    control
+        .execute_for_output()
+        .expect("the paired control with correct scatter destinations must accept the proof");
+
+    let mutated_source = source(true);
+    let test = build_test!(
+        mutated_source.as_str(),
+        &data.initial_stack(),
+        data.advice_stack(),
+        data.store,
+        data.advice_map
+    );
+    test.execute().expect_err(
+        "verifier must reject a non-identity proof order when two scatter destinations are swapped",
+    );
+}
+
+fn assert_recursive_verifier_rejects(data: VerifierData, message: &str) {
+    let source = vm_verify_proof_program();
+    let test = build_test!(
+        source.as_str(),
+        &data.initial_stack(),
+        data.advice_stack(),
+        data.store.clone(),
+        data.advice_map
+    );
+
+    assert!(test.execute_for_output().is_err(), "{message}");
+}
+
+#[test]
 fn folding_reseed_helper_matches_reference_sampler() {
-    fn source(use_combined_helper: bool) -> String {
+    fn source(use_combined_helper: bool, pow_bits: usize) -> String {
         let sample = if use_combined_helper {
             "
-            push.41.31.29.23 push.17
+            push.41.31.29.23 push.0
             exec.random_coin::reseed_check_folding_pow_and_sample_alpha
             "
         } else {
             "
-            push.41.31.29.23 push.17
+            push.41.31.29.23 push.0
             exec.random_coin::reseed_with_felt
-            exec.constants::get_folding_pow_bits
-            exec.random_coin::sample_bits
-            assertz
-            exec.random_coin::sample_ext
+            exec.random_coin::sample_folding_pow_and_ext
             "
         };
 
@@ -128,45 +391,101 @@ fn folding_reseed_helper_matches_reference_sampler() {
             use miden::core::stark::random_coin
 
             begin
-                push.0 exec.constants::set_folding_pow_bits
-                push.109.113.127.131 exec.constants::c_ptr mem_storew_le dropw
-                push.0 exec.constants::random_coin_input_len_ptr mem_store
+                push.{pow_bits} exec.constants::set_folding_pow_bits
+                push.109.113.127.131 exec.constants::random_coin_cv_ptr mem_storew_le dropw
+                exec.random_coin::eidos_clear_buffer
+                push.0 exec.constants::random_coin_counter_ptr mem_store
                 push.0 exec.constants::random_coin_output_len_ptr mem_store
 
                 {sample}
 
                 exec.constants::random_coin_output_len_ptr mem_load
-                exec.random_coin::load_random_coin_state
+                exec.constants::random_coin_counter_ptr mem_load
+                exec.constants::random_coin_buffer_len_ptr mem_load
+                padw exec.constants::random_coin_output_word_ptr mem_loadw_le
+                padw exec.constants::random_coin_cv_ptr mem_loadw_le
                 exec.sys::truncate_stack
             end
             "
         )
     }
 
-    let (reference, _) = build_test!(&source(false), &[])
-        .execute_for_output()
-        .expect("reference sampler should execute");
-    let (combined, _) = build_test!(&source(true), &[])
-        .execute_for_output()
-        .expect("combined sampler should execute");
+    for pow_bits in [0, 1] {
+        let (reference, _) = build_test!(&source(false, pow_bits), &[])
+            .execute_for_output()
+            .unwrap_or_else(|err| {
+                panic!("reference sampler should execute with pow_bits={pow_bits}: {err:?}")
+            });
+        let (combined, _) = build_test!(&source(true, pow_bits), &[])
+            .execute_for_output()
+            .unwrap_or_else(|err| {
+                panic!("combined sampler should execute with pow_bits={pow_bits}: {err:?}")
+            });
 
-    assert_eq!(
-        combined.stack.get_num_elements(15),
-        reference.stack.get_num_elements(15),
-        "combined FRI reseed helper diverged from reference sampler"
-    );
-    assert_eq!(combined.stack.get_element(12), Some(Felt::from_u32(5)));
+        assert_eq!(
+            combined.stack.get_num_elements(15),
+            reference.stack.get_num_elements(15),
+            "combined FRI reseed helper diverged from reference sampler with pow_bits={pow_bits}"
+        );
+    }
 }
 
 #[test]
-fn word_and_pair_observe_helpers_match_scalar_observe() {
+fn folding_reseed_rejects_nonempty_buffer() {
+    let source = "
+        use miden::core::stark::constants
+        use miden::core::stark::random_coin
+
+        begin
+            push.1 exec.constants::set_folding_pow_bits
+            push.109.113.127.131 exec.constants::random_coin_cv_ptr mem_storew_le dropw
+            exec.random_coin::eidos_clear_buffer
+            push.17 exec.random_coin::observe_felt
+
+            push.41.31.29.23 push.0
+            exec.random_coin::reseed_check_folding_pow_and_sample_alpha
+        end
+        ";
+
+    let test = build_test!(source, &[]);
+    expect_assert_error_code_from_msg!(
+        test,
+        "reseed_with_folding_pow_and_ext: buffer must be empty"
+    );
+}
+
+#[test]
+fn zero_pow_folding_reseed_accepts_nonempty_buffer() {
+    let source = "
+        use miden::core::stark::constants
+        use miden::core::stark::random_coin
+
+        begin
+            push.0 exec.constants::set_folding_pow_bits
+            push.109.113.127.131 exec.constants::random_coin_cv_ptr mem_storew_le dropw
+            exec.random_coin::eidos_clear_buffer
+            push.17 exec.random_coin::observe_felt
+
+            push.41.31.29.23 push.0
+            exec.random_coin::reseed_check_folding_pow_and_sample_alpha
+            drop drop
+        end
+        ";
+
+    build_test!(source, &[])
+        .execute()
+        .expect("zero-PoW reseed should flush a partial buffer");
+}
+
+#[test]
+fn word_observe_helper_matches_scalar_observe() {
     fn source(use_word_helpers: bool) -> String {
         let observe = if use_word_helpers {
             "
             push.11.7.5.3
             exec.random_coin::observe_word
-            push.17.13
-            exec.random_coin::observe_pair
+            push.13 exec.random_coin::observe_felt
+            push.17 exec.random_coin::observe_felt
             exec.random_coin::flush_buffer
             "
         } else {
@@ -188,14 +507,19 @@ fn word_and_pair_observe_helpers_match_scalar_observe() {
             use miden::core::stark::random_coin
 
             begin
-                push.101.103.107.109 exec.constants::c_ptr mem_storew_le dropw
-                push.0 exec.constants::random_coin_input_len_ptr mem_store
-                push.8 exec.constants::random_coin_output_len_ptr mem_store
+                push.101.103.107.109 exec.constants::random_coin_cv_ptr mem_storew_le dropw
+                exec.random_coin::eidos_clear_buffer
+                push.0 exec.constants::random_coin_counter_ptr mem_store
+                push.0 exec.constants::random_coin_output_len_ptr mem_store
 
                 {observe}
+                exec.random_coin::sample_felt
 
                 exec.constants::random_coin_output_len_ptr mem_load
-                exec.random_coin::load_random_coin_state
+                exec.constants::random_coin_counter_ptr mem_load
+                exec.constants::random_coin_buffer_len_ptr mem_load
+                padw exec.constants::random_coin_output_word_ptr mem_loadw_le
+                padw exec.constants::random_coin_cv_ptr mem_loadw_le
                 exec.sys::truncate_stack
             end
             "
@@ -214,18 +538,6 @@ fn word_and_pair_observe_helpers_match_scalar_observe() {
         reference.stack.get_num_elements(13),
         "batched observe helpers changed random coin state"
     );
-    assert_eq!(optimized.stack.get_element(12), Some(Felt::from_u32(8)));
-
-    let invalid = build_test!(
-        "
-        use miden::core::stark::random_coin
-        begin
-            push.2.1 exec.random_coin::observe_pair
-        end
-        ",
-        &[]
-    );
-    expect_assert_error_message!(invalid);
 }
 
 #[test]
@@ -257,15 +569,20 @@ fn observe_word_and_flush_buffer_matches_scalar_observe() {
             use miden::core::stark::random_coin
 
             begin
-                push.101.103.107.109 exec.constants::c_ptr mem_storew_le dropw
-                push.0 exec.constants::random_coin_input_len_ptr mem_store
-                push.8 exec.constants::random_coin_output_len_ptr mem_store
+                push.101.103.107.109 exec.constants::random_coin_cv_ptr mem_storew_le dropw
+                exec.random_coin::eidos_clear_buffer
+                push.0 exec.constants::random_coin_counter_ptr mem_store
+                push.0 exec.constants::random_coin_output_len_ptr mem_store
 
                 {prefix}
                 {observe}
+                exec.random_coin::sample_felt
 
                 exec.constants::random_coin_output_len_ptr mem_load
-                exec.random_coin::load_random_coin_state
+                exec.constants::random_coin_counter_ptr mem_load
+                exec.constants::random_coin_buffer_len_ptr mem_load
+                padw exec.constants::random_coin_output_word_ptr mem_loadw_le
+                padw exec.constants::random_coin_cv_ptr mem_loadw_le
                 exec.sys::truncate_stack
             end
             "
@@ -285,7 +602,6 @@ fn observe_word_and_flush_buffer_matches_scalar_observe() {
             reference.stack.get_num_elements(13),
             "word observe-and-flush helper changed random coin state with prefix_len={prefix_len}"
         );
-        assert_eq!(optimized.stack.get_element(12), Some(Felt::from_u32(8)));
     }
 }
 
@@ -331,7 +647,7 @@ pub fn generate_recursive_verifier_data(
             .unwrap();
     let witness = processor.execute_for_proving_sync(&program, &mut host).unwrap();
     let stack_outputs = *witness.claim().stack_outputs();
-    let proof = Prover::new().with_hash_fn(HashFunction::Poseidon2).prove(witness).unwrap();
+    let proof = Prover::new().with_hash_fn(HashFunction::Eidos).prove(witness).unwrap();
 
     let program_info = ProgramInfo::from(program);
     let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
@@ -441,7 +757,8 @@ fn request_flow_binds_proof_to_claim() {
     // claim — the advice provider cannot pass off another proof. The intended claim's own
     // content-addressed entries stay available so the kernel-witness fetch succeeds and
     // rejection happens in verification, not because of a missing key.
-    let other = generate_recursive_verifier_data(EXAMPLE_LOG_DEFERRED, fib_stack_inputs(), None);
+    let other =
+        generate_recursive_verifier_data(EXAMPLE_LOG_DEFERRED, log_deferred_stack_inputs(), None);
     let (k, v) = entry(&other.proof_stream);
     let mut advice_map = other.advice_map.clone();
     advice_map.extend(intended.advice_map.iter().cloned());
@@ -538,7 +855,7 @@ fn vm_verify_proof_program() -> String {
     )
 }
 
-fn run_recursive_verifier(data: &VerifierData) {
+fn run_recursive_verifier(data: &VerifierData) -> ProofOrder {
     use miden_air::security;
 
     let source = vm_verify_proof_program();
@@ -553,13 +870,16 @@ fn run_recursive_verifier(data: &VerifierData) {
         data.advice_map.clone()
     )
     .with_trace_handler(VERIFIER_RETURN, verifier_stack.clone());
-    ace_read_check::execute_and_check(&test);
+    let order = ace_read_check::execute_and_check(&test, &data.proof_stream, &data.claim_advice);
 
-    let params = miden_air::config::pcs_params();
+    // Pin the full common descriptor and deferred root so any value or ordering drift is caught
+    // across every end-to-end configuration.
+    let params = config::pcs_params();
     let height_start = 4 + WORD_SIZE;
-    let log_max_height = data.proof_stream[height_start..height_start + miden_air::MIDEN_AIR_COUNT]
+    let log_max_height = data.proof_stream[height_start..height_start + MIDEN_AIR_COUNT - 1]
         .iter()
         .copied()
+        .chain([u64::from(AND8_LOOKUP_LOG_HEIGHT)])
         .max()
         .expect("the MVM relation has AIR instances");
     let kernel_commitment = claim_kernel_commitment(data);
@@ -586,6 +906,20 @@ fn run_recursive_verifier(data: &VerifierData) {
     ];
     expected.extend_from_slice(&data.proof_stream[4..4 + WORD_SIZE]);
     verifier_stack.assert_outputs_and_caller(&expected);
+    order
+}
+
+/// Derives the expected proof order from the log heights carried in the proof stream.
+///
+/// Proof-stream layout: 4 security parameters, the 4-felt deferred root, then the three
+/// execution-dependent log heights (the And8Lookup height is verifier-fixed).
+fn expected_order_from_shape(data: &VerifierData) -> ProofOrder {
+    ProofOrder::from_instance_log_heights(&[
+        data.proof_stream[8] as u8,
+        data.proof_stream[9] as u8,
+        data.proof_stream[10] as u8,
+        AND8_LOOKUP_LOG_HEIGHT,
+    ])
 }
 
 /// Each of the four security parameters (num_queries, query_pow_bits, deep_pow_bits,
@@ -708,10 +1042,7 @@ fn tampered_claim_preimage_is_rejected() {
         data.store.clone(),
         data.advice_map.clone()
     );
-    expect_assert_error_code_from_msg!(
-        test,
-        "pipe_double_words_preimage_to_memory_with_domain: COMMITMENT does not match"
-    );
+    expect_assert_error_code_from_msg!(test, "claim preimage commitment does not match");
 }
 
 /// The advice-map value under the claim commitment must use the canonical 40-felt encoding.
@@ -755,6 +1086,14 @@ fn advice_map_value_mut(data: &mut VerifierData, key: Word) -> &mut Vec<Felt> {
     &mut entry.1
 }
 
+/// Advice-map key the recursive verifier fetches the ACE circuit stream under.
+///
+/// One circuit serves every proof order, so this is the canonical circuit's own digest — the
+/// same value `build_merkle_data` keys the advice entry with and the loader pins the stream to.
+fn recursive_circuit_key() -> Word {
+    miden_air::ace::shared_recursive_circuit().commitment
+}
+
 // EXAMPLE PROGRAMS
 // ================================================================================================
 
@@ -774,6 +1113,9 @@ const EXAMPLE_FIB_LARGE: &str = "begin
         u32split drop
     end";
 
+/// Tiny program where every AIR lands at its minimum height.
+const EXAMPLE_EQUAL_HEIGHTS: &str = "begin push.1 drop end";
+
 /// Like EXAMPLE_FIB_SMALL but with a syscall, for kernel-aware tests.
 const EXAMPLE_FIB_KERNEL_SMALL: &str = "begin
         syscall.foo
@@ -783,9 +1125,18 @@ const EXAMPLE_FIB_KERNEL_SMALL: &str = "begin
         u32split drop
     end";
 
+/// Like EXAMPLE_FIB_LARGE but with a syscall, for kernel-aware flipped-order tests.
+const EXAMPLE_FIB_KERNEL_LARGE: &str = "begin
+        syscall.foo
+        repeat.400
+            swap dup.1 add
+        end
+        u32split drop
+    end";
+
 const EXAMPLE_LOG_DEFERRED: &str = "begin
         log_deferred
-        dropw dropw dropw
+        dropw
     end";
 
 fn fib_stack_inputs() -> Vec<u64> {
@@ -793,6 +1144,424 @@ fn fib_stack_inputs() -> Vec<u64> {
     inputs[15] = 0;
     inputs[14] = 1;
     inputs
+}
+
+fn log_deferred_stack_inputs() -> Vec<u64> {
+    // TRUE_DIGEST is the zero word and must occupy the top four positions. A nonzero first tail
+    // element makes the post-`dropw` output visibly distinct from an empty stack.
+    let mut inputs = vec![0_u64; 16];
+    inputs[4] = 7;
+    inputs
+}
+
+// EIDOS CHALLENGER PARITY TESTS
+// ================================================================================================
+
+/// The trusted AND8 preprocessed-trace commitment for the canonical Miden statement shape, as
+/// bound by `load_air_context` (must match `AND8_PREPROCESSED_TRACE_COM_*` in `sys/vm/mod.masm`).
+fn and8_preprocessed_commitment() -> [Felt; WORD_SIZE] {
+    let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+    let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
+        MidenMultiAir::new(),
+        vec![Felt::ZERO; NUM_PUBLIC_VALUES],
+        vec![],
+    )
+    .expect("zero public inputs satisfy the Miden statement shape");
+    let commitment: [u64; WORD_SIZE] = Preprocessed::build(&statement, &config)
+        .expect("the Miden relation declares the AND8 preprocessed table")
+        .commitment()
+        .into();
+    commitment.map(Felt::new_unchecked)
+}
+
+fn read_word(output: &miden_processor::ExecutionOutput, addr: u32) -> [Felt; WORD_SIZE] {
+    let ctx = miden_processor::ContextId::root();
+    array::from_fn(|i| {
+        output
+            .memory
+            .read_element(ctx, Felt::from_u32(addr + i as u32))
+            .expect("memory read")
+    })
+}
+
+/// Step-I transcript parity: the MASM Fiat-Shamir schedule (relation digest + PCS params via
+/// `init_seed`, preprocessed commitment, `[CLAIM_HASH | D]`, AIR shape as five single felts,
+/// main-trace commitment) squeezes the same word as the Rust Eidos challenger fed the identical
+/// observation stream.
+#[test]
+fn public_input_transcript_matches_rust_challenger() {
+    const SQUEEZED_WORD_PTR: u32 = 1000;
+    const RANDOM_COIN_BUFFER_LEN_PTR: u32 = 3223322767;
+    const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3223322768;
+
+    let log_heights = [10_u64, 11, 12];
+    let seed = [1_u8; 32];
+    let mut rng = ChaCha20Rng::from_seed(seed);
+
+    // The transcript binds the claim only through its commitment; the preimage merely has to be
+    // staged for `stage_boundary_inputs`/`load_public_inputs` to read.
+    let claim: [u64; NUM_CLAIM_ELEMENTS] = array::from_fn(|_| rng.next_u32() as u64);
+    let claim_hash: [u64; WORD_SIZE] = array::from_fn(|_| rng.next_u32() as u64);
+    let deferred_root: [u64; WORD_SIZE] = array::from_fn(|_| rng.next_u32() as u64);
+    let main_trace_commitment: [u64; WORD_SIZE] = array::from_fn(|_| rng.next_u32() as u64);
+
+    let mut advice_stack = log_heights.to_vec();
+    advice_stack.extend_from_slice(&claim);
+    advice_stack.extend_from_slice(&deferred_root);
+    advice_stack.extend_from_slice(&main_trace_commitment);
+
+    let params = config::pcs_params();
+    let source = format!(
+        "
+        use miden::core::sys::vm
+        use miden::core::stark::constants
+        use miden::core::stark::random_coin
+        use miden::core::sys::vm::layout
+        use miden::core::sys::vm::public_inputs
+
+        {COPY_ADVICE_TO_MEM}
+
+        begin
+            push.{num_queries} exec.constants::set_number_queries
+            push.{query_pow_bits} exec.constants::set_query_pow_bits
+            push.{deep_pow_bits} exec.constants::set_deep_pow_bits
+            push.{folding_pow_bits} exec.constants::set_folding_pow_bits
+            exec.vm::load_air_context
+
+            # Stage the claim region and commitment the way `vm::verify_proof` leaves them.
+            push.{NUM_CLAIM_ELEMENTS} exec.layout::claim_ptr exec.copy_advice_to_mem
+            push.{ch3}.{ch2}.{ch1}.{ch0}
+            exec.layout::claim_commitment_ptr mem_storew_le dropw
+            exec.public_inputs::stage_boundary_inputs
+
+            exec.random_coin::init_seed
+            exec.public_inputs::process_public_inputs
+
+            # Main-trace commitment, then squeeze (the squeeze flushes the buffered stream).
+            padw adv_loadw
+            exec.constants::main_trace_com_ptr mem_storew_le
+            exec.random_coin::observe_word
+            exec.random_coin::eidos_squeeze_word
+            push.{SQUEEZED_WORD_PTR} mem_storew_le
+            dropw
+        end
+        ",
+        num_queries = params.num_queries(),
+        query_pow_bits = params.query_pow_bits(),
+        deep_pow_bits = params.deep_pow_bits(),
+        folding_pow_bits = params.folding_pow_bits(),
+        ch0 = claim_hash[0],
+        ch1 = claim_hash[1],
+        ch2 = claim_hash[2],
+        ch3 = claim_hash[3],
+    );
+
+    let test = build_test!(source.as_str(), &[], &advice_stack);
+    let (output, _host) = test.execute_for_output().expect("execution failed");
+
+    // Rust mirror over the identical observation stream.
+    let config = config::eidos_config(params, config::RELATION_DIGEST);
+    let mut challenger = config.challenger();
+    config::observe_protocol_params(config.pcs(), &mut challenger);
+    for element in and8_preprocessed_commitment() {
+        challenger.observe(element);
+    }
+    for &element in claim_hash.iter().chain(deferred_root.iter()) {
+        challenger.observe(Felt::new_unchecked(element));
+    }
+    challenger.observe(Felt::new_unchecked(MIDEN_AIR_COUNT as u64));
+    for log_height in
+        [log_heights[0], log_heights[1], log_heights[2], AND8_LOOKUP_LOG_HEIGHT as u64]
+    {
+        challenger.observe(Felt::new_unchecked(log_height));
+    }
+    for &element in &main_trace_commitment {
+        challenger.observe(Felt::new_unchecked(element));
+    }
+    let expected_word = Word::new(array::from_fn(|_| challenger.sample_algebra_element()));
+
+    assert_eq!(Word::new(read_word(&output, SQUEEZED_WORD_PTR)), expected_word);
+
+    // The squeeze left neither buffered input nor cached output behind.
+    let ctx = miden_processor::ContextId::root();
+    let read = |addr| output.memory.read_element(ctx, Felt::from_u32(addr)).expect("memory read");
+    assert_eq!(read(RANDOM_COIN_BUFFER_LEN_PTR), Felt::ZERO);
+    assert_eq!(read(RANDOM_COIN_OUTPUT_LEN_PTR), Felt::ZERO);
+}
+
+#[test]
+fn eidos_init_seed_matches_rust_challenger() {
+    const SQUEEZED_WORD_PTR: u32 = 1000;
+
+    let params = config::pcs_params();
+    let source = format!(
+        "
+        use miden::core::sys::vm
+        use miden::core::stark::constants
+        use miden::core::stark::random_coin
+
+        begin
+            push.{num_queries} exec.constants::set_number_queries
+            push.{query_pow_bits} exec.constants::set_query_pow_bits
+            push.{deep_pow_bits} exec.constants::set_deep_pow_bits
+            push.{folding_pow_bits} exec.constants::set_folding_pow_bits
+            exec.vm::load_air_context
+            exec.random_coin::init_seed
+            exec.random_coin::eidos_squeeze_word
+            push.{SQUEEZED_WORD_PTR} mem_storew_le
+            dropw
+        end
+        ",
+        num_queries = params.num_queries(),
+        query_pow_bits = params.query_pow_bits(),
+        deep_pow_bits = params.deep_pow_bits(),
+        folding_pow_bits = params.folding_pow_bits(),
+    );
+
+    let shape = [10_u64, 11, 12];
+    let test = build_test!(source.as_str(), &[], &shape);
+    let (output, _host) = test.execute_for_output().expect("execution failed");
+
+    let config = config::eidos_config(params, config::RELATION_DIGEST);
+    let mut challenger = config.challenger();
+    config::observe_protocol_params(config.pcs(), &mut challenger);
+    // `init_seed` also stages the trusted preprocessed-trace commitment onto the buffered stream.
+    for element in and8_preprocessed_commitment() {
+        challenger.observe(element);
+    }
+    let expected_word = Word::new(array::from_fn(|_| challenger.sample_algebra_element()));
+
+    assert_eq!(Word::new(read_word(&output, SQUEEZED_WORD_PTR)), expected_word);
+}
+
+#[test]
+fn eidos_relation_digest_seed_matches_rust_challenger() {
+    const SQUEEZED_WORD_PTR: u32 = 1000;
+
+    // The pushed word is `Eidos::transcript_init_cv(STARK_TRANSCRIPT)`, matching the
+    // `EIDOS_TRANSCRIPT_INIT_CV_*` constants in `stark/random_coin.masm`.
+    let source = "
+        use miden::core::sys::vm
+        use miden::core::stark::constants
+        use miden::core::stark::random_coin
+
+        begin
+            exec.vm::load_air_context
+            push.6620516959492505600.1947077364412317696.2688637132020383744.4280581857109607681
+            padw exec.constants::relation_digest_ptr mem_loadw_le
+            exec.random_coin::eidos_init_challenger
+            exec.random_coin::eidos_squeeze_word
+            push.1000 mem_storew_le
+            dropw
+        end
+        ";
+
+    let shape = [10_u64, 11, 12];
+    let test = build_test!(source, &[], &shape);
+    let (output, _host) = test.execute_for_output().expect("execution failed");
+
+    let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+    let mut challenger = config.challenger();
+    let expected_word = Word::new(array::from_fn(|_| challenger.sample_algebra_element()));
+
+    assert_eq!(Word::new(read_word(&output, SQUEEZED_WORD_PTR)), expected_word);
+}
+
+#[test]
+fn eidos_absorb_block_matches_rust_challenger() {
+    const SQUEEZED_WORD_PTR: u32 = 1000;
+
+    let source = "
+        use miden::core::stark::random_coin
+        use miden::core::stark::constants
+
+        begin
+            push.13.12.11.10 exec.constants::random_coin_cv_ptr mem_storew_le
+            dropw
+            exec.random_coin::eidos_clear_buffer
+            push.8.7.6.5
+            push.4.3.2.1
+            exec.random_coin::eidos_absorb_block
+            exec.random_coin::eidos_squeeze_word
+            push.1000 mem_storew_le
+            dropw
+        end
+        ";
+
+    let test = build_test!(source, &[]);
+    let (output, _host) = test.execute_for_output().expect("execution failed");
+
+    let init_cv = Word::new([
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(13),
+    ]);
+    let mut challenger = miden_crypto::hash::eidos::EidosChallenger::new(init_cv);
+    challenger.observe([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(6),
+        Felt::new_unchecked(7),
+        Felt::new_unchecked(8),
+    ]);
+    let expected_word = challenger.squeeze_word();
+
+    assert_eq!(Word::new(read_word(&output, SQUEEZED_WORD_PTR)), expected_word);
+}
+
+#[test]
+fn eidos_absorb_block_rejects_nonempty_buffer() {
+    let source = "
+        use miden::core::stark::constants
+        use miden::core::stark::random_coin
+
+        begin
+            push.13.12.11.10 exec.constants::random_coin_cv_ptr mem_storew_le dropw
+            exec.random_coin::eidos_clear_buffer
+            push.17 exec.random_coin::observe_felt
+
+            push.8.7.6.5
+            push.4.3.2.1
+            exec.random_coin::eidos_absorb_block
+        end
+        ";
+
+    let test = build_test!(source, &[]);
+    expect_assert_error_code_from_msg!(test, "eidos_absorb_block: buffer must be empty");
+}
+
+#[test]
+fn eidos_hash_elements_single_block_matches_masm_compress_loop() {
+    const HASH_WORD_PTR: u32 = 1000;
+
+    let init_cv = miden_crypto::hash::eidos::Eidos::init_chaining_word(
+        miden_crypto::hash::eidos::domains::GENERIC_FELT_SEQUENCE,
+        8,
+    );
+    let source = format!(
+        "
+        begin
+            push.{cv3}.{cv2}.{cv1}.{cv0}
+            push.8.7.6.5
+            push.4.3.2.1
+            compress
+            dropw dropw
+            push.{HASH_WORD_PTR} mem_storew_le
+            dropw
+        end
+        ",
+        cv0 = init_cv[0].as_canonical_u64(),
+        cv1 = init_cv[1].as_canonical_u64(),
+        cv2 = init_cv[2].as_canonical_u64(),
+        cv3 = init_cv[3].as_canonical_u64(),
+    );
+
+    let test = build_test!(source.as_str(), &[]);
+    let (output, _host) = test.execute_for_output().expect("execution failed");
+
+    let elements = (1..=8).map(Felt::new_unchecked).collect::<Vec<_>>();
+    let expected_word = miden_crypto::hash::eidos::Eidos::hash_elements(&elements);
+
+    assert_eq!(Word::new(read_word(&output, HASH_WORD_PTR)), expected_word);
+}
+
+#[test]
+fn eidos_hash_elements_adv_pipe_loop_matches_masm_compress_loop() {
+    const HASH_WORD_PTR: u32 = 1000;
+    const STREAM_PTR: u32 = 1 << 16;
+
+    let elements = (1..=16).map(Felt::new_unchecked).collect::<Vec<_>>();
+    let init_cv = miden_crypto::hash::eidos::Eidos::init_chaining_word(
+        miden_crypto::hash::eidos::domains::GENERIC_FELT_SEQUENCE,
+        elements.len() as u32,
+    );
+    let advice_stack: Vec<u64> = elements.iter().map(Felt::as_canonical_u64).collect();
+
+    let source = format!(
+        "
+        begin
+            push.{STREAM_PTR}
+            push.{cv3}.{cv2}.{cv1}.{cv0}
+            padw padw
+            repeat.2
+                adv_pipe
+                compress
+            end
+            dropw dropw
+            movup.4 drop
+            push.{HASH_WORD_PTR} mem_storew_le
+            dropw
+        end
+        ",
+        cv0 = init_cv[0].as_canonical_u64(),
+        cv1 = init_cv[1].as_canonical_u64(),
+        cv2 = init_cv[2].as_canonical_u64(),
+        cv3 = init_cv[3].as_canonical_u64(),
+    );
+
+    let test = build_test!(source.as_str(), &[], &advice_stack);
+    let (output, _host) = test.execute_for_output().expect("execution failed");
+
+    let expected_word = miden_crypto::hash::eidos::Eidos::hash_elements(&elements);
+
+    assert_eq!(Word::new(read_word(&output, HASH_WORD_PTR)), expected_word);
+}
+
+#[test]
+fn eidos_hash_elements_advice_map_loop_matches_masm_compress_loop() {
+    const STREAM_PTR: u32 = 1 << 16;
+
+    let elements = (1..=16).map(Felt::new_unchecked).collect::<Vec<_>>();
+    let expected_word = miden_crypto::hash::eidos::Eidos::hash_elements(&elements);
+    let map_values = elements
+        .iter()
+        .map(Felt::as_canonical_u64)
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let init_cv = miden_crypto::hash::eidos::Eidos::init_chaining_word(
+        miden_crypto::hash::eidos::domains::GENERIC_FELT_SEQUENCE,
+        elements.len() as u32,
+    );
+
+    let source = format!(
+        "
+        adv_map HASH_OUTPUT([{key0}, {key1}, {key2}, {key3}]) = [
+            {map_values}
+        ]
+
+        begin
+            push.HASH_OUTPUT
+            adv.push_mapval
+            push.{STREAM_PTR}
+            push.{cv3}.{cv2}.{cv1}.{cv0}
+            padw padw
+            repeat.2
+                adv_pipe
+                compress
+            end
+            dropw dropw
+            movup.4 drop
+            assert_eqw
+        end
+        ",
+        key0 = expected_word[0].as_canonical_u64(),
+        key1 = expected_word[1].as_canonical_u64(),
+        key2 = expected_word[2].as_canonical_u64(),
+        key3 = expected_word[3].as_canonical_u64(),
+        map_values = map_values,
+        cv0 = init_cv[0].as_canonical_u64(),
+        cv1 = init_cv[1].as_canonical_u64(),
+        cv2 = init_cv[2].as_canonical_u64(),
+        cv3 = init_cv[3].as_canonical_u64(),
+    );
+
+    let test = build_test!(source.as_str(), &[]);
+    test.execute().expect("execution failed");
 }
 
 // REDUCED INPUTS TESTS
@@ -874,8 +1643,9 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
 
             push.10 exec.layout::set_core_trace_length_log
             push.10 exec.layout::set_chiplets_trace_length_log
-            push.10 exec.layout::set_poseidon2_permutation_trace_length_log
-            push.10 exec.constants::set_trace_length_log
+            push.10 exec.layout::set_eidos_compression_trace_length_log
+            push.16 exec.layout::set_and8_lookup_trace_length_log
+            push.16 exec.constants::set_trace_length_log
             push.4.3.2.1 exec.constants::relation_digest_ptr mem_storew_le dropw
             push.{claim_c3}.{claim_c2}.{claim_c1}.{claim_c0}
             exec.layout::claim_commitment_ptr mem_storew_le dropw
@@ -905,7 +1675,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
     // Must match `stark/constants.masm` and `sys/vm/layout.masm`.
     const BOUNDARY_INPUTS_PTR: u32 = 3223322836;
     const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3223322638;
-    const C_TOTAL_PTR: u32 = 3223322772;
+    const C_TOTAL_PTR: u32 = 3223322784;
 
     let pi_ptr = read_elem(PUBLIC_INPUTS_ADDRESS_PTR) as u32;
 
@@ -980,8 +1750,8 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
 #[test]
 fn quotient_recomposition_constants_match_derivation() {
     // The generated evaluator serializes values derived from two independent protocol inputs:
-    // quotient arity from the AIRs, and the canonical LDE shift from the PCS configuration. The
-    // VM currently has arity = blowup = 8, so deriving all three from the blowup would produce the
+    // quotient arity from the AIRs, and the canonical LDE shift from the PCS configuration. The VM
+    // has arity = blowup = 8, so deriving all three from the blowup would produce the
     // same numbers and conceal the conflation that breaks relations where they differ.
     let masm = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -1011,13 +1781,106 @@ fn quotient_recomposition_constants_match_derivation() {
         .expect("the Miden AIR set is non-empty");
     let expected = miden_crypto::stark::quotient_recomposition_inputs::<Felt>(
         log_quotient_degree,
-        miden_air::config::pcs_params().log_blowup(),
+        config::pcs_params().log_blowup(),
     )
     .expect("the Miden quotient degree fits its PCS blowup");
 
     assert_eq!(shift_ratio, expected.shift_ratio, "QUOTIENT_SHIFT_RATIO is stale");
     assert_eq!(first_shift, expected.first_shift, "QUOTIENT_FIRST_SHIFT is stale");
     assert_eq!(first_weight, expected.first_weight, "QUOTIENT_FIRST_WEIGHT is stale");
+}
+
+/// A relation may stage per-AIR fold coefficients only once its ACE input region holds them.
+///
+/// Each generated evaluator's `stage_air_fold_coefficients` writes one extension-field
+/// coefficient per AIR immediately after the selector block, at base offsets
+/// `FIRST_SELECTOR_OFFSET + SELECTOR_STRIDE * num_airs + 2k` from the relation's stark-vars base.
+/// Only the felts below `ACE_CIRCUIT_STREAM_PTR` belong to that region; a coefficient past its
+/// end lands in the circuit-stream region, where the loader's next `adv_pipe` silently overwrites
+/// it. The memory-map test cannot see this — it compares *declared* extents, and both regions
+/// stay dense and disjoint whether or not the writes stay inside them — so the bound is asserted
+/// here instead, against the offset the evaluator actually addresses.
+#[test]
+fn staged_fold_coefficients_fit_the_declared_ace_input_region() {
+    const STAGING_PROC: &str = "stage_air_fold_coefficients";
+    const OFFSET_SITE: &str = "exec.layout::auxiliary_ace_inputs_ptr add.";
+    /// Base felts per staged coefficient (one quadratic-extension element).
+    const COEFFICIENT_STRIDE: u32 = 2;
+
+    let shared = include_str!("../../asm/stark/constraints_eval_inputs.masm");
+    let masm_const = |source: &str, name: &str, what: &str| -> u32 {
+        let prefix = format!("const {name} = ");
+        source
+            .lines()
+            .find_map(|line| line.trim().strip_prefix(&prefix)?.parse::<u32>().ok())
+            .unwrap_or_else(|| panic!("missing {what} constant {name}"))
+    };
+
+    let first_selector_offset = masm_const(shared, "FIRST_SELECTOR_OFFSET", "shared");
+    let selector_stride = masm_const(shared, "SELECTOR_STRIDE", "shared");
+    assert!(
+        !shared.contains(&format!("proc {STAGING_PROC}")),
+        "the shared module must not carry a second fold-coefficient algorithm"
+    );
+
+    for (relation, layout_const, evaluator) in [
+        (
+            "vm",
+            vm_layout_const as fn(&str) -> u32,
+            include_str!("../../asm/sys/vm/constraints_eval.masm"),
+        ),
+        (
+            "pvm",
+            pvm_layout_const as fn(&str) -> u32,
+            include_str!("../../asm/sys/pvm/constraints_eval.masm"),
+        ),
+    ] {
+        let num_airs = masm_const(evaluator, "NUM_AIRS", relation);
+        let region_felts =
+            layout_const("ACE_CIRCUIT_STREAM_PTR") - layout_const("AUXILIARY_ACE_INPUTS_PTR");
+
+        // Walk the procedure declarations rather than the raw text so a rename fails here instead
+        // of turning this guard into a silent no-op.
+        let mut declares_staging = false;
+        let mut in_staging = false;
+        let mut staged_offset = None;
+        for line in evaluator.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) =
+                trimmed.strip_prefix("pub proc ").or_else(|| trimmed.strip_prefix("proc "))
+            {
+                let name = rest.split(['(', ' ']).next().unwrap_or(rest);
+                if name == STAGING_PROC {
+                    assert!(
+                        !trimmed.starts_with("pub "),
+                        "{relation}: {STAGING_PROC} must stay private to the evaluator"
+                    );
+                }
+                declares_staging |= name == STAGING_PROC;
+                in_staging = name == STAGING_PROC;
+            }
+            if in_staging && let Some(offset) = trimmed.strip_prefix(OFFSET_SITE) {
+                staged_offset = offset.parse::<u32>().ok();
+            }
+        }
+        assert!(declares_staging, "{relation}: {STAGING_PROC} is no longer declared");
+        let staged_offset =
+            staged_offset.unwrap_or_else(|| panic!("{relation}: {STAGING_PROC} has no offset"));
+
+        let selectors_end = first_selector_offset + selector_stride * num_airs;
+        assert_eq!(
+            staged_offset, selectors_end,
+            "{relation}: the evaluator stages fold coefficients off the slot right after the \
+             selector block"
+        );
+        let coefficients_end = selectors_end + COEFFICIENT_STRIDE * num_airs;
+        assert!(
+            coefficients_end <= region_felts,
+            "{relation}: {num_airs} fold coefficients end at felt {coefficients_end}, past the \
+             {region_felts}-felt AUXILIARY_ACE_INPUTS_PTR region; enlarge the region before \
+             staging them"
+        );
+    }
 }
 
 // HELPERS
@@ -1041,6 +1904,9 @@ fn max_kernel_source() -> String {
 
 // CONSTANTS
 // ===============================================================================================
+
+/// The verifier-fixed And8Lookup log trace height (the full byte-pair table).
+const AND8_LOOKUP_LOG_HEIGHT: u8 = 16;
 
 /// Memory used by test consumers while deriving a claim commitment.
 const CONSUMER_CLAIM_PTR: u64 = 4096;

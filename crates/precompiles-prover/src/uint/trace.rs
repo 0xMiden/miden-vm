@@ -1,30 +1,22 @@
-//! UintStore trace generation + aux builder.
+//! UintStore main-trace generation.
 //!
-//! [`generate_trace`] lays each interned uint out as a [`PERIOD`]-row
+//! [`generate_trace_padded_to`] lays each interned uint out as a [`PERIOD`]-row
 //! block (resolving each uint's bound-value from the modulus it references
 //! and counting consumers for `uintval_mult`), padding the block count to
 //! a power of two (min 1) with self-referential zero blocks at fresh tail
 //! ptrs — each its own modulus and its own single `UintVal` consumer, so
 //! padding nets out on the bus without touching the demand ledger.
-//! `build_aux` drives the LogUp running sum (the `UintVal` provide /
-//! consume) and the Schwartz–Zippel `id` register, whose per-row
-//! accumulation mirrors [`super::UintStoreAir`]'s `contrib` exactly.
 
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::array;
 
-use miden_core::{
-    Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
-    utils::{Matrix, RowMajorMatrix},
-};
+use miden_core::{Felt, utils::RowMajorMatrix};
 
 use super::{
-    AUX_WIDTH, CARRY_HI_BEGIN, CARRY_LO_BEGIN, HUB_CELL_UINTLIMBS_MULT, HUB_CELL_UINTVAL_MULT,
-    NUM_CELLS, NUM_MAIN_COLS, PERIOD, TERM_CELL_GAP, UintStoreAir,
+    CARRY_HI_BEGIN, CARRY_LO_BEGIN, HUB_CELL_UINTLIMBS_MULT, HUB_CELL_UINTVAL_MULT, NUM_CELLS,
+    NUM_MAIN_COLS, PERIOD, TERM_CELL_GAP,
 };
 use crate::{
-    logup::build_logup_aux_trace,
     math::{U256, to_limbs16, to_limbs32},
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::ProvideMult,
@@ -38,7 +30,7 @@ use crate::{
 pub struct UintPtr(u32);
 
 impl UintPtr {
-    /// The raw store address (trace cells, cap fields, diagnostics).
+    /// The raw store address (trace cells, frame fields, diagnostics).
     pub fn addr(self) -> u32 {
         self.0
     }
@@ -76,8 +68,8 @@ fn carries(v32: &[u32; 8], comp32: &[u32; 8]) -> [u16; 7] {
 }
 
 /// Demand ledger for the [`UintVal`](crate::relations::BusId::UintVal) bus:
-/// every consumer — the store's own bound-refs (`require_bound_refs`),
-/// eval uint-leaves, future add / mul — records per-ptr demand, and the
+/// every consumer — including the store's own bound references (`require_bound_refs`), eval uint
+/// leaves, add/mul operands, and MSM literal scalars — records per-ptr demand, and the
 /// store reads the totals for each uint's provide multiplicity. Mirrors
 /// [`BytePairLutRequires`]
 /// for the `Range16` bus.
@@ -102,15 +94,15 @@ impl UintValRequires {
     }
 }
 
-/// Pinned uints occupy the ptr namespace `[1, 2^16)`; ptr 0 is never a store address,
-/// and transients allocate from `2^16` upward (later).
+/// Pinned uints occupy the ptr namespace `[1, 2^16)`; ptr 0 is never a store address, and the
+/// transient namespace starts at `2^16`.
 pub const PIN_NAMESPACE_END: u32 = 1 << 16;
 
 /// `*Requires` accumulator for the UintStore: the interned uints (a
 /// ptr-keyed map, with a `(value, modulus)`-keyed reverse index) plus the
 /// [`UintVal`](crate::relations::BusId::UintVal) demand ledger. Each
 /// uint's bound-ref demand is recorded here on intern, so
-/// [`generate_trace`] never relies on the caller to supply it.
+/// [`generate_trace_padded_to`] never relies on the caller to supply it.
 ///
 /// Interning is **canonical**: `value → ptr` is kept injective per
 /// modulus, so equal values share one ptr under every interleaving —
@@ -166,6 +158,7 @@ impl UintStoreRequires {
     /// on a value already interned under the same modulus — pins are
     /// protocol addresses, so they must land before any equal value can
     /// be interned canonically onto them.
+    #[cfg(test)]
     pub fn intern_pinned(&mut self, addr: u32, value: U256, bound: UintPtr) -> UintPtr {
         let ptr = UintPtr(addr);
         assert!(value <= self.uint(bound).value, "value exceeds its modulus bound");
@@ -230,9 +223,8 @@ impl UintStoreRequires {
         self.demand.require(ptr);
     }
 
-    /// Record one external `UintLimbs` (raw 8×16 view) consumer at `ptr` —
-    /// a mul-chiplet convolution operand. One require covers both halves
-    /// (the consumer takes the lo and the hi message exactly once each).
+    /// Record one external consumer of the complete 16×16-bit `UintLimbs` message at `ptr`, as
+    /// used for a mul-chiplet convolution operand.
     pub fn require_uintlimbs(&mut self, ptr: UintPtr) {
         self.limbs_demand.require(ptr);
     }
@@ -276,7 +268,7 @@ impl Default for UintStoreRequires {
 /// two) with self-referential zero blocks at fresh tail ptrs. A padding
 /// block is its own modulus (`v = comp = bound = 0`) and its own single
 /// `UintVal` consumer, so it nets out on the bus; its self bound-ref is
-/// laid by [`generate_trace`] directly rather than through the demand
+/// laid by [`generate_trace_padded_to`] directly rather than through the demand
 /// ledger.
 fn padded_blocks(requires: &UintStoreRequires, min_blocks: usize) -> Vec<Uint> {
     let n_real = requires.uints.len();
@@ -301,6 +293,15 @@ fn bound_value(requires: &UintStoreRequires, u: &Uint, is_pad: bool) -> U256 {
     requires.uint(u.bound_ptr).value
 }
 
+/// Builds the main trace at its natural height.
+#[cfg(test)]
+pub fn generate_trace(
+    requires: UintStoreRequires,
+    bpl: &mut BytePairLutRequires,
+) -> RowMajorMatrix<Felt> {
+    generate_trace_padded_to(requires, bpl, 0)
+}
+
 /// Build the UintStore main trace from the [`UintStoreRequires`]
 /// accumulator — the sorted uints (padded per `padded_blocks`) plus the
 /// `UintVal` demand ledger (each uint's `uintval_mult` = its total
@@ -311,19 +312,10 @@ fn bound_value(requires: &UintStoreRequires, u: &Uint, is_pad: bool) -> U256 {
 ///
 /// The same pass drives the `Range16` demand the chiplet consumes into
 /// `bpl` — every `v` / `comp` 16-bit limb plus the per-block ptr gap,
-/// padding blocks included — mirroring the consumes [`UintStoreAir`]
+/// padding blocks included — mirroring the consumes [`super::UintStoreAir`]
 /// emits on the `v` / `comp` / term rows.
-pub fn generate_trace(
-    requires: UintStoreRequires,
-    bpl: &mut BytePairLutRequires,
-) -> RowMajorMatrix<Felt> {
-    generate_trace_padded_to(requires, bpl, 0)
-}
-
-/// As [`generate_trace`], but the block count is additionally floored at
-/// `min_blocks` (still rounded to a power of two) — lets a caller
-/// sharing this trace's row range with another chiplet (see
-/// [`crate::uint::store_mul`]) force a shared height.
+///
+/// The block count is at least `min_blocks`, rounded up to a power of two.
 pub(crate) fn generate_trace_padded_to(
     requires: UintStoreRequires,
     bpl: &mut BytePairLutRequires,
@@ -393,80 +385,4 @@ pub(crate) fn generate_trace_padded_to(
     }
 
     RowMajorMatrix::new(vals, NUM_MAIN_COLS)
-}
-
-/// Witness-bearing companion to [`UintStoreAir`].
-pub(crate) fn build_aux(
-    main: &RowMajorMatrix<Felt>,
-    challenges: &[QuadFelt],
-) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    // Col 0: LogUp running sum over the UintVal provide / consume.
-    let (logup, sigma) = build_logup_aux_trace(&UintStoreAir, main, challenges);
-    let n = main.height();
-    let beta = challenges[1];
-
-    // β^0..β^7.
-    let mut bp = [QuadFelt::ZERO; 8];
-    bp[0] = QuadFelt::ONE;
-    for i in 1..8 {
-        bp[i] = bp[i - 1] * beta;
-    }
-    let two16 = Felt::from(1u32 << 16);
-    let t32 = QuadFelt::from(Felt::new(1u64 << 32).expect("2^32 < Goldilocks p"));
-
-    // Col 1: the SZ register. id[0] = 0; id[r+1] = id[r] + contrib(row r),
-    // contrib matching UintStoreAir's role-gated expression exactly.
-    let logup_width = logup.width();
-    let mut data = Vec::with_capacity(AUX_WIDTH * n);
-    let mut id = QuadFelt::ZERO;
-    for r in 0..n {
-        data.extend((0..logup_width).map(|c| logup.values[r * logup_width + c]));
-        data.push(id);
-
-        let limb = |c: usize| -> Felt { main.values[r * NUM_MAIN_COLS + c] };
-        let recomb_lo07 = || {
-            (0..4).fold(QuadFelt::ZERO, |s, k| {
-                let rk = limb(2 * k) + two16 * limb(2 * k + 1);
-                s + bp[k] * QuadFelt::from(rk)
-            })
-        };
-        let recomb_hi07 = || {
-            (0..4).fold(QuadFelt::ZERO, |s, k| {
-                let rk = limb(2 * k) + two16 * limb(2 * k + 1);
-                s + bp[4 + k] * QuadFelt::from(rk)
-            })
-        };
-        let recomb_hi815 = || {
-            (0..4).fold(QuadFelt::ZERO, |s, k| {
-                let rk = limb(8 + 2 * k) + two16 * limb(8 + 2 * k + 1);
-                s + bp[4 + k] * QuadFelt::from(rk)
-            })
-        };
-        let contrib: QuadFelt = match r % PERIOD {
-            0 => recomb_lo07(),
-            1 => recomb_hi07(),
-            2 => recomb_lo07() + recomb_hi815(),
-            // Bound (closing) row: subtract both direct 4×32 halves, add
-            // both hosted carries' (β^{j+1} − t·β^j) terms.
-            3 => {
-                let carry_lo = (0..4).fold(QuadFelt::ZERO, |s, j| {
-                    let w = bp[j + 1] - bp[j] * t32;
-                    s + w * QuadFelt::from(limb(CARRY_LO_BEGIN + j))
-                });
-                let carry_hi = (0..3).fold(QuadFelt::ZERO, |s, j| {
-                    let w = bp[4 + j + 1] - bp[4 + j] * t32;
-                    s + w * QuadFelt::from(limb(CARRY_HI_BEGIN + j))
-                });
-                let direct_lo =
-                    (0..4).fold(QuadFelt::ZERO, |s, k| s + bp[k] * QuadFelt::from(limb(k)));
-                let direct_hi =
-                    (0..4).fold(QuadFelt::ZERO, |s, k| s + bp[4 + k] * QuadFelt::from(limb(8 + k)));
-                carry_lo - direct_lo + carry_hi - direct_hi
-            },
-            _ => unreachable!("PERIOD = 4"),
-        };
-        id += contrib;
-    }
-
-    (RowMajorMatrix::new(data, AUX_WIDTH), sigma)
 }

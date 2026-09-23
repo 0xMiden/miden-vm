@@ -1,5 +1,4 @@
 use miden_ace_codegen::{AceCircuit, AceConfig, InputKey, LayoutKind};
-use miden_air::MIDEN_AIR_COUNT;
 use miden_core::{
     Felt, ONE, ZERO,
     advice::AdviceStack,
@@ -87,21 +86,12 @@ fn circuit_evaluation_prove_verify() {
 
 #[test]
 fn multi_air_eval_circuit_masm() {
-    // Exercises the combined Miden multi-AIR circuit. If this test passes, the
-    // codegen + MASM ACE chip are consistent for the multi-AIR shape; any
-    // failure in the recursive verifier (`test_poseidon2_prove_verify`) is then in the
-    // input plumbing (memory layout, advice ordering, transcript binding), not in the
-    // circuit.
+    // Check that the encoded canonical circuit accepts inputs whose Rust evaluation is zero.
     let config = AceConfig {
         num_quotient_chunks: 8,
         layout: LayoutKind::Masm,
-        num_airs: MIDEN_AIR_COUNT,
     };
-    let circuit = miden_air::ace::build_multi_air_ace_circuit_for_order(
-        config,
-        &miden_air::ProofOrder::instance_order(),
-    )
-    .unwrap();
+    let circuit = miden_air::ace::build_canonical_multi_air_ace_circuit(config).unwrap();
     let layout = circuit.layout().clone();
 
     let mut inputs = fill_inputs(&layout);

@@ -4,7 +4,7 @@
 //! invariants, and evaluates the same ACE circuit in Rust.
 
 use miden_ace_codegen::{AceConfig, InputKey, InputLayout, LayoutKind};
-use miden_air::{MIDEN_AIR_COUNT, ProofOrder, ace::build_multi_air_ace_circuit_for_order};
+use miden_air::{MIDEN_AIR_COUNT, ProofOrder, ace::build_canonical_multi_air_ace_circuit};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt, TwoAdicField},
@@ -14,47 +14,146 @@ use miden_crypto::field::Field;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor};
 use miden_utils_testing::Test;
 
+use super::{
+    vm_layout_const,
+    vm_scatter_bench::{RowGeometry, expected_frame_memory, proof_order},
+};
+
 // MASM MEMORY LAYOUT
 // ================================================================================================
 
 const TRACE_LENGTH_LOG_PTR: u32 = 3223322634;
+const TRACE_LENGTH_PTR: u32 = 3223322632;
+const LDE_DOMAIN_GEN_PTR: u32 = 3223322626;
+const DOMAIN_OFFSET_PTR: u32 = 3223322635;
 const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3223322638;
-const ORDER_TAG_PTR: u32 = 3223322639;
+const MAIN_TRACE_COM_PTR: u32 = 3223322640;
+const AUX_TRACE_COM_PTR: u32 = 3223322644;
+const COMPOSITION_POLY_COM_PTR: u32 = 3223322648;
+const COMPOSITION_COEF_PTR: u32 = 3223322704;
 const Z_PTR: u32 = 3223322652;
-const AIR_TRACE_LENGTH_LOGS_PTR: u32 = 3223322736;
-const AUX_RAND_ELEM_PTR: u32 = 3225419776;
-const OOD_EVALUATIONS_PTR: u32 = 3225419784;
-const AUX_BUS_BOUNDARY_PTR: u32 = 3225420328;
-const AUXILIARY_ACE_INPUTS_PTR: u32 = 3225420336;
-const ACE_CIRCUIT_STREAM_PTR: u32 = 3225420376;
+const AIR_TRACE_LENGTH_LOGS_PTR: u32 = 3223322744;
+pub(super) fn assert_proof_stream_read_sections(
+    read: &impl Fn(u32) -> Felt,
+    proof_stream: &[u64],
+    claim: &[u64],
+) {
+    const MAIN_OFFSET: usize = 11;
+    const AUX_COMMIT_OFFSET: usize = 15;
+    const AUX_VALUES_OFFSET: usize = 19;
+    const QUOTIENT_COMMIT_OFFSET: usize = 27;
+    const OOD_OFFSET: usize = 33;
+    let ood_evaluations_ptr = vm_layout_const("OOD_EVALUATIONS_PTR");
+    let aux_bus_boundary_ptr = vm_layout_const("AUX_BUS_BOUNDARY_PTR");
+    let ood_felts = usize::try_from(aux_bus_boundary_ptr - ood_evaluations_ptr)
+        .expect("OOD frame size fits usize");
+
+    let public_ptr = read(PUBLIC_INPUTS_ADDRESS_PTR).as_canonical_u64() as u32;
+    for i in 0..32 {
+        assert_eq!(
+            read(public_ptr + 2 * i as u32),
+            Felt::new_unchecked(claim[8 + i]),
+            "public input {i} differs from the authenticated claim"
+        );
+        assert_eq!(
+            read(public_ptr + 2 * i as u32 + 1),
+            Felt::ZERO,
+            "public input {i} has a nonzero extension coordinate"
+        );
+    }
+
+    for (memory, stream) in [
+        (MAIN_TRACE_COM_PTR, MAIN_OFFSET),
+        (AUX_TRACE_COM_PTR, AUX_COMMIT_OFFSET),
+        (COMPOSITION_POLY_COM_PTR, QUOTIENT_COMMIT_OFFSET),
+    ] {
+        for i in 0..4 {
+            assert_eq!(
+                read(memory + i as u32),
+                Felt::new_unchecked(proof_stream[stream + i]),
+                "commitment stream mismatch at memory {memory}, limb {i}"
+            );
+        }
+    }
+    // The proof submits both the boundary values and the trace segments in the height-sorted
+    // proof order, and the verifier scatters them to the canonical addresses the ACE circuit
+    // reads. Both oracles below are computed from the wire stream through that permutation, so
+    // a scatter that dropped, duplicated, or mis-targeted a segment fails here.
+    let order = proof_order(&staged_log_heights(read));
+
+    for (position, &air) in order.iter().enumerate() {
+        for coordinate in 0..2 {
+            assert_eq!(
+                read(aux_bus_boundary_ptr + (2 * air + coordinate) as u32),
+                Felt::new_unchecked(proof_stream[AUX_VALUES_OFFSET + 2 * position + coordinate]),
+                "aux-boundary value from proof position {position} is not at AIR {air}"
+            );
+        }
+    }
+
+    let geometry = RowGeometry::vm();
+    assert_eq!(
+        ood_felts,
+        2 * geometry.row_felts() as usize,
+        "the OOD region no longer holds exactly the two-row frame"
+    );
+    let wire: Vec<Felt> = proof_stream[OOD_OFFSET..OOD_OFFSET + ood_felts]
+        .iter()
+        .map(|value| Felt::new_unchecked(*value))
+        .collect();
+    let expected = expected_frame_memory(&geometry, &order, &wire);
+    for (i, expected) in expected.iter().enumerate() {
+        assert_eq!(
+            read(ood_evaluations_ptr + i as u32).as_canonical_u64(),
+            *expected,
+            "OOD felt {i} is not the value the scatter must place there"
+        );
+    }
+}
+
+/// The per-AIR log heights `load_air_context` staged, in canonical instance order.
+fn staged_log_heights(read: &impl Fn(u32) -> Felt) -> Vec<u64> {
+    (0..MIDEN_AIR_COUNT as u32)
+        .map(|air| read(AIR_TRACE_LENGTH_LOGS_PTR + air).as_canonical_u64())
+        .collect()
+}
 
 #[test]
 fn ace_read_pointers_match_masm_layout() {
+    let aux_rand_elem_ptr = vm_layout_const("AUX_RAND_ELEM_PTR");
+    let ood_evaluations_ptr = vm_layout_const("OOD_EVALUATIONS_PTR");
+    let aux_bus_boundary_ptr = vm_layout_const("AUX_BUS_BOUNDARY_PTR");
+    let auxiliary_ace_inputs_ptr = vm_layout_const("AUXILIARY_ACE_INPUTS_PTR");
+    let ace_circuit_stream_ptr = vm_layout_const("ACE_CIRCUIT_STREAM_PTR");
     let config = AceConfig {
         num_quotient_chunks: 8,
         layout: LayoutKind::Masm,
-        num_airs: MIDEN_AIR_COUNT,
     };
-    let circuit = build_multi_air_ace_circuit_for_order(config, &ProofOrder::instance_order())
-        .expect("multi-AIR ACE circuit");
+    let circuit = build_canonical_multi_air_ace_circuit(config).expect("canonical ACE circuit");
     let layout = circuit.layout();
 
     let beta = layout.index(InputKey::AuxRandBeta).expect("aux randomness beta");
     let alpha = layout.index(InputKey::AuxRandAlpha).expect("aux randomness alpha");
-    let main_curr = layout.index(InputKey::Main { offset: 0, index: 0 }).expect("main curr");
+    let preprocessed_curr = layout
+        .index(InputKey::Preprocessed { offset: 0, index: 0 })
+        .expect("preprocessed curr");
     let aux_bus = layout.index(InputKey::AuxBusBoundary(0)).expect("aux bus boundary");
     let stark_vars = layout.index(InputKey::Alpha).expect("stark vars");
 
     assert_eq!(alpha, beta + 1);
-    assert_eq!(OOD_EVALUATIONS_PTR - AUX_RAND_ELEM_PTR, 2 * (main_curr - beta) as u32);
-    assert_eq!(AUX_BUS_BOUNDARY_PTR - OOD_EVALUATIONS_PTR, 2 * (aux_bus - main_curr) as u32);
+    assert_eq!(ood_evaluations_ptr - aux_rand_elem_ptr, 2 * (preprocessed_curr - beta) as u32);
     assert_eq!(
-        AUXILIARY_ACE_INPUTS_PTR - AUX_BUS_BOUNDARY_PTR,
+        aux_bus_boundary_ptr - ood_evaluations_ptr,
+        2 * (aux_bus - preprocessed_curr) as u32
+    );
+    assert_eq!(
+        auxiliary_ace_inputs_ptr - aux_bus_boundary_ptr,
         2 * (stark_vars - aux_bus) as u32
     );
     assert_eq!(
-        ACE_CIRCUIT_STREAM_PTR - AUXILIARY_ACE_INPUTS_PTR,
-        2 * (layout.total_inputs - stark_vars) as u32
+        ace_circuit_stream_ptr - auxiliary_ace_inputs_ptr,
+        2 * (layout.total_inputs - stark_vars) as u32,
+        "ACE inputs and circuit constants must be contiguous"
     );
 }
 
@@ -67,10 +166,11 @@ fn ace_read_pointers_match_masm_layout() {
 /// The returned vector has `layout.total_inputs` entries.
 fn extract_ace_inputs(read: &impl Fn(u32) -> Felt, layout: &InputLayout) -> Vec<QuadFelt> {
     let pi_ptr = read(PUBLIC_INPUTS_ADDRESS_PTR).as_canonical_u64() as u32;
+    let aux_rand_elem_ptr = vm_layout_const("AUX_RAND_ELEM_PTR");
 
     assert!(
-        pi_ptr < AUX_RAND_ELEM_PTR,
-        "pi_ptr ({pi_ptr}) >= AUX_RAND_ELEM_PTR ({AUX_RAND_ELEM_PTR})"
+        pi_ptr < aux_rand_elem_ptr,
+        "pi_ptr ({pi_ptr}) >= AUX_RAND_ELEM_PTR ({aux_rand_elem_ptr})"
     );
 
     (0..layout.total_inputs)
@@ -83,16 +183,46 @@ fn extract_ace_inputs(read: &impl Fn(u32) -> Felt, layout: &InputLayout) -> Vec<
         .collect()
 }
 
+/// The proof order the verifier staged.
+///
+/// `stage_proof_order_maps` derives `pos_by_id` and `id_by_pos` from the transcript-bound per-AIR
+/// heights. Scatter staging, boundary placement, and fold-coefficient staging read those maps.
+/// This helper checks both maps against the Rust ordering before extracting the ACE inputs.
+fn extract_order(read: &impl Fn(u32) -> Felt) -> ProofOrder {
+    let log_heights: Vec<u8> =
+        staged_log_heights(read).into_iter().map(|height| height as u8).collect();
+    let order = ProofOrder::from_instance_log_heights(&log_heights);
+
+    let positions_ptr = vm_layout_const("PROOF_ORDER_POSITIONS_PTR");
+    let ids_ptr = vm_layout_const("PROOF_ORDER_IDS_PTR");
+    for (position, air) in order.airs().iter().enumerate() {
+        let id = air.instance_index();
+        assert_eq!(
+            read(positions_ptr + id as u32).as_canonical_u64(),
+            position as u64,
+            "staged pos_by_id[{id}] disagrees with the Rust ranking of the staged heights"
+        );
+        assert_eq!(
+            read(ids_ptr + position as u32).as_canonical_u64(),
+            id as u64,
+            "staged id_by_pos[{position}] disagrees with the Rust ranking of the staged heights"
+        );
+    }
+    order
+}
+
 // INPUT CHECKS
 // ================================================================================================
 
 /// Assert critical Fiat-Shamir-derived values are non-zero.
-fn sanity_check_ace_inputs(inputs: &[QuadFelt], layout: &InputLayout) {
+fn sanity_check_ace_inputs(read: &impl Fn(u32) -> Felt, inputs: &[QuadFelt], layout: &InputLayout) {
     let get = |key: InputKey| -> QuadFelt { inputs[layout.index(key).expect("missing key")] };
+    let read_quad = |addr| QuadFelt::new([read(addr), read(addr + 1)]);
 
     // Fiat-Shamir challenges
     assert!(!get(InputKey::Alpha).is_zero(), "alpha is zero");
     assert!(!get(InputKey::AuxRandBeta).is_zero(), "beta is zero");
+    assert!(!read_quad(COMPOSITION_COEF_PTR + 2).is_zero(), "multi-AIR fold beta is zero");
 
     // Vanishing polynomial
     assert!(
@@ -100,15 +230,46 @@ fn sanity_check_ace_inputs(inputs: &[QuadFelt], layout: &InputLayout) {
         "z^N - 1 = 0 -- OOD point is on the trace domain"
     );
 
-    // Selector polynomials
-    assert!(!get(InputKey::IsFirst).is_zero(), "is_first is zero");
-    assert!(!get(InputKey::IsLast).is_zero(), "is_last is zero");
-    assert!(!get(InputKey::IsTransition).is_zero(), "is_transition is zero");
-
     // Quotient recomposition
     assert!(!get(InputKey::Weight0).is_zero(), "weight0 is zero");
     assert!(!get(InputKey::F).is_zero(), "f is zero");
     assert!(!get(InputKey::S0).is_zero(), "s0 is zero");
+    assert_eq!(get(InputKey::Alpha), read_quad(COMPOSITION_COEF_PTR));
+    assert_eq!(get(InputKey::Reserved), QuadFelt::ZERO);
+    assert_eq!(
+        get(InputKey::Weight0),
+        QuadFelt::from(Felt::new_unchecked(8_868_329_529_835_627_796))
+    );
+    assert_eq!(
+        get(InputKey::F),
+        QuadFelt::from(Felt::new_unchecked(18_446_744_069_397_807_105))
+    );
+    assert_eq!(
+        get(InputKey::S0),
+        QuadFelt::from(Felt::new_unchecked(5_473_358_340_599_679_662))
+    );
+    let trace_length = read(TRACE_LENGTH_PTR).as_canonical_u64();
+    let old_f = read(LDE_DOMAIN_GEN_PTR).exp_u64(trace_length);
+    let old_s0 = read(DOMAIN_OFFSET_PTR).exp_u64(trace_length);
+    let old_weight0 = (Felt::from_u8(8) * old_s0.exp_u64(7)).try_inverse().expect("nonzero weight");
+    assert_eq!(get(InputKey::F), QuadFelt::from(old_f), "fixed f differs from runtime domain");
+    assert_eq!(
+        get(InputKey::S0),
+        QuadFelt::from(old_s0),
+        "fixed s0 differs from runtime domain"
+    );
+    assert_eq!(
+        get(InputKey::Weight0),
+        QuadFelt::from(old_weight0),
+        "fixed weight0 differs from runtime domain"
+    );
+
+    let z_pow_n = read_quad(Z_PTR);
+    let z = read_quad(Z_PTR + 2);
+    let max_log = read(TRACE_LENGTH_LOG_PTR).as_canonical_u64() as usize;
+    let z_k = (5..max_log).fold(z, |value, _| value * value);
+    assert_eq!(get(InputKey::ZPowN), z_pow_n);
+    assert_eq!(get(InputKey::ZK), z_k);
 
     // OOD frame should have at least some non-zero values
     assert!(
@@ -128,6 +289,7 @@ fn assert_air_selectors_match_trace_metadata(
     layout: &InputLayout,
 ) {
     let get = |key: InputKey| -> QuadFelt { inputs[layout.index(key).expect("missing key")] };
+    let read = |addr| read(addr);
     let z = QuadFelt::new([read(Z_PTR + 2), read(Z_PTR + 3)]);
     let max_log = read(TRACE_LENGTH_LOG_PTR).as_canonical_u64() as u32;
 
@@ -157,14 +319,43 @@ fn assert_air_selectors_match_trace_metadata(
     }
 }
 
+/// Each AIR's staged fold coefficient must be `beta^(n - 1 - pos)`, with `pos` that AIR's
+/// position in the height-sorted proof order.
+///
+/// These slots are what carry the proof order into an otherwise order-invariant circuit: the
+/// AIR opened last folds with `beta^0` and the one opened first with `beta^(n - 1)`. Keying the
+/// exponent by instance index instead would agree only for the identity order, which most e2e
+/// fixtures are not.
+fn assert_fold_coefficients_match_the_proof_order(
+    read: &impl Fn(u32) -> Felt,
+    order: &ProofOrder,
+    inputs: &[QuadFelt],
+    layout: &InputLayout,
+) {
+    let get = |key: InputKey| -> QuadFelt { inputs[layout.index(key).expect("missing key")] };
+    let beta = QuadFelt::new([read(COMPOSITION_COEF_PTR + 2), read(COMPOSITION_COEF_PTR + 3)]);
+
+    for (position, air) in order.airs().iter().enumerate() {
+        let exponent = (MIDEN_AIR_COUNT - 1 - position) as u64;
+        assert_eq!(
+            get(InputKey::MultiAirFoldCoeff(air.instance_index())),
+            beta.exp_u64(exponent),
+            "AIR {} at proof position {position} has the wrong fold coefficient",
+            air.instance_index(),
+        );
+    }
+}
+
 // CROSS-EVALUATION
 // ================================================================================================
 
-/// Runs an MVM verifier fixture and checks the ACE inputs it leaves in the verifier's context.
+/// Runs an MVM verifier fixture and checks what it left in the verifier's context: the proof
+/// stream sections it read into memory, the fold coefficients against the proof order its staged
+/// heights induce, and the ACE inputs, which are cross-evaluated in Rust.
 ///
 /// The fixture's trace handlers run as usual, so callers can still observe the verifier's stack
 /// at return.
-pub(super) fn execute_and_check(test: &Test) {
+pub(super) fn execute_and_check(test: &Test, proof_stream: &[u64], claim: &[u64]) -> ProofOrder {
     let (program, ..) = test.compile().expect("the verifier fixture must assemble");
     let mut host = DefaultHost::default().with_library(&CoreLibrary::default()).unwrap();
     for (event, handler) in &test.trace_handlers {
@@ -189,27 +380,32 @@ pub(super) fn execute_and_check(test: &Test) {
 
     let ctx = verifier_context.expect("the verifier must enter an isolated context");
     let read = |addr| processor.memory().read_element(ctx, Felt::from_u32(addr)).unwrap();
+
+    assert_proof_stream_read_sections(&read, proof_stream, claim);
+
     let config = AceConfig {
         num_quotient_chunks: 8,
         layout: LayoutKind::Masm,
-        num_airs: MIDEN_AIR_COUNT,
     };
 
-    let tag = read(ORDER_TAG_PTR).as_canonical_u64();
-    let order = ProofOrder::from_tag(tag as u32)
-        .unwrap_or_else(|| panic!("invalid order tag in recursive verifier memory: {tag}"));
-    let circuit =
-        build_multi_air_ace_circuit_for_order(config, &order).expect("multi-AIR ace circuit");
+    let order = extract_order(&read);
+    let circuit = build_canonical_multi_air_ace_circuit(config).expect("canonical ace circuit");
     let layout = circuit.layout();
 
     let inputs = extract_ace_inputs(&read, layout);
-    sanity_check_ace_inputs(&inputs, layout);
+    assert_eq!(inputs.len(), layout.total_inputs, "extracted input count mismatch");
+
+    sanity_check_ace_inputs(&read, &inputs, layout);
     assert_air_selectors_match_trace_metadata(&read, &inputs, layout);
+    assert_fold_coefficients_match_the_proof_order(&read, &order, &inputs, layout);
 
     let result = circuit.eval(&inputs).expect("ACE eval failed");
     assert!(
         result.is_zero(),
         "ACE cross-evaluation is non-zero: {result:?}\n\
+         proof order: {order:?}\n\
          MASM verifier populated the READ section incorrectly."
     );
+
+    order
 }

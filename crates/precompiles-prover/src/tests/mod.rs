@@ -10,17 +10,18 @@ mod binding;
 mod bus_balance;
 mod byte_pair_lut;
 mod chunk;
+mod chunk_node_sponge;
 mod deferred_session;
 mod deferred_state;
 mod ec;
 mod ec_add;
 mod ec_dag;
 mod ec_msm;
+mod eidos;
 mod eval;
 mod keccak;
 mod keccak_node;
 mod keccak_sponge;
-mod poseidon2;
 mod uint;
 mod uint_add;
 mod uint_dag;
@@ -30,18 +31,35 @@ mod vm_uint;
 
 use std::{vec, vec::Vec};
 
+use miden_air::lookup::{LookupAir, ProverLookupBuilder};
 use miden_core::{
     Felt,
     deferred::DeferredRoot,
-    field::QuadFelt,
-    proof::{HashFunction, StarkProof},
+    field::{PrimeCharacteristicRing, QuadFelt},
+    proof::StarkProof,
     utils::RowMajorMatrix,
 };
-use miden_lifted_air::{BaseAir, LiftedAir, MultiAir, ProverStatement, ReductionError, Statement};
+use miden_lifted_air::{LiftedAir, MultiAir, ProverStatement, ReductionError, Statement};
 use miden_lifted_stark::check_constraints;
 use miden_precompiles_verifier::{VerifyError, verify_deferred as verify_precompile};
 
-use crate::{session::SessionTraces, stark_config::test_challenger};
+use crate::{
+    session::SessionTraces,
+    stark_config::{DEFAULT_HASH_FUNCTION, test_challenger},
+};
+
+/// Clone the standalone transcript-eval main trace.
+pub(crate) fn transcript_eval_main(traces: &SessionTraces) -> RowMajorMatrix<Felt> {
+    traces.mains()[4].clone()
+}
+
+/// Return a replacement for the standalone transcript-eval main trace.
+pub(crate) fn with_transcript_eval_main(
+    _traces: &SessionTraces,
+    eval: RowMajorMatrix<Felt>,
+) -> RowMajorMatrix<Felt> {
+    eval
+}
 
 pub(crate) type SessionProof = (StarkProof, DeferredRoot);
 
@@ -53,7 +71,7 @@ impl SessionTracesTestExt for SessionTraces {
     fn prove(self) -> SessionProof {
         let public_root = self.public_root().as_array().into();
         let proof = self
-            .prove_stark(HashFunction::Blake3_256)
+            .prove_stark(DEFAULT_HASH_FUNCTION)
             .expect("prove precompile session with default hash function");
         (proof, public_root)
     }
@@ -64,11 +82,8 @@ pub(crate) fn verify_deferred(proof: &SessionProof) -> Result<DeferredRoot, Veri
     Ok(proof.1)
 }
 
-/// A local-only [`MultiAir`] wrapper for per-chiplet
-/// [`check_constraints`]: its `eval_external` emits no cross-AIR
-/// assertion, so a single AIR's *local* constraints are checked without
-/// the stack-level Σσ=0 closure (per-AIR σ ≠ 0). Mirrors the pre-0.26
-/// per-AIR `check_constraints`.
+/// A local-only [`MultiAir`] wrapper that omits external assertions, allowing
+/// [`check_constraints`] to evaluate one chiplet's local constraints independently.
 struct LocalAir<A>(Vec<A>);
 
 impl<A> MultiAir<Felt, QuadFelt> for LocalAir<A>
@@ -127,25 +142,36 @@ where
     miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, A>(air)
 }
 
-/// The `[preprocessed ++ main]` matrix the lookup eval reads for a chiplet
-/// with preprocessed columns — mirrors `logup::CombinedWindow` (constraint
-/// side) and BytePairLut's prover-side combine. Returns `None` for chiplets
-/// without preprocessed columns, so balance-check helpers pass `main`
-/// straight to the prover-side fraction builder.
-pub(crate) fn combined_lookup_main<A>(
-    air: &A,
-    main: &RowMajorMatrix<Felt>,
-) -> Option<RowMajorMatrix<Felt>>
+/// Return an AIR's LogUp column shape without exposing its private backing constant.
+pub(crate) fn lookup_column_shape<A>(air: &A) -> &[usize]
 where
-    A: BaseAir<Felt>,
+    A: for<'a> LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
-    let pre = air.preprocessed_trace()?;
-    let (pre_w, main_w) = (pre.width, main.width);
-    let height = main.values.len() / main_w;
-    let mut values = Vec::with_capacity(height * (pre_w + main_w));
-    for r in 0..height {
-        values.extend_from_slice(&pre.values[r * pre_w..(r + 1) * pre_w]);
-        values.extend_from_slice(&main.values[r * main_w..(r + 1) * main_w]);
-    }
-    Some(RowMajorMatrix::new(values, pre_w + main_w))
+    LookupAir::<ProverLookupBuilder<'_, Felt, QuadFelt>>::column_shape(air)
+}
+
+/// Add two rational folds represented as `(numerator, denominator)` pairs.
+pub(crate) fn add_rational_folds(
+    (left_v, left_u): (QuadFelt, QuadFelt),
+    (right_v, right_u): (QuadFelt, QuadFelt),
+) -> (QuadFelt, QuadFelt) {
+    (left_v * right_u + right_v * left_u, left_u * right_u)
+}
+
+/// Sum rational folds without inverting their denominators.
+pub(crate) fn sum_rational_folds(
+    folds: impl IntoIterator<Item = (QuadFelt, QuadFelt)>,
+) -> (QuadFelt, QuadFelt) {
+    folds.into_iter().fold((QuadFelt::ZERO, QuadFelt::ONE), add_rational_folds)
+}
+
+/// Assert that two rational folds represent the same field element.
+pub(crate) fn assert_same_rational_fold(
+    actual: (QuadFelt, QuadFelt),
+    expected: (QuadFelt, QuadFelt),
+    context: &str,
+) {
+    assert_ne!(actual.1, QuadFelt::ZERO, "{context}: actual denominator is zero");
+    assert_ne!(expected.1, QuadFelt::ZERO, "{context}: expected denominator is zero");
+    assert_eq!(actual.0 * expected.1, expected.0 * actual.1, "{context}");
 }

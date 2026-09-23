@@ -6,7 +6,7 @@
 //! the quotient accumulator, every layer of the three per-proof LMCS digest trees (main, aux,
 //! quotient) alive at `open` time, the transient per-leaf hashing buffer held while whichever of
 //! those trees is under construction squeezes its leaf digests, and the process-cached
-//! BytePairLut preprocessed bundle. That bundle retains its raw `2^16 × 4` trace, its
+//! BytePairLut preprocessed bundle. That bundle retains its raw `2^16`-row trace, its
 //! blowup-factor LDE, its LMCS digest tree, and the same transient per-leaf hashing buffer for
 //! its own one-time construction. The estimate covers one proof and the preprocessed bundle for
 //! its selected hash configuration. It excludes bundles cached for other hash configurations and
@@ -26,7 +26,7 @@ use miden_lifted_air::{BaseAir, LiftedAir};
 
 use crate::{
     air::{ChipletAir, NUM_CHIPLETS},
-    primitives::byte_pair_lut::{NUM_PREPROCESSED_COLS, TRACE_HEIGHT},
+    primitives::byte_pair_lut::TRACE_HEIGHT,
 };
 
 // CONSTANTS
@@ -65,11 +65,11 @@ pub const SAFETY_DENOMINATOR: u64 = 4;
 /// Building an LMCS tree's leaf layer holds a buffer of these per-leaf states (see
 /// `LiftedTree::build_with_alignment` in `miden-lifted-stark`) until every leaf's digest has been
 /// squeezed out of it; the buffer coexists with the squeezed digests until it is dropped. Blake3's
-/// `ChainingHasher` uses the digest itself as its state, so it costs nothing beyond
-/// [`DIGEST_BYTES`]; RPO, RPX, Poseidon2, and Keccak all hold a wider sponge state.
+/// `ChainingHasher` and the Eidos LMCS hasher use the digest itself as their state, so they cost
+/// nothing beyond [`DIGEST_BYTES`]; RPO, RPX, Poseidon2, and Keccak all hold a wider sponge state.
 const fn leaf_state_bytes(hash_fn: HashFunction) -> u64 {
     match hash_fn {
-        HashFunction::Blake3_256 => DIGEST_BYTES,
+        HashFunction::Blake3_256 | HashFunction::Eidos => DIGEST_BYTES,
         HashFunction::Rpo256 | HashFunction::Rpx256 | HashFunction::Poseidon2 => {
             ALGEBRAIC_LEAF_STATE_BYTES
         },
@@ -93,12 +93,12 @@ pub fn prover_peak_bytes(
     // hashing state over that digest is unmodelled extra scratch.
     let extra_leaf_scratch_bytes = leaf_state_bytes(hash_fn).saturating_sub(DIGEST_BYTES);
 
-    // `Preprocessed` is cached for the process lifetime and retains the raw BytePairLut table,
+    // `Preprocessed` is cached for the process lifetime and retains the raw byte-pair table,
     // its LDE, every layer of its LMCS tree, and the leaf-hashing scratch buffer held while that
     // tree's leaves are squeezed. A full binary tree has fewer than twice as many digests as
     // leaves, so `2 * LDE height * DIGEST_BYTES` is a conservative upper bound.
     let preprocessed_height = u64::try_from(TRACE_HEIGHT).ok()?;
-    let preprocessed_width = u64::try_from(NUM_PREPROCESSED_COLS).ok()?;
+    let preprocessed_width = u64::try_from(ChipletAir::BytePairLut.preprocessed_width()).ok()?;
     let preprocessed_trace_bytes = preprocessed_height
         .checked_mul(one_plus_blowup)?
         .checked_mul(preprocessed_width)?
@@ -169,11 +169,11 @@ mod tests {
 
         assert_eq!(
             prover_peak_bytes(&[0; NUM_CHIPLETS], &low_blowup, HashFunction::Blake3_256),
-            Some(18_350_080)
+            Some(20_316_160)
         );
         assert_eq!(
             prover_peak_bytes(&[0; NUM_CHIPLETS], &production_blowup, HashFunction::Blake3_256),
-            Some(65_536_000)
+            Some(71_434_240)
         );
     }
 
@@ -182,30 +182,32 @@ mod tests {
         let params = precompile_pcs_params();
         // Current per-row trace costs before the safety multiplier, in `ChipletAir::all()` order,
         // are:
-        // 13_320, 2_736, 7_776, 504, 5_112, 7_344, 2_592, 2_592, 3_384, and 5_472
+        // 9_720, 10_944, 6_624, 1_080, 4_392, 7_056, 2_592, 2_592, 3_096, and 4_968
         // bytes. The shared term uses the maximum quotient degree (4) across the full AIR set.
         // Each expectation also includes that quotient/tree peak, the preprocessed bundle, and the
-        // 5/4 safety factor. Blake3 adds no leaf-hashing scratch beyond the digest itself. Any AIR
-        // shape change must break this test rather than silently drift the model.
+        // 5/4 safety factor. Blake3 and Eidos add no leaf-hashing scratch beyond the digest itself.
+        // Any AIR shape change must break this test rather than silently drift the model.
         let expected = [
-            65_555_210, 65_541_980, 65_548_280, 65_539_190, 65_544_950, 65_547_740, 65_541_800,
-            65_541_800, 65_542_790, 65_545_400,
+            71_448_950, 71_450_480, 71_445_080, 71_438_150, 71_442_290, 71_445_620, 71_440_040,
+            71_440_040, 71_440_670, 71_443_010,
         ];
-        for (i, expected) in expected.into_iter().enumerate() {
-            let mut heights = [0; NUM_CHIPLETS];
-            heights[i] = 1;
+        for hash_fn in [HashFunction::Blake3_256, HashFunction::Eidos] {
+            for (i, expected) in expected.into_iter().enumerate() {
+                let mut heights = [0; NUM_CHIPLETS];
+                heights[i] = 1;
+                assert_eq!(
+                    prover_peak_bytes(&heights, &params, hash_fn),
+                    Some(expected),
+                    "{:?} alone with {hash_fn:?}",
+                    ChipletAir::all()[i]
+                );
+            }
             assert_eq!(
-                prover_peak_bytes(&heights, &params, HashFunction::Blake3_256),
-                Some(expected),
-                "{:?} alone",
-                ChipletAir::all()[i]
+                prover_peak_bytes(&[1; NUM_CHIPLETS], &params, hash_fn),
+                Some(71_503_130),
+                "all chiplet AIRs at height 1 with {hash_fn:?}"
             );
         }
-        assert_eq!(
-            prover_peak_bytes(&[1; NUM_CHIPLETS], &params, HashFunction::Blake3_256),
-            Some(65_602_100),
-            "all chiplet AIRs at height 1"
-        );
     }
 
     #[test]

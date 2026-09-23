@@ -12,8 +12,8 @@ use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 use crate::{
     ec::{self, groups},
     logup::{
-        CyclicConstraintLookupBuilder, LookupAir, LookupBuilder, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        NUM_SIGMA_VALUES,
+        ConstraintLookupBuilder, LookupAir, LookupBuilder, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
+        NUM_RANDOMNESS,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
 };
@@ -63,7 +63,7 @@ impl LiftedAir<Felt, QuadFelt> for EcPointStoreGroupsAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -80,9 +80,9 @@ impl LiftedAir<Felt, QuadFelt> for EcPointStoreGroupsAir {
         ec::eval_point_store_main(builder, 0);
         groups::eval_main(builder, GROUPS_COL_OFFSET);
 
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -90,10 +90,6 @@ impl<LB> LookupAir<LB> for EcPointStoreGroupsAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }

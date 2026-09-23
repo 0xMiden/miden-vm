@@ -1,9 +1,9 @@
 //! Conjectured security level computation for the precompile chiplet stack.
 //!
 //! The chiplet stack proves a different statement from the VM and therefore has its own AIR shape.
-//! Both statements use the same round-budget formulas and challenge field. Their recursive
-//! verifiers both use Poseidon2. Native verification derives alignment and collision resistance
-//! from the commitment scheme used for each proof.
+//! Both statements use the round-budget formulas in [`p3_security::budget`] and the same challenge
+//! field. Their recursive verifiers both use Eidos. Native verification derives alignment and
+//! collision resistance from the commitment scheme used for each proof.
 //!
 //! [`AIR_SHAPE`] stores the relation shape used by the security calculation, while
 //! `air_shape_matches_symbolic` checks it against the shape obtained from the chiplet AIRs.
@@ -12,10 +12,14 @@ pub use miden_air::security::{
     AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
     SecurityTerm,
 };
-use miden_air::security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT};
+use miden_air::security::{
+    CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT, EIDOS_CHALLENGE_SAMPLE_BITS,
+    security_report_with_hash,
+};
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, QuadFelt},
+    proof::HashFunction,
 };
 use miden_crypto::stark::pcs::PcsParams;
 use miden_lifted_air::{BaseAir, ConstraintCounts, ConstraintDegrees, LiftedAir};
@@ -29,7 +33,7 @@ use crate::{
     primitives::byte_pair_lut::BytePairLutAir,
     relations::MAX_MESSAGE_WIDTH,
     stark_config::{LOG_BLOWUP, LOG_FOLDING_ARITY},
-    transcript::{eval::TranscriptEvalAir, poseidon2::Poseidon2Air},
+    transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
 
@@ -43,22 +47,22 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 
 /// Shape of the chiplet multi-AIR statement used by the security estimator.
 ///
-/// `air_shape_matches_symbolic` checks this stored value against the current chiplet AIRs.
+/// This stored value must equal the shape returned by [`derive_air_shape`].
 pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 591,
+    num_composed_constraints: 660,
     max_constraint_degree: 5,
     max_combo: NUM_OOD_POINTS,
-    num_deep_terms: Some(770),
+    num_deep_terms: Some(802),
     lookup: LookupShape {
-        fractions_per_row: 247,
+        fractions_per_row: 260,
         max_message_width: 18,
     },
 };
 
 /// Computes the AIR shape by symbolically evaluating every chiplet AIR.
 ///
-/// Tests compare [`AIR_SHAPE`] with this result. The symbolic pass allocates and evaluates every
-/// chiplet AIR, so [`security_report`] uses the checked constant instead of calling this function.
+/// This allocating pass supports validation and tooling. [`security_report`] uses the stored
+/// [`AIR_SHAPE`] constant.
 pub fn derive_air_shape() -> AirShape {
     let airs = ChipletAir::all();
     let num_airs = airs.len();
@@ -100,7 +104,7 @@ pub fn derive_air_shape() -> AirShape {
 /// [`AIR_SHAPE`]'s `max_constraint_degree` for the quotient group's chunk count. Native
 /// verification of a proof committed under a non-algebraic LMCS (Blake3, alignment 1; Keccak,
 /// alignment 17) calls this instead of using the alignment-[`COMMITMENT_ALIGNMENT`] [`AIR_SHAPE`]
-/// fixed for the Poseidon2 preset.
+/// fixed for the default Eidos preset.
 pub fn num_deep_terms(alignment: usize) -> u32 {
     let mut num_columns = 0;
     for air in ChipletAir::all() {
@@ -186,39 +190,38 @@ pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << LOG_FOLDING_ARI
 
 /// Lookup grinding applied before the lookup challenges are sampled.
 ///
-/// Lifted STARK currently samples them directly after the main-trace commitment and exposes no
+/// Lifted STARK samples them directly after the main-trace commitment and exposes no
 /// lookup-grinding parameter.
 pub const LOOKUP_POW_BITS: u32 = 0;
 
 /// Number of one-time lookup fractions added at the PVM boundary by the fixed `UintVal` and
 /// `EcGroup` messages.
 ///
-/// `fixed_boundary_fraction_count` derives this value from the fixed messages. A test below checks
-/// that the descriptor constant remains equal to the derived count.
+/// `fixed_boundary_fraction_count` derives this value from the fixed messages; the descriptor
+/// constant must equal the derived count.
 pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 8;
 
-/// The configured challenge-field bound less the lookup round's coefficient, in fixed point.
-pub const LOOKUP_BASE: u64 = CHALLENGE_FIELD_BITS - LOOKUP_COEFFICIENT;
+/// The Eidos challenge-support bound less the lookup round's coefficient, in fixed point.
+pub const LOOKUP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - LOOKUP_COEFFICIENT;
 
-/// The configured challenge-field bound less the constraint-composition round's coefficient, in
+/// The Eidos challenge-support bound less the constraint-composition round's coefficient, in
 /// fixed point.
-pub const COMPOSITION_TERM: u64 = CHALLENGE_FIELD_BITS - COMPOSITION_COEFFICIENT;
+pub const COMPOSITION_TERM: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - COMPOSITION_COEFFICIENT;
 
-/// The configured challenge-field bound less the out-of-domain round's coefficient, in fixed
+/// The Eidos challenge-support bound less the out-of-domain round's coefficient, in fixed
 /// point.
-pub const OOD_BASE: u64 = CHALLENGE_FIELD_BITS - OOD_COEFFICIENT;
+pub const OOD_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - OOD_COEFFICIENT;
 
-/// The configured challenge-field bound less the DEEP round's coefficient, in fixed point.
-pub const DEEP_BASE: u64 = CHALLENGE_FIELD_BITS - DEEP_COEFFICIENT;
+/// The Eidos challenge-support bound less the DEEP round's coefficient, in fixed point.
+pub const DEEP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - DEEP_COEFFICIENT;
 
-/// The configured challenge-field bound less the FRI folding round's coefficient and fixed
+/// The Eidos challenge-support bound less the FRI folding round's coefficient and fixed
 /// blowup, in fixed point.
 ///
 /// The common MASM estimator uses the whole-bit floor of this value when proving that FRI folding
-/// cannot determine the result. Drift tests keep the MASM constant used by that proof synchronized
-/// with this value.
+/// cannot determine the result. Its `FRI_FOLDING_BASE_BITS` constant must equal that floor.
 pub const FOLDING_BASE: u64 =
-    CHALLENGE_FIELD_BITS - FOLDING_COEFFICIENT - fixed::from_bits(LOG_BLOWUP as u32);
+    EIDOS_CHALLENGE_SAMPLE_BITS - FOLDING_COEFFICIENT - fixed::from_bits(LOG_BLOWUP as u32);
 
 /// `log2(e)`, rounded down, in Q16 fixed point.
 pub const LOG2_E: u64 = fixed::LOG2_E;
@@ -248,7 +251,7 @@ fn fractions_per_row_of(air: ChipletAir) -> usize {
 
     match air {
         ChipletAir::ChunkNodeSponge => shape_of(ChunkNodeSpongeAir),
-        ChipletAir::Poseidon2 => shape_of(Poseidon2Air),
+        ChipletAir::EidosCompression => shape_of(EidosCompressionAir),
         ChipletAir::KeccakRound => shape_of(KeccakRoundAir),
         ChipletAir::BytePairLut => shape_of(BytePairLutAir),
         ChipletAir::TranscriptEval => shape_of(TranscriptEvalAir),
@@ -315,12 +318,12 @@ pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
 /// Builds PVM security parameters from values obtained during proof verification.
 ///
 /// `log_max_height` and `alignment` must come from successful STARK verification, and
-/// `collision_resistance` from the commitment hash used to verify the proof.
+/// `hash_fn` from the configuration used to verify the proof, including its challenger.
 pub fn proof_security_parameters(
     pcs_params: &PcsParams,
     log_max_height: u32,
     alignment: usize,
-    collision_resistance: u32,
+    hash_fn: HashFunction,
 ) -> ProofSecurityParameters {
     ProofSecurityParameters {
         protocol_params: protocol_params(pcs_params),
@@ -328,8 +331,9 @@ pub fn proof_security_parameters(
         instance_shape: InstanceShape {
             log_max_height,
             field_bits: CHALLENGE_FIELD_BITS,
-            collision_resistance,
+            collision_resistance: hash_fn.collision_resistance(),
         },
+        hash_fn,
         air_shape: AirShape {
             num_deep_terms: Some(num_deep_terms(alignment)),
             ..AIR_SHAPE
@@ -339,7 +343,7 @@ pub fn proof_security_parameters(
     }
 }
 
-/// Computes a Poseidon2 chiplet-stack proof's conjectured security level, per protocol round.
+/// Computes an Eidos chiplet-stack proof's conjectured security level, per protocol round.
 ///
 /// `log_max_height` is the largest chiplet trace height bound by the proof transcript. The lookup
 /// term includes the additional fractions added by the fixed `UintVal` and `EcGroup`
@@ -351,13 +355,13 @@ pub fn proof_security_parameters(
 /// estimator's contract.
 pub fn security_report(params: &ProtocolParams, log_max_height: u32) -> SecurityReport {
     let instance = deployed_instance(log_max_height);
-    let report = p3_security::budget::security_report(params, &instance, &AIR_SHAPE);
+    let report = security_report_with_hash(params, &instance, &AIR_SHAPE, HashFunction::Eidos);
     apply_fixed_boundary_correction(report, log_max_height)
 }
 
-/// Computes a Poseidon2 chiplet-stack proof's conjectured security level, in bits.
+/// Computes an Eidos chiplet-stack proof's conjectured security level, in bits.
 pub fn conjectured_security_level(params: &PcsParams, log_max_height: u32) -> u32 {
-    proof_security_parameters(params, log_max_height, COMMITMENT_ALIGNMENT, COLLISION_RESISTANCE)
+    proof_security_parameters(params, log_max_height, COMMITMENT_ALIGNMENT, HashFunction::Eidos)
         .conjectured_security_level()
 }
 
@@ -365,16 +369,17 @@ pub fn conjectured_security_level(params: &PcsParams, log_max_height: u32) -> u3
 /// under a commitment scheme with the given column alignment.
 ///
 /// Every AIR shape input but `num_deep_terms` is alignment-independent, so this reuses
-/// [`AIR_SHAPE`] otherwise. [`conjectured_security_level`] uses the Poseidon2 preset's alignment
-/// [`COMMITMENT_ALIGNMENT`]. This helper accepts a different alignment but still assumes the
-/// commitment scheme has [`COLLISION_RESISTANCE`] bits; verification returns
-/// [`ProofSecurityParameters`] built with both properties of the proof's actual hash function.
+/// [`AIR_SHAPE`] otherwise. [`conjectured_security_level`] is exact only at the Eidos preset's
+/// alignment [`COMMITMENT_ALIGNMENT`]; verification calls this instead for every hash function, so
+/// a proof committed under a different LMCS (Blake3, alignment 1; Keccak, alignment 17) is graded
+/// under its own DEEP term count and collision-resistance cap rather than the Eidos ones.
 pub fn conjectured_security_level_for_alignment(
     params: &PcsParams,
     log_max_height: u32,
     alignment: usize,
+    hash_fn: HashFunction,
 ) -> u32 {
-    proof_security_parameters(params, log_max_height, alignment, COLLISION_RESISTANCE)
+    proof_security_parameters(params, log_max_height, alignment, hash_fn)
         .conjectured_security_level()
 }
 
@@ -399,7 +404,7 @@ mod tests {
         assert_eq!(
             fixed_boundary_fraction_count(),
             u64::from(FIXED_BOUNDARY_LOOKUP_TERMS),
-            "fixed boundary shape moved"
+            "fixed boundary shape mismatch"
         );
     }
 
@@ -411,12 +416,12 @@ mod tests {
         const FP_SHIFT: u32 = 16;
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
-        const SECURITY_CAP_FP: u64 = 8_388_606;
-        const LOOKUP_BASE_FP: u64 = 7_584_459;
-        const COMPOSITION_TERM_FP: u64 = 7_785_215;
-        const OOD_BASE_FP: u64 = 8_204_623;
-        const DEEP_BASE_FP: u64 = 7_760_199;
-        const FOLDING_BASE_FP: u64 = 8_022_589;
+        const SECURITY_CAP_FP: u64 = 8_257_536;
+        const LOOKUP_BASE_FP: u64 = 7_448_540;
+        const COMPOSITION_TERM_FP: u64 = 7_643_704;
+        const OOD_BASE_FP: u64 = 8_073_553;
+        const DEEP_BASE_FP: u64 = 7_625_280;
+        const FOLDING_BASE_FP: u64 = 7_891_519;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
         assert_eq!(FIXED_POINT_FRACTIONAL_BITS, FP_SHIFT, "FP_SHIFT is stale");
@@ -430,13 +435,13 @@ mod tests {
         assert_eq!(FOLDING_BASE, FOLDING_BASE_FP, "FOLDING_BASE_FP is stale");
         assert_eq!(
             LOOKUP_POW_BITS, LOOKUP_POW_BITS_SNAPSHOT,
-            "Lifted STARK does not currently support lookup grinding"
+            "Lifted STARK does not support lookup grinding"
         );
     }
 
     /// [`num_deep_terms`] at [`COMMITMENT_ALIGNMENT`] must reproduce [`AIR_SHAPE`]'s stored
     /// `num_deep_terms` exactly, so [`conjectured_security_level_for_alignment`] computes the same
-    /// level for a Poseidon2 proof as [`conjectured_security_level`].
+    /// level for an Eidos proof as [`conjectured_security_level`].
     #[test]
     fn num_deep_terms_matches_the_reference_alignment() {
         assert_eq!(num_deep_terms(COMMITMENT_ALIGNMENT), AIR_SHAPE.num_deep_terms.unwrap());
@@ -448,7 +453,7 @@ mod tests {
         let pcs_params = precompile_pcs_params();
         let expected_protocol_params = protocol_params(&pcs_params);
         let security_parameters =
-            proof_security_parameters(&pcs_params, 19, COMMITMENT_ALIGNMENT, COLLISION_RESISTANCE);
+            proof_security_parameters(&pcs_params, 19, COMMITMENT_ALIGNMENT, HashFunction::Eidos);
 
         assert_eq!(
             security_parameters.conjectured_security_report(),
@@ -467,20 +472,20 @@ mod tests {
 
         for (log_height, expected_level, expected_binding) in [
             (16, 96, QUERY_LABEL),
-            (18, 96, QUERY_LABEL),
-            (20, 95, LOOKUP_LABEL),
-            (24, 91, LOOKUP_LABEL),
+            (18, 95, LOOKUP_LABEL),
+            (20, 93, LOOKUP_LABEL),
+            (24, 89, LOOKUP_LABEL),
         ] {
             let report = security_report(&params, log_height);
             assert_eq!(
                 report.security_level(),
                 expected_level,
-                "level moved at log height {log_height}"
+                "unexpected level at log height {log_height}"
             );
             assert_eq!(
                 report.binding_term().label,
                 expected_binding,
-                "binding round moved at log height {log_height}"
+                "unexpected binding round at log height {log_height}"
             );
         }
     }
@@ -496,32 +501,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_191_195, 7_785_215, 7_825_002, 8_388_606, 7_891_517, 6_335_399, 8_388_606],
+                [7_055_278, 7_643_704, 7_693_931, 8_257_536, 7_760_447, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 16),
-                [6_535_882, 7_785_215, 7_170_620, 8_388_606, 7_236_157, 6_335_399, 8_388_606],
+                [6_399_963, 7_643_704, 7_039_549, 8_257_536, 7_105_087, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 19),
-                [6_339_274, 7_785_215, 6_974_013, 8_388_606, 7_039_549, 6_335_399, 8_388_606],
-                96,
+                [6_203_355, 7_643_704, 6_842_942, 8_257_536, 6_908_479, 6_335_399, 8_257_536],
+                94,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_273_738, 7_785_215, 6_908_477, 8_388_606, 6_974_013, 6_335_399, 8_388_606],
-                95,
+                [6_137_819, 7_643_704, 6_777_406, 8_257_536, 6_842_943, 6_335_399, 8_257_536],
+                93,
             ),
             (
                 (27, 17, 12, 4, 24),
-                [6_011_594, 7_785_215, 6_646_333, 8_388_606, 6_711_869, 6_335_399, 8_388_606],
-                91,
+                [5_875_675, 7_643_704, 6_515_262, 8_257_536, 6_580_799, 6_335_399, 8_257_536],
+                89,
             ),
             (
                 (7, 0, 0, 0, 16),
-                [6_535_882, 7_785_215, 7_170_620, 7_760_199, 6_974_013, 1_353_667, 8_388_606],
+                [6_399_963, 7_643_704, 7_039_549, 7_625_280, 6_842_943, 1_353_667, 8_257_536],
                 20,
             ),
         ];
@@ -545,12 +550,12 @@ mod tests {
             assert_eq!(
                 (*report.terms()).map(|term| term.bits),
                 rounds,
-                "round bits moved at {params:?}, log height {log_height}"
+                "round-bit mismatch at {params:?}, log height {log_height}"
             );
             assert_eq!(
                 report.security_level(),
                 level,
-                "level moved at {params:?}, log height {log_height}"
+                "unexpected level at {params:?}, log height {log_height}"
             );
         }
     }
