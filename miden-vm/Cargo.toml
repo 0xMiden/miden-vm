@@ -65,6 +65,7 @@ executable = [
     "dep:hex",
     "dep:tempfile",
     "dep:miden-wasm-event-handlers",
+    "dep:same-file",
     "dep:tracing-subscriber",
     "internal",
     "serde",
@@ -102,6 +103,7 @@ miden-wasm-event-handlers = { workspace = true, optional = true, features = ["st
 # External dependencies
 clap = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
+same-file = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
