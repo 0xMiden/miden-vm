@@ -1725,7 +1725,17 @@ mod tests {
 
     #[test]
     fn p256_value_rejects_off_curve_and_noncanonical_coordinates() {
-        let mut state = state();
+        // sqrt(B) mod p: (0, SQRT_B) is on P-256, and x = p encodes the same x-coordinate.
+        const SQRT_B: Limbs = [
+            0x174f_93f4,
+            0x28bf_856a,
+            0x1dae_8717,
+            0x541c_2af3,
+            0x84a0_6bb6,
+            0x2433_bd5d,
+            0x0e2f_83d7,
+            0x6648_5c78,
+        ];
         let curve = CurveId::P256;
         let CurvePoint::Affine { x, y } = curve.generator() else {
             unreachable!()
@@ -1738,13 +1748,20 @@ mod tests {
             Node::value(UintPrecompile::value_frame(curve.base_domain()), limbs.map(Felt::from_u32))
                 .expect("value frame is precompile-owned")
         };
-        for (px, py) in [(x, off_curve_y), (P256Base::MODULUS, y), ([0; 8], [0; 8])] {
+        let evaluate_point = |px: Limbs, py: Limbs| {
+            let mut state = state();
             let px = coordinate(px);
             let py = coordinate(py);
             let _ = state.register(px.clone());
             let _ = state.register(py.clone());
             let point = CurvePrecompile::affine_node_from_digests(curve, px.digest(), py.digest());
-            assert!(evaluate(&mut state, point).is_err());
+            evaluate(&mut state, point)
+        };
+
+        // The canonical encoding is accepted, so only the canonical-coordinate check rejects x = p.
+        evaluate_point(ZERO_LIMBS, SQRT_B).expect("(0, sqrt(B)) is a P-256 point");
+        for (px, py) in [(x, off_curve_y), (P256Base::MODULUS, SQRT_B), (ZERO_LIMBS, ZERO_LIMBS)] {
+            assert!(evaluate_point(px, py).is_err());
         }
     }
 
