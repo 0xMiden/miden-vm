@@ -44,6 +44,9 @@
 //! | 32    | `Sha512Word`   | SHA-512 IO and compression bands | `(block_id, addr, lo, hi)` — a 64-bit word in a compression block's fixed program |
 //! | 33    | `Sha512RoundMetadata` | SHA-512 compression | `(block_id, t, input_word, w_mult, a_mult, e_mult, k_lo, k_hi)` — fixed round metadata |
 //! | 34    | `Sha512IoContinuation` | SHA-512 IO | `(block_id, len, left, before, input_p2)` — invocation state between consecutive IO blocks |
+//! | 35    | `Sha256Word`   | SHA-256 IO and compression bands | `(block_id, addr, value)` — a 32-bit word in a compression block's fixed program |
+//! | 36    | `Sha256RoundMetadata` | SHA-256 compression | `(block_id, t, input_word, w_mult, a_mult, e_mult, k)` — fixed round metadata |
+//! | 37    | `Sha256IoContinuation` | SHA-256 IO | `(block_id, len, left, before, input_eidos, input_head)` — invocation state between consecutive IO blocks |
 //!
 //! ## Adding a new relation
 //!
@@ -98,14 +101,17 @@ pub enum BusId {
     Sha512Word = 32,
     Sha512RoundMetadata = 33,
     Sha512IoContinuation = 34,
+    Sha256Word = 35,
+    Sha256RoundMetadata = 36,
+    Sha256IoContinuation = 37,
 }
 
 /// Number of bus-prefix slots, one greater than the maximum [`BusId`].
 ///
 /// [`Challenges::new`](miden_air::lookup::Challenges::new) precomputes one prefix for each numeric
 /// ID in this range, including the reserved entries.
-pub const NUM_BUS_IDS: usize = 35;
-const _: () = assert!(NUM_BUS_IDS == BusId::Sha512IoContinuation as usize + 1);
+pub const NUM_BUS_IDS: usize = 38;
+const _: () = assert!(NUM_BUS_IDS == BusId::Sha256IoContinuation as usize + 1);
 
 // The numeric IDs are transcript domain separators. Pin every assigned and reserved slot so a
 // reorder cannot silently change relation encodings while leaving `NUM_BUS_IDS` unchanged.
@@ -144,6 +150,9 @@ const _: () = assert!(BusId::EidosWord as usize == 31);
 const _: () = assert!(BusId::Sha512Word as usize == 32);
 const _: () = assert!(BusId::Sha512RoundMetadata as usize == 33);
 const _: () = assert!(BusId::Sha512IoContinuation as usize == 34);
+const _: () = assert!(BusId::Sha256Word as usize == 35);
+const _: () = assert!(BusId::Sha256RoundMetadata as usize == 36);
+const _: () = assert!(BusId::Sha256IoContinuation as usize == 37);
 
 /// Maximum payload width (excluding the bus prefix) any message in this
 /// VM emits. Sets the size of the precomputed `β^0..β^{W-1}` table held
