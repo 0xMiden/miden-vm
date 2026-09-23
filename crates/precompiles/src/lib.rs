@@ -14,7 +14,7 @@ mod math;
 pub use codec::{chunks_to_bytes_exact, n_chunks};
 pub use hash::{
     HashAssertNode, HashFunction, HashPrecompile, keccak256::Keccak256Precompile,
-    sha512::Sha512Precompile,
+    sha256::Sha256Precompile, sha512::Sha512Precompile,
 };
 pub use math::{
     curve::{
@@ -53,6 +53,7 @@ pub fn registry() -> PrecompileRegistry {
     PrecompileRegistry::new()
         .with_precompile(Keccak256Precompile::default())
         .with_precompile(Sha512Precompile::default())
+        .with_precompile(Sha256Precompile::default())
         .with_precompile(UintPrecompile)
         .with_precompile(CurvePrecompile)
 }
