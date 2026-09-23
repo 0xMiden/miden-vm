@@ -289,6 +289,22 @@ fn prove_keeps_the_proof_when_an_explicit_output_crosses_a_symlink_with_dot_dot(
 }
 
 #[test]
+fn prove_keeps_the_proof_when_the_default_output_is_a_hard_link_to_it() {
+    let (working_dir, mut cmd) = prove_command();
+    let proof_path = working_dir.path().join("custom.proof");
+    let output_path = working_dir.path().join("custom.outputs");
+    // A hard link needs an existing target, so start from a stale proof. The new proof is written
+    // over it in place, which keeps both names on the one file.
+    fs::write(&proof_path, "stale proof").unwrap();
+    fs::hard_link(&proof_path, &output_path).unwrap();
+
+    cmd.arg("--proof").arg(&proof_path);
+    cmd.assert().failure().stderr(predicate::str::contains("overwrite"));
+
+    assert_proof_survived(&proof_path);
+}
+
+#[test]
 fn prove_rejects_invalid_program_extension_before_inferred_inputs_file() {
     let working_dir = TempDir::new().unwrap();
     let program_path = working_dir.path().join("miden-vm-cli-invalid-prove-extension-test.txt");
