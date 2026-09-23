@@ -43,6 +43,19 @@ unused bytes and felts in the final 32-byte chunk. The byte length must fit the 
 assertion binds the exact input length and all 64 output bytes; completing the execution proof
 also proves the SHA-512 computation.
 
+## SHA256 precompile
+
+Module `miden::core::precompiles::hashes::sha256` provides deferred SHA-256 hashing. Its
+`hash_bytes_mem` procedure consumes `[in_ptr, len_bytes, out_ptr, ...]` and writes the 32-byte
+digest as eight little-endian packed `u32` felts at `out_ptr`.
+
+Both pointers must be word-aligned. Input bytes use the same packed representation, with zero
+unused bytes and felts in the final 32-byte chunk. The byte length must fit the configured
+`max_hash_len_bytes` execution limit. Input and output ranges may overlap. The logged deferred
+assertion binds the exact input length and all 32 output bytes; completing the execution proof
+also proves the SHA-256 computation. The `miden::core::crypto::hashes::sha256` module below
+computes SHA-256 directly in MASM instead.
+
 ## SHA256
 Module `miden::core::crypto::hashes::sha256` contains procedures for computing hashes using [SHA256](https://en.wikipedia.org/wiki/SHA-2) hash function. The input and output elements are assumed to contain one 32-bit value per element.
 
