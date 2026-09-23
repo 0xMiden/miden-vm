@@ -667,9 +667,9 @@ mod tests {
                 &miden_precompiles::default_precompile_limits(),
             )
             .unwrap();
+        let root = prepared.root();
         let error = prepared.evaluate().unwrap_err();
         assert!(matches!(error.root(), PrecompileError::AssertionFailed));
-        let root = prepared.root();
         let proof = ExecutionProof::new(vm_proof(root), PrecompileStatus::Deferred(witness));
         assert!(matches!(
             Verifier::new().verify(&claim(), &proof),

@@ -5,6 +5,11 @@
 #### Features
 
 - [BREAKING] Add a precompile prover memory budget, with a 64GiB default ([#3799](https://github.com/0xMiden/miden-vm/pull/3799)).
+- [BREAKING] Added configurable per-witness precompile work limits and explicit work classes for
+  hash, uint, curve, and MSM operations. `Precompile::work` is now required, witness preparation
+  enforces limits before commitment hashing or evaluation, and `PreparedWitness::evaluate` now
+  consumes the prepared witness while reusing its checked node commitments
+  ([#3849](https://github.com/0xMiden/miden-vm/issues/3849)).
 
 #### Changes
 

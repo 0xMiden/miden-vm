@@ -161,7 +161,8 @@ impl PrecompileWitness {
         Ok(wire)
     }
 
-    /// Hydrates and validates this graph, enforcing `limits` before hashing each entry.
+    /// Validates and admits this graph under `registry` and `limits`, computing each commitment
+    /// once without evaluating precompile semantics or establishing assertion truth.
     pub fn prepare(
         &self,
         registry: Arc<PrecompileRegistry>,
@@ -220,12 +221,13 @@ impl PrecompileWitness {
             };
             work.charge(node.felt_len(), item, limits)?;
 
-            let digest = node.digest();
+            let prepared = PreparedNode::new(node);
+            let digest = prepared.digest();
             if !seen_digests.insert(digest) {
                 return Err(IntegrityError::InvalidStructure.into());
             }
             digests.push(digest);
-            nodes.push(PreparedNode { node, digest });
+            nodes.push(prepared);
         }
 
         self.validate_canonical_order(digests.len())?;
@@ -303,7 +305,7 @@ impl PrecompileWitness {
 // PREPARED WITNESS
 // ================================================================================================
 
-/// One hydrated node and its checked structural commitment.
+/// A hydrated node and the commitment computed during preparation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedNode {
     node: Node,
@@ -311,6 +313,15 @@ pub struct PreparedNode {
 }
 
 impl PreparedNode {
+    pub(super) fn new(node: Node) -> Self {
+        let digest = node.digest();
+        Self { node, digest }
+    }
+
+    pub(super) fn into_parts(self) -> (Digest, Node) {
+        (self.digest, self.node)
+    }
+
     /// Returns the hydrated node.
     pub const fn node(&self) -> &Node {
         &self.node
@@ -323,6 +334,9 @@ impl PreparedNode {
 }
 
 /// A structurally valid, admitted witness ready for native or recording evaluation.
+///
+/// Preparation establishes graph integrity, commitments, and declared work only. It does not
+/// establish semantic validity or assertion truth.
 #[derive(Debug, Clone)]
 pub struct PreparedWitness {
     registry: Arc<PrecompileRegistry>,
@@ -347,16 +361,23 @@ impl PreparedWitness {
         &self.nodes
     }
 
-    /// Evaluates every prepared node under the same registry used for preparation.
-    pub fn evaluate(&self) -> Result<(), PrecompileError> {
-        let mut state = DeferredState::new_for_prepared(Arc::clone(&self.registry))?;
-        for prepared in &self.nodes {
-            state.insert_prepared_node(prepared.digest, prepared.node.clone())?;
+    /// Consumes and evaluates this witness, succeeding only if its root resolves to
+    /// [`TRUE_DIGEST`].
+    pub fn evaluate(self) -> Result<(), PrecompileError> {
+        let Self { registry, nodes, root, work: _ } = self;
+        let mut state = DeferredState::new_for_prepared(registry)?;
+        let mut digests = Vec::with_capacity(nodes.len());
+        for prepared in nodes {
+            digests.push(state.insert_node(prepared)?);
         }
-        for prepared in &self.nodes {
-            state.evaluate_digest(prepared.digest)?;
+        let mut root_result = None;
+        for digest in digests {
+            let canonical = state.evaluate_digest(digest)?;
+            if digest == root {
+                root_result = Some(canonical);
+            }
         }
-        if state.evaluate_digest(self.root)? != TRUE_DIGEST {
+        if root_result.ok_or(PrecompileError::MissingNode)? != TRUE_DIGEST {
             return Err(PrecompileError::AssertionFailed);
         }
         Ok(())

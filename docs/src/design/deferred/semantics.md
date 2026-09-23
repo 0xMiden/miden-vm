@@ -26,8 +26,8 @@ pub struct DeferredState {
 ## Vocabulary
 
 - **Registered** means a digest has an entry in `DeferredState.nodes`. Registration can happen
-  through `DeferredState::register`, evaluation storing canonical/helper nodes, `log_statement`
-  storing framework `AND` nodes.
+  through `DeferredState::register`, evaluation storing canonical/helper nodes, or statement
+  logging storing framework `AND` nodes.
 - **Evaluated** means a registered input digest has been semantically reduced to a canonical node
   under the installed `PrecompileRegistry`. The canonical node is also stored in `nodes` so it can
   be referenced by downstream nodes.
@@ -89,11 +89,11 @@ checks.
 
 ## Evaluation
 
-Evaluation first requires the input digest to be present in `nodes`; evaluation state alone never
-creates durable DAG membership. A call to `evaluate_digest(digest)` returns the digest of the
-canonical node. This is a semantic operation: it may compute the result or use internal
-memoization, but callers do not observe that distinction. Callers that need canonical node contents
-can compose `evaluate_digest` with `get_node`.
+Evaluation requires the input digest to be present in `nodes`; evaluation state alone never creates
+durable DAG membership. A call to `evaluate_digest(digest)` returns the digest of the canonical
+node. This is a semantic operation: it may compute the result or use internal memoization, but
+callers do not observe that distinction. Callers that need canonical node contents can compose
+`evaluate_digest` with `get_node`.
 
 Framework nodes evaluate as follows:
 
@@ -106,7 +106,8 @@ Node::AND(lhs, rhs) =>
 ```
 
 Precompile-owned nodes are evaluated by `PrecompileRegistry::evaluate`, which dispatches to the
-owning `Precompile` with a `DeferredContext`.
+owning `Precompile` with a `DeferredContext`. Canonical nodes newly produced during evaluation are
+validated before they become registered nodes.
 
 `DeferredContext` gives precompile implementations the same semantic split:
 
@@ -130,11 +131,29 @@ only its root-reachable closure in canonical child-first order. Index zero is im
 entries carry literal chunks, joins carry two backward child indices, and pair lists carry ordered
 pairs of backward child indices. A nonempty witness opens the digest of its last entry.
 
-Checked construction and decoding reconstruct commitments, reject duplicate or conflicting entries,
-unsupported framework shapes, empty payloads, forward references, unreachable entries, and
-noncanonical traversal order. They do not interpret precompile operations or evaluate assertions.
-Standalone decoding rejects trailing bytes. Completed execution outputs carry this same portable
-representation, and release the runtime state.
+In-memory construction and standalone decoding enforce canonical transport syntax and allocation
+bounds only; standalone decoding also rejects trailing bytes. They do not hash commitments or
+validate graph topology. Completed execution outputs carry this same portable representation and
+release the runtime state.
+
+## Witness preparation and admission
+
+`PrecompileWitness::prepare(registry, limits)` hydrates and validates bounded wire entries, charges
+structural and declared work before computing their commitments, and returns a `PreparedWitness`.
+It rejects duplicate commitments, invalid references, orphaned entries, noncanonical traversal
+order, and a `TRUE_DIGEST` final root without establishing computation or assertion truth.
+`PreparedWitness::root` exposes the reconstructed commitment and `PreparedWitness::work` exposes
+the admitted work summary.
+
+`PreparedWitness::evaluate(self)` consumes the prepared value and succeeds only when semantic
+evaluation resolves its root to `TRUE_DIGEST`. Callers that need reuse must clone it explicitly.
+
+`PrecompileLimits` is a per-singleton-witness admission policy. It bounds explicit node elements
+and requires a `WorkLimit` for every installed registry class. `PrecompileWork` reports node and
+class counts, total class size, and maximum individual size. Framework nodes consume structural
+elements but no precompile work class. The standard registry's
+`default_precompile_limits()` defines the canonical hash, uint, curve, and MSM policy. Verifier and
+prover callers can replace it with `with_precompile_limits`.
 
 ## Proof obligations and composition
 
@@ -145,10 +164,11 @@ root. `Prover::prove_full` proves both stages, using a one-element precompile ba
 
 For delegated proving, decode the transported proof and pass its witnesses directly to
 `Prover::prove_precompiles(Vec<PrecompileWitness>)`. The batch must be nonempty. Each input retains its
-own indices, while one private Session shares computations across the batch. Operation support,
-canonical arithmetic values, curve membership, assertion truth, MSM restrictions, and commitments
-are checked during import. A root must have a transcript eval row; a bare external Keccak assertion
-cannot serve as the final root and is rejected without changing its commitment.
+own indices. Each singleton is prepared and admitted independently before one private Session shares
+computations across the batch. Operation support, canonical arithmetic values, curve membership,
+assertion truth, MSM restrictions, and commitments are checked during import. A root must have a
+transcript eval row; a bare external Keccak assertion cannot serve as the final root and is rejected
+without changing its commitment.
 
 The batch preserves exact root order and multiplicity: `[A, B, A]` proves `AND(AND(A, B), A)`.
 Repeated operands and root occurrences count as separate binding uses, even when their computation
@@ -193,10 +213,11 @@ decoding their payloads. Previous encodings and conversion between formats are n
 
 Canonical binary decoders enforce fixed hard ceilings before allocating declared collections:
 `MAX_STARK_PROOF_BYTES` per inner STARK, `MAX_PRECOMPILE_ROOTS` per ordered root list, and
-`MAX_DEFERRED_ELEMENTS` for each portable witness. Batch import additionally enforces the root count,
-total input elements, and execution work limits across all inputs, including repeated inputs, so
-computation sharing does not bypass scan limits. These are library safety bounds, not configurable
-protocol, whole-envelope, file, network, or ingestion policy.
+`MAX_DEFERRED_ELEMENTS` for each portable witness. Logical element and operation limits are applied
+independently to every singleton witness, including repeated witnesses; a batch may exceed the same
+logical workload in aggregate. `MAX_PRECOMPILE_ROOTS` and the precompile prover's estimated peak
+memory budget are batch-wide. These are library safety and admission bounds, not protocol,
+whole-envelope, file, network, or ingestion policy.
 
 Generic serialization traits are representation formats. Generic Serde
 deserialization is not guaranteed to apply the canonical decoder's early allocation bounds and must
