@@ -27,6 +27,7 @@ use crate::handlers::{
     precompiles::{
         ed25519::{ED25519_DECOMPRESS_EVENT_NAME, handle_ed25519_decompress},
         keccak256::{KECCAK256_DIGEST_EVENT_NAME, handle_keccak256_digest},
+        sha256::{SHA256_DIGEST_EVENT_NAME, handle_sha256_digest},
         sha512::{SHA512_DIGEST_EVENT_NAME, handle_sha512_digest},
         uint_field_inv::{UINT_FIELD_INV_EVENT_NAME, handle_uint_field_inv},
     },
@@ -196,6 +197,7 @@ impl CoreLibrary {
             (ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, Arc::new(handle_ecdsa_k256_keccak_recover)),
             (KECCAK256_DIGEST_EVENT_NAME, Arc::new(handle_keccak256_digest)),
             (SHA512_DIGEST_EVENT_NAME, Arc::new(handle_sha512_digest)),
+            (SHA256_DIGEST_EVENT_NAME, Arc::new(handle_sha256_digest)),
             (ED25519_DECOMPRESS_EVENT_NAME, Arc::new(handle_ed25519_decompress)),
             (UINT_FIELD_INV_EVENT_NAME, Arc::new(handle_uint_field_inv)),
         ];
