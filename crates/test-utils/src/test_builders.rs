@@ -216,6 +216,7 @@ macro_rules! build_test_by_mode {
         let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
         let source = source_manager.load($crate::SourceLanguage::Masm, name.into(), $source.into());
 
+        #[allow(deprecated)] // Initialize retained legacy fields for compatibility.
         $crate::Test {
             source_manager,
             source,
@@ -243,6 +244,7 @@ macro_rules! build_test_by_mode {
         let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
         let source = source_manager.load($crate::SourceLanguage::Masm, name.into(), $source.into());
 
+        #[allow(deprecated)] // Initialize retained legacy fields for compatibility.
         $crate::Test {
             source_manager,
             source,
@@ -275,6 +277,7 @@ macro_rules! build_test_by_mode {
         let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
         let source = source_manager.load($crate::SourceLanguage::Masm, name.into(), $source.into());
 
+        #[allow(deprecated)] // Initialize retained legacy fields for compatibility.
         $crate::Test {
             source_manager,
             source,
@@ -309,6 +312,7 @@ macro_rules! build_test_by_mode {
         let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
         let source = source_manager.load($crate::SourceLanguage::Masm, name.into(), $source.into());
 
+        #[allow(deprecated)] // Initialize retained legacy fields for compatibility.
         $crate::Test {
             source_manager,
             source,
