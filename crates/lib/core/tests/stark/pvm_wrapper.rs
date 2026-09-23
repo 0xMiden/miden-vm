@@ -15,8 +15,8 @@ const ACE_REGISTRY_ROOT_PTR: u32 = 3_223_322_732;
 const OOD_EVALUATIONS_ADDRESS_PTR: u32 = 3_223_322_761;
 const CURRENT_TRACE_ROW_ADDRESS_PTR: u32 = 3_223_322_762;
 
-const PREPROCESSED_CURRENT_PTR: u32 = 3_225_426_432;
-const CURRENT_TRACE_ROW_PTR: u32 = 3_225_443_440;
+const PREPROCESSED_CURRENT_PTR: u32 = 3_225_426_440;
+const CURRENT_TRACE_ROW_PTR: u32 = 3_225_443_448;
 
 // Runtime call-site vector. The precompiles-prover oracle derives the matching MASM constants
 // directly from the AIRs.

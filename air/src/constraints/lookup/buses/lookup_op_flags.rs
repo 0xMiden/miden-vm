@@ -43,7 +43,6 @@ use crate::constraints::{
 pub struct LookupOpFlags<E> {
     // -- Degree-4 individual ops (current row) --------------------------------------------------
     end: E,
-    repeat: E,
     respan: E,
     call: E,
     syscall: E,
@@ -195,28 +194,24 @@ where
         let u32_rc_op = bits[6][1].clone() * bits[5][0].clone() * bits[4][0].clone();
         let u32div = u32_rc_op.clone() * b321[get_op_index(opcodes::U32DIV)].clone();
 
-        // right_shift_scalar (degree 6): prefix_011 + PUSH + U32SPLIT.
+        // right_shift (degree 6): prefix_011 + PUSH + U32SPLIT.
         // U32SPLIT is a degree-6 op: u32_rc_op * b321[get_op_index(U32SPLIT)].
         let u32split = u32_rc_op.clone() * b321[get_op_index(opcodes::U32SPLIT)].clone();
         let prefix_01 = bits[6][0].clone() * bits[5][1].clone();
         let prefix_011 = prefix_01.clone() * bits[4][1].clone();
-        let right_shift = prefix_011 + push.clone() + u32split;
+        let right_shift = prefix_011 + push.dup() + u32split;
 
-        // left_shift_scalar (degree 5):
+        // left_shift (degree 5):
         //   prefix_010 + u32_add3_madd_group + SPLIT + REPEAT + END*is_loop + DYN.
         //   prefix_010 includes FRIE2F4, which rewrites s0..s14 but still decrements stack depth.
-        // DYNCALL intentionally excluded (see OpFlags::left_shift doc). LOOP is also excluded:
-        // under do-while semantics the LOOP op reads no stack input.
+        // DYNCALL intentionally excluded (see OpFlags::left_shift). LOOP is also excluded: under
+        // do-while semantics the LOOP op reads no stack input.
         let prefix_010 = prefix_01 * bits[4][0].clone();
         let u32_add3_madd_group = u32_rc_op.clone() * bits[3][1].clone() * bits[2][1].clone();
         let is_loop = decoder.end_block_flags().is_loop;
         let end_loop = end.clone() * is_loop;
-        let left_shift = prefix_010
-            + u32_add3_madd_group
-            + split.clone()
-            + repeat.clone()
-            + end_loop
-            + dyn_op.clone();
+        let left_shift =
+            prefix_010 + u32_add3_madd_group + split.clone() + repeat + end_loop + dyn_op.clone();
 
         // overflow = (b0 - 16) * h0, degree 2 (uses stack columns, not decoder).
         let b0: E = stack.b0.into();
@@ -224,7 +219,6 @@ where
 
         Self {
             end,
-            repeat,
             respan,
             call,
             syscall,
@@ -274,8 +268,8 @@ impl LookupOpFlags<Felt> {
     /// (or no) flag instead of building the polynomial products that
     /// [`from_main_cols`](LookupOpFlags::from_main_cols) builds. Semantics match
     /// `from_main_cols` on any valid trace. op_bits are 0/1 by the decoder's boolean
-    /// constraint, and the `is_loop` hasher slot that gates `left_shift`'s `end` term is
-    /// also 0/1 on valid traces.
+    /// constraint, and the `is_loop` hasher slot that gates `left_shift`'s END term is also 0/1 on
+    /// valid traces.
     ///
     /// When `debug_assertions` is on, the output is cross-checked field-by-field against
     /// `from_main_cols` so divergences surface immediately in tests.
@@ -307,7 +301,7 @@ impl LookupOpFlags<Felt> {
             opcodes::HORNERBASE => f.hornerbase = Felt::ONE,
             opcodes::HORNEREXT => f.hornerext = Felt::ONE,
             opcodes::END => f.end = Felt::ONE,
-            opcodes::REPEAT => f.repeat = Felt::ONE,
+            opcodes::REPEAT => {},
             opcodes::RESPAN => f.respan = Felt::ONE,
             opcodes::CALL => f.call = Felt::ONE,
             opcodes::SYSCALL => f.syscall = Felt::ONE,
@@ -333,13 +327,12 @@ impl LookupOpFlags<Felt> {
         // -- Composite flags via integer range tests ------------------------------------
         // u32_rc_op: 1 iff opcode is a degree-6 u32 op (opcodes 64..80).
         f.u32_rc_op = bool_to_felt((64..80).contains(&opcode));
-        // right_shift_scalar: prefix_011 (opcodes 48..64) + PUSH + U32SPLIT.
+        // right_shift: prefix_011 (opcodes 48..64) + PUSH + U32SPLIT.
         f.right_shift = bool_to_felt(
             (48..64).contains(&opcode) || opcode == opcodes::PUSH || opcode == opcodes::U32SPLIT,
         );
-        // left_shift_scalar: prefix_010 (opcodes 32..48, including FRIE2F4) + U32ADD3/U32MADD
-        // + SPLIT/REPEAT/DYN + END*is_loop. DYNCALL and LOOP are excluded; see
-        // OpFlags::left_shift.
+        // left_shift: prefix_010 (opcodes 32..48, including FRIE2F4) + U32ADD3/U32MADD
+        // + SPLIT/REPEAT/DYN + END*is_loop. DYNCALL and LOOP are excluded; see OpFlags::left_shift.
         let is_end_loop = opcode == opcodes::END && decoder.end_block_flags().is_loop == Felt::ONE;
         f.left_shift = bool_to_felt(
             (32..48).contains(&opcode)
@@ -371,7 +364,6 @@ impl LookupOpFlags<Felt> {
     fn all_zero() -> Self {
         Self {
             end: Felt::ZERO,
-            repeat: Felt::ZERO,
             respan: Felt::ZERO,
             call: Felt::ZERO,
             syscall: Felt::ZERO,
@@ -436,7 +428,6 @@ impl LookupOpFlags<Felt> {
         }
         check!(
             end,
-            repeat,
             respan,
             call,
             syscall,
@@ -513,7 +504,6 @@ macro_rules! accessors {
 accessors!(
     // Degree-4 individual ops
     end,
-    repeat,
     respan,
     call,
     syscall,
@@ -618,7 +608,6 @@ mod tests {
             opcodes::JOIN,
             opcodes::SPLIT,
             opcodes::LOOP,
-            opcodes::REPEAT,
             opcodes::DYN,
             opcodes::DYNCALL,
             opcodes::CALL,
@@ -644,6 +633,23 @@ mod tests {
                 "op-group selector for block-hash opcode {opcode}",
             );
         }
+
+        let repeat = generate_test_row(opcodes::REPEAT.into());
+        let repeat_next = generate_test_row(0);
+        let repeat_flags =
+            LookupOpFlags::from_main_cols(&repeat.decoder, &repeat.stack, &repeat_next.decoder);
+        assert_eq!(block_hash_selector(&repeat_flags), ZERO, "REPEAT adds no block-hash entry");
+        assert_eq!(
+            op_group_selector(
+                &repeat_flags,
+                repeat.decoder.in_span,
+                repeat.decoder.group_count,
+                repeat_next.decoder.group_count,
+                repeat.decoder.batch_flags,
+            ),
+            ZERO,
+            "REPEAT is not an op-group selector",
+        );
 
         for opcode in [opcodes::SPAN, opcodes::RESPAN] {
             let mut row = generate_test_row(opcode.into());
@@ -690,7 +696,6 @@ mod tests {
         flags.join()
             + flags.split()
             + flags.loop_op()
-            + flags.repeat()
             + flags.dyn_op()
             + flags.dyncall()
             + flags.call()
@@ -814,7 +819,6 @@ mod tests {
 
         check!(
             end,
-            repeat,
             respan,
             call,
             syscall,

@@ -8,7 +8,7 @@
 //! 1. **In-span constraints**: Ensure the in-span flag transitions correctly.
 //! 2. **Op-bit binary constraints**: Ensure operation bits are binary.
 //! 3. **Extra columns (e0, e1)**: Degree-reduction columns for operation flag computation.
-//! 4. **Opcode-bit group constraints**: Eliminate unused opcode prefixes.
+//! 4. **Opcode-bit group constraints**: Reject unused encodings in the upper prefix groups.
 //! 5. **General opcode-semantic constraints**: Per-operation invariants (SPLIT/LOOP, DYN, REPEAT,
 //!    END, HALT).
 //! 6. **Group count constraints**: Group-count transitions inside basic blocks.
@@ -47,7 +47,7 @@
 //! | Context     | h0         | h1..h3    | h4             | h5      | h6      | h7         |
 //! |-------------|------------|-----------|----------------|---------|---------|------------|
 //! | SPAN/RESPAN | packed ops | op groups | op group       | op group| op group| op group   |
-//! | END         | block hash₀| hash₁..₃ | is_loop_body   | is_loop | is_call | is_syscall |
+//! | END         | block hash₀| hash₁..₃ | is_loop_body   | is_loop | restores_caller_frame | 0 |
 //! | User ops    | packed ops | op groups | user_op_helper | ...     | ...     | ...        |
 //!
 //! ## Operation Flag Degrees
@@ -69,6 +69,7 @@
 pub mod columns;
 
 use miden_crypto::stark::air::AirBuilder;
+use p3_field::Dup;
 
 use crate::{
     CoreCols, Felt, MidenAirBuilder,
@@ -104,9 +105,7 @@ pub fn enforce_main<AB>(
         batch_flags,
         extra,
     } = local.decoder;
-    // b2 and b3 are not used directly in decoder constraints — they are consumed only
-    // by the op_flags module for individual opcode discrimination.
-    let [b0, b1, _, _, b4, b5, b6] = op_bits;
+    let [b0, b1, b2, b3, b4, b5, b6] = op_bits;
     let [bc0, bc1, bc2] = batch_flags;
     let [e0, e1] = extra;
     let h0 = hasher_state[0];
@@ -179,10 +178,8 @@ pub fn enforce_main<AB>(
     // =============================================
     // Extra columns (e0, e1) — degree reduction
     // =============================================
-    // Without these columns, operation flags for the upper opcode groups (U32, VeryHigh)
-    // would require products of up to 7 bits (degree 7), exceeding the constraint system's
-    // degree budget. By precomputing e0 and e1 in the trace and constraining them here,
-    // the op_flags module can reference these degree-1 columns instead.
+    // e0 and e1 reduce flag degrees for prefixes 101 and 11 so their operation-specific
+    // constraints fit the degree-9 budget.
     //
     //   e0 = b6 · (1 - b5) · b4    selects the "101" prefix (degree-5 ops)
     //   e1 = b6 · b5               selects the "11" prefix (degree-4 ops)
@@ -198,26 +195,22 @@ pub fn enforce_main<AB>(
     // =============================================
     // Opcode-bit group constraints
     // =============================================
-    // Certain opcode prefixes have unused bit positions that must be zero to prevent
-    // invalid opcodes from being encoded. Both opcode groups use e0/e1 for degree reduction:
+    // Restrict unused opcode encodings in the upper prefix groups:
     //
-    //   Prefix  | b6 b5 b4 | Meaning    | Constraint
-    //   --------+----------+------------+------------
-    //   U32     | 1  0  0  | 8 U32 ops  | b0 = 0
-    //   VeryHi  | 1  1  *  | 8 hi ops   | b0 = b1 = 0
+    //   b6 b5 b4 | Constraint
+    //   ---------+----------------------
+    //   1  0  0  | b0 = 0
+    //   1  0  1  | exclude opcode 95
+    //   1  1  *  | b0 = b1 = 0
     //
-    // The U32 prefix is computed as b6·(1-b5)·(1-b4) = b6 - e1 - e0 (degree 1).
-    // The VeryHi prefix is b6·b5 = e1 (degree 1).
+    // With Boolean opcode bits and constrained e0, b6 - e0 selects prefixes 100 and 11,
+    // disjoint from e0's 101 prefix. Under prefix 101, b0 is forbidden only for slot 95.
+    let prefix_100_or_11 = b6 - e0;
+    let prefix_101_with_low_bits_111 = e0 * b3 * b2 * b1;
+    builder.when(prefix_100_or_11 + prefix_101_with_low_bits_111).assert_zero(b0);
 
-    // When U32 prefix is active, b0 must be zero.
-    builder.when(b6 - e1 - e0).assert_zero(b0);
-
-    // When VeryHi prefix is active, both b0 and b1 must be zero.
-    {
-        let builder = &mut builder.when(e1);
-        builder.assert_zero(b0);
-        builder.assert_zero(b1);
-    }
+    // Prefix 11 also requires b1 = 0.
+    builder.when(e1).assert_zero(b1);
 
     // =============================================
     // General opcode-semantic constraints
@@ -229,9 +222,8 @@ pub fn enforce_main<AB>(
     // SPLIT     | s0 in {0, 1}                        | s0 selects true/false branch
     // DYN       | h4 = h5 = h6 = h7 = 0               | callee digest lives in h0..h3 only
     // REPEAT    | s0 = 1                              | loop condition must be true
-    // REPEAT    | is_loop_body (h4) = 1               | must be inside an active loop body
     // END+loop  | is_loop (h5) => s0 = 0              | exiting loop: condition became false
-    // END+REP'  | h0'..h4' = h0..h4                   | carry block hash + loop flag for re-entry
+    // END+REP'  | is_loop_body (h4) = 1               | REPEAT follows a loop-body END
     // HALT      | f_halt => f_halt'                   | absorbing / terminal state
 
     // SPLIT: branch selector must be binary.
@@ -246,29 +238,57 @@ pub fn enforce_main<AB>(
         builder.assert_zeros(hasher_zeros)
     }
 
-    // REPEAT: top-of-stack must be 1 (loop condition true) and we must be inside an
-    // active loop body (is_loop_body = h4 = 1).
+    // DYNCALL records its caller's post-pop stack depth and overflow pointer in h4/h5. Bind the
+    // depth directly; the overflow relation binds h5 when non-empty, and the constraint below
+    // handles the empty case.
     {
-        let loop_condition = local.stack.get(0);
-        let builder = &mut builder.when(op_flags.repeat());
-        builder.assert_one(loop_condition);
-        builder.assert_one(is_loop_body);
+        let overflow = op_flags.overflow();
+        let builder = &mut builder.when(op_flags.dyncall());
+        builder.assert_eq(hasher_state[4], local.stack.b0 - overflow.dup());
+        builder.when(overflow.not()).assert_zero(hasher_state[5]);
     }
+
+    // REPEAT consumes a true loop condition.
+    builder.when(op_flags.repeat()).assert_one(local.stack.get(0));
 
     // END inside a loop: when ending a loop block (is_loop = h5 = 1), top-of-stack must
     // be 0 — the loop exits because the condition became false.
     let loop_condition = local.stack.get(0);
     builder.when(op_flags.end()).when(is_loop).assert_zero(loop_condition);
 
-    // END followed by REPEAT: carry the block hash (h0..h3) and the is_loop_body flag
-    // (h4) into the next row so the loop body can be re-entered.
+    // END entry-kind selectors form the same tagged union as `BlockStackMsg`. They are boolean and
+    // mutually exclusive: an END consumes either a LOOP continuation or a caller frame, never
+    // both. h7 has no END semantics and is fixed to zero rather than carrying unauthenticated
+    // metadata.
     {
-        let gate = op_flags.end() * op_flags.repeat_next();
-        let builder = &mut builder.when(gate);
-        for i in 0..5 {
-            builder.assert_eq(hasher_state_next[i], hasher_state[i]);
-        }
+        let restores_caller_frame = end_flags.restores_caller_frame;
+        let builder = &mut builder.when(op_flags.end());
+        builder.assert_bool(is_loop);
+        builder.assert_bool(restores_caller_frame);
+        builder.assert_zero(hasher_state[7]);
+        builder.assert_zero(is_loop * restores_caller_frame);
     }
+
+    // `is_loop_body` is intentionally not authenticated by a standalone decoder constraint. The
+    // block-hash relation includes it in the END key. A value of one can match only a LoopBody
+    // entry emitted by the unique LOOP row that owns `addr_next`; a value of zero can match only a
+    // non-loop child entry. The block-stack relation separately authenticates the END's
+    // child-to-parent edge.
+
+    // REPEAT can follow only a loop-body END; its own h0..h4 do not authorize the next body.
+    builder
+        .when_transition()
+        .when(op_flags.repeat_next())
+        .assert_one(op_flags.end() * is_loop_body);
+
+    // Prevent LOOP -> END, which would skip the body when its lookup multiplicity is zero.
+    builder
+        .when_transition()
+        .when(op_flags.loop_op())
+        .assert_zero(op_flags.end_next());
+
+    // The first row has no END predecessor, so it cannot be REPEAT.
+    builder.when_first_row().assert_zero(op_flags.repeat());
 
     // HALT is absorbing: once entered, the VM stays in HALT for all remaining rows.
     builder.when_transition().when(op_flags.halt()).assert_one(op_flags.halt_next());
@@ -276,7 +296,10 @@ pub fn enforce_main<AB>(
     // =============================================
     // Group count constraints
     // =============================================
-    // The group_count column tracks remaining operation groups in the current basic block.
+    // The group_count column tracks remaining operation groups in the current basic block. On
+    // LOOP control-flow rows, it is also reused by the block-hash lookup as the multiplicity of
+    // the LOOP-committed body digest. That LOOP-side value is ignored by the op-group relation
+    // because control-flow rows have `in_span = 0`.
     //
     // ## Lifecycle
     //
@@ -477,8 +500,12 @@ pub fn enforce_main<AB>(
     // controller pair, so addr increments by CONTROLLER_ROWS_PER_PERMUTATION.
 
     // Inside a basic block, addr must stay the same (all ops in one batch share the same
-    // hasher-table address).
-    builder.when_transition().when(in_span).assert_eq(addr_next, addr);
+    // hasher-table address). REPEAT also re-enters the same loop parent for another body
+    // iteration.
+    builder
+        .when_transition()
+        .when(in_span + op_flags.repeat())
+        .assert_eq(addr_next, addr);
 
     // RESPAN moves to the next hash block (addr += CONTROLLER_ROWS_PER_PERMUTATION).
     builder
@@ -509,13 +536,15 @@ pub fn enforce_main<AB>(
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use miden_core::{
         Felt, ONE,
-        field::{PrimeCharacteristicRing, QuadFelt},
+        field::{Field, PrimeCharacteristicRing, QuadFelt},
         operations::opcodes,
     };
 
-    use super::enforce_main;
+    use super::{CONTROLLER_ROWS_PER_PERM_FELT, enforce_main};
     use crate::{
         CoreCols,
         constraints::{
@@ -524,11 +553,15 @@ mod tests {
         },
     };
 
-    fn decoder_constraints_hold(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> bool {
+    fn eval_decoder(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {
         let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
         let mut builder = ConstraintEvalBuilder::new();
         enforce_main(&mut builder, local, next, &op_flags);
-        builder.evaluations.into_iter().all(|value| value == QuadFelt::ZERO)
+        builder.evaluations
+    }
+
+    fn decoder_accepts(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> bool {
+        eval_decoder(local, next).iter().all(|v| *v == QuadFelt::ZERO)
     }
 
     #[test]
@@ -544,7 +577,7 @@ mod tests {
         next.decoder.group_count = Felt::from_u8(3);
 
         assert!(
-            !decoder_constraints_hold(&local, &next),
+            !decoder_accepts(&local, &next),
             "leaving a span without END or RESPAN must violate the decoder AIR",
         );
     }
@@ -560,8 +593,260 @@ mod tests {
         next.decoder.group_count = Felt::from_u8(3);
 
         assert!(
-            !decoder_constraints_hold(&local, &next),
+            !decoder_accepts(&local, &next),
             "entering a span without SPAN or RESPAN must violate the decoder AIR",
         );
+    }
+
+    fn honest_in_span_pair() -> (CoreCols<Felt>, CoreCols<Felt>) {
+        let mut local = generate_test_row(opcodes::NOOP.into());
+        let mut next = generate_test_row(opcodes::NOOP.into());
+        local.decoder.addr = Felt::new_unchecked(17);
+        next.decoder.addr = local.decoder.addr;
+        local.decoder.in_span = Felt::ONE;
+        next.decoder.in_span = Felt::ONE;
+        local.decoder.group_count = Felt::ONE;
+        next.decoder.group_count = Felt::ONE;
+        local.decoder.op_index = Felt::ZERO;
+        next.decoder.op_index = Felt::ONE;
+        (local, next)
+    }
+
+    fn span_row_with_single_group() -> CoreCols<Felt> {
+        let mut row = generate_test_row(opcodes::SPAN.into());
+        row.decoder.addr = Felt::new_unchecked(17);
+        row.decoder.group_count = Felt::new_unchecked(2);
+        row.decoder.batch_flags[1] = Felt::ONE;
+        row.decoder.batch_flags[2] = Felt::ONE;
+        row
+    }
+
+    fn repeat_row_with_true_condition() -> CoreCols<Felt> {
+        let mut row = generate_test_row(opcodes::REPEAT.into());
+        row.stack.top[0] = Felt::ONE;
+        row
+    }
+
+    fn set_opcode(row: &mut CoreCols<Felt>, opcode: usize) {
+        let opcode_row = generate_test_row(opcode);
+        row.decoder.op_bits = opcode_row.decoder.op_bits;
+        row.decoder.extra = opcode_row.decoder.extra;
+    }
+
+    #[test]
+    fn permitted_decoder_adjacency_pairs_are_accepted() {
+        let (in_span_local, in_span_next) = honest_in_span_pair();
+        assert!(
+            decoder_accepts(&in_span_local, &in_span_next),
+            "an ordinary in-span transition must be accepted"
+        );
+
+        let span = span_row_with_single_group();
+        let mut first_op = generate_test_row(opcodes::NOOP.into());
+        first_op.decoder.addr = span.decoder.addr;
+        first_op.decoder.in_span = Felt::ONE;
+        first_op.decoder.group_count = Felt::ONE;
+        assert!(decoder_accepts(&span, &first_op), "SPAN must be allowed to enter a basic block");
+
+        let mut respan = span_row_with_single_group();
+        set_opcode(&mut respan, opcodes::RESPAN.into());
+        first_op.decoder.addr = respan.decoder.addr + CONTROLLER_ROWS_PER_PERM_FELT;
+        assert!(
+            decoder_accepts(&respan, &first_op),
+            "RESPAN must be allowed to enter the next batch"
+        );
+
+        for exit_opcode in [opcodes::END, opcodes::RESPAN] {
+            let mut in_span = generate_test_row(opcodes::NOOP.into());
+            let mut exit = generate_test_row(exit_opcode.into());
+            in_span.decoder.addr = Felt::new_unchecked(17);
+            exit.decoder.addr = in_span.decoder.addr;
+            in_span.decoder.in_span = Felt::ONE;
+            assert!(
+                decoder_accepts(&in_span, &exit),
+                "an in-span row must be allowed to exit via opcode {exit_opcode}"
+            );
+        }
+
+        let mut end = generate_test_row(opcodes::END.into());
+        let mut repeat = repeat_row_with_true_condition();
+        end.stack.top[0] = Felt::ONE;
+        end.decoder.hasher_state[4] = Felt::ONE;
+        repeat.decoder.hasher_state[0] = Felt::new_unchecked(7);
+        assert!(
+            decoder_accepts(&end, &repeat),
+            "a loop-body END may precede REPEAT without copying its helper lanes"
+        );
+
+        end.stack.top[0] = Felt::ZERO;
+        end.decoder.hasher_state[5] = Felt::ONE;
+        assert!(
+            decoder_accepts(&end, &repeat),
+            "the completed loop body may itself be a nested LOOP"
+        );
+    }
+
+    #[test]
+    fn malformed_decoder_adjacency_pairs_are_rejected() {
+        let (mut in_span, _) = honest_in_span_pair();
+        let mut repeat = repeat_row_with_true_condition();
+        repeat.decoder.addr = in_span.decoder.addr;
+        assert!(
+            !decoder_accepts(&in_span, &repeat),
+            "an in-span row cannot exit directly to REPEAT"
+        );
+
+        let loop_row = generate_test_row(opcodes::LOOP.into());
+        assert!(!decoder_accepts(&loop_row, &repeat), "REPEAT's predecessor must be END");
+
+        let non_loop_body_end = generate_test_row(opcodes::END.into());
+        assert!(
+            !decoder_accepts(&non_loop_body_end, &repeat_row_with_true_condition()),
+            "REPEAT must follow an END marked as a loop body"
+        );
+
+        let end = generate_test_row(opcodes::END.into());
+        let mut illegal_entry = generate_test_row(opcodes::NOOP.into());
+        illegal_entry.decoder.in_span = Felt::ONE;
+        assert!(
+            !decoder_accepts(&end, &illegal_entry),
+            "an in-span successor must be entered by SPAN/RESPAN or another in-span row"
+        );
+
+        in_span.decoder.in_span = Felt::ONE;
+        let split = generate_test_row(opcodes::SPLIT.into());
+        assert!(
+            !decoder_accepts(&in_span, &split),
+            "a basic-block row cannot exit via arbitrary control flow"
+        );
+    }
+
+    #[test]
+    fn loop_cannot_jump_directly_to_its_end() {
+        let loop_row = generate_test_row(opcodes::LOOP.into());
+        let span = span_row_with_single_group();
+        assert!(decoder_accepts(&loop_row, &span), "LOOP must be allowed to enter its body");
+
+        let end = generate_test_row(opcodes::END.into());
+        assert!(
+            !decoder_accepts(&loop_row, &end),
+            "LOOP must not skip its do-while body by jumping directly to END"
+        );
+    }
+
+    #[test]
+    fn opcode_prefix_boundaries() {
+        let (mut local, next) = honest_in_span_pair();
+        for opcode in [opcodes::U32ADD, opcodes::LOGDEFERRED, opcodes::MRUPDATE] {
+            set_opcode(&mut local, opcode.into());
+            assert!(decoder_accepts(&local, &next), "opcode {opcode} must be accepted");
+        }
+
+        for opcode in [65, 95, 97, 98] {
+            set_opcode(&mut local, opcode);
+            assert!(!decoder_accepts(&local, &next), "unused opcode {opcode} must be rejected");
+        }
+    }
+
+    /// END entry-kind selectors must encode exactly one valid semantic kind.
+    ///
+    /// Every other soundness test in this tree keeps these selectors valid, so the invalid cases
+    /// here are what make each domain constraint mutation-sensitive.
+    #[test]
+    fn block_stack_entry_kind_selectors_must_encode_a_valid_kind() {
+        let accepts = |is_loop: Felt, restores_caller_frame: Felt, h7: Felt| {
+            let mut local = generate_test_row(opcodes::END.into());
+            local.decoder.hasher_state[5] = is_loop;
+            local.decoder.hasher_state[6] = restores_caller_frame;
+            local.decoder.hasher_state[7] = h7;
+            let next = generate_test_row(0);
+            eval_decoder(&local, &next).iter().all(|v| *v == QuadFelt::ZERO)
+        };
+
+        // Every semantic END block-stack entry kind: non-loop continuation, LOOP continuation,
+        // and caller frame.
+        for (is_loop, restores_caller_frame, h7) in [
+            (Felt::ZERO, Felt::ZERO, Felt::ZERO),
+            (Felt::ONE, Felt::ZERO, Felt::ZERO),
+            (Felt::ZERO, Felt::ONE, Felt::ZERO),
+        ] {
+            assert!(
+                accepts(is_loop, restores_caller_frame, h7),
+                "a valid END entry kind must be permitted"
+            );
+        }
+
+        assert!(
+            !accepts(Felt::new_unchecked(3), Felt::ZERO, Felt::ZERO),
+            "a non-boolean LOOP selector must be rejected"
+        );
+        assert!(
+            !accepts(Felt::ONE, Felt::ONE, Felt::ZERO),
+            "an END cannot be both a LOOP continuation and a caller frame"
+        );
+        assert!(
+            !accepts(Felt::ZERO, Felt::ONE, Felt::ONE),
+            "the unused h7 lane must be zero on an END row"
+        );
+        assert!(
+            !accepts(Felt::ZERO, Felt::new_unchecked(3), Felt::ZERO),
+            "a non-boolean caller-frame restoration selector must be rejected"
+        );
+    }
+
+    /// Control against over-constraining: outside END rows these lanes are user-op helper
+    /// registers, and the booleanity constraint is gated on the END flag so it must not reach
+    /// them. Uses NOOP, which reads no helper registers.
+    #[test]
+    fn helper_lanes_are_unconstrained_off_end_rows() {
+        let mut local = generate_test_row(opcodes::NOOP.into());
+        local.decoder.hasher_state[5] = Felt::new_unchecked(3);
+        local.decoder.hasher_state[6] = Felt::new_unchecked(5);
+        local.decoder.hasher_state[7] = Felt::new_unchecked(7);
+        let next = generate_test_row(0);
+
+        // Re-evaluate with the lanes zeroed; the two runs must agree, i.e. no constraint in
+        // this module reacted to them.
+        let with_values = eval_decoder(&local, &next);
+        let mut cleared = local;
+        cleared.decoder.hasher_state[5] = Felt::ZERO;
+        cleared.decoder.hasher_state[6] = Felt::ZERO;
+        cleared.decoder.hasher_state[7] = Felt::ZERO;
+        let with_zeros = eval_decoder(&cleared, &next);
+
+        assert_eq!(
+            with_values, with_zeros,
+            "the END-gated booleanity constraint must not reach helper lanes on a NOOP row"
+        );
+    }
+
+    /// DYNCALL records the caller state after consuming its address operand. The decoder binds
+    /// the saved depth in both overflow regimes and binds the saved pointer directly only in the
+    /// empty regime; with overflow present, the stack-overflow relation owns that pointer.
+    #[test]
+    fn dyncall_saved_frame_cells_follow_the_post_pop_state() {
+        let accepts = |depth: Felt, overflow_helper: Felt, h4: Felt, h5: Felt| {
+            let mut local = generate_test_row(opcodes::DYNCALL.into());
+            local.stack.b0 = depth;
+            local.stack.h0 = overflow_helper;
+            local.decoder.hasher_state[4] = h4;
+            local.decoder.hasher_state[5] = h5;
+            let next = generate_test_row(0);
+            eval_decoder(&local, &next).iter().all(|v| *v == QuadFelt::ZERO)
+        };
+
+        // Empty overflow: consuming the address leaves the represented depth clamped at 16 and
+        // there is no previous overflow row, so both saved values are fixed directly.
+        assert!(accepts(Felt::from_u8(16), Felt::ZERO, Felt::from_u8(16), Felt::ZERO));
+        assert!(!accepts(Felt::from_u8(16), Felt::ZERO, Felt::from_u8(15), Felt::ZERO));
+        assert!(!accepts(Felt::from_u8(16), Felt::ZERO, Felt::from_u8(16), Felt::ONE));
+
+        // Non-empty overflow: at depth 18 the inverse helper makes `overflow() = 1`, so the
+        // post-pop saved depth is 17. h5 is deliberately outside this module's authority here;
+        // the DYNCALL removal in the stack-overflow relation binds it to the prior row address.
+        let inverse_two = Felt::from_u8(2).inverse();
+        let relation_owned_h5 = Felt::new_unchecked(123);
+        assert!(accepts(Felt::from_u8(18), inverse_two, Felt::from_u8(17), relation_owned_h5));
+        assert!(!accepts(Felt::from_u8(18), inverse_two, Felt::from_u8(18), relation_owned_h5));
     }
 }
