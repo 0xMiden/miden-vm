@@ -505,14 +505,26 @@ fn distinct_hash_claims_count_shared_payload_demand() {
     }
     let witness = fixture.witness();
     let demand = 1u64 + 7 + 31;
-    let rejected = miden_precompiles::default_precompile_limits()
-        .with_class(HASH_WORK, WorkLimit::new(u64::MAX, demand - 1, u32::MAX));
+    let rejected = miden_precompiles::default_precompile_limits().with_class(
+        HASH_WORK,
+        WorkLimit {
+            max_count: u64::MAX,
+            max_total_size: demand - 1,
+            max_size: u32::MAX,
+        },
+    );
     assert!(matches!(
         import_witnesses(vec![witness.clone()], &rejected),
         Err(SessionInputError::Preparation { witness: 0, .. })
     ));
-    let admitted = miden_precompiles::default_precompile_limits()
-        .with_class(HASH_WORK, WorkLimit::new(u64::MAX, demand, u32::MAX));
+    let admitted = miden_precompiles::default_precompile_limits().with_class(
+        HASH_WORK,
+        WorkLimit {
+            max_count: u64::MAX,
+            max_total_size: demand,
+            max_size: u32::MAX,
+        },
+    );
     import_witnesses(vec![witness], &admitted).unwrap().finish().check();
 }
 
@@ -575,14 +587,26 @@ fn msm_limits_are_per_node_and_per_witness() {
             .unwrap();
         inputs.push(fixture.open(eq));
     }
-    let per_claim = miden_precompiles::default_precompile_limits()
-        .with_class(MSM_WORK, WorkLimit::new(u64::MAX, u64::MAX, 1));
+    let per_claim = miden_precompiles::default_precompile_limits().with_class(
+        MSM_WORK,
+        WorkLimit {
+            max_count: u64::MAX,
+            max_total_size: u64::MAX,
+            max_size: 1,
+        },
+    );
     assert!(matches!(
         import_witnesses(vec![inputs[1].clone()], &per_claim),
         Err(SessionInputError::Preparation { witness: 0, .. })
     ));
-    let per_witness = miden_precompiles::default_precompile_limits()
-        .with_class(MSM_WORK, WorkLimit::new(u64::MAX, 2, 2));
+    let per_witness = miden_precompiles::default_precompile_limits().with_class(
+        MSM_WORK,
+        WorkLimit {
+            max_count: u64::MAX,
+            max_total_size: 2,
+            max_size: 2,
+        },
+    );
     // Distinct and repeated witnesses are admitted independently even though their combined MSM
     // term count exceeds the per-witness total.
     import_witnesses(inputs.clone(), &per_witness).unwrap().finish().check();

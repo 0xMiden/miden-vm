@@ -145,17 +145,15 @@ impl PrecompileWork {
 /// Bounds for one work class within a single witness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorkLimit {
-    max_count: u64,
-    max_total_size: u64,
-    max_size: u32,
+    /// Maximum number of items in this class.
+    pub max_count: u64,
+    /// Maximum sum of item sizes in this class.
+    pub max_total_size: u64,
+    /// Maximum size of one item in this class.
+    pub max_size: u32,
 }
 
 impl WorkLimit {
-    /// Creates count, aggregate-size, and individual-size bounds for one work class.
-    pub const fn new(max_count: u64, max_total_size: u64, max_size: u32) -> Self {
-        Self { max_count, max_total_size, max_size }
-    }
-
     fn check(self, class: WorkClass, summary: WorkSummary) -> Result<(), PrecompileLimitError> {
         if summary.count > self.max_count {
             return Err(PrecompileLimitError::Count {
@@ -215,7 +213,7 @@ impl PrecompileLimits {
     }
 
     /// Returns the configured limit for `class`, if that class is admitted.
-    pub(crate) fn class(&self, class: WorkClass) -> Option<WorkLimit> {
+    pub fn class(&self, class: WorkClass) -> Option<WorkLimit> {
         self.classes.get(&class).copied()
     }
 }
@@ -245,7 +243,14 @@ mod tests {
 
     #[test]
     fn charging_is_checked_before_mutating_the_summary() {
-        let limits = PrecompileLimits::new(24).with_class(TEST, WorkLimit::new(2, 7, 4));
+        let limits = PrecompileLimits::new(24).with_class(
+            TEST,
+            WorkLimit {
+                max_count: 2,
+                max_total_size: 7,
+                max_size: 4,
+            },
+        );
         let mut work = PrecompileWork::default();
 
         work.charge(12, Some(WorkItem::new(TEST, 3)), &limits).unwrap();

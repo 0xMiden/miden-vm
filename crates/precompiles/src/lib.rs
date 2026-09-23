@@ -56,15 +56,37 @@ pub fn default_precompile_limits() -> PrecompileLimits {
     let max_hash_bytes = (MAX_DEFERRED_ELEMENTS * size_of::<u32>()) as u64;
 
     PrecompileLimits::new(MAX_DEFERRED_ELEMENTS as u64)
-        .with_class(UINT_WORK, WorkLimit::new(max_operations, max_operations, 1))
-        .with_class(CURVE_WORK, WorkLimit::new(max_operations, max_operations, 1))
+        .with_class(
+            UINT_WORK,
+            WorkLimit {
+                max_count: max_operations,
+                max_total_size: max_operations,
+                max_size: 1,
+            },
+        )
+        .with_class(
+            CURVE_WORK,
+            WorkLimit {
+                max_count: max_operations,
+                max_total_size: max_operations,
+                max_size: 1,
+            },
+        )
         .with_class(
             HASH_WORK,
-            WorkLimit::new(max_operations, max_hash_bytes, max_hash_bytes as u32),
+            WorkLimit {
+                max_count: max_operations,
+                max_total_size: max_hash_bytes,
+                max_size: max_hash_bytes as u32,
+            },
         )
         .with_class(
             MSM_WORK,
-            WorkLimit::new(max_operations, DEFAULT_MAX_TOTAL_MSM_TERMS, DEFAULT_MAX_MSM_TERMS),
+            WorkLimit {
+                max_count: max_operations,
+                max_total_size: DEFAULT_MAX_TOTAL_MSM_TERMS,
+                max_size: DEFAULT_MAX_MSM_TERMS,
+            },
         )
 }
 
