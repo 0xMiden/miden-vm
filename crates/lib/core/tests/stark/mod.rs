@@ -880,7 +880,7 @@ fn run_recursive_verifier(data: &VerifierData) -> ProofOrder {
         data.store.clone(),
         data.advice_map.clone()
     )
-    .with_trace_handler(VERIFIER_RETURN, verifier_stack.clone());
+    .with_handler(VERIFIER_RETURN, verifier_stack.clone());
     let order = ace_read_check::execute_and_check(&test, &data.proof_stream, &data.claim_advice);
 
     // Pin the full common descriptor and deferred root so any value or ordering drift is caught

@@ -113,7 +113,7 @@ fn test_trace_handler_registry() {
     };
 
     let mut host = DefaultHost::default();
-    host.register_event_handler(EventName::new(trace_name), recorder).unwrap();
+    host.register_handler(EventName::new(trace_name), recorder).unwrap();
 
     FastProcessor::new_with_options(
         StackInputs::default(),

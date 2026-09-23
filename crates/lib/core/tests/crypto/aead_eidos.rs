@@ -12,12 +12,11 @@ use miden_crypto::{
     },
 };
 use miden_processor::{
-    ExecutionError, ProcessorState,
-    advice::AdviceMutation,
-    event::{EventError, EventHandler},
+    ExecutionError,
     operation::OperationError,
 };
-use miden_utils_testing::Test;
+use miden_utils_testing::EventTest;
+use miden_event_handler::{AdviceRecorder, EventContext, EventError, EventHandler};
 
 const SRC_PTR: u64 = 1000;
 const DST_PTR: u64 = 2000;
@@ -965,7 +964,7 @@ fn decrypt_empty_ad_rejects_forged_plaintext_advice() {
                     Felt::new(plaintext[index].as_canonical_u64() ^ mask).unwrap();
                 let test = miden_utils_testing::build_test_by_mode!(false, source.as_str(), &[])
                     .with_library(core_lib.package())
-                    .with_event_handler(
+                    .with_handler(
                         AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
                         PlaintextHandler(forged_plaintext),
                     );
@@ -1014,7 +1013,7 @@ fn decrypt_empty_ad_rejects_forged_tag() {
     let core_lib = CoreLibrary::default();
     let test = miden_utils_testing::build_test_by_mode!(false, source.as_str(), &[])
         .with_library(core_lib.package())
-        .with_event_handler(AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME, PlaintextHandler(plaintext));
+        .with_handler(AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME, PlaintextHandler(plaintext));
     assert_aead_error("forged tag", &test, "AEAD tag mismatch");
 }
 
@@ -1376,7 +1375,7 @@ fn assert_encrypt_felts_accepts_layout(src_ptr: u64, dst_ptr: u64, num_felts: us
 }
 
 #[track_caller]
-fn assert_aead_error(case: &str, test: &Test, expected_error: &str) {
+fn assert_aead_error(case: &str, test: &EventTest, expected_error: &str) {
     let error = test.execute().expect_err(case);
     let expected_code = miden_core::mast::error_code_from_msg(expected_error);
     assert!(
@@ -1495,7 +1494,7 @@ fn assert_decrypt_rejected_before_event(
     let core_lib = CoreLibrary::default();
     let test = miden_utils_testing::build_test_by_mode!(false, source.as_str(), &[])
         .with_library(core_lib.package())
-        .with_event_handler(
+        .with_handler(
             AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
             CountingHandler(Arc::clone(&calls)),
         );
@@ -1603,15 +1602,16 @@ fn assert_auth_rejected(procedure: &str, ct_ptr: u64, count: u64, expected_error
 struct PlaintextHandler(Vec<Felt>);
 
 impl EventHandler for PlaintextHandler {
-    fn on_event(&self, _process: &ProcessorState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
-        Ok(vec![AdviceMutation::extend_advice_stack_with(self.0.clone())])
+    fn on_event(&self, _context: EventContext, advice: &mut AdviceRecorder<'_>) -> Result<(), EventError> {
+        advice.prepend_stack(self.0.clone());
+        Ok(())
     }
 }
 
 struct CountingHandler(Arc<AtomicUsize>);
 
 impl EventHandler for CountingHandler {
-    fn on_event(&self, _process: &ProcessorState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, _context: EventContext, _advice: &mut AdviceRecorder<'_>) -> Result<(), EventError> {
         self.0.fetch_add(1, Ordering::SeqCst);
         // Abort an unexpected event before an invalid length can drive further work.
         Err("unexpected plaintext event".into())

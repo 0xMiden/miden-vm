@@ -21,10 +21,10 @@ fn one_shared_registration_receives_event_and_trace_payloads() {
             Ok(())
         });
     let mut host = DefaultHost::default();
-    host.register_event_handler(name.clone(), registration::EventHandler::shared(shared.clone()))
+    host.register_handler(name.clone(), registration::EventHandler::shared(shared.clone()))
         .unwrap();
     assert!(
-        host.register_event_handler(name.clone(), registration::EventHandler::shared(shared))
+        host.register_handler(name.clone(), registration::EventHandler::shared(shared))
             .is_err()
     );
     let program = Assembler::default()
@@ -58,7 +58,7 @@ fn unknown_and_wrong_kind_delivery_policy() {
         let name = EventName::new("test::policy");
         let mut host = DefaultHost::default();
         if known {
-            host.register_event_handler(
+            host.register_handler(
                 name.clone(),
                 |context: EventContext<'_>, _: &mut AdviceRecorder<'_>| {
                     context.kind().require(InvocationKind::Event)?;
@@ -109,7 +109,7 @@ fn trace_recording_rules_apply_to_idempotent_and_empty_outputs() {
     for output in 0..4 {
         let name = EventName::new("test::trace::output");
         let mut host = DefaultHost::default();
-        host.register_event_handler(
+        host.register_handler(
             name.clone(),
             move |_: EventContext<'_>, advice: &mut AdviceRecorder<'_>| {
                 match output {

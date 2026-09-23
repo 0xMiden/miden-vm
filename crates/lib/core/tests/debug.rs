@@ -11,22 +11,21 @@ use std::{
 
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{Felt, Word};
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 use miden_core_lib::{
     CoreLibrary,
     handlers::debug::{
         DebugPrinter, PRINT_ADV_MAP_EVENT_NAME, PRINT_ADV_MAP_ITEM_EVENT_NAME,
         PRINT_ADV_STACK_EVENT_NAME, PRINT_MEM_ALL_EVENT_NAME, PRINT_MEM_EVENT_NAME,
-        PRINT_STACK_EVENT_NAME, advice_debug_handlers, debug_handlers, noop_debug_handlers,
+        PRINT_STACK_EVENT_NAME, advice_debug_event_handlers, debug_event_handlers,
+        noop_debug_event_handlers,
     },
 };
-use miden_event_handler::EventContextError;
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
+use miden_event_handler::{EventContextError, EventHandler};
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, HostLibrary,
+    DefaultHost, EventLibrary, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
     Program, StackInputs, SyncHost,
     advice::{AdviceInputs, AdviceStack},
-    event::{EventHandler, EventName},
+    event::{EventName, registration},
 };
 
 // HARNESS
@@ -56,23 +55,21 @@ impl fmt::Write for SharedBuf {
     }
 }
 
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
-fn debug_handlers_with_writer(writer: SharedBuf) -> Vec<(EventName, Arc<dyn EventHandler>)> {
+fn debug_handlers_with_writer(writer: SharedBuf) -> Vec<(EventName, registration::EventHandler)> {
     let printer: Arc<dyn EventHandler> = Arc::new(DebugPrinter::new(writer));
     vec![
-        (PRINT_STACK_EVENT_NAME, printer.clone()),
-        (PRINT_MEM_EVENT_NAME, printer.clone()),
-        (PRINT_MEM_ALL_EVENT_NAME, printer.clone()),
-        (PRINT_ADV_STACK_EVENT_NAME, printer.clone()),
-        (PRINT_ADV_MAP_EVENT_NAME, printer.clone()),
-        (PRINT_ADV_MAP_ITEM_EVENT_NAME, printer),
+        (PRINT_STACK_EVENT_NAME, registration::EventHandler::shared(printer.clone())),
+        (PRINT_MEM_EVENT_NAME, registration::EventHandler::shared(printer.clone())),
+        (PRINT_MEM_ALL_EVENT_NAME, registration::EventHandler::shared(printer.clone())),
+        (PRINT_ADV_STACK_EVENT_NAME, registration::EventHandler::shared(printer.clone())),
+        (PRINT_ADV_MAP_EVENT_NAME, registration::EventHandler::shared(printer.clone())),
+        (PRINT_ADV_MAP_ITEM_EVENT_NAME, registration::EventHandler::shared(printer)),
     ]
 }
 
 /// Assembles `source` against the core library and executes it with a [`DebugPrinter`] writing
 /// into an in-memory buffer (rather than the default stdout one), returning everything printed by
 /// the `print_*` events along with the execution output.
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn run(source: &str, advice: AdviceInputs) -> (String, ExecutionOutput) {
     let core_lib = CoreLibrary::default();
     let assembler = Assembler::default()
@@ -84,12 +81,12 @@ fn run(source: &str, advice: AdviceInputs) -> (String, ExecutionOutput) {
         .unwrap_program();
 
     let buf = Arc::new(Mutex::new(String::new()));
-    let host_lib = HostLibrary {
-        mast_forest: core_lib.mast_forest().clone(),
-        package_debug_info: Ok(None),
-        handlers: debug_handlers_with_writer(SharedBuf(buf.clone())),
-    };
-    let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
+    let mut host = DefaultHost::default()
+        .with_library(EventLibrary {
+            handlers: debug_handlers_with_writer(SharedBuf(buf.clone())),
+            ..core_lib.host_library()
+        })
+        .expect("failed to load host lib");
 
     let output = execute_sync(
         &program,
@@ -124,7 +121,7 @@ fn run_with_default_core_handlers(source: &str, advice: AdviceInputs) -> Executi
         .expect("failed to assemble program")
         .unwrap_program();
     let mut host = DefaultHost::default()
-        .with_library(&core_lib)
+        .with_library(core_lib.host_library())
         .expect("failed to load core library handlers");
 
     execute_sync(&program, StackInputs::default(), advice, &mut host, ExecutionOptions::default())
@@ -291,7 +288,6 @@ fn print_mem_all_includes_max_u32_cell() {
 }
 
 #[test]
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn print_mem_rejects_out_of_bounds_range_end() {
     let source = "
     use miden::core::debug
@@ -309,12 +305,12 @@ fn print_mem_rejects_out_of_bounds_range_end() {
         .assemble_program("program", source)
         .expect("failed to assemble program")
         .unwrap_program();
-    let host_lib = HostLibrary {
-        mast_forest: core_lib.mast_forest().clone(),
-        package_debug_info: Ok(None),
-        handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
-    };
-    let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
+    let mut host = DefaultHost::default()
+        .with_library(EventLibrary {
+            handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
+            ..core_lib.host_library()
+        })
+        .expect("failed to load host lib");
 
     match execute_sync(
         &program,
@@ -335,7 +331,6 @@ fn print_mem_rejects_out_of_bounds_range_end() {
 }
 
 #[test]
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn print_mem_rejects_oversized_range() {
     // An explicit range wider than the 1024-address cap is rejected, catching a caller that passes
     // a huge range by accident. Use `print_mem_all` to print the entire memory.
@@ -355,12 +350,12 @@ fn print_mem_rejects_oversized_range() {
         .assemble_program("program", source)
         .expect("failed to assemble program")
         .unwrap_program();
-    let host_lib = HostLibrary {
-        mast_forest: core_lib.mast_forest().clone(),
-        package_debug_info: Ok(None),
-        handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
-    };
-    let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
+    let mut host = DefaultHost::default()
+        .with_library(EventLibrary {
+            handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
+            ..core_lib.host_library()
+        })
+        .expect("failed to load host lib");
 
     match execute_sync(
         &program,
@@ -378,7 +373,6 @@ fn print_mem_rejects_oversized_range() {
 }
 
 #[test]
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn print_mem_rejects_full_range() {
     // The cap has no exemption: the full `[0, 2^32)` range is rejected like any other oversized
     // range, so `print_mem` can't be used to bypass the documented 1024-address limit. Printing
@@ -399,12 +393,12 @@ fn print_mem_rejects_full_range() {
         .assemble_program("program", source)
         .expect("failed to assemble program")
         .unwrap_program();
-    let host_lib = HostLibrary {
-        mast_forest: core_lib.mast_forest().clone(),
-        package_debug_info: Ok(None),
-        handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
-    };
-    let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
+    let mut host = DefaultHost::default()
+        .with_library(EventLibrary {
+            handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
+            ..core_lib.host_library()
+        })
+        .expect("failed to load host lib");
 
     match execute_sync(
         &program,
@@ -559,10 +553,9 @@ fn print_stack_is_stack_neutral() {
 }
 
 #[test]
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn default_core_handlers_include_debug_printers() {
     let core_lib = CoreLibrary::default();
-    let handlers = core_lib.handlers();
+    let handlers = core_lib.event_handlers();
 
     for debug_event in [PRINT_STACK_EVENT_NAME, PRINT_MEM_EVENT_NAME, PRINT_MEM_ALL_EVENT_NAME] {
         assert!(
@@ -584,7 +577,6 @@ fn default_core_handlers_include_debug_printers() {
 }
 
 #[test]
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn debug_handlers_compose_with_default_core_handlers() {
     let source = "
     use miden::core::debug
@@ -605,14 +597,11 @@ fn debug_handlers_compose_with_default_core_handlers() {
         .expect("failed to assemble program")
         .unwrap_program();
 
-    let mut handlers = core_lib.handlers();
-    handlers.extend(advice_debug_handlers());
-    let host_lib = HostLibrary {
-        mast_forest: core_lib.mast_forest().clone(),
-        package_debug_info: Ok(None),
-        handlers,
-    };
-    let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
+    let mut handlers = core_lib.event_handlers();
+    handlers.extend(advice_debug_event_handlers());
+    let mut host = DefaultHost::default()
+        .with_library(EventLibrary { handlers, ..core_lib.host_library() })
+        .expect("failed to load host lib");
 
     let output = execute_sync(
         &program,
@@ -626,9 +615,8 @@ fn debug_handlers_compose_with_default_core_handlers() {
 }
 
 #[test]
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn debug_handlers_include_all_core_debug_events() {
-    let handlers = debug_handlers();
+    let handlers = debug_event_handlers();
 
     for debug_event in [
         PRINT_STACK_EVENT_NAME,
@@ -640,7 +628,7 @@ fn debug_handlers_include_all_core_debug_events() {
     ] {
         assert!(
             handlers.iter().any(|(event, _)| event == &debug_event),
-            "{debug_event:?} should be registered by debug_handlers()"
+            "{debug_event:?} should be registered by debug_event_handlers()"
         );
     }
 }
@@ -660,7 +648,6 @@ fn default_core_handlers_run_print_stack() {
 }
 
 #[test]
-#[allow(deprecated)] // Legacy callback/harness coverage or raw inspection.
 fn noop_debug_handlers_run_print_stack_without_output() {
     let source = "
     use miden::core::debug
@@ -679,12 +666,12 @@ fn noop_debug_handlers_run_print_stack_without_output() {
         .assemble_program("program", source)
         .expect("failed to assemble program")
         .unwrap_program();
-    let host_lib = HostLibrary {
-        mast_forest: core_lib.mast_forest().clone(),
-        package_debug_info: Ok(None),
-        handlers: noop_debug_handlers(),
-    };
-    let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
+    let mut host = DefaultHost::default()
+        .with_library(EventLibrary {
+            handlers: noop_debug_event_handlers(),
+            ..core_lib.host_library()
+        })
+        .expect("failed to load host lib");
 
     let output = execute_sync(
         &program,

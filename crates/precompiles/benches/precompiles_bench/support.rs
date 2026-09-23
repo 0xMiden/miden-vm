@@ -88,8 +88,9 @@ pub fn prove_once_with_hash(
     fixture: &PrecompileFixture,
     hash_fn: HashFunction,
 ) -> (StackOutputs, ExecutionProof) {
+    let core_lib = CoreLibrary::default();
     let mut host = DefaultHost::default()
-        .with_library(&CoreLibrary::default())
+        .with_library(core_lib.host_library())
         .expect("failed to load core library into host");
     let witness = FastProcessor::new_with_options(
         fixture.stack_inputs,

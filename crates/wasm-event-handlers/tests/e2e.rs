@@ -1,21 +1,18 @@
 //! End-to-end test: a MASM program emits a custom event, the Wasm handler shipped inside the
 //! package answers through the advice stack, and the program verifies the answer in-VM.
 
-// Retain packaged legacy factory coverage alongside explicit portable package loading.
-#![allow(deprecated)]
-
 use std::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_event_handler_abi::ABI_VERSION;
 use miden_mast_package::{EventHandlerManifestEntry, EventHandlerSection, Package};
 use miden_processor::{
-    DefaultHost, FastProcessor, HostLibrary, StackInputs,
+    DefaultHost, FastProcessor, StackInputs,
     serde::{Deserializable, Serializable},
 };
-use miden_wasm_event_handlers::{
-    WasmHandlerLimits, event_handlers_from_package, host_library_from_package,
-};
+#[allow(deprecated)] // Import the retained factory for its compatibility test.
+use miden_wasm_event_handlers::host_library_from_package;
+use miden_wasm_event_handlers::{WasmHandlerLimits, event_library_from_package};
 
 /// A handler that reads the first stack input, doubles it, and pushes the result to the advice
 /// stack.
@@ -58,7 +55,8 @@ fn assemble_package_with_handlers() -> Package {
 }
 
 #[test]
-fn program_verifies_advice_from_a_packaged_wasm_handler() {
+#[allow(deprecated)] // Verifies the retained event-only package factory.
+fn legacy_packaged_handler_factory_still_executes() {
     let package = assemble_package_with_handlers();
 
     // Full wire roundtrip: the handlers travel inside the .masp bytes.
@@ -67,7 +65,7 @@ fn program_verifies_advice_from_a_packaged_wasm_handler() {
     let library = host_library_from_package(&decoded, WasmHandlerLimits::default())
         .expect("handlers load from the package");
     let mut host = DefaultHost::default();
-    host.load_library(library).expect("handlers register");
+    host.load_legacy_library(library).expect("handlers register");
 
     let program = decoded.unwrap_program();
     FastProcessor::new(StackInputs::default())
@@ -76,15 +74,14 @@ fn program_verifies_advice_from_a_packaged_wasm_handler() {
 }
 
 #[test]
-fn portable_package_list_loads_with_the_forest() {
+fn portable_package_library_loads_with_the_forest() {
     let package = Arc::new(assemble_package_with_handlers());
-    let handlers = event_handlers_from_package(&package, WasmHandlerLimits::default()).unwrap();
+    let library = event_library_from_package(&package, WasmHandlerLimits::default()).unwrap();
     let mut host = DefaultHost::default();
-    host.load_library_with_event_handlers(HostLibrary::from(package.clone()), handlers)
-        .unwrap();
+    host.load_library(library).unwrap();
     FastProcessor::new(StackInputs::default())
         .execute_sync(&package.unwrap_program(), &mut host)
-        .expect("the portable package list supplies the same verified advice");
+        .expect("the portable package library supplies the same verified advice");
 }
 
 /// A handler that batch-reads two memory elements the program wrote and forwards them as
@@ -128,7 +125,8 @@ fn packaged_handler_reads_vm_memory() {
     let package = (*package).with_event_handlers(&section).expect("section attaches");
     let program = package.unwrap_program();
 
-    let library = host_library_from_package(&Arc::new(package), WasmHandlerLimits::default())
+    let package = Arc::new(package);
+    let library = event_library_from_package(&package, WasmHandlerLimits::default())
         .expect("handlers load from the package");
     let mut host = DefaultHost::default();
     host.load_library(library).expect("handlers register");
@@ -224,7 +222,7 @@ fn rust_guest_fixture_end_to_end() {
     let package = (*package).with_event_handlers(&section).expect("section attaches");
     let decoded = Arc::new(Package::read_from_bytes(&package.to_bytes()).expect("package decodes"));
 
-    let library = host_library_from_package(&decoded, WasmHandlerLimits::default())
+    let library = event_library_from_package(&decoded, WasmHandlerLimits::default())
         .expect("handlers load from the package");
     let mut host = DefaultHost::default();
     host.load_library(library).expect("handlers register");
@@ -274,7 +272,7 @@ fn rust_guest_reads_current_and_root_memory() {
         )
         .expect("program assembles");
     let package = Arc::new((*package).with_event_handlers(&section).expect("section attaches"));
-    let library = host_library_from_package(&package, WasmHandlerLimits::default())
+    let library = event_library_from_package(&package, WasmHandlerLimits::default())
         .expect("handlers load from the package");
     let mut host = DefaultHost::default();
     host.load_library(library).expect("handlers register");
@@ -327,7 +325,8 @@ fn rust_guest_merges_words() {
     let package = (*package).with_event_handlers(&section).expect("section attaches");
     let program = package.unwrap_program();
 
-    let library = host_library_from_package(&Arc::new(package), WasmHandlerLimits::default())
+    let package = Arc::new(package);
+    let library = event_library_from_package(&package, WasmHandlerLimits::default())
         .expect("handlers load from the package");
     let mut host = DefaultHost::default();
     host.load_library(library).expect("handlers register");
@@ -357,7 +356,8 @@ fn rust_guest_panic_reaches_the_host() {
     let package = (*package).with_event_handlers(&section).expect("section attaches");
     let program = package.unwrap_program();
 
-    let library = host_library_from_package(&Arc::new(package), WasmHandlerLimits::default())
+    let package = Arc::new(package);
+    let library = event_library_from_package(&package, WasmHandlerLimits::default())
         .expect("handlers load from the package");
     let mut host = DefaultHost::default();
     host.load_library(library).expect("handlers register");
