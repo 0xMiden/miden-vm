@@ -80,7 +80,7 @@ pub const COL_CHUNK_HEAD_RAW: usize = 47;
 pub const COL_CHUNK_HEAD_DIGEST: usize = 49;
 
 // The following cells are unused by state/digest extraction on row 7 and hold assertion hashes.
-// Every constraint and lookup on their ordinary byte/word meaning is restricted to rows 0..3.
+// No constraint or lookup on their ordinary byte/word meaning applies on row 7.
 pub const COL_H_INPUT: usize = COL_DIGEST_BEGIN;
 pub const COL_H_DIGEST: usize = COL_DIGEST_BEGIN + 4;
 pub const H_SHA256_COLS: [usize; 4] =

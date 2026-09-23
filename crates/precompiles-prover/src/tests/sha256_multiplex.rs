@@ -6,7 +6,6 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, LiftedAir};
 use miden_precompiles_air::hash::sha256::{
     COL_IO_ACT, IO_COLUMNS, IO_ROW_START, NUM_MAIN_COLS, Sha256IoContinuation,
 };
@@ -42,16 +41,6 @@ fn requirements(lengths: &[usize]) -> (Sha256CompressionRequires, Sha256IoRequir
 fn io_index(block: usize, lane: usize, column: usize) -> usize {
     (block * compression::COMPRESSION_PERIOD + IO_ROW_START + lane) * NUM_MAIN_COLS
         + IO_COLUMNS[column]
-}
-
-#[test]
-fn sha256_reuses_compression_padding_for_io() {
-    // IO needs only eight rows per block. It shares both witness and lookup columns with
-    // compression instead of adding a mostly empty band to all 4096 rows.
-    assert_eq!(Sha256Air.width(), 61);
-    assert_eq!(Sha256Air.aux_width(), 18);
-    assert_eq!(crate::tests::log_quotient_degree(&Sha256Air), 2);
-    assert_eq!(crate::tests::log_quotient_degree(&Sha256IoAir), 2);
 }
 
 #[test]

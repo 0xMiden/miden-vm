@@ -25,6 +25,9 @@ pub mod io;
 
 pub const IO_PERIODIC_OFFSET: usize = compression::NUM_PERIODIC_COLS;
 pub const IO_ROW_START: usize = compression::COMPRESSION_PERIOD - io::IO_PERIOD;
+// `COL_LANE_LAST8` selects lanes 24..32 of a 32-row cycle, which are the IO rows only while the
+// IO band spans eight rows and starts at lane 24.
+const _: () = assert!(io::IO_PERIOD == 8 && IO_ROW_START % 32 == 32 - io::IO_PERIOD);
 pub const COL_IO_ACT: usize = compression::NUM_MAIN_COLS;
 pub const NUM_MAIN_COLS: usize = compression::NUM_MAIN_COLS + 22;
 pub const NUM_AUX_COLS: usize = io::NUM_AUX_COLS;

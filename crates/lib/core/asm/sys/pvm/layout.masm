@@ -73,8 +73,8 @@ const PREPROCESSED_COM_PTR = 3225451544
 const OOD_SCATTER_TABLE_PTR = 3225451548
 
 ### 12 felts: 3225451644..3225451656. `pos_by_id`: the position of each
-### chiplet, in ChipletAir::all() order, within the height-sorted proof order. The first
-### 12 cells are live and the final 0 pad the following table to a word boundary.
+### chiplet, in ChipletAir::all() order, within the height-sorted proof order.
+### All 12 cells are live.
 ### Staged once per proof by `sys/pvm/ood_frames.masm::stage_proof_order_maps`; read by both
 ### ingest scatters.
 const PROOF_ORDER_POSITIONS_PTR = 3225451644
