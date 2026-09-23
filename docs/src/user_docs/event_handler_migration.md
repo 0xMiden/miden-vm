@@ -15,22 +15,50 @@ fn double(context: EventContext<'_>, advice: &mut AdviceRecorder<'_>) -> Result<
 ```
 
 Register a concrete handler, function, or typed closure with
-`DefaultHost::register_event_handler(name, handler)`. Use
+`DefaultHost::register_handler(name, handler)`. Use
 `event::registration::EventHandler::shared(arc)` for an existing `Arc<dyn
 miden_event_handler::EventHandler>`. `event::HandlerRegistry` provides the same registration and
 explicit routing for custom hosts. There is one portable binding per identity. Registration does
 not declare event or trace modes: `context.kind()` describes the actual invocation.
 
-For a core library, load its forest and portable handlers atomically:
+## Migrate a host
+
+1. Change callback inputs from `&ProcessorState` to `EventContext` and add
+   `&mut AdviceRecorder`. Return `Result<(), EventError>` instead of a mutation vector.
+2. Translate stack offsets and memory reads as described below. The context exposes payload values;
+   use `context.id()` for the invocation ID instead of reading it from the stack.
+3. Register the portable handler with `register_handler`. Use `replace_handler` to replace a binding
+   and `unregister_handler` to remove it. Each binding receives both regular events and traces.
+4. Load a complete `EventLibrary` with `load_library` or `with_library`. For the core library,
+   `CoreLibrary::host_library()` supplies its forest, debug information, and portable handlers:
 
 ```rust,ignore
 let core = miden_core_lib::CoreLibrary::default();
-host.load_library_with_event_handlers(core.package(), core.event_handlers())?;
+let mut host = miden_processor::DefaultHost::default().with_library(core.host_library())?;
+host.register_handler(miden_core::events::EventName::new("myapp::double"), double)?;
 ```
 
-The supplied portable list replaces the legacy handler list for that load. A failed registration
-rolls back the new registrations and leaves the forest store unchanged. Existing `load_library`
-and `with_library` retain their legacy event-only handler behavior.
+For a Wasm package, use the checked factory so loading includes its embedded handlers:
+
+```rust,ignore
+let library = miden_wasm_event_handlers::event_library_from_package(
+    &package,
+    miden_wasm_event_handlers::WasmHandlerLimits::default(),
+)?;
+host.load_library(library)?;
+```
+
+`EventLibrary::new(forest, debug_info, handlers)` is available for custom libraries. A bare forest
+can also be loaded when it needs no handlers. Do not convert a package to a bare forest when its
+embedded handlers are required. Loading a complete library is atomic: a failed registration rolls
+back the new registrations and leaves the forest store unchanged.
+
+The short host methods now select portable handlers. During a staged migration, keep an old raw
+callback behind `register_legacy_handler`, `replace_legacy_handler`, or
+`unregister_legacy_handler`, and load its `HostLibrary` with `load_legacy_library` or
+`with_legacy_library`. These explicitly named paths are deprecated and retain event-only behavior;
+legacy trace registration remains separate. The migration therefore requires changing call sites,
+even though the old callback traits and argument shapes remain available.
 
 ## Context and output
 
@@ -38,6 +66,18 @@ and `with_library` retain their legacy event-only handler behavior.
 registry routes it under another key. Payload position zero skips the dispatch envelope: old raw
 position `n` becomes `n - 1` for a regular event and `n - 2` for a trace. `clock()` is a `u32`;
 `in_root_context()` identifies root execution.
+
+| Raw callback read | Portable callback read |
+| --- | --- |
+| Event ID at `get_stack_item(0)` | `context.id()` |
+| Event input at `get_stack_item(1)` | `context.stack_item(0)` |
+| Event word at `get_stack_word(5)` | `context.stack_word(4)` |
+| Trace ID at `get_stack_item(1)` | `context.id()` |
+| Trace input at `get_stack_item(2)` | `context.stack_item(0)` |
+| Raw trace snapshot followed by `.skip(2)` | `context.stack_snapshot()` without skipping |
+
+Subtract the envelope only from payload offsets; an old read of an envelope element becomes a
+metadata query. Native and Wasm handlers use the same payload-relative positions.
 
 All current/root memory reads follow the VM's zero-filled memory contract: an address that has never
 been written contains zero. `memory_value` and `memory_word` return `Result<Felt, EventContextError>`
@@ -53,10 +93,24 @@ let input = context.memory_slice(input_ptr, input_len)?;
 
 Operand-stack reads are infallible and zero-extend beyond the tracked depth. Advice is supplied input:
 advice-stack reads still fail on insufficient elements, and advice-map lookups retain missing-key
-semantics. Sparse memory snapshots enumerate stored words for inspection; they do not define which
-addresses can be read.
+semantics. Sparse memory snapshots enumerate stored elements for inspection; they do not define which
+addresses can be read. Replace an old `get_mem_value(...).ok_or(...)` or
+`get_mem_word(...).ok_or(...)` initialization check with the corresponding context read, then
+validate the returned value for the application. Unwritten memory and explicitly written zero are
+indistinguishable through this interface. Select `memory_value_root`, `memory_word_root`, or the
+root range helpers when the data belongs to the root context rather than the current one.
 
-Advice and Merkle queries borrow pre-callback state. Pending writes are invisible. Record output with:
+Advice and Merkle queries borrow pre-callback state. Pending writes are invisible. Replace each
+returned `AdviceMutation` with a recorder call and finish the callback with `Ok(())`:
+
+| Legacy mutation | Recorder operation |
+| --- | --- |
+| `extend_advice_stack(stack)` | `advice.prepend_stack(stack.into_elements())` |
+| `extend_advice_stack_with(values)` | `advice.prepend_stack(values)` |
+| `extend_map(map)` | Iterate `(key, values)` and call `advice.insert_map_entry(key, values)` |
+| `extend_merkle_store(nodes)` | `advice.extend_merkle_store(nodes)` |
+
+Preserve the mutation order when translating these calls:
 
 - `prepend_stack(values)`: values are top-to-bottom. Recording `[a, b]`, then `[c, d]` produces
   `[c, d, a, b, old...]`. Falcon records remainder before quotient.
@@ -85,6 +139,12 @@ identities; the host owns the remaining policy. Do not delegate a partly recorde
 legacy default callback: the engine permits legacy fallback only when the pending batch is empty.
 Ordinary errors never trigger fallback.
 
+A handler that accepts only regular events should call
+`context.kind().require(InvocationKind::Event)?`; a trace observer can require `InvocationKind::Trace`.
+If an application previously registered separate event and trace handlers at the same identity,
+combine them into one handler that matches on `context.kind()` before registering that identity.
+There is no separate trace registration in the portable registry.
+
 `DefaultHost` errors on unknown regular events and ignores unknown traces. Known handlers receive
 both kinds and their errors propagate. A successful trace that records any output fails without
 applying advice. Empty stack/node iterators record nothing; empty map values and idempotent writes
@@ -97,7 +157,7 @@ Required zero-advice bookkeeping must remain a regular event.
 
 ## Compatibility and concrete migrations
 
-These existing APIs remain usable but are deprecated:
+The deprecated callback APIs remain available through the explicit compatibility paths:
 
 | Legacy API | Migration |
 | --- | --- |
@@ -107,12 +167,14 @@ These existing APIs remain usable but are deprecated:
 | `NoopEventHandler` | `miden_event_handler::NoopHandler` |
 | `processor::advice::AdviceMutation` | `AdviceRecorder` output operations |
 | `Host` / `SyncHost` `on_event` and `on_trace` | one `handle_event` callback |
-| old `DefaultHost` event/trace registration methods | `register_event_handler` / `unregister_event_handler` |
-| `CoreLibrary::handlers`, debug/readonly legacy lists | `event_handlers` and corresponding `*_event_handlers` lists |
-| `HostLibrary::handlers` / `set_handlers` | explicit `load_library_with_event_handlers` |
-| Wasm `handlers` / package legacy lists | `event_handlers` / `event_handlers_from_package` |
+| legacy event/trace registration | `register_handler` / `replace_handler` / `unregister_handler` |
+| `CoreLibrary::handlers`, debug/readonly legacy lists | `host_library()` for complete loading; `event_handlers` and corresponding `*_event_handlers` lists for custom bindings |
+| `HostLibrary::handlers` / `set_handlers` | `EventLibrary` with `load_library` / `with_library` |
+| Wasm `host_library_from_package` | `event_library_from_package` followed by `load_library` |
+| Wasm `handlers` / package legacy lists | `event_handlers` / `event_handlers_from_package` for custom bindings |
 
-Exact old `Arc<dyn Handler>` argument/list shapes remain, including `Arc::new(Concrete)` coercion.
+The explicit legacy APIs retain `Arc<dyn Handler>` argument/list shapes, including
+`Arc::new(Concrete)` coercion.
 Old event and trace registries can still hold separate handlers at the same identity. New portable
 registrations reject collisions with either legacy registry. Hosts overriding only old callbacks
 continue to run, including the default no-op trace callback. `event::legacy_handler` and
@@ -123,13 +185,16 @@ Native public `handle_*` functions now take `(EventContext, &mut AdviceRecorder)
 `Result<(), EventError>`; direct callers must migrate or use the processor adapter. `DebugPrinter`
 retains its old trait implementation as an adapter. `WasmEventHandler` implements the portable
 trait; old factories still return legacy trait objects. `Test` retains its exact public fields and
-old builders, so full external struct literals remain valid. Use its existing batch builder with
-`legacy_handler` for portable producers, and direct host execution for unified trace tests.
+old builders, so full external struct literals remain valid. For new fixtures, use
+`Test::with_handler` or `Test::with_handlers`: these return an `EventTest` with explicit portable
+bindings shared by events and traces. Reserve the old builders for compatibility tests.
 
-Independent raw inspection remains available: `FastProcessor::state`, snapshots, numeric context
-IDs and deferred-state access have not been replaced by synthetic invocations. Remove these legacy
-facades only after downstream callback migrations and a separate inspection API are settled; no
-removal release is promised here.
+For inspection outside a callback, read `FastProcessor` directly: replace `processor.state().ctx()`
+with `processor.ctx()`, `processor.state().clock()` with `processor.clock()`, and raw advice access
+with `processor.advice_provider()`. Use `processor.memory()` for explicit numeric-context reads.
+Do not construct a synthetic invocation for independent inspection. `ProcessorState` remains public
+and deprecated for downstream compatibility; ordinary first-party callers should not suppress its
+warning.
 
 Native Keccak input is limited to 1 MiB and AEAD plaintext to 16 MiB. These fixed limits replace the
 configurable hash limit accessors on `ExecutionOptions` and apply before expensive work; the

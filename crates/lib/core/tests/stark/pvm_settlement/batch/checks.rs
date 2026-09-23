@@ -1,8 +1,5 @@
 //! Checks for skipped TRUE roots, repeated roots, and proofs of the wrong batch.
 
-// This batch harness intentionally exercises the retained legacy event callback.
-#![allow(deprecated)]
-
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -16,12 +13,11 @@ use miden_core::{
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus},
 };
 use miden_core_lib::{CoreLibrary, PVM_PROOF_REQUEST_EVENT_NAME};
+use miden_event_handler::{AdviceRecorder, EventContext, EventError};
 use miden_precompiles_verifier::masm_verifier::PvmRecursiveVerifierInputs;
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, ProcessorState, Program,
-    StackInputs,
-    advice::{AdviceInputs, AdviceMutation},
-    operation::OperationError,
+    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, Program, StackInputs,
+    advice::AdviceInputs, operation::OperationError,
 };
 use miden_prover::Prover;
 
@@ -116,7 +112,7 @@ async fn batch_root_and_response_checks() {
     let wrong_commitment = Word::new(elements[1..5].try_into().unwrap());
     let wrong_advice = advice_inputs
         .with_map([(wrong_commitment, Word::words_as_elements(&commitments).to_vec())]);
-    let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
+    let mut host = DefaultHost::default().with_library(core_lib.host_library()).unwrap();
     let error = FastProcessor::new_with_options(
         wrong_batch_input,
         wrong_advice,
@@ -176,24 +172,27 @@ fn assert_rejects_pvm_response(
     let response_root = response.claim_commitment();
     let requests = Arc::new(AtomicUsize::new(0));
     let handler_requests = Arc::clone(&requests);
-    let mut host = DefaultHost::default().with_library(core_lib).unwrap();
+    let mut host = DefaultHost::default().with_library(core_lib.host_library()).unwrap();
     host.register_handler(
         PVM_PROOF_REQUEST_EVENT_NAME,
-        Arc::new(move |process: &ProcessorState<'_>| {
+        move |context: EventContext<'_>,
+              advice: &mut AdviceRecorder<'_>|
+              -> Result<(), EventError> {
             handler_requests.fetch_add(1, Ordering::Relaxed);
-            assert_eq!(process.get_stack_word(1), verifier_root);
-            let requested_root = process.get_stack_word(5);
+            assert_eq!(context.stack_word(0), verifier_root);
+            let requested_root = context.stack_word(4);
             assert_ne!(requested_root, response_root);
             // Put a valid proof of a different root under the requested key. The MASM verifier
             // must reject it even though the host returned a proof in the expected place.
             let (_, mut map, store) = response.advice().clone().into_parts();
             let stream = map.remove(&proof_request_key(verifier_root, response_root)).unwrap();
             map.insert(proof_request_key(verifier_root, requested_root), stream);
-            Ok(vec![
-                AdviceMutation::extend_map(map),
-                AdviceMutation::extend_merkle_store(store.inner_nodes()),
-            ])
-        }),
+            for (key, values) in map {
+                advice.insert_map_entry(key, values);
+            }
+            advice.extend_merkle_store(store.inner_nodes());
+            Ok(())
+        },
     )
     .unwrap();
     let error =

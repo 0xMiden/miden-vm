@@ -6,9 +6,6 @@
 //! building the `crate` key is covered by the end-to-end test, and the refusal of that key by the
 //! safe processor is covered here, because it costs no build.
 
-// Retain coverage of the legacy packaged host-library factory during migration.
-#![allow(deprecated)]
-
 use std::{fs, path::Path, sync::Arc};
 
 use miden_assembly::{
@@ -19,7 +16,7 @@ use miden_mast_package::{MAX_MODULE_BYTES, Package as MastPackage};
 use miden_processor::DefaultHost;
 // The tests write the manifest records the guest SDK macro normally writes.
 use miden_wasm_event_handlers::{
-    WasmHandlerLimits, host_library_from_package, test_append_manifest_section,
+    WasmHandlerLimits, event_library_from_package, test_append_manifest_section,
 };
 use miden_wasm_event_handlers_project::{
     WasmEventHandlerCargoBuildProcessor, WasmEventHandlerProcessor,
@@ -393,14 +390,14 @@ fn a_host_loads_the_handlers_of_one_package_of_the_project() {
         .expect("the executable target assembles");
 
     let mut host = DefaultHost::default();
-    let first = host_library_from_package(&library_package, WasmHandlerLimits::default())
+    let first = event_library_from_package(&library_package, WasmHandlerLimits::default())
         .expect("the handlers of the library package load");
     host.load_library(first).expect("the first package registers its handlers");
 
     // Both packages carry the same handler set, so the second registration hits the event the
     // first one registered. The failure is the rule, not a defect: a host takes the handlers of
     // one package of a project.
-    let second = host_library_from_package(&binary_package, WasmHandlerLimits::default())
+    let second = event_library_from_package(&binary_package, WasmHandlerLimits::default())
         .expect("the handlers of the executable package load");
     let error = host
         .load_library(second)

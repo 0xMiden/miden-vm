@@ -5,10 +5,11 @@ This crate runs Wasm-compiled custom event handlers for the Miden VM.
 A Wasm event handler is an untrusted core Wasm module that ships inside a Miden package. This
 crate loads such a module with the [wasmi](https://crates.io/crates/wasmi) interpreter, validates
 it, and adapts each declared handler to the portable `miden_event_handler::EventHandler` trait.
-`WasmHandlerModule::event_handlers` and `event_handlers_from_package` provide unified handlers
-for `DefaultHost::register_event_handler`. wasmi is a pure-Rust interpreter, so
-the same handler runs on native hosts and on hosts that are themselves compiled to Wasm (for
-example in a browser).
+`event_library_from_package` returns a complete `EventLibrary` containing the package forest,
+debug information, and handlers for `DefaultHost::load_library` or `with_library`. For individual
+bindings, `WasmHandlerModule::event_handlers` and `event_handlers_from_package` provide unified
+handlers for `DefaultHost::register_handler`. wasmi is a pure-Rust interpreter, so the same handler
+runs on native hosts and on hosts that are themselves compiled to Wasm (for example in a browser).
 
 Guarantees for untrusted modules:
 
@@ -31,7 +32,9 @@ using only revision 1 imports retain revision 1 when packaged. The `event_id` qu
 report the manifest binding, including when a host routes the handler through an alias.
 
 The original `handlers`, `handlers_from_package`, and `host_library_from_package` APIs retain
-legacy event-only registration and their original shared-handler list types.
+legacy event-only registration and their original shared-handler list types. Load a legacy
+`HostLibrary` with `load_legacy_library`, or register a legacy handler with
+`register_legacy_handler`; these compatibility paths are deprecated.
 
 ## License
 
