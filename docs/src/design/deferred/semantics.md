@@ -120,7 +120,8 @@ validated before they become registered nodes.
 ## Root and portable export
 
 `root` starts at `TRUE_DIGEST`. `log_statement(stmt_digest)` evaluates the current root and
-statement, requires both to evaluate to `Node::TRUE`, then appends one framework `AND` node:
+statement, requires both to evaluate to `Node::TRUE`, then appends one framework `AND` node.
+`log_verified_statement` checks the proposed new root before that evaluation:
 
 ```text
 next_root = digest(Node::and(previous_root, stmt_digest))
@@ -159,8 +160,10 @@ prover callers can replace it with `with_precompile_limits`.
 
 `Prover::prove` proves the VM first. A `TRUE_DIGEST` root yields `PrecompileStatus::Empty`; any other
 root yields `PrecompileStatus::Deferred` carrying its portable singleton witness. Execution-witness
-construction and decoding require `None` exactly for a TRUE VM root, or one witness with a matching
-root. `Prover::prove_full` proves both stages, using a one-element precompile batch.
+construction and decoding require `None` exactly for a TRUE VM root, or one witness for a non-TRUE
+VM root. Decoding does not reconstruct the witness root; preparation computes it, and proving or
+verification checks it against the execution root. `Prover::prove_full` proves both stages, using
+a one-element precompile batch.
 
 For delegated proving, decode the transported proof and pass its witnesses directly to
 `Prover::prove_precompiles(Vec<PrecompileWitness>)`. The batch must be nonempty. Each input retains its
@@ -215,8 +218,11 @@ Canonical binary decoders enforce fixed hard ceilings before allocating declared
 `MAX_STARK_PROOF_BYTES` per inner STARK, `MAX_PRECOMPILE_ROOTS` per ordered root list, and
 `MAX_DEFERRED_ELEMENTS` for each portable witness. Logical element and operation limits are applied
 independently to every singleton witness, including repeated witnesses; a batch may exceed the same
-logical workload in aggregate. `MAX_PRECOMPILE_ROOTS` and the precompile prover's estimated peak
-memory budget are batch-wide. These are library safety and admission bounds, not protocol,
+logical workload in aggregate. Before creating a proving session, the batch also admits at most
+`16 * MAX_DEFERRED_ELEMENTS` structural elements (including folded-root overhead) and four times
+that many declared hash-input bytes, counting repeated witnesses each time. `MAX_PRECOMPILE_ROOTS`
+and the precompile prover's estimated peak memory budget are batch-wide. These are library safety
+and admission bounds, not protocol,
 whole-envelope, file, network, or ingestion policy.
 
 Generic serialization traits are representation formats. Generic Serde

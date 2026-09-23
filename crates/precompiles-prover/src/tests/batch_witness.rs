@@ -181,7 +181,7 @@ fn preparation_reports_exact_canonical_work_classes() {
 
     let prepared = prepare(&fixture.witness());
     let work = prepared.work();
-    assert_eq!(work.nodes(), prepared.nodes().len() as u64);
+    assert_eq!(work.nodes(), prepared.digests().len() as u64);
     assert_eq!(work.class(UINT_WORK).unwrap().count(), 5);
     assert_eq!(work.class(UINT_WORK).unwrap().total_size(), 5);
     assert_eq!(work.class(CURVE_WORK).unwrap().count(), 3);
@@ -546,14 +546,6 @@ fn shared_commitment_cannot_change_payload_shape() {
     let (lhs, rhs) = pairs[0];
     entries[changed] = PrecompileWitnessEntry::Join { tag: *tag, lhs, rhs };
     let malformed = PrecompileWitness::from_entries(entries).unwrap();
-    assert!(
-        malformed
-            .prepare(
-                Arc::new(miden_precompiles::registry()),
-                &miden_precompiles::default_precompile_limits(),
-            )
-            .is_err()
-    );
     let error = session_from_witnesses(vec![valid, malformed]).err().unwrap();
     assert!(matches!(error, SessionInputError::Preparation { witness: 1, .. }));
 }

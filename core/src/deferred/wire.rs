@@ -184,6 +184,31 @@ impl PrecompileWitness {
         seen_digests.insert(TRUE_DIGEST);
 
         for entry in &self.entries {
+            let payload_count = match entry {
+                WireEntry::Data { chunks, .. } => chunks.len(),
+                WireEntry::Join { .. } => 1,
+                WireEntry::PairList { pairs, .. } => pairs.len(),
+            };
+            if payload_count != 0 {
+                let entry_elements = payload_count
+                    .checked_mul(Node::DATA_CHUNK_FELT_LEN)
+                    .and_then(|elements| Tag::FELT_LEN.checked_add(elements))
+                    .ok_or(PrecompileLimitError::Overflow)?;
+                let actual = work
+                    .elements()
+                    .checked_add(
+                        u64::try_from(entry_elements)
+                            .map_err(|_| PrecompileLimitError::Overflow)?,
+                    )
+                    .ok_or(PrecompileLimitError::Overflow)?;
+                if actual > limits.max_elements() {
+                    return Err(PrecompileLimitError::Elements {
+                        actual,
+                        max: limits.max_elements(),
+                    }
+                    .into());
+                }
+            }
             let child = |index: u32| {
                 digests.get(index as usize).copied().ok_or(IntegrityError::InvalidStructure)
             };
@@ -307,7 +332,7 @@ impl PrecompileWitness {
 
 /// A hydrated node and the commitment computed during preparation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PreparedNode {
+pub(crate) struct PreparedNode {
     node: Node,
     digest: Digest,
 }
@@ -323,12 +348,12 @@ impl PreparedNode {
     }
 
     /// Returns the hydrated node.
-    pub const fn node(&self) -> &Node {
+    pub(crate) const fn node(&self) -> &Node {
         &self.node
     }
 
     /// Returns the node's checked commitment.
-    pub const fn digest(&self) -> Digest {
+    pub(crate) const fn digest(&self) -> Digest {
         self.digest
     }
 }
@@ -356,28 +381,25 @@ impl PreparedWitness {
         &self.work
     }
 
-    /// Returns the hydrated nodes in canonical child-first order.
-    pub fn nodes(&self) -> &[PreparedNode] {
-        &self.nodes
+    /// Returns checked node commitments in canonical child-first order.
+    pub fn digests(&self) -> impl ExactSizeIterator<Item = Digest> + '_ {
+        self.nodes.iter().map(PreparedNode::digest)
     }
 
     /// Consumes and evaluates this witness, succeeding only if its root resolves to
     /// [`TRUE_DIGEST`].
     pub fn evaluate(self) -> Result<(), PrecompileError> {
-        let Self { registry, nodes, root, work: _ } = self;
-        let mut state = DeferredState::new_for_prepared(registry)?;
+        let Self { registry, nodes, root: _, work: _ } = self;
+        let mut state = DeferredState::new(registry)?;
         let mut digests = Vec::with_capacity(nodes.len());
         for prepared in nodes {
             digests.push(state.insert_node(prepared)?);
         }
-        let mut root_result = None;
+        let root_digest = digests.pop().ok_or(PrecompileError::MissingNode)?;
         for digest in digests {
-            let canonical = state.evaluate_digest(digest)?;
-            if digest == root {
-                root_result = Some(canonical);
-            }
+            state.evaluate_digest(digest)?;
         }
-        if root_result.ok_or(PrecompileError::MissingNode)? != TRUE_DIGEST {
+        if state.evaluate_digest(root_digest)? != TRUE_DIGEST {
             return Err(PrecompileError::AssertionFailed);
         }
         Ok(())

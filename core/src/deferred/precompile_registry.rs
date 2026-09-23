@@ -40,7 +40,7 @@ impl PrecompileRegistry {
     }
 
     /// Returns the work classes used by installed precompiles.
-    pub fn work_classes(&self) -> Vec<WorkClass> {
+    pub(crate) fn work_classes(&self) -> Vec<WorkClass> {
         let mut classes = Vec::new();
         for precompile in self.precompiles.values() {
             for &class in precompile.work_classes() {

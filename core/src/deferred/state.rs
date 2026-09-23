@@ -35,21 +35,8 @@ impl DeferredState {
         Ok(state)
     }
 
-    /// Creates an admitted-witness evaluator whose untrusted input was already resource checked.
-    pub(super) fn new_for_prepared(
-        registry: Arc<PrecompileRegistry>,
-    ) -> Result<Self, PrecompileError> {
-        let mut state = Self::empty_with_limit(registry, usize::MAX);
-        state.initialize_precompile_nodes()?;
-        Ok(state)
-    }
-
     /// Creates a state seeded only with framework basics.
     fn empty(registry: Arc<PrecompileRegistry>) -> Self {
-        Self::empty_with_limit(registry, MAX_DEFERRED_ELEMENTS)
-    }
-
-    fn empty_with_limit(registry: Arc<PrecompileRegistry>, remaining_elements: usize) -> Self {
         let mut nodes = BTreeMap::new();
         nodes.insert(TRUE_DIGEST, Node::TRUE);
 
@@ -61,7 +48,7 @@ impl DeferredState {
             nodes,
             root: TRUE_DIGEST,
             evals,
-            remaining_elements,
+            remaining_elements: MAX_DEFERRED_ELEMENTS,
         }
     }
 
@@ -210,7 +197,7 @@ impl DeferredState {
         statement_digest: Digest,
         expected_new_root: Digest,
     ) -> Result<Digest, PrecompileError> {
-        let statement = self.prepare_statement(statement_digest)?;
+        let statement = PreparedNode::new(Node::and(self.root, statement_digest));
         let actual_new_root = statement.digest();
         if actual_new_root != expected_new_root {
             return Err(DeferredError::InvalidDeferredRootTransition {
@@ -220,6 +207,8 @@ impl DeferredState {
             .into());
         }
 
+        self.require_true_eval(self.root)?;
+        self.require_true_eval(statement_digest)?;
         self.accept_statement(statement)
     }
 
@@ -541,5 +530,25 @@ mod tests {
             ordinary.root()
         );
         assert_eq!(verified.get_canonical_digest(expected), Some(TRUE_DIGEST));
+    }
+
+    #[test]
+    fn verified_root_mismatch_precedes_statement_evaluation() {
+        let precompile = FixturePrecompile;
+        let registry = Arc::new(PrecompileRegistry::new().with_precompile(precompile));
+        let mut state = DeferredState::new(registry).unwrap();
+        let statement = state.insert_node(PreparedNode::new(precompile.node(0))).unwrap();
+        let actual_root = Node::and(TRUE_DIGEST, statement).digest();
+        assert_ne!(actual_root, TRUE_DIGEST);
+
+        assert!(matches!(
+            state.log_verified_statement(statement, TRUE_DIGEST),
+            Err(PrecompileError::Other(DeferredError::InvalidDeferredRootTransition { .. }))
+        ));
+        assert_eq!(state.root(), TRUE_DIGEST);
+        assert_eq!(state.get_canonical_digest(statement), None);
+
+        let error = state.log_verified_statement(statement, actual_root).unwrap_err();
+        assert!(matches!(error.root(), PrecompileError::AssertionFailed));
     }
 }

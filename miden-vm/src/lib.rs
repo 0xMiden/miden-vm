@@ -12,11 +12,7 @@ pub use miden_assembly::{
     diagnostics,
 };
 pub use miden_core::{
-    deferred::{
-        IntegrityError, PrecompileLimitError, PrecompileLimits, PrecompileWitnessEntry,
-        PrecompileWork, PreparationError, PreparedNode, PreparedWitness, WorkClass, WorkItem,
-        WorkLimit, WorkSummary,
-    },
+    deferred::{PrecompileLimits, WorkClass, WorkLimit},
     program::ExecutionClaim,
     proof::{
         ExecutionProof, ExecutionProofCompatibility, ExecutionProofCompatibilityError,

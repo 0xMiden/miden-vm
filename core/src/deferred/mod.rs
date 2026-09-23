@@ -23,8 +23,9 @@ pub use node::{DataChunk, Digest, Node, NodeType, Payload, TRUE_DIGEST, Tag};
 pub use precompile::{Precompile, precompile_id};
 pub use precompile_registry::PrecompileRegistry;
 pub use state::{DeferredContext, DeferredState};
+pub(crate) use wire::PreparedNode;
 pub use wire::{
-    IntegrityError, PrecompileWitness, PreparationError, PreparedNode, PreparedWitness,
+    IntegrityError, PrecompileWitness, PreparationError, PreparedWitness,
     WireEntry as PrecompileWitnessEntry,
 };
 pub use work::{

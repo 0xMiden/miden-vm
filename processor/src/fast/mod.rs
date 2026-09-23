@@ -703,7 +703,7 @@ pub struct ExecutionOutput {
 }
 
 impl ExecutionOutput {
-    /// Returns the carried deferred root, or TRUE when no witness is present.
+    /// Returns the deferred root accumulated during execution.
     ///
     /// This does not validate the witness's precompile computations.
     pub fn precompile_root(&self) -> Digest {

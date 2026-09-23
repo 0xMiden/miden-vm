@@ -14,11 +14,6 @@ impl WorkClass {
     pub const fn new(name: &'static str) -> Self {
         Self(name)
     }
-
-    /// Returns this class's display name.
-    pub const fn name(self) -> &'static str {
-        self.0
-    }
 }
 
 impl core::fmt::Display for WorkClass {
@@ -39,16 +34,6 @@ impl WorkItem {
     /// bytes or MSM terms. Fixed-size operations use one.
     pub const fn new(class: WorkClass, size: u32) -> Self {
         Self { class, size }
-    }
-
-    /// Returns the class whose limit and summary receive this item.
-    pub const fn class(self) -> WorkClass {
-        self.class
-    }
-
-    /// Returns the class-specific size of this item.
-    pub const fn size(self) -> u32 {
-        self.size
     }
 }
 
@@ -112,11 +97,6 @@ impl PrecompileWork {
         self.classes.get(&class).copied()
     }
 
-    /// Iterates over the encountered work classes in lexical class-name order.
-    pub fn classes(&self) -> impl Iterator<Item = (WorkClass, WorkSummary)> + '_ {
-        self.classes.iter().map(|(&class, &summary)| (class, summary))
-    }
-
     pub(crate) fn charge(
         &mut self,
         elements: usize,
@@ -176,21 +156,6 @@ impl WorkLimit {
         Self { max_count, max_total_size, max_size }
     }
 
-    /// Returns the maximum number of items in this class.
-    pub const fn max_count(self) -> u64 {
-        self.max_count
-    }
-
-    /// Returns the maximum aggregate item size in this class.
-    pub const fn max_total_size(self) -> u64 {
-        self.max_total_size
-    }
-
-    /// Returns the maximum size of one item in this class.
-    pub const fn max_size(self) -> u32 {
-        self.max_size
-    }
-
     fn check(self, class: WorkClass, summary: WorkSummary) -> Result<(), PrecompileLimitError> {
         if summary.count > self.max_count {
             return Err(PrecompileLimitError::Count {
@@ -245,32 +210,13 @@ impl PrecompileLimits {
     }
 
     /// Returns the structural field-element ceiling.
-    pub const fn max_elements(&self) -> u64 {
+    pub(crate) const fn max_elements(&self) -> u64 {
         self.max_elements
     }
 
     /// Returns the configured limit for `class`, if that class is admitted.
-    pub fn class(&self, class: WorkClass) -> Option<WorkLimit> {
+    pub(crate) fn class(&self, class: WorkClass) -> Option<WorkLimit> {
         self.classes.get(&class).copied()
-    }
-
-    /// Checks already-computed work against this policy.
-    pub fn check(&self, work: &PrecompileWork) -> Result<(), PrecompileLimitError> {
-        if work.elements > self.max_elements {
-            return Err(PrecompileLimitError::Elements {
-                actual: work.elements,
-                max: self.max_elements,
-            });
-        }
-        for (&class, &summary) in &work.classes {
-            let limit = self
-                .classes
-                .get(&class)
-                .copied()
-                .ok_or(PrecompileLimitError::MissingClass { class })?;
-            limit.check(class, summary)?;
-        }
-        Ok(())
     }
 }
 

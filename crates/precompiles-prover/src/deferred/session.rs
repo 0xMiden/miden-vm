@@ -7,12 +7,13 @@ use alloc::{
 };
 
 use miden_core::deferred::{
-    DataChunk, Digest, MAX_PRECOMPILE_ROOTS, Node, PrecompileLimits, PrecompileWitness,
-    PreparationError, PreparedWitness, TRUE_DIGEST, Tag, fold_deferred_root,
+    DataChunk, Digest, MAX_DEFERRED_ELEMENTS, MAX_PRECOMPILE_ROOTS, Node, PrecompileLimits,
+    PrecompileWitness, PrecompileWitnessEntry, PreparationError, PreparedWitness, TRUE_DIGEST, Tag,
+    WorkSummary, fold_deferred_root,
 };
 use miden_precompiles::{
-    CurveBinaryOp, CurveId, CurveOp, Keccak256Precompile, UintBinaryOp, UintDomain, UintOp,
-    chunks_to_bytes_exact, n_chunks,
+    CurveBinaryOp, CurveId, CurveOp, HASH_WORK, Keccak256Precompile, UintBinaryOp, UintDomain,
+    UintOp, chunks_to_bytes_exact, n_chunks,
 };
 use miden_precompiles_air::{memory, stark_config::precompile_pcs_params};
 
@@ -24,6 +25,12 @@ use crate::{
 };
 
 const MSM_WNAF_WINDOW: usize = 5;
+// A separate session-wide input ceiling admits multiple maximal singleton witnesses while
+// rejecting unbounded aggregate import work before allocating a proving Session.
+const MAX_BATCH_INPUT_ELEMENTS: u64 = 16 * MAX_DEFERRED_ELEMENTS as u64;
+const MAX_BATCH_HASH_BYTES: u64 = MAX_BATCH_INPUT_ELEMENTS * size_of::<u32>() as u64;
+const MAX_TERM_PRESERVING_TERMS: usize = 4096;
+const MAX_TOTAL_TERM_PRESERVING_TERMS: usize = 16 * MAX_TERM_PRESERVING_TERMS;
 
 /// Input positions use a zero-based witness number and one-based entry number (zero is TRUE).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,7 +114,8 @@ struct TranslatedEc {
 
 /// Cache entries borrow the original input, without cloning payloads or constructing a new graph.
 struct Cached<'a> {
-    definition: &'a Node,
+    definition: &'a PrecompileWitnessEntry,
+    digests: &'a [Digest],
     value: Imported<'a>,
 }
 
@@ -115,6 +123,7 @@ struct WitnessImporter {
     session: Session,
     wnaf_tables: BTreeMap<(EcPointPtr, usize), strategies::WnafTable>,
     glv_endo_tables: BTreeMap<(EcPointPtr, usize), strategies::WnafTable>,
+    term_preserving_terms_left: usize,
     location: WitnessLocation,
 }
 
@@ -175,8 +184,8 @@ fn import_witnesses_with_roots(
         });
     }
 
-    // Admission is deliberately per singleton witness. The batch may exceed the same logical
-    // workload in aggregate; only root count and the later prover-memory estimate are batch-wide.
+    // Admit each singleton before building the Session. The separate batch preflight below
+    // limits aggregate scan work, including repeated witnesses and hash input demand.
     let registry = Arc::new(miden_precompiles::registry());
     let prepared = witnesses
         .iter()
@@ -203,38 +212,85 @@ fn import_witnesses_with_roots(
         }
     }
 
-    import_prepared(&prepared)
+    preflight_batch(&prepared)?;
+    import_prepared(&witnesses, &prepared)
 }
 
-fn import_prepared(prepared: &[PreparedWitness]) -> Result<WitnessSession, SessionInputError> {
+fn preflight_batch(prepared: &[PreparedWitness]) -> Result<(), SessionInputError> {
+    let mut elements = 0u64;
+    let mut hash_bytes = 0u64;
+    let fold_cost = Node::and(TRUE_DIGEST, TRUE_DIGEST).felt_len() as u64;
+    for (witness, input) in prepared.iter().enumerate() {
+        let location = WitnessLocation::Root { witness };
+        // Each additional root creates a framework AND node in the proving Session.
+        let fold_elements = if witness == 0 { 0 } else { fold_cost };
+        elements = elements
+            .checked_add(input.work().elements())
+            .and_then(|total| total.checked_add(fold_elements))
+            .ok_or(SessionInputError::Limit {
+                location,
+                resource: "batch input elements",
+            })?;
+        if elements > MAX_BATCH_INPUT_ELEMENTS {
+            return Err(SessionInputError::Limit {
+                location,
+                resource: "batch input elements",
+            });
+        }
+        hash_bytes = hash_bytes
+            .checked_add(input.work().class(HASH_WORK).map_or(0, WorkSummary::total_size))
+            .ok_or(SessionInputError::Limit {
+                location,
+                resource: "batch hash input bytes",
+            })?;
+        if hash_bytes > MAX_BATCH_HASH_BYTES {
+            return Err(SessionInputError::Limit {
+                location,
+                resource: "batch hash input bytes",
+            });
+        }
+    }
+    Ok(())
+}
+
+fn import_prepared(
+    witnesses: &[PrecompileWitness],
+    prepared: &[PreparedWitness],
+) -> Result<WitnessSession, SessionInputError> {
+    let index_tables = prepared
+        .iter()
+        .map(|witness| core::iter::once(TRUE_DIGEST).chain(witness.digests()).collect::<Vec<_>>())
+        .collect::<Vec<_>>();
     let mut import = WitnessImporter {
         session: Session::new(),
         wnaf_tables: BTreeMap::new(),
         glv_endo_tables: BTreeMap::new(),
+        term_preserving_terms_left: MAX_TOTAL_TERM_PRESERVING_TERMS,
         location: WitnessLocation::Batch,
     };
     let mut cache: BTreeMap<Digest, Cached<'_>> = BTreeMap::new();
-    let mut roots = Vec::with_capacity(prepared.len());
+    let mut roots = Vec::with_capacity(witnesses.len());
     let mut aggregate = None;
-    for (witness_index, witness) in prepared.iter().enumerate() {
-        let mut entries = BTreeMap::new();
-        entries.insert(TRUE_DIGEST, Imported::True);
-        for (entry_index, prepared_node) in witness.nodes().iter().enumerate() {
+    for (witness_index, ((witness, checked), digests)) in
+        witnesses.iter().zip(prepared).zip(&index_tables).enumerate()
+    {
+        let mut entries = Vec::with_capacity(digests.len());
+        entries.push(Imported::True);
+        for (entry_index, entry) in witness.entries().iter().enumerate() {
             import.location = WitnessLocation::Entry {
                 witness: witness_index,
                 entry: entry_index + 1,
             };
-            let digest = prepared_node.digest();
-            let node = prepared_node.node();
+            let digest = digests[entry_index + 1];
             let value = if let Some(previous) = cache.get(&digest) {
-                if node != previous.definition {
+                if !same_definition(entry, digests, previous.definition, previous.digests) {
                     return Err(import.invalid("conflicting definition for a shared commitment"));
                 }
                 // This exact definition and each of its child commitments were already checked.
                 // Reuse the computation; its later operand uses still count as distinct bindings.
                 previous.value
             } else {
-                let value = import.entry(node, &entries)?;
+                let value = import.entry(entry, &entries)?;
                 let hash = match value {
                     Imported::True | Imported::Chunks(_) => None,
                     Imported::Truth(node) => Some(node.hash()),
@@ -244,24 +300,24 @@ fn import_prepared(prepared: &[PreparedWitness]) -> Result<WitnessSession, Sessi
                 if let Some(actual) = hash {
                     import.check_commitment(digest, actual)?;
                 }
-                cache.insert(digest, Cached { definition: node, value });
+                cache.insert(digest, Cached { definition: entry, digests, value });
                 value
             };
-            entries.insert(digest, value);
+            entries.push(value);
         }
         import.location = WitnessLocation::Root { witness: witness_index };
-        let Some(Imported::Truth(claim)) = entries.get(&witness.root()).copied() else {
+        let Some(Imported::Truth(claim)) = entries.last().copied() else {
             return Err(import.invalid("root is not a true assertion"));
         };
         if !import.session.is_recorded_truth(claim) {
             return Err(import.invalid("bare external assertion cannot be a precompile root"));
         }
-        import.check_commitment(witness.root(), claim.hash())?;
+        import.check_commitment(checked.root(), claim.hash())?;
         aggregate = Some(match aggregate {
             None => claim,
             Some(previous) => import.session.assert_and(previous, claim),
         });
-        roots.push(witness.root());
+        roots.push(checked.root());
     }
     let root = aggregate.ok_or(SessionInputError::Empty)?;
     import.location = WitnessLocation::Batch;
@@ -274,6 +330,41 @@ fn import_prepared(prepared: &[PreparedWitness]) -> Result<WitnessSession, Sessi
         root.hash(),
     )?;
     Ok(WitnessSession { session: import.session, root, roots })
+}
+
+fn same_definition(
+    a: &PrecompileWitnessEntry,
+    a_digests: &[Digest],
+    b: &PrecompileWitnessEntry,
+    b_digests: &[Digest],
+) -> bool {
+    if a.tag() != b.tag() {
+        return false;
+    }
+    match (a, b) {
+        (
+            PrecompileWitnessEntry::Data { chunks: a, .. },
+            PrecompileWitnessEntry::Data { chunks: b, .. },
+        ) => a == b,
+        (
+            PrecompileWitnessEntry::Join { lhs: a, rhs: b, .. },
+            PrecompileWitnessEntry::Join { lhs: c, rhs: d, .. },
+        ) => {
+            a_digests[*a as usize] == b_digests[*c as usize]
+                && a_digests[*b as usize] == b_digests[*d as usize]
+        },
+        (
+            PrecompileWitnessEntry::PairList { pairs: a, .. },
+            PrecompileWitnessEntry::PairList { pairs: b, .. },
+        ) => {
+            a.len() == b.len()
+                && a.iter().zip(b).all(|((a, b), (c, d))| {
+                    a_digests[*a as usize] == b_digests[*c as usize]
+                        && a_digests[*b as usize] == b_digests[*d as usize]
+                })
+        },
+        _ => false,
+    }
 }
 
 impl WitnessImporter {
@@ -298,20 +389,16 @@ impl WitnessImporter {
     }
     fn get<'a>(
         &self,
-        entries: &BTreeMap<Digest, Imported<'a>>,
-        digest: Digest,
+        entries: &[Imported<'a>],
+        index: u32,
     ) -> Result<Imported<'a>, SessionInputError> {
         entries
-            .get(&digest)
+            .get(index as usize)
             .copied()
-            .ok_or_else(|| self.invalid("missing prepared child"))
+            .ok_or_else(|| self.invalid("invalid child index"))
     }
-    fn truth(
-        &mut self,
-        entries: &BTreeMap<Digest, Imported<'_>>,
-        digest: Digest,
-    ) -> Result<Truthy, SessionInputError> {
-        match self.get(entries, digest)? {
+    fn truth(&mut self, entries: &[Imported<'_>], index: u32) -> Result<Truthy, SessionInputError> {
+        match self.get(entries, index)? {
             Imported::True => Ok(self.session.zero()),
             Imported::Truth(value) => Ok(value),
             _ => Err(self.invalid("expected assertion operand")),
@@ -319,54 +406,54 @@ impl WitnessImporter {
     }
     fn uint(
         &self,
-        entries: &BTreeMap<Digest, Imported<'_>>,
-        digest: Digest,
+        entries: &[Imported<'_>],
+        index: u32,
     ) -> Result<TranslatedUint, SessionInputError> {
-        match self.get(entries, digest)? {
+        match self.get(entries, index)? {
             Imported::Uint(value) => Ok(value),
             _ => Err(self.invalid("expected uint operand")),
         }
     }
     fn point(
         &self,
-        entries: &BTreeMap<Digest, Imported<'_>>,
-        digest: Digest,
+        entries: &[Imported<'_>],
+        index: u32,
     ) -> Result<TranslatedEc, SessionInputError> {
-        match self.get(entries, digest)? {
+        match self.get(entries, index)? {
             Imported::Point(value) => Ok(value),
             _ => Err(self.invalid("expected curve operand")),
         }
     }
     fn chunks<'a>(
         &self,
-        entries: &BTreeMap<Digest, Imported<'a>>,
-        digest: Digest,
+        entries: &[Imported<'a>],
+        index: u32,
     ) -> Result<&'a [DataChunk], SessionInputError> {
-        match self.get(entries, digest)? {
+        match self.get(entries, index)? {
             Imported::Chunks(value) => Ok(value),
             _ => Err(self.invalid("expected chunks operand")),
         }
     }
-    fn join(&self, node: &Node) -> Result<(Digest, Digest), SessionInputError> {
-        node.payload()
-            .as_join()
-            .map_err(|_| self.invalid("operation requires two children"))
+    fn join(&self, entry: &PrecompileWitnessEntry) -> Result<(u32, u32), SessionInputError> {
+        match entry {
+            PrecompileWitnessEntry::Join { lhs, rhs, .. } => Ok((*lhs, *rhs)),
+            _ => Err(self.invalid("operation requires two children")),
+        }
     }
     fn entry<'a>(
         &mut self,
-        node: &'a Node,
-        entries: &BTreeMap<Digest, Imported<'a>>,
+        entry: &'a PrecompileWitnessEntry,
+        entries: &[Imported<'a>],
     ) -> Result<Imported<'a>, SessionInputError> {
-        let tag = node.tag();
+        let tag = entry.tag();
         if tag == Tag::CHUNKS {
-            return node
-                .payload()
-                .as_data()
-                .map(Imported::Chunks)
-                .map_err(|_| self.invalid("chunks require data payload"));
+            return match entry {
+                PrecompileWitnessEntry::Data { chunks, .. } => Ok(Imported::Chunks(chunks)),
+                _ => Err(self.invalid("chunks require data payload")),
+            };
         }
         if tag == Tag::AND {
-            let (lhs, rhs) = self.join(node)?;
+            let (lhs, rhs) = self.join(entry)?;
             let lhs = self.truth(entries, lhs)?;
             let rhs = self.truth(entries, rhs)?;
             return Ok(Imported::Truth(self.session.assert_and(lhs, rhs)));
@@ -374,7 +461,7 @@ impl WitnessImporter {
         if let Some(n_bytes) = Keccak256Precompile::decode_assert_tag(tag)
             .map_err(|_| self.invalid("invalid hash tag"))?
         {
-            let (input, expected) = self.join(node)?;
+            let (input, expected) = self.join(entry)?;
             let n_bytes = n_bytes as usize;
             let input = chunks_to_bytes_exact(
                 self.chunks(entries, input)?,
@@ -400,10 +487,12 @@ impl WitnessImporter {
         {
             return match op {
                 UintOp::Value(domain) => {
-                    let chunk = node
-                        .payload()
-                        .as_value()
-                        .map_err(|_| self.invalid("uint value requires one chunk"))?;
+                    let PrecompileWitnessEntry::Data { chunks, .. } = entry else {
+                        return Err(self.invalid("uint value requires data"));
+                    };
+                    let [chunk] = chunks.as_slice() else {
+                        return Err(self.invalid("uint value requires one chunk"));
+                    };
                     let mut limbs = [0u32; 8];
                     for (limb, felt) in limbs.iter_mut().zip(chunk) {
                         *limb = u32::try_from(felt.as_canonical_u64())
@@ -418,7 +507,7 @@ impl WitnessImporter {
                     }))
                 },
                 UintOp::Binary(op) => {
-                    let (a, b) = self.join(node)?;
+                    let (a, b) = self.join(entry)?;
                     let a = self.uint(entries, a)?;
                     let b = self.uint(entries, b)?;
                     if a.domain != b.domain {
@@ -432,7 +521,7 @@ impl WitnessImporter {
                     Ok(Imported::Uint(TranslatedUint { node, domain: a.domain }))
                 },
                 UintOp::Eq => {
-                    let (a, b) = self.join(node)?;
+                    let (a, b) = self.join(entry)?;
                     let a = self.uint(entries, a)?;
                     let b = self.uint(entries, b)?;
                     if a.domain != b.domain {
@@ -448,8 +537,8 @@ impl WitnessImporter {
         if let Some(op) = CurveOp::decode_tag(tag).map_err(|_| self.invalid("invalid curve tag"))? {
             return match op {
                 CurveOp::Value(curve) => {
-                    let (x, y) = self.join(node)?;
-                    let node = match (x == TRUE_DIGEST, y == TRUE_DIGEST) {
+                    let (x, y) = self.join(entry)?;
+                    let node = match (x == 0, y == 0) {
                         (true, true) => self.session.ec_pai(curve.group_ptr()),
                         (true, false) | (false, true) => {
                             return Err(self.invalid("incomplete infinity coordinates"));
@@ -472,7 +561,7 @@ impl WitnessImporter {
                     Ok(Imported::Point(TranslatedEc { node, curve }))
                 },
                 CurveOp::Binary(op) => {
-                    let (a, b) = self.join(node)?;
+                    let (a, b) = self.join(entry)?;
                     let a = self.point(entries, a)?;
                     let b = self.point(entries, b)?;
                     if a.curve != b.curve {
@@ -485,7 +574,7 @@ impl WitnessImporter {
                     Ok(Imported::Point(TranslatedEc { node, curve: a.curve }))
                 },
                 CurveOp::Eq => {
-                    let (a, b) = self.join(node)?;
+                    let (a, b) = self.join(entry)?;
                     let a = self.point(entries, a)?;
                     let b = self.point(entries, b)?;
                     if a.curve != b.curve {
@@ -497,14 +586,13 @@ impl WitnessImporter {
                     Ok(Imported::Truth(self.session.ec_is(&a.node, &b.node)))
                 },
                 CurveOp::Msm => {
-                    let pairs = node
-                        .payload()
-                        .as_pair_list()
-                        .map_err(|_| self.invalid("MSM requires a pair list"))?;
+                    let PrecompileWitnessEntry::PairList { pairs, .. } = entry else {
+                        return Err(self.invalid("MSM requires a pair list"));
+                    };
                     let &(first, _) = pairs.first().ok_or_else(|| self.invalid("empty MSM"))?;
                     let curve = self.point(entries, first)?.curve;
                     let mut terms = Vec::with_capacity(pairs.len());
-                    for (point, scalar) in pairs {
+                    for &(point, scalar) in pairs {
                         let point = self.point(entries, point)?;
                         let scalar = self.uint(entries, scalar)?;
                         if point.curve != curve {
@@ -531,8 +619,6 @@ impl WitnessImporter {
         terms: Vec<(TranslatedEc, TranslatedUint)>,
     ) -> Result<EcNode, SessionInputError> {
         // The entry decoder checked the nonempty pair list and every operand before lowering.
-        self.session
-            .constrain_scalar_bound(&terms[0].0.node, curve.scalar_domain().bound_ptr());
 
         // Zero scalars are always fine (0·P = 𝒪); repeated canonical bases —
         // including two structurally different point nodes that resolve to
@@ -550,6 +636,23 @@ impl WitnessImporter {
             self.session.uint_value(&scalar.node) != U256::ZERO && bases.insert(point.node.point)
         });
 
+        if !fast_path_eligible {
+            if terms.len() > MAX_TERM_PRESERVING_TERMS {
+                return Err(SessionInputError::Limit {
+                    location: self.location,
+                    resource: "term-preserving MSM terms per node",
+                });
+            }
+            self.term_preserving_terms_left = self
+                .term_preserving_terms_left
+                .checked_sub(terms.len())
+                .ok_or(SessionInputError::Limit {
+                    location: self.location,
+                    resource: "term-preserving MSM terms per session",
+                })?;
+        }
+        self.session
+            .constrain_scalar_bound(&terms[0].0.node, curve.scalar_domain().bound_ptr());
         let expr = if fast_path_eligible {
             self.msm_joint_expr(curve, &terms)
         } else {
@@ -566,7 +669,7 @@ impl WitnessImporter {
     /// The joint/interleaved addition chain for a PairList whose declared
     /// bases are pairwise distinct and every scalar nonzero. `joint_wnaf`'s
     /// per-column term-row cost is O(n log n), using a balanced reduction rather than
-    /// repeatedly copying a growing prefix. The batch input budget bounds its term count.
+    /// repeatedly copying a growing prefix. The batch input ceiling bounds its term count.
     ///
     /// GLV curves split each term's scalar in half (`glv_joint_wnaf_with_tables`),
     /// trading ~half the ladder height for twice the virtual bases —
