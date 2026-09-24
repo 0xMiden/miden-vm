@@ -13,7 +13,6 @@ use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
     DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
-    crypto::random::RandomCoin,
     event::EventError,
     operation::OperationError,
 };
@@ -255,8 +254,8 @@ fn test_falcon512_probabilistic_product_failure() {
 /// `move_sig_to_adv_stack`, and then proceed to `verify` the signature.
 #[test]
 fn test_move_sig_to_adv_stack() {
-    let seed = Word::default();
-    let mut rng = RandomCoin::new(seed);
+    let seed = [0u8; 32];
+    let mut rng = ChaCha20Rng::from_seed(seed);
     let secret_key = SecretKey::with_rng(&mut rng);
     let message = random_word();
 
@@ -291,8 +290,8 @@ fn test_move_sig_to_adv_stack() {
 
 #[test]
 fn falcon_execution() {
-    let seed = Word::default();
-    let mut rng = RandomCoin::new(seed);
+    let seed = [0u8; 32];
+    let mut rng = ChaCha20Rng::from_seed(seed);
     let sk = SecretKey::with_rng(&mut rng);
     let message = random_word();
     let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
