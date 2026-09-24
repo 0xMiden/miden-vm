@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Check user doc cycle counts against generated core-lib docs and assembly fixtures."""
+"""Check user doc cycle counts against generated core-lib docs and assembly fixtures.
+
+Core-lib mappings in ``user-doc-cycle-mappings.toml`` must declare exactly one of:
+``fixture_id`` (measured ``assembly-cycle-fixtures.toml`` case) or ``exemption``.
+"""
 
 from __future__ import annotations
 
@@ -51,6 +55,8 @@ def extract_cycles_from_description(description: str) -> str:
     block = re.sub(r"where:\s*", "where ", block, flags=re.IGNORECASE)
     block = re.sub(r"[,.\:;]", " ", block)
     block = re.sub(r"\s+", " ", block.lower()).strip()
+    if not block:
+        raise MissingCycleTextError("description has empty cycle text")
     if is_estimate:
         return f"estimate {block}"
     return block
@@ -118,8 +124,36 @@ def extract_generated_procedure_cycles(path: Path, procedure: str) -> str:
     raise KeyError(f"generated procedure not found: {procedure!r} in {path}")
 
 
+def load_assembly_fixtures() -> dict[str, dict]:
+    cases = tomllib.loads(ASSEMBLY_FIXTURES.read_text(encoding="utf-8"))["case"]
+    by_id: dict[str, dict] = {}
+    for case in cases:
+        case_id = case["id"]
+        if case_id in by_id:
+            raise ValueError(f"duplicate assembly fixture id: {case_id!r}")
+        by_id[case_id] = case
+    return by_id
+
+
+def fixture_expected_matches_cycles(fixture_expected: str, doc_cycles: str) -> bool:
+    """Return True if a measured fixture expectation matches normalized doc cycle text.
+
+    Assembly fixtures often use ``\"38 cycles\"`` while core-lib docs normalize to ``\"38\"``.
+    """
+    expected = fixture_expected.strip().lower()
+    actual = doc_cycles.strip().lower()
+    if expected == actual:
+        return True
+    if expected.endswith(" cycles") and expected[: -len(" cycles")] == actual:
+        return True
+    if actual.endswith(" cycles") and actual[: -len(" cycles")] == expected:
+        return True
+    return False
+
+
 def check_core_lib_mappings() -> list[str]:
     entries = tomllib.loads(MAPPINGS.read_text(encoding="utf-8"))["entry"]
+    fixtures = load_assembly_fixtures()
     errors: list[str] = []
 
     for entry in entries:
@@ -127,6 +161,23 @@ def check_core_lib_mappings() -> list[str]:
         generated_path = ROOT / entry["generated_doc"]
         section = entry.get("section")
         procedure = entry["procedure"]
+        fixture_id = entry.get("fixture_id")
+        exemption = entry.get("exemption")
+
+        has_fixture = fixture_id is not None
+        has_exemption = exemption is not None
+        if has_fixture == has_exemption:
+            errors.append(
+                f"{user_path}: {procedure}: mapping must set exactly one of "
+                f"`fixture_id` or `exemption` (got fixture_id={fixture_id!r}, "
+                f"exemption={exemption!r})"
+            )
+            continue
+        if has_exemption and not str(exemption).strip():
+            errors.append(
+                f"{user_path}: {procedure}: `exemption` must be a non-empty reason"
+            )
+            continue
 
         try:
             user_content = user_path.read_text(encoding="utf-8")
@@ -144,6 +195,25 @@ def check_core_lib_mappings() -> list[str]:
                 f"{user_path}: {procedure}\n"
                 f"  expected (generated): {generated_cycles!r}\n"
                 f"  actual (user doc):    {user_cycles!r}"
+            )
+            continue
+
+        if has_exemption:
+            continue
+
+        fixture = fixtures.get(fixture_id)
+        if fixture is None:
+            errors.append(
+                f"{user_path}: {procedure}: unknown fixture_id {fixture_id!r} "
+                f"(not in {ASSEMBLY_FIXTURES.relative_to(ROOT)})"
+            )
+            continue
+
+        expected = str(fixture["expected"])
+        if not fixture_expected_matches_cycles(expected, user_cycles):
+            errors.append(
+                f"{user_path}: {procedure}: cycle text {user_cycles!r} does not match "
+                f"measured fixture {fixture_id!r} expected {expected!r}"
             )
 
     return errors
@@ -176,10 +246,6 @@ def table_header_cells(content: str, row_start: int) -> list[str] | None:
 
 def _normalize_cycle_cell_text(text: str) -> str:
     text = text.lower()
-    if re.fullmatch(r"\d+(?: cycles?)?", text, re.IGNORECASE):
-        return text
-    if re.fullmatch(r"\d+(?: \d+)+", text):
-        return text
     match = re.search(r"\*\(\s*(\d+\s+cycles?)\s*\)\*", text, re.IGNORECASE)
     if match:
         return re.sub(r"\s+", " ", match.group(1).lower())
@@ -193,8 +259,9 @@ def extract_cycle_cell_from_row(
 ) -> str | None:
     """Return the cycle cell text from a marked markdown table row.
 
-    When the table has a Cycles column header, use that column. Otherwise fall back to
-    an embedded `*(N cycles)*` fragment in the instruction cell (u32_operations).
+    When the table has a Cycles column header, that column is authoritative: a blank
+    cell returns None (no fallback). Otherwise fall back to an embedded
+    `*(N cycles)*` fragment in the instruction cell (u32_operations).
     """
     cells = [c.strip() for c in row.strip().strip("|").split("|")]
 
@@ -204,13 +271,15 @@ def extract_cycle_cell_from_row(
 
     if header_cells:
         for idx, name in enumerate(header_cells):
-            if "cycle" in name and idx < len(cells):
+            if "cycle" in name:
+                if idx >= len(cells):
+                    return None
                 text = _normalize_table_cell(cells[idx])
-                if text:
-                    return _normalize_cycle_cell_text(text)
+                if not text:
+                    return None
+                return _normalize_cycle_cell_text(text)
 
     for cell in cells:
-        text = _normalize_table_cell(cell)
         match = re.search(r"\*\(\s*(\d+\s+cycles?)\s*\)\*", cell, re.IGNORECASE)
         if match:
             return re.sub(r"\s+", " ", match.group(1).lower())
@@ -223,8 +292,21 @@ def check_assembly_fixtures() -> list[str]:
 
     for case in cases:
         case_id = case["id"]
-        doc_path = ROOT / case["doc"]
-        marker = f"<!-- cycle-check: {case['marker']} -->"
+        doc = case.get("doc")
+        marker_name = case.get("marker")
+        # Core-lib-only fixtures omit doc/marker; they are still measured by processor tests
+        # and referenced from user-doc-cycle-mappings.toml via fixture_id.
+        if doc is None and marker_name is None:
+            continue
+        if doc is None or marker_name is None:
+            errors.append(
+                f"fixture {case_id!r}: set both `doc` and `marker`, or omit both "
+                f"for core-lib-only fixtures"
+            )
+            continue
+
+        doc_path = ROOT / doc
+        marker = f"<!-- cycle-check: {marker_name} -->"
         expected = case["expected"].strip().lower()
 
         content = doc_path.read_text(encoding="utf-8")
@@ -270,6 +352,12 @@ class CheckUserDocCyclesTests(unittest.TestCase):
         with self.assertRaises(MissingCycleTextError):
             extract_cycles_from_description("Inputs: [a, b] Outputs: [c]")
 
+    def test_empty_cycle_text_raises(self) -> None:
+        for description in ("Cycles:", "Cycles:   ", "Cycles (estimate):", "Cycles:\n"):
+            with self.subTest(description=description):
+                with self.assertRaises(MissingCycleTextError):
+                    extract_cycles_from_description(description)
+
     def test_cycle_cell_uses_cycles_column_not_operand(self) -> None:
         content = (
             "| Instruction | Stack Input | Stack Output | Cycles | Notes |\n"
@@ -280,9 +368,41 @@ class CheckUserDocCyclesTests(unittest.TestCase):
         row = content[row_start:content.find("\n", row_start)]
         self.assertEqual(extract_cycle_cell_from_row(row, content, row_start), "38")
 
+    def test_blank_cycles_column_returns_none(self) -> None:
+        # Present Cycles column is authoritative: do not fall back to *(38 cycles)*.
+        content = (
+            "| Instruction | Stack Input | Stack Output | Cycles | Notes |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| foo *(38 cycles)* | `[2, 1, ...]` | `[3, ...]` |  | note |\n"
+        )
+        row_start = content.index("| foo")
+        row = content[row_start:content.find("\n", row_start)]
+        self.assertIsNone(extract_cycle_cell_from_row(row, content, row_start))
+
     def test_cycle_cell_falls_back_to_embedded_cycles(self) -> None:
         row = "| u32popcnt *(38 cycles)* | [a, ...] | [b, ...] | note |"
         self.assertEqual(extract_cycle_cell_from_row(row), "38 cycles")
+
+    def test_fixture_expected_matches_cycles(self) -> None:
+        self.assertTrue(fixture_expected_matches_cycles("38", "38"))
+        self.assertTrue(fixture_expected_matches_cycles("38 cycles", "38"))
+        self.assertTrue(fixture_expected_matches_cycles("38", "38 cycles"))
+        self.assertFalse(fixture_expected_matches_cycles("38", "32"))
+        self.assertFalse(fixture_expected_matches_cycles("38 cycles", "32"))
+
+    def test_mapping_requires_fixture_or_exemption(self) -> None:
+        # Spot-check the live mappings file rather than re-implementing TOML policy here.
+        entries = tomllib.loads(MAPPINGS.read_text(encoding="utf-8"))["entry"]
+        self.assertGreater(len(entries), 0)
+        for entry in entries:
+            has_fixture = "fixture_id" in entry
+            has_exemption = "exemption" in entry
+            self.assertTrue(
+                has_fixture != has_exemption,
+                msg=f"{entry.get('procedure')}: need exactly one of fixture_id/exemption",
+            )
+            if has_exemption:
+                self.assertTrue(str(entry["exemption"]).strip())
 
 
 if __name__ == "__main__":

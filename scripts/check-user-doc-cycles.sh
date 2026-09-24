@@ -7,7 +7,6 @@ cd "${ROOT}"
 echo "Regenerating core library docs..."
 MIDEN_BUILD_LIB_DOCS=1 cargo check -p miden-core-lib
 
-echo "Checking user doc cycle counts..."
 if command -v python3.12 >/dev/null 2>&1; then
     PYTHON=python3.12
 elif command -v python3.11 >/dev/null 2>&1; then
@@ -19,6 +18,9 @@ if ! "$PYTHON" -c 'import tomllib' 2>/dev/null; then
     echo "error: Python 3.11+ required (tomllib). Use python3.11 or python3.12." >&2
     exit 1
 fi
+echo "Running user-doc cycle checker unit tests..."
+"$PYTHON" scripts/check_user_doc_cycles.py test
+echo "Checking user doc cycle counts..."
 "$PYTHON" scripts/check_user_doc_cycles.py
 
 echo "Checking assembly cycle fixtures..."
