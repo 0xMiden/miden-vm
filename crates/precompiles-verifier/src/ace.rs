@@ -423,7 +423,7 @@ mod tests {
 
     #[test]
     fn pvm_masm_read_layout_matches_every_codegen_boundary() {
-        const READ_START: u64 = 3_225_426_416;
+        const READ_START: u64 = 3_225_426_424;
         const NEXT_VM_REGION: u64 = 3_238_002_688;
         const LAYOUT_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/layout.masm");

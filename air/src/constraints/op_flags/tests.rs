@@ -92,18 +92,17 @@ fn naive_composites(
     // Under do-while semantics, LOOP (deg5[5]) does not shift the stack — only SPLIT (deg5[4])
     // contributes here.
     let split_flag = deg5[4];
-    let shift_left_on_end = deg4[4] * is_loop_end;
+    let loop_end_pop = deg4[4] * is_loop_end;
 
-    let right_shift_flag = prefix_011 + deg5[11] + deg6[4];
-    let left_shift_flag =
-        prefix_010 + add3_madd_prefix + split_flag + deg5[8] + deg4[5] + shift_left_on_end;
+    let right_shift = prefix_011 + deg5[11] + deg6[4];
+    let left_shift = prefix_010 + add3_madd_prefix + split_flag + deg5[8] + deg4[5] + loop_end_pop;
 
     let control_flow = deg5[4] + deg5[5] + deg5[6] + deg5[7] // SPAN/JOIN/SPLIT/LOOP
         + deg4[4] + deg4[5] + deg4[6] + deg4[7] // END/REPEAT/RESPAN/HALT
         + deg5[8] + deg5[12] // DYN/DYNCALL
         + deg4[2] + deg4[3]; // SYSCALL/CALL
 
-    (left_shift_flag, right_shift_flag, control_flow)
+    (left_shift, right_shift, control_flow)
 }
 
 fn valid_opcodes() -> Vec<usize> {
@@ -297,11 +296,11 @@ fn optimized_flags_match_naive() {
             assert_eq!(flag, deg4[i], "degree4 flag mismatch at index {i}");
         }
 
-        let (left_shift_flag, right_shift_flag, control_flow) =
+        let (left_shift, right_shift, control_flow) =
             naive_composites(bits, &deg6, &deg5, &deg4, ZERO);
 
-        assert_eq!(op_flags.left_shift(), left_shift_flag, "left_shift flag mismatch");
-        assert_eq!(op_flags.right_shift(), right_shift_flag, "right_shift flag mismatch");
+        assert_eq!(op_flags.left_shift(), left_shift, "aggregate left-shift flag mismatch");
+        assert_eq!(op_flags.right_shift(), right_shift, "aggregate right-shift flag mismatch");
         assert_eq!(op_flags.control_flow(), control_flow, "control_flow flag mismatch");
     }
 }

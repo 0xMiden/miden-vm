@@ -546,8 +546,8 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
     const GENERIC_FRAME_START: u64 = 3_223_322_624;
     const GENERIC_FRAME_END: u64 = 3_223_322_764;
     const VM_FRAME_END: u64 = 3_223_323_864;
-    const PVM_FRAME_START: u64 = 3_225_426_416;
-    const PVM_FRAME_END: u64 = 3_225_444_212;
+    const PVM_FRAME_START: u64 = 3_225_426_424;
+    const PVM_FRAME_END: u64 = 3_225_444_220;
 
     /// `(path below asm/sys, name, offset from the declared address, extent in felts)`.
     /// New relation-owned addresses must be added here, including one-felt cells.
@@ -584,7 +584,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("vm/layout.masm", "AUX_BUS_BOUNDARY_PTR", 0, 8),
         ("vm/layout.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, 40),
         // Fixed VM stream reservation ending at the PVM allocation.
-        ("vm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 6040),
+        ("vm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 6048),
         ("vm/layout.masm", "CURRENT_TRACE_ROW_PTR", 0, 136),
     ];
 
