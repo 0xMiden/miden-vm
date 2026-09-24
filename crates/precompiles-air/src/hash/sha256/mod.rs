@@ -15,7 +15,6 @@ use crate::{
         ConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, LookupColumn, LookupGroup,
         LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
     },
-    primitives::byte_pair_lut::Range16Msg,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::{current_main, next_main},
 };
@@ -25,33 +24,24 @@ pub mod io;
 
 pub const IO_PERIODIC_OFFSET: usize = compression::NUM_PERIODIC_COLS;
 pub const IO_ROW_START: usize = compression::COMPRESSION_PERIOD - io::IO_PERIOD;
-// `COL_LANE_LAST8` selects lanes 24..32 of a 32-row cycle, which are the IO rows only while the
-// IO band spans eight rows and starts at lane 24.
-const _: () = assert!(io::IO_PERIOD == 8 && IO_ROW_START % 32 == 32 - io::IO_PERIOD);
+const _: () = assert!(io::IO_PERIOD == 32 && IO_ROW_START.is_multiple_of(32));
 pub const COL_IO_ACT: usize = compression::NUM_MAIN_COLS;
-pub const NUM_MAIN_COLS: usize = compression::NUM_MAIN_COLS + 22;
-pub const NUM_AUX_COLS: usize = io::NUM_AUX_COLS;
-
-/// The block controller remains live on IO rows. All other compression cells are reused;
-/// only the IO activity selector and twenty-one payload cells need additional columns.
+pub const NUM_MAIN_COLS: usize = compression::NUM_MAIN_COLS + 1;
+pub const NUM_AUX_COLS: usize = 11;
+/// The controller stays live; serialized IO fits in compression's inactive payload cells.
 pub const IO_COLUMNS: [usize; io::NUM_MAIN_COLS] = {
-    assert!(compression::NUM_MAIN_COLS - compression::COL_META_T == 28);
     let mut columns = [0; io::NUM_MAIN_COLS];
     columns[io::COL_ACT] = COL_IO_ACT;
     columns[io::COL_BLOCK_ID] = compression::COL_BLOCK_ID;
     let mut i = 2;
-    while i < 30 {
+    while i < io::NUM_MAIN_COLS {
         columns[i] = compression::COL_META_T + i - 2;
         i += 1;
     }
-    while i < io::NUM_MAIN_COLS {
-        columns[i] = COL_IO_ACT + i - 29;
-        i += 1;
-    }
-    assert!(columns[io::NUM_MAIN_COLS - 1] == NUM_MAIN_COLS - 1);
+    assert!(columns[io::NUM_MAIN_COLS - 1] < compression::NUM_MAIN_COLS);
     columns
 };
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = io::COLUMN_SHAPE;
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1];
 
 /// Transport the IO state over the compression rows between consecutive blocks.
 /// Unique consecutive block ids also bind the first/final flags and invocation endpoints.
@@ -142,7 +132,6 @@ impl LiftedAir<Felt, QuadFelt> for Sha256Air {
         let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
         let periods = builder.periodic_values();
         let io_periods = core::array::from_fn(|i| periods[IO_PERIODIC_OFFSET + i].into());
-        let lane_last8: AB::Expr = periods[compression::program::COL_LANE_LAST8].into();
         let io_act: AB::Expr = local[COL_IO_ACT].into();
         builder.assert_bool(local[COL_IO_ACT]);
         builder.assert_zero(
@@ -150,8 +139,7 @@ impl LiftedAir<Felt, QuadFelt> for Sha256Air {
                 - AB::Expr::from(local[compression::COL_ACT])
                     * local[compression::COL_PHASE_BEGIN + compression::program::PHASE_PADDING]
                         .into()
-                    * local[compression::COL_PHASE_END].into()
-                    * lane_last8,
+                    * local[compression::COL_PHASE_END].into(),
         );
         compression::eval_main_with_io(builder, 0, 0, io_act.clone());
         let io_local = IO_COLUMNS.map(|column| local[column]);
@@ -190,118 +178,89 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha256Air {
             core::array::from_fn(|i| periods[IO_PERIODIC_OFFSET + i].into());
         let io_act: LB::Expr = local[COL_IO_ACT].into();
         let exec_act = LB::Expr::from(local[compression::COL_ACT]) - io_act.clone();
-        // One group per column: its two batches are mutually exclusive. Separate groups
-        // would multiply denominators, increasing both degree and committed area. IO needs
-        // more columns than compression, so the trailing IO columns carry no compression batch.
-        for index in 0..io::NUM_AUX_COLS - 1 {
-            let kind = compression::SHARED_BATCHES.get(index).copied();
-            let io = io::lookup_batch_degree(index, 0);
-            let io = Deg { v: io.v + 1, u: io.u + 1 };
-            let comp = kind.map(|kind| {
-                let comp = compression::lookup_batch_degree(kind, 0);
-                Deg { v: comp.v + 1, u: comp.u + 1 }
-            });
-            let degree = comp.map_or(io, |comp| Deg { v: comp.v.max(io.v), u: comp.u.max(io.u) });
+        for (index, kind) in compression::SHARED_BATCHES.into_iter().enumerate() {
+            let comp = compression::lookup_batch_degree(kind, 0);
+            let comp = Deg { v: comp.v + 1, u: comp.u + 1 };
+            let io = if index < io::NUM_AUX_COLS {
+                io::lookup_column_degree(index, true)
+            } else {
+                Deg { v: 0, u: 0 }
+            };
+            let degree = Deg { v: comp.v.max(io.v), u: comp.u.max(io.u) };
             builder.next_column(
                 |column| {
                     column.group(
                         "sha256-phases",
                         |group| {
-                            if let (Some(kind), Some(comp)) = (kind, comp) {
-                                group.batch(
-                                    "compression",
-                                    exec_act.clone(),
-                                    |batch| {
-                                        compression::eval_lookup_batch(
-                                            batch,
-                                            kind,
-                                            &comp_local,
-                                            &comp_periods,
-                                            LB::Expr::ONE,
-                                            0,
-                                        );
-                                    },
-                                    comp,
-                                );
-                            }
                             group.batch(
-                                "io",
-                                io_act.clone(),
+                                "compression",
+                                exec_act.clone(),
                                 |batch| {
-                                    io::eval_lookup_batch(
+                                    compression::eval_lookup_batch(
                                         batch,
-                                        index,
-                                        &io_local,
-                                        &io_next,
-                                        &io_periods,
+                                        kind,
+                                        &comp_local,
+                                        &comp_periods,
                                         LB::Expr::ONE,
                                         0,
-                                    );
+                                    )
                                 },
-                                io,
+                                comp,
                             );
+                            if index < io::NUM_AUX_COLS {
+                                io::eval_lookup_group(
+                                    group,
+                                    index,
+                                    &io_local,
+                                    &io_next,
+                                    &io_periods,
+                                    io_act.clone(),
+                                );
+                            }
+                            if index == 8 {
+                                let v = |column: usize| -> LB::Expr { io_local[column].into() };
+                                let provide = io_act.clone()
+                                    * io_periods[io::program::P_LAST].clone()
+                                    * (LB::Expr::ONE - v(io::COL_FINAL_BLOCK));
+                                let consume = io_act.clone()
+                                    * io_periods[io::program::P_FIRST].clone()
+                                    * (LB::Expr::ONE - v(io::COL_FIRST_BLOCK));
+                                let degree = Deg { v: 3, u: 4 };
+                                group.remove(
+                                    "continue",
+                                    provide,
+                                    || Sha256IoContinuation {
+                                        block_id: v(io::COL_BLOCK_ID) + LB::Expr::ONE,
+                                        len: v(io::COL_LEN),
+                                        left: v(io::COL_LEFT),
+                                        before: v(io::COL_BEFORE),
+                                        input_eidos: v(io::COL_INPUT_EIDOS),
+                                        input_head: v(io::COL_INPUT_HEAD),
+                                    },
+                                    degree,
+                                );
+                                group.add(
+                                    "resume",
+                                    consume,
+                                    || Sha256IoContinuation {
+                                        block_id: v(io::COL_BLOCK_ID),
+                                        len: v(io::COL_LEN),
+                                        left: v(io::COL_LEFT),
+                                        before: v(io::COL_BEFORE),
+                                        input_eidos: v(io::COL_INPUT_EIDOS)
+                                            - v(io::COL_CHUNK_ACTIVE),
+                                        input_head: v(io::COL_INPUT_HEAD),
+                                    },
+                                    degree,
+                                );
+                            }
                         },
                         degree,
-                    );
+                    )
                 },
                 degree,
             );
         }
-
-        let v = |column: usize| -> LB::Expr { io_local[column].into() };
-        let last = io_act.clone() * io_periods[io::program::P_LAST].clone();
-        let final_block = v(io::COL_FINAL_BLOCK);
-        let provide = last.clone() * (LB::Expr::ONE - final_block.clone());
-        let consume = io_act
-            * io_periods[io::program::P_FIRST].clone()
-            * (LB::Expr::ONE - v(io::COL_FIRST_BLOCK));
-        let degree = Deg { v: 3, u: 4 };
-        // Final length validation and the two continuation endpoints are mutually exclusive.
-        // This column is a fraction column, so its degree-four denominator closes at degree five.
-        builder.next_column(
-            |column| {
-                column.group(
-                    "sha256-io-boundary",
-                    |group| {
-                        group.add(
-                            "length-high",
-                            last * final_block,
-                            || Range16Msg { w: v(io::COL_WORD_HI) },
-                            degree,
-                        );
-                        group.remove(
-                            "continue",
-                            provide,
-                            || Sha256IoContinuation {
-                                block_id: v(io::COL_BLOCK_ID) + LB::Expr::ONE,
-                                len: v(io::COL_LEN),
-                                left: v(io::COL_LEFT)
-                                    - (0..8).map(|i| v(io::COL_MSG_BEGIN + i)).sum::<LB::Expr>(),
-                                before: v(io::COL_MSG_BEGIN + 7),
-                                input_eidos: v(io::COL_INPUT_EIDOS),
-                                input_head: v(io::COL_INPUT_HEAD),
-                            },
-                            degree,
-                        );
-                        group.add(
-                            "resume",
-                            consume,
-                            || Sha256IoContinuation {
-                                block_id: v(io::COL_BLOCK_ID),
-                                len: v(io::COL_LEN),
-                                left: v(io::COL_LEFT),
-                                before: v(io::COL_BEFORE),
-                                input_eidos: v(io::COL_INPUT_EIDOS) - v(io::COL_CHUNK_ACTIVE),
-                                input_head: v(io::COL_INPUT_HEAD),
-                            },
-                            degree,
-                        );
-                    },
-                    degree,
-                );
-            },
-            degree,
-        );
     }
 }
 

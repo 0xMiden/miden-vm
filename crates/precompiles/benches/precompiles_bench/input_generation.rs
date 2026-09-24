@@ -137,7 +137,35 @@ fn p256_signing_key(rng: &mut ChaCha20Rng) -> P256SigningKey {
 
 /// Deterministic pseudo-random message bytes of `len_bytes`, distinct per `index`.
 fn sha256_message(len_bytes: usize, index: u64) -> Vec<u8> {
-    (0..len_bytes)
-        .map(|i| ((i as u64).wrapping_mul(31).wrapping_add(index * 97)) as u8)
-        .collect()
+    assert!(len_bytes >= size_of::<u64>());
+    let mut message = vec![0; len_bytes];
+    ChaCha20Rng::seed_from_u64(index).fill_bytes(&mut message);
+    // Preserve every index bit so the deferred-claim cache cannot collapse scaling workloads.
+    message[..size_of::<u64>()].copy_from_slice(&index.to_le_bytes());
+    message
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn default_workload_has_valid_advice() {
+        super::generate_advice_inputs(super::PrecompileWorkload::default());
+    }
+
+    #[test]
+    fn sha256_scaling_inputs_do_not_repeat_after_256_claims() {
+        use std::collections::HashSet;
+
+        use super::*;
+
+        for len in [SHA256_64B_LEN, SHA256_1KIB_LEN] {
+            let mut messages = HashSet::new();
+            for index in (0..1024).chain([1 << 32, 1 << 48, u64::MAX]) {
+                let message = sha256_message(len, index);
+                assert_eq!(message.len(), len);
+                assert_eq!(message, sha256_message(len, index), "fixtures must be reproducible");
+                assert!(messages.insert(message), "claim {index} repeats at length {len}");
+            }
+        }
+    }
 }

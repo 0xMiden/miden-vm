@@ -827,7 +827,7 @@ mod tests {
             .expect("fixture denominators are non-zero");
         let expected = match crate::ace_constants::PVM_PROTOCOL_ID {
             // Fixed secp256k1, Ed25519 and P-256 boundary denominators plus one value per chiplet.
-            3 => QuadFelt::new([
+            4 => QuadFelt::new([
                 Felt::new_unchecked(13_307_287_383_580_918_166),
                 Felt::new_unchecked(9_765_647_450_999_344_333),
             ]),

@@ -8,7 +8,7 @@ use std::{
 use miden_air::lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions};
 use miden_core::{
     Felt,
-    field::{Field, PrimeCharacteristicRing, QuadFelt},
+    field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_crypto::hash::sha2::Sha256;
@@ -23,7 +23,7 @@ use crate::{
     },
     logup::{LookupMessage, NUM_PUBLIC_VALUES},
     primitives::byte_pair_lut::{
-        BytePairLutAir, BytePairLutRequires, NUM_MAIN_COLS as BPL_MAIN_COLS,
+        BytePairLutAir, BytePairLutRequires, NUM_MAIN_COLS as BPL_MAIN_COLS, Range16Msg,
         generate_trace as bpl_trace,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -31,6 +31,40 @@ use crate::{
 
 const COL_MULT_CANONICAL_XOR: usize = EidosRelation::CanonicalXor.index();
 const COL_MULT_RANGE16: usize = BPL_MAIN_COLS - 1;
+
+#[cfg(feature = "concurrent")]
+#[test]
+fn sha256_parallel_trace_and_lookups_match_sequential() {
+    use crate::{
+        hash::sha256::{io::Sha256IoRequires, trace},
+        primitives::byte_pair_lut::BytePairOp,
+        transcript::eidos::trace::EidosRequires,
+    };
+
+    let serial = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+    let parallel = rayon::ThreadPoolBuilder::new().num_threads(4).build().unwrap();
+    // Empty, serial fallback, parallel threshold, and an uneven split with inactive padding.
+    for len in [None, Some(0), Some(1920), Some(1984), Some(2048)] {
+        let mut compression = Sha256CompressionRequires::new();
+        let mut io = Sha256IoRequires::new();
+        if let Some(len) = len {
+            let input: Vec<u8> = (0..len).map(|i| (i * 29 + 7) as u8).collect();
+            io.require(&input, &mut compression, &mut EidosRequires::new());
+        }
+        let build = || {
+            let mut bpl = BytePairLutRequires::new();
+            // Parallel reduction must add to the session's existing demands.
+            bpl.require(BytePairOp::Xor, 37, 91);
+            bpl.require_range16(0xabcd);
+            let main = trace::generate_trace(compression.clone(), io.clone(), &mut bpl);
+            (main, bpl_trace(bpl))
+        };
+        let (serial_main, serial_bpl) = serial.install(build);
+        let (parallel_main, parallel_bpl) = parallel.install(build);
+        assert_eq!(serial_main.values, parallel_main.values, "message length {len:?}");
+        assert_eq!(serial_bpl.values, parallel_bpl.values, "message length {len:?}");
+    }
+}
 
 #[test]
 fn sha256_program_has_the_frozen_shape() {
@@ -351,7 +385,8 @@ fn sha256_compression_records_all_byte_pair_and_range16_demands() {
         }
     }
     // AND and ANDNOT consume the canonical XOR relation through their affine result encodings.
-    assert_eq!(counts[COL_MULT_CANONICAL_XOR], (288 + 64 + 24 + 66 + 672 + 640 + 600) * 4);
+    // Constants and rotations already have canonical packed words, so they need no byte lookups.
+    assert_eq!(counts[COL_MULT_CANONICAL_XOR], (288 + 64 + 24 + 640 + 600) * 4);
     assert_eq!(counts[COL_MULT_RANGE16], 672 * 4);
     crate::tests::check_local(BytePairLutAir, &bpl_main);
     crate::tests::check_local(Sha256CompressionAir, &main);
@@ -437,6 +472,16 @@ fn sha256_and_bpl_buses_balance_with_input_and_output_boundaries() {
 }
 
 fn two_block_bus_residual(mutator: impl FnOnce(&mut RowMajorMatrix<Felt>)) -> usize {
+    two_block_bus_balance(mutator)
+        .0
+        .values()
+        .filter(|multiplicity| **multiplicity != Felt::ZERO)
+        .count()
+}
+
+fn two_block_bus_balance(
+    mutator: impl FnOnce(&mut RowMajorMatrix<Felt>),
+) -> (HashMap<QuadFelt, Felt>, Challenges<QuadFelt>) {
     let states = [[0x0123_4567; 8], [0xfedc_ba98; 8]];
     let blocks = [
         [0x89ab_cdef; 16],
@@ -473,7 +518,7 @@ fn two_block_bus_residual(mutator: impl FnOnce(&mut RowMajorMatrix<Felt>)) -> us
             boundary(block_id, 3232 + i as u32, word, Felt::ONE);
         }
     }
-    net.values().filter(|multiplicity| **multiplicity != Felt::ZERO).count()
+    (net, challenges)
 }
 
 #[test]
@@ -532,14 +577,83 @@ fn sha256_two_block_bus_rejects_byte_256() {
 }
 
 #[test]
-fn sha256_two_block_bus_binds_rotation_source_bytes() {
+fn sha256_rotation_decomposition_binds_the_packed_source() {
     let row = first_slot(program::Op::Rol(30));
-    assert!(
+    assert_local_rejects(|main| {
+        main.values[row * NUM_MAIN_COLS + COL_A_BEGIN] += Felt::ONE;
+    });
+}
+
+#[test]
+fn sha256_constants_and_rotations_need_only_packed_words() {
+    assert_eq!(
         two_block_bus_residual(|main| {
-            // ROL stores the unrotated source in r; XOR(a, 0, r) must enforce r == a.
-            main.values[row * NUM_MAIN_COLS + COL_R_BEGIN] += Felt::ONE;
-        }) > 0
+            // Neither operation uses individual digits: canonicalizing them would add redundant
+            // byte checks. Both local constraints and the word bus must accept the same packed
+            // value.
+            for (op, column) in [
+                (program::Op::Const(0x1fff_ffff), COL_R_BEGIN),
+                (program::Op::Rol(30), COL_A_BEGIN),
+            ] {
+                let offset = first_slot(op) * NUM_MAIN_COLS + column;
+                let original = pack_test_bytes(&main.values[offset..offset + 4]);
+                main.values[offset] += Felt::from_u32(256);
+                main.values[offset + 1] -= Felt::ONE;
+                assert_eq!(pack_test_bytes(&main.values[offset..offset + 4]), original);
+            }
+            // R is unused on ROL rows; the output is reconstructed from the u16 limbs.
+            let offset = first_slot(program::Op::Rol(30)) * NUM_MAIN_COLS + COL_R_BEGIN;
+            main.values[offset..offset + 4].fill(Felt::from_u32(777));
+            crate::tests::check_local(Sha256CompressionAir, main);
+        }),
+        0
     );
+}
+
+#[test]
+fn sha256_rotation_source_range_is_authenticated_by_the_word_bus() {
+    let row = first_slot(program::Op::Rol(30));
+    let offset = row * NUM_MAIN_COLS;
+    let (net, challenges) = two_block_bus_balance(|main| {
+        // Forge a non-u32 source and a consistent, canonical-limb decomposition. Local
+        // rotation arithmetic accepts it, but it cannot match any earlier u32-producing slot.
+        main.values[offset + COL_A_BEGIN..offset + COL_A_BEGIN + 4].fill(Felt::ZERO);
+        main.values[offset + COL_A_BEGIN + 3] = Felt::from_u32(256);
+        let decomposition = 1u64 << 63;
+        for i in 0..4 {
+            main.values[offset + COL_ROT_BEGIN + i] =
+                Felt::from_u32(((decomposition >> (16 * i)) & 0xffff) as u32);
+        }
+        crate::tests::check_local(Sha256CompressionAir, main);
+    });
+    let forged_source = Sha256WordMsg {
+        block_id: Felt::ZERO,
+        addr: Felt::from_u32(program::slots()[row].src_a),
+        value: Felt::new_unchecked(1u64 << 32),
+    }
+    .encode(&challenges);
+    assert_eq!(net.get(&forged_source), Some(&Felt::ONE));
+}
+
+#[test]
+fn sha256_rotation_field_alias_is_rejected_by_limb_ranges() {
+    let offset = first_slot(program::Op::Rol(30)) * NUM_MAIN_COLS;
+    let mut high = 0;
+    let (net, challenges) = two_block_bus_balance(|main| {
+        let a = pack_test_bytes(&main.values[offset + COL_A_BEGIN..offset + COL_A_BEGIN + 4]);
+        let decomposition = (u128::from(a.as_canonical_u64()) + (1u128 << 32)) * (1u128 << 30);
+        let alias = decomposition + u128::from(Felt::ORDER_U64);
+        for i in 0..3 {
+            main.values[offset + COL_ROT_BEGIN + i] =
+                Felt::from_u32(((alias >> (16 * i)) & 0xffff) as u32);
+        }
+        high = (alias >> 48) as u32;
+        assert!(high >= 65_536);
+        main.values[offset + COL_ROT_BEGIN + 3] = Felt::from_u32(high);
+        crate::tests::check_local(Sha256CompressionAir, main);
+    });
+    let forged_limb = Range16Msg { w: Felt::from_u32(high) }.encode(&challenges);
+    assert_eq!(net.get(&forged_limb), Some(&Felt::ONE));
 }
 
 #[test]

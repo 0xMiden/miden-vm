@@ -191,81 +191,81 @@ pub(crate) fn populate_rows(
         let len = inv.input.len();
         for (block_index, block) in inv.blocks.iter().enumerate() {
             let final_block = block_index + 1 == inv.blocks.len();
+            let raw_head = inv.raw_eidos.span.head().as_u32();
+            let raw_tail = inv.raw_eidos.span.tail().as_u32();
             for i in 0..io::IO_PERIOD {
                 let mut row = [Felt::ZERO; io::NUM_MAIN_COLS];
                 assert_eq!(row_index / io::IO_PERIOD, block.id as usize);
-                row[io::COL_BLOCK_ID] = Felt::from_u32(block.id);
-                let offset = block_index * 64 + i * 8;
+                let offset = block_index * 64 + i.min(16) * 4;
                 let left = len.saturating_sub(offset) as u32;
                 row[io::COL_ACT] = Felt::ONE;
+                row[io::COL_BLOCK_ID] = Felt::from_u32(block.id);
                 row[io::COL_FIRST_BLOCK] = Felt::from_bool(block_index == 0);
                 row[io::COL_FINAL_BLOCK] = Felt::from_bool(final_block);
                 row[io::COL_BEFORE] = Felt::from_bool(offset <= len);
                 row[io::COL_LEFT] = Felt::from_u32(left);
-                row[io::COL_LEFT_LO16] = Felt::from_u16(left as u16);
-                row[io::COL_LEFT_HI16] = Felt::from_u16((left >> 16) as u16);
-                bpl.require_range16(left as u16);
-                bpl.require_range16((left >> 16) as u16);
                 row[io::COL_LEN] = Felt::from_u32(len as u32);
-                let chunk_index = offset / 32;
-                row[io::COL_CHUNK_ACTIVE] =
-                    Felt::from_bool(chunk_index == 0 || chunk_index * 32 < len);
-                let raw_head = inv.raw_eidos.span.head().as_u32();
-                let raw_tail = inv.raw_eidos.span.tail().as_u32();
+                row[io::COL_INPUT_HEAD] = Felt::from_u32(raw_head);
+                let chunk_index = (block_index * 64 + i.min(15) * 4) / 32;
                 row[io::COL_INPUT_EIDOS] =
                     Felt::from_u32((raw_head + chunk_index as u32).min(raw_tail));
-                row[io::COL_INPUT_HEAD] = Felt::from_u32(raw_head);
-                row[io::COL_DIGEST_EIDOS] = Felt::from_u32(inv.digest_eidos.span.head().as_u32());
-                row[io::COL_NODE_EIDOS] = Felt::from_u32(inv.node_eidos.span.head().as_u32());
-                for j in 0..8 {
-                    let byte = inv.input.get(offset + j).copied().unwrap_or(0);
-                    row[io::COL_RAW_BEGIN + j] = Felt::from_u8(byte);
-                    row[io::COL_MSG_BEGIN + j] = Felt::from_bool(offset + j < len);
-                    bpl.require(BytePairOp::Xor, 0, byte);
-                }
-                if offset >= 8 {
-                    let previous = core::array::from_fn(|j| {
-                        inv.input.get(offset - 8 + j).copied().unwrap_or(0)
-                    });
-                    row[io::COL_PREVIOUS_RAW..io::COL_PREVIOUS_RAW + 2]
-                        .copy_from_slice(&pack_le(previous));
-                }
-                if i % 4 == 2 {
-                    let head = core::array::from_fn(|j| {
-                        inv.input.get(offset - 16 + j).copied().unwrap_or(0)
-                    });
-                    row[io::COL_CHUNK_HEAD_RAW..io::COL_CHUNK_HEAD_RAW + 2]
-                        .copy_from_slice(&pack_le(head));
-                }
-                row[io::COL_WORD_LO] = Felt::from_u32(block.words[2 * i + 1]);
-                row[io::COL_WORD_HI] = Felt::from_u32(block.words[2 * i]);
-                if i < 4 {
-                    row[io::COL_STATE_LO] = Felt::from_u32(block.state[2 * i + 1]);
-                    row[io::COL_STATE_HI] = Felt::from_u32(block.state[2 * i]);
-                    if final_block {
-                        for j in 0..8 {
-                            let byte = inv.digest[i * 8 + j];
-                            row[io::COL_DIGEST_BEGIN + j] = Felt::from_u8(byte);
-                            bpl.require(BytePairOp::Xor, 0, byte);
-                        }
-                        if i > 0 {
-                            let previous = inv.digest[(i - 1) * 8..i * 8]
-                                .try_into()
-                                .expect("previous digest row");
-                            row[io::COL_PREVIOUS_DIGEST..io::COL_PREVIOUS_DIGEST + 2]
-                                .copy_from_slice(&pack_le(previous));
-                        }
-                        if i % 4 == 2 {
-                            let head = inv.digest[(i - 2) * 8..(i - 1) * 8]
-                                .try_into()
-                                .expect("chunk head digest row");
-                            row[io::COL_CHUNK_HEAD_DIGEST..io::COL_CHUNK_HEAD_DIGEST + 2]
-                                .copy_from_slice(&pack_le(head));
-                        }
+                if i < 16 {
+                    row[io::COL_LEFT_LO16] = Felt::from_u16(left as u16);
+                    row[io::COL_LEFT_HI16] = Felt::from_u16((left >> 16) as u16);
+                    bpl.require_range16(left as u16);
+                    bpl.require_range16((left >> 16) as u16);
+                    row[io::COL_CHUNK_ACTIVE] =
+                        Felt::from_bool(chunk_index == 0 || chunk_index * 32 < len);
+                    for j in 0..4 {
+                        let byte = inv.input.get(offset + j).copied().unwrap_or(0);
+                        row[io::COL_RAW_BEGIN + j] = Felt::from_u8(byte);
+                        row[io::COL_MSG_BEGIN + j] = Felt::from_bool(offset + j < len);
+                        bpl.require(BytePairOp::Xor, 0, byte);
+                    }
+                    row[io::COL_WORD] = Felt::from_u32(block.words[i]);
+                    for j in 0..7 {
+                        // Only the seven within-block predecessors can reach an emitted chunk.
+                        let word = if i + j >= 7 {
+                            let offset = block_index * 64 + (i + j - 7) * 4;
+                            u32::from_le_bytes(core::array::from_fn(|k| {
+                                inv.input.get(offset + k).copied().unwrap_or(0)
+                            }))
+                        } else {
+                            0
+                        };
+                        row[io::COL_RAW_BUFFER + j] = Felt::from_u32(word);
+                    }
+                    if final_block && i == 14 {
+                        bpl.require_range16(block.words[14] as u16);
                     }
                 }
-                if final_block && i == io::IO_PERIOD - 1 {
-                    bpl.require_range16(block.words[2 * i] as u16);
+                if (16..20).contains(&i) {
+                    row[io::COL_STATE_HI] = Felt::from_u32(block.state[2 * (i - 16)]);
+                    row[io::COL_STATE_LO] = Felt::from_u32(block.state[2 * (i - 16) + 1]);
+                }
+                if final_block && (20..=24).contains(&i) {
+                    row[io::COL_DIGEST_EIDOS] =
+                        Felt::from_u32(inv.digest_eidos.span.head().as_u32());
+                }
+                if final_block && (20..24).contains(&i) {
+                    let lane = i - 20;
+                    for j in 0..8 {
+                        let byte = inv.digest[lane * 8 + j];
+                        row[io::COL_DIGEST_BEGIN + j] = Felt::from_u8(byte);
+                        bpl.require(BytePairOp::Xor, 0, byte);
+                    }
+                    if lane > 0 {
+                        row[io::COL_PREVIOUS_DIGEST..io::COL_PREVIOUS_DIGEST + 2].copy_from_slice(
+                            &pack_le(inv.digest[(lane - 1) * 8..lane * 8].try_into().unwrap()),
+                        );
+                    }
+                    if lane == 2 {
+                        row[io::COL_CHUNK_HEAD_DIGEST..io::COL_CHUNK_HEAD_DIGEST + 2]
+                            .copy_from_slice(&pack_le(inv.digest[..8].try_into().unwrap()));
+                    }
+                }
+                if final_block && i == 24 {
+                    row[io::COL_NODE_EIDOS] = Felt::from_u32(inv.node_eidos.span.head().as_u32());
                     row[io::COL_OUT_MULT] = Felt::from_u32(inv.out_mult);
                     row[io::COL_H_INPUT..io::COL_H_INPUT + 4]
                         .copy_from_slice(&inv.raw_eidos.digest.0);

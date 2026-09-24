@@ -60,7 +60,13 @@ fn precompiles_bench(c: &mut Criterion) {
 
     for (name, proof_hash) in PROOF_HASHES {
         let (stack_outputs, proof) = prove_once_with_hash(&fixture, proof_hash);
-        verify_once(&fixture, stack_outputs, proof);
+        verify_once(&fixture, stack_outputs, &proof);
+
+        group.bench_function(format!("{name}/verify"), |b| {
+            b.iter(|| {
+                verify_once(black_box(&fixture), black_box(stack_outputs), black_box(&proof));
+            });
+        });
 
         group.bench_function(format!("{name}/prove"), |b| {
             b.iter_custom(|iterations| {
