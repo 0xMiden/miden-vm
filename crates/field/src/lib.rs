@@ -25,10 +25,10 @@ mod native;
     )
 ))]
 pub use native::PackedFelt;
-#[cfg(all(any(test, feature = "arbitrary"), not(all(target_family = "wasm", miden))))]
-pub use native::arb_felt_noncanonical;
 #[cfg(not(all(target_family = "wasm", miden)))]
 pub use native::{Felt, FeltFromIntError};
+#[cfg(all(any(test, feature = "arbitrary"), not(all(target_family = "wasm", miden))))]
+pub use native::{arb_felt_canonical, arb_felt_noncanonical};
 
 pub mod utils;
 

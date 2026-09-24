@@ -729,8 +729,13 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            (0u64..Felt::ORDER).prop_map(Felt::new_unchecked).boxed()
+            prop_oneof![4 => arb_felt_canonical(), 1 => arb_felt_noncanonical()].boxed()
         }
+    }
+
+    /// Generates field elements with canonical representations.
+    pub fn arb_felt_canonical() -> impl Strategy<Value = Felt> {
+        (0u64..Felt::ORDER).prop_map(Felt::new_unchecked)
     }
 
     /// Generates field elements with non-canonical representations.
@@ -740,4 +745,4 @@ mod arbitrary {
 }
 
 #[cfg(all(any(test, feature = "arbitrary"), not(all(target_family = "wasm", miden))))]
-pub use arbitrary::arb_felt_noncanonical;
+pub use arbitrary::{arb_felt_canonical, arb_felt_noncanonical};

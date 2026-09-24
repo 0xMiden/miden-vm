@@ -8,10 +8,10 @@ use p3_field::{
     extension::{Binomial, BinomiallyExtendable, ExtensionAlgebra, HasTwoAdicBinomialExtension},
     integers::QuotientMap,
 };
-use proptest::prelude::*;
+use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use rand::{SeedableRng, distr::Distribution, rngs::SmallRng};
 
-use super::{Felt, Goldilocks, arb_felt_noncanonical};
+use super::{Felt, Goldilocks, arb_felt_canonical, arb_felt_noncanonical};
 
 /// A minimal hasher used to validate that `Felt` hashes identically to `Goldilocks`.
 #[derive(Default)]
@@ -49,6 +49,26 @@ unsafe fn felt_from_raw_u64(raw: u64) -> Felt {
 fn felt_to_raw_u64(value: Felt) -> u64 {
     // SAFETY: Felt is repr(transparent) over Goldilocks, which is repr(transparent) over u64.
     unsafe { core::mem::transmute_copy(&value) }
+}
+
+#[test]
+fn arbitrary_felt_covers_canonical_and_noncanonical_representations() {
+    let strategy = any::<Felt>();
+    let mut runner = TestRunner::deterministic();
+    let mut found_canonical = false;
+    let mut found_noncanonical = false;
+
+    for _ in 0..64 {
+        let value = strategy.new_tree(&mut runner).unwrap().current();
+        if felt_to_raw_u64(value) < Felt::ORDER {
+            found_canonical = true;
+        } else {
+            found_noncanonical = true;
+        }
+    }
+
+    assert!(found_canonical);
+    assert!(found_noncanonical);
 }
 
 proptest! {
@@ -214,7 +234,7 @@ proptest! {
     }
 
     #[test]
-    fn arbitrary_felt_is_canonical(value in any::<Felt>()) {
+    fn canonical_felt_strategy_uses_canonical_representations(value in arb_felt_canonical()) {
         prop_assert!(felt_to_raw_u64(value) < Felt::ORDER);
     }
 
