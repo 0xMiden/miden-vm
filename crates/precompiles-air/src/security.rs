@@ -231,7 +231,7 @@ pub const DEEP_BASE: u64 = CHALLENGE_FIELD_BITS - DEEP_COEFFICIENT;
 pub const FOLDING_BASE: u64 =
     CHALLENGE_FIELD_BITS - FOLDING_COEFFICIENT - fixed::from_bits(LOG_BLOWUP as u32);
 
-/// `log2(e)`, rounded down, in Q16 fixed point.
+/// `log2(e)`, rounded up, in Q16 fixed point.
 pub const LOG2_E: u64 = fixed::LOG2_E;
 
 /// The instance shape of a deployed PVM proof at the given maximum AIR log height.

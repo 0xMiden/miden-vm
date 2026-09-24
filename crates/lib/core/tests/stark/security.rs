@@ -24,8 +24,9 @@ fn vm_verify_proof_rejects_oversized_num_queries() {
 }
 
 /// The MVM lookup round must agree with the native estimator at every supported trace height and
-/// kernel size. Query inputs are maximized so lookup determines the returned minimum at every
-/// cell. The common query calculation is covered separately over its complete input domain.
+/// kernel size. Query inputs and DEEP grinding are maximized so lookup determines the returned
+/// minimum at every cell. The common query calculation is covered separately over its complete
+/// input domain.
 #[test]
 fn vm_lookup_round_matches_native_exhaustively() {
     use Axis::{Fixed, Inner, Outer};
@@ -40,7 +41,7 @@ fn vm_lookup_round_matches_native_exhaustively() {
         [
             Fixed(NUM_QUERIES_MAX),
             Fixed(POW_BITS_MAX),
-            Fixed(0),
+            Fixed(POW_BITS_MAX),
             Fixed(0),
             Outer(MVM_LOG_HEIGHT_MIN),
             Inner(0),
@@ -311,7 +312,7 @@ fn run_estimator(descriptor: SecurityDescriptor) -> Result<u64, miden_processor:
         .map(|(output, _)| output.stack.get_num_elements(1)[0].as_canonical_u64())
 }
 
-/// Exercises each branch used to compute the query, lookup, and DEEP terms.
+/// Exercises each branch used to compute the query and lookup terms.
 ///
 /// These descriptors are synthetic, but all of them satisfy the estimator's input bounds. Each
 /// comment derives the expected result, which is also checked against the native estimator. The
@@ -347,18 +348,18 @@ fn common_security_estimator_wires_each_computed_round() {
         ),
         // A = 257 (the envelope floor): base = 127 - 9 - 6 = 112 and slack recovery fires. The
         // omitted rounds are at their least secure accepted values: composition is 114 bits,
-        // OOD is 118 bits, and folding is 116 bits. DEEP binds at 105 bits.
+        // OOD is 118 bits, and folding is 116 bits. DEEP grinding keeps lookup binding at 113
+        // bits.
         (
             "dominated-round envelope corner",
             SecurityDescriptor {
-                deep_pow_bits: 0,
                 folding_pow_bits: 0,
                 num_composed_constraints: 8192,
                 max_constraint_degree: 9,
                 num_deep_terms: 8192,
                 ..baseline
             },
-            105,
+            113,
         ),
         // The MVM lookup shape at height 22: A = 504, b = 1477 + 11 = 1488, R = 1, so the slack
         // bound recovers the fractional bit exactly: 127 - 9 - 22 - 0 + 1 = 97.
@@ -411,6 +412,36 @@ fn common_security_estimator_wires_each_computed_round() {
             expected_level,
             "{binding_term} probe expectation drifted from the native estimator"
         );
+    }
+}
+
+/// DEEP must determine the returned minimum on both sides of a power-of-two boundary and at
+/// the term-count ceiling. Lookup is 119 - height bits on this shape, strictly above every probe;
+/// query and the omitted rounds are also higher. Grinding must add to the DEEP result.
+#[test]
+fn deep_round_matches_native_at_rounding_boundaries() {
+    // At height 6 with no grinding, powers of two lose the fractional field-size bit:
+    // 124 - ceil(log2(n)) - 6 + !is_power_of_two(n).
+    for (num_deep_terms, unground_level) in
+        [(255, 111), (256, 110), (257, 110), (8191, 106), (8192, 105)]
+    {
+        for log_max_height in [6, 29] {
+            for deep_pow_bits in [0, 1] {
+                let descriptor = SecurityDescriptor {
+                    num_deep_terms,
+                    log_max_height,
+                    deep_pow_bits,
+                    ..minimal_synthetic_shape()
+                };
+                let expected = unground_level - (log_max_height - 6) + deep_pow_bits;
+                let actual = run_estimator(descriptor).expect("DEEP probe must execute");
+                assert_eq!(
+                    actual, expected,
+                    "DEEP mismatch at n={num_deep_terms}, height={log_max_height}, grinding={deep_pow_bits}"
+                );
+                assert_eq!(native_level(&descriptor), expected, "native DEEP expectation drifted");
+            }
+        }
     }
 }
 
@@ -488,7 +519,7 @@ fn slack_bound_never_overstates_and_loses_at_most_one_bit() {
 
 /// Checks that each unsupported-input condition is rejected.
 ///
-/// The arithmetic and the proof that five native terms may be omitted both rely on these bounds.
+/// The arithmetic and the proof that four native terms may be omitted both rely on these bounds.
 /// Returning a level outside them would make one of those arguments invalid.
 #[test]
 fn estimator_envelope_violations_trap() {
@@ -714,7 +745,8 @@ fn security_level_threshold_rejects_below_target() {
 }
 
 /// The PVM lookup round must agree with the native estimator at every supported trace height.
-/// Query inputs are maximized so lookup determines the returned minimum at every height.
+/// Query inputs and DEEP grinding are maximized so lookup determines the returned minimum at
+/// every height.
 #[test]
 fn pvm_lookup_round_matches_native_exhaustively() {
     use Axis::{Fixed, Outer};
@@ -730,7 +762,7 @@ fn pvm_lookup_round_matches_native_exhaustively() {
         [
             Fixed(NUM_QUERIES_MAX),
             Fixed(POW_BITS_MAX),
-            Fixed(0),
+            Fixed(POW_BITS_MAX),
             Fixed(0),
             Outer(PVM_LOG_HEIGHT_MIN),
         ],
