@@ -42,19 +42,19 @@
 //!
 //! Main group contribution table:
 //!
-//! | Interaction | Gate deg | Payload | U contrib | V contrib |
-//! |---|---|---|---|---|
-//! | JOIN/SPLIT/SPAN/DYN continuation add | 5 | Continuation, denom 1 | 6 | 5 |
-//! | LOOP continuation add | 5 | Continuation, denom 1 | 6 | 5 |
-//! | DYNCALL caller-frame add | 5 | CallerFrame, denom 1 | 6 | 5 |
-//! | CALL/SYSCALL caller-frame add | 4 | CallerFrame, denom 1 | 5 | 4 |
-//! | END continuation remove | 5 | Continuation, denom 1 | 6 | 5 |
-//! | END caller-frame remove | 5 | CallerFrame, denom 1 | 6 | 5 |
-//! | RESPAN batch (k=2, f=respan deg 4) | — | Continuation | 6 | 5 |
-//! | u32rc batch (k=4, f=u32_rc_op deg 3) | — | Range, denom 1 | **7** | **6** |
-//! | MPVERIFY Merkle batch (k=3, f=mpverify deg 5) | — | Range, denom 1 | **8** | **7** |
-//! | MRUPDATE Merkle batch (k=4, f=mrupdate deg 4) | — | Range, denom 1 | **8** | **7** |
-//! | logpre batch (k=2, f=log_deferred deg 5) | — | LogDeferred, denom 1 | **7** | **6** |
+//! |Interaction                                  |Gate deg|Payload              |U degree|V degree|
+//! |---------------------------------------------|--------|---------------------|--------|--------|
+//! |JOIN/SPLIT/SPAN/DYN continuation add         |5       |Continuation, denom 1|6       |5       |
+//! |LOOP continuation add                        |5       |Continuation, denom 1|6       |5       |
+//! |DYNCALL caller-frame add                     |5       |CallerFrame, denom 1 |6       |5       |
+//! |CALL/SYSCALL caller-frame add                |4       |CallerFrame, denom 1 |5       |4       |
+//! |END continuation remove                      |5       |Continuation, denom 1|6       |5       |
+//! |END caller-frame remove                      |5       |CallerFrame, denom 1 |6       |5       |
+//! |RESPAN batch (k=2, f=respan deg 4)           |—       |Continuation         |6       |5       |
+//! |u32rc batch (k=4, f=u32_rc_op deg 3)         |—       |Range, denom 1       |**7**   |**6**   |
+//! |MPVERIFY Merkle batch (k=3, f=mpverify deg 5)|—       |Range, denom 1       |**8**   |**7**   |
+//! |MRUPDATE Merkle batch (k=4, f=mrupdate deg 4)|—       |Range, denom 1       |**8**   |**7**   |
+//! |logpre batch (k=2, f=log_deferred deg 5)     |—       |LogDeferred, denom 1 |**7**   |**6**   |
 //!
 //! Column max: `U = 8, V = 7`; transition degree is `max(1 + 8, 7) = 9`.
 

@@ -25,13 +25,13 @@ Miden VM programs consist of a set of code blocks organized into a binary tree. 
 Managing control flow in the VM is accomplished by executing control flow operations listed in the table below. Each of these operations requires exactly one VM cycle to execute.
 
 | Operation | Description                                                                  |
-| --------- | ---------------------------------------------------------------------------- |
+|-----------|------------------------------------------------------------------------------|
 | `JOIN`    | Initiates processing of a new [Join block](../programs.md#join-block).       |
 | `SPLIT`   | Initiates processing of a new [Split block](../programs.md#split-block).     |
 | `LOOP`    | Initiates processing of a new [Loop block](../programs.md#loop-block).       |
 | `REPEAT`  | Initiates a new iteration of an executing loop.                              |
-| `SPAN`    | Initiates processing of a new [basic block](../programs.md#basic-block). |
-| `RESPAN`  | Initiates processing of a new operation batch within a basic block. |
+| `SPAN`    | Initiates processing of a new [basic block](../programs.md#basic-block).     |
+| `RESPAN`  | Initiates processing of a new operation batch within a basic block.          |
 | `DYN`     | Initiates processing of a new [Dyn block](../programs.md#dyn-block).         |
 | `DYNCALL` | Initiates processing of a new [Dyncall block](../programs.md#dyncall-block). |
 | `CALL`    | Initiates processing of a new [Call block](../programs.md#call-block).       |
@@ -116,17 +116,17 @@ The decoder is one of the more complex parts of the VM. It consists of the follo
 
 Decoder trace columns are grouped as follows:
 
-| Columns | Registers | Purpose |
-| :-----: | --------- | ------- |
-| $0$ | $a$ | Block address |
-| $1$--$7$ | $b_0, \ldots, b_6$ | Opcode bits |
-| $8$--$15$ | $h_0, \ldots, h_7$ | Hasher state and operation helpers |
-| $16$ | $sp$ | In-basic-block flag |
-| $17$ | $gc$ | Remaining operation-group count, or body multiplicity on `LOOP` rows |
-| $18$ | $ox$ | Index within the current operation group |
-| $19$ | `full_batch` | Full eight-group batch indicator |
-| $20$ | `batch_size_code` | Short-batch size code ($1$, $-1$, or $0$) |
-| $21$--$22$ | $e_0, e_1$ | Degree-reduction registers |
+| Columns    | Registers          | Purpose                                                              |
+| :--------: | ------------------ | -------------------------------------------------------------------- |
+| $0$        | $a$                | Block address                                                        |
+| $1$--$7$   | $b_0, \ldots, b_6$ | Opcode bits                                                          |
+| $8$--$15$  | $h_0, \ldots, h_7$ | Hasher state and operation helpers                                   |
+| $16$       | $sp$               | In-basic-block flag                                                  |
+| $17$       | $gc$               | Remaining operation-group count, or body multiplicity on `LOOP` rows |
+| $18$       | $ox$               | Index within the current operation group                             |
+| $19$       | `full_batch`       | Full eight-group batch indicator                                     |
+| $20$       | `batch_size_code`  | Short-batch size code ($1$, $-1$, or $0$)                            |
+| $21$--$22$ | $e_0, e_1$         | Degree-reduction registers                                           |
 
 These registers have the following meanings:
 
@@ -567,13 +567,13 @@ To simplify the constraint system, the number of groups in a batch can be only o
 
 The pair $(full\_batch, batch\_size\_code)$ encodes the batch size and determines which groups are added to the op group table:
 
-| Encoding | Batch size | Groups added to the op group table |
-| :------: | :--------: | ---------------------------------- |
-| $(1, 0)$ | $8$ | $h_1, \ldots, h_7$ |
-| $(0, 1)$ | $4$ | $h_1, \ldots, h_3$ |
-| $(0, -1)$ | $2$ | $h_1$ |
-| $(0, 0)$ on `SPAN` or `RESPAN` | $1$ | None |
-| $(0, 0)$ otherwise | Inactive | None |
+| Encoding                       | Batch size | Groups added to the op group table |
+|:------------------------------:|:----------:|------------------------------------|
+| $(1, 0)$                       | $8$        | $h_1, \ldots, h_7$                 |
+| $(0, 1)$                       | $4$        | $h_1, \ldots, h_3$                 |
+| $(0, -1)$                      | $2$        | $h_1$                              |
+| $(0, 0)$ on `SPAN` or `RESPAN` | $1$        | None                               |
+| $(0, 0)$ otherwise             | Inactive   | None                               |
 
 Thus, the constrained `SPAN`/`RESPAN` selector distinguishes a one-group batch from an inactive row; both use the same two committed values.
 
