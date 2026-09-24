@@ -159,7 +159,7 @@ pub fn prove_once_with_hash(
 pub fn verify_once(
     fixture: &PrecompileFixture,
     stack_outputs: StackOutputs,
-    proof: ExecutionProof,
+    proof: &ExecutionProof,
 ) {
     let claim = ExecutionClaim::from_program_info(
         fixture.program.to_info(),
@@ -167,7 +167,7 @@ pub fn verify_once(
         stack_outputs,
     );
     let outcome = Verifier::new()
-        .verify(&claim, &proof)
+        .verify(&claim, proof)
         .expect("failed to verify precompile benchmark proof");
     assert!(outcome.is_complete(), "prove_full must settle all precompile work");
 }
