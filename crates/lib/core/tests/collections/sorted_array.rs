@@ -110,6 +110,43 @@ fn test_sorted_array_lookups_reject_oversized_ranges() {
 }
 
 #[test]
+fn test_sorted_array_lookups_accept_maximum_range() {
+    const MAX_ENTRIES: u32 = 1 << 16;
+    const START_PTR: u32 = 4;
+
+    let tests = [
+        ("find_word", 4, "push.[1,0,0,0]"),
+        ("find_key_value", 8, "push.[1,0,0,0]"),
+        ("find_half_key_value", 8, "push.1 push.1"),
+    ];
+
+    for (procedure, stride, key) in tests {
+        let end_ptr = START_PTR + MAX_ENTRIES * stride;
+        let source = format!(
+            "
+            use miden::core::collections::sorted_array
+
+            {TRUNCATE_STACK_PROC}
+
+            begin
+                push.{end_ptr} push.{START_PTR} {key}
+                exec.sorted_array::{procedure}
+                exec.truncate_stack
+            end
+            "
+        );
+
+        build_test!(source, &[]).expect_stack(&[
+            0,
+            u64::from(end_ptr),
+            u64::from(START_PTR),
+            u64::from(end_ptr),
+            0,
+        ]);
+    }
+}
+
+#[test]
 fn test_unsorted_array_find_word_fails() {
     let source: String = format!(
         "
