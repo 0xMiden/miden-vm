@@ -41,9 +41,7 @@ pub const COL_WORD_FIRST: usize = 9;
 pub const COL_HASH_FIRST: usize = 10;
 pub const COL_WORD_LAST: usize = 11;
 pub const COL_LANE_HALF: usize = 12;
-/// Last eight lanes of a 32-row cycle, which host the IO rows of the final padding cycle.
-pub const COL_LANE_LAST8: usize = 13;
-pub const TEMPLATE_BEGIN: usize = 14;
+pub const TEMPLATE_BEGIN: usize = 13;
 pub const TEMPLATE_COLS: usize = 17;
 pub const NUM_PERIODIC_COLS: usize = TEMPLATE_BEGIN + 6 * TEMPLATE_COLS;
 
@@ -480,7 +478,6 @@ pub fn compression_program() -> [Vec<Felt>; NUM_PERIODIC_COLS] {
                     COL_HASH_FIRST => Felt::from((row % 32 == 0) as u8),
                     COL_WORD_LAST => Felt::from((row % 16 == 15) as u8),
                     COL_LANE_HALF => Felt::from((row % 32 / 16) as u32),
-                    COL_LANE_LAST8 => Felt::from((row % 32 >= 24) as u8),
                     _ => template_field(
                         (column - TEMPLATE_BEGIN) / TEMPLATE_COLS,
                         row,

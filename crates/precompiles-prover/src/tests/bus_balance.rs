@@ -42,10 +42,10 @@ fn sha512_reuses_compression_padding_for_io() {
 
 #[test]
 fn sha256_reuses_compression_padding_for_io() {
-    // IO needs only eight rows per block. It must share both witness and lookup columns
+    // IO needs only thirty-two rows per block. It must share both witness and lookup columns
     // with compression instead of adding a mostly empty band to all 4096 rows.
-    assert_eq!(Sha256Air.width(), 61);
-    assert_eq!(Sha256Air.aux_width(), 18);
+    assert_eq!(Sha256Air.width(), 40);
+    assert_eq!(Sha256Air.aux_width(), 11);
     assert_eq!(NUM_CHIPLETS, 12);
     assert_eq!(crate::tests::log_quotient_degree(&Sha256Air), 2);
 }

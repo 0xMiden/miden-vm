@@ -7,8 +7,31 @@ use miden_precompiles_air::hash::sha256::compression::{
     self,
     program::{self, Op},
 };
+use miden_utils_sync::LazyLock;
 
 use crate::primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp};
+
+static SLOTS: LazyLock<[program::Slot; program::COMPRESSION_PERIOD]> =
+    LazyLock::new(program::slots);
+
+/// The controller, metadata and program repeat in every block, including inactive padding.
+/// Cache only the fixed prefix; byte witnesses are filled independently for each active block.
+static ROW_TEMPLATES: LazyLock<Vec<[Felt; compression::COL_A_BEGIN]>> = LazyLock::new(|| {
+    let metadata = program::round_metadata();
+    // A phase has at most 64 cycles, so its remaining-cycle delta is in -63..=0.
+    let inverses: [Felt; 64] =
+        core::array::from_fn(|i| (-Felt::from(i as u32)).try_inverse().unwrap_or(Felt::ZERO));
+    SLOTS
+        .iter()
+        .enumerate()
+        .map(|(index, &slot)| {
+            let mut row = [Felt::ZERO; compression::COL_A_BEGIN];
+            fill_control(&mut row, index, &metadata, &inverses);
+            fill_program(&mut row, slot);
+            row
+        })
+        .collect()
+});
 
 #[derive(Debug, Clone, Copy)]
 pub struct CompressionInput {
@@ -103,12 +126,7 @@ fn populate_block(
                 }
                 value
             },
-            Op::Const(v) => {
-                for byte in v.to_le_bytes() {
-                    bpl.require(BytePairOp::Xor, 0, byte);
-                }
-                v
-            },
+            Op::Const(v) => v,
             Op::Xor => {
                 for (x, y) in a.to_le_bytes().into_iter().zip(b.to_le_bytes()) {
                     bpl.require(BytePairOp::Xor, x, y);
@@ -136,9 +154,6 @@ fn populate_block(
                 sum
             },
             Op::Rol(sh) => {
-                for byte in a.to_le_bytes() {
-                    bpl.require(BytePairOp::Xor, byte, 0);
-                }
                 let decomposition = (u64::from(a) + (1u64 << 32)) * (1u64 << sh);
                 for (j, limb) in limbs.iter_mut().enumerate() {
                     *limb = ((decomposition >> (16 * j)) & 0xffff) as u16;
@@ -216,24 +231,79 @@ pub(crate) fn populate_trace(
     assert!(
         values.len() / row_width >= requires.trace_height().expect("SHA-256 trace height overflow")
     );
-    let slots = program::slots();
-    let metadata = program::round_metadata();
-    for (index, row) in values.chunks_exact_mut(row_width).enumerate() {
+    let templates = &*ROW_TEMPLATES;
+    let initialize_row = |(index, row): (usize, &mut [Felt])| {
+        row[..compression::COL_A_BEGIN]
+            .copy_from_slice(&templates[index % program::COMPRESSION_PERIOD]);
         let block = index / program::COMPRESSION_PERIOD;
         row[compression::COL_BLOCK_ID] =
             Felt::from(u32::try_from(block).expect("SHA-256 block id overflow"));
         row[compression::COL_ACT] = Felt::from((block < requires.records.len()) as u8);
-        let slot_index = index % program::COMPRESSION_PERIOD;
-        fill_control(row, slot_index, &metadata);
-        fill_program(row, slots[slot_index]);
+    };
+
+    #[cfg(feature = "concurrent")]
+    if requires.records.len() >= 2 * MIN_BLOCKS_PER_PARALLEL_CHUNK
+        && miden_crypto::parallel::current_num_threads() > 1
+    {
+        use miden_crypto::parallel::*;
+
+        // Fixed rows include inactive padding, so initialize the entire allocation in parallel.
+        values
+            .par_chunks_mut(row_width)
+            .with_min_len(program::COMPRESSION_PERIOD)
+            .enumerate()
+            .for_each(initialize_row);
+        populate_blocks_parallel(&requires.records, bpl, values, row_width);
+        return;
     }
+    values.chunks_exact_mut(row_width).enumerate().for_each(initialize_row);
+    populate_blocks_sequential(&requires.records, bpl, values, row_width);
+}
+
+fn populate_blocks_sequential(
+    records: &[CompressionInput],
+    bpl: &mut BytePairLutRequires,
+    values: &mut [Felt],
+    row_width: usize,
+) {
     // Populate directly into the final allocation; reuse scratch words across blocks.
     let mut memory = vec![0u32; program::COMPRESSION_PERIOD];
-    for (rows, rec) in values
-        .chunks_exact_mut(program::COMPRESSION_PERIOD * row_width)
-        .zip(&requires.records)
+    for (rows, rec) in values.chunks_exact_mut(program::COMPRESSION_PERIOD * row_width).zip(records)
     {
-        populate_block(rec, &slots, rows, row_width, &mut memory, bpl);
+        populate_block(rec, &SLOTS, rows, row_width, &mut memory, bpl);
+    }
+}
+
+/// Amortize initialization and merging of one dense lookup accumulator per parallel chunk.
+#[cfg(feature = "concurrent")]
+const MIN_BLOCKS_PER_PARALLEL_CHUNK: usize = 16;
+
+#[cfg(feature = "concurrent")]
+fn populate_blocks_parallel(
+    records: &[CompressionInput],
+    bpl: &mut BytePairLutRequires,
+    values: &mut [Felt],
+    row_width: usize,
+) {
+    use miden_crypto::parallel::*;
+
+    let blocks_per_chunk =
+        records.len().div_ceil(current_num_threads()).max(MIN_BLOCKS_PER_PARALLEL_CHUNK);
+    let block_size = program::COMPRESSION_PERIOD * row_width;
+    let counts = values[..records.len() * block_size]
+        .par_chunks_mut(blocks_per_chunk * block_size)
+        .zip(records.par_chunks(blocks_per_chunk))
+        .map(|(rows, records)| {
+            let mut counts = BytePairLutRequires::new();
+            populate_blocks_sequential(records, &mut counts, rows, row_width);
+            counts
+        })
+        .reduce_with(|mut left, right| {
+            left.merge(right);
+            left
+        });
+    if let Some(counts) = counts {
+        bpl.merge(counts);
     }
 }
 
@@ -241,14 +311,15 @@ fn fill_control(
     row: &mut [Felt],
     index: usize,
     metadata: &[program::RoundMetadata; program::MAX_PERIODIC_LENGTH],
+    inverses: &[Felt; 64],
 ) {
     let phase = program::PHASE_BASES.iter().rposition(|&base| index >= base as usize).unwrap();
     let cycle = (index - program::PHASE_BASES[phase] as usize) / 32;
     row[compression::COL_PHASE_BEGIN + phase] = Felt::ONE;
     row[compression::COL_CYCLE] = Felt::from(cycle as u32);
-    let delta = Felt::from((cycle + 1) as u32) - Felt::from(program::PHASE_CYCLES[phase]);
-    row[compression::COL_PHASE_END] = Felt::from((delta == Felt::ZERO) as u8);
-    row[compression::COL_PHASE_INV] = delta.try_inverse().unwrap_or(Felt::ZERO);
+    let remaining = program::PHASE_CYCLES[phase] as usize - cycle - 1;
+    row[compression::COL_PHASE_END] = Felt::from((remaining == 0) as u8);
+    row[compression::COL_PHASE_INV] = inverses[remaining];
     let round = match phase {
         program::PHASE_WORDS => 2 * cycle + index % 32 / 16,
         program::PHASE_HASH => cycle,

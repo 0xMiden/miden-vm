@@ -165,7 +165,7 @@ pub fn eval_main<AB: LiftedAirBuilder<F = Felt>>(
     eval_main_with_io(builder, main_col_offset, periodic_col_offset, AB::Expr::ZERO);
 }
 
-/// Keep the block controller live while the final eight NOP rows hold IO witnesses.
+/// Keep the block controller live while the final 32 NOP rows hold IO witnesses.
 pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
     builder: &mut AB,
     main_col_offset: usize,
@@ -174,7 +174,8 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
 ) {
     let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
     let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), main_col_offset);
-    let p = builder.periodic_values().to_vec();
+    let periodic: [AB::Expr; NUM_PERIODIC_COLS] =
+        array::from_fn(|i| builder.periodic_values()[periodic_col_offset + i].into());
     // The phase machine runs on inactive rows too, permitting a 128-row empty
     // trace while anchoring every active compression to exactly 4096 rows.
     let block_id: AB::Expr = local[COL_BLOCK_ID].into();
@@ -184,7 +185,6 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
     let phase_end: AB::Expr = local[COL_PHASE_END].into();
     let phases: [AB::Expr; program::NUM_PHASES] =
         array::from_fn(|i| local[COL_PHASE_BEGIN + i].into());
-    let periodic: Vec<AB::Expr> = p[periodic_col_offset..].iter().map(|&v| v.into()).collect();
     let last = periodic[program::COL_P32_LAST].clone();
     let block_last = last.clone() * phase_end.clone() * phases[program::PHASE_PADDING].clone();
     builder.assert_bool(local[COL_ACT]);
@@ -314,12 +314,13 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
     let two32 = AB::Expr::from(Felt::new(1u64 << 32).unwrap());
     builder.when(program_gate * is_add.clone()).assert_bool(local[COL_CARRY]);
     let carry: AB::Expr = local[COL_CARRY].into();
-    builder.assert_zero(act.clone() * is_add * (a + b - r.clone() - two32.clone() * carry));
-    builder.assert_zero(act.clone() * is_const * (r.clone() - constant));
-    // With `k = 2^s` for `s` in 1..=30, `(r + 2^32) * k` lies in `[2^33, 2^63)`, so its four
-    // range-checked 16-bit limbs cannot encode an alias shifted by the field modulus.
+    builder.assert_zero(act.clone() * is_add * (a.clone() + b - r.clone() - two32.clone() * carry));
+    builder.assert_zero(act.clone() * is_const * (r - constant));
+    // The source bus authenticates a u32: sources precede destinations, and every operation
+    // preserves that range. With `k = 2^s` for `s` in 1..=30, `(a + 2^32) * k` lies in
+    // `[2^33, 2^63)`, so its four range-checked u16 limbs cannot encode a field-modulus alias.
     let decomposition: AB::Expr = pack_le(&local[COL_ROT_BEGIN..COL_ROT_BEGIN + 4], 1u64 << 16);
-    builder.assert_zero(act * is_rol * ((r + two32) * k - decomposition));
+    builder.assert_zero(act * is_rol * ((a + two32) * k - decomposition));
 }
 
 /// The 32-bit left rotation encoded by a ROL row's limbs of `(x + 2^32) * k`: the low word
@@ -498,15 +499,15 @@ pub(super) fn eval_lookup_batch<B, V>(
             let is_andnot = v(COL_PROG_BEGIN + program::T_IS_ANDNOT);
             let is_add = v(COL_PROG_BEGIN + program::T_IS_ADD);
             let is_input = v(COL_PROG_BEGIN + program::T_IS_INPUT);
-            let is_const = v(COL_PROG_BEGIN + program::T_IS_CONST);
-            let is_rol = v(COL_PROG_BEGIN + program::T_IS_ROL);
             let logic = is_xor.clone() + is_and.clone() + is_andnot.clone();
-            let value = is_add.clone() + is_input.clone() + is_const.clone();
+            // Constant packed words are fixed by the AIR. Rotation inputs are already u32
+            // on the source bus, and their outputs use the range-checked u16 decomposition.
+            let value = is_add.clone() + is_input.clone();
             let a: [V; 4] = array::from_fn(|i| local[COL_A_BEGIN + i]);
             let b: [V; 4] = array::from_fn(|i| local[COL_B_BEGIN + i]);
             let r: [V; 4] = array::from_fn(|i| local[COL_R_BEGIN + i]);
             for i in pair_indices {
-                let lut_a = (is_xor.clone() + is_andnot.clone() + is_rol.clone()) * v_at(&a, i)
+                let lut_a = (is_xor.clone() + is_andnot.clone()) * v_at(&a, i)
                     + is_and.clone() * (B::Expr::from(Felt::from(255u8)) - v_at(&a, i));
                 let b_value = logic.clone() * v_at(&b, i) + value.clone() * v_at(&r, i);
                 // The table stores `lut_a xor b_value`. ANDNOT results map through
@@ -523,9 +524,7 @@ pub(super) fn eval_lookup_batch<B, V>(
                             + is_and.clone()
                             + is_andnot.clone()
                             + is_add.clone()
-                            + is_rol.clone()
-                            + is_input.clone()
-                            + is_const.clone()),
+                            + is_input.clone()),
                     BytePairLutMsg::from_xor(lut_a, b_value, x),
                     entry_degree,
                 );

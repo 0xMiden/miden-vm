@@ -24,3 +24,7 @@ rand_chacha = { workspace = true }
 name = "precompiles_bench"
 path = "../../crates/precompiles/benches/precompiles_bench.rs"
 harness = false
+
+[[test]]
+name = "input_generation"
+path = "../../crates/precompiles/benches/precompiles_bench/input_generation.rs"

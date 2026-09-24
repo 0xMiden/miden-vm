@@ -44,6 +44,26 @@ fn io_index(block: usize, lane: usize, column: usize) -> usize {
 }
 
 #[test]
+fn sha256_trace_meets_per_block_memory_budget() {
+    use miden_lifted_air::LiftedAir;
+
+    let (compression, io) = requirements(&[55]);
+    let main = generate_trace(compression, io, &mut BytePairLutRequires::new());
+    let (aux, _) = Sha256Air.build_aux_trace(
+        &main,
+        &[],
+        &[],
+        &[QuadFelt::from_u64(17), QuadFelt::from_u64(31)],
+    );
+    // Each commitment row is padded independently to eight base-field elements.
+    // IO must fit within a 40-main + 24-aux aligned footprint per compression row.
+    let committed_cells = main.height() * main.width.next_multiple_of(8)
+        + aux.height() * (2 * aux.width).next_multiple_of(8);
+    assert!(committed_cells <= 64 * 4096, "SHA-256 cells per block: {committed_cells}");
+    check_local(Sha256Air, &main);
+}
+
+#[test]
 fn sha256_multiplex_preserves_dense_lookup_demands_and_empty_heights() {
     // Cover no invocations, an empty message, an exact final row, a padded third block,
     // and multiple invocations with duplicate messages and shared Eidos spans.
@@ -99,7 +119,7 @@ fn sha256_multiplex_rejects_wrong_row_ownership_and_io_witnesses() {
         ("message restarts after padding", io_index(0, 1, io::COL_MSG_BEGIN), Felt::ONE),
         ("raw byte outside the message", io_index(0, 1, io::COL_RAW_BEGIN), Felt::ONE),
         ("non-Boolean first flag", io_index(0, 0, io::COL_FIRST_BLOCK), Felt::from_u8(2)),
-        ("output before the final row", io_index(0, 1, io::COL_OUT_MULT), Felt::ONE),
+        ("broken raw-to-state marker", io_index(0, 16, io::COL_BEFORE), Felt::ONE),
     ] {
         let mut bad = main.clone();
         bad.values[index] = value;
@@ -118,13 +138,13 @@ fn sha256_multiplex_rejects_wrong_row_ownership_and_io_witnesses() {
     }
     assert!(
         std::panic::catch_unwind(|| check_local(Sha256Air, &bad)).is_err(),
-        "IO activity must be confined to the final eight padding rows",
+        "IO activity must be confined to the final 32 padding rows",
     );
     let mut bad = main;
-    bad.values[io_index(0, 7, io::COL_DIGEST_EIDOS)] += Felt::ONE;
+    bad.values[io_index(0, 24, io::COL_DIGEST_EIDOS)] += Felt::ONE;
     assert!(
         std::panic::catch_unwind(|| check_local(Sha256Air, &bad)).is_err(),
-        "digest pointer must be held across IO row 6 -> 7",
+        "digest pointer must be held across IO row 23 -> 24",
     );
 }
 
@@ -138,13 +158,8 @@ fn continuation(
     Sha256IoContinuation {
         block_id: v(io::COL_BLOCK_ID) + Felt::from_bool(provide),
         len: v(io::COL_LEN),
-        left: v(io::COL_LEFT)
-            - if provide {
-                (0..8).map(|i| v(io::COL_MSG_BEGIN + i)).sum::<Felt>()
-            } else {
-                Felt::ZERO
-            },
-        before: v(if provide { io::COL_MSG_BEGIN + 7 } else { io::COL_BEFORE }),
+        left: v(io::COL_LEFT),
+        before: v(io::COL_BEFORE),
         input_eidos: v(io::COL_INPUT_EIDOS)
             - if provide { Felt::ZERO } else { v(io::COL_CHUNK_ACTIVE) },
         input_head: v(io::COL_INPUT_HEAD),
@@ -164,7 +179,7 @@ fn sha256_multiplex_continuation_binds_every_transport_field() {
         io::COL_BLOCK_ID,
         io::COL_LEN,
         io::COL_LEFT,
-        io::COL_MSG_BEGIN + 7,
+        io::COL_BEFORE,
         io::COL_INPUT_EIDOS,
         io::COL_INPUT_HEAD,
     ] {
