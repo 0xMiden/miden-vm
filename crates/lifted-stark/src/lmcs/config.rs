@@ -300,6 +300,14 @@ where
         Ok(BatchProof { openings, witness })
     }
 
+    fn batch_proof<M: Matrix<Self::F>>(
+        &self,
+        tree: &Self::Tree<M>,
+        indices: &TreeIndices,
+    ) -> Result<Self::BatchProof, LmcsError> {
+        tree.batch_proof(self, indices)
+    }
+
     fn alignment(&self) -> usize {
         <H as Alignable<PF::Value, PD::Value>>::ALIGNMENT
     }
@@ -542,6 +550,9 @@ mod tests {
             .expect("Goldilocks+Blake3 LMCS roundtrip should verify");
 
         assert_eq!(opened[&0], tree.aligned_rows(0));
+        let typed = lmcs.batch_proof(&tree, &indices).unwrap();
+        assert_eq!(typed.openings[&0].rows, opened[&0]);
+        assert_eq!(typed.witness.root(), Some(&commitment));
         let verifier_digest =
             verifier_channel.finalize().expect("transcript should finalize cleanly");
         assert_eq!(prover_digest, verifier_digest);

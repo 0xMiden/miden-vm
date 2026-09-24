@@ -17,7 +17,6 @@
 use alloc::vec::Vec;
 
 use miden_lifted_air::{BaseAir, MultiAir, ProverStatement, Statement, log2_strict_u8};
-use miden_stark_transcript::{ProverTranscript, VerifierChannel, VerifierTranscript};
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -160,23 +159,8 @@ where
         C: StarkConfig<F, EF, Lmcs = L>,
     {
         let tree = self.committed.tree();
-        let tree_log_height = log2_strict_u8(tree.height());
         let indices = TreeIndices::new(query_indices, query_log_height)?;
-        indices.fold_to_depth(tree_log_height)?;
-
-        let mut prover_channel = ProverTranscript::new(config.challenger());
-        tree.prove_lifted_batch(config.lmcs(), &indices, &mut prover_channel);
-        let (_, transcript) = prover_channel.finalize();
-
-        let mut verifier_channel = VerifierTranscript::from_data(config.challenger(), &transcript);
-        let proof = config.lmcs().read_lifted_batch_proof(
-            &tree.aligned_widths(),
-            &indices,
-            tree_log_height,
-            &mut verifier_channel,
-        )?;
-        debug_assert!(verifier_channel.is_empty());
-        Ok(proof)
+        config.lmcs().lifted_batch_proof(tree, &indices)
     }
 
     /// The committed LDE tree, for opening and per-AIR quotient-domain views.
