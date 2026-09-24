@@ -404,6 +404,10 @@ impl ExtensionAlgebra<Self, 2, Binomial<Self>> for Felt {
 }
 
 impl BinomiallyExtendable<2> for Felt {
+    fn binomial_algebra_id() -> Vec<u8> {
+        <Goldilocks as BinomiallyExtendable<2>>::binomial_algebra_id()
+    }
+
     const W: Self = Self(<Goldilocks as BinomiallyExtendable<2>>::W);
 
     const DTH_ROOT: Self = Self(<Goldilocks as BinomiallyExtendable<2>>::DTH_ROOT);
@@ -437,6 +441,10 @@ impl ExtensionAlgebra<Self, 5, Binomial<Self>> for Felt {
 }
 
 impl BinomiallyExtendable<5> for Felt {
+    fn binomial_algebra_id() -> Vec<u8> {
+        <Goldilocks as BinomiallyExtendable<5>>::binomial_algebra_id()
+    }
+
     const W: Self = Self(<Goldilocks as BinomiallyExtendable<5>>::W);
 
     const DTH_ROOT: Self = Self(<Goldilocks as BinomiallyExtendable<5>>::DTH_ROOT);
