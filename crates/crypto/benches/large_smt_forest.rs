@@ -12,7 +12,6 @@ use miden_crypto::{
         Backend, ForestPersistentBackend, LargeSmtForest, LineageId, PersistentBackendConfig,
         SmtForestUpdateBatch, SmtUpdateBatch, TreeId,
     },
-    rand::test_utils::rand_value,
 };
 use miden_field::Word;
 
@@ -73,7 +72,7 @@ fn generate_forest_update_batch(lineages: &[LineageId], count: usize) -> SmtFore
 fn generate_lineages(count: usize) -> Vec<LineageId> {
     let mut lineages = Vec::new();
     for _ in 0..count {
-        lineages.push(LineageId::new(rand_value()));
+        lineages.push(LineageId::new(rand::random()));
     }
     lineages
 }
