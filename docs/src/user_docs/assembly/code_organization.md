@@ -310,6 +310,19 @@ begin
 end
 ```
 
+#### Word constants from strings
+
+A word constant could also be derived from a string using the `word("...")` constructor. The constructor hashes the UTF-8 bytes of the string with Blake3 and interprets the resulting 32-byte digest as four field elements, so the same string always yields the same word. The value is computed at compile time and can be used anywhere a regular word constant is allowed. A common use case is deriving named storage slot IDs, which could then be combined with the slice notation described below:
+
+```
+const METADATA_SLOT = word("miden::standards::fungible_faucets::metadata")
+
+begin
+    push.METADATA_SLOT       # pushes the four field elements derived from the string
+    push.METADATA_SLOT[0..2] # pushes only the first two elements of the derived word
+end
+```
+
 #### Word literal syntax
 
 In addition to word constants, you can push a word directly using the `push.[a,b,c,d]` syntax. This pushes 4 field elements onto the stack such that the first element `a` ends up on top of the stack:
