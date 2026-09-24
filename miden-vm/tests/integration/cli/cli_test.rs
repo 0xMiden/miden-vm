@@ -304,6 +304,30 @@ fn prove_keeps_the_proof_when_the_default_output_is_a_hard_link_to_it() {
     assert_proof_survived(&proof_path);
 }
 
+#[cfg(unix)]
+#[test]
+fn prove_keeps_a_write_only_proof_when_the_default_output_is_a_hard_link_to_it() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (working_dir, mut cmd) = prove_command();
+    let proof_path = working_dir.path().join("custom.proof");
+    let output_path = working_dir.path().join("custom.outputs");
+    fs::write(&proof_path, "stale proof").unwrap();
+    fs::hard_link(&proof_path, &output_path).unwrap();
+    fs::set_permissions(&proof_path, fs::Permissions::from_mode(0o200)).unwrap();
+
+    // root reads the file regardless of its mode, so the identity check cannot fail there
+    if fs::File::open(&proof_path).is_ok() {
+        return;
+    }
+
+    cmd.arg("--proof").arg(&proof_path);
+    cmd.assert().failure().stderr(predicate::str::contains("denied"));
+
+    fs::set_permissions(&proof_path, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_proof_survived(&proof_path);
+}
+
 #[test]
 fn prove_rejects_invalid_program_extension_before_inferred_inputs_file() {
     let working_dir = TempDir::new().unwrap();

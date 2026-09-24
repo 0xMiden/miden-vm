@@ -1,4 +1,5 @@
 use std::{
+    io,
     path::{Path, PathBuf},
     time::Instant,
 };
@@ -188,7 +189,16 @@ impl ProveCmd {
         // components, case-insensitive names, Unicode normalization and hard links in one step.
         let proof_path = self.resolved_proof_path();
         let output_path = self.output_file.clone().unwrap_or_else(|| self.default_output_path());
-        if resolve_to_same_file(&output_path, &proof_path) {
+        let collides = resolve_to_same_file(&output_path, &proof_path).map_err(|err| {
+            Report::msg(format!(
+                "Could not tell whether the outputs file `{}` is the proof file `{}`: {err}. The \
+                 proof was kept; re-run with a different --proof or --output path to get the \
+                 outputs.",
+                output_path.display(),
+                proof_path.display()
+            ))
+        })?;
+        if collides {
             return Err(Report::msg(format!(
                 "The outputs file `{}` would overwrite the proof file `{}`. The proof was kept; \
                  re-run with a different --proof or --output path to get the outputs.",
@@ -222,9 +232,13 @@ impl ProveCmd {
 /// Returns true when both paths name the same existing file.
 ///
 /// This runs after the proof has been written, so the proof side always exists. An outputs path
-/// that cannot be opened names a file that does not exist yet, which therefore cannot be the proof.
-fn resolve_to_same_file(output_path: &Path, proof_path: &Path) -> bool {
-    same_file::is_same_file(output_path, proof_path).unwrap_or(false)
+/// that does not exist yet cannot be the proof. Any other error (e.g. a proof file that cannot be
+/// opened for reading) leaves the question unanswered, so it is returned rather than taken as a no.
+fn resolve_to_same_file(output_path: &Path, proof_path: &Path) -> io::Result<bool> {
+    match same_file::is_same_file(output_path, proof_path) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        result => result,
+    }
 }
 
 #[cfg(test)]
@@ -292,14 +306,18 @@ mod tests {
         {
             let alias_path = dir.path().join("alias.proof");
             std::os::unix::fs::symlink(&proof_path, &alias_path).unwrap();
-            assert!(resolve_to_same_file(&alias_path, &proof_path));
+            assert!(resolve_to_same_file(&alias_path, &proof_path).unwrap());
         }
 
         // negative control: with `sub` missing there is nothing to resolve `..` against
-        assert!(!resolve_to_same_file(&dir.path().join("./sub/../same.proof"), &proof_path));
+        assert!(
+            !resolve_to_same_file(&dir.path().join("./sub/../same.proof"), &proof_path).unwrap()
+        );
 
         fs::create_dir(dir.path().join("sub")).unwrap();
-        assert!(resolve_to_same_file(&dir.path().join("./sub/../same.proof"), &proof_path));
+        assert!(
+            resolve_to_same_file(&dir.path().join("./sub/../same.proof"), &proof_path).unwrap()
+        );
     }
 
     #[test]
@@ -311,11 +329,32 @@ mod tests {
         // negative control: a copy has the same contents but is a different file
         let copy_path = dir.path().join("copy.proof");
         fs::copy(&proof_path, &copy_path).unwrap();
-        assert!(!resolve_to_same_file(&copy_path, &proof_path));
+        assert!(!resolve_to_same_file(&copy_path, &proof_path).unwrap());
 
         let link_path = dir.path().join("link.proof");
         fs::hard_link(&proof_path, &link_path).unwrap();
-        assert!(resolve_to_same_file(&link_path, &proof_path));
+        assert!(resolve_to_same_file(&link_path, &proof_path).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_to_same_file_reports_a_proof_it_cannot_open() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+        let link_path = dir.path().join("link.proof");
+        fs::hard_link(&proof_path, &link_path).unwrap();
+        fs::set_permissions(&proof_path, fs::Permissions::from_mode(0o200)).unwrap();
+
+        // root reads the file regardless of its mode, so there is no error to see
+        if fs::File::open(&proof_path).is_ok() {
+            return;
+        }
+
+        let err = resolve_to_same_file(&link_path, &proof_path).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
     }
 
     #[test]
@@ -324,6 +363,6 @@ mod tests {
         let proof_path = dir.path().join("same.proof");
         fs::write(&proof_path, "proof").unwrap();
 
-        assert!(!resolve_to_same_file(&dir.path().join("same.outputs"), &proof_path));
+        assert!(!resolve_to_same_file(&dir.path().join("same.outputs"), &proof_path).unwrap());
     }
 }
