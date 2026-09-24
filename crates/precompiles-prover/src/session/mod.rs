@@ -36,6 +36,8 @@
 use alloc::{vec, vec::Vec};
 
 pub use miden_core::proof::StarkProof;
+#[cfg(debug_assertions)]
+use miden_core::utils::Matrix;
 use miden_core::{Felt, utils::RowMajorMatrix};
 
 pub use crate::transcript::eval::trace::{EcNode, Truthy, UintNode};
@@ -134,6 +136,30 @@ impl Session {
         }
     }
 
+    /// Predict the exact padded main-trace heights without allocating or consuming the session.
+    /// Returns `None` if any height calculation exceeds the host `usize` range.
+    pub fn trace_heights(&self) -> Option<[usize; NUM_CHIPLETS]> {
+        let chunk_node_sponge = self
+            .chunk
+            .trace_height()?
+            .max(self.node.trace_height()?)
+            .max(self.sponge.trace_height()?);
+        let uint = self.uint.store.trace_height()?.max(self.uint.mul.trace_height()?);
+
+        Some([
+            chunk_node_sponge,
+            self.p2.trace_height()?,
+            self.round.trace_height()?,
+            crate::primitives::byte_pair_lut::TRACE_HEIGHT,
+            self.eval.trace_height()?,
+            uint,
+            self.uint.add.trace_height()?,
+            self.ec.store.trace_height()?,
+            self.ec.add.trace_height()?,
+            self.msm.trace_height()?,
+        ])
+    }
+
     /// Record a Keccak-256 of `input`. Returns its digest and a [`Truthy`]
     /// handle to the `Binding(H_keccak, True)` claim — fold the handle into
     /// the transcript via [`assert_and`](Self::assert_and) /
@@ -142,7 +168,7 @@ impl Session {
     /// Interning is below this layer: identical input collapses onto one
     /// keccak-node row (its `out_mult` bumped) and lays no fresh sponge /
     /// chunk / Poseidon2 work — but each call still yields its own handle,
-    /// so the keccak row's `out_mult` matches its eval consumes.
+    /// whose uses are counted and forwarded to the provider at `finish`.
     pub fn keccak(&mut self, input: &[u8]) -> (KeccakDigest, Truthy) {
         // Seven disjoint fields borrowed in one expression — the borrow
         // checker's field-splitting allows it (these are direct field
@@ -155,7 +181,7 @@ impl Session {
             &mut self.bpl,
             &mut self.p2,
         );
-        let handle = self.eval.issue(out.h_keccak);
+        let handle = self.eval.issue_keccak(out.h_keccak, out.node_row);
         (out.keccak_digest, handle)
     }
 
@@ -290,6 +316,16 @@ impl Session {
         self.eval.ec_is(p, q, &mut self.p2)
     }
 
+    /// Read a canonical value from this Session's uint store.
+    pub(crate) fn uint_value(&self, node: &UintNode) -> U256 {
+        self.uint.store.uint(node.ptr).value
+    }
+
+    /// Whether this claim has an eval row that can bind the public root.
+    pub(crate) fn is_recorded_truth(&self, claim: Truthy) -> bool {
+        self.eval.is_recorded_truth(claim)
+    }
+
     /// The DAG node `R = P − Q` — one `EcBinOp/Sub` row consuming the
     /// *rearranged* `EcGroupAdd(g, R, Q, P)` (`R + Q = P`) at mult 1,
     /// binding `(h, Group, r_ptr)`. One row, one block — the EC parallel
@@ -316,6 +352,15 @@ impl Session {
         require::intro_endo(&mut self.msm, &mut self.ec, &mut self.uint, point.point)
     }
 
+    /// Promote a stored point `P` to the 1-term MSM expression `⟨P × 0⟩`
+    /// (value = the group's point at infinity) — the zero-scalar leaf, dual
+    /// to [`msm_intro`](Self::msm_intro). Chiplet-internal, like
+    /// [`msm_intro`](Self::msm_intro). Mechanism in
+    /// [`msm::require::intro_zero`](crate::ec::msm::require::intro_zero).
+    pub fn msm_intro_zero(&mut self, point: &EcNode) -> EcExprPtr {
+        require::intro_zero(&mut self.msm, &mut self.ec, &mut self.uint, point.point)
+    }
+
     /// True if `point` is its group's point at infinity, i.e. it has no
     /// finite `(x, y)` coordinates. The GLV endomorphism `φ` has no
     /// coordinate-formula image for the identity, so a caller building a
@@ -331,6 +376,14 @@ impl Session {
     /// [`msm::require::combine`](crate::ec::msm::require::combine).
     pub fn msm_combine(&mut self, a: EcExprPtr, b: EcExprPtr) -> EcExprPtr {
         require::combine(&mut self.msm, &mut self.ec, &mut self.uint, a, b)
+    }
+
+    /// Combine two MSM expressions without merging shared bases — every
+    /// term of both operands survives as its own row, even across a
+    /// repeated base. Mechanism in
+    /// [`msm::require::combine_terms_preserving`](crate::ec::msm::require::combine_terms_preserving).
+    pub fn msm_combine_terms_preserving(&mut self, a: EcExprPtr, b: EcExprPtr) -> EcExprPtr {
+        require::combine_terms_preserving(&mut self.msm, &mut self.ec, &mut self.uint, a, b)
     }
 
     /// Negate an MSM expression: every term's scalar negated (the base
@@ -358,9 +411,14 @@ impl Session {
     /// expression by the bus; each scalar node must be stored under the group's
     /// scalar bound. Bumps the resolve use count on a new eval row.
     ///
-    /// Panics unless the claim is **fully merged** — distinct bases, exactly
-    /// one pair per term — the canonical form that makes the root well-defined
-    /// (an unmerged `P×a, P×b` would hash differently from `P×(a+b)`).
+    /// Panics unless `terms` is in exact 1:1 correspondence with `expr`'s own
+    /// term rows — one pair per chiplet term, each pair a real term of
+    /// `expr` (repeated bases and zero scalars are fine, *as long as* they
+    /// survive as their own row rather than being pre-merged: build `expr`
+    /// with [`msm_combine_terms_preserving`](Self::msm_combine_terms_preserving)
+    /// wherever a declared base might recur, so its rows stay in 1:1
+    /// correspondence with the caller's original terms instead of collapsing
+    /// two claim terms onto one merged row).
     pub fn ec_msm(&mut self, expr: EcExprPtr, terms: &[(EcNode, UintNode)]) -> EcNode {
         self.eval.record_ec_msm(expr, terms, &mut self.msm, &mut self.p2)
     }
@@ -397,8 +455,8 @@ impl Session {
     }
 
     /// Fold two claims: assert both truthy and bind their AND
-    /// `Hash(a || b || cap_transcript)` into the transcript. Consumes `a`
-    /// and `b`; returns the combined claim.
+    /// `Hash(a || b || cap_transcript)` into the transcript. Counts one use of each child
+    /// (two uses when they are the same claim); returns the shared-use combined claim.
     pub fn assert_and(&mut self, a: Truthy, b: Truthy) -> Truthy {
         self.eval.record_and(a, b, &mut self.p2)
     }
@@ -417,7 +475,7 @@ impl Session {
     /// Generate every chiplet's main trace and bundle them. `root` is the
     /// transcript's top claim (its hash becomes `public_root`); it must be
     /// an asserted node, and every other issued handle must already be
-    /// consumed — the eval chip's `generate_trace` panics otherwise.
+    /// consumed at least once — the eval chip's `generate_trace` panics otherwise.
     ///
     /// The sweep runs in dependency order — eval first (its `out_mult`
     /// checks feed BPL), the uint store's Range16 before BPL, BPL last
@@ -433,8 +491,13 @@ impl Session {
             }};
         }
 
+        #[cfg(debug_assertions)]
+        let predicted_heights = self.trace_heights();
         let public_root = root.hash();
         self.eval.assert_no_stray_values();
+        for (row, consumers) in self.eval.additional_keccak_uses() {
+            self.node.add_consumers(row, consumers);
+        }
         // EcCreate rows hash the group pointer and bind it through their EcPoint consume.
         let eval = trace_span!("eval", eval_trace(self.eval, root));
         let chunk_node_sponge = trace_span!(
@@ -467,7 +530,7 @@ impl Session {
         let ec = trace_span!("ec_store", ec_store_trace(self.ec.store));
         let bpl = trace_span!("byte_pair_lut", bpl_trace(self.bpl));
 
-        SessionTraces {
+        let traces = SessionTraces {
             chunk_node_sponge,
             p2,
             round,
@@ -479,7 +542,14 @@ impl Session {
             ec_add,
             msm,
             public_root,
-        }
+        };
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(
+            predicted_heights,
+            Some(traces.mains().map(Matrix::height)),
+            "preflight trace heights must match generated traces",
+        );
+        traces
     }
 }
 

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::{
     field::PrimeCharacteristicRing,
@@ -64,13 +66,13 @@ impl BaseAir<F> for TestAir {
         self.preprocessed
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<F>> {
+    fn periodic_columns(&self) -> Cow<'_, [Vec<F>]> {
         if self.period == 0 {
-            return Vec::new();
+            return Cow::Borrowed(&[]);
         }
         let mut column = vec![F::ZERO; self.period];
         column[1] = F::ONE;
-        vec![column]
+        Cow::Owned(vec![column])
     }
 }
 
@@ -145,8 +147,8 @@ impl BaseAir<F> for MockAir {
         1
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<F>> {
-        vec![vec![Felt::ONE]]
+    fn periodic_columns(&self) -> Cow<'_, [Vec<F>]> {
+        Cow::Owned(vec![vec![Felt::ONE]])
     }
 }
 
@@ -250,7 +252,7 @@ impl BaseAir<F> for MockPeriodicAir {
         1
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<F>> {
+    fn periodic_columns(&self) -> Cow<'_, [Vec<F>]> {
         // Period 128, mostly zero: cheaper to evaluate via the sparse Lagrange path.
         let mut sparse_col = vec![Felt::ZERO; 128];
         sparse_col[0] = Felt::new_unchecked(7);
@@ -261,7 +263,7 @@ impl BaseAir<F> for MockPeriodicAir {
         let dense_col: Vec<Felt> =
             [2u64, 3, 5, 7, 11, 13, 17, 19].into_iter().map(Felt::new_unchecked).collect();
 
-        vec![sparse_col, dense_col]
+        Cow::Owned(vec![sparse_col, dense_col])
     }
 }
 

@@ -1,10 +1,16 @@
-use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    vec,
+    vec::Vec,
+};
 use core::{cmp::min, ops::ControlFlow};
 
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    deferred::DeferredState,
+    deferred::{DeferredState, Digest, PrecompileWitness, TRUE_DIGEST},
     mast::{ExecutableMastForest, MastForest},
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
@@ -15,7 +21,8 @@ use miden_mast_package::{
 };
 
 use crate::{
-    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ProcessorState,
+    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, LoadedMastForest,
+    ProcessorState,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
@@ -123,6 +130,12 @@ pub struct FastProcessor {
     /// The advice provider to be used during execution.
     advice: AdviceProvider,
 
+    /// MAST forests loaded during this execution, indexed by their local procedure digests.
+    loaded_mast_forests: BTreeMap<Word, LoadedMastForest>,
+
+    /// Commitments of MAST forests whose advice maps have been merged into the advice provider.
+    merged_mast_forests: BTreeSet<Word>,
+
     /// A map from (context_id, word_address) to the word stored starting at that memory location.
     memory: Memory,
 
@@ -147,7 +160,7 @@ pub struct FastProcessor {
     /// size of core trace fragments during execution.
     options: ExecutionOptions,
 
-    /// Deferred witness accumulated during execution and returned for verifier rehydration.
+    /// Eager deferred evaluation state retained only while execution is running.
     deferred_state: DeferredState,
 
     /// Package debug information configured through [`ProgramExecutor`](crate::ProgramExecutor).
@@ -160,13 +173,17 @@ pub struct FastProcessor {
 impl FastProcessor {
     /// Packages the processor state after successful execution into a public result type.
     #[inline(always)]
-    fn into_execution_output(self, stack: StackOutputs) -> ExecutionOutput {
-        ExecutionOutput {
+    fn into_execution_output(self, stack: StackOutputs) -> Result<ExecutionOutput, ExecutionError> {
+        let precompile_witness = self
+            .deferred_state
+            .into_witness()
+            .map_err(|_| ExecutionError::Internal("failed to export deferred execution witness"))?;
+        Ok(ExecutionOutput {
             stack,
             advice: self.advice,
             memory: self.memory,
-            deferred_state: self.deferred_state,
-        }
+            precompile_witness,
+        })
     }
 
     /// Converts the terminal result of a full execution run into [`ExecutionOutput`].
@@ -176,9 +193,7 @@ impl FastProcessor {
         processor: Self,
     ) -> Result<ExecutionOutput, ExecutionError> {
         match flow {
-            ControlFlow::Continue(stack_outputs) => {
-                Ok(processor.into_execution_output(stack_outputs))
-            },
+            ControlFlow::Continue(stack_outputs) => processor.into_execution_output(stack_outputs),
             ControlFlow::Break(break_reason) => match break_reason {
                 BreakReason::Err(err) => Err(err),
                 BreakReason::Stopped(_) => {
@@ -276,6 +291,8 @@ impl FastProcessor {
 
         Ok(Self {
             advice: AdviceProvider::new(advice_inputs, &options)?,
+            loaded_mast_forests: BTreeMap::new(),
+            merged_mast_forests: BTreeSet::new(),
             stack,
             stack_top_idx,
             stack_bot_idx: stack_top_idx - MIN_STACK_DEPTH,
@@ -673,13 +690,24 @@ impl FastProcessor {
 // ===============================================================================================
 
 /// The output of a program execution, containing the state of the stack, advice provider, memory,
-/// and final deferred state at the end of execution.
+/// and optional portable precompile witness at the end of execution.
 #[derive(Debug)]
 pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
-    pub deferred_state: DeferredState,
+    pub precompile_witness: Option<PrecompileWitness>,
+}
+
+impl ExecutionOutput {
+    /// Returns the carried deferred root, or TRUE when no witness is present.
+    ///
+    /// This does not validate the witness's precompile computations.
+    pub fn precompile_root(&self) -> Digest {
+        self.precompile_witness
+            .as_ref()
+            .map_or(TRUE_DIGEST, PrecompileWitness::root_unchecked)
+    }
 }
 
 // SYSTEM CALL STATE

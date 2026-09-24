@@ -24,7 +24,7 @@
 //!     --bench per_air_degree_opt --features testing,concurrent
 //! ```
 
-use std::time::Instant;
+use std::{borrow::Cow, time::Instant};
 
 use miden_lifted_air::{
     AirBuilder, BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, WindowAccess,
@@ -166,7 +166,7 @@ impl<A: BaseAir<Felt>> BaseAir<Felt> for OverrideConstraintDegree<A> {
     fn num_public_values(&self) -> usize {
         self.inner.num_public_values()
     }
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
         self.inner.periodic_columns()
     }
 }
@@ -293,7 +293,7 @@ fn run_prove(
     eprintln!("{}\n", "=".repeat(70));
 
     let start = Instant::now();
-    let _output = ProverInstance::new(&config, &prover_statement, None)
+    let _output = ProverInstance::new(&config, prover_statement, None)
         .expect("no preprocessed columns")
         .prove(test_challenger())
         .expect("prove succeeds");

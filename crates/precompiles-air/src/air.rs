@@ -5,7 +5,7 @@
 //! cross-chiplet LogUp identity — `Σ σ = 0` — in
 //! [`MultiAir::eval_external`].
 
-use alloc::{vec, vec::Vec};
+use alloc::{borrow::Cow, vec, vec::Vec};
 
 use miden_core::{
     Felt,
@@ -112,8 +112,8 @@ impl BaseAir<Felt> for ChipletAir {
     fn num_public_values(&self) -> usize {
         delegate!(self, num_public_values)
     }
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        delegate!(self, periodic_columns)
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
+        Cow::Owned(delegate!(self, periodic_columns).into_owned())
     }
 }
 

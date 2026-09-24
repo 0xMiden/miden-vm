@@ -376,7 +376,7 @@ impl TypeExpr {
             TypeExpr::Ptr(ty) => Ok(ty
                 .pointee
                 .resolve_template_with_depth(resolver, depth + 1)?
-                .map(TypeTemplate::ptr)),
+                .map(|pointee| TypeTemplate::ptr_in(ty.address_space(), pointee))),
             TypeExpr::Struct(t) => {
                 let mut fields = Vec::with_capacity(t.fields.len());
                 for field in t.fields.iter() {

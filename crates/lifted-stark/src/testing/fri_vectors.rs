@@ -176,7 +176,7 @@ where
     // Run the FRI commit and query phases, writing the proof to the transcript.
     let mut channel = ProverTranscript::new(challenger.clone());
     let fri_polys = FriPolys::<F, EF, _>::new(&params, lmcs, &domain, evals.clone(), &mut channel);
-    fri_polys.prove_queries(&params, tree_indices.clone(), &mut channel);
+    fri_polys.prove_queries(&params, lmcs, tree_indices.clone(), &mut channel);
     let (_digest, transcript) = channel.finalize();
 
     // Verify the proof before exporting it as test vectors. The verifier consumes a fresh view of
@@ -215,7 +215,11 @@ where
         for index in batch.indices() {
             let rows = batch.opening(index).expect("opening must exist for query index");
             let siblings = batch.path(index).expect("path must exist for query index");
-            let leaf_digest: [F; DIGEST_WIDTH] = lmcs.hash(rows.iter_rows()).into();
+            let leaf_digest: [F; DIGEST_WIDTH] = batch
+                .leaf_hash(index)
+                .expect("leaf hash must exist for query index")
+                .clone()
+                .into();
             let row: [F; OPENING_ROW_WIDTH] =
                 rows.as_slice().try_into().expect("fold-4/ext2 opening has the expected width");
             openings.push(FriRoundOpening {

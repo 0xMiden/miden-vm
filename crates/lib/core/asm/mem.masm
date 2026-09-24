@@ -20,7 +20,7 @@ use miden::core::crypto::hashes::poseidon2
 #! `[write_ptr, write_ptr + 4*n)` overlap.
 #!
 #! Total cycles: 15 + 16 * num_words
-pub proc memcopy_words
+pub proc memcopy_words(n: u32, read_ptr: ptr<word>, write_ptr: ptr<word>)
   # Assert source and destination ranges do not overlap.
   # Non-overlap: write_ptr >= read_ptr + 4*n OR read_ptr >= write_ptr + 4*n
   dup mul.4
@@ -90,7 +90,7 @@ end
 #! `[write_ptr, write_ptr + n)` overlap.
 #!
 #! Total cycles: 7 + 14 * num_elements
-pub proc memcopy_elements
+pub proc memcopy_elements(n: u32, read_ptr: ptr<felt>, write_ptr: ptr<felt>)
     # Assert source and destination ranges do not overlap.
     # Non-overlap: write_ptr >= read_ptr + n OR read_ptr >= write_ptr + n
     dup dup.2 add
@@ -146,7 +146,11 @@ end
 #! Notice that the `end_ptr - write_ptr` value must be positive and a multiple of 8.
 #!
 #! Total cycles: 9 + 6 * num_word_pairs
-pub proc pipe_double_words_to_memory
+pub proc pipe_double_words_to_memory(
+    state: poseidon2::State,
+    write_ptr: ptr<word>,
+    end_ptr: ptr<word>,
+) -> (poseidon2::State, ptr<word>)
   dup.13 dup.13 neq # (4 cycles)
 
   # loop until write_ptr reaches end_ptr (6 cycles per iteration + 1)
@@ -167,7 +171,12 @@ end
 #
 # Inputs:  [C, write_ptr, end_ptr, needs_padding]
 # Outputs: [R0, R1, C', write_ptr']
-proc pipe_words_to_memory_with_capacity
+proc pipe_words_to_memory_with_capacity(
+    capacity: word,
+    write_ptr: ptr<word>,
+    end_ptr: ptr<word>,
+    needs_padding: i1,
+) -> (poseidon2::State, ptr<word>)
   # Set the initial rate to zero and absorb all complete rate blocks.
   padw padw
   exec.pipe_double_words_to_memory
@@ -207,7 +216,7 @@ end
 #! Total cycles:
 #!  - Even `num_words`: 43 + 9 * num_words / 2
 #!  - Odd `num_words`: 60 + 9 * round_down(num_words / 2)
-pub proc pipe_words_to_memory
+pub proc pipe_words_to_memory(num_words: u32, write_ptr: ptr<word>) -> (poseidon2::State, ptr<word>)
   # check if there is an odd number of words (6 cycles)
   dup is_odd
   # => [is_odd, num_words, write_ptr, ...]
@@ -249,7 +258,11 @@ end
 #! - empty, nonzero domain: 71 cycles
 #! - non-empty and even `num_words`: 55 + 9 * num_words / 2
 #! - non-empty and odd `num_words`: 72 + 9 * round_down(num_words / 2)
-pub proc pipe_words_to_memory_in_domain
+pub proc pipe_words_to_memory_in_domain(
+    domain: felt,
+    num_words: u32,
+    write_ptr: ptr<word>,
+) -> (poseidon2::Digest, ptr<word>)
   # Empty input has a distinct encoding under a nonzero domain. Reuse the canonical memory-based
   # implementation; it does not read memory when num_elements is zero.
   dup.1 eq.0
@@ -297,7 +310,11 @@ end
 #! Total cycles:
 #!  - Even `num_words`: 62 + 9 * num_words / 2
 #!  - Odd `num_words`: 79 + 9 * round_down(num_words / 2)
-pub proc pipe_preimage_to_memory
+pub proc pipe_preimage_to_memory(
+    num_words: u32,
+    write_ptr: ptr<word>,
+    commitment: poseidon2::Digest,
+) -> ptr<word>
   # Copies the advice stack data to memory
   exec.pipe_words_to_memory
   # => [R0, R1, C, write_ptr', COMMITMENT, ...]
@@ -329,7 +346,11 @@ end
 #!   with.
 #!
 #! Total cycles: 56 + 3 * num_words
-pub proc pipe_double_words_preimage_to_memory
+pub proc pipe_double_words_preimage_to_memory(
+    num_words: u32,
+    write_ptr: ptr<word>,
+    commitment: poseidon2::Digest,
+) -> ptr<word>
   # Assert precondition (8 cycles).
   dup is_odd assertz.err="pipe_double_words_preimage_to_memory: num_words must be even"
   # => [num_words, write_ptr, COMMITMENT, ...]
@@ -380,7 +401,12 @@ end
 #! - empty, zero domain: 87 cycles
 #! - empty, nonzero domain: 84 cycles
 #! - non-empty: 59 cycles + 3 * num_words
-pub proc pipe_double_words_preimage_to_memory_with_domain
+pub proc pipe_double_words_preimage_to_memory_with_domain(
+    domain: felt,
+    num_words: u32,
+    write_ptr: ptr<word>,
+    commitment: poseidon2::Digest,
+) -> ptr<word>
   # Bring `num_words` to the top so we can check and consume it below (1 cycle).
   swap
   # => [num_words, domain, write_ptr, COMMITMENT, ...]

@@ -27,7 +27,7 @@ const KECCAK256_DIGEST_EVENT = event("miden::precompiles::hashes::keccak256::dig
 #! Input:  [out_ptr, PREIMAGE_CHUNKS_DIGEST, len_bytes, ...]
 #! Advice: DIGEST_U32[8]
 #! Output: [...]  (DIGEST_U32[8] written to out_ptr)
-proc finish_hash_assert
+proc finish_hash_assert(out_ptr: ptr<u32>, preimage: precompiles::Digest, len_bytes: u32)
     # Keccak writes exactly one double-word. Manual word stores avoid building a whole adv_pipe
     # sponge shape for a single pipe.
     adv_pushw
@@ -64,7 +64,7 @@ end
 #! - out_ptr:  word-aligned destination for DIGEST_U32[8]
 #!
 #! Advice is untrusted: the advised digest is bound by the logged generic hash assertion.
-pub proc hash_bytes_mem
+pub proc hash_bytes_mem(in_ptr: ptr<u32>, len_bytes: u32, out_ptr: ptr<u32>)
     emit.KECCAK256_DIGEST_EVENT
     # => [in_ptr, len_bytes, out_ptr, ...]
     #    (handler sees [event_id, in_ptr, len_bytes, ...])
@@ -90,7 +90,7 @@ end
 #!
 #! Input:  [in_ptr, len_bytes, out_ptr, ...]
 #! Output: [...]  (DIGEST_U32[8] = Keccak256(INPUT_U8[len_bytes]) written to out_ptr)
-pub proc hash_1_chunk_mem
+pub proc hash_1_chunk_mem(in_ptr: ptr<u32>, len_bytes: u32, out_ptr: ptr<u32>)
     emit.KECCAK256_DIGEST_EVENT
     # => [in_ptr, len_bytes, out_ptr, ...]
     #    (handler sees [event_id, in_ptr, len_bytes, ...])
@@ -108,7 +108,7 @@ end
 #!
 #! Input:  [in_ptr, len_bytes, out_ptr, ...]
 #! Output: [...]  (DIGEST_U32[8] = Keccak256(INPUT_U8[len_bytes]) written to out_ptr)
-pub proc hash_2_chunks_mem
+pub proc hash_2_chunks_mem(in_ptr: ptr<u32>, len_bytes: u32, out_ptr: ptr<u32>)
     emit.KECCAK256_DIGEST_EVENT
     # => [in_ptr, len_bytes, out_ptr, ...]
     #    (handler sees [event_id, in_ptr, len_bytes, ...])

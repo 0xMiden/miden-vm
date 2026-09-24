@@ -6,7 +6,7 @@
 //! across the canonical edge cases (empty input, single-byte, full
 //! block, multi-block, padding-only trailing block).
 
-use std::{vec, vec::Vec};
+use std::{borrow::Cow, vec, vec::Vec};
 
 use miden_core::{
     Felt,
@@ -162,7 +162,7 @@ fn periodic_columns_match_program() {
     let air = KeccakSpongeAir;
     let cols = <KeccakSpongeAir as BaseAir<Felt>>::periodic_columns(&air);
     assert_eq!(cols.len(), NUM_PERIODIC_COLS);
-    for c in &cols {
+    for c in cols.iter() {
         assert_eq!(c.len(), SPONGE_PERIOD);
     }
 }
@@ -473,8 +473,10 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
             <KeccakSpongeAir as BaseAir<Felt>>::num_public_values(&KeccakSpongeAir)
         }
 
-        fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-            <KeccakSpongeAir as BaseAir<Felt>>::periodic_columns(&KeccakSpongeAir)
+        fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
+            Cow::Owned(
+                <KeccakSpongeAir as BaseAir<Felt>>::periodic_columns(&KeccakSpongeAir).into_owned(),
+            )
         }
     }
 

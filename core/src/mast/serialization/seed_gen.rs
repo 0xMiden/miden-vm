@@ -1,6 +1,6 @@
 //! Test helper for generating fuzz corpus seeds.
 //!
-//! Run with: cargo test -p miden-core --features serde generate_fuzz_seeds -- --ignored --nocapture
+//! Run with: cargo test -p miden-core --lib generate_fuzz_seeds -- --ignored --nocapture
 
 use alloc::{sync::Arc, vec::Vec};
 use std::println;
@@ -8,16 +8,19 @@ use std::println;
 use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
-    deferred::{DeferredState, DeferredStateWire, Node, TRUE_DIGEST},
+    deferred::{PrecompileWitness, PrecompileWitnessEntry, TRUE_DIGEST, Tag},
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest},
     operations::Operation,
     program::{KernelDescriptor, Program, StackInputs, StackOutputs},
-    proof::{ExecutionProof, HashFunction, StarkProof, VmProof},
+    proof::{
+        ExecutionProof, ExecutionProofCompatibility, HashFunction, PrecompileProof,
+        PrecompileStatus, StarkProof, VmProof,
+    },
     serde::{ByteWriter, Serializable},
 };
 
 /// Generates seed corpus files for fuzzing.
-/// Run with: cargo test -p miden-core --features serde generate_fuzz_seeds -- --ignored --nocapture
+/// Run with: cargo test -p miden-core --lib generate_fuzz_seeds -- --ignored --nocapture
 #[test]
 #[ignore = "run manually to generate fuzz seeds"]
 fn generate_fuzz_seeds() {
@@ -251,21 +254,23 @@ fn generate_fuzz_seeds() {
         write_seed("operation_deserialize", "op_add.bin", &op.to_bytes());
     }
 
-    // Deferred-state wire seeds. A deferred execution proof carries this passive wire so a
-    // delegated prover can hydrate it later and produce a precompile STARK proof for its root.
+    // Portable singleton precompile witnesses, including rejected empty and oversized payloads.
+    let singleton_witness = || {
+        PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
+            tag: Tag::AND,
+            lhs: 0,
+            rhs: 0,
+        }])
+        .expect("valid singleton fixture")
+    };
     {
-        let empty = DeferredStateWire::default();
-        write_seed("deferred_state_wire_deserialize", "empty_wire.bin", &empty.to_bytes());
+        let witness = singleton_witness();
+        write_seed("deferred_state_wire_deserialize", "singleton.bin", &witness.to_bytes());
+        let mut empty = vec![PrecompileWitness::WIRE_VERSION];
+        empty.write_usize(0);
+        write_seed("deferred_state_wire_deserialize", "empty.bin", &empty);
 
-        let mut state = DeferredState::default();
-        let statement = state
-            .register(Node::and(TRUE_DIGEST, TRUE_DIGEST))
-            .expect("framework statement should register");
-        state.log_statement(statement).expect("framework statement should log");
-        let wire = state.to_wire().expect("framework state should encode as wire");
-        write_seed("deferred_state_wire_deserialize", "all_entries_wire.bin", &wire.to_bytes());
-
-        let mut oversized_entry_count = Vec::new();
+        let mut oversized_entry_count = vec![PrecompileWitness::WIRE_VERSION];
         oversized_entry_count.write_usize(usize::MAX);
         write_seed(
             "deferred_state_wire_deserialize",
@@ -281,14 +286,78 @@ fn generate_fuzz_seeds() {
             proof: stark,
             precompile_root: TRUE_DIGEST,
         };
-        let proof = ExecutionProof::Complete { vm, precompile: None };
-        let proof = proof.to_bytes();
+        let proof = ExecutionProof::from_parts(
+            ExecutionProofCompatibility::new(Vec::new(), Vec::new()).unwrap(),
+            vm,
+            PrecompileStatus::Empty,
+        )
+        .to_bytes();
         write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof);
+    }
+
+    // Execution proof seed with deferred precompile work.
+    {
+        let wire = singleton_witness();
+        let vm = VmProof {
+            proof: StarkProof::new(Vec::new(), HashFunction::Rpo256),
+            precompile_root: wire.root_unchecked(),
+        };
+        let proof = ExecutionProof::from_parts(
+            ExecutionProofCompatibility::new(Vec::new(), Vec::new()).unwrap(),
+            vm,
+            PrecompileStatus::Deferred(wire),
+        )
+        .to_bytes();
+        write_seed("execution_proof_deserialize", "deferred_proof.bin", &proof);
+    }
+
+    // Execution proof seed with a completed precompile proof.
+    {
+        let vm = VmProof {
+            proof: StarkProof::new(Vec::new(), HashFunction::Rpo256),
+            precompile_root: TRUE_DIGEST,
+        };
+        let precompile = PrecompileProof {
+            proof: StarkProof::new(Vec::new(), HashFunction::Rpo256),
+            roots: vec![TRUE_DIGEST],
+        };
+        let proof = ExecutionProof::from_parts(
+            ExecutionProofCompatibility::new(Vec::new(), Vec::new()).unwrap(),
+            vm,
+            PrecompileStatus::Proven(precompile),
+        )
+        .to_bytes();
+        write_seed("execution_proof_deserialize", "proven_proof.bin", &proof);
+    }
+
+    // Execution proof seeds for malicious verifier-root length prefixes.
+    {
+        let mut oversized_vm_roots = Vec::new();
+        oversized_vm_roots.write_u8(ExecutionProofCompatibility::FORMAT_V2);
+        oversized_vm_roots.write_usize(usize::MAX);
+        write_seed(
+            "execution_proof_deserialize",
+            "oversized_vm_roots_len.bin",
+            &oversized_vm_roots,
+        );
+
+        let mut oversized_pvm_roots = Vec::new();
+        oversized_pvm_roots.write_u8(ExecutionProofCompatibility::FORMAT_V2);
+        oversized_pvm_roots.write_usize(0);
+        oversized_pvm_roots.write_usize(usize::MAX);
+        write_seed(
+            "execution_proof_deserialize",
+            "oversized_pvm_roots_len.bin",
+            &oversized_pvm_roots,
+        );
     }
 
     // Execution proof seed for malicious VM STARK length-prefix deserialization.
     {
         let mut oversized_proof_len = Vec::new();
+        oversized_proof_len.write_u8(ExecutionProofCompatibility::FORMAT_V2);
+        oversized_proof_len.write_usize(0); // VM verifier roots.
+        oversized_proof_len.write_usize(0); // PVM verifier roots.
         oversized_proof_len.write_u8(1); // Complete execution proof discriminant.
         oversized_proof_len.write_usize(usize::MAX);
         write_seed("execution_proof_deserialize", "oversized_proof_len.bin", &oversized_proof_len);

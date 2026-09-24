@@ -53,11 +53,8 @@ mod simple;
 pub use simple::{SimpleSmt, SimpleSmtProof};
 
 mod partial;
-pub use partial::{PartialSmt, UniqueNodes};
-
-mod forest;
-pub use forest::SmtForest;
 use miden_field::Felt;
+pub use partial::{PartialSmt, UniqueNodes};
 // CONSTANTS
 // ================================================================================================
 

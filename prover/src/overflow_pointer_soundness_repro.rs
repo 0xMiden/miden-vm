@@ -147,13 +147,13 @@ fn verifier_rejects_forged_overflow_pop_order() {
         &aux_inputs,
     )
     .expect("the low-level prover should encode the forged trace for the verifier regression");
-    let proof = ExecutionProof::Complete {
-        vm: VmProof {
+    let proof = ExecutionProof::new(
+        VmProof {
             proof: StarkProof::new(proof_bytes, HashFunction::Poseidon2),
             precompile_root: TRUE_DIGEST,
         },
-        precompile: None,
-    };
+        miden_core::proof::PrecompileStatus::Empty,
+    );
     let claim = ExecutionClaim::from_program_info(
         trace.program_info().clone(),
         trace.init_stack_state(),

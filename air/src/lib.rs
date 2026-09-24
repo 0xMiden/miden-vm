@@ -6,7 +6,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use core::borrow::Borrow;
 
 use miden_core::{
@@ -677,7 +677,7 @@ impl BaseAir<Felt> for HandwrittenMidenAir {
         BaseAir::<Felt>::num_public_values(&self.0)
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
         self.0.periodic_columns()
     }
 }
@@ -727,12 +727,12 @@ impl BaseAir<Felt> for MidenAir {
         NUM_PUBLIC_VALUES
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        match self {
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
+        Cow::Owned(match self {
             Self::Core => CoreAir.periodic_columns(),
             Self::Chiplets => ChipletsAir.periodic_columns(),
             Self::Poseidon2Permutation => Poseidon2PermutationAir.periodic_columns(),
-        }
+        })
     }
 }
 

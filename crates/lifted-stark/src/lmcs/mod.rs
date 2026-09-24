@@ -138,8 +138,8 @@ pub trait Lmcs: Clone {
 
     /// Hash a sequence of field slices into a leaf hash.
     ///
-    /// Inputs are absorbed in order. For salted leaves, append the salt slice to the
-    /// iterator (or call this with a chained iterator).
+    /// Inputs are absorbed in order. Each slice is padded independently to the hasher's
+    /// alignment. For salted leaves, append the salt as its own slice.
     fn hash<'a, I>(&self, rows: I) -> Self::Commitment
     where
         I: IntoIterator<Item = &'a [Self::F]>,
@@ -284,26 +284,29 @@ pub trait LmcsTree<F, Commitment, M> {
     /// The hint format is implementation-defined and must be consumed by the
     /// corresponding exact `Lmcs::open_batch` implementation. Rows are padded to
     /// the tree's alignment before being written to the channel. `indices` must
-    /// already be in this tree's own index space.
+    /// already be in this tree's own index space. `lmcs` must be the configuration
+    /// that built this tree; it recomputes hashes the tree does not store.
     ///
     /// Leaf openings are written in **sorted tree index order** (ascending, deduplicated).
-    fn prove_batch<Ch>(&self, indices: &TreeIndices, channel: &mut Ch)
+    fn prove_batch<L, Ch>(&self, lmcs: &L, indices: &TreeIndices, channel: &mut Ch)
     where
+        L: Lmcs<F = F, Commitment = Commitment>,
         Ch: ProverChannel<F = F, Commitment = Commitment>;
 
     /// Prove a virtually lifted batch opening.
     ///
     /// Projects `query_indices` to this tree's depth and then delegates to exact
     /// [`Self::prove_batch`].
-    fn prove_lifted_batch<Ch>(&self, query_indices: &TreeIndices, channel: &mut Ch)
+    fn prove_lifted_batch<L, Ch>(&self, lmcs: &L, query_indices: &TreeIndices, channel: &mut Ch)
     where
+        L: Lmcs<F = F, Commitment = Commitment>,
         Ch: ProverChannel<F = F, Commitment = Commitment>,
     {
         let tree_log_height = miden_lifted_air::log2_strict_u8(self.height());
         let leaf_indices = query_indices
             .fold_to_depth(tree_log_height)
             .expect("query index depth must be at least the committed tree depth");
-        self.prove_batch(&leaf_indices, channel);
+        self.prove_batch(lmcs, &leaf_indices, channel);
     }
 }
 

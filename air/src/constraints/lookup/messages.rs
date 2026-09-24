@@ -83,7 +83,8 @@ pub enum BusId {
     MemoryWriteWord = 14,
     Bitwise = 15,
     AceInit = 16,
-    /// Block stack table (decoder p1): tracks control flow block nesting.
+    /// Block-stack relation: a tagged union of control-flow continuations and saved
+    /// caller frames. See [`BlockStackMsg`].
     BlockStackTable = 17,
     /// Op group table (decoder p3): tracks operation batch consumption.
     OpGroupTable = 18,
@@ -427,28 +428,41 @@ impl<E: PrimeCharacteristicRing> BitwiseMsg<E> {
 // DECODER MESSAGES
 // ================================================================================================
 
-/// Block stack message: `[block_id, parent_id, is_loop, ctx, fmp, depth, fn_hash[4]]`.
+const BLOCK_STACK_CALLER_FN_HASH_OFFSET: usize = 6;
+/// The entry-kind tag follows every caller-frame payload slot.
+const BLOCK_STACK_ENTRY_KIND_OFFSET: usize = BLOCK_STACK_CALLER_FN_HASH_OFFSET + WORD_SIZE;
+const _: () = assert!(BLOCK_STACK_ENTRY_KIND_OFFSET == 10);
+const _: () = assert!(BLOCK_STACK_ENTRY_KIND_OFFSET < MIDEN_MAX_MESSAGE_WIDTH);
+
+/// An entry in the single logical block-stack relation.
 ///
-/// `Simple` — for blocks that don't save context (JOIN/SPLIT/SPAN/DYN/LOOP/RESPAN/END-simple).
-/// Context fields are encoded as zeros.
+/// `Continuation` records only ordinary control-flow nesting. It is used by
+/// JOIN/SPLIT/SPAN/DYN/LOOP/RESPAN and their matching END transitions.
 ///
-/// `Full` — for blocks that save/restore the caller's execution context
-/// (CALL/SYSCALL/DYNCALL/END-call).
+/// `CallerFrame` additionally records the caller state that CALL/SYSCALL/DYNCALL save and their
+/// matching END restores. Its semantic payload is
+/// `[caller_ctx, caller_stack_depth, caller_overflow_addr, caller_fn_hash[4]]`. It has no loop
+/// marker: caller frames and LOOP continuations are disjoint entry kinds. The encoder writes zero
+/// to the shared layout's `is_loop` slot.
+///
+/// The variants are a tagged union within one bus: a dedicated payload slot authenticates which
+/// END behavior the corresponding insertion authorized. They must not be modeled as an untagged,
+/// zero-padded union, because a zeroed caller-frame payload would then collide with a continuation
+/// entry.
 #[derive(Clone, Debug)]
 pub enum BlockStackMsg<E> {
-    Simple {
+    Continuation {
         block_id: E,
         parent_id: E,
         is_loop: E,
     },
-    Full {
+    CallerFrame {
         block_id: E,
         parent_id: E,
-        is_loop: E,
-        ctx: E,
-        fmp: E,
-        depth: E,
-        fn_hash: WordFields<E>,
+        caller_ctx: E,
+        caller_stack_depth: E,
+        caller_overflow_addr: E,
+        caller_fn_hash: WordFields<E>,
     },
 }
 
@@ -738,35 +752,36 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let mut acc = challenges.bus_prefix[BusId::BlockStackTable as usize].clone();
+        // Both variants use one bus. Slot 10 tags Continuation as 0 and CallerFrame as 1; without
+        // it, a caller frame with a zero saved-state payload would collide with a continuation.
+        let mut acc = challenges.bus_prefix[BusId::BlockStackTable as usize].dup();
         match self {
-            // `Simple` zero-pads to 10 slots; slots `3..10` contribute `β^k · 0 = 0` so
-            // they are elided from the loop.
-            Self::Simple { block_id, parent_id, is_loop } => {
+            Self::Continuation { block_id, parent_id, is_loop } => {
                 acc += challenges
-                    .inner_product_at(0, &[block_id.clone(), parent_id.clone(), is_loop.clone()]);
+                    .inner_product_at(0, &[block_id.dup(), parent_id.dup(), is_loop.dup()]);
             },
-            Self::Full {
+            Self::CallerFrame {
                 block_id,
                 parent_id,
-                is_loop,
-                ctx,
-                fmp,
-                depth,
-                fn_hash,
+                caller_ctx,
+                caller_stack_depth,
+                caller_overflow_addr,
+                caller_fn_hash,
             } => {
                 acc += challenges.inner_product_at(
                     0,
                     &[
-                        block_id.clone(),
-                        parent_id.clone(),
-                        is_loop.clone(),
-                        ctx.clone(),
-                        fmp.clone(),
-                        depth.clone(),
+                        block_id.dup(),
+                        parent_id.dup(),
+                        E::ZERO,
+                        caller_ctx.dup(),
+                        caller_stack_depth.dup(),
+                        caller_overflow_addr.dup(),
                     ],
                 );
-                acc += challenges.inner_product_at(6, fn_hash.as_slice());
+                acc += challenges
+                    .inner_product_at(BLOCK_STACK_CALLER_FN_HASH_OFFSET, caller_fn_hash.as_slice());
+                acc += challenges.inner_product_at(BLOCK_STACK_ENTRY_KIND_OFFSET, &[E::ONE]);
             },
         }
         acc
@@ -1064,8 +1079,8 @@ mod tests {
     use miden_core::Felt;
 
     use super::{
-        BusId, HasherMsg, MIDEN_MAX_MESSAGE_WIDTH, MerkleInitFromSelectorsMsg, SiblingBit,
-        SiblingFromRatesMsg, SiblingMsg,
+        BLOCK_STACK_ENTRY_KIND_OFFSET, BlockStackMsg, BusId, HasherMsg, MIDEN_MAX_MESSAGE_WIDTH,
+        MerkleInitFromSelectorsMsg, SiblingBit, SiblingFromRatesMsg, SiblingMsg,
     };
     use crate::lookup::{Challenges, message::LookupMessage};
 
@@ -1087,6 +1102,44 @@ mod tests {
                 BusId::COUNT,
             )
         })
+    }
+
+    #[test]
+    fn block_stack_entry_kind_is_authenticated_when_caller_frame_payload_is_zero() {
+        let block_id = Felt::from_u32(37);
+        let parent_id = Felt::from_u32(41);
+        let is_loop = Felt::ZERO;
+        let continuation = BlockStackMsg::Continuation { block_id, parent_id, is_loop };
+        let caller_frame = BlockStackMsg::CallerFrame {
+            block_id,
+            parent_id,
+            caller_ctx: Felt::ZERO,
+            caller_stack_depth: Felt::ZERO,
+            caller_overflow_addr: Felt::ZERO,
+            caller_fn_hash: [Felt::ZERO; 4],
+        };
+
+        for challenges in challenge_points() {
+            let continuation_encoding = <BlockStackMsg<Felt> as LookupMessage<Felt, Felt>>::encode(
+                &continuation,
+                &challenges,
+            );
+            let caller_frame_encoding = <BlockStackMsg<Felt> as LookupMessage<Felt, Felt>>::encode(
+                &caller_frame,
+                &challenges,
+            );
+            let expected_tag =
+                challenges.inner_product_at(BLOCK_STACK_ENTRY_KIND_OFFSET, &[Felt::ONE]);
+            assert_ne!(
+                continuation_encoding, caller_frame_encoding,
+                "the entry-kind tag must distinguish the two variants"
+            );
+            assert_eq!(
+                caller_frame_encoding - continuation_encoding,
+                expected_tag,
+                "the caller-frame encoding must differ only by its explicit entry-kind tag when its saved payload is zero"
+            );
+        }
     }
 
     #[test]

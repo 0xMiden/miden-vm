@@ -1,4 +1,4 @@
-use alloc::{format, sync::Arc, vec::Vec};
+use alloc::{format, vec::Vec};
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
@@ -7,9 +7,12 @@ use miden_air::{
     trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
 use miden_core::{
-    deferred::{DeferredState, DeferredStateWire, Digest, TRUE_DIGEST},
+    deferred::{Digest, TRUE_DIGEST},
     program::ExecutionClaim,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader,
+    },
 };
 
 use crate::{
@@ -74,9 +77,10 @@ impl ExecutionWitness {
             stack: stack_outputs,
             advice: _,
             memory: _,
-            deferred_state: precompiles,
+            precompile_witness: precompile,
         } = execution_output;
-        let precompile_root = precompiles.root();
+        let precompile_root =
+            precompile.as_ref().map_or(TRUE_DIGEST, PrecompileWitness::root_unchecked);
         let vm = VmWitness {
             program_info,
             stack_inputs,
@@ -84,10 +88,6 @@ impl ExecutionWitness {
             trace,
             precompile_root,
         };
-        let precompile = (precompile_root != TRUE_DIGEST).then(|| {
-            PrecompileWitness::new(precompiles)
-                .expect("a non-TRUE execution root must produce a singleton precompile witness")
-        });
 
         Self { vm, precompile }
     }
@@ -97,6 +97,11 @@ impl ExecutionWitness {
         self.vm.claim()
     }
 
+    /// Returns whether this witness contains precompile work.
+    pub const fn has_precompiles(&self) -> bool {
+        self.precompile.is_some()
+    }
+
     /// Consumes this witness and returns its supported low-level proving components.
     ///
     /// The [`VmWitness`] can be passed to [`build_trace`]. The optional [`PrecompileWitness`] is
@@ -104,14 +109,50 @@ impl ExecutionWitness {
     pub fn into_parts(self) -> (VmWitness, Option<PrecompileWitness>) {
         (self.vm, self.precompile)
     }
+
+    /// Decodes one execution witness from a potentially adversarial byte slice.
+    ///
+    /// The reader applies an input-proportional limit to byte consumption and collection
+    /// preallocation, then rejects trailing bytes. These checks establish safe transport syntax.
+    /// They do not prove that the sparse MAST replay is a subset of a particular source forest
+    /// because the witness wire does not carry such a proof.
+    ///
+    /// Use [`Self::read_from_bytes_trusted`] for bytes retained inside a trusted prover system.
+    #[track_caller]
+    pub fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let budget = bytes.len().saturating_mul(EXECUTION_WITNESS_BYTE_READ_BUDGET_MULTIPLIER);
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        let witness = <Self as Deserializable>::read_from(&mut reader)?;
+
+        if reader.has_more_bytes() {
+            return Err(DeserializationError::InvalidValue(
+                "extra bytes after execution witness payload".into(),
+            ));
+        }
+        Ok(witness)
+    }
+
+    /// Decodes execution witness bytes retained inside a trusted prover system.
+    ///
+    /// This preserves the original permissive byte-slice behavior. It trusts sparse MAST replay
+    /// hashes, accepts trailing bytes, and uses a replay-sized byte budget. Use
+    /// [`Self::read_from_bytes`] for bytes received across a trust boundary.
+    #[track_caller]
+    pub fn read_from_bytes_trusted(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let budget = bytes.len().saturating_mul(EXECUTION_WITNESS_BYTE_READ_BUDGET_MULTIPLIER);
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        <Self as Deserializable>::read_from(&mut reader)
+    }
 }
+
+/// Covers nested replay length checks while keeping untrusted work proportional to input size.
+const EXECUTION_WITNESS_BYTE_READ_BUDGET_MULTIPLIER: usize = 4;
 
 /// Current wire format version for [`ExecutionWitness`] serialization.
 ///
 /// The version is written as the first byte of every serialized witness. Deserialization only
-/// accepts this exact value, so a future format change only needs to add a new accepted version
-/// and keep the old readers where compatibility matters.
-const EXECUTION_WITNESS_WIRE_VERSION: u8 = 1;
+/// accepts this exact value; older formats are intentionally unsupported.
+const EXECUTION_WITNESS_WIRE_VERSION: u8 = 2;
 
 impl Serializable for ExecutionWitness {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
@@ -120,7 +161,7 @@ impl Serializable for ExecutionWitness {
         match &self.precompile {
             Some(precompile) => {
                 target.write_u8(1);
-                write_precompile_witness(precompile, target);
+                precompile.write_into(target);
             },
             None => target.write_u8(0),
         }
@@ -148,15 +189,8 @@ impl Deserializable for ExecutionWitness {
                 None
             },
             1 => {
-                let witness = read_precompile_witness(source)?;
-                // `read_precompile_witness` only produces singleton witnesses, but do not index
-                // blindly: keep deserialization panic-free even if that invariant changes.
-                let [witness_root] = witness.roots() else {
-                    return Err(DeserializationError::InvalidValue(
-                        "expected a singleton precompile witness".into(),
-                    ));
-                };
-                if *witness_root != vm.precompile_root {
+                let witness = PrecompileWitness::read_from(source)?;
+                if witness.root_unchecked() != vm.precompile_root {
                     return Err(DeserializationError::InvalidValue(
                         "precompile witness root does not match the VM witness precompile root"
                             .into(),
@@ -171,6 +205,10 @@ impl Deserializable for ExecutionWitness {
             },
         };
         Ok(Self { vm, precompile })
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        ExecutionWitness::read_from_bytes(bytes)
     }
 }
 
@@ -197,6 +235,11 @@ impl VmWitness {
             self.stack_inputs,
             self.stack_outputs,
         )
+    }
+
+    /// Returns whether this witness authenticates deferred precompile work.
+    pub fn has_precompiles(&self) -> bool {
+        self.precompile_root != TRUE_DIGEST
     }
 
     /// Takes the hasher replay out, leaving an empty buffered one.
@@ -253,49 +296,6 @@ impl Deserializable for VmWitness {
             precompile_root: Digest::read_from(source)?,
         })
     }
-}
-
-/// Writes a singleton precompile witness as its ordered roots followed by its canonical deferred
-/// wire.
-fn write_precompile_witness<W: ByteWriter>(witness: &PrecompileWitness, target: &mut W) {
-    let roots = witness.roots();
-    debug_assert_eq!(roots.len(), 1, "only singleton precompile witnesses are serializable");
-    target.write_usize(roots.len());
-    for root in roots {
-        root.write_into(target);
-    }
-    let deferred_wire = witness
-        .state()
-        .to_wire()
-        .expect("deferred state must serialize to canonical wire");
-    deferred_wire.write_into(target);
-}
-
-/// Reads a singleton precompile witness written by [`write_precompile_witness`].
-fn read_precompile_witness<R: ByteReader>(
-    source: &mut R,
-) -> Result<PrecompileWitness, DeserializationError> {
-    let roots = Vec::<Digest>::read_from(source)?;
-    if roots.len() != 1 {
-        return Err(DeserializationError::InvalidValue(
-            "expected a singleton precompile witness".into(),
-        ));
-    }
-    let deferred_wire = DeferredStateWire::read_from(source)?;
-    let deferred_state =
-        DeferredState::from_wire(Arc::new(miden_precompiles::registry()), &deferred_wire).map_err(
-            |err| DeserializationError::InvalidValue(format!("invalid deferred state: {err}")),
-        )?;
-
-    let witness = PrecompileWitness::new(deferred_state).map_err(|err| {
-        DeserializationError::InvalidValue(format!("invalid precompile witness: {err}"))
-    })?;
-    if witness.roots() != roots.as_slice() {
-        return Err(DeserializationError::InvalidValue(
-            "precompile witness roots do not match its deferred state".into(),
-        ));
-    }
-    Ok(witness)
 }
 
 // VM EXECUTION TRACE
@@ -498,19 +498,35 @@ mod wire_tests {
     use miden_assembly::Assembler;
     use miden_core::deferred::TRUE_DIGEST;
 
-    use super::{Deserializable, ExecutionWitness, Serializable};
-    use crate::{DefaultHost, FastProcessor, StackInputs};
+    use super::{ExecutionWitness, Serializable};
+    use crate::{DefaultHost, FastProcessor, StackInputs, mast::MastNodeId};
 
-    fn deferred_witness_bytes() -> alloc::vec::Vec<u8> {
+    fn execution_witness(source: &str) -> ExecutionWitness {
         let program = Assembler::default()
-            .assemble_program("program", "begin log_deferred end")
+            .assemble_program("program", source)
             .expect("program should compile")
             .unwrap_program();
         let mut host = DefaultHost::default();
-        let witness = FastProcessor::new(StackInputs::default())
+        FastProcessor::new(StackInputs::default())
             .execute_for_proving_sync(&program, &mut host)
-            .expect("execution should produce a witness");
-        witness.to_bytes()
+            .expect("execution should produce a witness")
+    }
+
+    fn deferred_witness() -> ExecutionWitness {
+        execution_witness("begin log_deferred end")
+    }
+
+    fn deferred_witness_bytes() -> alloc::vec::Vec<u8> {
+        deferred_witness().to_bytes()
+    }
+
+    #[test]
+    fn witness_reports_precompile_state() {
+        let plain = execution_witness("begin push.1 drop end");
+        assert!(!plain.has_precompiles());
+
+        let deferred = execution_witness("begin log_deferred end");
+        assert!(deferred.has_precompiles());
     }
 
     #[test]
@@ -518,15 +534,52 @@ mod wire_tests {
         let mut bytes = deferred_witness_bytes();
         assert!(ExecutionWitness::read_from_bytes(&bytes).is_ok());
 
-        // The first byte of the wire is the format version; any other value must be rejected
-        // before any payload is parsed.
-        bytes[0] = bytes[0].wrapping_add(1);
+        // Rejected versions are checked before decoding replay or witness payloads.
+        for version in [0, 1, super::EXECUTION_WITNESS_WIRE_VERSION + 1] {
+            bytes[0] = version;
+            let err = ExecutionWitness::read_from_bytes(&bytes)
+                .expect_err("unsupported witness format must be rejected");
+            assert!(format!("{err:?}").contains("unsupported execution witness wire version"));
+        }
+    }
+
+    #[test]
+    fn witness_wire_rejects_trailing_bytes() {
+        let mut bytes = deferred_witness_bytes();
+        bytes.push(0);
+
         let err = ExecutionWitness::read_from_bytes(&bytes)
-            .expect_err("witness with an unknown wire version should be rejected");
+            .expect_err("witness payload with trailing bytes should be rejected");
         assert!(
-            format!("{err:?}").contains("unsupported execution witness wire version"),
+            format!("{err:?}").contains("extra bytes after execution witness payload"),
             "unexpected error: {err:?}"
         );
+
+        assert!(
+            ExecutionWitness::read_from_bytes_trusted(&bytes).is_ok(),
+            "the explicit trusted reader should preserve the old permissive behavior"
+        );
+    }
+
+    #[test]
+    fn witness_wire_accepts_large_minimally_encoded_continuation_stack() {
+        let mut witness = deferred_witness();
+        let continuation = &mut witness
+            .vm
+            .trace_replay_mut()
+            .core_trace_contexts
+            .first_mut()
+            .expect("witness should contain a trace fragment")
+            .continuation;
+        for _ in 0..4096 {
+            continuation.push_start_node(MastNodeId::from(0));
+        }
+
+        let bytes = witness.to_bytes();
+        let restored = ExecutionWitness::read_from_bytes(&bytes)
+            .expect("valid witness should fit its input-proportional allocation budget");
+
+        assert_eq!(restored.to_bytes(), bytes);
     }
 
     #[test]

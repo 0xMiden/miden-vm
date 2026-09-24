@@ -86,7 +86,7 @@
 //! `a + b ≡ c` — the EC group law's generic-add case uses this on its
 //! `d = x₂ − x₁` subtraction instead of a separate disequality MAC.
 
-use alloc::{vec, vec::Vec};
+use alloc::{borrow::Cow, vec, vec::Vec};
 use core::array;
 
 use miden_core::{
@@ -292,10 +292,10 @@ impl BaseAir<Felt> for UintAddAir {
         NUM_PUBLIC_VALUES
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
         // One selector, 1 on the open row; the closing row is its
         // complement.
-        vec![vec![Felt::ONE, Felt::ZERO]]
+        Cow::Owned(vec![vec![Felt::ONE, Felt::ZERO]])
     }
 }
 

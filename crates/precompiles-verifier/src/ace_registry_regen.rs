@@ -50,7 +50,7 @@ const PVM_RELATION_MOD_PATH: &str = "../lib/core/asm/sys/pvm/mod.masm";
 /// First felt after the VM relation's fixed ACE stream reservation. The PVM's complete READ
 /// section starts here; its aux-randomness anchor is later because four public EF inputs precede
 /// it.
-const PVM_READ_START: u32 = 3_225_426_416;
+const PVM_READ_START: u32 = 3_225_426_424;
 /// Start of the VM relation's next scratch region; the PVM allocation must end before it.
 const NEXT_VM_REGION_START: u32 = 3_238_002_688;
 
@@ -440,6 +440,8 @@ fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String
         "### order; the PVM wrapper supplies the relation count and that shared base.\n\n",
     );
 
+    out.push_str("use miden::core::stark::types\n\n");
+
     for region in &layout.regions {
         writeln!(
             out,
@@ -480,21 +482,23 @@ fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String
     )
     .expect("writing to String cannot fail");
 
-    for (accessor, constant) in [
-        ("public_inputs_ptr", "PUBLIC_INPUTS_PTR"),
-        ("aux_rand_elem_ptr", "AUX_RAND_ELEM_PTR"),
-        ("preprocessed_current_ptr", "PREPROCESSED_CURRENT_PTR"),
-        ("aux_bus_boundary_ptr", "AUX_BUS_BOUNDARY_PTR"),
-        ("auxiliary_ace_inputs_ptr", "AUXILIARY_ACE_INPUTS_PTR"),
+    for (accessor, constant, ty) in [
+        ("public_inputs_ptr", "PUBLIC_INPUTS_PTR", "types::Address"),
+        ("aux_rand_elem_ptr", "AUX_RAND_ELEM_PTR", "types::Address"),
+        ("preprocessed_current_ptr", "PREPROCESSED_CURRENT_PTR", "types::Address"),
+        ("aux_bus_boundary_ptr", "AUX_BUS_BOUNDARY_PTR", "types::Address"),
+        ("auxiliary_ace_inputs_ptr", "AUXILIARY_ACE_INPUTS_PTR", "types::Address"),
     ] {
-        writeln!(out, "pub proc {accessor}\n    push.{constant}\nend\n")
+        writeln!(out, "pub proc {accessor}() -> {ty}\n    push.{constant}\nend\n")
             .expect("writing to String cannot fail");
     }
-    out.push_str("pub proc ace_circuit_stream_ptr\n    push.ACE_CIRCUIT_STREAM_PTR\nend\n");
-    out.push_str("\npub proc bus_gamma_ptr\n    push.BUS_GAMMA_PTR\nend\n");
-    out.push_str("\npub proc c_total_ptr\n    push.C_TOTAL_PTR\nend\n");
-    out.push_str("\npub proc current_trace_row_ptr\n    push.CURRENT_TRACE_ROW_PTR\nend\n");
-    out.push_str("\npub proc preprocessed_com_ptr\n    push.PREPROCESSED_COM_PTR\nend\n");
+    out.push_str("pub proc ace_circuit_stream_ptr() -> types::Address\n    push.ACE_CIRCUIT_STREAM_PTR\nend\n");
+    out.push_str("\npub proc bus_gamma_ptr() -> types::Address\n    push.BUS_GAMMA_PTR\nend\n");
+    out.push_str("\npub proc c_total_ptr() -> types::Address\n    push.C_TOTAL_PTR\nend\n");
+    out.push_str("\npub proc current_trace_row_ptr() -> types::Address\n    push.CURRENT_TRACE_ROW_PTR\nend\n");
+    out.push_str(
+        "\npub proc preprocessed_com_ptr() -> types::Address\n    push.PREPROCESSED_COM_PTR\nend\n",
+    );
 
     Ok(out)
 }
@@ -525,7 +529,7 @@ fn render_pvm_constraints_eval(
 fn max_periodic_cycle_len_log() -> Result<u32, String> {
     let max_len = ChipletAir::all()
         .iter()
-        .flat_map(<ChipletAir as BaseAir<Felt>>::periodic_columns)
+        .flat_map(|air| <ChipletAir as BaseAir<Felt>>::periodic_columns(air).into_owned())
         .map(|column| column.len())
         .max()
         .unwrap_or(1);

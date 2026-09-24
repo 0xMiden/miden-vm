@@ -1,12 +1,12 @@
 //! Building the advice a MASM recursive verifier consumes to verify a Miden VM proof.
 //!
-//! `exec.vm::verify_vm_proof` reads a STARK proof from the advice provider in a fixed
+//! `exec.vm::verify_proof` reads a STARK proof from the advice provider in a fixed
 //! order. This module is the producer side of that ABI: it selects the VM component of an
 //! [`ExecutionProof`] and packages it against its [`ExecutionClaim`] into the advice-stack stream,
 //! the Merkle store, and the advice-map entries the verifier consumes. Its authenticated
 //! precompile root is part of the VM statement; a completed precompile STARK is not verified here.
 //!
-//! Before calling `verify_vm_proof`, the consumer places this proof stream on top of the advice
+//! Before calling `vm::verify_proof`, the consumer places this proof stream on top of the advice
 //! stack:
 //!
 //!   security params (nq, query_pow, deep_pow, folding_pow) ->
@@ -15,9 +15,9 @@
 //!   DEEP PoW witness -> FRI rounds -> FRI remainder -> query PoW witness
 //!
 //! [`RecursiveVerifierInputs::for_request`] stores this stream in the advice map under the verifier
-//! and claim commitments. The consumer fetches it before calling `verify_vm_proof`. The consumer
+//! and claim commitments. The consumer fetches it before calling `vm::verify_proof`. The consumer
 //! also supplies the claim commitment; the advice map stores its 40-felt preimage under that
-//! commitment, and `verify_vm_proof` authenticates the preimage before using it. The advice map
+//! commitment, and `vm::verify_proof` authenticates the preimage before using it. The advice map
 //! stores the flattened kernel procedure digests under the kernel commitment as well. Query rows,
 //! the Merkle store, and the ACE circuit are content-addressed too.
 
@@ -64,7 +64,7 @@ type P2ProofData = StarkProofData<Felt, Challenge, P2Config>;
 /// Request-packaged inputs for MASM recursive verification.
 ///
 /// Pass [`Self::claim_commitment`] on the operand stack. The consumer derives the request key,
-/// fetches the proof stream from the advice map, and then invokes `exec.vm::verify_vm_proof`.
+/// fetches the proof stream from the advice map, and then invokes `exec.vm::verify_proof`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RecursiveVerifierInputs {
     advice: AdviceInputs,
@@ -114,14 +114,12 @@ impl RecursiveVerifierInputs {
     }
 }
 
-/// Builds the raw advice consumed by `verify_vm_proof` before request packaging.
+/// Builds the raw advice consumed by `vm::verify_proof` before request packaging.
 fn build_verifier_inputs(
     proof: &ExecutionProof,
     claim: &ExecutionClaim,
 ) -> Result<RecursiveVerifierInputs, RecursiveVerifierInputsError> {
-    let vm = match proof {
-        ExecutionProof::Deferred { vm, .. } | ExecutionProof::Complete { vm, .. } => vm,
-    };
+    let vm = proof.vm();
     let stark = &vm.proof;
     if stark.hash_fn() != HashFunction::Poseidon2 {
         return Err(RecursiveVerifierInputsError::UnsupportedHashFunction(stark.hash_fn()));
@@ -295,7 +293,7 @@ fn build_advice(
 
     advice_stack.push(pcs.query_pow_witness);
 
-    let (store, advice_map) = build_merkle_data(config, stark, &heights.proof_order)?;
+    let (store, advice_map) = build_merkle_data(stark, &heights.proof_order)?;
 
     let advice = AdviceInputs::default()
         .with_stack(advice_stack.into())
@@ -364,12 +362,10 @@ where
 /// entries (for the advice map). The verifier fetches authentication paths with `mtree_get` and
 /// leaf data with `adv.push_mapval`.
 fn build_merkle_data(
-    config: &P2Config,
     stark: &StarkProof<Challenge, P2Lmcs>,
     proof_order: &ProofOrder,
 ) -> Result<MerkleAdvice, RecursiveVerifierInputsError> {
     let pcs = &stark.pcs_proof;
-    let lmcs = config.lmcs();
 
     let mut store = MerkleStore::new();
     let mut advice_map = Vec::new();
@@ -377,7 +373,7 @@ fn build_merkle_data(
     // DEEP openings (one BatchProof per commitment: main, aux, quotient), then FRI openings
     // (one per FRI round).
     for batch_proof in pcs.deep_witnesses.iter().chain(pcs.fri_witnesses.iter()) {
-        let (tree, entries) = batch_proof_to_merkle(lmcs, batch_proof)?;
+        let (tree, entries) = batch_proof_to_merkle::<P2Lmcs>(batch_proof)?;
         store.extend(tree.inner_nodes());
         advice_map.extend(entries);
     }
@@ -400,7 +396,6 @@ fn build_merkle_data(
 /// Converts a `BatchProof` into a `PartialMerkleTree` (for the store) and its
 /// `leaf_hash -> leaf_data` advice-map entries.
 fn batch_proof_to_merkle<L>(
-    lmcs: &L,
     batch_proof: &L::BatchProof,
 ) -> Result<(PartialMerkleTree, Vec<(Word, Vec<Felt>)>), RecursiveVerifierInputsError>
 where
@@ -423,7 +418,10 @@ where
         )?;
 
         let leaf_data: Vec<Felt> = rows.as_slice().to_vec();
-        let leaf_word: Word = Word::new(lmcs.hash(rows.iter_rows()).into());
+        let leaf_hash = *batch_proof.leaf_hash(index).ok_or(
+            RecursiveVerifierInputsError::InvalidProofShape("missing leaf hash for query index"),
+        )?;
+        let leaf_word = Word::new(leaf_hash.into());
         let merkle_path =
             MerklePath::new(siblings.into_iter().map(|c| Word::new(c.into())).collect());
 
@@ -455,7 +453,7 @@ mod tests {
     use miden_core::{
         crypto::merkle::InnerNodeInfo,
         program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
-        proof::{StarkProof as CoreStarkProof, VmProof},
+        proof::{PrecompileStatus, StarkProof as CoreStarkProof, VmProof},
     };
 
     use super::*;
@@ -464,13 +462,13 @@ mod tests {
     /// bytes — the recursive verifier verifies only Poseidon2 STARKs.
     #[test]
     fn recursive_verifier_inputs_reject_non_poseidon2_proofs() {
-        let proof = ExecutionProof::Complete {
-            vm: VmProof {
+        let proof = ExecutionProof::new(
+            VmProof {
                 proof: CoreStarkProof::new(Vec::new(), HashFunction::Blake3_256),
                 precompile_root: Word::default(),
             },
-            precompile: None,
-        };
+            PrecompileStatus::Empty,
+        );
         let claim = ExecutionClaim::from_program_info(
             ProgramInfo::new(Word::default(), KernelDescriptor::default()),
             StackInputs::default(),

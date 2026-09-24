@@ -199,3 +199,69 @@ mod sys;
 mod word;
 
 mod stark;
+
+// These procedures consume/produce independent felts even though their semantic fields are
+// narrower. Check the exported Fast ABI, which uses physical layout instead of canonical
+// flattening.
+#[test]
+fn verifier_signatures_match_operand_stack_layout() {
+    use miden_assembly::ast::types::Type;
+    use miden_core_lib::CoreLibrary;
+    use miden_mast_package::PackageExport;
+
+    let core_lib = CoreLibrary::default();
+    let package = core_lib.package();
+    for (path, inputs, outputs) in [
+        ("::miden::core::stark::verifier::verify", 20, 4),
+        ("::miden::core::stark::security::compute_conjectured_security_level", 12, 1),
+        ("::miden::core::sys::vm::verify_proof", 4, 16),
+        ("::miden::core::sys::pvm::verify_proof", 4, 12),
+    ] {
+        let Some(PackageExport::Procedure(export)) = package.manifest.get_export(path) else {
+            panic!("missing procedure: {path}");
+        };
+        let signature = export.signature.as_ref().expect("typed procedure");
+        assert_eq!(
+            signature.params.iter().map(Type::size_in_felts).sum::<usize>(),
+            inputs,
+            "{path} inputs"
+        );
+        assert_eq!(
+            signature.results.iter().map(Type::size_in_felts).sum::<usize>(),
+            outputs,
+            "{path} outputs"
+        );
+    }
+
+    // Total arity alone would miss padding moved to the end of a record.
+    for (name, field_count) in [("StackProofParameters", 4), ("StackSecurityDescriptor", 9)] {
+        let path = format!("::miden::core::stark::types::{name}");
+        let Some(PackageExport::Type(export)) = package.manifest.get_export(path.as_str()) else {
+            panic!("missing type: {path}");
+        };
+        let Type::Struct(record) = &export.ty else {
+            panic!("expected struct: {path}");
+        };
+        let offsets: Vec<_> = record
+            .get()
+            .fields()
+            .iter()
+            .filter(|field| !field.name.as_deref().unwrap().ends_with("_padding"))
+            .map(|field| field.offset)
+            .collect();
+        assert_eq!(offsets, (0..field_count).map(|index| index * 4).collect::<Vec<_>>(), "{path}");
+    }
+
+    let Some(PackageExport::Type(export)) = package
+        .manifest
+        .get_export("::miden::core::crypto::dsa::falcon512_poseidon2::StoredCoefficient")
+    else {
+        panic!("missing coefficient memory type");
+    };
+    assert_eq!(
+        export.ty.size_in_bytes(),
+        4,
+        "coefficient buffers advance one felt per coefficient"
+    );
+    assert_eq!(export.ty.min_alignment(), 4);
+}

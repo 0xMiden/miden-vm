@@ -54,6 +54,47 @@ download_published_crate() {
     esac
 }
 
+published_package_has_library_target() {
+    local package="$1"
+    local version="$2"
+    local archive="$RELEASE_PLAN_TMPDIR/published-crates/$package-$version.crate"
+    local source_dir="$RELEASE_PLAN_TMPDIR/published-sources/$package-$version"
+    local manifest_path="$source_dir/$package-$version/Cargo.toml"
+    local published_metadata
+
+    check_command "tar"
+
+    mkdir -p "$(dirname "$archive")" "$source_dir"
+    if [[ ! -f "$archive" ]]; then
+        download_published_crate "$package" "$version" "$archive"
+    fi
+
+    if ! tar -xzf "$archive" -C "$source_dir"; then
+        echo "ERROR: could not extract published archive for $package v$version" >&2
+        exit 1
+    fi
+
+    if [[ ! -f "$manifest_path" ]]; then
+        echo "ERROR: published archive for $package v$version has no Cargo.toml" >&2
+        exit 1
+    fi
+
+    if ! published_metadata="$(
+        cargo metadata --manifest-path "$manifest_path" --no-deps --format-version 1
+    )"; then
+        echo "ERROR: could not read package metadata for published $package v$version" >&2
+        exit 1
+    fi
+
+    printf '%s' "$published_metadata" |
+        jq -e --arg package "$package" '
+          .packages[]
+          | select(.name == $package)
+          | .targets[]
+          | select(.kind | index("lib") or index("rlib"))
+        ' >/dev/null
+}
+
 latest_published_version() {
     local package="$1"
     local body_file="$RELEASE_PLAN_TMPDIR/${package}.latest.json"

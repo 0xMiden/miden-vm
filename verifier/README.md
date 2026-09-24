@@ -10,21 +10,36 @@ appropriate for projects that only need verification.
 Use `Verifier::new().verify(&claim, &proof)` to verify a deferred or complete `ExecutionProof`
 against its `ExecutionClaim`. The claim contains the program information and public stack inputs and
 outputs. The VM STARK authenticates the precompile root in either state. For a deferred proof, the
-passive wire is neither hydrated nor validated and the outcome exposes only the authenticated root;
-for a complete proof, the aggregate precompile STARK is also verified when present.
+verifier evaluates the portable witness and checks its root. The outcome exposes the
+authenticated root and VM security parameters. For a complete proof, the verifier also checks the
+aggregate precompile STARK when present and returns its security parameters.
 
 Use `Verifier::new().verify_precompile(&proof, expected_root)` to validate a `PrecompileProof`
 without first attaching it to an execution proof. It checks the expected-root membership and full
-ordered aggregate statement, verifies the precompile STARK, and returns its security level.
+ordered aggregate statement, verifies the precompile STARK, and returns its authenticated security
+parameters.
 
 Stack inputs are in push order (the last value is on top), while stack outputs are in pop order (the
 first value is on top).
 
-`Verifier::verify` returns a `VerificationOutcome`. Its `security_level()` is the minimum security
-level among the STARK components actually verified. Deferred verification exposes the authenticated
-obligation through `outstanding_precompile_root()`; complete verification returns no outstanding
-root. See the [deferred-proof semantics](../docs/src/design/deferred/semantics.md) for artifact,
-transport, and fixed-limit policy.
+`Verifier::verify` returns a `VerificationOutcome` containing the authenticated security parameters
+of each STARK component actually verified. Use
+`Verifier::new().with_min_conjectured_security_level_per_stark(required_bits)` to require a minimum
+conjectured security level for each STARK, including standalone `verify_precompile` calls. The VM's
+authenticated parameters are checked before native deferred-witness evaluation; complete proofs
+also check the precompile STARK's authenticated parameters. A level equal to the minimum is
+accepted. Insufficient security returns
+`VerificationError::InsufficientSecurityLevel { actual, required }`.
+
+This per-STARK minimum is not an end-to-end security guarantee. For example, a proof with two
+96-bit STARKs provides about 95 bits under the union bound. Callers that require 96 bits for the
+complete proof need extra margin.
+
+By default, no minimum is enforced. Successful results always retain the actual authenticated
+parameters, so callers can estimate the corresponding security levels themselves. Deferred
+verification exposes the authenticated obligation through
+`outstanding_precompile_root()`; complete verification returns no outstanding root. See the
+[deferred-proof semantics](../docs/src/design/deferred/semantics.md) for the full proof policy.
 
 ## Crate features
 

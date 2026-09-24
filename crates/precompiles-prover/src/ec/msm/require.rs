@@ -40,6 +40,40 @@ pub fn intro(
     msm.intro(group, sbound, base, one)
 }
 
+/// Promote a stored point `P` to the 1-term MSM expression `⟨P × 0⟩`
+/// (value = the group's point at infinity) — the zero-scalar leaf, dual to
+/// [`intro`]'s `⟨P × 1⟩`. Unlike `intro`, `val = base` doesn't hold here, so
+/// `base`'s own group membership (`is_pai = 0`) isn't implied by `val`'s
+/// PAI tie — this independently authenticates it, the same way
+/// [`intro_endo`] authenticates its own base. Panics if `base` is the point
+/// at infinity.
+pub fn intro_zero(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    base: EcPointPtr,
+) -> EcExprPtr {
+    if let Some(e) = msm.lookup_intro_zero(base) {
+        return e; // a prior ⟨base × 0⟩ — reuse it
+    }
+    let group = ec.store.point_params(base).0;
+    let (a_ptr, b_ptr, bound_ptr) = ec.store.group_params(group);
+    let (beta_ptr, lambda_ptr) = ec.store.group_glv_params(group);
+    let sbound = ec.store.group_sbound(group);
+    let zero = uint.require().intern(from_hex("0"), sbound);
+    let (base_x, base_y) =
+        ec.store.point_params(base).1.expect("intro_zero of the point at infinity");
+    let val = ec.store.group_pai(group);
+    ec.store.require_ecpoint(base);
+    ec.store.require_ecpoint(val);
+    ec.store.require_ecgroup(group);
+
+    msm.intro_zero(
+        group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, base, base_x, base_y, zero,
+        val,
+    )
+}
+
 /// Promote a stored point `P` to the 1-term MSM expression `⟨P × λ⟩`
 /// (value `= φ(P)`) — GLV's endomorphism leaf, the second base a joint
 /// wNAF ladder walks alongside [`intro`]'s `⟨P × 1⟩` (the two merge back
@@ -113,6 +147,41 @@ pub fn combine(
     ec.store.require_ecgroup(group);
 
     let c = msm.combine(
+        group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, a, b, val_a, val_b, val, rows,
+    );
+    msm.consume_op(a, 1);
+    msm.consume_op(b, 1);
+    c
+}
+
+/// Combine two MSM expressions **without merging shared bases** — every
+/// term of both operands survives as its own row (see [`concat_terms`]),
+/// even if a base occurs in both.
+pub fn combine_terms_preserving(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    a: EcExprPtr,
+    b: EcExprPtr,
+) -> EcExprPtr {
+    if let Some(e) = msm.lookup_concat_combine(a, b) {
+        return e; // identical concat-combine already laid — reuse it
+    }
+    let group = msm.group(a);
+    let sbound = msm.sbound(a);
+    let a_terms = msm.terms(a);
+    let b_terms = msm.terms(b);
+    let val_a = msm.value(a);
+    let val_b = msm.value(b);
+    let (a_ptr, b_ptr, bound_ptr) = ec.store.group_params(group);
+    let (beta_ptr, lambda_ptr) = ec.store.group_glv_params(group);
+
+    let rows = concat_terms(&a_terms, &b_terms);
+
+    let val = ec.require(uint.require()).add(val_a, val_b, 1);
+    ec.store.require_ecgroup(group);
+
+    let c = msm.combine_concat(
         group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, a, b, val_a, val_b, val, rows,
     );
     msm.consume_op(a, 1);
@@ -253,6 +322,50 @@ pub fn merge_terms(
             i += 1;
             j += 1;
         }
+    }
+    rows
+}
+
+/// The [`combine_terms_preserving`] walk: every one of A's terms copied
+/// through via `take_a` (in A's stored order), followed by every one of
+/// B's via `take_b` — never `take_both`, even when a base recurs between
+/// the two lists.
+pub fn concat_terms(
+    a_terms: &[(EcPointPtr, UintPtr)],
+    b_terms: &[(EcPointPtr, UintPtr)],
+) -> Vec<CombineRow> {
+    let zero_pt = EcPointPtr::from_addr(0);
+    let zero_u = UintPtr::from_addr(0);
+    let mut rows = Vec::with_capacity(a_terms.len() + b_terms.len());
+    for (i, &(base, s)) in a_terms.iter().enumerate() {
+        rows.push(CombineRow {
+            take_a: true,
+            take_b: false,
+            take_both: false,
+            i: i as u32,
+            j: 0,
+            base_a: base,
+            s_a: s,
+            base_b: zero_pt,
+            s_b: zero_u,
+            out_base: base,
+            out_scalar: s,
+        });
+    }
+    for (j, &(base, s)) in b_terms.iter().enumerate() {
+        rows.push(CombineRow {
+            take_a: false,
+            take_b: true,
+            take_both: false,
+            i: a_terms.len() as u32,
+            j: j as u32,
+            base_a: zero_pt,
+            s_a: zero_u,
+            base_b: base,
+            s_b: s,
+            out_base: base,
+            out_scalar: s,
+        });
     }
     rows
 }

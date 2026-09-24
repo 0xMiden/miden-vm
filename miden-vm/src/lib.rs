@@ -12,12 +12,14 @@ pub use miden_assembly::{
     diagnostics,
 };
 pub use miden_core::{
-    deferred::{DeferredStateWire, PrecompileWitnessError},
+    deferred::{IntegrityError, PrecompileWitnessEntry},
     program::ExecutionClaim,
     proof::{
-        ExecutionProof, ExecutionProofError, HashFunction, PrecompileProof, StarkProof, VmProof,
+        ExecutionProof, ExecutionProofCompatibility, ExecutionProofCompatibilityError,
+        ExecutionProofError, HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
     },
 };
+pub use miden_core_lib::conjectured_security_estimator_root;
 pub use miden_processor::{
     BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionWitness,
     FastProcessor, FutureMaybeSend, Host, KernelDescriptor, PrecompileWitness, Program,
@@ -25,21 +27,10 @@ pub use miden_processor::{
     operation::Operation, serde, trace, trace::VmTrace, utils,
 };
 pub use miden_prover::{InputError, Prover, ProverError, StackOutputs, Word, prove_sync};
-pub use miden_verifier::{VerificationError, VerificationOutcome, Verifier};
-
-/// Hydrates a passive deferred-state wire using the standard bundled precompile registry.
-///
-/// This is the public factory for precompile witnesses produced outside local execution. It
-/// validates the wire under the facade's installed precompiles before constructing the witness.
-pub fn precompile_witness_from_wire(
-    wire: &DeferredStateWire,
-) -> Result<PrecompileWitness, PrecompileWitnessError> {
-    let state = miden_core::deferred::DeferredState::from_wire(
-        alloc::sync::Arc::new(miden_precompiles::registry()),
-        wire,
-    )?;
-    PrecompileWitness::new(state)
-}
+pub use miden_verifier::{
+    AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
+    SecurityTerm, VerificationError, VerificationOutcome, Verifier,
+};
 
 // (private) exports
 // ================================================================================================

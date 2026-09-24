@@ -1,3 +1,4 @@
+use miden::core::stark::types
 use miden::core::stark::constants
 use miden::core::stark::public_inputs
 use miden::core::stark::random_coin
@@ -19,7 +20,7 @@ const PREPROCESSED_COMMITMENT_1 = 14394696689869899287
 const PREPROCESSED_COMMITMENT_2 = 1264609894509183924
 const PREPROCESSED_COMMITMENT_3 = 18313229530128768945
 
-pub proc preprocessed_commitment
+pub proc preprocessed_commitment() -> types::Digest
     push.PREPROCESSED_COMMITMENT_3.PREPROCESSED_COMMITMENT_2.PREPROCESSED_COMMITMENT_1.PREPROCESSED_COMMITMENT_0
 end
 
@@ -32,7 +33,7 @@ end
 #!
 #! Inputs:  [D0, D1, D2, D3, ...]
 #! Outputs: [...]
-pub proc stage_public_root
+pub proc stage_public_root(root: types::Digest)
     exec.layout::public_inputs_ptr mem_store
     exec.layout::public_inputs_ptr add.2 mem_store
     exec.layout::public_inputs_ptr add.4 mem_store
@@ -62,7 +63,7 @@ end
 #!
 #! Inputs:  [...]
 #! Outputs: [...]
-pub proc process_public_inputs
+pub proc process_public_inputs()
     exec.constants::random_coin_input_len_ptr mem_load
     assertz.err="PVM process_public_inputs: input buffer must be empty"
 

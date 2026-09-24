@@ -1,19 +1,108 @@
-use alloc::{sync::Arc, vec, vec::Vec};
+use alloc::{vec, vec::Vec};
 
-use miden_core::deferred::{DeferredState, Node};
+use miden_core::{
+    Felt,
+    deferred::{Node, PrecompileWitness, TRUE_DIGEST, Tag},
+    serde::{ByteWriter, Deserializable, Serializable},
+};
 use miden_precompiles::{CurveId, CurvePoint, CurvePrecompile, UintDomain, UintPrecompile};
 
-use crate::deferred::{DeferredSession, session_from_deferred_state};
+use crate::{
+    deferred::session::session_from_witnesses,
+    math::{U256, from_hex, to_limbs32},
+    session::SessionTraces,
+    tests::batch_witness::WitnessFixture,
+    transcript::eval::{COL_ACT, COL_IS_AND, COL_OUT_MULT},
+};
 
-fn state() -> DeferredState {
-    DeferredState::new(Arc::new(miden_precompiles::registry()))
-        .expect("precompile init must succeed")
+fn state() -> WitnessFixture {
+    WitnessFixture::new()
 }
 
 fn limbs(value: u32) -> [u32; 8] {
     let mut limbs = [0; 8];
     limbs[0] = value;
     limbs
+}
+
+#[test]
+fn deferred_session_lowers_shared_uint_dag_from_wire() {
+    let mut state = state();
+    let zero = state
+        .register(UintPrecompile::value_node(UintDomain::U256, limbs(0)))
+        .expect("zero must register");
+    let mut current = zero;
+    // Only 24 operation nodes, but an uncached traversal expands over 16 million leaves.
+    // Every expression evaluates to zero while retaining a distinct structural digest.
+    for depth in 0..24 {
+        let op = [UintPrecompile::ADD_OP_ID, UintPrecompile::SUB_OP_ID, UintPrecompile::MUL_OP_ID]
+            [depth % 3];
+        let node = Node::join(UintPrecompile::op_tag(op), current, current).unwrap();
+        current = state.register(node).expect("shared uint expression must register");
+    }
+    let eq = Node::join(UintPrecompile::op_tag(UintPrecompile::EQ_OP_ID), current, zero).unwrap();
+    let eq = state.register(eq).expect("equality must register");
+    state.log_statement(eq).unwrap();
+    state.log_statement(eq).unwrap();
+    check_wire_session(state);
+}
+
+#[test]
+fn deferred_session_lowers_shared_ec_dag_from_wire() {
+    let mut state = state();
+    let identity = state
+        .register(CurvePrecompile::identity_node(CurveId::Secp256k1))
+        .expect("identity must register");
+    let mut current = identity;
+    for depth in 0..24 {
+        let op = [CurvePrecompile::ADD_OP_ID, CurvePrecompile::SUB_OP_ID][depth % 2];
+        let node = Node::join(CurvePrecompile::op_tag(op), current, current).unwrap();
+        current = state.register(node).expect("shared EC expression must register");
+    }
+    let eq =
+        Node::join(CurvePrecompile::op_tag(CurvePrecompile::EQ_OP_ID), current, identity).unwrap();
+    let eq = state.register(eq).expect("equality must register");
+    state.log_statement(eq).unwrap();
+    state.log_statement(eq).unwrap();
+    check_wire_session(state);
+}
+
+#[test]
+fn deferred_session_lowers_exponential_and_dag_from_raw_wire() {
+    for depth in [1_u32, 2, 4, 64] {
+        // Start from untrusted bytes, not an in-memory state or private wire fields.
+        let mut bytes = Vec::new();
+        bytes.write_u8(PrecompileWitness::WIRE_VERSION);
+        bytes.write_usize(depth as usize);
+        for previous_index in 0..depth {
+            bytes.write_u8(1); // Join entry
+            Tag::AND.write_into(&mut bytes);
+            bytes.write_u32(previous_index);
+            bytes.write_u32(previous_index);
+        }
+        let witness = PrecompileWitness::read_from_bytes(&bytes).unwrap();
+        assert_eq!(witness.to_bytes(), bytes);
+        let traces = session_from_witnesses(vec![witness]).unwrap().finish();
+        traces.check();
+        let eval = traces.mains()[4];
+        let rows = eval.values.chunks_exact(eval.width).collect::<Vec<_>>();
+        assert_eq!(rows.iter().filter(|row| row[COL_ACT] == Felt::ONE).count(), depth as usize + 1);
+        assert_eq!(rows.iter().filter(|row| row[COL_IS_AND] == Felt::ONE).count(), depth as usize);
+        assert_eq!(rows[0][COL_OUT_MULT], Felt::ZERO);
+        for row in rows.iter().skip(1).filter(|row| row[COL_ACT] == Felt::ONE) {
+            assert_eq!(row[COL_OUT_MULT], Felt::from_u32(2));
+        }
+    }
+}
+
+fn check_wire_session(state: WitnessFixture) -> SessionTraces {
+    let witness = state.witness();
+    let witness =
+        PrecompileWitness::read_from_bytes(&witness.to_bytes()).expect("witness must decode");
+    assert_eq!(witness.root_unchecked(), state.root());
+    let traces = session_from_witnesses(vec![witness]).expect("shared DAG must lower").finish();
+    traces.check();
+    traces
 }
 
 #[test]
@@ -36,7 +125,8 @@ fn deferred_session_lowers_uint_equality_assertion() {
     let eq = state.register(eq).expect("equality must register");
     state.log_statement(eq).expect("equality must log");
 
-    session_from_deferred_state(&state).expect("uint equality should lower into a session");
+    session_from_witnesses(vec![state.witness()])
+        .expect("uint equality should lower into a session");
 }
 
 #[test]
@@ -62,10 +152,11 @@ fn deferred_session_lowers_curve_equality_assertion() {
     let eq = state.register(eq).expect("equality must register");
     state.log_statement(eq).expect("equality must log");
 
-    session_from_deferred_state(&state).expect("curve equality should lower into a session");
+    session_from_witnesses(vec![state.witness()])
+        .expect("curve equality should lower into a session");
 }
 
-fn register_curve_equality(state: &mut DeferredState, lhs: Node, rhs: Node) {
+fn register_curve_equality(state: &mut WitnessFixture, lhs: Node, rhs: Node) {
     let lhs = state.register(lhs).expect("lhs must register");
     let rhs = state.register(rhs).expect("rhs must register");
     let eq = Node::join(CurvePrecompile::op_tag(CurvePrecompile::EQ_OP_ID), lhs, rhs)
@@ -95,9 +186,9 @@ fn deferred_session_lowers_nested_one_term_msm() {
     state.register(outer.clone()).expect("outer MSM must register");
     register_curve_equality(&mut state, outer, generator);
 
-    let DeferredSession { session, root } =
-        session_from_deferred_state(&state).expect("nested MSM claims should lower");
-    session.finish(root).check();
+    let imported =
+        session_from_witnesses(vec![state.witness()]).expect("nested MSM claims should lower");
+    imported.finish().check();
 }
 
 #[test]
@@ -112,13 +203,13 @@ fn deferred_session_reuses_identical_msm_claim_in_trace() {
     let msm = curve_msm_node(vec![(generator, one)]);
     register_curve_equality(&mut state, msm.clone(), msm);
 
-    let DeferredSession { session, root } =
-        session_from_deferred_state(&state).expect("repeated MSM claim should lower");
-    session.finish(root).check();
+    let imported =
+        session_from_witnesses(vec![state.witness()]).expect("repeated MSM claim should lower");
+    imported.finish().check();
 }
 
 fn register_affine_curve_value(
-    state: &mut DeferredState,
+    state: &mut WitnessFixture,
     curve: CurveId,
     point: CurvePoint,
 ) -> Node {
@@ -135,7 +226,9 @@ fn register_affine_curve_value(
 }
 
 #[test]
-fn deferred_session_inputs_reject_zero_scalar_msm() {
+fn deferred_session_lowers_zero_scalar_msm() {
+    // 0·P = 𝒪: a single zero-scalar term registers and lowers to a session
+    // whose resolved value is the point at infinity.
     let mut state = state();
     let curve = CurveId::Secp256k1;
     let generator = CurvePrecompile::generator_node(curve);
@@ -144,11 +237,15 @@ fn deferred_session_inputs_reject_zero_scalar_msm() {
     state.register(zero.clone()).expect("zero scalar must register");
 
     let msm = curve_msm_node(vec![(generator, zero)]);
-    assert!(state.register(msm).is_err(), "zero-scalar MSM must be rejected");
+    register_curve_equality(&mut state, msm.clone(), msm);
+
+    session_from_witnesses(vec![state.witness()]).expect("zero-scalar MSM should lower");
 }
 
 #[test]
-fn deferred_session_inputs_reject_duplicate_base_msm() {
+fn deferred_session_lowers_duplicate_base_msm() {
+    // a·P + b·P = (a + b)·P: two terms naming the same generator lower
+    // (via the term-preserving fallback path) into one session.
     let mut state = state();
     let curve = CurveId::Secp256k1;
     let generator = CurvePrecompile::generator_node(curve);
@@ -159,7 +256,111 @@ fn deferred_session_inputs_reject_duplicate_base_msm() {
     state.register(three.clone()).expect("scalar must register");
 
     let msm = curve_msm_node(vec![(generator.clone(), two), (generator, three)]);
-    assert!(state.register(msm).is_err(), "duplicate-base MSM must be rejected");
+    register_curve_equality(&mut state, msm.clone(), msm);
+
+    session_from_witnesses(vec![state.witness()]).expect("duplicate-base MSM should lower");
+}
+
+#[test]
+fn deferred_session_lowers_mixed_zero_and_nonzero_msm() {
+    let mut state = state();
+    let curve = CurveId::Secp256k1;
+    let generator = CurvePrecompile::generator_node(curve);
+    let two_g = register_affine_curve_value(
+        &mut state,
+        curve,
+        curve
+            .mul_scalar(curve.generator(), limbs(2))
+            .expect("valid scalar multiplication"),
+    );
+    let zero = UintPrecompile::value_node(curve.scalar_domain(), limbs(0));
+    let three = UintPrecompile::value_node(curve.scalar_domain(), limbs(3));
+    state.register(generator.clone()).expect("generator must register");
+    state.register(zero.clone()).expect("zero scalar must register");
+    state.register(three.clone()).expect("scalar must register");
+
+    let msm = curve_msm_node(vec![(generator, zero), (two_g, three)]);
+    register_curve_equality(&mut state, msm.clone(), msm);
+
+    session_from_witnesses(vec![state.witness()]).expect("mixed zero/nonzero MSM should lower");
+}
+
+#[test]
+fn deferred_session_lowers_all_zero_msm_with_multiple_terms() {
+    let mut state = state();
+    let curve = CurveId::Secp256k1;
+    let generator = CurvePrecompile::generator_node(curve);
+    let two_g = register_affine_curve_value(
+        &mut state,
+        curve,
+        curve
+            .mul_scalar(curve.generator(), limbs(2))
+            .expect("valid scalar multiplication"),
+    );
+    let zero = UintPrecompile::value_node(curve.scalar_domain(), limbs(0));
+    state.register(generator.clone()).expect("generator must register");
+    state.register(zero.clone()).expect("zero scalar must register");
+
+    let msm = curve_msm_node(vec![(generator, zero.clone()), (two_g, zero)]);
+    register_curve_equality(&mut state, msm.clone(), msm);
+
+    session_from_witnesses(vec![state.witness()]).expect("all-zero MSM should lower");
+}
+
+#[test]
+fn deferred_session_lowers_repeated_base_coefficients_that_cancel() {
+    // A repeated base whose scalars sum to the curve order mod n cancels to
+    // the identity: k·P + (n − k)·P = n·P = 𝒪.
+    let mut state = state();
+    let curve = CurveId::Secp256k1;
+    let generator = CurvePrecompile::generator_node(curve);
+    let k = limbs(7);
+    let order = from_hex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
+    let n_minus_k = to_limbs32(order - U256::from(7u64));
+    let k_node = UintPrecompile::value_node(curve.scalar_domain(), k);
+    let n_minus_k_node = UintPrecompile::value_node(curve.scalar_domain(), n_minus_k);
+    state.register(generator.clone()).expect("generator must register");
+    state.register(k_node.clone()).expect("scalar must register");
+    state.register(n_minus_k_node.clone()).expect("scalar must register");
+
+    let msm = curve_msm_node(vec![(generator.clone(), k_node), (generator, n_minus_k_node)]);
+    register_curve_equality(&mut state, msm.clone(), msm);
+
+    session_from_witnesses(vec![state.witness()])
+        .expect("cancelling repeated-base MSM should lower");
+}
+
+#[test]
+fn deferred_session_lowers_structurally_different_nodes_at_the_same_canonical_point() {
+    // `G` and `identity + G` are structurally different DAG nodes that both
+    // evaluate to the generator — the same repeated-canonical-base path as
+    // `deferred_session_lowers_duplicate_base_msm`, reached structurally.
+    let mut state = state();
+    let curve = CurveId::Secp256k1;
+    let generator = CurvePrecompile::generator_node(curve);
+    let identity = CurvePrecompile::identity_node(curve);
+    state.register(generator.clone()).expect("generator must register");
+    state.register(identity.clone()).expect("identity must register");
+    let generator_via_add = Node::join(
+        CurvePrecompile::op_tag(CurvePrecompile::ADD_OP_ID),
+        identity.digest(),
+        generator.digest(),
+    )
+    .expect("tag is curve-owned");
+    let generator_via_add =
+        state.register(generator_via_add).expect("identity + generator must register");
+
+    let two = UintPrecompile::value_node(curve.scalar_domain(), limbs(2));
+    let three = UintPrecompile::value_node(curve.scalar_domain(), limbs(3));
+    state.register(two.clone()).expect("scalar must register");
+    state.register(three.clone()).expect("scalar must register");
+
+    let pairs = vec![(generator.digest(), two.digest()), (generator_via_add, three.digest())];
+    let msm = Node::try_pair_list(CurvePrecompile::msm_tag(), pairs).expect("tag is curve-owned");
+    register_curve_equality(&mut state, msm.clone(), msm);
+
+    session_from_witnesses(vec![state.witness()])
+        .expect("MSM over structurally different same-point nodes should lower");
 }
 
 #[test]
@@ -176,7 +377,16 @@ fn deferred_session_inputs_reject_identity_base_msm() {
     state.register(two.clone()).expect("scalar must register");
 
     let msm = curve_msm_node(vec![(identity, one), (generator, two)]);
-    assert!(state.register(msm).is_err(), "identity-base MSM must be rejected");
+    let root = state.register(msm).unwrap();
+    state.log_statement(root).unwrap();
+    let error = session_from_witnesses(vec![state.witness()]).err().unwrap();
+    assert!(matches!(
+        error,
+        crate::SessionInputError::Invalid {
+            reason: "MSM identity bases are unsupported",
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -197,5 +407,76 @@ fn deferred_session_lowers_large_msm_without_panicking() {
     let msm = curve_msm_node(pairs);
     register_curve_equality(&mut state, msm.clone(), msm);
 
-    session_from_deferred_state(&state).expect("large MSM should lower");
+    session_from_witnesses(vec![state.witness()]).expect("large MSM should lower");
+}
+
+fn run_on_small_stack(f: impl FnOnce() + Send + 'static) {
+    std::thread::Builder::new()
+        .stack_size(128 * 1024)
+        .spawn(f)
+        .expect("thread spawn must succeed")
+        .join()
+        .expect("thread must not panic");
+}
+
+#[test]
+fn translate_truthy_deep_and_spine_does_not_stackoverflow() {
+    run_on_small_stack(|| {
+        let mut state = WitnessFixture::new();
+        for _ in 0..512 {
+            state.log_statement(TRUE_DIGEST).unwrap();
+        }
+        session_from_witnesses(vec![state.witness()])
+            .expect("deep AND spine must lower without stack overflow");
+    });
+}
+
+#[test]
+fn translate_uint_deep_add_chain_does_not_stackoverflow() {
+    run_on_small_stack(|| {
+        let mut state = state();
+        let curve = CurveId::Secp256k1;
+        let one = UintPrecompile::value_node(curve.scalar_domain(), limbs(1));
+        state.register(one.clone()).expect("scalar leaf must register");
+        let mut current = one.clone();
+        for _ in 0..512 {
+            let next = Node::join(
+                UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID),
+                current.digest(),
+                one.digest(),
+            )
+            .expect("add node must construct");
+            state.register(next.clone()).expect("add node must register");
+            current = next;
+        }
+        let generator = CurvePrecompile::generator_node(curve);
+        state.register(generator.clone()).expect("generator must register");
+        let msm = curve_msm_node(vec![(generator, current)]);
+        state.register(msm.clone()).expect("MSM must register");
+        register_curve_equality(&mut state, msm.clone(), msm);
+        session_from_witnesses(vec![state.witness()])
+            .expect("deep uint add chain must lower without stack overflow");
+    });
+}
+
+#[test]
+fn translate_ec_deep_nested_msm_does_not_stackoverflow() {
+    run_on_small_stack(|| {
+        let mut state = state();
+        let curve = CurveId::Secp256k1;
+        let scalar2 = UintPrecompile::value_node(curve.scalar_domain(), limbs(2));
+        state.register(scalar2.clone()).expect("scalar must register");
+        let generator = CurvePrecompile::generator_node(curve);
+        state.register(generator.clone()).expect("generator must register");
+        let mut current = curve_msm_node(vec![(generator, scalar2.clone())]);
+        state.register(current.clone()).expect("first MSM must register");
+        for _ in 1..512 {
+            let next = curve_msm_node(vec![(current.clone(), scalar2.clone())]);
+            state.register(next.clone()).expect("nested MSM must register");
+            current = next;
+        }
+        register_curve_equality(&mut state, current.clone(), current);
+        session_from_witnesses(vec![state.witness()])
+            .expect("deep nested MSM must lower without stack overflow");
+    });
 }
