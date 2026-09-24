@@ -50,9 +50,7 @@ fn fq_bound() -> U256 {
 }
 
 fn random_challenges(rng: &mut impl Rng) -> [QuadFelt; 2] {
-    core::array::from_fn(|_| {
-        QuadFelt::new([Felt::new(rng.random()).unwrap(), Felt::new(rng.random()).unwrap()])
-    })
+    core::array::from_fn(|_| QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()]))
 }
 
 fn assert_balanced(traces: &SessionTraces, rng: &mut impl Rng) {

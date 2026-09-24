@@ -31,7 +31,7 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 
-use super::{Felt, VmTrace, build_trace_from_ops, rand_array};
+use super::{Felt, VmTrace, build_trace_from_ops};
 use crate::operation::Operation;
 
 const CONTROLLER_OFFSET: usize = CHIPLET_CONTROLLER_OFFSET;
@@ -134,8 +134,8 @@ fn build_lookup_fractions_runs_on_execution_trace() {
     let poseidon2_periodic = MidenAir::Poseidon2Permutation.periodic_columns();
 
     // QuadFelt challenges for LogUp, built from 4 random Felts (QuadFelt itself doesn't
-    // implement Randomizable, so we draw base-field elements and pair them).
-    let raw = rand_array::<Felt, 4>();
+    // have a direct distribution, so we draw base-field elements and pair them).
+    let raw = rand::random::<[Felt; 4]>();
     let alpha = QuadFelt::new([raw[0], raw[1]]);
     let beta = QuadFelt::new([raw[2], raw[3]]);
     let challenges =

@@ -9,7 +9,6 @@ use miden_crypto::{
     EMPTY_WORD, Felt, ONE, Word,
     hash::poseidon2::Poseidon2,
     merkle::smt::{LargeSmt, LargeSmtError, MemoryStorage, StorageError},
-    rand::test_utils::rand_value,
 };
 use rand::{RngExt, prelude::IteratorRandom, rng};
 
@@ -79,7 +78,7 @@ pub fn benchmark_smt() -> Result<(), LargeSmtError> {
     // prepare the `leaves` vector for tree creation
     let mut entries = Vec::new();
     for i in 0..tree_size {
-        let key = rand_value::<Word>();
+        let key = rand::random::<Word>();
         let value = Word::new([ONE, ONE, ONE, Felt::new_unchecked(i as u64)]);
         entries.push((key, value));
     }
@@ -138,7 +137,7 @@ pub fn insertion(tree: &mut LargeSmt<Storage>, insertions: usize) -> Result<(), 
     let mut insertion_times = Vec::new();
 
     for i in 0..insertions {
-        let test_key = Poseidon2::hash(&rand_value::<u64>().to_be_bytes());
+        let test_key = Poseidon2::hash(&rand::random::<u64>().to_be_bytes());
         let test_value = Word::new([ONE, ONE, ONE, Felt::new_unchecked((size + i) as u64)]);
 
         let now = Instant::now();
@@ -166,7 +165,7 @@ pub fn batched_insertion(
 
     let new_pairs: Vec<(Word, Word)> = (0..insertions)
         .map(|i| {
-            let key = Poseidon2::hash(&rand_value::<u64>().to_be_bytes());
+            let key = Poseidon2::hash(&rand::random::<u64>().to_be_bytes());
             let value = Word::new([ONE, ONE, ONE, Felt::new_unchecked((size + i) as u64)]);
             (key, value)
         })
@@ -218,7 +217,7 @@ pub fn batched_update(
         let value = if rng.random_bool(REMOVAL_PROBABILITY) {
             EMPTY_WORD
         } else {
-            Word::new([ONE, ONE, ONE, Felt::new_unchecked(rng.random())])
+            Word::new([ONE, ONE, ONE, rng.random::<Felt>()])
         };
 
         (key, value)

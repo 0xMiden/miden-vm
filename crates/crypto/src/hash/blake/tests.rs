@@ -4,18 +4,18 @@ use alloc::vec::Vec;
 use proptest::prelude::*;
 
 use super::*;
-use crate::{Felt, rand::test_utils::rand_vector};
+use crate::Felt;
 
 #[test]
 fn blake3_hash_elements() {
     // test multiple of 8
-    let elements = rand_vector::<Felt>(16);
+    let elements: Vec<Felt> = (0..16).map(|_| rand::random()).collect();
     let expected = compute_expected_element_hash(&elements);
     let actual: [u8; 32] = hash_elements(&elements);
     assert_eq!(&expected, &actual);
 
     // test not multiple of 8
-    let elements = rand_vector::<Felt>(17);
+    let elements: Vec<Felt> = (0..17).map(|_| rand::random()).collect();
     let expected = compute_expected_element_hash(&elements);
     let actual: [u8; 32] = hash_elements(&elements);
     assert_eq!(&expected, &actual);
@@ -23,7 +23,7 @@ fn blake3_hash_elements() {
 
 #[test]
 fn blake3_256_hash_elements_matches_hash() {
-    let elements = rand_vector::<Felt>(17);
+    let elements: Vec<Felt> = (0..17).map(|_| rand::random()).collect();
     let expected = Blake3_256::hash_elements(&elements);
     let mut bytes = Vec::new();
     for element in elements.iter() {
