@@ -1,4 +1,4 @@
-//! Chiplet responses bus ([`BusId::Chiplets`]).
+//! Chiplet responses lookup column.
 //!
 //! Chiplet-side responses from the hasher, bitwise, memory, ACE, and kernel ROM chiplets,
 //! all sharing one LogUp column.
@@ -12,6 +12,8 @@
 //! rather than splitting into four per-label variants. This keeps the response-column
 //! transition degree at 8; a per-variant split would bump it to 9.
 
+use super::super::operations::{aead_stream, merkle};
+
 use core::{array, borrow::Borrow};
 
 use miden_core::field::PrimeCharacteristicRing;
@@ -22,8 +24,8 @@ use crate::{
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
             messages::{
-                AceInitMsg, BitwiseMsg, BusId, BytePairLookupMsg, HasherMsg, HasherPayload,
-                KernelRomMsg, MemoryResponseMsg,
+                AceInitMsg, BitwiseMsg, BusId, HasherMsg, HasherPayload, KernelRomMsg,
+                MemoryResponseMsg,
             },
         },
         utils::{BoolNot, pack_u32_bytes_le},
@@ -60,25 +62,15 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     // Typed chiplet-data overlays.
     let ctrl = local.controller();
     let bw = local.bitwise();
-    let stream = local.aead_stream();
     let mem = local.memory();
     let ace = local.ace();
     let krom = local.kernel_rom();
 
-    // Hasher-internal sub-selectors are valid on controller rows and are reused below with their
-    // negated siblings.
+    // Hash-start and continuation flags on controller rows.
     let hs0: LB::Expr = ctrl.s0.into();
-    let hs1: LB::Expr = ctrl.s1.into();
-    let hs2: LB::Expr = ctrl.s2.into();
     let not_hs0 = hs0.not();
-    let not_hs1 = hs1.not();
-    let not_hs2 = hs2.not();
     let merkle_or_padding: LB::Expr = local.controller_merkle_or_padding().into();
     let hash_gate = ctx.chiplet_active.controller.clone() * merkle_or_padding.not();
-    // The controller skeleton makes `merkle_or_padding * s0` zero off controller rows. Keeping
-    // this gate narrow avoids a higher-degree controller-selector factor.
-    let merkle_gate = merkle_or_padding * hs0.clone();
-    let merkle_start: LB::Expr = ctrl.merkle_is_start().into();
 
     let state: [LB::Var; 12] = ctrl.state;
     let block_lo: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
@@ -87,9 +79,6 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     // --- Hasher response flags ---
     let f_hash_start: LB::Expr = hash_gate.clone() * hs0;
     let f_hash_continue: LB::Expr = hash_gate * not_hs0;
-    let f_mp: LB::Expr = merkle_gate.clone() * not_hs1 * hs2.clone() * merkle_start.clone();
-    let f_mv: LB::Expr = merkle_gate.clone() * hs1.clone() * not_hs2 * merkle_start.clone();
-    let f_mu: LB::Expr = merkle_gate * hs1 * hs2 * merkle_start;
 
     // --- Non-hasher flags ---
 
@@ -148,37 +137,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         Deg { v: 5, u: 6 },
                     );
 
-                    // Merkle leaf-word inputs for MP_VERIFY / MR_UPDATE_OLD / MR_UPDATE_NEW.
-                    // Each fires only on the first row of the corresponding Merkle path.
-                    for (name, flag, kind) in [
-                        ("mp_verify_input", f_mp, BusId::HasherMerkleVerifyInit),
-                        ("mr_update_old_input", f_mv, BusId::HasherMerkleOldInit),
-                        ("mr_update_new_input", f_mu, BusId::HasherMerkleNewInit),
-                    ] {
-                        g.add(
-                            name,
-                            flag,
-                            || {
-                                let addr = row_addr.clone();
-                                let node_index: LB::Expr = ctrl.merkle_node_index().into();
-                                let bit: LB::Expr = node_index.clone()
-                                    - Into::<LB::Expr>::into(ctrl.merkle_node_index_next())
-                                        .double();
-                                let one_minus_bit = bit.not();
-                                let word: [LB::Expr; 4] = array::from_fn(|i| {
-                                    one_minus_bit.clone() * block_lo[i].into()
-                                        + bit.clone() * block_hi[i].into()
-                                });
-                                HasherMsg {
-                                    kind,
-                                    addr,
-                                    node_index,
-                                    payload: HasherPayload::MerkleWord { direction_bit: bit, word },
-                                }
-                            },
-                            Deg { v: 5, u: 7 },
-                        );
-                    }
+                    merkle::emit_chiplet_inits::<LB, _>(g, ctx);
 
                     // Bitwise: runtime op selector bit.
                     g.add(
@@ -196,43 +155,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         Deg { v: 3, u: 5 },
                     );
 
-                    let mut remove_stream_row = |name: &'static str, phase_idx: usize| {
-                        let gate =
-                            ctx.chiplet_active.aead_stream.clone() * aead_phase[phase_idx].clone();
-                        g.batch(
-                            name,
-                            gate,
-                            |b| {
-                                let bytes = match phase_idx % 4 {
-                                    0 => stream.read().bytes,
-                                    1 => stream.high_first().bytes,
-                                    2 => stream.low_second().bytes,
-                                    3 => stream.high_second().bytes,
-                                    _ => unreachable!(),
-                                };
-                                for idx in 0..4 {
-                                    b.remove(
-                                        "aead_stream_byte",
-                                        BytePairLookupMsg::from_and(
-                                            bytes[idx].into(),
-                                            bytes[4 + idx].into(),
-                                            bytes[8 + idx].into(),
-                                        ),
-                                        Deg { v: 2, u: 3 },
-                                    );
-                                }
-                            },
-                            Deg { v: 3, u: 4 },
-                        );
-                    };
-                    remove_stream_row("aead_stream_row0", 0);
-                    remove_stream_row("aead_stream_row1", 1);
-                    remove_stream_row("aead_stream_row2", 2);
-                    remove_stream_row("aead_stream_row3", 3);
-                    remove_stream_row("aead_stream_row4", 4);
-                    remove_stream_row("aead_stream_row5", 5);
-                    remove_stream_row("aead_stream_row6", 6);
-                    remove_stream_row("aead_stream_row7", 7);
+                    aead_stream::emit_byte_checks::<LB, _>(g, ctx, &aead_phase);
 
                     // Memory response: runtime (is_read, is_word) mux keeps column transition at 8.
                     g.add(

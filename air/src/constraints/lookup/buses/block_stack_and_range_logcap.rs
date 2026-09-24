@@ -10,7 +10,7 @@
 //!
 //! # Structure
 //!
-//! One [`super::super::LookupBuilder::column`] call with one opcode-gated group:
+//! One [`crate::lookup::LookupBuilder::next_column`] call with one opcode-gated group:
 //!
 //! - Block-stack table: JOIN/SPLIT/SPAN/DYN, LOOP, DYNCALL, CALL/SYSCALL, two END cases, RESPAN
 //!   batch (7 branches, mutually exclusive via decoder opcode flags).
@@ -58,6 +58,8 @@
 //!
 //! Column max: `U = 8, V = 7`; transition degree is `max(1 + 8, 7) = 9`.
 
+use super::super::operations::merkle;
+
 use core::array;
 
 use miden_core::field::PrimeCharacteristicRing;
@@ -71,10 +73,7 @@ use crate::{
         utils::BoolNot,
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
-    trace::{
-        chiplets::hasher::MERKLE_DEPTH_RANGE_SCALE,
-        log_deferred::{HELPER_STATE_PREV_RANGE, STACK_STATE_NEW_RANGE},
-    },
+    trace::log_deferred::{HELPER_STATE_PREV_RANGE, STACK_STATE_NEW_RANGE},
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
@@ -129,11 +128,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
 
     let user_helpers = dec.user_op_helpers();
     let f_u32rc = op_flags.u32_rc_op();
-    let f_mpverify = op_flags.mpverify();
-    let f_mrupdate = op_flags.mrupdate();
     let f_log_deferred = op_flags.log_deferred();
-    let merkle_depth = stk.get(4);
-    let merkle_y3 = user_helpers[5];
 
     // u32rc helpers: first 4 of the 6 user_op_helpers.
     let u32rc_helpers: [LB::Var; 4] = array::from_fn(|i| user_helpers[i]);
@@ -316,74 +311,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         Deg { v: 6, u: 7 }, // (V, U) = (3 + 3, 4 + 3)
                     );
 
-                    // ---- Merkle range-check removes (BusId::RangeCheck) ----
-                    //
-                    // Two simultaneous checks enforce `1 <= depth <= MAX_MERKLE_DEPTH`. The first
-                    // constrains `depth` to its canonical 16-bit value. The second checks
-                    // `(depth - 1) * (2^16 / MAX_MERKLE_DEPTH)`, which fits in 16 bits exactly for
-                    // the supported positive depths. The first check is also what prevents the
-                    // scaled expression from wrapping through the field modulus.
-                    //
-                    // MPVERIFY and MRUPDATE are split because their opcode flags have degrees 5
-                    // and 4 respectively. This lets the lower-degree MRUPDATE branch carry both
-                    // top-limb checks while keeping the column at transition degree 9. The lower
-                    // three witness limbs live in the row-disjoint stack-overflow column;
-                    // MPVERIFY's direct y3 check shares its chiplet-request batch.
-                    g.batch(
-                        "mpverify_merkle_range_check",
-                        f_mpverify,
-                        move |b| {
-                            let depth: LB::Expr = merkle_depth.into();
-                            let scaled_depth = (depth.clone() - LB::Expr::ONE)
-                                * LB::Expr::from_u16(MERKLE_DEPTH_RANGE_SCALE);
-                            b.remove(
-                                "mpverify_depth",
-                                RangeMsg { value: depth },
-                                Deg { v: 5, u: 6 },
-                            );
-                            b.remove(
-                                "mpverify_depth_scaled",
-                                RangeMsg { value: scaled_depth },
-                                Deg { v: 5, u: 6 },
-                            );
-                            b.remove(
-                                "mpverify_merkle_y3_doubled",
-                                RangeMsg { value: LB::Expr::from_u16(2) * merkle_y3 },
-                                Deg { v: 5, u: 6 },
-                            );
-                        },
-                        Deg { v: 7, u: 8 }, // (V, U) = (2 + 5, 3 + 5)
-                    );
-                    g.batch(
-                        "mrupdate_merkle_range_check",
-                        f_mrupdate,
-                        move |b| {
-                            let depth: LB::Expr = merkle_depth.into();
-                            let scaled_depth = (depth.clone() - LB::Expr::ONE)
-                                * LB::Expr::from_u16(MERKLE_DEPTH_RANGE_SCALE);
-                            b.remove(
-                                "mrupdate_depth",
-                                RangeMsg { value: depth },
-                                Deg { v: 4, u: 5 },
-                            );
-                            b.remove(
-                                "mrupdate_depth_scaled",
-                                RangeMsg { value: scaled_depth },
-                                Deg { v: 4, u: 5 },
-                            );
-                            b.remove(
-                                "mrupdate_merkle_y3",
-                                RangeMsg { value: merkle_y3.into() },
-                                Deg { v: 4, u: 5 },
-                            );
-                            b.remove(
-                                "mrupdate_merkle_y3_doubled",
-                                RangeMsg { value: LB::Expr::from_u16(2) * merkle_y3 },
-                                Deg { v: 4, u: 5 },
-                            );
-                        },
-                        Deg { v: 7, u: 8 }, // (V, U) = (3 + 4, 4 + 4)
-                    );
+                    merkle::emit_core_range_checks::<LB, _>(g, ctx);
 
                     // ---- Log-deferred root update (BusId::LogDeferredRoot) ----
                     // Remove the previous deferred root, add the next. Mutually exclusive with all

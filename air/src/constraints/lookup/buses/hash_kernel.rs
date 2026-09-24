@@ -2,17 +2,13 @@
 //!
 //! Combines five row-disjoint interaction families on a single LogUp column:
 //!
-//! 1. **Sibling table** (`BusId::SiblingTable`) - Merkle update siblings. On Merkle controller rows
-//!    with `s0 * s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV (old path,
-//!    adds siblings). The direction bit `b = node_index - 2 * node_index_next` selects which half
-//!    of `block = [block_lo, block_hi]` holds the sibling, giving four gated interactions (two add,
-//!    two remove).
+//! 1. **Sibling table** (`BusId::SiblingTable`) - Merkle update siblings on controller rows; see
+//!    [`super::super::operations::merkle`].
 //! 2. **ACE memory reads** - on ACE chiplet rows, the block selector distinguishes word reads
 //!    (`f_ace_read`) from element reads used by EVAL rows (`f_ace_eval`). Both are removed from the
 //!    chiplets bus.
-//! 3. **AEAD stream memory I/O** (`BusId::{MemoryReadWord, MemoryWriteWord}`) - on stream rows,
-//!    phases 0 and 4 remove the duplicated plaintext reads, and the two terminal phases remove
-//!    ciphertext writes.
+//! 3. **AEAD stream memory I/O** (`BusId::{MemoryReadWord, MemoryWriteWord}`) - on stream rows;
+//!    see [`super::super::operations::aead_stream`].
 //! 4. **Normal bitwise AND8 checks** (`BusId::And8Lookup`) - on normal bitwise rows, four removes
 //!    bind the bytewise `a & b` witnesses to the shared AND8 lookup table.
 //! 5. **Memory-side range checks** (`BusId::RangeCheck`) - on memory chiplet rows, a five-remove
@@ -32,7 +28,9 @@
 //! `chiplets[18..20]`, past the end of the memory overlay, shared with the ACE chiplet
 //! column space), so they are read directly from the raw chiplet slice.
 
-use core::{array, borrow::Borrow};
+use super::super::operations::{aead_stream, merkle};
+
+use core::borrow::Borrow;
 
 use miden_core::field::PrimeCharacteristicRing;
 
@@ -41,9 +39,9 @@ use crate::{
         chiplets::columns::PeriodicCols,
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
-            messages::{BytePairLookupMsg, MemoryMsg, RangeMsg, SiblingBit, SiblingMsg},
+            messages::{BytePairLookupMsg, MemoryMsg, RangeMsg},
         },
-        utils::{BoolNot, pack_u32_bytes_le},
+        utils::BoolNot,
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
     trace::chiplets::ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
@@ -51,7 +49,7 @@ use crate::{
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// Three row-type-disjoint interaction sets, mutually exclusive via chiplet active flags:
+/// Five row-type-disjoint interaction sets, mutually exclusive via chiplet active flags:
 /// - **Sibling-table** on hasher controller rows (`chiplet_active.controller`): the MV/MU split is
 ///   mutually exclusive (`s2` vs `1-s2`) and the direction bit cuts within each side, so at most
 ///   one of the four fires per row -> 1 fraction.
@@ -80,36 +78,6 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
     let aead_phase: [LB::Expr; 8] = periodic.aead_stream.phases.map(Into::into);
 
-    // --- Sibling-table setup ---
-
-    // Typed hasher-controller overlay: sub-selectors `s0/s1/s2`, state lanes, Merkle index data,
-    // and carried MRUPDATE id.
-    let ctrl = local.controller();
-
-    let hs0: LB::Expr = ctrl.s0.into();
-    let hs1: LB::Expr = ctrl.s1.into();
-    let hs2: LB::Expr = ctrl.s2.into();
-
-    // MU/MV controller-row flags for sibling-table participation. Both share `s0 * s1 = 1`;
-    // they differ on `s2` (MU: `s2 = 1`, MV: `s2 = 0`) and fire at each Merkle path step.
-    let controller_flag = ctx.chiplet_active.controller.clone();
-    let f_mu_all: LB::Expr = controller_flag.clone() * hs0.clone() * hs1.clone() * hs2.clone();
-    let f_mv_all: LB::Expr = controller_flag * hs0 * hs1 * hs2.not();
-
-    // The controller state is `[block_lo (4), block_hi (4), cv (4)]`; sibling messages use only
-    // the two block words.
-    let block_lo: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
-    let block_hi: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
-    let mrupdate_id = local.controller_mrupdate_id();
-    let node_index = ctrl.merkle_node_index();
-
-    // Direction bit `b = node_index - 2 * node_index_next`. The bit / one_minus_bit combine
-    // multiplicatively into the sibling flags below - they're computed once and cloned into
-    // each `g.add` / `g.remove` flag argument.
-    let node_index_next: LB::Expr = ctrl.merkle_node_index_next().into();
-    let bit: LB::Expr = node_index.into() - node_index_next.double();
-    let one_minus_bit: LB::Expr = bit.not();
-
     // --- ACE memory-read setup ---
 
     // Typed ACE chiplet overlay.
@@ -130,8 +98,6 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let ace_id_1 = ace.id_1;
     let ace_id_2 = ace.eval().id_2;
     let ace_eval_op = ace.eval_op;
-    let stream = local.aead_stream();
-    let stream_gate = ctx.chiplet_active.aead_stream.clone();
     let bitwise = local.bitwise();
     let normal_bitwise_gate = ctx.chiplet_active.bitwise.clone();
 
@@ -149,41 +115,9 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
             col.group(
                 "sibling_ace_memory",
                 |g| {
-                    // --- SIBLING TABLE ---
-                    // MV adds (old path), MU removes (new path); each splits on the Merkle
-                    // direction bit into a BitZero (sibling in the high block word) and BitOne
-                    // (sibling in the low block word) branch. Four mutually exclusive
-                    // interactions total.
-                    for (op_name, is_add, f_all, bit_tag, bit_gate) in [
-                        (
-                            "sibling_mv_b0",
-                            true,
-                            f_mv_all.clone(),
-                            SiblingBit::Zero,
-                            one_minus_bit.clone(),
-                        ),
-                        ("sibling_mv_b1", true, f_mv_all, SiblingBit::One, bit.clone()),
-                        ("sibling_mu_b0", false, f_mu_all.clone(), SiblingBit::Zero, one_minus_bit),
-                        ("sibling_mu_b1", false, f_mu_all, SiblingBit::One, bit),
-                    ] {
-                        let gate = f_all * bit_gate;
-                        let build = move || {
-                            let mrupdate_id: LB::Expr = mrupdate_id.into();
-                            let node_index: LB::Expr = node_index.into();
-                            let h = match bit_tag {
-                                SiblingBit::Zero => array::from_fn(|i| block_hi[i].into()),
-                                SiblingBit::One => array::from_fn(|i| block_lo[i].into()),
-                            };
-                            SiblingMsg { bit: bit_tag, mrupdate_id, node_index, h }
-                        };
-                        if is_add {
-                            g.add(op_name, gate, build, Deg { v: 5, u: 6 });
-                        } else {
-                            g.remove(op_name, gate, build, Deg { v: 5, u: 6 });
-                        }
-                    }
+                    merkle::emit_siblings::<LB, _>(g, ctx);
 
-                    // --- ACE MEMORY READS (chiplet-responses column) ---
+                    // --- ACE MEMORY READS ---
                     // Word read on READ rows.
                     g.remove(
                         "ace_mem_read_word",
@@ -223,56 +157,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                         Deg { v: 5, u: 6 },
                     );
 
-                    // --- AEAD STREAM MEMORY I/O (chiplet rows) ---
-                    // One 8-row stream entry reads one plaintext word and writes two ciphertext
-                    // words. Both 4-row halves read the same source word, so each half is bound
-                    // directly to the memory chiplet.
-                    let mut remove_stream_read = |name: &'static str, phase_idx: usize| {
-                        let gate = stream_gate.clone() * aead_phase[phase_idx].clone();
-                        g.remove(
-                            name,
-                            gate,
-                            || {
-                                let row = stream.read();
-                                let word = row.plaintext.map(Into::into);
-                                MemoryMsg::read_word(
-                                    row.ctx.into(),
-                                    row.src_ptr.into(),
-                                    row.clk.into(),
-                                    word,
-                                )
-                            },
-                            Deg { v: 4, u: 5 },
-                        );
-                    };
-                    remove_stream_read("aead_stream_read0", 0);
-                    remove_stream_read("aead_stream_read1", 4);
-
-                    let mut remove_stream_write = |name: &'static str, phase_idx: usize| {
-                        let gate = stream_gate.clone() * aead_phase[phase_idx].clone();
-                        g.remove(
-                            name,
-                            gate,
-                            || {
-                                let row = stream.high_second();
-                                let word = [
-                                    row.c_prev0.into(),
-                                    row.c_prev1.into(),
-                                    row.c_prev2.into(),
-                                    stream_xor_limb::<LB>(row.bytes),
-                                ];
-                                MemoryMsg::write_word(
-                                    row.ctx.into(),
-                                    row.dst_ptr.into(),
-                                    row.clk.into(),
-                                    word,
-                                )
-                            },
-                            Deg { v: 4, u: 5 },
-                        );
-                    };
-                    remove_stream_write("aead_stream_write0", 3);
-                    remove_stream_write("aead_stream_write1", 7);
+                    aead_stream::emit_memory_io::<LB, _>(g, ctx, &aead_phase);
 
                     // --- NORMAL BITWISE AND8 CHECKS (BusId::And8Lookup) ---
                     //
@@ -338,17 +223,4 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
         },
         Deg { v: 7, u: 8 },
     );
-}
-
-fn stream_xor_limb<LB>(bytes: [LB::Var; 12]) -> LB::Expr
-where
-    LB: ChipletLookupBuilder,
-{
-    let xor_bytes: [LB::Expr; 4] = array::from_fn(|i| {
-        let lhs: LB::Expr = bytes[i].into();
-        let rhs: LB::Expr = bytes[i + 4].into();
-        let and: LB::Expr = bytes[i + 8].into();
-        lhs + rhs - and.double()
-    });
-    pack_u32_bytes_le::<_, LB::Expr>(xor_bytes)
 }
