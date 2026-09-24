@@ -476,6 +476,52 @@ fn test_adv_insert_mem_existing_key_respects_advice_size_budget() {
     ));
 }
 
+/// A conflicting value at the budget boundary must be rejected before it is collected.
+#[test]
+fn test_adv_insert_mem_conflict_at_budget_is_rejected_before_allocation() {
+    const RANGE_LEN: usize = 2;
+
+    let base_store_bytes = MerkleStore::default().num_internal_nodes() * 3 * Word::SERIALIZED_SIZE;
+    let felt_bytes = Word::SERIALIZED_SIZE / Word::NUM_ELEMENTS;
+    let entry_bytes = Word::SERIALIZED_SIZE + RANGE_LEN * felt_bytes;
+    let max = base_store_bytes + entry_bytes;
+
+    let err = run_conflicting_insert(max).unwrap_err();
+    assert!(matches!(
+        err,
+        ExecutionError::AdviceError {
+            err: AdviceError::SizeBudgetExceeded {
+                current,
+                added,
+                max: actual_max,
+            },
+            ..
+        } if current == max && added == entry_bytes && actual_max == max
+    ));
+}
+
+/// A conflicting value is reported when the budget permits collecting the candidate.
+#[test]
+fn test_adv_insert_mem_conflict_with_spare_budget_reports_values() {
+    const RANGE_LEN: usize = 2;
+
+    let base_store_bytes = MerkleStore::default().num_internal_nodes() * 3 * Word::SERIALIZED_SIZE;
+    let felt_bytes = Word::SERIALIZED_SIZE / Word::NUM_ELEMENTS;
+    let entry_bytes = Word::SERIALIZED_SIZE + RANGE_LEN * felt_bytes;
+    let max = base_store_bytes + 2 * entry_bytes;
+
+    let err = run_conflicting_insert(max).unwrap_err();
+    let ExecutionError::AdviceError {
+        err: AdviceError::MapKeyAlreadyPresent { prev_values, new_values, .. },
+        ..
+    } = err
+    else {
+        panic!("expected conflicting advice map value, got: {err:?}");
+    };
+    assert_eq!(prev_values, vec![Felt::new_unchecked(1); RANGE_LEN]);
+    assert_eq!(new_values, vec![Felt::new_unchecked(1), Felt::new_unchecked(2)]);
+}
+
 // HELPERS
 // ================================================================================================
 
@@ -561,6 +607,35 @@ fn run_insert_mem_after_empty_insertion(range_len: u32) -> Result<(), ExecutionE
     let base_store_bytes = MerkleStore::default().num_internal_nodes() * 3 * Word::SERIALIZED_SIZE;
     let options = ExecutionOptions::default()
         .with_max_advice_size_bytes(base_store_bytes + Word::SERIALIZED_SIZE);
+
+    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+        .map_err(ExecutionError::advice_error_no_context)?
+        .execute_sync(&program, &mut host)?;
+    Ok(())
+}
+
+fn run_conflicting_insert(max_advice_size_bytes: usize) -> Result<(), ExecutionError> {
+    let source = "begin
+        push.1 push.0 mem_store
+        push.1 push.1 mem_store
+
+        push.2 push.0
+        push.1.2.3.4
+        adv.insert_mem
+        dropw drop drop
+
+        push.2 push.1 mem_store
+        push.2 push.0
+        push.1.2.3.4
+        adv.insert_mem
+        dropw drop drop
+    end";
+    let program = Assembler::default()
+        .assemble_program("program", source)
+        .unwrap()
+        .unwrap_program();
+    let mut host = TestHost::default();
+    let options = ExecutionOptions::default().with_max_advice_size_bytes(max_advice_size_bytes);
 
     FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
         .map_err(ExecutionError::advice_error_no_context)?
