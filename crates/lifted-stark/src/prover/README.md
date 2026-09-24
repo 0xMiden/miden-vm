@@ -24,10 +24,12 @@ and optionally overrides `max_aux_inputs()`, `eval_external(...)`, and
 `observe(challenger, ...)` (defaults: zero `aux_inputs` budget, no cross-AIR assertions,
 and framed observation of `air_inputs.len()`, `air_inputs`, `max_aux_inputs()`,
 `aux_inputs.len()`, then `aux_inputs`; the protocol observes instance count and
-`log_heights` after that hook). Each AIR builds its
-own auxiliary trace via `LiftedAir::build_aux_trace(main, air_inputs, aux_inputs,
-challenges)`. A `Statement` wraps a `MultiAir` with the
-`air_inputs` shared by every AIR and the optional `aux_inputs`; `Statement::new`
+`log_heights` after that hook). Each AIR builds its auxiliary trace via
+`LiftedAir::build_aux_trace_with_preprocessed`. The default delegates to
+`build_aux_trace` for AIRs that do not use the cached preprocessed trace.
+
+A `Statement` wraps a `MultiAir` with the `air_inputs` shared by every AIR and
+the optional `aux_inputs`; `Statement::new`
 validates the inputs against the AIRs. A `ProverStatement` wraps a `Statement`
 with `traces()` (per-AIR main witness traces in instance order); `ProverStatement::new`
 validates the trace shape. The same `MultiAir` drives both proving and

@@ -1,9 +1,9 @@
 //! Preprocessed data: the fixed per-AIR matrices and their committed LDE tree.
 //!
 //! Preprocessed columns are *fixed circuit data* (lookup tables, selectors)
-//! declared by the AIR via [`BaseAir::preprocessed_trace`] and committed once
-//! at setup. The prover holds the cached raw matrices plus their LDE tree (the
-//! [`Preprocessed`] bundle, built once and borrowed across proofs); the
+//! declared by the AIR via [`BaseAir::preprocessed_trace`] and committed at
+//! setup. The prover holds the raw matrices plus their LDE tree (the
+//! [`Preprocessed`] bundle, which can be borrowed across proofs); the
 //! verifier holds only the commitment (a root hash, trusted like the AIR list
 //! itself).
 //!
@@ -40,8 +40,8 @@ use crate::{
 /// committed LDE tree.
 ///
 /// `traces[i]` is `Some` exactly when AIR `i` declares preprocessed columns;
-/// the LDE tree commits one LDE trace per such AIR, in proof order. Built once
-/// at setup via [`Preprocessed::build`] and borrowed across proofs.
+/// the LDE tree commits one LDE trace per such AIR, in proof order. Built at
+/// setup via [`Preprocessed::build`] and borrowed by prover instances.
 ///
 /// Parameterized over the LMCS `L` rather than a full [`StarkConfig`] so the
 /// value can be borrowed by prover instances with the same commitment type. The
@@ -55,7 +55,8 @@ where
     /// Per-AIR raw preprocessed matrices in instance order; `None` where the
     /// AIR declares none. The cached [`BaseAir::preprocessed_trace`] evals —
     /// `preprocessed_trace` re-allocates on every call, so they are computed
-    /// once here and retained for validation and `check_constraints`.
+    /// once here and retained for validation, auxiliary-trace construction,
+    /// and `check_constraints`.
     traces: Vec<Option<RowMajorMatrix<F>>>,
     /// Committed LDE tree, one committed LDE trace per preprocessed AIR.
     committed: Committed<F, RowMajorMatrix<F>, L>,
@@ -136,6 +137,11 @@ where
     /// verifier via [`VerifierInstance::new`](crate::VerifierInstance::new).
     pub fn commitment(&self) -> L::Commitment {
         self.committed.root()
+    }
+
+    /// Raw setup traces in AIR instance order.
+    pub(crate) fn raw_traces(&self) -> &[Option<RowMajorMatrix<F>>] {
+        &self.traces
     }
 
     /// Build an LMCS batch opening for setup-fixed preprocessed rows.

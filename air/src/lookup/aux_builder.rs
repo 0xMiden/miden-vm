@@ -51,6 +51,26 @@ where
     A: LiftedAir<F, EF>,
     for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
 {
+    let preprocessed = air.preprocessed_trace();
+    build_logup_aux_trace_with_preprocessed(air, main, preprocessed.as_ref(), challenges)
+}
+
+/// Build a LogUp auxiliary trace from a setup trace already held by the prover.
+///
+/// `preprocessed` must be the trace declared by `air`, or `None` when the AIR
+/// has no preprocessed columns.
+pub(crate) fn build_logup_aux_trace_with_preprocessed<A, F, EF>(
+    air: &A,
+    main: &RowMajorMatrix<F>,
+    preprocessed: Option<&RowMajorMatrix<F>>,
+    challenges: &[EF],
+) -> (RowMajorMatrix<EF>, Vec<EF>)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    A: LiftedAir<F, EF>,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
+{
     let _span = tracing::info_span!("build_aux_trace_logup").entered();
 
     debug_assert!(
@@ -65,7 +85,6 @@ where
     let beta = challenges[1];
     let lookup_challenges =
         Challenges::<EF>::new(alpha, beta, air.max_message_width(), air.num_bus_ids());
-    let preprocessed = air.preprocessed_trace();
     let periodic = air.periodic_columns();
     let num_cols = air.column_shape().len();
     assert!(num_cols > 0, "LogUp requires at least one accumulator column");
@@ -84,7 +103,7 @@ where
         let chunk = build_lookup_fraction_chunk(
             air,
             main,
-            preprocessed.as_ref(),
+            preprocessed,
             &periodic,
             &lookup_challenges,
             row_lo..row_lo + totals.len(),
@@ -590,7 +609,8 @@ mod tests {
             &lookup_challenges,
         );
         let (expected, sigma_prime) = accumulate_slow(&fractions);
-        let (actual, aux_values) = build_logup_aux_trace(&air, &main, &challenges);
+        let (actual, aux_values) =
+            build_logup_aux_trace_with_preprocessed(&air, &main, Some(&preprocessed), &challenges);
 
         assert_eq!(aux_values, [sigma_prime]);
         assert_eq!(actual.height(), num_rows);

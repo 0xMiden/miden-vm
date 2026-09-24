@@ -15,12 +15,13 @@ use miden_air::{
     ace::{
         RecursiveAceCircuit, build_canonical_multi_air_ace_circuit, recursive_verifier_ace_config,
     },
-    config::relation_digest,
+    config::{self, relation_digest},
 };
 use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt, program::KernelDescriptor};
 use miden_crypto::stark::{
-    Preprocessed, QuotientRecompositionInputs,
+    Preprocessed, QuotientRecompositionInputs, StarkConfig,
     air::{BaseAir, LiftedAir},
+    lmcs::Lmcs,
     quotient_recomposition_inputs,
 };
 
@@ -34,7 +35,6 @@ const PROTOCOL_ID: u64 = 1;
 const AIR_CONFIG_PATH: &str = "../../../air/src/config.rs";
 const CONSTRAINTS_EVAL_PATH: &str = "asm/sys/vm/constraints_eval.masm";
 const RELATION_DIGEST_PATH: &str = "asm/sys/vm/mod.masm";
-const VERIFIER_LIB_PATH: &str = "../../../verifier/src/lib.rs";
 const VM_LAYOUT_PATH: &str = "asm/sys/vm/layout.masm";
 const STARK_CONSTANTS_PATH: &str = "asm/stark/constants.masm";
 const VM_OOD_FRAMES_PATH: &str = "asm/sys/vm/ood_frames.masm";
@@ -116,7 +116,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     let vm_ood_frames = render_vm_ood_frames(&vm_geometry)?;
     let vm_deep_queries = render_vm_deep_queries(&vm_geometry)?;
 
-    let preprocessed_commitment = compute_eidos_preprocessed_commitment()?;
+    let preprocessed_commitments = compute_preprocessed_commitments(relation_digest)?;
 
     let mut relation_mod = read_file(RELATION_DIGEST_PATH)?;
     for (i, elem) in relation_digest.iter().enumerate() {
@@ -126,22 +126,45 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
             &elem.as_canonical_u64().to_string(),
         )?;
     }
-    for (i, elem) in preprocessed_commitment.iter().enumerate() {
+    for (i, elem) in preprocessed_commitments.eidos.iter().enumerate() {
         replace_masm_const(
             &mut relation_mod,
             &format!("AND8_PREPROCESSED_TRACE_COM_{i}"),
-            &elem.as_canonical_u64().to_string(),
+            &elem.to_string(),
         )?;
     }
     let mut air_config = read_file(AIR_CONFIG_PATH)?;
     replace_felt_array_const(&mut air_config, "RELATION_DIGEST", &relation_digest)?;
     replace_felt_array_const(&mut air_config, "ACE_CIRCUIT_DIGEST", &circuit_digest)?;
-
-    let mut verifier_lib = read_file(VERIFIER_LIB_PATH)?;
+    replace_u8_array_const(
+        &mut air_config,
+        "BLAKE3_PREPROCESSED_COMMITMENT",
+        &preprocessed_commitments.blake3,
+    )?;
+    replace_felt_array_const(
+        &mut air_config,
+        "RPO_PREPROCESSED_COMMITMENT",
+        &preprocessed_commitments.rpo,
+    )?;
+    replace_felt_array_const(
+        &mut air_config,
+        "RPX_PREPROCESSED_COMMITMENT",
+        &preprocessed_commitments.rpx,
+    )?;
     replace_u64_array_const(
-        &mut verifier_lib,
+        &mut air_config,
         "EIDOS_PREPROCESSED_COMMITMENT",
-        &preprocessed_commitment,
+        &preprocessed_commitments.eidos,
+    )?;
+    replace_felt_array_const(
+        &mut air_config,
+        "POSEIDON2_PREPROCESSED_COMMITMENT",
+        &preprocessed_commitments.poseidon2,
+    )?;
+    replace_u64_array_const(
+        &mut air_config,
+        "KECCAK_PREPROCESSED_COMMITMENT",
+        &preprocessed_commitments.keccak,
     )?;
 
     ensure_vm_ace_stream_fits(circuit.stream_len, &vm_layout)?;
@@ -152,37 +175,75 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
         stream_blocks: circuit.stream_len / 8,
         circuit_digest,
         relation_digest,
-        preprocessed_commitment,
+        preprocessed_commitments,
         constraints_eval,
         relation_mod,
         air_config,
-        verifier_lib,
         vm_layout,
         vm_ood_frames,
         vm_deep_queries,
     })
 }
 
-fn compute_eidos_preprocessed_commitment() -> io::Result<[Felt; 4]> {
-    let config = miden_air::config::eidos_config(
-        miden_air::config::pcs_params(),
-        miden_air::config::RELATION_DIGEST,
-    );
+struct PreprocessedCommitments {
+    blake3: [u8; 32],
+    rpo: [Felt; 4],
+    rpx: [Felt; 4],
+    eidos: [u64; 4],
+    poseidon2: [Felt; 4],
+    keccak: [u64; 4],
+}
+
+type Commitment<SC> = <<SC as StarkConfig<Felt, QuadFelt>>::Lmcs as Lmcs>::Commitment;
+
+fn compute_preprocessed_commitments(digest: [Felt; 4]) -> io::Result<PreprocessedCommitments> {
     let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
         MidenMultiAir::new(),
         vec![Felt::ZERO; NUM_PUBLIC_VALUES],
         vec![],
     )
     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-    let preprocessed = Preprocessed::build(&statement, &config).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "canonical verifier statement has no preprocessed trace",
-        )
-    })?;
-    let commitment: [u64; 4] = preprocessed.commitment().into();
+    let params = config::pcs_params();
+    Ok(PreprocessedCommitments {
+        blake3: compute_preprocessed_commitment(
+            &statement,
+            &config::blake3_256_config(params, digest),
+        )?
+        .into(),
+        rpo: compute_preprocessed_commitment(&statement, &config::rpo_config(params, digest))?
+            .into(),
+        rpx: compute_preprocessed_commitment(&statement, &config::rpx_config(params, digest))?
+            .into(),
+        eidos: compute_preprocessed_commitment(&statement, &config::eidos_config(params, digest))?
+            .into(),
+        poseidon2: compute_preprocessed_commitment(
+            &statement,
+            &config::poseidon2_config(params, digest),
+        )?
+        .into(),
+        keccak: compute_preprocessed_commitment(
+            &statement,
+            &config::keccak_config(params, digest),
+        )?
+        .into(),
+    })
+}
 
-    Ok(commitment.map(Felt::new_unchecked))
+fn compute_preprocessed_commitment<SC>(
+    statement: &Statement<Felt, QuadFelt, MidenMultiAir>,
+    config: &SC,
+) -> io::Result<Commitment<SC>>
+where
+    SC: StarkConfig<Felt, QuadFelt>,
+{
+    Preprocessed::build(statement, config)
+        .map(|preprocessed| preprocessed.commitment())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "canonical verifier statement has no preprocessed trace",
+            )
+        })
 }
 
 fn ensure_vm_ace_stream_fits(stream_len: usize, vm_layout: &str) -> io::Result<()> {
@@ -776,7 +837,6 @@ fn write_artifacts(artifact: &ComputedArtifacts) -> io::Result<()> {
     write_file(CONSTRAINTS_EVAL_PATH, &artifact.constraints_eval)?;
     write_file(RELATION_DIGEST_PATH, &artifact.relation_mod)?;
     write_file(AIR_CONFIG_PATH, &artifact.air_config)?;
-    write_file(VERIFIER_LIB_PATH, &artifact.verifier_lib)?;
     write_file(VM_LAYOUT_PATH, &artifact.vm_layout)?;
     write_file(VM_OOD_FRAMES_PATH, &artifact.vm_ood_frames)?;
     write_file(VM_DEEP_QUERIES_PATH, &artifact.vm_deep_queries)?;
@@ -785,8 +845,7 @@ fn write_artifacts(artifact: &ComputedArtifacts) -> io::Result<()> {
         artifact.num_inputs, artifact.num_eval_gates, artifact.stream_blocks
     );
     println!("wrote asm/sys/vm/mod.masm (relation digest and preprocessed commitment)");
-    println!("wrote air/src/config.rs (relation digest and ACE circuit digest)");
-    println!("wrote verifier/src/lib.rs (preprocessed commitment)");
+    println!("wrote air/src/config.rs (relation and ACE digests, preprocessed commitments)");
     println!("wrote VM recursive-verifier layout, OOD-frame, and DEEP-query geometry");
     println!("done - run `cargo test -p miden-air --lib` to update the insta snapshot");
     Ok(())
@@ -884,19 +943,24 @@ fn relation_digest_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), 
         return Err("RELATION_DIGEST in sys/vm/mod.masm is stale".into());
     }
 
-    let mut masm_preprocessed_commitment = [Felt::ZERO; 4];
+    let mut masm_preprocessed_commitment = [0u64; 4];
     for (i, slot) in masm_preprocessed_commitment.iter_mut().enumerate() {
         let name = format!("AND8_PREPROCESSED_TRACE_COM_{i}");
-        *slot =
-            parse_masm_const::<u64>(&masm, &name, "sys/vm/mod.masm").map(Felt::new_unchecked)?;
+        *slot = parse_masm_const::<u64>(&masm, &name, "sys/vm/mod.masm")?;
     }
-    if masm_preprocessed_commitment != artifact.preprocessed_commitment {
+    if masm_preprocessed_commitment != artifact.preprocessed_commitments.eidos {
         return Err("And8 preprocessed commitment in sys/vm/mod.masm is stale".into());
     }
 
-    let verifier_lib = read_file(VERIFIER_LIB_PATH).map_err(|e| e.to_string())?;
-    if verifier_lib != artifact.verifier_lib {
-        return Err("EIDOS_PREPROCESSED_COMMITMENT in verifier/src/lib.rs is stale".into());
+    let commitments = &artifact.preprocessed_commitments;
+    if config::BLAKE3_PREPROCESSED_COMMITMENT != commitments.blake3
+        || config::RPO_PREPROCESSED_COMMITMENT != commitments.rpo
+        || config::RPX_PREPROCESSED_COMMITMENT != commitments.rpx
+        || config::EIDOS_PREPROCESSED_COMMITMENT != commitments.eidos
+        || config::POSEIDON2_PREPROCESSED_COMMITMENT != commitments.poseidon2
+        || config::KECCAK_PREPROCESSED_COMMITMENT != commitments.keccak
+    {
+        return Err("preprocessed commitments in air/src/config.rs are stale".into());
     }
 
     // The generated map/scatter hook is specialized to one block per AIR. A stale value would
@@ -1121,13 +1185,16 @@ fn replace_felt_array_const(
     replace_rust_array_const(content, "pub const", name, &body)
 }
 
-fn replace_u64_array_const(content: &mut String, name: &str, values: &[Felt; 4]) -> io::Result<()> {
-    let mut body: String = values
-        .iter()
-        .map(|value| format!("\n    {},", value.as_canonical_u64()))
-        .collect();
+fn replace_u64_array_const(content: &mut String, name: &str, values: &[u64; 4]) -> io::Result<()> {
+    let mut body: String = values.iter().map(|value| format!("\n    {value},")).collect();
     body.push('\n');
-    replace_rust_array_const(content, "const", name, &body)
+    replace_rust_array_const(content, "pub const", name, &body)
+}
+
+fn replace_u8_array_const(content: &mut String, name: &str, values: &[u8; 32]) -> io::Result<()> {
+    let mut body: String = values.iter().map(|value| format!("\n    {value},")).collect();
+    body.push('\n');
+    replace_rust_array_const(content, "pub const", name, &body)
 }
 
 fn replace_rust_array_const(
@@ -1225,11 +1292,10 @@ struct ComputedArtifacts {
     stream_blocks: usize,
     circuit_digest: [Felt; 4],
     relation_digest: [Felt; 4],
-    preprocessed_commitment: [Felt; 4],
+    preprocessed_commitments: PreprocessedCommitments,
     constraints_eval: String,
     relation_mod: String,
     air_config: String,
-    verifier_lib: String,
     vm_layout: String,
     vm_ood_frames: String,
     vm_deep_queries: String,
@@ -1242,44 +1308,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generated_rust_array_replacement_is_rustfmt_safe_and_fails_closed() {
-        type Replacer = fn(&mut String, &str, &[Felt; 4]) -> io::Result<()>;
-
+    fn generated_felt_array_replacement_is_rustfmt_safe_and_fails_closed() {
         let values = [1, 2, 3, 4].map(Felt::new_unchecked);
-        for (replace, name, declaration, body, following) in [
-            (
-                replace_felt_array_const as Replacer,
-                "RELATION_DIGEST",
-                "pub const RELATION_DIGEST: [Felt; 4]",
-                "\n    Felt::new_unchecked(1),\n    Felt::new_unchecked(2),\n    \
-                 Felt::new_unchecked(3),\n    Felt::new_unchecked(4),\n",
-                "pub(crate) const UNTOUCHED: &str = \"];\";\n",
-            ),
-            (
-                replace_u64_array_const as Replacer,
-                "EIDOS_PREPROCESSED_COMMITMENT",
-                "const EIDOS_PREPROCESSED_COMMITMENT: [u64; 4]",
-                "\n    1,\n    2,\n    3,\n    4,\n",
-                "const UNTOUCHED: [u64; 4] = [9, 9, 9, 9];\n",
-            ),
-        ] {
-            let mut wrapped = format!("{declaration} =\n    [0, 0, 0, 0];\n\n{following}");
-            replace(&mut wrapped, name, &values).unwrap();
-            assert_eq!(wrapped, format!("{declaration} = [{body}];\n\n{following}"));
+        let name = "RELATION_DIGEST";
+        let declaration = "pub const RELATION_DIGEST: [Felt; 4]";
+        let body = "\n    Felt::new_unchecked(1),\n    Felt::new_unchecked(2),\n    \
+                    Felt::new_unchecked(3),\n    Felt::new_unchecked(4),\n";
+        let following = "pub(crate) const UNTOUCHED: &str = \"];\";\n";
 
-            let mut malformed = format!("{declaration} = [0, 0, 0, 0;\n\n{following}");
-            let original = malformed.clone();
-            let error = replace(&mut malformed, name, &values).unwrap_err();
-            assert!(error.to_string().contains("terminator not found"));
-            assert_eq!(malformed, original);
+        let mut wrapped = format!("{declaration} =\n    [0, 0, 0, 0];\n\n{following}");
+        replace_felt_array_const(&mut wrapped, name, &values).unwrap();
+        assert_eq!(wrapped, format!("{declaration} = [{body}];\n\n{following}"));
 
-            let mut duplicate =
-                format!("{declaration} = [0, 0, 0, 0];\n{declaration} = [0, 0, 0, 0];\n");
-            let original = duplicate.clone();
-            let error = replace(&mut duplicate, name, &values).unwrap_err();
-            assert!(error.to_string().contains("declared more than once"));
-            assert_eq!(duplicate, original);
-        }
+        let mut malformed = format!("{declaration} = [0, 0, 0, 0;\n\n{following}");
+        let original = malformed.clone();
+        let error = replace_felt_array_const(&mut malformed, name, &values).unwrap_err();
+        assert!(error.to_string().contains("terminator not found"));
+        assert_eq!(malformed, original);
+
+        let mut duplicate =
+            format!("{declaration} = [0, 0, 0, 0];\n{declaration} = [0, 0, 0, 0];\n");
+        let original = duplicate.clone();
+        let error = replace_felt_array_const(&mut duplicate, name, &values).unwrap_err();
+        assert!(error.to_string().contains("declared more than once"));
+        assert_eq!(duplicate, original);
     }
 
     /// A group every AIR occupies is indexed correctly by proof-order position, and one with a
