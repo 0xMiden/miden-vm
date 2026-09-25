@@ -29,6 +29,7 @@
 - [BREAKING] Changed `ProverInstance::new()` to take ownership of `ProverStatement`. `ProverInstance::prove()` now consumes the instance and returns its verifier statement with the proof. The prover can now release the main traces after their final use. This reduced measured peak memory by about 7 percent ([#3833](https://github.com/0xMiden/miden-vm/pull/3833)).
 - [BREAKING] Require `CryptoRng` for `SecretKey::with_rng` and `SecretKey::sign_with_rng` in the Falcon DSA module ([#3889](https://github.com/0xMiden/miden-vm/pull/3889)).
 - Fixed `AdviceMap` deserialization accepting a repeated key and silently keeping the last value; it now returns an error, matching `MastForestWireView` ([#3900](https://github.com/0xMiden/miden-vm/pull/3900)).
+- [BREAKING] `SmtLeaf::new_multiple` now requires strictly increasing keys and returns the new `SmtLeafError::UnsortedMultipleLeafKeys` otherwise, so leaves with repeated or unsorted keys are no longer accepted from serialized bytes ([#3901](https://github.com/0xMiden/miden-vm/pull/3901)).
 
 #### Changes
 
