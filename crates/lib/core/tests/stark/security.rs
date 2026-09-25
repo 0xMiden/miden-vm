@@ -458,7 +458,7 @@ fn slack_bound_never_overstates_and_loses_at_most_one_bit() {
                 let q = u64::from(64 - (coefficient - 1).leading_zeros());
                 let r_w = correction_fp(boundary, frac, h) >> 16;
                 assert!(
-                    126 - q - h >= r_w + 1,
+                    126 - q - h > r_w,
                     "grid design error: h={h} width={width} frac={frac} boundary={boundary} is \
                      outside the estimator envelope"
                 );
