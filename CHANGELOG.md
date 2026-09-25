@@ -21,6 +21,7 @@
   rejected before host memory is scanned, and the public `SortedArrayError` enum now includes
   `TooManyEntries`. This affects `find_word`, `find_key_value`, and `find_half_key_value`
   ([#3909](https://github.com/0xMiden/miden-vm/pull/3909)).
+- Fixed the `aead::decrypt` overlap check so it also covers the 4-element tag after the ciphertext; a destination placed at the tag address now fails the overlap assertion instead of overwriting the tag and failing with a tag mismatch. Ranges that end at the last memory address are no longer rejected ([#3897](https://github.com/0xMiden/miden-vm/pull/3897)).
 - [BREAKING] Fixed missing decoder AIR constraints that allowed `in_span` to change without a
   matching `SPAN`, `RESPAN`, or `END` operation. This changes Miden VM proofs and AIR relation
   digests. The VM recursive-verifier MAST root also changes, so consumers that pin it must update
