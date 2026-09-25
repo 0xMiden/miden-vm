@@ -8,6 +8,34 @@ use miden::core::mem
 
 const DECOMPRESS_EVENT = event("miden::core::crypto::dsa::eddsa_25519_sha512::decompress")
 
+# Messages are padded to 32-byte chunks, each stored as eight packed u32 felts.
+const PACKED_CHUNK_BYTES = 32
+const PACKED_CHUNK_FELTS = 8
+const PACKED_CHUNK_ROUNDING = PACKED_CHUNK_BYTES - 1
+const WORD_ALIGNMENT_MASK = 3
+
+# R || A || M preimage layout: offsets are in felts, while the hash length is in bytes.
+const PREIMAGE_A_OFFSET = 8
+const PREIMAGE_MSG_OFFSET = 16
+const PREIMAGE_PREFIX_BYTES = 64
+
+# Local-memory offsets in verify and verify_bytes, respectively.
+const VERIFY_MSG_LOCAL = 4
+const VERIFY_SCRATCH_LOCAL = 16
+const SCRATCH_PTR_LOCAL = 0
+const MSG_LEN_LOCAL = 1
+
+# The top bit of the compressed point's highest u32 limb encodes x's parity.
+const POINT_SIGN_BIT = 31
+const POINT_Y_HIGH_MASK = 0x7fffffff
+
+# Birational-map constants in F_p, split into low/high words of little-endian u32 limbs.
+# These are canonical field values; ed25519_base::load registers their expression digests.
+const SQRT_MINUS_486664_LO = [4282744326, 3429762218, 1266489986, 3315717073]
+const SQRT_MINUS_486664_HI = [66867070, 3531278556, 1621100219, 254209524]
+const OFFSET_486662_DIV_3_LO = [2863473745, 2863311530, 2863311530, 2863311530]
+const OFFSET_486662_DIV_3_HI = [2863311530, 2863311530, 2863311530, 715827882]
+
 # Generic Felt-sequence Eidos chaining word for the 8-Felt public-key preimage.
 const PUBLIC_KEY_INIT_CV = [
     4280581857092831745,
@@ -35,11 +63,11 @@ const PUBLIC_KEY_INIT_CV = [
 pub proc verify(public_key: eidos::Digest, message: word)
     # Reserve locals 4..12 for the packed message and 16..40 for R || A || M.
     swapw
-    locaddr.4 movdn.4 exec.store_word_u32s_le
+    locaddr.VERIFY_MSG_LOCAL movdn.4 exec.store_word_u32s_le
     # => [MSG_PTR, PK_COMM, ...]
 
-    locaddr.16 movdn.5
-    push.32 movdn.5
+    locaddr.VERIFY_SCRATCH_LOCAL movdn.5
+    push.PACKED_CHUNK_BYTES movdn.5
     movdn.4
     # => [PK_COMM, MSG_PTR, 32, SCRATCH_PTR, ...]
 
@@ -68,45 +96,46 @@ pub proc verify_bytes(
     # Locals 0 and 1 hold SCRATCH_PTR and MSG_LEN_BYTES; locals 2 and 3 are alignment padding.
     # Reject aliases with this or nested local frames before storing any arguments.
     # Retain the padded message length N (in felts) for the nonoverlap checks and copy.
-    dup.5 u32assert add.31 u32div.32 dup eq.0 add mul.8
+    dup.5 u32assert add.PACKED_CHUNK_ROUNDING u32div.PACKED_CHUNK_BYTES
+    dup eq.0 add mul.PACKED_CHUNK_FELTS
     dup dup.6 add locaddr.0 swap u32gte
     assert.err="Ed25519 buffers must precede verifier locals"
-    dup.7 dup.1 add add.16 locaddr.0 swap u32gte
+    dup.7 dup.1 add add.PREIMAGE_MSG_OFFSET locaddr.0 swap u32gte
     assert.err="Ed25519 buffers must precede verifier locals"
     # => [N, PK_COMM, MSG_PTR, MSG_LEN_BYTES, SCRATCH_PTR, ...]
 
-    dup.5 u32assert push.3 u32and assertz.err="unaligned message pointer"
-    dup.7 u32assert push.3 u32and assertz.err="unaligned scratch pointer"
-    movup.7 loc_store.0
-    movup.6 loc_store.1
+    dup.5 u32assert push.WORD_ALIGNMENT_MASK u32and assertz.err="unaligned message pointer"
+    dup.7 u32assert push.WORD_ALIGNMENT_MASK u32and assertz.err="unaligned scratch pointer"
+    movup.7 loc_store.SCRATCH_PTR_LOCAL
+    movup.6 loc_store.MSG_LEN_LOCAL
     # => [N, PK_COMM, MSG_PTR, ...]
 
     # Check both disjoint-range orderings before writing scratch or consuming advice.
-    dup.5 loc_load.0 dup.2 add add.16 u32gte
+    dup.5 loc_load.SCRATCH_PTR_LOCAL dup.2 add add.PREIMAGE_MSG_OFFSET u32gte
     # => [MSG_PTR >= SCRATCH_PTR+N+16, N, PK_COMM, MSG_PTR, ...]
-    loc_load.0 dup.7 dup.3 add u32gte
+    loc_load.SCRATCH_PTR_LOCAL dup.7 dup.3 add u32gte
     or assert.err="Ed25519 scratch must not overlap message memory"
-    movup.5 swap loc_load.0 add.16 movdn.2
+    movup.5 swap loc_load.SCRATCH_PTR_LOCAL add.PREIMAGE_MSG_OFFSET movdn.2
     # => [N, MSG_PTR, SCRATCH_PTR+16, PK_COMM, ...]
     exec.mem::memcopy_elements
 
     # Write A directly into its final preimage location and bind its exact compressed encoding.
     # Both words are Eidos commitments to byte encodings, so raw word equality is appropriate.
-    loc_load.0 add.8 push.PUBLIC_KEY_INIT_CV padw padw adv_pipe
+    loc_load.SCRATCH_PTR_LOCAL add.PREIMAGE_A_OFFSET push.PUBLIC_KEY_INIT_CV padw padw adv_pipe
     exec.eidos::compress
     exec.eidos::digest
     movup.4 drop assert_eqw.err="invalid public key commitment"
 
     # Load the shared square-root and offset constants as four-felt expression digests.
-    push.[66867070, 3531278556, 1621100219, 254209524]
-    push.[4282744326, 3429762218, 1266489986, 3315717073]
+    push.SQRT_MINUS_486664_HI
+    push.SQRT_MINUS_486664_LO
     exec.ed25519_base::load
-    push.[2863311530, 2863311530, 2863311530, 715827882]
-    push.[2863473745, 2863311530, 2863311530, 2863311530]
+    push.OFFSET_486662_DIV_3_HI
+    push.OFFSET_486662_DIV_3_LO
     exec.ed25519_base::load
     # => [OFFSET, SQRT, ...]
 
-    loc_load.0 exec.store_advice_u256
+    loc_load.SCRATCH_PTR_LOCAL exec.store_advice_u256
     # scratch = R || A || message; the remaining advice words contain S.
 
     # Consume S directly from the remaining advice stack words. The first load is the low word;
@@ -122,17 +151,18 @@ pub proc verify_bytes(
 
     # Preserve one copy of each constant for R while decoding A first.
     dupw.1 dupw.1
-    loc_load.0 add.8 exec.load_compressed_point
+    loc_load.SCRATCH_PTR_LOCAL add.PREIMAGE_A_OFFSET exec.load_compressed_point
     # => [A, SQRT, OFFSET, S, ...]
     movdnw.2
-    loc_load.0 exec.load_compressed_point
+    loc_load.SCRATCH_PTR_LOCAL exec.load_compressed_point
     # => [R, A, S, ...]
 
     # Both encodings are now represented by point digests. The SHA helper registers and hashes
     # the complete preimage before writing its output, so its 16-felt result can overwrite scratch.
-    loc_load.0 loc_load.1 add.64 loc_load.0 exec.sha512::hash_bytes_mem
+    loc_load.SCRATCH_PTR_LOCAL loc_load.MSG_LEN_LOCAL add.PREIMAGE_PREFIX_BYTES
+    loc_load.SCRATCH_PTR_LOCAL exec.sha512::hash_bytes_mem
     # SHA-512 digest bytes already form the little-endian 512-bit challenge integer.
-    loc_load.0 exec.ed25519_scalar::load_reduced_512_mem
+    loc_load.SCRATCH_PTR_LOCAL exec.ed25519_scalar::load_reduced_512_mem
     exec.ed25519_scalar::eval exec.ed25519_order::load
     # The curve MSM uses the complete-order ring (8l), so negate k in that domain. This is
     # [8l-k] for nonzero k and zero for k=0, exactly the coefficient of -[k]A.
@@ -175,10 +205,10 @@ proc load_compressed_point(
     # => [y4, y5, y6, encoded_y7, ptr, X_DIGEST, x0, SQRT, OFFSET, ...]
 
     # Check the sign against the same x witness, then remove it from y's highest limb.
-    movup.3 u32assert dup u32shr.31
+    movup.3 u32assert dup u32shr.POINT_SIGN_BIT
     movup.10 push.1 u32and
     assert_eq.err="invalid compressed point parity"
-    push.0x7fffffff u32and movdn.3
+    push.POINT_Y_HIGH_MASK u32and movdn.3
     movup.4 padw movup.4 mem_loadw_le
     exec.ed25519_base::load
     # => [Y_DIGEST, X_DIGEST, SQRT, OFFSET, ...]
