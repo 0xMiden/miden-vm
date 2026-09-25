@@ -73,8 +73,11 @@ pub const PHASE_FEED_FORWARD: usize = 4;
 pub const PHASE_PADDING: usize = 5;
 pub const NUM_PHASES: usize = 6;
 pub const PHASE_BASES: [u32; NUM_PHASES] = [0, 32, 1312, 1440, 4000, 4032];
+/// Number of 32-row cycles in each phase; a word-schedule cycle contains two 16-row words.
 pub const PHASE_CYCLES: [u32; NUM_PHASES] = [1, 40, 4, 80, 1, 2];
 
+/// Authenticated data for round `t`; multiplicities count future reads of `W[t]`, `a[t]`,
+/// and `e[t]`. Entries 80..128 are invalid padding for the periodic lookup table.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RoundMetadata {
     pub t: u32,
@@ -92,11 +95,15 @@ pub fn round_metadata() -> [RoundMetadata; MAX_PERIODIC_LENGTH] {
         if t >= 80 {
             return RoundMetadata::default();
         }
+        // W[t] is read once by its hash round, then by schedule words t+16, t+15, t+7,
+        // and t+2 when those words lie in 16..80. Each small sigma reads its input three times.
         let w_mult = 1
             + u32::from(t <= 63)
             + 3 * u32::from((1..=64).contains(&t))
             + u32::from((9..=72).contains(&t))
             + 3 * u32::from((14..=77).contains(&t));
+        // A newly computed a/e shifts through four state positions. Count its reads in the
+        // next four rounds, plus one feedforward read for values surviving the last round.
         let a_mult = 5 * u32::from(t <= 78)
             + 2 * u32::from(t <= 77)
             + u32::from(t <= 76)
@@ -132,6 +139,9 @@ pub enum Op {
     Nop,
 }
 
+/// One instruction whose destination address is its index in the compression program.
+/// `Input` uses `src_a` as an external word index; other reading operations use slot addresses.
+/// `dst_mult` counts all consumers, including the IO read of a feedforward result.
 #[derive(Debug, Clone, Copy)]
 pub struct Slot {
     pub op: Op,
@@ -270,6 +280,8 @@ impl Builder {
     fn rotr(&mut self, x: u32, s: u32) -> u32 {
         let l = 64 - s;
         if l == 31 || l == 63 {
+            // The biased rotation decomposition supports shifts mod 32 in 1..=30 only.
+            // Split these rotations so neither instruction needs the excluded shift of 31.
             let first = self.rol(x, 30);
             self.rol(first, l - 30)
         } else {
@@ -309,6 +321,8 @@ fn build() -> [Slot; COMPRESSION_PERIOD] {
         w[t] = b.bin(Op::Add, y, s1);
     }
     let mut h = [0u32; 8];
+    // Place d/h, c/g, b/f, then a/e in the a/e output lanes of four virtual prior rounds.
+    // The first real round can then use the same relative source addresses as later rounds.
     for cycle in 0..4 {
         b.pad_to(1312 + 32 * cycle + 23);
         h[3 - cycle] = b.input(16 + (3 - cycle) as u32);
@@ -391,6 +405,7 @@ fn template_slot(
     let address = match phase {
         PHASE_WORDS => 32 + 16 * 16 + 32 * cycle + row % 32,
         PHASE_HASH => 1440 + 32 * cycle + row % 32,
+        // Bootstrap starts at global row 1312 == 32 mod 128; undo that periodic-table offset.
         PHASE_BOOTSTRAP => 1312 + (row + 96) % 128,
         _ => PHASE_BASES[phase] as usize + row % 32,
     };

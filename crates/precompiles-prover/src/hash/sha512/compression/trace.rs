@@ -1,3 +1,9 @@
+//! Witness generation for the fixed SHA-512 compression program.
+//!
+//! Registration computes chaining outputs immediately. Trace generation later replays the same
+//! block inputs instruction by instruction, recording byte/range lookup demands alongside the
+//! witnesses expected by the compression AIR.
+
 use alloc::{vec, vec::Vec};
 
 #[cfg(test)]
@@ -10,6 +16,7 @@ use miden_precompiles_air::hash::sha512::compression::{
 
 use crate::primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp};
 
+/// One padded block and its incoming chaining state, as numeric SHA-512 u64 words.
 #[derive(Debug, Clone, Copy)]
 pub struct CompressionInput {
     pub state: [u64; 8],
@@ -32,6 +39,8 @@ impl Sha512CompressionRequires {
     pub fn num_blocks(&self) -> usize {
         self.records.len()
     }
+    /// Return a power-of-two height covering all active blocks. With no blocks, only the
+    /// longest periodic table (128 rows) is needed; inactive rows still run the phase controller.
     pub fn trace_height(&self) -> Option<usize> {
         self.records
             .len()
@@ -39,6 +48,8 @@ impl Sha512CompressionRequires {
             .max(program::MAX_PERIODIC_LENGTH)
             .checked_next_power_of_two()
     }
+    /// Register a block in invocation order and return its post-feedforward state.
+    /// The returned block ID is shared with IO lookups and is consecutive across all invocations.
     pub fn require(&mut self, state: [u64; 8], block: [u64; 16]) -> CompressionOutput {
         let block_id = u32::try_from(self.records.len()).expect("SHA-512 block id overflow");
         let output = compress(&state, &block);
@@ -144,6 +155,8 @@ fn populate_block(
                 for j in 0..8 {
                     bpl.require(BytePairOp::Xor, a.to_le_bytes()[j], 0);
                 }
+                // Match the AIR's biased half-word decomposition. The bias prevents modular
+                // aliases; the destination lookup removes it when joining the rotated halves.
                 let z = 1u64 << (sh % 32);
                 let lo = ((a as u32 as u64) + (1u64 << 32)) * z;
                 let hi = (((a >> 32) as u32 as u64) + (1u64 << 32)) * z;
@@ -175,6 +188,8 @@ fn populate_block(
             rows[base + compression::COL_B_BEGIN..base + compression::COL_B_BEGIN + 8]
                 .copy_from_slice(&witness_b.to_le_bytes().map(Felt::from));
         }
+        // ROL keeps unrotated bytes in R for the byte lookup and limb equations. Its actual
+        // result is already in mem[i] and is reconstructed by the AIR's destination lookup.
         let raw = match s.op {
             Op::Rol(_) => a,
             _ => r,

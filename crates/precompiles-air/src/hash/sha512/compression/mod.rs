@@ -1,4 +1,9 @@
 //! Fixed-program SHA-512 compression AIR.
+//!
+//! Each row executes one instruction from [`program`]. Operands and ordinary results use eight
+//! little-endian bytes; [`Sha512WordMsg`] carries their packed u32 halves between producer and
+//! consumer rows. A phase/cycle controller selects short periodic instruction templates instead
+//! of committing a full 4096-row program table.
 
 pub mod program;
 
@@ -57,6 +62,9 @@ pub const COL_ROT_BEGIN: usize = COL_B_BEGIN;
 pub const COL_CARRY_LO: usize = COL_ROL_K;
 pub const COL_CARRY_HI: usize = COL_SWAP;
 
+/// A u64 word identified by its compression block and address, split into low/high u32 halves.
+/// Instruction results use their slot index; external message/state words use
+/// `INPUT_ADDR_BASE + index`, with message indices 0..16 and state indices 16..24.
 #[derive(Debug, Clone)]
 pub struct Sha512WordMsg<E> {
     pub block_id: E,
@@ -172,6 +180,10 @@ pub fn eval_main<AB: LiftedAirBuilder<F = Felt>>(
 }
 
 /// Keep the block controller live while the final sixteen NOP rows hold IO witnesses.
+///
+/// The controller fixes the instruction schedule; the row equations below enforce ADD, CONST,
+/// and the ROL decomposition. Operand provenance, bytewise logic, range checks, and round metadata
+/// are enforced by `eval_lookup_batch`. Both parts are needed to prove a compression.
 pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
     builder: &mut AB,
     main_col_offset: usize,
@@ -193,12 +205,15 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
     let periodic: Vec<AB::Expr> = p[periodic_col_offset..].iter().map(|&v| v.into()).collect();
     let last = periodic[program::COL_P32_LAST].clone();
     let block_last = last.clone() * phase_end.clone() * phases[program::PHASE_PADDING].clone();
+    // Exactly one phase is selected, even in inactive padding. Combined with the fixed initial
+    // state and transitions below, this prevents the witness from skipping or mixing phases.
     builder.assert_bool(local[COL_ACT]);
     builder.assert_bool(local[COL_PHASE_END]);
     for i in 0..program::NUM_PHASES {
         builder.assert_bool(local[COL_PHASE_BEGIN + i]);
     }
     builder.assert_zero(phases.iter().cloned().sum::<AB::Expr>() - AB::Expr::ONE);
+    // Start at block zero, in the first cycle of MASK. The periodic lane already starts at zero.
     builder.when_first_row().assert_zero(block_id.clone());
     builder
         .when_first_row()
@@ -209,23 +224,34 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
         .zip(program::PHASE_CYCLES)
         .map(|(phase, length)| phase.clone() * Felt::from(length))
         .sum();
+    // `phase_end` marks the entire final 32-row cycle. The inverse witness makes it an
+    // exact zero test; the lane-31 selector below controls when the phase actually advances.
+    // For d = cycle + 1 - phase_length: d = 0 forces phase_end = 1; otherwise phase_end = 0
+    // and phase_inv = 1/d. Neither an early exit nor a delayed phase change is possible.
     let remaining = cycle.clone() + AB::Expr::ONE - phase_length;
     builder.assert_zero(remaining.clone() * phase_end.clone());
     builder
         .assert_zero(remaining * local[COL_PHASE_INV].into() - (AB::Expr::ONE - phase_end.clone()));
+    // Active blocks form a prefix: activity cannot restart after becoming zero, and it can
+    // change only at a block's last row. Thus an active block cannot omit any of its 4096 rows.
     builder
         .when_transition()
         .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
     builder
         .when_transition()
         .assert_zero((AB::Expr::ONE - block_last.clone()) * (act_next - act.clone()));
+    // Give each block a unique consecutive ID for all word and metadata lookups.
     builder
         .when_transition()
         .assert_zero(next[COL_BLOCK_ID].into() - block_id - block_last.clone());
+    // Hold the cycle within its 32 lanes. At lane 31, increment it unless the phase ends;
+    // the final term then cancels cycle + 1, resetting the next phase's cycle to zero.
     builder.when_transition().assert_zero(
         next[COL_CYCLE].into() - cycle.clone() - last.clone()
             + last.clone() * phase_end.clone() * (cycle.clone() + AB::Expr::ONE),
     );
+    // Advance the one-hot phase only at the last lane of its last cycle. The cyclic previous
+    // index also implements PADDING -> MASK at the start of the next compression block.
     for i in 0..program::NUM_PHASES {
         let previous = (i + program::NUM_PHASES - 1) % program::NUM_PHASES;
         builder.when_transition().assert_zero(
@@ -236,6 +262,8 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
     }
     // Transition constraints alone would accept a truncated active block.
     builder.when_last_row().assert_zero(act.clone() * (AB::Expr::ONE - block_last));
+    // IO rows retain the controller but reinterpret the remaining cells. `act` gates execution
+    // and lookups; `program_gate` still enforces template equations on inactive, non-IO rows.
     let act = act - io_act.clone();
     let program_gate = AB::Expr::ONE - io_act;
 
@@ -243,6 +271,8 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
     let hash_phase = phases[program::PHASE_HASH].clone();
     let round: AB::Expr = local[COL_META_T].into();
     let input_word: AB::Expr = local[COL_META_INPUT_WORD].into();
+    // A word-schedule cycle contains rounds 2*cycle and 2*cycle+1; a hash cycle contains one
+    // round. Binding t to these counters prevents substituting another round's constants/fanout.
     builder.assert_zero(
         word_phase.clone()
             * (round.clone()
@@ -250,6 +280,8 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
                 - periodic[program::COL_LANE_HALF].clone()),
     );
     builder.assert_zero(hash_phase.clone() * (round.clone() - cycle.clone()));
+    // A metadata lookup authenticates only the first row of each word/hash round. Hold all
+    // fields throughout its 16/32-row round so every instruction uses that authenticated data.
     let hold_metadata = word_phase * (AB::Expr::ONE - periodic[program::COL_WORD_LAST].clone())
         + hash_phase.clone() * (AB::Expr::ONE - last);
     for column in COL_META_T..=COL_META_K_HI {
@@ -258,7 +290,9 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
             .assert_zero(hold_metadata.clone() * (next[column].into() - local[column].into()));
     }
 
-    // Materialize the opcode, sources, and rotation parameters. Destination fanout
+    // Materialize the opcode, sources, and rotation parameters from the selected fixed template.
+    // On active compression rows this fixes opcode selectors (all zero for NOP), source addresses,
+    // and ROL parameters rather than letting the witness choose an instruction. Destination fanout
     // can be used directly by its lookup without increasing the maximum degree.
     let word_last = periodic[program::COL_WORD_LAST].clone();
     let is_add: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_ADD].into();
@@ -266,6 +300,8 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
         let mut expected = AB::Expr::ZERO;
         for (phase, phase_selector) in phases.iter().enumerate() {
             let template = &periodic[program::TEMPLATE_BEGIN + phase * program::TEMPLATE_COLS..];
+            // The expansion template starts at W[16], after eight cycles of two input words.
+            // Its affine source addresses therefore use cycle - 8; hash templates use cycle.
             let template_cycle = if phase == program::PHASE_WORDS {
                 cycle.clone() - AB::Expr::from(Felt::from(8u8))
             } else {
@@ -311,6 +347,8 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
     let is_rol: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_ROL].into();
     let k: AB::Expr = local[COL_ROL_K].into();
     let mask_template = program::TEMPLATE_BEGIN + program::PHASE_MASK * program::TEMPLATE_COLS;
+    // MASK constants come directly from the periodic template. Hash-round K[t] is carried in
+    // witness metadata and authenticated by the metadata lookup, then held across the round.
     let const_lo = phases[program::PHASE_MASK].clone()
         * periodic[mask_template + program::T_CONST_LO].clone()
         + hash_phase.clone() * local[COL_META_K_LO].into();
@@ -327,11 +365,18 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
     let [r_lo, r_hi] = halves_le(&r, 256);
     let carry_lo: AB::Expr = local[COL_CARRY_LO].into();
     let carry_hi: AB::Expr = local[COL_CARRY_HI].into();
+    // ADD reuses the two ROL-parameter cells as Boolean carries. Its operand halves are bound
+    // to prior u32 results by source lookups; the byte table range-checks its result bytes.
     builder
         .when(program_gate.clone() * is_add.clone())
         .assert_bool(local[COL_CARRY_LO]);
     builder.when(program_gate * is_add.clone()).assert_bool(local[COL_CARRY_HI]);
     let gate_add = act.clone() * is_add;
+    // Enforce r = a + b mod 2^64 through two integer equalities:
+    // a_lo + b_lo = r_lo + 2^32*carry_lo,
+    // a_hi + b_hi + carry_lo = r_hi + 2^32*carry_hi.
+    // Each side is far below the base-field modulus, so field equality cannot hide overflow.
+    // The high carry is deliberately discarded to implement wrapping addition.
     builder.assert_zero(
         gate_add.clone()
             * (a_lo + b_lo
@@ -344,9 +389,17 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
                 - r_hi.clone()
                 - AB::Expr::from(Felt::new(1u64 << 32).unwrap()) * carry_hi),
     );
+    // CONST has no source lookup: bind its range-checked result directly to the selected mask
+    // or round constant. The same result is then available to consumers through the word bus.
     let gate_const = act.clone() * is_const;
     builder.assert_zero(gate_const.clone() * (r_lo.clone() - const_lo));
     builder.assert_zero(gate_const * (r_hi.clone() - const_hi));
+    // On ROL rows, R holds the unrotated input and B holds two four-u16 decompositions of
+    // y = (input_half + 2^32) * k, where k = 2^(shift mod 32). For shift mod 32 in 1..=30,
+    // we have 2^32 - 1 < y < p. Since p = 2^64 - 2^32 + 1, y + p exceeds 2^64 - 1:
+    // four u16 limbs cannot encode a second representative of y modulo the base field.
+    // RangePair lookups bound all eight limbs to u16. The byte lookup also forces R = A on
+    // these rows; the destination lookup reconstructs the rotated result from these limbs.
     let rol_gate = act * is_rol;
     let lo_decomp: AB::Expr = pack_le(&limbs[0..4], 1u64 << 16);
     let hi_decomp: AB::Expr = pack_le(&limbs[4..8], 1u64 << 16);
@@ -355,6 +408,8 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
     builder.assert_zero(rol_gate * ((r_hi + two32) * k - hi_decomp));
 }
 
+/// Join each shifted half's low 32 bits with the bits spilling from the opposite half.
+/// Subtract `k` to remove the decomposition bias, then swap halves for rotations of 32 or more.
 fn rotated_halves<E: Algebra<Felt>, V: Copy + Into<E>>(limbs: &[V; 8], k: E, swap: E) -> [E; 2] {
     let x: [E; 8] = array::from_fn(|i| limbs[i].into());
     let two16 = E::from(Felt::from(1u32 << 16));
@@ -427,6 +482,8 @@ fn lookup_entry_degree(kind: LookupKind, activity_degree: usize) -> Deg {
 }
 
 /// Emit one compression lookup batch into an already-opened lookup batch.
+/// Negative multiplicities provide words/table entries; positive multiplicities consume them.
+/// The caller either supplies `act` here or gates the enclosing batch in the composite AIR.
 pub(super) fn eval_lookup_batch<B, V>(
     batch: &mut B,
     kind: LookupKind,
@@ -445,6 +502,9 @@ pub(super) fn eval_lookup_batch<B, V>(
 
     match kind {
         LookupKind::Destination => {
+            // Provide the result once per scheduled read. Intermediate fanouts are fixed by
+            // the template; W/a/e fanouts vary by round and come from authenticated metadata.
+            // The extra read of each feedforward result binds it to the IO state or digest.
             let bid = v(COL_BLOCK_ID);
             let phases: [B::Expr; program::NUM_PHASES] = array::from_fn(|i| v(COL_PHASE_BEGIN + i));
             let dst_mult: B::Expr = phases
@@ -464,6 +524,8 @@ pub(super) fn eval_lookup_batch<B, V>(
                             + p(template + program::T_DST_E) * v(COL_META_E_MULT))
                 })
                 .sum();
+            // Reconstruct the unique destination address from the controller; the witness
+            // cannot publish a result at another instruction's address to satisfy its readers.
             let slot = phases
                 .iter()
                 .zip(program::PHASE_BASES)
@@ -474,6 +536,7 @@ pub(super) fn eval_lookup_batch<B, V>(
             let r: [V; 8] = array::from_fn(|i| local[COL_R_BEGIN + i]);
             let limbs: [V; 8] = array::from_fn(|i| local[COL_ROT_BEGIN + i]);
             let [r_lo, r_hi] = halves_le(&r, 256);
+            // ROL publishes the reconstructed rotation, not the unrotated bytes in R.
             let [c_lo, c_hi] = rotated_halves(&limbs, v(COL_ROL_K), v(COL_SWAP));
             let is_rol = v(COL_PROG_BEGIN + program::T_IS_ROL);
             let out_lo = r_lo.clone() + is_rol.clone() * (c_lo - r_lo);
@@ -491,6 +554,8 @@ pub(super) fn eval_lookup_batch<B, V>(
             );
         },
         LookupKind::Sources => {
+            // Every operand read must match a provided (block, address, lo, hi) tuple. ROL
+            // reads only A; binary instructions read both A and B; INPUT/CONST/NOP read neither.
             let bid = v(COL_BLOCK_ID);
             let a: [V; 8] = array::from_fn(|i| local[COL_A_BEGIN + i]);
             let b: [V; 8] = array::from_fn(|i| local[COL_B_BEGIN + i]);
@@ -529,6 +594,8 @@ pub(super) fn eval_lookup_batch<B, V>(
             );
         },
         LookupKind::Input => {
+            // INPUT copies a word supplied by IO. The external address range is disjoint from
+            // instruction slots, so an internal result cannot stand in for a message/state word.
             let bid = v(COL_BLOCK_ID);
             let r: [V; 8] = array::from_fn(|i| local[COL_R_BEGIN + i]);
             let [r_lo, r_hi] = halves_le(&r, 256);
@@ -547,6 +614,10 @@ pub(super) fn eval_lookup_batch<B, V>(
             );
         },
         LookupKind::Byte(index) | LookupKind::BytePair(index) => {
+            // A single XOR-table tuple covers each byte's logic and range constraints:
+            // - XOR checks (a, b, r) directly; AND/ANDNOT convert r to an XOR result below.
+            // - ADD/INPUT/CONST check (0, r, r), which range-checks the result byte.
+            // - ROL checks (a, 0, r), which range-checks a and forces r = a before rotation.
             let bid_kind = matches!(kind, LookupKind::BytePair(_));
             let pair_indices = if bid_kind {
                 [index * 2, index * 2 + 1]
@@ -595,6 +666,8 @@ pub(super) fn eval_lookup_batch<B, V>(
             }
         },
         LookupKind::RangePair(index) => {
+            // These u16 bounds turn the ROL decomposition equations into bounded integer
+            // decompositions. They are inactive when B holds ordinary second-operand bytes.
             let limbs: [V; 8] = array::from_fn(|i| local[COL_ROT_BEGIN + i]);
             let is_rol = v(COL_PROG_BEGIN + program::T_IS_ROL);
             for i in [index * 2, index * 2 + 1] {
@@ -607,6 +680,9 @@ pub(super) fn eval_lookup_batch<B, V>(
             }
         },
         LookupKind::MetadataProvider => {
+            // The 128 bootstrap rows cover one full metadata-table period. Provide two copies
+            // of each valid entry: one for W[t]'s schedule and one for hash round t. Padding
+            // entries 80..128 provide nothing, so they cannot authenticate an extra round.
             let bid = v(COL_BLOCK_ID);
             let phases: [B::Expr; program::NUM_PHASES] = array::from_fn(|i| v(COL_PHASE_BEGIN + i));
             let provider = -B::Expr::from(Felt::from(2u8))
@@ -630,6 +706,8 @@ pub(super) fn eval_lookup_batch<B, V>(
             );
         },
         LookupKind::MetadataConsumer => {
+            // Consume metadata at each round's first row. The controller fixes t and the local
+            // hold constraints propagate these authenticated fields through the rest of the round.
             let bid = v(COL_BLOCK_ID);
             let phases: [B::Expr; program::NUM_PHASES] = array::from_fn(|i| v(COL_PHASE_BEGIN + i));
             let consumer = act

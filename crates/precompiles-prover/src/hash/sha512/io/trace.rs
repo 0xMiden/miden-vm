@@ -1,3 +1,9 @@
+//! Build padding/chaining witnesses and Eidos commitments for complete SHA-512 invocations.
+//!
+//! Compression consumes big-endian u64 words from the padded message. Eidos commits the original
+//! message and the digest bytes as separate, zero-padded 32-byte chunk sequences; the assertion
+//! frame binds their commitments to the original byte length.
+
 #[cfg(test)]
 use alloc::vec;
 use alloc::vec::Vec;
@@ -24,8 +30,11 @@ use crate::{
 
 #[derive(Debug, Clone, Copy)]
 pub struct Sha512IoOutput {
+    /// SHA-512 output bytes in the standard digest order.
     pub digest: [u8; 64],
+    /// Eidos digest of the assertion binding the input, its length, and the SHA-512 output.
     pub h_sha512: EidosDigest,
+    /// Index used to add consumers of this assertion without generating duplicate hash work.
     pub invocation: u32,
 }
 
@@ -130,6 +139,8 @@ impl Sha512IoRequires {
     }
 }
 
+/// Commit bytes using the same little-endian u32 packing as the MASM CHUNKS registration.
+/// Unused bytes in the final chunk are zero; even an empty byte string occupies one chunk.
 fn require_chunks(bytes: &[u8], eidos: &mut EidosRequires) -> AbsorptionOutput {
     let node = Node::chunks_from_bytes(bytes);
     let chunks = node.payload().as_data().expect("CHUNKS data payload");
@@ -181,6 +192,7 @@ pub fn generate_trace_padded_to(
 }
 
 /// Emit only the active IO rows, allowing the combined AIR to place them in compression NOPs.
+/// Callback indices are dense: sixteen rows per block, in compression registration order.
 pub(crate) fn populate_rows(
     requires: Sha512IoRequires,
     bpl: &mut BytePairLutRequires,
@@ -200,6 +212,8 @@ pub(crate) fn populate_rows(
                 row[io::COL_ACT] = Felt::ONE;
                 row[io::COL_FIRST_BLOCK] = Felt::from_bool(block_index == 0);
                 row[io::COL_FINAL_BLOCK] = Felt::from_bool(final_block);
+                // At offset == len, the previous byte is still present (or is the initial
+                // sentinel for an empty message), so this row inserts the padding marker.
                 row[io::COL_BEFORE] = Felt::from_bool(offset <= len);
                 row[io::COL_LEFT] = Felt::from_u32(left);
                 row[io::COL_LEFT_LO16] = Felt::from_u16(left as u16);
@@ -208,6 +222,8 @@ pub(crate) fn populate_rows(
                 bpl.require_range16((left >> 16) as u16);
                 row[io::COL_LEN] = Felt::from_u32(len as u32);
                 let chunk_index = offset / 32;
+                // CHUNKS reserves one zero-filled chunk for an empty message. Clamp its ID
+                // at the tail once raw input ends, even if SHA padding needs another block.
                 row[io::COL_CHUNK_ACTIVE] =
                     Felt::from_bool(chunk_index == 0 || chunk_index * 32 < len);
                 let raw_head = inv.raw_eidos.span.head().as_u32();
