@@ -7,8 +7,8 @@
 //! 2. **ACE memory reads** - on ACE chiplet rows, the block selector distinguishes word reads
 //!    (`f_ace_read`) from element reads used by EVAL rows (`f_ace_eval`). Both are removed from the
 //!    chiplets bus.
-//! 3. **AEAD stream memory I/O** (`BusId::{MemoryReadWord, MemoryWriteWord}`) - on stream rows;
-//!    see [`super::super::operations::aead_stream`].
+//! 3. **AEAD stream memory I/O** (`BusId::{MemoryReadWord, MemoryWriteWord}`) - on stream rows; see
+//!    [`super::super::operations::aead_stream`].
 //! 4. **Normal bitwise AND8 checks** (`BusId::And8Lookup`) - on normal bitwise rows, four removes
 //!    bind the bytewise `a & b` witnesses to the shared AND8 lookup table.
 //! 5. **Memory-side range checks** (`BusId::RangeCheck`) - on memory chiplet rows, a five-remove
@@ -28,12 +28,11 @@
 //! `chiplets[18..20]`, past the end of the memory overlay, shared with the ACE chiplet
 //! column space), so they are read directly from the raw chiplet slice.
 
-use super::super::operations::{aead_stream, merkle};
-
 use core::borrow::Borrow;
 
 use miden_core::field::PrimeCharacteristicRing;
 
+use super::super::operations::{aead_stream, merkle};
 use crate::{
     constraints::{
         chiplets::columns::PeriodicCols,

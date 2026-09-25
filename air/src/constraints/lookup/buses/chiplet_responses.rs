@@ -12,12 +12,11 @@
 //! rather than splitting into four per-label variants. This keeps the response-column
 //! transition degree at 8; a per-variant split would bump it to 9.
 
-use super::super::operations::{aead_stream, merkle};
-
 use core::{array, borrow::Borrow};
 
 use miden_core::field::PrimeCharacteristicRing;
 
+use super::super::operations::{aead_stream, merkle};
 use crate::{
     constraints::{
         chiplets::columns::PeriodicCols,

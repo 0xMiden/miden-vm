@@ -6,7 +6,6 @@
 //! single-denominator hasher shape.
 
 use super::super::operations::merkle;
-
 use crate::{
     constraints::{
         lookup::{

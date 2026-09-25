@@ -48,7 +48,7 @@
 //! 3. **Deterministic constraints** — `eval()` emits the same number and types of constraints
 //!    regardless of builder implementation.
 //! 4. **Aux trace output** —
-//!    [`LiftedAir::build_aux_trace_with_preprocessed`](air::LiftedAir::build_aux_trace_with_preprocessed)
+//!    [`build_aux_trace_with_preprocessed`](air::LiftedAir::build_aux_trace_with_preprocessed)
 //!    returns, per AIR, a trace of width `aux_width()`, height matching the main trace, and exactly
 //!    `num_aux_values()` aux values. A malformed output is caught by the prover (LDE/commit panic)
 //!    or by verification, since the verifier re-derives these shapes from the AIR contract.

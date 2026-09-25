@@ -204,7 +204,7 @@ pub(in crate::constraints::lookup) fn emit_core_index_limbs<LB, G>(
     let op_flags = &ctx.op_flags;
     let helpers = ctx.local.decoder.user_op_helpers();
     // MPVERIFY and MRUPDATE preserve stack depth, so these branches cannot
-    // overlap any overflow-table interaction above. The top witness limb and its
+    // overlap any overflow-table interaction in their column. The top witness limb and its
     // doubled bound are placed in other existing columns to preserve degree 9.
     g.batch(
         "mpverify_merkle_y_low",

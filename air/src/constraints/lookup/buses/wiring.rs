@@ -52,10 +52,9 @@
 //! [`super::super::operations::aead_stream`]. Merkle compression interactions are defined in
 //! [`super::super::operations::merkle`].
 
-use super::super::operations::{aead_stream, merkle};
-
 use core::{array, borrow::Borrow};
 
+use super::super::operations::{aead_stream, merkle};
 use crate::{
     constraints::{
         chiplets::columns::PeriodicCols,

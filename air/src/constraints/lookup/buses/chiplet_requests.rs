@@ -7,12 +7,11 @@
 //!
 //! Every interaction is folded into a single [`crate::lookup::LookupColumn::group`] call.
 
-use super::super::operations::{aead_stream, merkle};
-
 use core::array;
 
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE, field::PrimeCharacteristicRing, operations::opcodes};
 
+use super::super::operations::{aead_stream, merkle};
 use crate::{
     constraints::lookup::{
         main_air::{MainBusContext, MainLookupBuilder},

@@ -58,12 +58,11 @@
 //!
 //! Column max: `U = 8, V = 7`; transition degree is `max(1 + 8, 7) = 9`.
 
-use super::super::operations::merkle;
-
 use core::array;
 
 use miden_core::field::PrimeCharacteristicRing;
 
+use super::super::operations::merkle;
 use crate::{
     constraints::{
         lookup::{

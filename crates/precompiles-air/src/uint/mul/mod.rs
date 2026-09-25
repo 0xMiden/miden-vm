@@ -44,21 +44,22 @@
 //! and one `Range16` fraction. Nineteen cells per row hold the 148 committed values in eight active
 //! rows:
 //!
-//! | row | role | cells 0–15 / 0–16            | cells past the limbs                                         |
-//! |-----|------|------------------------------|--------------------------------------------------------------|
-//! | 0   | `a`  | a's 16-bit limbs (0–15)      | γ spill (16–18)                                              |
-//! | 1   | `b`  | b's limbs (0–15)             | γ spill (16–18)                                              |
-//! | 2   | `p`  | bound's limbs (0–15)         | γ spill (16–18)                                              |
-//! | 3   | `q`  | q₀..q₁₆ (0–16)               | γ spill (17–18)                                              |
-//! | 4   | `r`  | r's eight 32-bit limbs (0–7) | γ spill (8–18)                                               |
-//! | 5   | `g0` | —                            | γ (0–18, all cells)                                          |
-//! | 6   | `g1` | —                            | γ (0–14; 15–18 spare)                                        |
-//! | 7   | `c`  | c's eight 32-bit limbs (0–7) | mult, c_ptr, κ_c, is_sub, κ_c_signed (8–12); γ spill (13–18) |
+//! | row | role | limb cells                   | cells past the limbs                  |
+//! |-----|------|------------------------------|---------------------------------------|
+//! | 0   | `a`  | a's 16-bit limbs (0–15)      | γ spill (16–18)                       |
+//! | 1   | `b`  | b's limbs (0–15)             | γ spill (16–18)                       |
+//! | 2   | `p`  | bound's limbs (0–15)         | γ spill (16–18)                       |
+//! | 3   | `q`  | q₀..q₁₆ (0–16)               | γ spill (17–18)                       |
+//! | 4   | `r`  | r's eight 32-bit limbs (0–7) | γ spill (8–18)                        |
+//! | 5   | `g0` | —                            | γ (0–18, all cells)                   |
+//! | 6   | `g1` | —                            | γ (0–14; 15–18 spare)                 |
+//! | 7   | `c`  | c's eight 32-bit limbs (0–7) | term metadata (8–12); γ spill (13–18) |
 //!
 //! [`GAMMA_SLOTS`] is the shared placement table used by the AIR and trace generator. The `c` row
-//! holds the term metadata and closes the block. Its local contribution has not yet entered `id`,
-//! so the closing constraint reconstructs that contribution before asserting zero. This mirrors
-//! the `p_own` pattern in [`UintAdd`](crate::uint::add).
+//! holds `mult`, `c_ptr`, `κ_c`, `is_sub`, and `κ_c_signed` in cells 8–12 and closes the block. Its
+//! local contribution has not yet entered `id`, so the closing constraint reconstructs that
+//! contribution before asserting zero. This mirrors the `p_own` pattern in
+//! [`UintAdd`](crate::uint::add).
 //!
 //! ## Registers
 //!
