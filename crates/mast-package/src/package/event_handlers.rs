@@ -205,6 +205,11 @@ pub enum EventHandlerSectionError {
     #[error("'event_handlers' section has trailing bytes")]
     TrailingBytes,
 
+    /// The payload decodes to a section whose canonical encoding differs from the payload, which
+    /// would let equal sections carry different dependency commitments.
+    #[error("'event_handlers' section payload is not the canonical encoding of the section")]
+    NonCanonicalEncoding,
+
     /// A field of the section goes over its size cap.
     #[error("'event_handlers' section {field} length {actual} goes over the cap of {max}")]
     OverSizeCap {
@@ -359,19 +364,28 @@ impl EventHandlerSection {
     ///
     /// The payload is untrusted input, so the reader gets a budget of the payload size, bytes
     /// after the encoded section are refused, and the decoded section must pass
-    /// [`Self::validate`]. This is the full decode path:
+    /// [`Self::validate`]. The payload must also be the canonical encoding of the section it
+    /// decodes to, so equal sections always carry the same bytes and the same dependency
+    /// commitment. This is the full decode path:
     /// [`Package::event_handlers`](crate::Package::event_handlers) and the fuzz target both call
     /// it, so neither can drift from the other.
     ///
     /// # Errors
     /// Returns an error when the payload fails to decode (including size-cap violations), when
-    /// bytes follow the encoded section, or when the section breaks a rule of [`Self::validate`].
+    /// bytes follow the encoded section, when the section breaks a rule of [`Self::validate`], or
+    /// when the payload is not the canonical encoding of the section.
     pub fn from_payload(bytes: &[u8]) -> Result<Self, EventHandlerSectionError> {
         let section = read_payload_with_budget::<Self>(bytes).map_err(|err| match err {
             PayloadError::Decode(source) => EventHandlerSectionError::Decode(source),
             PayloadError::TrailingBytes => EventHandlerSectionError::TrailingBytes,
         })?;
         section.validate()?;
+        // The length prefixes decode from nonminimal forms too, so a byte-different payload can
+        // decode to an equal section. Re-encoding with the producer's encoder and comparing the
+        // bytes refuses every such form at once.
+        if section.to_bytes() != bytes {
+            return Err(EventHandlerSectionError::NonCanonicalEncoding);
+        }
         Ok(section)
     }
 }
@@ -481,6 +495,29 @@ mod tests {
         bytes.write_usize(0);
         let err = EventHandlerSection::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
         assert!(err.to_string().contains("export name is empty"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn nonminimal_length_encoding_is_rejected() {
+        let canonical = sample().to_bytes();
+        assert_eq!(EventHandlerSection::from_payload(&canonical).unwrap(), sample());
+
+        // The handler count follows the 4-byte ABI version and the 1-byte module length plus the
+        // 8 module bytes. Its minimal vint64 form is the single byte `(2 << 1) | 1`; the padded
+        // two-byte form `((2 << 1) | 1) << 1`, little-endian, decodes to the same count.
+        let count_at = 4 + 1 + 8;
+        assert_eq!(canonical[count_at], 0x05);
+        let mut padded = canonical[..count_at].to_vec();
+        padded.extend_from_slice(&[0x0a, 0x00]);
+        padded.extend_from_slice(&canonical[count_at + 1..]);
+
+        // The padded payload decodes to the same section, so only the canonical check refuses it.
+        let decoded = EventHandlerSection::read_from(&mut SliceReader::new(&padded)).unwrap();
+        assert_eq!(decoded, sample());
+        assert!(matches!(
+            EventHandlerSection::from_payload(&padded),
+            Err(EventHandlerSectionError::NonCanonicalEncoding)
+        ));
     }
 
     #[test]
