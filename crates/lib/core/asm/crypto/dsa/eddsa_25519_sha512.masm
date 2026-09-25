@@ -33,9 +33,16 @@ const PUBLIC_KEY_INIT_CV = [
 #! commit to its encoding separately. No result is pushed; failed verification traps.
 @locals(48)
 pub proc verify(public_key: eidos::Digest, message: word)
-    loc_storew_le.0 dropw
-    locaddr.4 movdn.4 exec.store_word_u32s_le drop
-    locaddr.16 push.32 locaddr.4 padw loc_loadw_le.0
+    # Reserve locals 4..12 for the packed message and 16..40 for R || A || M.
+    swapw
+    locaddr.4 movdn.4 exec.store_word_u32s_le
+    # => [MSG_PTR, PK_COMM, ...]
+
+    locaddr.16 movdn.5
+    push.32 movdn.5
+    movdn.4
+    # => [PK_COMM, MSG_PTR, 32, SCRATCH_PTR, ...]
+
     exec.verify_bytes
 end
 
@@ -51,131 +58,164 @@ end
 #! overwritten. Both complete ranges must lie below this procedure's local frame; parent-frame
 #! locals are supported. MSG_LEN_BYTES + 64 must fit the max_hash_len_bytes execution limit.
 #! Public-key commitments and acceptance rules are the same as verify. Advice is untrusted.
-@locals(48)
+@locals(4)
 pub proc verify_bytes(
     public_key: eidos::Digest,
     message_ptr: ptr<u32>,
     message_len_bytes: u32,
     scratch_ptr: ptr<u32>,
 )
-    # Check before saving arguments: neither buffer may alias this or any nested local frame.
+    # Locals 0 and 1 hold SCRATCH_PTR and MSG_LEN_BYTES; locals 2 and 3 are alignment padding.
+    # Reject aliases with this or nested local frames before storing any arguments.
+    # Retain the padded message length N (in felts) for the nonoverlap checks and copy.
     dup.5 u32assert add.31 u32div.32 dup eq.0 add mul.8
     dup dup.6 add locaddr.0 swap u32gte
     assert.err="Ed25519 buffers must precede verifier locals"
-    dup.7 add add.16 locaddr.0 swap u32gte
+    dup.7 dup.1 add add.16 locaddr.0 swap u32gte
     assert.err="Ed25519 buffers must precede verifier locals"
+    # => [N, PK_COMM, MSG_PTR, MSG_LEN_BYTES, SCRATCH_PTR, ...]
 
-    loc_storew_le.0 dropw
-    loc_store.4 loc_store.5 loc_store.6
-    loc_load.4 u32assert push.3 u32and assertz.err="unaligned message pointer"
-    loc_load.6 u32assert push.3 u32and assertz.err="unaligned scratch pointer"
-    loc_load.5 u32assert add.31 u32div.32 dup eq.0 add mul.8 loc_store.7
+    dup.5 u32assert push.3 u32and assertz.err="unaligned message pointer"
+    dup.7 u32assert push.3 u32and assertz.err="unaligned scratch pointer"
+    movup.7 loc_store.0
+    movup.6 loc_store.1
+    # => [N, PK_COMM, MSG_PTR, ...]
 
-    # Check the complete scratch range before copying or consuming the witness.
-    loc_load.4 loc_load.6 loc_load.7 add add.16 u32gte
-    loc_load.6 loc_load.4 loc_load.7 add u32gte
+    # Check both disjoint-range orderings before writing scratch or consuming advice.
+    dup.5 loc_load.0 dup.2 add add.16 u32gte
+    # => [MSG_PTR >= SCRATCH_PTR+N+16, N, PK_COMM, MSG_PTR, ...]
+    loc_load.0 dup.7 dup.3 add u32gte
     or assert.err="Ed25519 scratch must not overlap message memory"
-    loc_load.6 add.16 loc_load.4 loc_load.7 exec.mem::memcopy_elements
+    movup.5 swap loc_load.0 add.16 movdn.2
+    # => [N, MSG_PTR, SCRATCH_PTR+16, PK_COMM, ...]
+    exec.mem::memcopy_elements
 
-    # Commit to the exact compressed A before using it in the group equation or hash preimage.
-    locaddr.8 push.PUBLIC_KEY_INIT_CV padw padw adv_pipe
+    # Write A directly into its final preimage location and bind its exact compressed encoding.
+    # Both words are Eidos commitments to byte encodings, so raw word equality is appropriate.
+    loc_load.0 add.8 push.PUBLIC_KEY_INIT_CV padw padw adv_pipe
     exec.eidos::compress
     exec.eidos::digest
-    movup.4 drop padw loc_loadw_le.0 assert_eqw.err="invalid public key commitment"
+    movup.4 drop assert_eqw.err="invalid public key commitment"
 
-    # These constants are shared by both point decompressions. The public-key commitment has
-    # already been checked, so loc[0..4] is available for the square-root constant; loc[20..24]
-    # holds the x-coordinate offset.
+    # Load the shared square-root and offset constants as four-felt expression digests.
     push.[66867070, 3531278556, 1621100219, 254209524]
     push.[4282744326, 3429762218, 1266489986, 3315717073]
     exec.ed25519_base::load
-    loc_storew_le.0 dropw
     push.[2863311530, 2863311530, 2863311530, 715827882]
     push.[2863473745, 2863311530, 2863311530, 2863311530]
     exec.ed25519_base::load
-    loc_storew_le.20 dropw
+    # => [OFFSET, SQRT, ...]
 
-    loc_load.6 exec.store_advice_u256
-    loc_load.6 add.8 locaddr.8 push.8 exec.mem::memcopy_elements
+    loc_load.0 exec.store_advice_u256
     # scratch = R || A || message; the remaining advice words contain S.
 
     # Consume S directly from the remaining advice stack words. The first load is the low word;
     # swap the two loaded words into the scalar VALUE layout before evaluating and widening it.
+    # Loading in the scalar domain enforces S < l; reducing an arbitrary S would accept aliases.
     padw adv_loadw
     padw adv_loadw
     swapw
     exec.ed25519_scalar::load
     exec.ed25519_scalar::eval exec.ed25519_order::load
-    loc_storew_le.16 dropw
+    swapw.2
+    # => [SQRT, OFFSET, S, ...]
 
-    padw loc_loadw_le.20 padw loc_loadw_le.0
-    locaddr.8 exec.load_compressed_point loc_storew_le.24 dropw
-    padw loc_loadw_le.20 padw loc_loadw_le.0
-    loc_load.6 exec.load_compressed_point loc_storew_le.28 dropw
+    # Preserve one copy of each constant for R while decoding A first.
+    dupw.1 dupw.1
+    loc_load.0 add.8 exec.load_compressed_point
+    # => [A, SQRT, OFFSET, S, ...]
+    movdnw.2
+    loc_load.0 exec.load_compressed_point
+    # => [R, A, S, ...]
 
-    locaddr.32 loc_load.5 add.64 loc_load.6 exec.sha512::hash_bytes_mem
+    # Both encodings are now represented by point digests. The SHA helper registers and hashes
+    # the complete preimage before writing its output, so its 16-felt result can overwrite scratch.
+    loc_load.0 loc_load.1 add.64 loc_load.0 exec.sha512::hash_bytes_mem
     # SHA-512 digest bytes already form the little-endian 512-bit challenge integer.
-    locaddr.32 exec.ed25519_scalar::load_reduced_512_mem
+    loc_load.0 exec.ed25519_scalar::load_reduced_512_mem
     exec.ed25519_scalar::eval exec.ed25519_order::load
     # The curve MSM uses the complete-order ring (8l), so negate k in that domain. This is
     # [8l-k] for nonzero k and zero for k=0, exactly the coefficient of -[k]A.
     exec.ed25519_order::push_zero_digest exec.ed25519_order::sub
-    padw loc_loadw_le.24 swapw
-    padw loc_loadw_le.16
+    # => [-k, R, A, S, ...]
+    swapw.2 swapdw swapw
+    # => [S, -k, A, R, ...]
     exec.ed25519::msm2_generator
-    # => [[s]B + [-k]A, ...]
-    padw loc_loadw_le.28
-    exec.ed25519::assert_eq
+    # => [[s]B + [-k]A, R, ...]
+    # These are deferred point expressions; compare their values through the curve relation.
+    swapw exec.ed25519::assert_eq
 end
 
 #! Decodes a compressed point through an untrusted Edwards x-coordinate witness.
 #! The birational map and its image's curve membership are enforced by field/curve relations.
 #! Three doubles reject all small-order points, including the map's exceptional two-torsion image.
-@locals(36)
+#! `ptr` must be word-aligned and reference eight readable packed-u32 felts. The compressed
+#! encoding is left unchanged. The supplied constants and returned point are four-felt digests.
+#! Input:  [ptr, SQRT, OFFSET, ...]
+#! Output: [POINT, ...]
+#! The event supplies eight little-endian u32 limbs of x; field/curve relations bind this advice.
 proc load_compressed_point(
     ptr: ptr<u32>,
     sqrt_minus_486664: ed25519_base::Expr,
     offset_486662_div_3: ed25519_base::Expr,
 ) -> ed25519::Point
     emit.DECOMPRESS_EVENT
-    loc_store.0
-    loc_storew_le.28 dropw
-    loc_storew_le.32 dropw
-    locaddr.4 exec.store_advice_u256
-    locaddr.4 exec.ed25519_base::load_mem loc_storew_le.12 dropw
-    locaddr.16 loc_load.0 push.8 exec.mem::memcopy_elements
-    loc_load.23 u32assert dup u32shr.31 loc_store.1
-    push.0x7fffffff u32and loc_store.23
-    loc_load.4 push.1 u32and loc_load.1 assert_eq.err="invalid compressed point parity"
+
+    # Retain x's low limb for parity, and register the complete canonical x before using it.
+    # SQRT and OFFSET below denote the supplied field expression digests.
+    adv_pushw
+    dup movdn.4
+    adv_pushw swapw
+    exec.ed25519_base::load
+    # => [X_DIGEST, x0, ptr, SQRT, OFFSET, ...]
+
+    movup.5
+    dup add.4 padw movup.4 mem_loadw_le
+    # => [y4, y5, y6, encoded_y7, ptr, X_DIGEST, x0, SQRT, OFFSET, ...]
+
+    # Check the sign against the same x witness, then remove it from y's highest limb.
+    movup.3 u32assert dup u32shr.31
+    movup.10 push.1 u32and
+    assert_eq.err="invalid compressed point parity"
+    push.0x7fffffff u32and movdn.3
+    movup.4 padw movup.4 mem_loadw_le
+    exec.ed25519_base::load
+    # => [Y_DIGEST, X_DIGEST, SQRT, OFFSET, ...]
 
     # u = (1+y)/(1-y), where y is canonical after removing the sign bit.
-    locaddr.16 exec.ed25519_base::load_mem
     dupw exec.ed25519_base::push_one_digest exec.ed25519_base::add
     swapw exec.ed25519_base::push_one_digest exec.ed25519_base::sub
     exec.ed25519_base::inv exec.ed25519_base::mul
-    loc_storew_le.24 dropw
+    # => [U_DIGEST, X_DIGEST, SQRT, OFFSET, ...]
 
     # Y = sqrt(-486664)*u/x. Inverting x rejects both x=0 exceptional encodings.
-    padw loc_loadw_le.12 exec.ed25519_base::inv
-    padw loc_loadw_le.24 exec.ed25519_base::mul
-    padw loc_loadw_le.28 exec.ed25519_base::mul
+    swapw exec.ed25519_base::inv
+    dupw.1 exec.ed25519_base::mul
+    movupw.2 exec.ed25519_base::mul
+    # => [MAPPED_Y, U_DIGEST, OFFSET, ...]
+
     # X = u + 486662/3.
-    padw loc_loadw_le.24
-    padw loc_loadw_le.32 exec.ed25519_base::add
+    swapw movupw.2 exec.ed25519_base::add
     exec.ed25519::load_digest_pair
 
+    # Preserve P while testing [8]P. This rejects small-order points without requiring P to
+    # lie in the prime-order subgroup, matching the strict verification acceptance policy.
     dupw
     repeat.3 dupw exec.ed25519::add end
     exec.ed25519::is_identity
     assertz.err="small-order Ed25519 point"
 end
 
+#! Copies eight advice felts to word-aligned memory, with the low four limbs first.
+#! Input: [ptr, ...]. Output: [...]. This copy does not itself validate the advised limbs.
 proc store_advice_u256(ptr: ptr<u32>)
     adv_pushw dup.4 mem_storew_le dropw
     adv_pushw dup.4 add.4 mem_storew_le dropw
     drop
 end
 
+#! Writes each word element as low/high u32 limbs in element order, using eight memory felts.
+#! Input: [WORD, ptr, ...]. Output: [ptr, ...]. The destination must be word-aligned.
 proc store_word_u32s_le(value: word, ptr: ptr<u32>) -> ptr<u32>
     swap u32split movup.2 u32split
     dup.6 mem_storew_le dropw
