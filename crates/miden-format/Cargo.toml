@@ -32,4 +32,5 @@ walkdir.workspace = true
 windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
+miden-assembly-syntax = { workspace = true, features = ["std"] }
 tempfile.workspace = true
