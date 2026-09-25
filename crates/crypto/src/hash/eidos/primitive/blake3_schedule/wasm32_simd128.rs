@@ -2,7 +2,7 @@
 
 use core::arch::wasm32::*;
 
-use super::{IV, MSG_SCHEDULE};
+use super::IV;
 
 #[inline(always)]
 fn load(xs: &[u32; 4]) -> v128 {
@@ -63,16 +63,26 @@ pub(super) fn compress_packed_4(cv: [[u32; 4]; 8], block: [[u32; 4]; 16]) -> [[u
         v[8 + i] = splat(IV[i]);
     }
 
-    for s in MSG_SCHEDULE {
-        g(&mut v, 0, 4, 8, 12, load(&block[s[0]]), load(&block[s[1]]));
-        g(&mut v, 1, 5, 9, 13, load(&block[s[2]]), load(&block[s[3]]));
-        g(&mut v, 2, 6, 10, 14, load(&block[s[4]]), load(&block[s[5]]));
-        g(&mut v, 3, 7, 11, 15, load(&block[s[6]]), load(&block[s[7]]));
-        g(&mut v, 0, 5, 10, 15, load(&block[s[8]]), load(&block[s[9]]));
-        g(&mut v, 1, 6, 11, 12, load(&block[s[10]]), load(&block[s[11]]));
-        g(&mut v, 2, 7, 8, 13, load(&block[s[12]]), load(&block[s[13]]));
-        g(&mut v, 3, 4, 9, 14, load(&block[s[14]]), load(&block[s[15]]));
+    macro_rules! round {
+        ($($s:literal),*) => {{
+            let s = [$($s),*];
+            g(&mut v, 0, 4, 8, 12, load(&block[s[0]]), load(&block[s[1]]));
+            g(&mut v, 1, 5, 9, 13, load(&block[s[2]]), load(&block[s[3]]));
+            g(&mut v, 2, 6, 10, 14, load(&block[s[4]]), load(&block[s[5]]));
+            g(&mut v, 3, 7, 11, 15, load(&block[s[6]]), load(&block[s[7]]));
+            g(&mut v, 0, 5, 10, 15, load(&block[s[8]]), load(&block[s[9]]));
+            g(&mut v, 1, 6, 11, 12, load(&block[s[10]]), load(&block[s[11]]));
+            g(&mut v, 2, 7, 8, 13, load(&block[s[12]]), load(&block[s[13]]));
+            g(&mut v, 3, 4, 9, 14, load(&block[s[14]]), load(&block[s[15]]));
+        }};
     }
+    round!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    round!(2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8);
+    round!(3, 4, 10, 12, 13, 2, 7, 14, 6, 5, 9, 0, 11, 15, 8, 1);
+    round!(10, 7, 12, 9, 14, 3, 13, 15, 4, 0, 11, 2, 5, 8, 1, 6);
+    round!(12, 13, 9, 11, 15, 10, 14, 8, 7, 2, 5, 3, 0, 1, 6, 4);
+    round!(9, 14, 11, 5, 8, 12, 15, 1, 13, 3, 0, 10, 2, 6, 4, 7);
+    round!(11, 15, 5, 0, 1, 9, 8, 6, 14, 10, 2, 12, 3, 4, 7, 13);
 
     core::array::from_fn(|i| store(v128_xor(v[i], v[i + 8])))
 }

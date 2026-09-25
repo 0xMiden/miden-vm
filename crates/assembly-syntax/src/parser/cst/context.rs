@@ -74,6 +74,21 @@ impl<'a> LoweringContext<'a> {
         self.lower_ident_text(span, raw)
     }
 
+    /// Lowers a quoted-string token holding an identifier escaped the way [ast::Ident] prints one.
+    pub(super) fn lower_escaped_ident_token(
+        &mut self,
+        token: &SyntaxToken,
+    ) -> Result<ast::Ident, ParsingError> {
+        let span = self.parse.span_for_token(token);
+        let text = token.text();
+        let raw = text.strip_prefix('"').and_then(|text| text.strip_suffix('"')).unwrap_or(text);
+        let unescaped = unescape(raw).ok_or_else(|| ParsingError::InvalidSyntax {
+            span,
+            message: "invalid escape sequence in identifier".to_string(),
+        })?;
+        self.lower_ident_text(span, &unescaped)
+    }
+
     /// Lowers an identifier-like or quoted-string token into an AST identifier.
     ///
     /// This is used for declarations whose textual name may need quoting in source syntax, such as
@@ -191,4 +206,27 @@ impl<'a> LoweringContext<'a> {
             interned
         })
     }
+}
+
+/// Reverses the escaping `str::escape_debug` applies to an identifier.
+fn unescape(text: &str) -> Option<String> {
+    let mut unescaped = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            unescaped.push(ch);
+            continue;
+        }
+        let ch = match chars.next()? {
+            escaped @ ('\\' | '"' | '\'') => escaped,
+            'u' => {
+                let (hex, rest) = chars.as_str().strip_prefix('{')?.split_once('}')?;
+                chars = rest.chars();
+                char::from_u32(u32::from_str_radix(hex, 16).ok()?)?
+            },
+            _ => return None,
+        };
+        unescaped.push(ch);
+    }
+    Some(unescaped)
 }

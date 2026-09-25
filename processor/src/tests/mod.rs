@@ -1576,6 +1576,7 @@ fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
 }
 
 fn measure_program_cycles(program: &str) -> u32 {
+    use miden_core_lib::CoreLibrary;
     use miden_utils_testing::{TRUNCATE_STACK_PROC, Test};
 
     let body = program.trim();
@@ -1586,7 +1587,11 @@ exec.truncate_stack
 end"
     );
 
-    let test = Test::new("program", &source, false);
+    // Link the packaged core library so fixtures can `exec` real core-lib procedures.
+    let core_lib = CoreLibrary::default();
+    let test = Test::new("program", &source, false)
+        .with_library(core_lib.package())
+        .with_event_handlers(core_lib.handlers());
     let outputs = test.get_last_stack_state();
     let measured = outputs
         .iter()

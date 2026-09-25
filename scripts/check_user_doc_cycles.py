@@ -96,13 +96,34 @@ def extract_table_row_description(line: str, procedure: str) -> str | None:
     return description
 
 
+_CYCLE_LABEL_RE = re.compile(
+    r"(?:^|\b)Cycles(?:\s*\(estimate\))?\s*:|"
+    r"\*\(\s*\d+\s+cycles?\s*\)\*",
+    re.IGNORECASE,
+)
+
+
 def extract_user_procedure_cycles(content: str, section: str | None, procedure: str) -> str:
     scoped = slice_section(content, section)
 
     subsection = section or procedure
-    if re.search(rf"^###\s+{re.escape(subsection)}\s*$", content, re.MULTILINE):
-        for line in scoped.splitlines():
-            if re.search(r"cycles", line, re.IGNORECASE):
+    # Cycle-label scan applies when we are already in a ### body:
+    # - `section` itself matched a ### heading (heading is outside `scoped`), or
+    # - a ### `subsection` heading appears inside `scoped` (e.g. no section filter).
+    section_was_h3 = False
+    if section is not None:
+        heading = re.search(
+            rf"^(#{{2,3}})\s+{re.escape(section)}\s*$", content, re.MULTILINE
+        )
+        section_was_h3 = bool(heading and heading.group(1) == "###")
+
+    heading_in_scoped = re.search(
+        rf"^###\s+{re.escape(subsection)}\s*$", scoped, re.MULTILINE
+    )
+    if section_was_h3 or heading_in_scoped:
+        body = slice_section(scoped, subsection) if heading_in_scoped else scoped
+        for line in body.splitlines():
+            if _CYCLE_LABEL_RE.search(line):
                 return extract_cycles_from_description(line)
         raise KeyError(f"no cycle text in subsection: {subsection!r}")
 
@@ -279,8 +300,19 @@ def extract_cycle_cell_from_row(
                     return None
                 return _normalize_cycle_cell_text(text)
 
-    for cell in cells:
-        match = re.search(r"\*\(\s*(\d+\s+cycles?)\s*\)\*", cell, re.IGNORECASE)
+    # No Cycles column: only the instruction cell may embed *(N cycles)* (never Notes).
+    instruction_idx = 0
+    if header_cells:
+        for idx, name in enumerate(header_cells):
+            if "instruction" in name:
+                instruction_idx = idx
+                break
+    if instruction_idx < len(cells):
+        match = re.search(
+            r"\*\(\s*(\d+\s+cycles?)\s*\)\*",
+            cells[instruction_idx],
+            re.IGNORECASE,
+        )
         if match:
             return re.sub(r"\s+", " ", match.group(1).lower())
     return None
@@ -382,6 +414,48 @@ class CheckUserDocCyclesTests(unittest.TestCase):
     def test_cycle_cell_falls_back_to_embedded_cycles(self) -> None:
         row = "| u32popcnt *(38 cycles)* | [a, ...] | [b, ...] | note |"
         self.assertEqual(extract_cycle_cell_from_row(row), "38 cycles")
+
+    def test_embedded_cycles_in_notes_are_ignored(self) -> None:
+        # Without a Cycles column, only the instruction cell is searched.
+        row = "| u32popcnt | [a, ...] | [b, ...] | notes has *(38 cycles)* |"
+        self.assertIsNone(extract_cycle_cell_from_row(row))
+
+    def test_notes_embedded_cycles_ignored_when_cycles_column_wrong(self) -> None:
+        # Cycles column present but wrong/empty: must not fall back to Notes *(38 cycles)*.
+        content = (
+            "| Instruction | Stack Input | Stack Output | Cycles | Notes |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| foo | `[2, 1, ...]` | `[3, ...]` |  | notes *(38 cycles)* |\n"
+        )
+        row_start = content.index("| foo")
+        row = content[row_start : content.find("\n", row_start)]
+        self.assertIsNone(extract_cycle_cell_from_row(row, content, row_start))
+
+    def test_subsection_heading_and_cycles_search_use_scoped(self) -> None:
+        # A later ### with the same name as the ## section must not hijack table extraction.
+        content = (
+            "## Sec\n"
+            "| Procedure | Description |\n"
+            "| --- | --- |\n"
+            "| Target | Does a thing.<br /><br />Cycles: 38 |\n"
+            "### Sec\n"
+            "Cycles: 99\n"
+        )
+        self.assertEqual(
+            extract_user_procedure_cycles(content, "Sec", "Target"),
+            "38",
+        )
+
+    def test_bare_cycles_word_is_not_a_cycle_label(self) -> None:
+        # When the mapped section is the ### heading itself, ignore bare "cycles".
+        content = (
+            "### Proc\n"
+            "This line mentions cycles without a label\n"
+            "Cycles: 12\n"
+            "### Other\n"
+            "Cycles: 99\n"
+        )
+        self.assertEqual(extract_user_procedure_cycles(content, "Proc", "Proc"), "12")
 
     def test_fixture_expected_matches_cycles(self) -> None:
         self.assertTrue(fixture_expected_matches_cycles("38", "38"))

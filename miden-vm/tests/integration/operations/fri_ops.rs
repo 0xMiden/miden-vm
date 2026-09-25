@@ -1,4 +1,4 @@
-use miden_utils_testing::{Felt, TRUNCATE_STACK_PROC, build_test, push_inputs, rand::rand_array};
+use miden_utils_testing::{Felt, TRUNCATE_STACK_PROC, build_test, push_inputs};
 
 // FRI_EXT2FOLD4
 // ================================================================================================
@@ -6,8 +6,10 @@ use miden_utils_testing::{Felt, TRUNCATE_STACK_PROC, build_test, push_inputs, ra
 #[test]
 fn fri_ext2fold4() {
     for coset in 0..4 {
-        let mut inputs =
-            rand_array::<Felt, 17>().iter().map(Felt::as_canonical_u64).collect::<Vec<_>>();
+        let mut inputs = rand::random::<[Felt; 17]>()
+            .iter()
+            .map(Felt::as_canonical_u64)
+            .collect::<Vec<_>>();
 
         // inputs[7] -> stack[9] = natural coset.
         inputs[7] = coset;

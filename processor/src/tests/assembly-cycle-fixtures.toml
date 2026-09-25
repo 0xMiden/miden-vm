@@ -22,10 +22,11 @@ program = "clk push.7 u32popcnt drop clk swap sub"
 baseline_program = "clk push.7 drop clk swap sub"
 expected = "38"
 
-# Core-lib `mmr::num_leaves_to_num_peaks` body is solely `u32popcnt`.
+# Core-lib mmr::num_leaves_to_num_peaks measured via real packaged exec (not inlined u32popcnt).
+# Packaged-library boundary is included in the measured cost (46); docs/annotations match.
 # No assembly doc marker: used by scripts/user-doc-cycle-mappings.toml.
 [[case]]
 id = "num_leaves_to_num_peaks"
-program = "clk push.7 u32popcnt drop clk swap sub"
+program = "clk push.7 exec.::miden::core::collections::mmr::num_leaves_to_num_peaks drop clk swap sub"
 baseline_program = "clk push.7 drop clk swap sub"
-expected = "38"
+expected = "46"

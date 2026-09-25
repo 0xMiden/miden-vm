@@ -678,6 +678,7 @@ fn test_mast_forest_wire_view_rejects_external_after_basic_block() {
     let view = MastForestWireView::new(&bytes).unwrap();
     let entry_offset = view.node_entry_offset();
     let entry_size = MastNodeEntry::SERIALIZED_SIZE;
+    drop(view);
     bytes[entry_offset..entry_offset + 2 * entry_size].rotate_left(entry_size);
 
     let result = MastForestWireView::new(&bytes);
@@ -703,6 +704,7 @@ fn test_mast_forest_wire_view_rejects_duplicate_external_digests() {
     let view = MastForestWireView::new(&bytes).unwrap();
     let duplicate_digest_offset = view.external_digest_offset() + Word::min_serialized_size();
     let duplicate_digest = first.to_bytes();
+    drop(view);
     bytes[duplicate_digest_offset..duplicate_digest_offset + duplicate_digest.len()]
         .copy_from_slice(&duplicate_digest);
 
@@ -1253,13 +1255,15 @@ fn mast_forest_deserialize_invalid_ops_offset_fails() {
 
     let view = MastForestWireView::new(&serialized).unwrap();
     let node_entry_offset = view.node_entry_offset();
+    drop(view);
 
     // Corrupt the ops_offset field with an out-of-bounds value
     let block_discriminant: u64 = 3;
     let corrupted_value = (block_discriminant << 60) | u32::MAX as u64;
 
     let mut corrupted = serialized;
-    corrupted_value.write_into(&mut &mut corrupted[node_entry_offset..node_entry_offset + 8]);
+    corrupted[node_entry_offset..node_entry_offset + 8]
+        .copy_from_slice(&corrupted_value.to_le_bytes());
 
     let result = MastForest::read_from_bytes(&corrupted);
     assert_matches!(result, Err(DeserializationError::InvalidValue(_)));
@@ -1893,6 +1897,7 @@ fn test_untrusted_forest_detects_forward_reference() {
     let view = MastForestWireView::new(&bytes).unwrap();
     let entry_offset = view.node_entry_offset();
     let entry_size = MastNodeEntry::SERIALIZED_SIZE;
+    drop(view);
     bytes[entry_offset..entry_offset + 4 * entry_size].rotate_right(entry_size);
 
     // Deserialize as untrusted and try to validate
@@ -1927,9 +1932,8 @@ fn test_untrusted_forest_rejects_mismatched_wire_root_hash() {
     .into();
 
     let mut corrupted = bytes.clone();
-    bogus_digest.write_into(
-        &mut &mut corrupted[digest_offset..digest_offset + Word::min_serialized_size()],
-    );
+    corrupted[digest_offset..digest_offset + Word::min_serialized_size()]
+        .copy_from_slice(&bogus_digest.to_bytes());
 
     let untrusted = UntrustedMastForest::read_from_bytes(&corrupted).unwrap();
     let result = untrusted.validate();
@@ -1964,9 +1968,8 @@ fn test_untrusted_forest_rejects_digest_collision_in_wire_hashes() {
     let left_digest_offset = node_hash_digest_offset(&view, left_root.to_usize());
 
     let mut corrupted = bytes.clone();
-    right_digest.write_into(
-        &mut &mut corrupted[left_digest_offset..left_digest_offset + Word::min_serialized_size()],
-    );
+    corrupted[left_digest_offset..left_digest_offset + Word::min_serialized_size()]
+        .copy_from_slice(&right_digest.to_bytes());
 
     let untrusted = UntrustedMastForest::read_from_bytes(&corrupted).unwrap();
     let result = untrusted.validate();
@@ -2476,4 +2479,47 @@ fn test_untrusted_payload_does_not_allocate_debug_info_scaffolding() {
     untrusted
         .validate()
         .expect("validation should fit the budget previously consumed by debug scaffolding");
+}
+
+/// A repeated advice map key must be rejected by the wire view and by both deserializing readers.
+#[test]
+fn duplicate_advice_map_key_rejected_by_every_reader_path() {
+    use crate::advice::AdviceMap;
+
+    let mut forest = MastForest::new();
+    let block = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block);
+
+    // Same forest without an advice map.
+    let mut empty_bytes = Vec::new();
+    forest.clone().write_into(&mut empty_bytes);
+
+    // One-entry advice map, used to find where the advice map section starts.
+    let key = Word::default();
+    let mut one_entry_map = AdviceMap::default();
+    one_entry_map.insert(key, vec![Felt::new_unchecked(1)]);
+    let forest_with_map = forest.clone().with_advice_map(one_entry_map.clone());
+    let mut one_entry_bytes = Vec::new();
+    forest_with_map.write_into(&mut one_entry_bytes);
+
+    let one_entry_map_bytes = one_entry_map.to_bytes();
+    let advice_map_start = one_entry_bytes.len() - one_entry_map_bytes.len();
+
+    // The advice map is the last section, so everything before it must match.
+    assert_eq!(&one_entry_bytes[..advice_map_start], &empty_bytes[..advice_map_start]);
+
+    // Advice map with the same key twice.
+    let mut dup_map_bytes = Vec::new();
+    dup_map_bytes.write_usize(2);
+    (key, vec![Felt::new_unchecked(1)]).write_into(&mut dup_map_bytes);
+    (key, vec![Felt::new_unchecked(2)]).write_into(&mut dup_map_bytes);
+
+    let mut dup_bytes = one_entry_bytes[..advice_map_start].to_vec();
+    dup_bytes.extend_from_slice(&dup_map_bytes);
+
+    assert!(MastForestWireView::new(&dup_bytes).is_err());
+    assert!(MastForest::read_from_bytes(&dup_bytes).is_err());
+    assert!(UntrustedMastForest::read_from_bytes(&dup_bytes).is_err());
 }

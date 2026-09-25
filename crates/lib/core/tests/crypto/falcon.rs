@@ -13,7 +13,6 @@ use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
     DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
-    crypto::random::RandomCoin,
     event::EventError,
     operation::OperationError,
 };
@@ -25,9 +24,7 @@ use miden_utils_testing::{
         MerkleStore, Poseidon2,
         falcon512_poseidon2::{Polynomial, SecretKey},
     },
-    expect_exec_error_matches,
-    rand::random_word,
-    stack_inputs_from_ints,
+    expect_exec_error_matches, stack_inputs_from_ints,
 };
 use rand::{Rng, RngExt, SeedableRng, rng};
 use rand_chacha::ChaCha20Rng;
@@ -255,10 +252,10 @@ fn test_falcon512_probabilistic_product_failure() {
 /// `move_sig_to_adv_stack`, and then proceed to `verify` the signature.
 #[test]
 fn test_move_sig_to_adv_stack() {
-    let seed = Word::default();
-    let mut rng = RandomCoin::new(seed);
+    let seed = [0u8; 32];
+    let mut rng = ChaCha20Rng::from_seed(seed);
     let secret_key = SecretKey::with_rng(&mut rng);
-    let message = random_word();
+    let message = rng.random();
 
     let source = "
     use miden::core::crypto::dsa::falcon512_poseidon2
@@ -291,10 +288,10 @@ fn test_move_sig_to_adv_stack() {
 
 #[test]
 fn falcon_execution() {
-    let seed = Word::default();
-    let mut rng = RandomCoin::new(seed);
+    let seed = [0u8; 32];
+    let mut rng = ChaCha20Rng::from_seed(seed);
     let sk = SecretKey::with_rng(&mut rng);
-    let message = random_word();
+    let message = rng.random();
     let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
 
     let test = build_debug_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter())
@@ -501,7 +498,7 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
 #[test]
 fn falcon_prove_verify() {
     let sk = SecretKey::new();
-    let message = random_word();
+    let message = rng().random();
     let (source, op_stack, _, _, advice_map) = generate_test(sk, message);
 
     let program: Program = Assembler::default()
