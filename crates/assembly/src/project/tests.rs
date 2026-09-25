@@ -1671,6 +1671,84 @@ end
     );
 }
 
+/// A library assembled as a project root with a post-processor carries a section a dependency build
+/// never produces, so it must not be reused as that library's source-dependency artifact.
+#[test]
+fn a_post_processed_root_artifact_is_not_reused_as_a_source_dependency() {
+    let tempdir = TempDir::new().unwrap();
+    let dep_dir = tempdir.path().join("dep");
+    let dep_manifest = dep_dir.join("miden-project.toml");
+    write_file(
+        &dep_manifest,
+        r#"[package]
+name = "dep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    );
+    write_file(
+        &dep_dir.join("lib.masm"),
+        r#"pub proc foo
+    push.1
+end
+"#,
+    );
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+dep = { path = "../dep" }
+"#,
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"pub proc entry
+    exec.::dep::foo
+end
+"#,
+    );
+
+    // Build `dep` as a project root with a post-processor, then publish that artifact: its source
+    // provenance matches a dependency build of the same sources, only the extra section differs.
+    let mut context = TestContext::new();
+    let mut dep_assembler = context.project_assembler_for_path(&dep_manifest).unwrap();
+    dep_assembler.with_package_post_processor(MarkerPostProcessor {
+        tag: "pp-root",
+        invocations: Arc::new(std::sync::Mutex::new(Vec::new())),
+    });
+    let post_processed = dep_assembler
+        .assemble(ProjectTargetSelector::Library, "dev")
+        .expect("root build of dep should succeed");
+    assert!(
+        post_processed
+            .sections
+            .iter()
+            .any(|section| section.id == SectionId::custom("pp-root").unwrap())
+    );
+    context.registry_mut().add_package(post_processed);
+
+    let error = context
+        .assemble_library_package(&root_manifest, None)
+        .expect_err("a post-processed root artifact must not be reused as a dependency");
+    let message = error.to_string();
+    assert!(
+        message.contains("a dependency build does not produce"),
+        "unexpected error: {message}"
+    );
+    assert!(message.contains("pp-root"), "unexpected error: {message}");
+}
+
 #[test]
 fn root_package_is_not_auto_published_when_assembling_source_dependencies() {
     let tempdir = TempDir::new().unwrap();

@@ -7,7 +7,7 @@ use std::{
 
 use miden_assembly_syntax::{ast::ModuleKind, diagnostics::Report};
 use miden_core::serde::Deserializable;
-use miden_mast_package::{Package as MastPackage, TargetType};
+use miden_mast_package::{Package as MastPackage, SectionId, TargetType};
 use miden_package_registry::{PackageCache, PackageId, Version as PackageVersion};
 use miden_project::{
     Linkage, Package as ProjectPackage, PreassembledDependencyMetadata, Profile,
@@ -785,6 +785,30 @@ where
             ))),
         }?;
 
+        // Source provenance covers the sources only, so it cannot tell a dependency build from a
+        // root build that registered post-processors extended (for example with an
+        // `event_handlers` section). Reusing such an artifact as a dependency would give it a
+        // different dependency commitment than the cold build below, which skips post-processors,
+        // so the same source would resolve to two package identities depending on what the store
+        // holds. A dependency build produces only the sections listed here; an artifact with any
+        // other section is refused loudly, like a provenance mismatch. `KERNEL` is not listed:
+        // only program packages embed a kernel, and this path reuses library targets.
+        const DEPENDENCY_SECTIONS: [&SectionId; 3] = [
+            &SectionId::DEBUG_INFO,
+            &SectionId::ACCOUNT_COMPONENT_METADATA,
+            &SectionId::PROJECT_SOURCE_PROVENANCE,
+        ];
+        if let Some(section) = package
+            .sections
+            .iter()
+            .find(|section| !DEPENDENCY_SECTIONS.contains(&&section.id))
+        {
+            return Err(Report::msg(format!(
+                "package '{}' version '{}' is already registered, but the canonical artifact carries a '{}' section a dependency build does not produce (it was assembled as a project root with a package post-processor); bump the semantic version",
+                package_id, version, section.id,
+            )));
+        }
+
         Ok(RegisteredSourcePackage::Loaded(package))
     }
 
@@ -893,9 +917,11 @@ where
 
         // Registered processors run only on the packages of the project under assembly, never on
         // source dependencies: a dependency package must be complete as its own project builds
-        // it, and a dependency manifest must not direct work in the dependent's build. This also
-        // keeps dependency packages identical whether they are assembled fresh or reused from a
-        // package store, because the store's provenance does not cover processor inputs.
+        // it, and a dependency manifest must not direct work in the dependent's build. Source
+        // provenance does not cover processor inputs, so a post-processed root artifact in the
+        // package store looks reusable for a dependency of the same source;
+        // `try_reuse_registered_source_package` refuses such artifacts by their extra sections,
+        // which keeps dependency packages identical whether they are assembled fresh or reused.
         if !matches!(package_role, InterruptedTargetRole::Dependency) {
             let post_context = PostProcessContext { assembly: &context };
             for processor in &self.post_processors {
