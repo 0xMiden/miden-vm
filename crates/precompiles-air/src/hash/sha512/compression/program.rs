@@ -75,7 +75,7 @@ pub const NUM_PHASES: usize = 6;
 pub const PHASE_BASES: [u32; NUM_PHASES] = [0, 32, 1312, 1440, 4000, 4032];
 pub const PHASE_CYCLES: [u32; NUM_PHASES] = [1, 40, 4, 80, 1, 2];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RoundMetadata {
     pub t: u32,
     pub input_word: u32,
@@ -90,16 +90,7 @@ pub struct RoundMetadata {
 pub fn round_metadata() -> [RoundMetadata; MAX_PERIODIC_LENGTH] {
     core::array::from_fn(|t| {
         if t >= 80 {
-            return RoundMetadata {
-                t: 0,
-                input_word: 0,
-                w_mult: 0,
-                a_mult: 0,
-                e_mult: 0,
-                k_lo: 0,
-                k_hi: 0,
-                valid: 0,
-            };
+            return RoundMetadata::default();
         }
         let w_mult = 1
             + u32::from(t <= 63)

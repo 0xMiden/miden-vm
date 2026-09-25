@@ -150,7 +150,18 @@ fn ed25519_rejects_advice_that_negates_both_encoded_points() {
         });
     // [-s]B = (-R)+[k](-A). Both advised points are valid curve points, but their signs disagree
     // with the committed encodings. Removing the parity check would accept this witness.
-    assert!(run_program_with_handler(&source, &pk, &sig, Some(handler)).is_err());
+    let err = run_program_with_handler(&source, &pk, &sig, Some(handler)).unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            ExecutionError::OperationError {
+                err: OperationError::FailedAssertion { err_code, .. }, ..
+            } if *err_code == miden_core::mast::error_code_from_msg(
+                "invalid compressed point parity"
+            )
+        ),
+        "{err}",
+    );
 }
 
 #[test]
