@@ -323,12 +323,15 @@ pub proc decrypt(key: Key, nonce: Nonce, src_ptr: ptr<felt>, dst_ptr: ptr<felt>,
 
     # Assert source and destination memory ranges do not overlap.
     # The source range also covers the tag word that is read back after the plaintext has
-    # been written, so its end is src_ptr + (num_blocks + 1) * 8 + 4.
+    # been written. Both ranges are compared by their last address rather than their exclusive
+    # end, since the exclusive end is 2^32 (not a u32) when a range ends at the last memory word.
+    # => last source address: src_ptr + (num_blocks + 1) * 8 + 3
+    # => last destination address: dst_ptr + (num_blocks + 1) * 8 - 1
     dup.10 add.1 mul.8
-    dup dup.10 add add.4
-    dup.11 swap u32gte
-    swap dup.11 add
-    dup.10 swap u32gte
+    dup dup.10 add add.3
+    dup.11 swap u32gt
+    swap dup.11 add sub.1
+    dup.10 swap u32gt
     or assert.err="source and destination ranges must not overlap"
 
     # Compute the pointer to the tag for later use

@@ -640,6 +640,13 @@ fn test_decrypt_fails_on_overlap() {
 /// `[1000, 1016)`, tag at `[1016, 1020)`) with the given `dst_ptr`, then checks the first
 /// plaintext word at `dst_ptr`.
 fn decrypt_one_block_into(dst_ptr: u32) -> miden_utils_testing::Test {
+    decrypt_one_block(1000, dst_ptr)
+}
+
+/// Runs `aead::decrypt` for one data block stored at `src_ptr` (ciphertext at
+/// `[src_ptr, src_ptr + 16)`, tag at `[src_ptr + 16, src_ptr + 20)`) with the given `dst_ptr`,
+/// then checks the first plaintext word at `dst_ptr`.
+fn decrypt_one_block(src_ptr: u32, dst_ptr: u32) -> miden_utils_testing::Test {
     let seed = [21_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
 
@@ -660,15 +667,15 @@ fn decrypt_one_block_into(dst_ptr: u32) -> miden_utils_testing::Test {
     use miden::core::crypto::aead
 
     begin
-        push.{ciphertext_0:?} push.1000 mem_storew_le dropw
-        push.{ciphertext_1:?} push.1004 mem_storew_le dropw
-        push.{ciphertext_2:?} push.1008 mem_storew_le dropw
-        push.{ciphertext_3:?} push.1012 mem_storew_le dropw
-        push.{expected_tag:?} push.1016 mem_storew_le dropw
+        push.{ciphertext_0:?} push.{src_ptr} mem_storew_le dropw
+        push.{ciphertext_1:?} push.{src_1} mem_storew_le dropw
+        push.{ciphertext_2:?} push.{src_2} mem_storew_le dropw
+        push.{ciphertext_3:?} push.{src_3} mem_storew_le dropw
+        push.{expected_tag:?} push.{tag_ptr} mem_storew_le dropw
 
         push.1              # num_blocks
         push.{dst_ptr}      # dst_ptr
-        push.1000           # src_ptr
+        push.{src_ptr}      # src_ptr
         push.{nonce_elements:?}
         push.{key_elements:?}
         exec.aead::decrypt
@@ -681,6 +688,10 @@ fn decrypt_one_block_into(dst_ptr: u32) -> miden_utils_testing::Test {
         ciphertext_1 = &ciphertext[4..8],
         ciphertext_2 = &ciphertext[8..12],
         ciphertext_3 = &ciphertext[12..16],
+        src_1 = src_ptr + 4,
+        src_2 = src_ptr + 8,
+        src_3 = src_ptr + 12,
+        tag_ptr = src_ptr + 16,
     );
 
     build_test!(source.as_str(), &[])
@@ -707,4 +718,14 @@ fn test_decrypt_allows_destination_adjacent_to_source() {
     decrypt_one_block_into(984)
         .execute()
         .expect("decrypt into dst_ptr = src_ptr - 16 failed");
+}
+
+#[test]
+fn test_decrypt_allows_destination_ending_at_last_memory_word() {
+    // The (num_blocks + 1) * 8 destination range ends at 2^32, which is not a valid u32. A source
+    // range ending at 2^32 can't be tested end to end: the last memory word holds the frame
+    // pointer, which decrypt itself updates.
+    decrypt_one_block_into(u32::MAX - 15)
+        .execute()
+        .expect("decrypt into dst_ptr = 2^32 - 16 failed");
 }
