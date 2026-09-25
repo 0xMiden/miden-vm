@@ -211,7 +211,11 @@ impl Deserializable for AdviceMap {
         let count = source.read_usize()?;
         for _ in 0..count {
             let (key, values): (Word, Vec<Felt>) = source.read()?;
-            map.insert(key, Arc::from(values));
+            if map.insert(key, Arc::from(values)).is_some() {
+                return Err(DeserializationError::InvalidValue(
+                    "duplicate advice map key in serialized payload".into(),
+                ));
+            }
         }
         Ok(Self(map))
     }
@@ -231,5 +235,21 @@ mod tests {
         let map2 = AdviceMap::read_from_bytes(&bytes).unwrap();
 
         assert_eq!(map1, map2);
+    }
+
+    #[test]
+    fn read_from_rejects_duplicate_keys() {
+        use crate::serde::ByteWriter;
+
+        // Same key twice with different values. `write_into` never produces this, but a
+        // hand-written payload can.
+        let key = Word::default();
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.write_usize(2);
+        (key, vec![Felt::from_u32(1)]).write_into(&mut bytes);
+        (key, vec![Felt::from_u32(2)]).write_into(&mut bytes);
+
+        let err = AdviceMap::read_from_bytes(&bytes).unwrap_err();
+        assert!(matches!(err, DeserializationError::InvalidValue(_)));
     }
 }
