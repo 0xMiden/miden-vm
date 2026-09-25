@@ -575,7 +575,6 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("vm/layout.masm", "C_TOTAL_PTR", 0, 4),
         ("vm/layout.masm", "CLAIM_COMMITMENT_PTR", 0, 4),
         ("vm/layout.masm", "CLAIM_PTR", 0, 40),
-        ("vm/layout.masm", "CLAIM_PTR", 40, 16),
         ("vm/layout.masm", "BOUNDARY_INPUTS_PTR", 0, 8),
         ("vm/layout.masm", "KERNEL_WITNESS_PTR", 0, 1020),
         // Includes the alignment word before OOD_EVALUATIONS_PTR.
@@ -813,6 +812,14 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         "relation region manifest entries have no declaration: {:?}",
         relation_manifest.keys().collect::<Vec<_>>()
     );
+
+    // The 16 cells after the claim are padding, not part of its 40-felt preimage.
+    let claim_ptr = relation_regions
+        .iter()
+        .find(|region| region.source == "vm/layout.masm" && region.name == "CLAIM_PTR")
+        .expect("VM claim region is declared")
+        .lo;
+    relation_regions.push(region("vm/layout.masm", "CLAIM_PADDING".to_string(), claim_ptr, 40, 16));
 
     for relation in &relation_regions {
         if let Some(generic) = generic_regions.iter().find(|generic| overlaps(relation, generic)) {
