@@ -220,6 +220,22 @@ fn public_constant_keeps_import_live() -> TestResult {
 }
 
 #[test]
+fn reexported_private_constant_keeps_import_live() -> TestResult {
+    let context = TestContext::default();
+    let library = constant_library(&context, "BAR");
+    let mut context = TestContext::default();
+    context.add_library(Arc::from(library))?;
+    let source = source_file!(
+        &context,
+        "namespace test::lib\n\nuse {BAR} from lib::a\nconst A = BAR\npub use {A as EXPORTED} from self\n\npub proc noop\n    nop\nend\n"
+    );
+
+    let module = context.parse_module(source)?;
+    context.assemble_library("test", None, module, [])?;
+    Ok(())
+}
+
+#[test]
 fn simple_constant() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(
