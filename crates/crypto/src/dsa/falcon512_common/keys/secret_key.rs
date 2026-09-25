@@ -4,7 +4,7 @@ use core::marker::PhantomData;
 use miden_crypto_derive::{SilentDebug, SilentDisplay};
 use num::{Complex, Float, Zero};
 use num_complex::Complex64;
-use rand::Rng;
+use rand::{CryptoRng, Rng};
 
 use super::{
     super::{
@@ -97,7 +97,7 @@ impl<V: FalconVariant> SecretKey<V> {
     }
 
     /// Generates a secret key with the provided random-number generator.
-    pub fn with_rng<R: Rng>(rng: &mut R) -> Self {
+    pub fn with_rng<R: CryptoRng + Rng>(rng: &mut R) -> Self {
         let basis = ntru_gen(N, rng);
         Self::from_short_lattice_basis(basis)
     }
@@ -151,7 +151,7 @@ impl<V: FalconVariant> SecretKey<V> {
     }
 
     /// Signs a message using randomness from the provided generator.
-    pub fn sign_with_rng<R: Rng>(&self, message: Word, rng: &mut R) -> Signature<V> {
+    pub fn sign_with_rng<R: CryptoRng + Rng>(&self, message: Word, rng: &mut R) -> Signature<V> {
         let nonce = Nonce::deterministic();
 
         let h = self.compute_pub_key_poly();

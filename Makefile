@@ -267,7 +267,7 @@ test-wasm-handlers-host: ## Runs the Wasm event handler tests inside a wasm32 ho
 	cargo test -p miden-wasm-event-handlers --target wasm32-wasip1 --test handlers --test determinism
 
 .PHONY: test-wasm-simd
-test-wasm-simd: ## Runs the packed Goldilocks/Poseidon2 vs scalar tests under WASM SIMD128 (requires wasmtime)
+test-wasm-simd: ## Runs the packed Goldilocks/Poseidon2/Eidos vs scalar tests under WASM SIMD128 (requires wasmtime)
 	CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=." \
 	RUSTFLAGS="-C target-feature=+simd128" \
 	cargo test -p miden-field -p miden-crypto --no-default-features --lib --target wasm32-wasip1 -- packed

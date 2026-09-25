@@ -404,6 +404,10 @@ impl ExtensionAlgebra<Self, 2, Binomial<Self>> for Felt {
 }
 
 impl BinomiallyExtendable<2> for Felt {
+    fn binomial_algebra_id() -> Vec<u8> {
+        <Goldilocks as BinomiallyExtendable<2>>::binomial_algebra_id()
+    }
+
     const W: Self = Self(<Goldilocks as BinomiallyExtendable<2>>::W);
 
     const DTH_ROOT: Self = Self(<Goldilocks as BinomiallyExtendable<2>>::DTH_ROOT);
@@ -437,6 +441,10 @@ impl ExtensionAlgebra<Self, 5, Binomial<Self>> for Felt {
 }
 
 impl BinomiallyExtendable<5> for Felt {
+    fn binomial_algebra_id() -> Vec<u8> {
+        <Goldilocks as BinomiallyExtendable<5>>::binomial_algebra_id()
+    }
+
     const W: Self = Self(<Goldilocks as BinomiallyExtendable<5>>::W);
 
     const DTH_ROOT: Self = Self(<Goldilocks as BinomiallyExtendable<5>>::DTH_ROOT);
@@ -721,12 +729,20 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            let canonical = (0u64..Felt::ORDER).prop_map(Felt::new_unchecked).boxed();
-            // Goldilocks uses representation where values above the field order are valid and
-            // represent wrapped field elements. Generate such values 1/5 of the time to exercise
-            // this behavior.
-            let non_canonical = (Felt::ORDER..=u64::MAX).prop_map(Felt::new_unchecked).boxed();
-            prop_oneof![4 => canonical, 1 => non_canonical].no_shrink().boxed()
+            prop_oneof![4 => arb_felt_canonical(), 1 => arb_felt_noncanonical()].boxed()
         }
     }
+
+    /// Generates field elements with canonical representations.
+    pub fn arb_felt_canonical() -> impl Strategy<Value = Felt> {
+        (0u64..Felt::ORDER).prop_map(Felt::new_unchecked)
+    }
+
+    /// Generates field elements with non-canonical representations.
+    pub fn arb_felt_noncanonical() -> impl Strategy<Value = Felt> {
+        (Felt::ORDER..=u64::MAX).prop_map(Felt::new_unchecked)
+    }
 }
+
+#[cfg(all(any(test, feature = "arbitrary"), not(all(target_family = "wasm", miden))))]
+pub use arbitrary::{arb_felt_canonical, arb_felt_noncanonical};

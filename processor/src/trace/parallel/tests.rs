@@ -16,7 +16,7 @@ use miden_core::{
     operations::{Operation, opcodes},
     program::{KernelDescriptor, Program, StackInputs},
 };
-use miden_utils_testing::{get_column_name, rand::rand_array};
+use miden_utils_testing::get_column_name;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 
@@ -418,7 +418,7 @@ fn test_trace_generation_at_fragment_boundaries(
     // Build the LogUp aux trace from each main trace under identical random challenges and
     // verify every column matches row-for-row. Catches fragment-boundary nondeterminism in
     // lookup collection that `DeterministicTrace` (main-trace only) would miss.
-    let raw = rand_array::<Felt, 4>();
+    let raw = rand::random::<[Felt; 4]>();
     let challenges = [QuadFelt::new([raw[0], raw[1]]), QuadFelt::new([raw[2], raw[3]])];
     let (core_from_fragments, chip_from_fragments, poseidon2_from_fragments) =
         trace_from_fragments.main_trace().to_air_matrices();

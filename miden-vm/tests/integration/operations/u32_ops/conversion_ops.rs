@@ -3,9 +3,7 @@ use miden_processor::{ExecutionError, operation::OperationError};
 use miden_utils_testing::PrimeField64;
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
-use miden_utils_testing::{
-    Felt, U32_BOUND, WORD_SIZE, build_op_test, expect_exec_error_matches, rand::rand_value,
-};
+use miden_utils_testing::{Felt, U32_BOUND, WORD_SIZE, build_op_test, expect_exec_error_matches};
 
 #[cfg(feature = "arbitrary")]
 use super::prop_randw;
@@ -133,8 +131,8 @@ fn u32assert2() {
     let test = build_op_test!(asm_op, &[value_a, value_b]);
     test.expect_stack(&[value_a, value_b]);
 
-    let value_a = rand_value::<u32>() as u64;
-    let value_b = rand_value::<u32>() as u64;
+    let value_a = rand::random::<u32>() as u64;
+    let value_b = rand::random::<u32>() as u64;
     let test = build_op_test!(asm_op, &[value_a, value_b]);
     test.expect_stack(&[value_a, value_b]);
 }
@@ -225,8 +223,8 @@ fn u32cast() {
     test.expect_stack(&[0]);
 
     // --- rest of stack isn't affected -----------------------------------------------------------
-    let a = rand_value();
-    let b = rand_value();
+    let a = rand::random();
+    let b = rand::random();
 
     let test = build_op_test!(asm_op, &[b, a]);
     test.expect_stack(&[b % U32_BOUND, a]);
@@ -250,8 +248,8 @@ fn u32split() {
     test.expect_stack(&[1, 1]);
 
     // --- rest of stack isn't affected -----------------------------------------------------------
-    let a = rand_value();
-    let b = rand_value();
+    let a = rand::random();
+    let b = rand::random();
     let expected_hi = b >> 32;
     let expected_lo = b % U32_BOUND;
 

@@ -108,6 +108,7 @@ miden-processor = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
 miden-wasm-event-handlers = { workspace = true, features = ["std"] }
 predicates = { version = "3.1" }
+rand = { workspace = true, features = ["std", "thread_rng"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 walkdir.workspace = true

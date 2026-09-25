@@ -3,7 +3,6 @@ use core::ops::Range;
 
 use miden_air::trace::chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH};
 use miden_core::{ZERO, field::PrimeCharacteristicRing};
-use miden_utils_testing::rand::rand_value;
 
 use super::{Bitwise, ChipletTraceFragment, Felt};
 
@@ -252,6 +251,6 @@ fn binary_xor(a: Felt, b: Felt) -> Felt {
 }
 
 fn rand_u32() -> Felt {
-    let value = rand_value::<u64>() as u32 as u64;
+    let value = rand::random::<u64>() as u32 as u64;
     Felt::new_unchecked(value)
 }

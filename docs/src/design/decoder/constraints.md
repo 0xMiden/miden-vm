@@ -56,16 +56,30 @@ When a `DYN` operation is executed, the second half of the hasher registers
 > f_{dyn} \cdot h_i = 0 \text { for } i \in [4, 8) \text{ | degree} = 6
 > $$
 
-When `REPEAT` operation is executed, the value at the top of the operand stack must be $1$:
+A `REPEAT` operation requires $1$ at the top of the operand stack:
 
 > $$
 > f_{repeat} \cdot (1 - s_0) = 0 \text{ | degree} = 5
 > $$
 
-Also, when `REPEAT` operation is executed, the value in $h_4$ column (the `is_loop_body` flag), must be set to $1$. This ensures that `REPEAT` operation can be executed only inside a loop:
+On each transition, `REPEAT` must follow an `END` whose $h_4$ marks the completed node as a loop
+body. The block-hash relation authenticates this flag on the `END` row:
 
 > $$
-> f_{repeat} \cdot (1 - h_4) = 0 \text{ | degree} = 5
+> f_{repeat}' \cdot (1 - f_{end} \cdot h_4) = 0 \text{ | degree} = 9
+> $$
+
+`LOOP` cannot transition directly to `END`; that would skip the body if its body-hash
+multiplicity were zero:
+
+> $$
+> f_{loop} \cdot f_{end}' = 0 \text{ | degree} = 9
+> $$
+
+The first row has no predecessor, so it cannot be a `REPEAT` operation:
+
+> $$
+> f_{repeat} = 0 \text{ on the first row}
 > $$
 
 When `RESPAN` operation is executed, we need to make sure that the block ID is incremented by $2$:
@@ -78,12 +92,6 @@ When `END` operation is executed and we are exiting a *loop* block (i.e., `is_lo
 
 > $$
 > f_{end} \cdot h_5 \cdot s_0 = 0 \text{ | degree} = 6
-> $$
-
-Also, when `END` operation is executed and the next operation is `REPEAT`, values in $h_0, ..., h_4$ (the hash of the current block and the `is_loop_body` flag) must be copied to the next row:
-
-> $$
-> f_{end} \cdot f_{repeat}' \cdot (h_i' - h_i) = 0 \text { for } i \in [0, 5) \text{ | degree} = 9
 > $$
 
 A `HALT` instruction can be followed only by another `HALT` instruction:
@@ -108,26 +116,25 @@ We also use two extra columns ($e_0$, $e_1$) for degree reduction in the operati
 flag computation:
 
 > $$
-> e_0 - b_6 \cdot (1 - b_5) \cdot b_4 = 0 \text{ | degree} = 4
+> e_0 - b_6 \cdot (1 - b_5) \cdot b_4 = 0 \text{ | degree} = 3
 > $$
 
 > $$
-> e_1 - b_6 \cdot b_5 = 0 \text{ | degree} = 3
+> e_1 - b_6 \cdot b_5 = 0 \text{ | degree} = 2
 > $$
 
-Finally, we enforce opcode-prefix constraints needed for flag construction. These eliminate
-unused opcode prefixes so that only valid op-code prefixes are allowed:
+Since $e_0$ selects prefix `101`, $b_6 - e_0$ selects prefixes `100` and `11`. The two terms below
+select disjoint opcode groups: the first forces $b_0 = 0$ for prefixes `100` and `11`, and the
+second rejects opcode $95$ under prefix `101`:
 
 > $$
-> b_6 \cdot (1 - b_5) \cdot (1 - b_4) \cdot b_0 = 0 \text{ | degree} = 4
+> (b_6 - e_0 + e_0 \cdot b_3 \cdot b_2 \cdot b_1) \cdot b_0 = 0 \text{ | degree} = 5
 > $$
 
-> $$
-> b_6 \cdot b_5 \cdot b_0 = 0 \text{ | degree} = 3
-> $$
+Prefix `11` also requires $b_1 = 0$:
 
 > $$
-> b_6 \cdot b_5 \cdot b_1 = 0 \text{ | degree} = 3
+> e_1 \cdot b_1 = 0 \text{ | degree} = 2
 > $$
 
 When the value in `in_span` column is set to $1$, control flow operations cannot be executed on the VM, but when `in_span` flag is $0$, only control flow operations can be executed on the VM:
@@ -296,158 +303,193 @@ The degree of this constraint is $9$.
 ## Block stack table constraints
 As described [previously](./index.md#block-stack-table), block stack table keeps track of program blocks currently executing on the VM. Thus, whenever the VM starts executing a new block, an entry for this block is added to the block stack table. And when execution of a block completes, it is removed from the block stack table.
 
-Adding and removing entries to/from the block stack table is accomplished as follows:
-* To add an entry, we multiply the value in column $p_1$ by a value representing a tuple `(blk, prnt, is_loop, ctx_next, b0_next, b1_next, fn_hash_next)`
-. A constraint to enforce this would look as $p_1' = p_1 \cdot v$, where $v$ is the value representing the row to be added.
-* To remove an entry, we divide the value in column $p_1$ by a value representing a tuple `(blk, prnt, is_loop, ctx_next, b0_next, b1_next, fn_hash_next)`. A constraint to enforce this would look as $p_1' \cdot u = p_1$, where $u$ is the value representing the row to be removed.
+Adding and removing entries uses one logical block-stack relation with two authenticated entry
+kinds:
 
-> Recall that the columns `ctx_next, b0_next, b1_next, fn_hash_next` are only set on `CALL`, `SYSCALL`, and their corresponding `END` block. Therefore, for simplicity, we will ignore them when documenting all other block types (such that their values are set to `0`).
+* A **continuation** carries `(blk, prnt, is_loop)`.
+* A **caller frame** carries `(blk, prnt, caller_ctx, caller_stack_depth,
+  caller_overflow_addr, caller_fn_hash)`. In the common encoded layout its loop-marker slot is a
+  constant zero; a caller frame cannot also be a LOOP continuation.
 
-Before describing the constraints for the block stack table, we first describe how we compute the values to be added and removed from the table for each operation. In the below, for block start operations (`JOIN`, `SPLIT`, `LOOP`, `SPAN`) $a$ refers to the ID of the parent block, and $a'$ refers to the ID of the starting block. For `END` operation, the situation is reversed: $a$ is the ID of the ending block, and $a'$ is the ID of the parent block. For `RESPAN` operation, $a$ refers to the ID of the current operation batch, $a'$ refers to the ID of the next batch, and the parent ID for both batches is set by the prover non-deterministically in register $h_1$.
+Both kinds use the same block-stack bus prefix $\alpha_B$. Payload slot $i$ contributes
+$\beta^i t_i$. Slot 10 is an explicit entry-kind tag: zero for a continuation and one for a caller
+frame, contributing $\beta^{10}$ only to the latter. Thus a continuation is not a zero-padded
+caller frame, and the two cannot collide when all saved caller-state fields are zero. `JOIN`,
+`SPLIT`, `LOOP`, `SPAN`,
+`RESPAN`, and `DYN` use continuation entries. `CALL`, `DYNCALL`, and `SYSCALL` use caller-frame
+entries. The matching `END` must consume the same authenticated kind.
+
+Before describing the constraints, we describe the messages added to and removed from the
+relation. For compactness, throughout this block-stack section we write
+$\alpha_i = \beta^{i-1}$ for $i \ge 1$. The formulas display each opcode gate multiplied by its
+encoded denominator to make polynomial degrees visible. The lookup argument supplies the gate
+and denominator separately and contributes $f/d$ for an addition or $-f/d$ for a removal.
+
+For block-start operations (`JOIN`, `SPLIT`, `LOOP`, `SPAN`), $a$ is the parent block ID and $a'$
+is the starting block ID. For `END`, $a$ is the ending block ID and $a'$ is its parent. For
+`RESPAN`, $a$ is the current operation-batch ID, $a'$ is the next batch ID, and $h_1'$ supplies
+their common parent ID.
 
 When `JOIN` operation is executed, row $(a', a, 0)$ is added to the block stack table:
 
 $$
-v_{join} = f_{join} \cdot (\alpha_0 + \alpha_1 \cdot a' + \alpha_2 \cdot a + \alpha_3 \cdot 0) \text{ | degree} = 6
+v_{join} = f_{join} \cdot (\alpha_B + \alpha_1 \cdot a' + \alpha_2 \cdot a + \alpha_3 \cdot 0) \text{ | degree} = 6
 $$
 
 When `SPLIT` operation is executed, row $(a', a, 0)$ is added to the block stack table:
 
 $$
-v_{split} = f_{split} \cdot (\alpha_0 + \alpha_1 \cdot a' + \alpha_2 \cdot a + \alpha_3 \cdot 0) \text{ | degree} = 6
+v_{split} = f_{split} \cdot (\alpha_B + \alpha_1 \cdot a' + \alpha_2 \cdot a + \alpha_3 \cdot 0) \text{ | degree} = 6
 $$
 
 When `LOOP` operation is executed, row $(a', a, 1)$ is added to the block stack table. Because `LOOP` has do-while semantics, the body is always entered, so the `is_loop` slot is unconditionally $1$:
 
 $$
-v_{loop} = f_{loop} \cdot (\alpha_0 + \alpha_1 \cdot a' + \alpha_2 \cdot a + \alpha_3) \text{ | degree} = 5
+v_{loop} = f_{loop} \cdot (\alpha_B + \alpha_1 \cdot a' + \alpha_2 \cdot a + \alpha_3) \text{ | degree} = 6
 $$
 
 When `SPAN` operation is executed, row $(a', a, 0)$ is added to the block stack table:
 
 $$
-v_{span} = f_{span} \cdot (\alpha_0 + \alpha_1 \cdot a' + \alpha_2 \cdot a + \alpha_3 \cdot 0) \text{ | degree} = 6
+v_{span} = f_{span} \cdot (\alpha_B + \alpha_1 \cdot a' + \alpha_2 \cdot a + \alpha_3 \cdot 0) \text{ | degree} = 6
 $$
 
 When `RESPAN` operation is executed, row $(a, h_1', 0)$ is removed from the block stack table, and row $(a', h_1', 0)$ is added to the table. The prover sets the value of register $h_1$ at the next row to the ID of the parent block:
 
 $$
-u_{respan} = f_{respan} \cdot (\alpha_0 + \alpha_1 \cdot a + \alpha_2 \cdot h_1' + \alpha_3 \cdot 0) \text{ | degree} = 5  
-v_{respan} = f_{respan} \cdot (\alpha_0 + \alpha_1 \cdot a' + \alpha_2 \cdot h_1' + \alpha_3 \cdot 0) \text{ | degree} = 5
+u_{respan} = f_{respan} \cdot (\alpha_B + \alpha_1 \cdot a + \alpha_2 \cdot h_1' + \alpha_3 \cdot 0) \text{ | degree} = 5
+v_{respan} = f_{respan} \cdot (\alpha_B + \alpha_1 \cdot a' + \alpha_2 \cdot h_1' + \alpha_3 \cdot 0) \text{ | degree} = 5
 $$
 
 When a `DYN` operation is executed, row $(a', a, 0)$ is added to the block stack table:
 
 $$
-v_{dyn} = f_{dyn} \cdot (\alpha_0 + \alpha_1 \cdot a' + \alpha_2 \cdot a + \alpha_3 \cdot 0) \text{ | degree} = 6
+v_{dyn} = f_{dyn} \cdot (\alpha_B + \alpha_1 \cdot a' + \alpha_2 \cdot a + \alpha_3 \cdot 0) \text{ | degree} = 6
 $$
 
-When a `DYNCALL` operation is executed, row $(a', a, 0, ctx, h_4, h_5, \mathrm{fnhash}[0..3])$ is added to the block stack table (here $h_4, h_5$ hold the post-shift stack depth and overflow address):
+When a `DYNCALL` operation is executed, caller frame
+$(a', a, 0, ctx, h_4, h_5, \mathrm{fnhash}[0..3])$ is added to the block stack table. Here $h_4$
+is constrained to the caller's post-shift stack depth $b_0 - f_{ov}$. The overflow relation pins
+$h_5$ to the post-shift overflow address when overflow is non-empty, and a direct constraint pins
+it to zero when overflow is empty:
 
 $$
 \begin{align*}
-v_{dyncall} &= f_{dyncall} \cdot (\alpha_0 + \alpha_1 \cdot a' + \alpha_2 \cdot a + \alpha_3 \cdot 0
+v_{dyncall} &= f_{dyncall} \cdot (\alpha_B + \alpha_1 \cdot a' + \alpha_2 \cdot a + \alpha_3 \cdot 0
  + \alpha_4 \cdot ctx + \alpha_5 \cdot h_4 + \alpha_6 \cdot h_5 \\
 &\quad + \alpha_7 \cdot \mathrm{fnhash}_0 + \alpha_8 \cdot \mathrm{fnhash}_1
- + \alpha_9 \cdot \mathrm{fnhash}_2 + \alpha_{10} \cdot \mathrm{fnhash}_3) \text{ | degree} = 6
+ + \alpha_9 \cdot \mathrm{fnhash}_2 + \alpha_{10} \cdot \mathrm{fnhash}_3 + \alpha_{11}) \text{ | degree} = 6
 \end{align*}
 $$
 
-When a `CALL` or `SYSCALL` operation is executed, row $(a', a, 0, ctx, b_0, b_1, \mathrm{fnhash}[0..3])$ is added to the block stack table:
+When a `CALL` or `SYSCALL` operation is executed, caller frame
+$(a', a, 0, ctx, b_0, b_1, \mathrm{fnhash}[0..3])$ is added to the block stack table:
 
 $$
 \begin{align*}
-v_{callorsyscall} &= (f_{call} + f_{syscall}) \cdot (\alpha_0 + \alpha_1 \cdot a' + \alpha_2 \cdot a
+v_{callorsyscall} &= (f_{call} + f_{syscall}) \cdot (\alpha_B + \alpha_1 \cdot a' + \alpha_2 \cdot a
  + \alpha_3 \cdot 0 + \alpha_4 \cdot ctx + \alpha_5 \cdot b_0 + \alpha_6 \cdot b_1 \\
 &\quad + \alpha_7 \cdot \mathrm{fnhash}_0 + \alpha_8 \cdot \mathrm{fnhash}_1
- + \alpha_9 \cdot \mathrm{fnhash}_2 + \alpha_{10} \cdot \mathrm{fnhash}_3) \text{ | degree} = 5
+ + \alpha_9 \cdot \mathrm{fnhash}_2 + \alpha_{10} \cdot \mathrm{fnhash}_3 + \alpha_{11}) \text{ | degree} = 5
 \end{align*}
 $$
 
-When `END` operation is executed, how we construct the row will depend on whether the `IS_CALL` or `IS_SYSCALL` values are set (stored in registers $h_6$ and $h_7$ respectively). If they are not set, then row $(a, a', h_5)$ is removed from the block span table (where $h_5$ contains the `is_loop` flag); otherwise, row $(a ,a', 0, ctx', b_0', b_1', \mathrm{fnhash}'[0..3])$.
+When `END` executes, $\ell = h_5$ indicates a LOOP continuation and $t = h_6$ indicates that the
+operation restores a caller frame. Both selectors are constrained to be boolean and mutually
+exclusive, while $h_7$ is fixed to zero. If $t=0$, the operation removes continuation
+$(a, a', \ell)$. If $t=1$, it removes caller frame
+$(a, a', 0, ctx', b_0', b_1', \mathrm{fnhash}'[0..3])$.
+
+$$
+f_{end} \cdot \ell \cdot (\ell - 1) = 0, \qquad
+f_{end} \cdot t \cdot (t - 1) = 0, \qquad
+f_{end} \cdot h_7 = 0, \qquad
+f_{end} \cdot \ell \cdot t = 0
+$$
+
+The booleanity and mutual-exclusion constraints have degree $6$; the $h_7$ zeroing constraint has
+degree $5$.
 
 $$
 \begin{align*}
-u_{endnocall} &= \alpha_0 + \alpha_1 \cdot a + \alpha_2 \cdot a' + \alpha_3 \cdot h_5 \\
-u_{endcall} &= u_{endnocall} + \alpha_4 \cdot ctx' + \alpha_5 \cdot b_0' + \alpha_6 \cdot b_1' \\
+u_{continuation} &= \alpha_B + \alpha_1 \cdot a + \alpha_2 \cdot a' + \alpha_3 \cdot \ell \\
+u_{caller\_frame} &= \alpha_B + \alpha_1 \cdot a + \alpha_2 \cdot a' + \alpha_3 \cdot 0
+ + \alpha_4 \cdot ctx' + \alpha_5 \cdot b_0' + \alpha_6 \cdot b_1' \\
 &\quad + \alpha_7 \cdot \mathrm{fnhash}_0' + \alpha_8 \cdot \mathrm{fnhash}_1'
- + \alpha_9 \cdot \mathrm{fnhash}_2' + \alpha_{10} \cdot \mathrm{fnhash}_3' \\
-u_{end} &= f_{end} \cdot ((1 - h_6 - h_7) \cdot u_{endnocall} + (h_6 + h_7) \cdot u_{endcall} ) \text{ | degree} = 6
+ + \alpha_9 \cdot \mathrm{fnhash}_2' + \alpha_{10} \cdot \mathrm{fnhash}_3' + \alpha_{11} \\
+u_{end} &= f_{end} \cdot ((1 - t) \cdot u_{continuation} + t \cdot u_{caller\_frame} ) \text{ | degree} = 6
 \end{align*}
 $$
 
-Using the above definitions, we can describe the constraint for updating the block stack table as follows:
-
-> $$
-> p_1' \cdot (u_{end} + u_{respan} + 1 - (f_{end} + f_{respan})) = p_1 \cdot 
-> (v_{join} + v_{split} + v_{loop} + v_{span} + v_{respan} + v_{dyn} + v_{dyncall} + v_{callorsyscall} + 1 - 
-> (f_{join} + f_{split} + f_{loop} + f_{span} + f_{respan} + f_{dyn} + f_{dyncall} + f_{call} + f_{syscall}))
-> $$
-
-We need to add $1$ and subtract the sum of the relevant operation flags from each side to ensure that when none of the flags is set to $1$, the above constraint reduces to $p_1' = p_1$.
-
-The degree of this constraint is $9$.
-
-In addition to the above transition constraint, we also need to impose boundary constraints against the $p_1$ column to make sure the first and the last values in the column are set to $1$. This enforces that the block stack table starts and ends in an empty state.
+The lookup argument contributes $f/d$ for every add and $-f/d$ for every remove. It groups the
+mutually exclusive opcode branches and cross-multiplies their denominators. Summed across the trace,
+the block-stack contributions must be zero, proving multiset equality between inserted and removed
+tagged messages. The compiled constraint has degree $9$.
 
 ## Block hash table constraints
-As described [previously](./index.md#block-hash-table), when the VM starts executing a new program block, it adds hashes of the block's children to the block hash table. And when the VM finishes executing a block, it removes the block's hash from the block hash table. This means that the block hash table gets updated when we execute the `JOIN`, `SPLIT`, `LOOP`, `REPEAT`, `DYN`, and `END` operations (executing `SPAN` operation does not affect the block hash table because a *basic* block has no children).
+As described [previously](./index.md#block-hash-table), when the VM starts executing a new program block, it adds hashes of the block's children to the block hash table. And when the VM finishes executing a block, it removes the block's hash from the block hash table. This means that the block hash table gets updated when we execute the `JOIN`, `SPLIT`, `LOOP`, `DYN`, `DYNCALL`, `CALL`, `SYSCALL`, and `END` operations (executing `SPAN` operation does not affect the block hash table because a *basic* block has no children). `REPEAT` re-enters a loop body that the `LOOP` operation already accounted for, so it does not add an entry of its own.
 
-Adding and removing entries to/from the block hash table is accomplished as follows:
-* To add an entry, we multiply the value in column $p_2$ by a value representing a tuple `(prnt_id, block_hash, is_first_child, is_loop_body)`. A constraint to enforce this would look as $p_2' = p_2 \cdot v$, where $v$ is the value representing the row to be added.
-* To remove an entry, we divide the value in column $p_2$ by a value representing a tuple `(prnt_id, block_hash, is_first_child, is_loop_body)`. A constraint to enforce this would look as $p_2' \cdot u = p_2$, where $u$ is the value representing the row to be removed.
-
-To simplify constraint descriptions, we define a generic message for a block hash entry:
+The block-hash relation is part of a LogUp lookup column. Each insertion contributes $f/d$ and
+each removal contributes $-f/d$, where $f$ is the operation flag and $d$ encodes the entry. Define
+the denominator for one block-hash entry as:
 
 $$
-m(parent, h_0..h_3, is\_first, is\_loop\_body) =
-\alpha_0 + \alpha_1 \cdot parent + \sum_{i=0}^3(\alpha_{i+2} \cdot h_i)
-+ \alpha_6 \cdot is\_first + \alpha_7 \cdot is\_loop\_body
+d(parent, h_0..h_3, is\_first, is\_loop\_body) =
+\alpha_{block\_hash} + \sum_{i=0}^3 \beta^i h_i
++ \beta^4 parent + \beta^5 is\_first + \beta^6 is\_loop\_body.
 $$
 
 Using this, we define the left and right child messages for a `JOIN` as:
 
 $$
-ch_1 = m(a', h_0..h_3, 1, 0) \qquad
-ch_2 = m(a', h_4..h_7, 0, 0)
+d_{left} = d(a', h_0..h_3, 1, 0) \qquad
+d_{right} = d(a', h_4..h_7, 0, 0)
 $$
 
 Graphically, this looks like so:
 
 ![air_decoder_left_right_child](../../img/design/decoder/constraints/air_decoder_left_right_child.png)
 
-Using the above variables, we define row values to be added to and removed from the block hash table as follows.
-
 When `JOIN` operation is executed, hashes of both child nodes are added to the block hash table:
 
 $$
-v_{join} = f_{join} \cdot ch_1 \cdot ch_2  \text{ | degree} = 7
+L_{join} = f_{join}\left(\frac{1}{d_{left}} + \frac{1}{d_{right}}\right).
 $$
 
 When `SPLIT` operation is executed and the top of the stack is $1$, hash of the *true* branch is added to the block hash table; when the top of the stack is $0$, hash of the *false* branch is added:
 
 $$
-v_{split} = f_{split} \cdot (s_0 \cdot ch_1 + (1 - s_0) \cdot ch_2)  \text{ | degree} = 7
+L_{split} = \frac{f_{split}}{d\left(
+a',\; s_0 h_0 + (1-s_0)h_4,\ldots,s_0 h_3 + (1-s_0)h_7,\; 0,\; 0
+\right)}.
 $$
 
-When `LOOP` operation is executed, the hash of the loop body is unconditionally added to the
-block hash table (with `is_loop_body = 1`), since the body is always entered for the first
-iteration:
+When `LOOP` operation is executed, its row contributes the loop-body hash with
+`is_loop_body = 1` and multiplicity $gc$, the value of the `group_count` column. The lookup
+balance equates $gc$ with the number of body `END` rows that return to this loop instance. For an
+honestly executed do-while loop this count is at least one; the LOOP-to-END adjacency constraint
+prevents a malicious trace from skipping the body with a zero count. A single `LOOP` row therefore
+accounts for every iteration:
 
 $$
-v_{loop} = f_{loop} \cdot m(a', h_0..h_3, 0, 1) \text{ | degree} = 6
+L_{loop} = \frac{gc \cdot f_{loop}}{d(a', h_0..h_3, 0, 1)}.
 $$
 
-When `REPEAT` operation is executed, hash of the loop body is added to the block hash table:
+`REPEAT` does not add anything to the block hash table. Were it to add the digest supplied on its
+own row, a forged body `END` could be cancelled by the `REPEAT` that follows it, and the loop body
+executed by an iteration would no longer have to be the body that `LOOP` committed to.
 
-$$v_{repeat} = f_{repeat} \cdot m(a', h_0..h_3, 0, 1) \text{ | } \text{degree} = 5$$
+Note that `group_count` is reused here: on `LOOP` rows it carries this multiplicity rather than a
+number of operation groups. The op group table is unaffected because control-flow rows have
+`in_span = 0`.
 
 When `DYN`, `DYNCALL`, `CALL` or `SYSCALL` operation is executed, the hash of the child is
 added to the block hash table. In all cases, this child is found in the first half
 of the decoder hasher state.
 
 $$
-v_{allcalls} = (f_{dyn} + f_{dyncall} + f_{call} + f_{syscall}) \cdot m(a', h_0..h_3, 0, 0)  \text{ | degree} = 6
+L_{allcalls} = \frac{f_{dyn} + f_{dyncall} + f_{call} + f_{syscall}}
+{d(a', h_0..h_3, 0, 0)}.
 $$
 
 When `END` operation is executed, the hash of the completed block is removed from the block
@@ -458,23 +500,14 @@ constraint forbids `END → RESPAN`, so excluding it would let an adversarial tr
 false-positive `is_first_child = 1`. The `is_loop_body` flag is read from $h_4$.
 
 $$
-u_{end} = f_{end} \cdot m(a', h_0..h_3, 1 - (f_{end}' + f_{repeat}' + f_{respan}' + f_{halt}'), h_4) \text{ | } \text{degree} = 8
+L_{end} = -\frac{f_{end}}
+{d(a', h_0..h_3, 1 - (f_{end}' + f_{repeat}' + f_{respan}' + f_{halt}'), h_4)}.
 $$
 
-Using the above definitions, we can describe the constraint for updating the block hash table as follows:
-
-> $$
-> p_2' \cdot (u_{end} + 1 - f_{end}) = 
-> p_2 \cdot (v_{join} + v_{split} + v_{loop} + v_{repeat} + v_{allcalls} + 1 - (f_{join} + f_{split} + f_{loop} + f_{repeat} + f_{dyn} + f_{dyncall} + f_{call} + f_{syscall}))
-> $$
-
-We need to add $1$ and subtract the sum of the relevant operation flags from each side to ensure that when none of the flags is set to $1$, the above constraint reduces to $p_2' = p_2$.
-
-The degree of this constraint is $9$.
-
-In addition to the above transition constraint, the last value in the column is $1$
-(i.e., the block hash table is empty). The initial program-hash boundary constraint
-is planned but not enforced yet.
+The lookup builder combines these terms with the op-group interactions that share the column and
+cross-multiplies the active denominators. The resulting transition constraint has degree $9$. A
+boundary contribution inserts $(parent=0, child\_hash=program\_hash, 0, 0)$, which balances the
+root block's `END` removal and binds the relation to the claimed program hash.
 
 ## Basic block
 Basic block constraints ensure proper decoding of basic blocks. In addition to the block stack table constraints and block hash table constraints described previously, decoding of basic blocks requires constraints described below.
@@ -484,13 +517,10 @@ The `in_span` column (denoted as $sp$) marks rows which execute non-control flow
 operations. This is enforced by the control-flow constraint
 $1 - sp - f_{ctrl} = 0$, so $sp = 1$ for non-control flow operations and $sp = 0$
 otherwise. Semantically, this means $sp$ is 1 throughout basic blocks and 0 on
-control-flow rows. We do not separately constrain $sp' = sp$; the control-flow
-constraint pins $sp$ on every row, and the SPAN/RESPAN constraints below ensure
-the next row enters a basic block.
+control-flow rows. The transition constraints below enforce the legal state
+transitions into and out of basic blocks.
 Here $f_{ctrl}$ includes `SPAN`, `JOIN`, `SPLIT`, `LOOP`, `END`, `REPEAT`, `RESPAN`, `HALT`,
 `DYN`, `DYNCALL`, `CALL`, and `SYSCALL`.
-The op-group table and group_count constraints enforce that non-control rows can only appear
-inside spans, so $sp$ cannot switch to $1$ without a preceding `SPAN`/`RESPAN`.
 
 We require that the VM starts outside a basic block. Since $sp = 1 - f_{ctrl}$ and $f_{ctrl}$
 is binary, $sp$ is also binary.
@@ -499,30 +529,24 @@ is binary, $sp$ is also binary.
 > sp = 0 \text{ on the first row}
 > $$
 
-When executing `SPAN` or `RESPAN`, the next value of $sp$ must be set to $1$:
+On each transition, `SPAN` and `RESPAN` are followed by an in-span row. An
+in-span row remains inside unless the next operation is `END` or `RESPAN`:
 
 > $$
-> f_{span} \cdot (1 - sp') = 0 \text{ | degree} = 6
+> sp' = f_{span} + f_{respan} + sp \cdot (1 - f_{end}' - f_{respan}')
 > $$
 
-> $$
-> f_{respan} \cdot (1 - sp') = 0 \text{ | degree} = 5
-> $$
-
-Since these flags are mutually exclusive, we can also merge them into one constraint:
-
-> $$
-> (f_{span} + f_{respan}) \cdot (1 - sp') = 0 \text{ | degree} = 6
-> $$
+The first-row constraint above handles the start of the trace separately from
+this transition rule.
 
 ### Block address constraints
-When we are inside a *basic* block, values in block address columns (denoted as $a$) must remain the same. This can be enforced with the following constraint:
+When we are inside a *basic* block, values in block address columns (denoted as $a$) must remain the same. The same is true when executing `REPEAT`, which re-enters the same loop parent for another body iteration. This can be enforced with the following constraint:
 
 > $$
-> sp \cdot (a' - a) = 0 \text{ | degree} = 2
+> (sp + f_{repeat}) \cdot (a' - a) = 0 \text{ | degree} = 5
 > $$
 
-Notice that this constraint does not apply when we execute any of the control flow operations. For such operations, the prover sets the value of the $a$ column non-deterministically, except for the `RESPAN` operation. For the `RESPAN` operation the value in the $a$ column is incremented by $2$, which is enforced by a constraint described previously.
+Notice that this constraint does not apply when we execute most control flow operations. For such operations, the prover sets the value of the $a$ column non-deterministically, except for the `RESPAN` and `REPEAT` operations. For the `RESPAN` operation the value in the $a$ column is incremented by $2$, which is enforced by a constraint described previously.
 
 Notice also that this constraint implies that when the next operation is the `END` operation, the value in the $a$ column must also be copied over to the next row. This is exactly the behavior we want to enforce so that when the `END` operation is executed, the block address is set to the address of the current span batch.
 
