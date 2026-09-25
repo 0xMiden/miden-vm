@@ -13,7 +13,7 @@ use miden_core::{
 };
 
 use crate::{
-    ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, Word, ZERO,
+    AceError, ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, Word, ZERO,
     advice::AdviceError,
     continuation_stack::ContinuationStack,
     crypto::merkle::MerklePath,
@@ -22,7 +22,7 @@ use crate::{
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, SystemInterface,
     },
-    trace::chiplets::CircuitEvaluation,
+    trace::chiplets::{CircuitEvaluation, MAX_EVAL_CIRCUIT_INVOCATIONS},
     utils::Idx,
 };
 
@@ -838,10 +838,19 @@ impl AceReplay {
     // MUTATIONS (populated by the fast processor)
     // --------------------------------------------------------------------------------
 
-    /// Records the evaluation of a circuit.
-    pub fn record_circuit_evaluation(&mut self, circuit_eval: CircuitEvaluation) {
+    /// Records a circuit evaluation, rejecting invocations beyond the witness collection limit.
+    pub fn record_circuit_evaluation(
+        &mut self,
+        circuit_eval: CircuitEvaluation,
+    ) -> Result<(), AceError> {
+        if self.circuit_evaluations.len() >= MAX_EVAL_CIRCUIT_INVOCATIONS as usize {
+            return Err(AceError(format!(
+                "number of recorded eval_circuit invocations cannot exceed {MAX_EVAL_CIRCUIT_INVOCATIONS}"
+            )));
+        }
         let clk = RowIndex::from(circuit_eval.clk());
         self.circuit_evaluations.push_back((clk, circuit_eval));
+        Ok(())
     }
 
     /// Returns the total number of trace rows contributed by recorded evaluations, or `None` on

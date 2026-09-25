@@ -1,10 +1,13 @@
+use miden_assembly::Assembler;
 use miden_core::{
     field::PrimeField64,
     mast::{BasicBlockNodeBuilder, MastForest},
 };
 use miden_processor::{
     AceError, DefaultHost, ExecutionError, FastProcessor, Felt, Program, StackInputs,
-    advice::AdviceInputs, operation::Operation, trace::chiplets::MAX_EVAL_CIRCUIT_WIRES,
+    advice::AdviceInputs,
+    operation::Operation,
+    trace::chiplets::{MAX_EVAL_CIRCUIT_INVOCATIONS, MAX_EVAL_CIRCUIT_WIRES},
 };
 
 #[test]
@@ -53,6 +56,45 @@ fn eval_circuit_rejects_excessive_wires_before_memory_access() {
             panic!("expected an ACE resource-limit error, got {error}");
         };
         assert_eq!(message, format!("num of wires cannot exceed {limit} but was {}", limit + 2));
+    }
+}
+
+#[test]
+fn eval_circuit_witness_invocation_limit_across_calls() {
+    let limit = MAX_EVAL_CIRCUIT_INVOCATIONS;
+    // Two zero inputs and four gates, each subtracting the first input (wire 5) from itself.
+    let gate = 5 + (5_u64 << 30);
+    for invocations in [limit, limit + 1] {
+        let source = format!(
+            r#"
+            proc evaluate
+                push.{gate}.{gate}.{gate}.{gate}.4 mem_storew_be dropw
+                push.4.2.0 eval_circuit drop drop drop
+            end
+            begin
+                repeat.{invocations} call.evaluate end
+            end
+            "#
+        );
+        let program = Assembler::default()
+            .assemble_program("program", source)
+            .unwrap()
+            .unwrap_program();
+        // Each call enters a fresh context, but all evaluations belong to the same witness.
+        let result = FastProcessor::new(StackInputs::default())
+            .execute_for_proving_sync(&program, &mut DefaultHost::default());
+        if invocations == limit {
+            result.unwrap();
+        } else {
+            let ExecutionError::AceChipError { error: AceError(message), .. } = result.unwrap_err()
+            else {
+                panic!("expected an ACE invocation-limit error");
+            };
+            assert_eq!(
+                message,
+                format!("number of recorded eval_circuit invocations cannot exceed {limit}")
+            );
+        }
     }
 }
 
