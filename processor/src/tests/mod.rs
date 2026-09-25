@@ -1511,9 +1511,16 @@ fn test_assert_message_without_debug_info_reports_error_code() {
 }
 
 /// Verifies assembly instruction cycle fixtures referenced by user docs.
+///
+/// Core-lib-only fixtures (no `doc`/`marker`) are measured in `miden-core-lib` tests so
+/// this crate does not need a `miden-core-lib` dependency (unpublished on crates.io during
+/// the 0.34 development cycle, which breaks `cargo package` / release dry-run).
 #[test]
 fn user_doc_assembly_cycle_fixtures_match_documentation() {
     for case in load_assembly_cycle_fixtures() {
+        if !case.measured_here {
+            continue;
+        }
         let measured = measure_program_cycles(&case.program);
         let baseline = measure_program_cycles(&case.baseline_program);
         let delta = measured.saturating_sub(baseline);
@@ -1530,6 +1537,8 @@ struct AssemblyCycleFixture {
     program: String,
     baseline_program: String,
     expected_cycles: u32,
+    /// `true` when this crate measures the case (assembly doc fixtures with `doc`+`marker`).
+    measured_here: bool,
 }
 
 fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
@@ -1556,6 +1565,8 @@ fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
                 .next()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or_else(|| panic!("could not parse cycle count from {expected:?}"));
+            let has_doc = case.get("doc").and_then(toml::Value::as_str).is_some();
+            let has_marker = case.get("marker").and_then(toml::Value::as_str).is_some();
 
             AssemblyCycleFixture {
                 id: case.get("id").and_then(toml::Value::as_str).expect("id").to_string(),
@@ -1570,13 +1581,13 @@ fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
                     .expect("baseline_program")
                     .to_string(),
                 expected_cycles,
+                measured_here: has_doc && has_marker,
             }
         })
         .collect()
 }
 
 fn measure_program_cycles(program: &str) -> u32 {
-    use miden_core_lib::CoreLibrary;
     use miden_utils_testing::{TRUNCATE_STACK_PROC, Test};
 
     let body = program.trim();
@@ -1587,11 +1598,7 @@ exec.truncate_stack
 end"
     );
 
-    // Link the packaged core library so fixtures can `exec` real core-lib procedures.
-    let core_lib = CoreLibrary::default();
-    let test = Test::new("program", &source, false)
-        .with_library(core_lib.package())
-        .with_event_handlers(core_lib.handlers());
+    let test = Test::new("program", &source, false);
     let outputs = test.get_last_stack_state();
     let measured = outputs
         .iter()

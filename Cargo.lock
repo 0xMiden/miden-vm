@@ -2590,7 +2590,6 @@ dependencies = [
  "miden-air",
  "miden-assembly",
  "miden-core",
- "miden-core-lib",
  "miden-debug-types",
  "miden-mast-package",
  "miden-precompiles",

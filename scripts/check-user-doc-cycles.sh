@@ -27,3 +27,7 @@ echo "Checking assembly cycle fixtures..."
 # Processor VM tests need a larger stack than the default test thread stack (see Makefile TEST_RUST_MIN_STACK).
 RUST_MIN_STACK="${TEST_RUST_MIN_STACK:-16777216}" \
     cargo test -p miden-processor --lib tests::user_doc_assembly_cycle_fixtures_match_documentation -- --exact
+
+echo "Checking core-lib num_leaves_to_num_peaks cycle fixture..."
+RUST_MIN_STACK="${TEST_RUST_MIN_STACK:-16777216}" \
+    cargo test -p miden-core-lib --test core-lib test_num_leaves_to_num_peaks_cycle_count -- --exact
