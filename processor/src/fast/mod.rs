@@ -139,6 +139,9 @@ pub struct FastProcessor {
     /// A map from (context_id, word_address) to the word stored starting at that memory location.
     memory: Memory,
 
+    /// Cumulative requested ACE vector capacity charged during this execution.
+    ace_witness_bytes: usize,
+
     /// Stack of saved system state, used when starting a new execution context (from a `call`,
     /// `syscall` or `dyncall`) to keep track of the previous `(ctx, caller_hash)` upon return.
     /// Pushed in lockstep with `stack_overflow_save_stack`.
@@ -300,6 +303,7 @@ impl FastProcessor {
             ctx: 0_u32.into(),
             caller_hash: EMPTY_WORD,
             memory: Memory::new(options.max_memory_elements()),
+            ace_witness_bytes: 0,
             system_call_state_stack: Vec::new(),
             stack_overflow_save_stack: Vec::new(),
             saved_overflow_len: 0,

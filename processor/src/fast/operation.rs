@@ -14,9 +14,10 @@ use miden_core::{
 
 use crate::{
     AdviceProvider, ContextId, ExecutionError,
-    errors::OperationError,
+    errors::{AceError, OperationError},
     fast::{FastProcessor, INITIAL_STACK_TOP_IDX, SystemCallState, memory::Memory},
     processor::{HasherInterface, Processor, StackInterface, SystemInterface},
+    trace::chiplets::CircuitEvaluation,
 };
 
 impl Processor for FastProcessor {
@@ -54,6 +55,27 @@ impl Processor for FastProcessor {
     #[inline(always)]
     fn hasher(&mut self) -> &mut Self::Hasher {
         self
+    }
+
+    fn check_ace_resources(
+        &mut self,
+        num_read_rows: u32,
+        num_eval_rows: u32,
+    ) -> Result<(), AceError> {
+        let bytes = CircuitEvaluation::capacity_bytes(num_read_rows, num_eval_rows)
+            .ok_or_else(|| AceError("ACE witness capacity overflows usize".into()))?;
+        let total = self
+            .ace_witness_bytes
+            .checked_add(bytes)
+            .ok_or_else(|| AceError("ACE witness capacity exceeds the execution limit".into()))?;
+        if total > self.options.max_ace_witness_bytes() {
+            return Err(AceError(format!(
+                "ACE witness capacity {total} bytes exceeds the execution limit of {} bytes",
+                self.options.max_ace_witness_bytes()
+            )));
+        }
+        self.ace_witness_bytes = total;
+        Ok(())
     }
 
     #[inline(always)]

@@ -198,7 +198,8 @@ fn verify_circuit_eval(
 fn verify_encoded_circuit_eval(circuit: &Circuit, inputs: &[QuadFelt]) -> EncodedCircuit {
     let encoded_circuit = EncodedCircuit::try_from_circuit(circuit).expect("cannot encode");
 
-    let num_read_rows = encoded_circuit.num_vars() as u32 / 2;
+    // Each READ row loads one word containing two quadratic-extension values.
+    let num_read_rows = (encoded_circuit.num_vars() / 2) as u32;
     let num_eval_rows = encoded_circuit.num_eval() as u32;
     let ctx = ContextId::default();
     let clk = RowIndex::from(0);
@@ -246,15 +247,10 @@ fn verify_eval_circuit(circuit: &EncodedCircuit, inputs: &[QuadFelt]) {
         ptr_curr += Felt::from_u8(4);
     }
 
-    eval_circuit_impl(
-        ctx,
-        ptr,
-        clk + 1,
-        Felt::from_u32(circuit.num_vars() as u32),
-        Felt::from_u32(circuit.num_eval() as u32),
-        &mut mem,
-    )
-    .unwrap();
+    // Each READ row loads one word containing two quadratic-extension values.
+    let num_read_rows = (circuit.num_vars() / 2) as u32;
+    let num_eval_rows = circuit.num_eval() as u32;
+    eval_circuit_impl(ctx, ptr, clk + 1, num_read_rows, num_eval_rows, &mut mem).unwrap();
 }
 
 /// Generate a mock memory region that represents the inputs and un-hashed circuit.

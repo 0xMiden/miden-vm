@@ -16,6 +16,7 @@
 
 #### Fixes
 
+- [BREAKING] Bound cumulative ACE witness capacity and count-dependent work during execution. The limit defaults to 64 MiB and can be raised with `ExecutionOptions::with_max_ace_witness_bytes` or the CLI's `--max-ace-witness` option; the CLI also caps it at `--max-prover-memory`.
 - [BREAKING] Fixed missing decoder AIR constraints that allowed `in_span` to change without a
   matching `SPAN`, `RESPAN`, or `END` operation. This changes Miden VM proofs and AIR relation
   digests. The VM recursive-verifier MAST root also changes, so consumers that pin it must update

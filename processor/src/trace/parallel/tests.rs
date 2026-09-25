@@ -34,6 +34,103 @@ const DEFAULT_STACK: &[Felt] =
 /// sentinel value makes it obvious when an unexpected ZERO is dropped.
 const SENTINEL_VALUE: Felt = Felt::new_unchecked(9999);
 
+#[test]
+fn ace_witness_budget_covers_all_calls_in_execution_and_proving() {
+    let program = repeated_ace_program();
+    // The program evaluates the circuit twice, with one READ row and four EVAL rows per call.
+    let total_bytes = 2 * crate::trace::chiplets::CircuitEvaluation::capacity_bytes(1, 4).unwrap();
+
+    for limit in [0, total_bytes - 1, total_bytes] {
+        let options = ExecutionOptions::default()
+            .with_core_trace_fragment_size(1)
+            .unwrap()
+            .with_max_ace_witness_bytes(limit);
+        let processor = || {
+            FastProcessor::new_with_options(
+                StackInputs::default(),
+                AdviceInputs::default(),
+                options,
+            )
+            .unwrap()
+        };
+        let execution = processor().execute_sync(&program, &mut DefaultHost::default()).map(|_| ());
+        let proving = processor()
+            .execute_for_proving_sync(&program, &mut DefaultHost::default())
+            .and_then(|witness| build_trace(witness.into_parts().0))
+            .map(|_| ());
+
+        for result in [execution, proving] {
+            if limit == total_bytes {
+                result.unwrap();
+            } else {
+                assert!(matches!(
+                    result,
+                    Err(ExecutionError::AceChipError { error: crate::AceError(message), .. })
+                        if message.contains("exceeds the execution limit")
+                ));
+            }
+        }
+    }
+}
+
+#[test]
+fn ace_replay_rejects_dimensions_exceeding_recorded_reads() {
+    let program = repeated_ace_program();
+    // The recorded circuit has two variables and four gates. Overstate each count separately.
+    for (num_vars, num_eval) in [(4, 4), (2, 8)] {
+        let options = ExecutionOptions::default().with_core_trace_fragment_size(1).unwrap();
+        let processor = FastProcessor::new_with_options(
+            StackInputs::default(),
+            AdviceInputs::default(),
+            options,
+        )
+        .unwrap();
+        let mut witness = processor
+            .execute_for_proving_sync(&program, &mut DefaultHost::default())
+            .unwrap()
+            .into_parts()
+            .0;
+
+        // A one-cycle fragment containing eval_circuit has one word read and four gate reads.
+        let fragment = witness
+            .trace_replay_mut()
+            .core_trace_contexts
+            .iter_mut()
+            .find(|fragment| {
+                fragment.replay.memory_reads.iter_read_words().len() == 1
+                    && fragment.replay.memory_reads.iter_read_elements().len() == 4
+            })
+            .unwrap();
+        fragment.state.stack.stack_top[MIN_STACK_DEPTH - 2] = Felt::from_u32(num_vars);
+        fragment.state.stack.stack_top[MIN_STACK_DEPTH - 3] = Felt::from_u32(num_eval);
+
+        let err = build_trace(witness).unwrap_err();
+        assert!(matches!(
+            err,
+            ExecutionError::AceChipError { error: crate::AceError(message), .. }
+                if message.contains("exceed the recorded memory reads")
+        ));
+    }
+}
+
+fn repeated_ace_program() -> Program {
+    // Two input wires (IDs 5 and 4), followed by four gates computing wire 5 minus itself.
+    // A subtraction gate packs two 30-bit input IDs with opcode zero.
+    let gate = 5_u64 | (5_u64 << 30);
+    let source = format!(
+        "begin
+            push.{gate}.{gate}.{gate}.{gate} mem_storew_le.4 dropw
+            push.4.2.0
+            eval_circuit eval_circuit
+            drop drop drop
+        end"
+    );
+    miden_assembly::Assembler::default()
+        .assemble_program("ace_budget", source)
+        .unwrap()
+        .unwrap_program()
+}
+
 /// Returns the procedure hash that DYN and DYNCALL will call.
 /// The digest is computed dynamically from the target basic block (single SWAP operation).
 fn dyn_target_proc_hash() -> &'static [Felt] {

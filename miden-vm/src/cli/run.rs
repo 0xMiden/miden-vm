@@ -46,6 +46,16 @@ pub struct RunCmd {
     )]
     max_prover_memory: u64,
 
+    /// Maximum cumulative ACE witness capacity during execution (accepts suffixes: 64Mi, 1Gi)
+    ///
+    /// Also capped by --max-prover-memory.
+    #[arg(
+        long = "max-ace-witness",
+        default_value_t = ExecutionOptions::DEFAULT_MAX_ACE_WITNESS_BYTES as u64,
+        value_parser = parse_byte_size
+    )]
+    max_ace_witness: u64,
+
     /// Number of outputs
     #[arg(short = 'n', long = "num-outputs", default_value = "16")]
     num_outputs: usize,
@@ -152,7 +162,10 @@ fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
         params.expected_cycles,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
     )
-    .map_err(|err| Report::msg(format!("{err}")))?;
+    .map_err(|err| Report::msg(format!("{err}")))?
+    .with_max_ace_witness_bytes(
+        usize::try_from(params.max_ace_witness.min(params.max_prover_memory)).unwrap_or(usize::MAX),
+    );
 
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
         .map_err(|err| Report::msg(format!("{err}")))?;
@@ -212,7 +225,10 @@ fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
         params.expected_cycles,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
     )
-    .map_err(|err| Report::msg(format!("{err}")))?;
+    .map_err(|err| Report::msg(format!("{err}")))?
+    .with_max_ace_witness_bytes(
+        usize::try_from(params.max_ace_witness.min(params.max_prover_memory)).unwrap_or(usize::MAX),
+    );
 
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
         .map_err(|err| Report::msg(format!("{err}")))?;

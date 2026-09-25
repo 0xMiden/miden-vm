@@ -8,6 +8,7 @@ use miden_core::program::MIN_STACK_DEPTH;
 ///
 /// - `max_cycles` specifies the maximum number of cycles a program is allowed to execute.
 /// - `expected_cycles` specifies the number of cycles a program is expected to execute.
+/// - `max_ace_witness_bytes` caps cumulative requested ACE vector capacity and native work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExecutionOptions {
     max_cycles: u32,
@@ -35,6 +36,8 @@ pub struct ExecutionOptions {
     /// Maximum number of field elements allowed in the processor's memory at any point during
     /// execution, rounded up to the nearest multiple of 4.
     max_memory_elements: usize,
+    /// Maximum cumulative requested vector capacity, in bytes, for ACE circuit evaluations.
+    max_ace_witness_bytes: usize,
 }
 
 impl Default for ExecutionOptions {
@@ -48,6 +51,7 @@ impl Default for ExecutionOptions {
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
+            max_ace_witness_bytes: Self::DEFAULT_MAX_ACE_WITNESS_BYTES,
             overlapped_trace_build: true,
         }
     }
@@ -88,6 +92,10 @@ impl ExecutionOptions {
     /// use a large amount of memory while still providing a finite host-memory backstop against
     /// unbounded growth from writes to arbitrarily many unique addresses.
     pub const DEFAULT_MAX_MEMORY_ELEMENTS: usize = 1 << 28;
+
+    /// Default cumulative ACE vector capacity limit (64 MiB).
+    /// Callers can raise this for workloads that evaluate many circuits.
+    pub const DEFAULT_MAX_ACE_WITNESS_BYTES: usize = 64 * 1024 * 1024;
 
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
@@ -149,6 +157,7 @@ impl ExecutionOptions {
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
+            max_ace_witness_bytes: Self::DEFAULT_MAX_ACE_WITNESS_BYTES,
             overlapped_trace_build: true,
         })
     }
@@ -250,6 +259,11 @@ impl ExecutionOptions {
         self.max_memory_elements
     }
 
+    /// Returns the cumulative requested ACE vector capacity limit in bytes.
+    pub fn max_ace_witness_bytes(&self) -> usize {
+        self.max_ace_witness_bytes
+    }
+
     /// Sets the maximum number of continuations allowed on the continuation stack.
     pub fn with_max_num_continuations(mut self, max_num_continuations: usize) -> Self {
         self.max_num_continuations = max_num_continuations;
@@ -275,6 +289,17 @@ impl ExecutionOptions {
     /// Sets the maximum number of field elements allowed in the processor's memory.
     pub fn with_max_memory_elements(mut self, max_memory_elements: usize) -> Self {
         self.max_memory_elements = max_memory_elements;
+        self
+    }
+
+    /// Sets the cumulative ACE vector capacity limit.
+    /// Each circuit is charged even when execution discards its trace.
+    ///
+    /// This counts requested storage for wire values and READ/EVAL nodes. VM memory, recorded
+    /// memory reads, allocator overhead, and proving buffers are outside this limit. A limit of
+    /// zero disables circuit evaluation.
+    pub fn with_max_ace_witness_bytes(mut self, max_ace_witness_bytes: usize) -> Self {
+        self.max_ace_witness_bytes = max_ace_witness_bytes;
         self
     }
 }

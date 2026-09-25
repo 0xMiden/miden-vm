@@ -42,28 +42,17 @@ where
     let ctx = processor.system().ctx();
     let clk = processor.system().clock();
 
+    let (num_read_rows, num_eval_rows) = validate_circuit_dimensions(num_read, num_eval)?;
+    processor.check_ace_resources(num_read_rows, num_eval_rows)?;
     let circuit_evaluation =
-        eval_circuit_impl(ctx, ptr, clk, num_read, num_eval, processor.memory_mut())?;
+        eval_circuit_impl(ctx, ptr, clk, num_read_rows, num_eval_rows, processor.memory_mut())?;
     tracer.record_circuit_evaluation(circuit_evaluation);
 
     Ok(())
 }
 
-/// Constructs a witness for an arithmetic circuit encoded in memory starting at `ptr`.
-///
-/// This reads `num_vars` quadratic extension field elements from memory (the READ section), then
-/// reads `num_eval` base field element gate encodings (the EVAL section), evaluating each gate
-/// in sequence. Each operand must therefore have been resolved when its gate is encountered. This
-/// is a limitation of this witness-construction strategy, not a causality check enforced by the
-/// ACE AIR. Returns the resulting [`CircuitEvaluation`] if the circuit evaluates to zero.
-pub(crate) fn eval_circuit_impl(
-    ctx: ContextId,
-    ptr: Felt,
-    clk: RowIndex,
-    num_vars: Felt,
-    num_eval: Felt,
-    mem: &mut impl MemoryInterface,
-) -> Result<CircuitEvaluation, AceEvalError> {
+/// Checks the protocol dimensions before narrowing them to row counts.
+fn validate_circuit_dimensions(num_vars: Felt, num_eval: Felt) -> Result<(u32, u32), AceError> {
     let num_vars = num_vars.as_canonical_u64();
     let num_eval = num_eval.as_canonical_u64();
 
@@ -73,9 +62,7 @@ pub(crate) fn eval_circuit_impl(
             // If this fails, update the error message below
             assert!(MAX_NUM_ACE_WIRES == (1_u32 << 30) - 1);
         }
-        return Err(
-            AceError(format!("num of wires must be less than 2^30 but was {num_wires}")).into()
-        );
+        return Err(AceError(format!("num of wires must be less than 2^30 but was {num_wires}")));
     }
 
     // Ensure vars and instructions are word-aligned and non-empty. Note that variables are
@@ -84,21 +71,35 @@ pub(crate) fn eval_circuit_impl(
     if !num_vars.is_multiple_of(2) || num_vars == 0 {
         return Err(AceError(format!(
             "num of variables should be word aligned and non-zero but was {num_vars}"
-        ))
-        .into());
+        )));
     }
     if !num_eval.is_multiple_of(4) || num_eval == 0 {
         return Err(AceError(format!(
             "num of evaluation gates should be word aligned and non-zero but was {num_eval}"
-        ))
-        .into());
+        )));
     }
 
-    // Ensure instructions are word-aligned and non-empty
     let num_read_rows = (num_vars / 2) as u32;
     let num_eval_rows = num_eval as u32;
 
-    let mut evaluation_context = CircuitEvaluation::new(ctx, clk, num_read_rows, num_eval_rows);
+    Ok((num_read_rows, num_eval_rows))
+}
+
+/// Constructs a witness for the circuit in memory at `ptr`, requiring its output to be zero.
+///
+/// Each operand must have been resolved when its gate is encountered. This is a limitation of
+/// sequential witness construction; the ACE AIR constrains the order-independent wiring relation.
+/// Callers must validate the dimensions and check resources before calling this function.
+pub(crate) fn eval_circuit_impl(
+    ctx: ContextId,
+    ptr: Felt,
+    clk: RowIndex,
+    num_read_rows: u32,
+    num_eval_rows: u32,
+    mem: &mut impl MemoryInterface,
+) -> Result<CircuitEvaluation, AceEvalError> {
+    let mut evaluation_context =
+        CircuitEvaluation::try_new(ctx, clk, num_read_rows, num_eval_rows)?;
 
     let mut ptr = ptr;
     // perform READ operations
