@@ -17,6 +17,7 @@
 
 #### Fixes
 
+- Fixed concurrent `Smt::with_entries` and `LargeSmt::with_entries` panicking on leaves with more than `MAX_LEAF_ENTRIES` entries and keeping empty values in leaves shared with other keys ([#3916](https://github.com/0xMiden/miden-vm/pull/3916)).
 - [BREAKING] Limited core-library sorted-array lookups to 65,536 entries per call. Larger ranges are
   rejected before host memory is scanned, and the public `SortedArrayError` enum now includes
   `TooManyEntries`. This affects `find_word`, `find_key_value`, and `find_half_key_value`
