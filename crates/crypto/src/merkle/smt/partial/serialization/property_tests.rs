@@ -75,16 +75,18 @@ fn arbitrary_multi_leaf() -> impl Strategy<Value = SmtLeaf> {
             };
 
             let index = LeafIndex::from(*first_key);
-            SmtLeaf::new_multiple(
-                pairs
-                    .into_iter()
-                    .map(|(mut key, value)| {
-                        key.d = Felt::new_unchecked(index.position());
-                        (key, value)
-                    })
-                    .collect::<Vec<_>>(),
-            )
-            .expect("All keys have the same leaf index by construction")
+            let mut entries = pairs
+                .into_iter()
+                .map(|(mut key, value)| {
+                    key.d = Felt::new_unchecked(index.position());
+                    (key, value)
+                })
+                .collect::<Vec<_>>();
+            // A multiple leaf holds its entries sorted by key with no repeats.
+            entries.sort_by_key(|(key, _)| *key);
+            entries.dedup_by_key(|(key, _)| *key);
+            SmtLeaf::new_multiple(entries)
+                .expect("All keys have the same leaf index and are sorted by construction")
         },
     )
 }

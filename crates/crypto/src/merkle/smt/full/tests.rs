@@ -14,7 +14,7 @@ use crate::{
         },
         store::MerkleStore,
     },
-    utils::{Deserializable, Serializable},
+    utils::{Deserializable, DeserializationError, Serializable},
 };
 
 // SMT
@@ -833,6 +833,54 @@ fn test_max_leaf_entries_validation() {
         SmtLeafError::TooManyLeafEntries { .. },
         "should reject more than MAX_LEAF_ENTRIES entries"
     );
+}
+
+/// Tests that `new_multiple()` rejects a repeated key.
+#[test]
+fn test_smt_leaf_new_multiple_rejects_repeated_key() {
+    let key = Word::from([10_u32, 11_u32, 12_u32, 13_u32]);
+    let entries = vec![
+        (key, Word::from([1_u32, 2_u32, 3_u32, 4_u32])),
+        (key, Word::from([5_u32, 6_u32, 7_u32, 8_u32])),
+    ];
+
+    let error = SmtLeaf::new_multiple(entries).unwrap_err();
+    assert_matches!(
+        error,
+        SmtLeafError::UnsortedMultipleLeafKeys { previous, next } if previous == key && next == key
+    );
+}
+
+/// Tests that `new_multiple()` rejects keys that are not in strictly increasing order.
+#[test]
+fn test_smt_leaf_new_multiple_rejects_unsorted_keys() {
+    let key_1 = Word::from([10_u32, 11_u32, 12_u32, 13_u32]);
+    let key_2 = Word::from([100_u32, 101_u32, 102_u32, 13_u32]);
+    let value = Word::from([1_u32, 2_u32, 3_u32, 4_u32]);
+
+    assert!(SmtLeaf::new_multiple(vec![(key_1, value), (key_2, value)]).is_ok());
+
+    let error = SmtLeaf::new_multiple(vec![(key_2, value), (key_1, value)]).unwrap_err();
+    assert_matches!(
+        error,
+        SmtLeafError::UnsortedMultipleLeafKeys { previous, next } if previous == key_2 && next == key_1
+    );
+}
+
+/// Tests that a serialized multiple leaf with a repeated key is rejected on deserialization.
+#[test]
+fn test_smt_leaf_deserialization_rejects_repeated_key() {
+    let key = Word::from([10_u32, 11_u32, 12_u32, 13_u32]);
+    let leaf_index: LeafIndex<SMT_DEPTH> = key.into();
+
+    let mut serialized = Vec::new();
+    2_usize.write_into(&mut serialized);
+    leaf_index.position().write_into(&mut serialized);
+    (key, Word::from([1_u32, 2_u32, 3_u32, 4_u32])).write_into(&mut serialized);
+    (key, Word::from([5_u32, 6_u32, 7_u32, 8_u32])).write_into(&mut serialized);
+
+    let error = SmtLeaf::read_from_bytes(&serialized).unwrap_err();
+    assert_matches!(error, DeserializationError::InvalidValue(_));
 }
 
 /// Tests that verify_presence returns InvalidKeyForProof when key maps to different leaf index
