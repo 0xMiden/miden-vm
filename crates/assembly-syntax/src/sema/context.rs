@@ -197,17 +197,22 @@ impl AnalysisContext {
         }
     }
 
-    pub fn resolve_constant_usage(&mut self, module: &Module) {
+    pub(super) fn mark_reexported_constants_used(&mut self, module: &Module) {
         for import in module.imports() {
             if let Import::Item(import) = import
                 && import.visibility().is_public()
-                && let Some(name) =
-                    self.local_constant_name_for_path(import.target_path().as_deref())
             {
-                self.used_constants.insert(name);
+                let path = import.module_path().into_inner();
+                let is_local =
+                    path == Path::new("self") || path.to_relative() == self.module_path.as_path();
+                if is_local && self.constants.contains_key(import.source_name()) {
+                    self.used_constants.insert(import.source_name().clone());
+                }
             }
         }
+    }
 
+    pub fn resolve_constant_usage(&mut self) {
         let mut worklist = VecDeque::from_iter(self.used_constants.iter().cloned());
         for (name, constant) in &self.constants {
             if constant.visibility.is_public() && self.used_constants.insert(name.clone()) {
