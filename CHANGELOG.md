@@ -16,6 +16,7 @@
 
 #### Fixes
 
+- [BREAKING] Limit cumulative ACE READ and EVAL rows during execution, checked before allocation. The limit defaults to 2^19 rows and can be raised with `ExecutionOptions::with_max_ace_rows` ([#3904](https://github.com/0xMiden/miden-vm/pull/3904)).
 - [BREAKING] Fixed missing decoder AIR constraints that allowed `in_span` to change without a
   matching `SPAN`, `RESPAN`, or `END` operation. This changes Miden VM proofs and AIR relation
   digests. The VM recursive-verifier MAST root also changes, so consumers that pin it must update

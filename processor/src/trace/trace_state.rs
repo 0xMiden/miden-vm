@@ -550,13 +550,17 @@ impl MemoryReadsReplay {
 
     /// Returns an iterator over all recorded memory element reads, yielding tuples of
     /// (element, address, context ID, clock cycle).
-    pub fn iter_read_elements(&self) -> impl Iterator<Item = (Felt, Felt, ContextId, RowIndex)> {
+    pub fn iter_read_elements(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (Felt, Felt, ContextId, RowIndex)> {
         self.elements_read.iter().copied()
     }
 
     /// Returns an iterator over all recorded memory word reads, yielding tuples of
     /// (word, address, context ID, clock cycle).
-    pub fn iter_read_words(&self) -> impl Iterator<Item = (Word, Felt, ContextId, RowIndex)> {
+    pub fn iter_read_words(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (Word, Felt, ContextId, RowIndex)> {
         self.words_read.iter().copied()
     }
 

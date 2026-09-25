@@ -15,6 +15,8 @@ pub struct ExecutionOptions {
     core_trace_fragment_size: usize,
     /// Maximum combined logical size, in bytes, of the advice stack, map, and Merkle store.
     max_advice_size_bytes: usize,
+    /// Maximum cumulative READ and EVAL rows across all ACE evaluations.
+    max_ace_rows: u32,
     /// Whether the synchronous prover may overlap hasher-chiplet trace building with program
     /// execution (std-only; the sequential path is used on no_std regardless).
     overlapped_trace_build: bool,
@@ -44,6 +46,7 @@ impl Default for ExecutionOptions {
             expected_cycles: MIN_TRACE_LEN as u32,
             core_trace_fragment_size: Self::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
             max_advice_size_bytes: Self::DEFAULT_MAX_ADVICE_SIZE_BYTES,
+            max_ace_rows: Self::DEFAULT_MAX_ACE_ROWS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
@@ -65,6 +68,11 @@ impl ExecutionOptions {
 
     /// Default maximum combined logical size of the advice provider. Set to 16 MiB.
     pub const DEFAULT_MAX_ADVICE_SIZE_BYTES: usize = 16 * 1024 * 1024;
+
+    /// Default maximum cumulative ACE chiplet rows (2^19).
+    /// A READ row loads two variables; an EVAL row evaluates one gate. Charging both bounds
+    /// count-sized ACE allocations and circuit work across repeated evaluations.
+    pub const DEFAULT_MAX_ACE_ROWS: u32 = 1 << 19;
 
     /// Default maximum number of input bytes for a single hash precompile invocation.
     /// Set to 2^20 (1 MB).
@@ -145,6 +153,7 @@ impl ExecutionOptions {
             expected_cycles,
             core_trace_fragment_size,
             max_advice_size_bytes: Self::DEFAULT_MAX_ADVICE_SIZE_BYTES,
+            max_ace_rows: Self::DEFAULT_MAX_ACE_ROWS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
@@ -196,6 +205,11 @@ impl ExecutionOptions {
         self.max_advice_size_bytes
     }
 
+    /// Returns the cumulative ACE row limit.
+    pub fn max_ace_rows(&self) -> u32 {
+        self.max_ace_rows
+    }
+
     /// Returns the maximum number of input bytes allowed for a single hash precompile invocation.
     #[inline]
     pub fn max_hash_len_bytes(&self) -> usize {
@@ -219,6 +233,16 @@ impl ExecutionOptions {
     /// Sets the maximum combined logical size, in bytes, of the advice provider.
     pub fn with_max_advice_size_bytes(mut self, size: usize) -> Self {
         self.max_advice_size_bytes = size;
+        self
+    }
+
+    /// Sets the maximum cumulative READ and EVAL rows across all ACE evaluations.
+    ///
+    /// The limit is checked before allocating each circuit witness. Evaluations are charged
+    /// even when they reuse circuit data or their trace is discarded. Zero disables circuit
+    /// evaluation.
+    pub fn with_max_ace_rows(mut self, max_ace_rows: u32) -> Self {
+        self.max_ace_rows = max_ace_rows;
         self
     }
 

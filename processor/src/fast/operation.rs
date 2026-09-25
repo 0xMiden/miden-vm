@@ -14,7 +14,7 @@ use miden_core::{
 
 use crate::{
     AdviceProvider, ContextId, ExecutionError,
-    errors::OperationError,
+    errors::{AceError, OperationError},
     fast::{FastProcessor, INITIAL_STACK_TOP_IDX, SystemCallState, memory::Memory},
     processor::{HasherInterface, Processor, StackInterface, SystemInterface},
 };
@@ -54,6 +54,22 @@ impl Processor for FastProcessor {
     #[inline(always)]
     fn hasher(&mut self) -> &mut Self::Hasher {
         self
+    }
+
+    fn check_ace_resources(
+        &mut self,
+        num_read_rows: u32,
+        num_eval_rows: u32,
+    ) -> Result<(), AceError> {
+        let total = self.ace_rows + u64::from(num_read_rows) + u64::from(num_eval_rows);
+        let limit = self.options.max_ace_rows();
+        if total > u64::from(limit) {
+            return Err(AceError(format!(
+                "ACE row count {total} exceeds max_ace_rows limit of {limit}"
+            )));
+        }
+        self.ace_rows = total;
+        Ok(())
     }
 
     #[inline(always)]

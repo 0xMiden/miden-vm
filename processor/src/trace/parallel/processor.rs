@@ -19,7 +19,7 @@ use super::super::trace_state::{
 use crate::{
     BreakReason, ContextId, ExecutionError, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::OperationError,
+    errors::{AceError, OperationError},
     execution::{
         InternalBreakReason, execute_impl_noop_host, finish_emit_op_execution,
         finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
@@ -465,6 +465,21 @@ impl Processor for ReplayProcessor {
     type AdviceProvider = AdviceReplay;
     type Memory = MemoryReadsReplay;
     type Hasher = HasherResponseReplay;
+
+    fn check_ace_resources(
+        &mut self,
+        num_read_rows: u32,
+        num_eval_rows: u32,
+    ) -> Result<(), AceError> {
+        // Each row consumes one recorded read. Checking both queues before allocation bounds
+        // replay work and storage by the witness data already admitted by trace preflight.
+        if num_read_rows as usize > self.memory_reads_replay.iter_read_words().len()
+            || num_eval_rows as usize > self.memory_reads_replay.iter_read_elements().len()
+        {
+            return Err(AceError("ACE circuit dimensions exceed the recorded memory reads".into()));
+        }
+        Ok(())
+    }
 
     fn stack(&self) -> &Self::Stack {
         self

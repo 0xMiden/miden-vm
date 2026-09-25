@@ -2,8 +2,10 @@ use miden_air::trace::{RowIndex, chiplets::hasher::HasherState};
 use miden_core::deferred::Digest;
 
 use crate::{
-    ContextId, ExecutionError, Felt, MemoryError, Word, advice::AdviceError,
-    crypto::merkle::MerklePath, errors::OperationError,
+    ContextId, ExecutionError, Felt, MemoryError, Word,
+    advice::AdviceError,
+    crypto::merkle::MerklePath,
+    errors::{AceError, OperationError},
 };
 
 // PROCESSOR
@@ -41,6 +43,14 @@ pub(crate) trait Processor: Sized {
 
     /// Returns a mutable reference to the internal hasher subsystem.
     fn hasher(&mut self) -> &mut Self::Hasher;
+
+    /// Checks resources before allocating or evaluating a circuit. Execution charges cumulative
+    /// ACE rows; replay requires enough recorded reads to cover both sections.
+    fn check_ace_resources(
+        &mut self,
+        num_read_rows: u32,
+        num_eval_rows: u32,
+    ) -> Result<(), AceError>;
 }
 
 // SYSTEM INTERFACE
