@@ -153,7 +153,8 @@ end
 #! encoding is left unchanged. The supplied constants and returned point are four-felt digests.
 #! Input:  [ptr, SQRT, OFFSET, ...]
 #! Output: [POINT, ...]
-#! The event supplies eight little-endian u32 limbs of x; field/curve relations bind this advice.
+#! The event supplies x's eight u32 limbs for `repeat.8 adv_push end`, leaving x0 on top.
+#! Field/curve relations bind this advice to the compressed encoding.
 proc load_compressed_point(
     ptr: ptr<u32>,
     sqrt_minus_486664: ed25519_base::Expr,
@@ -163,9 +164,9 @@ proc load_compressed_point(
 
     # Retain x's low limb for parity, and register the complete canonical x before using it.
     # SQRT and OFFSET below denote the supplied field expression digests.
-    adv_pushw
-    dup movdn.4
-    adv_pushw swapw
+    repeat.8 adv_push end
+    # => [X_LO, X_HI, ptr, SQRT, OFFSET, ...]
+    dup movdn.8
     exec.ed25519_base::load
     # => [X_DIGEST, x0, ptr, SQRT, OFFSET, ...]
 
