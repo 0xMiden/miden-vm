@@ -18,6 +18,9 @@ pub const ED25519_DECOMPRESS_EVENT_NAME: EventName =
 
 /// Supplies a coordinate witness. The MASM loader proves parity, canonicality, and curve
 /// membership.
+///
+/// Advice is arranged for `repeat.8 adv_push end` to leave x's eight u32 limbs on the operand
+/// stack in little-endian order, with the least-significant limb on top.
 pub fn handle_ed25519_decompress(
     process: &ProcessorState<'_>,
 ) -> Result<Vec<AdviceMutation>, EventError> {
@@ -25,6 +28,6 @@ pub fn handle_ed25519_decompress(
     let encoded = read_memory_packed_u32(process, ptr, 32)?;
     let x = ed25519_decompress_x(encoded.try_into().expect("exactly 32 point bytes"))?;
     let mut advice = AdviceStack::new();
-    advice.append_for_adv_pipe(&x.map(Felt::from_u32));
+    advice.append_for_adv_push(&x.map(Felt::from_u32));
     Ok(vec![AdviceMutation::extend_advice_stack(advice)])
 }
