@@ -4,8 +4,8 @@
 //! Eidos's fixed parameter-word tail (`v[12..16] = IV[4..8]`, without counter, block length, or
 //! flags) to a `[u32; 16]` message block using four diagonalized 128-bit rows.
 //!
-//! SSE2 is part of the x86_64 architectural baseline, so the plain `compress_raw`/
-//! `compress_raw_xof` below run unconditionally on x86_64 with no runtime feature check.
+//! SSE2 is part of the x86_64 architectural baseline. The SSE4.1 variant uses native blends for
+//! message permutation; its rotations keep the shift-based form used by upstream Rust BLAKE3.
 //!
 //! The AVX-512F/VL-targeted variant uses the same algorithm with access to XMM16-31, reducing
 //! register spills without changing the logical width. Both variants are emitted from the same
@@ -128,14 +128,20 @@ unsafe fn undiagonalize(row0: &mut __m128i, row2: &mut __m128i, row3: &mut __m12
 }
 
 #[inline(always)]
-unsafe fn blend_epi16(a: __m128i, b: __m128i, imm8: i32) -> __m128i {
+unsafe fn blend_epi16<const IMM8: i32>(a: __m128i, b: __m128i) -> __m128i {
     unsafe {
         let bits = _mm_set_epi16(0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01);
-        let mut mask = _mm_set1_epi16(imm8 as i16);
+        let mut mask = _mm_set1_epi16(IMM8 as i16);
         mask = _mm_and_si128(mask, bits);
         mask = _mm_cmpeq_epi16(mask, bits);
         _mm_or_si128(_mm_and_si128(mask, b), _mm_andnot_si128(mask, a))
     }
+}
+
+#[inline]
+#[target_feature(enable = "sse4.1")]
+unsafe fn blend_sse41<const IMM8: i32>(a: __m128i, b: __m128i) -> __m128i {
+    _mm_blend_epi16::<IMM8>(a, b)
 }
 
 /// Row-wise diagonalized permutation.
@@ -144,10 +150,9 @@ unsafe fn blend_epi16(a: __m128i, b: __m128i, imm8: i32) -> __m128i {
 /// BLAKE3 permuted state after all seven rounds, with Eidos's fixed parameter-word tail
 /// (`v[12..16] = IV[4..8]`, matching `super::permuted_state_with_parameter_words`).
 ///
-/// The macro emits a baseline SSE2 variant and an `avx512f,avx512vl`-targeted variant from the
-/// same body.
+/// The macro emits baseline SSE2, SSE4.1, and AVX-512F/VL variants from the same body.
 macro_rules! define_compress_pre {
-    ($(#[$attr:meta])* $name:ident) => {
+    ($(#[$attr:meta])* $name:ident, $blend:ident) => {
         $(#[$attr])*
         #[inline]
         unsafe fn $name(cv: &[u32; 8], block: &[u32; 16]) -> [__m128i; 4] {
@@ -195,11 +200,11 @@ macro_rules! define_compress_pre {
                     g1(row0, row1, row2, row3, t0);
                     t1 = shuffle2!(m2, m3, mm_shuffle!(3, 3, 2, 2));
                     tt = _mm_shuffle_epi32(m0, mm_shuffle!(0, 0, 3, 3));
-                    t1 = blend_epi16(tt, t1, 0xcc);
+                    t1 = $blend::<0xcc>(tt, t1);
                     g2(row0, row1, row2, row3, t1);
                     diagonalize(row0, row2, row3);
                     t2 = _mm_unpacklo_epi64(m3, m1);
-                    tt = blend_epi16(t2, m2, 0xc0);
+                    tt = $blend::<0xc0>(t2, m2);
                     t2 = _mm_shuffle_epi32(tt, mm_shuffle!(1, 3, 2, 0));
                     g1(row0, row1, row2, row3, t2);
                     t3 = _mm_unpackhi_epi32(m1, m3);
@@ -221,12 +226,23 @@ macro_rules! define_compress_pre {
 
 define_compress_pre!(
     #[cfg(any(feature = "std", not(target_feature = "avx512vl")))]
-    compress_pre
+    compress_pre,
+    blend_epi16
+);
+define_compress_pre!(
+    #[cfg(any(
+        feature = "std",
+        all(target_feature = "sse4.1", not(target_feature = "avx512vl"))
+    ))]
+    #[target_feature(enable = "sse4.1")]
+    compress_pre_sse41,
+    blend_sse41
 );
 define_compress_pre!(
     #[cfg(any(feature = "std", target_feature = "avx512vl"))]
     #[target_feature(enable = "avx512f,avx512vl")]
-    compress_pre_avx512vl
+    compress_pre_avx512vl,
+    blend_epi16
 );
 
 /// Returns the raw eight-word CV fold with Eidos compression's fixed parameter words:
@@ -254,6 +270,15 @@ define_compress_raw!(
     #[cfg(any(feature = "std", not(target_feature = "avx512vl")))]
     compress_raw_impl,
     compress_pre
+);
+define_compress_raw!(
+    #[cfg(any(
+        feature = "std",
+        all(target_feature = "sse4.1", not(target_feature = "avx512vl"))
+    ))]
+    #[target_feature(enable = "sse4.1")]
+    compress_raw_sse41,
+    compress_pre_sse41
 );
 define_compress_raw!(
     #[cfg(any(feature = "std", target_feature = "avx512vl"))]
@@ -293,6 +318,15 @@ define_compress_raw_xof!(
     compress_pre
 );
 define_compress_raw_xof!(
+    #[cfg(any(
+        feature = "std",
+        all(target_feature = "sse4.1", not(target_feature = "avx512vl"))
+    ))]
+    #[target_feature(enable = "sse4.1")]
+    compress_raw_xof_sse41,
+    compress_pre_sse41
+);
+define_compress_raw_xof!(
     #[cfg(any(feature = "std", target_feature = "avx512vl"))]
     #[target_feature(enable = "avx512f,avx512vl")]
     compress_raw_xof_avx512vl,
@@ -301,7 +335,10 @@ define_compress_raw_xof!(
 
 /// Returns the raw eight-word CV fold with Eidos compression's fixed parameter words. Needs no
 /// runtime feature check: SSE2 is part of the x86_64 architectural baseline.
-#[cfg(any(feature = "std", not(target_feature = "avx512vl")))]
+#[cfg(any(
+    feature = "std",
+    not(any(target_feature = "avx512vl", target_feature = "sse4.1"))
+))]
 #[inline]
 pub(super) fn compress_raw(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 8] {
     // SAFETY: SSE2 is part of the x86_64 architectural baseline.
@@ -310,7 +347,10 @@ pub(super) fn compress_raw(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 8] {
 
 /// Returns the raw sixteen-word XOF fold with Eidos compression's fixed parameter words. Needs no
 /// runtime feature check: SSE2 is part of the x86_64 architectural baseline.
-#[cfg(any(feature = "std", not(target_feature = "avx512vl")))]
+#[cfg(any(
+    feature = "std",
+    not(any(target_feature = "avx512vl", target_feature = "sse4.1"))
+))]
 #[inline]
 pub(super) fn compress_raw_xof(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 16] {
     // SAFETY: SSE2 is part of the x86_64 architectural baseline.
