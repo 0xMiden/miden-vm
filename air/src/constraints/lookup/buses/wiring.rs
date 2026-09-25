@@ -1,7 +1,7 @@
 //! `v_wiring` shared bus column.
 //!
 //! ACE wiring, hasher compression links, and AEAD stream output/request traffic live in one
-//! [`super::super::LookupColumn::group`] call. Their row selectors are mutually exclusive at the
+//! [`crate::lookup::LookupColumn::group`] call. Their row selectors are mutually exclusive at the
 //! chiplet level, so the simple-group composition is sound and the column degree is the maximum
 //! of the active branch degrees.
 //!
@@ -48,27 +48,21 @@
 //! The compression-link gate has degree `(5, 6)`, below the ACE batch's `(8, 7)`.
 //! Merging into the same group therefore leaves the column's transition at `(8, 7)`.
 //!
-//! ## AEAD stream
-//!
-//! AEAD stream rows emit paired Eidos XOF output limbs. The first limb comes from the
-//! current stream row; the second comes from the next row, whose phase is constrained by the
-//! stream-row transition constraints. Request messages fire on phases 2 and 6.
+//! AEAD stream output and request interactions are defined in
+//! [`super::super::operations::aead_stream`]. Merkle compression interactions are defined in
+//! [`super::super::operations::merkle`].
 
 use core::{array, borrow::Borrow};
 
-use miden_core::{chiplets::eidos_compression, field::PrimeCharacteristicRing};
-
+use super::super::operations::{aead_stream, merkle};
 use crate::{
     constraints::{
-        chiplets::columns::{AeadStreamCols, PeriodicCols},
+        chiplets::columns::PeriodicCols,
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
-            messages::{
-                AceWireMsg, AeadEidosCompressionOutputPairMsg, AeadStreamRequestMsg,
-                HasherCompressionLinkMsg,
-            },
+            messages::{AceWireMsg, HasherCompressionLinkMsg},
         },
-        utils::{BoolNot, pack_u32_bytes_le},
+        utils::BoolNot,
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
 };
@@ -93,7 +87,6 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     LB: ChipletLookupBuilder,
 {
     let local = ctx.local;
-    let next = ctx.next;
     let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
     let aead_phase: [LB::Expr; 8] = periodic.aead_stream.phases.map(Into::into);
 
@@ -127,26 +120,17 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 
     // Controller rows emit one compression-link tuple except padding rows.
     let ctrl = local.controller();
-    let controller_flag = ctx.chiplet_active.controller.clone();
     let merkle_or_padding: LB::Expr = local.controller_merkle_or_padding().into();
-    let ctrl_s0: LB::Expr = ctrl.s0.into();
-    let f_hash_compression = controller_flag.clone() * merkle_or_padding.not();
-    let f_merkle_compression = controller_flag * merkle_or_padding * ctrl_s0;
+    let f_hash_compression = ctx.chiplet_active.controller.clone() * merkle_or_padding.not();
 
     let ctrl_state: [LB::Var; 12] = array::from_fn(|i| ctrl.state[i]);
     let ctrl_row_data: [LB::Var; 4] = ctrl.hash_cv();
-    let merkle_cv = eidos_compression::merkle_node_chaining_word();
-    let stream = local.aead_stream();
-    let stream_next = next.aead_stream();
-    let stream_gate = ctx.chiplet_active.aead_stream.clone();
 
     builder.next_column(
         |col| {
-            // Single group hosts both buses. ACE rows (`chiplet_active.ace`) and controller rows
-            // (`chiplet_active.controller`) are pairwise mutually exclusive, so the simple-group
-            // composition is sound. Merging into one group takes MAX over per-interaction
-            // degrees instead of multiplying sibling `(V_g, U_g)` pairs, critical for keeping
-            // this column's transition inside the degree-9 budget.
+            // ACE, controller, and AEAD stream rows are mutually exclusive. A single group
+            // takes the maximum branch degree rather than multiplying sibling `(V_g, U_g)`
+            // pairs, keeping the transition inside the degree-9 budget.
             col.group(
                 "ace_compression_link",
                 |g| {
@@ -209,144 +193,13 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                         Deg { v: 5, u: 6 },
                     );
 
-                    // Merkle compression: +1 / encode(block, fixed_cv, cv_out).
-                    g.add(
-                        "merkle_compression",
-                        f_merkle_compression,
-                        move || {
-                            let block = array::from_fn(|i| ctrl_state[i].into());
-                            let cv_in = array::from_fn(|i| LB::Expr::from(merkle_cv[i]));
-                            let cv_out = array::from_fn(|i| ctrl_state[8 + i].into());
-                            HasherCompressionLinkMsg { block, cv_in, cv_out }
-                        },
-                        Deg { v: 5, u: 6 },
-                    );
+                    merkle::emit_compression::<LB, _>(g, ctx);
 
-                    let mut add_stream_pair =
-                        |name: &'static str, phase_idx: usize, first_lane_offset: u16| {
-                            g.add(
-                                name,
-                                stream_gate.clone() * aead_phase[phase_idx].clone(),
-                                || {
-                                    aead_stream_pair_msg::<LB>(
-                                        stream,
-                                        stream_next,
-                                        phase_idx,
-                                        first_lane_offset,
-                                    )
-                                },
-                                Deg { v: 3, u: 4 },
-                            );
-                        };
-                    add_stream_pair("aead_stream_pair0", 0, 0);
-                    add_stream_pair("aead_stream_pair2", 4, 0);
-
-                    g.batch(
-                        "aead_stream_pair1_request",
-                        stream_gate.clone() * aead_phase[2].clone(),
-                        |b| {
-                            b.add(
-                                "aead_stream_pair1",
-                                aead_stream_pair_msg::<LB>(stream, stream_next, 2, 2),
-                                Deg { v: 3, u: 4 },
-                            );
-                            b.add(
-                                "aead_stream_request",
-                                aead_stream_request_msg::<LB>(stream, 0),
-                                Deg { v: 3, u: 4 },
-                            );
-                        },
-                        Deg { v: 4, u: 7 },
-                    );
-
-                    g.batch(
-                        "aead_stream_pair3_request",
-                        stream_gate.clone() * aead_phase[6].clone(),
-                        |b| {
-                            b.add(
-                                "aead_stream_pair3",
-                                aead_stream_pair_msg::<LB>(stream, stream_next, 6, 2),
-                                Deg { v: 3, u: 4 },
-                            );
-                            b.add(
-                                "aead_stream_request",
-                                aead_stream_request_msg::<LB>(stream, 4),
-                                Deg { v: 3, u: 4 },
-                            );
-                        },
-                        Deg { v: 4, u: 7 },
-                    );
+                    aead_stream::emit_wiring::<LB, _>(g, ctx, &aead_phase);
                 },
                 Deg { v: 8, u: 7 },
             );
         },
         Deg { v: 8, u: 7 },
     );
-}
-
-fn aead_stream_pair_msg<LB>(
-    stream: &AeadStreamCols<LB::Var>,
-    stream_next: &AeadStreamCols<LB::Var>,
-    phase_idx: usize,
-    first_lane_offset: u16,
-) -> AeadEidosCompressionOutputPairMsg<LB::Expr>
-where
-    LB: ChipletLookupBuilder,
-{
-    let (clk, lane_base, value0, value1) = match phase_idx % 4 {
-        0 => {
-            let row = stream.read();
-            let next = stream_next.high_first();
-            (
-                row.clk.into(),
-                row.lane_base.into(),
-                stream_b_limb::<LB>(row.bytes),
-                stream_b_limb::<LB>(next.bytes),
-            )
-        },
-        2 => {
-            let row = stream.low_second();
-            let next = stream_next.high_second();
-            (
-                row.clk.into(),
-                row.lane_base.into(),
-                stream_b_limb::<LB>(row.bytes),
-                stream_b_limb::<LB>(next.bytes),
-            )
-        },
-        _ => unreachable!(),
-    };
-    AeadEidosCompressionOutputPairMsg {
-        clk,
-        first_lane_idx: lane_base + LB::Expr::from_u16(first_lane_offset),
-        value0,
-        value1,
-    }
-}
-
-fn aead_stream_request_msg<LB>(
-    stream: &AeadStreamCols<LB::Var>,
-    second_half_offset: u16,
-) -> AeadStreamRequestMsg<LB::Expr>
-where
-    LB: ChipletLookupBuilder,
-{
-    let row = stream.low_second();
-    let dst_ptr: LB::Expr = row.dst_ptr.into();
-    let lane_base: LB::Expr = row.lane_base.into();
-    let offset = LB::Expr::from_u16(second_half_offset);
-    AeadStreamRequestMsg {
-        ctx: row.ctx.into(),
-        clk: row.clk.into(),
-        src_ptr: row.src_ptr.into(),
-        dst_ptr: dst_ptr - offset.clone(),
-        lane_base: lane_base - offset,
-    }
-}
-
-fn stream_b_limb<LB>(bytes: [LB::Var; 12]) -> LB::Expr
-where
-    LB: ChipletLookupBuilder,
-{
-    pack_u32_bytes_le::<_, LB::Expr>([bytes[4], bytes[5], bytes[6], bytes[7]])
 }

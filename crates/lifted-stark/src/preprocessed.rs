@@ -1,9 +1,9 @@
 //! Preprocessed data: the fixed per-AIR matrices and their committed LDE tree.
 //!
 //! Preprocessed columns are *fixed circuit data* (lookup tables, selectors)
-//! declared by the AIR via [`BaseAir::preprocessed_trace`] and committed once
-//! at setup. The prover holds the cached raw matrices plus their LDE tree (the
-//! [`Preprocessed`] bundle, built once and borrowed across proofs); the
+//! declared by the AIR via [`BaseAir::preprocessed_trace`] and committed at
+//! setup. The prover holds the raw matrices plus their LDE tree (the
+//! [`Preprocessed`] bundle, which can be borrowed across proofs); the
 //! verifier holds only the commitment (a root hash, trusted like the AIR list
 //! itself).
 //!
@@ -17,7 +17,6 @@
 use alloc::vec::Vec;
 
 use miden_lifted_air::{BaseAir, MultiAir, ProverStatement, Statement, log2_strict_u8};
-use miden_stark_transcript::{ProverTranscript, VerifierChannel, VerifierTranscript};
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -40,8 +39,8 @@ use crate::{
 /// committed LDE tree.
 ///
 /// `traces[i]` is `Some` exactly when AIR `i` declares preprocessed columns;
-/// the LDE tree commits one LDE trace per such AIR, in proof order. Built once
-/// at setup via [`Preprocessed::build`] and borrowed across proofs.
+/// the LDE tree commits one LDE trace per such AIR, in proof order. Built at
+/// setup via [`Preprocessed::build`] and borrowed by prover instances.
 ///
 /// Parameterized over the LMCS `L` rather than a full [`StarkConfig`] so the
 /// value can be borrowed by prover instances with the same commitment type. The
@@ -55,7 +54,8 @@ where
     /// Per-AIR raw preprocessed matrices in instance order; `None` where the
     /// AIR declares none. The cached [`BaseAir::preprocessed_trace`] evals —
     /// `preprocessed_trace` re-allocates on every call, so they are computed
-    /// once here and retained for validation and `check_constraints`.
+    /// once here and retained for validation, auxiliary-trace construction,
+    /// and `check_constraints`.
     traces: Vec<Option<RowMajorMatrix<F>>>,
     /// Committed LDE tree, one committed LDE trace per preprocessed AIR.
     committed: Committed<F, RowMajorMatrix<F>, L>,
@@ -138,6 +138,11 @@ where
         self.committed.root()
     }
 
+    /// Raw setup traces in AIR instance order.
+    pub(crate) fn raw_traces(&self) -> &[Option<RowMajorMatrix<F>>] {
+        &self.traces
+    }
+
     /// Build an LMCS batch opening for setup-fixed preprocessed rows.
     ///
     /// The returned proof opens the queried rows against [`Self::commitment`].
@@ -154,23 +159,8 @@ where
         C: StarkConfig<F, EF, Lmcs = L>,
     {
         let tree = self.committed.tree();
-        let tree_log_height = log2_strict_u8(tree.height());
         let indices = TreeIndices::new(query_indices, query_log_height)?;
-        indices.fold_to_depth(tree_log_height)?;
-
-        let mut prover_channel = ProverTranscript::new(config.challenger());
-        tree.prove_lifted_batch(config.lmcs(), &indices, &mut prover_channel);
-        let (_, transcript) = prover_channel.finalize();
-
-        let mut verifier_channel = VerifierTranscript::from_data(config.challenger(), &transcript);
-        let proof = config.lmcs().read_lifted_batch_proof(
-            &tree.aligned_widths(),
-            &indices,
-            tree_log_height,
-            &mut verifier_channel,
-        )?;
-        debug_assert!(verifier_channel.is_empty());
-        Ok(proof)
+        config.lmcs().lifted_batch_proof(tree, &indices)
     }
 
     /// The committed LDE tree, for opening and per-AIR quotient-domain views.

@@ -6,8 +6,6 @@ extern crate alloc;
 extern crate std;
 
 use alloc::{boxed::Box, sync::Arc};
-#[cfg(feature = "std")]
-use core::any::{Any, TypeId};
 
 use miden_air::{MidenMultiAir, PublicInputs, Statement, config, security};
 use miden_core::{
@@ -19,30 +17,14 @@ use miden_core::{
     proof::{CURRENT_PVM_VERIFIER_ROOT, CURRENT_VM_VERIFIER_ROOT, MAX_STARK_PROOF_BYTES},
 };
 use miden_crypto::stark::{
-    Preprocessed, PreprocessedValidationError, StarkConfig, VerifierInstance, lmcs::Lmcs,
-    proof::StarkProofData, verifier::VerifierError,
+    PreprocessedValidationError, StarkConfig, VerifierInstance, lmcs::Lmcs, proof::StarkProofData,
+    verifier::VerifierError,
 };
 use miden_serde_utils::deserialize_schema_exact;
 use serde::de::DeserializeOwned;
 use serde_wincode::{SerdeCompat, wincode};
 
-/// Commitment to the fixed And8 table under the canonical Eidos PCS parameters.
-const EIDOS_PREPROCESSED_COMMITMENT: [u64; 4] = [
-    7435130241103350969,
-    2209492810180294937,
-    2763208909109372110,
-    5080896414781165458,
-];
-const _: () = assert!(config::LOG_BLOWUP == 3);
-
 type PreprocessedCommitment<SC> = <<SC as StarkConfig<Felt, QuadFelt>>::Lmcs as Lmcs>::Commitment;
-
-#[cfg(feature = "std")]
-type PreprocessedCache = std::collections::HashMap<(TypeId, u8), Box<dyn Any + Send + Sync>>;
-
-#[cfg(feature = "std")]
-static PREPROCESSED_COMMITMENTS: std::sync::OnceLock<std::sync::Mutex<PreprocessedCache>> =
-    std::sync::OnceLock::new();
 
 // RE-EXPORTS
 // ================================================================================================
@@ -353,15 +335,33 @@ impl Verifier {
         match stark.hash_fn() {
             HashFunction::Blake3_256 => {
                 let config = config::blake3_256_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes, None)
+                self.verify_stark_proof(
+                    &config,
+                    &public_values,
+                    &aux_inputs,
+                    proof_bytes,
+                    config::BLAKE3_PREPROCESSED_COMMITMENT.into(),
+                )
             },
             HashFunction::Rpo256 => {
                 let config = config::rpo_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes, None)
+                self.verify_stark_proof(
+                    &config,
+                    &public_values,
+                    &aux_inputs,
+                    proof_bytes,
+                    config::RPO_PREPROCESSED_COMMITMENT.into(),
+                )
             },
             HashFunction::Rpx256 => {
                 let config = config::rpx_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes, None)
+                self.verify_stark_proof(
+                    &config,
+                    &public_values,
+                    &aux_inputs,
+                    proof_bytes,
+                    config::RPX_PREPROCESSED_COMMITMENT.into(),
+                )
             },
             HashFunction::Eidos => {
                 let config = config::eidos_config(pcs_params, config::RELATION_DIGEST);
@@ -370,16 +370,28 @@ impl Verifier {
                     &public_values,
                     &aux_inputs,
                     proof_bytes,
-                    Some(eidos_preprocessed_commitment()),
+                    config::EIDOS_PREPROCESSED_COMMITMENT.into(),
                 )
             },
             HashFunction::Poseidon2 => {
                 let config = config::poseidon2_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes, None)
+                self.verify_stark_proof(
+                    &config,
+                    &public_values,
+                    &aux_inputs,
+                    proof_bytes,
+                    config::POSEIDON2_PREPROCESSED_COMMITMENT.into(),
+                )
             },
             HashFunction::Keccak => {
                 let config = config::keccak_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes, None)
+                self.verify_stark_proof(
+                    &config,
+                    &public_values,
+                    &aux_inputs,
+                    proof_bytes,
+                    config::KECCAK_PREPROCESSED_COMMITMENT.into(),
+                )
             },
         }
         .map_err(|error| VerificationError::StarkVerificationError(program_root, Box::new(error)))
@@ -406,11 +418,11 @@ impl Verifier {
         public_values: &[Felt],
         aux_inputs: &[Felt],
         proof_bytes: &[u8],
-        fixed_preprocessed_commitment: Option<PreprocessedCommitment<SC>>,
+        preprocessed_commitment: PreprocessedCommitment<SC>,
     ) -> Result<(u32, usize), StarkVerificationError>
     where
-        SC: StarkConfig<Felt, QuadFelt> + 'static,
-        PreprocessedCommitment<SC>: Clone + Send + Sync + DeserializeOwned + 'static,
+        SC: StarkConfig<Felt, QuadFelt>,
+        PreprocessedCommitment<SC>: DeserializeOwned,
     {
         if proof_bytes.len() > MAX_STARK_PROOF_BYTES {
             return Err(StarkVerificationError::ProofTooLarge {
@@ -440,58 +452,13 @@ impl Verifier {
         )
         .map_err(|error| StarkVerificationError::Verifier(VerifierError::from(error)))?;
 
-        let preprocessed_commitment = fixed_preprocessed_commitment
-            .or_else(|| cached_preprocessed_commitment(&statement, config));
-        VerifierInstance::new(config, &statement, preprocessed_commitment)?
+        VerifierInstance::new(config, &statement, Some(preprocessed_commitment))?
             .verify(&proof, challenger)?;
 
         let log_max_height =
             u32::from(proof.log_trace_heights().iter().copied().max().unwrap_or(0));
         Ok((log_max_height, config.lmcs().alignment()))
     }
-}
-
-#[cfg(feature = "std")]
-fn cached_preprocessed_commitment<SC>(
-    statement: &Statement<Felt, QuadFelt, MidenMultiAir>,
-    config: &SC,
-) -> Option<PreprocessedCommitment<SC>>
-where
-    SC: StarkConfig<Felt, QuadFelt> + 'static,
-    PreprocessedCommitment<SC>: Clone + Send + Sync + 'static,
-{
-    let key = (TypeId::of::<SC>(), config.pcs().log_blowup());
-    let mut cache = PREPROCESSED_COMMITMENTS
-        .get_or_init(Default::default)
-        .lock()
-        .expect("preprocessed commitment cache poisoned");
-
-    if let Some(value) = cache.get(&key) {
-        return value
-            .downcast_ref::<Option<PreprocessedCommitment<SC>>>()
-            .expect("preprocessed commitment cache type mismatch")
-            .clone();
-    }
-
-    let value =
-        Preprocessed::build(statement, config).map(|preprocessed| preprocessed.commitment());
-    cache.insert(key, Box::new(value.clone()));
-    value
-}
-
-fn eidos_preprocessed_commitment() -> PreprocessedCommitment<config::EidosConfig> {
-    EIDOS_PREPROCESSED_COMMITMENT.into()
-}
-
-#[cfg(not(feature = "std"))]
-fn cached_preprocessed_commitment<SC>(
-    statement: &Statement<Felt, QuadFelt, MidenMultiAir>,
-    config: &SC,
-) -> Option<PreprocessedCommitment<SC>>
-where
-    SC: StarkConfig<Felt, QuadFelt> + 'static,
-{
-    Preprocessed::build(statement, config).map(|preprocessed| preprocessed.commitment())
 }
 
 impl Default for Verifier {
@@ -916,9 +883,9 @@ mod tests {
         )
         .unwrap();
 
-        let commitment =
-            Preprocessed::build(&statement, &config).map(|preprocessed| preprocessed.commitment());
+        let commitment = miden_crypto::stark::Preprocessed::build(&statement, &config)
+            .map(|preprocessed| preprocessed.commitment());
 
-        assert_eq!(commitment, Some(eidos_preprocessed_commitment()));
+        assert_eq!(commitment, Some(config::EIDOS_PREPROCESSED_COMMITMENT.into()));
     }
 }

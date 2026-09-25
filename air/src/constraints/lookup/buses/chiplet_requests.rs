@@ -5,19 +5,17 @@
 //! The U32DIV range-check batch shares this column because its opcode is disjoint from every
 //! chiplet-request branch and its degree fits the column bound.
 //!
-//! Every interaction is folded into a single [`super::super::LookupColumn::group`] call.
+//! Every interaction is folded into a single [`crate::lookup::LookupColumn::group`] call.
 
 use core::array;
 
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE, field::PrimeCharacteristicRing, operations::opcodes};
 
+use super::super::operations::{aead_stream, merkle};
 use crate::{
     constraints::lookup::{
         main_air::{MainBusContext, MainLookupBuilder},
-        messages::{
-            AceInitMsg, AeadEidosCompressionInputMsg, AeadStreamRequestMsg, BitwiseMsg, HasherMsg,
-            KernelRomMsg, MemoryMsg, RangeMsg,
-        },
+        messages::{AceInitMsg, BitwiseMsg, HasherMsg, KernelRomMsg, MemoryMsg, RangeMsg},
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
     trace::{
@@ -57,8 +55,6 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     let h = dec.hasher_state;
     let group_count = dec.group_count;
     let helper0 = user_helpers[0];
-    let merkle_direction_bit = user_helpers[1];
-    let merkle_y3 = user_helpers[5];
     let clk = local.system.clk;
     let sys_ctx = local.system.ctx;
     let sys_ctx_next = next.system.ctx;
@@ -67,10 +63,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     let stk_next_0 = stk_next.get(0);
     let log_addr = user_helpers[HELPER_ADDR_IDX];
 
-    // Constants reused across COMPRESS / MPVERIFY / MRUPDATE / END / LOGPRECOMPILE.
-    // Strides are measured in controller-trace rows.
+    // Offset to the last controller row of a compression.
     let last_off: LB::Expr = LB::Expr::from_u16((CONTROLLER_ROWS_PER_HASHER_OP - 1) as u16);
-    let cycle_len: LB::Expr = LB::Expr::from_u16(CONTROLLER_ROWS_PER_HASHER_OP as u16);
 
     // Shared (ctx, addr, clk) triple for MLOAD / MSTORE / MLOADW / MSTOREW: all read from
     // `s0` with the current system context and clock.
@@ -281,100 +275,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                         );
                     }
 
-                    // --- MPVERIFY ---
-                    {
-                        let cycle_len = cycle_len.clone();
-                        g.batch(
-                            "mpverify",
-                            op_flags.mpverify(),
-                            move |b| {
-                                let helper0: LB::Expr = helper0.into();
-                                let mp_index = stk.get(5).into();
-                                let mp_depth: LB::Expr = stk.get(4).into();
-                                let stk_word_0 = array::from_fn(|i| stk.get(i).into());
-                                let old_root = array::from_fn(|i| stk.get(6 + i).into());
-                                b.remove(
-                                    "mpverify_init",
-                                    HasherMsg::merkle_verify_init(
-                                        helper0.clone(),
-                                        mp_index,
-                                        merkle_direction_bit.into(),
-                                        stk_word_0,
-                                    ),
-                                    Deg { v: 5, u: 6 },
-                                );
-                                let return_addr = helper0 + mp_depth * cycle_len - LB::Expr::ONE;
-                                b.remove(
-                                    "mpverify_return",
-                                    HasherMsg::return_hash(return_addr, old_root),
-                                    Deg { v: 5, u: 6 },
-                                );
-                                b.remove(
-                                    "mpverify_merkle_y3",
-                                    RangeMsg { value: merkle_y3.into() },
-                                    Deg { v: 5, u: 6 },
-                                );
-                            },
-                            Deg { v: 7, u: 8 }, // (V, U) = (2 + 5, 3 + 5)
-                        );
-                    }
-
-                    // --- MRUPDATE ---
-                    {
-                        let cycle_len = cycle_len.clone();
-                        g.batch(
-                            "mrupdate",
-                            op_flags.mrupdate(),
-                            move |b| {
-                                let helper0: LB::Expr = helper0.into();
-                                let mr_index: LB::Expr = stk.get(5).into();
-                                let mr_depth: LB::Expr = stk.get(4).into();
-                                let stk_word_0 = array::from_fn(|i| stk.get(i).into());
-                                let stk_next_word_0 = array::from_fn(|i| stk_next.get(i).into());
-                                let old_root = array::from_fn(|i| stk.get(6 + i).into());
-                                let new_node = array::from_fn(|i| stk.get(10 + i).into());
-                                b.remove(
-                                    "mrupdate_old_init",
-                                    HasherMsg::merkle_old_init(
-                                        helper0.clone(),
-                                        mr_index.clone(),
-                                        merkle_direction_bit.into(),
-                                        stk_word_0,
-                                    ),
-                                    Deg { v: 4, u: 5 },
-                                );
-                                let old_return_addr = helper0.clone()
-                                    + mr_depth.clone() * cycle_len.clone()
-                                    - LB::Expr::ONE;
-                                b.remove(
-                                    "mrupdate_old_return",
-                                    HasherMsg::return_hash(old_return_addr, old_root),
-                                    Deg { v: 4, u: 5 },
-                                );
-                                let new_init_addr =
-                                    helper0.clone() + mr_depth.clone() * cycle_len.clone();
-                                b.remove(
-                                    "mrupdate_new_init",
-                                    HasherMsg::merkle_new_init(
-                                        new_init_addr,
-                                        mr_index,
-                                        merkle_direction_bit.into(),
-                                        new_node,
-                                    ),
-                                    Deg { v: 4, u: 5 },
-                                );
-                                let new_return_addr = helper0
-                                    + mr_depth * (cycle_len.clone() + cycle_len)
-                                    - LB::Expr::ONE;
-                                b.remove(
-                                    "mrupdate_new_return",
-                                    HasherMsg::return_hash(new_return_addr, stk_next_word_0),
-                                    Deg { v: 4, u: 5 },
-                                );
-                            },
-                            Deg { v: 7, u: 8 }, // (V, U) = (3 + 4, 4 + 4)
-                        );
-                    }
+                    merkle::emit_core_requests::<LB, _>(g, main_ctx);
 
                     // --- MLOAD / MSTORE / MLOADW / MSTOREW ---
                     // Shared (ctx, addr, clk) triple: reads the current system context, s0,
@@ -477,51 +378,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                         Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
                     );
 
-                    // --- AEAD STREAM ---
-                    let src_ptr = stk.get(5);
-                    let dst_ptr = stk.get(6);
-                    g.batch(
-                        "aead_stream",
-                        op_flags.cryptostream(),
-                        move |b| {
-                            let state = array::from_fn(|i| {
-                                if i == 0 {
-                                    stk.get(4).into()
-                                } else if i < 8 {
-                                    LB::Expr::ZERO
-                                } else {
-                                    stk.get(i - 8).into()
-                                }
-                            });
-                            b.insert(
-                                "aead_eidos_input",
-                                LB::Expr::ONE,
-                                AeadEidosCompressionInputMsg { clk: clk.into(), state },
-                                Deg { v: 4, u: 5 },
-                            );
-                            for (name, src_offset, dst_offset, lane_base) in
-                                [("aead_stream_low", 0, 0, 0), ("aead_stream_high", 4, 8, 8)]
-                            {
-                                // The stream side emits the same request from both 4-row halves
-                                // of one 8-row entry, so Core supplies multiplicity -2.
-                                b.insert(
-                                    name,
-                                    -LB::Expr::from_u16(2),
-                                    AeadStreamRequestMsg {
-                                        ctx: sys_ctx.into(),
-                                        clk: clk.into(),
-                                        src_ptr: Into::<LB::Expr>::into(src_ptr)
-                                            + LB::Expr::from_u16(src_offset),
-                                        dst_ptr: Into::<LB::Expr>::into(dst_ptr)
-                                            + LB::Expr::from_u16(dst_offset),
-                                        lane_base: LB::Expr::from_u16(lane_base),
-                                    },
-                                    Deg { v: 4, u: 5 },
-                                );
-                            }
-                        },
-                        Deg { v: 7, u: 8 }, // (V, U) = (3 + 4, 4 + 4)
-                    );
+                    aead_stream::emit_core_requests::<LB, _>(g, main_ctx);
 
                     // --- HORNERBASE / HORNEREXT ---
                     // Both ops read the evaluation point alpha from the aligned word

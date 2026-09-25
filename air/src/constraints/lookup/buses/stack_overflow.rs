@@ -4,20 +4,22 @@
 //! canonical-index witness. The opcode families are row-disjoint: MPVERIFY and MRUPDATE are
 //! no-shift operations, so neither can activate a stack-overflow add/remove.
 //!
-//! - **Right shift** (add): when an item is pushed past stack[15], record `(clk, s15, b1)` — the
+//! - **Right shift** (add): when an item is pushed past `stack[15]`, record `(clk, s15, b1)` — the
 //!   cycle, spilled value, and link to the previous overflow row.
 //! - **Left shift ∧ non-empty overflow** (remove): consume the matching `(b1, s15', b1')` row.
-//! - **DYNCALL ∧ non-empty overflow** (remove): consume `(b1, s15', hasher_state[5])` because the
-//!   caller's post-pop overflow pointer is staged there, not in `b1'` (which is reset).
+//! - **DYNCALL ∧ non-empty overflow** (remove): DYNCALL is excluded from `left_shift`; it consumes
+//!   `(b1, s15', hasher_state[5])` because the caller's post-pop overflow pointer is staged in h5
+//!   while `b1'` is reset.
 
 use p3_field::Dup;
 
+use super::super::operations::merkle;
 use crate::{
     constraints::lookup::{
         main_air::{MainBusContext, MainLookupBuilder},
-        messages::{RangeMsg, StackOverflowMsg},
+        messages::StackOverflowMsg,
     },
-    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
+    lookup::{Deg, LookupColumn, LookupGroup},
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
@@ -43,7 +45,6 @@ pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
     let b1 = local.stack.b1;
     let b1_next = next.stack.b1;
     let h5 = local.decoder.hasher_state[5];
-    let helpers = local.decoder.user_op_helpers();
 
     // `op_flags.overflow() = (b0 - 16) * h0`, degree 2. Aliased once so each removal can cheaply
     // duplicate the expression.
@@ -94,37 +95,7 @@ pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
                         Deg { v: 7, u: 8 },
                     );
 
-                    // MPVERIFY and MRUPDATE preserve stack depth, so these branches cannot
-                    // overlap any overflow-table interaction above. The top witness limb and its
-                    // doubled bound are placed in other existing columns to preserve degree 9.
-                    g.batch(
-                        "mpverify_merkle_y_low",
-                        op_flags.mpverify(),
-                        |b| {
-                            for helper in &helpers[2..5] {
-                                b.remove(
-                                    "mpverify_merkle_y_limb",
-                                    RangeMsg { value: (*helper).into() },
-                                    Deg { v: 5, u: 6 },
-                                );
-                            }
-                        },
-                        Deg { v: 7, u: 8 }, // (V, U) = (2 + 5, 3 + 5)
-                    );
-                    g.batch(
-                        "mrupdate_merkle_y_low",
-                        op_flags.mrupdate(),
-                        |b| {
-                            for helper in &helpers[2..5] {
-                                b.remove(
-                                    "mrupdate_merkle_y_limb",
-                                    RangeMsg { value: (*helper).into() },
-                                    Deg { v: 4, u: 5 },
-                                );
-                            }
-                        },
-                        Deg { v: 6, u: 7 }, // (V, U) = (2 + 4, 3 + 4)
-                    );
+                    merkle::emit_core_index_limbs::<LB, _>(g, ctx);
                 },
                 Deg { v: 7, u: 8 },
             );

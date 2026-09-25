@@ -1,4 +1,4 @@
-use alloc::{vec, vec::Vec};
+use alloc::{collections::BTreeMap, vec, vec::Vec};
 use core::{array, mem};
 
 use miden_stark_transcript::ProverChannel;
@@ -11,7 +11,14 @@ use p3_util::{log2_strict_usize, reverse_bits_len};
 use tracing::info_span;
 
 use crate::{
-    lmcs::{Lmcs, LmcsTree, proof::LeafOpening, row_list::RowList, tree_indices::TreeIndices},
+    lmcs::{
+        Lmcs, LmcsError, LmcsTree,
+        merkle_witness::MerkleWitness,
+        node_id::NodeId,
+        proof::{BatchProof, LeafOpening},
+        row_list::RowList,
+        tree_indices::TreeIndices,
+    },
     util::align::aligned_len_sum,
 };
 
@@ -179,30 +186,11 @@ where
 
         // Stream leaf openings in sorted tree index order.
         for &index in indices.iter() {
-            let opening = LeafOpening {
-                rows: self.aligned_rows(index),
-                salt: self.salt(index),
-            };
-            opening.write_to_channel(channel);
+            self.leaf_opening(index).write_to_channel(channel);
         }
 
-        let tree_depth = tree_log_height as usize;
-        let stored_depth = self.digest_layers.len() - 1;
-        let pruned_subtrees = self.rebuild_pruned_subtrees(lmcs, indices);
-
         // Emit missing sibling hashes left-to-right, bottom-to-top.
-        for sibling in indices.missing_siblings() {
-            let (depth, position) = (sibling.depth(), sibling.position());
-            let hash = if depth <= stored_depth {
-                Hash::from(self.digest_layers[depth][position])
-            } else {
-                let shift = depth - stored_depth;
-                let subtree = pruned_subtrees
-                    .binary_search_by_key(&(position >> shift), |(ancestor, _)| *ancestor)
-                    .map(|i| &pruned_subtrees[i].1)
-                    .expect("a missing sibling lies under a queried leaf's stored ancestor");
-                subtree[tree_depth - depth][position & ((1 << shift) - 1)]
-            };
+        for (_, hash) in self.missing_sibling_hashes(lmcs, indices) {
             channel.hint_commitment(hash);
         }
     }
@@ -215,6 +203,78 @@ where
     D: Copy + Default + PartialEq + Send + Sync,
     M: Matrix<F>,
 {
+    pub(crate) fn batch_proof<L>(
+        &self,
+        lmcs: &L,
+        indices: &TreeIndices,
+    ) -> Result<BatchProof<F, Hash<F, D, DIGEST_ELEMS>, SALT_ELEMS>, LmcsError>
+    where
+        L: Lmcs<F = F, Commitment = Hash<F, D, DIGEST_ELEMS>>,
+    {
+        let tree_depth = log2_strict_usize(self.height());
+        if indices.depth() as usize != tree_depth {
+            return Err(LmcsError::InvalidProof);
+        }
+
+        let openings: BTreeMap<_, _> =
+            indices.iter().map(|&index| (index, self.leaf_opening(index))).collect();
+        let leaf_hashes = openings.iter().map(|(&index, opening)| (index, opening.leaf_hash(lmcs)));
+
+        let mut siblings = self.missing_sibling_hashes(lmcs, indices);
+        let witness = MerkleWitness::build(
+            leaf_hashes,
+            tree_depth,
+            |expected| {
+                let (actual, hash) = siblings.next().ok_or(LmcsError::InvalidProof)?;
+                if actual != expected {
+                    return Err(LmcsError::InvalidProof);
+                }
+                Ok(hash)
+            },
+            |left, right| lmcs.compress(left, right),
+        )?;
+        let remaining_sibling = siblings.next();
+        debug_assert!(remaining_sibling.is_none());
+
+        Ok(BatchProof { openings, witness })
+    }
+
+    fn leaf_opening(&self, index: usize) -> LeafOpening<F, SALT_ELEMS> {
+        LeafOpening {
+            rows: self.aligned_rows(index),
+            salt: self.salt(index),
+        }
+    }
+
+    /// Rebuild only queried pruned subtrees, then yield missing siblings in transcript order.
+    fn missing_sibling_hashes<'a, L>(
+        &'a self,
+        lmcs: &L,
+        indices: &'a TreeIndices,
+    ) -> impl Iterator<Item = (NodeId, Hash<F, D, DIGEST_ELEMS>)> + 'a
+    where
+        L: Lmcs<F = F, Commitment = Hash<F, D, DIGEST_ELEMS>>,
+    {
+        let tree_depth = log2_strict_usize(self.height());
+        let stored_depth = self.digest_layers.len() - 1;
+        let pruned_subtrees = self.rebuild_pruned_subtrees(lmcs, indices);
+
+        indices.missing_siblings().map(move |sibling| {
+            let (depth, position) = (sibling.depth(), sibling.position());
+            let hash = if depth <= stored_depth {
+                Hash::from(self.digest_layers[depth][position])
+            } else {
+                let shift = depth - stored_depth;
+                let subtree = pruned_subtrees
+                    .binary_search_by_key(&(position >> shift), |(ancestor, _)| *ancestor)
+                    .map(|i| &pruned_subtrees[i].1)
+                    .expect("a missing sibling lies under a queried leaf's stored ancestor");
+                subtree[tree_depth - depth][position & ((1 << shift) - 1)]
+            };
+            (sibling, hash)
+        })
+    }
+
     /// Build a tree from domain-ordered matrices with optional salt and explicit alignment.
     ///
     /// Matrices are bit-reversed internally before storage and hashing.

@@ -48,7 +48,7 @@ use miden_crypto::{
 use miden_serde_utils::deserialize_schema_exact;
 use serde_wincode::{SerdeCompat, wincode};
 
-use crate::{MAX_STARK_PROOF_BYTES, eidos_preprocessed_commitment};
+use crate::MAX_STARK_PROOF_BYTES;
 
 // TYPES
 // ================================================================================================
@@ -193,7 +193,7 @@ fn build_from_proof_bytes(
     let statement =
         Statement::<Felt, Challenge, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
             .map_err(|e| RecursiveVerifierInputsError::StatementAssembly(e.to_string()))?;
-    let preprocessed_commitment = Some(eidos_preprocessed_commitment());
+    let preprocessed_commitment = Some(config::EIDOS_PREPROCESSED_COMMITMENT.into());
     let verifier_instance = VerifierInstance::new(&config, &statement, preprocessed_commitment)?;
 
     let (stark, _digest) = StarkProof::from_data(&verifier_instance, &proof, challenger)?;
@@ -554,7 +554,7 @@ mod tests {
             .commitment()
             .into();
 
-        let fixed: [u64; 4] = eidos_preprocessed_commitment().into();
+        let fixed = config::EIDOS_PREPROCESSED_COMMITMENT;
         assert_eq!(commitment, fixed);
     }
 

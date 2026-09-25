@@ -12,6 +12,7 @@ use miden_lifted_air::log2_strict_u8;
 use miden_stateful_hasher::{Alignable, StatefulHasher};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
+use proof::BatchProofView;
 use rand::{RngExt, SeedableRng, rngs::SmallRng};
 
 use super::*;
@@ -191,6 +192,73 @@ fn hiding_roundtrip() {
     let tree2: HidingTree<_> = config2.build_tree(matrices2);
 
     assert_ne!(tree1.root(), tree2.root());
+}
+
+fn assert_typed_streamed_parity<C, M>(
+    lmcs: &C,
+    tree: &C::Tree<M>,
+    query_indices: &[usize],
+    query_depth: u8,
+) where
+    C: Lmcs<F = Felt, Commitment = TestCommitment>,
+    M: Matrix<Felt>,
+{
+    let indices = TreeIndices::new(query_indices.iter().copied(), query_depth).unwrap();
+    let tree_depth = log2_strict_u8(tree.height());
+    let typed = lmcs.lifted_batch_proof(tree, &indices).unwrap();
+
+    let mut prover_channel = gl::prover_channel();
+    tree.prove_lifted_batch(lmcs, &indices, &mut prover_channel);
+    let (_, transcript) = prover_channel.finalize();
+    let mut verifier_channel = gl::verifier_channel(&transcript);
+    let streamed = lmcs
+        .read_lifted_batch_proof(
+            &tree.aligned_widths(),
+            &indices,
+            tree_depth,
+            &mut verifier_channel,
+        )
+        .unwrap();
+    assert!(verifier_channel.is_empty());
+
+    assert_eq!(typed.indices().collect::<Vec<_>>(), streamed.indices().collect::<Vec<_>>());
+    for index in typed.indices() {
+        assert_eq!(typed.opening(index), streamed.opening(index));
+        assert_eq!(typed.salt(index), streamed.salt(index));
+        assert_eq!(typed.leaf_hash(index), streamed.leaf_hash(index));
+        assert_eq!(typed.path(index), streamed.path(index));
+    }
+}
+
+#[test]
+fn typed_batch_proof_matches_streamed_openings() {
+    let mut rng = SmallRng::seed_from_u64(321);
+    let matrices =
+        vec![RowMajorMatrix::rand(&mut rng, 8, 3), RowMajorMatrix::rand(&mut rng, 64, 5)];
+    let lmcs = gl::test_lmcs();
+    let tree = lmcs.build_aligned_tree(matrices.clone());
+    assert_typed_streamed_parity(&lmcs, &tree, &[63, 1, 17, 1, 32, 0], 6);
+    assert_typed_streamed_parity(&lmcs, &tree, &[127, 63, 64, 0, 65], 7);
+    assert_typed_streamed_parity(&lmcs, &tree, &[], 6);
+    assert_typed_streamed_parity(&lmcs, &tree, &(0..64).collect::<Vec<_>>(), 6);
+
+    let unaligned_tree = lmcs.build_tree(matrices.clone());
+    assert_typed_streamed_parity(&lmcs, &unaligned_tree, &[63, 1, 17, 1, 32, 0], 6);
+
+    let single = lmcs.build_tree(vec![RowMajorMatrix::rand(&mut rng, 1, 2)]);
+    assert_typed_streamed_parity(&lmcs, &single, &[0, 1, 7], 3);
+
+    let hiding = hiding_lmcs(rng);
+    let hiding_tree = hiding.build_aligned_tree(matrices);
+    assert_typed_streamed_parity(&hiding, &hiding_tree, &[127, 63, 64, 0, 65], 7);
+
+    let wrong_depth = TreeIndices::new([0], 7).unwrap();
+    assert!(matches!(lmcs.batch_proof(&tree, &wrong_depth), Err(LmcsError::InvalidProof)));
+    let shallow_query = TreeIndices::new([0], 5).unwrap();
+    assert!(matches!(
+        lmcs.lifted_batch_proof(&tree, &shallow_query),
+        Err(LmcsError::InvalidProof)
+    ));
 }
 
 #[test]

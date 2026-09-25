@@ -14,7 +14,6 @@
 - [BREAKING] Replaced the per-proof-order ACE circuit registries with one order-invariant circuit per relation, changing circuit and relation digests, verifier roots, and recursive proof fixtures ([#3762](https://github.com/0xMiden/miden-vm/pull/3762)).
 - [BREAKING] Replaced repeated recursive-verifier proof-order ranking with one generated map pass, changing the VM and PVM recursive-verifier artifacts and roots; replaced `MasmConstraintsEvalConfig::stages_fold_coefficients: bool` with `fold_coefficients: Option<FoldCoefficientStaging>`.
 - [BREAKING] RocksDB SMT stores reject incompatible or unmarked nonempty databases. Rebuild these stores from key-value entries.
-- [BREAKING] Security-parameter builders take the proof-hash configuration instead of a collision-bit count; renamed the lossy Eidos packing helpers to `mask_and_pack_felt` and `mask_and_pack_word`.
 - [BREAKING] Removed the custom `Randomizable` trait and random test wrappers. Use `rand` distributions instead. `Word` now implements `StandardUniform`, and `Felt`'s default Proptest strategy is shrinkable and covers canonical and non-canonical representations. Tests that require one representation can use `arb_felt_canonical()` or `arb_felt_noncanonical()` ([#3873](https://github.com/0xMiden/miden-vm/pull/3873)).
 - Improved lifted STARK prover performance: LogUp fractions are built and accumulated in row chunks with a parallel accumulator scan, and DEEP reduction avoids element-wise buffer swaps and per-height group buffers ([#3851](https://github.com/0xMiden/miden-vm/pull/3851)).
 - [BREAKING] Reduced prover peak memory by 13-20% by pruning Merkle layers ([#3872](https://github.com/0xMiden/miden-vm/pull/3872)).
@@ -23,7 +22,6 @@
 
 #### Fixes
 
-- Corrected native and recursive Eidos proof-security estimates to account for restricted Fiat-Shamir challenges. Eidos has a 126-bit generic collision-resistance ceiling and restricted field outputs; see the [security and usage guide](docs/src/design/eidos-security.md).
 - [BREAKING] Fixed missing decoder AIR constraints that allowed `in_span` to change without a
   matching `SPAN`, `RESPAN`, or `END` operation. This changes Miden VM proofs and AIR relation
   digests. The VM recursive-verifier MAST root also changes, so consumers that pin it must update

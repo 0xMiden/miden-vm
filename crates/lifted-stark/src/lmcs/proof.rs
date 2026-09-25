@@ -3,8 +3,8 @@
 //! - [`Proof`]: Single-opening proof with rows, optional salt, and authentication path.
 //! - [`BatchProof`]: Batch opening data with per-leaf rows/salt and a [`MerkleWitness`].
 //!
-//! Use [`Lmcs::read_batch_proof`] to parse transcript hints
-//! into a [`BatchProof`] without verifying against a commitment.
+//! Use [`Lmcs::batch_proof`] to construct a proof from a tree or [`Lmcs::read_batch_proof`]
+//! to parse one from transcript hints.
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
@@ -27,7 +27,7 @@ pub struct Proof<F, C, const SALT_ELEMS: usize = 0> {
     pub siblings: Vec<C>,
 }
 
-/// Batch opening data parsed from transcript hints without verification.
+/// Batch opening data with a Merkle witness for authentication paths.
 ///
 /// Bundles opened leaf data (rows + salt) with the reconstructed [`MerkleWitness`] for
 /// authentication path queries. Indices here are leaf indices after any virtual-lift folding.
@@ -48,7 +48,7 @@ pub trait BatchProofView<F, C> {
     /// Get the opened rows for a given leaf index.
     fn opening(&self, index: usize) -> Option<&RowList<F>>;
 
-    /// Get the hash computed from an opened leaf while parsing the proof.
+    /// Get the hash computed from an opened leaf.
     fn leaf_hash(&self, index: usize) -> Option<&C>;
 
     /// Get the salt for a given leaf index.

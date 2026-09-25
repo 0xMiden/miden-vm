@@ -11,17 +11,17 @@ To refer to decoder execution trace columns, we use the following names (these a
 as in the previous section). Additionally, we denote the register containing the value at the top
 of the stack as $s_0$.
 
-| Columns | Registers |
-| :-----: | --------- |
-| $0$ | $a$ |
-| $1$--$7$ | $b_0, \ldots, b_6$ |
-| $8$--$15$ | $h_0, \ldots, h_7$ |
-| $16$ | $sp$ |
-| $17$ | $gc$ |
-| $18$ | $ox$ |
-| $19$ | `full_batch` |
-| $20$ | `batch_size_code` |
-| $21$--$22$ | $e_0, e_1$ |
+| Columns    | Registers          |
+|:----------:|--------------------|
+| $0$        | $a$                |
+| $1$--$7$   | $b_0, \ldots, b_6$ |
+| $8$--$15$  | $h_0, \ldots, h_7$ |
+| $16$       | $sp$               |
+| $17$       | $gc$               |
+| $18$       | $ox$               |
+| $19$       | `full_batch`       |
+| $20$       | `batch_size_code`  |
+| $21$--$22$ | $e_0, e_1$         |
 
 We assume that the VM exposes a flag per operation which is set to $1$ when the operation is executed, and to $0$ otherwise. The notation for such flags is $f_{opname}$. For example, when the VM executes a `PUSH` operation, flag $f_{push} = 1$. All flags are mutually exclusive - i.e., when one flag is set to $1$ all other flags are set to $0$. The flags are computed based on values in `op_bits` columns.
 
@@ -540,12 +540,12 @@ The `full_batch` and `batch_size_code` columns specify how many operation groups
 in an operation batch. Let $f$ denote `full_batch`, let $t$ denote `batch_size_code`, and let
 $A = f_{span} + f_{respan}$. The valid encodings are:
 
-| Encoding $(f, t)$ | Meaning |
-| :---------------: | ------- |
-| $(1, 0)$ | 8 groups |
-| $(0, 1)$ | 4 groups |
-| $(0, -1)$ | 2 groups |
-| $(0, 0)$ with $A = 1$ | 1 group |
+| Encoding $(f, t)$     | Meaning      |
+|:---------------------:|--------------|
+| $(1, 0)$              | 8 groups     |
+| $(0, 1)$              | 4 groups     |
+| $(0, -1)$             | 2 groups     |
+| $(0, 0)$ with $A = 1$ | 1 group      |
 | $(0, 0)$ with $A = 0$ | Inactive row |
 
 The following constraints restrict the pair to these encodings. The two inactive-row constraints

@@ -44,13 +44,13 @@ After that, chiplets are ordered by degree of constraints so that higher-degree 
 The resulting order is as follows:
 
 | Chiplet         | Row Alignment | Internal Degree | Chiplet Selector Degree | Total Degree | Columns | Chiplet Selector Flag |
-| --------------- | :----------: | :-------------: | :---------------------: | :----------: | :-----: | --------------------- |
-| Hash controller |      8       |        8        |            1            |      9       |   22    | $\{0\}$               |
-| Bitwise chiplet |      8       |        3        |            2            |      5       |   20    | $\{1, 0\}$            |
-| Memory          |      -       |        6        |            3            |      9       |   17    | $\{1, 1, 0\}$         |
-| ACE             |      -       |        5        |            4            |      9       |   16    | $\{1, 1, 1, 0\}$      |
-| Kernel ROM      |      -       |        -        |            5            |      -       |    5    | $\{1, 1, 1, 1, 0\}$   |
-| Padding         |      -       |        -        |            -            |      -       |    -    | $\{1, 1, 1, 1, 1\}$   |
+|-----------------|:-------------:|:---------------:|:-----------------------:|:------------:|:-------:|-----------------------|
+| Hash controller | 8             | 8               | 1                       | 9            | 22      | $\{0\}$               |
+| Bitwise chiplet | 8             | 3               | 2                       | 5            | 20      | $\{1, 0\}$            |
+| Memory          | -             | 6               | 3                       | 9            | 17      | $\{1, 1, 0\}$         |
+| ACE             | -             | 5               | 4                       | 9            | 16      | $\{1, 1, 1, 0\}$      |
+| Kernel ROM      | -             | -               | 5                       | -            | 5       | $\{1, 1, 1, 1, 0\}$   |
+| Padding         | -             | -               | -                       | -            | -       | $\{1, 1, 1, 1, 1\}$   |
 
 ### Additional requirements for stacking execution traces
 
@@ -84,18 +84,18 @@ cancelling each other except with the standard random-encoding collision probabi
 
 The following selection covers Core requests and their stacked-chiplet responses:
 
-| Interaction | `BusId` value |
-| ----------- | ------------- |
-| Kernel ROM call | 3 |
-| Hasher full-state input | 4 |
-| Hasher sequential absorption | 6 |
-| Hasher result/CV return | 7 |
-| Merkle verify input | 8 |
-| Merkle update old/new inputs | 9 / 10 |
-| Memory element read/write | 11 / 12 |
-| Memory word read/write | 13 / 14 |
-| Bitwise | 15 |
-| ACE initialization | 16 |
+| Interaction                  | `BusId` value |
+|------------------------------|---------------|
+| Kernel ROM call              | 3             |
+| Hasher full-state input      | 4             |
+| Hasher sequential absorption | 6             |
+| Hasher result/CV return      | 7             |
+| Merkle verify input          | 8             |
+| Merkle update old/new inputs | 9 / 10        |
+| Memory element read/write    | 11 / 12       |
+| Memory word read/write       | 13 / 14       |
+| Bitwise                      | 15            |
+| ACE initialization           | 16            |
 
 Other cross-AIR and virtual-table relations have their own IDs. The authoritative list is the
 `BusId` definition in `air/src/constraints/lookup/messages.rs`.

@@ -86,7 +86,9 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
     /// `challenges` contains exactly [`num_randomness`](Self::num_randomness)
     /// extension-field elements for this AIR. The returned `aux_trace` has width
     /// [`aux_width`](Self::aux_width) and the same height as `main`; `aux_values` has
-    /// length [`num_aux_values`](Self::num_aux_values).
+    /// length [`num_aux_values`](Self::num_aux_values). The default
+    /// [`build_aux_trace_with_preprocessed`](Self::build_aux_trace_with_preprocessed)
+    /// delegates to this method.
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<F>,
@@ -94,6 +96,22 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
         aux_inputs: &[F],
         challenges: &[EF],
     ) -> (RowMajorMatrix<EF>, Vec<EF>);
+
+    /// Build the auxiliary trace using the cached preprocessed trace when present.
+    ///
+    /// The prover supplies the preprocessed trace cached in its setup bundle:
+    /// `Some` exactly when this AIR declares preprocessed columns. AIRs that
+    /// do not need it can use the default implementation.
+    fn build_aux_trace_with_preprocessed(
+        &self,
+        main: &RowMajorMatrix<F>,
+        _preprocessed: Option<&RowMajorMatrix<F>>,
+        air_inputs: &[F],
+        aux_inputs: &[F],
+        challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        self.build_aux_trace(main, air_inputs, aux_inputs, challenges)
+    }
 
     /// Return the [`AirLayout`] describing this AIR's dimensions.
     ///

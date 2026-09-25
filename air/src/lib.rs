@@ -85,7 +85,7 @@ use constraints::{
 use logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH};
 use lookup::{
     BoundaryBuilder, Challenges, ConstraintLookupBuilder, LookupAir, LookupMessage,
-    build_logup_aux_trace,
+    build_logup_aux_trace_with_preprocessed,
 };
 use miden_core::utils::RowMajorMatrix;
 
@@ -808,6 +808,23 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for HandwrittenMidenAir {
         self.0.build_aux_trace(main, air_inputs, aux_inputs, challenges)
     }
 
+    fn build_aux_trace_with_preprocessed(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        preprocessed: Option<&RowMajorMatrix<Felt>>,
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
+        challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        self.0.build_aux_trace_with_preprocessed(
+            main,
+            preprocessed,
+            air_inputs,
+            aux_inputs,
+            challenges,
+        )
+    }
+
     fn constraint_degree(&self) -> ConstraintDegrees {
         LiftedAir::<Felt, EF>::constraint_degree(&self.0)
     }
@@ -878,11 +895,30 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<Felt>,
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
+        challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        let preprocessed = self.preprocessed_trace();
+        self.build_aux_trace_with_preprocessed(
+            main,
+            preprocessed.as_ref(),
+            air_inputs,
+            aux_inputs,
+            challenges,
+        )
+    }
+
+    fn build_aux_trace_with_preprocessed(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        preprocessed: Option<&RowMajorMatrix<Felt>>,
         _air_inputs: &[Felt],
         _aux_inputs: &[Felt],
         challenges: &[EF],
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        let (aux_trace, committed) = build_logup_aux_trace(self, main, challenges);
+        let (aux_trace, committed) =
+            build_logup_aux_trace_with_preprocessed(self, main, preprocessed, challenges);
         debug_assert_eq!(
             committed.len(),
             1,

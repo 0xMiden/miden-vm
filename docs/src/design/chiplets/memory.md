@@ -100,9 +100,9 @@ $$
 
 The above constraints ensure that $n=1$ whenever the address changes, and $n=0$ otherwise. We can then define the following constraints to make sure values in columns `d0` and `d1` contain either the delta between addresses or between clock cycles.
 
-| Condition | Constraint                                      | Comments                                                                                                                                   |
-| --------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| $n=1$     | $(a' - a) - (2^{16} \cdot d_1' + d_0') = 0$     | When the address changes, columns `d0` and `d1` at the next row should contain the delta between the old and the new address.              |
+| Condition | Constraint                                  | Comments                                                                                                                                   |
+|-----------|---------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
+| $n=1$     | $(a' - a) - (2^{16} \cdot d_1' + d_0') = 0$ | When the address changes, columns `d0` and `d1` at the next row should contain the delta between the old and the new address.              |
 | $n=0$     | $(i' - i) - (2^{16} \cdot d_1' + d_0') = 0$ | When the address remains the same, columns `d0` and `d1` at the next row should contain the delta between the old and the new clock cycle. |
 
 We can combine the above constraints as follows:
@@ -147,10 +147,10 @@ $$
 
 We can then define the following constraints to make sure values in columns `d0` and `d1` contain the delta between contexts, between addresses, or between clock cycles.
 
-| Condition            | Constraint                                      | Comments                                                                                                                                                         |
-| -------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| $n_0=1$              | $(c' - c) - (2^{16} \cdot d_1' + d_0') = 0$     | When the context changes, columns `d0` and `d1` at the next row should contain the delta between the old and the new contexts.                                   |
-| $n_0=0$ <br /> $n_1=1$ | $(a' - a) - (2^{16} \cdot d_1' + d_0') = 0$     | When the context remains the same but the address changes, columns `d0` and `d1` at the next row should contain the delta between the old and the new addresses. |
+| Condition              | Constraint                                  | Comments                                                                                                                                                         |
+|------------------------|---------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| $n_0=1$                | $(c' - c) - (2^{16} \cdot d_1' + d_0') = 0$ | When the context changes, columns `d0` and `d1` at the next row should contain the delta between the old and the new contexts.                                   |
+| $n_0=0$ <br /> $n_1=1$ | $(a' - a) - (2^{16} \cdot d_1' + d_0') = 0$ | When the context remains the same but the address changes, columns `d0` and `d1` at the next row should contain the delta between the old and the new addresses. |
 | $n_0=0$ <br /> $n_1=0$ | $(i' - i) - (2^{16} \cdot d_1' + d_0') = 0$ | When both the context and the address remain the same, columns `d0` and `d1` at the next row should contain the delta between the old and the new clock cycle.   |
 
 We can combine the above constraints as follows:
@@ -347,12 +347,12 @@ That is, if $v_i$ is not written to, then either its value needs to be copied ov
 Each active memory row provides one typed [LogUp](../lookups/logup.md) message. The message domain
 identifies the access kind, and the payload identifies the accessed value:
 
-| Access kind | `BusId` | Payload |
-| ----------- | ------- | ------- |
-| element read | `MemoryReadElement` | $(ctx, addr, clk, value)$ |
-| element write | `MemoryWriteElement` | $(ctx, addr, clk, value)$ |
-| word read | `MemoryReadWord` | $(ctx, addr, clk, v_0, v_1, v_2, v_3)$ |
-| word write | `MemoryWriteWord` | $(ctx, addr, clk, v_0, v_1, v_2, v_3)$ |
+| Access kind   | `BusId`              | Payload                                |
+|---------------|----------------------|----------------------------------------|
+| element read  | `MemoryReadElement`  | $(ctx, addr, clk, value)$              |
+| element write | `MemoryWriteElement` | $(ctx, addr, clk, value)$              |
+| word read     | `MemoryReadWord`     | $(ctx, addr, clk, v_0, v_1, v_2, v_3)$ |
+| word write    | `MemoryWriteWord`    | $(ctx, addr, clk, v_0, v_1, v_2, v_3)$ |
 
 ##### Memory row value {#memory-row-value}
 

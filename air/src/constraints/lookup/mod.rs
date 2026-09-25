@@ -6,6 +6,7 @@
 //! - [`chiplet_air`]: chiplet-trace lookup columns and their shared row context.
 //! - [`miden_air`]: boundary corrections and committed-final metadata.
 //! - [`messages`]: denominator encodings and bus identifiers.
+//! - [`operations`]: interactions grouped by VM operation across lookup columns.
 //! - [`buses`]: per-bus emitters used by the main and chiplet lookup AIRs.
 //! - [`extension_impls`]: adapter-specific builder hooks for constraint, prover, and debug paths.
 
@@ -16,5 +17,6 @@ mod extension_impls;
 pub mod main_air;
 pub mod messages;
 pub mod miden_air;
+pub(crate) mod operations;
 
 pub use messages::{BusId, MIDEN_MAX_MESSAGE_WIDTH};
