@@ -33,6 +33,8 @@
 
 use miden_event_handler_abi::{Felt, MerkleNode, Status, Word, guest};
 
+use crate::OutOfBounds;
+
 // CANONICALIZATION
 // ================================================================================================
 
@@ -133,15 +135,18 @@ pub fn mem_get(addr: u32) -> Felt {
 /// Reads the `out.len()` memory elements at addresses `addr..addr + out.len()` of the current
 /// context.
 ///
-/// Memory the program never wrote reads as zero, as for [`mem_get`]. Returns `false` when the
-/// range goes past the `u32` address space; `out` is unchanged then.
-pub fn mem_read(addr: u32, out: &mut [Felt]) -> bool {
+/// Memory the program never wrote reads as zero, as for [`mem_get`].
+///
+/// # Errors
+/// Returns [`OutOfBounds`] when the range goes past the `u32` address space; `out` is unchanged
+/// then.
+pub fn mem_read(addr: u32, out: &mut [Felt]) -> Result<(), OutOfBounds> {
     let len = out.len() as u32;
     // SAFETY: the module contract; `len` is the element count of `out`.
     let raw = unsafe { guest::mem_read(addr, out.as_mut_ptr(), len) };
     match status(raw) {
-        Status::Ok => true,
-        Status::OutOfBounds => false,
+        Status::Ok => Ok(()),
+        Status::OutOfBounds => Err(OutOfBounds),
         _ => fail("mem_read failed"),
     }
 }
@@ -151,13 +156,17 @@ pub fn mem_read(addr: u32, out: &mut [Felt]) -> bool {
 ///
 /// The same contract as [`mem_read`], for the root context — where kernel state lives — from a
 /// handler that runs in another context.
-pub fn mem_read_root(addr: u32, out: &mut [Felt]) -> bool {
+///
+/// # Errors
+/// Returns [`OutOfBounds`] when the range goes past the `u32` address space; `out` is unchanged
+/// then.
+pub fn mem_read_root(addr: u32, out: &mut [Felt]) -> Result<(), OutOfBounds> {
     let len = out.len() as u32;
     // SAFETY: the module contract; `len` is the element count of `out`.
     let raw = unsafe { guest::mem_read_root(addr, out.as_mut_ptr(), len) };
     match status(raw) {
-        Status::Ok => true,
-        Status::OutOfBounds => false,
+        Status::Ok => Ok(()),
+        Status::OutOfBounds => Err(OutOfBounds),
         _ => fail("mem_read_root failed"),
     }
 }
@@ -200,14 +209,16 @@ pub fn adv_stack_len() -> u32 {
 
 /// Reads `out.len()` advice-stack elements starting at `offset` (offset `0` is the top).
 ///
-/// Returns `false` when the range goes past the advice-stack length; `out` is unchanged then.
-pub fn adv_stack_read(offset: u32, out: &mut [Felt]) -> bool {
+/// # Errors
+/// Returns [`OutOfBounds`] when the range goes past the advice-stack length; `out` is unchanged
+/// then.
+pub fn adv_stack_read(offset: u32, out: &mut [Felt]) -> Result<(), OutOfBounds> {
     let len = out.len() as u32;
     // SAFETY: the module contract; `len` is the element count of `out`.
     let raw = unsafe { guest::adv_stack_read(offset, out.as_mut_ptr(), len) };
     match status(raw) {
-        Status::Ok => true,
-        Status::OutOfBounds => false,
+        Status::Ok => Ok(()),
+        Status::OutOfBounds => Err(OutOfBounds),
         _ => fail("adv_stack_read failed"),
     }
 }
