@@ -1,4 +1,9 @@
 //! SHA-512 AIR sharing compression and IO witnesses across disjoint rows.
+//!
+//! Each block spans 4096 rows. Its last sixteen rows (4080..4096) run the IO constraints
+//! in cells otherwise used by compression, while the compression block controller stays live.
+//! The same row ownership selects between compression and IO lookup batches. IO state crosses
+//! the intervening compression rows through [`Sha512IoContinuation`] rather than next-row copies.
 
 use alloc::{borrow::Cow, vec::Vec};
 
@@ -51,6 +56,8 @@ const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = io::COLUMN_SHAPE;
 
 /// Transport the IO state over the compression rows between consecutive blocks.
 /// Unique consecutive block ids also bind the first/final flags and invocation endpoints.
+/// A non-final block provides the state consumed by the next non-first block. Thus block zero
+/// must begin an invocation, and every unfinished invocation must have a successor.
 #[derive(Debug, Clone)]
 pub struct Sha512IoContinuation<E> {
     pub block_id: E,
@@ -141,6 +148,9 @@ impl LiftedAir<Felt, QuadFelt> for Sha512Air {
         let lane_half: AB::Expr = periods[compression::program::COL_LANE_HALF].into();
         let io_act: AB::Expr = local[COL_IO_ACT].into();
         builder.assert_bool(local[COL_IO_ACT]);
+        // The second half of the last padding cycle is exactly the sixteen-row IO window.
+        // Equality fixes IO ownership in both directions: it forbids IO on compression rows
+        // and requires all sixteen IO rows in each active block, so no block can omit binding.
         builder.assert_zero(
             io_act.clone()
                 - AB::Expr::from(local[compression::COL_ACT])
@@ -152,6 +162,8 @@ impl LiftedAir<Felt, QuadFelt> for Sha512Air {
         compression::eval_main_with_io(builder, 0, 0, io_act.clone());
         let io_local = IO_COLUMNS.map(|column| local[column]);
         let io_next = IO_COLUMNS.map(|column| next[column]);
+        // Adjacent-row copies are valid only within this IO window. Its last row is followed
+        // by compression cells, so the continuation bus below must carry state to the next block.
         let carry = io_act.clone() * (AB::Expr::ONE - io_periods[io::program::P_LAST].clone());
         io::eval_main_rows(builder, &io_local, &io_next, &io_periods, io_act, carry);
 
@@ -185,12 +197,16 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha512Air {
         let io_periods: [LB::Expr; io::NUM_PERIODIC_COLS] =
             core::array::from_fn(|i| periods[IO_PERIODIC_OFFSET + i].into());
         let io_act: LB::Expr = local[COL_IO_ACT].into();
+        // The ownership equation makes these Boolean, disjoint activity flags. Inactive padding
+        // enables neither batch, even though its compression controller continues advancing.
         let exec_act = LB::Expr::from(local[compression::COL_ACT]) - io_act.clone();
         // One group per column: its two batches are mutually exclusive. Separate groups
         // would multiply denominators, increasing both degree and committed area.
         for (index, kind) in compression::SHARED_BATCHES.into_iter().enumerate() {
             let comp = compression::lookup_batch_degree(kind, 0);
             let io = io::lookup_batch_degree(index, 0);
+            // Inner entries use act = 1; the outer linear flag raises both numerator and
+            // denominator degree by one. Disjoint batches share the maximum of their bounds.
             let comp = Deg { v: comp.v + 1, u: comp.u + 1 };
             let io = Deg { v: io.v + 1, u: io.u + 1 };
             let degree = Deg { v: comp.v.max(io.v), u: comp.u.max(io.u) };
@@ -241,6 +257,9 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha512Air {
         let v = |column: usize| -> LB::Expr { io_local[column].into() };
         let last = io_act.clone() * io_periods[io::program::P_LAST].clone();
         let final_block = v(io::COL_FINAL_BLOCK);
+        // Non-final blocks provide their post-row-15 state under the next block's ID. Non-first
+        // blocks must consume it at row 0. Unique consecutive IDs force these endpoints to pair:
+        // block zero must be first, and the last active block must be final.
         let provide = last.clone() * (LB::Expr::ONE - final_block.clone());
         let consume = io_act
             * io_periods[io::program::P_FIRST].clone()
@@ -265,6 +284,7 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha512Air {
                             || Sha512IoContinuation {
                                 block_id: v(io::COL_BLOCK_ID) + LB::Expr::ONE,
                                 len: v(io::COL_LEN),
+                                // Account for the message bytes consumed on the outgoing row.
                                 left: v(io::COL_LEFT)
                                     - (0..8).map(|i| v(io::COL_MSG_BEGIN + i)).sum::<LB::Expr>(),
                                 before: v(io::COL_MSG_BEGIN + 7),
@@ -281,6 +301,8 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha512Air {
                                 len: v(io::COL_LEN),
                                 left: v(io::COL_LEFT),
                                 before: v(io::COL_BEFORE),
+                                // An active chunk advances the ID on entry to this block;
+                                // compare with the preceding block's last chunk ID.
                                 input_eidos: v(io::COL_INPUT_EIDOS) - v(io::COL_CHUNK_ACTIVE),
                                 input_head: v(io::COL_INPUT_HEAD),
                             },

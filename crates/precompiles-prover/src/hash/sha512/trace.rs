@@ -12,6 +12,9 @@ use super::{
 };
 use crate::primitives::byte_pair_lut::BytePairLutRequires;
 
+/// Build the shared trace from compression and IO records registered together, in the same order.
+/// Compression fills the controller and instruction cells first; IO then replaces only the cells
+/// mapped by `IO_COLUMNS` in each block's final sixteen NOP rows.
 pub fn generate_trace(
     compression: Sha512CompressionRequires,
     io: Sha512IoRequires,
