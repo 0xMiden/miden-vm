@@ -95,7 +95,8 @@ end
 #! Output: [num_peaks, ...]
 #! Cycles: 46
 pub proc num_leaves_to_num_peaks(num_leaves: u32) -> u8
-  # count number of peaks (38 cycles for the body; 46 total including the call boundary)
+  # Packaged-exec cost is 46 (core-lib harness / fixture num_leaves_to_num_peaks).
+  # Body is u32popcnt (38); remaining cycles are call-boundary overhead.
   u32popcnt
   # => [count, ...]
 end
