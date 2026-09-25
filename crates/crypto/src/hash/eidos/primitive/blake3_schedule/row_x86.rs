@@ -128,6 +128,7 @@ unsafe fn undiagonalize(row0: &mut __m128i, row2: &mut __m128i, row3: &mut __m12
 }
 
 #[inline(always)]
+#[cfg(any(feature = "std", not(target_feature = "sse4.1"), target_feature = "avx512vl"))]
 unsafe fn blend_epi16<const IMM8: i32>(a: __m128i, b: __m128i) -> __m128i {
     unsafe {
         let bits = _mm_set_epi16(0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01);
@@ -139,6 +140,10 @@ unsafe fn blend_epi16<const IMM8: i32>(a: __m128i, b: __m128i) -> __m128i {
 }
 
 #[inline]
+#[cfg(any(
+    feature = "std",
+    all(target_feature = "sse4.1", not(target_feature = "avx512vl"))
+))]
 #[target_feature(enable = "sse4.1")]
 unsafe fn blend_sse41<const IMM8: i32>(a: __m128i, b: __m128i) -> __m128i {
     _mm_blend_epi16::<IMM8>(a, b)
@@ -225,7 +230,10 @@ macro_rules! define_compress_pre {
 }
 
 define_compress_pre!(
-    #[cfg(any(feature = "std", not(target_feature = "avx512vl")))]
+    #[cfg(any(
+        feature = "std",
+        not(any(target_feature = "avx512vl", target_feature = "sse4.1"))
+    ))]
     compress_pre,
     blend_epi16
 );
@@ -267,7 +275,10 @@ macro_rules! define_compress_raw {
 }
 
 define_compress_raw!(
-    #[cfg(any(feature = "std", not(target_feature = "avx512vl")))]
+    #[cfg(any(
+        feature = "std",
+        not(any(target_feature = "avx512vl", target_feature = "sse4.1"))
+    ))]
     compress_raw_impl,
     compress_pre
 );
@@ -313,7 +324,10 @@ macro_rules! define_compress_raw_xof {
 }
 
 define_compress_raw_xof!(
-    #[cfg(any(feature = "std", not(target_feature = "avx512vl")))]
+    #[cfg(any(
+        feature = "std",
+        not(any(target_feature = "avx512vl", target_feature = "sse4.1"))
+    ))]
     compress_raw_xof_impl,
     compress_pre
 );
