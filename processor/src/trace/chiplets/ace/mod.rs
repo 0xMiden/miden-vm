@@ -16,6 +16,13 @@ pub const PTR_OFFSET_ELEM: Felt = Felt::ONE;
 pub const PTR_OFFSET_WORD: Felt = Felt::new_unchecked(4);
 pub const MAX_NUM_ACE_WIRES: u32 = instruction::MAX_ID;
 
+/// Maximum combined number of READ and EVAL wires accepted by one `eval_circuit` operation.
+///
+/// Bounds host allocation and work before circuit evaluation begins. This should accommodate
+/// the ACE circuits of both the VM and PVM recursive verifiers, currently 6,044 and 13,912 wires
+/// respectively (see `sys/{vm,pvm}/constraints_eval.masm` in the core library).
+pub const MAX_EVAL_CIRCUIT_WIRES: u32 = 1 << 15;
+
 /// Arithmetic circuit evaluation (ACE) chiplet.
 ///
 /// This is a VM chiplet used to evaluate arithmetic circuits given some input, which is equivalent
