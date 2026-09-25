@@ -17,6 +17,10 @@
 
 #### Fixes
 
+- [BREAKING] Limited core-library sorted-array lookups to 65,536 entries per call. Larger ranges are
+  rejected before host memory is scanned, and the public `SortedArrayError` enum now includes
+  `TooManyEntries`. This affects `find_word`, `find_key_value`, and `find_half_key_value`
+  ([#3909](https://github.com/0xMiden/miden-vm/pull/3909)).
 - [BREAKING] Fixed missing decoder AIR constraints that allowed `in_span` to change without a
   matching `SPAN`, `RESPAN`, or `END` operation. This changes Miden VM proofs and AIR relation
   digests. The VM recursive-verifier MAST root also changes, so consumers that pin it must update
