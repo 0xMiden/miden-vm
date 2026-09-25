@@ -142,11 +142,11 @@ fn ed25519_rejects_advice_that_negates_both_encoded_points() {
             let AdviceMutation::ExtendStack { stack } = mutations.pop().unwrap() else {
                 panic!("coordinate witness must be advice-stack data")
             };
-            let limbs: [Felt; 8] = stack.into_elements().try_into().unwrap();
+            let mut limbs: [Felt; 8] = stack.into_elements().try_into().unwrap();
+            // Restore operand-stack limb order from the scalar advice-pop order.
+            limbs.reverse();
             let opposite_x = Ed25519Base::sub([0; 8], limbs.map(|v| v.as_canonical_u64() as u32));
-            let mut advice = AdviceStack::new();
-            advice.append_for_adv_pipe(&opposite_x.map(Felt::from_u32));
-            Ok(vec![AdviceMutation::extend_advice_stack(advice)])
+            Ok(vec![decompression_advice(opposite_x)])
         });
     // [-s]B = (-R)+[k](-A). Both advised points are valid curve points, but their signs disagree
     // with the committed encodings. Removing the parity check would accept this witness.
@@ -197,9 +197,7 @@ fn ed25519_rejects_noncanonical_x_witness_even_when_parity_matches() {
     let handler: Arc<dyn EventHandler> =
         Arc::new(move |process: &miden_processor::ProcessorState<'_>| {
             if handler_decompressions.fetch_add(1, Ordering::Relaxed) == 0 {
-                let mut advice = AdviceStack::new();
-                advice.append_for_adv_pipe(&noncanonical.map(Felt::from_u32));
-                Ok(vec![AdviceMutation::extend_advice_stack(advice)])
+                Ok(vec![decompression_advice(noncanonical)])
             } else {
                 // Keep the R witness canonical if execution reaches the second point. The
                 // failure should therefore come from A's noncanonical x witness alone.
@@ -245,9 +243,7 @@ fn ed25519_rejects_noncanonical_y_encoding() {
     let handler: Arc<dyn EventHandler> =
         Arc::new(move |process: &miden_processor::ProcessorState<'_>| {
             if handler_decompressions.fetch_add(1, Ordering::Relaxed) == 0 {
-                let mut advice = AdviceStack::new();
-                advice.append_for_adv_pipe(&canonical_x.map(Felt::from_u32));
-                Ok(vec![AdviceMutation::extend_advice_stack(advice)])
+                Ok(vec![decompression_advice(canonical_x)])
             } else {
                 handle_ed25519_decompress(process)
             }
@@ -374,6 +370,13 @@ fn run_program_with_handler(
         assert!(output.advice.stack().is_empty(), "signature witness must be consumed");
     }
     output
+}
+
+/// Encodes a coordinate witness for the decompression loader's eight scalar advice pushes.
+fn decompression_advice(x: [u32; 8]) -> AdviceMutation {
+    let mut advice = AdviceStack::new();
+    advice.append_for_adv_push(&x.map(Felt::from_u32));
+    AdviceMutation::extend_advice_stack(advice)
 }
 
 fn hex_bytes<const N: usize>(hex: &str) -> [u8; N] {
