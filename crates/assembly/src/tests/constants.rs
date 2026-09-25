@@ -47,6 +47,36 @@ fn public_constant_no_warning() -> TestResult {
 }
 
 #[test]
+fn reexported_private_constant_and_its_dependencies_do_not_warn() -> TestResult {
+    let context = TestContext::default();
+    for path in ["self", "::test::lib"] {
+        let source = source_file!(
+            &context,
+            format!(
+                "namespace test::lib\n\nconst A = 7\nconst C = A\npub use {{C as B}} from {path}\n\npub proc noop\n    nop\nend\n"
+            )
+        );
+
+        let module = context.parse_module(source)?;
+        context.assemble_library("test", None, module, [])?;
+    }
+    Ok(())
+}
+
+#[test]
+fn reexport_from_another_module_does_not_mark_same_named_local_constant_used() {
+    let context = TestContext::default();
+    let source =
+        source_file!(&context, "namespace test::lib\n\nconst A = 7\npub use {A as B} from ::dep\n");
+    let error = context.parse_module(source).expect_err("the local constant is unused");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+
+    assert!(rendered.contains("unused constant"), "{rendered}");
+    assert!(rendered.contains("const A = 7"), "{rendered}");
+}
+
+#[test]
 fn chained_unused_constants_both_warn() {
     let context = TestContext::default();
     let source = source_file!(&context, "\nconst A = 1\nconst B = A\n\nbegin\n    push.1\nend");
