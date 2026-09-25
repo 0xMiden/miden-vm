@@ -63,9 +63,9 @@ impl CircuitEvaluation {
         let eval_rows = num_eval_rows as usize;
         let wires = read_rows.checked_mul(2)?.checked_add(eval_rows)?;
         wires
-            .checked_mul(core::mem::size_of::<(QuadFelt, u32)>())?
-            .checked_add(read_rows.checked_mul(core::mem::size_of::<ReadNode>())?)?
-            .checked_add(eval_rows.checked_mul(core::mem::size_of::<EvalNode>())?)
+            .checked_mul(size_of::<(QuadFelt, u32)>())?
+            .checked_add(read_rows.checked_mul(size_of::<ReadNode>())?)?
+            .checked_add(eval_rows.checked_mul(size_of::<EvalNode>())?)
     }
 
     /// Allocates storage for a circuit with the given READ and EVAL row counts.
