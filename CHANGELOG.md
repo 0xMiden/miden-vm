@@ -7,6 +7,7 @@
 - [BREAKING] Add a precompile prover memory budget, with a 64GiB default ([#3799](https://github.com/0xMiden/miden-vm/pull/3799)).
 - [BREAKING] Share one Lagrange basis across periodic columns of a period ([#3847](https://github.com/0xMiden/miden-vm/pull/3847)).
 - [BREAKING] Added proven SHA-512 hashing and Ed25519 signature verification to the precompile VM and core library ([#3867](https://github.com/0xMiden/miden-vm/issues/3867)).
+- [BREAKING] Added P-256 curve support, a deferred SHA-256 precompile chiplet, and ECDSA P-256/SHA-256 signature verification and public-key recovery to the core library ([#3896](https://github.com/0xMiden/miden-vm/pull/3896)).
 
 #### Changes
 

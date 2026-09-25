@@ -298,21 +298,21 @@ mod tests {
     #[test]
     fn pvm_row_geometry_is_the_one_the_hook_was_rendered_from() {
         let geometry = live_geometry();
-        assert_eq!(geometry.preprocessed, vec![0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(geometry.main, vec![104, 112, 72, 8, 40, 48, 32, 24, 24, 48, 64]);
-        assert_eq!(geometry.aux, vec![40, 40, 24, 8, 24, 56, 8, 16, 24, 32, 40]);
+        assert_eq!(geometry.preprocessed, vec![0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(geometry.main, vec![104, 112, 72, 8, 40, 48, 32, 24, 24, 48, 64, 40]);
+        assert_eq!(geometry.aux, vec![40, 40, 24, 8, 24, 56, 8, 16, 24, 32, 40, 24]);
         assert_eq!(geometry.quotient, 8);
-        assert_eq!(geometry.row_felts(), 1_808);
-        assert_eq!(geometry.row_blocks(), 226);
+        assert_eq!(geometry.row_felts(), 1_936);
+        assert_eq!(geometry.row_blocks(), 242);
 
         let plan = pvm_scatter_plan(&geometry).expect("scatter plan");
-        assert_eq!(plan.segment_count(), 24, "one segment per occupied per-chiplet block");
-        assert_eq!(plan.dispatched_slots(), 22, "main and aux are the order-dependent groups");
+        assert_eq!(plan.segment_count(), 26, "one segment per occupied per-chiplet block");
+        assert_eq!(plan.dispatched_slots(), 24, "main and aux are the order-dependent groups");
         assert_eq!(
             pvm_scatter_table_layout(&geometry).unwrap(),
             PvmScatterTableLayout {
-                proof_order_pairs: 4..48,
-                pipe_digests: 48..92,
+                proof_order_pairs: 4..52,
+                pipe_digests: 52..96,
             }
         );
     }
@@ -360,7 +360,7 @@ mod tests {
             panic!("a partially occupied group must be refused");
         };
         assert!(
-            error.contains("preprocessed commitment group is occupied by 2 of 11"),
+            error.contains("preprocessed commitment group is occupied by 2 of 12"),
             "unexpected refusal: {error}"
         );
     }
@@ -371,7 +371,7 @@ mod tests {
     fn scatter_plan_refuses_to_outgrow_the_reserved_table() {
         let base = live_geometry();
         // Give every chiplet a distinct main and aux width, so the `pipe_k` set grows a word at a
-        // time until the digests no longer fit behind the twenty-two dispatch pairs.
+        // time until the digests no longer fit behind the twenty-four dispatch pairs.
         let geometry = PvmOodGeometry {
             preprocessed: base.preprocessed.clone(),
             main: (0..NUM_CHIPLETS).map(|i| 32 * (i + 1)).collect(),

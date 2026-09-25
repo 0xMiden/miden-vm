@@ -1,0 +1,47 @@
+use miden::core::precompiles
+
+# Pinned to the Rust-side Sha256Precompile constants. DOMAIN_TAG identifies the registered SHA-256
+# precompile domain; ASSERT_OP_ID identifies the assertion operation within that domain. The digest
+# occupies one CHUNKS block.
+const DOMAIN_TAG = 16780289
+const ASSERT_OP_ID = 0
+const SHA256_DIGEST_EVENT = event("miden::precompiles::hashes::sha256::digest")
+
+# Fixed lanes of `init(DOMAIN_TAG, [ASSERT_OP_ID, len_bytes, 0])`.
+const ASSERT_INIT_CV_0 = 4280581857109609473
+const ASSERT_INIT_CV_1 = 2688637132020383744
+const ASSERT_INIT_CV_2_BASE = 1947077364412317696
+const ASSERT_INIT_CV_3 = 6620516959492505600
+
+#! Hashes a variable-length byte message using the deferred SHA-256 precompile.
+#!
+#! Input:  [in_ptr, len_bytes, out_ptr, ...]
+#! Output: [...] (eight packed little-endian u32 digest limbs written to out_ptr)
+#!
+#! Both pointers must be word-aligned. Input memory holds bytes packed little-endian into u32
+#! limbs; unused bytes and felts in the final 32-byte chunk must be zero. The message length must
+#! fit the configured max_hash_len_bytes execution limit. Input and output memory may overlap.
+#! Advice is untrusted: the output chunk is bound by the logged SHA-256 assertion.
+pub proc hash_bytes_mem(in_ptr: ptr<u32>, len_bytes: u32, out_ptr: ptr<u32>)
+    emit.SHA256_DIGEST_EVENT
+
+    dup.1 add.31 u32div.32
+    dup eq.0 add swap
+    exec.precompiles::register_chunks_mem
+    # => [PREIMAGE_CHUNKS_DIGEST, len_bytes, out_ptr, ...]
+    movup.5
+    # => [out_ptr, PREIMAGE_CHUNKS_DIGEST, len_bytes, ...]
+
+    adv_pushw dup.4 mem_storew_le dropw
+    adv_pushw dup.4 add.4 mem_storew_le dropw
+    exec.precompiles::register_chunks_mem_1
+    # => [EXPECTED_DIGEST_CHUNKS_DIGEST, PREIMAGE_CHUNKS_DIGEST, len_bytes, ...]
+    swapw movup.8
+    # => [len_bytes, PREIMAGE_CHUNKS_DIGEST, EXPECTED_DIGEST_CHUNKS_DIGEST, ...]
+    u32assert.err="SHA-256 preimage length must fit in u32"
+    push.ASSERT_INIT_CV_2_BASE add
+    push.ASSERT_INIT_CV_3 swap push.ASSERT_INIT_CV_1 push.ASSERT_INIT_CV_0
+    # => [CV, PREIMAGE_CHUNKS_DIGEST, EXPECTED_DIGEST_CHUNKS_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
+    exec.precompiles::log_deferred
+end

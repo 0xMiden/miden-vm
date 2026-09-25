@@ -5,7 +5,7 @@ use miden_core::Felt;
 use super::spec::{Limbs, UintSpec};
 use crate::math::{
     ed25519_base::Ed25519Base, ed25519_order::Ed25519Order, ed25519_scalar::Ed25519Scalar,
-    k1_base::K1Base, k1_scalar::K1Scalar, u256::U256,
+    k1_base::K1Base, k1_scalar::K1Scalar, p256_base::P256Base, p256_scalar::P256Scalar, u256::U256,
 };
 
 /// VM-owned store pointer for the U256 wrapping-domain bound (`2^256 - 1`).
@@ -20,6 +20,10 @@ pub const ED25519_BASE_BOUND_PTR: u32 = 4;
 pub const ED25519_SCALAR_BOUND_PTR: u32 = 5;
 /// VM-owned store pointer for the full Ed25519 group-order bound (`8*l - 1`).
 pub const ED25519_ORDER_BOUND_PTR: u32 = 6;
+/// VM-owned store pointer for the P-256 base-field bound (`p - 1`).
+pub const P256_BASE_BOUND_PTR: u32 = 14;
+/// VM-owned store pointer for the P-256 scalar-field bound (`n - 1`).
+pub const P256_SCALAR_BOUND_PTR: u32 = 15;
 
 /// Fixed uint arithmetic domains supported by the native uint precompile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,17 +40,23 @@ pub enum UintDomain {
     Ed25519Scalar,
     /// Full Ed25519 group-order ring.
     Ed25519Order,
+    /// P-256 base field.
+    P256Base,
+    /// P-256 scalar field.
+    P256Scalar,
 }
 
 impl UintDomain {
     /// All fixed domains in deterministic precompile initialization order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 8] = [
         Self::U256,
         Self::K1Base,
         Self::K1Scalar,
         Self::Ed25519Base,
         Self::Ed25519Scalar,
         Self::Ed25519Order,
+        Self::P256Base,
+        Self::P256Scalar,
     ];
 
     /// Returns the supported domain for a local metadata identifier.
@@ -58,6 +68,8 @@ impl UintDomain {
             id if id == <Ed25519Base as UintSpec>::ID => Some(Self::Ed25519Base),
             id if id == <Ed25519Scalar as UintSpec>::ID => Some(Self::Ed25519Scalar),
             id if id == <Ed25519Order as UintSpec>::ID => Some(Self::Ed25519Order),
+            id if id == <P256Base as UintSpec>::ID => Some(Self::P256Base),
+            id if id == <P256Scalar as UintSpec>::ID => Some(Self::P256Scalar),
             _ => None,
         }
     }
@@ -71,6 +83,8 @@ impl UintDomain {
             Self::Ed25519Base => <Ed25519Base as UintSpec>::ID,
             Self::Ed25519Scalar => <Ed25519Scalar as UintSpec>::ID,
             Self::Ed25519Order => <Ed25519Order as UintSpec>::ID,
+            Self::P256Base => <P256Base as UintSpec>::ID,
+            Self::P256Scalar => <P256Scalar as UintSpec>::ID,
         }
     }
 
@@ -83,6 +97,8 @@ impl UintDomain {
             Self::Ed25519Base => ED25519_BASE_BOUND_PTR,
             Self::Ed25519Scalar => ED25519_SCALAR_BOUND_PTR,
             Self::Ed25519Order => ED25519_ORDER_BOUND_PTR,
+            Self::P256Base => P256_BASE_BOUND_PTR,
+            Self::P256Scalar => P256_SCALAR_BOUND_PTR,
         }
     }
 
@@ -95,6 +111,8 @@ impl UintDomain {
             ED25519_BASE_BOUND_PTR => Some(Self::Ed25519Base),
             ED25519_SCALAR_BOUND_PTR => Some(Self::Ed25519Scalar),
             ED25519_ORDER_BOUND_PTR => Some(Self::Ed25519Order),
+            P256_BASE_BOUND_PTR => Some(Self::P256Base),
+            P256_SCALAR_BOUND_PTR => Some(Self::P256Scalar),
             _ => None,
         }
     }
@@ -108,6 +126,8 @@ impl UintDomain {
             Self::Ed25519Base => <Ed25519Base as UintSpec>::ENCODED_MODULUS,
             Self::Ed25519Scalar => <Ed25519Scalar as UintSpec>::ENCODED_MODULUS,
             Self::Ed25519Order => <Ed25519Order as UintSpec>::ENCODED_MODULUS,
+            Self::P256Base => <P256Base as UintSpec>::ENCODED_MODULUS,
+            Self::P256Scalar => <P256Scalar as UintSpec>::ENCODED_MODULUS,
         }
     }
 
@@ -120,6 +140,8 @@ impl UintDomain {
             Self::Ed25519Base => <Ed25519Base as UintSpec>::IS_PRIME_FIELD,
             Self::Ed25519Scalar => <Ed25519Scalar as UintSpec>::IS_PRIME_FIELD,
             Self::Ed25519Order => <Ed25519Order as UintSpec>::IS_PRIME_FIELD,
+            Self::P256Base => <P256Base as UintSpec>::IS_PRIME_FIELD,
+            Self::P256Scalar => <P256Scalar as UintSpec>::IS_PRIME_FIELD,
         }
     }
 
@@ -132,6 +154,8 @@ impl UintDomain {
             Self::Ed25519Base => Ed25519Base::is_canonical(value),
             Self::Ed25519Scalar => Ed25519Scalar::is_canonical(value),
             Self::Ed25519Order => Ed25519Order::is_canonical(value),
+            Self::P256Base => P256Base::is_canonical(value),
+            Self::P256Scalar => P256Scalar::is_canonical(value),
         }
     }
 
@@ -144,6 +168,8 @@ impl UintDomain {
             Self::Ed25519Base => Ed25519Base::add(lhs, rhs),
             Self::Ed25519Scalar => Ed25519Scalar::add(lhs, rhs),
             Self::Ed25519Order => Ed25519Order::add(lhs, rhs),
+            Self::P256Base => P256Base::add(lhs, rhs),
+            Self::P256Scalar => P256Scalar::add(lhs, rhs),
         }
     }
 
@@ -156,6 +182,8 @@ impl UintDomain {
             Self::Ed25519Base => Ed25519Base::sub(lhs, rhs),
             Self::Ed25519Scalar => Ed25519Scalar::sub(lhs, rhs),
             Self::Ed25519Order => Ed25519Order::sub(lhs, rhs),
+            Self::P256Base => P256Base::sub(lhs, rhs),
+            Self::P256Scalar => P256Scalar::sub(lhs, rhs),
         }
     }
 
@@ -168,6 +196,8 @@ impl UintDomain {
             Self::Ed25519Base => Ed25519Base::mul(lhs, rhs),
             Self::Ed25519Scalar => Ed25519Scalar::mul(lhs, rhs),
             Self::Ed25519Order => Ed25519Order::mul(lhs, rhs),
+            Self::P256Base => P256Base::mul(lhs, rhs),
+            Self::P256Scalar => P256Scalar::mul(lhs, rhs),
         }
     }
 
@@ -180,6 +210,8 @@ impl UintDomain {
             Self::Ed25519Base => Ed25519Base::inv(value),
             Self::Ed25519Scalar => Ed25519Scalar::inv(value),
             Self::Ed25519Order => Ed25519Order::inv(value),
+            Self::P256Base => P256Base::inv(value),
+            Self::P256Scalar => P256Scalar::inv(value),
         }
     }
 
@@ -200,6 +232,8 @@ impl UintDomain {
             Self::Ed25519Base => Ed25519Base::minus_one(),
             Self::Ed25519Scalar => Ed25519Scalar::minus_one(),
             Self::Ed25519Order => Ed25519Order::minus_one(),
+            Self::P256Base => P256Base::minus_one(),
+            Self::P256Scalar => P256Scalar::minus_one(),
         }
     }
 
@@ -212,6 +246,8 @@ impl UintDomain {
             Self::Ed25519Base => Ed25519Base::half(),
             Self::Ed25519Scalar => Ed25519Scalar::half(),
             Self::Ed25519Order => Ed25519Order::half(),
+            Self::P256Base => P256Base::half(),
+            Self::P256Scalar => P256Scalar::half(),
         }
     }
 
@@ -224,6 +260,8 @@ impl UintDomain {
             Self::Ed25519Base => Ed25519Base::pow2_mod(exponent),
             Self::Ed25519Scalar => Ed25519Scalar::pow2_mod(exponent),
             Self::Ed25519Order => Ed25519Order::pow2_mod(exponent),
+            Self::P256Base => P256Base::pow2_mod(exponent),
+            Self::P256Scalar => P256Scalar::pow2_mod(exponent),
         }
     }
 

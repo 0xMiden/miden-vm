@@ -2218,6 +2218,7 @@ dependencies = [
  "miden-utils-sync",
  "miden-verifier",
  "num",
+ "p256",
  "p3-security",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
@@ -2308,6 +2309,7 @@ dependencies = [
 name = "miden-crypto-wycheproof-tests"
 version = "0.34.0"
 dependencies = [
+ "der",
  "ed25519-dalek",
  "hex",
  "k256",
@@ -2317,8 +2319,10 @@ dependencies = [
  "miden-crypto",
  "miden-precompiles",
  "miden-processor",
+ "p256",
  "wycheproof-ng-core",
  "wycheproof-ng-dh",
+ "wycheproof-ng-ecdsa",
  "wycheproof-ng-eddsa",
  "x25519-dalek",
 ]
@@ -2554,7 +2558,9 @@ dependencies = [
  "miden-precompiles",
  "miden-precompiles-air",
  "miden-precompiles-verifier",
+ "miden-utils-sync",
  "rand 0.10.2",
+ "rayon",
  "serde",
  "serde-wincode",
  "thiserror",
@@ -2823,6 +2829,7 @@ dependencies = [
  "miden-core-lib",
  "miden-crypto",
  "miden-vm",
+ "p256",
  "rand_chacha 0.10.0",
 ]
 
@@ -3013,6 +3020,19 @@ name = "owo-colors"
 version = "4.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
+
+[[package]]
+name = "p256"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2c9239b2dbc807adbbe147e8cf72ea7450c3a0aabe62cb8e75ff4ec22e1f72a"
+dependencies = [
+ "ecdsa",
+ "elliptic-curve",
+ "primefield",
+ "primeorder",
+ "sha2",
+]
 
 [[package]]
 name = "p3-air"
@@ -5220,6 +5240,18 @@ name = "wycheproof-ng-dh"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e204f2f9f01a3b93dfaa7cf63466bdc88beb629f8216b869ff7400cf0c53fddd"
+dependencies = [
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "wycheproof-ng-core",
+]
+
+[[package]]
+name = "wycheproof-ng-ecdsa"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1a42460081707a5c4186407a5a46ae1a477e3adbb0e93a72a98ec9a01062a50"
 dependencies = [
  "serde",
  "serde_derive",

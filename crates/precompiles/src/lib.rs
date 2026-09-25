@@ -14,13 +14,14 @@ mod math;
 pub use codec::{chunks_to_bytes_exact, n_chunks};
 pub use hash::{
     HashAssertNode, HashFunction, HashPrecompile, keccak256::Keccak256Precompile,
-    sha512::Sha512Precompile,
+    sha256::Sha256Precompile, sha512::Sha512Precompile,
 };
 pub use math::{
     curve::{
         CurveBinaryOp, CurveCoefficient, CurveId, CurveNodeRef, CurveOp, CurvePoint,
         CurvePrecompile, CurveSpec, ED25519_A_PTR, ED25519_B_PTR, ED25519_GENERATOR_X,
         ED25519_GENERATOR_Y, ED25519_GROUP_PTR, ED25519_ID, K1_A_PTR, K1_B_PTR, K1_GROUP_PTR,
+        P256_A_PTR, P256_B_PTR, P256_GENERATOR_X, P256_GENERATOR_Y, P256_GROUP_PTR, P256_ID,
         SECP256K1_BETA, SECP256K1_GENERATOR_X, SECP256K1_GENERATOR_Y, SECP256K1_ID,
         SECP256K1_LAMBDA, ShortWeierstrassSpec, curve_coefficients, ed25519_decompress_x,
         glv_decompose, phi_generator, scalar_mul_mod_n,
@@ -30,11 +31,14 @@ pub use math::{
     ed25519_scalar::Ed25519Scalar,
     k1_base::K1Base,
     k1_scalar::K1Scalar,
+    p256_base::P256Base,
+    p256_scalar::P256Scalar,
     u256::U256,
     uint::{
         ED25519_BASE_BOUND_PTR, ED25519_ORDER_BOUND_PTR, ED25519_SCALAR_BOUND_PTR,
-        K1_BASE_BOUND_PTR, K1_SCALAR_BOUND_PTR, Limbs, ONE_LIMBS, TWO_LIMBS, U256_BOUND_PTR,
-        UintBinaryOp, UintDomain, UintNodeRef, UintOp, UintPrecompile, UintSpec, ZERO_LIMBS,
+        K1_BASE_BOUND_PTR, K1_SCALAR_BOUND_PTR, Limbs, ONE_LIMBS, P256_BASE_BOUND_PTR,
+        P256_SCALAR_BOUND_PTR, TWO_LIMBS, U256_BOUND_PTR, UintBinaryOp, UintDomain, UintNodeRef,
+        UintOp, UintPrecompile, UintSpec, ZERO_LIMBS,
     },
 };
 
@@ -49,6 +53,7 @@ pub fn registry() -> PrecompileRegistry {
     PrecompileRegistry::new()
         .with_precompile(Keccak256Precompile::default())
         .with_precompile(Sha512Precompile::default())
+        .with_precompile(Sha256Precompile::default())
         .with_precompile(UintPrecompile)
         .with_precompile(CurvePrecompile)
 }

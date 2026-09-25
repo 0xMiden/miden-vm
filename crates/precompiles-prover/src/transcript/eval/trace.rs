@@ -30,8 +30,8 @@
 //! All handles are shared and counted: each recorded consumer edge increments its child's
 //! count, which becomes the provider row's `out_mult`. The designated truthy root must have
 //! no consumers; every other truthy claim must be consumed. Session additionally rejects
-//! unused value nodes. External Keccak and SHA-512 claims carry their provider row in this same
-//! ledger, so Session can forward their final use counts before laying those traces.
+//! unused value nodes. External Keccak, SHA-512, and SHA-256 claims carry their provider row in
+//! this same ledger, so Session can forward their final use counts before laying those traces.
 //!
 //! Row order is free (children flow over the bus), so the root sits at row 0 with
 //! `out_mult = 0`. Non-root zero leaves merge into one row with their summed consumer count.
@@ -288,6 +288,7 @@ enum ClaimKind {
     Value,
     Keccak { row: u32 },
     Sha512 { invocation: u32 },
+    Sha256 { invocation: u32 },
 }
 
 /// `*Requires`-pattern accumulator for the eval chip, built from explicit
@@ -924,6 +925,22 @@ impl TranscriptEvalRequires {
 
     pub(crate) fn issue_sha512(&mut self, hash: EidosDigest, invocation: u32) -> Truthy {
         let id = self.new_claim(ClaimKind::Sha512 { invocation });
+        Truthy { id, hash }
+    }
+
+    /// SHA-256 `require` records one provide per invocation. Forward only the additional uses.
+    pub(crate) fn additional_sha256_uses(&self) -> impl Iterator<Item = (u32, ProvideMult)> + '_ {
+        self.claims.iter().filter_map(|claim| match claim.kind {
+            ClaimKind::Sha256 { invocation } => Some((
+                invocation,
+                claim.consumers.checked_sub(1).expect("stray unasserted SHA-256 claim"),
+            )),
+            _ => None,
+        })
+    }
+
+    pub(crate) fn issue_sha256(&mut self, hash: EidosDigest, invocation: u32) -> Truthy {
+        let id = self.new_claim(ClaimKind::Sha256 { invocation });
         Truthy { id, hash }
     }
 

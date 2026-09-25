@@ -5,10 +5,13 @@ use miden_core::{
     deferred::{DEFERRED_AND_FRAME, Node, PrecompileWitness, TRUE_DIGEST},
     serde::{ByteWriter, Deserializable, Serializable},
 };
-use miden_crypto::hash::{keccak::Keccak256, sha2::Sha512};
+use miden_crypto::hash::{
+    keccak::Keccak256,
+    sha2::{Sha256, Sha512},
+};
 use miden_precompiles::{
-    CurveId, CurvePoint, CurvePrecompile, Keccak256Precompile, Sha512Precompile, UintDomain,
-    UintPrecompile,
+    CurveId, CurvePoint, CurvePrecompile, Keccak256Precompile, Sha256Precompile, Sha512Precompile,
+    UintDomain, UintPrecompile,
 };
 
 use crate::{
@@ -52,10 +55,56 @@ fn deferred_session_binds_full_sha512_digests_in_a_mixed_hash_session() {
     let assertion =
         state.register(Keccak256Precompile::assert_node(1, preimage, expected)).unwrap();
     state.log_statement(assertion).unwrap();
+    // SHA-256 reuses the same raw span on its own chiplet.
+    register_sha256_assertion(&mut state, &[1]);
 
     let imported = session_from_witnesses(vec![state.witness()])
         .expect("SHA-512 assertions must lower with their exact 64-byte expected digest");
     imported.finish().check();
+}
+
+fn register_sha256_assertion(state: &mut WitnessFixture, message: &[u8]) {
+    let preimage = state.register(Node::chunks_from_bytes(message)).unwrap();
+    let expected = state
+        .register(Node::chunks_from_bytes(Sha256::hash(message).as_bytes()))
+        .unwrap();
+    let assertion = state
+        .register(Sha256Precompile::assert_node(message.len() as u32, preimage, expected))
+        .unwrap();
+    state.log_statement(assertion).unwrap();
+}
+
+#[test]
+fn deferred_session_proves_sha256_at_padding_boundaries_and_multiple_blocks() {
+    let mut state = state();
+    // 55 bytes is the longest single-block message; 56 and 63 push the length into a second
+    // block; 64, 119 and 120 straddle the next block boundaries; 1000 bytes spans sixteen blocks.
+    for len in [0usize, 55, 56, 63, 64, 119, 120, 1000] {
+        let message: Vec<u8> = (0..len).map(|i| (i * 7 + 3) as u8).collect();
+        register_sha256_assertion(&mut state, &message);
+    }
+    check_wire_session(state);
+}
+
+#[test]
+fn deferred_session_rejects_false_sha256_assertion() {
+    let mut state = state();
+    let message = b"abc";
+    let preimage = state.register(Node::chunks_from_bytes(message)).unwrap();
+    let mut wrong = <[u8; 32]>::from(Sha256::hash(message));
+    wrong[0] ^= 1;
+    let expected = state.register(Node::chunks_from_bytes(&wrong)).unwrap();
+    let assertion = state.register(Sha256Precompile::assert_node(3, preimage, expected)).unwrap();
+    state.log_statement(assertion).unwrap();
+
+    let error = session_from_witnesses(vec![state.witness()]).err().unwrap();
+    assert!(
+        matches!(
+            error,
+            crate::SessionInputError::Invalid { reason: "false SHA-256 assertion", .. }
+        ),
+        "deferred evaluation must reject a false SHA-256 claim: {error}"
+    );
 }
 
 #[test]
@@ -562,4 +611,34 @@ fn translate_ec_deep_nested_msm_does_not_stackoverflow() {
         session_from_witnesses(vec![state.witness()])
             .expect("deep nested MSM must lower without stack overflow");
     });
+}
+
+#[test]
+fn deferred_session_proves_p256_msm_and_equality() {
+    let mut state = state();
+    let curve = CurveId::P256;
+    let generator = CurvePrecompile::generator_node(curve);
+    let three_g = register_affine_curve_value(
+        &mut state,
+        curve,
+        curve.mul_scalar(curve.generator(), limbs(3)).unwrap(),
+    );
+    let two = UintPrecompile::value_node(UintDomain::P256Scalar, limbs(2));
+    let n_minus_one =
+        UintPrecompile::value_node(UintDomain::P256Scalar, UintDomain::P256Scalar.minus_one());
+    state.register(two.clone()).unwrap();
+    state.register(n_minus_one.clone()).unwrap();
+    // 2·(3G) + (n−1)·G = 5G.
+    let msm = curve_msm_node(vec![(three_g, two), (generator, n_minus_one)]);
+    state.register(msm.clone()).unwrap();
+    let five_g = register_affine_curve_value(
+        &mut state,
+        curve,
+        curve.mul_scalar(curve.generator(), limbs(5)).unwrap(),
+    );
+    register_curve_equality(&mut state, msm, five_g);
+
+    let imported = session_from_witnesses(vec![state.witness()])
+        .expect("P-256 MSMs must lower through the non-GLV path");
+    imported.finish().check();
 }

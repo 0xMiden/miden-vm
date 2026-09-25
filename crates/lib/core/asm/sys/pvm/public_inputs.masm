@@ -8,10 +8,10 @@ use miden::core::sys::pvm::layout
 const NUM_PUBLIC_VALUES = 4
 const MAX_AUX_INPUTS = 0
 const NUM_AUX_INPUTS = 0
-const NUM_CHIPLETS = 11
+const NUM_CHIPLETS = 12
 
-# After two complete Eidos blocks, `h4..h10` remain in the challenger input buffer.
-const BUFFERED_SHAPE_VALUE_COUNT = 7
+# The shape stream ends on an Eidos block boundary, so no shape value remains buffered.
+const BUFFERED_SHAPE_VALUE_COUNT = 0
 
 #! Stores the deferred root as the PVM's four base-field public values.
 #!
@@ -40,15 +40,15 @@ end
 #!
 #! 1. default statement encoding `[4, D0, D1, D2, D3, 0, 0]`, where the final zeroes are
 #!    `max_aux_inputs` and `aux_inputs.len()`;
-#! 2. instance shape `[11, h0, ..., h10]` in `ChipletAir::all()` order.
+#! 2. instance shape `[12, h0, ..., h11]` in `ChipletAir::all()` order.
 #!
 #! The trusted preprocessed commitment is already buffered by `random_coin::init_seed`; with this
-#! 19-felt statement-and-shape stream, the combined 23 felts perform two Eidos compressions and
-#! leave seven felts buffered. The generic verifier appends the main commitment and flushes before
+#! 20-felt statement-and-shape stream, the combined 24 felts perform three Eidos compressions and
+#! leave no felts buffered. The generic verifier appends the main commitment and flushes before
 #! sampling, exactly matching the Rust challenger.
 #!
 #! Precondition: random-coin input_len is four after protocol parameters and the trusted setup.
-#! Postcondition: random-coin input_len is seven; output_len is zero.
+#! Postcondition: random-coin input_len is zero; output_len is zero.
 #!
 #! Inputs:  [...]
 #! Outputs: [...]
@@ -70,7 +70,7 @@ pub proc process_public_inputs()
     push.MAX_AUX_INPUTS exec.random_coin::observe_felt
     push.NUM_AUX_INPUTS exec.random_coin::observe_felt
 
-    # Instance shape: `[11, h0, ..., h10]`.
+    # Instance shape: `[12, h0, ..., h11]`.
     push.NUM_CHIPLETS exec.random_coin::observe_felt
     exec.constants::air_trace_length_logs_ptr
     repeat.NUM_CHIPLETS

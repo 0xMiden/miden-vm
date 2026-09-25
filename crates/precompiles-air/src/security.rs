@@ -29,7 +29,8 @@ use crate::{
     ChipletAir,
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
     hash::{
-        chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir, sha512::Sha512Air,
+        chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir, sha256::Sha256Air,
+        sha512::Sha512Air,
     },
     logup::{LookupAir, ProverLookupBuilder},
     primitives::byte_pair_lut::BytePairLutAir,
@@ -51,12 +52,12 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 ///
 /// This stored value must equal the shape returned by [`derive_air_shape`].
 pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 795,
+    num_composed_constraints: 907,
     max_constraint_degree: 5,
     max_combo: NUM_OOD_POINTS,
-    num_deep_terms: Some(906),
+    num_deep_terms: Some(970),
     lookup: LookupShape {
-        fractions_per_row: 294,
+        fractions_per_row: 313,
         max_message_width: 18,
     },
 };
@@ -201,7 +202,7 @@ pub const LOOKUP_POW_BITS: u32 = 0;
 ///
 /// `fixed_boundary_fraction_count` derives this value from the fixed messages; the descriptor
 /// constant must equal the derived count.
-pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 14;
+pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 19;
 
 /// The Eidos challenge-support bound less the lookup round's coefficient, in fixed point.
 pub const LOOKUP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - LOOKUP_COEFFICIENT;
@@ -263,6 +264,7 @@ fn fractions_per_row_of(air: ChipletAir) -> usize {
         ChipletAir::EcGroupAdd => shape_of(EcGroupAddAir),
         ChipletAir::EcMsm => shape_of(EcMsmAir),
         ChipletAir::Sha512 => shape_of(Sha512Air),
+        ChipletAir::Sha256 => shape_of(Sha256Air),
     }
 }
 
@@ -420,10 +422,10 @@ mod tests {
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
         const SECURITY_CAP_FP: u64 = 8_257_536;
-        const LOOKUP_BASE_FP: u64 = 7_436_920;
-        const COMPOSITION_TERM_FP: u64 = 7_626_109;
+        const LOOKUP_BASE_FP: u64 = 7_430_999;
+        const COMPOSITION_TERM_FP: u64 = 7_613_647;
         const OOD_BASE_FP: u64 = 8_073_553;
-        const DEEP_BASE_FP: u64 = 7_613_751;
+        const DEEP_BASE_FP: u64 = 7_607_298;
         const FOLDING_BASE_FP: u64 = 7_891_519;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
@@ -504,32 +506,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_043_633, 7_626_109, 7_693_931, 8_257_536, 7_760_447, 6_335_399, 8_257_536],
+                [7_037_693, 7_613_647, 7_693_931, 8_257_536, 7_760_447, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 16),
-                [6_388_343, 7_626_109, 7_039_549, 8_257_536, 7_105_087, 6_335_399, 8_257_536],
+                [6_382_422, 7_613_647, 7_039_549, 8_257_536, 7_105_087, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 19),
-                [6_191_735, 7_626_109, 6_842_942, 8_257_536, 6_908_479, 6_335_399, 8_257_536],
+                [6_185_814, 7_613_647, 6_842_942, 8_257_536, 6_908_479, 6_335_399, 8_257_536],
                 94,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_126_199, 7_626_109, 6_777_406, 8_257_536, 6_842_943, 6_335_399, 8_257_536],
+                [6_120_278, 7_613_647, 6_777_406, 8_257_536, 6_842_943, 6_335_399, 8_257_536],
                 93,
             ),
             (
                 (27, 17, 12, 4, 24),
-                [5_864_055, 7_626_109, 6_515_262, 8_257_536, 6_580_799, 6_335_399, 8_257_536],
+                [5_858_134, 7_613_647, 6_515_262, 8_257_536, 6_580_799, 6_335_399, 8_257_536],
                 89,
             ),
             (
                 (7, 0, 0, 0, 16),
-                [6_388_343, 7_626_109, 7_039_549, 7_613_751, 6_842_943, 1_353_667, 8_257_536],
+                [6_382_422, 7_613_647, 7_039_549, 7_607_298, 6_842_943, 1_353_667, 8_257_536],
                 20,
             ),
         ];
