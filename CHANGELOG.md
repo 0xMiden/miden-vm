@@ -7,6 +7,10 @@
 - [BREAKING] Reject unsorted or repeated keys in `SmtLeaf::new_multiple` and when reading serialized leaves. Invalid keys return the new `SmtLeafError::UnsortedMultipleLeafKeys` error ([#3901](https://github.com/0xMiden/miden-vm/pull/3901)).
 - [BREAKING] Fixed the `aead::decrypt` overlap check so it also covers the 4-element tag after the ciphertext; a destination placed at the tag address now fails the overlap assertion instead of overwriting the tag and failing with a tag mismatch. Layouts where the destination range only overlaps the tag are now rejected even when nothing would be written there, e.g. an empty message (`num_blocks = 0`) with `dst_ptr` at the tag address. Ranges that end at the last memory address are no longer rejected ([#3897](https://github.com/0xMiden/miden-vm/pull/3897)).
 
+#### Fixes
+
+- [BREAKING] Limited `eval_circuit` to 32,768 total READ and EVAL wires per call, rejecting oversized circuits before witness allocation or memory access to bound host resource usage ([#3908](https://github.com/0xMiden/miden-vm/pull/3908)).
+
 ## v0.34.0 (2026-09-26)
 
 #### Features
