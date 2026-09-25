@@ -17,6 +17,7 @@
 - [BREAKING] Security-parameter builders take the proof-hash configuration instead of a collision-bit count; renamed the lossy Eidos packing helpers to `mask_and_pack_felt` and `mask_and_pack_word`.
 - Improved lifted STARK prover performance: LogUp fractions are built and accumulated in row chunks with a parallel accumulator scan, and DEEP reduction avoids element-wise buffer swaps and per-height group buffers ([#3851](https://github.com/0xMiden/miden-vm/pull/3851)).
 - Reduced prover peak memory by 13-20% by pruning Merkle layers ([#3872](https://github.com/0xMiden/miden-vm/pull/3872)).
+- Optimized Eidos Merkle tree construction ([#3898](https://github.com/0xMiden/miden-vm/pull/3898)).
 
 #### Fixes
 
