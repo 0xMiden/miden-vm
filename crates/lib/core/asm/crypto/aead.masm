@@ -322,8 +322,10 @@ pub proc decrypt(key: Key, nonce: Nonce, src_ptr: ptr<felt>, dst_ptr: ptr<felt>,
     # used during encryption, the tag comparison will fail and execution will halt.
 
     # Assert source and destination memory ranges do not overlap.
+    # The source range also covers the tag word that is read back after the plaintext has
+    # been written, so its end is src_ptr + (num_blocks + 1) * 8 + 4.
     dup.10 add.1 mul.8
-    dup dup.10 add
+    dup dup.10 add add.4
     dup.11 swap u32gte
     swap dup.11 add
     dup.10 swap u32gte

@@ -635,3 +635,76 @@ fn test_decrypt_fails_on_overlap() {
     let test = build_test!(source, &[]);
     expect_assert_error_code_from_msg!(test, "source and destination ranges must not overlap");
 }
+
+/// Runs `aead::decrypt` for one data block stored at `src_ptr = 1000` (ciphertext at
+/// `[1000, 1016)`, tag at `[1016, 1020)`) with the given `dst_ptr`, then checks the first
+/// plaintext word at `dst_ptr`.
+fn decrypt_one_block_into(dst_ptr: u32) -> miden_utils_testing::Test {
+    let seed = [21_u8; 32];
+    let mut rng = ChaCha20Rng::from_seed(seed);
+
+    let key = SecretKey::with_rng(&mut rng);
+    let nonce = Nonce::with_rng(&mut rng);
+    let plaintext: Vec<Felt> = (10..18).map(Felt::new_unchecked).collect();
+    let encrypted = key
+        .encrypt_elements_with_nonce(&plaintext, &[], nonce)
+        .expect("encryption failed");
+
+    let expected_tag = encrypted.auth_tag().to_elements();
+    let key_elements = key.to_elements();
+    let nonce_elements: [Felt; 4] = encrypted.nonce().clone().into();
+    let ciphertext = encrypted.ciphertext();
+
+    let source = format!(
+        "
+    use miden::core::crypto::aead
+
+    begin
+        push.{ciphertext_0:?} push.1000 mem_storew_le dropw
+        push.{ciphertext_1:?} push.1004 mem_storew_le dropw
+        push.{ciphertext_2:?} push.1008 mem_storew_le dropw
+        push.{ciphertext_3:?} push.1012 mem_storew_le dropw
+        push.{expected_tag:?} push.1016 mem_storew_le dropw
+
+        push.1              # num_blocks
+        push.{dst_ptr}      # dst_ptr
+        push.1000           # src_ptr
+        push.{nonce_elements:?}
+        push.{key_elements:?}
+        exec.aead::decrypt
+
+        padw push.{dst_ptr} mem_loadw_le
+        push.[10,11,12,13] assert_eqw.err=\"plaintext mismatch\"
+    end
+    ",
+        ciphertext_0 = &ciphertext[0..4],
+        ciphertext_1 = &ciphertext[4..8],
+        ciphertext_2 = &ciphertext[8..12],
+        ciphertext_3 = &ciphertext[12..16],
+    );
+
+    build_test!(source.as_str(), &[])
+}
+
+#[test]
+fn test_decrypt_fails_when_destination_overlaps_tag() {
+    // dst_ptr = src_ptr + (num_blocks + 1) * 8 is the address of the tag itself. The tag is read
+    // back only after the plaintext has been written, so this layout must be rejected up front
+    // rather than failing later with a misleading tag mismatch.
+    let test = decrypt_one_block_into(1016);
+    expect_assert_error_code_from_msg!(test, "source and destination ranges must not overlap");
+}
+
+#[test]
+fn test_decrypt_allows_destination_adjacent_to_source() {
+    // Plaintext written right after the tag.
+    decrypt_one_block_into(1020)
+        .execute()
+        .expect("decrypt into dst_ptr = tag_ptr + 4 failed");
+
+    // Plaintext written right before the source range (checked with the same conservative
+    // (num_blocks + 1) * 8 destination size as before).
+    decrypt_one_block_into(984)
+        .execute()
+        .expect("decrypt into dst_ptr = src_ptr - 16 failed");
+}
