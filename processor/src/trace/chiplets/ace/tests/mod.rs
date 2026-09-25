@@ -29,6 +29,7 @@ use crate::{
     execution::eval_circuit_impl,
     fast::Memory,
     trace::chiplets::ace::{
+        MAX_EVAL_CIRCUIT_WIRES,
         instruction::{Op, decode_instruction},
         tests::circuit::{Circuit, CircuitLayout, Instruction, NodeID},
         trace::CircuitEvaluation,
@@ -40,6 +41,20 @@ mod encoder;
 
 const PTR_OFFSET_ELEM: Felt = Felt::ONE;
 const PTR_OFFSET_WORD: Felt = Felt::new_unchecked(4);
+
+#[test]
+fn eval_circuit_accepts_wire_limit() {
+    let instruction = Instruction {
+        node_l: NodeID::Input(0),
+        node_r: NodeID::Input(0),
+        op: Op::Sub,
+    };
+    // Eight inputs and a multiple of eight gates need no encoding padding.
+    let circuit =
+        Circuit::new(8, vec![], vec![instruction; MAX_EVAL_CIRCUIT_WIRES as usize - 8]).unwrap();
+    let encoded_circuit = EncodedCircuit::try_from_circuit(&circuit).unwrap();
+    verify_eval_circuit(&encoded_circuit, &[QuadFelt::ZERO; 8]);
+}
 
 #[test]
 fn test_var_plus_one() {

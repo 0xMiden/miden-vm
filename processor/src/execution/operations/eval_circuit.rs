@@ -5,7 +5,10 @@ use crate::{
     ContextId, Felt,
     errors::{AceError, AceEvalError},
     processor::{MemoryInterface, Processor, StackInterface, SystemInterface},
-    trace::chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
+    trace::chiplets::{
+        CircuitEvaluation, MAX_EVAL_CIRCUIT_WIRES, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM,
+        PTR_OFFSET_WORD,
+    },
     tracer::Tracer,
 };
 
@@ -44,7 +47,7 @@ where
 
     let circuit_evaluation =
         eval_circuit_impl(ctx, ptr, clk, num_read, num_eval, processor.memory_mut())?;
-    tracer.record_circuit_evaluation(circuit_evaluation);
+    tracer.record_circuit_evaluation(circuit_evaluation)?;
 
     Ok(())
 }
@@ -68,14 +71,13 @@ pub(crate) fn eval_circuit_impl(
     let num_eval = num_eval.as_canonical_u64();
 
     let num_wires = num_vars.saturating_add(num_eval);
-    if num_wires > MAX_NUM_ACE_WIRES as u64 {
-        const {
-            // If this fails, update the error message below
-            assert!(MAX_NUM_ACE_WIRES == (1_u32 << 30) - 1);
-        }
-        return Err(
-            AceError(format!("num of wires must be less than 2^30 but was {num_wires}")).into()
-        );
+    // Reject oversized circuits before allocating their witness or accessing memory.
+    const { assert!(MAX_EVAL_CIRCUIT_WIRES <= MAX_NUM_ACE_WIRES) };
+    if num_wires > MAX_EVAL_CIRCUIT_WIRES as u64 {
+        return Err(AceError(format!(
+            "num of wires cannot exceed {MAX_EVAL_CIRCUIT_WIRES} but was {num_wires}"
+        ))
+        .into());
     }
 
     // Ensure vars and instructions are word-aligned and non-empty. Note that variables are

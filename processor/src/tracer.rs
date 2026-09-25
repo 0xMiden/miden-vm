@@ -7,7 +7,7 @@ use miden_core::{
 };
 
 use crate::{
-    ContextId, ExecutionError,
+    AceError, ContextId, ExecutionError,
     continuation_stack::{Continuation, ContinuationStack},
     trace::{chiplets::CircuitEvaluation, utils::split_u32_into_u16},
 };
@@ -323,8 +323,15 @@ pub trait Tracer {
 
     /// Records the evaluation of a circuit.
     ///
+    /// Returns an error if recording the evaluation would exceed the tracer's resource limits.
+    ///
     /// Called by: `EVAL_CIRCUIT`.
-    fn record_circuit_evaluation(&mut self, _circuit_evaluation: CircuitEvaluation) {}
+    fn record_circuit_evaluation(
+        &mut self,
+        _circuit_evaluation: CircuitEvaluation,
+    ) -> Result<(), AceError> {
+        Ok(())
+    }
 }
 
 // OPERATION HELPER REGISTERS
