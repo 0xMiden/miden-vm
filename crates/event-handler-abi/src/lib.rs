@@ -32,7 +32,9 @@
 //! (a missing advice-map key, an out-of-bounds bulk-read range). The host traps the handler for
 //! conditions that only a defective or hostile handler can create:
 //!
-//! - a pointer range outside the guest memory, or one whose `ptr + len` computation overflows;
+//! - a pointer range outside the guest memory, or one whose `ptr + len` computation overflows; this
+//!   holds for an empty range too, so a call with a zero length still traps on a pointer past the
+//!   end of the guest memory;
 //! - a field element that is not in canonical form (`>= FIELD_MODULUS`);
 //! - a mutation that goes over a host-side size limit;
 //! - fuel exhaustion.
