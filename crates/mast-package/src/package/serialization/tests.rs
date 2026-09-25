@@ -496,7 +496,6 @@ fn package_rejects_non_root_export() {
     let package = Package {
         name: PackageId::from("test_pkg"),
         version: crate::Version::new(0, 0, 0),
-        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Library,
         mast: Arc::new(forest),
@@ -729,7 +728,6 @@ fn regression_package_deserialisation_rejects_spoofed_mast_node_digests() {
     let package = Package {
         name: PackageId::from("lib"),
         version: crate::Version::new(0, 0, 0),
-        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Library,
         mast: Arc::new(forest),
@@ -774,7 +772,6 @@ fn trusted_package_deserialisation_accepts_spoofed_mast_hashes() {
     let package = Package {
         name: PackageId::from("lib"),
         version: crate::Version::new(0, 0, 0),
-        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Library,
         mast: Arc::new(forest),
@@ -823,7 +820,6 @@ fn regression_kernel_package_deserialisation_rejects_spoofed_mast_node_digests()
     let package = Package {
         name: PackageId::from("kernel"),
         version: crate::Version::new(0, 0, 0),
-        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Kernel,
         mast: Arc::new(forest),
@@ -869,7 +865,6 @@ fn package_deserialize_from_file_rejects_spoofed_kernel_mast_node_digests() {
     let package = Package {
         name: PackageId::from("kernel"),
         version: crate::Version::new(0, 0, 0),
-        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Kernel,
         mast: Arc::new(forest),
@@ -923,7 +918,6 @@ fn trusted_kernel_package_deserialisation_accepts_spoofed_mast_hashes() {
     let package = Package {
         name: PackageId::from("kernel"),
         version: crate::Version::new(0, 0, 0),
-        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Kernel,
         mast: Arc::new(forest),
