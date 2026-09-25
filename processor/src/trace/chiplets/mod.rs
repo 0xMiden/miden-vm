@@ -29,7 +29,10 @@ mod memory;
 pub(crate) use memory::Memory;
 
 mod ace;
-pub use ace::{Ace, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD};
+pub use ace::{
+    Ace, CircuitEvaluation, MAX_EVAL_CIRCUIT_WIRES, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM,
+    PTR_OFFSET_WORD,
+};
 
 mod kernel_rom;
 pub(crate) use kernel_rom::KernelRom;
