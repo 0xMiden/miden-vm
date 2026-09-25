@@ -26,6 +26,7 @@
 - [BREAKING] Fixed the MASM printer so a printed procedure parses again: signatures keep their parameter names in the new `FunctionType::arg_names` field, and `@locals` prints its count as an integer ([#3658](https://github.com/0xMiden/miden-vm/issues/3658)).
 - [BREAKING] Changed `ProverInstance::new()` to take ownership of `ProverStatement`. `ProverInstance::prove()` now consumes the instance and returns its verifier statement with the proof. The prover can now release the main traces after their final use. This reduced measured peak memory by about 7 percent ([#3833](https://github.com/0xMiden/miden-vm/pull/3833)).
 - [BREAKING] Require `CryptoRng` for `SecretKey::with_rng` and `SecretKey::sign_with_rng` in the Falcon DSA module ([#3889](https://github.com/0xMiden/miden-vm/pull/3889)).
+- Fixed `AdviceMap` deserialization accepting a repeated key and silently keeping the last value; it now returns an error, matching `MastForestWireView` ([#3900](https://github.com/0xMiden/miden-vm/pull/3900)).
 
 #### Changes
 
