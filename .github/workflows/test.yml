@@ -6,11 +6,54 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
+
 permissions:
   contents: read
   pull-requests: read
 
 jobs:
+  classify-eidos-paths:
+    name: Classify Eidos paths
+    runs-on: ubuntu-slim
+    outputs:
+      run: ${{ steps.paths.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check for Eidos-related changes
+        id: paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          run=false
+          if [ "${EVENT_NAME}" != "pull_request" ]; then
+            run=true
+          else
+            while IFS= read -r -d '' path; do
+              case "${path}" in
+                .cargo/*|.config/nextest.toml|.github/actions/cleanup-runner/*|\
+                .github/workflows/test.yml|Cargo.lock|Cargo.toml|rust-toolchain.toml|\
+                crates/crypto/*|crates/crypto-derive/*|crates/field/*|crates/lifted-air/*|\
+                crates/lifted-stark/*|crates/serde-utils/*|crates/stark-transcript/*|\
+                crates/stateful-hasher/*)
+                  run=true
+                  break
+                  ;;
+              esac
+            done < <(git diff --name-only -z "${BASE_SHA}...${HEAD_SHA}")
+          fi
+
+          echo "run=${run}" >> "${GITHUB_OUTPUT}"
+
   test:
     name: test on warpbuild
     runs-on: warp-ubuntu-latest-x64-8x
@@ -24,7 +67,7 @@ jobs:
       # install-action commit and set tool explicitly, or zizmor's
       # impostor-commit audit can flag stale shortcut-tag hashes.
       - name: Install nextest
-        uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2.87.8
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -36,154 +79,6 @@ jobs:
         run: make test-build NEXTEST_PROFILE=ci
       - name: test
         run: make test NEXTEST_PROFILE=ci
-
-  crypto-test:
-    name: crypto test on warpbuild
-    runs-on: warp-ubuntu-latest-x64-8x
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Cleanup large tools for build space
-        uses: ./.github/actions/cleanup-runner
-      - name: Install nextest
-        uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2.87.8
-        with:
-          tool: cargo-nextest
-      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
-        with:
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
-      - name: Install rust
-        run: rustup update --no-self-update
-      - name: Run crypto tests
-        run: make test-crypto
-
-  eidos-x86-backends:
-    name: Eidos ${{ matrix.backend }} backend
-    runs-on: warp-ubuntu-latest-x64-8x
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - backend: SSE2
-            target_features: -avx2,-avx512f,-avx512vl
-            required_cpu_features: sse2
-            forbidden_target_features: avx2 avx512f avx512vl
-          - backend: AVX2
-            target_features: +avx2,-avx512f,-avx512vl
-            required_cpu_features: avx2
-            forbidden_target_features: avx512f avx512vl
-          - backend: AVX-512F/VL
-            target_features: +avx2,+avx512f,+avx512vl
-            required_cpu_features: avx2 avx512f avx512vl
-            forbidden_target_features: ""
-    env:
-      RUSTFLAGS: -C target-feature=${{ matrix.target_features }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Verify runner CPU features
-        env:
-          REQUIRED_CPU_FEATURES: ${{ matrix.required_cpu_features }}
-        run: |
-          set -euo pipefail
-
-          if [ "$(uname -m)" != "x86_64" ]; then
-            echo "::error::Eidos ${{ matrix.backend }} tests require an x86-64 runner"
-            exit 1
-          fi
-
-          lscpu
-          cpu_features=" $(awk -F: '/^flags[[:space:]]*:/{print $2; exit}' /proc/cpuinfo) "
-          for feature in ${REQUIRED_CPU_FEATURES}; do
-            if [[ "${cpu_features}" != *" ${feature} "* ]]; then
-              echo "::error::Runner does not expose required CPU feature '${feature}'"
-              exit 1
-            fi
-          done
-          echo "Runner supports Eidos ${{ matrix.backend }} execution"
-      - name: Cleanup large tools for build space
-        uses: ./.github/actions/cleanup-runner
-      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
-        with:
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
-      - name: Install rust
-        run: rustup update --no-self-update
-      - name: Install nextest
-        uses: taiki-e/install-action@b6b84cf49ebfe0176417bdce007c624f0db37f20 # v2.86.2
-        with:
-          tool: cargo-nextest
-      - name: Verify configured Rust target features
-        env:
-          FORBIDDEN_TARGET_FEATURES: ${{ matrix.forbidden_target_features }}
-          REQUIRED_TARGET_FEATURES: ${{ matrix.required_cpu_features }}
-          TARGET_FEATURES: ${{ matrix.target_features }}
-        run: |
-          set -euo pipefail
-
-          rust_cfg="$(rustc --print cfg -C "target-feature=${TARGET_FEATURES}")"
-          printf '%s\n' "${rust_cfg}"
-          for feature in ${REQUIRED_TARGET_FEATURES}; do
-            if ! grep -Fqx "target_feature=\"${feature}\"" <<<"${rust_cfg}"; then
-              echo "::error::Rust did not enable required target feature '${feature}'"
-              exit 1
-            fi
-          done
-          for feature in ${FORBIDDEN_TARGET_FEATURES}; do
-            if grep -Fqx "target_feature=\"${feature}\"" <<<"${rust_cfg}"; then
-              echo "::error::Rust unexpectedly enabled target feature '${feature}'"
-              exit 1
-            fi
-          done
-          echo "Configured Eidos target: ${{ matrix.backend }}"
-      - name: Check every miden-crypto target with the configured target features
-        # `cfg(test)` keeps otherwise-gated helpers alive, so the plain library build has to be
-        # checked on its own: once with runtime dispatch (`std`) and once with compile-time backend
-        # selection (`no_std`).
-        env:
-          RUSTFLAGS: -D warnings -C target-feature=${{ matrix.target_features }}
-        run: |
-          cargo check -p miden-crypto --all-targets
-          cargo check -p miden-crypto --lib --no-default-features
-      - name: Run Eidos backend equivalence and vector tests
-        # Disabling the crate's `std` feature makes target features select the exact backend. The
-        # default-feature crypto job above exercises runtime CPU dispatch and checks each x86-64
-        # backend directly on the runner's CPU.
-        run: cargo nextest run --profile ci -p miden-crypto --lib --no-default-features --no-tests=fail 'hash::eidos::'
-
-  doc-tests:
-    name: doc-tests
-    runs-on: warp-ubuntu-latest-x64-8x
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Cleanup large tools for build space
-        uses: ./.github/actions/cleanup-runner
-      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
-        with:
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
-      - name: Install rust
-        run: rustup update --no-self-update
-      - name: Run doc-tests
-        run: make test-docs
-
-  check-core-lib-docs:
-    name: check core library docs
-    runs-on: warp-ubuntu-latest-x64-8x
-    needs: [test, doc-tests]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Cleanup large tools for build space
-        uses: ./.github/actions/cleanup-runner
-      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
-        with:
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
-      - name: Install rust
-        run: rustup update --no-self-update
       - name: Build core library and generate documentation
         run: |
           # Build core library with documentation generation enabled
@@ -208,6 +103,139 @@ jobs:
           else
             echo "No documentation changes in crates/lib/core/docs/ - OK"
           fi
+
+  crypto-test:
+    name: crypto test on warpbuild
+    runs-on: warp-ubuntu-latest-x64-8x
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Install nextest
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        with:
+          tool: cargo-nextest
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Run crypto tests
+        run: make test-crypto
+
+  eidos-x86-backends:
+    name: Eidos x86 backends
+    needs: classify-eidos-paths
+    if: needs.classify-eidos-paths.outputs.run == 'true'
+    runs-on: warp-ubuntu-latest-x64-8x
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Inspect runner CPU
+        run: |
+          set -euo pipefail
+
+          if [ "$(uname -m)" != "x86_64" ]; then
+            echo "::error::Eidos backend tests require an x86-64 runner"
+            exit 1
+          fi
+
+          lscpu
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Install nextest
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        with:
+          tool: cargo-nextest
+      - name: Check every Eidos x86 backend
+        # `cfg(test)` keeps otherwise-gated helpers alive, so the plain library build has to be
+        # checked on its own: once with runtime dispatch (`std`) and once with compile-time backend
+        # selection (`no_std`).
+        run: |
+          set -uo pipefail
+
+          check_backend() {
+            local backend="$1"
+            local target_features="$2"
+            local required_target_features="$3"
+            local forbidden_target_features="$4"
+            local cpu_features
+            local rust_cfg
+
+            cpu_features=" $(awk -F: '/^flags[[:space:]]*:/{print $2; exit}' /proc/cpuinfo) "
+            for feature in ${required_target_features}; do
+              if [[ "${cpu_features}" != *" ${feature} "* ]]; then
+                echo "::error::Runner does not expose ${backend} CPU feature '${feature}'"
+                return 1
+              fi
+            done
+
+            rust_cfg="$(rustc --print cfg -C "target-feature=${target_features}")" || return 1
+            printf '%s\n' "${rust_cfg}"
+            for feature in ${required_target_features}; do
+              if ! grep -Fqx "target_feature=\"${feature}\"" <<<"${rust_cfg}"; then
+                echo "::error::Rust did not enable required target feature '${feature}'"
+                return 1
+              fi
+            done
+            for feature in ${forbidden_target_features}; do
+              if grep -Fqx "target_feature=\"${feature}\"" <<<"${rust_cfg}"; then
+                echo "::error::Rust unexpectedly enabled target feature '${feature}'"
+                return 1
+              fi
+            done
+            echo "Configured Eidos target: ${backend}"
+
+            RUSTFLAGS="-D warnings -C target-feature=${target_features}" \
+              cargo check -p miden-crypto --all-targets || return 1
+            RUSTFLAGS="-D warnings -C target-feature=${target_features}" \
+              cargo check -p miden-crypto --lib --no-default-features || return 1
+
+            # Disabling the crate's `std` feature makes target features select the exact backend.
+            RUSTFLAGS="-C target-feature=${target_features}" \
+              cargo nextest run --profile ci -p miden-crypto --lib --no-default-features \
+                --no-tests=fail 'hash::eidos::' || return 1
+          }
+
+          failed=0
+          if ! check_backend SSE2 '-avx2,-avx512f,-avx512vl' \
+            'sse2' 'avx2 avx512f avx512vl'; then
+            failed=1
+          fi
+          if ! check_backend AVX2 '+avx2,-avx512f,-avx512vl' \
+            'avx2' 'avx512f avx512vl'; then
+            failed=1
+          fi
+          if ! check_backend AVX-512F/VL '+avx2,+avx512f,+avx512vl' \
+            'avx2 avx512f avx512vl' ''; then
+            failed=1
+          fi
+          exit "${failed}"
+
+  doc-tests:
+    name: doc-tests
+    runs-on: warp-ubuntu-latest-x64-8x
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Run doc-tests
+        run: make test-docs
 
   check-constraints:
     name: check recursive constraint artifacts
@@ -278,7 +306,7 @@ jobs:
       # Keep this on a released install-action commit with an explicit tool; see
       # the nextest install above for the zizmor/tool-shortcut rationale.
       - name: Install cargo-hack
-        uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2.87.8
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: cargo-hack
       - name: Check all feature combinations

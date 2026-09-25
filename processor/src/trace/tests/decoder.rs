@@ -12,9 +12,9 @@
 //! batching). Broader end-to-end soundness comes from
 //! `build_lookup_fractions_runs_on_execution_trace` in `tests/lookup.rs`.
 
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_air::logup::{BlockHashMsg, BlockStackMsg, OpGroupMsg};
+use miden_air::logup::{BlockHashMsg, BlockStackMsg, OpGroupMsg, StackOverflowMsg};
 use miden_core::{
     Felt, ONE, ZERO,
     mast::{
@@ -22,7 +22,7 @@ use miden_core::{
         MastNodeExt, SplitNodeBuilder,
     },
     operations::{Operation, opcodes},
-    program::Program,
+    program::{KernelDescriptor, Program},
 };
 
 use super::{
@@ -63,7 +63,7 @@ where
 // BLOCK STACK TABLE (M1) TESTS
 // ================================================================================================
 
-/// A lone SPAN pushes one simple entry and the matching END pops it.
+/// A lone SPAN pushes one continuation entry and the matching END pops it.
 #[test]
 fn block_stack_span_push_pop() {
     let ops = vec![Operation::Add, Operation::Mul];
@@ -80,7 +80,7 @@ fn block_stack_span_push_pop() {
         if op == Felt::from_u8(opcodes::SPAN) {
             exp.add(
                 row,
-                &BlockStackMsg::Simple {
+                &BlockStackMsg::Continuation {
                     block_id: addr_next,
                     parent_id: addr,
                     is_loop: ZERO,
@@ -89,7 +89,7 @@ fn block_stack_span_push_pop() {
         } else if op == Felt::from_u8(opcodes::END) {
             exp.remove(
                 row,
-                &BlockStackMsg::Simple {
+                &BlockStackMsg::Continuation {
                     block_id: addr,
                     parent_id: addr_next,
                     is_loop: ZERO,
@@ -103,11 +103,10 @@ fn block_stack_span_push_pop() {
     log.assert_contains(&exp);
 }
 
-/// CALL pushes a `Full` entry saving caller context (ctx, fmp, depth, fn_hash); the matching
-/// END pops a `Full` entry reading the *next* row's system/stack state (the restored caller
-/// context).
+/// CALL pushes a `CallerFrame` entry saving the caller context, stack depth, overflow pointer,
+/// and function hash. Its matching END pops that entry using the restored state from the next row.
 #[test]
-fn block_stack_call_full_push_pop() {
+fn block_stack_call_frame_push_pop() {
     let program = {
         let mut forest = MastForest::new();
         let callee = BasicBlockNodeBuilder::new(vec![Operation::Noop])
@@ -129,32 +128,29 @@ fn block_stack_call_full_push_pop() {
         if op == Felt::from_u8(opcodes::CALL) {
             exp.add(
                 row,
-                &BlockStackMsg::Full {
+                &BlockStackMsg::CallerFrame {
                     block_id: main.addr(next),
                     parent_id: main.addr(idx),
-                    is_loop: ZERO,
-                    ctx: main.ctx(idx),
-                    fmp: main.stack_depth(idx),
-                    depth: main.parent_overflow_address(idx),
-                    fn_hash: main.fn_hash(idx),
+                    caller_ctx: main.ctx(idx),
+                    caller_stack_depth: main.stack_depth(idx),
+                    caller_overflow_addr: main.parent_overflow_address(idx),
+                    caller_fn_hash: main.fn_hash(idx),
                 },
             );
         }
 
-        // END-of-CALL branch: `is_call_flag` at the END row selects the Full variant. Caller
-        // context is restored on the *next* row, so the emitter reads ctx/b0/b1/fn_hash from
-        // row+1.
-        if op == Felt::from_u8(opcodes::END) && main.is_call_flag(idx) == ONE {
+        // Caller-frame END: caller state is restored on the *next* row, so the emitter reads it
+        // from row+1.
+        if op == Felt::from_u8(opcodes::END) && main.restores_caller_frame_flag(idx) == ONE {
             exp.remove(
                 row,
-                &BlockStackMsg::Full {
+                &BlockStackMsg::CallerFrame {
                     block_id: main.addr(idx),
                     parent_id: main.addr(next),
-                    is_loop: ZERO,
-                    ctx: main.ctx(next),
-                    fmp: main.stack_depth(next),
-                    depth: main.parent_overflow_address(next),
-                    fn_hash: main.fn_hash(next),
+                    caller_ctx: main.ctx(next),
+                    caller_stack_depth: main.stack_depth(next),
+                    caller_overflow_addr: main.parent_overflow_address(next),
+                    caller_fn_hash: main.fn_hash(next),
                 },
             );
         }
@@ -165,7 +161,8 @@ fn block_stack_call_full_push_pop() {
     log.assert_contains(&exp);
 }
 
-/// SPLIT pushes a `Simple { is_loop: 0 }` entry (parent = current block, block = addr_next) and
+/// SPLIT pushes a `Continuation { is_loop: 0 }` entry (parent = current block,
+/// block = addr_next) and
 /// the matching END pops it. Runs twice — once with `s0 = 1` (TRUE branch), once with `s0 = 0`
 /// (FALSE branch) — since the block-stack emission is identical either way but the END reached
 /// for the matching pop differs between branches.
@@ -195,21 +192,22 @@ fn block_stack_split_push_pop(#[case] cond: u64) {
         if op == Felt::from_u8(opcodes::SPLIT) {
             exp.add(
                 row,
-                &BlockStackMsg::Simple {
+                &BlockStackMsg::Continuation {
                     block_id: addr_next,
                     parent_id: addr,
                     is_loop: ZERO,
                 },
             );
             split_adds += 1;
-        } else if op == Felt::from_u8(opcodes::END) && main.is_call_flag(idx) == ZERO {
+        } else if op == Felt::from_u8(opcodes::END) && main.restores_caller_frame_flag(idx) == ZERO
+        {
             // is_loop on the END overlay comes from the typed END flags; for non-loop ENDs it
             // is zero. We can read it back from the trace to stay agnostic about which END row
             // matches which push.
             let is_loop = main.is_loop_flag(idx);
             exp.remove(
                 row,
-                &BlockStackMsg::Simple {
+                &BlockStackMsg::Continuation {
                     block_id: addr,
                     parent_id: addr_next,
                     is_loop,
@@ -219,18 +217,18 @@ fn block_stack_split_push_pop(#[case] cond: u64) {
     });
 
     assert_eq!(split_adds, 1, "expected exactly one SPLIT push");
-    // One END for the taken inner branch, one for the SPLIT itself (parent). Both pop Simple.
-    assert_eq!(exp.count_removes(), 2, "expected two Simple pops (child END + SPLIT END)");
+    // One END for the taken inner branch, one for the SPLIT itself (parent). Both pop
+    // Continuation entries.
+    assert_eq!(exp.count_removes(), 2, "expected two Continuation pops (child END + SPLIT END)");
     log.assert_contains(&exp);
 }
 
-/// LOOP pushes a `Simple { is_loop: 1 }` entry and the matching END pops it. With do-while
+/// LOOP pushes a `Continuation { is_loop: 1 }` entry and the matching END pops it. With do-while
 /// semantics the body always runs at least once, so a raw LoopNode never produces an
 /// `is_loop = 0` push. The skip-without-entering path lives in the wrapping SPLIT inserted by
 /// the assembler for `while.true` and is covered by the Split-node tests.
-#[rstest::rstest]
-#[case::enters(1, ONE)]
-fn block_stack_loop_is_loop_flag(#[case] cond: u64, #[case] expected_is_loop: Felt) {
+#[test]
+fn block_stack_loop_uses_loop_continuation() {
     let program = {
         let mut f = MastForest::new();
         let body = BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop])
@@ -240,9 +238,8 @@ fn block_stack_loop_is_loop_flag(#[case] cond: u64, #[case] expected_is_loop: Fe
         f.make_root(loop_id);
         Program::new(f.into(), loop_id)
     };
-    // Stack is laid out top-first: `cond` on top (drives LOOP), trailing zero drives the
-    // single REPEAT/exit read when `cond == 1`.
-    let trace = build_trace_from_program(&program, &[cond, 0]);
+    // Stack is top-first: 1 requests one repeat, then 0 exits the loop.
+    let trace = build_trace_from_program(&program, &[1, 0]);
     let log = InteractionLog::new(&trace);
     let main = trace.main_trace();
 
@@ -255,28 +252,26 @@ fn block_stack_loop_is_loop_flag(#[case] cond: u64, #[case] expected_is_loop: Fe
         let addr_next = main.addr(RowIndex::from(row + 1));
 
         if op == Felt::from_u8(opcodes::LOOP) {
-            let is_loop = main.stack_element(0, idx);
-            assert_eq!(is_loop, expected_is_loop, "s0 sanity at LOOP row");
             exp.add(
                 row,
-                &BlockStackMsg::Simple {
+                &BlockStackMsg::Continuation {
                     block_id: addr_next,
                     parent_id: addr,
-                    is_loop,
+                    is_loop: ONE,
                 },
             );
             loop_pushes += 1;
         } else if op == Felt::from_u8(opcodes::END)
-            && main.is_call_flag(idx) == ZERO
-            && main.is_loop_flag(idx) == expected_is_loop
+            && main.restores_caller_frame_flag(idx) == ZERO
+            && main.is_loop_flag(idx) == ONE
             && main.is_loop_body_flag(idx) == ZERO
         {
             exp.remove(
                 row,
-                &BlockStackMsg::Simple {
+                &BlockStackMsg::Continuation {
                     block_id: addr,
                     parent_id: addr_next,
-                    is_loop: expected_is_loop,
+                    is_loop: ONE,
                 },
             );
             loop_pops += 1;
@@ -284,10 +279,7 @@ fn block_stack_loop_is_loop_flag(#[case] cond: u64, #[case] expected_is_loop: Fe
     });
 
     assert_eq!(loop_pushes, 1, "expected one LOOP push");
-    assert_eq!(
-        loop_pops, 1,
-        "expected one matching LOOP END pop (is_loop={expected_is_loop:?})"
-    );
+    assert_eq!(loop_pops, 1, "expected one matching LOOP END pop");
     log.assert_contains(&exp);
 }
 
@@ -354,7 +346,7 @@ fn block_stack_split_wrapped_loop_uses_constant_is_loop() {
     // Correct push: `is_loop` is a constant `1`, regardless of `s_0`.
     exp.add(
         push_row,
-        &BlockStackMsg::Simple {
+        &BlockStackMsg::Continuation {
             block_id: push_block_id,
             parent_id: push_parent_id,
             is_loop: ONE,
@@ -363,7 +355,7 @@ fn block_stack_split_wrapped_loop_uses_constant_is_loop() {
     // Matching pop: `is_loop = h_5 = 1` at every loop END under do-while.
     exp.remove(
         pop_row,
-        &BlockStackMsg::Simple {
+        &BlockStackMsg::Continuation {
             block_id: pop_block_id,
             parent_id: pop_parent_id,
             is_loop: ONE,
@@ -399,7 +391,7 @@ fn block_stack_respan_add_and_remove() {
 
         exp.add(
             row,
-            &BlockStackMsg::Simple {
+            &BlockStackMsg::Continuation {
                 block_id: addr_next,
                 parent_id: parent,
                 is_loop: ZERO,
@@ -407,7 +399,7 @@ fn block_stack_respan_add_and_remove() {
         );
         exp.remove(
             row,
-            &BlockStackMsg::Simple {
+            &BlockStackMsg::Continuation {
                 block_id: addr,
                 parent_id: parent,
                 is_loop: ZERO,
@@ -480,9 +472,9 @@ fn block_hash_join_enqueue_dequeue() {
     log.assert_contains(&exp);
 }
 
-/// LOOP and REPEAT both enqueue a `LoopBody` entry for the body, and the END at the end of
-/// each body dequeues it with `is_loop_body = 1`. Runs two iterations (inputs `[1, 0]`) so both
-/// the LOOP entry and the REPEAT branches fire.
+/// LOOP enqueues one weighted `LoopBody` entry for all executions of the body, and the END at the
+/// end of each body dequeues it with `is_loop_body = 1`. Runs two iterations (inputs `[1, 0]`) so
+/// the LOOP entry has multiplicity 2 and the REPEAT branch fires without adding a body entry.
 #[test]
 fn block_hash_loop_body_with_repeat() {
     let program = {
@@ -506,8 +498,9 @@ fn block_hash_loop_body_with_repeat() {
     let log = InteractionLog::new(&trace);
     let main = trace.main_trace();
 
-    let mut fired_loop_body = 0usize;
+    let mut fired_loop_body_enqueue = 0usize;
     let mut fired_loop_body_end = 0usize;
+    let mut repeat_rows = 0usize;
 
     let mut exp = Expectations::new(&log);
     for_each_op(&trace, |row, op| {
@@ -517,14 +510,28 @@ fn block_hash_loop_body_with_repeat() {
         let h0: [Felt; 4] = [first[0], first[1], first[2], first[3]];
         let addr_next = main.addr(next);
 
-        // Under do-while the LOOP unconditionally enqueues the body for the first iteration,
-        // and each REPEAT enqueues for a subsequent iteration. The AIR's `f_loop_body` expression
-        // becomes `loop_op + repeat` in Phase 3.
-        let is_loop_entering = op == Felt::from_u8(opcodes::LOOP);
-        let is_repeat = op == Felt::from_u8(opcodes::REPEAT);
-        if is_loop_entering || is_repeat {
-            exp.add(row, &BlockHashMsg::LoopBody { parent: addr_next, child_hash: h0 });
-            fired_loop_body += 1;
+        // Under do-while the LOOP unconditionally enqueues the committed body digest. REPEAT
+        // re-enters the loop but does not add a block-hash entry from its own row.
+        if op == Felt::from_u8(opcodes::LOOP) {
+            let multiplicity = main.group_count(idx);
+            assert_eq!(
+                multiplicity,
+                Felt::new_unchecked(2),
+                "the LOOP row must carry one body entry per iteration"
+            );
+            exp.push(
+                row,
+                multiplicity,
+                &BlockHashMsg::LoopBody { parent: addr_next, child_hash: h0 },
+            );
+            fired_loop_body_enqueue += 1;
+        } else if op == Felt::from_u8(opcodes::REPEAT) {
+            assert_eq!(
+                main.group_count(idx),
+                ZERO,
+                "REPEAT rows must not carry the LOOP-side body multiplicity"
+            );
+            repeat_rows += 1;
         }
 
         // END of the loop body: `is_loop_body` bit is set on the END overlay.
@@ -543,9 +550,109 @@ fn block_hash_loop_body_with_repeat() {
         }
     });
 
-    // Sanity: each iteration fires one LoopBody enqueue and one body-ending END remove.
-    assert_eq!(fired_loop_body, 2, "expected LOOP + REPEAT to each fire a LoopBody enqueue");
+    // Sanity: one weighted LOOP enqueue covers both iterations; REPEAT itself fires no enqueue.
+    assert_eq!(fired_loop_body_enqueue, 1, "expected one weighted LOOP body enqueue");
+    assert_eq!(repeat_rows, 1, "fixture must execute one REPEAT row");
     assert_eq!(fired_loop_body_end, 2, "expected one END-of-loop-body remove per iteration");
+
+    log.assert_contains(&exp);
+}
+
+/// Nested loops exercise the keying of LOOP-side body multiplicities by dynamic loop
+/// address. This fixture produces three dynamic LOOP rows with body-execution counts `[2, 2, 3]`.
+/// The same static inner loop node appears multiple times, but each dynamic instance has a
+/// distinct controller address and therefore its own multiplicity.
+#[test]
+fn block_hash_nested_loop_body_multiplicities_are_keyed_by_dynamic_address() {
+    let program = {
+        let mut mast_forest = MastForest::new();
+        let body = BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop])
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
+        let inner_loop = LoopNodeBuilder::new(body).add_to_forest(&mut mast_forest).unwrap();
+        let outer_loop = LoopNodeBuilder::new(inner_loop).add_to_forest(&mut mast_forest).unwrap();
+        mast_forest.make_root(outer_loop);
+        Program::new(mast_forest.into(), outer_loop)
+    };
+
+    // Stack inputs mirror the nested-loop fragmentation fixture. The exact fixture shape is pinned
+    // below; the important invariant is that every LOOP multiplicity is keyed by the dynamic
+    // controller address reached from that LOOP row.
+    let trace = build_trace_from_program(&program, &[1, 1, 0, 1, 1, 0, 0, 9999]);
+    let log = InteractionLog::new(&trace);
+    let main = trace.main_trace();
+
+    let mut body_end_counts = BTreeMap::<u64, u64>::new();
+    for_each_op(&trace, |row, op| {
+        let idx = RowIndex::from(row);
+        if op == Felt::from_u8(opcodes::END) && main.is_loop_body_flag(idx) == ONE {
+            let loop_addr = main.addr(RowIndex::from(row + 1)).as_canonical_u64();
+            *body_end_counts.entry(loop_addr).or_insert(0) += 1;
+        }
+    });
+
+    let mut exp = Expectations::new(&log);
+    let mut loop_multiplicities = Vec::new();
+    let mut body_end_rows = 0usize;
+    let mut repeat_rows = 0usize;
+
+    for_each_op(&trace, |row, op| {
+        let idx = RowIndex::from(row);
+        let next = RowIndex::from(row + 1);
+        let first = main.decoder_hasher_state_first_half(idx);
+        let h0: [Felt; 4] = [first[0], first[1], first[2], first[3]];
+        let addr_next = main.addr(next);
+
+        if op == Felt::from_u8(opcodes::LOOP) {
+            let expected_count = body_end_counts
+                .get(&addr_next.as_canonical_u64())
+                .copied()
+                .expect("every dynamic LOOP must have at least one body END");
+            let multiplicity = main.group_count(idx);
+            assert_eq!(
+                multiplicity,
+                Felt::new_unchecked(expected_count),
+                "row {row}: honest LOOP.group_count must equal body END count at its dynamic address"
+            );
+
+            loop_multiplicities.push(expected_count);
+            exp.push(
+                row,
+                multiplicity,
+                &BlockHashMsg::LoopBody { parent: addr_next, child_hash: h0 },
+            );
+        } else if op == Felt::from_u8(opcodes::REPEAT) {
+            assert_eq!(
+                main.group_count(idx),
+                ZERO,
+                "row {row}: REPEAT rows must not carry the LOOP-side body multiplicity"
+            );
+            repeat_rows += 1;
+        }
+
+        if op == Felt::from_u8(opcodes::END) && main.is_loop_body_flag(idx) == ONE {
+            let is_first_child = next_op_first_child_flag(main, next);
+            exp.remove(
+                row,
+                &BlockHashMsg::End {
+                    parent: addr_next,
+                    child_hash: h0,
+                    is_first_child,
+                    is_loop_body: ONE,
+                },
+            );
+            body_end_rows += 1;
+        }
+    });
+
+    loop_multiplicities.sort_unstable();
+    assert_eq!(
+        loop_multiplicities,
+        vec![2, 2, 3],
+        "expected the nested fixture's dynamic loop body counts"
+    );
+    assert_eq!(repeat_rows, 4, "fixture must execute four REPEAT rows");
+    assert_eq!(body_end_rows, 7, "fixture must produce seven loop-body END rows");
 
     log.assert_contains(&exp);
 }
@@ -883,21 +990,21 @@ fn decoder_dyncall_at_min_stack_depth_records_post_drop_ctx_info() {
         .find(|&i| main.get_op_code(i) == dyncall_opcode)
         .expect("DYNCALL row not found in trace");
 
-    // second_hasher_state[0] = parent_stack_depth        → decoder_hasher_state_element(4)
-    // second_hasher_state[1] = parent_next_overflow_addr → decoder_hasher_state_element(5)
+    // second_hasher_state[0] = caller stack depth        → decoder_hasher_state_element(4)
+    // second_hasher_state[1] = caller overflow address   → decoder_hasher_state_element(5)
     //
-    // With 4 hash elements on the stack the depth is still MIN_STACK_DEPTH (16); after
-    // DYNCALL drops those 4 elements the post-drop depth is 12 = MIN_STACK_DEPTH, which
-    // means no overflow entry was pushed, so parent_next_overflow_addr must be ZERO.
+    // DYNCALL consumes the memory address at the top of the stack. At the minimum represented
+    // depth, that pop is clamped at MIN_STACK_DEPTH (16) and the empty overflow table leaves no
+    // previous overflow address to record, so the caller overflow address must be ZERO.
     assert_eq!(
         main.decoder_hasher_state_element(4, row),
         Felt::new_unchecked(MIN_STACK_DEPTH as u64),
-        "parent_stack_depth should equal MIN_STACK_DEPTH"
+        "the caller stack depth should equal MIN_STACK_DEPTH"
     );
     assert_eq!(
         main.decoder_hasher_state_element(5, row),
         ZERO,
-        "parent_next_overflow_addr should be ZERO when stack is at MIN_STACK_DEPTH"
+        "the caller overflow address should be ZERO when stack is at MIN_STACK_DEPTH"
     );
 }
 
@@ -970,7 +1077,7 @@ fn decoder_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr(
     assert_eq!(
         recorded_depth,
         Felt::new_unchecked(17),
-        "parent_stack_depth should be 17 (= pre-DYNCALL depth 18 minus 1)"
+        "the caller stack depth should be 17 (= pre-DYNCALL depth 18 minus 1)"
     );
 
     // Independently determine T1 (clock of push(0)) by scanning for all PUSH rows before DYNCALL.
@@ -990,7 +1097,199 @@ fn decoder_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr(
     // clk_after_pop_in_current_ctx() returns T1 (the second-to-last overflow entry's clock).
     assert_eq!(
         recorded_overflow_addr, t1,
-        "parent_next_overflow_addr must equal T1 (second-to-last overflow clock = {t1}); \
+        "the caller overflow address must equal T1 (second-to-last overflow clock = {t1}); \
          T2 (top overflow clock = {t2}) would indicate the buggy path"
     );
+
+    // The lookup must bind h5 as the predecessor of the row consumed by DYNCALL.
+    assert_eq!(main.parent_overflow_address(dyncall_row), t2);
+    let next = RowIndex::from(usize::from(dyncall_row) + 1);
+    assert_eq!(main.stack_element(15, next), ZERO);
+    let log = InteractionLog::new(&trace);
+    let mut expected = Expectations::new(&log);
+    expected.remove(usize::from(dyncall_row), &StackOverflowMsg { clk: t2, val: ZERO, prev: t1 });
+    log.assert_contains(&expected);
+}
+
+// END-FLAG / SYSTEM-STATE COUPLING
+// ================================================================================================
+
+/// The AIR gates `ctx`/`fn_hash` preservation on the caller-frame restoration selector: an END
+/// carrying no caller-frame restoration flag must preserve both columns, because only a
+/// caller-frame block-stack entry authorizes restoring them.
+///
+/// The AIR rejects an END that changes system state without this flag, but it cannot ensure future
+/// processor finish paths keep emitting the flag. This property protects honest trace construction.
+///
+/// Coverage is asserted, not assumed: the test fails if any END variety it claims to exercise
+/// never actually appears, so it cannot quietly go vacuous if program lowering changes.
+#[test]
+fn system_state_changes_across_end_imply_a_caller_frame_flag() {
+    #[derive(Debug, Default)]
+    struct EndObservations {
+        continuation: usize,
+        loop_continuation: usize,
+        caller_frame: usize,
+    }
+
+    let observe_and_check = |label: &str, trace: &VmTrace| {
+        let main = trace.main_trace();
+        let mut observations = EndObservations::default();
+        for row in 0..(main.core_height() - 1) {
+            let idx = RowIndex::from(row);
+            if main.get_op_code(idx) != Felt::from_u8(opcodes::END) {
+                continue;
+            }
+            let next = RowIndex::from(row + 1);
+            let restores_caller_frame = main.restores_caller_frame_flag(idx);
+
+            if restores_caller_frame == ZERO {
+                if main.is_loop_flag(idx) == ONE {
+                    observations.loop_continuation += 1;
+                } else {
+                    observations.continuation += 1;
+                }
+            } else {
+                assert_eq!(
+                    restores_caller_frame, ONE,
+                    "row {row} of `{label}`: the caller-frame restoration flag must be boolean"
+                );
+                observations.caller_frame += 1;
+            }
+
+            let changed =
+                main.ctx(idx) != main.ctx(next) || main.fn_hash(idx) != main.fn_hash(next);
+            if !changed {
+                continue;
+            }
+            assert_eq!(
+                restores_caller_frame, ONE,
+                "row {row} of `{label}`: an END that changes ctx or fn_hash must restore a caller \
+                 frame, or the AIR's preservation mask rejects the honest trace"
+            );
+        }
+        observations
+    };
+
+    let count_opcode = |trace: &VmTrace, opcode: u8| {
+        let main = trace.main_trace();
+        (0..main.core_height())
+            .map(RowIndex::from)
+            .filter(|&row| main.get_op_code(row) == Felt::from_u8(opcode))
+            .count()
+    };
+
+    // Assembled programs: ordinary basic block, JOIN/SPLIT, loop body + REPEAT + loop exit, and
+    // a CALL whose callee itself contains a nested ordinary END.
+    // Stack inputs are top-first. The loop program is the only one reading them: it pops 1 to
+    // enter, 1 to repeat, then 0 to exit -- giving LOOP, REPEAT and a loop END. The others push
+    // their own conditions.
+    let run_assembled = |source: &str, inputs: &[u64], expected_opcodes: &[(u8, usize)]| {
+        let program = miden_assembly::Assembler::default()
+            .assemble_program("program", source)
+            .unwrap()
+            .unwrap_program();
+        let trace = build_trace_from_program(&program, inputs);
+        for &(opcode, expected_count) in expected_opcodes {
+            assert_eq!(
+                count_opcode(&trace, opcode),
+                expected_count,
+                "fixture must execute opcode {opcode} exactly {expected_count} time(s)"
+            );
+        }
+        observe_and_check(source, &trace)
+    };
+
+    let ordinary = run_assembled("begin push.1 nop drop end", &[], &[]);
+    assert!(ordinary.continuation > 0, "ordinary fixture executed no continuation END");
+
+    let split = run_assembled(
+        "begin push.1 if.true push.7 drop else push.8 drop end push.9 drop end",
+        &[],
+        &[(opcodes::SPLIT, 1)],
+    );
+    assert!(split.continuation > 0, "SPLIT fixture executed no continuation END");
+
+    let loop_program = run_assembled(
+        "begin while.true nop end end",
+        &[1, 1, 0],
+        &[(opcodes::LOOP, 1), (opcodes::REPEAT, 1)],
+    );
+    assert!(loop_program.loop_continuation > 0, "LOOP fixture executed no LOOP END");
+
+    let call = run_assembled(
+        "proc inner push.1 if.true nop else nop end nop end begin call.inner end",
+        &[],
+        &[(opcodes::CALL, 1)],
+    );
+    assert_eq!(call.caller_frame, 1, "CALL fixture executed the wrong frame ENDs");
+
+    // DYN and DYNCALL: both reach a target by digest read from memory, and only DYNCALL creates a
+    // caller frame. Assembled separately because the target digest must be
+    // supplied as a `Felt` stack input rather than through `u64`.
+    let run_dynamic = |op: &str, expected_opcode: u8| {
+        let source = format!(
+            "proc target nop end\n begin call.target mem_storew_le.40 dropw push.40 {op} end"
+        );
+        let program = miden_assembly::Assembler::default()
+            .assemble_program("program", source.as_str())
+            .unwrap()
+            .unwrap_program();
+        let root = program.hash();
+        let target_digest = program
+            .mast_forest()
+            .procedure_digests()
+            .find(|d| *d != root)
+            .expect("the dynamic target must survive as its own procedure");
+
+        let mut stack_values = vec![Felt::ZERO; 16];
+        for (i, limb) in target_digest.as_elements().iter().enumerate() {
+            stack_values[i] = *limb;
+        }
+        let stack_inputs = StackInputs::new(&stack_values).unwrap();
+        let trace = build_trace_from_program_with_stack(&program, stack_inputs);
+        assert_eq!(
+            count_opcode(&trace, expected_opcode),
+            1,
+            "{op} fixture must execute its dynamic start opcode exactly once"
+        );
+        observe_and_check(op, &trace).caller_frame
+    };
+    let dyn_call_frames = run_dynamic("dynexec", opcodes::DYN);
+    let dyncall_call_frames = run_dynamic("dyncall", opcodes::DYNCALL);
+    assert_eq!(dyn_call_frames, 1, "DYN fixture must contain only the explicit CALL frame");
+    assert_eq!(dyncall_call_frames, 2, "DYNCALL fixture must add exactly one caller frame");
+
+    // SYSCALL, built through the MAST directly since it needs a kernel.
+    {
+        let mut forest = MastForest::new();
+        let kernel_proc_id = BasicBlockNodeBuilder::new(vec![Operation::Noop])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        forest.make_root(kernel_proc_id);
+        let kernel_digest = forest[kernel_proc_id].digest();
+        let kernel = KernelDescriptor::new(&[kernel_digest]).unwrap();
+
+        let syscall_id =
+            CallNodeBuilder::new_syscall(kernel_proc_id).add_to_forest(&mut forest).unwrap();
+        let body_id = BasicBlockNodeBuilder::new(vec![Operation::Noop])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        let root_id =
+            JoinNodeBuilder::new([body_id, syscall_id]).add_to_forest(&mut forest).unwrap();
+        forest.make_root(root_id);
+        let program = Program::with_kernel(forest.into(), root_id, kernel);
+
+        let trace = build_trace_from_program(&program, &[]);
+        assert_eq!(
+            count_opcode(&trace, opcodes::SYSCALL),
+            1,
+            "SYSCALL fixture must execute its SYSCALL start opcode exactly once"
+        );
+        let observations = observe_and_check("syscall", &trace);
+        assert_eq!(
+            observations.caller_frame, 1,
+            "SYSCALL fixture must contribute exactly one caller-frame END"
+        );
+    }
 }

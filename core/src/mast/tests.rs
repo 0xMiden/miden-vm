@@ -1,7 +1,8 @@
 use alloc::{collections::BTreeSet, vec::Vec};
 
-use miden_crypto::rand::test_utils::prng_array;
 use proptest::prelude::*;
+use rand::{RngExt, SeedableRng};
+use rand_chacha::ChaCha20Rng;
 
 use crate::{
     Felt, WORD_SIZE, Word,
@@ -38,7 +39,7 @@ proptest! {
         let program_hash = digest_from_seed(*seed);
         let kernel: Vec<Word> = (0..kernel_count)
             .scan(*seed, |seed, _| {
-                *seed = prng_array(*seed);
+                *seed = ChaCha20Rng::from_seed(*seed).random();
                 Some(digest_from_seed(*seed))
             })
             .collect();

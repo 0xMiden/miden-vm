@@ -98,7 +98,7 @@ fn lookup_slack_bound_is_conservative_at_every_transition() {
         }
     }
 
-    let mvm_shape = security::AIR_SHAPE.lookup;
+    let mvm_shape = security::LOOKUP_SHAPE;
     let mvm_coefficient =
         (u64::from(mvm_shape.max_message_width) + 2) * u64::from(mvm_shape.fractions_per_row);
     let (mvm_q, _, mvm_bound) = bound(mvm_coefficient);
@@ -108,7 +108,7 @@ fn lookup_slack_bound_is_conservative_at_every_transition() {
         "the slack bound must be tight for the MVM lookup coefficient"
     );
 
-    let pvm_shape = pvm::AIR_SHAPE.lookup;
+    let pvm_shape = pvm::LOOKUP_SHAPE;
     let pvm_coefficient =
         (u64::from(pvm_shape.max_message_width) + 2) * u64::from(pvm_shape.fractions_per_row);
     let (_, _, pvm_bound) = bound(pvm_coefficient);
@@ -134,12 +134,12 @@ fn lookup_slack_bound_is_conservative_at_every_transition() {
     assert_eq!(minimum_base, 13);
 }
 
-/// Checks that the five terms omitted by the MASM estimator remain above the lookup term.
+/// Checks that the four terms omitted by the MASM estimator remain above the lookup term.
 ///
 /// The minimum lookup coefficient and zero boundary correction make the lookup term as large as
-/// the accepted bounds permit. The maximum constraint count, constraint degree, and DEEP term
-/// count make the omitted terms as small as the bounds permit. Moving any of these values away
-/// from this corner increases the margin. Every accepted height is checked because the
+/// the accepted bounds permit. The maximum constraint count and degree make the omitted terms as
+/// small as the bounds permit. Moving any of these values away from this corner increases the
+/// margin. Every accepted height is checked because the
 /// out-of-domain, lookup, and FRI folding terms all depend on height.
 #[test]
 fn omitted_rounds_are_dominated_at_envelope_extremes() {
@@ -147,12 +147,13 @@ fn omitted_rounds_are_dominated_at_envelope_extremes() {
     let air_shape = AirShape {
         num_composed_constraints: 8192,
         max_constraint_degree: 9,
+        num_quotient_chunks: 8,
         max_combo: security::AIR_SHAPE.max_combo,
         num_deep_terms: Some(8192),
-        lookup: LookupShape {
+        lookup: Some(LookupShape {
             fractions_per_row: 1,
             max_message_width: 255,
-        },
+        }),
     };
 
     for log_max_height in 6..=29 {
@@ -173,13 +174,7 @@ fn omitted_rounds_are_dominated_at_envelope_extremes() {
                 .expect("the lookup round must be present")
                 .bits;
 
-            for label in [
-                COMPOSITION_LABEL,
-                OUT_OF_DOMAIN_LABEL,
-                DEEP_COMPOSITION_LABEL,
-                FOLDING_LABEL,
-                COLLISION_LABEL,
-            ] {
+            for label in [COMPOSITION_LABEL, OUT_OF_DOMAIN_LABEL, FOLDING_LABEL, COLLISION_LABEL] {
                 let term = report
                     .terms()
                     .iter()
@@ -191,20 +186,44 @@ fn omitted_rounds_are_dominated_at_envelope_extremes() {
                 );
             }
 
-            let two_term = report
+            let computed_minimum = report
                 .terms()
                 .iter()
-                .filter(|term| term.label == LOOKUP_LABEL || term.label == QUERY_LABEL)
+                .filter(|term| {
+                    term.label == LOOKUP_LABEL
+                        || term.label == QUERY_LABEL
+                        || term.label == DEEP_COMPOSITION_LABEL
+                })
                 .map(|term| term.bits)
                 .min()
-                .expect("both computed rounds must be present")
+                .expect("all computed rounds must be present")
                 >> security::FIXED_POINT_FRACTIONAL_BITS;
             assert_eq!(
                 u64::from(report.security_level()),
-                two_term,
+                computed_minimum,
                 "a dominated round binds at height {log_max_height}, queries {num_queries}, \
                  query grinding {query_pow_bits}"
             );
+        }
+    }
+}
+
+/// The MASM DEEP calculation needs only an integer logarithm and a power-of-two flag.
+#[test]
+fn deep_whole_bit_formula_matches_native_fixed_point_rounding() {
+    let field_bits = security::CHALLENGE_FIELD_BITS;
+    let one = security::FIXED_POINT_ONE;
+    for n in 1..=8192u64 {
+        let q = u64::from(64 - (n - 1).leading_zeros());
+        for height in [6, 29] {
+            for pow_bits in [0, 31] {
+                let native = (field_bits - fixed::ceil_log2(n) - (height + 3) * one
+                    + pow_bits * one)
+                    .min(security::SECURITY_CAP)
+                    / one;
+                let masm = (124 - q - height + pow_bits + u64::from(!n.is_power_of_two())).min(127);
+                assert_eq!(masm, native, "n={n}, height={height}, pow_bits={pow_bits}");
+            }
         }
     }
 }

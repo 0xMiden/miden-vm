@@ -11,6 +11,8 @@
 use alloc::vec::Vec;
 
 use assert_matches::assert_matches;
+use rand::{RngExt, SeedableRng};
+use rand_chacha::ChaCha20Rng;
 
 use super::{Config, Result, test_utils::UNUSED_ENTRY_COUNT};
 use crate::{
@@ -28,7 +30,6 @@ use crate::{
             },
         },
     },
-    rand::test_utils::{ContinuousRng, rand_value},
 };
 
 // TYPE ALIASES
@@ -75,13 +76,13 @@ fn roots() -> Result<()> {
     // We start by constructing our forest.
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x96; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x96; 32]);
 
     // We add a number of lineages to the forest, some of which have the same _root_ value.
-    let version_1: VersionId = rng.value();
-    let lineage_1: LineageId = rng.value();
-    let lineage_2: LineageId = rng.value();
-    let lineage_3: LineageId = rng.value();
+    let version_1: VersionId = rng.random();
+    let lineage_1: LineageId = rng.random();
+    let lineage_2: LineageId = rng.random();
+    let lineage_3: LineageId = rng.random();
 
     let root_1 = forest.add_lineage(lineage_1, version_1, SmtUpdateBatch::default())?;
     assert_eq!(
@@ -100,10 +101,10 @@ fn roots() -> Result<()> {
     );
 
     // We then update one of them to make sure it ends up with a historical root as well.
-    let k1: Word = rng.value();
-    let v1: Word = rng.value();
-    let k2: Word = rng.value();
-    let v2: Word = rng.value();
+    let k1: Word = rng.random();
+    let v1: Word = rng.random();
+    let k2: Word = rng.random();
+    let v2: Word = rng.random();
 
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(k1, v1);
@@ -127,21 +128,21 @@ fn roots() -> Result<()> {
 fn latest_version() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x69; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x69; 32]);
 
     // Let's add some trees to the forest. Two are empty and one is added with data.
-    let version_1: VersionId = rng.value();
+    let version_1: VersionId = rng.random();
     let version_2: VersionId = version_1 + 1;
     let version_3: VersionId = version_2 + 1;
 
-    let lineage_1: LineageId = rng.value();
-    let lineage_2: LineageId = rng.value();
-    let lineage_3: LineageId = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let lineage_2: LineageId = rng.random();
+    let lineage_3: LineageId = rng.random();
 
-    let k1: Word = rng.value();
-    let v1: Word = rng.value();
-    let k2: Word = rng.value();
-    let v2: Word = rng.value();
+    let k1: Word = rng.random();
+    let v1: Word = rng.random();
+    let k2: Word = rng.random();
+    let v2: Word = rng.random();
 
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(k1, v1);
@@ -152,21 +153,21 @@ fn latest_version() -> Result<()> {
     forest.add_lineage(lineage_3, version_1, operations)?;
 
     // Now let's update one of the empty ones twice...
-    let k3: Word = rng.value();
-    let v3: Word = rng.value();
+    let k3: Word = rng.random();
+    let v3: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(k3, v3);
     forest.update_tree(lineage_1, version_2, operations)?;
 
-    let k4: Word = rng.value();
-    let v4: Word = rng.value();
+    let k4: Word = rng.random();
+    let v4: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(k4, v4);
     forest.update_tree(lineage_1, version_3, operations)?;
 
     // ...and the non-empty one once with a non-contiguous version.
-    let k5: Word = rng.value();
-    let v5: Word = rng.value();
+    let k5: Word = rng.random();
+    let v5: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(k5, v5);
     forest.update_tree(lineage_3, version_3, operations)?;
@@ -177,7 +178,7 @@ fn latest_version() -> Result<()> {
     assert_eq!(forest.latest_version(lineage_3).unwrap(), version_3);
 
     // Finally, if we look for a lineage that doesn't exist, we should get `None` back.
-    let ne_lineage: LineageId = rng.value();
+    let ne_lineage: LineageId = rng.random();
     assert!(forest.latest_version(ne_lineage).is_none());
 
     Ok(())
@@ -187,23 +188,23 @@ fn latest_version() -> Result<()> {
 fn lineage_roots() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x42; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x42; 32]);
 
     // Let's add a lineage to the forest and update it a few times.
-    let lineage: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
+    let lineage: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
     let version_2 = version_1 + 1;
     let version_3 = version_2 + 1;
     let root_1 = forest.add_lineage(lineage, version_1, SmtUpdateBatch::default())?;
 
-    let k1: Word = rng.value();
-    let v1: Word = rng.value();
+    let k1: Word = rng.random();
+    let v1: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(k1, v1);
     let root_2 = forest.update_tree(lineage, version_2, operations)?;
 
-    let k2: Word = rng.value();
-    let v2: Word = rng.value();
+    let k2: Word = rng.random();
+    let v2: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(k2, v2);
     let root_3 = forest.update_tree(lineage, version_3, operations)?;
@@ -222,7 +223,7 @@ fn lineage_roots() -> Result<()> {
     assert_eq!(lineage_roots[2], root_1.root());
 
     // If, however, we query for the roots of a non-existent lineage, we should get `None` back.
-    let ne_lineage: LineageId = rng.value();
+    let ne_lineage: LineageId = rng.random();
     assert!(forest.lineage_roots(ne_lineage).is_none());
 
     Ok(())
@@ -232,11 +233,11 @@ fn lineage_roots() -> Result<()> {
 fn latest_root() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x97; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x97; 32]);
 
     // Let's add a lineage to the forest.
-    let lineage: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
+    let lineage: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
     let version_2 = version_1 + 1;
     let root_1 = forest.add_lineage(lineage, version_1, SmtUpdateBatch::default())?;
 
@@ -244,8 +245,8 @@ fn latest_root() -> Result<()> {
     assert_eq!(forest.latest_root(lineage), Some(root_1.root()));
 
     // And then update it...
-    let k1: Word = rng.value();
-    let v1: Word = rng.value();
+    let k1: Word = rng.random();
+    let v1: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(k1, v1);
     let root_2 = forest.update_tree(lineage, version_2, operations)?;
@@ -254,7 +255,7 @@ fn latest_root() -> Result<()> {
     assert_eq!(forest.latest_root(lineage), Some(root_2.root()));
 
     // However, if we query for a nonexistent lineage, we should get `None` back.
-    let ne_lineage: LineageId = rng.value();
+    let ne_lineage: LineageId = rng.random();
     assert!(forest.latest_root(ne_lineage).is_none());
 
     Ok(())
@@ -264,31 +265,31 @@ fn latest_root() -> Result<()> {
 fn tree_count() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x67; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x67; 32]);
 
     // A newly-initialized forest should know about only the trees that its backend knows about.
     assert_eq!(forest.tree_count(), forest.get_backend().trees()?.count());
 
     // Now let's add some trees.
-    let lineage_1: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
     let version_2 = version_1 + 1;
     let version_3 = version_2 + 1;
     forest.add_lineage(lineage_1, version_1, SmtUpdateBatch::default())?;
 
-    let k1: Word = rng.value();
-    let v1: Word = rng.value();
+    let k1: Word = rng.random();
+    let v1: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(k1, v1);
     forest.update_tree(lineage_1, version_2, operations)?;
 
-    let k2: Word = rng.value();
-    let v2: Word = rng.value();
+    let k2: Word = rng.random();
+    let v2: Word = rng.random();
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(k2, v2);
     forest.update_tree(lineage_1, version_3, operations)?;
 
-    let lineage_2: LineageId = rng.value();
+    let lineage_2: LineageId = rng.random();
     forest.add_lineage(lineage_2, version_1, SmtUpdateBatch::default())?;
 
     // As there are two current trees and two historical versions, we should see four trees total.
@@ -301,18 +302,18 @@ fn tree_count() -> Result<()> {
 fn lineage_count() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x64; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x64; 32]);
 
     // A newly-initialized forest should know about only the lineages that its backend knows about.
     assert_eq!(forest.lineage_count(), forest.get_backend().lineages()?.count());
 
     // So now let's add some lineages.
-    let version: VersionId = rng.value();
-    let lineage_1: LineageId = rng.value();
+    let version: VersionId = rng.random();
+    let lineage_1: LineageId = rng.random();
     forest.add_lineage(lineage_1, version, SmtUpdateBatch::default())?;
-    let lineage_2: LineageId = rng.value();
+    let lineage_2: LineageId = rng.random();
     forest.add_lineage(lineage_2, version, SmtUpdateBatch::default())?;
-    let lineage_3: LineageId = rng.value();
+    let lineage_3: LineageId = rng.random();
     forest.add_lineage(lineage_3, version, SmtUpdateBatch::default())?;
 
     // We should see three lineages.
@@ -320,7 +321,7 @@ fn lineage_count() -> Result<()> {
 
     // This should stay the same if we update a tree.
     let operations =
-        SmtUpdateBatch::new([SmtForestOperation::insert(rng.value(), rng.value())].into_iter());
+        SmtUpdateBatch::new([SmtForestOperation::insert(rng.random(), rng.random())].into_iter());
     forest.update_tree(lineage_1, version + 1, operations)?;
     assert_eq!(forest.lineage_count(), 3);
 
@@ -331,18 +332,18 @@ fn lineage_count() -> Result<()> {
 fn root_info() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x32; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x32; 32]);
 
     // Let's start by adding a lineage and updating it.
-    let lineage_1: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
     let operations =
-        SmtUpdateBatch::new([SmtForestOperation::insert(rng.value(), rng.value())].into_iter());
+        SmtUpdateBatch::new([SmtForestOperation::insert(rng.random(), rng.random())].into_iter());
     let historical_root = forest.add_lineage(lineage_1, version_1, operations)?;
 
     let version_2 = version_1 + 1;
     let operations =
-        SmtUpdateBatch::new([SmtForestOperation::insert(rng.value(), rng.value())].into_iter());
+        SmtUpdateBatch::new([SmtForestOperation::insert(rng.random(), rng.random())].into_iter());
     let current_root = forest.update_tree(lineage_1, version_2, operations)?;
 
     // When we query for a root (lineage_1, version_1), we should get back HistoricalVersion.
@@ -362,7 +363,7 @@ fn root_info() -> Result<()> {
     assert_eq!(forest.root_info(TreeId::new(lineage_1, version_3)), RootInfo::Missing);
 
     // As we should also get back when the lineage doesn't exist.
-    let lineage_2: LineageId = rng.value();
+    let lineage_2: LineageId = rng.random();
     assert_eq!(forest.root_info(TreeId::new(lineage_2, version_1)), RootInfo::Missing);
 
     Ok(())
@@ -375,25 +376,25 @@ fn root_info() -> Result<()> {
 fn open() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x08; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x08; 32]);
 
     // When we query for a tree with a lineage that is not known by the forest, we should get an
     // error back.
-    let missing_lineage: LineageId = rng.value();
-    let missing_version: VersionId = rng.value();
-    let missing_key: Word = rng.value();
+    let missing_lineage: LineageId = rng.random();
+    let missing_version: VersionId = rng.random();
+    let missing_key: Word = rng.random();
 
     let result = forest.open(TreeId::new(missing_lineage, missing_version), missing_key);
     assert!(result.is_err());
     assert_matches!(result.unwrap_err(), LargeSmtForestError::UnknownLineage(l) if l == missing_lineage);
 
     // Now let's add an (empty) lineage to the forest.
-    let lineage_1: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
-    let key_1: Word = rng.value();
-    let value_1_v1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2_v1: Word = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
+    let key_1: Word = rng.random();
+    let value_1_v1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2_v1: Word = rng.random();
     forest.add_lineage(
         lineage_1,
         version_1,
@@ -427,16 +428,16 @@ fn open() -> Result<()> {
     tree_v1.insert(key_2, value_2_v1)?;
 
     // And get a random opening on the initial tree.
-    let random_key: Word = rng.value();
+    let random_key: Word = rng.random();
     let forest_opening = forest.open(TreeId::new(lineage_1, version_1), random_key)?;
     let tree_v1_opening = tree_v1.open(&random_key);
     assert_eq!(forest_opening, tree_v1_opening);
 
     // Now let's make some modifications to the tree.
-    let version_2: VersionId = rng.value();
-    let value_1_v2: Word = rng.value();
-    let key_3: Word = rng.value();
-    let value_3_v1: Word = rng.value();
+    let version_2 = version_1 + 1;
+    let value_1_v2: Word = rng.random();
+    let key_3: Word = rng.random();
+    let value_3_v1: Word = rng.random();
     forest.update_tree(
         lineage_1,
         version_2,
@@ -457,7 +458,7 @@ fn open() -> Result<()> {
     tree_v2.insert(key_2, EMPTY_WORD)?;
 
     // These two should again produce the same opening when we query for the latest version.
-    let random_key: Word = rng.value();
+    let random_key: Word = rng.random();
     let forest_opening = forest.open(TreeId::new(lineage_1, version_2), random_key)?;
     let tree_v2_opening = tree_v2.open(&random_key);
     assert_eq!(forest_opening, tree_v2_opening);
@@ -475,25 +476,25 @@ fn open() -> Result<()> {
 fn get() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x12; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x12; 32]);
 
     // When we query for a tree with a lineage that is not known by the forest, we should get an
     // error back.
-    let missing_lineage: LineageId = rng.value();
-    let missing_version: VersionId = rng.value();
-    let missing_key: Word = rng.value();
+    let missing_lineage: LineageId = rng.random();
+    let missing_version: VersionId = rng.random();
+    let missing_key: Word = rng.random();
 
     let result = forest.get(TreeId::new(missing_lineage, missing_version), missing_key);
     assert!(result.is_err());
     assert_matches!(result.unwrap_err(), LargeSmtForestError::UnknownLineage(l) if l == missing_lineage);
 
     // Now let's add an (empty) lineage to the forest.
-    let lineage_1: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
-    let key_1: Word = rng.value();
-    let value_1_v1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2_v1: Word = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
+    let key_1: Word = rng.random();
+    let value_1_v1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2_v1: Word = rng.random();
     forest.add_lineage(
         lineage_1,
         version_1,
@@ -523,7 +524,7 @@ fn get() -> Result<()> {
 
     // If we query for a key that has never been inserted we want to get back `None`.
     let tree_v1 = TreeId::new(lineage_1, version_1);
-    let non_inserted_key: Word = rng.value();
+    let non_inserted_key: Word = rng.random();
     assert!(forest.get(tree_v1, non_inserted_key)?.is_none());
 
     // But if we query for a key that has been, we should get back the corresponding value.
@@ -532,9 +533,9 @@ fn get() -> Result<()> {
 
     // Now let's add another version.
     let version_2: VersionId = version_1 + 1;
-    let value_1_v2: Word = rng.value();
-    let key_3: Word = rng.value();
-    let value_3_v1: Word = rng.value();
+    let value_1_v2: Word = rng.random();
+    let key_3: Word = rng.random();
+    let value_3_v1: Word = rng.random();
     forest.update_tree(
         lineage_1,
         version_2,
@@ -565,18 +566,18 @@ fn get() -> Result<()> {
 fn entry_count() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x22; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x22; 32]);
 
     // Let's start by adding a lineage with some values.
-    let lineage_1: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
-    let key_1: Word = rng.value();
-    let value_1_v1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2_v1: Word = rng.value();
-    let mut key_3: Word = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
+    let key_1: Word = rng.random();
+    let value_1_v1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2_v1: Word = rng.random();
+    let mut key_3: Word = rng.random();
     key_3[3] = key_1[3];
-    let value_3_v1: Word = rng.value();
+    let value_3_v1: Word = rng.random();
 
     let mut operations = SmtUpdateBatch::empty();
     operations.add_insert(key_1, value_1_v1);
@@ -587,10 +588,10 @@ fn entry_count() -> Result<()> {
 
     // We'll also update this so we have a historical version in play to be sure things work.
     let version_2: VersionId = version_1 + 1;
-    let value_1_v2: Word = rng.value();
-    let mut key_4: Word = rng.value();
+    let value_1_v2: Word = rng.random();
+    let mut key_4: Word = rng.random();
     key_4[3] = key_2[3];
-    let value_4_v1: Word = rng.value();
+    let value_4_v1: Word = rng.random();
 
     let mut operations = SmtUpdateBatch::empty();
     operations.add_remove(key_3);
@@ -600,7 +601,7 @@ fn entry_count() -> Result<()> {
     forest.update_tree(lineage_1, version_2, operations)?;
 
     // If we try and get the entry count over a lineage that does not exist we should see an error.
-    let ne_lineage: LineageId = rng.value();
+    let ne_lineage: LineageId = rng.random();
     match forest.entry_count(TreeId::new(ne_lineage, version_1)) {
         Err(e) => assert_matches!(e, LargeSmtForestError::UnknownLineage(l) if l == ne_lineage),
         Ok(_) => panic!("Result was not an error"),
@@ -634,16 +635,16 @@ fn entry_count() -> Result<()> {
 fn entry_count_historical_across_versions() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x23; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x23; 32]);
 
-    let lineage: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
+    let lineage: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
 
     // Version 1: Insert 2 entries.
-    let key_1: Word = rng.value();
-    let value_1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2: Word = rng.value();
+    let key_1: Word = rng.random();
+    let value_1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2: Word = rng.random();
 
     let mut ops = SmtUpdateBatch::empty();
     ops.add_insert(key_1, value_1);
@@ -652,8 +653,8 @@ fn entry_count_historical_across_versions() -> Result<()> {
 
     // Version 2: Insert 1 more entry (total 3).
     let version_2 = version_1 + 1;
-    let key_3: Word = rng.value();
-    let value_3: Word = rng.value();
+    let key_3: Word = rng.random();
+    let value_3: Word = rng.random();
 
     let mut ops = SmtUpdateBatch::empty();
     ops.add_insert(key_3, value_3);
@@ -677,21 +678,21 @@ fn entry_count_historical_across_versions() -> Result<()> {
 fn entry_count_historical_across_versions_via_update_forest() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x24; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x24; 32]);
 
     // Set up two lineages so we exercise the update_forest path (which updates multiple lineages
     // in a single batch).
-    let lineage_a: LineageId = rng.value();
-    let lineage_b: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
+    let lineage_a: LineageId = rng.random();
+    let lineage_b: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
 
     // Version 1: lineage_a gets 2 entries, lineage_b gets 1 entry.
-    let a_key_1: Word = rng.value();
-    let a_value_1: Word = rng.value();
-    let a_key_2: Word = rng.value();
-    let a_value_2: Word = rng.value();
-    let b_key_1: Word = rng.value();
-    let b_value_1: Word = rng.value();
+    let a_key_1: Word = rng.random();
+    let a_value_1: Word = rng.random();
+    let a_key_2: Word = rng.random();
+    let a_value_2: Word = rng.random();
+    let b_key_1: Word = rng.random();
+    let b_value_1: Word = rng.random();
 
     let mut ops_a = SmtUpdateBatch::empty();
     ops_a.add_insert(a_key_1, a_value_1);
@@ -705,12 +706,12 @@ fn entry_count_historical_across_versions_via_update_forest() -> Result<()> {
     // Version 2 via update_forest: add 1 entry to lineage_a (total 3), add 2 entries to
     // lineage_b (total 3).
     let version_2 = version_1 + 1;
-    let a_key_3: Word = rng.value();
-    let a_value_3: Word = rng.value();
-    let b_key_2: Word = rng.value();
-    let b_value_2: Word = rng.value();
-    let b_key_3: Word = rng.value();
-    let b_value_3: Word = rng.value();
+    let a_key_3: Word = rng.random();
+    let a_value_3: Word = rng.random();
+    let b_key_2: Word = rng.random();
+    let b_value_2: Word = rng.random();
+    let b_key_3: Word = rng.random();
+    let b_value_3: Word = rng.random();
 
     let mut batch = SmtForestUpdateBatch::empty();
     batch.operations(lineage_a).add_insert(a_key_3, a_value_3);
@@ -721,8 +722,8 @@ fn entry_count_historical_across_versions_via_update_forest() -> Result<()> {
     // Version 3 via update_forest: remove 1 entry from lineage_a (total 2), add 1 entry to
     // lineage_b (total 4).
     let version_3 = version_2 + 1;
-    let b_key_4: Word = rng.value();
-    let b_value_4: Word = rng.value();
+    let b_key_4: Word = rng.random();
+    let b_value_4: Word = rng.random();
 
     let mut batch = SmtForestUpdateBatch::empty();
     batch.operations(lineage_a).add_remove(a_key_1);
@@ -746,18 +747,18 @@ fn entry_count_historical_across_versions_via_update_forest() -> Result<()> {
 fn entries() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x47; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x47; 32]);
 
     // Let's start by adding a lineage with some values.
-    let lineage_1: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
-    let key_1: Word = rng.value();
-    let value_1_v1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2_v1: Word = rng.value();
-    let mut key_3: Word = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
+    let key_1: Word = rng.random();
+    let value_1_v1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2_v1: Word = rng.random();
+    let mut key_3: Word = rng.random();
     key_3[3] = key_1[3];
-    let value_3_v1: Word = rng.value();
+    let value_3_v1: Word = rng.random();
 
     let mut operations = SmtUpdateBatch::empty();
     operations.add_insert(key_1, value_1_v1);
@@ -768,10 +769,10 @@ fn entries() -> Result<()> {
 
     // We'll also update this so we have a historical version in play to be sure things work.
     let version_2: VersionId = version_1 + 1;
-    let value_1_v2: Word = rng.value();
-    let mut key_4: Word = rng.value();
+    let value_1_v2: Word = rng.random();
+    let mut key_4: Word = rng.random();
     key_4[3] = key_2[3];
-    let value_4_v1: Word = rng.value();
+    let value_4_v1: Word = rng.random();
 
     let mut operations = SmtUpdateBatch::empty();
     operations.add_remove(key_3);
@@ -781,7 +782,7 @@ fn entries() -> Result<()> {
     forest.update_tree(lineage_1, version_2, operations)?;
 
     // If we try and get entries over a lineage that does not exist we should see an error.
-    let ne_lineage: LineageId = rng.value();
+    let ne_lineage: LineageId = rng.random();
     match forest.entries(TreeId::new(ne_lineage, version_1)) {
         Err(e) => assert_matches!(e, LargeSmtForestError::UnknownLineage(l) if l == ne_lineage),
         Ok(_) => panic!("Result was not an error"),
@@ -897,21 +898,21 @@ fn entries_never_returns_empty_entry() -> Result<()> {
     // For more detailed testing of this behavior, see the `property_tests`.
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x44; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x44; 32]);
 
     // The FIRST such situation is when the iterator contains _only_ historical entries in its
     // remaining tail. We can produce such a state by adding an empty lineage and then setting
     // values in that lineage.
-    let lineage_1: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
     forest.add_lineage(lineage_1, version_1, SmtUpdateBatch::empty())?;
 
     // We now set values in that lineage.
     let version_2 = version_1 + 1;
-    let key_1: Word = rng.value();
-    let value_1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2: Word = rng.value();
+    let key_1: Word = rng.random();
+    let value_1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2: Word = rng.random();
     let operations = SmtUpdateBatch::new(
         [
             SmtForestOperation::insert(key_1, value_1),
@@ -927,9 +928,9 @@ fn entries_never_returns_empty_entry() -> Result<()> {
 
     // The SECOND scenario is where only some entries are added, so we end up with entire leaves
     // that are history only and contain empty values.
-    let lineage_2: LineageId = rng.value();
+    let lineage_2: LineageId = rng.random();
     let key_1 = Word::from([1u32, 0, 0, 42]);
-    let value_1: Word = rng.value();
+    let value_1: Word = rng.random();
     forest.add_lineage(
         lineage_2,
         version_1,
@@ -938,7 +939,7 @@ fn entries_never_returns_empty_entry() -> Result<()> {
 
     // Now we add an update to a different leaf.
     let key_2 = Word::from([2u32, 0, 0, 43]);
-    let value_2: Word = rng.value();
+    let value_2: Word = rng.random();
     forest.update_tree(
         lineage_2,
         version_2,
@@ -954,9 +955,9 @@ fn entries_never_returns_empty_entry() -> Result<()> {
 
     // The third scenario is where entries are added within a shared leaf, where we should only see
     // the historical leaf entries and not their reversions.
-    let lineage_3: LineageId = rng.value();
+    let lineage_3: LineageId = rng.random();
     let key_1 = Word::from([1u32, 0, 0, 42]);
-    let value_1: Word = rng.value();
+    let value_1: Word = rng.random();
     forest.add_lineage(
         lineage_3,
         version_1,
@@ -965,7 +966,7 @@ fn entries_never_returns_empty_entry() -> Result<()> {
 
     // We now add an update in the same leaf.
     let key_2 = Word::from([2u32, 0, 0, 42]);
-    let value_2: Word = rng.value();
+    let value_2: Word = rng.random();
     forest.update_tree(
         lineage_3,
         version_2,
@@ -985,15 +986,15 @@ fn entries_never_returns_empty_entry() -> Result<()> {
 fn entries_history_empty_values_do_not_reorder() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x55; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x55; 32]);
 
-    let lineage: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
+    let lineage: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
 
     let key_a = Word::from([2u32, 0, 0, 42]);
-    let value_a: Word = rng.value();
+    let value_a: Word = rng.random();
     let key_c = Word::from([3u32, 0, 0, 42]);
-    let value_c_v1: Word = rng.value();
+    let value_c_v1: Word = rng.random();
 
     forest.add_lineage(
         lineage,
@@ -1009,8 +1010,8 @@ fn entries_history_empty_values_do_not_reorder() -> Result<()> {
 
     let version_2 = version_1 + 1;
     let key_b = Word::from([1u32, 0, 0, 42]);
-    let value_b: Word = rng.value();
-    let value_c_v2: Word = rng.value();
+    let value_b: Word = rng.random();
+    let value_c_v2: Word = rng.random();
 
     forest.update_tree(
         lineage,
@@ -1041,11 +1042,11 @@ fn entries_history_empty_values_do_not_reorder() -> Result<()> {
 fn add_lineage() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x42; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x42; 32]);
 
     // We can add an initial lineage to the forest, starting with no changes from the default tree.
-    let lineage: LineageId = rng.value();
-    let version: VersionId = rng.value();
+    let lineage: LineageId = rng.random();
+    let version: VersionId = rng.random();
     let result = forest.add_lineage(lineage, version, SmtUpdateBatch::default());
     assert!(result.is_ok());
 
@@ -1072,13 +1073,13 @@ fn add_lineage() -> Result<()> {
 fn update_tree() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x69; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x69; 32]);
 
     // Let's start by adding a lineage to the forest...
-    let lineage_1: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
-    let key_1: Word = rng.value();
-    let value_1: Word = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
+    let key_1: Word = rng.random();
+    let value_1: Word = rng.random();
 
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(key_1, value_1);
@@ -1095,7 +1096,7 @@ fn update_tree() -> Result<()> {
     assert!(!forest.get_non_empty_histories().contains(&lineage_1));
 
     // If we try and update a lineage that is unknown, we should see an error.
-    let unknown_lineage: LineageId = rng.value();
+    let unknown_lineage: LineageId = rng.random();
     let result = forest.update_tree(unknown_lineage, version_1, SmtUpdateBatch::default());
     assert!(result.is_err());
     assert_matches!(
@@ -1115,17 +1116,17 @@ fn update_tree() -> Result<()> {
     );
 
     // Let's create some data and actually add it.
-    let key_2: Word = rng.value();
-    let value_2: Word = rng.value();
-    let key_3: Word = rng.value();
-    let value_3: Word = rng.value();
+    let key_2: Word = rng.random();
+    let value_2: Word = rng.random();
+    let key_3: Word = rng.random();
+    let value_3: Word = rng.random();
 
     let mut operations = SmtUpdateBatch::default();
     operations.add_insert(key_2, value_2);
     operations.add_insert(key_3, value_3);
     operations.add_remove(key_1);
 
-    let version_2: VersionId = rng.value();
+    let version_2 = version_1 + 1;
     let result = forest.update_tree(lineage_1, version_2, operations)?;
 
     // And we can check this against the tree.
@@ -1167,15 +1168,15 @@ fn update_tree() -> Result<()> {
 fn compute_and_apply_update_tree_mutations() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x71; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x71; 32]);
 
-    let lineage: LineageId = rng.value();
+    let lineage: LineageId = rng.random();
     let version_1: VersionId = 10;
     let version_2: VersionId = 11;
-    let key_1: Word = rng.value();
-    let value_1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2: Word = rng.value();
+    let key_1: Word = rng.random();
+    let value_1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2: Word = rng.random();
 
     let mut initial = SmtUpdateBatch::default();
     initial.add_insert(key_1, value_1);
@@ -1213,17 +1214,17 @@ fn compute_and_apply_update_tree_mutations() -> Result<()> {
 fn compute_and_apply_forest_mutations_can_mix_additions_and_updates() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x74; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x74; 32]);
 
-    let existing_lineage: LineageId = rng.value();
-    let new_lineage: LineageId = rng.value();
+    let existing_lineage: LineageId = rng.random();
+    let new_lineage: LineageId = rng.random();
     let version_1: VersionId = 10;
     let version_2: VersionId = 11;
 
-    let existing_key: Word = rng.value();
-    let existing_value: Word = rng.value();
-    let new_key: Word = rng.value();
-    let new_value: Word = rng.value();
+    let existing_key: Word = rng.random();
+    let existing_value: Word = rng.random();
+    let new_key: Word = rng.random();
+    let new_value: Word = rng.random();
 
     forest.add_lineage(existing_lineage, version_1, SmtUpdateBatch::default())?;
 
@@ -1255,18 +1256,18 @@ fn compute_and_apply_forest_mutations_can_mix_additions_and_updates() -> Result<
 fn apply_update_tree_mutations_rejects_stale_state() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x72; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x72; 32]);
 
-    let lineage: LineageId = rng.value();
+    let lineage: LineageId = rng.random();
     let version_1: VersionId = 20;
     let version_2: VersionId = 21;
     let version_3: VersionId = 22;
-    let key_1: Word = rng.value();
-    let value_1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2: Word = rng.value();
-    let key_3: Word = rng.value();
-    let value_3: Word = rng.value();
+    let key_1: Word = rng.random();
+    let value_1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2: Word = rng.random();
+    let key_3: Word = rng.random();
+    let value_3: Word = rng.random();
 
     forest.add_lineage(lineage, version_1, SmtUpdateBatch::default())?;
 
@@ -1296,23 +1297,23 @@ fn apply_update_tree_mutations_rejects_stale_state() -> Result<()> {
 fn add_lineages() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0xa1; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0xa1; 32]);
 
     // An empty batch should return an empty result and leave the forest unchanged.
-    let version: VersionId = rng.value();
+    let version: VersionId = rng.random();
     let empty_batch = SmtForestUpdateBatch::empty();
     let results = forest.add_lineages(version, empty_batch)?;
     assert!(results.is_empty());
 
     // We can add multiple distinct lineages at once, each with their own data.
-    let lineage_1: LineageId = rng.value();
-    let lineage_2: LineageId = rng.value();
-    let lineage_3: LineageId = rng.value();
+    let lineage_1: LineageId = rng.random();
+    let lineage_2: LineageId = rng.random();
+    let lineage_3: LineageId = rng.random();
 
-    let l1_key: Word = rng.value();
-    let l1_value: Word = rng.value();
-    let l2_key: Word = rng.value();
-    let l2_value: Word = rng.value();
+    let l1_key: Word = rng.random();
+    let l1_value: Word = rng.random();
+    let l2_key: Word = rng.random();
+    let l2_value: Word = rng.random();
 
     let mut batch = SmtForestUpdateBatch::empty();
     batch.operations(lineage_1).add_insert(l1_key, l1_value);
@@ -1365,7 +1366,7 @@ fn add_lineages() -> Result<()> {
     assert!(!forest.get_non_empty_histories().contains(&lineage_3));
 
     // Adding a batch that contains an already-known lineage should fail with DuplicateLineage.
-    let lineage_4: LineageId = rng.value();
+    let lineage_4: LineageId = rng.random();
     let mut dup_batch = SmtForestUpdateBatch::empty();
     dup_batch.operations(lineage_1); // already exists
     dup_batch.operations(lineage_4); // new
@@ -1387,15 +1388,15 @@ fn add_lineages() -> Result<()> {
 fn update_forest() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;
-    let mut rng = ContinuousRng::new([0x69; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x69; 32]);
 
     // Let's start by adding a few empty lineages to the forest, just so we have a starting point.
     // Adding all of these should succeed as they are disjoint lineages.
-    let version_1: VersionId = rng.value();
-    let lineage_1: LineageId = rng.value();
-    let lineage_2: LineageId = rng.value();
-    let lineage_3: LineageId = rng.value();
-    let lineage_4: LineageId = rng.value();
+    let version_1: VersionId = rng.random();
+    let lineage_1: LineageId = rng.random();
+    let lineage_2: LineageId = rng.random();
+    let lineage_3: LineageId = rng.random();
+    let lineage_4: LineageId = rng.random();
 
     let l1_r1 = forest.add_lineage(lineage_1, version_1, SmtUpdateBatch::default())?;
     let l2_r1 = forest.add_lineage(lineage_2, version_1, SmtUpdateBatch::default())?;
@@ -1403,18 +1404,18 @@ fn update_forest() -> Result<()> {
     let l4_r1 = forest.add_lineage(lineage_4, version_1, SmtUpdateBatch::default())?;
 
     // Let's compose some updates.
-    let l1_key_1: Word = rng.value();
-    let l1_value_1: Word = rng.value();
-    let l2_key_1: Word = rng.value();
-    let l2_value_1: Word = rng.value();
-    let l3_key_1: Word = rng.value();
-    let l3_value_1: Word = rng.value();
-    let l4_key_1: Word = rng.value();
-    let l4_value_1: Word = rng.value();
+    let l1_key_1: Word = rng.random();
+    let l1_value_1: Word = rng.random();
+    let l2_key_1: Word = rng.random();
+    let l2_value_1: Word = rng.random();
+    let l3_key_1: Word = rng.random();
+    let l3_value_1: Word = rng.random();
+    let l4_key_1: Word = rng.random();
+    let l4_value_1: Word = rng.random();
 
     // First we want to test the case where we refer to a lineage that doesn't exist. In this case,
     // we should get an error.
-    let ne_lineage: LineageId = rng.value();
+    let ne_lineage: LineageId = rng.random();
     let version_bad = version_1 - 1;
     let version_2 = version_1 + 1;
     let mut operations_ne_lineage = SmtForestUpdateBatch::empty();
@@ -1514,8 +1515,8 @@ fn update_forest() -> Result<()> {
     // tree, no state changes are made to that lineage. We check both the case where there are
     // operations that result in no changes, and where no operations are specified.
     let version_3 = version_2 + 1;
-    let key_5: Word = rng.value();
-    let value_5: Word = rng.value();
+    let key_5: Word = rng.random();
+    let value_5: Word = rng.random();
     let mut operations_with_nop = SmtForestUpdateBatch::empty();
     operations_with_nop.operations(lineage_1).add_insert(l1_key_1, l1_value_1);
     operations_with_nop.operations(lineage_2);
@@ -1545,15 +1546,16 @@ fn update_forest() -> Result<()> {
 
 #[test]
 fn truncate_removes_emptied_lineages_from_non_empty_histories() {
-    let lineage: LineageId = rand_value();
-    let root: Word = rand_value();
+    let mut rng = ChaCha20Rng::from_seed([0x76; 32]);
+    let lineage: LineageId = rng.random();
+    let root: Word = rng.random();
 
     // Build a lineage with one historical version at version 5, and a latest version of 10.
     let mut history = History::empty(4);
     let nodes = NodeChanges::default();
     let changed_keys = ChangedKeys::default();
     history
-        .add_version(rand_value(), 5, nodes, changed_keys, UNUSED_ENTRY_COUNT)
+        .add_version(rng.random(), 5, nodes, changed_keys, UNUSED_ENTRY_COUNT)
         .unwrap();
     assert_eq!(history.num_versions(), 1);
 
@@ -1591,18 +1593,19 @@ fn truncate_removes_emptied_lineages_from_non_empty_histories() {
 
 #[test]
 fn truncate_retains_non_empty_lineages_in_non_empty_histories() {
-    let lineage: LineageId = rand_value();
-    let root: Word = rand_value();
+    let mut rng = ChaCha20Rng::from_seed([0x77; 32]);
+    let lineage: LineageId = rng.random();
+    let root: Word = rng.random();
 
     // Build a lineage with two historical versions (5 and 8), latest version 15.
     let mut history = History::empty(4);
     let nodes = NodeChanges::default();
     let changed_keys = ChangedKeys::default();
     history
-        .add_version(rand_value(), 5, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)
+        .add_version(rng.random(), 5, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)
         .unwrap();
     history
-        .add_version(rand_value(), 8, nodes, changed_keys, UNUSED_ENTRY_COUNT)
+        .add_version(rng.random(), 8, nodes, changed_keys, UNUSED_ENTRY_COUNT)
         .unwrap();
     assert_eq!(history.num_versions(), 2);
 
@@ -1643,22 +1646,22 @@ fn truncate_retains_non_empty_lineages_in_non_empty_histories() {
 fn entries_with_fallible_backend() -> Result<()> {
     let backend = FallibleEntriesBackend::new();
     let mut forest = LargeSmtForest::new(backend)?;
-    let mut rng = ContinuousRng::new([0xfa; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0xfa; 32]);
 
     // Add a lineage with more than 3 entries so we can verify that entries beyond the failure
     // point are never returned.
-    let lineage: LineageId = rng.value();
-    let version: VersionId = rng.value();
-    let key_1: Word = rng.value();
-    let value_1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2: Word = rng.value();
-    let key_3: Word = rng.value();
-    let value_3: Word = rng.value();
-    let key_4: Word = rng.value();
-    let value_4: Word = rng.value();
-    let key_5: Word = rng.value();
-    let value_5: Word = rng.value();
+    let lineage: LineageId = rng.random();
+    let version: VersionId = rng.random();
+    let key_1: Word = rng.random();
+    let value_1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2: Word = rng.random();
+    let key_3: Word = rng.random();
+    let value_3: Word = rng.random();
+    let key_4: Word = rng.random();
+    let value_4: Word = rng.random();
+    let key_5: Word = rng.random();
+    let value_5: Word = rng.random();
 
     let mut operations = SmtUpdateBatch::empty();
     operations.add_insert(key_1, value_1);
@@ -1699,21 +1702,21 @@ fn entries_with_fallible_backend() -> Result<()> {
 fn entry_count_historical_bypasses_fallible_entries_iterator() -> Result<()> {
     let backend = FallibleEntriesBackend::new();
     let mut forest = LargeSmtForest::new(backend)?;
-    let mut rng = ContinuousRng::new([0xfb; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0xfb; 32]);
 
     // Add a lineage with 5 entries at version V1.
-    let lineage: LineageId = rng.value();
-    let version_1: VersionId = rng.value();
-    let key_1: Word = rng.value();
-    let value_1: Word = rng.value();
-    let key_2: Word = rng.value();
-    let value_2: Word = rng.value();
-    let key_3: Word = rng.value();
-    let value_3: Word = rng.value();
-    let key_4: Word = rng.value();
-    let value_4: Word = rng.value();
-    let key_5: Word = rng.value();
-    let value_5: Word = rng.value();
+    let lineage: LineageId = rng.random();
+    let version_1: VersionId = rng.random();
+    let key_1: Word = rng.random();
+    let value_1: Word = rng.random();
+    let key_2: Word = rng.random();
+    let value_2: Word = rng.random();
+    let key_3: Word = rng.random();
+    let value_3: Word = rng.random();
+    let key_4: Word = rng.random();
+    let value_4: Word = rng.random();
+    let key_5: Word = rng.random();
+    let value_5: Word = rng.random();
 
     let mut operations = SmtUpdateBatch::empty();
     operations.add_insert(key_1, value_1);
@@ -1726,8 +1729,8 @@ fn entry_count_historical_bypasses_fallible_entries_iterator() -> Result<()> {
 
     // Update the tree at V2 so V1 becomes historical.
     let version_2: VersionId = version_1 + 1;
-    let key_6: Word = rng.value();
-    let value_6: Word = rng.value();
+    let key_6: Word = rng.random();
+    let value_6: Word = rng.random();
     let mut operations = SmtUpdateBatch::empty();
     operations.add_insert(key_6, value_6);
     forest.update_tree(lineage, version_2, operations)?;

@@ -14,13 +14,17 @@ on:
     # runs once a day at 01:00 UTC (adjust as needed)
     - cron: '0 1 * * *'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
+
 permissions: {}
 
 jobs:
   localLinks:
     name: Check local documentation links
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     permissions:
       contents: read
     steps:

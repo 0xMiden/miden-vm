@@ -45,8 +45,8 @@ fn shared_truthy_claims_balance_and_reject_wrong_multiplicities() {
     assert_eq!(mains[0].values[NODE_COL_OFFSET + KECCAK_OUT_MULT], Felt::from_u32(5));
 
     let mut rng = StdRng::seed_from_u64(3787);
-    let alpha = QuadFelt::new([Felt::new(rng.random()).unwrap(), Felt::new(rng.random()).unwrap()]);
-    let beta = QuadFelt::new([Felt::new(rng.random()).unwrap(), Felt::new(rng.random()).unwrap()]);
+    let alpha = QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()]);
+    let beta = QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()]);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     assert!(session_stack_residual(&mains, &[], &challenges).is_empty());
     let shared_and = mains[4]
@@ -176,7 +176,7 @@ fn external_assertion_cannot_bind_the_final_root() {
 }
 
 fn random_hash(rng: &mut impl Rng) -> P2Digest {
-    P2Digest(core::array::from_fn(|_| Felt::new(rng.random()).unwrap()))
+    P2Digest(core::array::from_fn(|_| rng.random::<Felt>()))
 }
 
 fn fold_one(

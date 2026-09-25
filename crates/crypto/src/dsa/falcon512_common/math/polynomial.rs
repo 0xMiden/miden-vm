@@ -697,9 +697,10 @@ impl<F: Zeroize> Zeroize for Polynomial<F> {
 #[cfg(test)]
 mod tests {
     use proptest::{collection::vec, prelude::*};
+    use rand::{RngExt, SeedableRng};
+    use rand_chacha::ChaCha20Rng;
 
     use super::{FalconFelt, N, Polynomial};
-    use crate::rand::test_utils::prng_array;
 
     #[test]
     fn div_zero_by_nonzero_returns_zero() {
@@ -819,8 +820,8 @@ mod tests {
 
     #[test]
     fn test_negacyclic_reduction() {
-        let coef1: [u8; N] = prng_array([0u8; 32]);
-        let coef2: [u8; N] = prng_array([1u8; 32]);
+        let coef1: [u8; N] = ChaCha20Rng::from_seed([0u8; 32]).random();
+        let coef2: [u8; N] = ChaCha20Rng::from_seed([1u8; 32]).random();
 
         let poly1 = Polynomial::new(coef1.iter().map(|&a| FalconFelt::new(a as i16)).collect());
         let poly2 = Polynomial::new(coef2.iter().map(|&a| FalconFelt::new(a as i16)).collect());

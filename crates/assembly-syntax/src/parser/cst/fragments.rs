@@ -453,10 +453,10 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     fn parse_function_type(&mut self) -> Result<ast::FunctionType, ParsingError> {
         let lparen =
             self.expect_kind(SyntaxKind::LParen, "expected `(` to start procedure signature")?;
-        let args = self.parse_comma_delimited_allow_trailing(
-            SyntaxKind::RParen,
-            Self::parse_function_param_type,
-        )?;
+        let (arg_names, args): (Vec<_>, Vec<_>) = self
+            .parse_comma_delimited_allow_trailing(SyntaxKind::RParen, Self::parse_function_param)?
+            .into_iter()
+            .unzip();
         let rparen =
             self.expect_kind(SyntaxKind::RParen, "expected `)` to close procedure parameters")?;
         let mut end_span = self.token_span(&rparen);
@@ -475,6 +475,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         Self::check_variadic_position(&results, "result")?;
 
         Ok(ast::FunctionType::new(ast::types::CallConv::Fast, args, results)
+            .with_arg_names(arg_names)
             .with_span(join_spans(self.token_span(&lparen), end_span)))
     }
 
@@ -504,20 +505,29 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         }
     }
 
-    fn parse_function_param_type(&mut self) -> Result<ast::TypeExpr, ParsingError> {
+    /// Parses a single procedure parameter.
+    fn parse_function_param(
+        &mut self,
+    ) -> Result<(Option<ast::Ident>, ast::TypeExpr), ParsingError> {
         if self.at_kind(SyntaxKind::DotDotDot) {
-            return Ok(self.parse_variadic_type());
+            return Ok((None, self.parse_variadic_type()));
         }
 
-        if !matches!(self.current().as_ref().map(SyntaxToken::kind), Some(SyntaxKind::Ident))
-            || self.peek_kind(1) != Some(SyntaxKind::Colon)
+        if !matches!(
+            self.current().as_ref().map(SyntaxToken::kind),
+            Some(SyntaxKind::Ident | SyntaxKind::QuotedIdent | SyntaxKind::QuotedString)
+        ) || self.peek_kind(1) != Some(SyntaxKind::Colon)
         {
             return Err(self.invalid_syntax("expected a named procedure parameter"));
         }
 
+        let name = self.bump().expect("parameter name token should be present");
+        let name = match name.kind() {
+            SyntaxKind::QuotedString => self.context.lower_escaped_ident_token(&name)?,
+            _ => self.context.lower_ident_token(&name)?,
+        };
         self.bump();
-        self.bump();
-        self.parse_type_expr()
+        Ok((Some(name), self.parse_type_expr()?))
     }
 
     /// Consumes a `...` token, which is only reachable from parameter or result position.
