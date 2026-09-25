@@ -2145,3 +2145,88 @@ fn test_function_type_prints_parameter_names() {
     let unnamed = FunctionType::new(types::CallConv::Fast, vec![felt(), felt()], vec![]);
     assert_eq!(unnamed.to_pretty_string(), "(arg0: felt, arg1: felt)");
 }
+
+// ================================================================================================
+// PRINT / PARSE ROUND-TRIP TESTS
+// ================================================================================================
+
+fn reparse_printed(
+    context: &SyntaxTestContext,
+    source: &str,
+) -> (alloc::boxed::Box<Module>, alloc::string::String, alloc::boxed::Box<Module>) {
+    let module = context.parse_module(source).unwrap_or_else(|err| panic!("{err:?}"));
+    let printed = module.to_string();
+    let reparsed = context
+        .parse_module(&printed)
+        .unwrap_or_else(|err| panic!("printed module failed to parse:\n{printed}\n{err:?}"));
+    (module, printed, reparsed)
+}
+
+/// `assert.err=CONST` keeps the constant reference in the parsed AST, but the printer wraps it in
+/// quotes, so the printed module asserts with the literal message "ERR" instead of "boom".
+#[test]
+fn test_roundtrip_error_message_constant() {
+    let context = SyntaxTestContext::default();
+    let source = "namespace test::roundtrip\n\nconst ERR = \"boom\"\n\npub proc p\n    assert.err=ERR\nend\n";
+    let (module, printed, reparsed) = reparse_printed(&context, source);
+    assert!(
+        printed.contains("assert.err=ERR"),
+        "constant reference printed as a string:\n{printed}"
+    );
+    assert_eq!(module, reparsed);
+}
+
+/// Semantic analysis rewrites `syscall.foo` to `syscall.::$kernel::foo`, which is exactly what the
+/// printer emits, but semantic analysis then rejects that path form on re-parse.
+#[test]
+fn test_roundtrip_syscall_target() {
+    let context = SyntaxTestContext::default();
+    let source = "namespace test::roundtrip\n\npub proc p\n    syscall.foo\nend\n";
+    let (module, _printed, reparsed) = reparse_printed(&context, source);
+    assert_eq!(module, reparsed);
+}
+
+/// Attributes are joined with `nl()` between them, but no newline follows the last one, so a
+/// marker attribute such as `@inline` is glued to the `pub proc` keyword that follows it.
+#[test]
+fn test_roundtrip_marker_attribute() {
+    let context = SyntaxTestContext::default();
+    let source = "namespace test::roundtrip\n\n@inline\npub proc p\n    nop\nend\n";
+    let (module, printed, reparsed) = reparse_printed(&context, source);
+    assert!(
+        printed.contains("@inline\npub proc p"),
+        "attribute glued to the next token:\n{printed}"
+    );
+    assert_eq!(module, reparsed);
+}
+
+/// Attribute string values keep their source escapes when parsed, but are printed with
+/// `escape_default`, so every print/parse cycle adds another level of escaping.
+#[test]
+fn test_roundtrip_attribute_string_escape() {
+    let context = SyntaxTestContext::default();
+    let source =
+        "namespace test::roundtrip\n\n@props(name = \"a\\\"b\")\npub proc p\n    nop\nend\n";
+    let (module, _printed, reparsed) = reparse_printed(&context, source);
+    assert_eq!(module, reparsed);
+}
+
+/// The MASM syntax spells the element address space `felt`, but the printer emits the
+/// `midenc-hir-type` spelling `element`, which the parser rejects.
+#[test]
+fn test_roundtrip_felt_address_space() {
+    let context = SyntaxTestContext::default();
+    let source = "namespace test::roundtrip\n\npub type T = ptr<u8, addrspace(felt)>\n";
+    let (module, _printed, reparsed) = reparse_printed(&context, source);
+    assert_eq!(module, reparsed);
+}
+
+/// C-like enum variants are lowered to module constants *and* kept in the enum type, and the
+/// printer emits both, so the printed module redefines every variant name.
+#[test]
+fn test_roundtrip_enum() {
+    let context = SyntaxTestContext::default();
+    let source = "namespace test::roundtrip\n\nenum TAG : u8 {\n    A,\n    B = 5,\n}\n";
+    let (module, _printed, reparsed) = reparse_printed(&context, source);
+    assert_eq!(module, reparsed);
+}

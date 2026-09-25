@@ -887,7 +887,26 @@ impl crate::prettier::PrettyPrint for Module {
             doc += nl();
         }
 
+        // The variants of a C-like enum are also defined as module constants, but printing the
+        // enum declaration already defines them, so printing those constants too would redefine
+        // every variant name.
+        let enum_variants = self
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Type(TypeDecl::Enum(ty)) if ty.is_c_like() => Some(ty.variants()),
+                _ => None,
+            })
+            .flatten()
+            .map(|variant| variant.name.as_str())
+            .collect::<alloc::collections::BTreeSet<_>>();
+
         for item in self.items.iter() {
+            if let Item::Constant(constant) = item
+                && enum_variants.contains(constant.name().as_str())
+            {
+                continue;
+            }
             doc += nl() + item.render();
         }
 

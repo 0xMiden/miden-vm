@@ -17,6 +17,7 @@
 
 #### Fixes
 
+- Fixed MASM module printing so printed modules parse back to the same module: `*.err=` constant references are no longer quoted, marker attributes are followed by a newline, kernel `syscall` targets, C-like enums and `addrspace(felt)` are printed in parseable form, and attribute strings are no longer re-escaped ([#3915](https://github.com/0xMiden/miden-vm/pull/3915)).
 - [BREAKING] Limited core-library sorted-array lookups to 65,536 entries per call. Larger ranges are
   rejected before host memory is scanned, and the public `SortedArrayError` enum now includes
   `TooManyEntries`. This affects `find_word`, `find_key_value`, and `find_half_key_value`
@@ -1495,7 +1496,7 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 
 #### Fixes
 
-- Fixed `SourceContent::update` splice logic to prevent panics on single-line edits and respect exclusive end semantics for multi-line edits ([#XXXX](https://github.com/0xMiden/miden-vm/pull/2146)).
+- Fixed `SourceContent::update` splice logic to prevent panics on single-line edits and respect exclusive end semantics for multi-line edits ([#3915](https://github.com/0xMiden/miden-vm/pull/2146)).
 - Truncated nprime.masm output stack to prevent overflow during benchmarks ([#1879](https://github.com/0xMiden/miden-vm/issues/1879)).
 - Modules can now be provided in any order to the `Assembler`, see #1669 (#1881).
 - Addressed bug which caused references to re-exported procedures whose definition internally referred to an aliased module import, to produce an "undefined module" error, see #1451 (#1892).
