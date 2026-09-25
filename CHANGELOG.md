@@ -28,6 +28,7 @@
 - Fixed `miden-format` moving an item's doc comment to the module when the file starts with a blank line ([#3884](https://github.com/0xMiden/miden-vm/issues/3884)).
 - [BREAKING] Changed `ProverInstance::new()` to take ownership of `ProverStatement`. `ProverInstance::prove()` now consumes the instance and returns its verifier statement with the proof. The prover can now release the main traces after their final use. This reduced measured peak memory by about 7 percent ([#3833](https://github.com/0xMiden/miden-vm/pull/3833)).
 - [BREAKING] Require `CryptoRng` for `SecretKey::with_rng` and `SecretKey::sign_with_rng` in the Falcon DSA module ([#3889](https://github.com/0xMiden/miden-vm/pull/3889)).
+- Fixed `AdviceMap` deserialization accepting a repeated key and silently keeping the last value; it now returns an error, matching `MastForestWireView` ([#3900](https://github.com/0xMiden/miden-vm/pull/3900)).
 
 #### Changes
 
