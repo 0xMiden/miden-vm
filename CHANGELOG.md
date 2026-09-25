@@ -9,7 +9,7 @@
 
 #### Fixes
 
-- [BREAKING] Limited `eval_circuit` to 32,768 total READ and EVAL wires per call, rejecting oversized circuits before witness allocation or memory access to bound host resource usage ([#3908](https://github.com/0xMiden/miden-vm/pull/3908)).
+- [BREAKING] Limited `eval_circuit` to 32,768 total READ and EVAL wires per call and witness collection to 1,024 invocations. Oversized circuits are rejected before allocation, and evaluations beyond the invocation limit are rejected before being recorded in the witness ([#3908](https://github.com/0xMiden/miden-vm/pull/3908)).
 
 ## v0.34.0 (2026-09-26)
 

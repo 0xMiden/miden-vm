@@ -47,7 +47,7 @@ where
 
     let circuit_evaluation =
         eval_circuit_impl(ctx, ptr, clk, num_read, num_eval, processor.memory_mut())?;
-    tracer.record_circuit_evaluation(circuit_evaluation);
+    tracer.record_circuit_evaluation(circuit_evaluation)?;
 
     Ok(())
 }
