@@ -6,7 +6,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
-        PrecompileError, Tag, precompile_id,
+        PrecompileError, Tag, WorkClass, WorkItem, precompile_id,
     },
 };
 
@@ -253,6 +253,10 @@ impl Precompile for UintPrecompile {
         Self::id()
     }
 
+    fn work_classes(&self) -> &'static [WorkClass] {
+        &[crate::UINT_WORK]
+    }
+
     fn init(&self) -> Vec<Node> {
         let mut nodes = Vec::new();
         for domain in UintDomain::ALL {
@@ -274,6 +278,11 @@ impl Precompile for UintPrecompile {
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
         let op = UintOp::decode(args)?;
         Some(op.node_type())
+    }
+
+    fn work(&self, args: [Felt; 3], _payload: &Payload) -> Result<WorkItem, PrecompileError> {
+        UintOp::decode(args).ok_or(PrecompileError::InvalidNode)?;
+        Ok(WorkItem::new(crate::UINT_WORK, 1))
     }
 
     fn evaluate(

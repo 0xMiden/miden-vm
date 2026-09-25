@@ -599,7 +599,10 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        deferred::{Node, PrecompileWitnessEntry, TRUE_DIGEST, Tag},
+        deferred::{
+            MAX_DEFERRED_ELEMENTS, Node, PrecompileLimits, PrecompileRegistry,
+            PrecompileWitnessEntry, TRUE_DIGEST, Tag,
+        },
         serde::ByteWriter,
     };
 
@@ -650,7 +653,13 @@ mod tests {
             rhs: 0,
         }])
         .unwrap();
-        let root = witness.root_unchecked();
+        let root = witness
+            .prepare(
+                alloc::sync::Arc::new(PrecompileRegistry::new()),
+                &PrecompileLimits::new(MAX_DEFERRED_ELEMENTS as u64),
+            )
+            .unwrap()
+            .root();
         (witness, root)
     }
 

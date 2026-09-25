@@ -6,7 +6,7 @@
 
 use alloc::{format, vec::Vec};
 
-use super::{DeferredContext, Node, NodeType, Payload, PrecompileError};
+use super::{DeferredContext, Node, NodeType, Payload, PrecompileError, WorkClass, WorkItem};
 use crate::{Felt, utils::hash_string_to_word};
 
 // PRECOMPILE TRAIT
@@ -25,6 +25,9 @@ pub trait Precompile: Send + Sync {
     /// turning id drift into a setup-time failure.
     fn id(&self) -> Felt;
 
+    /// Returns the work classes this precompile may produce.
+    fn work_classes(&self) -> &'static [WorkClass];
+
     /// Canonical constants this precompile wants registered before execution.
     ///
     /// State initialization loads every installed precompile's init nodes into one bootstrap set,
@@ -39,6 +42,13 @@ pub trait Precompile: Send + Sync {
     /// Returning `None` rejects the tag. The registry has already matched the precompile id, so
     /// this only interprets the tag's local arguments.
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType>;
+
+    /// Declares the bounded work represented by one recognized node.
+    ///
+    /// The framework calls this after validating the outer payload shape and before hashing or
+    /// evaluating the node. Implementations must not evaluate children, perform cryptographic
+    /// computation, or allocate proportionally to attacker-controlled values.
+    fn work(&self, args: [Felt; 3], payload: &Payload) -> Result<WorkItem, PrecompileError>;
 
     /// Evaluates one owned node to its canonical form.
     ///

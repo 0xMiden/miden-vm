@@ -14,12 +14,13 @@ and shares computations across inputs. It builds the chiplet traces and serializ
 bound to the ordered fold of the constituent roots. No runtime evaluator or merged witness is built.
 
 Empty batches and bare external assertion roots are rejected. Batch input uses the existing
-`MAX_DEFERRED_ELEMENTS` ceiling for tags and payloads, including repeated inputs and aggregate AND
-nodes. `MAX_PRECOMPILE_ROOTS` bounds every root occurrence. Total declared hash input is separately
-bounded to four bytes per allowed element, so sharing one large payload cannot hide repeated hash
-work. MSM lowering retains its existing per-claim and aggregate fallback term limits; the input
-element ceiling also bounds total pair-list terms. Balanced per-column wNAF reductions and exact
-sorted term-multiset checks keep term processing at O(n log n) for the fixed scalar width.
+`MAX_DEFERRED_ELEMENTS` ceiling for each singleton witness. Before Session construction, each
+witness is independently hydrated, structurally validated, charged against its configured
+`PrecompileLimits`, and committed. Repeated batch inputs are each admitted; computation sharing does
+not erase their declared work. `MAX_PRECOMPILE_ROOTS` and the estimated prover peak-memory budget
+are batch-wide. MSM lowering retains its existing per-claim and per-witness term limits. Balanced
+per-column wNAF reductions and exact sorted term-multiset checks keep term processing at O(n log n)
+for the fixed scalar width.
 
 ## Build
 

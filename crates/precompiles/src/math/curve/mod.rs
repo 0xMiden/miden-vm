@@ -48,7 +48,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
-        PrecompileError, TRUE_DIGEST, Tag, precompile_id,
+        PrecompileError, TRUE_DIGEST, Tag, WorkClass, WorkItem, precompile_id,
     },
 };
 
@@ -822,6 +822,10 @@ impl Precompile for CurvePrecompile {
         Self::id()
     }
 
+    fn work_classes(&self) -> &'static [WorkClass] {
+        &[crate::CURVE_WORK, crate::MSM_WORK]
+    }
+
     fn init(&self) -> Vec<Node> {
         let mut nodes = Vec::with_capacity(CurveId::ALL.len() * 2);
         for curve in CurveId::ALL {
@@ -834,6 +838,17 @@ impl Precompile for CurvePrecompile {
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
         let op = CurveOp::decode(args)?;
         Some(op.node_type())
+    }
+
+    fn work(&self, args: [Felt; 3], payload: &Payload) -> Result<WorkItem, PrecompileError> {
+        let op = CurveOp::decode(args).ok_or(PrecompileError::InvalidNode)?;
+        if op == CurveOp::Msm {
+            let terms = u32::try_from(payload.as_chunks().len())
+                .map_err(|_| PrecompileError::InvalidNode)?;
+            Ok(WorkItem::new(crate::MSM_WORK, terms))
+        } else {
+            Ok(WorkItem::new(crate::CURVE_WORK, 1))
+        }
     }
 
     fn evaluate(

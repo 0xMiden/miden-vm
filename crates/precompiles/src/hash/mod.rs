@@ -12,7 +12,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredContext, Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag,
-        precompile_id,
+        WorkClass, WorkItem, precompile_id,
     },
 };
 
@@ -136,6 +136,10 @@ impl<H: HashFunction> Precompile for HashPrecompile<H> {
         Self::id()
     }
 
+    fn work_classes(&self) -> &'static [WorkClass] {
+        &[crate::HASH_WORK]
+    }
+
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
         let disc = u32::try_from(args[0].as_canonical_u64()).ok()?;
         if disc != ASSERT_DISC || args[2] != ZERO {
@@ -143,6 +147,12 @@ impl<H: HashFunction> Precompile for HashPrecompile<H> {
         }
         u32::try_from(args[1].as_canonical_u64()).ok()?;
         Some(NodeType::Join)
+    }
+
+    fn work(&self, args: [Felt; 3], _payload: &Payload) -> Result<WorkItem, PrecompileError> {
+        let tag = Self::tag(args);
+        let n_bytes = Self::decode_assert_tag(tag)?.ok_or(PrecompileError::InvalidNode)?;
+        Ok(WorkItem::new(crate::HASH_WORK, n_bytes))
     }
 
     fn evaluate(
@@ -379,13 +389,12 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
         .into_witness()
         .expect("hash assertion should export")
         .expect("logged hash assertion is nonempty");
-    assert_eq!(witness.root_unchecked(), root);
-    assert_eq!(
-        witness
-            .compute_root(Arc::new(
-                PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default()),
-            ))
-            .unwrap(),
-        root
-    );
+    let prepared = witness
+        .prepare(
+            Arc::new(PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default())),
+            &crate::default_precompile_limits(),
+        )
+        .unwrap();
+    assert_eq!(prepared.root(), root);
+    prepared.evaluate().unwrap();
 }

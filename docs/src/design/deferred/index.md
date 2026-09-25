@@ -89,7 +89,7 @@ plus the rules that give them meaning. Think of it as a small typed sub-language
 DAG. Concrete proof-bound precompiles live in the `miden-precompiles` crate; MASM support code
 for them is currently treated as internal implementation detail.
 
-A precompile supplies three things:
+A precompile supplies four things:
 
 - `decode(args) -> Option<NodeType>` checks which constructor a tag names and what
   structural shape it carries. This inspects only `Tag::args()`; payload data is not available yet.
@@ -99,6 +99,11 @@ A precompile supplies three things:
   - `NodeType::Join` declares one payload block containing two child digests.
   - `NodeType::PairList` declares a non-empty list of structural `lhs || rhs` digest pairs.
   - `NodeType::True` is reserved for the framework TRUE sentinel; a precompile must not return it.
+- `work(args, payload) -> Result<WorkItem>` classifies the bounded computation represented by a
+  structurally valid node. Witness preparation calls it before hashing or evaluation, so it must
+  not evaluate children, perform the claimed cryptographic work, or allocate proportionally to
+  attacker-controlled values. Every class declared by an installed registry must have a configured
+  `WorkLimit`.
 - `evaluate(args, payload, …) -> Result<Node>` computes a node's **canonical form**. The
   common roles are: validate a canonical value represented as data (its canonical is itself),
   evaluate an operation (evaluate the child canonicals, then combine), or check a predicate
@@ -122,8 +127,8 @@ During evaluation the framework hands the precompile a `DeferredContext`, throug
 `get_node` for a registered digest, `evaluate_digest` a child digest to its canonical digest, or
 `register` a freshly-minted helper node into the DAG. Registered helper nodes are validated under
 the same registry and must satisfy the ordinary child-closure rules. The precompile never touches
-the commitment directly. It supplies only per-node meaning, and the framework drives the
-depth-first recursion.
+the commitment directly. It supplies only per-node meaning, and the framework drives recursive
+evaluation.
 
 The in-memory `DeferredState` may memoize evaluation results internally. That memoization is
 transparent to precompile implementations and is not serialized as trusted state.
@@ -200,8 +205,10 @@ directly, without reconstructing append history. The digest is structural: even 
 under the distinct capacity `[1, 0, 0, 0]` and is not equal to `TRUE_DIGEST`, though it evaluates
 semantically to `TRUE`.
 
-Portable decoding checks the committed graph's structure. Session import then validates the
-operations and assertions needed to prove its root. Neither step rebuilds the execution evaluator.
+Portable decoding checks canonical encoding and allocation bounds without hashing the graph.
+Preparation validates its structure, charges declared work, and computes commitments. Session
+import then validates the operations and assertions needed to prove its root without rebuilding the
+native execution evaluator.
 
 ## Portable witnesses and verification
 
@@ -216,18 +223,20 @@ The in-memory graph and serialized graph have the same representation:
 - pair lists carry ordered pairs of backward child indices;
 - the root is the digest of the final entry.
 
-Export uses deterministic child-first DFS and omits unreachable nodes. Checked construction and
-canonical decoding validate framework shapes, nonempty payloads, backward references, reconstructed
-commitments, duplicate-free entries, root reachability, and exact DFS order. They use bounded,
-iterative graph traversal without running the evaluator.
+Export uses deterministic child-first DFS and omits unreachable nodes. In-memory construction and
+canonical decoding enforce the element ceiling and canonical transport syntax without hashing or
+registry access. `PrecompileWitness::prepare` hydrates entries, validates framework and precompile
+shapes, charges per-witness work limits before hashing, reconstructs commitments, and rejects
+duplicates, forward references, orphaned entries, and noncanonical DFS order. Preparation uses
+bounded, iterative graph traversal without running the evaluator.
 
 `ExecutionProof::read_from_bytes` decodes portable material without a precompile registry. A
-prover passes singleton witnesses directly to `Prover::prove_precompiles`, which validates their
-operations and assertions while importing into one Session. Computations may be shared across
-inputs, while each parent operand and each ordered root occurrence retains its proof-binding use.
-The resulting proof carries the exact ordered roots. Completing an execution proof preserves its
-compatibility declaration. See the [API contract](./semantics.md#transport-and-limits) for format
-versions and input limits.
+prover passes singleton witnesses directly to `Prover::prove_precompiles`. Each witness is prepared
+and admitted independently before the prepared graphs are imported into one Session, which validates
+their operations and assertions. Computations may be shared across inputs, while each parent operand
+and each ordered root occurrence retains its proof-binding use. The resulting proof carries the
+exact ordered roots. Completing an execution proof preserves its compatibility declaration. See the
+[API contract](./semantics.md#transport-and-limits) for format versions and input limits.
 
 ## Status and scope
 
@@ -237,5 +246,7 @@ The `miden-precompiles` crate supplies the bundled implementations used by core-
 standard proving. See the [API contract](./semantics.md#proof-obligations-and-composition) for the
 portable transport, batching, completion, and verification lifecycle.
 
-More generic DAG resource accounting remains a follow-up; the external STARK that verifies a
-committed DAG, the **Precompile VM**, is described in GitHub discussion #3005.
+Logical resource admission is explicit and per singleton witness: structural elements and declared
+hash, uint, curve, and MSM work are checked before commitment hashing or evaluation. Batch-wide
+prover memory is estimated separately. The external STARK that verifies a committed DAG, the
+**Precompile VM**, is described in GitHub discussion #3005.

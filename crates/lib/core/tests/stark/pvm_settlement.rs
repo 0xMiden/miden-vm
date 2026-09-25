@@ -175,6 +175,7 @@ struct PvmSettlementHost {
     inner: DefaultHost,
     event_name: EventName,
     expected_verifier_root: Word,
+    available_root: Word,
     precompile_witnesses: Vec<PrecompileWitness>,
     precompile_proof: Option<PrecompileProof>,
 }
@@ -184,10 +185,23 @@ impl PvmSettlementHost {
         let inner = DefaultHost::default()
             .with_library(core_lib)
             .expect("core library must load into the settlement host");
+        let registry = Arc::new(miden_precompiles::registry());
+        let limits = miden_precompiles::default_precompile_limits();
+        let available_root = precompile_witnesses
+            .iter()
+            .map(|witness| {
+                witness
+                    .prepare(Arc::clone(&registry), &limits)
+                    .expect("execution-produced witness must prepare")
+                    .root()
+            })
+            .reduce(fold_deferred_root)
+            .expect("settlement requires at least one witness");
         Self {
             inner,
             event_name: PVM_PROOF_REQUEST_EVENT_NAME,
             expected_verifier_root: core_lib.pvm_recursive_verifier_root(),
+            available_root,
             precompile_witnesses,
             precompile_proof: None,
         }
@@ -241,16 +255,10 @@ impl Host for PvmSettlementHost {
                 }
                 .into());
             }
-            let available_root = self
-                .precompile_witnesses
-                .iter()
-                .map(PrecompileWitness::root_unchecked)
-                .reduce(fold_deferred_root)
-                .expect("settlement requires at least one witness");
-            if requested_root != available_root {
+            if requested_root != self.available_root {
                 return Err(SettlementEventError::RootMismatch {
                     requested: requested_root,
-                    available: available_root,
+                    available: self.available_root,
                 }
                 .into());
             }

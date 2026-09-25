@@ -10,7 +10,7 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    deferred::{DeferredState, Digest, PrecompileWitness, TRUE_DIGEST},
+    deferred::{DeferredState, Digest, PrecompileWitness},
     mast::{ExecutableMastForest, MastForest},
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
@@ -174,6 +174,7 @@ impl FastProcessor {
     /// Packages the processor state after successful execution into a public result type.
     #[inline(always)]
     fn into_execution_output(self, stack: StackOutputs) -> Result<ExecutionOutput, ExecutionError> {
+        let precompile_root = self.deferred_state.root();
         let precompile_witness = self
             .deferred_state
             .into_witness()
@@ -182,6 +183,7 @@ impl FastProcessor {
             stack,
             advice: self.advice,
             memory: self.memory,
+            precompile_root,
             precompile_witness,
         })
     }
@@ -696,17 +698,16 @@ pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
+    pub precompile_root: Digest,
     pub precompile_witness: Option<PrecompileWitness>,
 }
 
 impl ExecutionOutput {
-    /// Returns the carried deferred root, or TRUE when no witness is present.
+    /// Returns the deferred root accumulated during execution.
     ///
     /// This does not validate the witness's precompile computations.
     pub fn precompile_root(&self) -> Digest {
-        self.precompile_witness
-            .as_ref()
-            .map_or(TRUE_DIGEST, PrecompileWitness::root_unchecked)
+        self.precompile_root
     }
 }
 

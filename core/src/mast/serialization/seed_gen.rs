@@ -8,7 +8,7 @@ use std::println;
 use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
-    deferred::{PrecompileWitness, PrecompileWitnessEntry, TRUE_DIGEST, Tag},
+    deferred::{Node, PrecompileWitness, PrecompileWitnessEntry, TRUE_DIGEST, Tag},
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest},
     operations::Operation,
     program::{KernelDescriptor, Program, StackInputs, StackOutputs},
@@ -254,7 +254,7 @@ fn generate_fuzz_seeds() {
         write_seed("operation_deserialize", "op_add.bin", &op.to_bytes());
     }
 
-    // Portable singleton precompile witnesses, including rejected empty and oversized payloads.
+    // Portable singleton precompile witnesses, including empty and oversized transport cases.
     let singleton_witness = || {
         PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
             tag: Tag::AND,
@@ -298,9 +298,10 @@ fn generate_fuzz_seeds() {
     // Execution proof seed with deferred precompile work.
     {
         let wire = singleton_witness();
+        let precompile_root = Node::and(TRUE_DIGEST, TRUE_DIGEST).digest();
         let vm = VmProof {
             proof: StarkProof::new(Vec::new(), HashFunction::Rpo256),
-            precompile_root: wire.root_unchecked(),
+            precompile_root,
         };
         let proof = ExecutionProof::from_parts(
             ExecutionProofCompatibility::new(Vec::new(), Vec::new()).unwrap(),

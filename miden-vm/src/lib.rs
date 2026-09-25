@@ -12,7 +12,7 @@ pub use miden_assembly::{
     diagnostics,
 };
 pub use miden_core::{
-    deferred::{IntegrityError, PrecompileWitnessEntry},
+    deferred::{PrecompileLimits, WorkClass, WorkLimit},
     program::ExecutionClaim,
     proof::{
         ExecutionProof, ExecutionProofCompatibility, ExecutionProofCompatibilityError,
@@ -20,6 +20,9 @@ pub use miden_core::{
     },
 };
 pub use miden_core_lib::conjectured_security_estimator_root;
+pub use miden_precompiles::{
+    CURVE_WORK, HASH_WORK, MSM_WORK, UINT_WORK, default_precompile_limits,
+};
 pub use miden_processor::{
     BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionWitness,
     FastProcessor, FutureMaybeSend, Host, KernelDescriptor, PrecompileWitness, Program,

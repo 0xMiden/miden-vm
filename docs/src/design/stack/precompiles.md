@@ -26,8 +26,10 @@ modules are currently internal implementation detail used by core-library facade
 - **`DeferredState`** — Execution state that tracks registered nodes, evaluates them under the
   registry, and maintains the rolling deferred root. Completion consumes and releases this state.
 - **`PrecompileWitness`** — One portable canonical root opening carried by execution outputs and
-  deferred proofs. Decoding checks its structure. `Prover::prove_precompiles` imports an owned batch
-  directly into one Session to validate and prove the assertions.
+  deferred proofs. Decoding checks bounded canonical transport syntax; preparation validates its
+  child-first graph, charges configured per-witness work limits, and computes commitments before
+  native evaluation or recording import. `Prover::prove_precompiles` imports an owned batch directly
+  into one Session to validate and prove the assertions.
 - **Deferred root** — A single digest public value. Each logged statement appends
   `Node::AND(previous_root, statement_digest)` and advances the root to that node digest.
 
