@@ -13,6 +13,7 @@
 - [BREAKING] Reduced prover peak memory by 13-20% by pruning Merkle layers ([#3872](https://github.com/0xMiden/miden-vm/pull/3872)).
 - Added Eidos wasm32 SIMD128 backend ([#3881](https://github.com/0xMiden/miden-vm/pull/3881)).
 - [BREAKING] Bumped Plonky3 related dependencies to v0.8.0, updating reported conjectured security levels with corrected conservative rounding and a DEEP composition bound that accounts for the LDE size ([#3888](https://github.com/0xMiden/miden-vm/pull/3888)).
+- Optimized Eidos native and wasm compression ([#3899](https://github.com/0xMiden/miden-vm/pull/3899)).
 
 #### Fixes
 
