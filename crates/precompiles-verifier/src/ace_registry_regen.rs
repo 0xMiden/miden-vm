@@ -445,7 +445,8 @@ fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String
     for region in &layout.regions {
         writeln!(
             out,
-            "### {} felts: {}..{}.",
+            "### {}: {} felts at {}..{}.",
+            region.constant,
             region.extent,
             region.ptr,
             region.ptr + region.extent
