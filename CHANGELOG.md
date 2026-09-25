@@ -13,9 +13,14 @@
 - [BREAKING] Reduced prover peak memory by 13-20% by pruning Merkle layers ([#3872](https://github.com/0xMiden/miden-vm/pull/3872)).
 - Added Eidos wasm32 SIMD128 backend ([#3881](https://github.com/0xMiden/miden-vm/pull/3881)).
 - [BREAKING] Bumped Plonky3 related dependencies to v0.8.0, updating reported conjectured security levels with corrected conservative rounding and a DEEP composition bound that accounts for the LDE size ([#3888](https://github.com/0xMiden/miden-vm/pull/3888)).
+- Optimized Eidos native and wasm compression ([#3899](https://github.com/0xMiden/miden-vm/pull/3899)).
 
 #### Fixes
 
+- [BREAKING] Limited core-library sorted-array lookups to 65,536 entries per call. Larger ranges are
+  rejected before host memory is scanned, and the public `SortedArrayError` enum now includes
+  `TooManyEntries`. This affects `find_word`, `find_key_value`, and `find_half_key_value`
+  ([#3909](https://github.com/0xMiden/miden-vm/pull/3909)).
 - [BREAKING] Fixed missing decoder AIR constraints that allowed `in_span` to change without a
   matching `SPAN`, `RESPAN`, or `END` operation. This changes Miden VM proofs and AIR relation
   digests. The VM recursive-verifier MAST root also changes, so consumers that pin it must update
@@ -24,9 +29,10 @@
 - Fixed Falcon512 `ntru_gen` so oversized NTRU solution coefficients are rejected against the encoding bound before `i16` narrowing, instead of panicking in `try_into` ([#3857](https://github.com/0xMiden/miden-vm/pull/3857)).
 - Fixed `IntValue::Felt` Display so it prints canonical hex without byte-swapping ([#3808](https://github.com/0xMiden/miden-vm/pull/3808)).
 - [BREAKING] Fixed the MASM printer so a printed procedure parses again: signatures keep their parameter names in the new `FunctionType::arg_names` field, and `@locals` prints its count as an integer ([#3658](https://github.com/0xMiden/miden-vm/issues/3658)).
+- Fixed `miden-format` moving an item's doc comment to the module when the file starts with a blank line ([#3884](https://github.com/0xMiden/miden-vm/issues/3884)).
 - [BREAKING] Changed `ProverInstance::new()` to take ownership of `ProverStatement`. `ProverInstance::prove()` now consumes the instance and returns its verifier statement with the proof. The prover can now release the main traces after their final use. This reduced measured peak memory by about 7 percent ([#3833](https://github.com/0xMiden/miden-vm/pull/3833)).
 - [BREAKING] Require `CryptoRng` for `SecretKey::with_rng` and `SecretKey::sign_with_rng` in the Falcon DSA module ([#3889](https://github.com/0xMiden/miden-vm/pull/3889)).
-- Fixed the `aead::decrypt` overlap check so it also covers the 4-element tag after the ciphertext; a destination placed at the tag address now fails the overlap assertion instead of overwriting the tag and failing with a tag mismatch. Ranges that end at the last memory address are no longer rejected ([#3897](https://github.com/0xMiden/miden-vm/pull/3897)).
+- Fixed `AdviceMap` deserialization accepting a repeated key and silently keeping the last value; it now returns an error, matching `MastForestWireView` ([#3900](https://github.com/0xMiden/miden-vm/pull/3900)).
 
 #### Changes
 
