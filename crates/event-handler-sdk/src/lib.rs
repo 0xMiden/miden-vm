@@ -51,3 +51,18 @@ mod panic_handler;
 mod wrappers;
 #[cfg(target_arch = "wasm32")]
 pub use wrappers::*;
+
+/// The error of a batch read whose range goes past the bounds of the source it reads.
+///
+/// The batch-read wrappers return it instead of a flag, so a caller cannot silently go on with
+/// an output buffer the host never wrote.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutOfBounds;
+
+impl core::fmt::Display for OutOfBounds {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("the read range was out of bounds")
+    }
+}
+
+impl core::error::Error for OutOfBounds {}
