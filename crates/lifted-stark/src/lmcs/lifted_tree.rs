@@ -233,7 +233,8 @@ where
             },
             |left, right| lmcs.compress(left, right),
         )?;
-        debug_assert!(siblings.next().is_none());
+        let remaining_sibling = siblings.next();
+        debug_assert!(remaining_sibling.is_none());
 
         Ok(BatchProof { openings, witness })
     }

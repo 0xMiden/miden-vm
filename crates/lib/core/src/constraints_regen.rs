@@ -104,7 +104,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     }
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
-        miden_air::config::pcs_params().log_blowup(),
+        config::pcs_params().log_blowup(),
     )
     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
 
@@ -920,10 +920,10 @@ pub fn relation_digest_matches_air() -> Result<(), String> {
 fn relation_digest_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), String> {
     let expected = artifact.relation_digest;
 
-    if miden_air::config::RELATION_DIGEST != expected {
+    if config::RELATION_DIGEST != expected {
         return Err("RELATION_DIGEST in air/src/config.rs is stale".into());
     }
-    if miden_air::config::ACE_CIRCUIT_DIGEST != artifact.circuit_digest {
+    if config::ACE_CIRCUIT_DIGEST != artifact.circuit_digest {
         return Err(
             "ACE_CIRCUIT_DIGEST in air/src/config.rs is stale (it binds the transcript to the \
              one circuit the recursive verifier evaluates)"
@@ -1029,15 +1029,11 @@ pub fn security_masm_matches_air() -> Result<(), String> {
         ("SECURITY_CAP_BITS", miden_air::security::SECURITY_CAP >> fractional_bits),
         (
             "DEEP_FIELD_BASE_BITS",
-            (sample_bits >> fractional_bits)
-                - u64::from(miden_air::config::pcs_params().log_blowup()),
+            (sample_bits >> fractional_bits) - u64::from(config::pcs_params().log_blowup()),
         ),
         ("FRI_FOLDING_BASE_BITS", miden_air::security::FOLDING_BASE >> fractional_bits),
         ("LOG2_E_FP", miden_air::security::LOG2_E),
-        (
-            "MAX_CONSTRAINT_DEGREE",
-            (1u64 << miden_air::config::pcs_params().log_blowup()) + 1,
-        ),
+        ("MAX_CONSTRAINT_DEGREE", (1u64 << config::pcs_params().log_blowup()) + 1),
     ];
 
     for (name, expected) in shared_literals {

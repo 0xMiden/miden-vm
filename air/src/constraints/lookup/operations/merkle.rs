@@ -78,7 +78,6 @@ where
 
     // --- MRUPDATE ---
     {
-        let cycle_len = cycle_len.clone();
         g.batch(
             "mrupdate",
             op_flags.mrupdate(),
@@ -253,10 +252,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_inits<LB, G>(
     // additional controller selector keeps the response gate within the degree bound.
     let merkle_gate = merkle_or_padding * hs0;
     let merkle_start: LB::Expr = ctrl.merkle_is_start().into();
-    let f_mp: LB::Expr =
-        merkle_gate.clone() * hs1.clone().not() * hs2.clone() * merkle_start.clone();
-    let f_mv: LB::Expr =
-        merkle_gate.clone() * hs1.clone() * hs2.clone().not() * merkle_start.clone();
+    let f_mp: LB::Expr = merkle_gate.clone() * hs1.not() * hs2.clone() * merkle_start.clone();
+    let f_mv: LB::Expr = merkle_gate.clone() * hs1.clone() * hs2.not() * merkle_start.clone();
     let f_mu: LB::Expr = merkle_gate * hs1 * hs2 * merkle_start;
     let row_addr: LB::Expr = local.chip_clk.into();
     let block_lo: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);

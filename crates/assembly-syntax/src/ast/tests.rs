@@ -1579,7 +1579,7 @@ end
 }
 
 #[test]
-fn test_constant_expr_parentheses_roundtrip_formatting() {
+fn test_constant_expr_roundtrip_formatting() {
     let source = "\
 namespace test::formatting
 
@@ -1588,6 +1588,7 @@ use {N} from dep
 const LOWER_PRECEDENCE_LHS = (N + 1) * 3
 const LOWER_PRECEDENCE_RHS = 3 * (N + 1)
 const SAME_PRECEDENCE_RHS = N - (N - 1)
+const LONG_EXPRESSION = LOWER_PRECEDENCE_LHS + LOWER_PRECEDENCE_RHS + SAME_PRECEDENCE_RHS
 ";
 
     let context = SyntaxTestContext::default();
