@@ -16,6 +16,7 @@
 
 #### Fixes
 
+- [BREAKING] Limited `eval_circuit` to 32,768 total READ and EVAL wires per call, rejecting oversized circuits before witness allocation or memory access to bound host resource usage ([#3908](https://github.com/0xMiden/miden-vm/pull/3908)).
 - [BREAKING] Fixed missing decoder AIR constraints that allowed `in_span` to change without a
   matching `SPAN`, `RESPAN`, or `END` operation. This changes Miden VM proofs and AIR relation
   digests. The VM recursive-verifier MAST root also changes, so consumers that pin it must update
