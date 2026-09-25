@@ -2,7 +2,10 @@ use alloc::{string::String, vec::Vec};
 use core::{fmt, slice};
 
 use super::{Eidos, InnerNodeInfo, MerkleError, MerklePath, NodeIndex, Word};
-use crate::utils::{assume_init_vec, uninit_vector, word_to_hex};
+use crate::{
+    hash::eidos::{PACKED_LANES, PackedDigest},
+    utils::{assume_init_vec, uninit_vector, word_to_hex},
+};
 
 // MERKLE TREE
 // ================================================================================================
@@ -44,13 +47,37 @@ impl MerkleTree {
             node.write(*leaf);
         });
 
-        // calculate all internal tree nodes
-        for i in (1..n).rev() {
-            // SAFETY: We fill leaves first, then iterate from the bottom up. At this point,
-            // nodes[2 * i] and nodes[2 * i + 1] have already been written.
-            let left = unsafe { nodes[2 * i].assume_init_read() };
-            let right = unsafe { nodes[2 * i + 1].assume_init_read() };
-            nodes[i].write(Eidos::merge(&[left, right]));
+        // Calculate each level after its children. Parents within a level are independent.
+        let mut level_start = n / 2;
+        loop {
+            let level_end = 2 * level_start;
+            let mut i = level_start;
+            while i + PACKED_LANES <= level_end {
+                let children: [PackedDigest; 2] = core::array::from_fn(|child| {
+                    core::array::from_fn(|word| {
+                        core::array::from_fn(|lane| {
+                            // SAFETY: the entire child level was filled before this level began.
+                            unsafe { nodes[2 * (i + lane) + child].assume_init_ref()[word] }
+                        })
+                    })
+                });
+                let parents = Eidos::merge_packed(&children);
+                for lane in 0..PACKED_LANES {
+                    nodes[i + lane]
+                        .write(Word::new(core::array::from_fn(|word| parents[word][lane])));
+                }
+                i += PACKED_LANES;
+            }
+            for parent in i..level_end {
+                // SAFETY: the entire child level was filled before this level began.
+                let left = unsafe { nodes[2 * parent].assume_init_read() };
+                let right = unsafe { nodes[2 * parent + 1].assume_init_read() };
+                nodes[parent].write(Eidos::merge(&[left, right]));
+            }
+            if level_start == 1 {
+                break;
+            }
+            level_start /= 2;
         }
 
         // SAFETY: all elements were written above.
@@ -310,6 +337,27 @@ mod tests {
         assert_eq!(node3, tree.nodes[3]);
 
         assert_eq!(root, tree.root());
+    }
+
+    #[test]
+    fn construction_matches_scalar_merges_at_packed_width_boundaries() {
+        // Every node matters: a packed lane mix-up can leave the root correct for repeated leaves.
+        for leaf_count in [2, 16, 32, 64, 128, 256] {
+            let leaves: Vec<_> = (0..leaf_count)
+                .map(|row| {
+                    Word::new(core::array::from_fn(|column| {
+                        Felt::new_unchecked((4 * row + column + 1) as u64)
+                    }))
+                })
+                .collect();
+            let mut expected = vec![Word::default(); 2 * leaf_count];
+            expected[leaf_count..].copy_from_slice(&leaves);
+            for parent in (1..leaf_count).rev() {
+                expected[parent] = Eidos::merge(&[expected[2 * parent], expected[2 * parent + 1]]);
+            }
+
+            assert_eq!(MerkleTree::new(leaves).unwrap().nodes, expected);
+        }
     }
 
     #[test]
