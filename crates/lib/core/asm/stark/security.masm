@@ -13,7 +13,7 @@ const BITS_PER_QUERY_FP = 193381
 const CHALLENGE_FIELD_WHOLE_BITS = 127
 const CHALLENGE_FIELD_OFFSET_FP = 2
 # Whole-bit floor of the field/hash security cap used by the native report.
-pub const SECURITY_CAP_BITS = 127
+const SECURITY_CAP_BITS = 127
 const DEEP_FIELD_BASE_BITS = 124
 # Whole-bit FRI folding bound before subtracting trace height or adding grinding.
 pub const FRI_FOLDING_BASE_BITS = 122
