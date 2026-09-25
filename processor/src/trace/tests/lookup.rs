@@ -44,7 +44,7 @@ use miden_core::{
 
 use super::{
     Felt, VmTrace, build_trace_from_ops, build_trace_from_ops_with_inputs,
-    lookup_harness::InteractionLog, rand_array,
+    lookup_harness::InteractionLog,
 };
 use crate::{AdviceInputs, StackInputs, operation::Operation};
 
@@ -359,7 +359,7 @@ fn eidos_compression_lookup_row_shape_matches_expected_interactions() {
         "Eidos compression trace height must be a whole number of compression blocks",
     );
 
-    let raw = rand_array::<Felt, 4>();
+    let raw = rand::random::<[Felt; 4]>();
     let alpha = QuadFelt::new([raw[0], raw[1]]);
     let beta = QuadFelt::new([raw[2], raw[3]]);
     let challenges =
@@ -495,7 +495,7 @@ fn eidos_compression_lookup_ledger_fits_narrow_slot_cap() {
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
     let (_, _, eidos_compression_matrix, _) = trace.main_trace().clone_air_matrices();
-    let raw = rand_array::<Felt, 4>();
+    let raw = rand::random::<[Felt; 4]>();
     let alpha = QuadFelt::new([raw[0], raw[1]]);
     let beta = QuadFelt::new([raw[2], raw[3]]);
     let challenges =
@@ -737,7 +737,7 @@ pub(super) fn assert_global_lookup_balance_rejects(
 ) {
     let (honest_core, honest_chiplets, honest_eidos, honest_and8) =
         trace.main_trace().clone_air_matrices();
-    let raw = rand_array::<Felt, 4>();
+    let raw = rand::random::<[Felt; 4]>();
     let challenges = Challenges::<QuadFelt>::new(
         QuadFelt::new([raw[0], raw[1]]),
         QuadFelt::new([raw[2], raw[3]]),
@@ -902,7 +902,7 @@ fn and8_columns_bind_every_aux_column_through_the_cyclic_wrap() {
         .preprocessed_trace()
         .expect("And8 AIR must declare its fixed byte-pair table");
 
-    let raw = rand_array::<Felt, 4>();
+    let raw = rand::random::<[Felt; 4]>();
     let challenges = Challenges::<QuadFelt>::new(
         QuadFelt::new([raw[0], raw[1]]),
         QuadFelt::new([raw[2], raw[3]]),
@@ -952,7 +952,7 @@ fn and8_paired_columns_reject_opposite_multiplicity_deltas_across_domains() {
         .preprocessed_trace()
         .expect("And8 AIR must declare its fixed byte-pair table");
 
-    let raw = rand_array::<Felt, 4>();
+    let raw = rand::random::<[Felt; 4]>();
     let challenges = Challenges::<QuadFelt>::new(
         QuadFelt::new([raw[0], raw[1]]),
         QuadFelt::new([raw[2], raw[3]]),
@@ -1025,8 +1025,8 @@ fn assert_lookup_fractions_run(label: &str, trace: &VmTrace) {
         .expect("byte-pair lookup AIR declares a preprocessed table");
 
     // QuadFelt challenges for LogUp, built from 4 random Felts (QuadFelt itself doesn't
-    // implement Randomizable, so we draw base-field elements and pair them).
-    let raw = rand_array::<Felt, 4>();
+    // have a direct distribution, so we draw base-field elements and pair them).
+    let raw = rand::random::<[Felt; 4]>();
     let alpha = QuadFelt::new([raw[0], raw[1]]);
     let beta = QuadFelt::new([raw[2], raw[3]]);
     let challenges =

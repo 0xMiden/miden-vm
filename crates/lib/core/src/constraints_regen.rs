@@ -957,12 +957,17 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     let fractional_bits = miden_air::security::FIXED_POINT_FRACTIONAL_BITS;
     let fixed_point_one = miden_air::security::FIXED_POINT_ONE;
     let sample_bits = miden_air::security::EIDOS_CHALLENGE_SAMPLE_BITS;
-    let shared_literals: [(&str, u64); 8] = [
+    let shared_literals: [(&str, u64); 9] = [
         ("FP_SHIFT", u64::from(fractional_bits)),
         ("FP_ONE", fixed_point_one),
         ("BITS_PER_QUERY_FP", miden_air::security::BITS_PER_QUERY),
         ("CHALLENGE_SAMPLE_BITS", sample_bits >> fractional_bits),
         ("SECURITY_CAP_BITS", miden_air::security::SECURITY_CAP >> fractional_bits),
+        (
+            "DEEP_FIELD_BASE_BITS",
+            (sample_bits >> fractional_bits)
+                - u64::from(miden_air::config::pcs_params().log_blowup()),
+        ),
         ("FRI_FOLDING_BASE_BITS", miden_air::security::FOLDING_BASE >> fractional_bits),
         ("LOG2_E_FP", miden_air::security::LOG2_E),
         (
@@ -978,7 +983,7 @@ pub fn security_masm_matches_air() -> Result<(), String> {
         }
     }
 
-    // The estimator omits five native security terms only while the MVM shape and the generic
+    // The estimator omits four native security terms only while the MVM shape and the generic
     // verifier's parameter ranges satisfy its documented bounds. `air_shape_matches_symbolic`
     // checks the stored shape against the AIRs; the checks below fail if that shape leaves the
     // estimator envelope. This function also pins the generic verifier bounds directly.
@@ -986,8 +991,9 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     let utils = read_file(GENERIC_UTILS_PATH).map_err(|e| e.to_string())?;
     let air_shape = miden_air::security::AIR_SHAPE;
     let parsed = |name: &str| parse_masm_const::<u64>(&estimator, name, SECURITY_ESTIMATOR_PATH);
-    let lookup_coefficient = (u64::from(air_shape.lookup.max_message_width) + 2)
-        * u64::from(air_shape.lookup.fractions_per_row);
+    let lookup = air_shape.lookup.expect("the MVM uses a lookup argument");
+    let lookup_coefficient =
+        (u64::from(lookup.max_message_width) + 2) * u64::from(lookup.fractions_per_row);
     let max_boundary_terms = u64::from(miden_air::security::CORE_BOUNDARY_LOOKUP_TERMS)
         + KernelDescriptor::MAX_NUM_PROCEDURES as u64;
     if u64::from(air_shape.num_composed_constraints) > parsed("MAX_COMPOSED_CONSTRAINTS")? {
@@ -1029,10 +1035,7 @@ pub fn security_masm_matches_air() -> Result<(), String> {
 
     let descriptor_literals: [(&str, u64); 9] = [
         ("LOOKUP_POW_BITS", miden_air::security::LOOKUP_POW_BITS as u64),
-        (
-            "MAX_MESSAGE_WIDTH",
-            miden_air::security::AIR_SHAPE.lookup.max_message_width as u64,
-        ),
+        ("MAX_MESSAGE_WIDTH", miden_air::security::LOOKUP_SHAPE.max_message_width as u64),
         (
             "NUM_COMPOSED_CONSTRAINTS",
             miden_air::security::AIR_SHAPE.num_composed_constraints as u64,
@@ -1053,7 +1056,7 @@ pub fn security_masm_matches_air() -> Result<(), String> {
         ),
         (
             "LOOKUP_FRACTIONS_PER_ROW",
-            miden_air::security::AIR_SHAPE.lookup.fractions_per_row as u64,
+            miden_air::security::LOOKUP_SHAPE.fractions_per_row as u64,
         ),
         ("MAX_NUM_KERNEL_PROCEDURES", KernelDescriptor::MAX_NUM_PROCEDURES as u64),
         ("LOG_HEIGHT_MAX", estimator_heights),

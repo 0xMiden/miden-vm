@@ -27,7 +27,7 @@ use miden_lifted_stark::testing::{
 use miden_stark_transcript::ProverTranscript;
 use p3_blake3::Blake3;
 use p3_challenger::{CanObserve, FieldChallenger};
-use p3_commit::{ExtensionMmcs, Mmcs, Pcs};
+use p3_commit::{ExtensionMmcs, Mmcs, Pcs, UnivariateStarkPcs};
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
 use p3_field::coset::TwoAdicMultiplicativeCoset;
 use p3_fri::{FriParameters, TwoAdicFriPcs};
@@ -74,6 +74,7 @@ fn workspace_pcs(
         log_final_poly_len,
         max_log_arity,
         num_queries,
+        batch_proof_of_work_bits: 0,
         commit_proof_of_work_bits: 0,
         query_proof_of_work_bits: 0,
         mmcs: challenge_mmcs,
@@ -202,6 +203,7 @@ fn bench_pcs_open(c: &mut Criterion) {
                         (domain, m.clone())
                     });
                     <WorkspacePcs as Pcs<gl::QuadFelt, gl::Challenger>>::commit(&ws_pcs, domains_and_evals)
+                        .expect("workspace PCS commit")
                 })
                 .collect();
 
@@ -226,7 +228,7 @@ fn bench_pcs_open(c: &mut Criterion) {
                             } else {
                                 vec![vec![z1]; num_matrices]
                             };
-                            (prover_data, points)
+                            (prover_data, points).into()
                         })
                         .collect();
 
@@ -235,7 +237,8 @@ fn bench_pcs_open(c: &mut Criterion) {
                             &ws_pcs,
                             black_box(data_and_points),
                             &mut challenger,
-                        );
+                        )
+                        .expect("workspace PCS open");
                     black_box(proof)
                 });
             });
@@ -348,13 +351,13 @@ fn bench_quotient_commit(c: &mut Criterion) {
                 bench.iter(|| {
                     let q_evals = random_quotient_evals(n, QC_CONSTRAINT_DEGREE, 42);
                     let q_flat = RowMajorMatrix::new_col(q_evals).flatten_to_base();
-                    let (commitment, data) =
-                        <WorkspacePcs as Pcs<gl::QuadFelt, gl::Challenger>>::commit_quotient(
-                            &pcs,
-                            quotient_domain,
-                            q_flat,
-                            QC_CONSTRAINT_DEGREE,
-                        );
+                    let (commitment, data) = <WorkspacePcs as UnivariateStarkPcs<
+                        gl::QuadFelt,
+                        gl::Challenger,
+                    >>::commit_quotient(
+                        &pcs, quotient_domain, q_flat, QC_CONSTRAINT_DEGREE
+                    )
+                    .expect("workspace PCS quotient commit");
                     black_box((commitment, data))
                 });
             });

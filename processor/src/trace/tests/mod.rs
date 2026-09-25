@@ -7,7 +7,6 @@ use miden_core::{
     operations::Operation,
     program::Program,
 };
-use miden_utils_testing::rand::rand_array;
 
 use super::{Felt, VmTrace};
 use crate::{

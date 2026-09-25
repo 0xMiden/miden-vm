@@ -642,6 +642,13 @@ mod tests {
             ("BITS_PER_QUERY_FP", pvm_security::BITS_PER_QUERY),
             ("CHALLENGE_SAMPLE_BITS", sample_bits >> fractional_bits),
             ("SECURITY_CAP_BITS", pvm_security::SECURITY_CAP >> fractional_bits),
+            (
+                "DEEP_FIELD_BASE_BITS",
+                (sample_bits >> fractional_bits)
+                    - u64::from(
+                        miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup(),
+                    ),
+            ),
             ("FRI_FOLDING_BASE_BITS", pvm_security::FOLDING_BASE >> fractional_bits),
             ("LOG2_E_FP", pvm_security::LOG2_E),
             (
@@ -657,12 +664,13 @@ mod tests {
             );
         }
 
-        // The estimator omits five native security terms only while the PVM shape satisfies these
+        // The estimator omits four native security terms only while the PVM shape satisfies these
         // bounds. `pvm_canonical_ace_shape_matches_current_air` checks the stored shape against the
         // chiplet AIRs; the checks below fail if that shape leaves the estimator envelope.
         let air_shape = pvm_security::AIR_SHAPE;
-        let lookup_coefficient = (u64::from(air_shape.lookup.max_message_width) + 2)
-            * u64::from(air_shape.lookup.fractions_per_row);
+        let lookup = air_shape.lookup.expect("the PVM uses a lookup argument");
+        let lookup_coefficient =
+            (u64::from(lookup.max_message_width) + 2) * u64::from(lookup.fractions_per_row);
         assert!(
             u64::from(air_shape.num_composed_constraints)
                 <= masm_const(SECURITY_ESTIMATOR_PATH, "MAX_COMPOSED_CONSTRAINTS"),
@@ -711,7 +719,7 @@ mod tests {
 
         for (name, expected) in [
             ("LOOKUP_POW_BITS", u64::from(pvm_security::LOOKUP_POW_BITS)),
-            ("MAX_MESSAGE_WIDTH", u64::from(pvm_security::AIR_SHAPE.lookup.max_message_width)),
+            ("MAX_MESSAGE_WIDTH", u64::from(pvm_security::LOOKUP_SHAPE.max_message_width)),
             (
                 "NUM_COMPOSED_CONSTRAINTS",
                 u64::from(pvm_security::AIR_SHAPE.num_composed_constraints),
@@ -728,7 +736,7 @@ mod tests {
             ),
             (
                 "LOOKUP_FRACTIONS_PER_ROW",
-                u64::from(pvm_security::AIR_SHAPE.lookup.fractions_per_row),
+                u64::from(pvm_security::LOOKUP_SHAPE.fractions_per_row),
             ),
             (
                 "FIXED_BOUNDARY_LOOKUP_TERMS",

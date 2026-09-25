@@ -334,14 +334,9 @@ impl MainTrace {
         self.core_row(i).decoder.end_block_flags().is_loop
     }
 
-    /// Returns the `is_call` flag at row i.
-    pub fn is_call_flag(&self, i: RowIndex) -> Felt {
-        self.core_row(i).decoder.end_block_flags().is_call
-    }
-
-    /// Returns the `is_syscall` flag at row i.
-    pub fn is_syscall_flag(&self, i: RowIndex) -> Felt {
-        self.core_row(i).decoder.end_block_flags().is_syscall
+    /// Returns whether the END at row i restores a caller frame.
+    pub fn restores_caller_frame_flag(&self, i: RowIndex) -> Felt {
+        self.core_row(i).decoder.end_block_flags().restores_caller_frame
     }
 
     /// Returns the operation-batch encoding at row i.
@@ -350,8 +345,11 @@ impl MainTrace {
         [decoder.full_batch, decoder.batch_size_code]
     }
 
-    /// Returns the operation group count. This indicates the number of operation that remain
-    /// to be executed in the current span block.
+    /// Returns the decoder's `group_count` value at row i.
+    ///
+    /// On SPAN, RESPAN, and in-span rows, this tracks the operation groups remaining in the
+    /// current basic block. On LOOP rows, it counts body executions and supplies the block-hash
+    /// lookup multiplicity.
     pub fn group_count(&self, i: RowIndex) -> Felt {
         self.core_row(i).decoder.group_count
     }

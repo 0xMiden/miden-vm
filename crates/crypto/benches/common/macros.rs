@@ -994,8 +994,9 @@ macro_rules! benchmark_aead_bytes {
 
                 // Pre-encrypt data for decryption benchmark
                 let nonce = Nonce::with_rng(&mut rng);
-                let encrypted =
-                    key.encrypt_bytes_with_nonce(&data, &associated_data, nonce.clone()).unwrap();
+                let encrypted = key
+                    .encrypt_bytes_with_nonce(&data, &associated_data, nonce.clone())
+                    .unwrap();
 
                 // Decryption benchmark
                 group.bench_with_input(

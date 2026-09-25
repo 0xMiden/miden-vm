@@ -17,7 +17,7 @@ use miden_core::{
     program::{KernelDescriptor, Program, StackInputs},
     utils::RowMajorMatrix,
 };
-use miden_utils_testing::{get_column_name, rand::rand_array};
+use miden_utils_testing::get_column_name;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 
@@ -407,7 +407,7 @@ fn test_trace_generation_at_fragment_boundaries(
     // Build the LogUp aux trace from each main trace under identical random challenges and
     // verify every column matches row-for-row. Catches fragment-boundary nondeterminism in
     // lookup collection.
-    let raw = rand_array::<Felt, 4>();
+    let raw = rand::random::<[Felt; 4]>();
     let challenges = [QuadFelt::new([raw[0], raw[1]]), QuadFelt::new([raw[2], raw[3]])];
     let (
         core_from_fragments,

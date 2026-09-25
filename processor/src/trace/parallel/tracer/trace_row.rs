@@ -39,7 +39,8 @@ struct DecoderRow {
     pub hasher_state: (Word, Word),
     /// Whether this row is an operation within a basic block
     pub in_basic_block: bool,
-    /// The group count for this operation
+    /// Remaining operation groups for basic-block decoding. LOOP multiplicity is filled after
+    /// trace rows are assembled.
     pub group_count: Felt,
     /// The index of the operation within its operation group, or 0 if this is not a row containing
     /// an operation in a basic block.

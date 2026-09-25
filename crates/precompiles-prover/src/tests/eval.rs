@@ -60,8 +60,8 @@ fn shared_truthy_claims_balance_and_reject_wrong_multiplicities() {
     assert_eq!(mains[0].values[NODE_COL_OFFSET + KECCAK_OUT_MULT], Felt::from_u32(5));
 
     let mut rng = StdRng::seed_from_u64(3787);
-    let alpha = QuadFelt::new([Felt::new(rng.random()).unwrap(), Felt::new(rng.random()).unwrap()]);
-    let beta = QuadFelt::new([Felt::new(rng.random()).unwrap(), Felt::new(rng.random()).unwrap()]);
+    let alpha = QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()]);
+    let beta = QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()]);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     assert!(session_stack_residual(&mains, &[], &challenges).is_empty());
     let shared_and = mains[4]
@@ -337,7 +337,7 @@ fn typed_relation_column_preserves_each_selected_message() {
 }
 
 fn random_hash(rng: &mut impl Rng) -> EidosDigest {
-    EidosDigest(core::array::from_fn(|_| Felt::new(rng.random()).unwrap()))
+    EidosDigest(core::array::from_fn(|_| rng.random::<Felt>()))
 }
 
 fn fold_one(
@@ -380,7 +380,7 @@ fn build_pinned_uint_trace(seed: u64) -> (RowMajorMatrix<Felt>, EidosDigest, usi
     let mut req = TranscriptEvalRequires::new();
 
     let zero = req.zero();
-    let value = core::array::from_fn(|_| rng.random());
+    let value = core::array::from_fn(|_| rng.random::<u32>());
     let mut scratch = UintStoreRequires::new();
     let pinned =
         req.pin_uint(UintPtr::from_addr(7), UintPtr::from_addr(7), value, &mut scratch, &mut eidos);

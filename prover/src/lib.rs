@@ -35,7 +35,25 @@ static PREPROCESSED_SETUPS: std::sync::OnceLock<std::sync::Mutex<PreprocessedCac
 mod prover;
 
 #[cfg(all(test, feature = "std"))]
+mod block_stack_entry_kind_repro;
+#[cfg(all(test, feature = "std"))]
+mod ctx_continuation_end_soundness_repro;
+#[cfg(all(test, feature = "std"))]
+mod dyncall_bottom_slot_soundness_repro;
+#[cfg(all(test, feature = "std"))]
+mod dyncall_end_relabel_repro;
+#[cfg(all(test, feature = "std"))]
+mod dyncall_saved_frame_soundness_repro;
+#[cfg(all(test, feature = "std"))]
+mod first_row_repeat_soundness_repro;
+#[cfg(all(test, feature = "std"))]
 mod overflow_pointer_soundness_repro;
+#[cfg(all(test, feature = "std"))]
+mod repeat_loop_schema_soundness_repro;
+#[cfg(all(test, feature = "std"))]
+mod repro_harness;
+#[cfg(all(test, feature = "std"))]
+mod span_entry_soundness_repro;
 
 // EXPORTS
 // ================================================================================================

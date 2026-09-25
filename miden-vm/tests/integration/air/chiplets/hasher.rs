@@ -1,13 +1,12 @@
 use miden_utils_testing::{
     TRUNCATE_STACK_PROC, Word, build_op_test, build_test,
     crypto::{Eidos, MerkleStore, MerkleTree, init_merkle_leaf, init_merkle_store},
-    rand::rand_vector,
 };
 
 #[test]
 fn compress() {
     let asm_op = "compress";
-    let pub_inputs = rand_vector::<u64>(8);
+    let pub_inputs = (0..8).map(|_| rand::random::<u64>()).collect::<Vec<_>>();
 
     build_op_test!(asm_op, &pub_inputs).check_constraints();
 }
@@ -35,7 +34,7 @@ fn compress_accepts_unmasked_input_cv() {
 #[test]
 fn hmerge() {
     let asm_op = "hmerge";
-    let pub_inputs = rand_vector::<u64>(8);
+    let pub_inputs: Vec<u64> = (0..8).map(|_| rand::random()).collect();
 
     build_op_test!(asm_op, &pub_inputs).check_constraints();
 }

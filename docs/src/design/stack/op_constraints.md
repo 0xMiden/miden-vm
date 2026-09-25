@@ -50,9 +50,9 @@ $$
 
 As can be seen from above, the degree for both of these flags is $7$. Since degree of constraints in Miden VM can go up to $9$, this means that operation-specific constraints cannot exceed degree $2$. However, there are some operations which require constraints of higher degree (e.g., $3$ or even $5$). To support such constraints, we adopt the following scheme.
 
-We organize the operations into $4$ groups as shown below and also introduce two extra registers $e_0$ and $e_1$ for degree reduction:
+We organize the opcode slots into $4$ groups as shown below and also introduce two extra registers $e_0$ and $e_1$ for degree reduction:
 
-| $b_6$ | $b_5$ | $b_4$ | $b_3$ | $b_2$ | $b_1$ | $b_0$ | $e_0$ | $e_1$ | # of ops | degree |
+| $b_6$ | $b_5$ | $b_4$ | $b_3$ | $b_2$ | $b_1$ | $b_0$ | $e_0$ | $e_1$ | # of slots | degree |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :------: | :----: |
 |   0   |   x   |   x   |   x   |   x   |   x   |   x   |   0   |   0   |    64    |   7    |
 |   1   |   0   |   0   |   x   |   x   |   x   |   -   |   0   |   0   |    8     |   6    |
@@ -62,13 +62,22 @@ We organize the operations into $4$ groups as shown below and also introduce two
 In the above:
 * Operation flags for operations in the first group (with prefix `0`), are computed using all $7$ op bits, and thus their degree is $7$.
 * Operation flags for operations in the second group (with prefix `100`), are computed using only the first $6$ op bits, and thus their degree is $6$.
-* Operation flags for operations in the third group (with prefix `101`), are computed using all $7$ op bits. We use the extra register $e_0$ (which is set to $b_6 \cdot (1-b_5) \cdot b_4$) to reduce the degree by $2$. Thus, the degree of op flags in this group is $5$.
+* Operation flags for opcode slots in the third group (with prefix `101`), are computed using all $7$ op bits. We use the extra register $e_0$ (which is set to $b_6 \cdot (1-b_5) \cdot b_4$) to reduce the degree by $2$. Thus, the degree of op flags in this group is $5$. This group has $16$ slots, but slot $95$ is unused.
 * Operation flags for operations in the fourth group (with prefix `11`), are computed using only the first $5$ op bits. We use the extra register $e_1$ (which is set to $b_6 \cdot b_5$) to reduce the degree by $1$. Thus, the degree of op flags in this group is $4$.
+
+The decoder shares one $b_0$ constraint across the three upper groups:
+
+$$
+(b_6 - e_0 + e_0 \cdot b_3 \cdot b_2 \cdot b_1) \cdot b_0 = 0 \text{ | degree} = 5
+$$
+
+For prefixes `100` and `11`, $b_6 - e_0 = 1$, so $b_0$ must be zero. For prefix `101`, $e_0 = 1$,
+and the second term rejects opcode $95$. The two terms select disjoint opcode groups.
 
 How operations are distributed between these $4$ groups is described in the sections below.
 
 ### No stack shift operations
-This group contains $32$ operations which do not shift the stack (this is almost all such operations). Since the op flag degree for these operations is $7$, constraints for these operations cannot exceed degree $2$.
+This group contains $32$ opcode slots whose AIR route does not shift the stack (this is almost all such operations). Since the op flag degree for these slots is $7$, constraints selected by them cannot exceed degree $2$.
 
 | Operation | Opcode value | Binary encoding |        Operation group        | Flag degree |
 |-----------|:------------:|:---------------:|:-----------------------------:|:-----------:|
@@ -78,7 +87,7 @@ This group contains $32$ operations which do not shift the stack (this is almost
 | `INV`     |     $3$      |   `000_0011`    |  [Field ops](./field_ops.md)  |     $7$     |
 | `INCR`    |     $4$      |   `000_0100`    |  [Field ops](./field_ops.md)  |     $7$     |
 | `NOT`     |     $5$      |   `000_0101`    |  [Field ops](./field_ops.md)  |     $7$     |
-| `<unused>`|     $6$      |   `000_0110`    |                               |     $7$     |
+| `<reserved>` |    $6$      |   `000_0110`    |      AIR no-shift alias       |     $7$     |
 | `MLOAD`   |     $7$      |   `000_0111`    |    [I/O ops](./io_ops.md)     |     $7$     |
 | `SWAP`    |     $8$      |   `000_1000`    |  [Stack ops](./stack_ops.md)  |     $7$     |
 | `CALLER`  |     $9$      |   `000_1001`    | [System ops](./system_ops.md) |     $7$     |
@@ -104,6 +113,9 @@ This group contains $32$ operations which do not shift the stack (this is almost
 | `SWAPW3`  |     $29$     |   `001_1101`    |  [Stack ops](./stack_ops.md)  |     $7$     |
 | `SWAPDW`  |     $30$     |   `001_1110`    |  [Stack ops](./stack_ops.md)  |     $7$     |
 | `EMIT`    |     $31$     |   `001_1111`    | [System ops](./system_ops.md) |     $7$     |
+
+Opcode $6$ is reserved/non-serializable: no `Operation` maps to it, but the AIR accepts the slot
+as a full no-shift alias so every visible stack position remains constrained.
 
 ### Left stack shift operations
 This group contains $16$ operations which shift the stack to the left (i.e., remove an item from the stack). Most of left-shift operations are contained in this group. Since the op flag degree for these operations is $7$, constraints for these operations cannot exceed degree $2$.
@@ -169,15 +181,14 @@ The degree of this flag is $3$, which is acceptable for a selector for degree $5
 | `U32ADD3`    |     $76$     |   `100_1100`    | [u32 ops](./u32_ops.md) |     $6$     |
 | `U32MADD`    |     $78$     |   `100_1110`    | [u32 ops](./u32_ops.md) |     $6$     |
 
-As mentioned previously, the last bit of the opcode is not used in computation of the flag for these operations. We force this bit to always be set to $0$ with the following constraint:
-
-$$
-b_6 \cdot (1 - b_5) \cdot (1 - b_4) \cdot b_0 = 0 \text{ | degree} = 4
-$$
+The last bit is unused for these operations. The shared $b_0$ constraint above fixes it to zero for
+prefix `100`.
 
 Putting these operations into a group with flag degree $6$ is important for two other reasons:
 * Constraints for the `U32SPLIT` operation have degree $3$. Thus, the degree of the op flag for this operation cannot exceed $6$.
-* Operations `U32ADD3` and `U32MADD` shift the stack to the left. Thus, having these two operations in this group and putting them under the common prefix `10011` allows us to create a common flag for these operations of degree $5$ (recall that the left-shift flag cannot exceed degree $5$).
+* Operations `U32ADD3` and `U32MADD` shift the stack left. Thus, having these two operations in this
+  group and putting them under the common prefix `10011` allows us to include them in the
+  degree-$5$ aggregate left-shift flag.
 
 ### High-degree operations
 This group contains operations which require constraints with degree up to $3$. All $7$ operation bits are used for these flags. The extra $e_0$ column is used for degree reduction of the three high-degree bits.
@@ -204,11 +215,14 @@ This group contains operations which require constraints with degree up to $3$. 
 Note that the `SPLIT` and `LOOP` operations share the common prefix `101010` and can be detected together with a flag of degree $4$ (using $e_0$ for degree reduction). Only `SPLIT` shifts the stack to the left, however: `LOOP` is do-while and reads no stack input — see [LOOP block decoding](../decoder/index.md#loop-block-decoding).
 
 
-Also, we need to make sure that `extra` register $e_0$, which is used to reduce the flag degree by $2$, is set to $1$ when $b_6 = 1$, $b_5 = 0$, and $b_4 = 1$:
+The defining constraint for $e_0$ is:
 
 $$
 e_0 - b_6 \cdot (1 - b_5) \cdot b_4 = 0 \text{ | degree} = 3
 $$
+
+The final slot in this group (`101_1111`, opcode $95$) is unused and is rejected by the shared
+$b_0$ constraint above.
 
 ### Very high-degree operations
 This group contains operations which require constraints with degree up to $5$.
@@ -224,17 +238,14 @@ This group contains operations which require constraints with degree up to $5$.
 | `RESPAN`     |    $120$     |   `111_1000`    | [Flow control ops](../decoder/index.md) |     $4$     |
 | `HALT`       |    $124$     |   `111_1100`    | [Flow control ops](../decoder/index.md) |     $4$     |
 
-As mentioned previously, the last two bits of the opcode are not used in computation of the flag for these operations. We force these bits to always be set to $0$ with the following constraints:
+The last two bits are unused for these operations. The shared constraint fixes $b_0$; $b_1$ is
+fixed by:
 
 $$
-b_6 \cdot b_5 \cdot b_0 = 0 \text{ | degree} = 3
+e_1 \cdot b_1 = 0 \text{ | degree} = 2
 $$
 
-$$
-b_6 \cdot b_5 \cdot b_1 = 0 \text{ | degree} = 3
-$$
-
-Also, we need to make sure that `extra` register $e_1$, which is used to reduce the flag degree by $1$, is set to $1$ when both $b_6$ and $b_5$ columns are set to $1$:
+The defining constraint for $e_1$ is:
 
 $$
 e_1 - b_6 \cdot b_5 = 0 \text{ | degree} = 2
@@ -244,16 +255,26 @@ $$
 Using the operation flags defined above, we can compute several composite flags which are used by various constraints in the VM.
 
 ### Shift right flag
-The right-shift flag indicates that an operation shifts the stack to the right. This flag is computed as follows:
+
+The right-shift flag is the low-degree aggregate used by the stack-depth and overflow-table
+constraints for operations that shift the stack right by one element. It is computed as follows:
 
 $$
 f_{shr} = (1 - b_6) \cdot b_5 \cdot b_4 + f_{u32split} + f_{push} \text{ | degree} = 6
 $$
 
-In the above, $(1 - b_6) \cdot b_5 \cdot b_4$ evaluates to $1$ for all [right stack shift](#right-stack-shift-operations) operations described previously. This works because all these operations have a common prefix `011`. We also need to add in flags for other operations which shift the stack to the right but are not a part of the above group (e.g., `PUSH` operation).
+In the above, $(1 - b_6) \cdot b_5 \cdot b_4$ evaluates to $1$ for all
+[right stack shift](#right-stack-shift-operations) operations described previously. This works
+because all these operations have a common prefix `011`. We also add operations outside that group
+which have the same net depth effect and overflow behavior: `PUSH` and `U32SPLIT`. This aggregate
+is a lower-degree expression than the per-position right-shift selectors; `U32SPLIT`, for example,
+overwrites $s_0$ while still increasing stack depth by one.
 
 ### Shift left flag
-The left-shift flag indicates that a given operation shifts the stack to the left. To simplify the description of this flag, we will first compute the following intermediate variables:
+
+The left-shift flag is the low-degree aggregate used by the stack-depth and overflow-table
+constraints for ordinary one-element left shifts. To simplify its description, we first compute
+the following intermediate variable:
 
 A flag which is set to $1$ when $f_{u32add3} = 1$ or $f_{u32madd} = 1$:
 
@@ -264,15 +285,22 @@ $$
 Using the above variable, we compute the left-shift flag as follows:
 
 $$
-f_{shl} = (1 - b_6) \cdot b_5 \cdot (1 - b_4) + f_{add3\_madd} + f_{split} + f_{repeat} + f_{end} \cdot h_5 \text{ | degree} = 5
+f_{shl} = (1 - b_6) \cdot b_5 \cdot (1 - b_4) + f_{add3\_madd} + f_{split} + f_{repeat} + f_{end} \cdot h_5 + f_{dyn} \text{ | degree} = 5
 $$
 
 In the above:
 * $(1 - b_6) \cdot b_5 \cdot (1 - b_4)$ evaluates to $1$ for all [left stack shift](#left-stack-shift-operations) operations described previously. This works because all these operations have a common prefix `010`.
 * $f_{split}$ is the SPLIT op flag. 
 * $h_5$ is the helper register in the decoder which is set to $1$ when we are exiting a `LOOP` block, and to $0$ otherwise. Because the loop body is always entered, $h_5$ coincides with "the ending node is a *loop*".
+* $f_{dyn}$ covers `DYN`, which consumes the memory address of its target hash from the stack.
 
-Thus, similarly to the right-shift flag, we compute the value of the left-shift flag based on the prefix of the operation group which contains most left shift operations, and add in flag values for other operations which shift the stack to the left but are not a part of this group.
+This selector deliberately excludes `DYNCALL`. Although `DYNCALL` also has a net one-element pop,
+call entry resets the ordinary stack-depth and overflow-pointer columns, while the caller's
+post-shift depth and overflow address are recorded in decoder helper columns and the overflow-table
+removal is constrained separately. DYNCALL is added explicitly to the local selector which fills
+$s'_{15}$ from overflow, or sets it to zero when overflow is empty. As with $f_{shr}$, $f_{shl}$ is
+not a per-position selector; specialized operations such as `FRIE2F4` constrain their visible
+stack positions separately.
 
 ### Control flow flag
 The control flow flag $f_{ctrl}$ is set to $1$ when a control flow operation is being executed by the VM, and to $0$ otherwise. Naively, this flag can be computed as follows:

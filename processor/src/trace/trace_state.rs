@@ -385,55 +385,43 @@ impl BlockStackReplay {
     }
 }
 
-/// The flags written in the second word of the hasher state for END operations.
-#[derive(Debug)]
-pub struct NodeFlags {
-    is_loop_body: bool,
-    is_loop: bool,
-    is_call: bool,
-    is_syscall: bool,
+/// The semantic block-stack entry kind consumed by an END operation.
+#[derive(Debug, Clone, Copy)]
+pub enum EndBlockStackEntryKind {
+    /// An ordinary control-flow continuation.
+    Continuation,
+    /// A LOOP continuation, whose block-stack message carries the loop marker.
+    LoopContinuation,
+    /// A caller frame whose saved state is restored by this END.
+    CallerFrame,
 }
 
-impl NodeFlags {
-    /// Creates a new instance of `NodeFlags`.
-    ///
-    /// The four booleans are independent flags packed into the hasher state's
-    /// second word for an END operation; there is no natural smaller grouping,
-    /// so we accept the bool parameters explicitly.
-    #[allow(clippy::fn_params_excessive_bools)]
-    pub fn new(is_loop_body: bool, is_loop: bool, is_call: bool, is_syscall: bool) -> Self {
-        Self {
-            is_loop_body,
-            is_loop,
-            is_call,
-            is_syscall,
-        }
+/// The flags written in the second word of the hasher state for END operations.
+///
+/// `entry_kind` is typed so trace construction cannot accidentally emit an invalid combination
+/// such as a caller-frame END that is also marked as a LOOP END.
+#[derive(Debug)]
+pub struct EndBlockFlags {
+    is_loop_body: bool,
+    entry_kind: EndBlockStackEntryKind,
+}
+
+impl EndBlockFlags {
+    /// Creates END flags for the specified block-stack entry kind.
+    pub fn new(is_loop_body: bool, entry_kind: EndBlockStackEntryKind) -> Self {
+        Self { is_loop_body, entry_kind }
     }
 
-    /// Returns ONE if this node is a body of a LOOP node; otherwise returns ZERO.
-    pub fn is_loop_body(&self) -> Felt {
-        if self.is_loop_body { ONE } else { ZERO }
-    }
-
-    /// Returns ONE if this END is closing a LOOP node; otherwise returns ZERO.
-    pub fn is_loop(&self) -> Felt {
-        if self.is_loop { ONE } else { ZERO }
-    }
-
-    /// Returns ONE if this node is a CALL or DYNCALL; otherwise returns ZERO.
-    pub fn is_call(&self) -> Felt {
-        if self.is_call { ONE } else { ZERO }
-    }
-
-    /// Returns ONE if this node is a SYSCALL; otherwise returns ZERO.
-    pub fn is_syscall(&self) -> Felt {
-        if self.is_syscall { ONE } else { ZERO }
-    }
-
-    /// Convenience method that writes the flags in the proper order to be written to the second
-    /// word of the hasher state for the trace row of an END operation.
+    /// Encodes the flags in their hasher-state column order.
     pub fn to_hasher_state_second_word(&self) -> Word {
-        [self.is_loop_body(), self.is_loop(), self.is_call(), self.is_syscall()].into()
+        let is_loop_body = if self.is_loop_body { ONE } else { ZERO };
+        let (is_loop, restores_caller_frame) = match self.entry_kind {
+            EndBlockStackEntryKind::Continuation => (ZERO, ZERO),
+            EndBlockStackEntryKind::LoopContinuation => (ONE, ZERO),
+            EndBlockStackEntryKind::CallerFrame => (ZERO, ONE),
+        };
+
+        [is_loop_body, is_loop, restores_caller_frame, ZERO].into()
     }
 }
 
@@ -1523,6 +1511,28 @@ mod tests {
     use core::mem::size_of;
 
     use super::*;
+
+    #[test]
+    fn end_block_flags_encode_each_entry_kind() {
+        let cases = [
+            (
+                EndBlockFlags::new(false, EndBlockStackEntryKind::Continuation),
+                [ZERO, ZERO, ZERO, ZERO].into(),
+            ),
+            (
+                EndBlockFlags::new(true, EndBlockStackEntryKind::LoopContinuation),
+                [ONE, ONE, ZERO, ZERO].into(),
+            ),
+            (
+                EndBlockFlags::new(false, EndBlockStackEntryKind::CallerFrame),
+                [ZERO, ZERO, ONE, ZERO].into(),
+            ),
+        ];
+
+        for (flags, expected) in cases {
+            assert_eq!(flags.to_hasher_state_second_word(), expected);
+        }
+    }
 
     #[test]
     fn bitwise_replay_trace_len_accounts_for_aead_stream_rows() {

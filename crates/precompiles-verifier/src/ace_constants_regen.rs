@@ -299,7 +299,7 @@ fn compute() -> Result<GeneratedArtifacts, String> {
         }
     }
     for (name, value) in [
-        ("MAX_MESSAGE_WIDTH", u64::from(pvm_security::AIR_SHAPE.lookup.max_message_width)),
+        ("MAX_MESSAGE_WIDTH", u64::from(pvm_security::LOOKUP_SHAPE.max_message_width)),
         (
             "NUM_COMPOSED_CONSTRAINTS",
             u64::from(pvm_security::AIR_SHAPE.num_composed_constraints),
@@ -316,7 +316,7 @@ fn compute() -> Result<GeneratedArtifacts, String> {
         ),
         (
             "LOOKUP_FRACTIONS_PER_ROW",
-            u64::from(pvm_security::AIR_SHAPE.lookup.fractions_per_row),
+            u64::from(pvm_security::LOOKUP_SHAPE.fractions_per_row),
         ),
         (
             "FIXED_BOUNDARY_LOOKUP_TERMS",

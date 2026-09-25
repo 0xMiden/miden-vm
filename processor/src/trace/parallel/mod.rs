@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
 
 use itertools::Itertools;
@@ -385,6 +385,7 @@ fn generate_core_trace_row_major(
         &system_rows,
         &first_stack_top,
     );
+    set_loop_body_multiplicities(&mut core_trace_data, total_core_trace_rows)?;
 
     // Run batch inversion on stack's H0 helper column, processing each fragment in parallel.
     // This must be done after fixup_stack_and_system_rows since that function overwrites the first
@@ -424,6 +425,76 @@ fn generate_core_trace_row_major(
     );
 
     Ok(core_trace_data)
+}
+
+/// Fill each LOOP row's `group_count` with the number of loop-body END rows that return to that
+/// dynamic loop address.
+///
+/// The block-hash lookup uses this value as the multiplicity of the LOOP-committed body digest.
+/// REPEAT rows intentionally do not add loop-body entries, so the original LOOP row must carry
+/// the multiplicity for every iteration of the dynamic loop instance. This is the honest aggregate
+/// count; AIR soundness also relies on the decoder/address/block-stack provenance constraints to
+/// prevent forged same-key END rows or dynamic-address reuse.
+fn set_loop_body_multiplicities(
+    core_trace_data: &mut [Felt],
+    num_rows: usize,
+) -> Result<(), ExecutionError> {
+    if num_rows < 2 {
+        return Ok(());
+    }
+
+    let mut loop_body_counts = BTreeMap::<u64, u64>::new();
+    let width = CORE_STORAGE_WIDTH;
+
+    for row_idx in 0..num_rows - 1 {
+        let row: &CoreCols<Felt> = core_trace_data[row_idx * width..(row_idx + 1) * width].borrow();
+
+        if decode_opcode(&row.decoder.op_bits) != opcodes::END
+            || row.decoder.end_block_flags().is_loop_body != ONE
+        {
+            continue;
+        }
+
+        let next: &CoreCols<Felt> =
+            core_trace_data[(row_idx + 1) * width..(row_idx + 2) * width].borrow();
+        let loop_addr = next.decoder.addr.as_canonical_u64();
+        *loop_body_counts.entry(loop_addr).or_insert(0) += 1;
+    }
+
+    for row_idx in 0..num_rows - 1 {
+        let is_loop = {
+            let row: &CoreCols<Felt> =
+                core_trace_data[row_idx * width..(row_idx + 1) * width].borrow();
+            decode_opcode(&row.decoder.op_bits) == opcodes::LOOP
+        };
+        if !is_loop {
+            continue;
+        }
+
+        let loop_addr = {
+            let next: &CoreCols<Felt> =
+                core_trace_data[(row_idx + 1) * width..(row_idx + 2) * width].borrow();
+            next.decoder.addr.as_canonical_u64()
+        };
+        let body_count = loop_body_counts
+            .get(&loop_addr)
+            .copied()
+            .ok_or(ExecutionError::Internal("dynamic LOOP has no matching body END"))?;
+
+        let row: &mut CoreCols<Felt> =
+            core_trace_data[row_idx * width..(row_idx + 1) * width].borrow_mut();
+        row.decoder.group_count = Felt::new_unchecked(body_count);
+    }
+
+    Ok(())
+}
+
+fn decode_opcode(op_bits: &[Felt; NUM_OP_BITS]) -> u8 {
+    let mut opcode = 0u8;
+    for (idx, bit) in op_bits.iter().enumerate() {
+        opcode |= ((bit.as_canonical_u64() & 1) as u8) << idx;
+    }
+    opcode
 }
 
 /// Initializing the first row of each fragment with the appropriate stack and system state.

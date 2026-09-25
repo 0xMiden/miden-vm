@@ -7,8 +7,9 @@ const FP_ONE = 65536
 const BITS_PER_QUERY_FP = 193381
 const CHALLENGE_SAMPLE_BITS = 126
 const SECURITY_CAP_BITS = 126
+const DEEP_FIELD_BASE_BITS = 123
 const FRI_FOLDING_BASE_BITS = 120
-const LOG2_E_FP = 94548
+const LOG2_E_FP = 94549
 
 # Inputs outside these bounds are not supported. The bounds prevent overflow and underflow in the
 # lookup calculation and are also the assumptions used below to prove that the other native
@@ -52,15 +53,29 @@ proc lookup_boundary_correction(
     end
 end
 
+#! Whole-bit DEEP composition bound for 1..=8192 batched terms. The Eidos challenge support
+#! has exactly 126 bits, so the result is 126 - ceil(log2(n)) - log_height - 3 + deep_pow_bits,
+#! capped at 126 bits. The three-bit subtraction accounts for the LDE blowup.
+#! Inputs:  [num_deep_terms, log_height, deep_pow_bits, ...]
+#! Outputs: [deep_level, ...]
+proc deep_security_level(n: u32, log_height: u8, deep_pow_bits: u8) -> u32
+    dup sub.1 u32clz push.32 swap sub
+    # => [q, n, log_height, deep_pow_bits, ...]
+    swap drop
+    # => [q, log_height, deep_pow_bits, ...]
+    push.DEEP_FIELD_BASE_BITS swap sub
+    swap sub swap add
+    push.SECURITY_CAP_BITS u32min
+end
+
 #! Computes a proof's conjectured security level from the descriptor returned by the MVM or PVM
 #! recursive verifier:
 #!
-#!   level = min(query, lookup).
+#!   level = min(query, lookup, deep).
 #!
-#! The native report also includes constraint composition, out-of-domain evaluation, DEEP
-#! composition, FRI folding, and the field/hash cap. The bounds checked here ensure that these
-#! five terms are greater than lookup, as shown below. Lifted STARK applies grinding before DEEP,
-#! FRI folding, and query sampling, but not before lookup challenges; lookup grinding must be zero.
+#! The native report also includes constraint composition, out-of-domain evaluation, FRI folding,
+#! and the field/hash cap. The bounds checked here keep those four terms above lookup. Lifted STARK
+#! applies grinding before DEEP, FRI folding, and query sampling. Lookup grinding must be zero.
 #!
 #! # Query term
 #!
@@ -88,7 +103,7 @@ end
 #!
 #! The procedure subtracts one when b < r_f. Because b <= s, it cannot overstate the native
 #! bound and can understate it by at most one bit. For MVM, A = (16 + 2) * 78 = 1404 gives
-#! b = 34404, while R is at most 4887 (258 boundary terms at height 6). For PVM,
+#! b = 34405, while R is at most 4887 (258 boundary terms at height 6). For PVM,
 #! A = (18 + 2) * 260 = 5200 gives b = 40838 and R = 1 at every supported height. Hence
 #! b >= r_f for both deployed shapes, so this decision is exact throughout their ranges.
 #!
@@ -96,7 +111,15 @@ end
 #! product cannot wrap. At widths 16 and 18, the upper bound permits 3640 and 3276 fractions per
 #! row respectively. The descriptor supplies these values from the verified AIR shape.
 #!
-#! # Why the other five terms can be omitted
+#! # DEEP term
+#!
+#! Let `n = num_deep_terms` and `q = ceil(log2(n))`. The native round subtracts
+#! `ceil(log2(n) * FP_ONE)` and the LDE height `height + 3` from the Q16 challenge-support size,
+#! then adds `deep_pow_bits`. The Eidos support has exactly 126 bits, so its whole-bit value is
+#!
+#!   deep = min(126, 123 - q - height + deep_pow_bits).
+#!
+#! # Why the other four terms can be omitted
 #!
 #! A >= 257, height >= 6, and R >= 0 give
 #!
@@ -111,12 +134,11 @@ end
 #!   ceil(FP_ONE * log2(11)) + 1 < 4 * FP_ONE, the term still exceeds 122 - height;
 #! - FRI folding: FRI_FOLDING_BASE_BITS - height + folding_pow >= 120 - height;
 #! - composition: composed <= 8192 gives at least 126 - log2(8192) = 113 bits;
-#! - DEEP: deep_terms <= 8192 and nonnegative grinding also give at least 113 bits;
 #! - collision cap: SECURITY_CAP_BITS = 126 > 111.
 #!
 #! The OOD and folding bounds subtract the same height as lookup. Thus their margins hold at
-#! every accepted height. DEEP and folding grinding can only increase their bounds. The cap is
-#! also greater than lookup, so omitting a query clamp cannot affect the final minimum.
+#! every accepted height. Folding grinding can only increase its bound. The cap is also greater
+#! than lookup, so omitting a query clamp cannot affect the final minimum.
 #!
 #! # Contract
 #!
@@ -145,18 +167,24 @@ end
 #! Invocation: exec
 pub proc compute_conjectured_security_level(descriptor: types::StackSecurityDescriptor) -> u32
     # Assert the validity envelope documented above. Each comparison also range-checks its
-    # operand as a u32. Inputs not used by query or lookup are consumed after validation.
+    # operand as a u32. Inputs not used by query, lookup, or DEEP are consumed after validation.
     # Lifted STARK has no grinding step before lookup-challenge sampling.
     assertz.err="lookup grinding must be zero"
     dup eq.0 assertz.err="num_composed_constraints must be positive"
     u32lte.MAX_COMPOSED_CONSTRAINTS assert.err="num_composed_constraints exceeds the estimator envelope"
     u32lte.MAX_CONSTRAINT_DEGREE assert.err="max_constraint_degree exceeds the estimator envelope"
     dup eq.0 assertz.err="num_deep_terms must be positive"
-    u32lte.MAX_DEEP_TERMS assert.err="num_deep_terms exceeds the estimator envelope"
-    movup.6 u32lte.MAX_POW_BITS assert.err="deep_pow_bits exceeds the estimator envelope"
-    movup.6 u32lte.MAX_POW_BITS assert.err="folding_pow_bits exceeds the estimator envelope"
+    dup u32lte.MAX_DEEP_TERMS assert.err="num_deep_terms exceeds the estimator envelope"
+    movup.8 u32lte.MAX_POW_BITS assert.err="folding_pow_bits exceeds the estimator envelope"
+    dup.7 u32lte.MAX_POW_BITS assert.err="deep_pow_bits exceeds the estimator envelope"
+    # => [num_deep_terms, max_message_width, boundary_terms, fractions_per_row, log_height,
+    #     num_queries, query_pow, deep_pow, ...]
+    dup dup.5 dup.9 swap movup.2 exec.deep_security_level
+    # => [deep_level, num_deep_terms, max_message_width, boundary_terms, fractions_per_row,
+    #     log_height, num_queries, query_pow, deep_pow, ...]
+    movdn.8 drop movup.6 drop
     # => [max_message_width, boundary_terms, fractions_per_row, log_height, num_queries,
-    #     query_pow, ...]
+    #     query_pow, deep_level, ...]
 
     # A = (max_message_width + 2) * fractions_per_row. Each factor is bounded before the
     # multiplication, so the product is at most 2^32 and remains below the field modulus. The
@@ -203,13 +231,14 @@ pub proc compute_conjectured_security_level(descriptor: types::StackSecurityDesc
     push.CHALLENGE_SAMPLE_BITS movup.2 sub movup.3 sub movup.2 sub
     dup u32gte.1 assert.err="lookup correction exceeds the estimator envelope"
     swap sub
-    # => [lookup, num_queries, query_pow, ...]
+    # => [lookup, num_queries, query_pow, deep_level, ...]
 
     # FRI queries. The lookup round is at most 111 bits inside the envelope, so neither this
     # term nor the final minimum needs the collision/field cap. Validate and consume both inputs.
     dup.1 u32lte.MAX_NUM_QUERIES assert.err="num_queries exceeds the estimator envelope"
     dup.2 u32lte.MAX_POW_BITS assert.err="query_pow_bits exceeds the estimator envelope"
     movdn.2 mul.BITS_PER_QUERY_FP u32shr.FP_SHIFT add
+    u32min
     u32min
     # => [level, ...]
 end

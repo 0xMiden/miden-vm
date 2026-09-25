@@ -691,6 +691,7 @@ fn test_mast_forest_wire_view_rejects_external_after_basic_block() {
     let view = MastForestWireView::new(&bytes).unwrap();
     let entry_offset = view.node_entry_offset();
     let entry_size = MastNodeEntry::SERIALIZED_SIZE;
+    drop(view);
     bytes[entry_offset..entry_offset + 2 * entry_size].rotate_left(entry_size);
 
     let result = MastForestWireView::new(&bytes);
@@ -716,6 +717,7 @@ fn test_mast_forest_wire_view_rejects_duplicate_external_digests() {
     let view = MastForestWireView::new(&bytes).unwrap();
     let duplicate_digest_offset = view.external_digest_offset() + Word::min_serialized_size();
     let duplicate_digest = first.to_bytes();
+    drop(view);
     bytes[duplicate_digest_offset..duplicate_digest_offset + duplicate_digest.len()]
         .copy_from_slice(&duplicate_digest);
 
@@ -1266,13 +1268,15 @@ fn mast_forest_deserialize_invalid_ops_offset_fails() {
 
     let view = MastForestWireView::new(&serialized).unwrap();
     let node_entry_offset = view.node_entry_offset();
+    drop(view);
 
     // Corrupt the ops_offset field with an out-of-bounds value
     let block_discriminant: u64 = 3;
     let corrupted_value = (block_discriminant << 60) | u32::MAX as u64;
 
     let mut corrupted = serialized;
-    corrupted_value.write_into(&mut &mut corrupted[node_entry_offset..node_entry_offset + 8]);
+    corrupted[node_entry_offset..node_entry_offset + 8]
+        .copy_from_slice(&corrupted_value.to_le_bytes());
 
     let result = MastForest::read_from_bytes(&corrupted);
     assert_matches!(result, Err(DeserializationError::InvalidValue(_)));
@@ -1922,6 +1926,7 @@ fn test_untrusted_forest_detects_forward_reference() {
     let view = MastForestWireView::new(&bytes).unwrap();
     let entry_offset = view.node_entry_offset();
     let entry_size = MastNodeEntry::SERIALIZED_SIZE;
+    drop(view);
     bytes[entry_offset..entry_offset + 4 * entry_size].rotate_right(entry_size);
 
     // Deserialize as untrusted and try to validate
@@ -1956,9 +1961,8 @@ fn test_untrusted_forest_rejects_mismatched_wire_root_hash() {
     .into();
 
     let mut corrupted = bytes.clone();
-    bogus_digest.write_into(
-        &mut &mut corrupted[digest_offset..digest_offset + Word::min_serialized_size()],
-    );
+    corrupted[digest_offset..digest_offset + Word::min_serialized_size()]
+        .copy_from_slice(&bogus_digest.to_bytes());
 
     let untrusted = UntrustedMastForest::read_from_bytes(&corrupted).unwrap();
     let result = untrusted.validate();
@@ -1993,9 +1997,8 @@ fn test_untrusted_forest_rejects_digest_collision_in_wire_hashes() {
     let left_digest_offset = node_hash_digest_offset(&view, left_root.to_usize());
 
     let mut corrupted = bytes.clone();
-    right_digest.write_into(
-        &mut &mut corrupted[left_digest_offset..left_digest_offset + Word::min_serialized_size()],
-    );
+    corrupted[left_digest_offset..left_digest_offset + Word::min_serialized_size()]
+        .copy_from_slice(&right_digest.to_bytes());
 
     let untrusted = UntrustedMastForest::read_from_bytes(&corrupted).unwrap();
     let result = untrusted.validate();

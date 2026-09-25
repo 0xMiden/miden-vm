@@ -14,7 +14,7 @@ pub use miden_air::security::{
 };
 use miden_air::security::{
     CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT, EIDOS_CHALLENGE_SAMPLE_BITS,
-    security_report_with_hash,
+    OOD_POW_BITS, security_report_with_hash,
 };
 use miden_core::{
     Felt,
@@ -51,12 +51,16 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 pub const AIR_SHAPE: AirShape = AirShape {
     num_composed_constraints: 660,
     max_constraint_degree: 5,
+    num_quotient_chunks: 4,
     max_combo: NUM_OOD_POINTS,
     num_deep_terms: Some(802),
-    lookup: LookupShape {
-        fractions_per_row: 260,
-        max_message_width: 18,
-    },
+    lookup: Some(LOOKUP_SHAPE),
+};
+
+/// Lookup argument shape of the chiplet multi-AIR statement, as stored in [`AIR_SHAPE`].
+pub const LOOKUP_SHAPE: LookupShape = LookupShape {
+    fractions_per_row: 260,
+    max_message_width: 18,
 };
 
 /// Computes the AIR shape by symbolically evaluating every chiplet AIR.
@@ -87,12 +91,13 @@ pub fn derive_air_shape() -> AirShape {
         // single-AIR statement needs no cross-AIR batching challenge.
         num_composed_constraints: (num_constraints + num_airs - 1) as u32,
         max_constraint_degree: max_constraint_degree as u32,
+        num_quotient_chunks: quotient_chunk_count(max_constraint_degree) as u32,
         max_combo: NUM_OOD_POINTS,
         num_deep_terms: Some(num_columns as u32 + NUM_OOD_POINTS),
-        lookup: LookupShape {
+        lookup: Some(LookupShape {
             fractions_per_row: fractions_per_row as u32,
             max_message_width: MAX_MESSAGE_WIDTH as u32,
-        },
+        }),
     }
 }
 
@@ -126,9 +131,13 @@ fn column_count(air: &ChipletAir, alignment: usize) -> usize {
 /// Committed base columns in the quotient group: one chunk per unit of degree above the vanishing
 /// polynomial, rounded up to a power of two, committed as a single extension-valued matrix.
 fn quotient_column_count(max_constraint_degree: usize, alignment: usize) -> usize {
-    let chunks = max_constraint_degree.saturating_sub(1).max(1).next_power_of_two();
+    aligned(quotient_chunk_count(max_constraint_degree) * EXTENSION_DEGREE, alignment)
+}
 
-    aligned(chunks * EXTENSION_DEGREE, alignment)
+/// Committed quotient chunks: one per unit of degree above the vanishing polynomial, rounded up to
+/// a power of two.
+fn quotient_chunk_count(max_constraint_degree: usize) -> usize {
+    max_constraint_degree.saturating_sub(1).max(1).next_power_of_two()
 }
 
 /// Pads a committed width up to the commitment scheme's column alignment.
@@ -161,7 +170,7 @@ pub const SECURITY_CAP: u64 = deployed_instance(0).cap();
 
 /// Q16 upper bound on the log2 of the lookup round's error coefficient.
 pub const LOOKUP_COEFFICIENT: u64 = fixed::ceil_log2(
-    (AIR_SHAPE.lookup.max_message_width as u64 + 2) * AIR_SHAPE.lookup.fractions_per_row as u64,
+    (LOOKUP_SHAPE.max_message_width as u64 + 2) * LOOKUP_SHAPE.fractions_per_row as u64,
 );
 
 /// Q16 upper bound on the log2 of the constraint-composition round's error coefficient.
@@ -223,7 +232,7 @@ pub const DEEP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - DEEP_COEFFICIENT;
 pub const FOLDING_BASE: u64 =
     EIDOS_CHALLENGE_SAMPLE_BITS - FOLDING_COEFFICIENT - fixed::from_bits(LOG_BLOWUP as u32);
 
-/// `log2(e)`, rounded down, in Q16 fixed point.
+/// `log2(e)`, rounded up, in Q16 fixed point.
 pub const LOG2_E: u64 = fixed::LOG2_E;
 
 /// The instance shape of a deployed PVM proof at the given maximum AIR log height.
@@ -282,7 +291,7 @@ fn fixed_boundary_fraction_count() -> u64 {
 fn fixed_boundary_correction(log_max_height: u32) -> u64 {
     let numerator = fixed_boundary_fraction_count() * LOG2_E;
     numerator
-        .div_ceil(AIR_SHAPE.lookup.fractions_per_row as u64)
+        .div_ceil(LOOKUP_SHAPE.fractions_per_row as u64)
         .div_ceil(1u64 << log_max_height)
 }
 
@@ -307,6 +316,7 @@ pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
         log_folding_arity: u32::from(params.log_folding_arity()),
         num_queries: params.num_queries() as u32,
         query_pow_bits: params.query_pow_bits() as u32,
+        ood_pow_bits: OOD_POW_BITS,
         deep_pow_bits: params.deep_pow_bits() as u32,
         folding_pow_bits: params.folding_pow_bits() as u32,
         // The chiplet stack samples its lookup challenges directly after the main-trace
@@ -501,32 +511,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_055_278, 7_643_704, 7_693_931, 8_257_536, 7_760_447, 6_335_399, 8_257_536],
+                [7_055_278, 7_643_704, 7_693_931, 7_821_888, 7_760_447, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 16),
-                [6_399_963, 7_643_704, 7_039_549, 8_257_536, 7_105_087, 6_335_399, 8_257_536],
+                [6_399_963, 7_643_704, 7_039_549, 7_166_528, 7_105_087, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 19),
-                [6_203_355, 7_643_704, 6_842_942, 8_257_536, 6_908_479, 6_335_399, 8_257_536],
+                [6_203_355, 7_643_704, 6_842_942, 6_969_920, 6_908_479, 6_335_399, 8_257_536],
                 94,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_137_819, 7_643_704, 6_777_406, 8_257_536, 6_842_943, 6_335_399, 8_257_536],
+                [6_137_819, 7_643_704, 6_777_406, 6_904_384, 6_842_943, 6_335_399, 8_257_536],
                 93,
             ),
             (
                 (27, 17, 12, 4, 24),
-                [5_875_675, 7_643_704, 6_515_262, 8_257_536, 6_580_799, 6_335_399, 8_257_536],
+                [5_875_675, 7_643_704, 6_515_262, 6_642_240, 6_580_799, 6_335_399, 8_257_536],
                 89,
             ),
             (
                 (7, 0, 0, 0, 16),
-                [6_399_963, 7_643_704, 7_039_549, 7_625_280, 6_842_943, 1_353_667, 8_257_536],
+                [6_399_963, 7_643_704, 7_039_549, 6_380_096, 6_842_943, 1_353_667, 8_257_536],
                 20,
             ),
         ];
