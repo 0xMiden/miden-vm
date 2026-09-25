@@ -42,16 +42,6 @@ pub struct ProveCmd {
     )]
     max_prover_memory: u64,
 
-    /// Maximum cumulative ACE witness capacity during execution (accepts suffixes: 64Mi, 1Gi)
-    ///
-    /// Also capped by --max-prover-memory.
-    #[arg(
-        long = "max-ace-witness",
-        default_value_t = ExecutionOptions::DEFAULT_MAX_ACE_WITNESS_BYTES as u64,
-        value_parser = parse_byte_size
-    )]
-    max_ace_witness: u64,
-
     /// Number of outputs
     #[arg(short = 'n', long = "num-outputs", default_value = "16")]
     num_outputs: usize,
@@ -85,12 +75,6 @@ impl ProveCmd {
             self.expected_cycles,
             ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         )
-        .map(|options| {
-            options.with_max_ace_witness_bytes(
-                usize::try_from(self.max_ace_witness.min(self.max_prover_memory))
-                    .unwrap_or(usize::MAX),
-            )
-        })
         .map_err(|err| Report::msg(format!("{err}")))
     }
 
@@ -213,22 +197,5 @@ impl ProveCmd {
         }
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn prover_memory_limit_applies_to_ace_execution() {
-        let command = ProveCmd::parse_from(["prove", "program.masm", "--max-prover-memory", "1Ki"]);
-        assert_eq!(command.get_execution_options().unwrap().max_ace_witness_bytes(), 1024);
-    }
-
-    #[test]
-    fn ace_witness_limit_can_exceed_default() {
-        let command = ProveCmd::parse_from(["prove", "program.masm", "--max-ace-witness", "256Mi"]);
-        assert_eq!(command.get_execution_options().unwrap().max_ace_witness_bytes(), 256 << 20);
     }
 }

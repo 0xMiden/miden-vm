@@ -17,7 +17,6 @@ use crate::{
     errors::{AceError, OperationError},
     fast::{FastProcessor, INITIAL_STACK_TOP_IDX, SystemCallState, memory::Memory},
     processor::{HasherInterface, Processor, StackInterface, SystemInterface},
-    trace::chiplets::CircuitEvaluation,
 };
 
 impl Processor for FastProcessor {
@@ -62,19 +61,14 @@ impl Processor for FastProcessor {
         num_read_rows: u32,
         num_eval_rows: u32,
     ) -> Result<(), AceError> {
-        let bytes = CircuitEvaluation::capacity_bytes(num_read_rows, num_eval_rows)
-            .ok_or_else(|| AceError("ACE witness capacity overflows usize".into()))?;
-        let total = self
-            .ace_witness_bytes
-            .checked_add(bytes)
-            .ok_or_else(|| AceError("ACE witness capacity exceeds the execution limit".into()))?;
-        if total > self.options.max_ace_witness_bytes() {
+        let total = self.ace_rows + u64::from(num_read_rows) + u64::from(num_eval_rows);
+        let limit = self.options.max_ace_rows();
+        if total > u64::from(limit) {
             return Err(AceError(format!(
-                "ACE witness capacity {total} bytes exceeds the execution limit of {} bytes",
-                self.options.max_ace_witness_bytes()
+                "ACE row count {total} exceeds max_ace_rows limit of {limit}"
             )));
         }
-        self.ace_witness_bytes = total;
+        self.ace_rows = total;
         Ok(())
     }
 

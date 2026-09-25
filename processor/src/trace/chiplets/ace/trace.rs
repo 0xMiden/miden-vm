@@ -57,17 +57,6 @@ pub struct CircuitEvaluation {
 }
 
 impl CircuitEvaluation {
-    /// Returns the requested capacity of the three count-sized vectors.
-    pub(crate) fn capacity_bytes(num_read_rows: u32, num_eval_rows: u32) -> Option<usize> {
-        let read_rows = num_read_rows as usize;
-        let eval_rows = num_eval_rows as usize;
-        let wires = read_rows.checked_mul(2)?.checked_add(eval_rows)?;
-        wires
-            .checked_mul(size_of::<(QuadFelt, u32)>())?
-            .checked_add(read_rows.checked_mul(size_of::<ReadNode>())?)?
-            .checked_add(eval_rows.checked_mul(size_of::<EvalNode>())?)
-    }
-
     /// Allocates storage for a circuit with the given READ and EVAL row counts.
     ///
     /// # Panics

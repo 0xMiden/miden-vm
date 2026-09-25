@@ -44,8 +44,8 @@ pub(crate) trait Processor: Sized {
     /// Returns a mutable reference to the internal hasher subsystem.
     fn hasher(&mut self) -> &mut Self::Hasher;
 
-    /// Checks resources before allocating or evaluating a circuit. Execution charges its witness
-    /// budget; replay requires enough recorded reads to cover both sections.
+    /// Checks resources before allocating or evaluating a circuit. Execution charges cumulative
+    /// ACE rows; replay requires enough recorded reads to cover both sections.
     fn check_ace_resources(
         &mut self,
         num_read_rows: u32,

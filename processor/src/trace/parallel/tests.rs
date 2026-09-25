@@ -35,39 +35,45 @@ const DEFAULT_STACK: &[Felt] =
 const SENTINEL_VALUE: Felt = Felt::new_unchecked(9999);
 
 #[test]
-fn ace_witness_budget_covers_all_calls_in_execution_and_proving() {
-    let program = repeated_ace_program();
-    // The program evaluates the circuit twice, with one READ row and four EVAL rows per call.
-    let total_bytes = 2 * crate::trace::chiplets::CircuitEvaluation::capacity_bytes(1, 4).unwrap();
-
-    for limit in [0, total_bytes - 1, total_bytes] {
-        let options = ExecutionOptions::default()
-            .with_core_trace_fragment_size(1)
+fn ace_row_limit_covers_repeated_calls_independently_of_max_cycles() {
+    // Each call adds one READ row and four EVAL rows, reusing the same VM memory.
+    const ROWS_PER_EVALUATION: u32 = 1 + 4;
+    let min_trace_len = MIN_TRACE_LEN as u32;
+    for (max_cycles, passing_calls) in [(None, 12), (Some(min_trace_len), 20)] {
+        let limit = passing_calls * ROWS_PER_EVALUATION;
+        if let Some(max_cycles) = max_cycles {
+            assert!(limit > max_cycles);
+        }
+        let options = ExecutionOptions::new(max_cycles, min_trace_len, 1)
             .unwrap()
-            .with_max_ace_witness_bytes(limit);
-        let processor = || {
-            FastProcessor::new_with_options(
-                StackInputs::default(),
-                AdviceInputs::default(),
-                options,
-            )
-            .unwrap()
-        };
-        let execution = processor().execute_sync(&program, &mut DefaultHost::default()).map(|_| ());
-        let proving = processor()
-            .execute_for_proving_sync(&program, &mut DefaultHost::default())
-            .and_then(|witness| build_trace(witness.into_parts().0))
-            .map(|_| ());
+            .with_max_ace_rows(limit);
+        for (num_calls, succeeds) in [(passing_calls, true), (passing_calls + 1, false)] {
+            let program = repeated_ace_program(num_calls);
+            let processor = || {
+                FastProcessor::new_with_options(
+                    StackInputs::default(),
+                    AdviceInputs::default(),
+                    options,
+                )
+                .unwrap()
+            };
+            let execution =
+                processor().execute_sync(&program, &mut DefaultHost::default()).map(|_| ());
+            let proving = processor()
+                .execute_for_proving_sync(&program, &mut DefaultHost::default())
+                .and_then(|witness| build_trace(witness.into_parts().0))
+                .map(|_| ());
 
-        for result in [execution, proving] {
-            if limit == total_bytes {
-                result.unwrap();
-            } else {
-                assert!(matches!(
-                    result,
-                    Err(ExecutionError::AceChipError { error: crate::AceError(message), .. })
-                        if message.contains("exceeds the execution limit")
-                ));
+            for result in [execution, proving] {
+                if succeeds {
+                    result.unwrap();
+                } else {
+                    assert!(matches!(
+                        result,
+                        Err(ExecutionError::AceChipError { error: crate::AceError(message), .. })
+                            if message.contains(&format!("ACE row count {} exceeds max_ace_rows limit of {limit}", num_calls * ROWS_PER_EVALUATION))
+                    ));
+                }
             }
         }
     }
@@ -75,7 +81,7 @@ fn ace_witness_budget_covers_all_calls_in_execution_and_proving() {
 
 #[test]
 fn ace_replay_rejects_dimensions_exceeding_recorded_reads() {
-    let program = repeated_ace_program();
+    let program = repeated_ace_program(2);
     // The recorded circuit has two variables and four gates. Overstate each count separately.
     for (num_vars, num_eval) in [(4, 4), (2, 8)] {
         let options = ExecutionOptions::default().with_core_trace_fragment_size(1).unwrap();
@@ -113,7 +119,7 @@ fn ace_replay_rejects_dimensions_exceeding_recorded_reads() {
     }
 }
 
-fn repeated_ace_program() -> Program {
+fn repeated_ace_program(num_calls: u32) -> Program {
     // Two input wires (IDs 5 and 4), followed by four gates computing wire 5 minus itself.
     // A subtraction gate packs two 30-bit input IDs with opcode zero.
     let gate = 5_u64 | (5_u64 << 30);
@@ -121,7 +127,9 @@ fn repeated_ace_program() -> Program {
         "begin
             push.{gate}.{gate}.{gate}.{gate} mem_storew_le.4 dropw
             push.4.2.0
-            eval_circuit eval_circuit
+            repeat.{num_calls}
+                eval_circuit
+            end
             drop drop drop
         end"
     );
