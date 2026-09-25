@@ -49,7 +49,7 @@ fn public_constant_no_warning() -> TestResult {
 #[test]
 fn reexported_private_constant_and_its_dependencies_do_not_warn() -> TestResult {
     let context = TestContext::default();
-    for path in ["self", "::test::lib"] {
+    for path in ["self", "test::lib", "::test::lib"] {
         let source = source_file!(
             &context,
             format!(
