@@ -2480,3 +2480,46 @@ fn test_untrusted_payload_does_not_allocate_debug_info_scaffolding() {
         .validate()
         .expect("validation should fit the budget previously consumed by debug scaffolding");
 }
+
+/// A repeated advice map key must be rejected by the wire view and by both deserializing readers.
+#[test]
+fn duplicate_advice_map_key_rejected_by_every_reader_path() {
+    use crate::advice::AdviceMap;
+
+    let mut forest = MastForest::new();
+    let block = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block);
+
+    // Same forest without an advice map.
+    let mut empty_bytes = Vec::new();
+    forest.clone().write_into(&mut empty_bytes);
+
+    // One-entry advice map, used to find where the advice map section starts.
+    let key = Word::default();
+    let mut one_entry_map = AdviceMap::default();
+    one_entry_map.insert(key, vec![Felt::new_unchecked(1)]);
+    let forest_with_map = forest.clone().with_advice_map(one_entry_map.clone());
+    let mut one_entry_bytes = Vec::new();
+    forest_with_map.write_into(&mut one_entry_bytes);
+
+    let one_entry_map_bytes = one_entry_map.to_bytes();
+    let advice_map_start = one_entry_bytes.len() - one_entry_map_bytes.len();
+
+    // The advice map is the last section, so everything before it must match.
+    assert_eq!(&one_entry_bytes[..advice_map_start], &empty_bytes[..advice_map_start]);
+
+    // Advice map with the same key twice.
+    let mut dup_map_bytes = Vec::new();
+    dup_map_bytes.write_usize(2);
+    (key, vec![Felt::new_unchecked(1)]).write_into(&mut dup_map_bytes);
+    (key, vec![Felt::new_unchecked(2)]).write_into(&mut dup_map_bytes);
+
+    let mut dup_bytes = one_entry_bytes[..advice_map_start].to_vec();
+    dup_bytes.extend_from_slice(&dup_map_bytes);
+
+    assert!(MastForestWireView::new(&dup_bytes).is_err());
+    assert!(MastForest::read_from_bytes(&dup_bytes).is_err());
+    assert!(UntrustedMastForest::read_from_bytes(&dup_bytes).is_err());
+}
