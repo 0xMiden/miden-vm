@@ -8,6 +8,7 @@
 //!
 //! Each submodule corresponds to a specific signature scheme:
 //! - [`ecdsa_k256_keccak`]: ECDSA over secp256k1 with Keccak256 hashing
+//! - [`eddsa_25519_sha512`]: Ed25519 with SHA-512 hashing
 //! - [`falcon512_eidos`]: Falcon-512 with the native VM hash
 
 // ECDSA K256 KECCAK
@@ -100,6 +101,47 @@ pub mod ecdsa_k256_keccak {
 
     fn limbs_to_felts<const N: usize>(limbs: [u32; N]) -> [Felt; N] {
         limbs.map(Felt::from_u32)
+    }
+}
+
+// EDDSA 25519 SHA512
+// ================================================================================================
+
+/// Ed25519 signature helpers for the `eddsa_25519_sha512::verify` and `verify_bytes` MASM ABIs.
+///
+/// Verification requires canonical public-key and signature encodings and rejects small-order
+/// public keys and signature points. The public-key commitment matches `miden-crypto`; the
+/// signature remains an uncommitted advice witness.
+pub mod eddsa_25519_sha512 {
+    extern crate alloc;
+
+    use alloc::vec::Vec;
+
+    use miden_core::{Felt, Word, serde::Serializable, utils::bytes_to_packed_u32_elements};
+    use miden_crypto::{
+        SequentialCommit,
+        dsa::eddsa_25519_sha512::{PublicKey, Signature, SigningKey},
+    };
+
+    /// Signs the 32 little-endian bytes of a Word and encodes the public key and signature as
+    /// advice for the MASM verifier. Use [`public_key_commitment()`] for its operand-stack input.
+    pub fn sign(sk: &SigningKey, msg: Word) -> Vec<Felt> {
+        encode_signature(&sk.public_key(), &sk.sign(msg))
+    }
+
+    /// Encodes `[A[8] || R[8] || S[8]]` in advice-consumption order, where each element is a
+    /// packed little-endian u32 limb of the original RFC 8032 byte encodings. No normalization
+    /// is performed. The same witness format serves Word and arbitrary-byte verification.
+    pub fn encode_signature(pk: &PublicKey, sig: &Signature) -> Vec<Felt> {
+        let mut elements = pk.to_elements();
+        elements.extend(bytes_to_packed_u32_elements(&sig.to_bytes()));
+        elements
+    }
+
+    /// Returns the Eidos commitment to the compressed public key's eight packed u32 limbs,
+    /// matching the `PK_COMM` input to both MASM verification procedures.
+    pub fn public_key_commitment(pk: &PublicKey) -> Word {
+        pk.to_commitment()
     }
 }
 

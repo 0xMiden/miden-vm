@@ -16,8 +16,10 @@
 //! - `EQ`: trapping equality predicate that evaluates to `Node::TRUE` only when both operands
 //!   reduce to the same canonical point.
 //!
-//! Affine coordinates are canonical uint values in the curve's base-field domain. Concrete MASM
-//! support modules are generated separately and are currently internal implementation detail.
+//! Affine coordinates are canonical uint values in the curve's base-field domain. Ed25519
+//! `VALUE` coordinates use its birational short-Weierstrass model; compressed Edwards bytes are
+//! decoded before conversion and never stored in deferred curve nodes. Concrete MASM support
+//! modules are generated separately and are currently internal implementation detail.
 //!
 //! ## Trust contract
 //!
@@ -35,9 +37,11 @@
 //! These methods may use debug assertions to document invariants in debug builds, but release
 //! builds do not revalidate curve membership before applying formulas.
 //!
-//! This precompile does not provide compressed point encodings, subgroup checks, signature
-//! semantics, or public API stability guarantees beyond this internal precompile contract.
+//! This precompile does not load compressed points into graph `VALUE` nodes, enforce subgroup
+//! checks, or provide signature semantics or public API stability guarantees beyond this internal
+//! precompile contract.
 
+mod ed25519;
 mod glv;
 mod secp256k1;
 mod short_weierstrass;
@@ -54,8 +58,9 @@ use miden_core::{
 };
 use miden_crypto::hash::eidos::{DomainTag, EidosDomain, EidosFrame};
 
-use self::secp256k1::Secp256k1;
+use self::{ed25519::Ed25519, secp256k1::Secp256k1};
 pub use self::{
+    ed25519::{ED25519_GENERATOR_X, ED25519_GENERATOR_Y, ED25519_ID, ed25519_decompress_x},
     glv::{SECP256K1_BETA, SECP256K1_LAMBDA, glv_decompose, phi_generator, scalar_mul_mod_n},
     secp256k1::{SECP256K1_GENERATOR_X, SECP256K1_GENERATOR_Y, SECP256K1_ID},
 };
@@ -74,6 +79,12 @@ pub const K1_LAMBDA_PTR: u32 = 11;
 
 /// VM-owned store pointer for the secp256k1 group configuration.
 pub const K1_GROUP_PTR: u32 = 1;
+/// VM-owned store pointer for the Ed25519 group configuration.
+pub const ED25519_GROUP_PTR: u32 = 2;
+/// VM-owned store pointer for the Ed25519 curve coefficient `A`.
+pub const ED25519_A_PTR: u32 = 12;
+/// VM-owned store pointer for the Ed25519 curve coefficient `B`.
+pub const ED25519_B_PTR: u32 = 13;
 
 /// A fixed curve coefficient uint pinned at a VM-owned store pointer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,8 +99,8 @@ pub struct CurveCoefficient {
 
 /// Returns all fixed curve coefficients in VM pointer order.
 ///
-/// The order is secp256k1 `A`/`B`.
-pub fn curve_coefficients() -> [CurveCoefficient; 2] {
+/// The order is secp256k1 `A`/`B`, followed by Ed25519 `A`/`B`.
+pub fn curve_coefficients() -> [CurveCoefficient; 4] {
     [
         CurveCoefficient {
             ptr: CurveId::Secp256k1.a_ptr(),
@@ -100,6 +111,16 @@ pub fn curve_coefficients() -> [CurveCoefficient; 2] {
             ptr: CurveId::Secp256k1.b_ptr(),
             bound_ptr: CurveId::Secp256k1.base_domain().bound_ptr(),
             value: <Secp256k1 as ShortWeierstrassSpec>::B,
+        },
+        CurveCoefficient {
+            ptr: CurveId::Ed25519.a_ptr(),
+            bound_ptr: CurveId::Ed25519.base_domain().bound_ptr(),
+            value: <Ed25519 as ShortWeierstrassSpec>::A,
+        },
+        CurveCoefficient {
+            ptr: CurveId::Ed25519.b_ptr(),
+            bound_ptr: CurveId::Ed25519.base_domain().bound_ptr(),
+            value: <Ed25519 as ShortWeierstrassSpec>::B,
         },
     ]
 }
@@ -272,16 +293,18 @@ pub trait ShortWeierstrassSpec: CurveSpec {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CurveId {
     Secp256k1,
+    Ed25519,
 }
 
 impl CurveId {
     /// All fixed curves in deterministic precompile initialization order.
-    pub const ALL: [Self; 1] = [Self::Secp256k1];
+    pub const ALL: [Self; 2] = [Self::Secp256k1, Self::Ed25519];
 
     /// Returns the supported curve for an internal curve selector.
     pub fn from_id(id: Felt) -> Option<Self> {
         match id {
             id if id == <Secp256k1 as CurveSpec>::ID => Some(Self::Secp256k1),
+            id if id == <Ed25519 as CurveSpec>::ID => Some(Self::Ed25519),
             _ => None,
         }
     }
@@ -290,6 +313,7 @@ impl CurveId {
     pub fn id(self) -> Felt {
         match self {
             Self::Secp256k1 => SECP256K1_ID,
+            Self::Ed25519 => ED25519_ID,
         }
     }
 
@@ -297,6 +321,7 @@ impl CurveId {
     pub const fn group_ptr(self) -> u32 {
         match self {
             Self::Secp256k1 => K1_GROUP_PTR,
+            Self::Ed25519 => ED25519_GROUP_PTR,
         }
     }
 
@@ -304,6 +329,7 @@ impl CurveId {
     pub const fn from_group_ptr(ptr: u32) -> Option<Self> {
         match ptr {
             K1_GROUP_PTR => Some(Self::Secp256k1),
+            ED25519_GROUP_PTR => Some(Self::Ed25519),
             _ => None,
         }
     }
@@ -312,6 +338,7 @@ impl CurveId {
     pub const fn a_ptr(self) -> u32 {
         match self {
             Self::Secp256k1 => K1_A_PTR,
+            Self::Ed25519 => ED25519_A_PTR,
         }
     }
 
@@ -319,6 +346,7 @@ impl CurveId {
     pub const fn b_ptr(self) -> u32 {
         match self {
             Self::Secp256k1 => K1_B_PTR,
+            Self::Ed25519 => ED25519_B_PTR,
         }
     }
 
@@ -326,6 +354,7 @@ impl CurveId {
     pub const fn base_domain(self) -> UintDomain {
         match self {
             Self::Secp256k1 => UintDomain::K1Base,
+            Self::Ed25519 => UintDomain::Ed25519Base,
         }
     }
 
@@ -333,6 +362,7 @@ impl CurveId {
     pub fn a_value(self) -> Limbs {
         match self {
             Self::Secp256k1 => <Secp256k1 as ShortWeierstrassSpec>::A,
+            Self::Ed25519 => <Ed25519 as ShortWeierstrassSpec>::A,
         }
     }
 
@@ -340,6 +370,7 @@ impl CurveId {
     pub fn b_value(self) -> Limbs {
         match self {
             Self::Secp256k1 => <Secp256k1 as ShortWeierstrassSpec>::B,
+            Self::Ed25519 => <Ed25519 as ShortWeierstrassSpec>::B,
         }
     }
 
@@ -347,6 +378,7 @@ impl CurveId {
     pub const fn scalar_domain(self) -> UintDomain {
         match self {
             Self::Secp256k1 => UintDomain::K1Scalar,
+            Self::Ed25519 => UintDomain::Ed25519Order,
         }
     }
 
@@ -354,6 +386,7 @@ impl CurveId {
     pub fn generator(self) -> CurvePoint {
         match self {
             Self::Secp256k1 => Secp256k1::generator(),
+            Self::Ed25519 => Ed25519::generator(),
         }
     }
 
@@ -366,6 +399,7 @@ impl CurveId {
                 lambda_ptr: K1_LAMBDA_PTR,
                 lambda: SECP256K1_LAMBDA,
             }),
+            Self::Ed25519 => None,
         }
     }
 
@@ -374,6 +408,7 @@ impl CurveId {
     pub fn point_from_affine(self, x: Limbs, y: Limbs) -> Result<CurvePoint, PrecompileError> {
         match self {
             Self::Secp256k1 => Secp256k1::point_from_affine(x, y),
+            Self::Ed25519 => Ed25519::point_from_affine(x, y),
         }
     }
 
@@ -381,6 +416,7 @@ impl CurveId {
     pub fn is_on_curve(self, point: &CurvePoint) -> bool {
         match self {
             Self::Secp256k1 => Secp256k1::is_on_curve(point),
+            Self::Ed25519 => Ed25519::is_on_curve(point),
         }
     }
 
@@ -388,6 +424,7 @@ impl CurveId {
     pub fn add(self, lhs: CurvePoint, rhs: CurvePoint) -> Result<CurvePoint, PrecompileError> {
         match self {
             Self::Secp256k1 => Secp256k1::add(lhs, rhs),
+            Self::Ed25519 => Ed25519::add(lhs, rhs),
         }
     }
 
@@ -395,6 +432,7 @@ impl CurveId {
     pub fn neg(self, point: CurvePoint) -> Result<CurvePoint, PrecompileError> {
         match self {
             Self::Secp256k1 => Secp256k1::neg(point),
+            Self::Ed25519 => Ed25519::neg(point),
         }
     }
 
@@ -402,6 +440,7 @@ impl CurveId {
     pub fn sub(self, lhs: CurvePoint, rhs: CurvePoint) -> Result<CurvePoint, PrecompileError> {
         match self {
             Self::Secp256k1 => Secp256k1::sub(lhs, rhs),
+            Self::Ed25519 => Ed25519::sub(lhs, rhs),
         }
     }
 
@@ -414,6 +453,7 @@ impl CurveId {
     ) -> Result<CurvePoint, PrecompileError> {
         match self {
             Self::Secp256k1 => Secp256k1::mul_scalar(point, scalar),
+            Self::Ed25519 => Ed25519::mul_scalar(point, scalar),
         }
     }
 }
@@ -912,6 +952,9 @@ mod tests {
 
     use super::*;
     use crate::math::{
+        ed25519_base::Ed25519Base,
+        ed25519_order::Ed25519Order,
+        ed25519_scalar::Ed25519Scalar,
         k1_scalar::K1Scalar,
         uint::{UintPrecompile, ZERO_LIMBS},
     };
@@ -1297,7 +1340,7 @@ mod tests {
         for curve in CurveId::ALL {
             assert_eq!(CurveId::from_group_ptr(curve.group_ptr()), Some(curve));
             assert!(curve.is_on_curve(&curve.generator()));
-            assert!(curve.scalar_domain().is_prime_field());
+            assert_eq!(curve.scalar_domain().is_prime_field(), curve == CurveId::Secp256k1);
         }
         assert_eq!(CurveId::from_group_ptr(99), None);
         assert!(!K1Scalar::is_canonical(&K1Scalar::MODULUS));
@@ -1315,8 +1358,193 @@ mod tests {
                     bound_ptr: CurveId::Secp256k1.base_domain().bound_ptr(),
                     value: CurveId::Secp256k1.b_value(),
                 },
+                CurveCoefficient {
+                    ptr: CurveId::Ed25519.a_ptr(),
+                    bound_ptr: CurveId::Ed25519.base_domain().bound_ptr(),
+                    value: CurveId::Ed25519.a_value(),
+                },
+                CurveCoefficient {
+                    ptr: CurveId::Ed25519.b_ptr(),
+                    bound_ptr: CurveId::Ed25519.base_domain().bound_ptr(),
+                    value: CurveId::Ed25519.b_value(),
+                },
             ],
         );
+    }
+
+    #[test]
+    fn ed25519_group_foundation_matches_independent_sw_fixtures() {
+        const GENERATOR_X: Limbs = [
+            0xaaad_245a,
+            0xaaaa_aaaa,
+            0xaaaa_aaaa,
+            0xaaaa_aaaa,
+            0xaaaa_aaaa,
+            0xaaaa_aaaa,
+            0xaaaa_aaaa,
+            0x2aaa_aaaa,
+        ];
+        const GENERATOR_Y: Limbs = [
+            0x8131_2c14,
+            0xd616_3a5d,
+            0x9283_9e4d,
+            0x6dc2_b281,
+            0x88b7_2eb3,
+            0x1fe1_22d3,
+            0x475f_794b,
+            0x5f51_e65e,
+        ];
+        const TWO_G_X: Limbs = [
+            0x8815_734c,
+            0x0758_f147,
+            0xc8df_b607,
+            0x39ea_0797,
+            0x27c0_1bbf,
+            0x841f_b713,
+            0xc31e_9c62,
+            0x4b7d_ed7f,
+        ];
+        const TWO_G_Y: Limbs = [
+            0x38d2_0a8a,
+            0x4328_fb9a,
+            0x7272_c6e1,
+            0x889a_614d,
+            0xa2d4_5d0c,
+            0xfaf5_ff6b,
+            0xe8ff_1751,
+            0x6c4a_81fe,
+        ];
+        const ORDER: Limbs = [
+            0xe7ae_9f68,
+            0xc093_18d2,
+            0x17bc_e6b2,
+            0xa6f7_cef5,
+            0x0000_0000,
+            0x0000_0000,
+            0x0000_0000,
+            0x8000_0000,
+        ];
+        const SCALAR_MODULUS: Limbs = [
+            0x5cf5_d3ed,
+            0x5812_631a,
+            0xa2f7_9cd6,
+            0x14de_f9de,
+            0x0000_0000,
+            0x0000_0000,
+            0x0000_0000,
+            0x1000_0000,
+        ];
+        const TORSION_X: Limbs = [
+            0xaaad_2451,
+            0xaaaa_aaaa,
+            0xaaaa_aaaa,
+            0xaaaa_aaaa,
+            0xaaaa_aaaa,
+            0xaaaa_aaaa,
+            0xaaaa_aaaa,
+            0x2aaa_aaaa,
+        ];
+        const TORSION_Y: Limbs = ZERO_LIMBS;
+
+        assert_eq!(Ed25519Base::ID, Felt::new_unchecked(4));
+        assert_eq!(Ed25519Scalar::ID, Felt::new_unchecked(5));
+        assert_eq!(Ed25519Order::ID, Felt::new_unchecked(6));
+        assert_eq!(
+            Ed25519Base::MODULUS,
+            [
+                0xffff_ffed,
+                0xffff_ffff,
+                0xffff_ffff,
+                0xffff_ffff,
+                0xffff_ffff,
+                0xffff_ffff,
+                0xffff_ffff,
+                0x7fff_ffff,
+            ]
+        );
+        assert_eq!(Ed25519Scalar::MODULUS, SCALAR_MODULUS);
+
+        let curve = CurveId::Ed25519;
+        assert_eq!(curve.id(), Felt::new_unchecked(2));
+        assert_eq!(curve.group_ptr(), 2);
+        assert_eq!(curve.base_domain(), UintDomain::Ed25519Base);
+        assert_eq!(curve.scalar_domain(), UintDomain::Ed25519Order);
+        assert!(!curve.scalar_domain().is_prime_field());
+        assert_eq!(curve.generator(), CurvePoint::Affine { x: GENERATOR_X, y: GENERATOR_Y });
+
+        let generator = curve.generator();
+        assert_eq!(
+            curve.mul_scalar(generator, [2, 0, 0, 0, 0, 0, 0, 0]).unwrap(),
+            CurvePoint::Affine { x: TWO_G_X, y: TWO_G_Y }
+        );
+        assert_eq!(curve.add(CurvePoint::Identity, generator).unwrap(), generator);
+        assert_eq!(curve.mul_scalar(generator, ZERO_LIMBS).unwrap(), CurvePoint::Identity);
+        assert_eq!(
+            curve.add(generator, curve.neg(generator).unwrap()).unwrap(),
+            CurvePoint::Identity
+        );
+
+        let torsion = curve.point_from_affine(TORSION_X, TORSION_Y).unwrap();
+        assert_eq!(curve.mul_scalar(torsion, SCALAR_MODULUS).unwrap(), torsion);
+        let mixed = curve.add(generator, torsion).unwrap();
+        let mixed_neg = curve.neg(mixed).unwrap();
+        let mut order_minus_one = ORDER;
+        order_minus_one[0] -= 1;
+        assert_eq!(
+            curve.add(curve.mul_scalar(torsion, order_minus_one).unwrap(), torsion).unwrap(),
+            CurvePoint::Identity
+        );
+        assert_eq!(
+            curve.add(curve.mul_scalar(mixed, order_minus_one).unwrap(), mixed).unwrap(),
+            CurvePoint::Identity
+        );
+        assert_eq!(curve.add(mixed, mixed_neg).unwrap(), CurvePoint::Identity);
+
+        assert!(curve.point_from_affine(ZERO_LIMBS, ZERO_LIMBS).is_err());
+        assert!(curve.point_from_affine(Ed25519Base::MODULUS, ZERO_LIMBS).is_err());
+    }
+
+    #[test]
+    fn ed25519_compressed_x_decoder_checks_rfc8032_encoding() {
+        const BASEPOINT_X: Limbs = [
+            0x8f25_d51a,
+            0xc956_2d60,
+            0x9525_a7b2,
+            0x692c_c760,
+            0xfdd6_dc5c,
+            0xc0a4_e231,
+            0xcd6e_53fe,
+            0x2169_36d3,
+        ];
+        let basepoint = [
+            0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+            0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+            0x66, 0x66, 0x66, 0x66,
+        ];
+        assert_eq!(ed25519_decompress_x(basepoint).unwrap(), BASEPOINT_X);
+
+        let identity = [
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        assert_eq!(ed25519_decompress_x(identity).unwrap(), ZERO_LIMBS);
+
+        let mut negative_zero = identity;
+        negative_zero[31] = 0x80;
+        assert!(ed25519_decompress_x(negative_zero).is_err());
+
+        let noncanonical_y = [
+            0xed, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0x7f,
+        ];
+        assert!(ed25519_decompress_x(noncanonical_y).is_err());
+
+        let nonsquare_y = [
+            2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        assert!(ed25519_decompress_x(nonsquare_y).is_err());
     }
 
     #[test]
@@ -1354,9 +1582,11 @@ mod tests {
         for curve in CurveId::ALL {
             let modulus = match curve {
                 CurveId::Secp256k1 => K1Scalar::MODULUS,
+                CurveId::Ed25519 => Ed25519Order::MODULUS,
             };
             let minus_one = match curve {
                 CurveId::Secp256k1 => K1Scalar::minus_one(),
+                CurveId::Ed25519 => Ed25519Order::minus_one(),
             };
 
             // Valid on-curve base points: generator, [2^128]generator, and their sum. The
@@ -1379,7 +1609,10 @@ mod tests {
                     );
                 }
 
-                for _ in 0..40 {
+                // Each affine step performs a field inversion. Keep the full randomized sweep
+                // in release tests and a smaller sweep plus every edge case in debug builds.
+                let random_cases = if cfg!(debug_assertions) { 4 } else { 40 };
+                for _ in 0..random_cases {
                     let mut scalar = [0u32; 8];
                     for limb in scalar.iter_mut() {
                         *limb = next_u32(&mut state);

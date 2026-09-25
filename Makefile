@@ -363,7 +363,11 @@ check-precompile-masm: ## Check generated precompile MASM artifacts for drift
 	cp crates/lib/core/asm/precompiles/u256.masm "$$generated_masm_tmp/tracked/asm/u256.masm"; \
 	cp crates/lib/core/asm/precompiles/fields/k1_base.masm "$$generated_masm_tmp/tracked/asm/fields/k1_base.masm"; \
 	cp crates/lib/core/asm/precompiles/fields/k1_scalar.masm "$$generated_masm_tmp/tracked/asm/fields/k1_scalar.masm"; \
+	cp crates/lib/core/asm/precompiles/fields/ed25519_base.masm "$$generated_masm_tmp/tracked/asm/fields/ed25519_base.masm"; \
+	cp crates/lib/core/asm/precompiles/fields/ed25519_order.masm "$$generated_masm_tmp/tracked/asm/fields/ed25519_order.masm"; \
+	cp crates/lib/core/asm/precompiles/fields/ed25519_scalar.masm "$$generated_masm_tmp/tracked/asm/fields/ed25519_scalar.masm"; \
 	cp crates/lib/core/asm/precompiles/curves/secp256k1.masm "$$generated_masm_tmp/tracked/asm/curves/secp256k1.masm"; \
+	cp crates/lib/core/asm/precompiles/curves/ed25519.masm "$$generated_masm_tmp/tracked/asm/curves/ed25519.masm"; \
 	diff -ru "$$generated_masm_tmp/tracked" "$$generated_masm_tmp/generated"
 
 .PHONY: regenerate-pvm-proof-fixture

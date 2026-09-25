@@ -15,8 +15,8 @@ use miden_core::{
 };
 use miden_crypto::hash::eidos::{EidosDomain, EidosFrame};
 use miden_precompiles::{
-    CurveBinaryOp, CurveId, CurveOp, Keccak256Precompile, UintBinaryOp, UintDomain, UintOp,
-    chunks_to_bytes_exact, n_chunks,
+    CurveBinaryOp, CurveId, CurveOp, Keccak256Precompile, Sha512Precompile, UintBinaryOp,
+    UintDomain, UintOp, chunks_to_bytes_exact, n_chunks,
 };
 use miden_precompiles_air::{memory, stark_config::precompile_pcs_params};
 
@@ -237,11 +237,14 @@ pub(crate) fn import_witnesses(
                 .and_then(|n| n.checked_add(EidosFrame::FELT_LEN))
                 .ok_or(SessionInputError::Limit { location, resource: "input elements" })?;
             reserve(&mut elements_left, elements, location, "input elements")?;
-            if let Some(n_bytes) =
-                Keccak256Precompile::decode_assert_frame(entry.frame()).map_err(|_| {
-                    SessionInputError::Invalid { location, reason: "invalid hash frame" }
-                })?
-            {
+            let hash_frame = match Keccak256Precompile::decode_assert_frame(entry.frame()) {
+                Ok(None) => Sha512Precompile::decode_assert_frame(entry.frame()),
+                keccak => keccak,
+            };
+            if let Some(n_bytes) = hash_frame.map_err(|_| SessionInputError::Invalid {
+                location,
+                reason: "invalid hash frame",
+            })? {
                 reserve(&mut hash_bytes_left, n_bytes as usize, location, "hash input bytes")?;
             }
             digests.push(entry.digest(&digests).map_err(|_| SessionInputError::Invalid {
@@ -487,6 +490,30 @@ impl WitnessImporter {
                 .eq(expected.iter().copied())
             {
                 return Err(self.invalid("false Keccak assertion"));
+            }
+            return Ok(Imported::Truth(claim));
+        }
+        if let Some(n_bytes) = Sha512Precompile::decode_assert_frame(frame)
+            .map_err(|_| self.invalid("invalid hash frame"))?
+        {
+            let (input, expected) = self.join(entry)?;
+            let n_bytes = n_bytes as usize;
+            let input = chunks_to_bytes_exact(
+                self.chunks(entries, input)?,
+                n_chunks(n_bytes as u32).get() as usize,
+                n_bytes,
+            )
+            .map_err(|_| self.invalid("malformed hash input chunks"))?;
+            let digest_bytes = Sha512Precompile::DIGEST_BYTES;
+            let expected = chunks_to_bytes_exact(
+                self.chunks(entries, expected)?,
+                n_chunks(digest_bytes as u32).get() as usize,
+                digest_bytes,
+            )
+            .map_err(|_| self.invalid("malformed expected hash chunks"))?;
+            let (actual, claim) = self.session.sha512(&input);
+            if actual[..] != expected[..] {
+                return Err(self.invalid("false SHA-512 assertion"));
             }
             return Ok(Imported::Truth(claim));
         }

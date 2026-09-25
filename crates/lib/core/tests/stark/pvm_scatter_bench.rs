@@ -17,7 +17,7 @@ use crate::helpers::read_memory_felt;
 /// Felts moved by one `adv_pipe`.
 const BLOCK_FELTS: u32 = 8;
 /// Chiplet instances in `ChipletAir::all()` order.
-const NUM_CHIPLETS: usize = 10;
+const NUM_CHIPLETS: usize = miden_precompiles_air::NUM_CHIPLETS;
 
 // HARNESS MEMORY MAP
 // ================================================================================================
@@ -169,7 +169,7 @@ fn proof_order(heights: &[u64]) -> Vec<usize> {
 fn height_fixtures() -> Vec<Vec<u64>> {
     let mut fixtures: Vec<Vec<u64>> =
         structured_orders().iter().map(|order| heights_for_order(order)).collect();
-    fixtures.push(vec![18, 18, 16, 18, 18, 16, 18, 18, 18, 16]);
+    fixtures.push(vec![18, 18, 16, 18, 18, 16, 18, 18, 18, 16, 18]);
     fixtures
 }
 

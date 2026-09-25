@@ -92,6 +92,7 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_utils_sync::LazyLock;
 
 use crate::{
     logup::{
@@ -280,6 +281,8 @@ const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2];
 #[derive(Debug, Default, Clone, Copy)]
 pub struct UintAddAir;
 
+static PERIODIC_COLUMNS: LazyLock<[Vec<Felt>; 1]> = LazyLock::new(|| [vec![Felt::ONE, Felt::ZERO]]);
+
 impl BaseAir<Felt> for UintAddAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
@@ -290,13 +293,15 @@ impl BaseAir<Felt> for UintAddAir {
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        // One selector, 1 on the open row; the closing row is its
-        // complement.
-        Cow::Owned(vec![vec![Felt::ONE, Felt::ZERO]])
+        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
     }
 }
 
 impl LiftedAir<Felt, QuadFelt> for UintAddAir {
+    fn max_periodic_length(&self) -> usize {
+        PERIOD
+    }
+
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
