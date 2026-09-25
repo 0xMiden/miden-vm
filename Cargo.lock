@@ -2604,6 +2604,7 @@ dependencies = [
  "rstest",
  "thiserror",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]

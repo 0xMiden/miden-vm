@@ -35,6 +35,59 @@ fn test_num_leaves_to_num_peaks() {
     build_test!(hash_size, &[0b0001_1111_1111_1111_1111]).expect_stack(&[17]);
 }
 
+/// Measures `mmr::num_leaves_to_num_peaks` via the core-library harness (real packaged exec).
+///
+/// Must stay aligned with `Cycles: 46` in:
+/// - `processor/src/tests/assembly-cycle-fixtures.toml` (`id = "num_leaves_to_num_peaks"`)
+/// - `crates/lib/core/asm/collections/mmr.masm`
+/// - `crates/lib/core/docs/collections/mmr.md`
+/// - `docs/src/user_docs/core_lib/collections.md`
+#[test]
+fn test_num_leaves_to_num_peaks_cycle_count() {
+    const EXPECTED_CYCLES: u64 = 46;
+
+    // Same wrap as processor `measure_program_cycles`: clk leaves one stack value,
+    // so truncate to stay within the 16-element end-of-program limit.
+    let program = format!(
+        "
+    use miden::core::collections::mmr
+
+    {TRUNCATE_STACK_PROC}
+    begin
+      clk push.7 exec.mmr::num_leaves_to_num_peaks drop clk swap sub
+      exec.truncate_stack
+    end
+    "
+    );
+    let baseline = format!(
+        "
+    {TRUNCATE_STACK_PROC}
+    begin
+      clk push.7 drop clk swap sub
+      exec.truncate_stack
+    end
+    "
+    );
+
+    let measured = build_test!(&program)
+        .get_last_stack_state()
+        .iter()
+        .next()
+        .expect("program should leave a cycle delta on the stack")
+        .as_canonical_u64();
+    let base = build_test!(&baseline)
+        .get_last_stack_state()
+        .iter()
+        .next()
+        .expect("baseline should leave a cycle delta on the stack")
+        .as_canonical_u64();
+    let delta = measured.saturating_sub(base);
+    assert_eq!(
+        delta, EXPECTED_CYCLES,
+        "num_leaves_to_num_peaks cycle count changed (measured {measured}, baseline {base})"
+    );
+}
+
 #[test]
 fn test_num_peaks_to_message_size() {
     let hash_size = "
