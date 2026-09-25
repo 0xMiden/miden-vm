@@ -215,8 +215,9 @@ fn byte_range(
     elem_size: usize,
     count: u32,
 ) -> Result<core::ops::Range<usize>, wasmi::Error> {
-    // With a `u32` count and an element size of at most 8 bytes, the length peaks at 2^35 and
-    // neither check can fire. Both stay as defense in depth for a future wider count.
+    // With a `u32` count and an element size of at most 96 bytes (one Merkle node), the length
+    // stays below 2^39 and neither check can fire. Both stay as defense in depth for a future wider
+    // count.
     let len = (count as u64)
         .checked_mul(elem_size as u64)
         .ok_or_else(|| trap("pointer range length overflows"))?;
@@ -750,13 +751,16 @@ fn adv_stack_extend(
     len: u32,
 ) -> Result<(), wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + u64::from(len) * FUEL_PER_FELT)?;
+    let mem = memory(&mut caller)?;
+    // The ABI traps on a bad pointer even for an empty mutation, so check it before the
+    // early return below.
+    byte_range(mem.data(&caller).len(), vals, FELT_BYTES, len)?;
     // An empty extension changes nothing; buffering a record for it would let a loop
     // accumulate mutation records without touching the mutation budget.
     if len == 0 {
         return Ok(());
     }
     charge_mutation(caller.data_mut(), len as usize)?;
-    let mem = memory(&mut caller)?;
     let felts = read_felts(mem.data(&caller), vals, len)?;
     caller
         .data_mut()
@@ -775,7 +779,8 @@ fn adv_map_insert(
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + (u64::from(len) + 4) * FUEL_PER_FELT)?;
     // Unlike the two sibling mutations, this call has no `len == 0` early return, on purpose: an
     // empty value under a key is a meaningful map entry, and the four-felt key charge below
-    // always consumes mutation budget, so a loop of empty inserts cannot run free.
+    // always consumes mutation budget, so a loop of empty inserts cannot run free. The
+    // `read_felts` call below validates the `vals` pointer even when `len` is zero.
     charge_mutation(caller.data_mut(), (len as usize).saturating_add(4))?;
     let mem = memory(&mut caller)?;
     let key = read_word(mem.data(&caller), key)?;
@@ -798,6 +803,9 @@ fn merkle_store_extend(
         + (felt_count as u64).saturating_mul(FUEL_PER_FELT)
         + u64::from(len).saturating_mul(FUEL_PER_MERKLE_NODE);
     charge_fuel(&mut caller, fuel)?;
+    let mem = memory(&mut caller)?;
+    // The ABI traps on a bad pointer even for an empty mutation; see `adv_stack_extend`.
+    byte_range(mem.data(&caller).len(), nodes, MERKLE_NODE_FELTS * FELT_BYTES, len)?;
     // An empty extension changes nothing; see `adv_stack_extend`.
     if len == 0 {
         return Ok(());
@@ -806,7 +814,6 @@ fn merkle_store_extend(
     // The fuel and mutation charges above trap long before the count can leave the `u32` range,
     // so this conversion cannot fail; it must not wrap if a limit ever grows.
     let felt_count = u32::try_from(felt_count).map_err(|_| trap("merkle node count overflows"))?;
-    let mem = memory(&mut caller)?;
     let felts = read_felts(mem.data(&caller), nodes, felt_count)?;
     // The discarded `as_chunks` remainder is empty: `read_felts` returned exactly
     // `len * MERKLE_NODE_FELTS` elements.

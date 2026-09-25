@@ -1060,6 +1060,45 @@ fn zero_length_mutations_buffer_no_records() {
     assert!(mutations.is_empty(), "empty extensions must buffer no records: {mutations:?}");
 }
 
+#[test]
+fn zero_length_mutations_at_the_memory_end_buffer_no_records() {
+    // Offset 65536 is the end of the single 64 KiB memory page: an empty range there is still
+    // inside the guest memory.
+    let wat_src = fixture(
+        "(call $adv_stack_extend (i32.const 65536) (i32.const 0))
+         (call $merkle_store_extend (i32.const 65536) (i32.const 0))",
+    );
+    let module = load(&wat_src);
+    let mutations = run(&module, &processor()).expect("handler succeeds");
+    assert!(mutations.is_empty(), "empty extensions must buffer no records: {mutations:?}");
+}
+
+#[test]
+fn zero_length_adv_stack_extend_with_bad_pointer_traps() {
+    // The ABI traps on a pointer outside the guest memory even for an empty mutation.
+    let wat_src = fixture("(call $adv_stack_extend (i32.const -1) (i32.const 0))");
+    let module = load(&wat_src);
+    let err = run(&module, &processor()).expect_err("handler must trap");
+    assert!(err.contains("pointer range"), "unexpected error: {err}");
+}
+
+#[test]
+fn zero_length_merkle_store_extend_with_bad_pointer_traps() {
+    let wat_src = fixture("(call $merkle_store_extend (i32.const -1) (i32.const 0))");
+    let module = load(&wat_src);
+    let err = run(&module, &processor()).expect_err("handler must trap");
+    assert!(err.contains("pointer range"), "unexpected error: {err}");
+}
+
+#[test]
+fn zero_length_adv_map_insert_with_bad_values_pointer_traps() {
+    // The key at offset 0 is a valid all-zero word; only the empty `vals` range is bad.
+    let wat_src = fixture("(call $adv_map_insert (i32.const 0) (i32.const -1) (i32.const 0))");
+    let module = load(&wat_src);
+    let err = run(&module, &processor()).expect_err("handler must trap");
+    assert!(err.contains("pointer range"), "unexpected error: {err}");
+}
+
 /// A handler that calls `adv_stack_extend` with a zero length 1000 times.
 ///
 /// Fuel arithmetic, measured on this fixture: the 1-page memory costs 8192 fuel per
