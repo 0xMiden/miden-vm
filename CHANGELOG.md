@@ -30,6 +30,7 @@
 - Fixed `AdviceMap` deserialization accepting a repeated key and silently keeping the last value; it now returns an error, matching `MastForestWireView` ([#3900](https://github.com/0xMiden/miden-vm/pull/3900)).
 - [BREAKING] Limited core-library sorted-array lookups to 65,536 entries per call. Larger ranges are rejected before host memory is scanned, and the public `SortedArrayError` enum now includes `TooManyEntries`. This affects `find_word`, `find_key_value`, and `find_half_key_value` ([#3909](https://github.com/0xMiden/miden-vm/pull/3909)).
 - [BREAKING] Closed decoder AIR soundness gaps in caller-frame restoration, DYNCALL stack transitions, span and `REPEAT` adjacency, reserved opcode slots, and repeated-loop body authentication. This changes the block-stack and `END` APIs, AIR relation digest, and ACE registry roots, invalidating older proofs.
+- Fixed `prove` writing the default outputs file next to the program instead of the proof, and refused an outputs path that names the proof file, so the proof is never replaced ([#3760](https://github.com/0xMiden/miden-vm/pull/3760)).
 
 ## v0.33.0 (2026-09-16)
 

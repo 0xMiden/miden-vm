@@ -1,4 +1,8 @@
-use std::{path::PathBuf, time::Instant};
+use std::{
+    io,
+    path::{Path, PathBuf},
+    time::Instant,
+};
 
 use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
@@ -180,22 +184,185 @@ impl ProveCmd {
         // write proof to file
         ProofFile::write(proof, &self.proof_file, &self.program_file).map_err(Report::msg)?;
 
-        // provide outputs
-        if let Some(output_path) = &self.output_file {
-            // write all outputs to specified file.
-            OutputFile::write(&stack_outputs, output_path).map_err(Report::msg)?;
-        } else {
-            // if no output path was provided, get the stack outputs for printing to the screen.
+        // Whether the outputs path names the proof is a question only the filesystem can answer,
+        // and only now that the proof exists: comparing file identity sees through symlinks, `..`
+        // components, case-insensitive names, Unicode normalization and hard links in one step.
+        let proof_path = self.resolved_proof_path();
+        let output_path = self.output_file.clone().unwrap_or_else(|| self.default_output_path());
+        let collides = resolve_to_same_file(&output_path, &proof_path).map_err(|err| {
+            Report::msg(format!(
+                "Could not tell whether the outputs file `{}` is the proof file `{}`: {err}. The \
+                 proof was kept; re-run with a different --proof or --output path to get the \
+                 outputs.",
+                output_path.display(),
+                proof_path.display()
+            ))
+        })?;
+        if collides {
+            return Err(Report::msg(format!(
+                "The outputs file `{}` would overwrite the proof file `{}`. The proof was kept; \
+                 re-run with a different --proof or --output path to get the outputs.",
+                output_path.display(),
+                proof_path.display()
+            )));
+        }
+
+        OutputFile::write(&stack_outputs, &output_path).map_err(Report::msg)?;
+
+        // without --output the outputs file is not where the user is looking, so print the stack
+        if self.output_file.is_none() {
             let stack = stack_outputs.get_num_elements(self.num_outputs).to_vec();
-
-            // write all outputs to default location if none was provided
-            let default_output_path = self.program_file.with_extension("outputs");
-            OutputFile::write(&stack_outputs, &default_output_path).map_err(Report::msg)?;
-
-            // print stack outputs to screen.
             println!("Output: {stack:?}");
         }
 
         Ok(())
+    }
+
+    /// Resolves the proof path the same way as ProofFile::write.
+    fn resolved_proof_path(&self) -> PathBuf {
+        ProofFile::resolve_path(&self.proof_file, &self.program_file)
+    }
+
+    /// Derives verify's default outputs path from the resolved proof path.
+    fn default_output_path(&self) -> PathBuf {
+        self.resolved_proof_path().with_extension("outputs")
+    }
+}
+
+/// Returns true when both paths name the same existing file.
+///
+/// This runs after the proof has been written, so the proof side always exists. An outputs path
+/// that does not exist yet cannot be the proof. Any other error (e.g. a proof file that cannot be
+/// opened for reading) leaves the question unanswered, so it is returned rather than taken as a no.
+fn resolve_to_same_file(output_path: &Path, proof_path: &Path) -> io::Result<bool> {
+    match same_file::is_same_file(output_path, proof_path) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        result => result,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+
+    fn prove_cmd(program_file: &str, proof_file: Option<&str>) -> ProveCmd {
+        ProveCmd {
+            program_file: PathBuf::from(program_file),
+            expected_cycles: 64,
+            input_file: None,
+            library_paths: Vec::new(),
+            max_cycles: ExecutionOptions::MAX_CYCLES,
+            max_prover_memory: Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES,
+            num_outputs: 16,
+            output_file: None,
+            proof_file: proof_file.map(PathBuf::from),
+            hasher: "blake3-256".to_string(),
+            security: "96bits".to_string(),
+            kernel_file: None,
+        }
+    }
+
+    #[test]
+    fn default_output_path_follows_the_program_when_no_proof_is_given() {
+        assert_eq!(
+            prove_cmd("dir/program.masm", None).default_output_path(),
+            PathBuf::from("dir/program.outputs")
+        );
+    }
+
+    #[test]
+    fn default_output_path_follows_a_custom_proof_path() {
+        assert_eq!(
+            prove_cmd("dir/program.masm", Some("out/custom.proof")).default_output_path(),
+            PathBuf::from("out/custom.outputs")
+        );
+    }
+
+    #[test]
+    fn default_output_path_handles_an_extensionless_proof_path() {
+        assert_eq!(
+            prove_cmd("dir/program.masm", Some("out/custom")).default_output_path(),
+            PathBuf::from("out/custom.outputs")
+        );
+    }
+
+    #[test]
+    fn default_output_path_collides_with_a_proof_path_that_is_already_an_outputs_path() {
+        assert_eq!(
+            prove_cmd("dir/program.masm", Some("out/custom.outputs")).default_output_path(),
+            PathBuf::from("out/custom.outputs")
+        );
+    }
+
+    #[test]
+    fn resolve_to_same_file_sees_through_a_symlinked_proof_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+
+        #[cfg(unix)]
+        {
+            let alias_path = dir.path().join("alias.proof");
+            std::os::unix::fs::symlink(&proof_path, &alias_path).unwrap();
+            assert!(resolve_to_same_file(&alias_path, &proof_path).unwrap());
+        }
+
+        // negative control: with `sub` missing there is nothing to resolve `..` against
+        assert!(
+            !resolve_to_same_file(&dir.path().join("./sub/../same.proof"), &proof_path).unwrap()
+        );
+
+        fs::create_dir(dir.path().join("sub")).unwrap();
+        assert!(
+            resolve_to_same_file(&dir.path().join("./sub/../same.proof"), &proof_path).unwrap()
+        );
+    }
+
+    #[test]
+    fn resolve_to_same_file_sees_through_a_hard_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+
+        // negative control: a copy has the same contents but is a different file
+        let copy_path = dir.path().join("copy.proof");
+        fs::copy(&proof_path, &copy_path).unwrap();
+        assert!(!resolve_to_same_file(&copy_path, &proof_path).unwrap());
+
+        let link_path = dir.path().join("link.proof");
+        fs::hard_link(&proof_path, &link_path).unwrap();
+        assert!(resolve_to_same_file(&link_path, &proof_path).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_to_same_file_reports_a_proof_it_cannot_open() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+        let link_path = dir.path().join("link.proof");
+        fs::hard_link(&proof_path, &link_path).unwrap();
+        fs::set_permissions(&proof_path, fs::Permissions::from_mode(0o200)).unwrap();
+
+        // root reads the file regardless of its mode, so there is no error to see
+        if fs::File::open(&proof_path).is_ok() {
+            return;
+        }
+
+        let err = resolve_to_same_file(&link_path, &proof_path).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn resolve_to_same_file_ignores_an_outputs_path_that_does_not_exist_yet() {
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+
+        assert!(!resolve_to_same_file(&dir.path().join("same.outputs"), &proof_path).unwrap());
     }
 }
