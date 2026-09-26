@@ -1,0 +1,6 @@
+[package]
+name = "miden-wasm-handler-project-fixture-decoy"
+version = "0.0.0"
+description = "Test fixture: the default workspace member a handler build must not mistake for the guest crate"
+publish = false
+edition = "2024"

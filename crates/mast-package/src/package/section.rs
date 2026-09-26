@@ -36,6 +36,9 @@ impl SectionId {
     pub const PROJECT_SOURCE_PROVENANCE: Self = Self(Cow::Borrowed("project_source_provenance"));
     /// This section contains the serialized kernel package linked against by an executable package.
     pub const KERNEL: Self = Self(Cow::Borrowed("kernel"));
+    /// This section contains a Wasm module with custom event handlers plus its manifest; see
+    /// [`crate::EventHandlerSection`].
+    pub const EVENT_HANDLERS: Self = Self(Cow::Borrowed("event_handlers"));
 
     /// Construct a user-defined (i.e. "custom") section identifier
     ///
@@ -85,6 +88,7 @@ impl FromStr for SectionId {
             "account_component_metadata" => Ok(Self::ACCOUNT_COMPONENT_METADATA),
             "project_source_provenance" => Ok(Self::PROJECT_SOURCE_PROVENANCE),
             "kernel" => Ok(Self::KERNEL),
+            "event_handlers" => Ok(Self::EVENT_HANDLERS),
             custom => Self::custom(custom),
         }
     }
@@ -188,6 +192,7 @@ impl Arbitrary for SectionId {
             Self::ACCOUNT_COMPONENT_METADATA,
             Self::PROJECT_SOURCE_PROVENANCE,
             Self::KERNEL,
+            Self::EVENT_HANDLERS,
         ]);
 
         let custom = (

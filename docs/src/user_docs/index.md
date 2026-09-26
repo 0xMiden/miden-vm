@@ -7,9 +7,10 @@ sidebar_position: 1
 
 In the following sections, we provide developer-focused documentation useful to those who want to develop on Miden VM or build compilers from higher-level languages to Miden VM.
 
-This documentation consists of two high-level sections:
+This documentation consists of three high-level sections:
 
 - [Miden assembly](./assembly/index.md) which provides a detailed description of Miden assembly language, which is the native language of Miden VM.
 - [Miden Core Library](./core_lib/index.md) which provides descriptions of all procedures available in Miden Core Library.
+- [Wasm event handlers](./wasm_event_handlers.md) which describes how to write custom event handlers as WebAssembly modules and how a host loads them from a package.
 
 For info on how to run programs on Miden VM, please refer to the [usage](../usage.md) section in the introduction.

@@ -135,6 +135,31 @@ The **`package_deserialize`** target tests `Package::read_from_bytes`.
 cargo +nightly fuzz run package_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
+**`event_handler_section_deserialize`** — Tests `EventHandlerSection::from_payload` (the
+untrusted `event_handlers` package section with its decode-time size caps), the same function
+`Package::event_handlers` uses.
+
+```bash
+cargo +nightly fuzz run event_handler_section_deserialize --fuzz-dir tools/miden-core-fuzz
+```
+
+**`wasm_handler_manifest`** — Tests `manifest_from_module`: the wasmparser pass over an
+untrusted binary and the `miden:event-manifest` custom-section record parser.
+
+```bash
+cargo +nightly fuzz run wasm_handler_manifest --fuzz-dir tools/miden-core-fuzz
+```
+
+**`wasm_section_walk_differential`** — Differential test: any module wasmi validates must also
+parse with the wasmparser version the handler loader pins, and pass the static analysis built on
+it (the instantiation-cost estimate and the start-section check), since the loader conservatively
+rejects modules that either one refuses. A disagreement means the loader's wasmparser pin and
+wasmi's own wasmparser dependency drifted apart.
+
+```bash
+cargo +nightly fuzz run wasm_section_walk_differential --fuzz-dir tools/miden-core-fuzz
+```
+
 ### Component targets
 
 These fuzz internal structures through the MastForest deserialization path:
