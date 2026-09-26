@@ -83,10 +83,13 @@ impl SmtLeaf {
     }
 
     /// Returns a new multiple leaf with the specified entries. The leaf index is derived from the
-    /// entries' keys.
+    /// entries' keys. Entries must be sorted by key in strictly increasing order, which is the
+    /// form that [`SmtLeaf::insert`] and [`SmtLeaf::remove`] maintain.
     ///
     /// # Errors
     ///   - Returns an error if 2 keys in `entries` map to a different leaf index
+    ///   - Returns an error if the keys are not sorted in strictly increasing order (this also
+    ///     rejects repeated keys)
     ///   - Returns an error if the number of entries exceeds [`MAX_LEAF_ENTRIES`]
     pub fn new_multiple(entries: Vec<(Word, Word)>) -> Result<Self, SmtLeafError> {
         if entries.len() < 2 {
@@ -97,12 +100,14 @@ impl SmtLeaf {
             return Err(SmtLeafError::TooManyLeafEntries { actual: entries.len() });
         }
 
-        // Check that all keys map to the same leaf index
+        // Check that all keys map to the same leaf index and are strictly increasing, since
+        // `insert()` and `remove()` binary-search the entries.
         {
             let mut keys = entries.iter().map(|(key, _)| key);
 
             let first_key = *keys.next().expect("ensured at least 2 entries");
             let first_leaf_index: LeafIndex<SMT_DEPTH> = first_key.into();
+            let mut previous_key = first_key;
 
             for &next_key in keys {
                 let next_leaf_index: LeafIndex<SMT_DEPTH> = next_key.into();
@@ -113,6 +118,14 @@ impl SmtLeaf {
                         key_2: next_key,
                     });
                 }
+
+                if next_key <= previous_key {
+                    return Err(SmtLeafError::UnsortedMultipleLeafKeys {
+                        previous: previous_key,
+                        next: next_key,
+                    });
+                }
+                previous_key = next_key;
             }
         }
 

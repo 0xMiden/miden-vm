@@ -68,25 +68,25 @@ fn arbitrary_single_leaf() -> impl Strategy<Value = SmtLeaf> {
 
 /// Generates a leaf with multiple entries, all ensured to share the same leaf index.
 fn arbitrary_multi_leaf() -> impl Strategy<Value = SmtLeaf> {
-    prop::collection::vec((arbitrary_valid_word(), arbitrary_valid_word()), 2..=64).prop_map(
-        |pairs| {
-            let Some((first_key, _)) = pairs.first() else {
-                panic!("Minimum requested length is 2 but the pairs vec was empty.")
-            };
-
-            let index = LeafIndex::from(*first_key);
-            SmtLeaf::new_multiple(
-                pairs
-                    .into_iter()
-                    .map(|(mut key, value)| {
-                        key.d = Felt::new_unchecked(index.position());
-                        (key, value)
-                    })
-                    .collect::<Vec<_>>(),
-            )
-            .expect("All keys have the same leaf index by construction")
-        },
+    // Keys share the leaf index element and are distinct in the other three, so the leaf always
+    // has at least two entries, also while shrinking.
+    (
+        arbitrary_valid_felt(),
+        prop::collection::btree_map(
+            prop::array::uniform3(arbitrary_valid_felt()),
+            arbitrary_valid_word(),
+            2..=64,
+        ),
     )
+        .prop_map(|(leaf_index, pairs)| {
+            // A multiple leaf holds its entries sorted by key.
+            let entries = pairs
+                .into_iter()
+                .map(|([a, b, c], value)| (Word::new([a, b, c, leaf_index]), value))
+                .collect::<BTreeMap<_, _>>();
+            SmtLeaf::new_multiple(entries.into_iter().collect())
+                .expect("All keys are distinct, sorted and share the same leaf index")
+        })
 }
 
 /// Generates an arbitrary `SmtLeaf`.

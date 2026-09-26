@@ -41,6 +41,12 @@ pub enum SmtLeafError {
     #[error("multiple leaf requires at least two entries but only {0} were given")]
     MultipleLeafRequiresTwoEntries(usize),
 
+    /// Multiple leaf entries must be sorted by key in strictly increasing order.
+    #[error(
+        "multiple leaf requires strictly increasing keys but key {next} does not follow key {previous}"
+    )]
+    UnsortedMultipleLeafKeys { previous: Word, next: Word },
+
     /// Multiple leaf contains more entries than the maximum allowed.
     #[error(
         "multiple leaf contains {actual} entries but the maximum allowed is {MAX_LEAF_ENTRIES}"
