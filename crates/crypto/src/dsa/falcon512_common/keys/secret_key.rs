@@ -194,12 +194,18 @@ impl<V: FalconVariant> SecretKey<V> {
 
     /// Derives the public key corresponding to this secret key using h = g /f [mod ϕ][mod p].
     fn compute_pub_key_poly(&self) -> PublicKey<V> {
-        let g: Polynomial<FalconFelt> = self.secret_key[0].clone().into();
-        let g_fft = g.fft();
-        let minus_f: Polynomial<FalconFelt> = self.secret_key[1].clone().into();
-        let f = -minus_f;
-        let f_fft = f.fft();
-        let h_fft = g_fft.hadamard_div(&f_fft);
+        // Convert from borrowed polynomials so the by-value clones never materialize.
+        // Each secret-carrying intermediate is wiped on drop.
+        let g: Zeroizing<Polynomial<FalconFelt>> =
+            Zeroizing::new(Polynomial::from(&self.secret_key[0]));
+        let g_fft = Zeroizing::new(g.fft());
+        let minus_f: Zeroizing<Polynomial<FalconFelt>> =
+            Zeroizing::new(Polynomial::from(&self.secret_key[1]));
+        let f = Zeroizing::new(-(&*minus_f));
+        let f_fft = Zeroizing::new(f.fft());
+        let f_fft_inv = Zeroizing::new(f_fft.hadamard_inv());
+        // h = g / f is the public key, so the result needs no wiping.
+        let h_fft = g_fft.hadamard_mul(&f_fft_inv);
         h_fft.ifft().into()
     }
 
@@ -275,6 +281,7 @@ impl<V: FalconVariant> SecretKey<V> {
     }
 }
 
+#[cfg(test)]
 impl<V: FalconVariant> PartialEq for SecretKey<V> {
     fn eq(&self, other: &Self) -> bool {
         use subtle::ConstantTimeEq;
@@ -285,6 +292,7 @@ impl<V: FalconVariant> PartialEq for SecretKey<V> {
     }
 }
 
+#[cfg(test)]
 impl<V: FalconVariant> Eq for SecretKey<V> {}
 
 // SERIALIZATION / DESERIALIZATION
@@ -400,11 +408,14 @@ impl<V: FalconVariant> Deserializable for SecretKey<V> {
             ))?,
         );
 
-        let mut f = Polynomial::new(f.iter().map(|&c| i16::from(c)).collect());
-        let g = Polynomial::new(g.iter().map(|&c| i16::from(c)).collect());
-        let mut big_f = Polynomial::new(big_f.iter().map(|&c| i16::from(c)).collect());
+        let mut f = Zeroizing::new(Polynomial::new(f.iter().map(|&c| i16::from(c)).collect()));
+        let mut g = Zeroizing::new(Polynomial::new(g.iter().map(|&c| i16::from(c)).collect()));
+        let mut big_f =
+            Zeroizing::new(Polynomial::new(big_f.iter().map(|&c| i16::from(c)).collect()));
 
-        let f_fft = Polynomial::<FalconFelt>::from(&f).fft();
+        // Each FFT-domain step is bound in `Zeroizing` so every secret-carrying intermediate
+        // is wiped, including the inverse that `hadamard_div` would otherwise allocate.
+        let f_fft = Zeroizing::new(Polynomial::<FalconFelt>::from(&*f).fft());
         if f_fft.coefficients.iter().any(Zero::is_zero) {
             return Err(DeserializationError::InvalidValue(
                 "Falcon secret key polynomial f is not invertible".to_string(),
@@ -417,10 +428,12 @@ impl<V: FalconVariant> Deserializable for SecretKey<V> {
             ));
         }
 
-        let g_fft = Polynomial::<FalconFelt>::from(&g).fft();
-        let big_f_fft = Polynomial::<FalconFelt>::from(&big_f).fft();
-        let big_g = g_fft.hadamard_div(&f_fft).hadamard_mul(&big_f_fft).ifft();
-        let big_g = Polynomial::new(big_g.to_balanced_values());
+        let g_fft = Zeroizing::new(Polynomial::<FalconFelt>::from(&*g).fft());
+        let big_f_fft = Zeroizing::new(Polynomial::<FalconFelt>::from(&*big_f).fft());
+        let f_fft_inv = Zeroizing::new(f_fft.hadamard_inv());
+        let quotient = Zeroizing::new(g_fft.hadamard_mul(&f_fft_inv));
+        let big_g_fft = Zeroizing::new(quotient.hadamard_mul(&big_f_fft));
+        let mut big_g = Zeroizing::new(Polynomial::new(big_g_fft.ifft().to_balanced_values()));
 
         let big_coefficient_bound = (1 << (WIDTH_BIG_POLY_COEFFICIENT - 1)) - 1;
         if !check_coefficients_bound(&big_g, big_coefficient_bound as i16) {
@@ -442,7 +455,13 @@ impl<V: FalconVariant> Deserializable for SecretKey<V> {
             *coefficient = -*coefficient;
         }
 
-        let basis = [g, f, big_g, big_f];
+        // Move the kept polynomials out; the wrappers then wipe the emptied vectors.
+        let basis = [
+            core::mem::take(&mut *g),
+            core::mem::take(&mut *f),
+            core::mem::take(&mut *big_g),
+            core::mem::take(&mut *big_f),
+        ];
         Ok(Self::from_short_lattice_basis(basis))
     }
 }
@@ -452,7 +471,9 @@ impl<V: FalconVariant> Deserializable for SecretKey<V> {
 
 /// Computes the complex FFT of the secret key polynomials.
 fn to_complex_fft(basis: &[Polynomial<i16>; 4]) -> [Polynomial<Complex<f64>>; 4] {
-    let [g, f, big_g, big_f] = basis.clone();
+    // Destructure the borrowed array so each `map` reads coefficients by reference
+    // instead of allocating four plain `Polynomial<i16>` clones.
+    let [g, f, big_g, big_f] = basis;
     let g_fft = g.map(|cc| Complex64::new(*cc as f64, 0.0)).fft();
     let minus_f_fft = f.map(|cc| -Complex64::new(*cc as f64, 0.0)).fft();
     let big_g_fft = big_g.map(|cc| Complex64::new(*cc as f64, 0.0)).fft();

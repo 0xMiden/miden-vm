@@ -16,6 +16,7 @@ use super::{
     MODULUS, N,
     keys::{WIDTH_BIG_POLY_COEFFICIENT, WIDTH_SMALL_POLY_COEFFICIENT},
 };
+use crate::utils::zeroize::Zeroizing;
 
 mod fft;
 pub use fft::{CyclotomicFourier, FastFft};
@@ -91,8 +92,9 @@ impl Inverse for f64 {
 /// [1]: <https://falcon-sign.info/falcon.pdf>
 pub(crate) fn ntru_gen<R: Rng>(n: usize, rng: &mut R) -> [Polynomial<i16>; 4] {
     loop {
-        let f = gen_poly(n, rng);
-        let g = gen_poly(n, rng);
+        // Wrap the sampled secrets so rejected candidates are wiped on every `continue`.
+        let f = Zeroizing::new(gen_poly(n, rng));
+        let mut g = Zeroizing::new(gen_poly(n, rng));
 
         // we do bound checks on the coefficients of the sampled polynomials in order to make sure
         // that they will be encodable/decodable
@@ -102,7 +104,8 @@ pub(crate) fn ntru_gen<R: Rng>(n: usize, rng: &mut R) -> [Polynomial<i16>; 4] {
             continue;
         }
 
-        let f_ntt = f.map(|&i| FalconFelt::new(i)).fft();
+        let f_felt = Zeroizing::new(f.map(|&i| FalconFelt::new(i)));
+        let f_ntt = Zeroizing::new(f_felt.fft());
         if f_ntt.coefficients.iter().any(Zero::is_zero) {
             continue;
         }
@@ -120,9 +123,17 @@ pub(crate) fn ntru_gen<R: Rng>(n: usize, rng: &mut R) -> [Polynomial<i16>; 4] {
             {
                 continue;
             }
-            let capital_f = capital_f.map(|i| i.try_into().unwrap());
-            let capital_g = capital_g.map(|i| i.try_into().unwrap());
-            return [g, -f, capital_g, -capital_f];
+            let capital_f = Zeroizing::new(capital_f.map(|i| i.try_into().unwrap()));
+            let mut capital_g = Zeroizing::new(capital_g.map(|i| i.try_into().unwrap()));
+            // Move the kept polynomials out (the wrappers then wipe empty vecs) and negate
+            // through references so the un-negated copies are wiped too. The returned basis
+            // is owned by `SecretKey`, which wipes it on drop.
+            return [
+                core::mem::take(&mut *g),
+                -(&*f),
+                core::mem::take(&mut *capital_g),
+                -(&*capital_f),
+            ];
         }
     }
 }
