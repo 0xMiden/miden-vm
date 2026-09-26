@@ -16,6 +16,7 @@
 - Added Eidos wasm32 SIMD128 backend ([#3881](https://github.com/0xMiden/miden-vm/pull/3881)).
 - [BREAKING] Bumped Plonky3 related dependencies to v0.8.0, updating reported conjectured security levels with corrected conservative rounding and a DEEP composition bound that accounts for the LDE size ([#3888](https://github.com/0xMiden/miden-vm/pull/3888)).
 - Optimized Eidos native and wasm compression ([#3899](https://github.com/0xMiden/miden-vm/pull/3899)).
+- [BREAKING] Warn when a private assembly constant is unused, and make `miden::core::stark::security::SECURITY_CAP_BITS` private ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
 
 #### Fixes
 
