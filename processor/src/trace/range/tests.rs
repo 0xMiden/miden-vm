@@ -1,7 +1,6 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_utils_testing::rand::rand_array;
 
 use super::RangeChecker;
 use crate::{Felt, ZERO, utils::ToElements};
@@ -63,7 +62,7 @@ fn range_checks() {
 #[test]
 fn range_checks_rand() {
     let mut checker = RangeChecker::new();
-    let values = rand_array::<u64, 300>();
+    let values = rand::random::<[u64; 300]>();
     let values = values
         .into_iter()
         .map(|v| Felt::new_unchecked(v as u16 as u64))

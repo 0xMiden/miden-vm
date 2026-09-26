@@ -1,6 +1,6 @@
 [package]
 name = "miden-format"
-version = "0.33.1"
+version = "0.34.0"
 description = "Formatter for the Miden Assembly language"
 documentation = "https://docs.rs/miden-format"
 readme = "README.md"
@@ -32,4 +32,5 @@ walkdir.workspace = true
 windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
+miden-assembly-syntax = { workspace = true, features = ["std"] }
 tempfile.workspace = true

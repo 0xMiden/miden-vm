@@ -113,15 +113,15 @@ pub(crate) fn ntru_gen<R: Rng>(n: usize, rng: &mut R) -> [Polynomial<i16>; 4] {
         if let Some((capital_f, capital_g)) =
             ntru_solve(&f.map(|&i| i.into()), &g.map(|&i| i.into()))
         {
-            // we do bound checks on the coefficients of the solution polynomials in order to make
-            // sure that they will be encodable/decodable
-            let capital_f = capital_f.map(|i| i.try_into().unwrap());
-            let capital_g = capital_g.map(|i| i.try_into().unwrap());
-            if !(check_coefficients_bound(&capital_f, MAX_BIG_POLY_COEFFICIENT_SIZE)
-                && check_coefficients_bound(&capital_g, MAX_BIG_POLY_COEFFICIENT_SIZE))
+            // Check encoding bounds before narrowing to i16 so oversized candidates are
+            // rejected instead of panicking in try_into.
+            if !(check_bigint_coefficients_bound(&capital_f, MAX_BIG_POLY_COEFFICIENT_SIZE)
+                && check_bigint_coefficients_bound(&capital_g, MAX_BIG_POLY_COEFFICIENT_SIZE))
             {
                 continue;
             }
+            let capital_f = capital_f.map(|i| i.try_into().unwrap());
+            let capital_g = capital_g.map(|i| i.try_into().unwrap());
             return [g, -f, capital_g, -capital_f];
         }
     }
@@ -331,6 +331,12 @@ pub(crate) fn check_coefficients_bound(polynomial: &Polynomial<i16>, bound: i16)
     polynomial.to_balanced_values().iter().all(|c| *c <= bound && *c >= -bound)
 }
 
+/// Asserts that the coefficients of a `BigInt` polynomial are within [-bound, bound].
+fn check_bigint_coefficients_bound(polynomial: &Polynomial<BigInt>, bound: i16) -> bool {
+    let bound = BigInt::from(bound);
+    polynomial.coefficients.iter().all(|c| *c <= bound && *c >= -bound.clone())
+}
+
 // TESTS
 // ================================================================================================
 
@@ -343,7 +349,8 @@ mod tests {
     use rand_chacha::ChaCha20Rng;
 
     use super::{
-        FalconFelt, Inverse, MODULUS, Polynomial, check_coefficients_bound, ntru_gen, xgcd,
+        FalconFelt, Inverse, MAX_BIG_POLY_COEFFICIENT_SIZE, MODULUS, Polynomial,
+        check_bigint_coefficients_bound, check_coefficients_bound, ntru_gen, xgcd,
     };
 
     /// `ntru_gen` returns the secret-key basis rows `[g, -f, G, -F]`; the NTRU equation
@@ -416,5 +423,16 @@ mod tests {
         let poly = Polynomial::new(vec![3i16, -3, 0]);
         assert!(check_coefficients_bound(&poly, 3));
         assert!(!check_coefficients_bound(&poly, 2));
+    }
+
+    #[test]
+    fn check_bigint_coefficients_bound_rejects_outside_encoding_range() {
+        let in_range =
+            Polynomial::new(vec![BigInt::from(127), BigInt::from(-127), BigInt::from(0)]);
+        let too_large = Polynomial::new(vec![BigInt::from(128)]);
+        let too_small = Polynomial::new(vec![BigInt::from(-128)]);
+        assert!(check_bigint_coefficients_bound(&in_range, MAX_BIG_POLY_COEFFICIENT_SIZE));
+        assert!(!check_bigint_coefficients_bound(&too_large, MAX_BIG_POLY_COEFFICIENT_SIZE));
+        assert!(!check_bigint_coefficients_bound(&too_small, MAX_BIG_POLY_COEFFICIENT_SIZE));
     }
 }

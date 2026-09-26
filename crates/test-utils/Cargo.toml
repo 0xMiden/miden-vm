@@ -1,6 +1,6 @@
 [package]
 name = "miden-test-utils"
-version = "0.33.1"
+version = "0.34.0"
 description = "Test utilities for Miden VM programs"
 readme = "README.md"
 categories = ["development-tools::testing", "no-std"]
@@ -31,7 +31,6 @@ miden-air.workspace = true
 miden-assembly.workspace = true
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true
-miden-crypto.workspace = true
 miden-mast-package.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true

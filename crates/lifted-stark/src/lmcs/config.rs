@@ -340,7 +340,7 @@ mod tests {
 
         let make_transcript = |indices: &TreeIndices| {
             let mut prover_channel = gl::prover_channel();
-            tree.prove_batch(indices, &mut prover_channel);
+            tree.prove_batch(&lmcs, indices, &mut prover_channel);
             prover_channel.finalize()
         };
 
@@ -370,7 +370,7 @@ mod tests {
         let log_tiny = log2_strict_u8(tiny_tree.height());
         let tiny_indices = ti(&[0], log_tiny);
         let mut prover_channel = gl::prover_channel();
-        tiny_tree.prove_batch(&tiny_indices, &mut prover_channel);
+        tiny_tree.prove_batch(&lmcs, &tiny_indices, &mut prover_channel);
         let (prover_digest, transcript) = prover_channel.finalize();
         let mut verifier_channel = gl::verifier_channel(&transcript);
         let opened = lmcs
@@ -429,7 +429,7 @@ mod tests {
 
         let make_transcript = || {
             let mut prover_channel = gl::prover_channel();
-            tree.prove_lifted_batch(&indices, &mut prover_channel);
+            tree.prove_lifted_batch(&lmcs, &indices, &mut prover_channel);
             prover_channel.finalize()
         };
 
@@ -533,7 +533,7 @@ mod tests {
         // Prove then verify a single index.
         let indices = TreeIndices::new([0usize], log_max_height).unwrap();
         let mut prover_channel = ProverTranscript::new(challenger());
-        tree.prove_batch(&indices, &mut prover_channel);
+        tree.prove_batch(&lmcs, &indices, &mut prover_channel);
         let (prover_digest, transcript) = prover_channel.finalize();
 
         let mut verifier_channel = VerifierTranscript::from_data(challenger(), &transcript);
@@ -586,7 +586,7 @@ mod tests {
 
         let mut prover_channel = ProverTranscript::new(challenger());
         let indices = TreeIndices::new([0usize], log_max_height).unwrap();
-        tree.prove_batch(&indices, &mut prover_channel);
+        tree.prove_batch(&lmcs, &indices, &mut prover_channel);
         let (prover_digest, transcript) = prover_channel.finalize();
 
         let mut verifier_channel = VerifierTranscript::from_data(challenger(), &transcript);

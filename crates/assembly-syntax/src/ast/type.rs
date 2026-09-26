@@ -8,11 +8,11 @@ use super::{
     SymbolResolutionError, Visibility, types,
 };
 
-/// Maximum allowed nesting depth of type expressions during resolution.
+/// Maximum allowed nesting depth of type expressions during parsing and resolution.
 ///
 /// This limit is intended to prevent stack overflows from maliciously deep type expressions while
 /// remaining far above typical type nesting in real programs.
-const MAX_TYPE_EXPR_NESTING: usize = 256;
+pub(crate) const MAX_TYPE_EXPR_NESTING: usize = 256;
 
 /// Abstracts over resolving an item to a concrete [Type], using one of:
 ///
@@ -155,6 +155,8 @@ pub struct FunctionType {
     pub span: SourceSpan,
     pub cc: types::CallConv,
     pub args: Vec<TypeExpr>,
+    /// Parameter names, where known. Like `span`, equality and hashing ignore them.
+    pub arg_names: Vec<Option<Ident>>,
     pub results: Vec<TypeExpr>,
 }
 
@@ -186,6 +188,7 @@ impl FunctionType {
             span: SourceSpan::UNKNOWN,
             cc,
             args,
+            arg_names: Vec::new(),
             results,
         }
     }
@@ -196,16 +199,35 @@ impl FunctionType {
         self.span = span;
         self
     }
+
+    /// Set the parameter names
+    #[inline]
+    pub fn with_arg_names(mut self, arg_names: Vec<Option<Ident>>) -> Self {
+        debug_assert_eq!(arg_names.len(), self.args.len());
+        self.arg_names = arg_names;
+        self
+    }
 }
 
 impl crate::prettier::PrettyPrint for FunctionType {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
+        let render_arg = |(index, ty): (usize, &TypeExpr)| {
+            if matches!(ty, TypeExpr::Primitive(prim) if matches!(prim.inner(), Type::Variadic)) {
+                return ty.render();
+            }
+            let name = match self.arg_names.get(index) {
+                Some(Some(name)) => display(name),
+                _ => text(format!("arg{index}")),
+            };
+            name + const_text(": ") + ty.render()
+        };
         let singleline_args = self
             .args
             .iter()
-            .map(PrettyPrint::render)
+            .enumerate()
+            .map(render_arg)
             .reduce(|acc, arg| acc + const_text(", ") + arg)
             .unwrap_or(Document::Empty);
         let multiline_args = indent(
@@ -213,7 +235,8 @@ impl crate::prettier::PrettyPrint for FunctionType {
             nl() + self
                 .args
                 .iter()
-                .map(PrettyPrint::render)
+                .enumerate()
+                .map(render_arg)
                 .reduce(|acc, arg| acc + const_text(",") + nl() + arg)
                 .unwrap_or(Document::Empty),
         ) + nl();

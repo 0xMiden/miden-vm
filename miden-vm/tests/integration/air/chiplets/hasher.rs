@@ -1,13 +1,12 @@
 use miden_utils_testing::{
     TRUNCATE_STACK_PROC, Word, build_op_test, build_test,
     crypto::{MerkleStore, MerkleTree, Poseidon2, init_merkle_leaf, init_merkle_store},
-    rand::rand_vector,
 };
 
 #[test]
 fn hperm() {
     let asm_op = "hperm";
-    let pub_inputs = rand_vector::<u64>(8);
+    let pub_inputs: Vec<u64> = (0..8).map(|_| rand::random()).collect();
 
     build_op_test!(asm_op, &pub_inputs).check_constraints();
 }
@@ -15,7 +14,7 @@ fn hperm() {
 #[test]
 fn hmerge() {
     let asm_op = "hmerge";
-    let pub_inputs = rand_vector::<u64>(8);
+    let pub_inputs: Vec<u64> = (0..8).map(|_| rand::random()).collect();
 
     build_op_test!(asm_op, &pub_inputs).check_constraints();
 }

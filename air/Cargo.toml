@@ -1,6 +1,6 @@
 [package]
 name = "miden-air"
-version = "0.33.1"
+version = "0.34.0"
 description = "Algebraic intermediate representation of Miden VM processor"
 documentation = "https://docs.rs/miden-air"
 readme = "README.md"
@@ -20,7 +20,7 @@ doctest = false
 [features]
 default = ["std"]
 arbitrary = ["std", "dep:proptest"]
-std = ["miden-core/std", "proptest?/std", "thiserror/std"]
+std = ["miden-core/std", "proptest?/std", "rand/std", "rand/thread_rng", "thiserror/std"]
 concurrent = ["std"]
 testing = []
 
@@ -35,6 +35,7 @@ miden-utils-indexing.workspace = true
 p3-field.workspace = true
 p3-security.workspace = true
 proptest = { workspace = true, optional = true }
+rand.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 

@@ -22,7 +22,6 @@ use miden_air::{
     lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
 };
 use miden_core::{field::QuadFelt, utils::RowMajorMatrix};
-use miden_utils_testing::rand::rand_array;
 
 use super::{Felt, VmTrace};
 
@@ -62,8 +61,8 @@ impl InteractionLog {
         let chip_periodic = MidenAir::Chiplets.periodic_columns();
         let poseidon2_periodic = MidenAir::Poseidon2Permutation.periodic_columns();
 
-        // `QuadFelt` itself isn't `Randomizable`, so draw 4 base-field elements and pair them.
-        let raw = rand_array::<Felt, 4>();
+        // Draw four base-field elements and pair them into two extension-field elements.
+        let raw = rand::random::<[Felt; 4]>();
         let alpha = QuadFelt::new([raw[0], raw[1]]);
         let beta = QuadFelt::new([raw[2], raw[3]]);
         let challenges =

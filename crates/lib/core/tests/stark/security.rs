@@ -24,8 +24,9 @@ fn vm_verify_proof_rejects_oversized_num_queries() {
 }
 
 /// The MVM lookup round must agree with the native estimator at every supported trace height and
-/// kernel size. Query inputs are maximized so lookup determines the returned minimum at every
-/// cell. The common query calculation is covered separately over its complete input domain.
+/// kernel size. Query inputs and DEEP grinding are maximized so lookup determines the returned
+/// minimum at every cell. The common query calculation is covered separately over its complete
+/// input domain.
 #[test]
 fn vm_lookup_round_matches_native_exhaustively() {
     use Axis::{Fixed, Inner, Outer};
@@ -40,7 +41,7 @@ fn vm_lookup_round_matches_native_exhaustively() {
         [
             Fixed(NUM_QUERIES_MAX),
             Fixed(POW_BITS_MAX),
-            Fixed(0),
+            Fixed(POW_BITS_MAX),
             Fixed(0),
             Outer(MVM_LOG_HEIGHT_MIN),
             Inner(0),
@@ -158,11 +159,11 @@ fn vm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 6]) {
         end
         ",
         lookup_pow_bits = security::LOOKUP_POW_BITS,
-        max_message_width = security::AIR_SHAPE.lookup.max_message_width,
+        max_message_width = security::LOOKUP_SHAPE.max_message_width,
         num_composed_constraints = security::AIR_SHAPE.num_composed_constraints,
         max_constraint_degree = security::AIR_SHAPE.max_constraint_degree,
         num_deep_terms = security::AIR_SHAPE.num_deep_terms.unwrap(),
-        fractions_per_row = security::AIR_SHAPE.lookup.fractions_per_row,
+        fractions_per_row = security::LOOKUP_SHAPE.fractions_per_row,
         core_boundary_terms = security::CORE_BOUNDARY_LOOKUP_TERMS,
     );
     let levels = run_sweep_grid(&adapter, &push_args, outer_bound, inner_bound);
@@ -256,11 +257,11 @@ fn vm_security_descriptor(
         deep_pow_bits: u64::from(deep_pow_bits),
         folding_pow_bits: u64::from(folding_pow_bits),
         log_max_height: u64::from(log_max_height),
-        max_message_width: u64::from(security::AIR_SHAPE.lookup.max_message_width),
+        max_message_width: u64::from(security::LOOKUP_SHAPE.max_message_width),
         num_composed_constraints: u64::from(security::AIR_SHAPE.num_composed_constraints),
         max_constraint_degree: u64::from(security::AIR_SHAPE.max_constraint_degree),
         num_deep_terms: u64::from(security::AIR_SHAPE.num_deep_terms.unwrap()),
-        lookup_fractions_per_row: u64::from(security::AIR_SHAPE.lookup.fractions_per_row),
+        lookup_fractions_per_row: u64::from(security::LOOKUP_SHAPE.fractions_per_row),
         num_lookup_boundary_terms: u64::from(
             security::CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
         ),
@@ -290,8 +291,10 @@ fn native_level(descriptor: &SecurityDescriptor) -> u64 {
     params.air_shape.num_composed_constraints = descriptor.num_composed_constraints as u32;
     params.air_shape.max_constraint_degree = descriptor.max_constraint_degree as u32;
     params.air_shape.num_deep_terms = Some(descriptor.num_deep_terms as u32);
-    params.air_shape.lookup.fractions_per_row = descriptor.lookup_fractions_per_row as u32;
-    params.air_shape.lookup.max_message_width = descriptor.max_message_width as u32;
+    params.air_shape.lookup = Some(security::LookupShape {
+        fractions_per_row: descriptor.lookup_fractions_per_row as u32,
+        max_message_width: descriptor.max_message_width as u32,
+    });
     params.num_lookup_boundary_terms = descriptor.num_lookup_boundary_terms as u32;
     u64::from(params.conjectured_security_report().security_level())
 }
@@ -313,7 +316,7 @@ fn run_estimator(descriptor: SecurityDescriptor) -> Result<u64, miden_processor:
 ///
 /// These descriptors are synthetic, but all of them satisfy the estimator's input bounds. Each
 /// comment derives the expected result, which is also checked against the native estimator. The
-/// tests for the input bounds and native dominance calculation cover the five terms omitted by the
+/// tests for the input bounds and native dominance calculation cover the four terms omitted by the
 /// MASM procedure.
 #[test]
 fn common_security_estimator_wires_each_computed_round() {
@@ -344,12 +347,12 @@ fn common_security_estimator_wires_each_computed_round() {
             20,
         ),
         // A = 257 (the envelope floor): base = 127 - 9 - 6 = 112 and slack recovery fires. The
-        // omitted rounds are at their least secure accepted values: composition and DEEP are 114
-        // bits, OOD is 118 bits, and folding is 116 bits. Lookup remains the minimum at 113.
+        // omitted rounds are at their least secure accepted values: composition is 114 bits,
+        // OOD is 118 bits, and folding is 116 bits. DEEP grinding keeps lookup binding at 113
+        // bits.
         (
             "dominated-round envelope corner",
             SecurityDescriptor {
-                deep_pow_bits: 0,
                 folding_pow_bits: 0,
                 num_composed_constraints: 8192,
                 max_constraint_degree: 9,
@@ -409,6 +412,36 @@ fn common_security_estimator_wires_each_computed_round() {
             expected_level,
             "{binding_term} probe expectation drifted from the native estimator"
         );
+    }
+}
+
+/// DEEP must determine the returned minimum on both sides of a power-of-two boundary and at
+/// the term-count ceiling. Lookup is 119 - height bits on this shape, strictly above every probe;
+/// query and the omitted rounds are also higher. Grinding must add to the DEEP result.
+#[test]
+fn deep_round_matches_native_at_rounding_boundaries() {
+    // At height 6 with no grinding, powers of two lose the fractional field-size bit:
+    // 124 - ceil(log2(n)) - 6 + !is_power_of_two(n).
+    for (num_deep_terms, unground_level) in
+        [(255, 111), (256, 110), (257, 110), (8191, 106), (8192, 105)]
+    {
+        for log_max_height in [6, 29] {
+            for deep_pow_bits in [0, 1] {
+                let descriptor = SecurityDescriptor {
+                    num_deep_terms,
+                    log_max_height,
+                    deep_pow_bits,
+                    ..minimal_synthetic_shape()
+                };
+                let expected = unground_level - (log_max_height - 6) + deep_pow_bits;
+                let actual = run_estimator(descriptor).expect("DEEP probe must execute");
+                assert_eq!(
+                    actual, expected,
+                    "DEEP mismatch at n={num_deep_terms}, height={log_max_height}, grinding={deep_pow_bits}"
+                );
+                assert_eq!(native_level(&descriptor), expected, "native DEEP expectation drifted");
+            }
+        }
     }
 }
 
@@ -486,7 +519,7 @@ fn slack_bound_never_overstates_and_loses_at_most_one_bit() {
 
 /// Checks that each unsupported-input condition is rejected.
 ///
-/// The arithmetic and the proof that five native terms may be omitted both rely on these bounds.
+/// The arithmetic and the proof that four native terms may be omitted both rely on these bounds.
 /// Returning a level outside them would make one of those arguments invalid.
 #[test]
 fn estimator_envelope_violations_trap() {
@@ -651,16 +684,16 @@ fn recursive_verifier_ranges_fit_security_estimator_envelope() {
     for (name, width, frac, boundary, h_min) in [
         (
             "MVM",
-            u64::from(vm::AIR_SHAPE.lookup.max_message_width),
-            u64::from(vm::AIR_SHAPE.lookup.fractions_per_row),
+            u64::from(vm::LOOKUP_SHAPE.max_message_width),
+            u64::from(vm::LOOKUP_SHAPE.fractions_per_row),
             u64::from(vm::CORE_BOUNDARY_LOOKUP_TERMS)
                 + miden_core::program::KernelDescriptor::MAX_NUM_PROCEDURES as u64,
             MVM_LOG_HEIGHT_MIN,
         ),
         (
             "PVM",
-            u64::from(pvm::AIR_SHAPE.lookup.max_message_width),
-            u64::from(pvm::AIR_SHAPE.lookup.fractions_per_row),
+            u64::from(pvm::LOOKUP_SHAPE.max_message_width),
+            u64::from(pvm::LOOKUP_SHAPE.fractions_per_row),
             u64::from(pvm::FIXED_BOUNDARY_LOOKUP_TERMS),
             PVM_LOG_HEIGHT_MIN,
         ),
@@ -712,7 +745,8 @@ fn security_level_threshold_rejects_below_target() {
 }
 
 /// The PVM lookup round must agree with the native estimator at every supported trace height.
-/// Query inputs are maximized so lookup determines the returned minimum at every height.
+/// Query inputs and DEEP grinding are maximized so lookup determines the returned minimum at
+/// every height.
 #[test]
 fn pvm_lookup_round_matches_native_exhaustively() {
     use Axis::{Fixed, Outer};
@@ -728,7 +762,7 @@ fn pvm_lookup_round_matches_native_exhaustively() {
         [
             Fixed(NUM_QUERIES_MAX),
             Fixed(POW_BITS_MAX),
-            Fixed(0),
+            Fixed(POW_BITS_MAX),
             Fixed(0),
             Outer(PVM_LOG_HEIGHT_MIN),
         ],
@@ -789,11 +823,11 @@ fn pvm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 5]) {
         end
         ",
         lookup_pow_bits = security::LOOKUP_POW_BITS,
-        max_message_width = security::AIR_SHAPE.lookup.max_message_width,
+        max_message_width = security::LOOKUP_SHAPE.max_message_width,
         num_composed_constraints = security::AIR_SHAPE.num_composed_constraints,
         max_constraint_degree = security::AIR_SHAPE.max_constraint_degree,
         num_deep_terms = security::AIR_SHAPE.num_deep_terms.unwrap(),
-        fractions_per_row = security::AIR_SHAPE.lookup.fractions_per_row,
+        fractions_per_row = security::LOOKUP_SHAPE.fractions_per_row,
         boundary_terms = security::FIXED_BOUNDARY_LOOKUP_TERMS,
     );
     let levels = run_sweep_grid(&adapter, &push_args, outer_bound, inner_bound);

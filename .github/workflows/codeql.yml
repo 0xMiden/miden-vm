@@ -1,0 +1,190 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main, next]
+  pull_request:
+    types: [opened, reopened, synchronize]
+  schedule:
+    - cron: '0 4 * * 1'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
+
+permissions:
+  contents: read
+
+jobs:
+  classify:
+    name: Classify CodeQL paths
+    runs-on: ubuntu-slim
+    outputs:
+      actions: ${{ steps.paths.outputs.actions }}
+      python: ${{ steps.paths.outputs.python }}
+      rust: ${{ steps.paths.outputs.rust }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify changed paths
+        id: paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          actions=false
+          python=false
+          rust=false
+          if [ "${EVENT_NAME}" != "pull_request" ]; then
+            actions=true
+            python=true
+            rust=true
+          else
+            changed_paths="${RUNNER_TEMP}/codeql-changed-paths"
+            git diff --name-only -z "${BASE_SHA}...${HEAD_SHA}" > "${changed_paths}"
+            while IFS= read -r -d '' path; do
+              case "${path}" in
+                .github/actions/*|.github/workflows/*)
+                  actions=true
+                  ;;
+              esac
+              case "${path}" in
+                *.py)
+                  python=true
+                  ;;
+              esac
+              case "${path}" in
+                .cargo/*|.github/codeql/*|.github/workflows/codeql.yml|Cargo.lock|Cargo.toml|\
+                Makefile|crates/lib/core/codegen/*|rust-toolchain.toml|scripts/*|*.rs|*.masm|\
+                *.masm.tpl|*/Cargo.lock|*/Cargo.toml)
+                  rust=true
+                  ;;
+              esac
+            done < "${changed_paths}"
+          fi
+
+          {
+            echo "actions=${actions}"
+            echo "python=${python}"
+            echo "rust=${rust}"
+          } >> "${GITHUB_OUTPUT}"
+
+  actions:
+    name: CodeQL Actions
+    needs: classify
+    if: needs.classify.outputs.actions == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          build-mode: none
+          languages: actions
+      - name: Analyze
+        uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          category: /language:actions
+
+  python:
+    name: CodeQL Python
+    needs: classify
+    if: needs.classify.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          build-mode: none
+          languages: python
+      - name: Analyze
+        uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          category: /language:python
+
+  rust:
+    name: CodeQL Rust
+    needs: classify
+    if: needs.classify.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          build-mode: none
+          languages: rust
+      - name: Analyze
+        uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          category: /language:rust
+
+  gate:
+    name: CodeQL gate
+    needs: [classify, actions, python, rust]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-slim
+    permissions: {}
+    steps:
+      - name: Check CodeQL results
+        env:
+          ACTIONS_REQUIRED: ${{ needs.classify.outputs.actions }}
+          ACTIONS_RESULT: ${{ needs.actions.result }}
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          PYTHON_REQUIRED: ${{ needs.classify.outputs.python }}
+          PYTHON_RESULT: ${{ needs.python.result }}
+          RUST_REQUIRED: ${{ needs.classify.outputs.rust }}
+          RUST_RESULT: ${{ needs.rust.result }}
+        run: |
+          set -euo pipefail
+
+          if [ "${CLASSIFY_RESULT}" != "success" ]; then
+            echo "::error::CodeQL path classification did not succeed"
+            exit 1
+          fi
+
+          check_result() {
+            local language="$1"
+            local required="$2"
+            local result="$3"
+
+            if [ "${required}" = "true" ] && [ "${result}" != "success" ]; then
+              echo "::error::Required ${language} scan finished with result '${result}'"
+              return 1
+            fi
+            if [ "${required}" != "true" ] && [ "${result}" != "skipped" ]; then
+              echo "::error::Unexpected ${language} scan result '${result}'"
+              return 1
+            fi
+          }
+
+          check_result Actions "${ACTIONS_REQUIRED}" "${ACTIONS_RESULT}"
+          check_result Python "${PYTHON_REQUIRED}" "${PYTHON_RESULT}"
+          check_result Rust "${RUST_REQUIRED}" "${RUST_RESULT}"

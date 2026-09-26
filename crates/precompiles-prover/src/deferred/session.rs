@@ -14,6 +14,7 @@ use miden_precompiles::{
     CurveBinaryOp, CurveId, CurveOp, Keccak256Precompile, UintBinaryOp, UintDomain, UintOp,
     chunks_to_bytes_exact, n_chunks,
 };
+use miden_precompiles_air::{memory, stark_config::precompile_pcs_params};
 
 use crate::{
     ec::{msm::trace::EcExprPtr, trace::EcPointPtr},
@@ -149,11 +150,19 @@ pub(crate) fn session_from_witnesses(
 pub(crate) fn prove(
     witnesses: Vec<PrecompileWitness>,
     hash_fn: crate::HashFunction,
+    max_prover_memory_bytes: u64,
 ) -> Result<crate::PrecompileProof, crate::PrecompileProvingError> {
     let imported = {
         let _span = tracing::info_span!("build_session").entered();
         import_witnesses(witnesses, ImportLimits::default())?
     };
+    let params = precompile_pcs_params();
+    let estimated_bytes = imported
+        .session
+        .trace_heights()
+        .and_then(|heights| memory::prover_peak_bytes(&heights, &params, hash_fn));
+    crate::check_memory_budget(estimated_bytes, max_prover_memory_bytes)?;
+
     let traces = {
         let _span = tracing::info_span!("build_trace").entered();
         imported.session.finish(imported.root)

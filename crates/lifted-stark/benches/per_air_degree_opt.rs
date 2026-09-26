@@ -293,7 +293,7 @@ fn run_prove(
     eprintln!("{}\n", "=".repeat(70));
 
     let start = Instant::now();
-    let _output = ProverInstance::new(&config, &prover_statement, None)
+    let _output = ProverInstance::new(&config, prover_statement, None)
         .expect("no preprocessed columns")
         .prove(test_challenger())
         .expect("prove succeeds");

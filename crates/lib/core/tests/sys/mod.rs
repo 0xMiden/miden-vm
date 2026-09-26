@@ -1,5 +1,5 @@
 #[cfg(feature = "arbitrary")]
-use miden_utils_testing::{MIN_STACK_DEPTH, proptest::prelude::*, rand::rand_vector};
+use miden_utils_testing::{MIN_STACK_DEPTH, proptest::prelude::*};
 
 #[test]
 fn truncate_stack() {
@@ -14,7 +14,7 @@ fn truncate_stack() {
 proptest! {
     #[test]
     fn truncate_stack_proptest(test_values in prop::collection::vec(any::<u64>(), MIN_STACK_DEPTH), n in 1_usize..100) {
-        let push_values = rand_vector::<u64>(n);
+        let push_values: Vec<u64> = (0..n).map(|_| rand::random()).collect();
         let mut source_vec = vec!["use miden::core::sys".to_string(), "begin".to_string()];
         for value in push_values.iter() {
             source_vec.push(format!("push.{value}"));

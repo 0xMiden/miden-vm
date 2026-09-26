@@ -54,7 +54,7 @@ fn anchored_inv(seed: u64, len_bytes: u32) -> KeccakNodeInvocation {
     KeccakNodeInvocation {
         len_bytes,
         d: core::array::from_fn(|_| rng.random()),
-        h_input_chunks: core::array::from_fn(|_| Felt::new(rng.random()).unwrap()),
+        h_input_chunks: core::array::from_fn(|_| rng.random::<Felt>()),
         chunk_seq_id_head: ChunkSeqId::forged(0),
         perm_seq_id_chunks: PermSeqId::forged(0),
         perm_seq_id_digest_chunks: PermSeqId::forged(100),
@@ -73,7 +73,7 @@ fn next_inv(prev: &KeccakNodeInvocation, seed: u64, len_bytes: u32) -> KeccakNod
     KeccakNodeInvocation {
         len_bytes,
         d: core::array::from_fn(|_| rng.random()),
-        h_input_chunks: core::array::from_fn(|_| Felt::new(rng.random()).unwrap()),
+        h_input_chunks: core::array::from_fn(|_| rng.random::<Felt>()),
         chunk_seq_id_head: ChunkSeqId::forged(
             prev.chunk_seq_id_head.seq() + prev.n_chunks() as u32,
         ),

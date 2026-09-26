@@ -21,7 +21,27 @@ use tracing::instrument;
 mod prover;
 
 #[cfg(all(test, feature = "std"))]
+mod block_stack_entry_kind_repro;
+#[cfg(all(test, feature = "std"))]
+mod ctx_continuation_end_soundness_repro;
+#[cfg(all(test, feature = "std"))]
+mod dyncall_bottom_slot_soundness_repro;
+#[cfg(all(test, feature = "std"))]
+mod dyncall_end_relabel_repro;
+#[cfg(all(test, feature = "std"))]
+mod dyncall_saved_frame_soundness_repro;
+#[cfg(all(test, feature = "std"))]
+mod first_row_repeat_soundness_repro;
+#[cfg(all(test, feature = "std"))]
 mod overflow_pointer_soundness_repro;
+#[cfg(all(test, feature = "std"))]
+mod repeat_loop_schema_soundness_repro;
+#[cfg(all(test, feature = "std"))]
+mod repeat_predecessor_soundness_repro;
+#[cfg(all(test, feature = "std"))]
+mod repro_harness;
+#[cfg(all(test, feature = "std"))]
+mod span_entry_soundness_repro;
 
 // EXPORTS
 // ================================================================================================
@@ -69,8 +89,8 @@ where
         ProverStatement::new(statement, vec![core_trace, chiplets_trace, poseidon2_trace])
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
 
-    let output: StarkOutput<Felt, QuadFelt, SC> =
-        ProverInstance::new(config, &prover_statement, None)
+    let (output, _statement): (StarkOutput<Felt, QuadFelt, SC>, _) =
+        ProverInstance::new(config, prover_statement, None)
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?
             .prove(challenger)
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;

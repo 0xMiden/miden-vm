@@ -64,7 +64,7 @@ const KERNEL_WITNESS_PTR = 3223322844
 ##                           [ chiplets selectors       ]  slots 14..16
 ##                           [ Poseidon2 selectors      ]  slots 17..19
 ##   ACE_CIRCUIT_STREAM_PTR
-##                       --> [ stream + reserved tail   ]  6040 felts
+##                       --> [ stream + reserved tail   ]  6048 felts
 
 ### Two extension-field elements: beta followed by alpha, four base felts total.
 const AUX_RAND_ELEM_PTR = 3225419776
@@ -81,7 +81,7 @@ const AUX_BUS_BOUNDARY_PTR = 3225420328
 const AUXILIARY_ACE_INPUTS_PTR = 3225420336
 
 ### Factored ACE circuit stream, sized by the generated evaluator's `ACE_PREFIX_BLOCKS` and
-### `ACE_COMMON_BLOCKS`. The region reserves 6040 felts; the tail beyond the stream keeps the
+### `ACE_COMMON_BLOCKS`. The region reserves 6048 felts; the tail beyond the stream keeps the
 ### PVM READ section's base address (`sys/pvm/layout.masm`) fixed.
 const ACE_CIRCUIT_STREAM_PTR = 3225420376
 
