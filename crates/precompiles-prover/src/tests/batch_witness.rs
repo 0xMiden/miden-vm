@@ -317,6 +317,12 @@ fn malformed_semantics_are_located_before_session_operations() {
             .unwrap(),
         )
         .unwrap();
+    let long_uint = fixture
+        .register(
+            Node::try_data(UintPrecompile::value_tag(UintDomain::U256), vec![[Felt::ZERO; 8]; 2])
+                .unwrap(),
+        )
+        .unwrap();
     let unknown = fixture
         .register(
             Node::value(
@@ -398,11 +404,8 @@ fn malformed_semantics_are_located_before_session_operations() {
     for root in [
         false_eq,
         wrong_domain,
-        bad_limb,
         off_curve,
         false_hash,
-        modulus,
-        above_modulus,
         incomplete_infinity,
         wrong_coordinate_domain,
         false_point_eq,
@@ -431,6 +434,10 @@ fn malformed_semantics_are_located_before_session_operations() {
         );
     }
     for (root, expected_reason) in [
+        (bad_limb, "invalid uint value for its domain"),
+        (long_uint, "invalid uint value for its domain"),
+        (modulus, "invalid uint value for its domain"),
+        (above_modulus, "invalid uint value for its domain"),
         (short_hash_input, "malformed hash input chunks"),
         (nonzero_hash_padding, "malformed hash input chunks"),
         (wide_hash_limb, "malformed hash input chunks"),

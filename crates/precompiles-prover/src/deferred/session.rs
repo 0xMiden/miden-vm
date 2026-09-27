@@ -7,12 +7,12 @@ use alloc::{
 };
 
 use miden_core::deferred::{
-    DataChunk, Digest, MAX_PRECOMPILE_ROOTS, Node, PrecompileLimits, PrecompileWitness,
-    PreparationError, PreparedNode, PreparedWitness, TRUE_DIGEST, Tag, fold_deferred_root,
+    DataChunk, Digest, MAX_PRECOMPILE_ROOTS, PrecompileLimits, PrecompileWitness, PreparationError,
+    PreparedNode, PreparedWitness, TRUE_DIGEST, Tag, fold_deferred_root,
 };
 use miden_precompiles::{
     CurveBinaryOp, CurveId, CurveOp, Keccak256Precompile, UintBinaryOp, UintDomain, UintOp,
-    chunks_to_bytes_exact, n_chunks,
+    UintPrecompile, chunks_to_bytes_exact, n_chunks,
 };
 use miden_precompiles_air::{memory, stark_config::precompile_pcs_params};
 
@@ -239,7 +239,7 @@ impl WitnessImporter {
                 // Reuse the computation; later operand uses still create their own bindings.
                 continue;
             }
-            let value = self.entry(prepared.node())?;
+            let value = self.entry(&prepared)?;
             let hash = match value {
                 Imported::True | Imported::Chunks => None,
                 Imported::Truth(node) => Some(node.hash()),
@@ -252,13 +252,12 @@ impl WitnessImporter {
             self.cache.insert(digest, Cached { definition: prepared, value });
         }
         self.location = WitnessLocation::Root { witness: witness_index };
-        let Imported::Truth(claim) = self.get(root)? else {
+        let Imported::Truth(claim) = self.get(root) else {
             return Err(self.invalid("root is not a true assertion"));
         };
         if !self.session.is_recorded_truth(claim) {
             return Err(self.invalid("bare external assertion cannot be a precompile root"));
         }
-        self.check_commitment(root, claim.hash())?;
         self.aggregate = Some(match self.aggregate {
             None => claim,
             Some(previous) => self.session.assert_and(previous, claim),
@@ -268,14 +267,14 @@ impl WitnessImporter {
     }
 
     fn finish(mut self) -> Result<WitnessSession, SessionInputError> {
-        let root = self.aggregate.ok_or(SessionInputError::Empty)?;
+        let root = self.aggregate.expect("the batch is nonempty and every witness was imported");
         self.location = WitnessLocation::Batch;
         self.check_commitment(
             self.roots
                 .iter()
                 .copied()
                 .reduce(fold_deferred_root)
-                .ok_or(SessionInputError::Empty)?,
+                .expect("every imported witness contributes a root"),
             root.hash(),
         )?;
         Ok(WitnessSession {
@@ -304,18 +303,15 @@ impl WitnessImporter {
             })
         }
     }
-    fn get(&self, digest: Digest) -> Result<Imported, SessionInputError> {
+    fn get(&self, digest: Digest) -> Imported {
         if digest == TRUE_DIGEST {
-            return Ok(Imported::True);
+            return Imported::True;
         }
-        self.cache
-            .get(&digest)
-            .map(|entry| entry.value)
-            .ok_or_else(|| self.invalid("missing child commitment"))
+        self.cache.get(&digest).expect("prepared nodes are imported child-first").value
     }
 
     fn truth(&mut self, digest: Digest) -> Result<Truthy, SessionInputError> {
-        match self.get(digest)? {
+        match self.get(digest) {
             Imported::True => Ok(self.session.zero()),
             Imported::Truth(value) => Ok(value),
             _ => Err(self.invalid("expected assertion operand")),
@@ -323,14 +319,14 @@ impl WitnessImporter {
     }
 
     fn uint(&self, digest: Digest) -> Result<TranslatedUint, SessionInputError> {
-        match self.get(digest)? {
+        match self.get(digest) {
             Imported::Uint(value) => Ok(value),
             _ => Err(self.invalid("expected uint operand")),
         }
     }
 
     fn point(&self, digest: Digest) -> Result<TranslatedEc, SessionInputError> {
-        match self.get(digest)? {
+        match self.get(digest) {
             Imported::Point(value) => Ok(value),
             _ => Err(self.invalid("expected curve operand")),
         }
@@ -338,36 +334,32 @@ impl WitnessImporter {
 
     fn chunks(&self, digest: Digest) -> Result<&[DataChunk], SessionInputError> {
         match self.cache.get(&digest) {
-            Some(Cached { definition, value: Imported::Chunks }) => definition
-                .node()
-                .payload()
-                .as_data()
-                .map_err(|_| self.invalid("expected chunks operand")),
+            Some(Cached { definition, value: Imported::Chunks }) => {
+                Ok(definition.node().payload().as_data().expect("prepared CHUNKS have data"))
+            },
             _ => Err(self.invalid("expected chunks operand")),
         }
     }
 
-    fn join(&self, node: &Node) -> Result<(Digest, Digest), SessionInputError> {
-        node.payload()
-            .as_join()
-            .map_err(|_| self.invalid("operation requires two children"))
-    }
-
-    fn entry(&mut self, entry: &Node) -> Result<Imported, SessionInputError> {
+    /// Preparation with the built-in registry establishes tags, shapes and references. Operand
+    /// types, value encodings and assertion truth still require evaluation here.
+    fn entry(&mut self, prepared: &PreparedNode) -> Result<Imported, SessionInputError> {
+        let entry = prepared.node();
         let tag = entry.tag();
+        let join = || entry.payload().as_join().expect("prepared operation has join shape");
         if tag == Tag::CHUNKS {
             return Ok(Imported::Chunks);
         }
         if tag == Tag::AND {
-            let (lhs, rhs) = self.join(entry)?;
+            let (lhs, rhs) = join();
             let lhs = self.truth(lhs)?;
             let rhs = self.truth(rhs)?;
             return Ok(Imported::Truth(self.session.assert_and(lhs, rhs)));
         }
-        if let Some(n_bytes) = Keccak256Precompile::decode_assert_tag(tag)
-            .map_err(|_| self.invalid("invalid hash tag"))?
+        if let Some(n_bytes) =
+            Keccak256Precompile::decode_assert_tag(tag).expect("preparation validates hash tags")
         {
-            let (input, expected) = self.join(entry)?;
+            let (input, expected) = join();
             let n_bytes = n_bytes as usize;
             let input = chunks_to_bytes_exact(
                 self.chunks(input)?,
@@ -388,33 +380,18 @@ impl WitnessImporter {
             }
             return Ok(Imported::Truth(claim));
         }
-        if let Some(op) =
-            UintOp::decode_tag(tag).map_err(|_| self.invalid("invalid uint tag or domain"))?
-        {
+        if let Some(op) = UintOp::decode_tag(tag).expect("preparation validates uint tags") {
             return match op {
                 UintOp::Value(domain) => {
-                    let chunks = entry
-                        .payload()
-                        .as_data()
-                        .map_err(|_| self.invalid("uint value requires data"))?;
-                    let [chunk] = chunks else {
-                        return Err(self.invalid("uint value requires one chunk"));
-                    };
-                    let mut limbs = [0u32; 8];
-                    for (limb, felt) in limbs.iter_mut().zip(chunk) {
-                        *limb = u32::try_from(felt.as_canonical_u64())
-                            .map_err(|_| self.invalid("uint limb exceeds u32"))?;
-                    }
-                    if !domain.is_canonical(&limbs) {
-                        return Err(self.invalid("uint value exceeds its domain"));
-                    }
+                    let limbs = UintPrecompile::decode_value_node(entry, domain)
+                        .map_err(|_| self.invalid("invalid uint value for its domain"))?;
                     Ok(Imported::Uint(TranslatedUint {
                         node: self.session.uint_leaf(from_limbs32(&limbs), domain.bound_ptr()),
                         domain,
                     }))
                 },
                 UintOp::Binary(op) => {
-                    let (a, b) = self.join(entry)?;
+                    let (a, b) = join();
                     let a = self.uint(a)?;
                     let b = self.uint(b)?;
                     if a.domain != b.domain {
@@ -428,7 +405,7 @@ impl WitnessImporter {
                     Ok(Imported::Uint(TranslatedUint { node, domain: a.domain }))
                 },
                 UintOp::Eq => {
-                    let (a, b) = self.join(entry)?;
+                    let (a, b) = join();
                     let a = self.uint(a)?;
                     let b = self.uint(b)?;
                     if a.domain != b.domain {
@@ -441,10 +418,10 @@ impl WitnessImporter {
                 },
             };
         }
-        if let Some(op) = CurveOp::decode_tag(tag).map_err(|_| self.invalid("invalid curve tag"))? {
+        if let Some(op) = CurveOp::decode_tag(tag).expect("preparation validates curve tags") {
             return match op {
                 CurveOp::Value(curve) => {
-                    let (x, y) = self.join(entry)?;
+                    let (x, y) = join();
                     let node = match (x == TRUE_DIGEST, y == TRUE_DIGEST) {
                         (true, true) => self.session.ec_pai(curve.group_ptr()),
                         (true, false) | (false, true) => {
@@ -468,7 +445,7 @@ impl WitnessImporter {
                     Ok(Imported::Point(TranslatedEc { node, curve }))
                 },
                 CurveOp::Binary(op) => {
-                    let (a, b) = self.join(entry)?;
+                    let (a, b) = join();
                     let a = self.point(a)?;
                     let b = self.point(b)?;
                     if a.curve != b.curve {
@@ -481,7 +458,7 @@ impl WitnessImporter {
                     Ok(Imported::Point(TranslatedEc { node, curve: a.curve }))
                 },
                 CurveOp::Eq => {
-                    let (a, b) = self.join(entry)?;
+                    let (a, b) = join();
                     let a = self.point(a)?;
                     let b = self.point(b)?;
                     if a.curve != b.curve {
@@ -493,11 +470,9 @@ impl WitnessImporter {
                     Ok(Imported::Truth(self.session.ec_is(&a.node, &b.node)))
                 },
                 CurveOp::Msm => {
-                    let pairs = entry
-                        .payload()
-                        .as_pair_list()
-                        .map_err(|_| self.invalid("MSM requires a pair list"))?;
-                    let &(first, _) = pairs.first().ok_or_else(|| self.invalid("empty MSM"))?;
+                    let pairs =
+                        entry.payload().as_pair_list().expect("prepared MSM has pair-list shape");
+                    let (first, _) = pairs[0];
                     let curve = self.point(first)?.curve;
                     let mut terms = Vec::with_capacity(pairs.len());
                     for (point, scalar) in pairs {
@@ -519,7 +494,7 @@ impl WitnessImporter {
                 },
             };
         }
-        Err(self.invalid("unsupported precompile operation"))
+        unreachable!("preparation uses the built-in registry")
     }
     fn msm_from_terms(
         &mut self,
