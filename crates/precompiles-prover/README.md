@@ -25,8 +25,9 @@ the partial Session and reports the input location. Bare external assertion root
 
 There is no aggregate logical-work admission or separate Session MSM limit. Repetitions and shared
 payload claims retain their declared work; MSM admission covers either lowering path. Balanced
-reductions retain O(n log n) term processing for the fixed scalar width. After import, estimated
-proving memory is checked before trace allocation; this does not cap preparation/import allocations.
+reductions retain O(n log n) term processing for the fixed scalar width. After import, the prover
+checks estimated memory immediately before trace allocation and proving; this does not cap import
+or preparation allocations.
 Batch-count and proving-memory failures are capacity errors. Current defaults remain unchanged;
 calibration is separate follow-up work. See the [admission and migration contract](
 ../../docs/src/design/deferred/semantics.md#witness-preparation-and-admission) for checked-node

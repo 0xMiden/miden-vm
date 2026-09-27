@@ -12,9 +12,11 @@ extern crate std;
 use alloc::vec::Vec;
 
 pub use deferred::session::{SessionInputError, WitnessLocation};
-use miden_core::deferred::{PrecompileLimits, PrecompileWitness};
+use miden_core::deferred::{Digest, PrecompileLimits, PrecompileWitness};
 pub use miden_core::proof::{HashFunction, PrecompileProof, StarkProof};
 pub use miden_precompiles::default_precompile_limits;
+use miden_precompiles_air::{memory, stark_config::precompile_pcs_params};
+use session::{Session, Truthy};
 
 pub(crate) mod ec;
 pub(crate) mod hash;
@@ -77,7 +79,7 @@ pub fn prove_precompiles_with_limits_and_budget(
     limits: &PrecompileLimits,
     max_prover_memory_bytes: u64,
 ) -> Result<PrecompileProof, PrecompileProvingError> {
-    deferred::session::prove(witnesses, hash_fn, limits, None, max_prover_memory_bytes)
+    prove(witnesses, hash_fn, limits, None, max_prover_memory_bytes)
 }
 
 /// Proves one witness after binding its prepared root to the execution-established root.
@@ -88,13 +90,54 @@ pub fn prove_precompile_for_root_with_limits_and_budget(
     limits: &PrecompileLimits,
     max_prover_memory_bytes: u64,
 ) -> Result<PrecompileProof, PrecompileProvingError> {
-    deferred::session::prove(
+    prove(
         alloc::vec![witness],
         hash_fn,
         limits,
         Some(core::slice::from_ref(&expected_root)),
         max_prover_memory_bytes,
     )
+}
+
+pub(crate) struct WitnessSession {
+    session: Session,
+    root: Truthy,
+    roots: Vec<Digest>,
+}
+
+impl WitnessSession {
+    #[cfg(test)]
+    pub(crate) fn finish(self) -> session::SessionTraces {
+        self.session.finish(self.root)
+    }
+}
+
+fn prove(
+    witnesses: Vec<PrecompileWitness>,
+    hash_fn: HashFunction,
+    limits: &PrecompileLimits,
+    expected_roots: Option<&[Digest]>,
+    max_prover_memory_bytes: u64,
+) -> Result<PrecompileProof, PrecompileProvingError> {
+    let imported = {
+        let _span = tracing::info_span!("build_session").entered();
+        deferred::session::import_witnesses_with_roots(witnesses, limits, expected_roots)?
+    };
+    let params = precompile_pcs_params();
+    let estimated_bytes = imported
+        .session
+        .trace_heights()
+        .and_then(|heights| memory::prover_peak_bytes(&heights, &params, hash_fn));
+    check_memory_budget(estimated_bytes, max_prover_memory_bytes)?;
+
+    let traces = {
+        let _span = tracing::info_span!("build_trace").entered();
+        imported.session.finish(imported.root)
+    };
+    Ok(PrecompileProof {
+        proof: traces.prove_stark(hash_fn)?,
+        roots: imported.roots,
+    })
 }
 
 fn check_memory_budget(

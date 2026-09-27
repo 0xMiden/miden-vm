@@ -14,10 +14,9 @@ use miden_precompiles::{
     CurveBinaryOp, CurveId, CurveOp, Keccak256Precompile, UintBinaryOp, UintDomain, UintOp,
     UintPrecompile, chunks_to_bytes_exact, n_chunks,
 };
-use miden_precompiles_air::{memory, stark_config::precompile_pcs_params};
 
 use crate::{
-    PrecompileProvingError,
+    PrecompileProvingError, WitnessSession,
     ec::{msm::trace::EcExprPtr, trace::EcPointPtr},
     math::{U256, from_limbs32, to_limbs32},
     session::{EcNode, Session, Truthy, UintNode, strategies},
@@ -67,19 +66,6 @@ pub enum SessionInputError {
     },
 }
 
-pub(crate) struct WitnessSession {
-    session: Session,
-    root: Truthy,
-    roots: Vec<Digest>,
-}
-
-impl WitnessSession {
-    #[cfg(test)]
-    pub(crate) fn finish(self) -> crate::session::SessionTraces {
-        self.session.finish(self.root)
-    }
-}
-
 #[derive(Clone, Copy)]
 enum Imported {
     True,
@@ -122,34 +108,6 @@ pub(crate) fn session_from_witnesses(
     witnesses: Vec<PrecompileWitness>,
 ) -> Result<WitnessSession, PrecompileProvingError> {
     import_witnesses(witnesses, &miden_precompiles::default_precompile_limits())
-}
-
-pub(crate) fn prove(
-    witnesses: Vec<PrecompileWitness>,
-    hash_fn: crate::HashFunction,
-    limits: &PrecompileLimits,
-    expected_roots: Option<&[Digest]>,
-    max_prover_memory_bytes: u64,
-) -> Result<crate::PrecompileProof, PrecompileProvingError> {
-    let imported = {
-        let _span = tracing::info_span!("build_session").entered();
-        import_witnesses_with_roots(witnesses, limits, expected_roots)?
-    };
-    let params = precompile_pcs_params();
-    let estimated_bytes = imported
-        .session
-        .trace_heights()
-        .and_then(|heights| memory::prover_peak_bytes(&heights, &params, hash_fn));
-    crate::check_memory_budget(estimated_bytes, max_prover_memory_bytes)?;
-
-    let traces = {
-        let _span = tracing::info_span!("build_trace").entered();
-        imported.session.finish(imported.root)
-    };
-    Ok(crate::PrecompileProof {
-        proof: traces.prove_stark(hash_fn)?,
-        roots: imported.roots,
-    })
 }
 
 pub(crate) fn import_witnesses(
