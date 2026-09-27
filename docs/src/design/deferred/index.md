@@ -225,16 +225,17 @@ The in-memory graph and serialized graph have the same representation:
 
 Export uses deterministic child-first DFS and omits unreachable nodes. In-memory construction and
 canonical decoding enforce the element ceiling and canonical transport syntax without hashing or
-registry access. `PrecompileWitness::prepare` hydrates entries, validates framework and precompile
-shapes, charges per-witness work limits before hashing, reconstructs commitments, and rejects
+registry access. `PrecompileWitness::prepare` consumes entries, validates framework and precompile
+shapes, charges per-witness work before hashing, reconstructs commitments, and rejects
 duplicates, forward references, orphaned entries, and noncanonical DFS order. Preparation uses
 bounded, iterative graph traversal without running the evaluator.
 
 `ExecutionProof::read_from_bytes` decodes portable material without a precompile registry. A
 prover passes singleton witnesses directly to `Prover::prove_precompiles`. Each witness is prepared
-and admitted independently before the prepared graphs are imported into one Session, which validates
-their operations and assertions. Computations may be shared across inputs, while each parent operand
-and each ordered root occurrence retains its proof-binding use. The resulting proof carries the
+and admitted independently, with expected roots checked where supplied, before a Session exists.
+A second loop consumes prepared graphs and validates operations while recording them. Failure drops
+the partial Session. Its cache owns checked definitions and Session values; shared computations
+retain each parent operand and ordered root occurrence's proof-binding use. The proof carries the
 exact ordered roots. Completing an execution proof preserves its compatibility declaration. See the
 [API contract](./semantics.md#transport-and-limits) for format versions and input limits.
 
@@ -247,6 +248,8 @@ standard proving. See the [API contract](./semantics.md#proof-obligations-and-co
 portable transport, batching, completion, and verification lifecycle.
 
 Logical resource admission is explicit and per singleton witness: structural elements and declared
-hash, uint, curve, and MSM work are checked before commitment hashing or evaluation. Batch-wide
-prover memory is estimated separately. The external STARK that verifies a committed DAG, the
+hash, uint, curve, and MSM work are checked before commitment hashing or evaluation. Batches and
+proofs share a 128-root ceiling, with no aggregate logical-work admission.
+Prover memory is estimated after import and checked before trace allocation; default admission-limit
+calibration remains separate follow-up work. The external STARK that verifies a committed DAG, the
 **Precompile VM**, is described in GitHub discussion #3005.

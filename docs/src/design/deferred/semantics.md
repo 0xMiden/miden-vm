@@ -139,22 +139,45 @@ release the runtime state.
 
 ## Witness preparation and admission
 
-`PrecompileWitness::prepare(registry, limits)` hydrates and validates bounded wire entries, charges
-structural and declared work before computing their commitments, and returns a `PreparedWitness`.
-It rejects duplicate commitments, invalid references, orphaned entries, noncanonical traversal
-order, and a `TRUE_DIGEST` final root without establishing computation or assertion truth.
-`PreparedWitness::root` exposes the reconstructed commitment and `PreparedWitness::work` exposes
-the admitted work summary.
+`PrecompileWitness::prepare(self, registry, limits)` consumes bounded wire entries and moves their
+payloads into checked nodes. It validates registry tags, payload shapes, and backward references,
+charges structural and declared work before hashing each node, and stops at the first exceeded
+limit. A final traversal checks canonical order and reachability without hashing again. Duplicate
+commitments, orphaned entries, and a `TRUE_DIGEST` final root are rejected.
 
-`PreparedWitness::evaluate(self)` consumes the prepared value and succeeds only when semantic
-evaluation resolves its root to `TRUE_DIGEST`. Callers that need reuse must clone it explicitly.
+A successful `PreparedWitness` contains the reconstructed commitments and root, the complete
+`PrecompileWork`, and a graph admitted under the supplied per-witness policy. It does not establish
+computational validity or assertion truth. `root()` and `work()` expose the root and admitted work;
+`digests()` iterates over the checked commitments. `into_nodes(self)` consumes the witness and yields
+opaque `PreparedNode` values in canonical child-first order. Their `node()` and `digest()` accessors
+are read-only; construction and fields remain private.
+
+`PreparedWitness::evaluate(self)` consumes the prepared value and succeeds only when native semantic
+evaluation resolves its root to `TRUE_DIGEST`. Callers retaining either witness representation must
+clone it explicitly. For example:
+
+```rust,ignore
+let prepared = witness.clone().prepare(registry, &limits)?;
+let root = prepared.root();
+let work = prepared.work().clone();
+prepared.evaluate()?;
+// `witness` remains available because this caller explicitly cloned it.
+```
 
 `PrecompileLimits` is a per-singleton-witness admission policy. It bounds explicit node elements
 and requires a `WorkLimit` for every installed registry class. `PrecompileWork` reports node and
 class counts, total class size, and maximum individual size. Framework nodes consume structural
-elements but no precompile work class. The standard registry's
-`default_precompile_limits()` defines the canonical hash, uint, curve, and MSM policy. Verifier and
-prover callers can replace it with `with_precompile_limits`.
+elements but no precompile work class. Distinct hash claims charge their declared input bytes even
+when they share a payload. Every declared MSM term is charged, including zero scalars and repeated
+canonical bases, so admission covers either lowering path. There are no separate Session MSM
+workload limits or session-wide fallback-term counter.
+
+The standard registry's `default_precompile_limits()` defines the hash, uint, curve, and MSM policy.
+Verifier and prover callers can replace it with `with_precompile_limits`. Default calibration is
+separate follow-up work: measure preparation, import, and proving for realistic hash, arithmetic,
+curve, mixed, and worst-case MSM workloads, with both little sharing and repeated/shared inputs.
+The existing defaults are unchanged and are not evidence that 128 maximal inputs are practical.
+Normal admission limits can be lower than the hard transport/allocation ceiling.
 
 ## Proof obligations and composition
 
@@ -165,13 +188,25 @@ VM root. Decoding does not reconstruct the witness root; preparation computes it
 verification checks it against the execution root. `Prover::prove_full` proves both stages, using
 a one-element precompile batch.
 
-For delegated proving, decode the transported proof and pass its witnesses directly to
-`Prover::prove_precompiles(Vec<PrecompileWitness>)`. The batch must be nonempty. Each input retains its
-own indices. Each singleton is prepared and admitted independently before one private Session shares
-computations across the batch. Operation support, canonical arithmetic values, curve membership,
-assertion truth, MSM restrictions, and commitments are checked during import. A root must have a
-transcript eval row; a bare external Keccak assertion cannot serve as the final root and is rejected
-without changing its commitment.
+For delegated proving, decode the transported proof and pass its witnesses by value to
+`Prover::prove_precompiles(Vec<PrecompileWitness>)`. Before preparation, reject empty batches, more
+than `MAX_PRECOMPILE_ROOTS` witnesses, and a mismatched expected-root count when roots are supplied.
+The first loop consumes and prepares every input independently, including repetitions, and checks
+its expected execution root where supplied. No proving Session exists until every input passes.
+
+The second loop consumes each `PreparedWitness` into a private `WitnessImporter`. Import evaluates
+operations while recording them into its Session; it does not run native evaluation first. It
+checks canonical arithmetic values, curve membership, operand compatibility, assertion truth,
+supported MSM operands, and recorded commitments. A root must have a transcript eval row; a bare
+external Keccak assertion cannot serve as the final root.
+
+Import consumes the importer and returns it only on success. A semantic failure drops the partial
+Session and all its caches, with no rollback or resumable state. `SessionInputError` retains indexed
+`Preparation` and `RootMismatch` errors and `Invalid`/`Commitment` errors with `WitnessLocation`:
+witness numbers are zero-based and entry numbers are one-based. The importer owns checked node
+definitions and translated Session values keyed by commitment, compares complete definitions before
+reuse, and never borrows raw witnesses or rechecks admission limits. Session construction and
+mutation remain private; there is no public prepared-batch proving entrypoint.
 
 The batch preserves exact root order and multiplicity: `[A, B, A]` proves `AND(AND(A, B), A)`.
 Repeated operands and root occurrences count as separate binding uses, even when their computation
@@ -194,10 +229,11 @@ represent inconsistent artifacts. None of these operations establishes validity.
 ordered aggregate folding, and the precompile STARK. It can validate a precompile artifact against
 an expected outstanding root and returns its authenticated security parameters. `Verifier::verify`
 checks the proof's compatibility declaration and execution lifecycle before it verifies the VM
-STARK. For deferred proofs, it evaluates the witness and requires its recomputed root to match the
-VM-authenticated root. It reuses `verify_precompile` for complete proofs. A successful deferred
-verification returns
-the authenticated VM security parameters and outstanding root. A successful complete verification
+STARK. For deferred proofs, it first authenticates the VM proof and required security level, then
+explicitly clones the borrowed portable witness for consuming preparation. It checks the prepared
+root against the VM-authenticated root before native evaluation. It reuses `verify_precompile` for
+complete proofs. A successful deferred verification returns the authenticated VM security parameters
+and outstanding root. A successful complete verification
 has no outstanding obligation and, when it includes a precompile proof, also returns the PVM
 security parameters.
 
@@ -215,15 +251,25 @@ Each canonical decoder accepts only its supported version and rejects other vers
 decoding their payloads. Previous encodings and conversion between formats are not supported.
 
 Canonical binary decoders enforce fixed hard ceilings before allocating declared collections:
-`MAX_STARK_PROOF_BYTES` per inner STARK, `MAX_PRECOMPILE_ROOTS` per ordered root list, and
-`MAX_DEFERRED_ELEMENTS` for each portable witness. Logical element and operation limits are applied
-independently to every singleton witness, including repeated witnesses; a batch may exceed the same
-logical workload in aggregate. Before creating a proving session, the batch also admits at most
-`16 * MAX_DEFERRED_ELEMENTS` structural elements (including folded-root overhead) and four times
-that many declared hash-input bytes, counting repeated witnesses each time. `MAX_PRECOMPILE_ROOTS`
-and the precompile prover's estimated peak memory budget are batch-wide. These are library safety
-and admission bounds, not protocol,
-whole-envelope, file, network, or ingestion policy.
+`MAX_STARK_PROOF_BYTES` per inner STARK, `MAX_PRECOMPILE_ROOTS = 128` per ordered root list, and
+`MAX_DEFERRED_ELEMENTS` for each portable witness. The same 128-root ceiling applies to proving
+requests and verification of in-memory proofs. Proof layouts and versions are unchanged, but proofs
+with more than 128 roots are unsupported.
+
+Logical element and operation limits apply independently to every witness, including repetitions.
+Computation sharing does not discount admission. A batch may exceed these totals collectively;
+there is no aggregate element/hash-work preflight. Grouping valid witnesses does not make an input
+invalid. `PrecompileProvingError::BatchTooLarge { witnesses, max }` reports the upfront count failure,
+replacing the former `SessionInputError::Limit` path. Per-witness work-limit errors remain under
+`SessionInputError::Preparation`.
+
+After every input has been evaluated and recorded, the prover estimates the completed Session's
+peak proving memory, including aggregation overhead. It checks this estimate before allocating
+chiplet traces or starting the STARK pipeline. `MemoryBudgetExceeded` and `MemoryEstimateOverflow`
+are outer capacity errors, not failures attributed to a witness. The caller can choose a smaller
+batch or larger memory budget. This check does not bound preparation or Session-building allocations.
+Backend trace-height/estimate overflow remains a capacity failure, separate from witness admission.
+These are library safety and admission bounds, not whole-envelope, file, network, or ingestion policy.
 
 Generic serialization traits are representation formats. Generic Serde
 deserialization is not guaranteed to apply the canonical decoder's early allocation bounds and must

@@ -100,6 +100,7 @@ fn check_wire_session(state: WitnessFixture) -> SessionTraces {
     let witness =
         PrecompileWitness::read_from_bytes(&witness.to_bytes()).expect("witness must decode");
     let prepared = witness
+        .clone()
         .prepare(
             alloc::sync::Arc::new(miden_precompiles::registry()),
             &miden_precompiles::default_precompile_limits(),
@@ -388,10 +389,10 @@ fn deferred_session_inputs_reject_identity_base_msm() {
     let error = session_from_witnesses(vec![state.witness()]).err().unwrap();
     assert!(matches!(
         error,
-        crate::SessionInputError::Invalid {
+        crate::PrecompileProvingError::Input(crate::SessionInputError::Invalid {
             reason: "MSM identity bases are unsupported",
             ..
-        }
+        })
     ));
 }
 

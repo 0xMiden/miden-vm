@@ -153,11 +153,13 @@ impl Prover {
     /// Proves an owned batch of singleton execution obligations in one STARK.
     ///
     /// The proof preserves the input roots in order, including repeated roots. An empty batch
-    /// is rejected. Single-execution proving uses this same path with a one-element vector.
+    /// is rejected, as is a batch exceeding the shared 128-root proof ceiling. Single-execution
+    /// proving uses this same path with a one-element vector.
     ///
     /// The configured logical limits apply independently to each witness before session creation.
     /// The batch may exceed those totals collectively; root count and prover memory remain
-    /// independent batch-wide ceilings.
+    /// independent batch-wide ceilings. Memory is checked after import and before trace allocation;
+    /// it does not bound allocations during preparation or session construction.
     pub fn prove_precompiles(
         &self,
         witnesses: Vec<PrecompileWitness>,

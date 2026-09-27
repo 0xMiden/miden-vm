@@ -13,14 +13,24 @@ The crate imports portable graphs directly into one proving session, checks oper
 and shares computations across inputs. It builds the chiplet traces and serializes one STARK proof
 bound to the ordered fold of the constituent roots. No runtime evaluator or merged witness is built.
 
-Empty batches and bare external assertion roots are rejected. Batch input uses the existing
-`MAX_DEFERRED_ELEMENTS` ceiling for each singleton witness. Before Session construction, each
-witness is independently hydrated, structurally validated, charged against its configured
-`PrecompileLimits`, and committed. Repeated batch inputs are each admitted; computation sharing does
-not erase their declared work. `MAX_PRECOMPILE_ROOTS` and the estimated prover peak-memory budget
-are batch-wide. MSM lowering retains its existing per-claim and per-witness term limits. Balanced
-per-column wNAF reductions and exact sorted term-multiset checks keep term processing at O(n log n)
-for the fixed scalar width.
+Empty batches and batches above `MAX_PRECOMPILE_ROOTS = 128` are rejected before preparation.
+This ceiling also applies to proof decoding and verification. Encodings and versions are unchanged;
+proofs with more than 128 roots are unsupported.
+
+The first loop consumes and prepares every witness independently, checking structure, commitments,
+per-witness `PrecompileLimits`, and expected roots where supplied. Preparation does not establish
+assertion truth. A second loop consumes only prepared witnesses into a private importer, which
+owns its checked-definition cache and evaluates computations while recording them. Failure drops
+the partial Session and reports the input location. Bare external assertion roots remain unsupported.
+
+There is no aggregate logical-work admission or separate Session MSM limit. Repetitions and shared
+payload claims retain their declared work; MSM admission covers either lowering path. Balanced
+reductions retain O(n log n) term processing for the fixed scalar width. After import, estimated
+proving memory is checked before trace allocation; this does not cap preparation/import allocations.
+Batch-count and proving-memory failures are capacity errors. Current defaults remain unchanged;
+calibration is separate follow-up work. See the [admission and migration contract](
+../../docs/src/design/deferred/semantics.md#witness-preparation-and-admission) for checked-node
+ownership, error changes, capacity handling, and calibration requirements.
 
 ## Build
 

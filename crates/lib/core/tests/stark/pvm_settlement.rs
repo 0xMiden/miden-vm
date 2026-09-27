@@ -191,6 +191,7 @@ impl PvmSettlementHost {
             .iter()
             .map(|witness| {
                 witness
+                    .clone()
                     .prepare(Arc::clone(&registry), &limits)
                     .expect("execution-produced witness must prepare")
                     .root()

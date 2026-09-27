@@ -435,7 +435,7 @@ impl Node {
     /// - data and TRUE nodes have no children;
     /// - join nodes yield `lhs`, then `rhs`;
     /// - pair-list nodes yield `lhs0`, `rhs0`, `lhs1`, `rhs1`, ...
-    pub(crate) fn children(&self) -> impl Iterator<Item = Digest> + '_ {
+    pub(crate) fn children(&self) -> impl DoubleEndedIterator<Item = Digest> + '_ {
         self.payload.children().into_iter()
     }
 

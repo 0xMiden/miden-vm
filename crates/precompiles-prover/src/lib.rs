@@ -35,8 +35,9 @@ pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 = 64 << 30;
 
 /// Proves an owned batch of singleton execution obligations in one STARK.
 ///
-/// The returned roots preserve input order and repetitions. Empty batches are rejected. The
-/// importer prepares and admits each portable witness independently before sharing computations.
+/// The returned roots preserve input order and repetitions. Empty batches and batches exceeding
+/// [`miden_core::deferred::MAX_PRECOMPILE_ROOTS`] are rejected before preparation. Every portable
+/// witness is consumed and admitted independently before a private Session shares computations.
 pub fn prove_precompiles(
     witnesses: Vec<PrecompileWitness>,
     hash_fn: HashFunction,
@@ -53,7 +54,9 @@ pub fn prove_precompiles(
 ///
 /// Checks the modelled peak prover memory against `max_prover_memory_bytes` before allocating
 /// chiplet traces or entering the STARK pipeline. The budget applies to this single proof using
-/// `hash_fn`; concurrent proofs require separate budgeting. Witness import precedes the check.
+/// `hash_fn`; concurrent proofs require separate budgeting. Witness import precedes the check,
+/// so this is not an allocation budget for preparation or Session construction. A capacity error
+/// can be addressed with a smaller batch or a larger memory budget.
 pub fn prove_precompiles_with_budget(
     witnesses: Vec<PrecompileWitness>,
     hash_fn: HashFunction,
@@ -110,6 +113,9 @@ fn check_memory_budget(
 pub enum PrecompileProvingError {
     #[error(transparent)]
     Input(#[from] SessionInputError),
+    /// The requested batch exceeds the shared proof-root capacity, before witness preparation.
+    #[error("precompile batch contains {witnesses} witnesses, maximum is {max}")]
+    BatchTooLarge { witnesses: usize, max: usize },
     /// The prover memory estimate exceeded the host height range or the byte model's `u64` range.
     #[error("precompile prover memory estimate overflowed")]
     MemoryEstimateOverflow,

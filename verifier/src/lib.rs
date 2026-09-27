@@ -197,8 +197,9 @@ impl Verifier {
         // Authenticate the VM statement and enforce the configured minimum security before
         // performing potentially expensive witness evaluation.
         if let PrecompileStatus::Deferred(witness) = proof.precompile() {
-            let prepared =
-                witness.prepare(Arc::clone(&self.precompile_registry), &self.precompile_limits)?;
+            let prepared = witness
+                .clone()
+                .prepare(Arc::clone(&self.precompile_registry), &self.precompile_limits)?;
             if prepared.root() != vm.precompile_root {
                 return Err(VerificationError::DeferredWitnessRootMismatch);
             }
@@ -662,6 +663,7 @@ mod tests {
         .unwrap();
         // Evaluating this witness first would reject its false assertion instead of the VM STARK.
         let prepared = witness
+            .clone()
             .prepare(
                 Arc::new(miden_precompiles::registry()),
                 &miden_precompiles::default_precompile_limits(),
@@ -682,6 +684,9 @@ mod tests {
         type CheckError = fn(VerificationError) -> bool;
 
         let required = root(1);
+        Verifier::new()
+            .validate_precompile(&precompile_proof(vec![required; MAX_PRECOMPILE_ROOTS]), required)
+            .unwrap();
         let cases: Vec<(PrecompileProof, Word, CheckError)> = vec![
             (precompile_proof(vec![]), required, |error| {
                 matches!(error, VerificationError::EmptyPrecompileRoots)

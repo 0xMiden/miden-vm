@@ -67,7 +67,6 @@ pub fn assert_precompile_witness_round_trips(output: &ExecutionOutput) {
             .expect("portable precompile witness must round-trip");
     assert_eq!(decoded, output.precompile_witness);
     let decoded_root = decoded
-        .as_ref()
         .map(|witness| {
             witness
                 .prepare(

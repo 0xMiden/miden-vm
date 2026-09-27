@@ -23,9 +23,8 @@ pub use node::{DataChunk, Digest, Node, NodeType, Payload, TRUE_DIGEST, Tag};
 pub use precompile::{Precompile, precompile_id};
 pub use precompile_registry::PrecompileRegistry;
 pub use state::{DeferredContext, DeferredState};
-pub(crate) use wire::PreparedNode;
 pub use wire::{
-    IntegrityError, PrecompileWitness, PreparationError, PreparedWitness,
+    IntegrityError, PrecompileWitness, PreparationError, PreparedNode, PreparedWitness,
     WireEntry as PrecompileWitnessEntry,
 };
 pub use work::{
@@ -46,8 +45,8 @@ pub const MAX_DEFERRED_ELEMENTS: usize = 1 << 20;
 
 /// Hard library safety ceiling for ordered precompile roots.
 ///
-/// This bounds root-vector allocation and aggregate-root folding.
-pub const MAX_PRECOMPILE_ROOTS: usize = 1 << 12;
+/// This bounds proving batch size, root-vector allocation, and aggregate-root folding.
+pub const MAX_PRECOMPILE_ROOTS: usize = 128;
 
 /// Folds a verified deferred statement into the rolling deferred root.
 pub fn fold_deferred_root(root: DeferredRoot, statement: Digest) -> DeferredRoot {
