@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.34.1 (Unreleased)
+
+#### Features
+
+#### Changes
+
+#### Fixes
+
 ## v0.34.0 (2026-09-26)
 
 #### Features

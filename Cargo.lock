@@ -2046,7 +2046,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "miden-ace-codegen"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "miden-constraint-compiler",
  "miden-core",
@@ -2058,7 +2058,7 @@ dependencies = [
 
 [[package]]
 name = "miden-air"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "insta",
  "miden-ace-codegen",
@@ -2077,7 +2077,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "env_logger",
  "insta",
@@ -2097,7 +2097,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "env_logger",
  "log",
@@ -2121,7 +2121,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax-cst"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "miden-debug-types",
  "miden-rowan",
@@ -2131,7 +2131,7 @@ dependencies = [
 
 [[package]]
 name = "miden-bench"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "clap",
  "miden-lifted-stark",
@@ -2162,7 +2162,7 @@ dependencies = [
 
 [[package]]
 name = "miden-constraint-compiler"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "miden-core",
  "miden-crypto",
@@ -2170,7 +2170,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "criterion",
  "derive_more",
@@ -2194,7 +2194,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core-lib"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "criterion",
  "env_logger",
@@ -2231,7 +2231,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core-lib-codegen"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "miden-core",
  "miden-precompiles",
@@ -2240,7 +2240,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "assert_matches",
  "blake3",
@@ -2291,7 +2291,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "miden-field",
  "quote",
@@ -2300,7 +2300,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-smt-codspeed-bench"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "codspeed-criterion-compat",
  "miden-crypto",
@@ -2309,7 +2309,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-wycheproof-tests"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "ed25519-dalek",
  "hex",
@@ -2323,7 +2323,7 @@ dependencies = [
 
 [[package]]
 name = "miden-debug-types"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "memchr",
  "miden-crypto",
@@ -2343,7 +2343,7 @@ dependencies = [
 
 [[package]]
 name = "miden-field"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "miden-serde-utils",
  "num-bigint 0.5.1",
@@ -2362,7 +2362,7 @@ dependencies = [
 
 [[package]]
 name = "miden-format"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "clap",
  "miden-assembly-syntax",
@@ -2387,7 +2387,7 @@ dependencies = [
 
 [[package]]
 name = "miden-lifted-air"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "miden-field",
  "p3-air",
@@ -2400,7 +2400,7 @@ dependencies = [
 
 [[package]]
 name = "miden-lifted-stark"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "criterion",
  "miden-lifted-air",
@@ -2432,7 +2432,7 @@ dependencies = [
 
 [[package]]
 name = "miden-mast-package"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "codspeed-criterion-compat",
  "hashbrown 0.17.1",
@@ -2487,7 +2487,7 @@ dependencies = [
 
 [[package]]
 name = "miden-package-registry"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -2501,7 +2501,7 @@ dependencies = [
 
 [[package]]
 name = "miden-package-registry-local"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "clap",
  "miden-assembly-syntax",
@@ -2518,7 +2518,7 @@ dependencies = [
 
 [[package]]
 name = "miden-precompiles"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "miden-core",
  "miden-crypto",
@@ -2527,7 +2527,7 @@ dependencies = [
 
 [[package]]
 name = "miden-precompiles-air"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "miden-air",
  "miden-core",
@@ -2541,7 +2541,7 @@ dependencies = [
 
 [[package]]
 name = "miden-precompiles-prover"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "k256",
  "miden-air",
@@ -2562,7 +2562,7 @@ dependencies = [
 
 [[package]]
 name = "miden-precompiles-verifier"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "insta",
  "miden-ace-codegen",
@@ -2582,7 +2582,7 @@ dependencies = [
 
 [[package]]
 name = "miden-processor"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "hashbrown 0.17.1",
  "insta",
@@ -2610,7 +2610,7 @@ dependencies = [
 
 [[package]]
 name = "miden-project"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -2630,7 +2630,7 @@ dependencies = [
 
 [[package]]
 name = "miden-prover"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "miden-air",
  "miden-assembly",
@@ -2659,7 +2659,7 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
@@ -2669,7 +2669,7 @@ dependencies = [
 
 [[package]]
 name = "miden-stark-transcript"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "p3-challenger",
  "p3-field",
@@ -2679,7 +2679,7 @@ dependencies = [
 
 [[package]]
 name = "miden-stateful-hasher"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "p3-bn254",
  "p3-field",
@@ -2690,7 +2690,7 @@ dependencies = [
 
 [[package]]
 name = "miden-test-serialization-macros"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "proc-macro2",
  "proptest",
@@ -2701,7 +2701,7 @@ dependencies = [
 
 [[package]]
 name = "miden-test-utils"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "env_logger",
  "miden-air",
@@ -2719,7 +2719,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-core-derive"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2728,7 +2728,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-diagnostics"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "miden-debug-types",
  "miden-miette",
@@ -2737,7 +2737,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-indexing"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "miden-serde-utils",
  "miden-test-serialization-macros",
@@ -2747,7 +2747,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-sync"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "lock_api",
  "loom",
@@ -2757,7 +2757,7 @@ dependencies = [
 
 [[package]]
 name = "miden-verifier"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "miden-air",
  "miden-core",
@@ -2772,7 +2772,7 @@ dependencies = [
 
 [[package]]
 name = "miden-vm"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -2800,7 +2800,7 @@ dependencies = [
 
 [[package]]
 name = "miden-vm-blake3-bench"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "clap",
  "codspeed-criterion-compat",
@@ -2815,7 +2815,7 @@ dependencies = [
 
 [[package]]
 name = "miden-vm-precompiles-bench"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "codspeed-criterion-compat",
  "miden-core",
@@ -2827,7 +2827,7 @@ dependencies = [
 
 [[package]]
 name = "miden-vm-synthetic-bench"
-version = "0.34.0"
+version = "0.34.1"
 dependencies = [
  "codspeed-criterion-compat",
  "miden-assembly",
