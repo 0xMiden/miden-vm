@@ -1793,6 +1793,7 @@ dependencies = [
  "miden-stark",
  "miden-utils-diagnostics",
  "miden-utils-indexing",
+ "p3-maybe-rayon",
  "paste",
  "rayon",
  "thiserror",
@@ -2166,6 +2167,9 @@ name = "p3-maybe-rayon"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe1d83295d958b3d098e11b7868ac35c866c9c0432ce5266b90f7844dad513de"
+dependencies = [
+ "rayon",
+]
 
 [[package]]
 name = "p3-mds"
