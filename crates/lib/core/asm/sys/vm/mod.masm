@@ -9,8 +9,13 @@ pub mod public_inputs
 
 use miden::core::mem
 use {
-    ACE_REGISTRY_ROOT_PTR, AIR_TRACE_LENGTH_LOGS_PTR, CURRENT_TRACE_ROW_ADDRESS_PTR,
-    OOD_EVALUATIONS_ADDRESS_PTR, ORDER_TAG_PTR, RELATION_DIGEST_PTR, TRACE_LENGTH_LOG_PTR
+    ACE_REGISTRY_ROOT_PTR,
+    CURRENT_TRACE_ROW_ADDRESS_PTR,
+    LOG_AIR_TRACE_LENGTHS_PTR,
+    LOG_TRACE_LENGTH_PTR,
+    OOD_EVALUATIONS_ADDRESS_PTR,
+    ORDER_TAG_PTR,
+    RELATION_DIGEST_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::utils
 use miden::core::stark::verifier
@@ -87,7 +92,7 @@ pub proc load_air_context()
     u32max
     exec.layout::get_poseidon2_permutation_trace_length_log
     u32max
-    mem_store.TRACE_LENGTH_LOG_PTR
+    mem_store.LOG_TRACE_LENGTH_PTR
 
     exec.derive_order_tag
     mem_store.ORDER_TAG_PTR
@@ -135,14 +140,14 @@ proc derive_order_tag() -> u8
     # => [k = 0, tag = 0]
 
     repeat.NUM_MIDEN_AIRS
-        dup push.AIR_TRACE_LENGTH_LOGS_PTR add mem_load
+        dup push.LOG_AIR_TRACE_LENGTHS_PTR add mem_load
         # => [h_k, k, tag]
 
         push.0.0 push.0
         # => [m = 0, inv = 0, after = 0, h_k, k, tag]
 
         repeat.NUM_MIDEN_AIRS
-            dup push.AIR_TRACE_LENGTH_LOGS_PTR add mem_load
+            dup push.LOG_AIR_TRACE_LENGTHS_PTR add mem_load
             # => [h_m, m, inv, after, h_k, k, tag]
 
             # inv += (m < k) * (h_m > h_k)
@@ -270,7 +275,7 @@ end
 #!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
 #!          log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 proc build_security_descriptor(parameters: types::StackProofParameters) -> types::StackSecurityDescriptor
-    mem_load.TRACE_LENGTH_LOG_PTR
+    mem_load.LOG_TRACE_LENGTH_PTR
     push.LOOKUP_FRACTIONS_PER_ROW
     exec.layout::num_kernel_procedures_ptr mem_load
     add.CORE_BOUNDARY_LOOKUP_TERMS

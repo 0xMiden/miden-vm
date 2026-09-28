@@ -1,7 +1,9 @@
 use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 use {
-    AUX_TRACE_COM_PTR, RANDOM_COIN_INPUT_LEN_PTR, RANDOM_COIN_OUTPUT_LEN_PTR
+    AUX_TRACE_COM_PTR,
+    RANDOM_COIN_INPUT_LENGTH_PTR,
+    RANDOM_COIN_OUTPUT_LENGTH_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::random_coin
 use miden::core::sys::pvm::layout
@@ -62,9 +64,9 @@ pub proc observe_aux_trace()
     # The eight fixed-environment consumes depend on the sampled challenges but not on proof data.
     exec.compute_fixed_boundary_correction
 
-    mem_load.RANDOM_COIN_INPUT_LEN_PTR
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     assertz.err="PVM observe_aux_trace: input buffer must be empty"
-    push.0 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 
     # Rate block 1: [aux commitment | sigma_0 | sigma_1].
     padw adv_loadw
@@ -90,7 +92,7 @@ pub proc observe_aux_trace()
     swapw
     exec.absorb_full_rate_block
 
-    push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    push.8 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 
     # Sum the ten sigmas as five words, two extension elements per word.
     push.0.0

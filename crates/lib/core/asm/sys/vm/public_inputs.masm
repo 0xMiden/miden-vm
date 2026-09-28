@@ -1,6 +1,8 @@
 use miden::core::stark::types
 use {
-    PUBLIC_INPUTS_ADDRESS_PTR, RANDOM_COIN_INPUT_LEN_PTR, RANDOM_COIN_OUTPUT_LEN_PTR
+    PUBLIC_INPUTS_ADDRESS_PTR,
+    RANDOM_COIN_INPUT_LENGTH_PTR,
+    RANDOM_COIN_OUTPUT_LENGTH_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::public_inputs
 use miden::core::stark::random_coin
@@ -104,7 +106,7 @@ end
 #! Output: [...]
 pub proc process_public_inputs()
     # Assert precondition: the rate-aligned absorption below bypasses the buffered duplex.
-    mem_load.RANDOM_COIN_INPUT_LEN_PTR
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     assertz.err="process_public_inputs: input buffer must be empty"
 
     # 1) Store the ACE public-input pointer.
@@ -363,7 +365,7 @@ proc absorb_claim_and_deferred_into_fs(claim_hash: types::Digest)
     padw exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
     # => [D, CLAIM_HASH, ...]
 
-    push.0 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
     # Duplex overwrite mode: the stale rate words are never read, so load only the capacity
     # and build the rate from [CLAIM_HASH | D] already on the stack.
     exec.random_coin::get_capacity
@@ -377,7 +379,7 @@ proc absorb_claim_and_deferred_into_fs(claim_hash: types::Digest)
     # => [R1', R2', C', ...]
 
     exec.random_coin::store_random_coin_state
-    push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    push.8 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
     # => [...]
 end
 

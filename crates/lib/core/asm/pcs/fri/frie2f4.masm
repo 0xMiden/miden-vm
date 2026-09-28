@@ -1,8 +1,16 @@
 use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 use {
-    FRI_COM_PTR, FRI_QUERIES_ADDRESS_PTR, FRI_VERIFY_STATE_PTR, LDE_DOMAIN_GEN_PTR,
-    REMAINDER_POLY_ADDRESS_PTR, REMAINDER_POLY_SIZE_PTR, TMP1, TMP2, TMP3, TMP4
+    FRI_COM_PTR,
+    FRI_QUERIES_ADDRESS_PTR,
+    FRI_VERIFY_STATE_PTR,
+    LDE_DOMAIN_GENERATOR_PTR,
+    REMAINDER_POLY_ADDRESS_PTR,
+    REMAINDER_POLY_SIZE_PTR,
+    TMP1_PTR,
+    TMP2_PTR,
+    TMP3_PTR,
+    TMP4_PTR,
 } from miden::core::stark::constants
 use miden::core::pcs::fri::helper
 
@@ -58,9 +66,9 @@ pub proc verify_query_layer(
     swapw
     # => [C, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
 
-    # Hash the opened row. `adv_pipe` caches the row in TMP3/TMP4 and overwrites the
+    # Hash the opened row. `adv_pipe` caches the row in TMP3_PTR/TMP4_PTR and overwrites the
     # first 8 stack elements.
-    push.TMP3
+    push.TMP3_PTR
     movdn.4
     padw
     swapw
@@ -82,10 +90,10 @@ pub proc verify_query_layer(
     assert_eq
 
     # Load the opened row from memory.
-    push.TMP4
+    push.TMP4_PTR
     mem_loadw_le
     swapw
-    push.TMP3
+    push.TMP3_PTR
     mem_loadw_le
     # => [v0, ..., v7, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     fri_ext2fold4
@@ -143,10 +151,10 @@ pub proc verify_query_64(
     # => [rem_ptr, rem_ptr, poe^(2^n), f_pos, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
     movup.2
-    push.0.0.0 movup.3 mem_storew_le.TMP2 dropw
+    push.0.0.0 movup.3 mem_storew_le.TMP2_PTR dropw
     # => [rem_ptr, rem_ptr, f_pos, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
-    push.0 mem_loadw_le.TMP1
+    push.0 mem_loadw_le.TMP1_PTR
     # => [P, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
     swapw swapdw
@@ -203,10 +211,10 @@ pub proc verify_query_128(
     # => [rem_ptr, rem_ptr, poe^(2^n), f_pos, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
     movup.2
-    push.0.0.0 movup.3 mem_storew_le.TMP2 dropw
+    push.0.0.0 movup.3 mem_storew_le.TMP2_PTR dropw
     # => [rem_ptr, rem_ptr, f_pos, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
-    push.0 mem_loadw_le.TMP1
+    push.0 mem_loadw_le.TMP1_PTR
     # => [P, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
     swapw swapdw
@@ -269,8 +277,8 @@ proc verify_64(
     # Save a word containing a fresh accumulator for Horner evaluating the remainder polynomial,
     # a pointer to the evaluation point and a pointer to the location of the polynomial.
     push.0.0
-    push.TMP2 mem_load.REMAINDER_POLY_ADDRESS_PTR
-    mem_storew_le.TMP1
+    push.TMP2_PTR mem_load.REMAINDER_POLY_ADDRESS_PTR
+    mem_storew_le.TMP1_PTR
     movup.4
 
     while.true
@@ -348,8 +356,8 @@ proc verify_128(
     # Save a word containing a fresh accumulator for Horner evaluating the remainder polynomial,
     # a pointer to the evaluation point and a pointer to the location of the polynomial.
     push.0.0
-    push.TMP2 mem_load.REMAINDER_POLY_ADDRESS_PTR
-    mem_storew_le.TMP1
+    push.TMP2_PTR mem_load.REMAINDER_POLY_ADDRESS_PTR
+    mem_storew_le.TMP1_PTR
     movup.4
 
     while.true
@@ -387,7 +395,7 @@ end
 #! Output: [...]
 pub proc verify()
     # Get domain generator and pointer to the remainder polynomial.
-    mem_load.LDE_DOMAIN_GEN_PTR
+    mem_load.LDE_DOMAIN_GENERATOR_PTR
     mem_load.REMAINDER_POLY_ADDRESS_PTR
     # => [remainder_poly_ptr, g, ...]
 

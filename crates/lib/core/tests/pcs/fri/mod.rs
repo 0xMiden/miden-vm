@@ -14,7 +14,7 @@ const LAYER_RECORD_WIDTH: usize = 2 * WORD_SIZE;
 
 const FRI_PREPROCESS_SOURCE: &str = "
     use {FRI_COM_PTR, FRI_QUERIES_ADDRESS_PTR} from miden::core::stark::constants
-    use {LDE_DOMAIN_GEN_PTR, REMAINDER_POLY_ADDRESS_PTR} from miden::core::stark::constants
+    use {LDE_DOMAIN_GENERATOR_PTR, REMAINDER_POLY_ADDRESS_PTR} from miden::core::stark::constants
     use {REMAINDER_POLY_SIZE_PTR} from miden::core::stark::constants
 
     const MAX_FRI_QUERIES = 150
@@ -41,7 +41,7 @@ const FRI_PREPROCESS_SOURCE: &str = "
     end
 
     proc preprocess
-        dup mem_store.LDE_DOMAIN_GEN_PTR
+        dup mem_store.LDE_DOMAIN_GENERATOR_PTR
         adv_push
         # => [num_queries, g, ...]
         dup u32gt.0 assert.err=\"number of FRI queries must be nonzero\"
@@ -114,11 +114,12 @@ fn fri_verify_rejects_empty_query_region() {
     let source = "
         use miden::core::pcs::fri::frie2f4
         use {FRI_COM_PTR, FRI_QUERIES_ADDRESS_PTR} from miden::core::stark::constants
-        use {LDE_DOMAIN_GEN_PTR, REMAINDER_POLY_ADDRESS_PTR} from miden::core::stark::constants
+        use {LDE_DOMAIN_GENERATOR_PTR} from miden::core::stark::constants
+        use {REMAINDER_POLY_ADDRESS_PTR} from miden::core::stark::constants
         use {REMAINDER_POLY_SIZE_PTR} from miden::core::stark::constants
 
         begin
-            push.1 mem_store.LDE_DOMAIN_GEN_PTR
+            push.1 mem_store.LDE_DOMAIN_GENERATOR_PTR
             push.64 mem_store.REMAINDER_POLY_SIZE_PTR
             push.FRI_COM_PTR
             dup mem_store.REMAINDER_POLY_ADDRESS_PTR

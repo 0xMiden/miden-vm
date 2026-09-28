@@ -9,9 +9,9 @@ use miden_precompiles::{CurveId, UintDomain};
 use crate::helpers::read_memory_felt;
 
 const AUX_TRACE_COM_PTR: u32 = 3_223_322_644;
-const R1_PTR: u32 = 3_223_322_672;
-const RANDOM_COIN_INPUT_LEN_PTR: u32 = 3_223_322_759;
-const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3_223_322_760;
+const RANDOM_COIN_RATE_1_PTR: u32 = 3_223_322_672;
+const RANDOM_COIN_INPUT_LENGTH_PTR: u32 = 3_223_322_759;
+const RANDOM_COIN_OUTPUT_LENGTH_PTR: u32 = 3_223_322_760;
 const AUX_RAND_ELEM_PTR: u32 = 3_225_426_432;
 const AUX_BUS_BOUNDARY_PTR: u32 = 3_225_429_512;
 const BUS_GAMMA_PTR: u32 = 3_225_443_440;
@@ -25,13 +25,13 @@ fn setup_masm() -> String {
     format!(
         r#"
         push.{r1_3}.{r1_2}.{r1_1}.{r1_0}
-        mem_storew_le.R1_PTR dropw
+        mem_storew_le.RANDOM_COIN_RATE_1_PTR dropw
         push.{r2_3}.{r2_2}.{r2_1}.{r2_0}
-        mem_storew_le.R2_PTR dropw
+        mem_storew_le.RANDOM_COIN_RATE_2_PTR dropw
         push.{c_3}.{c_2}.{c_1}.{c_0}
-        mem_storew_le.C_PTR dropw
-        push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
-        push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+        mem_storew_le.RANDOM_COIN_CAPACITY_PTR dropw
+        push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
+        push.8 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
         "#,
         r1_0 = s[0],
         r1_1 = s[1],
@@ -51,7 +51,10 @@ fn setup_masm() -> String {
 fn sampler_source() -> String {
     format!(
         r#"
-        use {{C_PTR, R1_PTR, R2_PTR, RANDOM_COIN_INPUT_LEN_PTR, RANDOM_COIN_OUTPUT_LEN_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_CAPACITY_PTR, RANDOM_COIN_RATE_1_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_RATE_2_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_INPUT_LENGTH_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_OUTPUT_LENGTH_PTR}} from miden::core::stark::constants
         use miden::core::stark::random_coin
         use miden::core::sys::pvm::layout
 
@@ -68,7 +71,10 @@ fn sampler_source() -> String {
 fn hook_source() -> String {
     format!(
         r#"
-        use {{C_PTR, R1_PTR, R2_PTR, RANDOM_COIN_INPUT_LEN_PTR, RANDOM_COIN_OUTPUT_LEN_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_CAPACITY_PTR, RANDOM_COIN_RATE_1_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_RATE_2_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_INPUT_LENGTH_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_OUTPUT_LENGTH_PTR}} from miden::core::stark::constants
         use miden::core::sys::pvm::aux_trace
 
         begin
@@ -85,8 +91,10 @@ fn hook_source() -> String {
 fn reference_source() -> String {
     format!(
         r#"
-        use {{AUX_TRACE_COM_PTR, C_PTR, R1_PTR, R2_PTR}} from miden::core::stark::constants
-        use {{RANDOM_COIN_INPUT_LEN_PTR, RANDOM_COIN_OUTPUT_LEN_PTR}} from miden::core::stark::constants
+        use {{AUX_TRACE_COM_PTR, RANDOM_COIN_CAPACITY_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_RATE_1_PTR, RANDOM_COIN_RATE_2_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_INPUT_LENGTH_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_OUTPUT_LENGTH_PTR}} from miden::core::stark::constants
         use miden::core::stark::random_coin
         use miden::core::sys::pvm::layout
 
@@ -251,14 +259,14 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
         .execute_for_output()
         .expect("reference transcript must execute");
 
-    for addr in R1_PTR..R1_PTR + 12 {
+    for addr in RANDOM_COIN_RATE_1_PTR..RANDOM_COIN_RATE_1_PTR + 12 {
         assert_eq!(
             read_memory_felt(&hook_output, addr),
             read_memory_felt(&reference_output, addr),
             "transcript state differs at address {addr}"
         );
     }
-    for addr in [RANDOM_COIN_INPUT_LEN_PTR, RANDOM_COIN_OUTPUT_LEN_PTR] {
+    for addr in [RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR] {
         assert_eq!(
             read_memory_felt(&hook_output, addr),
             read_memory_felt(&reference_output, addr),

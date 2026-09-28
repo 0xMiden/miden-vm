@@ -7,8 +7,13 @@ pub mod ood_frames
 pub mod public_inputs
 
 use {
-    ACE_REGISTRY_ROOT_PTR, AIR_TRACE_LENGTH_LOGS_PTR, CURRENT_TRACE_ROW_ADDRESS_PTR,
-    OOD_EVALUATIONS_ADDRESS_PTR, ORDER_TAG_PTR, RELATION_DIGEST_PTR, TRACE_LENGTH_LOG_PTR
+    ACE_REGISTRY_ROOT_PTR,
+    CURRENT_TRACE_ROW_ADDRESS_PTR,
+    LOG_AIR_TRACE_LENGTHS_PTR,
+    LOG_TRACE_LENGTH_PTR,
+    OOD_EVALUATIONS_ADDRESS_PTR,
+    ORDER_TAG_PTR,
+    RELATION_DIGEST_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::utils
 use miden::core::stark::verifier
@@ -69,7 +74,7 @@ const ACE_REGISTRY_ROOT_3 = 13870270840525555445
 pub proc load_air_context()
     # [next_height_ptr, max_height]
     push.0
-    push.AIR_TRACE_LENGTH_LOGS_PTR
+    push.LOG_AIR_TRACE_LENGTHS_PTR
 
     push.MIN_LOG_HEIGHT_0 exec.load_air_height
     push.MIN_LOG_HEIGHT_1 exec.load_air_height
@@ -83,9 +88,9 @@ pub proc load_air_context()
     push.MIN_LOG_HEIGHT_9 exec.load_air_height
 
     drop
-    mem_store.TRACE_LENGTH_LOG_PTR
+    mem_store.LOG_TRACE_LENGTH_PTR
 
-    push.AIR_TRACE_LENGTH_LOGS_PTR
+    push.LOG_AIR_TRACE_LENGTHS_PTR
     push.NUM_CHIPLETS
     exec.utils::derive_order_tag_from_heights
     mem_store.ORDER_TAG_PTR
@@ -177,7 +182,7 @@ end
 #!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
 #!          log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 proc build_security_descriptor(parameters: types::StackProofParameters) -> types::StackSecurityDescriptor
-    mem_load.TRACE_LENGTH_LOG_PTR
+    mem_load.LOG_TRACE_LENGTH_PTR
     push.LOOKUP_FRACTIONS_PER_ROW
     push.FIXED_BOUNDARY_LOOKUP_TERMS
     push.MAX_MESSAGE_WIDTH

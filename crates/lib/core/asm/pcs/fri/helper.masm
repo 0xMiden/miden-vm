@@ -2,9 +2,16 @@ use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::random_coin
 use {
-    FRI_COM_PTR, FRI_QUERIES_ADDRESS_PTR, LDE_DOMAIN_INFO_PTR, NUM_FRI_LAYERS_PTR, NUM_QUERIES_PTR,
-    RANDOM_COIN_INPUT_LEN_PTR, RANDOM_COIN_OUTPUT_LEN_PTR, REMAINDER_POLY_ADDRESS_PTR,
-    REMAINDER_POLY_SIZE_PTR, TMP1
+    FRI_COM_PTR,
+    FRI_QUERIES_ADDRESS_PTR,
+    LDE_DOMAIN_INFO_PTR,
+    NUM_FRI_LAYERS_PTR,
+    NUM_QUERIES_PTR,
+    RANDOM_COIN_INPUT_LENGTH_PTR,
+    RANDOM_COIN_OUTPUT_LENGTH_PTR,
+    REMAINDER_POLY_ADDRESS_PTR,
+    REMAINDER_POLY_SIZE_PTR,
+    TMP1_PTR,
 } from miden::core::stark::constants
 
 # CONSTANTS
@@ -137,7 +144,7 @@ end
 pub proc load_fri_layer_commitments()
     # We need to store the current FRI layer LDE domain size and its logarithm.
     padw mem_loadw_le.LDE_DOMAIN_INFO_PTR
-    mem_storew_le.TMP1
+    mem_storew_le.TMP1_PTR
     # => [Y, ...] where `Y` is as "garbage" word
 
     # Address containing the first layer commitment
@@ -166,7 +173,7 @@ pub proc load_fri_layer_commitments()
         exec.random_coin::reseed_check_folding_pow_and_sample_alpha
         #=> [a0, a1, num_layers, ptr_layer + 4, y, y, ...]
         padw
-        mem_loadw_le.TMP1
+        mem_loadw_le.TMP1_PTR
         # => [lde_size, log2(lde_size), lde_generator, 0, a0, a1, Y, num_layers, ptr_layer + 4, y, y, ...]
 
         # Compute and save to memory new lde_size and its new logarithm
@@ -174,7 +181,7 @@ pub proc load_fri_layer_commitments()
         swap
         sub.2
         swap
-        mem_storew_le.TMP1
+        mem_storew_le.TMP1_PTR
         # => [lde_size / 4, log2(lde_size) - 2, lde_generator, 0, a0, a1, num_layers, ptr_layer + 4, y, y, ...]
 
         # Move the pointer higher up the stack
@@ -223,8 +230,8 @@ pub proc load_and_verify_remainder()
     if.true
         # Remainder polynomial degree less than 64
         # Load the random coin state as the initial sponge state.
-        push.0 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
-        push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
+        push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
+        push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
         exec.random_coin::load_random_coin_state
         # => [R0, R1, C, remainder_poly_ptr, ...]
 
@@ -233,14 +240,14 @@ pub proc load_and_verify_remainder()
 
         # Update the random coin state with the remainder polynomial digest.
         exec.random_coin::store_random_coin_state
-        push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
-        push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+        push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
+        push.8 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 
     else
         # Remainder polynomial degree less than 128
         # Load the random coin state as the initial sponge state.
-        push.0 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
-        push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
+        push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
+        push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
         exec.random_coin::load_random_coin_state
         # => [R0, R1, C, remainder_poly_ptr, ...]
 
@@ -250,8 +257,8 @@ pub proc load_and_verify_remainder()
 
         # Update the random coin state with the remainder polynomial digest.
         exec.random_coin::store_random_coin_state
-        push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
-        push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+        push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
+        push.8 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 
     end
     drop

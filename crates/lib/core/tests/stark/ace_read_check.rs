@@ -17,11 +17,11 @@ use miden_utils_testing::Test;
 // MASM MEMORY LAYOUT
 // ================================================================================================
 
-const TRACE_LENGTH_LOG_PTR: u32 = 3223322634;
+const LOG_TRACE_LENGTH_PTR: u32 = 3223322634;
 const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3223322638;
 const ORDER_TAG_PTR: u32 = 3223322639;
-const Z_PTR: u32 = 3223322652;
-const AIR_TRACE_LENGTH_LOGS_PTR: u32 = 3223322736;
+const OOD_POINT_PTR: u32 = 3223322652;
+const LOG_AIR_TRACE_LENGTHS_PTR: u32 = 3223322736;
 const AUX_RAND_ELEM_PTR: u32 = 3225419776;
 const OOD_EVALUATIONS_PTR: u32 = 3225419784;
 const AUX_BUS_BOUNDARY_PTR: u32 = 3225420328;
@@ -128,11 +128,11 @@ fn assert_air_selectors_match_trace_metadata(
     layout: &InputLayout,
 ) {
     let get = |key: InputKey| -> QuadFelt { inputs[layout.index(key).expect("missing key")] };
-    let z = QuadFelt::new([read(Z_PTR + 2), read(Z_PTR + 3)]);
-    let max_log = read(TRACE_LENGTH_LOG_PTR).as_canonical_u64() as u32;
+    let z = QuadFelt::new([read(OOD_POINT_PTR + 2), read(OOD_POINT_PTR + 3)]);
+    let max_log = read(LOG_TRACE_LENGTH_PTR).as_canonical_u64() as u32;
 
     for air in 0..MIDEN_AIR_COUNT {
-        let log_height = read(AIR_TRACE_LENGTH_LOGS_PTR + air as u32).as_canonical_u64() as u32;
+        let log_height = read(LOG_AIR_TRACE_LENGTHS_PTR + air as u32).as_canonical_u64() as u32;
         assert!(log_height <= max_log, "AIR {air} height exceeds the maximum height");
         let z_lift = (log_height..max_log).fold(z, |value, _| value * value);
         let vanishing = z_lift.exp_u64(1_u64 << log_height) - QuadFelt::ONE;

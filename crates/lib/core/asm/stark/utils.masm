@@ -1,9 +1,18 @@
 use miden::core::stark::types
 use {
-    DEEP_POW_BITS_PTR, FOLDING_POW_BITS_PTR, HOOK_COMPUTE_DEEP_COMPOSITION_POLYNOMIAL_QUERIES_PTR,
-    HOOK_EXECUTE_CONSTRAINT_EVALUATION_CHECK_PTR, HOOK_OBSERVE_AUX_TRACE_PTR,
-    HOOK_PROCESS_PUBLIC_INPUTS_PTR, HOOK_PROCESS_ROW_OOD_EVALUATIONS_PTR, NUM_QUERIES_PTR,
-    QUERY_POW_BITS_PTR, ROOT_UNITY, TMP1, TMP2, TMP3
+    DEEP_POW_BITS_PTR,
+    FOLDING_POW_BITS_PTR,
+    HOOK_COMPUTE_DEEP_COMPOSITION_POLYNOMIAL_QUERIES_PTR,
+    HOOK_EXECUTE_CONSTRAINT_EVALUATION_CHECK_PTR,
+    HOOK_OBSERVE_AUX_TRACE_PTR,
+    HOOK_PROCESS_PUBLIC_INPUTS_PTR,
+    HOOK_PROCESS_ROW_OOD_EVALUATIONS_PTR,
+    NUM_QUERIES_PTR,
+    QUERY_POW_BITS_PTR,
+    ROOT_UNITY,
+    TMP1_PTR,
+    TMP2_PTR,
+    TMP3_PTR,
 } from miden::core::stark::constants
 
 # Accepted transcript-bound security-parameter envelope for the recursive verifier. These bounds
@@ -196,7 +205,7 @@ end
 #! would need compile-time counts). PVM uses this generic path. The VM uses a fixed-count
 #! specialization; tests pin both implementations to the shared Rust `order_tag` convention.
 #!
-#! This procedure uses `TMP1..TMP3` as a twelve-entry factorial table and clobbers
+#! This procedure uses `TMP1_PTR..TMP3_PTR` as a twelve-entry factorial table and clobbers
 #! their previous contents.
 #!
 #! Precondition: `num_airs >= 2`. The procedure rejects counts above `MAX_ORDER_AIRS = 12`, the
@@ -208,14 +217,14 @@ end
 pub proc derive_order_tag_from_heights(num_airs: u8, heights_ptr: types::Address) -> u32
     dup u32lte.MAX_ORDER_AIRS assert.err="num_airs exceeds supported order-tag range"
 
-    # Store 0! through 11! in TMP1..TMP3. The complete table is fixed by MAX_ORDER_AIRS and avoids
-    # rebuilding the same weights for every proof. These scratch words are not live here.
+    # Store 0! through 11! in TMP1_PTR..TMP3_PTR. The complete table is fixed by MAX_ORDER_AIRS
+    # and avoids rebuilding the same weights for every proof. These scratch words are not live here.
     push.FACTORIAL_3.FACTORIAL_2.FACTORIAL_1.FACTORIAL_0
-    mem_storew_le.TMP1 dropw
+    mem_storew_le.TMP1_PTR dropw
     push.FACTORIAL_7.FACTORIAL_6.FACTORIAL_5.FACTORIAL_4
-    mem_storew_le.TMP2 dropw
+    mem_storew_le.TMP2_PTR dropw
     push.FACTORIAL_11.FACTORIAL_10.FACTORIAL_9.FACTORIAL_8
-    mem_storew_le.TMP3 dropw
+    mem_storew_le.TMP3_PTR dropw
     # => [num_airs, heights_ptr]
 
     push.0.0
@@ -274,7 +283,7 @@ pub proc derive_order_tag_from_heights(num_airs: u8, heights_ptr: types::Address
         # tag += inv * (num_airs - 1 - pos)!
         swap
         dup.5 sub.1 swap sub
-        push.TMP1 add mem_load
+        push.TMP1_PTR add mem_load
         mul
         movup.3 add movdn.2
         # => [h_k, k, tag', num_airs, heights_ptr]

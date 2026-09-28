@@ -3,7 +3,10 @@ use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use {
-    ACE_REGISTRY_ROOT_PTR, AIR_TRACE_LENGTH_LOGS_PTR, ORDER_TAG_PTR, PUBLIC_INPUTS_ADDRESS_PTR
+    ACE_REGISTRY_ROOT_PTR,
+    LOG_AIR_TRACE_LENGTHS_PTR,
+    ORDER_TAG_PTR,
+    PUBLIC_INPUTS_ADDRESS_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::constraints_eval_inputs
 use miden::core::sys::vm::layout
@@ -71,7 +74,7 @@ pub proc execute_constraint_evaluation_check()
     push.QUOTIENT_FIRST_SHIFT
     push.QUOTIENT_FIRST_WEIGHT
     exec.layout::auxiliary_ace_inputs_ptr
-    push.AIR_TRACE_LENGTH_LOGS_PTR
+    push.LOG_AIR_TRACE_LENGTHS_PTR
     push.NUM_AIRS
     push.MAX_CYCLE_LEN_LOG
     exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace

@@ -2,7 +2,10 @@ use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use {
-    AUX_TRACE_COM_PTR, ORDER_TAG_PTR, RANDOM_COIN_INPUT_LEN_PTR, RANDOM_COIN_OUTPUT_LEN_PTR
+    AUX_TRACE_COM_PTR,
+    ORDER_TAG_PTR,
+    RANDOM_COIN_INPUT_LENGTH_PTR,
+    RANDOM_COIN_OUTPUT_LENGTH_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::random_coin
 use miden::core::sys::vm::layout
@@ -132,11 +135,11 @@ pub proc observe_aux_trace()
     # => [...]
 
     # Assert precondition: input buffer must be empty.
-    mem_load.RANDOM_COIN_INPUT_LEN_PTR
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     assertz.err="observe_aux_trace: input buffer must be empty"
 
     # Reseeding clears the output buffer.
-    push.0 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 
     # Absorb the full rate block [commitment, aux0, aux1].
 
@@ -175,7 +178,7 @@ pub proc observe_aux_trace()
     exec.random_coin::store_random_coin_state
 
     # Fresh output available.
-    push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    push.8 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 
     # --- Outer-LogUp boundary check ---
     # Scale each normalized sum by the trace length at the same proof-order position.

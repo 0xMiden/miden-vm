@@ -64,7 +64,7 @@ fn add_path(
 fn source(preprocessed_root: Word, main_root: Word, aux_root: Word, quotient_root: Word) -> String {
     format!(
         r#"
-        use {{DOMAIN_OFFSET_PTR, LDE_DOMAIN_INFO_PTR, TMP2}} from miden::core::stark::constants
+        use {{DOMAIN_OFFSET_PTR, LDE_DOMAIN_INFO_PTR, TMP2_PTR}} from miden::core::stark::constants
         use miden::core::sys::pvm::deep_queries
 
         begin
@@ -73,7 +73,7 @@ fn source(preprocessed_root: Word, main_root: Word, aux_root: Word, quotient_roo
 
             # Horner alpha and generic scratch word [row_ptr, alpha_ptr, 0, 0].
             push.0.0.{alpha1}.{alpha0} push.{alpha_ptr} mem_storew_le dropw
-            push.0.0.{alpha_ptr}.{result_row_ptr} mem_storew_le.TMP2 dropw
+            push.0.0.{alpha_ptr}.{result_row_ptr} mem_storew_le.TMP2_PTR dropw
 
             # Domain data used by the generic final DEEP computation.
             push.0.{domain_generator}.{depth}.{lde_size}

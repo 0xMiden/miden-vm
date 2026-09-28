@@ -1,7 +1,10 @@
 use miden::core::stark::types
 use miden::core::stark::constants
 use {
-    HOOK_PROCESS_PUBLIC_INPUTS_PTR, PUBLIC_INPUTS_ADDRESS_PTR, TMP1, TMP2
+    HOOK_PROCESS_PUBLIC_INPUTS_PTR,
+    PUBLIC_INPUTS_ADDRESS_PTR,
+    TMP1_PTR,
+    TMP2_PTR,
 } from miden::core::stark::constants
 
 #! Processes the public inputs.
@@ -54,7 +57,7 @@ pub proc load_base_store_extension_double_word_from_mem(
     src: types::Address,
 ) -> (types::PoseidonState, ptr<types::QuadFelt>, types::Address)
     dup.13 mem_loadw_le
-    mem_storew_le.TMP1
+    mem_storew_le.TMP1_PTR
     movup.13 add.4 movdn.13
 
     swapw
@@ -70,7 +73,7 @@ pub proc load_base_store_extension_double_word_from_mem(
     mem_storew_le
 
     dup.13 mem_loadw_le
-    mem_storew_le.TMP2
+    mem_storew_le.TMP2_PTR
     movup.13 add.4 movdn.13
     swapw
     # => [a3, 0, a2, 0, a7, a6, a5, a4, C, dst, src, ...]
@@ -88,13 +91,13 @@ pub proc load_base_store_extension_double_word_from_mem(
     dup.12
     add.8
     mem_storew_le
-    mem_loadw_le.TMP2
+    mem_loadw_le.TMP2_PTR
     swapw
 
     dup.12
     add.16 swap.13
     add.12
     mem_storew_le
-    mem_loadw_le.TMP1
+    mem_loadw_le.TMP1_PTR
     # => [a3, a2, a1, a0, a7, a6, a5, a4, C, dst + 16, src + 8, ...]
 end

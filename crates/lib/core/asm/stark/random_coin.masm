@@ -1,8 +1,9 @@
 #! Random coin for the STARK verifier, built on a Poseidon2 sponge.
 #!
-#! The sponge state is stored in memory as three words: rate R1 (R1_PTR), rate R2 (R2_PTR),
-#! and capacity C (C_PTR). R1 and R2 are contiguous (R2_PTR = R1_PTR + 4), so rate elements
-#! 0..7 can be addressed as R1_PTR + index.
+#! The sponge state is stored in memory as three words: rate R1 at RANDOM_COIN_RATE_1_PTR, rate R2
+#! at RANDOM_COIN_RATE_2_PTR and capacity C at RANDOM_COIN_CAPACITY_PTR. R1 and R2 are contiguous
+#! (RANDOM_COIN_RATE_2_PTR = RANDOM_COIN_RATE_1_PTR + 4), so rate elements 0..7 can be addressed as
+#! RANDOM_COIN_RATE_1_PTR + index.
 #!
 #! Sampling uses an output_len counter that tracks how many rate elements remain. Each
 #! permutation sets output_len=8; each sample_felt decrements it by 1 and reads
@@ -20,12 +21,32 @@
 use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 use {
-    ALPHA_DEEP_ND_PTR, BLOWUP_FACTOR_LOG, COMPOSITION_COEF_PTR, C_PTR, DEEP_POW_BITS_PTR,
-    DEEP_RAND_CC_PTR, DOMAIN_OFFSET_INV_PTR, DOMAIN_OFFSET_PTR, FOLDING_POW_BITS_PTR,
-    FRI_FOLD_ARITY, FRI_QUERIES_ADDRESS_PTR, LDE_DOMAIN_INFO_PTR, LDE_DOMAIN_LOG_SIZE_PTR,
-    LOG_FINAL_DEGREE, NUM_QUERIES_PTR, QUERY_POW_BITS_PTR, R1_PTR, R2_PTR,
-    RANDOM_COIN_INPUT_LEN_PTR, RANDOM_COIN_OUTPUT_LEN_PTR, RELATION_DIGEST_PTR,
-    TRACE_DOMAIN_GENERATOR_PTR, TRACE_LENGTH_LOG_PTR, TRACE_LENGTH_PTR, ZERO_WORD_PTR, Z_PTR
+    CONSTRAINT_COMPOSITION_COEFS_PTR,
+    DEEP_ALPHA_ADVICE_PTR,
+    DEEP_COMPOSITION_COEFS_PTR,
+    DEEP_POW_BITS_PTR,
+    DOMAIN_OFFSET_INV_PTR,
+    DOMAIN_OFFSET_PTR,
+    FOLDING_POW_BITS_PTR,
+    FRI_FOLD_ARITY,
+    FRI_QUERIES_ADDRESS_PTR,
+    LDE_DOMAIN_INFO_PTR,
+    LOG_BLOWUP_FACTOR,
+    LOG_FINAL_DEGREE,
+    LOG_LDE_DOMAIN_SIZE_PTR,
+    LOG_TRACE_LENGTH_PTR,
+    NUM_QUERIES_PTR,
+    OOD_POINT_PTR,
+    QUERY_POW_BITS_PTR,
+    RANDOM_COIN_CAPACITY_PTR,
+    RANDOM_COIN_INPUT_LENGTH_PTR,
+    RANDOM_COIN_OUTPUT_LENGTH_PTR,
+    RANDOM_COIN_RATE_1_PTR,
+    RANDOM_COIN_RATE_2_PTR,
+    RELATION_DIGEST_PTR,
+    TRACE_DOMAIN_GENERATOR_PTR,
+    TRACE_LENGTH_PTR,
+    ZERO_WORD_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::utils
 
@@ -38,7 +59,7 @@ use miden::core::stark::utils
 #! Output: [R1, ...]
 #! Cycles: 6
 pub proc get_rate_1() -> word
-    padw mem_loadw_le.R1_PTR
+    padw mem_loadw_le.RANDOM_COIN_RATE_1_PTR
 end
 
 #! Store the first half of the rate portion of the random coin state.
@@ -47,7 +68,7 @@ end
 #! Output: [...]
 #! Cycles: 6
 pub proc set_rate_1(value: word)
-    mem_storew_le.R1_PTR dropw
+    mem_storew_le.RANDOM_COIN_RATE_1_PTR dropw
 end
 
 #! Return the second half of the rate portion of the random coin state.
@@ -56,7 +77,7 @@ end
 #! Output: [R2, ...]
 #! Cycles: 6
 pub proc get_rate_2() -> word
-    padw mem_loadw_le.R2_PTR
+    padw mem_loadw_le.RANDOM_COIN_RATE_2_PTR
 end
 
 #! Store the second half of the rate portion of the random coin state.
@@ -65,7 +86,7 @@ end
 #! Output: [...]
 #! Cycles: 6
 pub proc set_rate_2(value: word)
-    mem_storew_le.R2_PTR dropw
+    mem_storew_le.RANDOM_COIN_RATE_2_PTR dropw
 end
 
 #! Return the capacity portion of the random coin state.
@@ -74,7 +95,7 @@ end
 #! Output: [C, ...]
 #! Cycles: 6
 pub proc get_capacity() -> word
-    padw mem_loadw_le.C_PTR
+    padw mem_loadw_le.RANDOM_COIN_CAPACITY_PTR
 end
 
 #! Set the capacity portion of the random coin state.
@@ -83,7 +104,7 @@ end
 #! Output: [...]
 #! Cycles: 6
 pub proc set_capacity(value: word)
-    mem_storew_le.C_PTR dropw
+    mem_storew_le.RANDOM_COIN_CAPACITY_PTR dropw
 end
 
 #! Load the random coin state on the stack.
@@ -117,8 +138,8 @@ end
 #! Input:  [n, ...]
 #! Output: [...]
 pub proc add_absorb_length_tag(length: u8)
-    mem_load.C_PTR add
-    mem_store.C_PTR
+    mem_load.RANDOM_COIN_CAPACITY_PTR add
+    mem_store.RANDOM_COIN_CAPACITY_PTR
 end
 
 
@@ -134,12 +155,12 @@ end
 #! Input: [...]
 #! Output: [x, ...]
 pub proc sample_felt() -> felt
-    mem_load.RANDOM_COIN_OUTPUT_LEN_PTR
+    mem_load.RANDOM_COIN_OUTPUT_LENGTH_PTR
     dup push.0 neq assert.err="sample_felt: output buffer is empty"
     sub.1
-    dup mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    dup mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 
-    push.R1_PTR add mem_load
+    push.RANDOM_COIN_RATE_1_PTR add mem_load
 end
 
 #! Sample a quadratic extension field element from the transcript.
@@ -190,13 +211,14 @@ pub proc observe_felt(value: felt)
     # Invalidate any buffered rate output (p3's `output_buffer.clear()`): a partial buffer left here
     # leaves output_len = 0, so an unflushed `sample_felt` trips its assertion instead of reading a
     # stale rate. The full-buffer branch below restores output_len = 8 after permuting.
-    push.0 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 
     # Load input_len once and derive the write address rate[input_len] (rate elements 0..7 are
-    # addressed as R1_PTR + index), keeping input_len on the stack for the increment below.
-    mem_load.RANDOM_COIN_INPUT_LEN_PTR
+    # addressed as RANDOM_COIN_RATE_1_PTR + index), keeping input_len on the stack for the
+    # increment below.
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     # => [input_len, felt, ...]
-    dup push.R1_PTR add
+    dup push.RANDOM_COIN_RATE_1_PTR add
     # => [rate_addr, input_len, felt, ...]
     movup.2 swap mem_store
     # => [input_len, ...]
@@ -210,10 +232,10 @@ pub proc observe_felt(value: felt)
         exec.load_random_coin_state
         exec.poseidon2::permute
         exec.store_random_coin_state
-        push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
-        push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+        push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
+        push.8 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
     else
-        mem_store.RANDOM_COIN_INPUT_LEN_PTR
+        mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
     end
 end
 
@@ -229,13 +251,13 @@ end
 #! Input:  [w0, w1, w2, w3, ...]
 #! Output: [...]
 pub proc observe_word(value: word)
-    mem_load.RANDOM_COIN_INPUT_LEN_PTR
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     assertz.err="observe_word: input buffer must be empty"
     # => [w0, w1, w2, w3, ...]
 
-    push.0 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
     exec.set_rate_1
-    push.4 mem_store.RANDOM_COIN_INPUT_LEN_PTR
+    push.4 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
 end
 
 #! Absorb two elements after one word is already buffered.
@@ -250,14 +272,14 @@ end
 #! Input:  [x0, x1, ...]
 #! Output: [...]
 pub proc observe_pair(first: felt, second: felt)
-    mem_load.RANDOM_COIN_INPUT_LEN_PTR
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     push.4 assert_eq.err="observe_pair: input buffer must contain one word"
     # => [x0, x1, ...]
 
-    push.0 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
-    mem_store.R2_PTR
-    push.R2_PTR add.1 mem_store
-    push.6 mem_store.RANDOM_COIN_INPUT_LEN_PTR
+    push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
+    mem_store.RANDOM_COIN_RATE_2_PTR
+    push.RANDOM_COIN_RATE_2_PTR add.1 mem_store
+    push.6 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
 end
 
 #! Absorb the second buffered word into rate[4..7] and flush the full input buffer.
@@ -272,7 +294,7 @@ end
 #! Input:  [w0, w1, w2, w3, ...]
 #! Output: [...]
 proc observe_second_word_and_flush(value: word)
-    mem_load.RANDOM_COIN_INPUT_LEN_PTR
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     push.4 assert_eq.err="observe_second_word_and_flush: input buffer must contain one word"
     # => [w0, w1, w2, w3, ...]
 
@@ -286,8 +308,8 @@ proc observe_second_word_and_flush(value: word)
     exec.poseidon2::permute
     exec.store_random_coin_state
 
-    push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
-    push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
+    push.8 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 end
 
 #! Flush a partial input buffer, matching the `DuplexChallenger` duplexing performed at sample time.
@@ -300,14 +322,14 @@ end
 #! Input:  [...]
 #! Output: [...]
 pub proc flush_buffer()
-    mem_load.RANDOM_COIN_INPUT_LEN_PTR
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     dup push.0 neq
     if.true
         # Zero the rate slots the buffered inputs did not overwrite: rate[input_len..8].
         dup
         dup push.8 neq
         while.true
-            push.0 dup.1 push.R1_PTR add mem_store
+            push.0 dup.1 push.RANDOM_COIN_RATE_1_PTR add mem_store
             add.1
             dup push.8 neq
         end
@@ -318,8 +340,8 @@ pub proc flush_buffer()
         exec.load_random_coin_state
         exec.poseidon2::permute
         exec.store_random_coin_state
-        push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
-        push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+        push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
+        push.8 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
     else
         drop
     end
@@ -333,7 +355,7 @@ end
 #! Input:  [w0, w1, w2, w3, ...]
 #! Output: [...]
 pub proc observe_word_and_flush_buffer(value: word)
-    mem_load.RANDOM_COIN_INPUT_LEN_PTR
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     dup eq.4
     if.true
         drop
@@ -382,8 +404,8 @@ pub proc init_seed()
     padw
     mem_storew_le.ZERO_WORD_PTR
     dropw
-    push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
-    push.0 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
+    push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
     #=> [...]
 
     # ---- RELATION_DIGEST + PCS_PARAMS ----
@@ -407,7 +429,7 @@ pub proc init_seed()
     push.0
     push.FRI_FOLD_ARITY
     push.LOG_FINAL_DEGREE
-    push.BLOWUP_FACTOR_LOG
+    push.LOG_BLOWUP_FACTOR
     #=> [log_blowup, log_final_deg, fold_arity, 0, nq, query_pow, deep_pow, folding_pow, rd0, rd1, rd2, rd3, ...]
     #    ^-- R2                                     ^-- R1                                 ^-- C
 
@@ -425,8 +447,8 @@ pub proc init_seed()
     exec.store_random_coin_state
     #=> [...]
 
-    push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
-    push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
+    push.8 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
     #=> [...]
 
     # ---- Derive trace domain parameters ----
@@ -434,7 +456,7 @@ pub proc init_seed()
     # Reload log(trace_length) from memory (it was saved earlier) and derive
     # trace_length, LDE domain size, LDE generator, and trace generator.
 
-    mem_load.TRACE_LENGTH_LOG_PTR
+    mem_load.LOG_TRACE_LENGTH_PTR
     #=> [log(trace_length), ...]
 
     ## Compute trace_length = 2^log(trace_length)
@@ -449,7 +471,7 @@ pub proc init_seed()
 
     ## Compute log size of LDE domain
     swap
-    push.BLOWUP_FACTOR_LOG
+    push.LOG_BLOWUP_FACTOR
     add
     #=> [log(lde_size), trace_length, ...]
 
@@ -520,7 +542,7 @@ end
 #! Input: [felt, w0, w1, w2, w3, ...]
 #! Output: [R1, R2, C, ...]
 proc absorb_word_and_felt(value: felt, data: word) -> types::PoseidonState
-    mem_load.RANDOM_COIN_INPUT_LEN_PTR
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     assertz.err="absorb_word_and_felt: input buffer must be empty"
     # => [felt, w0, w1, w2, w3, ...]
 
@@ -552,7 +574,7 @@ pub proc reseed_with_felt(value: felt, commitment: types::Digest)
     exec.store_random_coin_state
 
     # Mark output buffer as full.
-    push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    push.8 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 end
 
 #! Reseed by absorbing a word directly and permuting.
@@ -568,7 +590,7 @@ end
 #! Input: [w0, w1, w2, w3, ...]
 #! Output: [...]
 pub proc reseed_direct(value: word)
-    mem_load.RANDOM_COIN_INPUT_LEN_PTR
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     assertz.err="reseed_direct: input buffer must be empty"
     # => [w0, w1, w2, w3, ...]
 
@@ -585,7 +607,7 @@ pub proc reseed_direct(value: word)
     exec.store_random_coin_state
 
     # Fresh output available.
-    push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    push.8 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 end
 
 #! Reseed with a FRI layer commitment, check folding PoW, and sample folding alpha.
@@ -625,7 +647,7 @@ pub proc reseed_check_folding_pow_and_sample_alpha(
     drop swap
     # => [a0, a1, ...]
 
-    push.5 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    push.5 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 end
 
 #! Absorb a nonzero proof-of-work nonce from advice and permute.
@@ -638,7 +660,7 @@ end
 proc absorb_pow_nonce(pow_bits: u8) -> (word, u8)
     adv_push
     # => [nonce, pow_bits, ...]
-    mem_load.RANDOM_COIN_INPUT_LEN_PTR
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     assertz.err="absorb_pow_nonce: input buffer must be empty"
     # => [nonce, pow_bits, ...]
 
@@ -690,9 +712,9 @@ pub proc generate_aux_randomness(aux_rand_ptr: ptr<types::QuadFelt>)
 end
 
 #! Draw the constraint-composition challenges.
-#! Stores `[alpha0, alpha1, beta0, beta1]` at `COMPOSITION_COEF_PTR`. The generic verifier uses
-#! `alpha` for constraint folding. Relation-specific code may use `beta` for its own folding
-#! layout.
+#! Stores `[alpha0, alpha1, beta0, beta1]` at `CONSTRAINT_COMPOSITION_COEFS_PTR`. The generic
+#! verifier uses `alpha` for constraint folding. Relation-specific code may use `beta` for its own
+#! folding layout.
 #!
 #! Input: [...]
 #! Output: [...]
@@ -702,11 +724,11 @@ pub proc generate_constraint_composition_coefficients()
     # => [beta0, beta1, alpha0, alpha1, ...]
     movup.3 movup.3
     # => [alpha0, alpha1, beta0, beta1, ...]
-    push.COMPOSITION_COEF_PTR
+    push.CONSTRAINT_COMPOSITION_COEFS_PTR
     mem_storew_le dropw
 end
 
-#! Draw deep composition polynomial random coefficient and save it at `DEEP_RAND_CC_PTR`.
+#! Draw deep composition polynomial random coefficient and save it at `DEEP_COMPOSITION_COEFS_PTR`.
 #!
 #! As this random challenge has already been used non-deterministically in prior computations, we
 #! also check that the generated challenge matches the non-deterministically provided one.
@@ -717,12 +739,12 @@ pub proc generate_deep_composition_random_coefficients()
     # Sample challenge_columns (deep alpha) for batching columns.
     exec.sample_ext
     padw
-    mem_loadw_le.ALPHA_DEEP_ND_PTR
+    mem_loadw_le.DEEP_ALPHA_ADVICE_PTR
     # => [alpha0_nd, alpha1_nd, 0, 0, alpha0, alpha1, ...]
 
     dup.4 assert_eq
     dup.4 assert_eq
-    push.DEEP_RAND_CC_PTR
+    push.DEEP_COMPOSITION_COEFS_PTR
     mem_storew_le
     dropw
 
@@ -732,10 +754,10 @@ pub proc generate_deep_composition_random_coefficients()
     exec.sample_ext
     # => [beta0, beta1, ...]
 
-    # Store [beta0, beta1, alpha0, alpha1] at DEEP_RAND_CC_PTR.
+    # Store [beta0, beta1, alpha0, alpha1] at DEEP_COMPOSITION_COEFS_PTR.
     # (alpha was already stored at positions 2,3 by the mem_storew_le above)
-    mem_store.DEEP_RAND_CC_PTR
-    push.DEEP_RAND_CC_PTR add.1 mem_store
+    mem_store.DEEP_COMPOSITION_COEFS_PTR
+    push.DEEP_COMPOSITION_COEFS_PTR add.1 mem_store
     #=> [...]
 end
 
@@ -763,25 +785,25 @@ proc check_nonzero_deep_pow_and_generate_deep_composition_random_coefficients(po
 
     # rate[6], rate[5] are deep alpha; they must match the advice-provided alpha used
     # while processing OOD frames.
-    dup.2 mem_load.ALPHA_DEEP_ND_PTR
+    dup.2 mem_load.DEEP_ALPHA_ADVICE_PTR
     assert_eq
     # => [rate4, rate5, rate6, ...]
-    dup.1 push.ALPHA_DEEP_ND_PTR add.1 mem_load
+    dup.1 push.DEEP_ALPHA_ADVICE_PTR add.1 mem_load
     assert_eq
     # => [rate4, rate5, rate6, ...]
-    dup.2 push.DEEP_RAND_CC_PTR add.2 mem_store
-    dup.1 push.DEEP_RAND_CC_PTR add.3 mem_store
+    dup.2 push.DEEP_COMPOSITION_COEFS_PTR add.2 mem_store
+    dup.1 push.DEEP_COMPOSITION_COEFS_PTR add.3 mem_store
     # => [rate4, rate5, rate6, ...]
 
     # rate[4], rate[3] are deep beta.
     movdn.2 drop drop
     # => [rate4, ...]
-    mem_store.DEEP_RAND_CC_PTR
-    push.R1_PTR add.3 mem_load
-    push.DEEP_RAND_CC_PTR add.1 mem_store
+    mem_store.DEEP_COMPOSITION_COEFS_PTR
+    push.RANDOM_COIN_RATE_1_PTR add.3 mem_load
+    push.DEEP_COMPOSITION_COEFS_PTR add.1 mem_store
 
     # PoW consumed rate[7], alpha consumed rate[6..5], and beta consumed rate[4..3].
-    push.3 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    push.3 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 end
 
 #! Check DEEP PoW and draw DEEP composition coefficients.
@@ -806,7 +828,7 @@ end
 
 #! Generate the OOD challenge point `z = (z0, z1)` and compute `z^N` where N is
 #! the trace length. The resulting word `[(z_0, z_1)^N, z0, z1]` is stored in the
-#! global memory address `Z_PTR` reserved for it.
+#! global memory address `OOD_POINT_PTR` reserved for it.
 #!
 #! Input: [...]
 #! Output: [...]
@@ -814,7 +836,7 @@ end
 pub proc generate_z_zN()
     # Sample z and load log trace length N
     exec.sample_ext
-    mem_load.TRACE_LENGTH_LOG_PTR
+    mem_load.LOG_TRACE_LENGTH_PTR
     # => [log(trace_len), z_0, z_1, ...]
 
     dup.2 dup.2
@@ -835,7 +857,7 @@ pub proc generate_z_zN()
     # => [(z_0, z_1)^n, z_0, z_1, ...]
 
     # Store z and z^N
-    mem_storew_le.Z_PTR
+    mem_storew_le.OOD_POINT_PTR
     dropw
 end
 
@@ -861,7 +883,7 @@ pub proc generate_list_indices()
     mem_load.FRI_QUERIES_ADDRESS_PTR
     #=> [query_ptr, num_queries, ...]
 
-    mem_load.LDE_DOMAIN_LOG_SIZE_PTR
+    mem_load.LOG_LDE_DOMAIN_SIZE_PTR
     #=> [depth, query_ptr, num_queries, ...]
 
     # mask = 2^depth - 1. Depth is at most 32; use the u32 all-ones mask at that boundary.
@@ -878,7 +900,7 @@ pub proc generate_list_indices()
     #=> [query_ptr, num_queries, mask, depth, ...]
 
     # Load current output_len from random coin state.
-    mem_load.RANDOM_COIN_OUTPUT_LEN_PTR
+    mem_load.RANDOM_COIN_OUTPUT_LENGTH_PTR
     dup push.0 neq assert.err="generate_list_indices: output_len must be nonzero"
     #=> [output_len, query_ptr, num_queries, mask, depth, ...]
 
@@ -905,9 +927,9 @@ pub proc generate_list_indices()
         # --- Read rate element at index (output_len - 1) ---
         sub.1
         #=> [idx, query_ptr, num_queries, mask, depth, ...]
-        # R1 and R2 are contiguous in memory (R1_PTR, R1_PTR+4 = R2_PTR), so
-        # rate[idx] is at R1_PTR + idx.
-        dup push.R1_PTR add mem_load
+        # R1 and R2 are contiguous in memory (RANDOM_COIN_RATE_2_PTR = RANDOM_COIN_RATE_1_PTR + 4),
+        # so rate[idx] is at RANDOM_COIN_RATE_1_PTR + idx.
+        dup push.RANDOM_COIN_RATE_1_PTR add mem_load
         #=> [felt, idx, query_ptr, num_queries, mask, depth, ...]
 
         # --- Extract masked index: lo 32 bits AND mask ---
@@ -944,11 +966,11 @@ pub proc generate_list_indices()
 
     # --- Restore random coin output_len so subsequent operations see correct state ---
     # pos 0 = output_len (remaining), store it back.
-    mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
     #=> [query_ptr, num_queries, mask, depth, ...]
 
     # No transcript input remains buffered while sampling indices.
-    push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
+    push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
 
     dropw
 end
@@ -997,7 +1019,7 @@ proc check_pow(pow_bits: u8)
         assertz.err="proof-of-work check failed"
         # => [rate4, rate5, rate6, ...]
         drop drop drop
-        push.7 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+        push.7 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
     else
         # Consume witness to keep advice layout, but do not affect transcript.
         adv_push

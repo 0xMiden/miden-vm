@@ -1,7 +1,11 @@
 use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 use {
-    AUX_TRACE_COM_PTR, COMPOSITION_POLY_COM_PTR, MAIN_TRACE_COM_PTR, TMP2, TMP3
+    AUX_TRACE_COM_PTR,
+    COMPOSITION_POLY_COM_PTR,
+    MAIN_TRACE_COM_PTR,
+    TMP2_PTR,
+    TMP3_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::deep_queries
 
@@ -125,11 +129,11 @@ proc process_main_segment_execution_trace(
     # Use the commitment to get the leaf and save it
     dup.5 dup.5
     mtree_get
-    mem_storew_le.TMP3
+    mem_storew_le.TMP3_PTR
     adv.push_mapval
     #=>[LEAF_VALUE, MAIN_TRACE_TREE_ROOT, depth, index, query_ptr]
 
-    mem_loadw_le.TMP2
+    mem_loadw_le.TMP2_PTR
     swapw
     #=>[LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
@@ -147,7 +151,7 @@ proc process_main_segment_execution_trace(
 
     # Load the leaf value we got using `mtree_get` and compare it against the hash we just computed
     swapw
-    mem_loadw_le.TMP3
+    mem_loadw_le.TMP3_PTR
     assert_eqw.err=LEAF_VALUE_MISMATCH
 end
 
@@ -187,13 +191,13 @@ proc process_aux_segment_execution_trace(
     # Get the leaf against the auxiliary trace commitment for the current query
     dup.9 dup.9
     mtree_get
-    mem_storew_le.TMP3
+    mem_storew_le.TMP3_PTR
     adv.push_mapval
     #=> [L, R, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
     # Load the values of the auxiliary segment of the execution trace at the current query
 
-    # The leaf was saved in TMP3 and the root is no longer needed. Reuse both words as
+    # The leaf was saved in TMP3_PTR and the root is no longer needed. Reuse both words as
     # the rate words and insert zero capacity.
     padw swapw.2
     #=> [Y, Y, 0, 0, 0, 0, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
@@ -204,7 +208,7 @@ proc process_aux_segment_execution_trace(
 
     # Load the leaf value we got using `mtree_get` and compare it against the hash we just computed
     swapw
-    mem_loadw_le.TMP3
+    mem_loadw_le.TMP3_PTR
     assert_eqw.err=LEAF_VALUE_MISMATCH
     #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 end
@@ -246,7 +250,7 @@ proc process_constraints_composition_poly_trace(
     # Get the leaf against the commitment
     dup.9 movup.9
     mtree_get
-    mem_storew_le.TMP3
+    mem_storew_le.TMP3_PTR
     adv.push_mapval
     #=>[L, R, ptr_x, ptr_alpha_inv, acc0, acc1, index, query_ptr]
 
@@ -258,7 +262,7 @@ proc process_constraints_composition_poly_trace(
 
     # Load the leaf value we got using `mtree_get` and compare it against the hash we just computed
     swapw
-    mem_loadw_le.TMP3
+    mem_loadw_le.TMP3_PTR
     assert_eqw.err=LEAF_VALUE_MISMATCH
     #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, index, query_ptr]
 

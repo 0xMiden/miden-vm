@@ -9,10 +9,10 @@ use miden_crypto::{
 use crate::helpers::read_memory_felt;
 
 const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3_223_322_638;
-const C_PTR: u32 = 3_223_322_668;
-const R1_PTR: u32 = 3_223_322_672;
-const RANDOM_COIN_INPUT_LEN_PTR: u32 = 3_223_322_759;
-const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3_223_322_760;
+const RANDOM_COIN_CAPACITY_PTR: u32 = 3_223_322_668;
+const RANDOM_COIN_RATE_1_PTR: u32 = 3_223_322_672;
+const RANDOM_COIN_INPUT_LENGTH_PTR: u32 = 3_223_322_759;
+const RANDOM_COIN_OUTPUT_LENGTH_PTR: u32 = 3_223_322_760;
 const PVM_PUBLIC_INPUTS_PTR: u32 = 3_225_426_424;
 const PVM_PREPROCESSED_COM_PTR: u32 = 3_225_444_216;
 
@@ -34,16 +34,16 @@ fn stage_statement_and_shape() -> String {
         push.{root3}.{root2}.{root1}.{root0}
         exec.public_inputs::stage_public_root
 
-        push.{h0} mem_store.AIR_TRACE_LENGTH_LOGS_PTR
-        push.{h1} push.AIR_TRACE_LENGTH_LOGS_PTR add.1 mem_store
-        push.{h2} push.AIR_TRACE_LENGTH_LOGS_PTR add.2 mem_store
-        push.{h3} push.AIR_TRACE_LENGTH_LOGS_PTR add.3 mem_store
-        push.{h4} push.AIR_TRACE_LENGTH_LOGS_PTR add.4 mem_store
-        push.{h5} push.AIR_TRACE_LENGTH_LOGS_PTR add.5 mem_store
-        push.{h6} push.AIR_TRACE_LENGTH_LOGS_PTR add.6 mem_store
-        push.{h7} push.AIR_TRACE_LENGTH_LOGS_PTR add.7 mem_store
-        push.{h8} push.AIR_TRACE_LENGTH_LOGS_PTR add.8 mem_store
-        push.{h9} push.AIR_TRACE_LENGTH_LOGS_PTR add.9 mem_store
+        push.{h0} mem_store.LOG_AIR_TRACE_LENGTHS_PTR
+        push.{h1} push.LOG_AIR_TRACE_LENGTHS_PTR add.1 mem_store
+        push.{h2} push.LOG_AIR_TRACE_LENGTHS_PTR add.2 mem_store
+        push.{h3} push.LOG_AIR_TRACE_LENGTHS_PTR add.3 mem_store
+        push.{h4} push.LOG_AIR_TRACE_LENGTHS_PTR add.4 mem_store
+        push.{h5} push.LOG_AIR_TRACE_LENGTHS_PTR add.5 mem_store
+        push.{h6} push.LOG_AIR_TRACE_LENGTHS_PTR add.6 mem_store
+        push.{h7} push.LOG_AIR_TRACE_LENGTHS_PTR add.7 mem_store
+        push.{h8} push.LOG_AIR_TRACE_LENGTHS_PTR add.8 mem_store
+        push.{h9} push.LOG_AIR_TRACE_LENGTHS_PTR add.9 mem_store
         "#,
         root0 = root[0],
         root1 = root[1],
@@ -67,7 +67,7 @@ fn transcript_source() -> String {
     let main = MAIN_COMMITMENT;
     format!(
         r#"
-        use {{AIR_TRACE_LENGTH_LOGS_PTR}} from miden::core::stark::constants
+        use {{LOG_AIR_TRACE_LENGTHS_PTR}} from miden::core::stark::constants
         use miden::core::stark::random_coin
         use miden::core::sys::pvm::public_inputs
 
@@ -109,21 +109,21 @@ fn pvm_public_input_hook_matches_the_rust_challenger() {
 
     for (i, expected) in challenger.sponge_state[..8].iter().enumerate() {
         assert_eq!(
-            read_memory_felt(&output, R1_PTR + i as u32),
+            read_memory_felt(&output, RANDOM_COIN_RATE_1_PTR + i as u32),
             *expected,
             "rate state differs at index {i}"
         );
     }
     for (i, expected) in challenger.sponge_state[8..].iter().enumerate() {
         assert_eq!(
-            read_memory_felt(&output, C_PTR + i as u32),
+            read_memory_felt(&output, RANDOM_COIN_CAPACITY_PTR + i as u32),
             *expected,
             "capacity state differs at index {i}"
         );
     }
     assert_eq!(output.stack.get_element(0), Some(expected_sample));
-    assert_eq!(read_memory_felt(&output, RANDOM_COIN_INPUT_LEN_PTR), Felt::ZERO);
-    assert_eq!(read_memory_felt(&output, RANDOM_COIN_OUTPUT_LEN_PTR), Felt::from_u8(7));
+    assert_eq!(read_memory_felt(&output, RANDOM_COIN_INPUT_LENGTH_PTR), Felt::ZERO);
+    assert_eq!(read_memory_felt(&output, RANDOM_COIN_OUTPUT_LENGTH_PTR), Felt::from_u8(7));
 
     assert_eq!(
         read_memory_felt(&output, PUBLIC_INPUTS_ADDRESS_PTR),
@@ -153,11 +153,11 @@ fn pvm_public_input_hook_matches_the_rust_challenger() {
 #[test]
 fn pvm_public_input_hook_rejects_a_nonempty_input_buffer() {
     let source = r#"
-        use {RANDOM_COIN_INPUT_LEN_PTR} from miden::core::stark::constants
+        use {RANDOM_COIN_INPUT_LENGTH_PTR} from miden::core::stark::constants
         use miden::core::sys::pvm::public_inputs
 
         begin
-            push.1 mem_store.RANDOM_COIN_INPUT_LEN_PTR
+            push.1 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
             exec.public_inputs::process_public_inputs
         end
     "#;

@@ -1,9 +1,9 @@
 use miden::core::stark::types
-use {AIR_TRACE_LENGTH_LOGS_PTR} from miden::core::stark::constants
+use {LOG_AIR_TRACE_LENGTHS_PTR} from miden::core::stark::constants
 
 ### Memory-map constants and accessors specific to the Miden VM relation.
 ###
-### The per-AIR log heights live in the generic array (`constants::AIR_TRACE_LENGTH_LOGS_PTR`);
+### The per-AIR log heights live in the generic array (`constants::LOG_AIR_TRACE_LENGTHS_PTR`);
 ### this module only fixes which AIR occupies which offset: core 0, chiplets 1,
 ### poseidon2_permutation 2 — the canonical instance order the proof order sorts against.
 ###
@@ -89,27 +89,27 @@ const ACE_CIRCUIT_STREAM_PTR = 3225420376
 const CURRENT_TRACE_ROW_PTR = 3238002688
 
 pub proc set_core_trace_length_log(height: u8)
-    mem_store.AIR_TRACE_LENGTH_LOGS_PTR
+    mem_store.LOG_AIR_TRACE_LENGTHS_PTR
 end
 
 pub proc get_core_trace_length_log() -> u8
-    mem_load.AIR_TRACE_LENGTH_LOGS_PTR
+    mem_load.LOG_AIR_TRACE_LENGTHS_PTR
 end
 
 pub proc set_chiplets_trace_length_log(height: u8)
-    push.AIR_TRACE_LENGTH_LOGS_PTR add.1 mem_store
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.1 mem_store
 end
 
 pub proc get_chiplets_trace_length_log() -> u8
-    push.AIR_TRACE_LENGTH_LOGS_PTR add.1 mem_load
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.1 mem_load
 end
 
 pub proc set_poseidon2_permutation_trace_length_log(height: u8)
-    push.AIR_TRACE_LENGTH_LOGS_PTR add.2 mem_store
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.2 mem_store
 end
 
 pub proc get_poseidon2_permutation_trace_length_log() -> u8
-    push.AIR_TRACE_LENGTH_LOGS_PTR add.2 mem_load
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.2 mem_load
 end
 
 ### Relation-facing pointer accessors used by the generated constraint evaluator.
