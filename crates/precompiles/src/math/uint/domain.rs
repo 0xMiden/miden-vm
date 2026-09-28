@@ -21,6 +21,17 @@ pub const ED25519_SCALAR_BOUND_PTR: u32 = 5;
 /// VM-owned store pointer for the full Ed25519 group-order bound (`8*l - 1`).
 pub const ED25519_ORDER_BOUND_PTR: u32 = 6;
 
+/// Algebraic structure of a [`UintDomain`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UintDomainKind {
+    /// Wrapping arithmetic modulo `2^256`.
+    Uint,
+    /// Arithmetic modulo a composite modulus.
+    Ring,
+    /// Arithmetic in a prime field.
+    Field,
+}
+
 /// Fixed uint arithmetic domains supported by the native uint precompile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UintDomain {
@@ -120,6 +131,18 @@ impl UintDomain {
             Self::Ed25519Base => <Ed25519Base as UintSpec>::IS_PRIME_FIELD,
             Self::Ed25519Scalar => <Ed25519Scalar as UintSpec>::IS_PRIME_FIELD,
             Self::Ed25519Order => <Ed25519Order as UintSpec>::IS_PRIME_FIELD,
+        }
+    }
+
+    /// Returns the algebraic structure of this domain.
+    pub const fn kind(self) -> UintDomainKind {
+        match self {
+            Self::U256 => UintDomainKind::Uint,
+            Self::K1Base => UintDomainKind::Field,
+            Self::K1Scalar => UintDomainKind::Field,
+            Self::Ed25519Base => UintDomainKind::Field,
+            Self::Ed25519Scalar => UintDomainKind::Field,
+            Self::Ed25519Order => UintDomainKind::Ring,
         }
     }
 
@@ -239,6 +262,28 @@ impl UintDomain {
             ])
         } else {
             None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math::uint::ZERO_LIMBS;
+
+    /// The declared kind selects the generated MASM wrapper labels, so it must agree with the
+    /// modulus and primality that each domain's spec declares.
+    #[test]
+    fn kind_matches_spec_modulus_and_primality() {
+        for domain in UintDomain::ALL {
+            let expected = if domain.encoded_modulus() == ZERO_LIMBS {
+                UintDomainKind::Uint
+            } else if domain.is_prime_field() {
+                UintDomainKind::Field
+            } else {
+                UintDomainKind::Ring
+            };
+            assert_eq!(domain.kind(), expected, "{domain:?}");
         }
     }
 }
