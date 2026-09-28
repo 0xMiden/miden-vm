@@ -707,6 +707,37 @@ fn test_decrypt_fails_when_destination_overlaps_tag() {
 }
 
 #[test]
+fn test_decrypt_rejects_empty_message_with_destination_at_tag() {
+    // With num_blocks = 0 nothing is written to dst_ptr, so this layout used to decrypt. The
+    // destination range still covers the tag word, so it is now rejected like any other overlap.
+    let source = r#"
+    use miden::core::crypto::aead
+
+    begin
+        push.0              # num_blocks
+        push.2000           # dst_ptr
+        push.1000           # src_ptr
+        push.[1,2,3,4]      # nonce
+        push.[5,6,7,8]      # key
+        exec.aead::encrypt
+
+        # Store the tag right after the encrypted padding
+        push.2008 mem_storew_le dropw
+
+        push.0              # num_blocks
+        push.2008           # dst_ptr (tag address)
+        push.2000           # src_ptr
+        push.[1,2,3,4]      # nonce
+        push.[5,6,7,8]      # key
+        exec.aead::decrypt
+    end
+    "#;
+
+    let test = build_test!(source, &[]);
+    expect_assert_error_code_from_msg!(test, "source and destination ranges must not overlap");
+}
+
+#[test]
 fn test_decrypt_allows_destination_adjacent_to_source() {
     // Plaintext written right after the tag.
     decrypt_one_block_into(1020)
