@@ -419,11 +419,13 @@ mod tests {
     fn trivial_precompile_witness() -> PrecompileWitness {
         use alloc::sync::Arc;
 
-        use miden_core::deferred::{DeferredState, Node, PrecompileRegistry, TRUE_DIGEST};
+        use miden_core::deferred::{
+            DeferredState, Node, PrecompileLimits, PrecompileRegistry, TRUE_DIGEST,
+        };
 
         let registry = Arc::new(PrecompileRegistry::new());
-        let mut state =
-            DeferredState::new(registry).expect("empty registry state should initialize");
+        let mut state = DeferredState::new(registry, PrecompileLimits::new(u64::MAX))
+            .expect("empty registry state should initialize");
         let statement = state
             .register(Node::and(TRUE_DIGEST, TRUE_DIGEST))
             .expect("trivial AND node should register");

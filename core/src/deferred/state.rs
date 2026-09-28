@@ -1,86 +1,53 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use super::{
-    DeferredError, Digest, IntegrityError, MAX_DEFERRED_ELEMENTS, Node, NodeType, PrecompileError,
-    PrecompileRegistry, PrecompileWitness, PreparedNode, TRUE_DIGEST, Tag,
+    DeferredError, Digest, IntegrityError, Node, NodeType, PrecompileError, PrecompileLimits,
+    PrecompileRegistry, PrecompileWitness, PrecompileWork, PreparedNode, TRUE_DIGEST, Tag,
 };
 
 /// Deferred graph and eager evaluation state.
 ///
-/// Registered original nodes, canonical/helper nodes, evaluation memos, the current root, and the
-/// element budget live here. [`Self::into_witness`] exports only the original root-reachable graph
-/// and releases the state.
+/// Semantic graph state is delegated to [`DeferredEvaluator`]; this wrapper adds the current root
+/// and execution-time admission policy. [`Self::into_witness`] exports only the original
+/// root-reachable graph and releases the state.
 #[derive(Debug, Clone)]
 pub struct DeferredState {
-    registry: Arc<PrecompileRegistry>,
-    // Every entry has a registry-valid shape, has child closure for the state in which it was
-    // admitted, and is stored under the digest checked when its `PreparedNode` was constructed.
-    nodes: BTreeMap<Digest, Node>,
+    evaluator: DeferredEvaluator,
     pub(super) root: Digest,
+    work: PrecompileWork,
+    limits: PrecompileLimits,
+}
+
+/// The semantic engine shared by execution and already-admitted witness evaluation.
+#[derive(Debug, Clone)]
+pub(super) struct DeferredEvaluator {
+    registry: Arc<PrecompileRegistry>,
+    nodes: BTreeMap<Digest, Node>,
     evals: BTreeMap<Digest, Digest>,
-    remaining_elements: usize,
 }
 
 impl Default for DeferredState {
     fn default() -> Self {
-        Self::new(Arc::new(PrecompileRegistry::new()))
+        Self::new(Arc::new(PrecompileRegistry::new()), PrecompileLimits::new(u64::MAX))
             .expect("empty registry initialization cannot fail")
     }
 }
 
 impl DeferredState {
-    pub fn new(registry: Arc<PrecompileRegistry>) -> Result<Self, PrecompileError> {
-        let mut state = Self::empty(registry);
-        state.initialize_precompile_nodes()?;
-        Ok(state)
-    }
-
-    /// Creates a state seeded only with framework basics.
-    fn empty(registry: Arc<PrecompileRegistry>) -> Self {
-        let mut nodes = BTreeMap::new();
-        nodes.insert(TRUE_DIGEST, Node::TRUE);
-
-        let mut evals = BTreeMap::new();
-        evals.insert(TRUE_DIGEST, TRUE_DIGEST);
-
-        Self {
-            registry,
-            nodes,
+    pub fn new(
+        registry: Arc<PrecompileRegistry>,
+        limits: PrecompileLimits,
+    ) -> Result<Self, PrecompileError> {
+        Ok(Self {
+            evaluator: DeferredEvaluator::new(registry)?,
             root: TRUE_DIGEST,
-            evals,
-            remaining_elements: MAX_DEFERRED_ELEMENTS,
-        }
+            work: PrecompileWork::default(),
+            limits,
+        })
     }
 
-    /// Loads all precompile initialization nodes, then evaluates each to ensure the bootstrap set
-    /// resolves under this registry.
-    fn initialize_precompile_nodes(&mut self) -> Result<(), PrecompileError> {
-        let mut prepared_nodes = Vec::new();
-        for node in self.registry.init_nodes() {
-            self.registry.validate_node(&node)?;
-            prepared_nodes.push(PreparedNode::new(node));
-        }
-        let init_digests = prepared_nodes.iter().map(PreparedNode::digest).collect::<Vec<_>>();
-        for prepared in prepared_nodes {
-            if prepared.node().children().any(|child| {
-                child != TRUE_DIGEST
-                    && !self.nodes.contains_key(&child)
-                    && !init_digests.contains(&child)
-            }) {
-                return Err(PrecompileError::MissingNode);
-            }
-            self.insert_node(prepared)?;
-        }
-
-        for digest in init_digests {
-            self.evaluate_digest(digest)?;
-        }
-
-        Ok(())
-    }
-
-    /// Adds precompiles to this state without discarding existing nodes, evaluation memos, root, or
-    /// budget accounting.
+    /// Adds precompiles without discarding existing nodes, evaluation memos, root, or work
+    /// accounting.
     ///
     /// Registration is additive only: duplicate precompile ids panic via
     /// [`PrecompileRegistry::merge`], matching setup-time registry construction behavior. The
@@ -91,15 +58,15 @@ impl DeferredState {
         precompiles: PrecompileRegistry,
     ) -> Result<(), PrecompileError> {
         let mut next = self.clone();
-        Arc::make_mut(&mut next.registry).merge(precompiles);
-        next.initialize_precompile_nodes()?;
+        Arc::make_mut(&mut next.evaluator.registry).merge(precompiles);
+        next.evaluator.initialize_precompile_nodes()?;
 
         *self = next;
         Ok(())
     }
 
     pub fn registry(&self) -> &PrecompileRegistry {
-        &self.registry
+        &self.evaluator.registry
     }
 
     /// Returns the current deferred root; [`super::TRUE_DIGEST`] means no statements are logged.
@@ -108,7 +75,7 @@ impl DeferredState {
     }
 
     pub fn get_node(&self, digest: &Digest) -> Option<&Node> {
-        self.nodes.get(digest)
+        self.evaluator.get_node(digest)
     }
 
     /// Returns the already-memoized canonical digest for `digest`, if present.
@@ -117,8 +84,7 @@ impl DeferredState {
     /// canonical results, or mutate the memo table. Missing memos and dangling memos whose
     /// canonical node is absent from this state both return `None`.
     pub fn get_canonical_digest(&self, digest: Digest) -> Option<Digest> {
-        let canonical_digest = self.evals.get(&digest).copied()?;
-        self.nodes.contains_key(&canonical_digest).then_some(canonical_digest)
+        self.evaluator.get_canonical_digest(digest)
     }
 
     /// Returns the already-memoized canonical node for `digest`, if present.
@@ -127,7 +93,7 @@ impl DeferredState {
     /// stored in this state.
     pub fn get_canonical_node(&self, digest: Digest) -> Option<(Digest, &Node)> {
         let canonical_digest = self.get_canonical_digest(digest)?;
-        self.nodes.get(&canonical_digest).map(|node| (canonical_digest, node))
+        self.evaluator.nodes.get(&canonical_digest).map(|node| (canonical_digest, node))
     }
 
     /// Returns the already-memoized canonical node for `digest` or
@@ -143,7 +109,8 @@ impl DeferredState {
 
     /// Returns the approximate number of field elements occupied by registered deferred nodes.
     pub fn num_elements(&self) -> usize {
-        self.nodes
+        self.evaluator
+            .nodes
             .iter()
             .filter_map(|(digest, node)| {
                 (*digest != TRUE_DIGEST).then_some(node.storage_felt_len())
@@ -151,8 +118,13 @@ impl DeferredState {
             .sum()
     }
 
-    pub fn remaining_elements(&self) -> usize {
-        self.remaining_elements
+    pub const fn work(&self) -> &PrecompileWork {
+        &self.work
+    }
+
+    /// Replaces the execution admission policy used for subsequent guest operations.
+    pub fn set_limits(&mut self, limits: PrecompileLimits) {
+        self.limits = limits;
     }
 
     /// Recognizes `tag` under the installed registry and returns its declared outer payload shape.
@@ -160,7 +132,7 @@ impl DeferredState {
     /// This does not inspect a payload, validate structural child references, or evaluate
     /// precompile semantics. [`Self::register`] performs those checks for a complete node.
     pub fn decode(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
-        self.registry.decode_node_type(tag)
+        self.evaluator.registry.decode_node_type(tag)
     }
 
     /// Registers a `PrecompileRegistry`-valid node in the DAG and evaluates it immediately.
@@ -172,8 +144,21 @@ impl DeferredState {
     /// If evaluation fails, registration returns that error immediately. Re-registering an
     /// identical successfully registered node is idempotent and budget-free.
     pub fn register(&mut self, node: Node) -> Result<Digest, PrecompileError> {
-        let prepared = self.prepare_node(node)?;
-        let digest = self.insert_node(prepared)?;
+        self.evaluator.validate_node(&node)?;
+        let item = if node.tag().is_framework_reserved() {
+            None
+        } else {
+            Some(self.evaluator.registry.work(&node)?)
+        };
+        let mut next_work = self.work.clone();
+        next_work.charge(node.felt_len(), item, &self.limits)?;
+        let prepared = PreparedNode::new(node);
+        let digest = prepared.digest();
+        if self.evaluator.nodes.get(&digest) == Some(prepared.node()) {
+            return Ok(digest);
+        }
+        self.work = next_work;
+        let digest = self.evaluator.insert_node(prepared)?;
         self.evaluate_digest(digest)?;
         Ok(digest)
     }
@@ -184,7 +169,10 @@ impl DeferredState {
     /// implicit [`TRUE_DIGEST`]. On success, this inserts the framework AND node, advances the
     /// deferred root, memoizes the new root as TRUE, and returns the new root.
     pub fn log_statement(&mut self, statement_digest: Digest) -> Result<Digest, PrecompileError> {
-        let statement = self.prepare_statement(statement_digest)?;
+        let statement = PreparedNode::new(Node::and(self.root, statement_digest));
+        self.charge_framework_node(&statement)?;
+        self.require_true_eval(self.root)?;
+        self.require_true_eval(statement_digest)?;
         self.accept_statement(statement)
     }
 
@@ -207,6 +195,7 @@ impl DeferredState {
             .into());
         }
 
+        self.charge_framework_node(&statement)?;
         self.require_true_eval(self.root)?;
         self.require_true_eval(statement_digest)?;
         self.accept_statement(statement)
@@ -218,6 +207,125 @@ impl DeferredState {
     /// whether the result was already known or computed by this call. Use [`Self::get_node`] with
     /// the returned digest to inspect the canonical node contents.
     pub fn evaluate_digest(&mut self, digest: Digest) -> Result<Digest, PrecompileError> {
+        self.evaluator.evaluate_digest(digest)
+    }
+
+    /// Consumes completed execution state and exports its root-reachable portable graph.
+    ///
+    /// Executions without logged work return `None`. Export preserves original node commitments
+    /// and omits unreachable nodes and evaluation caches; it does not serialize through bytes.
+    pub fn into_witness(self) -> Result<Option<PrecompileWitness>, IntegrityError> {
+        if self.root == TRUE_DIGEST {
+            return Ok(None);
+        }
+        PrecompileWitness::from_state(&self).map(Some)
+    }
+
+    fn record_eval(
+        &mut self,
+        input_digest: Digest,
+        canonical_digest: Digest,
+    ) -> Result<(), PrecompileError> {
+        self.evaluator.record_eval(input_digest, canonical_digest)
+    }
+
+    fn accept_statement(&mut self, statement: PreparedNode) -> Result<Digest, PrecompileError> {
+        let new_root = self.evaluator.insert_node(statement)?;
+        self.record_eval(new_root, TRUE_DIGEST)?;
+        self.root = new_root;
+        Ok(new_root)
+    }
+
+    fn charge_framework_node(&mut self, node: &PreparedNode) -> Result<(), PrecompileError> {
+        if self.evaluator.nodes.get(&node.digest()) != Some(node.node()) {
+            self.work.charge(node.node().felt_len(), None, &self.limits)?;
+        }
+        Ok(())
+    }
+
+    fn require_true_eval(&mut self, digest: Digest) -> Result<(), PrecompileError> {
+        if self.evaluate_digest(digest)? != TRUE_DIGEST {
+            return Err(PrecompileError::AssertionFailed);
+        }
+        Ok(())
+    }
+}
+
+impl DeferredEvaluator {
+    pub(super) fn new(registry: Arc<PrecompileRegistry>) -> Result<Self, PrecompileError> {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(TRUE_DIGEST, Node::TRUE);
+        let mut evals = BTreeMap::new();
+        evals.insert(TRUE_DIGEST, TRUE_DIGEST);
+        let mut evaluator = Self { registry, nodes, evals };
+        evaluator.initialize_precompile_nodes()?;
+        Ok(evaluator)
+    }
+
+    /// Loads and evaluates fixed registry bootstrap nodes without charging guest work.
+    fn initialize_precompile_nodes(&mut self) -> Result<(), PrecompileError> {
+        let mut prepared_nodes = Vec::new();
+        for node in self.registry.init_nodes() {
+            self.registry.validate_node(&node)?;
+            prepared_nodes.push(PreparedNode::new(node));
+        }
+        let init_digests = prepared_nodes.iter().map(PreparedNode::digest).collect::<Vec<_>>();
+        for prepared in prepared_nodes {
+            if prepared.node().children().any(|child| {
+                child != TRUE_DIGEST
+                    && !self.nodes.contains_key(&child)
+                    && !init_digests.contains(&child)
+            }) {
+                return Err(PrecompileError::MissingNode);
+            }
+            self.insert_node(prepared)?;
+        }
+        for digest in init_digests {
+            self.evaluate_digest(digest)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn get_node(&self, digest: &Digest) -> Option<&Node> {
+        self.nodes.get(digest)
+    }
+
+    fn get_canonical_digest(&self, digest: Digest) -> Option<Digest> {
+        let canonical = self.evals.get(&digest).copied()?;
+        self.nodes.contains_key(&canonical).then_some(canonical)
+    }
+
+    fn prepare_node(&self, node: Node) -> Result<PreparedNode, PrecompileError> {
+        self.validate_node(&node)?;
+        Ok(PreparedNode::new(node))
+    }
+
+    fn validate_node(&self, node: &Node) -> Result<(), PrecompileError> {
+        self.registry.validate_node(node)?;
+        for child in node.children() {
+            if child != TRUE_DIGEST && !self.nodes.contains_key(&child) {
+                return Err(PrecompileError::MissingNode);
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn insert_node(
+        &mut self,
+        prepared: PreparedNode,
+    ) -> Result<Digest, PrecompileError> {
+        let (digest, node) = prepared.into_parts();
+        match self.nodes.get(&digest) {
+            Some(existing) if existing == &node => Ok(digest),
+            Some(_) => Err(DeferredError::ConflictingNode.into()),
+            None => {
+                self.nodes.insert(digest, node);
+                Ok(digest)
+            },
+        }
+    }
+
+    pub(super) fn evaluate_digest(&mut self, digest: Digest) -> Result<Digest, PrecompileError> {
         if let Some(canonical) = self.evals.get(&digest).copied() {
             return self
                 .nodes
@@ -225,7 +333,6 @@ impl DeferredState {
                 .then_some(canonical)
                 .ok_or(PrecompileError::MissingNode);
         }
-
         let node = self.nodes.get(&digest).ok_or(PrecompileError::MissingNode)?.clone();
         let canonical_digest = if node.tag() == Tag::TRUE {
             TRUE_DIGEST
@@ -250,52 +357,8 @@ impl DeferredState {
                 self.insert_node(prepared)?
             }
         };
-
         self.record_eval(digest, canonical_digest)?;
         Ok(canonical_digest)
-    }
-
-    /// Consumes completed execution state and exports its root-reachable portable graph.
-    ///
-    /// Executions without logged work return `None`. Export preserves original node commitments
-    /// and omits unreachable nodes and evaluation caches; it does not serialize through bytes.
-    pub fn into_witness(self) -> Result<Option<PrecompileWitness>, IntegrityError> {
-        if self.root == TRUE_DIGEST {
-            return Ok(None);
-        }
-        PrecompileWitness::from_state(&self).map(Some)
-    }
-
-    fn prepare_node(&self, node: Node) -> Result<PreparedNode, PrecompileError> {
-        self.registry.validate_node(&node)?;
-        for child in node.children() {
-            if child != TRUE_DIGEST && !self.nodes.contains_key(&child) {
-                return Err(PrecompileError::MissingNode);
-            }
-        }
-        Ok(PreparedNode::new(node))
-    }
-
-    pub(super) fn insert_node(
-        &mut self,
-        prepared: PreparedNode,
-    ) -> Result<Digest, PrecompileError> {
-        let (digest, node) = prepared.into_parts();
-        match self.nodes.get(&digest) {
-            Some(existing) if existing == &node => Ok(digest),
-            Some(_) => Err(DeferredError::ConflictingNode.into()),
-            None => {
-                let required = node.storage_felt_len();
-                self.remaining_elements = self.remaining_elements.checked_sub(required).ok_or(
-                    DeferredError::DeferredStateTooLarge {
-                        num_elements: required,
-                        max: self.remaining_elements,
-                    },
-                )?;
-                self.nodes.insert(digest, node);
-                Ok(digest)
-            },
-        }
     }
 
     fn record_eval(
@@ -316,22 +379,6 @@ impl DeferredState {
         }
     }
 
-    fn prepare_statement(
-        &mut self,
-        statement_digest: Digest,
-    ) -> Result<PreparedNode, PrecompileError> {
-        self.require_true_eval(self.root)?;
-        self.require_true_eval(statement_digest)?;
-        self.prepare_node(Node::and(self.root, statement_digest))
-    }
-
-    fn accept_statement(&mut self, statement: PreparedNode) -> Result<Digest, PrecompileError> {
-        let new_root = self.insert_node(statement)?;
-        self.record_eval(new_root, TRUE_DIGEST)?;
-        self.root = new_root;
-        Ok(new_root)
-    }
-
     fn require_true_eval(&mut self, digest: Digest) -> Result<(), PrecompileError> {
         if self.evaluate_digest(digest)? != TRUE_DIGEST {
             return Err(PrecompileError::AssertionFailed);
@@ -348,20 +395,20 @@ impl DeferredState {
 /// Precompiles do not own the DAG; they receive this handle to evaluate registered children and to
 /// register helper nodes referenced by compound canonicals during execution.
 pub struct DeferredContext<'a> {
-    state: &'a mut DeferredState,
+    evaluator: &'a mut DeferredEvaluator,
 }
 
 impl<'a> DeferredContext<'a> {
     /// Binds state for one framework-driven evaluation.
-    pub(crate) fn new(state: &'a mut DeferredState) -> Self {
-        Self { state }
+    fn new(evaluator: &'a mut DeferredEvaluator) -> Self {
+        Self { evaluator }
     }
 
     /// Returns the registered node addressed by `digest`, if present.
     ///
     /// This is a syntactic DAG lookup: it does not evaluate the node or canonicalize it.
     pub fn get_node(&self, digest: &Digest) -> Option<&Node> {
-        self.state.get_node(digest)
+        self.evaluator.get_node(digest)
     }
 
     /// Evaluates a registered child digest and returns the canonical node digest.
@@ -370,7 +417,7 @@ impl<'a> DeferredContext<'a> {
     /// transparent to precompile implementations. Use
     /// [`Self::get_node`] with the returned digest to inspect the canonical node contents.
     pub fn evaluate_digest(&mut self, digest: Digest) -> Result<Digest, PrecompileError> {
-        self.state.evaluate_digest(digest)
+        self.evaluator.evaluate_digest(digest)
     }
 
     /// Evaluates two registered child digests to their canonical node digests.
@@ -396,7 +443,10 @@ impl<'a> DeferredContext<'a> {
     /// Use this when a compound canonical needs stable child commitments that were created during
     /// evaluation. Helper registration follows the same eager semantics as ordinary registration.
     pub fn register(&mut self, node: Node) -> Result<Digest, PrecompileError> {
-        self.state.register(node)
+        let prepared = self.evaluator.prepare_node(node)?;
+        let digest = self.evaluator.insert_node(prepared)?;
+        self.evaluator.evaluate_digest(digest)?;
+        Ok(digest)
     }
 }
 
@@ -405,10 +455,21 @@ mod tests {
     use super::*;
     use crate::{
         Felt, ZERO,
-        deferred::{Payload, Precompile, WorkClass, WorkItem, precompile_id},
+        deferred::{Payload, Precompile, WorkClass, WorkItem, WorkLimit, precompile_id},
     };
 
     const FIXTURE_WORK: WorkClass = WorkClass::new("state-fixture");
+
+    fn fixture_limits() -> PrecompileLimits {
+        PrecompileLimits::new(u64::MAX).with_class(
+            FIXTURE_WORK,
+            WorkLimit {
+                max_count: u64::MAX,
+                max_total_size: u64::MAX,
+                max_size: u32::MAX,
+            },
+        )
+    }
 
     #[derive(Debug, Clone, Copy)]
     struct FixturePrecompile;
@@ -466,20 +527,24 @@ mod tests {
     }
 
     #[test]
-    fn construction_uses_the_fixed_deferred_element_limit() {
-        let state = DeferredState::new(Arc::new(PrecompileRegistry::new())).unwrap();
+    fn construction_starts_with_no_charged_guest_work() {
+        let state = DeferredState::new(
+            Arc::new(PrecompileRegistry::new()),
+            PrecompileLimits::new(u64::MAX),
+        )
+        .unwrap();
         let default_state = DeferredState::default();
 
         assert_eq!(state.num_elements(), 0);
-        assert_eq!(state.remaining_elements(), MAX_DEFERRED_ELEMENTS);
-        assert_eq!(default_state.remaining_elements(), MAX_DEFERRED_ELEMENTS);
+        assert_eq!(state.work(), &PrecompileWork::default());
+        assert_eq!(default_state.work(), &PrecompileWork::default());
     }
 
     #[test]
     fn register_eagerly_propagates_precompile_evaluation_errors() {
         let precompile = FixturePrecompile;
         let registry = Arc::new(PrecompileRegistry::new().with_precompile(precompile));
-        let mut state = DeferredState::new(registry).unwrap();
+        let mut state = DeferredState::new(registry, fixture_limits()).unwrap();
         let node = precompile.node(0);
         let digest = node.digest();
 
@@ -490,10 +555,33 @@ mod tests {
     }
 
     #[test]
+    fn register_enforces_work_policy_before_evaluation() {
+        let precompile = FixturePrecompile;
+        let registry = Arc::new(PrecompileRegistry::new().with_precompile(precompile));
+        let limits = PrecompileLimits::new(u64::MAX).with_class(
+            FIXTURE_WORK,
+            WorkLimit {
+                max_count: 0,
+                max_total_size: 0,
+                max_size: 0,
+            },
+        );
+        let mut state = DeferredState::new(registry, limits).unwrap();
+        let node = precompile.node(0);
+        let digest = node.digest();
+
+        let error = state.register(node).unwrap_err();
+
+        assert!(matches!(error, PrecompileError::Limit(_)));
+        assert!(state.get_node(&digest).is_none());
+        assert_eq!(state.work(), &PrecompileWork::default());
+    }
+
+    #[test]
     fn evaluation_validates_a_new_canonical_before_storing_it() {
         let precompile = FixturePrecompile;
         let registry = Arc::new(PrecompileRegistry::new().with_precompile(precompile));
-        let mut state = DeferredState::new(registry).unwrap();
+        let mut state = DeferredState::new(registry, fixture_limits()).unwrap();
         let input = precompile.node(1);
         let input_digest = input.digest();
         let invalid = Node::value(
@@ -536,8 +624,8 @@ mod tests {
     fn verified_root_mismatch_precedes_statement_evaluation() {
         let precompile = FixturePrecompile;
         let registry = Arc::new(PrecompileRegistry::new().with_precompile(precompile));
-        let mut state = DeferredState::new(registry).unwrap();
-        let statement = state.insert_node(PreparedNode::new(precompile.node(0))).unwrap();
+        let mut state = DeferredState::new(registry, fixture_limits()).unwrap();
+        let statement = state.evaluator.insert_node(PreparedNode::new(precompile.node(0))).unwrap();
         let actual_root = Node::and(TRUE_DIGEST, statement).digest();
         assert_ne!(actual_root, TRUE_DIGEST);
 

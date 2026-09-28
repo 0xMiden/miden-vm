@@ -182,7 +182,7 @@ mod tests {
     use super::*;
     use crate::{
         ONE, ZERO,
-        deferred::{DeferredState, Payload, WorkClass, WorkItem},
+        deferred::{DeferredState, Payload, PrecompileLimits, WorkClass, WorkItem, WorkLimit},
     };
 
     const FIXTURE_WORK: WorkClass = WorkClass::new("fixture");
@@ -369,7 +369,15 @@ mod tests {
         let tag = f.tag();
         let registry = Arc::new(PrecompileRegistry::default().with_precompile(f));
         let node = Node::value(tag, [ZERO; 8]).unwrap();
-        let mut state = DeferredState::new(Arc::clone(&registry)).unwrap();
+        let limits = PrecompileLimits::new(u64::MAX).with_class(
+            FIXTURE_WORK,
+            WorkLimit {
+                max_count: u64::MAX,
+                max_total_size: u64::MAX,
+                max_size: u32::MAX,
+            },
+        );
+        let mut state = DeferredState::new(Arc::clone(&registry), limits).unwrap();
         // Use the framework's evaluation path so we exercise dispatch end-to-end.
         let digest = state.register(node.clone()).unwrap();
         let (canonical_digest, canonical_node) = state.require_canonical_node(digest).unwrap();

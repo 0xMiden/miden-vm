@@ -1,5 +1,5 @@
 use miden_air::trace::MIN_TRACE_LEN;
-use miden_core::program::MIN_STACK_DEPTH;
+use miden_core::{deferred::PrecompileLimits, program::MIN_STACK_DEPTH};
 
 // EXECUTION OPTIONS
 // ================================================================================================
@@ -8,7 +8,7 @@ use miden_core::program::MIN_STACK_DEPTH;
 ///
 /// - `max_cycles` specifies the maximum number of cycles a program is allowed to execute.
 /// - `expected_cycles` specifies the number of cycles a program is expected to execute.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionOptions {
     max_cycles: u32,
     expected_cycles: u32,
@@ -35,6 +35,8 @@ pub struct ExecutionOptions {
     /// Maximum number of field elements allowed in the processor's memory at any point during
     /// execution, rounded up to the nearest multiple of 4.
     max_memory_elements: usize,
+    /// Policy limiting guest-induced deferred precompile work.
+    precompile_limits: PrecompileLimits,
 }
 
 impl Default for ExecutionOptions {
@@ -49,6 +51,7 @@ impl Default for ExecutionOptions {
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
             overlapped_trace_build: true,
+            precompile_limits: miden_precompiles::default_precompile_limits(),
         }
     }
 }
@@ -150,6 +153,7 @@ impl ExecutionOptions {
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
             overlapped_trace_build: true,
+            precompile_limits: miden_precompiles::default_precompile_limits(),
         })
     }
 
@@ -275,6 +279,17 @@ impl ExecutionOptions {
     /// Sets the maximum number of field elements allowed in the processor's memory.
     pub fn with_max_memory_elements(mut self, max_memory_elements: usize) -> Self {
         self.max_memory_elements = max_memory_elements;
+        self
+    }
+
+    /// Returns the policy limiting guest-induced deferred precompile work.
+    pub const fn precompile_limits(&self) -> &PrecompileLimits {
+        &self.precompile_limits
+    }
+
+    /// Sets the policy limiting guest-induced deferred precompile work.
+    pub fn with_precompile_limits(mut self, limits: PrecompileLimits) -> Self {
+        self.precompile_limits = limits;
         self
     }
 }

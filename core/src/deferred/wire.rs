@@ -13,7 +13,7 @@ use alloc::{
 };
 
 use super::{
-    DataChunk, DeferredState, Digest, MAX_DEFERRED_ELEMENTS, Node, NodeType, PrecompileError,
+    DataChunk, DeferredState, Digest, MAX_DEFERRED_WIRE_ELEMENTS, Node, NodeType, PrecompileError,
     PrecompileLimitError, PrecompileLimits, PrecompileRegistry, PrecompileWork, TRUE_DIGEST, Tag,
     node::hash_payload,
 };
@@ -31,7 +31,7 @@ use crate::{
 /// Reserved index for the always-known [`super::TRUE_DIGEST`] / [`super::Node::TRUE`] node.
 const TRUE_INDEX: u32 = 0;
 
-const MAX_WIRE_ENTRIES: usize = MAX_DEFERRED_ELEMENTS / Tag::FELT_LEN;
+const MAX_WIRE_ENTRIES: usize = MAX_DEFERRED_WIRE_ELEMENTS / Tag::FELT_LEN;
 
 fn reserve_wire_elements(
     remaining_elements: &mut usize,
@@ -39,7 +39,7 @@ fn reserve_wire_elements(
 ) -> Result<(), DeserializationError> {
     *remaining_elements = remaining_elements.checked_sub(requested_elements).ok_or_else(|| {
         DeserializationError::InvalidValue(format!(
-            "deferred wire exceeds the {MAX_DEFERRED_ELEMENTS} element limit"
+            "deferred wire exceeds the {MAX_DEFERRED_WIRE_ELEMENTS} element limit"
         ))
     })?;
     Ok(())
@@ -181,35 +181,11 @@ impl PrecompileWitness {
         let mut indices = BTreeMap::new();
         let mut nodes = Vec::with_capacity(self.entries.len());
         let mut work = PrecompileWork::default();
+        let bootstrap = registry.init_nodes();
         digests.push(TRUE_DIGEST);
         indices.insert(TRUE_DIGEST, 0);
 
         for entry in self.entries {
-            let payload_count = match &entry {
-                WireEntry::Data { chunks, .. } => chunks.len(),
-                WireEntry::Join { .. } => 1,
-                WireEntry::PairList { pairs, .. } => pairs.len(),
-            };
-            if payload_count != 0 {
-                let entry_elements = payload_count
-                    .checked_mul(Node::DATA_CHUNK_FELT_LEN)
-                    .and_then(|elements| Tag::FELT_LEN.checked_add(elements))
-                    .ok_or(PrecompileLimitError::Overflow)?;
-                let actual = work
-                    .elements()
-                    .checked_add(
-                        u64::try_from(entry_elements)
-                            .map_err(|_| PrecompileLimitError::Overflow)?,
-                    )
-                    .ok_or(PrecompileLimitError::Overflow)?;
-                if actual > limits.max_elements() {
-                    return Err(PrecompileLimitError::Elements {
-                        actual,
-                        max: limits.max_elements(),
-                    }
-                    .into());
-                }
-            }
             let child = |index: u32| {
                 digests.get(index as usize).copied().ok_or(IntegrityError::InvalidStructure)
             };
@@ -239,14 +215,33 @@ impl PrecompileWitness {
             }
             .map_err(|_| IntegrityError::InvalidStructure)?;
 
+            if !bootstrap.contains(&node) {
+                let actual = work
+                    .elements()
+                    .checked_add(
+                        u64::try_from(node.felt_len())
+                            .map_err(|_| PrecompileLimitError::Overflow)?,
+                    )
+                    .ok_or(PrecompileLimitError::Overflow)?;
+                if actual > limits.max_elements() {
+                    return Err(PrecompileLimitError::Elements {
+                        actual,
+                        max: limits.max_elements(),
+                    }
+                    .into());
+                }
+            }
             registry.validate_node(&node)?;
-            let item = if node.tag().is_framework_reserved() {
-                None
-            } else {
-                Some(registry.work(&node)?)
-            };
-            work.charge(node.felt_len(), item, limits)?;
-
+            // Registry bootstrap constants are fixed host setup rather than guest-induced work.
+            // They may still appear in a portable graph when an admitted node references them.
+            if !bootstrap.contains(&node) {
+                let item = if node.tag().is_framework_reserved() {
+                    None
+                } else {
+                    Some(registry.work(&node)?)
+                };
+                work.charge(node.felt_len(), item, limits)?;
+            }
             let prepared = PreparedNode::new(node);
             let digest = prepared.digest();
             if indices.insert(digest, digests.len()).is_some() {
@@ -309,7 +304,7 @@ impl PrecompileWitness {
     }
 
     fn validate_element_limit(&self) -> Result<(), IntegrityError> {
-        let mut remaining_elements = MAX_DEFERRED_ELEMENTS;
+        let mut remaining_elements = MAX_DEFERRED_WIRE_ELEMENTS;
         for entry in &self.entries {
             let payload_count = match entry {
                 WireEntry::Data { chunks, .. } => chunks.len(),
@@ -404,16 +399,16 @@ impl PreparedWitness {
     /// [`TRUE_DIGEST`].
     pub fn evaluate(self) -> Result<(), PrecompileError> {
         let Self { registry, nodes, root: _, work: _ } = self;
-        let mut state = DeferredState::new(registry)?;
+        let mut evaluator = super::state::DeferredEvaluator::new(registry)?;
         let mut digests = Vec::with_capacity(nodes.len());
         for prepared in nodes {
-            digests.push(state.insert_node(prepared)?);
+            digests.push(evaluator.insert_node(prepared)?);
         }
         let root_digest = digests.pop().ok_or(PrecompileError::MissingNode)?;
         for digest in digests {
-            state.evaluate_digest(digest)?;
+            evaluator.evaluate_digest(digest)?;
         }
-        if state.evaluate_digest(root_digest)? != TRUE_DIGEST {
+        if evaluator.evaluate_digest(root_digest)? != TRUE_DIGEST {
             return Err(PrecompileError::AssertionFailed);
         }
         Ok(())
@@ -440,7 +435,7 @@ pub enum IntegrityError {
     /// Invalid framework shape, child reference, duplicate, orphan, or canonical entry order.
     #[error("invalid or non-canonical precompile witness structure")]
     InvalidStructure,
-    /// The portable entries exceed the same field-element ceiling as execution state.
+    /// The portable entries exceed the hard wire-allocation ceiling.
     #[error("deferred insertion requires {num_elements} elements but only {max} remain")]
     DeferredStateTooLarge { num_elements: usize, max: usize },
 }
@@ -682,7 +677,7 @@ impl Deserializable for PrecompileWitness {
             )));
         }
 
-        let mut remaining_elements = MAX_DEFERRED_ELEMENTS;
+        let mut remaining_elements = MAX_DEFERRED_WIRE_ELEMENTS;
         let mut entries = Vec::with_capacity(entry_count);
         for _ in 0..entry_count {
             entries.push(read_wire_entry(source, &mut remaining_elements)?);
@@ -787,7 +782,7 @@ mod tests {
     }
 
     fn framework_limits() -> PrecompileLimits {
-        PrecompileLimits::new(MAX_DEFERRED_ELEMENTS as u64)
+        PrecompileLimits::new(MAX_DEFERRED_WIRE_ELEMENTS as u64)
     }
 
     fn prepare_framework(witness: PrecompileWitness) -> Result<PreparedWitness, PreparationError> {
@@ -964,19 +959,18 @@ mod tests {
 
     #[test]
     fn wire_element_budget_accepts_exact_limit_and_rejects_one_more() {
-        let mut remaining = MAX_DEFERRED_ELEMENTS;
-        reserve_wire_elements(&mut remaining, MAX_DEFERRED_ELEMENTS).unwrap();
+        let mut remaining = MAX_DEFERRED_WIRE_ELEMENTS;
+        reserve_wire_elements(&mut remaining, MAX_DEFERRED_WIRE_ELEMENTS).unwrap();
         assert_eq!(remaining, 0);
         assert!(reserve_wire_elements(&mut remaining, 1).is_err());
-        let mut overflow_budget = MAX_DEFERRED_ELEMENTS;
+        let mut overflow_budget = MAX_DEFERRED_WIRE_ELEMENTS;
         assert!(reserve_wire_payload(&mut overflow_budget, usize::MAX).is_err());
     }
 
     #[test]
-    fn in_memory_entries_enforce_the_execution_element_limit() {
+    fn in_memory_entries_enforce_the_wire_element_limit() {
         let join = WireEntry::Join { tag: Tag::AND, lhs: 0, rhs: 0 };
-        let mut entries =
-            alloc::vec![join; MAX_DEFERRED_ELEMENTS / (Tag::FELT_LEN + Node::DATA_CHUNK_FELT_LEN)];
+        let mut entries = alloc::vec![join; MAX_DEFERRED_WIRE_ELEMENTS / (Tag::FELT_LEN + Node::DATA_CHUNK_FELT_LEN)];
         // Budget validation runs before hashing, so a repeated-entry allocation cannot bypass it.
         entries.push(WireEntry::Data {
             tag: Tag::CHUNKS,

@@ -238,9 +238,10 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     }
 
     let fresh = || {
-        DeferredState::new(Arc::new(
-            PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default()),
-        ))
+        DeferredState::new(
+            Arc::new(PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default())),
+            crate::default_precompile_limits(),
+        )
         .expect("hash precompile initialization should fit the test budget")
     };
     let assert_registers = |state: &mut DeferredState,
