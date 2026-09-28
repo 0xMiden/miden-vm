@@ -8,7 +8,8 @@ use std::{fs, path::Path};
 
 use miden_core::{Word, deferred::EidosFrame};
 use miden_precompiles::{
-    CurveId, CurvePrecompile, Limbs, ONE_LIMBS, TWO_LIMBS, UintDomain, UintPrecompile, ZERO_LIMBS,
+    CurveId, CurvePrecompile, Limbs, ONE_LIMBS, TWO_LIMBS, UintDomain, UintDomainKind,
+    UintPrecompile, ZERO_LIMBS,
 };
 
 const UINT_TEMPLATE_PATH: &str = "crates/lib/core/codegen/src/templates/uint.masm.tpl";
@@ -339,18 +340,17 @@ struct GeneratedFile {
 }
 
 fn domain_kind(domain: UintDomain) -> &'static str {
-    match domain {
-        UintDomain::U256 => "UINT",
-        UintDomain::Ed25519Order => "RING",
-        _ => "FIELD",
+    match domain.kind() {
+        UintDomainKind::Uint => "UINT",
+        UintDomainKind::Ring => "RING",
+        UintDomainKind::Field => "FIELD",
     }
 }
 
 fn value_kind(domain: UintDomain) -> &'static str {
-    if domain == UintDomain::U256 || domain == UintDomain::Ed25519Order {
-        "uint"
-    } else {
-        "field"
+    match domain.kind() {
+        UintDomainKind::Uint | UintDomainKind::Ring => "uint",
+        UintDomainKind::Field => "field",
     }
 }
 

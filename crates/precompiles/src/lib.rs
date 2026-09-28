@@ -34,7 +34,8 @@ pub use math::{
     uint::{
         ED25519_BASE_BOUND_PTR, ED25519_ORDER_BOUND_PTR, ED25519_SCALAR_BOUND_PTR,
         K1_BASE_BOUND_PTR, K1_SCALAR_BOUND_PTR, Limbs, ONE_LIMBS, TWO_LIMBS, U256_BOUND_PTR,
-        UintBinaryOp, UintDomain, UintNodeRef, UintOp, UintPrecompile, UintSpec, ZERO_LIMBS,
+        UintBinaryOp, UintDomain, UintDomainKind, UintNodeRef, UintOp, UintPrecompile, UintSpec,
+        ZERO_LIMBS,
     },
 };
 
