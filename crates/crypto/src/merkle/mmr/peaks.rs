@@ -3,7 +3,10 @@ use alloc::vec::Vec;
 use crate::{
     Felt, Word, ZERO,
     hash::poseidon2::Poseidon2,
-    merkle::mmr::{Forest, MmrError, MmrProof},
+    merkle::{
+        MerkleError,
+        mmr::{Forest, MmrError, MmrProof},
+    },
 };
 
 // MMR PEAKS
@@ -143,11 +146,29 @@ impl MmrPeaks {
     /// - provided opening proof is invalid.
     /// - Mmr root value computed using the provided leaf value differs from the actual one.
     pub fn verify(&self, value: Word, opening: MmrProof) -> Result<(), MmrError> {
-        let root = self.get_peak(opening.peak_index())?;
-        opening
-            .path()
-            .merkle_path()
-            .verify(opening.relative_pos() as u64, value, root)
+        // The tree, the peak and the relative position are derived from these peaks' forest, not
+        // from the forest carried by the proof, so that the proof cannot select a different tree.
+        let pos = opening.position();
+        let tree_height = self
+            .forest
+            .leaf_to_corresponding_tree(pos)
+            .ok_or(MmrError::PositionNotFound(pos))?;
+        let relative_pos =
+            self.forest.leaf_relative_position(pos).ok_or(MmrError::PositionNotFound(pos))?;
+        let root = self.get_peak(self.forest.tree_index(pos))?;
+
+        // The path must reach the peak from the leaf level; a shorter path would let an inner
+        // node be accepted as a leaf.
+        let merkle_path = opening.path().merkle_path();
+        if merkle_path.depth() as u32 != tree_height {
+            return Err(MmrError::InvalidMerklePath(MerkleError::InvalidNodeIndexDepth {
+                expected: tree_height as u8,
+                provided: merkle_path.depth(),
+            }));
+        }
+
+        merkle_path
+            .verify(relative_pos as u64, value, root)
             .map_err(MmrError::InvalidMerklePath)
     }
 

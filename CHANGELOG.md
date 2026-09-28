@@ -21,6 +21,10 @@
 - [BREAKING] Require minted MSM on-curve certificates to depend on older points. PVM proofs and verifier roots change ([#3943](https://github.com/0xMiden/miden-vm/pull/3943)).
 - [BREAKING] Reject nonzero certificates on UintAdd equality blocks. PVM proofs and verifier roots change ([#3943](https://github.com/0xMiden/miden-vm/pull/3943)).
 
+#### Fixes
+
+- [BREAKING] Fixed `MmrPeaks::verify` accepting proofs with a forest other than the peaks' forest or a path shorter than the tree height, and panicking on positions outside the forest. The tree, peak and relative position now come from the peaks' forest, so such proofs return `PositionNotFound` or `InvalidMerklePath` instead of `PeakOutOfBounds` ([#3931](https://github.com/0xMiden/miden-vm/pull/3931)).
+
 ## v0.34.0 (2026-09-26)
 
 #### Features
