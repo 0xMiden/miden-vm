@@ -87,7 +87,8 @@ fn reference_source(setup: &str) -> String {
     format!(
         r#"
     use miden::core::stark::random_coin
-    use miden::core::stark::constants
+    use {{FRI_QUERIES_ADDRESS_PTR, LDE_DOMAIN_LOG_SIZE_PTR}} from miden::core::stark::constants
+    use {{NUM_QUERIES_PTR}} from miden::core::stark::constants
     use miden::core::crypto::hashes::poseidon2
 
     #! Sample a felt, permuting first if the output buffer is empty.
@@ -125,9 +126,9 @@ fn reference_source(setup: &str) -> String {
     begin
         {setup}
 
-        exec.constants::get_number_queries
-        exec.constants::get_fri_queries_address
-        exec.constants::get_lde_domain_depth
+        mem_load.NUM_QUERIES_PTR
+        mem_load.FRI_QUERIES_ADDRESS_PTR
+        mem_load.LDE_DOMAIN_LOG_SIZE_PTR
         dup push.32 swap u32wrapping_sub pow2
         movdn.2 swap
         dup.3 push.0 neq

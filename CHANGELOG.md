@@ -2,6 +2,10 @@
 
 ## v0.35.0 (Unreleased)
 
+#### Changes
+
+- [BREAKING] Removed the accessor procedures from `miden::core::stark::constants`; import its constants instead ([#XXXX](https://github.com/0xMiden/miden-vm/pull/XXXX)).
+
 #### Fixes
 
 - [BREAKING] Reject unsorted or repeated keys in `SmtLeaf::new_multiple` and when reading serialized leaves. Invalid keys return the new `SmtLeafError::UnsortedMultipleLeafKeys` error ([#3901](https://github.com/0xMiden/miden-vm/pull/3901)).

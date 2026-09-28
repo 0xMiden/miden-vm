@@ -114,7 +114,7 @@ fn folding_reseed_helper_matches_reference_sampler() {
             "
             push.41.31.29.23 push.17
             exec.random_coin::reseed_with_felt
-            exec.constants::get_folding_pow_bits
+            mem_load.FOLDING_POW_BITS_PTR
             exec.random_coin::sample_bits
             assertz
             exec.random_coin::sample_ext
@@ -124,18 +124,20 @@ fn folding_reseed_helper_matches_reference_sampler() {
         format!(
             "
             use miden::core::sys
-            use miden::core::stark::constants
+            use {{C_PTR, FOLDING_POW_BITS_PTR}} from miden::core::stark::constants
+            use {{RANDOM_COIN_INPUT_LEN_PTR}} from miden::core::stark::constants
+            use {{RANDOM_COIN_OUTPUT_LEN_PTR}} from miden::core::stark::constants
             use miden::core::stark::random_coin
 
             begin
-                push.0 exec.constants::set_folding_pow_bits
-                push.109.113.127.131 exec.constants::c_ptr mem_storew_le dropw
-                push.0 exec.constants::random_coin_input_len_ptr mem_store
-                push.0 exec.constants::random_coin_output_len_ptr mem_store
+                push.0 mem_store.FOLDING_POW_BITS_PTR
+                push.109.113.127.131 mem_storew_le.C_PTR dropw
+                push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
+                push.0 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
 
                 {sample}
 
-                exec.constants::random_coin_output_len_ptr mem_load
+                mem_load.RANDOM_COIN_OUTPUT_LEN_PTR
                 exec.random_coin::load_random_coin_state
                 exec.sys::truncate_stack
             end
@@ -184,17 +186,18 @@ fn word_and_pair_observe_helpers_match_scalar_observe() {
         format!(
             "
             use miden::core::sys
-            use miden::core::stark::constants
+            use {{C_PTR, RANDOM_COIN_INPUT_LEN_PTR}} from miden::core::stark::constants
+            use {{RANDOM_COIN_OUTPUT_LEN_PTR}} from miden::core::stark::constants
             use miden::core::stark::random_coin
 
             begin
-                push.101.103.107.109 exec.constants::c_ptr mem_storew_le dropw
-                push.0 exec.constants::random_coin_input_len_ptr mem_store
-                push.8 exec.constants::random_coin_output_len_ptr mem_store
+                push.101.103.107.109 mem_storew_le.C_PTR dropw
+                push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
+                push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
 
                 {observe}
 
-                exec.constants::random_coin_output_len_ptr mem_load
+                mem_load.RANDOM_COIN_OUTPUT_LEN_PTR
                 exec.random_coin::load_random_coin_state
                 exec.sys::truncate_stack
             end
@@ -253,18 +256,19 @@ fn observe_word_and_flush_buffer_matches_scalar_observe() {
         format!(
             "
             use miden::core::sys
-            use miden::core::stark::constants
+            use {{C_PTR, RANDOM_COIN_INPUT_LEN_PTR}} from miden::core::stark::constants
+            use {{RANDOM_COIN_OUTPUT_LEN_PTR}} from miden::core::stark::constants
             use miden::core::stark::random_coin
 
             begin
-                push.101.103.107.109 exec.constants::c_ptr mem_storew_le dropw
-                push.0 exec.constants::random_coin_input_len_ptr mem_store
-                push.8 exec.constants::random_coin_output_len_ptr mem_store
+                push.101.103.107.109 mem_storew_le.C_PTR dropw
+                push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
+                push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
 
                 {prefix}
                 {observe}
 
-                exec.constants::random_coin_output_len_ptr mem_load
+                mem_load.RANDOM_COIN_OUTPUT_LEN_PTR
                 exec.random_coin::load_random_coin_state
                 exec.sys::truncate_stack
             end
@@ -851,7 +855,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
     let source = format!(
         "
         use miden::core::stark::random_coin
-        use miden::core::stark::constants
+        use {{RELATION_DIGEST_PTR, TRACE_LENGTH_LOG_PTR}} from miden::core::stark::constants
         use miden::core::sys::vm::layout
         use miden::core::sys::vm::public_inputs
 
@@ -875,8 +879,8 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
             push.10 exec.layout::set_core_trace_length_log
             push.10 exec.layout::set_chiplets_trace_length_log
             push.10 exec.layout::set_poseidon2_permutation_trace_length_log
-            push.10 exec.constants::set_trace_length_log
-            push.4.3.2.1 exec.constants::relation_digest_ptr mem_storew_le dropw
+            push.10 mem_store.TRACE_LENGTH_LOG_PTR
+            push.4.3.2.1 mem_storew_le.RELATION_DIGEST_PTR dropw
             push.{claim_c3}.{claim_c2}.{claim_c1}.{claim_c0}
             exec.layout::claim_commitment_ptr mem_storew_le dropw
 

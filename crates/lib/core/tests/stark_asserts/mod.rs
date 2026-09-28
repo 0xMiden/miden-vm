@@ -59,12 +59,13 @@ fn validate_inputs_source(
 ) -> String {
     format!(
         "use miden::core::stark::utils
-         use miden::core::stark::constants
+         use {{DEEP_POW_BITS_PTR, FOLDING_POW_BITS_PTR}} from miden::core::stark::constants
+         use {{NUM_QUERIES_PTR, QUERY_POW_BITS_PTR}} from miden::core::stark::constants
          begin
-             push.{num_queries} exec.constants::set_number_queries
-             push.{query_pow_bits} exec.constants::set_query_pow_bits
-             push.{deep_pow_bits} exec.constants::set_deep_pow_bits
-             push.{folding_pow_bits} exec.constants::set_folding_pow_bits
+             push.{num_queries} mem_store.NUM_QUERIES_PTR
+             push.{query_pow_bits} mem_store.QUERY_POW_BITS_PTR
+             push.{deep_pow_bits} mem_store.DEEP_POW_BITS_PTR
+             push.{folding_pow_bits} mem_store.FOLDING_POW_BITS_PTR
              exec.utils::validate_inputs
          end"
     )
@@ -239,11 +240,11 @@ fn validate_inputs_rejects_non_u32_security_parameters() {
 fn init_seed_trace_length_too_large_has_message() {
     // log(trace_length) = 32 overflows u32 in init_seed's `pow2` step.
     let source = "
-        use miden::core::stark::constants
+        use {RELATION_DIGEST_PTR, TRACE_LENGTH_LOG_PTR} from miden::core::stark::constants
         use miden::core::stark::random_coin
         begin
-            push.32 exec.constants::set_trace_length_log
-            push.0.0.0.0 exec.constants::relation_digest_ptr mem_storew_le dropw
+            push.32 mem_store.TRACE_LENGTH_LOG_PTR
+            push.0.0.0.0 mem_storew_le.RELATION_DIGEST_PTR dropw
             exec.random_coin::init_seed
         end
     ";
@@ -258,14 +259,16 @@ fn check_pow_invalid_has_message() {
     // The advice nonce (0) will fail the PoW check.
     let source = "
         use miden::core::stark::random_coin
-        use miden::core::stark::constants
+        use {DEEP_POW_BITS_PTR, FOLDING_POW_BITS_PTR} from miden::core::stark::constants
+        use {NUM_QUERIES_PTR, QUERY_POW_BITS_PTR} from miden::core::stark::constants
+        use {RELATION_DIGEST_PTR, TRACE_LENGTH_LOG_PTR} from miden::core::stark::constants
         begin
-            push.27 exec.constants::set_number_queries
-            push.16 exec.constants::set_query_pow_bits
-            push.0  exec.constants::set_deep_pow_bits
-            push.16 exec.constants::set_folding_pow_bits
-            push.10 exec.constants::set_trace_length_log
-            push.0.0.0.0 exec.constants::relation_digest_ptr mem_storew_le dropw
+            push.27 mem_store.NUM_QUERIES_PTR
+            push.16 mem_store.QUERY_POW_BITS_PTR
+            push.0  mem_store.DEEP_POW_BITS_PTR
+            push.16 mem_store.FOLDING_POW_BITS_PTR
+            push.10 mem_store.TRACE_LENGTH_LOG_PTR
+            push.0.0.0.0 mem_storew_le.RELATION_DIGEST_PTR dropw
             exec.random_coin::init_seed
             exec.random_coin::check_query_pow
         end
@@ -427,11 +430,11 @@ fn derive_order_tag_from_heights_matches_the_registry_air_limit() {
 fn relation_constraint_evaluators_reject_padding_order_tags() {
     for (relation, order_count) in [("vm", 6), ("pvm", 3_628_800)] {
         let source = format!(
-            "use miden::core::stark::constants
+            "use {{ORDER_TAG_PTR, TRACE_LENGTH_LOG_PTR}} from miden::core::stark::constants
              use miden::core::sys::{relation}::constraints_eval
              begin
-                 push.{order_count} exec.constants::set_order_tag
-                 push.8 exec.constants::set_trace_length_log
+                 push.{order_count} mem_store.ORDER_TAG_PTR
+                 push.8 mem_store.TRACE_LENGTH_LOG_PTR
                  exec.constraints_eval::execute_constraint_evaluation_check
              end"
         );
@@ -517,11 +520,11 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("QUERY_POW_BITS_PTR", 0, 1),
         ("DEEP_POW_BITS_PTR", 0, 1),
         ("FOLDING_POW_BITS_PTR", 0, 1),
-        ("DYNAMIC_PROCEDURE_0_PTR", 0, 4),
-        ("DYNAMIC_PROCEDURE_1_PTR", 0, 4),
-        ("DYNAMIC_PROCEDURE_2_PTR", 0, 4),
-        ("DYNAMIC_PROCEDURE_3_PTR", 0, 4),
-        ("DYNAMIC_PROCEDURE_4_PTR", 0, 4),
+        ("HOOK_COMPUTE_DEEP_COMPOSITION_POLYNOMIAL_QUERIES_PTR", 0, 4),
+        ("HOOK_EXECUTE_CONSTRAINT_EVALUATION_CHECK_PTR", 0, 4),
+        ("HOOK_PROCESS_ROW_OOD_EVALUATIONS_PTR", 0, 4),
+        ("HOOK_PROCESS_PUBLIC_INPUTS_PTR", 0, 4),
+        ("HOOK_OBSERVE_AUX_TRACE_PTR", 0, 4),
         ("RANDOM_COIN_INPUT_LEN_PTR", 0, 1),
         ("RANDOM_COIN_OUTPUT_LEN_PTR", 0, 1),
         ("OOD_EVALUATIONS_ADDRESS_PTR", 0, 1),

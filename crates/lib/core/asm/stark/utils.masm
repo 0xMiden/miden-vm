@@ -1,5 +1,10 @@
 use miden::core::stark::types
-use miden::core::stark::constants
+use {
+    DEEP_POW_BITS_PTR, FOLDING_POW_BITS_PTR, HOOK_COMPUTE_DEEP_COMPOSITION_POLYNOMIAL_QUERIES_PTR,
+    HOOK_EXECUTE_CONSTRAINT_EVALUATION_CHECK_PTR, HOOK_OBSERVE_AUX_TRACE_PTR,
+    HOOK_PROCESS_PUBLIC_INPUTS_PTR, HOOK_PROCESS_ROW_OOD_EVALUATIONS_PTR, NUM_QUERIES_PTR,
+    QUERY_POW_BITS_PTR, ROOT_UNITY, TMP1, TMP2, TMP3
+} from miden::core::stark::constants
 
 # Accepted transcript-bound security-parameter envelope for the recursive verifier. These bounds
 # also define the domain over which its returned descriptor may be passed to the common estimator.
@@ -32,10 +37,10 @@ const FACTORIAL_11 = 39916800
 #! Inputs:  [...]
 #! Outputs: [...]
 pub proc load_security_params()
-    adv_push exec.constants::set_number_queries
-    adv_push exec.constants::set_query_pow_bits
-    adv_push exec.constants::set_deep_pow_bits
-    adv_push exec.constants::set_folding_pow_bits
+    adv_push mem_store.NUM_QUERIES_PTR
+    adv_push mem_store.QUERY_POW_BITS_PTR
+    adv_push mem_store.DEEP_POW_BITS_PTR
+    adv_push mem_store.FOLDING_POW_BITS_PTR
 end
 
 #! Compute the LDE domain generator from the log2 of its size.
@@ -48,7 +53,7 @@ pub proc compute_lde_generator(log_domain_size: u8) -> felt
     swap
     sub
     pow2
-    exec.constants::get_root_unity
+    push.ROOT_UNITY
     swap
     exp.u32
     # => [domain_gen, ..]
@@ -63,18 +68,18 @@ end
 #! Output: [...]
 pub proc validate_inputs()
     # The query upper bound is a soft restriction imposed by the current verifier memory layout.
-    exec.constants::get_number_queries
+    mem_load.NUM_QUERIES_PTR
     dup u32lte.NUM_QUERIES_MAX assert.err="num_queries must be at most 150"
     u32gte.NUM_QUERIES_MIN assert.err="num_queries must be at least 7"
 
     # PoW bit counts must fit in the verifier's u32 bit masking.
-    exec.constants::get_query_pow_bits
+    mem_load.QUERY_POW_BITS_PTR
     u32lte.POW_BITS_MAX assert.err="query_pow_bits must be less than 32"
 
-    exec.constants::get_deep_pow_bits
+    mem_load.DEEP_POW_BITS_PTR
     u32lte.POW_BITS_MAX assert.err="deep_pow_bits must be less than 32"
 
-    exec.constants::get_folding_pow_bits
+    mem_load.FOLDING_POW_BITS_PTR
     u32lte.POW_BITS_MAX assert.err="folding_pow_bits must be less than 32"
 end
 
@@ -147,7 +152,7 @@ end
 #!
 #! Invocation: exec
 pub proc execute_constraint_evaluation_check()
-    exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr dynexec
+    push.HOOK_EXECUTE_CONSTRAINT_EVALUATION_CHECK_PTR dynexec
 end
 
 #! Observes the auxiliary trace: draws aux randomness, reseeds with the aux trace commitment,
@@ -160,7 +165,7 @@ end
 #!
 #! Invocation: exec
 pub proc observe_aux_trace()
-    exec.constants::get_procedure_digest_observe_aux_trace_ptr dynexec
+    push.HOOK_OBSERVE_AUX_TRACE_PTR dynexec
 end
 
 #! Stores digests of dynamically executed procedures.
@@ -168,11 +173,11 @@ end
 #! Input: [D0, D1, D2, D3, D4, ...]
 #! Output: [...]
 pub proc store_dynamically_executed_procedures(hooks: types::VerifierHooks)
-    exec.constants::get_procedure_digest_observe_aux_trace_ptr mem_storew_le dropw
-    exec.constants::get_procedure_digest_process_public_inputs_ptr mem_storew_le dropw
-    exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr mem_storew_le dropw
-    exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr mem_storew_le dropw
-    exec.constants::get_procedure_digest_compute_deep_composition_polynomial_queries_ptr mem_storew_le dropw
+    mem_storew_le.HOOK_OBSERVE_AUX_TRACE_PTR dropw
+    mem_storew_le.HOOK_PROCESS_PUBLIC_INPUTS_PTR dropw
+    mem_storew_le.HOOK_PROCESS_ROW_OOD_EVALUATIONS_PTR dropw
+    mem_storew_le.HOOK_EXECUTE_CONSTRAINT_EVALUATION_CHECK_PTR dropw
+    mem_storew_le.HOOK_COMPUTE_DEEP_COMPOSITION_POLYNOMIAL_QUERIES_PTR dropw
     # => [...]
 end
 
@@ -191,7 +196,7 @@ end
 #! would need compile-time counts). PVM uses this generic path. The VM uses a fixed-count
 #! specialization; tests pin both implementations to the shared Rust `order_tag` convention.
 #!
-#! This procedure uses `tmp1..tmp3` as a twelve-entry factorial table and clobbers
+#! This procedure uses `TMP1..TMP3` as a twelve-entry factorial table and clobbers
 #! their previous contents.
 #!
 #! Precondition: `num_airs >= 2`. The procedure rejects counts above `MAX_ORDER_AIRS = 12`, the
@@ -203,14 +208,14 @@ end
 pub proc derive_order_tag_from_heights(num_airs: u8, heights_ptr: types::Address) -> u32
     dup u32lte.MAX_ORDER_AIRS assert.err="num_airs exceeds supported order-tag range"
 
-    # Store 0! through 11! in tmp1..tmp3. The complete table is fixed by MAX_ORDER_AIRS and avoids
+    # Store 0! through 11! in TMP1..TMP3. The complete table is fixed by MAX_ORDER_AIRS and avoids
     # rebuilding the same weights for every proof. These scratch words are not live here.
     push.FACTORIAL_3.FACTORIAL_2.FACTORIAL_1.FACTORIAL_0
-    exec.constants::tmp1 mem_storew_le dropw
+    mem_storew_le.TMP1 dropw
     push.FACTORIAL_7.FACTORIAL_6.FACTORIAL_5.FACTORIAL_4
-    exec.constants::tmp2 mem_storew_le dropw
+    mem_storew_le.TMP2 dropw
     push.FACTORIAL_11.FACTORIAL_10.FACTORIAL_9.FACTORIAL_8
-    exec.constants::tmp3 mem_storew_le dropw
+    mem_storew_le.TMP3 dropw
     # => [num_airs, heights_ptr]
 
     push.0.0
@@ -269,7 +274,7 @@ pub proc derive_order_tag_from_heights(num_airs: u8, heights_ptr: types::Address
         # tag += inv * (num_airs - 1 - pos)!
         swap
         dup.5 sub.1 swap sub
-        exec.constants::tmp1 add mem_load
+        push.TMP1 add mem_load
         mul
         movup.3 add movdn.2
         # => [h_k, k, tag', num_airs, heights_ptr]

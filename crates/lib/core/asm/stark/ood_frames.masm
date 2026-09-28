@@ -1,5 +1,8 @@
 use miden::core::stark::types
-use miden::core::stark::constants
+use {
+    ALPHA_DEEP_ND_PTR, HOOK_PROCESS_ROW_OOD_EVALUATIONS_PTR, OOD_EVALUATIONS_ADDRESS_PTR,
+    OOD_FIXED_TERM_HORNER_EVALS_PTR, RANDOM_COIN_INPUT_LEN_PTR, RANDOM_COIN_OUTPUT_LEN_PTR
+} from miden::core::stark::constants
 use miden::core::stark::random_coin
 
 #! Loads the execution trace and the quotient trace evaluation frames.
@@ -43,7 +46,7 @@ pub proc load_and_horner_eval_ood_frames()
 
     # Save the random challenge
     push.0.0 movup.3 movup.3
-    exec.constants::deep_rand_alpha_nd_ptr mem_storew_le dropw
+    mem_storew_le.ALPHA_DEEP_ND_PTR dropw
     # => []
 
     # --- Compute Q^z(alpha) --------------------------------------------------
@@ -53,8 +56,8 @@ pub proc load_and_horner_eval_ood_frames()
     ### a) Set up the initial accumulator and the pointers to alpha and a pointer to some memory
     ###    region to which we save the OOD.
     push.0.0
-    exec.constants::deep_rand_alpha_nd_ptr
-    exec.constants::get_ood_evaluations_address
+    push.ALPHA_DEEP_ND_PTR
+    mem_load.OOD_EVALUATIONS_ADDRESS_PTR
     # => [ood_evaluations_ptr, deep_rand_alpha_ptr, 0, 0]
 
     ## 2) Process the fully aligned OOD `current` evaluations at z of the execution trace
@@ -62,8 +65,8 @@ pub proc load_and_horner_eval_ood_frames()
     ##    We load the random coin state and overwrite the rate with OOD blocks; capacity carries over.
 
     ### a) Load the random coin state as the initial sponge state.
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
-    push.0 exec.constants::random_coin_input_len_ptr mem_store
+    push.0 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+    push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
     exec.random_coin::load_random_coin_state
     # => [R0, R1, C, ood_frame_ptr, alpha_ptr, 0, 0]
 
@@ -80,7 +83,7 @@ pub proc load_and_horner_eval_ood_frames()
     movup.2
     movup.3
     swap.1
-    exec.constants::ood_fixed_term_horner_evaluations_ptr mem_storew_le
+    mem_storew_le.OOD_FIXED_TERM_HORNER_EVALS_PTR
     dropw
     push.0.0
     movdn.3
@@ -97,18 +100,18 @@ pub proc load_and_horner_eval_ood_frames()
 
     # Update the random coin state with the OOD stream digest.
     exec.random_coin::store_random_coin_state
-    push.0 exec.constants::random_coin_input_len_ptr mem_store
-    push.8 exec.constants::random_coin_output_len_ptr mem_store
+    push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
+    push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
     # => [ood_frame_ptr, alpha_ptr, acc0, acc1]
 
     # Negate Q^gz(alpha) and save it
     drop drop
     # => [acc0, acc1]
     neg
-    exec.constants::ood_fixed_term_horner_evaluations_ptr add.2 mem_store
+    push.OOD_FIXED_TERM_HORNER_EVALS_PTR add.2 mem_store
     # => [acc1]
     neg
-    exec.constants::ood_fixed_term_horner_evaluations_ptr add.3 mem_store
+    push.OOD_FIXED_TERM_HORNER_EVALS_PTR add.3 mem_store
     # => []
 end
 
@@ -125,5 +128,5 @@ proc process_row_ood_evaluations(
     state: types::PoseidonState,
     horner: types::HornerState,
 ) -> (types::PoseidonState, types::HornerState)
-    exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr dynexec
+    push.HOOK_PROCESS_ROW_OOD_EVALUATIONS_PTR dynexec
 end

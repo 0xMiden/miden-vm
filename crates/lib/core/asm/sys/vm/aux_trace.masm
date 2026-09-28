@@ -1,6 +1,9 @@
 use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
+use {
+    AUX_TRACE_COM_PTR, ORDER_TAG_PTR, RANDOM_COIN_INPUT_LEN_PTR, RANDOM_COIN_OUTPUT_LEN_PTR
+} from miden::core::stark::constants
 use miden::core::stark::random_coin
 use miden::core::sys::vm::layout
 use miden::core::sys::vm::public_inputs
@@ -45,7 +48,7 @@ end
 #! Output: [log_0, log_1, log_2, ...]
 proc push_proof_order_log_heights() -> (u8, u8, u8)
     push.ORDER_TAG_COUNT exec.constants::assert_valid_order_tag
-    exec.constants::get_order_tag
+    mem_load.ORDER_TAG_PTR
     dup eq.0
     if.true
         drop
@@ -106,7 +109,7 @@ end
 #! The advice provider supplies the commitment, then normalized sums in proof order:
 #!   [commitment, sigma_prime_0, sigma_prime_1, sigma_prime_2]
 #!
-#! The commitment is stored at aux_trace_com_ptr and the boundary values at
+#! The commitment is stored at AUX_TRACE_COM_PTR and the boundary values at
 #! aux_bus_boundary_ptr. After drawing the aux randomness, this procedure computes the
 #! outer-LogUp boundary correction `c_total` from it (and the statement values materialized in
 #! step I), then asserts `c_total + sum_i(n_i * sigma_prime_i) == 0`. The values and matching
@@ -129,16 +132,16 @@ pub proc observe_aux_trace()
     # => [...]
 
     # Assert precondition: input buffer must be empty.
-    exec.constants::random_coin_input_len_ptr mem_load
+    mem_load.RANDOM_COIN_INPUT_LEN_PTR
     assertz.err="observe_aux_trace: input buffer must be empty"
 
     # Reseeding clears the output buffer.
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
+    push.0 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
 
     # Absorb the full rate block [commitment, aux0, aux1].
 
     padw adv_loadw
-    exec.constants::aux_trace_com_ptr mem_storew_le
+    mem_storew_le.AUX_TRACE_COM_PTR
     # => [COM, ...]
 
     padw adv_loadw
@@ -172,7 +175,7 @@ pub proc observe_aux_trace()
     exec.random_coin::store_random_coin_state
 
     # Fresh output available.
-    push.8 exec.constants::random_coin_output_len_ptr mem_store
+    push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
 
     # --- Outer-LogUp boundary check ---
     # Scale each normalized sum by the trace length at the same proof-order position.

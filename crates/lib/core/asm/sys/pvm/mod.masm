@@ -6,7 +6,10 @@ pub mod layout
 pub mod ood_frames
 pub mod public_inputs
 
-use miden::core::stark::constants
+use {
+    ACE_REGISTRY_ROOT_PTR, AIR_TRACE_LENGTH_LOGS_PTR, CURRENT_TRACE_ROW_ADDRESS_PTR,
+    OOD_EVALUATIONS_ADDRESS_PTR, ORDER_TAG_PTR, RELATION_DIGEST_PTR, TRACE_LENGTH_LOG_PTR
+} from miden::core::stark::constants
 use miden::core::stark::utils
 use miden::core::stark::verifier
 
@@ -66,7 +69,7 @@ const ACE_REGISTRY_ROOT_3 = 13870270840525555445
 pub proc load_air_context()
     # [next_height_ptr, max_height]
     push.0
-    exec.constants::air_trace_length_logs_ptr
+    push.AIR_TRACE_LENGTH_LOGS_PTR
 
     push.MIN_LOG_HEIGHT_0 exec.load_air_height
     push.MIN_LOG_HEIGHT_1 exec.load_air_height
@@ -80,19 +83,19 @@ pub proc load_air_context()
     push.MIN_LOG_HEIGHT_9 exec.load_air_height
 
     drop
-    exec.constants::set_trace_length_log
+    mem_store.TRACE_LENGTH_LOG_PTR
 
-    exec.constants::air_trace_length_logs_ptr
+    push.AIR_TRACE_LENGTH_LOGS_PTR
     push.NUM_CHIPLETS
     exec.utils::derive_order_tag_from_heights
-    exec.constants::set_order_tag
+    mem_store.ORDER_TAG_PTR
 
     exec.store_relation_digest
     exec.store_ace_registry_root
     exec.layout::preprocessed_current_ptr
-    exec.constants::set_ood_evaluations_address
+    mem_store.OOD_EVALUATIONS_ADDRESS_PTR
     exec.layout::current_trace_row_ptr
-    exec.constants::set_current_trace_row_address
+    mem_store.CURRENT_TRACE_ROW_ADDRESS_PTR
 end
 
 #! Loads, validates, stores, and folds one instance's log height into the running maximum.
@@ -152,13 +155,13 @@ end
 
 proc store_relation_digest()
     push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
-    exec.constants::relation_digest_ptr mem_storew_le
+    mem_storew_le.RELATION_DIGEST_PTR
     dropw
 end
 
 proc store_ace_registry_root()
     push.ACE_REGISTRY_ROOT_3.ACE_REGISTRY_ROOT_2.ACE_REGISTRY_ROOT_1.ACE_REGISTRY_ROOT_0
-    exec.constants::ace_registry_root_ptr mem_storew_le
+    mem_storew_le.ACE_REGISTRY_ROOT_PTR
     dropw
 end
 
@@ -174,7 +177,7 @@ end
 #!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
 #!          log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 proc build_security_descriptor(parameters: types::StackProofParameters) -> types::StackSecurityDescriptor
-    exec.constants::get_trace_length_log
+    mem_load.TRACE_LENGTH_LOG_PTR
     push.LOOKUP_FRACTIONS_PER_ROW
     push.FIXED_BOUNDARY_LOOKUP_TERMS
     push.MAX_MESSAGE_WIDTH

@@ -2,6 +2,9 @@
 use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
+use {
+    ACE_REGISTRY_ROOT_PTR, AIR_TRACE_LENGTH_LOGS_PTR, ORDER_TAG_PTR, PUBLIC_INPUTS_ADDRESS_PTR
+} from miden::core::stark::constants
 use miden::core::stark::constraints_eval_inputs
 use miden::core::sys::vm::layout
 
@@ -68,7 +71,7 @@ pub proc execute_constraint_evaluation_check()
     push.QUOTIENT_FIRST_SHIFT
     push.QUOTIENT_FIRST_WEIGHT
     exec.layout::auxiliary_ace_inputs_ptr
-    exec.constants::air_trace_length_logs_ptr
+    push.AIR_TRACE_LENGTH_LOGS_PTR
     push.NUM_AIRS
     push.MAX_CYCLE_LEN_LOG
     exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace
@@ -77,7 +80,7 @@ pub proc execute_constraint_evaluation_check()
 
     push.NUM_EVAL_GATES_CIRCUIT
     push.NUM_INPUTS_CIRCUIT
-    exec.constants::public_inputs_address_ptr mem_load
+    mem_load.PUBLIC_INPUTS_ADDRESS_PTR
     eval_circuit
     drop drop drop
 end
@@ -126,8 +129,8 @@ end
 
 #! Loads the ACE circuit commitment selected by ORDER_TAG from the registry tree.
 proc load_ace_registry_commitment() -> types::Digest
-    padw exec.constants::ace_registry_root_ptr mem_loadw_le
-    exec.constants::get_order_tag
+    padw mem_loadw_le.ACE_REGISTRY_ROOT_PTR
+    mem_load.ORDER_TAG_PTR
     push.ACE_REGISTRY_DEPTH
     mtree_get
     swapw dropw

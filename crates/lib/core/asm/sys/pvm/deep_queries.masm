@@ -1,6 +1,8 @@
 use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
-use miden::core::stark::constants
+use {
+    AUX_TRACE_COM_PTR, COMPOSITION_POLY_COM_PTR, MAIN_TRACE_COM_PTR, TMP2, TMP3
+} from miden::core::stark::constants
 use miden::core::stark::deep_queries
 use miden::core::sys::pvm::layout
 
@@ -102,11 +104,11 @@ proc process_preprocessed_trace(
     dup.5 push.PREPROCESSED_INDEX_MASK u32and
     push.PREPROCESSED_TREE_DEPTH
     mtree_get
-    exec.constants::tmp3 mem_storew_le
+    mem_storew_le.TMP3
     adv.push_mapval
     #=> [LEAF_VALUE, PREPROCESSED_ROOT, full_depth, index, query_ptr]
 
-    exec.constants::tmp2 mem_loadw_le
+    mem_loadw_le.TMP2
     swapw
     #=> [LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, full_depth, index, query_ptr]
 
@@ -114,7 +116,7 @@ proc process_preprocessed_trace(
     exec.load_preprocessed_trace
 
     swapw
-    exec.constants::tmp3 mem_loadw_le
+    mem_loadw_le.TMP3
     assert_eqw.err=LEAF_VALUE_MISMATCH
 end
 
@@ -139,18 +141,18 @@ proc process_main_trace(
     index: u32,
     query_ptr: ptr<word>,
 ) -> (word, types::HornerState, u8, u32, ptr<word>)
-    exec.constants::main_trace_com_ptr mem_loadw_le
+    mem_loadw_le.MAIN_TRACE_COM_PTR
 
     dup.9 dup.9
     mtree_get
-    exec.constants::tmp3 mem_storew_le
+    mem_storew_le.TMP3
     adv.push_mapval
 
     padw swapw.2
     exec.load_main_trace
 
     swapw
-    exec.constants::tmp3 mem_loadw_le
+    mem_loadw_le.TMP3
     assert_eqw.err=LEAF_VALUE_MISMATCH
 end
 
@@ -175,18 +177,18 @@ proc process_aux_trace(
     index: u32,
     query_ptr: ptr<word>,
 ) -> (word, types::HornerState, u8, u32, ptr<word>)
-    exec.constants::aux_trace_com_ptr mem_loadw_le
+    mem_loadw_le.AUX_TRACE_COM_PTR
 
     dup.9 dup.9
     mtree_get
-    exec.constants::tmp3 mem_storew_le
+    mem_storew_le.TMP3
     adv.push_mapval
 
     padw swapw.2
     exec.load_aux_trace
 
     swapw
-    exec.constants::tmp3 mem_loadw_le
+    mem_loadw_le.TMP3
     assert_eqw.err=LEAF_VALUE_MISMATCH
 end
 
@@ -211,11 +213,11 @@ proc process_quotient_trace(
     index: u32,
     query_ptr: ptr<word>,
 ) -> (word, types::HornerState, u32, ptr<word>)
-    exec.constants::composition_poly_com_ptr mem_loadw_le
+    mem_loadw_le.COMPOSITION_POLY_COM_PTR
 
     dup.9 movup.9
     mtree_get
-    exec.constants::tmp3 mem_storew_le
+    mem_storew_le.TMP3
     adv.push_mapval
 
     padw
@@ -223,7 +225,7 @@ proc process_quotient_trace(
     exec.load_quotient_trace
 
     swapw
-    exec.constants::tmp3 mem_loadw_le
+    mem_loadw_le.TMP3
     assert_eqw.err=LEAF_VALUE_MISMATCH
 end
 

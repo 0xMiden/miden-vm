@@ -1,7 +1,11 @@
 use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::random_coin
-use miden::core::stark::constants
+use {
+    FRI_COM_PTR, FRI_QUERIES_ADDRESS_PTR, LDE_DOMAIN_INFO_PTR, NUM_FRI_LAYERS_PTR, NUM_QUERIES_PTR,
+    RANDOM_COIN_INPUT_LEN_PTR, RANDOM_COIN_OUTPUT_LEN_PTR, REMAINDER_POLY_ADDRESS_PTR,
+    REMAINDER_POLY_SIZE_PTR, TMP1
+} from miden::core::stark::constants
 
 # CONSTANTS
 # =================================================================================================
@@ -95,7 +99,7 @@ end
 #! Cycles: 45
 pub proc generate_fri_parameters()
     # Load FRI verifier data
-    padw exec.constants::get_lde_domain_info_word
+    padw mem_loadw_le.LDE_DOMAIN_INFO_PTR
     #=> [lde_size, log(lde_size), lde_g, 0, ...] (6 cycles)
 
     # Compute the number of FRI layers
@@ -116,9 +120,9 @@ pub proc generate_fri_parameters()
     end
     # => [num_fri_layers, remainder_size, lde_size, lde_size, log2(lde_size), domain_gen, 0, ...] (12 cycles)
 
-    exec.constants::set_num_fri_layers
+    mem_store.NUM_FRI_LAYERS_PTR
     div.8
-    exec.constants::set_remainder_poly_size
+    mem_store.REMAINDER_POLY_SIZE_PTR
     # => [lde_size, lde_size, log2(lde_size), domain_gen, 0, ...] (7 cycles)
 
     dropw
@@ -132,14 +136,14 @@ end
 #! Output: [...]
 pub proc load_fri_layer_commitments()
     # We need to store the current FRI layer LDE domain size and its logarithm.
-    padw exec.constants::get_lde_domain_info_word
-    exec.constants::tmp1 mem_storew_le
+    padw mem_loadw_le.LDE_DOMAIN_INFO_PTR
+    mem_storew_le.TMP1
     # => [Y, ...] where `Y` is as "garbage" word
 
     # Address containing the first layer commitment
     push.0.0
-    exec.constants::fri_com_ptr
-    exec.constants::get_num_fri_layers
+    push.FRI_COM_PTR
+    mem_load.NUM_FRI_LAYERS_PTR
     # => [num_layers, ptr_layer, y, y, Y, ...] where `y` are considered as "garbage" values
 
     dup
@@ -162,7 +166,7 @@ pub proc load_fri_layer_commitments()
         exec.random_coin::reseed_check_folding_pow_and_sample_alpha
         #=> [a0, a1, num_layers, ptr_layer + 4, y, y, ...]
         padw
-        exec.constants::tmp1 mem_loadw_le
+        mem_loadw_le.TMP1
         # => [lde_size, log2(lde_size), lde_generator, 0, a0, a1, Y, num_layers, ptr_layer + 4, y, y, ...]
 
         # Compute and save to memory new lde_size and its new logarithm
@@ -170,7 +174,7 @@ pub proc load_fri_layer_commitments()
         swap
         sub.2
         swap
-        exec.constants::tmp1 mem_storew_le
+        mem_storew_le.TMP1
         # => [lde_size / 4, log2(lde_size) - 2, lde_generator, 0, a0, a1, num_layers, ptr_layer + 4, y, y, ...]
 
         # Move the pointer higher up the stack
@@ -206,21 +210,21 @@ end
 pub proc load_and_verify_remainder()
     # Each FRI layer uses eight elements: a commitment word and a padded folding challenge.
     # The remainder coefficients follow these layers in memory.
-    exec.constants::get_num_fri_layers
-    mul.8 exec.constants::fri_com_ptr add
+    mem_load.NUM_FRI_LAYERS_PTR
+    mul.8 push.FRI_COM_PTR add
     # => [remainder_poly_ptr, ...]
-    dup exec.constants::set_remainder_poly_address
+    dup mem_store.REMAINDER_POLY_ADDRESS_PTR
     #=> [remainder_poly_ptr, ...]
 
-    exec.constants::get_remainder_poly_size
+    mem_load.REMAINDER_POLY_SIZE_PTR
     push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF
 
     eq
     if.true
         # Remainder polynomial degree less than 64
         # Load the random coin state as the initial sponge state.
-        push.0 exec.constants::random_coin_output_len_ptr mem_store
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
+        push.0 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+        push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
         exec.random_coin::load_random_coin_state
         # => [R0, R1, C, remainder_poly_ptr, ...]
 
@@ -229,14 +233,14 @@ pub proc load_and_verify_remainder()
 
         # Update the random coin state with the remainder polynomial digest.
         exec.random_coin::store_random_coin_state
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
-        push.8 exec.constants::random_coin_output_len_ptr mem_store
+        push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
+        push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
 
     else
         # Remainder polynomial degree less than 128
         # Load the random coin state as the initial sponge state.
-        push.0 exec.constants::random_coin_output_len_ptr mem_store
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
+        push.0 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
+        push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
         exec.random_coin::load_random_coin_state
         # => [R0, R1, C, remainder_poly_ptr, ...]
 
@@ -246,8 +250,8 @@ pub proc load_and_verify_remainder()
 
         # Update the random coin state with the remainder polynomial digest.
         exec.random_coin::store_random_coin_state
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
-        push.8 exec.constants::random_coin_output_len_ptr mem_store
+        push.0 mem_store.RANDOM_COIN_INPUT_LEN_PTR
+        push.8 mem_store.RANDOM_COIN_OUTPUT_LEN_PTR
 
     end
     drop
@@ -265,14 +269,14 @@ end
 #!
 #! Cycles: 7
 pub proc compute_query_pointer()
-    exec.constants::fri_com_ptr
-    exec.constants::get_number_queries
+    push.FRI_COM_PTR
+    mem_load.NUM_QUERIES_PTR
     mul.4
-    # => [num_queries*4, fri_com_ptr,  ...]
+    # => [num_queries*4, FRI_COM_PTR,  ...]
 
     sub
     # => [query_ptr, ...]
 
-    exec.constants::set_fri_queries_address
+    mem_store.FRI_QUERIES_ADDRESS_PTR
     # => [...]
 end

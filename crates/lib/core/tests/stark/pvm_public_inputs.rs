@@ -34,16 +34,16 @@ fn stage_statement_and_shape() -> String {
         push.{root3}.{root2}.{root1}.{root0}
         exec.public_inputs::stage_public_root
 
-        push.{h0} exec.constants::air_trace_length_logs_ptr mem_store
-        push.{h1} exec.constants::air_trace_length_logs_ptr add.1 mem_store
-        push.{h2} exec.constants::air_trace_length_logs_ptr add.2 mem_store
-        push.{h3} exec.constants::air_trace_length_logs_ptr add.3 mem_store
-        push.{h4} exec.constants::air_trace_length_logs_ptr add.4 mem_store
-        push.{h5} exec.constants::air_trace_length_logs_ptr add.5 mem_store
-        push.{h6} exec.constants::air_trace_length_logs_ptr add.6 mem_store
-        push.{h7} exec.constants::air_trace_length_logs_ptr add.7 mem_store
-        push.{h8} exec.constants::air_trace_length_logs_ptr add.8 mem_store
-        push.{h9} exec.constants::air_trace_length_logs_ptr add.9 mem_store
+        push.{h0} mem_store.AIR_TRACE_LENGTH_LOGS_PTR
+        push.{h1} push.AIR_TRACE_LENGTH_LOGS_PTR add.1 mem_store
+        push.{h2} push.AIR_TRACE_LENGTH_LOGS_PTR add.2 mem_store
+        push.{h3} push.AIR_TRACE_LENGTH_LOGS_PTR add.3 mem_store
+        push.{h4} push.AIR_TRACE_LENGTH_LOGS_PTR add.4 mem_store
+        push.{h5} push.AIR_TRACE_LENGTH_LOGS_PTR add.5 mem_store
+        push.{h6} push.AIR_TRACE_LENGTH_LOGS_PTR add.6 mem_store
+        push.{h7} push.AIR_TRACE_LENGTH_LOGS_PTR add.7 mem_store
+        push.{h8} push.AIR_TRACE_LENGTH_LOGS_PTR add.8 mem_store
+        push.{h9} push.AIR_TRACE_LENGTH_LOGS_PTR add.9 mem_store
         "#,
         root0 = root[0],
         root1 = root[1],
@@ -67,7 +67,7 @@ fn transcript_source() -> String {
     let main = MAIN_COMMITMENT;
     format!(
         r#"
-        use miden::core::stark::constants
+        use {{AIR_TRACE_LENGTH_LOGS_PTR}} from miden::core::stark::constants
         use miden::core::stark::random_coin
         use miden::core::sys::pvm::public_inputs
 
@@ -153,11 +153,11 @@ fn pvm_public_input_hook_matches_the_rust_challenger() {
 #[test]
 fn pvm_public_input_hook_rejects_a_nonempty_input_buffer() {
     let source = r#"
-        use miden::core::stark::constants
+        use {RANDOM_COIN_INPUT_LEN_PTR} from miden::core::stark::constants
         use miden::core::sys::pvm::public_inputs
 
         begin
-            push.1 exec.constants::random_coin_input_len_ptr mem_store
+            push.1 mem_store.RANDOM_COIN_INPUT_LEN_PTR
             exec.public_inputs::process_public_inputs
         end
     "#;
