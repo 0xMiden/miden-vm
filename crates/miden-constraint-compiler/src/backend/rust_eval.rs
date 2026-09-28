@@ -28,7 +28,13 @@
 //! slots. Preparation and row emission consume that same plan.
 //! [`emit_optimized_module`] also specializes single-use arithmetic while preserving cached terms.
 
-use std::fmt::Write as _;
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+use core::fmt::Write as _;
 
 use self::preparation::PreparationPlan;
 use crate::ir::{CapturedConstraints, Class, Graph, Leaf, Node, NodeId, OpKind};

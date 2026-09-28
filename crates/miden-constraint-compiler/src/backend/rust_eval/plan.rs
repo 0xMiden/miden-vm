@@ -1,6 +1,8 @@
 //! Rust-only, typed evaluation choices. The captured graph remains authoritative
 //! for ACE and constraint metadata; this plan only changes arithmetic scheduling.
 
+use alloc::{vec, vec::Vec};
+
 use crate::ir::{CapturedConstraints, Class, Graph, Leaf, Node, NodeId, OpKind};
 
 // Bound array sizes and live ranges. Longer sums retain a materialized prefix.

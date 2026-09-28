@@ -370,7 +370,7 @@ jobs:
         uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         with:
           tool: cargo-hack
-      - name: Check all feature combinations
+      - name: Check individual features with and without dev-dependencies
         run: make check-features
 
   wasm-handlers-host:
