@@ -2,6 +2,10 @@
 
 ## v0.35.0 (Unreleased)
 
+#### Fixes
+
+- [BREAKING] Reject unsorted or repeated keys in `SmtLeaf::new_multiple` and when reading serialized leaves. Invalid keys return the new `SmtLeafError::UnsortedMultipleLeafKeys` error ([#3901](https://github.com/0xMiden/miden-vm/pull/3901)).
+
 ## v0.34.0 (2026-09-26)
 
 #### Features
@@ -32,15 +36,6 @@
 - Fixed `AdviceMap` deserialization accepting a repeated key and silently keeping the last value; it now returns an error, matching `MastForestWireView` ([#3900](https://github.com/0xMiden/miden-vm/pull/3900)).
 - [BREAKING] Limited core-library sorted-array lookups to 65,536 entries per call. Larger ranges are rejected before host memory is scanned, and the public `SortedArrayError` enum now includes `TooManyEntries`. This affects `find_word`, `find_key_value`, and `find_half_key_value` ([#3909](https://github.com/0xMiden/miden-vm/pull/3909)).
 - [BREAKING] Closed decoder AIR soundness gaps in caller-frame restoration, DYNCALL stack transitions, span and `REPEAT` adjacency, reserved opcode slots, and repeated-loop body authentication. This changes the block-stack and `END` APIs, AIR relation digest, and ACE registry roots, invalidating older proofs.
-- [BREAKING] `SmtLeaf::new_multiple` now requires strictly increasing keys and returns the new `SmtLeafError::UnsortedMultipleLeafKeys` otherwise, so leaves with repeated or unsorted keys are no longer accepted from serialized bytes ([#3901](https://github.com/0xMiden/miden-vm/pull/3901)).
-
-#### Changes
-
-- Reworked the `MastForest` `Arbitrary` impl. `GenerationMode::Executable` (the default) yields forests whose procedure roots run to completion on any operand stack: infallible, stack-balanced basic blocks, binary split and loop conditions, externals that resolve to local roots, and syscalls into a paired `KernelDescriptor` exposed through `forest_kernel_strategy`. `GenerationMode::StructureOnly` keeps the permissive behavior ([#3158](https://github.com/0xMiden/miden-vm/pull/3158)).
-
-#### Changes
-
-- [BREAKING] Made the public `ParsingError` enum `#[non_exhaustive]` and restored separate variants for protocol ABI conflicts ([#3859](https://github.com/0xMiden/miden-vm/pull/3859)).
 
 ## v0.33.0 (2026-09-16)
 
