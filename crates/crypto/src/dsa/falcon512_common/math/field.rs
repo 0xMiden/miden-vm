@@ -4,6 +4,7 @@ use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAss
 use num::{One, Zero};
 
 use super::{Inverse, MODULUS, fft::CyclotomicFourier};
+use crate::utils::zeroize::Zeroize;
 
 /// An element of the Falcon base field Z_q for q = [`MODULUS`] = 12289 = 3 * 2^12 + 1, stored as
 /// its canonical representative in [0, q).
@@ -120,6 +121,12 @@ impl Zero for FalconFelt {
 
     fn is_zero(&self) -> bool {
         self.0 == 0
+    }
+}
+
+impl Zeroize for FalconFelt {
+    fn zeroize(&mut self) {
+        self.0.zeroize();
     }
 }
 

@@ -691,6 +691,11 @@ impl<F: Zeroize> Zeroize for Polynomial<F> {
     }
 }
 
+// `ZeroizeOnDrop` cannot be provided for `Polynomial<F>`: a `Drop` impl bounded on
+// `F: Zeroize` is rejected by the compiler (E0367), and bounding the struct itself would
+// exclude `Polynomial<Complex64>` used by the signing path. Callers holding secret
+// polynomials must wrap them in `Zeroizing` instead.
+
 // TESTS
 // ================================================================================================
 
@@ -831,5 +836,18 @@ mod tests {
             prod.reduce_by_cyclotomic(N),
             Polynomial::reduce_negacyclic(&Polynomial::mul_modulo_p(&poly1, &poly2))
         );
+    }
+
+    #[test]
+    fn test_zeroize_wipes_falcon_felt_polynomial() {
+        use crate::utils::zeroize::Zeroize;
+
+        let mut felt = FalconFelt::new(42);
+        felt.zeroize();
+        assert_eq!(felt.value(), 0);
+
+        let mut poly = Polynomial::new(vec![FalconFelt::new(3), FalconFelt::new(-7)]);
+        poly.zeroize();
+        assert!(poly.coefficients.is_empty());
     }
 }
