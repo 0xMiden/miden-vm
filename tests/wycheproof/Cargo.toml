@@ -11,6 +11,7 @@ version.workspace      = true
 doctest = false
 
 [dev-dependencies]
+der                 = { workspace = true }
 ed25519-dalek       = { workspace = true }
 hex                 = { features = ["alloc"], workspace = true }
 k256                = { features = ["alloc", "ecdh", "ecdsa", "pkcs8"], workspace = true }
@@ -20,8 +21,10 @@ miden-core-lib      = { workspace = true }
 miden-crypto        = { default-features = false, features = ["std"], workspace = true }
 miden-precompiles   = { workspace = true }
 miden-processor     = { workspace = true }
+p256                = { features = ["ecdsa", "pkcs8"], workspace = true }
 wycheproof-ng-core  = { workspace = true }
 wycheproof-ng-dh    = { workspace = true }
+wycheproof-ng-ecdsa = { workspace = true }
 wycheproof-ng-eddsa = { workspace = true }
 x25519-dalek        = { features = ["static_secrets"], workspace = true }
 

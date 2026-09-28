@@ -55,9 +55,9 @@ impl Relation {
         }
     }
 
-    /// Every non-map cell directly bordering the allocation. PVM's eleven-entry `pos_by_id` table
-    /// has one padding cell before the word-aligned `id_by_pos` table; VM's four-entry tables are
-    /// adjacent and therefore have no internal padding.
+    /// Every non-map cell directly bordering the allocation. PVM's twelve-entry and VM's four-entry
+    /// `pos_by_id` tables are adjacent to their `id_by_pos` tables, so neither has internal
+    /// padding.
     fn map_guard_addresses(&self) -> Vec<u32> {
         let positions = (self.layout_const)("PROOF_ORDER_POSITIONS_PTR");
         let ids = (self.layout_const)("PROOF_ORDER_IDS_PTR");
@@ -296,10 +296,10 @@ fn pvm_maps_match_the_stable_sort_for_structured_orders() {
 fn pvm_maps_resolve_ties_to_instance_order() {
     let relation = Relation::pvm();
     for heights in [
-        vec![18u64; 11],
-        vec![9u64, 9, 9, 9, 21, 21, 21, 9, 9, 21, 9],
-        vec![14u64, 12, 14, 12, 11, 11, 16, 16, 12, 14, 11],
-        vec![1u64, 29, 1, 29, 1, 29, 1, 29, 1, 29, 1],
+        vec![18u64; 12],
+        vec![9u64, 9, 9, 9, 21, 21, 21, 9, 9, 21, 9, 21],
+        vec![14u64, 12, 14, 12, 11, 11, 16, 16, 12, 14, 11, 16],
+        vec![1u64, 29, 1, 29, 1, 29, 1, 29, 1, 29, 1, 29],
     ] {
         relation.check(&heights);
     }
@@ -327,13 +327,13 @@ fn pvm_maps_match_the_stable_sort_for_seeded_random_heights() {
 
 /// The generated pass must be branch-free: a fixed comparator network of `cswap`s, no loops and
 /// no conditionals, so its cost and its control flow are independent of the proof order. Both the
-/// four-input VM network and the eleven-input PVM network are Batcher's merge exchange, generated
+/// four-input VM network and the twelve-input PVM network are Batcher's merge exchange, generated
 /// by `miden-ace-codegen`.
 #[test]
 fn the_pass_is_a_fixed_comparator_network() {
     for (hook, comparators) in [
         (include_str!("../../asm/sys/vm/ood_frames.masm"), 5),
-        (include_str!("../../asm/sys/pvm/ood_frames.masm"), 37),
+        (include_str!("../../asm/sys/pvm/ood_frames.masm"), 41),
     ] {
         let start = hook.find("pub proc stage_proof_order_maps").expect("the pass is generated");
         let body = &hook[start..];

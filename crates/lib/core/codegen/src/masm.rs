@@ -402,6 +402,16 @@ impl UintMasmConfig {
                 title: "ED25519 ORDER",
                 domain,
             },
+            UintDomain::P256Base => Self {
+                path: "asm/fields/p256_base.masm",
+                title: "P256 BASE-FIELD",
+                domain,
+            },
+            UintDomain::P256Scalar => Self {
+                path: "asm/fields/p256_scalar.masm",
+                title: "P256 SCALAR-FIELD",
+                domain,
+            },
         }
     }
 }
@@ -430,6 +440,13 @@ impl CurveMasmConfig {
                 title: "ED25519",
                 base_field_module: "ed25519_base",
                 base_field_description: "Ed25519 base-field",
+                curve,
+            },
+            CurveId::P256 => Self {
+                path: "asm/curves/p256.masm",
+                title: "P256",
+                base_field_module: "p256_base",
+                base_field_description: "P-256 base-field",
                 curve,
             },
         }
@@ -464,6 +481,9 @@ mod tests {
         assert!(out_dir.join("asm/fields/ed25519_order.masm").exists());
         assert!(out_dir.join("asm/curves/secp256k1.masm").exists());
         assert!(out_dir.join("asm/curves/ed25519.masm").exists());
+        assert!(out_dir.join("asm/fields/p256_base.masm").exists());
+        assert!(out_dir.join("asm/fields/p256_scalar.masm").exists());
+        assert!(out_dir.join("asm/curves/p256.masm").exists());
 
         fs::remove_dir_all(&out_dir).unwrap();
     }

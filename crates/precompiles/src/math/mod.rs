@@ -6,5 +6,7 @@ pub mod ed25519_order;
 pub mod ed25519_scalar;
 pub mod k1_base;
 pub mod k1_scalar;
+pub mod p256_base;
+pub mod p256_scalar;
 pub mod u256;
 pub mod uint;

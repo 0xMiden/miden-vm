@@ -95,7 +95,7 @@ fn expected_after_scatter(order: &[usize], wire: &[u64]) -> Vec<u64> {
 }
 
 /// Structured proof orders: identity, reversal, every adjacent swap, each chiplet moved to either
-/// end, and a deterministic scramble. Eleven chiplets admit 39,916,800 orders, so the sweep is a
+/// end, and a deterministic scramble. Twelve chiplets admit 479,001,600 orders, so the sweep is a
 /// sample; it is chosen to separate every pair of adjacent positions.
 pub(super) fn structured_orders() -> Vec<Vec<usize>> {
     let identity: Vec<usize> = (0..NUM_CHIPLETS).collect();
@@ -119,9 +119,9 @@ pub(super) fn structured_orders() -> Vec<Vec<usize>> {
         orders.push(back);
     }
     // A deterministic scramble.
-    orders.push(vec![4, 9, 1, 10, 7, 0, 6, 3, 8, 2, 5]);
-    orders.push(vec![3, 0, 2, 4, 5, 6, 7, 8, 9, 10, 1]);
-    orders.push(vec![1, 10, 9, 8, 7, 6, 5, 4, 2, 0, 3]);
+    orders.push(vec![4, 9, 1, 10, 7, 0, 11, 6, 3, 8, 2, 5]);
+    orders.push(vec![3, 0, 2, 4, 5, 6, 7, 8, 9, 10, 11, 1]);
+    orders.push(vec![1, 11, 10, 9, 8, 7, 6, 5, 4, 2, 0, 3]);
     orders.sort();
     orders.dedup();
     orders
@@ -264,9 +264,9 @@ fn tied_heights_scatter_to_the_instance_order() {
     let wire = wire_values();
     for heights in [
         vec![18u64; NUM_CHIPLETS],
-        vec![9u64, 9, 9, 9, 21, 21, 21, 9, 9, 21, 9],
+        vec![9u64, 9, 9, 9, 21, 21, 21, 9, 9, 21, 9, 21],
         // A pair of chiplets tied against each other, everything else split around them.
-        vec![14u64, 12, 14, 12, 11, 11, 16, 16, 12, 14, 11],
+        vec![14u64, 12, 14, 12, 11, 11, 16, 16, 12, 14, 11, 16],
     ] {
         let order = proof_order(&heights);
         assert_eq!(

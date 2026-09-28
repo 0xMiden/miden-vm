@@ -8,23 +8,23 @@ use miden::core::sys::pvm::layout
 # =================================================================================================
 
 # Number of READ variables (inputs + constants) for the constraint evaluation circuit.
-const NUM_INPUTS_CIRCUIT = 2432
+const NUM_INPUTS_CIRCUIT = 2630
 
 # Number of evaluation gates in the constraint evaluation circuit
-const NUM_EVAL_GATES_CIRCUIT = 11248
+const NUM_EVAL_GATES_CIRCUIT = 12892
 
 # Max cycle length for periodic columns
 const MAX_CYCLE_LEN_LOG = 7
 
 # Number of AIR instances in the relation.
-const NUM_AIRS = 11
+const NUM_AIRS = 12
 
 # Number of 8-felt blocks in the authenticated ACE circuit stream.
-const ACE_STREAM_BLOCKS = 1543
+const ACE_STREAM_BLOCKS = 1765
 
 # Precomputed generic Felt-sequence chaining word for the fixed-length stream.
 const ACE_STREAM_INIT_CV_0 = 4280581857092831745
-const ACE_STREAM_INIT_CV_1 = 2688637132020396088
+const ACE_STREAM_INIT_CV_1 = 2688637132020397864
 const ACE_STREAM_INIT_CV_2 = 1947077364412317696
 const ACE_STREAM_INIT_CV_3 = 6620516959492505600
 
@@ -38,10 +38,10 @@ const QUOTIENT_FIRST_WEIGHT = 2704820172613542122
 
 # Eidos digest of the ACE circuit stream this relation accepts. One circuit serves
 # every proof order, so it is the advice-map key and the value the loader pins.
-const ACE_CIRCUIT_DIGEST_0 = 998118168362624729
-const ACE_CIRCUIT_DIGEST_1 = 2192623667127773948
-const ACE_CIRCUIT_DIGEST_2 = 5271545827405564137
-const ACE_CIRCUIT_DIGEST_3 = 3235393341035691351
+const ACE_CIRCUIT_DIGEST_0 = 7245797779004943701
+const ACE_CIRCUIT_DIGEST_1 = 8340928470530059295
+const ACE_CIRCUIT_DIGEST_2 = 2134339915986898520
+const ACE_CIRCUIT_DIGEST_3 = 369719548715187055
 
 # ERRORS
 # =================================================================================================
@@ -114,72 +114,78 @@ end
 #! Outputs: []
 proc stage_air_fold_coefficients
     exec.layout::proof_order_ids_ptr
-    exec.layout::auxiliary_ace_inputs_ptr add.86
+    exec.layout::auxiliary_ace_inputs_ptr add.92
     padw exec.constants::composition_coef_ptr mem_loadw_le drop drop
     push.0.1
     # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     # Each step copies its coefficient and destination before storing c0 then c1.
-    # proof position 10: coefficient beta^0 to that AIR's slot
+    # proof position 11: coefficient beta^0 to that AIR's slot
+    dup.5 add.11 mem_load mul.2 dup.5 add
+    # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
+    # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
+    dup.3 dup.3 ext2mul
+    # proof position 10: coefficient beta^1 to that AIR's slot
     dup.5 add.10 mem_load mul.2 dup.5 add
     # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
     # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.3 dup.3 ext2mul
-    # proof position 9: coefficient beta^1 to that AIR's slot
+    # proof position 9: coefficient beta^2 to that AIR's slot
     dup.5 add.9 mem_load mul.2 dup.5 add
     # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
     # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.3 dup.3 ext2mul
-    # proof position 8: coefficient beta^2 to that AIR's slot
+    # proof position 8: coefficient beta^3 to that AIR's slot
     dup.5 add.8 mem_load mul.2 dup.5 add
     # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
     # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.3 dup.3 ext2mul
-    # proof position 7: coefficient beta^3 to that AIR's slot
+    # proof position 7: coefficient beta^4 to that AIR's slot
     dup.5 add.7 mem_load mul.2 dup.5 add
     # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
     # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.3 dup.3 ext2mul
-    # proof position 6: coefficient beta^4 to that AIR's slot
+    # proof position 6: coefficient beta^5 to that AIR's slot
     dup.5 add.6 mem_load mul.2 dup.5 add
     # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
     # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.3 dup.3 ext2mul
-    # proof position 5: coefficient beta^5 to that AIR's slot
+    # proof position 5: coefficient beta^6 to that AIR's slot
     dup.5 add.5 mem_load mul.2 dup.5 add
     # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
     # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.3 dup.3 ext2mul
-    # proof position 4: coefficient beta^6 to that AIR's slot
+    # proof position 4: coefficient beta^7 to that AIR's slot
     dup.5 add.4 mem_load mul.2 dup.5 add
     # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
     # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.3 dup.3 ext2mul
-    # proof position 3: coefficient beta^7 to that AIR's slot
+    # proof position 3: coefficient beta^8 to that AIR's slot
     dup.5 add.3 mem_load mul.2 dup.5 add
     # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
     # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.3 dup.3 ext2mul
-    # proof position 2: coefficient beta^8 to that AIR's slot
+    # proof position 2: coefficient beta^9 to that AIR's slot
     dup.5 add.2 mem_load mul.2 dup.5 add
     # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
     # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.3 dup.3 ext2mul
-    # proof position 1: coefficient beta^9 to that AIR's slot
+    # proof position 1: coefficient beta^10 to that AIR's slot
     dup.5 add.1 mem_load mul.2 dup.5 add
     # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.2 dup.2 dup.2 mem_store swap add.1 mem_store
     # => [c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.3 dup.3 ext2mul
-    # proof position 0: coefficient beta^10 to that AIR's slot
+    # proof position 0: coefficient beta^11 to that AIR's slot
     dup.5 mem_load mul.2 dup.5 add
     # => [destination, c0, c1, beta0, beta1, coefficient_ptr, id_by_pos_ptr]
     dup.2 dup.2 dup.2 mem_store swap add.1 mem_store

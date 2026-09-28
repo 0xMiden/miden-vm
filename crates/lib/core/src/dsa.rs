@@ -8,6 +8,7 @@
 //!
 //! Each submodule corresponds to a specific signature scheme:
 //! - [`ecdsa_k256_keccak`]: ECDSA over secp256k1 with Keccak256 hashing
+//! - [`ecdsa_p256_sha256`]: ECDSA over P-256 with SHA-256 hashing
 //! - [`eddsa_25519_sha512`]: Ed25519 with SHA-512 hashing
 //! - [`falcon512_eidos`]: Falcon-512 with the native VM hash
 
@@ -101,6 +102,84 @@ pub mod ecdsa_k256_keccak {
 
     fn limbs_to_felts<const N: usize>(limbs: [u32; N]) -> [Felt; N] {
         limbs.map(Felt::from_u32)
+    }
+}
+
+// ECDSA P256 SHA256
+// ================================================================================================
+
+/// ECDSA P-256 with SHA-256 signature helpers.
+///
+/// Functions in this module generate the public-key commitment and native advice witness expected
+/// by the `ecdsa_p256_sha256::verify` and `ecdsa_p256_sha256::verify_bytes` ABIs. Coordinates and
+/// scalars are little-endian u32 limbs. The public-key coordinates are bound by the commitment;
+/// `r` and `s` are an uncommitted witness, and high-s values are accepted.
+///
+/// The recovery procedures instead read a word-aligned native recovery witness from memory as
+/// `R_LE_U32[8] || S_LE_U32[8] || V`, where `V` is 0 or 1 (the y-parity of R).
+pub mod ecdsa_p256_sha256 {
+    extern crate alloc;
+
+    use alloc::vec::Vec;
+
+    use miden_core::{Felt, Word};
+    use miden_crypto::hash::{eidos::Eidos, sha2::Sha256};
+    use p256::ecdsa::{Signature, SigningKey, VerifyingKey, signature::hazmat::PrehashSigner};
+
+    /// Signs the 32 little-endian bytes of `msg` hashed with SHA-256 and encodes the public key
+    /// and signature as advice for `ecdsa_p256_sha256::verify`.
+    pub fn sign(sk: &SigningKey, msg: Word) -> Vec<Felt> {
+        let digest: [u8; 32] = Sha256::hash(&word_le_bytes(msg)).into();
+        let sig: Signature = sk.sign_prehash(&digest).expect("SHA-256 prehash is valid");
+        encode_signature(sk.verifying_key(), &sig)
+    }
+
+    /// Encodes `[QX[8] || QY[8] || R[8] || S[8]]` in advice-consumption order, each value as
+    /// little-endian u32 limbs. No normalization is performed.
+    pub fn encode_signature(pk: &VerifyingKey, sig: &Signature) -> Vec<Felt> {
+        let mut out = public_key_elements(pk).to_vec();
+        let (r, s) = sig.split_bytes();
+        out.extend(be_bytes_to_le_felts(&r.into()));
+        out.extend(be_bytes_to_le_felts(&s.into()));
+        out
+    }
+
+    /// Returns `PK_COMM = Eidos::hash_elements(QX[8] || QY[8])`.
+    pub fn public_key_commitment(pk: &VerifyingKey) -> Word {
+        Eidos::hash_elements(&public_key_elements(pk))
+    }
+
+    /// Converts big-endian affine coordinates to `QX[8] || QY[8]` little-endian u32 limbs.
+    pub(crate) fn public_key_felts(x: &[u8; 32], y: &[u8; 32]) -> [Felt; 16] {
+        let mut felts = [Felt::ZERO; 16];
+        felts[..8].copy_from_slice(&be_bytes_to_le_felts(x));
+        felts[8..].copy_from_slice(&be_bytes_to_le_felts(y));
+        felts
+    }
+
+    fn public_key_elements(pk: &VerifyingKey) -> [Felt; 16] {
+        let point = pk.to_sec1_point(false);
+        let x = point.x().expect("uncompressed point has an x-coordinate");
+        let y = point.y().expect("uncompressed point has a y-coordinate");
+        public_key_felts(&(*x).into(), &(*y).into())
+    }
+
+    fn be_bytes_to_le_felts(bytes: &[u8; 32]) -> [Felt; 8] {
+        core::array::from_fn(|i| {
+            let offset = 28 - 4 * i;
+            let limb = u32::from_be_bytes(bytes[offset..offset + 4].try_into().expect("u32 limb"));
+            Felt::from_u32(limb)
+        })
+    }
+
+    /// Returns each felt of `msg` as eight little-endian bytes, which is the `(lo, hi)` u32 split
+    /// performed by the MASM `store_word_u32s_le`.
+    fn word_le_bytes(msg: Word) -> [u8; 32] {
+        let mut bytes = [0u8; 32];
+        for (i, felt) in msg.iter().enumerate() {
+            bytes[8 * i..8 * (i + 1)].copy_from_slice(&felt.as_canonical_u64().to_le_bytes());
+        }
+        bytes
     }
 }
 

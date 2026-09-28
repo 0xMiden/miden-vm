@@ -1,6 +1,6 @@
 //! Multi-AIR relation for the chiplet stack.
 //!
-//! [`ChipletAir`] wraps the eleven heterogeneous AIRs into one enum (the
+//! [`ChipletAir`] wraps the twelve heterogeneous AIRs into one enum (the
 //! `MultiAir::Air` type); [`ChipletMultiAir`] owns them and closes the
 //! cross-chiplet LogUp identity in [`MultiAir::eval_external`]. Each AIR commits a normalized
 //! residue, so the external assertion weights it by that AIR's trace length.
@@ -18,7 +18,8 @@ use crate::{
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
     fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs},
     hash::{
-        chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir, sha512::Sha512Air,
+        chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir, sha256::Sha256Air,
+        sha512::Sha512Air,
     },
     logup::{Challenges, LookupMessage, lookup_challenges_from_slice},
     primitives::byte_pair_lut::{self, BytePairLutAir},
@@ -27,9 +28,9 @@ use crate::{
 };
 
 /// Number of AIR instances in the precompile relation.
-pub const NUM_CHIPLETS: usize = 11;
+pub const NUM_CHIPLETS: usize = 12;
 
-/// The eleven chiplet AIRs wrapped into one enum.
+/// The twelve chiplet AIRs wrapped into one enum.
 ///
 /// Variant order is the canonical proof instance order.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -45,6 +46,7 @@ pub enum ChipletAir {
     EcGroupAdd,
     EcMsm,
     Sha512,
+    Sha256,
 }
 
 macro_rules! delegate {
@@ -61,6 +63,7 @@ macro_rules! delegate {
             ChipletAir::EcGroupAdd => EcGroupAddAir.$method($($arg),*),
             ChipletAir::EcMsm => EcMsmAir.$method($($arg),*),
             ChipletAir::Sha512 => Sha512Air.$method($($arg),*),
+            ChipletAir::Sha256 => Sha256Air.$method($($arg),*),
         }
     };
 }
@@ -74,7 +77,7 @@ where
 }
 
 impl ChipletAir {
-    /// The eleven AIRs in canonical prover trace order.
+    /// The twelve AIRs in canonical prover trace order.
     pub fn all() -> [ChipletAir; NUM_CHIPLETS] {
         [
             ChipletAir::ChunkNodeSponge,
@@ -88,6 +91,7 @@ impl ChipletAir {
             ChipletAir::EcGroupAdd,
             ChipletAir::EcMsm,
             ChipletAir::Sha512,
+            ChipletAir::Sha256,
         ]
     }
 
@@ -158,13 +162,14 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
             ChipletAir::EcGroupAdd => eval_lifted(&EcGroupAddAir, builder),
             ChipletAir::EcMsm => eval_lifted(&EcMsmAir, builder),
             ChipletAir::Sha512 => eval_lifted(&Sha512Air, builder),
+            ChipletAir::Sha256 => eval_lifted(&Sha256Air, builder),
         }
     }
 }
 
 /// The chiplet stack as a [`MultiAir`].
 ///
-/// It owns the eleven AIRs in canonical order and closes the cross-chiplet LogUp identity in
+/// It owns the twelve AIRs in canonical order and closes the cross-chiplet LogUp identity in
 /// [`eval_external`](Self::eval_external), weighting each normalized residue by its trace length.
 #[derive(Debug, Clone)]
 pub struct ChipletMultiAir {
@@ -326,7 +331,7 @@ mod tests {
         let aux_refs: Vec<&[QuadFelt]> = aux_values.iter().map(Vec::as_slice).collect();
 
         // BytePairLut is fixed at 2^16; every other entry satisfies its AIR's minimum height.
-        let log_heights: [u8; NUM_CHIPLETS] = [8, 16, 7, 16, 5, 9, 10, 11, 12, 13, 14];
+        let log_heights: [u8; NUM_CHIPLETS] = [8, 16, 7, 16, 5, 9, 10, 11, 12, 13, 14, 15];
         let assertions = multi_air
             .eval_external(
                 &challenges,
@@ -363,7 +368,7 @@ mod tests {
             .map(|air| vec![QuadFelt::ZERO; air.num_aux_values()])
             .collect();
         let aux_refs: Vec<&[QuadFelt]> = aux_values.iter().map(Vec::as_slice).collect();
-        let log_heights: [u8; NUM_CHIPLETS] = [8, 16, 7, 16, 5, 9, 10, 11, 12, 13, 14];
+        let log_heights: [u8; NUM_CHIPLETS] = [8, 16, 7, 16, 5, 9, 10, 11, 12, 13, 14, 15];
         let rejects = |case: &str,
                        challenges: &[QuadFelt],
                        air_inputs: &[Felt],
@@ -459,6 +464,7 @@ mod tests {
             ChipletAir::EcGroupAdd,
             ChipletAir::EcMsm,
             ChipletAir::Sha512,
+            ChipletAir::Sha256,
         ];
         assert_eq!(
             ChipletAir::all(),
