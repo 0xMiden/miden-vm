@@ -20,8 +20,5 @@ std = ["miette/fancy-no-syscall", "miette/std", "miden-debug-types/std"]
 
 [dependencies]
 miden-debug-types.workspace = true
-miette = { workspace = true, features = [
-    "fancy-no-syscall",
-    "derive",
-] }
+miette = { workspace = true, features = ["derive"] }
 tracing.workspace = true

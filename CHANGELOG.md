@@ -20,6 +20,8 @@
 
 #### Fixes
 
+- Restored `no_std` builds for VM and crypto libraries by using `alloc` in the constraint compiler and gating channels, parallel trace building, diagnostic rendering, and codegen file I/O behind their feature flags ([#3927](https://github.com/0xMiden/miden-vm/issues/3927), [#3928](https://github.com/0xMiden/miden-vm/issues/3928), [#3929](https://github.com/0xMiden/miden-vm/issues/3929)).
+- Enabled `miden-test-utils` builds without `std` by keeping logging and test-only dependencies behind its `std` feature ([#3930](https://github.com/0xMiden/miden-vm/issues/3930)).
 - Updated `crypto-bigint` to 0.7.6 and `ctutils` to 0.4.5 to address [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387).
 
 ## v1.0.0-rc.0 (2026-10-21)

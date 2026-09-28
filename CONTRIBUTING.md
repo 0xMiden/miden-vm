@@ -100,6 +100,19 @@ For example, a new change to the AIR crate might have the following message: `fe
     cargo fixit --allow-staged --allow-dirty --all-targets --all-features; cargo fmt; cargo clippy --workspace --all-targets --all-features -- -D warnings
     ```
 
+### Feature and no_std checks
+
+Run `make check-features` to check each feature separately. It checks all targets
+and then repeats the library checks without dev-dependencies, which can enable
+`std` through Cargo feature unification.
+
+Run `rustup target add wasm32v1-none` and `make check-no-std` to check every
+workspace library that declares `no_std`. Each library builds separately with
+default features disabled on a target that has no standard library. The WASM
+workspace builds use targets that provide `std`, so they cannot detect all
+accidental `std` dependencies. CI runs both checks on pull requests.
+The release workflow repeats the bare-target check before publishing crates.
+
 ### Versioning
 We use [semver](https://semver.org/) naming convention.
 
