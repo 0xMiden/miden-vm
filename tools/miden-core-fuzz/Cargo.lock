@@ -977,15 +977,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "flume"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e139bc46ca777eb5efaf62df0ab8cc5fd400866427e56c68b22e414e53bd3be"
-dependencies = [
- "spin 0.9.9",
-]
-
-[[package]]
 name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1604,7 +1595,6 @@ dependencies = [
  "curve25519-dalek",
  "der",
  "ed25519-dalek",
- "flume",
  "hkdf",
  "k256",
  "miden-crypto-derive",
@@ -1773,6 +1763,7 @@ dependencies = [
  "miden-stark",
  "miden-utils-diagnostics",
  "miden-utils-indexing",
+ "p3-maybe-rayon",
  "paste",
  "rayon",
  "thiserror",
@@ -2133,6 +2124,9 @@ name = "p3-maybe-rayon"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe1d83295d958b3d098e11b7868ac35c866c9c0432ce5266b90f7844dad513de"
+dependencies = [
+ "rayon",
+]
 
 [[package]]
 name = "p3-mds"
@@ -3007,9 +3001,6 @@ name = "spin"
 version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
-dependencies = [
- "lock_api",
-]
 
 [[package]]
 name = "spin"
