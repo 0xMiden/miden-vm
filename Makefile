@@ -54,6 +54,7 @@ FEATURES_LOG_TREE        := --features concurrent,executable,tracing-forest
 # Target triple used when producing release artifacts. Defaults to the host's triple.
 BUILD_TARGET             ?= $(shell rustc -vV | grep host | awk '{print $$2}')
 NO_STD_TARGET            ?= wasm32-unknown-unknown
+BARE_METAL_TARGET        ?= wasm32v1-none
 
 # Per-crate default features
 FEATURES_air             := testing
@@ -239,8 +240,12 @@ check: ## Checks all targets and features for errors without code generation
 	$(BUILDDOCS) cargo check --all-targets ${ALL_FEATURES}
 
 .PHONY: check-features
-check-features: ## Checks all feature combinations compile without warnings using cargo-hack
+check-features: ## Checks each workspace feature without warnings using cargo-hack
 	@scripts/check-features.sh
+
+.PHONY: check-no-std
+check-no-std: ## Checks each no_std library on a target without std
+	python3 scripts/check-no-std.py --target $(BARE_METAL_TARGET)
 
 # --- building ------------------------------------------------------------------------------------
 
@@ -249,7 +254,7 @@ build: ## Builds with default parameters
 	$(BUILDDOCS) cargo build --release --features concurrent
 
 .PHONY: build-no-std
-build-no-std: ## Builds without the standard library
+build-no-std: ## Builds the workspace with default features disabled
 	$(BUILDDOCS) cargo build --no-default-features --target $(NO_STD_TARGET) --workspace \
 		--exclude miden-vm-blake3-bench \
 		--exclude miden-vm-synthetic-bench \

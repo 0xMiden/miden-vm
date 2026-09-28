@@ -9,6 +9,8 @@
 //! The encoded stream concatenates constants (EF) followed by operations
 //! (base-field), then pads to an `adv_pipe` block boundary.
 
+use alloc::{format, string::ToString, vec::Vec};
+
 use miden_core::{Felt, Word, crypto::hash::Poseidon2};
 use miden_crypto::field::ExtensionField;
 

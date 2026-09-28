@@ -1,3 +1,5 @@
+use alloc::{vec, vec::Vec};
+
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::PrimeCharacteristicRing;
 

@@ -1,3 +1,4 @@
+use alloc::{format, vec, vec::Vec};
 use std::borrow::Cow;
 
 use miden_core::{Felt, field::QuadFelt};

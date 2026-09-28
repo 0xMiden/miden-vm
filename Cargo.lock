@@ -2048,6 +2048,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 name = "miden-ace-codegen"
 version = "0.35.0"
 dependencies = [
+ "hashbrown 0.17.1",
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
@@ -2164,6 +2165,7 @@ dependencies = [
 name = "miden-constraint-compiler"
 version = "0.35.0"
 dependencies = [
+ "hashbrown 0.17.1",
  "miden-core",
  "miden-crypto",
 ]
@@ -2596,6 +2598,7 @@ dependencies = [
  "miden-test-utils",
  "miden-utils-diagnostics",
  "miden-utils-indexing",
+ "p3-maybe-rayon",
  "paste",
  "pretty_assertions",
  "proptest",

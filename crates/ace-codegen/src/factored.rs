@@ -19,8 +19,9 @@
 //! `[common ops | root padding]` (order-invariant), which the MASM loader hashes
 //! separately and the registry binds as `merge(H(prefix_i), H(common))`.
 
-use std::collections::HashMap;
+use alloc::{format, vec, vec::Vec};
 
+use hashbrown::HashMap;
 use miden_core::Felt;
 use miden_crypto::field::Field;
 
@@ -516,6 +517,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use super::is_exact_permutation;
 
     #[test]

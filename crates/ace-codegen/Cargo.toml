@@ -14,9 +14,12 @@ rust-version.workspace = true
 edition.workspace = true
 
 [features]
+default = ["std"]
+std = ["miden-constraint-compiler/std", "miden-core/std", "miden-crypto/std", "thiserror/std"]
 testing = []
 
 [dependencies]
+hashbrown.workspace = true
 miden-constraint-compiler = { workspace = true }
 miden-core = { workspace = true }
 miden-field = { workspace = true }

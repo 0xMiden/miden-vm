@@ -33,6 +33,14 @@
 //! - `quotient`: barycentric quotient recomposition helpers (used by DAG + tests).
 //! - `registry`: order tags, registry layout, subtree construction, and path authentication.
 
+#![no_std]
+
+extern crate alloc;
+#[cfg(test)]
+extern crate std;
+
+use alloc::string::String;
+
 // Core IR and lowering.
 mod circuit;
 mod dag;

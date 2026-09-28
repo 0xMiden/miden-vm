@@ -86,7 +86,7 @@ required-features = ["std"]
 
 [features]
 arbitrary         = ["dep:proptest", "miden-field/arbitrary"]
-concurrent        = ["dep:rayon", "miden-lifted-stark/concurrent", "p3-maybe-rayon/parallel", "p3-util/parallel", "std"]
+concurrent        = ["dep:flume", "dep:rayon", "miden-lifted-stark/concurrent", "p3-maybe-rayon/parallel", "p3-util/parallel", "std"]
 default           = ["concurrent", "std"]
 executable        = ["concurrent", "dep:clap"]
 fuzzing           = []
@@ -111,7 +111,7 @@ clap             = { features = ["derive"], optional = true, workspace = true }
 curve25519-dalek = { workspace = true }
 der              = { workspace = true }
 ed25519-dalek    = { features = ["alloc", "zeroize"], workspace = true }
-flume            = { workspace = true }
+flume            = { optional = true, workspace = true }
 hkdf             = { workspace = true }
 k256             = { features = ["alloc", "ecdh", "ecdsa", "pkcs8"], workspace = true }
 num              = { features = ["alloc", "libm"], workspace = true }

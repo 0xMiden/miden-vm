@@ -1,7 +1,8 @@
 //! Gate-count normalization for completed ACE DAGs.
 
-use std::collections::HashMap;
+use alloc::{vec, vec::Vec};
 
+use hashbrown::HashMap;
 use miden_crypto::field::Field;
 
 use super::{AceDag, DagBuilder, NodeId, NodeKind};

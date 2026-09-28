@@ -1,3 +1,4 @@
+use alloc::{vec, vec::Vec};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use miden_crypto::{

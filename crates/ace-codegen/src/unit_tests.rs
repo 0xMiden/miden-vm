@@ -1,5 +1,7 @@
 //! Unit tests for internal DAG + circuit helpers.
 
+use alloc::{vec, vec::Vec};
+
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Field, PrimeCharacteristicRing};
 use proptest::prelude::*;

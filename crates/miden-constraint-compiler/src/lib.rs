@@ -21,5 +21,11 @@
 //! Backend output is never trusted by inspection: each backend is validated
 //! against the hand-written source by oracles living with its consumers.
 
+#![no_std]
+
+extern crate alloc;
+#[cfg(test)]
+extern crate std;
+
 pub mod backend;
 pub mod ir;

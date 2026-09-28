@@ -243,6 +243,12 @@ jobs:
           ref: ${{ needs.prepare-release.outputs.sha }}
           persist-credentials: false
 
+      - name: Check isolated no-std libraries before publication
+        run: |
+          rustup toolchain install --no-self-update
+          rustup target add wasm32v1-none
+          RUSTFLAGS="-D warnings" make check-no-std
+
       - name: Authenticate with crates.io
         uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
         id: auth

@@ -1,6 +1,6 @@
 //! Rendering support for the relation-local MASM ACE evaluator wrapper.
 
-use std::{format, string::String};
+use alloc::{format, string::String};
 
 use miden_core::{Felt, Word};
 use miden_crypto::stark::QuotientRecompositionInputs;

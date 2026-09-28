@@ -96,6 +96,8 @@
 //! wrapped subtree (mirroring the tree lowering's `ExtLeaf::Base` case). Fields
 //! are concrete (`Felt`/`QuadFelt`), matching the capture frontend.
 
+use alloc::vec::Vec;
+
 use miden_constraint_compiler::ir::{
     CapturedConstraints, Graph, Leaf, Node, NodeId as IrNodeId, OpKind,
 };

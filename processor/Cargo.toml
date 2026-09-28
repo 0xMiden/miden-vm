@@ -22,6 +22,8 @@ doctest = false
 concurrent = ["std", "miden-air/concurrent"]
 default = ["std"]
 std = [
+    "dep:rayon",
+    "p3-maybe-rayon/parallel",
     "miden-core/std",
     "miden-debug-types/std",
     "miden-utils-diagnostics/std",
@@ -43,7 +45,8 @@ miden-utils-indexing.workspace = true
 hashbrown.workspace = true
 itertools.workspace = true
 paste.workspace = true
-rayon.workspace = true
+p3-maybe-rayon.workspace = true
+rayon = { workspace = true, optional = true }
 tracing.workspace = true
 thiserror.workspace = true
 

@@ -4,8 +4,9 @@
 //! coefficients via Horner evaluation, or sparse Lagrange form over nonzero
 //! evaluations.
 
-use std::collections::HashMap;
+use alloc::vec::Vec;
 
+use hashbrown::HashMap;
 use miden_crypto::field::Field;
 
 use super::{

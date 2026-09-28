@@ -5,6 +5,8 @@
 //! validating the ACE pipeline from both within ace-codegen tests and from
 //! downstream integration tests (e.g. in miden-air).
 
+use alloc::{format, vec, vec::Vec};
+
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::{
     field::{ExtensionField, Field, TwoAdicField},

@@ -1,13 +1,12 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 use miden_debug_types::{DefaultSourceManager, SourceFile, SourceManager};
-use miden_utils_diagnostics::{
-    Report,
-    reporting::{ReportHandlerOpts, set_hook},
-};
+use miden_utils_diagnostics::{Report, reporting::set_hook};
 
+#[cfg(not(feature = "std"))]
+use crate::diagnostics::reporting::DefaultReportHandler;
 #[cfg(feature = "std")]
-use crate::diagnostics::reporting::set_panic_hook;
+use crate::diagnostics::reporting::{ReportHandlerOpts, set_panic_hook};
 use crate::{
     Path,
     ast::{Form, Module, ModuleKind},
@@ -51,7 +50,7 @@ impl SyntaxTestContext {
 
         #[cfg(not(feature = "std"))]
         {
-            let _ = set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
+            let _ = set_hook(Box::new(|_| Box::new(DefaultReportHandler::default())));
         }
         let source_manager = Arc::new(DefaultSourceManager::default());
         Self {
