@@ -10,7 +10,7 @@ use super::pvm_layout_const;
 use crate::helpers::read_memory_felt;
 
 /// Chiplet instances in `ChipletAir::all()` order.
-const NUM_CHIPLETS: usize = 10;
+const NUM_CHIPLETS: usize = miden_precompiles_air::NUM_CHIPLETS;
 
 /// Boundary values each chiplet exposes, in canonical instance order.
 ///
@@ -95,7 +95,7 @@ fn expected_after_scatter(order: &[usize], wire: &[u64]) -> Vec<u64> {
 }
 
 /// Structured proof orders: identity, reversal, every adjacent swap, each chiplet moved to either
-/// end, and a deterministic scramble. Ten chiplets admit 3,628,800 orders, so the sweep is a
+/// end, and a deterministic scramble. Eleven chiplets admit 39,916,800 orders, so the sweep is a
 /// sample; it is chosen to separate every pair of adjacent positions.
 pub(super) fn structured_orders() -> Vec<Vec<usize>> {
     let identity: Vec<usize> = (0..NUM_CHIPLETS).collect();
@@ -119,9 +119,9 @@ pub(super) fn structured_orders() -> Vec<Vec<usize>> {
         orders.push(back);
     }
     // A deterministic scramble.
-    orders.push(vec![4, 9, 1, 7, 0, 6, 3, 8, 2, 5]);
-    orders.push(vec![3, 0, 2, 4, 5, 6, 7, 8, 9, 1]);
-    orders.push(vec![1, 9, 8, 7, 6, 5, 4, 2, 0, 3]);
+    orders.push(vec![4, 9, 1, 10, 7, 0, 6, 3, 8, 2, 5]);
+    orders.push(vec![3, 0, 2, 4, 5, 6, 7, 8, 9, 10, 1]);
+    orders.push(vec![1, 10, 9, 8, 7, 6, 5, 4, 2, 0, 3]);
     orders.sort();
     orders.dedup();
     orders
@@ -155,6 +155,16 @@ fn source(heights: &[u64]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
+    let tail = if total_values() * SIGMA_FELTS % 4 == 2 {
+        let offset = total_values() * SIGMA_FELTS - 2;
+        format!(
+            "    adv_push adv_push swap\n    dup exec.layout::aux_bus_boundary_ptr add.{offset} \
+             mem_store\n    dup.1 exec.layout::aux_bus_boundary_ptr add.{} mem_store\n    drop drop",
+            offset + 1
+        )
+    } else {
+        String::new()
+    };
     format!(
         "use miden::core::stark::constants
 use miden::core::sys::pvm::aux_trace
@@ -168,6 +178,7 @@ begin
     push.{s3}.{s2}.{s1}.{s0}
 
 {absorbs}
+{tail}
 
     exec.aux_trace::scatter_aux_bus_boundary
 
@@ -214,8 +225,8 @@ fn the_scatter_covers_every_chiplet_of_the_relation() {
         pvm_layout_const("AUXILIARY_ACE_INPUTS_PTR") - pvm_layout_const("AUX_BUS_BOUNDARY_PTR");
     assert_eq!(
         region as usize,
-        total_values() * SIGMA_FELTS,
-        "the boundary region no longer holds exactly the exposed values"
+        (total_values() * SIGMA_FELTS).next_multiple_of(4),
+        "the boundary region no longer holds exactly the exposed values and their word padding"
     );
 }
 
@@ -253,9 +264,9 @@ fn tied_heights_scatter_to_the_instance_order() {
     let wire = wire_values();
     for heights in [
         vec![18u64; NUM_CHIPLETS],
-        vec![9u64, 9, 9, 9, 21, 21, 21, 9, 9, 21],
+        vec![9u64, 9, 9, 9, 21, 21, 21, 9, 9, 21, 9],
         // A pair of chiplets tied against each other, everything else split around them.
-        vec![14u64, 12, 14, 12, 11, 11, 16, 16, 12, 14],
+        vec![14u64, 12, 14, 12, 11, 11, 16, 16, 12, 14, 11],
     ] {
         let order = proof_order(&heights);
         assert_eq!(

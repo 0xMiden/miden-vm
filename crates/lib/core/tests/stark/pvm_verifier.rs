@@ -1,17 +1,20 @@
 //! End-to-end verification of a real PVM proof inside MASM.
 
+use std::sync::Arc;
+
 use miden_core::{
     Felt, Word,
     advice::AdviceInputs,
     crypto::hash::Keccak256,
     deferred::{
-        DEFERRED_AND_FRAME, Node, PrecompileWitness, PrecompileWitnessEntry, deferred_chunks_frame,
+        DEFERRED_AND_FRAME, DeferredState, Node, PrecompileWitness, PrecompileWitnessEntry,
+        deferred_chunks_frame,
     },
     program::proof_request_key,
     proof::{HashFunction, PrecompileProof, StarkProof},
 };
 use miden_core_lib::CoreLibrary;
-use miden_precompiles::Keccak256Precompile;
+use miden_precompiles::{Keccak256Precompile, Sha512Precompile};
 use miden_precompiles_air::NUM_CHIPLETS;
 use miden_precompiles_prover::prove_precompiles;
 use miden_precompiles_verifier::masm_verifier::{
@@ -27,6 +30,68 @@ use super::{
 use crate::helpers::masm_push_word;
 
 const SECURITY_PARAM_COUNT: usize = 4;
+
+#[test]
+fn pvm_keccak_only_recursive_verifier_cost_is_bounded() {
+    const SOURCE: &str = "
+        use miden::core::sys
+        use miden::core::sys::pvm
+        begin
+            dupw
+            procref.pvm::verify_proof
+            exec.sys::build_proof_request_key
+            adv.push_mapval dropw
+            exec.pvm::verify_proof
+            exec.sys::truncate_stack
+        end
+    ";
+
+    let proof = prove_keccak_claim(&[0x61; 32]);
+    let inputs = PvmRecursiveVerifierInputs::for_request(pvm_verify_proof_root(), &proof)
+        .expect("host adapter must parse the proof");
+    let initial_stack: [u64; 4] = inputs.claim_commitment().into();
+    let mut test = build_test!(SOURCE, initial_stack);
+    test.advice_inputs = inputs.advice().clone();
+    let trace = test.execute().expect("Keccak-only PVM proof must verify");
+    let summary = trace.trace_len_summary();
+    eprintln!("Keccak-only PVM recursive trace: {summary:?}");
+    assert!(
+        summary.padded_trace_len() <= 1 << 18,
+        "SHA-512's fixed program must not force Keccak-only recursion back to 2^19 rows"
+    );
+}
+
+#[test]
+fn pvm_verifies_sha512_and_mixed_hash_claims() {
+    use miden_crypto::hash::sha2::Sha512;
+
+    for mixed in [false, true] {
+        let mut state = DeferredState::new(Arc::new(miden_precompiles::registry())).unwrap();
+        // 112 bytes requires two SHA-512 padding blocks; Keccak still needs only one.
+        let input = [0xa5; 112];
+        let preimage = state.register(Node::chunks_from_bytes(&input)).unwrap();
+        let expected = state
+            .register(Node::chunks_from_bytes(Sha512::hash(&input).as_bytes()))
+            .unwrap();
+        let assertion =
+            state.register(Sha512Precompile::assert_node(112, preimage, expected)).unwrap();
+        state.log_statement(assertion).unwrap();
+        if mixed {
+            let expected = state
+                .register(Node::chunks_from_bytes(Keccak256::hash(&input).as_bytes()))
+                .unwrap();
+            let assertion = state
+                .register(Keccak256Precompile::assert_node(112, preimage, expected))
+                .unwrap();
+            state.log_statement(assertion).unwrap();
+        }
+        let witness = state.into_witness().unwrap().expect("the state logs hash claims");
+        let proof = prove_precompiles(vec![witness], HashFunction::Eidos).unwrap();
+        let inputs =
+            PvmRecursiveVerifierInputs::for_request(pvm_verify_proof_root(), &proof).unwrap();
+        assert_pvm_verifies(&inputs);
+    }
+}
 
 #[test]
 fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
@@ -83,7 +148,7 @@ fn assert_pvm_rejects_tampering(inputs: &PvmRecursiveVerifierInputs) {
     let wrong_claim_advice = AdviceInputs::new(stack, map, store);
     assert_pvm_rejects(&wrong_claim_advice, wrong_claim_commitment);
 
-    // The ten heights are the sole carrier of proof order into the OOD scatter table, the sigma
+    // The eleven heights are the sole carrier of proof order into the OOD scatter table, the sigma
     // scatter, and fold staging. Chiplet 3's height is verifier-fixed (its stream slot must equal
     // a constant, so forging it fails a shape check rather than exercising order binding); every
     // other chiplet's height is advice-supplied and must be transcript-bound.

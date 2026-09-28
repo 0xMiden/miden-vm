@@ -314,7 +314,7 @@ impl FoldRelation {
     fn pvm() -> Self {
         Self {
             relation: "pvm",
-            num_airs: 10,
+            num_airs: miden_precompiles_air::NUM_CHIPLETS,
             stark_vars_ptr: crate::stark::pvm_layout_const("AUXILIARY_ACE_INPUTS_PTR"),
             evaluator: include_str!("../../asm/sys/pvm/constraints_eval.masm"),
         }
@@ -413,9 +413,9 @@ fn fold_height_cases(num_airs: usize) -> Vec<Vec<u64>> {
     }
     // Block ties and a scramble, cut to the relation's size.
     for template in [
-        vec![12u64, 12, 11, 11, 13, 13, 12, 11, 13, 12],
-        vec![9u64, 14, 9, 22, 7, 14, 25, 6, 14, 9],
-        vec![20u64, 6, 19, 7, 18, 8, 17, 9, 16, 10],
+        vec![12u64, 12, 11, 11, 13, 13, 12, 11, 13, 12, 11],
+        vec![9u64, 14, 9, 22, 7, 14, 25, 6, 14, 9, 22],
+        vec![20u64, 6, 19, 7, 18, 8, 17, 9, 16, 10, 15],
     ] {
         cases.push(template[..num_airs].to_vec());
     }
@@ -724,9 +724,10 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
             0,
             Until("PROOF_ORDER_POSITIONS_PTR"),
         ),
-        // Ten live position cells plus two alignment cells, followed by one ID per proof position.
+        // Eleven live position cells plus one alignment cell, followed by one ID per proof
+        // position.
         ("pvm/layout.masm", "PROOF_ORDER_POSITIONS_PTR", 0, Until("PROOF_ORDER_IDS_PTR")),
-        ("pvm/layout.masm", "PROOF_ORDER_IDS_PTR", 0, Fixed(10)),
+        ("pvm/layout.masm", "PROOF_ORDER_IDS_PTR", 0, Fixed(11)),
         ("vm/layout.masm", "NUM_KERNEL_PROCEDURES_PTR", 0, Fixed(1)),
         ("vm/layout.masm", "CONTROL_ALIGNMENT_PADDING_PTR", 0, Fixed(3)),
         ("vm/layout.masm", "BUS_GAMMA_PTR", 0, Fixed(4)),

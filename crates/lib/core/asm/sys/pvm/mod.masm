@@ -14,17 +14,17 @@ use miden::core::stark::verifier
 # zero because Lifted STARK does not grind lookup challenges.
 const LOOKUP_POW_BITS = 0
 const MAX_MESSAGE_WIDTH = 18
-const NUM_COMPOSED_CONSTRAINTS = 660
+const NUM_COMPOSED_CONSTRAINTS = 795
 const MAX_CONSTRAINT_DEGREE = 5
-const NUM_DEEP_TERMS = 802
-const LOOKUP_FRACTIONS_PER_ROW = 260
-const FIXED_BOUNDARY_LOOKUP_TERMS = 8
+const NUM_DEEP_TERMS = 906
+const LOOKUP_FRACTIONS_PER_ROW = 294
+const FIXED_BOUNDARY_LOOKUP_TERMS = 14
 
 # Inclusive upper bound used by the PVM shape checks.
 const LOG_HEIGHT_MAX = 29
 
 # Fixed ChipletAir::all() cardinality.
-const NUM_CHIPLETS = 10
+const NUM_CHIPLETS = 11
 
 # The host request used to obtain a PVM proof package for the deferred root on the operand stack.
 const PROOF_REQUEST_EVENT = event("miden::core::sys::pvm::request_proof")
@@ -42,12 +42,13 @@ const MIN_LOG_HEIGHT_6 = 1
 const MIN_LOG_HEIGHT_7 = 1
 const MIN_LOG_HEIGHT_8 = 2
 const MIN_LOG_HEIGHT_9 = 1
+const MIN_LOG_HEIGHT_10 = 7
 
 # PVM_RELATION_DIGEST = Eidos(PVM_PROTOCOL_ID || PVM_ACE_CIRCUIT_DIGEST).
-const RELATION_DIGEST_0 = 5258132695316583046
-const RELATION_DIGEST_1 = 1130709131279213577
-const RELATION_DIGEST_2 = 7578682590228695015
-const RELATION_DIGEST_3 = 4948183518061979794
+const RELATION_DIGEST_0 = 3551619199036311162
+const RELATION_DIGEST_1 = 9168535892284436208
+const RELATION_DIGEST_2 = 1494863611359133273
+const RELATION_DIGEST_3 = 3112947351974463672
 
 # Trusted commitment to the PVM preprocessed trace tree under the native Eidos configuration;
 # `random_coin::init_seed` binds it into the Fiat-Shamir transcript.
@@ -58,11 +59,11 @@ const PREPROCESSED_COMMITMENT_3 = 5080896414781165458
 
 #! Loads the fixed PVM relation context.
 #!
-#! Stores the ten AIR heights in `ChipletAir::all()` order, their maximum, both inverse maps of the
-#! height-sorted proof order, the out-of-domain scatter table, relation commitments, and fixed
+#! Stores the eleven AIR heights in `ChipletAir::all()` order, their maximum, both inverse maps of
+#! the height-sorted proof order, the out-of-domain scatter table, relation commitments, and fixed
 #! OOD/query-row addresses.
 #!
-#! Advice order: [h0, ..., h9].
+#! Advice order: [h0, ..., h10].
 #! Inputs:  [...]
 #! Outputs: [...]
 pub proc load_air_context()
@@ -80,6 +81,7 @@ pub proc load_air_context()
     push.MIN_LOG_HEIGHT_7 exec.load_air_height
     push.MIN_LOG_HEIGHT_8 exec.load_air_height
     push.MIN_LOG_HEIGHT_9 exec.load_air_height
+    push.MIN_LOG_HEIGHT_10 exec.load_air_height
 
     drop
     exec.constants::set_trace_length_log
@@ -222,7 +224,7 @@ pub proc request_proof(root: types::Digest) -> types::Digest
     adv.push_mapval dropw
 end
 
-#! Verifies a lifted-STARK proof for the ten-chiplet PVM relation and returns the common security
+#! Verifies a lifted-STARK proof for the eleven-chiplet PVM relation and returns the common security
 #! descriptor.
 #!
 #! The deferred root is the relation's four public base-field values, supplied by the caller as the

@@ -125,7 +125,7 @@ fn shape_and_degree_match_design() {
 #[should_panic(expected = "constraint not satisfied")]
 fn overlapping_stored_families_rejected_by_derived_intro_endo_selector() {
     let traces = msm_two_intro_traces();
-    let mut main = traces.mains().into_iter().last().expect("EcMsm trace exists").clone();
+    let mut main = traces.mains()[9].clone();
     let width = EcMsmAir.width();
     let row = (0..main.height())
         .find(|&row| {
@@ -154,7 +154,7 @@ fn overlapping_stored_families_rejected_by_derived_intro_endo_selector() {
 #[should_panic(expected = "constraint not satisfied")]
 fn shared_mint_flag_rejected_on_intro() {
     let traces = msm_two_intro_traces();
-    let mut main = traces.mains().into_iter().last().expect("EcMsm trace exists").clone();
+    let mut main = traces.mains()[9].clone();
     let width = EcMsmAir.width();
     let row = (0..main.height())
         .find(|&row| main.values[row * width + COL_IS_INTRO] == Felt::ONE)

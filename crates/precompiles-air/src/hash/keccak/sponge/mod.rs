@@ -17,6 +17,7 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_utils_sync::LazyLock;
 pub use program::{NUM_PERIODIC_COLS, SPONGE_PERIOD, sponge_program};
 
 use crate::{
@@ -178,6 +179,8 @@ pub use program::{
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KeccakSpongeAir;
 
+static PERIODIC_COLUMNS: LazyLock<[Vec<Felt>; NUM_PERIODIC_COLS]> = LazyLock::new(sponge_program);
+
 impl BaseAir<Felt> for KeccakSpongeAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
@@ -188,7 +191,7 @@ impl BaseAir<Felt> for KeccakSpongeAir {
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Owned(sponge_program().into())
+        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
     }
 }
 
@@ -278,6 +281,10 @@ pub(crate) const fn mask_byte(lo: u32, hi: u32, byte_idx: usize) -> u8 {
 // ================================================================================================
 
 impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
+    fn max_periodic_length(&self) -> usize {
+        SPONGE_PERIOD
+    }
+
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
