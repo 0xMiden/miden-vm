@@ -8,6 +8,8 @@
 - [BREAKING] Fixed the `aead::decrypt` overlap check so it also covers the 4-element tag after the ciphertext; a destination placed at the tag address now fails the overlap assertion instead of overwriting the tag and failing with a tag mismatch. Layouts where the destination range only overlaps the tag are now rejected even when nothing would be written there, e.g. an empty message (`num_blocks = 0`) with `dst_ptr` at the tag address. Ranges that end at the last memory address are no longer rejected ([#3897](https://github.com/0xMiden/miden-vm/pull/3897)).
 - [BREAKING] Limited `eval_circuit` to 32,768 total READ and EVAL wires per call and witness collection to 32 invocations. Oversized circuits are rejected before allocation, and evaluations beyond the invocation limit are rejected before being recorded in the witness ([#3908](https://github.com/0xMiden/miden-vm/pull/3908)).
 
+- Fixed concurrent `Smt::with_entries` and `LargeSmt::with_entries` panicking on leaves with more than `MAX_LEAF_ENTRIES` entries and keeping empty values in leaves shared with other keys ([#3932](https://github.com/0xMiden/miden-vm/pull/3932)).
+
 ## v0.34.0 (2026-09-26)
 
 #### Features
