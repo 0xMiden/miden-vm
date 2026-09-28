@@ -41,7 +41,7 @@ fn generate_updates(entries: Vec<(Word, Word)>, updates: usize) -> Vec<(Word, Wo
             let value = if rng.random_bool(REMOVAL_PROBABILITY) {
                 EMPTY_WORD
             } else {
-                Word::new([ONE, ONE, ONE, Felt::new_unchecked(rng.random())])
+                Word::new([ONE, ONE, ONE, rng.random::<Felt>()])
             };
             (key, value)
         })

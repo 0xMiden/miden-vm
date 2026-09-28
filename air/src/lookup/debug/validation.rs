@@ -19,16 +19,14 @@ use alloc::vec::Vec;
 use core::{fmt, marker::PhantomData};
 
 use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
-use miden_crypto::{
-    rand::random_felt,
-    stark::air::{
-        AirBuilder, PermutationAirBuilder,
-        symbolic::{
-            BaseEntry, BaseLeaf, ExtEntry, ExtLeaf, SymbolicAirBuilder, SymbolicExpr,
-            SymbolicExpression, SymbolicExpressionExt, SymbolicVariable, SymbolicVariableExt,
-        },
+use miden_crypto::stark::air::{
+    AirBuilder, PermutationAirBuilder,
+    symbolic::{
+        BaseEntry, BaseLeaf, ExtEntry, ExtLeaf, SymbolicAirBuilder, SymbolicExpr,
+        SymbolicExpression, SymbolicExpressionExt, SymbolicVariable, SymbolicVariableExt,
     },
 };
+use rand::RngExt;
 
 use super::super::{
     Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
@@ -161,20 +159,21 @@ pub fn validate<A>(air: &A, layout: ValidateLayout) -> Result<(), ValidationErro
 where
     for<'ab, 'r> A: LookupAir<ValidationBuilder<'ab, 'r>>,
 {
+    let mut rng = rand::rng();
     // Sample a single random row valuation shared by the symbolic and concrete
     // sides. `alpha`/`beta` are instantiated twice: once as symbolic `Challenge`
     // leaves inside `SymbolicAirBuilder::permutation_randomness`, and once as
     // concrete `QuadFelt`s in `row_valuation`. The evaluator below maps
     // `ExtEntry::Challenge { index: 0/1 }` back to these concrete values.
-    let current: Vec<Felt> = (0..layout.trace_width).map(|_| random_felt()).collect();
-    let next: Vec<Felt> = (0..layout.trace_width).map(|_| random_felt()).collect();
+    let current: Vec<Felt> = (0..layout.trace_width).map(|_| rng.random()).collect();
+    let next: Vec<Felt> = (0..layout.trace_width).map(|_| rng.random()).collect();
     let preprocessed_current: Vec<Felt> =
-        (0..layout.preprocessed_width).map(|_| random_felt()).collect();
+        (0..layout.preprocessed_width).map(|_| rng.random()).collect();
     let preprocessed_next: Vec<Felt> =
-        (0..layout.preprocessed_width).map(|_| random_felt()).collect();
-    let periodic: Vec<Felt> = (0..layout.num_periodic_columns).map(|_| random_felt()).collect();
-    let alpha = QuadFelt::new([random_felt(), random_felt()]);
-    let beta = QuadFelt::new([random_felt(), random_felt()]);
+        (0..layout.preprocessed_width).map(|_| rng.random()).collect();
+    let periodic: Vec<Felt> = (0..layout.num_periodic_columns).map(|_| rng.random()).collect();
+    let alpha = QuadFelt::new(rng.random());
+    let beta = QuadFelt::new(rng.random());
 
     let mut sym = SymbolicAirBuilder::<Felt, QuadFelt>::new(layout.to_symbolic());
     let row_valuation = RowValuation {

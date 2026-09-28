@@ -39,23 +39,25 @@ impl<T: Copy> DecoderCols<T> {
         ]
     }
 
-    /// Returns the 4 end-block flags (hasher_state[4..8]).
+    /// Returns the END flags stored in hasher state columns 4 through 6.
+    /// Column 7 is constrained to zero on END rows.
     pub fn end_block_flags(&self) -> EndBlockFlags<T> {
         EndBlockFlags {
             is_loop_body: self.hasher_state[4],
             is_loop: self.hasher_state[5],
-            is_call: self.hasher_state[6],
-            is_syscall: self.hasher_state[7],
+            restores_caller_frame: self.hasher_state[6],
         }
     }
 }
 
-/// Named end-block flag overlay for `hasher_state[4..8]`.
+/// Named overlay for the semantic END flags in `hasher_state[4..7]`.
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct EndBlockFlags<T> {
+    /// Whether the node that ended is the body of a LOOP node.
     pub is_loop_body: T,
+    /// Whether this END closes a LOOP continuation.
     pub is_loop: T,
-    pub is_call: T,
-    pub is_syscall: T,
+    /// Whether this END restores state from an authenticated caller-frame entry.
+    pub restores_caller_frame: T,
 }

@@ -8,28 +8,29 @@
 //!
 //! - `b0`: Stack depth (always >= 16)
 //! - `b1`: Address of the top row in the overflow table (clk value when item was pushed)
-//! - `h0`: Overflow flag helper = 1/(b0 - 16) when b0 > 16, else 0
+//! - `h0`: Overflow flag helper = 1/(b0 - 16) when b0 > 16; unconstrained when b0 = 16
 //!
 //! ## Constraints
 //!
 //! 1. **Stack depth transition** (degree 7):
 //!    - No shift: depth stays the same
 //!    - Right shift: depth increases by 1
-//!    - Left shift with non-empty overflow: depth decreases by 1 (we pop from the overflow table)
+//!    - Left shift with non-empty overflow: depth decreases by 1
 //!    - CALL/SYSCALL/DYNCALL: depth resets to 16
 //!
 //! 2. **Overflow flag** (degree 3):
-//!    - When overflow table is empty (b0 = 16), h0 must be 0
+//!    - When overflow table is empty (b0 = 16), h0 is unconstrained
 //!    - When overflow table has values (b0 > 16), h0 = 1/(b0 - 16)
 //!
 //! 3. **Overflow index** (degree 7, 8):
-//!    - On right shift: b1' = clk (record when item was pushed)
+//!    - On right shift: b1' = clk (record when an item was pushed)
 //!    - On CALL/SYSCALL/DYNCALL: b1' = 0 (start with an empty overflow table)
 //!    - On operations which do not modify or restore the overflow table: b1' = b1
-//!    - On left shift with depth = 16: stack[15]' = 0 (no item to restore)
+//!    - On a left shift or DYNCALL at depth 16: stack[15]' = 0
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
+use p3_field::Dup;
 
 use crate::{
     CoreCols, MidenAirBuilder,
@@ -45,7 +46,7 @@ use crate::{
 /// 1. Stack depth transitions correctly based on the operation type
 /// 2. Overflow flag h0 is set correctly
 /// 3. Overflow bookkeeping index b1 is updated correctly on shifts
-/// 4. Last stack item is zeroed on left shift when depth = 16
+/// 4. Last stack item is zeroed when it must be refilled and depth = 16
 pub fn enforce_main<AB>(
     builder: &mut AB,
     local: &CoreCols<AB::Var>,
@@ -79,12 +80,13 @@ pub fn enforce_main<AB>(
 /// Enforces stack depth transition constraints.
 ///
 /// The stack depth (b0) changes based on the operation:
-/// - No shift operations: depth unchanged
-/// - Right shift operations: depth += 1
-/// - Left shift operations with non-empty overflow: depth -= 1 (we pop from the overflow table)
+/// - No shift: depth unchanged
+/// - Right shift: depth += 1
+/// - Left shift with non-empty overflow: depth -= 1
 /// - CALL/SYSCALL/DYNCALL: depth = 16 (reset)
 ///
-/// The END operation exiting a CALL/SYSCALL block is handled separately via multiset constraints.
+/// An END operation which restores a caller frame is handled separately by the block-stack
+/// relation.
 fn enforce_stack_depth_constraints<AB>(
     builder: &mut AB,
     local: &CoreCols<AB::Var>,
@@ -99,46 +101,41 @@ fn enforce_stack_depth_constraints<AB>(
     // Flag for CALL, DYNCALL, or SYSCALL operations
     let call_or_dyncall_or_syscall = op_flags.call() + op_flags.dyncall() + op_flags.syscall();
 
-    // Flag for END operation that ends a CALL/DYNCALL or SYSCALL block
-    let is_call_or_dyncall_end = local.decoder.hasher_state[6];
-    let is_syscall_end = local.decoder.hasher_state[7];
-    let call_or_dyncall_or_syscall_end = op_flags.end() * (is_call_or_dyncall_end + is_syscall_end);
+    // Flag for an END operation that restores a caller frame.
+    let end_flags = local.decoder.end_block_flags();
+    let caller_frame_end = op_flags.end() * end_flags.restores_caller_frame;
 
     // Invariants relied on here:
-    // - Aggregate left_shift/right_shift flags are 0 on CALL/SYSCALL/END rows.
-    // - DYNCALL is excluded from the aggregate left_shift flag (its stack effect is handled via
-    //   per-position left_shift_at flags plus the call-entry depth reset).
+    // - The aggregate left/right-shift flags are zero on CALL/SYSCALL and caller-frame END rows. A
+    //   LOOP continuation END is not masked and uses the left-shift term normally.
+    // - DYNCALL is excluded from `left_shift` (its stack effect is handled via per-position
+    //   `left_shift_at` flags plus the call-entry depth reset).
     //
     // We have three regimes:
     //
     // 1) CALL/SYSCALL/DYNCALL entry: force b0' = 16 (handled by call_part below).
-    // 2) END-of-call: depth restoration is validated by block stack constraints; we don't enforce
-    //    the shift law here.
-    // 3) All other rows ("normal ops"): depth follows the shift law b0' - b0 + f_shl * f_ov - f_shr
-    //    = 0.
+    // 2) Caller-frame END: depth restoration is validated by block-stack constraints; we don't
+    //    enforce the shift law here.
+    // 3) All other rows: depth follows b0' - b0 + f_shl * f_ov - f_shr = 0.
     //
     // Why we mask only the (b0' - b0) term:
     //
-    // - On CALL/SYSCALL/END rows, the aggregate shift flags are 0 by construction. (CALL/SYSCALL
-    //   are explicitly no-shift ops; END sets left_shift only for loop exits; DYNCALL is
-    //   intentionally excluded from the aggregate left_shift flag.)
-    // - Therefore, the shift terms already vanish on those rows, and masking them would only
+    // - On CALL/SYSCALL and caller-frame END rows, the shift terms vanish. DYNCALL is intentionally
+    //   excluded from the aggregate left-shift flag.
+    // - Therefore, these terms already vanish in the masked regimes, and masking them would only
     //   increase polynomial degree.
-    // - We still need to suppress the raw (b0' - b0) term on END-of-call rows, hence the mask.
-    let normal_mask =
-        AB::Expr::ONE - call_or_dyncall_or_syscall.clone() - call_or_dyncall_or_syscall_end;
-    let depth_delta_part = (depth_next.into() - depth.into()) * normal_mask;
+    // - We still need to suppress the raw (b0' - b0) term on caller-frame END rows, hence the mask.
+    let normal_mask = AB::Expr::ONE - call_or_dyncall_or_syscall.dup() - caller_frame_end;
+    let depth_delta_part = (depth_next - depth) * normal_mask;
 
-    // Left shift with non-empty overflow: when f_shl=1 and f_ov=1, depth must decrement by 1.
-    // This contributes +1 to the LHS, enforcing b0' = b0 - 1.
+    // Left shift with non-empty overflow decrements depth by one.
     let left_shift_part = op_flags.left_shift() * op_flags.overflow();
 
-    // Right shift: when f_shr=1, depth must increment by 1.
-    // This contributes -1 to the LHS, enforcing b0' = b0 + 1.
+    // Right shift increments depth by one.
     let right_shift_part = op_flags.right_shift();
 
     // CALL/SYSCALL/DYNCALL: depth resets to 16 when entering a new context.
-    let call_part = call_or_dyncall_or_syscall * (depth_next.into() - F_16);
+    let call_part = call_or_dyncall_or_syscall * (depth_next - F_16);
 
     // Combined constraint: normal depth update + shift effects + call reset = 0.
     builder
@@ -149,10 +146,10 @@ fn enforce_stack_depth_constraints<AB>(
 /// Enforces overflow bookkeeping index constraints.
 ///
 /// Overflow pointer constraints:
-/// 1. On right shift: b1' = clk (record the clock cycle when item was pushed to overflow)
+/// 1. On a right shift: b1' = clk (record the clock cycle of the overflow row)
 /// 2. On CALL/SYSCALL/DYNCALL: b1' = 0 (start the new context with no overflow)
 /// 3. On operations which do not modify or restore the overflow table: b1' = b1
-/// 4. On left shift with depth = 16: stack[15]' = 0 (no item to restore from overflow)
+/// 4. When position 15 must be refilled at depth 16: stack[15]' = 0
 fn enforce_overflow_index_constraints<AB>(
     builder: &mut AB,
     local: &CoreCols<AB::Var>,
@@ -166,37 +163,43 @@ fn enforce_overflow_index_constraints<AB>(
     let clk = local.system.clk;
     let last_stack_item_next = next.stack.get(15);
 
-    // On right shift, the overflow address should be set to current clk
+    // On a right shift, the overflow address is the current clock.
     builder.when(op_flags.right_shift()).assert_eq(overflow_addr_next, clk);
 
     // A new call context starts with an empty overflow table.
     let context_start = op_flags.call() + op_flags.dyncall() + op_flags.syscall();
     builder
         .when_transition()
-        .when(context_start.clone())
+        .when(context_start.dup())
         .assert_zero(overflow_addr_next);
 
-    // END restores the caller's overflow address through the block stack lookup. The call and
-    // syscall end flags are mutually exclusive: the block-stack relation has one Full removal to
-    // match the corresponding CALL or SYSCALL addition (see block_stack_and_range_logcap). Thus,
-    // their sum is boolean on valid traces. A right shift creates a new overflow record, while a
-    // left shift with non-empty overflow restores the previous address through the overflow table
-    // lookup. All other transitions preserve b1.
+    // A caller-frame END restores the caller's overflow address through the block-stack lookup.
+    // The decoder constrains the restoration flag to be boolean on every END row, and a forged
+    // caller-frame removal cannot be absorbed by a continuation addition because the two carry
+    // distinct entry-kind tags. A right shift creates a new overflow record, while a left shift
+    // with non-empty overflow restores the previous address through the overflow-table lookup.
+    // All other transitions preserve b1.
     let end_flags = local.decoder.end_block_flags();
-    let context_end = op_flags.end() * (end_flags.is_call.into() + end_flags.is_syscall.into());
-    let updates_overflow_addr = context_start
-        + context_end
+    let caller_frame_end = op_flags.end() * end_flags.restores_caller_frame;
+    let pointer_changes = context_start
+        + caller_frame_end
         + op_flags.right_shift()
         + op_flags.left_shift() * op_flags.overflow();
     builder
         .when_transition()
-        .when(AB::Expr::ONE - updates_overflow_addr)
+        .when(pointer_changes.not())
         .assert_eq(overflow_addr_next, overflow_addr);
 
-    // On left shift when depth = 16 (no overflow), last stack item should be zero
+    // When position 15 must be refilled and depth = 16, the new value must be zero.
+    //
+    // The aggregate left-shift flag deliberately excludes DYNCALL because call entry resets the
+    // ordinary depth and overflow-pointer columns. Position 15 still needs the same refill rule:
+    // the overflow-table lookup supplies it when overflow is non-empty, and it must be zero when
+    // overflow is empty.
+    let fills_bottom_slot = op_flags.left_shift() + op_flags.dyncall();
     builder
         .when(op_flags.overflow().not())
-        .when(op_flags.left_shift())
+        .when(fills_bottom_slot)
         .assert_zero(last_stack_item_next);
 }
 
@@ -266,22 +269,57 @@ mod tests {
     }
 
     #[test]
-    fn overflow_address_transitions() {
-        for (opcode, next_depth, next_overflow_addr, transition) in [
-            (opcodes::NOOP, 17, 11, "preserve"),
-            (opcodes::CALL, 16, 0, "reset"),
-            (opcodes::DYNCALL, 16, 0, "reset"),
-            (opcodes::SYSCALL, 16, 0, "reset"),
-            (opcodes::END, 17, 11, "preserve"),
-        ] {
+    fn dyncall_zeros_s15_when_overflow_is_empty() {
+        let mut local = generate_test_row(opcodes::DYNCALL.into());
+        local.stack.b0 = Felt::new_unchecked(16);
+
+        let mut next = generate_test_row(0);
+        next.stack.b0 = Felt::new_unchecked(16);
+
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
+
+        next.stack.top[15] = ONE;
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(
+            evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+            "DYNCALL must zero s15 when no overflow item can be restored"
+        );
+    }
+
+    #[test]
+    fn noop_preserves_overflow_address() {
+        let mut local = generate_test_row(opcodes::NOOP.into());
+        local.stack.b0 = Felt::new_unchecked(17);
+        local.stack.b1 = Felt::new_unchecked(11);
+        local.stack.h0 = ONE;
+
+        let mut next = generate_test_row(0);
+        next.stack.b0 = Felt::new_unchecked(17);
+        next.stack.b1 = local.stack.b1;
+
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
+
+        next.stack.b1 += ONE;
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(
+            evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+            "NOOP must preserve the overflow address"
+        );
+    }
+
+    #[test]
+    fn call_family_resets_overflow_address() {
+        for opcode in [opcodes::CALL, opcodes::DYNCALL, opcodes::SYSCALL] {
             let mut local = generate_test_row(opcode.into());
             local.stack.b0 = Felt::new_unchecked(17);
             local.stack.b1 = Felt::new_unchecked(11);
             local.stack.h0 = ONE;
 
             let mut next = generate_test_row(0);
-            next.stack.b0 = Felt::new_unchecked(next_depth);
-            next.stack.b1 = Felt::new_unchecked(next_overflow_addr);
+            next.stack.b0 = Felt::new_unchecked(16);
+            next.stack.b1 = ZERO;
 
             let evaluations = eval_stack_overflow(&local, &next);
             assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
@@ -290,7 +328,7 @@ mod tests {
             let evaluations = eval_stack_overflow(&local, &next);
             assert!(
                 evaluations.iter().any(|value| *value != QuadFelt::ZERO),
-                "opcode {opcode} must {transition} the overflow address"
+                "opcode {opcode} must reset the overflow address"
             );
         }
     }
@@ -310,5 +348,51 @@ mod tests {
 
         let evaluations = eval_stack_overflow(&local, &next);
         assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
+    }
+
+    #[test]
+    fn continuation_end_preserves_overflow_address() {
+        let mut local = generate_test_row(opcodes::END.into());
+        local.stack.b0 = Felt::new_unchecked(17);
+        local.stack.b1 = Felt::new_unchecked(11);
+        local.stack.h0 = ONE;
+
+        let mut next = generate_test_row(0);
+        next.stack.b0 = local.stack.b0;
+        next.stack.b1 = local.stack.b1;
+        next.stack.h0 = ONE;
+
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
+
+        next.stack.b1 += ONE;
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(
+            evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+            "a continuation END must preserve the overflow address"
+        );
+    }
+
+    #[test]
+    fn continuation_end_preserves_stack_depth() {
+        let mut local = generate_test_row(opcodes::END.into());
+        local.stack.b0 = Felt::new_unchecked(17);
+        local.stack.b1 = Felt::new_unchecked(11);
+        local.stack.h0 = ONE;
+
+        let mut next = generate_test_row(0);
+        next.stack.b0 = local.stack.b0;
+        next.stack.b1 = local.stack.b1;
+        next.stack.h0 = ONE;
+
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
+
+        next.stack.b0 += ONE;
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(
+            evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+            "a continuation END must preserve stack depth"
+        );
     }
 }

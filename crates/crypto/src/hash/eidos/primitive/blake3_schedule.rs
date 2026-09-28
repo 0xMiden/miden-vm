@@ -16,6 +16,10 @@ use core::array;
 #[cfg(target_arch = "x86_64")]
 mod row_x86;
 
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[path = "blake3_schedule/wasm32_simd128.rs"]
+mod wasm32_simd128;
+
 /// BLAKE3 IV.
 pub(super) const IV: [u32; 8] = [
     0x6a09_e667,
@@ -59,6 +63,7 @@ pub(super) const PACKED_LANES: usize = 16;
     all(target_arch = "x86_64", feature = "std"),
     all(target_arch = "x86_64", not(target_feature = "avx512f")),
     all(target_arch = "aarch64", target_feature = "neon"),
+    all(target_arch = "wasm32", target_feature = "simd128"),
 ))]
 #[inline]
 fn compress_via_sub_batches<const W: usize>(
@@ -205,12 +210,24 @@ mod native_backend {
         cv: &[[u32; PACKED_LANES]; 8],
         block: &[[u32; PACKED_LANES]; 16],
     ) -> [[u32; PACKED_LANES]; 8] {
+        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            super::compress_via_sub_batches::<4>(
+                cv,
+                block,
+                super::wasm32_simd128::compress_packed_4,
+            )
+        }
+
         #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
         {
             super::compress_via_sub_batches::<4>(cv, block, super::neon::compress_packed_4)
         }
 
-        #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
+        #[cfg(not(any(
+            all(target_arch = "wasm32", target_feature = "simd128"),
+            all(target_arch = "aarch64", target_feature = "neon")
+        )))]
         {
             super::compress_packed(*cv, *block)
         }
@@ -262,7 +279,10 @@ fn g(v: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize, x: u32, y: u32) 
 #[cfg(any(
     test,
     all(target_arch = "aarch64", not(target_feature = "neon")),
-    not(any(target_arch = "aarch64", target_arch = "x86_64")),
+    all(
+        not(any(target_arch = "aarch64", target_arch = "x86_64")),
+        not(all(target_arch = "wasm32", target_feature = "simd128")),
+    ),
 ))]
 fn add_packed<const LANES: usize>(a: [u32; LANES], b: [u32; LANES]) -> [u32; LANES] {
     array::from_fn(|i| a[i].wrapping_add(b[i]))
@@ -272,7 +292,10 @@ fn add_packed<const LANES: usize>(a: [u32; LANES], b: [u32; LANES]) -> [u32; LAN
 #[cfg(any(
     test,
     all(target_arch = "aarch64", not(target_feature = "neon")),
-    not(any(target_arch = "aarch64", target_arch = "x86_64")),
+    all(
+        not(any(target_arch = "aarch64", target_arch = "x86_64")),
+        not(all(target_arch = "wasm32", target_feature = "simd128")),
+    ),
 ))]
 fn xor_packed<const LANES: usize>(a: [u32; LANES], b: [u32; LANES]) -> [u32; LANES] {
     array::from_fn(|i| a[i] ^ b[i])
@@ -282,7 +305,10 @@ fn xor_packed<const LANES: usize>(a: [u32; LANES], b: [u32; LANES]) -> [u32; LAN
 #[cfg(any(
     test,
     all(target_arch = "aarch64", not(target_feature = "neon")),
-    not(any(target_arch = "aarch64", target_arch = "x86_64")),
+    all(
+        not(any(target_arch = "aarch64", target_arch = "x86_64")),
+        not(all(target_arch = "wasm32", target_feature = "simd128")),
+    ),
 ))]
 fn rotr_packed<const LANES: usize>(a: [u32; LANES], n: u32) -> [u32; LANES] {
     array::from_fn(|i| a[i].rotate_right(n))
@@ -292,7 +318,10 @@ fn rotr_packed<const LANES: usize>(a: [u32; LANES], n: u32) -> [u32; LANES] {
 #[cfg(any(
     test,
     all(target_arch = "aarch64", not(target_feature = "neon")),
-    not(any(target_arch = "aarch64", target_arch = "x86_64")),
+    all(
+        not(any(target_arch = "aarch64", target_arch = "x86_64")),
+        not(all(target_arch = "wasm32", target_feature = "simd128")),
+    ),
 ))]
 fn g_packed<const LANES: usize>(
     v: &mut [[u32; LANES]; 16],
@@ -418,7 +447,10 @@ pub(super) fn compress_raw_xof_with_parameter_words(
 #[cfg(any(
     test,
     all(target_arch = "aarch64", not(target_feature = "neon")),
-    not(any(target_arch = "aarch64", target_arch = "x86_64")),
+    all(
+        not(any(target_arch = "aarch64", target_arch = "x86_64")),
+        not(all(target_arch = "wasm32", target_feature = "simd128")),
+    ),
 ))]
 pub(super) fn compress_packed<const LANES: usize>(
     cv: [[u32; LANES]; 8],
@@ -1030,6 +1062,65 @@ mod tests {
         assert_eq!(compress_via_sub_batches::<4>(&cv, &block, compress_packed::<4>), expected);
         assert_eq!(compress_via_sub_batches::<8>(&cv, &block, compress_packed::<8>), expected);
         assert_eq!(compress_via_sub_batches::<16>(&cv, &block, compress_packed::<16>), expected);
+    }
+
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    mod wasm32_simd128_backend {
+        use super::*;
+
+        const PARAMETER_WORDS: [u32; 4] = [IV[4], IV[5], IV[6], IV[7]];
+
+        fn assert_matches_scalar(cv: [[u32; 4]; 8], block: [[u32; 4]; 16]) {
+            let actual = super::super::wasm32_simd128::compress_packed_4(cv, block);
+            for lane in 0..4 {
+                let cv_lane = array::from_fn(|word| cv[word][lane]);
+                let block_lane = array::from_fn(|word| block[word][lane]);
+                let expected =
+                    compress_raw_with_parameter_words(cv_lane, block_lane, PARAMETER_WORDS);
+                let actual_lane = array::from_fn(|word| actual[word][lane]);
+                assert_eq!(actual_lane, expected, "lane {lane} diverged");
+            }
+        }
+
+        #[test]
+        fn wasm32_simd128_packed_backend_matches_scalar_for_adversarial_and_random_inputs() {
+            const VALUES: [u32; 8] = [
+                0,
+                u32::MAX,
+                0x0000_0001,
+                0x8000_0000,
+                0xaaaa_aaaa,
+                0x5555_5555,
+                0x0123_4567,
+                0x89ab_cdef,
+            ];
+            let cv = array::from_fn(|word| {
+                array::from_fn(|lane| VALUES[(word * 3 + lane) % VALUES.len()])
+            });
+            let block = array::from_fn(|word| {
+                array::from_fn(|lane| VALUES[(word * 5 + lane * 3) % VALUES.len()])
+            });
+            assert_matches_scalar(cv, block);
+
+            let mut state = 0x9e37_79b9_7f4a_7c15u64;
+            for _ in 0..512 {
+                let (cv, block) = random_packed::<4>(&mut state);
+                assert_matches_scalar(cv, block);
+            }
+        }
+
+        #[test]
+        fn wasm32_simd128_packed_backend_preserves_logical_lane_order_across_sub_batches() {
+            let mut state = 0x0123_4567_89ab_cdefu64;
+            let (cv, block) = random_packed::<PACKED_LANES>(&mut state);
+            let expected = compress_packed::<PACKED_LANES>(cv, block);
+            let actual = compress_via_sub_batches::<4>(
+                &cv,
+                &block,
+                super::super::wasm32_simd128::compress_packed_4,
+            );
+            assert_eq!(actual, expected);
+        }
     }
 
     /// Each x86_64 backend is checked directly rather than through the runtime dispatcher, so one

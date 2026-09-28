@@ -4,7 +4,6 @@ use miden_core::field::Field;
 use miden_processor::{ExecutionError, operation::OperationError};
 use miden_utils_testing::{
     Felt, ONE, PrimeField64, ZERO, build_op_test, build_test, expect_exec_error_matches,
-    rand::rand_value,
 };
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::{WORD_SIZE, prop_randw, proptest::prelude::*};
@@ -30,7 +29,7 @@ fn add() {
     test.expect_stack(&[8]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let c = rand::random::<u64>();
     let test = build_op_test!(asm_op, &[2, 5, c]);
     test.expect_stack(&[7, c]);
 }
@@ -57,7 +56,7 @@ fn add_b() {
     test.expect_stack(&[8]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let c = rand::random::<u64>();
     let test = build_op_test!(build_asm_op(2), &[5, c]);
     test.expect_stack(&[7, c]);
 }
@@ -78,7 +77,7 @@ fn sub() {
     test.expect_stack(&[Felt::ORDER_U64 - 1]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let c = rand::random::<u64>();
     let test = build_op_test!(asm_op, &[2, 2, c]);
     test.expect_stack(&[0, c]);
 }
@@ -99,7 +98,7 @@ fn sub_b() {
     test.expect_stack(&[Felt::ORDER_U64 - 1]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let c = rand::random::<u64>();
     let test = build_op_test!(build_asm_op(2), &[2, c]);
     test.expect_stack(&[0, c]);
 }
@@ -122,7 +121,7 @@ fn mul() {
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let c = rand::random::<u64>();
     let test = build_op_test!(asm_op, &[2, 2, c]);
     test.expect_stack(&[4, c]);
 }
@@ -148,7 +147,7 @@ fn mul_b() {
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let c = rand::random::<u64>();
     let test = build_op_test!(build_asm_op(2), &[2, c]);
     test.expect_stack(&[4, c]);
 }
@@ -171,7 +170,7 @@ fn div() {
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let c = rand::random::<u64>();
     let test = build_op_test!(asm_op, &[5, 10, c]);
     test.expect_stack(&[2, c]);
 }
@@ -212,7 +211,7 @@ fn div_b() {
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let c = rand::random::<u64>();
     let test = build_op_test!(build_asm_op(5), &[10, c]);
     test.expect_stack(&[2, c]);
 }
@@ -244,7 +243,7 @@ fn neg() {
     test.expect_stack(&[0]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let c = rand::random::<u64>();
     let test = build_op_test!(asm_op, &[5, c]);
     test.expect_stack(&[Felt::ORDER_U64 - 5, c]);
 }
@@ -281,7 +280,7 @@ fn inv() {
     test.expect_stack(&[Felt::new_unchecked(64).inverse().as_canonical_u64()]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let c = rand::random::<u64>();
     let test = build_op_test!(asm_op, &[5, c]);
     test.expect_stack(&[Felt::new_unchecked(5).inverse().as_canonical_u64(), c]);
 }
@@ -326,7 +325,7 @@ fn pow2_fail() {
 
     // --- random u32 values > 63 ------------------------------------------------------
 
-    let mut value = rand_value::<u32>() as u64;
+    let mut value = rand::random::<u32>() as u64;
     value += (u32::MAX as u64) + 1;
 
     let test = build_op_test!(asm_op, &[value]);
@@ -393,7 +392,7 @@ fn exp_bits_length_fail() {
 fn exp_small_pow() {
     let build_asm_op = |param: u64| format!("exp.{param}");
 
-    let base = rand_value::<u64>();
+    let base = rand::random::<u64>();
     let pow = 7;
     let expected = Felt::new_unchecked(base).exp_u64(pow);
 

@@ -119,14 +119,18 @@ pub const COMMITMENT_ALIGNMENT: usize = config::SPONGE_RATE;
 /// This is stored rather than derived during verification. `air_shape_matches_symbolic` checks it
 /// against the shape obtained by symbolically evaluating the AIRs.
 pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 674,
+    num_composed_constraints: 675,
     max_constraint_degree: 9,
+    num_quotient_chunks: 8,
     max_combo: NUM_OOD_POINTS,
     num_deep_terms: Some(282),
-    lookup: LookupShape {
-        fractions_per_row: 78,
-        max_message_width: 16,
-    },
+    lookup: Some(LOOKUP_SHAPE),
+};
+
+/// Lookup argument shape of the Miden VM multi-AIR statement, as stored in [`AIR_SHAPE`].
+pub const LOOKUP_SHAPE: LookupShape = LookupShape {
+    fractions_per_row: 78,
+    max_message_width: 16,
 };
 
 /// Computes the AIR shape by symbolically evaluating every AIR in the statement.
@@ -155,12 +159,13 @@ pub fn derive_air_shape() -> AirShape {
         // single-AIR statement needs no cross-AIR batching challenge.
         num_composed_constraints: (num_constraints + AIRS.len() - 1) as u32,
         max_constraint_degree: max_constraint_degree as u32,
+        num_quotient_chunks: quotient_chunk_count(max_constraint_degree) as u32,
         max_combo: NUM_OOD_POINTS,
         num_deep_terms: Some(num_columns as u32 + NUM_OOD_POINTS),
-        lookup: LookupShape {
+        lookup: Some(LookupShape {
             fractions_per_row: fractions_per_row as u32,
             max_message_width: MIDEN_MAX_MESSAGE_WIDTH as u32,
-        },
+        }),
     }
 }
 
@@ -196,9 +201,13 @@ fn column_count(air: MidenAir, alignment: usize) -> usize {
 /// Committed base columns in the quotient group: one chunk per unit of degree above the vanishing
 /// polynomial, rounded up to a power of two, committed as a single extension-valued matrix.
 fn quotient_column_count(max_constraint_degree: usize, alignment: usize) -> usize {
-    let chunks = max_constraint_degree.saturating_sub(1).max(1).next_power_of_two();
+    aligned(quotient_chunk_count(max_constraint_degree) * EXTENSION_DEGREE, alignment)
+}
 
-    aligned(chunks * EXTENSION_DEGREE, alignment)
+/// Committed quotient chunks: one per unit of degree above the vanishing polynomial, rounded up to
+/// a power of two.
+fn quotient_chunk_count(max_constraint_degree: usize) -> usize {
+    max_constraint_degree.saturating_sub(1).max(1).next_power_of_two()
 }
 
 /// Pads a committed width up to the commitment scheme's column alignment.
@@ -237,7 +246,7 @@ pub const SECURITY_CAP: u64 = deployed_instance(0).cap();
 
 /// Q16 upper bound on the log2 of the lookup round's error coefficient.
 pub const LOOKUP_COEFFICIENT: u64 = fixed::ceil_log2(
-    (AIR_SHAPE.lookup.max_message_width as u64 + 2) * AIR_SHAPE.lookup.fractions_per_row as u64,
+    (LOOKUP_SHAPE.max_message_width as u64 + 2) * LOOKUP_SHAPE.fractions_per_row as u64,
 );
 
 /// Q16 upper bound on the log2 of the constraint-composition round's error coefficient.
@@ -263,6 +272,12 @@ pub const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(match AIR_SHAPE.num_deep_term
 
 /// Q16 upper bound on the log2 of the FRI folding round's error coefficient.
 pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << config::LOG_FOLDING_ARITY) - 1));
+
+/// Grinding applied before the out-of-domain point is sampled.
+///
+/// Lifted STARK samples the point directly after the quotient commitment; its DEEP grinding runs
+/// only after the out-of-domain evaluations are bound.
+pub const OOD_POW_BITS: u32 = 0;
 
 /// Lookup grinding applied before the lookup challenges are sampled.
 ///
@@ -301,7 +316,7 @@ const fn deployed_instance(log_max_height: u32) -> InstanceShape {
     }
 }
 
-/// `log2(e)`, rounded down, in fixed point. Matches the common MASM estimator's `LOG2_E_FP`.
+/// `log2(e)`, rounded up, in fixed point. Matches the common MASM estimator's `LOG2_E_FP`.
 pub const LOG2_E: u64 = fixed::LOG2_E;
 
 /// Number of lookup fractions `emit_core_boundary` emits unconditionally: the block-hash seed and
@@ -361,7 +376,7 @@ impl ProofSecurityParameters {
         );
         let correction = lookup_boundary_correction(
             self.num_lookup_boundary_terms,
-            self.air_shape.lookup.fractions_per_row,
+            self.air_shape.lookup.map_or(0, |lookup| lookup.fractions_per_row),
             self.instance_shape.log_max_height,
         );
         apply_lookup_correction(report, correction)
@@ -446,6 +461,7 @@ pub fn conjectured_security_level(
         log_folding_arity: config::LOG_FOLDING_ARITY as u32,
         num_queries,
         query_pow_bits,
+        ood_pow_bits: OOD_POW_BITS,
         deep_pow_bits,
         folding_pow_bits,
         lookup_pow_bits: LOOKUP_POW_BITS,
@@ -487,6 +503,7 @@ pub fn conjectured_security_level_for_alignment(
         log_folding_arity: config::LOG_FOLDING_ARITY as u32,
         num_queries,
         query_pow_bits,
+        ood_pow_bits: OOD_POW_BITS,
         deep_pow_bits,
         folding_pow_bits,
         lookup_pow_bits: LOOKUP_POW_BITS,
@@ -512,6 +529,7 @@ pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
         log_folding_arity: u32::from(params.log_folding_arity()),
         num_queries: params.num_queries() as u32,
         query_pow_bits: params.query_pow_bits() as u32,
+        ood_pow_bits: OOD_POW_BITS,
         deep_pow_bits: params.deep_pow_bits() as u32,
         folding_pow_bits: params.folding_pow_bits() as u32,
         // The protocol samples the lookup challenges directly after the main-trace commitment,
@@ -542,7 +560,7 @@ pub fn security_report(
     let report = security_report_with_hash(params, &instance, &AIR_SHAPE, hash_fn);
     let correction = lookup_boundary_correction(
         CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
-        AIR_SHAPE.lookup.fractions_per_row,
+        LOOKUP_SHAPE.fractions_per_row,
         log_max_height,
     );
     apply_lookup_correction(report, correction)
@@ -567,10 +585,10 @@ mod tests {
         let air = AirShape {
             num_composed_constraints: 1024,
             num_deep_terms: Some(1024),
-            lookup: LookupShape {
+            lookup: Some(LookupShape {
                 max_message_width: 6,
                 fractions_per_row: 128,
-            },
+            }),
             ..AIR_SHAPE
         };
         let instance = deployed_instance(20);
@@ -581,7 +599,8 @@ mod tests {
             (LOOKUP_LABEL, 96u32),
             // Each batching coefficient is 2^10, so error <= 2^10 / 2^126 = 2^-116.
             (COMPOSITION_LABEL, 116),
-            (DEEP_COMPOSITION_LABEL, 116),
+            // DEEP batching also pays the LDE height (20 + 3).
+            (DEEP_COMPOSITION_LABEL, 93),
         ] {
             assert_eq!(
                 report.terms().iter().find(|term| term.label == label).unwrap().bits,
@@ -721,7 +740,7 @@ mod tests {
         const BITS_PER_QUERY_FP: u64 = 193_381;
         const SECURITY_CAP_FP: u64 = 8_257_536;
         const LOOKUP_BASE_FP: u64 = 7_572_335;
-        const COMPOSITION_TERM_FP: u64 = 7_641_720;
+        const COMPOSITION_TERM_FP: u64 = 7_641_579;
         const OOD_BASE_FP: u64 = 8_030_818;
         const DEEP_BASE_FP: u64 = 7_724_102;
         const FOLDING_BASE_FP: u64 = 7_891_519;
@@ -755,32 +774,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_179_062, 7_641_720, 7_645_438, 8_257_536, 7_760_447, 6_335_399, 8_257_536],
+                [7_179_062, 7_641_579, 7_645_438, 7_920_710, 7_760_447, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_261_614, 7_641_720, 6_729_109, 8_257_536, 6_842_943, 6_335_399, 8_257_536],
+                [6_261_614, 7_641_579, 6_729_109, 7_003_206, 6_842_943, 6_335_399, 8_257_536],
                 95,
             ),
             (
                 (27, 17, 12, 4, 23),
-                [6_065_006, 7_641_720, 6_532_501, 8_257_536, 6_646_335, 6_335_399, 8_257_536],
+                [6_065_006, 7_641_579, 6_532_501, 6_806_598, 6_646_335, 6_335_399, 8_257_536],
                 92,
             ),
             (
                 (27, 17, 12, 4, 29),
-                [5_671_790, 7_641_720, 6_139_285, 8_257_536, 6_253_119, 6_335_399, 8_257_536],
+                [5_671_790, 7_641_579, 6_139_285, 6_413_382, 6_253_119, 6_335_399, 8_257_536],
                 86,
             ),
             (
                 (7, 0, 0, 0, 20),
-                [6_261_614, 7_641_720, 6_729_109, 7_724_102, 6_580_799, 1_353_667, 8_257_536],
+                [6_261_614, 7_641_579, 6_729_109, 6_216_774, 6_580_799, 1_353_667, 8_257_536],
                 20,
             ),
             (
                 (150, 31, 31, 31, 29),
-                [5_671_790, 7_641_720, 6_139_285, 8_257_536, 8_022_591, 8_257_536, 8_257_536],
+                [5_671_790, 7_641_579, 6_139_285, 7_658_566, 8_022_591, 8_257_536, 8_257_536],
                 86,
             ),
         ];

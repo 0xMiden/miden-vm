@@ -1,10 +1,7 @@
 use miden_air::Serializable;
 use miden_crypto::hash::sha2::Sha256;
 use miden_processor::{ExecutionError, operation::OperationError};
-use miden_utils_testing::{
-    Felt, IntoBytes, Test, group_slice_elements, push_inputs,
-    rand::{rand_array, rand_value, rand_vector},
-};
+use miden_utils_testing::{Felt, IntoBytes, Test, group_slice_elements, push_inputs};
 
 const NON_U32_WORD: u64 = u32::MAX as u64 + 2;
 const INVALID_SHA256_MESSAGE_WORD: &str = "invalid sha256 message word";
@@ -23,8 +20,8 @@ const SHA256_MERGE_SOURCE: &str = "
 
 #[test]
 fn sha256_hash_bytes() {
-    let length_in_bytes = rand_value::<u64>() & 1023; // length: 0-1023
-    let ibytes: Vec<u8> = rand_vector(length_in_bytes as usize);
+    let length_in_bytes = rand::random::<u64>() & 1023; // length: 0-1023
+    let ibytes: Vec<u8> = (0..length_in_bytes as usize).map(|_| rand::random()).collect();
     let ipadding: Vec<u8> = vec![0; (4 - (length_in_bytes as usize % 4)) % 4];
 
     // Note: We need .rev() here because push_inputs generates MASM push instructions.
@@ -89,8 +86,8 @@ fn sha256_hash_bytes() {
 
 #[test]
 fn sha256_2_to_1_hash() {
-    let input0 = rand_array::<Felt, 4>().into_bytes();
-    let input1 = rand_array::<Felt, 4>().into_bytes();
+    let input0 = rand::random::<[Felt; 4]>().into_bytes();
+    let input1 = rand::random::<[Felt; 4]>().into_bytes();
 
     let mut ibytes = [0u8; 64];
     ibytes[..32].copy_from_slice(&input0);
@@ -112,7 +109,7 @@ fn sha256_2_to_1_hash() {
 
 #[test]
 fn sha256_1_to_1_hash() {
-    let ibytes = rand_array::<Felt, 4>().into_bytes();
+    let ibytes = rand::random::<[Felt; 4]>().into_bytes();
     let ifelts: Vec<u64> = group_slice_elements::<u8, 4>(&ibytes)
         .iter()
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)

@@ -1,6 +1,6 @@
 //! Block-hash table and op-group table interactions in one lookup column.
 //!
-//! - Block-hash table rows come from control-flow opcodes: JOIN, SPLIT, LOOP/REPEAT,
+//! - Block-hash table rows come from control-flow opcodes: JOIN, SPLIT, LOOP,
 //!   DYN/DYNCALL/CALL/SYSCALL, and END.
 //! - Op-group table rows come from SPAN/RESPAN batch setup rows and in-span decode rows.
 //!
@@ -61,9 +61,6 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
 
     let f_join = op_flags.join();
     let f_split = op_flags.split();
-    // LOOP unconditionally enqueues the body (do-while semantics) and REPEAT enqueues each
-    // subsequent iteration.
-    let f_loop_body = op_flags.loop_op() + op_flags.repeat();
     let f_child = op_flags.dyn_op() + op_flags.dyncall() + op_flags.call() + op_flags.syscall();
     let f_end = op_flags.end();
     let f_push = op_flags.push();
@@ -126,16 +123,28 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                         Deg { v: 5, u: 7 },
                     );
 
-                    // LOOP/REPEAT body: first child is `h_0`.
-                    g.add(
-                        "loop_repeat",
-                        f_loop_body,
+                    // LOOP body: first child is `h_0`.
+                    //
+                    // The lookup enforces aggregate same-key balance: the sum of LOOP-side
+                    // multiplicities for `(parent, body_hash, is_loop_body = 1)` must match the
+                    // matching body END removals, except with negligible lookup soundness error.
+                    // Per-loop provenance comes from the surrounding decoder/address/block-stack
+                    // constraints: multiplicity-one hasher responses make `parent` a unique
+                    // dynamic LOOP id, and the block-stack relation authenticates every END's
+                    // child-to-parent edge. Consequently an END with `is_loop_body = 1` can match
+                    // only this LOOP-owned key. REPEAT must not add an entry for the digest on its
+                    // own row, because that lets a forged body END self-cancel against the
+                    // following REPEAT.
+                    g.insert(
+                        "loop_body",
+                        op_flags.loop_op(),
+                        gc.clone(),
                         || {
                             let parent = addr_next.into();
                             let child_hash = h_0.map(LB::Expr::from);
                             BlockHashMsg::LoopBody { parent, child_hash }
                         },
-                        Deg { v: 5, u: 6 },
+                        Deg { v: 6, u: 6 },
                     );
 
                     // DYN/DYNCALL/CALL/SYSCALL: single child at `h_0`.

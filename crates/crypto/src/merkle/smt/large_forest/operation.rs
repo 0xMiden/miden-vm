@@ -222,23 +222,24 @@ impl IntoIterator for SmtForestUpdateBatch {
 #[cfg(test)]
 mod test {
     use itertools::Itertools;
+    use rand::{RngExt, SeedableRng};
+    use rand_chacha::ChaCha20Rng;
 
     use super::*;
-    use crate::rand::test_utils::ContinuousRng;
 
     #[test]
     fn tree_batch() {
-        let mut rng = ContinuousRng::new([0x12; 32]);
+        let mut rng = ChaCha20Rng::from_seed([0x12; 32]);
 
         // We start by creating an empty tree batch.
         let mut batch = SmtUpdateBatch::empty();
 
         // Let's make three operations on different keys...
-        let o1_key: Word = rng.value();
-        let o1_value: Word = rng.value();
-        let o2_key: Word = rng.value();
-        let o3_key: Word = rng.value();
-        let o3_value: Word = rng.value();
+        let o1_key: Word = rng.random();
+        let o1_value: Word = rng.random();
+        let o2_key: Word = rng.random();
+        let o3_key: Word = rng.random();
+        let o3_value: Word = rng.random();
 
         let o1 = SmtForestOperation::insert(o1_key, o1_value);
         let o2 = SmtForestOperation::remove(o2_key);
@@ -259,7 +260,7 @@ mod test {
         // Let's now make two additional operations with keys that overlay with keys from the first
         // three...
         let o4_key = o2_key;
-        let o4_value: Word = rng.value();
+        let o4_value: Word = rng.random();
         let o5_key = o1_key;
 
         let o4 = SmtForestOperation::insert(o4_key, o4_value);
@@ -285,21 +286,21 @@ mod test {
 
     #[test]
     fn forest_batch() {
-        let mut rng = ContinuousRng::new([0x13; 32]);
+        let mut rng = ChaCha20Rng::from_seed([0x13; 32]);
 
         // We can start by creating an empty forest batch.
         let mut batch = SmtForestUpdateBatch::empty();
 
         // Let's start by adding a few operations to a tree.
-        let t1_lineage: LineageId = rng.value();
-        let t1_o1 = SmtForestOperation::insert(rng.value(), rng.value());
-        let t1_o2 = SmtForestOperation::remove(rng.value());
+        let t1_lineage: LineageId = rng.random();
+        let t1_o1 = SmtForestOperation::insert(rng.random(), rng.random());
+        let t1_o2 = SmtForestOperation::remove(rng.random());
         batch.add_operations(t1_lineage, vec![t1_o1, t1_o2].into_iter());
 
         // We can also add them differently.
-        let t2_lineage: LineageId = rng.value();
-        let t2_o1 = SmtForestOperation::remove(rng.value());
-        let t2_o2 = SmtForestOperation::insert(rng.value(), rng.value());
+        let t2_lineage: LineageId = rng.random();
+        let t2_o1 = SmtForestOperation::remove(rng.random());
+        let t2_o2 = SmtForestOperation::insert(rng.random(), rng.random());
         batch.operations(t2_lineage).add_operations(vec![t2_o1, t2_o2].into_iter());
 
         // When we consume the batch, each per-tree batch should be unique by key and sorted.

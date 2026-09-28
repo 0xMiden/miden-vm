@@ -5,12 +5,12 @@
 //! no-shift operations, so neither can activate a stack-overflow add/remove.
 //!
 //! - **Right shift** (add): when an item is pushed past stack[15], record `(clk, s15, b1)` — the
-//!   cycle, the spilled value, and the link to the previous overflow row.
-//! - **Left shift ∧ non-empty overflow** (remove): when an item is popped back from the overflow
-//!   table, consume the matching `(b1, s15', b1')` row.
-//! - **DYNCALL ∧ non-empty overflow** (remove): DYNCALL is excluded from the `left_shift`
-//!   aggregate; it consumes `(b1, s15', hasher_state[5])` because the new overflow pointer after a
-//!   DYNCALL is staged in the decoder hasher state, not in `b1'` (which is reset).
+//!   cycle, spilled value, and link to the previous overflow row.
+//! - **Left shift ∧ non-empty overflow** (remove): consume the matching `(b1, s15', b1')` row.
+//! - **DYNCALL ∧ non-empty overflow** (remove): consume `(b1, s15', hasher_state[5])` because the
+//!   caller's post-pop overflow pointer is staged there, not in `b1'` (which is reset).
+
+use p3_field::Dup;
 
 use crate::{
     constraints::lookup::{
@@ -45,10 +45,10 @@ pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
     let h5 = local.decoder.hasher_state[5];
     let helpers = local.decoder.user_op_helpers();
 
-    // `op_flags.overflow() = (b0 - 16) * h0`, degree 2. Aliased once so each remove site
-    // does not re-clone the underlying expression.
+    // `op_flags.overflow() = (b0 - 16) * h0`, degree 2. Aliased once so each removal can cheaply
+    // duplicate the expression.
     let f_overflow = op_flags.overflow();
-    let f_left_overflow = op_flags.left_shift() * f_overflow.clone();
+    let f_left_shift_overflow = op_flags.left_shift() * f_overflow.dup();
     let f_dyncall_overflow = op_flags.dyncall() * f_overflow;
 
     builder.next_column(
@@ -56,7 +56,7 @@ pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
             col.group(
                 "overflow_interactions",
                 |g| {
-                    // Right shift: push `(clk, s15, b1)` onto the overflow table.
+                    // Right shift: add `(clk, s15, b1)` to the overflow table.
                     g.add(
                         "right_shift",
                         op_flags.right_shift(),
@@ -68,11 +68,10 @@ pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
                         Deg { v: 6, u: 7 },
                     );
 
-                    // Left shift with non-empty overflow: pop `(b1, s15', b1')` off the overflow
-                    // table.
+                    // Left shift with non-empty overflow: remove `(b1, s15', b1')`.
                     g.remove(
                         "left_shift",
-                        f_left_overflow,
+                        f_left_shift_overflow,
                         || StackOverflowMsg {
                             clk: b1.into(),
                             val: s15_next.into(),

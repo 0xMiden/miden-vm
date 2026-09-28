@@ -69,7 +69,7 @@ jobs:
         uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: wasmtime-cli@45.0.2
-      - name: Run packed Goldilocks/Poseidon2 vs scalar tests under WASM SIMD128
+      - name: Run packed Goldilocks/Poseidon2/Eidos vs scalar tests under WASM SIMD128
         run: make test-wasm-simd
       - name: Run overlapped trace-build tests on a threadless wasm target
         run: make test-wasm-threadless

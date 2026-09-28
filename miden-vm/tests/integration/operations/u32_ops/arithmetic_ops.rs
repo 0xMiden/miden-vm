@@ -1,7 +1,7 @@
 use miden_processor::{ExecutionError, operation::OperationError};
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
-use miden_utils_testing::{U32_BOUND, build_op_test, expect_exec_error_matches, rand::rand_value};
+use miden_utils_testing::{U32_BOUND, build_op_test, expect_exec_error_matches};
 
 // U32 OPERATIONS TESTS - MANUAL - ARITHMETIC OPERATIONS
 // ================================================================================================
@@ -29,14 +29,14 @@ fn u32wrapping_add() {
     test.expect_stack(&[1]);
 
     // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let b = rand::random::<u32>();
     let c = a.wrapping_add(b);
     let test = build_op_test!(asm_op, &[b as u64, a as u64]);
     test.expect_stack(&[c as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand_value::<u64>();
+    let e = rand::random::<u64>();
     let test = build_op_test!(asm_op, &[b as u64, a as u64, e]);
     test.expect_stack(&[c as u64, e]);
 }
@@ -63,14 +63,14 @@ fn u32wrapping_add_b() {
     test.expect_stack(&[1]);
 
     // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let b = rand::random::<u32>();
     let c = a.wrapping_add(b);
     let test = build_op_test!(build_asm_op(b as u64), &[a as u64]);
     test.expect_stack(&[c as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand_value::<u64>();
+    let e = rand::random::<u64>();
     let test = build_op_test!(build_asm_op(b as u64), &[a as u64, e]);
     test.expect_stack(&[c as u64, e]);
 }
@@ -100,15 +100,15 @@ fn u32overflowing_add() {
     test.expect_stack(&[1, 1]);
 
     // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let b = rand::random::<u32>();
     let (c, overflow) = a.overflowing_add(b);
     let d = if overflow { 1 } else { 0 };
     let test = build_op_test!(asm_op, &[b as u64, a as u64]);
     test.expect_stack(&[d, c as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand_value::<u64>();
+    let e = rand::random::<u64>();
     let test = build_op_test!(asm_op, &[b as u64, a as u64, e]);
     test.expect_stack(&[d, c as u64, e]);
 }
@@ -144,8 +144,8 @@ fn u32overflowing_add3() {
     test.expect_stack(&[1, 1]);
 
     // --- random u32 values with c = 0 -----------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let b = rand::random::<u32>();
     let c = 0_u64;
     let (d, overflow) = a.overflowing_add(b);
     let e = if overflow { 1 } else { 0 };
@@ -153,8 +153,8 @@ fn u32overflowing_add3() {
     test.expect_stack(&[e, d as u64]);
 
     // --- random u32 values with c = 1 -----------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let b = rand::random::<u32>();
     let c = 1_u32;
     let (d, overflow_b) = a.overflowing_add(b);
     let (d, overflow_c) = d.overflowing_add(c);
@@ -163,7 +163,7 @@ fn u32overflowing_add3() {
     test.expect_stack(&[e, d as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let f = rand_value::<u64>();
+    let f = rand::random::<u64>();
     let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64, f]);
     test.expect_stack(&[e, d as u64, f]);
 }
@@ -189,15 +189,15 @@ fn u32widening_add() {
     test.expect_stack(&[1, 1]);
 
     // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let b = rand::random::<u32>();
     let (c, overflow) = a.overflowing_add(b);
     let d = if overflow { 1 } else { 0 };
     let test = build_op_test!(asm_op, &[b as u64, a as u64]);
     test.expect_stack(&[c as u64, d]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand_value::<u64>();
+    let e = rand::random::<u64>();
     let test = build_op_test!(asm_op, &[b as u64, a as u64, e]);
     test.expect_stack(&[c as u64, d, e]);
 }
@@ -227,8 +227,8 @@ fn u32widening_add3() {
     test.expect_stack(&[1, 1]);
 
     // --- random u32 values with c = 0 -----------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let b = rand::random::<u32>();
     let c = 0_u64;
     let (d, overflow) = a.overflowing_add(b);
     let e = if overflow { 1 } else { 0 };
@@ -236,8 +236,8 @@ fn u32widening_add3() {
     test.expect_stack(&[d as u64, e]);
 
     // --- random u32 values with c = 1 -----------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let b = rand::random::<u32>();
     let c = 1_u32;
     let (d, overflow_b) = a.overflowing_add(b);
     let (d, overflow_c) = d.overflowing_add(c);
@@ -246,7 +246,7 @@ fn u32widening_add3() {
     test.expect_stack(&[d as u64, e]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let f = rand_value::<u64>();
+    let f = rand::random::<u64>();
     let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64, f]);
     test.expect_stack(&[d as u64, e, f]);
 }
@@ -300,14 +300,14 @@ fn u32wrapping_sub() {
     test.expect_stack(&[u32::MAX as u64]);
 
     // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let b = rand::random::<u32>();
     let c = a.wrapping_sub(b);
     let test = build_op_test!(asm_op, &[b as u64, a as u64]);
     test.expect_stack(&[c as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand_value::<u64>();
+    let e = rand::random::<u64>();
     let test = build_op_test!(asm_op, &[b as u64, a as u64, e]);
     test.expect_stack(&[c as u64, e]);
 }
@@ -329,14 +329,14 @@ fn u32wrapping_sub_b() {
     test.expect_stack(&[u32::MAX as u64]);
 
     // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let b = rand::random::<u32>();
     let c = a.wrapping_sub(b);
     let test = build_op_test!(build_asm_op(b as u64), &[a as u64]);
     test.expect_stack(&[c as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand_value::<u64>();
+    let e = rand::random::<u64>();
     let test = build_op_test!(build_asm_op(b as u64), &[a as u64, e]);
     test.expect_stack(&[c as u64, e]);
 }
@@ -361,16 +361,16 @@ fn u32overflowing_sub() {
     test.expect_stack(&[1, u32::MAX as u64]);
 
     // --- random u32 values: a >= b --------------------------------------------------------------
-    let val1 = rand_value::<u32>();
-    let val2 = rand_value::<u32>();
+    let val1 = rand::random::<u32>();
+    let val2 = rand::random::<u32>();
     let (a, b) = if val1 >= val2 { (val1, val2) } else { (val2, val1) };
     let c = a - b;
     let test = build_op_test!(asm_op, &[b as u64, a as u64]);
     test.expect_stack(&[0, c as u64]);
 
     // --- random u32 values: a < b ---------------------------------------------------------------
-    let val1 = rand_value::<u32>();
-    let val2 = rand_value::<u32>();
+    let val1 = rand::random::<u32>();
+    let val2 = rand::random::<u32>();
     let (a, b) = if val1 >= val2 { (val2, val1) } else { (val1, val2) };
     let (c, _) = a.overflowing_sub(b);
     let d = 1;
@@ -378,7 +378,7 @@ fn u32overflowing_sub() {
     test.expect_stack(&[d, c as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand_value::<u64>();
+    let e = rand::random::<u64>();
     let test = build_op_test!(asm_op, &[b as u64, a as u64, e]);
     test.expect_stack(&[d, c as u64, e]);
 }
@@ -400,14 +400,14 @@ fn u32wrapping_mul() {
     test.expect_stack(&[0]);
 
     // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let b = rand::random::<u32>();
     let c = a.wrapping_mul(b);
     let test = build_op_test!(asm_op, &[b as u64, a as u64]);
     test.expect_stack(&[c as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand_value::<u64>();
+    let e = rand::random::<u64>();
     let test = build_op_test!(asm_op, &[b as u64, a as u64, e]);
     test.expect_stack(&[c as u64, e]);
 }
@@ -432,14 +432,14 @@ fn u32wrapping_mul_b() {
     test.expect_stack(&[0]);
 
     // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let b = rand::random::<u32>();
     let c = a.wrapping_mul(b);
     let test = build_op_test!(build_asm_op(b as u64), &[a as u64]);
     test.expect_stack(&[c as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand_value::<u64>();
+    let e = rand::random::<u64>();
     let test = build_op_test!(build_asm_op(b as u64), &[a as u64, e]);
     test.expect_stack(&[c as u64, e]);
 }
@@ -465,8 +465,8 @@ fn u32widening_mul() {
     test.expect_stack(&[0, 2]);
 
     // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let b = rand::random::<u32>();
     let result = a as u64 * b as u64;
     let lo = result % U32_BOUND;
     let hi = result / U32_BOUND;
@@ -474,7 +474,7 @@ fn u32widening_mul() {
     test.expect_stack(&[lo, hi]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand_value::<u64>();
+    let e = rand::random::<u64>();
     let test = build_op_test!(asm_op, &[b as u64, a as u64, e]);
     test.expect_stack(&[lo, hi, e]);
 }
@@ -503,9 +503,9 @@ fn u32widening_madd() {
     test.expect_stack(&[1, 2]);
 
     // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
-    let c = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let b = rand::random::<u32>();
+    let c = rand::random::<u32>();
     let madd = a as u64 * b as u64 + c as u64;
     let lo = madd % U32_BOUND;
     let hi = madd / U32_BOUND;
@@ -513,7 +513,7 @@ fn u32widening_madd() {
     test.expect_stack(&[lo, hi]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let f = rand_value::<u64>();
+    let f = rand::random::<u64>();
     let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64, f]);
     test.expect_stack(&[lo, hi, f]);
 }
@@ -562,8 +562,8 @@ fn u32div() {
     test.expect_stack(&[1]);
 
     // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let mut b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let mut b = rand::random::<u32>();
     if b == 0 {
         // ensure we're not using a failure case.
         b += 1;
@@ -573,7 +573,7 @@ fn u32div() {
     test.expect_stack(&[quot]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand_value::<u64>();
+    let e = rand::random::<u64>();
     let test = build_op_test!("u32div", &[b as u64, a as u64, e]);
     test.expect_stack(&[quot, e]);
 }
@@ -604,8 +604,8 @@ fn u32mod() {
     test.expect_stack(&[5]);
 
     // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let mut b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let mut b = rand::random::<u32>();
     if b == 0 {
         // ensure we're not using a failure case.
         b += 1;
@@ -615,7 +615,7 @@ fn u32mod() {
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let c = rand::random::<u64>();
     let test = build_op_test!("u32mod", &[b as u64, a as u64, c]);
     test.expect_stack(&[expected as u64, c]);
 }
@@ -652,8 +652,8 @@ fn u32divmod() {
     test.expect_stack(&[1, 1]);
 
     // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let mut b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let mut b = rand::random::<u32>();
     if b == 0 {
         // ensure we're not using a failure case.
         b += 1;
@@ -664,7 +664,7 @@ fn u32divmod() {
     test.expect_stack(&[rem, quot]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand_value::<u64>();
+    let e = rand::random::<u64>();
     let test = build_op_test!("u32divmod", &[b as u64, a as u64, e]);
     test.expect_stack(&[rem, quot, e]);
 }

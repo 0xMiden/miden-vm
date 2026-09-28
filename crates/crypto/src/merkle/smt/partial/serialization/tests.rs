@@ -5,13 +5,12 @@ use alloc::collections::BTreeMap;
 
 use miden_field::{Felt, Word};
 use miden_serde_utils::{Deserializable, Serializable};
+use rand::{RngExt, SeedableRng};
+use rand_chacha::ChaCha20Rng;
 
-use crate::{
-    merkle::{
-        EmptySubtreeRoots, NodeIndex,
-        smt::{LeafIndex, SMT_DEPTH, SmtLeaf, UniqueNodes},
-    },
-    rand::test_utils::ContinuousRng,
+use crate::merkle::{
+    EmptySubtreeRoots, NodeIndex,
+    smt::{LeafIndex, SMT_DEPTH, SmtLeaf, UniqueNodes},
 };
 
 #[test]
@@ -22,29 +21,29 @@ fn empty_unique_nodes_roundtrips() {
 
 #[test]
 fn unique_nodes_roundtrips() {
-    let mut rng = ContinuousRng::new([0x67; 32]);
+    let mut rng = ChaCha20Rng::from_seed([0x67; 32]);
     let nodes = [
-        (NodeIndex::new(6, 8).unwrap(), rng.value()),
-        (NodeIndex::new(6, 63).unwrap(), rng.value()),
-        (NodeIndex::new(61, 2u64.pow(58) + 31).unwrap(), rng.value()),
+        (NodeIndex::new(6, 8).unwrap(), rng.random()),
+        (NodeIndex::new(6, 63).unwrap(), rng.random()),
+        (NodeIndex::new(61, 2u64.pow(58) + 31).unwrap(), rng.random()),
     ]
     .into_iter()
     .collect();
 
     let leaf_1_index = u64::MAX;
     let leaf_1_value = SmtLeaf::new_empty(LeafIndex::new_max_depth(leaf_1_index));
-    let leaf_2_value = SmtLeaf::new_single(rng.value(), rng.value());
+    let leaf_2_value = SmtLeaf::new_single(rng.random(), rng.random());
     let leaf_2_index = leaf_2_value.index().position();
-    let leaf_index: Felt = rng.value();
+    let leaf_index: Felt = rng.random();
     let leaf_3_value = SmtLeaf::new_multiple(vec![
-        (Word::new([rng.value(), rng.value(), rng.value(), leaf_index]), rng.value()),
-        (Word::new([rng.value(), rng.value(), rng.value(), leaf_index]), rng.value()),
+        (Word::new([rng.random(), rng.random(), rng.random(), leaf_index]), rng.random()),
+        (Word::new([rng.random(), rng.random(), rng.random(), leaf_index]), rng.random()),
     ])
     .unwrap();
     let leaf_3_index = leaf_3_value.index().position();
 
     let mut value = UniqueNodes::empty();
-    value.root = rng.value();
+    value.root = rng.random();
     value.nodes = nodes;
     value.leaves = [
         (leaf_1_index, leaf_1_value),

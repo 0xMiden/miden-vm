@@ -37,7 +37,6 @@ use miden_core::{
     field::PrimeCharacteristicRing,
     mast::OpBatch,
 };
-use miden_utils_testing::rand::rand_array;
 
 use super::{
     BLOCK_LEN, ChipletTraceFragment, Digest, Felt, Hasher, HasherState, LINEAR_HASH, MP_VERIFY,
@@ -299,8 +298,8 @@ fn compression_deduplication() {
 
 #[test]
 fn hash_memoization_control_blocks() {
-    let h1: Digest = rand_array::<Felt, 4>().into();
-    let h2: Digest = rand_array::<Felt, 4>().into();
+    let h1: Digest = rand::random::<[Felt; 4]>().into();
+    let h2: Digest = rand::random::<[Felt; 4]>().into();
     let domain = Felt::from_u8(7); // arbitrary domain
 
     // Compute the expected hash
@@ -745,7 +744,7 @@ fn compress_state(mut state: HasherState) -> HasherState {
 }
 
 fn random_state_with_packed_cv() -> HasherState {
-    let mut state: HasherState = rand_array();
+    let mut state: HasherState = rand::random();
     for value in &mut state[BLOCK_LEN..] {
         *value = Felt::new_unchecked(value.as_canonical_u64() & 0x7fff_ffff_ffff_ffff);
     }

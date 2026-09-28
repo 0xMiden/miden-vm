@@ -2,27 +2,21 @@ use std::hint::black_box;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use miden_crypto::{
-    Felt, Word,
+    Word,
     merkle::{
         MerkleTree, NodeIndex,
         smt::{LeafIndex, SMT_MAX_DEPTH, SimpleSmt},
         store::MerkleStore,
     },
-    rand::test_utils::{rand_array, rand_value},
 };
 
 /// Since MerkleTree can only be created when a power-of-two number of elements is used, the sample
 /// sizes are limited to that.
 static BATCH_SIZES: [usize; 3] = [2usize.pow(4), 2usize.pow(7), 2usize.pow(10)];
 
-/// Generates a random `Word`.
-fn random_word() -> Word {
-    rand_array::<Felt, 4>().into()
-}
-
 /// Generates an index at the specified depth in `0..range`.
 fn random_index(range: u64, depth: u8) -> NodeIndex {
-    let value = rand_value::<u64>() % range;
+    let value = rand::random::<u64>() % range;
     NodeIndex::new(depth, value).unwrap()
 }
 
@@ -61,7 +55,7 @@ fn get_leaf_merkletree(c: &mut Criterion) {
     let mut group = c.benchmark_group("get_leaf_merkletree");
 
     let random_data_size = BATCH_SIZES.into_iter().max().unwrap();
-    let random_data: Vec<Word> = (0..random_data_size).map(|_| random_word()).collect();
+    let random_data: Vec<Word> = (0..random_data_size).map(|_| rand::random::<Word>()).collect();
 
     for size in BATCH_SIZES {
         let leaves = &random_data[..size];
@@ -95,7 +89,7 @@ fn get_leaf_simplesmt(c: &mut Criterion) {
     let mut group = c.benchmark_group("get_leaf_simplesmt");
 
     let random_data_size = BATCH_SIZES.into_iter().max().unwrap();
-    let random_data: Vec<Word> = (0..random_data_size).map(|_| random_word()).collect();
+    let random_data: Vec<Word> = (0..random_data_size).map(|_| rand::random::<Word>()).collect();
 
     for size in BATCH_SIZES {
         let leaves = &random_data[..size];
@@ -166,7 +160,7 @@ fn get_node_merkletree(c: &mut Criterion) {
     let mut group = c.benchmark_group("get_node_merkletree");
 
     let random_data_size = BATCH_SIZES.into_iter().max().unwrap();
-    let random_data: Vec<Word> = (0..random_data_size).map(|_| random_word()).collect();
+    let random_data: Vec<Word> = (0..random_data_size).map(|_| rand::random::<Word>()).collect();
 
     for size in BATCH_SIZES {
         let leaves = &random_data[..size];
@@ -201,7 +195,7 @@ fn get_node_simplesmt(c: &mut Criterion) {
     let mut group = c.benchmark_group("get_node_simplesmt");
 
     let random_data_size = BATCH_SIZES.into_iter().max().unwrap();
-    let random_data: Vec<Word> = (0..random_data_size).map(|_| random_word()).collect();
+    let random_data: Vec<Word> = (0..random_data_size).map(|_| rand::random::<Word>()).collect();
 
     for size in BATCH_SIZES {
         let leaves = &random_data[..size];
@@ -240,7 +234,7 @@ fn get_leaf_path_merkletree(c: &mut Criterion) {
     let mut group = c.benchmark_group("get_leaf_path_merkletree");
 
     let random_data_size = BATCH_SIZES.into_iter().max().unwrap();
-    let random_data: Vec<Word> = (0..random_data_size).map(|_| random_word()).collect();
+    let random_data: Vec<Word> = (0..random_data_size).map(|_| rand::random::<Word>()).collect();
 
     for size in BATCH_SIZES {
         let leaves = &random_data[..size];
@@ -274,7 +268,7 @@ fn get_leaf_path_simplesmt(c: &mut Criterion) {
     let mut group = c.benchmark_group("get_leaf_path_simplesmt");
 
     let random_data_size = BATCH_SIZES.into_iter().max().unwrap();
-    let random_data: Vec<Word> = (0..random_data_size).map(|_| random_word()).collect();
+    let random_data: Vec<Word> = (0..random_data_size).map(|_| rand::random::<Word>()).collect();
 
     for size in BATCH_SIZES {
         let leaves = &random_data[..size];
@@ -314,7 +308,7 @@ fn new(c: &mut Criterion) {
     let mut group = c.benchmark_group("new");
 
     let random_data_size = BATCH_SIZES.into_iter().max().unwrap();
-    let random_data: Vec<Word> = (0..random_data_size).map(|_| random_word()).collect();
+    let random_data: Vec<Word> = (0..random_data_size).map(|_| rand::random::<Word>()).collect();
 
     for size in BATCH_SIZES {
         let leaves = &random_data[..size];
@@ -376,7 +370,7 @@ fn update_leaf_merkletree(c: &mut Criterion) {
     let mut group = c.benchmark_group("update_leaf_merkletree");
 
     let random_data_size = BATCH_SIZES.into_iter().max().unwrap();
-    let random_data: Vec<Word> = (0..random_data_size).map(|_| random_word()).collect();
+    let random_data: Vec<Word> = (0..random_data_size).map(|_| rand::random::<Word>()).collect();
 
     for size in BATCH_SIZES {
         let leaves = &random_data[..size];
@@ -389,7 +383,7 @@ fn update_leaf_merkletree(c: &mut Criterion) {
 
         group.bench_function(BenchmarkId::new("MerkleTree", size), |b| {
             b.iter_batched(
-                || (rand_value::<u64>() % size_u64, random_word()),
+                || (rand::random::<u64>() % size_u64, rand::random::<Word>()),
                 |(index, value)| black_box(mtree.update_leaf(index, value)),
                 BatchSize::SmallInput,
             )
@@ -398,7 +392,7 @@ fn update_leaf_merkletree(c: &mut Criterion) {
         let mut store_root = root;
         group.bench_function(BenchmarkId::new("MerkleStore", size), |b| {
             b.iter_batched(
-                || (random_index(size_u64, depth), random_word()),
+                || (random_index(size_u64, depth), rand::random::<Word>()),
                 |(index, value)| {
                     // The MerkleTree automatically updates its internal root, the Store maintains
                     // the old root and adds the new one. Here we update the root to have a fair
@@ -417,7 +411,7 @@ fn update_leaf_simplesmt(c: &mut Criterion) {
     let mut group = c.benchmark_group("update_leaf_simplesmt");
 
     let random_data_size = BATCH_SIZES.into_iter().max().unwrap();
-    let random_data: Vec<Word> = (0..random_data_size).map(|_| random_word()).collect();
+    let random_data: Vec<Word> = (0..random_data_size).map(|_| rand::random::<Word>()).collect();
 
     for size in BATCH_SIZES {
         let leaves = &random_data[..size];
@@ -434,7 +428,7 @@ fn update_leaf_simplesmt(c: &mut Criterion) {
 
         group.bench_function(BenchmarkId::new("SimpleSMT", size), |b| {
             b.iter_batched(
-                || (rand_value::<u64>() % size_u64, random_word()),
+                || (rand::random::<u64>() % size_u64, rand::random::<Word>()),
                 |(index, value)| {
                     black_box(smt.insert(LeafIndex::<SMT_MAX_DEPTH>::new(index).unwrap(), value))
                 },
@@ -445,7 +439,7 @@ fn update_leaf_simplesmt(c: &mut Criterion) {
         let mut store_root = root;
         group.bench_function(BenchmarkId::new("MerkleStore", size), |b| {
             b.iter_batched(
-                || (random_index(size_u64, SMT_MAX_DEPTH), random_word()),
+                || (random_index(size_u64, SMT_MAX_DEPTH), rand::random::<Word>()),
                 |(index, value)| {
                     // The MerkleTree automatically updates its internal root, the Store maintains
                     // the old root and adds the new one. Here we update the root to have a fair

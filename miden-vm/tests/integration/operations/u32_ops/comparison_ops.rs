@@ -1,8 +1,8 @@
 use core::cmp::Ordering;
 
+use miden_utils_testing::build_op_test;
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
-use miden_utils_testing::{build_op_test, rand::rand_value};
 
 // U32 OPERATIONS TESTS - MANUAL - COMPARISON OPERATIONS
 // ================================================================================================
@@ -166,8 +166,8 @@ fn test_comparison_op(asm_op: &str, expected_lt: u64, expected_eq: u64, expected
     test.expect_stack(&[expected_gt]);
 
     // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u64>() as u32;
-    let b = rand_value::<u64>() as u32;
+    let a = rand::random::<u64>() as u32;
+    let b = rand::random::<u64>() as u32;
     let expected = match a.cmp(&b) {
         Ordering::Less => expected_lt,
         Ordering::Equal => expected_eq,
@@ -183,7 +183,7 @@ fn test_comparison_op(asm_op: &str, expected_lt: u64, expected_eq: u64, expected
     test.expect_stack(&[expected]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let c = rand::random::<u64>();
 
     let test = build_op_test!(asm_op, &[b as u64, a as u64, c]);
     test.expect_stack(&[expected, c]);
@@ -220,8 +220,8 @@ fn test_min(asm_op: &str) {
     test.expect_stack(&[0]);
 
     // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let b = rand::random::<u32>();
     let expected = match a.cmp(&b) {
         Ordering::Less => a,
         Ordering::Equal => b,
@@ -236,7 +236,7 @@ fn test_min(asm_op: &str) {
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let c = rand::random::<u64>();
 
     let test = build_op_test!(asm_op, &[b as u64, a as u64, c]);
     test.expect_stack(&[expected as u64, c]);
@@ -272,8 +272,8 @@ fn test_max(asm_op: &str) {
     test.expect_stack(&[1]);
 
     // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
+    let a = rand::random::<u32>();
+    let b = rand::random::<u32>();
     let expected = match a.cmp(&b) {
         Ordering::Less => b,
         Ordering::Equal => b,
@@ -288,7 +288,7 @@ fn test_max(asm_op: &str) {
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand_value::<u64>();
+    let c = rand::random::<u64>();
 
     let test = build_op_test!(asm_op, &[b as u64, a as u64, c]);
     test.expect_stack(&[expected as u64, c]);

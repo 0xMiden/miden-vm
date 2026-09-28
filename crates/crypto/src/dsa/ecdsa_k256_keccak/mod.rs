@@ -348,11 +348,12 @@ pub enum PublicKeyError {
 /// use miden_crypto::{
 ///     Felt, Word,
 ///     dsa::ecdsa_k256_keccak::{Signature, SigningKey},
-///     rand::test_utils::seeded_rng,
 /// };
 /// use miden_serde_utils::{Deserializable, Serializable};
+/// use rand::SeedableRng;
+/// use rand_chacha::ChaCha20Rng;
 ///
-/// let mut rng = seeded_rng([7; 32]);
+/// let mut rng = ChaCha20Rng::from_seed([7; 32]);
 /// let signing_key = SigningKey::with_rng(&mut rng);
 /// let message = Word::new([
 ///     Felt::new_unchecked(1),

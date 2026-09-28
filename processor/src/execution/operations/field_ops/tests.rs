@@ -5,7 +5,6 @@ use miden_core::{
     field::{BasedVectorSpace, Field, QuadFelt},
     program::{MIN_STACK_DEPTH, StackInputs},
 };
-use miden_utils_testing::rand::rand_value;
 
 use super::{
     op_add, op_and, op_eq, op_eqz, op_expacc, op_ext2mul, op_incr, op_inv, op_mul, op_neg, op_not,
@@ -346,7 +345,7 @@ fn test_op_expacc() {
 
 #[test]
 fn test_op_ext2mul() {
-    let [a0, a1, b0, b1] = [rand_value::<Felt>(); 4];
+    let [a0, a1, b0, b1] = rand::random::<[Felt; 4]>();
 
     let mut processor = FastProcessor::new(StackInputs::new(&[b0, b1, a0, a1]).unwrap());
 
@@ -371,9 +370,9 @@ fn test_op_ext2mul() {
 // --------------------------------------------------------------------------------------------
 
 fn get_rand_values() -> (Felt, Felt, Felt) {
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
-    let c: u64 = rand_value();
+    let a: u64 = rand::random();
+    let b: u64 = rand::random();
+    let c: u64 = rand::random();
     (Felt::new_unchecked(a), Felt::new_unchecked(b), Felt::new_unchecked(c))
 }
 

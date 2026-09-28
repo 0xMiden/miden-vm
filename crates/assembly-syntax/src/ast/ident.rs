@@ -140,7 +140,10 @@ impl Ident {
             crate::Path::KERNEL_PATH
             | crate::Path::EXEC_PATH
             | crate::ast::ProcedureName::MAIN_PROC_NAME => false,
-            ident => !ident.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+            ident => {
+                ident.starts_with(|c: char| c.is_ascii_digit())
+                    || !ident.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            },
         }
     }
 

@@ -1965,6 +1965,8 @@ mod tests {
 
     use num::One;
     use num_complex::Complex64;
+    use rand::{RngExt, SeedableRng};
+    use rand_chacha::ChaCha20Rng;
 
     use super::{
         COMPLEX_BITREVERSED_POWERS, CyclotomicFourier, FELT_BITREVERSED_POWERS,
@@ -1972,11 +1974,10 @@ mod tests {
         FELT_NINV_16, FELT_NINV_32, FELT_NINV_64, FELT_NINV_128, FELT_NINV_256, FELT_NINV_512,
         FalconFelt, FastFft, Polynomial,
     };
-    use crate::rand::test_utils::prng_array;
 
     /// Deterministic pseudorandom polynomial over the Falcon field.
     fn random_felt_poly(n: usize, seed: u8) -> Polynomial<FalconFelt> {
-        let bytes: [u8; 1024] = prng_array([seed; 32]);
+        let bytes: [u8; 1024] = ChaCha20Rng::from_seed([seed; 32]).random();
         Polynomial::new(
             bytes[..2 * n]
                 .chunks(2)
@@ -1987,7 +1988,7 @@ mod tests {
 
     /// Deterministic pseudorandom polynomial with small real coefficients.
     fn random_complex_poly(n: usize, seed: u8) -> Polynomial<Complex64> {
-        let bytes: [u8; 512] = prng_array([seed; 32]);
+        let bytes: [u8; 512] = ChaCha20Rng::from_seed([seed; 32]).random();
         Polynomial::new(
             bytes[..n]
                 .iter()

@@ -6,14 +6,12 @@ use miden_core_lib::handlers::u64_div::{U64_DIV_EVENT_NAME, U64DivError};
 use miden_processor::{ExecutionError, operation::OperationError};
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
-use miden_utils_testing::{
-    Felt, PrimeField64, U32_BOUND, expect_exec_error_matches, rand::rand_value, stack,
-};
+use miden_utils_testing::{Felt, PrimeField64, U32_BOUND, expect_exec_error_matches, stack};
 
 #[test]
 fn wrapping_add() {
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
+    let a: u64 = rand::random();
+    let b: u64 = rand::random();
     let c = a.wrapping_add(b);
 
     let source = "
@@ -63,8 +61,8 @@ fn overflowing_add() {
             exec.u64::overflowing_add
         end";
 
-    let a = rand_value::<u64>() as u32 as u64;
-    let b = rand_value::<u64>() as u32 as u64;
+    let a = rand::random::<u64>() as u32 as u64;
+    let b = rand::random::<u64>() as u32 as u64;
     let (c, _) = a.overflowing_add(b);
 
     let (a1, a0) = split_u64(a);
@@ -77,7 +75,7 @@ fn overflowing_add() {
     test.expect_stack(&[0, c0, c1]);
 
     let a = u64::MAX;
-    let b = rand_value::<u64>();
+    let b = rand::random::<u64>();
     let (c, _) = a.overflowing_add(b);
 
     let (a1, a0) = split_u64(a);
@@ -97,8 +95,8 @@ fn widening_add() {
             exec.u64::widening_add
         end";
 
-    let a = rand_value::<u64>() as u32 as u64;
-    let b = rand_value::<u64>() as u32 as u64;
+    let a = rand::random::<u64>() as u32 as u64;
+    let b = rand::random::<u64>() as u32 as u64;
     let (c, overflow) = a.overflowing_add(b);
     let carry = if overflow { 1 } else { 0 };
 
@@ -112,7 +110,7 @@ fn widening_add() {
     test.expect_stack(&[c0, c1, carry]);
 
     let a = u64::MAX;
-    let b = rand_value::<u64>();
+    let b = rand::random::<u64>();
     let (c, overflow) = a.overflowing_add(b);
     let carry = if overflow { 1 } else { 0 };
 
@@ -130,8 +128,8 @@ fn widening_add() {
 
 #[test]
 fn wrapping_sub() {
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
+    let a: u64 = rand::random();
+    let b: u64 = rand::random();
     let c = a.wrapping_sub(b);
 
     let source = "
@@ -152,8 +150,8 @@ fn wrapping_sub() {
 
 #[test]
 fn overflowing_sub() {
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
+    let a: u64 = rand::random();
+    let b: u64 = rand::random();
     let (c, flag) = a.overflowing_sub(b);
 
     let source = "
@@ -171,8 +169,8 @@ fn overflowing_sub() {
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[flag as u64, c0, c1]);
 
-    let base = rand_value::<u64>() as u32 as u64;
-    let diff = rand_value::<u64>() as u32 as u64;
+    let base = rand::random::<u64>() as u32 as u64;
+    let diff = rand::random::<u64>() as u32 as u64;
 
     let a = base;
     let b = base + diff;
@@ -186,8 +184,8 @@ fn overflowing_sub() {
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[1, c0, c1]);
 
-    let base = rand_value::<u64>() as u32 as u64;
-    let diff = rand_value::<u64>() as u32 as u64;
+    let base = rand::random::<u64>() as u32 as u64;
+    let diff = rand::random::<u64>() as u32 as u64;
 
     let a = base + diff;
     let b = base;
@@ -207,8 +205,8 @@ fn overflowing_sub() {
 
 #[test]
 fn wrapping_mul() {
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
+    let a: u64 = rand::random();
+    let b: u64 = rand::random();
     let c = a.wrapping_mul(b);
 
     let source = "
@@ -251,8 +249,8 @@ fn widening_mul() {
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[c0, c1, c2, c3]);
 
-    let a = rand_value::<u64>() as u128;
-    let b = rand_value::<u64>() as u128;
+    let a = rand::random::<u64>() as u128;
+    let b = rand::random::<u64>() as u128;
     let c = a.wrapping_mul(b);
 
     let a = a as u64;
@@ -334,7 +332,7 @@ fn overflowing_mul() {
         (u32::MAX as u64, u32::MAX as u64), // largest no-overflow product
         (1u64 << 32, 1u64 << 32),           // smallest overflowing product
         (u64::MAX, u64::MAX),
-        (rand_value(), rand_value()),
+        (rand::random(), rand::random()),
     ];
 
     for &(a, b) in cases {
@@ -351,7 +349,7 @@ fn overflowing_mul() {
 
 #[test]
 fn checked_not() {
-    let cases: &[u64] = &[0, 1, u64::MAX, u32::MAX as u64, 1u64 << 32, rand_value()];
+    let cases: &[u64] = &[0, 1, u64::MAX, u32::MAX as u64, 1u64 << 32, rand::random()];
 
     let source = "
         use miden::core::math::u64
@@ -412,8 +410,8 @@ fn unchecked_lte() {
     build_test!(source, &stack![0, 0, 1, 0]).expect_stack(&[0]);
 
     // randomized test
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
+    let a: u64 = rand::random();
+    let b: u64 = rand::random();
     let c = (a <= b) as u64;
 
     let (a1, a0) = split_u64(a);
@@ -460,8 +458,8 @@ fn unchecked_gte() {
     build_test!(source, &stack![0, 0, 1, 0]).expect_stack(&[1]);
 
     // randomized test
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
+    let a: u64 = rand::random();
+    let b: u64 = rand::random();
     let c = (a >= b) as u64;
 
     let (a1, a0) = split_u64(a);
@@ -528,8 +526,8 @@ fn unchecked_eq() {
     build_test!(source, &stack![1, 0, 0, 0]).expect_stack(&[0]);
 
     // randomized test
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
+    let a: u64 = rand::random();
+    let b: u64 = rand::random();
     let c = (a == b) as u64;
 
     let (a1, a0) = split_u64(a);
@@ -556,8 +554,8 @@ fn unchecked_neq() {
     build_test!(source, &stack![1, 0, 0, 0]).expect_stack(&[1]);
 
     // randomized test
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
+    let a: u64 = rand::random();
+    let b: u64 = rand::random();
     let c = (a != b) as u64;
 
     let (a1, a0) = split_u64(a);
@@ -581,7 +579,7 @@ fn unchecked_eqz() {
     build_test!(source, &stack![1, 0]).expect_stack(&[0]);
 
     // randomized test
-    let a: u64 = rand_value();
+    let a: u64 = rand::random();
     let c = (a == 0) as u64;
 
     let (a1, a0) = split_u64(a);
@@ -600,11 +598,11 @@ fn advice_push_u64div() {
     );
 
     // get two random 64-bit integers and split them into 32-bit limbs
-    let a = rand_value::<u64>();
+    let a = rand::random::<u64>();
     let a_hi = a >> 32;
     let a_lo = a as u32 as u64;
 
-    let b = rand_value::<u64>();
+    let b = rand::random::<u64>();
     let b_hi = b >> 32;
     let b_lo = b as u32 as u64;
 
@@ -673,11 +671,11 @@ fn advice_push_u64div_local_procedure() {
     );
 
     // get two random 64-bit integers and split them into 32-bit limbs
-    let a = rand_value::<u64>();
+    let a = rand::random::<u64>();
     let a_hi = a >> 32;
     let a_lo = a as u32 as u64;
 
-    let b = rand_value::<u64>();
+    let b = rand::random::<u64>();
     let b_hi = b >> 32;
     let b_lo = b as u32 as u64;
 
@@ -743,8 +741,8 @@ fn advice_push_u64div_conditional_execution() {
 
 #[test]
 fn unchecked_div() {
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
+    let a: u64 = rand::random();
+    let b: u64 = rand::random();
     let c = a / b;
 
     let source = "
@@ -831,8 +829,8 @@ fn ensure_div_doesnt_crash() {
 
 #[test]
 fn unchecked_mod() {
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
+    let a: u64 = rand::random();
+    let b: u64 = rand::random();
     let c = a % b;
 
     let source = "
@@ -863,8 +861,8 @@ fn unchecked_mod() {
 
 #[test]
 fn unchecked_divmod() {
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
+    let a: u64 = rand::random();
+    let b: u64 = rand::random();
     let q = a / b;
     let r = a % b;
 
@@ -891,8 +889,8 @@ fn unchecked_divmod() {
 
 #[test]
 fn checked_and() {
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
+    let a: u64 = rand::random();
+    let b: u64 = rand::random();
     let c = a & b;
 
     let source = "
@@ -913,8 +911,8 @@ fn checked_and() {
 
 #[test]
 fn checked_and_fail() {
-    let a0: u64 = rand_value();
-    let b0: u64 = rand_value();
+    let a0: u64 = rand::random();
+    let b0: u64 = rand::random();
 
     let a1: u64 = U32_BOUND;
     let b1: u64 = U32_BOUND;
@@ -939,8 +937,8 @@ fn checked_and_fail() {
 
 #[test]
 fn checked_or() {
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
+    let a: u64 = rand::random();
+    let b: u64 = rand::random();
     let c = a | b;
 
     let source = "
@@ -961,8 +959,8 @@ fn checked_or() {
 
 #[test]
 fn checked_or_fail() {
-    let a0: u64 = rand_value();
-    let b0: u64 = rand_value();
+    let a0: u64 = rand::random();
+    let b0: u64 = rand::random();
 
     let a1: u64 = U32_BOUND;
     let b1: u64 = U32_BOUND;
@@ -987,8 +985,8 @@ fn checked_or_fail() {
 
 #[test]
 fn checked_xor() {
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
+    let a: u64 = rand::random();
+    let b: u64 = rand::random();
     let c = a ^ b;
 
     let source = "
@@ -1009,8 +1007,8 @@ fn checked_xor() {
 
 #[test]
 fn checked_xor_fail() {
-    let a0: u64 = rand_value();
-    let b0: u64 = rand_value();
+    let a0: u64 = rand::random();
+    let b0: u64 = rand::random();
 
     let a1: u64 = U32_BOUND;
     let b1: u64 = U32_BOUND;
@@ -1043,7 +1041,7 @@ fn unchecked_shl() {
 
     // [n, a_lo, a_hi] -> [c_lo, c_hi]
     // shift by 0
-    let a: u64 = rand_value();
+    let a: u64 = rand::random();
     let (a1, a0) = split_u64(a);
     let b: u32 = 0;
 
@@ -1094,7 +1092,7 @@ fn unchecked_shr() {
 
     // [n, a_lo, a_hi] -> [c_lo, c_hi]
     // shift by 0
-    let a: u64 = rand_value();
+    let a: u64 = rand::random();
     let (a1, a0) = split_u64(a);
     let b: u32 = 0;
 
@@ -1214,7 +1212,7 @@ fn unchecked_rotl() {
 
     // [n, a_lo, a_hi] -> [c_lo, c_hi]
     // shift by 0
-    let a: u64 = rand_value();
+    let a: u64 = rand::random();
     let (a1, a0) = split_u64(a);
     let b: u32 = 0;
 
@@ -1265,7 +1263,7 @@ fn unchecked_rotr() {
 
     // [n, a_lo, a_hi] -> [c_lo, c_hi]
     // shift by 0
-    let a: u64 = rand_value();
+    let a: u64 = rand::random();
     let (a1, a0) = split_u64(a);
     let b: u32 = 0;
 

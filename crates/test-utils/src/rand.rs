@@ -1,20 +1,4 @@
-#[cfg(feature = "std")]
-pub use miden_crypto::rand::{
-    random_felt, random_word,
-    test_utils::{rand_array, rand_value, rand_vector},
-};
-
-#[cfg(feature = "std")]
-use super::QuadFelt;
 use super::{Felt, Word};
-// RANDOM GENERATORS
-// ================================================================================================
-
-/// Generates a random QuadFelt
-#[cfg(feature = "std")]
-pub fn rand_quad_felt() -> QuadFelt {
-    QuadFelt::new([rand_value(), rand_value()])
-}
 
 // SEEDED GENERATORS
 // ================================================================================================

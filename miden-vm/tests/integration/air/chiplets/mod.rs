@@ -1,4 +1,4 @@
-use miden_utils_testing::{build_test, rand::rand_vector};
+use miden_utils_testing::build_test;
 
 mod bitwise;
 mod hasher;
@@ -14,7 +14,7 @@ fn chiplets() {
         mem_load                # memory operation
         drop
     end";
-    let pub_inputs = rand_vector::<u64>(8);
+    let pub_inputs: Vec<u64> = (0..8).map(|_| rand::random()).collect();
 
     build_test!(source, &pub_inputs).check_constraints();
 }

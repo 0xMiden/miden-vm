@@ -98,7 +98,7 @@ Overall, during a right shift we do the following:
 * Add a row to the overflow table described by tuple $(clk, s_{15}, b_1)$.
 * Set the next value of $b_1$ to the current value of $clk$.
 
-Also, as mentioned previously, the prover sets values in $h_0$ non-deterministically to $\frac{1}{b_0-16}$.
+Also, as mentioned previously, the prover sets values in $h_0$ non-deterministically to $\frac{1}{b_0 - 16}$.
 
 ## Left shift
 
@@ -128,14 +128,16 @@ To simplify constraint descriptions, we'll assume that the VM exposes two binary
 
 | Flag      | Degree | Description                                                                                      |
 | --------- | ------ | ------------------------------------------------------------------------------------------------ |
-| $f_{shr}$ | 6      | When this flag is set to $1$, the instruction executing on the VM is performing a "right shift". |
-| $f_{shl}$ | 5      | When this flag is set to $1$, the instruction executing on the VM is performing a "left shift".  |
+| $f_{shr}$ | 6      | Low-degree aggregate for operations which shift the stack right by one element. |
+| $f_{shl}$ | 5      | Low-degree aggregate for ordinary one-element left shifts; DYNCALL is handled separately. |
 
-These flags are mutually exclusive. That is, if $f_{shl}=1$, then $f_{shr}=0$ and vice versa. However, both flags can be set to $0$ simultaneously. This happens when the executed instruction does not shift the stack. How these flags are computed is described [here](./op_constraints.md).
+These flags are mutually exclusive. That is, if $f_{shl}=1$, then $f_{shr}=0$ and vice versa. However, both flags can be set to $0$ simultaneously. How these flags are computed is described [here](./op_constraints.md).
 
 We also use a combined call-entry flag $f_{enter}$ to denote entry into a new execution context.
-Here, $f_{enter} = f_{call} + f_{dyncall} + f_{syscall}$. The END-of-call transition is
-validated by the block stack table constraints and is not handled by the stack depth rule below.
+Here, $f_{enter} = f_{call} + f_{dyncall} + f_{syscall}$. We use
+$f_{restore} = f_{end} \cdot h_6$ for an `END` that consumes a caller-frame entry. The block-stack
+relation authenticates the restored depth, so caller-frame restoration is handled separately from
+the ordinary stack-depth rule below.
 
 ### Stack overflow flag
 
@@ -148,33 +150,34 @@ $$
 To ensure that this flag is set correctly, we need to impose the following constraint:
 
 $$
-(1-f_{ov}) \cdot (b_0-16) = 0 \text{ | degree} = 3
+(1 - f_{ov}) \cdot (b_0 - 16) = 0 \text{ | degree} = 3
 $$
 
 The above constraint can be satisfied only when either of the following holds:
 
 * $b_0 = 16$, in which case $f_{ov}$ evaluates to $0$, regardless of the value of $h_0$.
-* $f_{ov} = 1$, in which case $b_0$ cannot be equal to $16$ (and $h_0$ must be set to $\frac{1}{b_0-16}$).
+* $f_{ov} = 1$, in which case $b_0$ cannot be equal to $16$ (and $h_0$ must be set to $\frac{1}{b_0 - 16}$).
 
 ### Stack depth constraints
 To make sure stack depth column $b_0$ is updated correctly, we need to impose the following constraints:
 
-| Condition                   | Constraint__     | Description                                                                                                          |
-| --------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------- |
-| $f_{shr}=1$                 | $b'_0 = b_0 + 1$ | When the stack is shifted to the right, stack depth should be incremented by $1$.                                    |
-| $f_{shl}=1$ <br /> $f_{ov}=1$ | $b'_0 = b_0-1$ | When the stack is shifted to the left and the overflow table is not empty, stack depth should be decremented by $1$. |
-| $f_{enter}=1$               | $b'_0 = 16$      | On CALL/SYSCALL/DYNCALL entry, the stack depth resets to the accessible top 16 positions.                          |
-| otherwise                   | $b'_0 = b_0$     | In all other cases, stack depth should not change.                                                                   |
+| Condition                   | Constraint__      | Description                                                                                   |
+| --------------------------- | ----------------- | --------------------------------------------------------------------------------------------- |
+| $f_{shr}=1$                 | $b'_0 = b_0 + 1$  | A one-element right shift adds one row to the overflow table.                                  |
+| $f_{shl}=1$ <br /> $f_{ov}=1$ | $b'_0 = b_0 - 1$ | A one-element left shift removes one row when the overflow table is not empty.                 |
+| $f_{enter}=1$               | $b'_0 = 16$       | On CALL/SYSCALL/DYNCALL entry, the stack depth resets to the accessible top 16 positions.      |
+| $f_{restore}=1$             | from caller frame | A caller-frame END restores the authenticated saved depth through the block-stack relation.    |
+| otherwise                   | $b'_0 = b_0$      | In all other cases, stack depth should not change.                                             |
 
-For non-call rows (no CALL/SYSCALL/DYNCALL entry and no END-of-call), we can combine the shift
+For rows with $f_{enter}=f_{restore}=0$, we can combine the shift
 constraints into a single expression as follows:
 
 $$
-b'_0-b_0 + f_{shl} \cdot f_{ov}-f_{shr} = 0 \text{ | degree} = 7
+b'_0 - b_0 + f_{shl} \cdot f_{ov} - f_{shr} = 0 \text{ | degree} = 7
 $$
 
-On CALL/SYSCALL/DYNCALL entry, we instead enforce $b'_0 = 16$ via a dedicated term. END-of-call
-depth updates are handled by the block stack table constraints.
+On CALL/SYSCALL/DYNCALL entry, we instead enforce $b'_0 = 16$ via a dedicated term. Caller-frame
+END depth updates are handled by the block-stack relation.
 
 ### Overflow table constraints
 
@@ -187,13 +190,27 @@ table instead removes $S(b_1,s'_{15},h_5)$, because the restored predecessor is 
 hasher register $h_5$ while $b'_1$ is reset for the new context. Operations that do not add or
 remove an overflow entry make no `StackOverflowTable` interaction.
 
-For a left shift, the lookup relation binds the next values of $s_{15}$ and $b_1$ to $t_1$ and
-$t_2$ of the removed overflow-table row.
+Let $d_{push}=S(clk,s_{15},b_1)$, $d_{pop}=S(b_1,s'_{15},b'_1)$, and
+$d_{dyncall}=S(b_1,s'_{15},h_5)$ denote the message encodings above.
 
-In case of a right shift, we also need to make sure that the next value of $b_1$ is set to the current value of $clk$. This can be done with the following constraint:
+The row contribution to the LogUp sum is:
 
 $$
-f_{shr} \cdot (b'_1-clk) = 0 \text{ | degree} = 7
+\frac{f_{shr}}{d_{push}}
+- \frac{f_{shl} f_{ov}}{d_{pop}}
+- \frac{f_{dyncall} f_{ov}}{d_{dyncall}}.
+$$
+
+The compiled lookup constraint cross-multiplies these fractions and has degree $9$.
+
+On a left shift with non-empty overflow, the constraint forces the prover to set the next values of
+$s_{15}$ and $b_1$ to values $t_1$ and $t_2$ of the row removed from the overflow table.
+
+On a right shift, we also need to make sure that the next value of $b_1$ is set to the current value
+of $clk$. This can be done with the following constraint:
+
+$$
+f_{shr} \cdot (b'_1 - clk) = 0 \text{ | degree} = 7
 $$
 
 Entering a CALL, DYNCALL, or SYSCALL context starts with an empty overflow table, so we also
@@ -203,24 +220,27 @@ $$
 f_{enter} \cdot b'_1 = 0
 $$
 
-All other operations must preserve $b_1$, except for a non-empty left shift or the end of a CALL,
-DYNCALL, or SYSCALL context. Those transitions restore $b_1$ through the overflow-table or
-block-stack lookup. Let $f_{exit}$ select the latter three END variants and define:
+All other operations must preserve $b_1$, except for right shifts, non-empty left shifts, or
+caller-frame `END` rows. Those transitions update or restore $b_1$ through the overflow or
+block-stack relation. Define:
 
 $$
-f_{update} = f_{enter} + f_{exit} + f_{shr} + f_{shl} \cdot f_{ov}
+f_{update} = f_{enter} + f_{restore} + f_{shr} + f_{shl} \cdot f_{ov}
 $$
 
 The direct preservation constraint is:
 
 $$
-(1-f_{update}) \cdot (b'_1-b_1) = 0
+(1 - f_{update}) \cdot (b'_1 - b_1) = 0
 $$
 
-In case of a left shift, when the overflow table is empty, we need to make sure that a $0$ is "shifted in" from the right (i.e., $s_{15}$ is set to $0$). This can be done with the following constraint:
+When the overflow table is empty, every operation that left-shifts into position 15 must set
+$s'_{15}$ to zero. DYNCALL is excluded from $f_{shl}$ because call entry resets the ordinary depth
+and overflow-pointer columns, but it still performs this stack shift. Thus the local selector for
+this constraint is $f_{bottom} = f_{shl} + f_{dyncall}$, and we enforce:
 
 $$
-f_{shl} \cdot (1-f_{ov}) \cdot s_{15}' = 0 \text{ | degree} = 8
+f_{bottom} \cdot (1 - f_{ov}) \cdot s_{15}' = 0 \text{ | degree} = 8
 $$
 
 ### Boundary constraints
