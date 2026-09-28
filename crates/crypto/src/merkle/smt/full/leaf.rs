@@ -84,7 +84,7 @@ impl SmtLeaf {
 
     /// Returns a new multiple leaf with the specified entries. The leaf index is derived from the
     /// entries' keys. Entries must be sorted by key in strictly increasing order, which is the
-    /// form that [`SmtLeaf::insert`] and [`SmtLeaf::remove`] maintain.
+    /// form that `SmtLeaf::insert` and `SmtLeaf::remove` maintain.
     ///
     /// # Errors
     ///   - Returns an error if 2 keys in `entries` map to a different leaf index
