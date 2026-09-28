@@ -4,7 +4,7 @@
 
 #### Changes
 
-- [BREAKING] Removed the accessor procedures from `miden::core::stark::constants`; import its constants instead ([#XXXX](https://github.com/0xMiden/miden-vm/pull/XXXX)).
+- [BREAKING] Removed the accessor procedures from `miden::core::stark::constants`; import its constants instead ([#3925](https://github.com/0xMiden/miden-vm/pull/3925)).
 
 #### Fixes
 
