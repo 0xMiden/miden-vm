@@ -44,6 +44,9 @@ pub enum LinkerError {
     #[error("duplicate definition found for module '{path}'")]
     #[diagnostic()]
     DuplicateModule { path: Arc<Path> },
+    #[error("too many modules in the graph")]
+    #[diagnostic()]
+    TooManyModules,
     #[error("invalid module surface metadata for package '{package}': {reason}")]
     #[diagnostic()]
     InvalidPackageModuleSurface { package: String, reason: String },
