@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::{
-    Matrix,
+    Dimensions, Matrix,
     bitrev::{BitReversedMatrixView, BitReversibleMatrix},
     dense::{RowMajorMatrix, RowMajorMatrixView},
 };
@@ -19,7 +19,7 @@ use tracing::info_span;
 use crate::{
     StarkConfig,
     domain::{Coset, EvaluationDomain, LiftedDomain},
-    lmcs::{Lmcs, LmcsTree},
+    lmcs::{BlockConsumerFactory, Lmcs, LmcsTree},
 };
 
 // ============================================================================
@@ -142,7 +142,7 @@ where
 pub(super) fn commit_traces<F, EF, SC>(
     config: &SC,
     domains: &[LiftedDomain<F>],
-    traces: Vec<RowMajorMatrix<F>>,
+    mut traces: Vec<RowMajorMatrix<F>>,
 ) -> Committed<F, RowMajorMatrix<F>, SC::Lmcs>
 where
     F: TwoAdicField,
@@ -154,28 +154,59 @@ where
 
     let log_blowup = config.pcs().log_blowup();
 
+    let last = config.hash_lde_blocks().then(|| traces.pop().unwrap());
+    let evaluate = |idx: usize,
+                    trace: RowMajorMatrix<F>,
+                    make_consumer: Option<BlockConsumerFactory<'_, F>>| {
+        let domain = &domains[idx];
+        let width = trace.width();
+        assert_eq!(
+            trace.height(),
+            domain.trace_height(),
+            "trace {idx} height does not match its domain"
+        );
+        let log_trace_height = domain.log_trace_height();
+        let coset_shift = domain.lde_shift();
+        // This span includes synchronous leaf hashing when block hashing is enabled.
+        info_span!("LDE", trace = idx, log_height = log_trace_height, width).in_scope(|| {
+            if let Some(make_consumer) = make_consumer {
+                config
+                    .dft()
+                    .coset_lde_batch_with_blocks(
+                        trace,
+                        log_blowup.into(),
+                        coset_shift,
+                        |_, _| {},
+                        make_consumer,
+                    )
+                    .bit_reverse_rows()
+            } else {
+                config
+                    .dft()
+                    .coset_lde_batch(trace, log_blowup.into(), coset_shift)
+                    .bit_reverse_rows()
+            }
+        })
+    };
     let ldes: Vec<_> = traces
         .into_iter()
-        .zip(domains)
         .enumerate()
-        .map(|(idx, (trace, domain))| {
-            let width = trace.width();
-            assert_eq!(
-                trace.height(),
-                domain.trace_height(),
-                "trace {idx} height does not match its domain",
-            );
-
-            let log_trace_height = domain.log_trace_height();
-            let coset_shift = domain.lde_shift();
-
-            info_span!("LDE", trace = idx, log_height = log_trace_height, width)
-                .in_scope(|| config.dft().coset_lde_batch(trace, log_blowup.into(), coset_shift))
-        })
+        .map(|(idx, trace)| evaluate(idx, trace, None))
         .collect();
-
-    // Build aligned LMCS tree and wrap in Committed
-    let tree = config.lmcs().build_aligned_tree(ldes);
+    let tree = if let Some(trace) = last {
+        let idx = ldes.len();
+        let dimensions = Dimensions {
+            height: domains[idx].lde_height(),
+            width: trace.width(),
+        };
+        config.lmcs().build_aligned_tree_with_blocks(ldes, dimensions, |make_consumer| {
+            evaluate(idx, trace, make_consumer)
+        })
+    } else {
+        config.lmcs().build_aligned_tree(
+            ldes.into_iter().map(BitReversibleMatrix::bit_reverse_rows).collect(),
+        )
+    };
     Committed::new(tree)
 }
 

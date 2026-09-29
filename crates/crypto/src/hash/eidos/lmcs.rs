@@ -221,7 +221,10 @@ fn encoded_len(row_lengths: impl IntoIterator<Item = usize>) -> usize {
 mod tests {
     use core::array;
 
+    use miden_field::PrimeCharacteristicRing;
+    use p3_matrix::{bitrev::BitReversibleMatrix, dense::RowMajorMatrixView};
     use p3_symmetric::PseudoCompressionFunction;
+    use rand::{SeedableRng, rngs::SmallRng};
 
     use super::*;
     use crate::{
@@ -229,8 +232,8 @@ mod tests {
         hash::eidos::{Eidos, compression::compress_felt_block_for_test},
         stark::{
             hasher::{Alignable, StatefulHasher},
-            lmcs::{Lmcs, LmcsTree},
-            matrix::RowMajorMatrix,
+            lmcs::{Lmcs, LmcsTree, hiding_config::HidingLmcsConfig},
+            matrix::{Matrix, RowMajorMatrix},
         },
     };
 
@@ -292,6 +295,49 @@ mod tests {
         );
 
         assert_eq!(partial_state, padded_state);
+    }
+
+    #[test]
+    fn block_hashing_preserves_length_bound_salted_commitment() {
+        let lmcs =
+            HidingLmcsConfig::<PackedFelt, PackedU64, _, _, _, DIGEST_WIDTH, DIGEST_WIDTH, 4>::new(
+                EidosLmcsHasher,
+                EidosLmcsCompressor,
+                SmallRng::seed_from_u64(42),
+            );
+        for with_prefix in [false, true] {
+            let mut matrices = Vec::new();
+            if with_prefix {
+                matrices.push(RowMajorMatrix::new(vec![Felt::ONE; 3], 3));
+            }
+            matrices.push(RowMajorMatrix::new(
+                (1..=2 * PACKED_LANES * 9).map(Felt::from_usize).collect(),
+                9,
+            ));
+            let expected = lmcs.clone().build_aligned_tree(
+                matrices.iter().map(|matrix| matrix.as_view().bit_reverse_rows()).collect(),
+            );
+            let expected_root = expected.root();
+            drop(expected);
+            let matrix = matrices.pop().unwrap();
+            let actual = lmcs.clone().build_aligned_tree_with_blocks(
+                matrices,
+                matrix.dimensions(),
+                |make_consumer| {
+                    let consume = make_consumer.unwrap()(PACKED_LANES);
+                    for (index, values) in
+                        matrix.values.chunks_exact(PACKED_LANES * matrix.width()).enumerate()
+                    {
+                        consume(
+                            index * PACKED_LANES,
+                            RowMajorMatrixView::new(values, matrix.width()),
+                        );
+                    }
+                    matrix
+                },
+            );
+            assert_eq!(actual.root(), expected_root);
+        }
     }
 
     #[test]
