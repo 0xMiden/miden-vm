@@ -944,7 +944,7 @@ dependencies = [
 
 [[package]]
 name = "miden-event-handler-abi"
-version = "0.34.0"
+version = "1.0.0"
 dependencies = [
  "miden-field",
 ]
@@ -1193,7 +1193,7 @@ dependencies = [
 
 [[package]]
 name = "miden-wasm-event-handlers"
-version = "0.34.0"
+version = "1.0.0"
 dependencies = [
  "miden-crypto",
  "miden-event-handler-abi",
