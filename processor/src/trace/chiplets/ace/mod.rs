@@ -27,7 +27,7 @@ pub const MAX_EVAL_CIRCUIT_WIRES: u32 = 1 << 15;
 ///
 /// Together with [`MAX_EVAL_CIRCUIT_WIRES`], bounds cumulative ACE work and witness storage
 /// during witness collection. Execution without tracing only enforces the per-call wire limit.
-pub const MAX_EVAL_CIRCUIT_INVOCATIONS: u32 = 1 << 10;
+pub const MAX_EVAL_CIRCUIT_INVOCATIONS: u32 = 1 << 5;
 
 /// Arithmetic circuit evaluation (ACE) chiplet.
 ///
