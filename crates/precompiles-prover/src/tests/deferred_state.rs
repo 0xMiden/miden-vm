@@ -5,7 +5,7 @@ use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
     deferred::{Digest, Node as VmNode, PrecompileWitness, TRUE_DIGEST as VM_TRUE_DIGEST},
-    field::QuadFelt,
+    field::{Field, QuadFelt},
     proof::{HashFunction, StarkProof},
     serde::{Deserializable, Serializable},
     utils::Matrix,
@@ -21,8 +21,12 @@ use crate::{
     PrecompileProvingError, check_memory_budget,
     deferred::session::session_from_witnesses,
     hash::{
-        chunk_node_sponge::SPONGE_COL_OFFSET,
-        keccak::sponge::{COL_ACT as SPONGE_COL_ACT, SPONGE_PERIOD, trace::keccak_oracle},
+        chunk_node::NODE_COL_OFFSET,
+        chunk_node_sponge::{ChunkNodeSpongeAir, SPONGE_COL_OFFSET},
+        keccak::{
+            node::{COL_ACT as NODE_COL_ACT, COL_N_CHUNKS, COL_N_CHUNKS_INV},
+            sponge::{COL_ACT as SPONGE_COL_ACT, SPONGE_PERIOD, trace::keccak_oracle},
+        },
     },
     math::{U256, from_hex, to_limbs32},
     prove_precompiles, prove_precompiles_with_budget,
@@ -581,6 +585,20 @@ fn merged_chunk_node_sponge_multi_block_checks_and_balances() {
         traces.check();
         assert_session_balanced(&traces, &mut rng);
     }
+}
+
+#[test]
+#[should_panic(expected = "constraint not satisfied")]
+fn merged_empty_keccak_node_cannot_redirect_chunk_tail() {
+    let traces = keccak_session_traces(&[]);
+    traces.check();
+    let mut merged = traces.mains()[0].clone();
+    assert_eq!(merged.values[NODE_COL_OFFSET + NODE_COL_ACT], Felt::ONE);
+    assert_eq!(merged.values[NODE_COL_OFFSET + COL_N_CHUNKS], Felt::ONE);
+
+    merged.values[NODE_COL_OFFSET + COL_N_CHUNKS] = Felt::from(2u8);
+    merged.values[NODE_COL_OFFSET + COL_N_CHUNKS_INV] = Felt::from(2u8).inverse();
+    crate::tests::check_local(ChunkNodeSpongeAir, &merged);
 }
 
 /// Explicit full prove+verify of a multi-block Keccak session — the

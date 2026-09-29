@@ -11,7 +11,7 @@ use std::vec;
 use miden_core::{
     Felt,
     deferred::{Digest, Node},
-    field::QuadFelt,
+    field::{Field, QuadFelt},
 };
 use miden_lifted_air::{BaseAir, LiftedAir};
 use miden_precompiles::Keccak256Precompile;
@@ -187,12 +187,15 @@ fn chunk_count_accepts_empty_and_boundary_lengths() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn final_node_cannot_redirect_chunk_tail() {
-    let inv = anchored_inv(0x11, 32);
-    let mut main = generate_trace_from_invocations(core::slice::from_ref(&inv));
-    assert_eq!(main.values[COL_N_CHUNKS], Felt::ONE);
-    assert_eq!(main.values[NUM_MAIN_COLS + COL_ACT], Felt::ZERO);
+    let first = anchored_inv(0x11, 32);
+    let last = next_inv(&first, 0x12, 32);
+    let mut main = generate_trace_from_invocations(&[first, last]);
+    crate::tests::check_local(KeccakNodeAir, &main);
+    assert_eq!(main.values[NUM_MAIN_COLS + COL_ACT], Felt::ONE);
+    assert_eq!(main.values[NUM_MAIN_COLS + COL_N_CHUNKS], Felt::ONE);
 
-    main.values[COL_N_CHUNKS] = Felt::from(2u8);
+    main.values[NUM_MAIN_COLS + COL_N_CHUNKS] = Felt::from(2u8);
+    main.values[NUM_MAIN_COLS + COL_N_CHUNKS_INV] = Felt::from(2u8).inverse();
     crate::tests::check_local(KeccakNodeAir, &main);
 }
 
