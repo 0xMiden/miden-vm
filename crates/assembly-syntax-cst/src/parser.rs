@@ -220,6 +220,16 @@ enum BlockParseOutcome {
     ReachedEof,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TypeAnnotationEnd {
+    /// Reached `=`, leaving it unconsumed. The annotation may still contain errors.
+    Equals,
+    /// Stopped before another declaration, leaving it unconsumed.
+    RecoveryBoundary,
+    /// Reached the end of input before finding `=`.
+    Eof,
+}
+
 impl<'input> Parser<'input> {
     fn new(source: &'input SourceFile) -> Self {
         let eof_span = eof_anchor_span(source, None);
@@ -614,6 +624,17 @@ impl<'input> Parser<'input> {
             self.error_here("expected a constant name");
         }
 
+        self.bump_regular_trivia();
+        if self.at_kind(SyntaxKind::Colon) {
+            match self.parse_type_annotation() {
+                TypeAnnotationEnd::Equals => {},
+                TypeAnnotationEnd::RecoveryBoundary | TypeAnnotationEnd::Eof => {
+                    self.finish_node();
+                    return;
+                },
+            }
+        }
+
         self.expect_kind(SyntaxKind::Equal, "expected `=` in constant declaration");
         self.parse_expr_until_line_end();
         self.parse_line_tail();
@@ -762,6 +783,40 @@ impl<'input> Parser<'input> {
         }
 
         self.finish_node();
+    }
+
+    fn parse_type_annotation(&mut self) -> TypeAnnotationEnd {
+        self.start_node(SyntaxKind::TypeAnnotation);
+        debug_assert!(self.at_kind(SyntaxKind::Colon));
+        self.bump(); // colon
+
+        let mut saw_significant = false;
+        let end = loop {
+            self.bump_regular_trivia();
+
+            if self.eof() {
+                self.error_at_eof("expected `=` after type annotation");
+                break TypeAnnotationEnd::Eof;
+            }
+
+            if self.at_kind(SyntaxKind::Equal) {
+                if !saw_significant {
+                    self.error_here("expected type annotation after `:`");
+                }
+                break TypeAnnotationEnd::Equals;
+            }
+
+            if self.at_top_level_form_starter() {
+                self.error_here("expected `=` after type annotation");
+                break TypeAnnotationEnd::RecoveryBoundary;
+            }
+
+            self.bump();
+            saw_significant = true;
+        };
+
+        self.finish_node();
+        end
     }
 
     fn parse_line_tail(&mut self) {
@@ -1858,6 +1913,17 @@ adv_map TABLE = [
             .collect()
     }
 
+    fn constant_declarations(parse: &super::Parse) -> Vec<crate::ast::Constant> {
+        parse
+            .root()
+            .items()
+            .filter_map(|item| match item {
+                Item::Constant(constant) => Some(constant),
+                _ => None,
+            })
+            .collect()
+    }
+
     fn nested_if_source(depth: usize, terminated: bool) -> String {
         let mut source = String::from("begin\n");
         for _ in 0..depth {
@@ -2072,6 +2138,91 @@ end
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::IfOp));
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::RepeatOp));
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::WhileOp));
+    }
+
+    #[test]
+    fn parses_constant_type_annotations() {
+        for (source, annotation_tokens, value) in [
+            ("const X: u8 = 8\n", &[":", "u8"][..], "8"),
+            ("pub const X :\n# type\nfelt\n= 8\n", &[":", "felt"], "8"),
+            ("const X: word = [1,2,3,4]\n", &[":", "word"], "[1,2,3,4]"),
+            (
+                "const X: [felt; 4] = [1,2,3,4]\n",
+                &[":", "[", "felt", ";", "4", "]"],
+                "[1,2,3,4]",
+            ),
+            (
+                "const X: [\n    felt; 4\n] = [1,2,3,4]\n",
+                &[":", "[", "felt", ";", "4", "]"],
+                "[1,2,3,4]",
+            ),
+        ] {
+            let parse = parse_text(source);
+            assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+            assert_eq!(parse.syntax().text().to_string(), source);
+
+            let constants = constant_declarations(&parse);
+            assert_eq!(constants.len(), 1);
+            let annotation = constants[0].type_annotation().expect("type annotation");
+            assert_eq!(
+                annotation
+                    .significant_tokens()
+                    .map(|token| token.text().to_string())
+                    .collect::<Vec<_>>(),
+                annotation_tokens
+            );
+            assert_eq!(
+                constants[0].expr().expect("initializer").syntax().text().to_string(),
+                value
+            );
+        }
+    }
+
+    #[test]
+    fn constant_type_annotation_recovery_preserves_next_declaration() {
+        for source in [
+            "const X: u8\nconst Y = 2\n",
+            "const X: u8 const Y = 2\n",
+            "const X:\nconst Y = 2\n",
+        ] {
+            let parse = parse_text(source);
+            assert_eq!(diagnostic_labels(&parse), vec!["expected `=` after type annotation"]);
+            let label = &parse.diagnostics()[0].labels.as_ref().unwrap()[0];
+            assert_eq!(label.offset(), source.find("const Y").unwrap());
+            assert_eq!(parse.syntax().text().to_string(), source);
+
+            let constants = constant_declarations(&parse);
+            assert_eq!(constants.len(), 2);
+            assert!(constants[0].expr().is_none());
+            assert_eq!(constants[1].name_token().expect("constant name").text(), "Y");
+            assert_eq!(constants[1].expr().expect("initializer").syntax().text().to_string(), "2");
+        }
+    }
+
+    #[test]
+    fn empty_constant_type_annotation_preserves_initializer() {
+        let parse = parse_text("const X: = 8\nconst Y = 2\n");
+        assert_eq!(diagnostic_labels(&parse), vec!["expected type annotation after `:`"]);
+
+        let constants = constant_declarations(&parse);
+        assert_eq!(constants.len(), 2);
+        assert_eq!(constants[0].expr().expect("initializer").syntax().text().to_string(), "8");
+        assert_eq!(constants[1].name_token().expect("constant name").text(), "Y");
+        assert_eq!(constants[1].expr().expect("initializer").syntax().text().to_string(), "2");
+    }
+
+    #[test]
+    fn constant_type_annotation_reports_missing_equals_at_eof() {
+        for source in ["const X: u8", "const X:"] {
+            let parse = parse_text(source);
+            assert_eq!(diagnostic_labels(&parse), vec!["expected `=` after type annotation"]);
+            assert_eq!(parse.syntax().text().to_string(), source);
+
+            let constants = constant_declarations(&parse);
+            assert_eq!(constants.len(), 1);
+            assert!(constants[0].type_annotation().is_some());
+            assert!(constants[0].expr().is_none());
+        }
     }
 
     #[test]
