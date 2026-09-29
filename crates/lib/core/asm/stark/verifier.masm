@@ -44,6 +44,10 @@ use miden::core::stark::utils
 #! - Maximum remainder polynomial degree: 127.
 #! - Constraint folding, OOD evaluations, and aux-trace values use the quadratic extension field.
 #!
+#! Rust counterpart: `miden_lifted_stark::VerifierInstance::verify`. Rust checks PCS openings
+#! before evaluating constraints; this procedure evaluates constraints first. Constraint evaluation
+#! does not change the Fiat-Shamir transcript, so the order of challenges is the same.
+#!
 #! Inputs:  [D0, D1, D2, D3, D4]
 #! Outputs: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
 pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters

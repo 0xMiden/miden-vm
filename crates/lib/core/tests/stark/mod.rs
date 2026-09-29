@@ -29,6 +29,7 @@ mod pvm_public_inputs;
 mod pvm_settlement;
 mod pvm_verifier;
 mod pvm_wrapper;
+mod random_coin;
 mod security;
 mod security_math;
 mod verifier_stack;
