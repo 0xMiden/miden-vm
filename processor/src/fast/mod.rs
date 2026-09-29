@@ -30,6 +30,7 @@ use crate::{
 };
 
 mod basic_block;
+mod debug;
 mod execution_api;
 mod external;
 mod memory;
@@ -37,6 +38,7 @@ mod operation;
 mod step;
 
 pub use basic_block::SystemEventError;
+pub use debug::{DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin};
 pub use memory::Memory;
 pub use step::{BreakReason, ResumeContext};
 
