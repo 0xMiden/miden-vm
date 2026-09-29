@@ -48,7 +48,7 @@ fn build_basic_program(ops: Vec<Operation>) -> Program {
     Program::new(mast_forest.into(), root)
 }
 
-fn execute(program: &Program, stack: &[u64]) -> miden_processor::trace::VmTrace {
+fn execute(program: &Program, stack: &[u64]) -> VmTrace {
     let stack = stack.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(StackInputs::new(&stack).unwrap())
@@ -208,7 +208,7 @@ fn count_loop_body_end_removals(
         .count()
 }
 
-fn find_first_iteration_window(trace: &miden_processor::trace::VmTrace) -> (usize, usize, usize) {
+fn find_first_iteration_window(trace: &VmTrace) -> (usize, usize, usize) {
     let main = trace.main_trace();
     let is =
         |row: usize, opcode: u8| main.get_op_code(RowIndex::from(row)) == Felt::from_u8(opcode);

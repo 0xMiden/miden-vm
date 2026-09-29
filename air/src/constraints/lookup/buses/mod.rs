@@ -1,18 +1,17 @@
-//! Per-bus emitters for the Miden VM's LogUp argument.
+//! Physical lookup-column emitters for the Miden VM's LogUp argument.
 //!
 //! The Miden VM's LogUp buses are emitted across 8 columns — most host a single bus, but
 //! several host two or more linearly-independent buses sharing one running accumulator via
 //! distinct `bus_prefix[bus]` additive bases (see per-bus module docs for the merges).
-//! Each emitter is a crate-private `pub(in crate::constraints::lookup) fn emit_*` that
-//! opens a single [`super::LookupBuilder::column`] closure and describes the bus's
-//! interactions via [`super::LookupColumn::group`] or
-//! [`super::LookupColumn::group_with_cached_encoding`].
+//! Each emitter opens one [`crate::lookup::LookupBuilder::next_column`] closure and fixes
+//! group placement, column degree, and per-row fraction capacity. AEAD and Merkle logic lives in
+//! [`super::operations`]; these emitters call it inside the appropriate column groups.
 //!
 //! ## Shared merge rules
 //!
-//! A [`super::LookupColumn::group`] assumes its top-level entries are mutually exclusive,
+//! A [`crate::lookup::LookupColumn::group`] assumes its top-level entries are mutually exclusive,
 //! so the column degree is the max over active branches. Simultaneous fractions belong in
-//! a [`super::LookupGroup::batch`] with an explicit degree. If two interaction families are
+//! a [`crate::lookup::LookupGroup::batch`] with an explicit degree. If two interaction families are
 //! not mutually exclusive, they must be emitted as sibling groups; sibling groups compose
 //! product-wise and increase the column degree accordingly.
 //!

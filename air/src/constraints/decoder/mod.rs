@@ -45,11 +45,11 @@
 //!
 //! The 8 hasher-state columns serve different roles depending on the current operation:
 //!
-//! | Context     | h0         | h1..h3    | h4             | h5      | h6      | h7         |
-//! |-------------|------------|-----------|----------------|---------|---------|------------|
-//! | SPAN/RESPAN | packed ops | op groups | op group       | op group| op group| op group   |
-//! | END         | block hash₀| hash₁..₃ | is_loop_body   | is_loop | restores_caller_frame | 0 |
-//! | User ops    | packed ops | op groups | user_op_helper | ...     | ...     | ...        |
+//! |Context    |h0         |h1..h3   |h4            |h5      |h6                   |h7      |
+//! |-----------|-----------|---------|--------------|--------|---------------------|--------|
+//! |SPAN/RESPAN|packed ops |op groups|op group      |op group|op group             |op group|
+//! |END        |block hash₀|hash₁..₃ |is_loop_body  |is_loop |restores_caller_frame|0       |
+//! |User ops   |packed ops |op groups|user_op_helper|...     |...                  |...     |
 //!
 //! ## Operation Flag Degrees
 //!

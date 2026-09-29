@@ -63,7 +63,7 @@ macro_rules! impl_borrow_for_chiplet_cols {
 /// ## Layout
 ///
 /// ```text
-/// | s0 s1 s2 | state[12]                                       | row_data[4]   |
+/// | s0 s1 s2 | state[12]                                        | row_data[4]   |
 /// |          | block_lo[4]      | block_hi[4] | cv/digest[4]    | row-kind data |
 /// ```
 #[repr(C)]

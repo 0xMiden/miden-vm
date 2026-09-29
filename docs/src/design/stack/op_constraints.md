@@ -193,24 +193,24 @@ Putting these operations into a group with flag degree $6$ is important for two 
 ### High-degree operations
 This group contains operations which require constraints with degree up to $3$. All $7$ operation bits are used for these flags. The extra $e_0$ column is used for degree reduction of the three high-degree bits.
 
-| Operation     | Opcode value | Binary encoding |            Operation group             | Flag degree |
-|---------------|:------------:|:---------------:|:--------------------------------------:|:-----------:|
-| `COMPRESS`   |     $80$     |   `101_0000`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
-| `MPVERIFY`    |     $81$     |   `101_0001`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
-| `PIPE`        |     $82$     |   `101_0010`    |         [I/O ops](./io_ops.md)         |     $5$     |
-| `MSTREAM`     |     $83$     |   `101_0011`    |         [I/O ops](./io_ops.md)         |     $5$     |
-| `SPLIT`       |     $84$     |   `101_0100`    | [Flow control ops](../decoder/index.md) |     $5$     |
-| `LOOP`        |     $85$     |   `101_0101`    | [Flow control ops](../decoder/index.md) |     $5$     |
-| `SPAN`        |     $86$     |   `101_0110`    | [Flow control ops](../decoder/index.md) |     $5$     |
-| `JOIN`        |     $87$     |   `101_0111`    | [Flow control ops](../decoder/index.md) |     $5$     |
-| `DYN`         |     $88$     |   `101_1000`    | [Flow control ops](../decoder/index.md) |     $5$     |
-| `HORNERBASE`  |     $89$     |   `101_1001`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
-| `HORNEREXT`   |     $90$     |   `101_1010`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
-| `PUSH`        |     $91$     |   `101_1011`    |         [I/O ops](./io_ops.md)         |     $5$     |
-| `DYNCALL`     |     $92$     |   `101_1100`    | [Flow control ops](../decoder/index.md) |     $5$     |
-| `EVALCIRCUIT` |     $93$     |   `101_1101`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
-| `LOGDEFERRED` |     $94$     |   `101_1110`    | [Crypto ops](./crypto_ops.md#log_deferred) |     $5$     |
-| `<unused>`    |     $95$     |   `101_1111`    |                                        |     $5$     |
+| Operation     | Opcode value | Binary encoding | Operation group                            | Flag degree |
+|---------------|:------------:|:---------------:|:------------------------------------------:|:-----------:|
+| `COMPRESS`    | $80$         | `101_0000`      | [Crypto ops](./crypto_ops.md)              | $5$         |
+| `MPVERIFY`    | $81$         | `101_0001`      | [Crypto ops](./crypto_ops.md)              | $5$         |
+| `PIPE`        | $82$         | `101_0010`      | [I/O ops](./io_ops.md)                     | $5$         |
+| `MSTREAM`     | $83$         | `101_0011`      | [I/O ops](./io_ops.md)                     | $5$         |
+| `SPLIT`       | $84$         | `101_0100`      | [Flow control ops](../decoder/index.md)    | $5$         |
+| `LOOP`        | $85$         | `101_0101`      | [Flow control ops](../decoder/index.md)    | $5$         |
+| `SPAN`        | $86$         | `101_0110`      | [Flow control ops](../decoder/index.md)    | $5$         |
+| `JOIN`        | $87$         | `101_0111`      | [Flow control ops](../decoder/index.md)    | $5$         |
+| `DYN`         | $88$         | `101_1000`      | [Flow control ops](../decoder/index.md)    | $5$         |
+| `HORNERBASE`  | $89$         | `101_1001`      | [Crypto ops](./crypto_ops.md)              | $5$         |
+| `HORNEREXT`   | $90$         | `101_1010`      | [Crypto ops](./crypto_ops.md)              | $5$         |
+| `PUSH`        | $91$         | `101_1011`      | [I/O ops](./io_ops.md)                     | $5$         |
+| `DYNCALL`     | $92$         | `101_1100`      | [Flow control ops](../decoder/index.md)    | $5$         |
+| `EVALCIRCUIT` | $93$         | `101_1101`      | [Crypto ops](./crypto_ops.md)              | $5$         |
+| `LOGDEFERRED` | $94$         | `101_1110`      | [Crypto ops](./crypto_ops.md#log_deferred) | $5$         |
+| `<unused>`    | $95$         | `101_1111`      |                                            | $5$         |
 
 Note that the `SPLIT` and `LOOP` operations share the common prefix `101010` and can be detected together with a flag of degree $4$ (using $e_0$ for degree reduction). Only `SPLIT` shifts the stack to the left, however: `LOOP` is do-while and reads no stack input — see [LOOP block decoding](../decoder/index.md#loop-block-decoding).
 
@@ -227,16 +227,16 @@ $b_0$ constraint above.
 ### Very high-degree operations
 This group contains operations which require constraints with degree up to $5$.
 
-| Operation    | Opcode value | Binary encoding |            Operation group             | Flag degree |
-| ------------ | :----------: | :-------------: | :------------------------------------: | :---------: |
-| `MRUPDATE`   |     $96$     |   `110_0000`    |     [Crypto ops](./crypto_ops.md)      |     $4$     |
-| `CRYPTOSTREAM` |    $100$     |   `110_0100`    |     [Crypto ops](./crypto_ops.md)      |     $4$     |
-| `SYSCALL`    |    $104$     |   `110_1000`    | [Flow control ops](../decoder/index.md) |     $4$     |
-| `CALL`       |    $108$     |   `110_1100`    | [Flow control ops](../decoder/index.md) |     $4$     |
-| `END`        |    $112$     |   `111_0000`    | [Flow control ops](../decoder/index.md) |     $4$     |
-| `REPEAT`     |    $116$     |   `111_0100`    | [Flow control ops](../decoder/index.md) |     $4$     |
-| `RESPAN`     |    $120$     |   `111_1000`    | [Flow control ops](../decoder/index.md) |     $4$     |
-| `HALT`       |    $124$     |   `111_1100`    | [Flow control ops](../decoder/index.md) |     $4$     |
+| Operation      | Opcode value | Binary encoding | Operation group                         | Flag degree |
+|----------------|:------------:|:---------------:|:---------------------------------------:|:-----------:|
+| `MRUPDATE`     | $96$         | `110_0000`      | [Crypto ops](./crypto_ops.md)           | $4$         |
+| `CRYPTOSTREAM` | $100$        | `110_0100`      | [Crypto ops](./crypto_ops.md)           | $4$         |
+| `SYSCALL`      | $104$        | `110_1000`      | [Flow control ops](../decoder/index.md) | $4$         |
+| `CALL`         | $108$        | `110_1100`      | [Flow control ops](../decoder/index.md) | $4$         |
+| `END`          | $112$        | `111_0000`      | [Flow control ops](../decoder/index.md) | $4$         |
+| `REPEAT`       | $116$        | `111_0100`      | [Flow control ops](../decoder/index.md) | $4$         |
+| `RESPAN`       | $120$        | `111_1000`      | [Flow control ops](../decoder/index.md) | $4$         |
+| `HALT`         | $124$        | `111_1100`      | [Flow control ops](../decoder/index.md) | $4$         |
 
 The last two bits are unused for these operations. The shared constraint fixes $b_0$; $b_1$ is
 fixed by:

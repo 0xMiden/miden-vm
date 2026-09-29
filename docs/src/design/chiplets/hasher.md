@@ -36,14 +36,14 @@ clock-tagged AEAD input/output relations rather than an ordinary controller comp
 
 The chiplets trace uses a top-level selector prefix `s0..s4`.
 
-| Region | Active when |
-| ------ | ----------- |
-| Hash controller | `!s0` |
-| Bitwise / AEAD stream | `s0 * !s1` |
-| Memory | `s0 * s1 * !s2` |
-| ACE | `s0 * s1 * s2 * !s3` |
-| Kernel ROM | `s0 * s1 * s2 * s3 * !s4` |
-| Padding | `s0 * s1 * s2 * s3 * s4` |
+| Region                | Active when               |
+|-----------------------|---------------------------|
+| Hash controller       | `!s0`                     |
+| Bitwise / AEAD stream | `s0 * !s1`                |
+| Memory                | `s0 * s1 * !s2`           |
+| ACE                   | `s0 * s1 * s2 * !s3`      |
+| Kernel ROM            | `s0 * s1 * s2 * s3 * !s4` |
+| Padding               | `s0 * s1 * s2 * s3 * s4`  |
 
 The controller region is padded to an 8-row boundary before the bitwise/AEAD-stream region so its
 8-row entries remain phase-aligned.
@@ -71,14 +71,14 @@ need a committed `cv_in` column.
 
 The internal selectors have the following valid encodings:
 
-| `(cs0, cs1, cs2)` | Row kind |
-| ----------------- | -------- |
-| `(1, 0, 0)` | Hash start |
-| `(0, 0, 0)` | Hash continuation |
-| `(1, 0, 1)` | Merkle path verification |
-| `(1, 1, 0)` | Merkle update, old path |
-| `(1, 1, 1)` | Merkle update, new path |
-| `(0, 1, 0)` | Controller padding |
+| `(cs0, cs1, cs2)` | Row kind                 |
+|-------------------|--------------------------|
+| `(1, 0, 0)`       | Hash start               |
+| `(0, 0, 0)`       | Hash continuation        |
+| `(1, 0, 1)`       | Merkle path verification |
+| `(1, 1, 0)`       | Merkle update, old path  |
+| `(1, 1, 1)`       | Merkle update, new path  |
+| `(0, 1, 0)`       | Controller padding       |
 
 The remaining selector patterns are invalid.
 
@@ -111,9 +111,9 @@ internal computation provider connected by lookup arguments.
 The MVM's `EidosCompressionAir` uses 108 main columns and 20 auxiliary columns, with one 32-row
 block per physical compression:
 
-| Rows | Role |
-| ---- | ---- |
-| 0–27 | Seven Eidos compression rounds, represented as 28 fused G-function rows |
+| Rows  | Role                                                                                                               |
+|-------|--------------------------------------------------------------------------------------------------------------------|
+| 0–27  | Seven Eidos compression rounds, represented as 28 fused G-function rows                                            |
 | 28–31 | Footer rows assembling the message, input chaining value, output chaining value, XOF lanes, and external relations |
 
 Periodic selectors identify the G-function phase, diagonal steps, message-schedule indices, and

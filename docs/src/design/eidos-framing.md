@@ -107,12 +107,12 @@ the correct namespace and unique tags, but allocation across repositories remain
 rule. The `(namespace, local_id) = (0, 0)` pair is reserved, so the all-zero tag is never
 registrable. A nonzero namespace may allocate owner-local ID zero.
 
-| Namespace | Owner | Responsibility |
-| ---: | --- | --- |
-| `0x00` | `miden-crypto` | Cryptographic constructions implemented by `miden-crypto` |
-| `0x01` | `miden-vm` | VM, proof-system, and precompile constructions |
-| `0x02` | `miden-protocol` | Protocol commitments and transaction constructions |
-| `0x10` | Miden ecosystem | Reserved for a centrally maintained ecosystem registry; not for ad hoc allocation |
+| Namespace | Owner            | Responsibility                                                                    |
+|----------:|------------------|-----------------------------------------------------------------------------------|
+| `0x00`    | `miden-crypto`   | Cryptographic constructions implemented by `miden-crypto`                         |
+| `0x01`    | `miden-vm`       | VM, proof-system, and precompile constructions                                    |
+| `0x02`    | `miden-protocol` | Protocol commitments and transaction constructions                                |
+| `0x10`    | Miden ecosystem  | Reserved for a centrally maintained ecosystem registry; not for ad hoc allocation |
 
 Unlisted namespace values remain unallocated. Adding one requires an update to the central
 namespace registry in `miden-crypto`; it is not a local convention.
@@ -332,37 +332,37 @@ does not provide backtracking resistance within a reseed interval.
 The declarations in `hash::eidos::domains` are normative and are the source for this table and
 generated MASM constants.
 
-| Local ID | Version | Rust domain | Encoding |
-| ---: | ---: | --- | --- |
-| `0x0001` | 1 | `SMT_BUCKET_LEAF` | `Custom` |
-| `0x0002` | 1 | `MMR_PEAKS` | `Custom` |
-| `0x0003` | 1 | `GENERIC_BYTE_STRING` | `ByteString` |
-| `0x0004` | 1 | `FALCON_HASH_TO_POINT` | `Custom` |
-| `0x0005` | 1 | `FALCON_PUBLIC_KEY` | `FeltSequence` |
-| `0x0006` | 1 | `AEAD_CTR_KEY` | `Custom` |
-| `0x0007` | 1 | `AEAD_MAC_KEY` | `Custom` |
-| `0x0008` | 1 | `RANDOM_COIN_STATE` | `FeltSequence` |
-| `0x0009` | 1 | `RANDOM_COIN_OUTPUT` | `FeltSequence` |
-| `0x000a` | 1 | `GENERIC_FELT_SEQUENCE` | `FeltSequence` |
-| `0x000b` | 1 | `LMCS_LEAF` | `Custom` |
+| Local ID | Version | Rust domain             | Encoding       |
+|---------:|--------:|-------------------------|----------------|
+| `0x0001` | 1       | `SMT_BUCKET_LEAF`       | `Custom`       |
+| `0x0002` | 1       | `MMR_PEAKS`             | `Custom`       |
+| `0x0003` | 1       | `GENERIC_BYTE_STRING`   | `ByteString`   |
+| `0x0004` | 1       | `FALCON_HASH_TO_POINT`  | `Custom`       |
+| `0x0005` | 1       | `FALCON_PUBLIC_KEY`     | `FeltSequence` |
+| `0x0006` | 1       | `AEAD_CTR_KEY`          | `Custom`       |
+| `0x0007` | 1       | `AEAD_MAC_KEY`          | `Custom`       |
+| `0x0008` | 1       | `RANDOM_COIN_STATE`     | `FeltSequence` |
+| `0x0009` | 1       | `RANDOM_COIN_OUTPUT`    | `FeltSequence` |
+| `0x000a` | 1       | `GENERIC_FELT_SEQUENCE` | `FeltSequence` |
+| `0x000b` | 1       | `LMCS_LEAF`             | `Custom`       |
 
 ## `miden-vm` local registry
 
 The declarations in `core::program::domain` are normative and are the source for this table.
 
-| Local ID | Version | Rust domain | Encoding |
-| ---: | ---: | --- | --- |
-| `0x0000` | 1 | `KERNEL_COMMITMENT` | `FeltSequence` |
-| `0x0001` | 1 | `EXECUTION_CLAIM` | `FeltSequence` |
-| `0x0002` | 1 | `PROOF_REQUEST` | `FeltSequence` |
-| `0x0003` | 1 | `DEFERRED_AND` | `Custom` |
-| `0x0004` | 1 | `DEFERRED_CHUNKS` | `Custom` |
-| `0x0005` | 1 | `STARK_TRANSCRIPT` | `Transcript` |
-| `0x0006` | 1 | `KECCAK256_PRECOMPILE` | `Custom` |
-| `0x0007` | 1 | `UINT256_PRECOMPILE` | `Custom` |
-| `0x0008` | 1 | `CURVE_PRECOMPILE` | `Custom` |
-| `0x0009` | 1 | `PVM_UINT_PIN_CLAIM` | `Custom` |
-| `0x000a` | 1 | `FALCON_PRODUCT_CHECK` | `FeltSequence` |
+| Local ID | Version | Rust domain            | Encoding       |
+|---------:|--------:|------------------------|----------------|
+| `0x0000` | 1       | `KERNEL_COMMITMENT`    | `FeltSequence` |
+| `0x0001` | 1       | `EXECUTION_CLAIM`      | `FeltSequence` |
+| `0x0002` | 1       | `PROOF_REQUEST`        | `FeltSequence` |
+| `0x0003` | 1       | `DEFERRED_AND`         | `Custom`       |
+| `0x0004` | 1       | `DEFERRED_CHUNKS`      | `Custom`       |
+| `0x0005` | 1       | `STARK_TRANSCRIPT`     | `Transcript`   |
+| `0x0006` | 1       | `KECCAK256_PRECOMPILE` | `Custom`       |
+| `0x0007` | 1       | `UINT256_PRECOMPILE`   | `Custom`       |
+| `0x0008` | 1       | `CURVE_PRECOMPILE`     | `Custom`       |
+| `0x0009` | 1       | `PVM_UINT_PIN_CLAIM`   | `Custom`       |
+| `0x000a` | 1       | `FALCON_PRODUCT_CHECK` | `FeltSequence` |
 
 Numeric assignments are consensus-visible. Changing a numbered construction's encoding, parameter
 schema, or schedule requires a new version. A delegated construction may evolve the payload grammar

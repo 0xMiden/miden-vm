@@ -161,13 +161,13 @@ The above constraint can be satisfied only when either of the following holds:
 ### Stack depth constraints
 To make sure stack depth column $b_0$ is updated correctly, we need to impose the following constraints:
 
-| Condition                   | Constraint__      | Description                                                                                   |
-| --------------------------- | ----------------- | --------------------------------------------------------------------------------------------- |
-| $f_{shr}=1$                 | $b'_0 = b_0 + 1$  | A one-element right shift adds one row to the overflow table.                                  |
-| $f_{shl}=1$ <br /> $f_{ov}=1$ | $b'_0 = b_0 - 1$ | A one-element left shift removes one row when the overflow table is not empty.                 |
-| $f_{enter}=1$               | $b'_0 = 16$       | On CALL/SYSCALL/DYNCALL entry, the stack depth resets to the accessible top 16 positions.      |
-| $f_{restore}=1$             | from caller frame | A caller-frame END restores the authenticated saved depth through the block-stack relation.    |
-| otherwise                   | $b'_0 = b_0$      | In all other cases, stack depth should not change.                                             |
+| Condition                     | Constraint__      | Description                                                                                 |
+| ----------------------------- | ----------------- | ------------------------------------------------------------------------------------------- |
+| $f_{shr}=1$                   | $b'_0 = b_0 + 1$  | A one-element right shift adds one row to the overflow table.                               |
+| $f_{shl}=1$ <br /> $f_{ov}=1$ | $b'_0 = b_0 - 1$  | A one-element left shift removes one row when the overflow table is not empty.              |
+| $f_{enter}=1$                 | $b'_0 = 16$       | On CALL/SYSCALL/DYNCALL entry, the stack depth resets to the accessible top 16 positions.   |
+| $f_{restore}=1$               | from caller frame | A caller-frame END restores the authenticated saved depth through the block-stack relation. |
+| otherwise                     | $b'_0 = b_0$      | In all other cases, stack depth should not change.                                          |
 
 For rows with $f_{enter}=f_{restore}=0$, we can combine the shift
 constraints into a single expression as follows:

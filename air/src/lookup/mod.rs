@@ -13,6 +13,7 @@ pub mod debug;
 pub mod message;
 pub mod prover;
 
+pub(crate) use aux_builder::build_logup_aux_trace_with_preprocessed;
 pub use aux_builder::{LookupFractions, accumulate, accumulate_slow, build_logup_aux_trace};
 pub use builder::{BoundaryBuilder, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup};
 pub use challenges::Challenges;

@@ -5,20 +5,20 @@
 //!
 //! ## Column Layout (within chiplet, offset by selectors)
 //!
-//! | Column    | Purpose                                        |
-//! |-----------|------------------------------------------------|
-//! | is_read   | Read/write selector: 1=read, 0=write           |
-//! | is_word   | Element/word access: 0=element, 1=word         |
-//! | ctx       | Context ID                                     |
-//! | word_addr | Word address                                   |
-//! | idx0, idx1 | Element index bits (0-3)                      |
-//! | clk       | Clock cycle of operation                       |
-//! | v0-v3     | Memory word values                             |
-//! | d0, d1    | Lower/upper 16 bits of the active delta        |
-//! | d_inv     | Inverse of the active delta (docs: column `t`) |
-//! | f_sca     | Same context/addr flag (`is_same_ctx_and_addr`) |
-//! | w0        | Lower 16 bits of word index (word_addr / 4)   |
-//! | w1        | Upper 16 bits of word index (word_addr / 4)   |
+//! | Column      | Purpose                                          |
+//! |-------------|--------------------------------------------------|
+//! | is_read     | Read/write selector: 1=read, 0=write             |
+//! | is_word     | Element/word access: 0=element, 1=word           |
+//! | ctx         | Context ID                                       |
+//! | word_addr   | Word address                                     |
+//! | idx0, idx1  | Element index bits (0-3)                         |
+//! | clk         | Clock cycle of operation                         |
+//! | v0-v3       | Memory word values                               |
+//! | d0, d1      | Lower/upper 16 bits of the active delta          |
+//! | d_inv       | Inverse of the active delta (docs: column `t`)   |
+//! | f_sca       | Same context/addr flag (`is_same_ctx_and_addr`)  |
+//! | w0          | Lower 16 bits of word index (word_addr / 4)      |
+//! | w1          | Upper 16 bits of word index (word_addr / 4)      |
 //!
 //! ## Address range checks
 //!

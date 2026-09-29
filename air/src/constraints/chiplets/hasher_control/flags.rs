@@ -6,14 +6,14 @@
 //!
 //! ## Selector encoding
 //!
-//! | s0 | s1 | s2 | Row type |
-//! |----|----|----|----------|
-//! |  1 |  0 |  0 | Hash start: full Eidos compression input state |
-//! |  0 |  0 |  0 | Hash continuation: full Eidos compression input state |
-//! |  1 |  0 |  1 | MP row |
-//! |  1 |  1 |  0 | MV row |
-//! |  1 |  1 |  1 | MU row |
-//! |  0 |  1 |  0 | Padding |
+//! | s0   | s1   | s2   | Row type                                              |
+//! |------|------|------|-------------------------------------------------------|
+//! | 1    | 0    | 0    | Hash start: full Eidos compression input state        |
+//! | 0    | 0    | 0    | Hash continuation: full Eidos compression input state |
+//! | 1    | 0    | 1    | MP row                                                |
+//! | 1    | 1    | 0    | MV row                                                |
+//! | 1    | 1    | 1    | MU row                                                |
+//! | 0    | 1    | 0    | Padding                                               |
 //!
 //! The two remaining patterns are invalid.
 

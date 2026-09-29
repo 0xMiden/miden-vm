@@ -57,12 +57,12 @@ elements so ciphertext serialization is unambiguous.
 Each stream entry occupies eight rows and overlays 20 shared chiplet columns. Every row proves one
 u32 XOR through four And8 lookups. The phases are:
 
-| Phase | Purpose |
-| --- | --- |
-| 0, 4 | Read one plaintext word and process the low limb of its first element |
-| 1, 5 | Process that element's high limb and enforce its canonical split |
-| 2, 6 | Process the low limb of the second element and bind the stream request |
-| 3, 7 | Process the second high limb, enforce its split, and write one ciphertext word |
+| Phase | Purpose                                                                        |
+|-------|--------------------------------------------------------------------------------|
+| 0, 4  | Read one plaintext word and process the low limb of its first element          |
+| 1, 5  | Process that element's high limb and enforce its canonical split               |
+| 2, 6  | Process the low limb of the second element and bind the stream request         |
+| 3, 7  | Process the second high limb, enforce its split, and write one ciphertext word |
 
 The two four-row halves cover two plaintext elements each. Typed relations bind each entry to:
 

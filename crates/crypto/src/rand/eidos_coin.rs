@@ -1,7 +1,7 @@
 use alloc::string::ToString;
 
 use rand::{
-    Rng,
+    Rng, RngExt,
     rand_core::{Infallible, TryRng, utils},
 };
 
@@ -99,11 +99,10 @@ impl EidosRandomCoin {
     /// Panics if output generation requires another block after the `u64` block counter is
     /// exhausted.
     pub fn draw_basefield(&mut self) -> Felt {
+        // Reject noncanonical values to avoid bias from reducing candidates modulo the field.
         loop {
-            let candidate =
-                self.try_next_u64().expect("Eidos random-coin generation is infallible");
-            if let Ok(value) = Felt::new(candidate) {
-                return value;
+            if let Ok(felt) = Felt::new(self.random::<u64>()) {
+                return felt;
             }
         }
     }
@@ -150,21 +149,14 @@ impl EidosRandomCoin {
     }
 
     fn next_output_u32(&mut self) -> u32 {
-        loop {
-            if self.current == OUTPUT_FELTS {
-                self.refill_output();
-            }
-
-            let value = self.output[self.current].as_canonical_u64();
-            self.current += 1;
-
-            // Eidos outputs have uniform low-u32 limbs under the pseudorandom-output assumption.
-            // For a uniform Goldilocks-field output, p - 1 is the sole extra preimage
-            // of zero; removing it leaves exactly 2^32 - 1 preimages for every u32 value.
-            if value != Felt::ORDER - 1 {
-                return value as u32;
-            }
+        if self.current == OUTPUT_FELTS {
+            self.refill_output();
         }
+
+        // Generated Eidos words lie below 2^63, so every u32 has the same number of preimages.
+        let value = self.output[self.current].as_canonical_u64() as u32;
+        self.current += 1;
+        value
     }
 
     fn refill_output(&mut self) {
@@ -297,16 +289,6 @@ mod tests {
 
         assert_eq!(coin.draw_basefield(), Felt::from_u64(42));
         assert_eq!(coin.current, 4);
-    }
-
-    #[test]
-    fn u32_sampling_rejects_the_extra_low_limb_preimage() {
-        let output =
-            Word::new([Felt::new_unchecked(Felt::ORDER - 1), Felt::from_u32(42), ZERO, ZERO]);
-        let mut coin = EidosRandomCoin::from_parts(Word::default(), output, 1, 0);
-
-        assert_eq!(coin.random::<u32>(), 42);
-        assert_eq!(coin.current, 2);
     }
 
     #[test]

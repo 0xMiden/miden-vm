@@ -19,15 +19,15 @@
 //! one local/next window. Both `comp` halves share a row because `comp` has no external consumer.
 //! The closing `bound` row holds both bound halves, every carry, and the pointer gap:
 //!
-//! | row | role    | cells 0–7                | cells 8–15                              |
-//! |-----|---------|---------------------------|------------------------------------------|
-//! | 0   | `v` lo  | 8×16-bit (recombined → 4×32) | — (dead)                              |
-//! | 1   | `v` hi  | 8×16-bit                  | `uintval_mult`@8, `uintlimbs_mult`@9 (10–15 dead) |
-//! | 2   | `comp`  | comp lo (8×16-bit)        | comp hi (8×16-bit)                       |
-//! | 3   | `bound` (closing) | 4×32-bit lo (0–3) + γ₀..γ₃ (4–7) | 4×32-bit hi (8–11) + γ₄..γ₆ (12–14) + gap (15) |
+//! | row | role    | cells 0–7                     | cells 8–15                                 |
+//! |-----|---------|-------------------------------|--------------------------------------------|
+//! | 0   | `v` lo  | 8×16-bit (recombined → 4×32)  | — (dead)                                   |
+//! | 1   | `v` hi  | 8×16-bit                      | multiplicities (8–9); 10–15 dead           |
+//! | 2   | `comp`  | comp lo (8×16-bit)            | comp hi (8×16-bit)                         |
+//! | 3   | `bound` | 32-bit lo (0–3); γ₀..γ₃ (4–7) | 32-bit hi (8–11); γ₄..γ₆ (12–14); gap (15) |
 //!
-//! The `v` high row holds both provide multiplicities. The `v` low-row providers read those
-//! multiplicities and the high limbs from the next row.
+//! The `v` high row holds `uintval_mult` in cell 8 and `uintlimbs_mult` in cell 9. The `v` low-row
+//! providers read those multiplicities and the high limbs from the next row.
 //!
 //! A single extension-field register `id` (aux col — see
 //! `REGISTER_COL`) accumulates, per row, the signed `β`-weighted limb
