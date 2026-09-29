@@ -6,7 +6,7 @@ use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
 use super::*;
 use crate::{
     MAX_CONTROL_FLOW_NESTING,
-    ast::{Form, Immediate, Instruction, Op, Visibility},
+    ast::{Form, Immediate, Instruction, MAX_TYPE_EXPR_NESTING, Op, Visibility},
 };
 
 fn test_source_file(source: &str) -> Arc<SourceFile> {
@@ -181,6 +181,79 @@ end
 
     let forms = parse_forms(source).expect("parser should succeed");
     assert_eq!(forms.len(), 2);
+}
+
+#[test]
+fn expression_nesting_limits_are_inclusive() {
+    let source = format!(
+        "const PARENS = {}1{}\nconst BINARY = 1{}\ntype T = {}felt{}\n",
+        "(".repeat(MAX_CONSTANT_EXPR_NESTING),
+        ")".repeat(MAX_CONSTANT_EXPR_NESTING),
+        " + 1".repeat(MAX_CONSTANT_EXPR_NESTING),
+        "[".repeat(MAX_TYPE_EXPR_NESTING),
+        "; 1]".repeat(MAX_TYPE_EXPR_NESTING),
+    );
+
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || {
+            parse_forms(test_source_file(&source))
+                .expect("constant and type expressions at the nesting limits should parse");
+        })
+        .expect("failed to start parser thread")
+        .join()
+        .expect("parser thread panicked");
+}
+
+#[test]
+fn rejects_deeply_nested_constant_expression() {
+    let depth = 10_000;
+    let source = format!("const VALUE = {}1{}\n", "(".repeat(depth), ")".repeat(depth),);
+
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || {
+            let error = parse_forms(test_source_file(&source))
+                .expect_err("deep constant expression should return an error");
+            assert_eq!(error.to_string(), "constant expression nesting depth exceeded");
+        })
+        .expect("failed to start parser thread")
+        .join()
+        .expect("parser thread panicked");
+}
+
+#[test]
+fn rejects_deeply_nested_binary_constant_expression() {
+    let depth = 10_000;
+    let source = format!("const VALUE = 1{}\n", " + 1".repeat(depth));
+
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || {
+            let error = parse_forms(test_source_file(&source))
+                .expect_err("deep binary constant expression should return an error");
+            assert_eq!(error.to_string(), "constant expression nesting depth exceeded");
+        })
+        .expect("failed to start parser thread")
+        .join()
+        .expect("parser thread panicked");
+}
+
+#[test]
+fn rejects_deeply_nested_type_expression() {
+    let depth = 10_000;
+    let source = format!("type T = {}felt{}\n", "[".repeat(depth), "; 1]".repeat(depth),);
+
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || {
+            let error = parse_forms(test_source_file(&source))
+                .expect_err("deep type expression should return an error");
+            assert_eq!(error.to_string(), "type expression nesting depth exceeded");
+        })
+        .expect("failed to start parser thread")
+        .join()
+        .expect("parser thread panicked");
 }
 
 #[test]

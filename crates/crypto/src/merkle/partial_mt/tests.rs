@@ -73,6 +73,25 @@ fn with_leaves() {
     assert_eq!(expected_root, pmt.root())
 }
 
+/// Checks that dense leaves produce the same root when supplied in reverse position order.
+#[test]
+fn with_leaves_dense_reverse_order() {
+    const DEPTH: u8 = 8;
+    const NUM_LEAVES: usize = 1 << DEPTH;
+
+    let values: Vec<Word> = (0..NUM_LEAVES).map(|value| int_to_node(value as u64)).collect();
+    let expected_root = MerkleTree::new(values.clone()).unwrap().root();
+    let entries = (0..NUM_LEAVES).rev().map(|position| {
+        let index = NodeIndex::new(DEPTH, position as u64).unwrap();
+        (index, values[position])
+    });
+
+    let tree = PartialMerkleTree::with_leaves(entries).unwrap();
+
+    assert_eq!(tree.root(), expected_root);
+    assert_eq!(tree.max_depth(), DEPTH);
+}
+
 /// Checks that `with_leaves()` function returns an error when using incomplete set of nodes.
 #[test]
 fn err_with_leaves() {
@@ -86,7 +105,10 @@ fn err_with_leaves() {
 
     let leaf_nodes: BTreeMap<NodeIndex, Word> = leaf_nodes_vec.into_iter().collect();
 
-    assert!(PartialMerkleTree::with_leaves(leaf_nodes).is_err());
+    match PartialMerkleTree::with_leaves(leaf_nodes) {
+        Err(MerkleError::NodeIndexNotFoundInTree(node)) => assert_eq!(node, NODE22),
+        other => panic!("expected missing node {NODE22}, got {other:?}"),
+    }
 }
 
 /// Checks that `with_leaves()` accepts an empty input and returns an empty tree.
