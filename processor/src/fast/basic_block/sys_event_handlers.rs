@@ -116,12 +116,19 @@ fn insert_mem_values_into_adv_map(processor: &mut FastProcessor) -> Result<(), S
 
     let addr_range = start_addr as u32..end_addr as u32;
     let key = processor.stack_get_word(1);
+    let ctx = processor.ctx;
 
-    if !processor.advice.contains_map_key(&key) {
-        processor.advice.check_map_value_allocation(addr_range.len())?;
+    if let Some(existing_values) = processor.advice.get_mapped_values(&key)
+        && existing_values.len() == addr_range.len()
+        && addr_range
+            .clone()
+            .map(|addr| processor.memory().read_element_impl(ctx, addr).unwrap_or(ZERO))
+            .eq(existing_values.iter().copied())
+    {
+        return Ok(());
     }
 
-    let ctx = processor.ctx;
+    processor.advice.check_map_value_allocation(addr_range.len())?;
 
     let values: Vec<Felt> = addr_range
         .map(|addr| processor.memory().read_element_impl(ctx, addr).unwrap_or(ZERO))

@@ -30,7 +30,8 @@ enum KeySize {
 ///   Advice stack: [maybe_key_ptr, was_key_found, ...]
 ///
 /// # Errors
-/// Returns an error if the provided word array is not sorted in non-decreasing order.
+/// Returns an error if the provided word array is too large or is not sorted in non-decreasing
+/// order.
 pub fn handle_lowerbound_array(
     process: &ProcessorState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
@@ -53,7 +54,8 @@ pub fn handle_lowerbound_array(
 ///   Advice stack: [maybe_key_ptr, was_key_found, ...]
 ///
 /// # Errors
-/// Returns an error if the keys are not sorted in non-decreasing order.
+/// Returns an error if the key-value array is too large or if its keys are not sorted in
+/// non-decreasing order.
 pub fn handle_lowerbound_key_value(
     process: &ProcessorState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
@@ -76,6 +78,7 @@ pub fn handle_lowerbound_key_value(
 const KEY_OFFSET: usize = 1;
 const START_ADDR_OFFSET: usize = 5;
 const END_ADDR_OFFSET: usize = 6;
+const MAX_SORTED_ARRAY_ENTRIES: usize = 1 << 16;
 
 fn push_lowerbound_result(
     process: &ProcessorState,
@@ -110,6 +113,15 @@ fn push_lowerbound_result(
                 SortedArrayError::InvalidKeyValueRange { size: addr_range.len() as u32 }.into()
             );
         }
+    }
+
+    let num_entries = addr_range.len() / stride as usize;
+    if num_entries > MAX_SORTED_ARRAY_ENTRIES {
+        return Err(SortedArrayError::TooManyEntries {
+            actual: num_entries,
+            max: MAX_SORTED_ARRAY_ENTRIES,
+        }
+        .into());
     }
 
     // If range is empty, result is end_ptr
@@ -189,6 +201,10 @@ fn word_to_search_key(mut word: Word, key_size: KeySize) -> Word {
 /// Error types that can occur during LOWERBOUND event operations.
 #[derive(Debug, thiserror::Error)]
 pub enum SortedArrayError {
+    /// The sorted array exceeds the maximum number of entries that the host will scan.
+    #[error("sorted array entry count {actual} exceeds maximum of {max}")]
+    TooManyEntries { actual: usize, max: usize },
+
     /// Elements are not sorted in non-decreasing order.
     #[error("element at index {index} ({value}) is smaller than the predecessor ({predecessor})")]
     NotAscendingOrder {

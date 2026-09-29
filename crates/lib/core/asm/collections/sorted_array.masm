@@ -41,6 +41,7 @@ const LOWERBOUND_KEY_VALUE_EVENT = event("miden::core::collections::sorted_array
 #! - start_ptr or end_ptr is not a u32 value.
 #! - start_ptr, end_ptr are not word-aligned
 #! - `start_ptr > end_ptr`
+#! - the array contains more than 65,536 words.
 #!
 #! Cycles:
 #!   Value exists: 47 cycles
@@ -253,6 +254,7 @@ end
 #! - end_ptr is not double-word-aligned with the start_ptr:
 #!     - `(end_ptr - start_ptr)` must be divisible by 8
 #! - `start_ptr > end_ptr`
+#! - the array contains more than 65,536 key-value entries.
 pub proc find_key_value(
     key: word,
     start_ptr: ptr<Entry>,
@@ -296,6 +298,7 @@ end
 #! - end_ptr is not double-word-aligned with the start_ptr:
 #!     - `(end_ptr - start_ptr)` must be divisible by 8
 #! - `start_ptr > end_ptr`
+#! - the array contains more than 65,536 key-value entries.
 pub proc find_half_key_value(
     key: HalfKey,
     start_ptr: ptr<Entry>,

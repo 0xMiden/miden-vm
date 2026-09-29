@@ -136,19 +136,18 @@ impl PartialMerkleTree {
             current_layer = layer_iter.next().unwrap();
             core::mem::swap(&mut current_layer, &mut parent_layer);
 
+            // Siblings have the same parent position. Sort them together and retain one child per
+            // parent so each parent is computed once.
+            current_layer.sort_unstable();
+            current_layer.dedup_by_key(|position| *position / 2);
+
             for index_value in current_layer {
                 // get the parent node index
                 let parent_node = NodeIndex::new(depth - 1, index_value / 2)?;
 
-                // If parent already exists, check if it's user-provided (invalid) or computed
-                // (skip)
-                if parent_layer.contains(&parent_node.position()) {
-                    // If the parent was provided as a leaf, that's invalid - we can't have both
-                    // a node and its descendant in the input set.
-                    if leaves.contains(&parent_node) {
-                        return Err(MerkleError::EntryIsNotLeaf { node: parent_node });
-                    }
-                    continue;
+                // A user-provided parent cannot also have a descendant in the input set.
+                if leaves.contains(&parent_node) {
+                    return Err(MerkleError::EntryIsNotLeaf { node: parent_node });
                 }
 
                 // create current node index

@@ -8,11 +8,11 @@ use super::{
     SymbolResolutionError, Visibility, types,
 };
 
-/// Maximum allowed nesting depth of type expressions during resolution.
+/// Maximum allowed nesting depth of type expressions during parsing and resolution.
 ///
 /// This limit is intended to prevent stack overflows from maliciously deep type expressions while
 /// remaining far above typical type nesting in real programs.
-const MAX_TYPE_EXPR_NESTING: usize = 256;
+pub(crate) const MAX_TYPE_EXPR_NESTING: usize = 256;
 
 /// Abstracts over resolving an item to a concrete [Type], using one of:
 ///

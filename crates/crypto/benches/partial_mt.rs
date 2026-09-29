@@ -16,7 +16,7 @@ use common::data::{WordPattern, generate_word_pattern};
 benchmark_multi!(
     partial_merkle_tree_with_leaves,
     "partial_merkle_tree_with_leaves",
-    &[64, 256, 1024, 4096, 8192],
+    &[64, 256, 1024, 4096, 8192, 16_384, 65_536],
     |b: &mut Bencher<'_>, &num_leaves: &usize| {
         b.iter_batched(
             || {

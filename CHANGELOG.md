@@ -1,10 +1,9 @@
 # Changelog
 
-## v0.34.0 (Unreleased)
+## v1.0.0 (Unreleased)
 
 #### Features
 
-- [BREAKING] Add a precompile prover memory budget, with a 64GiB default ([#3799](https://github.com/0xMiden/miden-vm/pull/3799)).
 - Added Wasm-compiled custom event handlers: untrusted Wasm modules ship inside a `.masp` package (`event_handlers` section) and run under the wasmi interpreter on any host. New crates: `miden-event-handler-abi` (host/guest ABI contract), `miden-wasm-event-handlers` (host-side runner with fuel, memory, and mutation limits), `miden-event-handler-sdk` + `miden-event-handler-macros` (Rust guest SDK with manifest emission). Also added `ProcessorState::stack_depth` ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 - [BREAKING] The package dependency commitment now binds the `event_handlers` section (next to the account-component metadata), and the semantic sections enter its preimage in a canonical order, so the dependency commitment of a package that carries handlers changes ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 - [BREAKING] `DefaultHost::replace_handler` and `DefaultHost::replace_trace_handler` now return `Result<bool, ExecutionError>` instead of `bool`, because the event name is validated before the handler is registered ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
@@ -12,34 +11,36 @@
 - [BREAKING] Handler registration now rejects the whole reserved `sys::` event-name prefix and empty event names, not only the known system-event names ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 - Added project-assembler support for Wasm event handlers: `miden-assembly` gains a generic package post-processor mechanism (`PackagePostProcessor`, `PostProcessContext`, `ProjectAssembler::with_package_post_processor`), and the new `miden-wasm-event-handlers-project` crate plugs into it. The plugin reads `[package.metadata.midenc.event-handlers]` from `miden-project.toml` (`crate =` builds a Rust guest crate, `module =` reads a prebuilt module), validates the module with the default `WasmHandlerLimits`, and embeds the `event_handlers` section into every package of the project under assembly (never into source dependencies) ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 
-#### Changes
+## v0.34.0 (2026-09-26)
 
-- [BREAKING] Removed the custom `Randomizable` trait and random test wrappers. Use `rand` distributions instead. `Word` now implements `StandardUniform`, and `Felt`'s default Proptest strategy is shrinkable and covers canonical and non-canonical representations. Tests that require one representation can use `arb_felt_canonical()` or `arb_felt_noncanonical()` ([#3873](https://github.com/0xMiden/miden-vm/pull/3873)).
-- Improved lifted STARK prover performance: LogUp fractions are built and accumulated in row chunks with a parallel accumulator scan, and DEEP reduction avoids element-wise buffer swaps and per-height group buffers ([#3851](https://github.com/0xMiden/miden-vm/pull/3851)).
-- [BREAKING] Reduced prover peak memory by 13-20% by pruning Merkle layers ([#3872](https://github.com/0xMiden/miden-vm/pull/3872)).
-- Added Eidos wasm32 SIMD128 backend ([#3881](https://github.com/0xMiden/miden-vm/pull/3881)).
-- [BREAKING] Bumped Plonky3 related dependencies to v0.8.0, updating reported conjectured security levels with corrected conservative rounding and a DEEP composition bound that accounts for the LDE size ([#3888](https://github.com/0xMiden/miden-vm/pull/3888)).
+#### Features
 
-#### Fixes
-
-- [BREAKING] Fixed missing decoder AIR constraints that allowed `in_span` to change without a
-  matching `SPAN`, `RESPAN`, or `END` operation. This changes Miden VM proofs and AIR relation
-  digests. The VM recursive-verifier MAST root also changes, so consumers that pin it must update
-  ([#3883](https://github.com/0xMiden/miden-vm/pull/3883)).
-- [BREAKING] Closed decoder AIR soundness gaps in caller-frame restoration, DYNCALL stack transitions, span and `REPEAT` adjacency, reserved opcode slots, and repeated-loop body authentication. This changes the block-stack and `END` APIs, AIR relation digest, and ACE registry roots, invalidating older proofs.
-- Fixed Falcon512 `ntru_gen` so oversized NTRU solution coefficients are rejected against the encoding bound before `i16` narrowing, instead of panicking in `try_into` ([#3857](https://github.com/0xMiden/miden-vm/pull/3857)).
-- Fixed `IntValue::Felt` Display so it prints canonical hex without byte-swapping ([#3808](https://github.com/0xMiden/miden-vm/pull/3808)).
-- [BREAKING] Fixed the MASM printer so a printed procedure parses again: signatures keep their parameter names in the new `FunctionType::arg_names` field, and `@locals` prints its count as an integer ([#3658](https://github.com/0xMiden/miden-vm/issues/3658)).
-- [BREAKING] Changed `ProverInstance::new()` to take ownership of `ProverStatement`. `ProverInstance::prove()` now consumes the instance and returns its verifier statement with the proof. The prover can now release the main traces after their final use. This reduced measured peak memory by about 7 percent ([#3833](https://github.com/0xMiden/miden-vm/pull/3833)).
-- [BREAKING] Require `CryptoRng` for `SecretKey::with_rng` and `SecretKey::sign_with_rng` in the Falcon DSA module ([#3889](https://github.com/0xMiden/miden-vm/pull/3889)).
+- [BREAKING] Add a precompile prover memory budget, with a 64GiB default ([#3799](https://github.com/0xMiden/miden-vm/pull/3799)).
 
 #### Changes
 
 - Reworked the `MastForest` `Arbitrary` impl. `GenerationMode::Executable` (the default) yields forests whose procedure roots run to completion on any operand stack: infallible, stack-balanced basic blocks, binary split and loop conditions, externals that resolve to local roots, and syscalls into a paired `KernelDescriptor` exposed through `forest_kernel_strategy`. `GenerationMode::StructureOnly` keeps the permissive behavior ([#3158](https://github.com/0xMiden/miden-vm/pull/3158)).
-
-#### Changes
-
+- Improved lifted STARK prover performance: LogUp fractions are built and accumulated in row chunks with a parallel accumulator scan, and DEEP reduction avoids element-wise buffer swaps and per-height group buffers ([#3851](https://github.com/0xMiden/miden-vm/pull/3851)).
 - [BREAKING] Made the public `ParsingError` enum `#[non_exhaustive]` and restored separate variants for protocol ABI conflicts ([#3859](https://github.com/0xMiden/miden-vm/pull/3859)).
+- - [BREAKING] Reduced prover peak memory by 13-20% by pruning Merkle layers ([#3872](https://github.com/0xMiden/miden-vm/pull/3872)).
+- [BREAKING] Removed the custom `Randomizable` trait and random test wrappers. Use `rand` distributions instead. `Word` now implements `StandardUniform`, and `Felt`'s default Proptest strategy is shrinkable and covers canonical and non-canonical representations. Tests that require one representation can use `arb_felt_canonical()` or `arb_felt_noncanonical()` ([#3873](https://github.com/0xMiden/miden-vm/pull/3873)).
+- Added Eidos wasm32 SIMD128 backend ([#3881](https://github.com/0xMiden/miden-vm/pull/3881)).
+- [BREAKING] Bumped Plonky3 related dependencies to v0.8.0, updating reported conjectured security levels with corrected conservative rounding and a DEEP composition bound that accounts for the LDE size ([#3888](https://github.com/0xMiden/miden-vm/pull/3888)).
+- Optimized Eidos native and wasm compression ([#3899](https://github.com/0xMiden/miden-vm/pull/3899)).
+
+#### Fixes
+
+- [BREAKING] Fixed the MASM printer so a printed procedure parses again: signatures keep their parameter names in the new `FunctionType::arg_names` field, and `@locals` prints its count as an integer ([#3658](https://github.com/0xMiden/miden-vm/issues/3658)).
+- [BREAKING] Fixed stack overflows when parsing deeply nested constant and type expressions by rejecting nesting beyond 256 levels ([#3700](https://github.com/0xMiden/miden-vm/pull/3700)).
+- Fixed `IntValue::Felt` Display so it prints canonical hex without byte-swapping ([#3808](https://github.com/0xMiden/miden-vm/pull/3808)).
+- Fixed Falcon512 `ntru_gen` so oversized NTRU solution coefficients are rejected against the encoding bound before `i16` narrowing, instead of panicking in `try_into` ([#3857](https://github.com/0xMiden/miden-vm/pull/3857)).
+- [BREAKING] Changed `ProverInstance::new()` to take ownership of `ProverStatement`. `ProverInstance::prove()` now consumes the instance and returns its verifier statement with the proof. The prover can now release the main traces after their final use. This reduced measured peak memory by about 7 percent ([#3833](https://github.com/0xMiden/miden-vm/pull/3833)).
+- [BREAKING] Fixed missing decoder AIR constraints that allowed `in_span` to change without a matching `SPAN`, `RESPAN`, or `END` operation. This changes Miden VM proofs and AIR relation digests. The VM recursive-verifier MAST root also changes, so consumers that pin it must update ([#3883](https://github.com/0xMiden/miden-vm/pull/3883)).
+- Fixed `miden-format` moving an item's doc comment to the module when the file starts with a blank line ([#3884](https://github.com/0xMiden/miden-vm/issues/3884)).
+- [BREAKING] Require `CryptoRng` for `SecretKey::with_rng` and `SecretKey::sign_with_rng` in the Falcon DSA module ([#3889](https://github.com/0xMiden/miden-vm/pull/3889)).
+- Fixed `AdviceMap` deserialization accepting a repeated key and silently keeping the last value; it now returns an error, matching `MastForestWireView` ([#3900](https://github.com/0xMiden/miden-vm/pull/3900)).
+- [BREAKING] Limited core-library sorted-array lookups to 65,536 entries per call. Larger ranges are rejected before host memory is scanned, and the public `SortedArrayError` enum now includes `TooManyEntries`. This affects `find_word`, `find_key_value`, and `find_half_key_value` ([#3909](https://github.com/0xMiden/miden-vm/pull/3909)).
+- [BREAKING] Closed decoder AIR soundness gaps in caller-frame restoration, DYNCALL stack transitions, span and `REPEAT` adjacency, reserved opcode slots, and repeated-loop body authentication. This changes the block-stack and `END` APIs, AIR relation digest, and ACE registry roots, invalidating older proofs.
 
 ## v0.33.0 (2026-09-16)
 

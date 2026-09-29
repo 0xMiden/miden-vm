@@ -32,11 +32,25 @@ pub(super) const IV: [u32; 8] = [
     0x5be0_cd19,
 ];
 
-#[cfg(any(test, not(target_arch = "x86_64")))]
+#[cfg(any(
+    test,
+    all(target_arch = "aarch64", not(target_feature = "neon")),
+    all(
+        not(any(target_arch = "aarch64", target_arch = "x86_64")),
+        not(all(target_arch = "wasm32", target_feature = "simd128")),
+    ),
+))]
 const ROUNDS: usize = 7;
 
 /// BLAKE3 message-word schedule for the compression rounds.
-#[cfg(any(test, not(target_arch = "x86_64")))]
+#[cfg(any(
+    test,
+    all(target_arch = "aarch64", not(target_feature = "neon")),
+    all(
+        not(any(target_arch = "aarch64", target_arch = "x86_64")),
+        not(all(target_arch = "wasm32", target_feature = "simd128")),
+    ),
+))]
 const MSG_SCHEDULE: [[usize; 16]; ROUNDS] = [
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
     [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8],
@@ -93,6 +107,12 @@ fn compress_via_sub_batches<const W: usize>(
 /// same predicates.
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 pub(crate) mod cpu {
+    /// SSE4.1 selects native blends for single-block row compression.
+    #[inline]
+    pub(crate) fn has_sse41() -> bool {
+        std::is_x86_feature_detected!("sse4.1")
+    }
+
     /// AVX-512F selects the 16-lane packed backend and the AVX-512 `u64` lane adapter.
     #[inline]
     pub(crate) fn has_avx512f() -> bool {
@@ -234,7 +254,7 @@ mod native_backend {
     }
 }
 
-/// Selects the baseline SSE2 or AVX-512F/VL row implementation at runtime under `std` through
+/// Selects the SSE2, SSE4.1, or AVX-512F/VL row implementation at runtime under `std` through
 /// `cpu`. Without `std`, target features select the implementation at compile time.
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 mod row_dispatch {
@@ -246,6 +266,9 @@ mod row_dispatch {
             // SAFETY: `cpu::has_avx512vl` confirmed AVX-512F and AVX-512VL support on the running
             // CPU.
             unsafe { row_x86::compress_raw_avx512vl(cv, block) }
+        } else if cpu::has_sse41() {
+            // SAFETY: `cpu::has_sse41` confirmed SSE4.1 support on the running CPU.
+            unsafe { row_x86::compress_raw_sse41(cv, block) }
         } else {
             row_x86::compress_raw(cv, block)
         }
@@ -256,6 +279,9 @@ mod row_dispatch {
         if cpu::has_avx512vl() {
             // SAFETY: see `compress_raw` above.
             unsafe { row_x86::compress_raw_xof_avx512vl(cv, block) }
+        } else if cpu::has_sse41() {
+            // SAFETY: see `compress_raw` above.
+            unsafe { row_x86::compress_raw_xof_sse41(cv, block) }
         } else {
             row_x86::compress_raw_xof(cv, block)
         }
@@ -354,16 +380,29 @@ fn permuted_state_with_parameter_words(
     v[8..12].copy_from_slice(&IV[..4]);
     v[12..16].copy_from_slice(&parameter_words);
 
-    for s in MSG_SCHEDULE.iter() {
-        g(&mut v, 0, 4, 8, 12, block[s[0]], block[s[1]]);
-        g(&mut v, 1, 5, 9, 13, block[s[2]], block[s[3]]);
-        g(&mut v, 2, 6, 10, 14, block[s[4]], block[s[5]]);
-        g(&mut v, 3, 7, 11, 15, block[s[6]], block[s[7]]);
-        g(&mut v, 0, 5, 10, 15, block[s[8]], block[s[9]]);
-        g(&mut v, 1, 6, 11, 12, block[s[10]], block[s[11]]);
-        g(&mut v, 2, 7, 8, 13, block[s[12]], block[s[13]]);
-        g(&mut v, 3, 4, 9, 14, block[s[14]], block[s[15]]);
+    // Keep message indices constant so the scalar backend needs no schedule-table loads or
+    // bounds checks inside the compression rounds.
+    macro_rules! round {
+        ($($s:literal),*) => {{
+            let s = [$($s),*];
+            g(&mut v, 0, 4, 8, 12, block[s[0]], block[s[1]]);
+            g(&mut v, 1, 5, 9, 13, block[s[2]], block[s[3]]);
+            g(&mut v, 2, 6, 10, 14, block[s[4]], block[s[5]]);
+            g(&mut v, 3, 7, 11, 15, block[s[6]], block[s[7]]);
+            g(&mut v, 0, 5, 10, 15, block[s[8]], block[s[9]]);
+            g(&mut v, 1, 6, 11, 12, block[s[10]], block[s[11]]);
+            g(&mut v, 2, 7, 8, 13, block[s[12]], block[s[13]]);
+            g(&mut v, 3, 4, 9, 14, block[s[14]], block[s[15]]);
+        }};
     }
+
+    round!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    round!(2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8);
+    round!(3, 4, 10, 12, 13, 2, 7, 14, 6, 5, 9, 0, 11, 15, 8, 1);
+    round!(10, 7, 12, 9, 14, 3, 13, 15, 4, 0, 11, 2, 5, 8, 1, 6);
+    round!(12, 13, 9, 11, 15, 10, 14, 8, 7, 2, 5, 3, 0, 1, 6, 4);
+    round!(9, 14, 11, 5, 8, 12, 15, 1, 13, 3, 0, 10, 2, 6, 4, 7);
+    round!(11, 15, 5, 0, 1, 9, 8, 6, 14, 10, 2, 12, 3, 4, 7, 13);
 
     v
 }
@@ -383,7 +422,23 @@ pub(super) fn compress_raw(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
         unsafe { row_x86::compress_raw_avx512vl(&cv, &block) }
     }
 
-    #[cfg(all(target_arch = "x86_64", not(feature = "std"), not(target_feature = "avx512vl")))]
+    #[cfg(all(
+        target_arch = "x86_64",
+        not(feature = "std"),
+        target_feature = "sse4.1",
+        not(target_feature = "avx512vl")
+    ))]
+    {
+        // SAFETY: SSE4.1 is enabled crate-wide in this configuration.
+        unsafe { row_x86::compress_raw_sse41(&cv, &block) }
+    }
+
+    #[cfg(all(
+        target_arch = "x86_64",
+        not(feature = "std"),
+        not(target_feature = "sse4.1"),
+        not(target_feature = "avx512vl")
+    ))]
     {
         row_x86::compress_raw(&cv, &block)
     }
@@ -408,7 +463,23 @@ pub(super) fn compress_raw_xof(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
         unsafe { row_x86::compress_raw_xof_avx512vl(&cv, &block) }
     }
 
-    #[cfg(all(target_arch = "x86_64", not(feature = "std"), not(target_feature = "avx512vl")))]
+    #[cfg(all(
+        target_arch = "x86_64",
+        not(feature = "std"),
+        target_feature = "sse4.1",
+        not(target_feature = "avx512vl")
+    ))]
+    {
+        // SAFETY: SSE4.1 is enabled crate-wide in this configuration.
+        unsafe { row_x86::compress_raw_xof_sse41(&cv, &block) }
+    }
+
+    #[cfg(all(
+        target_arch = "x86_64",
+        not(feature = "std"),
+        not(target_feature = "sse4.1"),
+        not(target_feature = "avx512vl")
+    ))]
     {
         row_x86::compress_raw_xof(&cv, &block)
     }
@@ -880,7 +951,10 @@ mod neon {
 
     #[inline(always)]
     fn rotr8(x: uint32x4_t) -> uint32x4_t {
-        unsafe { vsriq_n_u32::<8>(vshlq_n_u32::<24>(x), x) }
+        unsafe {
+            let mask = vld1q_u8([1u8, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12].as_ptr());
+            vreinterpretq_u32_u8(vqtbl1q_u8(vreinterpretq_u8_u32(x), mask))
+        }
     }
 
     #[inline(always)]
@@ -1203,6 +1277,24 @@ mod tests {
         #[test]
         fn sse2_row_variant_matches_reference() {
             assert_row_variant_matches_reference(row_x86::compress_raw, row_x86::compress_raw_xof);
+        }
+
+        #[test]
+        fn sse41_row_variant_matches_reference() {
+            if !cpu::has_sse41() {
+                std::eprintln!("skipped: the running CPU lacks SSE4.1");
+                return;
+            }
+            assert_row_variant_matches_reference(
+                |cv, block| {
+                    // SAFETY: `cpu::has_sse41` confirmed SSE4.1 support on the running CPU.
+                    unsafe { row_x86::compress_raw_sse41(cv, block) }
+                },
+                |cv, block| {
+                    // SAFETY: see above.
+                    unsafe { row_x86::compress_raw_xof_sse41(cv, block) }
+                },
+            );
         }
 
         #[test]
