@@ -236,7 +236,7 @@ impl ReplayProcessor {
                         None,
                         None,
                         None,
-                        external_node_id,
+                        (external_node_id, None),
                         current_forest,
                         &mut package_debug_info,
                         &mut inline_call_contexts,
