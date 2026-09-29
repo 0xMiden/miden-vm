@@ -240,6 +240,12 @@ impl Linker {
         let static_library = matches!(library.linkage, Linkage::Static).then(|| library.clone());
         let result = match self.libraries.entry(library_interface_digest) {
             Entry::Vacant(entry) => {
+                let remaining_capacity =
+                    ModuleIndex::MAX_MODULES.saturating_sub(self.modules.len());
+                if module_descriptors.len() > remaining_capacity {
+                    return Err(LinkerError::TooManyModules);
+                }
+
                 entry.insert(library);
                 self.link_assembled_modules(module_descriptors)
             },
@@ -1259,6 +1265,36 @@ mod tests {
 
         assert!(result.is_ok(), "module capacity exhaustion must not panic");
         assert!(matches!(result.unwrap(), Err(LinkerError::TooManyModules)));
+    }
+
+    #[test]
+    fn link_library_does_not_record_library_when_module_capacity_is_exhausted() {
+        let context = TestContext::default();
+        let module = context
+            .parse_module(source_file!(
+                &context,
+                r#"
+                namespace overflow
+
+                pub proc foo
+                    push.1
+                end
+                "#
+            ))
+            .expect("library module should parse");
+        let package: Arc<MastPackage> = Assembler::new(context.source_manager())
+            .assemble_library("overflow", module, None::<Box<Module>>)
+            .expect("library should assemble")
+            .into();
+        let library = LinkLibrary::from_package(package).with_linkage(Linkage::Static);
+        let mut linker = linker_at_module_capacity(&context);
+
+        assert!(matches!(linker.link_library(library.clone()), Err(LinkerError::TooManyModules)));
+        assert_eq!(linker.modules.len(), ModuleIndex::MAX_MODULES);
+        assert_eq!(linker.libraries().count(), 0);
+        assert_eq!(linker.static_libraries().count(), 0);
+
+        assert!(matches!(linker.link_library(library), Err(LinkerError::TooManyModules)));
     }
 
     #[test]
