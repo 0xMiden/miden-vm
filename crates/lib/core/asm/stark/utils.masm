@@ -92,68 +92,6 @@ pub proc validate_inputs()
     u32lte.POW_BITS_MAX assert.err="folding_pow_bits must be less than 32"
 end
 
-#! Reverse the lowest `bits` bits of `index` using parallel bit-swap.
-#! `pow2_shift` must equal 2^(32 - bits); the caller pre-computes it once.
-#!
-#! The algorithm has two parts:
-#!
-#! 1) Left-shift: multiply index by pow2_shift = 2^(32-bits) to place the `bits`
-#!    meaningful bits into the top of a 32-bit word. Since index < 2^bits, the
-#!    product is always < 2^32 so u32wrapping_mul is exact.
-#!
-#! 2) Full 32-bit reversal via 5 parallel swap steps. Each step k (for k=1,2,4,8,16)
-#!    swaps every adjacent group of k bits. A mask isolates the even-positioned
-#!    groups; the odd-positioned groups are the complement. Shifting each half by
-#!    k positions and combining swaps all groups simultaneously. After all 5 steps,
-#!    bit position i has moved to position 31-i, which (because of the initial
-#!    left-shift) is exactly position (bits-1-i) of the original -- i.e., the
-#!    reversed index. No final shift is needed.
-#!
-#! The two halves never overlap, so XOR = OR = ADD; we use XOR (1 cycle vs 3 for
-#! u32wrapping_add).
-#!
-#! Input: [index, pow2_shift, ...]
-#! Output: [rev_index, ...]
-#! Cycles: 78
-pub proc bit_reverse_len_parallel(index: u32, pow2_shift: u32) -> u32
-    u32wrapping_mul
-
-    # Step 1: swap adjacent bits
-    # x = ((x >> 1) & 0x55555555) ^ ((x & 0x55555555) << 1)
-    dup u32shr.1 push.0x55555555 u32and
-    swap push.0x55555555 u32and u32shl.1
-    u32xor
-    #=> [x1, ...]
-
-    # Step 2: swap bit pairs
-    # x = ((x >> 2) & 0x33333333) ^ ((x & 0x33333333) << 2)
-    dup u32shr.2 push.0x33333333 u32and
-    swap push.0x33333333 u32and u32shl.2
-    u32xor
-    #=> [x2, ...]
-
-    # Step 3: swap nibbles
-    # x = ((x >> 4) & 0x0F0F0F0F) ^ ((x & 0x0F0F0F0F) << 4)
-    dup u32shr.4 push.0x0F0F0F0F u32and
-    swap push.0x0F0F0F0F u32and u32shl.4
-    u32xor
-    #=> [x3, ...]
-
-    # Step 4: swap bytes
-    # x = ((x >> 8) & 0x00FF00FF) ^ ((x & 0x00FF00FF) << 8)
-    dup u32shr.8 push.0x00FF00FF u32and
-    swap push.0x00FF00FF u32and u32shl.8
-    u32xor
-    #=> [x4, ...]
-
-    # Step 5: swap halfwords
-    # x = (x >> 16) ^ (x << 16)  (no mask needed, both halves fit in 16 bits)
-    dup u32shr.16
-    swap u32shl.16
-    u32xor
-    #=> [rev_index, ...]
-end
-
 #! Executes the constraints evaluation check.
 #!
 #! Inputs:  [...]

@@ -153,14 +153,6 @@ pub proc stage_boundary_inputs()
     # => [...]
 end
 
-#! Loads the final deferred root from the boundary-inputs window.
-#!
-#! Input:  [...]
-#! Output: [D, ...]
-pub proc load_deferred_root() -> types::Digest
-    padw exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
-end
-
 # HELPER PROCEDURES
 # =================================================================================================
 

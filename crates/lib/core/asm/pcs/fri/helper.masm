@@ -23,21 +23,12 @@ const FRI_REMAINDER_CODEWORD_MAX_SIZE = 1024
 const FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF_LOG = 9
 const FRI_REMAINDER_CODEWORD_MAX_SIZE_LOG = 10
 const FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF = 64
-const FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1 = 128
 
 # CONSTANTS GETTERS
 # =================================================================================================
 
-pub proc get_fri_remainder_codeword_max_size() -> u16
-    push.FRI_REMAINDER_CODEWORD_MAX_SIZE
-end
-
 pub proc get_fri_remainder_poly_max_degree_plus_1_half() -> u8
     push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF
-end
-
-pub proc get_fri_remainder_poly_max_degree_plus_1() -> u8
-    push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1
 end
 
 # HELPERS

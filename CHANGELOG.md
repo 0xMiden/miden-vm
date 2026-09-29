@@ -5,6 +5,7 @@
 #### Changes
 
 - [BREAKING] Removed the accessor procedures from `miden::core::stark::constants`; import its constants instead ([#3925](https://github.com/0xMiden/miden-vm/pull/3925)).
+- [BREAKING] Removed unused procedures from the MASM recursive verifier ([#3937](https://github.com/0xMiden/miden-vm/pull/3937)).
 
 #### Fixes
 
