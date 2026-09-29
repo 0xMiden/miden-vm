@@ -102,6 +102,12 @@ impl Display for EventId {
 pub struct EventName(Cow<'static, str>);
 
 impl EventName {
+    /// The name prefix that is reserved for system events.
+    ///
+    /// The full namespace is reserved: a host refuses to register a handler for any name with
+    /// this prefix, not only for the names of the system events that exist now.
+    pub const RESERVED_NAMESPACE: &'static str = "sys::";
+
     /// Creates an EventName from a static string.
     ///
     /// This is the primary constructor for compile-time event name constants.
@@ -126,6 +132,13 @@ impl EventName {
     /// The ID is computed by hashing the name using blake3.
     pub fn to_event_id(&self) -> EventId {
         EventId::from_name(self.as_str())
+    }
+
+    /// Returns `true` if this name is in the reserved [`Self::RESERVED_NAMESPACE`].
+    ///
+    /// Only the VM can supply handlers for these names.
+    pub fn is_reserved(&self) -> bool {
+        self.as_str().starts_with(Self::RESERVED_NAMESPACE)
     }
 }
 
@@ -242,5 +255,22 @@ mod tests {
 
         // EventName to EventId
         assert_eq!(name1.to_event_id(), EventId::from_name("static::event"));
+    }
+
+    #[test]
+    fn event_name_reserved_namespace() {
+        // The full namespace is reserved, not only the names of the system events that exist.
+        assert!(EventName::new("sys::merkle_node_merge").is_reserved());
+        assert!(EventName::new("sys::not_a_real_event").is_reserved());
+        assert!(EventName::new("sys::").is_reserved());
+
+        assert!(!EventName::new("user::event").is_reserved());
+        assert!(!EventName::new("sys").is_reserved());
+        assert!(!EventName::new("").is_reserved());
+
+        // Every system event name is in the reserved namespace.
+        for event in SystemEvent::all() {
+            assert!(event.event_name().is_reserved());
+        }
     }
 }

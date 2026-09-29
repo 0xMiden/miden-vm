@@ -1,0 +1,656 @@
+//! The `[package.metadata.midenc.event-handlers]` table: its rules, its errors, and the section it
+//! attaches.
+//!
+//! These tests drive the real project assembler, so they pin what a developer sees from a build.
+//! They declare handler modules with the `module` key, so none of them needs a Rust toolchain;
+//! building the `crate` key is covered by the end-to-end test, and the refusal of that key by the
+//! safe processor is covered here, because it costs no build.
+
+use std::{fs, path::Path, sync::Arc};
+
+use miden_assembly::{
+    Assembler, PackagePostProcessor, PostProcessContext, ProjectTargetSelector,
+    diagnostics::Report, testing::TestRegistry,
+};
+use miden_mast_package::{MAX_MODULE_BYTES, Package as MastPackage};
+use miden_processor::DefaultHost;
+// The tests write the manifest records the guest SDK macro normally writes.
+use miden_wasm_event_handlers::{
+    WasmHandlerLimits, host_library_from_package, test_append_manifest_section,
+};
+use miden_wasm_event_handlers_project::{
+    WasmEventHandlerCargoBuildProcessor, WasmEventHandlerProcessor,
+};
+use tempfile::TempDir;
+
+// FIXTURES
+// ================================================================================================
+
+/// The event the `double` handler module answers.
+const DOUBLE_EVENT: &str = "test::project::double";
+
+/// A handler module that answers [`DOUBLE_EVENT`]. The WAT mirrors what the guest SDK compiles
+/// to: it reads the first stack input and answers with twice its value.
+const DOUBLE_WAT: &str = r#"(module
+  (import "miden:event/v1" "stack_get" (func $stack_get (param i32) (result i64)))
+  (import "miden:event/v1" "adv_stack_extend" (func $adv_stack_extend (param i32 i32)))
+  (memory (export "memory") 1)
+  (func (export "double")
+    (i64.store (i32.const 0) (i64.mul (call $stack_get (i32.const 0)) (i64.const 2)))
+    (call $adv_stack_extend (i32.const 0) (i32.const 1))))"#;
+
+/// Writes `contents` to `path`, creating the parent directories.
+fn write(path: &Path, contents: &str) {
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, contents).unwrap();
+}
+
+/// Writes the `double` handler module, with its manifest record, next to the manifest.
+fn write_handler_module(root: &Path) {
+    write_handler_module_for(root, DOUBLE_EVENT);
+}
+
+/// Writes the handler module that answers `event`, with its manifest record, next to the
+/// manifest, replacing any module already there.
+///
+/// The code is the `double` one whatever the event name: the name is what the section reports, so
+/// it is enough to tell two modules apart.
+fn write_handler_module_for(root: &Path, event: &str) {
+    let wasm = test_append_manifest_section(
+        wat::parse_str(DOUBLE_WAT).expect("the fixture WAT parses"),
+        &[(event, "double")],
+    );
+    fs::write(root.join("handlers.wasm"), wasm).unwrap();
+}
+
+/// Returns the event names of the handler section `package` carries.
+fn events(package: &MastPackage) -> Vec<String> {
+    package
+        .event_handlers()
+        .expect("the section decodes")
+        .expect("the package carries the section")
+        .handlers
+        .iter()
+        .map(|entry| entry.event.as_str().to_string())
+        .collect()
+}
+
+/// Writes a library-only project whose manifest holds `metadata`, and returns the manifest path.
+fn write_project(root: &Path, metadata: &str) -> std::path::PathBuf {
+    let manifest_path = root.join("miden-project.toml");
+    write(
+        &manifest_path,
+        &format!(
+            r#"[package]
+name = "handlerlib"
+version = "1.0.0"
+{metadata}
+[lib]
+path = "lib.masm"
+"#
+        ),
+    );
+    write(
+        &root.join("lib.masm"),
+        r#"pub proc helper
+    push.1
+end
+"#,
+    );
+    manifest_path
+}
+
+/// Writes a project with a library target and one executable target, both of which get the
+/// `double` handler module, and returns the manifest path.
+fn write_lib_and_bin_project(root: &Path) -> std::path::PathBuf {
+    let manifest_path = root.join("miden-project.toml");
+    write(
+        &manifest_path,
+        r#"[package]
+name = "handlerapp"
+version = "1.0.0"
+
+[package.metadata.midenc.event-handlers]
+module = "handlers.wasm"
+
+[lib]
+path = "lib.masm"
+
+[[bin]]
+name = "main"
+path = "main.masm"
+"#,
+    );
+    write(
+        &root.join("lib.masm"),
+        r#"pub proc helper
+    push.1
+end
+"#,
+    );
+    write(
+        &root.join("main.masm"),
+        r#"begin
+    push.1
+    drop
+end
+"#,
+    );
+    write_handler_module(root);
+    manifest_path
+}
+
+/// Writes a project with a kernel library target and an executable target that links it, both of
+/// which get the `double` handler module, and returns the manifest path.
+fn write_kernel_and_bin_project(root: &Path) -> std::path::PathBuf {
+    let manifest_path = root.join("miden-project.toml");
+    write(
+        &manifest_path,
+        r#"[package]
+name = "handlerkernelapp"
+version = "1.0.0"
+
+[package.metadata.midenc.event-handlers]
+module = "handlers.wasm"
+
+[lib]
+kind = "kernel"
+path = "kernel.masm"
+
+[[bin]]
+name = "main"
+path = "main.masm"
+"#,
+    );
+    write(
+        &root.join("kernel.masm"),
+        r#"pub proc foo
+    caller
+end
+"#,
+    );
+    write(
+        &root.join("main.masm"),
+        r#"begin
+    syscall.foo
+end
+"#,
+    );
+    write_handler_module(root);
+    manifest_path
+}
+
+/// Assembles a target of the project at `manifest_path` with `processor` registered.
+fn assemble_with(
+    manifest_path: &Path,
+    target: ProjectTargetSelector<'_>,
+    processor: impl PackagePostProcessor + 'static,
+) -> Result<Arc<MastPackage>, Report> {
+    let mut registry = TestRegistry::default();
+    let mut project_assembler =
+        Assembler::default().for_project_at_path(manifest_path, &mut registry)?;
+    project_assembler.with_package_post_processor(processor);
+    project_assembler.assemble(target, "dev")
+}
+
+/// Returns the metadata table that points `module` at the handler module of `dir`, by absolute
+/// path.
+fn absolute_module_metadata(dir: &Path) -> String {
+    format!(
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"{}\"\n",
+        dir.join("handlers.wasm").display()
+    )
+}
+
+/// Assembles a target of the project at `manifest_path` with the safe processor registered, the
+/// one every `module` test drives.
+fn assemble(
+    manifest_path: &Path,
+    target: ProjectTargetSelector<'_>,
+) -> Result<Arc<MastPackage>, Report> {
+    assemble_with(manifest_path, target, WasmEventHandlerProcessor::new())
+}
+
+/// Assembles the library target of the project at `manifest_path` and returns the error message.
+fn assemble_library_error(manifest_path: &Path) -> String {
+    assemble(manifest_path, ProjectTargetSelector::Library)
+        .expect_err("the build must fail")
+        .to_string()
+}
+
+// TESTS
+// ================================================================================================
+
+#[test]
+fn an_absent_table_leaves_the_package_unchanged() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(tempdir.path(), "");
+
+    let package = assemble(&manifest_path, ProjectTargetSelector::Library)
+        .expect("a project without the table assembles");
+    assert_eq!(package.event_handlers().expect("the section decodes"), None);
+}
+
+#[test]
+fn a_prebuilt_module_attaches_to_the_package() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
+    );
+    write_handler_module(tempdir.path());
+
+    let package = assemble(&manifest_path, ProjectTargetSelector::Library)
+        .expect("the prebuilt module attaches");
+    assert_eq!(events(&package), [DOUBLE_EVENT]);
+}
+
+/// The safe processor reads a prebuilt module only. A `crate` key means a `cargo build` of the
+/// source the manifest names, so it fails the build, and the message names the processor that
+/// does build guest crates.
+#[test]
+fn the_safe_processor_refuses_a_guest_crate() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\ncrate = \"handlers\"\n",
+    );
+    // The guest crate directory is never created: the refusal comes before any build, so there is
+    // nothing to build.
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(
+        error.contains("WasmEventHandlerCargoBuildProcessor"),
+        "unexpected error: {error}"
+    );
+    assert!(error.contains("cargo build"), "unexpected error: {error}");
+}
+
+/// The cargo-building processor serves both keys, so a prebuilt module needs no toolchain there
+/// either.
+#[test]
+fn the_cargo_build_processor_accepts_a_prebuilt_module() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
+    );
+    write_handler_module(tempdir.path());
+
+    let package = assemble_with(
+        &manifest_path,
+        ProjectTargetSelector::Library,
+        WasmEventHandlerCargoBuildProcessor::new(),
+    )
+    .expect("the prebuilt module attaches");
+    assert_eq!(events(&package), [DOUBLE_EVENT]);
+}
+
+/// The safe processor reads modules from inside the project only. An absolute path out of the
+/// project would otherwise make the assembler embed any file it can read into the package it
+/// produces, which a host that assembles source supplied by other users must not offer.
+#[test]
+fn the_safe_processor_refuses_a_module_outside_the_project_root() {
+    let project_dir = TempDir::new().unwrap();
+    let outside_dir = TempDir::new().unwrap();
+    write_handler_module(outside_dir.path());
+    let manifest_path =
+        write_project(project_dir.path(), &absolute_module_metadata(outside_dir.path()));
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(error.contains("outside the project root"), "unexpected error: {error}");
+    assert!(error.contains("handlers.wasm"), "unexpected error: {error}");
+}
+
+/// The containment rule holds for a relative escape too: the path is canonicalized before it is
+/// checked, so a `..` segment cannot walk out of the project.
+#[test]
+fn the_safe_processor_refuses_a_dotdot_module_escape() {
+    let tempdir = TempDir::new().unwrap();
+    // The module is a sibling of the project directory, so only an escape reaches it.
+    write_handler_module(tempdir.path());
+    let manifest_path = write_project(
+        &tempdir.path().join("project"),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"../handlers.wasm\"\n",
+    );
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(error.contains("outside the project root"), "unexpected error: {error}");
+}
+
+/// The cargo-building processor takes a module from anywhere, deliberately: it already builds the
+/// source the project names, so bounding the path adds no safety, and a module another build
+/// produced out of tree is a legitimate input.
+#[test]
+fn the_cargo_build_processor_accepts_a_module_outside_the_project_root() {
+    let project_dir = TempDir::new().unwrap();
+    let outside_dir = TempDir::new().unwrap();
+    write_handler_module(outside_dir.path());
+    let manifest_path =
+        write_project(project_dir.path(), &absolute_module_metadata(outside_dir.path()));
+
+    let package = assemble_with(
+        &manifest_path,
+        ProjectTargetSelector::Library,
+        WasmEventHandlerCargoBuildProcessor::new(),
+    )
+    .expect("the cargo-building processor puts no bound on the module path");
+    assert_eq!(events(&package), [DOUBLE_EVENT]);
+}
+
+#[test]
+fn the_section_attaches_to_every_target_of_the_package() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_lib_and_bin_project(tempdir.path());
+
+    for target in [ProjectTargetSelector::Library, ProjectTargetSelector::Executable("main")] {
+        let package = assemble(&manifest_path, target).expect("the target assembles");
+        assert!(
+            package.event_handlers().expect("the section decodes").is_some(),
+            "target '{}' lost the handler section",
+            package.name,
+        );
+    }
+}
+
+/// An executable and the kernel it embeds are two targets of one project, so the section attaches
+/// to both and the embedded copy is identical to the outer one. A consumer that loads the
+/// executable meets the same handler set twice.
+#[test]
+fn an_executable_and_its_project_kernel_carry_the_identical_section() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_kernel_and_bin_project(tempdir.path());
+
+    let package = assemble(&manifest_path, ProjectTargetSelector::Executable("main"))
+        .expect("the executable target assembles");
+    let section = package
+        .event_handlers()
+        .expect("the section decodes")
+        .expect("the executable package carries the section");
+    let kernel = package
+        .try_embedded_kernel_package()
+        .expect("the embedded kernel package decodes")
+        .expect("the executable package embeds its project kernel");
+
+    assert_eq!(
+        kernel.event_handlers().expect("the kernel section decodes"),
+        Some(section),
+        "the embedded kernel must carry the section of the executable, byte for byte",
+    );
+}
+
+#[test]
+fn a_host_loads_the_handlers_of_one_package_of_the_project() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_lib_and_bin_project(tempdir.path());
+
+    let library_package = assemble(&manifest_path, ProjectTargetSelector::Library)
+        .expect("the library target assembles");
+    let binary_package = assemble(&manifest_path, ProjectTargetSelector::Executable("main"))
+        .expect("the executable target assembles");
+
+    let mut host = DefaultHost::default();
+    let first = host_library_from_package(&library_package, WasmHandlerLimits::default())
+        .expect("the handlers of the library package load");
+    host.load_library(first).expect("the first package registers its handlers");
+
+    // Both packages carry the same handler set, so the second registration hits the event the
+    // first one registered. The failure is the rule, not a defect: a host takes the handlers of
+    // one package of a project.
+    let second = host_library_from_package(&binary_package, WasmHandlerLimits::default())
+        .expect("the handlers of the executable package load");
+    let error = host
+        .load_library(second)
+        .expect_err("the second package must not register the same handlers")
+        .to_string();
+    assert!(error.contains("already registered"), "unexpected error: {error}");
+    assert!(error.contains("test::project::double"), "unexpected error: {error}");
+}
+
+#[test]
+fn both_keys_set_is_an_error() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\ncrate = \"handlers\"\nmodule = \"handlers.wasm\"\n",
+    );
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(error.contains("mutually exclusive"), "unexpected error: {error}");
+    assert!(error.contains("miden-project.toml"), "unexpected error: {error}");
+}
+
+#[test]
+fn neither_key_set_is_an_error() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path =
+        write_project(tempdir.path(), "\n[package.metadata.midenc.event-handlers]\n");
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(
+        error.contains("exactly one of 'crate' or 'module'"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn an_unknown_key_is_an_error() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\nfuel = 10\n",
+    );
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(error.contains("unknown key 'fuel'"), "unexpected error: {error}");
+}
+
+#[test]
+fn a_value_of_the_wrong_type_is_an_error() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path =
+        write_project(tempdir.path(), "\n[package.metadata.midenc.event-handlers]\nmodule = 7\n");
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(
+        error.contains("key 'module' must be a string path, but it is integer"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn a_missing_module_file_is_an_error() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
+    );
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(error.contains("cannot read the handler module"), "unexpected error: {error}");
+    assert!(error.contains("handlers.wasm"), "unexpected error: {error}");
+}
+
+#[test]
+fn an_oversized_module_is_refused_before_parsing() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
+    );
+    // A module over the cap of the `event_handlers` section can never ship, so the build refuses
+    // it on its size alone, without parsing it.
+    fs::write(tempdir.path().join("handlers.wasm"), vec![0u8; MAX_MODULE_BYTES + 1]).unwrap();
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(error.contains("over the"), "unexpected error: {error}");
+    assert!(error.contains("-byte limit"), "unexpected error: {error}");
+}
+
+#[test]
+fn a_non_regular_module_file_is_refused() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
+    );
+    // A directory is the file kind a test can create portably; the rule also covers the kinds a
+    // test cannot, such as a device or a FIFO, where a plain read would never return.
+    fs::create_dir(tempdir.path().join("handlers.wasm")).unwrap();
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(error.contains("is not a regular file"), "unexpected error: {error}");
+    assert!(error.contains("handlers.wasm"), "unexpected error: {error}");
+}
+
+#[test]
+fn a_module_without_manifest_records_is_an_error() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
+    );
+    // The module loads, but it carries no `miden:event-manifest` record.
+    fs::write(
+        tempdir.path().join("handlers.wasm"),
+        wat::parse_str(DOUBLE_WAT).expect("the fixture WAT parses"),
+    )
+    .unwrap();
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(error.contains("declares no event handlers"), "unexpected error: {error}");
+    assert!(error.contains("#[miden_event_handler("), "unexpected error: {error}");
+    assert!(error.contains("miden-event-handler-sdk"), "unexpected error: {error}");
+}
+
+#[test]
+fn a_module_the_host_would_refuse_fails_the_build() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
+    );
+    // The module exports no linear memory, so every host refuses it at load. Build-time
+    // validation must refuse it here instead.
+    let wasm = test_append_manifest_section(
+        wat::parse_str(r#"(module (func (export "double")))"#).expect("the WAT parses"),
+        &[("test::project::double", "double")],
+    );
+    fs::write(tempdir.path().join("handlers.wasm"), wasm).unwrap();
+
+    let error = assemble_library_error(&manifest_path);
+    assert!(error.contains("is not valid"), "unexpected error: {error}");
+    assert!(error.contains("linear memory"), "unexpected error: {error}");
+}
+
+#[test]
+fn a_second_handler_section_is_an_error() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
+    );
+    write_handler_module(tempdir.path());
+
+    // Two producers of the section would silently disagree about the handlers of the package, so
+    // the second attachment fails the build instead of replacing the first.
+    let mut registry = TestRegistry::default();
+    let mut project_assembler =
+        Assembler::default().for_project_at_path(&manifest_path, &mut registry).unwrap();
+    project_assembler
+        .with_package_post_processor(WasmEventHandlerProcessor::new())
+        .with_package_post_processor(WasmEventHandlerProcessor::new());
+
+    let error = project_assembler
+        .assemble(ProjectTargetSelector::Library, "dev")
+        .expect_err("the second attachment must fail")
+        .to_string();
+    assert!(error.contains("already has an 'event_handlers' section"), "unexpected: {error}");
+    assert!(error.contains("miden-project.toml"), "unexpected error: {error}");
+}
+
+/// Lends one processor to several assemblers, so a test can observe what a single processor
+/// instance carries across the packages it post-processes.
+struct SharedProcessor(Arc<WasmEventHandlerProcessor>);
+
+impl PackagePostProcessor for SharedProcessor {
+    fn post_process(
+        &self,
+        package: &mut MastPackage,
+        context: &PostProcessContext<'_>,
+    ) -> Result<(), Report> {
+        self.0.post_process(package, context)
+    }
+}
+
+/// Assembles the library target of the project at `manifest_path` with `processor`, which the
+/// caller keeps across assemblies.
+fn assemble_shared(
+    processor: &Arc<WasmEventHandlerProcessor>,
+    manifest_path: &Path,
+) -> Result<Arc<MastPackage>, Report> {
+    let mut registry = TestRegistry::default();
+    let mut project_assembler =
+        Assembler::default().for_project_at_path(manifest_path, &mut registry)?;
+    project_assembler.with_package_post_processor(SharedProcessor(processor.clone()));
+    project_assembler.assemble(ProjectTargetSelector::Library, "dev")
+}
+
+#[test]
+fn a_changed_module_publishes_the_new_section() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
+    );
+    write_handler_module(tempdir.path());
+
+    let processor = Arc::new(WasmEventHandlerProcessor::new());
+    let first = assemble_shared(&processor, &manifest_path)
+        .expect("the first assembly derives the section");
+    assert_eq!(events(&first), [DOUBLE_EVENT]);
+
+    // The developer edits the handlers between two builds. The second build must ship what the
+    // module holds now, not the section the processor derived before the edit.
+    write_handler_module_for(tempdir.path(), "test::project::triple");
+    let second = assemble_shared(&processor, &manifest_path)
+        .expect("the second assembly derives the edited module");
+    assert_eq!(events(&second), ["test::project::triple"]);
+}
+
+#[test]
+fn a_broken_module_fails_the_next_assembly() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
+    );
+    write_handler_module(tempdir.path());
+
+    let processor = Arc::new(WasmEventHandlerProcessor::new());
+    assemble_shared(&processor, &manifest_path).expect("the first assembly derives the section");
+
+    fs::write(tempdir.path().join("handlers.wasm"), b"not a wasm module").unwrap();
+    let error = assemble_shared(&processor, &manifest_path)
+        .expect_err("a broken module must fail the build, whatever the processor derived before")
+        .to_string();
+    assert!(error.contains("is not valid"), "unexpected error: {error}");
+}
+
+#[test]
+fn a_fixed_module_recovers_after_a_failure() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_project(
+        tempdir.path(),
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
+    );
+    fs::write(tempdir.path().join("handlers.wasm"), b"not a wasm module").unwrap();
+
+    let processor = Arc::new(WasmEventHandlerProcessor::new());
+    assemble_shared(&processor, &manifest_path).expect_err("the broken module fails the build");
+
+    // A failure is not memoized, so the developer who fixes the module needs no new processor.
+    write_handler_module(tempdir.path());
+    let package = assemble_shared(&processor, &manifest_path).expect("the fixed module assembles");
+    assert_eq!(events(&package), [DOUBLE_EVENT]);
+}

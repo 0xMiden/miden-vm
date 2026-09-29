@@ -7,22 +7,93 @@ use miden_assembly::{
 use miden_core::program::Program;
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::{
-    Package,
+    EventHandlerSection, Package,
     debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
+use miden_processor::{DefaultHost, HostLibrary};
 use miden_prover::serde::Deserializable;
+use miden_wasm_event_handlers::{WasmHandlerLimits, host_library_from_package};
 
 use crate::cli::data::{Libraries, ProgramFile};
 
-/// Returns a `Program` type from a `.masp` package file.
-pub fn get_masp_program(path: &Path) -> Result<Program, Report> {
-    let package = Package::deserialize_from_file(path)
+/// Returns the `Package` read from a `.masp` package file.
+///
+/// The callers extract the program with [`Package::try_into_program`] and register the package
+/// with [`load_package_with_handlers`].
+pub fn get_masp_package(path: &Path) -> Result<Arc<Package>, Report> {
+    Package::deserialize_from_file(path)
         .into_diagnostic()
-        .wrap_err("Failed to deserialize package")?;
-    package.try_into_program()
+        .wrap_err("Failed to deserialize package")
+        .map(Arc::new)
+}
+
+/// Registers the MAST forest, the debug info, and the Wasm event handlers of `package` with
+/// `host`.
+///
+/// `DefaultHost::load_library` on a package alone leaves the `event_handlers` section
+/// unregistered, because the processor cannot depend on the Wasm handler runner. This function
+/// routes the package through that runner, so every package the CLI loads answers its own events.
+///
+/// A project attaches one handler section to every target it builds, so two packages of the same
+/// project — an executable and its embedded kernel, or a `-l` sibling — carry identical
+/// sections, and the host would reject the second registration of every event. An identical
+/// section is benign (same module, same manifest), so a package whose section is already in
+/// `loaded_handler_sections` registers its MAST forest and debug info only. Differing sections
+/// that share an event name still fail loudly.
+///
+/// # Errors
+/// Returns an error when the handler module of the package fails validation, or when the host
+/// already holds a different handler for one of the events the package declares.
+pub fn load_package_with_handlers(
+    host: &mut DefaultHost,
+    package: &Arc<Package>,
+    loaded_handler_sections: &mut Vec<EventHandlerSection>,
+) -> Result<(), Report> {
+    let section = package
+        .event_handlers()
+        .into_diagnostic()
+        .wrap_err("Failed to load the package's Wasm event handlers")?;
+    if let Some(section) = section {
+        if loaded_handler_sections.contains(&section) {
+            return host
+                .load_library(HostLibrary::from(package.clone()))
+                .into_diagnostic()
+                .wrap_err("Failed to register the package's MAST forest");
+        }
+        loaded_handler_sections.push(section);
+    }
+    let library = host_library_from_package(package, WasmHandlerLimits::default())
+        .into_diagnostic()
+        .wrap_err("Failed to load the package's Wasm event handlers")?;
+    host.load_library(library)
+        .into_diagnostic()
+        .wrap_err("Failed to register the package's Wasm event handlers")
+}
+
+/// Registers a program package and its embedded kernel package, if any, with `host`.
+///
+/// `Package::try_into_program` selects the embedded kernel package, so kernel code runs at
+/// execution time; this function loads that package's MAST forest and Wasm event handlers into
+/// the host the same way it loads the outer package's. Library packages (`-l`) have no embedded
+/// kernel to honor and go through [`load_package_with_handlers`] directly.
+pub fn load_program_package_with_handlers(
+    host: &mut DefaultHost,
+    package: &Arc<Package>,
+    loaded_handler_sections: &mut Vec<EventHandlerSection>,
+) -> Result<(), Report> {
+    load_package_with_handlers(host, package, loaded_handler_sections)?;
+    if let Some(kernel_package) = package.try_embedded_kernel_package()? {
+        load_package_with_handlers(host, &Arc::from(kernel_package), loaded_handler_sections)?;
+    }
+    Ok(())
 }
 
 /// Returns a `Program` type from a `.masm` assembly file.
+///
+/// When `kernel_file` is a `.masp` package, that package is returned alongside the program, so the
+/// caller can register its MAST forest and its Wasm event handlers with the host. A `.masm` kernel
+/// has neither a package nor handlers, so `None` is returned for it, as it is when no kernel is
+/// given.
 pub fn get_masm_program(
     path: &Path,
     libraries: &Libraries,
@@ -33,12 +104,16 @@ pub fn get_masm_program(
         Option<PackageDebugInfo>,
         Option<DebugSourceNodeId>,
         Arc<DefaultSourceManager>,
+        Option<Arc<Package>>,
     ),
     Report,
 > {
     // Assembler debug mode is always enabled (issue #1821)
     let program_file = ProgramFile::read(path)?;
     let source_manager = program_file.source_manager().clone();
+
+    // A `.masp` kernel is handed back to the caller, which registers it with the host
+    let mut kernel_package = None;
 
     // If kernel is provided, compile it and use it when compiling the program
     let package = if let Some(kernel_path) = kernel_file {
@@ -52,12 +127,14 @@ pub fn get_masm_program(
                 let bytes = fs::read(kernel_path).into_diagnostic().wrap_err_with(|| {
                     format!("Failed to read kernel package `{}`", kernel_path.display())
                 })?;
-                Package::read_from_bytes(&bytes)
+                let kernel_lib: Arc<Package> = Package::read_from_bytes(&bytes)
                     .map(Arc::from)
                     .into_diagnostic()
                     .wrap_err_with(|| {
                         format!("Failed to deserialize kernel package `{}`", kernel_path.display())
-                    })?
+                    })?;
+                kernel_package = Some(kernel_lib.clone());
+                kernel_lib
             },
             "masm" => {
                 // Compile kernel from assembly source
@@ -108,7 +185,7 @@ pub fn get_masm_program(
     let entrypoint_source_node = package.entrypoint_source_node();
     let program = package.unwrap_program();
 
-    Ok((program, debug_info, entrypoint_source_node, source_manager))
+    Ok((program, debug_info, entrypoint_source_node, source_manager, kernel_package))
 }
 
 /// Parses a byte-size string into a byte count.

@@ -2,10 +2,15 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::Arc,
 };
 
 use assert_cmd::prelude::*;
+use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_mast_package::Package;
+use miden_wasm_event_handlers::{
+    WasmHandlerLimits, section_from_module, test_append_manifest_section,
+};
 use predicates::prelude::*;
 use tempfile::TempDir;
 
@@ -331,6 +336,142 @@ fn cli_run_with_lib() {
         .arg(fixture("tests/integration/cli/data/main.masm"))
         .arg("-l")
         .arg(&output_file);
+    cmd.assert().success();
+}
+
+/// Bundles the `kernel_main.masm` fixture into `<working_dir>/<name>` as a kernel package.
+fn bundle_kernel_package(working_dir: &Path, name: &str) -> PathBuf {
+    let output_file = working_dir.join(name);
+    let mut cmd = bin_under_test(working_dir);
+    cmd.arg("bundle")
+        .arg(fixture("tests/integration/cli/data/kernel_main.masm"))
+        .arg("--kernel")
+        .arg("--output")
+        .arg(&output_file);
+    cmd.assert().success();
+    output_file
+}
+
+#[test]
+fn run_rejects_kernel_for_masp_package() {
+    let working_dir = TempDir::new().unwrap();
+    let package_path = bundle_kernel_package(working_dir.path(), "prog.masp");
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("run")
+        .arg(&package_path)
+        .arg("--kernel")
+        .arg(fixture("tests/integration/cli/data/kernel_main.masm"));
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("does not apply to a `.masp` package"));
+}
+
+#[test]
+fn prove_rejects_kernel_for_masp_package() {
+    let working_dir = TempDir::new().unwrap();
+    let package_path = bundle_kernel_package(working_dir.path(), "prog.masp");
+    // `prove` reads the inferred inputs file before it looks at the program kind.
+    fs::write(working_dir.path().join("prog.inputs"), r#"{"operand_stack":[]}"#).unwrap();
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("prove")
+        .arg(&package_path)
+        .arg("--kernel")
+        .arg(fixture("tests/integration/cli/data/kernel_main.masm"));
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("does not apply to a `.masp` package"));
+}
+
+/// A `.masp` kernel is registered with the host, so its procedures are reachable from a `syscall`.
+#[test]
+fn run_masm_program_honors_a_masp_kernel() {
+    let working_dir = TempDir::new().unwrap();
+    let kernel_path = bundle_kernel_package(working_dir.path(), "kernel.masp");
+
+    let program_path = working_dir.path().join("program.masm");
+    // `kernel_proc` runs `caller`, which requires a `call` frame under the `syscall`.
+    fs::write(
+        &program_path,
+        "proc bar\n    syscall.kernel_proc\nend\n\nbegin\n    call.bar\nend\n",
+    )
+    .unwrap();
+    fs::write(working_dir.path().join("program.inputs"), r#"{"operand_stack":[]}"#).unwrap();
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("run")
+        .arg(&program_path)
+        .arg("--kernel")
+        .arg(&kernel_path)
+        .arg("-n")
+        .arg("1");
+    cmd.assert().success();
+}
+
+/// A handler module the loader accepts: it exports linear memory and a `() -> ()` handler.
+const HANDLER_WAT: &str = r#"(module
+  (memory (export "memory") 1)
+  (func (export "handler")))"#;
+
+/// A project attaches one handler section to every target it builds, so an executable and the
+/// project kernel it embeds carry the identical section. The CLI must run such a package: it
+/// registers the handlers once and takes only the MAST forest of the second package.
+#[test]
+fn run_loads_a_masp_whose_kernel_shares_the_handler_section() {
+    let working_dir = TempDir::new().unwrap();
+
+    // The section a project build would attach to both targets.
+    let wasm = test_append_manifest_section(
+        wat::parse_str(HANDLER_WAT).expect("the fixture WAT parses"),
+        &[("test::cli::event", "handler")],
+    );
+    let section = section_from_module(wasm, WasmHandlerLimits::default())
+        .expect("the handler module derives a section");
+
+    // The kernel carries the section before it is embedded, so the executable's kernel dependency
+    // commits to the kernel package the CLI later reads back.
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let kernel = Assembler::new(source_manager.clone())
+        .assemble_kernel_from_root("kernel", fixture("tests/integration/cli/data/kernel_main.masm"))
+        .expect("the kernel assembles");
+    let kernel = Arc::new(
+        kernel
+            .with_event_handlers(&section)
+            .expect("the kernel package takes the section"),
+    );
+
+    // Assembling against the kernel package embeds it and records the matching kernel dependency,
+    // the way a project build does.
+    let mut package = Assembler::with_kernel(source_manager, kernel)
+        .expect("the assembler takes the kernel package")
+        .assemble_program("program", "begin push.1 drop end")
+        .expect("the program assembles");
+    package
+        .attach_event_handlers(&section)
+        .expect("the executable package takes the section");
+
+    let package_path = working_dir.path().join("prog.masp");
+    package.write_to_file(&package_path).unwrap();
+    fs::write(working_dir.path().join("prog.inputs"), r#"{"operand_stack":[]}"#).unwrap();
+
+    // The run below exercises the handler deduplication only if the round-tripped package
+    // still yields its embedded kernel — a digest-pairing break would surface as an error
+    // there and skip the second handler load. Pin that precondition, so this test cannot
+    // pass vacuously.
+    let round_tripped = Package::deserialize_from_file(&package_path).unwrap();
+    let embedded_kernel = round_tripped
+        .try_embedded_kernel_package()
+        .expect("the embedded kernel must decode with a matching dependency digest")
+        .expect("the package must embed its kernel");
+    assert_eq!(
+        embedded_kernel.event_handlers().expect("the kernel section decodes"),
+        Some(section),
+        "the embedded kernel must carry the same handler section as the outer package",
+    );
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("run").arg(&package_path).arg("-n").arg("1");
     cmd.assert().success();
 }
 

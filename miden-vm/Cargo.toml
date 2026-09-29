@@ -59,6 +59,7 @@ default = ["std"]
 executable = [
     "dep:clap",
     "dep:hex",
+    "dep:miden-wasm-event-handlers",
     "dep:tracing-subscriber",
     "internal",
     "serde",
@@ -88,6 +89,7 @@ miden-prover.workspace = true
 miden-mast-package.workspace = true
 miden-core-lib.workspace = true
 miden-verifier.workspace = true
+miden-wasm-event-handlers = { workspace = true, optional = true, features = ["std"] }
 
 # External dependencies
 clap = { workspace = true, optional = true }
@@ -104,8 +106,10 @@ criterion = { workspace = true, features = ["async_tokio"] }
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-processor = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
+miden-wasm-event-handlers = { workspace = true, features = ["std"] }
 predicates = { version = "3.1" }
 rand = { workspace = true, features = ["std", "thread_rng"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 walkdir.workspace = true
+wat.workspace = true
