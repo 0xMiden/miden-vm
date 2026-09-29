@@ -6,7 +6,7 @@ use core::cell::RefCell;
 use miden_stark_transcript::VerifierChannel;
 use miden_stateful_hasher::{Alignable, StatefulHasher};
 use p3_field::PackedValue;
-use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
+use p3_matrix::{Dimensions, Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use p3_symmetric::{Hash, PseudoCompressionFunction};
 use rand::{
     Rng,
@@ -14,8 +14,8 @@ use rand::{
 };
 
 use crate::lmcs::{
-    Lmcs, LmcsError, OpenedRows, config::LmcsConfig, lifted_tree::LiftedMerkleTree,
-    proof::BatchProof, tree_indices::TreeIndices,
+    BlockConsumerFactory, Lmcs, LmcsError, OpenedRows, config::LmcsConfig,
+    lifted_tree::LiftedMerkleTree, proof::BatchProof, tree_indices::TreeIndices,
 };
 
 /// Configuration for hiding LMCS with random salt.
@@ -144,6 +144,27 @@ where
             leaves,
             Some(salt),
             <H as Alignable<PF::Value, PD::Value>>::ALIGNMENT,
+        )
+    }
+
+    fn build_aligned_tree_with_blocks<P>(
+        &self,
+        leaves: Vec<RowMajorMatrix<Self::F>>,
+        dimensions: Dimensions,
+        produce: P,
+    ) -> Self::Tree<RowMajorMatrix<Self::F>>
+    where
+        P: FnOnce(Option<BlockConsumerFactory<'_, Self::F>>) -> RowMajorMatrix<Self::F>,
+    {
+        let tree_height = dimensions.height;
+        let salt = RowMajorMatrix::rand(&mut *self.rng.borrow_mut(), tree_height, SALT);
+        LiftedMerkleTree::build_aligned_with_blocks::<PF, PD, H, C, P, WIDTH>(
+            &self.inner.sponge,
+            &self.inner.compress,
+            leaves,
+            dimensions,
+            produce,
+            Some(salt),
         )
     }
 

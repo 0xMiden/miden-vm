@@ -2,6 +2,10 @@
 
 ## v1.0.0 (Unreleased)
 
+#### Changes
+
+- Added opt-in hashing of completed trace LDE blocks to the lifted STARK prover (`hash_lde_blocks`) ([#3866](https://github.com/0xMiden/miden-vm/pull/3866)).
+
 ## v0.34.0 (2026-09-26)
 
 #### Features

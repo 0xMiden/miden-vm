@@ -958,6 +958,7 @@ dependencies = [
  "miden-lifted-air",
  "miden-stark-transcript",
  "miden-stateful-hasher",
+ "miden-utils-sync",
  "p3-challenger",
  "p3-dft",
  "p3-field",
