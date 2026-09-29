@@ -186,6 +186,19 @@ impl<F> Default for ContinuationStack<F> {
 }
 
 impl<F> ContinuationStack<F> {
+    pub(crate) fn iter_with_source_node_ids(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (&Continuation<F>, Option<DebugSourceNodeId>)> {
+        self.stack.iter().enumerate().map(|(index, continuation)| {
+            let source_node_id = self
+                .source_node_ids
+                .as_deref()
+                .and_then(|ids| ids.get(index).copied())
+                .flatten();
+            (continuation, source_node_id)
+        })
+    }
+
     /// Creates a new continuation stack for a program.
     ///
     /// # Arguments
@@ -243,7 +256,7 @@ impl<F> ContinuationStack<F> {
     /// # Arguments
     /// * `forest` - The MAST forest to enter
     pub fn push_enter_forest(&mut self, forest: F) {
-        self.push_enter_forest_with_package_debug_info(forest, None, 0);
+        self.push_enter_forest_with_package_debug_info(forest, None, 0, None);
     }
 
     pub(crate) fn push_enter_forest_with_package_debug_info(
@@ -251,13 +264,14 @@ impl<F> ContinuationStack<F> {
         forest: F,
         package_debug_info: Option<Arc<PackageDebugInfo>>,
         inline_context_depth: usize,
+        source_node_id: Option<DebugSourceNodeId>,
     ) {
         self.stack.push(Continuation::EnterForest {
             forest,
             package_debug_info,
             inline_context_depth,
         });
-        self.push_source_node_id(None);
+        self.push_source_node_id(source_node_id);
     }
 
     /// Pushes a join finish continuation onto the stack.

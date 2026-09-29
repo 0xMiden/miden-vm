@@ -141,6 +141,310 @@ fn debug_source_node(
     }
 }
 
+#[test]
+fn source_debug_call_frames_track_nested_execs() {
+    let chains = collect_debug_call_chains(
+        r#"
+proc inner
+    nop
+end
+
+proc outer
+    exec.inner
+    push.1 drop
+end
+
+begin
+    exec.outer
+    push.2 drop
+end
+"#,
+    );
+
+    assert_nested_debug_call_chains(&chains);
+}
+
+#[test]
+fn source_debug_call_frames_track_nested_calls() {
+    let chains = collect_debug_call_chains(
+        r#"
+proc inner
+    nop
+end
+
+proc outer
+    call.inner
+    push.1 drop
+end
+
+begin
+    call.outer
+    push.2 drop
+end
+"#,
+    );
+
+    assert_nested_debug_call_chains(&chains);
+}
+
+#[test]
+fn source_debug_call_frames_do_not_invent_tail_exec_wrappers() {
+    let chains = collect_debug_call_chains(
+        "proc inner push.1 drop end proc outer exec.inner end begin exec.outer end",
+    );
+    assert!(
+        chains.iter().any(|chain| chain.len() == 2 && chain[1].contains("inner")),
+        "{chains:?}"
+    );
+    assert!(chains.iter().all(|chain| chain.iter().all(|name| !name.contains("outer"))));
+}
+
+#[test]
+fn source_debug_call_frames_do_not_include_future_siblings() {
+    let chains = collect_debug_call_chains(
+        "proc inner push.1 drop end proc outer exec.inner end begin exec.outer exec.inner end",
+    );
+    assert!(
+        chains.iter().any(|chain| chain.len() == 2 && chain[1].contains("inner")),
+        "{chains:?}"
+    );
+    assert!(chains.iter().all(|chain| chain.len() <= 3), "{chains:?}");
+}
+
+#[test]
+fn source_debug_call_frames_track_branch_and_loop_returns() {
+    let chains = collect_debug_call_chains(
+        "proc inner push.1 drop end proc outer push.1 if.true exec.inner else nop end push.2 dup neq.0 while.true exec.inner sub.1 dup neq.0 end drop push.2 drop end begin exec.outer push.3 drop end",
+    );
+    assert_nested_debug_call_chains(&chains);
+    assert_eq!(chains.last().unwrap().len(), 1, "{chains:?}");
+}
+
+fn collect_debug_call_chains(source: &str) -> Vec<Vec<alloc::string::String>> {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let package = Arc::<Package>::from(
+        Assembler::new(source_manager).assemble_program("program", source).unwrap(),
+    );
+    collect_package_debug_call_chains(package, DefaultHost::default())
+}
+
+fn collect_package_debug_call_chains(
+    package: Arc<Package>,
+    mut host: DefaultHost,
+) -> Vec<Vec<String>> {
+    let package_debug_info = package.debug_info().unwrap().unwrap();
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let mut resume_ctx = processor
+        .get_initial_resume_context_for_package(package)
+        .expect("package should produce an initial resume context");
+    let mut chains = Vec::new();
+
+    loop {
+        let op_idx = resume_ctx.continuation_stack().iter_continuations_for_next_clock().find_map(
+            |continuation| {
+                let Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } =
+                    continuation
+                else {
+                    return None;
+                };
+                let block = resume_ctx.current_forest()[*node_id].unwrap_basic_block();
+                let batch_offset = block
+                    .op_batches()
+                    .iter()
+                    .take(*batch_index)
+                    .map(|batch| batch.ops().len())
+                    .sum::<usize>();
+                Some(u32::try_from(batch_offset + op_idx_in_batch).unwrap())
+            },
+        );
+        let frames = resume_ctx.debug_call_frames();
+        if op_idx.is_some() {
+            assert!(
+                !frames.is_empty(),
+                "every basic-block operation, including padding, must retain a source call frame"
+            );
+        }
+        if !frames.is_empty() {
+            chains.push(
+                frames
+                    .iter()
+                    .map(|frame| frame.debug_info()[frame.function().name_idx].to_string())
+                    .collect::<Vec<_>>(),
+            );
+        }
+
+        match processor
+            .step_with_package_debug_info_sync(&mut host, resume_ctx, &package_debug_info)
+            .unwrap()
+        {
+            Some(next) => resume_ctx = next,
+            None => break,
+        }
+    }
+
+    chains
+}
+
+#[test]
+fn source_debug_call_frames_expose_inference_and_reuse_the_index() {
+    for invocation in ["exec.inner", "call.inner"] {
+        let source_manager = Arc::new(DefaultSourceManager::default());
+        let source =
+            format!("proc inner push.7 drop end begin push.1 drop {invocation} push.2 drop end");
+        let package = Arc::<Package>::from(
+            Assembler::new(source_manager).assemble_program("program", source).unwrap(),
+        );
+        let debug_info = package.debug_info().unwrap().unwrap();
+        let mut processor = FastProcessor::new(StackInputs::default());
+        let mut host = DefaultHost::default();
+        let mut resume = processor.get_initial_resume_context_for_package(package).unwrap();
+        let mut resolver = crate::DebugCallFrameResolver::new();
+        let mut seen = false;
+        loop {
+            let frames = resolver.resolve(&resume);
+            let repeated = resolver.resolve(&resume);
+            assert_eq!(frames.len(), repeated.len());
+            for (frame, repeated) in frames.iter().zip(&repeated) {
+                assert!(frame.is_same_frame(repeated));
+                assert_eq!(frame.origin(), repeated.origin());
+                if frame.debug_info()[frame.function().name_idx].contains("inner") {
+                    assert_eq!(frame.is_inferred(), invocation == "exec.inner");
+                    seen = true;
+                }
+            }
+            match processor
+                .step_with_package_debug_info_sync(&mut host, resume, &debug_info)
+                .unwrap()
+            {
+                Some(next) => resume = next,
+                None => break,
+            }
+        }
+        assert!(seen, "{invocation}");
+    }
+}
+
+#[test]
+fn source_debug_call_frames_distinguish_adjacent_identical_invocations() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let package = Arc::<Package>::from(
+        Assembler::new(source_manager)
+            .assemble_program(
+                "program",
+                "proc inner push.7 drop end begin exec.inner exec.inner end",
+            )
+            .unwrap(),
+    );
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let mut host = DefaultHost::default();
+    let mut resume = processor.get_initial_resume_context_for_package(package).unwrap();
+    let mut activations = Vec::new();
+    loop {
+        for frame in resume.debug_call_frames() {
+            if frame.debug_info()[frame.function().name_idx].contains("inner")
+                && activations
+                    .last()
+                    .is_none_or(|previous: &crate::DebugCallFrame| !previous.is_same_frame(&frame))
+            {
+                activations.push(frame);
+            }
+        }
+        match processor
+            .step_with_package_debug_info_sync(&mut host, resume, &debug_info)
+            .unwrap()
+        {
+            Some(next) => resume = next,
+            None => break,
+        }
+    }
+    assert_eq!(activations.len(), 2);
+    assert_eq!(activations[0].function_idx(), activations[1].function_idx());
+    assert!(!activations[0].is_same_frame(&activations[1]));
+}
+
+#[test]
+fn source_debug_call_frames_track_dynamic_invocations() {
+    for opcode in ["dynexec", "dyncall"] {
+        let source = format!(
+            "proc inner push.7 drop end proc outer procref.inner mem_storew_le.100 dropw push.100 {opcode} push.8 drop end begin exec.outer push.9 drop end"
+        );
+        let chains = collect_debug_call_chains(&source);
+        assert_nested_debug_call_chains(&chains);
+    }
+}
+
+#[test]
+fn source_debug_call_frames_preserve_recursive_activations() {
+    let chains = collect_debug_call_chains(
+        "proc inner dup neq.0 if.true sub.1 push.100 dynexec else nop end end begin procref.inner mem_storew_le.100 dropw push.3 push.100 dynexec drop end",
+    );
+    assert!(
+        chains
+            .iter()
+            .any(|chain| chain.iter().filter(|name| name.contains("inner")).count() == 4),
+        "{chains:?}"
+    );
+    assert_eq!(chains.last().unwrap().len(), 1, "{chains:?}");
+}
+
+#[test]
+fn source_debug_call_frames_preserve_external_tail_callers() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let library_module = Module::parser(Some(ModuleKind::Library))
+        .parse_str(
+            None,
+            "namespace dep::math pub proc inner push.7 drop end",
+            source_manager.clone(),
+        )
+        .unwrap();
+    let library: Arc<Package> = Arc::from(
+        Assembler::new(source_manager.clone())
+            .assemble_library("dep", library_module, None::<Box<Module>>)
+            .unwrap(),
+    );
+    let assembler = Assembler::new(source_manager)
+        .with_package(library.clone(), Linkage::Dynamic)
+        .unwrap();
+    let package: Arc<Package> = Arc::from(
+        assembler
+            .assemble_program(
+                "program",
+                "use dep::math proc outer exec.math::inner end begin exec.outer push.9 drop end",
+            )
+            .unwrap(),
+    );
+    let mut host = DefaultHost::default();
+    host.load_library(library).unwrap();
+    let chains = collect_package_debug_call_chains(package, host);
+    assert!(
+        chains.iter().any(|chain| chain.len() == 3
+            && chain[1].contains("outer")
+            && chain[2].contains("inner")),
+        "{chains:?}"
+    );
+    assert_eq!(chains.last().unwrap().len(), 1, "{chains:?}");
+}
+
+fn assert_nested_debug_call_chains(chains: &[Vec<alloc::string::String>]) {
+    assert!(
+        chains.iter().any(|chain| {
+            chain.len() >= 3
+                && chain[chain.len() - 2].contains("outer")
+                && chain.last().unwrap().contains("inner")
+        }),
+        "expected main -> outer -> inner call chain, got {chains:?}"
+    );
+    assert!(
+        chains.iter().any(|chain| {
+            chain.len() == 2
+                && chain.last().unwrap().contains("outer")
+                && chain.iter().all(|name| !name.contains("inner"))
+        }),
+        "expected inner frame to expire back to outer, got {chains:?}"
+    );
+}
+
 fn debug_info_section(debug_info: &PackageDebugInfo) -> Section {
     Section::new(SectionId::DEBUG_INFO, debug_info.to_bytes())
 }
@@ -1066,6 +1370,14 @@ fn dynexec_propagates_inline_context_through_the_selected_target() {
             saw_context_cleared |= saw_target_context;
         } else {
             assert_eq!(names, ["source::dynamic"]);
+            let frames = resume_context.debug_call_frames();
+            assert_eq!(frames.first().unwrap().inherited_inline_calls(), 0);
+            if let Some(target) = frames
+                .last()
+                .filter(|frame| frame.debug_info()[frame.function().name_idx].ends_with("target"))
+            {
+                assert_eq!(target.inherited_inline_calls(), 1);
+            }
             saw_target_context = true;
         }
 
@@ -1156,6 +1468,14 @@ fn external_exec_propagates_inline_context_into_the_loaded_package() {
             }
         } else {
             assert_eq!(names, ["source::external"]);
+            let frames = resume_context.debug_call_frames();
+            assert_eq!(frames.first().unwrap().inherited_inline_calls(), 0);
+            if let Some(target) = frames
+                .last()
+                .filter(|frame| frame.debug_info()[frame.function().name_idx].ends_with("target"))
+            {
+                assert_eq!(target.inherited_inline_calls(), 1);
+            }
             saw_target_context = true;
         }
 
