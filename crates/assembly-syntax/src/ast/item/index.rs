@@ -85,12 +85,6 @@ impl core::fmt::Display for GlobalItemIndex {
 #[repr(transparent)]
 pub struct ModuleIndex(u16);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("invalid module index: too many modules")]
-pub struct ModuleIndexError {
-    attempted: usize,
-}
-
 impl ModuleIndex {
     pub const MAX_MODULES: usize = u16::MAX as usize + 1;
 
@@ -98,9 +92,8 @@ impl ModuleIndex {
         Self::try_new(index).expect("invalid module index: too many modules")
     }
 
-    pub fn try_new(index: usize) -> Result<Self, ModuleIndexError> {
-        let raw = index.try_into().map_err(|_| ModuleIndexError { attempted: index })?;
-        Ok(Self(raw))
+    pub fn try_new(index: usize) -> Result<Self, core::num::TryFromIntError> {
+        index.try_into().map(Self)
     }
 
     pub const fn const_new(index: u16) -> Self {
