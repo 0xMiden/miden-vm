@@ -19,7 +19,7 @@ const PREPROCESSED_INDEX_MASK = 524287
 # One opened query row, in the same commitment-group order as lifted-stark's DeepOracle.
 # Each double word is eight base-field felts, the Poseidon2 rate/alignment.
 const PREPROCESSED_ROW_DOUBLE_WORDS = 1
-const MAIN_ROW_DOUBLE_WORDS = 55
+const MAIN_ROW_DOUBLE_WORDS = 56
 const AUX_ROW_DOUBLE_WORDS = 39
 const QUOTIENT_ROW_DOUBLE_WORDS = 1
 

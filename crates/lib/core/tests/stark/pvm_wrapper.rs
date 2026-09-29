@@ -16,7 +16,7 @@ const OOD_EVALUATIONS_ADDRESS_PTR: u32 = 3_223_322_761;
 const CURRENT_TRACE_ROW_ADDRESS_PTR: u32 = 3_223_322_762;
 
 const PREPROCESSED_CURRENT_PTR: u32 = 3_225_426_440;
-const CURRENT_TRACE_ROW_PTR: u32 = 3_225_443_448;
+const CURRENT_TRACE_ROW_PTR: u32 = 3_225_443_552;
 
 // Runtime call-site vector. The precompiles-prover oracle derives the matching MASM constants
 // directly from the AIRs.
@@ -24,16 +24,16 @@ const BYTE_PAIR_LUT_AIR_INDEX: usize = 3;
 const MIN_LOG_HEIGHTS: [u64; 10] = [5, 4, 7, 16, 1, 3, 1, 1, 2, 1];
 const HEIGHTS: [u64; 10] = [16, 7, 12, 16, 11, 7, 10, 12, 13, 14];
 const RELATION_DIGEST: [u64; 4] = [
-    12_484_196_935_672_772_437,
-    3_477_320_138_365_322_110,
-    6_979_635_564_408_716_733,
-    16_634_898_497_425_374_784,
+    2_231_567_270_370_695_304,
+    14_010_679_557_219_365_777,
+    15_050_758_572_754_645_875,
+    8_725_143_684_558_279_935,
 ];
 const ACE_REGISTRY_ROOT: [u64; 4] = [
-    8_757_348_742_711_293_875,
-    6_538_879_707_987_301_428,
-    17_356_837_600_309_008_648,
-    13_870_270_840_525_555_445,
+    127_208_737_530_682_848,
+    17_930_151_204_762_154_629,
+    16_770_008_888_150_617_456,
+    7_918_879_334_061_466_168,
 ];
 
 fn source() -> &'static str {

@@ -5,7 +5,7 @@
 //! Both are period-1 (no periodic columns) and their own trace heights
 //! are otherwise unrelated, so they run **simultaneously** on the same
 //! rows in disjoint column ranges: main columns 0..12 are exactly
-//! [`chunk::ChunkAir`]'s own layout (unchanged), columns 12..42 are
+//! [`chunk::ChunkAir`]'s own layout (unchanged), columns 12..49 are
 //! exactly [`node::KeccakNodeAir`]'s own layout (unchanged, shifted by
 //! [`NODE_COL_OFFSET`]). No mode selector, no cross-gating — each side
 //! keeps its own constraint degree (`lqd = 1`).
@@ -134,6 +134,7 @@ where
         builder
             .when_transition()
             .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
+        node::eval_chunk_count(builder, &local);
 
         builder.assert_zero((AB::Expr::ONE - act) * out_mult);
 

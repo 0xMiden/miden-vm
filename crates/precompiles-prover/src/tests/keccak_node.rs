@@ -23,7 +23,8 @@ use crate::{
         keccak::{
             node::{
                 COL_ACT, COL_CHUNK_SEQ_ID_HEAD, COL_D_BEGIN, COL_H_DIGEST_CHUNKS_BEGIN,
-                COL_H_INPUT_CHUNKS_BEGIN, COL_H_KECCAK_BEGIN, COL_LEN_BYTES, COL_N_CHUNKS,
+                COL_H_INPUT_CHUNKS_BEGIN, COL_H_KECCAK_BEGIN, COL_IS_EMPTY,
+                COL_LAST_CHUNK_REM_BEGIN, COL_LEN_BYTES, COL_N_CHUNKS, COL_N_CHUNKS_INV,
                 COL_N_SPONGE_PERMS, COL_PERM_SEQ_ID_CHUNKS, COL_PERM_SEQ_ID_DIGEST_CHUNKS,
                 COL_PERM_SEQ_ID_KECCAK, COL_SPONGE_SEQ_ID_HEAD, KeccakNodeAir, NUM_AUX_COLS,
                 NUM_HASH, NUM_MAIN_COLS,
@@ -93,7 +94,7 @@ fn next_inv(prev: &KeccakNodeInvocation, seed: u64, len_bytes: u32) -> KeccakNod
 // ================================================================================================
 
 #[test]
-fn main_column_layout_partitions_30_indices() {
+fn main_column_layout_partitions_37_indices() {
     use crate::hash::keccak::node::COL_OUT_MULT;
     assert_eq!(COL_ACT, 0);
     assert_eq!(COL_SPONGE_SEQ_ID_HEAD, 1);
@@ -109,7 +110,10 @@ fn main_column_layout_partitions_30_indices() {
     assert_eq!(COL_H_DIGEST_CHUNKS_BEGIN, 21);
     assert_eq!(COL_H_KECCAK_BEGIN, 25);
     assert_eq!(COL_OUT_MULT, 29);
-    assert_eq!(NUM_MAIN_COLS, 30);
+    assert_eq!(COL_LAST_CHUNK_REM_BEGIN, 30);
+    assert_eq!(COL_IS_EMPTY, 35);
+    assert_eq!(COL_N_CHUNKS_INV, 36);
+    assert_eq!(NUM_MAIN_COLS, 37);
     assert_eq!(<KeccakNodeAir as BaseAir<Felt>>::width(&KeccakNodeAir), NUM_MAIN_COLS,);
 }
 
@@ -171,6 +175,25 @@ fn generated_row_uses_vm_chunk_and_keccak_node_digests() {
 #[test]
 fn constraints_hold_on_single_invocation() {
     check_with_invocations(0x01, &[anchored_inv(0x11, 50)]);
+}
+
+#[test]
+fn chunk_count_accepts_empty_and_boundary_lengths() {
+    for len_bytes in [0, 1, 31, 32, 33, 64] {
+        check_with_invocations(0x11, &[anchored_inv(0x11, len_bytes)]);
+    }
+}
+
+#[test]
+#[should_panic(expected = "constraint not satisfied")]
+fn final_node_cannot_redirect_chunk_tail() {
+    let inv = anchored_inv(0x11, 32);
+    let mut main = generate_trace_from_invocations(core::slice::from_ref(&inv));
+    assert_eq!(main.values[COL_N_CHUNKS], Felt::ONE);
+    assert_eq!(main.values[NUM_MAIN_COLS + COL_ACT], Felt::ZERO);
+
+    main.values[COL_N_CHUNKS] = Felt::from(2u8);
+    crate::tests::check_local(KeccakNodeAir, &main);
 }
 
 #[test]

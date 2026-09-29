@@ -8,7 +8,7 @@
 //! the caller-supplied [`SpongeRequires`], computes the digest-chunk
 //! hash `H_digest_chunks` and the transcript-DAG hash `H_keccak` via
 //! [`Poseidon2Requires`], and records a [`KeccakNodeInvocation`]
-//! [`generate_trace`] later stamps into one row of the 30-column
+//! [`generate_trace`] later stamps into one row of the 37-column
 //! main trace.
 //!
 //! The fall-out wiring:
@@ -22,7 +22,7 @@ use alloc::{collections::BTreeMap, vec, vec::Vec};
 use miden_core::{
     Felt,
     deferred::{Digest, Node},
-    field::QuadFelt,
+    field::{Field, QuadFelt},
     utils::RowMajorMatrix,
 };
 use miden_precompiles::Keccak256Precompile;
@@ -32,7 +32,7 @@ use crate::{
         chunk::trace::{ChunkRequires, ChunkSeqId},
         keccak::{
             digest::KeccakDigest,
-            node::{KeccakNodeAir, NUM_HASH, NUM_MAIN_COLS},
+            node::{KeccakNodeAir, NUM_HASH, NUM_LAST_CHUNK_REM_BITS, NUM_MAIN_COLS},
             round::RoundRequires,
             sponge::trace::{
                 Invocation as SpongeInvocation, SpongeRequires, SpongeSeqId, keccak_oracle,
@@ -145,7 +145,8 @@ pub fn generate_trace_from_invocations(
 /// Append one invocation's row to `trace` in column order: act,
 /// sponge_seq_id_head, n_sponge_perms, chunk_seq_id_head, n_chunks,
 /// perm_seq_id_chunks, len_bytes, perm_seq_id_digest_chunks, perm_seq_id_keccak,
-/// d[8], h_input_chunks[4], h_digest_chunks[4], h_keccak[4], out_mult.
+/// d[8], h_input_chunks[4], h_digest_chunks[4], h_keccak[4], out_mult,
+/// last-chunk remainder bits[5], is_empty, n_chunks_inv.
 fn push_row(trace: &mut Vec<Felt>, inv: &KeccakNodeInvocation) {
     let len_bytes = Felt::from(inv.len_bytes);
     let d_felts: [Felt; 8] = inv.d.map(Felt::from);
@@ -177,6 +178,10 @@ fn push_row(trace: &mut Vec<Felt>, inv: &KeccakNodeInvocation) {
     trace.extend(h_digest_chunks);
     trace.extend(h_keccak);
     trace.extend([Felt::from(inv.out_mult)]);
+    let remainder = inv.len_bytes.saturating_sub(1) % 32;
+    trace.extend((0..NUM_LAST_CHUNK_REM_BITS).map(|bit| Felt::from((remainder >> bit) & 1)));
+    trace.push(Felt::from(u8::from(inv.len_bytes == 0)));
+    trace.push(Felt::new(inv.n_chunks()).expect("n_chunks fits").inverse());
 }
 
 // REQUIRES ACCUMULATOR
