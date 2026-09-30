@@ -515,7 +515,7 @@ mod tests {
         let info = package.debug_info().unwrap().unwrap();
         let template = info.functions()[0];
         let node = info[template.source_node.into_option().unwrap()].clone();
-        let mut builder = PackageDebugInfoBuilder::from(Box::new(info.clone()));
+        let mut builder = PackageDebugInfoBuilder::from(Box::new(info));
         for position in 0..50_000 {
             let name = builder.add_string(format!("function_{position}"));
             let mut source = node.clone();
