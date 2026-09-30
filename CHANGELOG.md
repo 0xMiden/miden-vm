@@ -9,6 +9,8 @@
 
 #### Fixes
 
+- Restored `no_std` builds for VM and crypto libraries by removing unconditional `std` dependencies from ACE codegen and gating channels, parallel trace building, diagnostic rendering, and codegen file I/O behind their feature flags ([#3927](https://github.com/0xMiden/miden-vm/issues/3927), [#3928](https://github.com/0xMiden/miden-vm/issues/3928), [#3929](https://github.com/0xMiden/miden-vm/issues/3929)).
+- Enabled `miden-test-utils` builds without `std` by gating test macros, logging, and assertion diffs behind its `std` feature ([#3930](https://github.com/0xMiden/miden-vm/issues/3930)).
 - [BREAKING] Reject unsorted or repeated keys in `SmtLeaf::new_multiple` and when reading serialized leaves. Invalid keys return the new `SmtLeafError::UnsortedMultipleLeafKeys` error ([#3901](https://github.com/0xMiden/miden-vm/pull/3901)).
 - [BREAKING] Fixed the `aead::decrypt` overlap check so it also covers the 4-element tag after the ciphertext; a destination placed at the tag address now fails the overlap assertion instead of overwriting the tag and failing with a tag mismatch. Layouts where the destination range only overlaps the tag are now rejected even when nothing would be written there, e.g. an empty message (`num_blocks = 0`) with `dst_ptr` at the tag address. Ranges that end at the last memory address are no longer rejected ([#3897](https://github.com/0xMiden/miden-vm/pull/3897)).
 - [BREAKING] Limited `eval_circuit` to 32,768 total READ and EVAL wires per call and witness collection to 32 invocations. Oversized circuits are rejected before allocation, and evaluations beyond the invocation limit are rejected before being recorded in the witness ([#3908](https://github.com/0xMiden/miden-vm/pull/3908)).

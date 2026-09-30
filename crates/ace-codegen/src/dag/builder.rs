@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use alloc::vec::Vec;
 
+use hashbrown::HashMap;
 use miden_crypto::field::Field;
 
 use super::ir::{DagId, DagSnapshot, NodeId, NodeKind};

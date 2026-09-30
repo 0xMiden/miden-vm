@@ -31,11 +31,28 @@ jobs:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - name: Build for no-std
+      # These WASM targets provide std. The bare-metal job checks dependency leaks.
+      - name: Build for WASM
         run: |
           rustup update --no-self-update ${{ matrix.toolchain }}
           rustup +${{ matrix.toolchain }} target add ${{ matrix.target }}
           RUSTUP_TOOLCHAIN=${{ matrix.toolchain }} NO_STD_TARGET=${{ matrix.target }} make build-no-std
+
+  bare-metal:
+    name: Check isolated no-std libraries
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain and target without std
+        run: |
+          rustup toolchain install --no-self-update
+          rustup target add wasm32v1-none
+      - name: Check isolated no-std libraries
+        run: make check-no-std
 
   target-miden:
     name: Build for Miden target

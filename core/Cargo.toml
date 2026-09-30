@@ -31,6 +31,7 @@ harness = false
 [features]
 default = ["std"]
 std = [
+    "derive_more/std",
     "miden-crypto/std",
     "miden-debug-types/std",
     "miden-formatting/std",

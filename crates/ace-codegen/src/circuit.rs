@@ -3,8 +3,9 @@
 //! The emitted circuit is a flat list of inputs, constants, and arithmetic
 //! ops that matches the ACE chiplet execution model.
 
-use std::collections::HashMap;
+use alloc::{format, vec, vec::Vec};
 
+use hashbrown::HashMap;
 use miden_crypto::field::Field;
 
 use crate::{

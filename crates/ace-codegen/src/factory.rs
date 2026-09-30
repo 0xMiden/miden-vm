@@ -11,6 +11,8 @@
 //! The registry leaf of an ordering is `merge(H(constants | shuffle), H(common))` over
 //! the two `adv_pipe`-aligned stream segments.
 
+use alloc::{format, vec::Vec};
+
 use miden_core::{Felt, Word, crypto::hash::Poseidon2};
 use miden_crypto::{
     field::{ExtensionField, Field},

@@ -266,6 +266,7 @@ impl Chiplets {
             &[0, 1, 2, 3],
         );
 
+        #[cfg(feature = "std")]
         rayon::scope(|s| {
             s.spawn(move |_| {
                 hasher.fill_trace(&mut hasher_fragment, poseidon2_trace);
@@ -286,6 +287,16 @@ impl Chiplets {
                 fill_padding_rows(padding_band, padding_start);
             });
         });
+
+        #[cfg(not(feature = "std"))]
+        {
+            hasher.fill_trace(&mut hasher_fragment, poseidon2_trace);
+            bitwise.fill_trace(&mut bitwise_fragment);
+            memory.fill_trace(&mut memory_fragment);
+            ace.fill_trace(&mut ace_fragment);
+            kernel_rom.fill_trace(&mut kernel_rom_fragment);
+            fill_padding_rows(padding_band, padding_start);
+        }
     }
 }
 

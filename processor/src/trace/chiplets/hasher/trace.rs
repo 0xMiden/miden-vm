@@ -12,7 +12,7 @@ use miden_air::{
     },
 };
 use miden_core::chiplets::hasher::Hasher;
-use rayon::prelude::*;
+use p3_maybe_rayon::prelude::*;
 
 use super::{
     ChipletTraceFragment, Felt, HasherState, ONE, PermRequest, RATE_LEN, STATE_WIDTH, Selectors,

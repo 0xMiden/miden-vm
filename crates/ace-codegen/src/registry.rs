@@ -19,6 +19,8 @@
 //! to "recompute every leaf, check the root", which is the right shape for a registry
 //! small enough to rebuild wholesale.
 
+use alloc::{format, vec, vec::Vec};
+
 use miden_core::{Felt, Word, crypto::hash::Poseidon2};
 use miden_crypto::{
     field::ExtensionField,

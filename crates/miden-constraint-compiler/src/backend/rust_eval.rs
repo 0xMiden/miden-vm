@@ -27,7 +27,13 @@
 //! does not name `EF`, only ext constants liftable from the base field can be
 //! emitted (enforced at generation time).
 
-use std::fmt::Write as _;
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+use core::fmt::Write as _;
 
 use crate::ir::{CapturedConstraints, Class, Graph, Leaf, Node, NodeId, OpKind};
 

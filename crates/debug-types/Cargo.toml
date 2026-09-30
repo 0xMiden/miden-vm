@@ -20,6 +20,8 @@ ignored = ["serde_json"]
 [features]
 default = ["std"]
 std = [
+    "miette/std",
+    "miette/fancy-no-syscall",
     "memchr/std",
     "miden-formatting/std",
     "miden-utils-sync/std",
@@ -40,7 +42,7 @@ miden-utils-indexing.workspace = true
 
 # External dependencies
 memchr = { version = "2.7", default-features = false }
-miette = { workspace = true, features = ["fancy-no-syscall", "derive"] }
+miette = { workspace = true, features = ["derive"] }
 paste.workspace = true
 proptest = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }

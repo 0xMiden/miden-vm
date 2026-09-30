@@ -13,7 +13,12 @@ repository.workspace = true
 rust-version.workspace = true
 edition.workspace = true
 
+[features]
+default = ["std"]
+std = ["miden-core/std", "miden-crypto/std"]
+
 [dependencies]
+hashbrown.workspace = true
 miden-core = { workspace = true }
 miden-crypto = { workspace = true }
 

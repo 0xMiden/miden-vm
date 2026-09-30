@@ -6,6 +6,8 @@
 //! - choose a READ layout for inputs,
 //! - emit a circuit that matches verifier evaluation.
 
+use alloc::{format, vec, vec::Vec};
+
 use miden_constraint_compiler::ir::capture;
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::{

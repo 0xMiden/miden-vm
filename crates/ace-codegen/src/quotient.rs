@@ -4,6 +4,8 @@
 //! chunks. They are intentionally centralized to keep DAG lowering and tests
 //! aligned.
 
+use alloc::vec::Vec;
+
 use miden_crypto::field::{ExtensionField, Field};
 
 use crate::{
