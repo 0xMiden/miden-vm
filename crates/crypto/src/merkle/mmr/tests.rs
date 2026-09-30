@@ -1564,14 +1564,22 @@ fn test_peaks_verify_rejects_short_path() {
 
 #[test]
 fn test_peaks_verify_rejects_proof_for_other_forest() {
-    let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap(); // forest 7 = 4 + 2 + 1
+    // Leaves 4 and 5 are subtree hashes, so peak 1 = H(H(a, b), H(c, d)) is also the root of a
+    // depth-2 tree over a, b, c, d.
+    let [a, b, c, d] = [10, 11, 12, 13].map(int_to_node);
+    let mut leaves = LEAVES;
+    leaves[4] = Poseidon2::merge(&[a, b]);
+    leaves[5] = Poseidon2::merge(&[c, d]);
+    let mmr = Mmr::try_from_iter(leaves.iter().copied()).unwrap(); // forest 7 = 4 + 2 + 1
     let peaks = mmr.peaks();
 
-    // In a forest of 3 leaves, position 2 is a single-leaf tree with an empty path.
-    let value = peaks.peaks()[1];
-    let proof =
-        MmrProof::new(MmrPath::new(Forest::new(3).unwrap(), 2, MerklePath::default()), value);
-    assert!(peaks.verify(value, proof).is_err());
+    // In a forest of 3 leaves, position 2 is in peak 1 at relative position 0. The path has depth
+    // 2, which matches the height of the tree holding position 2 in forest 7.
+    let path = MerklePath::new(vec![b, leaves[5]]);
+    assert!(path.verify(0, a, &peaks.peaks()[1]).is_ok());
+
+    let proof = MmrProof::new(MmrPath::new(Forest::new(3).unwrap(), 2, path), a);
+    assert_matches!(peaks.verify(a, proof), Err(MmrError::InvalidMerklePath(_)));
 }
 
 #[test]

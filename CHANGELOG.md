@@ -23,7 +23,7 @@
 
 #### Fixes
 
-- [BREAKING] Fixed `MmrPeaks::verify` accepting proofs with a forest other than the peaks' forest or a path shorter than the tree height, and panicking on positions outside the forest. The tree, peak and relative position now come from the peaks' forest, so such proofs return `PositionNotFound` or `InvalidMerklePath` instead of `PeakOutOfBounds` ([#3931](https://github.com/0xMiden/miden-vm/pull/3931)).
+- [BREAKING] `MmrPeaks::verify` now takes the tree, peak and relative position from the peaks' forest instead of the proof's, and rejects positions outside that forest (`PositionNotFound`, previously a panic) and paths whose depth differs from the tree height (`InvalidMerklePath`) ([#3931](https://github.com/0xMiden/miden-vm/pull/3931)).
 
 ## v0.34.0 (2026-09-26)
 
