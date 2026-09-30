@@ -25,9 +25,12 @@ fn test_nonce() -> Nonce {
 
 #[test]
 fn key_and_nonce_serialization_roundtrip() {
-    let key = test_key();
+    let key_values = [0_u64, 1, 1 << 63, Felt::ORDER - 1];
+    let key = SecretKey::from_elements(key_values.map(Felt::new_unchecked));
     let nonce = test_nonce();
 
+    let expected_key_bytes = key_values.into_iter().flat_map(u64::to_le_bytes).collect::<Vec<_>>();
+    assert_eq!(key.to_bytes(), expected_key_bytes);
     assert_eq!(SecretKey::read_from_bytes(&key.to_bytes()).unwrap(), key);
     assert_eq!(Nonce::read_from_bytes(&nonce.to_bytes()).unwrap(), nonce);
 }
@@ -37,10 +40,14 @@ fn key_from_bytes_rejects_invalid_input() {
     let short = [0_u8; SK_SIZE_BYTES - 1];
     assert!(AeadEidos::key_from_bytes(&short).is_err());
 
-    // Felt::ORDER + 1 is the smallest non-canonical u64 after the modulus itself.
-    let mut noncanonical = [0_u8; SK_SIZE_BYTES];
-    noncanonical[..8].copy_from_slice(&(Felt::ORDER + 1).to_le_bytes());
-    assert!(AeadEidos::key_from_bytes(&noncanonical).is_err());
+    // Reject non-canonical elements even after other key elements have been decoded.
+    for index in 0..SECRET_KEY_SIZE {
+        for value in [Felt::ORDER, u64::MAX] {
+            let mut noncanonical = test_key().to_bytes();
+            noncanonical[index * 8..(index + 1) * 8].copy_from_slice(&value.to_le_bytes());
+            assert!(AeadEidos::key_from_bytes(&noncanonical).is_err());
+        }
+    }
 }
 
 #[test]
@@ -123,12 +130,16 @@ fn authentication_covers_every_input() {
         Err(EncryptionError::InvalidAuthTag)
     ));
 
-    let mut forged_tag = encrypted.clone();
-    forged_tag.auth_tag.0[1] += ONE;
-    assert!(matches!(
-        key.decrypt_elements_with_associated_data(&forged_tag, &associated_data),
-        Err(EncryptionError::InvalidAuthTag)
-    ));
+    for index in 0..AUTH_TAG_SIZE {
+        let mut forged_tag = encrypted.clone();
+        forged_tag.auth_tag.0[index] += ONE;
+        assert_ne!(forged_tag.auth_tag, encrypted.auth_tag);
+        assert!(!bool::from(forged_tag.auth_tag.ct_eq(&encrypted.auth_tag)));
+        assert!(matches!(
+            key.decrypt_elements_with_associated_data(&forged_tag, &associated_data),
+            Err(EncryptionError::InvalidAuthTag)
+        ));
+    }
 
     let mut forged_nonce = encrypted.clone();
     forged_nonce.nonce.0[0] += ONE;

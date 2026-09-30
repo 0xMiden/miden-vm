@@ -17,9 +17,7 @@
 
 use alloc::vec::Vec;
 
-use subtle::{Choice, ConstantTimeEq};
-
-use super::MAX_AUTHENTICATED_INPUT_FELTS;
+use super::{AuthTag, MAX_AUTHENTICATED_INPUT_FELTS};
 use crate::{
     Felt, Word,
     field::{BasedVectorSpace, BinomialExtensionField},
@@ -71,6 +69,9 @@ pub fn keystream_block(ctr_key: Word, counter: u32) -> [u32; 16] {
 ///
 /// Each plaintext Felt becomes two ciphertext Felts, each holding one u32 limb.
 /// Security requires a unique `(key, nonce)` per message.
+///
+/// This operation produces no authentication tag. Use [`encrypt_felts_expanded_authenticated`]
+/// for authenticated encryption.
 ///
 /// # Panics
 ///
@@ -224,19 +225,10 @@ pub fn decrypt_felts_expanded_authenticated(
         return None;
     }
     let expected_tag = auth_tag_expanded(key, nonce, associated_data, ciphertext);
-    if !tags_equal(&expected_tag, &tag) {
+    if AuthTag(expected_tag) != AuthTag(tag) {
         return None;
     }
     decrypt_felts_expanded(key, nonce, ciphertext)
-}
-
-fn tags_equal(left: &[Felt; 2], right: &[Felt; 2]) -> bool {
-    left.iter()
-        .zip(right)
-        .fold(Choice::from(1), |equal, (left, right)| {
-            equal & left.as_canonical_u64_ct().ct_eq(&right.as_canonical_u64_ct())
-        })
-        .into()
 }
 
 fn u32_limb(value: Felt) -> Option<u32> {
