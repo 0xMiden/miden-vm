@@ -1,5 +1,5 @@
 use std::{
-    io,
+    fs, io,
     path::{Path, PathBuf},
     time::Instant,
 };
@@ -234,13 +234,20 @@ impl ProveCmd {
 /// Returns true when both paths name the same existing file.
 ///
 /// This runs after the proof has been written, so the proof side always exists. An outputs path
-/// that does not exist yet cannot be the proof. Any other error (e.g. a proof file that cannot be
-/// opened for reading) leaves the question unanswered, so it is returned rather than taken as a no.
+/// that does not exist yet cannot be the proof, and neither can a FIFO or device; those are only
+/// stat'ed, because `is_same_file` opens both paths and opening a FIFO blocks until a writer
+/// appears. Any other error (e.g. a proof file that cannot be opened for reading) leaves the
+/// question unanswered, so it is returned rather than taken as a no.
 fn resolve_to_same_file(output_path: &Path, proof_path: &Path) -> io::Result<bool> {
-    match same_file::is_same_file(output_path, proof_path) {
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
-        result => result,
+    let output_is_file = match fs::metadata(output_path) {
+        Ok(metadata) => metadata.is_file(),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(err),
+    };
+    if !output_is_file || !fs::metadata(proof_path)?.is_file() {
+        return Ok(false);
     }
+    same_file::is_same_file(output_path, proof_path)
 }
 
 #[cfg(test)]
@@ -357,6 +364,23 @@ mod tests {
 
         let err = resolve_to_same_file(&link_path, &proof_path).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_to_same_file_does_not_open_a_fifo() {
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+        let fifo_path = dir.path().join("same.outputs");
+        let status = std::process::Command::new("mkfifo").arg(&fifo_path).status().unwrap();
+        assert!(status.success());
+
+        // opening the FIFO would block this thread forever, so run the check where it can time out
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || tx.send(resolve_to_same_file(&fifo_path, &proof_path).unwrap()));
+        let same = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("the check blocked");
+        assert!(!same);
     }
 
     #[test]

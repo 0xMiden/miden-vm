@@ -330,6 +330,28 @@ fn prove_keeps_a_write_only_proof_when_the_default_output_is_a_hard_link_to_it()
     assert_proof_survived(&proof_path);
 }
 
+#[cfg(unix)]
+#[test]
+fn prove_writes_outputs_into_a_fifo_without_blocking_on_it() {
+    let (working_dir, cmd) = prove_command();
+    let proof_path = working_dir.path().join("custom.proof");
+    let fifo_path = working_dir.path().join("custom.fifo");
+    assert!(Command::new("mkfifo").arg(&fifo_path).status().unwrap().success());
+
+    let reader = {
+        let fifo_path = fifo_path.clone();
+        std::thread::spawn(move || fs::read_to_string(fifo_path).unwrap())
+    };
+
+    // a regression hangs rather than fails, so bound the run
+    let mut cmd = assert_cmd::Command::from_std(cmd);
+    cmd.arg("--proof").arg(&proof_path).arg("--output").arg(&fifo_path);
+    cmd.timeout(std::time::Duration::from_secs(60)).assert().success();
+
+    assert!(reader.join().unwrap().contains("\"stack\""));
+    assert_proof_survived(&proof_path);
+}
+
 #[test]
 fn prove_rejects_invalid_program_extension_before_inferred_inputs_file() {
     let working_dir = TempDir::new().unwrap();
