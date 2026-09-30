@@ -12,7 +12,7 @@ pub use self::{
     expr::{ConstantExpr, ConstantOp, HashKind},
     value::ConstantValue,
 };
-use crate::ast::{DocString, Ident, Visibility};
+use crate::ast::{DocString, Ident, TypeExpr, Visibility};
 
 // CONSTANT
 // ================================================================================================
@@ -28,6 +28,8 @@ pub struct Constant {
     pub visibility: Visibility,
     /// The name of the constant.
     pub name: Ident,
+    /// The declared type of the constant
+    pub ty: Option<TypeExpr>,
     /// The expression associated with the constant.
     pub value: ConstantExpr,
 }
@@ -40,6 +42,7 @@ impl Constant {
             docs: None,
             visibility,
             name,
+            ty: None,
             value,
         }
     }
@@ -53,6 +56,12 @@ impl Constant {
     /// Returns the documentation associated with this item.
     pub fn docs(&self) -> Option<Span<&str>> {
         self.docs.as_ref().map(|docstring| docstring.as_spanned_str())
+    }
+
+    /// Specify the type of this constant
+    pub fn with_ty(mut self, ty: TypeExpr) -> Self {
+        self.ty = Some(ty);
+        self
     }
 
     /// Get the name of this constant
