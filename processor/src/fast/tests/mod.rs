@@ -212,6 +212,28 @@ fn source_debug_call_frames_do_not_include_future_siblings() {
 }
 
 #[test]
+fn source_debug_call_frames_do_not_invent_calls_from_matching_branch_bodies() {
+    for invocation in ["call.inner", "exec.inner"] {
+        for condition in [0, 1] {
+            let source = format!(
+                "proc inner push.7 drop end begin push.{condition} if.true push.7 drop else {invocation} end end"
+            );
+            let chains = collect_debug_call_chains(&source);
+            let has_inner =
+                chains.iter().any(|chain| chain.iter().any(|name| name.contains("inner")));
+            assert_eq!(
+                has_inner,
+                condition == 0,
+                "{invocation}, condition={condition}: {chains:?}"
+            );
+            if condition == 1 {
+                assert!(chains.iter().all(|chain| chain.len() == 1), "{chains:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn source_debug_call_frames_track_branch_and_loop_returns() {
     let chains = collect_debug_call_chains(
         "proc inner push.1 drop end proc outer push.1 if.true exec.inner else nop end push.2 dup neq.0 while.true exec.inner sub.1 dup neq.0 end drop push.2 drop end begin exec.outer push.3 drop end",
@@ -220,7 +242,7 @@ fn source_debug_call_frames_track_branch_and_loop_returns() {
     assert_eq!(chains.last().unwrap().len(), 1, "{chains:?}");
 }
 
-fn collect_debug_call_chains(source: &str) -> Vec<Vec<alloc::string::String>> {
+fn collect_debug_call_chains(source: &str) -> Vec<Vec<String>> {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let package = Arc::<Package>::from(
         Assembler::new(source_manager).assemble_program("program", source).unwrap(),
@@ -298,7 +320,7 @@ fn source_debug_call_frames_expose_inference_and_reuse_the_index() {
         let mut processor = FastProcessor::new(StackInputs::default());
         let mut host = DefaultHost::default();
         let mut resume = processor.get_initial_resume_context_for_package(package).unwrap();
-        let mut resolver = crate::DebugCallFrameResolver::new();
+        let mut resolver = DebugCallFrameResolver::new();
         let mut seen = false;
         loop {
             let frames = resolver.resolve(&resume);
@@ -345,7 +367,7 @@ fn source_debug_call_frames_distinguish_adjacent_identical_invocations() {
             if frame.debug_info()[frame.function().name_idx].contains("inner")
                 && activations
                     .last()
-                    .is_none_or(|previous: &crate::DebugCallFrame| !previous.is_same_frame(&frame))
+                    .is_none_or(|previous: &DebugCallFrame| !previous.is_same_frame(&frame))
             {
                 activations.push(frame);
             }
@@ -426,7 +448,7 @@ fn source_debug_call_frames_preserve_external_tail_callers() {
     assert_eq!(chains.last().unwrap().len(), 1, "{chains:?}");
 }
 
-fn assert_nested_debug_call_chains(chains: &[Vec<alloc::string::String>]) {
+fn assert_nested_debug_call_chains(chains: &[Vec<String>]) {
     assert!(
         chains.iter().any(|chain| {
             chain.len() >= 3
