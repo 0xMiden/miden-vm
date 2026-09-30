@@ -371,7 +371,6 @@ impl Linker {
     ///
     /// * Module with same [Path] is in the graph already
     /// * Too many modules in the graph
-    ///
     pub fn link_module(&mut self, module: &mut Module) -> Result<ModuleIndex, LinkerError> {
         log::debug!(target: "linker", "adding unprocessed module {}", module.path());
 
