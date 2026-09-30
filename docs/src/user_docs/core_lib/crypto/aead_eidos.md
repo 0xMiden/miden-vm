@@ -21,6 +21,9 @@ padding belong to the MAC input and are not appended to the ciphertext output.
 
 Callers must never reuse a `(key, nonce)` pair or repeat a counter block under the same `K_CTR`;
 the construction is not nonce-misuse-resistant.
+Applications must also track the aggregate verification budget under each key and retire the key
+before that budget is exhausted. See the [usage limits](../../../design/eidos-aead.md#usage-limits)
+for the per-message limit and how to account for verification attempts.
 
 ## Procedures
 
