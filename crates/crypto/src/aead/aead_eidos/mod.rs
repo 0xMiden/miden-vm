@@ -12,8 +12,7 @@ use rand::{
     CryptoRng,
     distr::{Distribution, Uniform},
 };
-#[cfg(any(test, feature = "testing"))]
-use subtle::ConstantTimeEq;
+use subtle::{Choice, ConstantTimeEq};
 
 use super::{AeadScheme, DataType, EncryptionError};
 use crate::{
@@ -23,7 +22,7 @@ use crate::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader, bytes_to_elements_exact, bytes_to_elements_with_padding, elements_to_bytes,
         padded_elements_to_bytes, read_sensitive_array,
-        zeroize::{Zeroize, ZeroizeOnDrop},
+        zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing},
     },
 };
 
@@ -106,7 +105,9 @@ impl EncryptedData {
 }
 
 /// Authentication tag over two elements of the Miden base field.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+///
+/// Equality compares both field elements in constant time.
+#[derive(Debug, Default, Clone, Copy)]
 pub struct AuthTag([Felt; AUTH_TAG_SIZE]);
 
 impl AuthTag {
@@ -120,6 +121,22 @@ impl AuthTag {
         self.0
     }
 }
+
+impl ConstantTimeEq for AuthTag {
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.iter().zip(other.0).fold(Choice::from(1), |equal, (left, right)| {
+            equal & left.as_canonical_u64_ct().ct_eq(&right.as_canonical_u64_ct())
+        })
+    }
+}
+
+impl PartialEq for AuthTag {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).into()
+    }
+}
+
+impl Eq for AuthTag {}
 
 /// Eidos AEAD secret key.
 #[derive(Clone, SilentDebug, SilentDisplay)]
@@ -368,19 +385,25 @@ impl From<Nonce> for Word {
 
 impl Serializable for SecretKey {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_bytes(&elements_to_bytes(&self.0));
+        let mut bytes = Zeroizing::new([0_u8; SK_SIZE_BYTES]);
+        for (element, chunk) in self.0.iter().zip(bytes.chunks_exact_mut(Felt::NUM_BYTES)) {
+            chunk.copy_from_slice(&element.as_canonical_u64_ct().to_le_bytes());
+        }
+        target.write_bytes(bytes.as_slice());
     }
 }
 
 impl Deserializable for SecretKey {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let bytes = read_sensitive_array::<SK_SIZE_BYTES, _>(source)?;
-        let elements = bytes_to_elements_exact(bytes.as_slice())
-            .and_then(|elements| elements.try_into().ok())
-            .ok_or_else(|| {
+        // Decode into a key so its Drop implementation clears partially decoded elements on error.
+        let mut key = Self([ZERO; SECRET_KEY_SIZE]);
+        for (element, chunk) in key.0.iter_mut().zip(bytes.as_chunks::<{ Felt::NUM_BYTES }>().0) {
+            *element = Felt::new(u64::from_le_bytes(*chunk)).map_err(|_| {
                 DeserializationError::InvalidValue("malformed secret key".to_string())
             })?;
-        Ok(Self(elements))
+        }
+        Ok(key)
     }
 }
 
