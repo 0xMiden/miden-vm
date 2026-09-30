@@ -19,9 +19,10 @@ use crate::{
     Felt, Word, ZERO,
     field::PrimeCharacteristicRing,
     utils::{
-        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        SliceReader, bytes_to_elements_exact, bytes_to_elements_with_padding, elements_to_bytes,
-        padded_elements_to_bytes, read_sensitive_array,
+        BINARY_CHUNK_SIZE, BudgetedReader, ByteReader, ByteWriter, Deserializable,
+        DeserializationError, Serializable, SliceReader, bytes_to_elements_exact,
+        bytes_to_elements_with_padding, elements_to_bytes, padded_elements_to_bytes,
+        read_sensitive_array,
         zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing},
     },
 };
@@ -233,9 +234,12 @@ impl SecretKey {
         associated_data: &[u8],
         nonce: Nonce,
     ) -> Result<EncryptedData, EncryptionError> {
+        validate_encryption_lengths(
+            plaintext.len().div_ceil(BINARY_CHUNK_SIZE),
+            associated_data.len().div_ceil(BINARY_CHUNK_SIZE),
+        )?;
         let plaintext = bytes_to_elements_with_padding(plaintext);
         let associated_data = bytes_to_elements_with_padding(associated_data);
-        validate_encryption_lengths(plaintext.len(), associated_data.len())?;
         let authenticated_data = bind_data_type(DataType::Bytes, &associated_data)?;
         let (ciphertext, tag) = expanded::encrypt_felts_expanded_authenticated(
             self.as_word(),
@@ -262,6 +266,7 @@ impl SecretKey {
         associated_data: &[Felt],
     ) -> Result<Vec<Felt>, EncryptionError> {
         ensure_data_type(encrypted_data, DataType::Elements)?;
+        validate_authentication_lengths(encrypted_data.ciphertext.len(), associated_data.len())?;
         let authenticated_data = bind_data_type(DataType::Elements, associated_data)?;
         self.decrypt_felts(encrypted_data, &authenticated_data)
     }
@@ -281,6 +286,10 @@ impl SecretKey {
         associated_data: &[u8],
     ) -> Result<Vec<u8>, EncryptionError> {
         ensure_data_type(encrypted_data, DataType::Bytes)?;
+        validate_authentication_lengths(
+            encrypted_data.ciphertext.len(),
+            associated_data.len().div_ceil(BINARY_CHUNK_SIZE),
+        )?;
         let associated_data = bytes_to_elements_with_padding(associated_data);
         let authenticated_data = bind_data_type(DataType::Bytes, &associated_data)?;
         let plaintext = self.decrypt_felts(encrypted_data, &authenticated_data)?;
@@ -437,7 +446,12 @@ impl Deserializable for EncryptedData {
         let data_type = source.read_u8()?.try_into().map_err(|_| {
             DeserializationError::InvalidValue("invalid encrypted-data type".to_string())
         })?;
-        let ciphertext = Vec::<Felt>::read_from(source)?;
+        let ciphertext_len = source.read_usize()?;
+        validate_ciphertext_length(ciphertext_len).map_err(|error| {
+            DeserializationError::InvalidValue(format!("malformed Eidos ciphertext: {error}"))
+        })?;
+        let ciphertext =
+            source.read_many_iter::<Felt>(ciphertext_len)?.collect::<Result<_, _>>()?;
         let nonce = Nonce(source.read()?);
         let auth_tag = AuthTag(source.read()?);
 
@@ -550,6 +564,14 @@ fn validate_encryption_lengths(
     associated_data_len: usize,
 ) -> Result<(), EncryptionError> {
     let ciphertext_len = plaintext_len.checked_mul(2).ok_or(EncryptionError::InputTooLong)?;
+    validate_authentication_lengths(ciphertext_len, associated_data_len)
+}
+
+fn validate_authentication_lengths(
+    ciphertext_len: usize,
+    associated_data_len: usize,
+) -> Result<(), EncryptionError> {
+    // The high-level APIs prepend a data-type marker to the caller's associated data.
     let authenticated_data_len =
         associated_data_len.checked_add(1).ok_or(EncryptionError::InputTooLong)?;
     expanded::checked_mac_input_len(authenticated_data_len, ciphertext_len)
@@ -558,15 +580,19 @@ fn validate_encryption_lengths(
 }
 
 fn validate_ciphertext(ciphertext: &[Felt]) -> Result<(), EncryptionError> {
-    if !ciphertext.len().is_multiple_of(2)
-        || ciphertext.iter().any(|felt| felt.as_canonical_u64() > u64::from(u32::MAX))
-    {
+    validate_ciphertext_length(ciphertext.len())?;
+    if ciphertext.iter().any(|felt| felt.as_canonical_u64() > u64::from(u32::MAX)) {
         return Err(EncryptionError::MalformedCiphertext);
     }
-    // Every high-level invocation authenticates a one-Felt data-type marker, even when the caller
-    // supplies no associated data.
-    expanded::checked_mac_input_len(1, ciphertext.len()).ok_or(EncryptionError::InputTooLong)?;
     Ok(())
+}
+
+fn validate_ciphertext_length(ciphertext_len: usize) -> Result<(), EncryptionError> {
+    if !ciphertext_len.is_multiple_of(2) {
+        return Err(EncryptionError::MalformedCiphertext);
+    }
+    // Check the MAC limit with empty caller AD; decryption checks it again with the supplied AD.
+    validate_authentication_lengths(ciphertext_len, 0)
 }
 
 fn ensure_data_type(

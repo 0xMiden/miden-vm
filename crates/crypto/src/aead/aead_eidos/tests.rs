@@ -194,7 +194,27 @@ fn malformed_ciphertext_is_rejected_at_public_boundaries() {
 }
 
 #[test]
+fn deserialization_rejects_invalid_ciphertext_lengths_before_reading_elements() {
+    for (length, error) in [
+        (1, EncryptionError::MalformedCiphertext),
+        (MAX_AUTHENTICATED_INPUT_FELTS, EncryptionError::InputTooLong),
+    ] {
+        // Only the header is present. The ciphertext length must be rejected before a payload read.
+        let mut encoded = Vec::new();
+        encoded.write_u8(DataType::Elements as u8);
+        encoded.write_usize(length);
+        let expected = format!("malformed Eidos ciphertext: {error}");
+        assert!(matches!(
+            EncryptedData::read_from_bytes(&encoded),
+            Err(DeserializationError::InvalidValue(message)) if message == expected
+        ));
+    }
+}
+
+#[test]
 fn authenticated_input_limit_accounts_for_expansion_and_type_marker() {
+    // Nonce(4), type marker(1), and length fields(2) use seven Felts. Each plaintext Felt produces
+    // two ciphertext limbs, leaving one padding Felt at the largest supported plaintext length.
     let largest_plaintext = (MAX_AUTHENTICATED_INPUT_FELTS - 8) / 2;
     assert!(validate_encryption_lengths(largest_plaintext, 0).is_ok());
     assert!(matches!(
@@ -202,12 +222,20 @@ fn authenticated_input_limit_accounts_for_expansion_and_type_marker() {
         Err(EncryptionError::InputTooLong)
     ));
 
+    // With empty plaintext, AD can use every Felt left after those seven fixed Felts.
     let largest_associated_data = MAX_AUTHENTICATED_INPUT_FELTS - 7;
     assert!(validate_encryption_lengths(0, largest_associated_data).is_ok());
     assert!(matches!(
         validate_encryption_lengths(0, largest_associated_data + 1),
         Err(EncryptionError::InputTooLong)
     ));
+
+    for (plaintext_len, ad_len) in [(usize::MAX, 0), (0, usize::MAX)] {
+        assert!(matches!(
+            validate_encryption_lengths(plaintext_len, ad_len),
+            Err(EncryptionError::InputTooLong)
+        ));
+    }
 }
 
 #[test]
