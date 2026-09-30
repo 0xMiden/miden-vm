@@ -1,4 +1,9 @@
-use alloc::{collections::BTreeMap, sync::Arc, vec, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    vec,
+    vec::Vec,
+};
 
 use miden_core::{
     Word,
@@ -19,10 +24,8 @@ pub enum DebugFrameOrigin {
     Source,
     /// A retained operation range matches a function's assembly-operation metadata.
     InferredRange,
-    /// The current assembly context uniquely names a function.
+    /// The selected source occurrence's assembly context uniquely names a function.
     InferredContext,
-    /// Only the executable root identifies the function; source identity is unavailable.
-    InferredRoot,
 }
 
 /// A recovered invocation of a debug function, without additional serialized frame metadata.
@@ -73,6 +76,20 @@ struct FunctionRange {
     start: u32,
     end: u32,
     inherited_inline_calls: usize,
+    signature: Signature,
+}
+
+impl FunctionRange {
+    fn matches_source(&self, node: &DebugSourceNode) -> bool {
+        let start = node.asm_ops.partition_point(|row| row.op_idx < self.start);
+        let end = node.asm_ops.partition_point(|row| row.op_idx < self.end);
+        node.asm_ops[start..end]
+            .iter()
+            .map(|row| {
+                (row.op_idx - self.start, row.context_name_idx, row.op_name_idx, row.num_cycles)
+            })
+            .eq(self.signature.iter().copied())
+    }
 }
 
 type Signature = Vec<(u32, DebugStringIdx, DebugStringIdx, u8)>;
@@ -96,9 +113,9 @@ struct FunctionIndex {
     forest: Arc<MastForest>,
     sources: BTreeMap<DebugSourceNodeId, Vec<DebugFunctionIdx>>,
     names: BTreeMap<Arc<str>, Vec<DebugFunctionIdx>>,
-    roots: BTreeMap<Word, Vec<DebugFunctionIdx>>,
     ranges: BTreeMap<MastNodeId, Vec<FunctionRange>>,
     entry_inline_counts: BTreeMap<DebugFunctionIdx, usize>,
+    entry_names: BTreeMap<DebugSourceNodeId, Option<DebugStringIdx>>,
 }
 
 impl FunctionIndex {
@@ -108,55 +125,99 @@ impl FunctionIndex {
             forest,
             sources: BTreeMap::new(),
             names: BTreeMap::new(),
-            roots: BTreeMap::new(),
             ranges: BTreeMap::new(),
             entry_inline_counts: BTreeMap::new(),
+            entry_names: BTreeMap::new(),
         };
+        let mut root_nodes = BTreeMap::<Word, MastNodeId>::new();
+        for root in index.forest.procedure_roots() {
+            root_nodes.entry(index.forest[*root].digest()).or_insert(*root);
+        }
+        let mut default_sources = BTreeMap::<MastNodeId, &DebugSourceNode>::new();
+        let mut named_sources = BTreeMap::<(MastNodeId, DebugStringIdx), &DebugSourceNode>::new();
+        let rank = |node: &DebugSourceNode| {
+            (node.asm_ops.len(), core::cmp::Reverse(node.inline_calls.len()))
+        };
+        for node in index.info.nodes() {
+            default_sources
+                .entry(node.exec_node)
+                .and_modify(|current| {
+                    if rank(node) >= rank(current) {
+                        *current = node;
+                    }
+                })
+                .or_insert(node);
+            for row in &node.asm_ops {
+                named_sources
+                    .entry((node.exec_node, row.context_name_idx))
+                    .and_modify(|current| {
+                        if rank(node) >= rank(current) {
+                            *current = node;
+                        }
+                    })
+                    .or_insert(node);
+            }
+        }
+        for position in 0..index.info.nodes().len() {
+            let mut source = DebugSourceNodeId::from(position as u32);
+            let mut path = Vec::new();
+            let name = loop {
+                if let Some(name) = index.entry_names.get(&source) {
+                    break *name;
+                }
+                if path.len() >= index.info.nodes().len() {
+                    break None;
+                }
+                path.push(source);
+                let node = &index.info[source];
+                if let Some(row) = node.asm_ops.first() {
+                    break Some(row.context_name_idx);
+                }
+                let Some(child) = node.children.first() else {
+                    break None;
+                };
+                source = *child;
+            };
+            for source in path {
+                index.entry_names.insert(source, name);
+            }
+        }
         let mut signatures = BTreeMap::<Signature, Vec<DebugFunctionIdx>>::new();
         for (position, function) in index.info.functions().iter().enumerate() {
             let function_idx = DebugFunctionIdx::from(position as u32);
             if let Some(source) = function.source_node.into_option() {
                 index.sources.entry(source).or_default().push(function_idx);
             }
-            index.roots.entry(function.mast_root).or_default().push(function_idx);
             for name_idx in [Some(function.name_idx), function.linkage_name_idx.into_option()]
                 .into_iter()
                 .flatten()
             {
                 if let Some(name) = index.info.get_string(name_idx) {
                     let names = index.names.entry(name).or_default();
-                    if !names.contains(&function_idx) {
+                    if names.last() != Some(&function_idx) {
                         names.push(function_idx);
                     }
                 }
             }
-            let Some(root) = index.forest.find_procedure_root(function.mast_root) else {
+            let Some(root) = root_nodes.get(&function.mast_root) else {
                 continue;
             };
-            let canonical =
-                index.info.nodes().iter().filter(|node| node.exec_node == root).max_by_key(
-                    |node| {
-                        (
-                            node.asm_ops.iter().any(|row| {
-                                row.context_name_idx == function.name_idx
-                                    || Some(row.context_name_idx)
-                                        == function.linkage_name_idx.into_option()
-                            }),
-                            node.asm_ops.len(),
-                            core::cmp::Reverse(node.inline_calls.len()),
-                        )
-                    },
-                );
-            if let Some(node) = canonical {
+            let canonical = [Some(function.name_idx), function.linkage_name_idx.into_option()]
+                .into_iter()
+                .flatten()
+                .filter_map(|name| named_sources.get(&(*root, name)).copied())
+                .max_by_key(|node| rank(node));
+            if let Some(node) = canonical.or_else(|| default_sources.get(root).copied()) {
                 index.entry_inline_counts.insert(
                     function_idx,
                     node.inline_calls.iter().filter(|row| row.op_idx == node.op_start).count(),
                 );
-                if !node.asm_ops.is_empty() {
+                if canonical.is_some() && !node.asm_ops.is_empty() {
                     signatures.entry(signature(node)).or_default().push(function_idx);
                 }
             }
         }
+        let mut seen_ranges = BTreeSet::new();
         for node in index.info.nodes().iter().filter(|node| !node.asm_ops.is_empty()) {
             let Some(functions) = signatures.get(&signature(node)) else {
                 continue;
@@ -174,13 +235,10 @@ impl FunctionIndex {
                     .filter(|row| row.op_idx == node.op_start)
                     .count()
                     .saturating_sub(index.entry_inline_counts.get(function).copied().unwrap_or(0)),
+                signature: signature(node),
             };
             let ranges = index.ranges.entry(node.exec_node).or_default();
-            if !ranges.iter().any(|other| {
-                other.function == range.function
-                    && other.start == range.start
-                    && other.end == range.end
-            }) {
+            if seen_ranges.insert((node.exec_node, range.function, range.start, range.end)) {
                 ranges.push(range);
             }
         }
@@ -213,6 +271,16 @@ impl FunctionIndex {
             return None;
         };
         Some(*function)
+    }
+
+    fn entry_function(&self, source: DebugSourceNodeId) -> Option<DebugFunctionIdx> {
+        let name = self.info.get_string((*self.entry_names.get(&source)?)?)?;
+        let [function] = self.names.get(&name)?.as_slice() else {
+            return None;
+        };
+        let node = self.info.source_node(source)?;
+        (self.info[*function].mast_root == self.forest[node.exec_node].digest())
+            .then_some(*function)
     }
 }
 
@@ -320,13 +388,7 @@ impl DebugCallFrameResolver {
             };
             let index = self.index(info, forest);
             let exact = index.source_function(*source);
-            let root = index.roots.get(&forest[node.exec_node].digest()).and_then(|functions| {
-                match functions.as_slice() {
-                    [function] => Some(*function),
-                    _ => None,
-                }
-            });
-            if let Some(function) = exact.or(root) {
+            if let Some(function) = exact.or_else(|| index.entry_function(*source)) {
                 let own_inline = index.entry_inline_counts.get(&function).copied().unwrap_or(0);
                 let inherited = inherited
                     + node
@@ -345,7 +407,7 @@ impl DebugCallFrameResolver {
                     if exact.is_some() {
                         DebugFrameOrigin::Source
                     } else {
-                        DebugFrameOrigin::InferredRoot
+                        DebugFrameOrigin::InferredContext
                     },
                 ));
             }
@@ -359,6 +421,7 @@ impl DebugCallFrameResolver {
                 {
                     if range.start < node.op_start
                         || range.end > enclosing_end
+                        || !range.matches_source(node)
                         || frames.last().is_some_and(|frame| {
                             frame.function_idx == range.function
                                 && Arc::ptr_eq(&frame.debug_info, info)
@@ -431,5 +494,51 @@ fn frame(
         continuation_depth,
         inherited_inline_calls,
         origin,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::{boxed::Box, format};
+
+    use miden_assembly::{Assembler, DefaultSourceManager};
+    use miden_core::serde::Serializable;
+    use miden_mast_package::debug_info::PackageDebugInfoBuilder;
+
+    use super::*;
+
+    #[test]
+    fn frame_index_handles_many_sources_and_functions_sharing_an_execution_node() {
+        let package = Assembler::new(Arc::new(DefaultSourceManager::default()))
+            .assemble_program("program", "begin push.7 drop end")
+            .unwrap();
+        let info = package.debug_info().unwrap().unwrap();
+        let template = info.functions()[0];
+        let node = info[template.source_node.into_option().unwrap()].clone();
+        let mut builder = PackageDebugInfoBuilder::from(Box::new(info.clone()));
+        for position in 0..50_000 {
+            let name = builder.add_string(format!("function_{position}"));
+            let mut source = node.clone();
+            for row in &mut source.asm_ops {
+                row.context_name_idx = name;
+            }
+            let source = builder.add_node(source).unwrap();
+            let mut function = template;
+            function.source_node = Some(source).into();
+            function.name_idx = name;
+            function.linkage_name_idx = Some(name).into();
+            builder.add_function(function);
+        }
+        let info = Arc::<PackageDebugInfo>::from(builder.build());
+        assert!(info.to_bytes().len() < 16 * 1024 * 1024);
+        let index = FunctionIndex::new(info.clone(), package.mast_forest().clone());
+        assert_eq!(index.entry_inline_counts.len(), 50_001);
+        assert_eq!(index.ranges[&node.exec_node].len(), 50_001);
+        for position in [1, 25_000, 50_000] {
+            let function = DebugFunctionIdx::from(position);
+            let source = info[function].source_node.into_option().unwrap();
+            assert_eq!(index.source_function(source), Some(function));
+            assert_eq!(index.entry_function(source), Some(function));
+        }
     }
 }
