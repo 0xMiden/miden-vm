@@ -550,7 +550,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
     const GENERIC_FRAME_END: u64 = 3_223_322_764;
     const VM_FRAME_END: u64 = 3_223_323_864;
     const PVM_FRAME_START: u64 = 3_225_426_424;
-    const PVM_FRAME_END: u64 = 3_225_444_332;
+    const PVM_FRAME_END: u64 = 3_225_444_308;
 
     /// `(path below asm/sys, name, offset from the declared address, extent in felts)`.
     /// New relation-owned addresses must be added here, including one-felt cells.
@@ -558,19 +558,19 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("pvm/layout.masm", "PUBLIC_INPUTS_PTR", 0, 8),
         ("pvm/layout.masm", "AUX_RAND_ELEM_PTR", 0, 8),
         ("pvm/layout.masm", "PREPROCESSED_CURRENT_PTR", 0, 16),
-        ("pvm/layout.masm", "MAIN_CURRENT_PTR", 0, 896),
+        ("pvm/layout.masm", "MAIN_CURRENT_PTR", 0, 880),
         ("pvm/layout.masm", "AUX_CURRENT_PTR", 0, 624),
         ("pvm/layout.masm", "QUOTIENT_CURRENT_PTR", 0, 16),
         ("pvm/layout.masm", "PREPROCESSED_NEXT_PTR", 0, 16),
-        ("pvm/layout.masm", "MAIN_NEXT_PTR", 0, 896),
+        ("pvm/layout.masm", "MAIN_NEXT_PTR", 0, 880),
         ("pvm/layout.masm", "AUX_NEXT_PTR", 0, 624),
         ("pvm/layout.masm", "QUOTIENT_NEXT_PTR", 0, 16),
         ("pvm/layout.masm", "AUX_BUS_BOUNDARY_PTR", 0, 20),
         ("pvm/layout.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, 84),
-        ("pvm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 13896),
+        ("pvm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 13912),
         ("pvm/layout.masm", "BUS_GAMMA_PTR", 0, 4),
         ("pvm/layout.masm", "C_TOTAL_PTR", 0, 4),
-        ("pvm/layout.masm", "CURRENT_TRACE_ROW_PTR", 0, 776),
+        ("pvm/layout.masm", "CURRENT_TRACE_ROW_PTR", 0, 768),
         ("pvm/layout.masm", "PREPROCESSED_COM_PTR", 0, 4),
         ("vm/layout.masm", "NUM_KERNEL_PROCEDURES_PTR", 0, 1),
         ("vm/layout.masm", "CONTROL_ALIGNMENT_PADDING_PTR", 0, 3),
