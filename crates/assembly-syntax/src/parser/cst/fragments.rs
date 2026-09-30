@@ -11,7 +11,7 @@ use miden_assembly_syntax_cst::{
     SyntaxKind, SyntaxToken,
     ast::{
         AdviceMap as CstAdviceMap, AstNode, Attribute as CstAttribute, Expr as CstExpr,
-        Signature as CstSignature, TypeBody as CstTypeBody,
+        Signature as CstSignature, TypeAnnotation as CstTypeAnnotation, TypeBody as CstTypeBody,
     },
     rowan,
 };
@@ -34,6 +34,17 @@ pub(super) fn lower_constant_expr(
     expr: &CstExpr,
 ) -> Result<ast::ConstantExpr, ParsingError> {
     FragmentParser::parse(context, expr, FragmentParser::parse_constant_expr)
+}
+
+/// Lowers a type annotation.
+pub(super) fn lower_type_annotation(
+    context: &mut LoweringContext<'_>,
+    annotation: &CstTypeAnnotation,
+) -> Result<ast::TypeExpr, ParsingError> {
+    FragmentParser::parse(context, annotation, |parser| {
+        parser.expect_kind(SyntaxKind::Colon, "expected `:` in type annotation")?;
+        parser.parse_type_expr()
+    })
 }
 
 /// Lowers the right-hand side of a `type` alias declaration.
@@ -1537,7 +1548,7 @@ mod tests {
 
     use super::{
         lower_advice_map_decl, lower_attribute, lower_function_type_from_signature,
-        lower_type_expr_from_alias_body,
+        lower_type_annotation, lower_type_expr_from_alias_body,
     };
     use crate::{
         ast,
@@ -1620,6 +1631,128 @@ end
         let mut interned = BTreeSet::default();
         let mut context = LoweringContext::new(parse, &mut interned);
         lower_function_type_from_signature(&mut context, &signature)
+    }
+
+    fn lower_ty_annotation(source: &str) -> Result<ast::TypeExpr, ParsingError> {
+        let parse = parse_source_file(test_source_file(source));
+        assert!(
+            parse.diagnostics().is_empty(),
+            "{source:?}: unexpected CST diagnostics: {:?}",
+            parse.diagnostics()
+        );
+
+        let annotation = parse
+            .root()
+            .items()
+            .find_map(|item| match item {
+                CstItem::Constant(constant) => constant.type_annotation(),
+                _ => None,
+            })
+            .expect("type annotation");
+
+        let mut interned = BTreeSet::default();
+        let mut context = LoweringContext::new(parse, &mut interned);
+        lower_type_annotation(&mut context, &annotation)
+    }
+
+    #[test]
+    fn lowers_type_annotations_from_cst_tokens() {
+        let u8_ty =
+            ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(ast::types::Type::U8));
+        let u32_ty =
+            ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(ast::types::Type::U32));
+        let word_ty = ast::types::Type::Array(Arc::new(ast::types::ArrayType::new(
+            ast::types::Type::Felt, 4,
+        )));
+
+        // Only the type annotation is lowered here. Initializers are placeholders and may not match
+        // the annotated type.
+        let cases = [
+            ("const VALUE: u8 = 42\n", u8_ty.clone()),
+            (
+                "const VALUE: word = 42\n",
+                ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(word_ty)),
+            ),
+            (
+                "const VALUE: ptr<[\n    # element type\n    felt; 4\n]> = 42\n",
+                ast::TypeExpr::Ptr(ast::PointerType::new(ast::TypeExpr::Array(ast::ArrayType::new(
+                    felt(), 4,
+                )))),
+            ),
+            (
+                "const VALUE: parts::Count = 42\n",
+                ast::TypeExpr::Ref(miden_debug_types::Span::unknown(Arc::from(crate::Path::new(
+                    "parts::Count",
+                )))),
+            ),
+            (
+                "const VALUE: [u32; 4] = 42\n",
+                ast::TypeExpr::Array(ast::ArrayType::new(u32_ty.clone(), 4)),
+            ),
+            (
+                "const VALUE: ptr<u8, addrspace(byte)> = 42\n",
+                ast::TypeExpr::Ptr(
+                    ast::PointerType::new(u8_ty.clone())
+                        .with_address_space(ast::types::AddressSpace::Byte),
+                ),
+            ),
+            (
+                "const VALUE: struct { x: u32 } = 42\n",
+                ast::TypeExpr::Struct(ast::StructType::new(
+                    None,
+                    [ast::StructField {
+                        span: miden_debug_types::SourceSpan::UNKNOWN,
+                        name: ast::Ident::new("x").unwrap(),
+                        ty: u32_ty.clone(),
+                    }],
+                )),
+            ),
+            (
+                "const VALUE: struct { x: u32, y: u8 } = 42\n",
+                ast::TypeExpr::Struct(ast::StructType::new(
+                    None,
+                    [
+                        ast::StructField {
+                            span: miden_debug_types::SourceSpan::UNKNOWN,
+                            name: ast::Ident::new("x").unwrap(),
+                            ty: u32_ty,
+                        },
+                        ast::StructField {
+                            span: miden_debug_types::SourceSpan::UNKNOWN,
+                            name: ast::Ident::new("y").unwrap(),
+                            ty: u8_ty.clone(),
+                        },
+                    ],
+                )),
+            ),
+            ("const VALUE : \t u8 \n = 42\n", u8_ty),
+        ];
+
+        for (source, expected) in cases {
+            let ty = lower_ty_annotation(source).unwrap_or_else(|err| panic!("{source:?}: {err}"));
+            assert_eq!(ty, expected, "{source:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_type_annotations() {
+        let cases = [
+            ("const VALUE: [u32] = 42\n", "expected `;` in array type"),
+            ("const VALUE: [u32; nope] = 42\n", "expected an array length"),
+            ("const VALUE: ptr<u8 = 42\n", "expected `>` to close pointer type"),
+            ("const VALUE: struct { x u32 } = 42\n", "expected `:` after struct field name"),
+            ("const VALUE: parts:: = 42\n", "expected a path component after `::`"),
+            ("const VALUE: u8 extra = 42\n", "unexpected trailing tokens in type annotation"),
+        ];
+
+        for (source, expected_message) in cases {
+            let err = lower_ty_annotation(source)
+                .expect_err(&alloc::format!("{source:?} should be rejected"));
+            let ParsingError::InvalidSyntax { message, .. } = err else {
+                panic!("{source:?}: expected InvalidSyntax, got {err:?}");
+            };
+            assert_eq!(message, expected_message, "{source:?}");
+        }
     }
 
     fn variadic() -> ast::TypeExpr {

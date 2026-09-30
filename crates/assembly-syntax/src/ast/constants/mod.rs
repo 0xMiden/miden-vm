@@ -12,7 +12,7 @@ pub use self::{
     expr::{ConstantExpr, ConstantOp, HashKind},
     value::ConstantValue,
 };
-use crate::ast::{DocString, Ident, Visibility};
+use crate::ast::{DocString, Ident, TypeExpr, Visibility};
 
 // CONSTANT
 // ================================================================================================
@@ -28,6 +28,8 @@ pub struct Constant {
     pub visibility: Visibility,
     /// The name of the constant.
     pub name: Ident,
+    /// The declared type of the constant
+    pub ty: Option<TypeExpr>,
     /// The expression associated with the constant.
     pub value: ConstantExpr,
 }
@@ -40,6 +42,7 @@ impl Constant {
             docs: None,
             visibility,
             name,
+            ty: None,
             value,
         }
     }
@@ -55,6 +58,12 @@ impl Constant {
         self.docs.as_ref().map(|docstring| docstring.as_spanned_str())
     }
 
+    /// Specify the type of this constant
+    pub fn with_ty(mut self, ty: TypeExpr) -> Self {
+        self.ty = Some(ty);
+        self
+    }
+
     /// Get the name of this constant
     pub fn name(&self) -> &Ident {
         &self.name
@@ -67,6 +76,7 @@ impl fmt::Debug for Constant {
             .field("docs", &self.docs)
             .field("visibility", &self.visibility)
             .field("name", &self.name)
+            .field("ty", &self.ty)
             .field("value", &self.value)
             .finish()
     }
@@ -79,6 +89,9 @@ impl crate::prettier::PrettyPrint for Constant {
         let mut doc = self.docs.as_ref().map(PrettyPrint::render).unwrap_or(Document::Empty);
 
         doc += flatten(const_text("const") + const_text(" ") + display(&self.name));
+        if let Some(ty) = &self.ty {
+            doc += const_text(": ") + ty.render();
+        }
         doc += const_text(" = ");
 
         doc + self.value.render() + nl()
@@ -89,7 +102,10 @@ impl Eq for Constant {}
 
 impl PartialEq for Constant {
     fn eq(&self, other: &Self) -> bool {
-        self.visibility == other.visibility && self.name == other.name && self.value == other.value
+        self.visibility == other.visibility
+            && self.name == other.name
+            && self.ty == other.ty
+            && self.value == other.value
     }
 }
 

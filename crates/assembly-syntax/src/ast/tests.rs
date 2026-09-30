@@ -1579,6 +1579,25 @@ end
 }
 
 #[test]
+fn test_constant_type_annotation_formatting() -> Result<(), Report> {
+    use crate::prettier::PrettyPrint;
+
+    let context = SyntaxTestContext::default();
+    for (source, expected) in [
+        ("const X = 1\n", "const X = 1\n"),
+        ("const X:u8=1\n", "const X: u8 = 1\n"),
+        ("const X:[felt;4]=[1,2,3,4]\n", "const X: [felt; 4] = [1,2,3,4]\n"),
+    ] {
+        let forms = context.parse_forms(source_file!(&context, source))?;
+        let [Form::Constant(constant)] = forms.as_slice() else {
+            panic!("{source:?}: expected one constant");
+        };
+        assert_eq!(constant.to_pretty_string(), expected, "{source:?}");
+    }
+    Ok(())
+}
+
+#[test]
 fn test_constant_expr_parentheses_roundtrip_formatting() {
     let source = "\
 namespace test::formatting
