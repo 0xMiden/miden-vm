@@ -141,6 +141,7 @@ pub fn analyze(
                         docs: None,
                         visibility: ty.visibility(),
                         name: name.clone(),
+                        ty: None,
                         value: discriminant.clone(),
                     });
                 }
@@ -150,6 +151,11 @@ pub fn analyze(
             },
             Form::Constant(constant) => {
                 namespace_allowed = false;
+                if let Some(ty) = &constant.ty {
+                    analyzer.error(SemanticAnalysisError::TypedConstantsNotSupported {
+                        span: ty.span(),
+                    });
+                }
                 analyzer.define_constant(&mut module, constant.with_docs(docs.take()));
             },
             Form::Import(import) => {
