@@ -18,6 +18,7 @@
 - Reused the fixed And8 setup trace during VM proving and precomputed its commitments for all six proof-hash configurations ([#3910](https://github.com/0xMiden/miden-vm/pull/3910)).
 - Optimized Eidos Merkle tree construction ([#3898](https://github.com/0xMiden/miden-vm/pull/3898)).
 - Evaluated Eidos AEAD MACs without allocating a coefficient buffer and checked input lengths before byte conversion, associated-data copying, or ciphertext deserialization.
+- Reduced fixed cycle costs in the core library's Eidos AEAD encryption, authentication, and decryption procedures.
 
 #### Fixes
 
