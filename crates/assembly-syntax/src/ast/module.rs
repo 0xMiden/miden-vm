@@ -473,6 +473,7 @@ impl Module {
                 docs,
                 visibility: alias.visibility(),
                 name,
+                ty: None,
                 value: discriminant,
             })?;
         }

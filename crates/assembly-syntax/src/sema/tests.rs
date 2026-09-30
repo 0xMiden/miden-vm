@@ -246,6 +246,19 @@ enum thing: u8 {}
 }
 
 #[test]
+fn typed_constants_are_rejected_in_analysis() {
+    let context = SyntaxTestContext::default();
+    let source = "namespace test\nconst N: u8 = 42\n";
+    let error = context.parse_module(source).expect_err("typed constant must fail");
+    let error = syntax_error(&error);
+    let [SemanticAnalysisError::TypedConstantsNotSupported { span }] = error.errors.as_slice()
+    else {
+        panic!("expected typed constant error, got {:?}", error.errors);
+    };
+    assert_eq!(error.source_file.source_slice(*span).unwrap(), "u8");
+}
+
+#[test]
 fn repeat_count_zero_rejected_in_analysis() {
     let context = SyntaxTestContext::default();
     let error = context
