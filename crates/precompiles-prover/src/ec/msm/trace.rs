@@ -633,7 +633,8 @@ impl EcMsmRequires {
 /// Build the EcMsm main trace from the accumulator (consumed). Routes
 /// each `intro`'s literal-1 `UintVal` demand into the uint store and each
 /// boundary's ordering `Range16` halves into the BPL (four for `combine`,
-/// two for `neg` — only the a-side), lays one row per term, and pads to a
+/// two for `neg`, plus two for a certificate-minting `neg` / `intro_endo`),
+/// lays one row per term, and pads to a
 /// power-of-two height with `act = 0` rows that continue the allocator
 /// chain but touch no bus.
 pub fn generate_trace(
@@ -708,8 +709,9 @@ pub fn generate_trace(
                 }
             } else if is_neg {
                 // Unary walk over A: cursor i, the consumed term cells, the
-                // operand value, group params, and the ∞ result slot. Only
-                // the a-side ordering half (b-side is combine-only).
+                // operand value, group params, and the ∞ result slot. The
+                // a-side ordering half, plus the b-side limbs for the
+                // certificate ordering when this neg mints `val`.
                 set(COL_A_EXPR, e.a_expr);
                 set(COL_I, rv.i);
                 set(COL_BASE_A, rv.base_a);
@@ -734,6 +736,13 @@ pub fn generate_trace(
                     set(COL_A_DIFF_HI, a_diff >> 16);
                     bpl.require_range16((a_diff & 0xffff) as u16);
                     bpl.require_range16((a_diff >> 16) as u16);
+                    if e.neg_minted == 1 {
+                        let cert_diff = cert_order_diff(e.val, e.val_a);
+                        set(COL_B_DIFF_LO, cert_diff & 0xffff);
+                        set(COL_B_DIFF_HI, cert_diff >> 16);
+                        bpl.require_range16((cert_diff & 0xffff) as u16);
+                        bpl.require_range16((cert_diff >> 16) as u16);
+                    }
                 }
             } else if is_intro_endo {
                 // The value relation's coordinate cells + the boundary's
@@ -749,6 +758,13 @@ pub fn generate_trace(
                 set(COL_ENDO_Y, e.endo_y);
                 set(COL_ENDO_VAL_X, e.endo_val_x);
                 set(COL_ENDO_MINTED, e.endo_minted);
+                if e.endo_minted == 1 {
+                    let cert_diff = cert_order_diff(e.val, rv.base);
+                    set(COL_B_DIFF_LO, cert_diff & 0xffff);
+                    set(COL_B_DIFF_HI, cert_diff >> 16);
+                    bpl.require_range16((cert_diff & 0xffff) as u16);
+                    bpl.require_range16((cert_diff >> 16) as u16);
+                }
             } else if is_intro_zero {
                 // `base`'s own coordinates (reusing the endo cells — see
                 // `COL_ENDO_BASE_X`) + the boundary's `EcGroup` pin
@@ -781,6 +797,14 @@ pub fn generate_trace(
     }
 
     RowMajorMatrix::new(vals, NUM_MAIN_COLS)
+}
+
+/// `val − source − 1` for a certificate-minting row. The point store appends a
+/// newly certified point after its source, so this difference is nonnegative.
+fn cert_order_diff(val: u32, source: u32) -> u32 {
+    val.checked_sub(source)
+        .and_then(|diff| diff.checked_sub(1))
+        .expect("a minted point is newer than its certificate source")
 }
 
 // PROVER
