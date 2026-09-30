@@ -35,8 +35,9 @@ const AEAD_MAC_INIT_CV_1 = 2688637132020383744
 const AEAD_MAC_INIT_CV_2 = 1947077364412317696
 const AEAD_MAC_INIT_CV_3 = 6620516959492505600
 
-# The MAC input is nonce(4) || associated_data || ciphertext || lengths(2) || padding. The
-# expanded-ciphertext helpers below use empty associated data.
+# The limit includes the nonce, associated data, ciphertext, two lengths, and final zero padding.
+# With empty associated data, the nonce and lengths occupy six Felts. Since the limit is a
+# multiple of eight, an input within it still fits after rounding up to an 8-Felt boundary.
 const AEAD_MAX_AUTHENTICATED_INPUT_FELTS = 268435456
 const AEAD_EMPTY_AD_FIXED_INPUT_FELTS = 6
 const AEAD_MAX_EMPTY_AD_CIPHERTEXT_FELTS = AEAD_MAX_AUTHENTICATED_INPUT_FELTS - AEAD_EMPTY_AD_FIXED_INPUT_FELTS
@@ -99,20 +100,16 @@ end
 
 #! Folds `num_batches` consecutive 8-Felt memory batches into the MAC accumulator.
 #!
-#! Input:  [alpha_ptr, acc0, acc1, stream_ptr, num_batches, ...]
-#! Output: [alpha_ptr, acc0, acc1, stream_ptr + 8*num_batches, ...]
-proc auth_horner_stream_batches
-    # Shape the stack once for the `mem_stream` + `horner_eval_ext` loop:
-    # [BLOCK_LO, BLOCK_HI, CV, stream_ptr, alpha_ptr, acc0, acc1, ...], with `num_batches`
-    # stored in CV[3]. `mem_stream` preserves CV and advances stream_ptr.
-    movup.3
-    movup.4
-    push.0.0.0
-    padw padw
-    # => [Y, Y, 0, 0, 0, num_batches, stream_ptr, alpha_ptr, acc0, acc1, ...]
-
-    # Process leading batches until the count is divisible by eight, then run
-    # the hot loop in eight-batch chunks to amortize `while.true` overhead.
+#! `mem_stream` loads each batch into the coefficient slots used by `horner_eval_ext`, so no
+#! stack rearrangement is needed between the two instructions. Both preserve the four slots
+#! reserved for a chaining value. The loop uses the fourth for its remaining batch count and
+#! leaves the other three unchanged.
+#!
+#! Input:  [BLOCK(8), cv0, cv1, cv2, num_batches, stream_ptr, alpha_ptr, acc0, acc1, ...]
+#! Output: [BLOCK'(8), cv0, cv1, cv2, 0, stream_ptr + 8*num_batches, alpha_ptr, acc0', acc1', ...]
+proc auth_horner_stream_loop
+    # Handle the initial num_batches % 8 batches, then process eight batches per loop iteration
+    # to reduce loop overhead.
     dup.11 u32mod.2
     if.true
         movup.11
@@ -160,44 +157,73 @@ proc auth_horner_stream_batches
 
         dup.11 neq.0
     end
+end
 
-    dropw dropw dropw
-    movdn.3
-    # => [alpha_ptr, acc0, acc1, stream_ptr_final, ...]
+#! Prepares the final partial ciphertext word for MAC evaluation.
+#!
+#! The empty-AD MAC input is
+#! `nonce(4) || ciphertext(ct_len) || [ad_len, ct_len] || zero_padding`.
+#! Here `ad_len = 0` and `ct_len` counts all expanded ciphertext limbs, each stored as a Felt.
+#! The length fields distinguish data from padding, including when the ciphertext ends in zeros.
+#! Append the fewest zero Felts (0..7) that make `ct_len + 6 + padding_len` a multiple of eight:
+#! `horner_eval_ext` processes eight Felts (four quadratic-extension coefficients) per batch.
+#!
+#! Only the first `k` entries of `W = [w0, w1, w2, w3]` belong to the ciphertext. Replace the
+#! others so values loaded from beyond the ciphertext cannot affect the tag:
+#!
+#! - `k = 1`: `[w0, ad_len, ct_len, 0]` (one padding Felt).
+#! - `k = 2`: `[w0, w1, ad_len, ct_len]` (no padding in this word).
+#! - `k = 3`: `[w0, w1, w2, ad_len]` (the caller puts `ct_len` in the next word).
+#!
+#! The caller supplies any further zero padding needed to complete the final 8-Felt batch.
+#!
+#! Input:  [k, ct_len, W(4), ...]
+#! Output: [W'(4), ...]
+#! `k` must be 1, 2, or 3.
+proc auth_pad_tail_word
+    dup eq.1
+    if.true
+        drop
+        # => [ct_len, w0, w1, w2, w3, ...] -> [w0, ad_len, ct_len, 0, ...]
+        movup.4 drop movup.3 drop movup.2 drop
+        swap push.0 swap
+        push.0 movdn.3
+    else
+        eq.2
+        if.true
+            # => [ct_len, w0, w1, w2, w3, ...] -> [w0, w1, ad_len, ct_len, ...]
+            movup.4 drop movup.3 drop
+            movdn.2
+            push.0 movdn.2
+        else
+            # => [ct_len, w0, w1, w2, w3, ...] -> [w0, w1, w2, ad_len, ...]
+            drop movup.3 drop
+            push.0 movdn.3
+        end
+    end
 end
 
 #! Copies `count` Felts from `src_ptr` to `dst_ptr`.
 #!
+#! The caller supplies word-aligned pointers, a u32 count, and valid memory ranges.
+#!
 #! Input:  [src_ptr, dst_ptr, count, ...]
 #! Output: [src_ptr + count, dst_ptr + count, ...]
 proc copy_felts
-    dup.2
-    u32divmod.4
-    swap
-    movup.2
-    movup.3
-    swap
-    # => [src_ptr, dst_ptr, full_words, tail, count, ...]
-
-    dup.2 neq.0
+    dup.2 push.4 u32gte
     while.true
-        movup.2 sub.1 movdn.2
-        # => [src_ptr, dst_ptr, remaining_words - 1, tail, count, ...]
-
         padw dup.4 mem_loadw_le
-        # => [WORD, src_ptr, dst_ptr, remaining_words, tail, count, ...]
+        # => [WORD(4), src_ptr, dst_ptr, count, ...]
         dup.5 mem_storew_le
         dropw
-        # => [src_ptr, dst_ptr, remaining_words, tail, count, ...]
+        # => [src_ptr, dst_ptr, count, ...]
 
         add.4
         swap add.4 swap
-        # => [src_ptr + 4, dst_ptr + 4, remaining_words, tail, count, ...]
-        dup.2 neq.0
+        movup.2 sub.4 movdn.2
+        # => [src_ptr + 4, dst_ptr + 4, count - 4, ...]
+        dup.2 push.4 u32gte
     end
-
-    movup.2 drop
-    # => [src_ptr + 4*full_words, dst_ptr + 4*full_words, tail, count, ...]
 
     dup.2 neq.0
     while.true
@@ -208,23 +234,7 @@ proc copy_felts
         movup.2 sub.1 movdn.2
         dup.2 neq.0
     end
-    drop
     movup.2 drop
-end
-
-#! Stores zero in `count` consecutive memory cells.
-#!
-#! Input:  [dst_ptr, count, ...]
-#! Output: [dst_ptr + count, ...]
-proc zero_felts
-    dup.1 neq.0
-    while.true
-        push.0 dup.1 mem_store
-        add.1
-        swap sub.1 swap
-        dup.1 neq.0
-    end
-    drop
 end
 
 # Validates a memory pointer without consuming it.
@@ -261,7 +271,7 @@ end
 #! Loads `count` Felts from advice into memory.
 #!
 #! Input:  [dst_ptr, count, ...]
-#! Output: [dst_ptr + count, ...]
+#! Output: [0, ...]
 proc load_advice_felts_to_memory
     dup.1
     u32divmod.8
@@ -336,36 +346,36 @@ end
 #! Asserts equality of two `count`-Felt memory ranges.
 #!
 #! Input:  [lhs_ptr, rhs_ptr, count, ...]
-#! Output: [lhs_ptr + count, rhs_ptr + count, ...]
+#! Output: [rhs_ptr + count, 0, ...]
 proc assert_felts_equal
-    dup.2
+    movup.2
     u32divmod.4
     swap
     movup.2
     movup.3
     swap
-    # => [lhs_ptr, rhs_ptr, full_words, tail, count, ...]
+    # => [lhs_ptr, rhs_ptr, full_words, tail, ...]
 
     dup.2 neq.0
     while.true
         movup.2 sub.1 movdn.2
-        # => [lhs_ptr, rhs_ptr, remaining_words - 1, tail, count, ...]
+        # => [lhs_ptr, rhs_ptr, remaining_words - 1, tail, ...]
 
         padw dup.4 mem_loadw_le
-        # => [LHS_WORD, lhs_ptr, rhs_ptr, remaining_words, tail, count, ...]
+        # => [LHS_WORD, lhs_ptr, rhs_ptr, remaining_words, tail, ...]
         padw dup.9 mem_loadw_le
-        # => [RHS_WORD, LHS_WORD, lhs_ptr, rhs_ptr, remaining_words, tail, count, ...]
+        # => [RHS_WORD, LHS_WORD, lhs_ptr, rhs_ptr, remaining_words, tail, ...]
         assert_eqw.err="AEAD ciphertext mismatch"
-        # => [lhs_ptr, rhs_ptr, remaining_words, tail, count, ...]
+        # => [lhs_ptr, rhs_ptr, remaining_words, tail, ...]
 
         add.4
         swap add.4 swap
-        # => [lhs_ptr + 4, rhs_ptr + 4, remaining_words, tail, count, ...]
+        # => [lhs_ptr + 4, rhs_ptr + 4, remaining_words, tail, ...]
         dup.2 neq.0
     end
 
     movup.2 drop
-    # => [lhs_ptr + 4*full_words, rhs_ptr + 4*full_words, tail, count, ...]
+    # => [lhs_ptr + 4*full_words, rhs_ptr + 4*full_words, tail, ...]
 
     dup.2 neq.0
     while.true
@@ -378,227 +388,197 @@ proc assert_felts_equal
         dup.2 neq.0
     end
     drop
-    movup.2 drop
 end
 
 #! Authenticates exact-length expanded ciphertext with empty associated data.
 #!
 #! MAC input:
-#! `nonce(4) || ciphertext(ciphertext_len) || [ad_len=0, ciphertext_len]`
+#! `nonce(4) || ciphertext(ciphertext_len) || [ad_len=0, ciphertext_len] || zero_padding`
 #!
-#! Adjacent Felts in the MAC input form one quadratic-extension coefficient.
+#! The nonce and two length fields add six Felts. Append 0..7 zero Felts to round the total
+#! `ciphertext_len + 6` up to a multiple of eight. Adjacent Felts form quadratic-extension
+#! coefficients, with four coefficients per MAC batch. The encoded lengths distinguish data
+#! from padding even when the ciphertext ends in zeros.
 #!
-#! `scratch_ptr` is temporary workspace for the initial partial batch and for
-#! the final tail plus length fields.
-#!
-#! Input:  [K_MAC(4), nonce(4), ct_ptr, ciphertext_len, scratch_ptr, ...]
+#! Input:  [K_MAC(4), nonce(4), ct_ptr, ciphertext_len, ...]
 #! Output: [tag0, tag1, ...]
 #!
 #! Where:
 #! - `ct_ptr` addresses exactly `ciphertext_len` expanded ciphertext-limb Felts.
-#! - `scratch_ptr` addresses at least 16 writable Felts.
 #!
 #! Panics if:
-#! - either pointer is not a word-aligned u32;
+#! - `ct_ptr` is not a word-aligned u32;
 #! - `ciphertext_len` does not fit in a u32 or exceeds the AEAD message limit;
-#! - either range overflows, reaches the procedure's local frame, or overlaps the other range.
+#! - the ciphertext range overflows or reaches the procedure's local frame.
 #!
 #! Invocation: exec
-@locals(24)
-pub proc auth_empty_ad_expanded_with_scratch(
+@locals(4)
+pub proc auth_empty_ad_expanded_exact(
     mac_key: MacKey,
     nonce: Nonce,
     ciphertext: ptr<felt>,
     ciphertext_len: u32,
-    scratch: ptr<felt>,
 ) -> Tag
-    loc_storew_le.0
-    dropw
-    loc_storew_le.4
-    dropw
-    # => [ct_ptr, ciphertext_len, scratch_ptr, ...]
-
-    # Horner evaluation reads a complete aligned word and requires the high pair to be zero.
-    push.0.0 loc_load.1 loc_load.0
-    loc_storew_le.16
-    dropw
-
-    dup loc_store.8
-    dup.1 loc_store.9
-    dup.2 loc_store.10
-    # => [ct_ptr, ciphertext_len, scratch_ptr, ...]
-
-    drop drop drop
-    # => [...]
-
-    loc_load.8 exec.assert_aead_pointer drop
-    loc_load.10 exec.assert_aead_pointer drop
-    loc_load.9 u32assert.err="AEAD ciphertext length must fit in a u32"
+    # => [K_MAC(4), nonce(4), ct_ptr, ciphertext_len, ...]
+    dup.8 exec.assert_aead_pointer drop
+    dup.9 u32assert.err="AEAD ciphertext length must fit in a u32"
     u32lte.AEAD_MAX_EMPTY_AD_CIPHERTEXT_FELTS
     assert.err="AEAD authentication input exceeds its supported length"
 
-    loc_load.10 push.16 exec.checked_aead_range_last
-    loc_store.21
-    locaddr.0 loc_load.21 u32gt
-    assert.err="AEAD memory ranges must stay below the local frame"
-
-    # An empty ciphertext range is disjoint from every workspace range.
-    loc_load.9 neq.0
+    # Skip the range check for empty ciphertext: the helper reads no ciphertext in that case.
+    # Otherwise require ct_ptr + ciphertext_len - 1 < locaddr.0 (this procedure's first local).
+    # Nested exec procedures allocate their locals at higher addresses, so this also prevents
+    # the helper's evaluation-point store from overwriting ciphertext before the MAC reads it.
+    dup.9 neq.0
     if.true
-        loc_load.8 loc_load.9 exec.checked_aead_range_last
-        loc_store.20
-        locaddr.0 loc_load.20 u32gt
+        dup.8 dup.10 exec.checked_aead_range_last
+        locaddr.0 swap u32gt
         assert.err="AEAD memory ranges must stay below the local frame"
-
-        # scratch_ptr > ct_last OR ct_ptr > scratch_last
-        loc_load.10 loc_load.20 u32gt
-        loc_load.8 loc_load.21 u32gt
-        or assert.err="AEAD memory ranges must not overlap"
     end
+
+    exec.auth_empty_ad_expanded_exact_validated
+end
+
+#! Authenticates exact-length expanded ciphertext whose range the caller has validated.
+#!
+#! The caller must check that `ct_ptr` is a word-aligned u32 and that `ciphertext_len` fits in a
+#! u32 and does not exceed the AEAD message limit. For non-empty ciphertext, the last address must
+#! fit in u32 and be below the caller's local frame.
+#!
+#! Input:  [K_MAC(4), nonce(4), ct_ptr, ciphertext_len, ...]
+#! Output: [tag0, tag1, ...]
+@locals(4)
+proc auth_empty_ad_expanded_exact_validated
+    # => [r0, r1, s0, s1, nonce(4), ct_ptr, len, ...]
+
+    # `horner_eval_ext` requires an aligned word `[r0, r1, 0, 0]` for the evaluation point.
+    # Keep the mask `(s0, s1)` on the stack below the accumulator until the final `ext2add`.
+    push.0.0 movup.3 movup.3
+    loc_storew_le.0
+    dropw
+    movdn.5 movdn.5
+    movup.7 movup.7
+    # => [ct_ptr, len, nonce(4), s0, s1, ...]
 
     push.0.1
-    locaddr.16
-    # => [alpha_ptr, acc0, acc1, ...]
+    locaddr.0
+    movup.4 movup.4
+    # => [ct_ptr, len, alpha_ptr, acc0, acc1, nonce(4), s0, s1, ...]
 
-    loc_load.9 push.4 u32gte
+    dup.1 push.4 u32gte
     if.true
+        # After the first four ciphertext Felts, split the rest into `middle` full 8-Felt batches
+        # and a `tail` of 0..7 Felts. Keep [0, len, tail, middle] in slots preserved by `mem_stream`
+        # and `horner_eval_ext`, with `middle` in the stream loop's batch-count slot.
+        dup add.4 movdn.2
+        dup.1 sub.4 u32divmod.8
+        movup.3 push.0
+        # => [0, len, tail, middle, ct_ptr, stream_ptr, alpha_ptr, acc0, acc1, nonce(4), ...]
+
         # First batch: nonce(4) || ciphertext[0..4].
-        padw loc_loadw_le.4
-        loc_load.10 mem_storew_le
-        dropw
+        padw movup.8 mem_loadw_le
+        movupw.3
+        horner_eval_ext
+        # => [nonce(4), ciphertext[0..4], 0, len, tail, middle, stream_ptr, alpha_ptr, ...]
 
-        padw loc_load.8 mem_loadw_le
-        loc_load.10 add.4 mem_storew_le
-        dropw
+        # Middle batches, streamed directly from the input.
+        exec.auth_horner_stream_loop
+        # => [BLOCK(8), 0, len, tail, 0, tail_ptr, alpha_ptr, acc0, acc1, ...]
 
-        loc_load.10 movdn.3
-        push.1 movdn.4
-        exec.auth_horner_stream_batches
-        movup.3 drop
-        # => [alpha_ptr, acc0, acc1, ...]
-
-        # Stream the aligned middle directly from the input.
-        loc_load.9 sub.4
-        u32divmod.8
-        swap
-        dup loc_store.11
-        dup.1 loc_store.12
-        drop drop
-        # => [alpha_ptr, acc0, acc1, ...]
-
-        loc_load.11 mul.8
-        loc_load.8 add.4 add
-        loc_store.13
-        # => [alpha_ptr, acc0, acc1, ...]
-
-        loc_load.8 add.4 movdn.3
-        loc_load.11 movdn.4
-        exec.auth_horner_stream_batches
-        movup.3 drop
-        # => [alpha_ptr, acc0, acc1, ...]
-
-        # Final batch: tail || [0, ciphertext_len] || zero padding. A 7-Felt tail
-        # needs two Horner batches because the length pair crosses the boundary.
-        loc_load.12 push.7 eq
+        # Append [ad_len=0, ct_len=len], then zeros to complete an 8-Felt batch. A 7-Felt tail
+        # plus the two lengths occupies nine Felts, so it needs two batches and seven padding
+        # zeros. Word loads may read beyond the ciphertext; replace those values before evaluation.
+        dup.10 push.4 u32lt
         if.true
-            push.2
+            dropw dropw
+            # => [0, len, tail, 0, tail_ptr, alpha_ptr, ...]
+            dup.2 eq.0
+            if.true
+                # No tail: [0, len, 0, 0, 0, 0, 0, 0].
+                padw push.0.0 dup.7 push.0
+            else
+                # Tail 1..3: append `ad_len` in the word containing the tail. Append `len` in
+                # the same word if it fits, or at the start of the next word.
+                padw
+                dup.6 eq.3
+                if.true
+                    drop dup.4
+                end
+                padw dup.12 mem_loadw_le
+                dup.9 dup.11
+                exec.auth_pad_tail_word
+            end
+            # => [BATCH(8), 0, len, tail, 0, tail_ptr, alpha_ptr, ...]
+            horner_eval_ext
         else
-            push.1
+            dup.12 mem_loadw_le
+            # => [tail[0..4], X(4), 0, len, tail, 0, tail_ptr, alpha_ptr, ...]
+            dup.10 eq.4
+            if.true
+                swapw dropw
+                push.0.0 dup.7 push.0
+                swapw
+            else
+                # Tail 5..7: the second word carries the rest of the tail.
+                swapw
+                dup.12 add.4 mem_loadw_le
+                dup.9 dup.11 sub.4
+                exec.auth_pad_tail_word
+                swapw
+            end
+            # => [BATCH(8), 0, len, tail, 0, tail_ptr, alpha_ptr, ...]
+            horner_eval_ext
+
+            dup.10 eq.7
+            if.true
+                # The length pair crossed the batch boundary: fold [len, 0, 0, 0, 0, 0, 0, 0].
+                dropw dropw
+                padw push.0.0.0 dup.8
+                horner_eval_ext
+            end
         end
-        loc_store.14
-        # => [alpha_ptr, acc0, acc1, ...]
-
-        loc_load.12
-        loc_load.10
-        loc_load.13
-        exec.copy_felts
-        drop drop
-        # => [alpha_ptr, acc0, acc1, ...]
-
-        loc_load.10 loc_load.12 add
-        dup push.0 swap mem_store
-        dup add.1 loc_load.9 swap mem_store
-        drop
-        # => [alpha_ptr, acc0, acc1, ...]
-
-        loc_load.14 mul.8
-        loc_load.12 add.2
-        sub
-        loc_store.15
-        # => [alpha_ptr, acc0, acc1, ...]
-
-        loc_load.15
-        loc_load.10 loc_load.12 add.2 add
-        exec.zero_felts
-        drop
-        # => [alpha_ptr, acc0, acc1, ...]
-
-        loc_load.10 movdn.3
-        loc_load.14 movdn.4
-        exec.auth_horner_stream_batches
-        movup.3 drop
-        # => [alpha_ptr, acc0, acc1, ...]
     else
-        # Small input: nonce || ciphertext_tail || [0, ciphertext_len] || zero padding.
-        padw loc_loadw_le.4
-        loc_load.10 mem_storew_le
-        dropw
-
-        loc_load.9
-        loc_load.10 add.4
-        loc_load.8
-        exec.copy_felts
-        drop drop
-        # => [alpha_ptr, acc0, acc1, ...]
-
-        loc_load.10 add.4 loc_load.9 add
-        dup push.0 swap mem_store
-        dup add.1 loc_load.9 swap mem_store
-        drop
-        # => [alpha_ptr, acc0, acc1, ...]
-
-        loc_load.9 push.3 eq
+        # With fewer than four ciphertext Felts, nonce and ciphertext fit in the first batch.
+        # For len = 3, nonce(4) + ciphertext(3) + lengths(2) needs nine Felts, hence two batches
+        # and seven padding zeros. Keep len in the unused stream pointer slot to select the second.
+        dup.1 eq.0
         if.true
-            push.2
+            drop drop
+            padw padw push.0
         else
-            push.1
+            padw movup.4
+            padw movup.4 mem_loadw_le
+            # => [W(4), 0, 0, 0, 0, len, alpha_ptr, acc0, acc1, nonce(4), ...]
+            dup.8 dup
+            exec.auth_pad_tail_word
         end
-        loc_store.14
-        # => [alpha_ptr, acc0, acc1, ...]
+        movupw.3
+        # => [nonce(4), padded_ciphertext(4), 0, 0, 0, 0, len, alpha_ptr, acc0, acc1, ...]
+        horner_eval_ext
 
-        loc_load.14 mul.8
-        loc_load.9 add.6
-        sub
-        loc_store.15
-        # => [alpha_ptr, acc0, acc1, ...]
-
-        loc_load.15
-        loc_load.10 add.6 loc_load.9 add
-        exec.zero_felts
-        drop
-        # => [alpha_ptr, acc0, acc1, ...]
-
-        loc_load.10 movdn.3
-        loc_load.14 movdn.4
-        exec.auth_horner_stream_batches
-        movup.3 drop
-        # => [alpha_ptr, acc0, acc1, ...]
+        dup.12 eq.3
+        if.true
+            dropw dropw
+            padw push.0.0.0.3
+            horner_eval_ext
+        end
     end
 
+    dropw dropw dropw drop
     drop
-    # => [acc0, acc1, ...]
+    # => [acc0, acc1, s0, s1, ...]
 
-    loc_load.3
-    loc_load.2
     ext2add
 end
 
 #! Authenticates expanded ciphertext with empty associated data.
 #!
 #! MAC input:
-#! `nonce(4) || ciphertext(8*num_blocks) || [ad_len=0, ct_len=8*num_blocks]`
+#! `nonce(4) || ciphertext(8*num_blocks) || [ad_len=0, ct_len=8*num_blocks] || [0, 0]`
 #!
-#! Adjacent Felts in the MAC input form one quadratic-extension coefficient.
+#! The two final zeros pad the `8*num_blocks + 6` input Felts to a multiple of eight, including
+#! when `num_blocks = 0`. Adjacent Felts form quadratic-extension coefficients, with four
+#! coefficients per MAC batch.
 #!
 #! Input:  [K_MAC(4), nonce(4), ct_ptr, num_blocks, ...]
 #! Output: [tag0, tag1, ...]
@@ -612,192 +592,103 @@ end
 #! - the ciphertext length or address range overflows, or the range reaches the local frame.
 #!
 #! Invocation: exec
-@locals(20)
+@locals(4)
 pub proc auth_empty_ad_expanded(
     mac_key: MacKey,
     nonce: Nonce,
     ciphertext: ptr<felt>,
     num_blocks: u32,
 ) -> Tag
-    loc_storew_le.0
-    dropw
-    loc_storew_le.4
-    dropw
-    # => [ct_ptr, num_blocks, ...]
-
-    dup exec.assert_aead_pointer loc_store.16
-    dup.1 u32assert.err="AEAD block count must fit in a u32"
-    dup
+    # => [K_MAC(4), nonce(4), ct_ptr, num_blocks, ...]
+    dup.8 exec.assert_aead_pointer drop
+    dup.9 u32assert.err="AEAD block count must fit in a u32"
     u32lte.AEAD_MAX_EMPTY_AD_CIPHERTEXT_BLOCKS
     assert.err="AEAD authentication input exceeds its supported length"
-    loc_store.17
 
-    loc_load.17 u32widening_mul.8
+    # `horner_eval_ext` requires an aligned word `[r0, r1, 0, 0]` for the evaluation point.
+    # Keep the mask `(s0, s1)` on the stack below the accumulator until the final `ext2add`.
+    push.0.0 movup.3 movup.3
+    loc_storew_le.0
+    dropw
+    movdn.5 movdn.5
+    movup.7 movup.7
+    # => [ct_ptr, num_blocks, nonce(4), s0, s1, ...]
+
+    dup.1 u32widening_mul.8
     swap assertz.err="AEAD ciphertext length exceeds u32"
-    loc_store.18
+    # => [ct_len, ct_ptr, num_blocks, nonce(4), s0, s1, ...]
 
-    loc_load.17 neq.0
+    dup.2 neq.0
     if.true
-        loc_load.16 loc_load.18 exec.checked_aead_range_last
-        loc_store.19
-        locaddr.0 loc_load.19 u32gt
+        dup.1 dup.1 exec.checked_aead_range_last
+        locaddr.0 swap u32gt
         assert.err="AEAD memory ranges must stay below the local frame"
     end
 
-    # Keep the MAC mask in locals 2..4, but give Horner its canonical
-    # `[r0, r1, 0, 0]` evaluation-point word.
-    push.0.0 loc_load.1 loc_load.0
-    loc_storew_le.12
-    dropw
+    push.0.1
+    locaddr.0
+    movup.5 movup.5 movup.5
+    # => [ct_len, ct_ptr, num_blocks, alpha_ptr, acc0, acc1, nonce(4), s0, s1, ...]
 
-    # Store the final length fields and the two padding zeros.
-    push.0.0.0.0
-    loc_storew_le.8
-    dropw
-    loc_load.18 loc_store.9
-    # => [ct_ptr, num_blocks, ...]
-
-    dup.1 neq.0
+    dup.2 neq.0
     if.true
-        # Accumulator state for `horner_eval_ext`: [alpha_ptr, acc0, acc1, ...].
-        push.0.1
-        locaddr.12
-        # => [alpha_ptr, acc0, acc1, ct_ptr, num_blocks, ...]
+        # Keep [0, ct_len, 0, middle] in the slots preserved by `mem_stream` and `horner_eval_ext`.
+        # The ciphertext length remains available for the final batch.
+        dup.1 add.4
+        movup.3 sub.1
+        movup.2 push.0
+        push.0 movdn.2
+        # => [0, ct_len, 0, num_blocks - 1, ct_ptr + 4, ct_ptr, alpha_ptr, acc0, acc1,
+        #     nonce(4), ...]
 
         # First batch: nonce(4) || ciphertext[0..4].
-        padw padw push.0
-        dup.12
-        mem_loadw_le
-        padw
-        loc_loadw_le.4
+        padw movup.9 mem_loadw_le
+        movupw.3
         horner_eval_ext
-        dropw dropw dropw drop
-        # => [alpha_ptr, acc0, acc1, ct_ptr, num_blocks, ...]
 
         # Middle batches: ciphertext[4..8*num_blocks-4].
-        movup.3
-        add.4
-        movdn.3
-        movup.4
-        sub.1
-        movdn.4
-        # => [alpha_ptr, acc0, acc1, stream_ptr, remaining_middle, ...]
+        exec.auth_horner_stream_loop
+        # => [BLOCK(8), 0, ct_len, 0, 0, final_word_ptr, alpha_ptr, acc0, acc1, s0, s1, ...]
 
-        exec.auth_horner_stream_batches
-        # => [alpha_ptr, acc0, acc1, final_word_ptr, ...]
-
-        # Final batch: last ciphertext word || [0, ct_len] || zero(2).
-        padw padw push.0
-        dup.12
-        mem_loadw_le
-        padw
-        loc_loadw_le.8
+        # Final batch: last ciphertext word || [ad_len=0, ct_len] || two padding zeros.
+        dup.12 mem_loadw_le
+        swapw dropw
+        push.0.0 dup.7 push.0
         swapw
         horner_eval_ext
-        dropw dropw dropw drop
-        # => [alpha_ptr, acc0, acc1, final_word_ptr, ...]
-
-        movup.3
-        drop
-        drop
-        # => [acc0, acc1, ...]
     else
-        # Empty ciphertext: nonce(4) || [0, 0, 0, 0].
-        push.0.1
-        locaddr.12
-        # => [alpha_ptr, acc0, acc1, ct_ptr, num_blocks, ...]
-
-        padw padw padw push.0
-        loc_loadw_le.4
+        # Empty ciphertext: nonce(4) || [ad_len=0, ct_len=0] || two padding zeros.
+        drop drop drop
+        padw padw push.0
+        movupw.3
         horner_eval_ext
-        dropw dropw dropw drop
-        # => [alpha_ptr, acc0, acc1, ct_ptr, num_blocks, ...]
-
-        movup.4
-        drop
-        movup.3
-        drop
-        drop
-        # => [acc0, acc1, ...]
     end
 
-    loc_load.3
-    loc_load.2
+    dropw dropw dropw drop
+    drop
+    # => [acc0, acc1, s0, s1, ...]
+
     ext2add
 end
 
-#! Encrypts `num_blocks * 8` plaintext felts using `crypto_stream`.
+#! Encrypts a prevalidated range of complete plaintext blocks.
+#!
+#! The caller must check word-aligned u32 pointers, a u32 counter, and a u32 block count.
+#! For non-empty input, both lengths (`8 * num_blocks` and `16 * num_blocks`), both last
+#! addresses, and `counter + num_blocks - 1` must fit in u32. The two non-empty ranges must
+#! be disjoint and end below the caller's local frame.
 #!
 #! Input:  [K_CTR(4), src_ptr, dst_ptr, counter, num_blocks, ...]
 #! Output: [K_CTR(4), src_ptr + 8*num_blocks, dst_ptr + 16*num_blocks,
 #!          counter + num_blocks, ...]
-#!
-#! Where:
-#! - `src_ptr` addresses `num_blocks * 8` plaintext Felts.
-#! - `dst_ptr` addresses `num_blocks * 16` writable ciphertext-limb Felts.
-#! - `num_blocks = 0` is a valid no-op.
-#! - counter blocks used with the same `K_CTR` must not repeat.
-#!
-#! The returned counter is a Felt so it can represent `2^32`, the exhausted sentinel. This value
-#! cannot be passed as an input counter, even when `num_blocks = 0`.
-#!
-#! Panics if:
-#! - either pointer, `counter`, or `num_blocks` does not fit in a u32;
-#! - either pointer is not word-aligned;
-#! - a length, address, or counter range overflows;
-#! - the memory ranges overlap or reach the procedure's local frame.
-#!
-#! Invocation: exec
-@locals(8)
-pub proc encrypt_blocks_stream(
-    key: CtrKey,
-    source: ptr<felt>,
-    destination: ptr<felt>,
-    counter: u32,
-    num_blocks: u32,
-) -> (CtrKey, ptr<felt>, ptr<felt>, felt)
-    # Validate the complete input and output ranges before the first write. Per-block checks alone
-    # do not prevent an early expanded-ciphertext block from overwriting a later plaintext block.
-    dup.4 exec.assert_aead_pointer loc_store.0
-    dup.5 exec.assert_aead_pointer loc_store.1
-    dup.6 u32assert.err="AEAD counter must fit in a u32" loc_store.7
-    dup.7 u32assert.err="AEAD block count must fit in a u32" loc_store.2
-
-    loc_load.2 u32widening_mul.8
-    swap assertz.err="AEAD plaintext length exceeds u32"
-    loc_store.3
-    loc_load.3 dup u32overflowing_add
-    assertz.err="AEAD ciphertext length exceeds u32"
-    loc_store.4
-
-    loc_load.2 neq.0
-    if.true
-        loc_load.7 loc_load.2 exec.checked_aead_counter_last
-        drop
-
-        loc_load.0 loc_load.3 exec.checked_aead_range_last
-        loc_store.5
-        loc_load.1 loc_load.4 exec.checked_aead_range_last
-        loc_store.6
-
-        locaddr.0 loc_load.5 u32gt
-        assert.err="AEAD memory ranges must stay below the local frame"
-        locaddr.0 loc_load.6 u32gt
-        assert.err="AEAD memory ranges must stay below the local frame"
-
-        # dst_ptr > src_last OR src_ptr > dst_last
-        loc_load.1 loc_load.5 u32gt
-        loc_load.0 loc_load.6 u32gt
-        or assert.err="AEAD memory ranges must not overlap"
-    end
-
-    # Put loop state in the order expected below the Eidos counter block.
+proc encrypt_validated_blocks_stream
+    # Put the counter before the pointers, as required by `crypto_stream`.
     movup.6
     movdn.4
     # => [K_CTR(4), counter, src_ptr, dst_ptr, remaining, ...]
 
-    # Process leading blocks until `remaining` is divisible by eight, then run
-    # the hot loop in eight-block chunks to amortize `while.true` overhead.
+    # Handle the initial num_blocks % 8 blocks, then process eight blocks per loop iteration
+    # to reduce loop overhead.
     dup.7 u32mod.2
     if.true
         crypto_stream
@@ -832,11 +723,76 @@ pub proc encrypt_blocks_stream(
     # => [K_CTR(4), src_ptr, dst_ptr, counter, ...]
 end
 
-#! Encrypts `num_felts` plaintext Felts into expanded ciphertext limbs.
+#! Encrypts `num_blocks * 8` plaintext felts using `crypto_stream`.
 #!
-#! Full 8-Felt blocks use `encrypt_blocks_stream`; a non-empty tail is copied
-#! into local scratch, encrypted as one padded stream block, and copied back as
-#! exactly `2 * tail` ciphertext-limb Felts.
+#! Input:  [K_CTR(4), src_ptr, dst_ptr, counter, num_blocks, ...]
+#! Output: [K_CTR(4), src_ptr + 8*num_blocks, dst_ptr + 16*num_blocks,
+#!          counter + num_blocks, ...]
+#!
+#! Where:
+#! - `src_ptr` addresses `num_blocks * 8` plaintext Felts.
+#! - `dst_ptr` addresses `num_blocks * 16` writable ciphertext-limb Felts.
+#! - `num_blocks = 0` is a valid no-op.
+#! - counter blocks used with the same `K_CTR` must not repeat.
+#!
+#! The returned counter is a Felt so it can represent `2^32`, the exhausted sentinel. This value
+#! cannot be passed as an input counter, even when `num_blocks = 0`.
+#!
+#! Panics if:
+#! - either pointer, `counter`, or `num_blocks` does not fit in a u32;
+#! - either pointer is not word-aligned;
+#! - a length, address, or counter range overflows;
+#! - the memory ranges overlap or reach the procedure's local frame.
+#!
+#! Invocation: exec
+@locals(4)
+pub proc encrypt_blocks_stream(
+    key: CtrKey,
+    source: ptr<felt>,
+    destination: ptr<felt>,
+    counter: u32,
+    num_blocks: u32,
+) -> (CtrKey, ptr<felt>, ptr<felt>, felt)
+    # Validate the complete input and output ranges before the first write. Per-block checks alone
+    # do not prevent an early expanded-ciphertext block from overwriting a later plaintext block.
+    # => [K_CTR(4), src_ptr, dst_ptr, counter, num_blocks, ...]
+    dup.4 exec.assert_aead_pointer drop
+    dup.5 exec.assert_aead_pointer drop
+    dup.6 u32assert.err="AEAD counter must fit in a u32" drop
+    dup.7 u32assert.err="AEAD block count must fit in a u32"
+    u32widening_mul.8
+    swap assertz.err="AEAD plaintext length exceeds u32"
+    dup dup u32overflowing_add
+    assertz.err="AEAD ciphertext length exceeds u32"
+    # => [ct_len, pt_len, K_CTR(4), src_ptr, dst_ptr, counter, num_blocks, ...]
+
+    dup.9 neq.0
+    if.true
+        dup.8 dup.10 exec.checked_aead_counter_last
+        drop
+        dup.6 dup.2 exec.checked_aead_range_last
+        dup.8 dup.2 exec.checked_aead_range_last
+        # => [dst_last, src_last, ct_len, pt_len, K_CTR(4), src_ptr, dst_ptr, counter,
+        #     num_blocks, ...]
+
+        # Keep both buffers below this procedure's local-memory region, which starts at locaddr.0.
+        dup locaddr.0 swap u32gt
+        assert.err="AEAD memory ranges must stay below the local frame"
+        dup.1 locaddr.0 swap u32gt
+        assert.err="AEAD memory ranges must stay below the local frame"
+
+        # dst_ptr > src_last OR src_ptr > dst_last
+        dup.9 dup.2 u32gt
+        dup.9 dup.2 u32gt
+        or assert.err="AEAD memory ranges must not overlap"
+        drop drop
+    end
+    drop drop
+
+    exec.encrypt_validated_blocks_stream
+end
+
+#! Encrypts `num_felts` plaintext Felts into expanded ciphertext limbs.
 #!
 #! Input:  [K_CTR(4), src_ptr, dst_ptr, counter, num_felts, ...]
 #! Output: [K_CTR(4), src_ptr + num_felts, dst_ptr + 2*num_felts,
@@ -857,7 +813,7 @@ end
 #! - the memory ranges overlap or reach the procedure's local frame.
 #!
 #! Invocation: exec
-@locals(36)
+@locals(4)
 pub proc encrypt_felts_expanded(
     key: CtrKey,
     source: ptr<felt>,
@@ -866,109 +822,111 @@ pub proc encrypt_felts_expanded(
     num_felts: u32,
 ) -> (CtrKey, ptr<felt>, ptr<felt>, felt)
     # Validate the complete input and output ranges before the full-block or tail path writes.
-    dup.4 exec.assert_aead_pointer loc_store.28
-    dup.5 exec.assert_aead_pointer loc_store.29
-    dup.6 u32assert.err="AEAD counter must fit in a u32" loc_store.34
-    dup.7 u32assert.err="AEAD plaintext length must fit in a u32" loc_store.30
-
-    loc_load.30 dup u32overflowing_add
+    # => [K_CTR(4), src_ptr, dst_ptr, counter, num_felts, ...]
+    dup.4 exec.assert_aead_pointer drop
+    dup.5 exec.assert_aead_pointer drop
+    dup.6 u32assert.err="AEAD counter must fit in a u32" drop
+    dup.7 u32assert.err="AEAD plaintext length must fit in a u32"
+    dup u32overflowing_add
     assertz.err="AEAD ciphertext length exceeds u32"
-    loc_store.31
+    # => [ct_len, K_CTR(4), src_ptr, dst_ptr, counter, num_felts, ...]
 
-    # used_blocks = ceil(num_felts / 8). The ciphertext-length check above bounds num_felts, so
-    # adding seven cannot overflow.
-    loc_load.30 u32overflowing_add.7
-    assertz.err="AEAD plaintext length exceeds u32"
-    u32div.8
-    loc_store.35
-
-    loc_load.30 neq.0
+    dup.8 neq.0
     if.true
-        loc_load.34 loc_load.35 exec.checked_aead_counter_last
+        # The checked ciphertext length bounds num_felts to 2^31 - 1, so adding seven fits in u32.
+        dup.7 dup.9 add.7 u32div.8 exec.checked_aead_counter_last
         drop
+        dup.5 dup.9 exec.checked_aead_range_last
+        dup.7 dup.2 exec.checked_aead_range_last
+        # => [dst_last, src_last, ct_len, K_CTR(4), src_ptr, dst_ptr, counter, num_felts, ...]
 
-        loc_load.28 loc_load.30 exec.checked_aead_range_last
-        loc_store.32
-        loc_load.29 loc_load.31 exec.checked_aead_range_last
-        loc_store.33
-
-        locaddr.0 loc_load.32 u32gt
+        # Require both buffers to end below locaddr.0, the start of this procedure's locals.
+        # The encryption helper allocates its tail scratch at higher addresses, so these bounds
+        # prevent scratch writes from overwriting either buffer.
+        dup locaddr.0 swap u32gt
         assert.err="AEAD memory ranges must stay below the local frame"
-        locaddr.0 loc_load.33 u32gt
+        dup.1 locaddr.0 swap u32gt
         assert.err="AEAD memory ranges must stay below the local frame"
 
         # dst_ptr > src_last OR src_ptr > dst_last
-        loc_load.29 loc_load.32 u32gt
-        loc_load.28 loc_load.33 u32gt
+        dup.8 dup.2 u32gt
+        dup.8 dup.2 u32gt
         or assert.err="AEAD memory ranges must not overlap"
+        drop drop
     end
+    drop
 
+    exec.encrypt_felts_expanded_validated
+end
+
+#! Encrypts `num_felts` plaintext Felts whose ranges the caller has validated.
+#!
+#! The caller must check word-aligned u32 pointers and u32 values for `counter` and `num_felts`.
+#! For non-empty input, `2 * num_felts`, both last addresses, and
+#! `counter + ceil(num_felts / 8) - 1` must fit in u32. The two non-empty ranges must be disjoint
+#! and end below the caller's local frame.
+#!
+#! Input:  [K_CTR(4), src_ptr, dst_ptr, counter, num_felts, ...]
+#! Output: [K_CTR(4), src_ptr + num_felts, dst_ptr + 2*num_felts,
+#!          counter + ceil(num_felts / 8), ...]
+@locals(24)
+proc encrypt_felts_expanded_validated
     movup.7
     u32divmod.8
     swap
     # => [full_blocks, tail, K_CTR(4), src_ptr, dst_ptr, counter, ...]
 
-    swap loc_store.24
+    swap movdn.8
     movdn.7
-    exec.encrypt_blocks_stream
-    # => [K_CTR(4), src_ptr_full, dst_ptr_full, counter_full, ...]
+    exec.encrypt_validated_blocks_stream
+    # => [K_CTR(4), src_ptr_full, dst_ptr_full, counter_full, tail, ...]
 
-    loc_load.24
+    movup.7
     dup neq.0
     if.true
-        # Save the post-prefix pointers and counter. The tail length remains on
-        # the stack until it is consumed by `copy_felts`.
-        dup.5 loc_store.25
-        dup.6 loc_store.26
-        dup.7 loc_store.27
         # => [tail, K_CTR(4), src_ptr_full, dst_ptr_full, counter_full, ...]
 
-        # Local memory is not guaranteed to be zeroed.
-        padw locaddr.0 mem_storew_le dropw
-        padw locaddr.4 mem_storew_le dropw
-        # => [tail, K_CTR(4), src_ptr_full, dst_ptr_full, counter_full, ...]
+        # `crypto_stream` reads eight plaintext Felts and writes sixteen ciphertext limbs per
+        # block. Use local scratch for this partial block so the full write fits. Each Felt is
+        # encrypted independently, and only the first 2 * tail limbs are copied out, so scratch
+        # cells beyond the plaintext tail need no initialization.
+        padw dup.9 mem_loadw_le
+        loc_storew_le.0 dropw
+        dup push.4 u32gt
+        if.true
+            padw dup.9 add.4 mem_loadw_le
+            loc_storew_le.4 dropw
+        end
 
-        # Copy the plaintext tail into an 8-Felt scratch block.
-        dup.5 locaddr.0 swap
-        # => [src_ptr_full, tail_pt_ptr, tail, K_CTR(4), ...]
-        exec.copy_felts
-        drop drop
-        # => [K_CTR(4), src_ptr_full, dst_ptr_full, counter_full, ...]
-
-        movup.6 drop
-        movup.5 drop
-        movup.4 drop
-        # => [K_CTR(4), ...]
-
-        locaddr.0 movdn.4
-        locaddr.8 movdn.5
-        loc_load.27 movdn.6
-        push.1 movdn.7
-        # => [K_CTR(4), tail_pt_ptr, tail_ct_ptr, counter_full, 1, ...]
-
-        movup.6 movdn.4
-        # => [K_CTR(4), counter_full, tail_pt_ptr, tail_ct_ptr, 1, ...]
+        # Keep the tail length and caller pointers below the `crypto_stream` inputs.
+        movdn.4
+        movup.7
+        push.1 locaddr.8 locaddr.0
+        movup.3
+        swapw
+        # => [K_CTR(4), counter_full, tail_pt_ptr, tail_ct_ptr, 1, tail, src_ptr_full,
+        #     dst_ptr_full, ...]
         crypto_stream
-        # => [K_CTR(4), counter_tail, tail_pt_ptr + 8, tail_ct_ptr + 16, 0, ...]
+        # => [K_CTR(4), counter_tail, tail_pt_ptr + 8, tail_ct_ptr + 16, 0, tail, src_ptr_full,
+        #     dst_ptr_full, ...]
 
-        # Copy only the logical ciphertext limbs for the original tail.
-        loc_load.24 mul.2
-        loc_load.26
+        # Copy exactly 2 * tail ciphertext limbs to the destination.
+        dup.8 mul.2
+        dup.11
         locaddr.8
-        # => [tail_dst_ptr, dst_ptr_full, 2*tail, K_CTR(4), ...]
+        # => [tail_ct_ptr, dst_ptr_full, 2*tail, K_CTR(4), counter_tail, tail_pt_ptr + 8,
+        #     tail_ct_ptr + 16, 0, tail, src_ptr_full, dst_ptr_full, ...]
         exec.copy_felts
-        drop drop
-        # => [K_CTR(4), counter_tail, tail_pt_ptr + 8, tail_ct_ptr + 16, 0, ...]
+        drop
+        # => [dst_ptr_full + 2*tail, K_CTR(4), counter_tail, tail_pt_ptr + 8, tail_ct_ptr + 16, 0,
+        #     tail, src_ptr_full, dst_ptr_full, ...]
 
-        movup.7 drop
-        movup.6 drop
-        movup.5 drop
-        movup.4 loc_store.27
-        # => [K_CTR(4), ...]
-
-        loc_load.25 loc_load.24 add movdn.4
-        loc_load.26 loc_load.24 mul.2 add movdn.5
-        loc_load.27 movdn.6
+        movup.11 drop
+        movup.10 movup.10 add
+        # => [src_ptr_full + tail, dst_ptr_full + 2*tail, K_CTR(4), counter_tail, tail_pt_ptr + 8,
+        #     tail_ct_ptr + 16, 0, ...]
+        movup.9 drop movup.8 drop movup.7 drop
+        swap movdn.5 movdn.4
         # => [K_CTR(4), src_ptr_full + tail, dst_ptr_full + 2*tail, counter_tail, ...]
     else
         drop
@@ -988,7 +946,7 @@ end
 #! - `src_ptr` points to `2 * num_felts` ciphertext-limb Felts followed by
 #!   `tag(2)`.
 #! - `dst_ptr` receives `num_felts` plaintext Felts from advice.
-#! - `scratch_ptr` addresses at least `max(16, 2 * num_felts)` writable Felts.
+#! - `scratch_ptr` addresses at least `2 * num_felts` writable Felts.
 #! - The host must register the core-library event handlers.
 #!
 #! Panics if:
@@ -1000,7 +958,7 @@ end
 #! - the tag or host-supplied plaintext witness is invalid.
 #!
 #! Invocation: exec
-@locals(16)
+@locals(4)
 pub proc decrypt_empty_ad(
     key: Key,
     nonce: Nonce,
@@ -1009,101 +967,92 @@ pub proc decrypt_empty_ad(
     num_felts: u32,
     scratch: ptr<felt>,
 )
-    loc_storew_le.0
-    dropw
-    loc_storew_le.4
-    dropw
-    loc_store.8
-    loc_store.9
-    loc_store.10
-    loc_store.11
-    # => [...]
+    # Bring the pointers and length above the key and nonce for validation.
+    movupw.2
+    # => [src_ptr, dst_ptr, num_felts, scratch_ptr, key(4), nonce(4), ...]
 
-    loc_load.8 exec.assert_aead_pointer drop
-    loc_load.9 exec.assert_aead_pointer drop
-    loc_load.11 exec.assert_aead_pointer drop
-    loc_load.10 u32assert.err="AEAD plaintext length must fit in a u32"
+    dup exec.assert_aead_pointer drop
+    dup.1 exec.assert_aead_pointer drop
+    dup.3 exec.assert_aead_pointer drop
+    dup.2 u32assert.err="AEAD plaintext length must fit in a u32"
     u32lte.AEAD_MAX_EMPTY_AD_PLAINTEXT_FELTS
     assert.err="AEAD authentication input exceeds its supported length"
 
     # ciphertext_len = 2 * num_felts
-    loc_load.10 dup u32overflowing_add
+    dup.2 dup u32overflowing_add
     assertz.err="AEAD ciphertext length exceeds u32"
-    loc_store.15
+    # => [ciphertext_len, src_ptr, dst_ptr, num_felts, scratch_ptr, ...]
 
     # source_last = src_ptr + ciphertext_len + tag_len - 1
-    loc_load.8
-    loc_load.15 u32overflowing_add.1
+    dup u32overflowing_add.1
     assertz.err="AEAD source range exceeds u32"
-    u32overflowing_add
+    dup.2 u32overflowing_add
     assertz.err="AEAD memory range exceeds the u32 address space"
-    loc_store.12
-
-    # scratch_last = scratch_ptr + max(16, ciphertext_len) - 1
-    loc_load.11
-    loc_load.15 push.16 u32max
-    exec.checked_aead_range_last
-    loc_store.14
-
-    locaddr.0 loc_load.12 u32gt
-    assert.err="AEAD memory ranges must stay below the local frame"
-    locaddr.0 loc_load.14 u32gt
+    # => [source_last, ciphertext_len, src_ptr, dst_ptr, num_felts, scratch_ptr, ...]
+    dup locaddr.0 swap u32gt
     assert.err="AEAD memory ranges must stay below the local frame"
 
-    # Source and scratch are always non-empty.
-    # scratch_ptr > source_last OR src_ptr > scratch_last
-    loc_load.11 loc_load.12 u32gt
-    loc_load.8 loc_load.14 u32gt
-    or assert.err="AEAD memory ranges must not overlap"
-
-    # The destination range is empty when num_felts is zero.
-    loc_load.10 neq.0
+    # The destination and scratch ranges are empty when num_felts is zero; the source always
+    # holds the tag.
+    dup.4 neq.0
     if.true
         # destination_last = dst_ptr + num_felts - 1
-        loc_load.9 loc_load.10 exec.checked_aead_range_last
-        loc_store.13
-        locaddr.0 loc_load.13 u32gt
+        dup.3 dup.5 exec.checked_aead_range_last
+        dup locaddr.0 swap u32gt
         assert.err="AEAD memory ranges must stay below the local frame"
 
+        # scratch_last = scratch_ptr + ciphertext_len - 1
+        dup.6 dup.3 exec.checked_aead_range_last
+        dup locaddr.0 swap u32gt
+        assert.err="AEAD memory ranges must stay below the local frame"
+        # => [scratch_last, destination_last, source_last, ciphertext_len, src_ptr, dst_ptr,
+        #     num_felts, scratch_ptr, ...]
+
         # dst_ptr > source_last OR src_ptr > destination_last
-        loc_load.9 loc_load.12 u32gt
-        loc_load.8 loc_load.13 u32gt
+        dup.5 dup.3 u32gt
+        dup.5 dup.3 u32gt
+        or assert.err="AEAD memory ranges must not overlap"
+
+        # scratch_ptr > source_last OR src_ptr > scratch_last
+        dup.7 dup.3 u32gt
+        dup.5 dup.2 u32gt
         or assert.err="AEAD memory ranges must not overlap"
 
         # scratch_ptr > destination_last OR dst_ptr > scratch_last
-        loc_load.11 loc_load.13 u32gt
-        loc_load.9 loc_load.14 u32gt
+        dup.7 dup.2 u32gt
+        dup.6 dup.2 u32gt
         or assert.err="AEAD memory ranges must not overlap"
-    end
 
-    # Rebuild the public stack ABI for the host handler after validating every range.
-    loc_load.11
-    loc_load.10
-    loc_load.9
-    loc_load.8
-    padw loc_loadw_le.4
-    padw loc_loadw_le.0
+        drop drop
+    end
+    drop drop
+    # => [src_ptr, dst_ptr, num_felts, scratch_ptr, key(4), nonce(4), ...]
+
+    # Emit the event with the public stack ABI in place, after validating every range.
+    movdnw.2
     emit.AEAD_DECRYPT_EMPTY_AD_EVENT
-    dropw dropw drop drop drop drop
-    # => [...]
+    movupw.2
+    # => [src_ptr, dst_ptr, num_felts, scratch_ptr, key(4), nonce(4), ...]
+
+    # These checks satisfy the validated helpers' preconditions: word-aligned u32 pointers and
+    # non-empty ranges that fit in u32, are pairwise disjoint, and end below this frame.
+    # The message limit also bounds 2 * num_felts and the last counter used when starting from zero.
 
     # Authenticate the input ciphertext and tag before using advice plaintext.
-    padw loc_loadw_le.4
-    padw loc_loadw_le.0
+    dupw.1 dupw.3 swapw
     exec.derive_mac_key
-    # => [K_MAC(4), ...]
+    # => [K_MAC(4), src_ptr, dst_ptr, num_felts, scratch_ptr, key(4), nonce(4), ...]
 
-    padw loc_loadw_le.4
-    swapw
-    loc_load.8 movdn.8
-    loc_load.10 mul.2 movdn.9
-    loc_load.11 movdn.10
-    # => [K_MAC(4), nonce(4), src_ptr, ciphertext_len, scratch_ptr, ...]
+    dupw.3 swapw
+    dup.8
+    dup.11 mul.2
+    movdn.9 movdn.8
+    # => [K_MAC(4), nonce(4), src_ptr, ciphertext_len, src_ptr, dst_ptr, num_felts, scratch_ptr,
+    #     key(4), nonce(4), ...]
+    exec.auth_empty_ad_expanded_exact_validated
+    # => [tag0, tag1, src_ptr, dst_ptr, num_felts, scratch_ptr, key(4), nonce(4), ...]
 
-    exec.auth_empty_ad_expanded_with_scratch
-    # => [tag0, tag1, ...]
-
-    loc_load.8 loc_load.10 mul.2 add
+    dup.2 dup.5 mul.2 add
     # => [tag_ptr, tag0, tag1, ...]
     dup mem_load
     movup.2 assert_eq.err="AEAD tag mismatch"
@@ -1111,33 +1060,29 @@ pub proc decrypt_empty_ad(
     dup add.1 mem_load
     movup.2 assert_eq.err="AEAD tag mismatch"
     drop
-    # => [...]
+    # => [src_ptr, dst_ptr, num_felts, scratch_ptr, key(4), nonce(4), ...]
 
-    loc_load.10
-    loc_load.9
+    dup.2 dup.2
     exec.load_advice_felts_to_memory
     drop
-    # => [...]
 
     # Re-encrypt the claimed plaintext into scratch.
-    padw loc_loadw_le.4
-    padw loc_loadw_le.0
+    dupw.1 dupw.3 swapw
     exec.derive_ctr_key
-    # => [K_CTR(4), ...]
+    # => [K_CTR(4), src_ptr, dst_ptr, num_felts, scratch_ptr, key(4), nonce(4), ...]
 
-    loc_load.9 movdn.4
-    loc_load.11 movdn.5
-    push.0 movdn.6
-    loc_load.10 movdn.7
-    exec.encrypt_felts_expanded
+    dup.6 push.0 dup.9 dup.8
+    swapw
+    # => [K_CTR(4), dst_ptr, scratch_ptr, 0, num_felts, src_ptr, dst_ptr, num_felts, scratch_ptr,
+    #     key(4), nonce(4), ...]
+    exec.encrypt_felts_expanded_validated
     dropw drop drop drop
-    # => [...]
+    # => [src_ptr, dst_ptr, num_felts, scratch_ptr, key(4), nonce(4), ...]
 
-    loc_load.10 mul.2
-    loc_load.8
-    loc_load.11
+    dup.2 mul.2 dup.1 dup.5
     # => [scratch_ptr, src_ptr, ciphertext_len, ...]
     exec.assert_felts_equal
     drop drop
+    dropw dropw dropw
     # => [...]
 end

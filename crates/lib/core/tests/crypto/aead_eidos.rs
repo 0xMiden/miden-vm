@@ -380,11 +380,19 @@ fn encrypt_felts_expanded_matches_reference_for_exact_lengths() {
         let expected_src = SRC_PTR + num_felts;
         let expected_dst = DST_PTR + 2 * num_felts;
 
-        let stores = store_felts(SRC_PTR, &plaintext);
+        // Sentinels after the plaintext must not affect the ciphertext. Sentinels after the output
+        // must remain unchanged after the tail copy.
+        let mut stores = store_felts(SRC_PTR, &plaintext);
+        stores.push_str(&store_sentinels(SRC_PTR + num_felts, 1001));
+        if num_felts != 0 {
+            stores.push_str(&store_sentinels(DST_PTR + 2 * num_felts, 2001));
+        }
         let expected_memory = if num_felts == 0 {
             vec![91, 92, 93, 94]
         } else {
-            felts_to_u64(&ciphertext)
+            let mut expected = felts_to_u64(&ciphertext);
+            expected.extend(2001..2001 + SENTINEL_CELLS);
+            expected
         };
         let zero_memory_setup = if num_felts == 0 {
             "
@@ -435,20 +443,20 @@ fn encrypt_felts_expanded_matches_reference_for_exact_lengths() {
 fn encrypt_entry_points_reject_cross_block_overlap() {
     // The first block sees adjacent ranges, but its output would overwrite the next input block.
     assert_encrypt_rejected(
-        "encrypt_blocks_stream cross-block overlap",
         "encrypt_blocks_stream",
         1000,
         1008,
         2,
+        "AEAD memory ranges must not overlap",
     );
 
     // The aligned prefix would overwrite the ninth Felt before the tail path reads it.
     assert_encrypt_rejected(
-        "encrypt_felts_expanded cross-block overlap",
         "encrypt_felts_expanded",
         1000,
         1008,
         9,
+        "AEAD memory ranges must not overlap",
     );
 }
 
@@ -473,31 +481,37 @@ fn encrypt_entry_points_reject_local_memory_aliases() {
 
     for (procedure, count) in [("encrypt_blocks_stream", 1), ("encrypt_felts_expanded", 4)] {
         assert_encrypt_rejected(
-            "source aliases procedure-local memory",
             procedure,
             local_memory_start,
             1000,
             count,
+            "AEAD memory ranges must stay below the local frame",
         );
-        assert_encrypt_local_frame_rejected(procedure, 1000, local_memory_start, count);
+        assert_encrypt_rejected(
+            procedure,
+            1000,
+            local_memory_start,
+            count,
+            "AEAD memory ranges must stay below the local frame",
+        );
     }
 }
 
 #[test]
 fn encrypt_entry_points_reject_expanded_length_overflow() {
     assert_encrypt_rejected(
-        "encrypt_blocks_stream ciphertext length overflow",
         "encrypt_blocks_stream",
         1000,
         2000,
         1_u64 << 28,
+        "AEAD ciphertext length exceeds u32",
     );
     assert_encrypt_rejected(
-        "encrypt_felts_expanded ciphertext length overflow",
         "encrypt_felts_expanded",
         1000,
         2000,
         1_u64 << 31,
+        "AEAD ciphertext length exceeds u32",
     );
 }
 
@@ -535,15 +549,19 @@ fn encrypt_entry_points_validate_counter_schedule() {
 }
 
 #[test]
-fn auth_empty_ad_expanded_with_scratch_matches_reference_for_exact_lengths() {
-    for num_felts in [0_usize, 1, 2, 4, 5, 8, 9, 13, 16, 24, 31, 64] {
+fn auth_empty_ad_expanded_exact_matches_reference_for_exact_lengths() {
+    // Cover every ciphertext tail length, both with and without complete middle batches.
+    for ciphertext_len in (0_usize..=20).chain([26, 32, 48, 62, 63, 64, 128]) {
         let key = word([1, 2, 3, 4]);
         let nonce = word([0x10, 0x20, 0x30, 0x40]);
         let nonce_elements = nonce.into_elements();
         let mac_key_elements = derive_mac_key(key, nonce).into_elements();
-        let plaintext = stream_plaintext_felts(num_felts);
-        let ciphertext = encrypt_felts_expanded(key, nonce, &plaintext);
-        let stores = store_felts(DST_PTR, &ciphertext);
+        let plaintext = stream_plaintext_felts(ciphertext_len.div_ceil(2));
+        let mut ciphertext = encrypt_felts_expanded(key, nonce, &plaintext);
+        ciphertext.truncate(ciphertext_len);
+        // Nonzero sentinels ensure the MAC excludes values read past the ciphertext tail.
+        let mut stores = store_felts(DST_PTR, &ciphertext);
+        stores.push_str(&store_sentinels(DST_PTR + ciphertext_len as u64, 1001));
         let expected_tag = auth_tag_expanded(key, nonce, &[], &ciphertext);
         let expected_tag_0 = expected_tag[0].as_canonical_u64();
         let expected_tag_1 = expected_tag[1].as_canonical_u64();
@@ -555,13 +573,12 @@ fn auth_empty_ad_expanded_with_scratch_matches_reference_for_exact_lengths() {
     begin
         {stores}
 
-        push.{SCRATCH_PTR}
         push.{ciphertext_len}
         push.{DST_PTR}
         push.{nonce_elements:?}
         push.{mac_key_elements:?}
 
-        exec.aead_eidos::auth_empty_ad_expanded_with_scratch
+        exec.aead_eidos::auth_empty_ad_expanded_exact
 
         push.{expected_tag_0}
         assert_eq.err=\"tag0 must match exact expanded MAC reference\"
@@ -581,19 +598,19 @@ fn auth_empty_ad_expanded_with_scratch_matches_reference_for_exact_lengths() {
 #[test]
 fn auth_empty_ad_expanded_rejects_invalid_ranges() {
     let cases = [
-        ("misaligned ciphertext", 1001, 0),
-        ("ciphertext pointer exceeds u32", U32_ADDRESS_SPACE_END, 0),
-        ("block count exceeds u32", 1000, U32_ADDRESS_SPACE_END),
+        (1001, 0, "AEAD pointer must be word-aligned"),
+        (U32_ADDRESS_SPACE_END, 0, "AEAD pointer must fit in a u32"),
+        (1000, U32_ADDRESS_SPACE_END, "AEAD block count must fit in a u32"),
         (
-            "authentication input exceeds the supported length",
             1000,
             FIRST_UNSUPPORTED_AUTH_BLOCK_COUNT,
+            "AEAD authentication input exceeds its supported length",
         ),
-        ("ciphertext end overflows", U32_ADDRESS_SPACE_END - 4, 1),
+        (U32_ADDRESS_SPACE_END - 4, 1, "AEAD memory range exceeds the u32 address space"),
     ];
 
-    for (case, ct_ptr, num_blocks) in cases {
-        assert_block_auth_rejected(case, ct_ptr, num_blocks);
+    for (ct_ptr, num_blocks, expected_error) in cases {
+        assert_block_auth_rejected(ct_ptr, num_blocks, expected_error);
     }
 }
 
@@ -606,15 +623,16 @@ fn auth_empty_ad_expanded_accepts_zero_blocks() {
 #[test]
 fn auth_empty_ad_expanded_rejects_local_memory_alias() {
     assert_block_auth_rejected(
-        "ciphertext aliases procedure-local memory",
         FMP_INIT_VALUE.as_canonical_u64(),
         1,
+        "AEAD memory ranges must stay below the local frame",
     );
 }
 
 #[test]
 fn decrypt_empty_ad_accepts_valid_ciphertext_for_exact_lengths() {
-    for num_felts in [0_usize, 1, 5, 8, 13, 16, 32, 64] {
+    // Ciphertext lengths 2 * num_felts cover every even MAC tail with and without middle batches.
+    for num_felts in [0_usize, 1, 2, 3, 4, 5, 6, 7, 8, 9, 13, 16, 32, 64] {
         let key = word([1, 2, 3, 4]);
         let nonce = word([0x10, 0x20, 0x30, 0x40]);
         let key_elements = key.into_elements();
@@ -690,7 +708,7 @@ fn decrypt_empty_ad_rejects_overlapping_regions_before_event() {
 
 #[test]
 fn decrypt_empty_ad_accepts_adjacent_regions() {
-    // workspace [984, 1000), source [1000, 1012), destination [1012, 1017)
+    // workspace [984, 994), source [1000, 1012), destination [1012, 1017)
     assert_decrypt_accepts_layout(1000, 1012, 5, 984);
 
     // destination [2000, 2008), workspace [2008, 2024)
@@ -727,19 +745,12 @@ fn decrypt_empty_ad_rejects_local_memory_aliases() {
 
 #[test]
 fn decrypt_empty_ad_handles_empty_destination_range() {
-    // The source still covers the two-Felt tag when num_felts is zero. The empty destination may
-    // begin inside either non-empty region without overlapping it.
+    // The source still covers the two-Felt tag when num_felts is zero. The empty destination and
+    // workspace may begin inside the source without overlapping it.
     assert_decrypt_accepts_layout(1000, 1000, 0, 2000);
     assert_decrypt_accepts_layout(1000, 2000, 0, 2000);
+    assert_decrypt_accepts_layout(1000, 2000, 0, 1000);
     assert_decrypt_accepts_layout(1000, FMP_INIT_VALUE.as_canonical_u64(), 0, 2000);
-
-    assert_decrypt_rejected_before_event(
-        "zero-length plaintext still has a source tag",
-        1000,
-        2000,
-        0,
-        1000,
-    );
 }
 
 #[test]
@@ -761,7 +772,7 @@ fn decrypt_empty_ad_rejects_invalid_ranges_before_event() {
         ),
         ("source end overflows", U32_ADDRESS_SPACE_END - 4, 1000, 2, 2000),
         ("destination end overflows", 1000, U32_ADDRESS_SPACE_END - 4, 8, 2000),
-        ("workspace end overflows", 1000, 2000, 1, U32_ADDRESS_SPACE_END - 4),
+        ("workspace end overflows", 1000, 2000, 8, U32_ADDRESS_SPACE_END - 4),
     ];
 
     for (case, src_ptr, dst_ptr, num_felts, scratch_ptr) in cases {
@@ -770,57 +781,38 @@ fn decrypt_empty_ad_rejects_invalid_ranges_before_event() {
 }
 
 #[test]
-fn auth_empty_ad_expanded_with_scratch_rejects_overlapping_regions() {
+fn auth_empty_ad_expanded_exact_accepts_empty_ranges() {
+    assert_auth_accepts(1000, 8);
+    // Empty ciphertext may start at the local frame because no ciphertext memory is accessed.
+    assert_auth_accepts(1000, 0);
+    assert_auth_accepts(FMP_INIT_VALUE.as_canonical_u64(), 0);
+}
+
+#[test]
+fn auth_empty_ad_expanded_exact_rejects_local_memory_alias() {
+    assert_auth_rejected(
+        FMP_INIT_VALUE.as_canonical_u64(),
+        4,
+        "AEAD memory ranges must stay below the local frame",
+    );
+}
+
+#[test]
+fn auth_empty_ad_expanded_exact_rejects_invalid_ranges() {
     let cases = [
-        ("ciphertext and workspace are identical", 1000, 8, 1000),
-        ("workspace starts inside ciphertext", 1000, 8, 1004),
-        ("ciphertext starts inside workspace", 1000, 8, 996),
-    ];
-
-    for (case, ct_ptr, ciphertext_len, scratch_ptr) in cases {
-        assert_auth_rejected(case, ct_ptr, ciphertext_len, scratch_ptr);
-    }
-}
-
-#[test]
-fn auth_empty_ad_expanded_with_scratch_accepts_adjacent_and_empty_ranges() {
-    // workspace [984, 1000), ciphertext [1000, 1008)
-    assert_auth_accepts(1000, 8, 984);
-    // ciphertext [1000, 1008), workspace [1008, 1024)
-    assert_auth_accepts(1000, 8, 1008);
-    // An empty ciphertext region may begin inside the non-empty workspace.
-    assert_auth_accepts(1000, 0, 1000);
-    assert_auth_accepts(FMP_INIT_VALUE.as_canonical_u64(), 0, 1000);
-}
-
-#[test]
-fn auth_empty_ad_expanded_with_scratch_rejects_local_memory_aliases() {
-    let local_memory_start = FMP_INIT_VALUE.as_canonical_u64();
-
-    assert_auth_rejected("ciphertext aliases procedure-local memory", local_memory_start, 4, 1000);
-    assert_auth_local_frame_rejected(1000, 4, local_memory_start);
-}
-
-#[test]
-fn auth_empty_ad_expanded_with_scratch_rejects_invalid_ranges() {
-    let cases = [
-        ("misaligned ciphertext", 1001, 8, 2000),
-        ("misaligned workspace", 1000, 8, 2001),
-        ("ciphertext pointer exceeds u32", U32_ADDRESS_SPACE_END, 0, 2000),
-        ("workspace pointer exceeds u32", 1000, 0, U32_ADDRESS_SPACE_END),
-        ("ciphertext length exceeds u32", 1000, U32_ADDRESS_SPACE_END, 2000),
+        (1001, 8, "AEAD pointer must be word-aligned"),
+        (U32_ADDRESS_SPACE_END, 0, "AEAD pointer must fit in a u32"),
+        (1000, U32_ADDRESS_SPACE_END, "AEAD ciphertext length must fit in a u32"),
         (
-            "authentication input exceeds the supported length",
             1000,
             FIRST_UNSUPPORTED_AUTH_CIPHERTEXT_LEN,
-            2000,
+            "AEAD authentication input exceeds its supported length",
         ),
-        ("ciphertext end overflows", U32_ADDRESS_SPACE_END - 4, 8, 2000),
-        ("workspace end overflows", 1000, 8, U32_ADDRESS_SPACE_END - 4),
+        (U32_ADDRESS_SPACE_END - 4, 8, "AEAD memory range exceeds the u32 address space"),
     ];
 
-    for (case, ct_ptr, ciphertext_len, scratch_ptr) in cases {
-        assert_auth_rejected(case, ct_ptr, ciphertext_len, scratch_ptr);
+    for (ct_ptr, ciphertext_len, expected_error) in cases {
+        assert_auth_rejected(ct_ptr, ciphertext_len, expected_error);
     }
 }
 
@@ -1191,6 +1183,26 @@ fn store_felts(ptr: u64, values: &[Felt]) -> String {
     stores
 }
 
+const SENTINEL_CELLS: u64 = 8;
+
+/// Generates MASM to store consecutive values starting at `first_value` in `SENTINEL_CELLS`
+/// cells at `ptr`. Individual stores allow `ptr` to be unaligned.
+fn store_sentinels(ptr: u64, first_value: u64) -> String {
+    (0..SENTINEL_CELLS)
+        .map(|i| {
+            format!(
+                "
+        push.{}
+        push.{}
+        mem_store
+",
+                first_value + i,
+                ptr + i
+            )
+        })
+        .collect()
+}
+
 fn assert_decrypt_accepts_layout(src_ptr: u64, dst_ptr: u64, num_felts: usize, scratch_ptr: u64) {
     let key = word([1, 2, 3, 4]);
     let nonce = word([0x10, 0x20, 0x30, 0x40]);
@@ -1200,7 +1212,22 @@ fn assert_decrypt_accepts_layout(src_ptr: u64, dst_ptr: u64, num_felts: usize, s
     let mut ciphertext_and_tag = encrypt_felts_expanded(key, nonce, &plaintext);
     let tag = auth_tag_expanded(key, nonce, &[], &ciphertext_and_tag);
     ciphertext_and_tag.extend(tag);
-    let input_stores = store_felts(src_ptr, &ciphertext_and_tag);
+    let mut input_stores = store_felts(src_ptr, &ciphertext_and_tag);
+
+    // Sentinels detect advice writes past the plaintext output and exercise re-encryption with
+    // nonzero values past the tail. Add them only where they cannot overlap source, scratch,
+    // or local memory.
+    let sentinel_start = dst_ptr + num_felts as u64;
+    let src_end = src_ptr + ciphertext_and_tag.len() as u64;
+    let scratch_end = scratch_ptr + 2 * num_felts as u64;
+    let disjoint =
+        |start: u64, end: u64| sentinel_start + SENTINEL_CELLS <= start || end <= sentinel_start;
+    let sentinels = disjoint(src_ptr, src_end)
+        && disjoint(scratch_ptr, scratch_end)
+        && sentinel_start + SENTINEL_CELLS <= FMP_INIT_VALUE.as_canonical_u64();
+    if sentinels {
+        input_stores.push_str(&store_sentinels(sentinel_start, 3001));
+    }
 
     let source = format!(
         "
@@ -1222,10 +1249,14 @@ fn assert_decrypt_accepts_layout(src_ptr: u64, dst_ptr: u64, num_felts: usize, s
     );
 
     let test = build_test!(source.as_str(), &[]);
-    if plaintext.is_empty() {
+    let mut expected_memory = felts_to_u64(&plaintext);
+    if sentinels {
+        expected_memory.extend(3001..3001 + SENTINEL_CELLS);
+    }
+    if expected_memory.is_empty() {
         test.expect_stack(&[]);
     } else {
-        test.expect_stack_and_memory(&[], dst_ptr as u32, &felts_to_u64(&plaintext));
+        test.expect_stack_and_memory(&[], dst_ptr as u32, &expected_memory);
     }
 }
 
@@ -1321,30 +1352,13 @@ fn assert_encrypt_felts_accepts_layout(src_ptr: u64, dst_ptr: u64, num_felts: us
     }
 }
 
-fn assert_encrypt_rejected(case: &str, procedure: &str, src_ptr: u64, dst_ptr: u64, count: u64) {
-    let key = word([1, 2, 3, 4]);
-    let nonce = word([0x10, 0x20, 0x30, 0x40]);
-    let ctr_key_elements = derive_ctr_key(key, nonce).into_elements();
-    let source = format!(
-        "
-    use miden::core::crypto::aead_eidos
-
-    begin
-        push.{count}
-        push.{COUNTER}
-        push.{dst_ptr}
-        push.{src_ptr}
-        push.{ctr_key_elements:?}
-
-        exec.aead_eidos::{procedure}
-    end
-    "
-    );
-
-    assert!(build_test!(source.as_str(), &[]).execute().is_err(), "{case} must be rejected");
-}
-
-fn assert_encrypt_local_frame_rejected(procedure: &str, src_ptr: u64, dst_ptr: u64, count: u64) {
+fn assert_encrypt_rejected(
+    procedure: &str,
+    src_ptr: u64,
+    dst_ptr: u64,
+    count: u64,
+    expected_error: &str,
+) {
     let key = word([1, 2, 3, 4]);
     let nonce = word([0x10, 0x20, 0x30, 0x40]);
     let ctr_key_elements = derive_ctr_key(key, nonce).into_elements();
@@ -1365,7 +1379,15 @@ fn assert_encrypt_local_frame_rejected(procedure: &str, src_ptr: u64, dst_ptr: u
     );
 
     let test = build_test!(source.as_str(), &[]);
-    expect_assert_error_code_from_msg!(test, "AEAD memory ranges must stay below the local frame");
+    let expected_code = miden_core::mast::error_code_from_msg(expected_error);
+    miden_utils_testing::expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { err_code, err_msg }
+                | OperationError::U32AssertionFailed { err_code, err_msg, .. },
+            ..
+        } if err_code == expected_code && err_msg.is_none()
+    );
 }
 
 fn assert_encrypt_exhausts_counter(
@@ -1487,7 +1509,7 @@ fn assert_decrypt_rejected_before_event(
     );
 }
 
-fn assert_auth_accepts(ct_ptr: u64, ciphertext_len: usize, scratch_ptr: u64) {
+fn assert_auth_accepts(ct_ptr: u64, ciphertext_len: usize) {
     let key = word([1, 2, 3, 4]);
     let nonce = word([0x10, 0x20, 0x30, 0x40]);
     let nonce_elements = nonce.into_elements();
@@ -1502,13 +1524,12 @@ fn assert_auth_accepts(ct_ptr: u64, ciphertext_len: usize, scratch_ptr: u64) {
     use miden::core::crypto::aead_eidos
 
     begin
-        push.{scratch_ptr}
         push.{ciphertext_len}
         push.{ct_ptr}
         push.{nonce_elements:?}
         push.{mac_key_elements:?}
 
-        exec.aead_eidos::auth_empty_ad_expanded_with_scratch
+        exec.aead_eidos::auth_empty_ad_expanded_exact
 
         push.{expected_tag_0}
         assert_eq.err=\"tag0 must match for valid memory ranges\"
@@ -1554,7 +1575,7 @@ fn assert_block_auth_accepts(ct_ptr: u64, num_blocks: usize) {
     build_test!(source.as_str(), &[]).expect_stack(&[]);
 }
 
-fn assert_block_auth_rejected(case: &str, ct_ptr: u64, num_blocks: u64) {
+fn assert_block_auth_rejected(ct_ptr: u64, num_blocks: u64, expected_error: &str) {
     let key = word([1, 2, 3, 4]);
     let nonce = word([16, 32, 48, 64]);
     let nonce_elements = nonce.into_elements();
@@ -1575,35 +1596,19 @@ fn assert_block_auth_rejected(case: &str, ct_ptr: u64, num_blocks: u64) {
     "
     );
 
-    assert!(build_test!(source.as_str(), &[]).execute().is_err(), "{case} must be rejected");
-}
-
-fn assert_auth_rejected(case: &str, ct_ptr: u64, ciphertext_len: u64, scratch_ptr: u64) {
-    let key = word([1, 2, 3, 4]);
-    let nonce = word([16, 32, 48, 64]);
-    let nonce_elements = nonce.into_elements();
-    let mac_key_elements = derive_mac_key(key, nonce).into_elements();
-
-    let source = format!(
-        "
-    use miden::core::crypto::aead_eidos
-
-    begin
-        push.{scratch_ptr}
-        push.{ciphertext_len}
-        push.{ct_ptr}
-        push.{nonce_elements:?}
-        push.{mac_key_elements:?}
-
-        exec.aead_eidos::auth_empty_ad_expanded_with_scratch
-    end
-    "
+    let test = build_test!(source.as_str(), &[]);
+    let expected_code = miden_core::mast::error_code_from_msg(expected_error);
+    miden_utils_testing::expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { err_code, err_msg }
+                | OperationError::U32AssertionFailed { err_code, err_msg, .. },
+            ..
+        } if err_code == expected_code && err_msg.is_none()
     );
-
-    assert!(build_test!(source.as_str(), &[]).execute().is_err(), "{case} must be rejected");
 }
 
-fn assert_auth_local_frame_rejected(ct_ptr: u64, ciphertext_len: u64, scratch_ptr: u64) {
+fn assert_auth_rejected(ct_ptr: u64, ciphertext_len: u64, expected_error: &str) {
     let key = word([1, 2, 3, 4]);
     let nonce = word([16, 32, 48, 64]);
     let nonce_elements = nonce.into_elements();
@@ -1614,19 +1619,26 @@ fn assert_auth_local_frame_rejected(ct_ptr: u64, ciphertext_len: u64, scratch_pt
     use miden::core::crypto::aead_eidos
 
     begin
-        push.{scratch_ptr}
         push.{ciphertext_len}
         push.{ct_ptr}
         push.{nonce_elements:?}
         push.{mac_key_elements:?}
 
-        exec.aead_eidos::auth_empty_ad_expanded_with_scratch
+        exec.aead_eidos::auth_empty_ad_expanded_exact
     end
     "
     );
 
     let test = build_test!(source.as_str(), &[]);
-    expect_assert_error_code_from_msg!(test, "AEAD memory ranges must stay below the local frame");
+    let expected_code = miden_core::mast::error_code_from_msg(expected_error);
+    miden_utils_testing::expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { err_code, err_msg }
+                | OperationError::U32AssertionFailed { err_code, err_msg, .. },
+            ..
+        } if err_code == expected_code && err_msg.is_none()
+    );
 }
 
 struct PlaintextHandler(Vec<Felt>);
