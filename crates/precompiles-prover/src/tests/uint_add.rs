@@ -391,6 +391,32 @@ fn equality_certificate_holds_and_balances() {
 }
 
 #[test]
+fn nz_cert_rejected_on_equality_block() {
+    // An `a + 0 ≡ c` block ignores `b`'s limbs, so a nonzero certificate over them would provide
+    // `UintAdd(bound, a, 0, c, nz = 1)`: "0 ≠ 0".
+    let mut rng = StdRng::seed_from_u64(0x2e_80f1);
+    let bound = random_modulus(&mut rng);
+    let a = random_uint_below(&mut rng, bound);
+
+    let mut store = UintStoreRequires::new();
+    let fp = store.pin_modulus(1, bound);
+    let a_ptr = store.intern_pinned(2, a, fp);
+
+    let mut add = UintAddRequires::new();
+    add.record_eq(a_ptr, a_ptr, fp, 0);
+    let mut main = generate_trace(add, &mut store);
+    crate::tests::check_local(UintAddAir, &main);
+
+    for row in [ROW_AB, ROW_AB + 1] {
+        main.values[row * NUM_MAIN_COLS + COL_NZ] = Felt::ONE;
+    }
+    main.values[ROW_AB * NUM_MAIN_COLS + CELL_HI] = Felt::ONE;
+    main.values[ROW_AB * NUM_MAIN_COLS + CELL_D_W] = Felt::ONE;
+    main.values[ROW_AB * NUM_MAIN_COLS + CELL_D_WS] = Felt::ONE;
+    crate::tests::assert_local_rejects(UintAddAir, &main);
+}
+
+#[test]
 #[should_panic]
 fn is_b_zero_rejects_unequal_values() {
     // Forge the is_b_zero flag onto an honest a + b = c block (zeroing the

@@ -425,6 +425,10 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         let b_ptr_local: AB::Expr = local[COL_B_PTR].into();
         builder.assert_zero(ab_sel.clone() * is_b_zero.clone() * b_ptr_local);
 
+        // The nonzero certificate speaks about the stored `b`, so it cannot
+        // ride an `a + 0 ≡ c` block, whose `b` limbs the identity ignores.
+        builder.assert_zero(ab_sel.clone() * nz.clone() * is_b_zero.clone());
+
         // b_on / c_on host act·(1 − is_zero): the witnessed activity gates
         // that let the gated b/c UintVal consumes carry a degree-2
         // multiplicity `sel·on` instead of `sel·(1−is_zero)·act`
