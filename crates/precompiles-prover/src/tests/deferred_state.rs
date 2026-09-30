@@ -597,10 +597,9 @@ fn merged_empty_keccak_node_cannot_redirect_chunk_tail() {
 
     merged.values[NODE_COL_OFFSET + COL_N_CHUNKS] = Felt::from(2u8);
     merged.values[NODE_COL_OFFSET + COL_N_CHUNKS_INV] = Felt::from(2u8).inverse();
-    assert!(
-        std::panic::catch_unwind(|| crate::tests::check_local(ChunkNodeSpongeAir, &merged))
-            .is_err()
-    );
+    crate::tests::assert_constraint_failure(|| {
+        crate::tests::check_local(ChunkNodeSpongeAir, &merged)
+    });
 }
 
 /// Explicit full prove+verify of a multi-block Keccak session — the
