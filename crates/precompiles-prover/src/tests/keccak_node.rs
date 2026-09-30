@@ -303,7 +303,7 @@ fn constraints_hold_on_empty_trace() {
 fn corrupt_and_check(
     _seed: u64,
     invocations: &[KeccakNodeInvocation],
-    corruption: impl FnOnce(&mut miden_core::utils::RowMajorMatrix<Felt>),
+    corruption: impl FnOnce(&mut RowMajorMatrix<Felt>),
 ) {
     let mut main = generate_trace_from_invocations(invocations);
     corruption(&mut main);

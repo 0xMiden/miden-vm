@@ -217,8 +217,8 @@ where
         - len_bytes.clone();
 
     builder.assert_zero(act.clone() * is_empty.clone() * (is_empty.clone() - AB::Expr::ONE));
-    builder.assert_zero(act.clone() * is_empty.clone() * len_bytes.clone());
-    builder.assert_zero(act.clone() * is_empty.clone() * remainder.clone());
+    builder.assert_zero(act.clone() * is_empty.clone() * len_bytes);
+    builder.assert_zero(act.clone() * is_empty * remainder);
     builder.assert_zero(act * (n_chunks * n_chunks_inv - AB::Expr::ONE));
 }
 
