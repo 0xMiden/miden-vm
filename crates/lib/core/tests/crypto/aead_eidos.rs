@@ -594,6 +594,7 @@ fn decrypt_empty_ad_accepts_valid_ciphertext_for_exact_lengths() {
     begin
         {input_stores}
 
+        push.[91, 92, 93, 94]
         push.{SCRATCH_PTR}
         push.{num_felts}
         push.{DST_PTR}
@@ -602,6 +603,9 @@ fn decrypt_empty_ad_accepts_valid_ciphertext_for_exact_lengths() {
         push.{key_elements:?}
 
         exec.aead_eidos::decrypt_empty_ad
+
+        push.[91, 92, 93, 94]
+        assert_eqw.err=\"decrypt must preserve the caller's stack\"
     end
     "
         );
@@ -862,21 +866,25 @@ fn decrypt_empty_ad_rejects_forged_plaintext_advice() {
     let nonce = word([0x10, 0x20, 0x30, 0x40]);
     let key_elements = key.into_elements();
     let nonce_elements = nonce.into_elements();
-    let plaintext = stream_plaintext_felts(5);
-    let mut ciphertext_and_tag = encrypt_felts_expanded(key, nonce, &plaintext);
-    let tag = auth_tag_expanded(key, nonce, &[], &ciphertext_and_tag);
-    ciphertext_and_tag.extend(tag);
+    let core_lib = CoreLibrary::default();
 
-    let input_stores = store_felts(SRC_PTR, &ciphertext_and_tag);
-    let source = format!(
-        "
+    for num_felts in [1_u64, 2, 3, 4, 7, 8, 9, 16, 17] {
+        let plaintext: Vec<_> =
+            (0..num_felts).map(|i| Felt::new(((i + 1) << 32) | (i + 17)).unwrap()).collect();
+        let mut ciphertext_and_tag = encrypt_felts_expanded(key, nonce, &plaintext);
+        let tag = auth_tag_expanded(key, nonce, &[], &ciphertext_and_tag);
+        ciphertext_and_tag.extend(tag);
+
+        let input_stores = store_felts(SRC_PTR, &ciphertext_and_tag);
+        let source = format!(
+            "
     use miden::core::crypto::aead_eidos
 
     begin
         {input_stores}
 
         push.{SCRATCH_PTR}
-        push.5
+        push.{num_felts}
         push.{DST_PTR}
         push.{SRC_PTR}
         push.{nonce_elements:?}
@@ -885,18 +893,29 @@ fn decrypt_empty_ad_rejects_forged_plaintext_advice() {
         exec.aead_eidos::decrypt_empty_ad
     end
     "
-    );
-
-    let core_lib = CoreLibrary::default();
-    let mut forged_plaintext = plaintext;
-    forged_plaintext[0] += Felt::ONE;
-    let test = miden_utils_testing::build_test_by_mode!(false, source.as_str(), &[])
-        .with_library(core_lib.package())
-        .with_event_handler(
-            AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
-            PlaintextHandler(forged_plaintext),
         );
-    assert_aead_error("forged plaintext advice", &test, "AEAD ciphertext mismatch");
+
+        // Each bit flip changes exactly one ciphertext limb under XOR encryption. Check both
+        // limbs of every plaintext Felt, including each position in full batches and tails.
+        for index in 0..plaintext.len() {
+            for (limb, mask) in [1, 1_u64 << 32].into_iter().enumerate() {
+                let mut forged_plaintext = plaintext.clone();
+                forged_plaintext[index] =
+                    Felt::new(plaintext[index].as_canonical_u64() ^ mask).unwrap();
+                let test = miden_utils_testing::build_test_by_mode!(false, source.as_str(), &[])
+                    .with_library(core_lib.package())
+                    .with_event_handler(
+                        AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
+                        PlaintextHandler(forged_plaintext),
+                    );
+                assert_aead_error(
+                    &format!("plaintext length {num_felts}, ciphertext limb {}", 2 * index + limb),
+                    &test,
+                    "AEAD ciphertext mismatch",
+                );
+            }
+        }
+    }
 }
 
 #[test]

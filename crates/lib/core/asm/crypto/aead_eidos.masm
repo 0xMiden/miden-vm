@@ -355,51 +355,55 @@ proc load_advice_felts_to_memory
     swap drop
 end
 
-#! Asserts equality of two `count`-Felt memory ranges.
+#! Asserts equality of two expanded-ciphertext ranges.
+#!
+#! The caller must supply word-aligned u32 pointers and an even u32 `count`. Each non-empty
+#! range must stay within the u32 address space.
 #!
 #! Input:  [lhs_ptr, rhs_ptr, count, ...]
-#! Output: [rhs_ptr + count, 0, ...]
-proc assert_felts_equal
-    movup.2
-    u32divmod.4
-    swap
-    movup.2
+#! Output: [...]
+proc assert_ciphertexts_equal
+    movup.2 u32divmod.4
+    # => [tail, full_words, lhs_ptr, rhs_ptr, ...]
+    swap mul.4 dup.2 add
+    # => [lhs_word_end, tail, lhs_ptr, rhs_ptr, ...]
     movup.3
-    swap
-    # => [lhs_ptr, rhs_ptr, full_words, tail, ...]
+    movup.3
+    # => [lhs_ptr, rhs_ptr, lhs_word_end, tail, ...]
 
-    dup.2 neq.0
+    # lhs_word_end is the first address after the complete words; tail is zero or two.
+    dup dup.3 neq
     while.true
-        movup.2 sub.1 movdn.2
-        # => [lhs_ptr, rhs_ptr, remaining_words - 1, tail, ...]
-
         padw dup.4 mem_loadw_le
-        # => [LHS_WORD, lhs_ptr, rhs_ptr, remaining_words, tail, ...]
+        # => [LHS_WORD, lhs_ptr, rhs_ptr, lhs_word_end, tail, ...]
         padw dup.9 mem_loadw_le
-        # => [RHS_WORD, LHS_WORD, lhs_ptr, rhs_ptr, remaining_words, tail, ...]
+        # => [RHS_WORD, LHS_WORD, lhs_ptr, rhs_ptr, lhs_word_end, tail, ...]
         assert_eqw.err="AEAD ciphertext mismatch"
-        # => [lhs_ptr, rhs_ptr, remaining_words, tail, ...]
+        # => [lhs_ptr, rhs_ptr, lhs_word_end, tail, ...]
 
         add.4
         swap add.4 swap
-        # => [lhs_ptr + 4, rhs_ptr + 4, remaining_words, tail, ...]
-        dup.2 neq.0
+        # => [lhs_ptr + 4, rhs_ptr + 4, lhs_word_end, tail, ...]
+        dup dup.3 neq
     end
 
     movup.2 drop
     # => [lhs_ptr + 4*full_words, rhs_ptr + 4*full_words, tail, ...]
 
-    dup.2 neq.0
-    while.true
+    # An odd plaintext length leaves exactly two ciphertext limbs after the full words.
+    movup.2 neq.0
+    if.true
         dup mem_load
         dup.2 mem_load
         assert_eq.err="AEAD ciphertext mismatch"
         add.1
-        swap add.1 swap
-        movup.2 sub.1 movdn.2
-        dup.2 neq.0
+        swap add.1
+        # => [rhs_ptr + 4*full_words + 1, lhs_ptr + 4*full_words + 1, ...]
+        dup mem_load
+        dup.2 mem_load
+        assert_eq.err="AEAD ciphertext mismatch"
     end
-    drop
+    drop drop
 end
 
 #! Authenticates exact-length expanded ciphertext with empty associated data.
@@ -1082,8 +1086,7 @@ pub proc decrypt_empty_ad(
 
     dup.2 mul.2 dup.1 dup.5
     # => [scratch_ptr, src_ptr, ciphertext_len, ...]
-    exec.assert_felts_equal
-    drop drop
+    exec.assert_ciphertexts_equal
     dropw dropw dropw
     # => [...]
 end
