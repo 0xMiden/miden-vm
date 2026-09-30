@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.35.0 (Unreleased)
+## v0.35.0 (2026-09-30)
 
 #### Changes
 
@@ -9,16 +9,15 @@
 
 #### Fixes
 
+- [BREAKING] Fixed the `aead::decrypt` overlap check so it also covers the 4-element tag after the ciphertext; a destination placed at the tag address now fails the overlap assertion instead of overwriting the tag and failing with a tag mismatch. Layouts where the destination range only overlaps the tag are now rejected even when nothing would be written there, e.g. an empty message (`num_blocks = 0`) with `dst_ptr` at the tag address. Ranges that end at the last memory address are no longer rejected ([#3897](https://github.com/0xMiden/miden-vm/pull/3897)).
+- [BREAKING] Reject unsorted or repeated keys in `SmtLeaf::new_multiple` and when reading serialized leaves. Invalid keys return the new `SmtLeafError::UnsortedMultipleLeafKeys` error ([#3901](https://github.com/0xMiden/miden-vm/pull/3901)).
+- [BREAKING] Limited `eval_circuit` to 32,768 total READ and EVAL wires per call and witness collection to 32 invocations. Oversized circuits are rejected before allocation, and evaluations beyond the invocation limit are rejected before being recorded in the witness ([#3908](https://github.com/0xMiden/miden-vm/pull/3908)).
+- Fixed concurrent `Smt::with_entries` and `LargeSmt::with_entries` panicking on leaves with more than `MAX_LEAF_ENTRIES` entries and keeping empty values in leaves shared with other keys ([#3932](https://github.com/0xMiden/miden-vm/pull/3932)).
 - [BREAKING] Reject inactive EC add rows that provide a group addition, and require each Keccak node's chunk count to match its byte length. PVM proofs and verifier roots change ([#3942](https://github.com/0xMiden/miden-vm/pull/3942)).
 - [BREAKING] Require Keccak sponge rows carrying message bytes to consume chunk-tape lanes and unused input bytes to be zero. PVM proofs and verifier roots change ([#3943](https://github.com/0xMiden/miden-vm/pull/3943)).
 - [BREAKING] Enforce Poseidon2 permutations on cycles with consumed inputs, and require output and continuation cycles to consume inputs. PVM proofs and verifier roots change ([#3943](https://github.com/0xMiden/miden-vm/pull/3943)).
 - [BREAKING] Require minted MSM on-curve certificates to depend on older points. PVM proofs and verifier roots change ([#3943](https://github.com/0xMiden/miden-vm/pull/3943)).
 - [BREAKING] Reject nonzero certificates on UintAdd equality blocks. PVM proofs and verifier roots change ([#3943](https://github.com/0xMiden/miden-vm/pull/3943)).
-- [BREAKING] Reject unsorted or repeated keys in `SmtLeaf::new_multiple` and when reading serialized leaves. Invalid keys return the new `SmtLeafError::UnsortedMultipleLeafKeys` error ([#3901](https://github.com/0xMiden/miden-vm/pull/3901)).
-- [BREAKING] Fixed the `aead::decrypt` overlap check so it also covers the 4-element tag after the ciphertext; a destination placed at the tag address now fails the overlap assertion instead of overwriting the tag and failing with a tag mismatch. Layouts where the destination range only overlaps the tag are now rejected even when nothing would be written there, e.g. an empty message (`num_blocks = 0`) with `dst_ptr` at the tag address. Ranges that end at the last memory address are no longer rejected ([#3897](https://github.com/0xMiden/miden-vm/pull/3897)).
-- [BREAKING] Limited `eval_circuit` to 32,768 total READ and EVAL wires per call and witness collection to 32 invocations. Oversized circuits are rejected before allocation, and evaluations beyond the invocation limit are rejected before being recorded in the witness ([#3908](https://github.com/0xMiden/miden-vm/pull/3908)).
-
-- Fixed concurrent `Smt::with_entries` and `LargeSmt::with_entries` panicking on leaves with more than `MAX_LEAF_ENTRIES` entries and keeping empty values in leaves shared with other keys ([#3932](https://github.com/0xMiden/miden-vm/pull/3932)).
 
 ## v0.34.0 (2026-09-26)
 
