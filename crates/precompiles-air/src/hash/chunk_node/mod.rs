@@ -5,7 +5,7 @@
 //! Both are period-1 (no periodic columns) and their own trace heights
 //! are otherwise unrelated, so they run **simultaneously** on the same
 //! rows in disjoint column ranges: main columns 0..12 are exactly
-//! [`chunk::ChunkAir`]'s own layout (unchanged), columns 12..49 are
+//! [`chunk::ChunkAir`]'s own layout (unchanged), columns 12..44 are
 //! exactly [`node::KeccakNodeAir`]'s own layout (unchanged, shifted by
 //! [`NODE_COL_OFFSET`]). No mode selector, no cross-gating — each side
 //! keeps its own constraint degree (`lqd = 1`).
@@ -30,6 +30,7 @@ use crate::{
         memory64::{CHUNK_ADDR_BASE, Memory64Msg},
     },
     logup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, frac_col},
+    primitives::byte_pair_lut::{BytePairLutMsg, BytePairOp},
     transcript::{
         binding::BindingMsg,
         poseidon2::{Poseidon2InMsg, Poseidon2OutMsg},
@@ -362,16 +363,28 @@ where
             interaction_deg
         ),
     );
+    let remainder: LB::Expr = local[node::COL_LAST_CHUNK_REM].into();
     frac_col!(
         builder,
         "handshake-and-chunks-digest",
-        provides_deg,
+        pair_deg,
         (
             "p2out-h-input-chunks",
             pos_act.clone(),
             Poseidon2OutMsg {
                 perm_seq_id: perm_seq_id_chunks_tail,
                 digest: h_input_chunks.clone()
+            },
+            interaction_deg
+        ),
+        (
+            "chunk-remainder",
+            pos_act.clone(),
+            BytePairLutMsg {
+                op: LB::Expr::from(Felt::from(BytePairOp::Xor.tag())),
+                a: remainder.clone(),
+                b: LB::Expr::from(Felt::from(31u8)) - remainder,
+                c: LB::Expr::from(Felt::from(31u8)),
             },
             interaction_deg
         ),

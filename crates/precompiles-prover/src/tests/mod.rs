@@ -129,6 +129,28 @@ where
     check_local_inputs(air, main, vec![Felt::ZERO; n]);
 }
 
+/// Assert that this local AIR check fails with a constraint diagnostic.
+pub(crate) fn assert_local_rejects<A>(air: A, main: &RowMajorMatrix<Felt>)
+where
+    A: LiftedAir<Felt, QuadFelt>,
+{
+    let n = air.num_public_values();
+    assert_local_rejects_inputs(air, main, vec![Felt::ZERO; n]);
+}
+
+/// [`assert_local_rejects`] with explicit public inputs.
+pub(crate) fn assert_local_rejects_inputs<A>(
+    air: A,
+    main: &RowMajorMatrix<Felt>,
+    air_inputs: Vec<Felt>,
+) where
+    A: LiftedAir<Felt, QuadFelt>,
+{
+    assert_constraint_failure(std::panic::AssertUnwindSafe(|| {
+        check_local_inputs(air, main, air_inputs)
+    }));
+}
+
 /// The per-AIR quotient degree used by the design-target smoke tests.
 pub(crate) fn log_quotient_degree<A>(air: &A) -> u8
 where

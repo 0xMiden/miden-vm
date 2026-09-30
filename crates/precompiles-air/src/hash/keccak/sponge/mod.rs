@@ -91,10 +91,12 @@ pub const COL_CHUNK_PTR: usize = 4;
 pub const COL_IS_ZERO: usize = 5;
 /// Chunks-available indicator on rate XORin rows; monotone
 /// non-increasing within the period (once chunks run out, they stay
-/// out — a single contiguous prefix). 1 iff the chunk chiplet provides
-/// at this row, else 0. On a last block that overshoots the rate, the
-/// prefix carries through the inert capacity / 0x80 rows so the rate
-/// rows and the extra rows [26,29) stay one prefix.
+/// out — a single contiguous prefix). A rate row (or, on the last block,
+/// an extra row) with `is_chunk_avail = 1` consumes a tape lane; the flag
+/// is forced to 1 on every rate row whose lane carries message bytes. On a
+/// last block that overshoots the rate, the prefix carries through the
+/// inert capacity / 0x80 rows so the rate rows and the extra rows [26,29)
+/// stay one prefix.
 pub const COL_IS_CHUNK_AVAIL: usize = 6;
 /// First column of the unary `b_j` selector bits for
 /// `byte_offset ∈ [0, 7]`. The 8 selectors occupy
@@ -114,8 +116,9 @@ pub const COL_B_RANGE: Range<usize> = COL_B_BEGIN..(COL_B_BEGIN + NUM_B_SELECTOR
 // --------------------------------------------------------------------
 
 /// Chunk lane value at this row. Bus-pinned by the chunk-bus require
-/// (Memory64 at `CHUNK_ADDR_BASE + chunk_ptr`) when
-/// `is_chunk_avail = 1`; unconstrained otherwise.
+/// (Memory64 at `CHUNK_ADDR_BASE + chunk_ptr`) on rows that consume a
+/// lane; zero when `is_chunk_avail = 0`, and zero past the message on
+/// consuming rows.
 pub const COL_CHUNK_LO: usize = 15;
 pub const COL_CHUNK_HI: usize = 16;
 /// Prev-perm output lane value (consumed from Memory64) on state-lane
@@ -495,23 +498,47 @@ where
         (AB::Expr::ONE - enters_new_invocation)
             * (chunk_ptr_next
                 - chunk_ptr
-                - (p_rate_block.clone() + p_extra * b_sum.clone()) * is_chunk_avail.clone()),
+                - (p_rate_block.clone() + p_extra.clone() * b_sum.clone())
+                    * is_chunk_avail.clone()),
     );
 
     // Chunk zero-fill on `is_chunk_avail = 0` --------------
-    // When the chunk chiplet doesn't provide at this row, pin
-    // `chunk_lo = chunk_hi = 0` so the witness is canonical and
-    // pre-pad verbatim XORs can't be steered by a
-    // prover-chosen unpinned chunk value. Effect: any
-    // under-emission by the chunk chiplet yields a deterministic
-    // zero-extended digest, caught by the downstream digest
-    // check at the transcript chiplet. Ungated — pinning chunk
-    // to 0 on non-rate / dead rows is benign since those rows
-    // never consume the chunk columns elsewhere.
+    // Pin `chunk_lo = chunk_hi = 0` so the witness is canonical. Ungated —
+    // pinning chunk to 0 on non-rate / dead rows is benign since those
+    // rows never consume the chunk columns elsewhere.
     let chunk_lo_local: AB::Expr = local[COL_CHUNK_LO].into();
     let chunk_hi_local: AB::Expr = local[COL_CHUNK_HI].into();
-    builder.assert_zero((AB::Expr::ONE - is_chunk_avail.clone()) * chunk_lo_local);
-    builder.assert_zero((AB::Expr::ONE - is_chunk_avail.clone()) * chunk_hi_local);
+    builder.assert_zero((AB::Expr::ONE - is_chunk_avail.clone()) * chunk_lo_local.clone());
+    builder.assert_zero((AB::Expr::ONE - is_chunk_avail.clone()) * chunk_hi_local.clone());
+
+    // Message lanes come from the tape ----------------------
+    // A rate row whose lane carries message bytes must consume a tape
+    // lane: every verbatim row, and the pad row unless the pad sits at
+    // byte 0. Otherwise such a row would absorb a zero lane while the
+    // skipped tape lanes are consumed later, on rows that ignore them.
+    let b_0: AB::Expr = local[COL_B_BEGIN].into();
+    let carries_message =
+        (AB::Expr::ONE - is_zero.clone()) - (is_zero_next.clone() - is_zero.clone()) * b_0;
+    builder.assert_zero(
+        act.clone()
+            * p_rate_block.clone()
+            * carries_message
+            * (AB::Expr::ONE - is_chunk_avail.clone()),
+    );
+
+    // Tape bytes after the message are zero -----------------
+    // The chunk encoding zero-pads the last chunk: a lane consumed past
+    // the pad is zero, and so are the pad lane's bytes from the pad
+    // position on (`chunk = cleared`, with `cleared` tied to the mask by
+    // the `andnot` lookup).
+    let past_pad = (p_rate_block.clone() + p_extra) * is_zero.clone();
+    builder.assert_zero(act.clone() * past_pad.clone() * chunk_lo_local.clone());
+    builder.assert_zero(act.clone() * past_pad * chunk_hi_local.clone());
+    let pad_row = p_rate_block.clone() * (is_zero_next.clone() - is_zero.clone());
+    let cleared_lo_local: AB::Expr = local[COL_CLEARED_LO].into();
+    let cleared_hi_local: AB::Expr = local[COL_CLEARED_HI].into();
+    builder.assert_zero(act.clone() * pad_row.clone() * (chunk_lo_local - cleared_lo_local));
+    builder.assert_zero(act.clone() * pad_row * (chunk_hi_local - cleared_hi_local));
 
     // Padding state machine ---------------------------------
     // Binarity.
