@@ -17,23 +17,14 @@ use miden_processor::{
     event::{EventError, EventHandler},
     operation::OperationError,
 };
+use miden_utils_testing::Test;
 
 const SRC_PTR: u64 = 1000;
 const DST_PTR: u64 = 2000;
 const SCRATCH_PTR: u64 = 3000;
 const COUNTER: u64 = 0;
-const SRC_PTR_PLUS_ONE_WORD: u64 = SRC_PTR + 4;
-const DST_PTR_PLUS_ONE_WORD: u64 = DST_PTR + 4;
-const DST_PTR_PLUS_TWO_WORDS: u64 = DST_PTR + 8;
-const SRC_PTR_PLUS_TWO_WORDS: u64 = SRC_PTR + 8;
-const DST_PTR_PLUS_THREE_WORDS: u64 = DST_PTR + 12;
-const DST_PTR_PLUS_FOUR_WORDS: u64 = DST_PTR + 16;
 const THREE_BLOCKS: u64 = 3;
-const SRC_PTR_PLUS_THREE_WORDS: u64 = SRC_PTR + 12;
-const SRC_PTR_PLUS_FOUR_WORDS: u64 = SRC_PTR + 16;
-const SRC_PTR_PLUS_FIVE_WORDS: u64 = SRC_PTR + 20;
 const SRC_PTR_PLUS_SIX_WORDS: u64 = SRC_PTR + 24;
-const DST_PTR_PLUS_FIVE_WORDS: u64 = DST_PTR + 20;
 const DST_PTR_PLUS_TWELVE_WORDS: u64 = DST_PTR + 48;
 const COUNTER_PLUS_THREE: u64 = COUNTER + 3;
 const SIX_BLOCKS: u64 = 6;
@@ -143,8 +134,7 @@ fn auth_empty_ad_one_block_matches_reference_vector() {
 
     let mac_key_elements = derive_mac_key(key, nonce).into_elements();
     let ciphertext = encrypt_felts_expanded(key, nonce, &plaintext);
-    let ciphertext_0 = &ciphertext[..4];
-    let ciphertext_1 = &ciphertext[4..];
+    let stores = store_felts(DST_PTR, &ciphertext);
     let expected_tag = auth_tag_expanded(key, nonce, &[], &ciphertext);
     let expected_tag_0 = expected_tag[0].as_canonical_u64();
     let expected_tag_1 = expected_tag[1].as_canonical_u64();
@@ -154,14 +144,7 @@ fn auth_empty_ad_one_block_matches_reference_vector() {
     use miden::core::crypto::aead_eidos
 
     begin
-        push.{ciphertext_0:?}
-        push.{DST_PTR}
-        mem_storew_le
-        dropw
-        push.{ciphertext_1:?}
-        push.{DST_PTR_PLUS_ONE_WORD}
-        mem_storew_le
-        dropw
+        {stores}
 
         push.1
         push.{DST_PTR}
@@ -241,42 +224,14 @@ fn encrypt_blocks_stream_after_u32and_matches_three_block_reference_vector() {
     let ctr_key_elements = ctr_key.into_elements();
     let ciphertext = encrypt_felts_expanded(key, nonce, &plaintext);
     let expected_memory = felts_to_u64(&ciphertext);
-    let plaintext_0 = &plaintext[..4];
-    let plaintext_1 = &plaintext[4..8];
-    let plaintext_2 = &plaintext[8..12];
-    let plaintext_3 = &plaintext[12..16];
-    let plaintext_4 = &plaintext[16..20];
-    let plaintext_5 = &plaintext[20..];
+    let stores = store_felts(SRC_PTR, &plaintext);
 
     let source = format!(
         "
     use miden::core::crypto::aead_eidos
 
     begin
-        push.{plaintext_0:?}
-        push.{SRC_PTR}
-        mem_storew_le
-        dropw
-        push.{plaintext_1:?}
-        push.{SRC_PTR_PLUS_ONE_WORD}
-        mem_storew_le
-        dropw
-        push.{plaintext_2:?}
-        push.{SRC_PTR_PLUS_TWO_WORDS}
-        mem_storew_le
-        dropw
-        push.{plaintext_3:?}
-        push.{SRC_PTR_PLUS_THREE_WORDS}
-        mem_storew_le
-        dropw
-        push.{plaintext_4:?}
-        push.{SRC_PTR_PLUS_FOUR_WORDS}
-        mem_storew_le
-        dropw
-        push.{plaintext_5:?}
-        push.{SRC_PTR_PLUS_FIVE_WORDS}
-        mem_storew_le
-        dropw
+        {stores}
 
         push.{THREE_BLOCKS}
         push.{COUNTER}
@@ -318,18 +273,7 @@ fn encrypt_blocks_stream_unrolled_block_counts_match_reference() {
         let ciphertext = encrypt_felts_expanded(key, nonce, &plaintext);
         let expected_memory = felts_to_u64(&ciphertext);
 
-        let mut stores = String::new();
-        for (word_idx, word) in plaintext.chunks(4).enumerate() {
-            let ptr = SRC_PTR + (word_idx as u64) * 4;
-            stores.push_str(&format!(
-                "
-        push.{word:?}
-        push.{ptr}
-        mem_storew_le
-        dropw
-"
-            ));
-        }
+        let stores = store_felts(SRC_PTR, &plaintext);
 
         let expected_src = SRC_PTR + 8 * num_blocks;
         let expected_dst = DST_PTR + 16 * num_blocks;
@@ -384,33 +328,15 @@ fn encrypt_felts_expanded_matches_reference_for_exact_lengths() {
         // must remain unchanged after the tail copy.
         let mut stores = store_felts(SRC_PTR, &plaintext);
         stores.push_str(&store_sentinels(SRC_PTR + num_felts, 1001));
-        if num_felts != 0 {
-            stores.push_str(&store_sentinels(DST_PTR + 2 * num_felts, 2001));
-        }
-        let expected_memory = if num_felts == 0 {
-            vec![91, 92, 93, 94]
-        } else {
-            let mut expected = felts_to_u64(&ciphertext);
-            expected.extend(2001..2001 + SENTINEL_CELLS);
-            expected
-        };
-        let zero_memory_setup = if num_felts == 0 {
-            "
-        push.[91, 92, 93, 94]
-        push.2000
-        mem_storew_le
-        dropw
-"
-        } else {
-            ""
-        };
+        stores.push_str(&store_sentinels(DST_PTR + 2 * num_felts, 2001));
+        let mut expected_memory = felts_to_u64(&ciphertext);
+        expected_memory.extend(2001..2001 + SENTINEL_CELLS);
 
         let source = format!(
             "
     use miden::core::crypto::aead_eidos
 
     begin
-        {zero_memory_setup}
         {stores}
 
         push.{num_felts}
@@ -446,6 +372,7 @@ fn encrypt_entry_points_reject_cross_block_overlap() {
         "encrypt_blocks_stream",
         1000,
         1008,
+        COUNTER,
         2,
         "AEAD memory ranges must not overlap",
     );
@@ -455,6 +382,7 @@ fn encrypt_entry_points_reject_cross_block_overlap() {
         "encrypt_felts_expanded",
         1000,
         1008,
+        COUNTER,
         9,
         "AEAD memory ranges must not overlap",
     );
@@ -484,6 +412,7 @@ fn encrypt_entry_points_reject_local_memory_aliases() {
             procedure,
             local_memory_start,
             1000,
+            COUNTER,
             count,
             "AEAD memory ranges must stay below the local frame",
         );
@@ -491,6 +420,7 @@ fn encrypt_entry_points_reject_local_memory_aliases() {
             procedure,
             1000,
             local_memory_start,
+            COUNTER,
             count,
             "AEAD memory ranges must stay below the local frame",
         );
@@ -503,6 +433,7 @@ fn encrypt_entry_points_reject_expanded_length_overflow() {
         "encrypt_blocks_stream",
         1000,
         2000,
+        COUNTER,
         1_u64 << 28,
         "AEAD ciphertext length exceeds u32",
     );
@@ -510,6 +441,7 @@ fn encrypt_entry_points_reject_expanded_length_overflow() {
         "encrypt_felts_expanded",
         1000,
         2000,
+        COUNTER,
         1_u64 << 31,
         "AEAD ciphertext length exceeds u32",
     );
@@ -520,8 +452,10 @@ fn encrypt_entry_points_validate_counter_schedule() {
     let max_counter = u64::from(u32::MAX);
 
     assert_encrypt_exhausts_counter("encrypt_blocks_stream", max_counter, 1, 8, 16);
-    assert_encrypt_counter_rejected(
+    assert_encrypt_rejected(
         "encrypt_blocks_stream",
+        SRC_PTR,
+        DST_PTR,
         max_counter,
         2,
         "AEAD counter range exceeds u32",
@@ -529,8 +463,10 @@ fn encrypt_entry_points_validate_counter_schedule() {
 
     assert_encrypt_exhausts_counter("encrypt_felts_expanded", max_counter, 1, 1, 2);
     assert_encrypt_exhausts_counter("encrypt_felts_expanded", max_counter, 8, 8, 16);
-    assert_encrypt_counter_rejected(
+    assert_encrypt_rejected(
         "encrypt_felts_expanded",
+        SRC_PTR,
+        DST_PTR,
         max_counter,
         9,
         "AEAD counter range exceeds u32",
@@ -538,8 +474,10 @@ fn encrypt_entry_points_validate_counter_schedule() {
 
     for procedure in ["encrypt_blocks_stream", "encrypt_felts_expanded"] {
         for count in [0, 1] {
-            assert_encrypt_counter_rejected(
+            assert_encrypt_rejected(
                 procedure,
+                SRC_PTR,
+                DST_PTR,
                 max_counter + 1,
                 count,
                 "AEAD counter must fit in a u32",
@@ -610,7 +548,7 @@ fn auth_empty_ad_expanded_rejects_invalid_ranges() {
     ];
 
     for (ct_ptr, num_blocks, expected_error) in cases {
-        assert_block_auth_rejected(ct_ptr, num_blocks, expected_error);
+        assert_auth_rejected("auth_empty_ad_expanded", ct_ptr, num_blocks, expected_error);
     }
 }
 
@@ -622,7 +560,8 @@ fn auth_empty_ad_expanded_accepts_zero_blocks() {
 
 #[test]
 fn auth_empty_ad_expanded_rejects_local_memory_alias() {
-    assert_block_auth_rejected(
+    assert_auth_rejected(
+        "auth_empty_ad_expanded",
         FMP_INIT_VALUE.as_canonical_u64(),
         1,
         "AEAD memory ranges must stay below the local frame",
@@ -642,29 +581,17 @@ fn decrypt_empty_ad_accepts_valid_ciphertext_for_exact_lengths() {
         let tag = auth_tag_expanded(key, nonce, &[], &ciphertext_and_tag);
         ciphertext_and_tag.extend(tag);
 
-        let input_stores = store_felts(SRC_PTR, &ciphertext_and_tag);
-        let expected_memory = if num_felts == 0 {
-            vec![91, 92, 93, 94]
-        } else {
-            felts_to_u64(&plaintext)
-        };
-        let zero_memory_setup = if num_felts == 0 {
-            "
-        push.[91, 92, 93, 94]
-        push.2000
-        mem_storew_le
-        dropw
-"
-        } else {
-            ""
-        };
+        let mut input_stores = store_felts(SRC_PTR, &ciphertext_and_tag);
+        // The output must stop at the plaintext length, including for an empty plaintext.
+        input_stores.push_str(&store_sentinels(DST_PTR + num_felts as u64, 3001));
+        let mut expected_memory = felts_to_u64(&plaintext);
+        expected_memory.extend(3001..3001 + SENTINEL_CELLS);
 
         let source = format!(
             "
     use miden::core::crypto::aead_eidos
 
     begin
-        {zero_memory_setup}
         {input_stores}
 
         push.{SCRATCH_PTR}
@@ -702,7 +629,14 @@ fn decrypt_empty_ad_rejects_overlapping_regions_before_event() {
     ];
 
     for (case, src_ptr, dst_ptr, scratch_ptr) in cases {
-        assert_decrypt_rejected_before_event(case, src_ptr, dst_ptr, 8, scratch_ptr);
+        assert_decrypt_rejected_before_event(
+            case,
+            src_ptr,
+            dst_ptr,
+            8,
+            scratch_ptr,
+            "AEAD memory ranges must not overlap",
+        );
     }
 }
 
@@ -718,29 +652,22 @@ fn decrypt_empty_ad_accepts_adjacent_regions() {
 #[test]
 fn decrypt_empty_ad_rejects_local_memory_aliases() {
     let local_memory_start = FMP_INIT_VALUE.as_canonical_u64();
+    let cases = [
+        ("source aliases procedure-local memory", local_memory_start, 1000, 2000),
+        ("destination aliases procedure-local memory", 1000, local_memory_start, 2000),
+        ("workspace aliases procedure-local memory", 1000, 2000, local_memory_start),
+    ];
 
-    assert_decrypt_rejected_before_event(
-        "source aliases procedure-local memory",
-        local_memory_start,
-        1000,
-        1,
-        2000,
-    );
-
-    assert_decrypt_rejected_before_event(
-        "destination aliases procedure-local memory",
-        1000,
-        local_memory_start,
-        1,
-        2000,
-    );
-    assert_decrypt_rejected_before_event(
-        "workspace aliases procedure-local memory",
-        1000,
-        2000,
-        1,
-        local_memory_start,
-    );
+    for (case, src_ptr, dst_ptr, scratch_ptr) in cases {
+        assert_decrypt_rejected_before_event(
+            case,
+            src_ptr,
+            dst_ptr,
+            1,
+            scratch_ptr,
+            "AEAD memory ranges must stay below the local frame",
+        );
+    }
 }
 
 #[test]
@@ -756,27 +683,91 @@ fn decrypt_empty_ad_handles_empty_destination_range() {
 #[test]
 fn decrypt_empty_ad_rejects_invalid_ranges_before_event() {
     let cases = [
-        ("misaligned source", 1001, 2000, 8, 3000),
-        ("misaligned destination", 1000, 2001, 8, 3000),
-        ("misaligned workspace", 1000, 2000, 8, 3001),
-        ("source pointer exceeds u32", U32_ADDRESS_SPACE_END, 2000, 0, 3000),
-        ("destination pointer exceeds u32", 1000, U32_ADDRESS_SPACE_END, 0, 3000),
-        ("workspace pointer exceeds u32", 1000, 2000, 0, U32_ADDRESS_SPACE_END),
-        ("plaintext length exceeds u32", 1000, 2000, U32_ADDRESS_SPACE_END, 3000),
+        ("misaligned source", 1001, 2000, 8, 3000, "AEAD pointer must be word-aligned"),
+        (
+            "misaligned destination",
+            1000,
+            2001,
+            8,
+            3000,
+            "AEAD pointer must be word-aligned",
+        ),
+        ("misaligned workspace", 1000, 2000, 8, 3001, "AEAD pointer must be word-aligned"),
+        (
+            "source pointer exceeds u32",
+            U32_ADDRESS_SPACE_END,
+            2000,
+            0,
+            3000,
+            "AEAD pointer must fit in a u32",
+        ),
+        (
+            "destination pointer exceeds u32",
+            1000,
+            U32_ADDRESS_SPACE_END,
+            0,
+            3000,
+            "AEAD pointer must fit in a u32",
+        ),
+        (
+            "workspace pointer exceeds u32",
+            1000,
+            2000,
+            0,
+            U32_ADDRESS_SPACE_END,
+            "AEAD pointer must fit in a u32",
+        ),
+        (
+            "plaintext length exceeds u32",
+            1000,
+            2000,
+            U32_ADDRESS_SPACE_END,
+            3000,
+            "AEAD plaintext length must fit in a u32",
+        ),
         (
             "authentication input exceeds the supported length",
             1000,
             2000,
             FIRST_UNSUPPORTED_AUTH_PLAINTEXT_LEN,
             3000,
+            "AEAD authentication input exceeds its supported length",
         ),
-        ("source end overflows", U32_ADDRESS_SPACE_END - 4, 1000, 2, 2000),
-        ("destination end overflows", 1000, U32_ADDRESS_SPACE_END - 4, 8, 2000),
-        ("workspace end overflows", 1000, 2000, 8, U32_ADDRESS_SPACE_END - 4),
+        (
+            "source end overflows",
+            U32_ADDRESS_SPACE_END - 4,
+            1000,
+            2,
+            2000,
+            "AEAD memory range exceeds the u32 address space",
+        ),
+        (
+            "destination end overflows",
+            1000,
+            U32_ADDRESS_SPACE_END - 4,
+            8,
+            2000,
+            "AEAD memory range exceeds the u32 address space",
+        ),
+        (
+            "workspace end overflows",
+            1000,
+            2000,
+            8,
+            U32_ADDRESS_SPACE_END - 4,
+            "AEAD memory range exceeds the u32 address space",
+        ),
     ];
 
-    for (case, src_ptr, dst_ptr, num_felts, scratch_ptr) in cases {
-        assert_decrypt_rejected_before_event(case, src_ptr, dst_ptr, num_felts, scratch_ptr);
+    for (case, src_ptr, dst_ptr, num_felts, scratch_ptr, expected_error) in cases {
+        assert_decrypt_rejected_before_event(
+            case,
+            src_ptr,
+            dst_ptr,
+            num_felts,
+            scratch_ptr,
+            expected_error,
+        );
     }
 }
 
@@ -791,6 +782,7 @@ fn auth_empty_ad_expanded_exact_accepts_empty_ranges() {
 #[test]
 fn auth_empty_ad_expanded_exact_rejects_local_memory_alias() {
     assert_auth_rejected(
+        "auth_empty_ad_expanded_exact",
         FMP_INIT_VALUE.as_canonical_u64(),
         4,
         "AEAD memory ranges must stay below the local frame",
@@ -812,7 +804,12 @@ fn auth_empty_ad_expanded_exact_rejects_invalid_ranges() {
     ];
 
     for (ct_ptr, ciphertext_len, expected_error) in cases {
-        assert_auth_rejected(ct_ptr, ciphertext_len, expected_error);
+        assert_auth_rejected(
+            "auth_empty_ad_expanded_exact",
+            ct_ptr,
+            ciphertext_len,
+            expected_error,
+        );
     }
 }
 
@@ -851,7 +848,12 @@ fn decrypt_empty_ad_rejects_forged_ciphertext() {
     );
 
     let test = build_test!(source.as_str(), &[]);
-    assert!(test.execute().is_err());
+    miden_utils_testing::expect_exec_error_matches!(
+        test,
+        ExecutionError::EventError { event_id, error, .. }
+            if event_id == AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME.to_event_id()
+                && error.to_string() == "Eidos AEAD authentication failed"
+    );
 }
 
 #[test]
@@ -894,7 +896,7 @@ fn decrypt_empty_ad_rejects_forged_plaintext_advice() {
             AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
             PlaintextHandler(forged_plaintext),
         );
-    assert!(test.execute().is_err());
+    assert_aead_error("forged plaintext advice", &test, "AEAD ciphertext mismatch");
 }
 
 #[test]
@@ -933,7 +935,7 @@ fn decrypt_empty_ad_rejects_forged_tag() {
     let test = miden_utils_testing::build_test_by_mode!(false, source.as_str(), &[])
         .with_library(core_lib.package())
         .with_event_handler(AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME, PlaintextHandler(plaintext));
-    assert!(test.execute().is_err());
+    assert_aead_error("forged tag", &test, "AEAD tag mismatch");
 }
 
 #[test]
@@ -958,12 +960,7 @@ fn auth_empty_ad_three_blocks_matches_reference_vector() {
 
     let mac_key_elements = derive_mac_key(key, nonce).into_elements();
     let ciphertext = encrypt_felts_expanded(key, nonce, &plaintext);
-    let ciphertext_0 = &ciphertext[..4];
-    let ciphertext_1 = &ciphertext[4..8];
-    let ciphertext_2 = &ciphertext[8..12];
-    let ciphertext_3 = &ciphertext[12..16];
-    let ciphertext_4 = &ciphertext[16..20];
-    let ciphertext_5 = &ciphertext[20..24];
+    let stores = store_felts(DST_PTR, &ciphertext);
     let expected_tag = auth_tag_expanded(key, nonce, &[], &ciphertext);
     let expected_tag_0 = expected_tag[0].as_canonical_u64();
     let expected_tag_1 = expected_tag[1].as_canonical_u64();
@@ -973,30 +970,7 @@ fn auth_empty_ad_three_blocks_matches_reference_vector() {
     use miden::core::crypto::aead_eidos
 
     begin
-        push.{ciphertext_0:?}
-        push.{DST_PTR}
-        mem_storew_le
-        dropw
-        push.{ciphertext_1:?}
-        push.{DST_PTR_PLUS_ONE_WORD}
-        mem_storew_le
-        dropw
-        push.{ciphertext_2:?}
-        push.{DST_PTR_PLUS_TWO_WORDS}
-        mem_storew_le
-        dropw
-        push.{ciphertext_3:?}
-        push.{DST_PTR_PLUS_THREE_WORDS}
-        mem_storew_le
-        dropw
-        push.{ciphertext_4:?}
-        push.{DST_PTR_PLUS_FOUR_WORDS}
-        mem_storew_le
-        dropw
-        push.{ciphertext_5:?}
-        push.{DST_PTR_PLUS_FIVE_WORDS}
-        mem_storew_le
-        dropw
+        {stores}
 
         push.{THREE_BLOCKS}
         push.{DST_PTR}
@@ -1031,42 +1005,14 @@ fn encrypt_stream_then_auth_empty_ad_matches_reference_vector() {
     let expected_tag = auth_tag_expanded(key, nonce, &[], &ciphertext);
     let expected_tag_0 = expected_tag[0].as_canonical_u64();
     let expected_tag_1 = expected_tag[1].as_canonical_u64();
-    let plaintext_0 = &plaintext[..4];
-    let plaintext_1 = &plaintext[4..8];
-    let plaintext_2 = &plaintext[8..12];
-    let plaintext_3 = &plaintext[12..16];
-    let plaintext_4 = &plaintext[16..20];
-    let plaintext_5 = &plaintext[20..];
+    let stores = store_felts(SRC_PTR, &plaintext);
 
     let source = format!(
         "
     use miden::core::crypto::aead_eidos
 
     begin
-        push.{plaintext_0:?}
-        push.{SRC_PTR}
-        mem_storew_le
-        dropw
-        push.{plaintext_1:?}
-        push.{SRC_PTR_PLUS_ONE_WORD}
-        mem_storew_le
-        dropw
-        push.{plaintext_2:?}
-        push.{SRC_PTR_PLUS_TWO_WORDS}
-        mem_storew_le
-        dropw
-        push.{plaintext_3:?}
-        push.{SRC_PTR_PLUS_THREE_WORDS}
-        mem_storew_le
-        dropw
-        push.{plaintext_4:?}
-        push.{SRC_PTR_PLUS_FOUR_WORDS}
-        mem_storew_le
-        dropw
-        push.{plaintext_5:?}
-        push.{SRC_PTR_PLUS_FIVE_WORDS}
-        mem_storew_le
-        dropw
+        {stores}
 
         push.{THREE_BLOCKS}
         push.{COUNTER}
@@ -1138,10 +1084,7 @@ fn stream_plaintext_three_blocks() -> [Felt; 24] {
 }
 
 fn stream_plaintext_blocks(num_blocks: usize) -> Vec<Felt> {
-    let base = stream_plaintext_three_blocks();
-    (0..num_blocks * 8)
-        .map(|i| base[i % base.len()] + Felt::new_unchecked((i / base.len()) as u64))
-        .collect()
+    stream_plaintext_felts(num_blocks * 8)
 }
 
 fn stream_plaintext_felts(num_felts: usize) -> Vec<Felt> {
@@ -1352,10 +1295,29 @@ fn assert_encrypt_felts_accepts_layout(src_ptr: u64, dst_ptr: u64, num_felts: us
     }
 }
 
+#[track_caller]
+fn assert_aead_error(case: &str, test: &Test, expected_error: &str) {
+    let error = test.execute().expect_err(case);
+    let expected_code = miden_core::mast::error_code_from_msg(expected_error);
+    assert!(
+        matches!(
+            &error,
+            ExecutionError::OperationError {
+                err: OperationError::FailedAssertion { err_code, err_msg }
+                    | OperationError::U32AssertionFailed { err_code, err_msg, .. },
+                ..
+            } if *err_code == expected_code && err_msg.is_none()
+        ),
+        "{case}: expected {expected_error:?} ({expected_code}), got {error:?}"
+    );
+}
+
+#[track_caller]
 fn assert_encrypt_rejected(
     procedure: &str,
     src_ptr: u64,
     dst_ptr: u64,
+    counter: u64,
     count: u64,
     expected_error: &str,
 ) {
@@ -1368,7 +1330,7 @@ fn assert_encrypt_rejected(
 
     begin
         push.{count}
-        push.{COUNTER}
+        push.{counter}
         push.{dst_ptr}
         push.{src_ptr}
         push.{ctr_key_elements:?}
@@ -1379,15 +1341,7 @@ fn assert_encrypt_rejected(
     );
 
     let test = build_test!(source.as_str(), &[]);
-    let expected_code = miden_core::mast::error_code_from_msg(expected_error);
-    miden_utils_testing::expect_exec_error_matches!(
-        test,
-        ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, err_msg }
-                | OperationError::U32AssertionFailed { err_code, err_msg, .. },
-            ..
-        } if err_code == expected_code && err_msg.is_none()
-    );
+    assert_aead_error(procedure, &test, expected_error);
 }
 
 fn assert_encrypt_exhausts_counter(
@@ -1431,49 +1385,14 @@ fn assert_encrypt_exhausts_counter(
     build_test!(source.as_str(), &[]).expect_stack(&[]);
 }
 
-fn assert_encrypt_counter_rejected(
-    procedure: &str,
-    counter: u64,
-    count: u64,
-    expected_error: &str,
-) {
-    let key = word([1, 2, 3, 4]);
-    let nonce = word([0x10, 0x20, 0x30, 0x40]);
-    let ctr_key_elements = derive_ctr_key(key, nonce).into_elements();
-    let source = format!(
-        "
-    use miden::core::crypto::aead_eidos
-
-    begin
-        push.{count}
-        push.{counter}
-        push.{DST_PTR}
-        push.{SRC_PTR}
-        push.{ctr_key_elements:?}
-
-        exec.aead_eidos::{procedure}
-    end
-    "
-    );
-
-    let test = build_test!(source.as_str(), &[]);
-    let expected_code = miden_core::mast::error_code_from_msg(expected_error);
-    miden_utils_testing::expect_exec_error_matches!(
-        test,
-        ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, .. }
-                | OperationError::U32AssertionFailed { err_code, .. },
-            ..
-        } if err_code == expected_code
-    );
-}
-
+#[track_caller]
 fn assert_decrypt_rejected_before_event(
     case: &str,
     src_ptr: u64,
     dst_ptr: u64,
     num_felts: u64,
     scratch_ptr: u64,
+    expected_error: &str,
 ) {
     let source = format!(
         "
@@ -1501,7 +1420,7 @@ fn assert_decrypt_rejected_before_event(
             CountingHandler(Arc::clone(&calls)),
         );
 
-    assert!(test.execute().is_err(), "{case} must be rejected");
+    assert_aead_error(case, &test, expected_error);
     assert_eq!(
         calls.load(Ordering::SeqCst),
         0,
@@ -1575,7 +1494,8 @@ fn assert_block_auth_accepts(ct_ptr: u64, num_blocks: usize) {
     build_test!(source.as_str(), &[]).expect_stack(&[]);
 }
 
-fn assert_block_auth_rejected(ct_ptr: u64, num_blocks: u64, expected_error: &str) {
+#[track_caller]
+fn assert_auth_rejected(procedure: &str, ct_ptr: u64, count: u64, expected_error: &str) {
     let key = word([1, 2, 3, 4]);
     let nonce = word([16, 32, 48, 64]);
     let nonce_elements = nonce.into_elements();
@@ -1586,59 +1506,18 @@ fn assert_block_auth_rejected(ct_ptr: u64, num_blocks: u64, expected_error: &str
     use miden::core::crypto::aead_eidos
 
     begin
-        push.{num_blocks}
+        push.{count}
         push.{ct_ptr}
         push.{nonce_elements:?}
         push.{mac_key_elements:?}
 
-        exec.aead_eidos::auth_empty_ad_expanded
+        exec.aead_eidos::{procedure}
     end
     "
     );
 
     let test = build_test!(source.as_str(), &[]);
-    let expected_code = miden_core::mast::error_code_from_msg(expected_error);
-    miden_utils_testing::expect_exec_error_matches!(
-        test,
-        ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, err_msg }
-                | OperationError::U32AssertionFailed { err_code, err_msg, .. },
-            ..
-        } if err_code == expected_code && err_msg.is_none()
-    );
-}
-
-fn assert_auth_rejected(ct_ptr: u64, ciphertext_len: u64, expected_error: &str) {
-    let key = word([1, 2, 3, 4]);
-    let nonce = word([16, 32, 48, 64]);
-    let nonce_elements = nonce.into_elements();
-    let mac_key_elements = derive_mac_key(key, nonce).into_elements();
-
-    let source = format!(
-        "
-    use miden::core::crypto::aead_eidos
-
-    begin
-        push.{ciphertext_len}
-        push.{ct_ptr}
-        push.{nonce_elements:?}
-        push.{mac_key_elements:?}
-
-        exec.aead_eidos::auth_empty_ad_expanded_exact
-    end
-    "
-    );
-
-    let test = build_test!(source.as_str(), &[]);
-    let expected_code = miden_core::mast::error_code_from_msg(expected_error);
-    miden_utils_testing::expect_exec_error_matches!(
-        test,
-        ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, err_msg }
-                | OperationError::U32AssertionFailed { err_code, err_msg, .. },
-            ..
-        } if err_code == expected_code && err_msg.is_none()
-    );
+    assert_aead_error(procedure, &test, expected_error);
 }
 
 struct PlaintextHandler(Vec<Felt>);
@@ -1654,6 +1533,7 @@ struct CountingHandler(Arc<AtomicUsize>);
 impl EventHandler for CountingHandler {
     fn on_event(&self, _process: &ProcessorState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
         self.0.fetch_add(1, Ordering::SeqCst);
-        Ok(Vec::new())
+        // Abort an unexpected event before an invalid length can drive further work.
+        Err("unexpected plaintext event".into())
     }
 }
