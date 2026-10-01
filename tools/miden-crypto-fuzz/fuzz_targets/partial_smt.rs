@@ -37,15 +37,15 @@ fuzz_target!(|data: &[u8]| {
     let _ = PartialSmt::read_from_bytes(&unique_nodes.to_bytes());
 
     // Also try the same leaves without reconstruction nodes. This preserves direct coverage for
-    // missing-node cases like the panic path reported in roborev review 3329.
+    // missing-node cases like the decode failure mode.
     if !unique_nodes.leaves.is_empty() {
         let mut missing_nodes = unique_nodes;
         missing_nodes.nodes.clear();
         let _ = PartialSmt::read_from_bytes(&missing_nodes.to_bytes());
     }
 
-    // Keep a minimal missing-node shape in the corpus so short inputs can still reach the reviewed
-    // failure mode without first discovering the broader structured encoding.
+    // Keep a minimal missing-node shape in the corpus so short inputs can still reach the
+    // decode failure mode without first discovering the broader structured encoding.
     let _ = PartialSmt::read_from_bytes(&focused_missing_node_payload(data));
 });
 

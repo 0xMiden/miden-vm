@@ -16,7 +16,7 @@ use std::{
 
 use libfuzzer_sys::fuzz_target;
 use miden_assembly::{Assembler, ProjectTargetSelector};
-use miden_core::serde::{Deserializable, SliceReader};
+use miden_core::serde::{Deserializable, Serializable, SliceReader};
 use miden_mast_package::{
     Package as MastPackage, SectionId, TargetType, debug_info::PackageDebugInfo,
 };
@@ -268,6 +268,18 @@ fn assemble_project(manifest_path: &Path, target: ProjectTargetSelector<'_>, pro
 
 fn validate_package(package: &MastPackage) {
     validate_debug_sections(package);
+
+    // STABILITY ORACLE: an ASSEMBLER-produced package must satisfy the wire contract its
+    // own reader enforces — canonical bytes must decode to an Eq-equal package. Catches
+    // assembler/serializer output that the package deserializer would reject (the
+    // writer/reader asymmetry class at the assembly layer).
+    let canonical = package.to_bytes();
+    let redecoded = MastPackage::read_from_bytes(&canonical)
+        .expect("an assembled package must satisfy its own wire format");
+    assert_eq!(
+        redecoded, *package,
+        "assembled package must round-trip through its wire format"
+    );
 
     // These conversion helpers borrow the package, despite the `try_into_*` names.
     match package.kind {
