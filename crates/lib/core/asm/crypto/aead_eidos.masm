@@ -5,7 +5,8 @@
 #! with plaintext felts and writes expanded ciphertext limbs.
 #! Authentication covers expanded ciphertext with empty associated data.
 #! The MAC pairs adjacent Felts as quadratic-extension coefficients and begins Horner evaluation
-#! at one, binding the number of coefficients.
+#! at one, binding the number of coefficients. A final multiplication by the evaluation point
+#! makes every input coefficient multiply a positive power of that point.
 #!
 #! Security contract:
 #! - callers must never reuse `(key, nonce)`;
@@ -21,16 +22,16 @@ use miden::core::crypto::hashes::eidos
 # Constants
 # ================================================================================================
 
-# Eidos::init_chaining_word(AEAD_CTR_KEY, 0), where AEAD_CTR_KEY = 0x00000601.
+# Eidos::init_chaining_word(AEAD_CTR_KEY, 0), where AEAD_CTR_KEY = 0x00000602.
 # Fixed-arity derivations use registered domain tags for separation; variable-length Eidos hashes
 # also bind their length in the initial chaining value.
-const AEAD_CTR_INIT_CV_0 = 4280581857092830721
+const AEAD_CTR_INIT_CV_0 = 4280581857092830722
 const AEAD_CTR_INIT_CV_1 = 2688637132020383744
 const AEAD_CTR_INIT_CV_2 = 1947077364412317696
 const AEAD_CTR_INIT_CV_3 = 6620516959492505600
 
-# Eidos::init_chaining_word(AEAD_MAC_KEY, 0), where AEAD_MAC_KEY = 0x00000701.
-const AEAD_MAC_INIT_CV_0 = 4280581857092830977
+# Eidos::init_chaining_word(AEAD_MAC_KEY, 0), where AEAD_MAC_KEY = 0x00000702.
+const AEAD_MAC_INIT_CV_0 = 4280581857092830978
 const AEAD_MAC_INIT_CV_1 = 2688637132020383744
 const AEAD_MAC_INIT_CV_2 = 1947077364412317696
 const AEAD_MAC_INIT_CV_3 = 6620516959492505600
@@ -467,7 +468,7 @@ end
 #! Output: [tag0, tag1, ...]
 proc auth_empty_ad_expanded_exact_validated
     # `horner_eval_ext` requires an aligned word `[r0, r1, 0, 0]` for the evaluation point.
-    # Keep the mask `(s0, s1)` on the stack below the accumulator until the final `ext2add`.
+    # Keep the mask `(s0, s1)` below the accumulator until the final multiply and addition.
     movdn.4
     push.0.0 movup.3 movup.3
     dup.6 mem_storew_le dropw
@@ -579,9 +580,14 @@ proc auth_empty_ad_expanded_exact_validated
     end
 
     dropw dropw dropw drop
-    drop
-    # => [acc0, acc1, s0, s1, ...]
+    # => [alpha_ptr, acc0, acc1, s0, s1, ...]
 
+    # Multiply by the evaluation point before adding the mask, so the unmasked MAC polynomial
+    # has constant coefficient zero.
+    dup add.1 mem_load
+    swap mem_load
+    # => [r0, r1, acc0, acc1, s0, s1, ...]
+    ext2mul
     ext2add
 end
 
@@ -620,7 +626,7 @@ pub proc auth_empty_ad_expanded(
     assert.err="AEAD authentication input exceeds its supported length"
 
     # `horner_eval_ext` requires an aligned word `[r0, r1, 0, 0]` for the evaluation point.
-    # Keep the mask `(s0, s1)` on the stack below the accumulator until the final `ext2add`.
+    # Keep the mask `(s0, s1)` below the accumulator until the final multiply and addition.
     push.0.0 movup.3 movup.3
     loc_storew_le.0
     dropw
@@ -679,9 +685,14 @@ pub proc auth_empty_ad_expanded(
     end
 
     dropw dropw dropw drop
-    drop
-    # => [acc0, acc1, s0, s1, ...]
+    # => [alpha_ptr, acc0, acc1, s0, s1, ...]
 
+    # Multiply by the evaluation point before adding the mask, so the unmasked MAC polynomial
+    # has constant coefficient zero.
+    dup add.1 mem_load
+    swap mem_load
+    # => [r0, r1, acc0, acc1, s0, s1, ...]
+    ext2mul
     ext2add
 end
 

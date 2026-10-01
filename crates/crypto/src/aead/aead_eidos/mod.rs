@@ -55,12 +55,22 @@ pub const AUTH_TAG_SIZE: usize = 2;
 /// coefficients.
 pub const MAX_AUTHENTICATED_INPUT_FELTS: usize = 1 << 28;
 
-/// Maximum sum of polynomial-degree bounds across verification attempts under one key when
-/// targeting 96-bit authentication security.
+/// Degree budget for failed and pending MAC verification attempts under one key.
 ///
-/// For each attempt, the degree bound is the larger coefficient count of the submitted message and
-/// any message previously authenticated with the same nonce. Applications are responsible for
-/// enforcing this lifetime limit. Reusing a nonce is forbidden regardless of this budget.
+/// Senders must use a fresh nonce for each message. Before checking a tag, reserve the larger
+/// polynomial degree of the submitted message and the sender's message under that nonce, if any.
+/// The degree is `padded_input_len / 2 + 1`, with length measured in Felts. If the sender's message
+/// length is unknown, use a size limit enforced for all messages sent and received under the key,
+/// or the maximum degree `2^27 + 1`.
+///
+/// Keep the charge on a mismatch; release it on a match. Refuse checks whose reservation would
+/// exceed the remaining budget. Reservations must be atomic and shared across all receivers using
+/// the key. The library does not track this budget.
+///
+/// With unique sender nonces and independent ideal session keys, the forgery bound is
+/// `(512 / 511) * 2^-96`. The concrete bound also includes the Eidos PRF distinguishing advantage
+/// and any nonce-collision probability. See the
+/// [Eidos AEAD usage limits](https://docs.miden.xyz/miden-vm/design/eidos-aead#usage-limits).
 pub const MAX_VERIFICATION_DEGREE_BUDGET_PER_KEY: u64 = 1 << 28;
 
 /// Ciphertext and authentication data produced by [`SecretKey`].
