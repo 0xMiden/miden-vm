@@ -578,10 +578,8 @@ pub struct SessionTraces {
 }
 
 impl SessionTraces {
-    /// The ten main traces in canonical chiplet order: chunk-node-sponge, Eidos compression,
-    /// Keccak round, canonical byte-pair lookup, transcript eval, uint-store-mul,
-    /// uint-add, ec-point-store-groups, ec-add, and ec-msm. The AIRs, provers, and public values a
-    /// caller assembles must line up with this order.
+    /// Borrows the ten main traces in [`Self::into_mains`] order.
+    #[cfg(any(test, debug_assertions))]
     pub fn mains(&self) -> [&RowMajorMatrix<Felt>; NUM_CHIPLETS] {
         [
             &self.chunk_node_sponge,
@@ -597,9 +595,10 @@ impl SessionTraces {
         ]
     }
 
-    /// The ten main traces by value in [`mains`](Self::mains) order,
-    /// consuming the bundle — lets the prover take ownership rather than
-    /// clone the (potentially large) traces.
+    /// Consumes the bundle and returns its ten main traces in canonical chiplet order:
+    /// chunk-node-sponge, Eidos compression, Keccak round, canonical byte-pair lookup,
+    /// transcript eval, uint-store-mul, uint-add, ec-point-store-groups, ec-add, and ec-msm.
+    /// The AIRs, provers, and public values must use this same order.
     pub fn into_mains(self) -> Vec<RowMajorMatrix<Felt>> {
         vec![
             self.chunk_node_sponge,

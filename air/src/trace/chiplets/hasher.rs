@@ -53,14 +53,6 @@ pub const NUM_ROUNDS: usize = miden_core::chiplets::hasher::NUM_ROUNDS;
 /// Number of selector columns in the trace.
 pub const NUM_SELECTORS: usize = 3;
 
-/// Standalone Eidos compression AIR block length.
-pub const HASH_CYCLE_LEN: usize = crate::trace::eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN;
-pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new_unchecked(HASH_CYCLE_LEN as u64);
-
-/// Index of the last row in a standalone Eidos compression AIR block (0-based).
-pub const LAST_CYCLE_ROW: usize = HASH_CYCLE_LEN - 1;
-pub const LAST_CYCLE_ROW_FELT: Felt = Felt::new_unchecked(LAST_CYCLE_ROW as u64);
-
 /// Row alignment for the hasher controller region inside `ChipletsAir`.
 ///
 /// The following bitwise section can host 8-row AEAD stream entries. Padding the controller

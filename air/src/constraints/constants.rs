@@ -5,8 +5,6 @@ use miden_core::field::PrimeCharacteristicRing;
 use crate::Felt;
 
 pub const F_1: Felt = Felt::ONE;
-#[allow(dead_code)]
-pub const F_NEG_1: Felt = Felt::NEG_ONE;
 pub const F_2: Felt = Felt::TWO;
 pub const F_3: Felt = Felt::new_unchecked(3);
 pub const F_4: Felt = Felt::new_unchecked(4);
