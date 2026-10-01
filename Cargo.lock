@@ -2572,7 +2572,6 @@ dependencies = [
  "miden-lifted-stark",
  "miden-precompiles-air",
  "miden-serde-utils",
- "rayon",
  "serde",
  "serde-wincode",
  "thiserror",
@@ -2612,7 +2611,6 @@ version = "1.0.0"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
- "miden-debug-types",
  "miden-mast-package",
  "miden-package-registry",
  "miden-test-serialization-macros",

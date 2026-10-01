@@ -147,32 +147,26 @@ using AND nodes. For `[A, TRUE, B, A]`, the folded root is:
 D = digest(AND(digest(AND(A, B)), A))
 ```
 
-Order and repeated nonzero roots are preserved. Each AND node uses one Poseidon2 permutation
-with `AND_TAG = [1, 0, 0, 0]`, matching `miden_core::deferred::fold_deferred_root`.
+Order and repeated nonzero roots are preserved. Each AND node compresses its two child digests
+with Eidos under `DEFERRED_AND_FRAME`, matching `miden_core::deferred::fold_deferred_root`.
 
 ### Proving the combined work
 
-Reconstruct each `DeferredState` from `PrecompileStatus::Deferred` with `DeferredState::from_wire`.
-Here, `deferred_states` contains states with nonzero roots in claim order, including repeats:
+Collect the singleton witnesses carried by `PrecompileStatus::Deferred` in claim order, including
+repeats. Pass this nonempty vector directly to the prover:
 
 ```rust
-use miden_core::deferred::PrecompileWitness;
-
-let witnesses = deferred_states
-    .into_iter()
-    .map(PrecompileWitness::new)
-    .collect::<Result<Vec<_>, _>>()?;
-let merged = PrecompileWitness::merge(witnesses)?;
+let pvm_proof = prover.prove_precompiles(witnesses)?;
 ```
 
-Merging computes `D` and combines the witness data. On the request for `D`, prove the merged
-witness with `Prover::prove_precompile` and return the packaged advice.
+The prover imports and evaluates the witnesses, folds their roots into `D`, and proves the
+combined work. On the request for `D`, return the packaged advice for this proof.
 
 The resulting `PrecompileProof` contains one STARK proof for `roots = [A, B, A]`. Its `aggregate_root()`
 recomputes `D` from the metadata. The batcher verifies the PVM proof against `D`, which it computed
 from the deferred roots returned by the MVM verifiers, and checks the proof's security level.
 
-If all roots are TRUE, skip merging witnesses and requesting a PVM proof.
+If all roots are TRUE, skip precompile proving and requesting a PVM proof.
 
 ### Proving the batcher
 

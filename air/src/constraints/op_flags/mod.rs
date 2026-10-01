@@ -784,9 +784,6 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
     // ------ Operation flags ---------------------------------------------------------------------
 
     op_flag_getters!(degree7_op_flags,
-        /// Operation Flag of NOOP operation.
-        #[expect(dead_code)]
-        noop => opcodes::NOOP,
         /// Operation Flag of EQZ operation.
         eqz => opcodes::EQZ,
         /// Operation Flag of NEG operation.
@@ -797,9 +794,6 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         incr => opcodes::INCR,
         /// Operation Flag of NOT operation.
         not => opcodes::NOT,
-        /// Operation Flag of MLOAD operation.
-        #[expect(dead_code)]
-        mload => opcodes::MLOAD,
         /// Operation Flag of SWAP operation.
         swap => opcodes::SWAP,
         /// Operation Flag of CALLER operation.
@@ -815,9 +809,6 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         movup3 => opcodes::MOVUP3,
         /// Operation Flag of MOVDN3 operation.
         movdn3 => opcodes::MOVDN3,
-        /// Operation Flag of ADVPOPW operation.
-        #[expect(dead_code)]
-        advpopw => opcodes::ADVPOPW,
         /// Operation Flag of EXPACC operation.
         expacc => opcodes::EXPACC,
         /// Operation Flag of MOVUP4 operation.
@@ -862,30 +853,12 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         and => opcodes::AND,
         /// Operation Flag of OR operation.
         or => opcodes::OR,
-        /// Operation Flag of U32AND operation.
-        #[expect(dead_code)]
-        u32and => opcodes::U32AND,
-        /// Operation Flag of U32XOR operation.
-        #[expect(dead_code)]
-        u32xor => opcodes::U32XOR,
         /// Operation Flag of FRIE2F4 operation.
         frie2f4 => opcodes::FRIE2F4,
-        /// Operation Flag of DROP operation.
-        #[expect(dead_code)]
-        drop => opcodes::DROP,
         /// Operation Flag of CSWAP operation.
         cswap => opcodes::CSWAP,
         /// Operation Flag of CSWAPW operation.
         cswapw => opcodes::CSWAPW,
-        /// Operation Flag of MLOADW operation.
-        #[expect(dead_code)]
-        mloadw => opcodes::MLOADW,
-        /// Operation Flag of MSTORE operation.
-        #[expect(dead_code)]
-        mstore => opcodes::MSTORE,
-        /// Operation Flag of MSTOREW operation.
-        #[expect(dead_code)]
-        mstorew => opcodes::MSTOREW,
         /// Operation Flag of PAD operation.
         pad => opcodes::PAD,
         /// Operation Flag of DUP operation.
@@ -912,9 +885,6 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         dup13 => opcodes::DUP13,
         /// Operation Flag of DUP15 operation.
         dup15 => opcodes::DUP15,
-        /// Operation Flag of ADVPOP operation.
-        #[expect(dead_code)]
-        advpop => opcodes::ADVPOP,
         /// Operation Flag of SDEPTH operation.
         sdepth => opcodes::SDEPTH,
         /// Operation Flag of CLK operation.
@@ -953,21 +923,12 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         loop_op => opcodes::LOOP,
         /// Operation Flag of SPAN operation.
         span => opcodes::SPAN,
-        /// Operation Flag of JOIN operation.
-        #[expect(dead_code)]
-        join => opcodes::JOIN,
         /// Operation Flag of PUSH operation.
         push => opcodes::PUSH,
         /// Operation Flag of DYN operation.
         dyn_op => opcodes::DYN,
         /// Operation Flag of DYNCALL operation.
         dyncall => opcodes::DYNCALL,
-        /// Operation Flag of EVALCIRCUIT operation.
-        #[expect(dead_code)]
-        evalcircuit => opcodes::EVALCIRCUIT,
-        /// Operation Flag of LOG_DEFERRED operation.
-        #[expect(dead_code)]
-        log_deferred => opcodes::LOGDEFERRED,
         /// Operation Flag of HORNERBASE operation.
         hornerbase => opcodes::HORNERBASE,
         /// Operation Flag of HORNEREXT operation.

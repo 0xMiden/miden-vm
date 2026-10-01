@@ -17,10 +17,9 @@ repository.workspace = true
 default = ["std"]
 concurrent = [
     "std",
-    "dep:rayon",
     "miden-precompiles-air/concurrent",
 ]
-constants-tools = ["std", "dep:miden-air", "dep:rayon"]
+constants-tools = ["std", "dep:miden-air"]
 std = [
     "dep:miden-ace-codegen",
     "miden-core/std",
@@ -38,7 +37,6 @@ miden-lifted-air.workspace = true
 miden-lifted-stark.workspace = true
 miden-precompiles-air.workspace = true
 miden-serde-utils.workspace = true
-rayon = { workspace = true, optional = true }
 serde.workspace = true
 serde-wincode.workspace = true
 thiserror.workspace = true

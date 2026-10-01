@@ -1108,7 +1108,7 @@ fn certificate_ordering_limbs_are_range_checked() {
     let mut rng = StdRng::seed_from_u64(0xce47);
     let rand_qf = |rng: &mut StdRng| {
         use rand::RngExt;
-        miden_core::field::QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()])
+        QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()])
     };
     let challenges =
         Challenges::new(rand_qf(&mut rng), rand_qf(&mut rng), MAX_MESSAGE_WIDTH, NUM_BUS_IDS);

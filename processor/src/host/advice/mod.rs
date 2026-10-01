@@ -152,12 +152,6 @@ impl AdviceProvider {
         Ok(())
     }
 
-    #[cfg(test)]
-    #[expect(dead_code)]
-    pub(crate) fn merkle_store(&self) -> &MerkleStore {
-        &self.store
-    }
-
     /// Applies the mutations given in order to the `AdviceProvider`.
     pub fn apply_mutations(
         &mut self,
