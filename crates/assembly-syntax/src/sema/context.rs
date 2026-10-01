@@ -23,6 +23,7 @@ pub struct AnalysisContext {
     used_constants: BTreeSet<Ident>,
     constant_deps: BTreeMap<Ident, BTreeSet<Ident>>,
     constant_import_refs: BTreeMap<Ident, BTreeSet<String>>,
+    qualified_type_refs: BTreeSet<PathBuf>,
     evaluating_constants: Vec<Ident>,
     evaluating_constant: Option<Ident>,
     imported: BTreeSet<Ident>,
@@ -115,6 +116,7 @@ impl AnalysisContext {
             used_constants: Default::default(),
             constant_deps: Default::default(),
             constant_import_refs: Default::default(),
+            qualified_type_refs: Default::default(),
             evaluating_constants: Default::default(),
             evaluating_constant: None,
             imported: Default::default(),
@@ -191,6 +193,17 @@ impl AnalysisContext {
         self.constant_import_refs.entry(constant.clone()).or_default().insert(import);
     }
 
+    pub fn record_qualified_type_ref(&mut self, path: &Path) {
+        self.qualified_type_refs.insert(path.to_path_buf());
+    }
+
+    fn local_type_name_for_path(&self, path: Span<&Path>) -> Option<Ident> {
+        let (name, parent) = path.split_last()?;
+        let is_local = parent == Path::new("self")
+            || (path.is_absolute() && parent.to_relative() == self.module_path.as_path());
+        is_local.then(|| Ident::new_with_span(path.span(), name).ok()).flatten()
+    }
+
     pub fn resolve_constant_usage(&mut self, module: &Module, used_imports: &mut BTreeSet<String>) {
         let mut local_imports = BTreeMap::<String, Ident>::new();
         let mut pending_imports = VecDeque::from_iter(used_imports.iter().cloned());
@@ -210,16 +223,32 @@ impl AnalysisContext {
             }
         }
 
+        for path in &self.qualified_type_refs {
+            let Some(name) =
+                self.local_type_name_for_path(Span::new(SourceSpan::UNKNOWN, path.as_path()))
+            else {
+                continue;
+            };
+            if used_imports.insert(name.as_str().to_string()) {
+                pending_imports.push_back(name.as_str().to_string());
+            }
+        }
+
         let mut pending_constants = VecDeque::from_iter(self.used_constants.iter().cloned());
         for (name, constant) in &self.constants {
             if constant.visibility.is_public() && self.used_constants.insert(name.clone()) {
                 pending_constants.push_back(name.clone());
             }
         }
+        let mut enum_variants = BTreeMap::<String, Vec<Ident>>::new();
         for item in module.items() {
             let Item::Type(TypeDecl::Enum(ty)) = item else {
                 continue;
             };
+            enum_variants.insert(
+                ty.name().as_str().to_string(),
+                ty.variants().iter().map(|variant| variant.name.clone()).collect(),
+            );
             if ty.visibility().is_public() || used_imports.contains(ty.name().as_str()) {
                 for variant in ty.variants() {
                     if self.used_constants.insert(variant.name.clone()) {
@@ -250,6 +279,12 @@ impl AnalysisContext {
                 if self.constants.contains_key(source) {
                     if self.used_constants.insert(source.clone()) {
                         pending_constants.push_back(source.clone());
+                    }
+                } else if let Some(variants) = enum_variants.get(source.as_str()) {
+                    for variant in variants {
+                        if self.used_constants.insert(variant.clone()) {
+                            pending_constants.push_back(variant.clone());
+                        }
                     }
                 } else if local_imports.contains_key(source.as_str())
                     && used_imports.insert(source.as_str().to_string())

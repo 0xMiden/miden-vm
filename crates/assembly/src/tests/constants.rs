@@ -353,6 +353,27 @@ end
 }
 
 #[test]
+fn aliased_and_qualified_enum_types_keep_discriminant_dependencies_live() -> TestResult {
+    let context = TestContext::default();
+    for (import, ty) in [
+        ("use {Status as State} from self", "State"),
+        ("", "self::Status"),
+        ("", "::test::lib::Status"),
+    ] {
+        let source = source_file!(
+            &context,
+            format!(
+                "namespace test::lib\n\nconst BASE = 10\nenum Status : u16 {{\n    OK = BASE,\n}}\n{import}\nproc hidden(value: {ty})\n    nop\nend\n\npub proc entry\n    exec.hidden\nend\n"
+            )
+        );
+
+        let module = context.parse_module(source)?;
+        context.assemble_library("test", None, module, [])?;
+    }
+    Ok(())
+}
+
+#[test]
 fn enum_felt_repr_variants() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(
