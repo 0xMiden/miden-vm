@@ -324,6 +324,35 @@ end
 }
 
 #[test]
+fn enum_type_in_called_procedure_keeps_discriminant_dependencies_live() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        r#"
+namespace test::lib
+
+const BASE = 10
+
+enum Status : u16 {
+    OK = BASE,
+}
+
+proc hidden(value: Status)
+    nop
+end
+
+pub proc entry
+    exec.hidden
+end
+"#
+    );
+
+    let module = context.parse_module(source)?;
+    context.assemble_library("test", None, module, [])?;
+    Ok(())
+}
+
+#[test]
 fn enum_felt_repr_variants() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(
