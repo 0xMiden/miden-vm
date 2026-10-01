@@ -58,6 +58,10 @@ k256 = { workspace = true, features = ["arithmetic"] }
 miden-air = { workspace = true, features = ["std", "testing"] }
 miden-precompiles-air = { workspace = true, features = ["testing"] }
 miden-precompiles-verifier = { workspace = true, features = ["std"] }
+proptest = { workspace = true, features = ["std"] }
+# Kept for upstream test files (e.g. the #3943 AIR-constraint tests) that still sample
+# with a seeded StdRng; the property-testing migration only replaced this crate's own
+# manual randomness.
 rand = { workspace = true, features = ["std_rng"] }
 rayon.workspace = true
 tracing = { workspace = true, features = ["std"] }

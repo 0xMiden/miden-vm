@@ -239,6 +239,49 @@ fn rejects_deeply_nested_binary_constant_expression() {
         .expect("parser thread panicked");
 }
 
+/// The nesting limits reject the FIRST depth past the boundary (limit + 1), not just
+/// far-past depths: an off-by-N check (e.g. `> limit + 5`) would pass both the
+/// inclusive-at-limit test and the deep-rejection tests while accepting depths the
+/// contract forbids. All three expression kinds are pinned at their own limit + 1.
+#[test]
+fn rejects_first_depth_past_the_nesting_limits() {
+    let cases = [
+        (
+            format!(
+                "const VALUE = {}1{}\n",
+                "(".repeat(MAX_CONSTANT_EXPR_NESTING + 1),
+                ")".repeat(MAX_CONSTANT_EXPR_NESTING + 1),
+            ),
+            "constant expression nesting depth exceeded",
+        ),
+        (
+            format!("const VALUE = 1{}\n", " + 1".repeat(MAX_CONSTANT_EXPR_NESTING + 1)),
+            "constant expression nesting depth exceeded",
+        ),
+        (
+            format!(
+                "type T = {}felt{}\n",
+                "[".repeat(MAX_TYPE_EXPR_NESTING + 1),
+                "; 1]".repeat(MAX_TYPE_EXPR_NESTING + 1),
+            ),
+            "type expression nesting depth exceeded",
+        ),
+    ];
+
+    for (source, expected) in cases {
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || {
+                let error = parse_forms(test_source_file(&source))
+                    .expect_err("the first depth past the limit should return an error");
+                assert_eq!(error.to_string(), expected);
+            })
+            .expect("failed to start parser thread")
+            .join()
+            .expect("parser thread panicked");
+    }
+}
+
 #[test]
 fn rejects_deeply_nested_type_expression() {
     let depth = 10_000;

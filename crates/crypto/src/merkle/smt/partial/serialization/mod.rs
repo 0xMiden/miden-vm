@@ -35,6 +35,10 @@ use crate::merkle::{
 /// Deserialization validates node indices and checks each leaf map key against the index embedded
 /// in its value.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct UniqueNodes {
     /// The expected root of the tree after reconstruction.
     ///
@@ -195,5 +199,87 @@ impl Deserializable for UniqueNodes {
         let unique_nodes = Self { root, nodes, leaves, value_only_leaves };
         unique_nodes.validate()?;
         Ok(unique_nodes)
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod unique_nodes_arbitrary {
+    use alloc::collections::BTreeMap;
+
+    use proptest::prelude::*;
+
+    use super::UniqueNodes;
+    use crate::{
+        Felt, Word,
+        merkle::{NodeIndex, smt::Smt},
+    };
+
+    impl Arbitrary for UniqueNodes {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader validates each node index against its declared depth
+            // (NodeIndex::new(depth, position)); bound positions to their depth by construction.
+            // BTreeMap deduplication keeps every map key unique; empty maps are valid inputs.
+            (
+                any::<Word>(),
+                proptest::collection::vec((0u8..=64, 0usize..=3), 0..=4),
+                proptest::collection::vec((any::<Word>(), any::<Word>()), 0..=3),
+                proptest::collection::vec(any::<u64>(), 0..=3),
+            )
+                .prop_map(|(root, levels, leaf_pairs, value_only_positions)| {
+                    let mut nodes = BTreeMap::new();
+                    for (depth, count) in levels {
+                        let mask = if depth == 64 { u64::MAX } else { (1u64 << depth) - 1 };
+                        for i in 0..count as u64 {
+                            let position = i.wrapping_mul(0x9e37_79b9_7f4a_7c15) & mask;
+                            // Arbitrary (non-zero-biased) hash: the wire carries node hashes
+                            // verbatim, so the property detects a deserializer that swaps or
+                            // zeroes them.
+                            let hash: Word = [
+                                Felt::from(i as u32 + 1),
+                                Felt::from(depth as u32),
+                                Felt::from(count as u32),
+                                Felt::from(position as u32 % 7),
+                            ]
+                            .into();
+                            nodes.insert(
+                                NodeIndex::new(depth, position).expect("position fits the depth"),
+                                hash,
+                            );
+                        }
+                    }
+
+                    // Leaves are sound by construction: materialize a real Smt and take its
+                    // actual leaves, keyed by their embedded index (the reader cross-validates
+                    // the position against the leaf's embedded index).
+                    let entries: BTreeMap<Word, Word> = leaf_pairs.into_iter().collect();
+                    let smt = Smt::with_entries(entries).expect("keys are distinct");
+                    let leaves: BTreeMap<u64, crate::merkle::smt::SmtLeaf> = smt
+                        .leaves()
+                        .map(|(index, leaf)| (index.position(), leaf.clone()))
+                        .collect();
+
+                    let value_only_leaves: BTreeMap<u64, Word> = value_only_positions
+                        .into_iter()
+                        .map(|p| {
+                            let hash: Word = [
+                                Felt::from(p as u32),
+                                Felt::from(p as u32 + 1),
+                                Felt::from(p as u32 + 2),
+                                Felt::from(p as u32 + 3),
+                            ]
+                            .into();
+                            (p, hash)
+                        })
+                        .collect();
+                    Self { root, nodes, leaves, value_only_leaves }
+                })
+                .boxed()
+        }
     }
 }
