@@ -12,6 +12,10 @@ use crate::{
 /// The proof consists of a sparse Merkle path and a leaf, which describes the node located at
 /// the base of the path.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct SmtProof {
     /// The sparse Merkle path from the leaf to the root.
     path: SparseMerklePath,

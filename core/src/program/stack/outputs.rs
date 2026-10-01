@@ -14,6 +14,10 @@ use crate::{
 ///
 /// The first element is at position 0 (top of stack).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct StackOutputs {
     elements: [Felt; MIN_STACK_DEPTH],
 }
@@ -160,4 +164,27 @@ pub enum OutputError {
     InvalidStackElement(u64),
     #[error("number of output values on the stack cannot exceed {0}, but was {1}")]
     OutputStackTooBig(usize, usize),
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::{MIN_STACK_DEPTH, StackOutputs};
+    use crate::Felt;
+
+    impl Arbitrary for StackOutputs {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Any field elements are valid stack outputs. Serialization trims trailing zeros and
+            // deserialization re-pads with `ZERO`, and `Felt` equality ignores representation,
+            // so exact round-trip equality holds.
+            any::<[Felt; MIN_STACK_DEPTH]>().prop_map(StackOutputs::from).boxed()
+        }
+    }
 }

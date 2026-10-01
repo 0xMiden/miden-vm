@@ -16,6 +16,7 @@ exclude.workspace = true
 
 [features]
 default = ["serde"]
+arbitrary = ["dep:proptest", "serde"]
 serde = [
   "dep:miden-serde-utils",
   "smallvec/serde",
@@ -23,7 +24,14 @@ serde = [
 std = ["miden-serde-utils/std"]
 
 [dependencies]
+proptest = { workspace = true, optional = true }
 miden-formatting.workspace = true
 miden-serde-utils = { workspace = true, optional = true }
 smallvec = { workspace = true, features = ["drain_filter"] }
 thiserror.workspace = true
+
+[dev-dependencies]
+miden-test-serialization-macros.workspace = true
+# std enables proptest's contextualize_config, so PROPTEST_CASES can scale the
+# pinned case counts for one-off high-confidence verification runs.
+proptest = { workspace = true, features = ["std"] }

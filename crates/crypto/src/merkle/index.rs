@@ -22,6 +22,10 @@ use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 /// The root is represented by the pair $(0, 0)$, its left child is $(1, 0)$ and its right child
 /// $(1, 1)$.
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct NodeIndex {
     depth: u8,
     position: u64,
@@ -252,6 +256,66 @@ impl Iterator for ProofIter {
 impl ExactSizeIterator for ProofIter {
     fn len(&self) -> usize {
         self.next_index.depth() as usize
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::NodeIndex;
+
+    impl Arbitrary for NodeIndex {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Sound by construction: depth in 0..=64 and position strictly below 2^depth.
+            // Depth 64 needs the full u64 position range, where 1u64 << depth would overflow.
+            (0u8..=64u8)
+                .prop_flat_map(|depth| {
+                    let positions: BoxedStrategy<u64> = if depth == 64 {
+                        (0u64..=u64::MAX).boxed()
+                    } else {
+                        (0u64..(1u64 << depth)).boxed()
+                    };
+                    (Just(depth), positions)
+                })
+                .prop_map(|(depth, position)| {
+                    NodeIndex::new(depth, position).expect("position is below 2^depth")
+                })
+                .boxed()
+        }
+    }
+
+    proptest! {
+        /// The wire decoder must reject exactly the (depth, position) pairs that violate the
+        /// type invariant (depth > 64, or position >= 2^depth), with `InvalidValue`.
+        #[test]
+        fn decoding_rejects_invariant_violations(
+            (depth, position) in prop_oneof![
+                // depth beyond the 64 limit, any position
+                (65u8..=u8::MAX, any::<u64>()),
+                // valid depth, position at or above 2^depth (1u64 << depth never overflows
+                // because depth < 64 in this branch)
+                (0u8..64u8).prop_flat_map(|depth| (Just(depth), (1u64 << depth)..=u64::MAX)),
+            ],
+        ) {
+            use alloc::vec::Vec;
+            use crate::utils::{Deserializable, DeserializationError, Serializable};
+
+            // Serialization writes depth as u8 LE and position as u64 LE.
+            let mut encoded = Vec::new();
+            depth.write_into(&mut encoded);
+            position.write_into(&mut encoded);
+            match NodeIndex::read_from_bytes(&encoded) {
+                Err(DeserializationError::InvalidValue(_)) => {}
+                other => panic!("expected InvalidValue rejection for depth={depth}, position={position}, got {other:?}"),
+            }
+        }
     }
 }
 

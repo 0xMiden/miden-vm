@@ -111,6 +111,10 @@ impl Deserializable for SectionId {
 }
 
 #[derive(Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct Section {
     pub id: SectionId,
     pub data: Cow<'static, [u8]>,
@@ -145,6 +149,27 @@ impl Section {
     /// Returns the size in bytes of this section's data
     pub fn len(&self) -> usize {
         self.data.len()
+    }
+}
+
+#[cfg(all(test, feature = "arbitrary"))]
+mod section_arbitrary {
+    use proptest::prelude::*;
+
+    use super::Section;
+    use crate::package::section::SectionId;
+
+    impl Arbitrary for Section {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The id round-trips through its string form (its own roundtrip test covers that);
+            // the data payload is any-valid bytes.
+            (any::<SectionId>(), proptest::collection::vec(any::<u8>(), 0..=16))
+                .prop_map(|(id, data)| Self::new(id, data))
+                .boxed()
+        }
     }
 }
 

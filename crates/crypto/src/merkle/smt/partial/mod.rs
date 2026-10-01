@@ -18,6 +18,85 @@ mod serialization;
 #[cfg(test)]
 mod tests;
 
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    extern crate alloc;
+
+    use alloc::{collections::BTreeMap, vec::Vec};
+
+    use proptest::prelude::*;
+
+    use super::PartialSmt;
+    use crate::{Word, merkle::smt::Smt};
+
+    impl Arbitrary for PartialSmt {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Build a sound partial SMT by construction: dedup keys in a BTreeMap (so all keys
+            // are distinct), materialize a full tree from those entries, then derive the partial
+            // from a SPARSE selection of proofs opened against that same tree (consistent roots
+            // guaranteed). The selection mixes inclusion proofs (subset of present keys, via the
+            // generated mask) and exclusion proofs (fresh keys, absent with overwhelming
+            // probability), so the sparse `nodes` / `value_only_leaves` serialization paths are
+            // exercised. Explicit branches cover the empty partial and the root-only partial.
+            // The sibling-leaf branch generates entries at adjacent even/odd leaf positions, so
+            // opening one leaf while its non-empty sibling is present-but-unopened (masked out
+            // of the inclusion proofs) produces value-only leaves deliberately. Random keys
+            // practically never share or adjoin leaf indices, so both branches are needed.
+            prop_oneof![
+                proptest::collection::vec((any::<Word>(), any::<Word>()), 0..=6).boxed(),
+                super::super::test_gen::sibling_leaf_entries().boxed(),
+            ]
+            .prop_flat_map(|pairs| {
+                // Drop empty values before deduplication (mirrors smt_from_pairs): the anchor
+                // entry must survive keep-last duplicate ordering even under shrinking.
+                let entries: BTreeMap<Word, Word> =
+                    pairs.into_iter().filter(|(_, value)| *value != crate::EMPTY_WORD).collect();
+                (
+                    proptest::collection::vec(any::<bool>(), entries.len()),
+                    proptest::collection::vec(any::<Word>(), 0..=3),
+                    Just(entries),
+                )
+            })
+            .prop_map(|(include_mask, exclusion_keys, entries)| {
+                if entries.is_empty() {
+                    // Explicit empty-partial branch.
+                    return PartialSmt::default();
+                }
+
+                let smt = Smt::with_entries(entries).expect("keys are distinct");
+
+                let mut proofs = Vec::new();
+                for (i, key) in
+                    smt.entries().map(|(k, _)| *k).collect::<Vec<_>>().into_iter().enumerate()
+                {
+                    if include_mask.get(i).copied().unwrap_or(true) {
+                        proofs.push(smt.open(&key));
+                    }
+                }
+                for key in exclusion_keys {
+                    // Absent with overwhelming probability; a collision just yields an
+                    // inclusion proof, which is equally valid input.
+                    proofs.push(smt.open(&key));
+                }
+
+                if proofs.is_empty() {
+                    // Explicit root-only branch: the partial tracks the root only.
+                    return PartialSmt::new(smt.root());
+                }
+
+                PartialSmt::from_proofs(proofs).expect("proofs share the tree's root")
+            })
+            .boxed()
+        }
+    }
+}
+
 pub use serialization::UniqueNodes;
 
 /// A partial version of an [`super::Smt`].
@@ -43,6 +122,10 @@ pub use serialization::UniqueNodes;
 /// Once a partial SMT has been constructed, its root is set in stone. All subsequently added proofs
 /// or merkle paths must match that root, otherwise an error is returned.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct PartialSmt {
     root: Word,
     num_entries: usize,

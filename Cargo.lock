@@ -2261,6 +2261,7 @@ dependencies = [
  "miden-field",
  "miden-lifted-stark",
  "miden-serde-utils",
+ "miden-test-serialization-macros",
  "num",
  "num-complex",
  "once_cell",
@@ -2355,6 +2356,7 @@ name = "miden-field"
 version = "1.0.0"
 dependencies = [
  "miden-serde-utils",
+ "miden-test-serialization-macros",
  "num-bigint 0.5.1",
  "p3-challenger",
  "p3-field",
@@ -2564,6 +2566,7 @@ dependencies = [
  "miden-precompiles-air",
  "miden-precompiles-verifier",
  "miden-utils-sync",
+ "proptest",
  "rand 0.10.2",
  "rayon",
  "serde",
@@ -2604,6 +2607,7 @@ dependencies = [
  "miden-debug-types",
  "miden-mast-package",
  "miden-precompiles",
+ "miden-test-serialization-macros",
  "miden-test-utils",
  "miden-utils-diagnostics",
  "miden-utils-indexing",
@@ -2862,6 +2866,8 @@ version = "0.18.0"
 dependencies = [
  "miden-formatting",
  "miden-serde-utils",
+ "miden-test-serialization-macros",
+ "proptest",
  "smallvec",
  "thiserror",
 ]

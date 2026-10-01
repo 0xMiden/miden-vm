@@ -21,6 +21,10 @@ mod tests;
 // ================================================================================================
 
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct StoreNode {
     left: Word,
     right: Word,
@@ -92,6 +96,10 @@ pub struct StoreNode {
 /// assert_eq!(store.num_internal_nodes() - 255, 10);
 /// ```
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct MerkleStore {
     nodes: Map<Word, StoreNode>,
 }
@@ -671,4 +679,60 @@ fn combine_nodes_with_empty_hashes(
         .into_iter()
         .map(|info| (info.value, StoreNode { left: info.left, right: info.right }))
         .chain(empty_hashes())
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use alloc::vec::Vec;
+
+    use proptest::prelude::*;
+
+    use super::{MerkleStore, StoreNode, Word};
+
+    impl Arbitrary for MerkleStore {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Build structurally valid stores bottom-up: every inserted key is the Poseidon2
+            // hash of its two children, matching the invariant maintained by `add_merkle_path`
+            // and `merge_roots`.
+            prop::collection::vec(any::<Word>(), 0..=16)
+                .prop_map(|leaves| {
+                    let mut store = MerkleStore::default();
+                    let mut level = leaves;
+                    while level.len() > 1 {
+                        let mut next = Vec::new();
+                        for pair in level.chunks(2) {
+                            if pair.len() == 2 {
+                                let parent = store
+                                    .merge_roots(pair[0], pair[1])
+                                    .expect("merging arbitrary words is valid");
+                                next.push(parent);
+                            } else {
+                                next.push(pair[0]);
+                            }
+                        }
+                        level = next;
+                    }
+                    store
+                })
+                .boxed()
+        }
+    }
+    impl Arbitrary for StoreNode {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Any (left, right) pair is structurally valid; key consistency is MerkleStore's
+            // concern, not the node's.
+            (any::<Word>(), any::<Word>())
+                .prop_map(|(left, right)| StoreNode { left, right })
+                .boxed()
+        }
+    }
 }

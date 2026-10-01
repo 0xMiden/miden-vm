@@ -137,6 +137,10 @@ pub mod opcodes {
 /// opcode space as the basic block operations.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u8)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub enum Operation {
     // ----- system operations -------------------------------------------------------------------
     /// Advances cycle counter, but does not change the state of user stack.
@@ -790,6 +794,112 @@ impl fmt::Display for Operation {
             Self::HornerExt => write!(f, "horner_eval_ext"),
             Self::EvalCircuit => write!(f, "eval_circuit"),
             Self::LogDeferred => write!(f, "log_deferred"),
+        }
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod operation_arbitrary {
+    use proptest::prelude::*;
+
+    use super::Operation;
+    use crate::Felt;
+
+    impl Arbitrary for Operation {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // All 81 variants are any-valid on the wire: unit variants carry only the op code,
+            // and the four data-carrying variants (Assert, U32assert2, Push, MpVerify) take an
+            // arbitrary Felt. prop_oneof exercises every discriminant in both directions.
+            prop_oneof![
+                any::<Felt>().prop_map(Self::Assert).boxed(),
+                any::<Felt>().prop_map(Self::U32assert2).boxed(),
+                any::<Felt>().prop_map(Self::Push).boxed(),
+                any::<Felt>().prop_map(Self::MpVerify).boxed(),
+                Just(Self::Noop),
+                Just(Self::SDepth),
+                Just(Self::Caller),
+                Just(Self::Clk),
+                Just(Self::Emit),
+                Just(Self::Add),
+                Just(Self::Neg),
+                Just(Self::Mul),
+                Just(Self::Inv),
+                Just(Self::Incr),
+                Just(Self::And),
+                Just(Self::Or),
+                Just(Self::Not),
+                Just(Self::Eq),
+                Just(Self::Eqz),
+                Just(Self::Expacc),
+                Just(Self::Ext2Mul),
+                Just(Self::U32split),
+                Just(Self::U32add),
+                Just(Self::U32add3),
+                Just(Self::U32sub),
+                Just(Self::U32mul),
+                Just(Self::U32madd),
+                Just(Self::U32div),
+                Just(Self::U32and),
+                Just(Self::U32xor),
+                Just(Self::Pad),
+                Just(Self::Drop),
+                Just(Self::Dup0),
+                Just(Self::Dup1),
+                Just(Self::Dup2),
+                Just(Self::Dup3),
+                Just(Self::Dup4),
+                Just(Self::Dup5),
+                Just(Self::Dup6),
+                Just(Self::Dup7),
+                Just(Self::Dup9),
+                Just(Self::Dup11),
+                Just(Self::Dup13),
+                Just(Self::Dup15),
+                Just(Self::Swap),
+                Just(Self::SwapW),
+                Just(Self::SwapW2),
+                Just(Self::SwapW3),
+                Just(Self::SwapDW),
+                Just(Self::MovUp2),
+                Just(Self::MovUp3),
+                Just(Self::MovUp4),
+                Just(Self::MovUp5),
+                Just(Self::MovUp6),
+                Just(Self::MovUp7),
+                Just(Self::MovUp8),
+                Just(Self::MovDn2),
+                Just(Self::MovDn3),
+                Just(Self::MovDn4),
+                Just(Self::MovDn5),
+                Just(Self::MovDn6),
+                Just(Self::MovDn7),
+                Just(Self::MovDn8),
+                Just(Self::CSwap),
+                Just(Self::CSwapW),
+                Just(Self::AdvPop),
+                Just(Self::AdvPopW),
+                Just(Self::MLoadW),
+                Just(Self::MStoreW),
+                Just(Self::MLoad),
+                Just(Self::MStore),
+                Just(Self::MStream),
+                Just(Self::Pipe),
+                Just(Self::CryptoStream),
+                Just(Self::HPerm),
+                Just(Self::MrUpdate),
+                Just(Self::FriE2F4),
+                Just(Self::HornerBase),
+                Just(Self::HornerExt),
+                Just(Self::EvalCircuit),
+                Just(Self::LogDeferred),
+            ]
+            .boxed()
         }
     }
 }

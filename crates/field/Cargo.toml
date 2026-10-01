@@ -39,6 +39,7 @@ default   = []
 testing   = ["arbitrary"]
 
 [dev-dependencies]
+miden-test-serialization-macros.workspace = true
 proptest = { features = ["alloc", "std"], workspace = true }
 rand     = { workspace = true }
 rstest   = { workspace = true }

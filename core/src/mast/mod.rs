@@ -919,6 +919,10 @@ impl<T: ExecutableMastForest + ?Sized> ExecutableMastForest for Arc<T> {
 /// [`MastNodeId`] handles. Hence, [`MastNodeId`] equality must not be used to test for equality of
 /// the underlying [`MastNode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct MastNodeId(u32);
 
 /// Operations that mutate a MAST often produce this mapping between old and new NodeIds.

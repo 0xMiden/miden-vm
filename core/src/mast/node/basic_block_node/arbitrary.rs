@@ -10,7 +10,8 @@ use proptest::{arbitrary::Arbitrary, prelude::*};
 use super::*;
 use crate::{
     Felt, ONE, Word,
-    advice::AdviceMap,
+    advice::{AdviceInputs, AdviceMap, AdviceStack},
+    crypto::merkle::MerkleStore,
     mast::{
         CallNodeBuilder, DenseMastForestBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, SplitNodeBuilder,
@@ -770,6 +771,16 @@ impl Arbitrary for MastForest {
 // OTHER ARBITRARY IMPLEMENTATIONS
 // ================================================================================================
 
+impl Arbitrary for AdviceStack {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // Any field elements are valid advice stack entries.
+        prop::collection::vec(any::<Felt>(), 0..=32).prop_map(AdviceStack::from).boxed()
+    }
+}
+
 impl Arbitrary for AdviceMap {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
@@ -820,6 +831,20 @@ impl Arbitrary for KernelDescriptor {
                 KernelDescriptor::from_hashes(words.into_iter().collect())
                     .expect("Generated kernel should be valid")
             })
+            .boxed()
+    }
+}
+
+impl Arbitrary for AdviceInputs {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // Each component has its own strategy producing structurally valid values:
+        // arbitrary felts for the stack, key-mapped element lists for the map, and
+        // hash-consistent nodes for the store.
+        (any::<AdviceStack>(), any::<AdviceMap>(), any::<MerkleStore>())
+            .prop_map(|(stack, map, store)| AdviceInputs::new(stack, map, store))
             .boxed()
     }
 }

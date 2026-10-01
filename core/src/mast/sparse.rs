@@ -22,7 +22,35 @@ use crate::{
 // trace replay's `mast_forest_store`. It is not a content-derived or stable identity for a forest,
 // and must not be compared or reused across stores or trace contexts. It is analogous to
 // `MastNodeId`, which is meaningful only within one forest's node store.
-newtype_id!(MastForestId);
+newtype_id!(
+    #[cfg_attr(
+        all(feature = "arbitrary", test),
+        miden_test_serialization_macros::serialization_test
+    )]
+    pub struct MastForestId;
+);
+
+#[cfg(all(feature = "arbitrary", test))]
+use crate::serde::{Deserializable, Serializable};
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod mast_forest_id_arbitrary {
+    use proptest::prelude::*;
+
+    use super::MastForestId;
+
+    impl Arbitrary for MastForestId {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Opaque u32 handle; edge-biased to the 0 and u32::MAX bounds.
+            prop_oneof![Just(0u32), Just(u32::MAX), any::<u32>()]
+                .prop_map(Self::from)
+                .boxed()
+        }
+    }
+}
 
 // SPARSE MAST FOREST
 // ================================================================================================

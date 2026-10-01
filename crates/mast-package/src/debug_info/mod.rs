@@ -1123,3 +1123,35 @@ fn table_remap_error<Exec: Idx, Src: Idx>(
         },
     }
 }
+
+#[cfg(test)]
+mod control_char_pin {
+    /// REPORTED ASSERTION ISSUE PIN (): the upstream debug-info fuzz target asserted decoded
+    /// strings contain no control chars, but the BUILDER accepts them (add_string has no
+    /// sanitization) and the writer emits them — the invariant is writer-producible and
+    /// therefore FALSE. This fixture pins the actual behavior: builder -> write -> read
+    /// round-trips a control character. If a string-display policy is ever added to
+    /// production (builder AND decoder), this flips to an Err/rejection assertion.
+    #[test]
+    fn control_chars_round_trip_through_debug_info() {
+        use miden_core::serde::{Deserializable, Serializable, SliceReader};
+
+        use crate::debug_info::{PackageDebugInfo, PackageDebugInfoBuilder};
+
+        let mut builder = PackageDebugInfoBuilder::default();
+        let idx = builder.add_string("has\u{0001}control");
+        let debug_info: PackageDebugInfo = *builder.build();
+        let bytes = debug_info.to_bytes();
+        let mut reader = SliceReader::new(&bytes);
+        let decoded = PackageDebugInfo::read_from(&mut reader).expect("decode should succeed");
+        // Exact-value oracles: the specific string (at its captured index) and the WHOLE
+        // decoded value must round-trip — a truncating or char-swapping decoder cannot
+        // pass (an any-is_control check would accept both).
+        assert_eq!(
+            decoded.get_string(idx).as_deref(),
+            Some("has\u{0001}control"),
+            "the exact control-char string must round-trip at its index"
+        );
+        assert_eq!(decoded, debug_info, "the whole value must round-trip");
+    }
+}

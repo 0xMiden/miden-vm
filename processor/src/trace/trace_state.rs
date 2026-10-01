@@ -58,6 +58,10 @@ mod serialization_tests;
 /// (`package_debug_info` and `source_node_ids`), so the exact-equality round-trip test generated
 /// by `serde_test` does not apply to this type.
 #[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct CoreTraceFragmentContext {
     pub state: CoreTraceState,
     pub replay: ExecutionReplay,
@@ -74,6 +78,10 @@ pub struct CoreTraceFragmentContext {
 /// Subset of the processor state used to build the core trace (system, decoder and stack sets of
 /// columns).
 #[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct CoreTraceState {
     pub system: SystemState,
     pub decoder: DecoderState,
@@ -88,6 +96,10 @@ pub struct CoreTraceState {
 /// This struct captures the complete state of the system at a specific clock cycle, allowing for
 /// reconstruction of the system trace during concurrent execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct SystemState {
     /// Current clock cycle (row index in the trace)
     pub clk: RowIndex,
@@ -124,6 +136,10 @@ impl SystemState {
 
 /// The subset of the decoder state required to build the trace.
 #[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct DecoderState {
     /// The value of the decoder's `addr` column.
     pub current_addr: Felt,
@@ -173,6 +189,10 @@ impl DecoderState {
 /// columns (stack_depth, overflow_addr, and overflow_helper) are computed from the stack_depth and
 /// last_overflow_addr fields.
 #[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct StackState {
     /// Top 16 stack slots (s0 to s15). These represent the top elements of the stack that are
     /// directly accessible.
@@ -299,6 +319,10 @@ impl StackState {
 /// also packages up all the necessary data for trace generators to generate trace fragments, which
 /// can be done on separate machines in parallel, for example.
 #[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct ExecutionReplay {
     pub block_stack: BlockStackReplay,
     pub execution_context: ExecutionContextReplay,
@@ -314,6 +338,10 @@ pub struct ExecutionReplay {
 // ================================================================================================
 
 #[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct ExecutionContextReplay {
     /// Extra data needed to recover the state on an END operation specifically for
     /// CALL/SYSCALL/DYNCALL nodes (which start/end a new execution context).
@@ -341,6 +369,10 @@ impl ExecutionContextReplay {
 
 /// Replay data for the block stack.
 #[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct BlockStackReplay {
     /// The parent address, recorded when a new node is started (JOIN, SPLIT, etc).
     node_start_parent_addr: VecDeque<Felt>,
@@ -431,6 +463,10 @@ impl EndBlockFlags {
 /// node operation. Additionally, we record `prev_addr` and `prev_parent_addr` to allow emulating
 /// peeking into the block stack, which is needed when processing REPEAT or RESPAN nodes.
 #[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct NodeEndData {
     /// the address of the node that is ending
     pub ended_node_addr: Felt,
@@ -445,6 +481,10 @@ pub struct NodeEndData {
 /// Data required to recover the state of an execution context when restoring it during an END
 /// operation.
 #[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct ExecutionContextSystemInfo {
     pub parent_ctx: ContextId,
     pub parent_fn_hash: Word,
@@ -464,6 +504,10 @@ pub struct ExecutionContextSystemInfo {
 /// resolution, allowing the trace generation context to deduplicate
 /// forests across fragments.
 #[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct MastForestResolutionReplay {
     mast_forest_resolutions: VecDeque<(MastNodeId, MastForestId)>,
 }
@@ -503,6 +547,10 @@ impl MastForestResolutionReplay {
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify address consistency.
 #[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct MemoryReadsReplay {
     elements_read: VecDeque<(Felt, Felt, ContextId, RowIndex)>,
     words_read: VecDeque<(Word, Felt, ContextId, RowIndex)>,
@@ -573,6 +621,10 @@ impl MemoryReadsReplay {
 /// This is separated from [MemoryReadsReplay] since writes are not needed for core trace generation
 /// (as reads are), but only to be able to fully build the memory chiplet trace.
 #[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct MemoryWritesReplay {
     elements_written: VecDeque<(Felt, Felt, ContextId, RowIndex)>,
     words_written: VecDeque<(Word, Felt, ContextId, RowIndex)>,
@@ -665,6 +717,10 @@ impl MemoryInterface for MemoryReadsReplay {
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify parameter consistency.
 #[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct AdviceReplay {
     // Stack operations
     stack_pops: VecDeque<Felt>,
@@ -756,6 +812,10 @@ impl AdviceProviderInterface for AdviceReplay {
 
 /// Enum representing the different bitwise operations that can be recorded.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub enum BitwiseOp {
     U32And,
     U32Xor,
@@ -783,6 +843,10 @@ pub enum BitwiseReplayEntry {
 
 /// Replay data for bitwise operations.
 #[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct BitwiseReplay {
     entries: VecDeque<BitwiseReplayEntry>,
 }
@@ -834,6 +898,10 @@ impl IntoIterator for BitwiseReplay {
 
 /// Replay data for kernel operations.
 #[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct KernelReplay {
     kernel_proc_accesses: VecDeque<Word>,
 }
@@ -863,6 +931,10 @@ impl IntoIterator for KernelReplay {
 
 /// Replay data for ACE operations.
 #[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct AceReplay {
     circuit_evaluations: VecDeque<(RowIndex, CircuitEvaluation)>,
 }
@@ -910,6 +982,10 @@ impl IntoIterator for AceReplay {
 
 /// Values requested from the 16-bit range-check table by a single operation.
 #[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub enum RangeCheckReplayValues {
     Two([u16; 2]),
     Four([u16; 4]),
@@ -928,6 +1004,10 @@ impl AsRef<[u16]> for RangeCheckReplayValues {
 
 /// Replay data for range checking operations.
 #[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct RangeCheckerReplay {
     range_checks: VecDeque<RangeCheckReplayValues>,
 }
@@ -990,6 +1070,10 @@ impl IntoIterator for RangeCheckerReplay {
 // ================================================================================================
 
 #[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct BlockAddressReplay {
     /// Recorded hasher addresses from operations like hash_control_block, hash_basic_block, etc.
     block_addresses: VecDeque<Felt>,
@@ -1020,6 +1104,10 @@ impl BlockAddressReplay {
 /// The hasher responses are recorded during fast processor execution and then replayed during core
 /// trace generation.
 #[derive(Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct HasherResponseReplay {
     /// Recorded hasher operations from Compress requests.
     ///
@@ -1136,6 +1224,10 @@ impl HasherInterface for HasherResponseReplay {
 /// Enum representing the different hasher operations that can be recorded, along with their
 /// operands.
 #[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub enum HasherOp {
     Compress([Felt; STATE_WIDTH]),
     AeadXof(ContextId, RowIndex, [Felt; STATE_WIDTH]),
@@ -1196,6 +1288,10 @@ pub enum ResolvedHasherOp<'a> {
 /// a hasher-chiplet builder running concurrently with execution; see
 /// `FastProcessor::execute_and_build_trace_sync`.
 #[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct HasherRequestReplay {
     sink: HasherOpSink,
 }
@@ -1429,6 +1525,10 @@ impl HasherRequestReplay {
 /// pre-recorded values. This works naturally since the fast processor has exactly the same
 /// access patterns as the main trace generators.
 #[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct StackOverflowReplay {
     /// Recorded overflow values and overflow addresses from pop_overflow operations. Each entry
     /// represents a value that was popped from the overflow stack, and the overflow address of the
@@ -1576,5 +1676,568 @@ mod tests {
         let mut ops = replay.into_resolved_ops(&[]);
         assert!(matches!(ops.next(), Some(Err(ExecutionError::Internal(_)))));
         assert!(ops.next().is_none());
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    extern crate alloc;
+
+    use miden_air::trace::RowIndex;
+    use proptest::prelude::*;
+
+    use super::{
+        AdviceReplay, BitwiseOp, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
+        CoreTraceState, DecoderState, ExecutionContextReplay, ExecutionContextSystemInfo,
+        KernelReplay, MIN_STACK_DEPTH, MemoryReadsReplay, MemoryWritesReplay, NodeEndData,
+        RangeCheckReplayValues, RangeCheckerReplay, StackState, SystemState,
+    };
+    use crate::{ContextId, Felt, Word};
+
+    impl Arbitrary for SystemState {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // All fields are any-valid on the wire.
+            (any::<RowIndex>(), any::<ContextId>(), any::<Word>(), any::<Word>())
+                .prop_map(|(clk, ctx, fn_hash, deferred_root)| Self {
+                    clk,
+                    ctx,
+                    fn_hash,
+                    deferred_root,
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for DecoderState {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (any::<Felt>(), any::<Felt>())
+                .prop_map(|(current_addr, parent_addr)| Self { current_addr, parent_addr })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for StackState {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader rejects stack_depth < MIN_STACK_DEPTH; bound it by construction and
+            // keep a small overflow margin so the depth stays representative and shrinking stays
+            // cheap.
+            (
+                any::<[Felt; MIN_STACK_DEPTH]>(),
+                (MIN_STACK_DEPTH..=(MIN_STACK_DEPTH + 8)),
+                any::<Felt>(),
+            )
+                .prop_map(|(stack_top, stack_depth, last_overflow_addr)| {
+                    Self::new(stack_top, stack_depth, last_overflow_addr)
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for NodeEndData {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (any::<Felt>(), any::<Felt>(), any::<Felt>())
+                .prop_map(|(ended_node_addr, prev_addr, prev_parent_addr)| Self {
+                    ended_node_addr,
+                    prev_addr,
+                    prev_parent_addr,
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for ExecutionContextSystemInfo {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (any::<ContextId>(), any::<Word>())
+                .prop_map(|(parent_ctx, parent_fn_hash)| Self { parent_ctx, parent_fn_hash })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for ExecutionContextReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Populated through the public recording API (fields are private).
+            proptest::collection::vec(any::<ExecutionContextSystemInfo>(), 0..=4)
+                .prop_map(|contexts| {
+                    let mut replay = Self::default();
+                    for ctx_info in contexts {
+                        replay.record_execution_context(ctx_info);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for BlockStackReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Populated through the public recording API (fields are private).
+            (
+                proptest::collection::vec(any::<Felt>(), 0..=4),
+                proptest::collection::vec((any::<Felt>(), any::<Felt>(), any::<Felt>()), 0..=4),
+            )
+                .prop_map(|(parent_addrs, node_ends)| {
+                    let mut replay = Self::default();
+                    for parent_addr in parent_addrs {
+                        replay.record_node_start_parent_addr(parent_addr);
+                    }
+                    for (ended_node_addr, prev_addr, prev_parent_addr) in node_ends {
+                        replay.record_node_end(ended_node_addr, prev_addr, prev_parent_addr);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for MemoryReadsReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                proptest::collection::vec(
+                    (any::<Felt>(), any::<Felt>(), any::<ContextId>(), any::<RowIndex>()),
+                    0..=4,
+                ),
+                proptest::collection::vec(
+                    (any::<Word>(), any::<Felt>(), any::<ContextId>(), any::<RowIndex>()),
+                    0..=4,
+                ),
+            )
+                .prop_map(|(element_rows, word_rows)| {
+                    let mut replay = Self::default();
+                    for (element, addr, ctx, clk) in element_rows {
+                        replay.record_read_element(element, addr, ctx, clk);
+                    }
+                    for (word, addr, ctx, clk) in word_rows {
+                        replay.record_read_word(word, addr, ctx, clk);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for MemoryWritesReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                proptest::collection::vec(
+                    (any::<Felt>(), any::<Felt>(), any::<ContextId>(), any::<RowIndex>()),
+                    0..=4,
+                ),
+                proptest::collection::vec(
+                    (any::<Word>(), any::<Felt>(), any::<ContextId>(), any::<RowIndex>()),
+                    0..=4,
+                ),
+            )
+                .prop_map(|(element_rows, word_rows)| {
+                    let mut replay = Self::default();
+                    for (element, addr, ctx, clk) in element_rows {
+                        replay.record_write_element(element, addr, ctx, clk);
+                    }
+                    for (word, addr, ctx, clk) in word_rows {
+                        replay.record_write_word(word, addr, ctx, clk);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for AdviceReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                proptest::collection::vec(any::<Felt>(), 0..=4),
+                proptest::collection::vec(any::<Word>(), 0..=4),
+                proptest::collection::vec(any::<[Word; 2]>(), 0..=4),
+            )
+                .prop_map(|(stack_pops, stack_word_pops, stack_dword_pops)| {
+                    let mut replay = Self::default();
+                    for value in stack_pops {
+                        replay.record_pop_stack(value);
+                    }
+                    for word in stack_word_pops {
+                        replay.record_pop_stack_word(word);
+                    }
+                    for dword in stack_dword_pops {
+                        replay.record_pop_stack_dword(dword);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for BitwiseOp {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            prop_oneof![Just(Self::U32And), Just(Self::U32Xor)].boxed()
+        }
+    }
+
+    impl Arbitrary for BitwiseReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Populated through the recording API; both op tags are exercised via the mask.
+            proptest::collection::vec((any::<BitwiseOp>(), any::<Felt>(), any::<Felt>()), 0..=4)
+                .prop_map(|rows| {
+                    let mut replay = Self::default();
+                    for (op, a, b) in rows {
+                        match op {
+                            BitwiseOp::U32And => replay.record_u32and(a, b),
+                            BitwiseOp::U32Xor => replay.record_u32xor(a, b),
+                        }
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for KernelReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            proptest::collection::vec(any::<Word>(), 0..=4)
+                .prop_map(|hashes| {
+                    let mut replay = Self::default();
+                    for proc_hash in hashes {
+                        replay.record_kernel_proc_access(proc_hash);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for RangeCheckReplayValues {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            prop_oneof![
+                any::<[u16; 2]>().prop_map(Self::Two).boxed(),
+                any::<[u16; 4]>().prop_map(Self::Four).boxed(),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for RangeCheckerReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Four-limb rows go through record_range_check_u32; two-limb rows through
+            // record_u32div_remainder_diff (record_merkle_depth additionally requires
+            // depth 1..=64 and scaling, covered by the deterministic tests).
+            proptest::collection::vec(any::<RangeCheckReplayValues>(), 0..=4)
+                .prop_map(|values| {
+                    let mut replay = Self::default();
+                    for value in values {
+                        match &value {
+                            RangeCheckReplayValues::Four(limbs) => {
+                                replay.record_range_check_u32(*limbs);
+                            },
+                            RangeCheckReplayValues::Two(limbs) => {
+                                replay.record_u32div_remainder_diff(*limbs);
+                            },
+                        }
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for BlockAddressReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            proptest::collection::vec(any::<Felt>(), 0..=4)
+                .prop_map(|addresses| {
+                    let mut replay = Self::default();
+                    for addr in addresses {
+                        replay.record_block_address(addr);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for CoreTraceState {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Composes three already-covered parts; all fields are pub.
+            (any::<SystemState>(), any::<DecoderState>(), any::<StackState>())
+                .prop_map(|(system, decoder, stack)| Self { system, decoder, stack })
+                .boxed()
+        }
+    }
+}
+
+// ARBITRARY EXTENSIONS (proptest) — replay types with private fields / hasher state
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary_replays {
+    use miden_core::mast::{MastForestId, MastNodeId};
+    use proptest::prelude::*;
+
+    use super::{
+        AdviceReplay, BlockAddressReplay, BlockStackReplay, CoreTraceFragmentContext,
+        CoreTraceState, ExecutionContextReplay, ExecutionReplay, HasherOp, HasherRequestReplay,
+        HasherResponseReplay, MastForestResolutionReplay, MemoryReadsReplay, STATE_WIDTH,
+        StackOverflowReplay,
+    };
+    use crate::{Felt, Word, crypto::merkle::MerklePath};
+
+    impl Arbitrary for StackOverflowReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                proptest::collection::vec((any::<Felt>(), any::<Felt>()), 0..=4),
+                proptest::collection::vec((any::<usize>(), any::<Felt>()), 0..=4),
+            )
+                .prop_map(|(overflow_values, restore_context_info)| {
+                    let mut replay = StackOverflowReplay::new();
+                    for (value, new_overflow_addr) in overflow_values {
+                        replay.record_pop_overflow(value, new_overflow_addr);
+                    }
+                    for (stack_depth, addr) in restore_context_info {
+                        replay.record_restore_context_overflow_addr(stack_depth, addr);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for HasherOp {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Every variant is any-valid on the wire; prop_oneof exercises all five tags.
+            prop_oneof![
+                any::<[Felt; STATE_WIDTH]>().prop_map(Self::Permute).boxed(),
+                (any::<Word>(), any::<Word>(), any::<Felt>(), any::<Word>())
+                    .prop_map(|(h1, h2, domain, expected_hash)| {
+                        Self::HashControlBlock((h1, h2, domain, expected_hash))
+                    })
+                    .boxed(),
+                (any::<MastForestId>(), any::<MastNodeId>(), any::<Word>())
+                    .prop_map(|(forest_id, node_id, expected_hash)| {
+                        Self::HashBasicBlock((forest_id, node_id, expected_hash))
+                    })
+                    .boxed(),
+                (any::<Word>(), any::<MerklePath>(), any::<Felt>())
+                    .prop_map(|(leaf, path, index)| Self::BuildMerkleRoot((leaf, path, index)))
+                    .boxed(),
+                (any::<Word>(), any::<Word>(), any::<MerklePath>(), any::<Felt>())
+                    .prop_map(|(old_root, new_root, path, index)| {
+                        Self::UpdateMerkleRoot((old_root, new_root, path, index))
+                    })
+                    .boxed(),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for HasherResponseReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                proptest::collection::vec((any::<Felt>(), any::<[Felt; 12]>()), 0..=4),
+                proptest::collection::vec((any::<Felt>(), any::<Word>()), 0..=4),
+                proptest::collection::vec((any::<Felt>(), any::<Word>(), any::<Word>()), 0..=4),
+            )
+                .prop_map(|(permutations, merkle_roots, mrupdates)| {
+                    let mut replay = Self::default();
+                    for (addr, hashed_state) in permutations {
+                        replay.record_permute(addr, hashed_state);
+                    }
+                    for (addr, computed_root) in merkle_roots {
+                        replay.record_build_merkle_root(addr, computed_root);
+                    }
+                    for (addr, old_root, new_root) in mrupdates {
+                        replay.record_update_merkle_root(addr, old_root, new_root);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for HasherRequestReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Buffered-only: the write side panics on Streamed and the reader always yields
+            // Buffered, so Default (Buffered) + record is the exact-roundtrip regime.
+            proptest::collection::vec(any::<HasherOp>(), 0..=4)
+                .prop_map(|ops| {
+                    let mut replay = Self::default();
+                    for op in ops {
+                        replay.record(op);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for MastForestResolutionReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            proptest::collection::vec((any::<MastNodeId>(), any::<MastForestId>()), 0..=4)
+                .prop_map(|resolutions| {
+                    let mut replay = Self::default();
+                    for (node_id, forest_id) in resolutions {
+                        replay.record_resolution(node_id, forest_id);
+                    }
+                    replay
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for ExecutionReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Composes eight already-covered replay parts; all fields are pub.
+            (
+                any::<BlockStackReplay>(),
+                any::<ExecutionContextReplay>(),
+                any::<StackOverflowReplay>(),
+                any::<MemoryReadsReplay>(),
+                any::<AdviceReplay>(),
+                any::<HasherResponseReplay>(),
+                any::<BlockAddressReplay>(),
+                any::<MastForestResolutionReplay>(),
+            )
+                .prop_map(
+                    |(
+                        block_stack,
+                        execution_context,
+                        stack_overflow,
+                        memory_reads,
+                        advice,
+                        hasher,
+                        block_address,
+                        mast_forest_resolution,
+                    )| {
+                        Self {
+                            block_stack,
+                            execution_context,
+                            stack_overflow,
+                            memory_reads,
+                            advice,
+                            hasher,
+                            block_address,
+                            mast_forest_resolution,
+                        }
+                    },
+                )
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for CoreTraceFragmentContext {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Composes four covered parts; all fields are pub.
+            (
+                any::<CoreTraceState>(),
+                any::<ExecutionReplay>(),
+                any::<crate::continuation_stack::ContinuationStack<MastForestId>>(),
+                any::<MastForestId>(),
+            )
+                .prop_map(|(state, replay, continuation, initial_mast_forest_id)| Self {
+                    state,
+                    replay,
+                    continuation,
+                    initial_mast_forest_id,
+                })
+                .boxed()
+        }
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod ace_replay_arbitrary {
+    use proptest::prelude::*;
+
+    use super::AceReplay;
+    use crate::trace::chiplets::CircuitEvaluation;
+
+    impl Arbitrary for AceReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Populated through the recording API; the pair's clk is derived from the evaluation.
+            proptest::collection::vec(any::<CircuitEvaluation>(), 0..=3)
+                .prop_map(|evaluations| {
+                    let mut replay = Self::default();
+                    for circuit_eval in evaluations {
+                        // The draw is bounded to 3 entries, far below the recording limit, so
+                        // this never rejects; ignore the Result to keep the generator infallible.
+                        let _ = replay.record_circuit_evaluation(circuit_eval);
+                    }
+                    replay
+                })
+                .boxed()
+        }
     }
 }

@@ -30,6 +30,10 @@ type NodeMap = BTreeMap<InOrderIndex, Word>;
 /// Serialization uses format version 1; unversioned encodings and other versions are rejected.
 /// Deserialization checks the structural invariants described in [`Self::from_parts`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct PartialMmr {
     /// The version of the MMR.
     ///
@@ -836,6 +840,92 @@ impl Deserializable for PartialMmr {
     /// Header, leaf count, empty peaks and nodes, tracked-leaf marker, and empty tracked leaves.
     fn min_serialized_size() -> usize {
         Self::FORMAT_MAGIC.len() + 2 + 4 * usize::min_serialized_size()
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::PartialMmr;
+    use crate::{
+        Word,
+        merkle::{MerklePath, mmr::Mmr},
+    };
+
+    impl Arbitrary for PartialMmr {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Sound by construction: build a real Mmr from generated leaves, derive its peaks,
+            // then track a generated subset of positions using authentication paths opened
+            // against that same Mmr (path/position consistency guaranteed). The tracked-leaves
+            // subset exercises the nodes map; a mask of all-false yields the peaks-only partial,
+            // and the empty-leaves input yields the empty partial. The large branch crosses the
+            // one-byte vint64 boundary at 128 (forest size, node indices, map length) and
+            // force-tracks the first and last leaves so high positions are always covered.
+            prop_oneof![
+                // Small branch: keeps shrinking cheap and covers empty/peaks-only shapes.
+                small_partial_mmr().boxed(),
+                // Large branch: 126..=129 leaves around the vint64 transition.
+                large_partial_mmr().boxed(),
+            ]
+            .boxed()
+        }
+    }
+
+    fn build_partial(
+        leaves: &[Word],
+        track_mask: &[bool],
+        force_positions: &[usize],
+    ) -> PartialMmr {
+        let mut mmr = Mmr::new();
+        for leaf in leaves {
+            mmr.add(*leaf).expect("adding a leaf to a fresh Mmr is valid");
+        }
+        let mut partial = PartialMmr::from_peaks(mmr.peaks());
+        let mut track = |pos: usize| {
+            let proof = mmr.open(pos).expect("position within forest is valid");
+            let path: MerklePath = proof.path().merkle_path().clone();
+            partial
+                .track(pos, proof.leaf(), &path)
+                .expect("path from the same Mmr is consistent");
+        };
+        for (pos, tracked) in track_mask.iter().enumerate() {
+            if *tracked {
+                track(pos);
+            }
+        }
+        for &pos in force_positions {
+            track(pos);
+        }
+        partial
+    }
+
+    fn small_partial_mmr() -> impl Strategy<Value = PartialMmr> {
+        proptest::collection::vec(any::<Word>(), 0..=8)
+            .prop_flat_map(|leaves| {
+                (proptest::collection::vec(any::<bool>(), leaves.len()), Just(leaves))
+            })
+            .prop_map(|(track_mask, leaves)| build_partial(&leaves, &track_mask, &[]))
+    }
+
+    fn large_partial_mmr() -> impl Strategy<Value = PartialMmr> {
+        (126usize..=129)
+            .prop_flat_map(|count| {
+                (
+                    proptest::collection::vec(any::<Word>(), count),
+                    proptest::collection::vec(any::<bool>(), count),
+                )
+            })
+            .prop_map(|(leaves, track_mask)| {
+                let last = leaves.len() - 1;
+                build_partial(&leaves, &track_mask, &[0, last])
+            })
     }
 }
 

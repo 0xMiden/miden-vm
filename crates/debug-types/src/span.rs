@@ -48,7 +48,14 @@ impl<T: ?Sized + Spanned> Spanned for alloc::sync::Arc<T> {
 
 /// This type is used to wrap any `T` with a [SourceSpan], and is typically used when it is not
 /// convenient to add a [SourceSpan] to the type - most commonly because we don't control the type.
+///
+/// Note: `PartialEq` intentionally ignores the span, so the macro's equality oracle cannot detect
+/// span corruption; `span_roundtrip_preserves_span_and_value_separately` covers that gap.
 #[derive(Clone, Copy)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test(types(u32))
+)]
 pub struct Span<T> {
     span: SourceSpan,
     spanned: T,
@@ -364,6 +371,10 @@ impl<T: Deserializable> Deserializable for Span<T> {
 /// to produce nice errors with it compared to this representation.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct SourceSpan {
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "SourceId::is_unknown"))]
     source_id: SourceId,
@@ -566,5 +577,95 @@ impl RangeBounds<ByteIndex> for SourceSpan {
     #[inline(always)]
     fn end_bound(&self) -> Bound<&ByteIndex> {
         Bound::Excluded(&self.end)
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(feature = "arbitrary")]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::{SourceId, SourceSpan, Span};
+
+    impl Arbitrary for SourceSpan {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The type invariant is start <= end (`len()` computes unsigned end - start), so the
+            // generator produces ordered spans only. NOTE: the wire decoder currently accepts
+            // reversed bounds too (a reported decoder gap; see the reproduction fixture in this
+            // module's tests); tightening read_from is a production change deferred to maintainers.
+            (any::<SourceId>(), any::<u32>(), any::<u32>())
+                .prop_map(|(source_id, a, b)| {
+                    let (start, end) = if a <= b { (a, b) } else { (b, a) };
+                    SourceSpan::new(source_id, start..end)
+                })
+                .boxed()
+        }
+    }
+
+    impl<T> Arbitrary for Span<T>
+    where
+        T: Arbitrary,
+        T::Strategy: 'static,
+    {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (any::<SourceSpan>(), any::<T>())
+                .prop_map(|(span, spanned)| Span::new(span, spanned))
+                .boxed()
+        }
+    }
+
+    proptest! {
+        /// `Span<T>`'s `PartialEq` intentionally ignores the span, so the macro's equality oracle
+        /// cannot detect span corruption in transit. This property compares the span fields and
+        /// the inner value separately, which is the actual wire contract.
+        #[test]
+        fn span_roundtrip_preserves_span_and_value_separately(
+            (source_id, start, end, value) in
+                (any::<u32>(), any::<u32>(), any::<u32>(), any::<u32>()),
+        ) {
+            use miden_crypto::utils::{Deserializable, Serializable};
+
+            let span = SourceSpan::new(SourceId::from(source_id), start..end);
+            let wrapped = Span::new(span, value);
+
+            let bytes = wrapped.to_bytes();
+            let round_trip = Span::<u32>::read_from_bytes(&bytes).unwrap();
+
+            assert_eq!(round_trip.span(), span);
+            assert_eq!(round_trip.inner(), &value);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_crypto::utils::Deserializable;
+
+    use super::*;
+
+    /// Reported decoder gap: the wire decoder accepts REVERSED bounds
+    /// (start > end), violating the type invariant that `len()` (unsigned end - start)
+    /// relies on — a decoded reversed span panics in debug when measured. This fixture
+    /// pins the defect's observable so it cannot silently change; it flips to a
+    /// rejection assertion when the production fix (InvalidValue on start > end) lands.
+    #[test]
+    fn wire_decoder_still_accepts_reversed_bounds() {
+        let mut bytes = alloc::vec::Vec::new();
+        bytes.write_u32(0); // source_id
+        bytes.write_u32(5); // start
+        bytes.write_u32(3); // end (reversed)
+
+        let span = SourceSpan::read_from_bytes(&bytes)
+            .expect("the reported defect: reversed bounds decode successfully");
+        assert_eq!(span.start().to_usize(), 5);
+        assert_eq!(span.end().to_usize(), 3);
     }
 }
