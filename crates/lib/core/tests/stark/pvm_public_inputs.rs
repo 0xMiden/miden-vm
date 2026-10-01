@@ -13,8 +13,8 @@ use crate::helpers::read_memory_felt;
 
 const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3_223_322_638;
 const RANDOM_COIN_CV_PTR: u32 = 3_223_322_668;
-const RANDOM_COIN_INPUT_LEN_PTR: u32 = 3_223_322_767;
-const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3_223_322_768;
+const RANDOM_COIN_INPUT_LENGTH_PTR: u32 = 3_223_322_767;
+const RANDOM_COIN_OUTPUT_LENGTH_PTR: u32 = 3_223_322_768;
 const ROOT: [u64; 4] = [101, 102, 103, 104];
 const HEIGHTS: [u64; 10] = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 const MAIN_COMMITMENT: [u64; 4] = [201, 202, 203, 204];
@@ -44,16 +44,16 @@ fn stage_statement_and_shape() -> String {
         push.{root3}.{root2}.{root1}.{root0}
         exec.public_inputs::stage_public_root
 
-        push.{h0} exec.constants::air_trace_length_logs_ptr mem_store
-        push.{h1} exec.constants::air_trace_length_logs_ptr add.1 mem_store
-        push.{h2} exec.constants::air_trace_length_logs_ptr add.2 mem_store
-        push.{h3} exec.constants::air_trace_length_logs_ptr add.3 mem_store
-        push.{h4} exec.constants::air_trace_length_logs_ptr add.4 mem_store
-        push.{h5} exec.constants::air_trace_length_logs_ptr add.5 mem_store
-        push.{h6} exec.constants::air_trace_length_logs_ptr add.6 mem_store
-        push.{h7} exec.constants::air_trace_length_logs_ptr add.7 mem_store
-        push.{h8} exec.constants::air_trace_length_logs_ptr add.8 mem_store
-        push.{h9} exec.constants::air_trace_length_logs_ptr add.9 mem_store
+        push.{h0} mem_store.LOG_AIR_TRACE_LENGTHS_PTR
+        push.{h1} push.LOG_AIR_TRACE_LENGTHS_PTR add.1 mem_store
+        push.{h2} push.LOG_AIR_TRACE_LENGTHS_PTR add.2 mem_store
+        push.{h3} push.LOG_AIR_TRACE_LENGTHS_PTR add.3 mem_store
+        push.{h4} push.LOG_AIR_TRACE_LENGTHS_PTR add.4 mem_store
+        push.{h5} push.LOG_AIR_TRACE_LENGTHS_PTR add.5 mem_store
+        push.{h6} push.LOG_AIR_TRACE_LENGTHS_PTR add.6 mem_store
+        push.{h7} push.LOG_AIR_TRACE_LENGTHS_PTR add.7 mem_store
+        push.{h8} push.LOG_AIR_TRACE_LENGTHS_PTR add.8 mem_store
+        push.{h9} push.LOG_AIR_TRACE_LENGTHS_PTR add.9 mem_store
         "#,
         root0 = root[0],
         root1 = root[1],
@@ -80,7 +80,11 @@ fn transcript_source() -> String {
     let params = precompile_pcs_params();
     format!(
         r#"
-        use miden::core::stark::constants
+        use {{
+            DEEP_POW_BITS_PTR, FOLDING_POW_BITS_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
+            LOG_TRACE_LENGTH_PTR, NUM_QUERIES_PTR, PREPROCESSED_TRACE_COM_PTR, QUERY_POW_BITS_PTR,
+            RELATION_DIGEST_PTR
+        }} from miden::core::stark::constants
         use miden::core::stark::random_coin
         use miden::core::sys::pvm::layout
         use miden::core::sys::pvm::public_inputs
@@ -89,16 +93,16 @@ fn transcript_source() -> String {
             {setup}
 
             push.{relation3}.{relation2}.{relation1}.{relation0}
-            exec.constants::relation_digest_ptr mem_storew_le dropw
+            mem_storew_le.RELATION_DIGEST_PTR dropw
             push.{preprocessed3}.{preprocessed2}.{preprocessed1}.{preprocessed0}
-            dupw exec.constants::preprocessed_trace_com_ptr mem_storew_le dropw
+            dupw mem_storew_le.PREPROCESSED_TRACE_COM_PTR dropw
             exec.layout::preprocessed_com_ptr mem_storew_le dropw
 
-            push.{num_queries} exec.constants::set_number_queries
-            push.{query_pow_bits} exec.constants::set_query_pow_bits
-            push.{deep_pow_bits} exec.constants::set_deep_pow_bits
-            push.{folding_pow_bits} exec.constants::set_folding_pow_bits
-            push.15 exec.constants::set_trace_length_log
+            push.{num_queries} mem_store.NUM_QUERIES_PTR
+            push.{query_pow_bits} mem_store.QUERY_POW_BITS_PTR
+            push.{deep_pow_bits} mem_store.DEEP_POW_BITS_PTR
+            push.{folding_pow_bits} mem_store.FOLDING_POW_BITS_PTR
+            push.15 mem_store.LOG_TRACE_LENGTH_PTR
             exec.random_coin::init_seed
 
             exec.public_inputs::process_public_inputs
@@ -162,8 +166,8 @@ fn pvm_public_input_hook_matches_the_rust_challenger() {
         );
     }
     assert_eq!(output.stack.get_element(0), Some(expected_sample));
-    assert_eq!(read_memory_felt(&output, RANDOM_COIN_INPUT_LEN_PTR), Felt::ZERO);
-    assert_eq!(read_memory_felt(&output, RANDOM_COIN_OUTPUT_LEN_PTR), Felt::from_u8(3));
+    assert_eq!(read_memory_felt(&output, RANDOM_COIN_INPUT_LENGTH_PTR), Felt::ZERO);
+    assert_eq!(read_memory_felt(&output, RANDOM_COIN_OUTPUT_LENGTH_PTR), Felt::from_u8(3));
 
     assert_eq!(
         read_memory_felt(&output, PUBLIC_INPUTS_ADDRESS_PTR),
@@ -193,11 +197,11 @@ fn pvm_public_input_hook_matches_the_rust_challenger() {
 #[test]
 fn pvm_public_input_hook_rejects_a_nonempty_input_buffer() {
     let source = r#"
-        use miden::core::stark::constants
+        use {RANDOM_COIN_INPUT_LENGTH_PTR} from miden::core::stark::constants
         use miden::core::sys::pvm::public_inputs
 
         begin
-            push.1 exec.constants::random_coin_input_len_ptr mem_store
+            push.1 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
             exec.public_inputs::process_public_inputs
         end
     "#;

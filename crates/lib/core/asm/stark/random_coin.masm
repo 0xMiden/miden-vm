@@ -9,16 +9,48 @@
 #! append to buffered input.
 #!
 #! Eidos challenger memory layout:
-#!   random_coin_cv_ptr          - 4-felt chaining value
-#!   random_coin_output_word_ptr - 4-felt output cache
-#!   random_coin_block_ptr       - 8-felt absorb block
-#!   random_coin_buffer_len_ptr  - position in the absorb block, 0..8
-#!   random_coin_counter_ptr     - 0 = absorbing; otherwise next counter-mode block index
-#!   random_coin_output_len_ptr  - felts left in the output cache, 0..4
+#!   RANDOM_COIN_CV_PTR             - 4-felt chaining value
+#!   RANDOM_COIN_OUTPUT_WORD_PTR    - 4-felt output cache
+#!   RANDOM_COIN_INPUT_BUF_PTR      - 8-felt absorb block
+#!   RANDOM_COIN_INPUT_LENGTH_PTR   - position in the absorb block, 0..8
+#!   RANDOM_COIN_COUNTER_PTR        - 0 = absorbing; otherwise next counter-mode block index
+#!   RANDOM_COIN_OUTPUT_LENGTH_PTR  - felts left in the output cache, 0..4
+
+use {
+    AUX_RAND_ELEM_ADDRESS_PTR,
+    CONSTRAINT_COMPOSITION_COEFS_PTR,
+    DEEP_ALPHA_ADVICE_PTR,
+    DEEP_COMPOSITION_COEFS_PTR,
+    DEEP_POW_BITS_PTR,
+    DOMAIN_OFFSET_INV_PTR,
+    DOMAIN_OFFSET_PTR,
+    FOLDING_POW_BITS_PTR,
+    FRI_FOLD_ARITY,
+    FRI_QUERIES_ADDRESS_PTR,
+    LDE_DOMAIN_INFO_PTR,
+    LOG_BLOWUP_FACTOR,
+    LOG_FINAL_DEGREE,
+    LOG_LDE_DOMAIN_SIZE_PTR,
+    LOG_TRACE_LENGTH_PTR,
+    NUM_QUERIES_PTR,
+    OOD_POINT_PTR,
+    PREPROCESSED_TRACE_COM_PTR,
+    QUERY_POW_BITS_PTR,
+    RANDOM_COIN_COUNTER_PTR,
+    RANDOM_COIN_CV_PTR,
+    RANDOM_COIN_INPUT_BUF_PTR,
+    RANDOM_COIN_INPUT_LENGTH_PTR,
+    RANDOM_COIN_OUTPUT_LENGTH_PTR,
+    RANDOM_COIN_OUTPUT_WORD_PTR,
+    RELATION_DIGEST_PTR,
+    TMP3_PTR,
+    TRACE_DOMAIN_GENERATOR_PTR,
+    TRACE_LENGTH_PTR,
+    ZERO_WORD_PTR,
+} from miden::core::stark::constants
 
 use miden::core::stark::types
 use miden::core::crypto::hashes::eidos
-use miden::core::stark::constants
 use miden::core::stark::utils
 
 # Eidos transcript-local root labels. These helper procs are available for typed
@@ -41,8 +73,8 @@ const EIDOS_TRANSCRIPT_INIT_CV_3 = 6620516959492505600
 #! Input: [...]
 #! Output: [...]
 pub proc eidos_enter_absorbing()
-    push.0 exec.constants::random_coin_counter_ptr mem_store
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
+    push.0 mem_store.RANDOM_COIN_COUNTER_PTR
+    push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 end
 
 #! Clear the generic Eidos absorb buffer.
@@ -50,22 +82,22 @@ end
 #! Input: [...]
 #! Output: [...]
 pub proc eidos_clear_buffer()
-    padw exec.constants::random_coin_block_ptr mem_storew_le
-    exec.constants::random_coin_block_ptr add.4 mem_storew_le dropw
-    push.0 exec.constants::random_coin_buffer_len_ptr mem_store
+    padw mem_storew_le.RANDOM_COIN_INPUT_BUF_PTR
+    push.RANDOM_COIN_INPUT_BUF_PTR add.4 mem_storew_le dropw
+    push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
 end
 
-#! Compress the block stored at `random_coin_block_ptr` into the Eidos chaining value.
+#! Compress the block stored at `RANDOM_COIN_INPUT_BUF_PTR` into the Eidos chaining value.
 #!
 #! Input: [...]
 #! Output: [...]
 pub proc eidos_compress_block()
-    padw exec.constants::random_coin_cv_ptr mem_loadw_le
-    padw exec.constants::random_coin_block_ptr add.4 mem_loadw_le
-    padw exec.constants::random_coin_block_ptr mem_loadw_le
+    padw mem_loadw_le.RANDOM_COIN_CV_PTR
+    padw push.RANDOM_COIN_INPUT_BUF_PTR add.4 mem_loadw_le
+    padw mem_loadw_le.RANDOM_COIN_INPUT_BUF_PTR
     compress
     swapw.2
-    exec.constants::random_coin_cv_ptr mem_storew_le dropw
+    mem_storew_le.RANDOM_COIN_CV_PTR dropw
     dropw dropw
 end
 
@@ -76,15 +108,15 @@ end
 #! Input: [block_lo, block_hi, ...]
 #! Output: [...]
 pub proc eidos_absorb_block(block_lo: word, block_hi: word)
-    exec.constants::random_coin_buffer_len_ptr mem_load
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     assertz.err="eidos_absorb_block: buffer must be empty"
 
-    padw exec.constants::random_coin_cv_ptr mem_loadw_le
+    padw mem_loadw_le.RANDOM_COIN_CV_PTR
     swapw.2
     swapw
     compress
     swapw.2
-    exec.constants::random_coin_cv_ptr mem_storew_le dropw
+    mem_storew_le.RANDOM_COIN_CV_PTR dropw
     dropw dropw
     exec.eidos_clear_buffer
     exec.eidos_enter_absorbing
@@ -97,13 +129,13 @@ end
 pub proc eidos_observe_felt(value: felt)
     exec.eidos_enter_absorbing
 
-    exec.constants::random_coin_buffer_len_ptr mem_load
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     dup push.8 u32lt assert.err="eidos_observe_felt: buffer_len exceeds block width"
     swap
     dup.1
-    exec.constants::random_coin_block_ptr add mem_store
+    push.RANDOM_COIN_INPUT_BUF_PTR add mem_store
     add.1
-    dup exec.constants::random_coin_buffer_len_ptr mem_store
+    dup mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
     push.8 eq
     if.true
         exec.eidos_compress_block
@@ -122,18 +154,18 @@ end
 pub proc eidos_observe_word(value: word)
     exec.eidos_enter_absorbing
 
-    exec.constants::random_coin_buffer_len_ptr mem_load
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     dup push.0 eq
     if.true
         drop
-        exec.constants::random_coin_block_ptr mem_storew_le dropw
-        padw exec.constants::random_coin_block_ptr add.4 mem_storew_le dropw
-        push.4 exec.constants::random_coin_buffer_len_ptr mem_store
+        mem_storew_le.RANDOM_COIN_INPUT_BUF_PTR dropw
+        padw push.RANDOM_COIN_INPUT_BUF_PTR add.4 mem_storew_le dropw
+        push.4 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
     else
         dup push.4 eq
         if.true
             drop
-            exec.constants::random_coin_block_ptr add.4 mem_storew_le dropw
+            push.RANDOM_COIN_INPUT_BUF_PTR add.4 mem_storew_le dropw
             exec.eidos_compress_block
             exec.eidos_clear_buffer
         else
@@ -207,11 +239,11 @@ pub proc eidos_init_challenger(
     transcript_init_cv: eidos::ChainingValue,
 )
     swapw
-    exec.constants::random_coin_cv_ptr mem_storew_le dropw
+    mem_storew_le.RANDOM_COIN_CV_PTR dropw
 
     exec.eidos_clear_buffer
-    padw exec.constants::random_coin_output_word_ptr mem_storew_le dropw
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
+    padw mem_storew_le.RANDOM_COIN_OUTPUT_WORD_PTR dropw
+    push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 
     exec.eidos_absorb_word
 end
@@ -221,35 +253,35 @@ end
 #! Input: [...]
 #! Output: [...]
 pub proc eidos_refill_output_word()
-    exec.constants::random_coin_counter_ptr mem_load
+    mem_load.RANDOM_COIN_COUNTER_PTR
     dup push.0 eq
     if.true
         drop
-        exec.constants::random_coin_buffer_len_ptr mem_load
+        mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
         dup push.8 u32lt assert.err="eidos_refill_output_word: buffer_len exceeds block width"
-        exec.constants::random_coin_cv_ptr add.3 mem_load
+        push.RANDOM_COIN_CV_PTR add.3 mem_load
         swap add.1 add
-        exec.constants::random_coin_cv_ptr add.3 mem_store
+        push.RANDOM_COIN_CV_PTR add.3 mem_store
         exec.eidos_compress_block
         exec.eidos_clear_buffer
-        push.1 exec.constants::random_coin_counter_ptr mem_store
+        push.1 mem_store.RANDOM_COIN_COUNTER_PTR
     else
-        dup add.1 exec.constants::random_coin_counter_ptr mem_store
+        dup add.1 mem_store.RANDOM_COIN_COUNTER_PTR
         push.0.0.0
         movup.3
-        exec.constants::random_coin_block_ptr mem_storew_le
+        mem_storew_le.RANDOM_COIN_INPUT_BUF_PTR
         drop push.0
-        exec.constants::random_coin_block_ptr add.4 mem_storew_le dropw
-        exec.constants::random_coin_cv_ptr add.3 mem_load
+        push.RANDOM_COIN_INPUT_BUF_PTR add.4 mem_storew_le dropw
+        push.RANDOM_COIN_CV_PTR add.3 mem_load
         push.9 add
-        exec.constants::random_coin_cv_ptr add.3 mem_store
+        push.RANDOM_COIN_CV_PTR add.3 mem_store
         exec.eidos_compress_block
         exec.eidos_clear_buffer
     end
 
-    padw exec.constants::random_coin_cv_ptr mem_loadw_le
-    exec.constants::random_coin_output_word_ptr mem_storew_le dropw
-    push.4 exec.constants::random_coin_output_len_ptr mem_store
+    padw mem_loadw_le.RANDOM_COIN_CV_PTR
+    mem_storew_le.RANDOM_COIN_OUTPUT_WORD_PTR dropw
+    push.4 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 end
 
 #! Sample one base field element from the Eidos transcript.
@@ -257,7 +289,7 @@ end
 #! Input: [...]
 #! Output: [x, ...]
 pub proc eidos_sample_felt() -> felt
-    exec.constants::random_coin_output_len_ptr mem_load
+    mem_load.RANDOM_COIN_OUTPUT_LENGTH_PTR
     dup push.0 eq
     if.true
         drop
@@ -267,10 +299,10 @@ pub proc eidos_sample_felt() -> felt
 
     dup push.4 u32lte assert.err="eidos_sample_felt: output_len exceeds word width"
     sub.1
-    dup exec.constants::random_coin_output_len_ptr mem_store
+    dup mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 
     push.3 swap sub
-    exec.constants::random_coin_output_word_ptr add mem_load
+    push.RANDOM_COIN_OUTPUT_WORD_PTR add mem_load
 end
 
 #! Sample one quadratic extension element from the Eidos transcript.
@@ -305,11 +337,11 @@ end
 #! Input: [...]
 #! Output: [word, ...]
 pub proc eidos_squeeze_word() -> word
-    exec.constants::random_coin_output_len_ptr mem_load
+    mem_load.RANDOM_COIN_OUTPUT_LENGTH_PTR
     push.0 assert_eq
     exec.eidos_refill_output_word
-    padw exec.constants::random_coin_output_word_ptr mem_loadw_le
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
+    padw mem_loadw_le.RANDOM_COIN_OUTPUT_WORD_PTR
+    push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 end
 
 #! Sample a single base field element from the transcript.
@@ -355,7 +387,7 @@ end
 #! Flush a partially absorbed Eidos block so subsequent sampling sees it.
 #! This is a no-op when the absorb buffer is empty.
 pub proc flush_buffer()
-    exec.constants::random_coin_buffer_len_ptr mem_load
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     push.0 neq
     if.true
         exec.eidos_refill_output_word
@@ -386,35 +418,35 @@ end
 pub proc init_seed()
     # Initialize the zero word.
     padw
-    exec.constants::zero_word_ptr mem_storew_le
+    mem_storew_le.ZERO_WORD_PTR
     dropw
     #=> [...]
 
     # ---- Relation digest + PCS params ----
 
     push.EIDOS_TRANSCRIPT_INIT_CV_3.EIDOS_TRANSCRIPT_INIT_CV_2.EIDOS_TRANSCRIPT_INIT_CV_1.EIDOS_TRANSCRIPT_INIT_CV_0
-    padw exec.constants::relation_digest_ptr mem_loadw_le
+    padw mem_loadw_le.RELATION_DIGEST_PTR
     exec.eidos_init_challenger
 
     # Absorb PCS parameters as one full Eidos block:
     # [nq, query_pow_bits, deep_pow_bits, folding_pow_bits,
     #  log_blowup, log_final_degree, fold_arity, 0].
-    exec.constants::get_folding_pow_bits
-    exec.constants::get_deep_pow_bits
-    exec.constants::get_query_pow_bits
-    exec.constants::get_number_queries
+    mem_load.FOLDING_POW_BITS_PTR
+    mem_load.DEEP_POW_BITS_PTR
+    mem_load.QUERY_POW_BITS_PTR
+    mem_load.NUM_QUERIES_PTR
 
     push.0
-    exec.constants::get_fri_fold_arity
-    exec.constants::get_log_final_degree
-    exec.constants::get_blowup_factor_log
+    push.FRI_FOLD_ARITY
+    push.LOG_FINAL_DEGREE
+    push.LOG_BLOWUP_FACTOR
     swapw
     exec.eidos_absorb_block
     #=> [...]
 
     # Bind the trusted preprocessed-trace commitment before statement-owned inputs, matching
     # `StarkProof::from_data`. It remains buffered until the claim commitment completes the block.
-    padw exec.constants::preprocessed_trace_com_ptr mem_loadw_le
+    padw mem_loadw_le.PREPROCESSED_TRACE_COM_PTR
     exec.eidos_observe_word
 
     # ---- Derive trace domain parameters ----
@@ -422,7 +454,7 @@ pub proc init_seed()
     # Reload log(trace_length) from memory (it was saved earlier) and derive
     # trace_length, LDE domain size, LDE generator, and trace generator.
 
-    exec.constants::get_trace_length_log
+    mem_load.LOG_TRACE_LENGTH_PTR
     #=> [log(trace_length), ...]
 
     ## Compute trace_length = 2^log(trace_length)
@@ -432,12 +464,12 @@ pub proc init_seed()
     #=> [trace_length, log(trace_length), ...]
 
     ## Save the trace length to memory
-    dup exec.constants::set_trace_length
+    dup mem_store.TRACE_LENGTH_PTR
     #=> [trace_length, log(trace_length), ...]
 
     ## Compute log size of LDE domain
     swap
-    exec.constants::get_blowup_factor_log
+    push.LOG_BLOWUP_FACTOR
     add
     #=> [log(lde_size), trace_length, ...]
 
@@ -456,8 +488,8 @@ pub proc init_seed()
     # by quotient recomposition and DEEP query points.
     dup.1
     exec.utils::compute_lde_shift
-    dup exec.constants::set_domain_offset
-    inv exec.constants::set_domain_offset_inv
+    dup mem_store.DOMAIN_OFFSET_PTR
+    inv mem_store.DOMAIN_OFFSET_INV_PTR
     #=> [lde_size, log(lde_size), lde_g, trace_length, ...]
 
     push.0
@@ -465,7 +497,7 @@ pub proc init_seed()
     #=> [lde_size, log(lde_size), lde_g, 0, trace_length, ...]
 
     # Save `[0, lde_g, log(lde_size), lde_size]`
-    exec.constants::set_lde_domain_info_word
+    mem_storew_le.LDE_DOMAIN_INFO_PTR
     #=> [lde_size, log(lde_size), lde_g, 0, trace_length, ...]
 
     # clean stack
@@ -479,7 +511,7 @@ pub proc init_seed()
     #=> [trace_g, 0, trace_length, ...]
 
     # Save `trace_g` to memory
-    exec.constants::set_trace_domain_generator
+    mem_store.TRACE_DOMAIN_GENERATOR_PTR
     #=> [0, trace_length, ...]
 
     # Clean up the stack.
@@ -502,7 +534,7 @@ end
 #! Input: [felt, w0, w1, w2, w3, ...]
 #! Output: [...]
 pub proc reseed_with_felt(value: felt, commitment: types::Digest)
-    exec.constants::tmp3 mem_store
+    mem_store.TMP3_PTR
     exec.eidos_observe_word
 end
 
@@ -516,26 +548,25 @@ end
 
 #! Verify per-round FRI folding proof-of-work and sample one extension field element.
 #!
-#! The folding PoW bit count is read from memory (set by load_security_params).
-#! When folding_pow_bits=0 the check is trivially satisfied (mask=0).
+#! Reads the folding PoW bit count from memory (set by load_security_params). For a nonzero bit
+#! count, observes the staged witness and requires the sampled low bits to be zero. A zero bit
+#! count requires a zero witness and skips both its observation and the PoW sample.
 #!
-#! Equivalent to: `get_folding_pow_bits sample_bits assertz; sample_ext`
-#!
-#! Must be called immediately after `reseed_with_felt`; the witness is staged in `tmp3`.
+#! Must be called immediately after `reseed_with_felt`; the witness is staged at `TMP3_PTR`.
 #!
 #! Input: [...]
 #! Output: [a0, a1, ...]
 pub proc sample_folding_pow_and_ext() -> types::QuadFelt
-    exec.constants::get_folding_pow_bits
+    mem_load.FOLDING_POW_BITS_PTR
     dup push.0 neq
     if.true
-        exec.constants::tmp3 mem_load
+        mem_load.TMP3_PTR
         exec.eidos_observe_felt
         exec.eidos_sample_bits
         assertz.err="per-round FRI folding grinding check failed"
     else
         drop
-        exec.constants::tmp3 mem_load
+        mem_load.TMP3_PTR
         assertz.err="FRI folding proof-of-work nonce must be zero when grinding factor is zero"
     end
 
@@ -554,10 +585,10 @@ pub proc reseed_with_folding_pow_and_ext(
     pow_witness: felt,
     commitment: types::Digest,
 ) -> types::QuadFelt
-    exec.constants::get_folding_pow_bits
+    mem_load.FOLDING_POW_BITS_PTR
     dup push.0 neq
     if.true
-        exec.constants::random_coin_buffer_len_ptr mem_load
+        mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
         assertz.err="reseed_with_folding_pow_and_ext: buffer must be empty"
         exec.eidos_enter_absorbing
 
@@ -568,35 +599,35 @@ pub proc reseed_with_folding_pow_and_ext(
         movup.7
         swapw
 
-        padw exec.constants::random_coin_cv_ptr mem_loadw_le
+        padw mem_loadw_le.RANDOM_COIN_CV_PTR
         movup.3 add.6 movdn.3
         swapw.2
         swapw
         compress
 
         swapw.2
-        exec.constants::random_coin_output_word_ptr mem_storew_le
-        exec.constants::random_coin_cv_ptr mem_storew_le
+        mem_storew_le.RANDOM_COIN_OUTPUT_WORD_PTR
+        mem_storew_le.RANDOM_COIN_CV_PTR
         dropw dropw dropw
 
-        push.0 exec.constants::random_coin_buffer_len_ptr mem_store
-        push.1 exec.constants::random_coin_counter_ptr mem_store
-        push.1 exec.constants::random_coin_output_len_ptr mem_store
+        push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
+        push.1 mem_store.RANDOM_COIN_COUNTER_PTR
+        push.1 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 
         # Consume output[0] for the grinding check and output[1], output[2] for alpha, leaving
         # output[3] cached as the next transcript sample.
         dup
         pow2
         u32assert u32overflowing_sub.1 assertz
-        exec.constants::random_coin_output_word_ptr mem_load
+        mem_load.RANDOM_COIN_OUTPUT_WORD_PTR
         u32split
         swap
         drop
         u32and
         assertz.err="per-round FRI folding grinding check failed"
         drop
-        exec.constants::random_coin_output_word_ptr add.1 mem_load
-        exec.constants::random_coin_output_word_ptr add.2 mem_load
+        push.RANDOM_COIN_OUTPUT_WORD_PTR add.1 mem_load
+        push.RANDOM_COIN_OUTPUT_WORD_PTR add.2 mem_load
         swap
     else
         drop
@@ -620,8 +651,8 @@ end
 # =============================================================================================
 
 #! Draws alpha and beta for the LogUp multiset hash
-#! `h(m) = alpha + \sum_{i=0}^{|m| - 1} m_i * beta^i` and stores them at the address returned by
-#! `constants::get_aux_rand_elem_address`.
+#! `h(m) = alpha + \sum_{i=0}^{|m| - 1} m_i * beta^i` and stores them at the address held in
+#! `constants::AUX_RAND_ELEM_ADDRESS_PTR`.
 #!
 #! Input: [...]
 #! Output: [...]
@@ -633,15 +664,16 @@ pub proc generate_aux_randomness()
     exec.sample_ext
     # => [beta0, beta1, alpha0, alpha1, ...]
 
-    exec.constants::get_aux_rand_elem_address mem_storew_le
+    mem_load.AUX_RAND_ELEM_ADDRESS_PTR mem_storew_le
     dropw
     #=> [...]
 end
 
 #! Draw the constraint-composition challenges.
 #!
-#! Stores `[alpha0, alpha1, beta0, beta1]` at `composition_coef_ptr`. The generic verifier uses
-#! `alpha` for constraint folding; each relation copies `beta` into its own multi-AIR fold slot.
+#! Stores `[alpha0, alpha1, beta0, beta1]` at `CONSTRAINT_COMPOSITION_COEFS_PTR`. The generic
+#! verifier uses `alpha` for constraint folding; each relation copies `beta` into its own
+#! multi-AIR fold slot.
 #!
 #! Input: [...]
 #! Output: [...]
@@ -652,11 +684,11 @@ pub proc generate_constraint_composition_coefficients()
     # => [beta0, beta1, alpha0, alpha1, ...]
     movup.3 movup.3
     # => [alpha0, alpha1, beta0, beta1, ...]
-    exec.constants::composition_coef_ptr
+    push.CONSTRAINT_COMPOSITION_COEFS_PTR
     mem_storew_le dropw
 end
 
-#! Draw deep composition polynomial random coefficient and save it at `deep_rand_coef_ptr`.
+#! Draw deep composition polynomial random coefficient and save it at `DEEP_COMPOSITION_COEFS_PTR`.
 #!
 #! As this random challenge has already been used non-deterministically in prior computations, we
 #! also check that the generated challenge matches the non-deterministically provided one.
@@ -667,12 +699,12 @@ pub proc generate_deep_composition_random_coefficients()
     # Sample challenge_columns (deep alpha) for batching columns.
     exec.sample_ext
     padw
-    exec.constants::deep_rand_alpha_nd_ptr mem_loadw_le
+    mem_loadw_le.DEEP_ALPHA_ADVICE_PTR
     # => [alpha0_nd, alpha1_nd, 0, 0, alpha0, alpha1, ...]
 
     dup.4 assert_eq
     dup.4 assert_eq
-    exec.constants::deep_rand_coef_ptr
+    push.DEEP_COMPOSITION_COEFS_PTR
     mem_storew_le
     dropw
 
@@ -682,10 +714,10 @@ pub proc generate_deep_composition_random_coefficients()
     exec.sample_ext
     # => [beta0, beta1, ...]
 
-    # Store [beta0, beta1, alpha0, alpha1] at deep_rand_coef_ptr.
+    # Store [beta0, beta1, alpha0, alpha1] at DEEP_COMPOSITION_COEFS_PTR.
     # (alpha was already stored at positions 2,3 by the mem_storew_le above)
-    exec.constants::deep_rand_coef_ptr mem_store
-    exec.constants::deep_rand_coef_ptr add.1 mem_store
+    mem_store.DEEP_COMPOSITION_COEFS_PTR
+    push.DEEP_COMPOSITION_COEFS_PTR add.1 mem_store
     #=> [...]
 end
 
@@ -695,7 +727,7 @@ end
 
 #! Generate the OOD challenge point `z = (z0, z1)` and compute `z^N` where N is
 #! the trace length. The resulting word `[(z_0, z_1)^N, z0, z1]` is stored in the
-#! global memory address `exec.z_ptr` reserved for it.
+#! global memory address `OOD_POINT_PTR` reserved for it.
 #!
 #! Input: [X, ...]
 #! Output: [...]
@@ -703,7 +735,7 @@ end
 pub proc generate_z_zN()
     # Sample z and load log trace length N
     exec.sample_ext
-    exec.constants::get_trace_length_log
+    mem_load.LOG_TRACE_LENGTH_PTR
     # => [log(trace_len), z_0, z_1, ...]
 
     dup.2 dup.2
@@ -724,7 +756,7 @@ pub proc generate_z_zN()
     # => [(z_0, z_1)^n, z_0, z_1, ...]
 
     # Store z and z^N
-    exec.constants::z_ptr mem_storew_le
+    mem_storew_le.OOD_POINT_PTR
     dropw
 end
 
@@ -766,11 +798,11 @@ end
 #! Input: [...]
 #! Output: [...]
 pub proc generate_list_indices()
-    exec.constants::get_number_queries
-    exec.constants::get_fri_queries_address
+    mem_load.NUM_QUERIES_PTR
+    mem_load.FRI_QUERIES_ADDRESS_PTR
     #=> [query_ptr, num_queries, ...]
 
-    exec.constants::get_lde_domain_depth
+    mem_load.LOG_LDE_DOMAIN_SIZE_PTR
     swap movup.2 swap
     #=> [query_ptr, num_queries, depth, ...]
 
@@ -863,7 +895,7 @@ end
 #! Input: [...]
 #! Output: [...]
 pub proc check_deep_pow()
-    exec.constants::get_deep_pow_bits
+    mem_load.DEEP_POW_BITS_PTR
     exec.check_pow
 end
 
@@ -880,6 +912,6 @@ end
 #! Input: [...]
 #! Output: [...]
 pub proc check_query_pow()
-    exec.constants::get_query_pow_bits
+    mem_load.QUERY_POW_BITS_PTR
     exec.check_pow
 end

@@ -1,6 +1,6 @@
 //! The Eidos hash construction and its underlying compression function.
 //!
-//! [`Eidos`](crate::hash::eidos::Eidos) exposes a framed hash construction and a raw compression
+//! [`Eidos`] exposes a framed hash construction and a raw compression
 //! operation. Complete-hash methods apply domain and length binding, framing, and padding.
 //! [`Eidos::compress`](crate::hash::eidos::Eidos::compress) compresses one complete block under a
 //! caller-supplied chaining value and adds no framing.

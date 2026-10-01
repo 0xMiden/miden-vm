@@ -38,6 +38,7 @@ mod pvm_settlement;
 mod pvm_sigma_scatter;
 mod pvm_verifier;
 mod pvm_wrapper;
+mod random_coin;
 mod security;
 mod security_math;
 mod verifier_stack;
@@ -387,23 +388,27 @@ fn folding_reseed_helper_matches_reference_sampler() {
         format!(
             "
             use miden::core::sys
-            use miden::core::stark::constants
+            use {{
+                FOLDING_POW_BITS_PTR, RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_CV_PTR,
+                RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR,
+                RANDOM_COIN_OUTPUT_WORD_PTR
+            }} from miden::core::stark::constants
             use miden::core::stark::random_coin
 
             begin
-                push.{pow_bits} exec.constants::set_folding_pow_bits
-                push.109.113.127.131 exec.constants::random_coin_cv_ptr mem_storew_le dropw
+                push.{pow_bits} mem_store.FOLDING_POW_BITS_PTR
+                push.109.113.127.131 mem_storew_le.RANDOM_COIN_CV_PTR dropw
                 exec.random_coin::eidos_clear_buffer
-                push.0 exec.constants::random_coin_counter_ptr mem_store
-                push.0 exec.constants::random_coin_output_len_ptr mem_store
+                push.0 mem_store.RANDOM_COIN_COUNTER_PTR
+                push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 
                 {sample}
 
-                exec.constants::random_coin_output_len_ptr mem_load
-                exec.constants::random_coin_counter_ptr mem_load
-                exec.constants::random_coin_buffer_len_ptr mem_load
-                padw exec.constants::random_coin_output_word_ptr mem_loadw_le
-                padw exec.constants::random_coin_cv_ptr mem_loadw_le
+                mem_load.RANDOM_COIN_OUTPUT_LENGTH_PTR
+                mem_load.RANDOM_COIN_COUNTER_PTR
+                mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
+                padw mem_loadw_le.RANDOM_COIN_OUTPUT_WORD_PTR
+                padw mem_loadw_le.RANDOM_COIN_CV_PTR
                 exec.sys::truncate_stack
             end
             "
@@ -433,12 +438,12 @@ fn folding_reseed_helper_matches_reference_sampler() {
 #[test]
 fn folding_reseed_rejects_nonempty_buffer() {
     let source = "
-        use miden::core::stark::constants
+        use {FOLDING_POW_BITS_PTR, RANDOM_COIN_CV_PTR} from miden::core::stark::constants
         use miden::core::stark::random_coin
 
         begin
-            push.1 exec.constants::set_folding_pow_bits
-            push.109.113.127.131 exec.constants::random_coin_cv_ptr mem_storew_le dropw
+            push.1 mem_store.FOLDING_POW_BITS_PTR
+            push.109.113.127.131 mem_storew_le.RANDOM_COIN_CV_PTR dropw
             exec.random_coin::eidos_clear_buffer
             push.17 exec.random_coin::observe_felt
 
@@ -457,12 +462,12 @@ fn folding_reseed_rejects_nonempty_buffer() {
 #[test]
 fn zero_pow_folding_reseed_accepts_nonempty_buffer() {
     let source = "
-        use miden::core::stark::constants
+        use {FOLDING_POW_BITS_PTR, RANDOM_COIN_CV_PTR} from miden::core::stark::constants
         use miden::core::stark::random_coin
 
         begin
-            push.0 exec.constants::set_folding_pow_bits
-            push.109.113.127.131 exec.constants::random_coin_cv_ptr mem_storew_le dropw
+            push.0 mem_store.FOLDING_POW_BITS_PTR
+            push.109.113.127.131 mem_storew_le.RANDOM_COIN_CV_PTR dropw
             exec.random_coin::eidos_clear_buffer
             push.17 exec.random_coin::observe_felt
 
@@ -503,23 +508,26 @@ fn word_observe_helper_matches_scalar_observe() {
         format!(
             "
             use miden::core::sys
-            use miden::core::stark::constants
+            use {{
+                RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_CV_PTR, RANDOM_COIN_INPUT_LENGTH_PTR,
+                RANDOM_COIN_OUTPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_WORD_PTR
+            }} from miden::core::stark::constants
             use miden::core::stark::random_coin
 
             begin
-                push.101.103.107.109 exec.constants::random_coin_cv_ptr mem_storew_le dropw
+                push.101.103.107.109 mem_storew_le.RANDOM_COIN_CV_PTR dropw
                 exec.random_coin::eidos_clear_buffer
-                push.0 exec.constants::random_coin_counter_ptr mem_store
-                push.0 exec.constants::random_coin_output_len_ptr mem_store
+                push.0 mem_store.RANDOM_COIN_COUNTER_PTR
+                push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 
                 {observe}
                 exec.random_coin::sample_felt
 
-                exec.constants::random_coin_output_len_ptr mem_load
-                exec.constants::random_coin_counter_ptr mem_load
-                exec.constants::random_coin_buffer_len_ptr mem_load
-                padw exec.constants::random_coin_output_word_ptr mem_loadw_le
-                padw exec.constants::random_coin_cv_ptr mem_loadw_le
+                mem_load.RANDOM_COIN_OUTPUT_LENGTH_PTR
+                mem_load.RANDOM_COIN_COUNTER_PTR
+                mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
+                padw mem_loadw_le.RANDOM_COIN_OUTPUT_WORD_PTR
+                padw mem_loadw_le.RANDOM_COIN_CV_PTR
                 exec.sys::truncate_stack
             end
             "
@@ -565,24 +573,27 @@ fn observe_word_and_flush_buffer_matches_scalar_observe() {
         format!(
             "
             use miden::core::sys
-            use miden::core::stark::constants
+            use {{
+                RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_CV_PTR, RANDOM_COIN_INPUT_LENGTH_PTR,
+                RANDOM_COIN_OUTPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_WORD_PTR
+            }} from miden::core::stark::constants
             use miden::core::stark::random_coin
 
             begin
-                push.101.103.107.109 exec.constants::random_coin_cv_ptr mem_storew_le dropw
+                push.101.103.107.109 mem_storew_le.RANDOM_COIN_CV_PTR dropw
                 exec.random_coin::eidos_clear_buffer
-                push.0 exec.constants::random_coin_counter_ptr mem_store
-                push.0 exec.constants::random_coin_output_len_ptr mem_store
+                push.0 mem_store.RANDOM_COIN_COUNTER_PTR
+                push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
 
                 {prefix}
                 {observe}
                 exec.random_coin::sample_felt
 
-                exec.constants::random_coin_output_len_ptr mem_load
-                exec.constants::random_coin_counter_ptr mem_load
-                exec.constants::random_coin_buffer_len_ptr mem_load
-                padw exec.constants::random_coin_output_word_ptr mem_loadw_le
-                padw exec.constants::random_coin_cv_ptr mem_loadw_le
+                mem_load.RANDOM_COIN_OUTPUT_LENGTH_PTR
+                mem_load.RANDOM_COIN_COUNTER_PTR
+                mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
+                padw mem_loadw_le.RANDOM_COIN_OUTPUT_WORD_PTR
+                padw mem_loadw_le.RANDOM_COIN_CV_PTR
                 exec.sys::truncate_stack
             end
             "
@@ -1192,7 +1203,7 @@ fn read_word(output: &miden_processor::ExecutionOutput, addr: u32) -> [Felt; WOR
 fn public_input_transcript_matches_rust_challenger() {
     const SQUEEZED_WORD_PTR: u32 = 1000;
     const RANDOM_COIN_BUFFER_LEN_PTR: u32 = 3223322767;
-    const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3223322768;
+    const RANDOM_COIN_OUTPUT_LENGTH_PTR: u32 = 3223322768;
 
     let log_heights = [10_u64, 11, 12];
     let seed = [1_u8; 32];
@@ -1214,7 +1225,10 @@ fn public_input_transcript_matches_rust_challenger() {
     let source = format!(
         "
         use miden::core::sys::vm
-        use miden::core::stark::constants
+        use {{
+            DEEP_POW_BITS_PTR, FOLDING_POW_BITS_PTR, MAIN_TRACE_COM_PTR, NUM_QUERIES_PTR,
+            QUERY_POW_BITS_PTR
+        }} from miden::core::stark::constants
         use miden::core::stark::random_coin
         use miden::core::sys::vm::layout
         use miden::core::sys::vm::public_inputs
@@ -1222,10 +1236,10 @@ fn public_input_transcript_matches_rust_challenger() {
         {COPY_ADVICE_TO_MEM}
 
         begin
-            push.{num_queries} exec.constants::set_number_queries
-            push.{query_pow_bits} exec.constants::set_query_pow_bits
-            push.{deep_pow_bits} exec.constants::set_deep_pow_bits
-            push.{folding_pow_bits} exec.constants::set_folding_pow_bits
+            push.{num_queries} mem_store.NUM_QUERIES_PTR
+            push.{query_pow_bits} mem_store.QUERY_POW_BITS_PTR
+            push.{deep_pow_bits} mem_store.DEEP_POW_BITS_PTR
+            push.{folding_pow_bits} mem_store.FOLDING_POW_BITS_PTR
             exec.vm::load_air_context
 
             # Stage the claim region and commitment the way `vm::verify_proof` leaves them.
@@ -1239,7 +1253,7 @@ fn public_input_transcript_matches_rust_challenger() {
 
             # Main-trace commitment, then squeeze (the squeeze flushes the buffered stream).
             padw adv_loadw
-            exec.constants::main_trace_com_ptr mem_storew_le
+            mem_storew_le.MAIN_TRACE_COM_PTR
             exec.random_coin::observe_word
             exec.random_coin::eidos_squeeze_word
             push.{SQUEEZED_WORD_PTR} mem_storew_le
@@ -1286,7 +1300,7 @@ fn public_input_transcript_matches_rust_challenger() {
     let ctx = miden_processor::ContextId::root();
     let read = |addr| output.memory.read_element(ctx, Felt::from_u32(addr)).expect("memory read");
     assert_eq!(read(RANDOM_COIN_BUFFER_LEN_PTR), Felt::ZERO);
-    assert_eq!(read(RANDOM_COIN_OUTPUT_LEN_PTR), Felt::ZERO);
+    assert_eq!(read(RANDOM_COIN_OUTPUT_LENGTH_PTR), Felt::ZERO);
 }
 
 #[test]
@@ -1297,14 +1311,16 @@ fn eidos_init_seed_matches_rust_challenger() {
     let source = format!(
         "
         use miden::core::sys::vm
-        use miden::core::stark::constants
+        use {{
+            DEEP_POW_BITS_PTR, FOLDING_POW_BITS_PTR, NUM_QUERIES_PTR, QUERY_POW_BITS_PTR
+        }} from miden::core::stark::constants
         use miden::core::stark::random_coin
 
         begin
-            push.{num_queries} exec.constants::set_number_queries
-            push.{query_pow_bits} exec.constants::set_query_pow_bits
-            push.{deep_pow_bits} exec.constants::set_deep_pow_bits
-            push.{folding_pow_bits} exec.constants::set_folding_pow_bits
+            push.{num_queries} mem_store.NUM_QUERIES_PTR
+            push.{query_pow_bits} mem_store.QUERY_POW_BITS_PTR
+            push.{deep_pow_bits} mem_store.DEEP_POW_BITS_PTR
+            push.{folding_pow_bits} mem_store.FOLDING_POW_BITS_PTR
             exec.vm::load_air_context
             exec.random_coin::init_seed
             exec.random_coin::eidos_squeeze_word
@@ -1342,13 +1358,13 @@ fn eidos_relation_digest_seed_matches_rust_challenger() {
     // `EIDOS_TRANSCRIPT_INIT_CV_*` constants in `stark/random_coin.masm`.
     let source = "
         use miden::core::sys::vm
-        use miden::core::stark::constants
+        use {RELATION_DIGEST_PTR} from miden::core::stark::constants
         use miden::core::stark::random_coin
 
         begin
             exec.vm::load_air_context
             push.6620516959492505600.1947077364412317696.2688637132020383744.4280581857109607681
-            padw exec.constants::relation_digest_ptr mem_loadw_le
+            padw mem_loadw_le.RELATION_DIGEST_PTR
             exec.random_coin::eidos_init_challenger
             exec.random_coin::eidos_squeeze_word
             push.1000 mem_storew_le
@@ -1373,10 +1389,10 @@ fn eidos_absorb_block_matches_rust_challenger() {
 
     let source = "
         use miden::core::stark::random_coin
-        use miden::core::stark::constants
+        use {RANDOM_COIN_CV_PTR} from miden::core::stark::constants
 
         begin
-            push.13.12.11.10 exec.constants::random_coin_cv_ptr mem_storew_le
+            push.13.12.11.10 mem_storew_le.RANDOM_COIN_CV_PTR
             dropw
             exec.random_coin::eidos_clear_buffer
             push.8.7.6.5
@@ -1416,11 +1432,11 @@ fn eidos_absorb_block_matches_rust_challenger() {
 #[test]
 fn eidos_absorb_block_rejects_nonempty_buffer() {
     let source = "
-        use miden::core::stark::constants
+        use {RANDOM_COIN_CV_PTR} from miden::core::stark::constants
         use miden::core::stark::random_coin
 
         begin
-            push.13.12.11.10 exec.constants::random_coin_cv_ptr mem_storew_le dropw
+            push.13.12.11.10 mem_storew_le.RANDOM_COIN_CV_PTR dropw
             exec.random_coin::eidos_clear_buffer
             push.17 exec.random_coin::observe_felt
 
@@ -1620,7 +1636,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
     let source = format!(
         "
         use miden::core::stark::random_coin
-        use miden::core::stark::constants
+        use {{LOG_TRACE_LENGTH_PTR, RELATION_DIGEST_PTR}} from miden::core::stark::constants
         use miden::core::sys::vm::layout
         use miden::core::sys::vm::public_inputs
 
@@ -1645,8 +1661,8 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
             push.10 exec.layout::set_chiplets_trace_length_log
             push.10 exec.layout::set_eidos_compression_trace_length_log
             push.16 exec.layout::set_and8_lookup_trace_length_log
-            push.16 exec.constants::set_trace_length_log
-            push.4.3.2.1 exec.constants::relation_digest_ptr mem_storew_le dropw
+            push.16 mem_store.LOG_TRACE_LENGTH_PTR
+            push.4.3.2.1 mem_storew_le.RELATION_DIGEST_PTR dropw
             push.{claim_c3}.{claim_c2}.{claim_c1}.{claim_c0}
             exec.layout::claim_commitment_ptr mem_storew_le dropw
 

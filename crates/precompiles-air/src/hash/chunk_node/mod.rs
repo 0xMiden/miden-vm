@@ -3,13 +3,13 @@
 //! [`crate::hash::chunk_node_sponge::ChunkNodeSpongeAir`].
 //!
 //! Both are period-1 (no periodic columns) and run simultaneously on the same rows in disjoint
-//! column ranges. Main columns 0..12 use [`chunk::ChunkAir`]'s layout; columns 12..42 use
+//! column ranges. Main columns 0..12 use [`chunk::ChunkAir`]'s layout; columns 12..44 use
 //! [`node::KeccakNodeAir`]'s layout shifted by [`NODE_COL_OFFSET`]. Both layouts are evaluated
 //! directly on every row.
 //!
-//! The 21 lookup interactions are repacked into six columns with shape `[3, 3, 3, 4, 4, 4]`.
+//! The 22 lookup interactions are repacked into six columns with shape `[3, 3, 4, 4, 4, 4]`.
 //! Column 0 contains three linear chunk-memory interactions and drives the centered accumulator.
-//! The three four-interaction columns reach degree five, which is the composite's degree bound.
+//! The four four-interaction columns reach degree five, which is the composite's degree bound.
 
 use core::array;
 
@@ -24,6 +24,7 @@ use crate::{
         memory64::{CHUNK_ADDR_BASE, Memory64Msg},
     },
     logup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, frac_col},
+    primitives::byte_pair_lut::BytePairLutMsg,
     transcript::{
         binding::BindingMsg,
         eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
@@ -44,7 +45,7 @@ pub const NUM_MAIN_COLS: usize = chunk::NUM_MAIN_COLS + node::NUM_MAIN_COLS;
 /// 18-column auxiliary trace.
 pub const NUM_AUX_COLS: usize = 6;
 
-pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [3, 3, 3, 4, 4, 4];
+pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [3, 3, 4, 4, 4, 4];
 
 // CONSTRAINTS
 // ================================================================================================
@@ -113,6 +114,7 @@ where
         builder
             .when_transition()
             .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
+        node::eval_chunk_count(builder, &local);
 
         builder.assert_zero((AB::Expr::ONE - act) * out_mult);
 
@@ -298,11 +300,12 @@ where
     let addr_lane =
         |j: u8| -> LB::Expr { digest_addr_base.clone() + LB::Expr::from(Felt::from(j)) };
 
-    // col 2: node request, truth binding, and chunk-chain consume.
+    // col 2: node request, truth binding, chunk-chain consume, and remainder check.
+    let remainder: LB::Expr = local[node::COL_LAST_CHUNK_REM].into();
     frac_col!(
         builder,
         "handshake-and-chunks-digest",
-        triple_deg,
+        quad_deg,
         (
             "ks-request",
             neg_act.clone(),
@@ -326,6 +329,16 @@ where
                 chunk_seq_id_head: chunk_seq_id_head.clone(),
                 absorption_id_head: absorption_id_chunks.clone()
             },
+            interaction_deg
+        ),
+        (
+            "chunk-remainder",
+            pos_act.clone(),
+            BytePairLutMsg::from_xor(
+                remainder.clone(),
+                LB::Expr::from(Felt::from(31u8)) - remainder,
+                LB::Expr::from(Felt::from(31u8)),
+            ),
             interaction_deg
         ),
     );

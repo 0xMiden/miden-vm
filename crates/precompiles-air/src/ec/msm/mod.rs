@@ -214,12 +214,14 @@ pub const COL_VAL_B: usize = 24;
 pub const COL_A_PTR: usize = 25;
 pub const COL_B_PTR: usize = 26;
 pub const COL_BOUND_PTR: usize = 27;
-/// Ordering witnesses (boundary): `expr − a_expr − 1 = a_diff_lo + 2¹⁶·
-/// a_diff_hi ≥ 0`, each half range-checked — enforces `a_expr < expr`
-/// for combine and neg (and `b_expr < expr` for combine), the well-founded
-/// order.
+/// A-side ordering witness on combine and neg boundaries:
+/// `expr − a_expr − 1 = a_diff_lo + 2¹⁶·a_diff_hi`, with both 16-bit limbs
+/// range-checked to enforce `a_expr < expr`.
 pub const COL_A_DIFF_LO: usize = 28;
 pub const COL_A_DIFF_HI: usize = 29;
+/// B-side ordering witness. On combine boundaries it enforces `b_expr < expr`.
+/// On certificate-minting neg and intro_endo rows, it enforces `val > val_a`
+/// or `val > base`, respectively. Both limbs are range-checked.
 pub const COL_B_DIFF_LO: usize = 30;
 pub const COL_B_DIFF_HI: usize = 31;
 
@@ -456,7 +458,7 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         builder.assert_zero(is_intro_endo.clone() * (AB::Expr::ONE - is_boundary.clone()));
         let lambda_ptr: AB::Expr = local[COL_LAMBDA_PTR].into();
         let scalar: AB::Expr = local[COL_SCALAR].into();
-        builder.assert_zero(is_intro_endo * (scalar - lambda_ptr));
+        builder.assert_zero(is_intro_endo.clone() * (scalar - lambda_ptr));
 
         // intro_zero: also a 1-row run (boundary). Neither the scalar (0)
         // nor the value (the group's PAI point) is an AIR-known constant
@@ -521,7 +523,8 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // lo + 2¹⁶·hi, halves range-checked on the bus ⇒ a_expr, b_expr <
         // expr. This is the well-founded order grounding the induction
         // against circular derivations. The a-side applies to combine AND
-        // neg (both consume operand A); the b-side only to combine.
+        // neg (both consume operand A); the b-side to combine, and its limbs
+        // carry the certificate ordering below on minting rows.
         let bnd_a = (is_combine.clone() + is_neg) * is_boundary.clone();
         let bnd_b = is_combine * is_boundary;
         let two16 = AB::Expr::from(Felt::from(TWO16));
@@ -535,7 +538,32 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         builder.assert_zero(
             bnd_a * (here_expr.clone() - a_expr - AB::Expr::ONE - a_lo - two16.clone() * a_hi),
         );
-        builder.assert_zero(bnd_b * (here_expr - b_expr - AB::Expr::ONE - b_lo - two16 * b_hi));
+        builder.assert_zero(
+            bnd_b
+                * (here_expr
+                    - b_expr
+                    - AB::Expr::ONE
+                    - b_lo.clone()
+                    - two16.clone() * b_hi.clone()),
+        );
+
+        // Certificate ordering: a minted `EcOnCurveCert(group, val)` rests on
+        // the membership of `val_a` (neg) or `base` (intro_endo), so `val`
+        // must have the larger point ptr, as for EcGroupAdd's `r > p, q`.
+        // Without it a point could certify itself, or a cycle of points each
+        // other, with none of them on the curve.
+        let cert_val: AB::Expr = local[COL_VAL].into();
+        let cert_val_a: AB::Expr = local[COL_VAL_A].into();
+        let cert_base: AB::Expr = local[COL_BASE].into();
+        let cert_diff = b_lo + two16 * b_hi;
+        // The two families share a mint-flag column; their selectors choose the source point.
+        let neg_mint: AB::Expr =
+            AB::Expr::from(local[COL_NEG_MINTED]) * AB::Expr::from(local[COL_IS_NEG]);
+        let endo_mint: AB::Expr = AB::Expr::from(local[COL_ENDO_MINTED]) * is_intro_endo;
+        builder.assert_zero(
+            neg_mint * (cert_val.clone() - cert_val_a - AB::Expr::ONE - cert_diff.clone()),
+        );
+        builder.assert_zero(endo_mint * (cert_val - cert_base - AB::Expr::ONE - cert_diff));
 
         // Phase 2: LogUp.
         let mut lb = ConstraintLookupBuilder::new(builder, self);
@@ -636,6 +664,9 @@ where
             (is_combine + is_neg.clone() + is_intro_endo.clone() + is_intro_zero.clone())
                 * is_boundary.clone();
         let bnd_endo = is_intro_endo * is_boundary.clone();
+        // The b-side limbs are range-checked on combine boundaries and on
+        // certificate-minting rows (see `COL_B_DIFF_LO`).
+        let range_b_gate = bnd_b.clone() + minted.clone();
         let bnd_intro_zero = is_intro_zero.clone() * is_boundary.clone();
 
         let one_deg = Deg { v: 1, u: 1 };
@@ -928,7 +959,7 @@ where
 
         // col 9/10 (paired, lqd-1): the ordering range checks — the two
         // 32-bit difference decompositions enforcing `a_expr, b_expr <
-        // expr`.
+        // expr`, and on minting rows `val > val_a` / `val > base`.
         frac_col!(
             builder,
             "ec-msm-order",
@@ -940,8 +971,8 @@ where
             builder,
             "ec-msm-order",
             pair_deg,
-            ("range-b-lo", bnd_b.clone(), Range16Msg { w: b_lo }, two_deg),
-            ("range-b-hi", bnd_b, Range16Msg { w: b_hi }, two_deg),
+            ("range-b-lo", range_b_gate.clone(), Range16Msg { w: b_lo }, two_deg),
+            ("range-b-hi", range_b_gate, Range16Msg { w: b_hi }, two_deg),
         );
 
         // col 11 (paired, lqd-1): intro_endo's coordinate relation — `P`'s

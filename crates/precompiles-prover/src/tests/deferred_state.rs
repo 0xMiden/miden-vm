@@ -5,7 +5,7 @@ use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
     deferred::{Digest, Node as VmNode, PrecompileWitness, TRUE_DIGEST as VM_TRUE_DIGEST},
-    field::{PrimeCharacteristicRing, QuadFelt},
+    field::{Field, PrimeCharacteristicRing, QuadFelt},
     proof::{HashFunction, StarkProof},
     serde::{Deserializable, Serializable},
     utils::Matrix,
@@ -27,7 +27,8 @@ use crate::{
         keccak::{
             node::{
                 COL_ABSORPTION_ID_CHUNKS as NODE_COL_ABSORPTION_ID_CHUNKS, COL_ACT as NODE_COL_ACT,
-                COL_H_INPUT_CHUNKS_BEGIN, COL_N_CHUNKS as NODE_COL_N_CHUNKS,
+                COL_H_INPUT_CHUNKS_BEGIN, COL_N_CHUNKS as NODE_COL_N_CHUNKS, COL_N_CHUNKS_INV,
+                NUM_MAIN_COLS as NODE_NUM_MAIN_COLS,
             },
             sponge::{COL_ACT as SPONGE_COL_ACT, SPONGE_PERIOD, trace::keccak_oracle},
         },
@@ -599,10 +600,8 @@ fn merged_chunk_node_sponge_multi_block_checks_and_balances() {
     }
 }
 
-/// The generic chunk and Eidos AIRs do not interpret the CHUNKS frame. The Keccak-node owner binds
-/// its claimed chunk count into both the Eidos initial CV and the consumed `(head, tail, digest)`
-/// relation. This mutant changes only that owner-supplied count. It remains locally admissible for
-/// a single invocation, but cannot balance against the unchanged chunk and Eidos traces.
+/// A changed chunk count must fail the owner's length constraints and unbalance its Eidos
+/// initial-CV and `(head, tail, digest)` relations against the unchanged compression trace.
 #[test]
 fn keccak_node_chunk_count_is_bound_by_cross_air_relations() {
     let traces = keccak_session_traces(&[0xa5; 33]);
@@ -621,10 +620,7 @@ fn keccak_node_chunk_count_is_bound_by_cross_air_relations() {
         let mut forged = mains[0].clone();
         forged.values[n_chunks_col] = forged_count;
 
-        // There is one active Keccak-node row, so changing its count does not violate the owner's
-        // row-to-row layout constraints. Soundness comes from its cross-AIR frame and span
-        // messages.
-        crate::tests::check_local(ChunkNodeSpongeAir, &forged);
+        crate::tests::assert_local_rejects(ChunkNodeSpongeAir, &forged);
 
         let residual = session_stack_residual(&mains, &[(0, &forged)], &challenges);
         assert!(
@@ -717,10 +713,8 @@ fn chain_head_distinguishes_a_crossed_terminal_digest_request() {
         ..NODE_COL_OFFSET + COL_H_INPUT_CHUNKS_BEGIN + old_digest.len()]
         .copy_from_slice(&old_digest);
 
-    // This is the final active owner row, so neither mutation violates its local layout. The
-    // full relation set rejects it. The direct comparison above isolates the head field; this
-    // integration check also confirms that the composed trace does not accept the malformed owner.
-    crate::tests::check_local(ChunkNodeSpongeAir, &forged_owner);
+    // Both the local chunk-count constraints and the cross-AIR relations reject this owner.
+    crate::tests::assert_local_rejects(ChunkNodeSpongeAir, &forged_owner);
     let residual = session_stack_residual(&mains, &[(0, &forged_owner)], &challenges);
     assert!(!residual.is_empty(), "the crossed terminal digest must not balance");
 }
@@ -755,6 +749,46 @@ fn reordering_chunks_within_an_eidos_chain_unbalances_the_bus() {
     );
     let residual = session_stack_residual(&mains, &[(0, &forged)], &challenges);
     assert!(!residual.is_empty(), "reordered chunks must unbalance the bus");
+}
+
+/// Exercises the remainder lookup in the deployed merged AIR across chunk boundaries.
+#[test]
+fn merged_keccak_chunk_count_boundaries_balance() {
+    let mut rng = StdRng::seed_from_u64(0xc0de_5b0a);
+    for len in [0usize, 1, 31, 32, 33, 63, 64, 65] {
+        let input: Vec<u8> = (0..len).map(|i| i as u8).collect();
+        let traces = keccak_session_traces(&input);
+        traces.check();
+        assert_session_balanced(&traces, &mut rng);
+    }
+}
+
+#[test]
+fn merged_empty_keccak_node_cannot_redirect_chunk_tail() {
+    let traces = keccak_session_traces(&[]);
+    traces.check();
+    let mut merged = traces.mains()[0].clone();
+    assert_eq!(merged.values[NODE_COL_OFFSET + NODE_COL_ACT], Felt::ONE);
+    assert_eq!(merged.values[NODE_COL_OFFSET + NODE_COL_N_CHUNKS], Felt::ONE);
+
+    merged.values[NODE_COL_OFFSET + NODE_COL_N_CHUNKS] = Felt::from(2u8);
+    merged.values[NODE_COL_OFFSET + COL_N_CHUNKS_INV] = Felt::from(2u8).inverse();
+    crate::tests::assert_constraint_failure(|| {
+        crate::tests::check_local(ChunkNodeSpongeAir, &merged)
+    });
+}
+
+/// Checks the remainder lookup of the deployed merged AIR against an out-of-range remainder.
+#[test]
+fn merged_keccak_chunk_remainder_is_range_checked() {
+    let traces = keccak_session_traces(&[0x5a; 32]);
+    traces.check();
+    let mut merged = traces.mains()[0].clone();
+    let node_row = &mut merged.values[NODE_COL_OFFSET..NODE_COL_OFFSET + NODE_NUM_MAIN_COLS];
+    assert_eq!(node_row[NODE_COL_ACT], Felt::ONE);
+    let tuple = super::keccak_node::forge_out_of_range_remainder(node_row);
+    crate::tests::check_local(ChunkNodeSpongeAir, &merged);
+    crate::tests::bus_balance::assert_unprovidable_xor_lookup(&ChunkNodeSpongeAir, &merged, tuple);
 }
 
 /// Explicit full prove+verify of a multi-block Keccak session — the

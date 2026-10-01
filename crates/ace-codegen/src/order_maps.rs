@@ -433,7 +433,7 @@ mod tests {
     fn config() -> ProofOrderMapsConfig<'static> {
         ProofOrderMapsConfig {
             num_airs: 4,
-            heights_ptr: "exec.constants::air_trace_length_logs_ptr",
+            heights_ptr: "push.LOG_AIR_TRACE_LENGTHS_PTR",
             pos_by_id_ptr: "exec.layout::proof_order_positions_ptr",
             id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
             word_load_heights: true,

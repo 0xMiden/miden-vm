@@ -15,8 +15,8 @@ use miden_precompiles::Keccak256Precompile;
 use miden_precompiles_prover::prove_precompiles;
 use miden_precompiles_verifier::verify_deferred;
 
-const PROOF_PATH: &str = "../precompiles-verifier/tests/fixtures/pvm_eidos_v0_31.bin";
-const ROOT_PATH: &str = "../precompiles-verifier/tests/fixtures/pvm_eidos_v0_31.root";
+const PROOF_PATH: &str = "../precompiles-verifier/tests/fixtures/pvm_eidos_v0_35.bin";
+const ROOT_PATH: &str = "../precompiles-verifier/tests/fixtures/pvm_eidos_v0_35.root";
 const INPUT: &[u8] = b"abc";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

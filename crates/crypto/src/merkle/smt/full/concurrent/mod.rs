@@ -282,14 +282,23 @@ impl Smt {
             pairs.sort_by_key(|(key_1, _)| *key_1);
             // Check for duplicates in a sorted list by comparing adjacent pairs
             Self::check_for_duplicate_keys(&pairs)?;
-            Ok(Some(SmtLeaf::new_multiple(pairs).unwrap()))
-        } else {
-            let (key, value) = pairs.pop().unwrap();
-            if value == Self::EMPTY_VALUE {
-                Ok(None)
-            } else {
+        }
+
+        // Pairs with the empty value are equivalent to absent keys, so they must not be stored.
+        pairs.retain(|(_, value)| *value != Self::EMPTY_VALUE);
+
+        match pairs.len() {
+            0 => Ok(None),
+            1 => {
+                let (key, value) = pairs.pop().unwrap();
                 Ok(Some(SmtLeaf::new_single(key, value)))
-            }
+            },
+            _ => SmtLeaf::new_multiple(pairs).map(Some).map_err(|e| match e {
+                SmtLeafError::TooManyLeafEntries { actual } => {
+                    MerkleError::TooManyLeafEntries { actual }
+                },
+                other => panic!("unexpected SmtLeaf::new_multiple error: {other:?}"),
+            }),
         }
     }
 

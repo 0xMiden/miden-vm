@@ -1,6 +1,14 @@
+use {
+    AUX_TRACE_COM_PTR,
+    COMPOSITION_POLY_COM_PTR,
+    LOG_BLOWUP_FACTOR,
+    MAIN_TRACE_COM_PTR,
+    PREPROCESSED_TRACE_COM_PTR,
+    TMP2_PTR,
+    TMP3_PTR,
+} from miden::core::stark::constants
 use miden::core::stark::types
 use miden::core::crypto::hashes::eidos
-use miden::core::stark::constants
 use miden::core::stark::deep_queries
 use miden::core::sys::vm::layout
 
@@ -18,7 +26,7 @@ const EIDOS_LMCS_INIT_CV_16 = [4280581857092832001, 2688637132020383760, 1947077
 const EIDOS_LMCS_INIT_CV_64 = [4280581857092832001, 2688637132020383808, 1947077364412317696, 6620516959492505600]
 const EIDOS_LMCS_INIT_CV_192 = [4280581857092832001, 2688637132020383936, 1947077364412317696, 6620516959492505600]
 
-# 2^(AND8_LOOKUP_LOG_HEIGHT + BLOWUP_FACTOR_LOG) - 1 = 2^(16 + 3) - 1.
+# 2^(AND8_LOOKUP_LOG_HEIGHT + LOG_BLOWUP_FACTOR) - 1 = 2^(16 + 3) - 1.
 const AND8_LDE_INDEX_MASK = 524287
 
 # MAIN PROCEDURE
@@ -134,7 +142,7 @@ proc process_preprocessed_segment
     # Get commitment to the preprocessed trace group.
     movdn.3 movdn.2
     push.0.0
-    exec.constants::preprocessed_trace_com_ptr mem_loadw_le
+    mem_loadw_le.PREPROCESSED_TRACE_COM_PTR
     #=> [PREPROCESSED_TRACE_TREE_ROOT, depth, index, query_ptr]
 
     # The setup-fixed AND8 table LDE can be shorter than the query domain. LMCS
@@ -146,15 +154,15 @@ proc process_preprocessed_segment
     push.AND8_LDE_INDEX_MASK
     u32and
     exec.layout::get_and8_lookup_trace_length_log
-    exec.constants::get_blowup_factor_log
+    push.LOG_BLOWUP_FACTOR
     add
     #=> [preprocessed_depth, masked_index, PREPROCESSED_TRACE_TREE_ROOT, depth, index, query_ptr]
     mtree_get
-    exec.constants::tmp3 mem_storew_le
+    mem_storew_le.TMP3_PTR
     adv.push_mapval
     #=> [LEAF_VALUE, PREPROCESSED_TRACE_TREE_ROOT, depth, index, query_ptr]
 
-    exec.constants::tmp2 mem_loadw_le
+    mem_loadw_le.TMP2_PTR
     swapw
     #=> [LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
@@ -170,7 +178,7 @@ proc process_preprocessed_segment
 
     swapw.2
     padw
-    exec.constants::tmp3 mem_loadw_le
+    mem_loadw_le.TMP3_PTR
     assert_eqw.err=PREPROCESSED_LEAF_VALUE_MISMATCH
     dropw
 end
@@ -199,11 +207,11 @@ proc process_main_segment_execution_trace(
     query_ptr: ptr<word>,
 ) -> (word, types::HornerState, u8, u32, ptr<word>)
     # Load main trace commitment and get leaf.
-    exec.constants::main_trace_com_ptr mem_loadw_le
+    mem_loadw_le.MAIN_TRACE_COM_PTR
 
     dup.9 dup.9
     mtree_get
-    exec.constants::tmp3 mem_storew_le
+    mem_storew_le.TMP3_PTR
     adv.push_mapval
     #=> [L, R, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
@@ -218,7 +226,7 @@ proc process_main_segment_execution_trace(
 
     swapw.2
     padw
-    exec.constants::tmp3 mem_loadw_le
+    mem_loadw_le.TMP3_PTR
     assert_eqw.err=MAIN_LEAF_VALUE_MISMATCH
     dropw
 end
@@ -254,12 +262,12 @@ proc process_aux_segment_execution_trace(
     query_ptr: ptr<word>,
 ) -> (word, types::HornerState, u8, u32, ptr<word>)
     # Load aux trace commitment and get leaf
-    exec.constants::aux_trace_com_ptr mem_loadw_le
+    mem_loadw_le.AUX_TRACE_COM_PTR
 
     # Get the leaf against the auxiliary trace commitment for the current query
     dup.9 dup.9
     mtree_get
-    exec.constants::tmp3 mem_storew_le
+    mem_storew_le.TMP3_PTR
     adv.push_mapval
     #=> [L, R, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
@@ -274,7 +282,7 @@ proc process_aux_segment_execution_trace(
 
     swapw.2
     padw
-    exec.constants::tmp3 mem_loadw_le
+    mem_loadw_le.TMP3_PTR
     assert_eqw.err=AUX_LEAF_VALUE_MISMATCH
     dropw
     #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
@@ -310,13 +318,13 @@ proc process_constraints_composition_poly_trace(
     query_ptr: ptr<word>,
 ) -> (word, types::EvaluationPair, u32, ptr<word>)
     # Load the commitment to the constraint trace
-    exec.constants::composition_poly_com_ptr mem_loadw_le
+    mem_loadw_le.COMPOSITION_POLY_COM_PTR
     #=> [R, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
     # Get the leaf against the commitment
     dup.9 movup.9
     mtree_get
-    exec.constants::tmp3 mem_storew_le
+    mem_storew_le.TMP3_PTR
     adv.push_mapval
     #=>[L, R, ptr_x, ptr_alpha_inv, acc0, acc1, index, query_ptr]
 
@@ -328,7 +336,7 @@ proc process_constraints_composition_poly_trace(
 
     swapw.2
     padw
-    exec.constants::tmp3 mem_loadw_le
+    mem_loadw_le.TMP3_PTR
     assert_eqw.err=QUOTIENT_LEAF_VALUE_MISMATCH
     dropw
     #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, index, query_ptr]

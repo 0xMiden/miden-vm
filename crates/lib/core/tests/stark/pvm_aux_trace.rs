@@ -13,8 +13,8 @@ use crate::helpers::read_memory_felt;
 
 const AUX_TRACE_COM_PTR: u32 = 3_223_322_644;
 const RANDOM_COIN_CV_PTR: u32 = 3_223_322_668;
-const RANDOM_COIN_INPUT_LEN_PTR: u32 = 3_223_322_767;
-const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3_223_322_768;
+const RANDOM_COIN_INPUT_LENGTH_PTR: u32 = 3_223_322_767;
+const RANDOM_COIN_OUTPUT_LENGTH_PTR: u32 = 3_223_322_768;
 const RANDOM_COIN_COUNTER_PTR: u32 = 3_223_322_769;
 const INITIAL_CV: [u64; 4] = [19, 20, 21, 22];
 const COMMITMENT: [u64; 4] = [31, 32, 33, 34];
@@ -37,13 +37,13 @@ fn random_coin_setup_masm() -> String {
     format!(
         r#"
         push.{cv3}.{cv2}.{cv1}.{cv0}
-        exec.constants::random_coin_cv_ptr mem_storew_le dropw
-        padw exec.constants::random_coin_output_word_ptr mem_storew_le dropw
-        padw exec.constants::random_coin_block_ptr mem_storew_le dropw
-        padw exec.constants::random_coin_block_ptr add.4 mem_storew_le dropw
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
-        push.0 exec.constants::random_coin_output_len_ptr mem_store
-        push.0 exec.constants::random_coin_counter_ptr mem_store
+        mem_storew_le.RANDOM_COIN_CV_PTR dropw
+        padw mem_storew_le.RANDOM_COIN_OUTPUT_WORD_PTR dropw
+        padw mem_storew_le.RANDOM_COIN_INPUT_BUF_PTR dropw
+        padw push.RANDOM_COIN_INPUT_BUF_PTR add.4 mem_storew_le dropw
+        push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
+        push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
+        push.0 mem_store.RANDOM_COIN_COUNTER_PTR
         "#,
         cv0 = cv[0],
         cv1 = cv[1],
@@ -54,7 +54,7 @@ fn random_coin_setup_masm() -> String {
 
 fn direct_random_coin_setup_masm() -> String {
     format!(
-        "{}\npush.{} exec.constants::set_aux_rand_elem_address",
+        "{}\npush.{} mem_store.AUX_RAND_ELEM_ADDRESS_PTR",
         random_coin_setup_masm(),
         pvm_layout_const("AUX_RAND_ELEM_PTR")
     )
@@ -68,11 +68,8 @@ fn setup_masm(log_heights: &LogHeights) -> String {
         } else {
             format!(" add.{index}")
         };
-        writeln!(
-            heights,
-            "push.{height} exec.constants::air_trace_length_logs_ptr{offset} mem_store"
-        )
-        .expect("write height setup");
+        writeln!(heights, "push.{height} push.LOG_AIR_TRACE_LENGTHS_PTR{offset} mem_store")
+            .expect("write height setup");
     }
 
     format!(
@@ -87,7 +84,11 @@ fn setup_masm(log_heights: &LogHeights) -> String {
 fn sampler_source(log_heights: &LogHeights) -> String {
     format!(
         r#"
-        use miden::core::stark::constants
+        use {{
+            AUX_RAND_ELEM_ADDRESS_PTR, AUX_TRACE_COM_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
+            RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_CV_PTR, RANDOM_COIN_INPUT_BUF_PTR,
+            RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_WORD_PTR
+        }} from miden::core::stark::constants
         use miden::core::stark::random_coin
 
         begin
@@ -102,7 +103,11 @@ fn sampler_source(log_heights: &LogHeights) -> String {
 fn hook_source(log_heights: &LogHeights) -> String {
     format!(
         r#"
-        use miden::core::stark::constants
+        use {{
+            AUX_RAND_ELEM_ADDRESS_PTR, AUX_TRACE_COM_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
+            RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_CV_PTR, RANDOM_COIN_INPUT_BUF_PTR,
+            RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_WORD_PTR
+        }} from miden::core::stark::constants
         use miden::core::sys::pvm::aux_trace
         use miden::core::sys::pvm::ood_frames
 
@@ -120,7 +125,11 @@ fn hook_source(log_heights: &LogHeights) -> String {
 fn reference_source(log_heights: &LogHeights) -> String {
     format!(
         r#"
-        use miden::core::stark::constants
+        use {{
+            AUX_RAND_ELEM_ADDRESS_PTR, AUX_TRACE_COM_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
+            RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_CV_PTR, RANDOM_COIN_INPUT_BUF_PTR,
+            RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_WORD_PTR
+        }} from miden::core::stark::constants
         use miden::core::stark::random_coin
         use miden::core::sys::pvm::layout
 
@@ -129,7 +138,7 @@ fn reference_source(log_heights: &LogHeights) -> String {
             exec.random_coin::generate_aux_randomness
 
             padw adv_loadw
-            exec.constants::aux_trace_com_ptr mem_storew_le
+            mem_storew_le.AUX_TRACE_COM_PTR
             exec.random_coin::observe_word
             padw adv_loadw
             exec.layout::aux_bus_boundary_ptr mem_storew_le
@@ -330,8 +339,11 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
                 "{case}: transcript state differs at address {addr}"
             );
         }
-        for addr in [RANDOM_COIN_INPUT_LEN_PTR, RANDOM_COIN_OUTPUT_LEN_PTR, RANDOM_COIN_COUNTER_PTR]
-        {
+        for addr in [
+            RANDOM_COIN_INPUT_LENGTH_PTR,
+            RANDOM_COIN_OUTPUT_LENGTH_PTR,
+            RANDOM_COIN_COUNTER_PTR,
+        ] {
             assert_eq!(
                 read_memory_felt(&hook_output, addr),
                 read_memory_felt(&reference_output, addr),
