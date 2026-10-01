@@ -41,6 +41,21 @@ pub const MAX_DEBUG_INFO_STRING_SIZE: usize = 4 * 1024;
 /// Maximum number of rows accepted in the variable-width debug type table.
 pub const MAX_DEBUG_INFO_TYPE_ROWS: usize = 1_000_000;
 
+/// Errors returned when encoding debug information for the bounded package reader.
+#[derive(Debug, thiserror::Error)]
+pub enum DebugInfoEncodingError {
+    /// A debug-information resource exceeds the reader's limit.
+    #[error("{resource} {size} exceeds limit {limit}")]
+    LimitExceeded {
+        resource: &'static str,
+        size: usize,
+        limit: usize,
+    },
+    /// The serialized debug-information envelope could not be read.
+    #[error("invalid encoded debug-information envelope: {0}")]
+    InvalidEnvelope(#[from] miden_core::serde::DeserializationError),
+}
+
 // PACKAGE DEBUG INFO
 // ================================================================================================
 
