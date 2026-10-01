@@ -1,5 +1,7 @@
 # Changelog
 
+## v0.36.0 (Unreleased)
+
 ## v0.35.0 (2026-10-01)
 
 #### Changes
