@@ -432,7 +432,22 @@ fn render_constant_annotation(
 
 fn render_declaration_prefix(tokens: &[SyntaxToken], indent: usize, config: &Config) -> String {
     if has_comment_tokens(tokens) {
-        render_token_stream_with_comments(tokens, indent, SpacingStyle::Default, config).join("\n")
+        let mut rendered =
+            render_token_stream_with_comments(tokens, indent, SpacingStyle::Default, config)
+                .join("\n");
+
+        // A trailing header comment needs a newline to avoid commenting out the initializer.
+        if tokens
+            .iter()
+            .rev()
+            .find(|token| !matches!(token.kind(), SyntaxKind::Whitespace | SyntaxKind::Newline))
+            .is_some_and(|token| {
+                matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment)
+            })
+        {
+            rendered.push('\n');
+        }
+        rendered
     } else {
         format!(
             "{}{}",
@@ -463,10 +478,21 @@ fn render_assigned_value(
     indent: usize,
     config: &Config,
 ) -> String {
-    if has_comment_token(value) {
-        let body = render_expression_with_comments(value, indent + config.indent_size(), config)
-            .join("\n");
-        return format!("{header}\n{body}");
+    let has_comments = has_comment_token(value);
+    if has_comments || header.ends_with('\n') {
+        let body = if has_comments {
+            render_expression_with_comments(value, indent + config.indent_size(), config)
+        } else {
+            render_token_lines(
+                &significant_tokens(value),
+                indent + config.indent_size(),
+                false,
+                config,
+            )
+        }
+        .join("\n");
+        let separator = if header.ends_with('\n') { "" } else { "\n" };
+        return format!("{header}{separator}{body}");
     }
 
     let value_tokens = significant_tokens(value);
@@ -2530,6 +2556,92 @@ adv_map COMMENTED(
 ";
 
         assert_eq!(assert_format_idempotent(source, "explicit advice map keys"), expected);
+    }
+
+    #[test]
+    fn preserves_newlines_after_advice_map_header_comments() {
+        for (source, expected) in [
+            ("adv_map T = # explanation\n[1,2]\n", "adv_map T = # explanation\n    [1, 2]\n"),
+            (
+                "adv_map T =\n# explanation\n[1,2]\n",
+                "adv_map T =\n# explanation\n    [1, 2]\n",
+            ),
+            (
+                "adv_map T = # explanation\n# more detail\n  [1,2]\n",
+                "adv_map T = # explanation\n# more detail\n    [1, 2]\n",
+            ),
+            ("adv_map T =\n[1,2]\n", "adv_map T = [1, 2]\n"),
+        ] {
+            assert_eq!(assert_format_idempotent(source, source), expected);
+        }
+    }
+
+    #[test]
+    fn preserves_advice_map_header_and_value_comments() {
+        let source = "\
+adv_map T = # explanation
+[
+# first element
+1,2
+] # table
+";
+        let expected = "\
+adv_map T = # explanation
+  [
+    # first element
+    1, 2
+  ] # table
+";
+        let config = Config {
+            indent_size: Some(2),
+            ..Config::default()
+        };
+
+        assert_eq!(
+            assert_format_idempotent_with_config(source, "advice map header and value", &config),
+            expected
+        );
+    }
+
+    #[test]
+    fn wraps_advice_map_values_after_header_comments() {
+        for (source, expected) in [
+            (
+                "adv_map T = # explanation\n[11111111,22222222,33333333,44444444]\n",
+                "\
+adv_map T = # explanation
+    [
+        11111111,
+        22222222,
+        33333333,
+        44444444
+    ]
+",
+            ),
+            (
+                "adv_map T = # explanation\nfoo(11111111,22222222,33333333,44444444)\n",
+                "\
+adv_map T = # explanation
+    foo(
+        11111111,
+        22222222,
+        33333333,
+        44444444
+    )
+",
+            ),
+        ] {
+            for overflow_delimited_expr in [false, true] {
+                let config = Config {
+                    max_line_length: Some(32),
+                    overflow_delimited_expr: Some(overflow_delimited_expr),
+                    ..Config::default()
+                };
+                let formatted = assert_format_idempotent_with_config(source, source, &config);
+                assert_eq!(formatted, expected);
+                assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
+            }
+        }
     }
 
     #[test]
