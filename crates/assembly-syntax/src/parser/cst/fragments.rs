@@ -1662,7 +1662,8 @@ end
         let u32_ty =
             ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(ast::types::Type::U32));
         let word_ty = ast::types::Type::Array(Arc::new(ast::types::ArrayType::new(
-            ast::types::Type::Felt, 4,
+            ast::types::Type::Felt,
+            4,
         )));
 
         // Only the type annotation is lowered here. Initializers are placeholders and may not match
@@ -1675,9 +1676,9 @@ end
             ),
             (
                 "const VALUE: ptr<[\n    # element type\n    felt; 4\n]> = 42\n",
-                ast::TypeExpr::Ptr(ast::PointerType::new(ast::TypeExpr::Array(ast::ArrayType::new(
-                    felt(), 4,
-                )))),
+                ast::TypeExpr::Ptr(ast::PointerType::new(ast::TypeExpr::Array(
+                    ast::ArrayType::new(felt(), 4),
+                ))),
             ),
             (
                 "const VALUE: parts::Count = 42\n",
@@ -1731,6 +1732,48 @@ end
         for (source, expected) in cases {
             let ty = lower_ty_annotation(source).unwrap_or_else(|err| panic!("{source:?}: {err}"));
             assert_eq!(ty, expected, "{source:?}");
+        }
+    }
+
+    #[test]
+    fn lowers_struct_type_annotations() {
+        for (annotation, repr) in [
+            ("", None),
+            ("@packed", Some(ast::types::TypeRepr::packed(1))),
+            ("@packed(4)", Some(ast::types::TypeRepr::packed(4))),
+            ("@transparent", Some(ast::types::TypeRepr::Transparent)),
+            ("@align(4)", Some(ast::types::TypeRepr::align(4))),
+        ] {
+            let mut structure = ast::StructType::new(
+                None,
+                [ast::StructField {
+                    span: miden_debug_types::SourceSpan::UNKNOWN,
+                    name: ast::Ident::new("foo").unwrap(),
+                    ty: ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
+                        ast::types::Type::U8,
+                    )),
+                }],
+            );
+            if let Some(repr) = repr {
+                structure = structure.with_repr(miden_debug_types::Span::unknown(repr));
+            }
+            let struct_ty = ast::TypeExpr::Struct(structure);
+            let struct_source =
+                alloc::format!("struct\n# representation\n{annotation} {{ foo: u8 }}");
+            for (ty_source, expected) in [
+                (struct_source.clone(), struct_ty.clone()),
+                (
+                    alloc::format!("ptr<[{struct_source}; 4]>"),
+                    ast::TypeExpr::Ptr(ast::PointerType::new(ast::TypeExpr::Array(
+                        ast::ArrayType::new(struct_ty, 4),
+                    ))),
+                ),
+            ] {
+                let source = alloc::format!("const VALUE: {ty_source} = 1\n");
+                let ty =
+                    lower_ty_annotation(&source).unwrap_or_else(|err| panic!("{source:?}: {err}"));
+                assert_eq!(ty, expected, "{source:?}");
+            }
         }
     }
 

@@ -790,6 +790,8 @@ impl<'input> Parser<'input> {
         debug_assert!(self.at_kind(SyntaxKind::Colon));
         self.bump(); // colon
 
+        let mut nesting = Nesting::default();
+        let mut next_can_be_struct_attr = false;
         let mut saw_significant = false;
         let end = loop {
             self.bump_regular_trivia();
@@ -806,11 +808,14 @@ impl<'input> Parser<'input> {
                 break TypeAnnotationEnd::Equals;
             }
 
-            if self.at_top_level_form_starter() {
+            let is_struct_attribute = next_can_be_struct_attr && self.at_kind(SyntaxKind::At);
+            if nesting.is_root() && !is_struct_attribute && self.at_top_level_form_starter() {
                 self.error_here("expected `=` after type annotation");
                 break TypeAnnotationEnd::RecoveryBoundary;
             }
 
+            next_can_be_struct_attr = self.at_keyword("struct");
+            self.bump_nesting(&mut nesting, self.current_kind().expect("not eof"));
             self.bump();
             saw_significant = true;
         };
@@ -2147,6 +2152,39 @@ end
             ("pub const X :\n# type\nfelt\n= 8\n", &[":", "felt"], "8"),
             ("const X: word = [1,2,3,4]\n", &[":", "word"], "[1,2,3,4]"),
             (
+                "const X: struct @packed { x: u8 } = 1\n",
+                &[":", "struct", "@", "packed", "{", "x", ":", "u8", "}"],
+                "1",
+            ),
+            (
+                "const X: struct @packed(4) { x: u8 } = 1\n",
+                &[":", "struct", "@", "packed", "(", "4", ")", "{", "x", ":", "u8", "}"],
+                "1",
+            ),
+            (
+                "const X: struct @transparent { x: u8 } = 1\n",
+                &[":", "struct", "@", "transparent", "{", "x", ":", "u8", "}"],
+                "1",
+            ),
+            (
+                "const X: struct\n# representation\n@align(4) { type: u8 } = 1\n",
+                &[":", "struct", "@", "align", "(", "4", ")", "{", "type", ":", "u8", "}"],
+                "1",
+            ),
+            (
+                "const X: struct { type: u8, const: u8 } = 1\n",
+                &[":", "struct", "{", "type", ":", "u8", ",", "const", ":", "u8", "}"],
+                "1",
+            ),
+            (
+                "const X: ptr<[struct @packed {\n    type: u8\n}; 4]> = 1\n",
+                &[
+                    ":", "ptr", "<", "[", "struct", "@", "packed", "{", "type", ":", "u8", "}",
+                    ";", "4", "]", ">",
+                ],
+                "1",
+            ),
+            (
                 "const X: [felt; 4] = [1,2,3,4]\n",
                 &[":", "[", "felt", ";", "4", "]"],
                 "[1,2,3,4]",
@@ -2184,6 +2222,8 @@ end
             "const X: u8\nconst Y = 2\n",
             "const X: u8 const Y = 2\n",
             "const X:\nconst Y = 2\n",
+            "const X: struct @packed { type: u8 }\nconst Y = 2\n",
+            "const X: ptr<[struct @packed { type: u8 }; 4]> const Y = 2\n",
         ] {
             let parse = parse_text(source);
             assert_eq!(diagnostic_labels(&parse), vec!["expected `=` after type annotation"]);
@@ -2196,6 +2236,25 @@ end
             assert!(constants[0].expr().is_none());
             assert_eq!(constants[1].name_token().expect("constant name").text(), "Y");
             assert_eq!(constants[1].expr().expect("initializer").syntax().text().to_string(), "2");
+        }
+    }
+
+    #[test]
+    fn constant_type_annotation_recovery_preserves_attributed_procedure() {
+        for ty in ["u8", "struct @packed { type: u8 }", "ptr<[struct { type: u8 }; 4]>"] {
+            let source = format!("const X: {ty}\n@inline\nproc foo\n    nop\nend\n");
+            let parse = parse_text(&source);
+            assert_eq!(diagnostic_labels(&parse), vec!["expected `=` after type annotation"]);
+            let label = &parse.diagnostics()[0].labels.as_ref().unwrap()[0];
+            assert_eq!(label.offset(), source.find("@inline").unwrap());
+            assert_eq!(parse.syntax().text().to_string(), source);
+            assert!(constant_declarations(&parse)[0].expr().is_none());
+
+            let root = parse.syntax();
+            let items = root.children().collect::<Vec<_>>();
+            assert_eq!(items.len(), 2);
+            assert_eq!(items[1].kind(), SyntaxKind::Procedure);
+            assert_eq!(items[1].children().next().unwrap().kind(), SyntaxKind::Attribute);
         }
     }
 
