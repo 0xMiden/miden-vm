@@ -85,8 +85,8 @@ fn layout_and_lookup_shape_match_design() {
     let composite_shape = <ChunkNodeSpongeAir as LookupAir<
         ProverLookupBuilder<'_, Felt, QuadFelt>,
     >>::column_shape(&ChunkNodeSpongeAir);
-    assert_eq!(&composite_shape[..chunk_node::NUM_AUX_COLS], [3, 3, 3, 4, 4, 4]);
-    assert_eq!(NUM_MAIN_COLS, 99);
+    assert_eq!(&composite_shape[..chunk_node::NUM_AUX_COLS], [3, 3, 4, 4, 4, 4]);
+    assert_eq!(NUM_MAIN_COLS, 101);
     assert_eq!(NUM_AUX_COLS, 18);
     assert_eq!(NUM_AUX_COLS, chunk_node::NUM_AUX_COLS + SPONGE_NUM_AUX_COLS);
     assert_eq!(<ChunkNodeSpongeAir as BaseAir<Felt>>::width(&ChunkNodeSpongeAir), NUM_MAIN_COLS);
@@ -115,15 +115,13 @@ fn layout_and_lookup_shape_match_design() {
 fn packed_lookup_columns_match_the_standalone_components() {
     const COMPOSITE_CHUNK_MEMORY_COL: usize = 0;
     const COMPOSITE_CHUNK_TAIL_COL: usize = 1;
-    const COMPOSITE_NODE_HANDSHAKE_COL: usize = 2;
     const COMPOSITE_NODE_INPUT_COL: usize = 3;
-    const COMPOSITE_NODE_TAIL_COLS: [usize; 2] = [4, 5];
+    const COMPOSITE_NODE_TAIL_COLS: [usize; 3] = [2, 4, 5];
 
     const CHUNK_MEMORY_COLS: [usize; 2] = [0, 1];
     const CHUNK_TAIL_COLS: [usize; 2] = [2, 3];
-    const NODE_HANDSHAKE_COLS: [usize; 2] = [0, 1];
     const NODE_INPUT_COLS: [usize; 2] = [2, 3];
-    const NODE_TAIL_COLS: [usize; 5] = [4, 5, 6, 7, 8];
+    const NODE_TAIL_COLS: [usize; 7] = [0, 1, 4, 5, 6, 7, 8];
 
     let input: Vec<u8> = (0..200).map(|i| i as u8).collect();
     let mut node = KeccakNodeRequires::new();
@@ -170,11 +168,6 @@ fn packed_lookup_columns_match_the_standalone_components() {
             "packed chunk tail column must preserve both standalone columns",
         );
         assert_same_rational_fold(
-            composite_folds[row][COMPOSITE_NODE_HANDSHAKE_COL],
-            sum_rational_folds(NODE_HANDSHAKE_COLS.map(|col| node_folds[row][col])),
-            "packed node handshake column must preserve both standalone columns",
-        );
-        assert_same_rational_fold(
             composite_folds[row][COMPOSITE_NODE_INPUT_COL],
             sum_rational_folds(NODE_INPUT_COLS.map(|col| node_folds[row][col])),
             "packed node input/D-limb column must preserve both standalone columns",
@@ -182,7 +175,7 @@ fn packed_lookup_columns_match_the_standalone_components() {
         assert_same_rational_fold(
             sum_rational_folds(COMPOSITE_NODE_TAIL_COLS.map(|col| composite_folds[row][col])),
             sum_rational_folds(NODE_TAIL_COLS.map(|col| node_folds[row][col])),
-            "packed node D-limb/Eidos columns must preserve all standalone columns",
+            "packed node handshake, remainder, and D-limb/Eidos columns must preserve all lookups",
         );
 
         // The same Sponge evaluator runs at two main/aux offsets. This comparison checks the

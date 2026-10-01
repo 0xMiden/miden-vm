@@ -1,5 +1,7 @@
+use {
+    PUBLIC_INPUTS_ADDRESS_PTR,
+} from miden::core::stark::constants
 use miden::core::stark::types
-use miden::core::stark::constants
 use miden::core::stark::public_inputs
 use miden::core::stark::random_coin
 use miden::core::sys::vm::layout
@@ -142,14 +144,6 @@ pub proc stage_boundary_inputs()
     adv_loadw
     exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_storew_le dropw
     # => [...]
-end
-
-#! Loads the final deferred root from the boundary-inputs window.
-#!
-#! Input:  [...]
-#! Output: [D, ...]
-pub proc load_deferred_root() -> types::Digest
-    padw exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
 end
 
 # HELPER PROCEDURES
@@ -369,7 +363,7 @@ proc load_public_inputs()
     # => [SCRATCH(12), ...]
     exec.layout::claim_ptr add.8
     movdn.12
-    exec.constants::public_inputs_address_ptr mem_load
+    mem_load.PUBLIC_INPUTS_ADDRESS_PTR
     movdn.12
     # => [SCRATCH(12), pi_ptr, claim_io_ptr, ...]
 

@@ -1,5 +1,9 @@
+use {
+    LOG_AIR_TRACE_LENGTHS_PTR,
+    RANDOM_COIN_INPUT_LENGTH_PTR,
+    RANDOM_COIN_OUTPUT_LENGTH_PTR,
+} from miden::core::stark::constants
 use miden::core::stark::types
-use miden::core::stark::constants
 use miden::core::stark::public_inputs
 use miden::core::stark::random_coin
 use miden::core::sys::pvm::layout
@@ -53,7 +57,7 @@ end
 #! Inputs:  [...]
 #! Outputs: [...]
 pub proc process_public_inputs()
-    exec.constants::random_coin_input_len_ptr mem_load
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     push.4 assert_eq.err="PVM process_public_inputs: preprocessed commitment is not buffered"
 
     # Publish the dense ACE READ public-input start through the generic verifier cell.
@@ -72,15 +76,15 @@ pub proc process_public_inputs()
 
     # Instance shape: `[10, h0, ..., h9]`.
     push.NUM_CHIPLETS exec.random_coin::observe_felt
-    exec.constants::air_trace_length_logs_ptr
+    push.LOG_AIR_TRACE_LENGTHS_PTR
     repeat.NUM_CHIPLETS
         dup mem_load exec.random_coin::observe_felt
         add.1
     end
     drop
 
-    exec.constants::random_coin_input_len_ptr mem_load
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     push.BUFFERED_SHAPE_VALUE_COUNT assert_eq.err="PVM process_public_inputs: transcript framing drifted"
-    exec.constants::random_coin_output_len_ptr mem_load
+    mem_load.RANDOM_COIN_OUTPUT_LENGTH_PTR
     assertz.err="PVM process_public_inputs: observed input exposed stale output"
 end

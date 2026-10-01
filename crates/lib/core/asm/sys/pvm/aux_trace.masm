@@ -1,5 +1,10 @@
+use {
+    AUX_TRACE_COM_PTR,
+    LOG_AIR_TRACE_LENGTHS_PTR,
+    RANDOM_COIN_INPUT_LENGTH_PTR,
+    RANDOM_COIN_OUTPUT_LENGTH_PTR,
+} from miden::core::stark::constants
 use miden::core::stark::types
-use miden::core::stark::constants
 use miden::core::stark::random_coin
 use miden::core::sys::pvm::layout
 
@@ -146,11 +151,11 @@ pub proc observe_aux_trace()
     # The eight fixed-environment consumes depend on the sampled challenges but not on proof data.
     exec.compute_fixed_boundary_correction
 
-    exec.constants::random_coin_input_len_ptr mem_load
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     assertz.err="PVM observe_aux_trace: input buffer must be empty"
     # Store and absorb the commitment plus all ten proof-ordered boundary values.
     padw adv_loadw
-    exec.constants::aux_trace_com_ptr mem_storew_le
+    mem_storew_le.AUX_TRACE_COM_PTR
     exec.random_coin::eidos_observe_word
     padw adv_loadw
     exec.layout::aux_bus_boundary_ptr mem_storew_le
@@ -170,9 +175,9 @@ pub proc observe_aux_trace()
     exec.layout::aux_bus_boundary_ptr add.16 mem_storew_le
     exec.random_coin::eidos_observe_word
 
-    exec.constants::random_coin_input_len_ptr mem_load
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     push.0 assert_eq.err="PVM observe_aux_trace: boundary transcript framing drifted"
-    exec.constants::random_coin_output_len_ptr mem_load
+    mem_load.RANDOM_COIN_OUTPUT_LENGTH_PTR
     assertz.err="PVM observe_aux_trace: observed input exposed stale output"
 
     # The transcript has now seen the wire order, so the sums may move to the canonical addresses
@@ -182,33 +187,33 @@ pub proc observe_aux_trace()
 
     # Scale chiplet k's normalized sum, now at offset 2k, by chiplet k's trace length. Each call
     # produces its pair on top of the running sum, which sits undisturbed beneath it until folded.
-    exec.constants::air_trace_length_logs_ptr mem_load push.0 exec.load_weighted_aux_sum
+    mem_load.LOG_AIR_TRACE_LENGTHS_PTR push.0 exec.load_weighted_aux_sum
 
-    exec.constants::air_trace_length_logs_ptr add.1 mem_load push.2 exec.load_weighted_aux_sum
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.1 mem_load push.2 exec.load_weighted_aux_sum
     ext2add
 
-    exec.constants::air_trace_length_logs_ptr add.2 mem_load push.4 exec.load_weighted_aux_sum
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.2 mem_load push.4 exec.load_weighted_aux_sum
     ext2add
 
-    exec.constants::air_trace_length_logs_ptr add.3 mem_load push.6 exec.load_weighted_aux_sum
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.3 mem_load push.6 exec.load_weighted_aux_sum
     ext2add
 
-    exec.constants::air_trace_length_logs_ptr add.4 mem_load push.8 exec.load_weighted_aux_sum
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.4 mem_load push.8 exec.load_weighted_aux_sum
     ext2add
 
-    exec.constants::air_trace_length_logs_ptr add.5 mem_load push.10 exec.load_weighted_aux_sum
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.5 mem_load push.10 exec.load_weighted_aux_sum
     ext2add
 
-    exec.constants::air_trace_length_logs_ptr add.6 mem_load push.12 exec.load_weighted_aux_sum
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.6 mem_load push.12 exec.load_weighted_aux_sum
     ext2add
 
-    exec.constants::air_trace_length_logs_ptr add.7 mem_load push.14 exec.load_weighted_aux_sum
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.7 mem_load push.14 exec.load_weighted_aux_sum
     ext2add
 
-    exec.constants::air_trace_length_logs_ptr add.8 mem_load push.16 exec.load_weighted_aux_sum
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.8 mem_load push.16 exec.load_weighted_aux_sum
     ext2add
 
-    exec.constants::air_trace_length_logs_ptr add.9 mem_load push.18 exec.load_weighted_aux_sum
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.9 mem_load push.18 exec.load_weighted_aux_sum
     ext2add
 
     exec.layout::c_total_ptr add.1 mem_load

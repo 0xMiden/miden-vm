@@ -1,5 +1,7 @@
+use {
+    AUX_TRACE_COM_PTR,
+} from miden::core::stark::constants
 use miden::core::stark::types
-use miden::core::stark::constants
 use miden::core::stark::random_coin
 use miden::core::sys::vm::public_inputs
 use miden::core::sys::vm::layout
@@ -99,7 +101,7 @@ pub proc observe_aux_trace()
 
     # Absorb commitment followed by the four normalized sums in proof order.
     padw adv_loadw
-    exec.constants::aux_trace_com_ptr mem_storew_le
+    mem_storew_le.AUX_TRACE_COM_PTR
     exec.random_coin::eidos_observe_word
 
     padw adv_loadw

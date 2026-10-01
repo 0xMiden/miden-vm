@@ -1,6 +1,17 @@
+use {
+    FRI_COM_PTR,
+    FRI_QUERIES_ADDRESS_PTR,
+    LDE_DOMAIN_INFO_PTR,
+    NUM_FRI_LAYERS_PTR,
+    NUM_QUERIES_PTR,
+    RANDOM_COIN_CV_PTR,
+    RANDOM_COIN_INPUT_LENGTH_PTR,
+    REMAINDER_POLY_ADDRESS_PTR,
+    REMAINDER_POLY_SIZE_PTR,
+    TMP1_PTR,
+} from miden::core::stark::constants
 use miden::core::stark::types
 use miden::core::stark::random_coin
-use miden::core::stark::constants
 
 # CONSTANTS
 # =================================================================================================
@@ -11,21 +22,12 @@ const FRI_REMAINDER_CODEWORD_MAX_SIZE = 1024
 const FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF_LOG = 9
 const FRI_REMAINDER_CODEWORD_MAX_SIZE_LOG = 10
 const FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF = 64
-const FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1 = 128
 
 # CONSTANTS GETTERS
 # =================================================================================================
 
-pub proc get_fri_remainder_codeword_max_size() -> u16
-    push.FRI_REMAINDER_CODEWORD_MAX_SIZE
-end
-
 pub proc get_fri_remainder_poly_max_degree_plus_1_half() -> u8
     push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF
-end
-
-pub proc get_fri_remainder_poly_max_degree_plus_1() -> u8
-    push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1
 end
 
 # HELPERS
@@ -86,7 +88,7 @@ end
 #! Output: [...]
 pub proc generate_fri_parameters()
     # Load FRI verifier data
-    padw exec.constants::get_lde_domain_info_word
+    padw mem_loadw_le.LDE_DOMAIN_INFO_PTR
     #=> [lde_size, log(lde_size), lde_g, 0, ...]
 
     # Compute the number of FRI layers
@@ -107,9 +109,9 @@ pub proc generate_fri_parameters()
     end
     # => [num_fri_layers, remainder_size, lde_size, lde_size, log2(lde_size), domain_gen, 0, ...]
 
-    exec.constants::set_num_fri_layers
+    mem_store.NUM_FRI_LAYERS_PTR
     div.8
-    exec.constants::set_remainder_poly_size
+    mem_store.REMAINDER_POLY_SIZE_PTR
     # => [lde_size, lde_size, log2(lde_size), domain_gen, 0, ...]
 
     dropw
@@ -123,14 +125,14 @@ end
 #! Output: [...]
 pub proc load_fri_layer_commitments()
     # We need to store the current FRI layer LDE domain size and its logarithm.
-    padw exec.constants::get_lde_domain_info_word
-    exec.constants::tmp1 mem_storew_le
+    padw mem_loadw_le.LDE_DOMAIN_INFO_PTR
+    mem_storew_le.TMP1_PTR
     # => [Y, ...] where `Y` is a garbage word
 
     # Address containing the first layer commitment
     push.0.0
-    exec.constants::fri_com_ptr
-    exec.constants::get_num_fri_layers
+    push.FRI_COM_PTR
+    mem_load.NUM_FRI_LAYERS_PTR
     # => [num_layers, ptr_layer, y, y, Y, ...] where `y` values are garbage
 
     dup
@@ -153,7 +155,7 @@ pub proc load_fri_layer_commitments()
         exec.random_coin::reseed_check_folding_pow_and_sample_alpha
         #=> [a0, a1, num_layers, ptr_layer + 4, y, y, ...]
         padw
-        exec.constants::tmp1 mem_loadw_le
+        mem_loadw_le.TMP1_PTR
         # => [lde_size, log2(lde_size), lde_generator, 0, a0, a1, Y, num_layers, ptr_layer + 4, y, y, ...]
 
         # Compute and save to memory new lde_size and its new logarithm
@@ -161,7 +163,7 @@ pub proc load_fri_layer_commitments()
         swap
         sub.2
         swap
-        exec.constants::tmp1 mem_storew_le
+        mem_storew_le.TMP1_PTR
         # => [lde_size / 4, log2(lde_size) - 2, lde_generator, 0, a0, a1, num_layers, ptr_layer + 4, y, y, ...]
 
         # Move the pointer higher up the stack
@@ -197,23 +199,23 @@ end
 pub proc load_and_verify_remainder()
     # Each FRI layer uses eight elements: a commitment word and a padded folding challenge.
     # The remainder coefficients follow these layers in memory.
-    exec.constants::get_num_fri_layers
-    mul.8 exec.constants::fri_com_ptr add
+    mem_load.NUM_FRI_LAYERS_PTR
+    mul.8 push.FRI_COM_PTR add
     # => [remainder_poly_ptr, ...]
-    dup exec.constants::set_remainder_poly_address
+    dup mem_store.REMAINDER_POLY_ADDRESS_PTR
     #=> [remainder_poly_ptr, ...]
 
-    exec.constants::random_coin_buffer_len_ptr mem_load
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     assertz.err="FRI remainder absorption requires an empty transcript buffer"
 
-    exec.constants::get_remainder_poly_size
+    mem_load.REMAINDER_POLY_SIZE_PTR
     push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF
 
     eq
     if.true
         # Remainder polynomial degree less than 64
         # Keep the transcript CV on stack while streaming the full remainder codeword.
-        padw exec.constants::random_coin_cv_ptr mem_loadw_le
+        padw mem_loadw_le.RANDOM_COIN_CV_PTR
         padw padw
         # => [Y, Y, cv, remainder_poly_ptr, ...]
 
@@ -221,7 +223,7 @@ pub proc load_and_verify_remainder()
     else
         # Remainder polynomial degree less than 128
         # Keep the transcript CV on stack while streaming the full remainder codeword.
-        padw exec.constants::random_coin_cv_ptr mem_loadw_le
+        padw mem_loadw_le.RANDOM_COIN_CV_PTR
         padw padw
         # => [Y, Y, cv, remainder_poly_ptr, ...]
 
@@ -231,7 +233,7 @@ pub proc load_and_verify_remainder()
 
     # Store the updated transcript CV and reopen the absorbing phase with an empty buffer.
     swapw.2
-    exec.constants::random_coin_cv_ptr mem_storew_le
+    mem_storew_le.RANDOM_COIN_CV_PTR
     dropw dropw dropw
     exec.random_coin::eidos_clear_buffer
     exec.random_coin::eidos_enter_absorbing
@@ -248,14 +250,14 @@ end
 #! Input: [...]
 #! Output: [...]
 pub proc compute_query_pointer()
-    exec.constants::fri_com_ptr
-    exec.constants::get_number_queries
+    push.FRI_COM_PTR
+    mem_load.NUM_QUERIES_PTR
     mul.4
-    # => [num_queries*4, fri_com_ptr,  ...]
+    # => [num_queries*4, FRI_COM_PTR,  ...]
 
     sub
     # => [query_ptr, ...]
 
-    exec.constants::set_fri_queries_address
+    mem_store.FRI_QUERIES_ADDRESS_PTR
     # => [...]
 end

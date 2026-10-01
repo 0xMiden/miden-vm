@@ -1,3 +1,12 @@
+use {
+    AUXILIARY_ACE_INPUTS_ADDRESS_PTR,
+    AUX_RAND_ELEM_ADDRESS_PTR,
+    CURRENT_TRACE_ROW_ADDRESS_PTR,
+    LOG_TRACE_LENGTH_PTR,
+    OOD_EVALUATIONS_ADDRESS_PTR,
+    PREPROCESSED_TRACE_COM_PTR,
+    RELATION_DIGEST_PTR,
+} from miden::core::stark::constants
 use miden::core::stark::types
 pub mod aux_trace
 pub mod claim
@@ -8,7 +17,6 @@ pub mod ood_frames
 pub mod public_inputs
 
 use miden::core::mem
-use miden::core::stark::constants
 use miden::core::stark::utils
 use miden::core::stark::verifier
 
@@ -89,7 +97,7 @@ pub proc load_air_context()
     u32max
     exec.layout::get_and8_lookup_trace_length_log
     u32max
-    exec.constants::set_trace_length_log
+    mem_store.LOG_TRACE_LENGTH_PTR
 
     # Derive the height-sorted proof order once from the heights stored above, then route each
     # AIR's canonical out-of-domain destination to its proof-order stream position. The heights are
@@ -101,13 +109,13 @@ pub proc load_air_context()
     exec.store_relation_digest
     exec.store_and8_preprocessed_trace_commitment
     exec.layout::ood_evaluations_ptr
-    exec.constants::set_ood_evaluations_address
+    mem_store.OOD_EVALUATIONS_ADDRESS_PTR
     exec.layout::current_trace_row_ptr
-    exec.constants::set_current_trace_row_address
+    mem_store.CURRENT_TRACE_ROW_ADDRESS_PTR
     exec.layout::auxiliary_ace_inputs_ptr
-    exec.constants::set_auxiliary_ace_inputs_address
+    mem_store.AUXILIARY_ACE_INPUTS_ADDRESS_PTR
     exec.layout::aux_rand_elem_ptr
-    exec.constants::set_aux_rand_elem_address
+    mem_store.AUX_RAND_ELEM_ADDRESS_PTR
 end
 
 proc assert_shape_log(height: felt) -> u8
@@ -119,14 +127,14 @@ end
 
 proc store_relation_digest()
     push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
-    exec.constants::relation_digest_ptr mem_storew_le
+    mem_storew_le.RELATION_DIGEST_PTR
     # Relation metadata is memory-only; leave the caller stack unchanged.
     dropw
 end
 
 proc store_and8_preprocessed_trace_commitment
     push.AND8_PREPROCESSED_TRACE_COM_3.AND8_PREPROCESSED_TRACE_COM_2.AND8_PREPROCESSED_TRACE_COM_1.AND8_PREPROCESSED_TRACE_COM_0
-    exec.constants::preprocessed_trace_com_ptr mem_storew_le
+    mem_storew_le.PREPROCESSED_TRACE_COM_PTR
     dropw
 end
 
@@ -179,7 +187,7 @@ end
 #!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
 #!          log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 proc build_security_descriptor(parameters: types::StackProofParameters) -> types::StackSecurityDescriptor
-    exec.constants::get_trace_length_log
+    mem_load.LOG_TRACE_LENGTH_PTR
     push.LOOKUP_FRACTIONS_PER_ROW
     exec.layout::num_kernel_procedures_ptr mem_load
     add.CORE_BOUNDARY_LOOKUP_TERMS

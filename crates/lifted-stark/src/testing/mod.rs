@@ -30,7 +30,7 @@ use alloc::vec::Vec;
 
 // Re-exports used by external integration tests and benches.
 pub use miden_lifted_air::{MultiAir, ProverStatement, Statement, log2_strict_u8};
-use p3_field::{Field, TwoAdicField};
+use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 pub use params::{
     BENCH_PCS_PARAMS, FRI_FOLD_ARITY_2, FRI_FOLD_ARITY_4, FRI_FOLD_ARITY_8, LOG_HEIGHTS,
@@ -66,6 +66,36 @@ pub use crate::{
 pub fn canonical_domain<F: TwoAdicField>(log_trace_height: u8, log_blowup: u8) -> LiftedDomain<F> {
     LiftedDomain::try_canonical(log_trace_height, log_blowup)
         .expect("canonical domain parameters out of range")
+}
+
+/// Number of FRI folding rounds the verifier expects for a codeword on `domain` under `params`.
+pub fn fri_num_rounds<F: TwoAdicField>(params: &PcsParams, domain: &LiftedDomain<F>) -> usize {
+    params.fri.num_rounds(domain)
+}
+
+/// Number of coefficients of the final FRI polynomial the verifier expects for a codeword on
+/// `domain` under `params`.
+pub fn fri_final_poly_degree<F: TwoAdicField>(
+    params: &PcsParams,
+    domain: &LiftedDomain<F>,
+) -> usize {
+    params.fri.final_poly_degree(domain)
+}
+
+/// Samples an OOD point and the next field element through the verifier's channel.
+pub fn sample_ood_point_and_next<F, EF, C, Ch>(domain: &LiftedDomain<F>, challenger: Ch) -> (EF, F)
+where
+    F: TwoAdicField,
+    EF: ExtensionField<F>,
+    C: Clone,
+    Ch: miden_stark_transcript::TranscriptChallenger<F, C>,
+{
+    use miden_stark_transcript::Channel;
+
+    let mut channel =
+        miden_stark_transcript::VerifierTranscript::<F, C, Ch>::new(challenger, &[], &[]);
+    let z = domain.sample_ood_point(&mut channel);
+    (z, channel.sample())
 }
 
 // =============================================================================

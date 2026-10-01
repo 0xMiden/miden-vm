@@ -34,20 +34,37 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn verifies_pinned_eidos_proof() {
-        const PROOF_BYTES: &[u8] = include_bytes!("../tests/fixtures/pvm_eidos_v0_31.bin");
-        const ROOT: &str = include_str!("../tests/fixtures/pvm_eidos_v0_31.root");
-        let root: [Felt; 4] = ROOT
+    fn fixture_root(text: &str) -> Word {
+        let root: [Felt; 4] = text
             .split_ascii_whitespace()
             .map(|value| Felt::new_unchecked(value.parse().expect("root element must be a u64")))
             .collect::<Vec<_>>()
             .try_into()
             .expect("fixture root must contain four elements");
-        let root = Word::new(root);
-        let proof = StarkProof::new(PROOF_BYTES.to_vec(), HashFunction::Eidos);
+        Word::new(root)
+    }
 
-        verify_deferred(&proof, root).expect("pinned Eidos proof must verify");
+    #[test]
+    fn rejects_pinned_old_eidos_proof() {
+        let root = fixture_root(include_str!("../tests/fixtures/pvm_eidos_v0_31.root"));
+        let proof = StarkProof::new(
+            include_bytes!("../tests/fixtures/pvm_eidos_v0_31.bin").to_vec(),
+            HashFunction::Eidos,
+        );
+
+        assert!(verify_deferred(&proof, root).is_err());
+        assert!(verify_deferred(&proof, TRUE_DIGEST).is_err());
+    }
+
+    #[test]
+    fn verifies_pinned_current_eidos_proof() {
+        let root = fixture_root(include_str!("../tests/fixtures/pvm_eidos_v0_35.root"));
+        let proof = StarkProof::new(
+            include_bytes!("../tests/fixtures/pvm_eidos_v0_35.bin").to_vec(),
+            HashFunction::Eidos,
+        );
+
+        verify_deferred(&proof, root).expect("current Eidos proof must verify");
         assert!(verify_deferred(&proof, TRUE_DIGEST).is_err());
     }
 

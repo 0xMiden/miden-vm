@@ -30,9 +30,10 @@ use crate::{
     ec::{
         COL_IS_CERT, EcRequire,
         add::{
-            CELL_R, COL_CANCEL, COL_DBL, COL_GEN, COL_MINTS, COL_PAI_P, COL_PAI_Q, COL_RP_HI,
-            COL_RP_LO, COL_RQ_HI, COL_RQ_LO, EcGroupAddAir, NUM_MAIN_COLS as ADD_COLS, PERIOD,
-            ROW_RES, ROW_TERM,
+            CELL_GROUP, CELL_R, COL_ACT, COL_CANCEL, COL_DBL, COL_GEN, COL_MINTS, COL_PAI_P,
+            COL_PAI_Q, COL_RP_HI, COL_RP_LO, COL_RQ_HI, COL_RQ_LO, EcGroupAddAir,
+            NUM_MAIN_COLS as ADD_COLS, PERIOD, ROW_RES, ROW_TERM, TERM_CELL_MULT, TERM_CELL_P,
+            TERM_CELL_Q,
             trace::{EcAddRequires, generate_trace as ec_add_trace},
         },
         point_store_groups::{
@@ -608,6 +609,27 @@ fn empty_trace_holds() {
         &mut BytePairLutRequires::new(),
     );
     assert_eq!(main.height(), PERIOD);
+    check_ec_add(&main);
+}
+
+#[test]
+#[should_panic(expected = "constraint")]
+fn inactive_block_cannot_provide_ecgroupadd() {
+    // This padding block has no active addition. A nonzero term count must fail.
+    let mut main = ec_add_trace(
+        EcAddRequires::new(),
+        &mut EcStoreRequires::new(),
+        &mut BytePairLutRequires::new(),
+    );
+    tamper_cell(&mut main, ROW_RES, CELL_GROUP, 7);
+    tamper_cell(&mut main, ROW_RES, CELL_R, 4);
+    tamper_cell(&mut main, ROW_TERM, TERM_CELL_MULT, 1);
+    tamper_cell(&mut main, ROW_TERM, TERM_CELL_P, 2);
+    tamper_cell(&mut main, ROW_TERM, TERM_CELL_Q, 3);
+
+    for row in 0..PERIOD {
+        assert_eq!(main.values[row * ADD_COLS + COL_ACT], Felt::ZERO);
+    }
     check_ec_add(&main);
 }
 

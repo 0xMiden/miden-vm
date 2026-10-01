@@ -8,7 +8,7 @@
 //! the caller-supplied [`SpongeRequires`], computes the digest-chunk
 //! hash `H_digest_chunks` and the transcript-DAG hash `H_keccak` via
 //! [`EidosRequires`], and records a [`KeccakNodeInvocation`]
-//! [`generate_trace`] later stamps into one row of the 30-column
+//! [`generate_trace`] later stamps into one row of the 32-column
 //! main trace.
 //!
 //! The fall-out wiring:
@@ -22,6 +22,7 @@ use alloc::{collections::BTreeMap, vec, vec::Vec};
 use miden_core::{
     Felt,
     deferred::{Digest, Node},
+    field::Field,
     utils::RowMajorMatrix,
 };
 use miden_precompiles::Keccak256Precompile;
@@ -38,7 +39,7 @@ use crate::{
             },
         },
     },
-    primitives::byte_pair_lut::BytePairLutRequires,
+    primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp},
     relations::ProvideMult,
     transcript::eidos::{
         digest::EidosDigest,
@@ -167,6 +168,9 @@ fn push_row(trace: &mut Vec<Felt>, inv: &KeccakNodeInvocation) {
     trace.extend(h_digest_chunks);
     trace.extend(h_keccak);
     trace.extend([Felt::from(inv.out_mult)]);
+    let remainder = inv.len_bytes.saturating_sub(1) % 32;
+    trace.push(Felt::from(remainder));
+    trace.push(Felt::new(inv.n_chunks()).expect("n_chunks fits").inverse());
 }
 
 // REQUIRES ACCUMULATOR
@@ -238,6 +242,7 @@ impl KeccakNodeRequires {
         bpl_req: &mut BytePairLutRequires,
         eidos: &mut EidosRequires,
     ) -> KeccakNodeOutput {
+        let len_bytes = u32::try_from(input.len()).expect("len_bytes fits in u32");
         let keccak_digest = keccak_oracle(input);
 
         // True dedup: an identical input bumps the existing row's consumer count. Bus balance
@@ -252,6 +257,9 @@ impl KeccakNodeRequires {
                 node_row: idx as u32,
             };
         }
+
+        let remainder = len_bytes.saturating_sub(1) % 32;
+        bpl_req.require(BytePairOp::Xor, remainder as u8, (31 - remainder) as u8);
 
         // Miss path: full allocation through sponge + 2× Eidos one-shots.
         let sponge_inv = SpongeInvocation { input: input.to_vec() };
@@ -282,7 +290,6 @@ impl KeccakNodeRequires {
 
         // H_keccak is the framed Eidos hash of H_input_chunks || H_digest_chunks under the
         // Keccak-assertion frame.
-        let len_bytes = u32::try_from(input.len()).expect("len_bytes fits in u32");
         let keccak_out = eidos.require_one_shot(
             Keccak256Precompile::assert_frame(len_bytes),
             h_input_chunks,
