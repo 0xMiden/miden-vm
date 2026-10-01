@@ -92,6 +92,9 @@ impl crate::prettier::PrettyPrint for Constant {
             doc += display(self.visibility) + const_text(" ");
         }
         doc += flatten(const_text("const") + const_text(" ") + display(&self.name));
+        if let Some(ty) = &self.ty {
+            doc += const_text(": ") + ty.render();
+        }
         doc += const_text(" = ");
 
         doc + self.value.render() + nl()
