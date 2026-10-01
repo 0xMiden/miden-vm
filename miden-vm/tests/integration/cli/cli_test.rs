@@ -316,15 +316,29 @@ fn prove_keeps_a_write_only_proof_when_the_default_output_is_a_hard_link_to_it()
     fs::hard_link(&proof_path, &output_path).unwrap();
     fs::set_permissions(&proof_path, fs::Permissions::from_mode(0o200)).unwrap();
 
-    // root reads the file regardless of its mode, so the identity check cannot fail there
-    if fs::File::open(&proof_path).is_ok() {
-        return;
-    }
-
     cmd.arg("--proof").arg(&proof_path);
-    cmd.assert().failure().stderr(predicate::str::contains("denied"));
+    cmd.assert().failure().stderr(predicate::str::contains("overwrite"));
 
     fs::set_permissions(&proof_path, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_proof_survived(&proof_path);
+}
+
+#[cfg(unix)]
+#[test]
+fn prove_writes_outputs_into_a_distinct_write_only_file() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (working_dir, mut cmd) = prove_command();
+    let proof_path = working_dir.path().join("custom.proof");
+    let output_path = working_dir.path().join("custom.outputs");
+    fs::write(&output_path, "stale outputs").unwrap();
+    fs::set_permissions(&output_path, fs::Permissions::from_mode(0o200)).unwrap();
+
+    cmd.arg("--proof").arg(&proof_path).arg("--output").arg(&output_path);
+    cmd.assert().success();
+
+    fs::set_permissions(&output_path, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(fs::read_to_string(&output_path).unwrap().contains("\"stack\""));
     assert_proof_survived(&proof_path);
 }
 
