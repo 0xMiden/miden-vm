@@ -1,3 +1,5 @@
+use proptest::prelude::*;
+
 //! Integration tests for the Keccak-round miniVM chiplet.
 //!
 //! Drives [`generate_trace`] + [`extract_output`] against a reference
@@ -17,7 +19,6 @@ use miden_core::{
 };
 use miden_crypto::stark::air::ConstraintDegrees;
 use miden_lifted_air::{BaseAir, LiftedAir};
-use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     hash::keccak::{
@@ -215,19 +216,7 @@ fn extract_output_matches_reference_keccak_canonical_test_vectors() {
     assert_eq!(got, expected, "patterned input");
 }
 
-#[test]
-fn extract_output_matches_reference_keccak_random_input() {
-    let mut rng = StdRng::seed_from_u64(0xcaca0);
-    for trial in 0..3 {
-        let mut state = [0u64; 25];
-        for lane in state.iter_mut() {
-            *lane = rng.random();
-        }
-        let expected = keccak_f1600(state);
-        let got = extract_output(&state, &KECCAK_RC);
-        assert_eq!(got, expected, "trial {trial}");
-    }
-}
+
 
 #[test]
 fn keccak_round_constraints_hold_on_canonical_input() {
@@ -239,18 +228,7 @@ fn keccak_round_constraints_hold_on_canonical_input() {
     crate::tests::check_local(KeccakRoundAir, &main);
 }
 
-#[test]
-fn keccak_round_constraints_hold_on_random_input() {
-    let mut rng = StdRng::seed_from_u64(0xc037f);
-    let mut state = [0u64; 25];
-    for lane in state.iter_mut() {
-        *lane = rng.random();
-    }
 
-    let main = generate_trace_from_states(&[state], &KECCAK_RC);
-
-    crate::tests::check_local(KeccakRoundAir, &main);
-}
 
 #[test]
 fn keccak_round_shape_and_degree_match_design() {
@@ -365,29 +343,7 @@ fn pure_rol_nonzero_b_unbalances_the_full_chiplet_stack() {
 /// output correctness (via `extract_outputs`) and constraint
 /// satisfaction. With NUM_LANES=2, the 3 perms split into a busiest lane of
 /// `⌈3/2⌉ = 2` perms, so the height is `2 * 3200 = 6400` padded to `8192`.
-#[test]
-fn keccak_round_multi_perm_oracle_and_constraints() {
-    use crate::hash::keccak::round::NUM_LANES;
-    let mut rng = StdRng::seed_from_u64(0xc0ffee);
-    let mut states = [[0u64; 25]; 3];
-    for state in states.iter_mut() {
-        for lane in state.iter_mut() {
-            *lane = rng.random();
-        }
-    }
 
-    let expected: Vec<[u64; 25]> = states.iter().map(|s| keccak_f1600(*s)).collect();
-    let got = extract_outputs(&states, &KECCAK_RC);
-    assert_eq!(got, expected, "per-perm oracle agreement");
-
-    let main = generate_trace_from_states(&states, &KECCAK_RC);
-    assert_eq!(
-        main.height(),
-        (states.len().div_ceil(NUM_LANES) * PERM_CYCLE).next_power_of_two()
-    );
-
-    crate::tests::check_local(KeccakRoundAir, &main);
-}
 
 // NEGATIVE TESTS — confirm `check_constraints` catches deliberate corruption.
 // ================================================================================================
@@ -430,4 +386,58 @@ fn corruption_rot_limb_breaks_rotation_decomposition_binding() {
     let col = ROT_LIMBS_RANGE.start;
     main.values[row * NUM_MAIN_COLS + col] += Felt::from(1u8);
     crate::tests::check_local(KeccakRoundAir, &main);
+}
+
+
+proptest! {
+    /// The chiplet's extracted output must agree with the reference permutation for arbitrary
+    /// lane values. Replaces a fixed-seed 3-trial loop; uniform lanes shrink toward zero on
+    /// failure. (Oracle-only, no trace generation, so the default case count is affordable.)
+    #[test]
+    fn extract_output_matches_reference_keccak_random_input(state in any::<[u64; 25]>()) {
+        let expected = keccak_f1600(state);
+        let got = extract_output(&state, &KECCAK_RC);
+        prop_assert_eq!(got, expected);
+    }
+}
+
+proptest! {
+    #![proptest_config(proptest::test_runner::Config::with_cases(16))]
+
+    /// Round constraints must hold for arbitrary lane values. Capped at 16 cases because each
+    /// case generates and checks a full trace (~0.5s); still 16x the coverage of the seeded
+    /// single draw it replaces, with shrinking.
+    #[test]
+    fn keccak_round_constraints_hold_on_random_input(state in any::<[u64; 25]>()) {
+        let main = generate_trace_from_states(&[state], &KECCAK_RC);
+
+        crate::tests::check_local(KeccakRoundAir, &main);
+    }
+}
+
+proptest! {
+    #![proptest_config(proptest::test_runner::Config::with_cases(8))]
+
+    /// Stack 3 independent perms of arbitrary states in one trace and verify both per-perm
+    /// output correctness (via `extract_outputs`) and constraint satisfaction. With
+    /// NUM_LANES=2, the 3 perms split into a busiest lane of `⌈3/2⌉ = 2` perms, so the height
+    /// is `2 * 3200 = 6400` padded to `8192`. Capped at 8 cases: each case generates and
+    /// checks a 3-perm trace.
+    #[test]
+    fn keccak_round_multi_perm_oracle_and_constraints(states in prop::collection::vec(any::<[u64; 25]>(), 3)) {
+        use crate::hash::keccak::round::NUM_LANES;
+        let states: [[u64; 25]; 3] = states.try_into().expect("exactly 3 states");
+
+        let expected: Vec<[u64; 25]> = states.iter().map(|s| keccak_f1600(*s)).collect();
+        let got = extract_outputs(&states, &KECCAK_RC);
+        prop_assert_eq!(got, expected);
+
+        let main = generate_trace_from_states(&states, &KECCAK_RC);
+        prop_assert_eq!(
+            main.height(),
+            (states.len().div_ceil(NUM_LANES) * PERM_CYCLE).next_power_of_two()
+        );
+
+        crate::tests::check_local(KeccakRoundAir, &main);
+    }
 }

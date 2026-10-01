@@ -4,7 +4,7 @@ use alloc::{collections::BTreeSet, vec::Vec};
 use proptest::prelude::*;
 
 use super::{Felt, Rpx256};
-use crate::{ONE, Word, ZERO};
+use crate::{ONE, Word, ZERO, rand::test_utils::seeded_felts_array};
 
 // The number of iterations to run the `ext_round_matches_reference_many` test.
 #[cfg(all(
@@ -18,7 +18,7 @@ const EXT_ROUND_TEST_ITERS: usize = 5_000_000;
 
 #[test]
 fn hash_elements_vs_merge() {
-    let elements = rand::random::<[Felt; 8]>();
+    let elements = seeded_felts_array::<8>(1);
 
     let digests: [Word; 2] = [
         Word::new(elements[..4].try_into().unwrap()),
@@ -32,7 +32,7 @@ fn hash_elements_vs_merge() {
 
 #[test]
 fn merge_vs_merge_in_domain() {
-    let elements = rand::random::<[Felt; 8]>();
+    let elements = seeded_felts_array::<8>(2);
 
     let digests: [Word; 2] = [
         Word::new(elements[..4].try_into().unwrap()),
@@ -82,7 +82,7 @@ fn hash_padding() {
 
 #[test]
 fn hash_elements_padding() {
-    let e1 = rand::random::<[Felt; 2]>();
+    let e1 = seeded_felts_array::<2>(3);
     let e2 = [e1[0], e1[1], ZERO];
 
     let r1 = Rpx256::hash_elements(&e1);
@@ -233,8 +233,17 @@ fn sponge_zeroes_collision() {
 ))]
 #[test]
 fn ext_round_matches_reference_many() {
+    // These draws live only in this AVX2-gated body — importing them at
+    // module level makes them unused (and lint-failing) elsewhere.
+    use rand::{Rng, SeedableRng};
+    use rand_chacha::ChaCha20Rng;
+
+    // One seeded stream for the whole loop: each iteration draws a fresh
+    // state (deterministic, varied — a per-element fixed seed would make
+    // every state constant).
+    let mut rng = ChaCha20Rng::from_seed([3; 32]);
     for i in 0..EXT_ROUND_TEST_ITERS {
-        let mut state = core::array::from_fn(|_| rand::random::<Felt>());
+        let mut state = core::array::from_fn(|_| Felt::new_unchecked(rng.next_u64()));
 
         for round in 0..7 {
             let mut got = state;

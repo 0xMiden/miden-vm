@@ -10,7 +10,7 @@ use miden_core::{
 use miden_crypto::hash::eidos::{DomainTag, DomainVersion, EidosFrame, namespace};
 use miden_precompiles::{CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile};
 use miden_precompiles_verifier::verify_deferred;
-use rand::{RngExt, SeedableRng, rngs::StdRng};
+use proptest::prelude::*;
 
 use crate::{
     HashFunction, SessionInputError, WitnessLocation,
@@ -194,22 +194,30 @@ fn shared_subgraphs_keep_local_indices_and_binding_uses() {
     session_from_witnesses(vec![a.clone(), b, a, root]).unwrap().finish().check();
 }
 
-#[test]
-fn randomized_shared_arithmetic_preserves_assertion_uses() {
-    let mut rng = StdRng::seed_from_u64(0x0da6_3811);
-    for _ in 0..4 {
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(8))]
+
+    #[test]
+    fn randomized_shared_arithmetic_preserves_assertion_uses(
+        (seed_values, op_picks, shared_picks) in (
+            proptest::collection::vec(1u32..32, 4),
+            proptest::collection::vec(any::<u32>(), 12),
+            proptest::collection::vec(any::<u32>(), 12),
+        ),
+    ) {
+        // The construction choices are reduced modulo the evolving
+        // table lengths at use time, so every prefix of any generated
+        // sequence is valid and shrinking stays inside the valid space.
         let mut fixture = WitnessFixture::new();
-        let mut values: Vec<_> = (0..4)
-            .map(|_| {
-                let value = rng.random_range(1..32);
-                (uint(&mut fixture, UintDomain::U256, value), value)
-            })
+        let mut values: Vec<_> = seed_values
+            .iter()
+            .map(|&value| (uint(&mut fixture, UintDomain::U256, value), value))
             .collect();
         let mut assertions = vec![TRUE_DIGEST];
         let mut inputs = Vec::new();
         for step in 0..12 {
-            let (lhs, a) = values[rng.random_range(0..values.len())];
-            let (rhs, b) = values[rng.random_range(0..values.len())];
+            let (lhs, a) = values[op_picks[step] as usize % values.len()];
+            let (rhs, b) = values[(op_picks[step] >> 16) as usize % values.len()];
             // Small additions keep the independent u32 oracle exact while reusing prior nodes.
             let sum = fixture
                 .register(
@@ -219,7 +227,7 @@ fn randomized_shared_arithmetic_preserves_assertion_uses() {
                 .unwrap();
             let expected = uint(&mut fixture, UintDomain::U256, a + b);
             let eq = uint_eq(&mut fixture, sum, expected);
-            let shared = assertions[rng.random_range(0..assertions.len())];
+            let shared = assertions[shared_picks[step] as usize % assertions.len()];
             let assertion = fixture.register(Node::and(eq, shared)).unwrap();
             fixture.log_statement(assertion).unwrap();
             values.push((sum, a + b));
@@ -229,8 +237,18 @@ fn randomized_shared_arithmetic_preserves_assertion_uses() {
             }
         }
         inputs.insert(1, inputs[2].clone());
-        inputs.push(inputs[0].clone());
-        session_from_witnesses(inputs).unwrap().finish().check();
+        // A non-palindromic tail: the previous inputs[0] tail made the root
+        // sequence a palindrome, so order-sensitive root bookkeeping bugs
+        // were invisible to the roots assertion below.
+        inputs.push(inputs[1].clone());
+        // The importer must preserve each witness's commitment root in
+        // input order — bind its root bookkeeping to the witnesses' own
+        // commitments before the traces are even built.
+        let expected_roots: Vec<Digest> =
+            inputs.iter().map(PrecompileWitness::root_unchecked).collect();
+        let imported = session_from_witnesses(inputs).unwrap();
+        prop_assert_eq!(imported.roots(), &expected_roots);
+        imported.finish().check();
     }
 }
 

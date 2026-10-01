@@ -2,22 +2,31 @@
 use alloc::vec::Vec;
 
 use proptest::prelude::*;
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha20Rng;
 
 use super::*;
 
 // SHA-256 TESTS
 // ================================================================================================
 
+/// Reproducible don't-care test data: one fixed-seed ChaCha stream per
+/// test (the oracle recomputes the expected digest from the values).
+fn seeded_felts(seed: u8, n: usize) -> Vec<Felt> {
+    let mut rng = ChaCha20Rng::from_seed([seed; 32]);
+    (0..n).map(|_| Felt::new_unchecked(rng.next_u64())).collect()
+}
+
 #[test]
 fn sha256_hash_elements() {
     // test multiple of 8
-    let elements: Vec<Felt> = (0..16).map(|_| rand::random()).collect();
+    let elements: Vec<Felt> = seeded_felts(1, 16);
     let expected = compute_expected_sha256_element_hash(&elements);
     let actual: [u8; DIGEST256_BYTES] = hash_elements_256(&elements);
     assert_eq!(&expected, &actual);
 
     // test not multiple of 8
-    let elements: Vec<Felt> = (0..17).map(|_| rand::random()).collect();
+    let elements: Vec<Felt> = seeded_felts(2, 17);
     let expected = compute_expected_sha256_element_hash(&elements);
     let actual: [u8; DIGEST256_BYTES] = hash_elements_256(&elements);
     assert_eq!(&expected, &actual);
@@ -77,13 +86,13 @@ fn test_sha256_nist_test_vectors() {
 #[test]
 fn sha512_hash_elements() {
     // test multiple of 16
-    let elements: Vec<Felt> = (0..32).map(|_| rand::random()).collect();
+    let elements: Vec<Felt> = seeded_felts(3, 32);
     let expected = compute_expected_sha512_element_hash(&elements);
     let actual: [u8; DIGEST512_BYTES] = hash_elements_512(&elements);
     assert_eq!(&expected, &actual);
 
     // test not multiple of 16
-    let elements: Vec<Felt> = (0..17).map(|_| rand::random()).collect();
+    let elements: Vec<Felt> = seeded_felts(4, 17);
     let expected = compute_expected_sha512_element_hash(&elements);
     let actual: [u8; DIGEST512_BYTES] = hash_elements_512(&elements);
     assert_eq!(&expected, &actual);

@@ -197,6 +197,10 @@ macro_rules! impl_unseal_elements_with_associated_data {
 
 /// Public key for sealing messages to a recipient.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub enum SealingKey {
     K256XChaCha20Poly1305(crate::dsa::ecdsa_k256_keccak::PublicKey),
     X25519XChaCha20Poly1305(crate::dsa::eddsa_25519_sha512::PublicKey),
@@ -485,6 +489,91 @@ impl EphemeralPublicKey {
                         .map_err(|_| IesError::EphemeralPublicKeyDeserializationFailed)?;
                 Ok(EphemeralPublicKey::X25519AeadEidos(key))
             },
+        }
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod key_arbitrary {
+    use proptest::prelude::*;
+    use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
+
+    use super::{EphemeralPublicKey, SealingKey};
+    use crate::dsa::{
+        ecdsa_k256_keccak::KeyExchangeKey as K256KeyExchangeKey,
+        eddsa_25519_sha512::PublicKey as Ed25519PublicKey,
+    };
+
+    fn seed32(a: u64) -> [u8; 32] {
+        let mut seed = [0u8; 32];
+        seed[..8].copy_from_slice(&a.to_be_bytes());
+        seed
+    }
+
+    fn k256_key_exchange_key(seed: [u8; 32]) -> K256KeyExchangeKey {
+        let mut rng = ChaCha20Rng::from_seed(seed);
+        K256KeyExchangeKey::with_rng(&mut rng)
+    }
+
+    fn k256_public_key(seed: [u8; 32]) -> crate::dsa::ecdsa_k256_keccak::PublicKey {
+        k256_key_exchange_key(seed).public_key()
+    }
+
+    impl Arbitrary for SealingKey {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // All six scheme arms wrap public keys that must survive point decompression on
+            // read: K256 keys are derived from a seeded key-exchange key, X25519 keys reuse the
+            // eddsa PublicKey strategy (derived from a generated secret).
+            prop_oneof![
+                (0u64..)
+                    .prop_map(|a| Self::K256XChaCha20Poly1305(k256_public_key(seed32(a))))
+                    .boxed(),
+                any::<Ed25519PublicKey>().prop_map(Self::X25519XChaCha20Poly1305).boxed(),
+                (0u64..)
+                    .prop_map(|a| Self::K256AeadPoseidon2(k256_public_key(seed32(a))))
+                    .boxed(),
+                any::<Ed25519PublicKey>().prop_map(Self::X25519AeadPoseidon2).boxed(),
+                (0u64..).prop_map(|a| Self::K256AeadEidos(k256_public_key(seed32(a)))).boxed(),
+                any::<Ed25519PublicKey>().prop_map(Self::X25519AeadEidos).boxed(),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for EphemeralPublicKey {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Both per-scheme keys are derived from deterministically seeded ephemeral secrets, so
+            // they survive the reader's point validation.
+            prop_oneof![
+                any::<crate::ecdh::k256::EphemeralPublicKey>()
+                    .prop_map(Self::K256XChaCha20Poly1305)
+                    .boxed(),
+                any::<crate::ecdh::x25519::EphemeralPublicKey>()
+                    .prop_map(Self::X25519XChaCha20Poly1305)
+                    .boxed(),
+                any::<crate::ecdh::k256::EphemeralPublicKey>()
+                    .prop_map(Self::K256AeadPoseidon2)
+                    .boxed(),
+                any::<crate::ecdh::x25519::EphemeralPublicKey>()
+                    .prop_map(Self::X25519AeadPoseidon2)
+                    .boxed(),
+                any::<crate::ecdh::k256::EphemeralPublicKey>()
+                    .prop_map(Self::K256AeadEidos)
+                    .boxed(),
+                any::<crate::ecdh::x25519::EphemeralPublicKey>()
+                    .prop_map(Self::X25519AeadEidos)
+                    .boxed(),
+            ]
+            .boxed()
         }
     }
 }

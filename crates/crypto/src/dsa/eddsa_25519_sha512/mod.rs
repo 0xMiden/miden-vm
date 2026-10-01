@@ -37,6 +37,10 @@ const SIGNATURE_BYTES: usize = 64;
 
 /// Secret key for EdDSA (Ed25519) signature verification over Curve25519.
 #[derive(Clone, SilentDebug, SilentDisplay)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 struct SecretKey {
     inner: ed25519_dalek::SigningKey,
 }
@@ -108,7 +112,11 @@ impl Eq for SecretKey {}
 // ================================================================================================
 
 /// A secret key for EdDSA (Ed25519) signature verification over Curve25519.
-#[derive(Clone, Eq, PartialEq, SilentDebug, SilentDisplay)] // Safe as SecretKey has const-time eq
+#[derive(Clone, Eq, PartialEq, SilentDebug, SilentDisplay)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)] // Safe as SecretKey has const-time eq
 pub struct SigningKey(SecretKey);
 
 impl SigningKey {
@@ -164,7 +172,11 @@ impl Deserializable for SigningKey {
 // ================================================================================================
 
 /// A key for ECDH key exchange over Curve25519
-#[derive(Clone, Eq, PartialEq, SilentDebug, SilentDisplay)] // Safe as SecretKey has const-time eq
+#[derive(Clone, Eq, PartialEq, SilentDebug, SilentDisplay)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)] // Safe as SecretKey has const-time eq
 pub struct KeyExchangeKey(SecretKey);
 
 impl KeyExchangeKey {
@@ -221,6 +233,10 @@ impl Deserializable for KeyExchangeKey {
 // ================================================================================================
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct PublicKey {
     pub(crate) inner: ed25519_dalek::VerifyingKey,
 }
@@ -461,6 +477,10 @@ pub enum UncheckedVerificationError {
 
 /// EdDSA (Ed25519) signature
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct Signature {
     inner: ed25519_dalek::Signature,
 }
@@ -561,5 +581,79 @@ impl Deserializable for Signature {
 impl fmt::Display for Signature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         crate::utils::write_hex(f, &self.to_bytes())
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod key_arbitrary {
+    use proptest::prelude::*;
+
+    use super::{
+        KeyExchangeKey, PublicKey, SECRET_KEY_BYTES, SIGNATURE_BYTES, SecretKey, Signature,
+        SigningKey,
+    };
+
+    impl Arbitrary for SecretKey {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // An Ed25519 secret key is an unconstrained 32-byte seed.
+            any::<[u8; SECRET_KEY_BYTES]>()
+                .prop_map(|bytes| Self {
+                    inner: ed25519_dalek::SigningKey::from_bytes(&bytes),
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for SigningKey {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            any::<SecretKey>().prop_map(Self).boxed()
+        }
+    }
+
+    impl Arbitrary for KeyExchangeKey {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            any::<SecretKey>().prop_map(Self).boxed()
+        }
+    }
+
+    impl Arbitrary for PublicKey {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader decompresses the curve point, so derive the public key from a generated
+            // secret key - valid by construction.
+            any::<SigningKey>()
+                .prop_map(|signing_key| Self {
+                    inner: signing_key.0.inner.verifying_key(),
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for Signature {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // from_bytes is infallible: any 64 bytes are a wire-valid signature.
+            any::<[u8; SIGNATURE_BYTES]>()
+                .prop_map(|bytes| Self {
+                    inner: ed25519_dalek::Signature::from_bytes(&bytes),
+                })
+                .boxed()
+        }
     }
 }
