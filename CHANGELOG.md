@@ -2,6 +2,10 @@
 
 ## v1.0.0 (Unreleased)
 
+#### Fixes
+
+- Fixed MASM module printing so printed modules parse back to the same module: `*.err=` constant references are no longer quoted, marker attributes are followed by a newline, attribute lists that span several lines keep their commas, kernel `syscall` targets, C-like enums and `addrspace(felt)` are printed in parseable form, attribute strings are no longer re-escaped, and `procref` with a MAST root no longer panics ([#3948](https://github.com/0xMiden/miden-vm/pull/3948)).
+
 ## v0.35.0 (2026-10-01)
 
 #### Changes
@@ -1505,7 +1509,7 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 
 #### Fixes
 
-- Fixed `SourceContent::update` splice logic to prevent panics on single-line edits and respect exclusive end semantics for multi-line edits ([#XXXX](https://github.com/0xMiden/miden-vm/pull/2146)).
+- Fixed `SourceContent::update` splice logic to prevent panics on single-line edits and respect exclusive end semantics for multi-line edits ([#3948](https://github.com/0xMiden/miden-vm/pull/2146)).
 - Truncated nprime.masm output stack to prevent overflow during benchmarks ([#1879](https://github.com/0xMiden/miden-vm/issues/1879)).
 - Modules can now be provided in any order to the `Assembler`, see #1669 (#1881).
 - Addressed bug which caused references to re-exported procedures whose definition internally referred to an aliased module import, to produce an "undefined module" error, see #1451 (#1892).
