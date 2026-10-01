@@ -1,7 +1,7 @@
 use alloc::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet, VecDeque},
-    string::String,
+    string::{String, ToString},
     sync::Arc,
     vec::Vec,
 };
@@ -189,42 +189,58 @@ impl AnalysisContext {
         self.constant_import_refs.entry(constant.clone()).or_default().insert(import);
     }
 
-    pub fn add_live_constant_import_refs(&self, used_imports: &mut BTreeSet<String>) {
-        for (constant, imports) in &self.constant_import_refs {
-            if self.used_constants.contains(constant) {
-                used_imports.extend(imports.iter().cloned());
-            }
-        }
-    }
-
-    pub(super) fn mark_reexported_constants_used(&mut self, module: &Module) {
+    pub fn resolve_constant_usage(&mut self, module: &Module, used_imports: &mut BTreeSet<String>) {
+        let mut local_imports = BTreeMap::<String, Ident>::new();
+        let mut pending_imports = VecDeque::from_iter(used_imports.iter().cloned());
         for import in module.imports() {
-            if let Import::Item(import) = import
-                && import.visibility().is_public()
-            {
-                let path = import.module_path().into_inner();
-                let is_local =
-                    path == Path::new("self") || path.to_relative() == self.module_path.as_path();
-                if is_local && self.constants.contains_key(import.source_name()) {
-                    self.used_constants.insert(import.source_name().clone());
+            let Import::Item(import) = import else {
+                continue;
+            };
+            let path = import.module_path().into_inner();
+            let is_local =
+                path == Path::new("self") || path.to_relative() == self.module_path.as_path();
+            if is_local {
+                let local_name = import.local_name().as_str().to_string();
+                local_imports.insert(local_name.clone(), import.source_name().clone());
+                if import.is_used() && used_imports.insert(local_name.clone()) {
+                    pending_imports.push_back(local_name);
                 }
             }
         }
-    }
 
-    pub fn resolve_constant_usage(&mut self) {
-        let mut worklist = VecDeque::from_iter(self.used_constants.iter().cloned());
+        let mut pending_constants = VecDeque::from_iter(self.used_constants.iter().cloned());
         for (name, constant) in &self.constants {
             if constant.visibility.is_public() && self.used_constants.insert(name.clone()) {
-                worklist.push_back(name.clone());
+                pending_constants.push_back(name.clone());
             }
         }
-        while let Some(name) = worklist.pop_front() {
-            if let Some(deps) = self.constant_deps.get(&name) {
-                for dep in deps {
-                    if self.used_constants.insert(dep.clone()) {
-                        worklist.push_back(dep.clone());
+        while !pending_constants.is_empty() || !pending_imports.is_empty() {
+            if let Some(name) = pending_constants.pop_front() {
+                if let Some(deps) = self.constant_deps.get(&name) {
+                    for dep in deps {
+                        if self.used_constants.insert(dep.clone()) {
+                            pending_constants.push_back(dep.clone());
+                        }
                     }
+                }
+                if let Some(imports) = self.constant_import_refs.get(&name) {
+                    for import in imports {
+                        if used_imports.insert(import.clone()) {
+                            pending_imports.push_back(import.clone());
+                        }
+                    }
+                }
+            } else if let Some(alias) = pending_imports.pop_front()
+                && let Some(source) = local_imports.get(&alias)
+            {
+                if self.constants.contains_key(source) {
+                    if self.used_constants.insert(source.clone()) {
+                        pending_constants.push_back(source.clone());
+                    }
+                } else if local_imports.contains_key(source.as_str())
+                    && used_imports.insert(source.as_str().to_string())
+                {
+                    pending_imports.push_back(source.as_str().to_string());
                 }
             }
         }

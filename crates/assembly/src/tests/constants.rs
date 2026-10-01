@@ -64,6 +64,32 @@ fn reexported_private_constant_and_its_dependencies_do_not_warn() -> TestResult 
 }
 
 #[test]
+fn private_local_import_used_by_procedure_keeps_source_constant_live() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "namespace test::lib\n\nconst A = 7\nconst C = A\nuse {C as B} from self\n\npub proc foo\n    push.B\nend\n"
+    );
+
+    let module = context.parse_module(source)?;
+    context.assemble_library("test", None, module, [])?;
+    Ok(())
+}
+
+#[test]
+fn private_local_import_used_by_live_constant_keeps_source_constant_live() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "namespace test::lib\n\nconst A = 7\nconst C = A\nuse {C as B} from self\npub const EXPORTED = B\n\npub proc noop\n    nop\nend\n"
+    );
+
+    let module = context.parse_module(source)?;
+    context.assemble_library("test", None, module, [])?;
+    Ok(())
+}
+
+#[test]
 fn reexport_from_another_module_does_not_mark_same_named_local_constant_used() {
     let context = TestContext::default();
     let source =
