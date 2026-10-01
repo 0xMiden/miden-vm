@@ -533,7 +533,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("LOG_AIR_TRACE_LENGTHS_PTR", 0, 16),
         ("RELATION_DIGEST_PTR", 0, 4),
         ("ACE_REGISTRY_ROOT_PTR", 0, 4),
-        ("CURRENT_TRACE_ROW_ADDRESS_PTR", 1, 1),
+        ("GENERIC_ALIGNMENT_PADDING_PTR", 0, 1),
         // One word per accepted query grows backward; FRI layers and the remainder grow forward.
         (
             "FRI_COM_PTR",
