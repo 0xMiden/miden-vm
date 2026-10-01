@@ -286,6 +286,7 @@ where
         current_forest.clone(),
         old_package_debug_info,
         inline_call_contexts.len(),
+        None,
     );
 
     // Push the root node of the external MAST forest onto the continuation stack.

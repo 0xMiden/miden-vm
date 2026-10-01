@@ -60,7 +60,10 @@ pub use errors::{
 };
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use executor::ProgramExecutor;
-pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
+pub use fast::{
+    BreakReason, DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin, ExecutionOutput,
+    FastProcessor, ResumeContext,
+};
 pub use host::{
     BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestStore, MemMastForestStore,
     SyncHost,

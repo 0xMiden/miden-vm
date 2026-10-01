@@ -6,6 +6,7 @@
 
 #### Changes
 
+- Added a cached `DebugCallFrameResolver` over existing function and source metadata for event-free debugger backtraces. Frames expose their evidence so consumers can distinguish source-identified frames from inferred optimized `exec` frames. The package debug-info format remains version 3.
 - [BREAKING] Removed the accessor procedures from `miden::core::stark::constants`; import its constants instead ([#3925](https://github.com/0xMiden/miden-vm/pull/3925)).
 - [BREAKING] Removed unused procedures from the MASM recursive verifier ([#3937](https://github.com/0xMiden/miden-vm/pull/3937)).
 
