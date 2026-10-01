@@ -192,8 +192,12 @@ test-build: ## Build the test binaries for the workspace (no run)
 	$(MAKE) core-test-build FEATURES="$(WORKSPACE_TEST_FEATURES)"
 
 .PHONY: test
-test: ## Run the standard workspace test suite
+test: test-masm-root-stability ## Run the standard workspace test suite
 	$(MAKE) core-test FEATURES="$(WORKSPACE_TEST_FEATURES)"
+
+.PHONY: test-masm-root-stability
+test-masm-root-stability: ## Test the release gate's version policy
+	bash scripts/test-check-masm-root-stability.sh
 
 .PHONY: test-crypto
 # Ordinary crypto, field, serde, derive, and Wycheproof tests run in the standard workspace suite.
@@ -213,7 +217,7 @@ test-docs: ## Run documentation tests (cargo test - nextest doesn't support doct
 # -- filtered test runs ---------------------------------------------------------------------------
 
 .PHONY: test-fast
-test-fast: ## Runs fast tests (excludes all CLI tests and proptests)
+test-fast: test-masm-root-stability ## Runs fast tests (excludes all CLI tests and proptests)
 	# Keep this feature set aligned with `test` so both targets reuse the same test binaries.
 	$(MAKE) core-test \
 		FEATURES="$(WORKSPACE_TEST_FEATURES)" \
