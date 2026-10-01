@@ -3,10 +3,11 @@ use std::mem;
 use miden_assembly_syntax_cst::{
     Item, Operation, SyntaxKind, SyntaxNode, SyntaxToken,
     ast::{
-        BeginBlock, Block, DoWhileOp, IfOp, Import, ImportKind, ImportSpecifier, Instruction,
-        Procedure, RepeatOp, Signature, SourceFile, TypeBody, TypeDecl, WhileOp,
+        AdviceMap, BeginBlock, Block, Constant, DoWhileOp, IfOp, Import, ImportKind,
+        ImportSpecifier, Instruction, Procedure, RepeatOp, Signature, SourceFile, TypeAnnotation,
+        TypeBody, TypeDecl, WhileOp,
     },
-    rowan::{NodeOrToken, ast::AstNode},
+    rowan::{Direction, NodeOrToken, ast::AstNode},
 };
 
 use crate::config::Config;
@@ -202,11 +203,9 @@ fn render_item(item: &Item, indent: usize, config: &Config) -> String {
         Item::ExternPackage(package) => render_line_form(package.syntax(), indent),
         Item::Submodule(submodule) => render_line_form(submodule.syntax(), indent),
         Item::Import(import) => render_import(import, indent, config),
-        Item::Constant(constant) => render_value_declaration(constant.syntax(), indent, config),
+        Item::Constant(constant) => render_constant(constant, indent, config),
         Item::TypeDecl(type_decl) => render_type_decl(type_decl, indent, config),
-        Item::AdviceMap(advice_map) => {
-            render_value_declaration(advice_map.syntax(), indent, config)
-        },
+        Item::AdviceMap(advice_map) => render_advice_map(advice_map, indent, config),
         Item::BeginBlock(begin) => render_begin_block(begin, indent, config),
         Item::Procedure(procedure) => render_procedure(procedure, indent, config),
     }
@@ -382,48 +381,113 @@ fn render_single_token(token: SyntaxToken) -> String {
     render_token_sequence(&[token])
 }
 
-fn render_value_declaration(node: &SyntaxNode, indent: usize, config: &Config) -> String {
-    let Some(value) = direct_child_of_kind(node, SyntaxKind::Expr) else {
-        return render_line_form(node, indent);
+fn render_constant(constant: &Constant, indent: usize, config: &Config) -> String {
+    let (Some(name), Some(value)) = (constant.name_token(), constant.expr()) else {
+        return render_line_form(constant.syntax(), indent);
     };
 
-    let prefix_tokens = significant_tokens_before_child(node, &value);
-    let value_tokens = significant_tokens(&value);
+    let mut header = indent_string(indent);
+    if constant.visibility().is_some() {
+        header.push_str("pub ");
+    }
+    header.push_str("const ");
+    header.push_str(&render_single_token(name));
 
-    let compact = format!(
-        "{}{}",
-        indent_string(indent),
-        render_token_sequence(&combine_tokens(&prefix_tokens, &value_tokens))
-    );
-
-    let mut rendered = if has_comment_token(&value) {
-        let header = format!("{}{}", indent_string(indent), render_token_sequence(&prefix_tokens));
-        let body = render_expression_with_comments(&value, indent + config.indent_size(), config)
-            .join("\n");
-        format!("{header}\n{body}")
-    } else if line_length(&compact) <= config.max_line_length() {
-        compact
-    } else if config.overflow_delimited_expr()
-        && let Some(rendered) =
-            render_wrapped_value_call(&prefix_tokens, &value_tokens, indent, config)
-    {
-        rendered
+    if let Some(annotation) = constant.type_annotation() {
+        header.push(' ');
+        header.push_str(&render_constant_annotation(
+            &annotation,
+            constant.syntax(),
+            indent,
+            config,
+        ));
     } else {
-        let header = format!("{}{}", indent_string(indent), render_token_sequence(&prefix_tokens));
-        let body = render_token_lines(&value_tokens, indent + config.indent_size(), true, config)
-            .join("\n");
-        format!("{header}\n{body}")
-    };
-
-    if let Some(comment) = direct_comment_token(node) {
-        append_inline_comment(&mut rendered, &comment);
+        header.push_str(" =");
     }
 
+    let mut rendered = render_assigned_value(header, value.syntax(), indent, config);
+    if let Some(comment) = comment_after_child(value.syntax()) {
+        append_inline_comment(&mut rendered, &comment);
+    }
     rendered
 }
 
+/// Renders `=` with the annotation to keep it out of a trailing line comment.
+fn render_constant_annotation(
+    annotation: &TypeAnnotation,
+    declaration: &SyntaxNode,
+    indent: usize,
+    config: &Config,
+) -> String {
+    let mut tokens = all_tokens(annotation.syntax());
+    tokens.extend(
+        declaration
+            .children_with_tokens()
+            .filter_map(NodeOrToken::into_token)
+            .find(|token| token.kind() == SyntaxKind::Equal),
+    );
+
+    render_declaration_prefix(&tokens, indent, config).trim_start().to_string()
+}
+
+fn render_declaration_prefix(tokens: &[SyntaxToken], indent: usize, config: &Config) -> String {
+    if has_comment_tokens(tokens) {
+        render_token_stream_with_comments(tokens, indent, SpacingStyle::Default, config).join("\n")
+    } else {
+        format!(
+            "{}{}",
+            indent_string(indent),
+            render_token_sequence(&significant_tokens_from(tokens.iter().cloned()))
+        )
+    }
+}
+
+fn render_advice_map(advice_map: &AdviceMap, indent: usize, config: &Config) -> String {
+    let Some(value) = advice_map.value_expr() else {
+        return render_line_form(advice_map.syntax(), indent);
+    };
+
+    let prefix_tokens = tokens_before_child(advice_map.syntax(), value.syntax());
+    let header = render_declaration_prefix(&prefix_tokens, indent, config);
+
+    let mut rendered = render_assigned_value(header, value.syntax(), indent, config);
+    if let Some(comment) = comment_after_child(value.syntax()) {
+        append_inline_comment(&mut rendered, &comment);
+    }
+    rendered
+}
+
+fn render_assigned_value(
+    header: String,
+    value: &SyntaxNode,
+    indent: usize,
+    config: &Config,
+) -> String {
+    if has_comment_token(value) {
+        let body = render_expression_with_comments(value, indent + config.indent_size(), config)
+            .join("\n");
+        return format!("{header}\n{body}");
+    }
+
+    let value_tokens = significant_tokens(value);
+    let compact = format!("{header} {}", render_token_sequence(&value_tokens));
+    if line_length(compact.lines().last().unwrap_or_default()) <= config.max_line_length() {
+        return compact;
+    }
+
+    if config.overflow_delimited_expr()
+        && let Some(rendered) = render_wrapped_value_call(&header, &value_tokens, indent, config)
+    {
+        return rendered;
+    }
+
+    let body =
+        render_token_lines(&value_tokens, indent + config.indent_size(), true, config).join("\n");
+    format!("{header}\n{body}")
+}
+
 fn render_wrapped_value_call(
-    prefix_tokens: &[SyntaxToken],
+    prefix: &str,
     value_tokens: &[SyntaxToken],
     indent: usize,
     config: &Config,
@@ -434,9 +498,8 @@ fn render_wrapped_value_call(
         return None;
     }
 
-    let header_tokens = combine_tokens(prefix_tokens, &value_tokens[..=open_index]);
-    let header = format!("{}{}", indent_string(indent), render_token_sequence(&header_tokens));
-    if line_length(&header) > config.max_line_length() {
+    let header = format!("{prefix} {}", render_token_sequence(&value_tokens[..=open_index]));
+    if line_length(header.lines().last().unwrap_or_default()) > config.max_line_length() {
         return None;
     }
 
@@ -1383,8 +1446,12 @@ fn has_comment_token(node: &SyntaxNode) -> bool {
 }
 
 fn significant_tokens(node: &SyntaxNode) -> Vec<SyntaxToken> {
-    node.descendants_with_tokens()
-        .filter_map(NodeOrToken::into_token)
+    significant_tokens_from(node.descendants_with_tokens().filter_map(NodeOrToken::into_token))
+}
+
+fn significant_tokens_from(tokens: impl IntoIterator<Item = SyntaxToken>) -> Vec<SyntaxToken> {
+    tokens
+        .into_iter()
         .filter(|token| {
             !token.kind().is_trivia()
                 && !matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment)
@@ -1392,32 +1459,18 @@ fn significant_tokens(node: &SyntaxNode) -> Vec<SyntaxToken> {
         .collect()
 }
 
-fn significant_tokens_before_child(node: &SyntaxNode, child: &SyntaxNode) -> Vec<SyntaxToken> {
+fn tokens_before_child(node: &SyntaxNode, child: &SyntaxNode) -> Vec<SyntaxToken> {
     let mut tokens = Vec::new();
 
     for element in node.children_with_tokens() {
         match element {
             NodeOrToken::Node(candidate) if candidate == *child => break,
-            NodeOrToken::Node(candidate) => tokens.extend(significant_tokens(&candidate)),
-            NodeOrToken::Token(token)
-                if !token.kind().is_trivia()
-                    && !matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment) =>
-            {
-                tokens.push(token)
-            },
-            NodeOrToken::Token(_) => (),
+            NodeOrToken::Node(candidate) => tokens.extend(all_tokens(&candidate)),
+            NodeOrToken::Token(token) => tokens.push(token),
         }
     }
 
     tokens
-}
-
-fn direct_child_of_kind(node: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
-    node.children().find(|child| child.kind() == kind)
-}
-
-fn combine_tokens(prefix: &[SyntaxToken], suffix: &[SyntaxToken]) -> Vec<SyntaxToken> {
-    prefix.iter().cloned().chain(suffix.iter().cloned()).collect()
 }
 
 fn trim_outer_whitespace_tokens(tokens: &[SyntaxToken]) -> Vec<SyntaxToken> {
@@ -1548,6 +1601,15 @@ fn split_top_level_items(tokens: &[SyntaxToken]) -> Vec<Vec<SyntaxToken>> {
     }
 
     items
+}
+
+fn comment_after_child(child: &SyntaxNode) -> Option<String> {
+    child
+        .siblings_with_tokens(Direction::Next)
+        .skip(1)
+        .filter_map(NodeOrToken::into_token)
+        .find(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment))
+        .map(|token| trimmed_comment(&token))
 }
 
 fn direct_comment_token(node: &SyntaxNode) -> Option<String> {
@@ -1878,7 +1940,14 @@ end
     }
 
     fn assert_format_idempotent(input: &str, label: impl core::fmt::Display) -> String {
-        let config = Config::default();
+        assert_format_idempotent_with_config(input, label, &Config::default())
+    }
+
+    fn assert_format_idempotent_with_config(
+        input: &str,
+        label: impl core::fmt::Display,
+        config: &Config,
+    ) -> String {
         let parse = parse_text(input);
         assert!(
             !parse.has_errors(),
@@ -1886,7 +1955,7 @@ end
             parse.diagnostics()
         );
 
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted = format_syntax(config, &parse.syntax());
         let reparsed = parse_text(&formatted);
         assert!(
             !reparsed.has_errors(),
@@ -1894,7 +1963,7 @@ end
             reparsed.diagnostics()
         );
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(config, &reparsed.syntax());
         assert_eq!(reformatted, formatted, "formatter was not idempotent for {label}");
         formatted
     }
@@ -2320,6 +2389,147 @@ end
 
         let reformatted = format_syntax(&config, &reparsed.syntax());
         assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn preserves_comments_inside_constant_annotations() {
+        let source = "\
+pub const WORD: [
+# element type
+felt; # element count
+4
+] = [1, 2, 3, 4] # word
+";
+        let expected = "\
+pub const WORD : [
+    # element type
+    felt ; # element count
+    4
+] = [1, 2, 3, 4] # word
+";
+
+        assert_eq!(assert_format_idempotent(source, "commented annotation"), expected);
+    }
+
+    #[test]
+    fn preserves_comments_after_constant_annotations() {
+        let source = "\
+const WORD: [felt; 4] # word type
+= [1, 2, 3, 4]
+";
+        let expected = "\
+const WORD : [felt ; 4] # word type
+= [1, 2, 3, 4]
+";
+
+        assert_eq!(assert_format_idempotent(source, "annotation tail comment"), expected);
+    }
+
+    #[test]
+    fn preserves_annotation_and_value_comments_together() {
+        let source = "\
+const WORD: [
+felt; # element count
+4
+] = [
+# first element
+1, 2, 3, 4
+] # word
+";
+        let expected = "\
+const WORD : [
+    felt ; # element count
+    4
+] =
+    [
+        # first element
+        1, 2, 3, 4
+    ] # word
+";
+
+        assert_eq!(assert_format_idempotent(source, "annotation and value comments"), expected);
+    }
+
+    #[test]
+    fn wraps_typed_constant_values_with_multiline_headers() {
+        let source = "\
+const WORD: [
+felt; # element count
+4
+] = word(\"miden::protocol::faucet::callback::on_before_asset_added_to_account\")
+";
+        let config = Config {
+            max_line_length: Some(78),
+            ..Config::default()
+        };
+        let expected = "\
+const WORD : [
+    felt ; # element count
+    4
+] =
+    word(
+        \"miden::protocol::faucet::callback::on_before_asset_added_to_account\"
+    )
+";
+        let formatted = assert_format_idempotent_with_config(source, "long typed value", &config);
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
+
+        let config = Config {
+            overflow_delimited_expr: Some(true),
+            ..config
+        };
+        let expected = "\
+const WORD : [
+    felt ; # element count
+    4
+] = word(
+    \"miden::protocol::faucet::callback::on_before_asset_added_to_account\"
+)
+";
+        let formatted =
+            assert_format_idempotent_with_config(source, "overflow typed value", &config);
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
+    }
+
+    #[test]
+    fn formats_compact_typed_constants() {
+        let source = "\
+pub const WORD:[felt;4]=[1,2,3,4]
+const VALUE:u32=42
+const MULTILINE: [
+felt;
+4
+] = [1, 2, 3, 4]
+";
+        let expected = "\
+pub const WORD : [felt ; 4] = [1, 2, 3, 4]
+const VALUE : u32 = 42
+const MULTILINE : [felt ; 4] = [1, 2, 3, 4]
+";
+
+        assert_eq!(assert_format_idempotent(source, "compact typed constants"), expected);
+    }
+
+    #[test]
+    fn preserves_explicit_advice_map_keys_and_comments() {
+        let source = "\
+adv_map TABLE(0x0200000000000000020000000000000002000000000000000200000000000000)=[1,2] # table
+adv_map COMMENTED(
+# key
+0x0200000000000000020000000000000002000000000000000200000000000000
+) = [1, 2] # commented table
+";
+        let expected = "\
+adv_map TABLE(0x0200000000000000020000000000000002000000000000000200000000000000) = [1, 2] # table
+adv_map COMMENTED(
+    # key
+    0x0200000000000000020000000000000002000000000000000200000000000000
+) = [1, 2] # commented table
+";
+
+        assert_eq!(assert_format_idempotent(source, "explicit advice map keys"), expected);
     }
 
     #[test]
