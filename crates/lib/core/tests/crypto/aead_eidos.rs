@@ -167,6 +167,67 @@ fn auth_empty_ad_one_block_matches_reference_vector() {
 }
 
 #[test]
+fn auth_empty_ad_binds_the_final_coefficient_to_the_evaluation_point() {
+    let key = word([1, 2, 3, 4]);
+    let nonce = word([0x10, 0x20, 0x30, 0x40]);
+    let nonce_elements = nonce.into_elements();
+    let mac_key_elements = derive_mac_key(key, nonce).into_elements();
+
+    // These inputs have the same padded length. Their encoded streams agree until the final
+    // extension coefficient, which changes from (0, 0) to (0, 10).
+    let extended_ciphertext = [
+        Felt::from_u32(1),
+        Felt::from_u32(2),
+        Felt::from_u32(3),
+        Felt::from_u32(4),
+        Felt::ZERO,
+        Felt::from_u32(4),
+        Felt::ZERO,
+        Felt::ZERO,
+        Felt::ZERO,
+        Felt::ZERO,
+    ];
+    let stores = store_felts(DST_PTR, &extended_ciphertext);
+
+    let source = format!(
+        "
+    use miden::core::crypto::aead_eidos
+
+    begin
+        {stores}
+
+        push.4
+        push.{DST_PTR}
+        push.{nonce_elements:?}
+        push.{mac_key_elements:?}
+
+        exec.aead_eidos::auth_empty_ad_expanded_exact
+
+        push.10
+        push.{DST_PTR}
+        push.{nonce_elements:?}
+        push.{mac_key_elements:?}
+
+        exec.aead_eidos::auth_empty_ad_expanded_exact
+
+        dup.2
+        eq
+        movup.2
+        drop
+        movup.2
+        add.10
+        movup.2
+        eq
+        and
+        assertz.err=\"the final MAC coefficient must be multiplied by the evaluation point\"
+    end
+    "
+    );
+
+    build_test!(source.as_str(), &[]).expect_stack(&[]);
+}
+
+#[test]
 fn encrypt_blocks_stream_zero_is_noop() {
     let key = word([1, 2, 3, 4]);
     let nonce = word([0x10, 0x20, 0x30, 0x40]);

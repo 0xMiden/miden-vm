@@ -339,8 +339,8 @@ generated MASM constants.
 | `0x0003` | 1       | `GENERIC_BYTE_STRING`   | `ByteString`   |
 | `0x0004` | 1       | `FALCON_HASH_TO_POINT`  | `Custom`       |
 | `0x0005` | 1       | `FALCON_PUBLIC_KEY`     | `FeltSequence` |
-| `0x0006` | 1       | `AEAD_CTR_KEY`          | `Custom`       |
-| `0x0007` | 1       | `AEAD_MAC_KEY`          | `Custom`       |
+| `0x0006` | 2       | `AEAD_CTR_KEY`          | `Custom`       |
+| `0x0007` | 2       | `AEAD_MAC_KEY`          | `Custom`       |
 | `0x0008` | 1       | `RANDOM_COIN_STATE`     | `FeltSequence` |
 | `0x0009` | 1       | `RANDOM_COIN_OUTPUT`    | `FeltSequence` |
 | `0x000a` | 1       | `GENERIC_FELT_SEQUENCE` | `FeltSequence` |

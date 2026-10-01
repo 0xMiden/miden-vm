@@ -19,11 +19,16 @@ to round the total `ciphertext_len + 6` up to a multiple of eight. Adjacent Felt
 quadratic-extension coefficients, with four coefficients per MAC batch. These length fields and
 padding belong to the MAC input and are not appended to the ciphertext output.
 
+The MAC starts Horner evaluation at one and multiplies by the evaluation point once more before
+adding the secret mask. Every input coefficient therefore multiplies a positive power of the
+evaluation point; the unmasked polynomial has constant coefficient zero.
+
 Callers must never reuse a `(key, nonce)` pair or repeat a counter block under the same `K_CTR`;
 the construction is not nonce-misuse-resistant.
-Applications must also track the aggregate verification budget under each key and retire the key
-before that budget is exhausted. See the [usage limits](../../../design/eidos-aead.md#usage-limits)
-for the per-message limit and how to account for verification attempts.
+Applications must reserve degree budget before each tag check, keep the charge on a mismatch,
+and release it on a match. The budget includes pending checks and is shared by all receivers using
+the key. See the [usage limits](../../../design/eidos-aead.md#usage-limits) for the stopping rule,
+message-size limits, and authentication bound under adaptive verification.
 
 ## Procedures
 
