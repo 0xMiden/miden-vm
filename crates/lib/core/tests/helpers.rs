@@ -2,8 +2,26 @@ extern crate alloc;
 
 use alloc::{string::String, vec::Vec};
 
+use miden_assembly::ast::ConstantValue;
 use miden_core::{Felt, Word};
+use miden_core_lib::CoreLibrary;
+use miden_mast_package::PackageExport;
 use miden_processor::{ContextId, ExecutionOutput};
+
+/// Returns the value of the public integer constant `name` exported by
+/// `miden::core::stark::constants` in the compiled core library.
+pub fn stark_constant(name: &str) -> u32 {
+    let path = format!("::miden::core::stark::constants::{name}");
+    let package = CoreLibrary::default().package();
+    let Some(PackageExport::Constant(constant)) = package.manifest.get_export(path.as_str()) else {
+        panic!("{path} is not an exported constant");
+    };
+    let ConstantValue::Int(value) = &constant.value else {
+        panic!("{path} is not an integer constant");
+    };
+    let value = value.inner().as_int();
+    u32::try_from(value).unwrap_or_else(|_| panic!("{path} does not fit in u32"))
+}
 
 /// Reads an initialized felt from root-context memory.
 pub fn read_memory_felt(output: &ExecutionOutput, addr: u32) -> Felt {

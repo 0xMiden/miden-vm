@@ -1,5 +1,12 @@
+use {
+    DEEP_ALPHA_ADVICE_PTR,
+    HOOK_PROCESS_ROW_OOD_EVALUATIONS_PTR,
+    OOD_EVALUATIONS_ADDRESS_PTR,
+    OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR,
+    RANDOM_COIN_CV_PTR,
+    RANDOM_COIN_INPUT_LENGTH_PTR,
+} from miden::core::stark::constants
 use miden::core::stark::types
-use miden::core::stark::constants
 use miden::core::stark::random_coin
 
 #! Loads the execution trace and the quotient trace evaluation frames.
@@ -22,7 +29,7 @@ use miden::core::stark::random_coin
 #!    composition at the out-of-domain point gz.
 #! 4. alpha is the DEEP composition challenge.
 #!
-#! The negated evaluations are stored as one word at OOD_FIXED_TERM_HORNER_EVALS_PTR.
+#! The negated evaluations are stored as one word at OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR.
 #!
 #! Inputs:  []
 #! Outputs: []
@@ -41,7 +48,7 @@ pub proc load_and_horner_eval_ood_frames()
 
     # Save the random challenge
     push.0.0 movup.3 movup.3
-    exec.constants::deep_rand_alpha_nd_ptr mem_storew_le dropw
+    mem_storew_le.DEEP_ALPHA_ADVICE_PTR dropw
     # => []
 
     # --- Compute Q^z(alpha) --------------------------------------------------
@@ -51,17 +58,17 @@ pub proc load_and_horner_eval_ood_frames()
     ### a) Set up the initial accumulator and the pointers to alpha and a pointer to some memory
     ###    region to which we save the OOD.
     push.0.0
-    exec.constants::deep_rand_alpha_nd_ptr
-    exec.constants::get_ood_evaluations_address
-    # => [ood_evaluations_ptr, deep_rand_alpha_ptr, 0, 0]
+    push.DEEP_ALPHA_ADVICE_PTR
+    mem_load.OOD_EVALUATIONS_ADDRESS_PTR
+    # => [ood_evaluations_ptr, deep_alpha_advice_ptr, 0, 0]
 
     ## 2) Process the fully aligned OOD `current` evaluations at z of the execution trace
     ##    and constraints polynomial evaluations. The three zero words are scratch slots; the
     ##    concrete row processor overwrites the first two words with each OOD block and
     ##    updates the transcript CV kept in the third word.
-    exec.constants::random_coin_buffer_len_ptr mem_load
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     assertz.err="OOD row absorption requires an empty transcript buffer"
-    padw exec.constants::random_coin_cv_ptr mem_loadw_le
+    padw mem_loadw_le.RANDOM_COIN_CV_PTR
     padw padw
     # => [0, 0, cv, ood_frame_ptr, alpha_ptr, 0, 0]
 
@@ -78,7 +85,7 @@ pub proc load_and_horner_eval_ood_frames()
     movup.2
     movup.3
     swap.1
-    exec.constants::ood_fixed_term_horner_evaluations_ptr mem_storew_le
+    mem_storew_le.OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR
     dropw
     push.0.0
     movdn.3
@@ -95,7 +102,7 @@ pub proc load_and_horner_eval_ood_frames()
 
     # Save the transcript CV and remove the row-processing scratch words.
     swapw.2
-    exec.constants::random_coin_cv_ptr mem_storew_le
+    mem_storew_le.RANDOM_COIN_CV_PTR
     dropw dropw dropw
     # => [ood_frame_ptr, alpha_ptr, acc0, acc1]
 
@@ -106,10 +113,10 @@ pub proc load_and_horner_eval_ood_frames()
     drop drop
     # => [acc0, acc1]
     neg
-    exec.constants::ood_fixed_term_horner_evaluations_ptr add.2 mem_store
+    push.OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR add.2 mem_store
     # => [acc1]
     neg
-    exec.constants::ood_fixed_term_horner_evaluations_ptr add.3 mem_store
+    push.OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR add.3 mem_store
     # => []
 end
 
@@ -125,5 +132,5 @@ proc process_row_ood_evaluations(
     state: types::EidosState,
     horner: types::HornerState,
 ) -> (types::EidosState, types::HornerState)
-    exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr dynexec
+    push.HOOK_PROCESS_ROW_OOD_EVALUATIONS_PTR dynexec
 end

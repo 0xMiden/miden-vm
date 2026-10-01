@@ -22,17 +22,17 @@ use super::{
 // MASM MEMORY LAYOUT
 // ================================================================================================
 
-const TRACE_LENGTH_LOG_PTR: u32 = 3223322634;
+const LOG_TRACE_LENGTH_PTR: u32 = 3223322634;
 const TRACE_LENGTH_PTR: u32 = 3223322632;
-const LDE_DOMAIN_GEN_PTR: u32 = 3223322626;
+const LDE_DOMAIN_GENERATOR_PTR: u32 = 3223322626;
 const DOMAIN_OFFSET_PTR: u32 = 3223322635;
 const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3223322638;
 const MAIN_TRACE_COM_PTR: u32 = 3223322640;
 const AUX_TRACE_COM_PTR: u32 = 3223322644;
 const COMPOSITION_POLY_COM_PTR: u32 = 3223322648;
-const COMPOSITION_COEF_PTR: u32 = 3223322704;
-const Z_PTR: u32 = 3223322652;
-const AIR_TRACE_LENGTH_LOGS_PTR: u32 = 3223322744;
+const CONSTRAINT_COMPOSITION_COEFS_PTR: u32 = 3223322704;
+const OOD_POINT_PTR: u32 = 3223322652;
+const LOG_AIR_TRACE_LENGTHS_PTR: u32 = 3223322744;
 pub(super) fn assert_proof_stream_read_sections(
     read: &impl Fn(u32) -> Felt,
     proof_stream: &[u64],
@@ -114,7 +114,7 @@ pub(super) fn assert_proof_stream_read_sections(
 /// The per-AIR log heights `load_air_context` staged, in canonical instance order.
 fn staged_log_heights(read: &impl Fn(u32) -> Felt) -> Vec<u64> {
     (0..MIDEN_AIR_COUNT as u32)
-        .map(|air| read(AIR_TRACE_LENGTH_LOGS_PTR + air).as_canonical_u64())
+        .map(|air| read(LOG_AIR_TRACE_LENGTHS_PTR + air).as_canonical_u64())
         .collect()
 }
 
@@ -222,7 +222,10 @@ fn sanity_check_ace_inputs(read: &impl Fn(u32) -> Felt, inputs: &[QuadFelt], lay
     // Fiat-Shamir challenges
     assert!(!get(InputKey::Alpha).is_zero(), "alpha is zero");
     assert!(!get(InputKey::AuxRandBeta).is_zero(), "beta is zero");
-    assert!(!read_quad(COMPOSITION_COEF_PTR + 2).is_zero(), "multi-AIR fold beta is zero");
+    assert!(
+        !read_quad(CONSTRAINT_COMPOSITION_COEFS_PTR + 2).is_zero(),
+        "multi-AIR fold beta is zero"
+    );
 
     // Vanishing polynomial
     assert!(
@@ -234,7 +237,7 @@ fn sanity_check_ace_inputs(read: &impl Fn(u32) -> Felt, inputs: &[QuadFelt], lay
     assert!(!get(InputKey::Weight0).is_zero(), "weight0 is zero");
     assert!(!get(InputKey::F).is_zero(), "f is zero");
     assert!(!get(InputKey::S0).is_zero(), "s0 is zero");
-    assert_eq!(get(InputKey::Alpha), read_quad(COMPOSITION_COEF_PTR));
+    assert_eq!(get(InputKey::Alpha), read_quad(CONSTRAINT_COMPOSITION_COEFS_PTR));
     assert_eq!(get(InputKey::Reserved), QuadFelt::ZERO);
     assert_eq!(
         get(InputKey::Weight0),
@@ -249,7 +252,7 @@ fn sanity_check_ace_inputs(read: &impl Fn(u32) -> Felt, inputs: &[QuadFelt], lay
         QuadFelt::from(Felt::new_unchecked(5_473_358_340_599_679_662))
     );
     let trace_length = read(TRACE_LENGTH_PTR).as_canonical_u64();
-    let old_f = read(LDE_DOMAIN_GEN_PTR).exp_u64(trace_length);
+    let old_f = read(LDE_DOMAIN_GENERATOR_PTR).exp_u64(trace_length);
     let old_s0 = read(DOMAIN_OFFSET_PTR).exp_u64(trace_length);
     let old_weight0 = (Felt::from_u8(8) * old_s0.exp_u64(7)).try_inverse().expect("nonzero weight");
     assert_eq!(get(InputKey::F), QuadFelt::from(old_f), "fixed f differs from runtime domain");
@@ -264,9 +267,9 @@ fn sanity_check_ace_inputs(read: &impl Fn(u32) -> Felt, inputs: &[QuadFelt], lay
         "fixed weight0 differs from runtime domain"
     );
 
-    let z_pow_n = read_quad(Z_PTR);
-    let z = read_quad(Z_PTR + 2);
-    let max_log = read(TRACE_LENGTH_LOG_PTR).as_canonical_u64() as usize;
+    let z_pow_n = read_quad(OOD_POINT_PTR);
+    let z = read_quad(OOD_POINT_PTR + 2);
+    let max_log = read(LOG_TRACE_LENGTH_PTR).as_canonical_u64() as usize;
     let z_k = (5..max_log).fold(z, |value, _| value * value);
     assert_eq!(get(InputKey::ZPowN), z_pow_n);
     assert_eq!(get(InputKey::ZK), z_k);
@@ -290,11 +293,11 @@ fn assert_air_selectors_match_trace_metadata(
 ) {
     let get = |key: InputKey| -> QuadFelt { inputs[layout.index(key).expect("missing key")] };
     let read = |addr| read(addr);
-    let z = QuadFelt::new([read(Z_PTR + 2), read(Z_PTR + 3)]);
-    let max_log = read(TRACE_LENGTH_LOG_PTR).as_canonical_u64() as u32;
+    let z = QuadFelt::new([read(OOD_POINT_PTR + 2), read(OOD_POINT_PTR + 3)]);
+    let max_log = read(LOG_TRACE_LENGTH_PTR).as_canonical_u64() as u32;
 
     for air in 0..MIDEN_AIR_COUNT {
-        let log_height = read(AIR_TRACE_LENGTH_LOGS_PTR + air as u32).as_canonical_u64() as u32;
+        let log_height = read(LOG_AIR_TRACE_LENGTHS_PTR + air as u32).as_canonical_u64() as u32;
         assert!(log_height <= max_log, "AIR {air} height exceeds the maximum height");
         let z_lift = (log_height..max_log).fold(z, |value, _| value * value);
         let vanishing = z_lift.exp_u64(1_u64 << log_height) - QuadFelt::ONE;
@@ -333,7 +336,10 @@ fn assert_fold_coefficients_match_the_proof_order(
     layout: &InputLayout,
 ) {
     let get = |key: InputKey| -> QuadFelt { inputs[layout.index(key).expect("missing key")] };
-    let beta = QuadFelt::new([read(COMPOSITION_COEF_PTR + 2), read(COMPOSITION_COEF_PTR + 3)]);
+    let beta = QuadFelt::new([
+        read(CONSTRAINT_COMPOSITION_COEFS_PTR + 2),
+        read(CONSTRAINT_COMPOSITION_COEFS_PTR + 3),
+    ]);
 
     for (position, air) in order.airs().iter().enumerate() {
         let exponent = (MIDEN_AIR_COUNT - 1 - position) as u64;

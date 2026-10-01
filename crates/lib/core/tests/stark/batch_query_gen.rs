@@ -14,10 +14,10 @@ use rstest::rstest;
 const RANDOM_COIN_CV_PTR: u32 = 3223322668;
 const RANDOM_COIN_OUTPUT_WORD_PTR: u32 = 3223322672;
 const NUM_QUERIES_PTR: u32 = 3223322628;
-const LDE_DOMAIN_LOG_SIZE_PTR: u32 = 3223322625;
+const LOG_LDE_DOMAIN_SIZE_PTR: u32 = 3223322625;
 const FRI_QUERIES_ADDRESS_PTR: u32 = 3223322633;
-const RANDOM_COIN_INPUT_LEN_PTR: u32 = 3223322767;
-const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3223322768;
+const RANDOM_COIN_INPUT_LENGTH_PTR: u32 = 3223322767;
+const RANDOM_COIN_OUTPUT_LENGTH_PTR: u32 = 3223322768;
 const RANDOM_COIN_COUNTER_PTR: u32 = 3223322769;
 
 // Fixed query storage address.
@@ -43,13 +43,13 @@ fn setup_masm(state: &[u64; 12], output_len: u32, num_queries: u32, depth: u32) 
     push.{RANDOM_COIN_OUTPUT_WORD_PTR} mem_storew_le dropw
 
     # Random coin buffer state
-    push.0 push.{RANDOM_COIN_INPUT_LEN_PTR} mem_store
-    push.{output_len} push.{RANDOM_COIN_OUTPUT_LEN_PTR} mem_store
+    push.0 push.{RANDOM_COIN_INPUT_LENGTH_PTR} mem_store
+    push.{output_len} push.{RANDOM_COIN_OUTPUT_LENGTH_PTR} mem_store
     push.1 push.{RANDOM_COIN_COUNTER_PTR} mem_store
 
     # Verifier parameters
     push.{num_queries} push.{NUM_QUERIES_PTR} mem_store
-    push.{depth} push.{LDE_DOMAIN_LOG_SIZE_PTR} mem_store
+    push.{depth} push.{LOG_LDE_DOMAIN_SIZE_PTR} mem_store
     push.{QUERY_PTR} push.{FRI_QUERIES_ADDRESS_PTR} mem_store
     "#,
         cv0 = state[0],
@@ -81,14 +81,16 @@ fn reference_source(setup: &str) -> String {
     format!(
         r#"
     use miden::core::stark::random_coin
-    use miden::core::stark::constants
+    use {{
+        FRI_QUERIES_ADDRESS_PTR, LOG_LDE_DOMAIN_SIZE_PTR, NUM_QUERIES_PTR
+    }} from miden::core::stark::constants
 
     begin
         {setup}
 
-        exec.constants::get_number_queries
-        exec.constants::get_fri_queries_address
-        exec.constants::get_lde_domain_depth
+        mem_load.NUM_QUERIES_PTR
+        mem_load.FRI_QUERIES_ADDRESS_PTR
+        mem_load.LOG_LDE_DOMAIN_SIZE_PTR
         swap movup.2 swap
         # => [query_ptr, num_queries, depth]
 
@@ -171,12 +173,12 @@ fn assert_batch_matches_reference(
     // Compare final output_len.
     let b_ol = batch_out
         .memory
-        .read_element(ContextId::root(), Felt::from_u32(RANDOM_COIN_OUTPUT_LEN_PTR))
+        .read_element(ContextId::root(), Felt::from_u32(RANDOM_COIN_OUTPUT_LENGTH_PTR))
         .map(|f| f.as_canonical_u64())
         .unwrap_or(u64::MAX);
     let r_ol = ref_out
         .memory
-        .read_element(ContextId::root(), Felt::from_u32(RANDOM_COIN_OUTPUT_LEN_PTR))
+        .read_element(ContextId::root(), Felt::from_u32(RANDOM_COIN_OUTPUT_LENGTH_PTR))
         .map(|f| f.as_canonical_u64())
         .unwrap_or(u64::MAX);
     assert_eq!(

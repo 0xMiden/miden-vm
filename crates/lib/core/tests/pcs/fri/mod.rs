@@ -13,7 +13,9 @@ const ADVICE_LENGTH_PREFIXES: usize = 3; // queries, layers, and remainder
 const LAYER_RECORD_WIDTH: usize = 2 * WORD_SIZE;
 
 const FRI_PREPROCESS_SOURCE: &str = "
-    use miden::core::stark::constants
+    use {FRI_COM_PTR, FRI_QUERIES_ADDRESS_PTR} from miden::core::stark::constants
+    use {LDE_DOMAIN_GENERATOR_PTR, REMAINDER_POLY_ADDRESS_PTR} from miden::core::stark::constants
+    use {REMAINDER_POLY_SIZE_PTR} from miden::core::stark::constants
 
     const MAX_FRI_QUERIES = 150
     const MAX_FRI_LAYERS = 32
@@ -39,17 +41,17 @@ const FRI_PREPROCESS_SOURCE: &str = "
     end
 
     proc preprocess
-        dup exec.constants::set_lde_domain_generator
+        dup mem_store.LDE_DOMAIN_GENERATOR_PTR
         adv_push
         # => [num_queries, g, ...]
         dup u32gt.0 assert.err=\"number of FRI queries must be nonzero\"
         dup u32lte.MAX_FRI_QUERIES assert.err=\"number of FRI queries exceeds FRI workspace\"
 
-        exec.constants::fri_com_ptr
+        push.FRI_COM_PTR
         # => [layer_ptr, num_queries, g, ...]
         dup.1 mul.4 sub
         # => [query_ptr, num_queries, g, ...]
-        dup exec.constants::set_fri_queries_address
+        dup mem_store.FRI_QUERIES_ADDRESS_PTR
         swap
         sub.1
         padw
@@ -91,7 +93,7 @@ const FRI_PREPROCESS_SOURCE: &str = "
         dup u32gt.0 assert.err=\"FRI remainder polynomial must be nonzero\"
         dup u32lte.MAX_FRI_REMAINDER_WORDS assert.err=\"FRI remainder polynomial exceeds FRI workspace\"
 
-        dup mul.2 exec.constants::set_remainder_poly_size
+        dup mul.2 mem_store.REMAINDER_POLY_SIZE_PTR
 
         sub.1
         movdn.4
@@ -102,7 +104,7 @@ const FRI_PREPROCESS_SOURCE: &str = "
         dropw drop drop
         #=> [remainder_poly_ptr, layer_ptr, g]
 
-        exec.constants::set_remainder_poly_address
+        mem_store.REMAINDER_POLY_ADDRESS_PTR
         drop drop
     end
 ";
@@ -111,14 +113,17 @@ const FRI_PREPROCESS_SOURCE: &str = "
 fn fri_verify_rejects_empty_query_region() {
     let source = "
         use miden::core::pcs::fri::frie2f4
-        use miden::core::stark::constants
+        use {FRI_COM_PTR, FRI_QUERIES_ADDRESS_PTR} from miden::core::stark::constants
+        use {LDE_DOMAIN_GENERATOR_PTR} from miden::core::stark::constants
+        use {REMAINDER_POLY_ADDRESS_PTR} from miden::core::stark::constants
+        use {REMAINDER_POLY_SIZE_PTR} from miden::core::stark::constants
 
         begin
-            push.1 exec.constants::set_lde_domain_generator
-            push.64 exec.constants::set_remainder_poly_size
-            exec.constants::fri_com_ptr
-            dup exec.constants::set_remainder_poly_address
-            exec.constants::set_fri_queries_address
+            push.1 mem_store.LDE_DOMAIN_GENERATOR_PTR
+            push.64 mem_store.REMAINDER_POLY_SIZE_PTR
+            push.FRI_COM_PTR
+            dup mem_store.REMAINDER_POLY_ADDRESS_PTR
+            mem_store.FRI_QUERIES_ADDRESS_PTR
             exec.frie2f4::verify
         end
         ";

@@ -352,7 +352,7 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
         }
         builder.assert_zero(
             pai_p.clone() + pai_q.clone() + cancel + dbl + generic
-                - act
+                - act.clone()
                 - pai_p.clone() * pai_q.clone(),
         );
 
@@ -402,6 +402,7 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
         let rq_lo: AB::Expr = next[COL_RQ_LO].into();
         let rq_hi: AB::Expr = next[COL_RQ_HI].into();
         let at_res: AB::Expr = sel[PCOL_RES].clone();
+        builder.assert_zero(at_res.clone() * (AB::Expr::ONE - act) * next[TERM_CELL_MULT].into());
         builder.assert_zero(
             at_res.clone()
                 * mints.clone()

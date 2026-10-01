@@ -1,3 +1,13 @@
+use {
+    AUXILIARY_ACE_INPUTS_ADDRESS_PTR,
+    AUX_RAND_ELEM_ADDRESS_PTR,
+    CURRENT_TRACE_ROW_ADDRESS_PTR,
+    LOG_AIR_TRACE_LENGTHS_PTR,
+    LOG_TRACE_LENGTH_PTR,
+    OOD_EVALUATIONS_ADDRESS_PTR,
+    PREPROCESSED_TRACE_COM_PTR,
+    RELATION_DIGEST_PTR,
+} from miden::core::stark::constants
 use miden::core::stark::types
 pub mod aux_trace
 pub mod constraints_eval
@@ -6,7 +16,6 @@ pub mod layout
 pub mod ood_frames
 pub mod public_inputs
 
-use miden::core::stark::constants
 use miden::core::stark::utils
 use miden::core::stark::verifier
 
@@ -14,10 +23,10 @@ use miden::core::stark::verifier
 # zero because Lifted STARK does not grind lookup challenges.
 const LOOKUP_POW_BITS = 0
 const MAX_MESSAGE_WIDTH = 18
-const NUM_COMPOSED_CONSTRAINTS = 660
+const NUM_COMPOSED_CONSTRAINTS = 673
 const MAX_CONSTRAINT_DEGREE = 5
 const NUM_DEEP_TERMS = 802
-const LOOKUP_FRACTIONS_PER_ROW = 260
+const LOOKUP_FRACTIONS_PER_ROW = 261
 const FIXED_BOUNDARY_LOOKUP_TERMS = 8
 
 # Inclusive upper bound used by the PVM shape checks.
@@ -44,10 +53,10 @@ const MIN_LOG_HEIGHT_8 = 2
 const MIN_LOG_HEIGHT_9 = 1
 
 # PVM_RELATION_DIGEST = Eidos(PVM_PROTOCOL_ID || PVM_ACE_CIRCUIT_DIGEST).
-const RELATION_DIGEST_0 = 5258132695316583046
-const RELATION_DIGEST_1 = 1130709131279213577
-const RELATION_DIGEST_2 = 7578682590228695015
-const RELATION_DIGEST_3 = 4948183518061979794
+const RELATION_DIGEST_0 = 8672788858776138894
+const RELATION_DIGEST_1 = 4949037241898863646
+const RELATION_DIGEST_2 = 5828450362038287754
+const RELATION_DIGEST_3 = 2959977635137424836
 
 # Trusted commitment to the PVM preprocessed trace tree under the native Eidos configuration;
 # `random_coin::init_seed` binds it into the Fiat-Shamir transcript.
@@ -68,7 +77,7 @@ const PREPROCESSED_COMMITMENT_3 = 5080896414781165458
 pub proc load_air_context()
     # [next_height_ptr, max_height]
     push.0
-    exec.constants::air_trace_length_logs_ptr
+    push.LOG_AIR_TRACE_LENGTHS_PTR
 
     push.MIN_LOG_HEIGHT_0 exec.load_air_height
     push.MIN_LOG_HEIGHT_1 exec.load_air_height
@@ -82,7 +91,7 @@ pub proc load_air_context()
     push.MIN_LOG_HEIGHT_9 exec.load_air_height
 
     drop
-    exec.constants::set_trace_length_log
+    mem_store.LOG_TRACE_LENGTH_PTR
 
     # The heights are stored above and unchanged from here on. Derive both inverse maps once: the
     # ingest scatters use pos_by_id, and fold-coefficient staging uses id_by_pos.
@@ -94,13 +103,13 @@ pub proc load_air_context()
     exec.store_relation_digest
     exec.store_preprocessed_commitment
     exec.layout::preprocessed_current_ptr
-    exec.constants::set_ood_evaluations_address
+    mem_store.OOD_EVALUATIONS_ADDRESS_PTR
     exec.layout::current_trace_row_ptr
-    exec.constants::set_current_trace_row_address
+    mem_store.CURRENT_TRACE_ROW_ADDRESS_PTR
     exec.layout::auxiliary_ace_inputs_ptr
-    exec.constants::set_auxiliary_ace_inputs_address
+    mem_store.AUXILIARY_ACE_INPUTS_ADDRESS_PTR
     exec.layout::aux_rand_elem_ptr
-    exec.constants::set_aux_rand_elem_address
+    mem_store.AUX_RAND_ELEM_ADDRESS_PTR
 end
 
 #! Loads, validates, stores, and folds one instance's log height into the running maximum.
@@ -160,7 +169,7 @@ end
 
 proc store_relation_digest()
     push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
-    exec.constants::relation_digest_ptr mem_storew_le
+    mem_storew_le.RELATION_DIGEST_PTR
     dropw
 end
 
@@ -176,7 +185,7 @@ end
 #!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
 #!          log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 proc build_security_descriptor(parameters: types::StackProofParameters) -> types::StackSecurityDescriptor
-    exec.constants::get_trace_length_log
+    mem_load.LOG_TRACE_LENGTH_PTR
     push.LOOKUP_FRACTIONS_PER_ROW
     push.FIXED_BOUNDARY_LOOKUP_TERMS
     push.MAX_MESSAGE_WIDTH
@@ -188,7 +197,7 @@ end
 
 proc store_preprocessed_commitment
     push.PREPROCESSED_COMMITMENT_3.PREPROCESSED_COMMITMENT_2.PREPROCESSED_COMMITMENT_1.PREPROCESSED_COMMITMENT_0
-    dupw exec.constants::preprocessed_trace_com_ptr mem_storew_le dropw
+    dupw mem_storew_le.PREPROCESSED_TRACE_COM_PTR dropw
     exec.layout::preprocessed_com_ptr mem_storew_le dropw
 end
 

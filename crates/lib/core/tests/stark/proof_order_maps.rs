@@ -79,9 +79,7 @@ impl Relation {
             .enumerate()
             .map(|(air, height)| {
                 let offset = if air == 0 { String::new() } else { format!(" add.{air}") };
-                format!(
-                    "    push.{height} exec.constants::air_trace_length_logs_ptr{offset} mem_store"
-                )
+                format!("    push.{height} push.LOG_AIR_TRACE_LENGTHS_PTR{offset} mem_store")
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -92,7 +90,7 @@ impl Relation {
             .collect::<Vec<_>>()
             .join("\n");
         format!(
-            "use miden::core::stark::constants
+            "use {{LOG_AIR_TRACE_LENGTHS_PTR}} from miden::core::stark::constants
 use miden::core::sys::{module}::ood_frames
 
 begin
