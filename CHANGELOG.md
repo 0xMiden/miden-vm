@@ -2,6 +2,10 @@
 
 ## v0.36.0 (Unreleased)
 
+#### Changes
+
+- [BREAKING] Warn on unused private assembly constants. Add a module path to `AnalysisContext::new` and an `UnusedConstant` variant to `SemanticAnalysisError` ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
+
 ## v0.35.0 (2026-10-01)
 
 #### Changes
@@ -37,7 +41,6 @@
 - Added Eidos wasm32 SIMD128 backend ([#3881](https://github.com/0xMiden/miden-vm/pull/3881)).
 - [BREAKING] Bumped Plonky3 related dependencies to v0.8.0, updating reported conjectured security levels with corrected conservative rounding and a DEEP composition bound that accounts for the LDE size ([#3888](https://github.com/0xMiden/miden-vm/pull/3888)).
 - Optimized Eidos native and wasm compression ([#3899](https://github.com/0xMiden/miden-vm/pull/3899)).
-- [BREAKING] Warn when a private assembly constant is unused, and make `miden::core::stark::security::SECURITY_CAP_BITS` private ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
 
 #### Fixes
 
@@ -52,14 +55,6 @@
 - Fixed `AdviceMap` deserialization accepting a repeated key and silently keeping the last value; it now returns an error, matching `MastForestWireView` ([#3900](https://github.com/0xMiden/miden-vm/pull/3900)).
 - [BREAKING] Limited core-library sorted-array lookups to 65,536 entries per call. Larger ranges are rejected before host memory is scanned, and the public `SortedArrayError` enum now includes `TooManyEntries`. This affects `find_word`, `find_key_value`, and `find_half_key_value` ([#3909](https://github.com/0xMiden/miden-vm/pull/3909)).
 - [BREAKING] Closed decoder AIR soundness gaps in caller-frame restoration, DYNCALL stack transitions, span and `REPEAT` adjacency, reserved opcode slots, and repeated-loop body authentication. This changes the block-stack and `END` APIs, AIR relation digest, and ACE registry roots, invalidating older proofs.
-
-#### Changes
-
-- Reworked the `MastForest` `Arbitrary` impl. `GenerationMode::Executable` (the default) yields forests whose procedure roots run to completion on any operand stack: infallible, stack-balanced basic blocks, binary split and loop conditions, externals that resolve to local roots, and syscalls into a paired `KernelDescriptor` exposed through `forest_kernel_strategy`. `GenerationMode::StructureOnly` keeps the permissive behavior ([#3158](https://github.com/0xMiden/miden-vm/pull/3158)).
-
-#### Changes
-
-- [BREAKING] Made the public `ParsingError` enum `#[non_exhaustive]` and restored separate variants for protocol ABI conflicts ([#3859](https://github.com/0xMiden/miden-vm/pull/3859)).
 
 ## v0.33.0 (2026-09-16)
 
