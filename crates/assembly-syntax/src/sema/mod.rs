@@ -530,9 +530,7 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
         }
     }
 
-    analyzer.mark_reexported_constants_used(module);
-    analyzer.resolve_constant_usage();
-    analyzer.add_live_constant_import_refs(&mut used_aliases);
+    analyzer.resolve_constant_usage(module, &mut used_aliases);
 
     for import in module.imports_mut() {
         if import.is_used() || !used_aliases.contains(import.local_name().as_str()) {
