@@ -265,6 +265,7 @@ impl FastProcessor {
     pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
         self.advice.set_options(&options)?;
         self.memory.set_max_elements(options.max_memory_elements());
+        self.deferred_state.set_limits(options.precompile_limits().clone());
         self.options = options;
         Ok(self)
     }
@@ -305,8 +306,11 @@ impl FastProcessor {
             system_call_state_stack: Vec::new(),
             stack_overflow_save_stack: Vec::new(),
             saved_overflow_len: 0,
-            deferred_state: DeferredState::new(Arc::new(miden_precompiles::registry()))
-                .map_err(AdviceError::DeferredStateInitializationFailed)?,
+            deferred_state: DeferredState::new(
+                Arc::new(miden_precompiles::registry()),
+                options.precompile_limits().clone(),
+            )
+            .map_err(AdviceError::DeferredStateInitializationFailed)?,
             package_debug_info: None,
             entrypoint_source_node: None,
             options,

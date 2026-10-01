@@ -8,8 +8,8 @@ use alloc::vec::Vec;
 use miden_core::{
     Word, ZERO,
     deferred::{
-        DataChunk, DeferredError, Digest, MAX_DEFERRED_ELEMENTS, Node, NodeType, PrecompileError,
-        Tag,
+        DataChunk, DeferredError, Digest, MAX_DEFERRED_WIRE_ELEMENTS, Node, NodeType,
+        PrecompileError, Tag,
     },
 };
 
@@ -229,15 +229,14 @@ pub(super) fn handle_deferred_register_data(
         },
     }
 
-    // Reject nodes that can never fit in the fixed deferred-state budget before
-    // reading memory. Remaining-budget accounting still belongs to `DeferredState::register`,
-    // because only inserting the node into `nodes` tells us whether this registration is an
-    // idempotent duplicate (which must remain free).
+    // Reject a payload exceeding the hard allocation ceiling before reading guest memory. The
+    // configurable execution-work policy is enforced by `DeferredState::register` after the node
+    // and its declared work have been decoded.
     let num_elements = payload_node_num_elements(n);
-    if num_elements > MAX_DEFERRED_ELEMENTS {
+    if num_elements > MAX_DEFERRED_WIRE_ELEMENTS {
         return Err(PrecompileError::from(DeferredError::DeferredStateTooLarge {
             num_elements,
-            max: MAX_DEFERRED_ELEMENTS,
+            max: MAX_DEFERRED_WIRE_ELEMENTS,
         })
         .into());
     }

@@ -6,7 +6,8 @@ extern crate alloc;
 extern crate std;
 
 use miden_core::deferred::{
-    MAX_DEFERRED_ELEMENTS, Node, PrecompileLimits, PrecompileRegistry, Tag, WorkClass, WorkLimit,
+    MAX_DEFERRED_WIRE_ELEMENTS, Node, PrecompileLimits, PrecompileRegistry, Tag, WorkClass,
+    WorkLimit,
 };
 
 mod codec;
@@ -52,10 +53,10 @@ pub const DEFAULT_MAX_TOTAL_MSM_TERMS: u64 = 16 * DEFAULT_MAX_MSM_TERMS as u64;
 pub fn default_precompile_limits() -> PrecompileLimits {
     let min_node_elements =
         Tag::AND.as_word().len() + Node::PACKED_BYTES_PER_CHUNK / size_of::<u32>();
-    let max_operations = (MAX_DEFERRED_ELEMENTS / min_node_elements) as u64;
-    let max_hash_bytes = (MAX_DEFERRED_ELEMENTS * size_of::<u32>()) as u64;
+    let max_operations = (MAX_DEFERRED_WIRE_ELEMENTS / min_node_elements) as u64;
+    let max_hash_bytes = (MAX_DEFERRED_WIRE_ELEMENTS * size_of::<u32>()) as u64;
 
-    PrecompileLimits::new(MAX_DEFERRED_ELEMENTS as u64)
+    PrecompileLimits::new(MAX_DEFERRED_WIRE_ELEMENTS as u64)
         .with_class(
             UINT_WORK,
             WorkLimit {
