@@ -4,6 +4,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 test_root="$(mktemp -d)"
 trap 'rm -rf "$test_root"' EXIT
+printf '[tag]\n\tgpgsign = true\n' > "$test_root/global.gitconfig"
+export GIT_CONFIG_GLOBAL="$test_root/global.gitconfig"
 
 test_repo="$test_root/repo"
 mkdir -p "$test_repo/scripts" "$test_repo/crates/lib/core/asm" "$test_root/bin"
@@ -11,6 +13,7 @@ git init -q "$test_repo"
 git -C "$test_repo" config user.name "MAST root gate test"
 git -C "$test_repo" config user.email "mast-root-gate@example.invalid"
 git -C "$test_repo" config commit.gpgsign false
+git -C "$test_repo" config tag.gpgsign false
 
 cp "$repo_root/scripts/check-masm-root-stability.sh" "$test_repo/scripts/"
 printf '// tag = "v0.35.0"\n' > "$test_repo/scripts/check-masm-export-digests.rs"
