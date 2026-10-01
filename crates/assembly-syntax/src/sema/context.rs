@@ -69,9 +69,7 @@ impl constants::ConstEnvironment for AnalysisContext {
         &mut self,
         path: Span<&Path>,
     ) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
-        if let Some(name) = path.as_ident() {
-            self.get(&name)
-        } else if let Some(name) = self.local_constant_name_for_path(path) {
+        if let Some(name) = self.local_constant_name(path) {
             self.get(&name)
         } else {
             Ok(None)
@@ -80,7 +78,7 @@ impl constants::ConstEnvironment for AnalysisContext {
 
     #[inline]
     fn on_eval_start(&mut self, path: Span<&Path>) {
-        if let Some(name) = path.as_ident()
+        if let Some(name) = self.local_constant_name(path)
             && self.constants.contains_key(&name)
         {
             self.evaluating_constants.push(name);
@@ -89,7 +87,7 @@ impl constants::ConstEnvironment for AnalysisContext {
 
     #[inline]
     fn on_eval_completed(&mut self, name: Span<&Path>, value: &ConstantExpr) {
-        let Some(name) = name.as_ident() else {
+        let Some(name) = self.local_constant_name(name) else {
             return;
         };
         if self.constants.contains_key(&name) {
@@ -164,6 +162,10 @@ impl AnalysisContext {
         } else {
             self.used_constants.insert(name.clone());
         }
+    }
+
+    fn local_constant_name(&self, path: Span<&Path>) -> Option<Ident> {
+        path.as_ident().or_else(|| self.local_constant_name_for_path(path))
     }
 
     fn local_constant_name_for_path(&self, path: Span<&Path>) -> Option<Ident> {
@@ -443,7 +445,7 @@ mod tests {
             &mut self,
             path: Span<&Path>,
         ) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
-            if let Some(name) = path.as_ident() {
+            if let Some(name) = self.inner.local_constant_name(path) {
                 self.get(&name)
             } else {
                 <AnalysisContext as constants::ConstEnvironment>::get_by_path(self.inner, path)
@@ -470,10 +472,23 @@ mod tests {
         ConstantExpr::Var(Span::new(SourceSpan::default(), path))
     }
 
-    fn make_shared_subexpression_chain(context: &mut AnalysisContext, depth: usize) {
+    fn make_ref_at(name: Ident, module: &Path) -> ConstantExpr {
+        let path = Arc::<Path>::from(module.join(Path::new(name.as_str())));
+        ConstantExpr::Var(Span::new(SourceSpan::default(), path))
+    }
+
+    fn make_shared_subexpression_chain(
+        context: &mut AnalysisContext,
+        depth: usize,
+        qualifier: Option<&Path>,
+    ) {
         for i in 0..depth {
             let name = make_name(i);
             let next = make_name(i + 1);
+            let make_next = || match qualifier {
+                Some(module) => make_ref_at(next.clone(), module),
+                None => make_ref(next.clone()),
+            };
             context.register_constant(Constant::new(
                 SourceSpan::default(),
                 Visibility::Public,
@@ -481,8 +496,8 @@ mod tests {
                 ConstantExpr::BinaryOp {
                     span: SourceSpan::default(),
                     op: ConstantOp::Add,
-                    lhs: Box::new(make_ref(next.clone())),
-                    rhs: Box::new(make_ref(next)),
+                    lhs: Box::new(make_next()),
+                    rhs: Box::new(make_next()),
                 },
             ));
         }
@@ -495,8 +510,7 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn semantic_const_eval_memoizes_shared_subexpressions() {
+    fn assert_shared_subexpression_memoization(qualifier: Option<&Path>) {
         let source_manager = Arc::new(DefaultSourceManager::default());
         let uri =
             Uri::from(String::from("mem://const-eval-shared-subexpressions").into_boxed_str());
@@ -506,16 +520,19 @@ mod tests {
             String::from("begin\n    nop\nend\n").into_boxed_str(),
         );
         let source_file = source_manager.load_from_raw_parts(uri, content);
-        let mut context = AnalysisContext::new(Path::EMPTY, source_file, source_manager);
+        let mut context = AnalysisContext::new(Path::new("test::lib"), source_file, source_manager);
 
         // Each Ci references C(i+1) twice, so without memoization the number of misses would
         // grow exponentially with depth.
         let depth = 24;
-        make_shared_subexpression_chain(&mut context, depth);
+        make_shared_subexpression_chain(&mut context, depth, qualifier);
 
         let root_name = make_name(0);
         let mut env = CountingEnv::new(&mut context);
-        let root = make_ref(root_name);
+        let root = match qualifier {
+            Some(module) => make_ref_at(root_name, module),
+            None => make_ref(root_name),
+        };
         let result = constants::eval::expr(&root, &mut env)
             .expect("shared-subexpression constant graph should evaluate");
 
@@ -529,5 +546,20 @@ mod tests {
             depth,
             "the second reference to each dependency should be served from cache"
         );
+    }
+
+    #[test]
+    fn semantic_const_eval_memoizes_shared_subexpressions() {
+        assert_shared_subexpression_memoization(None);
+    }
+
+    #[test]
+    fn semantic_const_eval_memoizes_self_qualified_subexpressions() {
+        assert_shared_subexpression_memoization(Some(Path::new("self")));
+    }
+
+    #[test]
+    fn semantic_const_eval_memoizes_absolute_qualified_subexpressions() {
+        assert_shared_subexpression_memoization(Some(Path::new("::test::lib")));
     }
 }
