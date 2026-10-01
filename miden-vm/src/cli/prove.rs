@@ -234,19 +234,45 @@ impl ProveCmd {
 /// Returns true when both paths name the same existing file.
 ///
 /// This runs after the proof has been written, so the proof side always exists. An outputs path
-/// that does not exist yet cannot be the proof, and neither can a FIFO or device; those are only
-/// stat'ed, because `is_same_file` opens both paths and opening a FIFO blocks until a writer
-/// appears. Any other error (e.g. a proof file that cannot be opened for reading) leaves the
-/// question unanswered, so it is returned rather than taken as a no.
+/// that does not exist yet cannot be the proof, and neither can a FIFO or device. Identity is
+/// taken from the stat of each path, so neither file is opened: opening a FIFO blocks until a
+/// writer appears, and opening for reading fails on a write-only file that is still a valid
+/// destination. Any other stat error leaves the question unanswered, so it is returned rather
+/// than taken as a no.
 fn resolve_to_same_file(output_path: &Path, proof_path: &Path) -> io::Result<bool> {
-    let output_is_file = match fs::metadata(output_path) {
-        Ok(metadata) => metadata.is_file(),
+    let output_metadata = match fs::metadata(output_path) {
+        Ok(metadata) => metadata,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
         Err(err) => return Err(err),
     };
-    if !output_is_file || !fs::metadata(proof_path)?.is_file() {
+    let proof_metadata = fs::metadata(proof_path)?;
+    if !output_metadata.is_file() || !proof_metadata.is_file() {
         return Ok(false);
     }
+    same_file_identity(output_path, &output_metadata, proof_path, &proof_metadata)
+}
+
+#[cfg(unix)]
+fn same_file_identity(
+    _: &Path,
+    output_metadata: &fs::Metadata,
+    _: &Path,
+    proof_metadata: &fs::Metadata,
+) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+
+    Ok(output_metadata.dev() == proof_metadata.dev()
+        && output_metadata.ino() == proof_metadata.ino())
+}
+
+// `is_same_file` opens with no access rights on Windows, so file permissions do not get in the way
+#[cfg(not(unix))]
+fn same_file_identity(
+    output_path: &Path,
+    _: &fs::Metadata,
+    proof_path: &Path,
+    _: &fs::Metadata,
+) -> io::Result<bool> {
     same_file::is_same_file(output_path, proof_path)
 }
 
@@ -347,7 +373,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn resolve_to_same_file_reports_a_proof_it_cannot_open() {
+    fn resolve_to_same_file_sees_through_a_hard_link_it_cannot_read() {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = tempfile::tempdir().unwrap();
@@ -357,13 +383,22 @@ mod tests {
         fs::hard_link(&proof_path, &link_path).unwrap();
         fs::set_permissions(&proof_path, fs::Permissions::from_mode(0o200)).unwrap();
 
-        // root reads the file regardless of its mode, so there is no error to see
-        if fs::File::open(&proof_path).is_ok() {
-            return;
-        }
+        assert!(resolve_to_same_file(&link_path, &proof_path).unwrap());
+    }
 
-        let err = resolve_to_same_file(&link_path, &proof_path).unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+    #[cfg(unix)]
+    #[test]
+    fn resolve_to_same_file_accepts_a_distinct_file_it_cannot_read() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+        let output_path = dir.path().join("same.outputs");
+        fs::write(&output_path, "stale outputs").unwrap();
+        fs::set_permissions(&output_path, fs::Permissions::from_mode(0o200)).unwrap();
+
+        assert!(!resolve_to_same_file(&output_path, &proof_path).unwrap());
     }
 
     #[cfg(unix)]
