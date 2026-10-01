@@ -36,7 +36,9 @@ pub struct ExecutionOptions {
     /// execution, rounded up to the nearest multiple of 4.
     max_memory_elements: usize,
     /// Policy limiting guest-induced deferred precompile work.
-    precompile_limits: PrecompileLimits,
+    execution_precompile_limits: PrecompileLimits,
+    /// Policy limiting the final root-reachable deferred witness exported after execution.
+    verification_precompile_limits: PrecompileLimits,
 }
 
 impl Default for ExecutionOptions {
@@ -51,7 +53,9 @@ impl Default for ExecutionOptions {
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
             overlapped_trace_build: true,
-            precompile_limits: miden_precompiles::default_precompile_limits(),
+            execution_precompile_limits: miden_precompiles::default_execution_precompile_limits(),
+            verification_precompile_limits:
+                miden_precompiles::default_verification_precompile_limits(),
         }
     }
 }
@@ -153,7 +157,9 @@ impl ExecutionOptions {
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
             overlapped_trace_build: true,
-            precompile_limits: miden_precompiles::default_precompile_limits(),
+            execution_precompile_limits: miden_precompiles::default_execution_precompile_limits(),
+            verification_precompile_limits:
+                miden_precompiles::default_verification_precompile_limits(),
         })
     }
 
@@ -283,13 +289,24 @@ impl ExecutionOptions {
     }
 
     /// Returns the policy limiting guest-induced deferred precompile work.
-    pub const fn precompile_limits(&self) -> &PrecompileLimits {
-        &self.precompile_limits
+    pub const fn execution_precompile_limits(&self) -> &PrecompileLimits {
+        &self.execution_precompile_limits
     }
 
     /// Sets the policy limiting guest-induced deferred precompile work.
-    pub fn with_precompile_limits(mut self, limits: PrecompileLimits) -> Self {
-        self.precompile_limits = limits;
+    pub fn with_execution_precompile_limits(mut self, limits: PrecompileLimits) -> Self {
+        self.execution_precompile_limits = limits;
+        self
+    }
+
+    /// Returns the policy limiting the final root-reachable deferred witness.
+    pub const fn verification_precompile_limits(&self) -> &PrecompileLimits {
+        &self.verification_precompile_limits
+    }
+
+    /// Sets the policy limiting the final root-reachable deferred witness.
+    pub fn with_verification_precompile_limits(mut self, limits: PrecompileLimits) -> Self {
+        self.verification_precompile_limits = limits;
         self
     }
 }

@@ -2,6 +2,8 @@
 
 use alloc::collections::BTreeMap;
 
+use super::{Node, PrecompileError, PrecompileRegistry};
+
 /// Stable process-local identifier for one class of precompile work.
 ///
 /// Returning the same class from multiple tags intentionally combines their accounting. The
@@ -73,7 +75,7 @@ impl WorkSummary {
     }
 }
 
-/// Work computed while preparing one portable witness.
+/// Work accumulated within one execution or verification accounting scope.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PrecompileWork {
     nodes: u64,
@@ -82,12 +84,12 @@ pub struct PrecompileWork {
 }
 
 impl PrecompileWork {
-    /// Returns the number of explicit nodes in the prepared witness.
+    /// Returns the number of charged nodes in this accounting scope.
     pub const fn nodes(&self) -> u64 {
         self.nodes
     }
 
-    /// Returns the canonical field-element footprint of all explicit nodes.
+    /// Returns the canonical field-element footprint charged in this accounting scope.
     pub const fn elements(&self) -> u64 {
         self.elements
     }
@@ -97,7 +99,26 @@ impl PrecompileWork {
         self.classes.get(&class).copied()
     }
 
-    pub(crate) fn charge(
+    /// Charges one node under `limits`.
+    ///
+    /// Framework nodes contribute structural elements but no precompile work class. Every other
+    /// node uses the owning precompile's declared work item.
+    pub(crate) fn charge_node(
+        &mut self,
+        node: &Node,
+        registry: &PrecompileRegistry,
+        limits: &PrecompileLimits,
+    ) -> Result<(), PrecompileError> {
+        let item = if node.tag().is_framework_reserved() {
+            None
+        } else {
+            Some(registry.work(node)?)
+        };
+        self.charge(node.felt_len(), item, limits)?;
+        Ok(())
+    }
+
+    fn charge(
         &mut self,
         elements: usize,
         item: Option<WorkItem>,
@@ -142,7 +163,7 @@ impl PrecompileWork {
     }
 }
 
-/// Bounds for one work class within a single witness.
+/// Bounds for one work class within a single accounting scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorkLimit {
     /// Maximum number of items in this class.
@@ -180,7 +201,7 @@ impl WorkLimit {
     }
 }
 
-/// Admission policy for one portable precompile witness.
+/// Admission policy for one execution or verification accounting scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrecompileLimits {
     max_elements: u64,
@@ -207,11 +228,6 @@ impl PrecompileLimits {
         self
     }
 
-    /// Returns the structural field-element ceiling.
-    pub(crate) const fn max_elements(&self) -> u64 {
-        self.max_elements
-    }
-
     /// Returns the configured limit for `class`, if that class is admitted.
     pub fn class(&self, class: WorkClass) -> Option<WorkLimit> {
         self.classes.get(&class).copied()
@@ -223,7 +239,7 @@ impl PrecompileLimits {
 pub enum PrecompileLimitError {
     #[error("precompile work accounting overflowed")]
     Overflow,
-    #[error("precompile witness uses {actual} structural elements, maximum is {max}")]
+    #[error("precompile work uses {actual} structural elements, maximum is {max}")]
     Elements { actual: u64, max: u64 },
     #[error("precompile work class `{class}` has no configured limit")]
     MissingClass { class: WorkClass },

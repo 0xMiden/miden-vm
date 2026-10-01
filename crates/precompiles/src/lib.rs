@@ -49,8 +49,21 @@ pub const DEFAULT_MAX_MSM_TERMS: u32 = 4_096;
 /// Conservative maximum total MSM terms in one witness admitted by default.
 pub const DEFAULT_MAX_TOTAL_MSM_TERMS: u64 = 16 * DEFAULT_MAX_MSM_TERMS as u64;
 
-/// Returns the canonical per-witness precompile admission policy.
-pub fn default_precompile_limits() -> PrecompileLimits {
+/// Returns the default policy for guest-induced deferred work during execution.
+pub fn default_execution_precompile_limits() -> PrecompileLimits {
+    default_precompile_limits()
+}
+
+/// Returns the default policy for one final root-reachable witness during verification.
+pub fn default_verification_precompile_limits() -> PrecompileLimits {
+    default_precompile_limits()
+}
+
+/// Builds the currently shared default policy for execution and verification.
+///
+/// The public entry points remain distinct because the two scopes are configured independently
+/// and may diverge as their defaults are calibrated.
+fn default_precompile_limits() -> PrecompileLimits {
     let min_node_elements =
         Tag::AND.as_word().len() + Node::PACKED_BYTES_PER_CHUNK / size_of::<u32>();
     let max_operations = (MAX_DEFERRED_WIRE_ELEMENTS / min_node_elements) as u64;

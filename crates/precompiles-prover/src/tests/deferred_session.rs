@@ -103,7 +103,7 @@ fn check_wire_session(state: WitnessFixture) -> SessionTraces {
         .clone()
         .prepare(
             alloc::sync::Arc::new(miden_precompiles::registry()),
-            &miden_precompiles::default_precompile_limits(),
+            &miden_precompiles::default_verification_precompile_limits(),
         )
         .unwrap();
     assert_eq!(prepared.root(), state.root());

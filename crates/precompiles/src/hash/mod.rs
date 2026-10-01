@@ -12,7 +12,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredContext, Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag,
-        WorkClass, WorkItem, precompile_id,
+        WorkItem, precompile_id,
     },
 };
 
@@ -136,10 +136,6 @@ impl<H: HashFunction> Precompile for HashPrecompile<H> {
         Self::id()
     }
 
-    fn work_classes(&self) -> &'static [WorkClass] {
-        &[crate::HASH_WORK]
-    }
-
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
         let disc = u32::try_from(args[0].as_canonical_u64()).ok()?;
         if disc != ASSERT_DISC || args[2] != ZERO {
@@ -240,7 +236,7 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     let fresh = || {
         DeferredState::new(
             Arc::new(PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default())),
-            crate::default_precompile_limits(),
+            crate::default_execution_precompile_limits(),
         )
         .expect("hash precompile initialization should fit the test budget")
     };
@@ -387,13 +383,13 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     let assertion = state.register(assertion_node).unwrap();
     let root = state.log_statement(assertion).unwrap();
     let witness = state
-        .into_witness()
+        .into_witness(&crate::default_verification_precompile_limits())
         .expect("hash assertion should export")
         .expect("logged hash assertion is nonempty");
     let prepared = witness
         .prepare(
             Arc::new(PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default())),
-            &crate::default_precompile_limits(),
+            &crate::default_verification_precompile_limits(),
         )
         .unwrap();
     assert_eq!(prepared.root(), root);

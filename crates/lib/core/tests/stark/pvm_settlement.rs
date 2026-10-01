@@ -186,7 +186,7 @@ impl PvmSettlementHost {
             .with_library(core_lib)
             .expect("core library must load into the settlement host");
         let registry = Arc::new(miden_precompiles::registry());
-        let limits = miden_precompiles::default_precompile_limits();
+        let limits = miden_precompiles::default_verification_precompile_limits();
         let available_root = precompile_witnesses
             .iter()
             .map(|witness| {

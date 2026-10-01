@@ -5,7 +5,7 @@ use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use super::precompile::{Precompile, precompile_id};
 use crate::{
     Felt,
-    deferred::{DeferredContext, Node, NodeType, PrecompileError, Tag, WorkClass, WorkItem},
+    deferred::{DeferredContext, Node, NodeType, PrecompileError, Tag, WorkItem},
 };
 
 /// Installed set of precompiles for deferred-node validation and evaluation.
@@ -37,19 +37,6 @@ impl PrecompileRegistry {
     /// Returns whether this registry contains no installed precompiles.
     pub fn is_empty(&self) -> bool {
         self.precompiles.is_empty()
-    }
-
-    /// Returns the work classes used by installed precompiles.
-    pub(crate) fn work_classes(&self) -> Vec<WorkClass> {
-        let mut classes = Vec::new();
-        for precompile in self.precompiles.values() {
-            for &class in precompile.work_classes() {
-                if !classes.contains(&class) {
-                    classes.push(class);
-                }
-            }
-        }
-        classes
     }
 
     /// Adds a precompile to the registry and returns `self` for chaining.
@@ -212,9 +199,6 @@ mod tests {
         fn id(&self) -> Felt {
             precompile_id(self.name())
         }
-        fn work_classes(&self) -> &'static [WorkClass] {
-            &[FIXTURE_WORK]
-        }
         fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
             if args != [ZERO; 3] {
                 return None;
@@ -247,9 +231,6 @@ mod tests {
         }
         fn id(&self) -> Felt {
             precompile_id(self.name())
-        }
-        fn work_classes(&self) -> &'static [WorkClass] {
-            &[]
         }
         fn decode(&self, _args: [Felt; 3]) -> Option<NodeType> {
             Some(NodeType::True)

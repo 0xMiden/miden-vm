@@ -24,7 +24,7 @@ pub struct Prover {
     hash_fn: HashFunction,
     max_prover_memory_bytes: u64,
     max_precompile_prover_memory_bytes: u64,
-    precompile_limits: PrecompileLimits,
+    verification_precompile_limits: PrecompileLimits,
 }
 
 impl Prover {
@@ -47,14 +47,15 @@ impl Prover {
             hash_fn: HashFunction::Blake3_256,
             max_prover_memory_bytes: Self::DEFAULT_MAX_PROVER_MEMORY_BYTES,
             max_precompile_prover_memory_bytes: Self::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
-            precompile_limits: miden_precompiles_prover::default_precompile_limits(),
+            verification_precompile_limits:
+                miden_precompiles_prover::default_verification_precompile_limits(),
         }
     }
 
-    /// Sets the maximum declared work admitted for each precompile witness.
+    /// Sets the verification policy applied independently to each precompile witness.
     #[must_use]
-    pub fn with_precompile_limits(mut self, limits: PrecompileLimits) -> Self {
-        self.precompile_limits = limits;
+    pub fn with_verification_precompile_limits(mut self, limits: PrecompileLimits) -> Self {
+        self.verification_precompile_limits = limits;
         self
     }
 
@@ -167,7 +168,7 @@ impl Prover {
         miden_precompiles_prover::prove_precompiles_with_limits_and_budget(
             witnesses,
             self.hash_fn,
-            &self.precompile_limits,
+            &self.verification_precompile_limits,
             self.max_precompile_prover_memory_bytes,
         )
         .map_err(ProverError::PrecompileProofGeneration)
@@ -182,7 +183,7 @@ impl Prover {
             witness,
             expected_root,
             self.hash_fn,
-            &self.precompile_limits,
+            &self.verification_precompile_limits,
             self.max_precompile_prover_memory_bytes,
         )
         .map_err(ProverError::PrecompileProofGeneration)
@@ -433,7 +434,7 @@ mod tests {
             .log_statement(statement)
             .expect("trivial statement should log into the deferred root");
         state
-            .into_witness()
+            .into_witness(&PrecompileLimits::new(u64::MAX))
             .expect("trivial deferred state should export")
             .expect("non-TRUE root should export a witness")
     }

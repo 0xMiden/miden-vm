@@ -247,9 +247,10 @@ The `miden-precompiles` crate supplies the bundled implementations used by core-
 standard proving. See the [API contract](./semantics.md#proof-obligations-and-composition) for the
 portable transport, batching, completion, and verification lifecycle.
 
-Logical resource admission is explicit and per singleton witness: structural elements and declared
-hash, uint, curve, and MSM work are checked before commitment hashing or evaluation. Batches and
-proofs share a 128-root ceiling, with no aggregate logical-work admission.
+Logical resource admission has two explicit scopes. Execution limits account every guest-induced
+deferred operation, while verification limits account every explicit node in the final unique
+root-reachable witness before commitment hashing or evaluation. Batches and proofs share a
+128-root ceiling, with no aggregate logical-work admission.
 Prover memory is estimated after import and checked before trace allocation; default admission-limit
 calibration remains separate follow-up work. The external STARK that verifies a committed DAG, the
 **Precompile VM**, is described in GitHub discussion #3005.

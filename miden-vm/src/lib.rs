@@ -21,7 +21,8 @@ pub use miden_core::{
 };
 pub use miden_core_lib::conjectured_security_estimator_root;
 pub use miden_precompiles::{
-    CURVE_WORK, HASH_WORK, MSM_WORK, UINT_WORK, default_precompile_limits,
+    CURVE_WORK, HASH_WORK, MSM_WORK, UINT_WORK, default_execution_precompile_limits,
+    default_verification_precompile_limits,
 };
 pub use miden_processor::{
     BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionWitness,

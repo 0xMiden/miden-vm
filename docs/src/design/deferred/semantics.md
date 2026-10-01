@@ -58,7 +58,7 @@ registration.
 `DeferredState::new(registry)` initializes one total budget from the library safety ceiling:
 
 ```text
-remaining_elements = MAX_DEFERRED_ELEMENTS
+remaining_elements = MAX_DEFERRED_WIRE_ELEMENTS
 ```
 
 Initialization also installs the registry's `init()` constants, charging them against that same
@@ -109,6 +109,13 @@ Precompile-owned nodes are evaluated by `PrecompileRegistry::evaluate`, which di
 owning `Precompile` with a `DeferredContext`. Canonical nodes newly produced during evaluation are
 validated before they become registered nodes.
 
+`DeferredState` owns execution admission around this semantic engine. Every guest registration
+attempt charges its node against `execution_work` and `execution_limits` before storage or
+evaluation, including repeated registrations of the same commitment. Storage and successful
+evaluation remain deduplicated. Rolling-root AND nodes are also guest-induced execution work.
+Registry bootstrap nodes and helper nodes created internally during semantic evaluation are not
+execution work.
+
 `DeferredContext` gives precompile implementations the same semantic split:
 
 - `get_node(digest)` queries the registered/original node by digest without evaluating it.
@@ -127,10 +134,13 @@ statement, requires both to evaluate to `Node::TRUE`, then appends one framework
 next_root = digest(Node::and(previous_root, stmt_digest))
 ```
 
-Logging `TRUE` still records this AND node. `into_witness` consumes the execution state and exports
-only its root-reachable closure in canonical child-first order. Index zero is implicit TRUE; data
-entries carry literal chunks, joins carry two backward child indices, and pair lists carry ordered
-pairs of backward child indices. A nonempty witness opens the digest of its last entry.
+Logging `TRUE` still records this AND node. `into_witness(verification_limits)` consumes the
+execution state and traverses only its unique root-reachable closure in canonical child-first
+order. It accounts every explicit exported node against the verification policy while traversing;
+an execution admitted under a different execution policy can therefore fail export. Index zero is
+implicit TRUE; data entries carry literal chunks, joins carry two backward child indices, and pair
+lists carry ordered pairs of backward child indices. A nonempty witness opens the digest of its
+last entry.
 
 In-memory construction and standalone decoding enforce canonical transport syntax and allocation
 bounds only; standalone decoding also rejects trailing bytes. They do not hash commitments or
@@ -139,11 +149,13 @@ release the runtime state.
 
 ## Witness preparation and admission
 
-`PrecompileWitness::prepare(self, registry, limits)` consumes bounded wire entries and moves their
-payloads into checked nodes. It validates registry tags, payload shapes, and backward references,
-charges structural and declared work before hashing each node, and stops at the first exceeded
-limit. A final traversal checks canonical order and reachability without hashing again. Duplicate
-commitments, orphaned entries, and a `TRUE_DIGEST` final root are rejected.
+`PrecompileWitness::prepare(self, registry, verification_limits)` independently reconstructs the
+same per-node verification work while consuming bounded wire entries and moving their payloads into
+checked nodes. It validates registry tags, payload shapes, and backward references, charges each
+explicit node before hashing it, and stops at the first exceeded limit. Explicit bootstrap or
+helper nodes are ordinary witness nodes and are counted. A final traversal checks canonical order
+and reachability without hashing again. Duplicate commitments, orphaned entries, and a
+`TRUE_DIGEST` final root are rejected.
 
 A successful `PreparedWitness` contains the reconstructed commitments and root, the complete
 `PrecompileWork`, and a graph admitted under the supplied per-witness policy. It does not establish
@@ -164,20 +176,26 @@ prepared.evaluate()?;
 // `witness` remains available because this caller explicitly cloned it.
 ```
 
-`PrecompileLimits` is a per-singleton-witness admission policy. It bounds explicit node elements
-and requires a `WorkLimit` for every installed registry class. `PrecompileWork` reports node and
-class counts, total class size, and maximum individual size. Framework nodes consume structural
-elements but no precompile work class. Distinct hash claims charge their declared input bytes even
-when they share a payload. Every declared MSM term is charged, including zero scalars and repeated
-canonical bases, so admission covers either lowering path. There are no separate Session MSM
-workload limits or session-wide fallback-term counter.
+`PrecompileLimits` and `PrecompileWork` are shared by execution and verification, but their scopes
+are deliberately different. Execution accounts guest attempts over time; verification accounts
+the final unique root-reachable graph. Their totals are not expected to match. Framework nodes
+consume structural elements but no precompile work class. A precompile-owned node requires a
+configured `WorkLimit` for the class it declares. Distinct hash claims charge their declared input
+bytes even when they share a payload. Every declared MSM term is charged, including zero scalars
+and repeated canonical bases, so admission covers either lowering path.
 
-The standard registry's `default_precompile_limits()` defines the hash, uint, curve, and MSM policy.
-Verifier and prover callers can replace it with `with_precompile_limits`. Default calibration is
-separate follow-up work: measure preparation, import, and proving for realistic hash, arithmetic,
-curve, mixed, and worst-case MSM workloads, with both little sharing and repeated/shared inputs.
-The existing defaults are unchanged and are not evidence that 128 maximal inputs are practical.
-Normal admission limits can be lower than the hard transport/allocation ceiling.
+The standard registry exposes `default_execution_precompile_limits()` and
+`default_verification_precompile_limits()`. They use the same private construction today but remain
+separate policies and configuration surfaces. `ExecutionOptions` configures both execution and
+export policy independently; prover and verifier callers configure verification policy with
+`with_verification_precompile_limits`. Default calibration is separate follow-up work: measure
+preparation, import, and proving for realistic hash, arithmetic, curve, mixed, and worst-case MSM
+workloads, with both little sharing and repeated/shared inputs. The existing defaults are unchanged
+and are not evidence that 128 maximal inputs are practical.
+
+`MAX_DEFERRED_WIRE_ELEMENTS` remains a separate hard transport/allocation ceiling. The proving
+Session accepts only `PreparedWitness` values and never reapplies logical-work admission. Prover
+memory is independently bounded by the batch-wide peak-memory policy.
 
 ## Proof obligations and composition
 
@@ -252,7 +270,7 @@ decoding their payloads. Previous encodings and conversion between formats are n
 
 Canonical binary decoders enforce fixed hard ceilings before allocating declared collections:
 `MAX_STARK_PROOF_BYTES` per inner STARK, `MAX_PRECOMPILE_ROOTS = 128` per ordered root list, and
-`MAX_DEFERRED_ELEMENTS` for each portable witness. The same 128-root ceiling applies to proving
+`MAX_DEFERRED_WIRE_ELEMENTS` for each portable witness. The same 128-root ceiling applies to proving
 requests and verification of in-memory proofs. Proof layouts and versions are unchanged, but proofs
 with more than 128 roots are unsupported.
 

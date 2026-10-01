@@ -71,7 +71,7 @@ pub fn assert_precompile_witness_round_trips(output: &ExecutionOutput) {
             witness
                 .prepare(
                     Arc::new(miden_precompiles::registry()),
-                    &miden_precompiles::default_precompile_limits(),
+                    &miden_precompiles::default_verification_precompile_limits(),
                 )
                 .expect("execution-produced witness must prepare")
                 .root()

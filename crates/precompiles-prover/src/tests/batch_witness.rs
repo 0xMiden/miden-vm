@@ -116,7 +116,7 @@ fn prepare(witness: PrecompileWitness) -> PreparedWitness {
     witness
         .prepare(
             Arc::new(miden_precompiles::registry()),
-            &miden_precompiles::default_precompile_limits(),
+            &miden_precompiles::default_verification_precompile_limits(),
         )
         .unwrap()
 }
@@ -479,7 +479,8 @@ fn logical_limits_apply_independently_to_repeated_inputs() {
         Err(PrecompileProvingError::Input(SessionInputError::Empty))
     ));
     let elements = prepare(a.clone()).work().elements();
-    let limits = miden_precompiles::default_precompile_limits().with_max_elements(elements);
+    let limits =
+        miden_precompiles::default_verification_precompile_limits().with_max_elements(elements);
     assert!(import_witnesses(vec![a.clone()], &limits).is_ok());
     assert!(import_witnesses(vec![a; MAX_PRECOMPILE_ROOTS], &limits).is_ok());
     let malformed = PrecompileWitness::from_entries(vec![]).unwrap();
@@ -506,7 +507,7 @@ fn preparation_and_root_binding_precede_semantic_import() {
     let false_claim = uint_eq(&mut fixture, one, two);
     let false_witness = fixture.open(false_claim);
     let (valid, _) = shared_witnesses();
-    let limits = miden_precompiles::default_precompile_limits();
+    let limits = miden_precompiles::default_verification_precompile_limits();
     let limited = limits
         .clone()
         .with_max_elements(prepare(false_witness.clone()).work().elements());
@@ -543,7 +544,7 @@ fn distinct_hash_claims_count_shared_payload_demand() {
     }
     let witness = fixture.witness();
     let demand = 1u64 + 7 + 31;
-    let rejected = miden_precompiles::default_precompile_limits().with_class(
+    let rejected = miden_precompiles::default_verification_precompile_limits().with_class(
         HASH_WORK,
         WorkLimit {
             max_count: u64::MAX,
@@ -567,7 +568,7 @@ fn distinct_hash_claims_count_shared_payload_demand() {
             }),
         }))
     ));
-    let admitted = miden_precompiles::default_precompile_limits().with_class(
+    let admitted = miden_precompiles::default_verification_precompile_limits().with_class(
         HASH_WORK,
         WorkLimit {
             max_count: u64::MAX,
@@ -643,7 +644,7 @@ fn msm_limits_are_per_node_and_per_witness() {
             fixture.log_statement(eq).unwrap();
         }
     }
-    let per_claim = miden_precompiles::default_precompile_limits().with_class(
+    let per_claim = miden_precompiles::default_verification_precompile_limits().with_class(
         MSM_WORK,
         WorkLimit {
             max_count: u64::MAX,
@@ -658,7 +659,7 @@ fn msm_limits_are_per_node_and_per_witness() {
             source: PreparationError::Limit(PrecompileLimitError::ItemSize { class: MSM_WORK, .. }),
         }))
     ));
-    let per_witness = miden_precompiles::default_precompile_limits().with_class(
+    let per_witness = miden_precompiles::default_verification_precompile_limits().with_class(
         MSM_WORK,
         WorkLimit {
             max_count: u64::MAX,

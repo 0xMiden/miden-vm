@@ -26,6 +26,7 @@ use crate::{
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
+    operation::OperationError,
     tracer::{OperationHelperRegisters, Tracer},
 };
 
@@ -177,8 +178,9 @@ impl FastProcessor {
         let precompile_root = self.deferred_state.root();
         let precompile_witness = self
             .deferred_state
-            .into_witness()
-            .map_err(|_| ExecutionError::Internal("failed to export deferred execution witness"))?;
+            .into_witness(self.options.verification_precompile_limits())
+            .map_err(OperationError::from)
+            .map_exec_err_no_ctx()?;
         Ok(ExecutionOutput {
             stack,
             advice: self.advice,
@@ -265,7 +267,8 @@ impl FastProcessor {
     pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
         self.advice.set_options(&options)?;
         self.memory.set_max_elements(options.max_memory_elements());
-        self.deferred_state.set_limits(options.precompile_limits().clone());
+        self.deferred_state
+            .set_execution_limits(options.execution_precompile_limits().clone());
         self.options = options;
         Ok(self)
     }
@@ -308,7 +311,7 @@ impl FastProcessor {
             saved_overflow_len: 0,
             deferred_state: DeferredState::new(
                 Arc::new(miden_precompiles::registry()),
-                options.precompile_limits().clone(),
+                options.execution_precompile_limits().clone(),
             )
             .map_err(AdviceError::DeferredStateInitializationFailed)?,
             package_debug_info: None,

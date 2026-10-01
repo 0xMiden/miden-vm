@@ -83,7 +83,7 @@ const VERIFIER_SUPPORT_V2: VerifierSupport = VerifierSupport {
 #[derive(Debug, Clone)]
 pub struct Verifier {
     precompile_registry: Arc<PrecompileRegistry>,
-    precompile_limits: PrecompileLimits,
+    verification_precompile_limits: PrecompileLimits,
     min_security_level: Option<u32>,
 }
 
@@ -93,15 +93,16 @@ impl Verifier {
     pub fn new() -> Self {
         Self {
             precompile_registry: Arc::new(miden_precompiles::registry()),
-            precompile_limits: miden_precompiles::default_precompile_limits(),
+            verification_precompile_limits:
+                miden_precompiles::default_verification_precompile_limits(),
             min_security_level: None,
         }
     }
 
-    /// Sets the maximum declared work admitted for one deferred precompile witness.
+    /// Sets the verification policy applied to one deferred precompile witness.
     #[must_use]
-    pub fn with_precompile_limits(mut self, limits: PrecompileLimits) -> Self {
-        self.precompile_limits = limits;
+    pub fn with_verification_precompile_limits(mut self, limits: PrecompileLimits) -> Self {
+        self.verification_precompile_limits = limits;
         self
     }
 
@@ -197,9 +198,10 @@ impl Verifier {
         // Authenticate the VM statement and enforce the configured minimum security before
         // performing potentially expensive witness evaluation.
         if let PrecompileStatus::Deferred(witness) = proof.precompile() {
-            let prepared = witness
-                .clone()
-                .prepare(Arc::clone(&self.precompile_registry), &self.precompile_limits)?;
+            let prepared = witness.clone().prepare(
+                Arc::clone(&self.precompile_registry),
+                &self.verification_precompile_limits,
+            )?;
             if prepared.root() != vm.precompile_root {
                 return Err(VerificationError::DeferredWitnessRootMismatch);
             }
@@ -666,7 +668,7 @@ mod tests {
             .clone()
             .prepare(
                 Arc::new(miden_precompiles::registry()),
-                &miden_precompiles::default_precompile_limits(),
+                &miden_precompiles::default_verification_precompile_limits(),
             )
             .unwrap();
         let root = prepared.root();

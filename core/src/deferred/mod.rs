@@ -42,7 +42,8 @@ pub const DEFERRED_ROOT_DOMAIN: Word = Word::new(Tag::AND.as_word());
 
 /// Hard allocation ceiling for hostile deferred wire input.
 ///
-/// Guest execution and witness admission use configurable [`PrecompileLimits`] instead.
+/// Execution and verification admission use independently configurable [`PrecompileLimits`]
+/// instead.
 pub const MAX_DEFERRED_WIRE_ELEMENTS: usize = 1 << 20;
 
 /// Hard library safety ceiling for ordered precompile roots.
@@ -94,7 +95,7 @@ pub enum PrecompileError {
     #[error("deferred assertion failed: values disagree")]
     AssertionFailed,
 
-    /// Guest-induced work exceeded the host's execution admission policy.
+    /// Work exceeded the configured execution or verification admission policy.
     #[error(transparent)]
     Limit(#[from] PrecompileLimitError),
 

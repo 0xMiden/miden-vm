@@ -6,7 +6,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
-        PrecompileError, Tag, WorkClass, WorkItem, precompile_id,
+        PrecompileError, Tag, WorkItem, precompile_id,
     },
 };
 
@@ -253,10 +253,6 @@ impl Precompile for UintPrecompile {
         Self::id()
     }
 
-    fn work_classes(&self) -> &'static [WorkClass] {
-        &[crate::UINT_WORK]
-    }
-
     fn init(&self) -> Vec<Node> {
         let mut nodes = Vec::new();
         for domain in UintDomain::ALL {
@@ -337,8 +333,11 @@ mod tests {
     use super::*;
 
     fn state() -> DeferredState {
-        DeferredState::new(Arc::new(crate::registry()), crate::default_precompile_limits())
-            .expect("precompile init must succeed")
+        DeferredState::new(
+            Arc::new(crate::registry()),
+            crate::default_execution_precompile_limits(),
+        )
+        .expect("precompile init must succeed")
     }
 
     fn evaluate(state: &mut DeferredState, node: Node) -> Result<Node, PrecompileError> {

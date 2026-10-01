@@ -18,10 +18,11 @@ This ceiling also applies to proof decoding and verification. Encodings and vers
 proofs with more than 128 roots are unsupported.
 
 The first loop consumes and prepares every witness independently, checking structure, commitments,
-per-witness `PrecompileLimits`, and expected roots where supplied. Preparation does not establish
-assertion truth. A second loop consumes only prepared witnesses into a private importer, which
-owns its checked-definition cache and evaluates computations while recording them. Failure drops
-the partial Session and reports the input location. Bare external assertion roots remain unsupported.
+per-witness verification limits, and expected roots where supplied. Preparation does not establish
+assertion truth. A second loop consumes only `PreparedWitness` values into a private importer,
+which owns its checked-definition cache and evaluates computations while recording them. It does
+not reapply workload admission. Failure drops the partial Session and reports the input location.
+Bare external assertion roots remain unsupported.
 
 There is no aggregate logical-work admission or separate Session MSM limit. Repetitions and shared
 payload claims retain their declared work; MSM admission covers either lowering path. Balanced

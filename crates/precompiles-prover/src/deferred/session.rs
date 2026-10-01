@@ -107,19 +107,19 @@ struct WitnessImporter {
 pub(crate) fn session_from_witnesses(
     witnesses: Vec<PrecompileWitness>,
 ) -> Result<WitnessSession, PrecompileProvingError> {
-    import_witnesses(witnesses, &miden_precompiles::default_precompile_limits())
+    import_witnesses(witnesses, &miden_precompiles::default_verification_precompile_limits())
 }
 
 pub(crate) fn import_witnesses(
     witnesses: Vec<PrecompileWitness>,
-    limits: &PrecompileLimits,
+    verification_limits: &PrecompileLimits,
 ) -> Result<WitnessSession, PrecompileProvingError> {
-    import_witnesses_with_roots(witnesses, limits, None)
+    import_witnesses_with_roots(witnesses, verification_limits, None)
 }
 
 pub(crate) fn import_witnesses_with_roots(
     witnesses: Vec<PrecompileWitness>,
-    limits: &PrecompileLimits,
+    verification_limits: &PrecompileLimits,
     expected_roots: Option<&[Digest]>,
 ) -> Result<WitnessSession, PrecompileProvingError> {
     if witnesses.is_empty() {
@@ -147,7 +147,7 @@ pub(crate) fn import_witnesses_with_roots(
         .enumerate()
         .map(|(witness, input)| {
             let prepared = input
-                .prepare(Arc::clone(&registry), limits)
+                .prepare(Arc::clone(&registry), verification_limits)
                 .map_err(|source| SessionInputError::Preparation { witness, source })?;
             if let Some(roots) = expected_roots {
                 let expected = roots[witness];

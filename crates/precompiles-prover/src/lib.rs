@@ -14,7 +14,7 @@ use alloc::vec::Vec;
 pub use deferred::session::{SessionInputError, WitnessLocation};
 use miden_core::deferred::{Digest, PrecompileLimits, PrecompileWitness};
 pub use miden_core::proof::{HashFunction, PrecompileProof, StarkProof};
-pub use miden_precompiles::default_precompile_limits;
+pub use miden_precompiles::default_verification_precompile_limits;
 use miden_precompiles_air::{memory, stark_config::precompile_pcs_params};
 use session::{Session, Truthy};
 
@@ -39,7 +39,8 @@ pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 = 64 << 30;
 ///
 /// The returned roots preserve input order and repetitions. Empty batches and batches exceeding
 /// [`miden_core::deferred::MAX_PRECOMPILE_ROOTS`] are rejected before preparation. Every portable
-/// witness is consumed and admitted independently before a private Session shares computations.
+/// witness is consumed and prepared under verification limits before a private Session shares
+/// computations. Session import does not reapply workload admission.
 pub fn prove_precompiles(
     witnesses: Vec<PrecompileWitness>,
     hash_fn: HashFunction,
@@ -47,7 +48,7 @@ pub fn prove_precompiles(
     prove_precompiles_with_limits_and_budget(
         witnesses,
         hash_fn,
-        &default_precompile_limits(),
+        &default_verification_precompile_limits(),
         DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
     )
 }
@@ -67,19 +68,19 @@ pub fn prove_precompiles_with_budget(
     prove_precompiles_with_limits_and_budget(
         witnesses,
         hash_fn,
-        &default_precompile_limits(),
+        &default_verification_precompile_limits(),
         max_prover_memory_bytes,
     )
 }
 
-/// Proves a batch with explicit per-witness logical limits and a batch prover-memory budget.
+/// Proves a batch with explicit per-witness verification limits and a batch prover-memory budget.
 pub fn prove_precompiles_with_limits_and_budget(
     witnesses: Vec<PrecompileWitness>,
     hash_fn: HashFunction,
-    limits: &PrecompileLimits,
+    verification_limits: &PrecompileLimits,
     max_prover_memory_bytes: u64,
 ) -> Result<PrecompileProof, PrecompileProvingError> {
-    prove(witnesses, hash_fn, limits, None, max_prover_memory_bytes)
+    prove(witnesses, hash_fn, verification_limits, None, max_prover_memory_bytes)
 }
 
 /// Proves one witness after binding its prepared root to the execution-established root.
@@ -87,13 +88,13 @@ pub fn prove_precompile_for_root_with_limits_and_budget(
     witness: PrecompileWitness,
     expected_root: miden_core::Word,
     hash_fn: HashFunction,
-    limits: &PrecompileLimits,
+    verification_limits: &PrecompileLimits,
     max_prover_memory_bytes: u64,
 ) -> Result<PrecompileProof, PrecompileProvingError> {
     prove(
         alloc::vec![witness],
         hash_fn,
-        limits,
+        verification_limits,
         Some(core::slice::from_ref(&expected_root)),
         max_prover_memory_bytes,
     )
@@ -115,13 +116,17 @@ impl WitnessSession {
 fn prove(
     witnesses: Vec<PrecompileWitness>,
     hash_fn: HashFunction,
-    limits: &PrecompileLimits,
+    verification_limits: &PrecompileLimits,
     expected_roots: Option<&[Digest]>,
     max_prover_memory_bytes: u64,
 ) -> Result<PrecompileProof, PrecompileProvingError> {
     let imported = {
         let _span = tracing::info_span!("build_session").entered();
-        deferred::session::import_witnesses_with_roots(witnesses, limits, expected_roots)?
+        deferred::session::import_witnesses_with_roots(
+            witnesses,
+            verification_limits,
+            expected_roots,
+        )?
     };
     let params = precompile_pcs_params();
     let estimated_bytes = imported

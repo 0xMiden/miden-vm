@@ -436,7 +436,7 @@ mod prover_api_lifecycle {
                 stack_inputs,
                 AdviceInputs::default(),
                 &mut buffered_host,
-                execution_options.with_overlapped_trace_build(false),
+                execution_options.clone().with_overlapped_trace_build(false),
             )
             .expect("buffered execute-and-prove should succeed");
 
@@ -447,7 +447,7 @@ mod prover_api_lifecycle {
                 stack_inputs,
                 AdviceInputs::default(),
                 &mut overlapped_host,
-                execution_options.with_overlapped_trace_build(true),
+                execution_options.clone().with_overlapped_trace_build(true),
             )
             .expect("overlapped execute-and-prove should succeed");
 
@@ -479,7 +479,7 @@ mod prover_api_lifecycle {
         assert_execution_security_levels(&one_claim, &one_deferred, &deferred_outcome);
         assert!(matches!(
             Verifier::new()
-                .with_precompile_limits(PrecompileLimits::new(0))
+                .with_verification_precompile_limits(PrecompileLimits::new(0))
                 .verify(&one_claim, &one_deferred),
             Err(VerificationError::DeferredWitnessPreparation(_))
         ));
@@ -533,7 +533,7 @@ mod prover_api_lifecycle {
         };
         assert!(matches!(
             Prover::new()
-                .with_precompile_limits(PrecompileLimits::new(0))
+                .with_verification_precompile_limits(PrecompileLimits::new(0))
                 .prove_precompiles(vec![one_precompile.clone()]),
             Err(ProverError::PrecompileProofGeneration(_))
         ));
