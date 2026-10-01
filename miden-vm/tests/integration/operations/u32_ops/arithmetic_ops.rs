@@ -1,6 +1,8 @@
 use miden_processor::{ExecutionError, operation::OperationError};
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
+#[cfg(feature = "arbitrary")]
+use miden_utils_testing::{Felt, PrimeField64};
 use miden_utils_testing::{U32_BOUND, build_op_test, expect_exec_error_matches};
 
 // U32 OPERATIONS TESTS - MANUAL - ARITHMETIC OPERATIONS
@@ -28,17 +30,7 @@ fn u32wrapping_add() {
     let test = build_op_test!(asm_op, &[b as u64, a]);
     test.expect_stack(&[1]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-    let c = a.wrapping_add(b);
-    let test = build_op_test!(asm_op, &[b as u64, a as u64]);
-    test.expect_stack(&[c as u64]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand::random::<u64>();
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, e]);
-    test.expect_stack(&[c as u64, e]);
+    // Randomized coverage, including stack preservation, lives in u32unchecked_add_proptest.
 }
 
 #[test]
@@ -62,17 +54,8 @@ fn u32wrapping_add_b() {
     let test = build_op_test!(build_asm_op(b), &[a]);
     test.expect_stack(&[1]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-    let c = a.wrapping_add(b);
-    let test = build_op_test!(build_asm_op(b as u64), &[a as u64]);
-    test.expect_stack(&[c as u64]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand::random::<u64>();
-    let test = build_op_test!(build_asm_op(b as u64), &[a as u64, e]);
-    test.expect_stack(&[c as u64, e]);
+    // Randomized coverage of the immediate variant, including stack preservation, lives in
+    // u32unchecked_add_proptest.
 }
 
 #[test]
@@ -99,18 +82,7 @@ fn u32overflowing_add() {
     let test = build_op_test!(asm_op, &[b as u64, a]);
     test.expect_stack(&[1, 1]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-    let (c, overflow) = a.overflowing_add(b);
-    let d = if overflow { 1 } else { 0 };
-    let test = build_op_test!(asm_op, &[b as u64, a as u64]);
-    test.expect_stack(&[d, c as u64]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand::random::<u64>();
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, e]);
-    test.expect_stack(&[d, c as u64, e]);
+    // Randomized coverage, including stack preservation, lives in u32unchecked_add_proptest.
 }
 
 #[test]
@@ -143,29 +115,8 @@ fn u32overflowing_add3() {
     let test = build_op_test!(asm_op, &[b as u64, a, 1]);
     test.expect_stack(&[1, 1]);
 
-    // --- random u32 values with c = 0 -----------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-    let c = 0_u64;
-    let (d, overflow) = a.overflowing_add(b);
-    let e = if overflow { 1 } else { 0 };
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, c]);
-    test.expect_stack(&[e, d as u64]);
-
-    // --- random u32 values with c = 1 -----------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-    let c = 1_u32;
-    let (d, overflow_b) = a.overflowing_add(b);
-    let (d, overflow_c) = d.overflowing_add(c);
-    let e = if overflow_b || overflow_c { 1 } else { 0 };
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
-    test.expect_stack(&[e, d as u64]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let f = rand::random::<u64>();
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64, f]);
-    test.expect_stack(&[e, d as u64, f]);
+    // Randomized coverage, including stack preservation, lives in u32unchecked_add3_proptest;
+    // exact carry propagation is covered by the (a + b + c) = 2^32 and > 2^32 cases above.
 }
 
 #[test]
@@ -188,18 +139,7 @@ fn u32widening_add() {
     let test = build_op_test!(asm_op, &[b as u64, a]);
     test.expect_stack(&[1, 1]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-    let (c, overflow) = a.overflowing_add(b);
-    let d = if overflow { 1 } else { 0 };
-    let test = build_op_test!(asm_op, &[b as u64, a as u64]);
-    test.expect_stack(&[c as u64, d]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand::random::<u64>();
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, e]);
-    test.expect_stack(&[c as u64, d, e]);
+    // Randomized coverage, including stack preservation, lives in u32unchecked_add_proptest.
 }
 
 #[test]
@@ -226,29 +166,8 @@ fn u32widening_add3() {
     let test = build_op_test!(asm_op, &[b as u64, a, 1]);
     test.expect_stack(&[1, 1]);
 
-    // --- random u32 values with c = 0 -----------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-    let c = 0_u64;
-    let (d, overflow) = a.overflowing_add(b);
-    let e = if overflow { 1 } else { 0 };
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, c]);
-    test.expect_stack(&[d as u64, e]);
-
-    // --- random u32 values with c = 1 -----------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-    let c = 1_u32;
-    let (d, overflow_b) = a.overflowing_add(b);
-    let (d, overflow_c) = d.overflowing_add(c);
-    let e = if overflow_b || overflow_c { 1 } else { 0 };
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
-    test.expect_stack(&[d as u64, e]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let f = rand::random::<u64>();
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64, f]);
-    test.expect_stack(&[d as u64, e, f]);
+    // Randomized coverage, including stack preservation, lives in u32unchecked_add3_proptest;
+    // exact carry propagation is covered by the (a + b + c) = 2^32 and > 2^32 cases above.
 }
 
 #[test]
@@ -299,17 +218,7 @@ fn u32wrapping_sub() {
     let test = build_op_test!(asm_op, &[2, 1]);
     test.expect_stack(&[u32::MAX as u64]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-    let c = a.wrapping_sub(b);
-    let test = build_op_test!(asm_op, &[b as u64, a as u64]);
-    test.expect_stack(&[c as u64]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand::random::<u64>();
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, e]);
-    test.expect_stack(&[c as u64, e]);
+    // Randomized coverage, including stack preservation, lives in u32unchecked_sub_proptest.
 }
 
 #[test]
@@ -328,17 +237,8 @@ fn u32wrapping_sub_b() {
     let test = build_op_test!(build_asm_op(2), &[1]);
     test.expect_stack(&[u32::MAX as u64]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-    let c = a.wrapping_sub(b);
-    let test = build_op_test!(build_asm_op(b as u64), &[a as u64]);
-    test.expect_stack(&[c as u64]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand::random::<u64>();
-    let test = build_op_test!(build_asm_op(b as u64), &[a as u64, e]);
-    test.expect_stack(&[c as u64, e]);
+    // Randomized coverage of the immediate variant, including stack preservation, lives in
+    // u32unchecked_sub_proptest.
 }
 
 #[test]
@@ -360,27 +260,8 @@ fn u32overflowing_sub() {
     let test = build_op_test!(asm_op, &[2, 1]);
     test.expect_stack(&[1, u32::MAX as u64]);
 
-    // --- random u32 values: a >= b --------------------------------------------------------------
-    let val1 = rand::random::<u32>();
-    let val2 = rand::random::<u32>();
-    let (a, b) = if val1 >= val2 { (val1, val2) } else { (val2, val1) };
-    let c = a - b;
-    let test = build_op_test!(asm_op, &[b as u64, a as u64]);
-    test.expect_stack(&[0, c as u64]);
-
-    // --- random u32 values: a < b ---------------------------------------------------------------
-    let val1 = rand::random::<u32>();
-    let val2 = rand::random::<u32>();
-    let (a, b) = if val1 >= val2 { (val2, val1) } else { (val1, val2) };
-    let (c, _) = a.overflowing_sub(b);
-    let d = 1;
-    let test = build_op_test!(asm_op, &[b as u64, a as u64]);
-    test.expect_stack(&[d, c as u64]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand::random::<u64>();
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, e]);
-    test.expect_stack(&[d, c as u64, e]);
+    // Randomized coverage of both orderings, including stack preservation, lives in
+    // u32unchecked_sub_proptest.
 }
 
 #[test]
@@ -399,17 +280,7 @@ fn u32wrapping_mul() {
     let test = build_op_test!(asm_op, &[4, U32_BOUND / 2]);
     test.expect_stack(&[0]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-    let c = a.wrapping_mul(b);
-    let test = build_op_test!(asm_op, &[b as u64, a as u64]);
-    test.expect_stack(&[c as u64]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand::random::<u64>();
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, e]);
-    test.expect_stack(&[c as u64, e]);
+    // Randomized coverage, including stack preservation, lives in u32unchecked_mul_proptest.
 }
 
 #[test]
@@ -431,17 +302,8 @@ fn u32wrapping_mul_b() {
     let test = build_op_test!(build_asm_op(4), &[U32_BOUND / 2]);
     test.expect_stack(&[0]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-    let c = a.wrapping_mul(b);
-    let test = build_op_test!(build_asm_op(b as u64), &[a as u64]);
-    test.expect_stack(&[c as u64]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand::random::<u64>();
-    let test = build_op_test!(build_asm_op(b as u64), &[a as u64, e]);
-    test.expect_stack(&[c as u64, e]);
+    // Randomized coverage of the immediate variant, including stack preservation, lives in
+    // u32unchecked_mul_proptest.
 }
 
 #[test]
@@ -464,19 +326,7 @@ fn u32widening_mul() {
     let test = build_op_test!(asm_op, &[4, U32_BOUND / 2]);
     test.expect_stack(&[0, 2]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-    let result = a as u64 * b as u64;
-    let lo = result % U32_BOUND;
-    let hi = result / U32_BOUND;
-    let test = build_op_test!(asm_op, &[b as u64, a as u64]);
-    test.expect_stack(&[lo, hi]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand::random::<u64>();
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, e]);
-    test.expect_stack(&[lo, hi, e]);
+    // Randomized coverage, including stack preservation, lives in u32unchecked_mul_proptest.
 }
 
 #[test]
@@ -502,20 +352,7 @@ fn u32widening_madd() {
     let test = build_op_test!(asm_op, &[4, U32_BOUND / 2, 1]);
     test.expect_stack(&[1, 2]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-    let c = rand::random::<u32>();
-    let madd = a as u64 * b as u64 + c as u64;
-    let lo = madd % U32_BOUND;
-    let hi = madd / U32_BOUND;
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
-    test.expect_stack(&[lo, hi]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let f = rand::random::<u64>();
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64, f]);
-    test.expect_stack(&[lo, hi, f]);
+    // Randomized coverage, including stack preservation, lives in u32widening_madd_proptest.
 }
 
 #[test]
@@ -561,21 +398,25 @@ fn u32div() {
     let test = build_op_test!("u32div", &[2, 3]);
     test.expect_stack(&[1]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let mut b = rand::random::<u32>();
-    if b == 0 {
-        // ensure we're not using a failure case.
-        b += 1;
-    }
-    let quot = (a / b) as u64;
-    let test = build_op_test!("u32div", &[b as u64, a as u64]);
-    test.expect_stack(&[quot]);
+    // --- maximum divisor ------------------------------------------------------------------------
+    let test = build_op_test!("u32div", &[u32::MAX as u64, u32::MAX as u64]);
+    test.expect_stack(&[1]);
 
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand::random::<u64>();
-    let test = build_op_test!("u32div", &[b as u64, a as u64, e]);
-    test.expect_stack(&[quot, e]);
+    let test = build_op_test!("u32div", &[3, u32::MAX as u64]);
+    test.expect_stack(&[(u32::MAX / 3) as u64]);
+
+    let test = build_op_test!("u32div.3", &[u32::MAX as u64]);
+    test.expect_stack(&[(u32::MAX / 3) as u64]);
+
+    // --- maximum immediate divisor --------------------------------------------------------------
+    let test = build_op_test!("u32div.4294967295", &[5]);
+    test.expect_stack(&[0]);
+
+    let test = build_op_test!("u32div.4294967295", &[u32::MAX as u64]);
+    test.expect_stack(&[1]);
+
+    // Randomized coverage, including stack preservation and the immediate variant, lives in
+    // u32div_proptest (which excludes b = 0 from its strategy rather than patching it).
 }
 
 #[test]
@@ -603,21 +444,25 @@ fn u32mod() {
     let test = build_op_test!("u32mod", &[11, 5]);
     test.expect_stack(&[5]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let mut b = rand::random::<u32>();
-    if b == 0 {
-        // ensure we're not using a failure case.
-        b += 1;
-    }
-    let expected = a % b;
-    let test = build_op_test!("u32mod", &[b as u64, a as u64]);
-    test.expect_stack(&[expected as u64]);
+    // --- maximum divisor ------------------------------------------------------------------------
+    let test = build_op_test!("u32mod", &[3, u32::MAX as u64]);
+    test.expect_stack(&[(u32::MAX % 3) as u64]);
 
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand::random::<u64>();
-    let test = build_op_test!("u32mod", &[b as u64, a as u64, c]);
-    test.expect_stack(&[expected as u64, c]);
+    let test = build_op_test!("u32mod", &[u32::MAX as u64, u32::MAX as u64]);
+    test.expect_stack(&[0]);
+
+    let test = build_op_test!("u32mod.3", &[u32::MAX as u64]);
+    test.expect_stack(&[(u32::MAX % 3) as u64]);
+
+    // --- maximum immediate divisor --------------------------------------------------------------
+    let test = build_op_test!("u32mod.4294967295", &[5]);
+    test.expect_stack(&[5]);
+
+    let test = build_op_test!("u32mod.4294967295", &[u32::MAX as u64]);
+    test.expect_stack(&[0]);
+
+    // Randomized coverage, including stack preservation and the immediate variant, lives in
+    // u32mod_proptest (which excludes b = 0 from its strategy rather than patching it).
 }
 
 #[test]
@@ -651,22 +496,27 @@ fn u32divmod() {
     let test = build_op_test!("u32divmod", &[2, 3]);
     test.expect_stack(&[1, 1]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let mut b = rand::random::<u32>();
-    if b == 0 {
-        // ensure we're not using a failure case.
-        b += 1;
-    }
-    let quot = (a / b) as u64;
-    let rem = (a % b) as u64;
-    let test = build_op_test!("u32divmod", &[b as u64, a as u64]);
-    test.expect_stack(&[rem, quot]);
+    // --- maximum divisor ------------------------------------------------------------------------
+    // Output is [remainder, quotient] with remainder on top
+    let test = build_op_test!("u32divmod", &[3, u32::MAX as u64]);
+    test.expect_stack(&[(u32::MAX % 3) as u64, (u32::MAX / 3) as u64]);
 
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let e = rand::random::<u64>();
-    let test = build_op_test!("u32divmod", &[b as u64, a as u64, e]);
-    test.expect_stack(&[rem, quot, e]);
+    let test = build_op_test!("u32divmod", &[u32::MAX as u64, u32::MAX as u64]);
+    test.expect_stack(&[0, 1]);
+
+    let test = build_op_test!("u32divmod.3", &[u32::MAX as u64]);
+    test.expect_stack(&[(u32::MAX % 3) as u64, (u32::MAX / 3) as u64]);
+
+    // --- maximum immediate divisor --------------------------------------------------------------
+    // Output is [remainder, quotient] with remainder on top
+    let test = build_op_test!("u32divmod.4294967295", &[5]);
+    test.expect_stack(&[5, 0]);
+
+    let test = build_op_test!("u32divmod.4294967295", &[u32::MAX as u64]);
+    test.expect_stack(&[0, 1]);
+
+    // Randomized coverage, including stack preservation and the immediate variant, lives in
+    // u32divmod_proptest (which excludes b = 0 from its strategy rather than patching it).
 }
 
 #[test]
@@ -688,7 +538,9 @@ fn u32divmod_fail() {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(100))]
     #[test]
-    fn u32unchecked_add_proptest(a in any::<u32>(), b in any::<u32>()) {
+    // `e` is bounded to the canonical field range: `build_op_test!` converts stack inputs via
+        // checked `Felt::new`, which panics for values at or above the field modulus.
+        fn u32unchecked_add_proptest(a in any::<u32>(), b in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let wrapping_asm_op = "u32wrapping_add";
         let overflowing_asm_op = "u32overflowing_add";
         let widening_asm_op = "u32widening_add";
@@ -696,19 +548,24 @@ proptest! {
         let (c, overflow) = a.overflowing_add(b);
         let d = if overflow { 1 } else { 0 };
 
-        let test = build_op_test!(wrapping_asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[c as u64])?;
+        // An unrelated element `e` below the operands verifies the rest of the stack is preserved.
+        let test = build_op_test!(wrapping_asm_op, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[c as u64, e])?;
 
         // Output is [carry, sum] with carry on top
-        let test = build_op_test!(overflowing_asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[d, c as u64])?;
+        let test = build_op_test!(overflowing_asm_op, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[d, c as u64, e])?;
 
-        let test = build_op_test!(widening_asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[c as u64, d])?;
+        let test = build_op_test!(widening_asm_op, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[c as u64, d, e])?;
+
+        // Immediate-operand variant of the wrapping operation.
+        let test = build_op_test!(format!("{wrapping_asm_op}.{b}"), &[a as u64, e]);
+        test.prop_expect_stack(&[c as u64, e])?;
     }
 
     #[test]
-    fn u32unchecked_add3_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
+    fn u32unchecked_add3_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>(), f in 0..Felt::ORDER_U64) {
         let wrapping_asm_op = "u32wrapping_add3";
         let overflowing_asm_op = "u32overflowing_add3";
         let widening_asm_op = "u32widening_add3";
@@ -718,18 +575,19 @@ proptest! {
         let lo = (sum as u32) as u64;
         let hi = sum >> 32;
 
-        let test = build_op_test!(wrapping_asm_op, &[b as u64, a as u64, c as u64]);
-        test.prop_expect_stack(&[lo])?;
+        // An unrelated element `f` below the operands verifies the rest of the stack is preserved.
+        let test = build_op_test!(wrapping_asm_op, &[b as u64, a as u64, c as u64, f]);
+        test.prop_expect_stack(&[lo, f])?;
 
-        let test = build_op_test!(overflowing_asm_op, &[b as u64, a as u64, c as u64]);
-        test.prop_expect_stack(&[hi, lo])?;
+        let test = build_op_test!(overflowing_asm_op, &[b as u64, a as u64, c as u64, f]);
+        test.prop_expect_stack(&[hi, lo, f])?;
 
-        let test = build_op_test!(widening_asm_op, &[b as u64, a as u64, c as u64]);
-        test.prop_expect_stack(&[lo, hi])?;
+        let test = build_op_test!(widening_asm_op, &[b as u64, a as u64, c as u64, f]);
+        test.prop_expect_stack(&[lo, hi, f])?;
     }
 
     #[test]
-    fn u32unchecked_sub_proptest(a in any::<u32>(), b in any::<u32>()) {
+    fn u32unchecked_sub_proptest(a in any::<u32>(), b in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let wrapping_asm_op = "u32wrapping_sub";
         let overflowing_asm_op = "u32overflowing_sub";
 
@@ -737,15 +595,20 @@ proptest! {
         let (c, overflow) = a.overflowing_sub(b);
         let d = if overflow { 1 } else { 0 };
 
-        let test = build_op_test!(wrapping_asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[c as u64])?;
+        // An unrelated element `e` below the operands verifies the rest of the stack is preserved.
+        let test = build_op_test!(wrapping_asm_op, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[c as u64, e])?;
 
-        let test = build_op_test!(overflowing_asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[d, c as u64])?;
+        let test = build_op_test!(overflowing_asm_op, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[d, c as u64, e])?;
+
+        // Immediate-operand variant of the wrapping operation.
+        let test = build_op_test!(format!("{wrapping_asm_op}.{b}"), &[a as u64, e]);
+        test.prop_expect_stack(&[c as u64, e])?;
     }
 
     #[test]
-    fn u32unchecked_mul_proptest(a in any::<u32>(), b in any::<u32>()) {
+    fn u32unchecked_mul_proptest(a in any::<u32>(), b in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let wrapping_asm_op = "u32wrapping_mul";
         let overflowing_asm_op = "u32widening_mul";
 
@@ -754,21 +617,27 @@ proptest! {
         let lo = result % U32_BOUND;
         let hi = result / U32_BOUND;
 
-        let test = build_op_test!(wrapping_asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[lo])?;
+        // An unrelated element `e` below the operands verifies the rest of the stack is preserved.
+        let test = build_op_test!(wrapping_asm_op, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[lo, e])?;
 
-        let test = build_op_test!(overflowing_asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[lo, hi])?;
+        let test = build_op_test!(overflowing_asm_op, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[lo, hi, e])?;
+
+        // Immediate-operand variant of the wrapping operation.
+        let test = build_op_test!(format!("{wrapping_asm_op}.{b}"), &[a as u64, e]);
+        test.prop_expect_stack(&[lo, e])?;
     }
 
     #[test]
-    fn u32div_proptest(a in any::<u32>(), b in 1..u32::MAX) {
+    fn u32div_proptest(a in any::<u32>(), b in 1..=u32::MAX, e in 0..Felt::ORDER_U64) {
         let asm_op = "u32div";
         let expected = (a / b) as u64;
 
-        // b provided via the stack.
-        let test = build_op_test!(&asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[expected])?;
+        // b provided via the stack, with an unrelated element `e` below it to verify that the
+        // rest of the stack is preserved.
+        let test = build_op_test!(&asm_op, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
 
         // b provided as a parameter.
         let asm_op = format!("{asm_op}.{b}");
@@ -777,13 +646,14 @@ proptest! {
     }
 
     #[test]
-    fn u32mod_proptest(a in any::<u32>(), b in 1..u32::MAX) {
+    fn u32mod_proptest(a in any::<u32>(), b in 1..=u32::MAX, c in 0..Felt::ORDER_U64) {
         let asm_op = "u32mod";
         let expected = (a % b) as u64;
 
-        // b provided via the stack.
-        let test = build_op_test!(&asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[expected])?;
+        // b provided via the stack, with an unrelated element `c` below it to verify that the
+        // rest of the stack is preserved.
+        let test = build_op_test!(&asm_op, &[b as u64, a as u64, c]);
+        test.prop_expect_stack(&[expected, c])?;
 
         // b provided as a parameter.
         let asm_op = format!("{asm_op}.{b}");
@@ -792,16 +662,17 @@ proptest! {
     }
 
     #[test]
-    fn u32divmod_proptest(a in any::<u32>(), b in 1..u32::MAX) {
+    fn u32divmod_proptest(a in any::<u32>(), b in 1..=u32::MAX, e in 0..Felt::ORDER_U64) {
         let asm_op = "u32divmod";
 
         // Output is [remainder, quotient] with remainder on top
         let quot = (a / b) as u64;
         let rem = (a % b) as u64;
 
-        // b provided via the stack.
-        let test = build_op_test!(&asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[rem, quot])?;
+        // b provided via the stack, with an unrelated element `e` below it to verify that the
+        // rest of the stack is preserved.
+        let test = build_op_test!(&asm_op, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[rem, quot, e])?;
 
         // b provided as a parameter.
         let asm_op = format!("{asm_op}.{b}");
@@ -810,7 +681,7 @@ proptest! {
     }
 
     #[test]
-    fn u32widening_madd_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
+    fn u32widening_madd_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>(), f in 0..Felt::ORDER_U64) {
         let asm_op = "u32widening_madd";
 
         // Output is [lo, hi] in LE order with lo on top
@@ -818,19 +689,21 @@ proptest! {
         let lo = madd % U32_BOUND;
         let hi = madd / U32_BOUND;
 
-        let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
-        test.prop_expect_stack(&[lo, hi])?;
+        // An unrelated element `f` below the operands verifies the rest of the stack is preserved.
+        let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64, f]);
+        test.prop_expect_stack(&[lo, hi, f])?;
     }
 
     #[test]
-    fn u32wrapping_madd_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
+    fn u32wrapping_madd_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>(), f in 0..Felt::ORDER_U64) {
         let asm_op = "u32wrapping_madd";
 
         // wrapping_madd returns (a * b + c) mod 2^32
         let madd = a as u64 * b as u64 + c as u64;
         let lo = madd % U32_BOUND;
 
-        let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
-        test.prop_expect_stack(&[lo])?;
+        // An unrelated element `f` below the operands verifies the rest of the stack is preserved.
+        let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64, f]);
+        test.prop_expect_stack(&[lo, f])?;
     }
 }

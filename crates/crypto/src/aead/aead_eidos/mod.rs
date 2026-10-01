@@ -75,6 +75,10 @@ pub const MAX_VERIFICATION_DEGREE_BUDGET_PER_KEY: u64 = 1 << 28;
 
 /// Ciphertext and authentication data produced by [`SecretKey`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct EncryptedData {
     data_type: DataType,
     ciphertext: Vec<Felt>,
@@ -151,6 +155,10 @@ impl Eq for AuthTag {}
 
 /// Eidos AEAD secret key.
 #[derive(Clone, SilentDebug, SilentDisplay)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct SecretKey([Felt; SECRET_KEY_SIZE]);
 
 impl SecretKey {
@@ -366,6 +374,10 @@ impl ZeroizeOnDrop for SecretKey {}
 
 /// Nonce for one Eidos AEAD invocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct Nonce([Felt; NONCE_SIZE]);
 
 impl Nonce {
@@ -402,6 +414,25 @@ impl From<Nonce> for Word {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary"))]
+mod secret_key_arbitrary {
+    use proptest::prelude::*;
+
+    use super::{SECRET_KEY_SIZE, SecretKey};
+    use crate::Felt;
+
+    impl Arbitrary for SecretKey {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The wire carries the raw key elements; any Felts are valid (SilentDebug provides
+            // the redacted Debug the macro oracle needs).
+            any::<[Felt; SECRET_KEY_SIZE]>().prop_map(Self).boxed()
+        }
+    }
+}
+
 impl Serializable for SecretKey {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         let mut bytes = Zeroizing::new([0_u8; SK_SIZE_BYTES]);
@@ -426,6 +457,24 @@ impl Deserializable for SecretKey {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary"))]
+mod nonce_arbitrary {
+    use proptest::prelude::*;
+
+    use super::{NONCE_SIZE, Nonce};
+    use crate::Felt;
+
+    impl Arbitrary for Nonce {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The wire carries the four canonical Felts; any Felts are valid input.
+            any::<[Felt; NONCE_SIZE]>().prop_map(Self).boxed()
+        }
+    }
+}
+
 impl Serializable for Nonce {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_bytes(&elements_to_bytes(&self.0));
@@ -439,6 +488,39 @@ impl Deserializable for Nonce {
             .and_then(|elements| elements.try_into().ok())
             .ok_or_else(|| DeserializationError::InvalidValue("malformed nonce".to_string()))?;
         Ok(Self(elements))
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod encrypted_data_arbitrary {
+    use proptest::prelude::*;
+
+    use super::{AuthTag, DataType, EncryptedData, Nonce};
+    use crate::Felt;
+
+    impl Arbitrary for EncryptedData {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // validate_ciphertext requires an even element count and every Felt to fit in a
+            // u32; generate pairs of u32-bounded Felts so both hold by construction.
+            (
+                prop_oneof![Just(DataType::Elements), Just(DataType::Bytes)],
+                proptest::collection::vec((any::<u32>(), any::<u32>()), 0..=4),
+                any::<[Felt; 2]>(),
+                any::<Nonce>(),
+            )
+                .prop_map(|(data_type, pairs, tag_elements, nonce)| {
+                    let ciphertext = pairs
+                        .into_iter()
+                        .flat_map(|(a, b)| [Felt::from(a), Felt::from(b)])
+                        .collect();
+                    Self::from_parts(data_type, ciphertext, AuthTag::new(tag_elements), nonce)
+                        .expect("even-length u32-bounded ciphertext passes validation")
+                })
+                .boxed()
+        }
     }
 }
 
