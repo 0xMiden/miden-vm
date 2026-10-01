@@ -366,6 +366,7 @@ impl VisitMut for VerifyInvokeTargets<'_> {
             }
             self.track_used_alias(&name);
         } else if let Some((module, _)) = path.split_first() {
+            self.analyzer.record_qualified_type_ref(path.inner());
             self.track_used_module_prefix(module);
         }
         ControlFlow::Continue(())
