@@ -17,7 +17,7 @@ use crate::ast::{DocString, Ident, TypeExpr, Visibility};
 // CONSTANT
 // ================================================================================================
 
-/// Represents a constant definition in Miden Assembly syntax, i.e. `const.FOO = 1 + 1`.
+/// Represents a constant definition in Miden Assembly syntax, i.e. `const FOO = 1 + 1`.
 #[derive(Clone)]
 pub struct Constant {
     /// The source span of the definition.
@@ -28,7 +28,9 @@ pub struct Constant {
     pub visibility: Visibility,
     /// The name of the constant.
     pub name: Ident,
-    /// The declared type of the constant
+    /// The optional declared type, retained for future type checking.
+    ///
+    /// Annotated constants are currently rejected during semantic analysis and linking.
     pub ty: Option<TypeExpr>,
     /// The expression associated with the constant.
     pub value: ConstantExpr,
@@ -58,7 +60,9 @@ impl Constant {
         self.docs.as_ref().map(|docstring| docstring.as_spanned_str())
     }
 
-    /// Specify the type of this constant
+    /// Sets the declared type annotation without validating it.
+    ///
+    /// Annotated constants are currently rejected during semantic analysis and linking.
     pub fn with_ty(mut self, ty: TypeExpr) -> Self {
         self.ty = Some(ty);
         self
