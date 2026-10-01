@@ -165,7 +165,7 @@ pub fn normalize_tree(tree: &mut LdlTree, sigma: f64) {
 pub fn ffsampling<R: Rng>(
     t: &(Polynomial<Complex64>, Polynomial<Complex64>),
     tree: &LdlTree,
-    mut rng: &mut R,
+    rng: &mut R,
 ) -> (Polynomial<Complex64>, Polynomial<Complex64>) {
     match tree {
         LdlTree::Branch(ell, left, right) => {
@@ -183,8 +183,8 @@ pub fn ffsampling<R: Rng>(
             (z0, z1)
         },
         LdlTree::Leaf(value) => {
-            let z0 = sampler_z(t.0.coefficients[0].re, value[0].re, SIGMIN, &mut rng);
-            let z1 = sampler_z(t.1.coefficients[0].re, value[0].re, SIGMIN, &mut rng);
+            let z0 = sampler_z(t.0.coefficients[0].re, value[0].re, SIGMIN, &mut *rng);
+            let z1 = sampler_z(t.1.coefficients[0].re, value[0].re, SIGMIN, &mut *rng);
             (
                 Polynomial::new(vec![Complex64::new(z0 as f64, 0.0)]),
                 Polynomial::new(vec![Complex64::new(z1 as f64, 0.0)]),

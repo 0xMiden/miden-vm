@@ -2,6 +2,10 @@
 
 ## v0.36.0 (Unreleased)
 
+#### Fixes
+
+- [BREAKING] `MmrPeaks::verify` now takes the tree, peak and relative position from the peaks' forest instead of the proof's, and rejects positions outside that forest (`PositionNotFound`, previously a panic) and paths whose depth differs from the tree height (`InvalidMerklePath`) ([#3931](https://github.com/0xMiden/miden-vm/pull/3931)).
+
 ## v0.35.0 (2026-10-01)
 
 #### Changes
@@ -20,10 +24,6 @@
 - [BREAKING] Enforce Poseidon2 permutations on cycles with consumed inputs, and require output and continuation cycles to consume inputs. PVM proofs and verifier roots change ([#3943](https://github.com/0xMiden/miden-vm/pull/3943)).
 - [BREAKING] Require minted MSM on-curve certificates to depend on older points. PVM proofs and verifier roots change ([#3943](https://github.com/0xMiden/miden-vm/pull/3943)).
 - [BREAKING] Reject nonzero certificates on UintAdd equality blocks. PVM proofs and verifier roots change ([#3943](https://github.com/0xMiden/miden-vm/pull/3943)).
-
-#### Fixes
-
-- [BREAKING] `MmrPeaks::verify` now takes the tree, peak and relative position from the peaks' forest instead of the proof's, and rejects positions outside that forest (`PositionNotFound`, previously a panic) and paths whose depth differs from the tree height (`InvalidMerklePath`) ([#3931](https://github.com/0xMiden/miden-vm/pull/3931)).
 
 ## v0.34.0 (2026-09-26)
 
