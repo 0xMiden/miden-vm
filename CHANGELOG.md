@@ -2,6 +2,10 @@
 
 ## v0.36.0 (Unreleased)
 
+#### Changes
+
+- [BREAKING] Warn on unused private assembly constants. Add a module path to `AnalysisContext::new` and an `UnusedConstant` variant to `SemanticAnalysisError` ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
+
 ## v0.35.0 (2026-10-01)
 
 #### Changes
