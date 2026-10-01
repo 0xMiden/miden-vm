@@ -266,6 +266,8 @@ pub use {mul} from ::miden::core::math::u64
 ### Constants
 Miden assembly supports constant declarations. Similar to procedures, constants have private visibility by default, but may be given `pub` visibility to export them for use from other modules. Constants can be used as immediates, rather than literals, with Miden assembly instructions that support immediate operands, avoiding duplicating the same literal expression in many places, as well as naming the value for readers. Many of the instructions in the Miden Assembly instruction set support immediate operands, but check the documentation to confirm that for specific instructions.
 
+Optional type annotations (`const NAME: TYPE = expr`) are parsed and preserved by the formatter, but annotated constants are not yet supported by the assembler and are rejected during semantic analysis or linking.
+
 A constant's name must start with an upper-case letter and can contain any combination of numbers, upper-case ASCII letters, and underscores (`_`). The number of characters in a constant name cannot exceed 100.
 
 A constant's value must be in a decimal or hexadecimal form and be in the range between $0$ and $2^{64} - 2^{32}$ (both inclusive). Value can be defined by an arithmetic expression using `+`, `-`, `*`, `/`, `//`, `(`, `)` operators and references to the previously defined constants if it uses only decimal numbers. Note that the arithmetic expression cannot contain spaces.
