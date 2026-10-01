@@ -113,8 +113,15 @@ impl DeferredState {
     }
 
     /// Replaces the execution admission policy used for subsequent guest operations.
-    pub fn set_execution_limits(&mut self, limits: PrecompileLimits) {
+    ///
+    /// The replacement must admit all work already consumed by this execution.
+    pub fn set_execution_limits(
+        &mut self,
+        limits: PrecompileLimits,
+    ) -> Result<(), PrecompileError> {
+        self.execution_work.validate(&limits)?;
         self.execution_limits = limits;
+        Ok(())
     }
 
     /// Recognizes `tag` under the installed registry and returns its declared outer payload shape.
@@ -150,12 +157,13 @@ impl DeferredState {
     /// implicit [`TRUE_DIGEST`]. On success, this inserts the framework AND node, advances the
     /// deferred root, memoizes the new root as TRUE, and returns the new root.
     pub fn log_statement(&mut self, statement_digest: Digest) -> Result<Digest, PrecompileError> {
-        let statement = PreparedNode::new(Node::and(self.root, statement_digest));
+        let statement = Node::and(self.root, statement_digest);
         self.execution_work.charge_node(
-            statement.node(),
+            &statement,
             &self.evaluator.registry,
             &self.execution_limits,
         )?;
+        let statement = PreparedNode::new(statement);
         self.require_true_eval(self.root)?;
         self.require_true_eval(statement_digest)?;
         self.accept_statement(statement)
@@ -164,13 +172,20 @@ impl DeferredState {
     /// Logs a statement only if its constrained transition matches `expected_new_root`.
     ///
     /// The VM constrains `log_deferred` as a Poseidon2 fold over the previous deferred root and
-    /// the statement digest. A mismatched commitment leaves the root unchanged.
+    /// the statement digest. A mismatched commitment leaves the root unchanged, but the attempted
+    /// root node remains charged as guest work.
     pub fn log_verified_statement(
         &mut self,
         statement_digest: Digest,
         expected_new_root: Digest,
     ) -> Result<Digest, PrecompileError> {
-        let statement = PreparedNode::new(Node::and(self.root, statement_digest));
+        let statement = Node::and(self.root, statement_digest);
+        self.execution_work.charge_node(
+            &statement,
+            &self.evaluator.registry,
+            &self.execution_limits,
+        )?;
+        let statement = PreparedNode::new(statement);
         let actual_new_root = statement.digest();
         if actual_new_root != expected_new_root {
             return Err(DeferredError::InvalidDeferredRootTransition {
@@ -179,12 +194,6 @@ impl DeferredState {
             }
             .into());
         }
-
-        self.execution_work.charge_node(
-            statement.node(),
-            &self.evaluator.registry,
-            &self.execution_limits,
-        )?;
         self.require_true_eval(self.root)?;
         self.require_true_eval(statement_digest)?;
         self.accept_statement(statement)
@@ -593,6 +602,38 @@ mod tests {
     }
 
     #[test]
+    fn execution_limits_cannot_be_lowered_below_consumed_work() {
+        let precompile = FixturePrecompile;
+        let registry = Arc::new(PrecompileRegistry::new().with_precompile(precompile));
+        let mut state = DeferredState::new(registry, fixture_limits()).unwrap();
+        let node = precompile.node(2);
+        state.register(node.clone()).unwrap();
+
+        let too_low = PrecompileLimits::new(u64::MAX).with_class(
+            FIXTURE_WORK,
+            WorkLimit {
+                max_count: 0,
+                max_total_size: u64::MAX,
+                max_size: u32::MAX,
+            },
+        );
+        let error = state.set_execution_limits(too_low).unwrap_err();
+
+        assert!(matches!(
+            error,
+            PrecompileError::Limit(PrecompileLimitError::Count {
+                class: FIXTURE_WORK,
+                actual: 1,
+                max: 0,
+            })
+        ));
+        state
+            .register(node)
+            .expect("rejected replacement must leave the old limits active");
+        assert_eq!(state.execution_work().class(FIXTURE_WORK).unwrap().count(), 2);
+    }
+
+    #[test]
     fn evaluation_validates_a_new_canonical_before_storing_it() {
         let precompile = FixturePrecompile;
         let registry = Arc::new(PrecompileRegistry::new().with_precompile(precompile));
@@ -618,6 +659,7 @@ mod tests {
         let expected = Node::and(TRUE_DIGEST, TRUE_DIGEST).digest();
         let mut ordinary = DeferredState::default();
         assert_eq!(ordinary.log_statement(TRUE_DIGEST).unwrap(), expected);
+        assert_eq!(ordinary.execution_work().nodes(), 1);
 
         let mut verified = DeferredState::default();
         let mismatch = Node::and(expected, TRUE_DIGEST).digest();
@@ -627,12 +669,14 @@ mod tests {
         ));
         assert_eq!(verified.root(), TRUE_DIGEST);
         assert!(verified.get_node(&expected).is_none());
+        assert_eq!(verified.execution_work().nodes(), 1);
 
         assert_eq!(
             verified.log_verified_statement(TRUE_DIGEST, expected).unwrap(),
             ordinary.root()
         );
         assert_eq!(verified.get_canonical_digest(expected), Some(TRUE_DIGEST));
+        assert_eq!(verified.execution_work().nodes(), 2);
     }
 
     #[test]

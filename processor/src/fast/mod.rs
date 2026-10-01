@@ -263,12 +263,14 @@ impl FastProcessor {
     /// Existing advice inputs are revalidated against the new options before they are applied. To
     /// load advice inputs that require non-default advice map limits, call this before
     /// [`Self::with_advice`] or use [`Self::new_with_options`]. The installed precompile registry
-    /// and any accumulated deferred state are preserved.
+    /// and any accumulated deferred state are preserved. Execution precompile limits cannot be
+    /// lowered below work already consumed by that state.
     pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
         self.advice.set_options(&options)?;
         self.memory.set_max_elements(options.max_memory_elements());
         self.deferred_state
-            .set_execution_limits(options.execution_precompile_limits().clone());
+            .set_execution_limits(options.execution_precompile_limits().clone())
+            .map_err(AdviceError::DeferredStateConfigurationFailed)?;
         self.options = options;
         Ok(self)
     }
@@ -313,7 +315,7 @@ impl FastProcessor {
                 Arc::new(miden_precompiles::registry()),
                 options.execution_precompile_limits().clone(),
             )
-            .map_err(AdviceError::DeferredStateInitializationFailed)?,
+            .map_err(AdviceError::DeferredStateConfigurationFailed)?,
             package_debug_info: None,
             entrypoint_source_node: None,
             options,

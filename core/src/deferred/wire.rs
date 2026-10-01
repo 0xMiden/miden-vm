@@ -446,12 +446,15 @@ impl WireEncoder {
 
         while let Some(step) = pending.pop() {
             match step {
-                WireEncodeStep::Visit(digest) => {
-                    self.schedule_digest(state, digest, &mut pending)?
-                },
-                WireEncodeStep::Emit(digest) => {
-                    let entry =
-                        self.entry_for_digest(state, digest, &mut work, verification_limits)?;
+                WireEncodeStep::Visit(digest) => self.schedule_digest(
+                    state,
+                    digest,
+                    &mut pending,
+                    &mut work,
+                    verification_limits,
+                )?,
+                WireEncodeStep::Emit(digest, node_type) => {
+                    let entry = self.entry_for_digest(state, digest, node_type)?;
                     self.push_entry(digest, entry)?;
                 },
             }
@@ -465,13 +468,24 @@ impl WireEncoder {
         state: &DeferredState,
         digest: Digest,
         pending: &mut Vec<WireEncodeStep>,
+        work: &mut PrecompileWork,
+        verification_limits: &PrecompileLimits,
     ) -> Result<(), PrecompileError> {
-        if digest == TRUE_DIGEST || !self.seen.insert(digest) {
+        if digest == TRUE_DIGEST || self.seen.contains(&digest) {
             return Ok(());
         }
 
         let (node_type, node) = self.validated_node(state, digest)?;
-        pending.push(WireEncodeStep::Emit(digest));
+        work.charge_node(node, state.registry(), verification_limits)?;
+        if work.elements() > MAX_DEFERRED_WIRE_ELEMENTS as u64 {
+            return Err(DeferredError::DeferredStateTooLarge {
+                num_elements: usize::try_from(work.elements()).unwrap_or(usize::MAX),
+                max: MAX_DEFERRED_WIRE_ELEMENTS,
+            }
+            .into());
+        }
+        self.seen.insert(digest);
+        pending.push(WireEncodeStep::Emit(digest, node_type));
 
         match node_type {
             NodeType::Data => {},
@@ -497,18 +511,9 @@ impl WireEncoder {
         &self,
         state: &DeferredState,
         digest: Digest,
-        work: &mut PrecompileWork,
-        verification_limits: &PrecompileLimits,
+        node_type: NodeType,
     ) -> Result<WireEntry, PrecompileError> {
-        let (node_type, node) = self.validated_node(state, digest)?;
-        work.charge_node(node, state.registry(), verification_limits)?;
-        if work.elements() > MAX_DEFERRED_WIRE_ELEMENTS as u64 {
-            return Err(DeferredError::DeferredStateTooLarge {
-                num_elements: usize::try_from(work.elements()).unwrap_or(usize::MAX),
-                max: MAX_DEFERRED_WIRE_ELEMENTS,
-            }
-            .into());
-        }
+        let node = state.get_node(&digest).ok_or(PrecompileError::MissingNode)?;
 
         Ok(match node_type {
             NodeType::Data => WireEntry::Data {
@@ -562,7 +567,7 @@ impl WireEncoder {
 
 enum WireEncodeStep {
     Visit(Digest),
-    Emit(Digest),
+    Emit(Digest, NodeType),
 }
 
 // SERIALIZATION

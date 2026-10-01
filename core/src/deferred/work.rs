@@ -99,6 +99,15 @@ impl PrecompileWork {
         self.classes.get(&class).copied()
     }
 
+    /// Validates already-accumulated work against `limits` without changing it.
+    pub(crate) fn validate(&self, limits: &PrecompileLimits) -> Result<(), PrecompileLimitError> {
+        limits.check_elements(self.elements)?;
+        for (&class, &summary) in &self.classes {
+            limits.check_class(class, summary)?;
+        }
+        Ok(())
+    }
+
     /// Charges one node under `limits`.
     ///
     /// Framework nodes contribute structural elements but no precompile work class. Every other
@@ -129,27 +138,17 @@ impl PrecompileWork {
             .elements
             .checked_add(u64::try_from(elements).map_err(|_| PrecompileLimitError::Overflow)?)
             .ok_or(PrecompileLimitError::Overflow)?;
-        if elements > limits.max_elements {
-            return Err(PrecompileLimitError::Elements {
-                actual: elements,
-                max: limits.max_elements,
-            });
-        }
+        limits.check_elements(elements)?;
 
         let next = item
             .map(|item| {
-                let limit = limits
-                    .classes
-                    .get(&item.class)
-                    .copied()
-                    .ok_or(PrecompileLimitError::MissingClass { class: item.class })?;
                 let summary = self
                     .classes
                     .get(&item.class)
                     .copied()
                     .unwrap_or_default()
                     .checked_with(item.size)?;
-                limit.check(item.class, summary)?;
+                limits.check_class(item.class, summary)?;
                 Ok((item.class, summary))
             })
             .transpose()?;
@@ -231,6 +230,25 @@ impl PrecompileLimits {
     /// Returns the configured limit for `class`, if that class is admitted.
     pub fn class(&self, class: WorkClass) -> Option<WorkLimit> {
         self.classes.get(&class).copied()
+    }
+
+    fn check_elements(&self, actual: u64) -> Result<(), PrecompileLimitError> {
+        if actual > self.max_elements {
+            return Err(PrecompileLimitError::Elements { actual, max: self.max_elements });
+        }
+        Ok(())
+    }
+
+    fn check_class(
+        &self,
+        class: WorkClass,
+        summary: WorkSummary,
+    ) -> Result<(), PrecompileLimitError> {
+        self.classes
+            .get(&class)
+            .copied()
+            .ok_or(PrecompileLimitError::MissingClass { class })?
+            .check(class, summary)
     }
 }
 
