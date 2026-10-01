@@ -146,6 +146,7 @@ impl BasicBlockBuilder<'_> {
             .iter()
             .map(|inline_call| DebugSourceInlineCall {
                 op_idx,
+                op_end: op_idx + 1,
                 callee_idx: inline_call.callee_idx,
                 loc_idx: inline_call.loc_idx,
             })
@@ -314,9 +315,29 @@ impl BasicBlockBuilder<'_> {
     }
 
     fn record_active_inline_calls(&mut self, op_idx: u32) {
+        if self.active_inline_calls.is_empty() {
+            return;
+        }
+        if let Some(last) = self.inline_calls.last() {
+            let start = self.inline_calls.partition_point(|row| row.op_idx < last.op_idx);
+            let previous = &mut self.inline_calls[start..];
+            if previous.len() == self.active_inline_calls.len()
+                && previous.iter().zip(&self.active_inline_calls).all(|(row, frame)| {
+                    row.op_end == op_idx
+                        && row.callee_idx == frame.callee_idx
+                        && row.loc_idx == frame.loc_idx
+                })
+            {
+                for row in previous {
+                    row.op_end = op_idx + 1;
+                }
+                return;
+            }
+        }
         self.inline_calls.extend(self.active_inline_calls.iter().map(|inline_call| {
             DebugSourceInlineCall {
                 op_idx,
+                op_end: op_idx + 1,
                 callee_idx: inline_call.callee_idx,
                 loc_idx: inline_call.loc_idx,
             }
@@ -371,5 +392,42 @@ impl BasicBlockBuilder<'_> {
     /// corresponding error code as a Felt.
     pub fn register_error(&mut self, msg: Arc<str>) -> Felt {
         self.mast_forest_builder.register_error(msg)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inline_ranges_coalesce_identical_chains_but_preserve_clears_and_depth_changes() {
+        let mut forest = MastForestBuilder::new_with_static_libraries([]).unwrap();
+        let mut builder = BasicBlockBuilder::new(None, &mut forest);
+        let frame = ActiveInlineCall {
+            callee_idx: DebugFunctionIdx::from(0),
+            loc_idx: DebugLocIdx::from(0),
+        };
+        builder.active_inline_calls = vec![frame, frame];
+        builder.push_op_many(Operation::Noop, 50_000);
+        assert_eq!(builder.inline_calls.len(), 2);
+        assert!(builder.inline_calls.iter().all(|row| row.op_idx == 0 && row.op_end == 50_000));
+
+        builder.clear_debug_inline_calls();
+        builder.push_op(Operation::Noop);
+        builder.active_inline_calls = vec![frame, frame];
+        builder.push_op_many(Operation::Noop, 3);
+        assert_eq!(builder.inline_calls.len(), 4);
+        assert!(builder.inline_calls.iter().all(|row| !row.contains_operation(50_000)));
+        assert!(
+            builder.inline_calls[2..]
+                .iter()
+                .all(|row| row.op_idx == 50_001 && row.op_end == 50_004)
+        );
+
+        builder.active_inline_calls = vec![frame];
+        builder.push_op(Operation::Noop);
+        assert_eq!(builder.inline_calls.len(), 5);
+        assert_eq!(builder.inline_calls[4].op_idx, 50_004);
+        assert_eq!(builder.inline_calls[4].op_end, 50_005);
     }
 }

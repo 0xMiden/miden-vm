@@ -2,6 +2,10 @@
 
 ## v1.0.0 (Unreleased)
 
+#### Changes
+
+- [BREAKING] Store inline-call frames as operation ranges instead of per-operation rows. Package debug-info version 4 preserves inline chains across clears, control flow, and dynamic or external boundaries without expanding them during decoding.
+
 ## v0.35.0 (2026-10-01)
 
 #### Changes
