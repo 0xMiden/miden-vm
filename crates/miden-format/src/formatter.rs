@@ -4,8 +4,8 @@ use miden_assembly_syntax_cst::{
     Item, Operation, SyntaxKind, SyntaxNode, SyntaxToken,
     ast::{
         AdviceMap, BeginBlock, Block, Constant, DoWhileOp, IfOp, Import, ImportKind,
-        ImportSpecifier, Instruction, Procedure, RepeatOp, Signature, SourceFile, TypeAnnotation,
-        TypeBody, TypeDecl, WhileOp,
+        ImportSpecifier, Instruction, Procedure, RepeatOp, Signature, SourceFile, TypeBody,
+        TypeDecl, WhileOp,
     },
     rowan::{Direction, NodeOrToken, ast::AstNode},
 };
@@ -382,52 +382,18 @@ fn render_single_token(token: SyntaxToken) -> String {
 }
 
 fn render_constant(constant: &Constant, indent: usize, config: &Config) -> String {
-    let (Some(name), Some(value)) = (constant.name_token(), constant.expr()) else {
+    let (Some(_), Some(value)) = (constant.name_token(), constant.expr()) else {
         return render_line_form(constant.syntax(), indent);
     };
 
-    let mut header = indent_string(indent);
-    if constant.visibility().is_some() {
-        header.push_str("pub ");
-    }
-    header.push_str("const ");
-    header.push_str(&render_single_token(name));
-
-    if let Some(annotation) = constant.type_annotation() {
-        header.push(' ');
-        header.push_str(&render_constant_annotation(
-            &annotation,
-            constant.syntax(),
-            indent,
-            config,
-        ));
-    } else {
-        header.push_str(" =");
-    }
+    let prefix_tokens = tokens_before_child(constant.syntax(), value.syntax());
+    let header = render_declaration_prefix(&prefix_tokens, indent, config);
 
     let mut rendered = render_assigned_value(header, value.syntax(), indent, config);
     if let Some(comment) = comment_after_child(value.syntax()) {
         append_inline_comment(&mut rendered, &comment);
     }
     rendered
-}
-
-/// Renders `=` with the annotation to keep it out of a trailing line comment.
-fn render_constant_annotation(
-    annotation: &TypeAnnotation,
-    declaration: &SyntaxNode,
-    indent: usize,
-    config: &Config,
-) -> String {
-    let mut tokens = all_tokens(annotation.syntax());
-    tokens.extend(
-        declaration
-            .children_with_tokens()
-            .filter_map(NodeOrToken::into_token)
-            .find(|token| token.kind() == SyntaxKind::Equal),
-    );
-
-    render_declaration_prefix(&tokens, indent, config).trim_start().to_string()
 }
 
 fn render_declaration_prefix(tokens: &[SyntaxToken], indent: usize, config: &Config) -> String {
@@ -2415,6 +2381,55 @@ end
 
         let reformatted = format_syntax(&config, &reparsed.syntax());
         assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn preserves_comments_outside_constant_annotations() {
+        for (source, expected) in [
+            ("const X = # explanation\n1\n", "const X = # explanation\n    1\n"),
+            ("const X # explanation\n= 1\n", "const X # explanation\n= 1\n"),
+            ("const # explanation\nX=1\n", "const # explanation\nX = 1\n"),
+            ("pub const X # explanation\n:u32=1\n", "pub const X # explanation\n: u32 = 1\n"),
+            (
+                "pub const X:u32= # explanation\n1\n",
+                "pub const X : u32 = # explanation\n    1\n",
+            ),
+            (
+                "const X =\n# explanation\n# more detail\n1\n",
+                "const X =\n# explanation\n# more detail\n    1\n",
+            ),
+            ("const X # name\n= # value\n1\n", "const X # name\n= # value\n    1\n"),
+            ("const X\n=\n1\n", "const X = 1\n"),
+        ] {
+            assert_eq!(assert_format_idempotent(source, source), expected);
+        }
+    }
+
+    #[test]
+    fn preserves_constant_header_and_value_comments() {
+        let source = "\
+const WORD = # initializer
+[
+# first element
+1,2,3,4
+] # word
+";
+        let expected = "\
+const WORD = # initializer
+  [
+    # first element
+    1, 2, 3, 4
+  ] # word
+";
+        let config = Config {
+            indent_size: Some(2),
+            ..Config::default()
+        };
+
+        assert_eq!(
+            assert_format_idempotent_with_config(source, "constant header and value", &config),
+            expected
+        );
     }
 
     #[test]
