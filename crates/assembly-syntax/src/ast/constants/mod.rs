@@ -76,6 +76,7 @@ impl fmt::Debug for Constant {
             .field("docs", &self.docs)
             .field("visibility", &self.visibility)
             .field("name", &self.name)
+            .field("ty", &self.ty)
             .field("value", &self.value)
             .finish()
     }
@@ -101,7 +102,10 @@ impl Eq for Constant {}
 
 impl PartialEq for Constant {
     fn eq(&self, other: &Self) -> bool {
-        self.visibility == other.visibility && self.name == other.name && self.value == other.value
+        self.visibility == other.visibility
+            && self.name == other.name
+            && self.ty == other.ty
+            && self.value == other.value
     }
 }
 
