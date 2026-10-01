@@ -715,36 +715,12 @@ impl MastForestBuilder {
             })
             .collect();
 
-        let mut inline_calls = Vec::with_capacity(
-            source_node.inline_calls.len()
-                + active_inline_calls.len()
-                    * core::cmp::max(
-                        source_node.op_end.saturating_sub(source_node.op_start),
-                        u32::from(is_external_boundary),
-                    ) as usize,
-        );
-        if source_node.op_start == source_node.op_end && is_external_boundary {
-            let boundary_op_idx = source_node.op_start;
-            inline_calls.extend(source_node.inline_calls.iter().copied());
+        let mut inline_calls = source_node.inline_calls.clone();
+        if source_node.op_start < source_node.op_end || is_external_boundary {
             inline_calls.extend(active_inline_calls.iter().map(|inline_call| {
                 DebugSourceInlineCall {
-                    op_idx: boundary_op_idx,
-                    callee_idx: inline_call.callee_idx,
-                    loc_idx: inline_call.loc_idx,
-                }
-            }));
-        }
-        for op_idx in source_node.op_start..source_node.op_end {
-            inline_calls.extend(
-                source_node
-                    .inline_calls
-                    .iter()
-                    .filter(|inline_call| inline_call.op_idx == op_idx)
-                    .copied(),
-            );
-            inline_calls.extend(active_inline_calls.iter().map(|inline_call| {
-                DebugSourceInlineCall {
-                    op_idx,
+                    op_idx: source_node.op_start,
+                    op_end: source_node.op_end,
                     callee_idx: inline_call.callee_idx,
                     loc_idx: inline_call.loc_idx,
                 }
@@ -1488,6 +1464,7 @@ impl MastForestBuilder {
                     .into_iter()
                     .map(|mut inline_call| {
                         inline_call.op_idx = remap_op_idx(inline_call.op_idx);
+                        inline_call.op_end = remap_op_idx(inline_call.op_end);
                         inline_call
                     })
                     .collect(),
@@ -1575,6 +1552,7 @@ impl MastForestBuilder {
                 merged_inline_calls.extend(source_node.inline_calls.iter().map(|inline_call| {
                     let mut inline_call = *inline_call;
                     inline_call.op_idx += u32::try_from(ops_offset).unwrap();
+                    inline_call.op_end += u32::try_from(ops_offset).unwrap();
                     inline_call
                 }));
                 merged_functions.extend(self.function_indices_for_source_ref(source_ref));
@@ -1883,7 +1861,12 @@ mod tests {
             ));
             (callee_idx, call_site_span)
         };
-        let inline_call = DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx };
+        let inline_call = DebugSourceInlineCall {
+            op_idx: 0,
+            op_end: 1,
+            callee_idx,
+            loc_idx,
+        };
         let decorated = builder.record_exec_inline_calls(target, &[inline_call]).unwrap();
         let source_node_count = builder.debug_info.debug_info().nodes().len();
 
@@ -1923,7 +1906,12 @@ mod tests {
             ));
             (callee_idx, loc_idx)
         };
-        let inline_call = DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx };
+        let inline_call = DebugSourceInlineCall {
+            op_idx: 0,
+            op_end: 1,
+            callee_idx,
+            loc_idx,
+        };
         let external_ref = builder
             .ensure_external_link_with_source_ref(mast_root, None, None, None)
             .unwrap();
@@ -1935,7 +1923,7 @@ mod tests {
                 7,
                 vec![],
                 vec![],
-                vec![DebugSourceInlineCall { op_idx: 7, ..inline_call }],
+                vec![DebugSourceInlineCall { op_idx: 7, op_end: 7, ..inline_call }],
                 &[],
                 true,
                 false,
@@ -1995,7 +1983,12 @@ mod tests {
             ));
             (callee_idx, loc_idx)
         };
-        let inline_call = DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx };
+        let inline_call = DebugSourceInlineCall {
+            op_idx: 0,
+            op_end: 1,
+            callee_idx,
+            loc_idx,
+        };
         let external_ref = builder
             .ensure_external_link_with_source_ref(block_digest, None, None, None)
             .unwrap();
@@ -2430,6 +2423,7 @@ mod tests {
                 vec![debug_var_a],
                 vec![DebugSourceInlineCall {
                     op_idx: 0,
+                    op_end: 1,
                     callee_idx: function_a,
                     loc_idx: location_a,
                 }],
@@ -2444,6 +2438,7 @@ mod tests {
                 vec![debug_var_b],
                 vec![DebugSourceInlineCall {
                     op_idx: 0,
+                    op_end: 1,
                     callee_idx: function_b,
                     loc_idx: location_b,
                 }],
@@ -2469,6 +2464,7 @@ mod tests {
             merged_source.inline_calls,
             vec![DebugSourceInlineCall {
                 op_idx: 0,
+                op_end: 1,
                 callee_idx: function_b,
                 loc_idx: location_b,
             }],
@@ -2510,6 +2506,7 @@ mod tests {
             remerged_source.inline_calls,
             vec![DebugSourceInlineCall {
                 op_idx: 0,
+                op_end: 1,
                 callee_idx: function_b,
                 loc_idx: location_b,
             }],
@@ -3151,6 +3148,7 @@ mod tests {
         );
         debug_info[source_ref].inline_calls.push(DebugSourceInlineCall {
             op_idx: 0,
+            op_end: 1,
             callee_idx: function_idx,
             loc_idx: location_idx,
         });

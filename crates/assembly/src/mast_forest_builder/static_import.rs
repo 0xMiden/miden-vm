@@ -550,7 +550,18 @@ impl MastForestBuilder {
                     row.callee_idx,
                     "function",
                 )?;
-                Ok(DebugSourceInlineCall { op_idx: row.op_idx, callee_idx, loc_idx })
+                let (op_idx, op_end) = self.unadjust_source_block_range(
+                    source_forest,
+                    source_exec_node_id,
+                    row.op_idx as usize,
+                    row.op_end as usize,
+                );
+                Ok(DebugSourceInlineCall {
+                    op_idx: u32::try_from(op_idx).unwrap(),
+                    op_end: u32::try_from(op_end).unwrap(),
+                    callee_idx,
+                    loc_idx,
+                })
             })
             .collect::<Result<Vec<_>, Report>>()?;
         let op_range = package_debug_info.source_node(source_node_id).map(|source_node| {
@@ -596,12 +607,7 @@ impl MastForestBuilder {
                 debug_vars,
                 |debug_var| &mut debug_var.op_idx,
             ),
-            inline_calls: self.unadjust_source_block_indices(
-                source_forest,
-                source_exec_node_id,
-                inline_calls,
-                |inline_call| &mut inline_call.op_idx,
-            ),
+            inline_calls,
             functions,
         })
     }
