@@ -413,9 +413,10 @@ impl<V: FalconVariant> Deserializable for SecretKey<V> {
         let mut big_f =
             Zeroizing::new(Polynomial::new(big_f.iter().map(|&c| i16::from(c)).collect()));
 
-        // Each FFT-domain step is bound in `Zeroizing` so every secret-carrying intermediate
-        // is wiped, including the inverse that `hadamard_div` would otherwise allocate.
-        let f_fft = Zeroizing::new(Polynomial::<FalconFelt>::from(&*f).fft());
+        // Bind each converted polynomial in `Zeroizing` before transforming so the
+        // temporaries `fft`/`ifft` allocate are wiped, not just the FFT outputs.
+        let mut f_fft = Zeroizing::new(Polynomial::<FalconFelt>::from(&*f));
+        f_fft.fft_inplace();
         if f_fft.coefficients.iter().any(Zero::is_zero) {
             return Err(DeserializationError::InvalidValue(
                 "Falcon secret key polynomial f is not invertible".to_string(),
@@ -428,12 +429,15 @@ impl<V: FalconVariant> Deserializable for SecretKey<V> {
             ));
         }
 
-        let g_fft = Zeroizing::new(Polynomial::<FalconFelt>::from(&*g).fft());
-        let big_f_fft = Zeroizing::new(Polynomial::<FalconFelt>::from(&*big_f).fft());
+        let mut g_fft = Zeroizing::new(Polynomial::<FalconFelt>::from(&*g));
+        g_fft.fft_inplace();
+        let mut big_f_fft = Zeroizing::new(Polynomial::<FalconFelt>::from(&*big_f));
+        big_f_fft.fft_inplace();
         let f_fft_inv = Zeroizing::new(f_fft.hadamard_inv());
         let quotient = Zeroizing::new(g_fft.hadamard_mul(&f_fft_inv));
-        let big_g_fft = Zeroizing::new(quotient.hadamard_mul(&big_f_fft));
-        let mut big_g = Zeroizing::new(Polynomial::new(big_g_fft.ifft().to_balanced_values()));
+        let mut big_g_fft = Zeroizing::new(quotient.hadamard_mul(&big_f_fft));
+        big_g_fft.ifft_inplace();
+        let mut big_g = Zeroizing::new(Polynomial::new(big_g_fft.to_balanced_values()));
 
         let big_coefficient_bound = (1 << (WIDTH_BIG_POLY_COEFFICIENT - 1)) - 1;
         if !check_coefficients_bound(&big_g, big_coefficient_bound as i16) {

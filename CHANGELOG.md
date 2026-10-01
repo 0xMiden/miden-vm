@@ -8,6 +8,11 @@
 
 #### Changes
 
+- [BREAKING] Removed `Eq` and `PartialEq` from Falcon, ECDSA-k256, and EdDSA secret-key types in
+  non-test builds so production comparisons cannot materialize encoded private-key copies
+  ([0xMiden/crypto#1061](https://github.com/0xMiden/crypto/pull/1061), [#3456](https://github.com/0xMiden/miden-vm/pull/3456)).
+  Also removed the public `ZeroizeOnDrop` impl on `Polynomial<F>`; downstream `T: ZeroizeOnDrop`
+  bounds that relied on that impl will now fail to compile with E0277.
 - [BREAKING] Removed the custom `Randomizable` trait and random test wrappers. Use `rand` distributions instead. `Word` now implements `StandardUniform`, and `Felt`'s default Proptest strategy is shrinkable and covers canonical and non-canonical representations. Tests that require one representation can use `arb_felt_canonical()` or `arb_felt_noncanonical()` ([#3873](https://github.com/0xMiden/miden-vm/pull/3873)).
 - Improved lifted STARK prover performance: LogUp fractions are built and accumulated in row chunks with a parallel accumulator scan, and DEEP reduction avoids element-wise buffer swaps and per-height group buffers ([#3851](https://github.com/0xMiden/miden-vm/pull/3851)).
 - [BREAKING] Reduced prover peak memory by 13-20% by pruning Merkle layers ([#3872](https://github.com/0xMiden/miden-vm/pull/3872)).
@@ -16,6 +21,10 @@
 
 #### Fixes
 
+- Wiped Falcon secret-polynomial and encoded-key temporaries during key generation,
+  deserialization, serialization, public-key derivation, and signing. ECDSA-k256 and EdDSA
+  serialization temporaries are also wiped
+  ([0xMiden/crypto#1061](https://github.com/0xMiden/crypto/pull/1061), [#3456](https://github.com/0xMiden/miden-vm/pull/3456)).
 - [BREAKING] Fixed missing decoder AIR constraints that allowed `in_span` to change without a
   matching `SPAN`, `RESPAN`, or `END` operation. This changes Miden VM proofs and AIR relation
   digests. The VM recursive-verifier MAST root also changes, so consumers that pin it must update
@@ -267,21 +276,6 @@
 - [BREAKING] Fixed collisions between empty input and full rate blocks in domain-separated field-element hashing by marking nonzero-domain empty input in capacity. This changes empty domain-separated commitments ([#3447](https://github.com/0xMiden/miden-vm/pull/3447)).
 - [BREAKING] Split the synthetic core MASM package into separate `miden-core` and `miden-precompiles` packages, leaving the bare `miden` namespace available for sibling packages such as `miden-protocol` ([#3459](https://github.com/0xMiden/miden-vm/pull/3459)).
 - Moved the `miden-precompiles` and `miden-precompiles-prover` crate sources from the repository root into `crates/`, aligning them with the rest of the workspace layout ([#3462](https://github.com/0xMiden/miden-vm/pull/3462)).
-
-#### Changes
-
-- [BREAKING] Removed `Eq` and `PartialEq` from Falcon, ECDSA-k256, and EdDSA secret-key types in
-  non-test builds so production comparisons cannot materialize encoded private-key copies
-  ([0xMiden/crypto#1061](https://github.com/0xMiden/crypto/pull/1061)).
-  Also removed the public `ZeroizeOnDrop` impl on `Polynomial<F>`; downstream `T: ZeroizeOnDrop`
-  bounds that relied on that impl will now fail to compile with E0277.
-
-#### Fixes
-
-- Wiped Falcon secret-polynomial and encoded-key temporaries during key generation,
-  deserialization, serialization, public-key derivation, and signing. ECDSA-k256 and EdDSA
-  serialization temporaries are also wiped
-  ([0xMiden/crypto#1061](https://github.com/0xMiden/crypto/pull/1061)).
 
 ## v0.28.0 (2026-08-01)
 
