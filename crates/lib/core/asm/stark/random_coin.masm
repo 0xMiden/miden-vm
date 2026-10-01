@@ -764,32 +764,6 @@ end
 # INDEX GENERATION
 # =============================================================================================
 
-#! Store one sampled query index word and advance the query pointer.
-#!
-#! Input: [sample, query_ptr, depth, index_mask, ...]
-#! Output: [query_ptr + 4, depth, index_mask, ...]
-proc store_query_index
-    u32split swap drop
-    dup.3 u32and
-    #=> [index, query_ptr, depth, index_mask, ...]
-
-    movdn.3
-    #=> [query_ptr, depth, index_mask, index, ...]
-
-    push.0
-    dup.4
-    dup.3
-    dup.6
-    #=> [index, depth, index, 0, query_ptr, depth, index_mask, index, ...]
-
-    dup.4 mem_storew_le dropw
-    #=> [query_ptr, depth, index_mask, index, ...]
-
-    add.4
-    movup.3 drop
-    #=> [query_ptr + 4, depth, index_mask, ...]
-end
-
 #! Generate a list of `num_queries` number of random indices in the range
 #! [0, lde_size) and store it in memory starting from `query_ptr`.
 #! The list is stored as `(index, depth, index, 0)` where `index` is the sampled domain-order

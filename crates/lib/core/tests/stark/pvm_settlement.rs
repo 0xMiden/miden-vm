@@ -103,7 +103,7 @@ fn prove_ecdsa_execution(
     .execute_for_proving_sync(&program, &mut host)
     .expect("ECDSA execution must produce a proving witness");
     let claim = witness.claim();
-    // The core library's recursive verifiers accept Poseidon2 proofs.
+    // The core library's recursive verifiers accept Eidos proofs.
     let proof = Prover::new()
         .with_hash_fn(HashFunction::Eidos)
         .prove(witness)
