@@ -11,6 +11,10 @@
 
 - Added `PublicKey::from_sec1_bytes` and `PublicKey::from_hex` to `ecdsa_k256_keccak` for parsing and validating compressed and uncompressed SEC1 public keys ([#3961](https://github.com/0xMiden/miden-vm/pull/3961)).
 
+#### Fixes
+
+- [BREAKING] Reject assembler-produced debug sections that exceed the standard reader's payload, string, or type-table limits instead of emitting packages that fail to load with debug information. Add `PackageDebugInfo::try_to_bytes` for checked encoding.
+
 ## v0.35.0 (2026-10-01)
 
 #### Changes
