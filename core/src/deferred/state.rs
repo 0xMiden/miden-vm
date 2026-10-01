@@ -107,11 +107,6 @@ impl DeferredState {
         self.get_canonical_node(digest).ok_or(PrecompileError::MissingNode)
     }
 
-    /// Returns work charged for guest-induced deferred operations during execution.
-    pub const fn execution_work(&self) -> &PrecompileWork {
-        &self.execution_work
-    }
-
     /// Replaces the execution admission policy used for subsequent guest operations.
     ///
     /// The replacement must admit all work already consumed by this execution.
@@ -164,8 +159,8 @@ impl DeferredState {
             &self.execution_limits,
         )?;
         let statement = PreparedNode::new(statement);
-        self.require_true_eval(self.root)?;
-        self.require_true_eval(statement_digest)?;
+        self.evaluator.require_true_eval(self.root)?;
+        self.evaluator.require_true_eval(statement_digest)?;
         self.accept_statement(statement)
     }
 
@@ -194,8 +189,8 @@ impl DeferredState {
             }
             .into());
         }
-        self.require_true_eval(self.root)?;
-        self.require_true_eval(statement_digest)?;
+        self.evaluator.require_true_eval(self.root)?;
+        self.evaluator.require_true_eval(statement_digest)?;
         self.accept_statement(statement)
     }
 
@@ -223,26 +218,11 @@ impl DeferredState {
         PrecompileWitness::from_state(&self, verification_limits).map(Some)
     }
 
-    fn record_eval(
-        &mut self,
-        input_digest: Digest,
-        canonical_digest: Digest,
-    ) -> Result<(), PrecompileError> {
-        self.evaluator.record_eval(input_digest, canonical_digest)
-    }
-
     fn accept_statement(&mut self, statement: PreparedNode) -> Result<Digest, PrecompileError> {
         let new_root = self.evaluator.insert_node(statement)?;
-        self.record_eval(new_root, TRUE_DIGEST)?;
+        self.evaluator.record_eval(new_root, TRUE_DIGEST)?;
         self.root = new_root;
         Ok(new_root)
-    }
-
-    fn require_true_eval(&mut self, digest: Digest) -> Result<(), PrecompileError> {
-        if self.evaluate_digest(digest)? != TRUE_DIGEST {
-            return Err(PrecompileError::AssertionFailed);
-        }
-        Ok(())
     }
 }
 
@@ -459,11 +439,11 @@ mod tests {
 
     const FIXTURE_WORK: WorkClass = WorkClass::new("state-fixture");
 
-    fn fixture_limits() -> PrecompileLimits {
+    fn fixture_limits(max_count: u64) -> PrecompileLimits {
         PrecompileLimits::new(u64::MAX).with_class(
             FIXTURE_WORK,
             WorkLimit {
-                max_count: u64::MAX,
+                max_count,
                 max_total_size: u64::MAX,
                 max_size: u32::MAX,
             },
@@ -494,7 +474,7 @@ mod tests {
         }
 
         fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
-            (args[0].as_canonical_u64() <= 2 && args[1] == ZERO && args[2] == ZERO)
+            (args[0].as_canonical_u64() <= 1 && args[1] == ZERO && args[2] == ZERO)
                 .then_some(NodeType::Data)
         }
 
@@ -516,52 +496,39 @@ mod tests {
                     payload.as_data()?.to_vec(),
                 )
                 .map_err(PrecompileError::from),
-                2 => Ok(Node::TRUE),
                 _ => unreachable!("decode admits only fixture modes"),
             }
         }
     }
 
     #[test]
-    fn construction_starts_with_no_charged_guest_work() {
-        let state = DeferredState::new(
-            Arc::new(PrecompileRegistry::new()),
-            PrecompileLimits::new(u64::MAX),
-        )
-        .unwrap();
-        let default_state = DeferredState::default();
-
-        assert_eq!(state.execution_work(), &PrecompileWork::default());
-        assert_eq!(default_state.execution_work(), &PrecompileWork::default());
-    }
-
-    #[test]
-    fn register_eagerly_propagates_precompile_evaluation_errors() {
+    fn failed_duplicate_registration_attempts_are_charged() {
         let precompile = FixturePrecompile;
         let registry = Arc::new(PrecompileRegistry::new().with_precompile(precompile));
-        let mut state = DeferredState::new(registry, fixture_limits()).unwrap();
+        let mut state = DeferredState::new(registry, fixture_limits(1)).unwrap();
         let node = precompile.node(0);
         let digest = node.digest();
 
-        let error = state.register(node).unwrap_err();
+        let error = state.register(node.clone()).unwrap_err();
 
         assert!(matches!(error.root(), PrecompileError::AssertionFailed));
         assert_eq!(state.get_canonical_digest(digest), None);
+        assert_eq!(state.execution_work.class(FIXTURE_WORK).unwrap().count(), 1);
+        assert!(matches!(
+            state.register(node),
+            Err(PrecompileError::Limit(PrecompileLimitError::Count {
+                class: FIXTURE_WORK,
+                actual: 2,
+                max: 1,
+            }))
+        ));
     }
 
     #[test]
     fn register_enforces_work_policy_before_evaluation() {
         let precompile = FixturePrecompile;
         let registry = Arc::new(PrecompileRegistry::new().with_precompile(precompile));
-        let limits = PrecompileLimits::new(u64::MAX).with_class(
-            FIXTURE_WORK,
-            WorkLimit {
-                max_count: 0,
-                max_total_size: 0,
-                max_size: 0,
-            },
-        );
-        let mut state = DeferredState::new(registry, limits).unwrap();
+        let mut state = DeferredState::new(registry, fixture_limits(0)).unwrap();
         let node = precompile.node(0);
         let digest = node.digest();
 
@@ -569,55 +536,21 @@ mod tests {
 
         assert!(matches!(error, PrecompileError::Limit(_)));
         assert!(state.get_node(&digest).is_none());
-        assert_eq!(state.execution_work(), &PrecompileWork::default());
-    }
-
-    #[test]
-    fn duplicate_guest_registrations_are_charged() {
-        let precompile = FixturePrecompile;
-        let registry = Arc::new(PrecompileRegistry::new().with_precompile(precompile));
-        let limits = PrecompileLimits::new(u64::MAX).with_class(
-            FIXTURE_WORK,
-            WorkLimit {
-                max_count: 1,
-                max_total_size: u64::MAX,
-                max_size: u32::MAX,
-            },
-        );
-        let mut state = DeferredState::new(registry, limits).unwrap();
-        let node = precompile.node(2);
-
-        state.register(node.clone()).unwrap();
-        let error = state.register(node).unwrap_err();
-
-        assert!(matches!(
-            error,
-            PrecompileError::Limit(PrecompileLimitError::Count {
-                class: FIXTURE_WORK,
-                actual: 2,
-                max: 1,
-            })
-        ));
-        assert_eq!(state.execution_work().class(FIXTURE_WORK).unwrap().count(), 1);
+        assert_eq!(state.execution_work, PrecompileWork::default());
     }
 
     #[test]
     fn execution_limits_cannot_be_lowered_below_consumed_work() {
         let precompile = FixturePrecompile;
         let registry = Arc::new(PrecompileRegistry::new().with_precompile(precompile));
-        let mut state = DeferredState::new(registry, fixture_limits()).unwrap();
-        let node = precompile.node(2);
-        state.register(node.clone()).unwrap();
+        let mut state = DeferredState::new(registry, fixture_limits(u64::MAX)).unwrap();
+        let node = precompile.node(0);
+        assert!(matches!(
+            state.register(node.clone()).unwrap_err().root(),
+            PrecompileError::AssertionFailed
+        ));
 
-        let too_low = PrecompileLimits::new(u64::MAX).with_class(
-            FIXTURE_WORK,
-            WorkLimit {
-                max_count: 0,
-                max_total_size: u64::MAX,
-                max_size: u32::MAX,
-            },
-        );
-        let error = state.set_execution_limits(too_low).unwrap_err();
+        let error = state.set_execution_limits(fixture_limits(0)).unwrap_err();
 
         assert!(matches!(
             error,
@@ -627,17 +560,18 @@ mod tests {
                 max: 0,
             })
         ));
-        state
-            .register(node)
-            .expect("rejected replacement must leave the old limits active");
-        assert_eq!(state.execution_work().class(FIXTURE_WORK).unwrap().count(), 2);
+        assert!(matches!(
+            state.register(node).unwrap_err().root(),
+            PrecompileError::AssertionFailed
+        ));
+        assert_eq!(state.execution_work.class(FIXTURE_WORK).unwrap().count(), 2);
     }
 
     #[test]
     fn evaluation_validates_a_new_canonical_before_storing_it() {
         let precompile = FixturePrecompile;
         let registry = Arc::new(PrecompileRegistry::new().with_precompile(precompile));
-        let mut state = DeferredState::new(registry, fixture_limits()).unwrap();
+        let mut state = DeferredState::new(registry, fixture_limits(u64::MAX)).unwrap();
         let input = precompile.node(1);
         let input_digest = input.digest();
         let invalid = Node::value(
@@ -659,7 +593,7 @@ mod tests {
         let expected = Node::and(TRUE_DIGEST, TRUE_DIGEST).digest();
         let mut ordinary = DeferredState::default();
         assert_eq!(ordinary.log_statement(TRUE_DIGEST).unwrap(), expected);
-        assert_eq!(ordinary.execution_work().nodes(), 1);
+        assert_eq!(ordinary.execution_work.nodes(), 1);
 
         let mut verified = DeferredState::default();
         let mismatch = Node::and(expected, TRUE_DIGEST).digest();
@@ -669,21 +603,21 @@ mod tests {
         ));
         assert_eq!(verified.root(), TRUE_DIGEST);
         assert!(verified.get_node(&expected).is_none());
-        assert_eq!(verified.execution_work().nodes(), 1);
+        assert_eq!(verified.execution_work.nodes(), 1);
 
         assert_eq!(
             verified.log_verified_statement(TRUE_DIGEST, expected).unwrap(),
             ordinary.root()
         );
         assert_eq!(verified.get_canonical_digest(expected), Some(TRUE_DIGEST));
-        assert_eq!(verified.execution_work().nodes(), 2);
+        assert_eq!(verified.execution_work.nodes(), 2);
     }
 
     #[test]
     fn verified_root_mismatch_precedes_statement_evaluation() {
         let precompile = FixturePrecompile;
         let registry = Arc::new(PrecompileRegistry::new().with_precompile(precompile));
-        let mut state = DeferredState::new(registry, fixture_limits()).unwrap();
+        let mut state = DeferredState::new(registry, fixture_limits(u64::MAX)).unwrap();
         let statement = state.evaluator.insert_node(PreparedNode::new(precompile.node(0))).unwrap();
         let actual_root = Node::and(TRUE_DIGEST, statement).digest();
         assert_ne!(actual_root, TRUE_DIGEST);

@@ -102,8 +102,8 @@ A precompile supplies four things:
 - `work(args, payload) -> Result<WorkItem>` classifies the bounded computation represented by a
   structurally valid node. Witness preparation calls it before hashing or evaluation, so it must
   not evaluate children, perform the claimed cryptographic work, or allocate proportionally to
-  attacker-controlled values. Every class declared by an installed registry must have a configured
-  `WorkLimit`.
+  attacker-controlled values. Every work class encountered in an execution or witness must have a
+  configured `WorkLimit` in that accounting policy.
 - `evaluate(args, payload, …) -> Result<Node>` computes a node's **canonical form**. The
   common roles are: validate a canonical value represented as data (its canonical is itself),
   evaluate an operation (evaluate the child canonicals, then combine), or check a predicate

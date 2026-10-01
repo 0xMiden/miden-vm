@@ -11,21 +11,29 @@ Successful execution consumes it and exports the root-reachable graph as one por
 one root, with no evaluator or evaluation cache. Structural validity alone does not establish the
 truth of its assertions.
 
-The simplified state model is:
+The execution state is:
 
 ```rust
 pub struct DeferredState {
+    evaluator: DeferredEvaluator,
+    root: Digest,
+    execution_work: PrecompileWork,
+    execution_limits: PrecompileLimits,
+}
+
+struct DeferredEvaluator {
     registry: Arc<PrecompileRegistry>,
     nodes: BTreeMap<Digest, Node>,
-    root: Digest,
-    remaining_elements: usize,
-    // evaluation results may be memoized internally, but this is not part of the public contract
+    evals: BTreeMap<Digest, Digest>,
 }
 ```
 
+`DeferredEvaluator` contains only graph storage and semantic evaluation. `DeferredState` adds the
+rolling root and execution admission.
+
 ## Vocabulary
 
-- **Registered** means a digest has an entry in `DeferredState.nodes`. Registration can happen
+- **Registered** means a digest has an entry in the evaluator's node store. Registration can happen
   through `DeferredState::register`, evaluation storing canonical/helper nodes, or statement
   logging storing framework `AND` nodes.
 - **Evaluated** means a registered input digest has been semantically reduced to a canonical node
@@ -35,41 +43,24 @@ pub struct DeferredState {
   Only the root-reachable closure is exported by `into_witness`; registered/evaluated orphans are
   dropped.
 
-## Registered nodes
+## Registration and execution admission
 
-`nodes` is the durable node store.
+`nodes` is the evaluator's durable node store.
 
 - `TRUE_DIGEST` is always present and maps to `Node::TRUE`.
-- `Node::TRUE` costs no budget.
 - Every non-TRUE node is keyed by `node.digest()`.
 - Structural nodes may reference only children already present in `nodes`, except for the implicit
   `TRUE_DIGEST`:
   - `Join` has two child digests.
   - `PairList` has one or more pairs of child digests.
-- Re-registering identical content is idempotent and free.
+- Re-registering identical content reuses storage and successful evaluation results.
 - Reusing an existing digest for different content is rejected as a conflicting node.
 
-Registration stores and shape-checks a node in `nodes`, evaluates it immediately, and stores the
-canonical result. False predicates and other semantic evaluation failures are reported by
-registration.
-
-## One fixed ceiling
-
-`DeferredState::new(registry)` initializes one total budget from the library safety ceiling:
-
-```text
-remaining_elements = MAX_DEFERRED_WIRE_ELEMENTS
-```
-
-Initialization also installs the registry's `init()` constants, charging them against that same
-budget. `extend_precompiles(precompiles)` merges additional precompiles into an existing state
-without discarding existing nodes, evaluation results, root, or budget accounting.
-
-Every new unique durable node inserted into `nodes` decrements `remaining_elements` by the node's
-field-element footprint using checked subtraction. Duplicate insertion is free, so registering the
-same data node at the exact budget limit succeeds. Evaluation results do not have a separate budget
-and do not double-count canonical payloads; only canonical/helper nodes newly inserted into `nodes`
-are charged.
+`DeferredState::register` shape-checks a guest node, charges every attempt against
+`execution_work` and `execution_limits`, then hashes, stores, and evaluates it. Duplicate and failed
+attempts are charged even when storage or successful evaluation can be reused. Registry bootstrap
+nodes and helpers created internally during semantic evaluation bypass execution admission.
+`extend_precompiles(precompiles)` preserves the existing evaluator, root, and execution work.
 
 The precompile's `decode` result is the framework shape gate:
 
@@ -80,12 +71,9 @@ The precompile's `decode` result is the framework shape gate:
 - `NodeType::PairList` authorizes a non-empty list of `lhs_digest || rhs_digest` chunks. Precompile
   evaluation checks any tag-derived semantic pair count.
 
-Processor handlers perform a cheap deferred-budget pre-check before allocating or reading a
-memory-backed payload, but exact data/pair-list arity remains precompile-specific semantics.
-
-If insertion exhausts the remaining budget, execution aborts with a budget error. The insertion path
-owns this accounting; processor deferred handlers do not perform post-mutation deferred budget
-checks.
+Memory-backed registration applies the separate hard `MAX_DEFERRED_WIRE_ELEMENTS` ceiling before
+reading a large guest payload. Exact execution admission still occurs once through
+`DeferredState::register`, after payload-dependent work can be classified.
 
 ## Evaluation
 
@@ -109,13 +97,6 @@ Precompile-owned nodes are evaluated by `PrecompileRegistry::evaluate`, which di
 owning `Precompile` with a `DeferredContext`. Canonical nodes newly produced during evaluation are
 validated before they become registered nodes.
 
-`DeferredState` owns execution admission around this semantic engine. Every guest registration
-attempt charges its node against `execution_work` and `execution_limits` before storage or
-evaluation, including repeated registrations of the same commitment. Storage and successful
-evaluation remain deduplicated. Rolling-root AND nodes are also guest-induced execution work.
-Registry bootstrap nodes and helper nodes created internally during semantic evaluation are not
-execution work.
-
 `DeferredContext` gives precompile implementations the same semantic split:
 
 - `get_node(digest)` queries the registered/original node by digest without evaluating it.
@@ -126,9 +107,10 @@ execution work.
 
 ## Root and portable export
 
-`root` starts at `TRUE_DIGEST`. `log_statement(stmt_digest)` evaluates the current root and
-statement, requires both to evaluate to `Node::TRUE`, then appends one framework `AND` node.
-`log_verified_statement` checks the proposed new root before that evaluation:
+`root` starts at `TRUE_DIGEST`. Each logging attempt charges its plain framework `AND` node before
+hashing the new commitment. `log_statement(stmt_digest)` then evaluates the current root and
+statement, requires both to evaluate to `Node::TRUE`, and advances the root.
+`log_verified_statement` checks the proposed new root before semantic evaluation:
 
 ```text
 next_root = digest(Node::and(previous_root, stmt_digest))
@@ -160,9 +142,9 @@ and reachability without hashing again. Duplicate commitments, orphaned entries,
 A successful `PreparedWitness` contains the reconstructed commitments and root, the complete
 `PrecompileWork`, and a graph admitted under the supplied per-witness policy. It does not establish
 computational validity or assertion truth. `root()` and `work()` expose the root and admitted work;
-`digests()` iterates over the checked commitments. `into_nodes(self)` consumes the witness and yields
-opaque `PreparedNode` values in canonical child-first order. Their `node()` and `digest()` accessors
-are read-only; construction and fields remain private.
+`into_nodes(self)` consumes the witness and yields opaque `PreparedNode` values in canonical
+child-first order. Their `node()` and `digest()` accessors are read-only; construction and fields
+remain private.
 
 `PreparedWitness::evaluate(self)` consumes the prepared value and succeeds only when native semantic
 evaluation resolves its root to `TRUE_DIGEST`. Callers retaining either witness representation must

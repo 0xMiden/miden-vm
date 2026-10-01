@@ -14,8 +14,7 @@ use alloc::{
 
 use super::{
     DataChunk, DeferredError, DeferredState, Digest, MAX_DEFERRED_WIRE_ELEMENTS, Node, NodeType,
-    PrecompileError, PrecompileLimitError, PrecompileLimits, PrecompileRegistry, PrecompileWork,
-    TRUE_DIGEST, Tag, node::hash_payload,
+    PrecompileError, PrecompileLimits, PrecompileRegistry, PrecompileWork, TRUE_DIGEST, Tag,
 };
 use crate::{
     Felt, ZERO,
@@ -82,59 +81,6 @@ impl WireEntry {
     fn min_serialized_size() -> usize {
         1 + Tag::min_serialized_size() + usize::min_serialized_size()
     }
-
-    /// Returns the tag whose operation is checked by the precompile prover.
-    pub fn tag(&self) -> Tag {
-        match self {
-            Self::Data { tag, .. } | Self::Join { tag, .. } | Self::PairList { tag, .. } => *tag,
-        }
-    }
-
-    fn children(&self) -> impl DoubleEndedIterator<Item = u32> + '_ {
-        let (join, pairs) = match self {
-            Self::Join { lhs, rhs, .. } => (Some([*lhs, *rhs]), &[][..]),
-            Self::PairList { pairs, .. } => (None, pairs.as_slice()),
-            Self::Data { .. } => (None, &[][..]),
-        };
-        join.into_iter()
-            .flatten()
-            .chain(pairs.iter().flat_map(|&(lhs, rhs)| [lhs, rhs]))
-    }
-
-    /// Reconstructs this entry's commitment from preceding digests, with TRUE at index zero.
-    ///
-    /// This validates framework shapes and references, without interpreting precompile tags or
-    /// evaluating assertions. The caller supplies only entries preceding this one.
-    pub fn digest(&self, digests: &[Digest]) -> Result<Digest, IntegrityError> {
-        if digests.first() != Some(&TRUE_DIGEST) {
-            return Err(IntegrityError::InvalidStructure);
-        }
-        let tag = self.tag();
-        if tag.is_framework_reserved()
-            && !matches!(self, Self::Data { tag, .. } if *tag == Tag::CHUNKS)
-            && !matches!(self, Self::Join { tag, .. } if *tag == Tag::AND)
-        {
-            return Err(IntegrityError::InvalidStructure);
-        }
-        if self.children().any(|index| index as usize >= digests.len()) {
-            return Err(IntegrityError::InvalidStructure);
-        }
-        let pair = |lhs: u32, rhs: u32| {
-            let lhs = digests[lhs as usize].into_elements();
-            let rhs = digests[rhs as usize].into_elements();
-            [lhs[0], lhs[1], lhs[2], lhs[3], rhs[0], rhs[1], rhs[2], rhs[3]]
-        };
-        match self {
-            Self::Data { chunks, .. } if !chunks.is_empty() => {
-                Ok(hash_payload(tag, chunks.iter().copied()))
-            },
-            Self::Join { lhs, rhs, .. } => Ok(hash_payload(tag, [pair(*lhs, *rhs)])),
-            Self::PairList { pairs, .. } if !pairs.is_empty() => {
-                Ok(hash_payload(tag, pairs.iter().map(|&(lhs, rhs)| pair(lhs, rhs))))
-            },
-            _ => Err(IntegrityError::InvalidStructure),
-        }
-    }
 }
 
 // PORTABLE WITNESS
@@ -172,16 +118,18 @@ impl PrecompileWitness {
         if self.entries.is_empty() {
             return Err(IntegrityError::InvalidStructure.into());
         }
-        let mut digests = Vec::with_capacity(self.entries.len() + 1);
         let mut indices = BTreeMap::new();
-        let mut nodes = Vec::with_capacity(self.entries.len());
+        let mut nodes: Vec<PreparedNode> = Vec::with_capacity(self.entries.len());
         let mut work = PrecompileWork::default();
-        digests.push(TRUE_DIGEST);
         indices.insert(TRUE_DIGEST, 0);
 
         for entry in self.entries {
-            let child = |index: u32| {
-                digests.get(index as usize).copied().ok_or(IntegrityError::InvalidStructure)
+            let child = |index: u32| match index {
+                TRUE_INDEX => Ok(TRUE_DIGEST),
+                index => nodes
+                    .get(index as usize - 1)
+                    .map(PreparedNode::digest)
+                    .ok_or(IntegrityError::InvalidStructure),
             };
             let node = match entry {
                 WireEntry::Data { tag, chunks } => {
@@ -213,15 +161,14 @@ impl PrecompileWitness {
             work.charge_node(&node, &registry, verification_limits)?;
             let prepared = PreparedNode::new(node);
             let digest = prepared.digest();
-            if indices.insert(digest, digests.len()).is_some() {
+            if indices.insert(digest, nodes.len() + 1).is_some() {
                 return Err(IntegrityError::InvalidStructure.into());
             }
-            digests.push(digest);
             nodes.push(prepared);
         }
 
         Self::validate_canonical_order(&nodes, &indices)?;
-        let root = *digests.last().expect("TRUE seeds the digest table");
+        let root = nodes.last().expect("the witness is nonempty").digest();
         if root == TRUE_DIGEST {
             return Err(IntegrityError::InvalidStructure.into());
         }
@@ -356,11 +303,6 @@ impl PreparedWitness {
         &self.work
     }
 
-    /// Returns checked node commitments in canonical child-first order.
-    pub fn digests(&self) -> impl ExactSizeIterator<Item = Digest> + '_ {
-        self.nodes.iter().map(PreparedNode::digest)
-    }
-
     /// Consumes this witness and yields its checked nodes in canonical child-first order.
     ///
     /// The nodes establish structural validity and admission, not computational validity.
@@ -394,18 +336,7 @@ pub enum PreparationError {
     #[error(transparent)]
     Integrity(#[from] IntegrityError),
     #[error(transparent)]
-    Precompile(PrecompileError),
-    #[error(transparent)]
-    Limit(#[from] PrecompileLimitError),
-}
-
-impl From<PrecompileError> for PreparationError {
-    fn from(error: PrecompileError) -> Self {
-        match error {
-            PrecompileError::Limit(error) => Self::Limit(error),
-            error => Self::Precompile(error),
-        }
-    }
+    Precompile(#[from] PrecompileError),
 }
 
 // INTEGRITY ERROR
@@ -544,8 +475,7 @@ impl WireEncoder {
         digest: Digest,
     ) -> Result<(NodeType, &'a Node), PrecompileError> {
         let node = state.get_node(&digest).ok_or(PrecompileError::MissingNode)?;
-        let node_type = state.registry().decode_node_type(node.tag())?;
-        node_type.validate_node(node)?;
+        let node_type = state.registry().validate_node(node)?;
         Ok((node_type, node))
     }
 
@@ -744,6 +674,7 @@ fn read_wire_entry<R: ByteReader>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deferred::PrecompileLimitError;
 
     fn felts(seed: u64) -> DataChunk {
         core::array::from_fn(|i| Felt::new_unchecked(seed + i as u64))
@@ -849,37 +780,21 @@ mod tests {
         let mut empty = DeferredState::default();
         empty.register(Node::chunks(alloc::vec![felts(10)]).unwrap()).unwrap();
         assert!(empty.into_witness(&framework_limits()).unwrap().is_none());
+
         let mut state = DeferredState::default();
         state.register(Node::chunks(alloc::vec![felts(10)]).unwrap()).unwrap();
         state.log_statement(TRUE_DIGEST).unwrap();
         let root = state.root();
-        let witness = state.into_witness(&framework_limits()).unwrap().unwrap();
-        assert_eq!(witness.entries(), &[WireEntry::Join { tag: Tag::AND, lhs: 0, rhs: 0 }]);
-        assert_eq!(prepare_framework(witness).unwrap().root(), root);
-    }
-
-    #[test]
-    fn verification_limits_apply_to_the_final_exported_graph() {
-        let registry = Arc::new(PrecompileRegistry::new());
-        let mut state =
-            DeferredState::new(Arc::clone(&registry), PrecompileLimits::new(u64::MAX)).unwrap();
-        let statement_node = Node::and(TRUE_DIGEST, TRUE_DIGEST);
-        let statement_elements = statement_node.felt_len() as u64;
-        let statement = state.register(statement_node).unwrap();
-        let root_node = Node::and(TRUE_DIGEST, statement);
-        let expected_elements = statement_elements + root_node.felt_len() as u64;
-        state.log_statement(statement).unwrap();
-
+        let expected_elements = Node::and(TRUE_DIGEST, TRUE_DIGEST).felt_len() as u64;
         let verification_limits = PrecompileLimits::new(expected_elements);
-        let witness = state
-            .clone()
-            .into_witness(&verification_limits)
-            .expect("execution may export under an independent verification policy")
-            .expect("the logged root is nonempty");
+        let registry = Arc::new(PrecompileRegistry::new());
+        let witness = state.clone().into_witness(&verification_limits).unwrap().unwrap();
+        assert_eq!(witness.entries(), &[WireEntry::Join { tag: Tag::AND, lhs: 0, rhs: 0 }]);
         let prepared = witness
             .prepare(registry, &verification_limits)
             .expect("exported work must prepare under the same verification policy");
-        assert_eq!(prepared.work().nodes(), 2);
+        assert_eq!(prepared.root(), root);
+        assert_eq!(prepared.work().nodes(), 1);
         assert_eq!(prepared.work().elements(), expected_elements);
         prepared.evaluate().expect("prepared evaluation is semantic only");
 

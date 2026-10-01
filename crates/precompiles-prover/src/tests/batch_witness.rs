@@ -3,9 +3,9 @@ use alloc::{collections::BTreeMap, sync::Arc, vec, vec::Vec};
 use miden_core::{
     Felt,
     deferred::{
-        DeferredError, Digest, MAX_PRECOMPILE_ROOTS, Node, Precompile, PrecompileLimitError,
-        PrecompileLimits, PrecompileWitness, PrecompileWitnessEntry, PreparationError,
-        PreparedWitness, TRUE_DIGEST, Tag, WorkLimit, fold_deferred_root,
+        DeferredError, Digest, MAX_PRECOMPILE_ROOTS, Node, Precompile, PrecompileError,
+        PrecompileLimitError, PrecompileLimits, PrecompileWitness, PrecompileWitnessEntry,
+        PreparationError, PreparedWitness, TRUE_DIGEST, Tag, WorkLimit, fold_deferred_root,
     },
 };
 use miden_precompiles::{
@@ -182,7 +182,6 @@ fn preparation_reports_exact_canonical_work_classes() {
 
     let prepared = prepare(fixture.witness());
     let work = prepared.work();
-    assert_eq!(work.nodes(), prepared.digests().len() as u64);
     assert_eq!(work.class(UINT_WORK).unwrap().count(), 5);
     assert_eq!(work.class(UINT_WORK).unwrap().total_size(), 5);
     assert_eq!(work.class(CURVE_WORK).unwrap().count(), 3);
@@ -562,10 +561,9 @@ fn distinct_hash_claims_count_shared_payload_demand() {
         import_witnesses(vec![later_invalid], &rejected),
         Err(PrecompileProvingError::Input(SessionInputError::Preparation {
             witness: 0,
-            source: PreparationError::Limit(PrecompileLimitError::TotalSize {
-                class: HASH_WORK,
-                ..
-            }),
+            source: PreparationError::Precompile(PrecompileError::Limit(
+                PrecompileLimitError::TotalSize { class: HASH_WORK, .. }
+            )),
         }))
     ));
     let admitted = miden_precompiles::default_verification_precompile_limits().with_class(
@@ -656,7 +654,9 @@ fn msm_limits_are_per_node_and_per_witness() {
         import_witnesses(vec![inputs[1].clone()], &per_claim),
         Err(PrecompileProvingError::Input(SessionInputError::Preparation {
             witness: 0,
-            source: PreparationError::Limit(PrecompileLimitError::ItemSize { class: MSM_WORK, .. }),
+            source: PreparationError::Precompile(PrecompileError::Limit(
+                PrecompileLimitError::ItemSize { class: MSM_WORK, .. }
+            )),
         }))
     ));
     let per_witness = miden_precompiles::default_verification_precompile_limits().with_class(
@@ -671,10 +671,9 @@ fn msm_limits_are_per_node_and_per_witness() {
         import_witnesses(vec![fixture.witness()], &per_witness),
         Err(PrecompileProvingError::Input(SessionInputError::Preparation {
             witness: 0,
-            source: PreparationError::Limit(PrecompileLimitError::TotalSize {
-                class: MSM_WORK,
-                ..
-            }),
+            source: PreparationError::Precompile(PrecompileError::Limit(
+                PrecompileLimitError::TotalSize { class: MSM_WORK, .. }
+            )),
         }))
     ));
     let above_old_ceiling = inputs.pop().unwrap();

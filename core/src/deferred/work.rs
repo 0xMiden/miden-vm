@@ -1,4 +1,4 @@
-//! Declared workload accounting for portable precompile witnesses.
+//! Declared deferred-precompile workload accounting.
 
 use alloc::collections::BTreeMap;
 
@@ -39,7 +39,7 @@ impl WorkItem {
     }
 }
 
-/// Aggregate work for one class within a witness.
+/// Aggregate work for one class within an accounting scope.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WorkSummary {
     count: u64,
@@ -94,7 +94,7 @@ impl PrecompileWork {
         self.elements
     }
 
-    /// Returns the summary for `class`, if the witness contains that class.
+    /// Returns the summary for `class`, if this scope contains that class.
     pub fn class(&self, class: WorkClass) -> Option<WorkSummary> {
         self.classes.get(&class).copied()
     }
@@ -227,11 +227,6 @@ impl PrecompileLimits {
         self
     }
 
-    /// Returns the configured limit for `class`, if that class is admitted.
-    pub fn class(&self, class: WorkClass) -> Option<WorkLimit> {
-        self.classes.get(&class).copied()
-    }
-
     fn check_elements(&self, actual: u64) -> Result<(), PrecompileLimitError> {
         if actual > self.max_elements {
             return Err(PrecompileLimitError::Elements { actual, max: self.max_elements });
@@ -252,7 +247,7 @@ impl PrecompileLimits {
     }
 }
 
-/// A witness exceeded its configured precompile admission policy.
+/// Work exceeded its configured precompile admission policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PrecompileLimitError {
     #[error("precompile work accounting overflowed")]
