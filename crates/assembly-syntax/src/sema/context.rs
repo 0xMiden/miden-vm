@@ -216,6 +216,18 @@ impl AnalysisContext {
                 pending_constants.push_back(name.clone());
             }
         }
+        for item in module.items() {
+            let Item::Type(TypeDecl::Enum(ty)) = item else {
+                continue;
+            };
+            if ty.visibility().is_public() || used_imports.contains(ty.name().as_str()) {
+                for variant in ty.variants() {
+                    if self.used_constants.insert(variant.name.clone()) {
+                        pending_constants.push_back(variant.name.clone());
+                    }
+                }
+            }
+        }
         while !pending_constants.is_empty() || !pending_imports.is_empty() {
             if let Some(name) = pending_constants.pop_front() {
                 if let Some(deps) = self.constant_deps.get(&name) {
