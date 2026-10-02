@@ -219,6 +219,12 @@ ast_node!(
     SyntaxKind::TypeBody,
     "type definition"
 );
+ast_node!(
+    #[doc = "A type annotation."]
+    TypeAnnotation,
+    SyntaxKind::TypeAnnotation,
+    "type annotation"
+);
 
 /// Any top-level item that can appear beneath the CST root.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -400,6 +406,11 @@ impl Constant {
     /// Returns the constant name token.
     pub fn name_token(&self) -> Option<SyntaxToken> {
         token_after_keyword(&self.syntax, "const")
+    }
+
+    /// Returns the optional type annotation.
+    pub fn type_annotation(&self) -> Option<TypeAnnotation> {
+        support::child(&self.syntax)
     }
 
     /// Returns the value expression for this constant.

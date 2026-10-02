@@ -220,6 +220,16 @@ enum BlockParseOutcome {
     ReachedEof,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TypeAnnotationEnd {
+    /// Reached `=`, leaving it unconsumed. The annotation may still contain errors.
+    Equals,
+    /// Stopped before another declaration, leaving it unconsumed.
+    RecoveryBoundary,
+    /// Reached the end of input before finding `=`.
+    Eof,
+}
+
 impl<'input> Parser<'input> {
     fn new(source: &'input SourceFile) -> Self {
         let eof_span = eof_anchor_span(source, None);
@@ -614,6 +624,17 @@ impl<'input> Parser<'input> {
             self.error_here("expected a constant name");
         }
 
+        self.bump_regular_trivia();
+        if self.at_kind(SyntaxKind::Colon) {
+            match self.parse_type_annotation() {
+                TypeAnnotationEnd::Equals => {},
+                TypeAnnotationEnd::RecoveryBoundary | TypeAnnotationEnd::Eof => {
+                    self.finish_node();
+                    return;
+                },
+            }
+        }
+
         self.expect_kind(SyntaxKind::Equal, "expected `=` in constant declaration");
         self.parse_expr_until_line_end();
         self.parse_line_tail();
@@ -762,6 +783,49 @@ impl<'input> Parser<'input> {
         }
 
         self.finish_node();
+    }
+
+    fn parse_type_annotation(&mut self) -> TypeAnnotationEnd {
+        self.start_node(SyntaxKind::TypeAnnotation);
+        debug_assert!(self.at_kind(SyntaxKind::Colon));
+        self.bump(); // colon
+
+        let mut nesting = Nesting::default();
+        let mut next_can_be_struct_attr = false;
+        let mut saw_significant = false;
+        let end = loop {
+            self.bump_regular_trivia();
+
+            if self.eof() {
+                self.error_at_eof("expected `=` after type annotation");
+                break TypeAnnotationEnd::Eof;
+            }
+
+            if self.at_kind(SyntaxKind::Equal) {
+                if !saw_significant {
+                    self.error_here("expected type annotation after `:`");
+                }
+                break TypeAnnotationEnd::Equals;
+            }
+
+            let is_struct_attribute = next_can_be_struct_attr && self.at_kind(SyntaxKind::At);
+            // Unclosed delimiters must not hide declarations, but keywords can also be field names.
+            if self.at_top_level_form_starter()
+                && ((nesting.is_root() && !is_struct_attribute)
+                    || self.at_strong_top_level_form_starter())
+            {
+                self.error_here("expected `=` after type annotation");
+                break TypeAnnotationEnd::RecoveryBoundary;
+            }
+
+            next_can_be_struct_attr = self.at_keyword("struct");
+            self.bump_nesting(&mut nesting, self.current_kind().expect("not eof"));
+            self.bump();
+            saw_significant = true;
+        };
+
+        self.finish_node();
+        end
     }
 
     fn parse_line_tail(&mut self) {
@@ -1376,26 +1440,94 @@ impl<'input> Parser<'input> {
             return false;
         };
 
-        token.kind() == SyntaxKind::DocComment
-            || token.kind() == SyntaxKind::At
-            || (token.kind() == SyntaxKind::Ident
-                && match token.text() {
-                    "adv_map" | "begin" | "const" | "enum" | "mod" | "namespace" | "proc"
-                    | "type" | "use" => true,
-                    "extern" => matches!(
-                        self.next_relevant_top_level_token(index + 1)
-                            .and_then(|next| self.tokens.get(next)),
-                        Some(next) if next.kind() == SyntaxKind::Ident && next.text() == "package"
-                    ),
-                    "pub" => matches!(
-                        self.next_relevant_top_level_token(index + 1)
-                            .and_then(|next| self.tokens.get(next)),
-                        Some(next)
-                            if next.kind() == SyntaxKind::Ident
-                                && matches!(next.text(), "const" | "enum" | "mod" | "proc" | "type" | "use")
-                    ),
-                    _ => false,
-                })
+        match token.kind() {
+            SyntaxKind::DocComment | SyntaxKind::At => true,
+            SyntaxKind::Ident => is_top_level_declaration_prefix(
+                token,
+                self.next_relevant_top_level_token(index + 1)
+                    .and_then(|next| self.tokens.get(next)),
+            ),
+            _ => false,
+        }
+    }
+
+    /// Peeks past attributes for recovery, returning the candidate token's index and whether
+    /// attributes were present.
+    fn peek_declaration_after_attributes(&self) -> Option<(usize, bool)> {
+        let mut index = self.next_relevant_block_token(self.pos)?;
+        let has_attributes = self.tokens[index].kind() == SyntaxKind::At;
+        while self.tokens[index].kind() == SyntaxKind::At {
+            index = self.next_relevant_block_token(index + 1)?;
+            if !is_name_like(self.tokens[index].kind()) {
+                return None;
+            }
+
+            index = self.next_relevant_block_token(index + 1)?;
+            if self.tokens[index].kind() == SyntaxKind::LParen {
+                let mut nesting = Nesting::default();
+                loop {
+                    nesting = nesting.bump(self.tokens[index].kind()).ok()?;
+                    index = self.next_relevant_block_token(index + 1)?;
+                    if nesting.is_root() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        Some((index, has_attributes))
+    }
+
+    /// Detects declaration starts even inside unclosed type annotations.
+    ///
+    /// Looks ahead without consuming tokens, distinguishing declaration prefixes from fields named
+    /// after keywords and struct representation attributes.
+    fn at_strong_top_level_form_starter(&self) -> bool {
+        let Some((index, has_attributes)) = self.peek_declaration_after_attributes() else {
+            return false;
+        };
+        let mut tokens =
+            self.tokens[index..].iter().filter(|token| !token.kind().is_trivia()).peekable();
+        let mut declaration = tokens.next().expect("declaration token");
+
+        if !is_top_level_declaration_prefix(declaration, tokens.peek().copied()) {
+            return false;
+        }
+        if declaration.text() == "pub" {
+            declaration = tokens.next().expect("public declaration keyword");
+        }
+        if has_attributes && declaration.text() != "proc" {
+            return false;
+        }
+
+        let Some(next) = tokens.next() else {
+            return false;
+        };
+        let is_name = is_name_like(next.kind());
+        match declaration.text() {
+            "const" | "enum" | "type" => {
+                is_name
+                    && tokens.next().is_some_and(|token| {
+                        matches!(token.kind(), SyntaxKind::Colon | SyntaxKind::Equal)
+                    })
+            },
+            "adv_map" => {
+                is_name
+                    && tokens.next().is_some_and(|token| {
+                        matches!(token.kind(), SyntaxKind::LParen | SyntaxKind::Equal)
+                    })
+            },
+            "begin" | "mod" | "namespace" | "proc" => is_name,
+            "extern" => true,
+            "use" => {
+                is_name
+                    || matches!(
+                        next.kind(),
+                        SyntaxKind::LBrace | SyntaxKind::Star | SyntaxKind::Number
+                    )
+            },
+            _ => false,
+        }
     }
 
     fn can_start_operation(&self) -> bool {
@@ -1410,11 +1542,9 @@ impl<'input> Parser<'input> {
         matches!(
             self.current(),
             Some(token)
-                if matches!(
-                    token.kind(),
-                    SyntaxKind::Ident | SyntaxKind::SpecialIdent | SyntaxKind::QuotedIdent
-                ) && (token.kind() != SyntaxKind::Ident
-                    || !is_reserved_block_keyword(token.text()))
+                if is_name_like(token.kind())
+                    && (token.kind() != SyntaxKind::Ident
+                        || !is_reserved_block_keyword(token.text()))
         )
     }
 
@@ -1476,10 +1606,7 @@ impl<'input> Parser<'input> {
     }
 
     fn at_name_like(&self) -> bool {
-        matches!(
-            self.current_kind(),
-            Some(SyntaxKind::Ident | SyntaxKind::SpecialIdent | SyntaxKind::QuotedIdent)
-        )
+        self.current_kind().is_some_and(is_name_like)
     }
 
     fn at_package_name_like(&self) -> bool {
@@ -1714,6 +1841,33 @@ fn punctuation_continues_instruction(kind: SyntaxKind) -> bool {
     )
 }
 
+fn is_name_like(kind: SyntaxKind) -> bool {
+    matches!(kind, SyntaxKind::Ident | SyntaxKind::SpecialIdent | SyntaxKind::QuotedIdent)
+}
+
+fn is_top_level_declaration_prefix(token: &Token<'_>, next: Option<&Token<'_>>) -> bool {
+    if token.kind() != SyntaxKind::Ident {
+        return false;
+    }
+
+    match token.text() {
+        "adv_map" | "begin" | "const" | "enum" | "mod" | "namespace" | "proc" | "type" | "use" => {
+            true
+        },
+        "extern" => matches!(
+            next,
+            Some(next) if next.kind() == SyntaxKind::Ident && next.text() == "package"
+        ),
+        "pub" => matches!(
+            next,
+            Some(next)
+                if next.kind() == SyntaxKind::Ident
+                    && matches!(next.text(), "const" | "enum" | "mod" | "proc" | "type" | "use")
+        ),
+        _ => false,
+    }
+}
+
 fn is_reserved_block_keyword(text: &str) -> bool {
     matches!(
         text,
@@ -1856,6 +2010,45 @@ adv_map TABLE = [
             .filter_map(|label| label.label())
             .map(ToString::to_string)
             .collect()
+    }
+
+    fn constant_declarations(parse: &super::Parse) -> Vec<crate::ast::Constant> {
+        parse
+            .root()
+            .items()
+            .filter_map(|item| match item {
+                Item::Constant(constant) => Some(constant),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn assert_constant_annotation(source: &str, value: &str) -> crate::ast::TypeAnnotation {
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{source}: {:?}", parse.diagnostics());
+        assert_eq!(parse.syntax().text().to_string(), source);
+
+        let constants = constant_declarations(&parse);
+        assert_eq!(constants.len(), 1);
+        assert_eq!(constants[0].expr().expect("initializer").syntax().text().to_string(), value);
+        constants[0].type_annotation().expect("type annotation")
+    }
+
+    fn assert_constant_annotation_recovery(source: &str, boundary: &str) -> super::Parse {
+        let parse = parse_text(source);
+        assert_eq!(
+            diagnostic_labels(&parse),
+            vec!["expected `=` after type annotation"],
+            "{source}"
+        );
+        let label = &parse.diagnostics()[0].labels.as_ref().unwrap()[0];
+        assert_eq!(label.offset(), source.find(boundary).expect("recovery boundary"));
+        assert_eq!(parse.syntax().text().to_string(), source);
+
+        let constants = constant_declarations(&parse);
+        assert!(constants[0].type_annotation().is_some());
+        assert!(constants[0].expr().is_none());
+        parse
     }
 
     fn nested_if_source(depth: usize, terminated: bool) -> String {
@@ -2072,6 +2265,275 @@ end
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::IfOp));
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::RepeatOp));
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::WhileOp));
+    }
+
+    #[test]
+    fn top_level_lookahead_preserves_prefix_and_trivia_rules() {
+        for (source, regular, strong) in [
+            ("", false, false),
+            ("const", true, false),
+            ("const: u8", true, false),
+            ("type::T", true, false),
+            ("pub const Y = 2", true, true),
+            ("pub # comment\nconst Y = 2", true, true),
+            ("pub #! docs\nconst Y = 2", false, true),
+            ("#! docs\npub const Y = 2", true, true),
+            ("pub adv_map TABLE = [1]", false, false),
+            ("pub begin", false, false),
+            ("extern package foo", true, true),
+            ("extern # comment\npackage foo", true, true),
+            ("extern #! docs\npackage foo", false, true),
+            ("extern const Y = 2", false, false),
+        ] {
+            let file = super::detached_source_file(source);
+            let parser = super::Parser::new(&file);
+            assert_eq!(
+                parser.at_top_level_form_starter(),
+                regular,
+                "regular lookahead for {source}"
+            );
+            assert_eq!(
+                parser.at_strong_top_level_form_starter(),
+                strong,
+                "strong lookahead for {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn strong_top_level_lookahead_checks_attribute_prefixes() {
+        for (source, strong) in [
+            ("@inline\npub proc foo", true),
+            ("@inline\npub #! docs\nproc foo", true),
+            ("#! docs\n@storage(size = [0, 1])\n@locals(1)\npub proc foo", true),
+            ("@storage([1, 2])\nproc foo", true),
+            ("@storage([1, 2]\nproc foo", false),
+            ("@storage(})\nproc foo", false),
+            ("@inline\npub type T = u8", false),
+            ("@packed { type: u8 }", false),
+            ("@42\nproc foo", false),
+            ("@inline", false),
+            ("@inline()", false),
+            ("@", false),
+        ] {
+            let file = super::detached_source_file(source);
+            let parser = super::Parser::new(&file);
+            assert!(parser.at_top_level_form_starter(), "regular lookahead for {source}");
+            assert_eq!(
+                parser.at_strong_top_level_form_starter(),
+                strong,
+                "strong lookahead for {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_constant_type_annotations() {
+        for (source, annotation_tokens, value) in [
+            ("const X: u8 = 8\n", &[":", "u8"][..], "8"),
+            ("pub const X :\n# type\nfelt\n= 8\n", &[":", "felt"], "8"),
+            ("const X: word = [1,2,3,4]\n", &[":", "word"], "[1,2,3,4]"),
+            (
+                "const X: struct @packed { x: u8 } = 1\n",
+                &[":", "struct", "@", "packed", "{", "x", ":", "u8", "}"],
+                "1",
+            ),
+            (
+                "const X: struct @packed(4) { x: u8 } = 1\n",
+                &[":", "struct", "@", "packed", "(", "4", ")", "{", "x", ":", "u8", "}"],
+                "1",
+            ),
+            (
+                "const X: struct @transparent { x: u8 } = 1\n",
+                &[":", "struct", "@", "transparent", "{", "x", ":", "u8", "}"],
+                "1",
+            ),
+            (
+                "const X: struct\n# representation\n@align(4) { type: u8 } = 1\n",
+                &[":", "struct", "@", "align", "(", "4", ")", "{", "type", ":", "u8", "}"],
+                "1",
+            ),
+            (
+                "const X: struct { type: u8, const: u8 } = 1\n",
+                &[":", "struct", "{", "type", ":", "u8", ",", "const", ":", "u8", "}"],
+                "1",
+            ),
+            (
+                "const X: ptr<[struct @packed {\n    type: u8\n}; 4]> = 1\n",
+                &[
+                    ":", "ptr", "<", "[", "struct", "@", "packed", "{", "type", ":", "u8", "}",
+                    ";", "4", "]", ">",
+                ],
+                "1",
+            ),
+            (
+                "const X: [felt; 4] = [1,2,3,4]\n",
+                &[":", "[", "felt", ";", "4", "]"],
+                "[1,2,3,4]",
+            ),
+            (
+                "const X: [\n    felt; 4\n] = [1,2,3,4]\n",
+                &[":", "[", "felt", ";", "4", "]"],
+                "[1,2,3,4]",
+            ),
+        ] {
+            let annotation = assert_constant_annotation(source, value);
+            assert_eq!(
+                annotation
+                    .significant_tokens()
+                    .map(|token| token.text().to_string())
+                    .collect::<Vec<_>>(),
+                annotation_tokens
+            );
+        }
+    }
+
+    #[test]
+    fn constant_type_annotation_recovery_preserves_next_declaration() {
+        for source in [
+            "const X: u8\nconst Y = 2\n",
+            "const X: u8 const Y = 2\n",
+            "const X:\nconst Y = 2\n",
+            "const X: struct @packed { type: u8 }\nconst Y = 2\n",
+            "const X: ptr<[struct @packed { type: u8 }; 4]> const Y = 2\n",
+            "const X: [u8; 4\nconst Y = 2\n",
+            "const X: [u8; 4 const Y = 2\n",
+            "const X: struct { field: u8\nconst Y = 2\n",
+            "const X: struct @packed(4\nconst Y = 2\n",
+            "const X: ptr<[struct @align(4) { type: u8\nconst Y = 2\n",
+            "const X: [u8; 4\n# next declaration\nconst Y = 2\n",
+        ] {
+            let parse = assert_constant_annotation_recovery(source, "const Y");
+
+            let constants = constant_declarations(&parse);
+            assert_eq!(constants.len(), 2);
+            assert_eq!(constants[1].name_token().expect("constant name").text(), "Y");
+            assert_eq!(constants[1].expr().expect("initializer").syntax().text().to_string(), "2");
+        }
+    }
+
+    #[test]
+    fn constant_type_annotation_recovery_preserves_attributed_procedure() {
+        for ty in [
+            "u8",
+            "struct @packed { type: u8 }",
+            "ptr<[struct { type: u8 }; 4]>",
+            "[u8; 4",
+            "struct { field: u8",
+            "struct @packed(4",
+            "[struct",
+        ] {
+            let source = format!("const X: {ty}\n@inline\nproc foo\n    nop\nend\n");
+            let parse = assert_constant_annotation_recovery(&source, "@inline");
+
+            let root = parse.syntax();
+            let items = root.children().collect::<Vec<_>>();
+            assert_eq!(items.len(), 2);
+            assert_eq!(items[1].kind(), SyntaxKind::Procedure);
+            assert_eq!(items[1].children().next().unwrap().kind(), SyntaxKind::Attribute);
+        }
+    }
+
+    #[test]
+    fn unclosed_constant_annotation_preserves_other_declarations() {
+        for (declaration, kind) in [
+            ("pub const Y: u8 = 2\n", SyntaxKind::Constant),
+            ("pub type T = u8\n", SyntaxKind::TypeDecl),
+            ("enum T: u8 { A, B }\n", SyntaxKind::TypeDecl),
+            ("pub mod api\n", SyntaxKind::Submodule),
+            ("namespace foo::bar\n", SyntaxKind::Namespace),
+            ("extern package \"miden/core@0.1.0\"\n", SyntaxKind::ExternPackage),
+            ("use foo::bar\n", SyntaxKind::Import),
+            ("pub use {bar} from foo\n", SyntaxKind::Import),
+            ("pub proc foo\n    nop\nend\n", SyntaxKind::Procedure),
+            ("begin\n    nop\nend\n", SyntaxKind::BeginBlock),
+            ("adv_map TABLE = [1, 2]\n", SyntaxKind::AdviceMap),
+            (
+                "adv_map TABLE(0x0200000000000000020000000000000002000000000000000200000000000000) = [1, 2]\n",
+                SyntaxKind::AdviceMap,
+            ),
+        ] {
+            let source = format!("const X: [u8; 4\n{declaration}");
+            let parse = assert_constant_annotation_recovery(&source, declaration);
+            let items = parse.syntax().children().collect::<Vec<_>>();
+            assert_eq!(items.len(), 2, "{source}");
+            assert_eq!(items[1].kind(), kind, "{source}");
+        }
+    }
+
+    #[test]
+    fn unclosed_constant_annotation_preserves_documented_declarations() {
+        for (declaration, kind) in [
+            ("const Y = 2\n", SyntaxKind::Constant),
+            (
+                "@storage(size = [0, 1])\n@locals(1)\npub proc foo\n    nop\nend\n",
+                SyntaxKind::Procedure,
+            ),
+        ] {
+            let source = format!("const X: [u8; 4\n#! docs\n{declaration}");
+            let parse = assert_constant_annotation_recovery(&source, "#! docs");
+            let items = parse.syntax().children().collect::<Vec<_>>();
+            assert_eq!(items.len(), 3);
+            assert_eq!(items[1].kind(), SyntaxKind::Doc);
+            assert_eq!(items[2].kind(), kind);
+            if kind == SyntaxKind::Procedure {
+                assert_eq!(
+                    items[2].children().filter(|node| node.kind() == SyntaxKind::Attribute).count(),
+                    2
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn nested_constant_annotation_keywords_do_not_trigger_recovery() {
+        for keyword in [
+            "adv_map",
+            "begin",
+            "const",
+            "enum",
+            "extern",
+            "mod",
+            "namespace",
+            "proc",
+            "pub",
+            "type",
+            "use",
+        ] {
+            let source = format!("const X: [struct {{ {keyword}: types::{keyword} }}; 4] = 1\n");
+            assert_constant_annotation(&source, "1");
+        }
+
+        for repr in ["@packed", "@packed(4)", "@transparent", "@align(4)"] {
+            let source = format!("const X: [struct {repr} {{ type: u8, const: u8 }}; 4] = 1\n");
+            assert_constant_annotation(&source, "1");
+        }
+    }
+
+    #[test]
+    fn empty_constant_type_annotation_preserves_initializer() {
+        let parse = parse_text("const X: = 8\nconst Y = 2\n");
+        assert_eq!(diagnostic_labels(&parse), vec!["expected type annotation after `:`"]);
+
+        let constants = constant_declarations(&parse);
+        assert_eq!(constants.len(), 2);
+        assert_eq!(constants[0].expr().expect("initializer").syntax().text().to_string(), "8");
+        assert_eq!(constants[1].name_token().expect("constant name").text(), "Y");
+        assert_eq!(constants[1].expr().expect("initializer").syntax().text().to_string(), "2");
+    }
+
+    #[test]
+    fn constant_type_annotation_reports_missing_equals_at_eof() {
+        for source in ["const X: u8", "const X:"] {
+            let parse = parse_text(source);
+            assert_eq!(diagnostic_labels(&parse), vec!["expected `=` after type annotation"]);
+            assert_eq!(parse.syntax().text().to_string(), source);
+
+            let constants = constant_declarations(&parse);
+            assert_eq!(constants.len(), 1);
+            assert!(constants[0].type_annotation().is_some());
+            assert!(constants[0].expr().is_none());
+        }
     }
 
     #[test]

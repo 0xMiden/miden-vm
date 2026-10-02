@@ -2,6 +2,10 @@
 
 ## v1.0.0 (Unreleased)
 
+#### Changes
+
+- Added parser, AST, and formatter support for optional constant type annotations. Annotated constants remain rejected during semantic analysis and linking ([#3957](https://github.com/0xMiden/miden-vm/pull/3957)).
+
 ## v0.35.0 (2026-10-01)
 
 #### Changes

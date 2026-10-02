@@ -358,6 +358,7 @@ impl Linker {
     ///
     /// * Module with same [Path] is in the graph already
     /// * Too many modules in the graph
+    /// * Module contains a constant with a type annotation
     ///
     /// # Panics
     ///
@@ -369,6 +370,24 @@ impl Linker {
         let is_duplicate = self.find_module_index(module.path()).is_some();
         if is_duplicate {
             return Err(LinkerError::DuplicateModule { path: module.path().into() });
+        }
+
+        for item in module.items() {
+            if let ast::Item::Constant(constant) = item
+                && let Some(ty) = &constant.ty
+            {
+                log::debug!(
+                    target: "linker",
+                    "rejecting typed constant {} in module {}",
+                    constant.name(),
+                    module.path()
+                );
+                let span = ty.span();
+                return Err(LinkerError::TypedConstantsNotSupported {
+                    span,
+                    source_file: self.source_manager.get(span.source_id()).ok(),
+                });
+            }
         }
 
         let module_index = self.next_module_id();
@@ -1232,6 +1251,35 @@ mod tests {
 
         assert_eq!(linker.libraries().count(), 1);
         assert_eq!(linker.static_libraries().count(), 2);
+    }
+
+    #[test]
+    fn typed_constants_are_rejected_without_mutating_module_or_linker() {
+        let context = TestContext::default();
+        let mut linker = Linker::new(context.source_manager());
+        let mut module = Module::new(ast::ModuleKind::Library, Path::new("::test"));
+        let constant = ast::Constant::new(
+            SourceSpan::UNKNOWN,
+            Visibility::Private,
+            Ident::new("N").unwrap(),
+            ast::ConstantExpr::Int(Span::unknown(42_u8.into())),
+        )
+        .with_ty(ast::TypeExpr::Primitive(Span::unknown(types::Type::U8)));
+        module.define_constant(constant).expect("constant should be defined");
+        let items = module.items().to_vec();
+        let module_count = linker.modules().len();
+
+        let error = linker.link_module(&mut module).expect_err("typed constant must fail");
+        assert!(matches!(error, LinkerError::TypedConstantsNotSupported { .. }));
+        assert_eq!(module.items(), items.as_slice());
+        assert_eq!(linker.modules().len(), module_count);
+
+        let ast::Item::Constant(constant) = module.items_mut().next().unwrap() else {
+            panic!("expected constant");
+        };
+        constant.ty = None;
+        linker.link_module(&mut module).expect("untyped constant should link");
+        assert_eq!(linker.modules().len(), module_count + 1);
     }
 
     #[test]

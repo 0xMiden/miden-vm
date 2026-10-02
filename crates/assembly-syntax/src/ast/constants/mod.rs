@@ -12,12 +12,12 @@ pub use self::{
     expr::{ConstantExpr, ConstantOp, HashKind},
     value::ConstantValue,
 };
-use crate::ast::{DocString, Ident, Visibility};
+use crate::ast::{DocString, Ident, TypeExpr, Visibility};
 
 // CONSTANT
 // ================================================================================================
 
-/// Represents a constant definition in Miden Assembly syntax, i.e. `const.FOO = 1 + 1`.
+/// Represents a constant definition in Miden Assembly syntax, i.e. `const FOO = 1 + 1`.
 #[derive(Clone)]
 pub struct Constant {
     /// The source span of the definition.
@@ -28,6 +28,10 @@ pub struct Constant {
     pub visibility: Visibility,
     /// The name of the constant.
     pub name: Ident,
+    /// The optional declared type, retained for future type checking.
+    ///
+    /// Annotated constants are currently rejected during semantic analysis and linking.
+    pub ty: Option<TypeExpr>,
     /// The expression associated with the constant.
     pub value: ConstantExpr,
 }
@@ -40,6 +44,7 @@ impl Constant {
             docs: None,
             visibility,
             name,
+            ty: None,
             value,
         }
     }
@@ -55,6 +60,14 @@ impl Constant {
         self.docs.as_ref().map(|docstring| docstring.as_spanned_str())
     }
 
+    /// Sets the declared type annotation without validating it.
+    ///
+    /// Annotated constants are currently rejected during semantic analysis and linking.
+    pub fn with_ty(mut self, ty: TypeExpr) -> Self {
+        self.ty = Some(ty);
+        self
+    }
+
     /// Get the name of this constant
     pub fn name(&self) -> &Ident {
         &self.name
@@ -67,6 +80,7 @@ impl fmt::Debug for Constant {
             .field("docs", &self.docs)
             .field("visibility", &self.visibility)
             .field("name", &self.name)
+            .field("ty", &self.ty)
             .field("value", &self.value)
             .finish()
     }
@@ -79,6 +93,9 @@ impl crate::prettier::PrettyPrint for Constant {
         let mut doc = self.docs.as_ref().map(PrettyPrint::render).unwrap_or(Document::Empty);
 
         doc += flatten(const_text("const") + const_text(" ") + display(&self.name));
+        if let Some(ty) = &self.ty {
+            doc += const_text(": ") + ty.render();
+        }
         doc += const_text(" = ");
 
         doc + self.value.render() + nl()
@@ -89,7 +106,10 @@ impl Eq for Constant {}
 
 impl PartialEq for Constant {
     fn eq(&self, other: &Self) -> bool {
-        self.visibility == other.visibility && self.name == other.name && self.value == other.value
+        self.visibility == other.visibility
+            && self.name == other.name
+            && self.ty == other.ty
+            && self.value == other.value
     }
 }
 

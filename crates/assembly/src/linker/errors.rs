@@ -26,6 +26,13 @@ pub enum LinkerError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     ConstEval(#[from] Box<ConstEvalError>),
+    #[error("typed constants are not supported yet")]
+    TypedConstantsNotSupported {
+        #[label("type annotations on constants are not supported yet")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+    },
     #[error("linking failed")]
     #[diagnostic(help("see diagnostics for details"))]
     Related {
