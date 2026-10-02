@@ -77,10 +77,9 @@ impl ExecutionWitness {
             stack: stack_outputs,
             advice: _,
             memory: _,
+            precompile_root,
             precompile_witness: precompile,
         } = execution_output;
-        let precompile_root =
-            precompile.as_ref().map_or(TRUE_DIGEST, PrecompileWitness::root_unchecked);
         let vm = VmWitness {
             program_info,
             stack_inputs,
@@ -190,10 +189,9 @@ impl Deserializable for ExecutionWitness {
             },
             1 => {
                 let witness = PrecompileWitness::read_from(source)?;
-                if witness.root_unchecked() != vm.precompile_root {
+                if vm.precompile_root == TRUE_DIGEST {
                     return Err(DeserializationError::InvalidValue(
-                        "precompile witness root does not match the VM witness precompile root"
-                            .into(),
+                        "VM witness carries a precompile witness for an empty deferred root".into(),
                     ));
                 }
                 Some(witness)
@@ -240,6 +238,11 @@ impl VmWitness {
     /// Returns whether this witness authenticates deferred precompile work.
     pub fn has_precompiles(&self) -> bool {
         self.precompile_root != TRUE_DIGEST
+    }
+
+    /// Returns the deferred root authenticated by the replayed VM execution.
+    pub fn precompile_root(&self) -> Digest {
+        self.precompile_root
     }
 
     /// Takes the hasher replay out, leaving an empty buffered one.
@@ -583,15 +586,14 @@ mod wire_tests {
     }
 
     #[test]
-    fn witness_wire_rejects_mismatched_precompile_root() {
+    fn witness_wire_rejects_precompile_witness_with_true_root() {
         let bytes = deferred_witness_bytes();
         let restored = ExecutionWitness::read_from_bytes(&bytes).expect("witness round trip");
         let (vm, precompile) = restored.into_parts();
         let precompile = precompile.expect("deferred execution should carry a precompile witness");
         assert_ne!(vm.precompile_root, TRUE_DIGEST);
 
-        // Tamper only the VM-side precompile root and re-serialize: the two halves of the wire
-        // no longer describe the same execution, so deserialization must reject them.
+        // A carried witness with an explicitly empty VM-side root is not a valid transport shape.
         let tampered = ExecutionWitness {
             vm: super::VmWitness { precompile_root: TRUE_DIGEST, ..vm },
             precompile: Some(precompile),
@@ -600,7 +602,7 @@ mod wire_tests {
             .expect_err("tampered witness should be rejected");
         assert!(
             format!("{err:?}")
-                .contains("precompile witness root does not match the VM witness precompile root"),
+                .contains("VM witness carries a precompile witness for an empty deferred root"),
             "unexpected error: {err:?}"
         );
 

@@ -2305,9 +2305,12 @@ fn stack_buffer_is_not_preallocated_to_operand_stack_depth_limit() {
     let options = ExecutionOptions::default()
         .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + GROWTH_MARGIN)
         .unwrap();
-    let mut processor =
-        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
-            .expect("processor advice inputs should fit advice map limits");
+    let mut processor = FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        options.clone(),
+    )
+    .expect("processor advice inputs should fit advice map limits");
 
     assert_eq!(
         processor.stack.len(),

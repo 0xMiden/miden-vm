@@ -12,8 +12,11 @@ extern crate std;
 use alloc::vec::Vec;
 
 pub use deferred::session::{SessionInputError, WitnessLocation};
-use miden_core::deferred::PrecompileWitness;
+use miden_core::deferred::{Digest, PrecompileLimits, PrecompileWitness};
 pub use miden_core::proof::{HashFunction, PrecompileProof, StarkProof};
+pub use miden_precompiles::default_verification_precompile_limits;
+use miden_precompiles_air::{memory, stark_config::precompile_pcs_params};
+use session::{Session, Truthy};
 
 pub(crate) mod ec;
 pub(crate) mod hash;
@@ -34,26 +37,112 @@ pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 = 64 << 30;
 
 /// Proves an owned batch of singleton execution obligations in one STARK.
 ///
-/// The returned roots preserve input order and repetitions. Empty batches are rejected. The
-/// importer validates portable semantics and enforces batch-wide input and lowering limits.
+/// The returned roots preserve input order and repetitions. Empty batches and batches exceeding
+/// [`miden_core::deferred::MAX_PRECOMPILE_ROOTS`] are rejected before preparation. Every portable
+/// witness is consumed and prepared under verification limits before a private Session shares
+/// computations. Session import does not reapply workload admission.
 pub fn prove_precompiles(
     witnesses: Vec<PrecompileWitness>,
     hash_fn: HashFunction,
 ) -> Result<PrecompileProof, PrecompileProvingError> {
-    prove_precompiles_with_budget(witnesses, hash_fn, DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES)
+    prove_precompiles_with_limits_and_budget(
+        witnesses,
+        hash_fn,
+        &default_verification_precompile_limits(),
+        DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
+    )
 }
 
 /// Same as [`prove_precompiles`], but with an explicit memory budget instead of the default.
 ///
 /// Checks the modelled peak prover memory against `max_prover_memory_bytes` before allocating
 /// chiplet traces or entering the STARK pipeline. The budget applies to this single proof using
-/// `hash_fn`; concurrent proofs require separate budgeting. Witness import precedes the check.
+/// `hash_fn`; concurrent proofs require separate budgeting. Witness import precedes the check,
+/// so this is not an allocation budget for preparation or Session construction. A capacity error
+/// can be addressed with a smaller batch or a larger memory budget.
 pub fn prove_precompiles_with_budget(
     witnesses: Vec<PrecompileWitness>,
     hash_fn: HashFunction,
     max_prover_memory_bytes: u64,
 ) -> Result<PrecompileProof, PrecompileProvingError> {
-    deferred::session::prove(witnesses, hash_fn, max_prover_memory_bytes)
+    prove_precompiles_with_limits_and_budget(
+        witnesses,
+        hash_fn,
+        &default_verification_precompile_limits(),
+        max_prover_memory_bytes,
+    )
+}
+
+/// Proves a batch with explicit per-witness verification limits and a batch prover-memory budget.
+pub fn prove_precompiles_with_limits_and_budget(
+    witnesses: Vec<PrecompileWitness>,
+    hash_fn: HashFunction,
+    verification_limits: &PrecompileLimits,
+    max_prover_memory_bytes: u64,
+) -> Result<PrecompileProof, PrecompileProvingError> {
+    prove(witnesses, hash_fn, verification_limits, None, max_prover_memory_bytes)
+}
+
+/// Proves one witness after binding its prepared root to the execution-established root.
+pub fn prove_precompile_for_root_with_limits_and_budget(
+    witness: PrecompileWitness,
+    expected_root: miden_core::Word,
+    hash_fn: HashFunction,
+    verification_limits: &PrecompileLimits,
+    max_prover_memory_bytes: u64,
+) -> Result<PrecompileProof, PrecompileProvingError> {
+    prove(
+        alloc::vec![witness],
+        hash_fn,
+        verification_limits,
+        Some(core::slice::from_ref(&expected_root)),
+        max_prover_memory_bytes,
+    )
+}
+
+pub(crate) struct WitnessSession {
+    session: Session,
+    root: Truthy,
+    roots: Vec<Digest>,
+}
+
+impl WitnessSession {
+    #[cfg(test)]
+    pub(crate) fn finish(self) -> session::SessionTraces {
+        self.session.finish(self.root)
+    }
+}
+
+fn prove(
+    witnesses: Vec<PrecompileWitness>,
+    hash_fn: HashFunction,
+    verification_limits: &PrecompileLimits,
+    expected_roots: Option<&[Digest]>,
+    max_prover_memory_bytes: u64,
+) -> Result<PrecompileProof, PrecompileProvingError> {
+    let imported = {
+        let _span = tracing::info_span!("build_session").entered();
+        deferred::session::import_witnesses_with_roots(
+            witnesses,
+            verification_limits,
+            expected_roots,
+        )?
+    };
+    let params = precompile_pcs_params();
+    let estimated_bytes = imported
+        .session
+        .trace_heights()
+        .and_then(|heights| memory::prover_peak_bytes(&heights, &params, hash_fn));
+    check_memory_budget(estimated_bytes, max_prover_memory_bytes)?;
+
+    let traces = {
+        let _span = tracing::info_span!("build_trace").entered();
+        imported.session.finish(imported.root)
+    };
+    Ok(PrecompileProof {
+        proof: traces.prove_stark(hash_fn)?,
+        roots: imported.roots,
+    })
 }
 
 fn check_memory_budget(
@@ -72,6 +161,9 @@ fn check_memory_budget(
 pub enum PrecompileProvingError {
     #[error(transparent)]
     Input(#[from] SessionInputError),
+    /// The requested batch exceeds the shared proof-root capacity, before witness preparation.
+    #[error("precompile batch contains {witnesses} witnesses, maximum is {max}")]
+    BatchTooLarge { witnesses: usize, max: usize },
     /// The prover memory estimate exceeded the host height range or the byte model's `u64` range.
     #[error("precompile prover memory estimate overflowed")]
     MemoryEstimateOverflow,
