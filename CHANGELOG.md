@@ -2,6 +2,10 @@
 
 ## v1.0.0 (Unreleased)
 
+#### Fixes
+
+- [BREAKING] Reject assembler-produced debug sections that exceed the standard reader's payload, string, or type-table limits instead of emitting packages that fail to load with debug information. Add `PackageDebugInfo::try_to_bytes` for checked encoding.
+
 ## v0.35.0 (2026-10-01)
 
 #### Changes

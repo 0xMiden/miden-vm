@@ -134,6 +134,33 @@ impl Serializable for PackageDebugInfo {
 
 #[cfg(target_endian = "little")]
 impl PackageDebugInfo {
+    /// Encode debug information only if it fits the standard package reader's resource limits.
+    ///
+    /// Unlike [`Serializable::to_bytes`], this rejects oversized payloads, string tables, strings,
+    /// and type tables rather than producing debug information that cannot be loaded normally.
+    pub fn try_to_bytes(&self) -> Result<Vec<u8>, super::DebugInfoEncodingError> {
+        use super::DebugInfoEncodingError;
+
+        let check = |resource, size, limit| {
+            if size > limit {
+                Err(DebugInfoEncodingError::LimitExceeded { resource, size, limit })
+            } else {
+                Ok(())
+            }
+        };
+        check("debug string count", self.strings.len(), MAX_DEBUG_INFO_STRING_ROWS)?;
+        for string in self.strings.iter() {
+            check("debug string size", string.len(), MAX_DEBUG_INFO_STRING_SIZE)?;
+        }
+        check("debug type count", self.types.len(), MAX_DEBUG_INFO_TYPE_ROWS)?;
+        let bytes = self.to_bytes();
+        let mut reader = miden_core::serde::SliceReader::new(&bytes);
+        reader.read_u8()?;
+        let payload_size = reader.read_usize()?;
+        check("package debug info payload size", payload_size, MAX_DEBUG_INFO_PAYLOAD_SIZE)?;
+        Ok(bytes)
+    }
+
     /// Reads package debug information without the fixed resource limits enforced by
     /// [`Self::read_from`].
     ///
@@ -1584,6 +1611,48 @@ mod tests {
         let decoded = PackageDebugInfo::read_from_bytes_unmetered(&bytes).unwrap();
         assert_eq!(decoded.strings().len(), 1);
         assert_eq!(decoded.strings()[DebugStringIdx::from(0)].as_ref(), oversized_string);
+    }
+
+    #[test]
+    fn checked_debug_encoding_matches_normal_encoding_for_readable_data() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        builder.add_string("source.rs");
+        let info = builder.build();
+        let bytes = info.try_to_bytes().unwrap();
+        assert_eq!(bytes, info.to_bytes());
+        assert!(PackageDebugInfo::read_from_bytes(&bytes).is_ok());
+    }
+
+    #[test]
+    fn checked_debug_encoding_rejects_oversized_strings() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        builder.add_string("x".repeat(MAX_DEBUG_INFO_STRING_SIZE + 1));
+        assert!(matches!(
+            builder.build().try_to_bytes(),
+            Err(super::super::DebugInfoEncodingError::LimitExceeded {
+                resource: "debug string size",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn checked_debug_encoding_rejects_oversized_payloads() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        for index in 0..4_200 {
+            let mut string = format!("{index:08}");
+            string.push_str(&"x".repeat(MAX_DEBUG_INFO_STRING_SIZE - string.len()));
+            builder.add_string(string);
+        }
+        let info = builder.build();
+        assert!(matches!(
+            info.try_to_bytes(),
+            Err(super::super::DebugInfoEncodingError::LimitExceeded {
+                resource: "package debug info payload size",
+                ..
+            })
+        ));
+        assert!(PackageDebugInfo::read_from_bytes(&info.to_bytes()).is_err());
     }
 
     #[test]
