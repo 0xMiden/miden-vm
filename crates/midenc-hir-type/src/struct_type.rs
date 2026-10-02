@@ -3,7 +3,22 @@ use core::{fmt, num::NonZeroU16};
 
 use smallvec::SmallVec;
 
-use super::{Alignable, Type};
+use super::Type;
+
+/// The error type returned when attempting to construct an invalid [StructType]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidStructTypeError {
+    #[error("invalid struct: size exceeds u32::MAX bytes")]
+    SizeOverflow,
+}
+
+/// Align `offset` up to `align`, which must be a power of two, or fail if that overflows `u32`.
+fn checked_align_up(offset: u32, align: u16) -> Result<u32, InvalidStructTypeError> {
+    assert!(align.is_power_of_two(), "invalid alignment: expected a power of two");
+    offset
+        .checked_next_multiple_of(u32::from(align))
+        .ok_or(InvalidStructTypeError::SizeOverflow)
+}
 
 /// This represents a structured aggregate type
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -158,8 +173,26 @@ impl StructType {
 
     /// Create a new struct from the given name, repr, and fields.
     ///
-    /// This function will panic if the rules of the given representation are violated.
+    /// This function will panic if the rules of the given representation are violated, or if the
+    /// struct would be larger than `u32::MAX` bytes. See [Self::try_from_parts] for a fallible
+    /// version of this function.
     pub fn from_parts<I>(name: Option<Arc<str>>, repr: TypeRepr, fields: I) -> Self
+    where
+        I: IntoIterator,
+        <I as IntoIterator>::Item: Into<NameAndType>,
+    {
+        Self::try_from_parts(name, repr, fields).unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    /// Create a new struct from the given name, repr, and fields, returning an error if the
+    /// struct would be larger than `u32::MAX` bytes.
+    ///
+    /// This function will panic if the rules of the given representation are violated.
+    pub fn try_from_parts<I>(
+        name: Option<Arc<str>>,
+        repr: TypeRepr,
+        fields: I,
+    ) -> Result<Self, InvalidStructTypeError>
     where
         I: IntoIterator,
         <I as IntoIterator>::Item: Into<NameAndType>,
@@ -179,10 +212,8 @@ impl StructType {
                 for (index, NameAndType { name, ty }) in tys.into_iter().enumerate() {
                     let index: u8 =
                         index.try_into().expect("invalid struct: expected no more than 255 fields");
-                    let field_size: u32 = ty
-                        .size_in_bytes()
-                        .try_into()
-                        .expect("invalid type: size is larger than 2^32 bytes");
+                    let field_size = u32::try_from(ty.size_in_bytes())
+                        .map_err(|_| InvalidStructTypeError::SizeOverflow)?;
                     if field_size == 0 {
                         fields.push(StructField { name, index, align: 1, offset, ty });
                     } else {
@@ -216,10 +247,8 @@ impl StructType {
                 for (index, NameAndType { name, ty }) in tys.into_iter().enumerate() {
                     let index: u8 =
                         index.try_into().expect("invalid struct: expected no more than 255 fields");
-                    let field_size: u32 = ty
-                        .size_in_bytes()
-                        .try_into()
-                        .expect("invalid type: size is larger than 2^32 bytes");
+                    let field_size = u32::try_from(ty.size_in_bytes())
+                        .map_err(|_| InvalidStructTypeError::SizeOverflow)?;
                     let default_align: u16 = ty.min_alignment().try_into().expect(
                         "invalid struct field alignment: expected power of two between 1 and 2^16",
                     );
@@ -227,15 +256,17 @@ impl StructType {
                         TypeRepr::Packed(align) => core::cmp::min(align.get(), default_align),
                         _ => default_align,
                     };
-                    offset += offset.align_offset(align as u32);
+                    offset = checked_align_up(offset, align)?;
                     fields.push(StructField { name, index, align, offset, ty });
-                    offset += field_size;
+                    offset = offset
+                        .checked_add(field_size)
+                        .ok_or(InvalidStructTypeError::SizeOverflow)?;
                 }
-                offset.align_up(align as u32)
+                checked_align_up(offset, align)?
             },
         };
 
-        Self { name, repr, size, fields }
+        Ok(Self { name, repr, size, fields })
     }
 
     /// Reassemble a struct from already-computed layout metadata.

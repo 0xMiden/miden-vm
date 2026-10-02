@@ -931,7 +931,9 @@ impl Type {
                             .to_string(),
                     ));
                 }
-                Type::from(StructType::from_parts(name, repr, fields))
+                StructType::try_from_parts(name, repr, fields)
+                    .map(Type::from)
+                    .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?
             },
             18 => {
                 let arity = source.read_usize()?;
@@ -1696,6 +1698,30 @@ mod tests {
             panic!("expected InvalidValue error");
         };
         assert!(message.contains("invalid array"));
+    }
+
+    #[test]
+    fn struct_type_rejects_fields_whose_sizes_sum_past_u32_max() {
+        // Each field is 2^31 bytes, so each passes the per-field check, but together they need
+        // 2^32 bytes, which a struct size cannot hold.
+        let field = Type::from(ArrayType::new(Type::Felt, 1 << 29));
+
+        // The oversized struct cannot be constructed to hand to the encoder -- constructing it is
+        // the overflow under test -- so take the struct header from the encoding of a valid
+        // two-field struct, and encode the fields themselves with the encoder.
+        let mut valid = Vec::new();
+        Type::from(StructType::new([Type::Felt, Type::Felt])).write_into(&mut valid);
+        let mut bytes = Vec::from(&valid[..4]);
+        for _ in 0..2 {
+            bytes.write_bool(false);
+            field.write_into(&mut bytes);
+        }
+
+        let err = Type::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("invalid struct: size exceeds u32::MAX bytes"));
     }
 
     #[test]
