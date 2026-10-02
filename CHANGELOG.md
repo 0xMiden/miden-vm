@@ -2,6 +2,10 @@
 
 ## v1.0.0 (Unreleased)
 
+#### Fixes
+
+- Fixed `prove` writing the default outputs file next to the program instead of the proof, and refused an outputs path that names the proof file, so the proof is never replaced ([#3760](https://github.com/0xMiden/miden-vm/pull/3760)).
+
 ## v0.35.0 (2026-10-01)
 
 #### Changes
