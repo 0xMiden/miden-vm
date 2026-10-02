@@ -2,6 +2,10 @@
 
 ## v1.0.0 (Unreleased)
 
+#### Features
+
+- Added `PublicKey::from_sec1_bytes` and `PublicKey::from_hex` to `ecdsa_k256_keccak` for parsing and validating compressed and uncompressed SEC1 public keys ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
+
 ## v0.35.0 (2026-10-01)
 
 #### Changes

@@ -1,7 +1,7 @@
 //! ECDSA (Elliptic Curve Digital Signature Algorithm) signature implementation over secp256k1
 //! curve using Keccak to hash the messages when signing.
 
-use alloc::{string::ToString, vec::Vec};
+use alloc::{format, string::ToString, vec::Vec};
 use core::fmt;
 
 use k256::{
@@ -20,8 +20,8 @@ use crate::{
     Felt, SequentialCommit, Word,
     ecdh::k256::{EphemeralPublicKey, SharedSecret},
     utils::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        read_sensitive_array, zeroize::ZeroizeOnDrop,
+        ByteReader, ByteWriter, Deserializable, DeserializationError, HexParseError, Serializable,
+        hex_to_bytes, read_sensitive_array, zeroize::ZeroizeOnDrop,
     },
 };
 
@@ -34,6 +34,8 @@ mod tests;
 const SECRET_KEY_BYTES: usize = 32;
 /// Length of public key in bytes when using compressed format encoding
 pub(crate) const PUBLIC_KEY_BYTES: usize = 33;
+/// Length of public key in bytes when using uncompressed format encoding
+const PUBLIC_KEY_UNCOMPRESSED_BYTES: usize = 65;
 /// Length of signature in bytes using our custom serialization
 const SIGNATURE_BYTES: usize = 65;
 /// Length of signature in bytes using standard serialization i.e., `SEC1`
@@ -306,6 +308,53 @@ impl PublicKey {
         let verifying_key = VerifyingKey::from_public_key_der(bytes)
             .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
         Ok(PublicKey { inner: verifying_key })
+    }
+
+    /// Creates a public key from SEC1-encoded bytes.
+    ///
+    /// Accepts the 33-byte compressed and the 65-byte uncompressed encoding. The point is fully
+    /// validated: an uncompressed key whose coordinates do not lie on the curve is rejected.
+    pub fn from_sec1_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        if bytes.len() != PUBLIC_KEY_BYTES && bytes.len() != PUBLIC_KEY_UNCOMPRESSED_BYTES {
+            return Err(DeserializationError::InvalidValue(format!(
+                "unsupported ECDSA public key length: expected {PUBLIC_KEY_BYTES} (compressed) or \
+                {PUBLIC_KEY_UNCOMPRESSED_BYTES} (uncompressed) bytes, got {}",
+                bytes.len()
+            )));
+        }
+
+        let verifying_key = VerifyingKey::from_sec1_bytes(bytes)
+            .map_err(|_| DeserializationError::InvalidValue("Invalid public key".to_string()))?;
+        Ok(PublicKey { inner: verifying_key })
+    }
+
+    /// Creates a public key from a `0x`-prefixed hex string in SEC1 format.
+    ///
+    /// Accepts the 33-byte compressed and the 65-byte uncompressed encoding (the form Ledger and
+    /// other Ethereum-style signers export). See [`Self::from_sec1_bytes`] for validation.
+    pub fn from_hex(encoded: &str) -> Result<Self, DeserializationError> {
+        let invalid_hex = |err: HexParseError| DeserializationError::InvalidValue(err.to_string());
+
+        let hex_digits = encoded.strip_prefix("0x").ok_or_else(|| {
+            DeserializationError::InvalidValue(
+                "ECDSA public key must use a 0x-prefixed hexadecimal encoding".to_string(),
+            )
+        })?;
+
+        match hex_digits.len() {
+            len if len == PUBLIC_KEY_BYTES * 2 => Self::from_sec1_bytes(
+                &hex_to_bytes::<PUBLIC_KEY_BYTES>(encoded).map_err(invalid_hex)?,
+            ),
+            len if len == PUBLIC_KEY_UNCOMPRESSED_BYTES * 2 => Self::from_sec1_bytes(
+                &hex_to_bytes::<PUBLIC_KEY_UNCOMPRESSED_BYTES>(encoded).map_err(invalid_hex)?,
+            ),
+            len => Err(DeserializationError::InvalidValue(format!(
+                "unsupported ECDSA public key length: expected {} (compressed) or {} \
+                (uncompressed) hexadecimal digits after the 0x prefix, got {len}",
+                PUBLIC_KEY_BYTES * 2,
+                PUBLIC_KEY_UNCOMPRESSED_BYTES * 2,
+            ))),
+        }
     }
 }
 

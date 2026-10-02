@@ -645,3 +645,84 @@ mod signature {
         }
     }
 }
+
+mod public_key_from_hex {
+    use alloc::format;
+
+    use miden_serde_utils::Serializable;
+
+    use crate::{dsa::ecdsa_k256_keccak::PublicKey, utils::hex_to_bytes};
+
+    /// The secp256k1 generator point (even y coordinate) in both SEC1 encodings.
+    const GEN_COMPRESSED: &str =
+        "0x0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+    const GEN_UNCOMPRESSED: &str = "0x0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b1\
+        6f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8";
+
+    /// The point 6·G (odd y coordinate), so the odd-parity branch of the uncompressed encoding is
+    /// exercised as well.
+    const SIX_GEN_COMPRESSED: &str =
+        "0x03fff97bd5755eeea420453a14355235d382f6472f8568a18b2f057a1460297556";
+    const SIX_GEN_UNCOMPRESSED: &str = "0x04fff97bd5755eeea420453a14355235d382f6472f8568a18b2f057\
+        a1460297556ae12777aacfbb620f3be96017f45c560de80f0f6518fe4a03c870c36b075f297";
+
+    #[test]
+    fn accepts_compressed_key() {
+        let key = PublicKey::from_hex(GEN_COMPRESSED).expect("compressed key should parse");
+
+        let expected = hex_to_bytes::<33>(GEN_COMPRESSED).unwrap();
+        assert_eq!(key.to_bytes(), expected);
+    }
+
+    #[test]
+    fn accepts_uncompressed_key_with_even_y() {
+        let from_uncompressed =
+            PublicKey::from_hex(GEN_UNCOMPRESSED).expect("uncompressed key should parse");
+        let from_compressed = PublicKey::from_hex(GEN_COMPRESSED).unwrap();
+
+        assert_eq!(from_uncompressed, from_compressed);
+    }
+
+    #[test]
+    fn accepts_uncompressed_key_with_odd_y() {
+        let from_uncompressed =
+            PublicKey::from_hex(SIX_GEN_UNCOMPRESSED).expect("uncompressed key should parse");
+        let from_compressed = PublicKey::from_hex(SIX_GEN_COMPRESSED).unwrap();
+
+        assert_eq!(from_uncompressed, from_compressed);
+    }
+
+    #[test]
+    fn rejects_missing_hex_prefix() {
+        let err = PublicKey::from_hex(&GEN_COMPRESSED[2..])
+            .expect_err("a key without the 0x prefix should be rejected");
+
+        assert!(format!("{err}").contains("0x"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn rejects_invalid_length() {
+        let err = PublicKey::from_hex("0x1234")
+            .expect_err("a key with an unsupported length should be rejected");
+
+        assert!(format!("{err}").contains("length"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn rejects_compressed_x_not_on_curve() {
+        // x = 5 has no square root of x³ + 7 on secp256k1, so no point has this x coordinate.
+        let not_on_curve = "0x020000000000000000000000000000000000000000000000000000000000000005";
+
+        PublicKey::from_hex(not_on_curve)
+            .expect_err("a compressed key with no matching curve point should be rejected");
+    }
+
+    #[test]
+    fn rejects_uncompressed_point_not_on_curve() {
+        // (1, 1) does not satisfy the curve equation.
+        let not_on_curve = format!("0x04{:064x}{:064x}", 1, 1);
+
+        PublicKey::from_hex(&not_on_curve)
+            .expect_err("an uncompressed point off the curve should be rejected");
+    }
+}
