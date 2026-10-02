@@ -73,7 +73,7 @@ when authentication fails.
 
 ## Usage limits
 
-A masked Eidos word contains four elements from a set of size `2^63`. Under the Eidos PRF
+An Eidos digest contains four elements, each below `2^63`. Under the Eidos PRF
 assumption, `r` and `s` are independent values from a set `A` of size `2^126` inside the quadratic
 extension field. For each possible valid tag, a nonzero difference polynomial of degree at most
 `D` has at most `D` roots. Counting over the extension field and the `|A|^2` possible pairs `(r, s)`

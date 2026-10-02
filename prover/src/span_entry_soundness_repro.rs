@@ -161,7 +161,8 @@ fn splice_op(fixture: &Fixture, opcode: u8) -> RowMajorMatrix<Felt> {
         decoder.hasher_state = [Felt::ZERO; 8];
         decoder.in_span = Felt::ONE;
         decoder.op_index = Felt::ZERO;
-        decoder.batch_flags = [Felt::ZERO; 3];
+        decoder.full_batch = Felt::ZERO;
+        decoder.batch_size_code = Felt::ZERO;
         let [_, _, _, _, b4, b5, b6] = bits;
         decoder.extra = [b6 * (Felt::ONE - b5) * b4, b6 * b5];
     }

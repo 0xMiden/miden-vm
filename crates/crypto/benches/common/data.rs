@@ -126,25 +126,6 @@ pub fn generate_words_merkle_std(count: usize) -> Vec<Word> {
     generate_words_pattern(count, WordPattern::MerkleStandard)
 }
 
-/// Prepare key-value entries for SMT benchmarks
-pub fn prepare_smt_entries(pair_count: u64, seed: &mut [u8; 32]) -> Vec<(Word, Word)> {
-    let entries: Vec<(Word, Word)> = (0..pair_count)
-        .map(|i| {
-            let count = pair_count as f64;
-            let idx = ((i as f64 / count) * (count)) as u64;
-            let key = Word::new([
-                generate_value(seed),
-                ONE,
-                Felt::new_unchecked(i),
-                Felt::new_unchecked(idx),
-            ]);
-            let value = generate_word(seed);
-            (key, value)
-        })
-        .collect();
-    entries
-}
-
 /// Generate test key-value pairs for SMT benchmarks (sequential)
 pub fn generate_smt_entries_sequential(count: usize) -> Vec<(Word, Word)> {
     (0..count as u64)
@@ -187,24 +168,6 @@ pub fn generate_smt_entries_mixed(count: usize) -> Vec<(Word, Word)> {
             // Values use offset sequential pattern
             let value = generate_word_pattern(i + 1000, WordPattern::Sequential);
             let key = generate_word_pattern(i, key_pattern);
-
-            (key, value)
-        })
-        .collect()
-}
-
-/// Generate SMT entries with clustered distribution (more realistic access patterns)
-pub fn generate_smt_entries_clustered(count: usize, clusters: usize) -> Vec<(Word, Word)> {
-    let cluster_size = count / clusters;
-    (0..count as u64)
-        .map(|i| {
-            let cluster_id = (i as usize / cluster_size) as u64;
-            let cluster_offset = i % cluster_size as u64;
-
-            // Keys are clustered around specific base values
-            let base = cluster_id * 10000;
-            let key = generate_word_pattern(base + cluster_offset, WordPattern::Sequential);
-            let value = generate_word_pattern(i, WordPattern::SpreadSequential);
 
             (key, value)
         })

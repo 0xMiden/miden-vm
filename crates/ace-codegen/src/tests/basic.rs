@@ -15,9 +15,9 @@ use miden_crypto::{
 use super::common::{eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient};
 use crate::{
     AceCircuit, AceConfig, InputKey, InputLayout, LayoutKind,
-    circuit::{AceNode, emit_circuit},
+    circuit::emit_circuit,
     dag::NodeKind,
-    pipeline::{build_ace_dag_for_air, build_multi_air_ace_circuit},
+    pipeline::{build_ace_dag_for_air, build_canonical_multi_air_ace_circuit},
 };
 
 // Base and extension field types for tests.
@@ -308,6 +308,88 @@ impl LiftedAir<F, EF> for MockPeriodicAir {
     }
 }
 
+/// Many period-32 small-integer columns, so their period adopts the shared Lagrange basis, next
+/// to a mostly-one column combined through the basis complement, a constant column, and a sparse
+/// period-128 column that keep their standalone forms.
+struct MockSharedBasisAir;
+
+const SHARED_BASIS_COLUMNS: usize = 12;
+
+fn shared_basis_columns() -> Vec<Vec<F>> {
+    let mut columns: Vec<Vec<F>> = (0..SHARED_BASIS_COLUMNS)
+        .map(|column| {
+            (0..32u64)
+                .map(|row| F::new_unchecked((row * (column as u64 + 3) + column as u64) % 17))
+                .collect()
+        })
+        .collect();
+    let mut mostly_one = vec![F::ONE; 32];
+    mostly_one[3] = F::ZERO;
+    mostly_one[20] = F::new_unchecked(6);
+    columns.push(mostly_one);
+    columns.push(vec![F::new_unchecked(9)]);
+    let mut sparse = vec![F::ZERO; 128];
+    sparse[17] = F::new_unchecked(23);
+    columns.push(sparse);
+    columns
+}
+
+impl BaseAir<F> for MockSharedBasisAir {
+    fn width(&self) -> usize {
+        1
+    }
+
+    fn num_public_values(&self) -> usize {
+        1
+    }
+
+    fn periodic_columns(&self) -> Cow<'_, [Vec<F>]> {
+        Cow::Owned(shared_basis_columns())
+    }
+}
+
+impl LiftedAir<F, EF> for MockSharedBasisAir {
+    fn num_randomness(&self) -> usize {
+        2
+    }
+
+    fn aux_width(&self) -> usize {
+        1
+    }
+
+    fn num_aux_values(&self) -> usize {
+        1
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), vec![EF::ZERO])
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+        let main = builder.main();
+        let a = main.current_slice()[0];
+        let pub0 = builder.public_values()[0];
+        let rand0 = builder.permutation_randomness()[0];
+        let aux0 = builder.permutation().current_slice()[0];
+        let periodic: Vec<AB::ExprEF> =
+            builder.periodic_values().iter().map(|value| (*value).into().into()).collect();
+
+        builder.assert_zero(a.into() + pub0.into());
+        builder.assert_zero_ext(rand0.into() + aux0.into());
+        let a_expr: AB::Expr = a.into();
+        let a_ext: AB::ExprEF = a_expr.into();
+        for value in periodic {
+            builder.assert_zero_ext(value * a_ext.clone());
+        }
+    }
+}
+
 fn ef(x: u64) -> EF {
     EF::from(F::new_unchecked(x))
 }
@@ -352,7 +434,7 @@ fn build_inputs(layout: &InputLayout) -> Vec<EF> {
 }
 
 #[test]
-fn multi_air_uses_proof_order_offsets_and_stable_selectors() {
+fn multi_air_uses_canonical_offsets_and_stable_selectors() {
     let airs = [
         TestAir {
             preprocessed: 1,
@@ -379,13 +461,11 @@ fn multi_air_uses_proof_order_offsets_and_stable_selectors() {
             ..TestAir::simple()
         },
     ];
-    let circuit = build_multi_air_ace_circuit(
+    let circuit = build_canonical_multi_air_ace_circuit(
         &airs,
-        &[2, 0, 1],
         AceConfig {
             num_quotient_chunks: 1,
             layout: LayoutKind::Masm,
-            num_airs: 3,
         },
         4,
     )
@@ -403,46 +483,56 @@ fn multi_air_uses_proof_order_offsets_and_stable_selectors() {
 
     let values = [
         (InputKey::Alpha, 1),
-        (InputKey::MultiAirFoldBeta, 10),
         (InputKey::IsFirstAir(0), 2),
         (InputKey::IsLastAir(1), 3),
         (InputKey::IsTransitionAir(2), 5),
-        (InputKey::Preprocessed { offset: 0, index: 4 }, 3),
-        (InputKey::Preprocessed { offset: 0, index: 9 }, 4),
-        (InputKey::Preprocessed { offset: 0, index: 2 }, 7),
-        (InputKey::Main { offset: 0, index: 8 }, 2),
-        (InputKey::Main { offset: 0, index: 14 }, 7),
-        (InputKey::Main { offset: 0, index: 4 }, 6),
+        (InputKey::Preprocessed { offset: 0, index: 0 }, 3),
+        (InputKey::Preprocessed { offset: 0, index: 5 }, 4),
+        (InputKey::Preprocessed { offset: 0, index: 10 }, 7),
+        (InputKey::Main { offset: 0, index: 0 }, 2),
+        (InputKey::Main { offset: 0, index: 6 }, 7),
+        (InputKey::Main { offset: 0, index: 12 }, 6),
     ];
-    let offset_only = [
-        InputKey::AuxCoord { offset: 0, index: 4, coord: 0 },
-        InputKey::AuxCoord { offset: 0, index: 7, coord: 1 },
-        InputKey::AuxCoord { offset: 0, index: 2, coord: 0 },
-        InputKey::AuxBusBoundary(1),
-        InputKey::AuxBusBoundary(3),
-        InputKey::AuxBusBoundary(0),
-    ];
-    let references: Vec<_> = circuit
-        .operations
-        .iter()
-        .flat_map(|op| [op.lhs, op.rhs])
-        .filter_map(|node| match node {
-            AceNode::Input(index) => Some(index),
-            _ => None,
-        })
-        .collect();
-    for key in values.iter().map(|&(key, _)| key).chain(offset_only) {
-        let index = circuit.layout().index(key).unwrap();
-        assert!(references.contains(&index), "missing {key:?}");
-    }
-
     let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
-    for (key, value) in values {
+    for (key, value) in values.into_iter().chain([
+        (InputKey::AuxCoord { offset: 0, index: 0, coord: 0 }, 2),
+        (InputKey::AuxCoord { offset: 0, index: 3, coord: 1 }, 3),
+        (InputKey::AuxCoord { offset: 0, index: 6, coord: 0 }, 5),
+        (InputKey::AuxBusBoundary(0), 7),
+        (InputKey::AuxBusBoundary(2), 11),
+        (InputKey::AuxBusBoundary(3), 13),
+        (InputKey::ZPowN, 19),
+        (InputKey::Weight0, 7),
+        (InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 }, 2),
+        (InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 1 }, 3),
+    ]) {
         set_input(&circuit, &mut inputs, key, ef(value));
     }
 
-    // Stable accumulators are 10, 33, and 65; proof order [2, 0, 1] folds to 6,633.
-    assert_eq!(circuit.eval(&inputs).unwrap(), ef(6_633));
+    // The per-AIR constraints give 19, 44 + 3u and 83, where u is the extension-field basis.
+    // With one quotient chunk, q*v = 7 * (2 + 3u) * (19 - 1) = 252 + 378u.
+    let quotient_binding = EF::new([F::from_u64(252), F::from_u64(378)]);
+    for (order, coefficients, expected) in [
+        ([2, 0, 1], [10, 1, 100], EF::new([F::from_u64(8_534), F::from_u64(3)])),
+        ([0, 1, 2], [100, 10, 1], EF::new([F::from_u64(2_423), F::from_u64(30)])),
+    ] {
+        for (i, coefficient) in coefficients.into_iter().enumerate() {
+            set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(i), ef(coefficient));
+        }
+        let expected = expected - quotient_binding;
+        assert_eq!(circuit.eval(&inputs).unwrap(), expected);
+        assert_eq!(
+            crate::testing::eval_multi_air_constraints(
+                &airs,
+                circuit.layout(),
+                &inputs,
+                &order,
+                ef(10),
+                4,
+            ),
+            expected,
+        );
+    }
     circuit.to_ace().expect("multi-AIR root must be MASM encodable");
 }
 
@@ -452,13 +542,11 @@ fn mixed_air_periods_use_one_shared_basis() {
         TestAir { period: 4, ..TestAir::simple() },
         TestAir { period: 32, ..TestAir::simple() },
     ];
-    let circuit = build_multi_air_ace_circuit(
+    let circuit = build_canonical_multi_air_ace_circuit(
         &airs,
-        &[0, 1],
         AceConfig {
             num_quotient_chunks: 1,
             layout: LayoutKind::Native,
-            num_airs: 2,
         },
         1,
     )
@@ -466,7 +554,8 @@ fn mixed_air_periods_use_one_shared_basis() {
     let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
     let z_k = ef(3);
     set_input(&circuit, &mut inputs, InputKey::ZK, z_k);
-    set_input(&circuit, &mut inputs, InputKey::MultiAirFoldBeta, ef(7));
+    set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(0), ef(7));
+    set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(1), ef(1));
 
     let mut period_four_point = z_k;
     for _ in 0..3 {
@@ -474,22 +563,32 @@ fn mixed_air_periods_use_one_shared_basis() {
     }
     let period_four = eval_periodic_values(&airs[0].periodic_columns(), period_four_point)[0];
     let period_thirty_two = eval_periodic_values(&airs[1].periodic_columns(), z_k)[0];
-    assert_eq!(circuit.eval(&inputs).unwrap(), period_four * ef(7) + period_thirty_two);
+    let expected = period_four * ef(7) + period_thirty_two;
+    assert_eq!(circuit.eval(&inputs).unwrap(), expected);
+    assert_eq!(
+        crate::testing::eval_multi_air_constraints(
+            &airs,
+            circuit.layout(),
+            &inputs,
+            &[0, 1],
+            ef(7),
+            1,
+        ),
+        expected,
+    );
     assert_ne!(period_four, eval_periodic_values(&airs[0].periodic_columns(), z_k)[0]);
 }
 
 #[test]
-fn multi_air_rejects_invalid_proof_orders() {
-    let airs = [TestAir::simple(), TestAir::simple()];
+fn multi_air_rejects_empty_airs_and_invalid_alignment() {
     let config = AceConfig {
         num_quotient_chunks: 1,
         layout: LayoutKind::Native,
-        num_airs: 2,
     };
-
-    assert!(build_multi_air_ace_circuit(&airs, &[0], config, 2).is_err());
-    assert!(build_multi_air_ace_circuit(&airs, &[0, 0], config, 2).is_err());
-    assert!(build_multi_air_ace_circuit(&airs, &[0, 2], config, 2).is_err());
+    let airs = [TestAir { aux: 1, ..TestAir::simple() }];
+    assert!(build_canonical_multi_air_ace_circuit::<TestAir>(&[], config, 2).is_err());
+    assert!(build_canonical_multi_air_ace_circuit(&airs, config, 0).is_err());
+    assert!(build_canonical_multi_air_ace_circuit(&airs, config, 3).is_err());
 }
 
 #[test]
@@ -498,7 +597,6 @@ fn test_preprocessed_entries_lower_to_input_keys() {
     let config = AceConfig {
         num_quotient_chunks: 1,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air(&air, config).unwrap();
 
@@ -521,7 +619,6 @@ fn test_preprocessed_inputs_affect_dag_and_circuit_eval() {
     let config = AceConfig {
         num_quotient_chunks: 1,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -543,7 +640,6 @@ fn test_verifier_dag_matches_manual_eval() {
     let config = AceConfig {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -591,7 +687,6 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
     let config = AceConfig {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -632,13 +727,100 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
     assert_eq!(circuit_value, actual);
 }
 
+/// The shared-basis lowering must agree with the independent dense reference, and the
+/// representation choice must actually exercise it alongside the standalone forms.
+#[test]
+fn test_shared_lagrange_basis_periodic_path_matches_manual_eval() {
+    use crate::dag::{PeriodicColumn, PeriodicColumnData};
+
+    let data = PeriodicColumnData::<EF>::from_periodic_columns(shared_basis_columns());
+    let columns = data.columns();
+    assert!(
+        columns[..SHARED_BASIS_COLUMNS]
+            .iter()
+            .all(|column| matches!(column, PeriodicColumn::Basis { period: 32, .. })),
+        "dense small-integer columns of one period must share its basis"
+    );
+    assert!(
+        matches!(&columns[SHARED_BASIS_COLUMNS], PeriodicColumn::Basis { offset, .. } if *offset == EF::ONE),
+        "a mostly-one column must be combined through the basis complement"
+    );
+    assert!(matches!(columns[SHARED_BASIS_COLUMNS + 2], PeriodicColumn::Sparse { .. }));
+
+    let air = MockSharedBasisAir;
+    let config = AceConfig {
+        num_quotient_chunks: 2,
+        layout: LayoutKind::Native,
+    };
+    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+    let layout = artifacts.layout.clone();
+    let inputs = build_inputs(&layout);
+    let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
+    let periodic_columns = air.periodic_columns();
+    let periodic_values = eval_periodic_values(&periodic_columns, z_k);
+
+    let air_layout = AirLayout {
+        preprocessed_width: 0,
+        main_width: layout.counts.width,
+        num_public_values: layout.counts.num_public,
+        permutation_width: layout.counts.aux_width,
+        num_permutation_challenges: layout.counts.num_randomness,
+        num_permutation_values: air.num_aux_values(),
+        num_periodic_columns: periodic_columns.len(),
+    };
+    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
+    air.eval(&mut builder);
+
+    let acc = eval_folded_constraints(
+        &builder.base_constraints(),
+        &builder.extension_constraints(),
+        &builder.constraint_layout(),
+        &inputs,
+        &layout,
+        &periodic_values,
+    );
+    let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
+    let vanishing = z_pow_n - EF::ONE;
+    let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
+
+    let actual = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
+    assert_eq!(actual, expected);
+
+    let circuit = emit_circuit(&artifacts.dag, layout).unwrap();
+    assert_eq!(circuit.eval(&inputs).expect("circuit eval"), actual);
+}
+
+/// Constant columns and repeats of another column add nothing to the basis savings of their
+/// period: the DAG folds a constant column to a single constant and shares a repeat's nodes. A
+/// lone one-hot column saves too little over the period-8 basis to adopt it, and adding either
+/// kind of column must not change that.
+#[test]
+fn test_constant_and_repeated_periodic_columns_do_not_count_toward_shared_basis() {
+    use crate::dag::{PeriodicColumn, PeriodicColumnData};
+
+    let mut one_hot = vec![F::ZERO; 8];
+    one_hot[5] = F::ONE;
+    let with_constants =
+        vec![one_hot.clone(), vec![F::new_unchecked(2); 8], vec![F::new_unchecked(3); 8]];
+    let repeated = vec![one_hot; 4];
+
+    for (case, columns) in [("constant", with_constants), ("repeated", repeated)] {
+        let data = PeriodicColumnData::<EF>::from_periodic_columns(columns);
+        assert!(
+            data.columns()
+                .iter()
+                .all(|column| !matches!(column, PeriodicColumn::Basis { .. })),
+            "{case} columns must not push a period onto the shared basis"
+        );
+    }
+}
+
 #[test]
 fn test_emitted_circuit_matches_dag_eval() {
     let air = MockAir;
     let config = AceConfig {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -651,28 +833,11 @@ fn test_emitted_circuit_matches_dag_eval() {
 }
 
 #[test]
-fn pipeline_rejects_zero_airs() {
-    let air = MockAir;
-    let config = AceConfig {
-        num_quotient_chunks: 2,
-        layout: LayoutKind::Native,
-        num_airs: 0,
-    };
-
-    let err = build_ace_dag_for_air(&air, config).unwrap_err();
-    assert!(
-        matches!(err, crate::AceError::InvalidInputLayout { .. }),
-        "expected InvalidInputLayout, got {err:?}"
-    );
-}
-
-#[test]
 fn pipeline_rejects_zero_quotient_chunks() {
     let air = MockAir;
     let config = AceConfig {
         num_quotient_chunks: 0,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
 
     let err = build_ace_dag_for_air(&air, config).unwrap_err();
@@ -688,7 +853,6 @@ fn test_encoded_circuit_structure() {
     let config = AceConfig {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
-        num_airs: 1,
     };
     let artifacts = build_ace_dag_for_air(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -697,217 +861,6 @@ fn test_encoded_circuit_structure() {
     let encoded = circuit.to_ace().unwrap();
     assert!(encoded.size_in_felt().is_multiple_of(8));
     assert_eq!(encoded.num_inputs(), layout.total_inputs);
-}
-
-fn mixed_factoring_airs() -> [TestAir; 3] {
-    [
-        TestAir {
-            preprocessed: 2,
-            main: 2,
-            aux: 1,
-            boundaries: 1,
-            selector: Selector::First,
-            ..TestAir::simple()
-        },
-        TestAir {
-            main: 3,
-            aux: 2,
-            boundaries: 2,
-            period: 4,
-            ..TestAir::simple()
-        },
-        TestAir {
-            preprocessed: 3,
-            main: 1,
-            aux: 1,
-            boundaries: 1,
-            selector: Selector::Transition,
-            ..TestAir::simple()
-        },
-    ]
-}
-
-/// Shared driver: for every order, the factored circuit must match the independent
-/// unfactored builder by layout, by evaluation on a deterministic input vector, and by
-/// its encode-only shuffle slice against the assembled stream — with anti-vacuity guards
-/// on both the evaluated values and the encoded sections.
-fn assert_factored_matches_unfactored_for_orders<const N: usize>(
-    airs: &[TestAir],
-    config: AceConfig,
-    alignment: usize,
-    orders: &[[usize; N]],
-    mut state: u64,
-) {
-    use crate::pipeline::build_factored_multi_air_ace_circuit;
-
-    let factored = build_factored_multi_air_ace_circuit(airs, config, alignment).expect("factored");
-    let mut buffer = crate::ShuffleEncodeBuffer::new();
-    let mut sections = Vec::new();
-    let mut distinct_values = std::collections::BTreeSet::new();
-    for order in orders {
-        let assembled = factored.circuit_for_order(order).expect("assembled circuit");
-        let reference =
-            build_multi_air_ace_circuit(airs, order, config, alignment).expect("reference circuit");
-        assert_eq!(
-            assembled.layout().total_inputs,
-            reference.layout().total_inputs,
-            "layouts must agree for {order:?}"
-        );
-
-        // Both circuits read the same proof-order input vector; fill it deterministically.
-        let inputs: Vec<EF> = (0..assembled.layout().total_inputs)
-            .map(|_| {
-                state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-                ef(state >> 33)
-            })
-            .collect();
-
-        let value = assembled.eval(&inputs).expect("factored eval");
-        assert_eq!(
-            value,
-            reference.eval(&inputs).expect("reference eval"),
-            "factored and unfactored circuits disagree for {order:?}"
-        );
-        distinct_values.insert(format!("{value:?}"));
-
-        // The encode-only registry path must reproduce the assembled stream's shuffle slice.
-        let full = assembled.to_ace().expect("factored circuit must be MASM encodable");
-        let const_felts = full.num_constants() * crate::EXT_DEGREE;
-        let shuffle_len = factored.num_shuffle_ops();
-        let encoded = factored
-            .encode_shuffle_section_for_order(order, &mut buffer)
-            .expect("fast path");
-        assert_eq!(
-            encoded,
-            &full.instructions()[const_felts..const_felts + shuffle_len],
-            "shuffle-only encoding diverges from the assembled stream for {order:?}"
-        );
-        sections.push(encoded.to_vec());
-    }
-    // Different orders weight the accumulators differently, so a shuffle that collapses to
-    // the identity for every order would make the equality above vacuous.
-    assert!(distinct_values.len() > 1, "orders must not all evaluate identically");
-    // Keep the fixture non-vacuous: its distinct orders should not collapse to one shuffle.
-    assert_pairwise_distinct_sections(orders, &sections);
-}
-
-#[test]
-fn factored_multi_air_matches_unfactored_for_every_order_with_preprocessed() {
-    // A deliberately mixed AIR set: distinct widths per kind, one AIR without preprocessed
-    // columns between two with them (exercising the zero-width offset accumulation), plus a
-    // periodic column and per-AIR selectors. The unfactored builder places inputs and folds
-    // in proof order directly; the factored builder must reproduce it through the shuffle
-    // section for every permutation, including the preprocessed region.
-    let airs = mixed_factoring_airs();
-    let config = AceConfig {
-        num_quotient_chunks: 2,
-        layout: LayoutKind::Masm,
-        num_airs: 3,
-    };
-    let orders: [[usize; 3]; 6] =
-        [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
-
-    assert_factored_matches_unfactored_for_orders(&airs, config, 4, &orders, 0x00dd_f00d_1234_5678);
-}
-
-/// Assert that no two proof orders produced the same shuffle-section encoding.
-fn assert_pairwise_distinct_sections<const N: usize>(
-    orders: &[[usize; N]],
-    sections: &[Vec<Felt>],
-) {
-    assert_eq!(orders.len(), sections.len(), "one section per order");
-    for i in 0..sections.len() {
-        for j in i + 1..sections.len() {
-            assert_ne!(
-                sections[i], sections[j],
-                "orders {:?} and {:?} encode identical shuffle sections — their registry \
-                 leaves would collide",
-                orders[i], orders[j]
-            );
-        }
-    }
-}
-
-#[test]
-fn factored_circuits_match_unfactored_beyond_three_airs() {
-    // At three AIRs `for e in 2..num_fold_coeffs` runs exactly once, so the chained power
-    // node `Operation(powers_start + (e - 2))` is only ever evaluated at offset 0 and the
-    // shuffle padding loop never executes. Both matter at the ten-chiplet precompile width.
-    //
-    // This compares against the independent unfactored builder rather than against the
-    // factored circuit's own encoding: `assemble` and `encode_shuffle_section` share
-    // `emit_shuffle_ops`, so an encoding-vs-encoding check cannot see a defect in the
-    // shared emitter — a wrong power-chain stride is invisible to it and shows up only
-    // here.
-    let airs: [TestAir; 5] = core::array::from_fn(|i| TestAir {
-        main: 2 + i,
-        aux: 1 + (i % 2),
-        boundaries: 1,
-        ..TestAir::simple()
-    });
-    let config = AceConfig {
-        num_quotient_chunks: 8,
-        layout: LayoutKind::Masm,
-        num_airs: 5,
-    };
-    let orders = [[0, 1, 2, 3, 4], [4, 3, 2, 1, 0], [2, 0, 4, 1, 3], [1, 4, 0, 3, 2]];
-
-    assert_factored_matches_unfactored_for_orders(&airs, config, 8, &orders, 0x51ed_9a77_0f13_c0de);
-}
-
-#[test]
-fn packed_leaves_match_the_scalar_path() {
-    use crate::{
-        FactoredCircuitFactory, PackedLeafScratch, ShuffleEncodeBuffer, factory::LEAF_LANES,
-        pipeline::build_factored_multi_air_ace_circuit,
-    };
-
-    // Five AIRs so the fold power chain is live, and batch sizes chosen to exercise
-    // both full chunks and the duplicate-padded tail for any LEAF_LANES.
-    let airs: [TestAir; 5] = core::array::from_fn(|i| TestAir {
-        main: 2 + i,
-        aux: 1 + (i % 2),
-        boundaries: 1,
-        ..TestAir::simple()
-    });
-    let config = AceConfig {
-        num_quotient_chunks: 8,
-        layout: LayoutKind::Masm,
-        num_airs: 5,
-    };
-    let factored = build_factored_multi_air_ace_circuit(&airs, config, 8).expect("factored");
-    let factory = FactoredCircuitFactory::new(factored).expect("factory");
-
-    let orders: Vec<[usize; 5]> = vec![
-        [0, 1, 2, 3, 4],
-        [4, 3, 2, 1, 0],
-        [2, 0, 4, 1, 3],
-        [1, 4, 0, 3, 2],
-        [3, 2, 4, 0, 1],
-        [0, 2, 1, 4, 3],
-        [4, 0, 3, 2, 1],
-    ];
-    let mut buffer = ShuffleEncodeBuffer::new();
-    let scalar: Vec<_> = orders
-        .iter()
-        .map(|order| factory.leaf_for_order(order, &mut buffer).expect("scalar leaf"))
-        .collect();
-
-    let mut scratch = PackedLeafScratch::new();
-    // Every prefix length: covers batch sizes below, at, and above LEAF_LANES,
-    // including tails that pad lanes with the duplicated last order.
-    for take in 1..=orders.len() {
-        let refs: Vec<&[usize]> = orders[..take].iter().map(<[usize; 5]>::as_slice).collect();
-        let mut packed = Vec::new();
-        factory
-            .leaves_for_orders(&refs, &mut scratch, &mut packed)
-            .expect("packed leaves");
-        assert_eq!(
-            packed,
-            scalar[..take],
-            "packed leaves diverge from the scalar path at batch size {take} (lanes: {LEAF_LANES})"
-        );
-    }
 }
 
 #[test]
@@ -924,50 +877,29 @@ fn stream_geometry_rejects_the_node_id_packing_bound() {
 }
 
 #[test]
-fn encode_shuffle_section_rejects_layouts_the_encoder_rejects() {
-    use crate::pipeline::build_factored_multi_air_ace_circuit;
-
-    // The encode-only path never builds an `AceCircuit`, so it must reproduce `to_ace`'s
-    // preconditions itself. Otherwise it would hand back felts for a stream the encoder —
-    // and therefore the chiplet — refuses, and a registry over those leaves would commit to
-    // circuits that can never be evaluated.
-    let airs = [
-        TestAir {
-            main: 2,
-            aux: 1,
-            boundaries: 0,
-            ..TestAir::simple()
-        },
-        TestAir {
-            main: 3,
-            aux: 1,
-            boundaries: 0,
-            ..TestAir::simple()
-        },
-    ];
-    let config = AceConfig {
-        num_quotient_chunks: 2,
-        layout: LayoutKind::Native,
-        num_airs: 2,
-    };
-    let factored = build_factored_multi_air_ace_circuit(&airs, config, 1).expect("factored");
-
-    // Native layouts do not pad the READ section, so this one lands on an odd input count.
-    // If that ever stops holding, the test is no longer exercising the guard.
-    assert!(
-        !factored.layout().total_inputs.is_multiple_of(2),
-        "test needs an unaligned READ layout to exercise the guard"
-    );
-
-    let order = [0, 1];
-    assert!(
-        factored.circuit_for_order(&order).expect("assembled").to_ace().is_err(),
-        "to_ace must reject an unaligned READ layout"
-    );
-
-    let mut buffer = crate::ShuffleEncodeBuffer::new();
-    assert!(
-        factored.encode_shuffle_section_for_order(&order, &mut buffer).is_err(),
-        "the encode-only path must reject exactly what to_ace rejects"
-    );
+fn canonical_builder_air_count_is_independent_of_order_maps() {
+    for num_airs in [1, crate::MAX_ORDER_AIRS + 1] {
+        let airs = vec![TestAir::simple(); num_airs];
+        let circuit = build_canonical_multi_air_ace_circuit(
+            &airs,
+            AceConfig {
+                num_quotient_chunks: 1,
+                layout: LayoutKind::Masm,
+            },
+            8,
+        )
+        .expect("canonical circuit");
+        let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
+        for i in 0..num_airs {
+            set_input(
+                &circuit,
+                &mut inputs,
+                InputKey::Main { offset: 0, index: 8 * i },
+                ef((i + 1) as u64),
+            );
+            set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(i), EF::ONE);
+        }
+        assert_eq!(circuit.eval(&inputs).unwrap(), ef((num_airs * (num_airs + 1) / 2) as u64));
+        circuit.to_ace().expect("canonical circuit must encode");
+    }
 }

@@ -3,13 +3,13 @@ use alloc::vec::Vec;
 use assert_matches::assert_matches;
 
 use super::{
-    super::{InnerNodeInfo, Poseidon2, Word},
+    super::{Eidos, InnerNodeInfo, Word},
     Mmr, MmrError, MmrPeaks, PartialMmr,
     full::NodeStore,
     nodes_from_mask,
 };
 use crate::{
-    Felt,
+    hash::eidos::{BLOCK_LEN, domains::MMR_PEAKS},
     merkle::{
         MerklePath, MerkleTree, NodeIndex, int_to_node,
         mmr::{
@@ -1044,10 +1044,10 @@ fn test_mmr_inner_nodes() {
     let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap();
     let nodes: Vec<InnerNodeInfo> = mmr.inner_nodes().collect();
 
-    let h01 = Poseidon2::merge(&[LEAVES[0], LEAVES[1]]);
-    let h23 = Poseidon2::merge(&[LEAVES[2], LEAVES[3]]);
-    let h0123 = Poseidon2::merge(&[h01, h23]);
-    let h45 = Poseidon2::merge(&[LEAVES[4], LEAVES[5]]);
+    let h01 = Eidos::merge(&[LEAVES[0], LEAVES[1]]);
+    let h23 = Eidos::merge(&[LEAVES[2], LEAVES[3]]);
+    let h0123 = Eidos::merge(&[h01, h23]);
+    let h45 = Eidos::merge(&[LEAVES[4], LEAVES[5]]);
     let postorder = vec![
         InnerNodeInfo {
             value: h01,
@@ -1115,11 +1115,11 @@ fn test_mmr_hash_peaks() {
     let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap();
     let peaks = mmr.peaks();
 
-    let first_peak = Poseidon2::merge(&[
-        Poseidon2::merge(&[LEAVES[0], LEAVES[1]]),
-        Poseidon2::merge(&[LEAVES[2], LEAVES[3]]),
+    let first_peak = Eidos::merge(&[
+        Eidos::merge(&[LEAVES[0], LEAVES[1]]),
+        Eidos::merge(&[LEAVES[2], LEAVES[3]]),
     ]);
-    let second_peak = Poseidon2::merge(&[LEAVES[4], LEAVES[5]]);
+    let second_peak = Eidos::merge(&[LEAVES[4], LEAVES[5]]);
     let third_peak = LEAVES[6];
 
     // minimum length is 16
@@ -1523,22 +1523,21 @@ mod property_tests {
 // ================================================================================================
 
 fn mmr_commitment(num_leaves: u64, padded_peaks: &[Word]) -> Word {
-    let padded_peak_elements = Word::words_as_elements(padded_peaks);
-    let mut elements = Vec::with_capacity(Word::NUM_ELEMENTS + padded_peak_elements.len());
-    elements.extend_from_slice(&[
-        Felt::new_unchecked(num_leaves),
-        Felt::ZERO,
-        Felt::ZERO,
-        Felt::ZERO,
-    ]);
-    elements.extend_from_slice(padded_peak_elements);
+    let mut cv = Eidos::init_chaining_word_with_params(
+        MMR_PEAKS,
+        [num_leaves as u32, (num_leaves >> 32) as u32, 0],
+    );
 
-    Poseidon2::hash_elements(&elements)
+    for block in Word::words_as_elements(padded_peaks).chunks_exact(BLOCK_LEN) {
+        cv = Eidos::compress(cv, block.try_into().expect("MMR peaks are block-aligned"));
+    }
+
+    cv
 }
 
-// short hand for the Poseidon2 hash, used to make test code more concise and easy to read
+// Short hand for the Eidos hash, used to make test code more concise and easy to read.
 fn merge(l: Word, r: Word) -> Word {
-    Poseidon2::merge(&[l, r])
+    Eidos::merge(&[l, r])
 }
 
 /// Given a leaf index and the current forest, return the tree number responsible for

@@ -281,7 +281,7 @@ fn native_level(descriptor: &SecurityDescriptor) -> u64 {
         descriptor.log_max_height as u32,
         0,
         security::COMMITMENT_ALIGNMENT,
-        128,
+        miden_core::proof::HashFunction::Eidos,
     );
     params.protocol_params.num_queries = descriptor.num_queries as u32;
     params.protocol_params.query_pow_bits = descriptor.query_pow_bits as u32;
@@ -346,10 +346,9 @@ fn common_security_estimator_wires_each_computed_round() {
             },
             20,
         ),
-        // A = 257 (the envelope floor): base = 127 - 9 - 6 = 112 and slack recovery fires. The
-        // omitted rounds are at their least secure accepted values: composition is 114 bits,
-        // OOD is 118 bits, and folding is 116 bits. DEEP grinding keeps lookup binding at 113
-        // bits.
+        // A = 257 and R = 0: floor(126 - log2(257) - 6) = 111. At this envelope corner,
+        // composition is 113 bits, DEEP exceeds it, OOD exceeds 116 bits, and folding exceeds
+        // 114 bits.
         (
             "dominated-round envelope corner",
             SecurityDescriptor {
@@ -359,12 +358,12 @@ fn common_security_estimator_wires_each_computed_round() {
                 num_deep_terms: 8192,
                 ..baseline
             },
-            113,
+            111,
         ),
-        // The MVM lookup shape at height 22: A = 504, b = 1477 + 11 = 1488, R = 1, so the slack
-        // bound recovers the fractional bit exactly: 127 - 9 - 22 - 0 + 1 = 97.
+        // A = 504, b = 1477 + 11 = 1488, R = 1: slack covers the correction,
+        // so no borrow is needed and the result is 126 - 9 - 22 = 95.
         (
-            "lookup with slack recovery",
+            "lookup without a borrow",
             SecurityDescriptor {
                 log_max_height: 22,
                 max_message_width: 16,
@@ -372,25 +371,23 @@ fn common_security_estimator_wires_each_computed_round() {
                 num_lookup_boundary_terms: 258,
                 ..baseline
             },
-            97,
+            95,
         ),
-        // A synthetic envelope corner on the MVM lookup shape (deployed boundary terms reach
-        // only 258): R = 216_110 = 3 * 65536 + 19_502, so r_w = 3 and the 1,488-unit slack
-        // cannot cover the remainder: 127 - 9 - 6 - 3 + 0. The recovery is not universal on
-        // this shape; it depends on the remainder.
+        // R = 216_110 = 3 * 65536 + 19_502. The 1,488-unit slack cannot cover the
+        // remainder, so the result is 126 - 9 - 6 - 3 - 1 = 107.
         (
-            "lookup with whole-bit correction and no recovery",
+            "lookup with whole-bit correction and a borrow",
             SecurityDescriptor {
                 max_message_width: 16,
                 lookup_fractions_per_row: 28,
                 num_lookup_boundary_terms: 4096,
                 ..baseline
             },
-            109,
+            107,
         ),
         // The largest correction allowed by the envelope, combined with its largest coefficient:
         // A = 65_536 and R = 6_051_072 = 92 * 65_536 + 21_760 at height 6. Since A is a power of
-        // two, no slack is recovered: 127 - 16 - 6 - 92.
+        // two, slack is zero and a borrow is needed: 126 - 16 - 6 - 92 - 1 = 11.
         (
             "lookup at the correction bound",
             SecurityDescriptor {
@@ -399,7 +396,7 @@ fn common_security_estimator_wires_each_computed_round() {
                 num_lookup_boundary_terms: 4096,
                 ..baseline
             },
-            13,
+            11,
         ),
     ];
 
@@ -416,14 +413,14 @@ fn common_security_estimator_wires_each_computed_round() {
 }
 
 /// DEEP must determine the returned minimum on both sides of a power-of-two boundary and at
-/// the term-count ceiling. Lookup is 119 - height bits on this shape, strictly above every probe;
+/// the term-count ceiling. Lookup is 117 - height bits on this shape, strictly above every probe;
 /// query and the omitted rounds are also higher. Grinding must add to the DEEP result.
 #[test]
 fn deep_round_matches_native_at_rounding_boundaries() {
-    // At height 6 with no grinding, powers of two lose the fractional field-size bit:
-    // 124 - ceil(log2(n)) - 6 + !is_power_of_two(n).
+    // At height 6 with no grinding, the exact 126-bit support gives
+    // 123 - ceil(log2(n)) - 6.
     for (num_deep_terms, unground_level) in
-        [(255, 111), (256, 110), (257, 110), (8191, 106), (8192, 105)]
+        [(255, 109), (256, 109), (257, 108), (8191, 104), (8192, 104)]
     {
         for log_max_height in [6, 29] {
             for deep_pow_bits in [0, 1] {
@@ -448,10 +445,10 @@ fn deep_round_matches_native_at_rounding_boundaries() {
 /// Checks the conservative lookup approximation on shapes not produced by either verifier.
 ///
 /// For some synthetic shapes, the lower bound on the logarithmic slack is too small to determine
-/// whether the native calculation adds a fractional bit. The first three cases pin examples where
+/// whether the native calculation borrows a bit. The first three cases pin examples where
 /// MASM returns exactly one bit less. The following grid checks that MASM never returns more than
 /// the native estimator and never differs by more than one bit. Each grid point is checked against
-/// the estimator's `base >= 2` requirement before execution. Unsupported inputs are tested
+/// the estimator's `base >= 1` requirement before execution. Unsupported inputs are tested
 /// separately by `estimator_envelope_violations_trap`.
 #[test]
 fn slack_bound_never_overstates_and_loses_at_most_one_bit() {
@@ -471,9 +468,9 @@ fn slack_bound_never_overstates_and_loses_at_most_one_bit() {
     };
 
     for (descriptor, expected) in [
-        (case(6, 8, 28, 1000), 112),
-        (case(7, 8, 28, 2048), 111),
-        (case(8, 8, 28, 4096), 110),
+        (case(6, 8, 28, 1000), 110),
+        (case(7, 8, 28, 2048), 109),
+        (case(8, 8, 28, 4096), 108),
     ] {
         let actual = run_estimator(descriptor).expect("supported descriptor must execute");
         assert_eq!(actual, expected, "conservative test case changed");
@@ -494,7 +491,7 @@ fn slack_bound_never_overstates_and_loses_at_most_one_bit() {
                 let q = u64::from(64 - (coefficient - 1).leading_zeros());
                 let r_w = correction_fp(boundary, frac, h) >> 16;
                 assert!(
-                    127 - q - h >= r_w + 2,
+                    126 - q - h > r_w,
                     "grid design error: h={h} width={width} frac={frac} boundary={boundary} is \
                      outside the estimator envelope"
                 );
@@ -701,9 +698,9 @@ fn recursive_verifier_ranges_fit_security_estimator_envelope() {
         let coefficient = (width + 2) * frac;
         let q = u64::from(64 - (coefficient - 1).leading_zeros());
         let r_w = correction_fp(boundary, frac, h_min) >> 16;
-        let field_whole_bits = vm::CHALLENGE_FIELD_BITS >> vm::FIXED_POINT_FRACTIONAL_BITS;
+        let field_whole_bits = vm::EIDOS_CHALLENGE_SAMPLE_BITS >> vm::FIXED_POINT_FRACTIONAL_BITS;
         let base = field_whole_bits - q - LOG_HEIGHT_MAX - r_w;
-        assert!(base >= 2, "{name} lookup base leaves fewer than two bits for the correction");
+        assert!(base >= 1, "{name} lookup base leaves less than one bit for the correction");
     }
 }
 
@@ -730,7 +727,7 @@ fn security_level_threshold_rejects_below_target() {
 
     // The deployed preset at a height below the lookup/query crossover computes to exactly the
     // target: the threshold assert must pass.
-    let at = build_test!(source.as_str(), &vm_security_descriptor(27, 17, 12, 4, 20, 0));
+    let at = build_test!(source.as_str(), &vm_security_descriptor(27, 17, 12, 4, 18, 0));
     at.execute_for_output().expect("an at-target level must be accepted");
 
     // Fewer queries and less grinding computes a level below the target: the threshold assert
@@ -911,7 +908,7 @@ fn synthetic_sweep(
 /// Returns a synthetic shape whose lookup term has the largest value allowed by the estimator.
 ///
 /// The coefficient and height use their lower bounds and there is no boundary correction, giving
-/// a 113-bit lookup term. This lets the query term determine the result over as much of its input
+/// a 111-bit lookup term. This lets the query term determine the result over as much of its input
 /// range as the estimator permits.
 fn minimal_synthetic_shape() -> SecurityDescriptor {
     SecurityDescriptor {
@@ -931,7 +928,7 @@ fn minimal_synthetic_shape() -> SecurityDescriptor {
 }
 
 /// Every query count the estimator accepts against every grinding value, covering the complete
-/// 151 x 32 domain on the minimal shape. The query term binds wherever it lies below the 113-bit
+/// 151 x 32 domain on the minimal shape. The query term binds wherever it lies below the 111-bit
 /// lookup ceiling; above it the lookup term bounds both implementations identically, so minimum
 /// parity is checked at every cell.
 #[test]

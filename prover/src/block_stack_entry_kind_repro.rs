@@ -1,40 +1,17 @@
-//! Regression tests: a caller-frame block-stack entry must not be substitutable for a continuation.
+//! Regression tests for the block-stack entry-kind tag.
 //!
-//! Continuation and caller-frame entries previously shared one untagged encoding domain, so a
-//! caller frame whose saved fields were all zero encoded to the same field element as a
-//! continuation. The block-stack relation therefore could not authenticate which interpretation
-//! an END selected. That distinction matters because caller-frame restoration controls the
-//! preservation masks for `ctx`, `fn_hash`, `b0`, and `b1`. The relation now includes an explicit
-//! entry-kind tag, and `decoder/mod.rs` additionally constrains the caller-frame restoration
-//! selector to be boolean on END rows.
+//! A non-loop continuation and a caller frame with zero saved state share every payload slot
+//! except the tag. Without it, an ordinary block's END could select caller-frame restoration and
+//! bypass preservation of `ctx`, `fn_hash`, `b0`, and `b1`. Inside a CALL, this could carry the
+//! callee's state into the root context without a SYSCALL or kernel-ROM check.
 //!
-//! The mechanism it guards against, in past tense: `impl LookupMessage for BlockStackMsg` used
-//! to encode both variants against the same bus prefix at the same slot offsets, with the
-//! continuation zero-padding the caller-state slots. So, identically as field elements:
+//! The forged witness relabels a continuation END as a caller-frame END and carries callee state
+//! forward. The tag prevents the substitution, while decoder constraints make the END entry-kind
+//! flags boolean and mutually exclusive.
 //!
-//! ```text
-//! encode(CallerFrame { b, p, caller_ctx: 0, caller_stack_depth: 0,
-//!                      caller_overflow_addr: 0, caller_fn_hash: [0;4] })
-//!     == encode(Continuation { b, p, is_loop: 0 })
-//! ```
-//!
-//! and the caller-frame flags formerly stored in decoder `h6` / `h7` were not constrained jointly
-//! boolean anywhere. Selecting `h6 = 1` on the END of an ordinary block zeroes every mask keyed on
-//! caller-frame restoration -- `default_flag` (ctx), `f_preserve` (fn_hash), `normal_mask` (b0),
-//! and `pointer_changes` (b1). With an untagged relation, a zero-payload caller-frame removal also
-//! has the same relation encoding as the pending continuation addition.
-//!
-//! The forced zero is security-relevant because zero is the **root context**. Code inside a CALL
-//! runs at `ctx = clk + 1`; propagating this mutation would select `ctx = 0` without a SYSCALL or
-//! kernel-ROM digest check.
-//!
-//! This fixture contains the resulting zero-state excursion inside a call: the enclosing CALL's
-//! own END restores `b0`/`b1`/`ctx`/`fn_hash` from the values its CALL row recorded before the
-//! last-row boundary. The test establishes that the fixed proof pipeline rejects the compound
-//! substitution, and selective ablation attributes that rejection to the entry-kind tag: with only
-//! the tag removed from `BlockStackMsg::encode` -- every other fix in place and the evaluator
-//! regenerated -- this witness verifies at 96-bit security, while the honest trace and both
-//! single-half controls below are unaffected.
+//! In the upstream Poseidon2 fixture, removing only the tag from `BlockStackMsg::encode` and
+//! regenerating the evaluator made this forged witness verify at 96-bit security. The honest trace
+//! and both single-half controls were unaffected.
 
 use miden_air::trace::RowIndex;
 use miden_core::{Felt, field::Field, operations::opcodes, utils::RowMajorMatrix};

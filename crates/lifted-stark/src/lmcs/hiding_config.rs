@@ -184,6 +184,14 @@ where
         self.inner.read_batch_proof(widths, indices, channel)
     }
 
+    fn batch_proof<M: Matrix<Self::F>>(
+        &self,
+        tree: &Self::Tree<M>,
+        indices: &TreeIndices,
+    ) -> Result<Self::BatchProof, LmcsError> {
+        self.inner.batch_proof(tree, indices)
+    }
+
     fn alignment(&self) -> usize {
         self.inner.alignment()
     }

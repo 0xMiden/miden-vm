@@ -747,7 +747,6 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
- "miden-field",
  "thiserror",
 ]
 
@@ -1050,7 +1049,6 @@ dependencies = [
 name = "miden-processor"
 version = "1.0.0"
 dependencies = [
- "hashbrown",
  "itertools",
  "miden-air",
  "miden-core",
@@ -1071,7 +1069,6 @@ version = "1.0.0"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
- "miden-debug-types",
  "miden-mast-package",
  "miden-package-registry",
  "proptest",

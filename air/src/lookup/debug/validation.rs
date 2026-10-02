@@ -4,16 +4,16 @@
 //! [`ValidateLookupAir`], so any qualifying [`LookupAir`] can be checked with
 //! `air.validate(layout)`. One short-circuit [`Result<(), ValidationError>`] covers:
 //!
-//! - `num_columns` declared vs observed (the walker counts `next_column` calls).
-//! - Per-group and per-column `Deg { n, d }` declared vs observed (via
+//! - `column_shape().len()` declared vs observed (the walker counts `next_column` calls).
+//! - Per-group and per-column `Deg { v, u }` declared vs observed (via
 //!   [`SymbolicExpression::degree_multiple`] on the running `(V, U)`).
 //! - Cached-encoding canonical vs encoded `(V, U)` equivalence, checked by evaluating the symbolic
 //!   difference `U_c·V_e − U_e·V_c` at a random row.
 //! - Simple-group scope: no illegal `insert_encoded` outside the `encoded` closure.
 //!
 //! The global max-degree budget is **not** checked here — the STARK prover's
-//! quotient validation already enforces it and duplicating that check muddies
-//! this module's purpose.
+//! quotient validation already enforces it, and duplicating that check would
+//! blur this module's purpose.
 
 use alloc::vec::Vec;
 use core::{fmt, marker::PhantomData};
@@ -45,8 +45,8 @@ type ExprEF = SymbolicExpressionExt<Felt, QuadFelt>;
 /// semantics; each variant corresponds to one of the checks.
 #[derive(Clone, Debug)]
 pub enum ValidationError {
-    /// [`LookupAir::num_columns`] disagreed with the number of `next_column` calls
-    /// issued by `eval`.
+    /// [`LookupAir::column_shape`] disagreed with the number of `next_column` calls issued by
+    /// `eval`.
     NumColumnsMismatch { declared: usize, observed: usize },
     /// A column's declared `Deg` differs from the observed symbolic degree of
     /// its accumulated `(V, U)`. Declared degrees are authoritative and must
@@ -126,6 +126,7 @@ impl fmt::Display for ValidationError {
 /// committed final count) through just to run the self-check.
 #[derive(Clone, Copy, Debug)]
 pub struct ValidateLayout {
+    pub preprocessed_width: usize,
     pub trace_width: usize,
     pub num_public_values: usize,
     pub num_periodic_columns: usize,
@@ -137,7 +138,7 @@ pub struct ValidateLayout {
 impl ValidateLayout {
     fn to_symbolic(self) -> miden_crypto::stark::air::symbolic::AirLayout {
         miden_crypto::stark::air::symbolic::AirLayout {
-            preprocessed_width: 0,
+            preprocessed_width: self.preprocessed_width,
             main_width: self.trace_width,
             num_public_values: self.num_public_values,
             permutation_width: self.permutation_width,
@@ -166,6 +167,10 @@ where
     // `ExtEntry::Challenge { index: 0/1 }` back to these concrete values.
     let current: Vec<Felt> = (0..layout.trace_width).map(|_| rng.random()).collect();
     let next: Vec<Felt> = (0..layout.trace_width).map(|_| rng.random()).collect();
+    let preprocessed_current: Vec<Felt> =
+        (0..layout.preprocessed_width).map(|_| rng.random()).collect();
+    let preprocessed_next: Vec<Felt> =
+        (0..layout.preprocessed_width).map(|_| rng.random()).collect();
     let periodic: Vec<Felt> = (0..layout.num_periodic_columns).map(|_| rng.random()).collect();
     let alpha = QuadFelt::new(rng.random());
     let beta = QuadFelt::new(rng.random());
@@ -174,6 +179,8 @@ where
     let row_valuation = RowValuation {
         current: &current,
         next: &next,
+        preprocessed_current: &preprocessed_current,
+        preprocessed_next: &preprocessed_next,
         periodic: &periodic,
         alpha,
         beta,
@@ -214,6 +221,8 @@ where
 struct RowValuation<'r> {
     current: &'r [Felt],
     next: &'r [Felt],
+    preprocessed_current: &'r [Felt],
+    preprocessed_next: &'r [Felt],
     periodic: &'r [Felt],
     /// `Challenge[0]` in any `SymbolicExpressionExt` tree.
     alpha: QuadFelt,
@@ -239,14 +248,14 @@ impl<'r> RowValuation<'r> {
                 BaseEntry::Main { offset: 0 } => self.current[*index],
                 BaseEntry::Main { offset: 1 } => self.next[*index],
                 BaseEntry::Periodic => self.periodic[*index],
-                BaseEntry::Main { offset } => {
-                    panic!("unexpected main offset {offset} in LookupAir::eval")
+                BaseEntry::Preprocessed { offset: 0 } => self.preprocessed_current[*index],
+                BaseEntry::Preprocessed { offset: 1 } => self.preprocessed_next[*index],
+                BaseEntry::Main { offset } | BaseEntry::Preprocessed { offset } => {
+                    panic!("unexpected {entry:?} offset {offset} in LookupAir::eval")
                 },
-                // LookupBuilder doesn't expose preprocessed or public values, and
-                // LookupAir::eval can't construct these leaves.
-                BaseEntry::Preprocessed { .. } | BaseEntry::Public => {
-                    panic!("unexpected {entry:?} leaf in LookupAir::eval")
-                },
+                // LookupBuilder doesn't expose public values, and LookupAir::eval can't
+                // construct these leaves.
+                BaseEntry::Public => panic!("unexpected {entry:?} leaf in LookupAir::eval"),
             },
             // Selector leaves are only produced by `AirBuilder::is_first_row` / etc.,
             // which LookupBuilder does not expose.
@@ -318,7 +327,7 @@ impl<'ab, 'r> ValidationBuilder<'ab, 'r> {
             sym_challenges,
             row_valuation,
             column_idx: 0,
-            declared_columns: air.num_columns(),
+            declared_columns: air.column_shape().len(),
             error: None,
         }
     }
@@ -346,6 +355,7 @@ impl<'ab, 'r> LookupBuilder for ValidationBuilder<'ab, 'r> {
     type PeriodicVar = SymbolicVariable<Felt>;
 
     type MainWindow = <Inner as AirBuilder>::MainWindow;
+    type PreprocessedWindow = <Inner as AirBuilder>::PreprocessedWindow;
 
     type Column<'c>
         = ValidationColumn<'c, 'r>
@@ -354,6 +364,10 @@ impl<'ab, 'r> LookupBuilder for ValidationBuilder<'ab, 'r> {
 
     fn main(&self) -> Self::MainWindow {
         self.ab.main()
+    }
+
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        self.ab.preprocessed()
     }
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {

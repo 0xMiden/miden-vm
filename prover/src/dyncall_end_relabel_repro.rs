@@ -6,15 +6,10 @@
 //! At the root, `caller_ctx = 0`, `caller_fn_hash = [0;4]`, and `caller_overflow_addr = 0`, so the
 //! honest saved stack depth of 16 is the frame's only nonzero saved-state slot.
 //!
-//! In the old untagged relation, setting `h4 = 0` gave that addition the same relation encoding as
-//! a continuation entry. Clearing the caller-frame restoration flag (decoder `h6`) on the
-//! DYNCALL's END then selected a continuation removal and the continuation preservation rules.
-//! The fixed AIR independently binds `h4` to the saved caller depth and authenticates the entry
-//! kind, so the regression deliberately exercises both protections together.
-//!
-//! This is not the same primitive as forging a caller-frame flag on a continuation END: it runs
-//! in the opposite direction (caller frame to continuation), and the message collision is
-//! manufactured on the *addition* side by the formerly unconstrained `h4`.
+//! With `h4 = 0`, the inserted caller frame's payload matches a continuation except for its
+//! entry-kind tag. Clearing decoder `h6` on the DYNCALL's END would then select continuation
+//! preservation rules. The AIR binds `h4` to the saved depth, and the tag authenticates the entry
+//! kind. This regression exercises both checks together.
 
 use alloc::vec;
 
@@ -150,12 +145,8 @@ fn relabelled_dyncall_end_is_rejected() {
         result.is_err(),
         "the proof pipeline must reject a relabelled DYNCALL END: {result:?}"
     );
-    // Attribution note: this forgery is now blocked by TWO independent constraints, and the
-    // `h4` binding fires first -- degenerating the addition requires h4 = 0, while h4 is pinned
-    // to `b0 - overflow()` = 16 here. So this test does NOT isolate the entry-kind tag; it would
-    // still reject with that tag reverted. Isolation for the tag lives in
-    // `block_stack_entry_kind_repro::forged_caller_frame_flag_on_continuation_end_is_rejected`,
-    // whose forgery touches no DYNCALL row. Kept as a regression test for the combined protection.
+    // The direct `h4 = b0 - overflow()` constraint rejects this forgery before the tag is used.
+    // `block_stack_entry_kind_repro` checks the tag with an unchanged DYNCALL row.
 }
 
 /// Control: relabel the END and carry the context forward, but leave `h4 = 16`. The DYNCALL

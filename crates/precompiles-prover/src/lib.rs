@@ -1,9 +1,4 @@
 #![no_std]
-#![allow(
-    dead_code,
-    unused_imports,
-    reason = "the imported prover stack is intentionally retained behind a narrow crate API"
-)]
 
 extern crate alloc;
 #[cfg(any(test, feature = "std"))]
@@ -17,11 +12,13 @@ pub use miden_core::proof::{HashFunction, PrecompileProof, StarkProof};
 
 pub(crate) mod ec;
 pub(crate) mod hash;
+#[cfg(test)]
 pub(crate) mod logup;
 pub(crate) mod math;
 pub(crate) mod primitives;
 pub(crate) mod relations;
 pub(crate) mod session;
+#[cfg(test)]
 pub(crate) mod stark_config;
 pub(crate) mod transcript;
 pub(crate) mod uint;

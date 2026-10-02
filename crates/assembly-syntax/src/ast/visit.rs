@@ -508,7 +508,7 @@ where
         | Reversew | Reversedw | CSwap | CSwapW | CDrop | CDropW | PushFeltList(_) | Sdepth
         | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe | MemStore | MemStoreWBe
         | MemStoreWLe | MemStream | AdvPipe | AdvPush | AdvPushW | AdvLoadW | Hash | HMerge
-        | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
+        | Compress | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
         | DynCall | DebugVar(_) | DebugInlineCall(_) | DebugInlineCallClear | HornerBase
         | HornerExt | CryptoStream | EvalCircuit | LogDeferred | Emit | Trace => {
             ControlFlow::Continue(())
@@ -1079,7 +1079,7 @@ where
         | Reversew | Reversedw | CSwap | CSwapW | CDrop | CDropW | PushFeltList(_) | Sdepth
         | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe | MemStore | MemStoreWBe
         | MemStoreWLe | MemStream | AdvPipe | AdvPush | AdvPushW | AdvLoadW | Hash | HMerge
-        | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
+        | Compress | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
         | DynCall | DebugVar(_) | DebugInlineCall(_) | DebugInlineCallClear | HornerBase
         | HornerExt | EvalCircuit | CryptoStream | LogDeferred | Emit | Trace => {
             ControlFlow::Continue(())

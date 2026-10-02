@@ -25,7 +25,7 @@ use super::{
 };
 use crate::{
     Word,
-    hash::poseidon2::Poseidon2,
+    hash::eidos::Eidos,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -241,7 +241,7 @@ impl Mmr {
         let mmr = Self::from_store(forest, nodes).map_err(|err| err.to_string())?;
         if mmr
             .inner_nodes()
-            .any(|node| node.value != Poseidon2::merge(&[node.left, node.right]))
+            .any(|node| node.value != Eidos::merge(&[node.left, node.right]))
         {
             return Err("Mmr contains a parent node inconsistent with its children".into());
         }
@@ -336,7 +336,7 @@ impl Mmr {
         let mut right = el;
         let mut left_tree = 1usize;
         while (old_forest.num_leaves() & left_tree) != 0 {
-            right = Poseidon2::merge(&[self.nodes[left_offset], right]);
+            right = Eidos::merge(&[self.nodes[left_offset], right]);
             self.nodes.push(right);
 
             debug_assert!(left_tree <= Forest::MAX_LEAVES);
