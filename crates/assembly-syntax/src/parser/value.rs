@@ -77,6 +77,12 @@ impl crate::prettier::PrettyPrint for PushValue {
     all(feature = "arbitrary", test),
     miden_test_serialization_macros::serialization_test
 )]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::text_roundtrip_test(
+        parse = "crate::testing::roundtrip::parse_word_value"
+    )
+)]
 pub struct WordValue(pub [Felt; 4]);
 
 impl fmt::Display for WordValue {
@@ -178,6 +184,13 @@ impl Deserializable for WordValue {
 #[cfg_attr(
     all(feature = "arbitrary", test),
     miden_test_serialization_macros::serialization_test
+)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::text_roundtrip_test(
+        parse = "crate::testing::roundtrip::parse_int_value",
+        eq = "crate::testing::roundtrip::int_value_eq"
+    )
 )]
 pub enum IntValue {
     /// A tiny value
