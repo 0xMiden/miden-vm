@@ -189,7 +189,7 @@ compatible VM and PVM verifier root histories. Native verification requires a sh
 shared PVM root with the verifier's private support policy. Transport preserves the portable
 witness without validating consistency between proof artifacts.
 
-`ExecutionProof` and `ExecutionWitness` use encoding version 2; `PrecompileWitness` uses version 1.
+`ExecutionProof`, `ExecutionWitness`, and `PrecompileWitness` use encoding version 2.
 Each canonical decoder accepts only its supported version and rejects other versions before
 decoding their payloads. Previous encodings and conversion between formats are not supported.
 

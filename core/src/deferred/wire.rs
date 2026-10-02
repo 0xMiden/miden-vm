@@ -178,7 +178,7 @@ pub struct PrecompileWitness {
 
 impl PrecompileWitness {
     /// Version of the standalone singleton witness encoding. Other versions are rejected.
-    pub const WIRE_VERSION: u8 = 1;
+    pub const WIRE_VERSION: u8 = 2;
 
     /// Checks a nonempty canonical singleton graph without evaluating any precompile.
     pub fn from_entries(entries: Vec<WireEntry>) -> Result<Self, IntegrityError> {
@@ -893,6 +893,27 @@ mod tests {
     }
 
     #[test]
+    fn standalone_witness_rejects_legacy_tag_encoding_before_body() {
+        // Version-1 singleton Join with Tag::AND = [1, 0, 0, 0] and two TRUE children.
+        const LEGACY_WITNESS: &[u8] = &[
+            1, 3, 1, // Version, one entry (vint64), Join discriminant.
+            1, 0, 0, 0, 0, 0, 0, 0, // Tag id.
+            0, 0, 0, 0, 0, 0, 0, 0, // Tag arg0.
+            0, 0, 0, 0, 0, 0, 0, 0, // Tag arg1.
+            0, 0, 0, 0, 0, 0, 0, 0, // Tag arg2.
+            0, 0, 0, 0, 0, 0, 0, 0, // Two u32 child indices.
+        ];
+        let mut reader = SliceReader::new(LEGACY_WITNESS);
+        assert_eq!(
+            PrecompileWitness::read_from(&mut reader),
+            Err(DeserializationError::InvalidValue(
+                "unsupported precompile witness version 1 (expected 2)".into()
+            ))
+        );
+        assert_eq!(reader.read_slice(LEGACY_WITNESS.len() - 1).unwrap(), &LEGACY_WITNESS[1..]);
+    }
+
+    #[test]
     fn standalone_witness_rejects_unsupported_versions_and_trailing_bytes() {
         let witness = PrecompileWitness::from_entries(alloc::vec![WireEntry::Join {
             frame: DEFERRED_AND_FRAME,
@@ -901,10 +922,16 @@ mod tests {
         }])
         .unwrap();
         let bytes = witness.to_bytes();
-        for version in [0, PrecompileWitness::WIRE_VERSION + 1] {
+        assert_eq!(bytes[0], 2);
+        for version in [0, 1, PrecompileWitness::WIRE_VERSION + 1] {
             let mut unsupported = bytes.clone();
             unsupported[0] = version;
-            assert!(PrecompileWitness::read_from_bytes(&unsupported).is_err());
+            assert_eq!(
+                PrecompileWitness::read_from_bytes(&unsupported),
+                Err(DeserializationError::InvalidValue(format!(
+                    "unsupported precompile witness version {version} (expected 2)"
+                )))
+            );
         }
         let mut trailing = bytes;
         trailing.push(0);

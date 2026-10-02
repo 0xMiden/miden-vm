@@ -28,9 +28,11 @@ pub struct StoreNode {
 
 /// An in-memory data store for Merkelized data.
 ///
-/// This is a in memory data store for Merkle trees, this store allows all the nodes of multiple
-/// trees to live as long as necessary and without duplication, this allows the implementation of
-/// space efficient persistent data structures.
+/// Nodes from multiple Merkle trees are stored without duplication, allowing persistent trees to
+/// share unchanged subtrees.
+///
+/// Serialization uses format version 1; unversioned encodings and other versions are rejected.
+/// Deserialization does not verify parent hashes against their children.
 ///
 /// Example usage:
 ///
@@ -101,6 +103,10 @@ impl Default for MerkleStore {
 }
 
 impl MerkleStore {
+    /// Identifies the serialized MerkleStore format.
+    const FORMAT_MAGIC: [u8; 8] = *b"MRKSTORE";
+    const FORMAT_VERSION: u8 = 1;
+
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
 
@@ -592,6 +598,8 @@ impl Deserializable for StoreNode {
 
 impl Serializable for MerkleStore {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_bytes(&Self::FORMAT_MAGIC);
+        target.write_u8(Self::FORMAT_VERSION);
         target.write_u64(self.nodes.len() as u64);
 
         for (k, v) in self.nodes.iter() {
@@ -603,6 +611,19 @@ impl Serializable for MerkleStore {
 
 impl Deserializable for MerkleStore {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        if source.read_array::<8>()? != Self::FORMAT_MAGIC {
+            return Err(DeserializationError::InvalidValue(
+                "unsupported MerkleStore format: expected a versioned encoding".into(),
+            ));
+        }
+        let version = source.read_u8()?;
+        if version != Self::FORMAT_VERSION {
+            return Err(DeserializationError::InvalidValue(format!(
+                "unsupported MerkleStore version {version} (expected {})",
+                Self::FORMAT_VERSION,
+            )));
+        }
+
         let len_u64 = source.read_u64()?;
         let len = usize::try_from(len_u64).map_err(|_| {
             DeserializationError::InvalidValue("MerkleStore node count too large".into())
@@ -621,9 +642,9 @@ impl Deserializable for MerkleStore {
         Ok(nodes.into_iter().collect())
     }
 
-    /// Minimum serialized size: u64 length prefix (0 entries).
+    /// Minimum serialized size: magic, version, and u64 node count (0 entries).
     fn min_serialized_size() -> usize {
-        8
+        Self::FORMAT_MAGIC.len() + 1 + u64::min_serialized_size()
     }
 }
 

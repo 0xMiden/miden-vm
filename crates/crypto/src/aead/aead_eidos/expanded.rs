@@ -11,6 +11,9 @@
 //! `nonce || associated_data || ciphertext || [ad_len, ct_len] || padding` become coefficients in
 //! the quadratic extension field. Horner evaluation starts with one, which binds the number of
 //! coefficients, and the second half of the MAC key masks the result.
+//!
+//! [`decrypt_felts_expanded_authenticated`]:
+//!     crate::aead::aead_eidos::expanded::decrypt_felts_expanded_authenticated
 
 use alloc::vec::Vec;
 
