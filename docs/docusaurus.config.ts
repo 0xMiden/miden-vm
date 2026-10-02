@@ -21,11 +21,6 @@ const config: Config = {
     mermaid: true,
   },
 
-  themes: [
-    ["@docusaurus/theme-classic", { customCss: "./styles.css" }],
-    "@docusaurus/theme-mermaid",
-  ],
-
   plugins: [
     [
       "@docusaurus/plugin-content-docs",
@@ -42,6 +37,11 @@ const config: Config = {
         rehypePlugins: [rehypeKatex],
       },
     ],
+  ],
+
+  themes: [
+    ["@docusaurus/theme-classic", { customCss: "./styles.css" }],
+    "@docusaurus/theme-mermaid",
     [
       "@cmfcmf/docusaurus-search-local",
       {
