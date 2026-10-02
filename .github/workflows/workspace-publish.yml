@@ -22,9 +22,9 @@ on:
         default: ""
         type: string
       allow_existing:
-        description: "Resume a partial publish after checking existing crates."
+        description: "Skip crate versions whose local package matches the published crate."
         required: false
-        default: false
+        default: true
         type: boolean
       skip_package_version_gate:
         description: "Skip the package version gate. Use only for manual release recovery after maintainers verify the release plan."
