@@ -2,6 +2,10 @@
 
 ## v1.0.0 (Unreleased)
 
+#### Fixes
+
+- [BREAKING] Reject `SourceSpan`s with reversed bounds (`start > end`) during deserialization. No writer produces such spans, but a hand-written or corrupted payload previously decoded into a span whose `len()` could panic.
+
 ## v0.35.0 (2026-10-01)
 
 #### Changes

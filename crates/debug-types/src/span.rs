@@ -1,3 +1,4 @@
+use alloc::format;
 use core::{
     borrow::Borrow,
     fmt,
@@ -512,6 +513,17 @@ impl Deserializable for SourceSpan {
         let source_id = SourceId::new_unchecked(source.read_u32()?);
         let start = ByteIndex::from(source.read_u32()?);
         let end = ByteIndex::from(source.read_u32()?);
+        // A span must satisfy `start <= end`, as `len()` computes `end - start` and would
+        // underflow on a reversed span. No writer produces one, so a reversed payload can only
+        // come from hand-written or corrupted bytes; reject it here instead of decoding a span
+        // that panics on first use.
+        if start > end {
+            return Err(DeserializationError::InvalidValue(format!(
+                "source span start ({}) is greater than its end ({})",
+                start.to_u32(),
+                end.to_u32()
+            )));
+        }
         Ok(Self { source_id, start, end })
     }
 }
@@ -566,5 +578,58 @@ impl RangeBounds<ByteIndex> for SourceSpan {
     #[inline(always)]
     fn end_bound(&self) -> Bound<&ByteIndex> {
         Bound::Excluded(&self.end)
+    }
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use miden_crypto::utils::{Deserializable, DeserializationError, SliceReader};
+
+    use super::*;
+
+    /// Builds the wire representation of a span: three little-endian `u32` values holding the
+    /// source id, the start bound, and the end bound, in that order.
+    fn span_bytes(source_id: u32, start: u32, end: u32) -> [u8; 12] {
+        let mut bytes = [0u8; 12];
+        bytes[0..4].copy_from_slice(&source_id.to_le_bytes());
+        bytes[4..8].copy_from_slice(&start.to_le_bytes());
+        bytes[8..12].copy_from_slice(&end.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn source_span_rejects_reversed_bounds() {
+        let bytes = span_bytes(0, 5, 3);
+        let mut reader = SliceReader::new(&bytes);
+        let err = SourceSpan::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("start (5)"));
+        assert!(message.contains("end (3)"));
+    }
+
+    #[test]
+    fn source_span_accepts_empty_span() {
+        let bytes = span_bytes(0, 3, 3);
+        let span = SourceSpan::read_from_bytes(&bytes).expect("empty span should decode");
+        assert_eq!(span.start().to_u32(), 3);
+        assert_eq!(span.end().to_u32(), 3);
+        assert_eq!(span.len(), 0);
+    }
+
+    #[test]
+    fn source_span_round_trip() {
+        let span = SourceSpan::new(SourceId::new_unchecked(7), 10u32..25u32);
+        let mut bytes = Vec::new();
+        span.write_into(&mut bytes);
+        let decoded = SourceSpan::read_from_bytes(&bytes).expect("valid span should decode");
+        assert_eq!(decoded, span);
+        assert_eq!(decoded.len(), 15);
     }
 }
