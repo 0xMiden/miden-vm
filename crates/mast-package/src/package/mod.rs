@@ -786,7 +786,8 @@ impl Package {
             for row in source_node.inline_calls.iter() {
                 let is_external_boundary = exec_node.is_external()
                     && source_node.op_start == source_node.op_end
-                    && row.op_idx == source_node.op_start;
+                    && row.op_idx == source_node.op_start
+                    && row.op_end == source_node.op_end;
                 if !is_external_boundary {
                     self.validate_source_map_row(
                         source_id,
@@ -794,6 +795,14 @@ impl Package {
                         row.op_idx,
                         "inline call",
                     )?;
+                    if row.op_end <= row.op_idx || row.op_end > source_node.op_end {
+                        return Err(PackageDebugInfoError::InvalidValue {
+                            message: format!(
+                                "debug inline-call range {}..{} is outside source node range {}..{}",
+                                row.op_idx, row.op_end, source_node.op_start, source_node.op_end,
+                            ),
+                        });
+                    }
                 }
                 if debug_info.get_function(row.callee_idx).is_none() {
                     return Err(PackageDebugInfoError::InvalidReference {
@@ -1911,6 +1920,7 @@ mod tests {
         let mut node = debug_source_node(exec_node, Vec::new(), 0, 1);
         node.inline_calls.push(DebugSourceInlineCall {
             op_idx: 0,
+            op_end: 1,
             callee_idx: DebugFunctionIdx::from(1),
             loc_idx: DebugLocIdx::from(0),
         });
@@ -1935,6 +1945,7 @@ mod tests {
         let mut node = debug_source_node(exec_node, Vec::new(), 0, 1);
         node.inline_calls.push(DebugSourceInlineCall {
             op_idx: 0,
+            op_end: 1,
             callee_idx: function_idx,
             loc_idx: DebugLocIdx::from(99),
         });
@@ -1944,6 +1955,30 @@ mod tests {
 
         let err = package.debug_info().expect_err("bad inline call location should be rejected");
         assert!(matches!(err, PackageDebugInfoError::InvalidReference { .. }));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_inline_ranges_outside_the_source_occurrence() {
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        let exec_node = package.get_export_node_id("app::entry");
+        for (op_idx, op_end) in [(0, 0), (0, 2), (1, 2)] {
+            let mut builder = PackageDebugInfoBuilder::default();
+            let mut node = debug_source_node(exec_node, Vec::new(), 0, 1);
+            node.inline_calls.push(DebugSourceInlineCall {
+                op_idx,
+                op_end,
+                callee_idx: DebugFunctionIdx::from(0),
+                loc_idx: DebugLocIdx::from(0),
+            });
+            builder.add_node(node).unwrap();
+            package.sections = vec![debug_info_section(builder.build().as_ref())];
+            let error = package.debug_info().unwrap_err();
+            if op_idx == 0 {
+                assert!(matches!(error, PackageDebugInfoError::InvalidValue { .. }), "{error}");
+            } else {
+                assert!(matches!(error, PackageDebugInfoError::InvalidReference { .. }), "{error}",);
+            }
+        }
     }
 
     #[test]
