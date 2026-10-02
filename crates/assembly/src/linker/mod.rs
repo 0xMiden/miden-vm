@@ -484,6 +484,11 @@ impl Linker {
                 reason: err.to_string(),
             }
         })?;
+        let remaining_capacity = ModuleIndex::MAX_MODULES.saturating_sub(self.modules.len());
+        if module_descriptors.len() > remaining_capacity {
+            return Err(LinkerError::TooManyModules.into());
+        }
+
         for module_descriptor in module_descriptors {
             let is_kernel_module = module_descriptor.path().is_kernel_path();
             let module_index = self.link_assembled_module(module_descriptor)?;
@@ -1294,6 +1299,61 @@ mod tests {
         assert_eq!(linker.static_libraries().count(), 0);
 
         assert!(matches!(linker.link_library(library), Err(LinkerError::TooManyModules)));
+    }
+
+    #[test]
+    fn link_with_kernel_does_not_partially_add_modules_when_capacity_is_exhausted() {
+        let context = TestContext::default();
+        let helpers = context
+            .parse_module(source_file!(
+                &context,
+                r#"
+                namespace $kernel::helpers
+
+                pub proc helper
+                    push.1
+                end
+                "#
+            ))
+            .expect("kernel helper module should parse");
+        let kernel = context
+            .parse_kernel(source_file!(
+                &context,
+                r#"
+                pub mod helpers
+
+                pub proc foo
+                    exec.helpers::helper
+                end
+                "#
+            ))
+            .expect("kernel module should parse");
+        let kernel_package: Arc<MastPackage> = Assembler::new(context.source_manager())
+            .assemble_kernel("kernel", kernel, [helpers])
+            .expect("two-module kernel should assemble")
+            .into();
+        let mut linker = linker_at_module_capacity(&context);
+        linker.modules.pop();
+        let modules_before = linker.modules.len();
+
+        let err = linker
+            .link_with_kernel(kernel_package.clone())
+            .expect_err("two-module kernel should exceed the single remaining slot");
+
+        assert!(err.to_string().contains("too many modules"));
+        assert_eq!(
+            linker.modules.len(),
+            modules_before,
+            "capacity failure must not partially add kernel modules"
+        );
+        assert!(!linker.has_nonempty_kernel());
+        assert!(linker.kernel_package().is_none());
+
+        let retry_err = linker
+            .link_with_kernel(kernel_package)
+            .expect_err("retry should fail with the same capacity error");
+        assert!(retry_err.to_string().contains("too many modules"));
+        assert_eq!(linker.modules.len(), modules_before);
     }
 
     #[test]
