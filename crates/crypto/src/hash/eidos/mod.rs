@@ -1,9 +1,9 @@
 //! The Eidos hash construction and its underlying compression function.
 //!
-//! [`Eidos`] exposes a framed hash construction and a raw compression
-//! operation. Complete-hash methods apply domain and length binding, framing, and padding.
-//! [`Eidos::compress`](crate::hash::eidos::Eidos::compress) compresses one complete block under a
-//! caller-supplied chaining value and adds no framing.
+//! The [Eidos API](crate::hash::eidos::Eidos) exposes a framed hash construction and a
+//! [raw compression operation](crate::hash::eidos::Eidos::compress). Complete-hash methods apply
+//! domain and length binding, framing, and padding. Raw compression processes one complete block
+//! under a caller-supplied chaining value and adds no framing.
 //!
 //! Eidos digests occupy a 252-bit packed subspace: the high bit of each odd Eidos compression
 //! output lane is cleared before two `u32` lanes are packed into one Goldilocks field element. The

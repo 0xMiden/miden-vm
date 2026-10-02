@@ -5,7 +5,6 @@ use seq_macro::seq;
 use {
     super::{Deserializable, DeserializationError, Serializable},
     alloc::boxed::Box,
-    alloc::vec::Vec,
     std::error::Error,
 };
 
@@ -963,28 +962,74 @@ fn check_mstore_subtree(store: &MerkleStore, subtree: &MerkleTree) {
 // SERIALIZATION
 // ================================================================================================
 
+const STORE_HEADER: &[u8] = b"MRKSTORE\x01";
+
 #[cfg(feature = "std")]
 #[test]
 fn test_serialization() -> Result<(), Box<dyn Error>> {
     let mtree = MerkleTree::new(VALUES4)?;
     let store = MerkleStore::from(&mtree);
-    let decoded = MerkleStore::read_from_bytes(&store.to_bytes()).expect("deserialization failed");
+    let bytes = store.to_bytes();
+    assert!(bytes.starts_with(STORE_HEADER));
+    let decoded = MerkleStore::read_from_bytes(&bytes).expect("deserialization failed");
     assert_eq!(store, decoded);
     Ok(())
 }
 
 #[test]
+fn deserialize_rejects_unversioned_store() {
+    // Unversioned encoding: a u64 node count followed by parent/left/right words.
+    let parent = Eidos::merge(&[VALUES4[0], VALUES4[1]]);
+    let mut bytes = 1u64.to_bytes();
+    parent.write_into(&mut bytes);
+    VALUES4[0].write_into(&mut bytes);
+    VALUES4[1].write_into(&mut bytes);
+
+    assert!(matches!(
+        MerkleStore::read_from_bytes(&bytes),
+        Err(DeserializationError::InvalidValue(message))
+            if message == "unsupported MerkleStore format: expected a versioned encoding"
+    ));
+}
+
+#[test]
+fn deserialize_checks_version_before_node_count() {
+    for version in [0, 2, u8::MAX] {
+        let mut bytes = STORE_HEADER.to_vec();
+        bytes[8] = version;
+        // No node count follows: the version error must take precedence over UnexpectedEOF.
+        assert!(matches!(
+            MerkleStore::read_from_bytes(&bytes),
+            Err(DeserializationError::InvalidValue(message))
+                if message == format!("unsupported MerkleStore version {version} (expected 1)")
+        ));
+    }
+}
+
+#[test]
+fn deserialize_accepts_empty_versioned_store() {
+    let mut bytes = STORE_HEADER.to_vec();
+    0u64.write_into(&mut bytes);
+    assert_eq!(bytes.len(), MerkleStore::min_serialized_size());
+    assert_eq!(MerkleStore::read_from_bytes(&bytes).unwrap(), MerkleStore::default());
+}
+
+#[test]
 fn deserialize_rejects_oversized_length() {
-    let mut bytes = Vec::new();
+    let mut bytes = STORE_HEADER.to_vec();
     u64::MAX.write_into(&mut bytes);
 
     let result = MerkleStore::read_from_bytes_with_budget(&bytes, bytes.len());
-    assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
+    assert!(matches!(
+        result,
+        Err(DeserializationError::InvalidValue(message))
+            if message == "MerkleStore node count too large"
+    ));
 }
 
 #[test]
 fn deserialize_rejects_truncated_payload() {
-    let mut bytes = Vec::new();
+    let mut bytes = STORE_HEADER.to_vec();
     1u64.write_into(&mut bytes);
 
     let result = MerkleStore::read_from_bytes(&bytes);

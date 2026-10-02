@@ -26,6 +26,9 @@ type NodeMap = BTreeMap<InOrderIndex, Word>;
 /// authentication paths for a subset of the elements in a full MMR.
 ///
 /// This structure stores both the authentication paths and the leaf values for tracked leaves.
+///
+/// Serialization uses format version 1; unversioned encodings and other versions are rejected.
+/// Deserialization checks the structural invariants described in [`Self::from_parts`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartialMmr {
     /// The version of the MMR.
@@ -82,6 +85,10 @@ impl Default for PartialMmr {
 }
 
 impl PartialMmr {
+    /// Identifies the serialized PartialMmr format.
+    const FORMAT_MAGIC: [u8; 8] = *b"PART_MMR";
+    const FORMAT_VERSION: u8 = 1;
+
     /// Marker byte separating `nodes` from the tracked leaf vector. This makes format corruption
     /// detectable and prevents ambiguity between adjacent variable-length fields.
     const TRACKED_LEAVES_MARKER: u8 = 0xff;
@@ -763,6 +770,8 @@ impl<I: Iterator<Item = (usize, Word)>> Iterator for InnerNodeIterator<'_, I> {
 
 impl Serializable for PartialMmr {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_bytes(&Self::FORMAT_MAGIC);
+        target.write_u8(Self::FORMAT_VERSION);
         self.forest.num_leaves().write_into(target);
         self.peaks.write_into(target);
         self.nodes.write_into(target);
@@ -778,6 +787,19 @@ impl Deserializable for PartialMmr {
         source: &mut R,
     ) -> Result<Self, crate::utils::DeserializationError> {
         use crate::utils::DeserializationError;
+
+        if source.read_array::<8>()? != Self::FORMAT_MAGIC {
+            return Err(DeserializationError::InvalidValue(
+                "unsupported PartialMmr format: expected a versioned encoding".into(),
+            ));
+        }
+        let version = source.read_u8()?;
+        if version != Self::FORMAT_VERSION {
+            return Err(DeserializationError::InvalidValue(format!(
+                "unsupported PartialMmr version {version} (expected {})",
+                Self::FORMAT_VERSION,
+            )));
+        }
 
         let forest = Forest::new(usize::read_from(source)?)?;
         let peaks_vec = Vec::<Word>::read_from(source)?;
@@ -809,6 +831,11 @@ impl Deserializable for PartialMmr {
         // Use validating constructor
         Self::from_parts(peaks, nodes, tracked_leaves)
             .map_err(|e| DeserializationError::InvalidValue(format!("invalid partial mmr: {e}")))
+    }
+
+    /// Header, leaf count, empty peaks and nodes, tracked-leaf marker, and empty tracked leaves.
+    fn min_serialized_size() -> usize {
+        Self::FORMAT_MAGIC.len() + 2 + 4 * usize::min_serialized_size()
     }
 }
 
@@ -842,6 +869,8 @@ mod tests {
         int_to_node(5),
         int_to_node(6),
     ];
+
+    const PARTIAL_MMR_HEADER: &[u8] = b"PART_MMR\x01";
 
     #[test]
     fn test_partial_mmr_apply_delta() {
@@ -1091,12 +1120,47 @@ mod tests {
     #[test]
     fn test_partial_mmr_serialization() {
         let mmr = Mmr::try_from_iter((0..7).map(int_to_node)).unwrap();
-        let partial_mmr = PartialMmr::from_peaks(mmr.peaks());
+        let mut tracked = PartialMmr::from_peaks(mmr.peaks());
+        tracked
+            .track(1, mmr.get(1).unwrap(), mmr.open(1).unwrap().path().merkle_path())
+            .unwrap();
 
-        let bytes = partial_mmr.to_bytes();
-        let decoded = PartialMmr::read_from_bytes(&bytes).unwrap();
+        for partial_mmr in [PartialMmr::default(), PartialMmr::from_peaks(mmr.peaks()), tracked] {
+            let bytes = partial_mmr.to_bytes();
+            assert!(bytes.starts_with(PARTIAL_MMR_HEADER));
+            let decoded = PartialMmr::read_from_bytes(&bytes).unwrap();
+            assert_eq!(partial_mmr, decoded);
+        }
+        assert_eq!(PartialMmr::default().to_bytes().len(), PartialMmr::min_serialized_size());
+    }
 
-        assert_eq!(partial_mmr, decoded);
+    #[test]
+    fn deserialize_rejects_unversioned_partial_mmr() {
+        // Unversioned encoding of a one-leaf MMR with no tracked paths.
+        let mut bytes = 1usize.to_bytes();
+        vec![int_to_node(1)].write_into(&mut bytes);
+        BTreeMap::<InOrderIndex, Word>::new().write_into(&mut bytes);
+        bytes.write_u8(0xff);
+        Vec::<usize>::new().write_into(&mut bytes);
+        assert!(matches!(
+            PartialMmr::read_from_bytes(&bytes),
+            Err(DeserializationError::InvalidValue(message))
+                if message == "unsupported PartialMmr format: expected a versioned encoding"
+        ));
+    }
+
+    #[test]
+    fn deserialize_checks_version_before_forest() {
+        for version in [0, 2, u8::MAX] {
+            let mut bytes = PARTIAL_MMR_HEADER.to_vec();
+            bytes[8] = version;
+            // No forest follows: reject the version before attempting to decode it.
+            assert!(matches!(
+                PartialMmr::read_from_bytes(&bytes),
+                Err(DeserializationError::InvalidValue(message))
+                    if message == format!("unsupported PartialMmr version {version} (expected 1)")
+            ));
+        }
     }
 
     #[test]
@@ -1108,7 +1172,7 @@ mod tests {
         let proof = mmr.open(leaf_pos).unwrap();
         partial_mmr.track(leaf_pos, node, proof.path().merkle_path()).unwrap();
 
-        let mut bytes = Vec::new();
+        let mut bytes = PARTIAL_MMR_HEADER.to_vec();
         partial_mmr.forest.num_leaves().write_into(&mut bytes);
         partial_mmr.peaks.write_into(&mut bytes);
         partial_mmr.nodes.write_into(&mut bytes);
@@ -1117,18 +1181,26 @@ mod tests {
 
         let result = PartialMmr::read_from_bytes(&bytes);
 
-        assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
+        assert!(matches!(
+            result,
+            Err(DeserializationError::InvalidValue(message))
+                if message == "duplicate tracked leaf in partial mmr encoding"
+        ));
     }
 
     #[test]
     fn test_partial_mmr_deserialization_rejects_large_forest() {
-        let mut bytes = (Forest::MAX_LEAVES + 1).to_bytes();
-        bytes.extend_from_slice(&0usize.to_bytes()); // empty peaks vec
-        bytes.extend_from_slice(&0usize.to_bytes()); // empty nodes map
-        bytes.extend_from_slice(&0usize.to_bytes()); // empty tracked vec
+        let mut bytes = PARTIAL_MMR_HEADER.to_vec();
+        (Forest::MAX_LEAVES + 1).write_into(&mut bytes);
 
+        // Reject the forest size before reading its peaks or nodes.
         let result = PartialMmr::read_from_bytes(&bytes);
-        assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
+        assert!(matches!(
+            result,
+            Err(DeserializationError::InvalidValue(message)) if message == format!(
+                "forest size {} exceeds maximum {}", Forest::MAX_LEAVES + 1, Forest::MAX_LEAVES
+            )
+        ));
     }
 
     #[test]
@@ -1265,11 +1337,14 @@ mod tests {
         (0..3).for_each(|i| mmr.add(int_to_node(i)).unwrap());
         let peaks = mmr.peaks();
 
-        let mut bytes = Vec::new();
+        let mut bytes = PARTIAL_MMR_HEADER.to_vec();
         peaks.num_leaves().write_into(&mut bytes);
         peaks.peaks().to_vec().write_into(&mut bytes);
         BTreeMap::<InOrderIndex, Word>::new().write_into(&mut bytes);
-        assert!(PartialMmr::read_from_bytes(&bytes).is_err());
+        assert!(matches!(
+            PartialMmr::read_from_bytes(&bytes),
+            Err(DeserializationError::UnexpectedEOF)
+        ));
     }
 
     #[test]
@@ -1278,14 +1353,18 @@ mod tests {
         (0..3).for_each(|i| mmr.add(int_to_node(i)).unwrap());
         let peaks = mmr.peaks();
 
-        let mut bytes = Vec::new();
+        let mut bytes = PARTIAL_MMR_HEADER.to_vec();
         peaks.num_leaves().write_into(&mut bytes);
         peaks.peaks().to_vec().write_into(&mut bytes);
         BTreeMap::<InOrderIndex, Word>::new().write_into(&mut bytes);
         bytes.write_u8(0x7f);
         Vec::<usize>::new().write_into(&mut bytes);
 
-        assert!(PartialMmr::read_from_bytes(&bytes).is_err());
+        assert!(matches!(
+            PartialMmr::read_from_bytes(&bytes),
+            Err(DeserializationError::InvalidValue(message))
+                if message == "unknown partial mmr serialization format"
+        ));
     }
 
     #[test]
@@ -1535,49 +1614,17 @@ mod tests {
     }
 
     #[test]
-    fn test_from_parts_validation_deserialization() {
-        // Build an MMR with 7 leaves
-        let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap();
-        let partial_mmr = PartialMmr::from_peaks(mmr.peaks());
+    fn deserialize_rejects_zero_node_index() {
+        let mut bytes = PARTIAL_MMR_HEADER.to_vec();
+        1usize.write_into(&mut bytes); // one leaf
+        vec![int_to_node(0)].write_into(&mut bytes);
+        1usize.write_into(&mut bytes); // one node
+        0usize.write_into(&mut bytes); // invalid: in-order indices start at one
+        int_to_node(0).write_into(&mut bytes);
+        bytes.write_u8(PartialMmr::TRACKED_LEAVES_MARKER);
+        Vec::<usize>::new().write_into(&mut bytes);
 
-        // Valid serialization/deserialization
-        let bytes = partial_mmr.to_bytes();
-        let decoded = PartialMmr::read_from_bytes(&bytes);
-        assert!(decoded.is_ok());
-
-        // Test that deserialization rejects bad data:
-        // We'll construct invalid bytes that would create an invalid PartialMmr
-
-        // Create a PartialMmr with a valid node, serialize it, then manually corrupt the node index
-        let mut partial_with_node = PartialMmr::from_peaks(mmr.peaks());
-        let node = mmr.get(1).unwrap();
-        let proof = mmr.open(1).unwrap();
-        partial_with_node.track(1, node, proof.path().merkle_path()).unwrap();
-
-        // Serialize and verify it deserializes correctly first
-        let valid_bytes = partial_with_node.to_bytes();
-        let valid_decoded = PartialMmr::read_from_bytes(&valid_bytes);
-        assert!(valid_decoded.is_ok());
-
-        // Now create malformed data with index 0 via manual byte construction
-        // This tests that deserialization properly validates inputs
-        let mut bad_bytes = Vec::new();
-        // forest (7 leaves)
-        bad_bytes.extend_from_slice(&7usize.to_bytes());
-        // peaks (3 peaks for forest 0b111)
-        bad_bytes.extend_from_slice(&3usize.to_bytes()); // vec length
-        for i in 0..3 {
-            bad_bytes.extend_from_slice(&int_to_node(i as u64).to_bytes());
-        }
-        // nodes: 1 entry with index 0
-        bad_bytes.extend_from_slice(&1usize.to_bytes()); // BTreeMap length
-        bad_bytes.extend_from_slice(&0usize.to_bytes()); // invalid index 0
-        bad_bytes.extend_from_slice(&int_to_node(0).to_bytes()); // value
-        bad_bytes.push(PartialMmr::TRACKED_LEAVES_MARKER);
-        // tracked_leaves: empty vec
-        bad_bytes.extend_from_slice(&0usize.to_bytes());
-
-        let result = PartialMmr::read_from_bytes(&bad_bytes);
+        let result = PartialMmr::read_from_bytes(&bytes);
         assert!(matches!(
             result,
             Err(DeserializationError::InvalidValue(message))
