@@ -822,3 +822,43 @@ fn clone_shares_in_memory_top_until_mutation() {
     assert_eq!(smt.root(), original_root);
     assert_ne!(clone.root(), original_root);
 }
+
+#[test]
+fn test_with_entries_drops_empty_value_in_shared_leaf() {
+    let leaf_felt = Felt::new_unchecked(42);
+    let k1 = Word::new([ONE, Felt::new_unchecked(0), Felt::new_unchecked(0), leaf_felt]);
+    let k2 = Word::new([
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        leaf_felt,
+    ]);
+    let v2 = Word::new([ONE; 4]);
+
+    let mut control = Smt::new();
+    control.insert(k2, v2).unwrap();
+
+    let large =
+        LargeSmt::with_entries(MemoryStorage::default(), [(k1, EMPTY_WORD), (k2, v2)]).unwrap();
+    assert_eq!(large.root(), control.root());
+}
+
+#[test]
+fn test_with_entries_too_many_leaf_entries() {
+    use crate::merkle::smt::MAX_LEAF_ENTRIES;
+    let leaf_felt = Felt::new_unchecked(7);
+    let entries: Vec<(Word, Word)> = (0..=MAX_LEAF_ENTRIES as u64)
+        .map(|i| {
+            (
+                Word::new([
+                    Felt::new_unchecked(i),
+                    Felt::new_unchecked(0),
+                    Felt::new_unchecked(0),
+                    leaf_felt,
+                ]),
+                Word::new([ONE; 4]),
+            )
+        })
+        .collect();
+    assert!(LargeSmt::with_entries(MemoryStorage::default(), entries).is_err());
+}

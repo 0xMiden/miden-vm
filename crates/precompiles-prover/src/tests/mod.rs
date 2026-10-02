@@ -28,7 +28,7 @@ mod uint_mul;
 mod utils;
 mod vm_uint;
 
-use std::{vec, vec::Vec};
+use std::{string::String, vec, vec::Vec};
 
 use miden_core::{
     Felt,
@@ -62,6 +62,16 @@ impl SessionTracesTestExt for SessionTraces {
 pub(crate) fn verify_deferred(proof: &SessionProof) -> Result<DeferredRoot, VerifyError> {
     verify_precompile(&proof.0, proof.1)?;
     Ok(proof.1)
+}
+
+pub(crate) fn assert_constraint_failure(check: impl FnOnce() + std::panic::UnwindSafe) {
+    let panic = std::panic::catch_unwind(check).expect_err("forged trace must fail a constraint");
+    let message = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&str>().copied())
+        .expect("constraint check must panic with a message");
+    assert!(message.contains("constraint not satisfied"), "unexpected panic: {message}");
 }
 
 /// A local-only [`MultiAir`] wrapper for per-chiplet
@@ -117,6 +127,28 @@ where
 {
     let n = air.num_public_values();
     check_local_inputs(air, main, vec![Felt::ZERO; n]);
+}
+
+/// Assert that this local AIR check fails with a constraint diagnostic.
+pub(crate) fn assert_local_rejects<A>(air: A, main: &RowMajorMatrix<Felt>)
+where
+    A: LiftedAir<Felt, QuadFelt>,
+{
+    let n = air.num_public_values();
+    assert_local_rejects_inputs(air, main, vec![Felt::ZERO; n]);
+}
+
+/// [`assert_local_rejects`] with explicit public inputs.
+pub(crate) fn assert_local_rejects_inputs<A>(
+    air: A,
+    main: &RowMajorMatrix<Felt>,
+    air_inputs: Vec<Felt>,
+) where
+    A: LiftedAir<Felt, QuadFelt>,
+{
+    assert_constraint_failure(std::panic::AssertUnwindSafe(|| {
+        check_local_inputs(air, main, air_inputs)
+    }));
 }
 
 /// The per-AIR quotient degree used by the design-target smoke tests.

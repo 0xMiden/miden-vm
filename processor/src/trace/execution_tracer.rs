@@ -22,8 +22,8 @@ use super::{
     utils::split_u32_into_u16,
 };
 use crate::{
-    ContextId, EMPTY_WORD, ExecutionError, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, RowIndex,
-    Word, ZERO,
+    AceError, ContextId, EMPTY_WORD, ExecutionError, FastProcessor, Felt, MIN_STACK_DEPTH, ONE,
+    RowIndex, Word, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
     crypto::merkle::MerklePath,
     mast::{
@@ -1068,8 +1068,11 @@ impl Tracer for ExecutionTracer {
     }
 
     #[inline(always)]
-    fn record_circuit_evaluation(&mut self, circuit_evaluation: CircuitEvaluation) {
-        self.ace.record_circuit_evaluation(circuit_evaluation);
+    fn record_circuit_evaluation(
+        &mut self,
+        circuit_evaluation: CircuitEvaluation,
+    ) -> Result<(), AceError> {
+        self.ace.record_circuit_evaluation(circuit_evaluation)
     }
 
     #[inline(always)]

@@ -13,11 +13,17 @@
 use std::{format, string::String, vec::Vec};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
-use miden_core::{Felt, utils::Matrix};
+use miden_core::{
+    Felt,
+    utils::{Matrix, RowMajorMatrix},
+};
 use miden_precompiles::{CurveId, CurvePoint, phi_generator};
 
 use crate::{
-    ec::msm::EcMsmAir,
+    ec::msm::{
+        COL_B_DIFF_HI, COL_B_DIFF_LO, COL_BASE, COL_ENDO_MINTED, COL_IS_BOUNDARY, COL_NEG_MINTED,
+        COL_VAL, COL_VAL_A, EcMsmAir, NUM_MAIN_COLS as MSM_COLS,
+    },
     math::{U256, from_hex, from_limbs32, to_limbs32},
     session::{
         EcNode, Session,
@@ -950,4 +956,86 @@ fn msm_resolve_run_expr_must_be_constant() {
     // Locally valid before the fix (no other constraint reads COL_MSM_EXPR);
     // the constancy constraint is what now rejects it.
     check_local_inputs(TranscriptEvalAir, &forged, traces.public_root().as_array().to_vec());
+}
+
+// CERTIFICATE ORDERING
+// ================================================================================================
+
+/// The EcMsm main trace of `traces` and the index of its first row with `flag = 1` (on a
+/// boundary).
+fn msm_main_and_minting_row(
+    traces: &crate::session::SessionTraces,
+    flag: usize,
+) -> (RowMajorMatrix<Felt>, usize) {
+    let main = traces.mains()[9].clone();
+    let row = (0..main.height())
+        .find(|&r| {
+            main.values[r * MSM_COLS + flag] == Felt::ONE
+                && main.values[r * MSM_COLS + COL_IS_BOUNDARY] == Felt::ONE
+        })
+        .expect("the session mints a certified point");
+    check_local_inputs(EcMsmAir, &main, traces.air_inputs());
+    (main, row)
+}
+
+#[test]
+fn intro_endo_cannot_certify_its_own_base() {
+    // φ(P) is minted with a certificate resting on P. Pointing `val` back at `base` would let a
+    // point certify itself (e.g. `(0, y)`, since β·0 = 0), with nothing checking it is on the
+    // curve.
+    let traces = msm_intro_endo_traces();
+    let (mut main, row) = msm_main_and_minting_row(&traces, COL_ENDO_MINTED);
+    main.values[row * MSM_COLS + COL_VAL] = main.values[row * MSM_COLS + COL_BASE];
+    crate::tests::assert_local_rejects_inputs(EcMsmAir, &main, traces.air_inputs());
+}
+
+#[test]
+fn neg_cannot_certify_its_own_operand_value() {
+    // −val_a is minted with a certificate resting on val_a (a `y = 0` point is its own negation).
+    let traces = msm_intro_neg_traces();
+    let (mut main, row) = msm_main_and_minting_row(&traces, COL_NEG_MINTED);
+    main.values[row * MSM_COLS + COL_VAL] = main.values[row * MSM_COLS + COL_VAL_A];
+    crate::tests::assert_local_rejects_inputs(EcMsmAir, &main, traces.air_inputs());
+}
+
+#[test]
+fn certificate_ordering_limbs_are_range_checked() {
+    // If a minted point reuses its source, the ordering holds locally with limbs encoding −1.
+    // Both minting paths must request `Range16(−1)`, which the byte-pair table cannot provide.
+    use std::collections::HashMap;
+
+    use miden_air::lookup::Challenges;
+    use miden_core::field::PrimeCharacteristicRing;
+    use rand::{SeedableRng, rngs::StdRng};
+
+    use crate::{
+        logup::LookupMessage,
+        primitives::byte_pair_lut::Range16Msg,
+        relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+        tests::bus_balance::fold_balance,
+    };
+
+    let mut rng = StdRng::seed_from_u64(0xce47);
+    let rand_qf = |rng: &mut StdRng| {
+        use rand::RngExt;
+        miden_core::field::QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()])
+    };
+    let challenges =
+        Challenges::new(rand_qf(&mut rng), rand_qf(&mut rng), MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+    let out_of_range = Range16Msg { w: -Felt::ONE }.encode(&challenges);
+    for (traces, flag, source) in [
+        (msm_intro_endo_traces(), COL_ENDO_MINTED, COL_BASE),
+        (msm_intro_neg_traces(), COL_NEG_MINTED, COL_VAL_A),
+    ] {
+        let (mut main, row) = msm_main_and_minting_row(&traces, flag);
+        main.values[row * MSM_COLS + COL_VAL] = main.values[row * MSM_COLS + source];
+        main.values[row * MSM_COLS + COL_B_DIFF_LO] = -Felt::ONE;
+        main.values[row * MSM_COLS + COL_B_DIFF_HI] = Felt::ZERO;
+        check_local_inputs(EcMsmAir, &main, traces.air_inputs());
+
+        let mut net = HashMap::new();
+        fold_balance(&EcMsmAir, &main, &challenges, &mut net);
+        let mult = net.get(&out_of_range).map_or(Felt::ZERO, |(mult, _)| *mult);
+        assert_eq!(mult, Felt::ONE, "the minting row must range-check its ordering limbs");
+    }
 }

@@ -1,5 +1,9 @@
 use miden::core::stark::types
-use miden::core::stark::constants
+use {
+    LOG_AIR_TRACE_LENGTHS_PTR,
+    RANDOM_COIN_INPUT_LENGTH_PTR,
+    RANDOM_COIN_OUTPUT_LENGTH_PTR,
+} from miden::core::stark::constants
 use miden::core::stark::public_inputs
 use miden::core::stark::random_coin
 use miden::core::sys::pvm::layout
@@ -64,7 +68,7 @@ end
 #! Inputs:  [...]
 #! Outputs: [...]
 pub proc process_public_inputs()
-    exec.constants::random_coin_input_len_ptr mem_load
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     assertz.err="PVM process_public_inputs: input buffer must be empty"
 
     # The trusted setup commitment precedes every statement-owned observation.
@@ -91,18 +95,18 @@ pub proc process_public_inputs()
     exec.layout::public_inputs_ptr add.6 mem_load
     exec.random_coin::observe_word
 
-    padw exec.constants::air_trace_length_logs_ptr mem_loadw_le
+    padw mem_loadw_le.LOG_AIR_TRACE_LENGTHS_PTR
     exec.random_coin::observe_word_and_flush_buffer
 
     # Buffer the remaining shape values `[h4, ..., h9]`.
-    padw exec.constants::air_trace_length_logs_ptr add.4 mem_loadw_le
+    padw push.LOG_AIR_TRACE_LENGTHS_PTR add.4 mem_loadw_le
     exec.random_coin::observe_word
-    exec.constants::air_trace_length_logs_ptr add.9 mem_load
-    exec.constants::air_trace_length_logs_ptr add.8 mem_load
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.9 mem_load
+    push.LOG_AIR_TRACE_LENGTHS_PTR add.8 mem_load
     exec.random_coin::observe_pair
 
-    exec.constants::random_coin_input_len_ptr mem_load
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     push.BUFFERED_SHAPE_VALUE_COUNT assert_eq.err="PVM process_public_inputs: transcript framing drifted"
-    exec.constants::random_coin_output_len_ptr mem_load
+    mem_load.RANDOM_COIN_OUTPUT_LENGTH_PTR
     assertz.err="PVM process_public_inputs: observed input exposed stale output"
 end

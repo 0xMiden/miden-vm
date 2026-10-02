@@ -3,7 +3,7 @@
 //! This module does not manage nonces. Callers must never reuse `(key, nonce)` and must not repeat
 //! counter blocks under a fixed CTR key. The low-level decryption helper does not authenticate;
 //! callers that need plaintext must use
-//! [`decrypt_felts_expanded_authenticated`](crate::aead::aead_eidos::expanded::decrypt_felts_expanded_authenticated).
+//! [`decrypt_felts_expanded_authenticated`].
 //!
 //! The CTR and MAC keys are separate Eidos compressions of `key || nonce` under their registered
 //! domains. Encryption XORs each pair of plaintext `u32` limbs with one pair from the raw Eidos

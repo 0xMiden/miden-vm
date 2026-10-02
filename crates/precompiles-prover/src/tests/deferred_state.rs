@@ -5,7 +5,7 @@ use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
     deferred::{Digest, Node as VmNode, PrecompileWitness, TRUE_DIGEST as VM_TRUE_DIGEST},
-    field::QuadFelt,
+    field::{Field, QuadFelt},
     proof::{HashFunction, StarkProof},
     serde::{Deserializable, Serializable},
     utils::Matrix,
@@ -21,8 +21,15 @@ use crate::{
     PrecompileProvingError, check_memory_budget,
     deferred::session::session_from_witnesses,
     hash::{
-        chunk_node_sponge::SPONGE_COL_OFFSET,
-        keccak::sponge::{COL_ACT as SPONGE_COL_ACT, SPONGE_PERIOD, trace::keccak_oracle},
+        chunk_node::NODE_COL_OFFSET,
+        chunk_node_sponge::{ChunkNodeSpongeAir, SPONGE_COL_OFFSET},
+        keccak::{
+            node::{
+                COL_ACT as NODE_COL_ACT, COL_N_CHUNKS, COL_N_CHUNKS_INV,
+                NUM_MAIN_COLS as NODE_NUM_MAIN_COLS,
+            },
+            sponge::{COL_ACT as SPONGE_COL_ACT, SPONGE_PERIOD, trace::keccak_oracle},
+        },
     },
     math::{U256, from_hex, to_limbs32},
     prove_precompiles, prove_precompiles_with_budget,
@@ -581,6 +588,46 @@ fn merged_chunk_node_sponge_multi_block_checks_and_balances() {
         traces.check();
         assert_session_balanced(&traces, &mut rng);
     }
+}
+
+/// Exercises the remainder lookup in the deployed merged AIR across chunk boundaries.
+#[test]
+fn merged_keccak_chunk_count_boundaries_balance() {
+    let mut rng = StdRng::seed_from_u64(0xc0de_5b0a);
+    for len in [0usize, 1, 31, 32, 33, 63, 64, 65] {
+        let input: Vec<u8> = (0..len).map(|i| i as u8).collect();
+        let traces = keccak_session_traces(&input);
+        traces.check();
+        assert_session_balanced(&traces, &mut rng);
+    }
+}
+
+#[test]
+fn merged_empty_keccak_node_cannot_redirect_chunk_tail() {
+    let traces = keccak_session_traces(&[]);
+    traces.check();
+    let mut merged = traces.mains()[0].clone();
+    assert_eq!(merged.values[NODE_COL_OFFSET + NODE_COL_ACT], Felt::ONE);
+    assert_eq!(merged.values[NODE_COL_OFFSET + COL_N_CHUNKS], Felt::ONE);
+
+    merged.values[NODE_COL_OFFSET + COL_N_CHUNKS] = Felt::from(2u8);
+    merged.values[NODE_COL_OFFSET + COL_N_CHUNKS_INV] = Felt::from(2u8).inverse();
+    crate::tests::assert_constraint_failure(|| {
+        crate::tests::check_local(ChunkNodeSpongeAir, &merged)
+    });
+}
+
+/// Checks the remainder lookup of the deployed merged AIR against an out-of-range remainder.
+#[test]
+fn merged_keccak_chunk_remainder_is_range_checked() {
+    let traces = keccak_session_traces(&[0x5a; 32]);
+    traces.check();
+    let mut merged = traces.mains()[0].clone();
+    let node_row = &mut merged.values[NODE_COL_OFFSET..NODE_COL_OFFSET + NODE_NUM_MAIN_COLS];
+    assert_eq!(node_row[NODE_COL_ACT], Felt::ONE);
+    let tuple = super::keccak_node::forge_out_of_range_remainder(node_row);
+    crate::tests::check_local(ChunkNodeSpongeAir, &merged);
+    crate::tests::bus_balance::assert_unprovidable_xor_lookup(&ChunkNodeSpongeAir, &merged, tuple);
 }
 
 /// Explicit full prove+verify of a multi-block Keccak session — the

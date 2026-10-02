@@ -1,5 +1,9 @@
 use miden::core::stark::types
-use miden::core::stark::constants
+use {
+    PUBLIC_INPUTS_ADDRESS_PTR,
+    RANDOM_COIN_INPUT_LENGTH_PTR,
+    RANDOM_COIN_OUTPUT_LENGTH_PTR,
+} from miden::core::stark::constants
 use miden::core::stark::public_inputs
 use miden::core::stark::random_coin
 use miden::core::crypto::hashes::poseidon2
@@ -102,7 +106,7 @@ end
 #! Output: [...]
 pub proc process_public_inputs()
     # Assert precondition: the rate-aligned absorption below bypasses the buffered duplex.
-    exec.constants::random_coin_input_len_ptr mem_load
+    mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     assertz.err="process_public_inputs: input buffer must be empty"
 
     # 1) Store the ACE public-input pointer.
@@ -147,14 +151,6 @@ pub proc stage_boundary_inputs()
     adv_loadw
     exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_storew_le dropw
     # => [...]
-end
-
-#! Loads the final deferred root from the boundary-inputs window.
-#!
-#! Input:  [...]
-#! Output: [D, ...]
-pub proc load_deferred_root() -> types::Digest
-    padw exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
 end
 
 # HELPER PROCEDURES
@@ -361,7 +357,7 @@ proc absorb_claim_and_deferred_into_fs(claim_hash: types::Digest)
     padw exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
     # => [D, CLAIM_HASH, ...]
 
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
+    push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
     # Duplex overwrite mode: the stale rate words are never read, so load only the capacity
     # and build the rate from [CLAIM_HASH | D] already on the stack.
     exec.random_coin::get_capacity
@@ -375,7 +371,7 @@ proc absorb_claim_and_deferred_into_fs(claim_hash: types::Digest)
     # => [R1', R2', C', ...]
 
     exec.random_coin::store_random_coin_state
-    push.8 exec.constants::random_coin_output_len_ptr mem_store
+    push.8 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
     # => [...]
 end
 
@@ -392,7 +388,7 @@ proc load_public_inputs()
     # => [SCRATCH(12), ...]
     exec.layout::claim_ptr add.8
     movdn.12
-    exec.constants::public_inputs_address_ptr mem_load
+    mem_load.PUBLIC_INPUTS_ADDRESS_PTR
     movdn.12
     # => [SCRATCH(12), pi_ptr, claim_io_ptr, ...]
 

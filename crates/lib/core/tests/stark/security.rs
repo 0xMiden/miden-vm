@@ -486,7 +486,7 @@ fn slack_bound_never_overstates_and_loses_at_most_one_bit() {
 
     for h in [6, 17, 29] {
         for (width, frac) in
-            [(255, 1), (16, 28), (18, 247), (30, 2048), (126, 512), (5, 9361), (98, 100)]
+            [(255, 1), (16, 28), (18, 248), (30, 2048), (126, 512), (5, 9361), (98, 100)]
         {
             for boundary in [0, 1, 258, 4096] {
                 let descriptor = case(h, width, frac, boundary);

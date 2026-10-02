@@ -6,7 +6,14 @@ use miden::core::stark::deep_queries
 use miden::core::stark::random_coin
 use miden::core::stark::ood_frames
 use miden::core::stark::public_inputs
-use miden::core::stark::constants
+use {
+    COMPOSITION_POLY_COM_PTR,
+    DEEP_POW_BITS_PTR,
+    FOLDING_POW_BITS_PTR,
+    MAIN_TRACE_COM_PTR,
+    NUM_QUERIES_PTR,
+    QUERY_POW_BITS_PTR,
+} from miden::core::stark::constants
 use miden::core::stark::utils
 
 #! Verifies a STARK proof.
@@ -37,6 +44,10 @@ use miden::core::stark::utils
 #! - Maximum remainder polynomial degree: 127.
 #! - Constraint folding, OOD evaluations, and aux-trace values use the quadratic extension field.
 #!
+#! Rust counterpart: `miden_lifted_stark::VerifierInstance::verify`. Rust checks PCS openings
+#! before evaluating constraints; this procedure evaluates constraints first. Constraint evaluation
+#! does not change the Fiat-Shamir transcript, so the order of challenges is the same.
+#!
 #! Inputs:  [D0, D1, D2, D3, D4]
 #! Outputs: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
 pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters
@@ -66,7 +77,7 @@ pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters
     # Load the main-trace commitment, observe it onto the buffered stream, and flush before
     # sampling auxiliary randomness.
     padw adv_loadw
-    exec.constants::main_trace_com_ptr mem_storew_le
+    mem_storew_le.MAIN_TRACE_COM_PTR
     # => [main_trace_commitment, ...]
     exec.random_coin::observe_word_and_flush_buffer
     # => [...]
@@ -100,7 +111,7 @@ pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters
     # Guaranteed here because generate_constraint_composition_coefficients only samples
     # (decrements output_len) and never observes (input_len stays 0).
     padw adv_loadw
-    exec.constants::composition_poly_com_ptr mem_storew_le
+    mem_storew_le.COMPOSITION_POLY_COM_PTR
     exec.random_coin::reseed_direct
     exec.random_coin::generate_z_zN
     # => [...]
@@ -186,8 +197,8 @@ pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters
     exec.frie2f4::verify
 
     # Return the transcript-bound parameters for the relation wrapper's caller to grade.
-    exec.constants::get_folding_pow_bits
-    exec.constants::get_deep_pow_bits
-    exec.constants::get_query_pow_bits
-    exec.constants::get_number_queries
+    mem_load.FOLDING_POW_BITS_PTR
+    mem_load.DEEP_POW_BITS_PTR
+    mem_load.QUERY_POW_BITS_PTR
+    mem_load.NUM_QUERIES_PTR
 end

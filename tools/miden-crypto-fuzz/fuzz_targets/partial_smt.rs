@@ -123,12 +123,21 @@ impl<'a> StructuredInput<'a> {
 
     fn next_multiple_leaf(&mut self, leaf_index: u64) -> SmtLeaf {
         let count = 2 + self.next_count(MAX_MULTI_LEAF_ENTRIES.saturating_sub(2));
-        let entries = (0..count)
-            .map(|_| (self.next_key_for_leaf(leaf_index), self.next_word()))
-            .collect();
+        // A multiple leaf holds its entries sorted by key with no repeats. Short inputs wrap around
+        // and can yield the same key twice, so a repeated key is bumped until it is new, keeping
+        // `count` entries.
+        let mut entries = BTreeMap::new();
+        for _ in 0..count {
+            let mut key = self.next_key_for_leaf(leaf_index);
+            while entries.contains_key(&key) {
+                key.a += Felt::ONE;
+            }
+            let value = self.next_word();
+            entries.insert(key, value);
+        }
 
-        SmtLeaf::new_multiple(entries)
-            .unwrap_or_else(|_| SmtLeaf::new_empty(LeafIndex::new_max_depth(leaf_index)))
+        SmtLeaf::new_multiple(entries.into_iter().collect())
+            .expect("keys are distinct, sorted and share the same leaf index")
     }
 
     fn next_key_for_leaf(&mut self, leaf_index: u64) -> Word {

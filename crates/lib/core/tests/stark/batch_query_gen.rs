@@ -11,14 +11,14 @@ use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
 
 // Must match the constants in `crates/lib/core/asm/stark/constants.masm`.
-const R1_PTR: u32 = 3223322672;
-const R2_PTR: u32 = 3223322676;
-const C_PTR: u32 = 3223322668;
+const RANDOM_COIN_RATE_1_PTR: u32 = 3223322672;
+const RANDOM_COIN_RATE_2_PTR: u32 = 3223322676;
+const RANDOM_COIN_CAPACITY_PTR: u32 = 3223322668;
 const NUM_QUERIES_PTR: u32 = 3223322628;
-const LDE_DOMAIN_LOG_SIZE_PTR: u32 = 3223322625;
+const LOG_LDE_DOMAIN_SIZE_PTR: u32 = 3223322625;
 const FRI_QUERIES_ADDRESS_PTR: u32 = 3223322633;
-const RANDOM_COIN_INPUT_LEN_PTR: u32 = 3223322759;
-const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3223322760;
+const RANDOM_COIN_INPUT_LENGTH_PTR: u32 = 3223322759;
+const RANDOM_COIN_OUTPUT_LENGTH_PTR: u32 = 3223322760;
 
 // Fixed query storage address.
 const QUERY_PTR: u32 = 100_000;
@@ -35,23 +35,23 @@ fn setup_masm(sponge: &[u64; 12], output_len: u32, num_queries: u32, depth: u32)
         r#"
     # Store R1 (rate word 1)
     push.{r1_3}.{r1_2}.{r1_1}.{r1_0}
-    push.{R1_PTR} mem_storew_le dropw
+    push.{RANDOM_COIN_RATE_1_PTR} mem_storew_le dropw
 
     # Store R2 (rate word 2)
     push.{r2_3}.{r2_2}.{r2_1}.{r2_0}
-    push.{R2_PTR} mem_storew_le dropw
+    push.{RANDOM_COIN_RATE_2_PTR} mem_storew_le dropw
 
     # Store C (capacity)
     push.{c_3}.{c_2}.{c_1}.{c_0}
-    push.{C_PTR} mem_storew_le dropw
+    push.{RANDOM_COIN_CAPACITY_PTR} mem_storew_le dropw
 
     # Random coin buffer state
-    push.0 push.{RANDOM_COIN_INPUT_LEN_PTR} mem_store
-    push.{output_len} push.{RANDOM_COIN_OUTPUT_LEN_PTR} mem_store
+    push.0 push.{RANDOM_COIN_INPUT_LENGTH_PTR} mem_store
+    push.{output_len} push.{RANDOM_COIN_OUTPUT_LENGTH_PTR} mem_store
 
     # Verifier parameters
     push.{num_queries} push.{NUM_QUERIES_PTR} mem_store
-    push.{depth} push.{LDE_DOMAIN_LOG_SIZE_PTR} mem_store
+    push.{depth} push.{LOG_LDE_DOMAIN_SIZE_PTR} mem_store
     push.{QUERY_PTR} push.{FRI_QUERIES_ADDRESS_PTR} mem_store
     "#,
         r1_0 = sponge[0],
@@ -87,18 +87,19 @@ fn reference_source(setup: &str) -> String {
     format!(
         r#"
     use miden::core::stark::random_coin
-    use miden::core::stark::constants
+    use {{FRI_QUERIES_ADDRESS_PTR, LOG_LDE_DOMAIN_SIZE_PTR}} from miden::core::stark::constants
+    use {{NUM_QUERIES_PTR}} from miden::core::stark::constants
     use miden::core::crypto::hashes::poseidon2
 
     #! Sample a felt, permuting first if the output buffer is empty.
     proc sample_felt_safe
-        push.{RANDOM_COIN_OUTPUT_LEN_PTR} mem_load
+        push.{RANDOM_COIN_OUTPUT_LENGTH_PTR} mem_load
         push.0 eq
         if.true
             exec.random_coin::load_random_coin_state
             exec.poseidon2::permute
             exec.random_coin::store_random_coin_state
-            push.8 push.{RANDOM_COIN_OUTPUT_LEN_PTR} mem_store
+            push.8 push.{RANDOM_COIN_OUTPUT_LENGTH_PTR} mem_store
         end
         exec.random_coin::sample_felt
     end
@@ -125,9 +126,9 @@ fn reference_source(setup: &str) -> String {
     begin
         {setup}
 
-        exec.constants::get_number_queries
-        exec.constants::get_fri_queries_address
-        exec.constants::get_lde_domain_depth
+        mem_load.NUM_QUERIES_PTR
+        mem_load.FRI_QUERIES_ADDRESS_PTR
+        mem_load.LOG_LDE_DOMAIN_SIZE_PTR
         dup push.32 swap u32wrapping_sub pow2
         movdn.2 swap
         dup.3 push.0 neq
@@ -143,7 +144,7 @@ fn reference_source(setup: &str) -> String {
             movup.3 sub.1 movdn.3
             dup.3 push.0 neq
         end
-        push.0 push.{RANDOM_COIN_INPUT_LEN_PTR} mem_store
+        push.0 push.{RANDOM_COIN_INPUT_LENGTH_PTR} mem_store
         drop drop drop drop
     end
     "#,
@@ -195,12 +196,12 @@ fn assert_batch_matches_reference(
     // Compare final output_len.
     let b_ol = batch_out
         .memory
-        .read_element(ContextId::root(), Felt::from_u32(RANDOM_COIN_OUTPUT_LEN_PTR))
+        .read_element(ContextId::root(), Felt::from_u32(RANDOM_COIN_OUTPUT_LENGTH_PTR))
         .map(|f| f.as_canonical_u64())
         .unwrap_or(u64::MAX);
     let r_ol = ref_out
         .memory
-        .read_element(ContextId::root(), Felt::from_u32(RANDOM_COIN_OUTPUT_LEN_PTR))
+        .read_element(ContextId::root(), Felt::from_u32(RANDOM_COIN_OUTPUT_LENGTH_PTR))
         .map(|f| f.as_canonical_u64())
         .unwrap_or(u64::MAX);
     assert_eq!(

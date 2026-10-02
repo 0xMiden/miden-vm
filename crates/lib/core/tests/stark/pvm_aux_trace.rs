@@ -9,13 +9,13 @@ use miden_precompiles::{CurveId, UintDomain};
 use crate::helpers::read_memory_felt;
 
 const AUX_TRACE_COM_PTR: u32 = 3_223_322_644;
-const R1_PTR: u32 = 3_223_322_672;
-const RANDOM_COIN_INPUT_LEN_PTR: u32 = 3_223_322_759;
-const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3_223_322_760;
+const RANDOM_COIN_RATE_1_PTR: u32 = 3_223_322_672;
+const RANDOM_COIN_INPUT_LENGTH_PTR: u32 = 3_223_322_759;
+const RANDOM_COIN_OUTPUT_LENGTH_PTR: u32 = 3_223_322_760;
 const AUX_RAND_ELEM_PTR: u32 = 3_225_426_432;
 const AUX_BUS_BOUNDARY_PTR: u32 = 3_225_429_512;
-const BUS_GAMMA_PTR: u32 = 3_225_443_440;
-const C_TOTAL_PTR: u32 = 3_225_443_444;
+const BUS_GAMMA_PTR: u32 = 3_225_443_528;
+const C_TOTAL_PTR: u32 = 3_225_443_532;
 
 const INITIAL_SPONGE: [u64; 12] = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
 const COMMITMENT: [u64; 4] = [31, 32, 33, 34];
@@ -25,13 +25,13 @@ fn setup_masm() -> String {
     format!(
         r#"
         push.{r1_3}.{r1_2}.{r1_1}.{r1_0}
-        exec.constants::r1_ptr mem_storew_le dropw
+        mem_storew_le.RANDOM_COIN_RATE_1_PTR dropw
         push.{r2_3}.{r2_2}.{r2_1}.{r2_0}
-        exec.constants::r2_ptr mem_storew_le dropw
+        mem_storew_le.RANDOM_COIN_RATE_2_PTR dropw
         push.{c_3}.{c_2}.{c_1}.{c_0}
-        exec.constants::c_ptr mem_storew_le dropw
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
-        push.8 exec.constants::random_coin_output_len_ptr mem_store
+        mem_storew_le.RANDOM_COIN_CAPACITY_PTR dropw
+        push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
+        push.8 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
         "#,
         r1_0 = s[0],
         r1_1 = s[1],
@@ -51,7 +51,10 @@ fn setup_masm() -> String {
 fn sampler_source() -> String {
     format!(
         r#"
-        use miden::core::stark::constants
+        use {{RANDOM_COIN_CAPACITY_PTR, RANDOM_COIN_RATE_1_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_RATE_2_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_INPUT_LENGTH_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_OUTPUT_LENGTH_PTR}} from miden::core::stark::constants
         use miden::core::stark::random_coin
         use miden::core::sys::pvm::layout
 
@@ -68,7 +71,10 @@ fn sampler_source() -> String {
 fn hook_source() -> String {
     format!(
         r#"
-        use miden::core::stark::constants
+        use {{RANDOM_COIN_CAPACITY_PTR, RANDOM_COIN_RATE_1_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_RATE_2_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_INPUT_LENGTH_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_OUTPUT_LENGTH_PTR}} from miden::core::stark::constants
         use miden::core::sys::pvm::aux_trace
 
         begin
@@ -85,7 +91,10 @@ fn hook_source() -> String {
 fn reference_source() -> String {
     format!(
         r#"
-        use miden::core::stark::constants
+        use {{AUX_TRACE_COM_PTR, RANDOM_COIN_CAPACITY_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_RATE_1_PTR, RANDOM_COIN_RATE_2_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_INPUT_LENGTH_PTR}} from miden::core::stark::constants
+        use {{RANDOM_COIN_OUTPUT_LENGTH_PTR}} from miden::core::stark::constants
         use miden::core::stark::random_coin
         use miden::core::sys::pvm::layout
 
@@ -95,7 +104,7 @@ fn reference_source() -> String {
             exec.random_coin::generate_aux_randomness
 
             padw adv_loadw
-            exec.constants::aux_trace_com_ptr mem_storew_le
+            mem_storew_le.AUX_TRACE_COM_PTR
             exec.random_coin::observe_word
             padw adv_loadw
             exec.layout::aux_bus_boundary_ptr mem_storew_le
@@ -250,14 +259,14 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
         .execute_for_output()
         .expect("reference transcript must execute");
 
-    for addr in R1_PTR..R1_PTR + 12 {
+    for addr in RANDOM_COIN_RATE_1_PTR..RANDOM_COIN_RATE_1_PTR + 12 {
         assert_eq!(
             read_memory_felt(&hook_output, addr),
             read_memory_felt(&reference_output, addr),
             "transcript state differs at address {addr}"
         );
     }
-    for addr in [RANDOM_COIN_INPUT_LEN_PTR, RANDOM_COIN_OUTPUT_LEN_PTR] {
+    for addr in [RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR] {
         assert_eq!(
             read_memory_felt(&hook_output, addr),
             read_memory_felt(&reference_output, addr),

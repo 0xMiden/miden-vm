@@ -8,7 +8,7 @@
 //! the caller-supplied [`SpongeRequires`], computes the digest-chunk
 //! hash `H_digest_chunks` and the transcript-DAG hash `H_keccak` via
 //! [`Poseidon2Requires`], and records a [`KeccakNodeInvocation`]
-//! [`generate_trace`] later stamps into one row of the 30-column
+//! [`generate_trace`] later stamps into one row of the 32-column
 //! main trace.
 //!
 //! The fall-out wiring:
@@ -22,7 +22,7 @@ use alloc::{collections::BTreeMap, vec, vec::Vec};
 use miden_core::{
     Felt,
     deferred::{Digest, Node},
-    field::QuadFelt,
+    field::{Field, QuadFelt},
     utils::RowMajorMatrix,
 };
 use miden_precompiles::Keccak256Precompile;
@@ -40,7 +40,7 @@ use crate::{
         },
     },
     logup::build_logup_aux_trace,
-    primitives::byte_pair_lut::BytePairLutRequires,
+    primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp},
     relations::ProvideMult,
     transcript::poseidon2::{
         digest::{P2Cap, P2Digest},
@@ -79,11 +79,9 @@ pub struct KeccakNodeInvocation {
     /// Sponge invocation start (the sponge's row at the first row of
     /// this invocation).
     pub sponge_seq_id_head: SpongeSeqId,
-    /// Downstream consumer count for the `Binding(H_keccak, True)`
-    /// provide on this row. Range-checked to `[0, 2^16)`; the AIR's
-    /// `(1 − act) · out_mult = 0` constraint pins it to 0 on
-    /// inactive rows. A plain `u32` count — pinned to the `Binding`
-    /// consumer count by bus balance, not range-checked.
+    /// Downstream consumer count for the `Binding(H_keccak, True)` provide. The AIR pins it to
+    /// zero on inactive rows; bus balance pins active counts to consumers. It is not
+    /// range-checked.
     pub out_mult: ProvideMult,
 }
 
@@ -145,7 +143,8 @@ pub fn generate_trace_from_invocations(
 /// Append one invocation's row to `trace` in column order: act,
 /// sponge_seq_id_head, n_sponge_perms, chunk_seq_id_head, n_chunks,
 /// perm_seq_id_chunks, len_bytes, perm_seq_id_digest_chunks, perm_seq_id_keccak,
-/// d[8], h_input_chunks[4], h_digest_chunks[4], h_keccak[4], out_mult.
+/// d[8], h_input_chunks[4], h_digest_chunks[4], h_keccak[4], out_mult,
+/// last-chunk remainder, n_chunks_inv.
 fn push_row(trace: &mut Vec<Felt>, inv: &KeccakNodeInvocation) {
     let len_bytes = Felt::from(inv.len_bytes);
     let d_felts: [Felt; 8] = inv.d.map(Felt::from);
@@ -177,6 +176,9 @@ fn push_row(trace: &mut Vec<Felt>, inv: &KeccakNodeInvocation) {
     trace.extend(h_digest_chunks);
     trace.extend(h_keccak);
     trace.extend([Felt::from(inv.out_mult)]);
+    let remainder = inv.len_bytes.saturating_sub(1) % 32;
+    trace.push(Felt::from(remainder));
+    trace.push(Felt::new(inv.n_chunks()).expect("n_chunks fits").inverse());
 }
 
 // REQUIRES ACCUMULATOR
@@ -250,6 +252,7 @@ impl KeccakNodeRequires {
         bpl_req: &mut BytePairLutRequires,
         p2: &mut Poseidon2Requires,
     ) -> KeccakNodeOutput {
+        let len_bytes = u32::try_from(input.len()).expect("len_bytes fits in u32");
         let keccak_digest = keccak_oracle(input);
 
         // True dedup: an identical input bumps the existing row's
@@ -265,6 +268,9 @@ impl KeccakNodeRequires {
                 node_row: idx as u32,
             };
         }
+
+        let remainder = len_bytes.saturating_sub(1) % 32;
+        bpl_req.require(BytePairOp::Xor, remainder as u8, (31 - remainder) as u8);
 
         // Miss path: full allocation through sponge + 2× P2 one-shots.
         let sponge_inv = SpongeInvocation { input: input.to_vec() };
@@ -290,7 +296,6 @@ impl KeccakNodeRequires {
         let _ = p2.require_digest(h_digest_chunks);
 
         // H_keccak = Poseidon2(H_input_chunks || H_digest_chunks || cap_keccak)
-        let len_bytes = u32::try_from(input.len()).expect("len_bytes fits in u32");
         let keccak_out = p2.require_one_shot(
             P2Cap::keccak256_assertion(len_bytes),
             h_input_chunks,

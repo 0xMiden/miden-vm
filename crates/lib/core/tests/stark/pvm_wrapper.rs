@@ -7,16 +7,16 @@ use crate::{
     support::security::{LOG_HEIGHT_MAX, PVM_LOG_HEIGHT_MIN},
 };
 
-const TRACE_LENGTH_LOG_PTR: u32 = 3_223_322_634;
+const LOG_TRACE_LENGTH_PTR: u32 = 3_223_322_634;
 const ORDER_TAG_PTR: u32 = 3_223_322_639;
-const AIR_TRACE_LENGTH_LOGS_PTR: u32 = 3_223_322_736;
+const LOG_AIR_TRACE_LENGTHS_PTR: u32 = 3_223_322_736;
 const RELATION_DIGEST_PTR: u32 = 3_223_322_728;
 const ACE_REGISTRY_ROOT_PTR: u32 = 3_223_322_732;
 const OOD_EVALUATIONS_ADDRESS_PTR: u32 = 3_223_322_761;
 const CURRENT_TRACE_ROW_ADDRESS_PTR: u32 = 3_223_322_762;
 
 const PREPROCESSED_CURRENT_PTR: u32 = 3_225_426_440;
-const CURRENT_TRACE_ROW_PTR: u32 = 3_225_443_448;
+const CURRENT_TRACE_ROW_PTR: u32 = 3_225_443_536;
 
 // Runtime call-site vector. The precompiles-prover oracle derives the matching MASM constants
 // directly from the AIRs.
@@ -24,16 +24,16 @@ const BYTE_PAIR_LUT_AIR_INDEX: usize = 3;
 const MIN_LOG_HEIGHTS: [u64; 10] = [5, 4, 7, 16, 1, 3, 1, 1, 2, 1];
 const HEIGHTS: [u64; 10] = [16, 7, 12, 16, 11, 7, 10, 12, 13, 14];
 const RELATION_DIGEST: [u64; 4] = [
-    12_484_196_935_672_772_437,
-    3_477_320_138_365_322_110,
-    6_979_635_564_408_716_733,
-    16_634_898_497_425_374_784,
+    12_083_831_178_076_904_894,
+    14_925_062_465_010_349_701,
+    1_958_677_770_500_754_567,
+    3_316_017_051_827_139_121,
 ];
 const ACE_REGISTRY_ROOT: [u64; 4] = [
-    8_757_348_742_711_293_875,
-    6_538_879_707_987_301_428,
-    17_356_837_600_309_008_648,
-    13_870_270_840_525_555_445,
+    8_460_828_740_255_852_863,
+    2_250_416_899_373_454_350,
+    6_973_647_063_103_729_084,
+    18_020_232_257_584_479_945,
 ];
 
 fn source() -> &'static str {
@@ -52,12 +52,12 @@ fn pvm_wrapper_stores_heights_order_tag_and_registry_metadata() {
     assert_eq!(output.stack.get_num_elements(16), &[Felt::ZERO; 16]);
     for (i, expected) in HEIGHTS.into_iter().enumerate() {
         assert_eq!(
-            read_memory_felt(&output, AIR_TRACE_LENGTH_LOGS_PTR + i as u32),
+            read_memory_felt(&output, LOG_AIR_TRACE_LENGTHS_PTR + i as u32),
             Felt::new_unchecked(expected),
             "AIR height {i} was not stored in instance order"
         );
     }
-    assert_eq!(read_memory_felt(&output, TRACE_LENGTH_LOG_PTR), Felt::from_u8(16));
+    assert_eq!(read_memory_felt(&output, LOG_TRACE_LENGTH_PTR), Felt::from_u8(16));
     assert_eq!(
         read_memory_felt(&output, OOD_EVALUATIONS_ADDRESS_PTR),
         Felt::from_u32(PREPROCESSED_CURRENT_PTR)

@@ -28,9 +28,6 @@
 //! namespaces (chunk-tape, sponge rows). `perm_seq_id_chunks` is
 //! bus-pinned per row (`ChunkChain`) but not constrained across rows —
 //! P2 is shared with other callers.
-//!
-//! See the design notes for the design and
-//! the design notes for the binding-bus model.
 
 use alloc::vec::Vec;
 use core::array;
@@ -50,6 +47,7 @@ use crate::{
         CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
         LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES, frac_col,
     },
+    primitives::byte_pair_lut::{BytePairLutMsg, BytePairOp},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
         binding::BindingMsg,
@@ -61,7 +59,7 @@ use crate::{
 // MAIN COLUMN LAYOUT
 // ================================================================================================
 //
-// 30 main witness columns:
+// 32 main witness columns:
 //
 // - Structural (1):     act.
 // - Heads / lengths (6): sponge_seq_id_head, n_sponge_perms, chunk_seq_id_head, n_chunks,
@@ -70,6 +68,8 @@ use crate::{
 // - Keccak digest (8):  D, interleaved as (lo, hi) per lane × 4 lanes.
 // - Computed hashes (12): H_input_chunks[4] || H_digest_chunks[4] || H_keccak[4].
 // - Consumer count (1): out_mult, a plain count pinned by Binding balance.
+// - Chunk count (2): Last-chunk remainder and inverse of n_chunks. A byte-pair lookup pins the
+//   remainder to 0..31; the length equation determines whether the input is empty.
 
 /// Sticky-downward activity flag. Gates every bus multiplicity.
 pub const COL_ACT: usize = 0;
@@ -87,9 +87,11 @@ pub const COL_N_SPONGE_PERMS: usize = 2;
 /// `ChunkChain` consume; `chunk_seq_id_head_next = chunk_seq_id_head +
 /// n_chunks` keeps the chunk-side namespace contiguous.
 pub const COL_CHUNK_SEQ_ID_HEAD: usize = 3;
-/// Number of chunks in this invocation's chain. Free witness; chunk-side
-/// `ChunkChain` bus balance + sponge's `chunk_ptr` chain pin it to
-/// `ceil(17·n_sponge_perms / 4)`.
+/// Number of chunks in this invocation, `max(1, ceil(len_bytes / 32))`.
+/// The length constraints and byte-pair lookup determine the count up to field wrap. `ChunkChain`
+/// pins the head cycle, and the `Poseidon2Out` tail lookup excludes wrapped counts at supported
+/// trace heights. The sponge reads a message lane from the final chunk of a nonempty input; for
+/// empty input, `n_chunks = 1`, so the tail read uses the head cycle.
 pub const COL_N_CHUNKS: usize = 4;
 /// P2 cycle at the head of this invocation's chunks-absorption chain.
 /// Pinned by the `ChunkChain` consume per row (the FK closes there);
@@ -151,8 +153,14 @@ pub const COL_H_KECCAK_END: usize = COL_H_KECCAK_BEGIN + NUM_HASH;
 /// tuple per consumer — true dedup, one row per digest at any count.
 pub const COL_OUT_MULT: usize = COL_H_KECCAK_END;
 
+/// `(len_bytes - 1) % 32`, or zero for empty input. The byte-pair lookup
+/// `Xor(remainder, 31 - remainder) = 31` exists only for remainder in 0..31.
+pub const COL_LAST_CHUNK_REM: usize = COL_OUT_MULT + 1;
+/// This inverse proves that an active row's chunk count is not zero.
+pub const COL_N_CHUNKS_INV: usize = COL_LAST_CHUNK_REM + 1;
+
 /// Total number of main witness columns.
-pub const NUM_MAIN_COLS: usize = COL_OUT_MULT + 1;
+pub const NUM_MAIN_COLS: usize = COL_N_CHUNKS_INV + 1;
 
 // AUX / PUBLIC LAYOUT
 // ================================================================================================
@@ -162,14 +170,14 @@ pub const NUM_MAIN_COLS: usize = COL_OUT_MULT + 1;
 ///
 /// - col 0: `KeccakSponge` provide alone — the gated running-sum anchor.
 /// - col 1: `Binding(_, True, 0, 0)` provide + `ChunkChain` consume.
-/// - col 2: `Poseidon2Out(H_input_chunks)` consume alone (no partner left to pair).
+/// - col 2: `Poseidon2Out(H_input_chunks)` consume + byte-pair remainder check.
 /// - col 3/4: the four `Memory64` D-limb consumes, paired.
 /// - col 5/6: digest-chunks P2 perm — `Poseidon2In` rate0+rate1, then cap +
 ///   `Poseidon2Out(H_digest_chunks)`.
 /// - col 7/8: keccak-node P2 perm — `Poseidon2In` rate0+rate1, then cap + `Poseidon2Out(H_keccak)`.
 pub const NUM_AUX_COLS: usize = 9;
 
-pub const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 1, 2, 2, 2, 2, 2, 2];
+pub const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2];
 
 // AIR
 // ================================================================================================
@@ -190,6 +198,29 @@ impl BaseAir<Felt> for KeccakNodeAir {
 
 // LIFTED AIR — local constraints
 // ================================================================================================
+
+/// Enforces the empty or nonempty length equation on each active row. The byte-pair lookup bounds
+/// the remainder; the bus-pinned head and tail cycle IDs exclude field-wrapped chunk counts at
+/// supported trace heights.
+pub(crate) fn eval_chunk_count<AB>(builder: &mut AB, local: &[AB::Var; NUM_MAIN_COLS])
+where
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    let act: AB::Expr = local[COL_ACT].into();
+    let len_bytes: AB::Expr = local[COL_LEN_BYTES].into();
+    let n_chunks: AB::Expr = local[COL_N_CHUNKS].into();
+    let n_chunks_inv: AB::Expr = local[COL_N_CHUNKS_INV].into();
+    let remainder: AB::Expr = local[COL_LAST_CHUNK_REM].into();
+    let is_empty = AB::Expr::from(Felt::from(32u8)) * (n_chunks.clone() - AB::Expr::ONE)
+        + remainder.clone()
+        + AB::Expr::ONE
+        - len_bytes.clone();
+
+    builder.assert_zero(act.clone() * is_empty.clone() * (is_empty.clone() - AB::Expr::ONE));
+    builder.assert_zero(act.clone() * is_empty.clone() * len_bytes);
+    builder.assert_zero(act.clone() * is_empty * remainder);
+    builder.assert_zero(act * (n_chunks * n_chunks_inv - AB::Expr::ONE));
+}
 
 impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
     fn num_randomness(&self) -> usize {
@@ -250,6 +281,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
         builder
             .when_transition()
             .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
+        eval_chunk_count(builder, &local);
 
         // out_mult on inactive rows --------------------------------
         // Pin `out_mult = 0` on dead rows so the `Binding` provide
@@ -407,18 +439,29 @@ where
                 interaction_deg
             ),
         );
-        // col 2: Poseidon2Out(H_input_chunks) consume alone (no partner
-        // left to pair).
+        // col 2: Poseidon2Out(H_input_chunks) consume + remainder check.
+        let remainder: LB::Expr = local[COL_LAST_CHUNK_REM].into();
         frac_col!(
             builder,
             "handshake-and-chunks-digest",
-            provides_deg,
+            pair_deg,
             (
                 "p2out-h-input-chunks",
                 pos_act.clone(),
                 Poseidon2OutMsg {
                     perm_seq_id: perm_seq_id_chunks_tail,
                     digest: h_input_chunks.clone(),
+                },
+                interaction_deg
+            ),
+            (
+                "chunk-remainder",
+                pos_act.clone(),
+                BytePairLutMsg {
+                    op: LB::Expr::from(Felt::from(BytePairOp::Xor.tag())),
+                    a: remainder.clone(),
+                    b: LB::Expr::from(Felt::from(31u8)) - remainder,
+                    c: LB::Expr::from(Felt::from(31u8)),
                 },
                 interaction_deg
             ),

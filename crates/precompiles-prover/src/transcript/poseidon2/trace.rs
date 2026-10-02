@@ -29,7 +29,7 @@ use core::ops::Range;
 use miden_core::{
     Felt,
     chiplets::hasher::Hasher,
-    field::{PrimeCharacteristicRing, QuadFelt},
+    field::{Field, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
 
@@ -371,9 +371,8 @@ impl Poseidon2Requires {
 /// inactive padding (`in_mult = out_mult = 0`).
 ///
 /// The multiplicities are plain consumer counts, each pinned to its In /
-/// Out consumer count by bus balance and *not* range-checked (so the
-/// `activity = in + out` gate can't be wrapped — see
-/// the design notes); the chiplet consumes no `Range16`.
+/// Out consumer count by bus balance and *not* range-checked; the chiplet
+/// consumes no `Range16`.
 pub fn generate_trace(requires: Poseidon2Requires) -> RowMajorMatrix<Felt> {
     let total_cycles = requires.next_seq as usize;
     let height = requires
@@ -455,6 +454,7 @@ fn write_cycle(
     let in_mult = Felt::from(in_multiplicity);
     let out_mult = Felt::from(out_multiplicity);
     let absorb = Felt::from(is_absorb as u8);
+    let in_mult_inv = in_mult.inverse();
 
     let mut state = initial_state;
 
@@ -567,12 +567,15 @@ fn write_cycle(
         Hasher::apply_matmul_external(&mut state);
     }
 
-    // Row 15: boundary — final state, no transition.
+    // Row 15: boundary — final state, no transition. The first cube register
+    // is free here and holds the input multiplicity inverse.
+    let mut boundary_regs = [Felt::ZERO; NUM_CUBE_REGS];
+    boundary_regs[0] = in_mult_inv;
     push_row(
         trace,
         &state,
         &[Felt::ZERO; 3],
-        &[Felt::ZERO; NUM_CUBE_REGS],
+        &boundary_regs,
         perm_seq_id,
         in_mult,
         out_mult,
@@ -584,7 +587,8 @@ fn write_cycle(
 
 /// Append a single row's main columns in column order: perm_seq_id,
 /// in_mult, out_mult, is_absorb, state[12], witnesses[3], cube
-/// registers[NUM_CUBE_REGS].
+/// registers[NUM_CUBE_REGS]. Only active cycles are written here; padding
+/// cycles stay all-zero past `perm_seq_id`.
 fn push_row(
     trace: &mut Vec<Felt>,
     state: &[Felt; STATE_WIDTH],

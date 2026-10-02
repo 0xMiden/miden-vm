@@ -13,7 +13,7 @@ use miden_core::{
     Felt,
     chiplets::hasher::Hasher,
     deferred::Tag,
-    field::{PrimeCharacteristicRing, QuadFelt},
+    field::{Field, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
 use miden_lifted_air::LiftedAir;
@@ -601,4 +601,65 @@ fn corruption_is_absorb_at_row_0_breaks_boundary() {
             main.values[r * NUM_MAIN_COLS + COL_IS_ABSORB] = Felt::ONE;
         }
     });
+}
+
+// ACTIVITY
+// ================================================================================================
+
+fn honest_trace(absorption: Absorption) -> RowMajorMatrix<Felt> {
+    let (p2, _outputs) = build_requires(&[absorption]);
+    let main = generate_trace(p2);
+    crate::tests::check_local(Poseidon2Air, &main);
+    main
+}
+
+fn set_cycle_col(main: &mut RowMajorMatrix<Felt>, cycle: usize, col: usize, value: Felt) {
+    for row in 0..PERIOD {
+        main.values[(cycle * PERIOD + row) * NUM_MAIN_COLS + col] = value;
+    }
+}
+
+/// Perturb one mid-permutation state cell of `cycle`.
+fn corrupt_permutation(main: &mut RowMajorMatrix<Felt>, cycle: usize) {
+    main.values[(cycle * PERIOD + 7) * NUM_MAIN_COLS + COL_STATE_BEGIN] += Felt::ONE;
+}
+
+#[test]
+fn interior_cycle_multiplicities_cannot_cancel_the_permutation() {
+    // Cycle 0 of a two-block chain: its Out emission is suppressed because cycle 1 continues the
+    // chain, so `out_multiplicity = −in_multiplicity` has no bus effect. The permutation must
+    // still be checked.
+    let mut main = honest_trace(rng_two_block(0xac71));
+    set_cycle_col(&mut main, 0, COL_OUT_MULTIPLICITY, -Felt::ONE);
+    corrupt_permutation(&mut main, 0);
+    crate::tests::assert_local_rejects(Poseidon2Air, &main);
+}
+
+#[test]
+fn consumed_inputs_force_permutation() {
+    // A one-shot cycle with consumed inputs must run its permutation even without an Out reader.
+    let mut main = honest_trace(rng_one_shot(0xac72));
+    set_cycle_col(&mut main, 0, COL_OUT_MULTIPLICITY, Felt::ZERO);
+    corrupt_permutation(&mut main, 0);
+    crate::tests::assert_local_rejects(Poseidon2Air, &main);
+}
+
+#[test]
+fn output_requires_consumed_inputs() {
+    // The chain's last cycle with no In consumer: its rate input would be free while its digest
+    // is still emitted.
+    let mut main = honest_trace(rng_two_block(0xac73));
+    set_cycle_col(&mut main, 1, COL_IN_MULTIPLICITY, Felt::ZERO);
+    crate::tests::assert_local_rejects(Poseidon2Air, &main);
+}
+
+#[test]
+fn continuation_requires_an_active_predecessor() {
+    // Cycle 0 made inert (no bus traffic, permutation unchecked) while cycle 1 still carries its
+    // capacity.
+    let mut main = honest_trace(rng_two_block(0xac74));
+    for col in [COL_IN_MULTIPLICITY, COL_OUT_MULTIPLICITY] {
+        set_cycle_col(&mut main, 0, col, Felt::ZERO);
+    }
+    crate::tests::assert_local_rejects(Poseidon2Air, &main);
 }

@@ -33,10 +33,8 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn verifies_pinned_poseidon2_proof() {
-        const PROOF_BYTES: &[u8] = include_bytes!("../tests/fixtures/pvm_poseidon2_v0_31.bin");
-        let root = Word::new(
+    fn pinned_keccak_root() -> Word {
+        Word::new(
             [
                 8727402973153492738,
                 13033997996299931781,
@@ -44,10 +42,25 @@ mod tests {
                 17469579631022355290,
             ]
             .map(Felt::new_unchecked),
-        );
+        )
+    }
+
+    #[test]
+    fn rejects_pinned_old_poseidon2_proof() {
+        const PROOF_BYTES: &[u8] = include_bytes!("../tests/fixtures/pvm_poseidon2_v0_31.bin");
         let proof = StarkProof::new(PROOF_BYTES.to_vec(), HashFunction::Poseidon2);
 
-        verify_deferred(&proof, root).expect("pinned poseidon2 proof must verify");
+        assert!(verify_deferred(&proof, pinned_keccak_root()).is_err());
+        assert!(verify_deferred(&proof, TRUE_DIGEST).is_err());
+    }
+
+    #[test]
+    fn verifies_pinned_current_poseidon2_proof() {
+        // This proof uses the b"abc" Keccak witness from the precompile prover tests.
+        const PROOF_BYTES: &[u8] = include_bytes!("../tests/fixtures/pvm_poseidon2_v0_35.bin");
+        let proof = StarkProof::new(PROOF_BYTES.to_vec(), HashFunction::Poseidon2);
+
+        verify_deferred(&proof, pinned_keccak_root()).expect("current Poseidon2 proof must verify");
         assert!(verify_deferred(&proof, TRUE_DIGEST).is_err());
     }
 

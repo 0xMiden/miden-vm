@@ -21,9 +21,10 @@ use crate::{
         keccak::{
             round::RoundRequires,
             sponge::{
-                COL_B_BEGIN, COL_B_RANGE, COL_CHUNK_LO, COL_CHUNK_PTR, COL_PADDED_HI,
-                COL_SPONGE_SEQ_ID, KeccakSpongeAir, KeccakSpongeMsg, NUM_AUX_COLS, NUM_B_SELECTORS,
-                NUM_MAIN_COLS, NUM_PERIODIC_COLS, SPONGE_PERIOD,
+                CHUNK_BYTES_RANGE, COL_B_BEGIN, COL_B_RANGE, COL_CHUNK_LO, COL_CHUNK_PTR,
+                COL_IS_CHUNK_AVAIL, COL_PADDED_HI, COL_SPONGE_SEQ_ID, KeccakSpongeAir,
+                KeccakSpongeMsg, NUM_AUX_COLS, NUM_B_SELECTORS, NUM_MAIN_COLS, NUM_PERIODIC_COLS,
+                SPONGE_PERIOD,
                 trace::{Invocation, SpongeRequires, generate_trace, keccak_oracle},
             },
         },
@@ -185,9 +186,8 @@ fn log_quotient_degree_matches_design_target() {
 
 #[test]
 fn constraints_hold_on_empty_invocation() {
-    // Empty input — the padding-only edge case. One block with the
-    // pad row at slot 0 (`byte_offset = 0`) and no chunk-tape lanes
-    // consumed (the chunk chiplet emits 0 chunks for an empty input).
+    // Empty input has one padding block. Its pad row is at slot 0,
+    // and the first four rate rows consume the canonical zero chunk.
     check_invocation(0xe_0_0_0, Invocation { input: vec![] });
 }
 
@@ -519,4 +519,99 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
     let (sponge_req, _chunk, _p2) = build_sponge_requires(&[Invocation { input: vec![0xab] }]);
     let main = generate_trace(sponge_req);
     crate::tests::check_local(AuxCorruptAir, &main);
+}
+
+// TAPE CONSUMPTION
+// ================================================================================================
+
+fn single_invocation_trace(input: Vec<u8>) -> miden_core::utils::RowMajorMatrix<Felt> {
+    let (sponge_req, _chunk, _p2) = build_sponge_requires(&[Invocation { input }]);
+    let main = generate_trace(sponge_req);
+    crate::tests::check_local(KeccakSpongeAir, &main);
+    main
+}
+
+fn set_cell(main: &mut miden_core::utils::RowMajorMatrix<Felt>, row: usize, col: usize, v: Felt) {
+    main.values[row * NUM_MAIN_COLS + col] = v;
+}
+
+#[test]
+fn constraints_hold_when_pad_lane_has_no_message_bytes() {
+    // Lengths that are multiples of 8 put the pad at byte 0 of its lane; for multiples of 32 the
+    // tape has no lane there at all, so the pad row consumes nothing.
+    let mut rng = StdRng::seed_from_u64(0x7a9e);
+    for len in [8usize, 16, 24, 32, 64, 128, 136, 264] {
+        let input: Vec<u8> = (0..len).map(|_| rng.random()).collect();
+        check_invocation(0x7a9e, Invocation { input });
+    }
+}
+
+#[test]
+fn non_last_block_cannot_skip_tape_lanes() {
+    // 136 zero bytes: two blocks, 20 tape lanes. Block 0 consumes no lane (absorbing zeros) and
+    // the last block consumes all 20 past the pad, where they are ignored.
+    let mut main = single_invocation_trace(vec![0u8; 136]);
+    for row in 0..SPONGE_PERIOD {
+        set_cell(&mut main, row, COL_IS_CHUNK_AVAIL, Felt::ZERO);
+        set_cell(&mut main, row, COL_CHUNK_PTR, Felt::ZERO);
+    }
+    let mut consumed = 0u32;
+    for slot in 0..SPONGE_PERIOD {
+        let row = SPONGE_PERIOD + slot;
+        set_cell(&mut main, row, COL_IS_CHUNK_AVAIL, Felt::from(u8::from(slot < 29)));
+        set_cell(&mut main, row, COL_CHUNK_PTR, Felt::from(consumed));
+        if slot < 17 || (26..29).contains(&slot) {
+            consumed += 1;
+        }
+    }
+    assert_eq!(consumed, 20);
+    crate::tests::assert_local_rejects(KeccakSpongeAir, &main);
+}
+
+#[test]
+fn pad_lane_with_message_bytes_must_be_consumed() {
+    // 33 bytes: the pad sits at byte 1 of lane 4, which holds message byte 32 (zero here, so the
+    // honest lane is zero too). Stopping consumption at the pad row would absorb that byte as 0
+    // whatever the tape holds.
+    let mut rng = StdRng::seed_from_u64(0x9ad0);
+    let mut input: Vec<u8> = (0..33).map(|_| rng.random()).collect();
+    input[32] = 0;
+    let mut main = single_invocation_trace(input);
+    for row in 4..SPONGE_PERIOD {
+        set_cell(&mut main, row, COL_IS_CHUNK_AVAIL, Felt::ZERO);
+        set_cell(&mut main, row, COL_CHUNK_PTR, Felt::from(4u8));
+    }
+    crate::tests::assert_local_rejects(KeccakSpongeAir, &main);
+}
+
+#[test]
+fn tape_lane_past_the_pad_must_be_zero() {
+    // 33 bytes: rows 5..8 consume the zero padding of the second chunk. A nonzero lane there
+    // would commit to a preimage whose padding is not zero.
+    let mut rng = StdRng::seed_from_u64(0x9ad1);
+    let input: Vec<u8> = (0..33).map(|_| rng.random()).collect();
+    let honest = single_invocation_trace(input);
+    for half in 0..2 {
+        let mut main = honest.clone();
+        set_cell(&mut main, 6, COL_CHUNK_LO + half, Felt::ONE);
+        set_cell(&mut main, 6, CHUNK_BYTES_RANGE.start + 4 * half, Felt::ONE);
+        crate::tests::assert_local_rejects(KeccakSpongeAir, &main);
+    }
+}
+
+#[test]
+fn pad_lane_bytes_after_the_message_must_be_zero() {
+    // 33 bytes: the pad row's lane holds message byte 32 at byte 0; byte 1 onwards is padding.
+    let mut rng = StdRng::seed_from_u64(0x9ad2);
+    let input: Vec<u8> = (0..33).map(|_| rng.random()).collect();
+    let honest = single_invocation_trace(input);
+    // (half, byte within the lane): byte 1 is in the low half, byte 5 in the high half.
+    for (half, byte) in [(0usize, 1usize), (1, 5)] {
+        let mut main = honest.clone();
+        let cell = 4 * NUM_MAIN_COLS + COL_CHUNK_LO + half;
+        let shift = 8 * (byte - 4 * half) as u32;
+        main.values[cell] += Felt::from(0xabu32 << shift);
+        set_cell(&mut main, 4, CHUNK_BYTES_RANGE.start + byte, Felt::from(0xabu8));
+        crate::tests::assert_local_rejects(KeccakSpongeAir, &main);
+    }
 }

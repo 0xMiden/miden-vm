@@ -11,7 +11,8 @@ use std::vec;
 use miden_core::{
     Felt,
     deferred::{Digest, Node},
-    field::QuadFelt,
+    field::{Field, QuadFelt},
+    utils::RowMajorMatrix,
 };
 use miden_lifted_air::{BaseAir, LiftedAir};
 use miden_precompiles::Keccak256Precompile;
@@ -23,10 +24,10 @@ use crate::{
         keccak::{
             node::{
                 COL_ACT, COL_CHUNK_SEQ_ID_HEAD, COL_D_BEGIN, COL_H_DIGEST_CHUNKS_BEGIN,
-                COL_H_INPUT_CHUNKS_BEGIN, COL_H_KECCAK_BEGIN, COL_LEN_BYTES, COL_N_CHUNKS,
-                COL_N_SPONGE_PERMS, COL_PERM_SEQ_ID_CHUNKS, COL_PERM_SEQ_ID_DIGEST_CHUNKS,
-                COL_PERM_SEQ_ID_KECCAK, COL_SPONGE_SEQ_ID_HEAD, KeccakNodeAir, NUM_AUX_COLS,
-                NUM_HASH, NUM_MAIN_COLS,
+                COL_H_INPUT_CHUNKS_BEGIN, COL_H_KECCAK_BEGIN, COL_LAST_CHUNK_REM, COL_LEN_BYTES,
+                COL_N_CHUNKS, COL_N_CHUNKS_INV, COL_N_SPONGE_PERMS, COL_PERM_SEQ_ID_CHUNKS,
+                COL_PERM_SEQ_ID_DIGEST_CHUNKS, COL_PERM_SEQ_ID_KECCAK, COL_SPONGE_SEQ_ID_HEAD,
+                KeccakNodeAir, NUM_AUX_COLS, NUM_HASH, NUM_MAIN_COLS,
                 trace::{KeccakNodeInvocation, generate_trace_from_invocations},
             },
             sponge::trace::SpongeSeqId,
@@ -89,11 +90,40 @@ fn next_inv(prev: &KeccakNodeInvocation, seed: u64, len_bytes: u32) -> KeccakNod
     }
 }
 
+fn single_node_trace(len_bytes: u32) -> RowMajorMatrix<Felt> {
+    let main = generate_trace_from_invocations(&[anchored_inv(0x11, len_bytes)]);
+    crate::tests::check_local(KeccakNodeAir, &main);
+    main
+}
+
+/// `is_empty = 32·(n_chunks − 1) + remainder + 1 − len_bytes` of a node row.
+fn is_empty(row: &[Felt]) -> Felt {
+    Felt::from(32u8) * (row[COL_N_CHUNKS] - Felt::ONE) + row[COL_LAST_CHUNK_REM] + Felt::ONE
+        - row[COL_LEN_BYTES]
+}
+
+/// Set a node row's chunk count, its inverse (zero for a zero count), and last-chunk remainder.
+fn set_chunk_count(row: &mut [Felt], n_chunks: Felt, remainder: Felt) {
+    row[COL_N_CHUNKS] = n_chunks;
+    row[COL_N_CHUNKS_INV] = n_chunks.try_inverse().unwrap_or(Felt::ZERO);
+    row[COL_LAST_CHUNK_REM] = remainder;
+}
+
+/// Recast a 32-byte node row as two chunks with remainder −1, which satisfies the length
+/// equation. Returns the `Xor` byte-pair tuple the row then consumes.
+pub(super) fn forge_out_of_range_remainder(row: &mut [Felt]) -> [Felt; 3] {
+    assert_eq!(row[COL_LEN_BYTES], Felt::from(32u8));
+    let remainder = -Felt::ONE;
+    set_chunk_count(row, Felt::from(2u8), remainder);
+    assert_eq!(is_empty(row), Felt::ZERO);
+    [remainder, Felt::from(31u8) - remainder, Felt::from(31u8)]
+}
+
 // LAYOUT / STRUCTURAL
 // ================================================================================================
 
 #[test]
-fn main_column_layout_partitions_30_indices() {
+fn main_column_layout_partitions_32_indices() {
     use crate::hash::keccak::node::COL_OUT_MULT;
     assert_eq!(COL_ACT, 0);
     assert_eq!(COL_SPONGE_SEQ_ID_HEAD, 1);
@@ -109,7 +139,9 @@ fn main_column_layout_partitions_30_indices() {
     assert_eq!(COL_H_DIGEST_CHUNKS_BEGIN, 21);
     assert_eq!(COL_H_KECCAK_BEGIN, 25);
     assert_eq!(COL_OUT_MULT, 29);
-    assert_eq!(NUM_MAIN_COLS, 30);
+    assert_eq!(COL_LAST_CHUNK_REM, 30);
+    assert_eq!(COL_N_CHUNKS_INV, 31);
+    assert_eq!(NUM_MAIN_COLS, 32);
     assert_eq!(<KeccakNodeAir as BaseAir<Felt>>::width(&KeccakNodeAir), NUM_MAIN_COLS,);
 }
 
@@ -174,6 +206,81 @@ fn constraints_hold_on_single_invocation() {
 }
 
 #[test]
+fn chunk_count_accepts_empty_and_boundary_lengths() {
+    for len_bytes in [0, 1, 31, 32, 33, 64] {
+        check_with_invocations(0x11, &[anchored_inv(0x11, len_bytes)]);
+    }
+}
+
+#[test]
+fn final_node_cannot_redirect_chunk_tail() {
+    let first = anchored_inv(0x11, 32);
+    let last = next_inv(&first, 0x12, 32);
+    let mut main = generate_trace_from_invocations(&[first, last]);
+    crate::tests::check_local(KeccakNodeAir, &main);
+    assert_eq!(main.values[NUM_MAIN_COLS + COL_ACT], Felt::ONE);
+    assert_eq!(main.values[NUM_MAIN_COLS + COL_N_CHUNKS], Felt::ONE);
+
+    main.values[NUM_MAIN_COLS + COL_N_CHUNKS] = Felt::from(2u8);
+    main.values[NUM_MAIN_COLS + COL_N_CHUNKS_INV] = Felt::from(2u8).inverse();
+    crate::tests::assert_local_rejects(KeccakNodeAir, &main);
+}
+
+#[test]
+fn is_empty_must_be_binary() {
+    // Empty input claimed as two chunks gives `is_empty = 33`. The tail read at
+    // `perm_seq_id_chunks + 1` would bind `keccak("")` to a two-chunk commitment.
+    let mut main = single_node_trace(0);
+    let row = &mut main.values[..NUM_MAIN_COLS];
+    set_chunk_count(row, Felt::from(2u8), Felt::ZERO);
+    assert_eq!(is_empty(row), Felt::from(33u8));
+    crate::tests::assert_local_rejects(KeccakNodeAir, &main);
+}
+
+#[test]
+fn is_empty_cannot_cover_nonempty_input() {
+    // Two chunks with remainder 0 describe 33 bytes; claiming 32 sets `is_empty = 1`. The claim
+    // would bind the Keccak digest of 32 bytes to a two-chunk commitment.
+    let mut main = single_node_trace(33);
+    main.values[COL_LEN_BYTES] = Felt::from(32u8);
+    assert_eq!(is_empty(&main.values[..NUM_MAIN_COLS]), Felt::ONE);
+    crate::tests::assert_local_rejects(KeccakNodeAir, &main);
+}
+
+#[test]
+fn is_empty_cannot_cover_a_remainder() {
+    // Empty input with remainder 1 holds only for the field-wrapped `n_chunks = 1 − 1/32`.
+    // This guard rules out that remainder locally, independent of the tail lookup.
+    let mut main = single_node_trace(0);
+    let row = &mut main.values[..NUM_MAIN_COLS];
+    let remainder = Felt::ONE;
+    set_chunk_count(row, Felt::ONE - remainder * Felt::from(32u8).inverse(), remainder);
+    assert_eq!(is_empty(row), Felt::ONE);
+    crate::tests::assert_local_rejects(KeccakNodeAir, &main);
+}
+
+#[test]
+fn chunk_count_must_be_nonzero() {
+    // Zero chunks with remainder 31 give `is_empty = 0` for empty input. The tail read would
+    // target the Poseidon2 cycle before this invocation's chunk-chain head.
+    let mut main = single_node_trace(0);
+    let row = &mut main.values[..NUM_MAIN_COLS];
+    set_chunk_count(row, Felt::ZERO, Felt::from(31u8));
+    assert_eq!(is_empty(row), Felt::ZERO);
+    crate::tests::assert_local_rejects(KeccakNodeAir, &main);
+}
+
+#[test]
+fn chunk_remainder_is_range_checked() {
+    // 32 bytes as two chunks satisfy every local constraint with remainder −1; the row must then
+    // request `Xor(−1, 32) = 31`, which the byte-pair table never provides.
+    let mut main = single_node_trace(32);
+    let tuple = forge_out_of_range_remainder(&mut main.values[..NUM_MAIN_COLS]);
+    crate::tests::check_local(KeccakNodeAir, &main);
+    crate::tests::bus_balance::assert_unprovidable_xor_lookup(&KeccakNodeAir, &main, tuple);
+}
+
+#[test]
 fn constraints_hold_on_multi_invocation_with_continuity() {
     let inv0 = anchored_inv(0xa0, 50);
     let inv1 = next_inv(&inv0, 0xa1, 100);
@@ -196,7 +303,7 @@ fn constraints_hold_on_empty_trace() {
 fn corrupt_and_check(
     _seed: u64,
     invocations: &[KeccakNodeInvocation],
-    corruption: impl FnOnce(&mut miden_core::utils::RowMajorMatrix<Felt>),
+    corruption: impl FnOnce(&mut RowMajorMatrix<Felt>),
 ) {
     let mut main = generate_trace_from_invocations(invocations);
     corruption(&mut main);

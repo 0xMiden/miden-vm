@@ -5,12 +5,17 @@ use std::{collections::HashMap, fmt::Debug, format, string::String, vec::Vec};
 use miden_air::lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions};
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_lifted_air::LiftedAir;
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
     hash::{chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir},
     logup::LookupMessage,
-    primitives::byte_pair_lut::BytePairLutAir,
+    primitives::byte_pair_lut::{
+        BytePairLutAir, BytePairLutMsg, BytePairOp, NUM_PREPROCESSED_COLS, PRE_A, PRE_B, PRE_C_XOR,
+        preprocessed_table,
+    },
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::{ChipletAir, NUM_CHIPLETS, fixed_ecgroup_msgs, fixed_uintval_msgs},
     transcript::{eval::TranscriptEvalAir, poseidon2::Poseidon2Air},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
@@ -37,6 +42,37 @@ pub(crate) fn fold_balance<A>(
             .or_insert_with(|| (Felt::ZERO, core::any::type_name::<A>().into()))
             .0 += multiplicity;
     }
+}
+
+/// Assert that `main` consumes `BytePairLut(Xor, a, b, c)` once and that no byte-pair table row
+/// provides it.
+pub(crate) fn assert_unprovidable_xor_lookup<A>(
+    air: &A,
+    main: &RowMajorMatrix<Felt>,
+    [a, b, c]: [Felt; 3],
+) where
+    A: LiftedAir<Felt, QuadFelt> + Sync,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+{
+    let mut rng = StdRng::seed_from_u64(0xb9e1);
+    let challenges = Challenges::new(
+        QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()]),
+        QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()]),
+        MAX_MESSAGE_WIDTH,
+        NUM_BUS_IDS,
+    );
+    let op = Felt::from(BytePairOp::Xor.tag());
+    let consume = BytePairLutMsg { op, a, b, c }.encode(&challenges);
+    let mut net = HashMap::new();
+    fold_balance(air, main, &challenges, &mut net);
+    let mult = net.get(&consume).map_or(Felt::ZERO, |(mult, _)| *mult);
+    assert_eq!(mult, Felt::ONE, "the row must consume the tuple once");
+
+    let provided = preprocessed_table()
+        .values
+        .chunks(NUM_PREPROCESSED_COLS)
+        .any(|row| row[PRE_A] == a && row[PRE_B] == b && row[PRE_C_XOR] == c);
+    assert!(!provided, "the byte-pair table must not provide the tuple");
 }
 
 /// Fold verifier-side fixed-environment boundary consumes into the accumulator.

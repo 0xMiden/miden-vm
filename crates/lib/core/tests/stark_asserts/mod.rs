@@ -15,9 +15,9 @@ use crate::{
     },
 };
 
-const TRACE_LENGTH_LOG_PTR: u32 = 3223322634;
+const LOG_TRACE_LENGTH_PTR: u32 = 3223322634;
 const ORDER_TAG_PTR: u32 = 3223322639;
-const AIR_TRACE_LENGTH_LOGS_PTR: u32 = 3223322736;
+const LOG_AIR_TRACE_LENGTHS_PTR: u32 = 3223322736;
 const OOD_EVALUATIONS_ADDRESS_PTR: u32 = 3223322761;
 const CURRENT_TRACE_ROW_ADDRESS_PTR: u32 = 3223322762;
 
@@ -59,12 +59,13 @@ fn validate_inputs_source(
 ) -> String {
     format!(
         "use miden::core::stark::utils
-         use miden::core::stark::constants
+         use {{DEEP_POW_BITS_PTR, FOLDING_POW_BITS_PTR}} from miden::core::stark::constants
+         use {{NUM_QUERIES_PTR, QUERY_POW_BITS_PTR}} from miden::core::stark::constants
          begin
-             push.{num_queries} exec.constants::set_number_queries
-             push.{query_pow_bits} exec.constants::set_query_pow_bits
-             push.{deep_pow_bits} exec.constants::set_deep_pow_bits
-             push.{folding_pow_bits} exec.constants::set_folding_pow_bits
+             push.{num_queries} mem_store.NUM_QUERIES_PTR
+             push.{query_pow_bits} mem_store.QUERY_POW_BITS_PTR
+             push.{deep_pow_bits} mem_store.DEEP_POW_BITS_PTR
+             push.{folding_pow_bits} mem_store.FOLDING_POW_BITS_PTR
              exec.utils::validate_inputs
          end"
     )
@@ -122,10 +123,10 @@ fn load_air_context_rejects_a_non_u32_trace_length() {
 #[test]
 fn load_air_context_stores_shape_and_max_height() {
     let output = execute_load_air_context(8, 10, 9);
-    assert_eq!(read_memory(&output, AIR_TRACE_LENGTH_LOGS_PTR), 8);
-    assert_eq!(read_memory(&output, AIR_TRACE_LENGTH_LOGS_PTR + 1), 10);
-    assert_eq!(read_memory(&output, AIR_TRACE_LENGTH_LOGS_PTR + 2), 9);
-    assert_eq!(read_memory(&output, TRACE_LENGTH_LOG_PTR), 10);
+    assert_eq!(read_memory(&output, LOG_AIR_TRACE_LENGTHS_PTR), 8);
+    assert_eq!(read_memory(&output, LOG_AIR_TRACE_LENGTHS_PTR + 1), 10);
+    assert_eq!(read_memory(&output, LOG_AIR_TRACE_LENGTHS_PTR + 2), 9);
+    assert_eq!(read_memory(&output, LOG_TRACE_LENGTH_PTR), 10);
     assert_eq!(read_memory(&output, OOD_EVALUATIONS_ADDRESS_PTR), VM_OOD_EVALUATIONS_PTR as u64);
     assert_eq!(
         read_memory(&output, CURRENT_TRACE_ROW_ADDRESS_PTR),
@@ -239,11 +240,11 @@ fn validate_inputs_rejects_non_u32_security_parameters() {
 fn init_seed_trace_length_too_large_has_message() {
     // log(trace_length) = 32 overflows u32 in init_seed's `pow2` step.
     let source = "
-        use miden::core::stark::constants
+        use {RELATION_DIGEST_PTR, LOG_TRACE_LENGTH_PTR} from miden::core::stark::constants
         use miden::core::stark::random_coin
         begin
-            push.32 exec.constants::set_trace_length_log
-            push.0.0.0.0 exec.constants::relation_digest_ptr mem_storew_le dropw
+            push.32 mem_store.LOG_TRACE_LENGTH_PTR
+            push.0.0.0.0 mem_storew_le.RELATION_DIGEST_PTR dropw
             exec.random_coin::init_seed
         end
     ";
@@ -258,14 +259,16 @@ fn check_pow_invalid_has_message() {
     // The advice nonce (0) will fail the PoW check.
     let source = "
         use miden::core::stark::random_coin
-        use miden::core::stark::constants
+        use {DEEP_POW_BITS_PTR, FOLDING_POW_BITS_PTR} from miden::core::stark::constants
+        use {NUM_QUERIES_PTR, QUERY_POW_BITS_PTR} from miden::core::stark::constants
+        use {RELATION_DIGEST_PTR, LOG_TRACE_LENGTH_PTR} from miden::core::stark::constants
         begin
-            push.27 exec.constants::set_number_queries
-            push.16 exec.constants::set_query_pow_bits
-            push.0  exec.constants::set_deep_pow_bits
-            push.16 exec.constants::set_folding_pow_bits
-            push.10 exec.constants::set_trace_length_log
-            push.0.0.0.0 exec.constants::relation_digest_ptr mem_storew_le dropw
+            push.27 mem_store.NUM_QUERIES_PTR
+            push.16 mem_store.QUERY_POW_BITS_PTR
+            push.0  mem_store.DEEP_POW_BITS_PTR
+            push.16 mem_store.FOLDING_POW_BITS_PTR
+            push.10 mem_store.LOG_TRACE_LENGTH_PTR
+            push.0.0.0.0 mem_storew_le.RELATION_DIGEST_PTR dropw
             exec.random_coin::init_seed
             exec.random_coin::check_query_pow
         end
@@ -427,11 +430,11 @@ fn derive_order_tag_from_heights_matches_the_registry_air_limit() {
 fn relation_constraint_evaluators_reject_padding_order_tags() {
     for (relation, order_count) in [("vm", 6), ("pvm", 3_628_800)] {
         let source = format!(
-            "use miden::core::stark::constants
+            "use {{ORDER_TAG_PTR, LOG_TRACE_LENGTH_PTR}} from miden::core::stark::constants
              use miden::core::sys::{relation}::constraints_eval
              begin
-                 push.{order_count} exec.constants::set_order_tag
-                 push.8 exec.constants::set_trace_length_log
+                 push.{order_count} mem_store.ORDER_TAG_PTR
+                 push.8 mem_store.LOG_TRACE_LENGTH_PTR
                  exec.constraints_eval::execute_constraint_evaluation_check
              end"
         );
@@ -482,52 +485,52 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("DOMAIN_OFFSET_INV_PTR", 0, 1),
         ("LDE_DOMAIN_INFO_PTR", 0, 4),
         ("LDE_DOMAIN_SIZE_PTR", 0, 1),
-        ("LDE_DOMAIN_LOG_SIZE_PTR", 0, 1),
-        ("LDE_DOMAIN_GEN_PTR", 0, 1),
+        ("LOG_LDE_DOMAIN_SIZE_PTR", 0, 1),
+        ("LDE_DOMAIN_GENERATOR_PTR", 0, 1),
         ("NUM_QUERIES_PTR", 0, 1),
         ("REMAINDER_POLY_SIZE_PTR", 0, 1),
         ("NUM_FRI_LAYERS_PTR", 0, 1),
         ("REMAINDER_POLY_ADDRESS_PTR", 0, 1),
         ("TRACE_LENGTH_PTR", 0, 1),
         ("FRI_QUERIES_ADDRESS_PTR", 0, 1),
-        ("TRACE_LENGTH_LOG_PTR", 0, 1),
+        ("LOG_TRACE_LENGTH_PTR", 0, 1),
         ("MAIN_TRACE_COM_PTR", 0, 4),
         ("AUX_TRACE_COM_PTR", 0, 4),
         ("COMPOSITION_POLY_COM_PTR", 0, 4),
-        ("Z_PTR", 0, 4),
+        ("OOD_POINT_PTR", 0, 4),
         ("ZERO_WORD_PTR", 0, 4),
-        ("ALPHA_DEEP_ND_PTR", 0, 4),
-        ("OOD_FIXED_TERM_HORNER_EVALS_PTR", 0, 4),
+        ("DEEP_ALPHA_ADVICE_PTR", 0, 4),
+        ("OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR", 0, 4),
         ("TRACE_DOMAIN_GENERATOR_PTR", 0, 1),
         ("PUBLIC_INPUTS_ADDRESS_PTR", 0, 1),
         ("FRI_VERIFY_STATE_PTR", 0, 4),
-        ("C_PTR", 0, 4),
-        ("R1_PTR", 0, 4),
-        ("R2_PTR", 0, 4),
-        ("TMP1", 0, 4),
-        ("TMP2", 0, 4),
-        ("TMP3", 0, 4),
-        ("TMP4", 0, 4),
-        ("COMPOSITION_COEF_PTR", 0, 4),
-        ("DEEP_RAND_CC_PTR", 0, 4),
-        ("NUM_FIXED_LEN_PUBLIC_INPUTS_PTR", 0, 1),
+        ("RANDOM_COIN_CAPACITY_PTR", 0, 4),
+        ("RANDOM_COIN_RATE_1_PTR", 0, 4),
+        ("RANDOM_COIN_RATE_2_PTR", 0, 4),
+        ("TMP1_PTR", 0, 4),
+        ("TMP2_PTR", 0, 4),
+        ("TMP3_PTR", 0, 4),
+        ("TMP4_PTR", 0, 4),
+        ("CONSTRAINT_COMPOSITION_COEFS_PTR", 0, 4),
+        ("DEEP_COMPOSITION_COEFS_PTR", 0, 4),
+        ("NUM_FIXED_LENGTH_PUBLIC_INPUTS_PTR", 0, 1),
         ("NUM_ACE_INPUTS_PTR", 0, 1),
         ("NUM_ACE_GATES_PTR", 0, 1),
-        ("MAX_CYCLE_LEN_LOG_PTR", 0, 1),
+        ("LOG_MAX_CYCLE_LENGTH_PTR", 0, 1),
         ("QUERY_POW_BITS_PTR", 0, 1),
         ("DEEP_POW_BITS_PTR", 0, 1),
         ("FOLDING_POW_BITS_PTR", 0, 1),
-        ("DYNAMIC_PROCEDURE_0_PTR", 0, 4),
-        ("DYNAMIC_PROCEDURE_1_PTR", 0, 4),
-        ("DYNAMIC_PROCEDURE_2_PTR", 0, 4),
-        ("DYNAMIC_PROCEDURE_3_PTR", 0, 4),
-        ("DYNAMIC_PROCEDURE_4_PTR", 0, 4),
-        ("RANDOM_COIN_INPUT_LEN_PTR", 0, 1),
-        ("RANDOM_COIN_OUTPUT_LEN_PTR", 0, 1),
+        ("HOOK_COMPUTE_DEEP_COMPOSITION_POLYNOMIAL_QUERIES_PTR", 0, 4),
+        ("HOOK_EXECUTE_CONSTRAINT_EVALUATION_CHECK_PTR", 0, 4),
+        ("HOOK_PROCESS_ROW_OOD_EVALUATIONS_PTR", 0, 4),
+        ("HOOK_PROCESS_PUBLIC_INPUTS_PTR", 0, 4),
+        ("HOOK_OBSERVE_AUX_TRACE_PTR", 0, 4),
+        ("RANDOM_COIN_INPUT_LENGTH_PTR", 0, 1),
+        ("RANDOM_COIN_OUTPUT_LENGTH_PTR", 0, 1),
         ("OOD_EVALUATIONS_ADDRESS_PTR", 0, 1),
         ("CURRENT_TRACE_ROW_ADDRESS_PTR", 0, 1),
         ("ORDER_TAG_PTR", 0, 1),
-        ("AIR_TRACE_LENGTH_LOGS_PTR", 0, 16),
+        ("LOG_AIR_TRACE_LENGTHS_PTR", 0, 16),
         ("RELATION_DIGEST_PTR", 0, 4),
         ("ACE_REGISTRY_ROOT_PTR", 0, 4),
         ("GENERIC_ALIGNMENT_PADDING_PTR", 0, 1),
@@ -541,13 +544,13 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
 
     // These declarations name fields inside LDE_DOMAIN_INFO_PTR rather than distinct storage.
     const GENERIC_ALIASES: &[&str] =
-        &["LDE_DOMAIN_SIZE_PTR", "LDE_DOMAIN_LOG_SIZE_PTR", "LDE_DOMAIN_GEN_PTR"];
+        &["LDE_DOMAIN_SIZE_PTR", "LOG_LDE_DOMAIN_SIZE_PTR", "LDE_DOMAIN_GENERATOR_PTR"];
 
     const GENERIC_FRAME_START: u64 = 3_223_322_624;
     const GENERIC_FRAME_END: u64 = 3_223_322_764;
     const VM_FRAME_END: u64 = 3_223_323_864;
     const PVM_FRAME_START: u64 = 3_225_426_424;
-    const PVM_FRAME_END: u64 = 3_225_444_220;
+    const PVM_FRAME_END: u64 = 3_225_444_308;
 
     /// `(path below asm/sys, name, offset from the declared address, extent in felts)`.
     /// New relation-owned addresses must be added here, including one-felt cells.
@@ -564,7 +567,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("pvm/layout.masm", "QUOTIENT_NEXT_PTR", 0, 16),
         ("pvm/layout.masm", "AUX_BUS_BOUNDARY_PTR", 0, 20),
         ("pvm/layout.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, 84),
-        ("pvm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 13824),
+        ("pvm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 13912),
         ("pvm/layout.masm", "BUS_GAMMA_PTR", 0, 4),
         ("pvm/layout.masm", "C_TOTAL_PTR", 0, 4),
         ("pvm/layout.masm", "CURRENT_TRACE_ROW_PTR", 0, 768),
@@ -655,8 +658,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
                     ConstantExpr::Int(value) => {
                         let value = value.inner().as_int();
                         let name = constant.name().as_str();
-                        let pointer_name = name.ends_with("_PTR")
-                            || matches!(name, "TMP1" | "TMP2" | "TMP3" | "TMP4");
+                        let pointer_name = name.ends_with("_PTR");
                         (address_only_module
                             || pointer_name
                             || ((1 << 31)..=u32::MAX as u64).contains(&value))
@@ -885,10 +887,10 @@ fn relation_height_setters_write_the_generic_array_in_order() {
      end";
     let (output, _) =
         build_test!(source, &[]).execute_for_output().expect("setters should execute");
-    assert_eq!(read_memory(&output, AIR_TRACE_LENGTH_LOGS_PTR), 11, "core at offset 0");
-    assert_eq!(read_memory(&output, AIR_TRACE_LENGTH_LOGS_PTR + 1), 22, "chiplets at offset 1");
+    assert_eq!(read_memory(&output, LOG_AIR_TRACE_LENGTHS_PTR), 11, "core at offset 0");
+    assert_eq!(read_memory(&output, LOG_AIR_TRACE_LENGTHS_PTR + 1), 22, "chiplets at offset 1");
     assert_eq!(
-        read_memory(&output, AIR_TRACE_LENGTH_LOGS_PTR + 2),
+        read_memory(&output, LOG_AIR_TRACE_LENGTHS_PTR + 2),
         33,
         "poseidon2_permutation at offset 2"
     );

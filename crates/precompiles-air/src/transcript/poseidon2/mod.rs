@@ -85,6 +85,9 @@ pub const NUM_WITNESSES: usize = 3;
 pub const COL_WITNESS_END: usize = COL_WITNESS_BEGIN + NUM_WITNESSES;
 
 /// First column of the cube registers (`x^3` per S-box on the busiest row).
+/// On row 15, the first register holds the inverse of `in_multiplicity` for
+/// real cycles. The AIR checks it when the cycle emits an output or supplies
+/// a continuation.
 pub const COL_CUBE_BEGIN: usize = COL_WITNESS_END;
 /// One past the last cube-register column.
 pub const COL_CUBE_END: usize = COL_CUBE_BEGIN + NUM_CUBE_REGS;
@@ -127,9 +130,7 @@ const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 1];
 /// Poseidon2 permutation chiplet AIR. 16-row period (one cycle = one
 /// permutation). Provides chunked permutation tuples on
 /// [`Poseidon2In`](crate::relations::BusId::Poseidon2In) and
-/// [`Poseidon2Out`](crate::relations::BusId::Poseidon2Out); range-checks
-/// `multiplicity` via the existing
-/// [`Range16`](crate::relations::BusId::Range16) bus.
+/// [`Poseidon2Out`](crate::relations::BusId::Poseidon2Out).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Poseidon2Air;
 
@@ -210,14 +211,18 @@ impl LiftedAir<Felt, QuadFelt> for Poseidon2Air {
         let is_absorb: AB::Expr = local[COL_IS_ABSORB].into();
         let is_absorb_next: AB::Expr = next[COL_IS_ABSORB].into();
 
-        // Activity gate for step transitions: any cycle with bus
-        // emissions on either side runs the permutation. Prevents the
-        // `in_mult = 0, out_mult > 0` fake-digest attack — under this
-        // gate, every published digest is a real Poseidon2 output of
-        // the prover-committed `state[0..12]` at row 0, so forging a
-        // specific target digest requires breaking Poseidon2 preimage
-        // resistance.
-        let activity: AB::Expr = in_multiplicity.clone() + out_multiplicity.clone();
+        // Input multiplicity gates the permutation. The first cube register
+        // is unused on row 15, where it certifies that an output or a
+        // continuation comes from a cycle with consumed inputs.
+        let in_multiplicity_inv = cube_regs[0].clone();
+        let needs_input = is_absorb_next.clone()
+            + (AB::Expr::ONE - is_absorb_next.clone()) * out_multiplicity.clone();
+        builder.assert_zero(
+            p_last_in_cycle.clone()
+                * needs_input
+                * (in_multiplicity.clone() * in_multiplicity_inv - AB::Expr::ONE),
+        );
+        let activity: AB::Expr = in_multiplicity.clone();
 
         // --- Boundary (`when_first_row`) -------------------------------
         builder.when_first_row().assert_zero(perm_seq_id.clone());
@@ -267,8 +272,8 @@ impl LiftedAir<Felt, QuadFelt> for Poseidon2Air {
         }
 
         // --- Poseidon2 step transitions -------------------------------
-        // Every step constraint is gated by `multiplicity` as well as
-        // its row selector. On padding cycles (mult = 0) the constraints
+        // Every step constraint is gated by `in_multiplicity` as well as its
+        // row selector. On padding cycles (`in_multiplicity = 0`) the constraints
         // vacuate, freeing the prover to zero-fill rather than evaluate
         // a dummy permutation. Each S-box's cube is committed to a
         // register (`cube_regs`), dropping its output degree from 7 to 3
@@ -399,10 +404,9 @@ where
         // Digest = state[0..4] at row 15.
         let digest: [LB::Expr; 4] = array::from_fn(|i| state[i].clone());
 
-        // Per-batch inner multiplicities (row gate pulled out into the
-        // outer batch flag). In-side bus emissions use in_multiplicity;
-        // out-side uses out_multiplicity. Both are plain counts pinned
-        // to their consumer counts by bus balance — not range-checked.
+        // Input multiplicity is bus-pinned on every cycle. Output multiplicity
+        // is bus-pinned when the output lookup fires; a continuation suppresses
+        // that lookup. Neither multiplicity is range-checked.
         let neg_in_mult: LB::Expr = LB::Expr::ZERO - in_multiplicity.clone();
         let neg_in_mult_cap: LB::Expr =
             (LB::Expr::ZERO - in_multiplicity) * (LB::Expr::ONE - is_absorb);
@@ -470,10 +474,6 @@ where
                                     Poseidon2InMsg::rate1(perm_seq_id.clone(), rate1_chunk),
                                     interaction_deg,
                                 );
-                                // The multiplicity is no longer range-checked:
-                                // it is pinned to the consumer count by bus
-                                // balance, so the activity gate `in + out`
-                                // can't wrap — see the design notes.
                                 b.insert(
                                     "out_rate0",
                                     m_out,
