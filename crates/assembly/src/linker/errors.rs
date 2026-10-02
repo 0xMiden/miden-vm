@@ -5,7 +5,7 @@ use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
     Felt, Path, Word,
-    ast::{SymbolResolutionError, constants::ConstEvalError},
+    ast::{ModuleIndex, SymbolResolutionError, constants::ConstEvalError},
     debuginfo::{SourceFile, SourceSpan},
     diagnostics::{Diagnostic, RelatedError, RelatedLabel, miette},
 };
@@ -44,6 +44,9 @@ pub enum LinkerError {
     #[error("duplicate definition found for module '{path}'")]
     #[diagnostic()]
     DuplicateModule { path: Arc<Path> },
+    #[error("too many modules in the graph (maximum: {})", ModuleIndex::MAX_MODULES)]
+    #[diagnostic()]
+    TooManyModules,
     #[error("invalid module surface metadata for package '{package}': {reason}")]
     #[diagnostic()]
     InvalidPackageModuleSurface { package: String, reason: String },

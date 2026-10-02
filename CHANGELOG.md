@@ -2,6 +2,10 @@
 
 ## v1.0.0 (Unreleased)
 
+#### Fixes
+
+- Fixed linker module-capacity overflow so AST and pre-assembled module registration return a structured error instead of panicking ([#3895](https://github.com/0xMiden/miden-vm/issues/3895)).
+
 ## v0.35.0 (2026-10-01)
 
 #### Changes
