@@ -32,8 +32,8 @@ use crate::merkle::{
 ///
 /// # Serialization
 ///
-/// Deserialization validates node indices and checks each leaf map key against the index embedded
-/// in its value.
+/// Deserialization requires canonical map ordering, rejects overlap between populated and
+/// value-only leaves, validates node indices, and checks each leaf key against its embedded index.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UniqueNodes {
     /// The expected root of the tree after reconstruction.
@@ -86,13 +86,21 @@ impl UniqueNodes {
             .unwrap_or_else(|| *EmptySubtreeRoots::entry(SMT_DEPTH, index.depth()))
     }
 
-    /// Checks that each leaf is stored under its embedded tree position.
+    /// Checks that each leaf is stored under its embedded position and the leaf maps are disjoint.
     pub(super) fn validate(&self) -> Result<(), DeserializationError> {
         for (&position, leaf) in &self.leaves {
             if position != leaf.index().position() {
                 return Err(DeserializationError::InvalidValue(format!(
                     "Node index {position} did not match the embedded leaf index {}",
                     leaf.index().position()
+                )));
+            }
+        }
+
+        for position in self.value_only_leaves.keys() {
+            if self.leaves.contains_key(position) {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "Leaf position {position} is present as both a populated and value-only leaf"
                 )));
             }
         }
@@ -158,13 +166,36 @@ impl Deserializable for UniqueNodes {
         // We first have to read the count of levels.
         let level_count = source.read_u64()?;
         let mut nodes = BTreeMap::new();
+        let mut previous_depth = None;
 
         // Next we have that many levels to read, but each is of a variable size.
         for _ in 0..level_count {
             let depth = source.read_u8()?;
+            if previous_depth.is_some_and(|previous| depth <= previous) {
+                return Err(DeserializationError::InvalidValue(
+                    "UniqueNodes levels must be in strictly increasing depth order".to_string(),
+                ));
+            }
+            previous_depth = Some(depth);
+
             let node_count = source.read_u64()?;
+            if node_count == 0 {
+                return Err(DeserializationError::InvalidValue(
+                    "UniqueNodes levels must not be empty".to_string(),
+                ));
+            }
+
+            let mut previous_position = None;
             for _ in 0..node_count {
                 let position = source.read_u64()?;
+                if previous_position.is_some_and(|previous| position <= previous) {
+                    return Err(DeserializationError::InvalidValue(
+                        "UniqueNodes node positions must be in strictly increasing order"
+                            .to_string(),
+                    ));
+                }
+                previous_position = Some(position);
+
                 let index = NodeIndex::new(depth, position)
                     .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
                 let value = source.read()?;
@@ -175,20 +206,35 @@ impl Deserializable for UniqueNodes {
         // Next we need the number of leaves.
         let leaf_count = source.read_u64()?;
         let mut leaves = BTreeMap::new();
+        let mut previous_position = None;
 
         // And then we have to read that many leaves.
         for _ in 0..leaf_count {
             let (position, leaf) = source.read()?;
+            if previous_position.is_some_and(|previous| position <= previous) {
+                return Err(DeserializationError::InvalidValue(
+                    "UniqueNodes leaf positions must be in strictly increasing order".to_string(),
+                ));
+            }
+            previous_position = Some(position);
             leaves.insert(position, leaf);
         }
 
         // Finally we read the number of value-only leaves...
         let value_only_leaf_count = source.read_u64()?;
         let mut value_only_leaves = BTreeMap::new();
+        let mut previous_position = None;
 
         // ... and read that many.
         for _ in 0..value_only_leaf_count {
             let (position, value) = source.read()?;
+            if previous_position.is_some_and(|previous| position <= previous) {
+                return Err(DeserializationError::InvalidValue(
+                    "UniqueNodes value-only leaf positions must be in strictly increasing order"
+                        .to_string(),
+                ));
+            }
+            previous_position = Some(position);
             value_only_leaves.insert(position, value);
         }
 

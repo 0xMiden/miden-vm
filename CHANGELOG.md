@@ -2,6 +2,10 @@
 
 ## v1.0.0 (Unreleased)
 
+#### Fixes
+
+- Fixed crypto `UniqueNodes` deserialization accepting duplicate or unordered positions, unordered or empty node levels, and overlapping leaf sections ([#3965](https://github.com/0xMiden/miden-vm/issues/3965)).
+
 ## v0.35.0 (2026-10-01)
 
 #### Changes

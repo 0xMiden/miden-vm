@@ -1,10 +1,10 @@
 #![cfg(test)]
 //! Handwritten tests for partial SMT serialization.
 
-use alloc::collections::BTreeMap;
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_field::{Felt, Word};
-use miden_serde_utils::{Deserializable, Serializable};
+use miden_serde_utils::{ByteWriter, Deserializable, Serializable};
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
@@ -12,6 +12,39 @@ use crate::merkle::{
     EmptySubtreeRoots, NodeIndex,
     smt::{LeafIndex, SMT_DEPTH, SmtLeaf, UniqueNodes},
 };
+
+fn write_unique_nodes_payload(
+    levels: &[(u8, &[(u64, Word)])],
+    leaves: &[(u64, SmtLeaf)],
+    value_only_leaves: &[(u64, Word)],
+) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    Word::default().write_into(&mut bytes);
+
+    bytes.write_u64(levels.len() as u64);
+    for (depth, nodes) in levels {
+        bytes.write_u8(*depth);
+        bytes.write_u64(nodes.len() as u64);
+        for (position, value) in *nodes {
+            bytes.write_u64(*position);
+            value.write_into(&mut bytes);
+        }
+    }
+
+    bytes.write_u64(leaves.len() as u64);
+    for (position, leaf) in leaves {
+        bytes.write_u64(*position);
+        leaf.write_into(&mut bytes);
+    }
+
+    bytes.write_u64(value_only_leaves.len() as u64);
+    for (position, value) in value_only_leaves {
+        bytes.write_u64(*position);
+        value.write_into(&mut bytes);
+    }
+
+    bytes
+}
 
 #[test]
 fn empty_unique_nodes_roundtrips() {
@@ -63,6 +96,68 @@ fn unique_nodes_rejects_mismatched_leaf_position() {
     value.leaves.insert(8, leaf);
 
     assert!(UniqueNodes::read_from_bytes(&value.to_bytes()).is_err());
+}
+
+#[test]
+fn unique_nodes_rejects_duplicate_node_positions() {
+    let nodes = [(1, Word::default()), (1, Word::from([1, 2, 3, 4u32]))];
+    let bytes = write_unique_nodes_payload(&[(2, &nodes)], &[], &[]);
+
+    assert!(UniqueNodes::read_from_bytes(&bytes).is_err());
+}
+
+#[test]
+fn unique_nodes_rejects_non_ascending_node_positions() {
+    let nodes = [(2, Word::default()), (1, Word::default())];
+    let bytes = write_unique_nodes_payload(&[(3, &nodes)], &[], &[]);
+
+    assert!(UniqueNodes::read_from_bytes(&bytes).is_err());
+}
+
+#[test]
+fn unique_nodes_rejects_non_ascending_levels() {
+    let first_level = [(0, Word::default())];
+    let second_level = [(0, Word::default())];
+    let bytes = write_unique_nodes_payload(&[(3, &first_level), (2, &second_level)], &[], &[]);
+
+    assert!(UniqueNodes::read_from_bytes(&bytes).is_err());
+}
+
+#[test]
+fn unique_nodes_rejects_empty_levels() {
+    let empty_level: [(u64, Word); 0] = [];
+    let bytes = write_unique_nodes_payload(&[(1, &empty_level)], &[], &[]);
+
+    assert!(UniqueNodes::read_from_bytes(&bytes).is_err());
+}
+
+#[test]
+fn unique_nodes_rejects_non_ascending_leaf_positions() {
+    let leaves = [
+        (8, SmtLeaf::new_empty(LeafIndex::new_max_depth(8))),
+        (7, SmtLeaf::new_empty(LeafIndex::new_max_depth(7))),
+    ];
+    let bytes = write_unique_nodes_payload(&[], &leaves, &[]);
+
+    assert!(UniqueNodes::read_from_bytes(&bytes).is_err());
+}
+
+#[test]
+fn unique_nodes_rejects_non_ascending_value_only_leaf_positions() {
+    let value_only_leaves = [(8, Word::default()), (7, Word::default())];
+    let bytes = write_unique_nodes_payload(&[], &[], &value_only_leaves);
+
+    assert!(UniqueNodes::read_from_bytes(&bytes).is_err());
+}
+
+#[test]
+fn unique_nodes_rejects_overlapping_leaf_representations() {
+    let position = 7;
+    let leaves = [(position, SmtLeaf::new_empty(LeafIndex::new_max_depth(position)))];
+    let value_only_leaves = [(position, Word::default())];
+    let bytes = write_unique_nodes_payload(&[], &leaves, &value_only_leaves);
+
+    assert!(UniqueNodes::read_from_bytes(&bytes).is_err());
 }
 
 #[test]
