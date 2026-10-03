@@ -377,6 +377,36 @@ fn deferred_state_accepts_msm_with_repeated_base() {
 }
 
 #[test]
+fn deferred_state_accepts_msm_nodes_sharing_one_expression() {
+    // All three MSM nodes name the same `(point, scalar)` pairs. The second names `2G` through an
+    // addition node, so it hashes differently while the importer derives the same expression for
+    // it as for the first; that expression is then resolved twice and each resolve needs an
+    // expression of its own. The third declares the pairs in the opposite order. The zero scalar
+    // takes the term-preserving fallback; the nonzero pair takes the joint ladder.
+    let curve = CurveId::Secp256k1;
+    let [(gx, gy), (g2x, g2y), (g3x, g3y)] = k1_points();
+    for (scalar_g, expected) in [(1u64, (g3x, g3y)), (0, (g2x, g2y))] {
+        let mut state = WitnessFixture::new();
+        let g = register_curve_point(&mut state, curve, gx, gy);
+        let g2 = register_curve_point(&mut state, curve, g2x, g2y);
+        let g2_added = register_curve_op(&mut state, CurvePrecompile::ADD_OP_ID, g, g);
+        let s_g = register_uint_value(&mut state, curve.scalar_domain(), U256::from(scalar_g));
+        let one = register_uint_value(&mut state, curve.scalar_domain(), from_hex("1"));
+        let expected = register_curve_point(&mut state, curve, expected.0, expected.1);
+        for pairs in [
+            vec![(g, s_g), (g2, one)],
+            vec![(g, s_g), (g2_added, one)],
+            vec![(g2, one), (g, s_g)],
+        ] {
+            let msm = register_curve_msm(&mut state, pairs);
+            let msm_eq = register_curve_op(&mut state, CurvePrecompile::EQ_OP_ID, msm, expected);
+            state.log_statement(msm_eq).expect("MSM equality logs");
+        }
+        translated_traces_check(&state);
+    }
+}
+
+#[test]
 fn trailing_zero_input_changes_root() {
     let abc = synthetic_keccak_state(b"abc");
     let abc_zero = synthetic_keccak_state(b"abc\0");

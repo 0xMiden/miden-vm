@@ -839,6 +839,8 @@ impl TranscriptEvalRequires {
         } else {
             duplicate(msm, expr)
         };
+        debug_assert_eq!(msm.value(resolved), val, "a resolved copy keeps the value");
+        debug_assert_eq!(msm.terms(resolved), msm.terms(expr), "a resolved copy keeps the terms");
         let absorption = eidos.require_absorption(frame, blocks.iter().copied());
         debug_assert_eq!(absorption.digest, h_claim);
         let _ = eidos.require_digest(absorption.digest);

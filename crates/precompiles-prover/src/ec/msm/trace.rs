@@ -613,9 +613,14 @@ impl EcMsmRequires {
     }
 
     /// Drops `key`'s dedup entry, so the next request for that relation lays a
-    /// fresh expression.
-    pub(crate) fn forget(&mut self, key: DedupKey) {
-        self.dedup.remove(&key);
+    /// fresh expression. Returns the expression the entry named.
+    pub(crate) fn forget(&mut self, key: DedupKey) -> Option<EcExprPtr> {
+        self.dedup.remove(&key)
+    }
+
+    /// Makes `expr` the dedup target for `key`.
+    pub(crate) fn remember(&mut self, key: DedupKey, expr: EcExprPtr) {
+        self.dedup.insert(key, expr);
     }
 
     /// Records the relation identity of the just-laid expression `e` and makes

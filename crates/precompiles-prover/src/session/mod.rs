@@ -439,7 +439,8 @@ impl Session {
     /// the chiplet's internal `idx` storage order (hence not of the
     /// addition-chain strategy). The caller's pairing is validated against the
     /// expression by the bus; each scalar node must be stored under the group's
-    /// scalar bound. Bumps the resolve use count on a new eval row.
+    /// scalar bound. On a new eval row, bumps the resolve use count of `expr`,
+    /// or of a fresh copy once `expr` is resolved.
     ///
     /// Panics unless `terms` is in exact 1:1 correspondence with `expr`'s own
     /// term rows — one pair per chiplet term, each pair a real term of
