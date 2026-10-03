@@ -450,7 +450,10 @@ impl Session {
     /// correspondence with the caller's original terms instead of collapsing
     /// two claim terms onto one merged row).
     pub fn ec_msm(&mut self, expr: EcExprPtr, terms: &[(EcNode, UintNode)]) -> EcNode {
-        self.eval.record_ec_msm(expr, terms, &mut self.msm, &mut self.eidos)
+        let (ec, uint) = (&mut self.ec, &mut self.uint);
+        self.eval.record_ec_msm(expr, terms, &mut self.msm, &mut self.eidos, |msm, expr| {
+            require::duplicate(msm, ec, uint, expr)
+        })
     }
 
     /// Number of MSM expressions laid so far (intros + endomorphism intros +

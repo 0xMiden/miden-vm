@@ -28,7 +28,7 @@ use miden_precompiles::{CurveId, CurvePoint, phi_generator};
 use crate::{
     ec::msm::{
         COL_A_DIFF_HI, COL_A_DIFF_LO, COL_A_EXPR, COL_B_DIFF_HI, COL_B_DIFF_LO, COL_BASE,
-        COL_BASE_A, COL_ENDO_MINTED, COL_EXPR_PTR, COL_IS_BOUNDARY, COL_IS_INTRO, COL_IS_NEG,
+        COL_BASE_A, COL_CLAIM_MULT, COL_ENDO_MINTED, COL_EXPR_PTR, COL_IS_BOUNDARY, COL_IS_INTRO, COL_IS_NEG,
         COL_LAMBDA_PTR, COL_NEG_MINTED, COL_SCALAR, COL_VAL, COL_VAL_A, EcMsmAir,
         NUM_MAIN_COLS as MSM_COLS,
     },
@@ -1128,4 +1128,77 @@ fn certificate_ordering_limbs_are_range_checked() {
         let mult = net.get(&out_of_range).map_or(Felt::ZERO, |(mult, _)| *mult);
         assert_eq!(mult, Felt::ONE, "the minting row must range-check its ordering limbs");
     }
+}
+
+// RESOLVE MULTIPLICITY
+// ================================================================================================
+
+/// One expression `⟨G×1, Q×1⟩` resolved by two claims that declare its terms in opposite orders.
+/// The claims hash differently, so each lays its own eval resolve run.
+fn msm_expression_resolved_twice_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+    let (g2x, g2y) = k256_coords(&(g + g));
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, g2x, g2y);
+    let ga = s.msm_intro(&g_pt);
+    let qb = s.msm_intro(&q_pt);
+    let expr = s.msm_combine(ga, qb);
+
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
+    let r_pt = s.ec_add(&g_pt, &q_pt);
+    let value_gq = s.ec_msm(expr, &[(g_pt, one), (q_pt, one)]);
+    let value_qg = s.ec_msm(expr, &[(q_pt, one), (g_pt, one)]);
+    let claim_gq = s.ec_is(&value_gq, &r_pt);
+    let claim_qg = s.ec_is(&value_qg, &r_pt);
+
+    let root = s.assert_and_fold([claim_gq, claim_qg]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_expression_resolved_twice_resolves_each_copy_once() {
+    // Every resolve consumes the claim terms of an expression no other resolve uses, so the
+    // second claim resolves a fresh copy of the shared expression.
+    let traces = msm_expression_resolved_twice_traces();
+    traces.check();
+    let main = &traces.mains()[9];
+    let rows = || main.values.chunks(MSM_COLS);
+    assert!(
+        rows().all(|row| row[COL_CLAIM_MULT] == Felt::ZERO || row[COL_CLAIM_MULT] == Felt::ONE),
+        "no expression may be resolved more than once",
+    );
+    let resolved = rows()
+        .filter(|row| row[COL_IS_BOUNDARY] == Felt::ONE && row[COL_CLAIM_MULT] == Felt::ONE)
+        .count();
+    assert_eq!(resolved, 2, "each claim resolves its own expression");
+}
+
+#[test]
+fn claim_mult_must_be_boolean() {
+    // Two resolves of one expression jointly consume twice its claim terms, so either resolve
+    // could absorb a different multiset, e.g. `{(G, 1), (G, 1)}` bound to the value of
+    // `{(G, 1), (Q, 1)}`. A resolve count above one must be rejected.
+    let traces = msm_two_term_ordered(false);
+    let mut main = traces.mains()[9].clone();
+    check_local_inputs(EcMsmAir, &main, traces.air_inputs());
+    let mut forged_rows = 0;
+    for row in main.values.chunks_mut(MSM_COLS) {
+        if row[COL_CLAIM_MULT] == Felt::ONE {
+            row[COL_CLAIM_MULT] = Felt::from(2u8);
+            forged_rows += 1;
+        }
+    }
+    assert_eq!(forged_rows, 2, "the resolved expression spans two term rows");
+    crate::tests::assert_local_rejects_inputs(EcMsmAir, &main, traces.air_inputs());
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_expression_resolved_twice_proves() {
+    verify_deferred(&msm_expression_resolved_twice_traces().prove())
+        .expect("two resolves of one expression must verify");
 }

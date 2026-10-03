@@ -149,7 +149,7 @@ struct ExprRecord {
 /// returns an *earlier* expr, only ever referenced by *later* ones, so it
 /// can never close a cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum DedupKey {
+pub(crate) enum DedupKey {
     /// `⟨base × 1⟩` — keyed by the base point (which fixes group + bound).
     Intro(u32),
     /// `⟨base × λ⟩` — keyed by the base point.
@@ -176,6 +176,8 @@ pub struct EcMsmRequires {
     /// Relation identity → the expression it produced; a repeated derivation
     /// reuses the stored handle (see [`lookup_intro`](Self::lookup_intro)).
     dedup: BTreeMap<DedupKey, EcExprPtr>,
+    /// Relation identity of each expression, in allocator order.
+    derivations: Vec<DedupKey>,
 }
 
 impl EcMsmRequires {
@@ -254,8 +256,7 @@ impl EcMsmRequires {
             claim_mult: 0,
         });
         let e = EcExprPtr(self.exprs.len() as u32);
-        self.dedup.insert(DedupKey::Intro(base.addr()), e);
-        e
+        self.register(DedupKey::Intro(base.addr()), e)
     }
 
     /// The expression a prior `intro_zero(base)` produced, if any — a
@@ -322,8 +323,7 @@ impl EcMsmRequires {
             claim_mult: 0,
         });
         let e = EcExprPtr(self.exprs.len() as u32);
-        self.dedup.insert(DedupKey::IntroZero(base.addr()), e);
-        e
+        self.register(DedupKey::IntroZero(base.addr()), e)
     }
 
     /// The expression a prior `intro_endo(base)` produced, if any — a
@@ -387,8 +387,7 @@ impl EcMsmRequires {
             claim_mult: 0,
         });
         let e = EcExprPtr(self.exprs.len() as u32);
-        self.dedup.insert(DedupKey::IntroEndo(base.addr()), e);
-        e
+        self.register(DedupKey::IntroEndo(base.addr()), e)
     }
 
     /// Record a `combine(a, b) = c` with value `val = val_a + val_b` and
@@ -418,8 +417,7 @@ impl EcMsmRequires {
             group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, a_expr, b_expr, val_a,
             val_b, val, rows,
         );
-        self.dedup.insert(DedupKey::Combine(a_expr.addr(), b_expr.addr()), e);
-        e
+        self.register(DedupKey::Combine(a_expr.addr(), b_expr.addr()), e)
     }
 
     /// Record a `combine_concat(a, b) = c` — the term-preserving fold (see
@@ -448,8 +446,7 @@ impl EcMsmRequires {
             group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, a_expr, b_expr, val_a,
             val_b, val, rows,
         );
-        self.dedup.insert(DedupKey::ConcatCombine(a_expr.addr(), b_expr.addr()), e);
-        e
+        self.register(DedupKey::ConcatCombine(a_expr.addr(), b_expr.addr()), e)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -584,8 +581,7 @@ impl EcMsmRequires {
             claim_mult: 0,
         });
         let e = EcExprPtr(self.exprs.len() as u32);
-        self.dedup.insert(DedupKey::Neg(a_expr.addr()), e);
-        e
+        self.register(DedupKey::Neg(a_expr.addr()), e)
     }
 
     /// Bump an expression's **op** use count by `mult` — one per `combine` /
@@ -597,9 +593,38 @@ impl EcMsmRequires {
     /// Bump an expression's **resolve** use count by `mult` — one per eval
     /// `EcMsm` resolve (drives `MsmClaimTerm` + the rest of `MsmExpr`). The
     /// resolve seam consumes the positionless `MsmClaimTerm`, so the absorb
-    /// order is the caller's, decoupled from the chiplet's `idx`.
+    /// order is the caller's, decoupled from the chiplet's `idx`. The AIR
+    /// admits at most one resolve per expression; a further resolve of the
+    /// same terms uses a [`duplicate`](crate::ec::msm::require::duplicate).
     pub fn consume_claim(&mut self, expr: EcExprPtr, mult: ProvideMult) {
-        self.exprs[expr.0 as usize - 1].claim_mult += mult;
+        let claim_mult = &mut self.exprs[expr.0 as usize - 1].claim_mult;
+        *claim_mult += mult;
+        assert!(*claim_mult <= 1, "an MSM expression is resolved at most once");
+    }
+
+    /// An expression's **resolve** use count.
+    pub fn claim_mult(&self, expr: EcExprPtr) -> ProvideMult {
+        self.exprs[expr.0 as usize - 1].claim_mult
+    }
+
+    /// The relation identity that laid `expr`.
+    pub(crate) fn derivation(&self, expr: EcExprPtr) -> DedupKey {
+        self.derivations[expr.0 as usize - 1]
+    }
+
+    /// Drops `key`'s dedup entry, so the next request for that relation lays a
+    /// fresh expression.
+    pub(crate) fn forget(&mut self, key: DedupKey) {
+        self.dedup.remove(&key);
+    }
+
+    /// Records the relation identity of the just-laid expression `e` and makes
+    /// it the dedup target for `key`.
+    fn register(&mut self, key: DedupKey, e: EcExprPtr) -> EcExprPtr {
+        debug_assert_eq!(self.derivations.len() + 1, e.0 as usize, "one derivation per expression");
+        self.derivations.push(key);
+        self.dedup.insert(key, e);
+        e
     }
 
     /// Count of recorded expressions (ordinary, zero, and endomorphism intros; combines; and

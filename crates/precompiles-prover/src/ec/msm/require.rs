@@ -15,7 +15,7 @@ use alloc::vec::Vec;
 use crate::{
     ec::{
         EcStores,
-        msm::trace::{CombineRow, EcExprPtr, EcMsmRequires, NegRow},
+        msm::trace::{CombineRow, DedupKey, EcExprPtr, EcMsmRequires, NegRow},
         trace::EcPointPtr,
     },
     math::from_hex,
@@ -240,6 +240,32 @@ pub fn neg(
     );
     msm.consume_op(a, 1);
     c
+}
+
+/// Lay a fresh copy of `expr` — the same terms and value under a new
+/// expression ptr — by repeating the operation that produced it without
+/// reusing its dedup entry. The copy re-records every lower-chiplet demand
+/// of that operation and carries its own use counts. The AIR admits one
+/// resolve per expression, so each further resolve of the same terms takes a
+/// copy. Returns the copy's handle.
+pub fn duplicate(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    expr: EcExprPtr,
+) -> EcExprPtr {
+    let derivation = msm.derivation(expr);
+    msm.forget(derivation);
+    match derivation {
+        DedupKey::Intro(base) => intro(msm, ec, uint, EcPointPtr::from_addr(base)),
+        DedupKey::IntroEndo(base) => intro_endo(msm, ec, uint, EcPointPtr::from_addr(base)),
+        DedupKey::IntroZero(base) => intro_zero(msm, ec, uint, EcPointPtr::from_addr(base)),
+        DedupKey::Combine(a, b) => combine(msm, ec, uint, EcExprPtr(a), EcExprPtr(b)),
+        DedupKey::ConcatCombine(a, b) => {
+            combine_terms_preserving(msm, ec, uint, EcExprPtr(a), EcExprPtr(b))
+        },
+        DedupKey::Neg(a) => neg(msm, ec, uint, EcExprPtr(a)),
+    }
 }
 
 /// The combine merge walk: a base-ordered two-pointer merge of two

@@ -242,6 +242,9 @@ pub const COL_NEG_X: usize = 33;
 /// and the rest of the `MsmExpr` provide; constant within a run, 0 on
 /// pads. This multiplicity records resolve uses of the positionless `MsmClaimTerm`; [`COL_MULT`]
 /// records combine uses of `MsmTerm` indexed by `idx`.
+/// Boolean: two resolves of one expression would only jointly consume twice
+/// its claim terms, letting each absorb a different multiset, so every
+/// resolve has an expression of its own.
 pub const COL_CLAIM_MULT: usize = 34;
 /// Family value-relation cells (boundary only). For `neg`, these are the two
 /// y ptrs of `R = (x_a, −y_a)`; for `intro_endo`, they are the shared y ptr
@@ -395,6 +398,9 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // phantom terms, independent of the consumer set.
         builder.assert_zero((AB::Expr::ONE - act.clone()) * local[COL_MULT].into());
         builder.assert_zero((AB::Expr::ONE - act) * local[COL_CLAIM_MULT].into());
+        // At most one resolve per expression: each resolve run must consume
+        // exactly its own expression's claim terms.
+        builder.assert_bool(local[COL_CLAIM_MULT]);
 
         // Allocator: expr_ptr = 1 on the first row, `+1` after each
         // boundary. ptr → (run) is injective by construction.

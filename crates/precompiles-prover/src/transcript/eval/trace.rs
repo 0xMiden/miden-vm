@@ -772,13 +772,16 @@ impl TranscriptEvalRequires {
     /// term's child `Group`/`Uint` binding (their `out_mult`);
     /// the absorb rows additionally consume `MsmClaimTerm` and the boundary
     /// `MsmExpr` over the bus (laid by the AIR). Dedups by `(expr, h_claim)` and bumps the MSM
-    /// resolve use count only for a new row. Returns the value's shared-use [`EcNode`].
+    /// resolve use count only for a new row. A new row resolves `expr` itself while it is
+    /// unresolved and otherwise the copy `duplicate` lays, since the AIR admits one resolve per
+    /// expression. Returns the value's shared-use [`EcNode`].
     pub fn record_ec_msm(
         &mut self,
         expr: EcExprPtr,
         terms: &[(EcNode, UintNode)],
         msm: &mut EcMsmRequires,
         eidos: &mut EidosRequires,
+        duplicate: impl FnOnce(&mut EcMsmRequires, EcExprPtr) -> EcExprPtr,
     ) -> EcNode {
         assert!(!terms.is_empty(), "an MSM claim needs at least one term");
         let group = msm.group(expr);
@@ -831,6 +834,11 @@ impl TranscriptEvalRequires {
             return node;
         }
 
+        let resolved = if msm.claim_mult(expr) == 0 {
+            expr
+        } else {
+            duplicate(msm, expr)
+        };
         let absorption = eidos.require_absorption(frame, blocks.iter().copied());
         debug_assert_eq!(absorption.digest, h_claim);
         let _ = eidos.require_digest(absorption.digest);
@@ -864,7 +872,7 @@ impl TranscriptEvalRequires {
             absorbed: None, // per-row compressions / digests live in `absorbs`
             kind: NodeKind::EcMsm {
                 absorbs,
-                expr: expr.addr(),
+                expr: resolved.addr(),
                 group: group.addr(),
                 val: val.addr(),
                 bound: bound.addr(),
@@ -872,7 +880,7 @@ impl TranscriptEvalRequires {
         });
         let node = EcNode { id, hash: h_claim, point: val };
         self.ec_dedup.insert(key, node);
-        msm.consume_claim(expr, 1);
+        msm.consume_claim(resolved, 1);
         node
     }
 

@@ -52,7 +52,7 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 ///
 /// This stored value must equal the shape returned by [`derive_air_shape`].
 pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 922,
+    num_composed_constraints: 923,
     max_constraint_degree: 5,
     num_quotient_chunks: 4,
     max_combo: NUM_OOD_POINTS,
