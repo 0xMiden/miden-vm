@@ -281,6 +281,65 @@ fn chunk_remainder_is_range_checked() {
     crate::tests::bus_balance::assert_unprovidable_xor_lookup(&KeccakNodeAir, &main, tuple);
 }
 
+/// Set a node row's sponge permutation count and return the last-block remainder
+/// `len_bytes − 136·(n_sponge_perms − 1)` that the row then range-checks.
+pub(super) fn forge_sponge_perms(row: &mut [Felt], n_sponge_perms: Felt) -> Felt {
+    row[COL_N_SPONGE_PERMS] = n_sponge_perms;
+    row[COL_LEN_BYTES] - Felt::from(136u8) * (n_sponge_perms - Felt::ONE)
+}
+
+#[test]
+fn final_node_sponge_perm_count_cannot_wrap() {
+    // The final active row has no continuity successor. A count of −1 would place the digest read
+    // two permutations before this invocation's first block, at another invocation's output.
+    let mut main = single_node_trace(32);
+    forge_sponge_perms(&mut main.values[..NUM_MAIN_COLS], -Felt::ONE);
+    crate::tests::check_local(KeccakNodeAir, &main);
+    crate::tests::bus_balance::assert_unprovidable_range16_lookup(
+        &KeccakNodeAir,
+        &main,
+        -Felt::from(2u8),
+    );
+}
+
+#[test]
+fn sponge_perm_count_cannot_exceed_length() {
+    // 32 bytes absorb in one permutation. Claiming two would read the digest from the permutation
+    // after this invocation, and leaves the last-block remainder at 32 − 136.
+    let mut main = single_node_trace(32);
+    let remainder = forge_sponge_perms(&mut main.values[..NUM_MAIN_COLS], Felt::from(2u8));
+    assert_eq!(remainder, -Felt::from(104u8));
+    crate::tests::check_local(KeccakNodeAir, &main);
+    crate::tests::bus_balance::assert_unprovidable_range16_lookup(&KeccakNodeAir, &main, remainder);
+}
+
+#[test]
+fn sponge_perm_count_cannot_fall_short_of_length() {
+    // 136 bytes need a second, padding-only permutation. Claiming one would read the first
+    // block's output as the digest and leaves the remainder at 136.
+    let mut main = single_node_trace(136);
+    let remainder = forge_sponge_perms(&mut main.values[..NUM_MAIN_COLS], Felt::ONE);
+    assert_eq!(remainder, Felt::from(136u8));
+    crate::tests::check_local(KeccakNodeAir, &main);
+    crate::tests::bus_balance::assert_unprovidable_range16_lookup(
+        &KeccakNodeAir,
+        &main,
+        Felt::from(135u8) - remainder,
+    );
+}
+
+#[test]
+fn sponge_perm_count_must_be_integral() {
+    // `n_sponge_perms = 1 + 10/136` gives the in-range remainder 0 for a 10-byte input; only the
+    // range check on `n_sponge_perms − 1` excludes this field-fractional count.
+    let mut main = single_node_trace(10);
+    let fraction = Felt::from(10u8) * Felt::from(136u8).inverse();
+    let remainder = forge_sponge_perms(&mut main.values[..NUM_MAIN_COLS], Felt::ONE + fraction);
+    assert_eq!(remainder, Felt::ZERO);
+    crate::tests::check_local(KeccakNodeAir, &main);
+    crate::tests::bus_balance::assert_unprovidable_range16_lookup(&KeccakNodeAir, &main, fraction);
+}
+
 #[test]
 fn constraints_hold_on_multi_invocation_with_continuity() {
     let inv0 = anchored_inv(0xa0, 50);

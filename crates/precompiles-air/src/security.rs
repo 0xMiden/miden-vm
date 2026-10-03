@@ -52,7 +52,7 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 ///
 /// This stored value must equal the shape returned by [`derive_air_shape`].
 pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 920,
+    num_composed_constraints: 922,
     max_constraint_degree: 5,
     num_quotient_chunks: 4,
     max_combo: NUM_OOD_POINTS,
@@ -62,7 +62,7 @@ pub const AIR_SHAPE: AirShape = AirShape {
 
 /// Lookup argument shape of the chiplet multi-AIR statement, as stored in [`AIR_SHAPE`].
 pub const LOOKUP_SHAPE: LookupShape = LookupShape {
-    fractions_per_row: 314,
+    fractions_per_row: 317,
     max_message_width: 18,
 };
 

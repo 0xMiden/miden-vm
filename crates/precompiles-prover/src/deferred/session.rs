@@ -18,7 +18,11 @@ use miden_precompiles::{
     CurveBinaryOp, CurveId, CurveOp, Keccak256Precompile, Sha256Precompile, Sha512Precompile,
     UintBinaryOp, UintDomain, UintOp, chunks_to_bytes_exact, n_chunks,
 };
-use miden_precompiles_air::{memory, stark_config::precompile_pcs_params};
+use miden_precompiles_air::{
+    hash::keccak::node::{MAX_SPONGE_PERMS, SPONGE_RATE_BYTES},
+    memory,
+    stark_config::precompile_pcs_params,
+};
 
 use crate::{
     ec::{msm::trace::EcExprPtr, trace::EcPointPtr},
@@ -43,6 +47,13 @@ const MAX_TERM_PRESERVING_TERMS: usize = 4096;
 /// stay well under it. The aggregate cap prevents splitting one oversized request across many
 /// claims.
 const MAX_TOTAL_TERM_PRESERVING_TERMS: usize = 16 * MAX_TERM_PRESERVING_TERMS;
+
+// The Keccak-node AIR admits at most `MAX_SPONGE_PERMS` sponge permutations per input; every hash
+// input the default import limit admits stays within that bound.
+const _: () = assert!(
+    (MAX_DEFERRED_ELEMENTS * size_of::<u32>() / SPONGE_RATE_BYTES as usize)
+        < MAX_SPONGE_PERMS as usize
+);
 
 /// The input ceiling uses the runtime's field-element accounting across the entire batch,
 /// including repeated inputs. Each pair costs eight elements, so it also bounds total MSM terms

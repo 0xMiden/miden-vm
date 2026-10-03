@@ -791,6 +791,36 @@ fn merged_keccak_chunk_remainder_is_range_checked() {
     crate::tests::bus_balance::assert_unprovidable_xor_lookup(&ChunkNodeSpongeAir, &merged, tuple);
 }
 
+/// Exercises the sponge-permutation range lookups in the deployed merged AIR across block
+/// boundaries.
+#[test]
+fn merged_keccak_sponge_perm_boundaries_balance() {
+    let mut rng = StdRng::seed_from_u64(0x5b0a_e136);
+    for len in [0usize, 135, 136, 137, 271, 272, 273] {
+        let input: Vec<u8> = (0..len).map(|i| i as u8).collect();
+        let traces = keccak_session_traces(&input);
+        traces.check();
+        assert_session_balanced(&traces, &mut rng);
+    }
+}
+
+/// Checks the sponge-permutation range lookup of the deployed merged AIR against a wrapped count.
+#[test]
+fn merged_keccak_sponge_perm_count_is_range_checked() {
+    let traces = keccak_session_traces(&[0x5a; 32]);
+    traces.check();
+    let mut merged = traces.mains()[0].clone();
+    let node_row = &mut merged.values[NODE_COL_OFFSET..NODE_COL_OFFSET + NODE_NUM_MAIN_COLS];
+    assert_eq!(node_row[NODE_COL_ACT], Felt::ONE);
+    super::keccak_node::forge_sponge_perms(node_row, -Felt::ONE);
+    crate::tests::check_local(ChunkNodeSpongeAir, &merged);
+    crate::tests::bus_balance::assert_unprovidable_range16_lookup(
+        &ChunkNodeSpongeAir,
+        &merged,
+        -Felt::from(2u8),
+    );
+}
+
 /// Explicit full prove+verify of a multi-block Keccak session — the
 /// end-to-end counterpart to the fast check/balance guard above, closing
 /// the merged-AIR multi-block gap through the real STARK path.

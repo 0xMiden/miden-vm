@@ -26,6 +26,7 @@
 
 #### Fixes
 
+
 - [BREAKING] Bumped the portable precompile witness encoding to version 2; version-1 witnesses are rejected before decoding their payloads ([#3879](https://github.com/0xMiden/miden-vm/pull/3879)).
 - [BREAKING] Introduced serialization format version 1 for `MerkleStore` and `PartialMmr` as part of the Eidos migration. Unversioned encodings, including stores embedded in `AdviceInputs`, are rejected; rebuild cached Merkle state using Eidos ([#3879](https://github.com/0xMiden/miden-vm/pull/3879)).
 - [BREAKING] Fixed Eidos AEAD authentication to prevent key-independent tag adjustments. The AEAD key derivation domains use version 2; ciphertexts and tags produced under version 1 are incompatible ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
@@ -41,6 +42,8 @@
 
 - Fixed linker module-capacity overflow so AST and pre-assembled module registration return a structured error instead of panicking ([#3895](https://github.com/0xMiden/miden-vm/issues/3895)).
 - [BREAKING] `MmrPeaks::verify` now takes the tree, peak and relative position from the peaks' forest instead of the proof's, and rejects positions outside that forest (`PositionNotFound`, previously a panic) and paths whose depth differs from the tree height (`InvalidMerklePath`) ([#3931](https://github.com/0xMiden/miden-vm/pull/3931)).
+- `build_trace` returns an error instead of panicking when a fragment continuation in an execution witness names a missing node, a node of the wrong kind, or a batch the basic block does not have ([#3978](https://github.com/0xMiden/miden-vm/pull/3978)).
+- [BREAKING] Require each Keccak node's sponge permutation count to match its byte length, so the node reads the digest of its own sponge invocation. PVM proofs and verifier roots change ([#XXXX](https://github.com/0xMiden/miden-vm/pull/XXXX)).
 
 #### Features
 

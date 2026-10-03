@@ -32,7 +32,7 @@ use crate::{
         chunk::trace::{ChunkRequires, ChunkSeqId},
         keccak::{
             digest::KeccakDigest,
-            node::{NUM_HASH, NUM_MAIN_COLS},
+            node::{MAX_SPONGE_PERMS, NUM_HASH, NUM_MAIN_COLS, SPONGE_RATE_BYTES},
             round::RoundRequires,
             sponge::trace::{
                 Invocation as SpongeInvocation, SpongeRequires, SpongeSeqId, keccak_oracle,
