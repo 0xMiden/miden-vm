@@ -163,7 +163,7 @@ fn lifted_air_validates_and_layout_matches_spec() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // The nine-column packing leaves columns 0 and 8 as singletons and pairs the other fractions.
+    // The eleven-column packing leaves columns 0, 8, and 10 as singletons and pairs the rest.
     // Every closing constraint therefore stays at degree ≤ 3 → log_quotient_degree = 1.
     let air = KeccakNodeAir;
     assert_eq!(crate::tests::log_quotient_degree(&air), 1);

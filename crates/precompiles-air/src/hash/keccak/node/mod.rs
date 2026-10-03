@@ -21,6 +21,8 @@
 //!    (block low = H_input_chunks, block high = H_digest_chunks) under the VM Keccak-256 assertion
 //!    frame `(KECCAK256_PRECOMPILE, ASSERT, len_bytes, 0)` → `H_keccak`.
 //! 7. Provides `Binding(H_keccak, True, 0, 0)`.
+//! 8. Range-checks `n_sponge_perms − 1` and the last sponge block's remainder, pinning
+//!    `n_sponge_perms = floor(len_bytes / 136) + 1`.
 //!
 //! Continuity (`+n_chunks` on `chunk_seq_id_head`, `+32·n_sponge_perms`
 //! on `sponge_seq_id_head`, gated on `act_next`) prevents per-namespace
@@ -174,8 +176,8 @@ pub const NUM_MAIN_COLS: usize = COL_N_CHUNKS_INV + 1;
 /// - col 5: digest-chunks block + initial CV.
 /// - col 6: `EidosOut(H_digest_chunks)` + byte-pair remainder check.
 /// - col 7/8: Keccak-node block + initial CV, then `EidosOut(H_keccak)`.
-/// - col 9/10: range checks of the last-block remainder, its distance to the rate, and
-///   `n_sponge_perms - 1` (see [`eval_sponge_perm_count`]).
+/// - col 9/10: range checks of the last-block remainder `r`, of `135 - r`, and of
+///   `n_sponge_perms - 1`.
 pub const NUM_AUX_COLS: usize = 11;
 
 pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 1];

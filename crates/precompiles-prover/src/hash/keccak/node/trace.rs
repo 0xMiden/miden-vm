@@ -88,7 +88,7 @@ impl KeccakNodeInvocation {
     /// Sponge perms = Keccak blocks = `floor(len_bytes / 136) + 1`
     /// under multi-rate-10*1 padding.
     pub fn n_sponge_perms(&self) -> u64 {
-        u64::from(self.len_bytes) / 136 + 1
+        u64::from(self.len_bytes / SPONGE_RATE_BYTES) + 1
     }
 
     /// Chunks in this invocation's chain = `max(1, ceil(len_bytes / 32))`.
