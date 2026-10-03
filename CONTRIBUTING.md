@@ -91,10 +91,6 @@ For example, a new change to the AIR crate might have the following message: `fe
     // CODE SECTION HEADER
     // ================================================================================
     ```
-- Add one [`CHANGELOG.md`](./CHANGELOG.md) entry for user-facing changes. The
-  entry should describe the Miden change, whether it affects VM crates, crypto
-  crates, or both. Trivial changes can use the `no changelog` label.
-
 - [Rustfmt](https://github.com/rust-lang/rustfmt) and [Clippy](https://github.com/rust-lang/rust-clippy) linting is included in CI pipeline. Anyways it's preferable to run linting locally before push:
     ```
     cargo fixit --allow-staged --allow-dirty --all-targets --all-features; cargo fmt; cargo clippy --workspace --all-targets --all-features -- -D warnings
@@ -102,6 +98,11 @@ For example, a new change to the AIR crate might have the following message: `fe
 
 ### Versioning
 We use [semver](https://semver.org/) naming convention.
+
+### Changelog fragments
+- Normal PRs should add a changelog fragment under `.changes/unreleased/` instead of editing `CHANGELOG.md`.
+- If a PR does not need a changelog entry, ask a maintainer to apply the `no changelog` label.
+- Fragment format details live in `.changes/README.md`.
 
 &nbsp;
 
@@ -111,9 +112,9 @@ We use [semver](https://semver.org/) naming convention.
 3. Commit messages and code style follow conventions.
 4. Tests added for new functionality.
 5. Documentation/comments updated for all changes according to our documentation convention.
-6. Changelog entry added to `CHANGELOG.md`, unless the PR is labeled `no changelog`.
-7. Clippy and Rustfmt linting passed.
-8. New branch rebased from `next`.
+6. Clippy and Rustfmt linting passed.
+7. New branch rebased from `next`.
+8. A changelog fragment was added in `.changes/unreleased/`, or the PR has the `no changelog` label.
 
 &nbsp;
 

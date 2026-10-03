@@ -1,0 +1,63 @@
+name: Prepare changelog release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, e.g. 0.23.0
+        required: true
+        type: string
+      date:
+        description: Release date in YYYY-MM-DD format. Defaults to today if empty.
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true # This workflow pushes the prepared changelog commit.
+
+      - name: Prepare changelog release
+        env:
+          RELEASE_DATE: ${{ inputs.date }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          if [[ ! "$RELEASE_VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            echo "::error::Release version must contain only letters, numbers, dots, underscores, and hyphens."
+            exit 1
+          fi
+          if [[ -n "$RELEASE_DATE" && ! "$RELEASE_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "::error::Release date must use YYYY-MM-DD format."
+            exit 1
+          fi
+
+          if [ -n "$RELEASE_DATE" ]; then
+            ./scripts/prepare-changelog-release.py --version "$RELEASE_VERSION" --date "$RELEASE_DATE"
+          else
+            ./scripts/prepare-changelog-release.py --version "$RELEASE_VERSION"
+          fi
+
+      - name: Commit prepared changelog
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          if git diff --quiet -- CHANGELOG.md .changes; then
+            echo "No changelog changes were produced."
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md .changes
+          git commit -m "chore(changelog): prepare $RELEASE_VERSION"
+          git push

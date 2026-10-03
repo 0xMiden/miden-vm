@@ -1,47 +1,35 @@
 #!/bin/bash
-set -uo pipefail
+set -euo pipefail
 
-CHANGELOG_FILE="CHANGELOG.md"
+FRAGMENT_GLOB=':(glob).changes/unreleased/*.md'
 
-usage() {
-    cat <<EOF
-Usage: BASE_REF=<base> NO_CHANGELOG_LABEL=<true|false> $0 [CHANGELOG_FILE]
-
-When no changelog file is passed, the script requires ${CHANGELOG_FILE}.
-EOF
-}
-
-require_changelog() {
-    local changelog_file="$1"
-
-    if git diff --quiet "origin/${BASE_REF}" -- "${changelog_file}"; then
-        >&2 echo "Changes should come with an entry in the \"${changelog_file}\" file. This behavior
-can be overridden by using the \"no changelog\" label, which is used for changes
-that are trivial / explicitly stated not to require a changelog entry."
-        exit 1
-    fi
-
-    echo "The \"${changelog_file}\" file has been updated."
-}
-
-if [ "${NO_CHANGELOG_LABEL:-false}" = "true" ]; then
-    # 'no changelog' set, so finish successfully
+if [[ "${NO_CHANGELOG_LABEL:-false}" == "true" ]]; then
     echo "\"no changelog\" label has been set"
     exit 0
 fi
 
-if [ "${1:-}" = "--help" ]; then
-    usage
-    exit 0
+if [[ -z "${BASE_REF:-}" ]]; then
+    echo "BASE_REF must be set" >&2
+    exit 1
 fi
 
-: "${BASE_REF:?BASE_REF is not set}"
+fragments=()
+while IFS= read -r fragment; do
+    [[ -n "$fragment" ]] && fragments+=("$fragment")
+done < <(git diff --name-only --diff-filter=AMR "origin/${BASE_REF}...HEAD" -- "$FRAGMENT_GLOB")
 
-if [ "$#" -gt 0 ]; then
-    for changelog_file in "$@"; do
-        require_changelog "${changelog_file}"
-    done
-    exit 0
+if [[ "${#fragments[@]}" -eq 0 ]]; then
+    cat >&2 <<'EOF'
+Changes should come with a changelog fragment in ".changes/unreleased/".
+This behavior can be overridden by using the "no changelog" label for changes
+that are trivial or explicitly stated not to require a changelog entry.
+EOF
+    exit 1
 fi
 
-require_changelog "${CHANGELOG_FILE}"
+validate_args=()
+for fragment in "${fragments[@]}"; do
+    validate_args+=(--validate-fragment "$fragment")
+done
+
+./scripts/prepare-changelog-release.py "${validate_args[@]}"
