@@ -167,6 +167,34 @@ fn self_qualified_constant_used_transitively() -> TestResult {
 }
 
 #[test]
+fn ancestor_module_alias_keeps_local_constant_live() -> TestResult {
+    let context = TestContext::default();
+    let root = context.parse_module(source_file!(
+        &context,
+        "namespace test\npub mod lib\npub proc noop\n    nop\nend\n"
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        "namespace test::lib\nuse ::test as t\nconst A = 7\npub const LIVE = t::lib::A\n"
+    ))?;
+
+    let package = context.assemble_library("test", None, root, [child])?;
+    let value = package.manifest.exports().find_map(|export| match export {
+        PackageExport::Constant(constant)
+            if constant.path.as_ref() == Path::new("::test::lib::LIVE") =>
+        {
+            Some(&constant.value)
+        },
+        _ => None,
+    });
+    assert_eq!(
+        value,
+        Some(&miden_assembly_syntax::ast::ConstantValue::Int(Span::unknown(7u8.into())))
+    );
+    Ok(())
+}
+
+#[test]
 fn relative_full_namespace_does_not_mark_constant_used() {
     let context = TestContext::default();
     let source = source_file!(

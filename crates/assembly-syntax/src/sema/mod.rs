@@ -207,7 +207,10 @@ pub fn analyze(
             return Err(analyzer.into_result().unwrap_err());
         }
     }
-    analyzer.set_module_path(module.path());
+    if let Err(err) = analyzer.set_module(&module) {
+        analyzer.error(err);
+        analyzer.has_failed()?;
+    }
 
     // Check all forms that have kind-specific restrictions now that the kind is concrete
     if !actual_kind.is_library() {
