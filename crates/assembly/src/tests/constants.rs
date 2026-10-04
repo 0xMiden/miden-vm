@@ -195,6 +195,59 @@ fn ancestor_module_alias_keeps_local_constant_live() -> TestResult {
 }
 
 #[test]
+fn ancestor_module_alias_keeps_enum_dependencies_live() -> TestResult {
+    let context = TestContext::default();
+    for (ty, discriminant) in [("Status", "t::lib::BASE"), ("t::lib::Status", "BASE")] {
+        let root = context.parse_module(source_file!(
+            &context,
+            "namespace test\npub mod lib\npub proc noop\n    nop\nend\n"
+        ))?;
+        let child = context.parse_module(source_file!(
+            &context,
+            format!(
+                "namespace test::lib\nuse ::test as t\nconst BASE = 7\nenum Status : u16 {{\n    OK = {discriminant},\n}}\nproc hidden(value: {ty})\n    nop\nend\npub proc entry\n    exec.hidden\nend\n"
+            )
+        ))?;
+
+        context.assemble_library("test", None, root, [child])?;
+    }
+    Ok(())
+}
+
+#[test]
+fn dead_constant_through_ancestor_alias_keeps_warnings() {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "namespace test::lib\nuse ::test as t\nconst A = 7\nconst DEAD = t::lib::A\npub proc entry\n    nop\nend\n"
+    );
+    let error = context
+        .parse_module(source)
+        .expect_err("both constants and the import are unused");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+
+    assert_eq!(rendered.matches("unused constant").count(), 2, "{rendered}");
+    assert!(rendered.contains("unused import"), "{rendered}");
+}
+
+#[test]
+fn ancestor_alias_to_another_module_does_not_keep_local_constant_live() {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "namespace test::lib\nuse ::test as t\nconst A = 7\npub const LIVE = t::other::A\n"
+    );
+    let error = context.parse_module(source).expect_err("the local constant is unused");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+
+    assert_eq!(rendered.matches("unused constant").count(), 1, "{rendered}");
+    assert!(rendered.contains("const A = 7"), "{rendered}");
+    assert!(!rendered.contains("unused import"), "{rendered}");
+}
+
+#[test]
 fn relative_full_namespace_does_not_mark_constant_used() {
     let context = TestContext::default();
     let source = source_file!(
