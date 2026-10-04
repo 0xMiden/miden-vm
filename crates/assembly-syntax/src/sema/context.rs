@@ -72,6 +72,16 @@ impl constants::ConstEnvironment for AnalysisContext {
         path: Span<&Path>,
     ) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         if let Some(name) = self.local_constant_name(path) {
+            // Enum discriminants are folded before import-use checks visit their expressions.
+            if !path.is_absolute()
+                && let Some((prefix, suffix)) = path.split_first()
+                && !suffix.is_empty()
+                && prefix != "self"
+                && let Some(parent) =
+                    self.evaluating_constants.last().or(self.evaluating_constant.as_ref()).cloned()
+            {
+                self.record_constant_import_ref(&parent, prefix.to_string());
+            }
             self.get(&name)
         } else {
             Ok(None)
@@ -448,7 +458,8 @@ mod tests {
     use crate::{
         Path, PathBuf,
         ast::{
-            Constant, ConstantExpr, ConstantOp, ConstantValue, Ident, Visibility,
+            Constant, ConstantExpr, ConstantOp, ConstantValue, Ident, Import, Module, ModuleImport,
+            ModuleKind, Visibility,
             constants::{self, eval::CachedConstantValue},
         },
         debuginfo::{
@@ -583,6 +594,16 @@ mod tests {
         );
         let source_file = source_manager.load_from_raw_parts(uri, content);
         let mut context = AnalysisContext::new(Path::new("test::lib"), source_file, source_manager);
+        let mut module = Module::new(ModuleKind::Library, Path::new("test::lib"));
+        module
+            .define_import(Import::Module(ModuleImport::new(
+                SourceSpan::UNKNOWN,
+                Visibility::Private,
+                Span::unknown(Arc::from(Path::new("::test"))),
+                Ident::new("t").unwrap(),
+            )))
+            .unwrap();
+        context.set_module(&module).unwrap();
 
         // Each Ci references C(i+1) twice, so without memoization the number of misses would
         // grow exponentially with depth.
@@ -623,5 +644,10 @@ mod tests {
     #[test]
     fn semantic_const_eval_memoizes_absolute_qualified_subexpressions() {
         assert_shared_subexpression_memoization(Some(Path::new("::test::lib")));
+    }
+
+    #[test]
+    fn semantic_const_eval_memoizes_alias_qualified_subexpressions() {
+        assert_shared_subexpression_memoization(Some(Path::new("t::lib")));
     }
 }
