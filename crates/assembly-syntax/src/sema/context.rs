@@ -18,6 +18,7 @@ use crate::ast::{
 /// This maintains the state for semantic analysis of a single [Module].
 pub struct AnalysisContext {
     module_path: PathBuf,
+    symbol_resolver: LocalSymbolResolver,
     constants: BTreeMap<Ident, Constant>,
     cached_constant_values: BTreeMap<Ident, ConstantValue>,
     used_constants: BTreeSet<Ident>,
@@ -109,8 +110,13 @@ impl AnalysisContext {
         source_file: Arc<SourceFile>,
         source_manager: Arc<dyn SourceManager>,
     ) -> Self {
+        let module_path = module_path.as_ref().to_relative().to_path_buf();
+        let module = Module::new(ModuleKind::Library, &module_path);
+        let symbol_resolver = LocalSymbolResolver::new(&module, source_manager.clone())
+            .expect("an empty module has a valid symbol table");
         Self {
-            module_path: module_path.as_ref().to_relative().to_path_buf(),
+            module_path,
+            symbol_resolver,
             constants: Default::default(),
             cached_constant_values: Default::default(),
             used_constants: Default::default(),
@@ -132,8 +138,12 @@ impl AnalysisContext {
         self.warnings_as_errors = yes;
     }
 
-    pub fn set_module_path(&mut self, path: &Path) {
-        self.module_path = path.to_relative().to_path_buf();
+    pub fn set_module(&mut self, module: &Module) -> Result<(), SemanticAnalysisError> {
+        let resolver = LocalSymbolResolver::new(module, self.source_manager.clone())
+            .map_err(|err| SemanticAnalysisError::SymbolResolutionError(Box::new(err)))?;
+        self.module_path = module.path().to_relative().to_path_buf();
+        self.symbol_resolver = resolver;
+        Ok(())
     }
 
     #[inline(always)]
@@ -171,13 +181,7 @@ impl AnalysisContext {
     }
 
     fn local_constant_name_for_path(&self, path: Span<&Path>) -> Option<Ident> {
-        let (name, module_path) = path.split_last()?;
-        let is_local = module_path == Path::new("self")
-            || (path.is_absolute() && module_path.to_relative() == self.module_path.as_path());
-        if !is_local {
-            return None;
-        }
-        let name = Ident::new_with_span(path.span(), name).ok()?;
+        let name = self.local_item_name_for_path(path)?;
         self.constants.contains_key(&name).then_some(name)
     }
 
@@ -197,11 +201,22 @@ impl AnalysisContext {
         self.qualified_type_refs.insert(path.to_path_buf());
     }
 
-    fn local_type_name_for_path(&self, path: Span<&Path>) -> Option<Ident> {
+    fn local_item_name_for_path(&self, path: Span<&Path>) -> Option<Ident> {
         let (name, parent) = path.split_last()?;
-        let is_local = parent == Path::new("self")
-            || (path.is_absolute() && parent.to_relative() == self.module_path.as_path());
-        is_local.then(|| Ident::new_with_span(path.span(), name).ok()).flatten()
+        if parent == Path::new("self") {
+            return Ident::new_with_span(path.span(), name).ok();
+        }
+        // Unresolved foreign references are checked by the linker when all modules are available.
+        let SymbolResolution::External(resolved) = self.symbol_resolver.resolve_path(path).ok()?
+        else {
+            return None;
+        };
+        let (name, parent) = resolved.split_last()?;
+        if parent.to_relative() == self.module_path.as_path() {
+            Ident::new_with_span(path.span(), name).ok()
+        } else {
+            None
+        }
     }
 
     pub fn resolve_constant_usage(&mut self, module: &Module, used_imports: &mut BTreeSet<String>) {
@@ -225,7 +240,7 @@ impl AnalysisContext {
 
         for path in &self.qualified_type_refs {
             let Some(name) =
-                self.local_type_name_for_path(Span::new(SourceSpan::UNKNOWN, path.as_path()))
+                self.local_item_name_for_path(Span::new(SourceSpan::UNKNOWN, path.as_path()))
             else {
                 continue;
             };
