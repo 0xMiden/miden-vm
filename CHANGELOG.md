@@ -8,7 +8,7 @@
 
 #### Changes
 
-- [BREAKING] Warn on unused private assembly constants. Add a module path to `AnalysisContext::new` and an `UnusedConstant` variant to `SemanticAnalysisError` ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
+- [BREAKING] Warn on unused private assembly constants. `AnalysisContext::new` takes a module path. Pass the parsed module to `AnalysisContext::set_module` and handle its `Result`. Add an `UnusedConstant` variant to `SemanticAnalysisError` ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
 
 ## v0.35.0 (2026-10-01)
 
