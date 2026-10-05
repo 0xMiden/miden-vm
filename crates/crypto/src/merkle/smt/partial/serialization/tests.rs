@@ -4,7 +4,7 @@
 use alloc::collections::BTreeMap;
 
 use miden_field::{Felt, Word};
-use miden_serde_utils::{Deserializable, Serializable};
+use miden_serde_utils::{Deserializable, DeserializationError, Serializable};
 
 use crate::merkle::{
     EmptySubtreeRoots, NodeIndex,
@@ -31,55 +31,43 @@ fn write_nodes_payload(levels: &[(u8, &[(u64, Word)])], target: &mut alloc::vec:
     target.write_u64(0); // value-only leaf count
 }
 
-/// Reported decoder gap (partial-SMT UniqueNodes wire format), part 1: a node position repeated
-/// WITHIN one level is silently overwritten (last value wins) instead of rejected — the same
-/// hand-written-payload class upstream #3900 fixed for AdviceMap. The two entries carry
-/// DISTINCT nonzero values so the assertion distinguishes overwrite from keep-first and
-/// from zeroing. `write_into` can never produce this payload (the BTreeMap source cannot
-/// hold duplicate keys). This fixture pins the defect's observable; it flips to a
-/// rejection assertion when the fix lands.
+/// Duplicate entries must be rejected before either value can replace the other.
 #[test]
-fn duplicate_node_position_in_a_level_is_silently_overwritten() {
+fn duplicate_node_position_in_a_level_is_rejected() {
     let first_value = Word::new([Felt::new_unchecked(0x6700_0000_0000_0001); 4]);
     let second_value = Word::new([Felt::new_unchecked(0x6700_0000_0000_0002); 4]);
     let mut bytes = alloc::vec::Vec::new();
     write_nodes_payload(&[(1, &[(1, first_value), (1, second_value)])], &mut bytes);
 
-    let decoded = UniqueNodes::read_from_bytes(&bytes)
-        .expect("the reported defect: a repeated node position decodes successfully");
-    let node = decoded.nodes.get(&NodeIndex::new(1, 1).unwrap()).unwrap();
-    assert_eq!(node, &second_value, "the LAST duplicate wins");
-    assert_ne!(node, &first_value, "keep-first must not pass");
+    assert_eq!(
+        UniqueNodes::read_from_bytes(&bytes),
+        Err(DeserializationError::InvalidValue(
+            "Duplicate node position 1 at depth 1".into()
+        ))
+    );
 }
 
-/// Reported decoder gap (partial-SMT UniqueNodes wire format), part 2: the reader does not require
-/// the wire's levels to be in ascending depth order (the writer's BTreeMap order), so the same
-/// node set has MULTIPLE valid byte encodings — the wire form is not uniquely decodable
-/// and the decoder accepts reorderings the writer can never produce.
+/// The writer emits levels in strictly increasing depth order.
 #[test]
-fn levels_in_descending_order_are_accepted() {
+fn levels_in_descending_order_are_rejected() {
     let mut bytes = alloc::vec::Vec::new();
     // The writer emits ascending depths; this payload is the reverse.
     let word_at = |i: u64| Word::new([Felt::new_unchecked(0x6700_0000_0000_0000 + i); 4]);
     write_nodes_payload(&[(2, &[(1, word_at(1))]), (1, &[(1, word_at(2))])], &mut bytes);
 
-    UniqueNodes::read_from_bytes(&bytes)
-        .expect("the reported defect: descending depth levels decode successfully");
+    assert_eq!(
+        UniqueNodes::read_from_bytes(&bytes),
+        Err(DeserializationError::InvalidValue(
+            "Level depth 1 does not exceed previous depth 2".into()
+        ))
+    );
 }
 
-/// Reported decoder gap (partial-SMT UniqueNodes wire format), part 3 (CONFIRMED): a position
-/// present in BOTH `leaves` and `value_only_leaves` decodes successfully, and `get_leaf_hash`
-/// silently shadows the value-only entry with the leaf's hash (leaves take priority via
-/// `.or_else`). The construction path can never produce the overlap — a position becomes
-/// either a leaf or a value-only entry, exclusively — so the ambiguity is
-/// writer-unproducible but decoder-accepted. Flips to a rejection assertion when the fix
-/// lands.
+/// A position must identify either a leaf or its hash alone.
 #[test]
-fn position_in_leaves_and_value_only_leaves_is_accepted_and_shadowed() {
+fn position_in_leaves_and_value_only_leaves_is_rejected() {
     use miden_serde_utils::ByteWriter;
 
-    // A POPULATED leaf: its hash differs from EMPTY_WORD (the missing-leaf fallback), so
-    // the shadowing assertion cannot pass under a get_leaf_hash that ignores both maps.
     let key = Word::new([Felt::new_unchecked(0x6700_0000_0000_0009); 4]);
     let leaf_value = Word::new([Felt::new_unchecked(0x6700_0000_0000_000a); 4]);
     let leaf_index = LeafIndex::<SMT_DEPTH>::from(key);
@@ -97,28 +85,12 @@ fn position_in_leaves_and_value_only_leaves_is_accepted_and_shadowed() {
     position.write_into(&mut bytes);
     shadowed_value.write_into(&mut bytes);
 
-    let decoded = UniqueNodes::read_from_bytes(&bytes)
-        .expect("the reported defect: an overlapped position decodes successfully");
-
-    // The exact decoded state in both maps.
-    assert_eq!(decoded.leaves.get(&position), Some(&leaf), "leaf present verbatim");
     assert_eq!(
-        decoded.value_only_leaves.get(&position),
-        Some(&shadowed_value),
-        "value-only entry present for the SAME position",
+        UniqueNodes::read_from_bytes(&bytes),
+        Err(DeserializationError::InvalidValue(format!(
+            "Leaf position {position} appears in both leaf maps"
+        )))
     );
-
-    // leaves take priority: the lookup returns the POPULATED leaf's hash, which differs
-    // from both EMPTY_WORD (the missing-leaf fallback) and the shadowed value — so this
-    // assertion establishes leaves-first selection, not just overlap acceptance.
-    assert_ne!(leaf.hash(), Word::default(), "populated leaf must not hash to EMPTY_WORD");
-    assert_eq!(
-        decoded.get_leaf_hash(position),
-        leaf.hash(),
-        "the leaf silently shadows the value-only entry",
-    );
-    assert_ne!(decoded.get_leaf_hash(position), shadowed_value);
-    assert_ne!(decoded.get_leaf_hash(position), Word::default());
 }
 
 #[test]
@@ -181,10 +153,20 @@ fn unique_nodes_roundtrips() {
 #[test]
 fn unique_nodes_rejects_mismatched_leaf_position() {
     let leaf = SmtLeaf::new_empty(LeafIndex::new_max_depth(7));
-    let mut value = UniqueNodes::empty();
-    value.leaves.insert(8, leaf);
+    use miden_serde_utils::ByteWriter;
 
-    assert!(UniqueNodes::read_from_bytes(&value.to_bytes()).is_err());
+    let mut bytes = alloc::vec::Vec::new();
+    UniqueNodes::empty().root.write_into(&mut bytes);
+    bytes.write_u64(0);
+    bytes.write_u64(1);
+    (8u64, leaf).write_into(&mut bytes);
+    bytes.write_u64(0);
+    assert_eq!(
+        UniqueNodes::read_from_bytes(&bytes),
+        Err(DeserializationError::InvalidValue(
+            "Node index 8 did not match the embedded leaf index 7".into()
+        ))
+    );
 }
 
 #[test]
