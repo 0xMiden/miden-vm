@@ -262,46 +262,48 @@ fn write_blind_key(
     in_group: &BTreeSet<Arc<str>>,
     completed: &BTreeMap<Arc<str>, Type>,
     out: &mut String,
-) {
+) -> Result<(), RecursiveTypeError> {
     use core::fmt::Write;
+
+    // The decoder expands closed composite types into templates. Normalize closed subterms
+    // before ranking so they have the same key as materialized types and completed references.
+    let mut references = BTreeSet::new();
+    collect_references(template, &mut references);
+    if references.is_disjoint(in_group) {
+        let ty = close_template_inner(template, &|name| completed.get(&name).cloned())?;
+        let _ = write!(out, "t[{ty:?}]");
+        return Ok(());
+    }
 
     match template {
         TypeTemplate::Type(ty) => {
             let _ = write!(out, "t[{ty:?}]");
         },
-        TypeTemplate::Rec(name) if in_group.contains(name) => out.push_str("v[]"),
-        TypeTemplate::Rec(name) => match completed.get(name) {
-            Some(ty) => {
-                let _ = write!(out, "t[{ty:?}]");
-            },
-            // Unresolvable here means the reference is dangling, which the caller rejects.
-            None => {
-                let _ = write!(out, "x[{name:?}]");
-            },
-        },
+        TypeTemplate::Rec(_) => out.push_str("v[]"),
         TypeTemplate::Ptr(addrspace, pointee) => {
             let _ = write!(out, "p[{addrspace:?}]");
-            write_blind_key(pointee, in_group, completed, out);
+            write_blind_key(pointee, in_group, completed, out)?;
         },
         TypeTemplate::Array(element, len) => {
             let _ = write!(out, "a[{len}]");
-            write_blind_key(element, in_group, completed, out);
+            write_blind_key(element, in_group, completed, out)?;
         },
         TypeTemplate::List(element) => {
             out.push_str("l[]");
-            write_blind_key(element, in_group, completed, out);
+            write_blind_key(element, in_group, completed, out)?;
         },
         TypeTemplate::Function(ty) => {
             // The list lengths matter: `fn(T)` and `fn() -> T` are otherwise the same tags in
             // the same order.
             let _ = write!(out, "f[{:?},{},{}]", ty.abi, ty.params.len(), ty.results.len());
             for t in ty.params.iter().chain(ty.results.iter()) {
-                write_blind_key(t, in_group, completed, out);
+                write_blind_key(t, in_group, completed, out)?;
             }
         },
-        TypeTemplate::Struct(ty) => write_blind_struct_key(ty, in_group, completed, out),
-        TypeTemplate::Enum(ty) => write_blind_enum_key(ty, in_group, completed, out),
+        TypeTemplate::Struct(ty) => write_blind_struct_key(ty, in_group, completed, out)?,
+        TypeTemplate::Enum(ty) => write_blind_enum_key(ty, in_group, completed, out)?,
     }
+    Ok(())
 }
 
 fn write_blind_struct_key(
@@ -309,14 +311,15 @@ fn write_blind_struct_key(
     in_group: &BTreeSet<Arc<str>>,
     completed: &BTreeMap<Arc<str>, Type>,
     out: &mut String,
-) {
+) -> Result<(), RecursiveTypeError> {
     use core::fmt::Write;
 
     let _ = write!(out, "s[{:?},{:?},{}]", ty.name, ty.repr, ty.fields.len());
     for field in &ty.fields {
         let _ = write!(out, "n[{:?}]", field.name);
-        write_blind_key(&field.ty, in_group, completed, out);
+        write_blind_key(&field.ty, in_group, completed, out)?;
     }
+    Ok(())
 }
 
 fn write_blind_enum_key(
@@ -324,17 +327,18 @@ fn write_blind_enum_key(
     in_group: &BTreeSet<Arc<str>>,
     completed: &BTreeMap<Arc<str>, Type>,
     out: &mut String,
-) {
+) -> Result<(), RecursiveTypeError> {
     use core::fmt::Write;
 
     let _ = write!(out, "e[{:?},{:?},{}]", ty.name, ty.discriminant, ty.variants.len());
     for variant in &ty.variants {
         let _ = write!(out, "w[{:?},{:?}]", variant.name, variant.discriminant_value);
         match variant.value.as_ref() {
-            Some(value) => write_blind_key(value, in_group, completed, out),
+            Some(value) => write_blind_key(value, in_group, completed, out)?,
             None => out.push_str("z[]"),
         }
     }
+    Ok(())
 }
 
 /// A small, dependency-free FNV-1a hasher. Its values never leave the crate.
@@ -367,8 +371,8 @@ fn structural_order_key(
     def: &TemplateDef,
     in_group: &BTreeSet<Arc<str>>,
     completed: &BTreeMap<Arc<str>, Type>,
-) -> (Option<Arc<str>>, AggregateKind, String) {
-    (def.body.declared_name(), def.kind, def.body.blind_key(in_group, completed))
+) -> Result<(Option<Arc<str>>, AggregateKind, String), RecursiveTypeError> {
+    Ok((def.body.declared_name(), def.kind, def.body.blind_key(in_group, completed)?))
 }
 
 fn hash_defs(defs: &[RecDef]) -> u64 {
@@ -963,7 +967,7 @@ fn build_group(
     // rather than break such ties arbitrarily, indistinguishable definitions are merged: they
     // denote the same type, exactly as two identically named and shaped non-recursive structs
     // already do. What comes back is one definition per equivalence class, canonically ordered.
-    let class_of = merge_isomorphic_definitions(defs, &component, completed);
+    let class_of = merge_isomorphic_definitions(defs, &component, completed)?;
     let class_count = class_of.iter().copied().max().map_or(0, |max| max as usize + 1);
 
     // Every member of a class resolves to that class's definition, so a reference to any of them
@@ -1051,7 +1055,7 @@ fn merge_isomorphic_definitions(
     defs: &[TemplateDef],
     component: &[usize],
     completed: &BTreeMap<Arc<str>, Type>,
-) -> Vec<u16> {
+) -> Result<Vec<u16>, RecursiveTypeError> {
     let position_of = component
         .iter()
         .enumerate()
@@ -1076,7 +1080,7 @@ fn merge_isomorphic_definitions(
     let keys = component
         .iter()
         .map(|member| structural_order_key(&defs[*member], &in_group, completed))
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
     let mut classes = rank(&keys);
 
     loop {
@@ -1090,7 +1094,7 @@ fn merge_isomorphic_definitions(
             .collect::<Vec<_>>();
         let refined = rank(&signatures);
         if refined == classes {
-            return classes;
+            return Ok(classes);
         }
         classes = refined;
     }
@@ -1195,13 +1199,13 @@ impl AggregateTemplate {
         &self,
         in_group: &BTreeSet<Arc<str>>,
         completed: &BTreeMap<Arc<str>, Type>,
-    ) -> String {
+    ) -> Result<String, RecursiveTypeError> {
         let mut key = String::new();
         match self {
             Self::Struct(ty) => write_blind_struct_key(ty, in_group, completed, &mut key),
             Self::Enum(ty) => write_blind_enum_key(ty, in_group, completed, &mut key),
-        }
-        key
+        }?;
+        Ok(key)
     }
 
     /// Every reference this definition makes, in the order it makes them.

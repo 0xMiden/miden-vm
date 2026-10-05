@@ -1935,6 +1935,8 @@ mod recursive_group_proptests {
 
     use super::*;
 
+    const COMPLETED: &str = "Completed";
+
     const KEYS: [&str; 3] = ["T0", "T1", "T2"];
 
     const SCALARS: [Type; 6] = [Type::U8, Type::U32, Type::U64, Type::U128, Type::I32, Type::Felt];
@@ -1957,42 +1959,74 @@ mod recursive_group_proptests {
                         [TypeTemplate::rec(key)],
                         [TypeTemplate::from(Type::U32)],
                     )),
-                    1 => Just(TypeTemplate::ptr(TypeTemplate::struct_type(
-                        TypeRepr::Default,
-                        [
-                            FieldTemplate::from(("head", TypeTemplate::rec(key))),
-                            FieldTemplate::from(("tail", TypeTemplate::from(Type::U64))),
-                        ],
-                    ))),
+                    1 => completed_field().prop_map(move |closed| {
+                        TypeTemplate::ptr(TypeTemplate::struct_type(
+                            TypeRepr::Default,
+                            [
+                                FieldTemplate::from(("head", TypeTemplate::rec(key))),
+                                FieldTemplate::from(("tail", closed)),
+                            ],
+                        ))
+                    }),
                 ]
             })
             .boxed()
     }
 
-    fn plain_field() -> BoxedStrategy<TypeTemplate> {
-        prop_oneof![
-            3 => proptest::sample::select(SCALARS.to_vec())
-                .prop_map(TypeTemplate::from),
-            2 => proptest::sample::select(SCALARS.to_vec())
-                .prop_map(|ty| TypeTemplate::ptr(TypeTemplate::from(ty))),
-            1 => proptest::sample::select(SCALARS.to_vec())
-                .prop_map(|ty| TypeTemplate::list(TypeTemplate::from(ty))),
-        ]
+    fn nested_template(leaf: BoxedStrategy<TypeTemplate>) -> BoxedStrategy<TypeTemplate> {
+        leaf.prop_recursive(2, 16, 2, |inner| {
+            prop_oneof![
+                inner.clone().prop_map(TypeTemplate::ptr),
+                inner.clone().prop_map(TypeTemplate::list),
+                (inner.clone(), 0usize..=3)
+                    .prop_map(|(element, len)| TypeTemplate::array(element, len)),
+                (inner.clone(), inner.clone()).prop_map(|(param, result)| {
+                    TypeTemplate::function(CallConv::Fast, [param], [result])
+                }),
+                (inner.clone(), inner.clone()).prop_map(|(a, b)| {
+                    TypeTemplate::struct_type(
+                        TypeRepr::Default,
+                        [FieldTemplate::from(("a", a)), FieldTemplate::from(("b", b))],
+                    )
+                }),
+                (inner.clone(), inner).prop_map(|(a, b)| {
+                    TypeTemplate::Enum(Box::new(EnumTemplate::new(
+                        "Nested",
+                        Type::U8,
+                        [
+                            VariantTemplate::new("A", a, Some(0)),
+                            VariantTemplate::new("B", b, Some(1)),
+                        ],
+                    )))
+                }),
+            ]
+        })
         .boxed()
     }
 
+    fn plain_field() -> BoxedStrategy<TypeTemplate> {
+        nested_template(
+            proptest::sample::select(SCALARS.to_vec()).prop_map(TypeTemplate::from).boxed(),
+        )
+    }
+
+    fn completed_field() -> BoxedStrategy<TypeTemplate> {
+        nested_template(Just(TypeTemplate::rec(COMPLETED)).boxed())
+    }
+
     fn fields(keys: &[&'static str]) -> BoxedStrategy<Vec<FieldTemplate>> {
-        proptest::collection::vec(prop_oneof![3 => plain_field(), 2 => guarded_rec(keys)], 0..=3)
-            .prop_map(|templates| {
-                templates
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, ty)| {
-                        FieldTemplate::from((alloc::format!("f{i}").into_boxed_str(), ty))
-                    })
-                    .collect()
-            })
-            .boxed()
+        proptest::collection::vec(
+            prop_oneof![3 => plain_field(), 2 => guarded_rec(keys), 1 => completed_field()],
+            0..=3,
+        )
+        .prop_map(|templates| {
+            templates
+                .into_iter()
+                .enumerate()
+                .map(|(i, ty)| FieldTemplate::from((alloc::format!("f{i}").into_boxed_str(), ty)))
+                .collect()
+        })
+        .boxed()
     }
 
     /// A generated definition, boxed so struct and enum strategies share one value type.
@@ -2022,6 +2056,7 @@ mod recursive_group_proptests {
             2 => Just(None),
             2 => plain_field().prop_map(Some),
             1 => guarded_rec(keys).prop_map(Some),
+            1 => completed_field().prop_map(Some),
         ]
         .boxed()
     }
@@ -2053,50 +2088,53 @@ mod recursive_group_proptests {
         prop_oneof![struct_def(keys), enum_def(keys)].boxed()
     }
 
-    fn recursive_group() -> BoxedStrategy<(BTreeMap<Arc<str>, Type>, usize)> {
+    fn recursive_group() -> BoxedStrategy<BTreeMap<Arc<str>, Type>> {
         (1usize..=3)
             .prop_flat_map(|len| {
                 let keys: Vec<&'static str> = KEYS[..len].to_vec();
-                (proptest::collection::vec(def(&keys), len), 0..len, Just(keys))
+                (
+                    proptest::collection::vec(def(&keys), len),
+                    Just(keys),
+                    plain_field(),
+                    any::<bool>(),
+                )
             })
-            .prop_map(|(defs, root, keys)| {
+            .prop_map(|(defs, keys, closed, completed_is_enum)| {
                 let mut builder = RecursiveTypeBuilder::new();
+                if completed_is_enum {
+                    builder.define_enum(
+                        COMPLETED,
+                        EnumTemplate::new(
+                            "Completed",
+                            Type::U8,
+                            [VariantTemplate::new("V", closed, Some(0))],
+                        ),
+                    );
+                } else {
+                    builder.define_struct(
+                        COMPLETED,
+                        StructTemplate::new(TypeRepr::Default, [("value", closed)]),
+                    );
+                }
                 for (key, template) in keys.iter().zip(defs) {
                     match template {
-                        Def::Struct(mut template) => {
-                            // Distinct declared names make the canonical order
-                            // name-determined: structural_order_key's first component
-                            // differs for every group member, so the builder's and the
-                            // decoder's class ranks cannot flip. The declared-name tie
-                            // class is the reported canonicalization defect (measured at
-                            // ~3% of anonymous-group draws).
-                            template.name = Some((*key).into());
+                        Def::Struct(template) => {
                             builder.define_struct(*key, template);
                         },
-                        Def::Enum(mut template) => {
-                            template.name = (*key).into();
+                        Def::Enum(template) => {
                             builder.define_enum(*key, template);
                         },
                     }
                 }
-                (builder.build().expect("generated group is valid by construction"), root)
+                builder.build().expect("generated group is valid by construction")
             })
             .boxed()
     }
 
-    /// Reported canonicalization defect's minimal counterexample: pinned as an explicit
-    /// fixture independent of the property's strategy (which restricts to distinct declared
-    /// names until the production fix lands — see the strategy comment above).
-    ///
-    /// The group members A and B are anonymous structs; B references the COMPLETED
-    /// out-of-group definition C, and A references B through a List barrier while B
-    /// references A through one. The builder's canonical rank for this group puts the
-    /// definitions in an order the decoder does not reproduce (the blind-key rendering
-    /// of the completed out-of-group reference differs between the sides), so the wire
-    /// form fails canonical-order validation on decode. When the production
-    /// tie-breaker/merge fix lands, flip this to assert round-trip equality.
+    /// Anonymous group members retain canonical order when a field refers to a completed
+    /// out-of-group definition whose template is expanded by the decoder.
     #[test]
-    fn group_with_completed_reference_fails_canonical_order_decoding() {
+    fn group_with_completed_reference_roundtrips() {
         let mut builder = RecursiveTypeBuilder::new();
         builder
             .define_struct(
@@ -2127,37 +2165,25 @@ mod recursive_group_proptests {
             );
         let built = builder.build().expect("should build");
 
-        // Both group members fail the same way; C (outside the group) round trips.
-        for key in ["A", "B"] {
-            let ty = built.get(key).expect(key).clone();
-            let mut bytes = Vec::new();
-            ty.write_into(&mut bytes);
-            let err = Type::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
-            let DeserializationError::InvalidValue(message) = err else {
-                panic!("expected InvalidValue for {key}, got {err:?}");
-            };
-            assert_eq!(
-                message, "invalid recursive type: definitions are not in canonical order",
-                "expected the reported canonical-order rejection for {key}",
-            );
+        for key in ["A", "B", "C"] {
+            let ty = built.get(key).expect(key);
+            let bytes = ty.to_bytes();
+            let decoded = Type::read_from_bytes(&bytes).expect("type should decode");
+            assert_eq!(&decoded, ty, "type {key} should round-trip");
+            assert_eq!(decoded.to_bytes(), bytes, "type {key} should preserve its wire encoding");
         }
-        let c = built.get("C").expect("C").clone();
-        let mut bytes = Vec::new();
-        c.write_into(&mut bytes);
-        let decoded = Type::read_from(&mut SliceReader::new(&bytes)).expect("C should decode");
-        assert_eq!(decoded, c);
     }
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(64))]
 
         #[test]
-        fn recursive_groups_round_trip((built, root) in recursive_group()) {
-            let ty = built.values().nth(root).expect("root definition");
-            let mut bytes = Vec::new();
-            ty.write_into(&mut bytes);
-            let decoded =
-                Type::read_from(&mut SliceReader::new(&bytes)).expect("should decode");
-            prop_assert_eq!(&decoded, ty);
+        fn recursive_groups_round_trip(built in recursive_group()) {
+            for ty in built.values() {
+                let bytes = ty.to_bytes();
+                let decoded = Type::read_from_bytes(&bytes).expect("should decode");
+                prop_assert_eq!(&decoded, ty);
+                prop_assert_eq!(decoded.to_bytes(), bytes);
+            }
         }
     }
 }
