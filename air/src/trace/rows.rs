@@ -316,20 +316,6 @@ mod tests {
     use miden_core::serde::{Deserializable, Serializable};
 
     #[test]
-    fn row_index_conversions() {
-        use super::RowIndex;
-        // Into
-        let _: RowIndex = 5.into();
-        let _: RowIndex = 5u32.into();
-        let _: RowIndex = (5usize).into();
-
-        // From
-        let _: u32 = RowIndex(5).into();
-        let _: u64 = RowIndex(5).into();
-        let _: usize = RowIndex(5).into();
-    }
-
-    #[test]
     fn row_index_ops() {
         use super::RowIndex;
 

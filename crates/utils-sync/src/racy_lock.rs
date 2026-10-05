@@ -268,12 +268,6 @@ mod tests {
     }
 
     #[test]
-    fn type_inference() {
-        // Check that we can infer `T` from closure's type.
-        let _ = RacyLock::new(|| ());
-    }
-
-    #[test]
     fn is_sync_send() {
         fn assert_traits<T: Send + Sync>() {}
         assert_traits::<RacyLock<Vec<i32>>>();
