@@ -229,7 +229,9 @@ impl Eidos {
     /// This is the packed equivalent of [`Self::merge`].
     #[inline]
     pub fn merge_packed(values: &[PackedDigest; 2]) -> PackedDigest {
-        compress_packed_digest_pair(values, &framing::init_packed_cv(0, [0; 3]))
+        let block = array::from_fn(|i| values[i / DIGEST_WIDTH][i % DIGEST_WIDTH]);
+        let cv = framing::init_packed_u32_cv(0, [0; 3]);
+        encoding::pack_cv_to_felts(compression::compress_packed_felt_block(&cv, &block))
     }
 
     /// Hash two digest words as one generic eight-Felt sequence.
