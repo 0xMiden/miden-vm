@@ -111,7 +111,7 @@ impl proptest::arbitrary::Arbitrary for PackageId {
         let chars = proptest::char::range('a', 'z');
         proptest::collection::vec(chars, 4..32)
             .prop_map(|chars| Self(String::from_iter(chars).into_boxed_str().into()))
-            .no_shrink()  // Pure random strings, no meaningful shrinking pattern
+            .no_shrink() // Pure random strings, no meaningful shrinking pattern
             .boxed()
     }
 }
