@@ -212,6 +212,13 @@ test-crypto: ## Run crypto tests requiring specialized feature configurations
 		--features miden-crypto/persistent-forest
 	$(MAKE) test-lifted-stark
 
+.PHONY:test-rpx-avx2-debug
+test-rpx-avx2-debug: ## Tests unoptimized RPX with AVX2 and the default 2 MiB thread stack
+	RUSTFLAGS="$(RUSTFLAGS) -C target-feature=+avx2" $(MAKE) test \
+		CRATE=miden-crypto WORKSPACE_TEST_FEATURES= CARGO_PROFILE=test \
+		TEST_RUST_MIN_STACK=2097152 EXTRA="--lib --no-tests=fail" \
+		EXPR="-E 'test(rpx_packed_permutation_fits_default_thread_stack)'"
+
 .PHONY: test-docs
 test-docs: ## Run documentation tests (cargo test - nextest doesn't support doctests)
 	$(BUILDDOCS) cargo test --doc $(ALL_FEATURES)
