@@ -32,8 +32,9 @@ use crate::merkle::{
 ///
 /// # Serialization
 ///
-/// Deserialization validates node indices and checks each leaf map key against the index embedded
-/// in its value.
+/// Deserialization requires nonempty levels with increasing depths and increasing map positions.
+/// It validates node indices, checks embedded leaf indices, and rejects overlap between the leaf
+/// maps. Serializing a value with mismatched leaf indices or overlapping leaf maps panics.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
@@ -90,9 +91,14 @@ impl UniqueNodes {
             .unwrap_or_else(|| *EmptySubtreeRoots::entry(SMT_DEPTH, index.depth()))
     }
 
-    /// Checks that each leaf is stored under its embedded tree position.
+    /// Checks embedded leaf positions and exclusivity of the leaf maps.
     pub(super) fn validate(&self) -> Result<(), DeserializationError> {
         for (&position, leaf) in &self.leaves {
+            if self.value_only_leaves.contains_key(&position) {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "Leaf position {position} appears in both leaf maps"
+                )));
+            }
             if position != leaf.index().position() {
                 return Err(DeserializationError::InvalidValue(format!(
                     "Node index {position} did not match the embedded leaf index {}",
@@ -113,6 +119,8 @@ impl Default for UniqueNodes {
 
 impl Serializable for UniqueNodes {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.validate().expect("cannot serialize invalid UniqueNodes");
+
         // First we write the expected root into the buffer.
         self.root.write_into(target);
 
@@ -162,38 +170,91 @@ impl Deserializable for UniqueNodes {
         // We first have to read the count of levels.
         let level_count = source.read_u64()?;
         let mut nodes = BTreeMap::new();
+        let mut previous_depth = None;
 
         // Next we have that many levels to read, but each is of a variable size.
         for _ in 0..level_count {
             let depth = source.read_u8()?;
+            if let Some(previous) = previous_depth
+                && depth <= previous
+            {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "Level depth {depth} does not exceed previous depth {previous}"
+                )));
+            }
+            previous_depth = Some(depth);
             let node_count = source.read_u64()?;
+            if node_count == 0 {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "Empty node level at depth {depth}"
+                )));
+            }
+            let mut previous_position = None;
             for _ in 0..node_count {
                 let position = source.read_u64()?;
+                if let Some(previous) = previous_position
+                    && position < previous
+                {
+                    return Err(DeserializationError::InvalidValue(format!(
+                        "Node position {position} precedes {previous} at depth {depth}"
+                    )));
+                }
+                previous_position = Some(position);
                 let index = NodeIndex::new(depth, position)
                     .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
                 let value = source.read()?;
-                nodes.insert(index, value);
+                if nodes.insert(index, value).is_some() {
+                    return Err(DeserializationError::InvalidValue(format!(
+                        "Duplicate node position {position} at depth {depth}"
+                    )));
+                }
             }
         }
 
         // Next we need the number of leaves.
         let leaf_count = source.read_u64()?;
         let mut leaves = BTreeMap::new();
+        let mut previous_position = None;
 
         // And then we have to read that many leaves.
         for _ in 0..leaf_count {
             let (position, leaf) = source.read()?;
-            leaves.insert(position, leaf);
+            if let Some(previous) = previous_position
+                && position < previous
+            {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "Leaf position {position} precedes {previous}"
+                )));
+            }
+            previous_position = Some(position);
+            if leaves.insert(position, leaf).is_some() {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "Duplicate leaf position {position}"
+                )));
+            }
         }
 
         // Finally we read the number of value-only leaves...
         let value_only_leaf_count = source.read_u64()?;
         let mut value_only_leaves = BTreeMap::new();
+        let mut previous_position = None;
 
         // ... and read that many.
         for _ in 0..value_only_leaf_count {
             let (position, value) = source.read()?;
-            value_only_leaves.insert(position, value);
+            if let Some(previous) = previous_position
+                && position < previous
+            {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "Value-only leaf position {position} precedes {previous}"
+                )));
+            }
+            previous_position = Some(position);
+            if value_only_leaves.insert(position, value).is_some() {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "Duplicate value-only leaf position {position}"
+                )));
+            }
         }
 
         let unique_nodes = Self { root, nodes, leaves, value_only_leaves };
@@ -266,12 +327,13 @@ mod unique_nodes_arbitrary {
 
                     let value_only_leaves: BTreeMap<u64, Word> = value_only_positions
                         .into_iter()
+                        .filter(|position| !leaves.contains_key(position))
                         .map(|p| {
                             let hash: Word = [
                                 Felt::from(p as u32),
-                                Felt::from(p as u32 + 1),
-                                Felt::from(p as u32 + 2),
-                                Felt::from(p as u32 + 3),
+                                Felt::from((p as u32).wrapping_add(1)),
+                                Felt::from((p as u32).wrapping_add(2)),
+                                Felt::from((p as u32).wrapping_add(3)),
                             ]
                             .into();
                             (p, hash)
