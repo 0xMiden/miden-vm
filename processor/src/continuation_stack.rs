@@ -618,18 +618,10 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            // Default keeps source_node_ids: None (push_source_node_id is a no-op while it is
-            // None), and the reader always decodes None - so Default + push_continuation stays
-            // in the exact-roundtrip regime. Stacks that track source node ids are lossy on the
-            // wire by design and are covered by the dedicated deterministic test.
+            // The reader omits source-node tracking, so generated stacks keep it disabled.
+            // The wire contract test below covers stacks that track source nodes.
             proptest::collection::vec(any::<Continuation<MastForestId>>(), 0..=6)
-                .prop_map(|continuations| {
-                    let mut stack = ContinuationStack::default();
-                    for continuation in continuations {
-                        stack.push_continuation(continuation);
-                    }
-                    stack
-                })
+                .prop_map(|stack| Self { stack, source_node_ids: None })
                 .boxed()
         }
     }
@@ -790,7 +782,7 @@ mod tests {
 
 #[cfg(test)]
 mod wire_contract_pin {
-    use alloc::vec::Vec;
+    use alloc::{vec, vec::Vec};
 
     use miden_core::{
         mast::{MastForestId, MastNodeId},
@@ -799,18 +791,17 @@ mod wire_contract_pin {
 
     use super::*;
 
-    /// Pins the wire contract that source-node tracking metadata is NOT serialized: a stack
-    /// that tracks source node ids must produce byte-identical output to the same stack without
-    /// tracking, since the reader always decodes `source_node_ids: None`. If serialization ever
-    /// starts emitting the tracked metadata, this assertion breaks and the exact-equality regime
-    /// the arbitrary strategies rely on must be re-examined.
+    /// Source-node tracking is omitted from serialization. Enabling tracking must not change the
+    /// bytes, and decoding must leave tracking disabled.
     #[test]
     fn tracked_and_untracked_stacks_serialize_identically() {
         let mut tracked = ContinuationStack::<MastForestId>::default();
+        tracked.start_tracking_source_nodes(None);
         tracked.push_with_source_node_id(
             Continuation::FinishJoin(MastNodeId::from(0u32)),
             Some(DebugSourceNodeId::from(0u32)),
         );
+        assert_eq!(tracked.source_node_ids, Some(vec![Some(DebugSourceNodeId::from(0u32))]));
 
         let mut untracked = ContinuationStack::<MastForestId>::default();
         untracked.push_continuation(Continuation::FinishJoin(MastNodeId::from(0u32)));
@@ -826,6 +817,6 @@ mod wire_contract_pin {
             ContinuationStack::<MastForestId>::read_from(&mut SliceReader::new(&tracked_bytes))
                 .expect("tracked stack round-trips through the wire");
         assert_eq!(decoded, untracked);
-        assert_eq!(decoded, tracked, "untracked-origin stacks round-trip exactly");
+        assert_eq!(decoded.source_node_ids, None);
     }
 }
