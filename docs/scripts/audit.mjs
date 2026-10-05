@@ -10,11 +10,6 @@ const exceptions = {
     version: "3.0.3",
     expires: "2026-11-03",
   },
-  "https://github.com/advisories/GHSA-ch52-4w7c-c8xp": {
-    package: "http-cache-semantics",
-    version: "4.2.0",
-    expires: "2026-11-03",
-  },
 };
 
 export function checkAudit(report, lock, today = new Date().toISOString().slice(0, 10)) {
@@ -71,7 +66,7 @@ function main() {
   const report = JSON.parse(result.stdout);
   const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
   const count = checkAudit(report, lock);
-  console.log(`Docs audit passed with ${count} findings covered by exceptions expiring 2026-11-03.`);
+  console.log(`Docs audit passed with ${count} findings covered by the braces exception, expiring 2026-11-03.`);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

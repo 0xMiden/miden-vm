@@ -7,7 +7,6 @@ function fixture() {
   const packages = {};
   for (const [name, version, id] of [
     ["braces", "3.0.3", "GHSA-vfj7-8cjw-p6xm"],
-    ["http-cache-semantics", "4.2.0", "GHSA-ch52-4w7c-c8xp"],
   ]) {
     vulnerabilities[name] = {
       via: [{ name, url: `https://github.com/advisories/${id}`, severity: "high" }],
@@ -16,7 +15,7 @@ function fixture() {
     };
     packages[`node_modules/${name}`] = { version };
   }
-  vulnerabilities.parent = { via: ["braces", "http-cache-semantics"] };
+  vulnerabilities.parent = { via: ["braces"] };
   vulnerabilities.grandparent = { via: ["parent"] };
   return [{ auditReportVersion: 2, vulnerabilities }, { packages }];
 }
@@ -27,7 +26,7 @@ test("accepts only reviewed advisories and their transitive findings", () => {
   const [report, lock] = fixture();
   // Exercise dependency resolution when parents appear before causes.
   report.vulnerabilities = Object.fromEntries(Object.entries(report.vulnerabilities).reverse());
-  assert.equal(checkAudit(report, lock, today), 4);
+  assert.equal(checkAudit(report, lock, today), 3);
   assert.equal(checkAudit({ auditReportVersion: 2, vulnerabilities: {} }, lock, today), 0);
 });
 
@@ -40,7 +39,7 @@ test("rejects a new advisory on an excepted package", () => {
 test("accepts parent cycles only when every advisory is reviewed", () => {
   const [report, lock] = fixture();
   report.vulnerabilities.parent.via.push("grandparent");
-  assert.equal(checkAudit(report, lock, today), 4);
+  assert.equal(checkAudit(report, lock, today), 3);
   report.vulnerabilities.grandparent.via.push({ name: "grandparent", url: "https://github.com/advisories/GHSA-new" });
   assert.throws(() => checkAudit(report, lock, today), /Unaccepted/);
 });
@@ -51,6 +50,21 @@ test("rejects unknown findings, missing causes, and cycles", () => {
     report.vulnerabilities.other = { via };
     assert.throws(() => checkAudit(report, lock, today));
   }
+});
+
+test("rejects the removed http-cache-semantics exception", () => {
+  const [report, lock] = fixture();
+  report.vulnerabilities["http-cache-semantics"] = {
+    via: [{
+      name: "http-cache-semantics",
+      url: "https://github.com/advisories/GHSA-ch52-4w7c-c8xp",
+      severity: "high",
+    }],
+    nodes: ["node_modules/http-cache-semantics"],
+    fixAvailable: false,
+  };
+  lock.packages["node_modules/http-cache-semantics"] = { version: "4.2.0" };
+  assert.throws(() => checkAudit(report, lock, today), /Unaccepted/);
 });
 
 test("rejects changed and missing locked versions, including nested copies", () => {
