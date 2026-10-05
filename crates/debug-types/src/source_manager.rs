@@ -424,7 +424,7 @@ impl DefaultSourceManagerImpl {
         let file = self.uris.get(&loc.uri).copied().and_then(|id| self.files.get(id))?;
 
         let max_len = ByteIndex::from(file.as_str().len() as u32);
-        if loc.start >= max_len || loc.end > max_len {
+        if loc.start > loc.end || loc.end > max_len {
             return None;
         }
 

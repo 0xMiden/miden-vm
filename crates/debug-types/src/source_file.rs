@@ -254,12 +254,13 @@ pub struct SourceFileRef {
 impl SourceFileRef {
     /// Create a [SourceFileRef] from a [SourceFile] and desired span (in bytes)
     ///
-    /// The given span will be constrained to the bytes of `file`, so a span that reaches out of
-    /// bounds will have its end bound set to the last byte of the file.
+    /// The given span must have ordered bounds, which are clamped to the length of `file`.
     pub fn new(file: Arc<SourceFile>, span: impl Into<Range<u32>>) -> Self {
-        let span = span.into();
-        let end = core::cmp::min(span.end, file.len() as u32);
-        let span = SourceSpan::new(file.id(), span.start..end);
+        let span = SourceSpan::new(file.id(), span.into());
+        let len = file.len() as u32;
+        let start = span.start().to_u32().min(len);
+        let end = span.end().to_u32().min(len);
+        let span = SourceSpan::new(file.id(), start..end);
         Self { file, span }
     }
 
