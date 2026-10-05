@@ -33,34 +33,26 @@ fuzz_target!(|data: &[u8]| {
     let _ = view.node_info_at(last);
     let _ = view.node_digest_at(last);
 
-    // STABILITY ORACLE (upgraded from crash-only): MastNodeInfo's serde impls are both
-    // #[cfg(test)]-gated, so the oracle runs through the UNGATED accessors: per-index
-    // consistency (the materialized info's entry and digest must equal the view's
-    // independent entry/digest accessors — catching entry/digest mispairing in view
-    // materialization) plus a Word digest roundtrip through ungated serde. Corpus
-    // reachability measured per the reachability rule: 31/237 ().
+    // Check consistency through the ungated view accessors and digest serialization.
     for i in 0..view.node_count() {
-        // REPORTED WIRE-VIEW GAP (): in-range access can currently FAIL on writer-unproducible
-        // wire bytes (non-canonical digest limbs pass view construction) — the pinned
-        // fixture wire_view_materializes_but_in_range_digest_access_fails tracks it. The
-        // exception below is scoped to that EXACT error signature; any OTHER in-range
-        // accessor error is a regression and must fail the oracle; blanket
-        // suppression would let a valid-node-rejecting regression run green.
+        let entry = view.node_entry_at(i).expect("in-range entry must decode");
+        // Non-external digest limbs are intentionally decoded lazily. Permit only the field-range
+        // error, and require both digest-bearing accessors to agree exactly.
         let info = match view.node_info_at(i) {
             Ok(info) => info,
             Err(miden_core::serde::DeserializationError::InvalidValue(msg))
                 if msg == "value not in the appropriate range" =>
             {
+                assert_eq!(
+                    view.node_digest_at(i),
+                    Err(miden_core::serde::DeserializationError::InvalidValue(msg)),
+                    "in-range digest accessors must return the same error"
+                );
                 continue;
             },
-            Err(e) => panic!(
-                "in-range node {i} failed with an UNEXPECTED error (the reported wire-view gap covers only                  non-canonical digest limbs): {e:?}"
-            ),
+            Err(e) => panic!("in-range node {i} failed with an unexpected error: {e:?}"),
         };
         // With info materialized, both independent accessors must succeed.
-        let entry = view
-            .node_entry_at(i)
-            .expect("in-range entry must materialize once info did");
         assert_eq!(
             info.node_entry(),
             entry,
