@@ -3,7 +3,7 @@ use core::{fmt, slice};
 
 use super::{Eidos, InnerNodeInfo, MerkleError, MerklePath, NodeIndex, Word};
 use crate::{
-    hash::eidos::{PACKED_LANES, PackedDigest, pack_digest_lanes},
+    hash::eidos::{PACKED_LANES, PackedDigest, pack_digest_lanes, unpack_digest_lane},
     utils::{assume_init_vec, uninit_vector, word_to_hex},
 };
 
@@ -62,8 +62,7 @@ impl MerkleTree {
                 });
                 let parents = Eidos::merge_packed(&children);
                 for lane in 0..PACKED_LANES {
-                    nodes[i + lane]
-                        .write(Word::new(core::array::from_fn(|word| parents[word][lane])));
+                    nodes[i + lane].write(Word::new(unpack_digest_lane(&parents, lane)));
                 }
                 i += PACKED_LANES;
             }
