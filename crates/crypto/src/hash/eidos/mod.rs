@@ -73,3 +73,11 @@ pub type PackedDigest = PackedChainingValue;
 
 /// One packed Eidos message block, with one independent block per logical packed lane.
 pub type PackedBlock = [PackedFelt; BLOCK_LEN];
+
+/// Arrange scalar digests into one packed batch.
+#[inline]
+pub(crate) fn pack_digest_lanes<T: Copy>(
+    lanes: &[[T; DIGEST_WIDTH]; PACKED_LANES],
+) -> [[T; PACKED_LANES]; DIGEST_WIDTH] {
+    core::array::from_fn(|word| core::array::from_fn(|lane| lanes[lane][word]))
+}
