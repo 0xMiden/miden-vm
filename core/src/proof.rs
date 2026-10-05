@@ -972,29 +972,25 @@ mod proof_arbitrary {
     };
     use crate::{Felt, Word};
 
-    fn stark_proof() -> impl Strategy<Value = StarkProof> {
-        // The reader enforces only the byte-count ceiling (64 MiB); bound well under it. The
-        // bytes are an opaque serialized artifact - the type does not validate their contents.
-        (
-            proptest::collection::vec(any::<u8>(), 0..=64),
-            prop_oneof![
-                Just(HashFunction::Blake3_256),
-                Just(HashFunction::Rpo256),
-                Just(HashFunction::Rpx256),
-                Just(HashFunction::Poseidon2),
-                Just(HashFunction::Keccak),
-            ],
-        )
-            .prop_map(|(bytes, hash_fn)| StarkProof::new(bytes, hash_fn))
-            .boxed()
-    }
-
     impl Arbitrary for StarkProof {
         type Parameters = ();
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            stark_proof().boxed()
+            // The reader enforces only the byte-count ceiling (64 MiB); bound well under it. The
+            // bytes are an opaque serialized artifact - the type does not validate their contents.
+            (
+                proptest::collection::vec(any::<u8>(), 0..=64),
+                prop_oneof![
+                    Just(HashFunction::Blake3_256),
+                    Just(HashFunction::Rpo256),
+                    Just(HashFunction::Rpx256),
+                    Just(HashFunction::Poseidon2),
+                    Just(HashFunction::Keccak),
+                ],
+            )
+                .prop_map(|(bytes, hash_fn)| StarkProof::new(bytes, hash_fn))
+                .boxed()
         }
     }
 
@@ -1004,7 +1000,7 @@ mod proof_arbitrary {
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             // DeferredRoot is a Word alias; both fields are any-valid.
-            (stark_proof(), any::<Word>())
+            (any::<StarkProof>(), any::<Word>())
                 .prop_map(|(proof, precompile_root)| Self { proof, precompile_root })
                 .boxed()
         }
@@ -1016,7 +1012,7 @@ mod proof_arbitrary {
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             // The reader enforces the MAX_PRECOMPILE_ROOTS ceiling; bound well under it.
-            (stark_proof(), proptest::collection::vec(any::<Word>(), 0..=4))
+            (any::<StarkProof>(), proptest::collection::vec(any::<Word>(), 0..=4))
                 .prop_map(|(proof, roots)| Self { proof, roots })
                 .boxed()
         }
