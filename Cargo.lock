@@ -2439,6 +2439,7 @@ dependencies = [
  "miden-crypto",
  "wycheproof-ng-core",
  "wycheproof-ng-dh",
+ "wycheproof-ng-ecdsa",
  "wycheproof-ng-eddsa",
  "x25519-dalek",
 ]
@@ -5364,6 +5365,18 @@ name = "wycheproof-ng-dh"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e204f2f9f01a3b93dfaa7cf63466bdc88beb629f8216b869ff7400cf0c53fddd"
+dependencies = [
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "wycheproof-ng-core",
+]
+
+[[package]]
+name = "wycheproof-ng-ecdsa"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1a42460081707a5c4186407a5a46ae1a477e3adbb0e93a72a98ec9a01062a50"
 dependencies = [
  "serde",
  "serde_derive",

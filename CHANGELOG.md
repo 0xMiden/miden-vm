@@ -7,6 +7,10 @@
 - Fixed linker module-capacity overflow so AST and pre-assembled module registration return a structured error instead of panicking ([#3895](https://github.com/0xMiden/miden-vm/issues/3895)).
 - [BREAKING] `MmrPeaks::verify` now takes the tree, peak and relative position from the peaks' forest instead of the proof's, and rejects positions outside that forest (`PositionNotFound`, previously a panic) and paths whose depth differs from the tree height (`InvalidMerklePath`) ([#3931](https://github.com/0xMiden/miden-vm/pull/3931)).
 
+#### Features
+
+- Added `PublicKey::from_sec1_bytes` and `PublicKey::from_hex` to `ecdsa_k256_keccak` for parsing and validating compressed and uncompressed SEC1 public keys ([#3961](https://github.com/0xMiden/miden-vm/pull/3961)).
+
 ## v0.35.0 (2026-10-01)
 
 #### Changes
