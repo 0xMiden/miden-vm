@@ -240,6 +240,12 @@ impl Linker {
         let static_library = matches!(library.linkage, Linkage::Static).then(|| library.clone());
         let result = match self.libraries.entry(library_interface_digest) {
             Entry::Vacant(entry) => {
+                let remaining_capacity =
+                    ModuleIndex::MAX_MODULES.saturating_sub(self.modules.len());
+                if module_descriptors.len() > remaining_capacity {
+                    return Err(LinkerError::TooManyModules);
+                }
+
                 entry.insert(library);
                 self.link_assembled_modules(module_descriptors)
             },
@@ -286,6 +292,13 @@ impl Linker {
     ///
     /// If called directly, the module will default to being dynamically linked. You must use
     /// [`Self::link_library`] if you wish to statically link `module`.
+    ///
+    /// # Errors
+    ///
+    /// This operation can fail for the following reasons:
+    ///
+    /// * Module with same [Path] is in the graph already
+    /// * Too many modules in the graph
     pub fn link_assembled_module(
         &mut self,
         module: ModuleDescriptor,
@@ -300,7 +313,7 @@ impl Linker {
             });
         }
 
-        let module_index = self.next_module_id();
+        let module_index = self.next_module_id()?;
         let submodules = module.submodules().to_vec();
         let items = module.items();
         let mut symbols = Vec::with_capacity(items.len());
@@ -358,11 +371,6 @@ impl Linker {
     ///
     /// * Module with same [Path] is in the graph already
     /// * Too many modules in the graph
-    ///
-    /// # Panics
-    ///
-    /// This function will panic if the number of modules exceeds the maximum representable
-    /// [ModuleIndex] value, `u16::MAX`.
     pub fn link_module(&mut self, module: &mut Module) -> Result<ModuleIndex, LinkerError> {
         log::debug!(target: "linker", "adding unprocessed module {}", module.path());
 
@@ -371,7 +379,7 @@ impl Linker {
             return Err(LinkerError::DuplicateModule { path: module.path().into() });
         }
 
-        let module_index = self.next_module_id();
+        let module_index = self.next_module_id()?;
         let submodules = module.submodules().to_vec();
         let mut symbols = Vec::new();
         let imports = module.take_imports().into_iter().map(Import::new).collect::<Vec<_>>();
@@ -426,8 +434,8 @@ impl Linker {
     }
 
     #[inline]
-    fn next_module_id(&self) -> ModuleIndex {
-        ModuleIndex::new(self.modules.len())
+    fn next_module_id(&self) -> Result<ModuleIndex, LinkerError> {
+        ModuleIndex::try_new(self.modules.len()).map_err(|_| LinkerError::TooManyModules)
     }
 }
 
@@ -476,6 +484,11 @@ impl Linker {
                 reason: err.to_string(),
             }
         })?;
+        let remaining_capacity = ModuleIndex::MAX_MODULES.saturating_sub(self.modules.len());
+        if module_descriptors.len() > remaining_capacity {
+            return Err(LinkerError::TooManyModules.into());
+        }
+
         for module_descriptor in module_descriptors {
             let is_kernel_module = module_descriptor.path().is_kernel_path();
             let module_index = self.link_assembled_module(module_descriptor)?;
@@ -1232,6 +1245,127 @@ mod tests {
 
         assert_eq!(linker.libraries().count(), 1);
         assert_eq!(linker.static_libraries().count(), 2);
+    }
+
+    fn linker_at_module_capacity(context: &TestContext) -> Linker {
+        let mut linker = Linker::new(context.source_manager());
+        let placeholder = LinkModule::new(
+            ModuleIndex::const_new(0),
+            ast::ModuleKind::Library,
+            LinkStatus::Linked,
+            ModuleSource::Ast,
+            Arc::<Path>::from(Path::new("::placeholder")),
+        );
+        linker.modules.resize(ModuleIndex::MAX_MODULES, placeholder);
+        linker
+    }
+
+    #[test]
+    fn link_module_returns_error_when_module_capacity_is_exhausted() {
+        let context = TestContext::default();
+        let mut linker = linker_at_module_capacity(&context);
+        let mut module = Module::new(ast::ModuleKind::Library, Path::new("::overflow"));
+        let result = catch_unwind(AssertUnwindSafe(|| linker.link_module(&mut module)));
+
+        assert!(result.is_ok(), "module capacity exhaustion must not panic");
+        assert!(matches!(result.unwrap(), Err(LinkerError::TooManyModules)));
+    }
+
+    #[test]
+    fn link_library_does_not_record_library_when_module_capacity_is_exhausted() {
+        let context = TestContext::default();
+        let module = context
+            .parse_module(source_file!(
+                &context,
+                r#"
+                namespace overflow
+
+                pub proc foo
+                    push.1
+                end
+                "#
+            ))
+            .expect("library module should parse");
+        let package: Arc<MastPackage> = Assembler::new(context.source_manager())
+            .assemble_library("overflow", module, None::<Box<Module>>)
+            .expect("library should assemble")
+            .into();
+        let library = LinkLibrary::from_package(package).with_linkage(Linkage::Static);
+        let mut linker = linker_at_module_capacity(&context);
+
+        assert!(matches!(linker.link_library(library.clone()), Err(LinkerError::TooManyModules)));
+        assert_eq!(linker.modules.len(), ModuleIndex::MAX_MODULES);
+        assert_eq!(linker.libraries().count(), 0);
+        assert_eq!(linker.static_libraries().count(), 0);
+
+        assert!(matches!(linker.link_library(library), Err(LinkerError::TooManyModules)));
+    }
+
+    #[test]
+    fn link_with_kernel_does_not_partially_add_modules_when_capacity_is_exhausted() {
+        let context = TestContext::default();
+        let helpers = context
+            .parse_module(source_file!(
+                &context,
+                r#"
+                namespace $kernel::helpers
+
+                pub proc helper
+                    push.1
+                end
+                "#
+            ))
+            .expect("kernel helper module should parse");
+        let kernel = context
+            .parse_kernel(source_file!(
+                &context,
+                r#"
+                pub mod helpers
+
+                pub proc foo
+                    exec.helpers::helper
+                end
+                "#
+            ))
+            .expect("kernel module should parse");
+        let kernel_package: Arc<MastPackage> = Assembler::new(context.source_manager())
+            .assemble_kernel("kernel", kernel, [helpers])
+            .expect("two-module kernel should assemble")
+            .into();
+        let mut linker = linker_at_module_capacity(&context);
+        linker.modules.pop();
+        let modules_before = linker.modules.len();
+
+        let err = linker
+            .link_with_kernel(kernel_package.clone())
+            .expect_err("two-module kernel should exceed the single remaining slot");
+
+        assert!(err.to_string().contains("too many modules"));
+        assert_eq!(
+            linker.modules.len(),
+            modules_before,
+            "capacity failure must not partially add kernel modules"
+        );
+        assert!(!linker.has_nonempty_kernel());
+        assert!(linker.kernel_package().is_none());
+
+        let retry_err = linker
+            .link_with_kernel(kernel_package)
+            .expect_err("retry should fail with the same capacity error");
+        assert!(retry_err.to_string().contains("too many modules"));
+        assert_eq!(linker.modules.len(), modules_before);
+    }
+
+    #[test]
+    fn link_assembled_module_returns_error_when_module_capacity_is_exhausted() {
+        let context = TestContext::default();
+        let mut linker = linker_at_module_capacity(&context);
+        let module =
+            ModuleDescriptor::new(Arc::<Path>::from(Path::new("::overflow_assembled")), None);
+        let result = catch_unwind(AssertUnwindSafe(|| linker.link_assembled_module(module)));
+
+        assert!(result.is_ok(), "module capacity exhaustion must not panic");
+        assert!(matches!(result.unwrap(), Err(LinkerError::TooManyModules)));
     }
 
     #[test]
