@@ -18,9 +18,8 @@ pub const MAX_NUM_ACE_WIRES: u32 = instruction::MAX_ID;
 
 /// Maximum combined number of READ and EVAL wires accepted by one `eval_circuit` operation.
 ///
-/// Bounds host allocation and work before circuit evaluation begins. This should accommodate
-/// the ACE circuits of both the VM and PVM recursive verifiers, currently 6,044 and 13,912 wires
-/// respectively (see `sys/{vm,pvm}/constraints_eval.masm` in the core library).
+/// Bounds host allocation and work before circuit evaluation begins. Both recursive verifier
+/// circuits must fit this limit (see `sys/{vm,pvm}/constraints_eval.masm` in the core library).
 pub const MAX_EVAL_CIRCUIT_WIRES: u32 = 1 << 15;
 
 /// Maximum number of `eval_circuit` invocations recorded in an execution witness.

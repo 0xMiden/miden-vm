@@ -10,9 +10,23 @@ use miden_vm::{
 
 use super::{RecursionCase, config::ProofComposition, recursive_host};
 
+pub(super) struct TraceShape {
+    core_rows: usize,
+    byte_pair_lookup_rows: usize,
+    chiplets_rows: usize,
+    eidos_compression_rows: usize,
+    hash_chiplet_rows: usize,
+    bitwise_rows: usize,
+    memory_rows: usize,
+    ace_rows: usize,
+    kernel_rows: usize,
+    max_trace_rows: usize,
+    max_padded_rows: usize,
+}
+
 pub(super) struct CaseTraceShape {
     composition: ProofComposition,
-    trace: TraceLenSummary,
+    trace: TraceShape,
 }
 
 struct ProveSummary {
@@ -23,6 +37,34 @@ struct ProveSummary {
     min_ms: f64,
     max_ms: f64,
     avg_proof_bytes: f64,
+}
+
+pub(super) fn trace_shape_summary_for(summary: &TraceLenSummary) -> TraceShape {
+    let chiplets = summary.chiplets();
+    let max_trace_rows = summary
+        .core_rows()
+        .max(summary.chiplets_rows())
+        .max(summary.eidos_compression_rows())
+        .max(summary.byte_pair_lookup_rows());
+    let max_padded_rows = summary
+        .core_height()
+        .max(summary.chiplets_height())
+        .max(summary.eidos_compression_height())
+        .max(summary.byte_pair_lookup_rows());
+
+    TraceShape {
+        core_rows: summary.core_rows(),
+        byte_pair_lookup_rows: summary.byte_pair_lookup_rows(),
+        chiplets_rows: summary.chiplets_rows(),
+        eidos_compression_rows: summary.eidos_compression_rows(),
+        hash_chiplet_rows: chiplets.hash_chiplet_len(),
+        bitwise_rows: chiplets.bitwise_chiplet_len(),
+        memory_rows: chiplets.memory_chiplet_len(),
+        ace_rows: chiplets.ace_chiplet_len(),
+        kernel_rows: chiplets.kernel_rom_len(),
+        max_trace_rows,
+        max_padded_rows,
+    }
 }
 
 pub(super) fn execute_trace_inputs(case: RecursionCase, mut host: DefaultHost) -> ExecutionWitness {
@@ -196,80 +238,79 @@ fn print_prove_summary(summaries: &[ProveSummary]) {
     }
 }
 
-fn trace_len_summary(case: &RecursionCase) -> TraceLenSummary {
+fn trace_shape_summary(case: &RecursionCase) -> TraceShape {
     let trace = build_trace_case(execute_trace_inputs(case.clone(), recursive_host()));
-    *trace.trace_len_summary()
+    trace_shape_summary_for(trace.trace_len_summary())
 }
 
 pub(super) fn print_case_shape(case: &RecursionCase) -> CaseTraceShape {
-    let trace = trace_len_summary(case);
-    let chiplets = trace.chiplets_trace_len();
+    let trace = trace_shape_summary(case);
 
     println!(
-        "    {} core={} range={} chiplets={} poseidon2_perm={} hash_ctrl={} max_trace={} max_padded={}",
+        "    {} core={} and8={} chiplets={} eidos_compression={} hash_ctrl={} max_trace={} max_padded={}",
         case.composition.label(),
-        trace.core_trace_len(),
-        trace.range_trace_len(),
-        chiplets.trace_len(),
-        trace.poseidon2_permutation_trace_len(),
-        chiplets.hash_chiplet_len(),
-        trace.trace_len(),
-        trace.padded_trace_len(),
+        trace.core_rows,
+        trace.byte_pair_lookup_rows,
+        trace.chiplets_rows,
+        trace.eidos_compression_rows,
+        trace.hash_chiplet_rows,
+        trace.max_trace_rows,
+        trace.max_padded_rows,
     );
     let record = format!("BENCH_RECURSION_SHAPE {}", case.composition.machine_fields());
     print_bench_shape(&record, &trace);
     CaseTraceShape { composition: case.composition, trace }
 }
 
-pub(super) fn print_bench_shape(record: &str, shape: &TraceLenSummary) {
+pub(super) fn print_bench_shape(record: &str, shape: &TraceShape) {
     // This is a machine-readable schema consumed by benchmark parsers.
-    let chiplets = shape.chiplets_trace_len();
     println!(
         concat!(
             "{} ",
-            "core_rows={} range_rows={} chiplets_rows={} poseidon2_permutation_rows={} ",
+            "core_rows={} byte_pair_lookup_rows={} chiplets_rows={} eidos_compression_rows={} ",
             "hash_chiplet_rows={} bitwise_rows={} memory_rows={} ace_rows={} kernel_rows={} ",
-            "native_hash_rows=0 and8_lookup_rows=0 max_trace_rows={} max_padded_rows={}"
+            "native_hash_rows={} and8_lookup_rows={} max_trace_rows={} max_padded_rows={}"
         ),
         record,
-        shape.core_trace_len(),
-        shape.range_trace_len(),
-        chiplets.trace_len(),
-        shape.poseidon2_permutation_trace_len(),
-        chiplets.hash_chiplet_len(),
-        chiplets.bitwise_chiplet_len(),
-        chiplets.memory_chiplet_len(),
-        chiplets.ace_chiplet_len(),
-        chiplets.kernel_rom_len(),
-        shape.trace_len(),
-        shape.padded_trace_len(),
+        shape.core_rows,
+        shape.byte_pair_lookup_rows,
+        shape.chiplets_rows,
+        shape.eidos_compression_rows,
+        shape.hash_chiplet_rows,
+        shape.bitwise_rows,
+        shape.memory_rows,
+        shape.ace_rows,
+        shape.kernel_rows,
+        shape.eidos_compression_rows,
+        shape.byte_pair_lookup_rows,
+        shape.max_trace_rows,
+        shape.max_padded_rows,
     );
 }
 
 pub(super) fn print_trace_shape_summary(shapes: &[CaseTraceShape]) {
     println!("\n=== recursive trace summary");
     println!(
-        "| MVM proofs | PVM proofs | core | range | chiplets | poseidon2_perm | hash | bitwise | memory | ace | kernel | max_trace | padded |"
+        "| MVM proofs | PVM proofs | core | and8 | chiplets | EidosCompression | hash | bitwise | memory | ace | kernel | max_trace | padded |"
     );
     println!("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
     for case in shapes {
         let shape = &case.trace;
-        let chiplets = shape.chiplets_trace_len();
         println!(
             "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
             case.composition.mvm_count(),
             case.composition.pvm_count(),
-            shape.core_trace_len(),
-            shape.range_trace_len(),
-            chiplets.trace_len(),
-            shape.poseidon2_permutation_trace_len(),
-            chiplets.hash_chiplet_len(),
-            chiplets.bitwise_chiplet_len(),
-            chiplets.memory_chiplet_len(),
-            chiplets.ace_chiplet_len(),
-            chiplets.kernel_rom_len(),
-            shape.trace_len(),
-            shape.padded_trace_len(),
+            shape.core_rows,
+            shape.byte_pair_lookup_rows,
+            shape.chiplets_rows,
+            shape.eidos_compression_rows,
+            shape.hash_chiplet_rows,
+            shape.bitwise_rows,
+            shape.memory_rows,
+            shape.ace_rows,
+            shape.kernel_rows,
+            shape.max_trace_rows,
+            shape.max_padded_rows,
         );
     }
 }

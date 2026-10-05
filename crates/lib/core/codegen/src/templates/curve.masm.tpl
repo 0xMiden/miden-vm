@@ -28,10 +28,10 @@ use miden::core::precompiles::fields::{{BASE_FIELD_MODULE}}
 #
 # Notation used below:
 # - DIGEST        = one word [d0, d1, d2, d3], d0 on top of the stack.
-# - VALUE_TAG     = one word [PRECOMPILE_ID, VALUE_OP_ID, GROUP_PTR, 0].
-# - OP_TAG(op_id) = one word [PRECOMPILE_ID, op_id, 0, 0] for ADD/SUB/EQ.
-# - MSM_TAG       = one word [PRECOMPILE_ID, MSM_OP_ID, 0, 0].
-# - POINT_VALUE   = `[X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST]` under VALUE_TAG.
+# - VALUE_FRAME   = one word [PRECOMPILE_ID, VALUE_OP_ID, GROUP_PTR, 0].
+# - OP_FRAME      = one word [PRECOMPILE_ID, op_id, 0, 0] for ADD/SUB/EQ.
+# - MSM_FRAME     = one word [PRECOMPILE_ID, MSM_OP_ID, n_pairs, 0].
+# - POINT_VALUE   = `[X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST]` under VALUE_FRAME.
 
 const PRECOMPILE_ID = {{PRECOMPILE_ID}}
 const GROUP_PTR = {{GROUP_PTR}}
@@ -41,12 +41,20 @@ const SUB_OP_ID = {{SUB_OP_ID}}
 const EQ_OP_ID = {{EQ_OP_ID}}
 const MSM_OP_ID = {{MSM_OP_ID}}
 
-# VALUE tags carry GROUP_PTR; ADD/SUB/EQ/MSM tags deliberately use zero in that slot.
-const VALUE_TAG = {{VALUE_TAG}}
-const ADD_TAG = {{ADD_TAG}}
-const SUB_TAG = {{SUB_TAG}}
-const EQ_TAG = {{EQ_TAG}}
-const MSM_TAG = {{MSM_TAG}}
+# The VALUE frame carries GROUP_PTR. ADD/SUB/EQ use zero for their remaining parameters; MSM binds
+# its pair count in param1. Codegen derives each fixed initial chaining word from its complete frame.
+const VALUE_INIT_CV = {{VALUE_INIT_CV}}
+const ADD_INIT_CV = {{ADD_INIT_CV}}
+const SUB_INIT_CV = {{SUB_INIT_CV}}
+const EQ_INIT_CV = {{EQ_INIT_CV}}
+const MSM_INIT_CV = {{MSM_INIT_CV}}
+const MSM2_INIT_CV = {{MSM2_INIT_CV}}
+# Initial chaining word for an MSM frame with pair count zero. `msm_mem` injects the checked count
+# into the third Felt at runtime.
+const MSM_BASE_CV_0 = {{MSM_BASE_CV_0}}
+const MSM_BASE_CV_1 = {{MSM_BASE_CV_1}}
+const MSM_BASE_CV_2 = {{MSM_BASE_CV_2}}
+const MSM_BASE_CV_3 = {{MSM_BASE_CV_3}}
 
 # Registered digests for CurvePrecompile init constants.
 const IDENTITY_DIGEST = {{IDENTITY_DIGEST}}
@@ -63,13 +71,32 @@ pub type PointValue = struct { x: Coordinate, y: Coordinate }
 #! An MSM term in point, scalar stack order.
 pub type MsmTerm = struct { point: Point, scalar: Scalar }
 
+#! Registers the fixed two-block MSM node staged in memory.
+#! Input:  [ptr, ...]
+#! Output: [MSM_POINT_DIGEST, ...]
+proc register_msm_mem_2
+    push.MSM2_INIT_CV push.2
+    # => [n_chunks=2, CV(MSM2), ptr, ...]
+    adv.register_deferred_data
+    drop
+    # => [CV(MSM2), ptr, ...]
+
+    padw padw
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, ...]
+    repeat.2
+        mem_stream compress
+    end
+    dropw dropw
+    movup.4 drop
+end
+
 #! Constructs an affine curve VALUE node from two coordinate digests.
 #! Input:  [X_DIGEST, Y_DIGEST, ...]
 #! Output: [POINT_DIGEST, ...]
 pub proc load_digest_pair(value: PointValue) -> Point
-    push.VALUE_TAG
-    # => [TAG(VALUE), X_DIGEST, Y_DIGEST, ...]
-    exec.precompiles::register_expr
+    push.VALUE_INIT_CV
+    # => [CV(VALUE), X_DIGEST, Y_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
     # => [POINT_DIGEST, ...]
 end
 
@@ -78,19 +105,15 @@ end
 #! Output: [POINT_DIGEST, ptr+8, ...]
 #! Memory layout: ptr[0..4] = X_DIGEST, ptr[4..8] = Y_DIGEST.
 pub proc load_digest_pair_mem_stream(ptr: ptr<PointValue>) -> (Point, ptr<PointValue>)
-    push.VALUE_TAG
-    # => [TAG(VALUE), ptr, ...]
-    push.1 movdn.5
-    # => [TAG(VALUE), ptr, n_chunks=1, ...]
+    push.VALUE_INIT_CV push.1
+    # => [n_chunks=1, CV(VALUE), ptr, ...]
     adv.register_deferred_data
-    # => [TAG(VALUE), ptr, n_chunks=1, ...]
-    movup.5 drop
-    # => [TAG(VALUE), ptr, ...]
+    drop
+    # => [CV(VALUE), ptr, ...]
     padw padw
-    # => [R0=0w, R1=0w, C=TAG(VALUE), ptr, ...]
-    mem_stream hperm
-    # => [R0'=POINT_DIGEST, R1', C', ptr+8, ...]
-    swapw.2 dropw dropw
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, ...]
+    mem_stream compress
+    dropw dropw
     # => [POINT_DIGEST, ptr+8, ...]
 end
 
@@ -151,9 +174,9 @@ end
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [SUM_DIGEST, ...]
 pub proc add(lhs: Point, rhs: Point) -> Point
-    push.ADD_TAG
-    # => [TAG(ADD), LHS_DIGEST, RHS_DIGEST, ...]
-    exec.precompiles::register_expr
+    push.ADD_INIT_CV
+    # => [CV(ADD), LHS_DIGEST, RHS_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
     # => [SUM_DIGEST, ...]
 end
 
@@ -161,9 +184,9 @@ end
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [DIFF_DIGEST, ...]
 pub proc sub(lhs: Point, rhs: Point) -> Point
-    push.SUB_TAG
-    # => [TAG(SUB), LHS_DIGEST, RHS_DIGEST, ...]
-    exec.precompiles::register_expr
+    push.SUB_INIT_CV
+    # => [CV(SUB), LHS_DIGEST, RHS_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
     # => [DIFF_DIGEST, ...]
 end
 
@@ -172,9 +195,9 @@ end
 #! Input:  [POINT_DIGEST, SCALAR_DIGEST, ...]
 #! Output: [PRODUCT_POINT_DIGEST, ...]
 pub proc mul_scalar(point: Point, scalar: Scalar) -> Point
-    push.MSM_TAG
-    # => [TAG(MSM), POINT_DIGEST, SCALAR_DIGEST, ...]
-    exec.precompiles::register_expr
+    push.MSM_INIT_CV
+    # => [CV(MSM), POINT_DIGEST, SCALAR_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
     # => [PRODUCT_POINT_DIGEST, ...]
 end
 
@@ -193,8 +216,10 @@ end
 #! Output: [MSM_POINT_DIGEST, ...]
 #! Memory layout: pair i at ptr + 8*i is `[POINT_DIGEST, SCALAR_DIGEST]`.
 pub proc msm_mem(ptr: ptr<MsmTerm>, n: u32) -> Point
-    push.MSM_TAG
-    # => [TAG(MSM), ptr, n, ...]
+    dup.1 u32assert.err="MSM pair count must fit in u32"
+    push.MSM_BASE_CV_2 add
+    push.MSM_BASE_CV_1 push.MSM_BASE_CV_3 movdn.2 push.MSM_BASE_CV_0
+    # => [CV(MSM), ptr, n_pairs, ...]
     exec.precompiles::register_mem
     # => [MSM_POINT_DIGEST, ...]
 end
@@ -208,9 +233,9 @@ pub proc msm2(term0: MsmTerm, term1: MsmTerm) -> Point
     loc_storew_le.4 dropw
     loc_storew_le.8 dropw
     loc_storew_le.12 dropw
-    push.2 locaddr.0
-    # => [ptr, n=2, ...]
-    exec.msm_mem
+    locaddr.0
+    # => [ptr, ...]
+    exec.register_msm_mem_2
     # => [MSM_POINT_DIGEST, ...]
 end
 
@@ -230,9 +255,9 @@ end
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [...]
 pub proc assert_eq(lhs: Point, rhs: Point)
-    push.EQ_TAG
-    # => [TAG(EQ), LHS_DIGEST, RHS_DIGEST, ...]
-    exec.precompiles::register_expr
+    push.EQ_INIT_CV
+    # => [CV(EQ), LHS_DIGEST, RHS_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
     # => [EQ_DIGEST, ...]
     exec.precompiles::log_deferred
     # => [...]
@@ -241,7 +266,7 @@ end
 #! Evaluates a curve expression and binds the advised canonical VALUE payload to the input digest.
 #! Input:  [POINT_EXPR_DIGEST, ...]
 #! Output: [POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, ...]
-#! Advice is untrusted. This wrapper re-hashes the advised VALUE payload with the registered VALUE_TAG and
+#! Advice is untrusted. This wrapper re-hashes the advised payload with the registered VALUE frame and
 #! logs `eq(EXPR_DIGEST, VALUE_DIGEST)` before returning the value digest and coordinate digests.
 pub proc eval(point: Point) -> (Point, PointValue)
     adv.evaluate_deferred_payload
@@ -252,24 +277,21 @@ pub proc eval(point: Point) -> (Point, PointValue)
     # => [X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, EXPR_DIGEST, ...]
 
     # Derive VALUE_DIGEST while preserving both payload words for the return.
-    push.VALUE_TAG
-    # => [TAG(VALUE), X, Y, EXPR_DIGEST, ...]
-    dupw.2
-    dupw.2
-    # => [X, Y, TAG(VALUE), X, Y, EXPR_DIGEST, ...]
-    exec.precompiles::digest_expr
+    dupw.1 dupw.1
+    # => [X, Y, X, Y, EXPR_DIGEST, ...]
+    push.VALUE_INIT_CV
+    # => [CV(VALUE), X, Y, X, Y, EXPR_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
     # => [VALUE_DIGEST, X, Y, EXPR_DIGEST, ...]
 
     # Preserve VALUE_DIGEST for the return while logging eq(EXPR_DIGEST, VALUE_DIGEST).
     movupw.3
     # => [EXPR_DIGEST, VALUE_DIGEST, X, Y, ...]
-    push.EQ_TAG
-    # => [TAG(EQ), EXPR_DIGEST, VALUE_DIGEST, X, Y, ...]
-    dupw.2
-    # => [VALUE_DIGEST, TAG(EQ), EXPR_DIGEST, VALUE_DIGEST, X, Y, ...]
-    movupw.2
-    # => [EXPR_DIGEST, VALUE_DIGEST, TAG(EQ), VALUE_DIGEST, X, Y, ...]
-    exec.precompiles::digest_expr
+    dupw.1 movdnw.2
+    # => [EXPR_DIGEST, VALUE_DIGEST, VALUE_DIGEST, X, Y, ...]
+    push.EQ_INIT_CV
+    # => [CV(EQ), EXPR_DIGEST, VALUE_DIGEST, VALUE_DIGEST, X, Y, ...]
+    exec.precompiles::register_fixed_expr
     # => [EQ_DIGEST, VALUE_DIGEST, X, Y, ...]
     exec.precompiles::log_deferred
     # => [VALUE_DIGEST, X, Y, ...]
@@ -285,22 +307,20 @@ proc eval_digest(point: Point) -> Point
     # => [EXPR_DIGEST, ...]
 
     # Derive the VALUE digest from the advised join payload.
-    push.VALUE_TAG
-    # => [TAG(VALUE), EXPR_DIGEST, ...]
     adv_pushw adv_pushw
-    # => [X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, TAG(VALUE), EXPR_DIGEST, ...]
-    exec.precompiles::digest_expr
+    # => [X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, EXPR_DIGEST, ...]
+    push.VALUE_INIT_CV
+    # => [CV(VALUE), X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, EXPR_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
     # => [VALUE_DIGEST, EXPR_DIGEST, ...]
 
     # Log eq(VALUE_DIGEST, EXPR_DIGEST) while preserving VALUE_DIGEST for the return. EQ predicate
     # operands are semantically commutative, so this order avoids an extra swap.
-    push.EQ_TAG
-    # => [TAG(EQ), VALUE_DIGEST, EXPR_DIGEST, ...]
-    movupw.2
-    # => [EXPR_DIGEST, TAG(EQ), VALUE_DIGEST, ...]
-    dupw.2
-    # => [VALUE_DIGEST, EXPR_DIGEST, TAG(EQ), VALUE_DIGEST, ...]
-    exec.precompiles::digest_expr
+    dupw movdnw.2
+    # => [VALUE_DIGEST, EXPR_DIGEST, VALUE_DIGEST, ...]
+    push.EQ_INIT_CV
+    # => [CV(EQ), VALUE_DIGEST, EXPR_DIGEST, VALUE_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
     # => [EQ_DIGEST, VALUE_DIGEST, ...]
     exec.precompiles::log_deferred
     # => [VALUE_DIGEST, ...]

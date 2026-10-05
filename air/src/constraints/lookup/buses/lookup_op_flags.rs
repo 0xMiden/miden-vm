@@ -57,7 +57,7 @@ pub struct LookupOpFlags<E> {
     dyn_op: E,
     dyncall: E,
     push: E,
-    hperm: E,
+    compress: E,
     mpverify: E,
     mstream: E,
     pipe: E,
@@ -144,7 +144,7 @@ where
         // -- Degree-5 subset --------------------------------------------------------------
         let deg5_extra: E = decoder.extra[0].into();
         let deg5 = |op: u8| -> E { deg5_extra.clone() * b3210[get_op_index(op)].clone() };
-        let hperm = deg5(opcodes::HPERM);
+        let compress = deg5(opcodes::COMPRESS);
         let mpverify = deg5(opcodes::MPVERIFY);
         let pipe = deg5(opcodes::PIPE);
         let mstream = deg5(opcodes::MSTREAM);
@@ -231,7 +231,7 @@ where
             dyn_op,
             dyncall,
             push,
-            hperm,
+            compress,
             mpverify,
             mstream,
             pipe,
@@ -292,7 +292,7 @@ impl LookupOpFlags<Felt> {
             opcodes::DYN => f.dyn_op = Felt::ONE,
             opcodes::DYNCALL => f.dyncall = Felt::ONE,
             opcodes::PUSH => f.push = Felt::ONE,
-            opcodes::HPERM => f.hperm = Felt::ONE,
+            opcodes::COMPRESS => f.compress = Felt::ONE,
             opcodes::MPVERIFY => f.mpverify = Felt::ONE,
             opcodes::MSTREAM => f.mstream = Felt::ONE,
             opcodes::PIPE => f.pipe = Felt::ONE,
@@ -376,7 +376,7 @@ impl LookupOpFlags<Felt> {
             dyn_op: Felt::ZERO,
             dyncall: Felt::ZERO,
             push: Felt::ZERO,
-            hperm: Felt::ZERO,
+            compress: Felt::ZERO,
             mpverify: Felt::ZERO,
             mstream: Felt::ZERO,
             pipe: Felt::ZERO,
@@ -440,7 +440,7 @@ impl LookupOpFlags<Felt> {
             dyn_op,
             dyncall,
             push,
-            hperm,
+            compress,
             mpverify,
             mstream,
             pipe,
@@ -517,7 +517,7 @@ accessors!(
     dyn_op,
     dyncall,
     push,
-    hperm,
+    compress,
     mpverify,
     mstream,
     pipe,
@@ -623,11 +623,11 @@ mod tests {
             assert_eq!(block_hash_selector(&flags), ONE, "block-hash selector for {opcode}");
             assert_eq!(
                 op_group_selector(
-                    &flags,
                     row.decoder.in_span,
                     row.decoder.group_count,
                     row_next.decoder.group_count,
-                    row.decoder.batch_flags,
+                    row.decoder.full_batch,
+                    row.decoder.batch_size_code,
                 ),
                 ZERO,
                 "op-group selector for block-hash opcode {opcode}",
@@ -641,11 +641,11 @@ mod tests {
         assert_eq!(block_hash_selector(&repeat_flags), ZERO, "REPEAT adds no block-hash entry");
         assert_eq!(
             op_group_selector(
-                &repeat_flags,
                 repeat.decoder.in_span,
                 repeat.decoder.group_count,
                 repeat_next.decoder.group_count,
-                repeat.decoder.batch_flags,
+                repeat.decoder.full_batch,
+                repeat.decoder.batch_size_code,
             ),
             ZERO,
             "REPEAT is not an op-group selector",
@@ -653,18 +653,19 @@ mod tests {
 
         for opcode in [opcodes::SPAN, opcodes::RESPAN] {
             let mut row = generate_test_row(opcode.into());
-            row.decoder.batch_flags = [ONE, ZERO, ZERO];
+            row.decoder.full_batch = ONE;
+            row.decoder.batch_size_code = ZERO;
             let row_next = generate_test_row(0);
             let flags = LookupOpFlags::from_main_cols(&row.decoder, &row.stack, &row_next.decoder);
 
             assert_eq!(block_hash_selector(&flags), ZERO, "block-hash selector for {opcode}");
             assert_eq!(
                 op_group_selector(
-                    &flags,
                     row.decoder.in_span,
                     row.decoder.group_count,
                     row_next.decoder.group_count,
-                    row.decoder.batch_flags,
+                    row.decoder.full_batch,
+                    row.decoder.batch_size_code,
                 ),
                 ONE,
                 "op-group batch selector for {opcode}",
@@ -681,11 +682,11 @@ mod tests {
         assert_eq!(block_hash_selector(&flags), ZERO, "block-hash selector inside a span");
         assert_eq!(
             op_group_selector(
-                &flags,
                 row.decoder.in_span,
                 row.decoder.group_count,
                 row_next.decoder.group_count,
-                row.decoder.batch_flags,
+                row.decoder.full_batch,
+                row.decoder.batch_size_code,
             ),
             ONE,
             "op-group removal selector inside a span",
@@ -704,14 +705,15 @@ mod tests {
     }
 
     fn op_group_selector(
-        flags: &LookupOpFlags<Felt>,
         in_span: Felt,
         group_count: Felt,
         group_count_next: Felt,
-        [c0, c1, c2]: [Felt; 3],
+        full_batch: Felt,
+        batch_size_code: Felt,
     ) -> Felt {
-        let batch_selector = (flags.span() + flags.respan())
-            * (c0 + (ONE - c0) * c1 * (ONE - c2) + (ONE - c0) * (ONE - c1) * c2);
+        let selectors =
+            crate::constraints::decoder::batch::OpBatchSelectors::new(full_batch, batch_size_code);
+        let batch_selector = selectors.groups_8 + selectors.groups_4 + selectors.groups_2;
         let removal_selector = in_span * (group_count - group_count_next);
         batch_selector + removal_selector
     }
@@ -765,7 +767,7 @@ mod tests {
             ("end", opcodes::END, LookupOpFlags::<Felt>::end),
             ("dyn", opcodes::DYN, LookupOpFlags::<Felt>::dyn_op),
             ("dyncall", opcodes::DYNCALL, LookupOpFlags::<Felt>::dyncall),
-            ("hperm", opcodes::HPERM, LookupOpFlags::<Felt>::hperm),
+            ("compress", opcodes::COMPRESS, LookupOpFlags::<Felt>::compress),
             ("mpverify", opcodes::MPVERIFY, LookupOpFlags::<Felt>::mpverify),
             ("mrupdate", opcodes::MRUPDATE, LookupOpFlags::<Felt>::mrupdate),
             ("mload", opcodes::MLOAD, LookupOpFlags::<Felt>::mload),
@@ -831,7 +833,7 @@ mod tests {
             dyn_op,
             dyncall,
             push,
-            hperm,
+            compress,
             mpverify,
             mstream,
             pipe,

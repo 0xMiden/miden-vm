@@ -43,6 +43,10 @@ newtype_id!(MastForestId);
 /// parent's trace row). These entries let trace generation read the digest without having to copy
 /// the full child node, and they make accidental entry into a pruned node a clean
 /// `get_node_by_id` miss rather than a partially-populated node.
+///
+/// Its serialized form is a trusted, version-local trace-replay format. It has no stable wire
+/// version and must not be persisted across releases or accepted as an untrusted program format;
+/// use the validated [`MastForest`] entry points for those cases.
 #[derive(Debug)]
 pub struct SparseMastForest {
     /// Subset of the original forest's nodes, keyed by their original [`MastNodeId`].

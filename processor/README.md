@@ -49,15 +49,16 @@ After execution with `FastProcessor::execute_for_proving*()`, split the returned
 enabled, trace generation is parallelized for improved performance.
 
 
-The trace consists of several sections:
-* The decoder, which tracks instruction decoding and control flow.
-* The stack, which records stack state transitions.
-* The range-checker, which validates that values fit into 16 bits.
-* The chiplets module, which handles complex computations (e.g., hashing) and random access memory.
+Trace generation produces the four matrices in the Miden proof statement:
 
-These sections are connected via two buses:
-* The range-checker bus, which links stack and chiplets modules with the range-checker.
-* The chiplet bus, which links stack and the decoder with the chiplets module.
+* the core trace for the system, decoder, and operand stack;
+* the stacked chiplets trace for the hash controller, bitwise, memory, ACE, and kernel ROM;
+* the standalone 32-row Eidos compression trace; and
+* the fixed And8 lookup trace, whose multiplicities also serve 16-bit range checks.
+
+Typed LogUp relations connect requests and responses across these matrices. The processor collects
+range-check and byte-lookup multiplicities while replaying execution and writes them into the fixed
+And8 table; there is no separate range-checker execution-trace segment.
 
 A much more in-depth description of Miden VM design is available [here](https://docs.miden.xyz/miden-vm/design).
 

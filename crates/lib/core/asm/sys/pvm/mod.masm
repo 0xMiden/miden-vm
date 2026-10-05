@@ -1,3 +1,13 @@
+use {
+    AUXILIARY_ACE_INPUTS_ADDRESS_PTR,
+    AUX_RAND_ELEM_ADDRESS_PTR,
+    CURRENT_TRACE_ROW_ADDRESS_PTR,
+    LOG_AIR_TRACE_LENGTHS_PTR,
+    LOG_TRACE_LENGTH_PTR,
+    OOD_EVALUATIONS_ADDRESS_PTR,
+    PREPROCESSED_TRACE_COM_PTR,
+    RELATION_DIGEST_PTR,
+} from miden::core::stark::constants
 use miden::core::stark::types
 pub mod aux_trace
 pub mod constraints_eval
@@ -6,15 +16,6 @@ pub mod layout
 pub mod ood_frames
 pub mod public_inputs
 
-use {
-    ACE_REGISTRY_ROOT_PTR,
-    CURRENT_TRACE_ROW_ADDRESS_PTR,
-    LOG_AIR_TRACE_LENGTHS_PTR,
-    LOG_TRACE_LENGTH_PTR,
-    OOD_EVALUATIONS_ADDRESS_PTR,
-    ORDER_TAG_PTR,
-    RELATION_DIGEST_PTR,
-} from miden::core::stark::constants
 use miden::core::stark::utils
 use miden::core::stark::verifier
 
@@ -22,16 +23,16 @@ use miden::core::stark::verifier
 # zero because Lifted STARK does not grind lookup challenges.
 const LOOKUP_POW_BITS = 0
 const MAX_MESSAGE_WIDTH = 18
-const NUM_COMPOSED_CONSTRAINTS = 605
+const NUM_COMPOSED_CONSTRAINTS = 673
 const MAX_CONSTRAINT_DEGREE = 5
-const NUM_DEEP_TERMS = 770
-const LOOKUP_FRACTIONS_PER_ROW = 248
+const NUM_DEEP_TERMS = 802
+const LOOKUP_FRACTIONS_PER_ROW = 261
 const FIXED_BOUNDARY_LOOKUP_TERMS = 8
 
 # Inclusive upper bound used by the PVM shape checks.
 const LOG_HEIGHT_MAX = 29
 
-# Fixed ChipletAir::all() cardinality and registry metadata.
+# Fixed ChipletAir::all() cardinality.
 const NUM_CHIPLETS = 10
 
 # The host request used to obtain a PVM proof package for the deferred root on the operand stack.
@@ -41,7 +42,7 @@ const PROOF_REQUEST_EVENT = event("miden::core::sys::pvm::request_proof")
 # AIR's two-row floor, maximum periodic-column length, and fixed preprocessed-trace height.
 # BytePairLut (instance 3) commits at exactly its bound, so it is checked as an equality.
 const MIN_LOG_HEIGHT_0 = 5
-const MIN_LOG_HEIGHT_1 = 4
+const MIN_LOG_HEIGHT_1 = 5
 const MIN_LOG_HEIGHT_2 = 7
 const FIXED_LOG_HEIGHT_3 = 16
 const MIN_LOG_HEIGHT_4 = 1
@@ -51,22 +52,24 @@ const MIN_LOG_HEIGHT_7 = 1
 const MIN_LOG_HEIGHT_8 = 2
 const MIN_LOG_HEIGHT_9 = 1
 
-# PVM_RELATION_DIGEST = Poseidon2(PVM_PROTOCOL_ID || PVM_ACE_REGISTRY_ROOT).
-const RELATION_DIGEST_0 = 12083831178076904894
-const RELATION_DIGEST_1 = 14925062465010349701
-const RELATION_DIGEST_2 = 1958677770500754567
-const RELATION_DIGEST_3 = 3316017051827139121
+# PVM_RELATION_DIGEST = Eidos(PVM_PROTOCOL_ID || PVM_ACE_CIRCUIT_DIGEST).
+const RELATION_DIGEST_0 = 8672788858776138894
+const RELATION_DIGEST_1 = 4949037241898863646
+const RELATION_DIGEST_2 = 5828450362038287754
+const RELATION_DIGEST_3 = 2959977635137424836
 
-# Root of the accepted PVM ACE circuit registry. Leaves are indexed by the ten-AIR order tag.
-const ACE_REGISTRY_ROOT_0 = 8460828740255852863
-const ACE_REGISTRY_ROOT_1 = 2250416899373454350
-const ACE_REGISTRY_ROOT_2 = 6973647063103729084
-const ACE_REGISTRY_ROOT_3 = 18020232257584479945
+# Trusted commitment to the PVM preprocessed trace tree under the native Eidos configuration;
+# `random_coin::init_seed` binds it into the Fiat-Shamir transcript.
+const PREPROCESSED_COMMITMENT_0 = 7435130241103350969
+const PREPROCESSED_COMMITMENT_1 = 2209492810180294937
+const PREPROCESSED_COMMITMENT_2 = 2763208909109372110
+const PREPROCESSED_COMMITMENT_3 = 5080896414781165458
 
 #! Loads the fixed PVM relation context.
 #!
-#! Stores the ten AIR heights in `ChipletAir::all()` order, their maximum, the proof-order tag,
-#! relation commitments, and fixed OOD/query-row addresses.
+#! Stores the ten AIR heights in `ChipletAir::all()` order, their maximum, both inverse maps of the
+#! height-sorted proof order, the out-of-domain scatter table, relation commitments, and fixed
+#! OOD/query-row addresses.
 #!
 #! Advice order: [h0, ..., h9].
 #! Inputs:  [...]
@@ -90,17 +93,23 @@ pub proc load_air_context()
     drop
     mem_store.LOG_TRACE_LENGTH_PTR
 
-    push.LOG_AIR_TRACE_LENGTHS_PTR
-    push.NUM_CHIPLETS
-    exec.utils::derive_order_tag_from_heights
-    mem_store.ORDER_TAG_PTR
+    # The heights are stored above and unchanged from here on. Derive both inverse maps once: the
+    # ingest scatters use pos_by_id, and fold-coefficient staging uses id_by_pos.
+    exec.ood_frames::stage_proof_order_maps
+
+    # Route each chiplet's canonical out-of-domain destination to its proof-order stream position.
+    exec.ood_frames::stage_ood_scatter_table
 
     exec.store_relation_digest
-    exec.store_ace_registry_root
+    exec.store_preprocessed_commitment
     exec.layout::preprocessed_current_ptr
     mem_store.OOD_EVALUATIONS_ADDRESS_PTR
     exec.layout::current_trace_row_ptr
     mem_store.CURRENT_TRACE_ROW_ADDRESS_PTR
+    exec.layout::auxiliary_ace_inputs_ptr
+    mem_store.AUXILIARY_ACE_INPUTS_ADDRESS_PTR
+    exec.layout::aux_rand_elem_ptr
+    mem_store.AUX_RAND_ELEM_ADDRESS_PTR
 end
 
 #! Loads, validates, stores, and folds one instance's log height into the running maximum.
@@ -164,18 +173,12 @@ proc store_relation_digest()
     dropw
 end
 
-proc store_ace_registry_root()
-    push.ACE_REGISTRY_ROOT_3.ACE_REGISTRY_ROOT_2.ACE_REGISTRY_ROOT_1.ACE_REGISTRY_ROOT_0
-    mem_storew_le.ACE_REGISTRY_ROOT_PTR
-    dropw
-end
-
 #! Builds the common security descriptor from the four transcript-bound proof parameters returned
 #! by the generic STARK verifier and the PVM relation data.
 #!
 #! The relation fields are fixed except for the maximum trace height, which the proof transcript
-#! binds. `FIXED_BOUNDARY_LOOKUP_TERMS` counts the fixed `UintVal` and `EcGroup` boundary messages;
-#! the native AIR tests derive and check this count.
+#! binds. `FIXED_BOUNDARY_LOOKUP_TERMS` counts the fixed `UintVal` and `EcGroup` boundary messages
+#! included by the native AIR.
 #!
 #! Inputs:  [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
@@ -190,6 +193,12 @@ proc build_security_descriptor(parameters: types::StackProofParameters) -> types
     push.MAX_CONSTRAINT_DEGREE
     push.NUM_COMPOSED_CONSTRAINTS
     push.LOOKUP_POW_BITS
+end
+
+proc store_preprocessed_commitment
+    push.PREPROCESSED_COMMITMENT_3.PREPROCESSED_COMMITMENT_2.PREPROCESSED_COMMITMENT_1.PREPROCESSED_COMMITMENT_0
+    dupw mem_storew_le.PREPROCESSED_TRACE_COM_PTR dropw
+    exec.layout::preprocessed_com_ptr mem_storew_le dropw
 end
 
 #! Requests and stages a PVM proof package for the deferred root.

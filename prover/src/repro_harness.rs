@@ -26,7 +26,8 @@ pub fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreC
 pub struct ReproTrace {
     pub core: RowMajorMatrix<Felt>,
     chiplets: RowMajorMatrix<Felt>,
-    poseidon2: RowMajorMatrix<Felt>,
+    eidos_compression: RowMajorMatrix<Felt>,
+    and8: RowMajorMatrix<Felt>,
     program_info: miden_processor::ProgramInfo,
     init_stack: miden_processor::StackInputs,
     precompile_root: miden_core::deferred::DeferredRoot,
@@ -37,11 +38,12 @@ impl ReproTrace {
     /// Captures the matrices and public inputs needed to prove mutations of `trace`.
     pub fn new(trace: &VmTrace) -> Self {
         let main = trace.main_trace();
-        let (core, chiplets, poseidon2) = main.to_air_matrices();
+        let (core, chiplets, eidos_compression, and8) = main.clone_air_matrices();
         Self {
             core,
             chiplets,
-            poseidon2,
+            eidos_compression,
+            and8,
             program_info: trace.program_info().clone(),
             init_stack: trace.init_stack_state(),
             precompile_root: trace.precompile_root(),
@@ -74,7 +76,13 @@ impl ReproTrace {
         outputs: StackOutputs,
     ) -> Result<VerificationOutcome, VerificationError> {
         let proof_bytes = self
-            .prove(core, self.chiplets.clone(), self.poseidon2.clone(), outputs)
+            .prove(
+                core,
+                self.chiplets.clone(),
+                self.eidos_compression.clone(),
+                self.and8.clone(),
+                outputs,
+            )
             .unwrap_or_else(|error| {
                 panic!("the low-level prover should encode the forged trace: {error}")
             });
@@ -87,10 +95,11 @@ impl ReproTrace {
         &self,
         core: RowMajorMatrix<Felt>,
         chiplets: RowMajorMatrix<Felt>,
-        poseidon2: RowMajorMatrix<Felt>,
+        eidos_compression: RowMajorMatrix<Felt>,
+        and8: RowMajorMatrix<Felt>,
         outputs: StackOutputs,
     ) -> Result<VerificationOutcome, String> {
-        let proof_bytes = match self.prove(core, chiplets, poseidon2, outputs) {
+        let proof_bytes = match self.prove(core, chiplets, eidos_compression, and8, outputs) {
             Ok(bytes) => bytes,
             Err(error) => {
                 assert!(
@@ -111,27 +120,21 @@ impl ReproTrace {
         &self,
         core: RowMajorMatrix<Felt>,
     ) -> Result<VerificationOutcome, String> {
-        let proof_bytes =
-            match self.prove(core, self.chiplets.clone(), self.poseidon2.clone(), self.outputs) {
-                Ok(bytes) => bytes,
-                Err(error) => {
-                    assert!(
-                        error.contains("external assertion 0 is non-zero"),
-                        "unexpected prover failure: {error}"
-                    );
-                    return Err(format!("prover rejected an unbalanced lookup: {error}"));
-                },
-            };
-
-        self.verify(proof_bytes, self.outputs)
-            .map_err(|error| format!("verifier rejected: {error}"))
+        self.prove_and_verify_parts_allowing_lookup_rejection(
+            core,
+            self.chiplets.clone(),
+            self.eidos_compression.clone(),
+            self.and8.clone(),
+            self.outputs,
+        )
     }
 
     fn prove(
         &self,
         core: RowMajorMatrix<Felt>,
         chiplets: RowMajorMatrix<Felt>,
-        poseidon2: RowMajorMatrix<Felt>,
+        eidos_compression: RowMajorMatrix<Felt>,
+        and8: RowMajorMatrix<Felt>,
         outputs: StackOutputs,
     ) -> Result<Vec<u8>, String> {
         let public_inputs = PublicInputs::new(
@@ -141,8 +144,8 @@ impl ReproTrace {
             self.precompile_root,
         );
         let (public_values, aux_inputs) = public_inputs.to_air_inputs();
-        let config = config::poseidon2_config(config::pcs_params(), config::RELATION_DIGEST);
-        prove_stark(&config, core, chiplets, poseidon2, &public_values, &aux_inputs)
+        let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+        prove_stark(&config, core, chiplets, eidos_compression, and8, &public_values, &aux_inputs)
             .map_err(|error| format!("{error}"))
     }
 
@@ -153,7 +156,7 @@ impl ReproTrace {
     ) -> Result<VerificationOutcome, VerificationError> {
         let proof = ExecutionProof::new(
             VmProof {
-                proof: StarkProof::new(proof_bytes, HashFunction::Poseidon2),
+                proof: StarkProof::new(proof_bytes, HashFunction::Eidos),
                 precompile_root: self.precompile_root,
             },
             PrecompileStatus::Empty,

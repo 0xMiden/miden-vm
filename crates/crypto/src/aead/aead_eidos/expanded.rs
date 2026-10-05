@@ -11,6 +11,9 @@
 //! `nonce || associated_data || ciphertext || [ad_len, ct_len] || padding` become coefficients in
 //! the quadratic extension field. Horner evaluation starts with one, which binds the number of
 //! coefficients, and the second half of the MAC key masks the result.
+//!
+//! [`decrypt_felts_expanded_authenticated`]:
+//!     crate::aead::aead_eidos::expanded::decrypt_felts_expanded_authenticated
 
 use alloc::vec::Vec;
 
@@ -255,10 +258,9 @@ fn counter_fits_len(num_felts: usize) -> bool {
 }
 
 /// Returns the padded base-field length of the MAC input when it is within the supported bound.
-pub(super) fn checked_mac_input_len(
-    associated_data_len: usize,
-    ciphertext_len: usize,
-) -> Option<usize> {
+///
+/// Both input lengths are measured in base-field elements.
+pub fn checked_mac_input_len(associated_data_len: usize, ciphertext_len: usize) -> Option<usize> {
     let unpadded_len = MAC_FIXED_INPUT_FELTS
         .checked_add(associated_data_len)?
         .checked_add(ciphertext_len)?;
