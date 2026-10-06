@@ -80,7 +80,7 @@
 - [BREAKING] Store inline-call frames as operation ranges instead of per-operation rows. Package debug-info version 4 preserves inline chains across clears, control flow, and dynamic or external boundaries without expanding them during decoding ([#3956](https://github.com/0xMiden/miden-vm/pull/3956)).
 #### Changes
 
-- Added parser, AST, and formatter support for optional constant type annotations. Annotated constants remain rejected during semantic analysis and linking ([#3957](https://github.com/0xMiden/miden-vm/pull/3957)).
+- Added parser, AST, and formatter support for optional constant type annotations (`const NAME: TYPE = expr`). Annotated constants are accepted by the assembler, but annotations do not yet enforce type constraints or affect constant evaluation ([#3957](https://github.com/0xMiden/miden-vm/pull/3957)).
 
 ## v0.35.0 (2026-10-01)
 

@@ -127,11 +127,6 @@ pub enum SemanticAnalysisError {
         #[label]
         span: SourceSpan,
     },
-    #[error("typed constants are not supported yet")]
-    TypedConstantsNotSupported {
-        #[label("type annotations on constants are not supported yet")]
-        span: SourceSpan,
-    },
     #[error("invalid enum type representation: underlying type must be an integral or felt type")]
     #[diagnostic()]
     InvalidEnumRepr {
