@@ -103,9 +103,9 @@ fn prove_ecdsa_execution(
     .execute_for_proving_sync(&program, &mut host)
     .expect("ECDSA execution must produce a proving witness");
     let claim = witness.claim();
-    // The core library's recursive verifiers accept Poseidon2 proofs.
+    // The core library's recursive verifiers accept Eidos proofs.
     let proof = Prover::new()
-        .with_hash_fn(HashFunction::Poseidon2)
+        .with_hash_fn(HashFunction::Eidos)
         .prove(witness)
         .expect("ECDSA execution must produce a deferred MVM proof");
     let PrecompileStatus::Deferred(precompile) = proof.precompile() else {
@@ -264,7 +264,7 @@ impl Host for PvmSettlementHost {
             // await its response here.
             tokio::task::yield_now().await;
             let precompile_proof = Prover::new()
-                .with_hash_fn(HashFunction::Poseidon2)
+                .with_hash_fn(HashFunction::Eidos)
                 .prove_precompiles(self.precompile_witnesses.clone())
                 .map_err(SettlementEventError::Proving)?;
             // Package the proof under the request key. MASM fetches it when request_proof returns.

@@ -5,29 +5,25 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt,
-    field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
 
-use crate::{
-    hash::{
-        chunk::{
-            self,
-            trace::{ChunkRequires, generate_trace_padded_to as chunk_trace},
+use crate::hash::{
+    chunk::{
+        self,
+        trace::{ChunkRequires, generate_trace_padded_to as chunk_trace},
+    },
+    chunk_node_sponge::NUM_MAIN_COLS,
+    keccak::{
+        node::{
+            self as node,
+            trace::{KeccakNodeRequires, generate_trace as node_trace},
         },
-        chunk_node_sponge::{ChunkNodeSpongeAir, NUM_MAIN_COLS},
-        keccak::{
-            node::{
-                self as node,
-                trace::{KeccakNodeRequires, generate_trace as node_trace},
-            },
-            sponge::{
-                self as sponge,
-                trace::{SpongeRequires, generate_trace_padded_to as sponge_trace},
-            },
+        sponge::{
+            self as sponge,
+            trace::{SpongeRequires, generate_trace_padded_to as sponge_trace},
         },
     },
-    logup::build_logup_aux_trace,
 };
 
 /// Build the merged main trace at the largest component height. Node rows
@@ -67,12 +63,4 @@ pub fn generate_trace(
     debug_assert_eq!(vals.len(), height * NUM_MAIN_COLS);
 
     RowMajorMatrix::new(vals, NUM_MAIN_COLS)
-}
-
-/// Build the merged chiplet's LogUp trace.
-pub(crate) fn build_aux(
-    main: &RowMajorMatrix<Felt>,
-    challenges: &[QuadFelt],
-) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    build_logup_aux_trace(&ChunkNodeSpongeAir, main, challenges)
 }

@@ -23,8 +23,10 @@ fuzz_target!(|data: &[u8]| {
         validate_debug_sections(&package);
         match package.debug_info() {
             Ok(Some(expected_debug_info)) => {
-                let untrusted_package = Package::read_from_bytes(data)
-                    .expect("a package with valid debug info should pass untrusted admission");
+                // Valid debug info does not mean the MAST forest and manifest are also valid.
+                let Ok(untrusted_package) = Package::read_from_bytes(data) else {
+                    return;
+                };
                 let actual_debug_info = untrusted_package
                     .debug_info()
                     .expect("admitted debug info should remain accessible")

@@ -10,13 +10,15 @@
 //! XOF. For authentication, adjacent elements of
 //! `nonce || associated_data || ciphertext || [ad_len, ct_len] || padding` become coefficients in
 //! the quadratic extension field. Horner evaluation starts with one, which binds the number of
-//! coefficients, and the second half of the MAC key masks the result.
+//! coefficients. A final multiplication by the evaluation point makes every input coefficient
+//! multiply a positive power of that point. The second half of the MAC key masks the result.
+//!
+//! [`decrypt_felts_expanded_authenticated`]:
+//!     crate::aead::aead_eidos::expanded::decrypt_felts_expanded_authenticated
 
 use alloc::vec::Vec;
 
-use subtle::{Choice, ConstantTimeEq};
-
-use super::MAX_AUTHENTICATED_INPUT_FELTS;
+use super::{AuthTag, MAX_AUTHENTICATED_INPUT_FELTS};
 use crate::{
     Felt, Word,
     field::{BasedVectorSpace, BinomialExtensionField},
@@ -30,6 +32,7 @@ use crate::{
 const FELTS_PER_CTR_BLOCK: usize = BLOCK_LEN;
 const LIMBS_PER_CTR_BLOCK: usize = 2 * FELTS_PER_CTR_BLOCK;
 const MAC_BATCH_FELTS: usize = BLOCK_LEN;
+// Nonce plus the associated-data and ciphertext length fields.
 const MAC_FIXED_INPUT_FELTS: usize = Word::NUM_ELEMENTS + 2;
 
 type QuadFelt = BinomialExtensionField<Felt, 2>;
@@ -37,7 +40,7 @@ type QuadFelt = BinomialExtensionField<Felt, 2>;
 /// Domain-separates `(key, nonce)` and compresses to a CTR chaining value via
 /// Eidos.
 ///
-/// The returned word lies in Eidos's 252-bit output subspace and is used as the input CV for
+/// The returned word lies in Eidos's 252-bit output set and is used as the input CV for
 /// keystream generation.
 pub fn derive_ctr_key(key: Word, nonce: Word) -> Word {
     let init = Eidos::init_chaining_word(AEAD_CTR_KEY, 0);
@@ -68,6 +71,9 @@ pub fn keystream_block(ctr_key: Word, counter: u32) -> [u32; 16] {
 ///
 /// Each plaintext Felt becomes two ciphertext Felts, each holding one u32 limb.
 /// Security requires a unique `(key, nonce)` per message.
+///
+/// This operation produces no authentication tag. Use [`encrypt_felts_expanded_authenticated`]
+/// for authenticated encryption.
 ///
 /// # Panics
 ///
@@ -137,7 +143,8 @@ pub fn decrypt_felts_expanded(key: Word, nonce: Word, ciphertext: &[Felt]) -> Op
 /// Associated data is included before the ciphertext. Lengths are measured in Felts and appended
 /// as `[ad_len, ct_len]`; the coefficient stream is padded to an 8-Felt boundary. The MAC
 /// polynomial is evaluated over the quadratic extension by pairing adjacent Felts into one
-/// extension coefficient. An implicit leading-one coefficient binds the polynomial length.
+/// extension coefficient. An implicit leading-one coefficient binds the polynomial length, and a
+/// final multiplication by the evaluation point leaves the constant coefficient fixed at zero.
 ///
 /// # Panics
 ///
@@ -160,21 +167,22 @@ pub fn auth_tag_expanded(
         "expanded ciphertext limbs must be canonical u32 Felts",
     );
 
-    let mut coefficients = Vec::with_capacity(padded_input_len);
-
-    coefficients.extend(nonce.into_elements());
-    coefficients.extend_from_slice(associated_data);
-    coefficients.extend_from_slice(ciphertext);
-    coefficients.push(Felt::from_u32(associated_data_len));
-    coefficients.push(Felt::from_u32(ciphertext_len));
-    while coefficients.len() < padded_input_len {
-        coefficients.push(Felt::ZERO);
-    }
+    let padding_len =
+        padded_input_len - MAC_FIXED_INPUT_FELTS - associated_data.len() - ciphertext.len();
+    // Pair across segment boundaries: odd-length associated data shares a coefficient with the
+    // first ciphertext Felt, or with the encoded AD length when ciphertext is empty.
+    let input = nonce
+        .into_elements()
+        .into_iter()
+        .chain(associated_data.iter().copied())
+        .chain(ciphertext.iter().copied())
+        .chain([Felt::from_u32(associated_data_len), Felt::from_u32(ciphertext_len)])
+        .chain(core::iter::repeat_n(Felt::ZERO, padding_len));
 
     let mac_key = derive_mac_key(key, nonce);
     let evaluation_point = quad_from_pair(mac_key[0], mac_key[1]);
     let mask = quad_from_pair(mac_key[2], mac_key[3]);
-    let tag = evaluate_mac_polynomial(&coefficients, evaluation_point) + mask;
+    let tag = evaluate_mac_polynomial(input, evaluation_point) + mask;
     let tag_coefficients = tag.as_basis_coefficients_slice();
     [tag_coefficients[0], tag_coefficients[1]]
 }
@@ -217,23 +225,16 @@ pub fn decrypt_felts_expanded_authenticated(
     tag: [Felt; 2],
 ) -> Option<Vec<Felt>> {
     checked_mac_input_len(associated_data.len(), ciphertext.len())?;
-    if !ciphertext.iter().all(|&limb| u32_limb(limb).is_some()) {
+    if !ciphertext.len().is_multiple_of(2)
+        || !ciphertext.iter().all(|&limb| u32_limb(limb).is_some())
+    {
         return None;
     }
     let expected_tag = auth_tag_expanded(key, nonce, associated_data, ciphertext);
-    if !tags_equal(&expected_tag, &tag) {
+    if AuthTag(expected_tag) != AuthTag(tag) {
         return None;
     }
     decrypt_felts_expanded(key, nonce, ciphertext)
-}
-
-fn tags_equal(left: &[Felt; 2], right: &[Felt; 2]) -> bool {
-    left.iter()
-        .zip(right)
-        .fold(Choice::from(1), |equal, (left, right)| {
-            equal & left.as_canonical_u64_ct().ct_eq(&right.as_canonical_u64_ct())
-        })
-        .into()
 }
 
 fn u32_limb(value: Felt) -> Option<u32> {
@@ -255,10 +256,10 @@ fn counter_fits_len(num_felts: usize) -> bool {
 }
 
 /// Returns the padded base-field length of the MAC input when it is within the supported bound.
-pub(super) fn checked_mac_input_len(
-    associated_data_len: usize,
-    ciphertext_len: usize,
-) -> Option<usize> {
+///
+/// Both input lengths are measured in base-field elements. The total includes the nonce and two
+/// length fields and is rounded up to an 8-Felt boundary.
+pub fn checked_mac_input_len(associated_data_len: usize, ciphertext_len: usize) -> Option<usize> {
     let unpadded_len = MAC_FIXED_INPUT_FELTS
         .checked_add(associated_data_len)?
         .checked_add(ciphertext_len)?;
@@ -267,14 +268,16 @@ pub(super) fn checked_mac_input_len(
     (padded_len <= MAX_AUTHENTICATED_INPUT_FELTS).then_some(padded_len)
 }
 
-fn evaluate_mac_polynomial(coefficients: &[Felt], alpha: QuadFelt) -> QuadFelt {
-    debug_assert_eq!(coefficients.len() % 2, 0);
+fn evaluate_mac_polynomial(mut input: impl Iterator<Item = Felt>, alpha: QuadFelt) -> QuadFelt {
+    let mut acc = quad_from_pair(Felt::ONE, Felt::ZERO);
+    while let Some(c0) = input.next() {
+        let c1 = input.next().expect("the MAC input is padded to an even length");
+        acc = acc * alpha + quad_from_pair(c0, c1);
+    }
 
-    coefficients
-        .chunks_exact(2)
-        .fold(quad_from_pair(Felt::ONE, Felt::ZERO), |acc, coefficient| {
-            acc * alpha + quad_from_pair(coefficient[0], coefficient[1])
-        })
+    // Make every input coefficient multiply a positive power of alpha. Otherwise, changing the
+    // last coefficient would change the tag by the same amount, independently of alpha.
+    acc * alpha
 }
 
 fn quad_from_pair(c0: Felt, c1: Felt) -> QuadFelt {
@@ -360,16 +363,16 @@ mod tests {
 
         let ciphertext = encrypt_felts_expanded(key(), nonce(), &plaintext);
         let expected = vec![
-            Felt::from_u32(0xc555_f5bf),
-            Felt::from_u32(0x3d65_054b),
-            Felt::from_u32(0x96bf_7e43),
-            Felt::from_u32(0xc786_a974),
-            Felt::from_u32(0xb499_c0c9),
-            Felt::from_u32(0x685c_4336),
-            Felt::from_u32(0x5e74_1803),
-            Felt::from_u32(0x15e3_9b29),
-            Felt::from_u32(0x023b_a875),
-            Felt::from_u32(0x950b_3e4a),
+            Felt::from_u32(0xbb25_603c),
+            Felt::from_u32(0x19cf_6da5),
+            Felt::from_u32(0xefac_9bbd),
+            Felt::from_u32(0xc61c_cf91),
+            Felt::from_u32(0xb375_27b5),
+            Felt::from_u32(0x1414_a95b),
+            Felt::from_u32(0xd9ff_7018),
+            Felt::from_u32(0x7782_e039),
+            Felt::from_u32(0x94b0_4b55),
+            Felt::from_u32(0x0073_05bf),
         ];
 
         assert_eq!(ciphertext, expected);
@@ -389,11 +392,47 @@ mod tests {
         let ciphertext = encrypt_felts_expanded(key(), nonce(), &plaintext);
         let tag = auth_tag_expanded(key(), nonce(), &associated_data, &ciphertext);
         let expected = [
-            Felt::new_unchecked(12694519460593773971),
-            Felt::new_unchecked(15828218946601660542),
+            Felt::new_unchecked(9878978564639456879),
+            Felt::new_unchecked(13261684965002033322),
         ];
 
         assert_eq!(tag, expected);
+    }
+
+    #[test]
+    fn streamed_mac_matches_buffered_reference_across_segment_boundaries() {
+        let mac_key = derive_mac_key(key(), nonce());
+        let alpha = quad_from_pair(mac_key[0], mac_key[1]);
+        let mask = quad_from_pair(mac_key[2], mac_key[3]);
+
+        // Cover odd and even AD/ciphertext lengths and every possible padding remainder.
+        for ad_len in 0..=9 {
+            let associated_data = (0..ad_len).map(Felt::from_u32).collect::<Vec<_>>();
+            for ct_len in 0..=17 {
+                let ciphertext = (0..ct_len).map(|i| Felt::from_u32(i * 0x101)).collect::<Vec<_>>();
+                let mut input = nonce().into_elements().to_vec();
+                input.extend_from_slice(&associated_data);
+                input.extend_from_slice(&ciphertext);
+                input.extend([Felt::from_u32(ad_len), Felt::from_u32(ct_len)]);
+                while !input.len().is_multiple_of(8) {
+                    input.push(Felt::ZERO);
+                }
+                let expected = input
+                    .chunks_exact(2)
+                    .fold(quad_from_pair(Felt::ONE, Felt::ZERO), |acc, pair| {
+                        acc * alpha + quad_from_pair(pair[0], pair[1])
+                    })
+                    * alpha
+                    + mask;
+
+                let expected: &[Felt] = expected.as_basis_coefficients_slice();
+                assert_eq!(
+                    auth_tag_expanded(key(), nonce(), &associated_data, &ciphertext),
+                    expected,
+                    "AD length {ad_len}, ciphertext length {ct_len}",
+                );
+            }
+        }
     }
 
     #[test]
@@ -414,6 +453,41 @@ mod tests {
 
         let truncated = ciphertext[..ciphertext.len() - 2].to_vec();
         assert_ne!(auth_tag_expanded(key(), nonce(), &[], &truncated), tag);
+    }
+
+    #[test]
+    fn authentication_binds_the_final_coefficient_to_the_evaluation_point() {
+        let ciphertext =
+            [Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)];
+        let tag = auth_tag_expanded(key(), nonce(), &[], &ciphertext);
+
+        // These inputs have the same padded length. Their encoded streams agree until the final
+        // extension coefficient, which changes from (0, 0) to (0, 10).
+        let extended_ciphertext = [
+            Felt::from_u32(1),
+            Felt::from_u32(2),
+            Felt::from_u32(3),
+            Felt::from_u32(4),
+            Felt::ZERO,
+            Felt::from_u32(4),
+            Felt::ZERO,
+            Felt::ZERO,
+            Felt::ZERO,
+            Felt::ZERO,
+        ];
+        let translated_tag = [tag[0], tag[1] + Felt::from_u32(10)];
+
+        assert_ne!(auth_tag_expanded(key(), nonce(), &[], &extended_ciphertext), translated_tag);
+        assert!(
+            decrypt_felts_expanded_authenticated(
+                key(),
+                nonce(),
+                &[],
+                &extended_ciphertext,
+                translated_tag,
+            )
+            .is_none()
+        );
     }
 
     #[test]

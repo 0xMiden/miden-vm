@@ -2,39 +2,39 @@
 
 use miden_core::Felt;
 
+use super::pvm_layout_const;
 use crate::{
     helpers::read_memory_felt,
     support::security::{LOG_HEIGHT_MAX, PVM_LOG_HEIGHT_MIN},
 };
 
 const LOG_TRACE_LENGTH_PTR: u32 = 3_223_322_634;
-const ORDER_TAG_PTR: u32 = 3_223_322_639;
-const LOG_AIR_TRACE_LENGTHS_PTR: u32 = 3_223_322_736;
-const RELATION_DIGEST_PTR: u32 = 3_223_322_728;
-const ACE_REGISTRY_ROOT_PTR: u32 = 3_223_322_732;
-const OOD_EVALUATIONS_ADDRESS_PTR: u32 = 3_223_322_761;
-const CURRENT_TRACE_ROW_ADDRESS_PTR: u32 = 3_223_322_762;
-
-const PREPROCESSED_CURRENT_PTR: u32 = 3_225_426_440;
-const CURRENT_TRACE_ROW_PTR: u32 = 3_225_443_536;
+const LOG_AIR_TRACE_LENGTHS_PTR: u32 = 3_223_322_744;
+const RELATION_DIGEST_PTR: u32 = 3_223_322_732;
+const OOD_EVALUATIONS_ADDRESS_PTR: u32 = 3_223_322_770;
+const CURRENT_TRACE_ROW_ADDRESS_PTR: u32 = 3_223_322_771;
 
 // Runtime call-site vector. The precompiles-prover oracle derives the matching MASM constants
 // directly from the AIRs.
 const BYTE_PAIR_LUT_AIR_INDEX: usize = 3;
-const MIN_LOG_HEIGHTS: [u64; 10] = [5, 4, 7, 16, 1, 3, 1, 1, 2, 1];
+const MIN_LOG_HEIGHTS: [u64; 10] = [5, 5, 7, 16, 1, 3, 1, 1, 2, 1];
 const HEIGHTS: [u64; 10] = [16, 7, 12, 16, 11, 7, 10, 12, 13, 14];
-const RELATION_DIGEST: [u64; 4] = [
-    12_083_831_178_076_904_894,
-    14_925_062_465_010_349_701,
-    1_958_677_770_500_754_567,
-    3_316_017_051_827_139_121,
-];
-const ACE_REGISTRY_ROOT: [u64; 4] = [
-    8_460_828_740_255_852_863,
-    2_250_416_899_373_454_350,
-    6_973_647_063_103_729_084,
-    18_020_232_257_584_479_945,
-];
+
+fn masm_const(source: &str, name: &str) -> u64 {
+    let prefix = format!("const {name} = ");
+    source
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(&prefix)?.parse().ok())
+        .unwrap_or_else(|| panic!("missing generated PVM MASM constant {name}"))
+}
+
+fn pvm_const(name: &str) -> u64 {
+    masm_const(include_str!("../../asm/sys/pvm/mod.masm"), name)
+}
+
+fn pvm_word(prefix: &str) -> [u64; 4] {
+    core::array::from_fn(|index| pvm_const(&format!("{prefix}_{index}")))
+}
 
 fn source() -> &'static str {
     "use miden::core::sys::pvm
@@ -44,7 +44,7 @@ fn source() -> &'static str {
 }
 
 #[test]
-fn pvm_wrapper_stores_heights_order_tag_and_registry_metadata() {
+fn pvm_wrapper_stores_heights_proof_order_positions_and_relation_metadata() {
     let (output, _) = build_test!(source(), &[], &HEIGHTS)
         .execute_for_output()
         .expect("PVM AIR context must load");
@@ -60,25 +60,31 @@ fn pvm_wrapper_stores_heights_order_tag_and_registry_metadata() {
     assert_eq!(read_memory_felt(&output, LOG_TRACE_LENGTH_PTR), Felt::from_u8(16));
     assert_eq!(
         read_memory_felt(&output, OOD_EVALUATIONS_ADDRESS_PTR),
-        Felt::from_u32(PREPROCESSED_CURRENT_PTR)
+        Felt::from_u32(pvm_layout_const("PREPROCESSED_CURRENT_PTR"))
     );
     assert_eq!(
         read_memory_felt(&output, CURRENT_TRACE_ROW_ADDRESS_PTR),
-        Felt::from_u32(CURRENT_TRACE_ROW_PTR)
+        Felt::from_u32(pvm_layout_const("CURRENT_TRACE_ROW_PTR"))
     );
 
+    // Both ingest scatters address the proof stream through this table, so a wrapper that staged
+    // it wrongly would route one chiplet's data onto another chiplet's wires.
     let mut proof_order: Vec<usize> = (0..HEIGHTS.len()).collect();
     proof_order.sort_by_key(|&i| (HEIGHTS[i], i));
-    let expected_tag = miden_ace_codegen::order_tag(&proof_order);
-    assert_eq!(read_memory_felt(&output, ORDER_TAG_PTR), Felt::from_u32(expected_tag));
+    let positions_ptr = pvm_layout_const("PROOF_ORDER_POSITIONS_PTR");
+    for (position, air) in proof_order.iter().copied().enumerate() {
+        assert_eq!(
+            read_memory_felt(&output, positions_ptr + air as u32),
+            Felt::from_u32(position as u32),
+            "chiplet {air} is not staged at its height-sorted proof position"
+        );
+    }
 
-    for (base, expected) in [
-        (RELATION_DIGEST_PTR, RELATION_DIGEST),
-        (ACE_REGISTRY_ROOT_PTR, ACE_REGISTRY_ROOT),
-    ] {
-        for (i, expected) in expected.into_iter().enumerate() {
-            assert_eq!(read_memory_felt(&output, base + i as u32), Felt::new_unchecked(expected));
-        }
+    for (i, expected) in pvm_word("RELATION_DIGEST").into_iter().enumerate() {
+        assert_eq!(
+            read_memory_felt(&output, RELATION_DIGEST_PTR + i as u32),
+            Felt::new_unchecked(expected)
+        );
     }
 }
 

@@ -1,8 +1,8 @@
 //! Periodic-column evaluation nodes, shared by both lowerings.
 //!
 //! Each column is emitted in its preselected representation: dense monomial
-//! coefficients via Horner evaluation, or sparse Lagrange form over nonzero
-//! evaluations.
+//! coefficients via Horner evaluation, sparse Lagrange form over nonzero
+//! evaluations, or nonzero evaluations over its period's shared Lagrange basis.
 
 use std::collections::HashMap;
 
@@ -10,7 +10,7 @@ use miden_crypto::field::Field;
 
 use super::{
     builder::DagBuilder,
-    ir::{NodeId, PeriodicColumn, PeriodicColumnData, SparseTerm},
+    ir::{LagrangeBasis, NodeId, PeriodicColumn, PeriodicColumnData, SparseTerm},
 };
 use crate::layout::{InputKey, InputLayout};
 
@@ -43,6 +43,7 @@ where
 
     let mut z_cache = HashMap::<u32, NodeId>::new();
     let mut zpow_cache = HashMap::<u32, Vec<NodeId>>::new();
+    let mut basis_cache = HashMap::<u32, BasisProducts>::new();
     let mut nodes = Vec::with_capacity(periodic.num_columns());
     for column in periodic.columns() {
         let col_len = column.period();
@@ -83,6 +84,40 @@ where
                     coeffs.iter().map(|c| builder.constant(*c)).collect();
                 horner_eval(builder, z_col, &coeff_nodes)
             },
+            PeriodicColumn::Basis { basis, offset, classes, .. } => {
+                let z_col = *z_cache.entry(log_pow_col).or_insert_with(|| {
+                    let mut z_col = builder.input(InputKey::ZK);
+                    for _ in 0..log_pow_col {
+                        z_col = builder.mul(z_col, z_col);
+                    }
+                    z_col
+                });
+                let products = basis_cache
+                    .entry(log_pow_col)
+                    .or_insert_with(|| BasisProducts::new(builder, z_col, basis));
+                // Process coefficients other than -1 first, then subtract the -1 groups.
+                let mut sum = builder.constant(*offset);
+                for subtract in [false, true] {
+                    for class in classes {
+                        if (class.coefficient == -EF::ONE) != subtract {
+                            continue;
+                        }
+                        let mut class_sum = builder.constant(EF::ZERO);
+                        for &index in &class.indices {
+                            let element = products.element(builder, basis, index);
+                            class_sum = builder.add(class_sum, element);
+                        }
+                        sum = if subtract {
+                            builder.sub(sum, class_sum)
+                        } else {
+                            let coefficient = builder.constant(class.coefficient);
+                            let term = builder.mul(coefficient, class_sum);
+                            builder.add(sum, term)
+                        };
+                    }
+                }
+                sum
+            },
         };
         nodes.push(value);
     }
@@ -121,6 +156,60 @@ where
         });
     }
     sum.expect("terms is non-empty")
+}
+
+/// Prefix and suffix products of a subgroup's linear factors `point - roots[k]`, from which every
+/// Lagrange basis element is assembled without inversion.
+///
+/// `prefix[j]` contains the factors before position `j`, scaled by the inverse period;
+/// `suffix[j]` contains those after it. Thus `prefix[j] * suffix[j]` omits the factor at `j`.
+/// For period four, writing `d_k = point - roots[k]` gives
+/// `L_2 = roots[2] * ((d_0*d_1)/4) * d_3`; the division uses the precomputed inverse period.
+/// Elements are built on demand: emission keeps every node, so an element no column reads must
+/// not be created.
+struct BasisProducts {
+    prefix: Vec<NodeId>,
+    suffix: Vec<NodeId>,
+}
+
+impl BasisProducts {
+    fn new<EF: Field>(
+        builder: &mut DagBuilder<EF>,
+        point: NodeId,
+        basis: &LagrangeBasis<EF>,
+    ) -> Self {
+        let period = basis.roots.len();
+        let factors: Vec<NodeId> = basis
+            .roots
+            .iter()
+            .map(|&root| {
+                let root = builder.constant(root);
+                builder.sub(point, root)
+            })
+            .collect();
+
+        let mut prefix = vec![builder.constant(basis.period_inv); period];
+        for index in 1..period {
+            prefix[index] = builder.mul(prefix[index - 1], factors[index - 1]);
+        }
+        let mut suffix = vec![builder.constant(EF::ONE); period];
+        for index in (0..period - 1).rev() {
+            suffix[index] = builder.mul(suffix[index + 1], factors[index + 1]);
+        }
+        Self { prefix, suffix }
+    }
+
+    /// `L_index(point) = roots[index] * prefix[index] * suffix[index]`.
+    fn element<EF: Field>(
+        &self,
+        builder: &mut DagBuilder<EF>,
+        basis: &LagrangeBasis<EF>,
+        index: usize,
+    ) -> NodeId {
+        let product = builder.mul(self.prefix[index], self.suffix[index]);
+        let root = builder.constant(basis.roots[index]);
+        builder.mul(root, product)
+    }
 }
 
 fn horner_eval<EF>(builder: &mut DagBuilder<EF>, point: NodeId, coeffs: &[NodeId]) -> NodeId

@@ -497,6 +497,21 @@ fn rejects_wrong_trusted_preprocessed_commitment() {
 }
 
 #[test]
+fn preprocessed_with_short_nonlinear_air() {
+    // The two-row squaring trace has a nonzero quotient. On wide SIMD targets this
+    // checks that a partial pack writes its output, including without preprocessed columns.
+    let ps = prover_statement(
+        vec![
+            MixedAir::Constant(ConstantAir),
+            MixedAir::RowCounter(RowCounterAir { preprocessed: row_index_trace(8) }),
+        ],
+        vec![squaring_trace(2), row_index_trace(8)],
+    );
+
+    prove_verify_reparse(ps);
+}
+
+#[test]
 fn preprocessed_shorter_than_max_trace() {
     // The tallest AIR (ConstantAir, height 8) has no preprocessed columns, so the
     // tallest preprocessed trace (RowCounter, height 4) sits below the max trace

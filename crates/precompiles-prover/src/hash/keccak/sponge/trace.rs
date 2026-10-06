@@ -3,23 +3,23 @@
 //! Callers hold a [`SpongeRequires`] accumulator and submit
 //! [`Invocation`]s to it via [`SpongeRequires::require`]. Each call
 //! delegates to the caller-supplied [`ChunkRequires`] (which lays the
-//! invocation's chunk-tape segment via [`Poseidon2Requires`]), runs
+//! invocation's chunk-tape segment via [`EidosRequires`]), runs
 //! the Keccak-f permutations as a trace-gen oracle, allocates a
 //! fresh `sponge_seq_id` range, and returns a [`SpongeOutput`]
-//! (Keccak digest + chunk-content P2 digest + range stamps).
+//! (Keccak digest + chunk-content Eidos digest + range stamps).
 //!
 //! No dedup at this layer — sponge is a pure allocator. The Keccak-
 //! node chiplet above dedupes by Keccak digest (`(content,
 //! len_bytes)` identity); below this layer, chunks duplicate per
 //! invocation (CR-dedup invariant).
 //!
-//! [`generate_trace`] takes a `&SpongeRequires` and walks records in
-//! allocation order, stamping the 27-column trace; trailing rows up
+//! [`generate_trace_padded_to`] consumes a `SpongeRequires` and walks records in
+//! allocation order, stamping the 57-column trace; trailing rows up
 //! to the next power of two are inactive (`act = 0`).
 
 use alloc::vec::Vec;
 
-use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
+use miden_core::{Felt, utils::RowMajorMatrix};
 
 use crate::{
     hash::{
@@ -30,20 +30,17 @@ use crate::{
             round::{NUM_ROUNDS, RoundRequires},
             sponge::{
                 CHUNK_BYTES_RANGE, CLEARED_BYTES_RANGE, COL_ACT, COL_B_BEGIN, COL_BYTES_LEFT,
-                COL_CHUNK_LO, COL_CHUNK_PTR, COL_CLEARED_LO, COL_IS_CHUNK_AVAIL,
-                COL_IS_FIRST_BLOCK_OF_INVOCATION, COL_IS_ZERO, COL_PADDED_LO, COL_SPONGE_SEQ_ID,
-                COL_STATE_NEW_LO, COL_STATE_OUT_LO, COL_STATE_PREV_LO, KeccakSpongeAir,
-                NUM_MAIN_COLS, PADDED_BYTES_RANGE, SPONGE_PERIOD, STATE_NEW_BYTES_RANGE,
-                STATE_PREV_BYTES_RANGE,
+                COL_CHUNK_PTR, COL_IS_CHUNK_AVAIL, COL_IS_FIRST_BLOCK_OF_INVOCATION, COL_IS_ZERO,
+                COL_SPONGE_SEQ_ID, COL_STATE_OUT_LO, NUM_MAIN_COLS, PADDED_BYTES_RANGE,
+                SPONGE_PERIOD, STATE_NEW_BYTES_RANGE, STATE_PREV_BYTES_RANGE,
                 program::{EXTRA_BLOCK_BEGIN, NOP_SLACK_BEGIN},
             },
         },
     },
-    logup::build_logup_aux_trace,
     primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp, require_logic64},
-    transcript::poseidon2::{
-        digest::P2Digest,
-        trace::{PermSpan, Poseidon2Requires},
+    transcript::eidos::{
+        digest::EidosDigest,
+        trace::{AbsorptionSpan, EidosRequires},
     },
     utils::split_u64,
 };
@@ -52,7 +49,7 @@ use crate::{
 const RATE_BYTES: usize = 136;
 /// Keccak rate in 64-bit lanes.
 const RATE_LANES: usize = 17;
-/// Chunk granularity in bytes (one Poseidon-transcript chunk = 256 bits).
+/// Chunk granularity in bytes (one Eidos message block = 256 bits).
 const CHUNK_BYTES: usize = 32;
 /// Chunk granularity in lanes.
 const CHUNK_LANES: usize = CHUNK_BYTES / 8;
@@ -141,17 +138,17 @@ impl SpongeSeqId {
 }
 
 /// What a `SpongeRequires::require` call returns: the Keccak digest
-/// of this invocation, the chunk-content P2 digest, the chunk-content
-/// P2 absorption span (so the Keccak-node layer can read OutRate0 at
-/// its tail), the invocation's sponge-row head, and its chunk-chain
+/// of this invocation, the chunk-content Eidos digest, the chunk-content
+/// Eidos absorption span (so the Keccak-node layer can consume the terminal
+/// `EidosOut` value at its tail), the invocation's sponge-row head, and its chunk-chain
 /// head. Empty input still lays one canonical zero chunk, so the span
-/// is non-empty and `chunk_content_digest` binds that chunk's P2
+/// is non-empty and `chunk_content_digest` binds that chunk's Eidos
 /// digest.
 #[derive(Debug, Clone)]
 pub struct SpongeOutput {
     pub keccak_digest: KeccakDigest,
-    pub chunk_content_digest: P2Digest,
-    pub chunk_content_perm_span: PermSpan,
+    pub chunk_content_digest: EidosDigest,
+    pub chunk_content_absorption_span: AbsorptionSpan,
     pub sponge_head: SpongeSeqId,
     pub chunk_head: ChunkSeqId,
 }
@@ -177,7 +174,7 @@ struct SpongeRecord {
 /// caller-supplied [`ChunkRequires`] to lay the chunk-tape segment,
 /// runs the Keccak-f permutations as a trace-gen oracle, allocates a
 /// fresh `sponge_seq_id` range, and records the per-block snapshots
-/// [`generate_trace`] later replays.
+/// [`generate_trace_padded_to`] later replays.
 ///
 /// No dedup at this layer — the Keccak-node chiplet above owns the
 /// dedup point.
@@ -204,7 +201,7 @@ impl SpongeRequires {
     /// one pad block (`keccak256("")`) and one canonical zero chunk,
     /// consumed by the block loop as a full garbage-tail (the pad fires
     /// at byte 0), so the digest is unperturbed while `H_input_chunks`
-    /// still binds a real P2 chain tail.
+    /// still binds a real Eidos chain tail.
     ///
     /// Drives the supplied `round_req` for the 24 rounds of each
     /// block's Keccak permutation, and `bpl_req` for the per-row
@@ -216,16 +213,16 @@ impl SpongeRequires {
         chunk_req: &mut ChunkRequires,
         round_req: &mut RoundRequires,
         bpl_req: &mut BytePairLutRequires,
-        p2: &mut Poseidon2Requires,
+        eidos: &mut EidosRequires,
     ) -> SpongeOutput {
         // Always lay a chunk segment. Empty input yields one canonical
         // zero chunk (see `ChunkInvocation::num_chunks`), which the block
         // loop below consumes as a full garbage-tail (pad at byte 0), so
         // the keccak digest is `keccak256("")` while `H_input_chunks`
-        // still binds a real P2 chain tail.
-        let chunk_out = chunk_req.require(&ChunkInvocation { input: inv.input.clone() }, p2);
-        let (chunk_head, chunk_content_digest, chunk_content_perm_span) =
-            (chunk_out.chunk_head, chunk_out.digest, chunk_out.perm_span);
+        // still binds a real Eidos chain tail.
+        let chunk_out = chunk_req.require(&ChunkInvocation { input: inv.input.clone() }, eidos);
+        let (chunk_head, chunk_content_digest, chunk_content_absorption_span) =
+            (chunk_out.chunk_head, chunk_out.digest, chunk_out.absorption_span);
 
         let layout = InvocationLayout::of(inv);
         let blocks = compute_block_snapshots_driving(inv, &layout, round_req, bpl_req);
@@ -246,7 +243,7 @@ impl SpongeRequires {
         SpongeOutput {
             keccak_digest,
             chunk_content_digest,
-            chunk_content_perm_span,
+            chunk_content_absorption_span,
             sponge_head,
             chunk_head,
         }
@@ -318,7 +315,7 @@ fn compute_block_snapshots_driving(
             }
 
             // 24 round submissions per block, evolving state via the
-            // reference round function so the chunk-content P2 layer
+            // reference round function so the chunk-content Eidos layer
             // sees identical state_ins to what round.generate_trace
             // will replay.
             for &rc in &KECCAK_RC[..NUM_ROUNDS] {
@@ -382,21 +379,19 @@ fn compute_block_snapshots(inv: &Invocation, layout: &InvocationLayout) -> Vec<B
 // TRACE GENERATION
 // ================================================================================================
 
+/// Builds the main trace at its natural height.
+#[cfg(test)]
+pub fn generate_trace(requires: SpongeRequires) -> RowMajorMatrix<Felt> {
+    generate_trace_padded_to(requires, 0)
+}
+
 /// Build the sponge chiplet's main trace from the recorded
 /// invocations. Walks records in allocation order, stamping
 /// `SPONGE_PERIOD` rows per block; trailing rows up to the next power
 /// of two are inactive (`act = 0`). Returns a [`NUM_MAIN_COLS`]-column
 /// trace.
-pub fn generate_trace(requires: SpongeRequires) -> RowMajorMatrix<Felt> {
-    generate_trace_padded_to(requires, 0)
-}
-
-/// Same as [`generate_trace`], but the trace height is at least `min_height`
-/// (still rounded up to a power of two) — lets a caller sharing this
-/// chiplet's row range with another AIR (see `hash::chunk_node_sponge`) pad
-/// the sponge's trace up to match the other side's height. Pads past the
-/// natural height are the sponge's own trailing inactive rows (`act = 0`,
-/// the `sponge_seq_id` / `bytes_left` chains continued).
+///
+/// The height is at least `min_height`, rounded up to a power of two.
 pub(crate) fn generate_trace_padded_to(
     requires: SpongeRequires,
     min_height: usize,
@@ -442,9 +437,7 @@ pub(crate) fn generate_trace_padded_to(
             let overshoot = chunks_in_block - rate_avail;
 
             for slot in 0..SPONGE_PERIOD {
-                // Scattered row: per-lane lo/hi pairs land at non-adjacent
-                // columns by branch (see `fill_state_lane_row`), so fill a
-                // stack scratch by `COL_*` index, then extend.
+                // Fill a row scratch by column index, then append it to the trace.
                 let mut r = [Felt::ZERO; NUM_MAIN_COLS];
 
                 r[COL_SPONGE_SEQ_ID] = Felt::new(row as u64).expect("row index fits");
@@ -471,7 +464,7 @@ pub(crate) fn generate_trace_padded_to(
                 }
 
                 let chunk_lane = if consume { tape.next().unwrap_or(0) } else { 0 };
-                write_u64_with_bytes(&mut r, COL_CHUNK_LO, CHUNK_BYTES_RANGE.start, chunk_lane);
+                write_u64_bytes(&mut r, CHUNK_BYTES_RANGE.start, chunk_lane);
 
                 fill_state_lane_row(
                     &mut r,
@@ -532,7 +525,7 @@ fn pack_chunk_tape(inv: &Invocation) -> impl Iterator<Item = u64> + '_ {
 }
 
 /// Same as [`pack_chunk_tape`] but driven by an explicit byte slice +
-/// lane count — used by [`generate_trace`] which holds the bytes in
+/// lane count — used by [`generate_trace_padded_to`] which holds the bytes in
 /// each [`SpongeRecord`] but rebuilds the iterator per record.
 fn pack_chunk_tape_from_bytes(input: &[u8], chunk_lanes: usize) -> impl Iterator<Item = u64> + '_ {
     input
@@ -565,7 +558,7 @@ fn fill_state_lane_row(
 
     if is_rate_slot {
         let state_prev = state_at_block_start[slot];
-        write_u64_with_bytes(r, COL_STATE_PREV_LO, STATE_PREV_BYTES_RANGE.start, state_prev);
+        write_u64_bytes(r, STATE_PREV_BYTES_RANGE.start, state_prev);
         let (state_new, cleared, padded) = if is_last_block && slot == layout.pad_lane_idx {
             // Pad row.
             let cleared = !andnot_mask(layout.byte_offset) & chunk_lane;
@@ -576,11 +569,11 @@ fn fill_state_lane_row(
             (state_prev, 0, 0)
         } else {
             // Verbatim XORin.
-            (state_prev ^ chunk_lane, 0, 0)
+            (state_prev ^ chunk_lane, 0, chunk_lane)
         };
-        write_u64_with_bytes(r, COL_STATE_NEW_LO, STATE_NEW_BYTES_RANGE.start, state_new);
-        write_u64_with_bytes(r, COL_CLEARED_LO, CLEARED_BYTES_RANGE.start, cleared);
-        write_u64_with_bytes(r, COL_PADDED_LO, PADDED_BYTES_RANGE.start, padded);
+        write_u64_bytes(r, STATE_NEW_BYTES_RANGE.start, state_new);
+        write_u64_bytes(r, CLEARED_BYTES_RANGE.start, cleared);
+        write_u64_bytes(r, PADDED_BYTES_RANGE.start, padded);
         if is_last_block {
             // Squeeze provides the perm-`last`'s output for
             // non-digest lanes (slots [4, 17) of the last block).
@@ -592,8 +585,8 @@ fn fill_state_lane_row(
     } else if is_capacity_slot {
         // Capacity passthrough: state_new = state_prev.
         let state_prev = state_at_block_start[slot];
-        write_u64_with_bytes(r, COL_STATE_PREV_LO, STATE_PREV_BYTES_RANGE.start, state_prev);
-        write_u64_with_bytes(r, COL_STATE_NEW_LO, STATE_NEW_BYTES_RANGE.start, state_prev);
+        write_u64_bytes(r, STATE_PREV_BYTES_RANGE.start, state_prev);
+        write_u64_bytes(r, STATE_NEW_BYTES_RANGE.start, state_prev);
         if is_last_block {
             write_u64(r, COL_STATE_OUT_LO, perm_out_last_block[slot]);
         }
@@ -604,17 +597,18 @@ fn fill_state_lane_row(
         // matches the lane-16 rate-XORin row's provide at the same
         // Memory64 address (`100·sponge_seq_id − 2484`), so the
         // post-XORin value pinned here must match what the rate
-        // row produced. The `xor-lane16` mult is gated by
+        // row produced. The shared `xor-state` mult is gated by
         // `is_last_block_period`, but trace generation fills the
         // values uniformly for layout consistency.
         let state_prev = post_xorin_this_block[LANE_16];
-        write_u64_with_bytes(r, COL_STATE_PREV_LO, STATE_PREV_BYTES_RANGE.start, state_prev);
+        write_u64_bytes(r, STATE_PREV_BYTES_RANGE.start, state_prev);
         let state_new = if is_last_block {
+            write_u64_bytes(r, PADDED_BYTES_RANGE.start, PAD_CONST);
             state_prev ^ PAD_CONST
         } else {
             state_prev
         };
-        write_u64_with_bytes(r, COL_STATE_NEW_LO, STATE_NEW_BYTES_RANGE.start, state_new);
+        write_u64_bytes(r, STATE_NEW_BYTES_RANGE.start, state_new);
     }
     // Slots 26..32 (NOP slack): all column values left at zero.
 }
@@ -625,12 +619,8 @@ fn write_u64(row: &mut [Felt], col_lo: usize, value: u64) {
     row[col_lo + 1] = hi;
 }
 
-/// Like [`write_u64`], but also fills `value`'s 8-byte little-endian
-/// shadow decomposition starting at `bytes_start` (see `sponge`'s
-/// "Byte-shadow columns" — the `eval` side links the two
-/// representations with an ungated local constraint).
-fn write_u64_with_bytes(row: &mut [Felt], col_lo: usize, bytes_start: usize, value: u64) {
-    write_u64(row, col_lo, value);
+/// Fill `value`'s 8-byte little-endian representation starting at `bytes_start`.
+fn write_u64_bytes(row: &mut [Felt], bytes_start: usize, value: u64) {
     for (i, b) in value.to_le_bytes().into_iter().enumerate() {
         row[bytes_start + i] = Felt::from(b);
     }
@@ -647,19 +637,6 @@ fn andnot_mask(byte_offset: usize) -> u64 {
 /// at the pad position.
 fn padding_mask(byte_offset: usize) -> u64 {
     1u64 << (8 * byte_offset)
-}
-
-// PROVER
-// ================================================================================================
-
-/// Build the aux trace for [`KeccakSpongeAir`]. The aux trace is
-/// produced by the generic [`build_logup_aux_trace`] driver — no
-/// chiplet-specific aux-trace code lives here.
-pub(crate) fn build_aux(
-    main: &RowMajorMatrix<Felt>,
-    challenges: &[QuadFelt],
-) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    build_logup_aux_trace(&KeccakSpongeAir, main, challenges)
 }
 
 #[cfg(test)]
