@@ -41,11 +41,14 @@
 
 #### Fixes
 
+- [BREAKING] `Package::strip_debug_info` strips an embedded kernel one level deep and rejects a kernel section that embeds another kernel with the new `PackageStripError::NestedEmbeddedKernel`, instead of recursing until the stack overflows ([#3981](https://github.com/0xMiden/miden-vm/pull/3981)).
+- [BREAKING] Fixed canonical ordering of recursive types. Old and new readers can reject each other's typed packages. Rejected reversed source spans and noncanonical partial-SMT payloads. Fixed RPX debug stack overflow and decoding of exhausted `RandomCoin` states ([#3976](https://github.com/0xMiden/miden-vm/pull/3976)).
 - Fixed linker module-capacity overflow so AST and pre-assembled module registration return a structured error instead of panicking ([#3895](https://github.com/0xMiden/miden-vm/issues/3895)).
 - [BREAKING] `MmrPeaks::verify` now takes the tree, peak and relative position from the peaks' forest instead of the proof's, and rejects positions outside that forest (`PositionNotFound`, previously a panic) and paths whose depth differs from the tree height (`InvalidMerklePath`) ([#3931](https://github.com/0xMiden/miden-vm/pull/3931)).
 
 #### Features
 
+- Added `Arbitrary` implementations and property tests for serialization and VM operations. Expanded fuzz input checks and seed inputs ([#3976](https://github.com/0xMiden/miden-vm/pull/3976)).
 - Added `PublicKey::from_sec1_bytes` and `PublicKey::from_hex` to `ecdsa_k256_keccak` for parsing and validating compressed and uncompressed SEC1 public keys ([#3961](https://github.com/0xMiden/miden-vm/pull/3961)).
 
 ## v0.35.0 (2026-10-01)
