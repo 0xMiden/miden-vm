@@ -652,22 +652,21 @@ proptest! {
 
     #[test]
     fn uint_store_empty_pads_proptest(alpha in arb_qf(), beta in arb_qf()) {
-        // No interned uints: generate_trace lays a single self-referential zero
-        // padding block (ptr 1), so an idle store still has a valid
-        // power-of-two trace whose buses net out (provide mult 1 = its own
-        // bound consume; Range16 zeros against BPL).
-        let store = UintStoreRequires::new();
-        let mut bpl = BytePairLutRequires::new();
-        let main = generate_trace(store, &mut bpl);
-        prop_assert_eq!(main.height(), 4, "one padding block");
+        // The traces and local constraints do not depend on the generated challenges.
+        static TRACES: std::sync::LazyLock<(RowMajorMatrix<Felt>, RowMajorMatrix<Felt>)> =
+            std::sync::LazyLock::new(|| {
+                let mut bpl = BytePairLutRequires::new();
+                let main = generate_trace(UintStoreRequires::new(), &mut bpl);
+                assert_eq!(main.height(), 4, "one padding block");
+                crate::tests::check_local(UintStoreAir, &main);
+                (main, bpl_trace(bpl))
+            });
+        let (main, bpl_main) = &*TRACES;
 
-        crate::tests::check_local(UintStoreAir, &main);
-
-        let bpl_main = bpl_trace(bpl);
         let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
         let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
-        fold_balance(&UintStoreAir, &main, &challenges, &mut net);
-        fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
+        fold_balance(&UintStoreAir, main, &challenges, &mut net);
+        fold_balance(&BytePairLutAir, bpl_main, &challenges, &mut net);
         let residual = net.values().filter(|m| **m != Felt::ZERO).count();
         prop_assert_eq!(residual, 0, "an empty store still closes its buses");
     }

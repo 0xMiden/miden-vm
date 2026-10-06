@@ -155,21 +155,21 @@ proptest! {
 
     /// Use equal operands to exercise equality in every generated case.
     #[test]
-    fn u32comparisons_equal_operands_proptest(a in any::<u32>(), e in 0..Felt::ORDER_U64) {
-        let cases = [
+    fn u32comparisons_equal_operands_proptest(
+        a in any::<u32>(),
+        e in 0..Felt::ORDER_U64,
+        (asm_op, expected) in prop::sample::select(vec![
             ("u32lt", 0),
             ("u32lte", 1),
             ("u32gt", 0),
             ("u32gte", 1),
-        ];
+        ]),
+    ) {
+        let test = build_op_test!(asm_op, &[a as u64, a as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
 
-        for (asm_op, expected) in cases {
-            let test = build_op_test!(asm_op, &[a as u64, a as u64, e]);
-            test.prop_expect_stack(&[expected, e])?;
-
-            let test = build_op_test!(format!("{asm_op}.{a}"), &[a as u64, e]);
-            test.prop_expect_stack(&[expected, e])?;
-        }
+        let test = build_op_test!(format!("{asm_op}.{a}"), &[a as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
     }
 }
 
