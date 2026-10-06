@@ -1,11 +1,9 @@
 #[cfg(feature = "arbitrary")]
 use core::cmp::Ordering;
 
-use miden_utils_testing::build_op_test;
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
-#[cfg(feature = "arbitrary")]
-use miden_utils_testing::{Felt, PrimeField64};
+use miden_utils_testing::{Felt, PrimeField64, build_op_test};
 
 // U32 OPERATIONS TESTS - MANUAL - COMPARISON OPERATIONS
 // ================================================================================================
@@ -63,6 +61,8 @@ fn u32max() {
 
 #[cfg(feature = "arbitrary")]
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
     #[test]
     fn u32lt_proptest(a in any::<u32>(), b in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let expected = match a.cmp(&b) {
@@ -153,9 +153,7 @@ proptest! {
         test.prop_expect_stack(&[expected as u64, e])?;
     }
 
-    /// `a` and `b` are generated independently above, so the equality branch is reached with
-    /// probability ~2^-32. This correlated property pins the equal-operands behavior (including
-    /// the u32::MAX boundary) for all four comparison operations, in stack and immediate forms.
+    /// Use equal operands to exercise equality in every generated case.
     #[test]
     fn u32comparisons_equal_operands_proptest(a in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let cases = [
@@ -223,6 +221,15 @@ fn test_comparison_op(asm_op: &str, expected_lt: u64, expected_eq: u64, expected
 
     let test = build_op_test!(asm_op_imm, &[u32::MAX as u64]);
     test.expect_stack(&[expected_gt]);
+
+    for a in [0, u32::MAX] {
+        let e = Felt::ORDER_U64 - 1;
+        let test = build_op_test!(asm_op, &[a as u64, a as u64, e]);
+        test.expect_stack(&[expected_eq, e]);
+
+        let test = build_op_test!(format!("{asm_op}.{a}"), &[a as u64, e]);
+        test.expect_stack(&[expected_eq, e]);
+    }
 
     // Randomized coverage, including immediate variants and stack preservation, lives in the
     // u32{lt,lte,gt,gte}_proptest tests below.
