@@ -380,9 +380,10 @@ fn deferred_state_accepts_msm_with_repeated_base() {
 fn deferred_state_accepts_msm_nodes_sharing_one_expression() {
     // All three MSM nodes name the same `(point, scalar)` pairs. The second names `2G` through an
     // addition node, so it hashes differently while the importer derives the same expression for
-    // it as for the first; that expression is then resolved twice and each resolve needs an
-    // expression of its own. The third declares the pairs in the opposite order. The zero scalar
-    // takes the term-preserving fallback; the nonzero pair takes the joint ladder.
+    // it as for the first; that expression then serves two claims, so the second claim takes a
+    // copy of it, the only expression the second node lays. The third declares the pairs in the
+    // opposite order. The zero scalar takes the term-preserving fallback; the nonzero pair takes
+    // the joint ladder.
     let curve = CurveId::Secp256k1;
     let [(gx, gy), (g2x, g2y), (g3x, g3y)] = k1_points();
     for (scalar_g, expected) in [(1u64, (g3x, g3y)), (0, (g2x, g2y))] {
@@ -393,6 +394,7 @@ fn deferred_state_accepts_msm_nodes_sharing_one_expression() {
         let s_g = register_uint_value(&mut state, curve.scalar_domain(), U256::from(scalar_g));
         let one = register_uint_value(&mut state, curve.scalar_domain(), from_hex("1"));
         let expected = register_curve_point(&mut state, curve, expected.0, expected.1);
+        let mut expr_counts = Vec::new();
         for pairs in [
             vec![(g, s_g), (g2, one)],
             vec![(g, s_g), (g2_added, one)],
@@ -401,7 +403,14 @@ fn deferred_state_accepts_msm_nodes_sharing_one_expression() {
             let msm = register_curve_msm(&mut state, pairs);
             let msm_eq = register_curve_op(&mut state, CurvePrecompile::EQ_OP_ID, msm, expected);
             state.log_statement(msm_eq).expect("MSM equality logs");
+            let session = session_from_witnesses(vec![state.witness()]).unwrap();
+            expr_counts.push(session.msm_expr_count());
         }
+        assert_eq!(
+            expr_counts[1],
+            expr_counts[0] + 1,
+            "the second node copies the first node's expression instead of deriving its own",
+        );
         translated_traces_check(&state);
     }
 }

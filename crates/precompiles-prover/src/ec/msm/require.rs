@@ -34,6 +34,16 @@ pub fn intro(
     if let Some(e) = msm.lookup_intro(base) {
         return e; // a prior ⟨base × 1⟩ — reuse it
     }
+    fresh_intro(msm, ec, uint, base)
+}
+
+/// Lays `⟨base × 1⟩` without consulting the dedup map.
+fn fresh_intro(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    base: EcPointPtr,
+) -> EcExprPtr {
     let group = ec.store.point_params(base).0;
     let sbound = ec.store.group_sbound(group);
     let one = uint.require().intern(from_hex("1"), sbound);
@@ -56,6 +66,16 @@ pub fn intro_zero(
     if let Some(e) = msm.lookup_intro_zero(base) {
         return e; // a prior ⟨base × 0⟩ — reuse it
     }
+    fresh_intro_zero(msm, ec, uint, base)
+}
+
+/// Lays `⟨base × 0⟩` without consulting the dedup map.
+fn fresh_intro_zero(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    base: EcPointPtr,
+) -> EcExprPtr {
     let group = ec.store.point_params(base).0;
     let (a_ptr, b_ptr, bound_ptr) = ec.store.group_params(group);
     let (beta_ptr, lambda_ptr) = ec.store.group_glv_params(group);
@@ -94,6 +114,16 @@ pub fn intro_endo(
     if let Some(e) = msm.lookup_intro_endo(base) {
         return e; // a prior ⟨base × λ⟩ — reuse it
     }
+    fresh_intro_endo(msm, ec, uint, base)
+}
+
+/// Lays `⟨base × λ⟩` without consulting the dedup map.
+fn fresh_intro_endo(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    base: EcPointPtr,
+) -> EcExprPtr {
     let group = ec.store.point_params(base).0;
     let (beta_ptr, lambda_ptr) = ec.store.group_glv_params(group);
     assert_ne!(beta_ptr.addr(), 0, "intro_endo requires a group with a GLV endomorphism");
@@ -131,6 +161,17 @@ pub fn combine(
         return e; // identical combine already laid — reuse it (no second
         // merge walk, value `EcGroupAdd`, or operand consume)
     }
+    fresh_combine(msm, ec, uint, a, b)
+}
+
+/// Lays `combine(a, b)` without consulting the dedup map.
+fn fresh_combine(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    a: EcExprPtr,
+    b: EcExprPtr,
+) -> EcExprPtr {
     let group = msm.group(a);
     let sbound = msm.sbound(a);
     let a_terms = msm.terms(a);
@@ -166,6 +207,17 @@ pub fn combine_terms_preserving(
     if let Some(e) = msm.lookup_concat_combine(a, b) {
         return e; // identical concat-combine already laid — reuse it
     }
+    fresh_combine_terms_preserving(msm, ec, uint, a, b)
+}
+
+/// Lays `combine_terms_preserving(a, b)` without consulting the dedup map.
+fn fresh_combine_terms_preserving(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    a: EcExprPtr,
+    b: EcExprPtr,
+) -> EcExprPtr {
     let group = msm.group(a);
     let sbound = msm.sbound(a);
     let a_terms = msm.terms(a);
@@ -202,6 +254,16 @@ pub fn neg(
     if let Some(e) = msm.lookup_neg(a) {
         return e; // a prior neg(a) — reuse it
     }
+    fresh_neg(msm, ec, uint, a)
+}
+
+/// Lays `neg(a)` without consulting the dedup map.
+fn fresh_neg(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    a: EcExprPtr,
+) -> EcExprPtr {
     let group = msm.group(a);
     let sbound = msm.sbound(a);
     let a_terms = msm.terms(a);
@@ -243,34 +305,28 @@ pub fn neg(
 }
 
 /// Lay a fresh copy of `expr` — the same terms and value under a new
-/// expression ptr — by repeating the operation that produced it without
-/// reusing its dedup entry. The copy re-records every lower-chiplet demand
-/// of that operation and carries its own use counts; the dedup entry keeps
-/// naming the expression it named before. The AIR admits one resolve per
-/// expression, so each further resolve of the same terms takes a copy.
-/// Returns the copy's handle.
+/// expression ptr — by repeating the fresh construction of the operation
+/// that produced it. The copy re-records every lower-chiplet demand of that
+/// operation and carries its own use counts; the dedup entry keeps naming
+/// the expression it named before (see `EcMsmRequires::lay_copy`). The
+/// AIR admits one transcript claim per expression, so each further claim on
+/// the same terms takes a copy. Returns the copy's handle.
 pub fn duplicate(
     msm: &mut EcMsmRequires,
     ec: &mut EcStores,
     uint: &mut UintStores,
     expr: EcExprPtr,
 ) -> EcExprPtr {
-    let derivation = msm.derivation(expr);
-    let cached = msm.forget(derivation);
-    let copy = match derivation {
-        DedupKey::Intro(base) => intro(msm, ec, uint, EcPointPtr::from_addr(base)),
-        DedupKey::IntroEndo(base) => intro_endo(msm, ec, uint, EcPointPtr::from_addr(base)),
-        DedupKey::IntroZero(base) => intro_zero(msm, ec, uint, EcPointPtr::from_addr(base)),
-        DedupKey::Combine(a, b) => combine(msm, ec, uint, EcExprPtr(a), EcExprPtr(b)),
+    msm.lay_copy(expr, |msm, derivation| match derivation {
+        DedupKey::Intro(base) => fresh_intro(msm, ec, uint, EcPointPtr::from_addr(base)),
+        DedupKey::IntroEndo(base) => fresh_intro_endo(msm, ec, uint, EcPointPtr::from_addr(base)),
+        DedupKey::IntroZero(base) => fresh_intro_zero(msm, ec, uint, EcPointPtr::from_addr(base)),
+        DedupKey::Combine(a, b) => fresh_combine(msm, ec, uint, EcExprPtr(a), EcExprPtr(b)),
         DedupKey::ConcatCombine(a, b) => {
-            combine_terms_preserving(msm, ec, uint, EcExprPtr(a), EcExprPtr(b))
+            fresh_combine_terms_preserving(msm, ec, uint, EcExprPtr(a), EcExprPtr(b))
         },
-        DedupKey::Neg(a) => neg(msm, ec, uint, EcExprPtr(a)),
-    };
-    if let Some(cached) = cached {
-        msm.remember(derivation, cached);
-    }
-    copy
+        DedupKey::Neg(a) => fresh_neg(msm, ec, uint, EcExprPtr(a)),
+    })
 }
 
 /// The combine merge walk: a base-ordered two-pointer merge of two

@@ -261,6 +261,16 @@ impl KeccakNodeRequires {
         let remainder = len_bytes.saturating_sub(1) % 32;
         bpl_req.require(BytePairOp::Xor, remainder as u8, (31 - remainder) as u8);
 
+        let full_blocks = len_bytes / SPONGE_RATE_BYTES;
+        assert!(
+            full_blocks < MAX_SPONGE_PERMS,
+            "a Keccak input must span at most {MAX_SPONGE_PERMS} sponge permutations"
+        );
+        let last_block_remainder = len_bytes % SPONGE_RATE_BYTES;
+        bpl_req.require_range16(full_blocks as u16);
+        bpl_req.require_range16(last_block_remainder as u16);
+        bpl_req.require_range16((SPONGE_RATE_BYTES - 1 - last_block_remainder) as u16);
+
         // Miss path: full allocation through sponge + 2× Eidos one-shots.
         let sponge_inv = SpongeInvocation { input: input.to_vec() };
         let sponge_out = sponge_req.require(&sponge_inv, chunk_req, round_req, bpl_req, eidos);

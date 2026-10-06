@@ -129,6 +129,11 @@ impl WitnessSession {
     pub(crate) fn finish(self) -> crate::session::SessionTraces {
         self.session.finish(self.root)
     }
+
+    #[cfg(test)]
+    pub(crate) fn msm_expr_count(&self) -> usize {
+        self.session.msm_expr_count()
+    }
 }
 
 #[derive(Clone, Copy)]

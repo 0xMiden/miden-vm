@@ -5,7 +5,7 @@ use std::{collections::HashMap, fmt::Debug, format, string::String, vec::Vec};
 use miden_air::lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions};
 use miden_core::{
     Felt,
-    field::QuadFelt,
+    field::{PrimeField64, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_lifted_air::{BaseAir, LiftedAir};
@@ -19,7 +19,7 @@ use crate::{
     },
     logup::LookupMessage,
     primitives::byte_pair_lut::{
-        BytePairLutAir, BytePairLutMsg, NUM_PREPROCESSED_COLS, PRE_A, PRE_B, PRE_XOR,
+        BytePairLutAir, BytePairLutMsg, NUM_PREPROCESSED_COLS, PRE_A, PRE_B, PRE_XOR, Range16Msg,
         preprocessed_table,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -256,6 +256,20 @@ pub(crate) fn session_stack_net(
     }
     fold_fixed_boundary_external_balance(challenges, &mut net);
     net
+}
+
+/// Return the unmatched denominators and their net multiplicities from the session stack.
+pub(crate) fn session_stack_residual_keyed(
+    mains: &[&RowMajorMatrix<Felt>; NUM_CHIPLETS],
+    replacements: &[(usize, &RowMajorMatrix<Felt>)],
+    challenges: &Challenges<QuadFelt>,
+) -> Vec<(QuadFelt, Felt, String)> {
+    session_stack_net(mains, replacements, challenges)
+        .into_iter()
+        .filter_map(|(denom, (mult, diagnostic))| {
+            (mult != Felt::ZERO).then_some((denom, mult, diagnostic))
+        })
+        .collect()
 }
 
 /// Return the nonzero entries from the canonical full session stack balance.

@@ -333,8 +333,14 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
 /// active row. With `n_sponge_perms − 1 ∈ [0, 2^16)` and the last-block remainder
 /// `r = len_bytes − 136·(n_sponge_perms − 1)` satisfying `r, 135 − r ∈ [0, 2^16)`, the length
 /// equation `len_bytes = 136·(n_sponge_perms − 1) + r` holds over the integers with
-/// `r ∈ [0, 135]`. The digest address and the sponge-head continuity therefore name this
-/// invocation's own permutations.
+/// `r ∈ [0, 135]`.
+///
+/// That count is the block count of this node's own sponge invocation. The invocation's first
+/// sponge row consumes this node's `KeccakSponge` request, which pins its starting `bytes_left` to
+/// `len_bytes`. The sponge's `bytes_left` decrement chain, pad-lane tie-down and pad-must-fire
+/// constraints then end the invocation on the block that absorbs the padding, its
+/// `floor(len_bytes / 136) + 1`-th. The digest address therefore reads this invocation's final
+/// permutation, and the sponge-head continuity steps to the first row of the next invocation.
 pub(crate) fn eval_sponge_perm_count<LB>(builder: &mut LB, local: &[LB::Var; NUM_MAIN_COLS])
 where
     LB: LookupBuilder<F = Felt>,
