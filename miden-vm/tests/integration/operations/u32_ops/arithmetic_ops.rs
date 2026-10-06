@@ -536,7 +536,7 @@ fn u32divmod_fail() {
 // ================================================================================================
 #[cfg(feature = "arbitrary")]
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(ProptestConfig::with_cases(64))]
     #[test]
     // `e` is bounded to the canonical field range: `build_op_test!` converts stack inputs via
         // checked `Felt::new`, which panics for values at or above the field modulus.

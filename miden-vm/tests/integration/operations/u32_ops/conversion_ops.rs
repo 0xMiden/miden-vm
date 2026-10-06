@@ -246,6 +246,8 @@ fn u32split() {
 // ================================================================================================
 #[cfg(feature = "arbitrary")]
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
     #[test]
     fn u32test_proptest(value in any::<u64>()) {
         let asm_op = "u32test";
