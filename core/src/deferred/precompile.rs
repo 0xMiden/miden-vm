@@ -11,7 +11,7 @@ use miden_crypto::hash::eidos::DomainTag;
 #[cfg(test)]
 use miden_crypto::hash::eidos::{DomainVersion, namespace};
 
-use super::{DeferredContext, Node, NodeType, Payload, PrecompileError};
+use super::{DeferredContext, Node, NodeType, Payload, PrecompileError, WorkItem};
 
 /// Constructs a tag in a test-only portion of the ecosystem namespace.
 ///
@@ -65,6 +65,13 @@ pub trait Precompile: Send + Sync {
     /// A [`NodeType::Join`] already contains exactly two child digests. Checks on the values of
     /// referenced children belong in [`Self::evaluate`].
     fn validate_payload(&self, params: [u32; 3], payload: &Payload) -> bool;
+
+    /// Declares the bounded work represented by one recognized node.
+    ///
+    /// The framework calls this after validating the outer payload shape and before hashing or
+    /// evaluating the node. Implementations must not evaluate children, perform cryptographic
+    /// computation, or allocate proportionally to attacker-controlled values.
+    fn work(&self, params: [u32; 3], payload: &Payload) -> Result<WorkItem, PrecompileError>;
 
     /// Evaluates one owned node to its canonical form.
     ///

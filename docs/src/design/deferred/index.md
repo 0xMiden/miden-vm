@@ -72,7 +72,7 @@ Identical content yields an identical digest, so equal subterms are shared autom
     structures. Pairs are encoded in payload order as 8-felt chunks `lhs || rhs`, and their child
     order is `lhs0`, `rhs0`, `lhs1`, `rhs1`, and so on. Canonical wire encodes the same ordered
     pairs as topological child indices. Empty pair lists are rejected; exact pair-count/arity
-    constraints are semantic and enforced by the owning precompile. Budget accounting treats each
+    constraints are checked by the owning precompile before admission. Budget accounting treats each
     pair as one ordinary 8-felt payload block, in addition to the frame word.
 
 The digest commits to both the frame and body. A non-TRUE node derives one Eidos initial chaining
@@ -100,6 +100,11 @@ A precompile defines the following methods:
 - `validate_payload(params, payload) -> bool` checks any fixed or parameter-dependent number of
   data chunks or digest pairs. This method is required and runs after shape validation, before
   insertion. Returning `false` rejects the node with `InvalidNode`.
+- `work(params, payload) -> Result<WorkItem>` classifies the bounded computation represented by a
+  structurally valid node. Witness preparation calls it before hashing or evaluation, so it must
+  not evaluate children, perform the claimed cryptographic work, or allocate proportionally to
+  attacker-controlled values. Every work class encountered in an execution or witness must have a
+  configured `WorkLimit` in that accounting policy.
 - `evaluate(params, payload, …) -> Result<Node>` computes a node's **canonical form**. The
   common roles are: validate a canonical value represented as data (its canonical is itself),
   evaluate an operation (evaluate the child canonicals, then combine), or check a predicate
@@ -122,8 +127,8 @@ During evaluation the framework hands the precompile a `DeferredContext`, throug
 `get_node` for a registered digest, `evaluate_digest` a child digest to its canonical digest, or
 `register` a freshly-minted helper node into the DAG. Registered helper nodes are validated under
 the same registry and must satisfy the ordinary child-closure rules. The precompile never touches
-the commitment directly. It supplies only per-node meaning, and the framework drives the
-depth-first recursion.
+the commitment directly. It supplies only per-node meaning, and the framework drives recursive
+evaluation.
 
 The in-memory `DeferredState` may memoize evaluation results internally. That memoization is
 transparent to precompile implementations and is not serialized as trusted state.
@@ -206,8 +211,10 @@ directly, without reconstructing append history. The digest is structural: even 
 hashed with the distinct `DEFERRED_AND_DOMAIN` Eidos framing and is not equal to `TRUE_DIGEST`,
 though it evaluates semantically to `TRUE`.
 
-Portable decoding checks the committed graph's structure. Session import then validates the
-operations and assertions needed to prove its root. Neither step rebuilds the execution evaluator.
+Portable decoding checks canonical encoding and allocation bounds without hashing the graph.
+Preparation validates its structure, charges declared work, and computes commitments. Session
+import then validates the operations and assertions needed to prove its root without rebuilding the
+native execution evaluator.
 
 ## Portable witnesses and verification
 
@@ -222,18 +229,21 @@ The in-memory graph and serialized graph have the same representation:
 - pair lists carry ordered pairs of backward child indices;
 - the root is the digest of the final entry.
 
-Export uses deterministic child-first DFS and omits unreachable nodes. Checked construction and
-canonical decoding validate framework shapes, nonempty payloads, backward references, reconstructed
-commitments, duplicate-free entries, root reachability, and exact DFS order. They use bounded,
-iterative graph traversal without running the evaluator.
+Export uses deterministic child-first DFS and omits unreachable nodes. In-memory construction and
+canonical decoding enforce the element ceiling and canonical transport syntax without hashing or
+registry access. `PrecompileWitness::prepare` consumes entries, validates framework and precompile
+shapes, charges per-witness work before hashing, reconstructs commitments, and rejects
+duplicates, forward references, orphaned entries, and noncanonical DFS order. Preparation uses
+bounded, iterative graph traversal without running the evaluator.
 
 `ExecutionProof::read_from_bytes` decodes portable material without a precompile registry. A
-prover passes singleton witnesses directly to `Prover::prove_precompiles`, which validates their
-operations and assertions while importing into one Session. Computations may be shared across
-inputs, while each parent operand and each ordered root occurrence retains its proof-binding use.
-The resulting proof carries the exact ordered roots. Completing an execution proof preserves its
-compatibility declaration. See the [API contract](./semantics.md#transport-and-limits) for format
-versions and input limits.
+prover passes singleton witnesses directly to `Prover::prove_precompiles`. Each witness is prepared
+and admitted independently, with expected roots checked where supplied, before a Session exists.
+A second loop consumes prepared graphs and validates operations while recording them. Failure drops
+the partial Session. Its cache owns checked definitions and Session values; shared computations
+retain each parent operand and ordered root occurrence's proof-binding use. The proof carries the
+exact ordered roots. Completing an execution proof preserves its compatibility declaration. See the
+[API contract](./semantics.md#transport-and-limits) for format versions and input limits.
 
 ## Status and scope
 
@@ -244,5 +254,10 @@ The `miden-precompiles` crate supplies the bundled implementations used by core-
 standard proving. See the [API contract](./semantics.md#proof-obligations-and-composition) for the
 portable transport, batching, completion, and verification lifecycle.
 
-Generic DAG resource accounting and the external STARK that verifies a committed DAG are outside
-this framework's scope.
+Logical resource admission has two explicit scopes. Execution limits account every guest-induced
+deferred operation, while verification limits account every explicit node in the final unique
+root-reachable witness before commitment hashing or evaluation. Batches and proofs share a
+128-root ceiling, with no aggregate logical-work admission.
+Prover memory is estimated after import and checked before trace allocation; default admission-limit
+calibration remains separate follow-up work. The external STARK that verifies a committed DAG, the
+**Precompile VM**, is described in GitHub discussion #3005.

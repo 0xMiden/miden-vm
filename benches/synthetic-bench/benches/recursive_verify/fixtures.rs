@@ -298,7 +298,7 @@ fn store_cached_pvm_proof(cache_dir: &Path, cache_key: &str, proof: &PrecompileP
         .unwrap_or_else(|err| panic!("write cached PVM proof {}: {err}", path.display()));
 }
 
-fn execute_pvm_workload(workload_path: &Path) -> PrecompileWitness {
+fn execute_pvm_workload(workload_path: &Path) -> (PrecompileWitness, Word) {
     let source = std::fs::read_to_string(workload_path)
         .unwrap_or_else(|err| panic!("read {}: {err}", workload_path.display()));
     let input_file = InputFile::read(&None, workload_path)
@@ -330,14 +330,15 @@ fn execute_pvm_workload(workload_path: &Path) -> PrecompileWitness {
             .expect("construct processor for canonical PVM workload")
             .execute_sync(&program, &mut host)
             .expect("execute canonical PVM workload");
-    output
+    let root = output.precompile_root();
+    let witness = output
         .precompile_witness
-        .expect("canonical workload must produce deferred work")
+        .expect("canonical workload must produce deferred work");
+    (witness, root)
 }
 
-fn generate_pvm_proof(witness: PrecompileWitness) -> PrecompileProof {
+fn generate_pvm_proof(witness: PrecompileWitness, root: Word) -> PrecompileProof {
     eprintln!("proving canonical precompile witness with Eidos...");
-    let root = witness.root_unchecked();
     let proof = Prover::new()
         .with_hash_fn(HashFunction::Eidos)
         .prove_precompiles(vec![witness])
@@ -352,14 +353,14 @@ fn load_pvm_proof(config: &BenchConfig) -> PrecompileProof {
     let workload_path = canonical_pvm_workload_path();
     let cache_key = pvm_proof_cache_key(&workload_path);
     eprintln!("executing canonical 100-Keccak/4-ECDSA workload...");
-    let witness = execute_pvm_workload(&workload_path);
-    let cached = config.pvm_proof_cache_dir().and_then(|cache_dir| {
-        load_cached_pvm_proof(cache_dir, cache_key.as_str(), witness.root_unchecked())
-    });
+    let (witness, root) = execute_pvm_workload(&workload_path);
+    let cached = config
+        .pvm_proof_cache_dir()
+        .and_then(|cache_dir| load_cached_pvm_proof(cache_dir, cache_key.as_str(), root));
     let (proof, cache_status) = if let Some(proof) = cached {
         (proof, "hit")
     } else {
-        let proof = generate_pvm_proof(witness);
+        let proof = generate_pvm_proof(witness, root);
         if let Some(cache_dir) = config.pvm_proof_cache_dir() {
             store_cached_pvm_proof(cache_dir, cache_key.as_str(), &proof);
         }
