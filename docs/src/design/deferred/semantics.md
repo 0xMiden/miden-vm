@@ -11,23 +11,31 @@ Successful execution consumes it and exports the root-reachable graph as one por
 one root, with no evaluator or evaluation cache. Structural validity alone does not establish the
 truth of its assertions.
 
-The simplified state model is:
+The execution state is:
 
 ```rust
 pub struct DeferredState {
+    evaluator: DeferredEvaluator,
+    root: Digest,
+    execution_work: PrecompileWork,
+    execution_limits: PrecompileLimits,
+}
+
+struct DeferredEvaluator {
     registry: Arc<PrecompileRegistry>,
     nodes: BTreeMap<Digest, Node>,
-    root: Digest,
-    remaining_elements: usize,
-    // evaluation results may be memoized internally, but this is not part of the public contract
+    evals: BTreeMap<Digest, Digest>,
 }
 ```
 
+`DeferredEvaluator` contains only graph storage and semantic evaluation. `DeferredState` adds the
+rolling root and execution admission.
+
 ## Vocabulary
 
-- **Registered** means a digest has an entry in `DeferredState.nodes`. Registration can happen
-  through `DeferredState::register`, evaluation storing canonical/helper nodes, `log_statement`
-  storing framework `AND` nodes.
+- **Registered** means a digest has an entry in the evaluator's node store. Registration can happen
+  through `DeferredState::register`, evaluation storing canonical/helper nodes, or statement
+  logging storing framework `AND` nodes.
 - **Evaluated** means a registered input digest has been semantically reduced to a canonical node
   under the installed `PrecompileRegistry`. The canonical node is also stored in `nodes` so it can
   be referenced by downstream nodes.
@@ -35,41 +43,24 @@ pub struct DeferredState {
   Only the root-reachable closure is exported by `into_witness`; registered/evaluated orphans are
   dropped.
 
-## Registered nodes
+## Registration and execution admission
 
-`nodes` is the durable node store.
+`nodes` is the evaluator's durable node store.
 
 - `TRUE_DIGEST` is always present and maps to `Node::TRUE`.
-- `Node::TRUE` costs no budget.
 - Every non-TRUE node is keyed by `node.digest()`.
 - Structural nodes may reference only children already present in `nodes`, except for the implicit
   `TRUE_DIGEST`:
   - `Join` has two child digests.
   - `PairList` has one or more pairs of child digests.
-- Re-registering identical content is idempotent and free.
+- Re-registering identical content reuses storage and successful evaluation results.
 - Reusing an existing digest for different content is rejected as a conflicting node.
 
-Registration stores and shape-checks a node in `nodes`, evaluates it immediately, and stores the
-canonical result. False predicates and other semantic evaluation failures are reported by
-registration.
-
-## One fixed ceiling
-
-`DeferredState::new(registry)` initializes one total budget from the library safety ceiling:
-
-```text
-remaining_elements = MAX_DEFERRED_ELEMENTS
-```
-
-Initialization also installs the registry's `init()` constants, charging them against that same
-budget. `extend_precompiles(precompiles)` merges additional precompiles into an existing state
-without discarding existing nodes, evaluation results, root, or budget accounting.
-
-Every new unique durable node inserted into `nodes` decrements `remaining_elements` by the node's
-field-element footprint using checked subtraction. Duplicate insertion is free, so registering the
-same data node at the exact budget limit succeeds. Evaluation results do not have a separate budget
-and do not double-count canonical payloads; only canonical/helper nodes newly inserted into `nodes`
-are charged.
+`DeferredState::register` shape-checks a guest node, charges every attempt against
+`execution_work` and `execution_limits`, then hashes, stores, and evaluates it. Duplicate and failed
+attempts are charged even when storage or successful evaluation can be reused. Registry bootstrap
+nodes and helpers created internally during semantic evaluation bypass execution admission.
+`extend_precompiles(precompiles)` preserves the existing evaluator, root, and execution work.
 
 The precompile's `decode` result is the framework shape gate:
 
@@ -82,20 +73,17 @@ After shape validation, the precompile's required `validate_payload` method chec
 parameter-dependent number of chunks or pairs. Rejection occurs before the node is inserted or
 charged against the budget. Checks on referenced child values belong in evaluation.
 
-Processor handlers perform a cheap deferred-budget pre-check before allocating or reading a
-memory-backed payload, but exact data/pair-list arity remains precompile-specific semantics.
-
-If insertion exhausts the remaining budget, execution aborts with a budget error. The insertion path
-owns this accounting; processor deferred handlers do not perform post-mutation deferred budget
-checks.
+Memory-backed registration applies the separate hard `MAX_DEFERRED_WIRE_ELEMENTS` ceiling before
+reading a large guest payload. Exact execution admission still occurs once through
+`DeferredState::register`, after payload-dependent work can be classified.
 
 ## Evaluation
 
-Evaluation first requires the input digest to be present in `nodes`; evaluation state alone never
-creates durable DAG membership. A call to `evaluate_digest(digest)` returns the digest of the
-canonical node. This is a semantic operation: it may compute the result or use internal
-memoization, but callers do not observe that distinction. Callers that need canonical node contents
-can compose `evaluate_digest` with `get_node`.
+Evaluation requires the input digest to be present in `nodes`; evaluation state alone never creates
+durable DAG membership. A call to `evaluate_digest(digest)` returns the digest of the canonical
+node. This is a semantic operation: it may compute the result or use internal memoization, but
+callers do not observe that distinction. Callers that need canonical node contents can compose
+`evaluate_digest` with `get_node`.
 
 Framework nodes evaluate as follows:
 
@@ -108,7 +96,8 @@ Node::AND(lhs, rhs) =>
 ```
 
 Precompile-owned nodes are evaluated by `PrecompileRegistry::evaluate`, which dispatches to the
-owning `Precompile` with a `DeferredContext`.
+owning `Precompile` with a `DeferredContext`. Canonical nodes newly produced during evaluation are
+validated before they become registered nodes.
 
 `DeferredContext` gives precompile implementations the same semantic split:
 
@@ -120,37 +109,106 @@ owning `Precompile` with a `DeferredContext`.
 
 ## Root and portable export
 
-`root` starts at `TRUE_DIGEST`. `log_statement(stmt_digest)` evaluates the current root and
-statement, requires both to evaluate to `Node::TRUE`, then appends one framework `AND` node:
+`root` starts at `TRUE_DIGEST`. Each logging attempt charges its plain framework `AND` node before
+hashing the new commitment. `log_statement(stmt_digest)` then evaluates the current root and
+statement, requires both to evaluate to `Node::TRUE`, and advances the root.
+`log_verified_statement` checks the proposed new root before semantic evaluation:
 
 ```text
 next_root = digest(Node::and(previous_root, stmt_digest))
 ```
 
-Logging `TRUE` still records this AND node. `into_witness` consumes the execution state and exports
-only its root-reachable closure in canonical child-first order. Index zero is implicit TRUE; data
-entries carry literal chunks, joins carry two backward child indices, and pair lists carry ordered
-pairs of backward child indices. A nonempty witness opens the digest of its last entry.
+Logging `TRUE` still records this AND node. `into_witness(verification_limits)` consumes the
+execution state and traverses only its unique root-reachable closure in canonical child-first
+order. It accounts every explicit exported node against the verification policy while traversing;
+an execution admitted under a different execution policy can therefore fail export. Index zero is
+implicit TRUE; data entries carry literal chunks, joins carry two backward child indices, and pair
+lists carry ordered pairs of backward child indices. A nonempty witness opens the digest of its
+last entry.
 
-Checked construction and decoding reconstruct commitments, reject duplicate or conflicting entries,
-unsupported framework shapes, empty payloads, forward references, unreachable entries, and
-noncanonical traversal order. They do not interpret precompile operations or evaluate assertions.
-Standalone decoding rejects trailing bytes. Completed execution outputs carry this same portable
-representation, and release the runtime state.
+In-memory construction and standalone decoding enforce canonical transport syntax and allocation
+bounds only; standalone decoding also rejects trailing bytes. They do not hash commitments or
+validate graph topology. Completed execution outputs carry this same portable representation and
+release the runtime state.
+
+## Witness preparation and admission
+
+`PrecompileWitness::prepare(self, registry, verification_limits)` independently reconstructs the
+same per-node verification work while consuming bounded wire entries and moving their payloads into
+checked nodes. It validates registry tags, payload shapes, and backward references, charges each
+explicit node before hashing it, and stops at the first exceeded limit. Explicit bootstrap or
+helper nodes are ordinary witness nodes and are counted. A final traversal checks canonical order
+and reachability without hashing again. Duplicate commitments, orphaned entries, and a
+`TRUE_DIGEST` final root are rejected.
+
+A successful `PreparedWitness` contains the reconstructed commitments and root, the complete
+`PrecompileWork`, and a graph admitted under the supplied per-witness policy. It does not establish
+computational validity or assertion truth. `root()` and `work()` expose the root and admitted work;
+`into_nodes(self)` consumes the witness and yields opaque `PreparedNode` values in canonical
+child-first order. Their `node()` and `digest()` accessors are read-only; construction and fields
+remain private.
+
+`PreparedWitness::evaluate(self)` consumes the prepared value and succeeds only when native semantic
+evaluation resolves its root to `TRUE_DIGEST`. Callers retaining either witness representation must
+clone it explicitly. For example:
+
+```rust,ignore
+let prepared = witness.clone().prepare(registry, &limits)?;
+let root = prepared.root();
+let work = prepared.work().clone();
+prepared.evaluate()?;
+// `witness` remains available because this caller explicitly cloned it.
+```
+
+`PrecompileLimits` and `PrecompileWork` are shared by execution and verification, but their scopes
+are deliberately different. Execution accounts guest attempts over time; verification accounts
+the final unique root-reachable graph. Their totals are not expected to match. Framework nodes
+consume structural elements but no precompile work class. A precompile-owned node requires a
+configured `WorkLimit` for the class it declares. Distinct hash claims charge their declared input
+bytes even when they share a payload. Every declared MSM term is charged, including zero scalars
+and repeated canonical bases, so admission covers either lowering path.
+
+The standard registry exposes `default_execution_precompile_limits()` and
+`default_verification_precompile_limits()`. They use the same private construction today but remain
+separate policies and configuration surfaces. `ExecutionOptions` configures both execution and
+export policy independently; prover and verifier callers configure verification policy with
+`with_verification_precompile_limits`. Default calibration is separate follow-up work: measure
+preparation, import, and proving for realistic hash, arithmetic, curve, mixed, and worst-case MSM
+workloads, with both little sharing and repeated/shared inputs. The defaults are not
+evidence that 128 maximal inputs are practical.
+
+`MAX_DEFERRED_WIRE_ELEMENTS` remains a separate hard transport/allocation ceiling. The proving
+Session accepts only `PreparedWitness` values and never reapplies logical-work admission. Prover
+memory is independently bounded by the batch-wide peak-memory policy.
 
 ## Proof obligations and composition
 
 `Prover::prove` proves the VM first. A `TRUE_DIGEST` root yields `PrecompileStatus::Empty`; any other
 root yields `PrecompileStatus::Deferred` carrying its portable singleton witness. Execution-witness
-construction and decoding require `None` exactly for a TRUE VM root, or one witness with a matching
-root. `Prover::prove_full` proves both stages, using a one-element precompile batch.
+construction and decoding require `None` exactly for a TRUE VM root, or one witness for a non-TRUE
+VM root. Decoding does not reconstruct the witness root; preparation computes it, and proving or
+verification checks it against the execution root. `Prover::prove_full` proves both stages, using
+a one-element precompile batch.
 
-For delegated proving, decode the transported proof and pass its witnesses directly to
-`Prover::prove_precompiles(Vec<PrecompileWitness>)`. The batch must be nonempty. Each input retains its
-own indices, while one private Session shares computations across the batch. Operation support,
-canonical arithmetic values, curve membership, assertion truth, MSM restrictions, and commitments
-are checked during import. A root must have a transcript eval row; a bare external Keccak assertion
-cannot serve as the final root and is rejected without changing its commitment.
+For delegated proving, decode the transported proof and pass its witnesses by value to
+`Prover::prove_precompiles(Vec<PrecompileWitness>)`. Before preparation, reject empty batches, more
+than `MAX_PRECOMPILE_ROOTS` witnesses, and a mismatched expected-root count when roots are supplied.
+The first loop consumes and prepares every input independently, including repetitions, and checks
+its expected execution root where supplied. No proving Session exists until every input passes.
+
+The second loop consumes each `PreparedWitness` into a private `WitnessImporter`. Import evaluates
+operations while recording them into its Session; it does not run native evaluation first. It
+checks canonical arithmetic values, curve membership, operand compatibility, assertion truth,
+supported MSM operands, and recorded commitments. A root must have a transcript eval row; a bare
+external Keccak assertion cannot serve as the final root.
+
+Import consumes the importer and returns it only on success. A semantic failure drops the partial
+Session and all its caches, with no rollback or resumable state. `SessionInputError` retains indexed
+`Preparation` and `RootMismatch` errors and `Invalid`/`Commitment` errors with `WitnessLocation`:
+witness numbers are zero-based and entry numbers are one-based. The importer owns checked node
+definitions and translated Session values keyed by commitment, compares complete definitions before
+reuse, and never borrows raw witnesses or rechecks admission limits. Session construction and
+mutation remain private; there is no public prepared-batch proving entrypoint.
 
 The batch preserves exact root order and multiplicity: `[A, B, A]` proves `AND(AND(A, B), A)`.
 Repeated operands and root occurrences count as separate binding uses, even when their computation
@@ -173,10 +231,11 @@ represent inconsistent artifacts. None of these operations establishes validity.
 ordered aggregate folding, and the precompile STARK. It can validate a precompile artifact against
 an expected outstanding root and returns its authenticated security parameters. `Verifier::verify`
 checks the proof's compatibility declaration and execution lifecycle before it verifies the VM
-STARK. For deferred proofs, it evaluates the witness and requires its recomputed root to match the
-VM-authenticated root. It reuses `verify_precompile` for complete proofs. A successful deferred
-verification returns
-the authenticated VM security parameters and outstanding root. A successful complete verification
+STARK. For deferred proofs, it first authenticates the VM proof and required security level, then
+explicitly clones the borrowed portable witness for consuming preparation. It checks the prepared
+root against the VM-authenticated root before native evaluation. It reuses `verify_precompile` for
+complete proofs. A successful deferred verification returns the authenticated VM security parameters
+and outstanding root. A successful complete verification
 has no outstanding obligation and, when it includes a precompile proof, also returns the PVM
 security parameters.
 
@@ -194,11 +253,24 @@ Each canonical decoder accepts only its supported version and rejects other vers
 decoding their payloads. Previous encodings and conversion between formats are not supported.
 
 Canonical binary decoders enforce fixed hard ceilings before allocating declared collections:
-`MAX_STARK_PROOF_BYTES` per inner STARK, `MAX_PRECOMPILE_ROOTS` per ordered root list, and
-`MAX_DEFERRED_ELEMENTS` for each portable witness. Batch import additionally enforces the root count,
-total input elements, and execution work limits across all inputs, including repeated inputs, so
-computation sharing does not bypass scan limits. These are library safety bounds, not configurable
-protocol, whole-envelope, file, network, or ingestion policy.
+`MAX_STARK_PROOF_BYTES` per inner STARK, `MAX_PRECOMPILE_ROOTS = 128` per ordered root list, and
+`MAX_DEFERRED_WIRE_ELEMENTS` for each portable witness. The same 128-root ceiling applies to proving
+requests and verification of in-memory proofs. Proofs with more than 128 roots are unsupported.
+
+Logical element and operation limits apply independently to every witness, including repetitions.
+Computation sharing does not discount admission. A batch may exceed these totals collectively;
+there is no aggregate element/hash-work preflight. Grouping valid witnesses does not make an input
+invalid. `PrecompileProvingError::BatchTooLarge { witnesses, max }` reports the upfront count failure,
+replacing the former `SessionInputError::Limit` path. Per-witness work-limit errors remain under
+`SessionInputError::Preparation`.
+
+After every input has been evaluated and recorded, the prover estimates the completed Session's
+peak proving memory, including aggregation overhead. It checks this estimate before allocating
+chiplet traces or starting the STARK pipeline. `MemoryBudgetExceeded` and `MemoryEstimateOverflow`
+are outer capacity errors, not failures attributed to a witness. The caller can choose a smaller
+batch or larger memory budget. This check does not bound preparation or Session-building allocations.
+Backend trace-height/estimate overflow remains a capacity failure, separate from witness admission.
+These are library safety and admission bounds, not whole-envelope, file, network, or ingestion policy.
 
 Generic serialization traits are representation formats. Generic Serde
 deserialization is not guaranteed to apply the canonical decoder's early allocation bounds and must
