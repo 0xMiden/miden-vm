@@ -619,7 +619,7 @@ fn test_insert_batch_large_dataset() {
 
 #[test]
 fn test_flat_layout_index_zero_unused_in_instance() {
-    use crate::merkle::Poseidon2;
+    use crate::merkle::Eidos;
 
     let storage = MemoryStorage::new();
     let mut smt = LargeSmt::<_>::new(storage).unwrap();
@@ -642,13 +642,13 @@ fn test_flat_layout_index_zero_unused_in_instance() {
     assert_eq!(in_memory_nodes[0], EMPTY_WORD, "Index 0 should be EMPTY_WORD (unused)");
 
     // The root hash is computed from children at indices 2 and 3
-    let computed_root = Poseidon2::merge(&[in_memory_nodes[2], in_memory_nodes[3]]);
+    let computed_root = Eidos::merge(&[in_memory_nodes[2], in_memory_nodes[3]]);
     assert_eq!(computed_root, smt.root(), "Root should equal hash(children[2], children[3])");
 }
 
 #[test]
 fn test_flat_layout_after_insertion() {
-    use crate::merkle::{EmptySubtreeRoots, Poseidon2};
+    use crate::merkle::{Eidos, EmptySubtreeRoots};
 
     // Insert a value and verify the flat layout is updated correctly
     let storage = MemoryStorage::new();
@@ -674,7 +674,7 @@ fn test_flat_layout_after_insertion() {
     assert!(changed, "At least one of root's children should have changed after insertion");
 
     // Verify root can be computed from children at indices 2 and 3
-    let computed_root = Poseidon2::merge(&[in_memory_nodes[2], in_memory_nodes[3]]);
+    let computed_root = Eidos::merge(&[in_memory_nodes[2], in_memory_nodes[3]]);
     assert_eq!(
         computed_root,
         smt.root(),
@@ -684,7 +684,7 @@ fn test_flat_layout_after_insertion() {
 
 #[test]
 fn test_flat_layout_children_relationship() {
-    use crate::merkle::{EmptySubtreeRoots, NodeIndex, Poseidon2};
+    use crate::merkle::{Eidos, EmptySubtreeRoots, NodeIndex};
 
     // Insert multiple values and verify parent-child relationships in the flat layout
     let storage = MemoryStorage::new();
@@ -707,7 +707,7 @@ fn test_flat_layout_children_relationship() {
     // Verify root separately (depth 0, value 0, memory_idx 1)
     let root_left = in_memory_nodes[2];
     let root_right = in_memory_nodes[3];
-    let root_hash = Poseidon2::merge(&[root_left, root_right]);
+    let root_hash = Eidos::merge(&[root_left, root_right]);
     assert_eq!(root_hash, smt.root(), "Root hash should match computed hash from children");
 
     for &leaf_value in &leaf_indices {
@@ -736,7 +736,7 @@ fn test_flat_layout_children_relationship() {
             );
 
             // Verify the parent-child hash relationship
-            let node_hash = Poseidon2::merge(&[left_child, right_child]);
+            let node_hash = Eidos::merge(&[left_child, right_child]);
             assert_eq!(
                 in_memory_nodes[memory_idx], node_hash,
                 "Stored hash at memory_idx {memory_idx} should match computed hash from children at depth {depth}, value {node_value}"
@@ -821,4 +821,44 @@ fn clone_shares_in_memory_top_until_mutation() {
     assert_ne!(smt.in_memory_nodes().as_ptr(), clone.in_memory_nodes().as_ptr());
     assert_eq!(smt.root(), original_root);
     assert_ne!(clone.root(), original_root);
+}
+
+#[test]
+fn test_with_entries_drops_empty_value_in_shared_leaf() {
+    let leaf_felt = Felt::new_unchecked(42);
+    let k1 = Word::new([ONE, Felt::new_unchecked(0), Felt::new_unchecked(0), leaf_felt]);
+    let k2 = Word::new([
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        leaf_felt,
+    ]);
+    let v2 = Word::new([ONE; 4]);
+
+    let mut control = Smt::new();
+    control.insert(k2, v2).unwrap();
+
+    let large =
+        LargeSmt::with_entries(MemoryStorage::default(), [(k1, EMPTY_WORD), (k2, v2)]).unwrap();
+    assert_eq!(large.root(), control.root());
+}
+
+#[test]
+fn test_with_entries_too_many_leaf_entries() {
+    use crate::merkle::smt::MAX_LEAF_ENTRIES;
+    let leaf_felt = Felt::new_unchecked(7);
+    let entries: Vec<(Word, Word)> = (0..=MAX_LEAF_ENTRIES as u64)
+        .map(|i| {
+            (
+                Word::new([
+                    Felt::new_unchecked(i),
+                    Felt::new_unchecked(0),
+                    Felt::new_unchecked(0),
+                    leaf_felt,
+                ]),
+                Word::new([ONE; 4]),
+            )
+        })
+        .collect();
+    assert!(LargeSmt::with_entries(MemoryStorage::default(), entries).is_err());
 }

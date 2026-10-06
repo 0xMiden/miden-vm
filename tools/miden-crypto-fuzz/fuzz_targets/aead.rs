@@ -8,9 +8,6 @@ use miden_crypto::{
             EncryptedData as EidosEncryptedData, Nonce as EidosNonce,
             SecretKey as EidosSecretKey,
         },
-        aead_poseidon2::{
-            EncryptedData as Poseidon2EncryptedData, SecretKey as Poseidon2SecretKey,
-        },
         xchacha::{EncryptedData as XChaChaEncryptedData, SecretKey as XChaChaSecretKey},
     },
     utils::Deserializable,
@@ -21,20 +18,12 @@ const MAX_STRUCTURED_INPUT_LEN: usize = 4096;
 fuzz_target!(|data: &[u8]| {
     // Malformed encodings must return an error without panicking.
     let _ = XChaChaEncryptedData::read_from_bytes(data);
-    let _ = Poseidon2EncryptedData::read_from_bytes(data);
     let _ = EidosEncryptedData::read_from_bytes(data);
 
     // A fixed key keeps decryption deterministic.
     let key_bytes = [0u8; 32];
     if let Ok(key) = XChaChaSecretKey::read_from_bytes(&key_bytes)
         && let Ok(encrypted_data) = XChaChaEncryptedData::read_from_bytes(data)
-    {
-        let _ = key.decrypt_bytes_with_associated_data(&encrypted_data, &[]);
-        let _ = key.decrypt_elements_with_associated_data(&encrypted_data, &[]);
-    }
-
-    if let Ok(key) = Poseidon2SecretKey::read_from_bytes(&key_bytes)
-        && let Ok(encrypted_data) = Poseidon2EncryptedData::read_from_bytes(data)
     {
         let _ = key.decrypt_bytes_with_associated_data(&encrypted_data, &[]);
         let _ = key.decrypt_elements_with_associated_data(&encrypted_data, &[]);
@@ -48,15 +37,12 @@ fuzz_target!(|data: &[u8]| {
     }
 
     let _ = XChaChaSecretKey::read_from_bytes(data);
-    let _ = Poseidon2SecretKey::read_from_bytes(data);
     let _ = EidosSecretKey::read_from_bytes(data);
 
     let _ = Vec::<XChaChaEncryptedData>::read_from_bytes(data);
-    let _ = Vec::<Poseidon2EncryptedData>::read_from_bytes(data);
     let _ = Vec::<EidosEncryptedData>::read_from_bytes(data);
 
     let _ = Option::<XChaChaEncryptedData>::read_from_bytes(data);
-    let _ = Option::<Poseidon2EncryptedData>::read_from_bytes(data);
     let _ = Option::<EidosEncryptedData>::read_from_bytes(data);
 
     // Exercise successful encryption as well as malformed-input handling. Capping the input keeps

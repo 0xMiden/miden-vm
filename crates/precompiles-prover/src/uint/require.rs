@@ -127,21 +127,6 @@ impl<'a> UintRequire<'a> {
         self.add.record_to_zero(a_ptr, b_ptr, a.bound_ptr, 1);
     }
 
-    /// Record the stored-value **equality certificate** `a = c` — the
-    /// `is_b_zero` add `a + 0 ≡ c (mod p)` over two stored uints (`b` is
-    /// the unstored zero: no `b` lookup, no zero pin). Both values are
-    /// canonical under the shared modulus, so the modular identity is
-    /// exactly value equality; the certificate is value-level, so two
-    /// distinct ptrs binding equal values still close. Panics unless the
-    /// stored values are equal.
-    pub fn value_eq(&mut self, a_ptr: UintPtr, c_ptr: UintPtr) {
-        let (a, _) = self.resolve(a_ptr);
-        let (c, _) = self.resolve(c_ptr);
-        assert_eq!(a.bound_ptr, c.bound_ptr, "eq operands must share a modulus");
-        assert_eq!(a.value, c.value, "a must equal c");
-        self.add.record_eq(a_ptr, c_ptr, a.bound_ptr, 1);
-    }
-
     /// Record the scaled MAC `κₐ·a·b + κ_c·c mod p` over stored uints
     /// sharing a modulus, interning the result. Returns the result's
     /// handle.
@@ -244,7 +229,7 @@ impl UintStores {
 
     /// A [`UintRequire`] view borrowing all three accumulators — the
     /// recording entry point. One borrow of the bundle, so a caller can
-    /// hold it alongside disjoint sibling borrows (eval, Poseidon2).
+    /// hold it alongside disjoint sibling borrows (eval, Eidos).
     pub fn require(&mut self) -> UintRequire<'_> {
         UintRequire::new(&mut self.store, &mut self.add, &mut self.mul)
     }

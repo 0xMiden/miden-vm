@@ -60,14 +60,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
+      - name: Check benchmark runner preflight
+        run: |
+          bash -n scripts/bench_eidos_vs_poseidon2.sh
+          python3 -m unittest discover -s scripts/tests -v
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       # Do not pin taiki-e's moving tool shortcut tags by hash. Pin a released
       # install-action commit and set tool explicitly, or zizmor's
       # impostor-commit audit can flag stale shortcut-tag hashes.
       - name: Install nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -75,6 +80,8 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
+      - name: Check generated precompile MASM
+        run: make check-precompile-masm
       - name: Build tests
         run: make test-build NEXTEST_PROFILE=ci
       - name: test
@@ -114,7 +121,7 @@ jobs:
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -152,7 +159,7 @@ jobs:
       - name: Install rust
         run: rustup update --no-self-update
       - name: Install nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           tool: cargo-nextest
       - name: Check every Eidos x86 backend
@@ -263,7 +270,7 @@ jobs:
         run: make test-wasm-handlers-host
 
   check-constraints:
-    name: check recursive constraint artifacts
+    name: check recursive constraint and PVM ACE artifacts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -278,24 +285,10 @@ jobs:
         run: rustup update --no-self-update
       - name: Check recursive constraint artifacts for drift
         run: make check-constraints
-
-  check-pvm-registry:
-    name: check PVM registry and MASM artifacts
-    runs-on: warp-ubuntu-latest-x64-8x
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Cleanup large tools for build space
-        uses: ./.github/actions/cleanup-runner
-      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
-        with:
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
-      - name: Install rust
-        run: rustup update --no-self-update
-      - name: Check PVM registry and MASM artifacts for drift (full 10! recompute)
-        run: make check-pvm-registry
+      - name: Check PVM ACE constants and MASM artifacts for drift
+        run: make check-pvm-constants
+      - name: Check pinned PVM proof fixture for drift
+        run: make check-pvm-proof-fixture
 
   run-examples:
     name: run masm examples
@@ -331,7 +324,7 @@ jobs:
       # Keep this on a released install-action commit with an explicit tool; see
       # the nextest install above for the zizmor/tool-shortcut rationale.
       - name: Install cargo-hack
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           tool: cargo-hack
       - name: Check all feature combinations

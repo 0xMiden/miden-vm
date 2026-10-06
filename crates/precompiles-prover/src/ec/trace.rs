@@ -18,25 +18,23 @@
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
+use miden_core::{Felt, utils::RowMajorMatrix};
 use miden_precompiles::CurveId;
 
 use super::{
     COL_A_PTR, COL_ACT, COL_B_PTR, COL_BETA_PTR, COL_BOUND_PTR, COL_ECPOINT_MULT, COL_GROUP_PTR,
     COL_IS_CERT, COL_IS_PAI, COL_LAMBDA_PTR, COL_PTR, COL_SBOUND_PTR, COL_U_PTR, COL_W_PTR,
-    COL_X_PTR, COL_Y_PTR, EcPointStoreAir, NUM_MAIN_COLS,
+    COL_X_PTR, COL_Y_PTR, NUM_MAIN_COLS,
     groups::{
         COL_A_PTR as G_COL_A_PTR, COL_B_PTR as G_COL_B_PTR, COL_BETA_PTR as G_COL_BETA_PTR,
         COL_BOUND_PTR as G_COL_BOUND_PTR, COL_LAMBDA_PTR as G_COL_LAMBDA_PTR,
         COL_MULT as G_COL_MULT, COL_PTR as G_COL_PTR, COL_SBOUND_PTR as G_COL_SBOUND_PTR,
-        EcGroupsAir, NUM_MAIN_COLS as G_NUM_MAIN_COLS,
+        NUM_MAIN_COLS as G_NUM_MAIN_COLS,
     },
 };
-use crate::{logup::build_logup_aux_trace, relations::ProvideMult, uint::trace::UintPtr};
+use crate::{relations::ProvideMult, uint::trace::UintPtr};
 
-/// Handle to a stored EC group — minted only by
-/// [`EcStoreRequires::create_group`], so holding one is proof the group
-/// row exists.
+/// Address of an EC group in the point store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EcGroupPtr(u32);
 
@@ -175,6 +173,7 @@ impl Default for EcStoreRequires {
 }
 
 impl EcStoreRequires {
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -197,6 +196,7 @@ impl EcStoreRequires {
     /// the curve `(a, b, bound)`** — a repeat returns the existing group
     /// (its PAI rides [`add_pai`](Self::add_pai)'s own per-group dedup).
     /// Returns the group's handle.
+    #[cfg(test)]
     pub fn create_group(&mut self, a: UintPtr, b: UintPtr, bound: UintPtr) -> EcGroupPtr {
         if let Some(&existing) = self.by_curve.get(&(a, b, bound)) {
             return existing;
@@ -310,7 +310,7 @@ impl EcStoreRequires {
         *self.group_demand.entry(group).or_insert(0) += 1;
     }
 
-    /// Record verifier-side consumes for every fixed group preseeded by [`Self::new`].
+    /// Record verifier-side consumes for every fixed group preseeded by [`Self::default`].
     pub fn require_fixed_groups(&mut self) {
         for curve in CurveId::ALL {
             let group = EcGroupPtr::from_addr(curve.group_ptr());
@@ -378,6 +378,7 @@ impl EcStoreRequires {
 /// Build the standalone group and point-store traces for component tests.
 /// Callers must record all cross-chiplet requirements before consuming the
 /// accumulator here.
+#[cfg(test)]
 pub fn generate_traces(requires: EcStoreRequires) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
     (groups_trace(&requires), points_trace(&requires))
 }
@@ -386,14 +387,13 @@ pub fn generate_traces(requires: EcStoreRequires) -> (RowMajorMatrix<Felt>, RowM
 /// padded to a power-of-two height (min 2). The ungated chain forces
 /// `ptr = row + 1` on every row, so pads carry their ptr too — they are
 /// simply rows whose `mult` (and params) stay zero, touching no bus.
+#[cfg(test)]
 fn groups_trace(requires: &EcStoreRequires) -> RowMajorMatrix<Felt> {
     groups_trace_padded_to(requires, 0)
 }
 
-/// [`groups_trace`] with a height floor — for sharing the group table's
-/// row range with another AIR (see [`super::point_store_groups`]): pads
-/// past the natural height are the table's own padding mechanism
-/// (`ptr = row + 1` continued, `mult` and params zero). `min_height`
+/// Builds the group table at a height of at least `min_height`. Padding rows
+/// continue `ptr = row + 1`, with zero multiplicity and parameters. `min_height`
 /// must be 0 or a power of two so the padded height remains a power of two.
 pub(crate) fn groups_trace_padded_to(
     requires: &EcStoreRequires,
@@ -465,22 +465,4 @@ pub(crate) fn points_trace(requires: &EcStoreRequires) -> RowMajorMatrix<Felt> {
     vals.resize(height * NUM_MAIN_COLS, Felt::ZERO);
 
     RowMajorMatrix::new(vals, NUM_MAIN_COLS)
-}
-
-/// Aux-trace builder for [`EcGroupsAir`] — the aux trace is exactly the
-/// LogUp column.
-pub(crate) fn build_groups_aux(
-    main: &RowMajorMatrix<Felt>,
-    challenges: &[QuadFelt],
-) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    build_logup_aux_trace(&EcGroupsAir, main, challenges)
-}
-
-/// Aux-trace builder for [`EcPointStoreAir`] — the aux trace is exactly
-/// the LogUp column.
-pub(crate) fn build_points_aux(
-    main: &RowMajorMatrix<Felt>,
-    challenges: &[QuadFelt],
-) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    build_logup_aux_trace(&EcPointStoreAir, main, challenges)
 }

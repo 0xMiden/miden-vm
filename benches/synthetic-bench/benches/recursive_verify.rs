@@ -15,8 +15,8 @@
 //! - `RECURSION_BENCH_STACK`: comma-separated stack inputs for the first transaction proof. The
 //!   first value is incremented per proof so the benchmark verifies distinct proofs. Defaults to
 //!   `0,1`.
-//! - `RECURSION_BENCH_HASH`: outer-proof STARK hash function. Inner proofs use Poseidon2, as
-//!   required by the recursive verifier. Defaults to `poseidon2`.
+//! - `RECURSION_BENCH_HASH`: outer-proof STARK hash function. Inner proofs use Eidos, as required
+//!   by the recursive verifier. Defaults to `eidos`.
 //! - `RECURSION_PROOF_COUNTS`: comma-separated proof counts. Defaults to `2,3,4,5,6,7,8`.
 //! - `RECURSION_PVM_COMPARISON`: benchmark `4 MVM + 1 PVM`, `7 MVM`, `5 MVM + 1 PVM`, and `8 MVM`,
 //!   in that order. `RECURSION_PROOF_COUNTS` must be unset. The PVM proof covers the canonical

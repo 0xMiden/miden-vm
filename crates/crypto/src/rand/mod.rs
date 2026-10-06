@@ -4,11 +4,11 @@ use rand::Rng;
 
 use crate::{Felt, Word};
 
-mod coin;
-pub use coin::RandomCoin;
-
 mod eidos_coin;
 pub use eidos_coin::EidosRandomCoin;
+
+/// Eidos-based random coin used by Miden.
+pub type RandomCoin = EidosRandomCoin;
 
 // Test utilities for generating deterministic random data.
 #[cfg(any(test, feature = "testing"))]

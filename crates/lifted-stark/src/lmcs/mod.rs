@@ -113,8 +113,7 @@ pub trait Lmcs: Clone {
     type Commitment: Clone + Eq;
     /// Tree type (prover data), parameterized by stored matrix type.
     type Tree<Stored: Matrix<Self::F>>: LmcsTree<Self::F, Self::Commitment, Stored>;
-    /// Batch witness type returned by [`read_batch_proof`](Self::read_batch_proof) and
-    /// [`read_lifted_batch_proof`](Self::read_lifted_batch_proof).
+    /// Batch witness type returned by the typed and transcript batch proof APIs.
     type BatchProof: BatchProofView<Self::F, Self::Commitment>;
 
     /// Build a tree from domain-ordered matrices with no transcript padding (alignment = 1).
@@ -236,6 +235,32 @@ pub trait Lmcs: Clone {
     {
         let leaf_indices = query_indices.fold_to_depth(tree_log_height)?;
         self.read_batch_proof(widths, &leaf_indices, channel)
+    }
+
+    /// Construct an exact batch proof directly from a committed tree.
+    ///
+    /// `tree` must have been built with this configuration, and `indices` must be
+    /// in the tree's index space. Empty indices produce an empty proof; a depth
+    /// mismatch returns [`LmcsError::InvalidProof`].
+    fn batch_proof<M: Matrix<Self::F>>(
+        &self,
+        tree: &Self::Tree<M>,
+        indices: &TreeIndices,
+    ) -> Result<Self::BatchProof, LmcsError>;
+
+    /// Construct a batch proof for query indices in a larger domain.
+    ///
+    /// The proof is keyed by distinct projected tree indices, as with
+    /// [`Self::read_lifted_batch_proof`]. Returns [`LmcsError::InvalidProof`]
+    /// if the query domain is smaller than the tree.
+    fn lifted_batch_proof<M: Matrix<Self::F>>(
+        &self,
+        tree: &Self::Tree<M>,
+        query_indices: &TreeIndices,
+    ) -> Result<Self::BatchProof, LmcsError> {
+        let tree_depth = miden_lifted_air::log2_strict_u8(tree.height());
+        let leaf_indices = query_indices.fold_to_depth(tree_depth)?;
+        self.batch_proof(tree, &leaf_indices)
     }
 
     /// Get the alignment used by `build_aligned_tree`.

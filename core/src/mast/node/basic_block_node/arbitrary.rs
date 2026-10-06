@@ -92,7 +92,7 @@ const OPS_NO_IMM: &[Operation] = &[
     Operation::Emit,
     Operation::Ext2Mul,
     Operation::Expacc,
-    Operation::HPerm,
+    Operation::Compress,
 ];
 
 /// Operations that cannot fail whatever the stack, advice provider, or memory hold. Their stack

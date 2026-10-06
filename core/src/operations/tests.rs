@@ -41,6 +41,14 @@ fn op_any_opcode_strategy() -> impl Strategy<Value = OpKind> {
     ]
 }
 
+#[test]
+fn compress_wire_opcode_is_pinned() {
+    assert_eq!(opcodes::COMPRESS, 0x50);
+    assert_eq!(Operation::Compress.op_code(), 0x50);
+    assert_eq!(Operation::Compress.to_bytes(), [0x50]);
+    assert_eq!(Operation::read_from_bytes(&[0x50]).unwrap(), Operation::Compress);
+}
+
 proptest! {
     #[test]
     fn control_flow_opcodes_are_rejected(kind in op_any_opcode_strategy()) {

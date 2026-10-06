@@ -774,7 +774,6 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
- "miden-field",
  "thiserror",
 ]
 
@@ -1086,7 +1085,6 @@ dependencies = [
 name = "miden-processor"
 version = "1.0.0"
 dependencies = [
- "hashbrown 0.17.1",
  "itertools",
  "miden-air",
  "miden-core",
@@ -1107,7 +1105,6 @@ version = "1.0.0"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
- "miden-debug-types",
  "miden-mast-package",
  "miden-package-registry",
  "proptest",
@@ -2430,12 +2427,12 @@ dependencies = [
 
 [[package]]
 name = "wasm-encoder"
-version = "0.256.0"
+version = "0.261.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec1492381bfd5ea51c2a99a919b676662559925cb8d7490547ec2e14c1ad3eb1"
+checksum = "2608e8bb6d67fd68f5a8d0eb1363d6e7bcbc1f8ded5a0bd3a1e382462b876b22"
 dependencies = [
  "leb128fmt",
- "wasmparser 0.256.0",
+ "wasmparser 0.261.0",
 ]
 
 [[package]]
@@ -2491,9 +2488,9 @@ dependencies = [
 
 [[package]]
 name = "wasmparser"
-version = "0.256.0"
+version = "0.261.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60bd825ffedc6cba8a642924ba7ae424afbc47811cffbcb7b92031ec24e59b4c"
+checksum = "4f20f20e44f7e8aeb6744823ea9d869ede51e51be4fdaedede2852282e54d2d8"
 dependencies = [
  "bitflags",
  "indexmap",
@@ -2501,9 +2498,9 @@ dependencies = [
 
 [[package]]
 name = "wast"
-version = "256.0.0"
+version = "261.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3ad42723fc9222da007f05812a3249c9a4ee7af79d497fc2a2079579ad7efe6"
+checksum = "776443145731a4062e5b0d392892a2005909b6ab72d9fdc3cad53dd1a714e44a"
 dependencies = [
  "bumpalo",
  "leb128fmt",
@@ -2514,9 +2511,9 @@ dependencies = [
 
 [[package]]
 name = "wat"
-version = "1.256.0"
+version = "1.261.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37cc86c54d8011b3202e265bfebada440733ea3a788ffaf46d395f7d2fdeacfb"
+checksum = "a7b4d1a49ea73a8f3326e74e3a05db667001b16bd1035ed3356fc1a0ed05ca7f"
 dependencies = [
  "wast",
 ]

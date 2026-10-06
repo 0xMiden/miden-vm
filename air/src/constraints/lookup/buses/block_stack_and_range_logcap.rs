@@ -1,29 +1,23 @@
-//! Packs four buses onto one main-trace lookup column:
+//! Packs three bus families onto one main-trace lookup column:
 //!
 //! - Block-stack table: control-flow block nesting.
 //! - u32 and Merkle-depth range-check removes: gated by u32 or Merkle opcodes.
 //! - Log-deferred transcript-state: gated by the log deferred opcode.
-//! - Range-table response: always active and isolated in its own group.
 //!
-//! Soundness of the merge relies on the three buses using distinct `bus_prefix[bus]` bases
+//! Soundness of the merge relies on the bus families using distinct `bus_prefix[bus]` bases
 //! (so their rationals remain linearly independent in the extension field) and on all
-//! opcode-gated interactions being mutually exclusive in the main group.
+//! interactions being mutually exclusive by opcode.
 //!
 //! # Structure
 //!
-//! One [`super::super::LookupBuilder::column`] call with two sibling
-//! [`super::super::LookupColumn::group`] calls:
+//! One [`crate::lookup::LookupBuilder::next_column`] call with one opcode-gated group:
 //!
-//! - **Main group** (opcode-gated, mutually exclusive by opcode):
-//!   - Block-stack table: JOIN/SPLIT/SPAN/DYN, LOOP, DYNCALL, CALL/SYSCALL, two END cases, RESPAN
-//!     batch (7 branches, mutually exclusive via decoder opcode flags).
-//!   - u32 range-check batch: 4 removes gated by `u32_rc_op`.
-//!   - Merkle-depth range-check batch: 2 removes gated by MPVERIFY / MRUPDATE.
-//!   - Log-deferred transcript-state batch: 1 remove + 1 add gated by `log_deferred`.
-//! - **Sibling group** (always on):
-//!   - Range-table response: a single insert with runtime multiplicity `range_m`, gated by `ONE` so
-//!     it fires on every row. Lives in its own group because it overlaps (row-wise) with every
-//!     opcode-gated interaction above and would break the simple-group mutual-exclusion invariant.
+//! - Block-stack table: JOIN/SPLIT/SPAN/DYN, LOOP, DYNCALL, CALL/SYSCALL, two END cases, RESPAN
+//!   batch (7 branches, mutually exclusive via decoder opcode flags).
+//! - u32 range-check batch: 4 removes gated by `u32_rc_op`.
+//! - Merkle range-check batches: depth bounds plus part of the canonical-index witness, gated by
+//!   MPVERIFY / MRUPDATE.
+//! - Log-deferred transcript-state batch: 1 remove + 1 add gated by `log_deferred`.
 //!
 //! # Mutual exclusivity
 //!
@@ -48,34 +42,27 @@
 //!
 //! Main group contribution table:
 //!
-//! | Interaction | Gate deg | Payload | U contrib | V contrib |
-//! |---|---|---|---|---|
-//! | JOIN/SPLIT/SPAN/DYN continuation add | 5 | Continuation, denom 1 | 6 | 5 |
-//! | LOOP continuation add | 5 | Continuation, denom 1 | 6 | 5 |
-//! | DYNCALL caller-frame add | 5 | CallerFrame, denom 1 | 6 | 5 |
-//! | CALL/SYSCALL caller-frame add | 4 | CallerFrame, denom 1 | 5 | 4 |
-//! | END continuation remove | 5 | Continuation, denom 1 | 6 | 5 |
-//! | END caller-frame remove | 5 | CallerFrame, denom 1 | 6 | 5 |
-//! | RESPAN batch (k=2, f=respan deg 4) | — | Continuation | 6 | 5 |
-//! | u32rc batch (k=4, f=u32_rc_op deg 3) | — | Range, denom 1 | **7** | **6** |
-//! | Merkle-depth batch (k=2, f=mpverify + mrupdate deg 5) | — | Range, denom 1 | **7** | **6** |
-//! | logpre batch (k=2, f=log_deferred deg 5) | — | LogDeferred, denom 1 | **7** | **6** |
+//! |Interaction                                  |Gate deg|Payload              |U degree|V degree|
+//! |---------------------------------------------|--------|---------------------|--------|--------|
+//! |JOIN/SPLIT/SPAN/DYN continuation add         |5       |Continuation, denom 1|6       |5       |
+//! |LOOP continuation add                        |5       |Continuation, denom 1|6       |5       |
+//! |DYNCALL caller-frame add                     |5       |CallerFrame, denom 1 |6       |5       |
+//! |CALL/SYSCALL caller-frame add                |4       |CallerFrame, denom 1 |5       |4       |
+//! |END continuation remove                      |5       |Continuation, denom 1|6       |5       |
+//! |END caller-frame remove                      |5       |CallerFrame, denom 1 |6       |5       |
+//! |RESPAN batch (k=2, f=respan deg 4)           |—       |Continuation         |6       |5       |
+//! |u32rc batch (k=4, f=u32_rc_op deg 3)         |—       |Range, denom 1       |**7**   |**6**   |
+//! |MPVERIFY Merkle batch (k=3, f=mpverify deg 5)|—       |Range, denom 1       |**8**   |**7**   |
+//! |MRUPDATE Merkle batch (k=4, f=mrupdate deg 4)|—       |Range, denom 1       |**8**   |**7**   |
+//! |logpre batch (k=2, f=log_deferred deg 5)     |—       |LogDeferred, denom 1 |**7**   |**6**   |
 //!
-//! Main group max: `U_g = 7, V_g = 6`.
-//!
-//! Sibling range-table group: `g.insert(ONE, range_m, RangeMsg)` — gate deg 0, mult deg 1,
-//! denom deg 1. `U_g = 1, V_g = 1`.
-//!
-//! Column fold (cross-mul rule `U_col = ∏ U_gi`, `V_col = Σᵢ V_gi · ∏_{j≠i} U_gj`):
-//!
-//! - `deg(U_col) = 7 + 1 = 8`
-//! - `deg(V_col) = max(6 + 1, 1 + 7) = 8`
-//! - **Transition = `max(1 + 8, 8) = 9`**, 0 headroom.
+//! Column max: `U = 8, V = 7`; transition degree is `max(1 + 8, 7) = 9`.
 
 use core::array;
 
 use miden_core::field::PrimeCharacteristicRing;
 
+use super::super::operations::merkle;
 use crate::{
     constraints::{
         lookup::{
@@ -85,24 +72,16 @@ use crate::{
         utils::BoolNot,
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
-    trace::{
-        chiplets::hasher::MERKLE_DEPTH_RANGE_SCALE,
-        log_deferred::{HELPER_STATE_PREV_RANGE, STACK_STATE_NEW_RANGE},
-    },
+    trace::log_deferred::{HELPER_STATE_PREV_RANGE, STACK_STATE_NEW_RANGE},
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// Main group per-row max is
-/// `max(1, 1, 1, 1, 1, 1, 2 (RESPAN), 4 (u32rc), 2 (Merkle depth), 2 (logpre)) = 4` — the
-/// u32rc 4-remove batch is the dominant branch.
-/// Sibling range-table group always contributes 1 fraction.
-/// Both groups run unconditionally (the main group fires at most one branch per row but
-/// the per-column accumulator allocates the worst-case slot budget), so the per-row max is
-/// the sum: `4 + 1 = 5`.
-pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 5;
+/// `max(1, 1, 1, 1, 1, 1, 2 (RESPAN), 4 (u32rc), 3 (MPVERIFY), 4 (MRUPDATE),
+/// 2 (logpre)) = 4`.
+pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 4;
 
-/// Emit the merged block-stack + u32/Merkle-depth range-check + logpre + range-table column.
+/// Emit the merged block-stack + u32/Merkle-depth range-check + logpre column.
 pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     builder: &mut LB,
     ctx: &MainBusContext<LB>,
@@ -144,16 +123,11 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     let fn_hash = local.system.fn_hash;
     let fn_hash_next = next.system.fn_hash;
 
-    let range_m = local.range.multiplicity;
-    let range_v = local.range.value;
-
     // ---- u32 and Merkle-depth range-check + logpre captures (from range_logcap.rs) ----
 
     let user_helpers = dec.user_op_helpers();
     let f_u32rc = op_flags.u32_rc_op();
-    let f_merkle_depth = op_flags.mpverify() + op_flags.mrupdate();
     let f_log_deferred = op_flags.log_deferred();
-    let merkle_depth = stk.get(4);
 
     // u32rc helpers: first 4 of the 6 user_op_helpers.
     let u32rc_helpers: [LB::Var; 4] = array::from_fn(|i| user_helpers[i]);
@@ -336,33 +310,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         Deg { v: 6, u: 7 }, // (V, U) = (3 + 3, 4 + 3)
                     );
 
-                    // ---- Merkle depth range-check removes (BusId::RangeCheck) ----
-                    //
-                    // Two simultaneous checks enforce `1 <= depth <= MAX_MERKLE_DEPTH`. The first
-                    // constrains `depth` to its canonical 16-bit value. The second checks
-                    // `(depth - 1) * (2^16 / MAX_MERKLE_DEPTH)`, which fits in 16 bits exactly for
-                    // the supported positive depths. The first check is also what prevents the
-                    // scaled expression from wrapping through the field modulus.
-                    //
-                    // MPVERIFY and MRUPDATE are disjoint from every other opcode family in this
-                    // group. Their summed flag has degree 5, so this matches the existing group
-                    // maximum and does not increase the column's degree.
-                    g.batch(
-                        "merkle_depth_range_check",
-                        f_merkle_depth,
-                        move |b| {
-                            let depth: LB::Expr = merkle_depth.into();
-                            let scaled_depth = (depth.clone() - LB::Expr::ONE)
-                                * LB::Expr::from_u16(MERKLE_DEPTH_RANGE_SCALE);
-                            b.remove("merkle_depth", RangeMsg { value: depth }, Deg { v: 5, u: 6 });
-                            b.remove(
-                                "merkle_depth_scaled",
-                                RangeMsg { value: scaled_depth },
-                                Deg { v: 5, u: 6 },
-                            );
-                        },
-                        Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
-                    );
+                    merkle::emit_core_range_checks::<LB, _>(g, ctx);
 
                     // ---- Log-deferred root update (BusId::LogDeferredRoot) ----
                     // Remove the previous deferred root, add the next. Mutually exclusive with all
@@ -387,30 +335,9 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
                     );
                 },
-                Deg { v: 6, u: 7 },
-            );
-
-            // Always-active insertion with multiplicity `range_m`. Lives in its own group
-            // because its gate (`ONE`) makes it fire on every row, overlapping with every
-            // opcode-gated interaction in the main group — which would break the simple-group
-            // mutual-exclusion invariant if they shared a group.
-            col.group(
-                "range_table",
-                |g| {
-                    g.insert(
-                        "range_response",
-                        LB::Expr::ONE,
-                        range_m.into(),
-                        || {
-                            let value = range_v.into();
-                            RangeMsg { value }
-                        },
-                        Deg { v: 1, u: 1 },
-                    );
-                },
-                Deg { v: 1, u: 1 },
+                Deg { v: 7, u: 8 },
             );
         },
-        Deg { v: 8, u: 8 },
+        Deg { v: 7, u: 8 },
     );
 }

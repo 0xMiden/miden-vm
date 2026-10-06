@@ -5,13 +5,12 @@ use seq_macro::seq;
 use {
     super::{Deserializable, DeserializationError, Serializable},
     alloc::boxed::Box,
-    alloc::vec::Vec,
     std::error::Error,
 };
 
 use super::{
-    EmptySubtreeRoots, MerkleError, MerklePath, MerkleStore, NodeIndex, PartialMerkleTree,
-    Poseidon2, Word,
+    Eidos, EmptySubtreeRoots, MerkleError, MerklePath, MerkleStore, NodeIndex, PartialMerkleTree,
+    Word,
 };
 use crate::{
     Felt, ONE, ZERO,
@@ -185,7 +184,7 @@ fn test_empty_roots() {
     let mut root = Word::default();
 
     for depth in 0..255 {
-        root = Poseidon2::merge(&[root; 2]);
+        root = Eidos::merge(&[root; 2]);
         assert!(
             store.get_node(root, NodeIndex::make(0, 0)).is_ok(),
             "The root of the empty tree of depth {depth} must be registered"
@@ -540,9 +539,9 @@ fn wont_open_to_different_depth_root() {
     // Compute the root for a different depth. We cherry-pick this specific depth to prevent a
     // regression to a bug in the past that allowed the user to fetch a node at a depth lower than
     // the inserted path of a Merkle tree.
-    let mut root = Poseidon2::merge(&[a, b]);
+    let mut root = Eidos::merge(&[a, b]);
     for depth in (1..=63).rev() {
-        root = Poseidon2::merge(&[root, empty[depth]]);
+        root = Eidos::merge(&[root, empty[depth]]);
     }
 
     // For this example, the depth of the Merkle tree is 1, as we have only two leaves. Here we
@@ -566,15 +565,15 @@ fn store_path_opens_from_leaf() {
     let g = Word::new([Felt::new_unchecked(7); 4]);
     let h = Word::new([Felt::new_unchecked(8); 4]);
 
-    let i = Poseidon2::merge(&[a, b]);
-    let j = Poseidon2::merge(&[c, d]);
-    let k = Poseidon2::merge(&[e, f]);
-    let l = Poseidon2::merge(&[g, h]);
+    let i = Eidos::merge(&[a, b]);
+    let j = Eidos::merge(&[c, d]);
+    let k = Eidos::merge(&[e, f]);
+    let l = Eidos::merge(&[g, h]);
 
-    let m = Poseidon2::merge(&[i, j]);
-    let n = Poseidon2::merge(&[k, l]);
+    let m = Eidos::merge(&[i, j]);
+    let n = Eidos::merge(&[k, l]);
 
-    let root = Poseidon2::merge(&[m, n]);
+    let root = Eidos::merge(&[m, n]);
 
     let mtree = MerkleTree::new(vec![a, b, c, d, e, f, g, h]).unwrap();
     let store = MerkleStore::from(&mtree);
@@ -963,28 +962,74 @@ fn check_mstore_subtree(store: &MerkleStore, subtree: &MerkleTree) {
 // SERIALIZATION
 // ================================================================================================
 
+const STORE_HEADER: &[u8] = b"MRKSTORE\x01";
+
 #[cfg(feature = "std")]
 #[test]
 fn test_serialization() -> Result<(), Box<dyn Error>> {
     let mtree = MerkleTree::new(VALUES4)?;
     let store = MerkleStore::from(&mtree);
-    let decoded = MerkleStore::read_from_bytes(&store.to_bytes()).expect("deserialization failed");
+    let bytes = store.to_bytes();
+    assert!(bytes.starts_with(STORE_HEADER));
+    let decoded = MerkleStore::read_from_bytes(&bytes).expect("deserialization failed");
     assert_eq!(store, decoded);
     Ok(())
 }
 
 #[test]
+fn deserialize_rejects_unversioned_store() {
+    // Unversioned encoding: a u64 node count followed by parent/left/right words.
+    let parent = Eidos::merge(&[VALUES4[0], VALUES4[1]]);
+    let mut bytes = 1u64.to_bytes();
+    parent.write_into(&mut bytes);
+    VALUES4[0].write_into(&mut bytes);
+    VALUES4[1].write_into(&mut bytes);
+
+    assert!(matches!(
+        MerkleStore::read_from_bytes(&bytes),
+        Err(DeserializationError::InvalidValue(message))
+            if message == "unsupported MerkleStore format: expected a versioned encoding"
+    ));
+}
+
+#[test]
+fn deserialize_checks_version_before_node_count() {
+    for version in [0, 2, u8::MAX] {
+        let mut bytes = STORE_HEADER.to_vec();
+        bytes[8] = version;
+        // No node count follows: the version error must take precedence over UnexpectedEOF.
+        assert!(matches!(
+            MerkleStore::read_from_bytes(&bytes),
+            Err(DeserializationError::InvalidValue(message))
+                if message == format!("unsupported MerkleStore version {version} (expected 1)")
+        ));
+    }
+}
+
+#[test]
+fn deserialize_accepts_empty_versioned_store() {
+    let mut bytes = STORE_HEADER.to_vec();
+    0u64.write_into(&mut bytes);
+    assert_eq!(bytes.len(), MerkleStore::min_serialized_size());
+    assert_eq!(MerkleStore::read_from_bytes(&bytes).unwrap(), MerkleStore::default());
+}
+
+#[test]
 fn deserialize_rejects_oversized_length() {
-    let mut bytes = Vec::new();
+    let mut bytes = STORE_HEADER.to_vec();
     u64::MAX.write_into(&mut bytes);
 
     let result = MerkleStore::read_from_bytes_with_budget(&bytes, bytes.len());
-    assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
+    assert!(matches!(
+        result,
+        Err(DeserializationError::InvalidValue(message))
+            if message == "MerkleStore node count too large"
+    ));
 }
 
 #[test]
 fn deserialize_rejects_truncated_payload() {
-    let mut bytes = Vec::new();
+    let mut bytes = STORE_HEADER.to_vec();
     1u64.write_into(&mut bytes);
 
     let result = MerkleStore::read_from_bytes(&bytes);

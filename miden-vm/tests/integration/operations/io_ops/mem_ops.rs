@@ -1,4 +1,4 @@
-use super::{Felt, TRUNCATE_STACK_PROC, ToElements, apply_permutation, build_op_test, build_test};
+use super::{Felt, TRUNCATE_STACK_PROC, ToElements, build_op_test, build_test, compress_state};
 
 // LOADING SINGLE ELEMENT ONTO THE STACK (MLOAD)
 // ================================================================================================
@@ -255,8 +255,8 @@ fn mem_stream() {
     // Stack [1, 2, 3, 4, 5, 6, 7, 8] with 1 on top
     let inputs = [1, 2, 3, 4, 5, 6, 7, 8];
 
-    // the state is built by replacing the values on the top of the stack with the values in memory
-    // Memory stores words at addresses 0 and 4 which are loaded into the rate portion.
+    // The state is built by replacing the values on the top of the stack with values from memory.
+    // Memory stores words at addresses 0 and 4, which become the two block words.
     // Due to BE storage and load, the values are reversed when loaded back.
     let mut final_stack: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
     final_stack.push(8); // address after reading 2 words (8 elements)
@@ -266,7 +266,7 @@ fn mem_stream() {
 }
 
 #[test]
-fn mem_stream_with_hperm() {
+fn mem_stream_with_compress() {
     let source = format!(
         "
         {TRUNCATE_STACK_PROC}
@@ -279,7 +279,7 @@ fn mem_stream_with_hperm() {
             mem_storew_le
             dropw
             push.12.11.10.9.8.7.6.5.4.3.2.1
-            mem_stream hperm
+            mem_stream compress
 
             exec.truncate_stack
         end"
@@ -290,8 +290,8 @@ fn mem_stream_with_hperm() {
     let mut state: [Felt; 12] =
         [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].to_elements().try_into().unwrap();
 
-    // apply a hash permutation to the state
-    apply_permutation(&mut state);
+    // Apply one Eidos compression to the state.
+    compress_state(&mut state);
 
     // Hasher state order matches stack order
     let mut final_stack = state.iter().map(|&v| v.as_canonical_u64()).collect::<Vec<u64>>();

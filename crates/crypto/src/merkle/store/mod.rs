@@ -4,8 +4,8 @@ use alloc::vec::Vec;
 use core::borrow::Borrow;
 
 use super::{
-    EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, MerkleTree, NodeIndex,
-    PartialMerkleTree, Poseidon2, RootPath, Word,
+    Eidos, EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, MerkleTree,
+    NodeIndex, PartialMerkleTree, RootPath, Word,
     mmr::Mmr,
     smt::{SimpleSmt, Smt},
 };
@@ -28,16 +28,18 @@ pub struct StoreNode {
 
 /// An in-memory data store for Merkelized data.
 ///
-/// This is a in memory data store for Merkle trees, this store allows all the nodes of multiple
-/// trees to live as long as necessary and without duplication, this allows the implementation of
-/// space efficient persistent data structures.
+/// Nodes from multiple Merkle trees are stored without duplication, allowing persistent trees to
+/// share unchanged subtrees.
+///
+/// Serialization uses format version 1; unversioned encodings and other versions are rejected.
+/// Deserialization does not verify parent hashes against their children.
 ///
 /// Example usage:
 ///
 /// ```rust
 /// # use miden_crypto::{ZERO, Felt, Word};
 /// # use miden_crypto::merkle::{NodeIndex, MerkleTree, store::MerkleStore};
-/// # use miden_crypto::hash::poseidon2::Poseidon2;
+/// # use miden_crypto::hash::eidos::Eidos;
 /// # use miden_crypto::field::PrimeCharacteristicRing;
 /// # const fn int_to_node(value: u64) -> Word {
 /// #     Word::new([Felt::new_unchecked(value), ZERO, ZERO, ZERO])
@@ -101,6 +103,10 @@ impl Default for MerkleStore {
 }
 
 impl MerkleStore {
+    /// Identifies the serialized MerkleStore format.
+    const FORMAT_MAGIC: [u8; 8] = *b"MRKSTORE";
+    const FORMAT_VERSION: u8 = 1;
+
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
 
@@ -427,7 +433,7 @@ impl MerkleStore {
             let left: Word = node.left;
             let right: Word = node.right;
 
-            debug_assert_eq!(Poseidon2::merge(&[left, right]), value);
+            debug_assert_eq!(Eidos::merge(&[left, right]), value);
             self.nodes.insert(value, StoreNode { left, right });
 
             node.value
@@ -479,7 +485,7 @@ impl MerkleStore {
     ///
     /// Merges arbitrary values. They may be leaves, nodes, or a mixture of both.
     pub fn merge_roots(&mut self, left_root: Word, right_root: Word) -> Result<Word, MerkleError> {
-        let parent = Poseidon2::merge(&[left_root, right_root]);
+        let parent = Eidos::merge(&[left_root, right_root]);
         self.nodes.insert(parent, StoreNode { left: left_root, right: right_root });
 
         Ok(parent)
@@ -592,6 +598,8 @@ impl Deserializable for StoreNode {
 
 impl Serializable for MerkleStore {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_bytes(&Self::FORMAT_MAGIC);
+        target.write_u8(Self::FORMAT_VERSION);
         target.write_u64(self.nodes.len() as u64);
 
         for (k, v) in self.nodes.iter() {
@@ -603,6 +611,19 @@ impl Serializable for MerkleStore {
 
 impl Deserializable for MerkleStore {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        if source.read_array::<8>()? != Self::FORMAT_MAGIC {
+            return Err(DeserializationError::InvalidValue(
+                "unsupported MerkleStore format: expected a versioned encoding".into(),
+            ));
+        }
+        let version = source.read_u8()?;
+        if version != Self::FORMAT_VERSION {
+            return Err(DeserializationError::InvalidValue(format!(
+                "unsupported MerkleStore version {version} (expected {})",
+                Self::FORMAT_VERSION,
+            )));
+        }
+
         let len_u64 = source.read_u64()?;
         let len = usize::try_from(len_u64).map_err(|_| {
             DeserializationError::InvalidValue("MerkleStore node count too large".into())
@@ -621,9 +642,9 @@ impl Deserializable for MerkleStore {
         Ok(nodes.into_iter().collect())
     }
 
-    /// Minimum serialized size: u64 length prefix (0 entries).
+    /// Minimum serialized size: magic, version, and u64 node count (0 entries).
     fn min_serialized_size() -> usize {
-        8
+        Self::FORMAT_MAGIC.len() + 1 + u64::min_serialized_size()
     }
 }
 

@@ -6,7 +6,8 @@ use miden_air::{
 };
 use miden_core::{
     WORD_SIZE, Word, ZERO,
-    crypto::{hash::Poseidon2, merkle::MerklePath},
+    chiplets::{eidos_compression, hasher::compress_state},
+    crypto::merkle::MerklePath,
     deferred::Digest,
     program::MIN_STACK_DEPTH,
     utils::range,
@@ -69,14 +70,24 @@ impl Processor for FastProcessor {
 
 impl HasherInterface for FastProcessor {
     #[inline(always)]
-    fn permute(
+    fn compress(
         &mut self,
         mut input_state: HasherState,
     ) -> Result<(Felt, HasherState), OperationError> {
-        Poseidon2::apply_permutation(&mut input_state);
+        compress_state(&mut input_state);
 
         // Return a default value for the address, as it is not needed in trace generation.
         Ok((ZERO, input_state))
+    }
+
+    #[inline(always)]
+    fn compress_aead_xof(
+        &mut self,
+        _ctx: ContextId,
+        _clk: RowIndex,
+        state: HasherState,
+    ) -> Result<[Felt; 16], OperationError> {
+        Ok(eidos_compression::compress_raw_xof_lanes(&state).map(Felt::from_u32))
     }
 
     #[inline(always)]

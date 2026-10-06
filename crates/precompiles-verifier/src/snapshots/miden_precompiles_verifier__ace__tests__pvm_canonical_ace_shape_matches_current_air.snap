@@ -1,0 +1,11 @@
+---
+source: crates/precompiles-verifier/src/ace.rs
+assertion_line: 334
+expression: snapshot
+---
+layout_inputs: 1668
+num_vars: 1938
+num_eval_gates: 8628
+stream_len: 9168
+circuit_digest: [2249153247071726614, 4218877445055920725, 1145948690241348325, 6633006404489012018]
+relation_digest: [8672788858776138894, 4949037241898863646, 5828450362038287754, 2959977635137424836]

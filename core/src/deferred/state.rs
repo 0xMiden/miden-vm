@@ -1,9 +1,12 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
+use miden_crypto::hash::eidos::{EidosDomain, EidosFrame};
+
 use super::{
-    DeferredError, Digest, IntegrityError, MAX_DEFERRED_ELEMENTS, Node, NodeType, PrecompileError,
-    PrecompileRegistry, PrecompileWitness, TRUE_DIGEST, Tag,
+    DEFERRED_AND_FRAME, DeferredError, Digest, IntegrityError, MAX_DEFERRED_ELEMENTS, Node,
+    NodeType, PrecompileError, PrecompileRegistry, PrecompileWitness, TRUE_DIGEST,
 };
+use crate::program::domain::DeferredChunksDomain;
 
 /// Deferred graph and eager evaluation state.
 ///
@@ -73,7 +76,7 @@ impl DeferredState {
     /// Adds precompiles to this state without discarding existing nodes, evaluation memos, root, or
     /// budget accounting.
     ///
-    /// Registration is additive only: duplicate precompile ids panic via
+    /// Registration is additive only: duplicate precompile domains panic via
     /// [`PrecompileRegistry::merge`], matching setup-time registry construction behavior. The
     /// state is cloned before mutation so failed precompile initialization leaves `self`
     /// unchanged.
@@ -146,12 +149,13 @@ impl DeferredState {
         self.remaining_elements
     }
 
-    /// Recognizes `tag` under the installed registry and returns its declared outer payload shape.
+    /// Recognizes `frame` under the installed registry and returns its declared outer payload
+    /// shape.
     ///
     /// This does not inspect a payload, validate structural child references, or evaluate
     /// precompile semantics. [`Self::register`] performs those checks for a complete node.
-    pub fn decode(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
-        self.registry.decode_node_type(tag)
+    pub fn decode(&self, frame: EidosFrame) -> Result<NodeType, PrecompileError> {
+        self.registry.decode_node_type(frame)
     }
 
     /// Registers a `PrecompileRegistry`-valid node in the DAG and evaluates it immediately.
@@ -190,7 +194,7 @@ impl DeferredState {
 
     /// Logs a statement only if its constrained transition matches `expected_new_root`.
     ///
-    /// The VM constrains `log_deferred` as a Poseidon2 fold over the previous deferred root and
+    /// The VM constrains `log_deferred` as an Eidos fold over the previous deferred root and
     /// the statement digest. This helper binds the in-memory deferred DAG to that constrained
     /// transition: it validates the expected root before mutating `self`, then applies the same
     /// semantic checks as [`Self::log_statement`].
@@ -226,15 +230,15 @@ impl DeferredState {
         }
 
         self.validate_node_for_insertion(&node)?;
-        let canonical = if node.tag() == Tag::TRUE {
+        let canonical = if node.is_true() {
             Node::TRUE
-        } else if node.tag() == Tag::AND {
+        } else if node.frame() == Some(DEFERRED_AND_FRAME) {
             let (lhs, rhs) = node.payload().as_join()?;
             for child in [lhs, rhs] {
                 self.require_true_eval(child)?;
             }
             Node::TRUE
-        } else if node.tag() == Tag::CHUNKS {
+        } else if node.frame().is_some_and(|frame| frame.domain() == DeferredChunksDomain::TAG) {
             node
         } else {
             let registry = Arc::clone(&self.registry);
@@ -378,10 +382,12 @@ impl<'a> DeferredContext<'a> {
 
 #[cfg(test)]
 mod tests {
+    use miden_crypto::hash::eidos::DomainTag;
+
     use super::*;
     use crate::{
-        Felt, ZERO,
-        deferred::{Payload, Precompile, precompile_id},
+        ZERO,
+        deferred::{Payload, Precompile, precompile::test_precompile_domain_tag},
     };
 
     #[derive(Debug, Clone, Copy)]
@@ -392,17 +398,21 @@ mod tests {
             "rejecting-registration-fixture"
         }
 
-        fn id(&self) -> Felt {
-            precompile_id(self.name())
+        fn domain(&self) -> DomainTag {
+            test_precompile_domain_tag(2)
         }
 
-        fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
-            (args == [ZERO; 3]).then_some(NodeType::Data)
+        fn decode(&self, params: [u32; 3]) -> Option<NodeType> {
+            (params == [0; 3]).then_some(NodeType::Data)
+        }
+
+        fn validate_payload(&self, _params: [u32; 3], payload: &Payload) -> bool {
+            payload.as_value().is_ok()
         }
 
         fn evaluate(
             &self,
-            _args: [Felt; 3],
+            _params: [u32; 3],
             _payload: &Payload,
             _context: &mut DeferredContext<'_>,
         ) -> Result<Node, PrecompileError> {
@@ -423,11 +433,10 @@ mod tests {
     #[test]
     fn register_eagerly_propagates_precompile_evaluation_errors() {
         let precompile = RejectingPrecompile;
-        let tag =
-            Tag::precompile(precompile.id(), [ZERO; 3]).expect("fixture id is precompile-owned");
+        let frame = EidosFrame::new(precompile.domain(), [0; 3]);
         let registry = Arc::new(PrecompileRegistry::new().with_precompile(precompile));
         let mut state = DeferredState::new(registry).unwrap();
-        let node = Node::value(tag, [ZERO; 8]).unwrap();
+        let node = Node::value(frame, [ZERO; 8]).unwrap();
         let digest = node.digest();
 
         let error = state.register(node).unwrap_err();

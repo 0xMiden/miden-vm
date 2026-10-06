@@ -1,14 +1,11 @@
-//! `v_wiring` shared interaction column. It carries `BusId::{AceWiring, HasherPermLinkInput,
-//! HasherPermLinkOutput}` messages and, in the Merkle level-0 batch, `BusId::RangeCheck`
-//! messages.
+//! `v_wiring` shared bus column.
 //!
-//! ACE rows and hasher-controller rows are mutually exclusive in the chiplets selector system, so
-//! their interactions can share one group without multiplying sibling `(V, U)` pairs.
+//! ACE wiring, hasher compression links, and AEAD stream output/request traffic live in one
+//! [`crate::lookup::LookupColumn::group`] call. Their row selectors are mutually exclusive at the
+//! chiplet level, so the simple-group composition is sound and the column degree is the maximum
+//! of the active branch degrees.
 //!
 //! ## ACE wiring (`BusId::AceWiring`)
-//!
-//! ACE wiring is an order-independent global consistency relation over wire identifiers and
-//! values. It does not enforce causal or topological ordering between rows.
 //!
 //! Two READ/EVAL wire interactions gated by the ACE chiplet selector + its per-row block
 //! selector, folded into a single `ace_flag`-gated batch with `sblock`-muxed multiplicities:
@@ -18,60 +15,71 @@
 //! (`is_read`/`is_eval`) to degree 4 (`ace_flag`), bringing the batch's contribution to
 //! `(deg(U_g), deg(V_g)) = (7, 8)`.
 //!
+//! Algebraic equivalence:
+//!
+//! ```text
+//!   is_read * (m_0/wire_0 + m_1/wire_1)
+//! + is_eval * (m_0/wire_0 - 1/wire_1 - 1/wire_2)
+//!   = ace_flag * [ m_0/wire_0
+//!                + ((1 - sblock) * m_1 - sblock)/wire_1
+//!                + (−sblock)/wire_2 ]
+//! ```
+//!
 //! The `wire_2` payload reads the physical columns shared with the READ overlay's `m_1`
-//! slot. Under `sblock = 1` (EVAL) they hold `v_2`, and under `sblock = 0` (READ) the
+//! slot: under `sblock = 1` (EVAL) they hold `v_2`, and under `sblock = 0` (READ) the
 //! `wire_2` interaction is fully suppressed via the `−sblock` multiplicity, so the
 //! interpretation collapses to the READ-mode one.
 //!
-//! ## Hasher perm-link and Merkle range checks
+//! ## Hasher compression link (`BusId::HasherCompressionLink`)
 //!
-//! Binds hasher controller rows to the Poseidon2 permutation AIR. The `perm_id` column ties each
-//! controller input/output row pair to one permutation cycle.
+//! Binds hasher controller rows to the standalone Eidos compression AIR. Without this
+//! bus a malicious prover could pair any controller `(state_in, state_out)` with any compression
+//! execution (or skip the cycle entirely). The controller side emits one interaction per
+//! compression row:
 //!
-//! - Ordinary controller inputs emit one `(perm_id, input_state)` message to
-//!   `BusId::HasherPermLinkInput`.
-//! - Merkle level-0 inputs batch three entries: the same permutation-link message, with logical
-//!   zero capacity, goes to `BusId::HasherPermLinkInput`; two canonical-index range-check messages
-//!   go to `BusId::RangeCheck`.
-//! - Controller output (`controller_active * is_output`, multiplicity `+1`): controller side of a
-//!   `(perm_id, output_state)` message. Routed to `BusId::HasherPermLinkOutput`.
+//! - **Hash compression** (`s_ctrl * !controller_merkle_or_padding`, multiplicity `+1`):
+//!   `[block(8), cv_in(4), cv_out(4)]`.
+//! - **Merkle compression** (`s_ctrl * controller_merkle_or_padding * s0`, multiplicity `+1`):
+//!   `[block(8), fixed_merkle_cv(4), cv_out(4)]`.
 //!
-//! Each controller pair contributes one input message and one output message with the same
-//! `perm_id`. The Poseidon2 AIR removes those messages on rows 0 and 15 of the matching
-//! permutation instance, and its transition constraints tie the row-15 state to the row-0 state.
+//! The Eidos compression AIR emits the matching receive on the final footer row of the
+//! standalone block.
+//!
+//! The compression-link gate has degree `(5, 6)`, below the ACE batch's `(8, 7)`.
+//! Merging into the same group therefore leaves the column's transition at `(8, 7)`.
+//!
+//! AEAD stream output and request interactions are defined in
+//! [`super::super::operations::aead_stream`]. Merkle compression interactions are defined in
+//! [`super::super::operations::merkle`].
 
-use core::array;
+use core::{array, borrow::Borrow};
 
-use miden_core::field::PrimeCharacteristicRing;
-
+use super::super::operations::{aead_stream, merkle};
 use crate::{
     constraints::{
-        chiplets::hasher_control::flags::ControllerFlags,
+        chiplets::columns::PeriodicCols,
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
-            messages::{AceWireMsg, HasherPermLinkMsg, RangeMsg},
+            messages::{AceWireMsg, HasherCompressionLinkMsg},
         },
         utils::BoolNot,
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
-    trace::chiplets::hasher::{RATE_LEN, STATE_WIDTH},
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// Single group hosts both buses. ACE and hasher-controller rows are mutually exclusive, so on any
-/// given row only one of:
-/// - ACE wiring batch on ACE rows: 3 fractions (wire_0 / wire_1 / wire_2 push unconditionally when
-///   the outer `ace_flag` fires).
-/// - Ordinary controller input: 1 perm-link fraction.
-/// - Merkle level-0 controller input: 3 fractions (perm-link plus two canonical-index range
-///   checks).
-/// - Controller output: 1 perm-link fraction.
+/// Single group hosts all wiring buses. Active branches are pairwise mutually
+/// exclusive, so on any given row only one of:
+/// - **ACE wiring batch** on ACE rows: 3 fractions (wire_0 / wire_1 / wire_2 push unconditionally
+///   when the outer `ace_flag` fires).
+/// - **Hasher compression link** on controller rows: 1 fraction.
+/// - **AEAD stream** rows: at most 2 fractions.
 ///
-/// Per-row max is therefore still `max(3, 3, 1) = 3`.
+/// Per-row max is therefore `max(3, 1, 2) = 3`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3;
 
-/// Emit the `v_wiring` shared column: ACE wiring + hasher perm-link.
+/// Emit the `v_wiring` shared column.
 pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     builder: &mut LB,
     ctx: &ChipletBusContext<LB>,
@@ -79,6 +87,8 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     LB: ChipletLookupBuilder,
 {
     let local = ctx.local;
+    let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
+    let aead_phase: [LB::Expr; 8] = periodic.aead_stream.phases.map(Into::into);
 
     // ---- ACE wiring captures (Group 1) ----
     let ace_flag = ctx.chiplet_active.ace.clone();
@@ -108,38 +118,21 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     // `m_1`.
     let sblock: LB::Expr = ace.s_block.into();
 
-    // ---- Perm-link captures ----
-    // Controller-side row-kind flags. `is_input = s0` (deg 1); `is_output = (1-s0)*(1-s1)`
-    // (deg 2). Padding rows (`s0=0, s1=1`) are excluded automatically by both expressions.
+    // Controller rows emit one compression-link tuple except padding rows.
     let ctrl = local.controller();
-    let (is_input, is_output) = ControllerFlags::<LB::Expr>::input_output(ctrl);
+    let merkle_or_padding: LB::Expr = local.controller_merkle_or_padding().into();
+    let f_hash_compression = ctx.chiplet_active.controller.clone() * merkle_or_padding.not();
 
-    let controller_flag = ctx.chiplet_active.controller.clone();
-
-    let f_ctrl_input = controller_flag.clone() * is_input;
-    let f_ctrl_output = controller_flag * is_output;
-
-    let ctrl_state: [LB::Var; STATE_WIDTH] = array::from_fn(|i| ctrl.state[i]);
-    let perm_id = ctrl.perm_id;
-
-    // On input rows, `(s1 OR s2) * is_boundary` selects level 0 of MP, MV, and MU while excluding
-    // sponge inputs. This branch includes two range checks; every other input uses the ordinary
-    // permutation-link interaction below.
-    let hs1: LB::Expr = ctrl.s1.into();
-    let hs2: LB::Expr = ctrl.s2.into();
-    let is_merkle_input = hs1.clone() + hs2.clone() - hs1 * hs2;
-    let is_merkle_level0 = is_merkle_input * LB::Expr::from(ctrl.is_boundary);
-    let f_merkle_level0 = f_ctrl_input.clone() * is_merkle_level0.clone();
-    let f_ctrl_input_ordinary = f_ctrl_input * is_merkle_level0.not();
-    let slack_1 = ctrl.capacity()[1];
-    let slack_2 = ctrl.capacity()[2];
+    let ctrl_state: [LB::Var; 12] = array::from_fn(|i| ctrl.state[i]);
+    let ctrl_row_data: [LB::Var; 4] = ctrl.hash_cv();
 
     builder.next_column(
         |col| {
-            // ACE rows and controller rows are mutually exclusive, so this group has at most one
-            // active batch per row.
+            // ACE, controller, and AEAD stream rows are mutually exclusive. A single group
+            // takes the maximum branch degree rather than multiplying sibling `(V_g, U_g)`
+            // pairs, keeping the transition inside the degree-9 budget.
             col.group(
-                "ace_perm_link",
+                "ace_compression_link",
                 |g| {
                     // ---- ACE wiring (BusId::AceWiring) ----
                     //
@@ -153,7 +146,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                             let m_0: LB::Expr = m_0.into();
                             let m_1: LB::Expr = m_1.into();
                             let wire_1_mult = sblock.not() * m_1 - sblock.clone();
-                            let wire_2_mult = LB::Expr::ZERO - sblock;
+                            let wire_2_mult = -sblock;
 
                             let wire_0 = AceWireMsg {
                                 clk: ace_clk.into(),
@@ -185,68 +178,28 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                         Deg { v: 8, u: 7 }, // (V, U) = (4 + 4, 3 + 4); ace_flag deg 4
                     );
 
-                    // ---- Hasher perm-link (BusId::HasherPermLink{Input,Output}) ----
+                    // ---- Hasher compression link (BusId::HasherCompressionLink) ----
 
-                    // Ordinary inputs send the state stored in the trace. Later Merkle levels have
-                    // zero capacity, while sponge inputs keep their actual capacity.
+                    // Hash compression: +1 / encode(block, cv_in, cv_out).
                     g.add(
-                        "perm_ctrl_input",
-                        f_ctrl_input_ordinary,
+                        "hash_compression",
+                        f_hash_compression,
                         move || {
-                            let state: [LB::Expr; STATE_WIDTH] = ctrl_state.map(Into::into);
-                            HasherPermLinkMsg::Input { perm_id: perm_id.into(), state }
+                            let block = array::from_fn(|i| ctrl_state[i].into());
+                            let cv_in = array::from_fn(|i| ctrl_state[8 + i].into());
+                            let cv_out = array::from_fn(|i| ctrl_row_data[i].into());
+                            HasherCompressionLinkMsg { block, cv_in, cv_out }
                         },
                         Deg { v: 5, u: 6 },
                     );
 
-                    // At Merkle level 0, the trace's capacity columns hold the slack witness. The
-                    // permutation message substitutes zeros for those four positions. The batch
-                    // also range-checks slack limbs 1 and 2. All three entries are active together,
-                    // giving (V, U) = (7, 8).
-                    g.batch(
-                        "perm_ctrl_input_merkle_level0",
-                        f_merkle_level0,
-                        move |b| {
-                            let state: [LB::Expr; STATE_WIDTH] = array::from_fn(|i| {
-                                if i < RATE_LEN {
-                                    ctrl_state[i].into()
-                                } else {
-                                    LB::Expr::ZERO
-                                }
-                            });
-                            b.add(
-                                "perm_ctrl_input",
-                                HasherPermLinkMsg::Input { perm_id: perm_id.into(), state },
-                                Deg { v: 5, u: 6 },
-                            );
-                            b.remove(
-                                "merkle_index_slack_1",
-                                RangeMsg { value: slack_1.into() },
-                                Deg { v: 5, u: 6 },
-                            );
-                            b.remove(
-                                "merkle_index_slack_2",
-                                RangeMsg { value: slack_2.into() },
-                                Deg { v: 5, u: 6 },
-                            );
-                        },
-                        Deg { v: 7, u: 8 },
-                    );
+                    merkle::emit_compression::<LB, _>(g, ctx);
 
-                    // Controller output: +1 / encode(perm_id, ctrl.state) on HasherPermLinkOutput.
-                    g.add(
-                        "perm_ctrl_output",
-                        f_ctrl_output,
-                        move || {
-                            let state: [LB::Expr; STATE_WIDTH] = ctrl_state.map(Into::into);
-                            HasherPermLinkMsg::Output { perm_id: perm_id.into(), state }
-                        },
-                        Deg { v: 3, u: 4 },
-                    );
+                    aead_stream::emit_wiring::<LB, _>(g, ctx, &aead_phase);
                 },
-                Deg { v: 8, u: 8 },
+                Deg { v: 8, u: 7 },
             );
         },
-        Deg { v: 8, u: 8 },
+        Deg { v: 8, u: 7 },
     );
 }

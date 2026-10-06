@@ -555,7 +555,7 @@ fn arb_felt() -> impl Strategy<Value = Felt> {
 
 /// Test that the debug assertion panics on unsorted entries.
 #[test]
-#[should_panic = "is_sorted_by_key"]
+#[cfg_attr(debug_assertions, should_panic = "is_sorted_by_key")]
 fn smt_with_sorted_entries_panics_on_unsorted_entries() {
     // Unsorted keys.
     let smt_leaves_2: [(Word, Word); 2] = [
@@ -591,8 +591,11 @@ fn smt_with_sorted_entries_panics_on_unsorted_entries() {
         ),
     ];
 
-    // Should panic because entries are not sorted.
-    Smt::with_sorted_entries(smt_leaves_2).unwrap();
+    // In debug builds this should panic because entries are not sorted. In release builds,
+    // `debug_assert!` is disabled, so this call is allowed to complete.
+    let _result = Smt::with_sorted_entries(smt_leaves_2);
+    #[cfg(not(debug_assertions))]
+    assert!(_result.is_ok());
 }
 
 #[test]
@@ -719,4 +722,51 @@ proptest! {
         prop_assert_eq!(sequential.node_mutations(), concurrent.node_mutations());
         prop_assert_eq!(sequential.new_pairs.len(), concurrent.new_pairs.len());
     }
+}
+
+/// An empty value in a leaf shared with other keys must be treated as an absent key, as in the
+/// sequential builder.
+#[test]
+fn test_with_entries_drops_empty_value_in_shared_leaf() {
+    let leaf_felt = Felt::new_unchecked(42);
+    let k1: Word = [ONE, ZERO, ZERO, leaf_felt].into();
+    let k2: Word = [Felt::new_unchecked(2), ZERO, ZERO, leaf_felt].into();
+    let entries = [(k1, EMPTY_WORD), (k2, [ONE; 4].into())];
+
+    let control = Smt::with_entries_sequential(entries).unwrap();
+    let smt = Smt::with_entries(entries).unwrap();
+
+    assert_eq!(control.num_entries(), 1);
+    assert_eq!(smt.num_entries(), control.num_entries());
+    assert_eq!(smt.root(), control.root());
+}
+
+#[test]
+fn test_with_entries_all_empty_values_in_shared_leaf() {
+    let leaf_felt = Felt::new_unchecked(42);
+    let k1: Word = [ONE, ZERO, ZERO, leaf_felt].into();
+    let k2: Word = [Felt::new_unchecked(2), ZERO, ZERO, leaf_felt].into();
+    let entries = [(k1, EMPTY_WORD), (k2, EMPTY_WORD)];
+
+    let smt = Smt::with_entries(entries).unwrap();
+    assert_eq!(smt.root(), Smt::default().root());
+}
+
+#[test]
+fn test_read_from_too_many_leaf_entries() {
+    use crate::{
+        merkle::smt::MAX_LEAF_ENTRIES,
+        utils::{ByteWriter, Deserializable},
+    };
+    let leaf_felt = Felt::new_unchecked(7);
+    let n = MAX_LEAF_ENTRIES + 1;
+    let mut bytes = Vec::new();
+    bytes.write_usize(n);
+    for i in 0..n {
+        let key: Word = [Felt::new_unchecked(i as u64), ZERO, ZERO, leaf_felt].into();
+        let value: Word = [ONE; 4].into();
+        bytes.write(key);
+        bytes.write(value);
+    }
+    assert!(Smt::read_from_bytes(&bytes).is_err());
 }
