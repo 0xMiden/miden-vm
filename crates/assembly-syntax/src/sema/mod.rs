@@ -150,11 +150,6 @@ pub fn analyze(
             },
             Form::Constant(constant) => {
                 namespace_allowed = false;
-                if let Some(ty) = &constant.ty {
-                    analyzer.error(SemanticAnalysisError::TypedConstantsNotSupported {
-                        span: ty.span(),
-                    });
-                }
                 analyzer.define_constant(&mut module, constant.with_docs(docs.take()));
             },
             Form::Import(import) => {
