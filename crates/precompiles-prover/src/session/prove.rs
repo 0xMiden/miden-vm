@@ -2,23 +2,28 @@
 
 use alloc::vec::Vec;
 
+#[cfg(test)]
+use miden_core::utils::RowMajorMatrix;
 use miden_core::{
     Felt,
     field::QuadFelt,
     proof::{HashFunction, StarkProof},
-    utils::RowMajorMatrix,
 };
 use miden_lifted_air::{ProverStatement, Statement};
+#[cfg(test)]
+use miden_lifted_stark::check_constraints;
 use miden_lifted_stark::{
-    Preprocessed, ProverInstance, StarkConfig, check_constraints,
+    Preprocessed, ProverInstance, StarkConfig,
     lmcs::Lmcs as LmcsTrait,
     proof::{StarkOutput, StarkProofData},
 };
+#[cfg(test)]
+use miden_precompiles_air::stark_config::test_challenger;
 use miden_precompiles_air::{
     ChipletMultiAir, preprocessed,
     stark_config::{
-        PRECOMPILE_RELATION_DIGEST, blake3_256_config, keccak_config, observe_protocol_params,
-        poseidon2_config, precompile_pcs_params, rpo_config, rpx_config, test_challenger,
+        PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
+        observe_protocol_params, poseidon2_config, precompile_pcs_params, rpo_config, rpx_config,
     },
 };
 use serde::Serialize;
@@ -28,6 +33,7 @@ use super::SessionTraces;
 use crate::ProveError;
 
 impl SessionTraces {
+    #[cfg(test)]
     fn prover_statement(&self) -> ProverStatement<Felt, QuadFelt, ChipletMultiAir> {
         let statement = Statement::new(ChipletMultiAir::new(), self.air_inputs(), Vec::new())
             .expect("chiplet statement inputs are valid");
@@ -35,7 +41,8 @@ impl SessionTraces {
         ProverStatement::new(statement, mains).expect("chiplet trace shapes are valid")
     }
 
-    /// Checks each AIR and the cross chiplet assertion with the fast test configuration.
+    /// Checks each AIR and the cross-chiplet assertion with the lightweight test configuration.
+    #[cfg(test)]
     pub fn check(&self) {
         check_constraints(&self.prover_statement(), test_challenger());
     }
@@ -68,6 +75,11 @@ impl SessionTraces {
             HashFunction::Keccak => {
                 let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
                 let preprocessed = preprocessed::keccak();
+                self.prove_stark_with_config(&config, &preprocessed, hash_fn)
+            },
+            HashFunction::Eidos => {
+                let config = eidos_config(params, PRECOMPILE_RELATION_DIGEST);
+                let preprocessed = preprocessed::eidos();
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
         }

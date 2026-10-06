@@ -322,6 +322,15 @@ where
             let trace = &traces[instance_idx as usize];
             let src = &trace.values;
             let mut values = Vec::with_capacity(src.len() * blowup);
+            #[cfg(feature = "concurrent")]
+            if current_num_threads() == 1 {
+                values.extend_from_slice(src);
+            } else {
+                // Indexed collection preserves row-major order while first-touching pages across
+                // the Rayon pool.
+                src.par_iter().copied().collect_into_vec(&mut values);
+            }
+            #[cfg(not(feature = "concurrent"))]
             values.extend_from_slice(src);
             RowMajorMatrix::new(values, trace.width())
         })
@@ -341,19 +350,24 @@ where
     // Build aux traces in instance order. The output shapes are trusted (see
     // trust contract above); a malformed output is caught downstream by the
     // LDE/commit or by verification.
+    let preprocessed_traces = preprocessed.map(Preprocessed::raw_traces);
     let aux_inputs = statement.aux_inputs();
     let (mut aux_traces_ef, mut all_aux_values): (Vec<_>, Vec<_>) = info_span!("build aux traces")
         .in_scope(|| {
             airs.par_iter()
                 .zip(traces.par_iter())
-                .map(|(air, main)| {
+                .enumerate()
+                .map(|(air_index, (air, main))| {
                     let num_randomness = air.num_randomness();
                     debug_assert!(
                         randomness.len() >= num_randomness,
                         "AIR requested more aux randomness than the shared challenge pool contains",
                     );
-                    let (trace, values) = air.build_aux_trace(
+                    let preprocessed_trace =
+                        preprocessed_traces.and_then(|traces| traces[air_index].as_ref());
+                    let (trace, values) = air.build_aux_trace_with_preprocessed(
                         main,
+                        preprocessed_trace,
                         air_inputs,
                         aux_inputs,
                         &randomness[..num_randomness],

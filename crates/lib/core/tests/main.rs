@@ -125,6 +125,46 @@ fn core_library_exports_crypto_wrappers() {
 }
 
 #[test]
+fn core_library_exports_eidos_streaming_api() {
+    use miden_core_lib::CoreLibrary;
+
+    let core_lib = CoreLibrary::default();
+    let package = core_lib.package();
+    let module = "::miden::core::crypto::hashes::eidos";
+
+    for procedure in [
+        "init_chaining_word",
+        "init_chaining_word_in_domain",
+        "init_with_chaining_word",
+        "init",
+        "init_in_domain",
+        "compress",
+        "digest",
+        "copy_digest",
+        "absorb_double_words_from_memory",
+        "prepare_hasher_state",
+        "hash_elements_with_state",
+        "hash_elements",
+        "hash_elements_in_domain",
+        "pad_and_hash_elements",
+    ] {
+        let path = format!("{module}::{procedure}");
+        assert!(
+            package.get_procedure_root_by_path(path.as_str()).is_some(),
+            "{path} must be exported by corelib",
+        );
+    }
+
+    for procedure in ["init_no_padding", "hash_elements_with_domain"] {
+        let path = format!("{module}::{procedure}");
+        assert!(
+            package.get_procedure_root_by_path(path.as_str()).is_none(),
+            "{path} must not be exported by corelib",
+        );
+    }
+}
+
+#[test]
 fn core_packages_do_not_block_sibling_miden_namespaces() {
     use std::sync::Arc;
 
@@ -156,14 +196,15 @@ fn core_packages_do_not_block_sibling_miden_namespaces() {
 #[test]
 fn precompile_semantic_api_is_available_from_precompiles_crate() {
     let _ = miden_precompiles::registry();
-    let _ = miden_precompiles::UintPrecompile::id();
+    let _ = miden_precompiles::UintPrecompile::domain();
 }
 
 #[test]
-fn core_library_load_registers_precompile_handlers() {
+fn core_library_load_registers_required_handlers() {
     use miden_core_lib::{
         CoreLibrary,
         handlers::{
+            aead_eidos::AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
             ecdsa_k256_keccak::ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,
             precompiles::{
                 keccak256::KECCAK256_DIGEST_EVENT_NAME, uint_field_inv::UINT_FIELD_INV_EVENT_NAME,
@@ -177,6 +218,7 @@ fn core_library_load_registers_precompile_handlers() {
     host.load_library(&core_lib).expect("failed to load core library");
 
     for event in [
+        AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
         KECCAK256_DIGEST_EVENT_NAME,
         UINT_FIELD_INV_EVENT_NAME,
         ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,
@@ -254,7 +296,7 @@ fn verifier_signatures_match_operand_stack_layout() {
 
     let Some(PackageExport::Type(export)) = package
         .manifest
-        .get_export("::miden::core::crypto::dsa::falcon512_poseidon2::StoredCoefficient")
+        .get_export("::miden::core::crypto::dsa::falcon512_eidos::StoredCoefficient")
     else {
         panic!("missing coefficient memory type");
     };

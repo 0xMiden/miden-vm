@@ -1,41 +1,37 @@
-//! Repro for repeated-loop body digest telescoping.
-//!
-//! A forged trace used to be able to execute an attacker-selected first loop iteration while
-//! keeping the final iteration equal to the committed loop body. The block-hash multiset
-//! telescoped through REPEAT rows and only bound the final iteration to the LOOP row's committed
-//! body digest. REPEAT rows no longer add loop-body entries, so this forgery must be rejected.
+//! Prover and verifier regressions for the LOOP body and REPEAT parent constraints.
 
 use alloc::{vec, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
+use std::collections::HashMap;
 
 use miden_air::{
-    CYCLE_INPUT_ROW, CYCLE_OUTPUT_ROW, Poseidon2PermutationCols,
+    ChipletCols, MidenAir,
+    logup::{BlockHashMsg, BusId, MIDEN_MAX_MESSAGE_WIDTH},
+    lookup::{Challenges, LookupMessage, build_lookup_fractions},
     trace::{
-        RowIndex,
-        chiplets::hasher::{CONTROLLER_ROWS_PER_PERMUTATION, HASH_CYCLE_LEN},
+        MIN_TRACE_LEN, RowIndex,
+        chiplets::hasher::{HASH_ABSORB, LINEAR_HASH, PADDING},
+        eidos_compression::{NUM_EIDOS_COMPRESSION_COLS, retag_felt_trace_block_cycle_id},
     },
 };
 use miden_core::{
     Felt,
+    field::QuadFelt,
     mast::{BasicBlockNodeBuilder, LoopNodeBuilder, MastForest},
     operations::{Operation, opcodes},
     program::{Program, StackOutputs},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_crypto::stark::air::BaseAir;
+use miden_processor::{
+    DefaultHost, FastProcessor, StackInputs,
+    trace::{VmTrace, chiplets::build_external_eidos_compression_traces},
+};
 
 use crate::{
     Prover,
     repro_harness::{ReproTrace, core_row_mut},
 };
-
-struct ForgedLoopTrace {
-    repro: ReproTrace,
-    core: RowMajorMatrix<Felt>,
-    chiplets: RowMajorMatrix<Felt>,
-    poseidon2: RowMajorMatrix<Felt>,
-    outputs: StackOutputs,
-}
 
 fn build_loop_program(body_ops: Vec<Operation>) -> Program {
     let mut mast_forest = MastForest::new();
@@ -45,7 +41,14 @@ fn build_loop_program(body_ops: Vec<Operation>) -> Program {
     Program::new(mast_forest.into(), root)
 }
 
-fn execute(program: &Program, stack: &[u64]) -> miden_processor::trace::VmTrace {
+fn build_basic_program(ops: Vec<Operation>) -> Program {
+    let mut mast_forest = MastForest::new();
+    let root = BasicBlockNodeBuilder::new(ops).add_to_forest(&mut mast_forest).unwrap();
+    mast_forest.make_root(root);
+    Program::new(mast_forest.into(), root)
+}
+
+fn execute(program: &Program, stack: &[u64]) -> VmTrace {
     let stack = stack.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(StackInputs::new(&stack).unwrap())
@@ -55,31 +58,132 @@ fn execute(program: &Program, stack: &[u64]) -> miden_processor::trace::VmTrace 
     trace
 }
 
-fn matrix_row(matrix: &RowMajorMatrix<Felt>, row: usize) -> Vec<Felt> {
+fn core_row(matrix: &RowMajorMatrix<Felt>, row: usize) -> &miden_air::CoreCols<Felt> {
     let width = matrix.width();
-    matrix.values[row * width..(row + 1) * width].to_vec()
+    matrix.values[row * width..(row + 1) * width].borrow()
 }
 
-fn set_matrix_row(matrix: &mut RowMajorMatrix<Felt>, row: usize, values: &[Felt]) {
+fn chiplet_row(matrix: &RowMajorMatrix<Felt>, row: usize) -> &ChipletCols<Felt> {
     let width = matrix.width();
-    assert_eq!(values.len(), width);
-    matrix.values[row * width..(row + 1) * width].copy_from_slice(values);
+    matrix.values[row * width..(row + 1) * width].borrow()
 }
 
-fn copy_matrix_row(
+fn copy_chiplet_row(
     dst: &mut RowMajorMatrix<Felt>,
     dst_row: usize,
     src: &RowMajorMatrix<Felt>,
     src_row: usize,
 ) {
-    assert_eq!(dst.width(), src.width());
-    let values = matrix_row(src, src_row);
-    set_matrix_row(dst, dst_row, &values);
+    let width = dst.width();
+    let row: &mut ChipletCols<Felt> =
+        dst.values[dst_row * width..(dst_row + 1) * width].borrow_mut();
+    let clock = row.chip_clk;
+    *row = chiplet_row(src, src_row).clone();
+    row.chip_clk = clock;
 }
 
-fn core_row(matrix: &RowMajorMatrix<Felt>, row: usize) -> &miden_air::CoreCols<Felt> {
-    let width = matrix.width();
-    matrix.values[row * width..(row + 1) * width].borrow()
+/// Rebuilds the compression witnesses for fixtures containing only linear hash requests.
+fn compression_witness(
+    chiplets: &RowMajorMatrix<Felt>,
+) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+    let requests = (0..chiplets.height()).filter_map(|index| {
+        let row = chiplet_row(chiplets, index);
+        if row.chiplet_selectors()[0] == Felt::ZERO {
+            return None;
+        }
+        let controller = row.controller();
+        let selectors = [controller.s0, controller.s1, controller.s2];
+        if selectors == PADDING {
+            return None;
+        }
+        assert!(selectors == LINEAR_HASH || selectors == HASH_ABSORB);
+        Some((controller.state, 1))
+    });
+    let (mut compression, mut and8) = build_external_eidos_compression_traces(requests);
+    if compression.height() < MIN_TRACE_LEN {
+        // The external builder permits one 32-row cycle; VM traces require at least 64 rows.
+        let (mut padding, padding_counts) = build_external_eidos_compression_traces([]);
+        retag_felt_trace_block_cycle_id(
+            padding.values.as_chunks_mut::<NUM_EIDOS_COMPRESSION_COLS>().0,
+            1,
+        );
+        compression.values.extend(padding.values);
+        assert_eq!(compression.height(), MIN_TRACE_LEN);
+        for (count, padding_count) in and8.values.iter_mut().zip(padding_counts.values) {
+            *count += padding_count;
+        }
+    }
+    (compression, and8)
+}
+
+/// Preserves non-hasher byte-table demand while replacing all controller compression requests.
+fn rebuild_hash_witnesses(
+    trace: &VmTrace,
+    chiplets: &RowMajorMatrix<Felt>,
+) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+    let (_, honest_chiplets, honest_compression, mut and8) =
+        trace.main_trace().clone_air_matrices();
+    let (rebuilt, old_counts) = compression_witness(&honest_chiplets);
+    assert!(
+        rebuilt.values == honest_compression.values,
+        "honest compression witness must match"
+    );
+    let (compression, new_counts) = compression_witness(chiplets);
+    for ((count, old), new) in and8.values.iter_mut().zip(old_counts.values).zip(new_counts.values)
+    {
+        assert!(count.as_canonical_u64() >= old.as_canonical_u64());
+        *count = *count - old + new;
+    }
+    (compression, and8)
+}
+
+/// Compares lookup-message multiplicities at a fixed challenge point, including the hash and byte
+/// tables. Public boundary messages stay unchanged in these fixtures.
+fn assert_lookup_delta(
+    trace: &VmTrace,
+    forged: [&RowMajorMatrix<Felt>; 4],
+    expected: &[(BlockHashMsg<Felt>, Felt)],
+) {
+    let challenges = Challenges::<QuadFelt>::new(
+        QuadFelt::new([Felt::from_u32(3), Felt::from_u32(5)]),
+        QuadFelt::new([Felt::from_u32(7), Felt::from_u32(11)]),
+        MIDEN_MAX_MESSAGE_WIDTH,
+        BusId::COUNT,
+    );
+    let (core, chiplets, compression, and8) = trace.main_trace().clone_air_matrices();
+    let mut delta = HashMap::new();
+    for ((air, honest), forged) in [
+        MidenAir::CORE,
+        MidenAir::CHIPLETS,
+        MidenAir::EIDOS_COMPRESSION,
+        MidenAir::AND8_LOOKUP,
+    ]
+    .into_iter()
+    .zip([&core, &chiplets, &compression, &and8])
+    .zip(forged)
+    {
+        let preprocessed = air.preprocessed_trace();
+        let periodic = BaseAir::<Felt>::periodic_columns(&air);
+        for (matrix, sign) in [(honest, -Felt::ONE), (forged, Felt::ONE)] {
+            let fractions =
+                build_lookup_fractions(&air, matrix, preprocessed.as_ref(), &periodic, &challenges);
+            for &(multiplicity, denominator) in fractions.fractions() {
+                *delta.entry(denominator).or_insert(Felt::ZERO) += sign * multiplicity;
+            }
+        }
+    }
+    delta.retain(|_, multiplicity| *multiplicity != Felt::ZERO);
+    let expected: HashMap<_, _> = expected
+        .iter()
+        .map(|(message, multiplicity)| (message.encode(&challenges), *multiplicity))
+        .collect();
+    assert_eq!(delta, expected, "forged witness must change only the expected lookup messages");
+}
+
+fn decode_opcode(op_bits: &[Felt; 7]) -> u8 {
+    op_bits.iter().enumerate().fold(0u8, |opcode, (bit_idx, bit)| {
+        opcode | ((bit.as_canonical_u64() as u8) << bit_idx)
+    })
 }
 
 fn count_loop_body_end_removals(
@@ -94,7 +198,8 @@ fn count_loop_body_end_removals(
             let next_is_not_first_child =
                 [opcodes::END, opcodes::REPEAT, opcodes::RESPAN, opcodes::HALT]
                     .contains(&decode_opcode(&next.decoder.op_bits));
-            local.decoder.op_bits == opcode_bits(opcodes::END)
+            local.decoder.op_bits
+                == core::array::from_fn(|bit_idx| Felt::from_u8((opcodes::END >> bit_idx) & 1))
                 && local.decoder.hasher_state[..4] == child_hash
                 && local.decoder.hasher_state[4] == Felt::ONE
                 && next.decoder.addr == parent
@@ -103,93 +208,7 @@ fn count_loop_body_end_removals(
         .count()
 }
 
-fn decode_opcode(op_bits: &[Felt; 7]) -> u8 {
-    op_bits.iter().enumerate().fold(0u8, |opcode, (bit_idx, bit)| {
-        opcode | ((bit.as_canonical_u64() as u8) << bit_idx)
-    })
-}
-
-fn opcode_bits(opcode: u8) -> [Felt; 7] {
-    core::array::from_fn(|bit_idx| Felt::from_u8((opcode >> bit_idx) & 1))
-}
-
-fn set_controller_perm_id(matrix: &mut RowMajorMatrix<Felt>, row: usize, perm_id: Felt) {
-    let width = matrix.width();
-    // The hasher controller occupies the chiplet row payload after the top-level selector, and
-    // `perm_id` is the final controller column immediately before `chip_clk`.
-    matrix.values[row * width + width - 2] = perm_id;
-}
-
-fn poseidon2_row_mut(
-    matrix: &mut RowMajorMatrix<Felt>,
-    row: usize,
-) -> &mut Poseidon2PermutationCols<Felt> {
-    let width = matrix.width();
-    matrix.values[row * width..(row + 1) * width].borrow_mut()
-}
-
-fn copy_basic_block_controller_rows(
-    chiplets: &mut RowMajorMatrix<Felt>,
-    attacker_chiplets: &RowMajorMatrix<Felt>,
-    block_addr: Felt,
-    perm_id: Felt,
-) {
-    let block_addr = block_addr.as_canonical_u64() as usize;
-    assert!(block_addr > 0, "controller addresses are one-indexed");
-
-    let controller_row = block_addr - 1;
-    for row in controller_row..controller_row + CONTROLLER_ROWS_PER_PERMUTATION {
-        copy_matrix_row(chiplets, row, attacker_chiplets, row);
-        set_controller_perm_id(chiplets, row, perm_id);
-    }
-}
-
-fn copy_poseidon2_cycle(
-    poseidon2: &mut RowMajorMatrix<Felt>,
-    dst_cycle: usize,
-    src: &RowMajorMatrix<Felt>,
-    src_cycle: usize,
-    perm_id: Felt,
-    multiplicity: Felt,
-) {
-    let dst_start = dst_cycle * HASH_CYCLE_LEN;
-    let src_start = src_cycle * HASH_CYCLE_LEN;
-    assert!(
-        dst_start + HASH_CYCLE_LEN <= poseidon2.height(),
-        "destination Poseidon2 cycle must fit in trace"
-    );
-    assert!(
-        src_start + HASH_CYCLE_LEN <= src.height(),
-        "source Poseidon2 cycle must fit in trace"
-    );
-
-    for (row, src_row) in
-        (dst_start..dst_start + HASH_CYCLE_LEN).zip(src_start..src_start + HASH_CYCLE_LEN)
-    {
-        copy_matrix_row(poseidon2, row, src, src_row);
-        poseidon2_row_mut(poseidon2, row).perm_id = perm_id;
-    }
-
-    poseidon2_row_mut(poseidon2, dst_start + CYCLE_INPUT_ROW).witnesses[0] = multiplicity;
-    poseidon2_row_mut(poseidon2, dst_start + CYCLE_OUTPUT_ROW).witnesses[0] = multiplicity;
-}
-
-fn set_poseidon2_cycle_multiplicity(
-    poseidon2: &mut RowMajorMatrix<Felt>,
-    cycle: usize,
-    multiplicity: Felt,
-) {
-    let start = cycle * HASH_CYCLE_LEN;
-    poseidon2_row_mut(poseidon2, start + CYCLE_INPUT_ROW).witnesses[0] = multiplicity;
-    poseidon2_row_mut(poseidon2, start + CYCLE_OUTPUT_ROW).witnesses[0] = multiplicity;
-}
-
-fn set_chip_clk(chiplets: &mut RowMajorMatrix<Felt>, row: usize) {
-    let width = chiplets.width();
-    chiplets.values[row * width + width - 1] = Felt::new_unchecked(row as u64 + 1);
-}
-
-fn find_first_iteration_window(trace: &miden_processor::trace::VmTrace) -> (usize, usize, usize) {
+fn find_first_iteration_window(trace: &VmTrace) -> (usize, usize, usize) {
     let main = trace.main_trace();
     let is =
         |row: usize, opcode: u8| main.get_op_code(RowIndex::from(row)) == Felt::from_u8(opcode);
@@ -203,177 +222,165 @@ fn find_first_iteration_window(trace: &miden_processor::trace::VmTrace) -> (usiz
                 && is(row + 3, opcodes::END)
                 && is(row + 4, opcodes::REPEAT)
         })
-        .expect("victim trace must start with LOOP | SPAN | op | op | END | REPEAT");
-
-    let body_addr = main.addr(RowIndex::from(span + 1));
-    assert_ne!(body_addr, Felt::ZERO, "body address must be nonzero");
+        .expect("fixture must contain LOOP | SPAN | op | op | END | REPEAT");
     (span, span + 4, span + 1)
-}
-
-fn build_forged_early_iteration_trace() -> ForgedLoopTrace {
-    let victim = build_loop_program(vec![Operation::Not, Operation::Not]);
-    let victim_trace = execute(&victim, &[1, 1, 0]);
-
-    // Same row count and stack effect as `NOT NOT`, but a different basic-block digest.
-    let attacker = build_loop_program(vec![Operation::Noop, Operation::Noop]);
-    let attacker_trace = execute(&attacker, &[1, 1, 0]);
-
-    let (first_span, first_repeat, first_body_op) = find_first_iteration_window(&victim_trace);
-    let (attacker_first_span, attacker_first_repeat, attacker_first_body_op) =
-        find_first_iteration_window(&attacker_trace);
-
-    let (mut core, mut chiplets, mut poseidon2) = victim_trace.main_trace().to_air_matrices();
-    let (attacker_core, attacker_chiplets, attacker_poseidon2) =
-        attacker_trace.main_trace().to_air_matrices();
-
-    // Replace only the first iteration and its following REPEAT row:
-    //
-    //   committed: LOOP(B) | SPAN_B | NOT  | NOT  | END_B | REPEAT(B) | ...
-    //   forged:    LOOP(B) | SPAN_X | NOOP | NOOP | END_X | REPEAT(X) | ...
-    //
-    // Before the schema fix, the later iterations stayed honest and the block-hash multiset
-    // balanced as `{B, X, B} == {X, B, B}`. Under the fixed schema, only the original LOOP row
-    // adds body entries, so the forged END_X has no matching add.
-    for (dst, src) in (first_span..=first_repeat).zip(attacker_first_span..=attacker_first_repeat) {
-        copy_matrix_row(&mut core, dst, &attacker_core, src);
-    }
-
-    let body_addr = core_row(&core, first_body_op).decoder.addr;
-    let attacker_body_addr = core_row(&attacker_core, attacker_first_body_op).decoder.addr;
-    assert_eq!(body_addr, attacker_body_addr, "fixture traces must align body addresses");
-    let body_cycle = (body_addr.as_canonical_u64() as usize - 1) / CONTROLLER_ROWS_PER_PERMUTATION;
-    let attacker_perm_id = Felt::new_unchecked(2);
-    let attacker_cycle = attacker_perm_id.as_canonical_u64() as usize;
-    copy_basic_block_controller_rows(
-        &mut chiplets,
-        &attacker_chiplets,
-        body_addr,
-        attacker_perm_id,
-    );
-    set_poseidon2_cycle_multiplicity(&mut poseidon2, body_cycle, Felt::new_unchecked(2));
-    copy_poseidon2_cycle(
-        &mut poseidon2,
-        attacker_cycle,
-        &attacker_poseidon2,
-        body_cycle,
-        attacker_perm_id,
-        Felt::ONE,
-    );
-
-    for row in first_span..=first_repeat {
-        core_row_mut(&mut core, row).system.clk = Felt::new_unchecked(row as u64);
-    }
-
-    ForgedLoopTrace {
-        repro: ReproTrace::new(&victim_trace),
-        core,
-        chiplets,
-        poseidon2,
-        outputs: *victim_trace.stack_outputs(),
-    }
 }
 
 #[test]
 fn honest_repeated_loop_verifies() {
     let program = build_loop_program(vec![Operation::Not, Operation::Not]);
     let trace = execute(&program, &[1, 1, 0]);
-    let main = trace.main_trace();
     assert!(
-        (0..main.core_height())
-            .any(|row| main.get_op_code(RowIndex::from(row)) == Felt::from_u8(opcodes::REPEAT)),
+        (0..trace.main_trace().core_height()).any(|row| {
+            trace.main_trace().get_op_code(RowIndex::from(row)) == Felt::from_u8(opcodes::REPEAT)
+        }),
         "fixture must execute REPEAT"
     );
-
-    let outcome = ReproTrace::new(&trace)
-        .prove_and_verify_current()
-        .expect("honest loop must verify");
-    assert!(outcome.is_complete(), "honest loop proof must verify completely");
+    assert!(ReproTrace::new(&trace).prove_and_verify_current().unwrap().is_complete());
 }
 
 #[test]
 fn forged_early_loop_iteration_body_is_rejected() {
-    let forged = build_forged_early_iteration_trace();
+    let victim = execute(&build_loop_program(vec![Operation::Not, Operation::Not]), &[1, 1, 0]);
+    let attacker = execute(&build_loop_program(vec![Operation::Noop, Operation::Noop]), &[1, 1, 0]);
+    assert_eq!(victim.stack_outputs(), attacker.stack_outputs());
+    let (span, repeat, body_op) = find_first_iteration_window(&victim);
+    assert_eq!((span, repeat, body_op), find_first_iteration_window(&attacker));
+    let (mut core, mut chiplets, ..) = victim.main_trace().clone_air_matrices();
+    let (attacker_core, attacker_chiplets, ..) = attacker.main_trace().clone_air_matrices();
+    let parent = core_row(&core, span).decoder.addr;
+    let committed = core_row(&core, span - 1).decoder.hasher_state[..4].try_into().unwrap();
+    let substituted =
+        core_row(&attacker_core, span - 1).decoder.hasher_state[..4].try_into().unwrap();
+    assert_ne!(committed, substituted);
 
-    let result = forged.repro.prove_and_verify_parts_allowing_lookup_rejection(
-        forged.core,
-        forged.chiplets,
-        forged.poseidon2,
-        forged.outputs,
+    // Keep LOOP's commitment and later iterations intact; replace only the first body and REPEAT.
+    for row in span..=repeat {
+        *core_row_mut(&mut core, row) = core_row(&attacker_core, row).clone();
+    }
+    let controller_row = core_row(&core, body_op).decoder.addr.as_canonical_u64() as usize - 1;
+    copy_chiplet_row(&mut chiplets, controller_row, &attacker_chiplets, controller_row);
+    let (compression, and8) = rebuild_hash_witnesses(&victim, &chiplets);
+    assert_lookup_delta(
+        &victim,
+        [&core, &chiplets, &compression, &and8],
+        &[
+            (BlockHashMsg::LoopBody { parent, child_hash: committed }, Felt::ONE),
+            (BlockHashMsg::LoopBody { parent, child_hash: substituted }, -Felt::ONE),
+        ],
     );
-    assert!(
-        result.is_err(),
-        "the proof pipeline must reject a REPEAT whose body digest was not committed by LOOP: {result:?}"
-    );
+    let error = ReproTrace::new(&victim)
+        .prove_and_verify_parts_allowing_lookup_rejection(
+            core,
+            chiplets,
+            compression,
+            and8,
+            *victim.stack_outputs(),
+        )
+        .expect_err("each iteration must execute the body committed by LOOP");
+    assert!(error.starts_with("prover rejected an unbalanced lookup:"), "{error}");
 }
 
 #[test]
 fn loop_skip_body_with_retired_hasher_rows_is_rejected() {
-    let program = build_loop_program(vec![Operation::Noop, Operation::Noop]);
-    let trace = execute(&program, &[0]);
-    let main = trace.main_trace();
-
-    // Honest fixture:
-    //   LOOP(gc=1) | SPAN | NOOP | NOOP | END_body | END_loop | HALT...
-    //
-    // Forged:
-    //   LOOP(gc=0) | END_loop | HALT | HALT | HALT | HALT | HALT...
-    //
-    // This skips the committed do-while body. Retiring the body's two hasher-controller rows
-    // avoids the incidental lookup imbalance from the earlier dead-end probe, so the current
-    // tree must reject this specifically through the new LOOP -> END decoder constraint.
-    let loop_row = 0usize;
-    let body_op_row = 2usize;
-    let loop_end_row = 5usize;
-    let first_halt_row = 6usize;
-    assert_eq!(main.get_op_code(RowIndex::from(loop_row)), Felt::from_u8(opcodes::LOOP));
-    assert_eq!(main.get_op_code(RowIndex::from(loop_row + 1)), Felt::from_u8(opcodes::SPAN));
-    assert_eq!(main.get_op_code(RowIndex::from(loop_end_row)), Felt::from_u8(opcodes::END));
-    assert_eq!(main.get_op_code(RowIndex::from(first_halt_row)), Felt::from_u8(opcodes::HALT));
-
-    let body_addr = main.addr(RowIndex::from(body_op_row)).as_canonical_u64() as usize;
-    assert!(body_addr > 0, "body hash controller address is one-indexed");
-    let body_controller_row = body_addr - 1;
-    let body_cycle = body_controller_row / CONTROLLER_ROWS_PER_PERMUTATION;
-    let controller_padding_row = body_controller_row + CONTROLLER_ROWS_PER_PERMUTATION;
-
-    let (mut core, mut chiplets, mut poseidon2) = main.to_air_matrices();
+    let trace = execute(&build_loop_program(vec![Operation::Noop, Operation::Noop]), &[0]);
+    let (mut core, mut chiplets, ..) = trace.main_trace().clone_air_matrices();
     let honest_core = core.clone();
     let honest_chiplets = chiplets.clone();
-
-    // Pull the loop's own END up to directly follow LOOP, then pad over the old body rows.
-    copy_matrix_row(&mut core, loop_row + 1, &honest_core, loop_end_row);
-    for row in (loop_row + 2)..=loop_end_row {
-        copy_matrix_row(&mut core, row, &honest_core, first_halt_row);
+    let loop_end = (1..core.height())
+        .find(|&row| {
+            let row = core_row(&core, row);
+            decode_opcode(&row.decoder.op_bits) == opcodes::END
+                && row.decoder.hasher_state[5] == Felt::ONE
+        })
+        .unwrap();
+    assert_eq!(decode_opcode(&core_row(&core, loop_end + 1).decoder.op_bits), opcodes::HALT);
+    let body_controller = core_row(&core, 2).decoder.addr.as_canonical_u64() as usize - 1;
+    for row in 1..=loop_end {
+        let source = if row == 1 { loop_end } else { loop_end + 1 };
+        *core_row_mut(&mut core, row) = core_row(&honest_core, source).clone();
+        core_row_mut(&mut core, row).system.clk = Felt::from_u32(row as u32);
     }
-    for row in (loop_row + 1)..=loop_end_row {
-        core_row_mut(&mut core, row).system.clk = Felt::new_unchecked(row as u64);
+    core_row_mut(&mut core, 0).decoder.group_count = Felt::ZERO;
+
+    let padding = (0..chiplets.height())
+        .find(|&row| {
+            let row = chiplet_row(&chiplets, row);
+            let controller = row.controller();
+            row.chiplet_selectors()[0] == Felt::ONE
+                && [controller.s0, controller.s1, controller.s2] == PADDING
+        })
+        .unwrap();
+    copy_chiplet_row(&mut chiplets, body_controller, &honest_chiplets, padding);
+    let (compression, and8) = rebuild_hash_witnesses(&trace, &chiplets);
+    assert_lookup_delta(&trace, [&core, &chiplets, &compression, &and8], &[]);
+    let error = ReproTrace::new(&trace)
+        .prove_and_verify_parts_allowing_lookup_rejection(
+            core,
+            chiplets,
+            compression,
+            and8,
+            *trace.stack_outputs(),
+        )
+        .expect_err("LOOP must execute its body even when its lookup multiplicity is zero");
+    assert!(error.starts_with("verifier rejected:"), "balanced lookup fixture: {error}");
+}
+
+#[test]
+fn forged_in_span_repeat_with_body_hash_evidence_is_rejected() {
+    // Hash evidence is valid; lookup construction rejects the unauthorized loop-body removal.
+    // This exercises the block-hash relation without isolating the REPEAT predecessor constraint.
+    let victim = execute(&build_basic_program(vec![Operation::Noop]), &[1, 1]);
+    let body_program = build_loop_program(vec![Operation::Not]);
+    let body = execute(&body_program, &[1]);
+    let repeated = execute(&body_program, &[0, 1]);
+    let (mut core, mut chiplets, ..) = victim.main_trace().clone_air_matrices();
+    let (body_core, body_chiplets, ..) = body.main_trace().clone_air_matrices();
+    let (repeat_core, ..) = repeated.main_trace().clone_air_matrices();
+    let victim_end = core_row(&core, 2).clone();
+    assert_eq!(decode_opcode(&victim_end.decoder.op_bits), opcodes::END);
+    assert_eq!(decode_opcode(&core_row(&repeat_core, 4).decoder.op_bits), opcodes::REPEAT);
+
+    // SPAN_A | NOOP | REPEAT | SPAN_X | NOT | END_X | END_A | HALT...
+    *core_row_mut(&mut core, 2) = core_row(&repeat_core, 4).clone();
+    for (dst, src) in [(3, 1), (4, 2), (5, 3)] {
+        *core_row_mut(&mut core, dst) = core_row(&body_core, src).clone();
     }
-
-    // With multiplicity zero, the LOOP row emits no loop-body block-hash entry.
-    core_row_mut(&mut core, loop_row).decoder.group_count = Felt::ZERO;
-
-    // Remove the now-unrequested body hash response by replacing its controller input/output pair
-    // with existing controller-padding rows, preserving the positional chiplet clock.
-    for offset in 0..CONTROLLER_ROWS_PER_PERMUTATION {
-        let dst = body_controller_row + offset;
-        copy_matrix_row(&mut chiplets, dst, &honest_chiplets, controller_padding_row + offset);
-        set_chip_clk(&mut chiplets, dst);
+    *core_row_mut(&mut core, 6) = victim_end;
+    for row in 2..=6 {
+        core_row_mut(&mut core, row).system.clk = Felt::from_u32(row as u32);
     }
-    set_poseidon2_cycle_multiplicity(&mut poseidon2, body_cycle, Felt::ZERO);
+    let final_stack = core_row(&core, 5).stack.clone();
+    for row in 6..core.height() {
+        core_row_mut(&mut core, row).stack = final_stack.clone();
+    }
+    let outputs = StackOutputs::from(final_stack.top);
+    assert_ne!(outputs, *victim.stack_outputs());
 
-    let repro = ReproTrace::new(&trace);
-    let result = repro.prove_and_verify_parts_allowing_lookup_rejection(
-        core,
-        chiplets,
-        poseidon2,
-        *trace.stack_outputs(),
+    let controller_row = core_row(&core, 4).decoder.addr.as_canonical_u64() as usize - 1;
+    copy_chiplet_row(&mut chiplets, controller_row, &body_chiplets, controller_row);
+    let (compression, and8) = rebuild_hash_witnesses(&victim, &chiplets);
+    assert_lookup_delta(
+        &victim,
+        [&core, &chiplets, &compression, &and8],
+        &[(
+            BlockHashMsg::LoopBody {
+                parent: core_row(&core, 6).decoder.addr,
+                child_hash: core_row(&core, 5).decoder.hasher_state[..4].try_into().unwrap(),
+            },
+            -Felt::ONE,
+        )],
     );
-    let error = result.expect_err("D15 must reject a LOOP row that jumps directly to END");
-    assert!(
-        error.starts_with("verifier rejected:"),
-        "the completed skip-body witness should produce a proof and fail verification, not fail \
-         lookup construction or another prover precheck: {error}"
-    );
+    let error = ReproTrace::new(&victim)
+        .prove_and_verify_parts_allowing_lookup_rejection(
+            core,
+            chiplets,
+            compression,
+            and8,
+            outputs,
+        )
+        .expect_err("an injected REPEAT cannot authorize an uncommitted body");
+    assert!(error.starts_with("prover rejected an unbalanced lookup:"), "{error}");
 }
 
 #[test]
@@ -381,13 +388,11 @@ fn loop_body_end_flag_cannot_be_reassigned_to_another_end() {
     let program = build_loop_program(vec![Operation::Not, Operation::Not]);
     let trace = execute(&program, &[1, 1, 0]);
     let main = trace.main_trace();
-
     let (first_span, first_repeat, first_body_op) = find_first_iteration_window(&trace);
     let loop_row = first_span - 1;
     assert_eq!(main.get_op_code(RowIndex::from(loop_row)), Felt::from_u8(opcodes::LOOP));
     assert_eq!(main.get_op_code(RowIndex::from(first_body_op)), Felt::from_u8(opcodes::NOT));
     let body_end_row = first_repeat - 1;
-    assert_eq!(main.get_op_code(RowIndex::from(body_end_row)), Felt::from_u8(opcodes::END));
     assert_eq!(main.is_loop_body_flag(RowIndex::from(body_end_row)), Felt::ONE);
 
     let non_body_end_row = ((first_repeat + 1)..main.core_height())
@@ -400,33 +405,28 @@ fn loop_body_end_flag_cannot_be_reassigned_to_another_end() {
     let loop_parent = main.addr(RowIndex::from(first_span));
     let hasher_state = main.decoder_hasher_state(RowIndex::from(loop_row));
     let loop_body_hash = [hasher_state[0], hasher_state[1], hasher_state[2], hasher_state[3]];
-
-    let (mut core, chiplets, poseidon2) = main.to_air_matrices();
+    let (mut core, chiplets, eidos_compression, and8) = main.clone_air_matrices();
     let honest_body_count = count_loop_body_end_removals(&core, loop_parent, loop_body_hash);
     assert_eq!(
         core_row(&core, loop_row).decoder.group_count,
         Felt::new_unchecked(honest_body_count as u64),
-        "fixture sanity: honest LOOP multiplicity must match same-key body END count"
+        "fixture LOOP multiplicity must match the body END count"
     );
 
-    // `is_loop_body` is not directly copied out of the block-stack message. Its 0/1 value is
-    // nevertheless authenticated by the full block-hash key: child digest + dynamic parent +
-    // entry kind. Moving the flag from a real loop-body END to a different END preserves the
-    // global number of zero/one flags, but changes two lookup keys and must be rejected.
     core_row_mut(&mut core, body_end_row).decoder.hasher_state[4] = Felt::ZERO;
     core_row_mut(&mut core, non_body_end_row).decoder.hasher_state[4] = Felt::ONE;
 
-    let repro = ReproTrace::new(&trace);
-    let result = repro.prove_and_verify_parts_allowing_lookup_rejection(
+    let result = ReproTrace::new(&trace).prove_and_verify_parts_allowing_lookup_rejection(
         core,
         chiplets,
-        poseidon2,
+        eidos_compression,
+        and8,
         *trace.stack_outputs(),
     );
     let error = result.expect_err("reassigning is_loop_body between END rows must be rejected");
     assert!(
         error.starts_with("prover rejected an unbalanced lookup:"),
-        "the forged END flags must fail at lookup construction, not for an incidental reason: {error}"
+        "the forged END flags must fail at lookup construction: {error}"
     );
 }
 
@@ -435,7 +435,6 @@ fn forged_intermediate_repeat_parent_addr_is_rejected() {
     let program = build_loop_program(vec![Operation::Not, Operation::Not]);
     let trace = execute(&program, &[1, 1, 0]);
     let (first_span, first_repeat, _) = find_first_iteration_window(&trace);
-
     let second_span = first_repeat + 1;
     let second_repeat = second_span + (first_repeat - first_span);
 
@@ -443,25 +442,50 @@ fn forged_intermediate_repeat_parent_addr_is_rejected() {
     assert_eq!(main.get_op_code(RowIndex::from(second_span)), Felt::from_u8(opcodes::SPAN));
     assert_eq!(main.get_op_code(RowIndex::from(second_repeat)), Felt::from_u8(opcodes::REPEAT));
 
-    let (mut core, chiplets, poseidon2) = main.to_air_matrices();
+    let (mut core, chiplets, eidos_compression, and8) = main.clone_air_matrices();
     let forged_parent = Felt::new_unchecked(99);
-
-    // The second iteration is followed by another REPEAT, so this mutates both endpoints of that
-    // iteration's parent edge. Before REPEAT parent-address continuity and LOOP-side body
-    // multiplicities, this shape could keep the local add/remove edges balanced. The proof
-    // pipeline must reject it.
     core_row_mut(&mut core, second_span).decoder.addr = forged_parent;
     core_row_mut(&mut core, second_repeat).decoder.addr = forged_parent;
 
-    let repro = ReproTrace::new(&trace);
-    let result = repro.prove_and_verify_parts_allowing_lookup_rejection(
+    let result = ReproTrace::new(&trace).prove_and_verify_parts_allowing_lookup_rejection(
         core,
         chiplets,
-        poseidon2,
+        eidos_compression,
+        and8,
         *trace.stack_outputs(),
+    );
+    assert!(result.is_err(), "REPEAT must preserve its parent address: {result:?}");
+}
+
+#[test]
+fn direct_repeat_without_body_hash_evidence_is_rejected() {
+    let victim = build_basic_program(vec![Operation::Noop]);
+    let victim_trace = execute(&victim, &[1, 1]);
+    let loop_program = build_loop_program(vec![Operation::Not]);
+    let loop_trace = execute(&loop_program, &[0, 1]);
+    let (mut core, chiplets, eidos_compression, and8) =
+        victim_trace.main_trace().clone_air_matrices();
+    let (repeat_core, ..) = loop_trace.main_trace().clone_air_matrices();
+    assert_eq!(decode_opcode(&core_row(&repeat_core, 4).decoder.op_bits), opcodes::REPEAT);
+
+    let repeat = core_row(&repeat_core, 4).clone();
+    *core_row_mut(&mut core, 2) = repeat;
+    core_row_mut(&mut core, 2).system.clk = Felt::from_u32(2);
+    let final_stack = core_row(&core, 2).stack.clone();
+    for row in 3..core.height() {
+        core_row_mut(&mut core, row).stack = final_stack.clone();
+    }
+    let forged_outputs = StackOutputs::from(final_stack.top);
+
+    let result = ReproTrace::new(&victim_trace).prove_and_verify_parts_allowing_lookup_rejection(
+        core,
+        chiplets,
+        eidos_compression,
+        and8,
+        forged_outputs,
     );
     assert!(
         result.is_err(),
-        "the proof pipeline must reject a REPEAT row whose successor changes parent address: {result:?}"
+        "REPEAT without body hash evidence must be rejected: {result:?}"
     );
 }

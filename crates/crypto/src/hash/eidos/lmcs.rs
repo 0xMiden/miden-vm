@@ -226,7 +226,9 @@ mod tests {
     use super::*;
     use crate::{
         Word,
-        hash::eidos::{Eidos, compression::compress_felt_block_for_test},
+        hash::eidos::{
+            Eidos, compression::compress_felt_block_for_test, pack_digest_lanes, unpack_digest_lane,
+        },
         stark::{
             hasher::{Alignable, StatefulHasher},
             lmcs::{Lmcs, LmcsTree},
@@ -516,13 +518,5 @@ mod tests {
         Eidos::merge(&[left, right])
             .into_elements()
             .map(|value| value.as_canonical_u64())
-    }
-
-    fn pack_digest_lanes(lanes: &[Digest; PACKED_LANES]) -> PackedDigest {
-        array::from_fn(|word| array::from_fn(|lane| lanes[lane][word]))
-    }
-
-    fn unpack_digest_lane(digest: &PackedDigest, lane: usize) -> Digest {
-        array::from_fn(|word| digest[word][lane])
     }
 }

@@ -82,7 +82,8 @@
 //! - [`crate::mast::SparseMastForest::read_from_bytes`]: separate trusted sparse replay payloads
 //!   for serialized trace-generation inputs. Sparse payloads preserve the sparse node and digest
 //!   maps produced by tracing; they do not share the dense `MastForest` wire format and are not an
-//!   untrusted validation boundary.
+//!   untrusted validation boundary. They are version-local and must not be persisted across
+//!   releases.
 //! - [`crate::mast::UntrustedMastForest::read_from_bytes`] /
 //!   [`crate::mast::UntrustedMastForest::read_from_bytes_with_options`]: untrusted parsing plus
 //!   later validation before use.
@@ -200,20 +201,21 @@ const FLAGS_RESERVED_MASK: u8 = 0xfd;
 /// - [0, 0, 3]: Added HASHLESS flag (bit 1). Trusted deserialization rejects HASHLESS. Split
 ///   fixed-width node entries from digest storage. External digests moved to a dedicated section.
 ///   Hashless serialization omits the general node-hash section entirely. Removed the unused
-///   metadata-count field from the wire header. Before any public release on this branch, the same
-///   unreleased wire version also grew explicit internal/external node counts in the header.
+///   metadata-count field from the wire header and added explicit internal/external node counts.
 /// - [0, 0, 4]: Removed the legacy inline metadata wire slots entirely. All assembly op metadata
 ///   and debug variable metadata are now stored in the DebugInfo section as separate indexed
-///   records. MAST nodes are metadata-free identifiers. Before any public release on this branch,
-///   the same unreleased wire version also reserved bit 0 and stopped using it as a forest-level
+///   records. MAST nodes are metadata-free identifiers. Reserved bit 0 and removed the forest-level
 ///   debug-presence flag.
+/// - [0, 0, 5]: Replaced opcode 0x50's HPERM semantics with COMPRESS. Rejecting version 4 prevents
+///   an old serialized node from retaining its stored digest while being executed with the new
+///   operation semantics on load paths that do not recompute node digests.
 ///
 /// Legacy wire versions (pre-#3192 decorator terminology):
 ///   [0,0,1] stored metadata as serialized decorator variants in CSR per-node slots.
 ///   [0,0,2] removed AssemblyOp from the decorator enum and stored them separately in DebugInfo.
 ///   [0,0,3] removed the unused decorator-count wire field.
 ///   [0,0,4] eliminated the decorator wire slots entirely.
-const VERSION: [u8; 3] = [0, 0, 4];
+const VERSION: [u8; 3] = [0, 0, 5];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================

@@ -9,7 +9,7 @@ use crate::math::uint::{Limbs, UintSpec};
 pub struct U256;
 
 impl U256 {
-    /// Stable local domain selector carried in uint precompile tags.
+    /// Stable local identifier used for uint-domain metadata.
     pub const ID: Felt = ZERO;
 
     /// Encoded modulus sentinel for arithmetic modulo `2^256`.

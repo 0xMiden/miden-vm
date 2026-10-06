@@ -1,8 +1,11 @@
 use alloc::{string::String, vec::Vec};
 use core::{fmt, slice};
 
-use super::{InnerNodeInfo, MerkleError, MerklePath, NodeIndex, Poseidon2, Word};
-use crate::utils::{assume_init_vec, uninit_vector, word_to_hex};
+use super::{Eidos, InnerNodeInfo, MerkleError, MerklePath, NodeIndex, Word};
+use crate::{
+    hash::eidos::{PACKED_LANES, PackedDigest, pack_digest_lanes, unpack_digest_lane},
+    utils::{assume_init_vec, uninit_vector, word_to_hex},
+};
 
 // MERKLE TREE
 // ================================================================================================
@@ -44,13 +47,35 @@ impl MerkleTree {
             node.write(*leaf);
         });
 
-        // calculate all internal tree nodes
-        for i in (1..n).rev() {
-            // SAFETY: We fill leaves first, then iterate from the bottom up. At this point,
-            // nodes[2 * i] and nodes[2 * i + 1] have already been written.
-            let left = unsafe { nodes[2 * i].assume_init_read() };
-            let right = unsafe { nodes[2 * i + 1].assume_init_read() };
-            nodes[i].write(Poseidon2::merge(&[left, right]));
+        // Calculate each level after its children. Parents within a level are independent.
+        let mut level_start = n / 2;
+        loop {
+            let level_end = 2 * level_start;
+            let mut i = level_start;
+            while i + PACKED_LANES <= level_end {
+                let children: [PackedDigest; 2] = core::array::from_fn(|child| {
+                    let lanes = core::array::from_fn(|lane| {
+                        // SAFETY: the entire child level was filled before this level began.
+                        unsafe { nodes[2 * (i + lane) + child].assume_init_read().into_elements() }
+                    });
+                    pack_digest_lanes(&lanes)
+                });
+                let parents = Eidos::merge_packed(&children);
+                for lane in 0..PACKED_LANES {
+                    nodes[i + lane].write(Word::new(unpack_digest_lane(&parents, lane)));
+                }
+                i += PACKED_LANES;
+            }
+            for parent in i..level_end {
+                // SAFETY: the entire child level was filled before this level began.
+                let left = unsafe { nodes[2 * parent].assume_init_read() };
+                let right = unsafe { nodes[2 * parent + 1].assume_init_read() };
+                nodes[parent].write(Eidos::merge(&[left, right]));
+            }
+            if level_start == 1 {
+                break;
+            }
+            level_start /= 2;
         }
 
         // SAFETY: all elements were written above.
@@ -166,7 +191,7 @@ impl MerkleTree {
         for _ in 0..index.depth() {
             index.move_up();
             let pos = index.to_scalar_index()? as usize;
-            let value = Poseidon2::merge(&pairs[pos]);
+            let value = Eidos::merge(&pairs[pos]);
             self.nodes[pos] = value;
         }
 
@@ -313,6 +338,27 @@ mod tests {
     }
 
     #[test]
+    fn construction_matches_scalar_merges_at_packed_width_boundaries() {
+        // Every node matters: a packed lane mix-up can leave the root correct for repeated leaves.
+        for leaf_count in [2, 16, 32, 64, 128, 256] {
+            let leaves: Vec<_> = (0..leaf_count)
+                .map(|row| {
+                    Word::new(core::array::from_fn(|column| {
+                        Felt::new_unchecked((4 * row + column + 1) as u64)
+                    }))
+                })
+                .collect();
+            let mut expected = vec![Word::default(); 2 * leaf_count];
+            expected[leaf_count..].copy_from_slice(&leaves);
+            for parent in (1..leaf_count).rev() {
+                expected[parent] = Eidos::merge(&[expected[2 * parent], expected[2 * parent + 1]]);
+            }
+
+            assert_eq!(MerkleTree::new(leaves).unwrap().nodes, expected);
+        }
+    }
+
+    #[test]
     fn get_leaf() {
         let tree = MerkleTree::new(LEAVES4).unwrap();
 
@@ -424,9 +470,9 @@ mod tests {
     // --------------------------------------------------------------------------------------------
 
     fn compute_internal_nodes() -> (Word, Word, Word) {
-        let node2 = Poseidon2::hash_elements(&[*LEAVES4[0], *LEAVES4[1]].concat());
-        let node3 = Poseidon2::hash_elements(&[*LEAVES4[2], *LEAVES4[3]].concat());
-        let root = Poseidon2::merge(&[node2, node3]);
+        let node2 = Eidos::merge(&[LEAVES4[0], LEAVES4[1]]);
+        let node3 = Eidos::merge(&[LEAVES4[2], LEAVES4[3]]);
+        let root = Eidos::merge(&[node2, node3]);
 
         (root, node2, node3)
     }

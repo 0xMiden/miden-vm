@@ -8,10 +8,10 @@ use miden_core::{
     },
 };
 use miden_crypto::{
-    hash::poseidon2::Poseidon2Permutation256,
+    hash::eidos::EidosChallenger,
     stark::{
         StarkConfig,
-        challenger::{CanObserve, DuplexChallenger, FieldChallenger},
+        challenger::{CanObserve, FieldChallenger, GrindingChallenger},
     },
 };
 use miden_lifted_stark::testing::{
@@ -23,7 +23,7 @@ use rand_chacha::ChaCha20Rng;
 
 use crate::helpers::{masm_push_word, read_memory_felt, stark_constant};
 
-type Challenger = DuplexChallenger<Felt, Poseidon2Permutation256, 12, 8>;
+type Challenger = EidosChallenger;
 
 const SAMPLES_PTR: u32 = 100_000;
 
@@ -43,64 +43,46 @@ fn random_word(rng: &mut ChaCha20Rng) -> [Felt; 4] {
     core::array::from_fn(|_| random_felt(rng))
 }
 
-/// A challenger holding `state` with `output_len` rate elements available for sampling, matching
-/// a MASM random coin with the same state and output length.
-fn challenger_with(state: [Felt; 12], output_len: usize) -> Challenger {
-    let mut challenger = Challenger::new(Poseidon2Permutation256);
-    challenger.sponge_state = state;
-    challenger.output_buffer = state[..output_len].to_vec();
+/// Initializes the challenger and consumes a prefix of its first output word.
+fn challenger_with(state: [Felt; 4], consumed: usize) -> Challenger {
+    let mut challenger = Challenger::new(Word::from(state));
+    for _ in 0..consumed {
+        challenger.sample_felt();
+    }
     challenger
 }
 
-/// MASM that writes `state` into the random coin with an empty input buffer and `output_len`
-/// rate elements available for sampling.
-fn store_random_coin(state: &[Felt; 12], output_len: usize) -> String {
-    let word = |i: usize| {
-        masm_push_word(&Word::from([state[i], state[i + 1], state[i + 2], state[i + 3]]))
-    };
+/// Initializes the MASM challenger and consumes the same output prefix as `challenger_with`.
+fn store_random_coin(state: &[Felt; 4], consumed: usize) -> String {
     format!(
         "
-        {r1} mem_storew_le.RANDOM_COIN_RATE_1_PTR dropw
-        {r2} mem_storew_le.RANDOM_COIN_RATE_2_PTR dropw
-        {c} mem_storew_le.RANDOM_COIN_CAPACITY_PTR dropw
-        push.0 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
-        push.{output_len} mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
+        {cv} mem_storew_le.RANDOM_COIN_CV_PTR dropw
+        exec.random_coin::eidos_clear_buffer
+        push.0 mem_store.RANDOM_COIN_COUNTER_PTR
+        push.0 mem_store.RANDOM_COIN_OUTPUT_LENGTH_PTR
+        {draws}
         ",
-        r1 = word(0),
-        r2 = word(4),
-        c = word(8),
+        cv = masm_push_word(&Word::from(*state)),
+        draws = "exec.random_coin::sample_felt drop\n".repeat(consumed),
     )
 }
 
 const RANDOM_COIN_IMPORTS: &str = "
     use miden::core::stark::random_coin
     use {
-        RANDOM_COIN_CAPACITY_PTR, RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR,
-        RANDOM_COIN_RATE_1_PTR, RANDOM_COIN_RATE_2_PTR
+        RANDOM_COIN_CV_PTR, RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR
     } from miden::core::stark::constants
 ";
 
 fn assert_random_coin_state(output: &ExecutionOutput, challenger: &Challenger, context: &str) {
-    let rate = stark_constant("RANDOM_COIN_RATE_1_PTR");
-    let capacity = stark_constant("RANDOM_COIN_CAPACITY_PTR");
-    for (i, expected) in challenger.sponge_state.iter().enumerate() {
-        let addr = if i < 8 {
-            rate + i as u32
-        } else {
-            capacity + (i - 8) as u32
-        };
-        assert_eq!(read_memory_felt(output, addr), *expected, "{context}: sponge element {i}");
+    let cv = stark_constant("RANDOM_COIN_CV_PTR");
+    for (i, expected) in challenger.cv().iter().enumerate() {
+        assert_eq!(
+            read_memory_felt(output, cv + i as u32),
+            *expected,
+            "{context}: chaining value element {i}"
+        );
     }
-    assert_eq!(
-        read_memory_felt(output, stark_constant("RANDOM_COIN_INPUT_LENGTH_PTR")),
-        Felt::from_usize(challenger.input_buffer.len()),
-        "{context}: input length"
-    );
-    assert_eq!(
-        read_memory_felt(output, stark_constant("RANDOM_COIN_OUTPUT_LENGTH_PTR")),
-        Felt::from_usize(challenger.output_buffer.len()),
-        "{context}: output length"
-    );
 }
 
 /// `miden_crypto` does not re-export `CanSampleBits`, so it is reached through its
@@ -119,7 +101,11 @@ enum Step {
     ObservePair([Felt; 2]),
     ObserveWordAndFlush([Felt; 4]),
     ReseedDirect([Felt; 4]),
-    ReseedWithFelt([Felt; 4], Felt),
+    FoldingPow {
+        commitment: [Felt; 4],
+        witness: Felt,
+        bits: u8,
+    },
     Flush,
     SampleFelt,
     SampleExt,
@@ -128,7 +114,7 @@ enum Step {
 
 /// MASM flushes pending input eagerly; Rust flushes on the next sample. Each buffered sequence
 /// ends with a sample, so both sides have incorporated its input before the next observation.
-fn boundary_steps(rng: &mut ChaCha20Rng) -> Vec<Step> {
+fn boundary_steps(rng: &mut ChaCha20Rng, state: [Felt; 4]) -> Vec<Step> {
     let mut steps = Vec::new();
 
     // Exercise each pending-input length, including a word that crosses a full rate.
@@ -148,22 +134,30 @@ fn boundary_steps(rng: &mut ChaCha20Rng) -> Vec<Step> {
         Step::SampleBits(1),
         Step::SampleBits(31),
         Step::SampleExt,
-        Step::SampleExt, // Consume the last two rate elements.
+        Step::SampleExt, // Cross an output-word boundary.
     ]);
 
     steps.push(Step::ReseedDirect(random_word(rng)));
     steps.push(Step::SampleFelt);
-    steps.push(Step::ReseedWithFelt(random_word(rng), random_felt(rng)));
-    steps.push(Step::SampleExt);
+    for bits in [0, 4] {
+        let commitment = random_word(rng);
+        // Generate a witness for the transcript prefix that both implementations will replay.
+        let mut challenger = challenger_with(state, 0);
+        replay_steps(&mut challenger, &steps);
+        commitment.into_iter().for_each(|x| challenger.observe(x));
+        let witness = challenger.grind(bits as usize);
+        steps.push(Step::FoldingPow { commitment, witness, bits });
+        steps.push(Step::SampleFelt);
+    }
 
-    // Eight scalar observations trigger a permutation without an explicit flush.
+    // Eight scalar observations compress one full input block without an explicit flush.
     steps.extend((0..8).map(|_| Step::ObserveFelt(random_felt(rng))));
     steps.push(Step::SampleFelt);
     steps
 }
 
-fn steps_source(state: &[Felt; 12], steps: &[Step]) -> String {
-    let mut body = store_random_coin(state, 8);
+fn steps_source(state: &[Felt; 4], steps: &[Step], combined_folding: bool) -> String {
+    let mut body = store_random_coin(state, 0);
     let mut addr = SAMPLES_PTR;
     for step in steps {
         let line = match step {
@@ -171,7 +165,9 @@ fn steps_source(state: &[Felt; 12], steps: &[Step]) -> String {
             Step::ObserveWord(w) => {
                 format!("{} exec.random_coin::observe_word", masm_push_word(&Word::from(*w)))
             },
-            Step::ObservePair([a, b]) => format!("push.{b}.{a} exec.random_coin::observe_pair"),
+            Step::ObservePair([a, b]) => format!(
+                "push.{a} exec.random_coin::observe_felt push.{b} exec.random_coin::observe_felt"
+            ),
             Step::ObserveWordAndFlush(w) => {
                 format!(
                     "{} exec.random_coin::observe_word_and_flush_buffer",
@@ -181,10 +177,19 @@ fn steps_source(state: &[Felt; 12], steps: &[Step]) -> String {
             Step::ReseedDirect(w) => {
                 format!("{} exec.random_coin::reseed_direct", masm_push_word(&Word::from(*w)))
             },
-            Step::ReseedWithFelt(w, f) => {
+            Step::FoldingPow { commitment, witness, bits } => {
+                let sample = if combined_folding {
+                    "exec.random_coin::reseed_check_folding_pow_and_sample_alpha"
+                } else {
+                    "exec.random_coin::reseed_with_felt exec.random_coin::sample_folding_pow_and_ext"
+                };
+                addr += 2;
                 format!(
-                    "{} push.{f} exec.random_coin::reseed_with_felt",
-                    masm_push_word(&Word::from(*w))
+                    "push.{bits} mem_store.FOLDING_POW_BITS_PTR
+                    {} push.{witness} {sample} mem_store.{} mem_store.{}",
+                    masm_push_word(&Word::from(*commitment)),
+                    addr - 2,
+                    addr - 1,
                 )
             },
             Step::Flush => "exec.random_coin::flush_buffer".to_string(),
@@ -208,7 +213,14 @@ fn steps_source(state: &[Felt; 12], steps: &[Step]) -> String {
         body.push_str("\n        ");
         body.push_str(&line);
     }
-    format!("{RANDOM_COIN_IMPORTS}\n    begin\n        {body}\n    end\n")
+    format!(
+        "{RANDOM_COIN_IMPORTS}
+        use {{FOLDING_POW_BITS_PTR}} from miden::core::stark::constants
+        begin
+            {body}
+        end
+        "
+    )
 }
 
 fn replay_steps(challenger: &mut Challenger, steps: &[Step]) -> Vec<Felt> {
@@ -220,11 +232,13 @@ fn replay_steps(challenger: &mut Challenger, steps: &[Step]) -> Vec<Felt> {
                 w.into_iter().for_each(|x| challenger.observe(x))
             },
             Step::ObservePair(pair) => pair.into_iter().for_each(|x| challenger.observe(x)),
-            Step::ReseedWithFelt(w, f) => {
-                w.into_iter().for_each(|x| challenger.observe(x));
-                challenger.observe(f);
+            Step::FoldingPow { commitment, witness, bits } => {
+                commitment.into_iter().for_each(|x| challenger.observe(x));
+                assert!(challenger.check_witness(bits as usize, witness));
+                let alpha: QuadFelt = challenger.sample_algebra_element();
+                samples.extend_from_slice(alpha.as_basis_coefficients_slice());
             },
-            // The Rust challenger permutes pending inputs when it next samples.
+            // The Rust challenger incorporates pending inputs when it next samples.
             Step::Flush => {},
             Step::SampleFelt => samples.push(challenger.sample_algebra_element::<Felt>()),
             Step::SampleExt => {
@@ -244,23 +258,25 @@ fn replay_steps(challenger: &mut Challenger, steps: &[Step]) -> Vec<Felt> {
 fn random_coin_boundary_sequences_match_the_rust_challenger() {
     for seed in 0..4 {
         let mut rng = ChaCha20Rng::seed_from_u64(seed);
-        let state: [Felt; 12] = core::array::from_fn(|_| random_felt(&mut rng));
-        let steps = boundary_steps(&mut rng);
-
-        let (output, _) = build_test!(&steps_source(&state, &steps), &[])
-            .execute_for_output()
-            .unwrap_or_else(|err| panic!("seed {seed}: transcript program failed: {err}"));
-
-        let mut challenger = challenger_with(state, 8);
+        let state: [Felt; 4] = core::array::from_fn(|_| random_felt(&mut rng));
+        let steps = boundary_steps(&mut rng, state);
+        let mut challenger = challenger_with(state, 0);
         let expected = replay_steps(&mut challenger, &steps);
-        for (i, expected) in expected.iter().enumerate() {
-            assert_eq!(
-                read_memory_felt(&output, SAMPLES_PTR + i as u32),
-                *expected,
-                "seed {seed}: sample {i} differs"
-            );
+        for combined_folding in [false, true] {
+            let context = format!("seed {seed}, combined folding helper: {combined_folding}");
+            let (output, _) = build_test!(&steps_source(&state, &steps, combined_folding), &[])
+                .execute_for_output()
+                .unwrap_or_else(|err| panic!("{context}: transcript program failed: {err}"));
+
+            for (i, expected) in expected.iter().enumerate() {
+                assert_eq!(
+                    read_memory_felt(&output, SAMPLES_PTR + i as u32),
+                    *expected,
+                    "{context}: sample {i} differs"
+                );
+            }
+            assert_random_coin_state(&output, &challenger, &context);
         }
-        assert_random_coin_state(&output, &challenger, &format!("seed {seed}"));
     }
 }
 
@@ -273,10 +289,10 @@ fn ood_point_matches_the_rust_sampler_at_every_supported_height() {
     let log_blowup = config::pcs_params().log_blowup();
     let min_height = MIN_TRACE_LEN.ilog2() as u8;
     let cases = supported_log_heights()
-        .map(|height| (height, 3 + usize::from((height - min_height) % 6)))
+        .map(|height| (height, 1 + usize::from((height - min_height) % 4)))
         .chain(core::iter::once((min_height, 2)));
     for (log_height, output_len) in cases {
-        let state: [Felt; 12] = core::array::from_fn(|_| random_felt(&mut rng));
+        let state: [Felt; 4] = core::array::from_fn(|_| random_felt(&mut rng));
         let lookahead = if output_len > 2 {
             format!("exec.random_coin::sample_felt mem_store.{SAMPLES_PTR}")
         } else {
@@ -292,13 +308,13 @@ fn ood_point_matches_the_rust_sampler_at_every_supported_height() {
                 {lookahead}
             end
             ",
-            store = store_random_coin(&state, output_len),
+            store = store_random_coin(&state, 4 - output_len),
         );
         let (output, _) = build_test!(&source, &[])
             .execute_for_output()
             .unwrap_or_else(|err| panic!("height 2^{log_height}: generate_z_zN failed: {err}"));
 
-        let challenger = challenger_with(state, output_len);
+        let challenger = challenger_with(state, 4 - output_len);
         let domain = canonical_domain::<Felt>(log_height, log_blowup);
         let (z, next): (QuadFelt, Felt) =
             sample_ood_point_and_next::<Felt, QuadFelt, [Felt; 4], _>(&domain, challenger.clone());
@@ -355,7 +371,7 @@ fn init_seed_source(
         {imports}
         use {{
             DEEP_POW_BITS_PTR, FOLDING_POW_BITS_PTR, LOG_TRACE_LENGTH_PTR, NUM_QUERIES_PTR,
-            QUERY_POW_BITS_PTR, RELATION_DIGEST_PTR
+            QUERY_POW_BITS_PTR, RELATION_DIGEST_PTR, PREPROCESSED_TRACE_COM_PTR
         }} from miden::core::stark::constants
         begin
             push.{num_queries} mem_store.NUM_QUERIES_PTR
@@ -364,6 +380,7 @@ fn init_seed_source(
             push.{folding_pow_bits} mem_store.FOLDING_POW_BITS_PTR
             {digest} mem_storew_le.RELATION_DIGEST_PTR dropw
             push.{log_height} mem_store.LOG_TRACE_LENGTH_PTR
+            padw mem_storew_le.PREPROCESSED_TRACE_COM_PTR dropw
             exec.random_coin::init_seed
             {extra}
         end
@@ -376,20 +393,31 @@ fn init_seed_source(
     )
 }
 
-/// Full-state equality also checks the blowup, final degree, and folding arity absorbed by
-/// `init_seed` against the Rust PCS configuration.
+/// The first sampled word binds the relation, PCS parameters, and preprocessed commitment.
 #[test]
 fn init_seed_matches_the_rust_transcript_seeding() {
     let mut rng = ChaCha20Rng::seed_from_u64(2355);
     let relation_digest = random_word(&mut rng);
-    let (output, _) = build_test!(&init_seed_source(&relation_digest, 10, "", ""), &[])
-        .execute_for_output()
-        .expect("init_seed must execute");
+    let draws = (0..4)
+        .map(|i| format!("exec.random_coin::sample_felt mem_store.{}", SAMPLES_PTR + i))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let source = init_seed_source(&relation_digest, 10, "", &draws);
+    let (output, _) =
+        build_test!(&source, &[]).execute_for_output().expect("init_seed must execute");
 
-    let mut challenger =
-        config::poseidon2_config(config::pcs_params(), relation_digest).challenger();
+    let mut challenger = config::eidos_config(config::pcs_params(), relation_digest).challenger();
     config::observe_protocol_params(&config::pcs_params(), &mut challenger);
-    assert_random_coin_state(&output, &challenger, "after init_seed");
+    for _ in 0..4 {
+        challenger.observe(Felt::ZERO);
+    }
+    for i in 0..4 {
+        assert_eq!(
+            read_memory_felt(&output, SAMPLES_PTR + i),
+            challenger.sample_algebra_element::<Felt>(),
+            "sample {i} after init_seed"
+        );
+    }
 }
 
 #[test]

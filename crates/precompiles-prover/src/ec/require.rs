@@ -46,9 +46,9 @@ impl<'a> EcRequire<'a> {
     ///
     /// VM-owned fixed groups are preseeded with their canonical scalar
     /// bound. An ad-hoc group's **scalar bound** starts vacuous (the tuple
-    /// carries the `F_p` handle) until
-    /// [`constrain_scalar_bound`](Self::constrain_scalar_bound) names
+    /// carries the `F_p` handle) until [`EcStoreRequires::set_scalar_bound`] names
     /// the scalar-field modulus.
+    #[cfg(test)]
     pub fn create_group(&mut self, a: U256, b: U256, bound: UintPtr) -> (EcGroupPtr, EcPointPtr) {
         assert_ne!(b, U256::ZERO, "b = 0 puts (0,0) on the curve");
         let a_ptr = self.uint.intern(a, bound);
@@ -56,16 +56,6 @@ impl<'a> EcRequire<'a> {
         let group = self.store.create_group(a_ptr, b_ptr, bound);
         let pai = self.store.add_pai(group);
         (group, pai)
-    }
-
-    /// Constrain the group's scalar field: `sbound` is the stored
-    /// `n − 1` of the group order — the modulus scalar arithmetic
-    /// (addition-chain exponents, ladder scalars) runs under. Until the
-    /// first call the group tuple vacuously carries its `F_p` handle;
-    /// mathematically `(a, b, p)` determines `F_s`, so this names a
-    /// value, it never chooses one. Idempotent on the same handle.
-    pub fn constrain_scalar_bound(&mut self, group: EcGroupPtr, sbound: UintPtr) {
-        self.store.set_scalar_bound(group, sbound);
     }
 
     /// Bind a finite point `(x, y)` of the group, interning the
@@ -135,40 +125,6 @@ impl<'a> EcRequire<'a> {
         pai
     }
 
-    /// A curve point from already-interned handles — the legacy coefficient
-    /// entry retained for direct callers/tests. Creates/dedups the group
-    /// `(a, b, bound)`, then delegates the point work to
-    /// [`point_on_group`](Self::point_on_group).
-    pub fn point_on_curve(
-        &mut self,
-        a_ptr: UintPtr,
-        b_ptr: UintPtr,
-        bound: UintPtr,
-        x_ptr: UintPtr,
-        y_ptr: UintPtr,
-    ) -> (EcGroupPtr, EcPointPtr) {
-        assert_ne!(self.uint.value(b_ptr), U256::ZERO, "b = 0 puts (0,0) on the curve");
-        let group = self.store.create_group(a_ptr, b_ptr, bound);
-        let point = self.point_on_group(group, x_ptr, y_ptr);
-        (group, point)
-    }
-
-    /// The group's point-at-infinity from already-interned curve handles — the
-    /// legacy coefficient entry retained for direct callers/tests.
-    /// Creates/dedups the group `(a, b, bound)`, then delegates to
-    /// [`pai_on_group`](Self::pai_on_group).
-    pub fn pai_on_curve(
-        &mut self,
-        a_ptr: UintPtr,
-        b_ptr: UintPtr,
-        bound: UintPtr,
-    ) -> (EcGroupPtr, EcPointPtr) {
-        assert_ne!(self.uint.value(b_ptr), U256::ZERO, "b = 0 puts (0,0) on the curve");
-        let group = self.store.create_group(a_ptr, b_ptr, bound);
-        let pai = self.pai_on_group(group);
-        (group, pai)
-    }
-
     /// The group law `R = P + Q` over stored points: select the case
     /// from the operands' values, record the per-case certificate
     /// arrangements into the uint relation chiplets, lay one EcGroupAdd
@@ -179,9 +135,8 @@ impl<'a> EcRequire<'a> {
     /// **Interns by relation identity** `(group, p, q)`: a repeat returns
     /// the recorded result and re-derives nothing — no second case
     /// selection, no second set of certificates (its `EcGroupAdd` tuple
-    /// just counts another consumer). The provide multiplicity is 0
-    /// today (the tuple is dormant until the MSM / DAG layer consumes
-    /// it); a consumer would pass its count here.
+    /// just counts another consumer). The multiplicity argument records relation consumers; zero
+    /// leaves the tuple dormant.
     fn add_inner(
         &mut self,
         group: EcGroupPtr,
@@ -375,41 +330,6 @@ impl<'a> EcRequire<'a> {
                 Some((x3, y3))
             },
         }
-    }
-
-    /// Negate a point — the cancel-case primitive: intern `R = −P =
-    /// (x, −y)` (eager membership) and record the cancel relation
-    /// `P + R = ∞` at `EcGroupAdd` provide `mult` (one per cancel-relation
-    /// consumer). Returns `(group, R, pai)`, where `pai` is the group's ∞
-    /// row (the cancel result, the `EcGroupAdd` result-slot the consumer
-    /// carries). The cancel block routes its own `EcGroup` /
-    /// `EcPoint(P, R, ∞)` demand; the caller's `EcPoint(∞)` pin forces
-    /// `R = −P`, since the `EcGroupAdd` bus alone carries no case flag and
-    /// so doesn't pin the ∞ result slot. Route one more ∞ consume here for
-    /// that pin.
-    pub fn neg(
-        &mut self,
-        p: EcPointPtr,
-        mult: ProvideMult,
-    ) -> (EcGroupPtr, EcPointPtr, EcPointPtr) {
-        let (group, coords) = self.store.point_params(p);
-        let (px, py) = coords.expect("Neg of the point at infinity");
-        let (_, _, bound) = self.store.group_params(group);
-        // Intern −py's *value* (no relation) — the cancel block's
-        // `add_to_zero(py, −py)` below is what certifies the negation. A
-        // `uint.neg` here would mint a dangling `UintAdd` provide (no eval
-        // consumer), unbalancing the bus.
-        let neg_py_val = sub_reduce(U256::ZERO, self.uint.value(py), self.uint.value(bound));
-        let neg_py = self.uint.intern(neg_py_val, bound);
-        let r = self.add_point_at(group, px, neg_py);
-        let pai = self.add_inner(group, p, r, mult);
-        // The consumer also consumes the ∞ result-slot's `EcPoint(is_pai =
-        // 1)` to pin `R = −P` — without it the slot is free (the
-        // `EcGroupAdd` tuple matches any case) and a negation consumer could
-        // bind any point. Route that demand so the store provides one extra ∞
-        // copy.
-        self.store.require_ecpoint(pai);
-        (group, r, pai)
     }
 
     /// The live cases' shared tail: `x₃ = λ² − t`, `e = x₁ − x₃`,

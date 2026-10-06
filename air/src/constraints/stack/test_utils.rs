@@ -82,6 +82,11 @@ impl AirBuilder for ConstraintEvalBuilder {
         self.transition
     }
 
+    fn is_transition_window(&self, size: usize) -> Self::Expr {
+        assert_eq!(size, 2, "stack tests use two-row transition windows");
+        self.is_transition()
+    }
+
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
         self.evaluations.push(QuadFelt::from(x.into()));
     }

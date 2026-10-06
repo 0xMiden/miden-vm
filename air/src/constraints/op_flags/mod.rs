@@ -198,7 +198,7 @@ where
         // --- Degree-5 flags (opcodes 80-95) ---
         // Uses extra[0] = b6*(1-b5)*b4 (degree 3), discriminated by [b0, b1, b2, b3].
         // Index = b3*8 + b2*4 + b1*2 + b0:
-        // - 0: HPERM          -  1: MPVERIFY
+        // - 0: COMPRESS      -  1: MPVERIFY
         // - 2: PIPE           -  3: MSTREAM
         // - 4: SPLIT          -  5: LOOP
         // - 6: SPAN           -  7: JOIN
@@ -213,7 +213,7 @@ where
         // --- Degree-4 flags (opcodes 96-127) ---
         // Uses extra[1] = b6*b5 (degree 2), discriminated by [b2, b3, b4].
         // Index = b4*4 + b3*2 + b2:
-        // - 0: MRUPDATE      - 1: CRYPTOSTREAM
+        // - 0: MRUPDATE      - 1: AEADSTREAM
         // - 2: SYSCALL        - 3: CALL
         // - 4: END            - 5: REPEAT
         // - 6: RESPAN         - 7: HALT
@@ -331,18 +331,20 @@ where
         let no_shift_depth0 = E::sum_array::<16>(&[
             // +NOOP         — no-op
             op7(opcodes::NOOP),
+            // +COMPRESS     — preserves the 8-felt block and updates only the CV
+            op5(opcodes::COMPRESS),
             // +(opcode 6)    — unused opcode slot; preserve the full visible stack
             deg7[6].clone(),
             // +U32ASSERT2   — checks s0,s1 are u32, no change
             op6(opcodes::U32ASSERT2),
             // +MPVERIFY     — verifies Merkle path in place
             op5(opcodes::MPVERIFY),
+            // +EVALCIRCUIT  — evaluates ACE circuit from advice without changing the stack
+            op5(opcodes::EVALCIRCUIT),
             // +SPAN         — control flow: begins basic block
             op5(opcodes::SPAN),
             // +JOIN         — control flow: begins join block
             op5(opcodes::JOIN),
-            // +LOOP         — control flow: do-while LOOP reads no stack input
-            op5(opcodes::LOOP),
             // +EMIT         — emits event, no stack change
             op7(opcodes::EMIT),
             // +RESPAN       — control flow: next batch in basic block
@@ -351,17 +353,17 @@ where
             op4(opcodes::HALT),
             // +CALL         — control flow: enters procedure
             op4(opcodes::CALL),
-            // +SYSCALL      - control flow: enters kernel procedure.
+            // +SYSCALL      — control flow: enters kernel procedure
             op4(opcodes::SYSCALL),
             // +END*(1-loop) — no-shift for non-Loop ENDs (Loop's END drops the trailing condition)
             op4(opcodes::END) * (E::ONE - is_loop_end),
-            // +EVALCIRCUIT  - asserts an ACE evaluation without changing the stack.
-            op5(opcodes::EVALCIRCUIT),
             // +HORNERBASE   - Horner step rewrites only the accumulator (s14, s15).
             op5(opcodes::HORNERBASE),
             // +HORNEREXT    - Horner step rewrites only the accumulator (s14, s15).
             op5(opcodes::HORNEREXT),
-        ]);
+        ])
+        // +LOOP — control flow: begins loop body without consuming a stack item.
+        + op5(opcodes::LOOP);
 
         // +opcodes[0..8] –NOOP –opcode6 — unary ops that modify only s0 (EQZ, NEG, INV, INCR,
         // NOT, MLOAD). Opcode 6 is included at depth 0 above.
@@ -371,50 +373,53 @@ where
         // +U32ADD +U32SUB +U32MUL +U32DIV — consume s0,s1, produce 2 results
         let u32_arith_group = prefix_100.clone() * bits[3][0].clone();
 
-        let no_shift_depth4 = E::sum_array::<6>(&[
+        let no_shift_depth4 = E::sum_array::<7>(&[
             // +MOVUP3|MOVDN3  — permute s0..s3
             movup_or_movdn[1].clone(),
             // +ADVPOPW|EXPACC — overwrite s0..s3 in place
             advpopw_or_expacc,
+            // +CALLER         — overwrites only s0..s3
+            op7(opcodes::CALLER),
             // +SWAPW2|SWAPW3  — swap s0..s3 with s8+ (leaves at depth 8)
             swapw2_or_swapw3,
             // +EXT2MUL        — ext field multiply on s0..s3
             op7(opcodes::EXT2MUL),
             // +MRUPDATE       — Merkle root update on s0..s3
             op4(opcodes::MRUPDATE),
-            // +CALLER         - overwrite s0..s3 with the caller hash.
-            op7(opcodes::CALLER),
+            // +LOGDEFERRED    — replaces only the top word
+            op5(opcodes::LOGDEFERRED),
         ]);
 
-        // Prefix-summed deltas for SWAPW2/SWAPW3:
-        //   SWAPW2 is active at depths 4..7 and 12..15.
-        //   SWAPW3 is active at depths 4..11.
-        // The shared SWAPW2|SWAPW3 term starts at depth 4. Depth 8 removes only SWAPW2,
-        // and depth 12 adds SWAPW2 back while removing SWAPW3.
+        let swapw2 = op7(opcodes::SWAPW2);
+        let swapw3 = op7(opcodes::SWAPW3);
+        let stream_word = op5(opcodes::PIPE) + op5(opcodes::MSTREAM);
 
-        let stream_word_ops = op5(opcodes::MSTREAM) + op5(opcodes::PIPE);
+        // SWAPW2/SWAPW3 depth lifecycle:
+        //   Op      Swaps               No-shift depths
+        //   SWAPW2  s[0..4] ↔ s[8..12]  0–7, 12–15
+        //   SWAPW3  s[0..4] ↔ s[12..16] 0–7, 8–11
 
         let no_shift_depth8
             // +MOVUP7|MOVDN7  — permute s0..s7
             = movup_or_movdn[5].clone()
             // +SWAPW          — swap s0..s3 with s4..s7, only affects depths 0-7
             + op7(opcodes::SWAPW)
-            // +MSTREAM/PIPE   - overwrite s0..s7 and increment s12; preserve s8..s11.
-            + stream_word_ops.clone()
-            // -SWAPW2         - s8..s11 are SWAPW2's target word, but unchanged for SWAPW3.
-            - op7(opcodes::SWAPW2);
+            // +PIPE|MSTREAM   — overwrite s0..s7 and cursor at s12
+            + stream_word.clone()
+            // –COMPRESS       — updates the CV at depths 8–11
+            - op5(opcodes::COMPRESS)
+            // –SWAPW2         — target range s8..s11 is affected by SWAPW2 only
+            - swapw2.clone();
 
         let no_shift_depth12
-            // +SWAPW2         - s12..s15 are unchanged by SWAPW2.
-            = op7(opcodes::SWAPW2)
-            // +HPERM         — Poseidon2 permutation on s0..s11
-            + op5(opcodes::HPERM)
-            // +LOGDEFERRED — Poseidon2 output rewrites s0..s11; s12..s15 stay unchanged
-            + op5(opcodes::LOGDEFERRED)
-            // -MSTREAM/PIPE  - s12 is incremented by these ops.
-            - stream_word_ops.clone()
-            // -SWAPW3         - s12..s15 are SWAPW3's target word.
-            - op7(opcodes::SWAPW3);
+            // +SWAPW2       — SWAPW2 re-enters at s12
+            = swapw2
+            // –SWAPW3       — SWAPW3 leaves at s12
+            - swapw3
+            // +COMPRESS     — preserves the stack tail above the CV
+            + op5(opcodes::COMPRESS)
+            // –PIPE|MSTREAM — cursor at s12 is updated
+            - stream_word.clone();
 
         let no_shift = accumulate_depth_deltas([
             // d=0
@@ -444,8 +449,8 @@ where
             E::ZERO,
             // d=12
             no_shift_depth12,
-            // +MSTREAM/PIPE   - preserve s13..s15 after skipping the incremented s12.
-            stream_word_ops,
+            // +PIPE|MSTREAM   — stack tail above the cursor is preserved
+            stream_word,
             // -HORNERBASE/HORNEREXT - s14, s15 hold the Horner accumulator, updated each step.
             -(op5(opcodes::HORNERBASE) + op5(opcodes::HORNEREXT)),
             // d=15 (unchanged)
@@ -461,7 +466,7 @@ where
         let all_mov_pairs = E::sum_array::<7>(&movup_or_movdn);
         let all_movdn = all_mov_pairs.clone() * bits[0][1].clone();
 
-        let left_shift_depth1 = E::sum_array::<11>(&[
+        let left_shift_depth1 = E::sum_array::<9>(&[
             // +ASSERT      — consumes s0 (must be 1)
             op7(opcodes::ASSERT),
             // +MOVDN{2..8} — move s0 down, shifts left above
@@ -476,15 +481,15 @@ where
             deg7[47].clone(),
             // +SPLIT        — control flow: pops condition from s0
             op5(opcodes::SPLIT),
-            // +REPEAT       - control flow: pops condition before re-entering a loop body
+            // +REPEAT       — control flow: pops condition for the next iteration
             op4(opcodes::REPEAT),
             // +END*loop     — END when ending a loop: pops the trailing condition the body left
             end_loop_flag.clone(),
+        ])
             // +DYN          — control flow: consumes s0 (address of the target hash in memory)
-            op5(opcodes::DYN),
+            + op5(opcodes::DYN)
             // +DYNCALL      — control flow: consumes s0 (address of the target hash in memory)
-            op5(opcodes::DYNCALL),
-        ]);
+            + op5(opcodes::DYNCALL);
 
         // +opcodes[32..40] –ASSERT — binary ops (EQ, ADD, MUL, AND, OR, U32AND, U32XOR)
         //   that consume s0,s1 and produce 1 result; ASSERT already counted at depth 1
@@ -779,9 +784,6 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
     // ------ Operation flags ---------------------------------------------------------------------
 
     op_flag_getters!(degree7_op_flags,
-        /// Operation Flag of NOOP operation.
-        #[expect(dead_code)]
-        noop => opcodes::NOOP,
         /// Operation Flag of EQZ operation.
         eqz => opcodes::EQZ,
         /// Operation Flag of NEG operation.
@@ -792,9 +794,6 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         incr => opcodes::INCR,
         /// Operation Flag of NOT operation.
         not => opcodes::NOT,
-        /// Operation Flag of MLOAD operation.
-        #[expect(dead_code)]
-        mload => opcodes::MLOAD,
         /// Operation Flag of SWAP operation.
         swap => opcodes::SWAP,
         /// Operation Flag of CALLER operation.
@@ -810,9 +809,6 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         movup3 => opcodes::MOVUP3,
         /// Operation Flag of MOVDN3 operation.
         movdn3 => opcodes::MOVDN3,
-        /// Operation Flag of ADVPOPW operation.
-        #[expect(dead_code)]
-        advpopw => opcodes::ADVPOPW,
         /// Operation Flag of EXPACC operation.
         expacc => opcodes::EXPACC,
         /// Operation Flag of MOVUP4 operation.
@@ -857,30 +853,12 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         and => opcodes::AND,
         /// Operation Flag of OR operation.
         or => opcodes::OR,
-        /// Operation Flag of U32AND operation.
-        #[expect(dead_code)]
-        u32and => opcodes::U32AND,
-        /// Operation Flag of U32XOR operation.
-        #[expect(dead_code)]
-        u32xor => opcodes::U32XOR,
         /// Operation Flag of FRIE2F4 operation.
         frie2f4 => opcodes::FRIE2F4,
-        /// Operation Flag of DROP operation.
-        #[expect(dead_code)]
-        drop => opcodes::DROP,
         /// Operation Flag of CSWAP operation.
         cswap => opcodes::CSWAP,
         /// Operation Flag of CSWAPW operation.
         cswapw => opcodes::CSWAPW,
-        /// Operation Flag of MLOADW operation.
-        #[expect(dead_code)]
-        mloadw => opcodes::MLOADW,
-        /// Operation Flag of MSTORE operation.
-        #[expect(dead_code)]
-        mstore => opcodes::MSTORE,
-        /// Operation Flag of MSTOREW operation.
-        #[expect(dead_code)]
-        mstorew => opcodes::MSTOREW,
         /// Operation Flag of PAD operation.
         pad => opcodes::PAD,
         /// Operation Flag of DUP operation.
@@ -907,9 +885,6 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         dup13 => opcodes::DUP13,
         /// Operation Flag of DUP15 operation.
         dup15 => opcodes::DUP15,
-        /// Operation Flag of ADVPOP operation.
-        #[expect(dead_code)]
-        advpop => opcodes::ADVPOP,
         /// Operation Flag of SDEPTH operation.
         sdepth => opcodes::SDEPTH,
         /// Operation Flag of CLK operation.
@@ -940,11 +915,7 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
     // ------ Degree 5 operations  ----------------------------------------------------------------
 
     op_flag_getters!(degree5_op_flags,
-        /// Operation Flag of HPERM operation.
-        #[expect(dead_code)]
-        hperm => opcodes::HPERM,
         /// Operation Flag of MPVERIFY operation.
-        #[expect(dead_code)]
         mpverify => opcodes::MPVERIFY,
         /// Operation Flag of SPLIT operation.
         split => opcodes::SPLIT,
@@ -952,21 +923,12 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         loop_op => opcodes::LOOP,
         /// Operation Flag of SPAN operation.
         span => opcodes::SPAN,
-        /// Operation Flag of JOIN operation.
-        #[expect(dead_code)]
-        join => opcodes::JOIN,
         /// Operation Flag of PUSH operation.
         push => opcodes::PUSH,
         /// Operation Flag of DYN operation.
         dyn_op => opcodes::DYN,
         /// Operation Flag of DYNCALL operation.
         dyncall => opcodes::DYNCALL,
-        /// Operation Flag of EVALCIRCUIT operation.
-        #[expect(dead_code)]
-        evalcircuit => opcodes::EVALCIRCUIT,
-        /// Operation Flag of LOG_DEFERRED operation.
-        #[expect(dead_code)]
-        log_deferred => opcodes::LOGDEFERRED,
         /// Operation Flag of HORNERBASE operation.
         hornerbase => opcodes::HORNERBASE,
         /// Operation Flag of HORNEREXT operation.
@@ -981,7 +943,6 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
 
     op_flag_getters!(degree4_op_flags,
         /// Operation Flag of MRUPDATE operation.
-        #[expect(dead_code)]
         mrupdate => opcodes::MRUPDATE,
         /// Operation Flag of CALL operation.
         call => opcodes::CALL,

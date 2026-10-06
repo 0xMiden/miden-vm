@@ -15,34 +15,21 @@ use crate::{
         falcon512_eidos::{
             PREVERSIONED_NONCE, PREVERSIONED_NONCE_LEN, SIG_NONCE_LEN, SIG_POLY_BYTE_LEN, SecretKey,
         },
-        falcon512_poseidon2,
     },
-    hash::{
-        eidos::{Eidos, domains::FALCON_PUBLIC_KEY},
-        poseidon2::Poseidon2,
-    },
+    hash::eidos::{Eidos, domains::FALCON_PUBLIC_KEY},
     utils::Serializable,
 };
 
 mod data;
 
 #[test]
-fn eidos_and_poseidon2_falcon_coexist() {
+fn public_key_commitment_uses_eidos() {
     let mut eidos_rng = ChaCha20Rng::from_seed([3_u8; 32]);
     let eidos_public_key = SecretKey::with_rng(&mut eidos_rng).public_key();
     let elements = eidos_public_key.to_elements();
     let commitment = eidos_public_key.to_commitment();
 
     assert_eq!(commitment, Eidos::hash_elements_in_domain(&elements, FALCON_PUBLIC_KEY));
-    assert_ne!(commitment, Poseidon2::hash_elements(&elements));
-
-    let mut poseidon2_rng = ChaCha20Rng::from_seed([5_u8; 32]);
-    let poseidon2_public_key =
-        falcon512_poseidon2::SecretKey::with_rng(&mut poseidon2_rng).public_key();
-    assert_eq!(
-        poseidon2_public_key.to_commitment(),
-        Poseidon2::hash_elements(&poseidon2_public_key.to_elements())
-    );
 }
 
 #[test]
