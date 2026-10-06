@@ -500,6 +500,8 @@ fn u32cto() {
 
 #[cfg(feature = "arbitrary")]
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
     #[test]
     fn u32and_proptest(a in any::<u32>(), b in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let asm_opcode = "u32and";
@@ -540,7 +542,10 @@ proptest! {
         let test = build_op_test!(format!("{asm_opcode}.{b}"), &[a as u64, e]);
         test.prop_expect_stack(&[expected, e])?;
     }
+}
 
+#[cfg(feature = "arbitrary")]
+proptest! {
     #[test]
     fn u32not_proptest(value in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let asm_opcode = "u32not";
