@@ -2818,6 +2818,7 @@ dependencies = [
  "insta",
  "miden-core-lib",
  "miden-vm",
+ "rayon",
  "serde",
  "serde_json",
  "tracing",
