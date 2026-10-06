@@ -933,6 +933,32 @@ fn compute_operations_and_adjust_mappings(
     }
 }
 
+fn remap_inline_ranges(
+    rows: &mut [DebugSourceInlineCall],
+    map: impl FnOnce(Vec<usize>) -> Vec<usize>,
+) {
+    let endpoints = rows
+        .iter()
+        .filter(|row| row.op_idx != row.op_end)
+        .flat_map(|row| [row.op_idx as usize, row.op_end as usize - 1])
+        .collect::<Vec<_>>();
+    if endpoints.is_empty() {
+        return;
+    }
+
+    let endpoint_count = endpoints.len();
+    let mapped = map(endpoints);
+    assert_eq!(mapped.len(), endpoint_count);
+    for (row, pair) in rows
+        .iter_mut()
+        .filter(|row| row.op_idx != row.op_end)
+        .zip(mapped.as_chunks::<2>().0)
+    {
+        row.op_idx = u32::try_from(pair[0]).unwrap();
+        row.op_end = u32::try_from(pair[1] + 1).unwrap();
+    }
+}
+
 fn batch_basic_block_operations(
     operations: Vec<Operation>,
 ) -> Result<(Vec<OpBatch>, Word), Report> {
@@ -1726,6 +1752,55 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
+
+    #[test]
+    fn inline_range_remapping_batches_all_endpoints() {
+        let mut rows = (0..128_u32)
+            .map(|index| DebugSourceInlineCall {
+                op_idx: index,
+                op_end: index + 2,
+                callee_idx: DebugFunctionIdx::from(index),
+                loc_idx: DebugLocIdx::from(index),
+            })
+            .collect::<Vec<_>>();
+        let boundary = DebugSourceInlineCall {
+            op_idx: 40,
+            op_end: 40,
+            callee_idx: DebugFunctionIdx::from(0_u32),
+            loc_idx: DebugLocIdx::from(0_u32),
+        };
+        rows.insert(5, boundary);
+        let original = rows.clone();
+        let mut map_calls = 0;
+        remap_inline_ranges(&mut rows, |endpoints| {
+            map_calls += 1;
+            let expected = (0..128_usize).flat_map(|index| [index, index + 1]).collect::<Vec<_>>();
+            assert_eq!(endpoints, expected);
+            endpoints.into_iter().map(|endpoint| endpoint + 7).collect()
+        });
+        assert_eq!(map_calls, 1);
+        for (row, original) in rows.iter().zip(original) {
+            let offset = if original.op_idx == original.op_end { 0 } else { 7 };
+            assert_eq!(row.op_idx, original.op_idx + offset);
+            assert_eq!(row.op_end, original.op_end + offset);
+            assert_eq!(row.callee_idx, original.callee_idx);
+            assert_eq!(row.loc_idx, original.loc_idx);
+        }
+    }
+
+    #[test]
+    fn inline_range_remapping_skips_zero_width_boundaries() {
+        let boundary = DebugSourceInlineCall {
+            op_idx: 7,
+            op_end: 7,
+            callee_idx: DebugFunctionIdx::from(0_u32),
+            loc_idx: DebugLocIdx::from(0_u32),
+        };
+        let mut rows = [boundary];
+        remap_inline_ranges(&mut rows, |_| panic!("boundary rows must not be remapped"));
+        assert_eq!(rows, [boundary]);
+        remap_inline_ranges(&mut [], |_| panic!("empty rows must not be remapped"));
+    }
 
     fn record_test_root(builder: &mut MastForestBuilder, node_ref: MastNodeRef) -> MastNodeRef {
         builder.record_procedure_root_ref(node_ref);

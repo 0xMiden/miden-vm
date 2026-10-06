@@ -17,7 +17,7 @@ use miden_mast_package::debug_info::{
 
 use super::{
     MastNodeRef, PendingMastNode, PendingMastNodeKind, SourceNodeRef,
-    compute_operations_and_adjust_mappings,
+    compute_operations_and_adjust_mappings, remap_inline_ranges,
 };
 use crate::diagnostics::{Diagnostic, Report, miette};
 
@@ -360,18 +360,13 @@ impl MastForestFinalizer {
 
             let source_id = source_id_by_ref[&source_ref];
             let exec_node = debug_info[source_id].exec_node;
-            let inline_calls = pending_source_node
+            let mut inline_calls = pending_source_node
                 .inline_calls
                 .iter()
                 .map(|inline_call| {
-                    let (op_idx, op_end) = adjust_source_op_range(
-                        &mast_forest[exec_node],
-                        inline_call.op_idx as usize,
-                        inline_call.op_end as usize,
-                    );
                     Ok(DebugSourceInlineCall {
-                        op_idx: u32::try_from(op_idx).unwrap(),
-                        op_end: u32::try_from(op_end).unwrap(),
+                        op_idx: inline_call.op_idx,
+                        op_end: inline_call.op_end,
                         callee_idx: remapped(
                             tables.function(inline_call.callee_idx),
                             inline_call.callee_idx,
@@ -385,6 +380,9 @@ impl MastForestFinalizer {
                     })
                 })
                 .collect::<Result<Vec<_>, Report>>()?;
+            remap_inline_ranges(&mut inline_calls, |endpoints| {
+                compute_operations_and_adjust_mappings(&mast_forest[exec_node], endpoints).1
+            });
             debug_info[source_id].inline_calls = inline_calls;
         }
 

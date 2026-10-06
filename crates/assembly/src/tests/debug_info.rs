@@ -450,6 +450,57 @@ fn compact_inline_ranges_survive_padding_and_static_linking() -> TestResult {
 }
 
 #[test]
+fn many_inline_ranges_survive_padding_and_static_linking() -> TestResult {
+    let context = TestContext::default();
+    let body = "nop nop push.1 drop nop nop push.2 drop\n".repeat(128);
+    let mut library_module = context.parse_module(source_file!(
+        &context,
+        format!("namespace dep::math pub proc callee {body} end")
+    ))?;
+    let markers = [None, Some("source::first"), None, Some("source::second")].repeat(128);
+    let callee = library_module.procedures_mut().next().unwrap();
+    replace_nops_with_named_inline_call_markers(&context, callee, &markers)?;
+    let library = Assembler::new(context.source_manager()).assemble_library(
+        "dep",
+        library_module,
+        None::<Box<Module>>,
+    )?;
+    let info = library.debug_info().into_diagnostic()?.unwrap();
+    assert_eq!(info.nodes().iter().map(|node| node.inline_calls.len()).sum::<usize>(), 256);
+
+    let mut module = context
+        .parse_module(source_file!(&context, "use dep::math begin nop exec.math::callee end"))?;
+    let entrypoint = module.procedures_mut().find(|procedure| procedure.is_entrypoint()).unwrap();
+    replace_nops_with_named_inline_call_markers(&context, entrypoint, &[Some("source::outer")])?;
+    let package = Assembler::new(context.source_manager())
+        .with_package(Arc::from(library), Linkage::Static)?
+        .assemble_program("test", module)?;
+    let info = package.debug_info().into_diagnostic()?.unwrap();
+    let mut checked = BTreeSet::new();
+    for (source_index, node) in info.nodes().iter().enumerate() {
+        let source_id = miden_mast_package::debug_info::DebugSourceNodeId::from(
+            u32::try_from(source_index).unwrap(),
+        );
+        for operation in &node.asm_ops {
+            let name = info[operation.op_name_idx].as_ref();
+            let inner = match name {
+                "push.1" => "source::first",
+                "push.2" => "source::second",
+                _ => continue,
+            };
+            let chain = info
+                .inline_calls_for_operation(source_id, operation.op_idx)
+                .map(|row| info[info.get_function(row.callee_idx).unwrap().name_idx].as_ref())
+                .collect::<Vec<_>>();
+            assert_eq!(chain, vec![inner, "source::outer"]);
+            checked.insert(operation.op_idx);
+        }
+    }
+    assert_eq!(checked.len(), 256);
+    Ok(())
+}
+
+#[test]
 fn source_name_attribute_sets_debug_name_and_linkage_name() -> TestResult {
     let context = TestContext::default();
     let module = context.parse_module(source_file!(
