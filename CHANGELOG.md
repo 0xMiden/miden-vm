@@ -5,6 +5,7 @@
 #### Features
 
 - Added `Arbitrary` implementations and property tests for serialization and VM operations. Expanded fuzz input checks and seed inputs ([#3976](https://github.com/0xMiden/miden-vm/pull/3976)).
+- [BREAKING] Added separately configurable execution and per-witness verification limits for deferred precompile work. Custom precompiles must implement `Precompile::work`; consuming witness preparation validates and admits work before commitment hashing or evaluation. Proving consumes prepared witnesses, with a shared 128-root ceiling and a separate memory-budget check before trace generation ([#3886](https://github.com/0xMiden/miden-vm/pull/3886)).
 - [BREAKING] Share one Lagrange basis across periodic columns of a period ([#3847](https://github.com/0xMiden/miden-vm/pull/3847)).
 - [BREAKING] Added proven SHA-512 hashing and Ed25519 signature verification to the precompile VM and core library ([#3867](https://github.com/0xMiden/miden-vm/issues/3867)).
 - [BREAKING] Added P-256 curve support, a deferred SHA-256 precompile chiplet, and ECDSA P-256/SHA-256 signature verification and public-key recovery to the core library ([#3896](https://github.com/0xMiden/miden-vm/pull/3896)).

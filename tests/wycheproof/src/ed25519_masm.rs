@@ -129,8 +129,13 @@ end
                     .as_ref()
                     .unwrap_or_else(|| panic!("tcId {id}: missing deferred work"));
                 let root = witness
-                    .compute_root(Arc::clone(&registry))
-                    .unwrap_or_else(|err| panic!("tcId {id}: invalid deferred relation: {err}"));
+                    .clone()
+                    .prepare(
+                        Arc::clone(&registry),
+                        &miden_precompiles::default_verification_precompile_limits(),
+                    )
+                    .unwrap_or_else(|err| panic!("tcId {id}: invalid deferred relation: {err}"))
+                    .root();
                 assert_eq!(root, output.precompile_root(), "tcId {id}: root changed");
             }
         }

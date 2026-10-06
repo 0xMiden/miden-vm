@@ -81,11 +81,14 @@ async fn async_and_sync_execution_witnesses_prove_equivalently() {
     let execution_options = ExecutionOptions::default();
 
     let mut sync_host = DefaultHost::default();
-    let sync_witness =
-        FastProcessor::new_with_options(stack_inputs, advice_inputs.clone(), execution_options)
-            .unwrap()
-            .execute_for_proving_sync(&program, &mut sync_host)
-            .unwrap();
+    let sync_witness = FastProcessor::new_with_options(
+        stack_inputs,
+        advice_inputs.clone(),
+        execution_options.clone(),
+    )
+    .unwrap()
+    .execute_for_proving_sync(&program, &mut sync_host)
+    .unwrap();
     let sync_claim = sync_witness.claim();
     let sync_outputs = *sync_claim.stack_outputs();
     let sync_proof = Prover::new().prove_full(sync_witness).unwrap();
