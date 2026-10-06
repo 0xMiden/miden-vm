@@ -1235,6 +1235,28 @@ mod tests {
     }
 
     #[test]
+    fn programmatically_constructed_typed_constant_links() {
+        let context = TestContext::default();
+        let mut linker = Linker::new(context.source_manager());
+        let mut module = Module::new(ast::ModuleKind::Library, Path::new("::test"));
+        let constant = ast::Constant::new(
+            SourceSpan::UNKNOWN,
+            Visibility::Private,
+            Ident::new("N").expect("valid identifier"),
+            ast::ConstantExpr::Int(Span::unknown(42_u8.into())),
+        )
+        .with_ty(ast::TypeExpr::Primitive(Span::unknown(types::Type::U8)));
+        module.define_constant(constant.clone()).expect("constant should be defined");
+
+        let module_index = linker.link_module(&mut module).expect("typed constant should link");
+        assert_eq!(linker.modules().len(), 1);
+        assert!(matches!(
+            linker[module_index].symbols().next().map(Symbol::item),
+            Some(SymbolItem::Constant(linked)) if linked == &constant
+        ));
+    }
+
+    #[test]
     fn oversized_link_module_resolution_returns_structured_error() {
         let context = TestContext::default();
         let mut linker = Linker::new(context.source_manager());

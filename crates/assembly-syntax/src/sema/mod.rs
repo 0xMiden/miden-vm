@@ -141,6 +141,7 @@ pub fn analyze(
                         docs: None,
                         visibility: ty.visibility(),
                         name: name.clone(),
+                        ty: None,
                         value: discriminant.clone(),
                     });
                 }

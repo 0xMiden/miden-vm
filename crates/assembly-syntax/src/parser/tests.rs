@@ -478,6 +478,7 @@ const WORD = [1, 2, 3, 4]
 const DIGEST = word(\"miden::digest\")
 const EVENT_ID = event(\"miden::event\")
 const VALUE = (parts::COUNT + 3) // 2
+const TYPED_VALUE: u32 = 42
 ",
     );
 

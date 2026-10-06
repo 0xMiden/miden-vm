@@ -2,6 +2,9 @@
 
 ## v1.0.0 (Unreleased)
 
+#### Changes
+
+- Added parser, AST, and formatter support for optional constant type annotations. Annotated constants remain rejected during semantic analysis and linking ([#3957](https://github.com/0xMiden/miden-vm/pull/3957)).
 #### Features
 
 - [BREAKING] Share one Lagrange basis across periodic columns of a period ([#3847](https://github.com/0xMiden/miden-vm/pull/3847)).
@@ -28,6 +31,9 @@
 - Hardened Eidos AEAD tag equality with constant-time comparison and cleared temporary secret-key buffers during serialization and deserialization ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
 - Corrected native and recursive Eidos proof-security estimates to account for restricted Fiat-Shamir challenges. Eidos has a 126-bit generic collision-resistance ceiling and restricted field outputs; see the [security and usage guide](docs/src/design/eidos-security.md).
 - Fixed lifted STARK proving for quotient domains smaller than the SIMD packing width ([#3910](https://github.com/0xMiden/miden-vm/pull/3910)).
+#### Changes
+
+- Added parser, AST, and formatter support for optional constant type annotations (`const NAME: TYPE = expr`). Annotated constants are accepted by the assembler, but annotations do not yet enforce type constraints or affect constant evaluation ([#3957](https://github.com/0xMiden/miden-vm/pull/3957)).
 
 ## v0.35.0 (2026-10-01)
 

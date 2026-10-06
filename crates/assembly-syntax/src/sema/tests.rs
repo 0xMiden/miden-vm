@@ -246,6 +246,19 @@ enum thing: u8 {}
 }
 
 #[test]
+fn typed_constants_pass_analysis() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_module("namespace test\npub const N: u8 = 42\n")
+        .expect("typed constant should pass analysis");
+    let constant = exported_constant(&module, "N");
+    assert!(matches!(
+        &constant.ty,
+        Some(TypeExpr::Primitive(ty)) if ty.inner() == &types::Type::U8
+    ));
+}
+
+#[test]
 fn repeat_count_zero_rejected_in_analysis() {
     let context = SyntaxTestContext::default();
     let error = context
