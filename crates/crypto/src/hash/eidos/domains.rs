@@ -47,14 +47,14 @@ crate::eidos_domain_registry! {
             }
             pub AEAD_CTR_KEY: AeadCtrKeyDomain {
                 local_id: 0x0006,
-                version: DomainVersion::numbered(1),
+                version: DomainVersion::numbered(2),
                 encoding: Custom,
                 description: "Eidos AEAD counter-mode key derivation.",
                 schema: "params = [0, 0, 0]; one fixed key || nonce block",
             }
             pub AEAD_MAC_KEY: AeadMacKeyDomain {
                 local_id: 0x0007,
-                version: DomainVersion::numbered(1),
+                version: DomainVersion::numbered(2),
                 encoding: Custom,
                 description: "Eidos AEAD polynomial-MAC key derivation.",
                 schema: "params = [0, 0, 0]; one fixed key || nonce block",

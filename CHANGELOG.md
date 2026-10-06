@@ -17,11 +17,15 @@
 - [BREAKING] Added `Lmcs::batch_proof` and `Lmcs::lifted_batch_proof` to construct typed batch proofs directly from trees. Custom `Lmcs` implementations must implement `batch_proof` ([#3910](https://github.com/0xMiden/miden-vm/pull/3910)).
 - Reused the fixed And8 setup trace during VM proving and precomputed its commitments for all six proof-hash configurations ([#3910](https://github.com/0xMiden/miden-vm/pull/3910)).
 - Optimized Eidos Merkle tree construction ([#3898](https://github.com/0xMiden/miden-vm/pull/3898)).
+- Evaluated Eidos AEAD MACs without allocating a coefficient buffer and checked input lengths before byte conversion, associated-data copying, or ciphertext deserialization ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
+- [BREAKING] Renamed `auth_empty_ad_expanded_with_scratch` to `auth_empty_ad_expanded_exact` and removed its `scratch_ptr` parameter. Reduced cycle costs in the core library's Eidos AEAD encryption, authentication, and decryption procedures ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
 
 #### Fixes
 
 - [BREAKING] Bumped the portable precompile witness encoding to version 2; version-1 witnesses are rejected before decoding their payloads ([#3879](https://github.com/0xMiden/miden-vm/pull/3879)).
 - [BREAKING] Introduced serialization format version 1 for `MerkleStore` and `PartialMmr` as part of the Eidos migration. Unversioned encodings, including stores embedded in `AdviceInputs`, are rejected; rebuild cached Merkle state using Eidos ([#3879](https://github.com/0xMiden/miden-vm/pull/3879)).
+- [BREAKING] Fixed Eidos AEAD authentication to prevent key-independent tag adjustments. The AEAD key derivation domains use version 2; ciphertexts and tags produced under version 1 are incompatible ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
+- Hardened Eidos AEAD tag equality with constant-time comparison and cleared temporary secret-key buffers during serialization and deserialization ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
 - Corrected native and recursive Eidos proof-security estimates to account for restricted Fiat-Shamir challenges. Eidos has a 126-bit generic collision-resistance ceiling and restricted field outputs; see the [security and usage guide](docs/src/design/eidos-security.md).
 - Fixed lifted STARK proving for quotient domains smaller than the SIMD packing width ([#3910](https://github.com/0xMiden/miden-vm/pull/3910)).
 
