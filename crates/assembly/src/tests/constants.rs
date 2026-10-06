@@ -20,6 +20,22 @@ fn simple_constant() -> TestResult {
 }
 
 #[test]
+fn typed_constant_assembles() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\
+    const N: u8 = 42
+    begin
+        push.N
+    end"
+    );
+    let program = context.assemble(source)?;
+    insta::assert_snapshot!(program);
+    Ok(())
+}
+
+#[test]
 fn enum_explicit_discriminants() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(
