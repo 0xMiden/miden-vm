@@ -791,7 +791,6 @@ impl<'input> Parser<'input> {
         self.bump(); // colon
 
         let mut nesting = Nesting::default();
-        let mut next_can_be_struct_attr = false;
         let mut saw_significant = false;
         let end = loop {
             self.bump_regular_trivia();
@@ -808,17 +807,12 @@ impl<'input> Parser<'input> {
                 break TypeAnnotationEnd::Equals;
             }
 
-            let is_struct_attribute = next_can_be_struct_attr && self.at_kind(SyntaxKind::At);
             // Unclosed delimiters must not hide declarations, but keywords can also be field names.
-            if self.at_top_level_form_starter()
-                && ((nesting.is_root() && !is_struct_attribute)
-                    || self.at_strong_top_level_form_starter())
-            {
+            if self.at_strong_top_level_form_starter() {
                 self.error_here("expected `=` after type annotation");
                 break TypeAnnotationEnd::RecoveryBoundary;
             }
 
-            next_can_be_struct_attr = self.at_keyword("struct");
             self.bump_nesting(&mut nesting, self.current_kind().expect("not eof"));
             self.bump();
             saw_significant = true;
@@ -2389,10 +2383,36 @@ end
     }
 
     #[test]
+    fn parses_constant_type_annotations_with_keyword_path_component() {
+        for (source, annotation_tokens, value) in [
+            ("const X: parts::type = 1\n", &[":", "parts", "::", "type"][..], "1"),
+            (
+                "const X: ptr<parts::type> = 1\n",
+                &[":", "ptr", "<", "parts", "::", "type", ">"],
+                "1",
+            ),
+            ("const X: type::Item = 1\n", &[":", "type", "::", "Item"], "1"),
+            ("const X: parts:: # component\ntype = 1\n", &[":", "parts", "::", "type"], "1"),
+            ("const X: type # separator\n::Item = 1\n", &[":", "type", "::", "Item"], "1"),
+        ] {
+            let annotation = assert_constant_annotation(source, value);
+            assert_eq!(
+                annotation
+                    .significant_tokens()
+                    .map(|token| token.text().to_string())
+                    .collect::<Vec<_>>(),
+                annotation_tokens
+            );
+        }
+    }
+
+    #[test]
     fn constant_type_annotation_recovery_preserves_next_declaration() {
         for source in [
             "const X: u8\nconst Y = 2\n",
             "const X: u8 const Y = 2\n",
+            "const X: parts::\nconst Y = 2\n",
+            "const X: ptr<parts::\nconst Y = 2\n",
             "const X:\nconst Y = 2\n",
             "const X: struct @packed { type: u8 }\nconst Y = 2\n",
             "const X: ptr<[struct @packed { type: u8 }; 4]> const Y = 2\n",

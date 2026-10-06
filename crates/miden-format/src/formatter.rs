@@ -2535,6 +2535,17 @@ const WORD : [
     }
 
     #[test]
+    fn formats_constant_type_annotations_with_keyword_path_component() {
+        for (source, expected) in [
+            ("const X: parts::type = 1\n", "const X : parts::type = 1\n"),
+            ("const X: ptr<parts::type> = 1\n", "const X : ptr<parts::type> = 1\n"),
+            ("const X: type::Item = 1\n", "const X : type::Item = 1\n"),
+        ] {
+            assert_eq!(assert_format_idempotent(source, source), expected);
+        }
+    }
+
+    #[test]
     fn formats_compact_typed_constants() {
         let source = "\
 pub const WORD:[felt;4]=[1,2,3,4]
