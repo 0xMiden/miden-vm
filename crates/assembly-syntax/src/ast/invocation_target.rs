@@ -55,8 +55,20 @@ impl Invoke {
 ///
 /// A label of an invoked procedure must comply with the following rules:
 /// - It can be a hexadecimal string representing a MAST root digest ([Word]). In this case, the
-///   label must start with "0x" and must be followed by a valid hexadecimal string representation
-///   of an [Word].
+///   label must start with "0x" and must be followed by exactly 64 hex digits (32 bytes) — the
+///   serialized byte form returned by [`Word::to_hex`] (equivalently, `Word`'s `Display`/`Debug`
+///   output). This is **not** the hex encoding of the four field elements as canonical big-endian
+///   integers concatenated together: each field element is encoded as its 8-byte little-endian
+///   representation (see [`Word::as_bytes`]), and those 4 * 8 = 32 bytes are what gets rendered as
+///   hex, byte by byte, in order. Concretely, for a word with elements `[e0, e1, e2, e3]`, the
+///   literal is `0x` followed by `hex(e0.to_le_bytes()) || hex(e1.to_le_bytes()) ||
+///   hex(e2.to_le_bytes()) || hex(e3.to_le_bytes())` — i.e. each 16-hex-digit chunk is the
+///   little-endian byte encoding of one field element, not its canonical (big-endian) integer
+///   representation. Encoding a MAST root literal by naively formatting each field element's
+///   integer value as hex and concatenating (e.g. `format!("{e0:016x}{e1:016x}...")`) silently
+///   parses to a *different*, incorrect [Word]/MAST root rather than failing — always construct
+///   such literals from [`Word::to_hex`] (or `Word`'s `Display` impl) instead of hand-encoding the
+///   field elements.
 /// - It can contain a single procedure name. In this case, the label must comply with procedure
 ///   name rules.
 /// - It can contain module name followed by procedure name (e.g., "module::procedure"). In this
