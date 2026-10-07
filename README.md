@@ -131,6 +131,15 @@ See the [Eidos security and usage guide](docs/src/design/eidos-security.md).
 | 2<sup>18</sup>   | 3.97 ms        | 9.02 sec     | 1.91 GiB     | 173.1 KiB  |
 | 2<sup>20</sup>   | 7.68 ms        | 38.92 sec    | 6.46 GiB     | 192.0 KiB  |
 
+The following results use the same workloads on an AMD Ryzen 9 9950X with one Rayon worker.
+
+| Padded VM cycles | Execution time | Proving time | RAM consumed | Proof size |
+| ---------------- | :------------: | :----------: | :----------: | :--------: |
+| 2<sup>14</sup>   | 5.99 ms        | 0.95 sec     | 0.37 GiB     | 154.4 KiB  |
+| 2<sup>16</sup>   | 6.29 ms        | 2.30 sec     | 0.54 GiB     | 154.2 KiB  |
+| 2<sup>18</sup>   | 6.87 ms        | 8.46 sec     | 1.59 GiB     | 173.1 KiB  |
+| 2<sup>20</sup>   | 9.04 ms        | 33.78 sec    | 5.66 GiB     | 192.0 KiB  |
+
 ### Multi-core prover performance
 
 The following runs use 128 Blake3 calls (828,632 VM cycles, padded to 2<sup>20</sup>).
@@ -142,11 +151,24 @@ The following runs use 128 Blake3 calls (828,632 VM cycles, padded to 2<sup>20</
 | Apple M4 Max (16 threads)      |                |              |             |                   |
 | Amazon Graviton 4 (64 threads) |                |              |             |                   |
 | AMD EPYC 9R45 (64 threads)     |                |              |             |                   |
-| AMD Ryzen 9 9950X (16 threads) |                |              |             |                   |
-| AMD Ryzen 9 9950X (32 threads) |                |              |             |                   |
+| AMD Ryzen 9 9950X (16 threads) | 9.71 ms        | 3.78 sec     | 0.26%       | 219 KHz           |
+| AMD Ryzen 9 9950X (32 threads) | 9.53 ms        | 3.83 sec     | 0.25%       | 217 KHz           |
 
 Execution % is execution time divided by proving time. Implied frequency measures VM cycles
 proved per second.
+
+The Ryzen results were measured on October 7, 2026, at commit
+[`08baa7a9`](https://github.com/0xMiden/miden-vm/commit/08baa7a9fcb01b1e14632f922f6acb7c3d750a02).
+The machine ran Arch Linux with kernel 6.18.35-1-lts and had 188 GiB of usable RAM.
+Builds used Rust 1.98.1 and the `optimized` profile with no extra `RUSTFLAGS`.
+The CPU used `amd-pstate-epp` with the `powersave` governor and `balance_performance`
+preference. Boost and SMT were enabled.
+
+Ryzen timings and proof sizes are medians of five samples after one warmup proof.
+The verifier reported 96 bits of conjectured security for the smaller workloads and
+95 bits for the 128-call workload. To reproduce the Ryzen rows, use `--threads 1`
+with `--iterations 2`, `8`, `32`, or `128`, or use `--iterations 128` with
+`--threads 16` or `--threads 32`.
 
 ## References
 
