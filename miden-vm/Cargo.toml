@@ -59,6 +59,7 @@ default = ["std"]
 executable = [
     "dep:clap",
     "dep:hex",
+    "dep:same-file",
     "dep:tracing-subscriber",
     "internal",
     "serde",
@@ -92,6 +93,7 @@ miden-verifier.workspace = true
 # External dependencies
 clap = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
+same-file = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 tracing.workspace = true

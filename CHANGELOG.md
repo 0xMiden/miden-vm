@@ -29,6 +29,7 @@
 - Corrected native and recursive Eidos proof-security estimates to account for restricted Fiat-Shamir challenges. Eidos has a 126-bit generic collision-resistance ceiling and restricted field outputs; see the [security and usage guide](docs/src/design/eidos-security.md).
 - Fixed lifted STARK proving for quotient domains smaller than the SIMD packing width ([#3910](https://github.com/0xMiden/miden-vm/pull/3910)).
 - Restored the VM chiplets diagram showing the hash controller and the Eidos compression and byte-lookup AIRs ([#3977](https://github.com/0xMiden/miden-vm/pull/3977)).
+- Fixed `prove` writing the default outputs file next to the program instead of the proof, and refused an outputs path that names the proof file, so the proof is never replaced ([#3760](https://github.com/0xMiden/miden-vm/pull/3760)).
 
 ## v0.35.0 (2026-10-01)
 
