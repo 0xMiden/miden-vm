@@ -1532,8 +1532,7 @@ mod tests {
         ast::{AstNode, Item as CstItem, SourceFile as CstSourceFile},
         parse_source_file,
     };
-    use miden_core::Felt;
-    use miden_debug_types::{SourceFile, SourceId, SourceLanguage, SourceSpan, Uri};
+    use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
     use pretty_assertions::assert_eq;
 
     use super::{
@@ -1542,7 +1541,7 @@ mod tests {
     };
     use crate::{
         Word, ast,
-        parser::{ParsingError, WordValue, cst::context::LoweringContext},
+        parser::{ParsingError, cst::context::LoweringContext},
     };
 
     #[test]
@@ -1854,6 +1853,11 @@ end
 
     #[test]
     fn mast_root_literal_matches_word_to_hex_byte_order() {
+        use miden_core::Felt;
+        use miden_debug_types::SourceSpan;
+
+        use crate::parser::WordValue;
+
         // Non-symmetric field elements (issue #3885): every byte position is distinct, so any
         // byte-order/transposition bug in the hex <-> Word conversion flips the resulting root.
         let elements: [u64; 4] =

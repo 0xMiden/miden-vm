@@ -6,6 +6,8 @@
 
 #### Changes
 
+- Documented the byte order of MAST root literals and added a regression test ([#3935](https://github.com/0xMiden/miden-vm/pull/3935)).
+
 #### Fixes
 
 ## v0.36.0 (2026-10-14)
