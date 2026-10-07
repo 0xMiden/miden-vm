@@ -1625,6 +1625,22 @@ mod tests {
     }
 
     #[test]
+    fn package_debug_info_rejects_payload_over_standard_limit() {
+        let payload_size = MAX_DEBUG_INFO_PAYLOAD_SIZE + 1;
+        let mut bytes = Vec::new();
+        bytes.write_u8(DEBUG_INFO_VERSION);
+        bytes.write_usize(payload_size);
+        bytes.resize(bytes.len() + payload_size, 0);
+
+        let error = PackageDebugInfo::read_from_bytes(&bytes).unwrap_err();
+        let DeserializationError::InvalidValue(message) = error else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("package debug info payload size"), "{message}");
+        assert!(message.contains("exceeds limit"), "{message}");
+    }
+
+    #[test]
     fn unmetered_package_debug_info_decode_ignores_fixed_limits() {
         let oversized_string = "x".repeat(MAX_DEBUG_INFO_STRING_SIZE + 1);
         let mut builder = PackageDebugInfoBuilder::default();

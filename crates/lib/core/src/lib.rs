@@ -242,6 +242,19 @@ mod tests {
     }
 
     #[test]
+    fn core_package_debug_info_is_readable_with_standard_limits() {
+        let core_lib = CoreLibrary::default();
+        let debug_info = core_lib
+            .package()
+            .debug_info()
+            .expect("embedded core library debug info must satisfy standard decode limits")
+            .expect("embedded core library should contain debug info");
+
+        assert!(!debug_info.functions().is_empty());
+        assert!(!debug_info.nodes().is_empty());
+    }
+
+    #[test]
     fn exported_procedures_have_type_signatures() {
         use miden_mast_package::PackageExport;
 

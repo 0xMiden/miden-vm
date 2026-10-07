@@ -380,7 +380,7 @@ run-examples: exec ## Runs all masm examples to verify they execute correctly
 	for masm in miden-vm/masm-examples/*/*.masm miden-vm/masm-examples/*/*/*.masm; do \
 		[ -f "$$masm" ] || continue; \
 		echo "  $$masm"; \
-		if ! ./target/optimized/miden-vm run "$$masm" > /dev/null 2>&1; then \
+		if ! ./target/optimized/miden-vm run "$$masm" > /dev/null; then \
 			echo "    FAILED: $$masm"; \
 			failed=1; \
 		fi; \
