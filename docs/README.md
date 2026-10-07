@@ -42,11 +42,16 @@ Keep live Mermaid rendering. The current Docusaurus build also requires
 `@mermaid-js/layout-elk` to resolve its optional layout import, even though the
 existing diagram uses the default layout. Local search remains enabled.
 
-KaTeX CSS and fonts come from the locked npm package. Mermaid resolves to the
-direct dependency's version range through the `$mermaid` override. The remaining
-security overrides update `serialize-javascript` and the `uuid` dependency of
-`sockjs` beyond the vulnerable major versions required by their parents. Remove
-these overrides when upstream dependency ranges include patched versions.
+KaTeX CSS and fonts come from the locked npm package. The `$katex` override also
+keeps Mermaid and `rehype-katex` on the patched KaTeX 0.18 release line. Mermaid
+resolves to the direct dependency's version range through the `$mermaid`
+override.
+
+The security overrides require `postcss-selector-parser` 7.1.6 or newer and
+Tinypool 2.1.2 or newer because the build dependencies still request older major
+versions. They also update `serialize-javascript` and the `uuid` dependency of
+`sockjs` beyond the vulnerable versions required by their parents. Remove these
+overrides when upstream dependency ranges include patched versions.
 
 To refresh compatible versions, run `npm update --ignore-scripts`, then repeat
 the build and audit. Commit both `package.json` and `package-lock.json` when the
