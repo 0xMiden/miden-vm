@@ -14,7 +14,7 @@ use miden_mast_package::debug_info::{
     PackageDebugInfo,
 };
 
-use crate::{Continuation, ResumeContext};
+use crate::{Continuation, ResumeContext, continuation_stack::DebugActivationId};
 
 /// Evidence used to recover a source-level frame. Inferred frames are best-effort and may omit
 /// optimized callers; consumers must distinguish them from frames identified by source identity.
@@ -35,7 +35,7 @@ pub struct DebugCallFrame {
     function_idx: DebugFunctionIdx,
     source_node_id: DebugSourceNodeId,
     range_start: u32,
-    continuation_depth: usize,
+    activation: DebugActivationId,
     inherited_inline_calls: usize,
     origin: DebugFrameOrigin,
 }
@@ -66,7 +66,7 @@ impl DebugCallFrame {
             && self.function_idx == other.function_idx
             && self.source_node_id == other.source_node_id
             && self.range_start == other.range_start
-            && self.continuation_depth == other.continuation_depth
+            && self.activation == other.activation
     }
 }
 
@@ -363,6 +363,9 @@ impl DebugCallFrameResolver {
             let Some(node) = info.source_node(*source) else {
                 continue;
             };
+            let Some(activation) = context.continuation_stack.debug_activation_at(position) else {
+                continue;
+            };
             let operation = match continuation {
                 Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
                     let block = forest[*node_id].unwrap_basic_block();
@@ -402,7 +405,7 @@ impl DebugCallFrameResolver {
                     function,
                     *source,
                     node.op_start,
-                    position,
+                    activation.clone(),
                     inherited,
                     if exact.is_some() {
                         DebugFrameOrigin::Source
@@ -435,7 +438,7 @@ impl DebugCallFrameResolver {
                         range.function,
                         *source,
                         range.start,
-                        position,
+                        activation.clone(),
                         inherited + range.inherited_inline_calls,
                         DebugFrameOrigin::InferredRange,
                     ));
@@ -459,7 +462,7 @@ impl DebugCallFrameResolver {
                     function,
                     *source,
                     node.op_start,
-                    position,
+                    activation,
                     inherited,
                     DebugFrameOrigin::InferredContext,
                 ));
@@ -482,7 +485,7 @@ fn frame(
     function_idx: DebugFunctionIdx,
     source_node_id: DebugSourceNodeId,
     range_start: u32,
-    continuation_depth: usize,
+    activation: DebugActivationId,
     inherited_inline_calls: usize,
     origin: DebugFrameOrigin,
 ) -> DebugCallFrame {
@@ -491,7 +494,7 @@ fn frame(
         function_idx,
         source_node_id,
         range_start,
-        continuation_depth,
+        activation,
         inherited_inline_calls,
         origin,
     }
