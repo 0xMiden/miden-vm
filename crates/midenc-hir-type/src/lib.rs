@@ -18,7 +18,6 @@ use alloc::{borrow::Cow, boxed::Box, sync::Arc};
 use core::fmt;
 
 use miden_formatting::prettier::PrettyPrint;
-/// Represents the type of a value in the HIR type system
 #[cfg(all(feature = "arbitrary", test))]
 use miden_serde_utils::{Deserializable, Serializable};
 
@@ -27,6 +26,7 @@ pub use self::{
     recursive::*, struct_type::*,
 };
 
+/// Represents the type of a value in the HIR type system
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
