@@ -36,7 +36,8 @@ const SPARSE_EXTERNAL: u8 = 8;
 /// This format preserves the sparse maps produced by execution tracing. It does not prove that
 /// this sparse view is a subset of a committed [`MastForest`], and it does not share the dense
 /// [`MastForest`] wire format. Callers must only read these bytes from a trusted producer, or after
-/// an outer transport/authentication layer has accepted them.
+/// an outer transport/authentication layer has accepted them. The format is version-local and is
+/// not suitable for persistence across releases.
 fn write_sparse_into<W: ByteWriter>(forest: &SparseMastForest, target: &mut W) {
     write_node_ids(forest.procedure_roots(), target);
     write_sparse_nodes(forest.nodes(), target);
@@ -140,7 +141,7 @@ impl Deserializable for SparseMastForest {
     /// This is not an untrusted input format. The reader performs cheap structural checks, but a
     /// producer controls collection lengths and can drive allocation. Callers must only read these
     /// bytes from a trusted producer, or after an outer transport/authentication layer has accepted
-    /// them.
+    /// them. Payloads are version-local and must not be persisted across releases.
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         let budget = bytes.len().saturating_mul(TRUSTED_BYTE_READ_BUDGET_MULTIPLIER);
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);

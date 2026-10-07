@@ -9,15 +9,21 @@ In this section we describe semantics and AIR constraints of operations over u32
 ### Range checks
 Most operations described below require some number of 16-bit range checks (i.e., verifying that the value of a field element is smaller than $2^{16}$). The number of required range checks varies between $2$ and $4$, depending on the operation. However, to simplify the constraint system, we force each relevant operation to consume exactly $4$ range checks. `U32DIV` performs two additional range checks for its remainder bound, as described below.
 
-To perform these range checks, the prover puts the values to be range-checked into helper registers $h_0, ..., h_3$, and then updates the range checker bus column $b_{range}$ according to the LogUp construction described in the [range checker](../range.md) documentation, using multiplicity $1$ for each value.
+To perform these range checks, the prover puts the values into helper registers $h_0, ..., h_3$
+and removes four unit-multiplicity `RangeCheck` messages from the typed LogUp relation described in
+the [16-bit range-check](../range.md) documentation. The fixed `And8LookupAir` table supplies the
+matching messages; there is no range-checker execution-trace component.
 
 This operation is enforced via the following constraint. Note that since constraints cannot include divisions, the actual constraint which is enforced will be expressed equivalently with all denominators multiplied through, resulting in a constraint of degree 5.
 
 $$
-b_{range}' = b_{range} - \frac{1}{(\alpha - h_0)} - \frac{1}{(\alpha - h_1)} - \frac{1}{(\alpha - h_2)} - \frac{1}{(\alpha - h_3)} \text{ | degree} = 5
+b_{range}' = b_{range} - \frac{1}{R(h_0)} - \frac{1}{R(h_1)} - \frac{1}{R(h_2)} - \frac{1}{R(h_3)} \text{ | degree} = 5
 $$
 
-The above is just a partial constraint as it does not show the range checker's part of the constraint, which adds the required values into the bus column. It also omits the [selector flag](./op_constraints.md#operation-flags) which is used to turn this constraint on only when executing relevant operations.
+Here $R$ is the challenge reduction for the typed `RangeCheck` message. The displayed equation is
+only the request side: `And8LookupAir` adds the matching table messages with their recorded
+multiplicities. It also omits the [selector flag](./op_constraints.md#operation-flags), which turns
+the request on only for the relevant operations.
 
 ### Checking element validity
 Another primitive which is required by most of the operations described below is checking whether four 16-bit values form a valid field element. Assume $t_0$, $t_1$, $t_2$, and $t_3$ are known to be 16-bit values, and we want to verify that $2^{48} \cdot t_3 + 2^{32} \cdot t_2 + 2^{16} \cdot t_1 + t_0$ is a valid field element.
@@ -278,13 +284,14 @@ Assume $s_0$ and $s_1$ are the values at the top of the stack. The `U32AND` oper
 
 ![u32and](../../img/design/stack/u32_operations/U32AND.png)
 
-To facilitate this operation, we will need to make a request to the chiplet bus $b_{chip}$ by dividing its current value by the value representing bitwise operation request. This can be enforced with the following constraint:
+The operation removes one typed `Bitwise` message from the
+[LogUp relation](../lookups/logup.md), with multiplicity $-1$:
 
 $$
-b_{chip}' \cdot \left(\alpha_0 + \alpha_1 \cdot op_{u32and} + \alpha_2 \cdot s_0 + \alpha_3 \cdot s_1 +  \alpha_4 \cdot s_0'  \right) = b_{chip} \text{ | degree} = 2
+[0,s_0,s_1,s'_0].
 $$
 
-In the above, $op_{u32and}$ is the unique [operation label](../chiplets/index.md#operation-labels) of the bitwise `AND` operation.
+The leading $0$ selects AND. The bitwise chiplet adds the matching message with multiplicity $+1$.
 
 **Note**: unlike for many other u32 operations, bitwise AND operation does not assume that the values at the top of the stack are smaller than $2^{32}$. This is because the lookup will fail for any inputs which are not 32-bit integers.
 
@@ -296,13 +303,13 @@ Assume $s_0$ and $s_1$ are the values at the top of the stack. The `U32XOR` oper
 
 ![u32xor](../../img/design/stack/u32_operations/U32XOR.png)
 
-To facilitate this operation, we will need to make a request to the chiplet bus $b_{chip}$ by dividing its current value by the value representing bitwise operation request. This can be enforced with the following constraint:
+The operation removes one typed `Bitwise` message from the LogUp relation, with multiplicity $-1$:
 
 > $$
-> b_{chip}' \cdot \left(\alpha_0 + \alpha_1 \cdot op_{u32xor} + \alpha_2 \cdot s_0 + \alpha_3 \cdot s_1 +  \alpha_4 \cdot s_0'  \right) = b_{chip} \text{ | degree} = 2
+> [1,s_0,s_1,s'_0].
 > $$
 
-In the above, $op_{u32xor}$ is the unique [operation label](../chiplets/index.md#operation-labels) of the bitwise `XOR` operation.
+The leading $1$ selects XOR. The bitwise chiplet adds the matching message with multiplicity $+1$.
 
 **Note**: unlike for many other u32 operations, bitwise XOR operation does not assume that the values at the top of the stack are smaller than $2^{32}$. This is because the lookup will fail for any inputs which are not 32-bit integers.
 

@@ -6,7 +6,7 @@ use alloc::{
 };
 use std::{fs, path::Path};
 
-use miden_core::Word;
+use miden_core::{Word, deferred::EidosFrame};
 use miden_precompiles::{
     CurveId, CurvePrecompile, Limbs, ONE_LIMBS, TWO_LIMBS, UintDomain, UintPrecompile, ZERO_LIMBS,
 };
@@ -51,7 +51,11 @@ fn render_uint(config: &UintMasmConfig) -> Result<String, String> {
     let two = constant(TWO_LIMBS, domain);
     let domain_constants = render_uint_constants(config)?;
     let domain_extra_procs = render_uint_extra_procs(config)?;
-    let op_tag = |op_id| word_literal(tag_word(UintPrecompile::op_tag(op_id)));
+    let value_frame = UintPrecompile::value_frame(domain);
+    let add_frame = UintPrecompile::op_frame(UintPrecompile::ADD_OP_ID);
+    let sub_frame = UintPrecompile::op_frame(UintPrecompile::SUB_OP_ID);
+    let mul_frame = UintPrecompile::op_frame(UintPrecompile::MUL_OP_ID);
+    let eq_frame = UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID);
 
     let replacements = vec![
         ("TEMPLATE_PATH", UINT_TEMPLATE_PATH.to_string()),
@@ -62,12 +66,12 @@ fn render_uint(config: &UintMasmConfig) -> Result<String, String> {
         ("ENCODED_MODULUS_NOTE", encoded_modulus_note(domain).to_string()),
         ("BOUND_PTR", domain.bound_ptr().to_string()),
         ("ENCODED_MODULUS_LIMBS", limbs_literal(domain.encoded_modulus())),
-        ("PRECOMPILE_ID", UintPrecompile::id().as_canonical_u64().to_string()),
-        ("VALUE_TAG", word_literal(tag_word(UintPrecompile::value_tag(domain)))),
-        ("ADD_TAG", op_tag(UintPrecompile::ADD_OP_ID)),
-        ("SUB_TAG", op_tag(UintPrecompile::SUB_OP_ID)),
-        ("MUL_TAG", op_tag(UintPrecompile::MUL_OP_ID)),
-        ("EQ_TAG", op_tag(UintPrecompile::EQ_OP_ID)),
+        ("PRECOMPILE_ID", UintPrecompile::domain().as_u32().to_string()),
+        ("VALUE_INIT_CV", initial_cv_literal(value_frame)),
+        ("ADD_INIT_CV", initial_cv_literal(add_frame)),
+        ("SUB_INIT_CV", initial_cv_literal(sub_frame)),
+        ("MUL_INIT_CV", initial_cv_literal(mul_frame)),
+        ("EQ_INIT_CV", initial_cv_literal(eq_frame)),
         ("ZERO_DIGEST", zero.digest),
         ("ZERO_LO_WORD", zero.lo_word),
         ("ZERO_HI_WORD", zero.hi_word),
@@ -149,25 +153,37 @@ fn constant(value: Limbs, domain: UintDomain) -> ConstantMasm {
 
 fn render_curve(config: &CurveMasmConfig) -> Result<String, String> {
     let curve = config.curve;
-    let op_tag = |op_id| word_literal(tag_word(CurvePrecompile::op_tag(op_id)));
+    let value_frame = CurvePrecompile::value_frame(curve);
+    let add_frame = CurvePrecompile::op_frame(CurvePrecompile::ADD_OP_ID);
+    let sub_frame = CurvePrecompile::op_frame(CurvePrecompile::SUB_OP_ID);
+    let eq_frame = CurvePrecompile::op_frame(CurvePrecompile::EQ_OP_ID);
+    let msm_base_cv = digest_word(
+        EidosFrame::new(CurvePrecompile::domain(), [CurvePrecompile::MSM_OP_ID as u32, 0, 0])
+            .initial_chaining_word(),
+    );
     let replacements = vec![
         ("TEMPLATE_PATH", CURVE_TEMPLATE_PATH.to_string()),
         ("REGENERATE_COMMAND", REGENERATE_COMMAND.to_string()),
         ("TITLE", config.title.to_string()),
         ("BASE_FIELD_MODULE", config.base_field_module.to_string()),
         ("BASE_FIELD_DESCRIPTION", config.base_field_description.to_string()),
-        ("PRECOMPILE_ID", CurvePrecompile::id().as_canonical_u64().to_string()),
+        ("PRECOMPILE_ID", CurvePrecompile::domain().as_u32().to_string()),
         ("GROUP_PTR", curve.group_ptr().to_string()),
         ("VALUE_OP_ID", CurvePrecompile::VALUE_OP_ID.to_string()),
         ("ADD_OP_ID", CurvePrecompile::ADD_OP_ID.to_string()),
         ("SUB_OP_ID", CurvePrecompile::SUB_OP_ID.to_string()),
         ("EQ_OP_ID", CurvePrecompile::EQ_OP_ID.to_string()),
         ("MSM_OP_ID", CurvePrecompile::MSM_OP_ID.to_string()),
-        ("VALUE_TAG", word_literal(tag_word(CurvePrecompile::value_tag(curve)))),
-        ("ADD_TAG", op_tag(CurvePrecompile::ADD_OP_ID)),
-        ("SUB_TAG", op_tag(CurvePrecompile::SUB_OP_ID)),
-        ("EQ_TAG", op_tag(CurvePrecompile::EQ_OP_ID)),
-        ("MSM_TAG", word_literal(tag_word(CurvePrecompile::msm_tag()))),
+        ("VALUE_INIT_CV", initial_cv_literal(value_frame)),
+        ("ADD_INIT_CV", initial_cv_literal(add_frame)),
+        ("SUB_INIT_CV", initial_cv_literal(sub_frame)),
+        ("EQ_INIT_CV", initial_cv_literal(eq_frame)),
+        ("MSM_INIT_CV", initial_cv_literal(CurvePrecompile::msm_frame(1))),
+        ("MSM2_INIT_CV", initial_cv_literal(CurvePrecompile::msm_frame(2))),
+        ("MSM_BASE_CV_0", msm_base_cv[0].to_string()),
+        ("MSM_BASE_CV_1", msm_base_cv[1].to_string()),
+        ("MSM_BASE_CV_2", msm_base_cv[2].to_string()),
+        ("MSM_BASE_CV_3", msm_base_cv[3].to_string()),
         (
             "IDENTITY_DIGEST",
             word_literal(digest_word(CurvePrecompile::identity_node(curve).digest())),
@@ -250,9 +266,8 @@ fn ensure_no_template_placeholders(rendered: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn tag_word(tag: miden_core::deferred::Tag) -> [u64; 4] {
-    let word = tag.as_word();
-    core::array::from_fn(|i| word[i].as_canonical_u64())
+fn initial_cv_literal(frame: EidosFrame) -> String {
+    word_literal(digest_word(frame.initial_chaining_word()))
 }
 
 fn digest_word(digest: Word) -> [u64; 4] {

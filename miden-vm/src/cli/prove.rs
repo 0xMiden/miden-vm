@@ -34,7 +34,9 @@ pub struct ProveCmd {
     #[arg(short = 'm', long = "max-cycles", default_value_t = ExecutionOptions::MAX_CYCLES)]
     max_cycles: u32,
 
-    /// Maximum memory, in bytes, the prover may allocate (accepts suffixes: 512M, 32Gi)
+    /// Maximum modelled peak memory for VM trace proving (accepts suffixes: 512M, 32Gi)
+    ///
+    /// Excludes fixed preprocessed setup and precompile proving.
     #[arg(
         long = "max-prover-memory",
         default_value_t = Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES,
@@ -55,7 +57,7 @@ pub struct ProveCmd {
     proof_file: Option<PathBuf>,
 
     /// Specifies the hash function to be used
-    /// Valid options: blake3-256, rpo, rpx, poseidon2
+    /// Valid options: blake3-256, rpo, rpx, poseidon2, keccak, eidos
     #[arg(long = "hasher", default_value = "blake3-256")]
     hasher: String,
 

@@ -4,7 +4,9 @@ use miden_core::{
     Felt, Word,
     advice::AdviceInputs,
     crypto::hash::Keccak256,
-    deferred::{Node, PrecompileWitness, PrecompileWitnessEntry, Tag},
+    deferred::{
+        DEFERRED_AND_FRAME, Node, PrecompileWitness, PrecompileWitnessEntry, deferred_chunks_frame,
+    },
     program::proof_request_key,
     proof::{HashFunction, PrecompileProof, StarkProof},
 };
@@ -36,7 +38,7 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
     let mut suffixed_bytes = short_proof.proof.bytes().to_vec();
     suffixed_bytes.push(0xaa);
     let suffixed_proof = PrecompileProof {
-        proof: StarkProof::new(suffixed_bytes, HashFunction::Poseidon2),
+        proof: StarkProof::new(suffixed_bytes, HashFunction::Eidos),
         roots: short_proof.roots,
     };
     assert!(
@@ -53,9 +55,9 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
         .expect("host adapter must parse the long proof");
 
     assert_ne!(
-        pvm_order_tag(&short),
-        pvm_order_tag(&long),
-        "fixtures must exercise distinct registry leaves",
+        pvm_proof_order(&short),
+        pvm_proof_order(&long),
+        "fixtures must exercise distinct proof orders",
     );
     assert_pvm_verifies(&short);
     assert_pvm_verifies(&long);
@@ -81,11 +83,36 @@ fn assert_pvm_rejects_tampering(inputs: &PvmRecursiveVerifierInputs) {
     let wrong_claim_advice = AdviceInputs::new(stack, map, store);
     assert_pvm_rejects(&wrong_claim_advice, wrong_claim_commitment);
 
-    let mut wrong_shape = inputs.advice().clone();
-    mutate_proof_stream(inputs, &mut wrong_shape, |stream| {
-        stream[SECURITY_PARAM_COUNT] += Felt::ONE
-    });
-    assert_pvm_rejects(&wrong_shape, inputs.claim_commitment());
+    // The ten heights are the sole carrier of proof order into the OOD scatter table, the sigma
+    // scatter, and fold staging. Chiplet 3's height is verifier-fixed (its stream slot must equal
+    // a constant, so forging it fails a shape check rather than exercising order binding); every
+    // other chiplet's height is advice-supplied and must be transcript-bound.
+    const FIXED_CHIPLET: usize = 3;
+
+    let honest_order = pvm_proof_order(inputs);
+    let mut reordering_forgeries = 0usize;
+    for chiplet in (0..NUM_CHIPLETS).filter(|&chiplet| chiplet != FIXED_CHIPLET) {
+        let mut wrong_shape = inputs.advice().clone();
+        mutate_proof_stream(inputs, &mut wrong_shape, |stream| {
+            stream[SECURITY_PARAM_COUNT + chiplet] += Felt::ONE;
+        });
+
+        let mut forged_heights: Vec<Felt> = self::proof_stream(inputs)
+            [SECURITY_PARAM_COUNT..SECURITY_PARAM_COUNT + NUM_CHIPLETS]
+            .to_vec();
+        forged_heights[chiplet] += Felt::ONE;
+        let mut forged_order: Vec<usize> = (0..NUM_CHIPLETS).collect();
+        forged_order.sort_by_key(|&i| (forged_heights[i].as_canonical_u64(), i));
+        if forged_order != honest_order {
+            reordering_forgeries += 1;
+        }
+
+        assert_pvm_rejects(&wrong_shape, inputs.claim_commitment());
+    }
+    assert!(
+        reordering_forgeries > 0,
+        "no forged height moved the proof order, so this fixture cannot cover order binding"
+    );
 
     for index in 0..SECURITY_PARAM_COUNT {
         let mut wrong_params = inputs.advice().clone();
@@ -102,8 +129,13 @@ fn assert_pvm_rejects_tampering(inputs: &PvmRecursiveVerifierInputs) {
         .max_by_key(|(_, values)| values.len())
         .map(|(key, values)| (*key, values.to_vec()))
         .expect("adapter must include the selected ACE stream");
-    assert!(
-        circuit_values.len() > 10_000,
+    let stream_blocks: usize = include_str!("../../asm/sys/pvm/constraints_eval.masm")
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("const ACE_STREAM_BLOCKS = ")?.parse().ok())
+        .expect("the generated PVM evaluator declares its stream length");
+    assert_eq!(
+        circuit_values.len(),
+        8 * stream_blocks,
         "the largest content-addressed value must be the ACE instruction stream"
     );
     let mut circuit_stream = circuit_values;
@@ -128,18 +160,29 @@ pub(super) fn prove_keccak_claim(input: &[u8]) -> PrecompileProof {
     );
     let witness = PrecompileWitness::from_entries(vec![
         PrecompileWitnessEntry::Data {
-            tag: Tag::CHUNKS,
+            frame: deferred_chunks_frame(
+                u32::try_from(input_node.payload().as_data().unwrap().len())
+                    .expect("fixture chunk count fits u32"),
+            ),
             chunks: input_node.payload().as_data().unwrap().to_vec(),
         },
         PrecompileWitnessEntry::Data {
-            tag: Tag::CHUNKS,
+            frame: deferred_chunks_frame(1),
             chunks: vec![digest_chunk],
         },
-        PrecompileWitnessEntry::Join { tag: assertion.tag(), lhs: 1, rhs: 2 },
-        PrecompileWitnessEntry::Join { tag: Tag::AND, lhs: 0, rhs: 3 },
+        PrecompileWitnessEntry::Join {
+            frame: assertion.frame().expect("assertion nodes carry a frame"),
+            lhs: 1,
+            rhs: 2,
+        },
+        PrecompileWitnessEntry::Join {
+            frame: DEFERRED_AND_FRAME,
+            lhs: 0,
+            rhs: 3,
+        },
     ])
     .expect("Keccak fixture has a canonical portable graph");
-    prove_precompiles(vec![witness], HashFunction::Poseidon2)
+    prove_precompiles(vec![witness], HashFunction::Eidos)
         .expect("fixture must produce a PVM STARK proof")
 }
 
@@ -228,11 +271,13 @@ fn assert_pvm_rejects(advice: &AdviceInputs, claim_commitment: Word) {
     );
 }
 
-fn pvm_order_tag(inputs: &PvmRecursiveVerifierInputs) -> u32 {
+/// The chiplet instances in committed-trace order: ascending log height, instance index breaking
+/// ties.
+fn pvm_proof_order(inputs: &PvmRecursiveVerifierInputs) -> Vec<usize> {
     let heights = &proof_stream(inputs)[SECURITY_PARAM_COUNT..SECURITY_PARAM_COUNT + NUM_CHIPLETS];
     let mut proof_order: Vec<usize> = (0..NUM_CHIPLETS).collect();
     proof_order.sort_by_key(|&i| (heights[i].as_canonical_u64(), i));
-    miden_ace_codegen::order_tag(&proof_order)
+    proof_order
 }
 
 fn run_interleaved_verifiers(

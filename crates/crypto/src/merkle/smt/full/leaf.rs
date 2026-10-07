@@ -3,8 +3,8 @@ use alloc::{string::ToString, vec::Vec};
 use super::EMPTY_WORD;
 use crate::{
     Felt, Word,
-    hash::poseidon2::Poseidon2,
-    merkle::smt::{LEAF_DOMAIN, LeafIndex, MAX_LEAF_ENTRIES, SMT_DEPTH, SmtLeafError},
+    hash::eidos::{Eidos, domains::SMT_BUCKET_LEAF},
+    merkle::smt::{LeafIndex, MAX_LEAF_ENTRIES, SMT_DEPTH, SmtLeafError},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -83,10 +83,13 @@ impl SmtLeaf {
     }
 
     /// Returns a new multiple leaf with the specified entries. The leaf index is derived from the
-    /// entries' keys.
+    /// entries' keys. Entries must be sorted by key in strictly increasing order, which is the
+    /// form that `SmtLeaf::insert` and `SmtLeaf::remove` maintain.
     ///
     /// # Errors
     ///   - Returns an error if 2 keys in `entries` map to a different leaf index
+    ///   - Returns an error if the keys are not sorted in strictly increasing order (this also
+    ///     rejects repeated keys)
     ///   - Returns an error if the number of entries exceeds [`MAX_LEAF_ENTRIES`]
     pub fn new_multiple(entries: Vec<(Word, Word)>) -> Result<Self, SmtLeafError> {
         if entries.len() < 2 {
@@ -97,12 +100,14 @@ impl SmtLeaf {
             return Err(SmtLeafError::TooManyLeafEntries { actual: entries.len() });
         }
 
-        // Check that all keys map to the same leaf index
+        // Check that all keys map to the same leaf index and are strictly increasing, since
+        // `insert()` and `remove()` binary-search the entries.
         {
             let mut keys = entries.iter().map(|(key, _)| key);
 
             let first_key = *keys.next().expect("ensured at least 2 entries");
             let first_leaf_index: LeafIndex<SMT_DEPTH> = first_key.into();
+            let mut previous_key = first_key;
 
             for &next_key in keys {
                 let next_leaf_index: LeafIndex<SMT_DEPTH> = next_key.into();
@@ -113,6 +118,14 @@ impl SmtLeaf {
                         key_2: next_key,
                     });
                 }
+
+                if next_key <= previous_key {
+                    return Err(SmtLeafError::UnsortedMultipleLeafKeys {
+                        previous: previous_key,
+                        next: next_key,
+                    });
+                }
+                previous_key = next_key;
             }
         }
 
@@ -182,13 +195,8 @@ impl SmtLeaf {
     pub fn hash(&self) -> Word {
         match self {
             SmtLeaf::Empty(_) => EMPTY_WORD,
-            SmtLeaf::Single((key, value)) => {
-                Poseidon2::merge_in_domain(&[*key, *value], LEAF_DOMAIN)
-            },
-            SmtLeaf::Multiple(kvs) => {
-                let elements: Vec<Felt> = kvs.iter().copied().flat_map(kv_to_elements).collect();
-                Poseidon2::hash_elements_in_domain(&elements, LEAF_DOMAIN)
-            },
+            SmtLeaf::Single(entry) => hash_entries(core::slice::from_ref(entry)),
+            SmtLeaf::Multiple(entries) => hash_entries(entries),
         }
     }
 
@@ -416,4 +424,14 @@ pub(crate) fn kv_to_elements((key, value): (Word, Word)) -> impl Iterator<Item =
     let value_elements = value.into_iter();
 
     key_elements.chain(value_elements)
+}
+
+fn hash_entries(entries: &[(Word, Word)]) -> Word {
+    let num_entries = u32::try_from(entries.len()).expect("SMT leaf entry count must fit in a u32");
+    let mut cv = Eidos::init_chaining_word(SMT_BUCKET_LEAF, num_entries);
+    for &(key, value) in entries {
+        let block = core::array::from_fn(|i| if i < 4 { key[i] } else { value[i - 4] });
+        cv = Eidos::compress(cv, block);
+    }
+    cv
 }

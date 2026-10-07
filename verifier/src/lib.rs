@@ -17,11 +17,14 @@ use miden_core::{
     proof::{CURRENT_PVM_VERIFIER_ROOT, CURRENT_VM_VERIFIER_ROOT, MAX_STARK_PROOF_BYTES},
 };
 use miden_crypto::stark::{
-    StarkConfig, VerifierInstance, lmcs::Lmcs, proof::StarkProofData, verifier::VerifierError,
+    PreprocessedValidationError, StarkConfig, VerifierInstance, lmcs::Lmcs, proof::StarkProofData,
+    verifier::VerifierError,
 };
 use miden_serde_utils::deserialize_schema_exact;
 use serde::de::DeserializeOwned;
 use serde_wincode::{SerdeCompat, wincode};
+
+type PreprocessedCommitment<SC> = <<SC as StarkConfig<Felt, QuadFelt>>::Lmcs as Lmcs>::Commitment;
 
 // RE-EXPORTS
 // ================================================================================================
@@ -332,23 +335,63 @@ impl Verifier {
         match stark.hash_fn() {
             HashFunction::Blake3_256 => {
                 let config = config::blake3_256_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
+                self.verify_stark_proof(
+                    &config,
+                    &public_values,
+                    &aux_inputs,
+                    proof_bytes,
+                    config::BLAKE3_PREPROCESSED_COMMITMENT.into(),
+                )
             },
             HashFunction::Rpo256 => {
                 let config = config::rpo_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
+                self.verify_stark_proof(
+                    &config,
+                    &public_values,
+                    &aux_inputs,
+                    proof_bytes,
+                    config::RPO_PREPROCESSED_COMMITMENT.into(),
+                )
             },
             HashFunction::Rpx256 => {
                 let config = config::rpx_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
+                self.verify_stark_proof(
+                    &config,
+                    &public_values,
+                    &aux_inputs,
+                    proof_bytes,
+                    config::RPX_PREPROCESSED_COMMITMENT.into(),
+                )
+            },
+            HashFunction::Eidos => {
+                let config = config::eidos_config(pcs_params, config::RELATION_DIGEST);
+                self.verify_stark_proof(
+                    &config,
+                    &public_values,
+                    &aux_inputs,
+                    proof_bytes,
+                    config::EIDOS_PREPROCESSED_COMMITMENT.into(),
+                )
             },
             HashFunction::Poseidon2 => {
                 let config = config::poseidon2_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
+                self.verify_stark_proof(
+                    &config,
+                    &public_values,
+                    &aux_inputs,
+                    proof_bytes,
+                    config::POSEIDON2_PREPROCESSED_COMMITMENT.into(),
+                )
             },
             HashFunction::Keccak => {
                 let config = config::keccak_config(pcs_params, config::RELATION_DIGEST);
-                self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
+                self.verify_stark_proof(
+                    &config,
+                    &public_values,
+                    &aux_inputs,
+                    proof_bytes,
+                    config::KECCAK_PREPROCESSED_COMMITMENT.into(),
+                )
             },
         }
         .map_err(|error| VerificationError::StarkVerificationError(program_root, Box::new(error)))
@@ -358,7 +401,7 @@ impl Verifier {
                 log_max_height,
                 num_kernel_procedures,
                 alignment,
-                stark.hash_fn().collision_resistance(),
+                stark.hash_fn(),
             )
         })
     }
@@ -375,10 +418,11 @@ impl Verifier {
         public_values: &[Felt],
         aux_inputs: &[Felt],
         proof_bytes: &[u8],
+        preprocessed_commitment: PreprocessedCommitment<SC>,
     ) -> Result<(u32, usize), StarkVerificationError>
     where
         SC: StarkConfig<Felt, QuadFelt>,
-        <SC::Lmcs as Lmcs>::Commitment: DeserializeOwned,
+        PreprocessedCommitment<SC>: DeserializeOwned,
     {
         if proof_bytes.len() > MAX_STARK_PROOF_BYTES {
             return Err(StarkVerificationError::ProofTooLarge {
@@ -408,8 +452,7 @@ impl Verifier {
         )
         .map_err(|error| StarkVerificationError::Verifier(VerifierError::from(error)))?;
 
-        VerifierInstance::new(config, &statement, None)
-            .expect("Miden AIRs declare no preprocessed columns")
+        VerifierInstance::new(config, &statement, Some(preprocessed_commitment))?
             .verify(&proof, challenger)?;
 
         let log_max_height =
@@ -518,6 +561,8 @@ pub enum StarkVerificationError {
     ProofTooLarge { size: usize, max: usize },
     #[error(transparent)]
     Verifier(#[from] VerifierError),
+    #[error(transparent)]
+    Preprocessed(#[from] PreprocessedValidationError),
 }
 
 // HELPER FUNCTIONS
@@ -534,7 +579,7 @@ fn roots_overlap(proof_roots: &[Word], accepted_roots: &[Word]) -> bool {
 mod tests {
     use alloc::{vec, vec::Vec};
 
-    use miden_core::deferred::{PrecompileWitness, PrecompileWitnessEntry, Tag};
+    use miden_core::deferred::{DEFERRED_AND_FRAME, PrecompileWitness, PrecompileWitnessEntry};
 
     use super::*;
 
@@ -558,14 +603,14 @@ mod tests {
 
     fn vm_proof(precompile_root: Word) -> VmProof {
         VmProof {
-            proof: StarkProof::new(vec![0, 0], HashFunction::Blake3_256),
+            proof: StarkProof::new(vec![0, 0], HashFunction::Eidos),
             precompile_root,
         }
     }
 
     fn precompile_proof(roots: Vec<Word>) -> PrecompileProof {
         PrecompileProof {
-            proof: StarkProof::new(vec![0, 0], HashFunction::Poseidon2),
+            proof: StarkProof::new(vec![0, 0], HashFunction::Eidos),
             roots,
         }
     }
@@ -585,7 +630,7 @@ mod tests {
         let required = root(1);
         let deferred = PrecompileStatus::Deferred(
             PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
-                tag: Tag::AND,
+                frame: DEFERRED_AND_FRAME,
                 lhs: 0,
                 rhs: 0,
             }])
@@ -631,19 +676,23 @@ mod tests {
 
         let witness = PrecompileWitness::from_entries(vec![
             PrecompileWitnessEntry::Data {
-                tag: UintPrecompile::value_tag(UintDomain::U256),
+                frame: UintPrecompile::value_frame(UintDomain::U256),
                 chunks: vec![[Felt::from_u32(0); 8]],
             },
             PrecompileWitnessEntry::Data {
-                tag: UintPrecompile::value_tag(UintDomain::U256),
+                frame: UintPrecompile::value_frame(UintDomain::U256),
                 chunks: vec![core::array::from_fn(|i| Felt::from_u32(u32::from(i == 0)))],
             },
             PrecompileWitnessEntry::Join {
-                tag: UintPrecompile::op_tag(UintPrecompile::EQ_OP_ID),
+                frame: UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID),
                 lhs: 1,
                 rhs: 2,
             },
-            PrecompileWitnessEntry::Join { tag: Tag::AND, lhs: 0, rhs: 3 },
+            PrecompileWitnessEntry::Join {
+                frame: DEFERRED_AND_FRAME,
+                lhs: 0,
+                rhs: 3,
+            },
         ])
         .unwrap();
         // Evaluating this witness first would reject its false assertion instead of the VM STARK.
@@ -700,7 +749,7 @@ mod tests {
         let proof = ExecutionProof::new(
             vm_proof(required),
             PrecompileStatus::Proven(PrecompileProof {
-                proof: StarkProof::new(vec![0; MAX_STARK_PROOF_BYTES + 1], HashFunction::Poseidon2),
+                proof: StarkProof::new(vec![0; MAX_STARK_PROOF_BYTES + 1], HashFunction::Eidos),
                 roots: vec![required],
             }),
         );
@@ -731,10 +780,7 @@ mod tests {
     fn verifier_rejects_oversized_directly_constructed_vm_proof() {
         let proof = ExecutionProof::new(
             VmProof {
-                proof: StarkProof::new(
-                    vec![0; MAX_STARK_PROOF_BYTES + 1],
-                    HashFunction::Blake3_256,
-                ),
+                proof: StarkProof::new(vec![0; MAX_STARK_PROOF_BYTES + 1], HashFunction::Eidos),
                 precompile_root: TRUE_DIGEST,
             },
             PrecompileStatus::Empty,
@@ -825,5 +871,21 @@ mod tests {
             proof.precompile().clone(),
         );
         assert!(SUPPORT.check(&old_compatible).is_ok());
+    }
+
+    #[test]
+    fn eidos_preprocessed_commitment_matches_fixed_table() {
+        let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+        let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
+            MidenMultiAir::new(),
+            vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES],
+            Vec::new(),
+        )
+        .unwrap();
+
+        let commitment = miden_crypto::stark::Preprocessed::build(&statement, &config)
+            .map(|preprocessed| preprocessed.commitment());
+
+        assert_eq!(commitment, Some(config::EIDOS_PREPROCESSED_COMMITMENT.into()));
     }
 }

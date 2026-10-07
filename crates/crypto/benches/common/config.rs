@@ -40,20 +40,6 @@ pub const HASH_ELEMENT_COUNTS: &[usize] = &[
     1000, // Larger scale test
 ];
 
-/// Input sizes for merge operations (in bytes)
-pub const MERGE_INPUT_SIZES: &[usize] = &[
-    1,   // Single byte inputs
-    2,   // Tiny inputs
-    4,   // Small inputs
-    8,   // Very small inputs
-    16,  // Small inputs
-    32,  // Word size
-    64,  // Double word
-    128, // 128 bytes
-    256, // 1KB
-    512, // 512 bytes
-];
-
 // === Field Operations Configuration ===
 /// Field element counts for batch operations
 pub const FIELD_BATCH_SIZES: &[usize] = &[

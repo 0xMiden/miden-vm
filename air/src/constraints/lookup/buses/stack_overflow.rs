@@ -1,15 +1,19 @@
 //! Stack overflow table bus (`BusId::StackOverflowTable`).
 //!
-//! Three mutually exclusive interactions:
+//! Stack-overflow table interactions share this column with the low three limbs of the Merkle
+//! canonical-index witness. The opcode families are row-disjoint: MPVERIFY and MRUPDATE are
+//! no-shift operations, so neither can activate a stack-overflow add/remove.
 //!
-//! - **Right shift** (add): when an item is pushed past stack[15], record `(clk, s15, b1)` — the
+//! - **Right shift** (add): when an item is pushed past `stack[15]`, record `(clk, s15, b1)` — the
 //!   cycle, spilled value, and link to the previous overflow row.
 //! - **Left shift ∧ non-empty overflow** (remove): consume the matching `(b1, s15', b1')` row.
-//! - **DYNCALL ∧ non-empty overflow** (remove): consume `(b1, s15', hasher_state[5])` because the
-//!   caller's post-pop overflow pointer is staged there, not in `b1'` (which is reset).
+//! - **DYNCALL ∧ non-empty overflow** (remove): DYNCALL is excluded from `left_shift`; it consumes
+//!   `(b1, s15', hasher_state[5])` because the caller's post-pop overflow pointer is staged in h5
+//!   while `b1'` is reset.
 
 use p3_field::Dup;
 
+use super::super::operations::merkle;
 use crate::{
     constraints::lookup::{
         main_air::{MainBusContext, MainLookupBuilder},
@@ -20,9 +24,9 @@ use crate::{
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// All three interactions gate on mutually exclusive opcode flags (right shift, left shift, and
-/// DYNCALL, which is excluded from the aggregate left-shift flag), so at most one fires per row.
-pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 1;
+/// Stack-overflow interactions contribute one fraction; MPVERIFY/MRUPDATE contribute the three
+/// low canonical-index limbs. The branches are opcode-disjoint, so at most three fire per row.
+pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3;
 
 /// Emit the stack overflow table bus.
 pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
@@ -90,6 +94,8 @@ pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
                         },
                         Deg { v: 7, u: 8 },
                     );
+
+                    merkle::emit_core_index_limbs::<LB, _>(g, ctx);
                 },
                 Deg { v: 7, u: 8 },
             );

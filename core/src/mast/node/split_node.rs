@@ -101,10 +101,10 @@ impl MastNodeExt for SplitNode {
     /// domain defined by [Self::DOMAIN] - i..e,:
     /// ```
     /// # use miden_core::mast::SplitNode;
-    /// # use miden_crypto::{Word, hash::poseidon2::Poseidon2 as Hasher};
+    /// # use miden_core::{Word, chiplets::hasher};
     /// # let on_true_digest = Word::default();
     /// # let on_false_digest = Word::default();
-    /// Hasher::merge_in_domain(&[on_true_digest, on_false_digest], SplitNode::DOMAIN);
+    /// hasher::merge_in_mast_domain(&[on_true_digest, on_false_digest], SplitNode::DOMAIN);
     /// ```
     fn digest(&self) -> Word {
         self.digest
@@ -176,7 +176,7 @@ impl SplitNodeBuilder {
             let true_branch_hash = true_branch.digest();
             let false_branch_hash = false_branch.digest();
 
-            hasher::merge_in_domain(&[true_branch_hash, false_branch_hash], SplitNode::DOMAIN)
+            hasher::merge_in_mast_domain(&[true_branch_hash, false_branch_hash], SplitNode::DOMAIN)
         };
 
         Ok(SplitNode { branches: self.branches, digest })
@@ -221,7 +221,7 @@ impl MastForestContributor for SplitNodeBuilder {
                 })?
                 .digest();
 
-            hasher::merge_in_domain(&[if_branch_hash, else_branch_hash], SplitNode::DOMAIN)
+            hasher::merge_in_mast_domain(&[if_branch_hash, else_branch_hash], SplitNode::DOMAIN)
         };
 
         fingerprint_with_child_fingerprints(node_digest, &self.branches, context, hash_by_node_id)

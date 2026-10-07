@@ -1,13 +1,21 @@
 //! The Eidos hash construction and its underlying compression function.
 //!
-//! [`Eidos`](crate::hash::eidos::Eidos) exposes a framed hash construction and a raw compression
-//! operation. Complete-hash methods apply domain and length binding, framing, and padding.
-//! [`Eidos::compress`](crate::hash::eidos::Eidos::compress) compresses one complete block under a
-//! caller-supplied chaining value and adds no framing.
+//! The [Eidos API](crate::hash::eidos::Eidos) exposes a framed hash construction and a
+//! [raw compression operation](crate::hash::eidos::Eidos::compress). Complete-hash methods apply
+//! domain and length binding, framing, and padding. Raw compression processes one complete block
+//! under a caller-supplied chaining value and adds no framing.
 //!
 //! Eidos digests occupy a 252-bit packed subspace: the high bit of each odd Eidos compression
 //! output lane is cleared before two `u32` lanes are packed into one Goldilocks field element. The
 //! resulting generic collision-resistance bound is 126 bits.
+//!
+//! Each digest element is below `2^63`, so digest elements are not uniform over the Goldilocks
+//! field and their 32-byte serialization is not a uniform 256-bit string. Use
+//! [`crate::rand::EidosRandomCoin::draw_basefield`] for full-field sampling and
+//! [`crate::aead::aead_eidos`] for authenticated encryption. The Fiat-Shamir challenger retains
+//! the restricted output distribution; its soundness bounds must use the actual sampling support.
+//!
+//! See the [security and usage guide](https://docs.miden.xyz/miden-vm/design/eidos-security).
 
 mod challenger;
 mod compression;
@@ -15,6 +23,7 @@ mod construction;
 pub mod domain;
 pub mod domains;
 pub mod encoding;
+mod frame;
 mod framing;
 mod lmcs;
 mod primitive;
@@ -29,6 +38,7 @@ pub use domain::{
     DomainTag, DomainVersion, EidosDomain, EidosDomainRegistry, EidosEncoding, FeltSequence,
     NAMESPACE_REGISTRY, Transcript, namespace, render_masm_constants,
 };
+pub use frame::EidosFrame;
 pub use lmcs::{EidosLmcs, config as lmcs_config};
 
 /// Number of Felts in one Eidos message block.
@@ -63,3 +73,20 @@ pub type PackedDigest = PackedChainingValue;
 
 /// One packed Eidos message block, with one independent block per logical packed lane.
 pub type PackedBlock = [PackedFelt; BLOCK_LEN];
+
+/// Arrange scalar digests into one packed batch.
+#[inline]
+pub(crate) fn pack_digest_lanes<T: Copy>(
+    lanes: &[[T; DIGEST_WIDTH]; PACKED_LANES],
+) -> [[T; PACKED_LANES]; DIGEST_WIDTH] {
+    core::array::from_fn(|word| core::array::from_fn(|lane| lanes[lane][word]))
+}
+
+/// Extract one scalar digest from a packed batch.
+#[inline]
+pub(crate) fn unpack_digest_lane<T: Copy>(
+    digest: &[[T; PACKED_LANES]; DIGEST_WIDTH],
+    lane: usize,
+) -> [T; DIGEST_WIDTH] {
+    core::array::from_fn(|word| digest[word][lane])
+}

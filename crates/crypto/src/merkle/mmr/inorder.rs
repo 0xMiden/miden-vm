@@ -161,7 +161,7 @@ mod test {
     use proptest::prelude::*;
 
     use super::InOrderIndex;
-    use crate::utils::{ByteWriter, Deserializable, Serializable};
+    use crate::utils::{ByteWriter, Deserializable, DeserializationError, Serializable};
 
     /// The index is one-based; untrusted bytes encoding zero must be rejected rather than
     /// silently constructing an index the traversal operations assume cannot exist.
@@ -169,7 +169,11 @@ mod test {
     fn deserialization_rejects_the_zero_index() {
         let mut bytes = Vec::new();
         bytes.write_usize(0);
-        assert!(InOrderIndex::read_from_bytes(&bytes).is_err());
+        assert!(matches!(
+            InOrderIndex::read_from_bytes(&bytes),
+            Err(DeserializationError::InvalidValue(message))
+                if message == "InOrderIndex must be nonzero"
+        ));
     }
 
     proptest! {

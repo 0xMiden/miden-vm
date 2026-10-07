@@ -9,7 +9,7 @@ use crate::math::uint::{Limbs, UintSpec};
 pub struct K1Base;
 
 impl K1Base {
-    /// Stable local domain selector carried in uint precompile tags.
+    /// Stable local identifier used for uint-domain metadata.
     pub const ID: Felt = Felt::new_unchecked(1);
 
     /// Modulus of the secp256k1 base field, little-endian u32 limbs.
