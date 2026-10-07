@@ -396,6 +396,60 @@ fn source_debug_call_frames_track_dynamic_invocations() {
     }
 }
 
+#[rstest]
+#[case("push.7 drop")]
+#[case("push.1 if.true push.7 drop else push.8 drop end push.9 drop")]
+#[case("push.2 dup neq.0 while.true push.7 drop sub.1 dup neq.0 end drop")]
+fn source_debug_call_frames_distinguish_repeated_invocations_at_one_site(#[case] body: &str) {
+    for invocation in ["call.inner", "exec.inner"] {
+        let source = format!(
+            "proc inner {body} end begin push.2 dup neq.0 while.true {invocation} sub.1 dup neq.0 end drop end"
+        );
+        let package = Arc::<Package>::from(
+            Assembler::new(Arc::new(DefaultSourceManager::default()))
+                .assemble_program("program", source)
+                .unwrap(),
+        );
+        let debug_info = package.debug_info().unwrap().unwrap();
+        let mut processor = FastProcessor::new(StackInputs::default());
+        let mut host = DefaultHost::default();
+        let mut resume = processor.get_initial_resume_context_for_package(package).unwrap();
+        let mut resolver = DebugCallFrameResolver::new();
+        let mut activations = Vec::<DebugCallFrame>::new();
+        let mut current = None::<DebugCallFrame>;
+        loop {
+            let frames = resolver.resolve(&resume);
+            let frame = frames
+                .into_iter()
+                .find(|frame| frame.debug_info()[frame.function().name_idx].contains("inner"));
+            if let Some(frame) = &frame {
+                if let Some(previous) = &current {
+                    assert!(previous.is_same_frame(frame), "identity changed inside {invocation}");
+                } else {
+                    activations.push(frame.clone());
+                }
+                let repeated = resume
+                    .debug_call_frames()
+                    .into_iter()
+                    .find(|frame| frame.debug_info()[frame.function().name_idx].contains("inner"))
+                    .unwrap();
+                assert!(frame.is_same_frame(&repeated));
+            }
+            current = frame;
+            match processor
+                .step_with_package_debug_info_sync(&mut host, resume, &debug_info)
+                .unwrap()
+            {
+                Some(next) => resume = next,
+                None => break,
+            }
+        }
+        assert_eq!(activations.len(), 2, "{invocation}");
+        assert_eq!(activations[0].function_idx(), activations[1].function_idx());
+        assert!(!activations[0].is_same_frame(&activations[1]), "{invocation}");
+    }
+}
+
 #[test]
 fn source_debug_call_frames_preserve_recursive_activations() {
     let chains = collect_debug_call_chains(

@@ -1,4 +1,5 @@
 use alloc::{sync::Arc, vec::Vec};
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use miden_core::{
     mast::{MastForestId, MastNodeId},
@@ -9,6 +10,59 @@ use miden_mast_package::debug_info::{DebugSourceInlineCall, DebugSourceNodeId, P
 
 /// A hint for the initial size of the continuation stack.
 const CONTINUATION_STACK_SIZE_HINT: usize = 64;
+
+#[derive(Clone, Debug)]
+pub(crate) struct DebugActivationId {
+    execution: Arc<AtomicU64>,
+    generation: u64,
+}
+
+impl PartialEq for DebugActivationId {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.execution, &other.execution) && self.generation == other.generation
+    }
+}
+
+impl Eq for DebugActivationId {}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DebugActivations {
+    active: DebugActivationId,
+    pending: Vec<u64>,
+}
+
+impl DebugActivations {
+    fn new(count: usize) -> Self {
+        let mut activations = Self {
+            active: DebugActivationId {
+                execution: Arc::new(AtomicU64::new(1)),
+                generation: 0,
+            },
+            pending: Vec::with_capacity(count),
+        };
+        for _ in 0..count {
+            let generation = activations.next_generation();
+            activations.pending.push(generation);
+        }
+        activations
+    }
+
+    fn next_generation(&self) -> u64 {
+        self.active
+            .execution
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |generation| {
+                generation.checked_add(1)
+            })
+            .expect("debug activation generation exhausted")
+    }
+
+    fn activation_at(&self, position: usize) -> Option<DebugActivationId> {
+        Some(DebugActivationId {
+            execution: self.active.execution.clone(),
+            generation: *self.pending.get(position)?,
+        })
+    }
+}
 
 /// Package-owned source context whose inline-call rows remain active across a dynamic target.
 #[derive(Debug, Clone)]
@@ -177,15 +231,24 @@ impl<F> Continuation<F> {
 pub struct ContinuationStack<F> {
     stack: Vec<Continuation<F>>,
     source_node_ids: Option<Vec<Option<DebugSourceNodeId>>>,
+    debug_activations: Option<DebugActivations>,
 }
 
 impl<F> Default for ContinuationStack<F> {
     fn default() -> Self {
-        Self { stack: Vec::new(), source_node_ids: None }
+        Self {
+            stack: Vec::new(),
+            source_node_ids: None,
+            debug_activations: None,
+        }
     }
 }
 
 impl<F> ContinuationStack<F> {
+    pub(crate) fn debug_activation_at(&self, position: usize) -> Option<DebugActivationId> {
+        self.debug_activations.as_ref()?.activation_at(position)
+    }
+
     pub(crate) fn iter_with_source_node_ids(
         &self,
     ) -> impl DoubleEndedIterator<Item = (&Continuation<F>, Option<DebugSourceNodeId>)> {
@@ -207,7 +270,11 @@ impl<F> ContinuationStack<F> {
         let mut stack = Vec::with_capacity(CONTINUATION_STACK_SIZE_HINT);
         stack.push(Continuation::StartNode(program.entrypoint()));
 
-        Self { stack, source_node_ids: None }
+        Self {
+            stack,
+            source_node_ids: None,
+            debug_activations: None,
+        }
     }
 
     pub(crate) fn new_with_source_node_id(
@@ -230,6 +297,7 @@ impl<F> ContinuationStack<F> {
         Self {
             stack,
             source_node_ids: Some(source_node_ids),
+            debug_activations: Some(DebugActivations::new(1)),
         }
     }
 
@@ -249,6 +317,15 @@ impl<F> ContinuationStack<F> {
     ) {
         self.stack.push(continuation);
         self.push_source_node_id(source_node_id);
+    }
+
+    pub(crate) fn push_resumed_with_source_node_id(
+        &mut self,
+        continuation: Continuation<F>,
+        source_node_id: Option<DebugSourceNodeId>,
+    ) {
+        self.stack.push(continuation);
+        self.push_source_node_id_with_resumption(source_node_id, true);
     }
 
     /// Pushes a continuation to enter the given MAST forest on the continuation stack.
@@ -317,9 +394,7 @@ impl<F> ContinuationStack<F> {
     /// associated MAST forest.
     pub fn pop_continuation(&mut self) -> Option<Continuation<F>> {
         let continuation = self.stack.pop()?;
-        if let Some(source_node_ids) = &mut self.source_node_ids {
-            source_node_ids.pop();
-        }
+        self.pop_source_node_id();
         Some(continuation)
     }
 
@@ -327,7 +402,7 @@ impl<F> ContinuationStack<F> {
         &mut self,
     ) -> Option<(Continuation<F>, Option<DebugSourceNodeId>)> {
         let continuation = self.stack.pop()?;
-        let source_node_id = self.source_node_ids.as_mut().and_then(Vec::pop).flatten();
+        let source_node_id = self.pop_source_node_id();
         Some((continuation, source_node_id))
     }
 
@@ -338,9 +413,34 @@ impl<F> ContinuationStack<F> {
     }
 
     fn push_source_node_id(&mut self, source_node_id: Option<DebugSourceNodeId>) {
+        self.push_source_node_id_with_resumption(source_node_id, false);
+    }
+
+    fn push_source_node_id_with_resumption(
+        &mut self,
+        source_node_id: Option<DebugSourceNodeId>,
+        resumed: bool,
+    ) {
         if let Some(source_node_ids) = &mut self.source_node_ids {
             source_node_ids.push(source_node_id);
+            if let Some(activations) = &mut self.debug_activations {
+                let generation =
+                    if !resumed && matches!(self.stack.last(), Some(Continuation::StartNode(_))) {
+                        activations.next_generation()
+                    } else {
+                        activations.active.generation
+                    };
+                activations.pending.push(generation);
+            }
         }
+    }
+
+    fn pop_source_node_id(&mut self) -> Option<DebugSourceNodeId> {
+        let source_node_ids = self.source_node_ids.as_mut()?;
+        if let Some(activations) = &mut self.debug_activations {
+            activations.active.generation = activations.pending.pop().unwrap();
+        }
+        source_node_ids.pop().flatten()
     }
 
     pub(crate) fn start_tracking_source_nodes(
@@ -353,6 +453,7 @@ impl<F> ContinuationStack<F> {
             *source_node_id = next_source_node_id;
         }
         self.source_node_ids = Some(source_node_ids);
+        self.debug_activations = Some(DebugActivations::new(self.stack.len()));
     }
 
     // PUBLIC ACCESSORS
@@ -566,7 +667,11 @@ impl Serializable for ContinuationStack<MastForestId> {
 impl Deserializable for ContinuationStack<MastForestId> {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let stack = Vec::<Continuation<MastForestId>>::read_from(source)?;
-        Ok(Self { stack, source_node_ids: None })
+        Ok(Self {
+            stack,
+            source_node_ids: None,
+            debug_activations: None,
+        })
     }
 }
 
@@ -584,6 +689,54 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn debug_activation_identity_survives_resumption_but_not_reentry() {
+        let node_id = MastNodeId::from(1);
+        let source_id = Some(DebugSourceNodeId::from(2));
+        let mut stack: ContinuationStack<Arc<MastForest>> = ContinuationStack::default();
+        stack.push_start_node(node_id);
+        stack.start_tracking_source_nodes(source_id);
+        let initial = stack.debug_activation_at(0).unwrap();
+
+        let (continuation, source_id) = stack.pop_continuation_with_source_node_id().unwrap();
+        stack.push_resumed_with_source_node_id(continuation, source_id);
+        assert_eq!(stack.debug_activation_at(0).unwrap(), initial);
+
+        stack.pop_continuation_with_source_node_id().unwrap();
+        stack.push_with_source_node_id(Continuation::FinishJoin(node_id), source_id);
+        assert_eq!(stack.debug_activation_at(0).unwrap(), initial);
+
+        stack.pop_continuation_with_source_node_id().unwrap();
+        stack.push_with_source_node_id(Continuation::StartNode(node_id), source_id);
+        assert_ne!(stack.debug_activation_at(0).unwrap(), initial);
+    }
+
+    #[test]
+    fn debug_activation_generations_are_unique_across_cloned_stacks() {
+        let node_id = MastNodeId::from(1);
+        let mut first: ContinuationStack<Arc<MastForest>> = ContinuationStack::default();
+        first.push_start_node(node_id);
+        first.start_tracking_source_nodes(Some(DebugSourceNodeId::from(2)));
+        let mut second = first.clone();
+        assert_eq!(first.debug_activation_at(0), second.debug_activation_at(0));
+
+        first.pop_continuation().unwrap();
+        second.pop_continuation().unwrap();
+        first.push_start_node(node_id);
+        second.push_start_node(node_id);
+        assert_ne!(first.debug_activation_at(0), second.debug_activation_at(0));
+    }
+
+    #[test]
+    fn source_unaware_continuations_do_not_track_activations() {
+        let mut stack: ContinuationStack<Arc<MastForest>> = ContinuationStack::default();
+        stack.push_start_node(MastNodeId::from(1));
+        assert!(stack.debug_activations.is_none());
+        assert!(stack.debug_activation_at(0).is_none());
+        stack.pop_continuation().unwrap();
+        assert!(stack.debug_activations.is_none());
+    }
 
     #[test]
     fn get_next_clock_cycle_increment_empty_stack() {
@@ -687,8 +840,10 @@ mod tests {
             batch_index: 4,
             op_idx_in_batch: 5,
         });
+        stack.start_tracking_source_nodes(None);
         stack.source_node_ids =
             Some(vec![Some(DebugSourceNodeId::from(10)), None, Some(DebugSourceNodeId::from(11))]);
+        assert!(stack.debug_activations.is_some());
 
         let bytes = stack.to_bytes();
         let restored = ContinuationStack::<MastForestId>::read_from_bytes(&bytes).unwrap();
@@ -717,5 +872,6 @@ mod tests {
         // source_node_ids is not serialized: indices without their owning package debug info
         // would be dangling on the restored side.
         assert_eq!(restored.source_node_ids, None);
+        assert!(restored.debug_activations.is_none());
     }
 }
