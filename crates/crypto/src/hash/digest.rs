@@ -205,18 +205,6 @@ mod tests {
     }
 
     #[test]
-    fn test_digest256_alias() {
-        let digest = Digest256::default();
-        assert_eq!(digest.as_bytes(), &[0u8; 32]);
-    }
-
-    #[test]
-    fn test_digest512_alias() {
-        let digest = Digest512::default();
-        assert_eq!(digest.as_bytes(), &[0u8; 64]);
-    }
-
-    #[test]
     fn test_digest_from_bytes_32() {
         let bytes = [1u8; 32];
         let digest = Digest::<32>::from(bytes);

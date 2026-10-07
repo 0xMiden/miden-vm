@@ -645,3 +645,179 @@ mod signature {
         }
     }
 }
+
+mod public_key_parsing {
+    use alloc::format;
+
+    use miden_serde_utils::Serializable;
+
+    use crate::{dsa::ecdsa_k256_keccak::PublicKey, utils::hex_to_bytes};
+
+    /// The secp256k1 generator point (even y coordinate) in both SEC1 encodings.
+    const GEN_COMPRESSED: &str =
+        "0x0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+    const GEN_UNCOMPRESSED: &str = "0x0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b1\
+        6f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8";
+
+    /// The point 6·G (odd y coordinate), so the odd-parity branch of the uncompressed encoding is
+    /// exercised as well.
+    const SIX_GEN_COMPRESSED: &str =
+        "0x03fff97bd5755eeea420453a14355235d382f6472f8568a18b2f057a1460297556";
+    const SIX_GEN_UNCOMPRESSED: &str = "0x04fff97bd5755eeea420453a14355235d382f6472f8568a18b2f057\
+        a1460297556ae12777aacfbb620f3be96017f45c560de80f0f6518fe4a03c870c36b075f297";
+
+    #[test]
+    fn accepts_compressed_key() {
+        let key = PublicKey::from_hex(GEN_COMPRESSED).expect("compressed key should parse");
+
+        let expected = hex_to_bytes::<33>(GEN_COMPRESSED).unwrap();
+        assert_eq!(key.to_bytes(), expected);
+    }
+
+    #[test]
+    fn accepts_uncompressed_key_with_even_y() {
+        let from_uncompressed =
+            PublicKey::from_hex(GEN_UNCOMPRESSED).expect("uncompressed key should parse");
+        let from_compressed = PublicKey::from_hex(GEN_COMPRESSED).unwrap();
+
+        assert_eq!(from_uncompressed, from_compressed);
+    }
+
+    #[test]
+    fn accepts_uncompressed_key_with_odd_y() {
+        let from_uncompressed =
+            PublicKey::from_hex(SIX_GEN_UNCOMPRESSED).expect("uncompressed key should parse");
+        let from_compressed = PublicKey::from_hex(SIX_GEN_COMPRESSED).unwrap();
+
+        assert_eq!(from_uncompressed, from_compressed);
+    }
+
+    #[test]
+    fn rejects_missing_hex_prefix() {
+        let err = PublicKey::from_hex(&GEN_COMPRESSED[2..])
+            .expect_err("a key without the 0x prefix should be rejected");
+
+        assert!(format!("{err}").contains("0x"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn rejects_invalid_length() {
+        let err = PublicKey::from_hex("0x1234")
+            .expect_err("a key with an unsupported length should be rejected");
+
+        assert!(format!("{err}").contains("length"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn rejects_compressed_x_not_on_curve() {
+        // x = 5 has no square root of x³ + 7 on secp256k1, so no point has this x coordinate.
+        let not_on_curve = "0x020000000000000000000000000000000000000000000000000000000000000005";
+
+        PublicKey::from_hex(not_on_curve)
+            .expect_err("a compressed key with no matching curve point should be rejected");
+    }
+
+    #[test]
+    fn rejects_uncompressed_point_not_on_curve() {
+        // (1, 1) does not satisfy the curve equation.
+        let not_on_curve = format!("0x04{:064x}{:064x}", 1, 1);
+
+        PublicKey::from_hex(&not_on_curve)
+            .expect_err("an uncompressed point off the curve should be rejected");
+    }
+
+    #[test]
+    fn from_sec1_bytes_accepts_compressed_and_uncompressed_keys() {
+        let compressed = hex_to_bytes::<33>(SIX_GEN_COMPRESSED).unwrap();
+        let uncompressed = hex_to_bytes::<65>(SIX_GEN_UNCOMPRESSED).unwrap();
+
+        let from_compressed =
+            PublicKey::from_sec1_bytes(&compressed).expect("compressed key should parse");
+        let from_uncompressed =
+            PublicKey::from_sec1_bytes(&uncompressed).expect("uncompressed key should parse");
+
+        assert_eq!(from_compressed, from_uncompressed);
+        assert_eq!(from_compressed.to_bytes(), compressed);
+    }
+
+    #[test]
+    fn from_sec1_bytes_rejects_unsupported_tags() {
+        let with_tag = |hex: &str, tag: u8| {
+            let mut bytes = hex_to_bytes::<65>(hex).unwrap();
+            bytes[0] = tag;
+            bytes
+        };
+        let mut compact = hex_to_bytes::<33>(GEN_COMPRESSED).unwrap();
+        compact[0] = 0x05;
+
+        // Encodings that k256 or other libraries accept, but this function does not.
+        let cases: [(&str, &[u8]); 3] = [
+            // 0x05 followed by the x coordinate only.
+            ("compact", &compact),
+            // X9.62 hybrid: both coordinates, and the parity of y in the tag (0x06 even, 0x07
+            // odd).
+            ("hybrid, even y", &with_tag(GEN_UNCOMPRESSED, 0x06)),
+            ("hybrid, odd y", &with_tag(SIX_GEN_UNCOMPRESSED, 0x07)),
+        ];
+
+        for (case, bytes) in cases {
+            let err = PublicKey::from_sec1_bytes(bytes)
+                .expect_err(&format!("the {case} encoding should be rejected"));
+            assert!(format!("{err}").contains("tag"), "{case}: unexpected error: {err}");
+        }
+    }
+
+    #[test]
+    fn from_sec1_bytes_rejects_invalid_lengths() {
+        let uncompressed = hex_to_bytes::<65>(GEN_UNCOMPRESSED).unwrap();
+
+        let empty: &[u8] = &[];
+        // The x coordinate alone, without the tag byte.
+        let x_coordinate_only = &uncompressed[1..33];
+        // Both coordinates without the 0x04 tag byte.
+        let untagged_uncompressed = &uncompressed[1..];
+        // A valid uncompressed key followed by one extra byte.
+        let uncompressed_with_trailing_byte = &[&uncompressed[..], &[0x00]].concat()[..];
+
+        for bytes in
+            [empty, x_coordinate_only, untagged_uncompressed, uncompressed_with_trailing_byte]
+        {
+            let err = PublicKey::from_sec1_bytes(bytes)
+                .expect_err("a key with an unsupported length should be rejected");
+            assert!(format!("{err}").contains("length"), "unexpected error: {err}");
+        }
+    }
+
+    #[test]
+    fn from_sec1_bytes_rejects_identity_and_out_of_range_coordinates() {
+        // secp256k1 field modulus p.
+        const P: &str = "fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f";
+        const P_PLUS_ONE: &str = "fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30";
+        const MAX_U256: &str = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+        // (1, ONE_Y) is a point on the curve, with an even y coordinate.
+        const ONE: &str = "0000000000000000000000000000000000000000000000000000000000000001";
+        const ONE_Y: &str = "4218f20ae6c646b363db68605822fb14264ca8d2587fdd6fbc750d587e76a7ee";
+
+        let compressed = |x: &str| hex_to_bytes::<33>(&format!("0x02{x}")).unwrap();
+        let uncompressed = |x: &str, y: &str| hex_to_bytes::<65>(&format!("0x04{x}{y}")).unwrap();
+
+        // The canonical encodings of (1, ONE_Y) are accepted, so the rejections below are caused
+        // only by the out-of-range coordinate.
+        let canonical = PublicKey::from_sec1_bytes(&compressed(ONE)).unwrap();
+        assert_eq!(PublicKey::from_sec1_bytes(&uncompressed(ONE, ONE_Y)).unwrap(), canonical);
+
+        let cases: [(&str, &[u8]); 7] = [
+            ("k256 identity", &[0x00; 33]),
+            ("all zero bytes at uncompressed length", &[0x00; 65]),
+            ("compressed x = p", &compressed(P)),
+            ("compressed x = p + 1", &compressed(P_PLUS_ONE)),
+            ("compressed x = 2^256 - 1", &compressed(MAX_U256)),
+            ("uncompressed x = p + 1", &uncompressed(P_PLUS_ONE, ONE_Y)),
+            ("uncompressed y = p", &uncompressed(ONE, P)),
+        ];
+
+        for (case, bytes) in cases {
+            assert!(PublicKey::from_sec1_bytes(bytes).is_err(), "{case} should be rejected");
+        }
+    }
+}
