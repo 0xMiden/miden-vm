@@ -118,16 +118,8 @@ Timings exclude setup and cleanup.
 | Apple M4 Pro      | 31.3 ms    | 14.7 ms    | 2.13x       |
 | Apple M4 Max      |            |            |             |
 
-Apple M4 Pro concurrent results use 14 threads. Sequential builds disable the `concurrent` feature.
-
-The Ryzen results were measured on October 7, 2026, at commit
-[`08baa7a9`](https://github.com/0xMiden/miden-vm/commit/08baa7a9fcb01b1e14632f922f6acb7c3d750a02).
-See the [VM performance results](../../../README.md#performance) for machine and toolchain details.
-Timings are Criterion point estimates with the benchmark defaults. Ryzen concurrent SMT
-results use 32 Rayon workers. Use `RAYON_NUM_THREADS=32` in the concurrent command below
-to reproduce them.
-In these runs, using 32 workers reduced construction time but increased batch insertion
-and update times.
+Concurrent SMT results use 14 Rayon workers on Apple M4 Pro and 32 on AMD Ryzen 9 9950X.
+Sequential builds disable the `concurrent` feature.
 
 ## Benchmark Explanations
 

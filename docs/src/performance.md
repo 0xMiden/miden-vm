@@ -13,6 +13,7 @@ The resulting proofs are therefore recursion-friendly: they can be efficiently v
 The VM executes the [Blake3 example](https://github.com/0xMiden/miden-vm/tree/next/miden-vm/masm-examples/hashing/blake3_1to1) program on an Apple M4 Pro with one Rayon worker.
 The rows measure chains of 2, 8, 32, and 128 Blake3 calls, with VM cycles padded to a power of two.
 The default proof parameters target 96-bit conjectured security.
+The 128-call Ryzen workload has 95 bits of conjectured security.
 See the [Eidos security and usage guide](design/eidos-security.md).
 
 | Padded VM cycles | Execution time | Proving time | RAM consumed | Proof size |
@@ -22,7 +23,8 @@ See the [Eidos security and usage guide](design/eidos-security.md).
 | 2<sup>18</sup>   | 3.97 ms        | 9.02 sec     | 1.91 GiB     | 173.1 KiB  |
 | 2<sup>20</sup>   | 7.68 ms        | 38.92 sec    | 6.46 GiB     | 192.0 KiB  |
 
-The following results use the same workloads on an AMD Ryzen 9 9950X with one Rayon worker.
+The AMD Ryzen 9 9950X results use one Rayon worker.
+Ryzen timings and proof sizes are medians of five samples.
 
 | Padded VM cycles | Execution time | Proving time | RAM consumed | Proof size |
 | ---------------- | :------------: | :----------: | :----------: | :--------: |
@@ -48,17 +50,6 @@ The following runs use 128 Blake3 calls (828,632 VM cycles, padded to 2<sup>20</
 Execution % is execution time divided by proving time. Implied frequency measures VM cycles
 proved per second.
 
-The Ryzen results were measured on October 7, 2026, at commit
-[`08baa7a9`](https://github.com/0xMiden/miden-vm/commit/08baa7a9fcb01b1e14632f922f6acb7c3d750a02).
-The machine ran Arch Linux with kernel 6.18.35-1-lts and had 188 GiB of usable RAM.
-Builds used Rust 1.98.1 and the `optimized` profile with no extra `RUSTFLAGS`.
-The CPU used `amd-pstate-epp` with the `powersave` governor and `balance_performance`
-preference. Boost and SMT were enabled.
-
-Ryzen timings and proof sizes are medians of five samples after one warmup proof.
-The verifier reported 96 bits of conjectured security for the smaller workloads and
-95 bits for the 128-call workload.
-
 ## Reproducing the results
 
 Run these commands from the workspace root:
@@ -69,7 +60,7 @@ target/optimized/vm-performance --hash eidos --threads 14 --iterations 128 --sam
 ```
 
 For the single-core rows, use `--threads 1` with `--iterations 2`, `8`, `32`, or `128`.
-For the Ryzen multi-core rows, use `--threads 16` or `--threads 32` with `--iterations 128`.
+For Ryzen multi-core results, set `--threads` to `16` or `32`.
 
 Execution time measures the fast interpreter. Proving time includes trace generation but excludes
 witness construction. RAM consumed is peak process memory.
