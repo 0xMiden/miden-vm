@@ -1532,16 +1532,17 @@ mod tests {
         ast::{AstNode, Item as CstItem, SourceFile as CstSourceFile},
         parse_source_file,
     };
-    use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
+    use miden_core::Felt;
+    use miden_debug_types::{SourceFile, SourceId, SourceLanguage, SourceSpan, Uri};
     use pretty_assertions::assert_eq;
 
     use super::{
-        lower_advice_map_decl, lower_attribute, lower_function_type_from_signature,
-        lower_type_expr_from_alias_body,
+        ParsedNumeric, lower_advice_map_decl, lower_attribute, lower_function_type_from_signature,
+        lower_type_expr_from_alias_body, parse_numeric_token,
     };
     use crate::{
-        ast,
-        parser::{ParsingError, cst::context::LoweringContext},
+        Word, ast,
+        parser::{ParsingError, WordValue, cst::context::LoweringContext},
     };
 
     #[test]
@@ -1849,6 +1850,65 @@ end
                 miden_core::Felt::from_u32(7),
             ]
         );
+    }
+
+    #[test]
+    fn mast_root_literal_matches_word_to_hex_byte_order() {
+        // Non-symmetric field elements (issue #3885): every byte position is distinct, so any
+        // byte-order/transposition bug in the hex <-> Word conversion flips the resulting root.
+        let elements: [u64; 4] =
+            [0x1f92867d5acabdfd, 0xece9a4eb6d0c2ae1, 0x9359c1a7ae1fa54e, 0x1fc16cc6ab2d94c0];
+        let word = Word::new([
+            Felt::new(elements[0]).unwrap(),
+            Felt::new(elements[1]).unwrap(),
+            Felt::new(elements[2]).unwrap(),
+            Felt::new(elements[3]).unwrap(),
+        ]);
+
+        // `Word::to_hex()` must round-trip through the MAST root literal parser.
+        let to_hex = word.to_hex();
+        let parsed = parse_numeric_token(SourceSpan::default(), &to_hex)
+            .expect("Word::to_hex() output must be a valid MAST root literal");
+        match parsed {
+            ParsedNumeric::Word(WordValue(parsed_word)) => {
+                assert_eq!(
+                    Word::from(parsed_word),
+                    word,
+                    "MAST root literal parsing must round-trip Word::to_hex() exactly"
+                );
+            },
+            ParsedNumeric::Int(_) => {
+                panic!("64 hex-digit literal must parse as a Word, not an Int")
+            },
+        }
+
+        // The "naive" encoding (each field element formatted as a canonical big-endian integer
+        // and concatenated) is syntactically a valid 64-digit hex literal, but silently decodes
+        // to a different MAST root.
+        let mut canonical_literal = alloc::string::String::from("0x");
+        for e in elements {
+            canonical_literal.push_str(&alloc::format!("{e:016x}"));
+        }
+        assert_ne!(
+            canonical_literal, to_hex,
+            "sanity check: canonical-integer and Word::to_hex() encodings must differ for this fixture"
+        );
+
+        let parsed_canonical = parse_numeric_token(SourceSpan::default(), &canonical_literal)
+            .expect("canonical-integer literal is still syntactically valid hex");
+        match parsed_canonical {
+            ParsedNumeric::Word(WordValue(parsed_word)) => {
+                assert_ne!(
+                    Word::from(parsed_word),
+                    word,
+                    "canonical-integer concatenation must NOT decode back to the original word \
+                     (this is the trap #3885 documents: it parses, but to the wrong root)"
+                );
+            },
+            ParsedNumeric::Int(_) => {
+                panic!("64 hex-digit literal must parse as a Word, not an Int")
+            },
+        }
     }
 
     fn test_source_file(source: &str) -> Arc<SourceFile> {
