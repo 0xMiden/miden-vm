@@ -186,7 +186,7 @@ fn inline_call_chains_cover_exec_source_occurrences() -> TestResult {
                 .iter()
                 .filter(|inline_call| inline_call.contains_operation(asm_op.op_idx))
                 .count(),
-            1,
+            2,
             "every operation in the exec target should retain the active inline chain",
         );
     }
@@ -246,7 +246,7 @@ fn exec_occurrences_do_not_reuse_stale_inline_chains() -> TestResult {
     }
     assert_eq!(
         inline_counts,
-        [1, 1, 0, 0],
+        [2, 2, 1, 1],
         "the plain exec must not inherit the earlier inline chain",
     );
 
@@ -326,7 +326,10 @@ fn nested_exec_inline_chains_are_innermost_first() -> TestResult {
         })
         .collect::<Vec<_>>();
 
-    assert_eq!(names, ["source::inner", "source::outer"]);
+    assert_eq!(
+        names,
+        ["::$exec::inner", "source::inner", "::$exec::outer_target", "source::outer"]
+    );
     Ok(())
 }
 
@@ -605,5 +608,259 @@ fn malformed_source_name_attributes_are_rejected() -> TestResult {
         assert_diagnostic!(&error, "expected exactly one quoted string");
     }
 
+    Ok(())
+}
+
+#[test]
+fn plain_exec_preserves_canonical_definitions() -> TestResult {
+    for visibility in ["pub ", ""] {
+        let context = TestContext::default();
+        let source = format!(
+            "namespace debug::repro\n{visibility}proc leaf push.42 end\npub proc wrapper exec.leaf end"
+        );
+        let package = Assembler::new(context.source_manager()).assemble_library(
+            "probe",
+            source,
+            None::<String>,
+        )?;
+        let debug = package.debug_info().into_diagnostic()?.unwrap();
+        let leaf = debug
+            .functions()
+            .iter()
+            .find(|f| debug[f.name_idx].ends_with("::leaf"))
+            .unwrap();
+        let wrapper = debug
+            .functions()
+            .iter()
+            .find(|f| debug[f.name_idx].ends_with("::wrapper"))
+            .unwrap();
+        assert_eq!(leaf.mast_root, wrapper.mast_root);
+        assert_ne!(leaf.source_node, wrapper.source_node);
+        assert!(debug[leaf.source_node.into_option().unwrap()].inline_calls.is_empty());
+    }
+
+    Ok(())
+}
+
+#[test]
+fn plain_exec_preserves_invocation_identity_through_merging() -> TestResult {
+    use miden_assembly_syntax::debuginfo::{SourceLanguage, Uri};
+    use miden_core::serde::{Deserializable, Serializable};
+
+    let source = "proc leaf push.42 end\nproc wrapper exec.leaf end\nbegin\n exec.wrapper\n drop\n exec.wrapper\n drop\nend";
+    let assemble = |text: &str| {
+        let context = TestContext::default();
+        let file = context.source_manager().load(
+            SourceLanguage::Masm,
+            Uri::new("memory://reproducer.masm"),
+            text.to_string(),
+        );
+        Assembler::new(context.source_manager()).assemble_program("program", file)
+    };
+    let wrapper_package = assemble(source)?;
+    let leaf_package =
+        assemble(&source.replace("exec.wrapper\n drop\nend", "exec.leaf   \n drop\nend"))?;
+    assert_eq!(wrapper_package.mast_forest().to_bytes(), leaf_package.mast_forest().to_bytes());
+    // Captured from v0.35.0 before the fix: source changes must not alter execution bytes.
+    let baseline = include_bytes!("fixtures/exec-source-identity.mast");
+    assert_eq!(wrapper_package.mast_forest().to_bytes(), baseline.as_slice());
+    let debug = wrapper_package.debug_info().into_diagnostic()?.unwrap();
+    let decoded =
+        miden_mast_package::debug_info::PackageDebugInfo::read_from_bytes(&debug.to_bytes())
+            .into_diagnostic()?;
+    assert_eq!(decoded, debug);
+    assert_ne!(
+        debug.to_bytes(),
+        leaf_package.debug_info().into_diagnostic()?.unwrap().to_bytes()
+    );
+    let root = wrapper_package.entrypoint_source_node().unwrap();
+    let pushes = debug[root]
+        .asm_ops
+        .iter()
+        .filter(|op| debug[op.op_name_idx].as_ref() == "push.42");
+    let mut count = 0;
+    for op in pushes {
+        let calls = debug.inline_calls_for_operation(root, op.op_idx).collect::<Vec<_>>();
+        let names = calls
+            .iter()
+            .map(|row| debug[debug.get_function(row.callee_idx).unwrap().name_idx].to_string())
+            .collect::<Vec<_>>();
+        assert!(names[0].ends_with("::leaf"));
+        assert!(names[1].ends_with("::wrapper"));
+        assert_eq!(names.len(), 2);
+        let inner_location = debug.get_location(calls[0].loc_idx).unwrap();
+        let outer_location = debug.get_location(calls[1].loc_idx).unwrap();
+        let inner_start = source.find("exec.leaf").unwrap() as u32;
+        let outer_start = source.match_indices("exec.wrapper").nth(count).unwrap().0 as u32;
+        assert_eq!(inner_location.start.to_u32(), inner_start);
+        assert_eq!(inner_location.end.to_u32(), inner_start + "exec.leaf".len() as u32);
+        assert_eq!(outer_location.start.to_u32(), outer_start);
+        assert_eq!(outer_location.end.to_u32(), outer_start + "exec.wrapper".len() as u32);
+        assert_eq!(outer_location.uri, Uri::new("memory://reproducer.masm"));
+        for row in calls {
+            let function = debug.get_function(row.callee_idx).unwrap();
+            let canonical = function.source_node.into_option().unwrap();
+            assert_ne!(canonical, root);
+            assert_eq!(
+                wrapper_package.mast_forest()[debug[canonical].exec_node].digest(),
+                function.mast_root
+            );
+            assert!(debug.get_location(row.loc_idx).is_some());
+        }
+        count += 1;
+    }
+    assert_eq!(count, 2);
+    Ok(())
+}
+
+#[test]
+fn plain_exec_preserves_imported_alias_identity() -> TestResult {
+    use miden_core::serde::{Deserializable, Serializable};
+
+    let context = TestContext::default();
+    let library = Assembler::new(context.source_manager()).assemble_library(
+        "dep",
+        "namespace dep::math\n@source_name(\"same\")\npub proc leaf() -> felt\n push.42\nend\n@source_name(\"same\")\npub proc wrapper() -> felt\n exec.leaf\nend",
+        None::<String>,
+    )?;
+    let library = Arc::new(Package::read_from_bytes(&library.to_bytes()).into_diagnostic()?);
+    for (linkage, tail) in
+        [(Linkage::Static, ""), (Linkage::Static, "drop"), (Linkage::Dynamic, "drop")]
+    {
+        let package = Assembler::new(context.source_manager())
+            .with_package(Arc::clone(&library), linkage)?
+            .assemble_program(
+                "test",
+                if tail.is_empty() { "use dep::math\nproc caller exec.math::wrapper end\nbegin call.caller end".to_string() }
+                else { format!("use dep::math\nbegin exec.math::wrapper {tail} exec.math::wrapper {tail} end") },
+            )?;
+        let debug = package.debug_info().into_diagnostic()?.unwrap();
+        let root = package.entrypoint_source_node().unwrap();
+        let mut names = Vec::new();
+        for source in reachable_source_nodes(&debug, root) {
+            for row in &debug[source].inline_calls {
+                let function = debug.get_function(row.callee_idx).unwrap();
+                let name = function.linkage_name_idx.into_option().unwrap_or(function.name_idx);
+                names.push(debug[name].to_string());
+                assert_ne!(function.mast_root, Word::default());
+                assert!(
+                    function.type_idx.into_option().is_some(),
+                    "exec must reference the typed declaration"
+                );
+                if linkage == Linkage::Static && tail.is_empty() {
+                    let definition = function
+                        .source_node
+                        .into_option()
+                        .expect("linked alias must retain its definition");
+                    assert_ne!(definition, root);
+                    assert_eq!(
+                        package.mast_forest()[debug[definition].exec_node].digest(),
+                        function.mast_root
+                    );
+                } else {
+                    assert_eq!(
+                        function.source_node.into_option(),
+                        None,
+                        "a pruned or dynamic definition must not be attributed to the invocation copy"
+                    );
+                }
+            }
+        }
+        assert!(names.iter().any(|name| name.ends_with("::wrapper")));
+        if linkage == Linkage::Static {
+            assert!(names.iter().any(|name| name.ends_with("::leaf")));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn linking_does_not_invent_definitions_for_source_less_functions() -> TestResult {
+    let context = TestContext::default();
+    let dependency = Assembler::new(context.source_manager()).assemble_library(
+        "dep",
+        "namespace dep::math\npub proc leaf push.42 end\npub proc wrapper exec.leaf end",
+        None::<String>,
+    )?;
+    let bridge = Assembler::new(context.source_manager())
+        .with_package(Arc::from(dependency), Linkage::Dynamic)?
+        .assemble_library(
+            "bridge",
+            "namespace bridge::math\nuse dep::math\npub proc wrapper exec.math::wrapper end",
+            None::<String>,
+        )?;
+    let package = Assembler::new(context.source_manager())
+        .with_package(Arc::from(bridge), Linkage::Static)?
+        .assemble_program("test", "use bridge::math\nbegin exec.math::wrapper end")?;
+    let debug = package.debug_info().into_diagnostic()?.unwrap();
+    let dependency_functions = debug
+        .functions()
+        .iter()
+        .filter(|function| debug[function.name_idx].starts_with("::dep::math::"))
+        .collect::<Vec<_>>();
+    assert_eq!(dependency_functions.len(), 2);
+    for function in dependency_functions {
+        assert_eq!(function.source_node.into_option(), None);
+    }
+    let root = package.entrypoint_source_node().unwrap();
+    let names = reachable_source_nodes(&debug, root)
+        .iter()
+        .flat_map(|source| debug[*source].inline_calls.iter())
+        .map(|row| debug[debug.get_function(row.callee_idx).unwrap().name_idx].to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["::dep::math::wrapper", "::bridge::math::wrapper"]);
+    Ok(())
+}
+
+#[test]
+fn exec_without_a_call_site_still_separates_definitions() -> TestResult {
+    let context = TestContext::default();
+    let mut module = context.parse_module(
+        "namespace debug::missing\npub proc leaf push.42 end\npub proc wrapper exec.leaf end",
+    )?;
+    for procedure in module.procedures_mut() {
+        for op in procedure.body_mut().iter_mut() {
+            if let Op::Inst(instruction) = op
+                && matches!(instruction.inner(), Instruction::Exec(_))
+            {
+                *instruction = Span::new(SourceSpan::UNKNOWN, instruction.inner().clone());
+            }
+        }
+    }
+    let package = Assembler::new(context.source_manager()).assemble_library(
+        "test",
+        module,
+        None::<String>,
+    )?;
+    let debug = package.debug_info().into_diagnostic()?.unwrap();
+    let functions = debug.functions();
+    assert_eq!(functions.len(), 2);
+    assert_ne!(functions[0].source_node, functions[1].source_node);
+    assert_eq!(functions[0].mast_root, functions[1].mast_root);
+    assert!(debug.nodes().iter().all(|node| node.inline_calls.is_empty()));
+    Ok(())
+}
+
+#[test]
+fn digest_only_exec_does_not_choose_an_ambiguous_alias() -> TestResult {
+    let context = TestContext::default();
+    let library = Assembler::new(context.source_manager()).assemble_library(
+        "dep",
+        "namespace dep::math\npub proc leaf push.42 end\npub proc wrapper exec.leaf end",
+        None::<String>,
+    )?;
+    let digest = library
+        .manifest
+        .exports()
+        .find_map(|export| match export {
+            PackageExport::Procedure(procedure) => Some(procedure.digest),
+            _ => None,
+        })
+        .unwrap();
+    let package = Assembler::new(context.source_manager())
+        .with_package(Arc::from(library), Linkage::Dynamic)?
+        .assemble_program("test", format!("begin exec.{digest} end"))?;
+    let debug = package.debug_info().into_diagnostic()?.unwrap();
+    assert!(debug.nodes().iter().all(|node| node.inline_calls.is_empty()));
     Ok(())
 }
