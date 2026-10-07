@@ -1,10 +1,13 @@
 pub mod eval;
 mod expr;
+#[cfg(test)]
+mod tests;
 mod value;
 
 use alloc::string::String;
 use core::fmt;
 
+use miden_core::events::EventId;
 use miden_debug_types::{SourceSpan, Span, Spanned};
 
 pub use self::{
@@ -14,80 +17,192 @@ pub use self::{
 };
 use crate::ast::{DocString, Ident, TypeExpr, Visibility};
 
-// CONSTANT
+// CONSTANT DECLARATION
+// ================================================================================================
+
+/// A constant declaration in Miden Assembly, i.e. `const FOO = 1 + 1`.
+///
+/// Its kind is derived from the current value expression and optional annotation, see
+/// [`Self::kind`]. Aliases are not resolved when determining the kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstantDecl {
+    definition: ConstantDefinition,
+    /// Kept independently of the kind for validation and diagnostics.
+    ty: Option<TypeExpr>,
+}
+
+/// The syntactic kind of a constant declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConstantKind {
+    /// Without an annotation and not an event or string expression.
+    Untyped,
+    /// With an annotation and not an event or string expression.
+    Typed,
+    /// An event hash expression, i.e. `event("...")`.
+    Event,
+    /// A string literal.
+    String,
+}
+
+impl ConstantDecl {
+    pub fn new(span: SourceSpan, visibility: Visibility, name: Ident, value: ConstantExpr) -> Self {
+        Self {
+            definition: ConstantDefinition::new(span, visibility, name, value),
+            ty: None,
+        }
+    }
+
+    /// Like [`Self::new`], with a type annotation.
+    pub fn new_with_ty(
+        span: SourceSpan,
+        visibility: Visibility,
+        name: Ident,
+        value: ConstantExpr,
+        ty: TypeExpr,
+    ) -> Self {
+        Self {
+            definition: ConstantDefinition::new(span, visibility, name, value),
+            ty: Some(ty),
+        }
+    }
+
+    /// Returns the kind of the current expression without resolving aliases or evaluating it.
+    ///
+    /// Event and string expressions take precedence over annotations, which are retained even
+    /// when they conflict with the expression.
+    pub fn kind(&self) -> ConstantKind {
+        match self.value() {
+            ConstantExpr::Hash(HashKind::Event, _) => ConstantKind::Event,
+            ConstantExpr::String(_) => ConstantKind::String,
+            _ if self.ty.is_some() => ConstantKind::Typed,
+            _ => ConstantKind::Untyped,
+        }
+    }
+
+    /// Returns the event id for an event hash expression, or `None` for any other expression.
+    ///
+    /// Aliases are not resolved.
+    pub fn event_id(&self) -> Option<EventId> {
+        match self.value() {
+            ConstantExpr::Hash(HashKind::Event, name) => Some(EventId::from_name(name.as_str())),
+            _ => None,
+        }
+    }
+
+    pub fn definition(&self) -> &ConstantDefinition {
+        &self.definition
+    }
+
+    pub fn definition_mut(&mut self) -> &mut ConstantDefinition {
+        &mut self.definition
+    }
+
+    pub fn with_docs(mut self, docs: Option<Span<String>>) -> Self {
+        *self.definition_mut().docs_mut() = docs.map(DocString::new);
+        self
+    }
+
+    pub fn name(&self) -> &Ident {
+        self.definition().name()
+    }
+
+    pub fn visibility(&self) -> Visibility {
+        self.definition().visibility()
+    }
+
+    pub fn docs(&self) -> Option<Span<&str>> {
+        self.definition().docs()
+    }
+
+    pub fn value(&self) -> &ConstantExpr {
+        self.definition().value()
+    }
+
+    pub fn value_mut(&mut self) -> &mut ConstantExpr {
+        self.definition_mut().value_mut()
+    }
+
+    pub fn ty(&self) -> Option<&TypeExpr> {
+        self.ty.as_ref()
+    }
+}
+
+impl Spanned for ConstantDecl {
+    fn span(&self) -> SourceSpan {
+        self.definition().span()
+    }
+}
+
+impl From<ConstantDefinition> for ConstantDecl {
+    fn from(definition: ConstantDefinition) -> Self {
+        Self { definition, ty: None }
+    }
+}
+
+impl crate::prettier::PrettyPrint for ConstantDecl {
+    fn render(&self) -> crate::prettier::Document {
+        self.definition().render_with_ty(self.ty())
+    }
+}
+
+// CONSTANT DEFINITION
 // ================================================================================================
 
 /// Represents a constant definition in Miden Assembly syntax, i.e. `const FOO = 1 + 1`.
 #[derive(Clone)]
-pub struct Constant {
-    /// The source span of the definition.
-    pub span: SourceSpan,
-    /// The documentation string attached to this definition.
-    pub docs: Option<DocString>,
-    /// The visibility of this constant
-    pub visibility: Visibility,
-    /// The name of the constant.
-    pub name: Ident,
-    /// The optional declared type, retained for future type checking.
-    ///
-    /// Annotated constants are currently rejected during semantic analysis and linking.
-    pub ty: Option<TypeExpr>,
-    /// The expression associated with the constant.
-    pub value: ConstantExpr,
+pub struct ConstantDefinition {
+    span: SourceSpan,
+    docs: Option<DocString>,
+    visibility: Visibility,
+    name: Ident,
+    value: ConstantExpr,
 }
 
-impl Constant {
-    /// Creates a new [Constant] from the given source span, name, and value.
+impl ConstantDefinition {
     pub fn new(span: SourceSpan, visibility: Visibility, name: Ident, value: ConstantExpr) -> Self {
         Self {
             span,
             docs: None,
             visibility,
             name,
-            ty: None,
             value,
         }
     }
 
-    /// Adds documentation to this constant declaration.
     pub fn with_docs(mut self, docs: Option<Span<String>>) -> Self {
         self.docs = docs.map(DocString::new);
         self
     }
 
-    /// Returns the documentation associated with this item.
     pub fn docs(&self) -> Option<Span<&str>> {
         self.docs.as_ref().map(|docstring| docstring.as_spanned_str())
     }
 
-    /// Sets the declared type annotation without validating it.
-    ///
-    /// Annotated constants are currently rejected during semantic analysis and linking.
-    pub fn with_ty(mut self, ty: TypeExpr) -> Self {
-        self.ty = Some(ty);
-        self
+    pub fn docs_mut(&mut self) -> &mut Option<DocString> {
+        &mut self.docs
     }
 
-    /// Get the name of this constant
     pub fn name(&self) -> &Ident {
         &self.name
     }
-}
 
-impl fmt::Debug for Constant {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("Constant")
-            .field("docs", &self.docs)
-            .field("visibility", &self.visibility)
-            .field("name", &self.name)
-            .field("ty", &self.ty)
-            .field("value", &self.value)
-            .finish()
+    pub fn name_mut(&mut self) -> &mut Ident {
+        &mut self.name
     }
-}
 
-impl crate::prettier::PrettyPrint for Constant {
-    fn render(&self) -> crate::prettier::Document {
+    pub fn visibility(&self) -> Visibility {
+        self.visibility
+    }
+
+    pub fn value(&self) -> &ConstantExpr {
+        &self.value
+    }
+
+    pub fn value_mut(&mut self) -> &mut ConstantExpr {
+        &mut self.value
+    }
+
+    fn render_with_ty(&self, ty: Option<&TypeExpr>) -> crate::prettier::Document {
         use crate::prettier::*;
 
         let mut doc = self.docs.as_ref().map(PrettyPrint::render).unwrap_or(Document::Empty);
@@ -96,7 +211,7 @@ impl crate::prettier::PrettyPrint for Constant {
             doc += display(self.visibility) + const_text(" ");
         }
         doc += flatten(const_text("const") + const_text(" ") + display(&self.name));
-        if let Some(ty) = &self.ty {
+        if let Some(ty) = ty {
             doc += const_text(": ") + ty.render();
         }
         doc += const_text(" = ");
@@ -105,18 +220,32 @@ impl crate::prettier::PrettyPrint for Constant {
     }
 }
 
-impl Eq for Constant {}
-
-impl PartialEq for Constant {
-    fn eq(&self, other: &Self) -> bool {
-        self.visibility == other.visibility
-            && self.name == other.name
-            && self.ty == other.ty
-            && self.value == other.value
+impl fmt::Debug for ConstantDefinition {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("ConstantDefinition")
+            .field("docs", &self.docs)
+            .field("visibility", &self.visibility)
+            .field("name", &self.name)
+            .field("value", &self.value)
+            .finish()
     }
 }
 
-impl Spanned for Constant {
+impl crate::prettier::PrettyPrint for ConstantDefinition {
+    fn render(&self) -> crate::prettier::Document {
+        self.render_with_ty(None)
+    }
+}
+
+impl Eq for ConstantDefinition {}
+
+impl PartialEq for ConstantDefinition {
+    fn eq(&self, other: &Self) -> bool {
+        self.visibility == other.visibility && self.name == other.name && self.value == other.value
+    }
+}
+
+impl Spanned for ConstantDefinition {
     fn span(&self) -> SourceSpan {
         self.span
     }

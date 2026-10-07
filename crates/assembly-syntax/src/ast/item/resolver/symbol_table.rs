@@ -256,7 +256,7 @@ mod tests {
             crate::ast::Module::new(crate::ast::ModuleKind::Library, Path::new("::m::huge"));
 
         for i in 0..=ItemIndex::MAX_ITEMS {
-            module.items.push(crate::ast::Item::Constant(crate::ast::Constant::new(
+            module.items.push(crate::ast::Item::Constant(crate::ast::ConstantDecl::new(
                 SourceSpan::UNKNOWN,
                 crate::ast::Visibility::Private,
                 Ident::new(format!("A{i}")).expect("valid identifier"),

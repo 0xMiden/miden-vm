@@ -9,15 +9,15 @@ use miden_debug_types::{Span, Spanned};
 use crate::{
     MAX_REPEAT_COUNT, Path,
     ast::{
-        Constant, ConstantExpr, ImportKind, Item, Module, ModuleKind, SymbolResolutionError,
-        TypeAlias, TypeExpr, Visibility, constants::ConstEvalError, types,
+        ConstantDecl, ConstantExpr, ConstantKind, ImportKind, Item, Module, ModuleKind,
+        SymbolResolutionError, TypeAlias, TypeExpr, Visibility, constants::ConstEvalError, types,
     },
     diagnostics::reporting::PrintDiagnostic,
     sema::{SemanticAnalysisError, SyntaxError},
     testing::SyntaxTestContext,
 };
 
-fn exported_constant<'a>(module: &'a Module, name: &str) -> &'a Constant {
+fn exported_constant<'a>(module: &'a Module, name: &str) -> &'a ConstantDecl {
     match module
         .items()
         .iter()
@@ -211,9 +211,9 @@ fn ident_with_name(name: &str) -> crate::ast::Ident {
     crate::ast::Ident::from_raw_parts(Span::unknown(Arc::<str>::from(name)))
 }
 
-fn constant_with_name(name: &str) -> Constant {
+fn constant_with_name(name: &str) -> ConstantDecl {
     let ident = ident_with_name(name);
-    Constant::new(
+    ConstantDecl::new(
         ident.span(),
         Visibility::Private,
         ident,
@@ -253,8 +253,39 @@ fn typed_constants_pass_analysis() {
         .expect("typed constant should pass analysis");
     let constant = exported_constant(&module, "N");
     assert!(matches!(
-        &constant.ty,
+        constant.ty(),
         Some(TypeExpr::Primitive(ty)) if ty.inner() == &types::Type::U8
+    ));
+}
+
+#[test]
+fn event_and_string_constants_classified_in_analysis() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_module(
+            r#"
+namespace test
+pub const EVENT = event("test::event")
+pub const MESSAGE = "message"
+pub const EVENT_ALIAS = EVENT
+pub const MESSAGE_ALIAS = MESSAGE
+"#,
+        )
+        .expect("constant declarations should pass analysis");
+
+    assert_eq!(exported_constant(&module, "EVENT").kind(), ConstantKind::Event);
+    assert_eq!(exported_constant(&module, "MESSAGE").kind(), ConstantKind::String);
+    for name in ["EVENT_ALIAS", "MESSAGE_ALIAS"] {
+        assert_eq!(exported_constant(&module, name).kind(), ConstantKind::Untyped);
+        assert_eq!(exported_constant(&module, name).event_id(), None);
+    }
+    assert!(matches!(
+        exported_constant(&module, "EVENT_ALIAS").value(),
+        ConstantExpr::Var(_)
+    ));
+    assert!(matches!(
+        exported_constant(&module, "MESSAGE_ALIAS").value(),
+        ConstantExpr::Var(_)
     ));
 }
 
@@ -386,7 +417,7 @@ pub const ACCOUNT_ID_SUFFIX_OFFSET = ACCOUNT_ID_AND_NONCE_OFFSET + 2
         .expect("expected semantic analysis to succeed");
 
     let exported = exported_constant(&module, "ACCOUNT_ID_SUFFIX_OFFSET");
-    let references = exported.value.references();
+    let references = exported.value().references();
     assert_eq!(references.len(), 1);
     assert_eq!(references[0].inner().as_str(), "ACCOUNT_ID_AND_NONCE_OFFSET");
 }
@@ -947,7 +978,7 @@ fn name_map_rebuilds_after_mutable_item_rename() {
         let Item::Constant(constant) = item else {
             continue;
         };
-        constant.name = ident_with_name("dup");
+        *constant.definition_mut().name_mut() = ident_with_name("dup");
     }
 
     let result = module.define_type(type_alias_with_name("dup"));
@@ -968,7 +999,7 @@ fn name_map_drops_old_name_after_mutable_item_rename() {
         let Item::Constant(constant) = item else {
             continue;
         };
-        constant.name = ident_with_name("new");
+        *constant.definition_mut().name_mut() = ident_with_name("new");
     }
 
     module
