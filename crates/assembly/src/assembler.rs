@@ -731,7 +731,7 @@ impl Assembler {
             },
             SymbolItem::Constant(item) => {
                 // Evaluate constant to a concrete value for export
-                let value = self.linker.const_eval(gid, &item.value, &mut cache)?;
+                let value = self.linker.const_eval(gid, item.value(), &mut cache)?;
 
                 PendingPackageExport::Constant(ConstantExport { path: symbol_path, value })
             },

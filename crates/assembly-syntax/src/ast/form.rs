@@ -3,7 +3,7 @@ use alloc::{string::String, sync::Arc};
 use miden_debug_types::{SourceSpan, Span, Spanned};
 
 use super::{
-    AdviceMapEntry, Block, Constant, EnumType, Ident, ImportDecl, Item, Path, Procedure,
+    AdviceMapEntry, Block, ConstantDecl, EnumType, Ident, ImportDecl, Item, Path, Procedure,
     SubmoduleDecl, TypeAlias, TypeDecl,
 };
 
@@ -29,7 +29,7 @@ pub enum Form {
     /// An enum type/constant declaration
     Enum(EnumType),
     /// A constant definition, possibly unresolved
-    Constant(Constant),
+    Constant(ConstantDecl),
     /// An executable block, represents a program entrypoint
     Begin(Block),
     /// A procedure
@@ -64,8 +64,8 @@ impl From<EnumType> for Form {
     }
 }
 
-impl From<Constant> for Form {
-    fn from(constant: Constant) -> Self {
+impl From<ConstantDecl> for Form {
+    fn from(constant: ConstantDecl) -> Self {
         Self::Constant(constant)
     }
 }
@@ -102,8 +102,8 @@ impl Spanned for Form {
             Self::ModuleDoc(spanned) | Self::Doc(spanned) => spanned.span(),
             Self::Type(spanned) => spanned.span(),
             Self::Enum(spanned) => spanned.span(),
-            Self::Constant(Constant { span, .. })
-            | Self::AdviceMapEntry(AdviceMapEntry { span, .. }) => *span,
+            Self::Constant(spanned) => spanned.span(),
+            Self::AdviceMapEntry(AdviceMapEntry { span, .. }) => *span,
             Self::Begin(spanned) => spanned.span(),
             Self::Procedure(spanned) => spanned.span(),
             Self::Import(spanned) => spanned.span(),

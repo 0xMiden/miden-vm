@@ -36,7 +36,7 @@ pub struct Import {
 #[derive(Debug, Clone)]
 pub enum SymbolItem {
     /// A constant declaration in AST form
-    Constant(ast::Constant),
+    Constant(ast::ConstantDecl),
     /// A type or enum declaration in AST form
     Type(ast::TypeDecl),
     /// Procedure symbols are wrapped in a `RefCell` to allow us to mutate the procedure body when

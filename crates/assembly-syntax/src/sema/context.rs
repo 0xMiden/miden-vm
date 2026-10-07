@@ -19,7 +19,7 @@ use crate::ast::{
 pub struct AnalysisContext {
     module_path: PathBuf,
     symbol_resolver: LocalSymbolResolver,
-    constants: BTreeMap<Ident, Constant>,
+    constants: BTreeMap<Ident, ConstantDecl>,
     cached_constant_values: BTreeMap<Ident, ConstantValue>,
     used_constants: BTreeSet<Ident>,
     constant_deps: BTreeMap<Ident, BTreeSet<Ident>>,
@@ -52,9 +52,8 @@ impl constants::ConstEnvironment for AnalysisContext {
             if let Some(value) = self.cached_constant_values.get(name) {
                 return Ok(Some(CachedConstantValue::Hit(value)));
             }
-            Ok(Some(CachedConstantValue::Miss(
-                &self.constants.get(name).expect("constant should exist").value,
-            )))
+            let constant = self.constants.get(name).expect("constant should exist");
+            Ok(Some(CachedConstantValue::Miss(constant.value())))
         } else if self.imported.contains(name) {
             // We don't have the definition available yet
             Ok(None)
@@ -195,8 +194,8 @@ impl AnalysisContext {
         self.constants.contains_key(&name).then_some(name)
     }
 
-    pub fn is_constant_used(&self, constant: &Constant) -> bool {
-        constant.visibility.is_public() || self.used_constants.contains(&constant.name)
+    pub fn is_constant_used(&self, constant: &ConstantDecl) -> bool {
+        constant.visibility().is_public() || self.used_constants.contains(constant.name())
     }
 
     pub fn mark_constant_used(&mut self, name: &Ident) {
@@ -261,7 +260,7 @@ impl AnalysisContext {
 
         let mut pending_constants = VecDeque::from_iter(self.used_constants.iter().cloned());
         for (name, constant) in &self.constants {
-            if constant.visibility.is_public() && self.used_constants.insert(name.clone()) {
+            if constant.visibility().is_public() && self.used_constants.insert(name.clone()) {
                 pending_constants.push_back(name.clone());
             }
         }
@@ -323,11 +322,11 @@ impl AnalysisContext {
     /// Define a new constant `constant`
     ///
     /// Returns `Err` if a constant with the same name is already defined
-    pub fn define_constant(&mut self, module: &mut Module, constant: Constant) {
+    pub fn define_constant(&mut self, module: &mut Module, constant: ConstantDecl) {
         if let Err(err) = module.define_constant(constant.clone()) {
             self.errors.push(err);
         } else {
-            let name = constant.name.clone();
+            let name = constant.name().clone();
             self.constants.insert(name, constant);
         }
     }
@@ -336,13 +335,13 @@ impl AnalysisContext {
     ///
     /// This is used for enum variants so we can fold discriminants without
     /// attempting to define the same constant twice.
-    pub fn register_constant(&mut self, constant: Constant) {
-        let name = constant.name.clone();
+    pub fn register_constant(&mut self, constant: ConstantDecl) {
+        let name = constant.name().clone();
         self.cached_constant_values.remove(&name);
         if let Some(prev) = self.constants.get(&name) {
             self.errors.push(SemanticAnalysisError::SymbolConflict {
-                span: constant.span,
-                prev_span: prev.span,
+                span: constant.span(),
+                prev_span: prev.span(),
             });
         } else {
             self.constants.insert(name, constant);
@@ -387,7 +386,7 @@ impl AnalysisContext {
         if let Some(value) = self.cached_constant_values.get(name) {
             Ok(value.clone().into())
         } else if let Some(constant) = self.constants.get(name) {
-            Ok(constant.value.clone())
+            Ok(constant.value().clone())
         } else {
             Err(SemanticAnalysisError::SymbolResolutionError(Box::new(
                 SymbolResolutionError::undefined(name.span(), &self.source_manager),
@@ -458,7 +457,7 @@ mod tests {
     use crate::{
         Path, PathBuf,
         ast::{
-            Constant, ConstantExpr, ConstantOp, ConstantValue, Ident, Import, Module, ModuleImport,
+            ConstantDecl, ConstantExpr, ConstantOp, ConstantValue, Ident, Import, Module, ModuleImport,
             ModuleKind, Visibility,
             constants::{self, eval::CachedConstantValue},
         },
@@ -562,7 +561,7 @@ mod tests {
                 Some(module) => make_ref_at(next.clone(), module),
                 None => make_ref(next.clone()),
             };
-            context.register_constant(Constant::new(
+            context.register_constant(ConstantDecl::new(
                 SourceSpan::default(),
                 Visibility::Public,
                 name,
@@ -575,7 +574,7 @@ mod tests {
             ));
         }
 
-        context.register_constant(Constant::new(
+        context.register_constant(ConstantDecl::new(
             SourceSpan::default(),
             Visibility::Public,
             make_name(depth),

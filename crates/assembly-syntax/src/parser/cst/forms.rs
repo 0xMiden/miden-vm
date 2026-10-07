@@ -338,10 +338,10 @@ fn lower_constant(
         },
     };
 
-    let mut constant = ast::Constant::new(span, visibility, name, expr);
-    if let Some(ty) = ty {
-        constant = constant.with_ty(ty);
-    }
+    let constant = match ty {
+        Some(ty) => ast::ConstantDecl::new_with_ty(span, visibility, name, expr, ty),
+        None => ast::ConstantDecl::new(span, visibility, name, expr),
+    };
     Ok(ast::Form::Constant(constant))
 }
 

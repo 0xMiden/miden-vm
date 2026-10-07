@@ -824,13 +824,13 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         let mut env = LocalConstantEnv {
             constants: module
                 .constants()
-                .map(|constant| (constant.name().as_str().to_string(), &constant.value))
+                .map(|constant| (constant.name().as_str().to_string(), constant.value()))
                 .collect(),
         };
         let mut declarations: Vec<_> = module
             .constants()
             .filter_map(|constant| {
-                let value = eval::expr(&constant.value, &mut env).unwrap_or_else(|err| {
+                let value = eval::expr(constant.value(), &mut env).unwrap_or_else(|err| {
                     panic!("failed to evaluate {}:{}: {err}", path.display(), constant.name())
                 });
                 match value {
