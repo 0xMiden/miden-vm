@@ -27,7 +27,7 @@ std = [
     "miden-utils-diagnostics/std",
     "thiserror/std",
 ]
-testing = ["miden-air/testing"]
+testing = ["arbitrary", "miden-air/testing"]
 arbitrary = ["dep:proptest", "miden-air/arbitrary", "miden-core/arbitrary"]
 
 [dependencies]
