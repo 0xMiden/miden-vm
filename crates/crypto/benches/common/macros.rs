@@ -1,12 +1,6 @@
-// Benchmark macros to reduce boilerplate code
-//
-// This module provides procedural macros to eliminate repetitive
-// patterns commonly found in benchmark code.
+// Shared Criterion benchmark macros.
 
-// Creates a unified hash benchmark macro that eliminates duplication
-//
-// This is the core macro that all other hash macros build upon.
-// It supports custom throughput calculation and provides maximum flexibility.
+// Defines a hash benchmark with per-input throughput.
 //
 // # Usage
 // ```no_run
@@ -38,18 +32,17 @@ macro_rules! benchmark_hash_core {
 
             for size_ref in $sizes {
                 let size_val = *size_ref;
-                group.bench_with_input(
-                    criterion::BenchmarkId::new($operation, size_val),
-                    &size_val,
-                    |b: &mut criterion::Bencher, &size_param: &usize| $closure(b, size_param),
-                );
-
                 if size_val > 0 {
                     let throughput_result = $throughput(size_val);
                     if let Some(ref t) = throughput_result {
                         group.throughput(t.clone());
                     }
                 }
+                group.bench_with_input(
+                    criterion::BenchmarkId::new($operation, size_val),
+                    &size_val,
+                    |b: &mut criterion::Bencher, &size_param: &usize| $closure(b, size_param),
+                );
             }
 
             group.finish();
@@ -208,16 +201,15 @@ macro_rules! benchmark_hash_felt {
 
             for count_ref in $counts {
                 let count = *count_ref;
+                let throughput_result = $throughput(count);
+                if let Some(ref t) = throughput_result {
+                    group.throughput(t.clone());
+                }
                 group.bench_with_input(
                     criterion::BenchmarkId::new("hash_elements", count),
                     &count,
                     |b: &mut criterion::Bencher, &count_param: &usize| $closure(b, count_param),
                 );
-
-                let throughput_result = $throughput(count);
-                if let Some(ref t) = throughput_result {
-                    group.throughput(t.clone());
-                }
             }
 
             group.finish();

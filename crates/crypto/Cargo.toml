@@ -41,6 +41,11 @@ required-features = ["internal"]
 
 [[bench]]
 harness           = false
+name              = "smt_summary"
+required-features = ["std"]
+
+[[bench]]
+harness           = false
 name              = "merkle"
 required-features = ["std"]
 
