@@ -279,7 +279,7 @@ proptest! {
             test.prop_expect_stack(&[])?;
         } else {
             let result = test.execute().map(|_| ());
-            if norm <= u32::MAX as u64 {
+            if u32::try_from(norm).is_ok() {
                 prop_assert!(matches!(&result, Err(ExecutionError::OperationError {
                     err: OperationError::FailedAssertion { err_code, .. }, ..
                 }) if *err_code == error_code_from_msg("comparison failed: norm bound")),
@@ -382,7 +382,7 @@ fn falcon_product_rejects_out_of_range_coefficient(#[case] in_h: bool) {
                 s2[index] = Felt::new_unchecked(value);
             }
             let result = product_test(&h, &s2, &pi).execute().map(|_| ());
-            let rejected = if value <= u32::MAX as u64 {
+            let rejected = if u32::try_from(value).is_ok() {
                 matches!(&result, Err(ExecutionError::OperationError {
                     err: OperationError::FailedAssertion { err_code, .. }, ..
                 }) if *err_code == error_code_from_msg("comparison failed: modulus"))
