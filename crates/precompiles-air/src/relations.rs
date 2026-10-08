@@ -43,7 +43,7 @@
 //! | 31    | `EidosWord`     | native `EidosCompressionAir` | `(message_index, message_word, compression_cycle_id)` — scheduled message-word permutation |
 //! | 32    | `Sha512Word`   | SHA-512 IO and compression bands | `(block_id, addr, lo, hi)` — a 64-bit word in a compression block's fixed program |
 //! | 33    | `Sha512RoundMetadata` | SHA-512 compression | `(block_id, t, input_word, w_mult, a_mult, e_mult, k_lo, k_hi)` — fixed round metadata |
-//! | 34    | `Sha512IoContinuation` | SHA-512 IO | `(block_id, len, left, before, input_p2)` — invocation state between consecutive IO blocks |
+//! | 34    | `Sha512IoContinuation` | SHA-512 IO | `(block_id, len, left, before, input_eidos, input_head)` — invocation state between consecutive IO blocks |
 //!
 //! ## Adding a new relation
 //!
