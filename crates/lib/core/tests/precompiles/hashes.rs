@@ -1,9 +1,18 @@
+use std::sync::Arc;
+
+use miden_assembly::{Assembler, Linkage};
 use miden_core::{Felt, deferred::Node, utils::bytes_to_packed_u32_elements};
-use miden_crypto::hash::keccak::Keccak256;
+use miden_core_lib::{CoreLibrary, handlers::precompiles::sha512::SHA512_DIGEST_EVENT_NAME};
+use miden_crypto::hash::{keccak::Keccak256, sha2::Sha512};
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
-use miden_processor::{ExecutionError, operation::OperationError};
+use miden_processor::{
+    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs,
+    advice::{AdviceInputs, AdviceMutation, AdviceStack},
+    event::EventHandler,
+    operation::OperationError,
+};
 
 use super::helpers::{
     TRUNCATE_STACK_TO_OUTPUT_PROC, assert_precompile_witness_round_trips, masm_store_felts,
@@ -207,6 +216,85 @@ fn deferred_memory_pair_list_digest_matches_host_for_multiple_blocks() {
 }
 
 #[test]
+fn sha512_hash_bytes_mem_writes_full_digest_at_padding_boundaries() {
+    for len in [0, 1, 31, 32, 64, 95, 96, 111, 112, 127, 128, 129, 255, 256] {
+        let input: Vec<u8> = (0..len).map(|i| i as u8).collect();
+        let output = run_hash_mem("sha512", "hash_bytes_mem", &input, 0)
+            .expect("sha512::hash_bytes_mem must execute");
+        assert_eq!(output, pack_digest(&Sha512::hash(&input)), "input length {len}");
+    }
+}
+
+#[test]
+fn sha512_hash_bytes_mem_rejects_malformed_packed_memory() {
+    for (input_ptr, stored_value, len_bytes) in [
+        (IN_PTR + 1, 0u64, 1),
+        (IN_PTR, 1u64 << 32, 4),
+        (IN_PTR, 0x0100, 1),
+        (IN_PTR, 1, 0),
+    ] {
+        let source = format!(
+            "begin push.{stored_value} push.{IN_PTR} mem_store \
+             push.{OUT_PTR} push.{len_bytes} push.{input_ptr} \
+             exec.::miden::core::precompiles::hashes::sha512::hash_bytes_mem end"
+        );
+        assert!(
+            run_precompile_program(&source).is_err(),
+            "malformed packed message was accepted"
+        );
+    }
+}
+
+#[test]
+fn sha512_hash_bytes_mem_allows_overlapping_output() {
+    let input: Vec<u8> = (0u8..96).collect();
+    let stores = masm_store_felts(&bytes_to_packed_u32_elements(&input), IN_PTR);
+    let source = format!(
+        "begin {stores} push.{IN_PTR} push.96 push.{IN_PTR} \
+         exec.::miden::core::precompiles::hashes::sha512::hash_bytes_mem end"
+    );
+    let output =
+        run_precompile_program(&source).expect("hash must bind input before writing output");
+    assert_precompile_witness_round_trips(&output);
+    assert_eq!(read_memory_felts(&output, IN_PTR, 16), pack_digest(&Sha512::hash(&input)));
+}
+
+#[test]
+fn sha512_hash_bytes_mem_rejects_a_forged_upper_digest_half() {
+    let input = b"abc";
+    let mut digest: [u8; 64] = Sha512::hash(input).into();
+    digest[32] ^= 1;
+    let handler: Arc<dyn EventHandler> =
+        Arc::new(move |_: &miden_processor::ProcessorState<'_>| {
+            let mut advice = AdviceStack::new();
+            advice.append_for_adv_pipe(&bytes_to_packed_u32_elements(&digest));
+            Ok(vec![AdviceMutation::extend_advice_stack(advice)])
+        });
+    let library = CoreLibrary::default();
+    let stores = masm_store_felts(&bytes_to_packed_u32_elements(input), IN_PTR);
+    let source = format!(
+        "begin {stores} push.{OUT_PTR} push.3 push.{IN_PTR} \
+         exec.::miden::core::precompiles::hashes::sha512::hash_bytes_mem end"
+    );
+    let program = Assembler::default()
+        .with_package(library.package(), Linkage::Dynamic)
+        .unwrap()
+        .assemble_program("sha512_forged_digest", source)
+        .unwrap()
+        .unwrap_program();
+    let mut host = DefaultHost::default().with_library(&library).unwrap();
+    assert!(host.replace_handler(SHA512_DIGEST_EVENT_NAME, handler));
+    let result = FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .unwrap()
+    .execute_sync(&program, &mut host);
+    assert!(result.is_err(), "the second SHA-512 output chunk must be authenticated");
+}
+
+#[test]
 fn keccak_hash_1_chunk_mem_writes_expected_digest() {
     let input: Vec<u8> = (0u8..32).collect();
 
@@ -287,7 +375,8 @@ fn run_hash_mem(
 
     let output = run_precompile_program(&source)?;
     assert_precompile_witness_round_trips(&output);
-    Ok(read_memory_felts(&output, OUT_PTR, DIGEST_FELTS))
+    let digest_felts = if module == "sha512" { 16 } else { DIGEST_FELTS };
+    Ok(read_memory_felts(&output, OUT_PTR, digest_felts))
 }
 
 fn pack_digest(bytes: &[u8]) -> Vec<Felt> {

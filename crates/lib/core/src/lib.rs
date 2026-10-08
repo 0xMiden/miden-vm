@@ -25,7 +25,9 @@ use crate::handlers::{
     ecdsa_k256_keccak::{ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handle_ecdsa_k256_keccak_recover},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
     precompiles::{
+        ed25519::{ED25519_DECOMPRESS_EVENT_NAME, handle_ed25519_decompress},
         keccak256::{KECCAK256_DIGEST_EVENT_NAME, handle_keccak256_digest},
+        sha512::{SHA512_DIGEST_EVENT_NAME, handle_sha512_digest},
         uint_field_inv::{UINT_FIELD_INV_EVENT_NAME, handle_uint_field_inv},
     },
     readonly::readonly_noop_handlers,
@@ -193,6 +195,8 @@ impl CoreLibrary {
             (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
             (ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, Arc::new(handle_ecdsa_k256_keccak_recover)),
             (KECCAK256_DIGEST_EVENT_NAME, Arc::new(handle_keccak256_digest)),
+            (SHA512_DIGEST_EVENT_NAME, Arc::new(handle_sha512_digest)),
+            (ED25519_DECOMPRESS_EVENT_NAME, Arc::new(handle_ed25519_decompress)),
             (UINT_FIELD_INV_EVENT_NAME, Arc::new(handle_uint_field_inv)),
         ];
         handlers.extend(default_debug_handlers());

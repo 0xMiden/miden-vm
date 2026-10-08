@@ -1,7 +1,7 @@
 //! Process-lifetime caching of the chiplet stack's preprocessed bundle.
 //!
 //! `Preprocessed::build` LDEs and commits the fixed `BytePairLut` table — a
-//! pure function of the fixed ten-chiplet list and the STARK config's
+//! pure function of the fixed eleven-chiplet list and the STARK config's
 //! blowup/LMCS/DFT — yet both `prove_stark` and `verify_stark` rebuild it on
 //! every call. Under `std`, each hash function's bundle is built once per
 //! process and reused via `OnceLock`; without `std` (e.g. a `no_std`
@@ -53,7 +53,7 @@ where
     }
 }
 
-/// The AIR list never varies across calls (the fixed ten-chiplet stack), and
+/// The AIR list never varies across calls (the fixed eleven-chiplet stack), and
 /// `Preprocessed::build` reads only `statement.airs()` — never the public
 /// inputs — so a scratch statement with dummy public inputs builds the exact
 /// same bundle as the real per-proof statement would.

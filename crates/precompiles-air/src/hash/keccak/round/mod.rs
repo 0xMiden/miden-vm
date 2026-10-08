@@ -23,6 +23,7 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_utils_sync::LazyLock;
 pub use program::{NUM_PERIODIC_COLS, Op, ROUND_PERIOD, Slot, round_program, slots};
 
 use crate::{
@@ -139,6 +140,8 @@ pub use program::{
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KeccakRoundAir;
 
+static PERIODIC_COLUMNS: LazyLock<[Vec<Felt>; NUM_PERIODIC_COLS]> = LazyLock::new(round_program);
+
 impl BaseAir<Felt> for KeccakRoundAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
@@ -149,11 +152,15 @@ impl BaseAir<Felt> for KeccakRoundAir {
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Owned(round_program().into())
+        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
     }
 }
 
 impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
+    fn max_periodic_length(&self) -> usize {
+        ROUND_PERIOD
+    }
+
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }

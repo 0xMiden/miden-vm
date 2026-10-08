@@ -10,3 +10,4 @@ pub mod chunk_node;
 pub mod chunk_node_sponge;
 pub mod keccak;
 pub mod memory64;
+pub mod sha512;

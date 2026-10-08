@@ -1,4 +1,7 @@
 #[cfg(test)]
+mod ed25519_masm;
+
+#[cfg(test)]
 mod tests {
     use ed25519_dalek::Verifier;
     use k256::{elliptic_curve::sec1::ToSec1Point, pkcs8::DecodePublicKey};

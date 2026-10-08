@@ -12,16 +12,18 @@ use miden_crypto::hash::eidos::{
         LMCS_LEAF, MMR_PEAKS, SMT_BUCKET_LEAF,
     },
 };
-use miden_precompiles::Keccak256Precompile;
+use miden_precompiles::{Keccak256Precompile, Sha512Precompile};
 
 const EIDOS: &str = include_str!("../../asm/crypto/hashes/eidos.masm");
 const SMT: &str = include_str!("../../asm/collections/smt.masm");
 const MMR: &str = include_str!("../../asm/collections/mmr.masm");
 const FALCON: &str = include_str!("../../asm/crypto/dsa/falcon512_eidos.masm");
 const ECDSA_K256_KECCAK: &str = include_str!("../../asm/crypto/dsa/ecdsa_k256_keccak.masm");
+const EDDSA_25519_SHA512: &str = include_str!("../../asm/crypto/dsa/eddsa_25519_sha512.masm");
 const AEAD: &str = include_str!("../../asm/crypto/aead_eidos.masm");
 const PRECOMPILES: &str = include_str!("../../asm/precompiles/mod.masm");
 const KECCAK: &str = include_str!("../../asm/precompiles/hashes/keccak256.masm");
+const SHA512: &str = include_str!("../../asm/precompiles/hashes/sha512.masm");
 const RANDOM_COIN: &str = include_str!("../../asm/stark/random_coin.masm");
 const SYS: &str = include_str!("../../asm/sys/mod.masm");
 const VM: &str = include_str!("../../asm/sys/vm/mod.masm");
@@ -114,6 +116,11 @@ fn masm_domain_tags_match_rust_registries() {
         masm_scalar(KECCAK, "ASSERT_OP_ID"),
         u64::from(Keccak256Precompile::ASSERT_OP_ID),
     );
+    assert_eq!(
+        masm_scalar(SHA512, "DOMAIN_TAG"),
+        u64::from(Sha512Precompile::domain().as_u32())
+    );
+    assert_eq!(masm_scalar(SHA512, "ASSERT_OP_ID"), u64::from(Sha512Precompile::ASSERT_OP_ID));
 }
 
 #[test]
@@ -167,6 +174,11 @@ fn masm_initial_chaining_words_match_rust() {
         "PUBLIC_KEY_INIT_CV",
         Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, (4 * Word::NUM_ELEMENTS) as u32),
     );
+    assert_word(
+        EDDSA_25519_SHA512,
+        "PUBLIC_KEY_INIT_CV",
+        Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, (2 * Word::NUM_ELEMENTS) as u32),
+    );
     assert_indexed_word(AEAD, "AEAD_CTR_INIT_CV", Eidos::init_chaining_word(AEAD_CTR_KEY, 0));
     assert_indexed_word(AEAD, "AEAD_MAC_INIT_CV", Eidos::init_chaining_word(AEAD_MAC_KEY, 0));
 
@@ -185,6 +197,15 @@ fn masm_initial_chaining_words_match_rust() {
             Felt::new_unchecked(masm_scalar(KECCAK, "ASSERT_INIT_CV_3")),
         ]),
         Keccak256Precompile::assert_frame(0).initial_chaining_word(),
+    );
+    assert_eq!(
+        Word::new([
+            Felt::new_unchecked(masm_scalar(SHA512, "ASSERT_INIT_CV_0")),
+            Felt::new_unchecked(masm_scalar(SHA512, "ASSERT_INIT_CV_1")),
+            Felt::new_unchecked(masm_scalar(SHA512, "ASSERT_INIT_CV_2_BASE")),
+            Felt::new_unchecked(masm_scalar(SHA512, "ASSERT_INIT_CV_3")),
+        ]),
+        Sha512Precompile::assert_frame(0).initial_chaining_word(),
     );
     assert_indexed_word(
         RANDOM_COIN,
