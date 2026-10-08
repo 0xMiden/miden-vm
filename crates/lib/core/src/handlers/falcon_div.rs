@@ -19,11 +19,11 @@ pub const FALCON_DIV_EVENT_NAME: EventName =
 
 /// FALCON_DIV system event handler.
 ///
-/// Pushes the result of divison (both the quotient and the remainder) of a [u64] by the Falcon
+/// Pushes the result of division (both the quotient and the remainder) of a [u64] by the Falcon
 /// prime (M = 12289) onto the advice stack.
 ///
 /// Inputs:
-///   Operand stack: [event_id, a1, a0, ...]
+///   Operand stack: [event_id, a0, a1, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
@@ -34,11 +34,11 @@ pub const FALCON_DIV_EVENT_NAME: EventName =
 /// Similarly, (q0, q1) represent the quotient and r the remainder.
 ///
 /// # Errors
-/// - Returns an error if the divisor is ZERO.
+///
 /// - Returns an error if either a0 or a1 is not a u32.
 pub fn handle_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-    let dividend_hi = process.get_stack_item(1).as_canonical_u64();
-    let dividend_lo = process.get_stack_item(2).as_canonical_u64();
+    let dividend_lo = process.get_stack_item(1).as_canonical_u64();
+    let dividend_hi = process.get_stack_item(2).as_canonical_u64();
 
     if dividend_lo > u32::MAX.into() {
         return Err(FalconDivError::InputNotU32 {
@@ -59,10 +59,10 @@ pub fn handle_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>
 
     let (quotient, remainder) = (dividend / M, dividend % M);
 
-    let (q_hi, q_lo) = u64_to_u32_elements(quotient);
-    let (r_hi, r_lo) = u64_to_u32_elements(remainder);
+    let (q_lo, q_hi) = u64_to_u32_elements(quotient);
+    let (r_lo, r_hi) = u64_to_u32_elements(remainder);
 
-    // Assertion from the original code: r_hi should always be zero for Falcon modulus
+    // The remainder is below M < 2^32, so its high limb is zero.
     assert_eq!(r_hi, ZERO);
 
     // MASM consumes the remainder after the quotient, with one `adv_push`.

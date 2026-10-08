@@ -119,15 +119,22 @@ pub mod falcon512_eidos {
     pub use miden_core::crypto::dsa::falcon512_eidos::{PublicKey, SecretKey, Signature};
     use miden_core::{
         Felt, Word,
-        crypto::{dsa::falcon512_eidos::Polynomial, hash::Eidos},
+        crypto::hash::Eidos,
         program::domain::{FALCON_PRODUCT_CHECK, FALCON_PRODUCT_CHECK_PAYLOAD_LEN},
     };
 
-    /// Signs the provided message with the provided secret key and returns the resulting signature
-    /// encoded in the format required by the `falcon512_eidos::verify` procedure, or `None` if
-    /// the secret key is malformed due to either incorrect length or failed decoding.
+    /// The Falcon modulus.
+    const M: u32 = 12289;
+
+    /// Half of the Falcon modulus rounded down, i.e., (M - 1) / 2.
+    const M_HALF: u32 = (M - 1) / 2;
+
+    const N: usize = 512;
+
+    /// Signs the message and encodes the signature for the `falcon512_eidos::verify` procedure.
     ///
-    /// This is equivalent to calling [`encode_signature`] on the result of signing the message.
+    /// The result is always `Some`. Key decoding errors are reported when deserializing a
+    /// [`SecretKey`], before calling this function.
     ///
     /// See [`encode_signature`] for the encoding format.
     pub fn sign(sk: &SecretKey, msg: Word) -> Option<Vec<Felt>> {
@@ -138,73 +145,91 @@ pub mod falcon512_eidos {
     /// Encodes the provided Falcon public key and signature into a vector of field elements in the
     /// format expected by `miden::core::crypto::dsa::falcon512_eidos::verify` procedure.
     ///
-    /// The encoding format is (in reverse order on the advice stack):
+    /// The advice stream contains:
     ///
-    /// 1. The challenge point, a tuple of elements representing an element in the quadratic
-    ///    extension field, at which we evaluate the polynomials in the subsequent three points to
-    ///    check the product relationship.
+    /// 1. The challenge point as `[tau1, tau0]` in the quadratic extension field, used to check
+    ///    that the product polynomial equals the public-key polynomial times the centered signature
+    ///    polynomial. The verifier checks that the point matches the transcript of the public-key
+    ///    commitment, shifted signature, and product.
     /// 2. The expanded public key represented as the coefficients of a polynomial of degree < 512.
-    /// 3. The signature represented as the coefficients of a polynomial of degree < 512.
-    /// 4. The product of the above two polynomials in the ring of polynomials with coefficients in
-    ///    the Miden field.
+    /// 3. The signature represented as the coefficients of a polynomial of degree < 512, in the
+    ///    shifted representation s2'_i = s2_i + (M - 1) / 2, where s2_i in [-(M-1)/2, (M-1)/2] is
+    ///    the centered representative of the i-th coefficient. This representation allows the MASM
+    ///    verifier to compute the square norm of each coefficient without any conditional
+    ///    centering.
+    /// 4. The product of the expanded public key and the centered signature polynomial in the ring
+    ///    of polynomials with coefficients in the Miden field.
     /// 5. The nonce represented as 8 field elements.
     ///
     /// The result can be streamed straight to the advice provider before invoking
     /// `falcon512_eidos::verify`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the public key or signature polynomial does not contain 512 coefficients.
     pub fn encode_signature(pk: &PublicKey, sig: &Signature) -> Vec<Felt> {
-        use alloc::vec;
+        assert_eq!(pk.coefficients.len(), N, "public key must contain 512 coefficients");
+        assert_eq!(sig.sig_poly().coefficients.len(), N, "s2 must contain 512 coefficients");
 
-        // The signature is composed of a nonce and a polynomial s2
+        // The product uses centered coefficients; advice carries shifted coefficients.
+        let s2_balanced = sig.sig_poly().to_balanced_values();
 
-        // The nonce is represented as 8 field elements.
-        let nonce = sig.nonce();
+        // Each convolution coefficient has absolute value at most
+        // 512 * (M - 1) * (M - 1) / 2, so the signed sum fits in i64.
+        let h_elements = pk.to_elements();
+        let mut pi = [0i64; 2 * N];
+        for (i, h_i) in h_elements.iter().enumerate() {
+            let h_i = h_i.as_canonical_u64() as i64;
+            for (j, &s2_j) in s2_balanced.iter().enumerate() {
+                pi[i + j] += h_i * i64::from(s2_j);
+            }
+        }
 
-        // We convert the signature to a polynomial
-        let s2 = sig.sig_poly();
+        let nonce = sig.nonce().to_elements();
+        let mut result = Vec::with_capacity(2 + 4 * N + nonce.len());
+        // Reserve the challenge slots until the polynomial transcript is complete.
+        result.extend([Felt::ZERO; 2]);
+        result.extend(h_elements);
+        // Shifted s2 coefficients lie in [0, M).
+        result
+            .extend(s2_balanced.iter().map(|&c| Felt::from_u32((c as i32 + M_HALF as i32) as u32)));
+        result.extend(pi.iter().map(|&a| {
+            let abs = Felt::new_unchecked(a.unsigned_abs());
+            if a < 0 { -abs } else { abs }
+        }));
 
-        // Lastly, for the probabilistic product routine that is part of the verification
-        // procedure, we need to compute the product of the expanded key and the signature
-        // polynomial in the ring of polynomials with coefficients in the Miden field.
-        let pi = Polynomial::mul_modulo_p(pk, s2);
-
-        // We now push the expanded key, the signature polynomial, and the product of the
-        // expanded key and the signature polynomial to the advice stack. We also push
-        // the challenge point at which the previous polynomials will be evaluated.
-        // Finally, we push the nonce needed for the hash-to-point algorithm.
-
-        let mut polynomials = pk.to_elements();
-        let s2_elements = s2.to_elements();
-        let pi_elements = pi.iter().map(|a| Felt::new_unchecked(*a)).collect::<Vec<_>>();
-
-        polynomials.extend_from_slice(&s2_elements);
-        polynomials.extend_from_slice(&pi_elements);
-
-        let digest_polynomials =
-            product_check_digest(pk.to_commitment(), &s2_elements, &pi_elements);
-        let challenge = (digest_polynomials[0], digest_polynomials[1]);
+        let digest = product_check_digest(
+            pk.to_commitment(),
+            &result[2 + N..2 + 2 * N],
+            &result[2 + 2 * N..],
+        );
 
         // Push [tau1, tau0] so two `adv_push` ops leave [tau0, tau1, ...] on the operand stack.
-        let mut result: Vec<Felt> = vec![challenge.1, challenge.0];
-        result.extend_from_slice(&polynomials);
-        result.extend_from_slice(&nonce.to_elements());
+        result[..2].copy_from_slice(&[digest[1], digest[0]]);
+        result.extend(nonce);
 
         result
     }
 
     /// Computes the Falcon product-check transcript digest.
     ///
-    /// The transcript binds the public-key commitment, the signature polynomial, and the claimed
-    /// product. The verifier recomputes the public-key commitment separately from the expanded key.
-    pub fn product_check_digest(public_key: Word, s2: &[Felt], product: &[Felt]) -> Word {
-        assert_eq!(s2.len(), 512, "s2 must contain 512 coefficients");
-        assert_eq!(product.len(), 1024, "product must contain 1024 coefficients");
+    /// The transcript binds the public-key commitment, shifted signature coefficients in [0, M),
+    /// and the claimed product with the centered signature polynomial. The verifier recomputes the
+    /// public-key commitment separately from the expanded key.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless `s2_shifted` contains 512 coefficients and `product` contains 1024.
+    pub fn product_check_digest(public_key: Word, s2_shifted: &[Felt], product: &[Felt]) -> Word {
+        assert_eq!(s2_shifted.len(), N, "s2 must contain 512 coefficients");
+        assert_eq!(product.len(), 2 * N, "product must contain 1024 coefficients");
 
         let mut cv =
             Eidos::init_chaining_word(FALCON_PRODUCT_CHECK, FALCON_PRODUCT_CHECK_PAYLOAD_LEN);
         let first_block = core::array::from_fn(|i| if i < 4 { public_key[i] } else { Felt::ZERO });
         cv = Eidos::compress(cv, first_block);
 
-        for chunk in s2.chunks(8).chain(product.chunks(8)) {
+        for chunk in s2_shifted.chunks(8).chain(product.chunks(8)) {
             cv = Eidos::compress(cv, chunk.try_into().expect("chunk length checked above"));
         }
 

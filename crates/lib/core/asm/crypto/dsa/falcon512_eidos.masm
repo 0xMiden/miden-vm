@@ -1,21 +1,21 @@
 use miden::core::crypto::hashes::eidos
-use miden::core::math::u64
 
 # CONSTANTS
 # =================================================================================================
 
-const J = 77321994752
 const M = 12289
 const M_HALF = 6144 # (M-1) / 2
 const M_DOUBLE = 24578
 const M_SQUARE = 151019521
+const TWO_POW_32_MOD_M = 10952
+const J_PLUS_M_HALF = 77322000896 # 512 * M^2 + M_HALF
+const NEG_M_HALF = 18446744069414578177 # -M_HALF as a field element, i.e., Q - M_HALF
 const SQUARE_NORM_BOUND = 34034726
-const MEMORY_POINTER_OFFSET_OF_HASH_TO_POINT_POLY_FROM_PRODUCT_POLY = 1024
 const FALCON_DIV_EVENT = event("miden::core::crypto::dsa::falcon512_eidos::falcon_div")
 
 # Eidos chaining word for the registered Falcon hash-to-point domain and an empty framed prefix.
 const FALCON_H2P_INIT_CV = [
-    4280581857092830209,
+    4280581857092830210,
     2688637132020383744,
     1947077364412317696,
     6620516959492505600
@@ -29,7 +29,7 @@ const FALCON_PUBLIC_KEY_INIT_CV = [
 ]
 # Eidos chaining word for the VM-registered 1,544-Felt Falcon product-check transcript.
 const FALCON_PRODUCT_INIT_CV = [
-    4280581857109608961,
+    4280581857109608962,
     2688637132020385288,
     1947077364412317696,
     6620516959492505600
@@ -43,52 +43,40 @@ pub type Coefficient = u16
 #! In memory each reduced coefficient occupies a full felt, rather than a packed u16.
 #! Use this for coefficient buffers; scalar stack arguments use Coefficient.
 pub type StoredCoefficient = struct @align(4) { value: Coefficient }
-#! A 64-bit integer with its high limb on top of the stack.
-pub type WideInteger = struct { hi: u32, lo: u32 }
-#! Falcon nonce, with the second word on top of the stack.
-pub type Nonce = struct { high: word, low: word }
-#! Integer polynomial coefficient (up to 512 * 12288^2), represented in one felt.
+#! Forty-byte Falcon nonce encoded as eight field elements in byte order.
+#! Each felt holds five little-endian bytes; lo holds bytes 0..20 and hi holds bytes 20..40.
+pub type Nonce = struct { lo: word, hi: word }
+#! Coefficient of the signed integer convolution, represented in the Miden field.
 pub type ProductCoefficient = felt
 #! Squared polynomial norm, represented in one felt (may exceed u32).
 pub type SquaredNorm = felt
 
-#! Given dividend ( i.e. a u64 given by its lower and higher u32 decomposition ) on the stack,
-#! this routine computes c = a % M where M = 12289
+#! Reduces a 64-bit dividend modulo M = 12289 using the `falcon_div` advice event.
+#! The caller must ensure that both input limbs are u32; this procedure checks the
+#! event's quotient and remainder. `verify` uses the VM divider directly.
 #!
-#! Expected stack state
-#!
-#! [a_hi, a_lo, ...]
-#!
-#! Output stack state looks like
-#!
-#! [c, ...] | c = a % M
-#!
-#! Note that it is the responsibility of the calling procedure to ensure that `a_hi` and `a_lo` are
-#! within the appropriate range i.e., they are u32-s.
-#!
-#! Cycles: 29
-pub proc mod_12289(value: WideInteger) -> Coefficient
+#! Input: [a_lo, a_hi, ...]
+#! Output: [a mod M, ...]
+pub proc mod_12289(value: u64) -> Coefficient
     emit.FALCON_DIV_EVENT
-    # the advice stack contains now [qhi, qlo, r, ...] where q = qhi * 2^32 + qlo is quotient
-    # and r is remainder
+    # Advice stack: [qhi, qlo, r, ...], where q = qhi * 2^32 + qlo is the quotient.
 
     adv_push adv_push
     u32assert2
-    # => [qlo, qhi, a_hi, a_lo, ...]
+    # => [qlo, qhi, a_lo, a_hi, ...]
 
     push.M
     u32widening_mul swap
-    # => [overflow, M * qlo % 2^32, qhi, a_hi, a_lo, ...]
+    # => [overflow, M * qlo % 2^32, qhi, a_lo, a_hi, ...]
 
     movup.2
     push.M
-    # => [M, qhi, overflow, M * qlo % 2^32, a_hi, a_lo, ...]
+    # => [M, qhi, overflow, M * qlo % 2^32, a_lo, a_hi, ...]
     u32widening_madd swap
-    # => [t1, t0, M * qlo % 32, a_hi, a_lo, ...] where t = t1 * 2^32 + t0 and t = M * qhi + overflow
-    # Note by the bound on x - r = q * M, we are guaranteed that t1 = 0
+    # => [t1, t0, M * qlo % 2^32, a_lo, a_hi, ...]
+    # Here t = t1 * 2^32 + t0 = M * qhi + overflow. A valid quotient requires t1 = 0.
     assertz.err="comparison failed: quotient overflow"
-    # => [M * q / 2^32, (M * q) % 2^32, a_hi, a_lo, ...]
-    # => [res_hi, res_lo, a_hi, a_lo, ...]
+    # => [res_hi, res_lo, a_lo, a_hi, ...], the two limbs of M * q
 
     adv_push
     # Advice values are untrusted. U32SUB/U32ADD only constrain their output limbs in the AIR,
@@ -96,23 +84,23 @@ pub proc mod_12289(value: WideInteger) -> Coefficient
     dup u32assert2
     push.M
     u32overflowing_sub
-    # => [borrow, diff, r, res_hi, res_lo, a_hi, a_lo, ...]
+    # => [borrow, diff, r, res_hi, res_lo, a_lo, a_hi, ...]
     # borrow = 1 when r < M (underflow). Assert borrow != 0, then drop diff.
     assert.err="comparison failed: modulus" drop
-    # => [r, res_hi, res_lo, a_hi, a_lo, ...]
+    # => [r, res_hi, res_lo, a_lo, a_hi, ...]
 
     dup
     movup.3
     u32overflowing_add
-    # => [flag, (res_lo + r) % 2^32, r, res_hi, a_hi, a_lo, ...] where u = uhi * 2^32 + ulo and u = (res_lo + r) / 2^32
+    # => [carry, (res_lo + r) % 2^32, r, res_hi, a_lo, a_hi, ...]
 
     movup.3
     u32overflowing_add
-    # => [flag, final_res_hi, final_res_lo, r, a_hi, a_lo, ...] flag should be 0 by the bound on inputs
+    # => [overflow, final_res_hi, final_res_lo, r, a_lo, a_hi, ...]
     assertz.err="comparison failed: addition overflow"
-    # => [final_res_hi, final_res_lo, r, a_hi, a_lo, ...]
+    # => [final_res_hi, final_res_lo, r, a_lo, a_hi, ...]
 
-    movup.3
+    movup.4
     assert_eq
     movup.2
     assert_eq
@@ -122,100 +110,104 @@ end
 # HASH-TO-POINT
 # =============================================================================================
 
-#! Takes as input a message digest, a nonce of size 40 bytes represented as 8 field elements
-#! and a pointer. The procedure absorbs MSG and NONCE into a fresh Eidos state and derives the
-#! coefficients of a polynomial c representing the hash-to-point of (MSG || NONCE). The coefficients
-#! are then saved in the memory region [c_ptr, c_ptr + 512).
-#! This implementation of the `hash_to_point` procedure avoids the rejection-sampling step
-#! required in the per-the-spec algorithm by using the observation on page 31 in
-#! https://falcon-sign.info/falcon.pdf
-#!
-#! Input: [c_ptr, MSG, NONCE0, NONCE1, ...]
-#! Output: [...]
-#!
-#! Cycles: ~1500
-@locals(8)
-pub proc hash_to_point(c_ptr: ptr<felt>, message: word, nonce: Nonce)
-    padw loc_storew_le.0 dropw
-    # => [c_ptr, MSG, NONCE0, NONCE1, ...]
-
-    # Move pointer out of the way
-    movdn.12
-
-    # Store MSG for later absorption
-    loc_storew_le.4 dropw
-    # => [NONCE0, NONCE1, c_ptr, ...]
-
-    # Absorb the nonce under the Falcon hash-to-point domain.
-    push.FALCON_H2P_INIT_CV
+# Derives the fixed expansion seed by absorbing the nonce and message under the Falcon domain.
+# Input: [MSG(4), NONCE(8), ...]
+# Output: [SEED(4), ...]
+proc init_hash_to_point(message: word, nonce: Nonce) -> eidos::ChainingValue
     movdnw.2
-    # => [NONCE0, NONCE1, C, c_ptr, ...]
+    push.FALCON_H2P_INIT_CV movdnw.2
+    # => [NONCE(8), CV(4), MSG(4), ...]
     exec.eidos::compress
-    # => [NONCE0, NONCE1, C, c_ptr, ...]
 
-    # Absorb the message
     dropw dropw
-    padw
-    loc_loadw_le.4
-    padw swapw
-    # => [MSG, 0, C, c_ptr, ...]
+    swapw padw swapw
+    # => [MSG(4), 0(4), CV(4), ...]
     exec.eidos::compress
-    # => [MSG, 0, C, c_ptr, ...]
-
-    # Derive four coefficients per zero-block Eidos compression.
     dropw dropw
-    padw padw
-    # => [0, 0, C, c_ptr, ...]
+end
+
+#! Computes the squared norm of s1 = c - pi in Z_M[x]/(x^512 + 1), generating the hash-to-point
+#! coefficients c from the message and nonce as they are needed.
+#! Generated coefficients are consumed on the stack without being stored in memory.
+#!
+#! The word-aligned pi_ptr points to 1024 coefficients of the signed integer product pi = h * s2,
+#! represented in the Miden field. Each product coefficient pi_i must satisfy
+#! |pi_i| <= 512 * (M - 1) * M_HALF, since h_j is in [0, M) and centered s2_j is in
+#! [-M_HALF, M_HALF]. The caller must establish these input ranges and the product identity;
+#! `verify` uses `load_h_s2_and_product` to check the ranges and probabilistically check the
+#! product identity.
+#!
+#! A fixed Eidos seed is derived from the eight-Felt nonce and the zero-padded message word.
+#! Each counter from 0 through 127 occupies the first element of an otherwise zero block;
+#! compressing that block under the seed emits four 63-bit samples in word order.
+#! Direct modular reduction replaces rejection sampling as described on page 31 of
+#! https://falcon-sign.info/falcon.pdf, with 63-bit samples here.
+#!
+#! For each i, the unreduced coefficient of s1 is c_i + pi_{i+512} - pi_i. Under the product
+#! bound, adding J + M_HALF, where J = 512 * M^2, makes the product term positive and below 2J.
+#! The reduction returns r = (s1_i + M_HALF) mod M in [0, M), so r - M_HALF is the centered
+#! s1 coefficient in [-M_HALF, M_HALF] whose square contributes to the returned norm.
+#! `verify` adds the squared norm of s2 and checks ||s1||^2 + ||s2||^2 < SQUARE_NORM_BOUND.
+#!
+#! Input: [pi_ptr, MSG(4), NONCE(8), ...]
+#! Output: [norm_sq(s1), ...]
+#!
+pub proc hash_to_point_s1_norm_sq(
+    pi_ptr: ptr<ProductCoefficient>,
+    message: word,
+    nonce: Nonce,
+) -> SquaredNorm
+    movdn.12
+    exec.init_hash_to_point
+    push.0.0.0 movup.7 swap
+    # => [acc, pi_ptr, counter, 0, SEED(4), ...]
+
     repeat.128
+        # The four control slots keep SEED word-aligned and pi_ptr at native dup.13 depth.
+        dupw.1 padw push.0.0.0 dup.13
+        # => [counter, 0(7), SEED(4), acc, pi_ptr, counter, 0, SEED(4), ...]
         exec.eidos::compress
-        # => [0, 0, C, c_ptr, ...]
 
-        swapw.2 movup.12 dup add.4 movdn.13
-        # => [c_ptr, C, 0, 0, c_ptr + 4, ...]
+        # Reuse the block slots for the two product words.
+        dup.13 mem_loadw_le
+        swapw
+        dup.13 add.512 mem_loadw_le
+        # => [PI_HI(4), PI_LO(4), C(4), acc, pi_ptr, counter, 0, SEED(4), ...]
 
-        mem_storew_le
-        swapw.2
-        # => [0, 0, C, c_ptr + 4, ...]
-
-        loc_loadw_le.0 swapw loc_loadw_le.0
-        # => [0, 0, C, c_ptr + 4, ...]
+        exec.s1_norm_sq_word
+        add swap add.4 swap
+        movup.2 add.1 movdn.2
+        # => [acc + norm, pi_ptr + 4, counter + 1, 0, SEED(4), ...]
     end
-
-    # Clean up the stack
-    dropw dropw dropw drop
+    movdn.7 dropw drop drop drop
 end
 
 
 # PROBABILISTIC POLYNOMIAL MULTIPLICATION IN Z_Q[x]
 # =============================================================================================
 
-#! Takes as input PK, the hash of the coefficients of the polynomial `h` representing the expanded
-#! public key, and a pointer to the memory location where the coefficients of the polynomial `h`
-#! will be stored.
-#! The procedure loads `h` from the advice stack and compares its hash with the provided hash `PK`.
-#! It then loads the polynomial `s2` representing the signature from the advice stack and lays it
-#! in memory right after `h`.
-#! After that, it loads the claimed polynomial `h * s2` in Z_Q[x] where Q is the Miden VM prime
-#! from the advice stack and lays it right after `s2`.
-#! The hash of `h`, `s2` and the claimed product is also computed and the first two field elements
-#! of the digest (i.e., the Fiat-Shamir challenge) are used in order to check that
-#! pi == h * s2 in Z_Q[x] by evaluating both sides at the random point. Note that since we need
-#! to hash the polynomials before computing their evaluations, the procedure receives
-#! the evaluation point non-deterministically so that it can perform the evaluations while hashing
-#! is still going on. After hashing of the polynomials is finished, the procedure checks that
-#! the evaluation point was indeed derived correctly from the hash of all 3 polynomials.
+#! Loads the expanded public key h, shifted signature s2', and claimed product pi from
+#! advice into consecutive memory regions starting at `ptr`. It checks that h hashes to
+#! `public_key`, that h and s2' have coefficients in [0, M), and that pi = h * s2
+#! at a Fiat-Shamir point in the quadratic extension of the Miden field.
+#!
+#! Here s2'_i = s2_i + M_HALF, with centered s2_i in [-M_HALF, M_HALF], and
+#! pi is the product with centered s2. The evaluation point is supplied on advice
+#! to permit evaluation while hashing; the procedure checks it against the digest
+#! of the public-key commitment, s2', and pi. The identity check is probabilistic.
+#! For a true polynomial product, each pi coefficient represents a signed convolution
+#! value with absolute value at most 512 * (M - 1) * M_HALF.
 #!
 #! Inputs:
 #!   Operand stack: [ptr, PK, ...]
-#!   Advice stack:  [tau0, tau1, h_0, ..., h_511, s2_0, ..., s2_511, pi_0, ..., pi_1022, ...]
+#!   Advice stack:  [tau1, tau0, h_0, ..., h_511, s2'_0, ..., s2'_511, pi_0, ..., pi_1023, ...]
 #! Outputs:
-#!   Operand stack: []
-#!   Advice stack:  []
+#!   Operand stack: [...]
+#!   Advice stack:  [...]
 #!
-#! Cycles: 6785
 @locals(12)
 pub proc load_h_s2_and_product(ptr: ptr<felt>, public_key: eidos::Digest)
-    # We will store in local addresses:
+    # Local addresses:
     # 1. 0..4 the public key,
     # 2. 4..8 the inverse evaluation point as [tau_inv0, tau_inv1, 0, 0],
     # 3. 8..12 the evaluation point as [tau0, tau1, 0, 0].
@@ -240,23 +232,27 @@ pub proc load_h_s2_and_product(ptr: ptr<felt>, public_key: eidos::Digest)
     # => [Y, C, ptr, tau_inv_ptr, acc0, acc1, ...], where Y is a "garbage" word
 
     ## d) Load the evaluation point tau from the advice tape, compute its inverse and save both
-    ## Note that we will evaluate the polynomials at `tau_inv = tau^{-1}` as we are loading the coefficients
-    ## in the normal order i.e., not in reversed order required for Horner evaluation.
-    ## This means that the equality we will be checking is
-    ## pi(tau_inv) * tau^1023 == h(tau_inv) * tau^511 * s2(tau_inv) * tau^511
+    ## The coefficients are loaded constant-first, i.e. not in the reversed order Horner evaluation
+    ## expects, so with multiplier `tau_inv = tau^{-1}` the accumulator for a polynomial f with n
+    ## coefficients is
     ##
-    ## which simplifies to
+    ## A_f := sum_k f_k * tau_inv^{n-1-k} = tau^{-(n-1)} * f(tau)
     ##
-    ## pi(tau_inv) * tau == h(tau_inv) * s2(tau_inv)
+    ## With n = 512 for h and s2 and
+    ## n = 1024 for pi, the product relation pi = h * s2 gives
+    ##
+    ## A_h * A_s2 = tau^{-1022} * pi(tau) = A_pi * tau
+    ##
+    ## which is the equality checked below.
     push.0.0
     adv_push adv_push
     # => [tau0, tau1, 0, 0, ...]
     loc_storew_le.8
     ext2inv
     loc_storew_le.4
-    # => [tau_inv0, tau_inv1, 0, 0, Y, 0, 0, 0, 0, ptr, tau_inv_ptr, acc0, acc1, ...]
+    # => [tau_inv0, tau_inv1, 0, 0, Y, C, ptr, tau_inv_ptr, acc0, acc1, ...]
 
-    # 2) Load the coefficients of the h polynomial and evaluate it at tau_inv
+    # 2) Load h and accumulate its reversed evaluation at tau_inv
     repeat.64
         adv_pipe
 
@@ -289,23 +285,23 @@ pub proc load_h_s2_and_product(ptr: ptr<felt>, public_key: eidos::Digest)
     dupw
     padw loc_loadw_le.0
     assert_eqw.err="comparison failed: public key"
-    # => [C, ptr, tau_inv_ptr, h(tau)_0, h(tau)_1, ...]
+    # => [C, ptr, tau_inv_ptr, A_h(2), ...]
 
     # 4) Start the Falcon product transcript with the public-key commitment.
     padw
     swapw
     push.FALCON_PRODUCT_INIT_CV exec.eidos::merge_with_chaining_word
     padw padw
-    # => [BLOCK_LO, BLOCK_HI, CV, ptr, tau_inv_ptr, h(tau)_0, h(tau)_1, ...]
+    # => [BLOCK_LO, BLOCK_HI, CV, ptr, tau_inv_ptr, A_h(2), ...]
 
-    # 5) Load s2 and evaluate at tau_inv
+    # 5) Load shifted s2' and accumulate its reversed evaluation at tau_inv
 
     ## a) Reset the accumulator, update the pointers and set up the state of the hasher
     push.0 movdn.14
     push.0 movdn.14
-    # => [C, 0, C', ptr, tau_inv_ptr, 0, 0, h(tau)_0, h(tau)_1, ...]
+    # => [0(8), CV, ptr, tau_inv_ptr, 0, 0, A_h(2), ...]
 
-    ## b) Load and evaluate s2 at tau_inv
+    ## b) Load and evaluate shifted s2' at tau_inv
     repeat.64
         adv_pipe
 
@@ -330,57 +326,99 @@ pub proc load_h_s2_and_product(ptr: ptr<felt>, public_key: eidos::Digest)
         horner_eval_base
         exec.eidos::compress
     end
-    # => [BLOCK_LO, BLOCK_HI, CV, ptr, tau_inv_ptr, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
+    # => [BLOCK_LO, BLOCK_HI, CV, ptr, tau_inv_ptr, A_s2_shifted(2), A_h(2), ...]
 
     # 6) Load claimed h * s2 in Z_Q[x]
 
     ## a) Reset the accumulator, update the pointers and set up the state of the hasher
     push.0 movdn.14
     push.0 movdn.14
-    # => [BLOCK_LO, BLOCK_HI, CV, ptr, tau_inv_ptr, 0, 0, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
+    # => [BLOCK_LO, BLOCK_HI, CV, ptr, tau_inv_ptr, 0, 0, A_s2_shifted(2), A_h(2), ...]
 
     repeat.128
         adv_pipe
         horner_eval_base
         exec.eidos::compress
     end
-    # => [Y0, Y1, C, ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
+    # => [Y0, Y1, C, ptr, tau_inv_ptr, A_pi(2), A_s2_shifted(2), A_h(2), ...]
 
     # 7) Check that the challenge we computed the evaluations with is the correct one
 
     ## a) Clean up the stack
     dropw dropw
-    # => [C, tau0, tau1, D[2], D[3], ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
+    # => [tau0(D), tau1(D), D[2], D[3], ptr, tau_inv_ptr, A_pi(2), A_s2_shifted(2), A_h(2), ...]
 
     ## b) Load from memory the challenge we got from the advice stack and assert equality between
     ##    the two challenges
     padw loc_loadw_le.8
-    # => [tau0, tau1, 0, 0, tau0(D), tau1(D), D[2], D[3], ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, ...]
+    # => [tau0, tau1, 0, 0, tau0(D), tau1(D), D[2], D[3], ptr, tau_inv_ptr, A_pi(2), ...]
     movdn.3 movdn.3 drop drop
-    # => [tau0, tau1, tau0(D), tau1(D), D[2], D[3], ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, ...]
-
+    # => [tau0, tau1, tau0(D), tau1(D), D[2], D[3], ptr, tau_inv_ptr, A_pi(2), ...]
 
     dup.2 assert_eq.err="comparison failed: tau"             # assert tau0 == tau0(D)
     dup.2 assert_eq.err="comparison failed: tau"             # assert tau1 == tau1(D)
-    # => [tau0, tau1, D[2], D[3], ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, ...]
+    # => [tau0, tau1, D[2], D[3], ptr, tau_inv_ptr, A_pi(2), ...]
 
     movdn.5                     # move tau0 past D[2], D[3], ptr, tau_inv_ptr
     movdn.5                     # move tau1 past D[2], D[3], ptr, tau_inv_ptr
-    dropw                       # drop D[2], D[3], ptr, tau_inv_ptr
-    # => [tau0, tau1, pi(tau)_0, pi(tau)_1, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
+    loc_loadw_le.4              # load tau_inv over the word about to be dropped
+    # => [tau_inv0, tau_inv1, 0, 0, tau0, tau1, A_pi(2), A_s2_shifted(2), A_h(2), ...]
+    movdn.3 movdn.3 drop drop
+    # => [tau_inv0, tau_inv1, tau0, tau1, A_pi(2), A_s2_shifted(2), A_h(2), ...]
 
-    # 8) Assert the equality pi(tau_inv) * tau == h(tau_inv) * s2(tau_inv)
+    exec.assert_product_evaluation
+end
 
-    ## a) Compute the left hand side of the equation
+# Checks A_pi * tau = A_h * (A_s2_shifted - M_HALF * U(tau_inv)), where
+# U(x) = sum_{i=0}^{511} x^i. The caller must supply nonzero tau and tau_inv = tau^(-1).
+# The A values are the reversed Horner evaluations described in load_h_s2_and_product.
+# The shift correction is M_HALF * U(tau_inv), since tau^(-511) * U(tau) = U(tau_inv).
+#
+# Input: [tau_inv(2), tau(2), A_pi(2), A_s2_shifted(2), A_h(2), ...]
+# Output: [...]
+proc assert_product_evaluation(
+    tau_inv: [felt; 2],
+    tau: [felt; 2],
+    product_eval: [felt; 2],
+    s2_shifted_eval: [felt; 2],
+    h_eval: [felt; 2],
+)
+    # Compute corr := -M_HALF * U(tau_inv). The factorization
+    # U(x) = product_{k=0}^{8} (1 + x^{2^k}) avoids inverting x - 1 at x = 1.
+    # Keep [p, s] = [x^{2^k}, U_{2^k}(x)] on the stack,
+    # where U_n(x) = sum_{j=0}^{n-1} x^j.
+    push.0.1 movdn.3 movdn.3
+    # => [p0, p1, s0, s1, tau0, tau1, ...] where p = tau_inv and s = 1
+    repeat.8
+        dup.1 dup.1 add.1
+        movup.5 movup.5 ext2mul
+        # => [(s * (1 + p))(2), p(2), tau0, tau1, ...]
+        movup.3 movup.3
+        dup.1 dup.1 ext2mul
+        # => [p^2(2), (s * (1 + p))(2), tau0, tau1, ...]
+    end
+    dup.1 dup.1 add.1
+    movup.5 movup.5 ext2mul
+    # => [U0, U1, p0, p1, tau0, tau1, ...] where U = U(tau_inv)
+    movdn.3 movdn.3 drop drop
+    # => [U0, U1, tau0, tau1, ...]
+    mul.NEG_M_HALF swap mul.NEG_M_HALF swap
+    # => [corr0, corr1, tau0, tau1, A_pi(2), A_s2_shifted(2), A_h(2), ...]
+
+    # Correct the shifted s2 accumulator.
+    movup.7 movup.7
+    # => [A_s2_shifted(2), corr0, corr1, tau0, tau1, A_pi(2), A_h(2), ...]
+    ext2add
+    movdn.5 movdn.5
+    # => [tau0, tau1, A_pi(2), A_s2(2), A_h(2), ...]
+
     ext2mul
-    # => [LHS_0, LHS_1, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
+    # => [LHS_0, LHS_1, A_s2(2), A_h(2), ...]
 
-    ## b) Compute the right hand side of the equation
     movdn.5 movdn.5
     ext2mul
     # => [RHS_0, RHS_1, LHS_0, LHS_1, ...]
 
-    ## c) Assert equality
     movup.2
     assert_eq
     assert_eq
@@ -391,7 +429,7 @@ end
 # SQUARE NORM OF Z_M[x]/(phi) POLYNOMIALS
 # =============================================================================================
 
-#! Normalizes an `e` in [0, M) to be in [-(M-1) << 1, (M-1) << 1) and returns its square norm.
+#! Returns the square of the centered representative of e in [0, M).
 #!
 #! We use the following formula to do so:
 #! normalize(e) = e^2 - phi * (2*M*e - M^2) where phi := (e > (M - 1)/2)
@@ -430,278 +468,132 @@ pub proc norm_sq(coefficient: Coefficient) -> u32
     #=> [norm(e)^2, ...]
 end
 
-#! Given a tuple (u, w, v), we want to compute (v - (u + (- w % M) % M) % M), where:
-#!
-#! 1. v is a field element given by its u32 decomposition i.e., (c_lo, c_hi) such that
-#!    v = c_hi * 2**32 + c_lo
-#! 2. w is a field element representing the (i+512)-th coefficient of the product polynomial
-#!    pi (i.e., h * s2). We are guaranteed that w is at most 512 * (M-1)^2.
-#! 3. u is a field element representing the i-th coefficient of the product polynomial
-#!    pi (i.e., h * s2). We are guaranteed that u is at most 512 * (M-1)^2.
-#!
-#! We can avoid doing three modular reductions by using the following facts:
-#!
-#! 1. M is much smaller than the Miden prime Q. Precisely, M * 2^50 < Q
-#! 2. The coefficients of the product polynomial, u and w, are strictly less than J := 512 * M^2.
-#! 3. The coefficients of c are raw hash outputs. Reducing them here gives the same result as
-#!    reducing them when hash-to-point stores c.
-#!
-#! This means that we can substitute (v - (u + (- w % M) % M) % M) with  v + w + J - u
-#! (note J % M = 0) without risking Q-underflow but we can still overflow.
-#! For this reason, we use the u32 decomposition of v and perform the addition of
-#! v and w + J - u as u64. Note that |w + J - u| <= 1024 * (M - 1)^2
-#! and hence there is the possibility of an overflow when we add v and w + J - u as u64.
-#! When there is an overflow, we add 10952, which is equal to 2^32 % M, to the upper u32 limb of
-#! the result of (v + (w + J - u)). Note that since |w + J - u| <= 1024 * (M-1)^2 < 2^38, and
-#! 10952 < M, we are guaranteed that this final u32 addition to the upper limb will not overflow.
-#!
-#! To get the final result we reduce (v + w + J - u) modulo M.
-#!
-#! Input: [pi0, pi512 + J, c_hi, c_lo, ...]
-#! Output: [e, ...]
-#!
-#! Cycles: 45
-pub proc diff_mod_M(
-    pi0: ProductCoefficient,
-    shifted_pi512: ProductCoefficient,
-    c: WideInteger,
-) -> Coefficient
-    # 1) Subtract
-    sub
-    #=> [pi512 + J - pi, c_hi, c_lo, ...]
-
-    # 2) u32split first u64
-    u32split swap
-    #=> [tmp_hi, tmp_lo, c_hi, c_lo, ...]
-
-    # 3) Add the two u64-s
-    # reversew converts [BE, BE] to [LE, LE] for u64::overflowing_add (1 cycle)
-    # movup.2 swap converts LE output to BE for mod_12289 (2 cycles)
-    reversew
-    exec.u64::overflowing_add
-    movup.2 swap
-    #=> [flag, res_hi, res_lo, ..]
-
-    # 4) Handle potential overflow in the u64 addition
-    push.10952 # 2^32 mod M
-    push.0
-    #=> [0, 10952, flag, res_hi, res_lo, ..]
-    swap.2
-    #=> [flag, 10952, 0, res_hi, res_lo, ..]
-    cdrop
+# Reduces c + shift modulo M for any Miden field element c and 0 < shift < 2 * J,
+# where J = 512 * M^2. Replacing c with c_lo + c_hi * (2^32 mod M) preserves its residue
+# modulo M and keeps the sum with shift below the Miden prime.
+# Input: [c, shift, ...]
+# Output: [r, ...], with r in [0, M)
+proc reduce_shifted_sample(c: felt, shift: felt) -> Coefficient
+    u32split swap mul.TWO_POW_32_MOD_M add
     add
-    #=> [res_hi, res_lo, ..]
+    # => [Y, ...], with Y congruent to c + shift (mod M) and Y < 2^46
 
-    # 5) Reduce modulo M
-    #    Note that by virtue of the above, we are guaranteed that `res_hi` and `res_lo` are u32-s,
-    #    and hence calling `mod_12289` is safe.
-    exec.mod_12289
-    #=> [e, ...]
+    u32split
+    # => [Y_lo, Y_hi, ...], with Y_hi < 2^14
+
+    # The U32DIV AIR range-checks quotient and remainder and enforces r < M.
+    u32divmod.M
+    # => [Y_lo mod M, q0, Y_hi, ...]
+    movup.2 mul.TWO_POW_32_MOD_M add
+    # => [Y_hi * TWO_POW_32_MOD_M + Y_lo mod M, q0, ...], with dividend < 2^28
+
+    u32divmod.M
+    # => [r, q1, q0, ...], with r in [0, M)
+    movdn.2 drop drop
 end
 
-#! Takes a pointer to a polynomial pi of degree less than 1024 with coefficients in Z_Q and
-#! a polynomial c of degree 512 with coefficients also in Z_Q, where Q is the Miden prime.
-#! The goal is to compute s1 = c - pi  = c - h * s2 in Z_M[x]/(phi) where M is the Falcon prime.
-#! The pointer pi_ptr points both to pi and c through the relation c_ptr = pi_ptr + offset
-#! where offset := 1281.
-#! The naive way to compute s1 would be to first reduce the polynomial pi modulo the Falcon
-#! prime M and then modulo the irreducible polynomial phi = x^512 + 1. Then we would need to negate
-#! the coefficients of pi modulo M and only then can we add these coefficients to the coefficients
-#! of c and then reduce the result modulo M one more time.
-#! Knowing that the end goal of computing c is to compute its norm squared, we can do better.
-#!
-#! We can compute s1 in a single pass by delaying the M-modular reduction til the end. This can
-#! be achieved through a careful analysis of the computation of the difference between pi and c.
-#!
-#! The i-th coefficient s1_i of s1 is equal to c_i - (pi_i - pi_{512 + i}) which is equal to
-#! c_i  + pi_{512 + i} - pi_i. Now, we know that the size of the pi_i coefficients is bounded by
-#! J := 512 * M^2 and this means that J + pi_{512 + i} - pi_i does not Q-underflow and since
-#! J = 0 mod M, the addition of J does not affect the final result. It is also important to
-#! note that adding J does not Q-overflow by virtue of M * 2^50 < Q.
-#! All of the above implies that we can compute s1_i with only one modular reduction at the end,
-#! in addition to one modular reduction applied to c_i.
-#! Moreover, since we are only interested in the square norm of s1_i, we do not have to store
-#! s1_i and then load it at a later point, and instead we can immediately follow the computation
-#! of s1_i with computing its square norm.
-#! After computing the square norm of s1_i, we can accumulate into an accumulator to compute the
-#! sum of the square norms of all the coefficients of polynomial c. Using the overflow stack, this
-#! can be delayed til the end.
-#!
-#! Input: [pi_ptr, ...]
-#! Output: [norm_sq(s1), ...]
-#!
-#! Cycles: 40450
-pub proc compute_s1_norm_sq(pi_ptr: ptr<ProductCoefficient>) -> SquaredNorm
-    repeat.128
-        # 1) Load the next 4 * 3 coefficients
-        # load the next four pi_i
-        padw
-        dup.4
-        mem_loadw_be
+# Sums the squared centered residues of c_i + pi_hi_i - pi_lo_i for four matching lanes.
+# Each product coefficient must satisfy |pi_i| <= 512 * (M - 1) * M_HALF.
+# Thus J + M_HALF + pi_hi_i - pi_lo_i is in (0, 2 * J), where J = 512 * M^2.
+# Input: [PI_HI(4), PI_LO(4), C(4), ...]
+# Output: [norm, ...]
+proc s1_norm_sq_word(pi_hi: word, pi_lo: word, c: word) -> SquaredNorm
+    movup.4 sub add.J_PLUS_M_HALF movup.7
+    exec.reduce_shifted_sample
+    sub.M_HALF dup mul
+    # => [e0, PI_HI(3), PI_LO(3), C(3), ...]
 
-        # load the next four pi_{i+512}
-        padw
-        dup.8 add.512
-        mem_loadw_be
+    swap movup.4 sub add.J_PLUS_M_HALF movup.6
+    exec.reduce_shifted_sample
+    sub.M_HALF dup mul add
+    # => [e0 + e1, PI_HI(2), PI_LO(2), C(2), ...]
 
-        # load the next four c_i
-        padw
-        dup.12 add.MEMORY_POINTER_OFFSET_OF_HASH_TO_POINT_POLY_FROM_PRODUCT_POLY
-        mem_loadw_be
-        #=> [C, PI_{i+512}, PI, pi_ptr, ...]
+    swap movup.3 sub add.J_PLUS_M_HALF movup.4
+    exec.reduce_shifted_sample
+    sub.M_HALF dup mul add
+    # => [e0 + e1 + e2, pi_hi3, pi_lo3, c3, ...]
 
-        # 2) Compute the squared norm of (i + 0)-th coefficient of s1
-
-        u32split swap
-        #=> [c0_hi, c0_lo, c1, c2, c3, PI_{i+512}, PI, pi_ptr, ...]
-        movup.5
-        push.J add
-        #=> [pi512_0, c0_hi, c0_lo, c1, c2, c3, pi512_1, pi512_2, pi512_3, PI, pi_ptr, ...]
-        movup.9
-        #=> [pi0, pi512_0, c_hi, c_lo, c1, c2, c3, pi512_1, pi512_2, pi512_3, pi1, pi2, pi3, pi_ptr, ...]
-        exec.diff_mod_M
-        #=> [e, c1, c2, c3, pi512_1, pi512_2, pi512_3, pi1, pi2, pi3, pi_ptr, ...]
-        exec.norm_sq
-        #=> [norm(e)^2, ...]
-
-        # Move the result out of the way so that we can process the remaining coefficients
-        movdn.10
-        #=> [c1, c2, c3, pi512_1, pi512_2, pi512_3, pi1, pi2, pi3, pi_ptr, e0, ...]
-
-        # 3) Compute the squared norm of (i + 1)-th coefficient of s1
-
-        u32split swap
-        #=> [c1_hi, c1_lo, c2, c3, pi512_1, pi512_2, pi512_3, pi1, pi2, pi3, pi_ptr, e0, ...]
-        movup.4
-        #=> [pi512_1, c1_hi, c1_lo, c2, c3, pi512_2, pi512_3, pi2, pi3, pi_ptr, e0, ...]
-        push.J add
-        movup.7
-        #=> [pi1, pi512_1, c1_hi, c1_lo, c2, c3, pi512_2, pi512_3, pi2, pi3, pi_ptr, e0, ...]
-        exec.diff_mod_M
-        exec.norm_sq
-        #=> [e, c2, c3, pi512_2, pi512_3, pi2, pi3, pi_ptr, e0, ...]
-
-        movdn.7
-        #=> [c2, c3, pi512_2, pi512_3, pi2, pi3, pi_ptr, e0, e1, ...]
-
-        # 4) Compute the squared norm of (i + 2)-th coefficient of s1
-
-        u32split swap
-        #=> [c2_hi, c2_lo, c3, pi512_2, pi512_3, pi2, pi3, pi_ptr, e0, e1, ...]
-        movup.3
-        push.J add
-        #=> [pi512_2, c2_hi, c2_lo, c3, pi512_3, pi2, pi3, pi_ptr, e0, e1, ...]
-        movup.5
-        #=> [pi2, pi512_2, c2_hi, c2_lo, c3, pi512_3, pi3, pi_ptr, e0, e1, ...]
-        exec.diff_mod_M
-        exec.norm_sq
-
-        movdn.4
-        #=> [c3, pi512_3, pi3, pi_ptr, e, e, e, ...]
-
-        # 5) Compute the squared norm of (i + 3)-th coefficient of s1
-
-        u32split swap
-        #=> [c3_hi, c3_lo, pi512_3, pi3, pi_ptr, e0, e1, e2, ...]
-        movup.2 push.J add
-        movup.3
-        #=> [pi3, pi512_3, c3_hi, c3_lo, pi_ptr, e0, e1, e2, ...]
-        exec.diff_mod_M
-        #=> [e3, pi_ptr, e0, e1, e2, ...]
-        exec.norm_sq
-        #=> [e3, pi_ptr, e0, e1, e2, ...]
-
-        swap
-        #=> [pi_ptr, e3, e0, e1, e2, ...]
-
-        # 6) Increment the pointer
-        add.4
-    end
-
-    # Sum up the squared norm of all the coefficients of s1
-    drop    # drop the pointer
-    repeat.511
-        add
-    end
-    #=> [norm_sq(s1), ...]
+    swap movup.2 sub add.J_PLUS_M_HALF movup.2
+    exec.reduce_shifted_sample
+    sub.M_HALF dup mul add
 end
+
 
 #! Compute the square norm of the polynomial s2 given a pointer to its coefficients.
+#!
+#! The coefficients are stored as s2'_i = s2_i + M_HALF in [0, M), as checked by
+#! `load_h_s2_and_product`. The centered coefficient is s2'_i - M_HALF.
 #!
 #! Input: [s2_ptr, ...]
 #! Output: [norm_sq(s2), ...]
 #!
-#! Cycles: 11150
 pub proc compute_s2_norm_sq(s2_ptr: ptr<StoredCoefficient>) -> SquaredNorm
-    repeat.128
-        padw
-        dup.4
-        mem_loadw_be
-        # => [c3, c2, c1, c0, s2_ptr, ...] where ci are coefficients of s2
+    push.0 swap
+    padw padw padw
+    # => [0(12), s2_ptr, acc, ...]
 
-        exec.norm_sq
-        swap
-        # => [c2, norm_sq(c3), c1, c0, s2_ptr, ...]
-        exec.norm_sq
-        add
-        swap
-        # => [c1, norm_sq(c2) + norm_sq(c3), c0, s2_ptr, ...]
-        exec.norm_sq
-        add
-        swap
-        # => [c0, norm_sq(c1) + norm_sq(c2) + norm_sq(c3), s2_ptr, ...]
-        exec.norm_sq
-        add
-        # => [norm_sq(c0) + norm_sq(c1) + norm_sq(c2) + norm_sq(c3), s2_ptr, ...]
-        swap
-        add.4
-        # => [s2_ptr + 1, norm_sq(c0) + norm_sq(c1) + norm_sq(c2) + norm_sq(c3), ...]
+    repeat.64
+        mem_stream
+        # => [S2_PRIME(8), 0(4), s2_ptr + 8, acc, ...]
+
+        sub.M_HALF dup mul
+        swap sub.M_HALF dup mul add
+        swap sub.M_HALF dup mul add
+        swap sub.M_HALF dup mul add
+        swap sub.M_HALF dup mul add
+        swap sub.M_HALF dup mul add
+        swap sub.M_HALF dup mul add
+        swap sub.M_HALF dup mul add
+        # => [n, 0(4), s2_ptr + 8, acc, ...]
+
+        movup.6 add movdn.5
+        # => [0(4), s2_ptr + 8, acc + n, ...]
+
+        padw padw
     end
-    drop
-    # (512 / 4) - 1 = 127 additions are needed
-    repeat.127
-        add
-    end
+
+    dropw dropw dropw drop
 end
 
 
 # FALCON SIGNATURE VERIFICATION ALGORITHM
 # =============================================================================================
 
-#! Verifies a signature against a public key and a message. The procedure gets as inputs the hash
-#! of the public key and the hash of the message via the operand stack. The signature is expected
-#! to be present on the advice stack.
+#! Verifies a Falcon signature against the public-key commitment PK and message word MSG.
+#! PK is the Eidos Falcon commitment returned by `PublicKey::to_commitment()`.
+#! The signature advice supplies the expanded key, shifted signature, claimed product, and nonce.
 #!
-#! The signature is valid if and only if the procedure returns.
+#! The procedure returns when the public key hash, Fiat-Shamir product check, and
+#! signature norm bound pass. The product check is probabilistic.
 #!
 #! Inputs:
 #!   Operand stack: [PK, MSG, ...]
 #!   Advice stack:  [SIGNATURE]
 #! Outputs:
-#!   Operand stack: []
-#!   Advice stack:  []
+#!   Operand stack: [...]
+#!   Advice stack:  [...]
 #!
+#! SIGNATURE = [tau1, tau0, h(512), s2'(512), pi(1024), nonce(8)],
 #! where:
 #! - tau = (tau0, tau1) is an element in the quadratic field extension at which the product relation
 #!   between `h * s2 = pi` is checked.
 #! - h_i are the coefficients of the expanded public key polynomial.
-#! - s2_i are the coefficients of the signature polynomial.
-#! - pi_i are the coefficients of `h * s2` in Z_Q[x] where Q is the Miden VM prime.
+#! - s2'_i are the coefficients of the signature polynomial in the shifted representation
+#!   s2'_i = s2_i + M_HALF, where s2_i is the centered representative of the i-th coefficient
+#!   (see `load_h_s2_and_product`).
+#! - pi_i are the coefficients of `h * s2` in Z_Q[x] where Q is the Miden VM prime and s2 is
+#!   centered.
 #! - nonce_i are field elements representing the nonce associated to the signature.
 #!
-#! Cycles: ~ 59859
-@locals(2560)
+@locals(2048)
 pub proc verify(public_key: eidos::Digest, message: word)
     # 1) Load the public key polynomial h and the signature polynomial s2 and the product of
-    # the two polynomials pi := h * s2 in Z_Q[x]. This also checks that h hashes to the provided
-    # digest PK. While loading the polynomials, the first half of the digest of hashing the three
-    # polynomials and is used to check that we indeed have pi := h * s2 in Z_Q[x] by checking that
-    # pi(tau) = h(tau) * s2(tau) where tau is a random (Fiat-Shamir) challenge resulting
-    # from hashing h, s2 and pi.
+    # the two polynomials pi := h * s2 in Z_Q[x]. This checks that h hashes to PK and verifies
+    # the product identity at a Fiat-Shamir challenge derived from PK, shifted s2, and pi.
 
     locaddr.0
     exec.load_h_s2_and_product
-    #=> [MSG, ...]                                  (Cycles: 6785)
+    #=> [MSG, ...]
 
     # 2) Load the NONCE from the advice provider. This is encoded as 8 field elements
 
@@ -711,38 +603,31 @@ pub proc verify(public_key: eidos::Digest, message: word)
     swapw
     #=> [NONCE0, NONCE1, MSG, ...]
 
-    # 3) Compute the hash-to-point of the message MSG from the provided NONCE and save
-    # the resulting polynomial c in the memory region [c_ptr, c_ptr + 512)
+    # 3) Derive hash-to-point coefficients and accumulate the squared norm of s1 := c - h * s2
+    # in Z_M[x]/(x^512 + 1), using the product stored at local offset 1024.
 
     movupw.2
-    locaddr.2048
-    exec.hash_to_point
-    #=> [...]                                       (Cycles: 1430)
-
-    # 4) Compute the squared norm of s1 := c - h * s2 (in Z_M[x]/(phi))
-
     locaddr.1024
-    #=> [pi_ptr, ...]
+    exec.hash_to_point_s1_norm_sq
+    #=> [norm_sq(s1), ...]
 
-    exec.compute_s1_norm_sq
-    #=> [norm_sq(s1), ...]                          (Cycles: 40450)
-
-    # 5) Compute the squared norm of s2
+    # 4) Compute the squared norm of s2
 
     locaddr.512
     #=> [s2_ptr, norm_sq(s1), ...]
 
     exec.compute_s2_norm_sq
-    #=> [norm_sq(s2), norm_sq(s1), ...]             (Cycles: 11150)
+    #=> [norm_sq(s2), norm_sq(s1), ...]
 
-    # 6) Check that ||(s1, s2)||^2 < K
+    # 5) Check that ||(s1, s2)||^2 < K. Each centered coefficient has magnitude at most
+    # M_HALF, so the sum is at most 1024 * M_HALF^2 < Q and cannot wrap in the field.
 
     add
     #=> [norm_sq(s1) + norm_sq(s2), ...]
 
     push.SQUARE_NORM_BOUND
     u32assert2 u32lt assert.err="comparison failed: norm bound"
-    #=> [...]                                       (Cycles: 8)
+    #=> [...]
 end
 
 # HELPERS

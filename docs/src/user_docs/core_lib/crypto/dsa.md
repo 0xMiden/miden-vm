@@ -18,7 +18,7 @@ The module exposes the following procedures:
 
 | Procedure | Description |
 | --------- | ----------- |
-| `verify` | Verifies a signature against a public key and a message. The procedure gets the hash of the public key and the hash of the message via the operand stack. The signature is expected to be provided via the advice provider.<br /><br />The signature is valid if and only if the procedure returns.<br /><br />Stack inputs: `[PK, MSG, ...]`<br />Advice stack inputs: `[SIGNATURE]`<br />Outputs: `[...]`<br /><br />Where `PK` is the hash of the public key and `MSG` is the hash of the message, and `SIGNATURE` is the signature being verified. Both hashes are expected to be computed using Eidos. |
+| `verify` | Verifies a signature against a public-key commitment and a message word. Signature advice supplies the expanded key, shifted signature polynomial, claimed product, and nonce.<br /><br />It checks the public-key commitment, a probabilistic polynomial-product identity, and the signature norm bound.<br /><br />Stack inputs: `[PK, MSG, ...]`<br />Advice stack inputs: `[SIGNATURE]`<br />Outputs: `[...]`<br /><br />`PK` is the Eidos Falcon public-key commitment returned by `PublicKey::to_commitment()`, and `MSG` is the message word. |
 
 ## ECDSA secp256k1 Keccak256
 

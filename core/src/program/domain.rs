@@ -93,10 +93,10 @@ miden_crypto::eidos_domain_registry! {
             }
             pub FALCON_PRODUCT_CHECK: FalconProductCheckDomain {
                 local_id: 0x000a,
-                version: DomainVersion::numbered(1),
+                version: DomainVersion::numbered(2),
                 encoding: FeltSequence,
                 description: "Falcon512-Eidos polynomial product-check transcript.",
-                schema: "param0 = 1544; param1 = 0; param2 = 0; payload = public-key commitment || zero word || 512 s2 coefficients || 1024 product coefficients",
+                schema: "param0 = 1544; param1 = 0; param2 = 0; payload = public-key commitment || zero word || 512 shifted coefficients s2_i + 6144 || 1024 coefficients of h * s2 over the Miden field; s2 is centered in [-6144, 6144]",
             }
         }
     }
