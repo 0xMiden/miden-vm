@@ -854,6 +854,12 @@ impl<'input> Parser<'input> {
     fn parse_visibility(&mut self) {
         self.start_node(SyntaxKind::Visibility);
         let _ = self.expect_keyword("pub", "expected `pub`");
+        self.bump_regular_trivia();
+        if self.at_kind(SyntaxKind::LParen) {
+            self.bump();
+            let _ = self.expect_keyword("package", "expected `package` in visibility modifier");
+            let _ = self.expect_kind(SyntaxKind::RParen, "expected `)` after `package`");
+        }
         self.finish_node();
     }
 
@@ -1388,7 +1394,7 @@ impl<'input> Parser<'input> {
                         Some(next) if next.kind() == SyntaxKind::Ident && next.text() == "package"
                     ),
                     "pub" => matches!(
-                        self.next_relevant_top_level_token(index + 1)
+                        self.next_token_after_visibility(index)
                             .and_then(|next| self.tokens.get(next)),
                         Some(next)
                             if next.kind() == SyntaxKind::Ident
@@ -1499,10 +1505,29 @@ impl<'input> Parser<'input> {
             return false;
         }
 
+        let next = if prefix == "pub" {
+            self.next_token_after_visibility(self.pos)
+        } else {
+            self.next_relevant_top_level_token(self.pos + 1)
+        };
         matches!(
-            self.next_relevant_top_level_token(self.pos + 1).and_then(|index| self.tokens.get(index)),
+            next.and_then(|index| self.tokens.get(index)),
             Some(token) if token.kind() == SyntaxKind::Ident && token.text() == keyword
         )
+    }
+
+    /// Looks past an optional visibility qualifier when recognizing declarations.
+    fn next_token_after_visibility(&self, index: usize) -> Option<usize> {
+        let mut next = self.next_relevant_top_level_token(index + 1)?;
+        if self.tokens.get(next)?.kind() == SyntaxKind::LParen {
+            next = self.next_relevant_top_level_token(next + 1)?;
+            next = self.next_relevant_top_level_token(next + 1)?;
+            if self.tokens.get(next)?.kind() != SyntaxKind::RParen {
+                return None;
+            }
+            next = self.next_relevant_top_level_token(next + 1)?;
+        }
+        Some(next)
     }
 
     fn at_regular_trivia(&self) -> bool {

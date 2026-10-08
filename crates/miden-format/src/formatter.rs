@@ -4,7 +4,7 @@ use miden_assembly_syntax_cst::{
     Item, Operation, SyntaxKind, SyntaxNode, SyntaxToken,
     ast::{
         BeginBlock, Block, DoWhileOp, IfOp, Import, ImportKind, ImportSpecifier, Instruction,
-        Procedure, RepeatOp, Signature, SourceFile, TypeBody, TypeDecl, WhileOp,
+        Procedure, RepeatOp, Signature, SourceFile, TypeBody, TypeDecl, Visibility, WhileOp,
     },
     rowan::{NodeOrToken, ast::AstNode},
 };
@@ -227,15 +227,21 @@ fn render_line_form(node: &SyntaxNode, indent: usize) -> String {
     rendered
 }
 
+fn visibility_prefix(visibility: Option<Visibility>) -> &'static str {
+    match visibility {
+        Some(visibility) if visibility.is_internal() => "pub(package) ",
+        Some(_) => "pub ",
+        None => "",
+    }
+}
+
 fn render_import(import: &Import, indent: usize, config: &Config) -> String {
     let Some(path) = import.module_path() else {
         return render_line_form(import.syntax(), indent);
     };
 
     let mut header = indent_string(indent);
-    if import.visibility().is_some() {
-        header.push_str("pub ");
-    }
+    header.push_str(visibility_prefix(import.visibility()));
     header.push_str("use");
 
     let path = render_token_sequence(&significant_tokens(path.syntax()));
@@ -484,9 +490,7 @@ fn render_type_decl(type_decl: &TypeDecl, indent: usize, config: &Config) -> Str
 fn render_type_decl_prefix(type_decl: &TypeDecl, indent: usize) -> String {
     let mut rendered = indent_string(indent);
 
-    if type_decl.visibility().is_some() {
-        rendered.push_str("pub ");
-    }
+    rendered.push_str(visibility_prefix(type_decl.visibility()));
 
     if let Some(keyword) = type_decl.keyword_token() {
         rendered.push_str(keyword.text());
@@ -578,9 +582,7 @@ fn render_procedure(procedure: &Procedure, indent: usize, config: &Config) -> St
     let mut lines = render_procedure_attribute_prologue(procedure, indent);
 
     let mut header = indent_string(indent);
-    if procedure.visibility().is_some() {
-        header.push_str("pub ");
-    }
+    header.push_str(visibility_prefix(procedure.visibility()));
     header.push_str("proc");
     if let Some(name) = procedure.name_token() {
         header.push(' ');
@@ -2964,5 +2966,24 @@ end
 
         let reformatted = format_syntax(&config, &reparsed.syntax());
         assert_eq!(reformatted, formatted);
+    }
+}
+
+#[cfg(test)]
+mod package_visibility_tests {
+    use miden_assembly_syntax_cst::parse_text;
+
+    use super::*;
+
+    #[test]
+    fn formatting_preserves_package_visibility() {
+        let input = "pub(package) mod api\npub(package) use {helper} from api\npub(package) const VALUE = 1\npub(package) type Word = felt\npub(package) enum Tag : u8 { A }\npub(package) proc helper nop end\n";
+        let parse = parse_text(input);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        let output = format_syntax(&Config::default(), &parse.syntax());
+        assert_eq!(output.matches("pub(package)").count(), 6, "{output}");
+        let reparsed = parse_text(&output);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert_eq!(format_syntax(&Config::default(), &reparsed.syntax()), output);
     }
 }

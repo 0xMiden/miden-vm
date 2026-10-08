@@ -527,7 +527,7 @@ impl Assembler {
 
                     let path: Arc<Path> = {
                         let symbol = &self.linker[gid];
-                        if !symbol.visibility().is_public() {
+                        if !symbol.visibility().is_exported() {
                             continue;
                         }
                         module_path
@@ -549,7 +549,7 @@ impl Assembler {
                 }
 
                 for import in imports.iter() {
-                    if !import.visibility().is_public() {
+                    if !import.visibility().is_exported() {
                         continue;
                     }
 
@@ -603,7 +603,7 @@ impl Assembler {
             let module = &self.linker[module_idx];
             let mut submodules = Vec::new();
             for decl in module.submodules() {
-                if !decl.visibility.is_public() {
+                if !decl.visibility.is_exported() {
                     continue;
                 }
 
@@ -815,7 +815,7 @@ impl Assembler {
         for module_index in module_indices.iter().copied() {
             let module = &self.linker[module_index];
             for symbol in module.symbols() {
-                if !symbol.visibility().is_public() {
+                if !symbol.visibility().is_exported() {
                     continue;
                 }
 
@@ -823,7 +823,7 @@ impl Assembler {
             }
 
             for import in module.imports() {
-                if !import.visibility().is_public()
+                if !import.visibility().is_exported()
                     || !matches!(import.kind(), ast::ImportKind::Item)
                 {
                     continue;

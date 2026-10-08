@@ -452,3 +452,81 @@ fn public_alias_of_private_type_can_appear_in_public_signatures() -> TestResult 
     assert_eq!(library.manifest.exports().count(), 3);
     Ok(())
 }
+
+#[test]
+fn package_visibility_allows_access_without_exporting_items() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace root
+        pub mod api
+        pub(package) mod internal
+        pub(package) use {helper as local} from self::api
+        use {VALUE, Hidden} from self::api
+        pub use {helper as exposed, Hidden as Exposed} from self::api
+        pub proc entry exec.local exec.internal::helper push.VALUE drop end
+        proc typed(value: Hidden) nop end
+        "#
+    ))?;
+    let api = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace root::api
+        pub(package) const VALUE = 1
+        pub(package) type Hidden = felt
+        pub(package) proc helper push.VALUE drop end
+        pub proc entry exec.helper end
+        "#
+    ))?;
+    let internal = context.parse_module(source_file!(
+        &context,
+        "namespace root::internal\npub proc helper nop end\n"
+    ))?;
+    let library =
+        Assembler::new(context.source_manager()).assemble_library("pkg", root, [api, internal])?;
+    let exports = library.manifest.exports().map(PackageExport::path).collect::<BTreeSet<_>>();
+    assert_eq!(exports.len(), 4);
+    assert!(library.manifest.get_module(Path::new("::root::api")).is_some());
+    assert!(library.manifest.get_module(Path::new("::root::internal")).is_none());
+    assert_eq!(library.manifest.get_module(Path::new("::root")).unwrap().submodules().len(), 1);
+    for path in ["::root::entry", "::root::exposed", "::root::Exposed", "::root::api::entry"] {
+        assert!(exports.contains(&Arc::from(Path::new(path))), "missing {path}");
+    }
+    Ok(())
+}
+
+#[test]
+fn package_reexport_is_accessible_from_another_module() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace root
+        pub mod api
+        use {LOCAL_VALUE, LocalWord} from self::api
+        pub proc entry
+            exec.api::local_helper
+            push.LOCAL_VALUE drop
+        end
+        proc typed(value: LocalWord) nop end
+        "#
+    ))?;
+    let api = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace root::api
+        const VALUE = 7
+        type Word = felt
+        proc helper nop end
+        pub(package) use {helper as local_helper, VALUE as LOCAL_VALUE, Word as LocalWord} from self
+        "#
+    ))?;
+    let library = Assembler::new(context.source_manager()).assemble_library("pkg", root, [api])?;
+    assert_eq!(library.manifest.exports().count(), 1);
+    assert_eq!(
+        library.manifest.exports().next().unwrap().path().as_ref(),
+        Path::new("::root::entry")
+    );
+    Ok(())
+}

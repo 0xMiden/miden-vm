@@ -150,7 +150,7 @@ impl NamespaceGraph {
             }
 
             for edge in self.module(module_index).submodules.values() {
-                if edge.visibility.is_public() {
+                if edge.visibility.is_exported() {
                     stack.push(edge.child);
                 }
             }
