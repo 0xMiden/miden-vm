@@ -117,14 +117,11 @@ cargo build --locked --profile optimized -p miden-vm-blake3-bench --bin vm-perfo
 target/optimized/vm-performance --hash eidos --threads 14 --iterations 128 --samples 5
 ```
 
-For Ryzen multi-core results, set `--threads` to `16` or `32`.
-
 ### Single-core prover performance
 
 The VM executes the [Blake3 example](miden-vm/masm-examples/hashing/blake3_1to1/) program on an Apple M4 Pro with one Rayon worker.
 The rows measure chains of 2, 8, 32, and 128 Blake3 calls, with VM cycles padded to a power of two.
 The default proof parameters target 96-bit conjectured security.
-The 128-call Ryzen workload has 95 bits of conjectured security.
 See the [Eidos security and usage guide](docs/src/design/eidos-security.md).
 
 | Padded VM cycles | Execution time | Proving time | RAM consumed | Proof size |

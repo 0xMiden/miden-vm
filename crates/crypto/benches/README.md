@@ -90,35 +90,34 @@ Timings exclude setup and cleanup.
 
 ### Scenario 1: SMT Construction (1M pairs)
 
-| Hardware          | Sequential | Concurrent | Improvement |
-| ----------------- | ---------- | ---------- | ----------- |
-| AMD Ryzen 9 9950X | 14.3 sec   | 9.01 sec   | 1.58x       |
-| Apple M1 Air      |            |            |             |
-| Apple M1 Pro      |            |            |             |
-| Apple M4 Pro      | 13 sec     | 5.59 sec   | 2.33x       |
-| Apple M4 Max      |            |            |             |
+| Hardware          | Sequential | Concurrent (threads) | Improvement |
+| ----------------- | ---------- | -------------------- | ----------- |
+| AMD Ryzen 9 9950X | 14.3 sec   | 9.01 sec (32)         | 1.58x       |
+| Apple M1 Air      |            |                      |             |
+| Apple M1 Pro      |            |                      |             |
+| Apple M4 Pro      | 13 sec     | 5.59 sec (14)         | 2.33x       |
+| Apple M4 Max      |            |                      |             |
 
 ### Scenario 2: SMT Batched Insertion (1k pairs, 1M leaves)
 
-| Hardware          | Sequential | Concurrent | Improvement |
-| ----------------- | ---------- | ---------- | ----------- |
-| AMD Ryzen 9 9950X | 12.4 ms    | 13.4 ms    | 0.93x       |
-| Apple M1 Air      |            |            |             |
-| Apple M1 Pro      |            |            |             |
-| Apple M4 Pro      | 21.6 ms    | 12.6 ms    | 1.71x       |
-| Apple M4 Max      |            |            |             |
+| Hardware          | Sequential | Concurrent (threads) | Improvement |
+| ----------------- | ---------- | -------------------- | ----------- |
+| AMD Ryzen 9 9950X | 12.4 ms    | 13.4 ms (32)          | 0.93x       |
+| Apple M1 Air      |            |                      |             |
+| Apple M1 Pro      |            |                      |             |
+| Apple M4 Pro      | 21.6 ms    | 12.6 ms (14)          | 1.71x       |
+| Apple M4 Max      |            |                      |             |
 
 ### Scenario 3: SMT Batched Update (1k pairs, 1M leaves)
 
-| Hardware          | Sequential | Concurrent | Improvement |
-| ----------------- | ---------- | ---------- | ----------- |
-| AMD Ryzen 9 9950X | 12.8 ms    | 13.5 ms    | 0.94x       |
-| Apple M1 Air      |            |            |             |
-| Apple M1 Pro      |            |            |             |
-| Apple M4 Pro      | 31.3 ms    | 14.7 ms    | 2.13x       |
-| Apple M4 Max      |            |            |             |
+| Hardware          | Sequential | Concurrent (threads) | Improvement |
+| ----------------- | ---------- | -------------------- | ----------- |
+| AMD Ryzen 9 9950X | 12.8 ms    | 13.5 ms (32)          | 0.94x       |
+| Apple M1 Air      |            |                      |             |
+| Apple M1 Pro      |            |                      |             |
+| Apple M4 Pro      | 31.3 ms    | 14.7 ms (14)          | 2.13x       |
+| Apple M4 Max      |            |                      |             |
 
-Concurrent SMT results use 14 Rayon workers on Apple M4 Pro and 32 on AMD Ryzen 9 9950X.
 Sequential builds disable the `concurrent` feature.
 
 ## Benchmark Explanations
