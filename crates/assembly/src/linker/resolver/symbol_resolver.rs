@@ -52,6 +52,10 @@ impl SymbolResolutionContext {
 /// a procedure can require multiple steps to reach the original concrete definition of the
 /// procedure.
 ///
+/// A resolution identifies the concrete definition without changing the invocation's access path.
+/// Callers retain that path for subsequent resolution, since replacing a re-export alias with the
+/// definition's path could discard the visibility granted by the alias.
+///
 /// The [SymbolResolver] encapsulates the tricky details of doing this, so that users of the
 /// resolver need only provide a reference to the [Linker], a name they wish to resolve, and some
 /// information about the caller necessary to determine the context in which the name should be
