@@ -17,8 +17,8 @@ const CURRENT_TRACE_ROW_ADDRESS_PTR: u32 = 3_223_322_771;
 // Runtime call-site vector. The precompiles-prover oracle derives the matching MASM constants
 // directly from the AIRs.
 const BYTE_PAIR_LUT_AIR_INDEX: usize = 3;
-const MIN_LOG_HEIGHTS: [u64; 11] = [5, 5, 7, 16, 1, 3, 1, 1, 2, 1, 7];
-const HEIGHTS: [u64; 11] = [16, 7, 12, 16, 11, 7, 10, 12, 13, 14, 9];
+const MIN_LOG_HEIGHTS: [u64; 12] = [5, 5, 7, 16, 1, 3, 1, 1, 2, 1, 7, 7];
+const HEIGHTS: [u64; 12] = [16, 7, 12, 16, 11, 7, 10, 12, 13, 14, 9, 8];
 
 fn masm_const(source: &str, name: &str) -> u64 {
     let prefix = format!("const {name} = ");
@@ -105,7 +105,7 @@ fn pvm_wrapper_enforces_every_air_height_boundary() {
         }
     }
 
-    let mut maximum = [LOG_HEIGHT_MAX; 11];
+    let mut maximum = [LOG_HEIGHT_MAX; 12];
     // BytePairLut's height is fixed; only the other instances range up to the ceiling.
     maximum[BYTE_PAIR_LUT_AIR_INDEX] = MIN_LOG_HEIGHTS[BYTE_PAIR_LUT_AIR_INDEX];
     build_test!(source(), &[], &maximum)

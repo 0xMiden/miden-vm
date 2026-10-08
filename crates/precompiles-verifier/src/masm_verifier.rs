@@ -129,7 +129,7 @@ pub enum PvmRecursiveVerifierInputsError {
     /// The trusted setup commitment did not match the PVM AIR declaration.
     #[error(transparent)]
     Preprocessed(#[from] miden_lifted_stark::PreprocessedValidationError),
-    /// The parsed proof does not have the fixed eleven-chiplet shape expected by the wrapper.
+    /// The parsed proof does not have the fixed twelve-chiplet shape expected by the wrapper.
     #[error("invalid proof shape: {0}")]
     InvalidProofShape(&'static str),
 }
