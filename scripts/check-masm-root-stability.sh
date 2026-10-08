@@ -30,10 +30,8 @@ parse_version() {
     eval "${prefix}_patch=\$patch"
 }
 
-cargo_incompatible_release_line_changed() {
-    (( baseline_major != current_major )) ||
-        (( baseline_major == 0 && baseline_minor != current_minor )) ||
-        (( baseline_major == 0 && baseline_minor == 0 && baseline_patch != current_patch ))
+mast_root_break_allowed() {
+    (( baseline_major == 0 && current_major == 1 && current_minor == 0 && current_patch == 0 ))
 }
 
 latest_release_tag_on_head() {
@@ -55,8 +53,8 @@ fi
 baseline_version="${baseline_tag#v}"
 parse_version "$baseline_version" baseline
 
-if cargo_incompatible_release_line_changed; then
-    echo "workspace version changed Cargo-incompatible release line from ${baseline_version} to ${workspace_version}; skipping MASM root stability check"
+if mast_root_break_allowed; then
+    echo "workspace version changed from ${baseline_version} to ${workspace_version}; allowing MAST root changes for the 0.x to 1.0 transition"
     exit 0
 fi
 

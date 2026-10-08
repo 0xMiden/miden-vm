@@ -11,7 +11,7 @@ use super::{
 use crate::{
     hash::eidos::{BLOCK_LEN, domains::MMR_PEAKS},
     merkle::{
-        MerklePath, MerkleTree, NodeIndex, int_to_node,
+        MerkleError, MerklePath, MerkleTree, NodeIndex, int_to_node,
         mmr::{
             InOrderIndex, MmrPath, MmrProof,
             forest::{Forest, TreeSizeIterator, high_bitmask},
@@ -1459,11 +1459,7 @@ fn test_mmr_proof_num_peaks_exceeds_current_num_peaks() {
         MmrPath::new(Forest::new(5).unwrap(), 4, original_proof.path().merkle_path().clone());
     let invalid_proof = MmrProof::new(invalid_path, original_proof.leaf());
     let err = mmr.peaks().verify(LEAVES[3], invalid_proof).unwrap_err();
-    assert_matches!(
-        err,
-        MmrError::PeakOutOfBounds { peak_idx, peaks_len }
-            if peak_idx == 1 && peaks_len == mmr.peaks().num_peaks()
-    );
+    assert_matches!(err, MmrError::PositionNotFound(4));
 }
 
 /// Tests that a proof whose peak count exceeds the peak count of the MMR returns an error.
@@ -1484,8 +1480,10 @@ fn test_mmr_old_proof_num_peaks_exceeds_current_num_peaks() {
     let err = mmr.peaks().verify(LEAVES[leaf_idx], proof).unwrap_err();
     assert_matches!(
         err,
-        MmrError::PeakOutOfBounds { peak_idx, peaks_len }
-            if peak_idx == 1 && peaks_len == mmr.peaks().num_peaks()
+        MmrError::InvalidMerklePath(MerkleError::InvalidNodeIndexDepth {
+            expected: 2,
+            provided: 0
+        })
     );
 }
 
@@ -1549,4 +1547,44 @@ fn leaf_to_corresponding_tree(leaf_idx: usize, forest: usize) -> Option<u32> {
 /// Return the total number of nodes of a given forest
 fn nodes_in_forest(forest: usize) -> usize {
     nodes_from_mask(forest)
+}
+
+#[test]
+fn test_peaks_verify_rejects_short_path() {
+    let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap(); // forest 7 = 4 + 2 + 1
+    let peaks = mmr.peaks();
+
+    // H(leaf0, leaf1) claimed as the value of leaf 0 with a one-node path.
+    let inner = Eidos::merge(&[LEAVES[0], LEAVES[1]]);
+    let sibling = Eidos::merge(&[LEAVES[2], LEAVES[3]]);
+    let proof = MmrProof::new(MmrPath::new(mmr.forest(), 0, MerklePath::new(vec![sibling])), inner);
+    assert!(peaks.verify(inner, proof).is_err());
+}
+
+#[test]
+fn test_peaks_verify_rejects_proof_for_other_forest() {
+    // Leaves 4 and 5 are subtree hashes, so peak 1 = H(H(a, b), H(c, d)) is also the root of a
+    // depth-2 tree over a, b, c, d.
+    let [a, b, c, d] = [10, 11, 12, 13].map(int_to_node);
+    let mut leaves = LEAVES;
+    leaves[4] = Eidos::merge(&[a, b]);
+    leaves[5] = Eidos::merge(&[c, d]);
+    let mmr = Mmr::try_from_iter(leaves.iter().copied()).unwrap(); // forest 7 = 4 + 2 + 1
+    let peaks = mmr.peaks();
+
+    // In a forest of 3 leaves, position 2 is in peak 1 at relative position 0. The path has depth
+    // 2, which matches the height of the tree holding position 2 in forest 7.
+    let path = MerklePath::new(vec![b, leaves[5]]);
+    assert!(path.verify(0, a, &peaks.peaks()[1]).is_ok());
+
+    let proof = MmrProof::new(MmrPath::new(Forest::new(3).unwrap(), 2, path), a);
+    assert_matches!(peaks.verify(a, proof), Err(MmrError::InvalidMerklePath(_)));
+}
+
+#[test]
+fn test_peaks_verify_out_of_range_position() {
+    let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap();
+    let peaks = mmr.peaks();
+    let proof = MmrProof::new(MmrPath::new(mmr.forest(), 100, MerklePath::default()), LEAVES[0]);
+    assert_matches!(peaks.verify(LEAVES[0], proof), Err(MmrError::PositionNotFound(100)));
 }
