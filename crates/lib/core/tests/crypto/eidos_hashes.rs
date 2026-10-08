@@ -10,7 +10,7 @@ use rstest::rstest;
 fn assert_hash_input_error(source: &str, message: &str) {
     let (program, ..) = build_test!(source, &[]).compile().unwrap();
     let mut host = DefaultHost::default()
-        .with_library(&miden_core_lib::CoreLibrary::default())
+        .with_library(miden_core_lib::CoreLibrary::default().host_library())
         .unwrap();
     // A missing range check must fail the test without running an unbounded absorption loop.
     let options =

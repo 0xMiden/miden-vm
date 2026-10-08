@@ -127,7 +127,7 @@ fn canonical_deferred_ecdsa4_keccak100_example_executes() {
         .expect("example must assemble")
         .unwrap_program();
     let mut host = DefaultHost::default()
-        .with_library(&core_lib)
+        .with_library(core_lib.host_library())
         .expect("core library must load into the host");
 
     FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())

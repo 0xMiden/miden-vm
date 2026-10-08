@@ -113,7 +113,7 @@ pub fn expect_precompile_trap_with_processor(source: &str) -> (ExecutionError, F
         .unwrap_program();
 
     let mut host = DefaultHost::default()
-        .with_library(&core_lib)
+        .with_library(core_lib.host_library())
         .expect("failed to load CoreLibrary into the host");
     let mut processor = FastProcessor::new_with_options(
         StackInputs::default(),

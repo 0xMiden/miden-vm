@@ -198,15 +198,14 @@ warning.
 
 Native Keccak input is limited to 1 MiB and AEAD plaintext to 16 MiB. These fixed limits replace the
 configurable hash limit accessors on `ExecutionOptions` and apply before expensive work; the
-processor's aggregate advice budget still applies. AEAD now reads unwritten ciphertext, padding, and
-tag elements as zero, just like VM memory instructions. This deliberately replaces the previous
-host-side rejection of unwritten words; authentication and padding validation still apply to the
-resulting values. Explicitly writing zero and leaving that memory unwritten have the same decryption
-behavior. Debug range output likewise displays zero for unwritten memory.
+processor's aggregate advice budget still applies. Eidos AEAD reads unwritten ciphertext limbs and
+tag elements as zero, just like VM memory instructions, and authenticates those values. Explicitly
+writing zero and leaving that memory unwritten have the same decryption behavior. Debug range output
+likewise displays zero for unwritten memory.
 
 Generated inverse wrappers now pass a domain selector and eight explicit limbs while
 retaining the original deferred digest for the multiplication assertion; host hints do not replace
-that binding. The ECDSA verification cycle baseline is 1353.
+that binding. The ECDSA verification cycle baseline is 1220.
 
 Wasm keeps the `miden:event/v1` namespace. ABI revision 2 adds `invocation_kind`; modules require
 only revision 1 when their imports do. A revision-1 declaration cannot import the new query.

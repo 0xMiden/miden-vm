@@ -308,7 +308,7 @@ fn test_eidos_recursive_verify_with_precompile_requests() {
 
     let stack_inputs = StackInputs::default();
     let mut host = DefaultHost::default()
-        .with_library(&core_lib)
+        .with_library(core_lib.host_library())
         .expect("failed to load core library into the host");
     let witness = FastProcessor::new_with_options(
         stack_inputs,
