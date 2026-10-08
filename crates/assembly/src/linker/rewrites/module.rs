@@ -25,9 +25,8 @@ use crate::{
 /// A [ModuleRewriter] handles applying all of the module-wide rewrites to a [Module] that is being
 /// added to the module graph of the linker. These rewrites include:
 ///
-/// * Resolving, at least partially, all of the invocation targets in procedures of the module, and
-///   rewriting those targets as concretely as possible OR as phantom calls representing procedures
-///   referenced by MAST root for which we have no definition.
+/// * Validating invocation targets and recording procedure dependencies while preserving the paths
+///   through which those targets are visible.
 pub struct ModuleRewriter<'a, 'b: 'a> {
     resolver: &'a SymbolResolver<'b>,
     cache: &'a mut ResolverCache,
@@ -109,12 +108,12 @@ impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
         Err(self.invalid_constant_ref(span))
     }
 
-    fn rewrite_target(
+    fn validate_target(
         &mut self,
         kind: InvokeKind,
-        target: &mut InvocationTarget,
+        target: &InvocationTarget,
     ) -> ControlFlow<LinkerError> {
-        log::debug!(target: "linker", "    * rewriting {kind} target {target}");
+        log::debug!(target: "linker", "    * validating {kind} target {target}");
         let context = SymbolResolutionContext {
             span: target.span(),
             module: self.module_id,
@@ -130,15 +129,9 @@ impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
             },
             Ok(SymbolResolution::Exact { path, .. }) => {
                 log::debug!(target: "linker", "    | target resolved to {path}");
-                match &mut *target {
-                    InvocationTarget::MastRoot(_) => (),
-                    InvocationTarget::Path(old_path) => {
-                        *old_path = path.with_span(old_path.span());
-                    },
-                    target @ InvocationTarget::Symbol(_) => {
-                        *target = InvocationTarget::Path(path.with_span(target.span()));
-                    },
-                }
+                // Preserve the access path: an alias may expose an otherwise private target.
+                // Replacing it with the definition's path would discard the visibility granted
+                // by the re-export when this invocation is resolved again.
                 self.invoked.insert(Invoke { kind, target: target.clone() });
             },
             Ok(SymbolResolution::Module { id, path }) => {
@@ -184,16 +177,16 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
         ControlFlow::Continue(())
     }
     fn visit_mut_syscall(&mut self, target: &mut InvocationTarget) -> ControlFlow<LinkerError> {
-        self.rewrite_target(InvokeKind::SysCall, target)
+        self.validate_target(InvokeKind::SysCall, target)
     }
     fn visit_mut_call(&mut self, target: &mut InvocationTarget) -> ControlFlow<LinkerError> {
-        self.rewrite_target(InvokeKind::Call, target)
+        self.validate_target(InvokeKind::Call, target)
     }
     fn visit_mut_invoke_target(
         &mut self,
         target: &mut InvocationTarget,
     ) -> ControlFlow<LinkerError> {
-        self.rewrite_target(InvokeKind::Exec, target)
+        self.validate_target(InvokeKind::Exec, target)
     }
     fn visit_mut_immediate_u8(&mut self, imm: &mut ast::Immediate<u8>) -> ControlFlow<LinkerError> {
         let mut visitor = ConstEvalVisitor::new(self);

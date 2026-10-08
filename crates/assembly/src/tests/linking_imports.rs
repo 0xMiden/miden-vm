@@ -358,3 +358,21 @@ fn link_import_public_item_reexport_cycle_with_self_relative_target_is_rejected(
 
     Ok(())
 }
+
+#[test]
+fn private_procedure_reexport_is_callable_from_another_module() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        "namespace root\npub mod api\nuse {exposed as imported} from self::api\npub proc entry exec.api::exposed exec.imported call.api::exposed procref.api::exposed drop end\n"
+    ))?;
+    let api = context.parse_module(source_file!(
+        &context,
+        "namespace root::api\nproc helper push.1 drop end\npub use {helper as exposed} from self\n"
+    ))?;
+    let library = Assembler::new(context.source_manager()).assemble_library("pkg", root, [api])?;
+    let exports = library.manifest.exports().map(PackageExport::path).collect::<BTreeSet<_>>();
+    assert_eq!(exports.len(), 2);
+    assert!(exports.contains(&Arc::from(Path::new("::root::api::exposed"))));
+    Ok(())
+}
