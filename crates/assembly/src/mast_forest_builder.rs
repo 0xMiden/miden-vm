@@ -715,36 +715,12 @@ impl MastForestBuilder {
             })
             .collect();
 
-        let mut inline_calls = Vec::with_capacity(
-            source_node.inline_calls.len()
-                + active_inline_calls.len()
-                    * core::cmp::max(
-                        source_node.op_end.saturating_sub(source_node.op_start),
-                        u32::from(is_external_boundary),
-                    ) as usize,
-        );
-        if source_node.op_start == source_node.op_end && is_external_boundary {
-            let boundary_op_idx = source_node.op_start;
-            inline_calls.extend(source_node.inline_calls.iter().copied());
+        let mut inline_calls = source_node.inline_calls.clone();
+        if source_node.op_start < source_node.op_end || is_external_boundary {
             inline_calls.extend(active_inline_calls.iter().map(|inline_call| {
                 DebugSourceInlineCall {
-                    op_idx: boundary_op_idx,
-                    callee_idx: inline_call.callee_idx,
-                    loc_idx: inline_call.loc_idx,
-                }
-            }));
-        }
-        for op_idx in source_node.op_start..source_node.op_end {
-            inline_calls.extend(
-                source_node
-                    .inline_calls
-                    .iter()
-                    .filter(|inline_call| inline_call.op_idx == op_idx)
-                    .copied(),
-            );
-            inline_calls.extend(active_inline_calls.iter().map(|inline_call| {
-                DebugSourceInlineCall {
-                    op_idx,
+                    op_idx: source_node.op_start,
+                    op_end: source_node.op_end,
                     callee_idx: inline_call.callee_idx,
                     loc_idx: inline_call.loc_idx,
                 }
@@ -954,6 +930,32 @@ fn compute_operations_and_adjust_mappings(
             let num_ops = mappings.iter().map(|idx| idx + 1).max().unwrap_or(0);
             (num_ops, mappings)
         },
+    }
+}
+
+fn remap_inline_ranges(
+    rows: &mut [DebugSourceInlineCall],
+    map: impl FnOnce(Vec<usize>) -> Vec<usize>,
+) {
+    let endpoints = rows
+        .iter()
+        .filter(|row| row.op_idx != row.op_end)
+        .flat_map(|row| [row.op_idx as usize, row.op_end as usize - 1])
+        .collect::<Vec<_>>();
+    if endpoints.is_empty() {
+        return;
+    }
+
+    let endpoint_count = endpoints.len();
+    let mapped = map(endpoints);
+    assert_eq!(mapped.len(), endpoint_count);
+    for (row, pair) in rows
+        .iter_mut()
+        .filter(|row| row.op_idx != row.op_end)
+        .zip(mapped.as_chunks::<2>().0)
+    {
+        row.op_idx = u32::try_from(pair[0]).unwrap();
+        row.op_end = u32::try_from(pair[1] + 1).unwrap();
     }
 }
 
@@ -1488,6 +1490,7 @@ impl MastForestBuilder {
                     .into_iter()
                     .map(|mut inline_call| {
                         inline_call.op_idx = remap_op_idx(inline_call.op_idx);
+                        inline_call.op_end = remap_op_idx(inline_call.op_end);
                         inline_call
                     })
                     .collect(),
@@ -1575,6 +1578,7 @@ impl MastForestBuilder {
                 merged_inline_calls.extend(source_node.inline_calls.iter().map(|inline_call| {
                     let mut inline_call = *inline_call;
                     inline_call.op_idx += u32::try_from(ops_offset).unwrap();
+                    inline_call.op_end += u32::try_from(ops_offset).unwrap();
                     inline_call
                 }));
                 merged_functions.extend(self.function_indices_for_source_ref(source_ref));
@@ -1749,6 +1753,55 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn inline_range_remapping_batches_all_endpoints() {
+        let mut rows = (0..128_u32)
+            .map(|index| DebugSourceInlineCall {
+                op_idx: index,
+                op_end: index + 2,
+                callee_idx: DebugFunctionIdx::from(index),
+                loc_idx: DebugLocIdx::from(index),
+            })
+            .collect::<Vec<_>>();
+        let boundary = DebugSourceInlineCall {
+            op_idx: 40,
+            op_end: 40,
+            callee_idx: DebugFunctionIdx::from(0_u32),
+            loc_idx: DebugLocIdx::from(0_u32),
+        };
+        rows.insert(5, boundary);
+        let original = rows.clone();
+        let mut map_calls = 0;
+        remap_inline_ranges(&mut rows, |endpoints| {
+            map_calls += 1;
+            let expected = (0..128_usize).flat_map(|index| [index, index + 1]).collect::<Vec<_>>();
+            assert_eq!(endpoints, expected);
+            endpoints.into_iter().map(|endpoint| endpoint + 7).collect()
+        });
+        assert_eq!(map_calls, 1);
+        for (row, original) in rows.iter().zip(original) {
+            let offset = if original.op_idx == original.op_end { 0 } else { 7 };
+            assert_eq!(row.op_idx, original.op_idx + offset);
+            assert_eq!(row.op_end, original.op_end + offset);
+            assert_eq!(row.callee_idx, original.callee_idx);
+            assert_eq!(row.loc_idx, original.loc_idx);
+        }
+    }
+
+    #[test]
+    fn inline_range_remapping_skips_zero_width_boundaries() {
+        let boundary = DebugSourceInlineCall {
+            op_idx: 7,
+            op_end: 7,
+            callee_idx: DebugFunctionIdx::from(0_u32),
+            loc_idx: DebugLocIdx::from(0_u32),
+        };
+        let mut rows = [boundary];
+        remap_inline_ranges(&mut rows, |_| panic!("boundary rows must not be remapped"));
+        assert_eq!(rows, [boundary]);
+        remap_inline_ranges(&mut [], |_| panic!("empty rows must not be remapped"));
+    }
+
     fn record_test_root(builder: &mut MastForestBuilder, node_ref: MastNodeRef) -> MastNodeRef {
         builder.record_procedure_root_ref(node_ref);
         node_ref
@@ -1883,7 +1936,12 @@ mod tests {
             ));
             (callee_idx, call_site_span)
         };
-        let inline_call = DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx };
+        let inline_call = DebugSourceInlineCall {
+            op_idx: 0,
+            op_end: 1,
+            callee_idx,
+            loc_idx,
+        };
         let decorated = builder.record_exec_inline_calls(target, &[inline_call]).unwrap();
         let source_node_count = builder.debug_info.debug_info().nodes().len();
 
@@ -1923,7 +1981,12 @@ mod tests {
             ));
             (callee_idx, loc_idx)
         };
-        let inline_call = DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx };
+        let inline_call = DebugSourceInlineCall {
+            op_idx: 0,
+            op_end: 1,
+            callee_idx,
+            loc_idx,
+        };
         let external_ref = builder
             .ensure_external_link_with_source_ref(mast_root, None, None, None)
             .unwrap();
@@ -1935,7 +1998,7 @@ mod tests {
                 7,
                 vec![],
                 vec![],
-                vec![DebugSourceInlineCall { op_idx: 7, ..inline_call }],
+                vec![DebugSourceInlineCall { op_idx: 7, op_end: 7, ..inline_call }],
                 &[],
                 true,
                 false,
@@ -1995,7 +2058,12 @@ mod tests {
             ));
             (callee_idx, loc_idx)
         };
-        let inline_call = DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx };
+        let inline_call = DebugSourceInlineCall {
+            op_idx: 0,
+            op_end: 1,
+            callee_idx,
+            loc_idx,
+        };
         let external_ref = builder
             .ensure_external_link_with_source_ref(block_digest, None, None, None)
             .unwrap();
@@ -2430,6 +2498,7 @@ mod tests {
                 vec![debug_var_a],
                 vec![DebugSourceInlineCall {
                     op_idx: 0,
+                    op_end: 1,
                     callee_idx: function_a,
                     loc_idx: location_a,
                 }],
@@ -2444,6 +2513,7 @@ mod tests {
                 vec![debug_var_b],
                 vec![DebugSourceInlineCall {
                     op_idx: 0,
+                    op_end: 1,
                     callee_idx: function_b,
                     loc_idx: location_b,
                 }],
@@ -2469,6 +2539,7 @@ mod tests {
             merged_source.inline_calls,
             vec![DebugSourceInlineCall {
                 op_idx: 0,
+                op_end: 1,
                 callee_idx: function_b,
                 loc_idx: location_b,
             }],
@@ -2510,6 +2581,7 @@ mod tests {
             remerged_source.inline_calls,
             vec![DebugSourceInlineCall {
                 op_idx: 0,
+                op_end: 1,
                 callee_idx: function_b,
                 loc_idx: location_b,
             }],
@@ -3151,6 +3223,7 @@ mod tests {
         );
         debug_info[source_ref].inline_calls.push(DebugSourceInlineCall {
             op_idx: 0,
+            op_end: 1,
             callee_idx: function_idx,
             loc_idx: location_idx,
         });

@@ -152,11 +152,13 @@ impl Arbitrary for PackageDebugInfo {
 
                     builder[source_a].inline_calls.push(DebugSourceInlineCall {
                         op_idx: 1,
+                        op_end: 2,
                         callee_idx: function_b,
                         loc_idx: location_a,
                     });
                     builder[source_b].inline_calls.push(DebugSourceInlineCall {
                         op_idx: 1,
+                        op_end: 2,
                         callee_idx: function_a,
                         loc_idx: location_b,
                     });

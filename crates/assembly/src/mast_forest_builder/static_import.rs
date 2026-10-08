@@ -15,7 +15,7 @@ use miden_mast_package::debug_info::{
 
 use super::{
     MastForestBuilder, MastNodeRef, MastNodeUse, PendingMastNodeDraft, PendingMastNodeKind,
-    SourceNodeRef,
+    SourceNodeRef, remap_inline_ranges,
 };
 use crate::diagnostics::Report;
 
@@ -540,7 +540,7 @@ impl MastForestBuilder {
                 })
             })
             .collect::<Result<Vec<_>, Report>>()?;
-        let inline_calls = package_debug_info
+        let mut inline_calls = package_debug_info
             .inline_calls_for_source_node(source_node_id)
             .map(|row| {
                 let loc_idx =
@@ -550,9 +550,22 @@ impl MastForestBuilder {
                     row.callee_idx,
                     "function",
                 )?;
-                Ok(DebugSourceInlineCall { op_idx: row.op_idx, callee_idx, loc_idx })
+                Ok(DebugSourceInlineCall {
+                    op_idx: row.op_idx,
+                    op_end: row.op_end,
+                    callee_idx,
+                    loc_idx,
+                })
             })
             .collect::<Result<Vec<_>, Report>>()?;
+        remap_inline_ranges(&mut inline_calls, |endpoints| {
+            if let Some(MastNode::Block(block)) = source_forest.get_node_by_id(source_exec_node_id)
+            {
+                BasicBlockNode::unadjust_asm_op_indices(endpoints, block.op_batches())
+            } else {
+                endpoints
+            }
+        });
         let op_range = package_debug_info.source_node(source_node_id).map(|source_node| {
             self.unadjust_source_block_range(
                 source_forest,
@@ -596,12 +609,7 @@ impl MastForestBuilder {
                 debug_vars,
                 |debug_var| &mut debug_var.op_idx,
             ),
-            inline_calls: self.unadjust_source_block_indices(
-                source_forest,
-                source_exec_node_id,
-                inline_calls,
-                |inline_call| &mut inline_call.op_idx,
-            ),
+            inline_calls,
             functions,
         })
     }
