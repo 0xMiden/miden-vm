@@ -337,7 +337,7 @@ generated MASM constants.
 | `0x0001` | 1       | `SMT_BUCKET_LEAF`       | `Custom`       |
 | `0x0002` | 1       | `MMR_PEAKS`             | `Custom`       |
 | `0x0003` | 1       | `GENERIC_BYTE_STRING`   | `ByteString`   |
-| `0x0004` | 1       | `FALCON_HASH_TO_POINT`  | `Custom`       |
+| `0x0004` | 2       | `FALCON_HASH_TO_POINT`  | `Custom`       |
 | `0x0005` | 1       | `FALCON_PUBLIC_KEY`     | `FeltSequence` |
 | `0x0006` | 2       | `AEAD_CTR_KEY`          | `Custom`       |
 | `0x0007` | 2       | `AEAD_MAC_KEY`          | `Custom`       |
@@ -362,7 +362,7 @@ The declarations in `core::program::domain` are normative and are the source for
 | `0x0007` | 1       | `UINT256_PRECOMPILE`   | `Custom`       |
 | `0x0008` | 1       | `CURVE_PRECOMPILE`     | `Custom`       |
 | `0x0009` | 1       | `PVM_UINT_PIN_CLAIM`   | `Custom`       |
-| `0x000a` | 1       | `FALCON_PRODUCT_CHECK` | `FeltSequence` |
+| `0x000a` | 2       | `FALCON_PRODUCT_CHECK` | `FeltSequence` |
 
 Numeric assignments are consensus-visible. Changing a numbered construction's encoding, parameter
 schema, or schedule requires a new version. A delegated construction may evolve the payload grammar
