@@ -1328,6 +1328,50 @@ fn test_build_trace_returns_err_when_poseidon2_trace_exceeds_budget() {
     );
 }
 
+/// The continuation stack of a fragment comes from a deserialized witness, so it must be checked
+/// against the replayed forest. A continuation that names a missing node, a node of the wrong
+/// kind, or a batch the basic block does not have must make `build_trace` return an error instead
+/// of panicking.
+#[rstest]
+#[case::start_missing_node(Continuation::StartNode(MastNodeId::new_unchecked(1_000)))]
+#[case::resume_missing_node(Continuation::ResumeBasicBlock {
+    node_id: MastNodeId::new_unchecked(1_000),
+    batch_index: 0,
+    op_idx_in_batch: 0,
+})]
+#[case::resume_batch_out_of_range(Continuation::ResumeBasicBlock {
+    node_id: MastNodeId::new_unchecked(0),
+    batch_index: 7,
+    op_idx_in_batch: 0,
+})]
+#[case::finish_loop_on_basic_block(Continuation::FinishLoop(MastNodeId::new_unchecked(0)))]
+#[case::finish_dyn_on_basic_block(Continuation::FinishDyn(MastNodeId::new_unchecked(0)))]
+fn test_build_trace_returns_err_on_inconsistent_continuation(
+    #[case] continuation: Continuation<MastForestId>,
+) {
+    let program = basic_block_program_small();
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(DEFAULT_STACK).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default().with_core_trace_fragment_size(4).unwrap(),
+    )
+    .expect("processor advice inputs should fit advice map limits");
+    let mut host = DefaultHost::default();
+    let mut vm_witness =
+        processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
+
+    let ctx = vm_witness.trace_replay_mut().core_trace_contexts.last_mut().unwrap();
+    let mut stack = ContinuationStack::default();
+    stack.push_continuation(continuation);
+    ctx.continuation = stack;
+
+    let result = build_trace(vm_witness);
+    assert!(
+        matches!(result, Err(ExecutionError::Internal(_))),
+        "expected ExecutionError::Internal, got: {result:?}"
+    );
+}
+
 /// Verifies that `build_trace` returns `ExecutionError::Internal` when `core_trace_contexts` is
 /// empty, since `push_halt_opcode_row` expects at least one fragment to have been processed.
 #[test]
