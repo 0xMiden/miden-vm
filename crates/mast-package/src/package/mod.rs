@@ -203,15 +203,24 @@ impl Package {
 
     /// Removes all package-owned debug information from this package.
     ///
-    /// This removes well-known package debug sections and recursively strips an embedded kernel
+    /// This removes well-known package debug sections and also strips them from an embedded kernel
     /// package if one is present.
+    ///
+    /// # Errors
+    /// Returns an error if an embedded kernel package cannot be decoded, or if it embeds another
+    /// kernel package.
     pub fn strip_debug_info(&mut self) -> Result<(), PackageStripError> {
         for section in self.sections.iter_mut().filter(|section| section.id == SectionId::KERNEL) {
             // Debug metadata is about to be removed, so validate the nested MAST while deferring
             // debug validation that could otherwise prevent stripping malformed metadata.
             let mut kernel_package = Self::read_from_bytes_trusted(section.data.as_ref())
                 .map_err(|source| PackageStripError::DecodeEmbeddedKernel { source })?;
-            kernel_package.strip_debug_info()?;
+            // The assembler never embeds a kernel in a kernel, so strip one level only instead of
+            // recursing into attacker-controlled nesting.
+            if kernel_package.sections.iter().any(|section| section.id == SectionId::KERNEL) {
+                return Err(PackageStripError::NestedEmbeddedKernel);
+            }
+            kernel_package.sections.retain(|section| !section.id.is_debug());
             section.data = Cow::Owned(kernel_package.to_bytes());
         }
 
@@ -2201,6 +2210,23 @@ mod tests {
             "untrusted embedded-kernel decode should retain validated nested debug sections"
         );
         assert!(untrusted_kernel.debug_info().unwrap().is_some());
+    }
+
+    #[test]
+    fn strip_debug_info_rejects_nested_embedded_kernel() {
+        let inner = build_debug_package("inner", TargetType::Kernel, "inner::boot", "inner_ctx");
+        let mut kernel =
+            build_debug_package("kernel", TargetType::Kernel, "kernel::boot", "kernel_ctx");
+        kernel.sections.push(Section::new(SectionId::KERNEL, inner.to_bytes()));
+
+        let mut package =
+            build_debug_package("app", TargetType::Executable, "app::entry", "app_ctx");
+        package.sections.push(Section::new(SectionId::KERNEL, kernel.to_bytes()));
+
+        assert!(matches!(
+            package.strip_debug_info(),
+            Err(PackageStripError::NestedEmbeddedKernel)
+        ));
     }
 
     #[test]
