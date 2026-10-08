@@ -11,7 +11,7 @@ use crate::{
         ExecutionState, InternalBreakReason, finalize_clock_cycle,
         finalize_clock_cycle_with_continuation, get_next_ctx_id,
     },
-    mast::{ExecutableMastForest, MastNodeId},
+    mast::{ExecutableMastForest, MastNode, MastNodeId},
     option_map_break_reason,
     processor::{MemoryInterface, Processor, StackInterface, SystemInterface},
     tracer::Tracer,
@@ -42,11 +42,13 @@ where
     );
 
     let dyn_node = option_map_break_reason(
-        current_forest.get_node_by_id(current_node_id),
+        current_forest.get_node_by_id(current_node_id).and_then(|node| match node {
+            MastNode::Dyn(dyn_node) => Some(dyn_node),
+            _ => None,
+        }),
         "dyn node not found in current forest",
     )
-    .map_break(InternalBreakReason::from)?
-    .unwrap_dyn();
+    .map_break(InternalBreakReason::from)?;
 
     // Retrieve callee hash from memory, using stack top as the memory address.
     let read_ctx = state.processor.system().ctx();
@@ -168,11 +170,13 @@ where
     );
 
     let dyn_node = option_map_break_reason(
-        current_forest.get_node_by_id(current_node_id),
+        current_forest.get_node_by_id(current_node_id).and_then(|node| match node {
+            MastNode::Dyn(dyn_node) => Some(dyn_node),
+            _ => None,
+        }),
         "dyn node not found in current forest",
     )
-    .map_break(InternalBreakReason::from)?
-    .unwrap_dyn();
+    .map_break(InternalBreakReason::from)?;
 
     // Retrieve callee hash from memory, using stack top as the memory address.
     let read_ctx = state.processor.system().ctx();
@@ -329,10 +333,12 @@ where
     );
 
     let dyn_node = option_map_break_reason(
-        current_forest.get_node_by_id(node_id),
+        current_forest.get_node_by_id(node_id).and_then(|node| match node {
+            MastNode::Dyn(dyn_node) => Some(dyn_node),
+            _ => None,
+        }),
         "dyn node not found in current forest",
-    )?
-    .unwrap_dyn();
+    )?;
     // For dyncall, restore the context.
     if dyn_node.is_dyncall() {
         if let Err(e) = state.processor.stack_mut().restore_context() {

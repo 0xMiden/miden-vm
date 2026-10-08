@@ -4,7 +4,7 @@ use crate::{
     BaseHost, BreakReason, MapExecErr, ONE, Stopper, ZERO,
     continuation_stack::Continuation,
     execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
-    mast::{ExecutableMastForest, LoopNode, MastNodeId},
+    mast::{ExecutableMastForest, LoopNode, MastNode, MastNodeId},
     operation::{BinaryValueErrorContext, OperationError},
     option_map_break_reason,
     processor::{Processor, StackInterface},
@@ -127,10 +127,12 @@ where
 {
     let condition = state.processor.stack().get(0);
     let loop_node = option_map_break_reason(
-        current_forest.get_node_by_id(current_node_id),
+        current_forest.get_node_by_id(current_node_id).and_then(|node| match node {
+            MastNode::Loop(loop_node) => Some(loop_node),
+            _ => None,
+        }),
         "loop node not found in current forest",
-    )?
-    .unwrap_loop();
+    )?;
 
     if condition == ONE {
         // Start the clock cycle corresponding to the REPEAT operation, before re-entering the loop
@@ -217,10 +219,12 @@ where
 {
     let condition = state.processor.stack().get(0);
     let loop_node = option_map_break_reason(
-        current_forest.get_node_by_id(current_node_id),
+        current_forest.get_node_by_id(current_node_id).and_then(|node| match node {
+            MastNode::Loop(loop_node) => Some(loop_node),
+            _ => None,
+        }),
         "loop node not found in current forest",
-    )?
-    .unwrap_loop();
+    )?;
 
     if condition == ONE {
         // Start the clock cycle corresponding to the REPEAT operation, before re-entering the loop
