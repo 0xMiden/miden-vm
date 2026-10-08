@@ -6,18 +6,20 @@ use alloc::{format, string::ToString, sync::Arc, vec::Vec};
 use miden_event_handler_abi::{ABI_VERSION, MANIFEST_RECORD_VERSION, MANIFEST_SECTION_NAME};
 use miden_mast_package::{
     EventHandlerManifestEntry, EventHandlerSection, EventHandlerSectionError, MAX_HANDLERS,
-    MAX_MODULE_BYTES, MAX_NAME_BYTES, Package,
+    MAX_MODULE_BYTES, MAX_NAME_BYTES, Package, PackageDebugInfoError,
 };
+#[allow(deprecated)] // The retained event-only factory returns the old handler trait.
+use miden_processor::event::EventHandler;
 use miden_processor::{
-    HostLibrary,
-    event::{EventHandler, EventName},
+    EventLibrary, HostLibrary,
+    event::{EventName, legacy_handler, registration},
 };
 use wasmparser::{Parser, Payload};
 
 use crate::{WasmHandlerLimits, WasmHandlerLoadError, WasmHandlerModule, module::module_statics};
 
 /// Loads the package's `event_handlers` section, validates the Wasm module, and returns one
-/// registered-handler pair per manifest entry.
+/// unified registered-handler pair per manifest entry, supporting regular events and traces.
 ///
 /// Returns an empty vector when the package has no `event_handlers` section.
 ///
@@ -25,28 +27,68 @@ use crate::{WasmHandlerLimits, WasmHandlerLoadError, WasmHandlerModule, module::
 /// Returns an error when the section is malformed (see
 /// [`EventHandlerSectionError`](miden_mast_package::EventHandlerSectionError)) or when the
 /// handler module fails validation (see [`WasmHandlerLoadError`]).
-pub fn handlers_from_package(
+pub fn event_handlers_from_package(
     package: &Package,
     limits: WasmHandlerLimits,
-) -> Result<Vec<(EventName, Arc<dyn EventHandler>)>, WasmHandlerLoadError> {
+) -> Result<Vec<(EventName, registration::EventHandler)>, WasmHandlerLoadError> {
     let Some(section) = package.event_handlers()? else {
         return Ok(Vec::new());
     };
     let manifest = section.handlers.into_iter().map(|entry| (entry.event, entry.export)).collect();
     let module =
         Arc::new(WasmHandlerModule::new(&section.module, section.abi_version, manifest, limits)?);
-    Ok(module.handlers())
+    Ok(module.event_handlers())
+}
+
+/// Builds a complete portable library with the package's forest, debug information, and Wasm
+/// handlers. The returned library supports both regular events and traces when loaded with
+/// [`DefaultHost::load_library`](miden_processor::DefaultHost::load_library).
+///
+/// # Errors
+/// Same failure conditions as [`event_handlers_from_package`].
+pub fn event_library_from_package(
+    package: &Arc<Package>,
+    limits: WasmHandlerLimits,
+) -> Result<EventLibrary, WasmHandlerLoadError> {
+    let handlers = event_handlers_from_package(package, limits)?;
+    let package_debug_info = match package.debug_info() {
+        Ok(debug_info) => Ok(debug_info),
+        Err(PackageDebugInfoError::UntrustedSections) => Ok(None),
+        Err(err) => Err(err),
+    };
+    Ok(EventLibrary::new(package.mast_forest().clone(), package_debug_info, handlers))
+}
+
+/// Loads legacy event-only registrations, preserving the original shared-handler list type.
+///
+/// Use [`event_handlers_from_package`] to register handlers for both regular events and traces.
+///
+/// # Errors
+/// Same failure conditions as [`event_handlers_from_package`].
+#[allow(deprecated)] // Legacy facade.
+#[deprecated(note = "use event_library_from_package and DefaultHost::load_library")]
+pub fn handlers_from_package(
+    package: &Package,
+    limits: WasmHandlerLimits,
+) -> Result<Vec<(EventName, Arc<dyn EventHandler>)>, WasmHandlerLoadError> {
+    Ok(event_handlers_from_package(package, limits)?
+        .into_iter()
+        .map(|(event, handler)| (event, legacy_handler(handler)))
+        .collect())
 }
 
 /// Builds a [`HostLibrary`] from a package: its MAST forest, its debug info, and the Wasm event
 /// handlers of its `event_handlers` section, if any.
 ///
-/// Load the result into a host with
-/// [`DefaultHost::load_library`](miden_processor::DefaultHost::load_library), which registers
-/// the handlers next to the MAST forest.
+/// Load the result with
+/// [`DefaultHost::load_legacy_library`](miden_processor::DefaultHost::load_legacy_library).
+/// This retains legacy event-only delivery. Use [`event_library_from_package`] for unified
+/// event and trace delivery.
 ///
 /// # Errors
 /// Same failure conditions as [`handlers_from_package`].
+#[allow(deprecated)] // Legacy facade.
+#[deprecated(note = "use event_library_from_package and DefaultHost::load_library")]
 pub fn host_library_from_package(
     package: &Arc<Package>,
     limits: WasmHandlerLimits,
@@ -128,15 +170,7 @@ pub fn section_from_module(
     let module = strip_manifest_sections(&wasm).ok_or_else(|| {
         WasmHandlerLoadError::InvalidModule("malformed section layout".to_string())
     })?;
-    // While only ABI v1 exists, the module cannot need more than the current version. This
-    // tripwire fails the build at the first version bump, because derivation must then compute
-    // the lowest ABI version the module's imports need — otherwise every derived package would
-    // declare the new version and older hosts would refuse modules that only use v1 imports.
-    const _: () = assert!(
-        ABI_VERSION == 1,
-        "ABI version bumped: section_from_module must compute the lowest version the module needs"
-    );
-    let section = EventHandlerSection {
+    let mut section = EventHandlerSection {
         abi_version: ABI_VERSION,
         module,
         handlers,
@@ -151,7 +185,10 @@ pub fn section_from_module(
         .iter()
         .map(|entry| (entry.event.clone(), entry.export.clone()))
         .collect();
-    WasmHandlerModule::new(&section.module, section.abi_version, manifest, limits)?;
+    let loaded = WasmHandlerModule::new(&section.module, section.abi_version, manifest, limits)?;
+    // Only imports determine the additive revision required by a module. Old guests continue
+    // to declare revision 1 even when a newer SDK/producer supports invocation_kind.
+    section.abi_version = loaded.required_abi_version();
     Ok(section)
 }
 
@@ -488,5 +525,24 @@ mod tests {
             matches!(err, WasmHandlerLoadError::ModuleTooLarge { max: MAX_MODULE_BYTES, .. }),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn derived_revision_tracks_imports_instead_of_the_sdk_version() {
+        for (import, expected) in [
+            ("", 1),
+            (r#"(import "miden:event/v1" "event_id" (func (result i64)))"#, 1),
+            (r#"(import "miden:event/v1" "invocation_kind" (func (result i32)))"#, 2),
+        ] {
+            let wasm = test_append_manifest_section(
+                wat::parse_str(format!(
+                    "(module {import} (memory (export \"memory\") 1) (func (export \"handler\")))"
+                ))
+                .unwrap(),
+                &[("test::wasm::version", "handler")],
+            );
+            let section = section_from_module(wasm, WasmHandlerLimits::default()).unwrap();
+            assert_eq!(section.abi_version, expected);
+        }
     }
 }

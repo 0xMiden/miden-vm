@@ -1,4 +1,4 @@
-use std::{sync::Arc, vec};
+use std::vec;
 
 use miden_air::Felt;
 use miden_assembly::{Assembler, Linkage};
@@ -16,10 +16,10 @@ use miden_core_lib::{
     dsa::falcon512_eidos::{self, product_check_digest},
 };
 use miden_crypto::hash::eidos::domains::{FALCON_HASH_TO_POINT, FALCON_PUBLIC_KEY};
+use miden_event_handler::{AdviceRecorder, EventContext, EventError, InvocationKind};
 use miden_processor::{
-    DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program,
-    advice::{AdviceInputs, AdviceMutation, AdviceStack},
-    event::EventError,
+    DefaultHost, ExecutionError, FastProcessor, Program,
+    advice::{AdviceInputs, AdviceStack},
     operation::OperationError,
 };
 #[cfg(feature = "arbitrary")]
@@ -63,7 +63,7 @@ const EVENT_FALCON_SIG_TO_STACK: EventName = EventName::new("test::falcon::sig_t
 /// of a DSA in Miden VM.
 ///
 /// Inputs:
-///   Operand stack: [event_id, PK, MSG, ...]
+///   Event payload: [PK, MSG, ...]
 ///   Advice stack: \[ SIGNATURE \]
 ///
 /// Outputs:
@@ -75,13 +75,17 @@ const EVENT_FALCON_SIG_TO_STACK: EventName = EventName::new("test::falcon::sig_t
 /// - SIGNATURE is the signature being verified.
 ///
 /// The advice provider is expected to contain the private key associated to the public key PK.
-pub fn push_falcon_signature(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-    let pub_key = process.get_stack_word(1);
-    let msg = process.get_stack_word(5);
+pub fn push_falcon_signature(
+    context: EventContext<'_>,
+    advice: &mut AdviceRecorder<'_>,
+) -> Result<(), EventError> {
+    context.kind().require(InvocationKind::Event)?;
+    let pub_key = context.stack_word(0);
+    let msg = context.stack_word(4);
 
-    let pk_sk_felts = process
-        .advice_provider()
-        .get_mapped_values(&pub_key)
+    let pk_sk_felts = context
+        .advice_map()
+        .get(&pub_key)
         .ok_or(FalconError::NoSecretKey { key: pub_key })?;
 
     // Convert felts back to bytes (each felt was a single byte stored as u64)
@@ -94,7 +98,8 @@ pub fn push_falcon_signature(process: &ProcessorState) -> Result<Vec<AdviceMutat
     let signature_result = falcon512_eidos::sign(&sk, msg)
         .ok_or(FalconError::MalformedSignatureKey { key_type: "Falcon512" })?;
 
-    Ok(vec![advice_stack_mutation(signature_result)])
+    advice.prepend_stack(signature_result);
+    Ok(())
 }
 
 // EVENT ERROR
@@ -553,7 +558,7 @@ fn test_move_sig_to_adv_stack() {
     let store = MerkleStore::new();
 
     let test = build_debug_test!(source, &op_stack, &adv_stack, store, advice_map.into_iter())
-        .with_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
+        .with_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
     test.expect_stack(&[])
 }
 
@@ -566,7 +571,7 @@ fn falcon_execution() {
     let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
 
     let test = build_debug_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter())
-        .with_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
+        .with_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
     test.expect_stack(&[])
 }
 
@@ -627,18 +632,21 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
     // Malicious event handler that always returns remainder = 0.
     // Signature matches the event-handler callback contract.
     #[allow(clippy::unnecessary_wraps)]
-    fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let a_hi = process.get_stack_item(1).as_canonical_u64();
-        let a_lo = process.get_stack_item(2).as_canonical_u64();
+    fn malicious_falcon_div(
+        context: EventContext<'_>,
+        advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
+        let a_hi = context.stack_item(0).as_canonical_u64();
+        let a_lo = context.stack_item(1).as_canonical_u64();
         let a = (a_hi << 32) | a_lo;
 
         let q = a.wrapping_mul(M_INV);
         let q_hi = Felt::new_unchecked(q >> 32);
         let q_lo = Felt::new_unchecked(q & 0xffff_ffff);
 
-        let remainder = advice_stack_mutation([ZERO]);
-        let quotient = advice_stack_mutation([q_hi, q_lo]);
-        Ok(vec![remainder, quotient])
+        advice.prepend_stack([ZERO]);
+        advice.prepend_stack([q_hi, q_lo]);
+        Ok(())
     }
 
     let source = "
@@ -660,7 +668,7 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
     let core_lib = CoreLibrary::default();
     let test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack)
         .with_library(core_lib.package())
-        .with_event_handler(FALCON_DIV, malicious_falcon_div);
+        .with_handler(FALCON_DIV, malicious_falcon_div);
 
     // Hardened mod_12289 must reject forged advice.
     expect_exec_error_matches!(
@@ -685,13 +693,16 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
 
     // Malicious event handler that forges q/r to trigger the addition-overflow assertion.
     #[allow(clippy::unnecessary_wraps)]
-    fn malicious_falcon_div(_process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn malicious_falcon_div(
+        _context: EventContext<'_>,
+        advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
         let q_hi = Felt::new_unchecked(FORGED_Q >> 32);
         let q_lo = Felt::new_unchecked(FORGED_Q & 0xffff_ffff);
 
-        let remainder = advice_stack_mutation([Felt::new_unchecked(FORGED_R)]);
-        let quotient = advice_stack_mutation([q_hi, q_lo]);
-        Ok(vec![remainder, quotient])
+        advice.prepend_stack([Felt::new_unchecked(FORGED_R)]);
+        advice.prepend_stack([q_hi, q_lo]);
+        Ok(())
     }
 
     let source = "
@@ -709,7 +720,7 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
     let core_lib = CoreLibrary::default();
     let test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack)
         .with_library(core_lib.package())
-        .with_event_handler(FALCON_DIV, malicious_falcon_div);
+        .with_handler(FALCON_DIV, malicious_falcon_div);
 
     expect_exec_error_matches!(
         test,
@@ -727,9 +738,12 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
         EventName::new("miden::core::crypto::dsa::falcon512_eidos::falcon_div");
 
     #[allow(clippy::unnecessary_wraps)]
-    fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let a_hi = process.get_stack_item(1).as_canonical_u64();
-        let a_lo = process.get_stack_item(2).as_canonical_u64();
+    fn malicious_falcon_div(
+        context: EventContext<'_>,
+        advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
+        let a_hi = context.stack_item(0).as_canonical_u64();
+        let a_lo = context.stack_item(1).as_canonical_u64();
         let dividend = (a_hi << 32) | a_lo;
         let quotient = dividend / M;
 
@@ -737,9 +751,9 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
         let q_lo = Felt::new_unchecked(quotient & 0xffff_ffff);
         let forged_remainder = Felt::new_unchecked(Felt::ORDER_U64 - 1);
 
-        let remainder = advice_stack_mutation([forged_remainder]);
-        let quotient = advice_stack_mutation([q_hi, q_lo]);
-        Ok(vec![remainder, quotient])
+        advice.prepend_stack([forged_remainder]);
+        advice.prepend_stack([q_hi, q_lo]);
+        Ok(())
     }
 
     let source = "
@@ -755,7 +769,7 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
     let core_lib = CoreLibrary::default();
     let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
     test.libraries.push(core_lib.package());
-    test.add_event_handler(FALCON_DIV, malicious_falcon_div);
+    let test = test.with_handler(FALCON_DIV, malicious_falcon_div);
 
     expect_exec_error_matches!(
         test,
@@ -782,9 +796,9 @@ fn falcon_prove_verify() {
     let stack_inputs = stack_inputs_from_ints(op_stack);
     let advice_inputs = AdviceInputs::default().with_map(advice_map);
     let mut host = DefaultHost::default();
-    host.load_library(&CoreLibrary::default()).expect("failed to load mast forest");
-    host.register_handler(EVENT_FALCON_SIG_TO_STACK, Arc::new(push_falcon_signature))
-        .unwrap();
+    let core_lib = CoreLibrary::default();
+    host.load_library(core_lib.host_library()).expect("failed to load mast forest");
+    host.register_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature).unwrap();
 
     let witness = FastProcessor::new_with_options(stack_inputs, advice_inputs, Default::default())
         .expect("processor advice inputs should fit advice map limits")
@@ -822,12 +836,6 @@ fn generate_test(
     let store = MerkleStore::new();
 
     (source, op_stack, adv_stack, store, advice_map)
-}
-
-fn advice_stack_mutation(values: impl IntoIterator<Item = Felt>) -> AdviceMutation {
-    let mut advice_stack = AdviceStack::new();
-    advice_stack.append_elements(values);
-    AdviceMutation::extend_advice_stack(advice_stack)
 }
 
 // HELPER FUNCTIONS

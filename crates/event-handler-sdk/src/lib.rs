@@ -29,6 +29,15 @@
 //! `miden-event-handler-abi` crate. Conditions a correct handler cannot meet (for example an
 //! unknown status code) end the handler through the `fail` wrapper.
 //!
+//! Call `sdk::invocation_kind()` to distinguish `sdk::InvocationKind::Event` from
+//! `sdk::InvocationKind::Trace`. This query requires ABI revision 2. Traces must not
+//! record advice; hosts can suppress them before invoking the guest. Stack position zero
+//! is the first payload element in either kind. `sdk::event_id()` keeps reporting the
+//! handler manifest binding even when the host registers it under an alias.
+//!
+//! The ABI namespace remains `miden:event/v1`. Package tooling derives the minimum revision
+//! from the imports actually used: modules without `invocation_kind` remain revision 1.
+//!
 //! # Features for the final handler crate
 //!
 //! A `no_std` handler crate needs a panic handler and a global allocator. This crate provides
@@ -40,7 +49,7 @@
 #![no_std]
 
 pub use miden_event_handler_abi as abi;
-pub use miden_event_handler_abi::{Felt, MerkleNode, Word};
+pub use miden_event_handler_abi::{Felt, InvocationKind, MerkleNode, Word};
 pub use miden_event_handler_macros::miden_event_handler;
 
 #[cfg(all(target_arch = "wasm32", feature = "bump-allocator"))]

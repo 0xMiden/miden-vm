@@ -12,14 +12,14 @@ use miden_core::{
 };
 use miden_core_lib::{CoreLibrary, PVM_PROOF_REQUEST_EVENT_NAME};
 use miden_debug_types::{Location, SourceFile, SourceSpan};
+use miden_event_handler::{AdviceRecorder, EventContext, EventError};
 use miden_precompiles_verifier::masm_verifier::{
     PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
 };
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, ExecutionOutput, FastProcessor, FutureMaybeSend, Host,
-    LoadedMastForest, ProcessorState, StackInputs, SyncHost,
-    advice::{AdviceInputs, AdviceMutation, AdviceStack},
-    event::EventError,
+    LoadedMastForest, StackInputs, SyncHost,
+    advice::{AdviceInputs, AdviceStack},
 };
 use miden_prover::{Prover, ProverError};
 use miden_verifier::{Verifier, recursive::RecursiveVerifierInputs};
@@ -90,7 +90,7 @@ fn prove_ecdsa_execution(
         .expect("ECDSA settlement fixture must assemble")
         .unwrap_program();
     let mut host = DefaultHost::default()
-        .with_library(core_lib)
+        .with_library(core_lib.host_library())
         .expect("core library must load into the host");
     let mut advice_stack = AdviceStack::new();
     advice_stack.append_elements(fixture.advice);
@@ -182,7 +182,7 @@ struct PvmSettlementHost {
 impl PvmSettlementHost {
     fn new(core_lib: &CoreLibrary, precompile_witnesses: Vec<PrecompileWitness>) -> Self {
         let inner = DefaultHost::default()
-            .with_library(core_lib)
+            .with_library(core_lib.host_library())
             .expect("core library must load into the settlement host");
         Self {
             inner,
@@ -220,20 +220,19 @@ impl Host for PvmSettlementHost {
         async move { forest }
     }
 
-    fn on_event(
+    fn handle_event(
         &mut self,
-        process: &ProcessorState<'_>,
-    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+        context: EventContext<'_>,
+        advice: &mut AdviceRecorder<'_>,
+    ) -> impl FutureMaybeSend<Result<(), EventError>> {
         async move {
-            let event_id = EventId::from_felt(process.get_stack_item(0));
-            if event_id != PVM_PROOF_REQUEST_EVENT_NAME.to_event_id() {
-                return SyncHost::on_event(&mut self.inner, process);
+            if context.id() != PVM_PROOF_REQUEST_EVENT_NAME.to_event_id() {
+                return SyncHost::handle_event(&mut self.inner, context, advice);
             }
 
-            // The event stack is [event_id, verifier_root, deferred_root]. Each root is four
-            // field elements, so the two roots start at positions 1 and 5.
-            let verifier_root = process.get_stack_word(1);
-            let requested_root = process.get_stack_word(5);
+            // The event payload contains the verifier root followed by the deferred root.
+            let verifier_root = context.stack_word(0);
+            let requested_root = context.stack_word(4);
             if verifier_root != self.expected_verifier_root {
                 return Err(SettlementEventError::VerifierRootMismatch {
                     requested: verifier_root,
@@ -256,7 +255,7 @@ impl Host for PvmSettlementHost {
             }
 
             let proof_key = proof_request_key(verifier_root, requested_root);
-            if process.advice_provider().map().get(&proof_key).is_some() {
+            if context.advice_map().get(&proof_key).is_some() {
                 return Err(SettlementEventError::PackageAlreadyLoaded.into());
             }
 
@@ -270,15 +269,16 @@ impl Host for PvmSettlementHost {
             // Package the proof under the request key. MASM fetches it when request_proof returns.
             let package = PvmRecursiveVerifierInputs::for_request(verifier_root, &precompile_proof)
                 .map_err(SettlementEventError::Advice)?;
-            let (advice, _) = package.into_parts();
-            let (_, advice_map, store) = advice.into_parts();
+            let (package_advice, _) = package.into_parts();
+            let (_, advice_map, store) = package_advice.into_parts();
             let merkle_nodes = store.inner_nodes();
             self.precompile_proof = Some(precompile_proof);
 
-            Ok(vec![
-                AdviceMutation::extend_map(advice_map),
-                AdviceMutation::extend_merkle_store(merkle_nodes),
-            ])
+            for (key, values) in advice_map {
+                advice.insert_map_entry(key, values);
+            }
+            advice.extend_merkle_store(merkle_nodes);
+            Ok(())
         }
     }
 }

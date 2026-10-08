@@ -326,7 +326,7 @@ impl FoldRelation {
     }
 
     /// The test program with the production staging attached as `test::fold`.
-    fn test(&self, heights: &[u64], beta: (u64, u64)) -> miden_utils_testing::Test {
+    fn test(&self, heights: &[u64], beta: (u64, u64)) -> miden_utils_testing::EventTest {
         let source = self.source(heights, beta);
         let mut test = build_test!(source.as_str(), &[]);
         test.add_module(

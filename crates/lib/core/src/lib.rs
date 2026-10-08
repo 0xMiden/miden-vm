@@ -15,20 +15,22 @@ extern crate alloc;
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_core::{Word, events::EventName, mast::MastForest};
-use miden_mast_package::Package;
-use miden_processor::{HostLibrary, event::EventHandler};
+use miden_mast_package::{Package, PackageDebugInfoError};
+#[allow(deprecated)] // Original library conversion and event-only list.
+use miden_processor::event::EventHandler;
+use miden_processor::{EventLibrary, HostLibrary, event::registration};
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
     aead_eidos::{AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME, handle_aead_eidos_decrypt_empty_ad},
-    debug::default_debug_handlers,
+    debug::default_debug_event_handlers,
     ecdsa_k256_keccak::{ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handle_ecdsa_k256_keccak_recover},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
     precompiles::{
         keccak256::{KECCAK256_DIGEST_EVENT_NAME, handle_keccak256_digest},
         uint_field_inv::{UINT_FIELD_INV_EVENT_NAME, handle_uint_field_inv},
     },
-    readonly::readonly_noop_handlers,
+    readonly::readonly_noop_event_handlers,
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
     sorted_array::{
         LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME, handle_lowerbound_array,
@@ -93,7 +95,7 @@ pub const PVM_PROOF_REQUEST_EVENT_NAME: EventName =
 ///
 /// ```rust,ignore
 /// # let core_lib = CoreLibrary::default();
-/// let handlers = core_lib.handlers();
+/// let handlers = core_lib.event_handlers();
 /// // Register handlers with your host...
 /// ```
 ///
@@ -108,6 +110,7 @@ pub struct CoreLibrary {
     package: Arc<Package>,
 }
 
+#[allow(deprecated)]
 impl From<&CoreLibrary> for HostLibrary {
     fn from(core_lib: &CoreLibrary) -> Self {
         Self {
@@ -170,6 +173,16 @@ impl CoreLibrary {
             .expect("the conjectured security estimator is exported from the core library")
     }
 
+    /// Returns the core library's forest, debug information, and portable event/trace handlers.
+    pub fn host_library(&self) -> EventLibrary {
+        let package_debug_info = match self.package.debug_info() {
+            Ok(debug_info) => Ok(debug_info),
+            Err(PackageDebugInfoError::UntrustedSections) => Ok(None),
+            Err(err) => Err(err),
+        };
+        EventLibrary::new(self.mast_forest().clone(), package_debug_info, self.event_handlers())
+    }
+
     /// Returns the default event handlers required by the core library.
     ///
     /// Stack and memory print-style debug handlers write to stdout by default. These handlers can
@@ -177,27 +190,36 @@ impl CoreLibrary {
     /// Hosts can replace those handlers to route output to a UI, log, no-op handler, or other sink.
     /// Advice debug handlers can expose witness data directly, so hosts must opt into those
     /// explicitly by extending this handler set with
-    /// [`crate::handlers::debug::advice_debug_handlers`].
-    pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
-        let mut handlers: Vec<(EventName, Arc<dyn EventHandler>)> = vec![
+    /// [`crate::handlers::debug::advice_debug_event_handlers`].
+    pub fn event_handlers(&self) -> Vec<(EventName, registration::EventHandler)> {
+        let mut handlers: Vec<(EventName, registration::EventHandler)> = vec![
+            (SMT_PEEK_EVENT_NAME, handle_smt_peek.into()),
+            (U64_DIV_EVENT_NAME, handle_u64_div.into()),
+            (U128_DIV_EVENT_NAME, handle_u128_div.into()),
+            (U256_DIV_EVENT_NAME, handle_u256_div.into()),
+            (FALCON_DIV_EVENT_NAME, handle_falcon_div.into()),
+            (LOWERBOUND_ARRAY_EVENT_NAME, handle_lowerbound_array.into()),
+            (LOWERBOUND_KEY_VALUE_EVENT_NAME, handle_lowerbound_key_value.into()),
             (
                 AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
-                Arc::new(handle_aead_eidos_decrypt_empty_ad),
+                handle_aead_eidos_decrypt_empty_ad.into(),
             ),
-            (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
-            (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
-            (U128_DIV_EVENT_NAME, Arc::new(handle_u128_div)),
-            (U256_DIV_EVENT_NAME, Arc::new(handle_u256_div)),
-            (FALCON_DIV_EVENT_NAME, Arc::new(handle_falcon_div)),
-            (LOWERBOUND_ARRAY_EVENT_NAME, Arc::new(handle_lowerbound_array)),
-            (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
-            (ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, Arc::new(handle_ecdsa_k256_keccak_recover)),
-            (KECCAK256_DIGEST_EVENT_NAME, Arc::new(handle_keccak256_digest)),
-            (UINT_FIELD_INV_EVENT_NAME, Arc::new(handle_uint_field_inv)),
+            (ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handle_ecdsa_k256_keccak_recover.into()),
+            (KECCAK256_DIGEST_EVENT_NAME, handle_keccak256_digest.into()),
+            (UINT_FIELD_INV_EVENT_NAME, handle_uint_field_inv.into()),
         ];
-        handlers.extend(default_debug_handlers());
-        handlers.extend(readonly_noop_handlers());
+        handlers.extend(default_debug_event_handlers());
+        handlers.extend(readonly_noop_event_handlers());
         handlers
+    }
+
+    /// Returns event-only adapters with the original processor handler signature.
+    /// Use [`Self::host_library`] and `DefaultHost::load_library` for unified
+    /// emit and trace delivery.
+    #[allow(deprecated)] // Legacy facade.
+    #[deprecated(note = "use host_library and DefaultHost::load_library")]
+    pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
+        handlers::legacy_handlers(self.event_handlers())
     }
 }
 

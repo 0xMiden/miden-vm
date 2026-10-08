@@ -79,7 +79,7 @@ fn test_memcopy_words() {
         .expect("Failed to compile test source.")
         .unwrap_program();
 
-    let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
+    let mut host = DefaultHost::default().with_library(core_lib.host_library()).unwrap();
 
     let processor = FastProcessor::new(StackInputs::default());
     let exec_output = processor.execute_sync(&program, &mut host).unwrap();
@@ -197,7 +197,7 @@ fn test_memcopy_elements() {
         .expect("Failed to compile test source.")
         .unwrap_program();
 
-    let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
+    let mut host = DefaultHost::default().with_library(core_lib.host_library()).unwrap();
 
     let processor = FastProcessor::new(StackInputs::default());
     let exec_output = processor.execute_sync(&program, &mut host).unwrap();

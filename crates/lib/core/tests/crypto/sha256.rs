@@ -1,7 +1,7 @@
 use miden_air::Serializable;
 use miden_crypto::hash::sha2::Sha256;
 use miden_processor::{ExecutionError, operation::OperationError};
-use miden_utils_testing::{Felt, IntoBytes, Test, group_slice_elements, push_inputs};
+use miden_utils_testing::{EventTest, Felt, IntoBytes, group_slice_elements, push_inputs};
 
 const NON_U32_WORD: u64 = u32::MAX as u64 + 2;
 const INVALID_SHA256_MESSAGE_WORD: &str = "invalid sha256 message word";
@@ -157,7 +157,7 @@ fn sha256_hash_bytes_rejects_non_u32_memory_word() {
     expect_non_u32_execution_error(build_test!(source, &[]));
 }
 
-fn expect_non_u32_execution_error(test: Test) {
+fn expect_non_u32_execution_error(test: EventTest) {
     let err = test.execute().expect_err("expected non-u32 SHA256 input to fail");
     match err {
         ExecutionError::OperationError {

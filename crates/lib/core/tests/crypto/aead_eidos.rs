@@ -11,13 +11,11 @@ use miden_crypto::{
         auth_tag_expanded, derive_ctr_key, derive_mac_key, encrypt_felts_expanded,
     },
 };
-use miden_processor::{
-    ExecutionError, ProcessorState,
-    advice::AdviceMutation,
-    event::{EventError, EventHandler},
-    operation::OperationError,
+use miden_event_handler::{
+    AdviceRecorder, EventContext, EventError, EventHandler, MAX_AEAD_PLAINTEXT_BYTES,
 };
-use miden_utils_testing::Test;
+use miden_processor::{ExecutionError, operation::OperationError};
+use miden_utils_testing::EventTest;
 
 const SRC_PTR: u64 = 1000;
 const DST_PTR: u64 = 2000;
@@ -678,6 +676,82 @@ fn decrypt_empty_ad_accepts_valid_ciphertext_for_exact_lengths() {
 }
 
 #[test]
+fn native_decrypt_checks_plaintext_limit_before_reading_memory() {
+    let max_felts = MAX_AEAD_PLAINTEXT_BYTES / (Word::SERIALIZED_SIZE / Word::NUM_ELEMENTS);
+    for num_felts in [max_felts, max_felts + 1] {
+        // The unaligned pointer rejects the inclusive limit without allocating ciphertext.
+        let source = format!(
+            "begin push.3000.{num_felts}.2000.1 padw padw emit.event(\"{AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME}\") end"
+        );
+        let error = build_test!(source.as_str(), &[]).execute().unwrap_err();
+        let ExecutionError::EventError { error, .. } = error else {
+            panic!("native decryption should reject the request");
+        };
+        let expected = if num_felts == max_felts {
+            format!("invalid Eidos AEAD input range at address 1 with length {}", 2 * num_felts + 2)
+        } else {
+            format!(
+                "Eidos AEAD plaintext needs {} advice bytes, exceeding the per-invocation maximum of {MAX_AEAD_PLAINTEXT_BYTES}",
+                num_felts * 8
+            )
+        };
+        assert_eq!(error.to_string(), expected);
+    }
+}
+
+#[test]
+fn decrypt_empty_ad_accepts_written_and_unwritten_zero_ciphertext() {
+    let key = word([1, 2, 3, 4]);
+    let nonce = word([0x10, 0x20, 0x30, 0x40]);
+    let mask = encrypt_felts_expanded(key, nonce, &[Felt::ZERO]);
+    let plaintext =
+        Felt::new(mask[0].as_canonical_u64() | (mask[1].as_canonical_u64() << 32)).unwrap();
+    let ciphertext = encrypt_felts_expanded(key, nonce, &[plaintext]);
+    assert_eq!(ciphertext, [Felt::ZERO; 2]);
+    let tag = auth_tag_expanded(key, nonce, &[], &ciphertext);
+    let key_elements = key.into_elements();
+    let nonce_elements = nonce.into_elements();
+    for write_zero_ciphertext in [false, true] {
+        let mut input_stores = store_felts(SRC_PTR + 2, &tag);
+        if write_zero_ciphertext {
+            input_stores.push_str(&store_felts(SRC_PTR, &ciphertext));
+        }
+        let source = format!(
+            "use miden::core::crypto::aead_eidos
+            begin {input_stores}
+                push.{SCRATCH_PTR}.1.{DST_PTR}.{SRC_PTR}
+                push.{nonce_elements:?} push.{key_elements:?}
+                exec.aead_eidos::decrypt_empty_ad
+            end"
+        );
+        build_test!(source.as_str(), &[]).expect_stack_and_memory(
+            &[],
+            DST_PTR as u32,
+            &[plaintext.as_canonical_u64()],
+        );
+    }
+}
+
+#[test]
+fn native_decrypt_authenticates_written_and_unwritten_zero_inputs() {
+    for write_zeros in [false, true] {
+        let stores = if write_zeros {
+            store_felts(SRC_PTR, &[Felt::ZERO; 4])
+        } else {
+            String::new()
+        };
+        let source = format!(
+            "begin {stores} push.{SCRATCH_PTR}.1.{DST_PTR}.{SRC_PTR} padw padw emit.event(\"{AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME}\") end"
+        );
+        let error = build_test!(source.as_str(), &[]).execute().unwrap_err();
+        let ExecutionError::EventError { error, .. } = error else {
+            panic!("zero ciphertext and tag must fail authentication");
+        };
+        assert_eq!(error.to_string(), "Eidos AEAD authentication failed");
+    }
+}
+
+#[test]
 fn decrypt_empty_ad_rejects_overlapping_regions_before_event() {
     let cases = [
         ("source and destination are identical", 1000, 1000, 3000),
@@ -965,7 +1039,7 @@ fn decrypt_empty_ad_rejects_forged_plaintext_advice() {
                     Felt::new(plaintext[index].as_canonical_u64() ^ mask).unwrap();
                 let test = miden_utils_testing::build_test_by_mode!(false, source.as_str(), &[])
                     .with_library(core_lib.package())
-                    .with_event_handler(
+                    .with_handler(
                         AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
                         PlaintextHandler(forged_plaintext),
                     );
@@ -1014,7 +1088,7 @@ fn decrypt_empty_ad_rejects_forged_tag() {
     let core_lib = CoreLibrary::default();
     let test = miden_utils_testing::build_test_by_mode!(false, source.as_str(), &[])
         .with_library(core_lib.package())
-        .with_event_handler(AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME, PlaintextHandler(plaintext));
+        .with_handler(AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME, PlaintextHandler(plaintext));
     assert_aead_error("forged tag", &test, "AEAD tag mismatch");
 }
 
@@ -1376,7 +1450,7 @@ fn assert_encrypt_felts_accepts_layout(src_ptr: u64, dst_ptr: u64, num_felts: us
 }
 
 #[track_caller]
-fn assert_aead_error(case: &str, test: &Test, expected_error: &str) {
+fn assert_aead_error(case: &str, test: &EventTest, expected_error: &str) {
     let error = test.execute().expect_err(case);
     let expected_code = miden_core::mast::error_code_from_msg(expected_error);
     assert!(
@@ -1495,10 +1569,7 @@ fn assert_decrypt_rejected_before_event(
     let core_lib = CoreLibrary::default();
     let test = miden_utils_testing::build_test_by_mode!(false, source.as_str(), &[])
         .with_library(core_lib.package())
-        .with_event_handler(
-            AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
-            CountingHandler(Arc::clone(&calls)),
-        );
+        .with_handler(AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME, CountingHandler(Arc::clone(&calls)));
 
     assert_aead_error(case, &test, expected_error);
     assert_eq!(
@@ -1603,15 +1674,24 @@ fn assert_auth_rejected(procedure: &str, ct_ptr: u64, count: u64, expected_error
 struct PlaintextHandler(Vec<Felt>);
 
 impl EventHandler for PlaintextHandler {
-    fn on_event(&self, _process: &ProcessorState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
-        Ok(vec![AdviceMutation::extend_advice_stack_with(self.0.clone())])
+    fn handle(
+        &self,
+        _context: EventContext,
+        advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
+        advice.prepend_stack(self.0.clone());
+        Ok(())
     }
 }
 
 struct CountingHandler(Arc<AtomicUsize>);
 
 impl EventHandler for CountingHandler {
-    fn on_event(&self, _process: &ProcessorState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
+    fn handle(
+        &self,
+        _context: EventContext,
+        _advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
         self.0.fetch_add(1, Ordering::SeqCst);
         // Abort an unexpected event before an invalid length can drive further work.
         Err("unexpected plaintext event".into())

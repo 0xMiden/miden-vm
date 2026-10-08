@@ -20,7 +20,7 @@ use miden_processor::{
     DefaultHost, FastProcessor, StackInputs,
     serde::{Deserializable, Serializable},
 };
-use miden_wasm_event_handlers::{WasmHandlerLimits, host_library_from_package};
+use miden_wasm_event_handlers::{WasmHandlerLimits, event_library_from_package};
 use miden_wasm_event_handlers_project::WasmEventHandlerCargoBuildProcessor;
 
 /// The name of the one event the fixture guest crate handles.
@@ -66,7 +66,7 @@ fn a_project_build_ships_a_working_wasm_handler() {
     let decoded = Arc::new(Package::read_from_bytes(&package.to_bytes()).expect("package decodes"));
     assert_fixture_section(&decoded);
 
-    let library = host_library_from_package(&decoded, WasmHandlerLimits::default())
+    let library = event_library_from_package(&decoded, WasmHandlerLimits::default())
         .expect("the handlers load from the package");
     let mut host = DefaultHost::default();
     host.load_library(library).expect("the handlers register");
