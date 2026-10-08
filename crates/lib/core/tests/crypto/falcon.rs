@@ -1,7 +1,6 @@
-use std::{sync::Arc, vec};
+use std::vec;
 
 use miden_air::Felt;
-use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     ZERO,
     crypto::{dsa::falcon512_eidos::Nonce, hash::Eidos},
@@ -9,7 +8,6 @@ use miden_core::{
     field::PrimeField64,
     mast::error_code_from_msg,
     program::domain::{FALCON_PRODUCT_CHECK, FALCON_PRODUCT_CHECK_PAYLOAD_LEN},
-    serde::{Deserializable, Serializable},
 };
 use miden_core_lib::{
     CoreLibrary,
@@ -17,657 +15,504 @@ use miden_core_lib::{
 };
 use miden_crypto::hash::eidos::domains::{FALCON_HASH_TO_POINT, FALCON_PUBLIC_KEY};
 use miden_processor::{
-    DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program,
-    advice::{AdviceInputs, AdviceMutation, AdviceStack},
+    ExecutionError, ProcessorState,
+    advice::{AdviceMutation, AdviceStack},
     event::EventError,
     operation::OperationError,
 };
 #[cfg(feature = "arbitrary")]
-use miden_utils_testing::proptest::proptest;
+use miden_utils_testing::proptest::{
+    array::{uniform4, uniform8},
+    collection,
+    prelude::*,
+};
 use miden_utils_testing::{
-    Word,
+    Test, Word,
     crypto::{
         MerkleStore,
         falcon512_eidos::{Polynomial, SecretKey},
     },
-    expect_exec_error_matches, stack_inputs_from_ints,
+    expect_exec_error_matches,
 };
-use rand::{Rng, RngExt, SeedableRng, rng};
+use rand::{Rng, RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
 
 /// Modulus used for Falcon512.
 const M: u64 = 12289;
-const Q: u64 = (M - 1) / 2;
+const M_HALF: i64 = ((M - 1) / 2) as i64;
 const N: usize = 512;
-const J: u64 = (N * M as usize * M as usize) as u64;
+const J: u64 = N as u64 * M * M;
+const PRODUCT_BOUND: i64 = N as i64 * (M as i64 - 1) * M_HALF;
+const SQUARE_NORM_BOUND: u64 = 34_034_726;
 
 const PROBABILISTIC_PRODUCT_SOURCE: &str = "
     use miden::core::crypto::dsa::falcon512_eidos
-
     begin
-        #=> [PK, ...]
         push.0
-        #=> [h_ptr, PK, ...]
-
         exec.falcon512_eidos::load_h_s2_and_product
-        #=> [...]
     end
-    ";
+";
+const VERIFY_SOURCE: &str = "
+    use miden::core::crypto::dsa::falcon512_eidos
+    begin
+        exec.falcon512_eidos::verify
+    end
+";
+const VERIFY_FROM_MAP_SOURCE: &str = "
+    use miden::core::crypto::dsa::falcon512_eidos
+    begin
+        exec.falcon512_eidos::move_sig_from_map_to_adv_stack
+        exec.falcon512_eidos::verify
+    end
+";
+const MOD_12289_SOURCE: &str = "
+    use miden::core::crypto::dsa::falcon512_eidos
+    begin
+        exec.falcon512_eidos::mod_12289
+    end
+";
 
-/// Event ID for pushing a Falcon signature to the advice stack.
-/// This event is used for testing purposes only.
-const EVENT_FALCON_SIG_TO_STACK: EventName = EventName::new("test::falcon::sig_to_stack");
+#[test]
+fn falcon_advice_encodes_centered_product_and_shifted_signature() {
+    let mut h = vec![0i16; N];
+    h[0] = 1;
+    let public_key = falcon512_eidos::PublicKey::from(Polynomial::from(&h));
+    let mut s2 = vec![0i16; N];
+    s2[0] = -(M_HALF as i16);
+    s2[1] = -1;
+    s2[N / 2] = 1;
+    s2[N - 1] = M_HALF as i16;
+    let nonce = Nonce::deterministic();
+    let nonce_elements = nonce.to_elements();
+    let signature =
+        falcon512_eidos::Signature::new(nonce, public_key.clone(), Polynomial::from(&s2).into());
 
-/// Event handler which pushes values onto the advice stack which are required for verification
-/// of a DSA in Miden VM.
-///
-/// Inputs:
-///   Operand stack: [event_id, PK, MSG, ...]
-///   Advice stack: \[ SIGNATURE \]
-///
-/// Outputs:
-///   Advice stack: [...]
-///
-/// Where:
-/// - PK is the digest of an expanded public.
-/// - MSG is the digest of the message to be signed.
-/// - SIGNATURE is the signature being verified.
-///
-/// The advice provider is expected to contain the private key associated to the public key PK.
-pub fn push_falcon_signature(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-    let pub_key = process.get_stack_word(1);
-    let msg = process.get_stack_word(5);
+    // With h = 1, the unreduced product is s2 followed by 512 zero coefficients.
+    let mut product = vec![Felt::ZERO; 2 * N];
+    for (coefficient, &value) in product.iter_mut().zip(&s2) {
+        *coefficient = field_from_signed(i64::from(value));
+    }
+    let shifted: Vec<_> = s2
+        .iter()
+        .map(|&value| Felt::from_u32((i64::from(value) + M_HALF) as u32))
+        .collect();
+    let digest = product_check_digest(public_key.to_commitment(), &shifted, &product);
+    let advice = falcon512_eidos::encode_signature(&public_key, &signature);
 
-    let pk_sk_felts = process
-        .advice_provider()
-        .get_mapped_values(&pub_key)
-        .ok_or(FalconError::NoSecretKey { key: pub_key })?;
-
-    // Convert felts back to bytes (each felt was a single byte stored as u64)
-    let sk_bytes: Vec<u8> = pk_sk_felts.iter().map(|f| f.as_canonical_u64() as u8).collect();
-
-    // Reconstruct SecretKey from bytes
-    let sk = SecretKey::read_from_bytes(&sk_bytes)
-        .map_err(|_| FalconError::MalformedSignatureKey { key_type: "Falcon512" })?;
-
-    let signature_result = falcon512_eidos::sign(&sk, msg)
-        .ok_or(FalconError::MalformedSignatureKey { key_type: "Falcon512" })?;
-
-    Ok(vec![advice_stack_mutation(signature_result)])
-}
-
-// EVENT ERROR
-// ================================================================================================
-
-#[derive(Debug, thiserror::Error)]
-pub enum FalconError {
-    #[error("public key {} not present in the event handler", .key.to_hex())]
-    NoSecretKey { key: Word },
-    #[error("malformed signature key: {key_type}")]
-    MalformedSignatureKey { key_type: &'static str },
+    assert_eq!(advice.len(), 2 + 4 * N + nonce_elements.len());
+    assert_eq!(advice[..2], [digest[1], digest[0]]);
+    assert_eq!(advice[2], Felt::ONE);
+    assert_eq!(advice[3..2 + N], [Felt::ZERO; N - 1]);
+    assert_eq!(advice[2 + N..2 + 2 * N], shifted);
+    assert_eq!(advice[2 + 2 * N..2 + 4 * N], product);
+    assert_eq!(advice[2 + 4 * N..], nonce_elements);
 }
 
 #[test]
 fn test_falcon512_norm_sq() {
     let source = "
-    use miden::core::crypto::dsa::falcon512_eidos
-
-    begin
-        exec.falcon512_eidos::norm_sq
-    end
+        use miden::core::crypto::dsa::falcon512_eidos
+        begin
+            exec.falcon512_eidos::norm_sq
+        end
     ";
-
-    // normalize(e) = e^2 - phi * (2*M*e - M^2) where phi := (e > (M - 1)/2)
-    let upper = rng().random_range(Q + 1..M);
-    let test_upper = build_test!(source, &[upper]);
-    test_upper.expect_stack(&[(M - upper) * (M - upper)]);
-
-    let lower = rng().random_range(0..=Q);
-    let test_lower = build_test!(source, &[lower]);
-    test_lower.expect_stack(&[lower * lower])
+    for value in [0, 1, M_HALF as u64, M_HALF as u64 + 1, M - 1] {
+        let magnitude = value.min(M - value);
+        build_test!(source, &[value]).expect_stack(&[magnitude * magnitude]);
+    }
 }
 
+/// Exposes private arithmetic from the production module through test-only exports.
+fn private_arithmetic_test(procedure: &str, inputs: &[u64]) -> Test {
+    const MODULE: &str = concat!(
+        include_str!("../../asm/crypto/dsa/falcon512_eidos.masm"),
+        "\npub proc reduce_for_test(c: felt, shift: felt) -> Coefficient
+            exec.reduce_shifted_sample
+        end
+        pub proc norm_word_for_test(pi_hi: word, pi_lo: word, c: word) -> SquaredNorm
+            exec.s1_norm_sq_word
+        end
+        pub proc product_evaluation_for_test(
+            tau_inv: [felt; 2],
+            tau: [felt; 2],
+            product_eval: [felt; 2],
+            s2_shifted_eval: [felt; 2],
+            h_eval: [felt; 2],
+        )
+            exec.assert_product_evaluation
+        end\n"
+    );
+    let source = format!(
+        "
+        use test::falcon
+        begin
+            exec.falcon::{procedure}
+        end
+    "
+    );
+    build_test!(source, inputs).with_module("test::falcon", MODULE)
+}
+
+#[rstest]
+#[case::valid([1, 0], true)]
+#[case::wrong_first_component([2, 0], false)]
+#[case::wrong_second_component([1, 1], false)]
+fn falcon_product_evaluation_checks_each_component(
+    #[case] product_eval: [u64; 2],
+    #[case] valid: bool,
+) {
+    // At tau = 1, U(tau_inv) = N. Set A_h = A_s2 = 1, so A_pi must equal (1, 0).
+    let tau = [1, 0];
+    let s2_shifted_eval = [N as u64 * M_HALF as u64 + 1, 0];
+    let mut inputs = [tau, tau, product_eval, s2_shifted_eval, [1, 0]].concat();
+    inputs.extend([7, 11, 13, 17]);
+    let test = private_arithmetic_test("product_evaluation_for_test", &inputs);
+    if valid {
+        test.expect_stack(&[7, 11, 13, 17]);
+    } else {
+        expect_exec_error_matches!(
+            test,
+            ExecutionError::OperationError {
+                err: OperationError::FailedAssertion { err_code, err_msg }, ..
+            } if err_code == ZERO && err_msg.is_none()
+        );
+    }
+}
+
+/// Full-field samples and shift endpoints must reduce as integers without wrapping modulo Q.
 #[test]
-fn test_falcon512_diff_mod_m() {
-    let source = "
-    use miden::core::crypto::dsa::falcon512_eidos
+fn test_falcon512_reduce_shifted_sample_boundaries() {
+    let cases = [
+        (0, 1),
+        (0, 2 * J - 1),
+        ((1 << 32) - 1, 1),
+        (1 << 32, 2 * J - 1),
+        ((1 << 63) - 1, J),
+        (1 << 63, J),
+        (Felt::ORDER_U64 - 1, 1),
+        (Felt::ORDER_U64 - 1, 2 * J - 1),
+        (Felt::ORDER_U64 - 1, J + M_HALF as u64 - 2 * PRODUCT_BOUND as u64),
+        (Felt::ORDER_U64 - 1, J + M_HALF as u64 + 2 * PRODUCT_BOUND as u64),
+    ];
 
-    begin
-        exec.falcon512_eidos::diff_mod_M
-    end
-    ";
-    let v = Felt::ORDER_U64 - 1;
-    let (v_lo, v_hi) = (v as u32, v >> 32);
+    for (c, shift) in cases {
+        let expected = ((u128::from(c) + u128::from(shift)) % u128::from(M)) as u64;
+        private_arithmetic_test("reduce_for_test", &[c, shift, 7, 11, 13, 17])
+            .expect_stack(&[expected, 7, 11, 13, 17]);
+    }
+}
 
-    // test largest possible value given v
-    let w = J - 1;
-    let u = 0;
-    let test1 = build_test!(source, &[u, w + J, v_hi, v_lo as u64]);
-
-    // Calculating (v - (u + (- w % M) % M) % M) should be the same as (v + w + J - u) % M.
-    let expanded_answer = (v as i128
-        - ((u as i64 + -(w as i64).rem_euclid(M as i64)).rem_euclid(M as i64) as i128))
-        .rem_euclid(M as i128);
-    let simplified_answer = (v as i128 + w as i128 + J as i128 - u as i128).rem_euclid(M as i128);
-    assert_eq!(expanded_answer, simplified_answer);
-
-    test1.expect_stack(&[simplified_answer as u64]);
-
-    // test smallest possible value given v
-    let w = 0;
-    let u = J - 1;
-    let test2 = build_test!(source, &[u, w + J, v_hi, v_lo as u64]);
-
-    // Calculating (v - (u + (- w % M) % M) % M) should be the same as (v + w + J - u) % M.
-    let expanded_answer = (v as i128
-        - ((u as i64 + -(w as i64).rem_euclid(M as i64)).rem_euclid(M as i64) as i128))
-        .rem_euclid(M as i128);
-    let simplified_answer = (v as i128 + w as i128 + J as i128 - u as i128).rem_euclid(M as i128);
-    assert_eq!(expanded_answer, simplified_answer);
-
-    test2.expect_stack(&[simplified_answer as u64]);
+fn field_from_signed(value: i64) -> Felt {
+    let magnitude = Felt::new_unchecked(value.unsigned_abs());
+    if value < 0 { -magnitude } else { magnitude }
 }
 
 #[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
-    fn diff_mod_m_proptest(v in 0..Felt::ORDER_U64, w in 0..J, u in 0..J) {
-
-          let source = "
-    use miden::core::crypto::dsa::falcon512_eidos
-
-    begin
-        exec.falcon512_eidos::diff_mod_M
-    end
-    ";
-
-    let (v_lo, v_hi) = (v as u32, v >> 32);
-    let test1 = build_test!(source, &[u, w + J, v_hi, v_lo as u64]);
-
-    // Calculating (v - (u + (- w % M) % M) % M) should be the same as (v + w + J - u) % M.
-    let expanded_answer = (v as i128
-        - ((u as i64 + -(w as i64).rem_euclid(M as i64)).rem_euclid(M as i64) as i128))
-    .rem_euclid(M as i128);
-    let simplified_answer = (v as i128 + w as i128 + J as i128 - u as i128).rem_euclid(M as i128);
-    assert_eq!(expanded_answer, simplified_answer);
-
-    test1.prop_expect_stack(&[simplified_answer as u64])?;
+    fn reduce_shifted_sample_proptest(
+        c in 0..Felt::ORDER_U64,
+        shift in 1..2 * J,
+    ) {
+        let expected = ((u128::from(c) + u128::from(shift)) % u128::from(M)) as u64;
+        private_arithmetic_test("reduce_for_test", &[c, shift, 7, 11, 13, 17])
+            .prop_expect_stack(&[expected, 7, 11, 13, 17])?;
     }
 
+    #[test]
+    fn s1_norm_sq_word_proptest(
+        c in uniform4(prop_oneof![Just(0), Just(Felt::ORDER_U64 - 1), 0..Felt::ORDER_U64]),
+        pi_lo in uniform4(prop_oneof![Just(-PRODUCT_BOUND), Just(PRODUCT_BOUND),
+            -PRODUCT_BOUND..=PRODUCT_BOUND]),
+        pi_hi in uniform4(prop_oneof![Just(-PRODUCT_BOUND), Just(PRODUCT_BOUND),
+            -PRODUCT_BOUND..=PRODUCT_BOUND]),
+        tail in uniform4(0..Felt::ORDER_U64),
+    ) {
+        let expected: u64 = (0..4).map(|i| {
+            let value = c[i] as i128 + pi_hi[i] as i128 - pi_lo[i] as i128;
+            centered_residue(value).unsigned_abs().pow(2)
+        }).sum();
+        let inputs: Vec<_> = pi_hi.into_iter().chain(pi_lo)
+            .map(|value| field_from_signed(value).as_canonical_u64())
+            .chain(c).chain(tail).collect();
+        let expected: Vec<_> = [expected].into_iter().chain(tail).collect();
+        private_arithmetic_test("norm_word_for_test", &inputs).prop_expect_stack(&expected)?;
+    }
+
+    /// A nonzero monomial error cannot vanish at a nonzero challenge, even after rehashing.
+    #[test]
+    fn falcon_product_identity_proptest(
+        h in collection::vec(0u32..M as u32, N),
+        s2 in collection::vec(0u32..M as u32, N),
+        index in 0..2 * N,
+        delta in 1..Felt::ORDER_U64,
+    ) {
+        let h: Vec<_> = h.into_iter().map(Felt::from_u32).collect();
+        let s2: Vec<_> = s2.into_iter().map(Felt::from_u32).collect();
+        let mut pi = mul_modulo_p_shifted(&h, &s2);
+        product_test(&h, &s2, &pi).prop_expect_stack(&[])?;
+        pi[index] += Felt::new_unchecked(delta);
+        let result = product_test(&h, &s2, &pi).execute().map(|_| ());
+        prop_assert!(matches!(&result,
+            Err(ExecutionError::OperationError {
+                err: OperationError::FailedAssertion { err_code, .. }, ..
+            }) if *err_code == ZERO
+        ), "expected product identity rejection, got {result:?}");
+    }
+
+    /// Unit monomials exercise negacyclic wraparound while allowing the exact norm to be chosen.
+    #[test]
+    fn falcon_verify_norm_proptest(
+        s1 in prop_oneof![collection::vec(-20i64..=20, N),
+            collection::vec(-450i64..=450, N), collection::vec(-M_HALF..=M_HALF, N)],
+        degree in prop_oneof![Just(0), Just(N - 1), 0..N],
+        negative in any::<bool>(),
+        message in uniform4(0..Felt::ORDER_U64),
+        nonce in uniform8(0..(1u64 << 40)),
+    ) {
+        let message = Word::new(message.map(Felt::new_unchecked));
+        let nonce = nonce.map(Felt::new_unchecked);
+        let test = norm_test(&s1, degree, if negative { -1 } else { 1 }, message, nonce);
+        let norm = 1 + s1.iter().map(|c| c.unsigned_abs().pow(2)).sum::<u64>();
+        if norm < SQUARE_NORM_BOUND {
+            test.prop_expect_stack(&[])?;
+        } else {
+            let result = test.execute().map(|_| ());
+            if norm <= u32::MAX as u64 {
+                prop_assert!(matches!(&result, Err(ExecutionError::OperationError {
+                    err: OperationError::FailedAssertion { err_code, .. }, ..
+                }) if *err_code == error_code_from_msg("comparison failed: norm bound")),
+                    "expected norm bound rejection for {norm}, got {result:?}");
+            } else {
+                prop_assert!(matches!(&result, Err(ExecutionError::OperationError {
+                    err: OperationError::NotU32Values { .. }, ..
+                })), "expected u32 rejection for {norm}, got {result:?}");
+            }
+        }
+    }
 }
 
+/// The complete product check must agree with the native transcript and its fixed digest.
 #[test]
-fn falcon_public_key_hash_loop_matches_eidos() {
-    const HASH_WORD_PTR: u32 = 1000;
+fn falcon_product_transcript_matches_host() {
+    let h: Vec<_> = (0..N).map(|i| Felt::from_u32(i as u32)).collect();
+    let s2: Vec<_> = (0..N).map(|i| Felt::from_u32((i + 3) as u32)).collect();
+    let pi = mul_modulo_p_shifted(&h, &s2);
+    let public_key = Eidos::hash_elements_in_domain(&h, FALCON_PUBLIC_KEY);
+    let expected = product_check_digest(public_key, &s2, &pi);
 
-    let h = Polynomial::new((0..N).map(|i| Felt::new_unchecked((i % M as usize) as u64)).collect());
-    let elements = to_elements(h);
-    let expected = Eidos::hash_elements_in_domain(&elements, FALCON_PUBLIC_KEY);
-    let init_cv = Eidos::init_chaining_word(FALCON_PUBLIC_KEY, elements.len() as u32);
-
-    let mut advice_stack = vec![7, 11];
-    advice_stack.extend(elements.iter().map(Felt::as_canonical_u64));
-
-    let source = format!(
-        "
-    use miden::core::crypto::hashes::eidos
-
-    @locals(8)
-    proc hash_h
-        push.0.0
-        locaddr.4
-        movup.3
-
-        push.{cv3}.{cv2}.{cv1}.{cv0}
-        padw
-
-        push.0.0
-        adv_push adv_push
-        ext2inv
-        loc_storew_le.4
-
-        repeat.64
-            adv_pipe
-            horner_eval_base
-            exec.eidos::compress
-        end
-
-        dropw dropw
-        push.{HASH_WORD_PTR} mem_storew_le
-        dropw drop drop drop drop
-    end
-
-    begin
-        push.0
-        exec.hash_h
-    end
-    ",
-        cv0 = init_cv[0].as_canonical_u64(),
-        cv1 = init_cv[1].as_canonical_u64(),
-        cv2 = init_cv[2].as_canonical_u64(),
-        cv3 = init_cv[3].as_canonical_u64(),
+    // Scalar Eidos reference for h[i] = i and shifted s2[i] = i + 3.
+    assert_eq!(
+        expected,
+        Word::new(
+            [
+                4180249070640490373,
+                5710444900508321502,
+                8063547575669664642,
+                958734707045704282,
+            ]
+            .map(Felt::new_unchecked)
+        )
     );
-
-    let (output, _host) = build_test!(&source, &[], &advice_stack)
-        .execute_for_output()
-        .expect("execution failed");
-
-    let ctx = miden_processor::ContextId::root();
-    let read = |addr| output.memory.read_element(ctx, Felt::from_u32(addr)).expect("memory read");
-    let actual: Word = [
-        read(HASH_WORD_PTR),
-        read(HASH_WORD_PTR + 1),
-        read(HASH_WORD_PTR + 2),
-        read(HASH_WORD_PTR + 3),
-    ]
-    .into();
-
-    assert_eq!(actual, expected);
-}
-
-#[test]
-fn falcon_product_transcript_loop_matches_host() {
-    const HASH_WORD_PTR: u32 = 1000;
-
-    let h = Polynomial::new((0..N).map(|i| Felt::new_unchecked((i % M as usize) as u64)).collect());
-    let s2 = Polynomial::new(
-        (0..N).map(|i| Felt::new_unchecked(((i + 3) % M as usize) as u64)).collect(),
-    );
-    let pi = mul_modulo_p(h.clone(), s2.clone());
-    let h_hash = Eidos::hash_elements_in_domain(&to_elements(h), FALCON_PUBLIC_KEY);
-    let s2_elements = to_elements(s2);
-    let pi_elements = pi.iter().map(|a| Felt::new_unchecked(*a)).collect::<Vec<_>>();
-    let expected = product_check_digest(h_hash, &s2_elements, &pi_elements);
 
     let mut payload = Vec::with_capacity(FALCON_PRODUCT_CHECK_PAYLOAD_LEN as usize);
-    payload.extend_from_slice(h_hash.as_elements());
+    payload.extend_from_slice(public_key.as_elements());
     payload.extend([Felt::ZERO; 4]);
-    payload.extend_from_slice(&s2_elements);
-    payload.extend_from_slice(&pi_elements);
+    payload.extend_from_slice(&s2);
+    payload.extend_from_slice(&pi);
     assert_eq!(expected, Eidos::hash_elements_in_domain(&payload, FALCON_PRODUCT_CHECK));
-
-    let init_cv = Eidos::init_chaining_word(FALCON_PRODUCT_CHECK, FALCON_PRODUCT_CHECK_PAYLOAD_LEN);
-
-    let advice_stack = s2_elements
-        .iter()
-        .chain(pi_elements.iter())
-        .map(Felt::as_canonical_u64)
-        .collect::<Vec<_>>();
-
-    let source = format!(
-        "
-    use miden::core::crypto::hashes::eidos
-
-    begin
-        padw
-        swapw
-        push.{cv3}.{cv2}.{cv1}.{cv0}
-        exec.eidos::merge_with_chaining_word
-        padw padw
-
-        repeat.64
-            adv_pipe
-            exec.eidos::compress
-        end
-
-        repeat.128
-            adv_pipe
-            exec.eidos::compress
-        end
-
-        dropw dropw
-        push.{HASH_WORD_PTR} mem_storew_le
-        dropw drop
-    end
-    ",
-        cv0 = init_cv[0].as_canonical_u64(),
-        cv1 = init_cv[1].as_canonical_u64(),
-        cv2 = init_cv[2].as_canonical_u64(),
-        cv3 = init_cv[3].as_canonical_u64(),
-    );
-
-    let mut stack = stack_from_words(&[h_hash]);
-    stack.push(0);
-    let (output, _host) = build_test!(&source, &stack, &advice_stack)
-        .execute_for_output()
-        .expect("execution failed");
-
-    let ctx = miden_processor::ContextId::root();
-    let read = |addr| output.memory.read_element(ctx, Felt::from_u32(addr)).expect("memory read");
-    let actual: Word = [
-        read(HASH_WORD_PTR),
-        read(HASH_WORD_PTR + 1),
-        read(HASH_WORD_PTR + 2),
-        read(HASH_WORD_PTR + 3),
-    ]
-    .into();
-
-    assert_eq!(actual, expected);
-}
-
-#[test]
-fn falcon_product_initial_block_matches_masm() {
-    const HASH_WORD_PTR: u32 = 1000;
-
-    let left: Word = [
-        Felt::new_unchecked(1),
-        Felt::new_unchecked(2),
-        Felt::new_unchecked(3),
-        Felt::new_unchecked(4),
-    ]
-    .into();
-    let right = Word::default();
-    let init_cv = Eidos::init_chaining_word(FALCON_PRODUCT_CHECK, FALCON_PRODUCT_CHECK_PAYLOAD_LEN);
-    let expected = Eidos::compress(
-        init_cv,
-        core::array::from_fn(|i| if i < 4 { left[i] } else { right[i - 4] }),
-    );
-
-    let source = format!(
-        "
-    use miden::core::crypto::hashes::eidos
-
-    begin
-        push.{cv3}.{cv2}.{cv1}.{cv0}
-        exec.eidos::merge_with_chaining_word
-        push.{HASH_WORD_PTR} mem_storew_le
-        dropw
-    end
-    ",
-        cv0 = init_cv[0].as_canonical_u64(),
-        cv1 = init_cv[1].as_canonical_u64(),
-        cv2 = init_cv[2].as_canonical_u64(),
-        cv3 = init_cv[3].as_canonical_u64(),
-    );
-
-    let stack = stack_from_words(&[left, right]);
-    let (output, _host) = build_test!(&source, &stack).execute_for_output().unwrap();
-
-    let ctx = miden_processor::ContextId::root();
-    let read = |addr| output.memory.read_element(ctx, Felt::from_u32(addr)).expect("memory read");
-    let actual: Word = [
-        read(HASH_WORD_PTR),
-        read(HASH_WORD_PTR + 1),
-        read(HASH_WORD_PTR + 2),
-        read(HASH_WORD_PTR + 3),
-    ]
-    .into();
-
-    assert_eq!(actual, expected);
-}
-
-#[test]
-fn falcon_hash_to_point_loop_matches_eidos() {
-    const C_PTR: u32 = 1000;
-
-    let message: Word = [
-        Felt::new_unchecked(13),
-        Felt::new_unchecked(21),
-        Felt::new_unchecked(34),
-        Felt::new_unchecked(55),
-    ]
-    .into();
-    let nonce = Nonce::deterministic();
-    let nonce_elements = nonce.to_elements();
-
-    let mut cv = Eidos::init_chaining_word(FALCON_HASH_TO_POINT, 0);
-    cv = Eidos::compress(cv, nonce_elements);
-
-    let mut message_block = [ZERO; 8];
-    message_block[..Word::NUM_ELEMENTS].copy_from_slice(message.as_slice());
-    cv = Eidos::compress(cv, message_block);
-
-    let squeeze_block = [ZERO; 8];
-    let mut expected = Vec::with_capacity(N);
-    for _ in 0..128 {
-        cv = Eidos::compress(cv, squeeze_block);
-        expected.extend_from_slice(cv.as_slice());
-    }
-
-    let source = format!(
-        "
-    use miden::core::crypto::dsa::falcon512_eidos
-
-    @locals(2560)
-    proc run_hash_to_point
-        locaddr.2048
-        exec.falcon512_eidos::hash_to_point
-
-        padw
-        loc_loadw_le.2048
-        push.{C_PTR}
-        mem_storew_le
-        dropw
-    end
-
-    begin
-        exec.run_hash_to_point
-    end
-    "
-    );
-
-    let mut op_stack = stack_from_words(&[message]);
-    op_stack.extend(nonce_elements.iter().map(Felt::as_canonical_u64));
-    let (output, _host) =
-        build_test!(&source, &op_stack).execute_for_output().expect("execution failed");
-
-    let ctx = miden_processor::ContextId::root();
-    for (idx, expected) in expected.iter().take(4).enumerate() {
-        let actual = output
-            .memory
-            .read_element(ctx, Felt::from_u32(C_PTR + idx as u32))
-            .expect("memory read");
-        assert_eq!(actual, *expected, "coefficient {idx}");
-    }
-}
-
-#[test]
-fn test_falcon512_probabilistic_product_deterministic() {
-    // Use a fixed seed to make the test deterministic
-    use miden_crypto::rand::RandomCoin;
-    let seed = Word::default();
-    let mut rng = RandomCoin::new(seed);
-
-    // Generate deterministic coefficients
-    let mut h_coeffs = Vec::new();
-    let mut s2_coeffs = Vec::new();
-    for _i in 0..N {
-        h_coeffs.push(Felt::new_unchecked(rng.random_range(0..M)));
-        s2_coeffs.push(Felt::new_unchecked(rng.random_range(0..M)));
-    }
-
-    let h: Polynomial<Felt> = Polynomial::new(h_coeffs);
-    let s2: Polynomial<Felt> = Polynomial::new(s2_coeffs);
-    let (operand_stack, advice_stack) = generate_data_probabilistic_product_test(h, s2, false);
-
-    let test = build_test!(PROBABILISTIC_PRODUCT_SOURCE, &operand_stack, &advice_stack);
-    let expected_stack = &[];
-    test.expect_stack(expected_stack);
+    product_test(&h, &s2, &pi).expect_stack(&[]);
 }
 
 #[test]
 fn test_falcon512_probabilistic_product() {
-    // create two random polynomials and generate the input operand stack and advice stack to
-    // the probabilistic product test procedure
-    let mut rng = ChaCha20Rng::from_seed([0; 32]);
-    let h: Polynomial<Felt> = Polynomial::new(random_coefficients_with_rng(&mut rng));
-    let s2: Polynomial<Felt> = Polynomial::new(random_coefficients_with_rng(&mut rng));
-    let (operand_stack, advice_stack) = generate_data_probabilistic_product_test(h, s2, false);
-
-    let test = build_test!(PROBABILISTIC_PRODUCT_SOURCE, &operand_stack, &advice_stack);
-    let expected_stack = &[];
-    test.expect_stack(expected_stack);
+    let (h, s2, pi) = product_polynomials(0);
+    product_test(&h, &s2, &pi).expect_stack(&[]);
 }
 
-#[test]
-fn test_falcon512_probabilistic_product_failure() {
-    // create two random polynomials and generate the input operand stack and advice stack to
-    // the probabilistic product test procedure
-    let mut rng = rng();
-    let h: Polynomial<Felt> = Polynomial::new(random_coefficients_with_rng(&mut rng));
-    let s2: Polynomial<Felt> = Polynomial::new(random_coefficients_with_rng(&mut rng));
-    let (operand_stack, advice_stack) = generate_data_probabilistic_product_test(h, s2, true);
-
-    let test = build_test!(PROBABILISTIC_PRODUCT_SOURCE, &operand_stack, &advice_stack);
-
+/// Recompute the challenge after changing the product, so rejection depends on the identity check.
+#[rstest]
+#[case::constant(0)]
+#[case::degree_1023(2 * N - 1)]
+fn test_falcon512_probabilistic_product_failure(#[case] index: usize) {
+    let (h, s2, mut pi) = product_polynomials(1);
+    pi[index] += Felt::ONE;
+    let test = product_test(&h, &s2, &pi);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::FailedAssertion{err_code, err_msg}, .. }
-        if err_code == ZERO && err_msg.is_none()
+        ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { err_code, err_msg }, ..
+        } if err_code == ZERO && err_msg.is_none()
     );
 }
 
-/// Similar to `falcon_execution` test, but with the `move_sig_to_adv_stack` operation.
-/// Specifically, we put the signature in the advice map ahead of time, call
-/// `move_sig_to_adv_stack`, and then proceed to `verify` the signature.
+/// The claimed product must use s2'_i - M_HALF, even when the transcript commits to h * s2'.
+#[test]
+fn test_falcon512_probabilistic_product_rejects_unshifted_encoding() {
+    let (h, s2, _) = product_polynomials(2);
+    let mut pi = [0u64; 2 * N];
+    for i in 0..N {
+        for j in 0..N {
+            pi[i + j] += h[i].as_canonical_u64() * s2[j].as_canonical_u64();
+        }
+    }
+    let test = product_test(&h, &s2, &pi.map(Felt::new_unchecked));
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { err_code, err_msg }, ..
+        } if err_code == ZERO && err_msg.is_none()
+    );
+}
+
+/// Range checks must reject malformed coefficients even when their commitments match the advice.
+#[rstest]
+#[case::public_key(true)]
+#[case::signature(false)]
+fn falcon_product_rejects_out_of_range_coefficient(#[case] in_h: bool) {
+    let (h, s2, pi) = product_polynomials(1);
+    // Check every adv_pipe lane in the first and last blocks, with matching commitments.
+    for index in (0..8).chain(N - 8..N) {
+        for value in [M, u32::MAX as u64, 1 << 32, Felt::ORDER_U64 - 1] {
+            let (mut h, mut s2) = (h.clone(), s2.clone());
+            if in_h {
+                h[index] = Felt::new_unchecked(value);
+            } else {
+                s2[index] = Felt::new_unchecked(value);
+            }
+            let result = product_test(&h, &s2, &pi).execute().map(|_| ());
+            let rejected = if value <= u32::MAX as u64 {
+                matches!(&result, Err(ExecutionError::OperationError {
+                    err: OperationError::FailedAssertion { err_code, .. }, ..
+                }) if *err_code == error_code_from_msg("comparison failed: modulus"))
+            } else {
+                matches!(
+                    &result,
+                    Err(ExecutionError::OperationError {
+                        err: OperationError::NotU32Values { .. },
+                        ..
+                    })
+                )
+            };
+            assert!(
+                rejected,
+                "range check for in_h={in_h}, index={index}, value={value}: {result:?}"
+            );
+        }
+    }
+}
+
+/// An honest product holds at every point, so only the transcript check rejects a different tau.
+#[test]
+fn falcon_product_binds_each_challenge_limb() {
+    let (h, s2, pi) = product_polynomials(7);
+    let (public_key, advice) = product_advice(&h, &s2, &pi);
+    for limb in 0..2 {
+        let mut advice: Vec<_> = advice.iter().map(Felt::as_canonical_u64).collect();
+        advice[limb] += 1;
+        let inputs = stack_from_words(&[public_key]);
+        let test = build_test!(PROBABILISTIC_PRODUCT_SOURCE, &inputs, &advice);
+        expect_exec_error_matches!(
+            test,
+            ExecutionError::OperationError {
+                err: OperationError::FailedAssertion { err_code, .. }, ..
+            } if err_code == error_code_from_msg("comparison failed: tau")
+        );
+    }
+}
+
 #[test]
 fn test_move_sig_to_adv_stack() {
-    let seed = [0u8; 32];
-    let mut rng = ChaCha20Rng::from_seed(seed);
-    let secret_key = SecretKey::with_rng(&mut rng);
-    let message = rng.random();
-
-    let source = "
-    use miden::core::crypto::dsa::falcon512_eidos
-
-    begin
-        exec.falcon512_eidos::move_sig_from_map_to_adv_stack
-        exec.falcon512_eidos::verify
-    end
-    ";
-
-    let public_key = secret_key.public_key().to_commitment();
-
-    let advice_map: Vec<(Word, Vec<Felt>)> = {
-        let sig_key = Eidos::hash_elements(Word::words_as_elements(&[public_key, message]));
-        let signature =
-            falcon512_eidos::sign(&secret_key, message).expect("failed to sign message");
-
-        vec![(sig_key, signature)]
-    };
-
-    let op_stack = stack_from_words(&[public_key, message]);
-
-    let adv_stack = vec![];
-    let store = MerkleStore::new();
-
-    let test = build_debug_test!(source, &op_stack, &adv_stack, store, advice_map.into_iter())
-        .with_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
-    test.expect_stack(&[])
+    let (public_key, message, advice) = signature_fixture();
+    verify_from_map_test(public_key, message, advice).expect_stack(&[]);
 }
 
 #[test]
 fn falcon_execution() {
-    let seed = [0u8; 32];
-    let mut rng = ChaCha20Rng::from_seed(seed);
-    let sk = SecretKey::with_rng(&mut rng);
-    let message = rng.random();
-    let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
-
-    let test = build_debug_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter())
-        .with_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
-    test.expect_stack(&[])
+    let (public_key, message, advice) = signature_fixture();
+    let preserved = [7, 11, 13, 17, 19, 23, 29, 31];
+    let mut inputs = stack_from_words(&[public_key, message]);
+    inputs.extend(preserved);
+    verify_test(public_key, message, &advice)
+        .with_stack_inputs(inputs)
+        .expect_stack(&preserved);
 }
 
 #[test]
-fn test_mod_12289_simple() {
-    // Simple test to debug mod_12289 with a known input
-    let source = "
-        use miden::core::crypto::dsa::falcon512_eidos
-
-        begin
-            exec.falcon512_eidos::mod_12289
-        end
-    ";
-
-    let op_stack = vec![0u64, 100000u64];
-
-    let test = build_test!(source, &op_stack, &[]);
-
-    // Expected: 100000 % 12289 = 1688
-    test.expect_stack(&[1688]);
-}
-
-#[test]
-fn test_mod_12289_larger_value() {
-    // Test with a larger value that requires the higher 32 bits
-    let source = "
-        use miden::core::crypto::dsa::falcon512_eidos
-
-        begin
-            exec.falcon512_eidos::mod_12289
-        end
-    ";
-
-    // Test with a = 2^33 = 8589934592
-    // a_hi = 2, a_lo = 0
-    let op_stack = vec![2u64, 0u64];
-
-    let test = build_test!(source, &op_stack, &[]);
-
-    // Expected: 8589934592 % 12289 = 7507
-    let expected = 8589934592u64 % 12289;
-    test.expect_stack(&[expected]);
+fn falcon_verify_binds_each_public_key_limb() {
+    let (public_key, message, advice) = signature_fixture();
+    for limb in 0..4 {
+        let mut wrong_key = public_key;
+        wrong_key[limb] += Felt::ONE;
+        let test = verify_test(wrong_key, message, &advice);
+        expect_exec_error_matches!(
+            test,
+            ExecutionError::OperationError {
+                err: OperationError::FailedAssertion { err_code, .. }, ..
+            } if err_code == error_code_from_msg("comparison failed: public key")
+        );
+    }
 }
 
 #[rstest]
-#[case(0, 100_000)]
-#[case(2, 0)]
-#[case(0, 12_290)]
-#[case(1, 1)]
-#[case(0xffff_ffff, 0xffff_fffe)]
-fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo: u64) {
-    const FALCON_DIV: EventName =
-        EventName::new("miden::core::crypto::dsa::falcon512_eidos::falcon_div");
+#[case::small(100_000)]
+#[case::high_limb(1 << 33)]
+#[case::distinct_limbs(0x0123_4567_89ab_cdef)]
+#[case::maximum(u64::MAX)]
+fn test_mod_12289(#[case] dividend: u64) {
+    let inputs = [dividend & 0xffff_ffff, dividend >> 32, 17, 31];
+    build_test!(MOD_12289_SOURCE, &inputs).expect_stack(&[dividend % M, 17, 31]);
+}
 
-    // M^(-1) mod 2^64. For any a, q = a * M_INV (mod 2^64) satisfies M*q ≡ a (mod 2^64).
-    const M_INV: u64 = 15010777177727684609;
-
-    // Malicious event handler that always returns remainder = 0.
-    // Signature matches the event-handler callback contract.
-    #[allow(clippy::unnecessary_wraps)]
-    fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let a_hi = process.get_stack_item(1).as_canonical_u64();
-        let a_lo = process.get_stack_item(2).as_canonical_u64();
-        let a = (a_hi << 32) | a_lo;
-
-        let q = a.wrapping_mul(M_INV);
-        let q_hi = Felt::new_unchecked(q >> 32);
-        let q_lo = Felt::new_unchecked(q & 0xffff_ffff);
-
-        let remainder = advice_stack_mutation([ZERO]);
-        let quotient = advice_stack_mutation([q_hi, q_lo]);
-        Ok(vec![remainder, quotient])
-    }
-
+#[test]
+fn test_mod_12289_after_u32split() {
     let source = "
         use miden::core::crypto::dsa::falcon512_eidos
+
         begin
+            u32split
             exec.falcon512_eidos::mod_12289
         end
     ";
 
-    let a = (a_hi << 32) | a_lo;
-    let true_remainder = a % M;
-    assert_ne!(true_remainder, 0, "test expects inputs with non-zero true remainder");
+    let dividend = Felt::ORDER_U64 - 1;
+    build_test!(source, &[dividend]).expect_stack(&[dividend % M]);
+}
 
-    let op_stack = vec![a_hi, a_lo];
-    let adv_stack: Vec<u64> = vec![];
+/// Supplies q and r without installing the core library's honest division handler.
+fn forged_division_test(dividend: u64, quotient: u64, remainder: u64) -> Test {
+    const FALCON_DIV: EventName =
+        EventName::new("miden::core::crypto::dsa::falcon512_eidos::falcon_div");
+    let inputs = [dividend & 0xffff_ffff, dividend >> 32];
+    miden_utils_testing::build_test_by_mode!(false, MOD_12289_SOURCE, &inputs)
+        .with_library(CoreLibrary::default().package())
+        .with_event_handler(FALCON_DIV, move |_process: &ProcessorState| {
+            let mut advice = AdviceStack::new();
+            advice.append_elements([
+                Felt::new_unchecked(quotient >> 32),
+                Felt::new_unchecked(quotient & 0xffff_ffff),
+                Felt::new_unchecked(remainder),
+            ]);
+            Ok::<_, EventError>(vec![AdviceMutation::extend_advice_stack(advice)])
+        })
+}
 
-    // Use the upstream test builder directly so we do not auto-register the honest
-    // falcon_div handler from CoreLibrary.
-    let core_lib = CoreLibrary::default();
-    let test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack)
-        .with_library(core_lib.package())
-        .with_event_handler(FALCON_DIV, malicious_falcon_div);
-
-    // Hardened mod_12289 must reject forged advice.
+#[rstest]
+#[case(100_000)]
+#[case(2 << 32)]
+#[case(12_290)]
+#[case((1 << 32) + 1)]
+#[case(0xffff_ffff_ffff_fffe)]
+fn test_mod_12289_rejects_forged_remainder_zero(#[case] dividend: u64) {
+    // M * q = dividend modulo 2^64, but not as an integer with remainder zero.
+    const M_INV: u64 = 15010777177727684609;
+    assert_ne!(dividend % M, 0);
+    let test = forged_division_test(dividend, dividend.wrapping_mul(M_INV), 0);
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, err_msg },
-            ..
+            err: OperationError::FailedAssertion { err_code, err_msg }, ..
         } if err_code == error_code_from_msg("comparison failed: quotient overflow")
             && err_msg.is_none()
     );
@@ -675,47 +520,15 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
 
 #[test]
 fn test_mod_12289_rejects_forged_addition_overflow() {
-    const FALCON_DIV: EventName =
-        EventName::new("miden::core::crypto::dsa::falcon512_eidos::falcon_div");
-
-    // Largest q such that M * q fits into 64 bits. This guarantees quotient-overflow checks pass.
-    const FORGED_Q: u64 = u64::MAX / M;
-    // 5664 > u64::MAX - M * FORGED_Q, so (M * FORGED_Q + FORGED_R) overflows u64.
-    const FORGED_R: u64 = 5_664;
-
-    // Malicious event handler that forges q/r to trigger the addition-overflow assertion.
-    #[allow(clippy::unnecessary_wraps)]
-    fn malicious_falcon_div(_process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let q_hi = Felt::new_unchecked(FORGED_Q >> 32);
-        let q_lo = Felt::new_unchecked(FORGED_Q & 0xffff_ffff);
-
-        let remainder = advice_stack_mutation([Felt::new_unchecked(FORGED_R)]);
-        let quotient = advice_stack_mutation([q_hi, q_lo]);
-        Ok(vec![remainder, quotient])
-    }
-
-    let source = "
-        use miden::core::crypto::dsa::falcon512_eidos
-        begin
-            exec.falcon512_eidos::mod_12289
-        end
-    ";
-
-    // Choose input equal to wrapping sum, so without the assertz this forged advice would pass.
-    let a = M.wrapping_mul(FORGED_Q).wrapping_add(FORGED_R);
-    let op_stack = vec![a >> 32, a & 0xffff_ffff];
-    let adv_stack: Vec<u64> = vec![];
-
-    let core_lib = CoreLibrary::default();
-    let test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack)
-        .with_library(core_lib.package())
-        .with_event_handler(FALCON_DIV, malicious_falcon_div);
-
+    // M * q fits in u64, but M * q + r = 2^64, whose wrapped value is the supplied dividend.
+    let quotient = u64::MAX / M;
+    let remainder = 5_664;
+    let dividend = M.wrapping_mul(quotient).wrapping_add(remainder);
+    let test = forged_division_test(dividend, quotient, remainder);
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, err_msg },
-            ..
+            err: OperationError::FailedAssertion { err_code, err_msg }, ..
         } if err_code == error_code_from_msg("comparison failed: addition overflow")
             && err_msg.is_none()
     );
@@ -723,188 +536,340 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
 
 #[test]
 fn test_mod_12289_rejects_non_u32_remainder_advice() {
-    const FALCON_DIV: EventName =
-        EventName::new("miden::core::crypto::dsa::falcon512_eidos::falcon_div");
-
-    #[allow(clippy::unnecessary_wraps)]
-    fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let a_hi = process.get_stack_item(1).as_canonical_u64();
-        let a_lo = process.get_stack_item(2).as_canonical_u64();
-        let dividend = (a_hi << 32) | a_lo;
-        let quotient = dividend / M;
-
-        let q_hi = Felt::new_unchecked(quotient >> 32);
-        let q_lo = Felt::new_unchecked(quotient & 0xffff_ffff);
-        let forged_remainder = Felt::new_unchecked(Felt::ORDER_U64 - 1);
-
-        let remainder = advice_stack_mutation([forged_remainder]);
-        let quotient = advice_stack_mutation([q_hi, q_lo]);
-        Ok(vec![remainder, quotient])
-    }
-
-    let source = "
-        use miden::core::crypto::dsa::falcon512_eidos
-        begin
-            exec.falcon512_eidos::mod_12289
-        end
-    ";
-
-    let op_stack = vec![0, 100_000];
-    let adv_stack: Vec<u64> = vec![];
-
-    let core_lib = CoreLibrary::default();
-    let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
-    test.libraries.push(core_lib.package());
-    test.add_event_handler(FALCON_DIV, malicious_falcon_div);
-
+    let test = forged_division_test(100_000, 100_000 / M, Felt::ORDER_U64 - 1);
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
-            err: OperationError::NotU32Values { values },
-            ..
+            err: OperationError::NotU32Values { values }, ..
         } if values.iter().any(|value| value.as_canonical_u64() == Felt::ORDER_U64 - 1)
     );
 }
 
 #[test]
-fn falcon_prove_verify() {
-    let sk = SecretKey::new();
-    let message = rng().random();
-    let (source, op_stack, _, _, advice_map) = generate_test(sk, message);
-
-    let program: Program = Assembler::default()
-        .with_package(CoreLibrary::default().package(), Linkage::Dynamic)
-        .expect("failed to load core library")
-        .assemble_program("program", source)
-        .expect("failed to compile test source")
-        .unwrap_program();
-
-    let stack_inputs = stack_inputs_from_ints(op_stack);
-    let advice_inputs = AdviceInputs::default().with_map(advice_map);
-    let mut host = DefaultHost::default();
-    host.load_library(&CoreLibrary::default()).expect("failed to load mast forest");
-    host.register_handler(EVENT_FALCON_SIG_TO_STACK, Arc::new(push_falcon_signature))
-        .unwrap();
-
-    let witness = FastProcessor::new_with_options(stack_inputs, advice_inputs, Default::default())
-        .expect("processor advice inputs should fit advice map limits")
-        .execute_for_proving_sync(&program, &mut host)
-        .expect("failed to execute");
-    let (vm_witness, _) = witness.into_parts();
-    let trace = miden_processor::trace::build_trace(vm_witness).expect("failed to build trace");
-    trace.check_constraints();
+fn falcon_trace_constraints() {
+    let (public_key, message, advice) = signature_fixture();
+    verify_test(public_key, message, &advice).check_constraints();
 }
 
-fn generate_test(
-    sk: SecretKey,
-    message: Word,
-) -> (String, Vec<u64>, Vec<u64>, MerkleStore, Vec<(Word, Vec<Felt>)>) {
-    let source = format!(
-        "
+#[test]
+fn falcon_prove_verify() {
+    let (public_key, message, advice) = signature_fixture();
+    verify_test(public_key, message, &advice)
+        .prove_and_verify(stack_from_words(&[public_key, message]), false);
+}
+
+/// Corrupts the boundaries of each advice region and sampled interior positions.
+/// The honest stream must accept, and each corrupted stream must reject.
+#[test]
+fn falcon_verify_rejects_corrupted_signature_advice() {
+    let (public_key, message, signature) = signature_fixture();
+    // [tau (2), h (512), s2 (512), pi (1024), nonce (8)]
+    assert_eq!(signature.len(), 2058);
+    let run = |advice| verify_from_map_test(public_key, message, advice).execute();
+    run(signature.clone()).expect("honest control must accept");
+
+    // region boundaries: tau, first/last of h, s2, pi, and the nonce
+    let mut targets = vec![0, 1, 2, 513, 514, 1025, 1026, 2049, 2050, 2057];
+    let mut sample_rng = ChaCha20Rng::from_seed([3; 32]);
+    for _ in 0..10 {
+        targets.push(sample_rng.random_range(0..signature.len()));
+    }
+
+    for &idx in &targets {
+        let deltas = [Felt::new_unchecked(1), Felt::new_unchecked(sample_rng.random_range(2..M))];
+        for delta in deltas {
+            let mut corrupted = signature.clone();
+            corrupted[idx] += delta;
+            assert!(
+                run(corrupted).is_err(),
+                "corrupted advice element {idx} (delta {delta}) was accepted",
+            );
+        }
+    }
+}
+
+/// Checks the shifted coefficient decoding and accumulated norm against an integer sum.
+#[test]
+fn test_falcon512_compute_s2_norm_sq() {
+    let source = "
     use miden::core::crypto::dsa::falcon512_eidos
 
     begin
-        emit.event(\"{EVENT_FALCON_SIG_TO_STACK}\")
-        exec.falcon512_eidos::verify
+        push.1000 padw padw padw
+        repeat.64
+            adv_pipe
+        end
+        dropw dropw dropw drop
+        push.1000
+        exec.falcon512_eidos::compute_s2_norm_sq
+        # the operand stack is 16 elements deep on entry, and the norm adds one more, so
+        # discard a padding element to leave a result the harness can read back
+        swap drop
     end
-    "
-    );
+    ";
 
-    let pk: Word = sk.public_key().to_commitment();
-    let sk_bytes = sk.to_bytes();
+    let mut rng = ChaCha20Rng::from_seed([17; 32]);
+    let coefficients: Vec<u64> = (0..N).map(|_| rng.random_range(0..M)).collect();
+    let expected: u64 = coefficients
+        .iter()
+        .map(|&c| {
+            let centered = c as i64 - M_HALF;
+            (centered * centered) as u64
+        })
+        .sum();
 
-    let to_adv_map = sk_bytes.iter().map(|a| Felt::new_unchecked(*a as u64)).collect::<Vec<Felt>>();
-
-    let advice_map: Vec<(Word, Vec<Felt>)> = vec![(pk, to_adv_map)];
-
-    let op_stack = stack_from_words(&[pk, message]);
-    let adv_stack = vec![];
-    let store = MerkleStore::new();
-
-    (source, op_stack, adv_stack, store, advice_map)
+    let test = build_test!(source, &[], &coefficients);
+    test.expect_stack(&[expected]);
 }
 
-fn advice_stack_mutation(values: impl IntoIterator<Item = Felt>) -> AdviceMutation {
-    let mut advice_stack = AdviceStack::new();
-    advice_stack.append_elements(values);
-    AdviceMutation::extend_advice_stack(advice_stack)
-}
+/// Checks the verifier's fused hash-to-point and norm computation against native Eidos samples
+/// and an integer norm calculation, including signed product coefficients at the convolution bound.
+#[rstest]
+#[case::zero_product(false)]
+#[case::signed_product(true)]
+fn falcon_hash_to_point_s1_norm_matches_eidos(#[case] signed_product: bool) {
+    let source = "
+    use miden::core::crypto::dsa::falcon512_eidos
 
-// HELPER FUNCTIONS
-// ================================================================================================
+    begin
+        push.1000 padw padw padw
+        repeat.128
+            adv_pipe
+        end
+        dropw dropw dropw drop
+        push.1000
+        exec.falcon512_eidos::hash_to_point_s1_norm_sq
+    end
+    ";
 
-/// Creates random coefficients of a polynomial in the range (0..M) using the given RNG.
-fn random_coefficients_with_rng<R: Rng>(rng: &mut R) -> Vec<Felt> {
-    let mut res = Vec::new();
-    for _i in 0..N {
-        res.push(Felt::new_unchecked(rng.random_range(0..M)))
-    }
-    res
-}
-
-/// Multiplies two polynomials over Z_p\[x\] without reducing modulo p.
-///
-/// Given that the degrees of the input polynomials are less than 512 and their coefficients are
-/// less than the modulus M = 12289, the resulting product polynomial is guaranteed to have
-/// coefficients less than the Miden prime.
-///
-/// Note that this multiplication is not over Z_p\[x\]/(phi).
-fn mul_modulo_p(a: Polynomial<Felt>, b: Polynomial<Felt>) -> [u64; 1024] {
-    let mut c = [0; 2 * N];
-    for i in 0..N {
-        for j in 0..N {
-            c[i + j] += a.coefficients[i].as_canonical_u64() * b.coefficients[j].as_canonical_u64();
-        }
-    }
-    c
-}
-
-/// Returns the coefficients of a polynomial.
-fn to_elements(poly: Polynomial<Felt>) -> Vec<Felt> {
-    poly.coefficients.to_vec()
-}
-
-/// Generates the data needed to execute the probabilistic product test.
-fn generate_data_probabilistic_product_test(
-    h: Polynomial<Felt>,
-    s2: Polynomial<Felt>,
-    test_failure: bool,
-) -> (Vec<u64>, AdviceStack) {
-    let mut rng = rng();
-    let pi = mul_modulo_p(h.clone(), s2.clone());
-    let s2_elements = to_elements(s2);
-    let pi_elements = pi.iter().map(|a| Felt::new_unchecked(*a)).collect::<Vec<_>>();
-    let h_elements = if test_failure {
-        to_elements(Polynomial::new(random_coefficients_with_rng(&mut rng)))
+    let message = Word::from([13, 21, 34, 55].map(Felt::from_u32));
+    let nonce = Nonce::deterministic().to_elements();
+    let c = hash_to_point_samples(&message, &nonce);
+    let pi = if signed_product {
+        let mut rng = ChaCha20Rng::from_seed([18; 32]);
+        let mut pi: Vec<i64> =
+            (0..2 * N).map(|_| rng.random_range(-PRODUCT_BOUND..=PRODUCT_BOUND)).collect();
+        pi[0] = -PRODUCT_BOUND;
+        pi[N] = PRODUCT_BOUND;
+        pi[1] = PRODUCT_BOUND;
+        pi[N + 1] = -PRODUCT_BOUND;
+        pi
     } else {
-        to_elements(h)
+        vec![0; 2 * N]
     };
 
-    // lay the polynomials in order h then s2 then pi = h * s2
-    let mut polynomials = h_elements.clone();
-    polynomials.extend_from_slice(&s2_elements);
-    polynomials.extend_from_slice(&pi_elements);
+    let expected: u64 = (0..N)
+        .map(|i| {
+            let value = c[i].as_canonical_u64() as i128 + pi[N + i] as i128 - pi[i] as i128;
+            centered_residue(value).unsigned_abs().pow(2)
+        })
+        .sum();
 
-    // get the challenge point and push it to the advice stack
-    // Two sequential `adv_push` ops will place tau0 on top, tau1 at position 1.
-    let h_hash = Eidos::hash_elements_in_domain(&h_elements, FALCON_PUBLIC_KEY);
-    let digest_polynomials = product_check_digest(h_hash, &s2_elements, &pi_elements);
-    let tau0 = digest_polynomials[0];
-    let tau1 = digest_polynomials[1];
-    let mut advice_stack = AdviceStack::new();
-    advice_stack.append_for_adv_push(&[tau0, tau1]);
-    advice_stack.append_elements(polynomials.iter().copied());
+    let advice: Vec<_> = pi
+        .into_iter()
+        .map(|value| field_from_signed(value).as_canonical_u64())
+        .collect();
 
-    // compute hash of h and place it on the stack.
-    let operand_stack = stack_from_words(&[h_hash]);
-
-    (operand_stack, advice_stack)
+    let preserved = [7, 11, 13, 17];
+    let mut op_stack = stack_from_words(&[message]);
+    op_stack.extend(nonce.iter().map(Felt::as_canonical_u64));
+    op_stack.extend(preserved);
+    let test = build_test!(source, &op_stack, &advice);
+    test.expect_stack(&[expected, preserved[0], preserved[1], preserved[2], preserved[3]]);
 }
 
-/// Builds operand-stack inputs from words. The first word ends up on top of the stack.
-///
-/// This matches `stack![]` semantics: `stack_from_words(&[A, B])` results in stack `[A, B, ...]`
-/// with A at position 0 (top).
+/// An adversary who could choose the evaluation point would be able to prove a false product:
+/// adding a multiple of `(x - t)` to the product leaves its value at `t` unchanged while
+/// changing the polynomial. The verifier must reject a supplied point that differs from its
+/// Fiat-Shamir challenge.
+#[test]
+fn test_falcon512_probabilistic_product_rejects_chosen_evaluation_point() {
+    let (h, s2, mut pi) = product_polynomials(11);
+    let t = Felt::from_u32(7);
+    let scale = Felt::from_u32(3);
+    pi[0] -= scale * t;
+    pi[1] += scale;
+
+    let (public_key, mut advice) = product_advice(&h, &s2, &pi);
+    advice[..2].copy_from_slice(&[Felt::ZERO, t]);
+    let inputs = stack_from_words(&[public_key]);
+    let advice: Vec<_> = advice.iter().map(Felt::as_canonical_u64).collect();
+    let test = build_test!(PROBABILISTIC_PRODUCT_SOURCE, &inputs, &advice);
+
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { err_code, err_msg }, ..
+        }
+        if err_code == error_code_from_msg("comparison failed: tau") && err_msg.is_none()
+    );
+}
+
+/// The strict norm bound must apply at the first word, across word boundaries, and at the end.
+#[rstest]
+#[case::first_word(0, 1, 1)]
+#[case::word_boundary(3, 4, -1)]
+#[case::last_word(510, 511, 1)]
+fn falcon_verify_norm_boundary(#[case] first: usize, #[case] second: usize, #[case] sign: i64) {
+    // 150^2 + 5832^2 + ||1||^2 = SQUARE_NORM_BOUND - 1.
+    norm_boundary_test(&[(first, sign * 150), (second, 5832)]).check_constraints();
+
+    // 1026^2 + 5743^2 + ||1||^2 = SQUARE_NORM_BOUND.
+    let test = norm_boundary_test(&[(first, sign * 1026), (second, 5743)]);
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { err_code, err_msg }, ..
+        } if err_code == error_code_from_msg("comparison failed: norm bound")
+            && err_msg.is_none()
+    );
+}
+
+/// A consistent product with a norm above 2^32 must fail the u32 guard before the norm comparison.
+#[test]
+fn falcon_verify_rejects_high_norm_witness() {
+    let (h, s2, pi) = product_polynomials(42);
+    let (public_key, mut advice) = product_advice(&h, &s2, &pi);
+    advice.extend((0..8).map(Felt::from_u32));
+    let test = verify_test(public_key, Word::default(), &advice);
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::NotU32Values { .. },
+            ..
+        }
+    );
+}
+
+// HELPERS
+// ================================================================================================
+
+fn signature_fixture() -> (Word, Word, Vec<Felt>) {
+    let mut rng = ChaCha20Rng::from_seed([4; 32]);
+    let secret_key = SecretKey::with_rng(&mut rng);
+    let message = rng.random();
+    let advice = falcon512_eidos::sign(&secret_key, message).expect("failed to sign message");
+    (secret_key.public_key().to_commitment(), message, advice)
+}
+
+fn verify_test(public_key: Word, message: Word, advice: &[Felt]) -> Test {
+    let inputs = stack_from_words(&[public_key, message]);
+    let advice: Vec<_> = advice.iter().map(Felt::as_canonical_u64).collect();
+    build_test!(VERIFY_SOURCE, &inputs, &advice)
+}
+
+fn verify_from_map_test(public_key: Word, message: Word, advice: Vec<Felt>) -> Test {
+    let key = Eidos::hash_elements(Word::words_as_elements(&[public_key, message]));
+    let inputs = stack_from_words(&[public_key, message]);
+    build_debug_test!(VERIFY_FROM_MAP_SOURCE, &inputs, &[], MerkleStore::new(), [(key, advice)])
+}
+
+fn random_coefficients_with_rng<R: Rng>(rng: &mut R) -> Vec<Felt> {
+    (0..N).map(|_| Felt::new_unchecked(rng.random_range(0..M))).collect()
+}
+
+fn product_polynomials(seed: u8) -> (Vec<Felt>, Vec<Felt>, [Felt; 2 * N]) {
+    let mut rng = ChaCha20Rng::from_seed([seed; 32]);
+    let h = random_coefficients_with_rng(&mut rng);
+    let s2 = random_coefficients_with_rng(&mut rng);
+    let pi = mul_modulo_p_shifted(&h, &s2);
+    (h, s2, pi)
+}
+
+/// Integer convolution of h with s2'_i - M_HALF, encoded as Miden field elements.
+fn mul_modulo_p_shifted(h: &[Felt], s2_shifted: &[Felt]) -> [Felt; 2 * N] {
+    let mut product = [0i64; 2 * N];
+    for i in 0..N {
+        for j in 0..N {
+            product[i + j] +=
+                h[i].as_canonical_u64() as i64 * (s2_shifted[j].as_canonical_u64() as i64 - M_HALF);
+        }
+    }
+    product.map(field_from_signed)
+}
+
+/// Builds commitments from the supplied polynomials, including deliberately malformed values.
+fn product_advice(h: &[Felt], s2: &[Felt], pi: &[Felt]) -> (Word, Vec<Felt>) {
+    let public_key = Eidos::hash_elements_in_domain(h, FALCON_PUBLIC_KEY);
+    let digest = product_check_digest(public_key, s2, pi);
+    let advice = [digest[1], digest[0]]
+        .into_iter()
+        .chain(h.iter().chain(s2).chain(pi).copied())
+        .collect();
+    (public_key, advice)
+}
+
+fn product_test(h: &[Felt], s2: &[Felt], pi: &[Felt]) -> Test {
+    let (public_key, advice) = product_advice(h, s2, pi);
+    let inputs = stack_from_words(&[public_key]);
+    let advice: Vec<_> = advice.iter().map(Felt::as_canonical_u64).collect();
+    build_test!(PROBABILISTIC_PRODUCT_SOURCE, &inputs, &advice)
+}
+
+/// Builds inputs in stack order, with the first word on top.
 fn stack_from_words(words: &[Word]) -> Vec<u64> {
-    words.iter().flat_map(|w| w.iter().map(Felt::as_canonical_u64)).collect()
+    words.iter().flat_map(|word| word.iter().map(Felt::as_canonical_u64)).collect()
+}
+
+fn norm_boundary_test(target_s1: &[(usize, i64)]) -> Test {
+    let mut s1 = [0i64; N];
+    for &(index, coefficient) in target_s1 {
+        assert!(index < N);
+        assert!(coefficient.abs() <= M_HALF);
+        s1[index] = coefficient;
+    }
+
+    let s1_norm: u64 = s1.iter().map(|coefficient| coefficient.unsigned_abs().pow(2)).sum();
+    assert!(s1_norm < SQUARE_NORM_BOUND);
+    let nonce = std::array::from_fn(|i| Felt::from_u32(i as u32));
+    norm_test(&s1, 0, 1, Word::default(), nonce)
+}
+
+/// Chooses h so that c - h * s2 equals the supplied s1 in Z_M[x]/(x^512 + 1), with
+/// s2 = sign * x^degree. The integer convolution is pi[i + degree] = sign * h[i].
+fn norm_test(s1: &[i64], degree: usize, sign: i64, message: Word, nonce: [Felt; 8]) -> Test {
+    assert_eq!(s1.len(), N);
+    assert!(sign == -1 || sign == 1);
+    let c = hash_to_point_samples(&message, &nonce);
+    let h: Vec<_> = (0..N)
+        .map(|i| {
+            let k = (i + degree) % N;
+            let value = c[k].as_canonical_u64() as i128 - s1[k] as i128;
+            let wrap_sign = if i + degree >= N { -1 } else { 1 };
+            Felt::new_unchecked((value * (sign * wrap_sign) as i128).rem_euclid(M as i128) as u64)
+        })
+        .collect();
+
+    let mut s2_shifted = vec![Felt::new_unchecked(M_HALF as u64); N];
+    s2_shifted[degree] = Felt::new_unchecked((M_HALF + sign) as u64);
+    let mut pi = [Felt::ZERO; 2 * N];
+    for (i, coefficient) in h.iter().enumerate() {
+        pi[i + degree] = field_from_signed(sign * coefficient.as_canonical_u64() as i64);
+    }
+
+    let (public_key, mut advice) = product_advice(&h, &s2_shifted, &pi);
+    advice.extend(nonce);
+    verify_test(public_key, message, &advice)
+}
+
+fn centered_residue(value: i128) -> i64 {
+    let residue = value.rem_euclid(M as i128) as i64;
+    if residue > M_HALF { residue - M as i64 } else { residue }
+}
+
+/// Computes native Eidos samples for the fused norm reference and controlled verifier witnesses.
+fn hash_to_point_samples(message: &Word, nonce: &[Felt; 8]) -> Vec<Felt> {
+    let mut cv = Eidos::init_chaining_word(FALCON_HASH_TO_POINT, 0);
+    cv = Eidos::compress(cv, *nonce);
+    let mut block = [ZERO; 8];
+    block[..4].copy_from_slice(message.as_elements());
+    let seed = Eidos::compress(cv, block);
+
+    let mut block = [ZERO; 8];
+    let mut coefficients = Vec::with_capacity(N);
+    for counter in 0..128 {
+        block[0] = Felt::from_u32(counter);
+        coefficients.extend_from_slice(Eidos::compress(seed, block).as_slice());
+    }
+    coefficients
 }

@@ -19,12 +19,13 @@ pub mod u64_div;
 // HELPER FUNCTIONS
 // ================================================================================================
 
-/// Converts a u64 value into two u32 elements (high and low parts).
+/// Converts a u64 value into its low and high u32 limbs, in that order.
 fn u64_to_u32_elements(value: u64) -> (Felt, Felt) {
-    let hi = Felt::from_u32((value >> 32) as u32);
     let lo = Felt::from_u32(value as u32);
-    (hi, lo)
+    let hi = Felt::from_u32((value >> 32) as u32);
+    (lo, hi)
 }
+
 /// Reads a contiguous region of memory elements, treating addresses that were never written to as
 /// zero.
 ///
