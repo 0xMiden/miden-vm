@@ -94,7 +94,7 @@ impl<'a> SymbolResolver<'a> {
                 id,
                 path: Span::new(span, Arc::from(self.module_path(id))),
             },
-            ResolvedUse::Item(gid) => SymbolResolution::Exact {
+            ResolvedUse::Item { id: gid, .. } => SymbolResolution::Exact {
                 gid,
                 path: Span::new(span, self.item_path(gid)),
             },
@@ -396,27 +396,26 @@ impl<'a> SymbolResolver<'a> {
         context: &SymbolResolutionContext,
         path: Span<&Path>,
     ) -> Result<SymbolResolution, LinkerError> {
+        let resolved = self.resolve_reference(context, path)?;
+        Ok(self.to_symbol_resolution(path.span(), resolved))
+    }
+
+    /// Resolves a reference while preserving visibility granted through re-export aliases.
+    pub(crate) fn resolve_reference(
+        &self,
+        context: &SymbolResolutionContext,
+        path: Span<&Path>,
+    ) -> Result<ResolvedUse, LinkerError> {
         match (self.namespaces, self.imports) {
             (Some(namespaces), Some(imports)) => {
-                self.resolve_path_with_namespaces(namespaces, imports, context, path)
+                namespaces.resolve_code_path(context.module, path, imports, self.graph)
             },
             _ => {
                 let namespaces = NamespaceGraph::build(self.graph)?;
                 let imports = namespaces.resolve_imports(self.graph)?;
-                self.resolve_path_with_namespaces(&namespaces, &imports, context, path)
+                namespaces.resolve_code_path(context.module, path, &imports, self.graph)
             },
         }
-    }
-
-    fn resolve_path_with_namespaces(
-        &self,
-        namespaces: &NamespaceGraph,
-        imports: &ResolvedImports,
-        context: &SymbolResolutionContext,
-        path: Span<&Path>,
-    ) -> Result<SymbolResolution, LinkerError> {
-        let resolved = namespaces.resolve_code_path(context.module, path, imports, self.graph)?;
-        Ok(self.to_symbol_resolution(path.span(), resolved))
     }
 
     pub fn resolve_local(

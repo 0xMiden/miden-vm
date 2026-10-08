@@ -220,7 +220,7 @@ begin
 end
 ```
 
-Imports are resolved independently. An import may not refer to another import declared in the same module:
+Import paths start at the global module tree unless qualified with `self::`. A bare import alias cannot be used as the root of another import path:
 
 ```
 use foo::bar
@@ -243,7 +243,14 @@ end
 
 In the module shown above, not only is the locally-defined procedure `foo` exported, but so are two procedures named `add` and `mul64`, whose implementations are defined in the `miden::core::math::u64` module.
 
-`pub use` follows the same path rules as `use`: it resolves from the global module tree unless the path starts with `self::`, and it does not resolve through other imports in the current module. Modules cannot be re-exported with `pub use`; use `pub mod` in the parent module to expose a submodule as part of a public module tree.
+`pub use` follows the same path rules as `use`: it resolves from the global module tree unless the path starts with `self::`. Any item visible at the declaration site may be re-exported, including a private item or import alias in the same module. The re-export's visibility controls access through the alias independently of the original declaration's visibility. Names must remain unique, so re-exporting a local declaration requires an alias:
+
+```masm
+proc helper nop end
+pub use {helper as exposed} from self
+```
+
+Modules cannot be re-exported with `pub use`; use `pub mod` in the parent module to expose a submodule as part of a public module tree.
 
 A leading `::` may be used to make the global root explicit:
 

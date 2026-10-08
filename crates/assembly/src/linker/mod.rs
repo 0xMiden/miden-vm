@@ -760,7 +760,7 @@ impl Linker {
                 let module_index = ModuleIndex::new(module_index);
 
                 for import in module.imports() {
-                    if let Some(namespaces::ResolvedUse::Item(gid)) =
+                    if let Some(namespaces::ResolvedUse::Item { id: gid, .. }) =
                         imports.get(module_index, import.local_name().as_str())
                     {
                         import.set_resolved(gid);

@@ -376,3 +376,79 @@ fn private_procedure_reexport_is_callable_from_another_module() -> TestResult {
     assert!(exports.contains(&Arc::from(Path::new("::root::api::exposed"))));
     Ok(())
 }
+
+#[test]
+fn private_items_can_be_reexported_from_their_own_module() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace root
+        type Hidden = felt
+        const VALUE = 7
+        proc helper nop end
+        pub use {Hidden as Exposed, VALUE as EXPOSED_VALUE, helper as exposed} from self
+        "#
+    ))?;
+    let library = Assembler::new(context.source_manager()).assemble_library(
+        "pkg",
+        root,
+        None::<Box<Module>>,
+    )?;
+    let exports = library.manifest.exports().map(PackageExport::path).collect::<BTreeSet<_>>();
+    assert_eq!(exports.len(), 3);
+    assert!(exports.contains(&Arc::from(Path::new("::root::Exposed"))));
+    assert!(exports.contains(&Arc::from(Path::new("::root::EXPOSED_VALUE"))));
+    assert!(exports.contains(&Arc::from(Path::new("::root::exposed"))));
+    Ok(())
+}
+
+#[test]
+fn private_import_can_be_reexported_from_its_own_module() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        "namespace root\nuse {foo as local} from dep\npub use {local as exposed} from self\n"
+    ))?;
+    let dep =
+        context.parse_module(source_file!(&context, "namespace dep\npub proc foo nop end\n"))?;
+    let library = Assembler::new(context.source_manager()).assemble_library("pkg", root, [dep])?;
+    assert_eq!(library.manifest.exports().count(), 1);
+    assert_eq!(
+        library.manifest.exports().next().unwrap().path().as_ref(),
+        Path::new("::root::exposed")
+    );
+    Ok(())
+}
+
+#[test]
+fn inaccessible_private_item_cannot_be_reexported() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        "namespace root\npub use {helper as exposed} from dep\n"
+    ))?;
+    let dep =
+        context.parse_module(source_file!(&context, "namespace dep\nproc helper nop end\n"))?;
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("pkg", root, [dep])
+        .expect_err("a re-export must not bypass declaration-site visibility");
+    assert_diagnostic!(err, "private symbol reference");
+    Ok(())
+}
+
+#[test]
+fn public_alias_of_private_type_can_appear_in_public_signatures() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        "namespace root\npub mod api\nuse {Exposed as Word} from self::api\npub proc entry(value: Word) nop end\n"
+    ))?;
+    let api = context.parse_module(source_file!(
+        &context,
+        "namespace root::api\ntype Hidden = felt\npub use {Hidden as Exposed} from ::root::api\npub proc local(value: Exposed) nop end\n"
+    ))?;
+    let library = Assembler::new(context.source_manager()).assemble_library("pkg", root, [api])?;
+    assert_eq!(library.manifest.exports().count(), 3);
+    Ok(())
+}
