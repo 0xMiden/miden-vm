@@ -1741,6 +1741,27 @@ mod tests {
     }
 
     #[test]
+    fn enum_type_rejects_variant_payload_that_overflows_u32_size() {
+        // A `[u8; u32::MAX]` payload is a valid array on its own, but adding the `u8` tag in
+        // front of it needs 2^32 bytes. Decoding must report that instead of panicking.
+        let mut bytes = Vec::new();
+        bytes.write_u8(21);
+        write_str(&mut bytes, "E");
+        bytes.write_u8(4);
+        bytes.write_usize(1);
+        write_str(&mut bytes, "V");
+        bytes.write_bool(true);
+        Type::from(ArrayType::new(Type::U8, u32::MAX as usize)).write_into(&mut bytes);
+        bytes.write_bool(false);
+
+        let err = Type::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("invalid enum: size exceeds u32::MAX bytes"), "{message}");
+    }
+
+    #[test]
     fn function_type_rejects_nested_over_limit() {
         let mut nested = Vec::new();
         for _ in 0..=MAX_TYPE_NESTING {
