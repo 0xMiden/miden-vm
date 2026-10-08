@@ -854,8 +854,12 @@ impl<'input> Parser<'input> {
     fn parse_visibility(&mut self) {
         self.start_node(SyntaxKind::Visibility);
         let _ = self.expect_keyword("pub", "expected `pub`");
-        self.bump_regular_trivia();
-        if self.at_kind(SyntaxKind::LParen) {
+        if self
+            .next_relevant_top_level_token(self.pos)
+            .and_then(|index| self.tokens.get(index))
+            .is_some_and(|token| token.kind() == SyntaxKind::LParen)
+        {
+            self.bump_regular_trivia();
             self.bump();
             let _ = self.expect_keyword("package", "expected `package` in visibility modifier");
             let _ = self.expect_kind(SyntaxKind::RParen, "expected `)` after `package`");
@@ -2988,5 +2992,27 @@ begin end
         let end = start + "foo".len() as u32;
         let expected = SourceSpan::new(parse.source().id(), start..end);
         assert_eq!(parse.span_for_token(&name), expected);
+    }
+}
+
+#[cfg(test)]
+mod visibility_trivia_tests {
+    use alloc::string::ToString;
+
+    use super::*;
+    use crate::ast::AstNode;
+
+    #[test]
+    fn unqualified_visibility_does_not_consume_trailing_trivia() {
+        let input = "pub # keep me\nmod api\n";
+        let parse = parse_text(input);
+        assert!(!parse.has_errors());
+        let visibility = parse
+            .syntax()
+            .descendants()
+            .find_map(crate::ast::Visibility::cast)
+            .expect("visibility marker");
+        assert_eq!(visibility.syntax().text().to_string(), "pub");
+        assert_eq!(parse.syntax().text().to_string(), input);
     }
 }
