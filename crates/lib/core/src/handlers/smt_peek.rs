@@ -47,9 +47,6 @@ pub const SMT_PEEK_EVENT_NAME: EventName =
 ///
 /// # Errors
 /// Returns an error if the provided Merkle root doesn't exist on the advice provider.
-///
-/// # Panics
-/// Will panic as unimplemented if the target depth is `64`.
 pub fn handle_smt_peek(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
     let empty_leaf = EmptySubtreeRoots::entry(SMT_DEPTH, SMT_DEPTH);
     // fetch the arguments from the operand stack
