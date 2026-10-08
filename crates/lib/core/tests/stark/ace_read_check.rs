@@ -359,14 +359,18 @@ fn assert_fold_coefficients_match_the_proof_order(
 /// stream sections it read into memory, the fold coefficients against the proof order its staged
 /// heights induce, and the ACE inputs, which are cross-evaluated in Rust.
 ///
-/// The fixture's trace handlers run as usual, so callers can still observe the verifier's stack
-/// at return.
-pub(super) fn execute_and_check(test: &EventTest, proof_stream: &[u64], claim: &[u64]) -> ProofOrder {
+/// Registers the supplied trace observer so callers can inspect the verifier's stack at return.
+pub(super) fn execute_and_check(
+    test: &EventTest,
+    proof_stream: &[u64],
+    claim: &[u64],
+    verifier_stack: super::VerifierStack,
+) -> ProofOrder {
     let (program, ..) = test.compile().expect("the verifier fixture must assemble");
-    let mut host = DefaultHost::default().with_library(CoreLibrary::default().host_library()).unwrap();
-    for (event, handler) in &test.handlers {
-        host.register_handler(event.clone(), handler.clone()).unwrap();
-    }
+    let mut host = DefaultHost::default()
+        .with_library(CoreLibrary::default().host_library())
+        .unwrap();
+    host.register_handler(super::VERIFIER_RETURN, verifier_stack).unwrap();
     let mut processor = FastProcessor::new_with_options(
         test.stack_inputs,
         test.advice_inputs.clone(),

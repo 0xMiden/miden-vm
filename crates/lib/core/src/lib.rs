@@ -200,7 +200,10 @@ impl CoreLibrary {
             (FALCON_DIV_EVENT_NAME, handle_falcon_div.into()),
             (LOWERBOUND_ARRAY_EVENT_NAME, handle_lowerbound_array.into()),
             (LOWERBOUND_KEY_VALUE_EVENT_NAME, handle_lowerbound_key_value.into()),
-            (AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME, handle_aead_eidos_decrypt_empty_ad.into()),
+            (
+                AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
+                handle_aead_eidos_decrypt_empty_ad.into(),
+            ),
             (ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handle_ecdsa_k256_keccak_recover.into()),
             (KECCAK256_DIGEST_EVENT_NAME, handle_keccak256_digest.into()),
             (UINT_FIELD_INV_EVENT_NAME, handle_uint_field_inv.into()),

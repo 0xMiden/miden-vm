@@ -39,13 +39,13 @@ fn merge_words() {
 fn context_memory() {
     let in_root = if sdk::is_root_context() { Felt::ONE } else { Felt::ZERO };
     let mut values = [in_root, Felt::ZERO, Felt::ZERO];
-    if !sdk::mem_read(100, &mut values[1..2]) {
+    if sdk::mem_read(100, &mut values[1..2]).is_err() {
         sdk::fail("current memory read failed");
     }
     if sdk::mem_get(100) != values[1] {
         sdk::fail("scalar and bulk memory reads disagree");
     }
-    if !sdk::mem_read_root(100, &mut values[2..3]) {
+    if sdk::mem_read_root(100, &mut values[2..3]).is_err() {
         sdk::fail("root memory read failed");
     }
     sdk::adv_stack_extend(&mut values);

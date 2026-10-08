@@ -1667,8 +1667,8 @@ fn trace_output_and_disabled_delivery_follow_the_engine_policy() {
     // record output. A failed callback's own error wins over forbidden trace output.
     for (body, expected) in [
         (
-            "(call $adv_stack_extend (i32.const -1) (i32.const 0))
-          (call $merkle_store_extend (i32.const -1) (i32.const 0))",
+            "(call $adv_stack_extend (i32.const 0) (i32.const 0))
+          (call $merkle_store_extend (i32.const 0) (i32.const 0))",
             None,
         ),
         (

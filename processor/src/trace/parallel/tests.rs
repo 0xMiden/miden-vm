@@ -23,7 +23,7 @@ use rstest::{fixture, rstest};
 
 use super::*;
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, EventLibrary,
+    AdviceInputs, DefaultHost, EventLibrary, ExecutionOptions, FastProcessor,
     trace::trace_state::MemoryReadsReplay,
 };
 

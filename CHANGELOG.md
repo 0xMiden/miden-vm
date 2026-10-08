@@ -4,15 +4,10 @@
 
 #### Features
 
-- [BREAKING] Add a precompile prover memory budget, with a 64GiB default ([#3799](https://github.com/0xMiden/miden-vm/pull/3799)).
-- Migrated native crypto handlers to typed advice with fixed Keccak (1 MiB input) and AEAD (16 MiB plaintext) admission limits. Removed configurable hash-length execution options; AEAD now treats unwritten ciphertext, padding, and tags as zero-valued memory and validates those values normally ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
-
+- Migrated native crypto handlers to typed advice with fixed Keccak (1 MiB input) and AEAD (16 MiB plaintext) admission limits. Removed configurable hash-length execution options; Eidos AEAD treats unwritten ciphertext limbs and tags as zero-valued memory and validates those values normally ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 - Migrated native arithmetic, collection, and observation handlers to payload-relative reads and typed advice recording. Public `handle_*` functions now take `EventContext` and `AdviceRecorder`; legacy library lists and `DebugPrinter` remain usable ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
-
 - Added portable `Host::handle_event` and `SyncHost::handle_event` callbacks, unified registrations, explicit trace-delivery policy, and complete-batch advice completion while preserving legacy host and registration paths ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
-
 - Added the portable `miden-event-handler` crate with one event/trace handler trait, payload-relative `EventContext`, and typed advice recorded into an engine-owned batch. Operand-stack reads zero-extend; all ordinary memory reads return zero for unwritten cells, with errors only for invalid addresses, alignment, or ranges. Missing advice remains meaningful ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
-
 - Added Wasm-compiled custom event handlers: untrusted Wasm modules ship inside a `.masp` package (`event_handlers` section) and run under the wasmi interpreter on any host. New crates: `miden-event-handler-abi` (host/guest ABI contract), `miden-wasm-event-handlers` (host-side runner with fuel, memory, and mutation limits), `miden-event-handler-sdk` + `miden-event-handler-macros` (Rust guest SDK with manifest emission). Also added `ProcessorState::stack_depth` ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 - [BREAKING] The package dependency commitment now binds the `event_handlers` section (next to the account-component metadata), and the semantic sections enter its preimage in a canonical order, so the dependency commitment of a package that carries handlers changes ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 - [BREAKING] `DefaultHost::replace_handler` and `DefaultHost::replace_trace_handler` now return `Result<bool, ExecutionError>` instead of `bool`, because the event name is validated before the handler is registered ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
@@ -23,6 +18,12 @@
 
 #### Changes
 
+- Deprecated raw-state processor handler, registry, mutation, and callback APIs while preserving
+  their compatibility paths. See the [migration guide](docs/src/user_docs/event_handler_migration.md)
+  for concrete handler changes and retained APIs ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
+- Wasm ABI revision 2 adds invocation kind while retaining the v1 namespace and revision-1 declarations.
+  Inverse witnesses carry explicit operands while retaining their deferred assertion binding
+  ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 - [BREAKING] Adopted Eidos as the native hash for VM data, Falcon signatures, AEAD, deferred computation, and proof transcripts, changing digests, verifier roots, and proof layout; `crypto_stream` now derives Eidos XOF blocks and writes expanded u32 ciphertext. Replaced `HPERM`/`adv.insert_hperm` with `COMPRESS`/`adv.insert_compress`; removed `adv.insert_hdword_d`, `sys::hdword_to_map_with_domain`, SMT `LEAF_DOMAIN`, and the Poseidon2-backed `RandomCoin`; and replaced the Poseidon2 core-library hash and AEAD modules with Eidos equivalents. Deferred nodes now use checked `EidosFrame` instead of `Tag`; `adv.evaluate_deferred_tag` is now `adv.evaluate_deferred_frame`; the name-derived IDs of `sys::adv::register_deferred` and `sys::adv::evaluate_deferred` were corrected; `adv.register_deferred` now uses `[CV, PAYLOAD_LO, PAYLOAD_HI]` and `adv.register_deferred_data` uses `[n_chunks, CV, ptr]`; and `precompiles::digest_expr` and `precompiles::register_value` are replaced by `precompiles::register_fixed_expr`. Renamed core `merge_in_domain` to `merge_in_mast_domain` and crypto `merge_in_domain` to `hash_two_words_in_domain`; removed the Poseidon2 IES schemes while preserving Eidos wire IDs 4 and 5; and bumped MAST serialization to 0.0.5 and Eidos execution witnesses to version 2 ([#3718](https://github.com/0xMiden/miden-vm/pull/3718)).
 - [BREAKING] Normalized every PVM AIR's committed LogUp sum by its trace length and reduced native and precompile VM trace widths using shared centered LogUp, compact byte-pair tables, and narrower decoder and chiplet layouts. Updated the native and recursive closures and verifier artifacts; this changes both proof relations ([#3756](https://github.com/0xMiden/miden-vm/pull/3756)).
 - [BREAKING] Replaced the per-proof-order ACE circuit registries with one order-invariant circuit per relation, changing circuit and relation digests, verifier roots, and recursive proof fixtures ([#3762](https://github.com/0xMiden/miden-vm/pull/3762)).
@@ -34,17 +35,10 @@
 - Optimized Eidos Merkle tree construction ([#3898](https://github.com/0xMiden/miden-vm/pull/3898)).
 - Evaluated Eidos AEAD MACs without allocating a coefficient buffer and checked input lengths before byte conversion, associated-data copying, or ciphertext deserialization ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
 - [BREAKING] Renamed `auth_empty_ad_expanded_with_scratch` to `auth_empty_ad_expanded_exact` and removed its `scratch_ptr` parameter. Reduced cycle costs in the core library's Eidos AEAD encryption, authentication, and decryption procedures ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
-- Improved lifted STARK prover performance: LogUp fractions are built and accumulated in row chunks with a parallel accumulator scan, and DEEP reduction avoids element-wise buffer swaps and per-height group buffers ([#3851](https://github.com/0xMiden/miden-vm/pull/3851)).
-- Reduced prover peak memory by 13-20% by pruning Merkle layers ([#3872](https://github.com/0xMiden/miden-vm/pull/3872)).
-- Deprecated raw-state processor handler, registry, mutation, and callback APIs while preserving
-  their compatibility paths. See the [migration guide](docs/src/user_docs/event_handler_migration.md)
-  for concrete handler changes and retained APIs ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
-- Wasm ABI revision 2 adds invocation kind while retaining the v1 namespace and revision-1 declarations.
-  Inverse witnesses carry explicit operands while retaining their deferred assertion binding
-  ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 
 #### Fixes
 
+- Zero-extend Hqword system-hash payloads at logical operand-stack depth ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 - [BREAKING] Bumped the portable precompile witness encoding to version 2; version-1 witnesses are rejected before decoding their payloads ([#3879](https://github.com/0xMiden/miden-vm/pull/3879)).
 - [BREAKING] Introduced serialization format version 1 for `MerkleStore` and `PartialMmr` as part of the Eidos migration. Unversioned encodings, including stores embedded in `AdviceInputs`, are rejected; rebuild cached Merkle state using Eidos ([#3879](https://github.com/0xMiden/miden-vm/pull/3879)).
 - [BREAKING] Fixed Eidos AEAD authentication to prevent key-independent tag adjustments. The AEAD key derivation domains use version 2; ciphertexts and tags produced under version 1 are incompatible ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
@@ -138,7 +132,6 @@
 
 - Preserved the public `ParsingError` enum layout while adding protocol ABI attribute checks ([#3812](https://github.com/0xMiden/miden-vm/pull/3812)).
 - Fixed issue where parsing of pointer types dropped address space information ([#3790](https://github.com/0xMiden/miden-vm/pull/3790)).
-- Zero-extend Hqword system-hash payloads at logical operand-stack depth ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 
 ## v0.32.0 (2026-09-05)
 
@@ -151,8 +144,6 @@
 #### Features
 
 #### Fixes
-
-- Zero-extend Hqword system-hash payloads at logical operand-stack depth ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 - Fixed stack overflow in the precompile prover's `translate_truthy`, `translate_uint`, and `translate_ec` by converting them from recursive to iterative post-order traversals. Programs with many `LOGDEFERRED` calls no longer crash ([#3626](https://github.com/0xMiden/miden-vm/issues/3626)).
 
 ## v0.31.1 (2026-09-04)

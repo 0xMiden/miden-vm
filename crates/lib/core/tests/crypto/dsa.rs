@@ -333,7 +333,7 @@ fn core_ecdsa_k256_keccak_verify_cycle_baseline() {
     let cycles = output.stack.get_element(0).expect("cycle count").as_canonical_u64();
     // This includes the deferred-node registration and hashing performed by the Keccak and
     // secp256k1 precompile wrappers.
-    assert_eq!(cycles, 1191);
+    assert_eq!(cycles, 1220);
 }
 
 #[test]
