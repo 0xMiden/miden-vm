@@ -33,6 +33,7 @@
 - Corrected native and recursive Eidos proof-security estimates to account for restricted Fiat-Shamir challenges. Eidos has a 126-bit generic collision-resistance ceiling and restricted field outputs; see the [security and usage guide](docs/src/design/eidos-security.md).
 - Fixed lifted STARK proving for quotient domains smaller than the SIMD packing width ([#3910](https://github.com/0xMiden/miden-vm/pull/3910)).
 - Restored the VM chiplets diagram showing the hash controller and the Eidos compression and byte-lookup AIRs ([#3977](https://github.com/0xMiden/miden-vm/pull/3977)).
+- `smt::get` returns the empty word for an absent key whose leaf holds a single pair for a different key, instead of failing an assertion ([#3979](https://github.com/0xMiden/miden-vm/pull/3979)).
 
 ## v0.36.0 (Unreleased)
 
