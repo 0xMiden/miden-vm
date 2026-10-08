@@ -48,7 +48,7 @@ use miden_core::{
     Felt,
     deferred::{
         DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
-        PrecompileError, TRUE_DIGEST,
+        PrecompileError, TRUE_DIGEST, WorkItem,
     },
     program::domain::CurvePrecompileDomain,
 };
@@ -858,6 +858,14 @@ impl Precompile for CurvePrecompile {
         payload.as_chunks().len() == n_pairs as usize
     }
 
+    fn work(&self, params: [u32; 3], _payload: &Payload) -> Result<WorkItem, PrecompileError> {
+        let op = CurveOp::decode(params).ok_or(PrecompileError::InvalidNode)?;
+        match op {
+            CurveOp::Msm(terms) => Ok(WorkItem::new(crate::MSM_WORK, terms)),
+            _ => Ok(WorkItem::new(crate::CURVE_WORK, 1)),
+        }
+    }
+
     fn evaluate(
         &self,
         params: [u32; 3],
@@ -917,7 +925,11 @@ mod tests {
     };
 
     fn state() -> DeferredState {
-        DeferredState::new(Arc::new(crate::registry())).expect("precompile init must succeed")
+        DeferredState::new(
+            Arc::new(crate::registry()),
+            crate::default_execution_precompile_limits(),
+        )
+        .expect("precompile init must succeed")
     }
 
     fn evaluate(state: &mut DeferredState, node: Node) -> Result<Node, PrecompileError> {

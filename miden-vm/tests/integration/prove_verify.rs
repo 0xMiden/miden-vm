@@ -347,9 +347,9 @@ mod prover_api_lifecycle {
     use miden_precompiles::{UintDomain, UintPrecompile};
     use miden_vm::{
         DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionWitness,
-        FastProcessor, HashFunction, PrecompileProof, PrecompileStatus, PrecompileWitness, Program,
-        Prover, StackInputs, StackOutputs, StarkProof, VerificationError, VerificationOutcome,
-        Verifier, advice::AdviceInputs, prove_sync,
+        FastProcessor, HashFunction, PrecompileLimits, PrecompileProof, PrecompileStatus,
+        PrecompileWitness, Program, Prover, ProverError, StackInputs, StackOutputs, StarkProof,
+        VerificationError, VerificationOutcome, Verifier, advice::AdviceInputs, prove_sync,
     };
 
     use super::minimum_conjectured_security_level;
@@ -489,7 +489,7 @@ mod prover_api_lifecycle {
             .prove_vm_witness(vm_witness)
             .expect_err("VM witness with precompile work should be rejected");
 
-        assert!(matches!(error, miden_vm::ProverError::VmWitnessHasPrecompiles));
+        assert!(matches!(error, ProverError::VmWitnessHasPrecompiles));
     }
 
     #[test]
@@ -508,7 +508,7 @@ mod prover_api_lifecycle {
                 stack_inputs,
                 AdviceInputs::default(),
                 &mut buffered_host,
-                execution_options.with_overlapped_trace_build(false),
+                execution_options.clone().with_overlapped_trace_build(false),
             )
             .expect("buffered execute-and-prove should succeed");
 
@@ -519,7 +519,7 @@ mod prover_api_lifecycle {
                 stack_inputs,
                 AdviceInputs::default(),
                 &mut overlapped_host,
-                execution_options.with_overlapped_trace_build(true),
+                execution_options.clone().with_overlapped_trace_build(true),
             )
             .expect("overlapped execute-and-prove should succeed");
 
@@ -548,6 +548,12 @@ mod prover_api_lifecycle {
         assert_eq!(deferred_outcome.outstanding_precompile_root(), Some(one_root));
         assert!(deferred_outcome.precompile_security_parameters().is_none());
         assert_execution_security_levels(&one_claim, &one_deferred, &deferred_outcome);
+        assert!(matches!(
+            Verifier::new()
+                .with_verification_precompile_limits(PrecompileLimits::new(0))
+                .verify(&one_claim, &one_deferred),
+            Err(VerificationError::DeferredWitnessPreparation(_))
+        ));
 
         // This unrelated witness would fail evaluation because its final node is data, not TRUE.
         // Reject its root mismatch before reaching that evaluation failure.
@@ -595,6 +601,12 @@ mod prover_api_lifecycle {
         let PrecompileStatus::Deferred(two_precompile) = two_transported.precompile() else {
             panic!("transported root-two proof should remain deferred");
         };
+        assert!(matches!(
+            Prover::new()
+                .with_verification_precompile_limits(PrecompileLimits::new(0))
+                .prove_precompiles(vec![one_precompile.clone()]),
+            Err(ProverError::PrecompileProofGeneration(_))
+        ));
         let two_root = two_transported.vm().precompile_root;
         let ordered_roots = vec![one_root, two_root, one_root];
 
@@ -951,9 +963,9 @@ mod execution_witness_serialization {
         let witness_bytes = witness.to_bytes();
         let inspected =
             ExecutionWitness::read_from_bytes(&witness_bytes).expect("witness round trip");
-        let (_, precompile) = inspected.into_parts();
+        let (vm, precompile) = inspected.into_parts();
+        let expected_deferred_root = vm.precompile_root();
         let precompile = precompile.expect("deferred execution should carry a precompile witness");
-        let expected_deferred_root = precompile.root_unchecked();
         let expected_witness = precompile;
 
         let proving =

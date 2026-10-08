@@ -5,7 +5,10 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use miden_core::deferred::PrecompileRegistry;
+use miden_core::deferred::{
+    EidosFrame, MAX_DEFERRED_WIRE_ELEMENTS, Node, PrecompileLimits, PrecompileRegistry, WorkClass,
+    WorkLimit,
+};
 
 mod codec;
 mod hash;
@@ -28,6 +31,77 @@ pub use math::{
         UintBinaryOp, UintDomain, UintNodeRef, UintOp, UintPrecompile, UintSpec, ZERO_LIMBS,
     },
 };
+
+// WORK ACCOUNTING
+// ================================================================================================
+
+/// Work class shared by every supported hash assertion.
+pub const HASH_WORK: WorkClass = WorkClass::new("hash");
+/// Work class shared by all uint domains and operations.
+pub const UINT_WORK: WorkClass = WorkClass::new("uint");
+/// Work class shared by non-MSM curve operations.
+pub const CURVE_WORK: WorkClass = WorkClass::new("curve");
+/// Work class for multi-scalar multiplication, sized by term count.
+pub const MSM_WORK: WorkClass = WorkClass::new("msm");
+
+/// Conservative maximum number of terms in one MSM admitted by default.
+pub const DEFAULT_MAX_MSM_TERMS: u32 = 4_096;
+/// Conservative maximum total MSM terms in one witness admitted by default.
+pub const DEFAULT_MAX_TOTAL_MSM_TERMS: u64 = 16 * DEFAULT_MAX_MSM_TERMS as u64;
+
+/// Returns the default policy for guest-induced deferred work during execution.
+pub fn default_execution_precompile_limits() -> PrecompileLimits {
+    default_precompile_limits()
+}
+
+/// Returns the default policy for one final root-reachable witness during verification.
+pub fn default_verification_precompile_limits() -> PrecompileLimits {
+    default_precompile_limits()
+}
+
+/// Builds the currently shared default policy for execution and verification.
+///
+/// The public entry points remain distinct because the two scopes are configured independently
+/// and may diverge as their defaults are calibrated.
+fn default_precompile_limits() -> PrecompileLimits {
+    let min_node_elements = EidosFrame::FELT_LEN + Node::PACKED_BYTES_PER_CHUNK / size_of::<u32>();
+    let max_operations = (MAX_DEFERRED_WIRE_ELEMENTS / min_node_elements) as u64;
+    let max_hash_bytes = (MAX_DEFERRED_WIRE_ELEMENTS * size_of::<u32>()) as u64;
+
+    PrecompileLimits::new(MAX_DEFERRED_WIRE_ELEMENTS as u64)
+        .with_class(
+            UINT_WORK,
+            WorkLimit {
+                max_count: max_operations,
+                max_total_size: max_operations,
+                max_size: 1,
+            },
+        )
+        .with_class(
+            CURVE_WORK,
+            WorkLimit {
+                max_count: max_operations,
+                max_total_size: max_operations,
+                max_size: 1,
+            },
+        )
+        .with_class(
+            HASH_WORK,
+            WorkLimit {
+                max_count: max_operations,
+                max_total_size: max_hash_bytes,
+                max_size: max_hash_bytes as u32,
+            },
+        )
+        .with_class(
+            MSM_WORK,
+            WorkLimit {
+                max_count: max_operations,
+                max_total_size: DEFAULT_MAX_TOTAL_MSM_TERMS,
+                max_size: DEFAULT_MAX_MSM_TERMS,
+            },
+        )
+}
 
 // REGISTRY
 // ================================================================================================

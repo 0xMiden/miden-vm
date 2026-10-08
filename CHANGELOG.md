@@ -4,6 +4,7 @@
 
 #### Features
 
+- [BREAKING] Added separately configurable execution and per-witness verification limits for deferred precompile work. Custom precompiles must implement `Precompile::work`; consuming witness preparation validates and admits work before commitment hashing or evaluation. Proving consumes prepared witnesses, with a shared 128-root ceiling and a separate memory-budget check before trace generation ([#3886](https://github.com/0xMiden/miden-vm/pull/3886)).
 - [BREAKING] Share one Lagrange basis across periodic columns of a period ([#3847](https://github.com/0xMiden/miden-vm/pull/3847)).
 
 #### Changes

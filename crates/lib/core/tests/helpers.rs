@@ -73,6 +73,8 @@ pub fn masm_push_word(word: &Word) -> String {
 
 /// Portable transport preserves the execution's complete precompile obligation.
 pub fn assert_precompile_witness_round_trips(output: &ExecutionOutput) {
+    use std::sync::Arc;
+
     use miden_core::{
         deferred::{PrecompileWitness, TRUE_DIGEST},
         serde::{Deserializable, Serializable},
@@ -82,10 +84,18 @@ pub fn assert_precompile_witness_round_trips(output: &ExecutionOutput) {
         Option::<PrecompileWitness>::read_from_bytes(&output.precompile_witness.to_bytes())
             .expect("portable precompile witness must round-trip");
     assert_eq!(decoded, output.precompile_witness);
-    assert_eq!(
-        decoded.as_ref().map(PrecompileWitness::root_unchecked).unwrap_or(TRUE_DIGEST),
-        output.precompile_root(),
-    );
+    let decoded_root = decoded
+        .map(|witness| {
+            witness
+                .prepare(
+                    Arc::new(miden_precompiles::registry()),
+                    &miden_precompiles::default_verification_precompile_limits(),
+                )
+                .expect("execution-produced witness must prepare")
+                .root()
+        })
+        .unwrap_or(TRUE_DIGEST);
+    assert_eq!(decoded_root, output.precompile_root());
 }
 
 #[cfg(test)]

@@ -14,6 +14,7 @@ mod precompile;
 mod precompile_registry;
 mod state;
 mod wire;
+mod work;
 
 use alloc::boxed::Box;
 
@@ -24,7 +25,14 @@ pub use node::{DataChunk, Digest, Node, NodeType, Payload, TRUE_DIGEST};
 pub use precompile::Precompile;
 pub use precompile_registry::PrecompileRegistry;
 pub use state::{DeferredContext, DeferredState};
-pub use wire::{IntegrityError, PrecompileWitness, WireEntry as PrecompileWitnessEntry};
+pub use wire::{
+    IntegrityError, PrecompileWitness, PreparationError, PreparedNode, PreparedWitness,
+    WireEntry as PrecompileWitnessEntry,
+};
+pub use work::{
+    PrecompileLimitError, PrecompileLimits, PrecompileWork, WorkClass, WorkItem, WorkLimit,
+    WorkSummary,
+};
 
 use crate::{
     Felt, Word,
@@ -66,13 +74,16 @@ pub const DEFERRED_AND_INIT_CV: Word = Word::new([
     Felt::new_unchecked(6620516959492505600),
 ]);
 
-/// Hard maximum approximate number of field elements allowed in deferred state.
-pub const MAX_DEFERRED_ELEMENTS: usize = 1 << 20;
+/// Hard allocation ceiling for hostile deferred wire input.
+///
+/// Execution and verification admission use independently configurable [`PrecompileLimits`]
+/// instead.
+pub const MAX_DEFERRED_WIRE_ELEMENTS: usize = 1 << 20;
 
 /// Hard library safety ceiling for ordered precompile roots.
 ///
-/// This bounds root-vector allocation and aggregate-root folding.
-pub const MAX_PRECOMPILE_ROOTS: usize = 1 << 12;
+/// This bounds proving batch size, root-vector allocation, and aggregate-root folding.
+pub const MAX_PRECOMPILE_ROOTS: usize = 128;
 
 /// Folds a verified deferred statement into the rolling deferred root.
 pub fn fold_deferred_root(root: DeferredRoot, statement: Digest) -> DeferredRoot {
@@ -117,6 +128,10 @@ pub enum PrecompileError {
     /// A precompile predicate evaluated to false.
     #[error("deferred assertion failed: values disagree")]
     AssertionFailed,
+
+    /// Work exceeded the configured execution or verification admission policy.
+    #[error(transparent)]
+    Limit(#[from] PrecompileLimitError),
 
     /// A framework-level error surfaced by a precompile evaluation.
     #[error(transparent)]

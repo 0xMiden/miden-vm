@@ -8,7 +8,9 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use miden_core::{
-    deferred::{DeferredContext, Digest, Node, NodeType, Payload, Precompile, PrecompileError},
+    deferred::{
+        DeferredContext, Digest, Node, NodeType, Payload, Precompile, PrecompileError, WorkItem,
+    },
     program::domain::DeferredChunksDomain,
 };
 use miden_crypto::hash::eidos::{DomainTag, EidosDomain, EidosFrame};
@@ -139,6 +141,12 @@ impl<H: HashFunction> Precompile for HashPrecompile<H> {
         true
     }
 
+    fn work(&self, params: [u32; 3], _payload: &Payload) -> Result<WorkItem, PrecompileError> {
+        let frame = EidosFrame::new(Self::domain(), params);
+        let n_bytes = Self::decode_assert_frame(frame)?.ok_or(PrecompileError::InvalidNode)?;
+        Ok(WorkItem::new(crate::HASH_WORK, n_bytes))
+    }
+
     fn evaluate(
         &self,
         params: [u32; 3],
@@ -223,9 +231,10 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     }
 
     let fresh = || {
-        DeferredState::new(Arc::new(
-            PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default()),
-        ))
+        DeferredState::new(
+            Arc::new(PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default())),
+            crate::default_execution_precompile_limits(),
+        )
         .expect("hash precompile initialization should fit the test budget")
     };
     let assert_registers = |state: &mut DeferredState,
@@ -357,16 +366,15 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     let assertion = state.register(assertion_node).unwrap();
     let root = state.log_statement(assertion).unwrap();
     let witness = state
-        .into_witness()
+        .into_witness(&crate::default_verification_precompile_limits())
         .expect("hash assertion should export")
         .expect("logged hash assertion is nonempty");
-    assert_eq!(witness.root_unchecked(), root);
-    assert_eq!(
-        witness
-            .compute_root(Arc::new(
-                PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default()),
-            ))
-            .unwrap(),
-        root
-    );
+    let prepared = witness
+        .prepare(
+            Arc::new(PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default())),
+            &crate::default_verification_precompile_limits(),
+        )
+        .unwrap();
+    assert_eq!(prepared.root(), root);
+    prepared.evaluate().unwrap();
 }

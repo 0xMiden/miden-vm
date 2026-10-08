@@ -11,7 +11,8 @@ use miden_air::{MidenMultiAir, PublicInputs, Statement, config, security};
 use miden_core::{
     Felt,
     deferred::{
-        DeferredRoot, MAX_PRECOMPILE_ROOTS, PrecompileError, PrecompileRegistry, TRUE_DIGEST,
+        DeferredRoot, MAX_PRECOMPILE_ROOTS, PrecompileError, PrecompileLimits, PrecompileRegistry,
+        PreparationError, TRUE_DIGEST,
     },
     field::QuadFelt,
     proof::{CURRENT_PVM_VERIFIER_ROOT, CURRENT_VM_VERIFIER_ROOT, MAX_STARK_PROOF_BYTES},
@@ -85,6 +86,7 @@ const VERIFIER_SUPPORT_V2: VerifierSupport = VerifierSupport {
 #[derive(Debug, Clone)]
 pub struct Verifier {
     precompile_registry: Arc<PrecompileRegistry>,
+    verification_precompile_limits: PrecompileLimits,
     min_security_level: Option<u32>,
 }
 
@@ -94,8 +96,17 @@ impl Verifier {
     pub fn new() -> Self {
         Self {
             precompile_registry: Arc::new(miden_precompiles::registry()),
+            verification_precompile_limits:
+                miden_precompiles::default_verification_precompile_limits(),
             min_security_level: None,
         }
+    }
+
+    /// Sets the verification policy applied to one deferred precompile witness.
+    #[must_use]
+    pub fn with_verification_precompile_limits(mut self, limits: PrecompileLimits) -> Self {
+        self.verification_precompile_limits = limits;
+        self
     }
 
     /// Requires at least `min_security_level` bits of conjectured security for each verified STARK.
@@ -120,9 +131,10 @@ impl Verifier {
     /// Verifies a deferred or complete versioned execution proof against its public claim.
     ///
     /// The VM STARK authenticates the carried precompile root in either state. For a deferred
-    /// proof, the verifier first verifies the VM STARK, then evaluates the carried
-    /// `PrecompileWitness` and checks that its recomputed root matches the VM root. It returns the
-    /// authenticated root as an outstanding obligation until a precompile STARK is supplied.
+    /// proof, the verifier first verifies the VM STARK, then prepares the carried
+    /// `PrecompileWitness` under its configured limits, binds the computed root to the VM root,
+    /// and evaluates it. It returns the authenticated root as an outstanding obligation until a
+    /// precompile STARK is supplied.
     /// Complete proofs that contain precompile work additionally verify the aggregate precompile
     /// STARK against the VM-authenticated root.
     ///
@@ -188,12 +200,15 @@ impl Verifier {
         self.check_security_level(&vm_security_parameters)?;
         // Authenticate the VM statement and enforce the configured minimum security before
         // performing potentially expensive witness evaluation.
-        if let PrecompileStatus::Deferred(witness) = proof.precompile()
-            && (witness.root_unchecked() != vm.precompile_root
-                || witness.compute_root(Arc::clone(&self.precompile_registry))?
-                    != vm.precompile_root)
-        {
-            return Err(VerificationError::DeferredWitnessRootMismatch);
+        if let PrecompileStatus::Deferred(witness) = proof.precompile() {
+            let prepared = witness.clone().prepare(
+                Arc::clone(&self.precompile_registry),
+                &self.verification_precompile_limits,
+            )?;
+            if prepared.root() != vm.precompile_root {
+                return Err(VerificationError::DeferredWitnessRootMismatch);
+            }
+            prepared.evaluate()?;
         }
         let precompile_security_parameters = precompile
             .map(|precompile| self.verify_precompile(precompile, vm.precompile_root))
@@ -534,6 +549,8 @@ pub enum VerificationError {
     DeferredTrueRoot,
     #[error("deferred witness root does not match the VM obligation")]
     DeferredWitnessRootMismatch,
+    #[error("deferred witness preparation failed: {0}")]
+    DeferredWitnessPreparation(#[from] PreparationError),
     #[error("deferred witness evaluation failed: {0}")]
     DeferredWitnessEvaluation(#[from] PrecompileError),
     #[error("a precompile proof must contain at least one constituent root")]
@@ -696,14 +713,17 @@ mod tests {
         ])
         .unwrap();
         // Evaluating this witness first would reject its false assertion instead of the VM STARK.
-        assert!(matches!(
-            witness.compute_root(Arc::new(miden_precompiles::registry())),
-            Err(error) if matches!(error.root(), PrecompileError::AssertionFailed)
-        ));
-        let proof = ExecutionProof::new(
-            vm_proof(witness.root_unchecked()),
-            PrecompileStatus::Deferred(witness),
-        );
+        let prepared = witness
+            .clone()
+            .prepare(
+                Arc::new(miden_precompiles::registry()),
+                &miden_precompiles::default_verification_precompile_limits(),
+            )
+            .unwrap();
+        let root = prepared.root();
+        let error = prepared.evaluate().unwrap_err();
+        assert!(matches!(error.root(), PrecompileError::AssertionFailed));
+        let proof = ExecutionProof::new(vm_proof(root), PrecompileStatus::Deferred(witness));
         assert!(matches!(
             Verifier::new().verify(&claim(), &proof),
             Err(VerificationError::StarkVerificationError(..))
@@ -715,6 +735,9 @@ mod tests {
         type CheckError = fn(VerificationError) -> bool;
 
         let required = root(1);
+        Verifier::new()
+            .validate_precompile(&precompile_proof(vec![required; MAX_PRECOMPILE_ROOTS]), required)
+            .unwrap();
         let cases: Vec<(PrecompileProof, Word, CheckError)> = vec![
             (precompile_proof(vec![]), required, |error| {
                 matches!(error, VerificationError::EmptyPrecompileRoots)

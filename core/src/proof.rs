@@ -663,7 +663,7 @@ mod tests {
             rhs: 0,
         }])
         .unwrap();
-        let root = witness.root_unchecked();
+        let root = Node::and(TRUE_DIGEST, TRUE_DIGEST).digest();
         (witness, root)
     }
 
@@ -832,6 +832,8 @@ mod tests {
 
     #[test]
     fn precompile_proof_decoder_rejects_oversized_root_count_before_payload() {
+        let at_limit = precompile_proof(&[root(3); MAX_PRECOMPILE_ROOTS]);
+        assert_eq!(PrecompileProof::read_from_bytes(&at_limit.to_bytes()).unwrap(), at_limit);
         let mut bytes = dummy_stark_proof(&[2]).to_bytes();
         bytes.write_usize(MAX_PRECOMPILE_ROOTS + 1);
 

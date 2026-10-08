@@ -10,7 +10,7 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    deferred::{DeferredState, Digest, PrecompileWitness, TRUE_DIGEST},
+    deferred::{DeferredState, Digest, PrecompileWitness},
     mast::{ExecutableMastForest, MastForest},
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
@@ -26,6 +26,7 @@ use crate::{
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
+    operation::OperationError,
     tracer::{OperationHelperRegisters, Tracer},
 };
 
@@ -174,14 +175,17 @@ impl FastProcessor {
     /// Packages the processor state after successful execution into a public result type.
     #[inline(always)]
     fn into_execution_output(self, stack: StackOutputs) -> Result<ExecutionOutput, ExecutionError> {
+        let precompile_root = self.deferred_state.root();
         let precompile_witness = self
             .deferred_state
-            .into_witness()
-            .map_err(|_| ExecutionError::Internal("failed to export deferred execution witness"))?;
+            .into_witness(self.options.verification_precompile_limits())
+            .map_err(OperationError::from)
+            .map_exec_err_no_ctx()?;
         Ok(ExecutionOutput {
             stack,
             advice: self.advice,
             memory: self.memory,
+            precompile_root,
             precompile_witness,
         })
     }
@@ -259,10 +263,14 @@ impl FastProcessor {
     /// Existing advice inputs are revalidated against the new options before they are applied. To
     /// load advice inputs that require non-default advice map limits, call this before
     /// [`Self::with_advice`] or use [`Self::new_with_options`]. The installed precompile registry
-    /// and any accumulated deferred state are preserved.
+    /// and any accumulated deferred state are preserved. Execution precompile limits cannot be
+    /// lowered below work already consumed by that state.
     pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
         self.advice.set_options(&options)?;
         self.memory.set_max_elements(options.max_memory_elements());
+        self.deferred_state
+            .set_execution_limits(options.execution_precompile_limits().clone())
+            .map_err(AdviceError::DeferredStateConfigurationFailed)?;
         self.options = options;
         Ok(self)
     }
@@ -303,8 +311,11 @@ impl FastProcessor {
             system_call_state_stack: Vec::new(),
             stack_overflow_save_stack: Vec::new(),
             saved_overflow_len: 0,
-            deferred_state: DeferredState::new(Arc::new(miden_precompiles::registry()))
-                .map_err(AdviceError::DeferredStateInitializationFailed)?,
+            deferred_state: DeferredState::new(
+                Arc::new(miden_precompiles::registry()),
+                options.execution_precompile_limits().clone(),
+            )
+            .map_err(AdviceError::DeferredStateConfigurationFailed)?,
             package_debug_info: None,
             entrypoint_source_node: None,
             options,
@@ -696,17 +707,16 @@ pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
+    pub precompile_root: Digest,
     pub precompile_witness: Option<PrecompileWitness>,
 }
 
 impl ExecutionOutput {
-    /// Returns the carried deferred root, or TRUE when no witness is present.
+    /// Returns the deferred root accumulated during execution.
     ///
     /// This does not validate the witness's precompile computations.
     pub fn precompile_root(&self) -> Digest {
-        self.precompile_witness
-            .as_ref()
-            .map_or(TRUE_DIGEST, PrecompileWitness::root_unchecked)
+        self.precompile_root
     }
 }
 
