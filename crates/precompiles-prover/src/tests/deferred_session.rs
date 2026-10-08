@@ -5,7 +5,14 @@ use miden_core::{
     deferred::{DEFERRED_AND_FRAME, Node, PrecompileWitness, TRUE_DIGEST},
     serde::{ByteWriter, Deserializable, Serializable},
 };
-use miden_precompiles::{CurveId, CurvePoint, CurvePrecompile, UintDomain, UintPrecompile};
+use miden_crypto::hash::{
+    keccak::Keccak256,
+    sha2::{Sha256, Sha512},
+};
+use miden_precompiles::{
+    CurveId, CurvePoint, CurvePrecompile, Keccak256Precompile, Sha256Precompile, Sha512Precompile,
+    UintDomain, UintPrecompile,
+};
 
 use crate::{
     deferred::session::session_from_witnesses,
@@ -23,6 +30,81 @@ fn limbs(value: u32) -> [u32; 8] {
     let mut limbs = [0; 8];
     limbs[0] = value;
     limbs
+}
+
+#[test]
+fn deferred_session_binds_full_sha512_digests_in_a_mixed_hash_session() {
+    let mut state = state();
+    // [1] and [1,0] share raw zero-padded CHUNKS but have different lengths/digests. Repeating
+    // [1] exercises multiplicities, and 112 bytes requires a second SHA padding block.
+    for input in [vec![1], vec![1, 0], vec![1], vec![0xa5; 112]] {
+        let preimage = state.register(Node::chunks_from_bytes(&input)).unwrap();
+        let expected = state
+            .register(Node::chunks_from_bytes(Sha512::hash(&input).as_bytes()))
+            .unwrap();
+        let assertion = state
+            .register(Sha512Precompile::assert_node(input.len() as u32, preimage, expected))
+            .unwrap();
+        state.log_statement(assertion).unwrap();
+    }
+    // Keccak must remain able to reuse the raw Eidos span without sharing SHA's block IDs.
+    let preimage = state.register(Node::chunks_from_bytes(&[1])).unwrap();
+    let expected = state
+        .register(Node::chunks_from_bytes(Keccak256::hash(&[1]).as_bytes()))
+        .unwrap();
+    let assertion =
+        state.register(Keccak256Precompile::assert_node(1, preimage, expected)).unwrap();
+    state.log_statement(assertion).unwrap();
+    // SHA-256 reuses the same raw span on its own chiplet.
+    register_sha256_assertion(&mut state, &[1]);
+
+    let imported = session_from_witnesses(vec![state.witness()])
+        .expect("SHA-512 assertions must lower with their exact 64-byte expected digest");
+    imported.finish().check();
+}
+
+fn register_sha256_assertion(state: &mut WitnessFixture, message: &[u8]) {
+    let preimage = state.register(Node::chunks_from_bytes(message)).unwrap();
+    let expected = state
+        .register(Node::chunks_from_bytes(Sha256::hash(message).as_bytes()))
+        .unwrap();
+    let assertion = state
+        .register(Sha256Precompile::assert_node(message.len() as u32, preimage, expected))
+        .unwrap();
+    state.log_statement(assertion).unwrap();
+}
+
+#[test]
+fn deferred_session_proves_sha256_at_padding_boundaries_and_multiple_blocks() {
+    let mut state = state();
+    // 55 bytes is the longest single-block message; 56 and 63 push the length into a second
+    // block; 64, 119 and 120 straddle the next block boundaries; 1000 bytes spans sixteen blocks.
+    for len in [0usize, 55, 56, 63, 64, 119, 120, 1000] {
+        let message: Vec<u8> = (0..len).map(|i| (i * 7 + 3) as u8).collect();
+        register_sha256_assertion(&mut state, &message);
+    }
+    check_wire_session(state);
+}
+
+#[test]
+fn deferred_session_rejects_false_sha256_assertion() {
+    let mut state = state();
+    let message = b"abc";
+    let preimage = state.register(Node::chunks_from_bytes(message)).unwrap();
+    let mut wrong = <[u8; 32]>::from(Sha256::hash(message));
+    wrong[0] ^= 1;
+    let expected = state.register(Node::chunks_from_bytes(&wrong)).unwrap();
+    let assertion = state.register(Sha256Precompile::assert_node(3, preimage, expected)).unwrap();
+    state.log_statement(assertion).unwrap();
+
+    let error = session_from_witnesses(vec![state.witness()]).err().unwrap();
+    assert!(
+        matches!(
+            error,
+            crate::SessionInputError::Invalid { reason: "false SHA-256 assertion", .. }
+        ),
+        "deferred evaluation must reject a false SHA-256 claim: {error}"
+    );
 }
 
 #[test]
@@ -224,6 +306,54 @@ fn register_affine_curve_value(
     let point = CurvePrecompile::affine_node_from_digests(curve, x.digest(), y.digest());
     state.register(point.clone()).expect("point must register");
     point
+}
+
+#[test]
+fn deferred_session_proves_ed25519_msm_with_mixed_torsion() {
+    let mut state = state();
+    let curve = CurveId::Ed25519;
+    // (486662/3, 0) is the short-Weierstrass image of the order-two point. The
+    // prime subgroup order l must preserve it: [l](B+T)=T, rather than the identity.
+    let torsion = curve
+        .point_from_affine(
+            to_limbs32(from_hex(
+                "2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaad2451",
+            )),
+            limbs(0),
+        )
+        .unwrap();
+    let mixed = curve.add(curve.generator(), torsion).unwrap();
+    let mixed = register_affine_curve_value(&mut state, curve, mixed);
+    let torsion = register_affine_curve_value(&mut state, curve, torsion);
+    let subgroup_order = UintPrecompile::value_node(
+        UintDomain::Ed25519Order,
+        to_limbs32(from_hex("1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3ed")),
+    );
+    state.register(subgroup_order.clone()).unwrap();
+    let msm = curve_msm_node(vec![(mixed.clone(), subgroup_order)]);
+    state.register(msm.clone()).unwrap();
+    register_curve_equality(&mut state, msm, torsion);
+
+    // [8l-1]P+P=0 also exercises scalar reduction modulo the full order and the
+    // group-law exceptional cases reached by a mixed-torsion MSM ladder.
+    let order_minus_one = UintPrecompile::value_node(
+        UintDomain::Ed25519Order,
+        to_limbs32(from_hex("80000000000000000000000000000000a6f7cef517bce6b2c09318d2e7ae9f67")),
+    );
+    state.register(order_minus_one.clone()).unwrap();
+    let negative = curve_msm_node(vec![(mixed.clone(), order_minus_one)]);
+    state.register(negative.clone()).unwrap();
+    let sum = Node::join(
+        CurvePrecompile::op_frame(CurvePrecompile::ADD_OP_ID),
+        negative.digest(),
+        mixed.digest(),
+    )
+    .unwrap();
+    register_curve_equality(&mut state, sum, CurvePrecompile::identity_node(curve));
+
+    let imported = session_from_witnesses(vec![state.witness()])
+        .expect("Ed25519 MSMs must lower under the full group order");
+    imported.finish().check();
 }
 
 #[test]
@@ -481,4 +611,34 @@ fn translate_ec_deep_nested_msm_does_not_stackoverflow() {
         session_from_witnesses(vec![state.witness()])
             .expect("deep nested MSM must lower without stack overflow");
     });
+}
+
+#[test]
+fn deferred_session_proves_p256_msm_and_equality() {
+    let mut state = state();
+    let curve = CurveId::P256;
+    let generator = CurvePrecompile::generator_node(curve);
+    let three_g = register_affine_curve_value(
+        &mut state,
+        curve,
+        curve.mul_scalar(curve.generator(), limbs(3)).unwrap(),
+    );
+    let two = UintPrecompile::value_node(UintDomain::P256Scalar, limbs(2));
+    let n_minus_one =
+        UintPrecompile::value_node(UintDomain::P256Scalar, UintDomain::P256Scalar.minus_one());
+    state.register(two.clone()).unwrap();
+    state.register(n_minus_one.clone()).unwrap();
+    // 2·(3G) + (n−1)·G = 5G.
+    let msm = curve_msm_node(vec![(three_g, two), (generator, n_minus_one)]);
+    state.register(msm.clone()).unwrap();
+    let five_g = register_affine_curve_value(
+        &mut state,
+        curve,
+        curve.mul_scalar(curve.generator(), limbs(5)).unwrap(),
+    );
+    register_curve_equality(&mut state, msm, five_g);
+
+    let imported = session_from_witnesses(vec![state.witness()])
+        .expect("P-256 MSMs must lower through the non-GLV path");
+    imported.finish().check();
 }

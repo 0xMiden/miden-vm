@@ -4,10 +4,8 @@
 
 ### Hash Functions
 
-The `miden-crypto` crate provides several hash functions. Some are "traditional" hash functions,
-like `BLAKE3`, which are optimized for use outside a STARK. Others are algebraic hash functions,
-like `Rescue Prime`, which are designed for efficient use inside a STARK. We benchmark these
-functions alongside constructions used by other proving systems:
+The hash benchmarks include conventional functions such as BLAKE3, optimized for native execution,
+and algebraic functions such as Rescue Prime, designed for efficient use inside a STARK:
 
 * **BLAKE3** as specified [here](https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf) and implemented [here](https://github.com/BLAKE3-team/BLAKE3) (with a wrapper exposed via this crate).
 * **SHA3** as specified [here](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.202.pdf) and implemented [here](https://github.com/novifinancial/winterfell/blob/46dce1adf0/crypto/src/hash/sha/mod.rs).
@@ -17,127 +15,127 @@ functions alongside constructions used by other proving systems:
 * **Poseidon2** as specified [here](https://eprint.iacr.org/2023/323) and implemented in this crate.
 * **Eidos** as implemented in this crate.
 
-The benchmark harness covers two scenarios. The first is 2-to-1 $(a,b)\mapsto h(a,b)$ hashing,
-where $a$, $b$, and $h(a,b)$ are digests for the selected hash function. The second hashes a
-sequence of 100 field elements into one digest. Digests contain four elements in the field with
-modulus $2^{64} - 2^{32} + 1$ for Poseidon2, Eidos, RPO, and RPX, and 32 bytes for SHA3, BLAKE3,
-and Keccak256. The tables report the available measurements for their displayed columns.
+We benchmark 2-to-1 hashing $(a,b)\mapsto h(a,b)$, where $a$, $b$, and $h(a,b)$ are digests,
+and hashing 100 field elements into one digest. Digests contain four elements in the field with
+modulus $2^{64}-2^{32}+1$ for Poseidon2, Eidos, RPO, and RPX, and 32 bytes for SHA3, BLAKE3,
+and Keccak256. The BLAKE3 column uses BLAKE3-256; SHA3 uses the external harness described below.
 
 ### Scenario 1: 2-to-1 hashing `h(a,b)`
 
-| Function            | BLAKE3 | SHA3   | Keccak256 | Poseidon2 | RPO_256  | RPX_256  |
-| ------------------- | :----: | :----: | :-------: | :-------: | :------: | :------: |
-| Apple M1 Pro        | 76 ns  | 245 ns |           |           |          |          |
-| Apple M2 Max        | 71 ns  | 233 ns |           |           |          |          |
-| Apple M4 Max        | 48 ns  |        | 149 ns    | 0.47 µs   | 2.5 µs   | 1.3 µs   |
-| Amazon Graviton 3   | 108 ns |        |           |           |          |          |
-| Amazon Graviton 4   | 96 ns  |        |           |           |          |          |
-| AMD Ryzen 9 9950X   | 49 ns  |        | 375 ns    | 0.65 µs   | 3.1 µs   | 1.6 µs   |
-| AMD EPYC 9R14       | 83 ns  |        |           |           |          |          |
-| Intel Core i5-8279U | 68 ns  | 536 ns | 514 ns    |           |          |          |
-| Intel Xeon 8375C    | 67 ns  |        |           |           |          |          |
+| Hardware            | BLAKE3  | SHA3 | Keccak256 | Poseidon2 | RPO_256 | RPX_256 | Eidos   |
+| ------------------- | :-----: | :--: | :-------: | :-------: | :-----: | :-----: | :-----: |
+| Apple M1 Pro        |         |      |           |           |         |         |         |
+| Apple M2 Max        |         |      |           |           |         |         |         |
+| Apple M4 Pro        | 48.5 ns |      | 124 ns    | 745 ns    | 2.69 µs | 1.45 µs | 47.4 ns |
+| Apple M4 Max        |         |      |           |           |         |         |         |
+| Amazon Graviton 3   |         |      |           |           |         |         |         |
+| Amazon Graviton 4   |         |      |           |           |         |         |         |
+| AMD Ryzen 9 9950X   | 57.3 ns |      | 193 ns    | 544 ns    | 3.13 µs | 2.00 µs | 68.4 ns |
+| AMD EPYC 9R14       |         |      |           |           |         |         |         |
+| Intel Core i5-8279U |         |      |           |           |         |         |         |
+| Intel Xeon 8375C    |         |      |           |           |         |         |         |
 
 ### Scenario 2: Sequential hashing of 100 elements `h([a_0,...,a_99])`
 
-| Function            | BLAKE3 | SHA3   | Keccak256 | Poseidon2 | RPO_256   | RPX_256 |
-| ------------------- | :----: | :----: | :-------: | :-------: | :------: | :------: |
-| Apple M1 Pro        | 1.0 µs | 1.5 µs |           |           |          |          |
-| Apple M2 Max        | 0.9 µs | 1.5 µs |           |           |          |          |
-| Apple M4 Max        | 0.7 µs |        | 0.7 µs    | 6.1 µs    | 32 µs    | 17 µs    |
-| Amazon Graviton 3   | 1.4 µs |        |           |           |          |          |
-| Amazon Graviton 4   | 1.2 µs |        |           |           |          |          |
-| AMD Ryzen 9 9950X   | 0.8 µs |        | 2.2 µs    | 8.7 µs    | 40 µs    | 22 µs    |
-| AMD EPYC 9R14       | 0.9 µs |        |           |           |          |          |
-| Intel Core i5-8279U | 0.9 µs |        | 3.4 µs    |           |          |          |
-| Intel Xeon 8375C    | 0.8 µs |        |           |           |          |          |
-
-Notes:
-- On Graviton 3 and 4, RPO256 and RPX256 are run with SVE acceleration enabled.
-- On AMD Ryzen 9 9950X, benchmarks are run with AVX512 acceleration enabled.
-- On AMD EPYC 9R14, RPO256 and RPX256 are run with AVX2 acceleration enabled.
+| Hardware            | BLAKE3 | SHA3 | Keccak256 | Poseidon2 | RPO_256 | RPX_256 | Eidos  |
+| ------------------- | :----: | :--: | :-------: | :-------: | :-----: | :-----: | :----: |
+| Apple M1 Pro        |        |      |           |           |         |         |        |
+| Apple M2 Max        |        |      |           |           |         |         |        |
+| Apple M4 Pro        | 692 ns |      | 788 ns    | 9.68 µs   | 35.2 µs | 18.8 µs | 708 ns |
+| Apple M4 Max        |        |      |           |           |         |         |        |
+| Amazon Graviton 3   |        |      |           |           |         |         |        |
+| Amazon Graviton 4   |        |      |           |           |         |         |        |
+| AMD Ryzen 9 9950X   | 801 ns |      | 1.24 µs   | 7.16 µs   | 41.3 µs | 29.9 µs | 916 ns |
+| AMD EPYC 9R14       |        |      |           |           |         |         |        |
+| Intel Core i5-8279U |        |      |           |           |         |         |        |
+| Intel Xeon 8375C    |        |      |           |           |         |         |        |
 
 ### Digital Signature Algorithms (DSA)
 
-We benchmark the digital signature algorithms provided by `miden-crypto`:
+Falcon512-Eidos uses Eidos for message hashing. ECDSA over secp256k1 uses Keccak256,
+and EdDSA over Ed25519 uses SHA-512.
 
-* **Falcon512-Eidos** - Falcon512 signature scheme using Eidos for message hashing
-* **ECDSA over secp256k1** - Elliptic Curve Digital Signature Algorithm using Keccak256 for message hashing
-* **EdDSA over Ed25519** - Edwards-curve Digital Signature Algorithm using SHA-512 for message hashing
-
-For each algorithm, we benchmark three core operations:
-1. **Key Generation** - Creating a new secret key
-2. **Signing** - Generating a signature for a message
-3. **Verification** - Verifying a signature against a message and public key
+We measure secret-key generation for each algorithm. Signing and verification use a
+four-element message, and timings are per operation.
 
 #### Falcon512-Eidos
 
-| Hardware            | Key Generation | Signing | Verification |
-| ------------------- | :------------: | :-----: | :----------: |
-| Apple M4            | 240 ms         | 6.9 ms  | 2.07 ms      |
+| Hardware          | Key Generation | Signing | Verification |
+| ----------------- | :------------: | :-----: | :----------: |
+| AMD Ryzen 9 9950X | 117 ms         | 347 µs  | 21.5 µs      |
+| Apple M4          |                |         |              |
+| Apple M4 Pro      | 132 ms         | 448 µs  | 19.3 µs      |
 
 #### ECDSA over secp256k1 (Keccak256)
 
-| Hardware            | Key Generation | Signing | Verification |
-| ------------------- | :------------: | :-----: | :----------: |
-| AMD Ryzen 9 9950X   | 32.2 µs        | 264 µs  | 492 µs       |
-| Apple M4            | 24.4 µs        | 258 µs  | 390 µs       |
+| Hardware          | Key Generation | Signing | Verification |
+| ----------------- | :------------: | :-----: | :----------: |
+| AMD Ryzen 9 9950X | 26.0 µs        | 28.9 µs | 33.0 µs      |
+| Apple M4          |                |         |              |
+| Apple M4 Pro      | 19.4 µs        | 22.1 µs | 23.4 µs      |
 
 #### EdDSA over Ed25519
 
-| Hardware            | Key Generation | Signing | Verification |
-| ------------------- | :------------: | :-----: | :----------: |
-| AMD Ryzen 9 9950X   | 8.7 µs         | 90.8 µs | 177 µs       |
-| Apple M4            | 8.2 µs         | 86.6 µs | 185.6 µs     |
+| Hardware          | Key Generation | Signing | Verification |
+| ----------------- | :------------: | :-----: | :----------: |
+| AMD Ryzen 9 9950X | 17.1 µs        | 17.5 µs | 20.2 µs      |
+| Apple M4          |                |         |              |
+| Apple M4 Pro      | 20.2 µs        | 20.7 µs | 20 µs        |
 
 ### Sparse Merkle Tree
 
-We build cryptographic data structures incorporating these hash functions. What follows are benchmarks of operations on sparse Merkle trees (SMTs), which use Eidos. We perform a batched modification of 1,000 values in a tree with 1,000,000 leaves.
+These benchmarks use Eidos hashing in an in-memory `Smt` with 1,000,000 key-value pairs.
+Each batch inserts or updates 1,000 entries; every fifth update deletes its entry.
+Timings exclude setup and cleanup.
 
 ### Scenario 1: SMT Construction (1M pairs)
 
-| Hardware          | Sequential | Concurrent | Improvement |
-| ----------------- | ---------- | ---------- | ----------- |
-| AMD Ryzen 9 9950X | 149 sec    | 6.6 sec    | 23x         |
-| Apple M1 Air      | 352 sec    | 57 sec     | 6.2x        |
-| Apple M1 Pro      | 351 sec    | 37 sec     | 9.5x        |
-| Apple M4 Max      | 195 sec    | 15 sec     | 13x         |
+| Hardware          | Sequential | Concurrent (threads) | Improvement |
+| ----------------- | ---------- | -------------------- | ----------- |
+| AMD Ryzen 9 9950X | 14.3 sec   | 9.01 sec (32)         | 1.58x       |
+| Apple M1 Air      |            |                      |             |
+| Apple M1 Pro      |            |                      |             |
+| Apple M4 Pro      | 13 sec     | 5.59 sec (14)         | 2.33x       |
+| Apple M4 Max      |            |                      |             |
 
 ### Scenario 2: SMT Batched Insertion (1k pairs, 1M leaves)
 
-| Function          | Sequential | Concurrent | Improvement |
-| ----------------- | ---------- | ---------- | ----------- |
-| AMD Ryzen 9 9950X | 192 ms     | 25 ms      | 7.7x        |
-| Apple M1 Air      | 729 ms     | 406 ms     | 1.8x        |
-| Apple M1 Pro      | 623 ms     | 86 ms      | 7.2x        |
-| Apple M4 Max      | 212 ms     | 28 ms      | 7.6x        |
+| Hardware          | Sequential | Concurrent (threads) | Improvement |
+| ----------------- | ---------- | -------------------- | ----------- |
+| AMD Ryzen 9 9950X | 12.4 ms    | 13.4 ms (32)          | 0.93x       |
+| Apple M1 Air      |            |                      |             |
+| Apple M1 Pro      |            |                      |             |
+| Apple M4 Pro      | 21.6 ms    | 12.6 ms (14)          | 1.71x       |
+| Apple M4 Max      |            |                      |             |
 
 ### Scenario 3: SMT Batched Update (1k pairs, 1M leaves)
 
-| Function          | Sequential | Concurrent | Improvement |
-| ----------------- | ---------- | ---------- | ----------- |
-| AMD Ryzen 9 9950X | 194 ms     | 26 ms      | 7.4x        |
-| Apple M1 Air      | 691 ms     | 307 ms     | 2.3x        |
-| Apple M1 Pro      | 419 ms     | 56 ms      | 7.5x        |
-| Apple M4 Max      | 218 ms     | 24 ms      | 9.1x        |
+| Hardware          | Sequential | Concurrent (threads) | Improvement |
+| ----------------- | ---------- | -------------------- | ----------- |
+| AMD Ryzen 9 9950X | 12.8 ms    | 13.5 ms (32)          | 0.94x       |
+| Apple M1 Air      |            |                      |             |
+| Apple M1 Pro      |            |                      |             |
+| Apple M4 Pro      | 31.3 ms    | 14.7 ms (14)          | 2.13x       |
+| Apple M4 Max      |            |                      |             |
 
-Notes:
-- On AMD Ryzen 9 9950X, benchmarks are run with AVX512 acceleration enabled.
+Sequential builds disable the `concurrent` feature.
 
 ## Benchmark Explanations
 
 ### Instructions
 
-Before you can run the benchmarks, you'll need to make sure you have Rust [installed](https://www.rust-lang.org/tools/install).
+Run these commands from the workspace root.
 
 #### Hash Function Benchmarks
 
-To run the benchmarks for RPO, RPX, Poseidon2, Eidos, BLAKE3 and Keccak256, clone the current repository, and from the root directory of the repo run:
+```bash
+cargo bench --locked --profile optimized -p miden-crypto --bench hash -- \
+  'hash-.*(merge$|hash_elements/100$)'
+```
 
- ```
- cargo bench hash
- ```
+Omit the filter to include the 1- and 1,000-element cases.
 
-To run the benchmarks for SHA3, clone the following [repository](https://github.com/Dominik1999/winterfell.git) as above, then checkout the `hash-functions-benches` branch, and from the root directory run:
+For SHA3, use the `hash-functions-benches` branch of [this repository](https://github.com/Dominik1999/winterfell.git):
 
 ```
 cargo bench hash
@@ -145,27 +143,36 @@ cargo bench hash
 
 #### Digital Signature Algorithm (DSA) Benchmarks
 
-To run the benchmarks for all DSA implementations (Falcon512-Eidos, ECDSA k256, and EdDSA), from the root directory run:
+```bash
+cargo bench --locked --profile optimized -p miden-crypto --bench dsa -- \
+  '_(keygen_secret|sign|verify)/benchmark$'
+```
 
-```
-cargo bench dsa
-```
+Divide signing and verification estimates by `OPERATIONS_PER_BATCH` (10). Secret-key generation
+runs once per iteration and needs no division.
 
 #### Sparse Merkle Tree Benchmarks
 
-To run the benchmarks for SMT operations, run the binary target with the `executable` feature:
+The `smt_summary` target measures the `Smt` operations in the tables above:
 
-```
-cargo run --features=executable
+```bash
+# Concurrent, with 14 threads.
+RAYON_NUM_THREADS=14 cargo bench --locked --profile optimized -p miden-crypto \
+  --bench smt_summary --no-default-features --features std,concurrent
+
+# Sequential algorithm.
+cargo bench --locked --profile optimized -p miden-crypto --bench smt_summary \
+  --no-default-features --features std
 ```
 
-The `concurrent` feature enables the concurrent benchmark, and is enabled by default. To run a sequential benchmark, disable the crate's default features:
+`SMT_BENCH_SIZE` and `SMT_BENCH_BATCH_SIZE` override the tree and batch sizes.
 
-```
-cargo run --no-default-features --features=executable,std
-```
+The separate executable measures `LargeSmt` with memory or RocksDB storage:
 
-The benchmark parameters may also be customized with the `-s`/`--size`, `-i`/`--insertions`, and `-u`/`--updates` options.
+```bash
+cargo run --locked --profile optimized -p miden-crypto --bin miden-crypto \
+  --features executable -- --storage memory --size 1000000 --insertions 1000 --updates 1000
+```
 
 ### Configuration
 
@@ -176,10 +183,9 @@ Configuration constants are defined in `benches/common/config.rs`:
 ```rust
 // Core configuration
 pub const DEFAULT_MEASUREMENT_TIME: Duration = Duration::from_secs(20);
-pub const DEFAULT_SAMPLE_SIZE: u64 = 100;
+pub const DEFAULT_SAMPLE_SIZE: usize = 100;
 
 // Hash function configuration
-// Simplified to focus on key benchmark sizes (1, 100, 1000 elements)
 pub const HASH_ELEMENT_COUNTS: &[usize] = &[1, 100, 1000];
 ```
 
@@ -202,7 +208,7 @@ let random_bytes = generate_byte_array_random(2048);
 Create `benches/<category>.rs` for new categories following existing patterns.
 
 #### Step 2: Add to Cargo.toml
-Add the bench to the workspace Cargo.toml:
+Add the bench to `crates/crypto/Cargo.toml`:
 
 ```toml
 [[bench]]
@@ -215,7 +221,6 @@ harness = false
 mod common;
 use common::*;
 
-// Import required configuration constants
 use crate::common::config::{HASH_INPUT_SIZES, DEFAULT_SAMPLE_SIZE};
 ```
 

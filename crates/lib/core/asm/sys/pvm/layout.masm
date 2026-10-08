@@ -4,7 +4,7 @@
 ### The ACE READ section is one dense vector of quadratic-extension inputs.
 ### Every boundary below is derived from the PVM circuit's InputLayout; each
 ### input occupies two base-field felts. The complete allocation, including relation-local
-### scratch after the stream, is the half-open range 3225432064..3225445498.
+### scratch after the stream, is the half-open range 3225432064..3225451404.
 ### Per-AIR heights remain in the generic 16-cell array, in ChipletAir::all()
 ### order; the PVM wrapper supplies the relation count and that shared base.
 
@@ -19,70 +19,70 @@ const AUX_RAND_ELEM_PTR = 3225432072
 ### 16 felts: 3225432080..3225432096.
 const PREPROCESSED_CURRENT_PTR = 3225432080
 
-### 1024 felts: 3225432096..3225433120.
+### 1232 felts: 3225432096..3225433328.
 const MAIN_CURRENT_PTR = 3225432096
 
-### 544 felts: 3225433120..3225433664.
-const AUX_CURRENT_PTR = 3225433120
+### 672 felts: 3225433328..3225434000.
+const AUX_CURRENT_PTR = 3225433328
 
-### 16 felts: 3225433664..3225433680.
-const QUOTIENT_CURRENT_PTR = 3225433664
+### 16 felts: 3225434000..3225434016.
+const QUOTIENT_CURRENT_PTR = 3225434000
 
-### 16 felts: 3225433680..3225433696.
-const PREPROCESSED_NEXT_PTR = 3225433680
+### 16 felts: 3225434016..3225434032.
+const PREPROCESSED_NEXT_PTR = 3225434016
 
-### 1024 felts: 3225433696..3225434720.
-const MAIN_NEXT_PTR = 3225433696
+### 1232 felts: 3225434032..3225435264.
+const MAIN_NEXT_PTR = 3225434032
 
-### 544 felts: 3225434720..3225435264.
-const AUX_NEXT_PTR = 3225434720
+### 672 felts: 3225435264..3225435936.
+const AUX_NEXT_PTR = 3225435264
 
-### 16 felts: 3225435264..3225435280.
-const QUOTIENT_NEXT_PTR = 3225435264
+### 16 felts: 3225435936..3225435952.
+const QUOTIENT_NEXT_PTR = 3225435936
 
-### 20 felts: 3225435280..3225435300.
-const AUX_BUS_BOUNDARY_PTR = 3225435280
+### 24 felts: 3225435952..3225435976.
+const AUX_BUS_BOUNDARY_PTR = 3225435952
 
-### 100 felts: 3225435300..3225435400.
-const AUXILIARY_ACE_INPUTS_PTR = 3225435300
+### 120 felts: 3225435976..3225436096.
+const AUXILIARY_ACE_INPUTS_PTR = 3225435976
 
-### 9168 felts: 3225435400..3225444568.
-const ACE_CIRCUIT_STREAM_PTR = 3225435400
+### 14208 felts: 3225436096..3225450304.
+const ACE_CIRCUIT_STREAM_PTR = 3225436096
 
-### 4 felts: 3225444568..3225444572. Stores gamma = beta^18.
-const BUS_GAMMA_PTR = 3225444568
+### 4 felts: 3225450304..3225450308. Stores gamma = beta^18.
+const BUS_GAMMA_PTR = 3225450304
 
-### 4 felts: 3225444572..3225444576. Stores the two-felt fixed-boundary correction; the remaining two felts are reserved.
-const C_TOTAL_PTR = 3225444572
+### 4 felts: 3225450308..3225450312. Stores the two-felt fixed-boundary correction; the remaining two felts are reserved.
+const C_TOTAL_PTR = 3225450308
 
-### 800 felts: 3225444576..3225445376. Stores one opened query row in commitment-group order.
-const CURRENT_TRACE_ROW_PTR = 3225444576
+### 968 felts: 3225450312..3225451280. Stores one opened query row in commitment-group order.
+const CURRENT_TRACE_ROW_PTR = 3225450312
 
-### 4 felts: 3225445376..3225445380. Stores the trusted preprocessed-tree commitment for DEEP openings.
-const PREPROCESSED_COM_PTR = 3225445376
+### 4 felts: 3225451280..3225451284. Stores the trusted preprocessed-tree commitment for DEEP openings.
+const PREPROCESSED_COM_PTR = 3225451280
 
-### 96 felts: 3225445380..3225445476. Out-of-domain ingest scatter table:
+### 96 felts: 3225451284..3225451380. Out-of-domain ingest scatter table:
 ###
 ###   +0            base address of the out-of-domain row being ingested
-###   +4  .. +43    per proof position, in stream order: (row-relative destination, digest address)
-###   +44 .. +83    `pipe_k` procedure digests reached by `dynexec`, one word each
+###   +4  .. +51    per proof position, in stream order: (row-relative destination, digest address)
+###   +52 .. +95    `pipe_k` procedure digests reached by `dynexec`, one word each
 ###
 ### The internal offsets and the reserve's sufficiency are owned by the regeneration tool,
 ### which derives them from the chiplet widths and fills `sys/pvm/ood_frames.masm`
 ### accordingly.
-const OOD_SCATTER_TABLE_PTR = 3225445380
+const OOD_SCATTER_TABLE_PTR = 3225451284
 
-### 12 felts: 3225445476..3225445488. `pos_by_id`: the position of each
-### chiplet, in ChipletAir::all() order, within the height-sorted proof order. The first
-### 10 cells are live and the final 2 pad the following table to a word boundary.
+### 12 felts: 3225451380..3225451392. `pos_by_id`: the position of each
+### chiplet, in ChipletAir::all() order, within the height-sorted proof order.
+### All 12 cells are live.
 ### Staged once per proof by `sys/pvm/ood_frames.masm::stage_proof_order_maps`; read by both
 ### ingest scatters.
-const PROOF_ORDER_POSITIONS_PTR = 3225445476
+const PROOF_ORDER_POSITIONS_PTR = 3225451380
 
-### 10 felts: 3225445488..3225445498. `id_by_pos`: the
+### 12 felts: 3225451392..3225451404. `id_by_pos`: the
 ### ChipletAir::all() index committed at each proof position. Staged with `pos_by_id`;
 ### read by the reverse fold-coefficient walk in `sys/pvm/constraints_eval.masm`.
-const PROOF_ORDER_IDS_PTR = 3225445488
+const PROOF_ORDER_IDS_PTR = 3225451392
 
 pub proc public_inputs_ptr() -> types::Address
     push.PUBLIC_INPUTS_PTR

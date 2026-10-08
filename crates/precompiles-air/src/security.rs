@@ -28,7 +28,10 @@ use p3_security::{budget::report::LOOKUP_LABEL, fixed};
 use crate::{
     ChipletAir,
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
-    hash::{chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir},
+    hash::{
+        chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir, sha256::Sha256Air,
+        sha512::Sha512Air,
+    },
     logup::{LookupAir, ProverLookupBuilder},
     primitives::byte_pair_lut::BytePairLutAir,
     relations::MAX_MESSAGE_WIDTH,
@@ -49,17 +52,17 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 ///
 /// This stored value must equal the shape returned by [`derive_air_shape`].
 pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 673,
+    num_composed_constraints: 920,
     max_constraint_degree: 5,
     num_quotient_chunks: 4,
     max_combo: NUM_OOD_POINTS,
-    num_deep_terms: Some(802),
+    num_deep_terms: Some(970),
     lookup: Some(LOOKUP_SHAPE),
 };
 
 /// Lookup argument shape of the chiplet multi-AIR statement, as stored in [`AIR_SHAPE`].
 pub const LOOKUP_SHAPE: LookupShape = LookupShape {
-    fractions_per_row: 261,
+    fractions_per_row: 314,
     max_message_width: 18,
 };
 
@@ -208,7 +211,7 @@ pub const LOOKUP_POW_BITS: u32 = 0;
 ///
 /// `fixed_boundary_fraction_count` derives this value from the fixed messages; the descriptor
 /// constant must equal the derived count.
-pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 8;
+pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 19;
 
 /// The Eidos challenge-support bound less the lookup round's coefficient, in fixed point.
 pub const LOOKUP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - LOOKUP_COEFFICIENT;
@@ -269,6 +272,8 @@ fn fractions_per_row_of(air: ChipletAir) -> usize {
         ChipletAir::EcPointStoreGroups => shape_of(EcPointStoreGroupsAir),
         ChipletAir::EcGroupAdd => shape_of(EcGroupAddAir),
         ChipletAir::EcMsm => shape_of(EcMsmAir),
+        ChipletAir::Sha512 => shape_of(Sha512Air),
+        ChipletAir::Sha256 => shape_of(Sha256Air),
     }
 }
 
@@ -427,10 +432,10 @@ mod tests {
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
         const SECURITY_CAP_FP: u64 = 8_257_536;
-        const LOOKUP_BASE_FP: u64 = 7_448_177;
-        const COMPOSITION_TERM_FP: u64 = 7_641_860;
+        const LOOKUP_BASE_FP: u64 = 7_430_697;
+        const COMPOSITION_TERM_FP: u64 = 7_612_301;
         const OOD_BASE_FP: u64 = 8_073_553;
-        const DEEP_BASE_FP: u64 = 7_625_280;
+        const DEEP_BASE_FP: u64 = 7_607_298;
         const FOLDING_BASE_FP: u64 = 7_891_519;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
@@ -511,32 +516,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_054_915, 7_641_860, 7_693_931, 7_821_888, 7_760_447, 6_335_399, 8_257_536],
+                [7_037_391, 7_612_301, 7_693_931, 7_803_906, 7_760_447, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 16),
-                [6_399_600, 7_641_860, 7_039_549, 7_166_528, 7_105_087, 6_335_399, 8_257_536],
+                [6_382_120, 7_612_301, 7_039_549, 7_148_546, 7_105_087, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 19),
-                [6_202_992, 7_641_860, 6_842_942, 6_969_920, 6_908_479, 6_335_399, 8_257_536],
+                [6_185_512, 7_612_301, 6_842_942, 6_951_938, 6_908_479, 6_335_399, 8_257_536],
                 94,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_137_456, 7_641_860, 6_777_406, 6_904_384, 6_842_943, 6_335_399, 8_257_536],
+                [6_119_976, 7_612_301, 6_777_406, 6_886_402, 6_842_943, 6_335_399, 8_257_536],
                 93,
             ),
             (
                 (27, 17, 12, 4, 24),
-                [5_875_312, 7_641_860, 6_515_262, 6_642_240, 6_580_799, 6_335_399, 8_257_536],
+                [5_857_832, 7_612_301, 6_515_262, 6_624_258, 6_580_799, 6_335_399, 8_257_536],
                 89,
             ),
             (
                 (7, 0, 0, 0, 16),
-                [6_399_600, 7_641_860, 7_039_549, 6_380_096, 6_842_943, 1_353_667, 8_257_536],
+                [6_382_120, 7_612_301, 7_039_549, 6_362_114, 6_842_943, 1_353_667, 8_257_536],
                 20,
             ),
         ];

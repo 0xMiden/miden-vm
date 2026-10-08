@@ -1,4 +1,4 @@
-//! Composite AIR for the chunk, Keccak-node, and Keccak-sponge chiplets.
+//! Composite AIR for the chunk and Keccak components.
 //!
 //! The three components share a row range in disjoint column bands. Their
 //! base constraints delegate to offset-aware component evaluators. The
@@ -9,6 +9,7 @@ use alloc::{borrow::Cow, vec::Vec};
 
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_utils_sync::LazyLock;
 
 use crate::{
     hash::{
@@ -25,7 +26,7 @@ use crate::{
 /// First main-trace column of the sponge band.
 pub const SPONGE_COL_OFFSET: usize = chunk_node::NUM_MAIN_COLS;
 
-pub const NUM_MAIN_COLS: usize = chunk_node::NUM_MAIN_COLS + sponge::NUM_MAIN_COLS;
+pub const NUM_MAIN_COLS: usize = SPONGE_COL_OFFSET + sponge::NUM_MAIN_COLS;
 pub const NUM_AUX_COLS: usize = chunk_node::NUM_AUX_COLS + sponge::NUM_AUX_COLS;
 
 const fn column_shape() -> [usize; NUM_AUX_COLS] {
@@ -47,6 +48,8 @@ const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = column_shape();
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ChunkNodeSpongeAir;
 
+static PERIODIC_COLUMNS: LazyLock<Vec<Vec<Felt>>> = LazyLock::new(|| Vec::from(sponge_program()));
+
 impl BaseAir<Felt> for ChunkNodeSpongeAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
@@ -57,11 +60,15 @@ impl BaseAir<Felt> for ChunkNodeSpongeAir {
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Owned(sponge_program().into())
+        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
     }
 }
 
 impl LiftedAir<Felt, QuadFelt> for ChunkNodeSpongeAir {
+    fn max_periodic_length(&self) -> usize {
+        sponge::SPONGE_PERIOD
+    }
+
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }

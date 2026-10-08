@@ -15,6 +15,7 @@ workspace = true
 clap = { workspace = true, features = ["derive", "std"] }
 miden-core-lib = { workspace = true }
 miden-vm = { path = "../../miden-vm", features = ["internal", "concurrent"] }
+rayon.workspace = true
 serde = { workspace = true, features = ["derive", "std"] }
 serde_json = { workspace = true, features = ["std"] }
 tracing = { workspace = true, features = ["std"] }
@@ -36,3 +37,8 @@ bench = false
 [[bench]]
 name = "blake3_bench"
 harness = false
+
+[[bin]]
+name = "vm-performance"
+path = "src/bin/vm-performance.rs"
+bench = false
