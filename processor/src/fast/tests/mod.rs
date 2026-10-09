@@ -1155,7 +1155,7 @@ fn external_exec_propagates_inline_context_into_the_loaded_package() {
                 );
             }
         } else {
-            assert_eq!(names, ["source::external"]);
+            assert_eq!(names, ["::dep::math::target", "source::external"]);
             saw_target_context = true;
         }
 

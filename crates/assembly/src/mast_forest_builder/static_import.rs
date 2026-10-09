@@ -1,4 +1,8 @@
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    vec::Vec,
+};
 use core::fmt::Debug;
 
 use miden_core::{
@@ -10,14 +14,18 @@ use miden_core::{
 };
 use miden_mast_package::debug_info::{
     DebugFunctionIdx, DebugInfoTableRemapping, DebugSourceAsmOp, DebugSourceInlineCall,
-    DebugSourceNodeId, DebugSourceVar, PackageDebugInfo,
+    DebugSourceNodeId, DebugSourceVar, FunctionInfo, PackageDebugInfo,
 };
 
 use super::{
     MastForestBuilder, MastNodeRef, MastNodeUse, PendingMastNodeDraft, PendingMastNodeKind,
     SourceNodeRef, remap_inline_ranges,
 };
-use crate::diagnostics::Report;
+use crate::{
+    GlobalItemIndex,
+    diagnostics::{IntoDiagnostic, Report},
+    linker::LinkLibrary,
+};
 
 #[derive(Clone, Copy)]
 struct StaticSourceRoot {
@@ -362,7 +370,78 @@ impl MastForestBuilder {
             .expect("statically linked subtree root must be copied"))
     }
 
-    fn import_static_debug_tables(
+    /// Import the declared function from the exact dependency, never from a digest alias.
+    /// Dynamic imports retain declaration/type/root data without claiming a local definition.
+    pub(crate) fn import_procedure_function(
+        &mut self,
+        gid: GlobalItemIndex,
+        library_id: Word,
+        library: &LinkLibrary,
+        path: &miden_assembly_syntax::Path,
+        source_node: Option<DebugSourceNodeId>,
+        mast_root: Word,
+    ) -> Result<Option<DebugFunctionIdx>, Report> {
+        if !self.imported_debug_tables.contains_key(&library_id) {
+            let imported = if let Some(debug) = library.package.debug_info().into_diagnostic()? {
+                let static_index = self
+                    .statically_linked_package_debug_info
+                    .iter()
+                    .enumerate()
+                    .find(|(index, info)| {
+                        info.as_ref() == Some(&debug)
+                            && self.statically_linked_source_forests[*index].commitment()
+                                == library.commitment()
+                    })
+                    .map(|(index, _)| index);
+                let tables = if let Some(index) = static_index {
+                    self.import_static_debug_tables(index, &debug)?
+                } else {
+                    Arc::new(debug.merge_tables_into(&mut self.debug_info).map_err(|error| {
+                        Report::msg(format!("failed to import procedure debug tables: {error}"))
+                    })?)
+                };
+                Some((debug, tables))
+            } else {
+                None
+            };
+            self.imported_debug_tables.insert(library_id, imported);
+        }
+        let Some((debug, tables)) = self.imported_debug_tables[&library_id].as_ref() else {
+            return Ok(None);
+        };
+        // An external export occurrence is an invocation boundary, not a local definition.
+        // Such declarations are identified by their exported linkage name below.
+        let source_node =
+            source_node.filter(|source| !library.mast()[debug[*source].exec_node].is_external());
+        let matches_name = |function: &FunctionInfo<DebugSourceNodeId>| {
+            let name = function.linkage_name_idx.into_option().unwrap_or(function.name_idx);
+            debug[name].as_ref() == path.as_str()
+        };
+        let candidates = debug.functions().iter().enumerate().filter(|(_, function)| {
+            function.mast_root == mast_root
+                && source_node
+                    .is_none_or(|source| function.source_node.into_option() == Some(source))
+        });
+        // Prefer the declared path. Re-exports may only have a function for the defining path,
+        // so fall back to the export's exact source occurrence, never to its digest alone.
+        let require_name =
+            source_node.is_none() || candidates.clone().any(|(_, function)| matches_name(function));
+        let mut matches =
+            candidates.filter(|(_, function)| !require_name || matches_name(function));
+        let Some((index, _)) = matches.next() else {
+            return Ok(None);
+        };
+        if matches.next().is_some() {
+            return Ok(None);
+        }
+        let index = tables
+            .function(DebugFunctionIdx::from(index as u32))
+            .expect("imported function must have a table mapping");
+        self.procedure_function_indices.insert(gid, index);
+        Ok(Some(index))
+    }
+
+    pub(super) fn import_static_debug_tables(
         &mut self,
         forest_idx: usize,
         package_debug_info: &PackageDebugInfo,
@@ -479,7 +558,98 @@ impl MastForestBuilder {
             node_uses_by_source_id.insert(source_node_id, node_use);
         }
 
+        // Inline invocation copies do not own function definitions. Import canonical source
+        // trees whose execution nodes are already present, without linking any additional code.
+        // If merging later prunes those execution nodes, finalization leaves the declaration's
+        // source_node absent rather than attributing the definition to a caller's aggregate.
+        self.copy_available_function_sources(
+            source_forest,
+            package_debug_info,
+            tables,
+            &node_uses_by_source_id,
+        )?;
         Ok(node_uses_by_source_id[&source_root_id].node_ref())
+    }
+
+    fn copy_available_function_sources(
+        &mut self,
+        source_forest: &MastForest,
+        debug: &PackageDebugInfo,
+        tables: &DebugInfoTableRemapping,
+        node_uses: &BTreeMap<DebugSourceNodeId, MastNodeUse>,
+    ) -> Result<(), Report> {
+        let exec_refs = node_uses
+            .iter()
+            .map(|(source, node_use)| (debug[*source].exec_node, node_use.node_ref()))
+            .collect::<BTreeMap<_, _>>();
+        let mut source_refs = node_uses
+            .iter()
+            .map(|(source, node_use)| (*source, node_use.source_ref()))
+            .collect::<BTreeMap<_, _>>();
+        let callees = node_uses
+            .keys()
+            .flat_map(|source| debug[*source].inline_calls.iter().map(|row| row.callee_idx))
+            .collect::<BTreeSet<_>>();
+        for index in callees {
+            let function = debug.get_function(index).expect("inline function must exist");
+            let Some(root) = function.source_node.into_option() else {
+                continue;
+            };
+            let function_index =
+                tables.function(index).expect("imported function must have a mapping");
+            if self.debug_info[function_index].source_node.into_option().is_some() {
+                continue;
+            }
+            let mut pending = vec![(root, false)];
+            let mut ordered = Vec::new();
+            let mut visited = BTreeSet::new();
+            let mut available = true;
+            while let Some((source, expanded)) = pending.pop() {
+                if source_refs.contains_key(&source) {
+                    continue;
+                }
+                let node = &debug[source];
+                if !exec_refs.contains_key(&node.exec_node) {
+                    available = false;
+                    break;
+                }
+                if expanded {
+                    ordered.push(source);
+                } else if visited.insert(source) {
+                    pending.push((source, true));
+                    pending.extend(node.children.iter().rev().map(|child| (*child, false)));
+                }
+            }
+            if !available {
+                continue;
+            }
+            for source in ordered {
+                let node = &debug[source];
+                let metadata = self.package_source_metadata(
+                    source_forest,
+                    debug,
+                    tables,
+                    source,
+                    node.exec_node,
+                )?;
+                let (start, end) =
+                    metadata.op_range.expect("package source has an operation range");
+                let source_ref = self.push_source_occurrence(
+                    exec_refs[&node.exec_node],
+                    node.children.iter().map(|child| source_refs[child]).collect(),
+                    start,
+                    end,
+                    metadata.asm_ops,
+                    metadata.debug_vars,
+                    metadata.inline_calls,
+                    &metadata.functions,
+                    source_forest[node.exec_node].is_external(),
+                    false,
+                )?;
+                source_refs.insert(source, source_ref);
+            }
+        }
+        Ok(())
     }
 
     fn package_source_metadata(
@@ -575,16 +745,13 @@ impl MastForestBuilder {
             )
         });
 
-        let mast_root = source_forest.get_digest_by_id(source_exec_node_id).unwrap();
         let functions = package_debug_info
             .functions()
             .iter()
             .enumerate()
             .filter_map(|(index, function)| {
                 let function_source_node = function.source_node.into_option();
-                if function_source_node.is_some_and(|snid| snid == source_node_id)
-                    || function_source_node.is_none() && function.mast_root == mast_root
-                {
+                if function_source_node == Some(source_node_id) {
                     let function_index = DebugFunctionIdx::from(
                         u32::try_from(index).expect("invalid function index"),
                     );
