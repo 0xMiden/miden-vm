@@ -45,8 +45,16 @@ impl Assembler {
                     && let Ok(location) = self.source_manager().location(call_site)
                 {
                     let loc_idx = mast_forest_builder.debug_info_mut().add_location(location);
-                    inline_calls
-                        .insert(0, DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx });
+                    // The exec source-tree copy assigns each occurrence's operation range.
+                    inline_calls.insert(
+                        0,
+                        DebugSourceInlineCall {
+                            op_idx: 0,
+                            op_end: 0,
+                            callee_idx,
+                            loc_idx,
+                        },
+                    );
                 }
                 mast_forest_builder.record_exec_inline_calls(resolved.node, &inline_calls)
             },
