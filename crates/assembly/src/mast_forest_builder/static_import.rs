@@ -409,6 +409,10 @@ impl MastForestBuilder {
         let Some((debug, tables)) = self.imported_debug_tables[&library_id].as_ref() else {
             return Ok(None);
         };
+        // An external export occurrence is an invocation boundary, not a local definition.
+        // Such declarations are identified by their exported linkage name below.
+        let source_node =
+            source_node.filter(|source| !library.mast()[debug[*source].exec_node].is_external());
         let matches_name = |function: &FunctionInfo<DebugSourceNodeId>| {
             let name = function.linkage_name_idx.into_option().unwrap_or(function.name_idx);
             debug[name].as_ref() == path.as_str()

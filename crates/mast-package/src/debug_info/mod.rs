@@ -35,7 +35,10 @@ pub const DEBUG_INFO_VERSION: u8 = 4;
 pub const MAX_DEBUG_INFO_PAYLOAD_SIZE: usize = 256 * 1024 * 1024;
 
 /// Maximum number of rows accepted in the variable-width debug string table.
-pub const MAX_DEBUG_INFO_STRING_ROWS: usize = 100_000;
+///
+/// Dependency imports currently merge complete shared tables, including for dynamic `exec`.
+/// Allow their distinct strings to accumulate while retaining the encoded payload size cap.
+pub const MAX_DEBUG_INFO_STRING_ROWS: usize = 1_000_000;
 
 /// Maximum encoded byte length accepted for one debug string.
 pub const MAX_DEBUG_INFO_STRING_SIZE: usize = 4 * 1024;
