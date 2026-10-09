@@ -10,7 +10,7 @@
 +- `build_trace` returns an error instead of panicking when a fragment continuation in an execution witness names a missing node, a node of the wrong kind, or a batch the basic block does not have ([#3978](https://github.com/0xMiden/miden-vm/pull/3978)).
 - Fixed assembler debug metadata losing procedure definitions and declared invocation targets for plain `exec`, including nested calls and package linking, while preserving executable MAST roots. Raised the bounded debug-payload limit to 32 MiB so the core library's invocation metadata remains readable ([#3982](https://github.com/0xMiden/miden-vm/pull/3982)).
 - Fixed cross-module calls through re-export aliases of private procedures by preserving the visibility granted through the alias.
-- Fixed assembler debug metadata losing procedure definitions and declared invocation targets for plain `exec`, including nested calls and package linking, while preserving executable MAST roots. Raised the bounded debug-payload limit to 32 MiB so the core library's invocation metadata remains readable ([#3982](https://github.com/0xMiden/miden-vm/pull/3982)).
+- Fixed assembler debug metadata losing procedure definitions and declared invocation targets for plain `exec`, including nested calls and package linking, while preserving executable MAST roots. Raised the bounded debug-payload limit to 256 MiB to accommodate dependency debug tables accumulated by dynamic `exec` ([#3982](https://github.com/0xMiden/miden-vm/pull/3982)).
 
 #### Features
 

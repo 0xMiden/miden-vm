@@ -1625,6 +1625,34 @@ mod tests {
     }
 
     #[test]
+    fn package_debug_info_decodes_merged_dependency_tables() {
+        // Dynamic exec currently imports entire dependency tables. Each dependency is readable
+        // on its own, but their distinct strings together exceed the former 32 MiB limit.
+        const STRING_SIZE: usize = 4096;
+        const STRING_COUNT: usize = 18 * 1024 * 1024 / STRING_SIZE;
+        let mut merged = PackageDebugInfoBuilder::default();
+        for dependency in ['a', 'b'] {
+            let mut builder = PackageDebugInfoBuilder::default();
+            for index in 0..STRING_COUNT {
+                let mut prefix = alloc::format!("{dependency}:{index:04}");
+                let padding = "x".repeat(STRING_SIZE - prefix.len());
+                prefix.push_str(&padding);
+                builder.add_string(prefix);
+            }
+            let bytes = builder.build().to_bytes();
+            let debug = PackageDebugInfo::read_from_bytes(&bytes)
+                .expect("each dependency's debug tables must be readable");
+            debug.merge_tables_into(&mut merged).unwrap();
+        }
+        let merged = merged.build();
+        let bytes = merged.to_bytes();
+        let decoded = PackageDebugInfo::read_from_bytes(&bytes)
+            .expect("merged dependency debug tables must remain readable");
+        assert_eq!(decoded.strings().len(), 2 * STRING_COUNT);
+        assert_eq!(decoded, *merged);
+    }
+
+    #[test]
     fn package_debug_info_rejects_payload_over_standard_limit() {
         let payload_size = MAX_DEBUG_INFO_PAYLOAD_SIZE + 1;
         let mut bytes = Vec::new();
