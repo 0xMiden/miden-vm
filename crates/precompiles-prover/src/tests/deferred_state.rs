@@ -377,6 +377,45 @@ fn deferred_state_accepts_msm_with_repeated_base() {
 }
 
 #[test]
+fn deferred_state_accepts_msm_nodes_sharing_one_expression() {
+    // All three MSM nodes name the same `(point, scalar)` pairs. The second names `2G` through an
+    // addition node, so it hashes differently while the importer derives the same expression for
+    // it as for the first; that expression then serves two claims, so the second claim takes a
+    // copy of it, the only expression the second node lays. The third declares the pairs in the
+    // opposite order. The zero scalar takes the term-preserving fallback; the nonzero pair takes
+    // the joint ladder.
+    let curve = CurveId::Secp256k1;
+    let [(gx, gy), (g2x, g2y), (g3x, g3y)] = k1_points();
+    for (scalar_g, expected) in [(1u64, (g3x, g3y)), (0, (g2x, g2y))] {
+        let mut state = WitnessFixture::new();
+        let g = register_curve_point(&mut state, curve, gx, gy);
+        let g2 = register_curve_point(&mut state, curve, g2x, g2y);
+        let g2_added = register_curve_op(&mut state, CurvePrecompile::ADD_OP_ID, g, g);
+        let s_g = register_uint_value(&mut state, curve.scalar_domain(), U256::from(scalar_g));
+        let one = register_uint_value(&mut state, curve.scalar_domain(), from_hex("1"));
+        let expected = register_curve_point(&mut state, curve, expected.0, expected.1);
+        let mut expr_counts = Vec::new();
+        for pairs in [
+            vec![(g, s_g), (g2, one)],
+            vec![(g, s_g), (g2_added, one)],
+            vec![(g2, one), (g, s_g)],
+        ] {
+            let msm = register_curve_msm(&mut state, pairs);
+            let msm_eq = register_curve_op(&mut state, CurvePrecompile::EQ_OP_ID, msm, expected);
+            state.log_statement(msm_eq).expect("MSM equality logs");
+            let session = session_from_witnesses(vec![state.witness()]).unwrap();
+            expr_counts.push(session.msm_expr_count());
+        }
+        assert_eq!(
+            expr_counts[1],
+            expr_counts[0] + 1,
+            "the second node copies the first node's expression instead of deriving its own",
+        );
+        translated_traces_check(&state);
+    }
+}
+
+#[test]
 fn trailing_zero_input_changes_root() {
     let abc = synthetic_keccak_state(b"abc");
     let abc_zero = synthetic_keccak_state(b"abc\0");
@@ -789,6 +828,36 @@ fn merged_keccak_chunk_remainder_is_range_checked() {
     let tuple = super::keccak_node::forge_out_of_range_remainder(node_row);
     crate::tests::check_local(ChunkNodeSpongeAir, &merged);
     crate::tests::bus_balance::assert_unprovidable_xor_lookup(&ChunkNodeSpongeAir, &merged, tuple);
+}
+
+/// Exercises the sponge-permutation range lookups in the deployed merged AIR across block
+/// boundaries.
+#[test]
+fn merged_keccak_sponge_perm_boundaries_balance() {
+    let mut rng = StdRng::seed_from_u64(0x5b0a_e136);
+    for len in [0usize, 135, 136, 137, 271, 272, 273] {
+        let input: Vec<u8> = (0..len).map(|i| i as u8).collect();
+        let traces = keccak_session_traces(&input);
+        traces.check();
+        assert_session_balanced(&traces, &mut rng);
+    }
+}
+
+/// Checks the sponge-permutation range lookup of the deployed merged AIR against a wrapped count.
+#[test]
+fn merged_keccak_sponge_perm_count_is_range_checked() {
+    let traces = keccak_session_traces(&[0x5a; 32]);
+    traces.check();
+    let mut merged = traces.mains()[0].clone();
+    let node_row = &mut merged.values[NODE_COL_OFFSET..NODE_COL_OFFSET + NODE_NUM_MAIN_COLS];
+    assert_eq!(node_row[NODE_COL_ACT], Felt::ONE);
+    super::keccak_node::forge_sponge_perms(node_row, -Felt::ONE);
+    crate::tests::check_local(ChunkNodeSpongeAir, &merged);
+    crate::tests::bus_balance::assert_unprovidable_range16_lookup(
+        &ChunkNodeSpongeAir,
+        &merged,
+        -Felt::from(2u8),
+    );
 }
 
 /// Explicit full prove+verify of a multi-block Keccak session — the

@@ -24,7 +24,7 @@
 //!
 //! `intro`, `intro_zero`, `intro_endo`, `combine`, and `neg` build the expression; the
 //! eval `EcMsm` absorb seam resolves a claim in-circuit, consuming the
-//! positionless `MsmClaimTerm` set so the absorb — and the transcript root
+//! positionless `MsmClaimTerm` multiset so the absorb — and the transcript root
 //! — follow the caller's declared term order, not the chiplet's `idx`
 //! storage order.
 
@@ -91,8 +91,9 @@ where
 /// LogUp message for the [`MsmExpr`](BusId::MsmExpr) relation: the head
 /// `(expr_ptr, group_ptr, val_ptr, k)` of an MSM expression — its `k`
 /// terms sum (under `group_ptr`) to the stored point `val_ptr`. Provided
-/// once per expression on its boundary row; consumed as an operand head
-/// by combine/neg and at the eval `EcMsm` resolve.
+/// on the expression's boundary row at its op use count plus
+/// [`COL_IS_CLAIMED`]; consumed as an operand head by combine/neg and by
+/// the boundary of the eval `EcMsm` claim the expression serves.
 #[derive(Debug, Clone)]
 pub struct MsmExprMsg<E> {
     pub expr_ptr: E,
@@ -122,10 +123,10 @@ where
 /// LogUp message for the [`MsmClaimTerm`](BusId::MsmClaimTerm) relation:
 /// one **positionless** term `(expr_ptr, base_ptr, scalar_ptr)` of an MSM
 /// expression — the resolve-seam twin of [`MsmTermMsg`] without the `idx`
-/// field. Provided once per term row at the expression's **resolve** use
-/// count (`COL_CLAIM_MULT`); consumed by the eval `EcMsm` absorb seam,
-/// which matches the claim's terms as an unordered set so the DAG absorb
-/// order (and root) is the caller's, not the chiplet's `idx` storage order.
+/// field. Provided once per term row of a claimed expression
+/// ([`COL_IS_CLAIMED`]); consumed by the eval `EcMsm` absorb seam, which
+/// matches the claim's terms as a multiset so the DAG absorb order (and
+/// root) is the caller's, not the chiplet's `idx` storage order.
 #[derive(Debug, Clone)]
 pub struct MsmClaimTermMsg<E> {
     pub expr_ptr: E,
@@ -175,9 +176,9 @@ pub const COL_VAL: usize = 8;
 /// **Op** use count — how often this expression is consumed as a
 /// `combine` / `neg` operand. Drives the `MsmTerm` provide (every term
 /// row) and part of the `MsmExpr` provide; constant within a run, 0 on
-/// pads. (The eval resolve uses [`COL_CLAIM_MULT`] instead, so the two
-/// consumers of a claim — combine-operand vs DAG-resolve — bill separate
-/// provides.)
+/// pads. (The eval claim uses [`COL_IS_CLAIMED`] instead, so the two
+/// consumers of an expression — combine/neg operand vs transcript claim —
+/// bill separate provides.)
 pub const COL_MULT: usize = 9;
 /// Two stored op-family flags. Together with [`COL_IS_NEG`], they determine
 /// the residual `intro_endo` selector and form a one-hot encoding of every
@@ -242,7 +243,10 @@ pub const COL_NEG_X: usize = 33;
 /// and the rest of the `MsmExpr` provide; constant within a run, 0 on
 /// pads. This multiplicity records resolve uses of the positionless `MsmClaimTerm`; [`COL_MULT`]
 /// records combine uses of `MsmTerm` indexed by `idx`.
-pub const COL_CLAIM_MULT: usize = 34;
+/// Boolean: two resolves of one expression would only jointly consume twice
+/// its claim terms, letting each absorb a different multiset, so every
+/// resolve has an expression of its own.
+pub const COL_IS_CLAIMED: usize = 34;
 /// Family value-relation cells (boundary only). For `neg`, these are the two
 /// y ptrs of `R = (x_a, −y_a)`; for `intro_endo`, they are the shared y ptr
 /// and `φ(P)`'s x ptr, respectively.
@@ -394,7 +398,10 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // `MsmExpr` provide both vanish — so a forged pad `mult` can't inject
         // phantom terms, independent of the consumer set.
         builder.assert_zero((AB::Expr::ONE - act.clone()) * local[COL_MULT].into());
-        builder.assert_zero((AB::Expr::ONE - act) * local[COL_CLAIM_MULT].into());
+        builder.assert_zero((AB::Expr::ONE - act) * local[COL_IS_CLAIMED].into());
+        // At most one claim per expression: each claim run must consume
+        // exactly its own expression's claim terms.
+        builder.assert_bool(local[COL_IS_CLAIMED]);
 
         // Allocator: expr_ptr = 1 on the first row, `+1` after each
         // boundary. ptr → (run) is injective by construction.
@@ -421,7 +428,7 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
             COL_SBOUND_PTR,
             COL_VAL,
             COL_MULT,
-            COL_CLAIM_MULT,
+            COL_IS_CLAIMED,
             COL_IS_INTRO,
             COL_IS_COMBINE,
             COL_IS_NEG,
@@ -595,7 +602,7 @@ where
         let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
 
         let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_MULT].into();
-        let neg_claim_mult: LB::Expr = LB::Expr::ZERO - local[COL_CLAIM_MULT].into();
+        let neg_is_claimed: LB::Expr = LB::Expr::ZERO - local[COL_IS_CLAIMED].into();
         let act: LB::Expr = local[COL_ACT].into();
         let is_boundary: LB::Expr = local[COL_IS_BOUNDARY].into();
         let is_intro: LB::Expr = local[COL_IS_INTRO].into();
@@ -693,16 +700,16 @@ where
             ),
         );
         // col 1 (paired, lqd-1): the expression head — consumed by
-        // combine/neg operand heads (op uses) AND the eval resolve (claim
-        // uses), so it provides at the *sum* — paired with the positionless
-        // resolve-seam term (one per term row at the resolve count).
+        // combine/neg operand heads (op uses) AND the eval claim it serves
+        // (if claimed), so it provides at the *sum* — paired with the
+        // positionless claim term (one per term row of a claimed expression).
         frac_col!(
             builder,
             "ec-msm-provide",
             pair_deg,
             (
                 "provide-msmexpr",
-                (neg_mult.clone() + neg_claim_mult.clone()) * is_boundary.clone(),
+                (neg_mult.clone() + neg_is_claimed.clone()) * is_boundary.clone(),
                 MsmExprMsg {
                     expr_ptr: expr_ptr.clone(),
                     group_ptr: group_ptr.clone(),
@@ -713,7 +720,7 @@ where
             ),
             (
                 "provide-msmclaimterm",
-                neg_claim_mult.clone(),
+                neg_is_claimed.clone(),
                 MsmClaimTermMsg {
                     expr_ptr: expr_ptr.clone(),
                     base_ptr: base.clone(),

@@ -19,7 +19,7 @@ use crate::{
     },
     logup::LookupMessage,
     primitives::byte_pair_lut::{
-        BytePairLutAir, BytePairLutMsg, NUM_PREPROCESSED_COLS, PRE_A, PRE_B, PRE_XOR,
+        BytePairLutAir, BytePairLutMsg, NUM_PREPROCESSED_COLS, PRE_A, PRE_B, PRE_XOR, Range16Msg,
         preprocessed_table,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -172,6 +172,28 @@ pub(crate) fn assert_unprovidable_xor_lookup<A>(
     assert!(!provided, "the byte-pair table must not provide the tuple");
 }
 
+/// Assert that `main` consumes `Range16(w)` once and that `w` lies outside the provided
+/// `[0, 2^16)` range.
+pub(crate) fn assert_unprovidable_range16_lookup<A>(air: &A, main: &RowMajorMatrix<Felt>, w: Felt)
+where
+    A: LiftedAir<Felt, QuadFelt> + Sync,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+{
+    let mut rng = StdRng::seed_from_u64(0x5e16);
+    let challenges = Challenges::new(
+        QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()]),
+        QuadFelt::new([rng.random::<Felt>(), rng.random::<Felt>()]),
+        MAX_MESSAGE_WIDTH,
+        NUM_BUS_IDS,
+    );
+    let consume = Range16Msg { w }.encode(&challenges);
+    let mut net = HashMap::new();
+    fold_balance(air, main, &challenges, &mut net);
+    let mult = net.get(&consume).map_or(Felt::ZERO, |(mult, _)| *mult);
+    assert_eq!(mult, Felt::ONE, "the row must consume the tuple once");
+    assert!(w.as_canonical_u64() >= 1 << 16, "the range table must not provide the tuple");
+}
+
 /// Fold verifier-side fixed-environment boundary consumes into the accumulator.
 pub(crate) fn fold_fixed_boundary_external_balance(
     challenges: &Challenges<QuadFelt>,
@@ -234,6 +256,20 @@ pub(crate) fn session_stack_net(
     }
     fold_fixed_boundary_external_balance(challenges, &mut net);
     net
+}
+
+/// Return the unmatched denominators and their net multiplicities from the session stack.
+pub(crate) fn session_stack_residual_keyed(
+    mains: &[&RowMajorMatrix<Felt>; NUM_CHIPLETS],
+    replacements: &[(usize, &RowMajorMatrix<Felt>)],
+    challenges: &Challenges<QuadFelt>,
+) -> Vec<(QuadFelt, Felt, String)> {
+    session_stack_net(mains, replacements, challenges)
+        .into_iter()
+        .filter_map(|(denom, (mult, diagnostic))| {
+            (mult != Felt::ZERO).then_some((denom, mult, diagnostic))
+        })
+        .collect()
 }
 
 /// Return the nonzero entries from the canonical full session stack balance.

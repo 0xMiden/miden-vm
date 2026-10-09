@@ -6,13 +6,14 @@
 //! Negative tests confirm `check_constraints` catches deliberate
 //! corruption of the activity flag, boundary, and continuity edges.
 
-use std::vec;
+use std::{vec, vec::Vec};
 
+use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
-    deferred::{Digest, Node},
+    deferred::{Digest, Node, TRUE_DIGEST, deferred_chunks_frame},
     field::{Field, QuadFelt},
-    utils::RowMajorMatrix,
+    utils::{Matrix, RowMajorMatrix},
 };
 use miden_lifted_air::{BaseAir, LiftedAir};
 use miden_precompiles::Keccak256Precompile;
@@ -20,22 +21,58 @@ use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     hash::{
-        chunk::trace::ChunkSeqId,
+        chunk::{
+            self as chunk_cols,
+            trace::{ChunkRequires, ChunkSeqId, generate_trace_padded_to as chunk_trace},
+        },
+        chunk_node::NODE_COL_OFFSET,
+        chunk_node_sponge::{
+            ChunkNodeSpongeAir, NUM_MAIN_COLS as CNS_COLS, SPONGE_COL_OFFSET,
+            trace::generate_trace as cns_trace,
+        },
         keccak::{
             node::{
                 COL_ABSORPTION_ID_CHUNKS, COL_ABSORPTION_ID_DIGEST_CHUNKS,
-                COL_ABSORPTION_ID_KECCAK, COL_ACT, COL_CHUNK_SEQ_ID_HEAD, COL_D_BEGIN,
-                COL_H_DIGEST_CHUNKS_BEGIN, COL_H_INPUT_CHUNKS_BEGIN, COL_H_KECCAK_BEGIN,
-                COL_LAST_CHUNK_REM, COL_LEN_BYTES, COL_N_CHUNKS, COL_N_CHUNKS_INV,
-                COL_N_SPONGE_PERMS, COL_SPONGE_SEQ_ID_HEAD, KeccakNodeAir, NUM_AUX_COLS, NUM_HASH,
-                NUM_MAIN_COLS,
-                trace::{KeccakNodeInvocation, generate_trace_from_invocations},
+                COL_ABSORPTION_ID_KECCAK, COL_ACT, COL_CHUNK_SEQ_ID_HEAD, COL_D_BEGIN, COL_D_END,
+                COL_H_DIGEST_CHUNKS_BEGIN, COL_H_DIGEST_CHUNKS_END, COL_H_INPUT_CHUNKS_BEGIN,
+                COL_H_INPUT_CHUNKS_END, COL_H_KECCAK_BEGIN, COL_H_KECCAK_END, COL_LAST_CHUNK_REM,
+                COL_LEN_BYTES, COL_N_CHUNKS, COL_N_CHUNKS_INV, COL_N_SPONGE_PERMS, COL_OUT_MULT,
+                COL_SPONGE_SEQ_ID_HEAD, KeccakNodeAir, NUM_AUX_COLS, NUM_HASH, NUM_MAIN_COLS,
+                SPONGE_RATE_BYTES,
+                trace::{
+                    KeccakNodeInvocation, KeccakNodeRequires, generate_trace_from_invocations,
+                },
             },
-            sponge::trace::SpongeSeqId,
+            round::{KeccakRoundAir, RoundRequires, generate_trace as round_trace},
+            sponge::{
+                self as sponge_cols,
+                trace::{
+                    Invocation as SpongeInvocation, SpongeOutput, SpongeRequires, SpongeSeqId,
+                    generate_trace_padded_to as sponge_trace, keccak_oracle,
+                },
+            },
         },
     },
-    logup::{NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
-    transcript::eidos::trace::testing::forged_absorption_id,
+    logup::{LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
+    primitives::byte_pair_lut::{
+        BytePairLutAir, BytePairLutRequires, BytePairOp, Range16Msg, generate_trace as bpl_trace,
+    },
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    session::Session,
+    tests::bus_balance::session_stack_residual_keyed,
+    transcript::{
+        eidos::{
+            EidosCompressionAir, EidosDigest,
+            trace::{
+                AbsorptionOutput, EidosRequires, generate_trace_with_byte_lookups as eidos_trace,
+                testing::forged_absorption_id,
+            },
+        },
+        eval::{
+            TranscriptEvalAir,
+            trace::{TranscriptEvalRequires, generate_trace as eval_trace},
+        },
+    },
 };
 
 // HELPERS
@@ -163,7 +200,7 @@ fn lifted_air_validates_and_layout_matches_spec() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // The nine-column packing leaves columns 0 and 8 as singletons and pairs the other fractions.
+    // The eleven-column packing leaves columns 0, 8, and 10 as singletons and pairs the rest.
     // Every closing constraint therefore stays at degree ≤ 3 → log_quotient_degree = 1.
     let air = KeccakNodeAir;
     assert_eq!(crate::tests::log_quotient_degree(&air), 1);
@@ -279,6 +316,530 @@ fn chunk_remainder_is_range_checked() {
     let tuple = forge_out_of_range_remainder(&mut main.values[..NUM_MAIN_COLS]);
     crate::tests::check_local(KeccakNodeAir, &main);
     crate::tests::bus_balance::assert_unprovidable_xor_lookup(&KeccakNodeAir, &main, tuple);
+}
+
+/// Set a node row's sponge permutation count and return the last-block remainder
+/// `len_bytes − 136·(n_sponge_perms − 1)` that the row then range-checks.
+pub(super) fn forge_sponge_perms(row: &mut [Felt], n_sponge_perms: Felt) -> Felt {
+    row[COL_N_SPONGE_PERMS] = n_sponge_perms;
+    row[COL_LEN_BYTES] - Felt::from(136u8) * (n_sponge_perms - Felt::ONE)
+}
+
+#[test]
+fn final_node_sponge_perm_count_cannot_wrap() {
+    // The final active row has no continuity successor. A count of −1 would place the digest read
+    // two permutations before this invocation's first block, at another invocation's output.
+    let mut main = single_node_trace(32);
+    forge_sponge_perms(&mut main.values[..NUM_MAIN_COLS], -Felt::ONE);
+    crate::tests::check_local(KeccakNodeAir, &main);
+    crate::tests::bus_balance::assert_unprovidable_range16_lookup(
+        &KeccakNodeAir,
+        &main,
+        -Felt::from(2u8),
+    );
+}
+
+#[test]
+fn sponge_perm_count_cannot_exceed_length() {
+    // 32 bytes absorb in one permutation. Claiming two would read the digest from the permutation
+    // after this invocation, and leaves the last-block remainder at 32 − 136.
+    let mut main = single_node_trace(32);
+    let remainder = forge_sponge_perms(&mut main.values[..NUM_MAIN_COLS], Felt::from(2u8));
+    assert_eq!(remainder, -Felt::from(104u8));
+    crate::tests::check_local(KeccakNodeAir, &main);
+    crate::tests::bus_balance::assert_unprovidable_range16_lookup(&KeccakNodeAir, &main, remainder);
+}
+
+#[test]
+fn sponge_perm_count_cannot_fall_short_of_length() {
+    // 136 bytes need a second, padding-only permutation. Claiming one would read the first
+    // block's output as the digest and leaves the remainder at 136.
+    let mut main = single_node_trace(136);
+    let remainder = forge_sponge_perms(&mut main.values[..NUM_MAIN_COLS], Felt::ONE);
+    assert_eq!(remainder, Felt::from(136u8));
+    crate::tests::check_local(KeccakNodeAir, &main);
+    crate::tests::bus_balance::assert_unprovidable_range16_lookup(
+        &KeccakNodeAir,
+        &main,
+        Felt::from(135u8) - remainder,
+    );
+}
+
+#[test]
+fn sponge_perm_count_must_be_integral() {
+    // `n_sponge_perms = 1 + 10/136` gives the in-range remainder 0 for a 10-byte input; only the
+    // range check on `n_sponge_perms − 1` excludes this field-fractional count.
+    let mut main = single_node_trace(10);
+    let fraction = Felt::from(10u8) * Felt::from(136u8).inverse();
+    let remainder = forge_sponge_perms(&mut main.values[..NUM_MAIN_COLS], Felt::ONE + fraction);
+    assert_eq!(remainder, Felt::ZERO);
+    crate::tests::check_local(KeccakNodeAir, &main);
+    crate::tests::bus_balance::assert_unprovidable_range16_lookup(&KeccakNodeAir, &main, fraction);
+}
+
+// MULTI-INVOCATION DIGEST FORGERY
+// ================================================================================================
+
+/// Attacker-chosen statement input: the digest of [`M_Y`] is claimed for it.
+const M_X: &[u8] = b"pay 1 MIDEN to alice";
+/// Message whose digest is misattributed to [`M_X`].
+const M_Y: &[u8] = b"pay 1000000 MIDEN to mallory";
+/// Dummy third invocation that lets the node rows visit the sponge out of physical order.
+const M_Z: &[u8] = b"z";
+
+/// `p − 1` in Goldilocks: the `n_sponge_perms` that steps the sponge head back by 32 rows, one
+/// permutation.
+const P_MINUS_ONE: u64 = 0xffff_ffff_0000_0000;
+
+const CHUNK_W: usize = chunk_cols::NUM_MAIN_COLS;
+const NODE_W: usize = NUM_MAIN_COLS;
+const SPONGE_W: usize = sponge_cols::NUM_MAIN_COLS;
+
+/// Indices of the Keccak-dependent chiplets in the session stack
+/// ([`SessionTraces::mains`](crate::session::SessionTraces::mains) order).
+const CNS: usize = 0;
+const EIDOS: usize = 1;
+const ROUND: usize = 2;
+const BPL: usize = 3;
+const EVAL: usize = 4;
+
+/// The Keccak-dependent chiplet traces (merged chunk/node/sponge, Eidos, round, eval) plus the
+/// byte-pair multiplicities those chiplets demand, and the transcript root.
+struct KeccakSide {
+    cns: RowMajorMatrix<Felt>,
+    eidos: RowMajorMatrix<Felt>,
+    round: RowMajorMatrix<Felt>,
+    bpl: RowMajorMatrix<Felt>,
+    eval: RowMajorMatrix<Felt>,
+    root: EidosDigest,
+}
+
+fn len_u32(m: &[u8]) -> u32 {
+    u32::try_from(m.len()).expect("message length fits u32")
+}
+
+fn keccak_felts(m: &[u8]) -> [Felt; 8] {
+    keccak_oracle(m).to_felts()
+}
+
+/// The three `Range16` values a node row range-checks, mirroring `eval_sponge_perm_count`: the
+/// full-block count `n_sponge_perms − 1`, the last block's remainder
+/// `len_bytes − 136·(n_sponge_perms − 1)`, and the rate gap `135 − remainder`.
+fn sponge_perm_range_checks(n_sponge_perms: Felt, len_bytes: Felt) -> [Felt; 3] {
+    let full_blocks = n_sponge_perms - Felt::ONE;
+    let remainder = len_bytes - Felt::from(SPONGE_RATE_BYTES) * full_blocks;
+    let rate_gap = Felt::from(SPONGE_RATE_BYTES - 1) - remainder;
+    [full_blocks, remainder, rate_gap]
+}
+
+/// The deferred root a VM program logs for
+/// `AND(TRUE, Keccak256Assert(chunks(input), chunks(claimed_digest)))`.
+fn deferred_root_for_claim(input: &[u8], claimed_digest: [Felt; 8]) -> EidosDigest {
+    let input_chunks = Node::chunks_from_bytes(input).digest();
+    let digest_chunks = Node::chunks(vec![claimed_digest])
+        .expect("digest chunks are non-empty")
+        .digest();
+    let assertion =
+        Keccak256Precompile::assert_node(len_u32(input), input_chunks, digest_chunks).digest();
+    EidosDigest::from(Node::and(TRUE_DIGEST, assertion).digest())
+}
+
+/// Replay the Keccak side of a session with the same inputs. Reproducing the session's Keccak
+/// chiplets bit for bit lets the test subtract their byte-pair demand and isolate the demand of
+/// the other chiplets.
+fn honest_keccak_side(msgs: &[&[u8]]) -> KeccakSide {
+    let mut eidos = EidosRequires::new();
+    let mut chunk = ChunkRequires::new();
+    let mut round = RoundRequires::new();
+    let mut bpl = BytePairLutRequires::new();
+    let mut sponge = SpongeRequires::new();
+    let mut node = KeccakNodeRequires::new();
+    let mut eval = TranscriptEvalRequires::new();
+
+    let claims: Vec<_> = msgs
+        .iter()
+        .map(|m| {
+            let out = node.require(m, &mut sponge, &mut chunk, &mut round, &mut bpl, &mut eidos);
+            eval.issue_keccak(out.h_keccak, out.node_row)
+        })
+        .collect();
+    let mut root = eval.zero();
+    for claim in claims {
+        root = eval.record_and(root, claim, &mut eidos);
+    }
+
+    let root_hash = root.hash();
+    let eval = eval_trace(eval, root);
+    let cns = cns_trace(chunk, node, sponge);
+    let eidos = eidos_trace(eidos, &mut bpl);
+    let round = round_trace(round, &mut bpl);
+    KeccakSide {
+        cns,
+        eidos,
+        round,
+        bpl: bpl_trace(bpl),
+        eval,
+        root: root_hash,
+    }
+}
+
+/// One forged node row: the message whose input chunks it binds, the sponge invocation and chunk
+/// chain it names, which invocation's digest it reads, and its `n_sponge_perms`.
+struct ForgedRow {
+    msg: usize,
+    sponge_head: u32,
+    chunk_head: u32,
+    digest_of: usize,
+    n_sponge_perms: Felt,
+    out_mult: u32,
+}
+
+/// Build the Keccak side where node rows associate each input with another invocation's digest.
+///
+/// The sponge, round, and chunk bands stay honest in physical order X, Y, Z. The node rows run in
+/// chunk order X, Z, Y at sponge heads 0, 64, 32 with `n_sponge_perms` 2, p − 1, 2, so the digest
+/// address `100·sponge_seq_id_head + 3200·n_sponge_perms − 128 + j` lands on another invocation's
+/// final-permutation output (row 0 reads D_Y, row 1 reads D_X, row 2 reads D_Z). The
+/// head-continuity step `+ 32·n_sponge_perms` still holds across the three rows, so without the
+/// sponge-permutation range checks every local constraint and every bus closes.
+fn forged_keccak_side(msgs: [&[u8]; 3]) -> KeccakSide {
+    let mut eidos = EidosRequires::new();
+    let mut chunk = ChunkRequires::new();
+    let mut round = RoundRequires::new();
+    let mut bpl = BytePairLutRequires::new();
+    let mut sponge = SpongeRequires::new();
+    let mut eval = TranscriptEvalRequires::new();
+
+    // Honest sponge, round, and chunk work in physical order X, Y, Z.
+    let outs: Vec<SpongeOutput> = msgs
+        .iter()
+        .map(|m| {
+            sponge.require(
+                &SpongeInvocation { input: m.to_vec() },
+                &mut chunk,
+                &mut round,
+                &mut bpl,
+                &mut eidos,
+            )
+        })
+        .collect();
+    for (i, out) in outs.iter().enumerate() {
+        assert_eq!(out.sponge_head.seq(), 32 * i as u32, "one permutation per message");
+        assert_eq!(out.chunk_head.seq(), i as u32, "one chunk per message");
+        assert_eq!(out.keccak_digest.to_felts(), keccak_felts(msgs[i]), "sponge stays honest");
+        // Each node row reads its chunk-chain tail through EidosOut(H_input_chunks).
+        let _ = eidos.require_digest(out.chunk_content_digest);
+    }
+    let digest_chunks: Vec<AbsorptionOutput> = outs
+        .iter()
+        .map(|out| {
+            let d = out.keccak_digest.to_felts();
+            let a = eidos.require_one_shot(
+                deferred_chunks_frame(1),
+                d[0..4].try_into().expect("block low"),
+                d[4..8].try_into().expect("block high"),
+            );
+            let _ = eidos.require_digest(a.digest);
+            a
+        })
+        .collect();
+
+    // Node rows in chunk order X, Z, Y; sponge heads 0, 64, 32.
+    let p_minus_one = Felt::new(P_MINUS_ONE).expect("p - 1 is canonical");
+    let rows = [
+        ForgedRow {
+            msg: 0,
+            sponge_head: 0,
+            chunk_head: 0,
+            digest_of: 1,
+            n_sponge_perms: Felt::from(2u8),
+            out_mult: 1,
+        },
+        ForgedRow {
+            msg: 2,
+            sponge_head: 64,
+            chunk_head: 1,
+            digest_of: 0,
+            n_sponge_perms: p_minus_one,
+            out_mult: 0,
+        },
+        ForgedRow {
+            msg: 1,
+            sponge_head: 32,
+            chunk_head: 2,
+            digest_of: 2,
+            n_sponge_perms: Felt::from(2u8),
+            out_mult: 0,
+        },
+    ];
+
+    let mut node_rows: Vec<[Felt; NODE_W]> = Vec::new();
+    let mut claimed_keccak = None;
+    for row in &rows {
+        let out = &outs[row.msg];
+        let h_input = out.chunk_content_digest;
+        let digest = &digest_chunks[row.digest_of];
+        let len = len_u32(msgs[row.msg]);
+        let keccak = eidos.require_one_shot(
+            Keccak256Precompile::assert_frame(len),
+            h_input.as_array(),
+            digest.digest.as_array(),
+        );
+        let _ = eidos.require_digest(keccak.digest);
+        if row.out_mult == 1 {
+            claimed_keccak = Some(keccak.digest);
+        }
+
+        let mut cells = [Felt::ZERO; NODE_W];
+        cells[COL_ACT] = Felt::ONE;
+        cells[COL_SPONGE_SEQ_ID_HEAD] = Felt::from(row.sponge_head);
+        cells[COL_N_SPONGE_PERMS] = row.n_sponge_perms;
+        cells[COL_CHUNK_SEQ_ID_HEAD] = Felt::from(row.chunk_head);
+        cells[COL_N_CHUNKS] = Felt::ONE;
+        cells[COL_ABSORPTION_ID_CHUNKS] =
+            Felt::from(out.chunk_content_absorption_span.head().as_u32());
+        cells[COL_LEN_BYTES] = Felt::from(len);
+        cells[COL_ABSORPTION_ID_DIGEST_CHUNKS] = Felt::from(digest.head().as_u32());
+        cells[COL_ABSORPTION_ID_KECCAK] = Felt::from(keccak.head().as_u32());
+        let d = outs[row.digest_of].keccak_digest.to_felts();
+        cells[COL_D_BEGIN..COL_D_END].copy_from_slice(&d);
+        cells[COL_H_INPUT_CHUNKS_BEGIN..COL_H_INPUT_CHUNKS_END]
+            .copy_from_slice(&h_input.as_array());
+        cells[COL_H_DIGEST_CHUNKS_BEGIN..COL_H_DIGEST_CHUNKS_END]
+            .copy_from_slice(&digest.digest.as_array());
+        cells[COL_H_KECCAK_BEGIN..COL_H_KECCAK_END].copy_from_slice(&keccak.digest.as_array());
+        cells[COL_OUT_MULT] = Felt::from(row.out_mult);
+        let remainder = (len.saturating_sub(1) % 32) as u8;
+        cells[COL_LAST_CHUNK_REM] = Felt::from(remainder);
+        cells[COL_N_CHUNKS_INV] = Felt::ONE;
+        node_rows.push(cells);
+
+        // The byte-pair LUT provides this row's chunk-remainder lookup and its in-range sponge
+        // permutation checks; the out-of-range checks have no row to provide them.
+        bpl.require(BytePairOp::Xor, remainder, 31 - remainder);
+        for w in sponge_perm_range_checks(row.n_sponge_perms, Felt::from(len)) {
+            if let Ok(w) = u16::try_from(w.as_canonical_u64()) {
+                bpl.require_range16(w);
+            }
+        }
+    }
+
+    // Only row 0's binding enters the transcript.
+    let claim = eval.issue_keccak(claimed_keccak.expect("row 0 provides its binding"), 0);
+    let zero = eval.zero();
+    let root = eval.record_and(zero, claim, &mut eidos);
+    let root_hash = root.hash();
+
+    let sponge_main = sponge_trace(sponge, 4);
+    let height = sponge_main.height();
+    let chunk_main = chunk_trace(chunk, height);
+    assert_eq!(chunk_main.height(), height);
+
+    let chunk_main = reorder_chunk_chains(chunk_main);
+    let sponge_main = repin_sponge_chunk_ptrs(sponge_main);
+    let cns = assemble_cns(&chunk_main, &node_rows, &sponge_main);
+
+    let eval = eval_trace(eval, root);
+    let round = round_trace(round, &mut bpl);
+    let eidos = eidos_trace(eidos, &mut bpl);
+    KeccakSide {
+        cns,
+        eidos,
+        round,
+        bpl: bpl_trace(bpl),
+        eval,
+        root: root_hash,
+    }
+}
+
+/// Swap chunk rows 1 and 2 so the chunk band holds X, Z, Y, and continue the dead rows'
+/// perm-cycle chain from the new last active row.
+fn reorder_chunk_chains(mut m: RowMajorMatrix<Felt>) -> RowMajorMatrix<Felt> {
+    for col in [chunk_cols::COL_ABSORPTION_ID]
+        .into_iter()
+        .chain(chunk_cols::COL_F_BEGIN..chunk_cols::COL_F_END)
+    {
+        m.values.swap(CHUNK_W + col, 2 * CHUNK_W + col);
+    }
+    for r in 0..3 {
+        assert_eq!(m.values[r * CHUNK_W + chunk_cols::COL_IS_HEAD], Felt::ONE);
+    }
+    let last_active = m.values[2 * CHUNK_W + chunk_cols::COL_ABSORPTION_ID];
+    for r in 3..m.height() {
+        assert_eq!(m.values[r * CHUNK_W + chunk_cols::COL_ACT], Felt::ZERO);
+        m.values[r * CHUNK_W + chunk_cols::COL_ABSORPTION_ID] =
+            last_active + Felt::from((r - 2) as u32);
+    }
+    m
+}
+
+/// Re-pin each sponge invocation's chunk-tape base to the reordered chunk band: Y (rows 32..64)
+/// reads chunk 2, Z (rows 64..) reads chunk 1. The chain is relaxed at both invocation seams.
+fn repin_sponge_chunk_ptrs(mut m: RowMajorMatrix<Felt>) -> RowMajorMatrix<Felt> {
+    let col = sponge_cols::COL_CHUNK_PTR;
+    assert_eq!(m.values[32 * SPONGE_W + col], Felt::from(4u8));
+    assert_eq!(m.values[64 * SPONGE_W + col], Felt::from(8u8));
+    let four = Felt::from(4u8);
+    for r in 32..64 {
+        m.values[r * SPONGE_W + col] += four;
+    }
+    for r in 64..m.height() {
+        m.values[r * SPONGE_W + col] -= four;
+    }
+    m
+}
+
+/// Interleave the chunk, forged node, and sponge bands into the merged chiplet's column layout.
+fn assemble_cns(
+    chunk: &RowMajorMatrix<Felt>,
+    node_rows: &[[Felt; NODE_W]],
+    sponge: &RowMajorMatrix<Felt>,
+) -> RowMajorMatrix<Felt> {
+    assert_eq!(NODE_COL_OFFSET, CHUNK_W);
+    assert_eq!(SPONGE_COL_OFFSET, CHUNK_W + NODE_W);
+    let height = sponge.height();
+    let mut vals = Vec::with_capacity(height * CNS_COLS);
+    for r in 0..height {
+        vals.extend_from_slice(&chunk.values[r * CHUNK_W..(r + 1) * CHUNK_W]);
+        match node_rows.get(r) {
+            Some(cells) => vals.extend_from_slice(cells),
+            None => vals.extend([Felt::ZERO; NODE_W]),
+        }
+        vals.extend_from_slice(&sponge.values[r * SPONGE_W..(r + 1) * SPONGE_W]);
+    }
+    RowMajorMatrix::new(vals, CNS_COLS)
+}
+
+fn node_cell(cns: &RowMajorMatrix<Felt>, row: usize, col: usize) -> Felt {
+    cns.values[row * CNS_COLS + NODE_COL_OFFSET + col]
+}
+
+#[test]
+fn multi_invocation_node_rows_cannot_read_another_invocations_digest() {
+    let msgs = [M_X, M_Y, M_Z];
+
+    // Honest session with the same three Keccak calls. It supplies every non-Keccak chiplet,
+    // including the fixed uint and EC boundary state.
+    let mut session = Session::new();
+    let claims: Vec<_> = msgs.iter().map(|m| session.keccak(m).1).collect();
+    let root = session.assert_and_fold(claims);
+    let honest = session.finish(root);
+    let s = honest.mains();
+
+    // The replay reproduces the session's Keccak side bit for bit, so subtracting its byte-pair
+    // demand isolates the demand of the other chiplets.
+    let replay = honest_keccak_side(&msgs);
+    assert_eq!(s[CNS].values, replay.cns.values, "replay chunk-node-sponge");
+    assert_eq!(s[EIDOS].values, replay.eidos.values, "replay eidos");
+    assert_eq!(s[ROUND].values, replay.round.values, "replay round");
+    assert_eq!(s[EVAL].values, replay.eval.values, "replay eval");
+    assert_eq!(honest.public_root(), replay.root, "replay root");
+
+    let forged = forged_keccak_side(msgs);
+    assert_eq!(forged.round.values, s[ROUND].values, "sponge and round work stays honest");
+
+    // The byte-pair LUT provides the honest non-Keccak demand plus the forged Keccak side's demand,
+    // every in-range check included, so only the out-of-range sponge-permutation checks stay
+    // unprovided.
+    let bpl_values: Vec<Felt> = s[BPL]
+        .values
+        .iter()
+        .zip(&replay.bpl.values)
+        .zip(&forged.bpl.values)
+        .map(|((&total, &keccak_honest), &keccak_forged)| total - keccak_honest + keccak_forged)
+        .collect();
+    let bpl = RowMajorMatrix::new(bpl_values, s[BPL].width());
+
+    // The statement is false: the transcript root is the deferred root of
+    // `Keccak256Assert(M_X, keccak256(M_Y))`, and keccak256(M_X) != keccak256(M_Y).
+    let d_x = keccak_felts(M_X);
+    let d_y = keccak_felts(M_Y);
+    assert_ne!(d_x, d_y);
+    assert_eq!(forged.root, deferred_root_for_claim(M_X, d_y), "root asserts H(M_X) = H(M_Y)");
+    assert_ne!(forged.root, deferred_root_for_claim(M_X, d_x), "root is not the honest claim");
+    let d_row0: [Felt; 8] = core::array::from_fn(|i| node_cell(&forged.cns, 0, COL_D_BEGIN + i));
+    assert_eq!(d_row0, d_y, "node row 0 binds M_X's chunks to D_Y");
+    assert_eq!(node_cell(&forged.cns, 0, COL_LEN_BYTES), Felt::from(len_u32(M_X)));
+    assert_eq!(node_cell(&forged.cns, 0, COL_OUT_MULT), Felt::ONE);
+    assert_eq!(
+        node_cell(&forged.cns, 1, COL_N_SPONGE_PERMS),
+        Felt::new(P_MINUS_ONE).expect("p - 1 is canonical"),
+    );
+
+    // Without the sponge-permutation range checks this witness satisfies every local constraint of
+    // every replaced chiplet.
+    crate::tests::check_local(ChunkNodeSpongeAir, &forged.cns);
+    crate::tests::check_local(EidosCompressionAir, &forged.eidos);
+    crate::tests::check_local(KeccakRoundAir, &forged.round);
+    crate::tests::check_local(BytePairLutAir, &bpl);
+    crate::tests::check_local_inputs(
+        TranscriptEvalAir,
+        &forged.eval,
+        forged.root.as_array().to_vec(),
+    );
+
+    // Control: the local check is not vacuous. The physical-order value n_sponge_perms = 1 on row 1
+    // breaks the sponge-head continuity into row 2.
+    let mut control = forged.cns.clone();
+    control.values[CNS_COLS + NODE_COL_OFFSET + COL_N_SPONGE_PERMS] = Felt::ONE;
+    crate::tests::assert_local_rejects(ChunkNodeSpongeAir, &control);
+
+    // The out-of-range `Range16` values the forged rows request, predicted from their
+    // `n_sponge_perms` and `len_bytes`.
+    let forged_rows = [
+        (Felt::from(2u8), Felt::from(len_u32(M_X))),
+        (Felt::new(P_MINUS_ONE).expect("p - 1 is canonical"), Felt::from(len_u32(M_Z))),
+        (Felt::from(2u8), Felt::from(len_u32(M_Y))),
+    ];
+    let mut expected_out_of_range: Vec<Felt> = Vec::new();
+    for (n_sponge_perms, len_bytes) in forged_rows {
+        for w in sponge_perm_range_checks(n_sponge_perms, len_bytes) {
+            if u16::try_from(w.as_canonical_u64()).is_err() {
+                expected_out_of_range.push(w);
+            }
+        }
+    }
+    assert_eq!(expected_out_of_range.len(), 4, "the forgery requests four out-of-range checks");
+
+    // The full session stack closes except for those out-of-range `Range16` requests: nothing else
+    // is left unbalanced.
+    let replacements = [
+        (CNS, &forged.cns),
+        (EIDOS, &forged.eidos),
+        (ROUND, &forged.round),
+        (BPL, &bpl),
+        (EVAL, &forged.eval),
+    ];
+    let mut rng = StdRng::seed_from_u64(0x3974);
+    for _ in 0..3 {
+        let challenges = Challenges::new(
+            QuadFelt::new([Felt::from(rng.random::<u32>()), Felt::from(rng.random::<u32>())]),
+            QuadFelt::new([Felt::from(rng.random::<u32>()), Felt::from(rng.random::<u32>())]),
+            MAX_MESSAGE_WIDTH,
+            NUM_BUS_IDS,
+        );
+        assert!(
+            session_stack_residual_keyed(&s, &[], &challenges).is_empty(),
+            "the honest stack balances",
+        );
+        let residual = session_stack_residual_keyed(&s, &replacements, &challenges);
+        let expected: Vec<QuadFelt> = expected_out_of_range
+            .iter()
+            .map(|&w| Range16Msg { w }.encode(&challenges))
+            .collect();
+        assert_eq!(
+            residual.len(),
+            expected.len(),
+            "only out-of-range range checks stay unbalanced: {residual:?}",
+        );
+        for (denom, mult, _) in &residual {
+            assert!(
+                expected.contains(denom),
+                "every residual entry is a predicted Range16 message"
+            );
+            assert_eq!(*mult, Felt::ONE, "each out-of-range range check is requested once");
+        }
+    }
 }
 
 #[test]
