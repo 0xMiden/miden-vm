@@ -829,7 +829,7 @@ fn plain_exec_preserves_reexported_function_identity() -> TestResult {
     let library = Assembler::new(context.source_manager()).assemble_library("dep", root, [dep])?;
     let library = Arc::new(Package::read_from_bytes(&library.to_bytes()).into_diagnostic()?);
     let library_debug = library.debug_info().into_diagnostic()?.unwrap();
-    let expected = ["::dep::foo", "::dep::other"];
+    let expected = ["::root::bar", "::root::baz"];
     assert_eq!(library_debug.functions()[0].mast_root, library_debug.functions()[1].mast_root);
 
     for (linkage, tail) in
@@ -915,6 +915,110 @@ fn plain_exec_prefers_named_function_with_shared_provenance() -> TestResult {
         assert_eq!(calls.len(), 1, "named exec must retain its invocation row under {linkage:?}");
         let function = debug.get_function(calls[0].callee_idx).unwrap();
         assert_eq!(debug[function.name_idx].as_ref(), "::dep::foo");
+    }
+    Ok(())
+}
+
+#[test]
+fn plain_exec_preserves_dynamic_dependency_reexports() -> TestResult {
+    use miden_core::serde::{Deserializable, Serializable};
+
+    let context = TestContext::default();
+    let dependency = Assembler::new(context.source_manager()).assemble_library(
+        "dep",
+        "namespace dep\n@source_name(\"same\")\npub proc foo() -> felt\n push.42\nend\n@source_name(\"same\")\npub proc other() -> felt\n push.42\nend",
+        None::<String>,
+    )?;
+    let bridge = Assembler::new(context.source_manager())
+        .with_package(Arc::from(dependency), Linkage::Dynamic)?
+        .assemble_library(
+            "bridge",
+            "namespace bridge\npub use {foo as bar, other as baz} from dep",
+            None::<String>,
+        )?;
+    let bridge = Arc::new(Package::read_from_bytes(&bridge.to_bytes()).into_diagnostic()?);
+    let bridge_debug = bridge.debug_info().into_diagnostic()?.unwrap();
+    for path in ["::bridge::bar", "::bridge::baz"] {
+        let function = bridge_debug
+            .functions()
+            .iter()
+            .find(|function| {
+                let name = function.linkage_name_idx.into_option().unwrap_or(function.name_idx);
+                bridge_debug[name].as_ref() == path
+            })
+            .expect("re-exports must retain their declaration");
+        assert!(function.type_idx.into_option().is_some());
+        assert_eq!(function.source_node.into_option(), None);
+    }
+    for linkage in [Linkage::Static, Linkage::Dynamic] {
+        let package = Assembler::new(context.source_manager())
+            .with_package(Arc::clone(&bridge), linkage)?
+            .assemble_program(
+                "test",
+                "use bridge\nbegin exec.bridge::bar drop exec.bridge::baz drop end",
+            )?;
+        let package = Package::read_from_bytes(&package.to_bytes()).into_diagnostic()?;
+        let debug = package.debug_info().into_diagnostic()?.unwrap();
+        let root = package.entrypoint_source_node().unwrap();
+        let calls = reachable_source_nodes(&debug, root)
+            .iter()
+            .flat_map(|source| debug[*source].inline_calls.iter())
+            .collect::<Vec<_>>();
+        assert_eq!(calls.len(), 2);
+        assert_ne!(calls[0].callee_idx, calls[1].callee_idx);
+        let mut paths = Vec::new();
+        for call in calls {
+            let function = debug.get_function(call.callee_idx).unwrap();
+            assert!(function.type_idx.into_option().is_some());
+            assert_eq!(function.source_node.into_option(), None);
+            assert!(debug.get_location(call.loc_idx).is_some());
+            paths.push(debug[function.linkage_name_idx.into_option().unwrap()].to_string());
+        }
+        paths.sort();
+        assert_eq!(paths, ["::bridge::bar", "::bridge::baz"]);
+    }
+    Ok(())
+}
+
+#[test]
+fn static_imports_preserve_resolved_external_inline_calls_in_either_order() -> TestResult {
+    let context = TestContext::default();
+    let dependency: Arc<Package> =
+        Arc::from(Assembler::new(context.source_manager()).assemble_library(
+            "dep",
+            "namespace dep\npub proc foo push.42 end\npub proc marker push.43 end",
+            None::<String>,
+        )?);
+    let bridge: Arc<Package> = Arc::from(
+        Assembler::new(context.source_manager())
+            .with_package(Arc::clone(&dependency), Linkage::Dynamic)?
+            .assemble_library(
+                "bridge",
+                "namespace bridge\nuse dep\npub proc wrapper exec.dep::foo end\npub proc other exec.dep::foo end",
+                None::<String>,
+            )?,
+    );
+    for calls in [
+        "exec.dep::foo drop exec.bridge::wrapper drop exec.bridge::other drop",
+        "exec.bridge::other drop exec.bridge::wrapper drop exec.dep::foo drop",
+    ] {
+        let package = Assembler::new(context.source_manager())
+            .with_package(Arc::clone(&dependency), Linkage::Static)?
+            .with_package(Arc::clone(&bridge), Linkage::Static)?
+            .assemble_program("test", format!("use dep\nuse bridge\nbegin {calls} end"))?;
+        let debug = package.debug_info().into_diagnostic()?.unwrap();
+        let root = package.entrypoint_source_node().unwrap();
+        let mut names = reachable_source_nodes(&debug, root)
+            .iter()
+            .flat_map(|source| debug[*source].inline_calls.iter())
+            .map(|call| debug[debug.get_function(call.callee_idx).unwrap().name_idx].to_string())
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(
+            names,
+            ["::bridge::other", "::bridge::wrapper", "::dep::foo", "::dep::foo", "::dep::foo"],
+            "{calls}"
+        );
     }
     Ok(())
 }

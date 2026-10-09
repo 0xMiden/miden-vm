@@ -666,10 +666,23 @@ impl Assembler {
                             item.source_debug_root_id().map(DebugSourceNodeId::from),
                             mast_forest_builder,
                         )?;
+                        let path = self.linker[gid.module].path().join(&item.name);
+                        if let Some(library_id) = item.source_library_commitment()
+                            && let Some(library) = self.linker.library_by_commitment(library_id)
+                        {
+                            mast_forest_builder.import_procedure_function(
+                                gid,
+                                library_id,
+                                library,
+                                &path,
+                                item.source_debug_root_id().map(DebugSourceNodeId::from),
+                                item.digest,
+                            )?;
+                        }
                         ResolvedProcedure {
                             node,
                             signature: item.signature.clone(),
-                            function: None,
+                            function: mast_forest_builder.procedure_function_index(gid),
                         }
                     },
                 };
@@ -737,6 +750,9 @@ impl Assembler {
             },
         };
 
+        if let PendingPackageExport::Procedure(procedure) = &export {
+            mast_forest_builder.record_exported_function(gid, &procedure.path);
+        }
         Ok(export)
     }
 

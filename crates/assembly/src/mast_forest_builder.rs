@@ -128,6 +128,8 @@ pub struct MastForestBuilder {
     nodes: IndexVec<MastNodeRef, PendingMastNode>,
     /// Most recent source occurrence for each execution node ref.
     latest_source_ref_by_node_ref: BTreeMap<MastNodeRef, SourceNodeRef>,
+    /// Most recent concrete occurrence, excluding normalized external invocation boundaries.
+    concrete_source_ref_by_node_ref: BTreeMap<MastNodeRef, SourceNodeRef>,
     /// Selectable source occurrences recorded for each execution node ref, in creation order.
     ///
     /// Supplemental range records created while merging blocks are excluded because they do not
@@ -583,6 +585,26 @@ impl MastForestBuilder {
         self.procedure_function_indices.get(&gid).copied()
     }
 
+    /// Retains the public linkage identity of a re-export without inventing a definition.
+    pub(crate) fn record_exported_function(
+        &mut self,
+        gid: GlobalItemIndex,
+        path: &miden_assembly_syntax::Path,
+    ) {
+        let Some(index) = self.procedure_function_index(gid) else {
+            return;
+        };
+        let mut function = self.debug_info[index];
+        let name = function.linkage_name_idx.into_option().unwrap_or(function.name_idx);
+        if self.debug_info[name].as_ref() == path.as_str() {
+            return;
+        }
+        // Keep the original source name, signature, location, and canonical definition (if any).
+        // The gid still names the defining procedure; only the export uses this new linkage name.
+        function.linkage_name_idx = Some(self.debug_info.add_string(path.as_str())).into();
+        self.debug_info.add_function(function);
+    }
+
     /// Records a source occurrence of an `exec` target under the supplied inline call chain.
     ///
     /// `exec` reuses the callee's execution node instead of creating a control node. Clone its
@@ -761,13 +783,32 @@ impl MastForestBuilder {
         let is_external_boundary = draft.kind.is_external();
         if is_external_boundary && !self.nodes[exec_ref].kind.is_external() {
             let source_ref = self
-                .latest_source_ref_by_node_ref
+                .concrete_source_ref_by_node_ref
                 .get(&exec_ref)
                 .copied()
                 .expect("a concrete execution node must have a source occurrence");
-            for function in &draft.functions {
-                self.debug_info.set_function_source_node(*function, source_ref);
+            if !draft.inline_calls.is_empty() || !draft.functions.is_empty() {
+                let source_node = self.source_occurrence_with_inline_calls(
+                    source_ref,
+                    &draft.inline_calls,
+                    &mut BTreeMap::new(),
+                )?;
+                // Keep the concrete occurrence as the basis for later external imports, so
+                // independent wrappers cannot inherit one another's invocation frames.
+                return self.push_source_occurrence(
+                    exec_ref,
+                    source_node.children,
+                    source_node.op_start as usize,
+                    source_node.op_end as usize,
+                    source_node.asm_ops,
+                    source_node.debug_vars,
+                    source_node.inline_calls,
+                    &draft.functions,
+                    false,
+                    true,
+                );
             }
+            self.latest_source_ref_by_node_ref.insert(exec_ref, source_ref);
             return Ok(source_ref);
         }
 
@@ -785,6 +826,7 @@ impl MastForestBuilder {
         )?;
 
         if !is_external_boundary {
+            self.concrete_source_ref_by_node_ref.insert(exec_ref, source_ref);
             self.remap_external_boundary_occurrences(exec_ref, source_ref)?;
         }
 
@@ -2025,6 +2067,54 @@ mod tests {
         assert_eq!(builder.latest_source_ref_for_node_ref(external_ref), Some(target.source_ref()));
         assert_eq!(builder.debug_info.debug_info().nodes().len(), source_node_count);
         assert!(builder.external_boundary_source_refs.is_empty());
+    }
+
+    #[test]
+    fn resolved_external_definitions_keep_distinct_source_occurrences() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let target = builder
+            .ensure_block_use(vec![Operation::Add], vec![], vec![], vec![], vec![])
+            .unwrap();
+        let mast_root = builder.nodes[target.node_ref()].digest;
+        let function = {
+            let debug_info = builder.debug_info_mut();
+            let loc = debug_info.add_location(Location::new(
+                Uri::from("file:///wrapper.masm"),
+                ByteIndex::from(0u32),
+                ByteIndex::from(1u32),
+            ));
+            let file = debug_info.debug_info().locations()[loc].file_idx;
+            let name = debug_info.add_string("wrapper");
+            debug_info.add_function(FunctionInfo::new(
+                None,
+                name,
+                file,
+                LineNumber::new(1).unwrap(),
+                ColumnNumber::new(1).unwrap(),
+                mast_root,
+            ))
+        };
+        let mut draft =
+            PendingMastNodeDraft::new(PendingMastNodeKind::External, mast_root, Vec::new());
+        draft.functions.push(function);
+        let wrapper = builder.intern_pending_node_use(draft.clone(), Vec::new()).unwrap();
+        assert_ne!(wrapper.source_ref(), target.source_ref());
+        assert_eq!(
+            builder.debug_info[function].source_node.into_option(),
+            Some(wrapper.source_ref())
+        );
+        assert_eq!(builder.latest_node_use(target.node_ref()), Some(wrapper));
+        assert_eq!(
+            builder.concrete_source_ref_by_node_ref[&target.node_ref()],
+            target.source_ref()
+        );
+
+        let repeated = builder.intern_pending_node_use(draft, Vec::new()).unwrap();
+        assert_ne!(repeated.source_ref(), target.source_ref());
+        assert_eq!(
+            builder.debug_info[function].source_node.into_option(),
+            Some(wrapper.source_ref())
+        );
     }
 
     #[test]

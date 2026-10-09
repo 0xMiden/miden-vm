@@ -77,6 +77,19 @@ impl PackageDebugInfoDecodeLimits {
     };
 }
 
+fn check_decode_limit(
+    label: &str,
+    actual: usize,
+    limit: usize,
+) -> Result<(), DeserializationError> {
+    if actual > limit {
+        return Err(DeserializationError::InvalidValue(alloc::format!(
+            "{label} {actual} exceeds limit {limit}"
+        )));
+    }
+    Ok(())
+}
+
 // PACKAGE DEBUG INFO SERIALIZATION
 // ================================================================================================
 
@@ -134,6 +147,37 @@ impl Serializable for PackageDebugInfo {
 
 #[cfg(target_endian = "little")]
 impl PackageDebugInfo {
+    /// Encodes debug information after checking the standard decoder's fixed resource limits.
+    ///
+    /// This lets producers reject metadata that a normal package consumer could not read, without
+    /// decoding another copy of the tables. Ordinary serialization remains unmetered. This checks
+    /// resource limits, not table references or the package's source graph.
+    pub fn to_bytes_with_standard_limits(&self) -> Result<Vec<u8>, DeserializationError> {
+        self.to_bytes_with_limits(PackageDebugInfoDecodeLimits::BOUNDED)
+    }
+
+    fn to_bytes_with_limits(
+        &self,
+        limits: PackageDebugInfoDecodeLimits,
+    ) -> Result<Vec<u8>, DeserializationError> {
+        for (label, actual, limit) in [
+            ("debug_info strings count", self.strings.len(), limits.string_rows),
+            ("debug_info types count", self.types.len(), limits.type_rows),
+        ] {
+            check_decode_limit(label, actual, limit)?;
+        }
+        for string in self.strings.iter() {
+            check_decode_limit("debug string size", string.len(), limits.string_size)?;
+        }
+
+        let bytes = self.to_bytes();
+        let mut header = miden_core::serde::SliceReader::new(&bytes);
+        header.read_u8()?;
+        let payload_size = header.read_usize()?;
+        check_decode_limit("package debug info payload size", payload_size, limits.payload_size)?;
+        Ok(bytes)
+    }
+
     /// Reads package debug information without the fixed resource limits enforced by
     /// [`Self::read_from`].
     ///
@@ -169,23 +213,13 @@ impl PackageDebugInfo {
         }
 
         let data_len = read_bounded_len(source, "package debug info", 1)?;
-        if data_len > limits.payload_size {
-            return Err(DeserializationError::InvalidValue(format!(
-                "package debug info payload size {data_len} exceeds limit {}",
-                limits.payload_size,
-            )));
-        }
+        check_decode_limit("package debug info payload size", data_len, limits.payload_size)?;
         let data = source.read_slice(data_len)?;
         let aligned = AlignedBytes::copy_from_slice(data, POD_BUFFER_ALIGNMENT)?;
         let mut source = PodSliceReader::new(aligned.as_slice());
 
         let strings_len = read_bounded_len(&mut source, "debug_info strings", 1)?;
-        if strings_len > limits.string_rows {
-            return Err(DeserializationError::InvalidValue(format!(
-                "debug_info strings count {strings_len} exceeds limit {}",
-                limits.string_rows,
-            )));
-        }
+        check_decode_limit("debug_info strings count", strings_len, limits.string_rows)?;
         let mut strings = Vec::new();
         for _ in 0..strings_len {
             strings.push(read_string(&mut source, limits.string_size)?);
@@ -208,12 +242,7 @@ impl PackageDebugInfo {
             "debug_info types",
             DebugTypeInfo::min_serialized_size(),
         )?;
-        if types_len > limits.type_rows {
-            return Err(DeserializationError::InvalidValue(format!(
-                "debug_info types count {types_len} exceeds limit {}",
-                limits.type_rows,
-            )));
-        }
+        check_decode_limit("debug_info types count", types_len, limits.type_rows)?;
         let types = source.read_many_iter(types_len)?.collect::<Result<Vec<DebugTypeInfo>, _>>()?;
         let types = IndexVec::try_from(types).map_err(|_| {
             DeserializationError::InvalidValue(
@@ -903,11 +932,7 @@ fn read_string<R: ByteReader>(
     max_size: usize,
 ) -> Result<Arc<str>, DeserializationError> {
     let len = read_bounded_len(source, "debug string bytes", 1)?;
-    if len > max_size {
-        return Err(DeserializationError::InvalidValue(alloc::format!(
-            "debug string size {len} exceeds limit {max_size}"
-        )));
-    }
+    check_decode_limit("debug string size", len, max_size)?;
     let bytes = source.read_slice(len)?;
     let s = core::str::from_utf8(bytes).map_err(|err| {
         DeserializationError::InvalidValue(alloc::format!("invalid utf-8 in string: {err}"))
@@ -925,6 +950,7 @@ fn read_debug_type_indices<R: ByteReader>(
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::ToString;
     use core::cell::Cell;
 
     use miden_assembly_syntax::ast::DebugVarLocation;
@@ -1625,6 +1651,42 @@ mod tests {
     }
 
     #[test]
+    fn checked_encoding_matches_standard_decoder_limits() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        builder.add_string("hello");
+        builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Felt));
+        let debug = builder.build();
+        let bytes = debug.to_bytes_with_standard_limits().unwrap();
+        assert_eq!(bytes, debug.to_bytes());
+        assert_eq!(PackageDebugInfo::read_from_bytes(&bytes).unwrap(), *debug);
+
+        for limits in [
+            PackageDebugInfoDecodeLimits {
+                payload_size: 0,
+                ..PackageDebugInfoDecodeLimits::BOUNDED
+            },
+            PackageDebugInfoDecodeLimits {
+                string_rows: 0,
+                ..PackageDebugInfoDecodeLimits::BOUNDED
+            },
+            PackageDebugInfoDecodeLimits {
+                string_size: 0,
+                ..PackageDebugInfoDecodeLimits::BOUNDED
+            },
+            PackageDebugInfoDecodeLimits {
+                type_rows: 0,
+                ..PackageDebugInfoDecodeLimits::BOUNDED
+            },
+        ] {
+            let encode_error = debug.to_bytes_with_limits(limits).unwrap_err();
+            let mut reader = miden_core::serde::SliceReader::new(&bytes);
+            let decode_error =
+                PackageDebugInfo::read_from_with_limits(&mut reader, limits).unwrap_err();
+            assert_eq!(encode_error.to_string(), decode_error.to_string());
+        }
+    }
+
+    #[test]
     fn package_debug_info_decodes_merged_dependency_tables() {
         // Dynamic exec currently imports entire dependency tables. Each dependency is readable
         // on its own, but their distinct strings together exceed the former 32 MiB limit.
@@ -1649,6 +1711,25 @@ mod tests {
         let decoded = PackageDebugInfo::read_from_bytes(&bytes)
             .expect("merged dependency debug tables must remain readable");
         assert_eq!(decoded.strings().len(), 2 * STRING_COUNT);
+        assert_eq!(decoded, *merged);
+    }
+
+    #[test]
+    fn package_debug_info_decodes_merged_dependency_string_rows() {
+        let mut merged = PackageDebugInfoBuilder::default();
+        for dependency in ['a', 'b'] {
+            let mut builder = PackageDebugInfoBuilder::default();
+            for index in 0..60_000 {
+                builder.add_string(alloc::format!("{dependency}:{index}"));
+            }
+            let bytes = builder.build().to_bytes();
+            let debug = PackageDebugInfo::read_from_bytes(&bytes).unwrap();
+            debug.merge_tables_into(&mut merged).unwrap();
+        }
+        let merged = merged.build();
+        let decoded = PackageDebugInfo::read_from_bytes(&merged.to_bytes())
+            .expect("merged string tables from readable dependencies must remain readable");
+        assert_eq!(decoded.strings().len(), 120_000);
         assert_eq!(decoded, *merged);
     }
 
