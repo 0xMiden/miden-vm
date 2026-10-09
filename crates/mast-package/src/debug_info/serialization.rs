@@ -24,6 +24,7 @@ use super::{
     MAX_DEBUG_INFO_STRING_ROWS, MAX_DEBUG_INFO_STRING_SIZE, MAX_DEBUG_INFO_TYPE_ROWS,
     OptionalIndex, PackageDebugInfo,
 };
+use crate::serde_helpers::read_capped_str;
 
 /// Base alignment for copied payloads. The assertions below ensure that this is sufficient for
 /// every row type decoded directly from the payload.
@@ -895,17 +896,12 @@ fn read_string<R: ByteReader>(
     source: &mut R,
     max_size: usize,
 ) -> Result<Arc<str>, DeserializationError> {
-    let len = read_bounded_len(source, "debug string bytes", 1)?;
-    if len > max_size {
-        return Err(DeserializationError::InvalidValue(alloc::format!(
+    let value = read_capped_str(source, "debug string bytes", max_size, |len| {
+        DeserializationError::InvalidValue(alloc::format!(
             "debug string size {len} exceeds limit {max_size}"
-        )));
-    }
-    let bytes = source.read_slice(len)?;
-    let s = core::str::from_utf8(bytes).map_err(|err| {
-        DeserializationError::InvalidValue(alloc::format!("invalid utf-8 in string: {err}"))
+        ))
     })?;
-    Ok(Arc::from(s))
+    Ok(Arc::from(value))
 }
 
 fn read_debug_type_indices<R: ByteReader>(

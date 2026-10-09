@@ -1671,6 +1671,84 @@ end
     );
 }
 
+/// A library assembled as a project root with a post-processor carries a section a dependency build
+/// never produces, so it must not be reused as that library's source-dependency artifact.
+#[test]
+fn a_post_processed_root_artifact_is_not_reused_as_a_source_dependency() {
+    let tempdir = TempDir::new().unwrap();
+    let dep_dir = tempdir.path().join("dep");
+    let dep_manifest = dep_dir.join("miden-project.toml");
+    write_file(
+        &dep_manifest,
+        r#"[package]
+name = "dep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    );
+    write_file(
+        &dep_dir.join("lib.masm"),
+        r#"pub proc foo
+    push.1
+end
+"#,
+    );
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+dep = { path = "../dep" }
+"#,
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"pub proc entry
+    exec.::dep::foo
+end
+"#,
+    );
+
+    // Build `dep` as a project root with a post-processor, then publish that artifact: its source
+    // provenance matches a dependency build of the same sources, only the extra section differs.
+    let mut context = TestContext::new();
+    let mut dep_assembler = context.project_assembler_for_path(&dep_manifest).unwrap();
+    dep_assembler.with_package_post_processor(MarkerPostProcessor {
+        tag: "pp-root",
+        invocations: Arc::new(std::sync::Mutex::new(Vec::new())),
+    });
+    let post_processed = dep_assembler
+        .assemble(ProjectTargetSelector::Library, "dev")
+        .expect("root build of dep should succeed");
+    assert!(
+        post_processed
+            .sections
+            .iter()
+            .any(|section| section.id == SectionId::custom("pp-root").unwrap())
+    );
+    context.registry_mut().add_package(post_processed);
+
+    let error = context
+        .assemble_library_package(&root_manifest, None)
+        .expect_err("a post-processed root artifact must not be reused as a dependency");
+    let message = error.to_string();
+    assert!(
+        message.contains("a dependency build does not produce"),
+        "unexpected error: {message}"
+    );
+    assert!(message.contains("pp-root"), "unexpected error: {message}");
+}
+
 #[test]
 fn root_package_is_not_auto_published_when_assembling_source_dependencies() {
     let tempdir = TempDir::new().unwrap();
@@ -3362,4 +3440,247 @@ fn read_usize_vint64(bytes: &[u8], offset: &mut usize) -> usize {
         let value = u64::from_le_bytes(encoded) >> length;
         usize::try_from(value).expect("encoded usize does not fit host usize")
     }
+}
+
+// PACKAGE POST-PROCESSORS
+// ================================================================================================
+
+/// A test processor that records its invocation and appends a marker custom section, so a test
+/// can observe both the invocation order and the package mutation.
+struct MarkerPostProcessor {
+    tag: &'static str,
+    invocations: Arc<std::sync::Mutex<Vec<&'static str>>>,
+}
+
+impl PackagePostProcessor for MarkerPostProcessor {
+    fn post_process(
+        &self,
+        package: &mut MastPackage,
+        context: &PostProcessContext<'_>,
+    ) -> Result<(), Report> {
+        // The context must expose the resolved project manifest of the package under assembly.
+        assert!(context.assembly.manifest_path.ends_with("miden-project.toml"));
+        self.invocations.lock().unwrap().push(self.tag);
+        package
+            .sections
+            .push(Section::new(SectionId::custom(self.tag).unwrap(), Vec::new()));
+        Ok(())
+    }
+}
+
+/// Writes a minimal library project and returns its manifest path.
+fn write_post_processor_fixture(tempdir: &TempDir) -> PathBuf {
+    let manifest_path = tempdir.path().join("miden-project.toml");
+    write_file(
+        &manifest_path,
+        r#"[package]
+name = "postproc"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    );
+    write_file(
+        &tempdir.path().join("lib.masm"),
+        r#"pub proc helper
+    push.1
+    push.2
+    add
+end
+"#,
+    );
+    manifest_path
+}
+
+#[test]
+fn package_post_processors_default_to_empty() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_post_processor_fixture(&tempdir);
+
+    let mut registry = TestRegistry::default();
+    let mut project_assembler =
+        Assembler::default().for_project_at_path(&manifest_path, &mut registry).unwrap();
+    assert!(project_assembler.post_processors.is_empty());
+
+    let package = project_assembler
+        .assemble(ProjectTargetSelector::Library, "dev")
+        .expect("assembly without post-processors should succeed");
+    assert!(
+        !package
+            .sections
+            .iter()
+            .any(|section| section.id == SectionId::custom("pp-a").unwrap())
+    );
+}
+
+#[test]
+fn package_post_processors_run_in_registration_order() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_post_processor_fixture(&tempdir);
+
+    let invocations = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut registry = TestRegistry::default();
+    let mut project_assembler =
+        Assembler::default().for_project_at_path(&manifest_path, &mut registry).unwrap();
+    project_assembler
+        .with_package_post_processor(MarkerPostProcessor {
+            tag: "pp-a",
+            invocations: invocations.clone(),
+        })
+        .with_package_post_processor(MarkerPostProcessor {
+            tag: "pp-b",
+            invocations: invocations.clone(),
+        });
+
+    let package = project_assembler
+        .assemble(ProjectTargetSelector::Library, "dev")
+        .expect("assembly with post-processors should succeed");
+
+    assert_eq!(invocations.lock().unwrap().as_slice(), &["pp-a", "pp-b"]);
+    let marker_positions: Vec<_> = package
+        .sections
+        .iter()
+        .enumerate()
+        .filter_map(|(index, section)| {
+            (section.id == SectionId::custom("pp-a").unwrap()
+                || section.id == SectionId::custom("pp-b").unwrap())
+            .then_some((index, section.id.clone()))
+        })
+        .collect();
+    assert_eq!(marker_positions.len(), 2);
+    // The sections appear in registration order because the processors run in that order.
+    assert_eq!(marker_positions[0].1, SectionId::custom("pp-a").unwrap());
+    assert_eq!(marker_positions[1].1, SectionId::custom("pp-b").unwrap());
+}
+
+#[test]
+fn manually_provided_sources_skip_package_post_processors() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_post_processor_fixture(&tempdir);
+
+    let invocations = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut registry = TestRegistry::default();
+    let mut project_assembler =
+        Assembler::default().for_project_at_path(&manifest_path, &mut registry).unwrap();
+    project_assembler.with_package_post_processor(MarkerPostProcessor {
+        tag: "pp-manual",
+        invocations: invocations.clone(),
+    });
+
+    let project = project_assembler.project.clone();
+    let target = ProjectTargetSelector::Library.select_target(project.as_ref()).unwrap();
+    let source_manager = project_assembler.assembler.source_manager();
+    let root_path = tempdir.path().join("lib.masm").canonicalize().unwrap();
+    let (root, support) = miden_assembly_syntax::parser::read_modules_from_root(
+        &root_path,
+        Some(target.namespace.inner().clone()),
+        Some(ModuleKind::Library),
+        source_manager,
+        false,
+    )
+    .unwrap();
+
+    let root_id = project_assembler.dependency_graph.root().clone();
+    let mut cache = BTreeMap::new();
+    let resolved = match project_assembler
+        .assemble_source_package(
+            root_id,
+            project,
+            &target,
+            "dev",
+            InterruptedTargetRole::Root,
+            None,
+            Some(ProjectSourceInputs { root, support }),
+            None,
+            &mut cache,
+        )
+        .expect("assembly from manual sources should succeed")
+    {
+        ControlFlow::Continue(resolved) => resolved,
+        ControlFlow::Break(_) => panic!("assembly should not be interrupted"),
+    };
+
+    assert!(invocations.lock().unwrap().is_empty());
+    assert!(
+        !resolved
+            .package
+            .sections
+            .iter()
+            .any(|section| section.id == SectionId::custom("pp-manual").unwrap())
+    );
+}
+
+#[test]
+fn source_dependencies_skip_package_post_processors() {
+    let tempdir = TempDir::new().unwrap();
+
+    let dep_dir = tempdir.path().join("pathdep");
+    write_file(
+        &dep_dir.join("miden-project.toml"),
+        r#"[package]
+name = "pathdep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "deps::pathdep"
+"#,
+    );
+    write_file(
+        &dep_dir.join("lib.masm"),
+        r#"pub proc leaf
+    push.7
+    drop
+end
+"#,
+    );
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+pathdep = { path = "../pathdep", linkage = "static" }
+"#,
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"use ::deps::pathdep
+
+pub proc entry
+    exec.pathdep::leaf
+end
+"#,
+    );
+
+    let invocations = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut registry = TestRegistry::default();
+    let mut project_assembler =
+        Assembler::default().for_project_at_path(&root_manifest, &mut registry).unwrap();
+    project_assembler.with_package_post_processor(MarkerPostProcessor {
+        tag: "pp-root-only",
+        invocations: invocations.clone(),
+    });
+
+    let package = project_assembler
+        .assemble(ProjectTargetSelector::Library, "dev")
+        .expect("the root and its source dependency assemble");
+
+    // The processor ran exactly once — for the root package, not for the source dependency —
+    // and the one marker section sits on the root package.
+    assert_eq!(invocations.lock().unwrap().len(), 1);
+    assert!(
+        package
+            .sections
+            .iter()
+            .any(|section| section.id == SectionId::custom("pp-root-only").unwrap())
+    );
 }
