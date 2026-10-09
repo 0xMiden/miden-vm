@@ -15,7 +15,7 @@ You can execute a program on Miden VM and generate a STARK proof of its executio
 Anyone can verify the proof without executing the program again or knowing its source code.
 
 The prover uses the [lifted STARK protocol](crates/lifted-stark) with components from
-[Plonky3](https://github.com/0xMiden/Plonky3) and [`p3-miden`](https://github.com/0xMiden/p3-miden).
+[Plonky3](https://github.com/Plonky3/Plonky3).
 
 For usage examples and the Rust API, see the [miden-vm crate](miden-vm).
 The [documentation](https://docs.miden.xyz/miden-vm/) covers the VM design and programming model.
