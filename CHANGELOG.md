@@ -43,7 +43,6 @@
 
 #### Fixes
 
-- [BREAKING] `Package::strip_debug_info` strips an embedded kernel one level deep and rejects a kernel section that embeds another kernel with the new `PackageStripError::NestedEmbeddedKernel`, instead of recursing until the stack overflows ([#3981](https://github.com/0xMiden/miden-vm/pull/3981)).
 - Fixed linker module-capacity overflow so AST and pre-assembled module registration return a structured error instead of panicking ([#3895](https://github.com/0xMiden/miden-vm/issues/3895)).
 - [BREAKING] `MmrPeaks::verify` now takes the tree, peak and relative position from the peaks' forest instead of the proof's, and rejects positions outside that forest (`PositionNotFound`, previously a panic) and paths whose depth differs from the tree height (`InvalidMerklePath`) ([#3931](https://github.com/0xMiden/miden-vm/pull/3931)).
 
