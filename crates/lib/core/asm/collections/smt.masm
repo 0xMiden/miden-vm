@@ -764,7 +764,7 @@ proc insert_single_leaf(
         # => [K_l, K, V_l, V, R]
 
         exec.insert_single_to_multi_leaf
-        # => [V_l, R_new]
+        # => [ZERO, R_new]
     end
 end
 
@@ -772,12 +772,12 @@ end
 #! converting the leaf to a multi-leaf.
 #!
 #! Inputs: [K_l, K, V_l, V, R]
-#! Outputs: [V_l, R_new]
+#! Outputs: [ZERO, R_new]
 #!
 #! where:
 #! - `K_l` is the original key stored in the single-leaf.
 #! - `V_l` is the original value stored in the single-leaf.
-#! - `K` is the new key to insert.
+#! - `K` is the new key to insert, distinct from `K_l`.
 #! - `V` is the new value to insert.
 #! - `R` is the root of the original SMT.
 #! - `R_new` is the root of the SMT after the insertion.
@@ -800,7 +800,7 @@ proc insert_single_to_multi_leaf(
     # => [K_l < K, K_l, K, V_l, V, R]
 
     # We need a contiguous region of memory containing the sorted pairs. Converting a single-leaf
-    # To a multi-leaf will always involve 2 pairs (8 words), so we can use local memory for this.
+    # to a multi-leaf will always involve 2 pairs (4 words), so we can use local memory for this.
 
     if.true
         # => [K_l, K, V_l, V, R]
@@ -1252,14 +1252,8 @@ proc replace_in_multi_leaf(
     # => [V_old, R_new]
 end
 
-#! Removes a key-value pair from a multi-leaf.
-#!
-#! LOCALS: MAX_LEAF_SIZE of key-value pairs + 4 pointers:
-#! - pairs_array_start: pointer to the start of the original leaf data
-#! - pairs_array_end: pointer to the end of the original leaf data
-#! - cur_read: pointer to the current read position in the original leaf data
-#! - cur_write: pointer to the current write position
-@locals(8196)
+#! Removes a key-value pair in place from the caller's multi-leaf buffer.
+@locals(2)
 proc remove_in_multi_leaf(
     key_ptr: ptr<Entry>,
     start_ptr: ptr<Entry>,
@@ -1273,19 +1267,11 @@ proc remove_in_multi_leaf(
     # LOCALS:
     # 0: pairs_array_start
     # 1: pairs_array_end
-    # 2: cur_read
-    # 3: cur_write
-    # 8..8196: leaf memory space
 
     movdn.6
     # => [start_ptr, end_ptr, V=EMPTY, key_ptr, K, R]
-    dup loc_store.0 # start_ptr
-    loc_store.2 # cur_read = start_ptr
+    loc_store.0 # start_ptr
     loc_store.1 # end_ptr
-    # => [V, key_ptr, K, R]
-
-    # cur_write = &LOCALS[4]
-    locaddr.4 loc_store.3
     # => [V=EMPTY, key_ptr, K, R]
 
     # Get V_in_leaf from key_ptr+4. We'll need it later. Since we know V is an
@@ -1309,7 +1295,7 @@ proc remove_in_multi_leaf(
     exec.memmove_word_range_left_and_advance_ptrs
     # => [cur_read', cur_write'; V_old, K, R]
 
-    drop loc_store.3
+    drop loc_store.1 # pairs_array_end after removal
     # => [V_old, K, R]
 
     movupw.2
@@ -1319,7 +1305,7 @@ proc remove_in_multi_leaf(
     dup.11
     # => [leaf_index, R, V_old, K]
 
-    loc_load.3 loc_load.0
+    loc_load.1 loc_load.0
     # => [start_addr, end_addr, leaf_index, R; V_old, K]
 
     exec.hash_and_insert_mem
