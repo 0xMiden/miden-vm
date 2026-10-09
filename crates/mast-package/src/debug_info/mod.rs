@@ -29,9 +29,10 @@ pub const DEBUG_INFO_VERSION: u8 = 4;
 /// Maximum encoded payload size accepted for package-owned debug information.
 ///
 /// Decoding temporarily retains the encoded section, an aligned copy, and decoded table storage,
-/// so this cap bounds peak memory before any package-level validation can run. The allowance
-/// accommodates the bundled core library's per-operation invocation metadata.
-pub const MAX_DEBUG_INFO_PAYLOAD_SIZE: usize = 32 * 1024 * 1024;
+/// so this cap bounds peak memory before any package-level validation can run. Assembly currently
+/// imports complete shared dependency tables even for dynamic `exec`, so the allowance accommodates
+/// several large libraries until selective debug-table imports are available.
+pub const MAX_DEBUG_INFO_PAYLOAD_SIZE: usize = 256 * 1024 * 1024;
 
 /// Maximum number of rows accepted in the variable-width debug string table.
 pub const MAX_DEBUG_INFO_STRING_ROWS: usize = 100_000;
