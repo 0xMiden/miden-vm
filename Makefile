@@ -194,8 +194,12 @@ test-build: ## Build the test binaries for the workspace (no run)
 	$(MAKE) core-test-build FEATURES="$(WORKSPACE_TEST_FEATURES)"
 
 .PHONY: test
-test: ## Run the standard workspace test suite
+test: test-masm-root-stability ## Run the standard workspace test suite
 	$(MAKE) core-test FEATURES="$(WORKSPACE_TEST_FEATURES)"
+
+.PHONY: test-masm-root-stability
+test-masm-root-stability: ## Test the release gate's version policy
+	bash scripts/test-check-masm-root-stability.sh
 
 .PHONY: test-crypto
 # Ordinary crypto, field, serde, derive, and Wycheproof tests run in the standard workspace suite.
@@ -215,7 +219,7 @@ test-docs: ## Run documentation tests (cargo test - nextest doesn't support doct
 # -- filtered test runs ---------------------------------------------------------------------------
 
 .PHONY: test-fast
-test-fast: ## Runs fast tests (excludes all CLI tests and proptests)
+test-fast: test-masm-root-stability ## Runs fast tests (excludes all CLI tests and proptests)
 	# Keep this feature set aligned with `test` so both targets reuse the same test binaries.
 	$(MAKE) core-test \
 		FEATURES="$(WORKSPACE_TEST_FEATURES)" \
@@ -363,7 +367,14 @@ check-precompile-masm: ## Check generated precompile MASM artifacts for drift
 	cp crates/lib/core/asm/precompiles/u256.masm "$$generated_masm_tmp/tracked/asm/u256.masm"; \
 	cp crates/lib/core/asm/precompiles/fields/k1_base.masm "$$generated_masm_tmp/tracked/asm/fields/k1_base.masm"; \
 	cp crates/lib/core/asm/precompiles/fields/k1_scalar.masm "$$generated_masm_tmp/tracked/asm/fields/k1_scalar.masm"; \
+	cp crates/lib/core/asm/precompiles/fields/ed25519_base.masm "$$generated_masm_tmp/tracked/asm/fields/ed25519_base.masm"; \
+	cp crates/lib/core/asm/precompiles/fields/ed25519_order.masm "$$generated_masm_tmp/tracked/asm/fields/ed25519_order.masm"; \
+	cp crates/lib/core/asm/precompiles/fields/ed25519_scalar.masm "$$generated_masm_tmp/tracked/asm/fields/ed25519_scalar.masm"; \
 	cp crates/lib/core/asm/precompiles/curves/secp256k1.masm "$$generated_masm_tmp/tracked/asm/curves/secp256k1.masm"; \
+	cp crates/lib/core/asm/precompiles/curves/ed25519.masm "$$generated_masm_tmp/tracked/asm/curves/ed25519.masm"; \
+	cp crates/lib/core/asm/precompiles/fields/p256_base.masm "$$generated_masm_tmp/tracked/asm/fields/p256_base.masm"; \
+	cp crates/lib/core/asm/precompiles/fields/p256_scalar.masm "$$generated_masm_tmp/tracked/asm/fields/p256_scalar.masm"; \
+	cp crates/lib/core/asm/precompiles/curves/p256.masm "$$generated_masm_tmp/tracked/asm/curves/p256.masm"; \
 	diff -ru "$$generated_masm_tmp/tracked" "$$generated_masm_tmp/generated"
 
 .PHONY: regenerate-pvm-proof-fixture

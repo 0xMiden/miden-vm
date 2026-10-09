@@ -151,6 +151,7 @@ log             = { version = "0.4", default-features = false }
 num             = { version = "0.4", default-features = false }
 num-complex     = { version = "0.4", default-features = false, features = ["libm"] }
 once_cell       = { version = "1.21", default-features = false }
+p256            = { version = "0.14", default-features = false }
 paste           = { version = "1.0", default-features = false }
 proptest        = { version = "1.8", default-features = false, features = ["no_std", "alloc"] }
 proptest-derive = { version = "0.8", default-features = false }
@@ -216,6 +217,7 @@ tracing-forest = "0.3.1"
 walkdir = "2.5"
 wycheproof-ng-core = { version = "0.2.0", default-features = false }
 wycheproof-ng-dh = { version = "0.2.0", default-features = false }
+wycheproof-ng-ecdsa = { version = "0.2.0", default-features = false }
 wycheproof-ng-eddsa = { version = "0.2.0", default-features = false }
 
 [workspace.lints.rust]

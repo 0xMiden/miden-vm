@@ -125,7 +125,7 @@ end
 #!
 #! Cycles
 #!   Leaf empty: 67 cycles
-#!   Leaf single: 162 cycles
+#!   Leaf single: 186 cycles
 #!   Leaf multiple, found at first key: 294 + 239 * pair_count
 #!   Leaf multiple, found at last key: 242 + 291 * pair_count
 #!   Leaf multiple, missing before first key: 224 + 291 * pair_count
@@ -183,22 +183,22 @@ pub proc get(key: Key, root: eidos::Digest) -> (word, eidos::Digest)
             adv_pushw
             adv_pushw
             swapw
-            # => [K, V, NV, K, R]
-
-            # Confirm that the key stored in the leaf is as expected
-            # (18 cycles)
-            movupw.3 dupw.1 assert_eqw
-            # => [K, V, NV, R]
-
-            # Duplicate V to return it after hash check
-            # (7 cycles)
-            dupw.1 movdnw.3
-            # => [V, K, NV, V, R]
+            # => [K_l, V, NV, K, R]
 
             # Hash leaf preimage with domain separation and ensure that it equals node value
-            # (28 cycles)
-            push.LEAF_MERGE_INIT_CV exec.eidos::merge_with_chaining_word assert_eqw
-            # => [V, R]
+            # (39 cycles)
+            dupw.1 dupw.1
+            # => [K_l, V, K_l, V, NV, K, R]
+            push.LEAF_MERGE_INIT_CV exec.eidos::merge_with_chaining_word movupw.3 assert_eqw
+            # => [K_l, V, K, R]
+
+            # The leaf may hold a different key with the same leaf index. Return V if the stored
+            # key is the requested one, and the empty word otherwise.
+            # (37 cycles)
+            movupw.2 eqw movdn.8 dropw dropw
+            # => [is_same_key, V, R]
+            padw movup.4 not cdropw
+            # => [V or ZERO, R]
         else
             # => [leaf_size, NV, K, R]
 

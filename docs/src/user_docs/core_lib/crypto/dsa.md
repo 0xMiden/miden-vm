@@ -20,6 +20,35 @@ The module exposes the following procedures:
 | --------- | ----------- |
 | `verify` | Verifies a signature against a public key and a message. The procedure gets the hash of the public key and the hash of the message via the operand stack. The signature is expected to be provided via the advice provider.<br /><br />The signature is valid if and only if the procedure returns.<br /><br />Stack inputs: `[PK, MSG, ...]`<br />Advice stack inputs: `[SIGNATURE]`<br />Outputs: `[...]`<br /><br />Where `PK` is the hash of the public key and `MSG` is the hash of the message, and `SIGNATURE` is the signature being verified. Both hashes are expected to be computed using Eidos. |
 
+## Ed25519 SHA512
+
+Module `miden::core::crypto::dsa::eddsa_25519_sha512` verifies ordinary Ed25519 signatures. It proves
+`SHA-512(R || A || M)` and the exact signature equation, including canonical point encodings,
+`s < l`, and rejection of small-order public keys and signature points. It does not implement
+Ed25519ph or Ed25519ctx.
+
+| Procedure | Stack inputs | Description |
+|-----------|--------------|-------------|
+| `verify` | `[PK_COMM, MSG_WORD, ...]` | Verifies the 32 little-endian bytes of `MSG_WORD`. |
+| `verify_bytes` | `[PK_COMM, MSG_PTR, MSG_LEN_BYTES, SCRATCH_PTR, ...]` | Verifies an arbitrary-length message in memory, using caller-provided scratch. |
+
+Both procedures consume advice `[A[8] || R[8] || S[8]]`, with each element containing four bytes of
+the RFC 8032 encoding as a little-endian `u32`. `PK_COMM` is the Eidos commitment to the eight
+compressed-public-key limbs, matching `miden-crypto::PublicKey::to_commitment`. Helpers in
+`miden-core-lib::dsa::eddsa_25519_sha512` construct the commitment and advice. The signature is an
+uncommitted witness; callers needing to bind a particular signature must commit to its encoding.
+Successful verification consumes the inputs and pushes no result; invalid input traps.
+
+The MASM verifier has a stricter acceptance policy than `miden-crypto::PublicKey::verify`: it
+rejects noncanonical point encodings and small-order `A` or `R`, while that API uses dalek's
+non-strict verification. A signature accepted off-chain by the latter may therefore trap in MASM.
+
+For `verify_bytes`, both pointers must be word-aligned. Pack message bytes four per felt as
+little-endian `u32` values, with zero unused bytes and felts through the final 32-byte chunk. Scratch
+requires `16 + 8*max(1,ceil(MSG_LEN_BYTES/32))` felts and is overwritten. The complete padded message
+and scratch ranges must be disjoint and lie below the verifier's local frame; parent-frame locals
+are supported. `MSG_LEN_BYTES + 64` must fit the configured `max_hash_len_bytes` execution limit.
+
 ## ECDSA secp256k1 Keccak256
 
 Module `miden::core::crypto::dsa::ecdsa_k256_keccak` verifies secp256k1 ECDSA relations for messages hashed with Keccak256. Its `verify` procedures consume an uncommitted signature witness from advice. Its `recover` procedures instead bind a memory-backed native EVM recovery witness and return the recovered affine public key. All procedures intentionally accept high-s signatures.
@@ -45,3 +74,23 @@ This module uses the following conventions for data representation:
 - Low-s canonicality and exact signature binding are separate properties. `recover` binds the exact in-memory `(r, s, v)` while accepting both low-s and high-s. A caller that requires a canonical transaction signature must enforce that policy separately.
 - A successfully recovered key is not automatically trusted. Callers must compare `QX_LE_U32 || QY_LE_U32`, or its native commitment, with authenticated contract state.
 - Equivalent low-s and high-s encodings mean raw signature bytes are not a replay identifier. Use a signed message/application nonce or a digest-derived identity for replay protection.
+
+## ECDSA P-256 SHA256
+
+Module `miden::core::crypto::dsa::ecdsa_p256_sha256` verifies P-256 (secp256r1) ECDSA signatures over messages hashed with SHA-256 and recovers P-256 public keys. It follows the `ecdsa_k256_keccak` ABI: the `verify` procedures consume an uncommitted signature witness from advice, and the `recover` procedures bind a memory-backed native recovery witness and return the recovered affine public key. Acceptance matches FIPS 186-5 and EIP-7951 ECDSA verification of the prehash `SHA-256(message)`, so high-s signatures are accepted.
+
+| Procedure | Stack inputs | Description |
+|-----------|--------------|-------------|
+| `verify` | `[PK_COMM, MSG_WORD, ...]` | Verifies a signature over the 32 little-endian bytes of `MSG_WORD`. Advice: `[QX[8], QY[8], SIG_R[8], SIG_S[8], ...]`. Outputs: `[...]`. |
+| `verify_bytes` | `[PK_COMM, MSG_PTR, MSG_LEN_BYTES, ...]` | Verifies a signature over a variable-length message in memory. Advice and outputs as for `verify`. |
+| `recover` | `[MSG_WORD, SIG_PTR, ...]` | Recovers the public key for the native recovery witness at `SIG_PTR` over `MSG_WORD`. Outputs: `[QX_LE_U32[8], QY_LE_U32[8], ...]`. |
+| `recover_bytes` | `[MSG_PTR, MSG_LEN_BYTES, SIG_PTR, ...]` | Recovers the public key for a variable-length message in memory. Outputs as for `recover`. |
+
+### Data Encoding
+
+- Coordinates and scalars are eight little-endian `u32` limbs, one limb per field element. `PK_COMM` is `Eidos::hash_elements(QX[8] || QY[8])` over those limbs. Compressed SEC1 public keys are not accepted. Helpers in `miden-core-lib::dsa::ecdsa_p256_sha256` build the commitment and the verification advice from RustCrypto `p256` keys and signatures; they do not encode recovery memory.
+- The message scalar `z` is the SHA-256 digest read as a big-endian integer and reduced modulo `n`. `MSG_WORD` is hashed as its 32 little-endian bytes. Memory-backed messages are packed four bytes per field element as little-endian `u32` values at a word-aligned `MSG_PTR`, with zero unused bytes and felts in the final 32-byte chunk; `MSG_LEN_BYTES` must fit the configured `max_hash_len_bytes` execution limit.
+- The **native recovery witness** is `R_LE_U32[8] || S_LE_U32[8] || V` in word-aligned, caller-owned memory that must remain unchanged until the procedure returns. `V` is 0 or 1, the y-parity of the recovery point `R`. The x-reduced recovery IDs 2 and 3 are rejected; an honest signature needs one with probability about `2^-130`.
+- Verification traps unless `0 < r < n`, `0 < s < n`, `QX, QY < p` form a point on the curve (so `(0, 0)` is rejected), and `R' = (z/s)·G + (r/s)·Q` is not the identity with `x(R') mod n == r`. Recovery additionally requires `x(R') == r` exactly and `y(R')` to have parity `V`.
+- A recovered key is not automatically trusted. Callers must authenticate it, for example by compressing it as SEC1 (`0x02 | (y & 1)` followed by big-endian `x`) and comparing it with an authenticated key.
+- Low-s is not enforced: `(r, s)` with `V` and `(r, n - s)` with `1 - V` recover the same key, so raw signature bytes are not a replay identifier.
