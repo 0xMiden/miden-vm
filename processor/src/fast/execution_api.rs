@@ -858,7 +858,8 @@ impl FastProcessor {
                 BreakReason::Err(err) => Err(err),
                 BreakReason::Stopped(maybe_continuation) => {
                     if let Some((continuation, source_node_id)) = maybe_continuation {
-                        continuation_stack.push_with_source_node_id(continuation, source_node_id);
+                        continuation_stack
+                            .push_resumed_with_source_node_id(continuation, source_node_id);
                     }
 
                     while matches!(
@@ -1016,7 +1017,7 @@ impl FastProcessor {
                         new_package_debug_info,
                         new_source_node_id,
                         inline_call_context,
-                        external_node_id,
+                        (external_node_id, source_node_id),
                         current_forest,
                         package_debug_info,
                         inline_call_contexts,
@@ -1152,7 +1153,7 @@ impl FastProcessor {
                         new_package_debug_info,
                         new_source_node_id,
                         inline_call_context,
-                        external_node_id,
+                        (external_node_id, source_node_id),
                         current_forest,
                         package_debug_info,
                         inline_call_contexts,
