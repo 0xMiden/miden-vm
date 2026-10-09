@@ -1,6 +1,7 @@
 use miden_mast_package::{Dependency, debug_info::PackageDebugInfo};
 
 use super::*;
+use crate::diagnostics::WrapErr;
 
 pub struct AssemblyProduct {
     package: Box<Package>,
@@ -73,9 +74,11 @@ impl AssemblyProduct {
 
         // Section: debug info
         if emit_debug_info {
-            package
-                .sections
-                .push(Section::new(SectionId::DEBUG_INFO, debug_info.to_bytes()));
+            let bytes = debug_info
+                .try_to_bytes()
+                .into_diagnostic()
+                .wrap_err("cannot emit package debug information; reduce debug information or build with debug information disabled")?;
+            package.sections.push(Section::new(SectionId::DEBUG_INFO, bytes));
         }
 
         Ok(package)
@@ -84,4 +87,40 @@ impl AssemblyProduct {
 
 fn linked_kernel_package_section(package: &Package) -> Section {
     Section::new(SectionId::KERNEL, package.to_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_mast_package::debug_info::{MAX_DEBUG_INFO_STRING_SIZE, PackageDebugInfoBuilder};
+
+    use super::*;
+
+    #[test]
+    fn artifact_checks_debug_encoding_only_when_debug_info_is_emitted() {
+        for emit_debug_info in [false, true] {
+            let mut package = Assembler::default()
+                .assemble_library(
+                    "debug-limits",
+                    "namespace debug_limits pub proc main push.1 end",
+                    [] as [&str; 0],
+                )
+                .unwrap();
+            package.sections.clear();
+            let mut debug_info = PackageDebugInfoBuilder::default();
+            debug_info.add_string("x".repeat(MAX_DEBUG_INFO_STRING_SIZE + 1));
+            let product = AssemblyProduct::new(package, None, debug_info.build());
+            match product.into_artifact(emit_debug_info) {
+                Ok(package) => {
+                    assert!(!emit_debug_info);
+                    assert!(
+                        !package.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO)
+                    );
+                },
+                Err(error) => {
+                    assert!(emit_debug_info);
+                    assert!(format!("{error:?}").contains("debug string size"));
+                },
+            }
+        }
+    }
 }
