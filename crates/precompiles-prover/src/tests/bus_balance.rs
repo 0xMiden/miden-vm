@@ -5,7 +5,7 @@ use std::{collections::HashMap, fmt::Debug, format, string::String, vec::Vec};
 use miden_air::lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions};
 use miden_core::{
     Felt,
-    field::{PrimeField64, QuadFelt},
+    field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_lifted_air::{BaseAir, LiftedAir};

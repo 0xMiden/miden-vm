@@ -57,10 +57,21 @@ mod tests {
     }
 
     #[test]
-    fn verifies_pinned_current_eidos_proof() {
+    fn rejects_pinned_v0_35_eidos_proof() {
         let root = fixture_root(include_str!("../tests/fixtures/pvm_eidos_v0_35.root"));
         let proof = StarkProof::new(
             include_bytes!("../tests/fixtures/pvm_eidos_v0_35.bin").to_vec(),
+            HashFunction::Eidos,
+        );
+
+        assert!(matches!(verify_deferred(&proof, root), Err(VerifyError::Verifier(_))));
+    }
+
+    #[test]
+    fn verifies_pinned_current_eidos_proof() {
+        let root = fixture_root(include_str!("../tests/fixtures/pvm_eidos_v1_0.root"));
+        let proof = StarkProof::new(
+            include_bytes!("../tests/fixtures/pvm_eidos_v1_0.bin").to_vec(),
             HashFunction::Eidos,
         );
 

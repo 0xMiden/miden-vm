@@ -176,8 +176,8 @@ pub const NUM_MAIN_COLS: usize = COL_N_CHUNKS_INV + 1;
 /// - col 5: digest-chunks block + initial CV.
 /// - col 6: `EidosOut(H_digest_chunks)` + byte-pair remainder check.
 /// - col 7/8: Keccak-node block + initial CV, then `EidosOut(H_keccak)`.
-/// - col 9/10: range checks of the last-block remainder `r`, of `135 - r`, and of
-///   `n_sponge_perms - 1`.
+/// - col 9/10: range checks of the last-block remainder `r`, of `135 - r`, and of `n_sponge_perms -
+///   1`.
 pub const NUM_AUX_COLS: usize = 11;
 
 pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 1];
@@ -356,7 +356,7 @@ where
     frac_col!(
         builder,
         "sponge-perm-count",
-        Deg { v: 3, u: 2 },
+        Deg { v: 2, u: 2 },
         (
             "last-block-remainder",
             act.clone(),
@@ -368,7 +368,7 @@ where
     frac_col!(
         builder,
         "sponge-perm-count",
-        Deg { v: 1, u: 2 },
+        Deg { v: 1, u: 1 },
         ("full-blocks", act, Range16Msg { w: full_blocks }, interaction_deg),
     );
 }

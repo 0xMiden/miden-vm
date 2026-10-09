@@ -12,7 +12,7 @@ use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
     deferred::{Digest, Node, TRUE_DIGEST, deferred_chunks_frame},
-    field::{Field, PrimeField64, QuadFelt},
+    field::{Field, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_lifted_air::{BaseAir, LiftedAir};
@@ -21,33 +21,58 @@ use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     hash::{
-        chunk::{self as chunk_cols, trace::{ChunkRequires, ChunkSeqId, generate_trace_padded_to as chunk_trace}},
+        chunk::{
+            self as chunk_cols,
+            trace::{ChunkRequires, ChunkSeqId, generate_trace_padded_to as chunk_trace},
+        },
         chunk_node::NODE_COL_OFFSET,
-        chunk_node_sponge::{ChunkNodeSpongeAir, NUM_MAIN_COLS as CNS_COLS, SPONGE_COL_OFFSET, trace::generate_trace as cns_trace},
+        chunk_node_sponge::{
+            ChunkNodeSpongeAir, NUM_MAIN_COLS as CNS_COLS, SPONGE_COL_OFFSET,
+            trace::generate_trace as cns_trace,
+        },
         keccak::{
             node::{
                 COL_ABSORPTION_ID_CHUNKS, COL_ABSORPTION_ID_DIGEST_CHUNKS,
                 COL_ABSORPTION_ID_KECCAK, COL_ACT, COL_CHUNK_SEQ_ID_HEAD, COL_D_BEGIN, COL_D_END,
-                COL_H_DIGEST_CHUNKS_BEGIN, COL_H_DIGEST_CHUNKS_END, COL_H_INPUT_CHUNKS_BEGIN, COL_H_INPUT_CHUNKS_END, COL_H_KECCAK_BEGIN, COL_H_KECCAK_END,
-                COL_LAST_CHUNK_REM, COL_LEN_BYTES, COL_N_CHUNKS, COL_N_CHUNKS_INV,
-                COL_N_SPONGE_PERMS, COL_OUT_MULT, COL_SPONGE_SEQ_ID_HEAD, KeccakNodeAir, NUM_AUX_COLS, NUM_HASH,
-                NUM_MAIN_COLS, SPONGE_RATE_BYTES,
-                trace::{KeccakNodeInvocation, KeccakNodeRequires, generate_trace_from_invocations},
+                COL_H_DIGEST_CHUNKS_BEGIN, COL_H_DIGEST_CHUNKS_END, COL_H_INPUT_CHUNKS_BEGIN,
+                COL_H_INPUT_CHUNKS_END, COL_H_KECCAK_BEGIN, COL_H_KECCAK_END, COL_LAST_CHUNK_REM,
+                COL_LEN_BYTES, COL_N_CHUNKS, COL_N_CHUNKS_INV, COL_N_SPONGE_PERMS, COL_OUT_MULT,
+                COL_SPONGE_SEQ_ID_HEAD, KeccakNodeAir, NUM_AUX_COLS, NUM_HASH, NUM_MAIN_COLS,
+                SPONGE_RATE_BYTES,
+                trace::{
+                    KeccakNodeInvocation, KeccakNodeRequires, generate_trace_from_invocations,
+                },
             },
             round::{KeccakRoundAir, RoundRequires, generate_trace as round_trace},
-            sponge::{self as sponge_cols, trace::{Invocation as SpongeInvocation, SpongeOutput, SpongeRequires, SpongeSeqId, generate_trace_padded_to as sponge_trace, keccak_oracle}},
+            sponge::{
+                self as sponge_cols,
+                trace::{
+                    Invocation as SpongeInvocation, SpongeOutput, SpongeRequires, SpongeSeqId,
+                    generate_trace_padded_to as sponge_trace, keccak_oracle,
+                },
+            },
         },
     },
     logup::{LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
-    primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, BytePairOp, Range16Msg, generate_trace as bpl_trace},
+    primitives::byte_pair_lut::{
+        BytePairLutAir, BytePairLutRequires, BytePairOp, Range16Msg, generate_trace as bpl_trace,
+    },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::Session,
     tests::bus_balance::session_stack_residual_keyed,
     transcript::{
-        eval::{TranscriptEvalAir, trace::{TranscriptEvalRequires, generate_trace as eval_trace}},
-        eidos::{EidosDigest, EidosCompressionAir, trace::{AbsorptionOutput, EidosRequires, generate_trace_with_byte_lookups as eidos_trace}},
+        eidos::{
+            EidosCompressionAir, EidosDigest,
+            trace::{
+                AbsorptionOutput, EidosRequires, generate_trace_with_byte_lookups as eidos_trace,
+                testing::forged_absorption_id,
+            },
+        },
+        eval::{
+            TranscriptEvalAir,
+            trace::{TranscriptEvalRequires, generate_trace as eval_trace},
+        },
     },
-    transcript::eidos::trace::testing::forged_absorption_id,
 };
 
 // HELPERS
@@ -571,7 +596,8 @@ fn forged_keccak_side(msgs: [&[u8]; 3]) -> KeccakSide {
         cells[COL_N_SPONGE_PERMS] = row.n_sponge_perms;
         cells[COL_CHUNK_SEQ_ID_HEAD] = Felt::from(row.chunk_head);
         cells[COL_N_CHUNKS] = Felt::ONE;
-        cells[COL_ABSORPTION_ID_CHUNKS] = Felt::from(out.chunk_content_absorption_span.head().as_u32());
+        cells[COL_ABSORPTION_ID_CHUNKS] =
+            Felt::from(out.chunk_content_absorption_span.head().as_u32());
         cells[COL_LEN_BYTES] = Felt::from(len);
         cells[COL_ABSORPTION_ID_DIGEST_CHUNKS] = Felt::from(digest.head().as_u32());
         cells[COL_ABSORPTION_ID_KECCAK] = Felt::from(keccak.head().as_u32());
