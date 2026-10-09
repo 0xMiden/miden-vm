@@ -17,7 +17,7 @@ and algebraic functions such as Rescue Prime, designed for efficient use inside 
 
 We benchmark 2-to-1 hashing $(a,b)\mapsto h(a,b)$, where $a$, $b$, and $h(a,b)$ are digests,
 and hashing 100 field elements into one digest. Digests contain four elements in the field with
-modulus $2^{64} - 2^{32} + 1$ for Poseidon2, Eidos, RPO, and RPX, and 32 bytes for SHA3, BLAKE3,
+modulus $2^{64}-2^{32}+1$ for Poseidon2, Eidos, RPO, and RPX, and 32 bytes for SHA3, BLAKE3,
 and Keccak256. The BLAKE3 column uses BLAKE3-256; SHA3 uses the external harness described below.
 
 ### Scenario 1: 2-to-1 hashing `h(a,b)`
@@ -30,7 +30,7 @@ and Keccak256. The BLAKE3 column uses BLAKE3-256; SHA3 uses the external harness
 | Apple M4 Max        |         |      |           |           |         |         |         |
 | Amazon Graviton 3   |         |      |           |           |         |         |         |
 | Amazon Graviton 4   |         |      |           |           |         |         |         |
-| AMD Ryzen 9 9950X   |         |      |           |           |         |         |         |
+| AMD Ryzen 9 9950X   | 57.3 ns |      | 193 ns    | 544 ns    | 3.13 µs | 2.00 µs | 68.4 ns |
 | AMD EPYC 9R14       |         |      |           |           |         |         |         |
 | Intel Core i5-8279U |         |      |           |           |         |         |         |
 | Intel Xeon 8375C    |         |      |           |           |         |         |         |
@@ -45,39 +45,32 @@ and Keccak256. The BLAKE3 column uses BLAKE3-256; SHA3 uses the external harness
 | Apple M4 Max        |        |      |           |           |         |         |        |
 | Amazon Graviton 3   |        |      |           |           |         |         |        |
 | Amazon Graviton 4   |        |      |           |           |         |         |        |
-| AMD Ryzen 9 9950X   |        |      |           |           |         |         |        |
+| AMD Ryzen 9 9950X   | 801 ns |      | 1.24 µs   | 7.16 µs   | 41.3 µs | 29.9 µs | 916 ns |
 | AMD EPYC 9R14       |        |      |           |           |         |         |        |
 | Intel Core i5-8279U |        |      |           |           |         |         |        |
 | Intel Xeon 8375C    |        |      |           |           |         |         |        |
 
 ### Digital Signature Algorithms (DSA)
 
-The signature benchmarks cover:
+Falcon512-Eidos uses Eidos for message hashing. ECDSA over secp256k1 uses Keccak256,
+and EdDSA over Ed25519 uses SHA-512.
 
-* **Falcon512-Eidos** - Falcon512 signature scheme using Eidos for message hashing
-* **ECDSA over secp256k1** - Elliptic Curve Digital Signature Algorithm using Keccak256 for message hashing
-* **EdDSA over Ed25519** - Edwards-curve Digital Signature Algorithm using SHA-512 for message hashing
-
-For each algorithm, we measure:
-
-1. **Key Generation** - Creating a new secret key
-2. **Signing** - Generating a signature for a message
-3. **Verification** - Verifying a signature against a message and public key
-
-Signing and verification use a four-element message. Timings are per operation.
+We measure secret-key generation for each algorithm. Signing and verification use a
+four-element message, and timings are per operation.
 
 #### Falcon512-Eidos
 
-| Hardware     | Key Generation | Signing | Verification |
-| ------------ | :------------: | :-----: | :----------: |
-| Apple M4     |                |         |              |
-| Apple M4 Pro | 132 ms         | 448 µs  | 19.3 µs      |
+| Hardware          | Key Generation | Signing | Verification |
+| ----------------- | :------------: | :-----: | :----------: |
+| AMD Ryzen 9 9950X | 117 ms         | 347 µs  | 21.5 µs      |
+| Apple M4          |                |         |              |
+| Apple M4 Pro      | 132 ms         | 448 µs  | 19.3 µs      |
 
 #### ECDSA over secp256k1 (Keccak256)
 
 | Hardware          | Key Generation | Signing | Verification |
 | ----------------- | :------------: | :-----: | :----------: |
-| AMD Ryzen 9 9950X |                |         |              |
+| AMD Ryzen 9 9950X | 26.0 µs        | 28.9 µs | 33.0 µs      |
 | Apple M4          |                |         |              |
 | Apple M4 Pro      | 19.4 µs        | 22.1 µs | 23.4 µs      |
 
@@ -85,7 +78,7 @@ Signing and verification use a four-element message. Timings are per operation.
 
 | Hardware          | Key Generation | Signing | Verification |
 | ----------------- | :------------: | :-----: | :----------: |
-| AMD Ryzen 9 9950X |                |         |              |
+| AMD Ryzen 9 9950X | 17.1 µs        | 17.5 µs | 20.2 µs      |
 | Apple M4          |                |         |              |
 | Apple M4 Pro      | 20.2 µs        | 20.7 µs | 20 µs        |
 
@@ -97,35 +90,35 @@ Timings exclude setup and cleanup.
 
 ### Scenario 1: SMT Construction (1M pairs)
 
-| Hardware          | Sequential | Concurrent | Improvement |
-| ----------------- | ---------- | ---------- | ----------- |
-| AMD Ryzen 9 9950X |            |            |             |
-| Apple M1 Air      |            |            |             |
-| Apple M1 Pro      |            |            |             |
-| Apple M4 Pro      | 13 sec     | 5.59 sec   | 2.33x       |
-| Apple M4 Max      |            |            |             |
+| Hardware          | Sequential | Concurrent (threads) | Improvement |
+| ----------------- | ---------- | -------------------- | ----------- |
+| AMD Ryzen 9 9950X | 14.3 sec   | 9.01 sec (32)         | 1.58x       |
+| Apple M1 Air      |            |                      |             |
+| Apple M1 Pro      |            |                      |             |
+| Apple M4 Pro      | 13 sec     | 5.59 sec (14)         | 2.33x       |
+| Apple M4 Max      |            |                      |             |
 
 ### Scenario 2: SMT Batched Insertion (1k pairs, 1M leaves)
 
-| Hardware          | Sequential | Concurrent | Improvement |
-| ----------------- | ---------- | ---------- | ----------- |
-| AMD Ryzen 9 9950X |            |            |             |
-| Apple M1 Air      |            |            |             |
-| Apple M1 Pro      |            |            |             |
-| Apple M4 Pro      | 21.6 ms    | 12.6 ms    | 1.71x       |
-| Apple M4 Max      |            |            |             |
+| Hardware          | Sequential | Concurrent (threads) | Improvement |
+| ----------------- | ---------- | -------------------- | ----------- |
+| AMD Ryzen 9 9950X | 12.4 ms    | 13.4 ms (32)          | 0.93x       |
+| Apple M1 Air      |            |                      |             |
+| Apple M1 Pro      |            |                      |             |
+| Apple M4 Pro      | 21.6 ms    | 12.6 ms (14)          | 1.71x       |
+| Apple M4 Max      |            |                      |             |
 
 ### Scenario 3: SMT Batched Update (1k pairs, 1M leaves)
 
-| Hardware          | Sequential | Concurrent | Improvement |
-| ----------------- | ---------- | ---------- | ----------- |
-| AMD Ryzen 9 9950X |            |            |             |
-| Apple M1 Air      |            |            |             |
-| Apple M1 Pro      |            |            |             |
-| Apple M4 Pro      | 31.3 ms    | 14.7 ms    | 2.13x       |
-| Apple M4 Max      |            |            |             |
+| Hardware          | Sequential | Concurrent (threads) | Improvement |
+| ----------------- | ---------- | -------------------- | ----------- |
+| AMD Ryzen 9 9950X | 12.8 ms    | 13.5 ms (32)          | 0.94x       |
+| Apple M1 Air      |            |                      |             |
+| Apple M1 Pro      |            |                      |             |
+| Apple M4 Pro      | 31.3 ms    | 14.7 ms (14)          | 2.13x       |
+| Apple M4 Max      |            |                      |             |
 
-Apple M4 Pro concurrent results use 14 threads. Sequential builds disable the `concurrent` feature.
+Sequential builds disable the `concurrent` feature.
 
 ## Benchmark Explanations
 

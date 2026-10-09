@@ -73,6 +73,59 @@ fn test_smt_get() {
     );
 }
 
+/// A key whose leaf holds a single pair for a different key is absent, so `get` returns the empty
+/// word like `Smt::get_value` does.
+#[test]
+fn test_smt_get_absent_key_in_single_leaf() {
+    const SOURCE: &str = "
+        use miden::core::collections::smt
+
+        begin
+            exec.smt::get
+        end
+    ";
+
+    let smt = build_smt_from_pairs(&LEAVES);
+    let (present_key, _) = LEAVES[0];
+    let absent_key = word(999, 102, 103, present_key[3].as_canonical_u64());
+    assert_eq!(smt.get_value(&absent_key), EMPTY_WORD);
+
+    let mut initial_stack = Vec::new();
+    push_word(&mut initial_stack, &smt.root());
+    push_word(&mut initial_stack, &absent_key);
+    let expected_output = build_expected_stack(EMPTY_WORD, smt.root());
+
+    let (store, advice_map) = build_advice_inputs(&smt);
+    build_test!(SOURCE, &initial_stack, &[], store, advice_map).expect_stack(&expected_output);
+}
+
+/// A single-pair leaf preimage that does not hash to the node value must be rejected, whether or
+/// not its key matches the requested one.
+#[test]
+fn test_smt_get_rejects_forged_single_leaf_preimage() {
+    const SOURCE: &str = "
+        use miden::core::collections::smt
+
+        begin
+            exec.smt::get
+        end
+    ";
+
+    let smt = build_smt_from_pairs(&LEAVES);
+    let (key, _) = LEAVES[0];
+    let leaf_hash = smt.get_leaf(&key).hash();
+    let (store, mut advice_map) = build_advice_inputs(&smt);
+    let (_, preimage) = advice_map.iter_mut().find(|(hash, _)| *hash == leaf_hash).unwrap();
+    *preimage = build_leaf_advice_value(&[(key, word(9, 9, 9, 9))]);
+
+    let mut initial_stack = Vec::new();
+    push_word(&mut initial_stack, &smt.root());
+    push_word(&mut initial_stack, &key);
+
+    let test = build_test!(SOURCE, &initial_stack, &[], store, advice_map);
+    crate::expect_assert_error_message!(test);
+}
+
 #[test]
 fn test_smt_get_multi() {
     const SOURCE: &str = "

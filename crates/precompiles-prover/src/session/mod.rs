@@ -433,13 +433,14 @@ impl Session {
     ///
     /// `terms` are the claim's `(base, scalar)` DAG-node pairs, **in absorb
     /// order**. The eval `EcMsm` seam consumes the claim's terms as a
-    /// positionless set (`MsmClaimTerm`), so the transcript root is a function
+    /// positionless multiset (`MsmClaimTerm`), so the transcript root is a function
     /// of *this* declared sequence — each term's specific base and scalar
     /// **nodes** (both are absorbed by hash), in this order — and **not** of
     /// the chiplet's internal `idx` storage order (hence not of the
     /// addition-chain strategy). The caller's pairing is validated against the
     /// expression by the bus; each scalar node must be stored under the group's
-    /// scalar bound. Bumps the resolve use count on a new eval row.
+    /// scalar bound. On a new eval row, marks `expr` claimed, or a fresh copy
+    /// once `expr` is claimed.
     ///
     /// Panics unless `terms` is in exact 1:1 correspondence with `expr`'s own
     /// term rows — one pair per chiplet term, each pair a real term of
@@ -450,7 +451,11 @@ impl Session {
     /// correspondence with the caller's original terms instead of collapsing
     /// two claim terms onto one merged row).
     pub fn ec_msm(&mut self, expr: EcExprPtr, terms: &[(EcNode, UintNode)]) -> EcNode {
-        self.eval.record_ec_msm(expr, terms, &mut self.msm, &mut self.eidos)
+        let (ec, uint) = (&mut self.ec, &mut self.uint);
+        self.eval
+            .record_ec_msm(expr, terms, &mut self.msm, &mut self.eidos, |msm, expr| {
+                require::duplicate(msm, ec, uint, expr)
+            })
     }
 
     /// Number of MSM expressions laid so far (intros + endomorphism intros +

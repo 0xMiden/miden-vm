@@ -8,7 +8,7 @@
 //! `UintAdd`), and its own provides sit at mult 0, closing every bus short
 //! of the DAG claim. The `msm_resolve_*` tests then prove + verify the full
 //! in-circuit resolve through the eval `EcMsm` seam — the positionless
-//! `MsmClaimTerm` set match, so the absorb (root) order is the caller's.
+//! `MsmClaimTerm` multiset match, so the absorb (root) order is the caller's.
 
 use std::{format, string::String, vec::Vec};
 
@@ -28,8 +28,8 @@ use miden_precompiles::{CurveId, CurvePoint, phi_generator};
 use crate::{
     ec::msm::{
         COL_A_DIFF_HI, COL_A_DIFF_LO, COL_A_EXPR, COL_B_DIFF_HI, COL_B_DIFF_LO, COL_BASE,
-        COL_BASE_A, COL_ENDO_MINTED, COL_EXPR_PTR, COL_IS_BOUNDARY, COL_IS_INTRO, COL_IS_NEG,
-        COL_LAMBDA_PTR, COL_NEG_MINTED, COL_SCALAR, COL_VAL, COL_VAL_A, EcMsmAir,
+        COL_BASE_A, COL_ENDO_MINTED, COL_EXPR_PTR, COL_IS_BOUNDARY, COL_IS_CLAIMED, COL_IS_INTRO,
+        COL_IS_NEG, COL_LAMBDA_PTR, COL_NEG_MINTED, COL_SCALAR, COL_VAL, COL_VAL_A, EcMsmAir,
         NUM_MAIN_COLS as MSM_COLS,
     },
     logup::{NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
@@ -762,7 +762,7 @@ fn msm_two_term_ordered(swap: bool) -> crate::session::SessionTraces {
     s.finish(root)
 }
 
-/// The resolve seam matches the claim's terms as a positionless **set**
+/// The resolve seam matches the claim's terms as a positionless **multiset**
 /// (`MsmClaimTerm`), so the absorb — and thus the transcript root — follows
 /// the **caller's** term-pair order, not the chiplet's internal storage order
 /// (and so not the addition-chain strategy). Both orders are valid; their
@@ -1128,4 +1128,187 @@ fn certificate_ordering_limbs_are_range_checked() {
         let mult = net.get(&out_of_range).map_or(Felt::ZERO, |(mult, _)| *mult);
         assert_eq!(mult, Felt::ONE, "the minting row must range-check its ordering limbs");
     }
+}
+
+// CLAIMED EXPRESSIONS
+// ================================================================================================
+
+/// Lays one expression and claims it through two value nodes that hash differently but name the
+/// same `(base, scalar)` pointers. `build` returns both value-equality claims.
+fn claimed_twice_traces(
+    build: impl FnOnce(&mut Session) -> [crate::session::Truthy; 2],
+) -> crate::session::SessionTraces {
+    let mut s = Session::new();
+    let claims = build(&mut s);
+    let root = s.assert_and_fold(claims);
+    s.finish(root)
+}
+
+/// Checks `traces` and that every claim has an expression of its own: no EcMsm expression serves
+/// more than one claim, and `claims` expressions are claimed.
+fn assert_each_claim_has_its_own_expression(traces: &crate::session::SessionTraces, claims: usize) {
+    traces.check();
+    let main = &traces.mains()[9];
+    let rows = || main.values.chunks(MSM_COLS);
+    assert!(
+        rows().all(|row| row[COL_IS_CLAIMED] == Felt::ZERO || row[COL_IS_CLAIMED] == Felt::ONE),
+        "no expression may serve more than one claim",
+    );
+    let claimed = rows()
+        .filter(|row| row[COL_IS_BOUNDARY] == Felt::ONE && row[COL_IS_CLAIMED] == Felt::ONE)
+        .count();
+    assert_eq!(claimed, claims, "each claim has its own expression");
+}
+
+/// The points `G` and `Q = 2G`.
+fn generator_points(s: &mut Session) -> (EcNode, EcNode) {
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+    let (g2x, g2y) = k256_coords(&(g + g));
+    (create(s, gx, gy), create(s, g2x, g2y))
+}
+
+/// `G + Q`, created from its coordinates and derived by `ec_add`: the two nodes hash differently
+/// but name one point.
+fn sum_points(s: &mut Session, g_pt: &EcNode, q_pt: &EcNode) -> (EcNode, EcNode) {
+    let g = ProjectivePoint::GENERATOR;
+    let (g3x, g3y) = k256_coords(&(g + g + g));
+    (create(s, g3x, g3y), s.ec_add(g_pt, q_pt))
+}
+
+/// One expression `⟨G×1, Q×1⟩` claimed by two value nodes that declare its terms in opposite
+/// orders. Repeating either claim returns its existing node and lays no expression.
+fn msm_expression_claimed_twice_traces() -> crate::session::SessionTraces {
+    claimed_twice_traces(|s| {
+        let (g_pt, q_pt) = generator_points(s);
+        let r_pt = s.ec_add(&g_pt, &q_pt);
+        let ga = s.msm_intro(&g_pt);
+        let qb = s.msm_intro(&q_pt);
+        let expr = s.msm_combine(ga, qb);
+        let one = s.uint_leaf(from_hex("1"), SN_PTR);
+        let value_gq = s.ec_msm(expr, &[(g_pt, one), (q_pt, one)]);
+        let value_qg = s.ec_msm(expr, &[(q_pt, one), (g_pt, one)]);
+        let exprs = s.msm_expr_count();
+        assert_eq!(s.ec_msm(expr, &[(g_pt, one), (q_pt, one)]).id, value_gq.id);
+        assert_eq!(s.ec_msm(expr, &[(q_pt, one), (g_pt, one)]).id, value_qg.id);
+        assert_eq!(s.msm_expr_count(), exprs, "a repeated claim lays no expression");
+        [s.ec_is(&value_gq, &r_pt), s.ec_is(&value_qg, &r_pt)]
+    })
+}
+
+#[test]
+fn msm_expression_claimed_twice_claims_each_copy_once() {
+    // Every claim consumes the claim terms of an expression no other claim uses, so the second
+    // claim takes a fresh copy of the shared expression.
+    assert_each_claim_has_its_own_expression(&msm_expression_claimed_twice_traces(), 2);
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_expression_claimed_twice_proves() {
+    verify_deferred(&msm_expression_claimed_twice_traces().prove())
+        .expect("two claims on one expression must verify");
+}
+
+#[test]
+fn term_preserving_combine_claimed_twice_claims_each_copy_once() {
+    let traces = claimed_twice_traces(|s| {
+        let (g_pt, q_pt) = generator_points(s);
+        let r_pt = s.ec_add(&g_pt, &q_pt);
+        let ga = s.msm_intro(&g_pt);
+        let qb = s.msm_intro(&q_pt);
+        let expr = s.msm_combine_terms_preserving(ga, qb);
+        let one = s.uint_leaf(from_hex("1"), SN_PTR);
+        let value_gq = s.ec_msm(expr, &[(g_pt, one), (q_pt, one)]);
+        let value_qg = s.ec_msm(expr, &[(q_pt, one), (g_pt, one)]);
+        [s.ec_is(&value_gq, &r_pt), s.ec_is(&value_qg, &r_pt)]
+    });
+    assert_each_claim_has_its_own_expression(&traces, 2);
+}
+
+#[test]
+fn neg_claimed_twice_claims_each_copy_once() {
+    let traces = claimed_twice_traces(|s| {
+        let (g_pt, q_pt, ..) = generator_points(s);
+        let ga = s.msm_intro(&g_pt);
+        let qb = s.msm_intro(&q_pt);
+        let gq = s.msm_combine(ga, qb);
+        let expr = s.msm_neg(gq);
+        let minus_one =
+            s.uint_leaf(from_limbs32(&CurveId::Secp256k1.scalar_domain().minus_one()), SN_PTR);
+        let neg_g3 = -(ProjectivePoint::GENERATOR * k256::Scalar::from(3u64));
+        let (nx, ny) = k256_coords(&neg_g3);
+        let r_pt = create(s, nx, ny);
+        let value_gq = s.ec_msm(expr, &[(g_pt, minus_one), (q_pt, minus_one)]);
+        let value_qg = s.ec_msm(expr, &[(q_pt, minus_one), (g_pt, minus_one)]);
+        [s.ec_is(&value_gq, &r_pt), s.ec_is(&value_qg, &r_pt)]
+    });
+    assert_each_claim_has_its_own_expression(&traces, 2);
+}
+
+#[test]
+fn intro_claimed_twice_claims_each_copy_once() {
+    let traces = claimed_twice_traces(|s| {
+        let (g_pt, q_pt) = generator_points(s);
+        let (r_created, r_added) = sum_points(s, &g_pt, &q_pt);
+        let expr = s.msm_intro(&r_created);
+        let one = s.uint_leaf(from_hex("1"), SN_PTR);
+        let value_created = s.ec_msm(expr, &[(r_created, one)]);
+        let value_added = s.ec_msm(expr, &[(r_added, one)]);
+        [s.ec_is(&value_created, &r_created), s.ec_is(&value_added, &r_added)]
+    });
+    assert_each_claim_has_its_own_expression(&traces, 2);
+}
+
+#[test]
+fn intro_zero_claimed_twice_claims_each_copy_once() {
+    let traces = claimed_twice_traces(|s| {
+        let (g_pt, q_pt) = generator_points(s);
+        let (r_created, r_added) = sum_points(s, &g_pt, &q_pt);
+        let expr = s.msm_intro_zero(&r_created);
+        let zero = s.uint_leaf(from_hex("0"), SN_PTR);
+        let pai_pt = s.ec_sub(&g_pt, &g_pt);
+        let value_created = s.ec_msm(expr, &[(r_created, zero)]);
+        let value_added = s.ec_msm(expr, &[(r_added, zero)]);
+        [s.ec_is(&value_created, &pai_pt), s.ec_is(&value_added, &pai_pt)]
+    });
+    assert_each_claim_has_its_own_expression(&traces, 2);
+}
+
+#[test]
+fn intro_endo_claimed_twice_claims_each_copy_once() {
+    let traces = claimed_twice_traces(|s| {
+        let (g_pt, q_pt, ..) = generator_points(s);
+        let g_derived = s.ec_sub(&q_pt, &g_pt);
+        let expr = s.msm_intro_endo(&g_pt);
+        let endo = CurveId::Secp256k1.endomorphism().expect("secp256k1 has a GLV endomorphism");
+        let lambda = s.uint_leaf(from_limbs32(&endo.lambda), SN_PTR);
+        let CurvePoint::Affine { x, y } = phi_generator() else {
+            panic!("phi(G) must be an affine point");
+        };
+        let phi_pt = create(s, from_limbs32(&x), from_limbs32(&y));
+        let value_created = s.ec_msm(expr, &[(g_pt, lambda)]);
+        let value_derived = s.ec_msm(expr, &[(g_derived, lambda)]);
+        [s.ec_is(&value_created, &phi_pt), s.ec_is(&value_derived, &phi_pt)]
+    });
+    assert_each_claim_has_its_own_expression(&traces, 2);
+}
+
+#[test]
+fn is_claimed_must_be_boolean() {
+    // Two claims on one expression jointly consume twice its claim terms, so either claim could
+    // absorb a different multiset, e.g. `{(G, 1), (G, 1)}` bound to the value of
+    // `{(G, 1), (Q, 1)}`. An `is_claimed` value above one must be rejected.
+    let traces = msm_two_term_ordered(false);
+    let mut main = traces.mains()[9].clone();
+    check_local_inputs(EcMsmAir, &main, traces.air_inputs());
+    let mut forged_rows = 0;
+    for row in main.values.chunks_mut(MSM_COLS) {
+        if row[COL_IS_CLAIMED] == Felt::ONE {
+            row[COL_IS_CLAIMED] = Felt::from(2u8);
+            forged_rows += 1;
+        }
+    }
+    assert_eq!(forged_rows, 2, "the claimed expression spans two term rows");
+    crate::tests::assert_local_rejects_inputs(EcMsmAir, &main, traces.air_inputs());
 }

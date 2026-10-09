@@ -18,7 +18,11 @@ use miden_precompiles::{
     CurveBinaryOp, CurveId, CurveOp, Keccak256Precompile, Sha256Precompile, Sha512Precompile,
     UintBinaryOp, UintDomain, UintOp, chunks_to_bytes_exact, n_chunks,
 };
-use miden_precompiles_air::{memory, stark_config::precompile_pcs_params};
+use miden_precompiles_air::{
+    hash::keccak::node::{MAX_SPONGE_PERMS, SPONGE_RATE_BYTES},
+    memory,
+    stark_config::precompile_pcs_params,
+};
 
 use crate::{
     ec::{msm::trace::EcExprPtr, trace::EcPointPtr},
@@ -44,6 +48,13 @@ const MAX_TERM_PRESERVING_TERMS: usize = 4096;
 /// claims.
 const MAX_TOTAL_TERM_PRESERVING_TERMS: usize = 16 * MAX_TERM_PRESERVING_TERMS;
 
+/// Default ceiling on declared hash input bytes across one import.
+const MAX_HASH_BYTES: usize = MAX_DEFERRED_ELEMENTS * size_of::<u32>();
+
+// The Keccak-node AIR admits at most `MAX_SPONGE_PERMS` sponge permutations per input; every hash
+// input the default import limit admits stays within that bound.
+const _: () = assert!((MAX_HASH_BYTES / SPONGE_RATE_BYTES as usize) < MAX_SPONGE_PERMS as usize);
+
 /// The input ceiling uses the runtime's field-element accounting across the entire batch,
 /// including repeated inputs. Each pair costs eight elements, so it also bounds total MSM terms
 /// by MAX_DEFERRED_ELEMENTS / 8. Scalars are fixed at 256 bits; balanced reductions in the joint
@@ -68,7 +79,7 @@ impl Default for ImportLimits {
     fn default() -> Self {
         Self {
             elements: MAX_DEFERRED_ELEMENTS,
-            hash_bytes: MAX_DEFERRED_ELEMENTS * size_of::<u32>(),
+            hash_bytes: MAX_HASH_BYTES,
             roots: MAX_PRECOMPILE_ROOTS,
             fallback_terms_per_node: MAX_TERM_PRESERVING_TERMS,
             fallback_terms: MAX_TOTAL_TERM_PRESERVING_TERMS,
@@ -117,6 +128,11 @@ impl WitnessSession {
     #[cfg(test)]
     pub(crate) fn finish(self) -> crate::session::SessionTraces {
         self.session.finish(self.root)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn msm_expr_count(&self) -> usize {
+        self.session.msm_expr_count()
     }
 }
 
