@@ -2,8 +2,6 @@
 //! Schwartz–Zippel over the [`UintStore`](crate::uint), with the binary
 //! carry / borrow chains and the `UintVal` bus balanced against the store.
 
-use proptest::prelude::*;
-
 use std::{collections::HashMap, vec::Vec};
 
 use miden_air::lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions};
@@ -13,13 +11,14 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_lifted_air::LiftedAir;
+use proptest::prelude::*;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
-    math::{U256, add_reduce, sub_reduce},
+    math::{U256, add_reduce, from_limbs16, sub_reduce},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    tests::uint::{arb_modulus, arb_uint_below, arb_qf, fixed_challenges, random_modulus, random_uint_below},
+    tests::uint::{arb_modulus, arb_qf, arb_uint_below, random_modulus, random_uint_below},
     uint::{
         UintStoreAir,
         add::{
@@ -600,7 +599,6 @@ fn log_quotient_degree_matches_design_target() {
     assert_eq!(crate::tests::log_quotient_degree(&UintAddAir), 1);
 }
 
-
 fn reduction_arrangement(bound: U256) -> (UintAddRequires, UintStoreRequires, u32) {
     let c = add_reduce(bound, bound, bound);
     let mut store = UintStoreRequires::new();
@@ -866,4 +864,3 @@ proptest! {
         prop_assert_eq!(residual, 0, "the act = 0 pad block contributes nothing");
     }
 }
-

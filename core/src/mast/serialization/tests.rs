@@ -2568,7 +2568,9 @@ fn wire_view_defers_internal_digest_validation_until_access() {
         0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     ];
-    let view = MastForestWireView::new(&BYTES).expect("structure should materialize");
+    let mut bytes = BYTES;
+    bytes[5..8].copy_from_slice(&VERSION);
+    let view = MastForestWireView::new(&bytes).expect("structure should materialize");
     assert_eq!(view.node_count(), 3);
     for i in 0..2 {
         view.node_info_at(i)

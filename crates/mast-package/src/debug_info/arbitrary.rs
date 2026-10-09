@@ -281,13 +281,8 @@ impl Arbitrary for DebugSourceInlineCall {
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (any::<u32>(), any::<u32>(), any::<DebugFunctionIdx>(), any::<DebugLocIdx>())
-            .prop_map(|(start, end, callee_idx, loc_idx)| Self {
-                op_idx: start.min(end),
-                op_end: start.max(end),
-                callee_idx,
-                loc_idx,
-            })
+        (any::<u32>(), any::<DebugFunctionIdx>(), any::<DebugLocIdx>())
+            .prop_map(|(op_idx, callee_idx, loc_idx)| Self { op_idx, callee_idx, loc_idx })
             .boxed()
     }
 }

@@ -1039,10 +1039,14 @@ mod tests {
 mod wire_arbitrary {
     use alloc::vec::Vec;
 
+    use miden_crypto::hash::eidos::{EidosDomain, EidosFrame};
     use proptest::prelude::*;
 
     use super::{PrecompileWitness, WireEntry};
-    use crate::deferred::node::Tag;
+    use crate::program::domain::{
+        CurvePrecompileDomain, Keccak256PrecompileDomain, Sha256PrecompileDomain,
+        Sha512PrecompileDomain, Uint256PrecompileDomain,
+    };
 
     impl Arbitrary for PrecompileWitness {
         type Parameters = ();
@@ -1053,7 +1057,7 @@ mod wire_arbitrary {
             // such that every entry's flattened child list is ASCENDING and every entry is
             // reachable from the root (the LAST entry, which must be reference-bearing). Under
             // those two rules validate_structure's DFS emits entries in wire order, digests stay
-            // unique (random tags, differing fold structures), and the element limit holds. A
+            // unique (generated frames, differing fold structures), and the element limit holds. A
             // Data entry is allowed only at position 0 (it has no children, so it would orphan
             // its predecessors elsewhere); entry 1 references it. Five shapes are generated: the
             // linear Join chain (0, prev), the branching Join (prev - 1, prev) whose two
@@ -1064,7 +1068,20 @@ mod wire_arbitrary {
             (1usize..=4)
                 .prop_flat_map(|len| {
                     (
-                        proptest::collection::vec(any::<Tag>(), len),
+                        proptest::collection::vec(
+                            (
+                                prop_oneof![
+                                    Just(Keccak256PrecompileDomain::TAG),
+                                    Just(Uint256PrecompileDomain::TAG),
+                                    Just(CurvePrecompileDomain::TAG),
+                                    Just(Sha256PrecompileDomain::TAG),
+                                    Just(Sha512PrecompileDomain::TAG),
+                                ],
+                                any::<[u32; 3]>(),
+                            )
+                                .prop_map(|(domain, params)| EidosFrame::new(domain, params)),
+                            len,
+                        ),
                         proptest::collection::vec(0u8..5, len),
                         proptest::collection::vec(
                             proptest::collection::vec(any::<crate::Felt>(), 8),
@@ -1072,55 +1089,39 @@ mod wire_arbitrary {
                         ),
                     )
                 })
-                .prop_map(|(tags, kinds, data_chunks)| {
+                .prop_map(|(frames, kinds, data_chunks)| {
                     // data_chunks is the (1..=3)-chunk payload of a position-0 Data entry; it is
                     // deliberately NOT zipped per entry so its length cannot truncate generation.
                     //
-                    // A framework-reserved tag id (0/1/2) is canonical only on Data{CHUNKS} and
-                    // Join{AND}; every other (tag, kind) combination must carry a non-reserved
-                    // id. Remap reserved ids to a non-reserved one so each entry is canonical BY
-                    // CONSTRUCTION — reserved-id words are reachable under the boundary-biased
-                    // Felt distribution (they were measure-zero under uniform sampling, which
-                    // let this invariant silently rely on sampling luck).
-                    let n = tags.len();
-                    let tags: Vec<_> = tags
-                        .into_iter()
-                        .map(|tag| {
-                            let mut word = tag.as_word();
-                            if Tag::is_framework_reserved_id(word[0]) {
-                                word[0] = crate::Felt::new_unchecked(3);
-                                Tag::from_word(word)
-                            } else {
-                                tag
-                            }
-                        })
-                        .collect();
+                    // Precompile domains accept every portable wire shape; the frame
+                    // constructor guarantees canonical u32 parameters.
+                    let n = frames.len();
                     let mut entries = Vec::with_capacity(n);
-                    for (i, (tag, kind)) in tags.into_iter().zip(kinds).enumerate() {
+                    for (i, (frame, kind)) in frames.into_iter().zip(kinds).enumerate() {
                         if i == 0 && kind == 4 && n >= 2 {
                             let chunks = data_chunks
                                 .iter()
                                 .map(|chunk| chunk.clone().try_into().expect("8 felts per chunk"))
                                 .collect();
-                            entries.push(WireEntry::Data { tag, chunks });
+                            entries.push(WireEntry::Data { frame, chunks });
                             continue;
                         }
                         let prev = i as u32; // the previous entry's wire index (TRUE for i = 0)
                         match kind % 4 {
-                            0 => entries.push(WireEntry::Join { tag, lhs: 0, rhs: prev }),
+                            0 => entries.push(WireEntry::Join { frame, lhs: 0, rhs: prev }),
                             // branching: two distinct earlier references (entries i - 2 and i - 1)
                             1 if i >= 2 => {
-                                entries.push(WireEntry::Join { tag, lhs: prev - 1, rhs: prev });
+                                entries.push(WireEntry::Join { frame, lhs: prev - 1, rhs: prev });
                             },
-                            1 => entries.push(WireEntry::Join { tag, lhs: 0, rhs: prev }),
+                            1 => entries.push(WireEntry::Join { frame, lhs: 0, rhs: prev }),
                             // multi-pair: flattened children [0, prev, prev, prev] ascending
                             2 => entries.push(WireEntry::PairList {
-                                tag,
+                                frame,
                                 pairs: alloc::vec![(0, prev), (prev, prev)],
                             }),
                             _ => {
                                 entries.push(WireEntry::PairList {
-                                    tag,
+                                    frame,
                                     pairs: alloc::vec![(0, prev)],
                                 });
                             },

@@ -2,8 +2,6 @@
 //! `UintVal` bus (3b-1), and `Range16` limb checks balanced against the
 //! byte-pair LUT (3b-2).
 
-use proptest::prelude::*;
-
 use std::{collections::HashMap, vec::Vec};
 
 use miden_air::lookup::{
@@ -16,6 +14,7 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
+use proptest::prelude::*;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
@@ -522,7 +521,6 @@ fn comp_hi_range_checks_cover_the_upper_comp_cells() {
     assert_ne!(residual, 0, "an oversized comp_hi limb must unbalance Range16",);
 }
 
-
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(32))]
 
@@ -588,7 +586,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(32))]
 
     #[test]
-    fn uint_store_buses_balance_against_bpl(
+    fn uint_store_buses_balance_against_bpl_proptest(
         (bound, v, alpha, beta) in arb_modulus()
             .prop_flat_map(|b| (Just(b), arb_uint_below(b), arb_qf(), arb_qf()))
             .prop_filter("nonzero v (ZERO is interned at ptr 3)", |(_, v, _, _)| {
@@ -730,4 +728,14 @@ pub(crate) fn arb_uint_below(bound: U256) -> BoxedStrategy<U256> {
 
 pub(crate) fn arb_qf() -> impl Strategy<Value = QuadFelt> {
     (any::<u32>(), any::<u32>()).prop_map(|(a, b)| QuadFelt::new([Felt::from(a), Felt::from(b)]))
+}
+
+#[test]
+fn uint_store_gaps_zero_value() {
+    gaps_layout_assertions(
+        fixed_modulus(),
+        U256::ZERO,
+        &fixed_challenges(),
+        "a zero-valued uint across the gap still balances",
+    );
 }
