@@ -1953,6 +1953,7 @@ mod arbitrary {
             prop_oneof![
                 any::<[u16; 2]>().prop_map(Self::Two).boxed(),
                 any::<[u16; 4]>().prop_map(Self::Four).boxed(),
+                any::<[u16; 5]>().prop_map(Self::Five).boxed(),
             ]
             .boxed()
         }
@@ -1963,19 +1964,21 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            // Four-limb rows go through record_range_check_u32; two-limb rows through
-            // record_u32div_remainder_diff (record_merkle_depth additionally requires
-            // depth 1..=64 and scaling, covered by the deterministic tests).
-            proptest::collection::vec(any::<RangeCheckReplayValues>(), 0..=4)
+            // Record five-limb rows from canonical field indices so the doubled top limb
+            // matches the Merkle-index witness. The other rows accept independent limbs.
+            proptest::collection::vec((any::<RangeCheckReplayValues>(), any::<Felt>()), 0..=4)
                 .prop_map(|values| {
                     let mut replay = Self::default();
-                    for value in values {
+                    for (value, index) in values {
                         match &value {
                             RangeCheckReplayValues::Four(limbs) => {
                                 replay.record_range_check_u32(*limbs);
                             },
                             RangeCheckReplayValues::Two(limbs) => {
                                 replay.record_u32div_remainder_diff(*limbs);
+                            },
+                            RangeCheckReplayValues::Five(_) => {
+                                replay.record_merkle_index(index);
                             },
                         }
                     }
@@ -2029,7 +2032,7 @@ mod arbitrary_replays {
         HasherResponseReplay, MastForestResolutionReplay, MemoryReadsReplay, STATE_WIDTH,
         StackOverflowReplay,
     };
-    use crate::{Felt, Word, crypto::merkle::MerklePath};
+    use crate::{ContextId, Felt, RowIndex, Word, crypto::merkle::MerklePath};
 
     impl Arbitrary for StackOverflowReplay {
         type Parameters = ();
@@ -2059,12 +2062,15 @@ mod arbitrary_replays {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            // Every variant is any-valid on the wire; prop_oneof exercises all five tags.
+            // Cover all six wire tags; control-block domains must fit in a u32.
             prop_oneof![
-                any::<[Felt; STATE_WIDTH]>().prop_map(Self::Permute).boxed(),
-                (any::<Word>(), any::<Word>(), any::<Felt>(), any::<Word>())
+                any::<[Felt; STATE_WIDTH]>().prop_map(Self::Compress).boxed(),
+                (any::<ContextId>(), any::<RowIndex>(), any::<[Felt; STATE_WIDTH]>())
+                    .prop_map(|(ctx, clk, state)| Self::AeadXof(ctx, clk, state))
+                    .boxed(),
+                (any::<Word>(), any::<Word>(), any::<u32>(), any::<Word>())
                     .prop_map(|(h1, h2, domain, expected_hash)| {
-                        Self::HashControlBlock((h1, h2, domain, expected_hash))
+                        Self::HashControlBlock((h1, h2, Felt::from(domain), expected_hash))
                     })
                     .boxed(),
                 (any::<MastForestId>(), any::<MastNodeId>(), any::<Word>())
@@ -2095,10 +2101,10 @@ mod arbitrary_replays {
                 proptest::collection::vec((any::<Felt>(), any::<Word>()), 0..=4),
                 proptest::collection::vec((any::<Felt>(), any::<Word>(), any::<Word>()), 0..=4),
             )
-                .prop_map(|(permutations, merkle_roots, mrupdates)| {
+                .prop_map(|(compressions, merkle_roots, mrupdates)| {
                     let mut replay = Self::default();
-                    for (addr, hashed_state) in permutations {
-                        replay.record_permute(addr, hashed_state);
+                    for (addr, hashed_state) in compressions {
+                        replay.record_compression(addr, hashed_state);
                     }
                     for (addr, computed_root) in merkle_roots {
                         replay.record_build_merkle_root(addr, computed_root);

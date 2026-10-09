@@ -165,7 +165,7 @@ mod test {
     use proptest::prelude::*;
 
     use super::InOrderIndex;
-    use crate::utils::{ByteWriter, Deserializable, DeserializationError, Serializable};
+    use crate::utils::{ByteWriter, Deserializable, Serializable};
 
     /// The index is one-based; untrusted bytes encoding zero must be rejected rather than
     /// silently constructing an index the traversal operations assume cannot exist.

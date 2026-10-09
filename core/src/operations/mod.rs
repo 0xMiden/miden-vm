@@ -891,7 +891,7 @@ mod operation_arbitrary {
                 Just(Self::MStream),
                 Just(Self::Pipe),
                 Just(Self::CryptoStream),
-                Just(Self::HPerm),
+                Just(Self::Compress),
                 Just(Self::MrUpdate),
                 Just(Self::FriE2F4),
                 Just(Self::HornerBase),

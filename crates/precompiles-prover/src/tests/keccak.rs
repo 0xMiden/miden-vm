@@ -1,5 +1,3 @@
-use proptest::prelude::*;
-
 //! Integration tests for the Keccak-round miniVM chiplet.
 //!
 //! Drives [`generate_trace`] + [`extract_output`] against a reference
@@ -19,6 +17,7 @@ use miden_core::{
 };
 use miden_crypto::stark::air::ConstraintDegrees;
 use miden_lifted_air::{BaseAir, LiftedAir};
+use proptest::prelude::*;
 
 use crate::{
     hash::keccak::{
@@ -216,8 +215,6 @@ fn extract_output_matches_reference_keccak_canonical_test_vectors() {
     assert_eq!(got, expected, "patterned input");
 }
 
-
-
 #[test]
 fn keccak_round_constraints_hold_on_canonical_input() {
     let state = [0u64; 25];
@@ -227,8 +224,6 @@ fn keccak_round_constraints_hold_on_canonical_input() {
 
     crate::tests::check_local(KeccakRoundAir, &main);
 }
-
-
 
 #[test]
 fn keccak_round_shape_and_degree_match_design() {
@@ -344,7 +339,6 @@ fn pure_rol_nonzero_b_unbalances_the_full_chiplet_stack() {
 /// satisfaction. With NUM_LANES=2, the 3 perms split into a busiest lane of
 /// `⌈3/2⌉ = 2` perms, so the height is `2 * 3200 = 6400` padded to `8192`.
 
-
 // NEGATIVE TESTS — confirm `check_constraints` catches deliberate corruption.
 // ================================================================================================
 
@@ -387,7 +381,6 @@ fn corruption_rot_limb_breaks_rotation_decomposition_binding() {
     main.values[row * NUM_MAIN_COLS + col] += Felt::from(1u8);
     crate::tests::check_local(KeccakRoundAir, &main);
 }
-
 
 proptest! {
     /// The chiplet's extracted output must agree with the reference permutation for arbitrary
@@ -440,4 +433,25 @@ proptest! {
 
         crate::tests::check_local(KeccakRoundAir, &main);
     }
+}
+
+#[test]
+fn keccak_round_constraints_hold_on_extreme_input() {
+    let all_ones = [u64::MAX; 25];
+    let mut alternating = [0u64; 25];
+    for (i, lane) in alternating.iter_mut().enumerate() {
+        *lane = if i % 2 == 0 { 0 } else { u64::MAX };
+    }
+
+    // Oracle agreement for the extreme states: constraints alone cannot catch a self-consistent
+    // but wrong permutation result for these exact inputs.
+    for state in [all_ones, alternating] {
+        let expected = keccak_f1600(state);
+        let got = extract_output(&state, &KECCAK_RC);
+        assert_eq!(got, expected);
+    }
+
+    let main = generate_trace_from_states(&[all_ones, alternating], &KECCAK_RC);
+
+    crate::tests::check_local(KeccakRoundAir, &main);
 }

@@ -527,7 +527,7 @@ mod key_arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            // All six scheme arms wrap public keys that must survive point decompression on
+            // All four scheme arms wrap public keys that must survive point decompression on
             // read: K256 keys are derived from a seeded key-exchange key, X25519 keys reuse the
             // eddsa PublicKey strategy (derived from a generated secret).
             prop_oneof![
@@ -535,10 +535,6 @@ mod key_arbitrary {
                     .prop_map(|a| Self::K256XChaCha20Poly1305(k256_public_key(seed32(a))))
                     .boxed(),
                 any::<Ed25519PublicKey>().prop_map(Self::X25519XChaCha20Poly1305).boxed(),
-                (0u64..)
-                    .prop_map(|a| Self::K256AeadPoseidon2(k256_public_key(seed32(a))))
-                    .boxed(),
-                any::<Ed25519PublicKey>().prop_map(Self::X25519AeadPoseidon2).boxed(),
                 (0u64..).prop_map(|a| Self::K256AeadEidos(k256_public_key(seed32(a)))).boxed(),
                 any::<Ed25519PublicKey>().prop_map(Self::X25519AeadEidos).boxed(),
             ]
@@ -559,12 +555,6 @@ mod key_arbitrary {
                     .boxed(),
                 any::<crate::ecdh::x25519::EphemeralPublicKey>()
                     .prop_map(Self::X25519XChaCha20Poly1305)
-                    .boxed(),
-                any::<crate::ecdh::k256::EphemeralPublicKey>()
-                    .prop_map(Self::K256AeadPoseidon2)
-                    .boxed(),
-                any::<crate::ecdh::x25519::EphemeralPublicKey>()
-                    .prop_map(Self::X25519AeadPoseidon2)
                     .boxed(),
                 any::<crate::ecdh::k256::EphemeralPublicKey>()
                     .prop_map(Self::K256AeadEidos)

@@ -904,9 +904,8 @@ fn ordering_limbs_on_both_rows_are_range_checked() {
     let mut k1 = k1_stack();
     k1.stack.require().add(k1.g_pt, k1.g2_pt, 0);
     let traces = k1.stack.traces();
-    let mut rng = StdRng::seed_from_u64(0xecad_dc04);
     traces.check();
-    assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
+    assert_eq!(stack_residual(&traces.mains(), &fixed_challenges()), 0);
 
     for (row, lo, hi) in [(ROW_RES, COL_RP_LO, COL_RP_HI), (ROW_TERM, COL_RQ_LO, COL_RQ_HI)] {
         let mut forged = traces.ec_add_main().clone();
@@ -917,7 +916,7 @@ fn ordering_limbs_on_both_rows_are_range_checked() {
         check_ec_add(&forged);
         let mut mains = traces.mains();
         mains[4] = &forged;
-        assert_ne!(stack_residual(&mains, &mut rng), 0, "ordering limbs on row {row}");
+        assert_ne!(stack_residual(&mains, &fixed_challenges()), 0, "ordering limbs on row {row}");
     }
 }
 

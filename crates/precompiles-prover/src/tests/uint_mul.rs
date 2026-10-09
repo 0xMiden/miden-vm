@@ -3,8 +3,6 @@
 //! `UintLimbs`/`UintVal`/`Range16` buses balanced against the store and
 //! the byte-pair LUT, and the act-gated padding.
 
-use proptest::prelude::*;
-
 use std::{collections::HashMap, vec::Vec};
 
 use miden_air::lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions};
@@ -14,13 +12,16 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_lifted_air::LiftedAir;
+use proptest::prelude::*;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     math::{U256, from_limbs16, mac_reduce, to_limbs16},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    tests::uint::{arb_modulus, arb_uint_below, fixed_challenges, random_modulus, random_uint_below},
+    tests::uint::{
+        arb_modulus, arb_uint_below, fixed_challenges, random_modulus, random_uint_below,
+    },
     uint::{
         UintStoreAir,
         mul::{
@@ -63,7 +64,13 @@ fn store_with(bound: U256, operands: &[U256]) -> (UintStoreRequires, UintPtr, Ve
     let ptrs = operands
         .iter()
         .enumerate()
-        .map(|(i, v)| store.intern_pinned(2 + i as u32, *v, fp))
+        .map(|(i, v)| {
+            if *v == bound || operands[..i].contains(v) {
+                store.intern(*v, fp)
+            } else {
+                store.intern_pinned(2 + i as u32, *v, fp)
+            }
+        })
         .collect();
     (store, fp, ptrs)
 }
@@ -331,7 +338,6 @@ fn gamma_slots_is_a_bijection_onto_distinct_cells() {
     assert_eq!(seen.len(), NUM_GAMMA_SLOTS);
 }
 
-
 // PROPERTY TESTS
 // ================================================================================================
 // The oracle relations above, generalized over generated operands with
@@ -442,3 +448,13 @@ proptest! {
     }
 }
 
+#[test]
+fn repeated_zero_operands_balance() {
+    let mut limbs = [0x1234u16; 16];
+    limbs[15] = 0x7fff;
+    let bound = from_limbs16(&limbs);
+    let (mut store, fp, ptrs) = store_with(bound, &[U256::ZERO; 3]);
+    let mut mul = UintMulRequires::new();
+    record_mac(&mut store, fp, &ptrs, &mut mul, 1, U256::ZERO, 1, U256::ZERO, U256::ZERO, bound);
+    check_and_balance(store, mul, &fixed_challenges());
+}
