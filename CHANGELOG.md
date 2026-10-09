@@ -47,6 +47,8 @@
 #### Features
 
 - Added `PublicKey::from_sec1_bytes` and `PublicKey::from_hex` to `ecdsa_k256_keccak` for parsing and validating compressed and uncompressed SEC1 public keys ([#3961](https://github.com/0xMiden/miden-vm/pull/3961)).
+- Rejected struct types larger than `u32::MAX` bytes with an error instead of panicking (debug builds) or computing a wrapped size (release builds). This affects the assembler, the recursive type builder, and `Type` deserialization; the new fallible `StructType::try_from_parts` reports the error as `InvalidStructTypeError::SizeOverflow` ([#3959](https://github.com/0xMiden/miden-vm/issues/3959)).
+- Rejected struct and enum types larger than `u32::MAX` bytes with an error instead of panicking (debug builds) or computing a wrapped size (release builds). This affects the assembler, the recursive type builder, and `Type` deserialization; the new fallible `StructType::try_from_parts` reports the error as `InvalidStructTypeError::SizeOverflow`, and `EnumType::new` as `InvalidEnumTypeError::SizeOverflow` ([#3959](https://github.com/0xMiden/miden-vm/issues/3959)).
 
 ## v0.35.0 (2026-10-01)
 

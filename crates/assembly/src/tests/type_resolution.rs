@@ -424,3 +424,35 @@ fn imported_type_bodies_resolve_in_their_defining_module() -> TestResult {
     assert_eq!(signature.params()[1..], [Type::U32, Type::Felt]);
     Ok(())
 }
+
+#[test]
+fn struct_whose_fields_sum_past_u32_max_bytes_is_an_error() {
+    // Each field is 2^31 bytes, which fits a struct size on its own, but together they need
+    // 2^32 bytes. Both a bare declaration and one that a signature refers to must be rejected.
+    for masm in [
+        "type T = struct { a: [felt; 536870912], b: [felt; 536870912] }\nbegin\n    nop\nend\n",
+        "type T = struct { a: [felt; 536870912], b: [felt; 536870912] }\n\
+         proc f(x: T)\n    nop\nend\n\
+         begin\n    exec.f\nend\n",
+    ] {
+        let err = Assembler::default()
+            .assemble_program("program", masm)
+            .expect_err("a struct larger than u32::MAX bytes should be rejected");
+        assert_diagnostic!(&err, "invalid recursive type");
+    }
+}
+
+#[test]
+fn struct_with_a_field_larger_than_u32_max_bytes_is_an_error() {
+    for masm in [
+        "type T = struct { a: [felt; 1073741824] }\nbegin\n    nop\nend\n",
+        "type T = struct { a: [felt; 1073741824] }\n\
+         proc f(x: T)\n    nop\nend\n\
+         begin\n    exec.f\nend\n",
+    ] {
+        let err = Assembler::default()
+            .assemble_program("program", masm)
+            .expect_err("a struct larger than u32::MAX bytes should be rejected");
+        assert_diagnostic!(&err, "invalid recursive type");
+    }
+}
