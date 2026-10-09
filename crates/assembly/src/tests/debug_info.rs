@@ -390,12 +390,10 @@ fn external_exec_records_inline_context_at_the_boundary() -> TestResult {
         .expect("decorated external exec should carry boundary inline context");
 
     assert_eq!(external_source.op_start, external_source.op_end);
-    assert!(
-        external_source
-            .inline_calls
-            .iter()
-            .all(|inline_call| inline_call.op_idx == external_source.op_start)
-    );
+    assert!(external_source.inline_calls.iter().all(|inline_call| {
+        inline_call.op_idx == external_source.op_start
+            && inline_call.op_end == external_source.op_end
+    }));
     Ok(())
 }
 
@@ -440,9 +438,9 @@ fn compact_inline_ranges_survive_padding_and_static_linking() -> TestResult {
                 .map(|row| info[info.get_function(row.callee_idx).unwrap().name_idx].as_ref())
                 .collect::<Vec<_>>();
             let expected = if name == "push.1" {
-                vec!["source::inner", "source::outer"]
+                vec!["source::inner", "::dep::math::callee", "source::outer"]
             } else {
-                vec!["source::outer"]
+                vec!["::dep::math::callee", "source::outer"]
             };
             assert_eq!(chain, expected);
             checked.insert(operation.op_idx);
@@ -495,7 +493,7 @@ fn many_inline_ranges_survive_padding_and_static_linking() -> TestResult {
                 .inline_calls_for_operation(source_id, operation.op_idx)
                 .map(|row| info[info.get_function(row.callee_idx).unwrap().name_idx].as_ref())
                 .collect::<Vec<_>>();
-            assert_eq!(chain, vec![inner, "source::outer"]);
+            assert_eq!(chain, vec![inner, "::dep::math::callee", "source::outer"]);
             checked.insert(operation.op_idx);
         }
     }
@@ -710,6 +708,50 @@ fn plain_exec_preserves_invocation_identity_through_merging() -> TestResult {
         count += 1;
     }
     assert_eq!(count, 2);
+    Ok(())
+}
+
+#[test]
+fn plain_exec_inline_ranges_cover_only_inlined_operations() -> TestResult {
+    let context = TestContext::default();
+    let package = Assembler::new(context.source_manager()).assemble_program(
+        "test",
+        "proc leaf push.42 neg end\nproc wrapper exec.leaf end\nbegin push.7 exec.wrapper drop drop end",
+    )?;
+    let debug = package.debug_info().into_diagnostic()?.unwrap();
+    let root = package.entrypoint_source_node().unwrap();
+    let inlined_start = debug[root]
+        .asm_ops
+        .iter()
+        .find(|op| debug[op.op_name_idx].as_ref() == "push.42")
+        .unwrap()
+        .op_idx;
+    let inlined_end = debug[root]
+        .asm_ops
+        .iter()
+        .find(|op| debug[op.op_name_idx].as_ref() == "neg")
+        .unwrap()
+        .op_idx
+        + 1;
+    assert_eq!(inlined_end - inlined_start, 2);
+    let calls = debug.inline_calls_for_source_node(root).collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2);
+    for call in calls {
+        assert_eq!((call.op_idx, call.op_end), (inlined_start, inlined_end));
+    }
+    for op_idx in 0..debug[root].op_end {
+        let names = debug
+            .inline_calls_for_operation(root, op_idx)
+            .map(|call| debug[debug.get_function(call.callee_idx).unwrap().name_idx].to_string())
+            .collect::<Vec<_>>();
+        if (inlined_start..inlined_end).contains(&op_idx) {
+            assert_eq!(names.len(), 2);
+            assert!(names[0].ends_with("::leaf"));
+            assert!(names[1].ends_with("::wrapper"));
+        } else {
+            assert!(names.is_empty(), "caller operation {op_idx} must not inherit exec frames");
+        }
+    }
     Ok(())
 }
 
