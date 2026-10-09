@@ -14,7 +14,7 @@ use miden_core::{
 };
 use miden_mast_package::debug_info::{
     DebugFunctionIdx, DebugInfoTableRemapping, DebugSourceAsmOp, DebugSourceInlineCall,
-    DebugSourceNodeId, DebugSourceVar, PackageDebugInfo,
+    DebugSourceNodeId, DebugSourceVar, FunctionInfo, PackageDebugInfo,
 };
 
 use super::{
@@ -409,13 +409,21 @@ impl MastForestBuilder {
         let Some((debug, tables)) = self.imported_debug_tables[&library_id].as_ref() else {
             return Ok(None);
         };
-        let mut matches = debug.functions().iter().enumerate().filter(|(_, function)| {
+        let matches_name = |function: &FunctionInfo<DebugSourceNodeId>| {
             let name = function.linkage_name_idx.into_option().unwrap_or(function.name_idx);
             debug[name].as_ref() == path.as_str()
-                && function.mast_root == mast_root
+        };
+        let candidates = debug.functions().iter().enumerate().filter(|(_, function)| {
+            function.mast_root == mast_root
                 && source_node
                     .is_none_or(|source| function.source_node.into_option() == Some(source))
         });
+        // Prefer the declared path. Re-exports may only have a function for the defining path,
+        // so fall back to the export's exact source occurrence, never to its digest alone.
+        let require_name =
+            source_node.is_none() || candidates.clone().any(|(_, function)| matches_name(function));
+        let mut matches =
+            candidates.filter(|(_, function)| !require_name || matches_name(function));
         let Some((index, _)) = matches.next() else {
             return Ok(None);
         };

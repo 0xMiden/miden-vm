@@ -775,6 +775,109 @@ fn plain_exec_preserves_imported_alias_identity() -> TestResult {
 }
 
 #[test]
+fn plain_exec_preserves_reexported_function_identity() -> TestResult {
+    use miden_core::serde::{Deserializable, Serializable};
+
+    let context = TestContext::default();
+    let root =
+        context.parse_module("namespace root\npub use {foo as bar, other as baz} from dep")?;
+    let dep = context.parse_module(
+        "namespace dep\n@source_name(\"same\")\npub proc foo() -> felt\n push.42\nend\n@source_name(\"same\")\npub proc other() -> felt\n push.42\nend",
+    )?;
+    let library = Assembler::new(context.source_manager()).assemble_library("dep", root, [dep])?;
+    let library = Arc::new(Package::read_from_bytes(&library.to_bytes()).into_diagnostic()?);
+    let library_debug = library.debug_info().into_diagnostic()?.unwrap();
+    let expected = ["::dep::foo", "::dep::other"];
+    assert_eq!(library_debug.functions()[0].mast_root, library_debug.functions()[1].mast_root);
+
+    for (linkage, tail) in
+        [(Linkage::Static, ""), (Linkage::Static, "drop"), (Linkage::Dynamic, "drop")]
+    {
+        let package = Assembler::new(context.source_manager())
+            .with_package(Arc::clone(&library), linkage)?
+            .assemble_program(
+                "test",
+                if tail.is_empty() {
+                    "use root\nproc first exec.root::bar end\nproc second exec.root::baz end\nbegin call.first call.second end"
+                        .to_string()
+                } else {
+                    format!("use root\nbegin exec.root::bar {tail} exec.root::baz {tail} end")
+                },
+            )?;
+        let package = Package::read_from_bytes(&package.to_bytes()).into_diagnostic()?;
+        let debug = package.debug_info().into_diagnostic()?.unwrap();
+        let root = package.entrypoint_source_node().unwrap();
+        let calls = reachable_source_nodes(&debug, root)
+            .iter()
+            .flat_map(|source| debug[*source].inline_calls.iter())
+            .collect::<Vec<_>>();
+        assert_eq!(calls.len(), 2, "re-exported exec calls must retain invocation rows");
+        assert_ne!(calls[0].callee_idx, calls[1].callee_idx);
+        let mut names = Vec::new();
+        for call in calls {
+            let function = debug.get_function(call.callee_idx).unwrap();
+            names.push(debug[function.linkage_name_idx.into_option().unwrap()].to_string());
+            assert!(function.type_idx.into_option().is_some());
+            if linkage == Linkage::Static && tail.is_empty() {
+                let definition = function.source_node.into_option().unwrap();
+                assert_ne!(definition, root);
+                assert_eq!(
+                    package.mast_forest()[debug[definition].exec_node].digest(),
+                    function.mast_root
+                );
+            } else {
+                assert_eq!(function.source_node.into_option(), None);
+            }
+            assert!(debug.get_location(call.loc_idx).is_some());
+        }
+        names.sort();
+        assert_eq!(names, expected);
+    }
+    Ok(())
+}
+
+#[test]
+fn plain_exec_prefers_named_function_with_shared_provenance() -> TestResult {
+    use miden_core::serde::Serializable;
+    use miden_mast_package::{SectionId, debug_info::PackageDebugInfoBuilder};
+
+    let context = TestContext::default();
+    let mut library = Assembler::new(context.source_manager()).assemble_library(
+        "dep",
+        "namespace dep\npub proc foo push.42 end",
+        None::<String>,
+    )?;
+    let mut debug =
+        PackageDebugInfoBuilder::from(Box::new(library.debug_info().into_diagnostic()?.unwrap()));
+    let mut alias = debug.debug_info().functions()[0];
+    alias.name_idx = debug.add_string("::dep::alias");
+    debug.add_function(alias);
+    library
+        .sections
+        .iter_mut()
+        .find(|section| section.id == SectionId::DEBUG_INFO)
+        .unwrap()
+        .data = debug.build().to_bytes().into();
+    let library: Arc<Package> = Arc::from(library);
+
+    for linkage in [Linkage::Static, Linkage::Dynamic] {
+        let package = Assembler::new(context.source_manager())
+            .with_package(Arc::clone(&library), linkage)?
+            .assemble_program("test", "use dep\nbegin exec.dep::foo drop end")?;
+        let debug = package.debug_info().into_diagnostic()?.unwrap();
+        let root = package.entrypoint_source_node().unwrap();
+        let calls = reachable_source_nodes(&debug, root)
+            .iter()
+            .flat_map(|source| debug[*source].inline_calls.iter())
+            .collect::<Vec<_>>();
+        assert_eq!(calls.len(), 1, "named exec must retain its invocation row under {linkage:?}");
+        let function = debug.get_function(calls[0].callee_idx).unwrap();
+        assert_eq!(debug[function.name_idx].as_ref(), "::dep::foo");
+    }
+    Ok(())
+}
+
+#[test]
 fn linking_does_not_invent_definitions_for_source_less_functions() -> TestResult {
     let context = TestContext::default();
     let dependency = Assembler::new(context.source_manager()).assemble_library(
