@@ -486,19 +486,25 @@ fn to_complex_fft(basis: &[Polynomial<i16>; 4]) -> [Polynomial<Complex<f64>>; 4]
 }
 
 /// Checks `f * G - g * F = q` in `Z[x] / (x^N + 1)`.
+///
+/// All secret-derived intermediates are bound in `Zeroizing` so the NTRU check does not leave
+/// unwiped `Polynomial<i64>` copies behind on either the accept or reject path.
 fn satisfies_ntru_relation(
     f: &Polynomial<i16>,
     g: &Polynomial<i16>,
     big_f: &Polynomial<i16>,
     big_g: &Polynomial<i16>,
 ) -> bool {
-    let f = f.map(|&coefficient| i64::from(coefficient));
-    let g = g.map(|&coefficient| i64::from(coefficient));
-    let big_f = big_f.map(|&coefficient| i64::from(coefficient));
-    let big_g = big_g.map(|&coefficient| i64::from(coefficient));
+    let f = Zeroizing::new(f.map(|&coefficient| i64::from(coefficient)));
+    let g = Zeroizing::new(g.map(|&coefficient| i64::from(coefficient)));
+    let big_f = Zeroizing::new(big_f.map(|&coefficient| i64::from(coefficient)));
+    let big_g = Zeroizing::new(big_g.map(|&coefficient| i64::from(coefficient)));
 
-    let determinant = (f * big_g - g * big_f).reduce_by_cyclotomic(N);
-    determinant == Polynomial::constant(i64::from(MODULUS))
+    let lhs = Zeroizing::new(&*f * &*big_g);
+    let rhs = Zeroizing::new(&*g * &*big_f);
+    let diff = Zeroizing::new(&*lhs - &*rhs);
+    let determinant = Zeroizing::new(diff.reduce_by_cyclotomic(N));
+    *determinant == Polynomial::constant(i64::from(MODULUS))
 }
 
 fn secret_key_coefficient_to_i8(coefficient: FalconFelt) -> i8 {
