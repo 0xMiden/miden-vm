@@ -7,11 +7,15 @@
 - [BREAKING] `Package::strip_debug_info` strips an embedded kernel one level deep and rejects a kernel section that embeds another kernel with the new `PackageStripError::NestedEmbeddedKernel`, instead of recursing until the stack overflows ([#3981](https://github.com/0xMiden/miden-vm/pull/3981)).
 - Fixed linker module-capacity overflow so AST and pre-assembled module registration return a structured error instead of panicking ([#3895](https://github.com/0xMiden/miden-vm/issues/3895)).
 - [BREAKING] `MmrPeaks::verify` now takes the tree, peak and relative position from the peaks' forest instead of the proof's, and rejects positions outside that forest (`PositionNotFound`, previously a panic) and paths whose depth differs from the tree height (`InvalidMerklePath`) ([#3931](https://github.com/0xMiden/miden-vm/pull/3931)).
-- `build_trace` returns an error instead of panicking when a fragment continuation in an execution witness names a missing node, a node of the wrong kind, or a batch the basic block does not have ([#3978](https://github.com/0xMiden/miden-vm/pull/3978)).
++- `build_trace` returns an error instead of panicking when a fragment continuation in an execution witness names a missing node, a node of the wrong kind, or a batch the basic block does not have ([#3978](https://github.com/0xMiden/miden-vm/pull/3978)).
+- Fixed assembler debug metadata losing procedure definitions and declared invocation targets for plain `exec`, including nested calls and package linking, while preserving executable MAST roots. Raised the bounded debug-payload limit to 32 MiB so the core library's invocation metadata remains readable ([#3982](https://github.com/0xMiden/miden-vm/pull/3982)).
+- Fixed cross-module calls through re-export aliases of private procedures by preserving the visibility granted through the alias.
 
 #### Features
 
 - Added `PublicKey::from_sec1_bytes` and `PublicKey::from_hex` to `ecdsa_k256_keccak` for parsing and validating compressed and uncompressed SEC1 public keys ([#3961](https://github.com/0xMiden/miden-vm/pull/3961)).
+- [BREAKING] Added MASM `pub(package)` visibility and `Visibility::Internal`, allowing declarations and re-exports to follow public access rules without being exported from the package.
+- Allowed re-exporting private items and import aliases visible at the re-export declaration site, including using re-exported private types in public signatures.
 
 #### Changes
 

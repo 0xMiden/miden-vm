@@ -358,3 +358,175 @@ fn link_import_public_item_reexport_cycle_with_self_relative_target_is_rejected(
 
     Ok(())
 }
+
+#[test]
+fn private_procedure_reexport_is_callable_from_another_module() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        "namespace root\npub mod api\nuse {exposed as imported} from self::api\npub proc entry exec.api::exposed exec.imported call.api::exposed procref.api::exposed drop end\n"
+    ))?;
+    let api = context.parse_module(source_file!(
+        &context,
+        "namespace root::api\nproc helper push.1 drop end\npub use {helper as exposed} from self\n"
+    ))?;
+    let library = Assembler::new(context.source_manager()).assemble_library("pkg", root, [api])?;
+    let exports = library.manifest.exports().map(PackageExport::path).collect::<BTreeSet<_>>();
+    assert_eq!(exports.len(), 2);
+    assert!(exports.contains(&Arc::from(Path::new("::root::api::exposed"))));
+    Ok(())
+}
+
+#[test]
+fn private_items_can_be_reexported_from_their_own_module() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace root
+        type Hidden = felt
+        const VALUE = 7
+        proc helper nop end
+        pub use {Hidden as Exposed, VALUE as EXPOSED_VALUE, helper as exposed} from self
+        "#
+    ))?;
+    let library = Assembler::new(context.source_manager()).assemble_library(
+        "pkg",
+        root,
+        None::<Box<Module>>,
+    )?;
+    let exports = library.manifest.exports().map(PackageExport::path).collect::<BTreeSet<_>>();
+    assert_eq!(exports.len(), 3);
+    assert!(exports.contains(&Arc::from(Path::new("::root::Exposed"))));
+    assert!(exports.contains(&Arc::from(Path::new("::root::EXPOSED_VALUE"))));
+    assert!(exports.contains(&Arc::from(Path::new("::root::exposed"))));
+    Ok(())
+}
+
+#[test]
+fn private_import_can_be_reexported_from_its_own_module() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        "namespace root\nuse {foo as local} from dep\npub use {local as exposed} from self\n"
+    ))?;
+    let dep =
+        context.parse_module(source_file!(&context, "namespace dep\npub proc foo nop end\n"))?;
+    let library = Assembler::new(context.source_manager()).assemble_library("pkg", root, [dep])?;
+    assert_eq!(library.manifest.exports().count(), 1);
+    assert_eq!(
+        library.manifest.exports().next().unwrap().path().as_ref(),
+        Path::new("::root::exposed")
+    );
+    Ok(())
+}
+
+#[test]
+fn inaccessible_private_item_cannot_be_reexported() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        "namespace root\npub use {helper as exposed} from dep\n"
+    ))?;
+    let dep =
+        context.parse_module(source_file!(&context, "namespace dep\nproc helper nop end\n"))?;
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("pkg", root, [dep])
+        .expect_err("a re-export must not bypass declaration-site visibility");
+    assert_diagnostic!(err, "private symbol reference");
+    Ok(())
+}
+
+#[test]
+fn public_alias_of_private_type_can_appear_in_public_signatures() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        "namespace root\npub mod api\nuse {Exposed as Word} from self::api\npub proc entry(value: Word) nop end\n"
+    ))?;
+    let api = context.parse_module(source_file!(
+        &context,
+        "namespace root::api\ntype Hidden = felt\npub use {Hidden as Exposed} from ::root::api\npub proc local(value: Exposed) nop end\n"
+    ))?;
+    let library = Assembler::new(context.source_manager()).assemble_library("pkg", root, [api])?;
+    assert_eq!(library.manifest.exports().count(), 3);
+    Ok(())
+}
+
+#[test]
+fn package_visibility_allows_access_without_exporting_items() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace root
+        pub mod api
+        pub(package) mod internal
+        pub(package) use {helper as local} from self::api
+        use {VALUE, Hidden} from self::api
+        pub use {helper as exposed, Hidden as Exposed} from self::api
+        pub proc entry exec.local exec.internal::helper push.VALUE drop end
+        proc typed(value: Hidden) nop end
+        "#
+    ))?;
+    let api = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace root::api
+        pub(package) const VALUE = 1
+        pub(package) type Hidden = felt
+        pub(package) proc helper push.VALUE drop end
+        pub proc entry exec.helper end
+        "#
+    ))?;
+    let internal = context.parse_module(source_file!(
+        &context,
+        "namespace root::internal\npub proc helper nop end\n"
+    ))?;
+    let library =
+        Assembler::new(context.source_manager()).assemble_library("pkg", root, [api, internal])?;
+    let exports = library.manifest.exports().map(PackageExport::path).collect::<BTreeSet<_>>();
+    assert_eq!(exports.len(), 4);
+    assert!(library.manifest.get_module(Path::new("::root::api")).is_some());
+    assert!(library.manifest.get_module(Path::new("::root::internal")).is_none());
+    assert_eq!(library.manifest.get_module(Path::new("::root")).unwrap().submodules().len(), 1);
+    for path in ["::root::entry", "::root::exposed", "::root::Exposed", "::root::api::entry"] {
+        assert!(exports.contains(&Arc::from(Path::new(path))), "missing {path}");
+    }
+    Ok(())
+}
+
+#[test]
+fn package_reexport_is_accessible_from_another_module() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace root
+        pub mod api
+        use {LOCAL_VALUE, LocalWord} from self::api
+        pub proc entry
+            exec.api::local_helper
+            push.LOCAL_VALUE drop
+        end
+        proc typed(value: LocalWord) nop end
+        "#
+    ))?;
+    let api = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace root::api
+        const VALUE = 7
+        type Word = felt
+        proc helper nop end
+        pub(package) use {helper as local_helper, VALUE as LOCAL_VALUE, Word as LocalWord} from self
+        "#
+    ))?;
+    let library = Assembler::new(context.source_manager()).assemble_library("pkg", root, [api])?;
+    assert_eq!(library.manifest.exports().count(), 1);
+    assert_eq!(
+        library.manifest.exports().next().unwrap().path().as_ref(),
+        Path::new("::root::entry")
+    );
+    Ok(())
+}

@@ -14,7 +14,7 @@ Miden assembly programs are organized into procedures. Procedures, in turn, can 
 A *procedure* can be used to encapsulate a frequently-used sequence of instructions which can later be invoked via a label. A procedure is introduced using the `proc` keyword. Procedure definitions consist of the following parts, in the order they appear:
 
 * Zero or more attributes which modify the procedure definition, or annotate it in some way. These can be user-defined, but there are also built-in attributes interpreted by the assembler. For example, `@locals(N)` specifies the number of procedure locals allocated for the procedure. See the [Procedure Attributes](#procedure-attributes) section for more on their syntax and semantics.
-* An optional visibility modifier, i.e. `pub` if the procedure is to be exported from the containing module.
+* An optional visibility modifier: `pub` or `pub(package)` to make the procedure visible outside its defining module.
 * The `proc` keyword
 * The procedure name/label
 * An optional type signature. See the [Types](#types) section for more details.
@@ -148,6 +148,18 @@ A program cannot contain any exported procedures.
 
 When a program is executed, the execution starts at the first instruction following the `begin` instruction.
 
+#### Package visibility
+
+`pub(package)` makes a declaration visible under the same module-access rules as `pub`, but does not export it from the package being built. It is supported on procedures, constants, types, enums, submodules, and item re-exports. For example, a helper in a public module can be called by another module in the package without becoming part of the package interface:
+
+```masm
+pub(package) proc helper
+    nop
+end
+```
+
+A `pub(package) mod` declaration makes the child module accessible like `pub mod`, while excluding its module tree from automatic package exports. A visible item can still be explicitly re-exported with `pub use` elsewhere.
+
 #### Declaring submodules
 Modules may declare submodules, and so on, to better organize functionality for re-use and maintainability. Modules must explicitly declare each submodule that
 is an immediate child of their namespace, using `mod` or `pub mod`:
@@ -220,7 +232,7 @@ begin
 end
 ```
 
-Imports are resolved independently. An import may not refer to another import declared in the same module:
+Import paths start at the global module tree unless qualified with `self::`. A bare import alias cannot be used as the root of another import path:
 
 ```
 use foo::bar
@@ -243,7 +255,14 @@ end
 
 In the module shown above, not only is the locally-defined procedure `foo` exported, but so are two procedures named `add` and `mul64`, whose implementations are defined in the `miden::core::math::u64` module.
 
-`pub use` follows the same path rules as `use`: it resolves from the global module tree unless the path starts with `self::`, and it does not resolve through other imports in the current module. Modules cannot be re-exported with `pub use`; use `pub mod` in the parent module to expose a submodule as part of a public module tree.
+`pub use` follows the same path rules as `use`: it resolves from the global module tree unless the path starts with `self::`. Any item visible at the declaration site may be re-exported, including a private item or import alias in the same module. The re-export's visibility controls access through the alias independently of the original declaration's visibility. Names must remain unique, so re-exporting a local declaration requires an alias:
+
+```masm
+proc helper nop end
+pub use {helper as exposed} from self
+```
+
+Use `pub(package) use` to expose an alias to other modules without exporting it from the package. Modules cannot be re-exported with `pub use`; use `pub mod` in the parent module to expose a submodule as part of a public module tree.
 
 A leading `::` may be used to make the global root explicit:
 

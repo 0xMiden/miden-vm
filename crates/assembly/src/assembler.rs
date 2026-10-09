@@ -527,7 +527,7 @@ impl Assembler {
 
                     let path: Arc<Path> = {
                         let symbol = &self.linker[gid];
-                        if !symbol.visibility().is_public() {
+                        if !symbol.visibility().is_exported() {
                             continue;
                         }
                         module_path
@@ -549,7 +549,7 @@ impl Assembler {
                 }
 
                 for import in imports.iter() {
-                    if !import.visibility().is_public() {
+                    if !import.visibility().is_exported() {
                         continue;
                     }
 
@@ -603,7 +603,7 @@ impl Assembler {
             let module = &self.linker[module_idx];
             let mut submodules = Vec::new();
             for decl in module.submodules() {
-                if !decl.visibility.is_public() {
+                if !decl.visibility.is_exported() {
                     continue;
                 }
 
@@ -815,15 +815,15 @@ impl Assembler {
         for module_index in module_indices.iter().copied() {
             let module = &self.linker[module_index];
             for symbol in module.symbols() {
-                if !symbol.visibility().is_public() {
+                if !symbol.visibility().is_exported() {
                     continue;
                 }
 
-                self.verify_exported_item(&resolver, module_index, symbol, None)?;
+                self.verify_exported_item(&resolver, module_index, symbol)?;
             }
 
             for import in module.imports() {
-                if !import.visibility().is_public()
+                if !import.visibility().is_exported()
                     || !matches!(import.kind(), ast::ImportKind::Item)
                 {
                     continue;
@@ -833,12 +833,7 @@ impl Assembler {
                     continue;
                 };
 
-                self.verify_exported_item(
-                    &resolver,
-                    gid.module,
-                    &self.linker[gid],
-                    Some(import.span()),
-                )?;
+                self.verify_exported_item(&resolver, gid.module, &self.linker[gid])?;
             }
         }
 
@@ -850,7 +845,6 @@ impl Assembler {
         resolver: &SymbolResolver<'_>,
         module_index: ModuleIndex,
         symbol: &crate::linker::Symbol,
-        export_span: Option<SourceSpan>,
     ) -> Result<(), Report> {
         match symbol.item() {
             SymbolItem::Procedure(proc) => {
@@ -858,13 +852,6 @@ impl Assembler {
                 self.verify_exported_signature(resolver, module_index, proc.signature())
             },
             SymbolItem::Type(type_decl) => {
-                if !symbol.visibility().is_public() {
-                    return Err(Report::new(SemanticAnalysisError::PrivateTypeInExportedType {
-                        span: export_span.unwrap_or_else(|| type_decl.name().span()),
-                        defined: type_decl.name().span(),
-                    }));
-                }
-
                 let mut visiting_types = BTreeSet::default();
                 self.verify_exported_type_decl(
                     resolver,
@@ -985,14 +972,11 @@ impl Assembler {
                     kind: None,
                 };
                 let resolution =
-                    resolver.resolve_path(&context, path.as_deref()).map_err(Report::from)?;
-
-                let gid = match resolution {
-                    SymbolResolution::Exact { gid, .. } => gid,
-                    SymbolResolution::Local(item) => current_module + item.into_inner(),
-                    SymbolResolution::External(_)
-                    | SymbolResolution::MastRoot(_)
-                    | SymbolResolution::Module { .. } => return Ok(()),
+                    resolver.resolve_reference(&context, path.as_deref()).map_err(Report::from)?;
+                let crate::linker::namespaces::ResolvedUse::Item { id: gid, visibility } =
+                    resolution
+                else {
+                    return Ok(());
                 };
 
                 let symbol = &self.linker[gid];
@@ -1000,7 +984,7 @@ impl Assembler {
                     return Ok(());
                 };
 
-                if !symbol.visibility().is_public() {
+                if !visibility.is_public() {
                     return Err(Report::new(
                         usage.private_type_error(path.span(), type_decl.name().span()),
                     ));

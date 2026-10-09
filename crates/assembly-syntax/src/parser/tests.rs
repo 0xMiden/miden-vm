@@ -1285,3 +1285,56 @@ fn parser_rejects_debug_instructions() {
         );
     }
 }
+
+#[test]
+fn parse_package_visibility_on_all_declarations() {
+    let forms = parse_forms(test_source_file(
+        "pub(package) mod api\n\
+         pub(package) use {helper} from api\n\
+         pub(package) const VALUE = 1\n\
+         pub(package) type Word = felt\n\
+         pub(package) enum Tag : u8 { A }\n\
+         pub(package) proc helper nop end\n",
+    ))
+    .expect("package visibility should parse");
+    assert_eq!(forms.len(), 6);
+    for form in &forms {
+        let visibility = match form {
+            Form::Submodule(decl) => decl.visibility,
+            Form::Import(import) => import.visibility(),
+            Form::Constant(constant) => constant.visibility,
+            Form::Type(ty) => ty.visibility,
+            Form::Enum(ty) => ty.visibility(),
+            Form::Procedure(proc) => proc.visibility(),
+            other => panic!("unexpected form: {other:?}"),
+        };
+        assert_eq!(visibility.to_string(), "pub(package)");
+        assert!(visibility.is_public());
+    }
+}
+
+#[test]
+fn package_visibility_survives_ast_roundtrip() {
+    let source = "namespace root\npub(package) mod api\npub(package) use {helper} from self::api\npub(package) const VALUE = 1\npub(package) type Word = felt\npub(package) proc entry nop end\n";
+    let source_manager = Arc::new(miden_debug_types::DefaultSourceManager::default());
+    let module = ModuleParser::new(Some(ast::ModuleKind::Library))
+        .parse_str(None, source, source_manager.clone())
+        .expect("package visibility should parse");
+    let rendered = module.to_string();
+    assert_eq!(rendered.matches("pub(package)").count(), 5, "{rendered}");
+    let reparsed = ModuleParser::new(Some(ast::ModuleKind::Library))
+        .parse_str(None, &rendered, source_manager)
+        .expect("printed package visibility should parse");
+    assert_eq!(reparsed.to_string(), rendered);
+}
+
+#[test]
+fn invalid_package_visibility_qualifiers_are_rejected() {
+    for source in [
+        "pub(module) proc helper nop end",
+        "pub() proc helper nop end",
+        "pub(package proc helper nop end",
+    ] {
+        assert!(parse_forms(test_source_file(source)).is_err(), "accepted {source}");
+    }
+}
