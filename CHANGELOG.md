@@ -21,6 +21,10 @@
 
 - [BREAKING] Store inline-call frames as operation ranges instead of per-operation rows. Package debug-info version 4 preserves inline chains across clears, control flow, and dynamic or external boundaries without expanding them during decoding ([#3956](https://github.com/0xMiden/miden-vm/pull/3956)).
 
+#### Changes
+
+- [BREAKING] Warn on unused private assembly constants. `AnalysisContext::new` takes a module path. Pass the parsed module to `AnalysisContext::set_module` and handle its `Result`. Add an `UnusedConstant` variant to `SemanticAnalysisError` ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
+
 ## v0.35.0 (2026-10-01)
 
 #### Changes

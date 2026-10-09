@@ -16,9 +16,7 @@ use miden::core::precompiles
 # - OP_TAG(op_id) = one word [PRECOMPILE_ID, op_id, 0, 0] for ADD/SUB/MUL/EQ.
 # - VALUE_U32[8]  = two words [v0, v1, v2, v3] [v4, v5, v6, v7], with v0 least significant.
 #
-const PRECOMPILE_ID = 5689961814541250448
-const BOUND_PTR = 1
-
+# generated parameters: precompile id 5689961814541250448, bound pointer 1
 # UintPrecompile op ids are fixed by the Rust precompile: VALUE=0, ADD=1, SUB=2, MUL=3,
 # EQ=4. Only VALUE_TAG carries BOUND_PTR; operation tags deliberately use zero in that slot.
 const VALUE_TAG = [5689961814541250448, 0, 1, 0]

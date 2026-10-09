@@ -81,17 +81,18 @@ impl SymbolTable for &crate::ast::Module {
             });
         }
 
-        items.extend(self.imports.iter().filter_map(|import| {
-            let Import::Item(item) = import else {
-                return None;
-            };
+        items.extend(self.imports.iter().map(|import| {
             let local_name = import.local_name().clone();
             let span = local_name.span();
             let name = Span::new(span, local_name.into_inner());
-            Some(LocalSymbol::Import {
+            let target = match import {
+                Import::Item(item) => item.target_path(),
+                Import::Module(module) => module.module_path().map(Arc::from),
+            };
+            LocalSymbol::Import {
                 name,
-                resolution: Ok(SymbolResolution::External(item.target_path())),
-            })
+                resolution: Ok(SymbolResolution::External(target)),
+            }
         }));
 
         items.into_iter()
