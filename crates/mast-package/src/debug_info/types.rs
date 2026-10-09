@@ -19,6 +19,8 @@ use alloc::{sync::Arc, vec::Vec};
 use core::{marker::PhantomData, num::NonZeroU32};
 
 use miden_assembly_syntax::ast::{DebugVarInfo, DebugVarLocation, TypeExpr, types::Type};
+#[cfg(all(feature = "arbitrary", test))]
+use miden_core::serde::{Deserializable, Serializable};
 use miden_core::{Word, mast::MastNodeId, operations::AssemblyOp};
 use miden_debug_types::{
     ByteIndex, ColumnIndex, ColumnNumber, LineIndex, LineNumber, SourceSpan, Span,
@@ -184,6 +186,10 @@ newtype_id!(
     ///
     /// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
     /// where a type index is expected).
+    #[cfg_attr(
+        all(feature = "arbitrary", test),
+        miden_test_serialization_macros::serialization_test
+    )]
     pub struct DebugStringIdx;
 );
 
@@ -195,6 +201,10 @@ newtype_id!(
     ///
     /// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
     /// where a type index is expected).
+    #[cfg_attr(
+        all(feature = "arbitrary", test),
+        miden_test_serialization_macros::serialization_test
+    )]
     pub struct DebugTypeIdx;
 );
 
@@ -206,6 +216,10 @@ newtype_id!(
     ///
     /// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
     /// where a type index is expected).
+    #[cfg_attr(
+        all(feature = "arbitrary", test),
+        miden_test_serialization_macros::serialization_test
+    )]
     pub struct DebugFileIdx;
 );
 
@@ -217,6 +231,10 @@ newtype_id!(
     ///
     /// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
     /// where a type index is expected).
+    #[cfg_attr(
+        all(feature = "arbitrary", test),
+        miden_test_serialization_macros::serialization_test
+    )]
     pub struct DebugFunctionIdx;
 );
 
@@ -228,6 +246,10 @@ newtype_id!(
     ///
     /// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
     /// where a type index is expected).
+    #[cfg_attr(
+        all(feature = "arbitrary", test),
+        miden_test_serialization_macros::serialization_test
+    )]
     pub struct DebugLocIdx;
 );
 
@@ -239,6 +261,10 @@ newtype_id!(
     ///
     /// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
     /// where a type index is expected).
+    #[cfg_attr(
+        all(feature = "arbitrary", test),
+        miden_test_serialization_macros::serialization_test
+    )]
     pub struct DebugSourceNodeId;
 );
 
@@ -404,6 +430,10 @@ const _DEBUG_LOC_SIZE_CHECK: () = const {
 ///
 /// Assembly-operation, variable, and inline-call rows are stored directly on each source
 /// occurrence.
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub type DebugSourceNode = SourceNode<MastNodeId, DebugSourceNodeId>;
 
 /// A source/debug occurrence for code that produced an executable MAST node.
@@ -542,6 +572,10 @@ impl DebugSourceAsmOp {
 
 /// Debug variable metadata keyed by a source/debug MAST occurrence.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct DebugSourceVar {
     /// Operation index local to the reduced execution node.
     pub op_idx: u32,
@@ -562,6 +596,10 @@ pub struct DebugSourceVar {
 /// Inline-call metadata keyed by a source/debug MAST occurrence.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(C)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct DebugSourceInlineCall {
     /// Operation index local to the reduced execution node.
     pub op_idx: u32,
@@ -619,6 +657,10 @@ impl DebugErrorMessage {
 /// This encodes the type of a variable or expression, enabling debuggers to properly
 /// display values on the stack or in memory.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub enum DebugTypeInfo {
     /// A primitive type (e.g., i32, i64, felt, etc.)
     Primitive(DebugPrimitiveType),
@@ -771,6 +813,10 @@ impl DebugPrimitiveType {
 
 /// Field information within a struct type.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct DebugFieldInfo {
     /// Name of the field (index into string table)
     pub name_idx: DebugStringIdx,
@@ -782,6 +828,10 @@ pub struct DebugFieldInfo {
 
 /// Variant information within an enum type.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct DebugVariantInfo {
     /// Name of the variant (index into string table).
     pub name_idx: DebugStringIdx,
@@ -1574,6 +1624,10 @@ fn checked_align_up_usize(value: usize, alignment: usize) -> Option<usize> {
     zerocopy::KnownLayout,
 )]
 #[repr(C)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct DebugFileInfo {
     /// Full path to the source file (index into string table).
     pub path_idx: DebugStringIdx,

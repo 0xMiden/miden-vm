@@ -14,13 +14,27 @@
 use libfuzzer_sys::fuzz_target;
 use miden_core::{
     mast::{UntrustedMastForest, UntrustedMastForestReadOptions},
-    serde::DeserializationError,
+    serde::{DeserializationError, Serializable},
 };
 
 fuzz_target!(|data: &[u8]| {
     let validate_untrusted = |result: Result<UntrustedMastForest, DeserializationError>| {
         if let Ok(untrusted) = result {
-            let _ = untrusted.validate();
+            // STABILITY ORACLE (upgraded from crash-only): a forest that PASSES
+            // untrusted validation must re-validate from its own canonical encoding —
+            // the validator cannot accept bytes whose canonical form it would reject
+            // (catches validator asymmetry between raw and canonical wire forms).
+            // MastForest has no PartialEq, so the oracle is at the validation-outcome
+            // level. Corpus reachability is inherited from the mast-forest seeds
+            // (make fuzz-seeds covers this target's corpus via seed_gen.rs).
+            if let Ok(forest) = untrusted.validate() {
+                let canonical = forest.to_bytes();
+                let revalidated = UntrustedMastForest::read_from_bytes(&canonical)
+                    .expect("canonical encoding must deserialize")
+                    .validate()
+                    .expect("canonical encoding must re-validate");
+                let _ = revalidated;
+            }
         }
     };
     let small_budget_options =

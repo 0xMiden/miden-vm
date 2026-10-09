@@ -50,6 +50,14 @@ pub type Digest512 = Digest<DIGEST512_BYTES>;
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(into = "String", try_from = "String"))]
 #[repr(transparent)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test(
+        types(DIGEST192_BYTES),
+        types(DIGEST256_BYTES),
+        types(DIGEST512_BYTES)
+    )
+)]
 pub struct Digest<const N: usize = DIGEST256_BYTES>([u8; N]);
 
 impl<const N: usize> Digest<N> {
@@ -290,5 +298,27 @@ mod tests {
         assert_eq!(bytes.len(), 128);
         assert_eq!(&bytes[0..64], &[1u8; 64]);
         assert_eq!(&bytes[64..128], &[2u8; 64]);
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::Digest;
+
+    impl<const N: usize> Arbitrary for Digest<N> {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Every byte pattern is a valid digest; no invariants to preserve.
+            proptest::collection::vec(any::<u8>(), N)
+                .prop_map(|bytes| Self(bytes.try_into().expect("vec length equals N")))
+                .boxed()
+        }
     }
 }

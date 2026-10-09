@@ -42,7 +42,7 @@ PVM_GENERATOR_RUST_OUTPUTS := crates/precompiles-verifier/src/ace_constants.rs \
 ALL_FEATURES             := --all-features
 
 # Workspace-wide test features
-WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,fixture-tools,constants-tools
+WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,fixture-tools,constants-tools,midenc-hir-type/arbitrary
 MIDEN_CRYPTO_FUZZ_TARGETS := smt word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
 MIDEN_SERDE_UTILS_FUZZ_TARGETS := primitives collections string vint64 goldilocks budgeted
 EXECUTION_PROOF_FUZZ_LIMITS := -rss_limit_mb=512 -timeout=10
@@ -211,6 +211,13 @@ test-crypto: ## Run crypto tests requiring specialized feature configurations
 		-p miden-crypto \
 		--features miden-crypto/persistent-forest
 	$(MAKE) test-lifted-stark
+
+.PHONY:test-rpx-avx2-debug
+test-rpx-avx2-debug: ## Tests unoptimized RPX with AVX2 and the default 2 MiB thread stack
+	RUSTFLAGS="$(RUSTFLAGS) -C target-feature=+avx2" $(MAKE) test \
+		CRATE=miden-crypto WORKSPACE_TEST_FEATURES= CARGO_PROFILE=test \
+		TEST_RUST_MIN_STACK=2097152 EXTRA="--lib --no-tests=fail" \
+		EXPR="-E 'test(rpx_packed_permutation_fits_default_thread_stack)'"
 
 .PHONY: test-docs
 test-docs: ## Run documentation tests (cargo test - nextest doesn't support doctests)

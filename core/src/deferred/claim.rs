@@ -10,6 +10,10 @@ use crate::{
 /// keys and downstream statements. For this claim type, the protocol defines that commitment to
 /// be the root itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct DeferredClaim(DeferredRoot);
 
 impl DeferredClaim {
@@ -29,6 +33,23 @@ impl DeferredClaim {
     /// returns the same word as [`Self::root`].
     pub const fn commitment(self) -> Word {
         self.0
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod deferred_claim_arbitrary {
+    use proptest::prelude::*;
+
+    use super::{DeferredClaim, DeferredRoot};
+
+    impl Arbitrary for DeferredClaim {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // DeferredRoot is a Digest alias; any digest is a valid claim root.
+            any::<DeferredRoot>().prop_map(Self::new).boxed()
+        }
     }
 }
 

@@ -1333,3 +1333,50 @@ fn apply_mutations(
 
     reversion
 }
+
+/// The arbitrary-module tree builder must retain a non-empty anchor entry even when the input
+/// contains duplicate keys and empty values (BTreeMap keeps the last value per key, and
+/// `with_entries` drops empty values). This is the shrinking invariant the SMT serialization
+/// strategies rely on: a positive-length input with an anchor never builds an empty tree.
+#[test]
+fn smt_from_pairs_retains_anchor_under_duplicates_and_empty_values() {
+    use crate::merkle::smt::full::arbitrary::smt_from_pairs;
+
+    let key = Word::new([Felt::new(7).unwrap(), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+    let anchor_value = Word::new([Felt::new(1).unwrap(), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+
+    // Anchor first, then a duplicate of its key with an empty value (the keep-last ordering
+    // hazard): the surviving value must still be non-empty.
+    let smt = smt_from_pairs(vec![(key, anchor_value), (key, EMPTY_WORD)]);
+    assert_eq!(smt.entries().count(), 1);
+    assert_ne!(smt.root(), Smt::default().root());
+
+    // Duplicate anchor key with a different non-empty value: the tree stays non-empty.
+    let other = Word::new([Felt::new(2).unwrap(), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+    let smt = smt_from_pairs(vec![(key, anchor_value), (key, other)]);
+    assert_eq!(smt.entries().count(), 1);
+}
+
+/// Generator-level invariant : every SMT generator must produce a populated tree
+/// even for shrunken inputs (values collapsed to EMPTY_WORD, duplicate keys). This pins the
+/// anchor guarantee the serialization strategies' explicit expects rely on.
+use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(proptest::test_runner::Config::with_cases(64))]
+
+    #[test]
+    fn smt_generators_always_produce_populated_trees(
+        random in super::arbitrary::random_pairs(1usize..=6),
+        colliding in crate::merkle::smt::test_gen::colliding_leaf_entries(),
+        sibling in crate::merkle::smt::test_gen::sibling_leaf_entries(),
+    ) {
+        for pairs in [random, colliding, sibling] {
+            let smt = super::arbitrary::smt_from_pairs(pairs);
+            prop_assert!(
+                smt.entries().next().is_some(),
+                "anchor entry must keep the tree populated under shrinking"
+            );
+        }
+    }
+}

@@ -175,3 +175,234 @@ impl Arbitrary for PackageDebugInfo {
             .boxed()
     }
 }
+
+// ARBITRARY FOR INDEX NEWTYPES AND LEAF ROWS
+// ================================================================================================
+
+macro_rules! impl_arbitrary_id {
+    ($name:ty) => {
+        impl Arbitrary for $name {
+            type Parameters = ();
+            type Strategy = BoxedStrategy<Self>;
+
+            fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+                // Any u32 is a valid table index on the wire; the edge-biased mix hits the 0
+                // and u32::MAX bounds that flat sampling would never reach.
+                prop_oneof![Just(0u32), Just(u32::MAX), any::<u32>()]
+                    .prop_map(Self::from)
+                    .boxed()
+            }
+        }
+    };
+}
+
+impl_arbitrary_id!(DebugStringIdx);
+impl_arbitrary_id!(DebugTypeIdx);
+impl_arbitrary_id!(DebugFileIdx);
+impl_arbitrary_id!(DebugFunctionIdx);
+impl_arbitrary_id!(DebugLocIdx);
+impl_arbitrary_id!(DebugSourceNodeId);
+
+impl Arbitrary for DebugFieldInfo {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // Flat row of any-valid fields: string/type table indices and a byte offset.
+        (any::<DebugStringIdx>(), any::<DebugTypeIdx>(), any::<u32>())
+            .prop_map(|(name_idx, type_idx, offset)| Self { name_idx, type_idx, offset })
+            .boxed()
+    }
+}
+
+impl Arbitrary for DebugVariantInfo {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // Options are any-valid on the wire (independent bools); the discriminant is a full
+        // u128 written as hi/lo halves.
+        (
+            any::<DebugStringIdx>(),
+            any::<Option<DebugTypeIdx>>(),
+            any::<Option<u32>>(),
+            any::<u128>(),
+        )
+            .prop_map(|(name_idx, type_idx, payload_offset, discriminant)| Self {
+                name_idx,
+                type_idx,
+                payload_offset,
+                discriminant,
+            })
+            .boxed()
+    }
+}
+
+impl Arbitrary for DebugFileInfo {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (any::<DebugStringIdx>(), any::<[u8; 32]>())
+            .prop_map(|(path_idx, checksum)| Self { path_idx, checksum })
+            .boxed()
+    }
+}
+
+impl Arbitrary for DebugSourceVar {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // arg_idx: the wire carries a u32 where 0 decodes to None (NonZeroU32::new), so any
+        // Option<NonZeroU32> is reachable; value_location has its own arbitrary impl.
+        (
+            any::<u32>(),
+            any::<DebugStringIdx>(),
+            any::<Option<DebugTypeIdx>>(),
+            any::<Option<NonZeroU32>>(),
+            any::<Option<DebugLocIdx>>(),
+            any::<DebugVarLocation>(),
+        )
+            .prop_map(|(op_idx, name_idx, type_id, arg_idx, location_idx, value_location)| Self {
+                op_idx,
+                name_idx,
+                type_id,
+                arg_idx,
+                location_idx,
+                value_location,
+            })
+            .boxed()
+    }
+}
+
+impl Arbitrary for DebugSourceInlineCall {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (any::<u32>(), any::<DebugFunctionIdx>(), any::<DebugLocIdx>())
+            .prop_map(|(op_idx, callee_idx, loc_idx)| Self { op_idx, callee_idx, loc_idx })
+            .boxed()
+    }
+}
+
+impl Arbitrary for DebugPrimitiveType {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // A fixed variant set serialized as one byte; exercise a representative spread
+        // (the full set adds no wire-coverage value beyond these tags).
+        prop_oneof![
+            Just(Self::Bool),
+            Just(Self::I8),
+            Just(Self::U32),
+            Just(Self::I64),
+            Just(Self::U64),
+            Just(Self::I128),
+        ]
+        .boxed()
+    }
+}
+
+impl Arbitrary for DebugTypeInfo {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // One row on the wire: nesting happens through type-table indices, not through the
+        // value, so every variant is any-valid given bounded child rows.
+        prop_oneof![
+            any::<DebugPrimitiveType>().prop_map(Self::Primitive).boxed(),
+            any::<DebugTypeIdx>()
+                .prop_map(|pointee_type_idx| Self::Pointer { pointee_type_idx })
+                .boxed(),
+            (any::<DebugTypeIdx>(), any::<Option<u32>>())
+                .prop_map(|(element_type_idx, count)| Self::Array { element_type_idx, count })
+                .boxed(),
+            (
+                any::<DebugStringIdx>(),
+                any::<u32>(),
+                proptest::collection::vec(any::<DebugFieldInfo>(), 0..=4)
+            )
+                .prop_map(|(name_idx, size, fields)| Self::Struct { name_idx, size, fields })
+                .boxed(),
+            (
+                any::<Option<DebugTypeIdx>>(),
+                proptest::collection::vec(any::<DebugTypeIdx>(), 0..=4)
+            )
+                .prop_map(|(return_type_idx, param_type_indices)| Self::Function {
+                    return_type_idx,
+                    param_type_indices,
+                })
+                .boxed(),
+            (
+                any::<DebugStringIdx>(),
+                any::<u32>(),
+                any::<DebugTypeIdx>(),
+                proptest::collection::vec(any::<DebugVariantInfo>(), 0..=4),
+            )
+                .prop_map(|(name_idx, size, discriminant_type_idx, variants)| Self::Enum {
+                    name_idx,
+                    size,
+                    discriminant_type_idx,
+                    variants,
+                })
+                .boxed(),
+            Just(Self::Variadic),
+            Just(Self::Unknown),
+        ]
+        .boxed()
+    }
+}
+
+impl Arbitrary for DebugSourceNode {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // Sound by construction: asm_ops are sorted and deduplicated by op_idx, satisfying the
+        // reader's strictly-increasing validation; everything else is any-valid on the wire.
+        (
+            any::<MastNodeId>(),
+            proptest::collection::vec(any::<DebugSourceNodeId>(), 0..=4),
+            any::<u32>(),
+            any::<u32>(),
+            proptest::collection::vec(
+                (
+                    any::<u32>(),
+                    any::<Option<DebugLocIdx>>(),
+                    any::<DebugStringIdx>(),
+                    any::<DebugStringIdx>(),
+                    any::<u8>(),
+                ),
+                0..=4,
+            ),
+            proptest::collection::vec(any::<DebugSourceVar>(), 0..=4),
+            proptest::collection::vec(any::<DebugSourceInlineCall>(), 0..=4),
+        )
+            .prop_map(
+                |(exec_node, children, op_start, op_end, asm_op_rows, debug_vars, inline_calls)| {
+                    let mut asm_ops: Vec<DebugSourceAsmOp> = asm_op_rows
+                        .into_iter()
+                        .map(|(op_idx, location_idx, context, op, cycles)| {
+                            DebugSourceAsmOp::new(op_idx, location_idx, context, op, cycles)
+                        })
+                        .collect();
+                    asm_ops.sort_by_key(|asm_op| asm_op.op_idx);
+                    asm_ops.dedup_by_key(|asm_op| asm_op.op_idx);
+                    Self {
+                        exec_node,
+                        children,
+                        op_start,
+                        op_end,
+                        asm_ops,
+                        debug_vars,
+                        inline_calls,
+                    }
+                },
+            )
+            .boxed()
+    }
+}

@@ -34,18 +34,20 @@ fuzz_target!(|data: &[u8]| {
     // Generate parse-valid compact PartialSmt encodings from the input bytes. This gives the fuzzer
     // enough structure to regularly reach reconstruction and validation, not just byte parsing.
     let unique_nodes = StructuredInput::new(data).unique_nodes();
-    let _ = PartialSmt::read_from_bytes(&unique_nodes.to_bytes());
+    let bytes = unique_nodes.to_bytes();
+    assert_eq!(UniqueNodes::read_from_bytes(&bytes).unwrap(), unique_nodes);
+    let _ = PartialSmt::read_from_bytes(&bytes);
 
     // Also try the same leaves without reconstruction nodes. This preserves direct coverage for
-    // missing-node cases like the panic path reported in roborev review 3329.
+    // missing-node cases like the decode failure mode.
     if !unique_nodes.leaves.is_empty() {
         let mut missing_nodes = unique_nodes;
         missing_nodes.nodes.clear();
         let _ = PartialSmt::read_from_bytes(&missing_nodes.to_bytes());
     }
 
-    // Keep a minimal missing-node shape in the corpus so short inputs can still reach the reviewed
-    // failure mode without first discovering the broader structured encoding.
+    // Keep a minimal missing-node shape in the corpus so short inputs can still reach the
+    // decode failure mode without first discovering the broader structured encoding.
     let _ = PartialSmt::read_from_bytes(&focused_missing_node_payload(data));
 });
 
@@ -102,7 +104,11 @@ impl<'a> StructuredInput<'a> {
 
         let mut value_only_leaves = BTreeMap::new();
         for _ in 0..self.next_count(MAX_VALUE_ONLY_LEAVES) {
-            value_only_leaves.insert(self.next_node_position(SMT_DEPTH), self.next_word());
+            let position = self.next_node_position(SMT_DEPTH);
+            let value = self.next_word();
+            if !leaves.contains_key(&position) {
+                value_only_leaves.insert(position, value);
+            }
         }
 
         UniqueNodes { root, nodes, leaves, value_only_leaves }
@@ -118,7 +124,7 @@ impl<'a> StructuredInput<'a> {
             _ => self.next_multiple_leaf(leaf_index),
         };
 
-        (outer_index, leaf)
+        (leaf.index().position(), leaf)
     }
 
     fn next_multiple_leaf(&mut self, leaf_index: u64) -> SmtLeaf {

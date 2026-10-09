@@ -21,7 +21,7 @@ use miden_core::{
 };
 use miden_lifted_air::{MultiAir, ProverStatement, ReductionError, Statement};
 use miden_lifted_stark::{Preprocessed, ProverInstance, VerifierInstance};
-use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
+use proptest::prelude::*;
 
 // The subset MultiAir closes its trace-length-weighted bus identity during the ignored prove
 // round-trip.
@@ -60,8 +60,12 @@ use crate::{
     },
 };
 
-fn rand_qf(rng: &mut impl Rng) -> QuadFelt {
-    QuadFelt::new([Felt::from(rng.random::<u32>()), Felt::from(rng.random::<u32>())])
+/// Fixed lookup challenges for the deterministic balance checks: generic
+/// nonzero fractions, so no term cancels by symmetry.
+fn fixed_challenges() -> Challenges<QuadFelt> {
+    let alpha = QuadFelt::new([Felt::from(0x11u32), Felt::from(0x22u32)]);
+    let beta = QuadFelt::new([Felt::from(0x33u32), Felt::from(0x44u32)]);
+    Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS)
 }
 
 // secp256k1 KATs (machine-verified small multiples of G).
@@ -282,14 +286,16 @@ impl EcStackTraces {
 /// Net unmatched LogUp denominators across the subset (0 ⟺ every bus
 /// closes). Takes the mains explicitly so tamper tests can substitute a
 /// forged matrix.
-fn stack_residual(mains: &[&RowMajorMatrix<Felt>; NUM_STACK], rng: &mut impl Rng) -> usize {
-    let challenges = Challenges::new(rand_qf(rng), rand_qf(rng), MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+fn stack_residual(
+    mains: &[&RowMajorMatrix<Felt>; NUM_STACK],
+    challenges: &Challenges<QuadFelt>,
+) -> usize {
     let mut net: HashMap<QuadFelt, (Felt, String)> = HashMap::new();
-    fold_balance(&BytePairLutAir, mains[0], &challenges, &mut net);
-    fold_balance(&UintStoreMulAir, mains[1], &challenges, &mut net);
-    fold_balance(&UintAddAir, mains[2], &challenges, &mut net);
-    fold_balance(&EcPointStoreGroupsAir, mains[3], &challenges, &mut net);
-    fold_balance(&EcGroupAddAir, mains[4], &challenges, &mut net);
+    fold_balance(&BytePairLutAir, mains[0], challenges, &mut net);
+    fold_balance(&UintStoreMulAir, mains[1], challenges, &mut net);
+    fold_balance(&UintAddAir, mains[2], challenges, &mut net);
+    fold_balance(&EcPointStoreGroupsAir, mains[3], challenges, &mut net);
+    fold_balance(&EcGroupAddAir, mains[4], challenges, &mut net);
     net.into_values().filter(|(m, _)| *m != Felt::ZERO).count()
 }
 
@@ -424,9 +430,8 @@ fn ec_add_matches_k256() {
     // The lattice is validated against k256 inside the builder; here we
     // also close the subset: per-chiplet constraints + full bus balance.
     let traces = k256_validated_stack().traces();
-    let mut rng = StdRng::seed_from_u64(0x000e_cadd_c256);
     traces.check();
-    assert_eq!(stack_residual(&traces.mains(), &mut rng), 0, "subset must balance");
+    assert_eq!(stack_residual(&traces.mains(), &fixed_challenges()), 0, "subset must balance");
 }
 
 #[test]
@@ -480,9 +485,8 @@ fn generic_add_computes_kat() {
     );
     assert_eq!(traces.ec_add_main().height(), PERIOD, "one add op = one block");
 
-    let mut rng = StdRng::seed_from_u64(0xecad_d001);
     traces.check();
-    assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
+    assert_eq!(stack_residual(&traces.mains(), &fixed_challenges()), 0);
 }
 
 #[test]
@@ -503,9 +507,8 @@ fn duplicate_adds_collapse() {
         "two identical adds collapse onto one block",
     );
 
-    let mut rng = StdRng::seed_from_u64(0xecad_dded);
     traces.check();
-    assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
+    assert_eq!(stack_residual(&traces.mains(), &fixed_challenges()), 0);
 }
 
 #[test]
@@ -523,9 +526,8 @@ fn double_binds_canonically() {
     let traces = k1.stack.traces();
     assert_eq!(block0_flags(traces.ec_add_main()), [0, 0, 0, 1, 0].map(Felt::from_u32));
 
-    let mut rng = StdRng::seed_from_u64(0xecad_d002);
     traces.check();
-    assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
+    assert_eq!(stack_residual(&traces.mains(), &fixed_challenges()), 0);
 }
 
 #[test]
@@ -541,9 +543,8 @@ fn cancel_resolves_to_canonical_pai() {
     let traces = k1.stack.traces();
     assert_eq!(block0_flags(traces.ec_add_main()), [0, 0, 1, 0, 0].map(Felt::from_u32));
 
-    let mut rng = StdRng::seed_from_u64(0xecad_d003);
     traces.check();
-    assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
+    assert_eq!(stack_residual(&traces.mains(), &fixed_challenges()), 0);
 }
 
 #[test]
@@ -566,9 +567,8 @@ fn pai_passthroughs_tie_results() {
         "∞ + ∞ sets both pass flags",
     );
 
-    let mut rng = StdRng::seed_from_u64(0xecad_d004);
     traces.check();
-    assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
+    assert_eq!(stack_residual(&traces.mains(), &fixed_challenges()), 0);
 }
 
 #[test]
@@ -594,9 +594,8 @@ fn ed25519_torsion_doubles_to_pai() {
     let traces = stack.traces();
     assert_eq!(block0_flags(traces.ec_add_main()), [0, 0, 1, 0, 0].map(Felt::from_u32));
 
-    let mut rng = StdRng::seed_from_u64(0xecadd_25519);
     traces.check();
-    assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
+    assert_eq!(stack_residual(&traces.mains(), &fixed_challenges()), 0);
 }
 
 #[test]
@@ -683,12 +682,11 @@ fn double_forged_as_generic_unbalances() {
     let traces = k1.stack.traces();
 
     let forged = tamper_block0(traces.ec_add_main(), &[(COL_DBL, 0), (COL_GEN, 1)]);
-    let mut rng = StdRng::seed_from_u64(0xecad_da01);
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
     mains[4] = &forged;
-    assert_ne!(stack_residual(&mains, &mut rng), 0);
+    assert_ne!(stack_residual(&mains, &fixed_challenges()), 0);
 }
 
 #[test]
@@ -741,12 +739,11 @@ fn finite_forged_as_pai_unbalances() {
     let mut forged =
         tamper_block0(traces.ec_add_main(), &[(COL_GEN, 0), (COL_PAI_P, 1), (COL_MINTS, 0)]);
     tamper_cell(&mut forged, ROW_RES, CELL_R, q_ptr.addr());
-    let mut rng = StdRng::seed_from_u64(0xecad_da03);
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
     mains[4] = &forged;
-    assert_ne!(stack_residual(&mains, &mut rng), 0);
+    assert_ne!(stack_residual(&mains, &fixed_challenges()), 0);
 }
 
 #[test]
@@ -764,12 +761,11 @@ fn double_forged_as_cancel_unbalances() {
 
     let mut forged = tamper_block0(traces.ec_add_main(), &[(COL_DBL, 0), (COL_CANCEL, 1)]);
     tamper_cell(&mut forged, ROW_RES, CELL_R, pai.addr());
-    let mut rng = StdRng::seed_from_u64(0xecad_da04);
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
     mains[4] = &forged;
-    assert_ne!(stack_residual(&mains, &mut rng), 0);
+    assert_ne!(stack_residual(&mains, &fixed_challenges()), 0);
 }
 
 #[test]
@@ -797,12 +793,11 @@ fn ed25519_torsion_forged_as_double_unbalances() {
     let traces = stack.traces();
 
     let forged = tamper_block0(traces.ec_add_main(), &[(COL_CANCEL, 0), (COL_DBL, 1)]);
-    let mut rng = StdRng::seed_from_u64(0xecadd_25519f);
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
     mains[4] = &forged;
-    assert_ne!(stack_residual(&mains, &mut rng), 0);
+    assert_ne!(stack_residual(&mains, &fixed_challenges()), 0);
 }
 
 #[test]
@@ -820,12 +815,11 @@ fn forged_result_ptr_unbalances() {
     // here we want the EcPoint-mismatch bus catch.
     let mut forged = tamper_block0(traces.ec_add_main(), &[(COL_MINTS, 0)]);
     tamper_cell(&mut forged, ROW_RES, CELL_R, g_pt.addr());
-    let mut rng = StdRng::seed_from_u64(0xecad_da05);
     check_ec_add(&forged);
 
     let mut mains = traces.mains();
     mains[4] = &forged;
-    assert_ne!(stack_residual(&mains, &mut rng), 0);
+    assert_ne!(stack_residual(&mains, &fixed_challenges()), 0);
 }
 
 // ============================================================================
@@ -910,9 +904,8 @@ fn ordering_limbs_on_both_rows_are_range_checked() {
     let mut k1 = k1_stack();
     k1.stack.require().add(k1.g_pt, k1.g2_pt, 0);
     let traces = k1.stack.traces();
-    let mut rng = StdRng::seed_from_u64(0xecad_dc04);
     traces.check();
-    assert_eq!(stack_residual(&traces.mains(), &mut rng), 0);
+    assert_eq!(stack_residual(&traces.mains(), &fixed_challenges()), 0);
 
     for (row, lo, hi) in [(ROW_RES, COL_RP_LO, COL_RP_HI), (ROW_TERM, COL_RQ_LO, COL_RQ_HI)] {
         let mut forged = traces.ec_add_main().clone();
@@ -923,7 +916,7 @@ fn ordering_limbs_on_both_rows_are_range_checked() {
         check_ec_add(&forged);
         let mut mains = traces.mains();
         mains[4] = &forged;
-        assert_ne!(stack_residual(&mains, &mut rng), 0, "ordering limbs on row {row}");
+        assert_ne!(stack_residual(&mains, &fixed_challenges()), 0, "ordering limbs on row {row}");
     }
 }
 
@@ -942,8 +935,53 @@ fn cert_point_forged_as_trio_unbalances() {
 
     let forged = tamper_ec_points(traces.ec_points_main(), r.addr() as usize - 1, COL_IS_CERT, 0);
     crate::tests::check_local(EcPointStoreGroupsAir, &forged);
-    let mut rng = StdRng::seed_from_u64(0xecad_dce3);
     let mut mains = traces.mains();
     mains[3] = &forged;
-    assert_ne!(stack_residual(&mains, &mut rng), 0);
+    assert_ne!(stack_residual(&mains, &fixed_challenges()), 0);
+}
+
+// PROPERTY TESTS
+// ================================================================================================
+
+/// The honest KAT stack's traces (chord add + tangent double over
+/// secp256k1), built once: the recorded multisets are
+/// challenge-independent, so the challenge proptest folds them per case.
+fn kat_traces() -> &'static EcStackTraces {
+    static KAT: std::sync::OnceLock<EcStackTraces> = std::sync::OnceLock::new();
+    KAT.get_or_init(|| {
+        let mut k1 = k1_stack();
+        let mut ec = k1.stack.require();
+        ec.add(k1.g_pt, k1.g2_pt, 0);
+        ec.add(k1.g_pt, k1.g_pt, 0);
+        let traces = k1.stack.traces();
+        traces.check();
+        traces
+    })
+}
+
+proptest! {
+    // Capped at 8: each case re-folds all five chiplet buses (~185ms with
+    // generated QuadFelt challenges), the Keccak-expensive-case precedent.
+    #![proptest_config(ProptestConfig::with_cases(8))]
+
+    #[test]
+    fn residual_vanishes_for_generated_challenges(
+        (alpha, beta) in (any::<[u32; 2]>(), any::<[u32; 2]>()).prop_map(|(a, b)| {
+            (
+                QuadFelt::new(a.map(Felt::from)),
+                QuadFelt::new(b.map(Felt::from)),
+            )
+        })
+    ) {
+        // The LogUp fold is a linear identity in the challenge pair: if
+        // the recorded multisets balance, the net residual vanishes for
+        // EVERY generic (α, β), not just the fixed deterministic pair the
+        // tamper tests pin. The recorded multisets are
+        // challenge-independent, so the honest KAT stack (chord add +
+        // tangent double) is built once and each case only re-folds.
+        let traces = kat_traces();
+        let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+        let residual = stack_residual(&traces.mains(), &challenges);
+        prop_assert_eq!(residual, 0, "the buses must close for generated challenges");
+    }
 }

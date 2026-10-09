@@ -14,6 +14,7 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
+use proptest::prelude::*;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
@@ -518,4 +519,223 @@ fn comp_hi_range_checks_cover_the_upper_comp_cells() {
     fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
     let residual = net.values().filter(|m| **m != Felt::ZERO).count();
     assert_ne!(residual, 0, "an oversized comp_hi limb must unbalance Range16",);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+
+    #[test]
+    fn uint_store_constraints_hold_over_generated_values(
+        (bound, v) in arb_modulus()
+            .prop_flat_map(|b| (Just(b), arb_uint_below(b)))
+            .prop_filter("nonzero v (ZERO is interned separately at ptr 3)", |(_, v)| {
+                *v != U256::ZERO
+            }),
+    ) {
+        // sample_store's shape: modulus@1 (self-ref), v@2, the v = 0 extreme@3.
+        let mut store = UintStoreRequires::new();
+        let fp = store.pin_modulus(1, bound);
+        store.intern_pinned(2, v, fp);
+        store.intern_pinned(3, U256::ZERO, fp);
+        let main = generate_trace(store, &mut BytePairLutRequires::new());
+        prop_assert_eq!(main.height(), 16, "3 uints + 1 padding block × 4 rows");
+
+        // The trace HOSTS the carries of `v + comp = bound` in the value
+        // block's closing row (block 1 = rows 4–7: γ₀..γ₃ in cells 4–7,
+        // γ₄..γ₆ in cells 12–14) — the hosted γⱼ must equal the exact
+        // carries32 of the stored limbs, for ANY in-range v (both the
+        // borrow and the no-carry limb-wise regimes).
+        let v32 = to_limbs32(v);
+        let comp256 = bound.wrapping_sub(v);
+        let c = carries32(&v32, &to_limbs32(comp256));
+        let bound_row = 4 + 3;
+        for (j, &cj) in c.iter().enumerate() {
+            let cell_col = if j < 4 {
+                CARRY_LO_BEGIN + j
+            } else {
+                CARRY_HI_BEGIN + (j - 4)
+            };
+            let cell = main.values[bound_row * NUM_MAIN_COLS + cell_col];
+            prop_assert_eq!(cell, Felt::from(cj), "γ{} must host the exact carry", j);
+        }
+
+        // The ZERO extreme at ptr 3 (block 2, rows 8–11) is the no-carry
+        // regime: comp = bound − 0 = bound adds limb-wise without any
+        // borrow, so every hosted γⱼ there must be zero.
+        let zero_row = 8 + 3;
+        for cell_col in CARRY_LO_BEGIN..CARRY_LO_BEGIN + 4 {
+            prop_assert_eq!(
+                main.values[zero_row * NUM_MAIN_COLS + cell_col],
+                Felt::ZERO,
+                "the zero uint's block must carry nothing",
+            );
+        }
+        for cell_col in CARRY_HI_BEGIN..CARRY_HI_BEGIN + 3 {
+            prop_assert_eq!(
+                main.values[zero_row * NUM_MAIN_COLS + cell_col],
+                Felt::ZERO,
+                "the zero uint's block must carry nothing",
+            );
+        }
+
+        crate::tests::check_local(UintStoreAir, &main);
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+
+    #[test]
+    fn uint_store_buses_balance_against_bpl_proptest(
+        (bound, v, alpha, beta) in arb_modulus()
+            .prop_flat_map(|b| (Just(b), arb_uint_below(b), arb_qf(), arb_qf()))
+            .prop_filter("nonzero v (ZERO is interned at ptr 3)", |(_, v, _, _)| {
+                *v != U256::ZERO
+            }),
+    ) {
+        let mut store = UintStoreRequires::new();
+        let fp = store.pin_modulus(1, bound);
+        store.intern_pinned(2, v, fp);
+        store.intern_pinned(3, U256::ZERO, fp);
+
+    // The byte-pair LUT provides exactly the Range16 demand the store
+    // consumes (every v / comp 16-bit limb + ptr gaps) — driven by the
+    // store's own trace pass.
+    let mut bpl = BytePairLutRequires::new();
+    let uint_main = generate_trace(store, &mut bpl);
+    let bpl_main = bpl_trace(bpl);
+
+        let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+
+        let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
+        fold_balance(&UintStoreAir, &uint_main, &challenges, &mut net);
+        fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
+
+        let residual = net.values().filter(|m| **m != Felt::ZERO).count();
+        prop_assert_eq!(
+            residual, 0,
+            "UintVal self-balances within the store; Range16 balances against BPL",
+        );
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+
+    #[test]
+    fn uint_store_gaps_and_self_ref_padding_proptest(
+        (bound, v, alpha, beta) in arb_modulus().prop_flat_map(|b| {
+            (Just(b), arb_uint_below(b), arb_qf(), arb_qf())
+        }),
+    ) {
+        // v == 0 is valid here: by_value keys on (value, bound_ptr), so
+        // zero@5 under modulus 1 does not collide with the self-ref
+        // zero modulus@100 — the zero boundary flows through the gaps.
+        // Modulus at the required root ptr 1; a value at ptr 5 (gap 3); a
+        // self-referential zero uint at ptr 100 (gap 94) — it nets out on its own
+        // (provide −1 + consume +1, both `(100, 100, ·)`). Auto-padding appends a
+        // fourth zero block at ptr 101 (gap 0).
+        let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+        gaps_layout_assertions(
+            bound,
+            v,
+            &challenges,
+            "non-trivial gaps + self-ref padding still balance",
+        );
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+
+    #[test]
+    fn uint_store_empty_pads_proptest(alpha in arb_qf(), beta in arb_qf()) {
+        // The traces and local constraints do not depend on the generated challenges.
+        static TRACES: std::sync::LazyLock<(RowMajorMatrix<Felt>, RowMajorMatrix<Felt>)> =
+            std::sync::LazyLock::new(|| {
+                let mut bpl = BytePairLutRequires::new();
+                let main = generate_trace(UintStoreRequires::new(), &mut bpl);
+                assert_eq!(main.height(), 4, "one padding block");
+                crate::tests::check_local(UintStoreAir, &main);
+                (main, bpl_trace(bpl))
+            });
+        let (main, bpl_main) = &*TRACES;
+
+        let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+        let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
+        fold_balance(&UintStoreAir, main, &challenges, &mut net);
+        fold_balance(&BytePairLutAir, bpl_main, &challenges, &mut net);
+        let residual = net.values().filter(|m| **m != Felt::ZERO).count();
+        prop_assert_eq!(residual, 0, "an empty store still closes its buses");
+    }
+}
+
+fn gaps_layout_assertions(bound: U256, v: U256, challenges: &Challenges<QuadFelt>, msg: &str) {
+    let mut store = UintStoreRequires::new();
+    let fp = store.pin_modulus(1, bound);
+    store.intern_pinned(5, v, fp);
+    store.pin_modulus(100, U256::ZERO);
+
+    let mut bpl = BytePairLutRequires::new();
+    let uint_main = generate_trace(store, &mut bpl);
+    let bpl_main = bpl_trace(bpl);
+
+    crate::tests::check_local(UintStoreAir, &uint_main);
+
+    let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
+    fold_balance(&UintStoreAir, &uint_main, challenges, &mut net);
+    fold_balance(&BytePairLutAir, &bpl_main, challenges, &mut net);
+    let residual = net.values().filter(|m| **m != Felt::ZERO).count();
+    assert_eq!(residual, 0, "{msg}");
+}
+
+fn fixed_modulus() -> U256 {
+    let mut m = [0x1234u16; 16];
+    m[15] = 0x7fff;
+    from_limbs16(&m)
+}
+
+pub(crate) fn fixed_challenges() -> Challenges<QuadFelt> {
+    let alpha = QuadFelt::new([Felt::from(0x11u32), Felt::from(0x22u32)]);
+    let beta = QuadFelt::new([Felt::from(0x33u32), Felt::from(0x44u32)]);
+    Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS)
+}
+
+pub(crate) fn arb_modulus() -> impl Strategy<Value = U256> {
+    (proptest::collection::vec(any::<u16>(), 15), 0x100u16..=0x7fffu16).prop_map(|(limbs, top)| {
+        let mut m = [1u16; 16];
+        for (slot, limb) in m.iter_mut().take(15).zip(limbs) {
+            *slot = limb.max(1);
+        }
+        m[15] = top;
+        from_limbs16(&m)
+    })
+}
+
+pub(crate) fn arb_uint_below(bound: U256) -> BoxedStrategy<U256> {
+    let top = to_limbs16(bound)[15];
+    (proptest::collection::vec(any::<u16>(), 15), any::<u16>())
+        .prop_map(move |(limbs, top_raw)| {
+            let mut v = [0u16; 16];
+            for (slot, limb) in v.iter_mut().take(15).zip(limbs) {
+                *slot = limb;
+            }
+            v[15] = top_raw % top;
+            from_limbs16(&v)
+        })
+        .boxed()
+}
+
+pub(crate) fn arb_qf() -> impl Strategy<Value = QuadFelt> {
+    (any::<u32>(), any::<u32>()).prop_map(|(a, b)| QuadFelt::new([Felt::from(a), Felt::from(b)]))
+}
+
+#[test]
+fn uint_store_gaps_zero_value() {
+    gaps_layout_assertions(
+        fixed_modulus(),
+        U256::ZERO,
+        &fixed_challenges(),
+        "a zero-valued uint across the gap still balances",
+    );
 }

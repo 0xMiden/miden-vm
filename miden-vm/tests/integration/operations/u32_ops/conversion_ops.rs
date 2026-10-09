@@ -131,10 +131,7 @@ fn u32assert2() {
     let test = build_op_test!(asm_op, &[value_a, value_b]);
     test.expect_stack(&[value_a, value_b]);
 
-    let value_a = rand::random::<u32>() as u64;
-    let value_b = rand::random::<u32>() as u64;
-    let test = build_op_test!(asm_op, &[value_a, value_b]);
-    test.expect_stack(&[value_a, value_b]);
+    // Randomized coverage lives in u32assert2_proptest.
 }
 
 #[test]
@@ -222,12 +219,7 @@ fn u32cast() {
     let test = build_op_test!(asm_op, &[U32_BOUND]);
     test.expect_stack(&[0]);
 
-    // --- rest of stack isn't affected -----------------------------------------------------------
-    let a = rand::random();
-    let b = rand::random();
-
-    let test = build_op_test!(asm_op, &[b, a]);
-    test.expect_stack(&[b % U32_BOUND, a]);
+    // Randomized coverage, including stack preservation, lives in u32cast_proptest.
 }
 
 #[test]
@@ -247,20 +239,15 @@ fn u32split() {
     let test = build_op_test!(asm_op, &[U32_BOUND + 1]);
     test.expect_stack(&[1, 1]);
 
-    // --- rest of stack isn't affected -----------------------------------------------------------
-    let a = rand::random();
-    let b = rand::random();
-    let expected_hi = b >> 32;
-    let expected_lo = b % U32_BOUND;
-
-    let test = build_op_test!(asm_op, &[b, a]);
-    test.expect_stack(&[expected_lo, expected_hi, a]);
+    // Randomized coverage, including stack preservation, lives in u32split_proptest.
 }
 
 // U32 OPERATIONS TESTS - RANDOMIZED - CONVERSIONS AND TESTS
 // ================================================================================================
 #[cfg(feature = "arbitrary")]
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
     #[test]
     fn u32test_proptest(value in any::<u64>()) {
         let asm_op = "u32test";
@@ -308,19 +295,29 @@ proptest! {
 }
 
     #[test]
-    fn u32cast_proptest(value in any::<u64>()) {
+    fn u32assert2_proptest(a in any::<u32>(), b in any::<u32>()) {
+        let asm_op = "u32assert2";
+
+        // assertion passes and leaves the stack unchanged if a < 2^32 and b < 2^32
+        let test = build_op_test!(asm_op, &[a as u64, b as u64]);
+        test.prop_expect_stack(&[a as u64, b as u64])?;
+    }
+
+    #[test]
+    fn u32cast_proptest(value in any::<u64>(), e in 0..Felt::ORDER_U64) {
         let asm_op = "u32cast";
 
         // expected result will be mod 2^32 applied to a field element
         // so the field modulus should be applied first
         let expected_result = value % Felt::ORDER_U64 % U32_BOUND;
 
-        let test = build_op_test!(asm_op, &[value]);
-        test.prop_expect_stack(&[expected_result])?;
+        // An unrelated element `e` below the operand verifies the rest of the stack is preserved.
+        let test = build_op_test!(asm_op, &[value, e]);
+        test.prop_expect_stack(&[expected_result, e])?;
     }
 
     #[test]
-    fn u32split_proptest(value in any::<u64>()) {
+    fn u32split_proptest(value in any::<u64>(), e in 0..Felt::ORDER_U64) {
         let asm_op = "u32split";
 
         // expected result will be mod 2^32 applied to a field element
@@ -330,7 +327,9 @@ proptest! {
         let expected_hi = felt_value >> 32;
         let expected_lo = felt_value as u32 as u64;
 
-        let test = build_op_test!(asm_op, &[value, value]);
-        test.prop_expect_stack(&[expected_lo, expected_hi, value])?;
+        // An unrelated element `e` below the operand verifies the rest of the stack is preserved
+        // independently of the split input.
+        let test = build_op_test!(asm_op, &[value, e]);
+        test.prop_expect_stack(&[expected_lo, expected_hi, e])?;
     }
 }

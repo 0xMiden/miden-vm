@@ -51,6 +51,11 @@ pub const MAX_DEBUG_INFO_TYPE_ROWS: usize = 1_000_000;
 /// limits for potentially adversarial input. Tools that deliberately accept the resource cost of
 /// larger debug information can use [`PackageDebugInfo::read_from_unmetered`] or
 /// [`PackageDebugInfo::read_from_bytes_unmetered`].
+///
+/// Strings are stored and serialized verbatim, including control characters, and consumers decide
+/// their validity for each use case (see [PR #3460]).
+///
+/// [PR #3460]: https://github.com/0xMiden/miden-vm/pull/3460#discussion_r3759590646
 #[cfg_attr(
     all(feature = "arbitrary", test),
     miden_test_serialization_macros::serialization_test
@@ -1121,5 +1126,31 @@ fn table_remap_error<Exec: Idx, Src: Idx>(
         DebugInfoTableRemapError::MissingSourceFile { file_idx } => {
             DebugInfoMergeError::MissingSourceFileMapping { forest_index, file_idx }
         },
+    }
+}
+
+#[cfg(test)]
+mod control_char_tests {
+    /// Control characters are preserved by the package format. Consumers decide whether a
+    /// decoded string is appropriate for their use case.
+    #[test]
+    fn control_chars_round_trip_through_debug_info() {
+        use miden_core::serde::{Deserializable, Serializable, SliceReader};
+
+        use crate::debug_info::{PackageDebugInfo, PackageDebugInfoBuilder};
+
+        let mut builder = PackageDebugInfoBuilder::default();
+        let idx = builder.add_string("has\u{0001}control");
+        let debug_info: PackageDebugInfo = *builder.build();
+        let bytes = debug_info.to_bytes();
+        let mut reader = SliceReader::new(&bytes);
+        let decoded = PackageDebugInfo::read_from(&mut reader).expect("decode should succeed");
+        // Check the exact string at its captured index and the whole decoded value.
+        assert_eq!(
+            decoded.get_string(idx).as_deref(),
+            Some("has\u{0001}control"),
+            "the exact control-char string must round-trip at its index"
+        );
+        assert_eq!(decoded, debug_info, "the whole value must round-trip");
     }
 }

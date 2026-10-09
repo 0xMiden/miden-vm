@@ -48,7 +48,14 @@ impl<T: ?Sized + Spanned> Spanned for alloc::sync::Arc<T> {
 
 /// This type is used to wrap any `T` with a [SourceSpan], and is typically used when it is not
 /// convenient to add a [SourceSpan] to the type - most commonly because we don't control the type.
+///
+/// Note: `PartialEq` intentionally ignores the span, so the macro's equality oracle cannot detect
+/// span corruption; `span_roundtrip_preserves_span_and_value_separately` covers that gap.
 #[derive(Clone, Copy)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test(types(u32))
+)]
 pub struct Span<T> {
     span: SourceSpan,
     spanned: T,
@@ -363,7 +370,11 @@ impl<T: Deserializable> Deserializable for Span<T> {
 /// messages, whereas line/column information is useful at a glance in debug output, it is harder
 /// to produce nice errors with it compared to this representation.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct SourceSpan {
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "SourceId::is_unknown"))]
     source_id: SourceId,
@@ -372,8 +383,35 @@ pub struct SourceSpan {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("invalid byte index range: maximum supported byte index is 2^32")]
-pub struct InvalidByteIndexRange;
+#[error("invalid byte index range {start}..{end}: expected start <= end <= u32::MAX")]
+pub struct InvalidByteIndexRange {
+    start: usize,
+    end: usize,
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for SourceSpan {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename = "SourceSpan")]
+        struct RawSourceSpan {
+            #[serde(default)]
+            source_id: SourceId,
+            start: ByteIndex,
+            end: ByteIndex,
+        }
+
+        let RawSourceSpan { source_id, start, end } = RawSourceSpan::deserialize(deserializer)?;
+        if start > end {
+            return Err(serde::de::Error::custom(alloc::format!(
+                "source span start {} exceeds end {}",
+                start.to_u32(),
+                end.to_u32()
+            )));
+        }
+        Ok(Self { source_id, start, end })
+    }
+}
 
 impl SourceSpan {
     /// A sentinel [SourceSpan] that indicates the span is unknown/invalid
@@ -395,15 +433,23 @@ impl SourceSpan {
     };
 
     /// Creates a new [SourceSpan] from the given range.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the start of the range exceeds its end.
     pub fn new<B>(source_id: SourceId, range: Range<B>) -> Self
     where
         B: Into<ByteIndex>,
     {
-        Self {
-            source_id,
-            start: range.start.into(),
-            end: range.end.into(),
-        }
+        let start = range.start.into();
+        let end = range.end.into();
+        assert!(
+            start <= end,
+            "source span start {} exceeds end {}",
+            start.to_u32(),
+            end.to_u32()
+        );
+        Self { source_id, start, end }
     }
 
     /// Creates a new [SourceSpan] for a specific offset.
@@ -413,13 +459,15 @@ impl SourceSpan {
     }
 
     /// Try to create a new [SourceSpan] from the given range with `usize` bounds.
+    ///
+    /// Returns an error if the bounds are reversed or exceed `u32::MAX`.
     pub fn try_from_range(
         source_id: SourceId,
         range: Range<usize>,
     ) -> Result<Self, InvalidByteIndexRange> {
         const MAX: usize = u32::MAX as usize;
-        if range.start > MAX || range.end > MAX {
-            return Err(InvalidByteIndexRange);
+        if range.start > range.end || range.start > MAX || range.end > MAX {
+            return Err(InvalidByteIndexRange { start: range.start, end: range.end });
         }
 
         Ok(SourceSpan {
@@ -512,6 +560,13 @@ impl Deserializable for SourceSpan {
         let source_id = SourceId::new_unchecked(source.read_u32()?);
         let start = ByteIndex::from(source.read_u32()?);
         let end = ByteIndex::from(source.read_u32()?);
+        if start > end {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "source span start {} exceeds end {}",
+                start.to_u32(),
+                end.to_u32()
+            )));
+        }
         Ok(Self { source_id, start, end })
     }
 }
@@ -540,11 +595,7 @@ impl From<Range<u32>> for SourceSpan {
 impl From<Range<ByteIndex>> for SourceSpan {
     #[inline]
     fn from(range: Range<ByteIndex>) -> Self {
-        Self {
-            source_id: SourceId::UNKNOWN,
-            start: range.start,
-            end: range.end,
-        }
+        Self::new(SourceId::UNKNOWN, range)
     }
 }
 
@@ -566,5 +617,90 @@ impl RangeBounds<ByteIndex> for SourceSpan {
     #[inline(always)]
     fn end_bound(&self) -> Bound<&ByteIndex> {
         Bound::Excluded(&self.end)
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(feature = "arbitrary")]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::{SourceId, SourceSpan, Span};
+
+    impl Arbitrary for SourceSpan {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The type invariant is start <= end (`len()` computes unsigned end - start), so the
+            // generator produces ordered spans only.
+            (any::<SourceId>(), any::<u32>(), any::<u32>())
+                .prop_map(|(source_id, a, b)| {
+                    let (start, end) = if a <= b { (a, b) } else { (b, a) };
+                    SourceSpan::new(source_id, start..end)
+                })
+                .boxed()
+        }
+    }
+
+    impl<T> Arbitrary for Span<T>
+    where
+        T: Arbitrary,
+        T::Strategy: 'static,
+    {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (any::<SourceSpan>(), any::<T>())
+                .prop_map(|(span, spanned)| Span::new(span, spanned))
+                .boxed()
+        }
+    }
+
+    proptest! {
+        /// `Span<T>`'s `PartialEq` intentionally ignores the span, so the macro's equality oracle
+        /// cannot detect span corruption in transit. This property compares the span fields and
+        /// the inner value separately, which is the actual wire contract.
+        #[test]
+        fn span_roundtrip_preserves_span_and_value_separately(
+            (source_id, start, end, value) in
+                (any::<u32>(), any::<u32>(), any::<u32>(), any::<u32>()),
+        ) {
+            use miden_crypto::utils::{Deserializable, Serializable};
+
+            let (start, end) = (start.min(end), start.max(end));
+            let span = SourceSpan::new(SourceId::from(source_id), start..end);
+            let wrapped = Span::new(span, value);
+
+            let bytes = wrapped.to_bytes();
+            let round_trip = Span::<u32>::read_from_bytes(&bytes).unwrap();
+
+            assert_eq!(round_trip.span(), span);
+            assert_eq!(round_trip.inner(), &value);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_crypto::utils::Deserializable;
+
+    use super::*;
+
+    /// Decoding preserves the ordered bounds required by `len()`.
+    #[test]
+    fn wire_decoder_rejects_reversed_bounds() {
+        let mut bytes = alloc::vec::Vec::new();
+        bytes.write_u32(0); // source_id
+        bytes.write_u32(5); // start
+        bytes.write_u32(3); // end (reversed)
+
+        assert_eq!(
+            SourceSpan::read_from_bytes(&bytes),
+            Err(DeserializationError::InvalidValue("source span start 5 exceeds end 3".into()))
+        );
     }
 }

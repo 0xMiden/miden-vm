@@ -3,11 +3,14 @@
 
 use alloc::vec::Vec;
 
+use proptest::prelude::*;
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
 use super::{
-    super::test_utils::UNUSED_ENTRY_COUNT, ChangedKeys, History, NodeChanges, error::Result,
+    super::test_utils::UNUSED_ENTRY_COUNT,
+    ChangedKeys, History, NodeChanges,
+    error::{HistoryError, Result},
 };
 use crate::{
     EMPTY_WORD, Felt, Word,
@@ -618,4 +621,85 @@ fn entry_count_reaches_zero_through_removals() -> Result<()> {
     assert_eq!(history.get_view_at(3)?.entry_count(), 0);
 
     Ok(())
+}
+
+// PROPERTY TESTS
+// ================================================================================================
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn find_latest_is_the_floor_of_the_query(
+        versions in proptest::collection::vec(any::<u64>(), 1..=6)
+            .prop_map(|mut vs| {
+                vs.sort_unstable();
+                vs.dedup();
+                vs
+            }),
+        probes in proptest::collection::vec(any::<u64>(), 1..=4),
+    ) {
+        // find_latest_corresponding_version is the floor over the
+        // recorded versions: the index of the largest recorded version
+        // <= the query, an error strictly below the oldest.
+        let n = versions.len();
+        let capacity = n;
+        let mut history = History::empty(capacity);
+        let nodes = NodeChanges::default();
+        let changed_keys = ChangedKeys::default();
+        for (i, v) in versions.iter().enumerate() {
+            history.add_version(
+                Word::new([Felt::new_unchecked(i as u64); 4]),
+                *v,
+                nodes.clone(),
+                changed_keys.clone(),
+                UNUSED_ENTRY_COUNT,
+            )?;
+        }
+
+        // Strictly below the oldest: exactly VersionTooOld (the history
+        // is nonempty, so the empty-history error would be a regression).
+        if versions[0] > 0 {
+            prop_assert_eq!(
+                history.find_latest_corresponding_version(versions[0] - 1),
+                Err(HistoryError::VersionTooOld),
+            );
+        }
+
+        // At each recorded version: its own index.
+        for (i, v) in versions.iter().enumerate() {
+            prop_assert_eq!(history.find_latest_corresponding_version(*v), Ok(i));
+        }
+
+        // Between consecutive versions: the lower index.
+        for w in versions.windows(2) {
+            let mid = w[0] + (w[1] - w[0]) / 2;
+            if mid > w[0] {
+                let idx = versions.iter().take_while(|v| **v <= mid).count() - 1;
+                prop_assert_eq!(history.find_latest_corresponding_version(mid), Ok(idx));
+            }
+        }
+
+        // Above the newest: the last index.
+        let last = versions[n - 1];
+        if last < u64::MAX {
+            prop_assert_eq!(history.find_latest_corresponding_version(last + 1), Ok(n - 1));
+        }
+
+        // Generated probes must resolve to the floor of the newest
+        // version <= probe, or error below the oldest.
+        for probe in probes {
+            match versions.iter().rposition(|v| *v <= probe) {
+                Some(idx) => {
+                    prop_assert_eq!(history.find_latest_corresponding_version(probe), Ok(idx));
+                },
+                None => {
+                    prop_assert_eq!(
+                        history.find_latest_corresponding_version(probe),
+                        Err(HistoryError::VersionTooOld),
+                    );
+                },
+            }
+        }
+    }
 }

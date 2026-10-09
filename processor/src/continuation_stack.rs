@@ -71,6 +71,10 @@ impl SourceInlineCallContext {
 /// snapshotted continuation stack inside a trace fragment it is a `usize` index into the
 /// `mast_forest_store` of the trace generation context.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test(types(MastForestId))
+)]
 pub enum Continuation<F> {
     /// Start processing a node in the MAST forest.
     StartNode(MastNodeId),
@@ -174,6 +178,10 @@ impl<F> Continuation<F> {
 /// `serde_test` does not apply; `continuation_stack_mast_forest_id_round_trip_omits_debug_metadata`
 /// covers the lossy round trip instead.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test(types(MastForestId))
+)]
 pub struct ContinuationStack<F> {
     stack: Vec<Continuation<F>>,
     source_node_ids: Option<Vec<Option<DebugSourceNodeId>>>,
@@ -556,6 +564,69 @@ impl Deserializable for ContinuationStack<MastForestId> {
     }
 }
 
+// ARBITRARY (proptest)
+// ===============================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use miden_core::mast::{MastForestId, MastNodeId};
+    use proptest::prelude::*;
+
+    use super::{Continuation, ContinuationStack};
+
+    impl Arbitrary for Continuation<MastForestId> {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Every variant is any-valid on the wire. EnterForest always carries
+            // package_debug_info: None - the wire format skips it, so Some would break the
+            // exact-equality oracle (that lossiness is covered by the dedicated deterministic
+            // test instead).
+            prop_oneof![
+                any::<MastNodeId>().prop_map(Self::StartNode).boxed(),
+                any::<MastNodeId>().prop_map(Self::FinishJoin).boxed(),
+                any::<MastNodeId>().prop_map(Self::FinishSplit).boxed(),
+                any::<MastNodeId>().prop_map(Self::FinishLoop).boxed(),
+                any::<MastNodeId>().prop_map(Self::FinishCall).boxed(),
+                any::<MastNodeId>().prop_map(Self::FinishDyn).boxed(),
+                (any::<MastNodeId>(), any::<usize>(), any::<usize>())
+                    .prop_map(|(node_id, batch_index, op_idx_in_batch)| Self::ResumeBasicBlock {
+                        node_id,
+                        batch_index,
+                        op_idx_in_batch,
+                    })
+                    .boxed(),
+                (any::<MastNodeId>(), any::<usize>())
+                    .prop_map(|(node_id, batch_index)| Self::Respan { node_id, batch_index })
+                    .boxed(),
+                any::<MastNodeId>().prop_map(Self::FinishBasicBlock).boxed(),
+                (any::<MastForestId>(), any::<usize>())
+                    .prop_map(|(forest, inline_context_depth)| Self::EnterForest {
+                        forest,
+                        package_debug_info: None,
+                        inline_context_depth,
+                    })
+                    .boxed(),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for ContinuationStack<MastForestId> {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader omits source-node tracking, so generated stacks keep it disabled.
+            // The wire contract test below covers stacks that track source nodes.
+            proptest::collection::vec(any::<Continuation<MastForestId>>(), 0..=6)
+                .prop_map(|stack| Self { stack, source_node_ids: None })
+                .boxed()
+        }
+    }
+}
+
 // TESTS
 // ================================================================================================
 
@@ -703,5 +774,49 @@ mod tests {
         // source_node_ids is not serialized: indices without their owning package debug info
         // would be dangling on the restored side.
         assert_eq!(restored.source_node_ids, None);
+    }
+}
+
+// WIRE CONTRACT PIN
+// ================================================================================================
+
+#[cfg(test)]
+mod wire_contract_pin {
+    use alloc::{vec, vec::Vec};
+
+    use miden_core::{
+        mast::{MastForestId, MastNodeId},
+        serde::{Deserializable, Serializable, SliceReader},
+    };
+
+    use super::*;
+
+    /// Source-node tracking is omitted from serialization. Enabling tracking must not change the
+    /// bytes, and decoding must leave tracking disabled.
+    #[test]
+    fn tracked_and_untracked_stacks_serialize_identically() {
+        let mut tracked = ContinuationStack::<MastForestId>::default();
+        tracked.start_tracking_source_nodes(None);
+        tracked.push_with_source_node_id(
+            Continuation::FinishJoin(MastNodeId::from(0u32)),
+            Some(DebugSourceNodeId::from(0u32)),
+        );
+        assert_eq!(tracked.source_node_ids, Some(vec![Some(DebugSourceNodeId::from(0u32))]));
+
+        let mut untracked = ContinuationStack::<MastForestId>::default();
+        untracked.push_continuation(Continuation::FinishJoin(MastNodeId::from(0u32)));
+
+        let mut tracked_bytes = Vec::new();
+        tracked.write_into(&mut tracked_bytes);
+        let mut untracked_bytes = Vec::new();
+        untracked.write_into(&mut untracked_bytes);
+
+        assert_eq!(tracked_bytes, untracked_bytes);
+
+        let decoded =
+            ContinuationStack::<MastForestId>::read_from(&mut SliceReader::new(&tracked_bytes))
+                .expect("tracked stack round-trips through the wire");
+        assert_eq!(decoded, untracked);
+        assert_eq!(decoded.source_node_ids, None);
     }
 }

@@ -15,6 +15,10 @@ const DOUBLE_WORD_LEN: usize = 8;
 ///
 /// A leaf can be empty, hold a single key-value pair, or multiple key-value pairs.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub enum SmtLeaf {
     /// An empty leaf at the specified index.
     Empty(LeafIndex<SMT_DEPTH>),
