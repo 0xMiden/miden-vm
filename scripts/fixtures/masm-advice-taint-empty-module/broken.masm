@@ -1,0 +1,13 @@
+#! Exercises an invalid local read. This test procedure cannot be assembled.
+#!
+#! Inputs:  []
+#! Outputs: [value]
+#!
+#! Where:
+#! - value is the attempted local read.
+#!
+#! Invocation: exec
+@locals(1)
+pub proc bad() -> felt
+    loc_load.1
+end
