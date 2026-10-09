@@ -334,11 +334,6 @@ fn pure_rol_nonzero_b_unbalances_the_full_chiplet_stack() {
     );
 }
 
-/// Stack 3 independent perms in one trace and verify both per-perm
-/// output correctness (via `extract_outputs`) and constraint
-/// satisfaction. With NUM_LANES=2, the 3 perms split into a busiest lane of
-/// `⌈3/2⌉ = 2` perms, so the height is `2 * 3200 = 6400` padded to `8192`.
-
 // NEGATIVE TESTS — confirm `check_constraints` catches deliberate corruption.
 // ================================================================================================
 
