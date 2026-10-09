@@ -2,6 +2,10 @@
 
 ## v0.36.0 (Unreleased)
 
+#### Changes
+
+- Removed the duplicate MAST forest commitment stored in `Package` and moved package commitment calculations into a private helper, without changing any commitment values ([#3880](https://github.com/0xMiden/miden-vm/pull/3880)).
+
 #### Fixes
 
 - [BREAKING] `Package::strip_debug_info` strips an embedded kernel one level deep and rejects a kernel section that embeds another kernel with the new `PackageStripError::NestedEmbeddedKernel`, instead of recursing until the stack overflows ([#3981](https://github.com/0xMiden/miden-vm/pull/3981)).
