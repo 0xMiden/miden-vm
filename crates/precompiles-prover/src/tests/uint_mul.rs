@@ -431,7 +431,10 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(16))]
 
     #[test]
-    fn mul_ops_balance_with_padding_proptest((bound, a, b, c) in arb_triple()) {
+    fn mul_ops_balance_with_padding_proptest(
+        (bound, a, b, c) in arb_triple()
+            .prop_filter("product and square must be distinct operations", |(_, a, b, _)| a != b)
+    ) {
         // Three ops (two scaled, one squaring a by itself) pad to four
         // blocks; the all-zero act = 0 padding block must stay off every
         // bus.
@@ -456,5 +459,8 @@ fn repeated_zero_operands_balance() {
     let (mut store, fp, ptrs) = store_with(bound, &[U256::ZERO; 3]);
     let mut mul = UintMulRequires::new();
     record_mac(&mut store, fp, &ptrs, &mut mul, 1, U256::ZERO, 1, U256::ZERO, U256::ZERO, bound);
-    check_and_balance(store, mul, &fixed_challenges());
+    record_mac(&mut store, fp, &ptrs, &mut mul, 3, U256::ZERO, 0, U256::ZERO, U256::ZERO, bound);
+    mul.record(1, ptrs[0], ptrs[0], 1, ptrs[2], ptrs[0], fp, 0);
+    let main = check_and_balance(store, mul, &fixed_challenges());
+    assert_eq!(main.height(), 2 * PERIOD, "equal operands deduplicate the product and square");
 }
