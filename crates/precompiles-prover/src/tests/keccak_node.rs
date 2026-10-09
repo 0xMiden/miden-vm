@@ -17,6 +17,7 @@ use miden_core::{
 };
 use miden_lifted_air::{BaseAir, LiftedAir};
 use miden_precompiles::Keccak256Precompile;
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     hash::{
