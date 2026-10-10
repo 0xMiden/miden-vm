@@ -2771,6 +2771,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-release-policy"
+version = "0.1.0"
+dependencies = [
+ "semver 1.0.28",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "miden-rowan"
 version = "0.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
