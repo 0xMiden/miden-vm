@@ -246,6 +246,13 @@ impl fmt::Display for QualifiedProcedureName {
 /// end
 /// ```
 #[derive(Debug, Clone)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::text_roundtrip_test(
+        parse = "crate::testing::roundtrip::parse_procedure_name",
+        accept = "crate::testing::roundtrip::is_masm_text"
+    )
+)]
 pub struct ProcedureName(Ident);
 
 impl ProcedureName {

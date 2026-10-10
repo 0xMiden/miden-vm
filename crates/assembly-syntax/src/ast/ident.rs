@@ -58,6 +58,13 @@ pub enum CaseKindError {
     all(feature = "arbitrary", test),
     miden_test_serialization_macros::serialization_test
 )]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::text_roundtrip_test(
+        parse = "crate::testing::roundtrip::parse_ident",
+        accept = "crate::testing::roundtrip::is_masm_text"
+    )
+)]
 pub struct Ident {
     /// The source span associated with this identifier.
     ///

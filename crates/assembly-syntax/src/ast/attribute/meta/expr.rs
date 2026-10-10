@@ -37,7 +37,8 @@ impl prettier::PrettyPrint for MetaExpr {
             Self::Ident(id) => text(id),
             Self::Int(value) => value.inner().render(),
             Self::Word(value) => display(value),
-            Self::String(id) => text(format!("\"{}\"", id.as_str().escape_default())),
+            // String values retain their source escapes during lowering, so print them verbatim
+            Self::String(id) => text(format!("\"{}\"", id.as_str())),
         }
     }
 }

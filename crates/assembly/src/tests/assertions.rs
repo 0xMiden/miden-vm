@@ -266,3 +266,31 @@ fn mtree_verify_with_code() -> TestResult {
     insta::assert_snapshot!(program);
     Ok(())
 }
+
+/// Printing `assert.err=CONST` must keep the constant reference, otherwise the printed program
+/// asserts with a different error code.
+#[test]
+fn assert_with_error_constant_keeps_code_after_printing() -> TestResult {
+    fn assert_codes(program: &Program) -> Vec<Operation> {
+        program.mast_forest()[program.entrypoint()]
+            .unwrap_basic_block()
+            .operations()
+            .copied()
+            .filter(|op| matches!(op, Operation::Assert(_)))
+            .collect()
+    }
+
+    let context = TestContext::default();
+    let original = "const ERR = \"boom\"\n\nbegin\n    push.1\n    assert.err=ERR\nend\n";
+    let module = context.parse_program(source_file!(&context, original))?;
+    let printed = module.to_string();
+
+    let original_program = context.assemble(source_file!(&context, original))?;
+    let printed_program = context.assemble(source_file!(&context, printed))?;
+    assert_eq!(
+        assert_codes(&original_program),
+        assert_codes(&printed_program),
+        "printed module assembles to a different error code:\n{printed}"
+    );
+    Ok(())
+}
