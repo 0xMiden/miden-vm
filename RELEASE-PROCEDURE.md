@@ -23,6 +23,7 @@ such as `0.28.1` to `0.28.2`.
 ## Prepare the release commit
 
 - Give each selected crate an unused version.
+- Give `miden-vm` an unused version for the repository tag, including limited releases.
 - Update its entry in `[workspace.dependencies]` in the root `Cargo.toml`.
 - Update `Cargo.lock` and any affected fuzz lockfiles.
 - Add a dated section to `CHANGELOG.md`. Name the crate in the heading for a
@@ -34,12 +35,15 @@ Commit all release changes to the selected branch before continuing.
 ## Check and publish
 
 Check the exact package list locally, then run the same list through the dry run.
+Set `release_branch` to the selected branch. The examples below show a stable release from `main`.
 
 ```bash
+release_branch=main
+release_tag="$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "miden-vm") | "v" + .version')"
 scripts/check-package-release-plan.sh miden-crypto
 
 gh workflow run workspace-dry-run.yml \
-  --ref main \
+  --ref "$release_branch" \
   -f packages="miden-crypto"
 ```
 
@@ -48,8 +52,8 @@ Publish from the
 
 ```bash
 gh workflow run workspace-publish.yml \
-  --ref main \
-  -f tag=v0.28.2 \
+  --ref "$release_branch" \
+  -f tag="$release_tag" \
   -f packages="miden-crypto"
 ```
 
