@@ -12,22 +12,72 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  codspeed:
-    name: Run CodSpeed benchmarks (${{ matrix.name }})
+  build-synthetic:
+    name: Build synthetic CodSpeed benchmark
+    runs-on: warp-ubuntu-latest-arm64-8x
+    # CodSpeed macro runners use ARM64 Ubuntu 22.04. Build with the same libc.
+    container:
+      image: ubuntu:22.04@sha256:5ec03bb3441e8b0bf3b4f9cd4629a1ae763010dc3035bb8da3ae6cf026486401
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_HOME: /usr/local/cargo
+      RUSTUP_HOME: /usr/local/rustup
+    permissions:
+      contents: read
+    steps:
+      - name: Install build dependencies
+        run: |
+          test "$(uname -m)" = aarch64
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential ca-certificates curl git libssl-dev pkg-config
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o "${RUNNER_TEMP}/rustup-init.sh"
+          sh "${RUNNER_TEMP}/rustup-init.sh" -y --no-modify-path --profile minimal --default-toolchain "${toolchain}"
+          /usr/local/cargo/bin/rustup target add wasm32-unknown-unknown
+          echo /usr/local/cargo/bin >> "${GITHUB_PATH}"
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: codspeed-synthetic
+
+      - name: Install cargo-codspeed
+        run: cargo install cargo-codspeed --version 4.6.0 --locked
+
+      - name: Build benchmark
+        run: cargo codspeed build --locked --measurement-mode walltime --profile optimized -p miden-vm-synthetic-bench --bench synthetic_bench
+
+      - name: Pack executable
+        run: |
+          test -x target/codspeed/walltime/miden-vm-synthetic-bench/synthetic_bench
+          tar -C target/codspeed -czf synthetic-codspeed.tar.gz walltime/miden-vm-synthetic-bench
+
+      - name: Upload executable
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: synthetic-codspeed
+          path: synthetic-codspeed.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  synthetic:
+    name: Run CodSpeed benchmarks (synthetic)
+    needs: build-synthetic
     runs-on: codspeed-macro
-    timeout-minutes: ${{ matrix.timeout }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: synthetic
-            package: miden-vm-synthetic-bench
-            bench: synthetic_bench
-            timeout: 60
-          - name: SMT
-            package: miden-crypto-smt-codspeed-bench
-            bench: smt_codspeed
-            timeout: 30
+    timeout-minutes: 60
     permissions:
       contents: read
       id-token: write
@@ -38,6 +88,49 @@ jobs:
       SYNTH_SAMPLE_SIZE: "10"
       SYNTH_WARM_UP_TIME_SECS: "1"
       SYNTH_SCENARIO: create-single-p2id-note
+      # Use this job's snapshot path rather than the compiled manifest path.
+      SYNTH_SNAPSHOT: ${{ github.workspace }}/benches/synthetic-bench/snapshots/bench-tx.json
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          rustup toolchain install "${toolchain}" --profile minimal
+
+      - name: Install cargo-codspeed
+        run: cargo install cargo-codspeed --version 4.6.0 --locked
+
+      - name: Download executable
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: synthetic-codspeed
+
+      - name: Unpack executable
+        run: |
+          test "$(uname -m)" = aarch64
+          mkdir -p target/codspeed
+          tar -C target/codspeed -xzf synthetic-codspeed.tar.gz
+          test -x target/codspeed/walltime/miden-vm-synthetic-bench/synthetic_bench
+
+      - name: Run benchmark
+        uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
+        with:
+          mode: walltime
+          run: cargo codspeed run --measurement-mode walltime -p miden-vm-synthetic-bench --bench synthetic_bench
+
+  smt:
+    name: Run CodSpeed benchmarks (SMT)
+    runs-on: codspeed-macro
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -55,20 +148,13 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Install cargo-codspeed
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo install cargo-codspeed --version 4.6.0 --locked
+        run: cargo install cargo-codspeed --version 4.6.0 --locked
 
-      - name: Build benchmarks
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo codspeed build --measurement-mode walltime --profile optimized -p ${{ matrix.package }} --bench ${{ matrix.bench }}
+      - name: Build benchmark
+        run: cargo codspeed build --locked --measurement-mode walltime --profile optimized -p miden-crypto-smt-codspeed-bench --bench smt_codspeed
 
-      - name: Run benchmarks
+      - name: Run benchmark
         uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
         with:
           mode: walltime
-          run: |
-            cargo codspeed run --measurement-mode walltime -p ${{ matrix.package }} --bench ${{ matrix.bench }}
+          run: cargo codspeed run --measurement-mode walltime -p miden-crypto-smt-codspeed-bench --bench smt_codspeed
