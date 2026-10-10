@@ -68,7 +68,8 @@ fn run(args: &[String]) -> Result<()> {
             println!("{}", Version::parse(left)?.cmp_precedence(&Version::parse(right)?) as i8)
         },
         [command @ ("latest" | "baseline"), current, path] => {
-            let current = Version::parse(current)?;
+            let current = Version::parse(current)
+                .map_err(|error| format!("invalid current version {current:?}: {error}"))?;
             let mut history: History = serde_json::from_reader(File::open(path)?)?;
             if history.versions.is_empty() {
                 return Err("published version history is empty".into());

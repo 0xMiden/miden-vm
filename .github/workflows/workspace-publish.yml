@@ -186,6 +186,7 @@ jobs:
           BUILD_TARGET=${{ matrix.target }} make exec-dist
       - name: Prepare artifact
         run: |
+          set -euo pipefail
           mkdir release-assets
           mv target/${{ matrix.target }}/optimized/miden-vm release-assets/miden-vm-${{ matrix.target }}
           mv target/${{ matrix.target }}/optimized/miden-format release-assets/miden-format-${{ matrix.target }}
@@ -198,6 +199,7 @@ jobs:
       - name: Prepare MASM package artifacts
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
+          set -euo pipefail
           mv target/packages/miden-core.masp release-assets/core.masp
       - name: Save release artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
