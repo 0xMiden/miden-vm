@@ -77,7 +77,7 @@ jobs:
 
   create-draft:
     name: create draft release
-    needs: [prepare-release, package-version-gate]
+    needs: [prepare-release, package-version-gate, upload-artifacts, verify-packages]
     if: ${{ github.repository_owner == '0xMiden' }}
     runs-on: ubuntu-latest
     environment: release
@@ -144,7 +144,7 @@ jobs:
 
   upload-artifacts:
     name: upload pre-built miden-vm executable artifacts
-    needs: [prepare-release, create-draft]
+    needs: [prepare-release, package-version-gate]
     if: ${{ github.repository_owner == '0xMiden' }}
     permissions:
       contents: read
@@ -201,7 +201,7 @@ jobs:
 
   stage-artifacts:
     name: attest and upload release artifacts
-    needs: [prepare-release, upload-artifacts, verify-packages]
+    needs: [prepare-release, upload-artifacts, create-draft]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -218,6 +218,7 @@ jobs:
           pattern: release-binaries-*
           merge-multiple: true
           path: release-assets
+      # Attest bytes from this run without granting OIDC access to compilation.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: release-assets/*
