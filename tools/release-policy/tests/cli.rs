@@ -22,8 +22,12 @@ fn version_selection_and_invalid_input() {
             assert!(output.status.success(), "{output:?}");
             assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), expected);
         } else {
-            assert!(!output.status.success());
-            assert!(String::from_utf8(output.stderr).unwrap().starts_with("release policy: "));
+            assert_eq!(output.status.code(), Some(1));
+            assert!(
+                String::from_utf8(output.stderr)
+                    .unwrap()
+                    .starts_with("release policy: invalid current version \"invalid\": ")
+            );
         }
     }
 }
