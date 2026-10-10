@@ -1,6 +1,5 @@
 #!/bin/bash
-
-# Release inputs and GitHub context are set by workspace-publish.yml.
+# Validate the dispatched release and emit its commit, tag and release type for GitHub Actions.
 
 set -euo pipefail
 
