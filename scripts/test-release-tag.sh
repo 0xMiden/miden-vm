@@ -16,7 +16,7 @@ git push --quiet origin main
 export RELEASE_BRANCH=main RELEASE_TAG=v0.35.1
 RELEASE_SHA="$(git rev-parse HEAD)"
 export RELEASE_SHA
-"$scripts/verify-release-head.sh"
+"$scripts/verify-release-refs.sh"
 if "$scripts/verify-release-tag.sh" 2>/dev/null; then
     echo 'Missing release tag was accepted.' >&2; exit 1
 fi
@@ -25,13 +25,17 @@ git push --quiet origin "$RELEASE_TAG"
 "$scripts/verify-release-tag.sh"
 git commit --quiet --allow-empty -m advanced
 git push --quiet origin main
-if "$scripts/verify-release-head.sh" 2>/dev/null; then
+if "$scripts/verify-release-refs.sh" 2>/dev/null; then
     echo 'Advanced branch was accepted.' >&2; exit 1
 fi
-git --git-dir="$fixture/remote.git" update-ref "refs/tags/$RELEASE_TAG" "$(git rev-parse HEAD)"
-if "$scripts/verify-release-tag.sh" 2>/dev/null; then
+advanced_sha="$(git rev-parse HEAD)"
+git checkout --quiet --detach "$RELEASE_SHA"
+git --git-dir="$fixture/remote.git" update-ref refs/heads/main "$RELEASE_SHA"
+git --git-dir="$fixture/remote.git" update-ref "refs/tags/$RELEASE_TAG" "$advanced_sha"
+if "$scripts/verify-release-refs.sh" 2>/dev/null; then
     echo 'Changed remote tag was accepted.' >&2; exit 1
 fi
+git checkout --quiet --detach "$advanced_sha"
 git tag -f "$RELEASE_TAG" "$(git rev-parse HEAD)" >/dev/null
 source "$scripts/lib/release-policy.sh"
 [[ "$(version_cmp 1.5.0 1.5.0-alpha.3)" == 1 ]]

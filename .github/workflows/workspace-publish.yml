@@ -91,12 +91,12 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Revalidate release head before creating the draft
+      - name: Revalidate release refs before creating the draft
         env:
           RELEASE_BRANCH: ${{ needs.prepare-release.outputs.branch }}
           RELEASE_SHA: ${{ needs.prepare-release.outputs.sha }}
           RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
-        run: ./scripts/verify-release-head.sh
+        run: ./scripts/verify-release-refs.sh
 
       - name: Create or validate draft release
         env:
@@ -239,7 +239,7 @@ jobs:
         # The create-draft deployment has completed before tag creation.
         run: |
           set -euo pipefail
-          ./scripts/verify-release-head.sh
+          ./scripts/verify-release-refs.sh
           refs="$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}")"
           if [[ -z "$refs" ]]; then
             gh api --method POST "repos/${GH_REPO}/git/refs" \

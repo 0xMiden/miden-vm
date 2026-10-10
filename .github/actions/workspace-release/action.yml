@@ -262,7 +262,7 @@ runs:
         done
 
         if [[ "$RELEASE_MODE" == publish ]]; then
-          ./scripts/verify-release-head.sh
+          ./scripts/verify-release-refs.sh
           ./scripts/verify-release-tag.sh
         fi
 

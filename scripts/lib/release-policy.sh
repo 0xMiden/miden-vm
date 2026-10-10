@@ -4,10 +4,10 @@
 source "$(dirname "${BASH_SOURCE[0]}")/release-plan-common.sh"
 
 verify_release_commit() {
-    local branch="$1" sha="$2" tag="$3" vm_version base_tag remote_tag
+    local branch="$1" sha="$2" tag="$3" vm_version base_tag
     local tag_refs tag_ref candidate_tag candidate_patch release_line
     release_policy branch "$branch" "$tag" || return 1
-    RELEASE_BRANCH="$branch" RELEASE_SHA="$sha" "$(dirname "${BASH_SOURCE[0]}")/../verify-release-head.sh" || return 1
+    RELEASE_BRANCH="$branch" RELEASE_SHA="$sha" RELEASE_TAG="$tag" "$(dirname "${BASH_SOURCE[0]}")/../verify-release-refs.sh" || return 1
 
     vm_version="$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "miden-vm") | .version')" || return 1
     if [[ "$tag" != "v$vm_version" ]]; then
@@ -41,10 +41,4 @@ verify_release_commit() {
         fi
     fi
 
-    # Check the remote ref rather than a possibly stale local tag.
-    remote_tag="$(git ls-remote --tags origin "refs/tags/$tag")" || return 1
-    if [[ -n "$remote_tag" ]]; then
-        RELEASE_TAG="$tag" RELEASE_SHA="$sha" \
-            "$(dirname "${BASH_SOURCE[0]}")/../verify-release-tag.sh" || return 1
-    fi
 }
