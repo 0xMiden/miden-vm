@@ -141,7 +141,7 @@ while IFS=$'\t' read -r package local_version manifest_path; do
     fi
 
     if [[ "$check_semver" == "false" ]]; then
-        would_publish+=("$package v$local_version (baseline: ${latest_version:-none})")
+        would_publish+=("$package v$local_version (latest published: $latest_version)")
         continue
     fi
 

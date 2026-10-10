@@ -240,8 +240,10 @@ jobs:
           RELEASE_SHA: ${{ needs.prepare-release.outputs.sha }}
         # The create-draft deployment has completed before tag creation.
         run: |
+          set -euo pipefail
           ./scripts/verify-release-head.sh
-          if [[ -z "$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}")" ]]; then
+          refs="$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}")"
+          if [[ -z "$refs" ]]; then
             gh api --method POST "repos/${GH_REPO}/git/refs" \
               -f "ref=refs/tags/${RELEASE_TAG}" -f "sha=${RELEASE_SHA}"
           fi
