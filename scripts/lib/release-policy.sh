@@ -1,13 +1,31 @@
 #!/bin/bash
+# Validate the release branch, source commit and maintenance ancestry.
 
 # shellcheck source=scripts/lib/release-plan-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/release-plan-common.sh"
 
 verify_release_commit() {
-    local branch="$1" sha="$2" tag="$3" vm_version base_tag
+    if [[ $# != 3 ]]; then
+        echo "Usage: verify_release_commit BRANCH SHA TAG" >&2
+        return 2
+    fi
+    local branch="$1" sha="$2" tag="$3"
+    local vm_version base_tag
     local tag_refs tag_ref candidate_tag candidate_patch release_line
     release_policy branch "$branch" "$tag" || return 1
-    RELEASE_BRANCH="$branch" RELEASE_SHA="$sha" RELEASE_TAG="$tag" "$(dirname "${BASH_SOURCE[0]}")/../verify-release-refs.sh" || return 1
+    git fetch --no-tags origin "refs/heads/$branch" || return 1
+    if [[ "$(git rev-parse 'FETCH_HEAD^{commit}')" != "$sha" || "$(git rev-parse HEAD)" != "$sha" ]]; then
+        echo "::error::Release commit $sha must match the checkout and origin/$branch HEAD." >&2
+        return 1
+    fi
+    tag_refs="$(git ls-remote --tags origin "refs/tags/$tag")" || return 1
+    if [[ -n "$tag_refs" ]]; then
+        git fetch --no-tags origin "refs/tags/$tag" || return 1
+        if [[ "$(git rev-parse 'FETCH_HEAD^{commit}')" != "$sha" ]]; then
+            echo "::error::Tag $tag must point to release commit $sha." >&2
+            return 1
+        fi
+    fi
 
     vm_version="$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "miden-vm") | .version')" || return 1
     if [[ "$tag" != "v$vm_version" ]]; then

@@ -91,12 +91,22 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Revalidate release refs before creating the draft
+      - &verify-release-refs
+        name: Revalidate release refs before publication
         env:
           RELEASE_BRANCH: ${{ needs.prepare-release.outputs.branch }}
           RELEASE_SHA: ${{ needs.prepare-release.outputs.sha }}
           RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
-        run: ./scripts/verify-release-refs.sh
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/heads/$RELEASE_BRANCH"
+          [[ "$(git rev-parse 'FETCH_HEAD^{commit}')" == "$RELEASE_SHA" ]]
+          [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA" ]]
+          refs="$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG")"
+          if [[ -n "$refs" ]]; then
+            git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+            [[ "$(git rev-parse 'FETCH_HEAD^{commit}')" == "$RELEASE_SHA" ]]
+          fi
 
       - name: Create or validate draft release
         env:
@@ -220,6 +230,7 @@ jobs:
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: release-assets/*
+      - *verify-release-refs
       - name: Upload draft assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -229,6 +240,7 @@ jobs:
           set -euo pipefail
           gh release upload --clobber "$RELEASE_TAG" release-assets/*
 
+      - *verify-release-refs
       - name: Create or verify immutable tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -239,13 +251,21 @@ jobs:
         # The create-draft deployment has completed before tag creation.
         run: |
           set -euo pipefail
-          ./scripts/verify-release-refs.sh
           refs="$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}")"
           if [[ -z "$refs" ]]; then
             gh api --method POST "repos/${GH_REPO}/git/refs" \
               -f "ref=refs/tags/${RELEASE_TAG}" -f "sha=${RELEASE_SHA}"
           fi
-          ./scripts/verify-release-tag.sh
+
+      - &verify-release-tag
+        name: Verify the published tag
+        env:
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
+          RELEASE_SHA: ${{ needs.prepare-release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+          [[ "$(git rev-parse 'FETCH_HEAD^{commit}')" == "$RELEASE_SHA" ]]
 
   verify-packages:
     name: verify release packages without publication credentials
@@ -287,7 +307,27 @@ jobs:
           persist-credentials: false
 
       - name: Configure Cargo before authentication
-        run: ./scripts/prepare-crates-publication.sh
+        run: |
+          set -euo pipefail
+
+          # Source Cargo configuration can run wrappers or credential providers.
+          # Package verification has already completed in a job without OIDC access.
+          if [[ -e .cargo || -L .cargo ]]; then
+              mv .cargo "$RUNNER_TEMP/release-source-cargo-config"
+          fi
+          version="$(sed -n 's/^channel *= *"\([0-9.]*\)".*/\1/p' rust-toolchain.toml)"
+          [[ "$version" =~ ^1\.[0-9]+\.[0-9]+$ ]] || {
+              echo '::error::Release publication requires a numbered Rust toolchain.' >&2
+              exit 1
+          }
+          rustup toolchain install "$version" --profile minimal --no-self-update
+          {
+              echo "RUSTUP_TOOLCHAIN=$version"
+              echo "CARGO_HOME=$RUNNER_TEMP/release-cargo-home"
+              echo 'RUSTC=rustc'
+              echo 'RUSTC_WRAPPER='
+              echo 'RUSTC_WORKSPACE_WRAPPER='
+          } >> "$GITHUB_ENV"
 
       - name: Authenticate with crates.io
         uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
@@ -314,6 +354,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - *verify-release-tag
       - name: Publish draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -325,7 +366,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          ./scripts/verify-release-tag.sh
           release_id="$(gh release view "${RELEASE_TAG}" --json databaseId -q .databaseId)"
           gh api \
             --method PATCH \
