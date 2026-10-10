@@ -10,3 +10,6 @@ publish = false
 semver = { workspace = true, features = ["serde", "std"] }
 serde.workspace = true
 serde_json = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+tempfile.workspace = true

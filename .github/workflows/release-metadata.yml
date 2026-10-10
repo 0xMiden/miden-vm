@@ -29,8 +29,5 @@ jobs:
       - name: Test release policy
         run: cargo test --locked --package miden-release-policy
 
-      - name: Check release tag identity
-        run: bash scripts/test-release-tag.sh
-
       - name: Check release metadata
         run: scripts/check-release-metadata.sh "${{ github.event.pull_request.base.sha }}"

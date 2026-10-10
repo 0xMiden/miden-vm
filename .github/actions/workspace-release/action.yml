@@ -262,8 +262,11 @@ runs:
         done
 
         if [[ "$RELEASE_MODE" == publish ]]; then
-          ./scripts/verify-release-refs.sh
-          ./scripts/verify-release-tag.sh
+          git fetch --no-tags origin "refs/heads/$RELEASE_BRANCH"
+          [[ "$(git rev-parse 'FETCH_HEAD^{commit}')" == "$RELEASE_SHA" ]]
+          [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA" ]]
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+          [[ "$(git rev-parse 'FETCH_HEAD^{commit}')" == "$RELEASE_SHA" ]]
         fi
 
         "${publish_cmd[@]}"
