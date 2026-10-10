@@ -37,7 +37,7 @@ jobs:
     if: ${{ github.repository_owner == '0xMiden' }}
     runs-on: ubuntu-latest
     permissions:
-      actions: read # Read required reviewers on the release environment.
+      actions: read # GET environment: https://docs.github.com/en/rest/deployments/environments#get-an-environment
       contents: read
     outputs:
       tag: ${{ steps.prepare.outputs.tag }}
@@ -187,6 +187,7 @@ jobs:
       - uses: ./.github/actions/cleanup-runner
       - name: Install Rust
         run: |
+          set -euo pipefail
           rustup toolchain install --no-self-update
           rustc --version
       - name: Add target
