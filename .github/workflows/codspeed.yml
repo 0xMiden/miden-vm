@@ -30,6 +30,7 @@ jobs:
     steps:
       - name: Install build dependencies
         run: |
+          set -euo pipefail
           test "$(uname -m)" = aarch64
           apt-get update
           apt-get install -y --no-install-recommends build-essential ca-certificates curl git libssl-dev pkg-config
@@ -62,6 +63,7 @@ jobs:
 
       - name: Pack executable
         run: |
+          set -euo pipefail
           test -x target/codspeed/walltime/miden-vm-synthetic-bench/synthetic_bench
           tar -C target/codspeed -czf synthetic-codspeed.tar.gz walltime/miden-vm-synthetic-bench
 
@@ -113,6 +115,7 @@ jobs:
 
       - name: Unpack executable
         run: |
+          set -euo pipefail
           test "$(uname -m)" = aarch64
           mkdir -p target/codspeed
           tar -C target/codspeed -xzf synthetic-codspeed.tar.gz
