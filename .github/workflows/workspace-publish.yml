@@ -91,14 +91,12 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Revalidate release commit before creating the tag
+      - name: Revalidate release head before creating the draft
         env:
           RELEASE_BRANCH: ${{ needs.prepare-release.outputs.branch }}
           RELEASE_SHA: ${{ needs.prepare-release.outputs.sha }}
           RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
-        run: |
-          source scripts/lib/release-policy.sh
-          verify_release_commit "$RELEASE_BRANCH" "$RELEASE_SHA" "$RELEASE_TAG"
+        run: ./scripts/verify-release-head.sh
 
       - name: Create or validate draft release
         env:
