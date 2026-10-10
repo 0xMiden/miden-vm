@@ -32,8 +32,8 @@ Keep the branch at that commit until publication finishes.
 
 The `release` environment requires approval from an authorized repository admin.
 An admin can approve their own release. Keep admin bypass disabled.
-The workflow refuses preparation if the environment has no required reviewers.
-GitHub accepts named users or teams as reviewers, so update the reviewer list when admin access changes.
+Configure named users as required reviewers. The workflow checks that each user has repository admin access.
+Update the reviewer list when admin access changes.
 Allow deployments from `main`, `next`, `release/v*`, and `release-v*`.
 
 ## Start the release
