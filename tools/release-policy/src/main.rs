@@ -103,6 +103,7 @@ mod tests {
     fn release_branches() {
         for (branch, tag, allowed) in [
             ("main", "v0.36.0", true),
+            ("main", "v0.36.1", true),
             ("next", "v1.0.0-rc.10", true),
             ("next", "v1.0.0", false),
             ("main", "v1.0.0-rc.1", false),

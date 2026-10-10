@@ -23,10 +23,9 @@ fn version_selection_and_invalid_input() {
             assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), expected);
         } else {
             assert_eq!(output.status.code(), Some(1));
-            assert!(
-                String::from_utf8(output.stderr)
-                    .unwrap()
-                    .starts_with("release policy: invalid current version \"invalid\": ")
+            assert_eq!(
+                String::from_utf8(output.stderr).unwrap(),
+                "release policy: invalid current version \"invalid\": unexpected character 'i' while parsing major version number\n"
             );
         }
     }
