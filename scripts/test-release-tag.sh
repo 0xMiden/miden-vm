@@ -22,6 +22,7 @@ if "$scripts/verify-release-tag.sh" 2>/dev/null; then
 fi
 git tag -a "$RELEASE_TAG" -m release
 git push --quiet origin "$RELEASE_TAG"
+"$scripts/verify-release-refs.sh"
 "$scripts/verify-release-tag.sh"
 git commit --quiet --allow-empty -m advanced
 git push --quiet origin main
