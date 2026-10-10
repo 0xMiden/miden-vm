@@ -67,12 +67,21 @@ fn run(args: &[String]) -> Result<()> {
         ["compare", left, right] => {
             println!("{}", Version::parse(left)?.cmp_precedence(&Version::parse(right)?) as i8)
         },
-        ["latest", current, path] => {
-            let history = serde_json::from_reader(File::open(path)?)?;
+        [command @ ("latest" | "baseline"), current, path] => {
+            let mut history: History = serde_json::from_reader(File::open(path)?)?;
+            if history.versions.is_empty() {
+                return Err("published version history is empty".into());
+            }
+            if *command == "baseline" {
+                history.versions.retain(|v| v.num.pre.is_empty());
+                if history.versions.is_empty() {
+                    return Ok(());
+                }
+            }
             println!("{}", latest(&history, &Version::parse(current)?)?);
         },
         ["branch", branch, tag] => branch_allowed(branch, tag)?,
-        _ => return Err("expected compare, latest, or branch arguments".into()),
+        _ => return Err("expected compare, latest, baseline, or branch arguments".into()),
     }
     Ok(())
 }

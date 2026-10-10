@@ -12,7 +12,8 @@ The workflow builds and publishes that commit.
 A patch branch must include its `.0` tag and the latest earlier stable patch tag in the same major/minor line.
 For example, `release-v0.35.1` must descend from `v0.35.0`.
 You can publish a patch after publishing a newer minor version.
-The package version gate compares each crate with the latest published version in its major/minor line, including prereleases.
+The package version gate checks version order against published prereleases.
+It checks API compatibility against stable releases in the same major/minor line.
 For a new line, it uses the latest stable version when one exists.
 
 ## Prepare the commit
