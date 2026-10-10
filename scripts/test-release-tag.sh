@@ -28,9 +28,36 @@ git push --quiet origin main
 if "$scripts/verify-release-head.sh" 2>/dev/null; then
     echo 'Advanced branch was accepted.' >&2; exit 1
 fi
-git tag -f "$RELEASE_TAG"
-git push --quiet --force origin "$RELEASE_TAG"
+git --git-dir="$fixture/remote.git" update-ref "refs/tags/$RELEASE_TAG" "$(git rev-parse HEAD)"
 if "$scripts/verify-release-tag.sh" 2>/dev/null; then
     echo 'Changed remote tag was accepted.' >&2; exit 1
 fi
-echo 'Release head and tag checks passed.'
+git tag -f "$RELEASE_TAG" "$(git rev-parse HEAD)" >/dev/null
+source "$scripts/lib/release-policy.sh"
+[[ "$(version_cmp 1.5.0 1.5.0-alpha.3)" == 1 ]]
+printf '%s' '{"versions":[{"num":"1.2.0","yanked":false},{"num":"1.2.1-rc.1","yanked":false}]}' > "$fixture/history.json"
+[[ "$(release_policy latest 1.2.1 "$fixture/history.json")" == 1.2.1-rc.1 ]]
+[[ "$(release_policy baseline 1.2.1 "$fixture/history.json")" == 1.2.0 ]]
+printf '[package]\nname="miden-vm"\nversion="0.35.2"\n[lib]\npath="lib.rs"\n' > Cargo.toml
+touch lib.rs
+git tag v0.35.0 "$RELEASE_SHA"
+git push --quiet origin v0.35.0
+RELEASE_BRANCH=release-v0.35.2 RELEASE_TAG=v0.35.2
+prior_sha="$RELEASE_SHA"
+RELEASE_SHA="$(git rev-parse HEAD)"
+git push --quiet origin "HEAD:refs/heads/$RELEASE_BRANCH"
+verify_release_commit "$RELEASE_BRANCH" "$RELEASE_SHA" "$RELEASE_TAG"
+git checkout --quiet --detach "$prior_sha"
+RELEASE_SHA="$prior_sha"
+git push --quiet --force origin "HEAD:refs/heads/$RELEASE_BRANCH"
+if verify_release_commit "$RELEASE_BRANCH" "$RELEASE_SHA" "$RELEASE_TAG"; then
+    echo 'Patch missing the previous patch was accepted.' >&2; exit 1
+fi
+git checkout --quiet --orphan unrelated
+git commit --quiet --allow-empty -m unrelated
+RELEASE_SHA="$(git rev-parse HEAD)"
+git push --quiet --force origin "HEAD:refs/heads/$RELEASE_BRANCH"
+if verify_release_commit "$RELEASE_BRANCH" "$RELEASE_SHA" "$RELEASE_TAG"; then
+    echo 'Patch missing the base release was accepted.' >&2; exit 1
+fi
+echo 'Release version, ancestry, head and tag checks passed.'
