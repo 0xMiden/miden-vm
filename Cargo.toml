@@ -43,6 +43,7 @@ members = [
     "processor",
     "prover",
     "tests/wycheproof",
+    "tools/release-policy",
     "verifier",
 ]
 resolver = "3"
@@ -158,6 +159,7 @@ rand            = { version = "0.10", default-features = false }
 rayon           = { version = "1.11", default-features = false }
 rocksdb         = { version = "0.24", default-features = false }
 seq-macro       = "0.3"
+semver          = { version = "1.0", default-features = false }
 serde           = { version = "1.0", default-features = false, features = ["alloc", "derive", "rc"] }
 serde_json      = { version = "1.0", default-features = false, features = ["alloc"] }
 serde-untagged  = {version = "0.1" }

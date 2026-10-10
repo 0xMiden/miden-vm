@@ -43,7 +43,7 @@ log.workspace = true
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 regex = { version = "1.12", default-features = false, features = ["unicode", "perf"] }
-semver = { version = "1.0", default-features = false }
+semver.workspace = true
 serde = { workspace = true, optional = true }
 smallvec.workspace = true
 thiserror.workspace = true

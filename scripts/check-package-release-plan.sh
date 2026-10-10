@@ -10,7 +10,6 @@ source "$DIR/lib/release-plan-common.sh"
 check_command "cargo"
 check_command "curl"
 check_command "jq"
-check_command "awk"
 
 export CRATES_IO_USER_AGENT="miden-vm-package-release-plan"
 RELEASE_PLAN_TMPDIR="$(mktemp -d)"
@@ -54,6 +53,13 @@ add_packages() {
 
 if [[ "${#package_arguments[@]}" -gt 0 ]]; then
     add_packages "${package_arguments[@]}"
+fi
+if [[ ${#selected_packages[@]} -gt 0 ]]; then
+    duplicates="$(printf '%s\n' "${selected_packages[@]}" | sort | uniq -d)"
+    if [[ -n "$duplicates" ]]; then
+        echo "ERROR: duplicate selected packages: $duplicates" >&2
+        exit 1
+    fi
 fi
 selected_package_count="${#selected_packages[@]}"
 
@@ -105,10 +111,10 @@ while IFS=$'\t' read -r package local_version manifest_path; do
         continue
     fi
 
-    latest_version="$(latest_published_version "$package")"
+    latest_version="$(latest_published_version "$package" "$local_version")"
 
     if [[ -z "$latest_version" ]]; then
-        would_publish+=("$package v$local_version (latest published: none)")
+        would_publish+=("$package")
         continue
     fi
 
@@ -135,7 +141,7 @@ while IFS=$'\t' read -r package local_version manifest_path; do
     fi
 
     if [[ "$check_semver" == "false" ]]; then
-        would_publish+=("$package v$local_version (latest published: $latest_version)")
+        would_publish+=("$package")
         continue
     fi
 
@@ -163,13 +169,13 @@ else
         if [[ -z "$baseline_commit" ]] &&
             ! published_package_has_library_target "$package" "$latest_version"; then
             echo "Skipping semver for $package because published v$latest_version has no library target."
-            would_publish+=("$package v$local_version (latest published: $latest_version)")
+            would_publish+=("$package")
             continue
         fi
 
         echo "Checking semver for $package v$local_version against published v$latest_version"
         if run_semver_check "$package" "$latest_version" "$workspace_root" "$baseline_commit"; then
-            would_publish+=("$package v$local_version (latest published: $latest_version)")
+            would_publish+=("$package")
         else
             semver_failures+=("$package v$local_version against published v$latest_version")
         fi
@@ -218,3 +224,6 @@ fi
 
 echo
 echo "Release plan check passed."
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    printf 'packages=%s\n' "$(jq -cn --args '$ARGS.positional' "${would_publish[@]}")" >> "$GITHUB_OUTPUT"
+fi
