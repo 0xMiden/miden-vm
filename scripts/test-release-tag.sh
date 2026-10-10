@@ -38,6 +38,11 @@ source "$scripts/lib/release-policy.sh"
 printf '%s' '{"versions":[{"num":"1.2.0","yanked":false},{"num":"1.2.1-rc.1","yanked":false}]}' > "$fixture/history.json"
 [[ "$(release_policy latest 1.2.1 "$fixture/history.json")" == 1.2.1-rc.1 ]]
 [[ "$(release_policy baseline 1.2.1 "$fixture/history.json")" == 1.2.0 ]]
+printf '%s' '{"versions":[{"num":"1.2.0-rc.1","yanked":false}]}' > "$fixture/history.json"
+if release_policy baseline invalid "$fixture/history.json" 2> "$fixture/error"; then
+    echo 'Invalid baseline version was accepted.' >&2; exit 1
+fi
+[[ "$(<"$fixture/error")" == "release policy: "* ]]
 printf '[package]\nname="miden-vm"\nversion="0.35.2"\n[lib]\npath="lib.rs"\n' > Cargo.toml
 touch lib.rs
 git tag v0.35.0 "$RELEASE_SHA"
