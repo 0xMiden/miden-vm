@@ -23,8 +23,8 @@ such as `0.28.1` to `0.28.2`.
 ## Prepare the release commit
 
 - Give each selected crate an unused version.
-- Give `miden-vm` an unused version for the repository tag, including limited releases.
-- Update its entry in `[workspace.dependencies]` in the root `Cargo.toml`.
+- Give `miden-vm` an unused version in its package manifest for the repository tag, including limited releases.
+- Update the selected crates' entries in `[workspace.dependencies]` in the root `Cargo.toml`, where those entries exist.
 - Update `Cargo.lock` and any affected fuzz lockfiles.
 - Add a dated section to `CHANGELOG.md`. Name the crate in the heading for a
   limited release.
