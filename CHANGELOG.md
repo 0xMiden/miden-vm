@@ -4,6 +4,7 @@
 
 #### Fixes
 
+- Fixed release version comparisons to respect prerelease precedence and compare patch releases within their major/minor line ([#3654](https://github.com/0xMiden/miden-vm/issues/3654)).
 - [BREAKING] `Package::strip_debug_info` strips an embedded kernel one level deep and rejects a kernel section that embeds another kernel with the new `PackageStripError::NestedEmbeddedKernel`, instead of recursing until the stack overflows ([#3981](https://github.com/0xMiden/miden-vm/pull/3981)).
 - Fixed linker module-capacity overflow so AST and pre-assembled module registration return a structured error instead of panicking ([#3895](https://github.com/0xMiden/miden-vm/issues/3895)).
 - [BREAKING] `MmrPeaks::verify` now takes the tree, peak and relative position from the peaks' forest instead of the proof's, and rejects positions outside that forest (`PositionNotFound`, previously a panic) and paths whose depth differs from the tree height (`InvalidMerklePath`) ([#3931](https://github.com/0xMiden/miden-vm/pull/3931)).
@@ -19,6 +20,7 @@
 
 #### Changes
 
+- Added guarded releases from patch branches and release candidates from `next`. Synthetic CodSpeed benchmarks now build separately from measurement ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
 - [BREAKING] Store inline-call frames as operation ranges instead of per-operation rows. Package debug-info version 4 preserves inline chains across clears, control flow, and dynamic or external boundaries without expanding them during decoding ([#3956](https://github.com/0xMiden/miden-vm/pull/3956)).
 
 ## v0.35.0 (2026-10-01)
