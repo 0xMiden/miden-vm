@@ -4,6 +4,7 @@
 
 #### Fixes
 
+- Fixed release version comparisons to respect prerelease precedence and compare patch releases within their major/minor line. API compatibility checks use stable releases instead of release candidates ([#3654](https://github.com/0xMiden/miden-vm/issues/3654)).
 - [BREAKING] `Package::strip_debug_info` strips an embedded kernel one level deep and rejects a kernel section that embeds another kernel with the new `PackageStripError::NestedEmbeddedKernel`, instead of recursing until the stack overflows ([#3981](https://github.com/0xMiden/miden-vm/pull/3981)).
 - Fixed linker module-capacity overflow so AST and pre-assembled module registration return a structured error instead of panicking ([#3895](https://github.com/0xMiden/miden-vm/issues/3895)).
 - [BREAKING] `MmrPeaks::verify` now takes the tree, peak and relative position from the peaks' forest instead of the proof's, and rejects positions outside that forest (`PositionNotFound`, previously a panic) and paths whose depth differs from the tree height (`InvalidMerklePath`) ([#3931](https://github.com/0xMiden/miden-vm/pull/3931)).
@@ -19,6 +20,12 @@
 
 #### Changes
 
+- Replaced the main-only release restriction with branch and version rules. Stable versions use `main`, patch versions use their matching `release/vVERSION` or `release-vVERSION` branch, and release candidates use `next`. Tags must match the VM version and source commit. Patch branches must include the base and latest earlier stable patch tags ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- Required release approval from a repository admin through the `release` environment. Admins can approve their own releases. Release candidates remain prereleases, and patch branches preserve GitHub's latest stable release ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- Required manual release dispatch and removed the `release.published` publication fallback. Removed the option to skip the package version gate ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- Moved builds and package verification into jobs without OIDC access. Cargo uploads use `--no-verify` after the selected packages pass verification, so compilation does not receive publication credentials. Recheck the remote tag before publishing the GitHub release ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- Replaced custom release version comparisons and the Python release tests with Rust `semver` tooling and focused Rust tests. Added release preparation and recovery instructions in `docs/RELEASING.md` ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- Separated synthetic CodSpeed compilation from measurement while retaining the optimized profile and benchmark coverage. The executable builds on an ARM64 8x runner using Ubuntu 22.04, and SMT benchmarks run independently ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
 - [BREAKING] Store inline-call frames as operation ranges instead of per-operation rows. Package debug-info version 4 preserves inline chains across clears, control flow, and dynamic or external boundaries without expanding them during decoding ([#3956](https://github.com/0xMiden/miden-vm/pull/3956)).
 
 ## v0.35.0 (2026-10-01)
