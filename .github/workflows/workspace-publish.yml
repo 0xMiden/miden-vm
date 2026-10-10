@@ -82,6 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     permissions:
+      actions: read
       contents: write
     steps:
       - name: Checkout release commit
@@ -90,6 +91,16 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.sha }}
           persist-credentials: false
+
+      - &verify-release-reviewers
+        name: Verify release reviewer permissions after approval
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          source scripts/lib/release-policy.sh
+          verify_release_reviewers
 
       - &verify-release-refs
         name: Revalidate release refs before publication
@@ -215,6 +226,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     permissions:
+      actions: read
       contents: write
       id-token: write
       attestations: write
@@ -223,6 +235,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - *verify-release-reviewers
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-binaries-*
@@ -297,6 +310,7 @@ jobs:
       RELEASE_SHA: ${{ needs.prepare-release.outputs.sha }}
       RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
     permissions:
+      actions: read
       contents: read
       id-token: write # Required for OIDC token exchange with crates.io
 
@@ -307,6 +321,8 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.sha }}
           persist-credentials: false
+
+      - *verify-release-reviewers
 
       - name: Configure Cargo before authentication
         run: |
@@ -350,12 +366,14 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     permissions:
+      actions: read
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - *verify-release-reviewers
       - *verify-release-tag
       - name: Publish draft release
         env:
