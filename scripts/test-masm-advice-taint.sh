@@ -59,8 +59,8 @@ check_result() {
 }
 
 check_error() {
-    local name="$1" diagnostic="$2" mode actual_status
-    shift 2
+    local name="$1" context="$2" diagnostic="$3" mode actual_status
+    shift 3
     for mode in default verbose; do
         if [[ "$mode" == verbose ]]; then
             set -- --verbose "$@"
@@ -72,6 +72,7 @@ check_error() {
             actual_status=$?
         fi
         if [[ "$actual_status" -ne 2 ]] || \
+            ! grep -Fq "$context" "$test_root/$name-$mode-output" || \
             ! grep -Fq "$diagnostic" "$test_root/$name-$mode-output"; then
             cat "$test_root/$name-$mode-output" >&2
             echo "$name: expected status 2 and diagnostic '$diagnostic', got $actual_status" >&2
@@ -81,13 +82,16 @@ check_error() {
     echo "$name: passed (default and verbose)"
 }
 
-check_error invalid_arguments "usage: midenc-masm-lint" --unknown
-check_error missing_project "No such file or directory" \
+check_error invalid_arguments "unexpected argument: --unknown" \
+    "usage: midenc-masm-lint" --unknown
+check_error missing_project "failed to analyze '$test_root/missing/miden-project.toml'" \
+    "No such file or directory (os error 2)" \
     "$test_root/missing/miden-project.toml"
 
 write_project malformed_project
 printf 'invalid = [\n' > "$test_root/malformed_project/miden-project.toml"
-check_error malformed_project "TOML parse error" \
+check_error malformed_project "failed to analyze '$test_root/malformed_project/miden-project.toml'" \
+    "unclosed array, expected \`]\`" \
     "$test_root/malformed_project/miden-project.toml"
 
 write_project clean
