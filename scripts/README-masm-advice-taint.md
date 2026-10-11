@@ -16,9 +16,9 @@ bash scripts/check-masm-advice-taint.sh --verbose
 bash scripts/check-masm-advice-taint.sh --verbose path/to/miden-project.toml
 ```
 
-`tools/midenc-masm-lint` is a separate Cargo workspace with its own manifest,
-lockfile, and pinned Rust toolchain. Its compiler dependencies use commit
-`5d45ed62b2f3ba390cc212e8a4519b2896941af9` from the published compiler fixes branch.
+`tools/midenc-masm-lint` is a separate Cargo workspace with its own manifest and
+lockfile. Its Rust toolchain is pinned. The compiler dependencies use commit
+`e0b331b6cdd6a9bba4d4f80ad13ef76a47a43339` from the published compiler fixes branch.
 That compiler retains its published VM 0.35 and HIR type 0.17 dependencies.
 Existing VM workspace dependencies and lockfiles are unchanged.
 
