@@ -128,7 +128,12 @@ shear: ## Runs cargo-shear to find unused or misplaced dependencies
 	cargo shear
 
 .PHONY: lint
-lint: xclippy format-check shear ## Runs all lint checks without modifying files
+lint: xclippy format-check shear lint-masm-advice-lint ## Runs all lint checks without modifying files
+
+.PHONY: lint-masm-advice-lint
+lint-masm-advice-lint:
+	cd tools/midenc-masm-lint && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings
+	shellcheck scripts/check-masm-advice-taint.sh scripts/test-masm-advice-taint.sh
 
 .PHONY: build-masm-advice-lint
 build-masm-advice-lint: ## Builds the compiler advice-taint developer tool
@@ -139,7 +144,8 @@ masm-advice-lint: ## Analyzes core MASM, rejecting findings and lost coverage
 	bash scripts/check-masm-advice-taint.sh
 
 .PHONY: test-masm-advice-lint
-test-masm-advice-lint: ## Checks advice-taint findings and coverage failure behavior
+test-masm-advice-lint: build-masm-advice-lint ## Checks advice-taint findings and coverage failure behavior
+	cd tools/midenc-masm-lint && cargo test --locked
 	bash scripts/test-masm-advice-taint.sh
 
 # --- docs ----------------------------------------------------------------------------------------
@@ -210,7 +216,7 @@ test-build: ## Build the test binaries for the workspace (no run)
 	$(MAKE) core-test-build FEATURES="$(WORKSPACE_TEST_FEATURES)"
 
 .PHONY: test
-test: test-masm-root-stability ## Run the standard workspace test suite
+test: test-masm-root-stability test-masm-advice-lint ## Run the standard workspace test suite
 	$(MAKE) core-test FEATURES="$(WORKSPACE_TEST_FEATURES)"
 
 .PHONY: test-masm-root-stability
@@ -235,7 +241,7 @@ test-docs: ## Run documentation tests (cargo test - nextest doesn't support doct
 # -- filtered test runs ---------------------------------------------------------------------------
 
 .PHONY: test-fast
-test-fast: test-masm-root-stability ## Runs fast tests (excludes all CLI tests and proptests)
+test-fast: test-masm-root-stability test-masm-advice-lint ## Runs fast tests (excludes VM CLI tests and proptests)
 	# Keep this feature set aligned with `test` so both targets reuse the same test binaries.
 	$(MAKE) core-test \
 		FEATURES="$(WORKSPACE_TEST_FEATURES)" \
@@ -257,12 +263,17 @@ test-loom: ## Runs all loom-based tests
 # --- checking ------------------------------------------------------------------------------------
 
 .PHONY: check
-check: ## Checks all targets and features for errors without code generation
+check: check-masm-advice-lint ## Checks all targets and features for errors without code generation
 	$(BUILDDOCS) cargo check --all-targets ${ALL_FEATURES}
+
+.PHONY: check-masm-advice-lint
+check-masm-advice-lint:
+	cd tools/midenc-masm-lint && cargo check --locked --all-targets
 
 .PHONY: check-features
 check-features: ## Checks all feature combinations compile without warnings using cargo-hack
 	@scripts/check-features.sh
+	cd tools/midenc-masm-lint && RUSTFLAGS="$(RUSTFLAGS) -D warnings" cargo hack check --locked --each-feature --all-targets
 
 # --- building ------------------------------------------------------------------------------------
 

@@ -5,7 +5,10 @@ use std::{
 
 use midenc_dialect_hir::analyses::{AdviceTaintAnalysis, AdviceTaintOriginKind};
 use midenc_frontend_masm::SkippedProcedure;
-use midenc_hir::{SourceSpan, diagnostics::SourceManager};
+use midenc_hir::{
+    SourceSpan,
+    diagnostics::{SourceManager, Uri},
+};
 
 pub fn findings(
     analysis: &AdviceTaintAnalysis,
@@ -51,7 +54,7 @@ pub fn findings(
             .unwrap_or_else(|| {
                 sources
                     .file_line_col(finding.advice_span)
-                    .map(|location| relative_path(location.uri.as_ref(), root))
+                    .map(|location| relative_path(&location.uri, root))
                     .unwrap_or_else(|_| "<unknown>".to_string())
             });
         let subject = match finding.origin.kind {
@@ -126,14 +129,29 @@ fn location(sources: &dyn SourceManager, span: SourceSpan, root: &Path) -> Strin
 
 fn source_location(sources: &dyn SourceManager, span: SourceSpan, root: &Path) -> Option<String> {
     let location = sources.file_line_col(span).ok()?;
-    let path = relative_path(location.uri.as_ref(), root);
+    let path = relative_path(&location.uri, root);
     Some(format!("{path}:{}:{}", location.line, location.column))
 }
 
-fn relative_path(uri: &str, root: &Path) -> String {
-    Path::new(uri)
-        .strip_prefix(root)
-        .unwrap_or(Path::new(uri))
-        .display()
-        .to_string()
+fn relative_path(uri: &Uri, root: &Path) -> String {
+    let Some(path) = uri.to_path() else {
+        return uri.to_string();
+    };
+    path.strip_prefix(root).unwrap_or(&path).display().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_uris_and_plain_paths_are_relative_to_the_manifest() {
+        for uri in ["file:///project/asm/mod.masm", "/project/asm/mod.masm"] {
+            assert_eq!(relative_path(&Uri::from(uri), Path::new("/project/asm")), "mod.masm");
+        }
+        assert_eq!(
+            relative_path(&Uri::from("https://example.com/mod.masm"), Path::new("/project/asm")),
+            "https://example.com/mod.masm"
+        );
+    }
 }
