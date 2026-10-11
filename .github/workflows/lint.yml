@@ -79,6 +79,11 @@ jobs:
           rustup update --no-self-update stable
           rustup +stable component add clippy
           make clippy
+      - name: Install advice CLI toolchain
+        working-directory: tools/midenc-masm-lint
+        run: rustup toolchain install --no-self-update
+      - name: Lint advice CLI and runners
+        run: make lint-masm-advice-lint
 
   rustfmt:
     name: rustfmt check nightly on ubuntu-latest
