@@ -18,6 +18,7 @@ fn main() -> ExitCode {
         if argument == "--verbose" || argument == "-v" {
             verbose = true;
         } else if argument.to_string_lossy().starts_with('-') || manifest.is_some() {
+            eprintln!("unexpected argument: {}", argument.to_string_lossy());
             eprintln!("usage: midenc-masm-lint [--verbose] <miden-project.toml>");
             return ExitCode::from(2);
         } else {
@@ -33,6 +34,7 @@ fn main() -> ExitCode {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::from(1),
         Err(error) => {
+            eprintln!("failed to analyze '{}'", Path::new(&manifest).display());
             eprintln!("{error:?}");
             ExitCode::from(2)
         },
