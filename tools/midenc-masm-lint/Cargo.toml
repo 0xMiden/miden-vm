@@ -7,7 +7,7 @@ publish = false
 [workspace]
 
 [dependencies]
-midenc-dialect-hir = { git = "https://github.com/0xMiden/compiler", rev = "5d45ed62b2f3ba390cc212e8a4519b2896941af9" }
-midenc-frontend-masm = { git = "https://github.com/0xMiden/compiler", rev = "5d45ed62b2f3ba390cc212e8a4519b2896941af9" }
-midenc-hir = { git = "https://github.com/0xMiden/compiler", rev = "5d45ed62b2f3ba390cc212e8a4519b2896941af9" }
-midenc-hir-analysis = { git = "https://github.com/0xMiden/compiler", rev = "5d45ed62b2f3ba390cc212e8a4519b2896941af9" }
+midenc-dialect-hir = { git = "https://github.com/0xMiden/compiler", rev = "e0b331b6cdd6a9bba4d4f80ad13ef76a47a43339" }
+midenc-frontend-masm = { git = "https://github.com/0xMiden/compiler", rev = "e0b331b6cdd6a9bba4d4f80ad13ef76a47a43339" }
+midenc-hir = { git = "https://github.com/0xMiden/compiler", rev = "e0b331b6cdd6a9bba4d4f80ad13ef76a47a43339" }
+midenc-hir-analysis = { git = "https://github.com/0xMiden/compiler", rev = "e0b331b6cdd6a9bba4d4f80ad13ef76a47a43339" }
