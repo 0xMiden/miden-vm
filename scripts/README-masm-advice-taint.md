@@ -18,15 +18,14 @@ bash scripts/check-masm-advice-taint.sh --verbose path/to/miden-project.toml
 
 `tools/midenc-masm-lint` is a separate Cargo workspace with its own manifest,
 lockfile, and pinned Rust toolchain. Its compiler dependencies use commit
-`9b6991137254823a6bf9e7a9b6d68600204a3312` from the compiler fixes branch.
+`5d45ed62b2f3ba390cc212e8a4519b2896941af9` from the published compiler fixes branch.
 That compiler retains its published VM 0.35 and HIR type 0.17 dependencies.
 Existing VM workspace dependencies and lockfiles are unchanged.
 
-The compiler commit is currently local. For local validation, its objects were
-fetched from the compiler worktree into Cargo's Git source cache, without changing
-Git hooks or repository dependency declarations. This pin must be available from
-`0xMiden/compiler` before a fresh network checkout or hosted workflow can build.
 Update the pin and tool lockfile after the compiler PR merges if its SHA changes.
+
+The VM's `check`, `test`, `test-fast`, `lint`, and `check-features` targets also
+check this tool. The test targets run its renderer test and CLI fixtures.
 
 The runner accepts an optional manifest path. `MIDENC_MASM_LINT` can select
 another already built copy of the tool. No installed Miden sysroot is required.
@@ -43,8 +42,8 @@ Display detail does not change the counts or exit status.
 
 | Exit status | Meaning |
 | --- | --- |
-| 0 | No diagnostics or skipped procedures, and analysis completed. |
-| 1 | Diagnostics, skipped procedures, or exhausted analysis budget. |
+| 0 | A complete scan found no issues or skipped procedures. |
+| 1 | Findings cause failure. Skips or budget exhaustion also fail. |
 | 2 | Invalid arguments or a project-loading, lifting, or analysis error. |
 
 Public-return advisories remain fatal in this implementation. Any later change to
@@ -53,7 +52,7 @@ that enforcement policy needs review and must preserve taint through callers.
 ## Manual CI evidence
 
 `Core MASM advice evidence` runs only through `workflow_dispatch`. It builds the
-CLI and checks all eight fixtures in both modes. It then collects compact and
+CLI and checks the fixtures in both modes. It then collects compact and
 verbose core reports and exit statuses, uploads the evidence even on failure,
 and fails if the modes disagree or the analysis returns a failing status.
 It is not a required PR check while the core still has coverage gaps and reports.
@@ -71,8 +70,10 @@ triage before classification as MASM defects. The 117 root failures cause anothe
 Compact output has 26 lines and verbose output has 15,341. Local evidence is in
 `target/masm-advice-lint/evidence/core-taint-compact.txt` and
 `target/masm-advice-lint/evidence/core-taint-verbose.txt`.
-All eight CLI cases pass in both modes. They cover clean code, sink findings,
+The CLI cases cover clean code, sink findings,
 grouped returns, and advice passing through declared word and pointer arguments.
-They also verify skipped dependencies, an empty child module, and budget exhaustion.
+They verify that skipped dependencies cause failure even when unrelated code is clean.
+An empty child module and budget exhaustion cannot return success.
+Argument errors and missing or malformed manifests must return status 2 in both modes.
 The CLI passes formatting and Clippy with warnings denied. Both scripts pass
 ShellCheck, and the manual workflow passes Actionlint. Hosted CI has not run.
