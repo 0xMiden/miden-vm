@@ -1411,7 +1411,7 @@ dependencies = [
 [[package]]
 name = "midenc-dialect-arith"
 version = "0.11.0"
-source = "git+https://github.com/0xMiden/compiler?rev=9b6991137254823a6bf9e7a9b6d68600204a3312#9b6991137254823a6bf9e7a9b6d68600204a3312"
+source = "git+https://github.com/0xMiden/compiler?rev=5d45ed62b2f3ba390cc212e8a4519b2896941af9#5d45ed62b2f3ba390cc212e8a4519b2896941af9"
 dependencies = [
  "midenc-hir",
  "paste",
@@ -1420,7 +1420,7 @@ dependencies = [
 [[package]]
 name = "midenc-dialect-cf"
 version = "0.11.0"
-source = "git+https://github.com/0xMiden/compiler?rev=9b6991137254823a6bf9e7a9b6d68600204a3312#9b6991137254823a6bf9e7a9b6d68600204a3312"
+source = "git+https://github.com/0xMiden/compiler?rev=5d45ed62b2f3ba390cc212e8a4519b2896941af9#5d45ed62b2f3ba390cc212e8a4519b2896941af9"
 dependencies = [
  "log",
  "midenc-dialect-arith",
@@ -1430,7 +1430,7 @@ dependencies = [
 [[package]]
 name = "midenc-dialect-hir"
 version = "0.11.0"
-source = "git+https://github.com/0xMiden/compiler?rev=9b6991137254823a6bf9e7a9b6d68600204a3312#9b6991137254823a6bf9e7a9b6d68600204a3312"
+source = "git+https://github.com/0xMiden/compiler?rev=5d45ed62b2f3ba390cc212e8a4519b2896941af9#5d45ed62b2f3ba390cc212e8a4519b2896941af9"
 dependencies = [
  "log",
  "miden-thiserror",
@@ -1445,7 +1445,7 @@ dependencies = [
 [[package]]
 name = "midenc-dialect-scf"
 version = "0.11.0"
-source = "git+https://github.com/0xMiden/compiler?rev=9b6991137254823a6bf9e7a9b6d68600204a3312#9b6991137254823a6bf9e7a9b6d68600204a3312"
+source = "git+https://github.com/0xMiden/compiler?rev=5d45ed62b2f3ba390cc212e8a4519b2896941af9#5d45ed62b2f3ba390cc212e8a4519b2896941af9"
 dependencies = [
  "log",
  "midenc-dialect-arith",
@@ -1458,7 +1458,7 @@ dependencies = [
 [[package]]
 name = "midenc-dialect-ub"
 version = "0.11.0"
-source = "git+https://github.com/0xMiden/compiler?rev=9b6991137254823a6bf9e7a9b6d68600204a3312#9b6991137254823a6bf9e7a9b6d68600204a3312"
+source = "git+https://github.com/0xMiden/compiler?rev=5d45ed62b2f3ba390cc212e8a4519b2896941af9#5d45ed62b2f3ba390cc212e8a4519b2896941af9"
 dependencies = [
  "midenc-hir",
 ]
@@ -1466,7 +1466,7 @@ dependencies = [
 [[package]]
 name = "midenc-frontend-masm"
 version = "0.11.0"
-source = "git+https://github.com/0xMiden/compiler?rev=9b6991137254823a6bf9e7a9b6d68600204a3312#9b6991137254823a6bf9e7a9b6d68600204a3312"
+source = "git+https://github.com/0xMiden/compiler?rev=5d45ed62b2f3ba390cc212e8a4519b2896941af9#5d45ed62b2f3ba390cc212e8a4519b2896941af9"
 dependencies = [
  "miden-assembly",
  "miden-assembly-syntax",
@@ -1484,7 +1484,7 @@ dependencies = [
 [[package]]
 name = "midenc-frontend-wasm-metadata"
 version = "0.15.0"
-source = "git+https://github.com/0xMiden/compiler?rev=9b6991137254823a6bf9e7a9b6d68600204a3312#9b6991137254823a6bf9e7a9b6d68600204a3312"
+source = "git+https://github.com/0xMiden/compiler?rev=5d45ed62b2f3ba390cc212e8a4519b2896941af9#5d45ed62b2f3ba390cc212e8a4519b2896941af9"
 dependencies = [
  "miden-mast-package",
  "serde",
@@ -1494,7 +1494,7 @@ dependencies = [
 [[package]]
 name = "midenc-hir"
 version = "0.11.0"
-source = "git+https://github.com/0xMiden/compiler?rev=9b6991137254823a6bf9e7a9b6d68600204a3312#9b6991137254823a6bf9e7a9b6d68600204a3312"
+source = "git+https://github.com/0xMiden/compiler?rev=5d45ed62b2f3ba390cc212e8a4519b2896941af9#5d45ed62b2f3ba390cc212e8a4519b2896941af9"
 dependencies = [
  "anyhow",
  "base64",
@@ -1521,7 +1521,7 @@ dependencies = [
 [[package]]
 name = "midenc-hir-analysis"
 version = "0.11.0"
-source = "git+https://github.com/0xMiden/compiler?rev=9b6991137254823a6bf9e7a9b6d68600204a3312#9b6991137254823a6bf9e7a9b6d68600204a3312"
+source = "git+https://github.com/0xMiden/compiler?rev=5d45ed62b2f3ba390cc212e8a4519b2896941af9#5d45ed62b2f3ba390cc212e8a4519b2896941af9"
 dependencies = [
  "bitvec",
  "blink-alloc",
@@ -1532,7 +1532,7 @@ dependencies = [
 [[package]]
 name = "midenc-hir-macros"
 version = "0.11.0"
-source = "git+https://github.com/0xMiden/compiler?rev=9b6991137254823a6bf9e7a9b6d68600204a3312#9b6991137254823a6bf9e7a9b6d68600204a3312"
+source = "git+https://github.com/0xMiden/compiler?rev=5d45ed62b2f3ba390cc212e8a4519b2896941af9#5d45ed62b2f3ba390cc212e8a4519b2896941af9"
 dependencies = [
  "darling",
  "heck",
@@ -1544,7 +1544,7 @@ dependencies = [
 [[package]]
 name = "midenc-hir-symbol"
 version = "0.11.0"
-source = "git+https://github.com/0xMiden/compiler?rev=9b6991137254823a6bf9e7a9b6d68600204a3312#9b6991137254823a6bf9e7a9b6d68600204a3312"
+source = "git+https://github.com/0xMiden/compiler?rev=5d45ed62b2f3ba390cc212e8a4519b2896941af9#5d45ed62b2f3ba390cc212e8a4519b2896941af9"
 dependencies = [
  "Inflector",
  "compact_str",
@@ -1559,7 +1559,7 @@ dependencies = [
 [[package]]
 name = "midenc-hir-transform"
 version = "0.11.0"
-source = "git+https://github.com/0xMiden/compiler?rev=9b6991137254823a6bf9e7a9b6d68600204a3312#9b6991137254823a6bf9e7a9b6d68600204a3312"
+source = "git+https://github.com/0xMiden/compiler?rev=5d45ed62b2f3ba390cc212e8a4519b2896941af9#5d45ed62b2f3ba390cc212e8a4519b2896941af9"
 dependencies = [
  "log",
  "midenc-hir",
@@ -1592,7 +1592,7 @@ dependencies = [
 [[package]]
 name = "midenc-package-interface"
 version = "0.15.0"
-source = "git+https://github.com/0xMiden/compiler?rev=9b6991137254823a6bf9e7a9b6d68600204a3312#9b6991137254823a6bf9e7a9b6d68600204a3312"
+source = "git+https://github.com/0xMiden/compiler?rev=5d45ed62b2f3ba390cc212e8a4519b2896941af9#5d45ed62b2f3ba390cc212e8a4519b2896941af9"
 dependencies = [
  "miden-assembly-syntax",
  "miden-mast-package",
@@ -1603,7 +1603,7 @@ dependencies = [
 [[package]]
 name = "midenc-session"
 version = "0.11.0"
-source = "git+https://github.com/0xMiden/compiler?rev=9b6991137254823a6bf9e7a9b6d68600204a3312#9b6991137254823a6bf9e7a9b6d68600204a3312"
+source = "git+https://github.com/0xMiden/compiler?rev=5d45ed62b2f3ba390cc212e8a4519b2896941af9#5d45ed62b2f3ba390cc212e8a4519b2896941af9"
 dependencies = [
  "anyhow",
  "clap",

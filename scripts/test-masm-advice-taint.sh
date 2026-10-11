@@ -58,6 +58,38 @@ check_result() {
     echo "$name: passed (default and verbose)"
 }
 
+check_error() {
+    local name="$1" diagnostic="$2" mode actual_status
+    shift 2
+    for mode in default verbose; do
+        if [[ "$mode" == verbose ]]; then
+            set -- --verbose "$@"
+        fi
+        if bash "$repo_root/scripts/check-masm-advice-taint.sh" \
+            "$@" > "$test_root/$name-$mode-output" 2>&1; then
+            actual_status=0
+        else
+            actual_status=$?
+        fi
+        if [[ "$actual_status" -ne 2 ]] || \
+            ! grep -Fq "$diagnostic" "$test_root/$name-$mode-output"; then
+            cat "$test_root/$name-$mode-output" >&2
+            echo "$name: expected status 2 and diagnostic '$diagnostic', got $actual_status" >&2
+            exit 1
+        fi
+    done
+    echo "$name: passed (default and verbose)"
+}
+
+check_error invalid_arguments "usage: midenc-masm-lint" --unknown
+check_error missing_project "No such file or directory" \
+    "$test_root/missing/miden-project.toml"
+
+write_project malformed_project
+printf 'invalid = [\n' > "$test_root/malformed_project/miden-project.toml"
+check_error malformed_project "TOML parse error" \
+    "$test_root/malformed_project/miden-project.toml"
+
 write_project clean
 cat > "$test_root/clean/mod.masm" <<'EOF'
 pub proc entry(value: u32) -> u32
