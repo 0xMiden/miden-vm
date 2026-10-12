@@ -88,8 +88,7 @@ jobs:
         uses: ./.github/actions/cleanup-runner
       - name: Rustfmt
         run: |
-          rustup update --no-self-update nightly
-          rustup +nightly component add rustfmt
+          rustup toolchain install nightly-2026-10-09 --profile minimal --component rustfmt --no-self-update
           make format-check
 
   doc:
