@@ -48,12 +48,20 @@ impl DebugActivations {
     }
 
     fn next_generation(&self) -> u64 {
-        self.active
-            .execution
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |generation| {
-                generation.checked_add(1)
-            })
-            .expect("debug activation generation exhausted")
+        let execution = &self.active.execution;
+        let mut generation = execution.load(Ordering::Relaxed);
+        loop {
+            let next = generation.checked_add(1).expect("debug activation generation exhausted");
+            match execution.compare_exchange_weak(
+                generation,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(previous) => return previous,
+                Err(current) => generation = current,
+            }
+        }
     }
 
     fn activation_at(&self, position: usize) -> Option<DebugActivationId> {
@@ -736,6 +744,39 @@ mod tests {
         assert!(stack.debug_activation_at(0).is_none());
         stack.pop_continuation().unwrap();
         assert!(stack.debug_activations.is_none());
+    }
+
+    #[test]
+    fn debug_activation_generations_return_the_previous_counter_value() {
+        let activations = DebugActivations::new(0);
+        activations.active.execution.store(u64::MAX - 1, Ordering::Relaxed);
+        assert_eq!(activations.next_generation(), u64::MAX - 1);
+        assert_eq!(activations.active.execution.load(Ordering::Relaxed), u64::MAX);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn debug_activation_generations_are_unique_under_contention() {
+        let activations = DebugActivations::new(0);
+        let mut generations = std::thread::scope(|scope| {
+            let handles: [_; 4] = core::array::from_fn(|_| {
+                scope.spawn(|| (0..128).map(|_| activations.next_generation()).collect::<Vec<_>>())
+            });
+            handles
+                .into_iter()
+                .flat_map(|handle| handle.join().expect("activation worker panicked"))
+                .collect::<Vec<_>>()
+        });
+        generations.sort_unstable();
+        assert_eq!(generations, (1..=512).collect::<Vec<_>>());
+    }
+
+    #[test]
+    #[should_panic(expected = "debug activation generation exhausted")]
+    fn debug_activation_generations_reject_overflow() {
+        let activations = DebugActivations::new(0);
+        activations.active.execution.store(u64::MAX, Ordering::Relaxed);
+        activations.next_generation();
     }
 
     #[test]
