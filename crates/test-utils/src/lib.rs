@@ -286,7 +286,8 @@ macro_rules! test_execution_methods {
             mem_start_addr: u32,
             expected_mem: &[u64],
         ) {
-            self.run().expect_stack_and_memory(final_stack, mem_start_addr, expected_mem)
+            self.run()
+                .expect_stack_and_memory(final_stack, mem_start_addr, expected_mem)
         }
 
         /// Asserts that executing the test inside a proptest results in the expected final stack
