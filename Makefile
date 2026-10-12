@@ -110,6 +110,10 @@ xclippy-fix: ## Applies clippy lint fixes via cargo-fixit (a faster `cargo clipp
 	fi
 
 
+.PHONY: install-rustfmt
+install-rustfmt: ## Installs the pinned nightly formatter
+	rustup toolchain install $(RUSTFMT_TOOLCHAIN) --profile minimal --component rustfmt --no-self-update
+
 .PHONY: format
 format: ## Runs Format using nightly toolchain
 	cargo +$(RUSTFMT_TOOLCHAIN) fmt --all
