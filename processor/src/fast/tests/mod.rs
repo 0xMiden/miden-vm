@@ -479,27 +479,31 @@ fn source_debug_call_frames_preserve_external_tail_callers() {
             .assemble_library("dep", library_module, None::<Box<Module>>)
             .unwrap(),
     );
-    let assembler = Assembler::new(source_manager)
-        .with_package(library.clone(), Linkage::Dynamic)
-        .unwrap();
-    let package: Arc<Package> = Arc::from(
-        assembler
-            .assemble_program(
-                "program",
-                "use dep::math proc outer exec.math::inner end begin exec.outer push.9 drop end",
-            )
-            .unwrap(),
-    );
-    let mut host = DefaultHost::default();
-    host.load_library(library).unwrap();
-    let chains = collect_package_debug_call_chains(package, host);
-    assert!(
-        chains.iter().any(|chain| chain.len() == 3
-            && chain[1].contains("outer")
-            && chain[2].contains("inner")),
-        "{chains:?}"
-    );
-    assert_eq!(chains.last().unwrap().len(), 1, "{chains:?}");
+    for (source, callers) in [
+        (
+            "use dep::math proc outer exec.math::inner end begin exec.outer push.9 drop end",
+            vec!["outer", "inner"],
+        ),
+        (
+            "use dep::math proc middle exec.math::inner end proc outer exec.middle end begin exec.outer push.9 drop end",
+            vec!["outer", "middle", "inner"],
+        ),
+    ] {
+        let assembler = Assembler::new(source_manager.clone())
+            .with_package(library.clone(), Linkage::Dynamic)
+            .unwrap();
+        let package: Arc<Package> =
+            Arc::from(assembler.assemble_program("program", source).unwrap());
+        let mut host = DefaultHost::default();
+        host.load_library(library.clone()).unwrap();
+        let chains = collect_package_debug_call_chains(package, host);
+        assert!(
+            chains.iter().any(|chain| chain.len() == callers.len() + 1
+                && chain[1..].iter().zip(&callers).all(|(name, caller)| name.ends_with(caller))),
+            "{source}: {chains:?}"
+        );
+        assert_eq!(chains.last().unwrap().len(), 1, "{chains:?}");
+    }
 }
 
 fn assert_nested_debug_call_chains(chains: &[Vec<String>]) {
@@ -1550,7 +1554,7 @@ fn external_exec_propagates_inline_context_into_the_loaded_package() {
                 .last()
                 .filter(|frame| frame.debug_info()[frame.function().name_idx].ends_with("target"))
             {
-                assert_eq!(target.inherited_inline_calls(), 1);
+                assert_eq!(target.inherited_inline_calls(), names.len());
             }
             saw_target_context = true;
         }
