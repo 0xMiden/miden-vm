@@ -197,7 +197,10 @@ impl Rpx256 {
     // --------------------------------------------------------------------------------------------
 
     /// (FB) round function.
-    #[inline(always)]
+    // Keep debug round frames separate: inlining all unrolled rounds exceeds the default
+    // thread stack on AVX2 targets.
+    #[cfg_attr(debug_assertions, inline(never))]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub fn apply_fb_round(state: &mut [Felt; STATE_WIDTH], round: usize) {
         apply_mds(state);
         if !add_constants_and_apply_sbox(state, &ARK1[round]) {
@@ -217,7 +220,8 @@ impl Rpx256 {
     /// It first attempts to run the optimized (SIMD-accelerated) implementation.
     /// If SIMD acceleration is not available for the current target it falls
     /// back to the scalar reference implementation (`apply_ext_round_ref`).
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline(never))]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub fn apply_ext_round(state: &mut [Felt; STATE_WIDTH], round: usize) {
         if !add_constants_and_apply_ext_round(state, &ARK1[round]) {
             Self::apply_ext_round_ref(state, round);

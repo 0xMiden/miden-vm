@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 56c93ba64be20900f4f30d15f5f80b90ecf47a83d5e9d78b7677b81167b31f0f # shrinks to obj = HashControlBlock((Word([0, 0, 7143097400944682016, 13978602652397203882]), Word([12382692358552861370, 9379751402306680147, 8431648501375806606, 5307301496821356417]), 4294967296, Word([2195244129049377008, 9886158457526850196, 7924060615835699412, 4294967294])))
+cc 9aa7fdeb50d69270fabec61ad92649caefa326f14c8acb29ea283037f4552138 # shrinks to obj = HasherRequestReplay { sink: Buffered([HashControlBlock((Word([0, 0, 0, 13928400405921489107]), Word([15105593650496143070, 17183070658259555068, 8891870325711921976, 6657905015771278700]), 10467267695861646950, Word([1, 3077611682822544890, 7500641632415759078, 7599733124296963703])))]) }

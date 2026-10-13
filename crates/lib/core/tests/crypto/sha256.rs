@@ -1,8 +1,10 @@
 use miden_air::Serializable;
 use miden_crypto::hash::sha2::Sha256;
 use miden_processor::{ExecutionError, operation::OperationError};
-use miden_utils_testing::{Felt, IntoBytes, Test, group_slice_elements, push_inputs};
-
+use miden_utils_testing::{
+    IntoBytes, Test, group_slice_elements, push_inputs,
+    rand::{seeded_element, seeded_word},
+};
 const NON_U32_WORD: u64 = u32::MAX as u64 + 2;
 const INVALID_SHA256_MESSAGE_WORD: &str = "invalid sha256 message word";
 const SHA256_HASH_SOURCE: &str = "
@@ -20,26 +22,33 @@ const SHA256_MERGE_SOURCE: &str = "
 
 #[test]
 fn sha256_hash_bytes() {
-    let length_in_bytes = rand::random::<u64>() & 1023; // length: 0-1023
-    let ibytes: Vec<u8> = (0..length_in_bytes as usize).map(|_| rand::random()).collect();
-    let ipadding: Vec<u8> = vec![0; (4 - (length_in_bytes as usize % 4)) % 4];
+    // Deterministic length sweep under the 1023 cap, covering every byte
+    // alignment mod 4 (the message ending halfway through a u32),
+    // the memory-word boundary, and the SHA-256 padding boundaries
+    // (55/56 flip the extra pad block, 64 is a full block).
+    let mut seed = 3u64;
+    for length_in_bytes in [0u64, 1, 2, 4, 55, 56, 58, 63, 64, 65, 66, 513, 1023] {
+        let ibytes: Vec<u8> = (0..length_in_bytes as usize)
+            .map(|_| seeded_element(&mut seed).as_canonical_u64() as u8)
+            .collect();
+        let ipadding: Vec<u8> = vec![0; (4 - (length_in_bytes as usize % 4)) % 4];
 
-    // Note: We need .rev() here because push_inputs generates MASM push instructions.
-    // MASM push puts each value on top, so pushing [a, b, c] results in stack [c, b, a].
-    // To get word0 on top after all pushes (and after mem_store.1 pops length),
-    // we need to push wordN-1 first, then ..., then word0, then length.
-    let ifelts = [
-        group_slice_elements::<u8, 4>(&[ibytes.clone(), ipadding].concat())
-            .iter()
-            .map(|&bytes| u32::from_be_bytes(bytes) as u64)
-            .rev()
-            .collect::<Vec<u64>>(),
-        vec![length_in_bytes; 1],
-    ]
-    .concat();
+        // Note: We need .rev() here because push_inputs generates MASM push instructions.
+        // MASM push puts each value on top, so pushing [a, b, c] results in stack [c, b, a].
+        // To get word0 on top after all pushes (and after mem_store.1 pops length),
+        // we need to push wordN-1 first, then ..., then word0, then length.
+        let ifelts = [
+            group_slice_elements::<u8, 4>(&[ibytes.clone(), ipadding].concat())
+                .iter()
+                .map(|&bytes| u32::from_be_bytes(bytes) as u64)
+                .rev()
+                .collect::<Vec<u64>>(),
+            vec![length_in_bytes; 1],
+        ]
+        .concat();
 
-    let source = format!(
-        "
+        let source = format!(
+            "
     use miden::core::crypto::hashes::sha256
 
     begin
@@ -71,23 +80,25 @@ fn sha256_hash_bytes() {
         # truncate the stack
         swapdw dropw dropw
     end",
-        inputs = push_inputs(&ifelts)
-    );
+            inputs = push_inputs(&ifelts)
+        );
 
-    let obytes = Sha256::hash(&ibytes).to_bytes();
-    let ofelts = group_slice_elements::<u8, 4>(&obytes)
-        .iter()
-        .map(|&bytes| u32::from_be_bytes(bytes) as u64)
-        .collect::<Vec<u64>>();
+        let obytes = Sha256::hash(&ibytes).to_bytes();
+        let ofelts = group_slice_elements::<u8, 4>(&obytes)
+            .iter()
+            .map(|&bytes| u32::from_be_bytes(bytes) as u64)
+            .collect::<Vec<u64>>();
 
-    let test = build_test!(source, &[]);
-    test.expect_stack(&ofelts);
+        let test = build_test!(source, &[]);
+        test.expect_stack(&ofelts);
+    }
 }
 
 #[test]
 fn sha256_2_to_1_hash() {
-    let input0 = rand::random::<[Felt; 4]>().into_bytes();
-    let input1 = rand::random::<[Felt; 4]>().into_bytes();
+    let mut seed = 1u64;
+    let (input0, input1) = (seeded_word(&mut seed), seeded_word(&mut seed));
+    let (input0, input1) = (input0.into_bytes(), input1.into_bytes());
 
     let mut ibytes = [0u8; 64];
     ibytes[..32].copy_from_slice(&input0);
@@ -109,7 +120,8 @@ fn sha256_2_to_1_hash() {
 
 #[test]
 fn sha256_1_to_1_hash() {
-    let ibytes = rand::random::<[Felt; 4]>().into_bytes();
+    let mut seed = 2u64;
+    let ibytes = seeded_word(&mut seed).into_bytes();
     let ifelts: Vec<u64> = group_slice_elements::<u8, 4>(&ibytes)
         .iter()
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)

@@ -1,5 +1,7 @@
 use miden_processor::{ExecutionError, Felt, operation::OperationError};
 #[cfg(feature = "arbitrary")]
+use miden_utils_testing::PrimeField64;
+#[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
 use miden_utils_testing::{U32_BOUND, build_op_test, expect_exec_error_matches};
 
@@ -25,19 +27,15 @@ fn u32and() {
     let test = build_op_test!(asm_op, &[0, 0]);
     test.expect_stack(&[0]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
+    // --- all-ones identity (a & u32::MAX = a) ----------------------------------------------------
+    let test = build_op_test!(asm_op, &[u32::MAX as u64, 0xdeadbeef_u32 as u64]);
+    test.expect_stack(&[0xdeadbeef_u64]);
 
-    let test = build_op_test!(asm_op, &[a as u64, b as u64]);
-    test.expect_stack(&[(a & b) as u64]);
+    let test = build_op_test!("u32and.4294967295", &[0xdeadbeef_u32 as u64]);
+    test.expect_stack(&[0xdeadbeef_u64]);
 
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand::random::<u32>();
-    let d = rand::random::<u32>();
-
-    let test = build_op_test!(asm_op, &[a as u64, b as u64, c as u64, d as u64]);
-    test.expect_stack(&[(a & b) as u64, c as u64, d as u64]);
+    // Randomized coverage, including the immediate variant and stack preservation, lives in
+    // u32and_proptest.
 }
 
 #[test]
@@ -57,19 +55,8 @@ fn u32and_b() {
     let test = build_op_test!(build_asm_op(0), &[0]);
     test.expect_stack(&[0]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-
-    let test = build_op_test!(build_asm_op(b), &[a as u64]);
-    test.expect_stack(&[(a & b) as u64]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand::random::<u32>();
-    let d = rand::random::<u32>();
-
-    let test = build_op_test!(build_asm_op(b), &[a as u64, c as u64, d as u64]);
-    test.expect_stack(&[(a & b) as u64, c as u64, d as u64]);
+    // Randomized coverage of the immediate variant, including stack preservation, lives in
+    // u32and_proptest.
 }
 
 #[test]
@@ -108,19 +95,15 @@ fn u32or() {
     let test = build_op_test!(asm_op, &[0, 0]);
     test.expect_stack(&[0]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
+    // --- all-ones saturation (a | u32::MAX = u32::MAX) -------------------------------------------
+    let test = build_op_test!(asm_op, &[u32::MAX as u64, 0xdeadbeef_u32 as u64]);
+    test.expect_stack(&[u32::MAX as u64]);
 
-    let test = build_op_test!(asm_op, &[a as u64, b as u64]);
-    test.expect_stack(&[(a | b) as u64]);
+    let test = build_op_test!("u32or.4294967295", &[0xdeadbeef_u32 as u64]);
+    test.expect_stack(&[u32::MAX as u64]);
 
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand::random::<u32>();
-    let d = rand::random::<u32>();
-
-    let test = build_op_test!(asm_op, &[a as u64, b as u64, c as u64, d as u64]);
-    test.expect_stack(&[(a | b) as u64, c as u64, d as u64]);
+    // Randomized coverage, including the immediate variant and stack preservation, lives in
+    // u32or_proptest.
 }
 
 #[test]
@@ -140,19 +123,8 @@ fn u32or_b() {
     let test = build_op_test!(build_asm_op(0), &[0]);
     test.expect_stack(&[0]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-
-    let test = build_op_test!(build_asm_op(b), &[a as u64]);
-    test.expect_stack(&[(a | b) as u64]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand::random::<u32>();
-    let d = rand::random::<u32>();
-
-    let test = build_op_test!(build_asm_op(b), &[a as u64, c as u64, d as u64]);
-    test.expect_stack(&[(a | b) as u64, c as u64, d as u64]);
+    // Randomized coverage of the immediate variant, including stack preservation, lives in
+    // u32or_proptest.
 }
 
 #[test]
@@ -191,18 +163,16 @@ fn u32xor() {
     let test = build_op_test!(asm_op, &[0, 0]);
     test.expect_stack(&[0]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
+    // --- all-ones complement (a ^ u32::MAX = !a)
+    // --------------------------------------------------
+    let test = build_op_test!(asm_op, &[u32::MAX as u64, 0xdeadbeef_u32 as u64]);
+    test.expect_stack(&[(!0xdeadbeef_u32) as u64]);
 
-    let test = build_op_test!(asm_op, &[a as u64, b as u64]);
-    test.expect_stack(&[(a ^ b) as u64]);
+    let test = build_op_test!("u32xor.4294967295", &[0xdeadbeef_u32 as u64]);
+    test.expect_stack(&[(!0xdeadbeef_u32) as u64]);
 
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand::random::<u32>();
-    let d = rand::random::<u32>();
-    let test = build_op_test!(asm_op, &[a as u64, b as u64, c as u64, d as u64]);
-    test.expect_stack(&[(a ^ b) as u64, c as u64, d as u64]);
+    // Randomized coverage, including the immediate variant and stack preservation, lives in
+    // u32xor_proptest.
 }
 
 #[test]
@@ -222,19 +192,8 @@ fn u32xor_b() {
     let test = build_op_test!(build_asm_op(0), &[0]);
     test.expect_stack(&[0]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>();
-
-    let test = build_op_test!(build_asm_op(b), &[a as u64]);
-    test.expect_stack(&[(a ^ b) as u64]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let c = rand::random::<u32>();
-    let d = rand::random::<u32>();
-
-    let test = build_op_test!(build_asm_op(b), &[a as u64, c as u64, d as u64]);
-    test.expect_stack(&[(a ^ b) as u64, c as u64, d as u64]);
+    // Randomized coverage of the immediate variant, including stack preservation, lives in
+    // u32xor_proptest.
 }
 
 #[test]
@@ -267,17 +226,7 @@ fn u32not() {
     let test = build_op_test!(asm_op, &[0]);
     test.expect_stack(&[U32_BOUND - 1]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-
-    let test = build_op_test!(asm_op, &[a as u64]);
-    test.expect_stack(&[!a as u64]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let b = rand::random::<u32>();
-
-    let test = build_op_test!(asm_op, &[a as u64, b as u64]);
-    test.expect_stack(&[!a as u64, b as u64]);
+    // Randomized coverage, including stack preservation, lives in u32not_proptest.
 }
 
 #[test]
@@ -291,17 +240,8 @@ fn u32not_b() {
     let test = build_op_test!(build_asm_op(0), &[]);
     test.expect_stack(&[U32_BOUND - 1]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand::random::<u32>();
-
-    let test = build_op_test!(build_asm_op(a as u64), &[]);
-    test.expect_stack(&[(!a) as u64]);
-
-    // --- test that the rest of the stack isn't affected -----------------------------------------
-    let b = rand::random::<u32>();
-
-    let test = build_op_test!(build_asm_op(a as u64), &[b as u64]);
-    test.expect_stack(&[!a as u64, b as u64]);
+    // Randomized coverage of the immediate variant, including stack preservation, lives in
+    // u32not_b_proptest.
 }
 
 #[test]
@@ -328,19 +268,14 @@ fn u32shl() {
     let test = build_op_test!(asm_op, &[b as u64, a as u64]);
     test.expect_stack(&[a.wrapping_shl(b) as u64]);
 
-    // --- test b = 0 -----------------------------------------------------------------------------
-    let a = rand::random::<u32>();
+    // --- test b = 0 (shift by zero is the identity) ----------------------------------------------
+    let a = 0xdeadbeef_u32;
     let b = 0;
 
     let test = build_op_test!(asm_op, &[b as u64, a as u64]);
     test.expect_stack(&[a.wrapping_shl(b) as u64]);
 
-    // --- test random values ---------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>() % 32;
-
-    let test = build_op_test!(asm_op, &[b as u64, a as u64]);
-    test.expect_stack(&[a.wrapping_shl(b) as u64]);
+    // Randomized coverage, including stack preservation, lives in u32shl_proptest.
 }
 
 #[test]
@@ -362,19 +297,15 @@ fn u32shl_b() {
     let test = build_op_test!(get_asm_op(b).as_str(), &[a as u64]);
     test.expect_stack(&[a.wrapping_shl(b) as u64]);
 
-    // --- test b = 0 -----------------------------------------------------------------------------
-    let a = rand::random::<u32>();
+    // --- test b = 0 (shift by zero is the identity) ----------------------------------------------
+    let a = 0xdeadbeef_u32;
     let b = 0;
 
     let test = build_op_test!(get_asm_op(b).as_str(), &[a as u64]);
     test.expect_stack(&[a.wrapping_shl(b) as u64]);
 
-    // --- test random values ---------------------------------------------------------------------
-    // let a = rand::random::<u32>();
-    // let b = rand::random::<u32>() % 32;
-
-    // let test = build_op_test!(get_asm_op(b).as_str(), &[a as u64]);
-    // test.expect_stack(&[a.wrapping_shl(b) as u64]);
+    // Randomized coverage of the immediate variant, including stack preservation, lives in
+    // u32shl_b_proptest.
 }
 
 #[test]
@@ -395,19 +326,15 @@ fn u32shr() {
     let test = build_op_test!(asm_op, &[b as u64, a as u64]);
     test.expect_stack(&[a.wrapping_shr(b) as u64]);
 
-    // --- test b = 0 ---------------------------------------------------------------------------
-    let a = rand::random::<u32>();
+    // --- test b = 0 (shift by zero is the identity) ----------------------------------------------
+    let a = 0xdeadbeef_u32;
     let b = 0;
 
     let test = build_op_test!(asm_op, &[b as u64, a as u64]);
     test.expect_stack(&[a.wrapping_shr(b) as u64]);
 
-    // --- test random values ---------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>() % 32;
-
-    let test = build_op_test!(asm_op, &[b as u64, a as u64]);
-    test.expect_stack(&[a.wrapping_shr(b) as u64]);
+    // Randomized coverage, including stack preservation, lives in u32shr_proptest (added alongside
+    // the existing shl/rotl proptests).
 }
 
 #[test]
@@ -429,19 +356,15 @@ fn u32shr_b() {
     let test = build_op_test!(get_asm_op(b).as_str(), &[a as u64]);
     test.expect_stack(&[a.wrapping_shr(b) as u64]);
 
-    // --- test b = 0 ---------------------------------------------------------------------------
-    let a = rand::random::<u32>();
+    // --- test b = 0 (shift by zero is the identity) ----------------------------------------------
+    let a = 0xdeadbeef_u32;
     let b = 0;
 
     let test = build_op_test!(get_asm_op(b).as_str(), &[a as u64]);
     test.expect_stack(&[a.wrapping_shr(b) as u64]);
 
-    // --- test random values ---------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>() % 32;
-
-    let test = build_op_test!(get_asm_op(b).as_str(), &[a as u64]);
-    test.expect_stack(&[a.wrapping_shr(b) as u64]);
+    // Randomized coverage of the immediate variant, including stack preservation, lives in
+    // u32shr_b_proptest.
 }
 
 #[test]
@@ -473,19 +396,14 @@ fn u32rotl() {
     let test = build_op_test!(asm_op, &[b as u64, a as u64]);
     test.expect_stack(&[a as u64]);
 
-    // --- test b = 0 -----------------------------------------------------------------------------
-    let a = rand::random::<u32>();
+    // --- test b = 0 (rotation by zero is the identity) -------------------------------------------
+    let a = 0xdeadbeef_u32;
     let b = 0;
 
     let test = build_op_test!(asm_op, &[b as u64, a as u64]);
     test.expect_stack(&[a.rotate_left(b) as u64]);
 
-    // --- test random values ---------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>() % 32;
-
-    let test = build_op_test!(asm_op, &[b as u64, a as u64]);
-    test.expect_stack(&[a.rotate_left(b) as u64]);
+    // Randomized coverage, including stack preservation, lives in u32rotl_proptest.
 }
 
 #[test]
@@ -517,19 +435,14 @@ fn u32rotr() {
     let test = build_op_test!(asm_op, &[b as u64, a as u64]);
     test.expect_stack(&[a as u64]);
 
-    // --- test b = 0 ---------------------------------------------------------------------------
-    let a = rand::random::<u32>();
+    // --- test b = 0 (rotation by zero is the identity) -------------------------------------------
+    let a = 0xdeadbeef_u32;
     let b = 0;
 
     let test = build_op_test!(asm_op, &[b as u64, a as u64]);
     test.expect_stack(&[a.rotate_right(b) as u64]);
 
-    // --- test random values ---------------------------------------------------------------------
-    let a = rand::random::<u32>();
-    let b = rand::random::<u32>() % 32;
-
-    let test = build_op_test!(asm_op, &[b as u64, a as u64]);
-    test.expect_stack(&[a.rotate_right(b) as u64]);
+    // Randomized coverage, including stack preservation, lives in u32rotr_proptest.
 }
 
 #[test]
@@ -587,143 +500,181 @@ fn u32cto() {
 
 #[cfg(feature = "arbitrary")]
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
     #[test]
-    fn u32and_proptest(a in any::<u32>(), b in any::<u32>()) {
+    fn u32and_proptest(a in any::<u32>(), b in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let asm_opcode = "u32and";
-        let values = [a as u64, b as u64];
         // should result in bitwise AND
         let expected = (a & b) as u64;
 
-        let test = build_op_test!(asm_opcode, &values);
-        test.prop_expect_stack(&[expected])?;
+        // An unrelated element `e` below the operands verifies the rest of the stack is preserved.
+        let test = build_op_test!(asm_opcode, &[a as u64, b as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
+
+        // Immediate variant.
+        let test = build_op_test!(format!("{asm_opcode}.{b}"), &[a as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
     }
 
     #[test]
-    fn u32or_proptest(a in any::<u32>(), b in any::<u32>()) {
+    fn u32or_proptest(a in any::<u32>(), b in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let asm_opcode = "u32or";
-        let values = [a as u64, b as u64];
         // should result in bitwise OR
         let expected = (a | b) as u64;
 
-        let test = build_op_test!(asm_opcode, &values);
-        test.prop_expect_stack(&[expected])?;
+        let test = build_op_test!(asm_opcode, &[a as u64, b as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
+
+        let test = build_op_test!(format!("{asm_opcode}.{b}"), &[a as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
     }
 
     #[test]
-    fn u32xor_proptest(a in any::<u32>(), b in any::<u32>()) {
+    fn u32xor_proptest(a in any::<u32>(), b in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let asm_opcode = "u32xor";
-        let values = [a as u64, b as u64];
         // should result in bitwise XOR
         let expected = (a ^ b) as u64;
 
-        let test = build_op_test!(asm_opcode, &values);
-        test.prop_expect_stack(&[expected])?;
-    }
+        let test = build_op_test!(asm_opcode, &[a as u64, b as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
 
+        let test = build_op_test!(format!("{asm_opcode}.{b}"), &[a as u64, e]);
+        test.prop_expect_stack(&[expected, e])?;
+    }
     #[test]
-    fn u32not_proptest(value in any::<u32>()) {
+    fn u32not_proptest(value in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let asm_opcode = "u32not";
 
         // should result in bitwise NOT
-        let test = build_op_test!(asm_opcode, &[value as u64]);
-        test.prop_expect_stack(&[!value as u64])?;
+        let test = build_op_test!(asm_opcode, &[value as u64, e]);
+        test.prop_expect_stack(&[!value as u64, e])?;
     }
 
     #[test]
-    fn u32shl_proptest(a in any::<u32>(), b in 0_u32..32) {
+    fn u32not_b_proptest(value in any::<u32>(), e in 0..Felt::ORDER_U64) {
+        let asm_opcode = format!("u32not.{value}");
+
+        // Immediate variant: the operand is encoded in the instruction itself.
+        let test = build_op_test!(asm_opcode, &[e]);
+        test.prop_expect_stack(&[!value as u64, e])?;
+    }
+
+    #[test]
+    fn u32shl_proptest(a in any::<u32>(), b in 0_u32..32, e in 0..Felt::ORDER_U64) {
         let asm_opcode = "u32shl";
 
         // should execute left shift: stack [shift, value] -> [value << shift]
         let c = a.wrapping_shl(b);
-        let test = build_op_test!(asm_opcode, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[c as u64])?;
+        let test = build_op_test!(asm_opcode, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[c as u64, e])?;
     }
 
     #[test]
-    fn u32shl_b_proptest(a in any::<u32>(), b in 0_u32..32) {
+    fn u32shl_b_proptest(a in any::<u32>(), b in 0_u32..32, e in 0..Felt::ORDER_U64) {
         let asm_opcode = format!("u32shl.{b}");
 
         // should execute left shift
         let c = a.wrapping_shl(b);
-        let test = build_op_test!(asm_opcode, &[a as u64]);
-        test.prop_expect_stack(&[c as u64])?;
+        let test = build_op_test!(asm_opcode, &[a as u64, e]);
+        test.prop_expect_stack(&[c as u64, e])?;
     }
 
     #[test]
-    fn u32rotl_proptest(a in any::<u32>(), b in 0_u32..32) {
+    fn u32shr_proptest(a in any::<u32>(), b in 0_u32..32, e in 0..Felt::ORDER_U64) {
+        let asm_opcode = "u32shr";
+
+        // should execute right shift: stack [shift, value] -> [value >> shift]
+        let c = a.wrapping_shr(b);
+        let test = build_op_test!(asm_opcode, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[c as u64, e])?;
+    }
+
+    #[test]
+    fn u32shr_b_proptest(a in any::<u32>(), b in 0_u32..32, e in 0..Felt::ORDER_U64) {
+        let asm_opcode = format!("u32shr.{b}");
+
+        // should execute right shift
+        let c = a.wrapping_shr(b);
+        let test = build_op_test!(asm_opcode, &[a as u64, e]);
+        test.prop_expect_stack(&[c as u64, e])?;
+    }
+
+    #[test]
+    fn u32rotl_proptest(a in any::<u32>(), b in 0_u32..32, e in 0..Felt::ORDER_U64) {
         let asm_opcode = "u32rotl";
 
         // should execute left bit rotation: stack [shift, value] -> [value.rotl(shift)]
-        let test = build_op_test!(asm_opcode, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[a.rotate_left(b) as u64])?;
+        let test = build_op_test!(asm_opcode, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[a.rotate_left(b) as u64, e])?;
     }
 
     #[test]
-    fn u32rotl_b_proptest(a in any::<u32>(), b in 0_u32..32) {
+    fn u32rotl_b_proptest(a in any::<u32>(), b in 0_u32..32, e in 0..Felt::ORDER_U64) {
         let op_base = "u32rotl";
         let asm_opcode = format!("{op_base}.{b}");
 
         // should execute left bit rotation
-        let test = build_op_test!(asm_opcode, &[a as u64]);
-        test.prop_expect_stack(&[a.rotate_left(b) as u64])?;
+        let test = build_op_test!(asm_opcode, &[a as u64, e]);
+        test.prop_expect_stack(&[a.rotate_left(b) as u64, e])?;
     }
 
     #[test]
-    fn u32rotr_proptest(a in any::<u32>(), b in 0_u32..32) {
+    fn u32rotr_proptest(a in any::<u32>(), b in 0_u32..32, e in 0..Felt::ORDER_U64) {
         let asm_opcode = "u32rotr";
 
         // should execute right bit rotation: stack [shift, value] -> [value.rotr(shift)]
-        let test = build_op_test!(asm_opcode, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[a.rotate_right(b) as u64])?;
+        let test = build_op_test!(asm_opcode, &[b as u64, a as u64, e]);
+        test.prop_expect_stack(&[a.rotate_right(b) as u64, e])?;
     }
 
     #[test]
-    fn u32rotr_b_proptest(a in any::<u32>(), b in 0_u32..32) {
+    fn u32rotr_b_proptest(a in any::<u32>(), b in 0_u32..32, e in 0..Felt::ORDER_U64) {
         let op_base = "u32rotr";
         let asm_opcode = format!("{op_base}.{b}");
 
         // should execute right bit rotation
-        let test = build_op_test!(asm_opcode, &[a as u64]);
-        test.prop_expect_stack(&[a.rotate_right(b) as u64])?;
+        let test = build_op_test!(asm_opcode, &[a as u64, e]);
+        test.prop_expect_stack(&[a.rotate_right(b) as u64, e])?;
     }
 
     #[test]
-    fn u32popcount_proptest(a in any::<u32>()) {
+    fn u32popcount_proptest(a in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let asm_opcode = "u32popcnt";
         let expected = a.count_ones();
-        let test = build_op_test!(asm_opcode, &[a as u64]);
-        test.prop_expect_stack(&[expected as u64])?;
+        let test = build_op_test!(asm_opcode, &[a as u64, e]);
+        test.prop_expect_stack(&[expected as u64, e])?;
     }
 
     #[test]
-    fn u32clz_proptest(a in any::<u32>()) {
+    fn u32clz_proptest(a in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let asm_opcode = "u32clz";
         let expected = a.leading_zeros();
-        let test = build_op_test!(asm_opcode, &[a as u64]);
-        test.prop_expect_stack(&[expected as u64])?;
+        let test = build_op_test!(asm_opcode, &[a as u64, e]);
+        test.prop_expect_stack(&[expected as u64, e])?;
     }
 
     #[test]
-    fn u32ctz_proptest(a in any::<u32>()) {
+    fn u32ctz_proptest(a in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let asm_opcode = "u32ctz";
         let expected = a.trailing_zeros();
-        let test = build_op_test!(asm_opcode, &[a as u64]);
-        test.prop_expect_stack(&[expected as u64])?;
+        let test = build_op_test!(asm_opcode, &[a as u64, e]);
+        test.prop_expect_stack(&[expected as u64, e])?;
     }
 
     #[test]
-    fn u32clo_proptest(a in any::<u32>()) {
+    fn u32clo_proptest(a in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let asm_opcode = "u32clo";
         let expected = a.leading_ones();
-        let test = build_op_test!(asm_opcode, &[a as u64]);
-        test.prop_expect_stack(&[expected as u64])?;
+        let test = build_op_test!(asm_opcode, &[a as u64, e]);
+        test.prop_expect_stack(&[expected as u64, e])?;
     }
 
     #[test]
-    fn u32cto_proptest(a in any::<u32>()) {
+    fn u32cto_proptest(a in any::<u32>(), e in 0..Felt::ORDER_U64) {
         let asm_opcode = "u32cto";
         let expected = a.trailing_ones();
-        let test = build_op_test!(asm_opcode, &[a as u64]);
-        test.prop_expect_stack(&[expected as u64])?;
+        let test = build_op_test!(asm_opcode, &[a as u64, e]);
+        test.prop_expect_stack(&[expected as u64, e])?;
     }
 }

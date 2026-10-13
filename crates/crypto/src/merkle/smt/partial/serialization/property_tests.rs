@@ -130,6 +130,10 @@ proptest! {
         leaves in arbitrary_leaves(),
         value_only_leaves in arbitrary_value_only_leaves(),
     ) {
+        let value_only_leaves = value_only_leaves
+            .into_iter()
+            .filter(|(position, _)| !leaves.contains_key(position))
+            .collect();
         let value = UniqueNodes { root, nodes, leaves, value_only_leaves };
         let serialized = value.to_bytes();
         let result = UniqueNodes::read_from_bytes(serialized.as_slice());
