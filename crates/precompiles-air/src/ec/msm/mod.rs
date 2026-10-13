@@ -196,35 +196,32 @@ pub const COL_B_EXPR: usize = 13;
 /// These identities tie each operand-head consume to its term count.
 pub const COL_I: usize = 14;
 pub const COL_J: usize = 15;
-/// Per-row take one-hot: `take_a + take_b + take_both = is_combine`.
+/// Stored single-take selectors; `take_both = is_combine - take_a - take_b` is derived.
 pub const COL_TAKE_A: usize = 16;
 pub const COL_TAKE_B: usize = 17;
-pub const COL_TAKE_BOTH: usize = 18;
-/// Operand term cells consumed from `MsmTerm(A, i, …)` / `MsmTerm(B, j,
-/// …)`. Combine uses both sides; neg uses A only.
-pub const COL_BASE_A: usize = 19;
-pub const COL_S_A: usize = 20;
-pub const COL_BASE_B: usize = 21;
-pub const COL_S_B: usize = 22;
+/// Operand scalars consumed from `MsmTerm(A, i, …)` / `MsmTerm(B, j, …)`. Both
+/// consumes use the output base. Combine uses both sides; neg uses A only.
+pub const COL_S_A: usize = 18;
+pub const COL_S_B: usize = 19;
 /// Operand values. Combine uses both; neg uses A only. On a combine
 /// boundary, `EcGroupAdd` asserts `val = val_a + val_b`.
-pub const COL_VAL_A: usize = 23;
-pub const COL_VAL_B: usize = 24;
+pub const COL_VAL_A: usize = 20;
+pub const COL_VAL_B: usize = 21;
 /// Group curve parameters used by combine, neg, and intro_endo to close the
 /// boundary's `EcGroup` consume and pin `sbound` to the group.
-pub const COL_A_PTR: usize = 25;
-pub const COL_B_PTR: usize = 26;
-pub const COL_BOUND_PTR: usize = 27;
+pub const COL_A_PTR: usize = 22;
+pub const COL_B_PTR: usize = 23;
+pub const COL_BOUND_PTR: usize = 24;
 /// A-side ordering witness on combine and neg boundaries:
 /// `expr − a_expr − 1 = a_diff_lo + 2¹⁶·a_diff_hi`, with both 16-bit limbs
 /// range-checked to enforce `a_expr < expr`.
-pub const COL_A_DIFF_LO: usize = 28;
-pub const COL_A_DIFF_HI: usize = 29;
+pub const COL_A_DIFF_LO: usize = 25;
+pub const COL_A_DIFF_HI: usize = 26;
 /// B-side ordering witness. On combine boundaries it enforces `b_expr < expr`.
 /// On certificate-minting neg and intro_endo rows, it enforces `val > val_a`
 /// or `val > base`, respectively. Both limbs are range-checked.
-pub const COL_B_DIFF_LO: usize = 30;
-pub const COL_B_DIFF_HI: usize = 31;
+pub const COL_B_DIFF_LO: usize = 27;
+pub const COL_B_DIFF_HI: usize = 28;
 
 // --- shared negation/endomorphism witness and resolve multiplicity -----
 /// Op-family flag for `neg`. Together with `is_intro`, `is_combine`, and `is_intro_zero`, it
@@ -233,11 +230,11 @@ pub const COL_B_DIFF_HI: usize = 31;
 /// output term per A term, the base copied and the scalar negated (the
 /// `is_c_zero` `UintAdd` `s_a + out_scalar ≡ 0`), with the value's shared
 /// x-coordinate and negated y-coordinate authenticated on the boundary.
-pub const COL_IS_NEG: usize = 32;
+pub const COL_IS_NEG: usize = 29;
 /// Family value-relation cell (boundary only). For `neg`, this is the
 /// **shared x ptr** of `R = (x_a, −y_a)`; for `intro_endo`, it is `P`'s x
 /// ptr.
-pub const COL_NEG_X: usize = 33;
+pub const COL_NEG_X: usize = 30;
 /// **Resolve** use count — how often this expression is resolved at the
 /// eval `EcMsm` seam. Drives the `MsmClaimTerm` provide (every term row)
 /// and the rest of the `MsmExpr` provide; constant within a run, 0 on
@@ -246,21 +243,21 @@ pub const COL_NEG_X: usize = 33;
 /// Boolean: two resolves of one expression would only jointly consume twice
 /// its claim terms, letting each absorb a different multiset, so every
 /// resolve has an expression of its own.
-pub const COL_IS_CLAIMED: usize = 34;
+pub const COL_IS_CLAIMED: usize = 31;
 /// Family value-relation cells (boundary only). For `neg`, these are the two
 /// y ptrs of `R = (x_a, −y_a)`; for `intro_endo`, they are the shared y ptr
 /// and `φ(P)`'s x ptr, respectively.
-pub const COL_NEG_YA: usize = 35;
-pub const COL_NEG_YR: usize = 36;
+pub const COL_NEG_YA: usize = 32;
+pub const COL_NEG_YR: usize = 33;
 /// Family mint flag (boundary only): 1 iff a `neg` or `intro_endo` row
 /// freshly mints its value, gating the common `EcOnCurveCert(group, val)`
 /// provide.
-pub const COL_NEG_MINTED: usize = 37;
+pub const COL_NEG_MINTED: usize = 34;
 /// The group's GLV endomorphism `β`/`λ` ptrs, used by combine, neg, and
 /// intro_endo to close the boundary's `EcGroup` consume. Both are the
 /// none-sentinel 0 for a group without an endomorphism.
-pub const COL_BETA_PTR: usize = 38;
-pub const COL_LAMBDA_PTR: usize = 39;
+pub const COL_BETA_PTR: usize = 35;
+pub const COL_LAMBDA_PTR: usize = 36;
 
 // `intro_endo` is the residual active operation after subtracting the four stored selectors. Its
 // value relation reuses the negation columns; `intro_zero` reuses the base-coordinate pair as
@@ -289,8 +286,8 @@ pub const COL_ENDO_MINTED: usize = COL_NEG_MINTED;
 ///
 /// This is one of five mutually exclusive operation flags:
 /// `is_intro + is_intro_endo + is_combine + is_neg + is_intro_zero = act`.
-pub const COL_IS_INTRO_ZERO: usize = 40;
-pub const NUM_MAIN_COLS: usize = 41;
+pub const COL_IS_INTRO_ZERO: usize = 37;
+pub const NUM_MAIN_COLS: usize = 38;
 
 // Aux: 14 columns, flattened via `frac_col!` over the 26 fractions so
 // every closing constraint stays at degree ≤ 3 → `log_quotient_degree` =
@@ -478,12 +475,10 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // Per-row take one-hot: each combine row emits one output term.
         let take_a: AB::Expr = local[COL_TAKE_A].into();
         let take_b: AB::Expr = local[COL_TAKE_B].into();
-        let take_both: AB::Expr = local[COL_TAKE_BOTH].into();
+        let take_both = is_combine.clone() - take_a.clone() - take_b.clone();
         builder.assert_bool(local[COL_TAKE_A]);
         builder.assert_bool(local[COL_TAKE_B]);
-        builder.assert_bool(local[COL_TAKE_BOTH]);
-        builder
-            .assert_zero(take_a.clone() + take_b.clone() + take_both.clone() - is_combine.clone());
+        builder.assert_bool(take_both.clone());
 
         // Cursors: 0 at run start, advance by the take on each in-run step
         // (reset to 0 across a boundary). The boundary's i + adv_i is k_a.
@@ -497,7 +492,7 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // is `is_neg` (the take flags are 0 off combine, pinned by the
         // one-hot above); j never advances on a neg.
         let adv_i = take_a.clone() + take_both.clone() + is_neg.clone();
-        let adv_j = take_b.clone() + take_both.clone();
+        let adv_j = take_b.clone() + take_both;
         builder
             .when_transition()
             .assert_zero(i_next - (AB::Expr::ONE - is_boundary.clone()) * (i_cur + adv_i));
@@ -505,26 +500,12 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
             .when_transition()
             .assert_zero(j_next - (AB::Expr::ONE - is_boundary.clone()) * (j_cur + adv_j));
 
-        // Output role-mix: take_a / take_both copy A's (base, s); take_b
-        // copies B's. take_both's merged scalar is pinned by its UintAdd
-        // consume (bus), so only the base and the non-merge scalars tie
-        // here. take_both forces a shared base.
-        let base_a: AB::Expr = local[COL_BASE_A].into();
-        let base_b: AB::Expr = local[COL_BASE_B].into();
+        // Operand consumes authenticate the output base directly. Single takes copy the
+        // scalar; merged and negated scalars are authenticated by their UintAdd messages.
         let s_a: AB::Expr = local[COL_S_A].into();
         let s_b: AB::Expr = local[COL_S_B].into();
-        let out_base: AB::Expr = local[COL_BASE].into();
         let out_scalar: AB::Expr = local[COL_SCALAR].into();
-        // take_a / take_both / neg copy A's base; take_b copies B's. (neg's
-        // out_scalar is bus-pinned by its `is_c_zero` UintAdd, like
-        // take_both's merged scalar, so it needs no equality here.)
-        builder.assert_zero(
-            (take_a.clone() + take_both.clone() + is_neg.clone()) * (out_base - base_a.clone())
-                + take_b.clone() * (local[COL_BASE].into() - base_b.clone()),
-        );
-        builder
-            .assert_zero(take_a * (out_scalar - s_a) + take_b * (local[COL_SCALAR].into() - s_b));
-        builder.assert_zero(take_both * (base_a - base_b));
+        builder.assert_zero(take_a * (out_scalar.clone() - s_a) + take_b * (out_scalar - s_b));
 
         // Strict pointer ordering (boundary): expr − operand − 1 =
         // lo + 2¹⁶·hi, halves range-checked on the bus ⇒ a_expr, b_expr <
@@ -626,10 +607,8 @@ where
         let j_cur: LB::Expr = local[COL_J].into();
         let take_a: LB::Expr = local[COL_TAKE_A].into();
         let take_b: LB::Expr = local[COL_TAKE_B].into();
-        let take_both: LB::Expr = local[COL_TAKE_BOTH].into();
-        let base_a: LB::Expr = local[COL_BASE_A].into();
+        let take_both = is_combine.clone() - take_a.clone() - take_b.clone();
         let s_a: LB::Expr = local[COL_S_A].into();
-        let base_b: LB::Expr = local[COL_BASE_B].into();
         let s_b: LB::Expr = local[COL_S_B].into();
         let val_a: LB::Expr = local[COL_VAL_A].into();
         let val_b: LB::Expr = local[COL_VAL_B].into();
@@ -777,7 +756,7 @@ where
                 MsmTermMsg {
                     expr_ptr: a_expr.clone(),
                     idx: i_cur.clone(),
-                    base_ptr: base_a.clone(),
+                    base_ptr: base.clone(),
                     scalar_ptr: s_a.clone(),
                 },
                 one_deg
@@ -811,7 +790,7 @@ where
                 MsmTermMsg {
                     expr_ptr: b_expr.clone(),
                     idx: j_cur.clone(),
-                    base_ptr: base_b.clone(),
+                    base_ptr: base.clone(),
                     scalar_ptr: s_b.clone(),
                 },
                 one_deg

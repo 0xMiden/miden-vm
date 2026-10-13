@@ -345,7 +345,6 @@ pub fn merge_terms(
     b_terms: &[(EcPointPtr, UintPtr)],
     uint: &mut UintRequire<'_>,
 ) -> Vec<CombineRow> {
-    let zero_pt = EcPointPtr::from_addr(0);
     let zero_u = UintPtr::from_addr(0);
     let (mut i, mut j) = (0usize, 0usize);
     let mut rows = Vec::new();
@@ -360,12 +359,9 @@ pub fn merge_terms(
             rows.push(CombineRow {
                 take_a: true,
                 take_b: false,
-                take_both: false,
                 i: ci,
                 j: cj,
-                base_a: base,
                 s_a: s,
-                base_b: zero_pt,
                 s_b: zero_u,
                 out_base: base,
                 out_scalar: s,
@@ -376,12 +372,9 @@ pub fn merge_terms(
             rows.push(CombineRow {
                 take_a: false,
                 take_b: true,
-                take_both: false,
                 i: ci,
                 j: cj,
-                base_a: zero_pt,
                 s_a: zero_u,
-                base_b: base,
                 s_b: s,
                 out_base: base,
                 out_scalar: s,
@@ -395,12 +388,9 @@ pub fn merge_terms(
             rows.push(CombineRow {
                 take_a: false,
                 take_b: false,
-                take_both: true,
                 i: ci,
                 j: cj,
-                base_a: base,
                 s_a: sa,
-                base_b: base,
                 s_b: sb,
                 out_base: base,
                 out_scalar: s_out,
@@ -420,19 +410,15 @@ pub fn concat_terms(
     a_terms: &[(EcPointPtr, UintPtr)],
     b_terms: &[(EcPointPtr, UintPtr)],
 ) -> Vec<CombineRow> {
-    let zero_pt = EcPointPtr::from_addr(0);
     let zero_u = UintPtr::from_addr(0);
     let mut rows = Vec::with_capacity(a_terms.len() + b_terms.len());
     for (i, &(base, s)) in a_terms.iter().enumerate() {
         rows.push(CombineRow {
             take_a: true,
             take_b: false,
-            take_both: false,
             i: i as u32,
             j: 0,
-            base_a: base,
             s_a: s,
-            base_b: zero_pt,
             s_b: zero_u,
             out_base: base,
             out_scalar: s,
@@ -442,12 +428,9 @@ pub fn concat_terms(
         rows.push(CombineRow {
             take_a: false,
             take_b: true,
-            take_both: false,
             i: a_terms.len() as u32,
             j: j as u32,
-            base_a: zero_pt,
             s_a: zero_u,
-            base_b: base,
             s_b: s,
             out_base: base,
             out_scalar: s,

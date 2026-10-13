@@ -296,6 +296,14 @@ mod tests {
     }
 
     #[test]
+    fn pvm_proof_compatibility_root_matches_embedded_verifier() {
+        assert_eq!(
+            Verifier::proof_compatibility().pvm_verifier_roots().last(),
+            Some(&CoreLibrary::default().pvm_recursive_verifier_root()),
+        );
+    }
+
+    #[test]
     fn proof_compatibility_roots_match_the_embedded_core_library() {
         let core_lib = CoreLibrary::default();
         let compatibility = Verifier::proof_compatibility();

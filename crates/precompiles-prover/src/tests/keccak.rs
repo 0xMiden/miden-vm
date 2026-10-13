@@ -66,6 +66,12 @@ fn fold_fractions(fractions: &[(Felt, QuadFelt)]) -> (QuadFelt, QuadFelt) {
 // TESTS
 // ================================================================================================
 
+#[test]
+fn packed_passthrough_keeps_round_assertions_within_budget() {
+    let counts = miden_lifted_air::ConstraintCounts::from_air::<Felt, QuadFelt, _>(&KeccakRoundAir);
+    assert_eq!(counts.base, 15);
+}
+
 /// Run a single Keccak round through the chiplet simulator and read
 /// back the state after that one round.
 fn chiplet_one_round(state: [u64; 25], rc: u64) -> [u64; 25] {

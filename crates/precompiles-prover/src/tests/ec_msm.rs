@@ -28,8 +28,8 @@ use miden_precompiles::{CurveId, CurvePoint, phi_generator};
 use crate::{
     ec::msm::{
         COL_A_DIFF_HI, COL_A_DIFF_LO, COL_A_EXPR, COL_B_DIFF_HI, COL_B_DIFF_LO, COL_BASE,
-        COL_BASE_A, COL_ENDO_MINTED, COL_EXPR_PTR, COL_IS_BOUNDARY, COL_IS_CLAIMED, COL_IS_INTRO,
-        COL_IS_NEG, COL_LAMBDA_PTR, COL_NEG_MINTED, COL_SCALAR, COL_VAL, COL_VAL_A, EcMsmAir,
+        COL_ENDO_MINTED, COL_EXPR_PTR, COL_IS_BOUNDARY, COL_IS_CLAIMED, COL_IS_INTRO, COL_IS_NEG,
+        COL_LAMBDA_PTR, COL_NEG_MINTED, COL_SCALAR, COL_VAL, COL_VAL_A, EcMsmAir,
         NUM_MAIN_COLS as MSM_COLS,
     },
     logup::{NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
@@ -100,7 +100,7 @@ fn msm_two_intro_traces() -> crate::session::SessionTraces {
 fn shape_and_degree_match_design() {
     let air = EcMsmAir;
 
-    assert_eq!(air.width(), 41);
+    assert_eq!(air.width(), 38);
     assert_eq!(air.aux_width(), 14);
     assert_eq!(
         <EcMsmAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(&air),
@@ -147,7 +147,6 @@ fn overlapping_stored_families_rejected_by_derived_intro_endo_selector() {
     // local equation still holds. The residual selector is then -1, which its
     // Boolean legality constraint must reject.
     main.values[offset + COL_IS_NEG] = Felt::ONE;
-    main.values[offset + COL_BASE_A] = main.values[offset + COL_BASE];
     main.values[offset + COL_A_EXPR] = Felt::ZERO;
     main.values[offset + COL_A_DIFF_LO] = Felt::ZERO;
     main.values[offset + COL_A_DIFF_HI] = Felt::ZERO;

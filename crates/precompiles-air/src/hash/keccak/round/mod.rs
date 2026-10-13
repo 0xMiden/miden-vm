@@ -235,18 +235,22 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
                 (AB::Expr::ONE - p_last.clone()) * (AB::Expr::from(next_act) - act.clone()),
             );
 
-            // Passthrough pin: on rows with no binary logic op (pure ROL and NOP), `x = a`.
-            // Byte-wise so it matches the canonical byte-pair lookup below:
-            // `(1 − is_xor − is_andnot) · (x_bytes[i] − a_bytes[i]) =
-            // 0` for each byte `i`.
-            let logic_active = is_xor.clone() + is_andnot.clone();
-            let no_logic = AB::Expr::ONE - logic_active;
-            for i in 0..8 {
-                let a_byte = local[base + A_BYTES_RANGE.start + i];
-                let r_byte = local[base + R_BYTES_RANGE.start + i];
-                builder.assert_zero(
-                    no_logic.clone() * (AB::Expr::from(r_byte) - AB::Expr::from(a_byte)),
+            // Active pure-ROL rows range-check both vectors through BytePairLut. Each
+            // packed u32 embeds injectively in the field, so two equalities bind all eight
+            // bytes. NOP and inactive rows have no observable operand/result bus traffic.
+            let no_logic = AB::Expr::ONE - is_xor.clone() - is_andnot.clone();
+            for half in 0..2 {
+                let a: AB::Expr = pack_le(
+                    &local[base + A_BYTES_RANGE.start + 4 * half
+                        ..base + A_BYTES_RANGE.start + 4 * half + 4],
+                    256,
                 );
+                let r: AB::Expr = pack_le(
+                    &local[base + R_BYTES_RANGE.start + 4 * half
+                        ..base + R_BYTES_RANGE.start + 4 * half + 4],
+                    256,
+                );
+                builder.assert_zero(no_logic.clone() * (r - a));
             }
 
             // Rotation limb-decomposition binding: on an active ROL row,
