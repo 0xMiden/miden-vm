@@ -1,6 +1,6 @@
 //! SHA-512 AIR sharing compression and IO witnesses across disjoint rows.
 //!
-//! Each block spans 4096 rows. Its last sixteen rows (4080..4096) run the IO constraints
+//! Each block spans 4096 rows. Its last sixty-four rows (4032..4096) run the IO constraints
 //! in cells otherwise used by compression, while the compression block controller stays live.
 //! The same row ownership selects between compression and IO lookup batches. IO state crosses
 //! the intervening compression rows through [`Sha512IoContinuation`] rather than next-row copies.
@@ -30,24 +30,25 @@ pub mod io;
 
 pub const IO_PERIODIC_OFFSET: usize = compression::NUM_PERIODIC_COLS;
 pub const IO_ROW_START: usize = compression::COMPRESSION_PERIOD - io::IO_PERIOD;
+const _: () = {
+    assert!(io::IO_PERIOD == 64);
+    assert!(IO_ROW_START.is_multiple_of(io::IO_PERIOD));
+};
 pub const COL_IO_ACT: usize = compression::NUM_MAIN_COLS;
-pub const NUM_MAIN_COLS: usize = compression::NUM_MAIN_COLS + 8;
+pub const NUM_MAIN_COLS: usize = compression::NUM_MAIN_COLS + 1;
 pub const NUM_AUX_COLS: usize = io::NUM_AUX_COLS;
 
 /// The block controller remains live on IO rows. All other compression cells are reused;
-/// only the IO activity selector and seven payload cells need additional columns.
+/// only the IO activity selector needs an additional column.
 pub const IO_COLUMNS: [usize; io::NUM_MAIN_COLS] = {
     assert!(compression::NUM_MAIN_COLS - compression::COL_META_T == 42);
     let mut columns = [0; io::NUM_MAIN_COLS];
     columns[io::COL_ACT] = COL_IO_ACT;
     columns[io::COL_BLOCK_ID] = compression::COL_BLOCK_ID;
     let mut i = 2;
-    while i < 44 {
-        columns[i] = compression::COL_META_T + i - 2;
-        i += 1;
-    }
+    assert!(io::NUM_MAIN_COLS <= 44);
     while i < io::NUM_MAIN_COLS {
-        columns[i] = COL_IO_ACT + i - 43;
+        columns[i] = compression::COL_META_T + i - 2;
         i += 1;
     }
     columns
@@ -145,19 +146,16 @@ impl LiftedAir<Felt, QuadFelt> for Sha512Air {
         let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
         let periods = builder.periodic_values();
         let io_periods = core::array::from_fn(|i| periods[IO_PERIODIC_OFFSET + i].into());
-        let lane_half: AB::Expr = periods[compression::program::COL_LANE_HALF].into();
         let io_act: AB::Expr = local[COL_IO_ACT].into();
         builder.assert_bool(local[COL_IO_ACT]);
-        // The second half of the last padding cycle is exactly the sixteen-row IO window.
+        // The two padding cycles are exactly the sixty-four-row IO window.
         // Equality fixes IO ownership in both directions: it forbids IO on compression rows
-        // and requires all sixteen IO rows in each active block, so no block can omit binding.
+        // and requires all sixty-four IO rows in each active block, so no block can omit binding.
         builder.assert_zero(
             io_act.clone()
                 - AB::Expr::from(local[compression::COL_ACT])
                     * local[compression::COL_PHASE_BEGIN + compression::program::PHASE_PADDING]
-                        .into()
-                    * local[compression::COL_PHASE_END].into()
-                    * lane_half,
+                        .into(),
         );
         compression::eval_main_with_io(builder, 0, 0, io_act.clone());
         let io_local = IO_COLUMNS.map(|column| local[column]);
@@ -257,11 +255,11 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha512Air {
         let v = |column: usize| -> LB::Expr { io_local[column].into() };
         let last = io_act.clone() * io_periods[io::program::P_LAST].clone();
         let final_block = v(io::COL_FINAL_BLOCK);
-        // Non-final blocks provide their post-row-15 state under the next block's ID. Non-first
+        // Non-final blocks provide their post-input state under the next block's ID. Non-first
         // blocks must consume it at row 0. Unique consecutive IDs force these endpoints to pair:
         // block zero must be first, and the last active block must be final.
-        let provide = last.clone() * (LB::Expr::ONE - final_block.clone());
-        let consume = io_act
+        let provide = last * (LB::Expr::ONE - final_block.clone());
+        let consume = io_act.clone()
             * io_periods[io::program::P_FIRST].clone()
             * (LB::Expr::ONE - v(io::COL_FIRST_BLOCK));
         let degree = Deg { v: 3, u: 4 };
@@ -274,7 +272,9 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha512Air {
                     |group| {
                         group.add(
                             "length-high",
-                            last * final_block,
+                            io_act.clone()
+                                * io_periods[io::program::P_RAW_LAST].clone()
+                                * final_block,
                             || Range16Msg { w: v(io::COL_WORD_HI) },
                             degree,
                         );
@@ -284,10 +284,8 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha512Air {
                             || Sha512IoContinuation {
                                 block_id: v(io::COL_BLOCK_ID) + LB::Expr::ONE,
                                 len: v(io::COL_LEN),
-                                // Account for the message bytes consumed on the outgoing row.
-                                left: v(io::COL_LEFT)
-                                    - (0..8).map(|i| v(io::COL_MSG_BEGIN + i)).sum::<LB::Expr>(),
-                                before: v(io::COL_MSG_BEGIN + 7),
+                                left: v(io::COL_LEFT),
+                                before: v(io::COL_BEFORE),
                                 input_eidos: v(io::COL_INPUT_EIDOS),
                                 input_head: v(io::COL_INPUT_HEAD),
                             },

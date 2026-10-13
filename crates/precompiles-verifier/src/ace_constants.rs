@@ -27,11 +27,12 @@ pub(crate) const PVM_PROTOCOL_ID: u64 = 4;
 /// Relation digest binding the accepted circuit into the Fiat-Shamir transcript
 /// (raw canonical u64 limbs): `Eidos(PVM_PROTOCOL_ID || PVM_ACE_CIRCUIT_DIGEST)`.
 #[cfg(any(test, feature = "constants-tools", feature = "std"))]
+#[rustfmt::skip]
 pub const PVM_RELATION_DIGEST: [u64; 4] = [
-    4669696855040236614,
-    7035471050175449290,
-    749981669756220114,
-    8639166592522244882,
+    2399481395866150949,
+    6700875380385478792,
+    1547598575402218253,
+    5777231542841271577,
 ];
 
 /// Eidos digest of the order-invariant PVM ACE circuit's instruction stream (raw canonical u64
@@ -39,16 +40,17 @@ pub const PVM_RELATION_DIGEST: [u64; 4] = [
 #[cfg(any(test, feature = "constants-tools"))]
 #[rustfmt::skip]
 pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [
-    4431278958302503383,
-    7959062071000155099,
-    5997417444211112252,
-    844455350841242414,
+    1572407354318851959,
+    2275428178419782547,
+    669494424673528598,
+    3407733093139055797,
 ];
 
 /// Commitment to the preprocessed (setup) trace tree under the Eidos config (raw canonical
 /// u64 limbs). A trusted verifier input, not proof data: an in-VM verifier cannot rebuild the
 /// bundle, so it observes this pinned value into the transcript.
 #[cfg(any(test, feature = "constants-tools"))]
+#[rustfmt::skip]
 pub const PVM_PREPROCESSED_COMMITMENT: [u64; 4] = [
     7435130241103350969,
     2209492810180294937,
@@ -59,7 +61,7 @@ pub const PVM_PREPROCESSED_COMMITMENT: [u64; 4] = [
 /// Encoded circuit shape: (READ variables, evaluation gates, stream length in felts). An in-VM
 /// verifier needs these as compile-time constants to size its reads and its ACE evaluation.
 #[cfg(any(test, feature = "constants-tools"))]
-pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (2566, 12836, 14064);
+pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (2550, 13084, 14312);
 
 /// Computes the relation digest binding an ACE circuit commitment into the Fiat-Shamir transcript.
 #[cfg(any(test, feature = "constants-tools"))]

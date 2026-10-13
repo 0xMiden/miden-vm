@@ -179,7 +179,7 @@ pub fn eval_main<AB: LiftedAirBuilder<F = Felt>>(
     eval_main_with_io(builder, main_col_offset, periodic_col_offset, AB::Expr::ZERO);
 }
 
-/// Keep the block controller live while the final sixteen NOP rows hold IO witnesses.
+/// Keep the block controller live while the final sixty-four NOP rows hold IO witnesses.
 ///
 /// The controller fixes the instruction schedule; the row equations below enforce ADD, CONST,
 /// and the ROL decomposition. Operand provenance, bytewise logic, range checks, and round metadata
