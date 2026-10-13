@@ -39,36 +39,47 @@ See [Contributing](CONTRIBUTING.md) for the contribution workflow.
 
 ### Features
 
-Miden VM supports general computation and proof generation with the following capabilities:
+Miden VM supports general computation and proof generation with the following capabilities.
+
+#### Programming model
 
 - Programs can use conditional branches and loops.
 - Programs can call procedures and execute them in isolated contexts with separate memory.
   Kernel procedures provide controlled access to the root context.
 - Programs can read and write memory, including local memory reserved for individual procedures.
 - Programs can use native 32-bit integer operations and Poseidon2 hashing, including Merkle path verification.
-- Programs can use external libraries. The [core library](crates/lib/core) includes operations on 64-bit integers and cryptographic routines.
-- Hosts can supply private inputs and computation hints through the advice provider.
-  Programs must verify advice values to establish their correctness.
-- You can use the fast processor to execute programs without generating a proof.
-- Programs can [defer computations to the host](docs/src/design/stack/precompiles.md).
-  The VM proof commits to the deferred claims.
-  To complete verification, you must also verify a precompile proof for those claims.
-  See the [deferred proof lifecycle](docs/src/design/deferred/semantics.md) for completion and verification requirements.
-- The [precompile VM](crates/precompiles-air) proves deferred claims with specialized circuits.
-  The current [precompiles](crates/precompiles) support Keccak-256 hashing, 256-bit integer arithmetic, and elliptic curve operations.
-  The core library uses these operations for [secp256k1 ECDSA verification and public key recovery](crates/lib/core/docs/crypto/dsa/ecdsa_k256_keccak.md).
-- Programs can verify VM proofs and precompile VM proofs with the core library's recursive verifiers.
-  See [`sys::vm`](crates/lib/core/docs/sys/vm.md) and [`sys::pvm`](crates/lib/core/docs/sys/pvm.md) for their requirements.
-- Developers can use processor APIs to step through execution and retain source locations, including inlined calls.
-  Programs can also [print VM state](docs/src/user_docs/assembly/debugging.md) through the core library's debug procedures.
-
-### Assembly and parsing
+- Programs can use code from external libraries. The [core library](crates/lib/core) includes operations on 64-bit integers and cryptographic routines.
 
 [Miden Assembly](docs/src/user_docs/assembly/index.md) is the language for Miden VM programs.
 The [assembly reference](docs/src/user_docs/assembly/instruction_reference.md) describes the instructions.
 See the [assembler documentation](crates/assembly/README.md) for parsing APIs and compilation into executable packages.
 
-### WebAssembly
+#### Hosts and private inputs
+
+Hosts can supply private inputs and computation hints through the advice provider.
+Programs must verify advice values to establish their correctness.
+
+#### Precompiles
+
+Programs can [defer computations to the host](docs/src/design/stack/precompiles.md).
+The VM proof commits to the deferred claims.
+To complete verification, you must also verify a precompile proof for those claims.
+See the [deferred proof lifecycle](docs/src/design/deferred/semantics.md) for completion and verification requirements.
+
+The [precompile VM](crates/precompiles-air) proves deferred claims with specialized circuits.
+The current [precompiles](crates/precompiles) support Keccak-256 hashing, 256-bit integer arithmetic, and elliptic curve operations.
+The core library uses these operations for [secp256k1 ECDSA verification and public key recovery](crates/lib/core/docs/crypto/dsa/ecdsa_k256_keccak.md).
+
+#### Recursive verification
+
+Programs can verify VM proofs and precompile VM proofs with the core library's recursive verifiers.
+See [`sys::vm`](crates/lib/core/docs/sys/vm.md) and [`sys::pvm`](crates/lib/core/docs/sys/pvm.md) for their requirements.
+
+#### Execution and platforms
+
+You can use the fast processor to execute programs without generating a proof.
+Developers can use processor APIs to step through execution and retain source locations, including inlined calls.
+Programs can also [print VM state](docs/src/user_docs/assembly/debugging.md) through the core library's debug procedures.
 
 Miden VM supports WebAssembly builds without Rust's standard library (`no_std`).
 The supported `no_std` targets are `wasm32-unknown-unknown` and `wasm32-wasip1`.
@@ -79,8 +90,6 @@ The workspace [Cargo configuration](.cargo/config.toml) enables SIMD128 instruct
 These instructions accelerate hashing in the Plonky3 backend.
 Cargo applies this configuration only when you build from this workspace or a directory inside it.
 When you use Miden VM as a dependency, set the same flag in your own Cargo configuration or `RUSTFLAGS`.
-
-### Concurrent proof generation
 
 Enable the `concurrent` feature to generate STARK proofs with multiple threads.
 The prover uses [Rayon](https://github.com/rayon-rs/rayon) for parallel computation.
