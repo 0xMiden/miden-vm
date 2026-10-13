@@ -67,7 +67,6 @@ runs:
       if: ${{ inputs.mode == 'dry-run' && (github.ref == 'refs/heads/main' || github.base_ref == 'main') }}
       shell: bash
       run: |
-        rustup toolchain install nightly --profile minimal --no-self-update
         chmod +x scripts/check-masm-root-stability.sh
         ./scripts/check-masm-root-stability.sh
 
