@@ -436,6 +436,7 @@ impl Deserializable for DebugSourceVar {
 impl Serializable for DebugSourceInlineCall {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u32(self.op_idx);
+        target.write_u32(self.op_end);
         self.callee_idx.write_into(target);
         self.loc_idx.write_into(target);
     }
@@ -444,13 +445,19 @@ impl Serializable for DebugSourceInlineCall {
 impl Deserializable for DebugSourceInlineCall {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let op_idx = source.read_u32()?;
+        let op_end = source.read_u32()?;
+        if op_end < op_idx {
+            return Err(DeserializationError::InvalidValue(
+                "debug inline-call range ends before its start".into(),
+            ));
+        }
         let callee_idx = DebugFunctionIdx::read_from(source)?;
         let loc_idx = DebugLocIdx::read_from(source)?;
-        Ok(DebugSourceInlineCall { op_idx, callee_idx, loc_idx })
+        Ok(DebugSourceInlineCall { op_idx, op_end, callee_idx, loc_idx })
     }
 
     fn min_serialized_size() -> usize {
-        4 + DebugFunctionIdx::min_serialized_size() + DebugLocIdx::min_serialized_size()
+        8 + DebugFunctionIdx::min_serialized_size() + DebugLocIdx::min_serialized_size()
     }
 }
 
@@ -1232,7 +1239,7 @@ mod tests {
     }
 
     #[test]
-    fn debug_function_v3_wire_bytes_are_stable() {
+    fn debug_function_v4_wire_bytes_are_stable() {
         const EXPECTED_ROW: [u8; size_of::<WireDebugFunctionInfo>()] = [
             1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0,
             0, 0, 0, 1, 0, 0, 0, 7, 0, 0, 0, 1, 0, 0, 0, 9, 0, 0, 0, 1, 0, 0, 0, 11, 0, 0, 0, 13,
@@ -1259,7 +1266,7 @@ mod tests {
         let debug_info = builder.build();
 
         let bytes = debug_info.to_bytes();
-        assert_eq!(bytes[0], 3);
+        assert_eq!(bytes[0], 4);
         assert!(
             bytes.windows(EXPECTED_ROW.len()).any(|window| window == EXPECTED_ROW),
             "serialized debug info did not contain the expected function row",
@@ -1346,6 +1353,7 @@ mod tests {
                 }],
                 inline_calls: alloc::vec![DebugSourceInlineCall {
                     op_idx: 2,
+                    op_end: 3,
                     callee_idx: function_idx,
                     loc_idx: location_idx,
                 }],
@@ -1540,6 +1548,55 @@ mod tests {
             panic!("expected InvalidValue error");
         };
         assert!(message.contains("unsupported debug_info version: 2"));
+    }
+
+    #[test]
+    fn inline_range_wire_bytes_are_stable_and_reversed_ranges_are_rejected() {
+        let row = DebugSourceInlineCall {
+            op_idx: 2,
+            op_end: 100_000,
+            callee_idx: DebugFunctionIdx::from(3),
+            loc_idx: DebugLocIdx::from(4),
+        };
+        let bytes = row.to_bytes();
+        assert_eq!(bytes, [2, 0, 0, 0, 160, 134, 1, 0, 3, 0, 0, 0, 4, 0, 0, 0]);
+        assert_eq!(DebugSourceInlineCall::read_from_bytes(&bytes).unwrap(), row);
+        assert!(row.contains_operation(2));
+        assert!(row.contains_operation(99_999));
+        assert!(!row.contains_operation(100_000));
+        let mut invalid = bytes;
+        invalid[4..8].copy_from_slice(&1u32.to_le_bytes());
+        assert!(DebugSourceInlineCall::read_from_bytes(&invalid).is_err());
+        assert!(PackageDebugInfo::read_from_bytes(&[3]).is_err());
+    }
+
+    #[test]
+    fn long_inline_ranges_roundtrip_without_expanding_into_operation_rows() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let source_id = builder
+            .add_node(DebugSourceNode {
+                exec_node: MastNodeId::new_unchecked(0),
+                children: Vec::new(),
+                op_start: 0,
+                op_end: 1_000_000,
+                asm_ops: Vec::new(),
+                debug_vars: Vec::new(),
+                inline_calls: (0..7)
+                    .map(|index| DebugSourceInlineCall {
+                        op_idx: 0,
+                        op_end: 1_000_000,
+                        callee_idx: DebugFunctionIdx::from(index),
+                        loc_idx: DebugLocIdx::from(index),
+                    })
+                    .collect(),
+            })
+            .unwrap();
+        let bytes = builder.build().to_bytes();
+        assert!(bytes.len() < 256);
+        let decoded = PackageDebugInfo::read_from_bytes(&bytes).unwrap();
+        assert_eq!(decoded.source_node(source_id).unwrap().inline_calls.len(), 7);
+        assert_eq!(decoded.inline_calls_for_operation(source_id, 999_999).count(), 7);
+        assert_eq!(decoded.inline_calls_for_operation(source_id, 1_000_000).count(), 0);
     }
 
     #[test]

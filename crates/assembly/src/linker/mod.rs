@@ -32,9 +32,10 @@
 //!    shares part of it's implementation with the same infrastructure used for symbol resolution
 //!    that is performed during semantic analysis - the difference is that at link-time, we are
 //!    stricter about what happens when a symbol cannot be resolved correctly.
-//! 3. A set of _rewrites_, applied to symbols/modules at link-time, which rewrite the AST so that
-//!    all symbol references and constant expressions are fully resolved/folded. This is where any
-//!    final issues are discovered, and the AST is prepared for lowering to MAST.
+//! 3. A set of _rewrites_, applied to symbols/modules at link-time, which validate symbol
+//!    references and fold constant expressions. Invocation targets retain their access paths so
+//!    that visibility granted through re-export aliases is preserved during subsequent resolution.
+//!    This is where final issues are discovered, and the AST is prepared for lowering to MAST.
 mod callgraph;
 mod debug;
 mod errors;
@@ -668,8 +669,8 @@ impl Linker {
         }
     }
 
-    /// Compute the module graph from the set of pending modules, and link it, rewriting any AST
-    /// modules with unresolved, or partially-resolved, symbol references.
+    /// Compute the module graph from the set of pending modules, validate symbol references, and
+    /// apply AST rewrites such as constant folding.
     ///
     /// This should be called any time you add more libraries or modules to the module graph, to
     /// ensure that the graph is valid, and that there are no unresolved references. In general,
@@ -679,8 +680,10 @@ impl Linker {
     /// When this function is called, some initial information is calculated about the AST modules
     /// which are to be added to the graph, and then each module is visited to perform a deeper
     /// analysis than can be done by the `sema` module, as we now have the full set of modules
-    /// available to do import resolution, and to rewrite invoke targets with their absolute paths
-    /// and/or MAST roots. A variety of issues are caught at this stage.
+    /// available to resolve imports and validate invocation targets. Resolutions identify concrete
+    /// definitions or MAST roots, but invocation targets retain their original access paths so that
+    /// re-export visibility is respected when they are resolved again. A variety of issues are
+    /// caught at this stage.
     ///
     /// Once each module is validated, the various analysis results stored as part of the graph
     /// structure are updated to reflect that module being added to the graph. Once part of the
@@ -697,11 +700,11 @@ impl Linker {
     ///    with the ability to generate MAST roots.
     ///
     /// 2. Visit the call graph bottom-up, so that we can fully compile a procedure before any of
-    ///    its callers, and thus rewrite those callers to reference that procedure by MAST root,
-    ///    rather than by name. As a result, a compiled MAST program is like an immutable snapshot
-    ///    of the entire call graph at the time of compilation. Later, if we choose to recompile a
-    ///    subset of modules (currently we do not have support for this in the assembler API), we
-    ///    can re-analyze/re-compile only those parts of the graph which have actually changed.
+    ///    its callers, and thus lower their invocations to MAST references rather than names. As a
+    ///    result, a compiled MAST program is like an immutable snapshot of the entire call graph at
+    ///    the time of compilation. Later, if we choose to recompile a subset of modules (currently
+    ///    we do not have support for this in the assembler API), we can re-analyze/re-compile only
+    ///    those parts of the graph which have actually changed.
     ///
     /// NOTE: This will return `Err` if we detect a validation error, an operation not supported by
     /// the current configuration, or, in [`LinkMode::Strict`], a cycle in the graph. In
@@ -760,7 +763,7 @@ impl Linker {
                 let module_index = ModuleIndex::new(module_index);
 
                 for import in module.imports() {
-                    if let Some(namespaces::ResolvedUse::Item(gid)) =
+                    if let Some(namespaces::ResolvedUse::Item { id: gid, .. }) =
                         imports.get(module_index, import.local_name().as_str())
                     {
                         import.set_resolved(gid);

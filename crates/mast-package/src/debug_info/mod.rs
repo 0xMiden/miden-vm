@@ -24,7 +24,7 @@ pub use types::*;
 type FxHashMap<K, V> = hashbrown::HashMap<K, V, rustc_hash::FxBuildHasher>;
 type FxHashSet<K> = hashbrown::HashSet<K, rustc_hash::FxBuildHasher>;
 
-pub const DEBUG_INFO_VERSION: u8 = 3;
+pub const DEBUG_INFO_VERSION: u8 = 4;
 
 /// Maximum encoded payload size accepted for package-owned debug information.
 ///
@@ -519,7 +519,7 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
         op_idx: u32,
     ) -> impl Iterator<Item = &DebugSourceInlineCall> {
         self.inline_calls_for_source_node(source_node)
-            .filter(move |row| row.op_idx == op_idx)
+            .filter(move |row| row.contains_operation(op_idx))
     }
 }
 
@@ -933,6 +933,7 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
                     )?;
                     target_node.inline_calls.push(DebugSourceInlineCall {
                         op_idx: row.op_idx,
+                        op_end: row.op_end,
                         callee_idx,
                         loc_idx,
                     });
