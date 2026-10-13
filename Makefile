@@ -34,7 +34,9 @@ help:
 # -- environment toggles --------------------------------------------------------------------------
 BACKTRACE                := RUST_BACKTRACE=1
 BUILDDOCS                := MIDEN_BUILD_LIB_DOCS=1
-DOCS_NIGHTLY_TOOLCHAIN   ?= nightly
+# Stable and beta rustfmt ignore the unstable settings even with RUSTC_BOOTSTRAP.
+RUSTFMT_TOOLCHAIN        := nightly-2026-10-09
+FUZZ_CARGO               := RUSTC_BOOTSTRAP=1 cargo +stable
 PVM_GENERATOR_RUST_OUTPUTS := crates/precompiles-verifier/src/ace_constants.rs \
 	crates/precompiles-air/src/protocol.rs
 
@@ -110,14 +112,18 @@ xclippy-fix: ## Applies clippy lint fixes via cargo-fixit (a faster `cargo clipp
 	fi
 
 
+.PHONY: install-rustfmt
+install-rustfmt: ## Installs the pinned nightly formatter
+	rustup toolchain install $(RUSTFMT_TOOLCHAIN) --profile minimal --component rustfmt --no-self-update
+
 .PHONY: format
 format: ## Runs Format using nightly toolchain
-	cargo +nightly fmt --all
+	cargo +$(RUSTFMT_TOOLCHAIN) fmt --all
 
 
 .PHONY: format-check
 format-check: ## Runs Format using nightly toolchain but only in check mode
-	cargo +nightly fmt --all --check
+	cargo +$(RUSTFMT_TOOLCHAIN) fmt --all --check
 
 .PHONY: shear
 shear: ## Runs cargo-shear to find unused or misplaced dependencies
@@ -131,7 +137,7 @@ lint: xclippy format-check shear ## Runs all lint checks without modifying files
 .PHONY: doc
 doc: ## Generates & checks documentation for workspace crates only
 	rm -rf "$${CARGO_TARGET_DIR:-target}/doc"
-	$(BUILDDOCS) RUSTDOCFLAGS="--enable-index-page -Zunstable-options -D warnings" cargo +$(DOCS_NIGHTLY_TOOLCHAIN) doc ${ALL_FEATURES} --keep-going --release --no-deps
+	$(BUILDDOCS) RUSTC_BOOTSTRAP=1 RUSTDOCFLAGS="--enable-index-page -Zunstable-options -D warnings" cargo +stable doc ${ALL_FEATURES} --keep-going --release --no-deps
 
 .PHONY: serve-docs
 serve-docs: ## Serves the docs
@@ -303,10 +309,10 @@ check-fuzz: ## Checks standalone fuzz workspaces
 .PHONY: fuzz-build-crypto
 fuzz-build-crypto: ## Builds imported crypto fuzz targets
 	for target in $(MIDEN_CRYPTO_FUZZ_TARGETS); do \
-		cargo +nightly fuzz build --fuzz-dir tools/miden-crypto-fuzz $$target; \
+		$(FUZZ_CARGO) fuzz build --fuzz-dir tools/miden-crypto-fuzz $$target; \
 	done
 	for target in $(MIDEN_SERDE_UTILS_FUZZ_TARGETS); do \
-		cargo +nightly fuzz build --fuzz-dir tools/miden-serde-utils-fuzz $$target; \
+		$(FUZZ_CARGO) fuzz build --fuzz-dir tools/miden-serde-utils-fuzz $$target; \
 	done
 
 .PHONY: test-lifted-stark
@@ -454,62 +460,62 @@ bench: ## Benchmarks either a specific bench or all; accepts 'benchmark=' to sel
 
 .PHONY: fuzz-mast-forest
 fuzz-mast-forest: fuzz-seeds ## Run fuzzing for MastForest deserialization
-	@cargo +nightly fuzz run mast_forest_deserialize --release --fuzz-dir tools/miden-core-fuzz
+	@$(FUZZ_CARGO) fuzz run mast_forest_deserialize --release --fuzz-dir tools/miden-core-fuzz
 
 .PHONY: fuzz-mast-validate
 fuzz-mast-validate: fuzz-seeds ## Run fuzzing for UntrustedMastForest validation
-	@cargo +nightly fuzz run mast_forest_validate --release --fuzz-dir tools/miden-core-fuzz
+	@$(FUZZ_CARGO) fuzz run mast_forest_validate --release --fuzz-dir tools/miden-core-fuzz
 
 .PHONY: fuzz-mast-node-info
 fuzz-mast-node-info: fuzz-seeds ## Run fuzzing for SerializedMastForest node metadata access
-	@cargo +nightly fuzz run mast_node_info --release --fuzz-dir tools/miden-core-fuzz
+	@$(FUZZ_CARGO) fuzz run mast_node_info --release --fuzz-dir tools/miden-core-fuzz
 
 .PHONY: fuzz-mast-forest-wire-view
 fuzz-mast-forest-wire-view: fuzz-seeds ## Run fuzzing for MastForestWireView structural inspection
-	@cargo +nightly fuzz run mast_forest_wire_view_new --release --fuzz-dir tools/miden-core-fuzz
+	@$(FUZZ_CARGO) fuzz run mast_forest_wire_view_new --release --fuzz-dir tools/miden-core-fuzz
 
 .PHONY: fuzz-execution-proof
 fuzz-execution-proof: fuzz-seeds ## Run bounded ExecutionProof deserialization fuzzing
-	@cargo +nightly fuzz run execution_proof_deserialize --release --fuzz-dir tools/miden-core-fuzz -- $(EXECUTION_PROOF_FUZZ_LIMITS) $(FUZZ_ARGS)
+	@$(FUZZ_CARGO) fuzz run execution_proof_deserialize --release --fuzz-dir tools/miden-core-fuzz -- $(EXECUTION_PROOF_FUZZ_LIMITS) $(FUZZ_ARGS)
 
 .PHONY: fuzz-all
 fuzz-all: fuzz-seeds ## Run all fuzz targets (in sequence)
 	FAILED=0; \
-	cargo +nightly fuzz run mast_forest_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run mast_forest_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run mast_forest_validate --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run mast_node_info --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run mast_forest_wire_view_new --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run basic_block_data --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run debug_info --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run program_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run program_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run kernel_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run kernel_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run stack_io_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run advice_map_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run advice_inputs_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run operation_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run operation_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run execution_proof_deserialize --release --fuzz-dir tools/miden-core-fuzz -- $(EXECUTION_PROOF_FUZZ_LIMITS) -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run execution_proof_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run execution_witness_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run deferred_state_wire_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run package_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run package_semantic_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run project_toml_parse --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run project_load --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
-	cargo +nightly fuzz run project_assemble --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run mast_forest_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run mast_forest_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run mast_forest_validate --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run mast_node_info --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run mast_forest_wire_view_new --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run basic_block_data --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run debug_info --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run program_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run program_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run kernel_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run kernel_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run stack_io_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run advice_map_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run advice_inputs_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run operation_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run operation_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run execution_proof_deserialize --release --fuzz-dir tools/miden-core-fuzz -- $(EXECUTION_PROOF_FUZZ_LIMITS) -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run execution_proof_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run execution_witness_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run deferred_state_wire_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run package_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run package_semantic_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run project_toml_parse --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run project_load --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	$(FUZZ_CARGO) fuzz run project_assemble --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	exit $$FAILED
 
 .PHONY: fuzz-list
 fuzz-list: ## List available fuzz targets
-	cargo +nightly fuzz list --fuzz-dir tools/miden-core-fuzz
+	$(FUZZ_CARGO) fuzz list --fuzz-dir tools/miden-core-fuzz
 
 .PHONY: fuzz-coverage
 fuzz-coverage: ## Generate coverage report for fuzz targets
-	cargo +nightly fuzz coverage mast_forest_deserialize --fuzz-dir tools/miden-core-fuzz
-	cargo +nightly fuzz coverage mast_forest_validate --fuzz-dir tools/miden-core-fuzz
+	$(FUZZ_CARGO) fuzz coverage mast_forest_deserialize --fuzz-dir tools/miden-core-fuzz
+	$(FUZZ_CARGO) fuzz coverage mast_forest_validate --fuzz-dir tools/miden-core-fuzz
 
 .PHONY: fuzz-seeds
 fuzz-seeds: ## Generate seed corpus files for fuzzing

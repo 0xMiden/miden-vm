@@ -23,7 +23,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: [stable, nightly]
         target: [wasm32-unknown-unknown, wasm32-wasip1]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -33,9 +32,9 @@ jobs:
         uses: ./.github/actions/cleanup-runner
       - name: Build for no-std
         run: |
-          rustup update --no-self-update ${{ matrix.toolchain }}
-          rustup +${{ matrix.toolchain }} target add ${{ matrix.target }}
-          RUSTUP_TOOLCHAIN=${{ matrix.toolchain }} NO_STD_TARGET=${{ matrix.target }} make build-no-std
+          rustup update --no-self-update stable
+          rustup +stable target add ${{ matrix.target }}
+          RUSTUP_TOOLCHAIN=stable NO_STD_TARGET=${{ matrix.target }} make build-no-std
 
   target-miden:
     name: Build for Miden target

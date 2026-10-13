@@ -4,7 +4,7 @@ use miden_assembly_syntax_cst::{
     Item, Operation, SyntaxKind, SyntaxNode, SyntaxToken,
     ast::{
         BeginBlock, Block, DoWhileOp, IfOp, Import, ImportKind, ImportSpecifier, Instruction,
-        Procedure, RepeatOp, Signature, SourceFile, TypeBody, TypeDecl, WhileOp,
+        Procedure, RepeatOp, Signature, SourceFile, TypeBody, TypeDecl, Visibility, WhileOp,
     },
     rowan::{NodeOrToken, ast::AstNode},
 };
@@ -196,7 +196,14 @@ fn analyze_children(parent: &SyntaxNode) -> (Vec<NodeLayout>, ContainerTail) {
 }
 
 fn render_item(item: &Item, indent: usize, config: &Config) -> String {
-    match item {
+    let visibility = match item {
+        Item::Submodule(decl) => decl.visibility(),
+        Item::Import(decl) => decl.visibility(),
+        Item::Constant(decl) => decl.visibility(),
+        Item::TypeDecl(decl) => decl.visibility(),
+        _ => None,
+    };
+    let rendered = match item {
         Item::Doc(doc) => render_doc(doc, indent),
         Item::Namespace(namespace) => render_line_form(namespace.syntax(), indent),
         Item::ExternPackage(package) => render_line_form(package.syntax(), indent),
@@ -209,7 +216,46 @@ fn render_item(item: &Item, indent: usize, config: &Config) -> String {
         },
         Item::BeginBlock(begin) => render_begin_block(begin, indent, config),
         Item::Procedure(procedure) => render_procedure(procedure, indent, config),
+    };
+
+    let mut lines = render_visibility_comments(visibility, indent);
+    if lines.is_empty() {
+        return rendered;
     }
+    lines.push(rendered);
+    lines.join("\n")
+}
+
+/// Render comments within and following visibility before the declaration keyword. Keeping
+/// this prologue separate lets declaration headers use canonical visibility without losing trivia.
+fn render_visibility_comments(visibility: Option<Visibility>, indent: usize) -> Vec<String> {
+    let Some(visibility) = visibility else {
+        return Vec::new();
+    };
+    let node = visibility.syntax();
+    let mut comments = node
+        .descendants_with_tokens()
+        .filter_map(NodeOrToken::into_token)
+        .filter(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment))
+        .map(|token| format!("{}{}", indent_string(indent), trimmed_comment(&token)))
+        .collect::<Vec<_>>();
+
+    if let Some(parent) = node.parent() {
+        for element in parent
+            .children_with_tokens()
+            .skip_while(|element| element.as_node() != Some(node))
+            .skip(1)
+        {
+            let NodeOrToken::Token(token) = element else { break };
+            if !token.kind().is_trivia() {
+                break;
+            }
+            if matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment) {
+                comments.push(format!("{}{}", indent_string(indent), trimmed_comment(&token)));
+            }
+        }
+    }
+    comments
 }
 
 fn render_doc(
@@ -227,15 +273,21 @@ fn render_line_form(node: &SyntaxNode, indent: usize) -> String {
     rendered
 }
 
+fn visibility_prefix(visibility: Option<Visibility>) -> &'static str {
+    match visibility {
+        Some(visibility) if visibility.is_internal() => "pub(package) ",
+        Some(_) => "pub ",
+        None => "",
+    }
+}
+
 fn render_import(import: &Import, indent: usize, config: &Config) -> String {
     let Some(path) = import.module_path() else {
         return render_line_form(import.syntax(), indent);
     };
 
     let mut header = indent_string(indent);
-    if import.visibility().is_some() {
-        header.push_str("pub ");
-    }
+    header.push_str(visibility_prefix(import.visibility()));
     header.push_str("use");
 
     let path = render_token_sequence(&significant_tokens(path.syntax()));
@@ -484,9 +536,7 @@ fn render_type_decl(type_decl: &TypeDecl, indent: usize, config: &Config) -> Str
 fn render_type_decl_prefix(type_decl: &TypeDecl, indent: usize) -> String {
     let mut rendered = indent_string(indent);
 
-    if type_decl.visibility().is_some() {
-        rendered.push_str("pub ");
-    }
+    rendered.push_str(visibility_prefix(type_decl.visibility()));
 
     if let Some(keyword) = type_decl.keyword_token() {
         rendered.push_str(keyword.text());
@@ -576,11 +626,10 @@ fn render_begin_block(begin: &BeginBlock, indent: usize, config: &Config) -> Str
 
 fn render_procedure(procedure: &Procedure, indent: usize, config: &Config) -> String {
     let mut lines = render_procedure_attribute_prologue(procedure, indent);
+    lines.extend(render_visibility_comments(procedure.visibility(), indent));
 
     let mut header = indent_string(indent);
-    if procedure.visibility().is_some() {
-        header.push_str("pub ");
-    }
+    header.push_str(visibility_prefix(procedure.visibility()));
     header.push_str("proc");
     if let Some(name) = procedure.name_token() {
         header.push(' ');
@@ -1552,6 +1601,10 @@ fn split_top_level_items(tokens: &[SyntaxToken]) -> Vec<Vec<SyntaxToken>> {
 
 fn direct_comment_token(node: &SyntaxNode) -> Option<String> {
     node.children_with_tokens()
+        // Visibility prologue comments are rendered separately, before the declaration keyword.
+        .skip_while(
+            |element| !matches!(element, NodeOrToken::Token(token) if !token.kind().is_trivia()),
+        )
         .filter_map(NodeOrToken::into_token)
         .find(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment))
         .map(|token| trimmed_comment(&token))
@@ -2964,5 +3017,82 @@ end
 
         let reformatted = format_syntax(&config, &reparsed.syntax());
         assert_eq!(reformatted, formatted);
+    }
+}
+
+#[cfg(test)]
+mod package_visibility_tests {
+    use miden_assembly_syntax_cst::parse_text;
+
+    use super::*;
+
+    #[test]
+    fn formatting_preserves_comments_in_visibility_modifiers() {
+        for declaration in [
+            "mod api # declaration\n",
+            "use {helper} from api # declaration\n",
+            "const VALUE = 1 # declaration\n",
+            "type Word = felt # declaration\n",
+            "enum Tag : u8 { A } # declaration\n",
+            "proc helper # declaration\n nop end\n",
+        ] {
+            for prefix in [
+                "pub # after pub\n# second\n",
+                "pub # after pub\n( # qualifier open\npackage # package scope\n) # after qualifier\n# second\n",
+            ] {
+                let input = format!("{prefix}{declaration}");
+                let parse = parse_text(&input);
+                assert!(!parse.has_errors(), "{input}: {:?}", parse.diagnostics());
+                let output = format_syntax(&Config::default(), &parse.syntax());
+                let reparsed = parse_text(&output);
+                assert!(!reparsed.has_errors(), "{output}: {:?}", reparsed.diagnostics());
+                let comments = |node: &SyntaxNode| {
+                    all_tokens(node)
+                        .into_iter()
+                        .filter(|token| token.kind() == SyntaxKind::Comment)
+                        .map(|token| token.text().to_string())
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(comments(&reparsed.syntax()), comments(&parse.syntax()), "{output}");
+                assert_eq!(
+                    significant_tokens(&reparsed.syntax())
+                        .iter()
+                        .map(|token| token.text().to_string())
+                        .collect::<Vec<_>>(),
+                    significant_tokens(&parse.syntax())
+                        .iter()
+                        .map(|token| token.text().to_string())
+                        .collect::<Vec<_>>()
+                );
+                assert_eq!(format_syntax(&Config::default(), &reparsed.syntax()), output);
+            }
+        }
+    }
+
+    #[test]
+    fn visibility_comments_follow_procedure_attributes() {
+        let input = "@locals(1) # attribute\npub # visibility\n(package) proc helper nop end\n";
+        let parse = parse_text(input);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        let output = format_syntax(&Config::default(), &parse.syntax());
+        assert!(
+            output.find("# attribute").unwrap() < output.find("# visibility").unwrap(),
+            "{output}"
+        );
+        let reparsed = parse_text(&output);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert_eq!(format_syntax(&Config::default(), &reparsed.syntax()), output);
+    }
+
+    #[test]
+    fn formatting_preserves_package_visibility() {
+        let input = "pub(package) mod api\npub(package) use {helper} from api\npub(package) const VALUE = 1\npub(package) type Word = felt\npub(package) enum Tag : u8 { A }\npub(package) proc helper nop end\n";
+        let parse = parse_text(input);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        let output = format_syntax(&Config::default(), &parse.syntax());
+        assert_eq!(output.matches("pub(package)").count(), 6, "{output}");
+        let reparsed = parse_text(&output);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert_eq!(format_syntax(&Config::default(), &reparsed.syntax()), output);
     }
 }

@@ -1,6 +1,6 @@
 # miden-vm release procedure
 
-Release crates from the current `main` commit. Crates imported into this
+Release crates from a branch allowed by the [VM release guide](docs/RELEASING.md). Crates imported into this
 workspace, including the Miden crypto crates, are released from this repository.
 
 ## Choose the scope
@@ -20,26 +20,30 @@ For crates below version 1.0, a minor bump is incompatible. For example,
 `0.28.1` to `0.29.0` may remove public API. A compatible fix uses a patch bump
 such as `0.28.1` to `0.28.2`.
 
-## Prepare `main`
+## Prepare the release commit
 
 - Give each selected crate an unused version.
-- Update its entry in `[workspace.dependencies]` in the root `Cargo.toml`.
+- Give `miden-vm` an unused version in its package manifest for the repository tag, including limited releases.
+- Update the selected crates' entries in `[workspace.dependencies]` in the root `Cargo.toml`, where those entries exist.
 - Update `Cargo.lock` and any affected fuzz lockfiles.
 - Add a dated section to `CHANGELOG.md`. Name the crate in the heading for a
   limited release.
 
 Bump a downstream crate only when it must publish a new dependency requirement.
-Merge all release changes to `main` before continuing.
+Commit all release changes to the selected branch before continuing.
 
 ## Check and publish
 
 Check the exact package list locally, then run the same list through the dry run.
+Set `release_branch` to the selected branch. The examples below show a stable release from `main`.
 
 ```bash
+release_branch=main
+release_tag="$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "miden-vm") | "v" + .version')"
 scripts/check-package-release-plan.sh miden-crypto
 
 gh workflow run workspace-dry-run.yml \
-  --ref main \
+  --ref "$release_branch" \
   -f packages="miden-crypto"
 ```
 
@@ -48,8 +52,8 @@ Publish from the
 
 ```bash
 gh workflow run workspace-publish.yml \
-  --ref main \
-  -f tag=v0.28.2 \
+  --ref "$release_branch" \
+  -f tag="$release_tag" \
   -f packages="miden-crypto"
 ```
 

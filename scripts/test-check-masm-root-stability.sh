@@ -30,7 +30,8 @@ git -C "$test_repo" tag v0.35.0
 cat > "$test_root/bin/rustup" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "$#" -eq 7 && "$1" == run && "$2" == nightly && "$3" == cargo && "$4" == -Zscript ]]
+[[ "$#" -eq 7 && "$1" == run && "$2" == stable && "$3" == cargo && "$4" == -Zscript ]]
+[[ "${RUSTC_BOOTSTRAP:-}" == 1 && -z "${RUSTC_WRAPPER:-}" ]]
 [[ -f "$5" && -f "$6" && -f "$7" ]]
 printf '%s\n' "$*" > "$ROOT_CHECK_STUB_LOG"
 exit "$ROOT_CHECK_STUB_STATUS"

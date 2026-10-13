@@ -563,12 +563,22 @@ pub struct DebugSourceVar {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub struct DebugSourceInlineCall {
-    /// Operation index local to the reduced execution node.
+    /// Inclusive operation start index local to the reduced execution node.
     pub op_idx: u32,
+    /// Exclusive operation end index. A zero-width external boundary has equal start and end.
+    pub op_end: u32,
     /// Inlined callee function index in the debug functions table.
     pub callee_idx: DebugFunctionIdx,
     /// Call-site source location index in the debug locations table.
     pub loc_idx: DebugLocIdx,
+}
+
+impl DebugSourceInlineCall {
+    /// Returns whether this range applies to an operation or zero-width external boundary.
+    pub fn contains_operation(&self, op_idx: u32) -> bool {
+        self.op_idx <= op_idx
+            && (op_idx < self.op_end || self.op_idx == self.op_end && op_idx == self.op_idx)
+    }
 }
 
 // DEBUG ERROR MESSAGES
@@ -2312,11 +2322,13 @@ mod tests {
     fn test_debug_source_map_inline_calls_are_keyed_by_source_operation() {
         let inline_a = DebugSourceInlineCall {
             op_idx: 3,
+            op_end: 4,
             callee_idx: DebugFunctionIdx::from(0),
             loc_idx: DebugLocIdx::from(0),
         };
         let inline_b = DebugSourceInlineCall {
             op_idx: 3,
+            op_end: 4,
             callee_idx: DebugFunctionIdx::from(1),
             loc_idx: DebugLocIdx::from(0),
         };
@@ -2546,7 +2558,12 @@ mod tests {
                     location_idx: None,
                     value_location: DebugVarLocation::Stack(0),
                 }],
-                inline_calls: vec![DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx }],
+                inline_calls: vec![DebugSourceInlineCall {
+                    op_idx: 0,
+                    op_end: 1,
+                    callee_idx,
+                    loc_idx,
+                }],
             };
             assert_eq!(builder.add_node(node).unwrap(), source_node);
             builder.add_root(source_node);
