@@ -254,6 +254,18 @@ Deferred DAG details:
   - Join payloads use the same two-word LIFO convention, leaving `lhs_digest` above `rhs_digest`
     after two `adv_pushw`s.
   - `TRUE` emits no advice.
+- `adv.export_deferred_witness` requires a registered, non-TRUE node that evaluates to TRUE. It
+  exports the graph reachable from that node, even if the node was never logged and is not the
+  current deferred-state root. The original digest is both the witness root and advice-map key;
+  evaluation does not replace it with `TRUE_DIGEST` or add an AND node.
+  The value is `[byte_len, packed_u32_le(witness_bytes)...]`, using the existing portable witness
+  encoding with four little-endian bytes per field element. Only the last limb is zero-padded;
+  `byte_len` excludes the padding. Decode exactly that many bytes and check the reconstructed root
+  against the key. Identical repeated exports succeed. Missing nodes, literal `TRUE_DIGEST`,
+  non-TRUE results, evaluation/export failures, map conflicts, and advice-budget exhaustion abort
+  execution without partially inserting an entry. Both stacks and the deferred root are preserved;
+  evaluation may populate its existing caches. The underlying system event is
+  `sys::adv::export_deferred_witness`.
 - All `adv.evaluate_deferred*` outputs, including frame-only output, are host-provided hints. Before
   proof-relevant use, code must relate them with VM instructions to values established independently
   of that advice.
@@ -262,6 +274,7 @@ _Insert into Advice Map:_
 
 | Instruction           | Stack Input          | Stack Output         | Notes                                                                                  |
 | --------------------- | -------------------- | -------------------- | -------------------------------------------------------------------------------------- |
+| `adv.export_deferred_witness` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Exports a registered true assertion's reachable DAG into the advice map under its original digest. Preserves the advice stack and deferred-state root. |
 | `adv.insert_mem`      | `[K, a, b, ... ]`    | `[K, a, b, ... ]`    | `advice_map[K] ← mem[a..b]`.                                                           |
 | `adv.insert_hdword`   | `[A, B, ... ]`       | `[A, B, ... ]`       | `K ← hdword(A \|\| B)` (top first). `advice_map[K] ← [A,B]`. |
 | `adv.insert_hqword`   | `[A, B, C, D, ... ]` | `[A, B, C, D, ... ]` | `K ← hash_elements([A,B,C,D])`. `advice_map[K] ← [A,B,C,D]`. |

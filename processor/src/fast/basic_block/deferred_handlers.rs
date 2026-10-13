@@ -6,11 +6,13 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Word, ZERO,
+    Felt, Word, ZERO,
     deferred::{
         DEFERRED_CHUNKS_DOMAIN, DataChunk, DeferredError, Digest, EidosFrame,
-        MAX_DEFERRED_ELEMENTS, Node, NodeType, PrecompileError,
+        MAX_DEFERRED_ELEMENTS, Node, NodeType, PrecompileError, TRUE_DIGEST,
     },
+    serde::Serializable,
+    utils::bytes_to_packed_u32_elements,
 };
 
 use super::SystemEventError;
@@ -171,6 +173,31 @@ fn evaluate_canonical_node(processor: &mut FastProcessor) -> Result<Node, System
         .ok_or(PrecompileError::MissingNode.into())
 }
 
+/// Exports the original graph of a registered true assertion into the advice map.
+pub(super) fn handle_deferred_export_witness(
+    processor: &mut FastProcessor,
+) -> Result<(), SystemEventError> {
+    let digest = processor.stack_get_word(DEFERRED_NODE_DIGEST_OFFSET);
+    if processor.deferred_state_mut().evaluate_digest(digest)? != TRUE_DIGEST {
+        return Err(PrecompileError::AssertionFailed.into());
+    }
+    let witness = processor
+        .deferred_state()
+        .witness_for(digest)
+        .map_err(|_| PrecompileError::InvalidNode)?;
+    let bytes = witness.to_bytes();
+    let value_len = 1 + bytes.len().div_ceil(size_of::<u32>());
+    if processor.advice.get_mapped_values(&digest).is_none() {
+        processor.advice.check_map_value_allocation(value_len)?;
+    }
+
+    let mut values = bytes_to_packed_u32_elements(&bytes);
+    // The deferred graph's element ceiling bounds its byte length well below the field modulus.
+    values.insert(0, Felt::new_unchecked(bytes.len() as u64));
+    processor.advice.insert_into_map(digest, values)?;
+    Ok(())
+}
+
 /// Pushes `node`'s canonical frame onto the advice stack.
 fn push_evaluated_frame(advice: &mut AdviceProvider, node: &Node) -> Result<(), SystemEventError> {
     let frame = node.frame().map(EidosFrame::as_word).unwrap_or_default();
@@ -304,13 +331,69 @@ fn decode_frame_from_cv(cv: Word) -> Result<EidosFrame, SystemEventError> {
 #[cfg(test)]
 mod tests {
     use miden_core::{
-        Felt,
         deferred::{DEFERRED_AND_FRAME, EidosFrame, deferred_chunks_frame},
         program::{StackInputs, domain::DomainTag},
     };
     use miden_precompiles::Keccak256Precompile;
 
     use super::*;
+
+    #[test]
+    fn export_witness_rejects_missing_true_and_value_roots() {
+        let mut processor = FastProcessor::new(StackInputs::default());
+        let value = processor
+            .deferred_state_mut()
+            .register(Node::chunks(vec![[ZERO; 8]]).unwrap())
+            .unwrap();
+        for (digest, expected) in [
+            (Word::new([Felt::from_u32(99); 4]), PrecompileError::MissingNode),
+            (TRUE_DIGEST, PrecompileError::InvalidNode),
+            (value, PrecompileError::AssertionFailed),
+        ] {
+            processor.stack_write_word(1, &digest);
+            let advice = processor.advice.clone();
+            let SystemEventError::Deferred(error) =
+                handle_deferred_export_witness(&mut processor).unwrap_err()
+            else {
+                panic!("expected a deferred error");
+            };
+            assert_eq!(core::mem::discriminant(error.root()), core::mem::discriminant(&expected));
+            assert_eq!(processor.advice, advice);
+            assert_eq!(processor.deferred_state().root(), TRUE_DIGEST);
+        }
+    }
+
+    #[test]
+    fn export_witness_preserves_advice_on_conflict_or_budget_failure() {
+        use miden_core::{WORD_SIZE, crypto::merkle::MerkleStore};
+
+        use crate::{ExecutionOptions, advice::AdviceError};
+
+        for conflicting_entry in [false, true] {
+            let mut processor = FastProcessor::new(StackInputs::default());
+            let digest = processor
+                .deferred_state_mut()
+                .register(Node::and(TRUE_DIGEST, TRUE_DIGEST))
+                .unwrap();
+            processor.stack_write_word(1, &digest);
+            let mut budget = MerkleStore::default().num_internal_nodes() * 3 * WORD_SIZE * 8;
+            if conflicting_entry {
+                processor.advice.insert_into_map(digest, vec![Felt::ONE]).unwrap();
+                budget += (WORD_SIZE + 1) * 8;
+            }
+            processor = processor
+                .with_options(ExecutionOptions::default().with_max_advice_size_bytes(budget))
+                .unwrap();
+            let advice = processor.advice.clone();
+            let error = handle_deferred_export_witness(&mut processor).unwrap_err();
+            assert!(matches!(
+                (conflicting_entry, error),
+                (true, SystemEventError::Advice(AdviceError::MapKeyAlreadyPresent { .. }))
+                    | (false, SystemEventError::Advice(AdviceError::SizeBudgetExceeded { .. }))
+            ));
+            assert_eq!(processor.advice, advice);
+        }
+    }
 
     #[test]
     fn register_rejects_framework_and_frames() {

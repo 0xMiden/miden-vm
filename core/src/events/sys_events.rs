@@ -399,6 +399,26 @@ pub enum SystemEvent {
     ///   Deferred state: node registered and semantically evaluated
     DeferredRegisterData,
 
+    /// Exports a registered true assertion's reachable DAG into the advice map under its digest.
+    ///
+    /// The selected node need not be logged into the current deferred root. The map value is
+    /// `[byte_len, packed_u32_le(witness_bytes)...]`, using the existing portable witness encoding.
+    /// Only the final u32 limb is zero-padded; `byte_len` excludes that padding.
+    ///
+    /// Returns an error for missing nodes, implicit TRUE, non-TRUE evaluation results, failed
+    /// evaluation/export, conflicting advice-map entries, or advice budget exhaustion. Identical
+    /// repeated exports succeed. The deferred root and both stacks remain unchanged; evaluation
+    /// may populate deferred-state caches. The exported witness remains untrusted advice.
+    ///
+    /// Inputs:
+    ///   Operand stack: [event_id, NODE_DIGEST, ...]
+    ///
+    /// Outputs:
+    ///   Operand stack: unchanged
+    ///   Advice stack: unchanged
+    ///   Advice map: {NODE_DIGEST: [byte_len, packed_u32_le(witness_bytes)...]}
+    DeferredExportWitness,
+
     // NON-MUTATING SYSTEM EVENTS
     // --------------------------------------------------------------------------------------------
     /// Signals an optional, read-only trace event to the host.
@@ -496,6 +516,7 @@ impl SystemEvent {
             Self::DeferredEvaluateFrame,
             Self::DeferredEvaluatePayload,
             Self::DeferredRegisterData,
+            Self::DeferredExportWitness,
             Self::TraceEvent,
         ]
     }
@@ -538,7 +559,7 @@ pub(crate) struct SystemEventEntry {
 
 impl SystemEvent {
     /// The total number of system events.
-    pub const COUNT: usize = 24;
+    pub const COUNT: usize = 25;
 
     /// Lookup table mapping system events to their metadata.
     ///
@@ -664,6 +685,11 @@ impl SystemEvent {
             name: "sys::adv::register_deferred_data",
         },
         SystemEventEntry {
+            id: EventId::from_u64(15159456528524262446),
+            event: SystemEvent::DeferredExportWitness,
+            name: "sys::adv::export_deferred_witness",
+        },
+        SystemEventEntry {
             id: EventId::from_u64(1768618069850226410),
             event: SystemEvent::TraceEvent,
             name: "sys::trace_event",
@@ -786,6 +812,7 @@ mod test {
                 | SystemEvent::DeferredEvaluateFrame
                 | SystemEvent::DeferredEvaluatePayload
                 | SystemEvent::DeferredRegisterData
+                | SystemEvent::DeferredExportWitness
                 | SystemEvent::TraceEvent => {},
             }
         }

@@ -120,6 +120,19 @@ Evaluation advice is also shape-dependent:
 All deferred-evaluation outputs, including frame-only output, are host hints. Before proof-relevant
 use, code must relate them with VM instructions to values established independently of that advice.
 
+`adv.export_deferred_witness` exports the reachable DAG of a registered, non-TRUE node that
+evaluates to TRUE. The node need not be logged or equal the current deferred-state root. Its
+original digest is the witness root and advice-map key. The value is
+`[byte_len, packed_u32_le(witness_bytes)...]`: four little-endian bytes per field element, with
+zero padding only in the final limb. The length excludes padding, so consumers decode exactly
+`byte_len` bytes and check the reconstructed witness root against the key. The witness uses the
+existing portable encoding and remains untrusted advice until validated.
+
+Both stacks and the deferred root remain unchanged; evaluation may populate its existing caches.
+Identical repeated exports succeed. Missing nodes, literal `TRUE_DIGEST`, non-TRUE results,
+evaluation/export failures, map conflicts, and advice-budget exhaustion abort execution without
+partially inserting an entry. This instruction invokes `sys::adv::export_deferred_witness`.
+
 | Instruction           | Stack_input        | Stack_output       | Notes                                                                                                                                                                                                                                                                |
 | --------------------- | ------------------ | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | adv.push_mapval                              | [K, ... ]          | [K, ... ]          | Pushes a list of field elements onto the advice stack. The list is looked up in the advice map using word $K$ as the key.                                                                                                                                            |
@@ -132,6 +145,7 @@ use, code must relate them with VM instructions to values established independen
 | adv.evaluate_deferred                        | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes its canonical frame and payload felts onto the advice stack. |
 | adv.evaluate_deferred_frame                  | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes only its canonical frame onto the advice stack. |
 | adv.evaluate_deferred_payload                | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes only its canonical payload felts onto the advice stack. |
+| adv.export_deferred_witness                  | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Exports a registered true assertion's reachable DAG into the advice map under its original digest. Preserves the advice stack and deferred-state root. |
 | adv.insert_mem                               | [K, a, b, ... ]    | [K, a, b, ... ]    | Reads words $data \leftarrow mem[a] .. mem[b]$ from memory, and save the data into $advice\_map[K] \leftarrow data$.                                                                                                                                                 |
 | adv.insert_hdword                            | [A, B, ... ]       | [A, B, ... ]       | Reads the top two words, uses the generic eight-Felt `hdword` as the key, and saves $advice\_map[K] \leftarrow [A, B]$. |
 | adv.insert_hqword                            | [A, B, C, D, ... ] | [A, B, C, D, ... ] | Reads top four words from the stack, computes a key as $K \leftarrow hash\_elements([A, B, C, D])$, and saves the data into $advice\_map[K] \leftarrow [A, B, C, D]$.                                                                                                  |
