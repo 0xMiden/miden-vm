@@ -12,6 +12,7 @@ source files or creating an adapter project.
 make build-masm-advice-lint
 make test-masm-advice-lint
 make masm-advice-lint
+make masm-advice-lint args=--verbose
 bash scripts/check-masm-advice-taint.sh --verbose
 bash scripts/check-masm-advice-taint.sh --verbose path/to/miden-project.toml
 ```
@@ -24,8 +25,7 @@ Existing VM workspace dependencies and lockfiles are unchanged.
 
 Update the pin and tool lockfile after the compiler PR merges if its SHA changes.
 
-The VM's `check`, `test`, `test-fast`, `lint`, and `check-features` targets also
-check this tool. The test targets run its renderer test and CLI fixtures.
+`make test-masm-advice-lint` runs the renderer test and CLI fixtures.
 
 The runner accepts an optional manifest path. `MIDENC_MASM_LINT` can select
 another already built copy of the tool. No installed Miden sysroot is required.
