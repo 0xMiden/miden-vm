@@ -21,6 +21,7 @@
 
 #### Changes
 
+- Added a cached `DebugCallFrameResolver` to recover debugger call frames from existing function and source metadata. Debuggers can distinguish frames identified by source metadata from inferred frames. The package debug-info format is unchanged ([#3941](https://github.com/0xMiden/miden-vm/pull/3941)).
 - Replaced the main-only release restriction. Stable releases can use `main`. Matching patch releases can also use `release/vVERSION` or `release-vVERSION` branches. Release candidates use `next`. Tags must match the VM version and source commit. Maintenance branches must descend from the base and latest earlier stable patch tags ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
 - Required release approval from a repository admin through the `release` environment. Admins can approve their own releases. Release candidates remain prereleases, and patch branches preserve GitHub's latest stable release ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
 - Required manual release dispatch and removed the `release.published` publication fallback. Removed the option to skip the package version gate ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
@@ -33,7 +34,6 @@
 
 #### Changes
 
-- Added a cached `DebugCallFrameResolver` over existing function and source metadata for event-free debugger backtraces. Frames expose their evidence so consumers can distinguish source-identified frames from inferred optimized `exec` frames. The package debug-info format remains version 3.
 - [BREAKING] Removed the accessor procedures from `miden::core::stark::constants`; import its constants instead ([#3925](https://github.com/0xMiden/miden-vm/pull/3925)).
 - [BREAKING] Removed unused procedures from the MASM recursive verifier ([#3937](https://github.com/0xMiden/miden-vm/pull/3937)).
 
