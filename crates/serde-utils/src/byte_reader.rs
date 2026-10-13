@@ -859,6 +859,59 @@ mod tests {
     use super::*;
     use crate::ByteWriter;
 
+    /// The vint64 usize codec has nine length classes; the class flip boundaries are
+    /// enumerable, so this test is EXHAUSTIVE over the class structure rather than
+    /// sampled: the small-value sweep (which crosses the 1-byte -> 2-byte edge), every
+    /// power-of-two edge ±1 up to 2^63 (each is some class's upper or lower boundary),
+    /// and the extremes. For every value the test asserts the roundtrip, that the
+    /// encoded byte count matches an INDEPENDENT length specification (the smallest L
+    /// with value < 2^(7L) — deliberately not `usize_encoded_len`, so a broken helper
+    /// cannot agree with its own expectation), and that the reader consumes exactly
+    /// that many bytes.
+    #[test]
+    fn usize_vint64_roundtrips_at_every_class_boundary() {
+        let mut values: Vec<usize> = (0..=300).collect();
+        for k in 1..=63u32 {
+            let edge = 2u64.pow(k);
+            values.push((edge - 1) as usize);
+            values.push(edge as usize);
+            if edge < u64::MAX {
+                values.push((edge + 1) as usize);
+            }
+        }
+        values.push(usize::MAX);
+
+        // An INDEPENDENT specification of the encoded length: an L-byte vint64 holds
+        // values < 2^(7L) (the first byte's high-bit pattern spends one bit per length
+        // step), so the expected length is the smallest L with value < 2^(7L), capped at
+        // 9. This deliberately does NOT call usize_encoded_len — if that helper were
+        // wrong (e.g. always returning 9), the encoder and a helper-derived expectation
+        // would agree and every class transition could be lost silently.
+        let independent_expected_len = |value: u64| {
+            let mut l = 1u64;
+            while l < 9 && value >= 1u64 << (7 * l) {
+                l += 1;
+            }
+            l as usize
+        };
+
+        for value in values {
+            let mut bytes = Vec::new();
+            bytes.write_usize(value);
+            let expected_len = independent_expected_len(value as u64);
+            assert_eq!(bytes.len(), expected_len, "encoded length mismatch for {value}",);
+
+            let mut reader = Cursor::new(bytes);
+            let decoded = reader.read_usize().unwrap();
+            assert_eq!(decoded, value, "roundtrip mismatch for {value}");
+            assert_eq!(
+                reader.position() as usize,
+                expected_len,
+                "read must consume exactly the encoded length for {value}",
+            );
+        }
+    }
+
     struct ChunkedReader {
         data: Vec<u8>,
         pos: usize,

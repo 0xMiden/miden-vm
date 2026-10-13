@@ -30,6 +30,10 @@ pub use stack::AdviceStack;
 /// Serialization includes the `MerkleStore` format header and version. Encodings containing an
 /// unversioned store are rejected.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct AdviceInputs {
     stack: AdviceStack,
     map: AdviceMap,

@@ -12,6 +12,10 @@ use crate::merkle::{NodeIndex, smt::LineageId};
 
 /// A key that uniquely identifies a leaf in the database.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct LeafKey {
     /// The lineage (and hence tree) to which the leaf belongs.
     pub lineage: LineageId,
@@ -45,6 +49,10 @@ impl Deserializable for LeafKey {
 
 /// A key that uniquely identifies a subtree in the database.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct SubtreeKey {
     /// The lineage (and hence tree) to which the subtree belongs.
     pub lineage: LineageId,
@@ -70,5 +78,39 @@ impl Deserializable for SubtreeKey {
         let index = NodeIndex::read_from(source)?;
 
         Ok(Self { lineage, index })
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::{LeafKey, LineageId, NodeIndex, SubtreeKey};
+
+    impl Arbitrary for LeafKey {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Any (lineage, index) pair is a structurally valid database key.
+            (any::<LineageId>(), any::<u64>())
+                .prop_map(|(lineage, index)| Self { lineage, index })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for SubtreeKey {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Any (lineage, valid NodeIndex) pair is a structurally valid database key.
+            (any::<LineageId>(), any::<NodeIndex>())
+                .prop_map(|(lineage, index)| Self { lineage, index })
+                .boxed()
+        }
     }
 }

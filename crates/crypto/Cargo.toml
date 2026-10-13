@@ -146,6 +146,7 @@ p3-symmetric.workspace   = true
 p3-util.workspace        = true
 
 [dev-dependencies]
+miden-test-serialization-macros.workspace = true
 assert_matches = { workspace = true }
 hex            = { features = ["alloc"], workspace = true }
 itertools      = { features = ["use_std"], workspace = true }

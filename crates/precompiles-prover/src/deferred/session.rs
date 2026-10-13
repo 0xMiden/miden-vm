@@ -125,6 +125,14 @@ pub(crate) struct WitnessSession {
 }
 
 impl WitnessSession {
+    /// Test-only view of the per-witness roots the importer recorded, in
+    /// input order — lets properties bind the importer's root bookkeeping
+    /// to the witnesses' own commitments.
+    #[cfg(test)]
+    pub(crate) fn roots(&self) -> &[Digest] {
+        &self.roots
+    }
+
     #[cfg(test)]
     pub(crate) fn finish(self) -> crate::session::SessionTraces {
         self.session.finish(self.root)

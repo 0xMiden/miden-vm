@@ -9,6 +9,10 @@ use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 
 /// A sealed message containing encrypted data
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct SealedMessage {
     /// Ephemeral public key (determines scheme and provides key material)
     pub(super) ephemeral_key: EphemeralPublicKey,
@@ -30,6 +34,27 @@ impl SealedMessage {
     /// Returns the byte representation of this sealed message.
     pub fn to_bytes(&self) -> Vec<u8> {
         <Self as Serializable>::to_bytes(self)
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod sealed_message_arbitrary {
+    use proptest::prelude::*;
+
+    use super::SealedMessage;
+    use crate::ies::keys::EphemeralPublicKey;
+
+    impl Arbitrary for SealedMessage {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader re-parses the ephemeral key under the scheme byte, so use a valid
+            // key (its own covered strategy); the ciphertext payload is any-valid bytes.
+            (any::<EphemeralPublicKey>(), proptest::collection::vec(any::<u8>(), 0..=32))
+                .prop_map(|(ephemeral_key, ciphertext)| Self { ephemeral_key, ciphertext })
+                .boxed()
+        }
     }
 }
 
