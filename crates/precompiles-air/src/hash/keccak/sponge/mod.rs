@@ -34,12 +34,12 @@ use crate::{
 // MAIN COLUMN LAYOUT
 // ================================================================================================
 //
-// 57 main witness columns split into four groups:
+// 49 main witness columns split into four groups:
 //
 // - Structural (5):    sponge_seq_id, act, bytes_left, is_first_block_of_invocation, chunk_ptr.
 // - Padding state (10): is_zero_p, is_chunk_avail, b_0..b_7.
 // - Squeeze value (2): state_out as u32 lo/hi.
-// - Byte lanes (40): chunk, state_prev, state_new, cleared, padded — each an 8-byte little-endian
+// - Byte lanes (32): chunk, state_prev, state_new, padded — each an 8-byte little-endian
 //   decomposition. Their u32 halves are reconstructed linearly where needed.
 //
 // Structural columns.
@@ -117,42 +117,41 @@ pub const COL_STATE_OUT_HI: usize = 16;
 // Byte-decomposed lane columns.
 // --------------------------------------------------------------------
 //
-// `chunk`, `state_prev`, `state_new`, `cleared`, and `padded` are stored as
+// `chunk`, `state_prev`, `state_new`, and `padded` are stored as
 // 8-byte little-endian decompositions. The `BytePairLut` requests verify
-// each pad/absorb XOR/ANDNOT directly, while [`halves_le`] reconstructs
+// each input byte and absorb XOR directly, while [`halves_le`] reconstructs
 // the u32 halves used by Memory64 and the local state constraints.
 pub const CHUNK_BYTES_RANGE: Range<usize> = 17..25;
 pub const STATE_PREV_BYTES_RANGE: Range<usize> = 25..33;
 pub const STATE_NEW_BYTES_RANGE: Range<usize> = 33..41;
-pub const CLEARED_BYTES_RANGE: Range<usize> = 41..49;
 /// Shared XOR operand: padded chunk on the pad row, raw chunk on verbatim rows,
 /// and the final 0x80 mask on the last block's lane-16 row.
-pub const PADDED_BYTES_RANGE: Range<usize> = 49..57;
+pub const PADDED_BYTES_RANGE: Range<usize> = 41..49;
 
-/// Total number of main witness columns (5 structural + 10 padding-state + 2 squeeze-value + 40
+/// Total number of main witness columns (5 structural + 10 padding-state + 2 squeeze-value + 32
 /// byte-lane columns).
-pub const NUM_MAIN_COLS: usize = 57;
+pub const NUM_MAIN_COLS: usize = 49;
 
 // AUX / PUBLIC LAYOUT
 // ================================================================================================
 
-/// Aux columns. The lookup fractions are flattened directly into 12
+/// Aux columns. The lookup fractions are flattened directly into 10
 /// product-closed columns:
 ///
 /// - col 0 (centered running sum): Memory64 `new-state` + `prev-perm`; their ungated recurrence
 ///   closes at degree 4.
 /// - col 1: Memory64 `rc` + lane-16 0x80 consume / provide.
 /// - col 2: Memory64 `squeeze` (the degree-4 multiplicity, alone → degree 4).
-/// - cols 3–10: one `BytePairLut` triple per byte: pad-row `andnot` + `xor-padding`, and a shared
-///   `xor-state` for pad, verbatim, and lane-16 rows. The normalized operand occupies
-///   [`PADDED_BYTES_RANGE`], keeping every message linear.
-/// - col 11: the KeccakSponge request + the chunk consume (the second degree-4 multiplicity, paired
+/// - cols 3–5: canonical pad-row input-byte checks, grouped as 3/3/2 fractions.
+/// - cols 6–8: shared `xor-state` for pad, verbatim, and lane-16 rows, grouped as 3/3/2 fractions.
+///   The normalized operand occupies [`PADDED_BYTES_RANGE`], keeping every message linear.
+/// - col 9: the KeccakSponge request + the chunk consume (the second degree-4 multiplicity, paired
 ///   → degree 5).
 ///
 /// The maximum LogUp constraint degree is five, giving `log_quotient_degree = 2`. Reducing it
 /// further would require witness-decomposing the degree-four `squeeze` and `chunk-consume`
 /// multiplicities.
-pub const NUM_AUX_COLS: usize = 12;
+pub const NUM_AUX_COLS: usize = 10;
 
 // One accumulator combines the Memory64, BytePairLut, and KeccakSponge interactions. Encoded bus
 // prefixes keep the three relations distinct under the shared LogUp challenges.
@@ -174,7 +173,7 @@ pub use program::{
 /// Keccak permutation) drives rate XORin / capacity passthrough /
 /// padding state machine over the
 /// [`Memory64`](crate::hash::memory64) bus, verifying its own pad/absorb
-/// XOR/ANDNOT ops directly against
+/// input bytes and XOR ops directly against
 /// [`BytePairLut`](crate::primitives::byte_pair_lut), with the
 /// per-invocation request consumed from the
 /// [`KeccakSponge`](crate::relations::BusId::KeccakSponge) bus.
@@ -197,71 +196,6 @@ impl BaseAir<Felt> for KeccakSpongeAir {
     }
 }
 
-// PAD-ROW MASK TABLES (indexed by `byte_offset ∈ [0, 8)`)
-// ================================================================================================
-//
-// The pad-row `BytePairLut` requests need two masks whose values are
-// selected by the unary `b_j` selector bits: `andnot_mask` clears
-// the bytes at and past `byte_offset`, and `padding_mask` places a
-// `0x01` byte at `byte_offset`. The arrays below contain the
-// per-`byte_offset` u32-half constants. `eval` extracts each byte from them via [`mask_byte`] and
-// builds `andnot_mask_bytes[i] = Σ_j b_j · mask_byte(ANDNOT_MASK_LO[j],
-// ANDNOT_MASK_HI[j], i)` (and likewise for padding) as a degree-1
-// witness inline.
-
-/// `ANDNOT_MASK[j].lo` (u32) for `byte_offset = j`. Equals the low
-/// 32 bits of `0xFFFF_FFFF_FFFF_FFFF << (8·j)`. Used by the pad-row
-/// ANDNOT message: `cleared = (NOT andnot_mask) AND chunk` zeroes
-/// chunk bytes at positions `[j, 8)`.
-pub const ANDNOT_MASK_LO: [u32; 8] = [
-    0xffff_ffff,
-    0xffff_ff00,
-    0xffff_0000,
-    0xff00_0000,
-    0x0000_0000,
-    0x0000_0000,
-    0x0000_0000,
-    0x0000_0000,
-];
-
-/// `ANDNOT_MASK[j].hi` (u32) for `byte_offset = j`.
-pub const ANDNOT_MASK_HI: [u32; 8] = [
-    0xffff_ffff,
-    0xffff_ffff,
-    0xffff_ffff,
-    0xffff_ffff,
-    0xffff_ffff,
-    0xffff_ff00,
-    0xffff_0000,
-    0xff00_0000,
-];
-
-/// `PADDING_MASK[j].lo` (u32) for `byte_offset = j`. Equals the low
-/// 32 bits of `0x01 << (8·j)`. Used by the pad-row XOR(padding)
-/// message: places the leading `0x01` padding byte at `byte_offset`.
-pub const PADDING_MASK_LO: [u32; 8] = [
-    0x0000_0001,
-    0x0000_0100,
-    0x0001_0000,
-    0x0100_0000,
-    0x0000_0000,
-    0x0000_0000,
-    0x0000_0000,
-    0x0000_0000,
-];
-
-/// `PADDING_MASK[j].hi` (u32) for `byte_offset = j`.
-pub const PADDING_MASK_HI: [u32; 8] = [
-    0x0000_0000,
-    0x0000_0000,
-    0x0000_0000,
-    0x0000_0000,
-    0x0000_0001,
-    0x0000_0100,
-    0x0001_0000,
-    0x0100_0000,
-];
-
 /// Low u32 half of the lane-16 trailing-`0x80` constant (= `0`).
 pub const PAD_CONST_LO: u32 = 0;
 /// High u32 half of the lane-16 trailing-`0x80` constant
@@ -269,15 +203,6 @@ pub const PAD_CONST_LO: u32 = 0;
 pub const PAD_CONST_HI: u32 = 0x8000_0000;
 /// Byte `i` (LSB-first) of the lane-16 trailing-`0x80` constant.
 pub const PAD_CONST_BYTES: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0x80];
-
-/// Byte `byte_idx` (LSB-first, `< 8`) of the 64-bit value whose 32-bit
-/// halves are `lo`/`hi`. Extracts from the already-verified `_LO`/`_HI`
-/// per-`byte_offset` mask constants, so the per-byte view is correct by
-/// construction rather than a hand-rederived bit pattern.
-pub(crate) const fn mask_byte(lo: u32, hi: u32, byte_idx: usize) -> u8 {
-    let word = if byte_idx < 4 { lo } else { hi };
-    ((word >> (8 * (byte_idx % 4))) & 0xff) as u8
-}
 
 // LIFTED AIR
 // ================================================================================================
@@ -326,7 +251,7 @@ where
 {
     // Phase 1: local row constraints.
     let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
-    // Next-row window: the same 57 columns at row r+1. Cyclic at
+    // Next-row window: the same 49 columns at row r+1. Cyclic at
     // row N-1 (`when_transition` gates out the wrap explicitly
     // where needed; other transition constraints rely on
     // `p_last`/`p_rate_block` factors making the wrap vacuous).
@@ -374,8 +299,8 @@ where
     }
 
     // Normalize the shared XOR operand outside the pad row, whose value is pinned by
-    // the two padding lookups. The periodic rate/lane-16 selectors are disjoint, so
-    // these two ties can share one degree-three constraint per byte.
+    // the arithmetic padding constraints below. The periodic rate/lane-16 selectors are disjoint,
+    // so these two ties can share one degree-three constraint per byte.
     let verbatim = p_rate_block.clone() * (AB::Expr::ONE - is_zero_next.clone());
     let lane16 = p_pad_0x80 * b_sum.clone();
     for i in 0..8 {
@@ -383,6 +308,20 @@ where
         builder.assert_zero(
             verbatim.clone() * (padded.clone() - chunk_bytes[i].into())
                 + lane16.clone() * (padded - AB::Expr::from(Felt::from(PAD_CONST_BYTES[i]))),
+        );
+    }
+
+    // On a pad transition, the Boolean, period-constant b selectors sum to one: their
+    // sum equals the monotone is_zero flag on the following non-rate rows. Retain input
+    // bytes before the selected position, insert 1 there, and clear the remaining bytes.
+    // Canonical input-byte lookups are still required; packed Memory64 halves alone do
+    // not establish the range of each digit.
+    let pad_mult = act.clone() * p_rate_block.clone() * (is_zero_next.clone() - is_zero.clone());
+    for i in 0..8 {
+        let keep: AB::Expr = ((i + 1)..8).map(|j| AB::Expr::from(local[COL_B_BEGIN + j])).sum();
+        let padded: AB::Expr = local[PADDED_BYTES_RANGE.start + i].into();
+        builder.assert_zero(
+            pad_mult.clone() * (padded - chunk_bytes[i].into() * keep - local[COL_B_BEGIN + i]),
         );
     }
 
@@ -501,14 +440,19 @@ where
     // Tape bytes after the message are zero -----------------
     // The chunk encoding zero-pads the last chunk: a lane consumed past
     // the pad is zero, and so are the pad lane's bytes from the pad
-    // position on (`chunk = cleared`, with `cleared` tied to the mask by
-    // the `andnot` lookup).
+    // position on (`chunk = cleared`). The arithmetic padding pins
+    // `padded = cleared + b` on the pad row, so `cleared = padded − b`; the
+    // canonical input-byte lookups make the packed equality hold digit-wise.
     let past_pad = (p_rate_block.clone() + p_extra) * is_zero.clone();
     builder.assert_zero(act.clone() * past_pad.clone() * chunk_lo.clone());
     builder.assert_zero(act.clone() * past_pad * chunk_hi.clone());
     let pad_row = p_rate_block.clone() * (is_zero_next.clone() - is_zero.clone());
-    let cleared_bytes: [AB::Var; 8] = array::from_fn(|i| local[CLEARED_BYTES_RANGE.start + i]);
-    let [cleared_lo_local, cleared_hi_local]: [AB::Expr; 2] = halves_le(&cleared_bytes, 256);
+    let padded_bytes: [AB::Var; 8] = array::from_fn(|i| local[PADDED_BYTES_RANGE.start + i]);
+    let b_bits: [AB::Var; 8] = array::from_fn(|i| local[COL_B_BEGIN + i]);
+    let [padded_lo, padded_hi]: [AB::Expr; 2] = halves_le(&padded_bytes, 256);
+    let [b_lo, b_hi]: [AB::Expr; 2] = halves_le(&b_bits, 256);
+    let cleared_lo_local = padded_lo - b_lo;
+    let cleared_hi_local = padded_hi - b_hi;
     builder.assert_zero(act.clone() * pad_row.clone() * (chunk_lo - cleared_lo_local));
     builder.assert_zero(act.clone() * pad_row * (chunk_hi - cleared_hi_local));
 
@@ -581,14 +525,14 @@ where
 // LOOKUP AIR
 // ================================================================================================
 
-/// Exact per-column insert counts. The 24 byte-table fractions occupy
-/// eight triples, each sharing its final XOR across all absorption/padding modes.
+/// Exact per-column insert counts. The 16 byte-table fractions occupy
+/// two sets of 3/3/2 batches, sharing the state XOR across all absorption/padding modes.
 /// The degree-4 `squeeze` remains alone and the
 /// degree-4 `chunk-consume` remains paired, keeping every constraint at
 /// degree 5 or below.
 pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [
     2, 3, 1, // Memory64 state, rc/lane-16, squeeze.
-    3, 3, 3, 3, 3, 3, 3, 3, // Padding preparation + shared state XOR, per byte.
+    3, 3, 2, 3, 3, 2, // Canonical input bytes + shared state XOR.
     2, // KeccakSponge request + chunk consume.
 ];
 
@@ -643,7 +587,6 @@ where
     let is_zero_next: LB::Expr = next[COL_IS_ZERO].into();
     let state_out_lo: LB::Expr = local[COL_STATE_OUT_LO].into();
     let state_out_hi: LB::Expr = local[COL_STATE_OUT_HI].into();
-    let cleared_bytes: [LB::Var; 8] = array::from_fn(|i| local[CLEARED_BYTES_RANGE.start + i]);
     let padded_bytes: [LB::Var; 8] = array::from_fn(|i| local[PADDED_BYTES_RANGE.start + i]);
     let chunk_bytes: [LB::Var; 8] = array::from_fn(|i| local[CHUNK_BYTES_RANGE.start + i]);
     let state_prev_bytes: [LB::Var; 8] =
@@ -653,25 +596,7 @@ where
     let [state_prev_lo, state_prev_hi]: [LB::Expr; 2] = halves_le(&state_prev_bytes, 256);
     let [state_new_lo, state_new_hi]: [LB::Expr; 2] = halves_le(&state_new_bytes, 256);
 
-    // Σ b_j (= `is_last_block_period`); `andnot_mask` and
-    // `padding_mask`, byte-decomposed, as `Σ_j b_j · MASK_BYTE[i][j]`
-    // inlines (`mask_byte` extracts byte `i` from the existing
-    // verifier-known `*_LO`/`*_HI` per-`byte_offset` constants, so the
-    // per-byte tables are correct by construction from the
-    // already-verified 32-bit ones).
-    let mut b_sum = LB::Expr::ZERO;
-    let mut andnot_mask_bytes: [LB::Expr; 8] = array::from_fn(|_| LB::Expr::ZERO);
-    let mut padding_mask_bytes: [LB::Expr; 8] = array::from_fn(|_| LB::Expr::ZERO);
-    for (j, col) in COL_B_RANGE.enumerate() {
-        let b_j: LB::Expr = local[col].into();
-        b_sum += b_j.clone();
-        for i in 0..8 {
-            let andnot_byte = mask_byte(ANDNOT_MASK_LO[j], ANDNOT_MASK_HI[j], i);
-            let padding_byte = mask_byte(PADDING_MASK_LO[j], PADDING_MASK_HI[j], i);
-            andnot_mask_bytes[i] += LB::Expr::from(Felt::from(andnot_byte)) * b_j.clone();
-            padding_mask_bytes[i] += LB::Expr::from(Felt::from(padding_byte)) * b_j.clone();
-        }
-    }
+    let b_sum: LB::Expr = COL_B_RANGE.map(|col| LB::Expr::from(local[col])).sum();
 
     // Derived multiplicity signals.
     let is_intra: LB::Expr = LB::Expr::ONE - is_first_block.clone();
@@ -797,51 +722,63 @@ where
         ),
     );
 
-    // cols 3..10: one three-fraction batch per rate byte. Each batch
-    // verifies `andnot` (mask, chunk) -> cleared, `xor-padding`
-    // (cleared, padding_mask) -> padded, and `xor-state`
-    // (state_prev, padded) -> state_new across pad, verbatim, and lane-16 rows.
+    // cols 3..8: canonical pad-row inputs, then state XORs. Both families fire on
+    // pad rows, so retain each fraction in a product batch with a constant batch flag.
     let pad_mult = p_rate_block.clone() * is_pad * act.clone();
     let xor_mult = (p_rate_block.clone() * is_absorb + p_pad_0x80 * b_sum.clone()) * act.clone();
-    for i in 0..8 {
-        frac_col!(
-            builder,
-            "byte-pair-lut",
-            triple_deg,
-            (
-                "andnot",
-                pad_mult.clone(),
-                BytePairLutMsg::from_andnot(
-                    andnot_mask_bytes[i].clone(),
-                    chunk_bytes[i].into(),
-                    cleared_bytes[i].into(),
-                ),
-                selected_interaction_deg
-            ),
-            (
-                "xor-padding",
-                pad_mult.clone(),
-                BytePairLutMsg::from_xor(
-                    cleared_bytes[i].into(),
-                    padding_mask_bytes[i].clone(),
-                    padded_bytes[i].into(),
-                ),
-                selected_interaction_deg
-            ),
-            (
-                "xor-state",
-                xor_mult.clone(),
-                BytePairLutMsg::from_xor(
-                    state_prev_bytes[i].into(),
-                    padded_bytes[i].into(),
-                    state_new_bytes[i].into(),
-                ),
-                selected_interaction_deg
-            ),
-        );
+    for (canonical_input, mult) in [(true, pad_mult), (false, xor_mult)] {
+        for start in (0..8).step_by(3) {
+            let end = (start + 3).min(8);
+            let deg = if end - start == 3 { triple_deg } else { pair_deg };
+            builder.next_column(
+                |col| {
+                    col.group(
+                        "byte-pair-lut",
+                        |group| {
+                            group.batch(
+                                "f",
+                                LB::Expr::ONE,
+                                |batch| {
+                                    for i in start..end {
+                                        let (name, msg) = if canonical_input {
+                                            (
+                                                "canonical-input-byte",
+                                                BytePairLutMsg::from_xor(
+                                                    chunk_bytes[i].into(),
+                                                    LB::Expr::ZERO,
+                                                    chunk_bytes[i].into(),
+                                                ),
+                                            )
+                                        } else {
+                                            (
+                                                "xor-state",
+                                                BytePairLutMsg::from_xor(
+                                                    state_prev_bytes[i].into(),
+                                                    padded_bytes[i].into(),
+                                                    state_new_bytes[i].into(),
+                                                ),
+                                            )
+                                        };
+                                        batch.insert(
+                                            name,
+                                            mult.clone(),
+                                            msg,
+                                            selected_interaction_deg,
+                                        );
+                                    }
+                                },
+                                deg,
+                            );
+                        },
+                        deg,
+                    );
+                },
+                deg,
+            );
+        }
     }
 
-    // col 11: the KeccakSponge request + the chunk consume (a degree-4
+    // col 9: the KeccakSponge request + the chunk consume (a degree-4
     // multiplicity, paired → closing 5). Two independent inserts on
     // different buses, bus-prefix-distinguished encodings keeping the
     // contributions algebraically distinct.
