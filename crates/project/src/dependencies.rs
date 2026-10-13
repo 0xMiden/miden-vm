@@ -4,7 +4,7 @@ mod graph;
 use alloc::{format, sync::Arc, vec};
 use core::fmt;
 
-use miden_debug_types::Spanned;
+use miden_assembly_syntax::debuginfo::Spanned;
 pub use miden_package_registry::{SemVer, Version, VersionReq, VersionRequirement};
 
 #[cfg(all(feature = "std", feature = "serde"))]
