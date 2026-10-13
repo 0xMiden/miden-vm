@@ -7,6 +7,7 @@ use super::{
     super::{apply_inv_sbox, apply_sbox},
     Felt, Rpo256, STATE_WIDTH,
 };
+use crate::rand::test_utils::seeded_felts_array;
 
 /// S-Box power for Rescue Prime hash function.
 const ALPHA: u64 = 7;
@@ -19,7 +20,7 @@ use crate::{
 
 #[test]
 fn test_sbox() {
-    let state = rand::random::<[Felt; STATE_WIDTH]>();
+    let state = seeded_felts_array::<STATE_WIDTH>(1);
 
     let mut expected = state;
     expected.iter_mut().for_each(|v| *v = v.exp_const_u64::<ALPHA>());
@@ -32,7 +33,7 @@ fn test_sbox() {
 
 #[test]
 fn test_inv_sbox() {
-    let state = rand::random::<[Felt; STATE_WIDTH]>();
+    let state = seeded_felts_array::<STATE_WIDTH>(2);
 
     let mut expected = state;
     expected.iter_mut().for_each(|v| *v = v.exp_const_u64::<INV_ALPHA>());
@@ -45,7 +46,7 @@ fn test_inv_sbox() {
 
 #[test]
 fn hash_elements_vs_merge() {
-    let elements = rand::random::<[Felt; 8]>();
+    let elements = seeded_felts_array::<8>(3);
 
     let digests: [Word; 2] = [
         Word::new(elements[..4].try_into().unwrap()),
@@ -59,7 +60,7 @@ fn hash_elements_vs_merge() {
 
 #[test]
 fn merge_vs_merge_in_domain() {
-    let elements = rand::random::<[Felt; 8]>();
+    let elements = seeded_felts_array::<8>(4);
 
     let digests: [Word; 2] = [
         Word::new(elements[..4].try_into().unwrap()),
@@ -131,7 +132,7 @@ fn hash_padding_no_extra_permutation_call() {
 
 #[test]
 fn hash_elements_padding() {
-    let e1 = rand::random::<[Felt; 2]>();
+    let e1 = seeded_felts_array::<2>(5);
     let e2 = [e1[0], e1[1], ZERO];
 
     let r1 = Rpo256::hash_elements(&e1);

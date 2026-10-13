@@ -15,6 +15,86 @@ use crate::utils::{
 #[cfg(test)]
 mod tests;
 
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    extern crate alloc;
+
+    use alloc::vec::Vec;
+
+    use proptest::prelude::*;
+
+    use super::PartialMerkleTree;
+    use crate::{
+        Word,
+        merkle::{MerklePath, MerkleTree, NodeIndex},
+    };
+
+    impl Arbitrary for PartialMerkleTree {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Sound by construction. Branch A opens a subset of leaves of a real MerkleTree:
+            // all paths share one depth, so no entry can be an ancestor of another (the
+            // ambiguity `with_leaves` rejects), and an all-false mask yields the empty tree.
+            // Branch B contributes a single synthetic deep path (no other path, so still no
+            // ambiguity), exercising large NodeIndex depth/position wire encodings cheaply -
+            // path provenance is irrelevant to the leaves-only wire format. No generation-time
+            // panics: every input is valid for any shrunken prefix.
+            prop_oneof![paths_from_real_tree().boxed(), single_deep_path().boxed()].boxed()
+        }
+    }
+
+    fn paths_from_real_tree() -> impl Strategy<Value = PartialMerkleTree> {
+        (1u8..=6)
+            .prop_flat_map(|depth| {
+                let count = 1usize << depth;
+                (
+                    Just(depth),
+                    proptest::collection::vec(any::<Word>(), count),
+                    proptest::collection::vec(any::<bool>(), count),
+                )
+            })
+            .prop_map(|(depth, leaves, track_mask)| {
+                let tree = MerkleTree::new(&leaves).expect("leaf count is a power of two >= 2");
+                let paths: Vec<(u64, Word, MerklePath)> = track_mask
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, tracked)| **tracked)
+                    .map(|(pos, _)| {
+                        let node_index =
+                            NodeIndex::new(depth, pos as u64).expect("position fits the depth");
+                        let path = tree.get_path(node_index).expect("position within the tree");
+                        (pos as u64, leaves[pos], path)
+                    })
+                    .collect();
+                PartialMerkleTree::with_paths(paths)
+                    .expect("paths from one tree share a depth and no ancestor relation")
+            })
+    }
+
+    fn single_deep_path() -> impl Strategy<Value = PartialMerkleTree> {
+        (7u8..=64, any::<u64>(), any::<Word>())
+            .prop_flat_map(|(depth, index, value)| {
+                let mask = if depth == 64 { u64::MAX } else { (1u64 << depth) - 1 };
+                (
+                    Just(depth),
+                    Just(value),
+                    Just(index & mask),
+                    proptest::collection::vec(any::<Word>(), depth as usize),
+                )
+            })
+            .prop_map(|(_depth, value, index, path_nodes)| {
+                let path = MerklePath::new(path_nodes);
+                PartialMerkleTree::with_paths([(index, value, path)])
+                    .expect("a single path is always a valid partial tree")
+            })
+    }
+}
+
 // CONSTANTS
 // ================================================================================================
 
@@ -32,6 +112,10 @@ const EMPTY_DIGEST: Word = EMPTY_WORD;
 ///
 /// The root of the tree is recomputed on each new leaf update.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct PartialMerkleTree {
     max_depth: u8,
     nodes: BTreeMap<NodeIndex, Word>,

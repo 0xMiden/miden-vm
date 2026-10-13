@@ -78,6 +78,19 @@ use crate::{
 // HELPERS
 // ================================================================================================
 
+/// Deterministic stand-in for seeded random fixture data. The digest bytes and chunk-chain
+/// digests are don't-care witnesses for these tests (the AIR's local constraints and LogUp
+/// recurrence are agnostic to them), so they only need to be arbitrary-looking and
+/// reproducible from source.
+fn fixture_u32(i: usize, tag: u64) -> u32 {
+    ((i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ tag) as u32
+}
+
+fn fixture_felt(i: usize, tag: u64) -> Felt {
+    let mix = (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ tag.rotate_left(32);
+    Felt::new_unchecked(mix % Felt::ORDER)
+}
+
 fn check_with_invocations(_seed: u64, invocations: &[KeccakNodeInvocation]) {
     let main = generate_trace_from_invocations(invocations);
     crate::tests::check_local(KeccakNodeAir, &main);
@@ -89,11 +102,10 @@ fn check_with_invocations(_seed: u64, invocations: &[KeccakNodeInvocation]) {
 /// which are agnostic to the digest bytes (cross-chiplet content
 /// consistency lives at the integration-test layer).
 fn anchored_inv(seed: u64, len_bytes: u32) -> KeccakNodeInvocation {
-    let mut rng = StdRng::seed_from_u64(seed);
     KeccakNodeInvocation {
         len_bytes,
-        d: core::array::from_fn(|_| rng.random()),
-        h_input_chunks: core::array::from_fn(|_| rng.random::<Felt>()),
+        d: core::array::from_fn(|i| fixture_u32(i, seed)),
+        h_input_chunks: core::array::from_fn(|i| fixture_felt(i, seed)),
         chunk_seq_id_head: ChunkSeqId::forged(0),
         absorption_id_chunks: forged_absorption_id(0),
         absorption_id_digest_chunks: forged_absorption_id(100),
@@ -108,11 +120,10 @@ fn anchored_inv(seed: u64, len_bytes: u32) -> KeccakNodeInvocation {
 /// keccak cycles are free witnesses (the orchestrator's continuity
 /// doesn't constrain them); we just pick fresh cycles per invocation.
 fn next_inv(prev: &KeccakNodeInvocation, seed: u64, len_bytes: u32) -> KeccakNodeInvocation {
-    let mut rng = StdRng::seed_from_u64(seed);
     KeccakNodeInvocation {
         len_bytes,
-        d: core::array::from_fn(|_| rng.random()),
-        h_input_chunks: core::array::from_fn(|_| rng.random::<Felt>()),
+        d: core::array::from_fn(|i| fixture_u32(i, seed)),
+        h_input_chunks: core::array::from_fn(|i| fixture_felt(i, seed)),
         chunk_seq_id_head: ChunkSeqId::forged(
             prev.chunk_seq_id_head.seq() + prev.n_chunks() as u32,
         ),

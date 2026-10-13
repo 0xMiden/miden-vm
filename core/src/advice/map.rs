@@ -238,6 +238,42 @@ mod tests {
         assert_eq!(map1, map2);
     }
 
+    #[cfg(feature = "arbitrary")]
+    ::proptest::proptest! {
+        /// The duplicate-key rejection covers the FULL repetition class: a repeated key
+        /// is rejected even when the two values are EQUAL (the map is a set of bindings,
+        /// not a multiset), and for arbitrary keys and values — `write_into` never
+        /// produces a repeated key (the BTreeMap source cannot), but a hand-written
+        /// payload can.
+        #[test]
+        fn prop_rejects_generated_duplicate_key_payloads(
+            (key, first, second) in (
+                proptest::prelude::any::<Word>(),
+                proptest::prelude::any::<Vec<Felt>>(),
+                proptest::prelude::any::<Vec<Felt>>(),
+            ),
+        ) {
+            use crate::serde::ByteWriter;
+
+            for (repeated, label) in [(second, "different value"), (first.clone(), "equal value")]
+            {
+                let mut bytes = Vec::new();
+                bytes.write_usize(2);
+                (key, first.clone()).write_into(&mut bytes);
+                (key, repeated).write_into(&mut bytes);
+
+                let err = AdviceMap::read_from_bytes(&bytes).unwrap_err();
+                let DeserializationError::InvalidValue(message) = err else {
+                    panic!("expected InvalidValue for a duplicate key with {label}, got {err:?}");
+                };
+                assert_eq!(
+                    message, "duplicate advice map key in serialized payload",
+                    "expected the duplicate-key rejection for {label}",
+                );
+            }
+        }
+    }
+
     #[test]
     fn advice_map_commitment_matches_eidos_primitive() {
         let low_key =
