@@ -955,7 +955,7 @@ fn read_debug_type_indices<R: ByteReader>(
 #[cfg(test)]
 mod tests {
     use alloc::string::ToString;
-    use core::cell::Cell;
+    use core::{assert_matches, cell::Cell};
 
     use miden_assembly_syntax::ast::DebugVarLocation;
     use miden_core::{Felt, Word};
@@ -1788,31 +1788,31 @@ mod tests {
     fn checked_debug_encoding_rejects_oversized_strings() {
         let mut builder = PackageDebugInfoBuilder::default();
         builder.add_string("x".repeat(MAX_DEBUG_INFO_STRING_SIZE + 1));
-        assert!(matches!(
+        assert_matches!(
             builder.build().to_bytes_with_standard_limits(),
             Err(super::super::DebugInfoEncodingError::LimitExceeded {
                 resource: "debug string size",
                 ..
             })
-        ));
+        );
     }
 
     #[test]
     fn checked_debug_encoding_rejects_oversized_payloads() {
         let mut builder = PackageDebugInfoBuilder::default();
-        for index in 0..4_200 {
+        for index in 0..((MAX_DEBUG_INFO_PAYLOAD_SIZE / MAX_DEBUG_INFO_STRING_SIZE) + 1) {
             let mut string = format!("{index:08}");
             string.push_str(&"x".repeat(MAX_DEBUG_INFO_STRING_SIZE - string.len()));
             builder.add_string(string);
         }
         let info = builder.build();
-        assert!(matches!(
+        assert_matches!(
             info.to_bytes_with_standard_limits(),
             Err(super::super::DebugInfoEncodingError::LimitExceeded {
                 resource: "package debug info payload size",
                 ..
             })
-        ));
+        );
         assert!(PackageDebugInfo::read_from_bytes(&info.to_bytes()).is_err());
     }
 
