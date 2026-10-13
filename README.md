@@ -157,6 +157,15 @@ The VM executes the [Blake3 example](miden-vm/masm-examples/hashing/blake3_1to1/
 | 2<sup>18</sup>   | 3.97 ms        | 9.02 sec     | 1.91 GiB     | 173.1 KiB  |
 | 2<sup>20</sup>   | 7.68 ms        | 38.92 sec    | 6.46 GiB     | 192.0 KiB  |
 
+The Apple M5 Max results use one Rayon worker. Timings and proof sizes are medians of five samples after one warmup proof.
+
+| Padded VM cycles | Execution time | Proving time | RAM consumed | Proof size |
+| ---------------- | :------------: | :----------: | :----------: | :--------: |
+| 2<sup>14</sup>   | 2.63 ms        | 0.92 sec     | 0.65 GiB     | 154.4 KiB  |
+| 2<sup>16</sup>   | 2.75 ms        | 2.13 sec     | 1.35 GiB     | 154.2 KiB  |
+| 2<sup>18</sup>   | 3.18 ms        | 7.48 sec     | 2.25 GiB     | 173.1 KiB  |
+| 2<sup>20</sup>   | 5.21 ms        | 30.01 sec    | 6.93 GiB     | 192.0 KiB  |
+
 The AMD Ryzen 9 9950X results use one Rayon worker. Ryzen timings and proof sizes are medians of five samples.
 
 | Padded VM cycles | Execution time | Proving time | RAM consumed | Proof size |
@@ -175,6 +184,7 @@ The following runs use 128 Blake3 calls (828,632 VM cycles, padded to 2<sup>20</
 | Apple M1 Pro (12 threads)      | 9.4 ms         | 7.75 sec     | 0.12%       | 130 KHz           |
 | Apple M4 Pro (14 threads)      | 6.3 ms         | 4.36 sec     | 0.14%       | 190 KHz           |
 | Apple M4 Max (16 threads)      | 5.9 ms         | 2.97 sec     | 0.20%       | 337 KHz           |
+| Apple M5 Max (18 threads)      | 5.8 ms         | 2.69 sec     | 0.22%       | 309 KHz           |
 | Amazon Graviton 4 (64 threads) |                |              |             |                   |
 | AMD EPYC 9R45 (64 threads)     |                |              |             |                   |
 | AMD Ryzen 9 9950X (16 threads) | 9.7 ms         | 3.78 sec     | 0.26%       | 219 KHz           |
