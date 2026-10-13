@@ -48,15 +48,15 @@ pub proc hash_bytes_mem(in_ptr: ptr<u32>, len_bytes: u32, out_ptr: ptr<u32>)
     exec.precompiles::log_deferred
 end
 
-#! Caller-root form of `hash_bytes_mem`; never logs into the VM root.
-#! Input:  [in_ptr, len_bytes, out_ptr, ROOT, ...]
-#! Output: [NEXT_ROOT, ...]
-#! The advised digest is written to out_ptr and its hash assertion is appended to ROOT.
+#! Returns the obligation root for `hash_bytes_mem` without logging into the VM root.
+#! Input:  [in_ptr, len_bytes, out_ptr, ...]
+#! Output: [ROOT, ...]
+#! The advised digest is written to out_ptr; ROOT is the registered hash assertion itself.
+#! The caller must include ROOT in its own obligation, for example using precompiles::append_root.
 pub proc hash_bytes_mem_with_root(
     in_ptr: ptr<u32>,
     len_bytes: u32,
     out_ptr: ptr<u32>,
-    root: precompiles::Digest,
 ) -> precompiles::Digest
     emit.SHA512_DIGEST_EVENT
     dup.1 add.31 u32div.32
@@ -73,5 +73,4 @@ pub proc hash_bytes_mem_with_root(
     push.ASSERT_INIT_CV_2_BASE add
     push.ASSERT_INIT_CV_3 swap push.ASSERT_INIT_CV_1 push.ASSERT_INIT_CV_0
     exec.precompiles::register_fixed_expr
-    exec.precompiles::append_root
 end

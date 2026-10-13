@@ -124,21 +124,31 @@ fn assert_manual_graph(
     witness
 }
 
-/// Exercises the root-last manual entry while preserving the native caller's result layout.
+/// Exports the operation's root, optionally composing it with an independent caller root.
+/// Both paths consume the root-first return while preserving the native result layout.
 pub fn manual_signature_source(
     source: &str,
     module: &str,
     procedure: &str,
-    seeded: bool,
+    composed: bool,
 ) -> String {
-    let start = if seeded {
-        "begin padw padw exec.::miden::core::precompiles::append_root"
+    let start = if composed {
+        "begin padw padw exec.::miden::core::precompiles::append_root push.64 mem_storew_le dropw"
     } else {
-        "begin padw"
+        "begin"
+    };
+    let finish = if composed {
+        // Save the returned root above the ordinary results, including all sixteen recovery
+        // limbs, then load both roots above those results for explicit caller composition.
+        "adv.export_deferred_witness push.68 mem_storew_le dropw \
+         padw push.64 mem_loadw_le padw push.68 mem_loadw_le \
+         exec.::miden::core::precompiles::append_root adv.export_deferred_witness dropw"
+    } else {
+        "adv.export_deferred_witness dropw"
     };
     source.replacen("begin", start, 1).replace(
         &format!("exec.::miden::core::crypto::dsa::{module}::{procedure}"),
-        &format!("exec.::miden::core::crypto::dsa::{module}::{procedure}_with_root adv.export_deferred_witness dropw"),
+        &format!("exec.::miden::core::crypto::dsa::{module}::{procedure}_with_root {finish}"),
     )
 }
 
@@ -146,30 +156,29 @@ pub fn assert_manual_signature_matches_native(
     native: &ExecutionOutput,
     manual: &ExecutionOutput,
     obligations: usize,
-    seeded: bool,
+    composed: bool,
 ) {
     use miden_core::deferred::{DEFERRED_AND_FRAME, Node, PrecompileWitnessEntry, TRUE_DIGEST};
 
-    assert_eq!(manual.advice.map().len(), 1, "one selected root was exported");
-    let root = *manual.advice.map().iter().next().unwrap().0;
-    let witness = assert_manual_graph(manual, root);
-    if seeded {
-        assert_eq!(
-            witness.entries().first(),
-            Some(&PrecompileWitnessEntry::Join {
-                frame: DEFERRED_AND_FRAME,
-                lhs: 0,
-                rhs: 0,
-            }),
-            "the incoming nonempty root must remain reachable"
-        );
+    assert_eq!(manual.advice.map().len(), 1 + usize::from(composed));
+    let root = if composed {
+        Word::new(core::array::from_fn(|i| read_memory_felt(manual, 68 + i as u32)))
     } else {
-        assert_eq!(native.precompile_root(), Node::and(TRUE_DIGEST, root).digest());
+        *manual.advice.map().iter().next().unwrap().0
+    };
+    let witness = assert_manual_graph(manual, root);
+    assert_eq!(native.precompile_root(), Node::and(TRUE_DIGEST, root).digest());
+    if composed {
+        let expected = Node::and(Node::and(TRUE_DIGEST, TRUE_DIGEST).digest(), root).digest();
+        let combined = assert_manual_graph(manual, expected);
+        assert_eq!(combined.entries().iter().filter(|entry| {
+            matches!(entry, PrecompileWitnessEntry::Join { frame, .. } if *frame == DEFERRED_AND_FRAME)
+        }).count(), obligations + 2, "composition must retain both independent subgraphs");
     }
     assert_eq!(native.stack, manual.stack, "ordinary results and tail must match");
     assert_eq!(witness.entries().iter().filter(|entry| {
         matches!(entry, PrecompileWitnessEntry::Join { frame, .. } if *frame == DEFERRED_AND_FRAME)
-    }).count(), obligations + usize::from(seeded), "every nested binding must reach the exported root");
+    }).count(), obligations, "every nested binding must reach the exported root");
     let uint_eq =
         miden_precompiles::UintPrecompile::op_frame(miden_precompiles::UintPrecompile::EQ_OP_ID);
     let curve_eq =

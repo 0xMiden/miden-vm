@@ -20,16 +20,20 @@ cargo run -p miden-core-lib-codegen -- --out target/miden-core-lib-generated-asm
 ## Caller-maintained precompile roots
 
 Deferred precompile procedures have `_with_root` variants for programs that accumulate their own
-obligations. They take the caller's four-felt root after their ordinary arguments, append every
-advice-binding assertion, and leave the VM's built-in deferred root unchanged. Start with the
-implicit TRUE digest (`padw`). Expression constructors, arithmetic expressions, loads, reductions,
-and MSM remain shared; they take no root.
+obligations without changing the VM's built-in deferred root. Field/uint and curve operations take
+the caller's four-felt root after their ordinary arguments and append every advice-binding
+assertion. Start with the implicit TRUE digest (`padw`). Evaluation, inversion/division, and
+predicates return `[ordinary results..., NEXT_ROOT, ...]`; assertions return only `NEXT_ROOT`.
+Comparisons can return false successfully: the root binds the values used to compute their result
+rather than asserting the result is true. Expression constructors, arithmetic expressions, loads,
+reductions, and MSM remain shared; they take no root.
 
-Hash and signature procedures return `[NEXT_ROOT, ordinary results..., ...]`. Field/uint evaluation,
-curve evaluation, inversion/division, and predicates return `[ordinary results..., NEXT_ROOT, ...]`.
-Assertions return only `NEXT_ROOT`. Comparisons can return false successfully: the root binds the
-values used to compute their result rather than asserting the result is true. Memory hashes keep
-their existing input/output encoding, alignment, padding, overlap, and length-limit contracts.
+Hash and signature procedures take the same arguments as their original procedures and return
+`[ROOT, ordinary results..., ...]`. They build an independent obligation, which the caller must
+include in its own root using `precompiles::append_root`. A hash returns its registered assertion
+directly, without an initial AND with TRUE; a signature returns its complete graph, including all
+nested advice bindings. Memory hashes write the digest to memory and return only ROOT, retaining
+their existing encoding, alignment, padding, overlap, and length-limit contracts.
 
 `precompiles::append_root` takes `[ASSERTION, ROOT, ...]` and returns the exact digest of
 `AND(ROOT, ASSERTION)`, registering and hashing the same ordered payload without logging. Both
@@ -38,6 +42,8 @@ built roots, and does not simplify TRUE children.
 
 ```masm
 use miden::core::precompiles::fields::k1_scalar
+use miden::core::precompiles::hashes::sha256
+use miden::core::precompiles
 use miden::core::sys
 
 begin
@@ -50,6 +56,14 @@ begin
     exec.k1_scalar::push_one_digest
     exec.k1_scalar::assert_eq_with_root
     # => [ROOT2, ...]
+
+    # Hash the packed bytes "abc" and explicitly include the returned obligation.
+    push.6513249 push.128 mem_store
+    push.256 push.3 push.128
+    exec.sha256::hash_bytes_mem_with_root
+    # => [HASH_ROOT, ROOT2, ...] (digest written to address 256)
+    exec.precompiles::append_root
+    # => [ROOT3, ...]
     adv.export_deferred_witness
     exec.sys::truncate_stack
 end

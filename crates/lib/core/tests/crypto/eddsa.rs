@@ -411,11 +411,11 @@ fn manual_ed25519_word_and_bytes_export_all_nested_bindings() {
             "begin {setup} exec.::miden::core::crypto::dsa::eddsa_25519_sha512::{procedure} exec.::miden::core::sys::truncate_stack end"
         );
         let native = run_program(&source, &pk, &sig).unwrap();
-        for seeded in [false, true] {
+        for composed in [false, true] {
             let manual_source =
-                manual_signature_source(&source, "eddsa_25519_sha512", procedure, seeded);
+                manual_signature_source(&source, "eddsa_25519_sha512", procedure, composed);
             let manual = run_program(&manual_source, &pk, &sig).unwrap();
-            assert_manual_signature_matches_native(&native, &manual, 10, seeded);
+            assert_manual_signature_matches_native(&native, &manual, 10, composed);
             let wrong = manual_source.replace(&commitment, &masm_push_word(&Word::default()));
             assert!(run_program(&wrong, &pk, &sig).is_err());
         }

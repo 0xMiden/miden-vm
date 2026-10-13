@@ -335,7 +335,7 @@ fn core_ecdsa_k256_keccak_verify_cycle_baseline() {
     // secp256k1 precompile wrappers.
     // Previously 1191 cycles. The shared body now threads a caller root and the wrapper logs
     // its complete subgraph once; primitive native hashing baselines remain separate.
-    assert_eq!(cycles, 1521);
+    assert_eq!(cycles, 1517);
 }
 
 #[test]
@@ -751,11 +751,11 @@ fn manual_signature_variants_export_all_obligations_and_preserve_results() {
             "begin {setup} exec.::miden::core::crypto::dsa::ecdsa_k256_keccak::{procedure} exec.::miden::core::sys::truncate_stack end"
         );
         let native = run_core_program_with_advice(&source, advice).unwrap();
-        for seeded in [false, true] {
+        for composed in [false, true] {
             let manual_source =
-                manual_signature_source(&source, "ecdsa_k256_keccak", procedure, seeded);
+                manual_signature_source(&source, "ecdsa_k256_keccak", procedure, composed);
             let manual = run_core_program_with_advice(&manual_source, advice).unwrap();
-            assert_manual_signature_matches_native(&native, &manual, obligations, seeded);
+            assert_manual_signature_matches_native(&native, &manual, obligations, composed);
             if procedure == "verify" || procedure == "verify_bytes" {
                 let wrong = manual_source.replace(&commitment, &masm_push_word(&Word::default()));
                 assert!(run_core_program_with_advice(&wrong, advice).is_err());

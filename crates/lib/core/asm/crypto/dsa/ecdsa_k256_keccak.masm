@@ -69,22 +69,21 @@ type Prehash = struct { limbs: [u32; 8] }
 #!
 #! Invocation: exec
 pub proc verify(public_key: eidos::Digest, message: word)
-    padw
-    # => [TRUE, PK_COMM, MSG_WORD, ...]
-    exec.verify_impl
+    exec.verify_with_root
     exec.precompiles::log_deferred
 end
 
-#! Caller-root form of `verify`; includes every nested advice-binding obligation.
-#! Leaves the VM built-in deferred root unchanged.
-#! Input: [PK_COMM, MSG_WORD, ROOT, ...]
-#! Output: [NEXT_ROOT, ...]
+#! Returns the complete obligation root for `verify`, including every nested advice binding.
+#! Leaves the VM built-in deferred root unchanged; the caller must include ROOT in its own
+#! obligation, for example using precompiles::append_root.
+#! Input: [PK_COMM, MSG_WORD, ...]
+#! Output: [ROOT, ...]
 pub proc verify_with_root(
     public_key: eidos::Digest,
     message: word,
-    root: precompiles::Digest,
 ) -> precompiles::Digest
-    movupw.2
+    padw
+    # => [TRUE, PK_COMM, MSG_WORD, ...]
     exec.verify_impl
 end
 
@@ -111,9 +110,10 @@ proc verify_impl(
 
     dup dup push.32 swap
     # => [in_ptr=loc[16], len_bytes=32, out_ptr=loc[16], digest_ptr=loc[16], ...]
-    padw loc_loadw_le.24
-    repeat.4 movdn.6 end
     exec.keccak256::hash_1_chunk_mem_with_root
+    # => [HASH_ROOT, ...]
+    padw loc_loadw_le.24
+    swapw exec.precompiles::append_root
     loc_storew_le.24 dropw
     # => [digest_ptr=loc[16], ...]  (DIGEST_U32[8] written to loc[16..24])
 
@@ -160,23 +160,22 @@ end
 #!
 #! Invocation: exec
 pub proc verify_bytes(public_key: eidos::Digest, message_ptr: ptr<u32>, message_len_bytes: u32)
-    padw
-    # => [TRUE, PK_COMM, MSG_PTR, MSG_LEN_BYTES, ...]
-    exec.verify_bytes_impl
+    exec.verify_bytes_with_root
     exec.precompiles::log_deferred
 end
 
-#! Caller-root form of `verify_bytes`; includes every nested advice-binding obligation.
-#! Leaves the VM built-in deferred root unchanged.
-#! Input: [PK_COMM, MSG_PTR, MSG_LEN_BYTES, ROOT, ...]
-#! Output: [NEXT_ROOT, ...]
+#! Returns the complete obligation root for `verify_bytes`, including every nested advice binding.
+#! Leaves the VM built-in deferred root unchanged; the caller must include ROOT in its own
+#! obligation, for example using precompiles::append_root.
+#! Input: [PK_COMM, MSG_PTR, MSG_LEN_BYTES, ...]
+#! Output: [ROOT, ...]
 pub proc verify_bytes_with_root(
     public_key: eidos::Digest,
     message_ptr: ptr<u32>,
     message_len_bytes: u32,
-    root: precompiles::Digest,
 ) -> precompiles::Digest
-    repeat.4 movup.9 end
+    padw
+    # => [TRUE, PK_COMM, MSG_PTR, MSG_LEN_BYTES, ...]
     exec.verify_bytes_impl
 end
 
@@ -196,9 +195,10 @@ proc verify_bytes_impl(
 
     movdn.2
     # => [MSG_PTR, MSG_LEN_BYTES, out_ptr=loc[16], ...]
-    padw loc_loadw_le.24
-    repeat.4 movdn.6 end
     exec.keccak256::hash_bytes_mem_with_root
+    # => [HASH_ROOT, ...]
+    padw loc_loadw_le.24
+    swapw exec.precompiles::append_root
     loc_storew_le.24 dropw
     # => [...]
 
@@ -243,22 +243,21 @@ end
 #!
 #! Invocation: exec
 pub proc recover(message: word, signature_ptr: ptr<RecoverySignature>) -> PublicKey
-    padw
-    # => [TRUE, MSG_WORD, SIG_PTR, ...]
-    exec.recover_impl
+    exec.recover_with_root
     exec.precompiles::log_deferred
 end
 
-#! Caller-root form of `recover`; includes every nested advice-binding obligation.
-#! Leaves the VM built-in deferred root unchanged.
-#! Input: [MSG_WORD, SIG_PTR, ROOT, ...]
-#! Output: [NEXT_ROOT, QX[8], QY[8], ...]
+#! Returns the complete obligation root for `recover`, including every nested advice binding.
+#! Leaves the VM built-in deferred root unchanged; the caller must include ROOT in its own
+#! obligation, for example using precompiles::append_root.
+#! Input: [MSG_WORD, SIG_PTR, ...]
+#! Output: [ROOT, QX[8], QY[8], ...]
 pub proc recover_with_root(
     message: word,
     signature_ptr: ptr<RecoverySignature>,
-    root: precompiles::Digest,
 ) -> (precompiles::Digest, PublicKey)
-    repeat.4 movup.8 end
+    padw
+    # => [TRUE, MSG_WORD, SIG_PTR, ...]
     exec.recover_impl
 end
 
@@ -277,9 +276,10 @@ proc recover_impl(
 
     dup dup push.32 swap
     # => [in_ptr=loc[0], len_bytes=32, out_ptr=loc[0], digest_ptr=loc[0], SIG_PTR, ...]
-    padw loc_loadw_le.8
-    repeat.4 movdn.6 end
     exec.keccak256::hash_1_chunk_mem_with_root
+    # => [HASH_ROOT, ...]
+    padw loc_loadw_le.8
+    swapw exec.precompiles::append_root
     loc_storew_le.8 dropw
     # => [digest_ptr=loc[0], SIG_PTR, ...]
 
@@ -326,23 +326,22 @@ pub proc recover_bytes(
     message_len_bytes: u32,
     signature_ptr: ptr<RecoverySignature>,
 ) -> PublicKey
-    padw
-    # => [TRUE, MSG_PTR, MSG_LEN_BYTES, SIG_PTR, ...]
-    exec.recover_bytes_impl
+    exec.recover_bytes_with_root
     exec.precompiles::log_deferred
 end
 
-#! Caller-root form of `recover_bytes`; includes every nested advice-binding obligation.
-#! Leaves the VM built-in deferred root unchanged.
-#! Input: [MSG_PTR, MSG_LEN_BYTES, SIG_PTR, ROOT, ...]
-#! Output: [NEXT_ROOT, QX[8], QY[8], ...]
+#! Returns the complete obligation root for `recover_bytes`, including every nested advice binding.
+#! Leaves the VM built-in deferred root unchanged; the caller must include ROOT in its own
+#! obligation, for example using precompiles::append_root.
+#! Input: [MSG_PTR, MSG_LEN_BYTES, SIG_PTR, ...]
+#! Output: [ROOT, QX[8], QY[8], ...]
 pub proc recover_bytes_with_root(
     message_ptr: ptr<u32>,
     message_len_bytes: u32,
     signature_ptr: ptr<RecoverySignature>,
-    root: precompiles::Digest,
 ) -> (precompiles::Digest, PublicKey)
-    repeat.4 movup.6 end
+    padw
+    # => [TRUE, MSG_PTR, MSG_LEN_BYTES, SIG_PTR, ...]
     exec.recover_bytes_impl
 end
 
@@ -357,9 +356,10 @@ proc recover_bytes_impl(
     loc_storew_le.8 dropw
     locaddr.0 movdn.2
     # => [MSG_PTR, MSG_LEN_BYTES, digest_ptr=loc[0], SIG_PTR, ...]
-    padw loc_loadw_le.8
-    repeat.4 movdn.6 end
     exec.keccak256::hash_bytes_mem_with_root
+    # => [HASH_ROOT, ...]
+    padw loc_loadw_le.8
+    swapw exec.precompiles::append_root
     loc_storew_le.8 dropw
     # => [SIG_PTR, ...]  (DIGEST_U32[8] written to loc[0..8])
 

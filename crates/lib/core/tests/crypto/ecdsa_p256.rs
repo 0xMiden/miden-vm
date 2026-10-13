@@ -982,11 +982,11 @@ fn manual_signature_variants_export_all_obligations_and_preserve_results() {
             "begin {setup} exec.::miden::core::crypto::dsa::ecdsa_p256_sha256::{procedure} exec.::miden::core::sys::truncate_stack end"
         );
         let native = run_core_program(&source, advice, None).unwrap();
-        for seeded in [false, true] {
+        for composed in [false, true] {
             let manual_source =
-                manual_signature_source(&source, "ecdsa_p256_sha256", procedure, seeded);
+                manual_signature_source(&source, "ecdsa_p256_sha256", procedure, composed);
             let manual = run_core_program(&manual_source, advice, None).unwrap();
-            assert_manual_signature_matches_native(&native, &manual, obligations, seeded);
+            assert_manual_signature_matches_native(&native, &manual, obligations, composed);
             if procedure == "verify" || procedure == "verify_bytes" {
                 let wrong = manual_source.replace(&commitment, &masm_push_word(&Word::default()));
                 assert!(run_core_program(&wrong, advice, None).is_err());

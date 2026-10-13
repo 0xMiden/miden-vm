@@ -142,14 +142,13 @@ pub proc hash_2_chunks_mem(in_ptr: ptr<u32>, len_bytes: u32, out_ptr: ptr<u32>)
     # => [...]
 end
 
-#! Caller-root form of `finish_hash_assert`; never logs into the VM root.
-#! Input:  [out_ptr, PREIMAGE, len_bytes, ROOT, ...]
-#! Output: [NEXT_ROOT, ...]
+#! Writes the advised Keccak256 digest and returns its registered hash assertion.
+#! Input:  [out_ptr, PREIMAGE, len_bytes, ...]
+#! Output: [ROOT, ...]
 proc finish_hash_assert_with_root(
     out_ptr: ptr<u32>,
     preimage: precompiles::Digest,
     len_bytes: u32,
-    root: precompiles::Digest,
 ) -> precompiles::Digest
     adv_pushw
     dup.4 mem_storew_le dropw
@@ -159,18 +158,17 @@ proc finish_hash_assert_with_root(
     swapw
     movup.8
     exec.register_hash_assert
-    exec.precompiles::append_root
 end
 
-#! Caller-root form of `hash_bytes_mem`; never logs into the VM root.
-#! Input:  [in_ptr, len_bytes, out_ptr, ROOT, ...]
-#! Output: [NEXT_ROOT, ...]
-#! The advised digest is written to out_ptr and its hash assertion is appended to ROOT.
+#! Returns the obligation root for `hash_bytes_mem` without logging into the VM root.
+#! Input:  [in_ptr, len_bytes, out_ptr, ...]
+#! Output: [ROOT, ...]
+#! The advised digest is written to out_ptr; ROOT is the registered hash assertion itself.
+#! The caller must include ROOT in its own obligation, for example using precompiles::append_root.
 pub proc hash_bytes_mem_with_root(
     in_ptr: ptr<u32>,
     len_bytes: u32,
     out_ptr: ptr<u32>,
-    root: precompiles::Digest,
 ) -> precompiles::Digest
     emit.KECCAK256_DIGEST_EVENT
     dup.1
@@ -182,15 +180,15 @@ pub proc hash_bytes_mem_with_root(
     exec.finish_hash_assert_with_root
 end
 
-#! Caller-root form of `hash_1_chunk_mem`; never logs into the VM root.
-#! Input:  [in_ptr, len_bytes, out_ptr, ROOT, ...]
-#! Output: [NEXT_ROOT, ...]
-#! The advised digest is written to out_ptr and its hash assertion is appended to ROOT.
+#! Returns the obligation root for `hash_1_chunk_mem` without logging into the VM root.
+#! Input:  [in_ptr, len_bytes, out_ptr, ...]
+#! Output: [ROOT, ...]
+#! The advised digest is written to out_ptr; ROOT is the registered hash assertion itself.
+#! The caller must include ROOT in its own obligation, for example using precompiles::append_root.
 pub proc hash_1_chunk_mem_with_root(
     in_ptr: ptr<u32>,
     len_bytes: u32,
     out_ptr: ptr<u32>,
-    root: precompiles::Digest,
 ) -> precompiles::Digest
     emit.KECCAK256_DIGEST_EVENT
     exec.precompiles::register_chunks_mem_1
@@ -198,15 +196,15 @@ pub proc hash_1_chunk_mem_with_root(
     exec.finish_hash_assert_with_root
 end
 
-#! Caller-root form of `hash_2_chunks_mem`; never logs into the VM root.
-#! Input:  [in_ptr, len_bytes, out_ptr, ROOT, ...]
-#! Output: [NEXT_ROOT, ...]
-#! The advised digest is written to out_ptr and its hash assertion is appended to ROOT.
+#! Returns the obligation root for `hash_2_chunks_mem` without logging into the VM root.
+#! Input:  [in_ptr, len_bytes, out_ptr, ...]
+#! Output: [ROOT, ...]
+#! The advised digest is written to out_ptr; ROOT is the registered hash assertion itself.
+#! The caller must include ROOT in its own obligation, for example using precompiles::append_root.
 pub proc hash_2_chunks_mem_with_root(
     in_ptr: ptr<u32>,
     len_bytes: u32,
     out_ptr: ptr<u32>,
-    root: precompiles::Digest,
 ) -> precompiles::Digest
     emit.KECCAK256_DIGEST_EVENT
     exec.precompiles::register_chunks_mem_2

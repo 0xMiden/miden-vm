@@ -119,64 +119,59 @@ pub proc merge(left: Digest, right: Digest) -> Digest
     # => [DIGEST_U32[8], ...]
 end
 
-#! Caller-root form of `hash_bytes`; never logs into the VM root.
-#! Input:  [ptr, len_bytes, ROOT, ...]
-#! Output: [NEXT_ROOT, DIGEST_U32[8], ...]
+#! Returns the obligation root for `hash_bytes` without logging into the VM root.
+#! The caller must include ROOT in its own obligation, for example using precompiles::append_root.
+#! Input:  [ptr, len_bytes, ...]
+#! Output: [ROOT, DIGEST_U32[8], ...]
 @locals(8)
 pub proc hash_bytes_with_root(
     ptr: ptr<u32>,
     len_bytes: u32,
-    root: precompiles::Digest,
 ) -> (precompiles::Digest, Digest)
     locaddr.0 movdn.2
     dup.2 movdn.3
-    # => [in_ptr, len_bytes, out_ptr, saved_out_ptr, ROOT, ...]
-    swapw
-    repeat.4 movdn.6 end
-    # => [in_ptr, len_bytes, out_ptr, ROOT, saved_out_ptr, ...]
+    # => [in_ptr, len_bytes, out_ptr, saved_out_ptr, ...]
     exec.keccak256::hash_bytes_mem_with_root
-    # => [NEXT_ROOT, saved_out_ptr, ...]
+    # => [ROOT, saved_out_ptr, ...]
     movup.4
-    # => [saved_out_ptr, NEXT_ROOT, ...]
+    # => [saved_out_ptr, ROOT, ...]
     padw dup.4 mem_loadw_le
     padw movup.8 add.4 mem_loadw_le swapw
     movupw.2
-    # => [NEXT_ROOT, DIGEST_LO, DIGEST_HI, ...]
+    # => [ROOT, DIGEST_LO, DIGEST_HI, ...]
 end
 
-#! Caller-root form of `hash`; never logs into the VM root.
-#! Input:  [INPUT_U32[8], ROOT, ...]
-#! Output: [NEXT_ROOT, DIGEST_U32[8], ...]
+#! Returns the obligation root for `hash` without logging into the VM root.
+#! The caller must include ROOT in its own obligation, for example using precompiles::append_root.
+#! Input:  [INPUT_U32[8], ...]
+#! Output: [ROOT, DIGEST_U32[8], ...]
 @locals(8)
-pub proc hash_with_root(input: Digest, root: precompiles::Digest) -> (precompiles::Digest, Digest)
+pub proc hash_with_root(input: Digest) -> (precompiles::Digest, Digest)
     locaddr.0
     dup movdn.5
     mem_storew_le dropw add.4
     dup movdn.5
     mem_storew_le dropw sub.4
     dup dup push.32 swap
-    # => [in_ptr, len_bytes, out_ptr, saved_out_ptr, ROOT, ...]
-    swapw
-    repeat.4 movdn.6 end
-    # => [in_ptr, len_bytes, out_ptr, ROOT, saved_out_ptr, ...]
+    # => [in_ptr, len_bytes, out_ptr, saved_out_ptr, ...]
     exec.keccak256::hash_1_chunk_mem_with_root
-    # => [NEXT_ROOT, saved_out_ptr, ...]
+    # => [ROOT, saved_out_ptr, ...]
     movup.4
-    # => [saved_out_ptr, NEXT_ROOT, ...]
+    # => [saved_out_ptr, ROOT, ...]
     padw dup.4 mem_loadw_le
     padw movup.8 add.4 mem_loadw_le swapw
     movupw.2
-    # => [NEXT_ROOT, DIGEST_LO, DIGEST_HI, ...]
+    # => [ROOT, DIGEST_LO, DIGEST_HI, ...]
 end
 
-#! Caller-root form of `merge`; never logs into the VM root.
-#! Input:  [LEFT_U32[8], RIGHT_U32[8], ROOT, ...]
-#! Output: [NEXT_ROOT, DIGEST_U32[8], ...]
+#! Returns the obligation root for `merge` without logging into the VM root.
+#! The caller must include ROOT in its own obligation, for example using precompiles::append_root.
+#! Input:  [LEFT_U32[8], RIGHT_U32[8], ...]
+#! Output: [ROOT, DIGEST_U32[8], ...]
 @locals(16)
 pub proc merge_with_root(
     left: Digest,
     right: Digest,
-    root: precompiles::Digest,
 ) -> (precompiles::Digest, Digest)
     locaddr.0
     repeat.3
@@ -186,16 +181,13 @@ pub proc merge_with_root(
     dup movdn.5
     mem_storew_le dropw sub.12
     dup dup push.64 swap
-    # => [in_ptr, len_bytes, out_ptr, saved_out_ptr, ROOT, ...]
-    swapw
-    repeat.4 movdn.6 end
-    # => [in_ptr, len_bytes, out_ptr, ROOT, saved_out_ptr, ...]
+    # => [in_ptr, len_bytes, out_ptr, saved_out_ptr, ...]
     exec.keccak256::hash_2_chunks_mem_with_root
-    # => [NEXT_ROOT, saved_out_ptr, ...]
+    # => [ROOT, saved_out_ptr, ...]
     movup.4
-    # => [saved_out_ptr, NEXT_ROOT, ...]
+    # => [saved_out_ptr, ROOT, ...]
     padw dup.4 mem_loadw_le
     padw movup.8 add.4 mem_loadw_le swapw
     movupw.2
-    # => [NEXT_ROOT, DIGEST_LO, DIGEST_HI, ...]
+    # => [ROOT, DIGEST_LO, DIGEST_HI, ...]
 end

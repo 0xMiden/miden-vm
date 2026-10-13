@@ -7,7 +7,10 @@ use miden_crypto::hash::{
     keccak::Keccak256,
     sha2::{Sha256, Sha512},
 };
-use miden_precompiles::{CurveId, CurvePrecompile, ONE_LIMBS, UintDomain, UintPrecompile};
+use miden_precompiles::{
+    CurveId, CurvePrecompile, Keccak256Precompile, ONE_LIMBS, Sha256Precompile, Sha512Precompile,
+    UintDomain, UintPrecompile,
+};
 
 use super::helpers::{
     masm_store_felts, read_memory_felts, read_stack_felts, run_precompile_program as run_raw,
@@ -206,6 +209,13 @@ fn manual_hashes_return_the_exact_assertion_root_and_memory_digest() {
                 "sha256" => Sha256::hash(&input).as_bytes().to_vec(),
                 _ => Sha512::hash(&input).as_bytes().to_vec(),
             };
+            let preimage = Node::chunks_from_bytes(&input).digest();
+            let digest = Node::chunks_from_bytes(&expected).digest();
+            let assertion = match module {
+                "keccak256" => Keccak256Precompile::assert_node(len as u32, preimage, digest),
+                "sha256" => Sha256Precompile::assert_node(len as u32, preimage, digest),
+                _ => Sha512Precompile::assert_node(len as u32, preimage, digest),
+            };
             let mut limbs = bytes_to_packed_u32_elements(&input);
             limbs.resize(len.div_ceil(32).max(1) * 8, Felt::ZERO);
             let stores = masm_store_felts(&limbs, 128);
@@ -218,24 +228,93 @@ fn manual_hashes_return_the_exact_assertion_root_and_memory_digest() {
             }
             for name in names {
                 let source = format!(
-                    "use miden::core::precompiles::hashes::{module}\nbegin {stores} padw push.256 push.{len} push.128 exec.{module}::{name}_with_root adv.export_deferred_witness end"
+                    "use miden::core::precompiles::hashes::{module}\nbegin {stores} push.99.98.97.96 push.256 push.{len} push.128 exec.{module}::{name}_with_root adv.export_deferred_witness end"
                 );
                 let output = run_precompile_program(&source).unwrap();
-                assert_eq!(and_count(&assert_exported_manual_root(&output, 0)), 1);
+                let witness = assert_exported_manual_root(&output, 0);
+                assert_eq!(witness.root_unchecked(), assertion.digest());
+                assert_eq!(and_count(&witness), 0, "hash roots must be bare assertions");
+                assert_eq!(
+                    &read_stack_felts(&output, 8)[4..],
+                    &[96, 97, 98, 99].map(Felt::from_u32)
+                );
                 let expected = bytes_to_packed_u32_elements(&expected);
                 assert_eq!(read_memory_felts(&output, 256, expected.len()), expected);
-                let native = source
-                    .replace("padw push.256", "push.256")
-                    .replace("_with_root", "")
-                    .replace("adv.export_deferred_witness", "");
+                let native =
+                    source.replace("_with_root", "").replace("adv.export_deferred_witness", "");
                 let native = run_precompile_program(&native).unwrap();
                 assert_eq!(
                     native.precompile_root(),
-                    assert_exported_manual_root(&output, 0).root_unchecked()
+                    Node::and(TRUE_DIGEST, witness.root_unchecked()).digest()
                 );
+                // Explicit composition must retain the exact hash assertion and caller root.
+                let composed = source.replace(
+                    "adv.export_deferred_witness",
+                    "padw swapw exec.::miden::core::precompiles::append_root adv.export_deferred_witness",
+                );
+                let composed = run_precompile_program(&composed).unwrap();
+                assert_eq!(
+                    assert_exported_manual_root(&composed, 0).root_unchecked(),
+                    native.precompile_root()
+                );
+                assert_eq!(read_memory_felts(&composed, 256, expected.len()), expected);
             }
         }
     }
+}
+
+#[test]
+fn returned_hash_roots_compose_with_arithmetic_and_preserve_the_vm_root() {
+    let one = UintPrecompile::value_node(UintDomain::U256, ONE_LIMBS).digest();
+    let equality =
+        Node::join(UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID), one, one).unwrap();
+    let seed = Node::and(TRUE_DIGEST, equality.digest()).digest();
+    let preimage = Node::chunks_from_bytes(b"abc").digest();
+    let sha256 = Sha256Precompile::assert_node(
+        3,
+        preimage,
+        Node::chunks_from_bytes(Sha256::hash(b"abc").as_bytes()).digest(),
+    );
+    let sha512 = Sha512Precompile::assert_node(
+        3,
+        preimage,
+        Node::chunks_from_bytes(Sha512::hash(b"abc").as_bytes()).digest(),
+    );
+    let expected = Node::and(Node::and(seed, sha256.digest()).digest(), sha512.digest()).digest();
+    let source = r#"
+        use miden::core::precompiles
+        use miden::core::precompiles::u256
+        use miden::core::precompiles::hashes::sha256
+        use miden::core::precompiles::hashes::sha512
+        begin
+            push.6513249 push.128 mem_store
+            push.99.98.97.96
+            padw exec.u256::push_one_digest dupw exec.u256::assert_eq_with_root
+            push.256 push.3 push.128 exec.sha256::hash_bytes_mem_with_root
+            adv.export_deferred_witness
+            exec.precompiles::append_root
+            push.256 push.3 push.128 exec.sha512::hash_bytes_mem_with_root
+            adv.export_deferred_witness
+            exec.precompiles::append_root
+            adv.export_deferred_witness
+        end
+    "#;
+    let output = run_precompile_program(source).unwrap();
+    let witness = assert_exported_manual_root(&output, 0);
+    assert_eq!(witness.root_unchecked(), expected);
+    assert_eq!(and_count(&witness), 3);
+    assert!(output.advice.get_mapped_values(&sha256.digest()).is_some());
+    assert!(output.advice.get_mapped_values(&sha512.digest()).is_some());
+    assert_eq!(&read_stack_felts(&output, 8)[4..], &[96, 97, 98, 99].map(Felt::from_u32));
+
+    let logged = source.replacen("begin", "begin padw exec.precompiles::log_deferred", 1);
+    let logged = run_precompile_program(&logged).unwrap();
+    assert_eq!(logged.precompile_root(), Node::and(TRUE_DIGEST, TRUE_DIGEST).digest());
+    assert_eq!(logged.stack, output.stack);
+    assert_eq!(
+        logged.advice.get_mapped_values(&expected),
+        output.advice.get_mapped_values(&expected)
+    );
 }
 
 #[test]
@@ -255,10 +334,10 @@ fn stack_keccak_returns_root_before_limbs_including_full_width_merge() {
                 .join(" ")
         };
         let source = format!(
-            "begin push.99.98.97.96 padw {setup} exec.::miden::core::crypto::hashes::keccak256::{name}_with_root adv.export_deferred_witness end"
+            "begin push.99.98.97.96 {setup} exec.::miden::core::crypto::hashes::keccak256::{name}_with_root adv.export_deferred_witness end"
         );
         let output = run_precompile_program(&source).unwrap();
-        assert_eq!(and_count(&assert_exported_manual_root(&output, 0)), 1);
+        assert_eq!(and_count(&assert_exported_manual_root(&output, 0)), 0);
         assert_eq!(
             &read_stack_felts(&output, 16)[4..12],
             bytes_to_packed_u32_elements(Keccak256::hash(&bytes).as_bytes())
@@ -299,7 +378,7 @@ fn manual_hashes_reject_forged_digest_advice() {
                 Ok(vec![AdviceMutation::extend_advice_stack(advice)])
             });
         let source = format!(
-            "begin push.6513249 push.128 mem_store padw push.256 push.3 push.128 exec.::miden::core::precompiles::hashes::{module}::hash_bytes_mem_with_root end"
+            "begin push.6513249 push.128 mem_store push.256 push.3 push.128 exec.::miden::core::precompiles::hashes::{module}::hash_bytes_mem_with_root end"
         );
         let program = Assembler::default()
             .with_package(library.package(), Linkage::Dynamic)

@@ -61,22 +61,21 @@ const PUBLIC_KEY_INIT_CV = [
 #! The signature is an uncommitted advice witness; callers needing exact signature binding must
 #! commit to its encoding separately. No result is pushed; failed verification traps.
 pub proc verify(public_key: eidos::Digest, message: word)
-    padw
-    # => [TRUE, PK_COMM, MSG_WORD, ...]
-    exec.verify_impl
+    exec.verify_with_root
     exec.precompiles::log_deferred
 end
 
-#! Caller-root form of `verify`; includes every nested advice-binding obligation.
-#! Leaves the VM built-in deferred root unchanged.
-#! Input: [PK_COMM, MSG_WORD, ROOT, ...]
-#! Output: [NEXT_ROOT, ...]
+#! Returns the complete obligation root for `verify`, including every nested advice binding.
+#! Leaves the VM built-in deferred root unchanged; the caller must include ROOT in its own
+#! obligation, for example using precompiles::append_root.
+#! Input: [PK_COMM, MSG_WORD, ...]
+#! Output: [ROOT, ...]
 pub proc verify_with_root(
     public_key: eidos::Digest,
     message: word,
-    root: precompiles::Digest,
 ) -> precompiles::Digest
-    movupw.2
+    padw
+    # => [TRUE, PK_COMM, MSG_WORD, ...]
     exec.verify_impl
 end
 
@@ -121,24 +120,23 @@ pub proc verify_bytes(
     message_len_bytes: u32,
     scratch_ptr: ptr<u32>,
 )
-    padw
-    # => [TRUE, PK_COMM, MSG_PTR, MSG_LEN_BYTES, SCRATCH_PTR, ...]
-    exec.verify_bytes_impl
+    exec.verify_bytes_with_root
     exec.precompiles::log_deferred
 end
 
-#! Caller-root form of `verify_bytes`; includes every nested advice-binding obligation.
-#! Leaves the VM built-in deferred root unchanged.
-#! Input: [PK_COMM, MSG_PTR, MSG_LEN_BYTES, SCRATCH_PTR, ROOT, ...]
-#! Output: [NEXT_ROOT, ...]
+#! Returns the complete obligation root for `verify_bytes`, including every nested advice binding.
+#! Leaves the VM built-in deferred root unchanged; the caller must include ROOT in its own
+#! obligation, for example using precompiles::append_root.
+#! Input: [PK_COMM, MSG_PTR, MSG_LEN_BYTES, SCRATCH_PTR, ...]
+#! Output: [ROOT, ...]
 pub proc verify_bytes_with_root(
     public_key: eidos::Digest,
     message_ptr: ptr<u32>,
     message_len_bytes: u32,
     scratch_ptr: ptr<u32>,
-    root: precompiles::Digest,
 ) -> precompiles::Digest
-    repeat.4 movup.10 end
+    padw
+    # => [TRUE, PK_COMM, MSG_PTR, MSG_LEN_BYTES, SCRATCH_PTR, ...]
     exec.verify_bytes_impl
 end
 
@@ -233,9 +231,10 @@ proc verify_bytes_impl(
     # the complete preimage before writing its output, so its 16-felt result can overwrite scratch.
     loc_load.SCRATCH_PTR_LOCAL loc_load.MSG_LEN_LOCAL add.PREIMAGE_PREFIX_BYTES
     loc_load.SCRATCH_PTR_LOCAL
-    padw loc_loadw_le.4
-    repeat.4 movdn.6 end
     exec.sha512::hash_bytes_mem_with_root
+    # => [HASH_ROOT, ...]
+    padw loc_loadw_le.4
+    swapw exec.precompiles::append_root
     loc_storew_le.4 dropw
     # SHA-512 digest bytes already form the little-endian 512-bit challenge integer.
     loc_load.SCRATCH_PTR_LOCAL exec.ed25519_scalar::load_reduced_512_mem
