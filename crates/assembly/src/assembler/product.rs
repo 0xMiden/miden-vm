@@ -1,7 +1,6 @@
 use miden_mast_package::{Dependency, debug_info::PackageDebugInfo};
 
 use super::*;
-use crate::diagnostics::WrapErr;
 
 pub struct AssemblyProduct {
     package: Box<Package>,
@@ -75,9 +74,12 @@ impl AssemblyProduct {
         // Section: debug info
         if emit_debug_info {
             let bytes = debug_info
-                .try_to_bytes()
-                .into_diagnostic()
-                .wrap_err("cannot emit package debug information; reduce debug information or build with debug information disabled")?;
+                .to_bytes_with_standard_limits()
+                .map_err(|error| {
+                    Report::msg(format!(
+                        "assembled package debug info exceeds standard decoder limits: {error}; reduce imported debug metadata or disable debug-info emission"
+                    ))
+                })?;
             package.sections.push(Section::new(SectionId::DEBUG_INFO, bytes));
         }
 
@@ -94,32 +96,28 @@ mod tests {
     use miden_mast_package::debug_info::{MAX_DEBUG_INFO_STRING_SIZE, PackageDebugInfoBuilder};
 
     use super::*;
+    use crate::testing::TestContext;
 
     #[test]
-    fn artifact_checks_debug_encoding_only_when_debug_info_is_emitted() {
-        for emit_debug_info in [false, true] {
-            let mut package = Assembler::default()
-                .assemble_library(
-                    "debug-limits",
-                    "namespace debug_limits pub proc main push.1 end",
-                    [] as [&str; 0],
-                )
+    fn artifact_rejects_debug_info_beyond_standard_decoder_limits() {
+        for emit_debug_info in [true, false] {
+            let context = TestContext::default();
+            let module = context.parse_module("begin push.42 end").unwrap();
+            let mut product = Assembler::new(context.source_manager())
+                .assemble_executable_modules("test".into(), module, [])
                 .unwrap();
-            package.sections.clear();
-            let mut debug_info = PackageDebugInfoBuilder::default();
-            debug_info.add_string("x".repeat(MAX_DEBUG_INFO_STRING_SIZE + 1));
-            let product = AssemblyProduct::new(package, None, debug_info.build());
-            match product.into_artifact(emit_debug_info) {
-                Ok(package) => {
-                    assert!(!emit_debug_info);
-                    assert!(
-                        !package.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO)
-                    );
-                },
-                Err(error) => {
-                    assert!(emit_debug_info);
-                    assert!(format!("{error:?}").contains("debug string size"));
-                },
+            let mut debug = PackageDebugInfoBuilder::from(product.debug_info);
+            debug.add_string("x".repeat(MAX_DEBUG_INFO_STRING_SIZE + 1));
+            product.debug_info = debug.build();
+            let result = product.into_artifact(emit_debug_info);
+            if emit_debug_info {
+                let error = result.expect_err("unreadable debug info must fail assembly");
+                let message = error.to_string();
+                assert!(message.contains("standard decoder limits"), "{message}");
+                assert!(message.contains("debug string size"), "{message}");
+                assert!(message.contains("disable debug-info emission"), "{message}");
+            } else {
+                assert!(result.unwrap().debug_info().unwrap().is_none());
             }
         }
     }

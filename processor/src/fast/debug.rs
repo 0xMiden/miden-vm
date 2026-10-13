@@ -26,6 +26,8 @@ pub enum DebugFrameOrigin {
     InferredRange,
     /// The selected source occurrence's assembly context uniquely names a function.
     InferredContext,
+    /// An external boundary's inline rows identify a caller with a retained canonical definition.
+    InferredInline,
 }
 
 /// A recovered invocation of a debug function, without additional serialized frame metadata.
@@ -261,6 +263,32 @@ impl FunctionIndex {
         candidates.next().is_none().then_some(first)
     }
 
+    fn external_caller_functions<'a>(
+        &'a self,
+        node: &'a DebugSourceNode,
+    ) -> impl Iterator<Item = (DebugFunctionIdx, u32, usize)> + 'a {
+        let external_digest = self.forest[node.exec_node]
+            .is_external()
+            .then(|| self.forest[node.exec_node].digest());
+        node.inline_calls.iter().rev().filter_map(move |row| {
+            if !row.contains_operation(node.op_start) {
+                return None;
+            }
+            let function = self.info.get_function(row.callee_idx)?;
+            let canonical = self.info.source_node(function.source_node.into_option()?)?;
+            if canonical.exec_node != node.exec_node || Some(function.mast_root) != external_digest
+            {
+                return None;
+            }
+            let own_inline = canonical
+                .inline_calls
+                .iter()
+                .filter(|row| row.contains_operation(canonical.op_start))
+                .count();
+            Some((row.callee_idx, row.op_idx, own_inline))
+        })
+    }
+
     fn context_function(&self, node: &DebugSourceNode, operation: u32) -> Option<DebugFunctionIdx> {
         let row = node.asm_op_for_operation(operation)?;
         if operation >= row.op_idx.saturating_add(u32::from(row.num_cycles)) {
@@ -412,6 +440,33 @@ impl DebugCallFrameResolver {
                     } else {
                         DebugFrameOrigin::InferredContext
                     },
+                ));
+            }
+            // External exec copies have no assembly operations or canonical source identity.
+            // Their explicit inline rows still identify caller-owned definitions, ordered
+            // from outermost to innermost. Imported declarations without a local definition
+            // belong to the loaded package's frames instead.
+            for (function, start, own_inline) in index.external_caller_functions(node) {
+                if frames.last().is_some_and(|frame| {
+                    frame.function_idx == function && Arc::ptr_eq(&frame.debug_info, info)
+                }) {
+                    continue;
+                }
+                let inherited = inherited
+                    + node
+                        .inline_calls
+                        .iter()
+                        .filter(|row| row.contains_operation(node.op_start))
+                        .count()
+                        .saturating_sub(own_inline);
+                frames.push(frame(
+                    info,
+                    function,
+                    *source,
+                    start,
+                    activation.clone(),
+                    inherited,
+                    DebugFrameOrigin::InferredInline,
                 ));
             }
             if position != next_start {
