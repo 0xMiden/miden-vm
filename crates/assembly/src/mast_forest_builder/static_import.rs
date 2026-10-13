@@ -432,6 +432,11 @@ impl MastForestBuilder {
             return Ok(None);
         };
         if matches.next().is_some() {
+            log::warn!(
+                target: "assembler::import_procedure_function",
+                "ambiguous debug declarations for {path} in library {} ({library_id}); omitting exec inline-call frame",
+                library.package.name,
+            );
             return Ok(None);
         }
         let index = tables

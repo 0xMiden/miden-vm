@@ -646,12 +646,8 @@ impl Assembler {
         let mut cache = crate::linker::ResolverCache::default();
         let export = match self.linker[gid].item() {
             SymbolItem::Compiled(ItemInfo::Procedure(item)) => {
-                let resolved = match mast_forest_builder.get_procedure(gid) {
-                    Some(proc) => ResolvedProcedure {
-                        node: proc.body_node_use(),
-                        signature: proc.signature(),
-                        function: mast_forest_builder.procedure_function_index(gid),
-                    },
+                let (node, signature) = match mast_forest_builder.get_procedure(gid) {
+                    Some(proc) => (proc.body_node_use(), proc.signature()),
                     // We didn't find the procedure in our current MAST forest. We still need to
                     // check if it exists in one of a library dependency.
                     None => {
@@ -679,15 +675,10 @@ impl Assembler {
                                 item.digest,
                             )?;
                         }
-                        ResolvedProcedure {
-                            node,
-                            signature: item.signature.clone(),
-                            function: mast_forest_builder.procedure_function_index(gid),
-                        }
+                        (node, item.signature.clone())
                     },
                 };
                 let digest = item.digest;
-                let ResolvedProcedure { node, signature, .. } = resolved;
                 let attributes = item.attributes.clone();
                 let pctx = ProcedureContext::new(
                     gid,
@@ -1641,13 +1632,12 @@ impl Assembler {
                     None,
                     mast_forest_builder,
                 )?;
-                Ok(ResolvedProcedure { node, signature: None, function: None })
+                Ok(ResolvedProcedure { node, function: None })
             },
             SymbolResolution::Exact { gid, .. } => {
                 match mast_forest_builder.get_procedure(gid) {
                     Some(proc) => Ok(ResolvedProcedure {
                         node: proc.body_node_use(),
-                        signature: proc.signature(),
                         function: mast_forest_builder.procedure_function_index(gid),
                     }),
                     // We didn't find the procedure in our current MAST forest. We still need to
@@ -1680,11 +1670,7 @@ impl Assembler {
                                     p.digest,
                                 )?;
                             }
-                            Ok(ResolvedProcedure {
-                                node,
-                                signature: p.signature.clone(),
-                                function,
-                            })
+                            Ok(ResolvedProcedure { node, function })
                         },
                         SymbolItem::Procedure(_) => panic!(
                             "AST procedure {gid:?} exists in the linker, but not in the MastForestBuilder"
@@ -1786,6 +1772,5 @@ pub(crate) struct BodyWrapper {
 
 pub(super) struct ResolvedProcedure {
     pub node: MastNodeUse,
-    pub signature: Option<Arc<FunctionType>>,
     pub function: Option<DebugFunctionIdx>,
 }
