@@ -113,7 +113,7 @@ fn inline_call_chains_are_recorded_on_call_and_structured_control_occurrences() 
         let inline_calls = source_node
             .inline_calls
             .iter()
-            .filter(|inline_call| inline_call.op_idx == 0)
+            .filter(|inline_call| inline_call.contains_operation(0))
             .collect::<Vec<_>>();
 
         assert_eq!(inline_calls.len(), 1, "{expected_op} should retain its inline chain");
@@ -184,7 +184,7 @@ fn inline_call_chains_cover_exec_source_occurrences() -> TestResult {
             callee_source
                 .inline_calls
                 .iter()
-                .filter(|inline_call| inline_call.op_idx == asm_op.op_idx)
+                .filter(|inline_call| inline_call.contains_operation(asm_op.op_idx))
                 .count(),
             1,
             "every operation in the exec target should retain the active inline chain",
@@ -393,6 +393,110 @@ fn external_exec_records_inline_context_at_the_boundary() -> TestResult {
             .iter()
             .all(|inline_call| inline_call.op_idx == external_source.op_start)
     );
+    Ok(())
+}
+
+#[test]
+fn compact_inline_ranges_survive_padding_and_static_linking() -> TestResult {
+    let context = TestContext::default();
+    let body = "push.1 drop\n".repeat(200);
+    let mut library_module = context.parse_module(source_file!(
+        &context,
+        format!("namespace dep::math pub proc callee nop {body} nop push.2 drop end")
+    ))?;
+    let callee = library_module.procedures_mut().next().unwrap();
+    replace_nops_with_named_inline_call_markers(&context, callee, &[Some("source::inner"), None])?;
+    let library = Assembler::new(context.source_manager()).assemble_library(
+        "dep",
+        library_module,
+        None::<Box<Module>>,
+    )?;
+    let info = library.debug_info().into_diagnostic()?.unwrap();
+    assert_eq!(info.nodes().iter().map(|node| node.inline_calls.len()).sum::<usize>(), 1);
+
+    let mut module = context
+        .parse_module(source_file!(&context, "use dep::math begin nop exec.math::callee end"))?;
+    let entrypoint = module.procedures_mut().find(|procedure| procedure.is_entrypoint()).unwrap();
+    replace_nops_with_named_inline_call_markers(&context, entrypoint, &[Some("source::outer")])?;
+    let package = Assembler::new(context.source_manager())
+        .with_package(Arc::from(library), Linkage::Static)?
+        .assemble_program("test", module)?;
+    let info = package.debug_info().into_diagnostic()?.unwrap();
+    let mut checked = BTreeSet::new();
+    for (source_index, node) in info.nodes().iter().enumerate() {
+        let source_id = miden_mast_package::debug_info::DebugSourceNodeId::from(
+            u32::try_from(source_index).unwrap(),
+        );
+        for operation in &node.asm_ops {
+            let name = info[operation.op_name_idx].as_ref();
+            if !matches!(name, "push.1" | "push.2") {
+                continue;
+            }
+            let chain = info
+                .inline_calls_for_operation(source_id, operation.op_idx)
+                .map(|row| info[info.get_function(row.callee_idx).unwrap().name_idx].as_ref())
+                .collect::<Vec<_>>();
+            let expected = if name == "push.1" {
+                vec!["source::inner", "source::outer"]
+            } else {
+                vec!["source::outer"]
+            };
+            assert_eq!(chain, expected);
+            checked.insert(operation.op_idx);
+        }
+    }
+    assert_eq!(checked.len(), 201);
+    Ok(())
+}
+
+#[test]
+fn many_inline_ranges_survive_padding_and_static_linking() -> TestResult {
+    let context = TestContext::default();
+    let body = "nop nop push.1 drop nop nop push.2 drop\n".repeat(128);
+    let mut library_module = context.parse_module(source_file!(
+        &context,
+        format!("namespace dep::math pub proc callee {body} end")
+    ))?;
+    let markers = [None, Some("source::first"), None, Some("source::second")].repeat(128);
+    let callee = library_module.procedures_mut().next().unwrap();
+    replace_nops_with_named_inline_call_markers(&context, callee, &markers)?;
+    let library = Assembler::new(context.source_manager()).assemble_library(
+        "dep",
+        library_module,
+        None::<Box<Module>>,
+    )?;
+    let info = library.debug_info().into_diagnostic()?.unwrap();
+    assert_eq!(info.nodes().iter().map(|node| node.inline_calls.len()).sum::<usize>(), 256);
+
+    let mut module = context
+        .parse_module(source_file!(&context, "use dep::math begin nop exec.math::callee end"))?;
+    let entrypoint = module.procedures_mut().find(|procedure| procedure.is_entrypoint()).unwrap();
+    replace_nops_with_named_inline_call_markers(&context, entrypoint, &[Some("source::outer")])?;
+    let package = Assembler::new(context.source_manager())
+        .with_package(Arc::from(library), Linkage::Static)?
+        .assemble_program("test", module)?;
+    let info = package.debug_info().into_diagnostic()?.unwrap();
+    let mut checked = BTreeSet::new();
+    for (source_index, node) in info.nodes().iter().enumerate() {
+        let source_id = miden_mast_package::debug_info::DebugSourceNodeId::from(
+            u32::try_from(source_index).unwrap(),
+        );
+        for operation in &node.asm_ops {
+            let name = info[operation.op_name_idx].as_ref();
+            let inner = match name {
+                "push.1" => "source::first",
+                "push.2" => "source::second",
+                _ => continue,
+            };
+            let chain = info
+                .inline_calls_for_operation(source_id, operation.op_idx)
+                .map(|row| info[info.get_function(row.callee_idx).unwrap().name_idx].as_ref())
+                .collect::<Vec<_>>();
+            assert_eq!(chain, vec![inner, "source::outer"]);
+            checked.insert(operation.op_idx);
+        }
+    }
+    assert_eq!(checked.len(), 256);
     Ok(())
 }
 

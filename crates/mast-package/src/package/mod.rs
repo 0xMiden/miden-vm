@@ -203,15 +203,24 @@ impl Package {
 
     /// Removes all package-owned debug information from this package.
     ///
-    /// This removes well-known package debug sections and recursively strips an embedded kernel
+    /// This removes well-known package debug sections and also strips them from an embedded kernel
     /// package if one is present.
+    ///
+    /// # Errors
+    /// Returns an error if an embedded kernel package cannot be decoded, or if it embeds another
+    /// kernel package.
     pub fn strip_debug_info(&mut self) -> Result<(), PackageStripError> {
         for section in self.sections.iter_mut().filter(|section| section.id == SectionId::KERNEL) {
             // Debug metadata is about to be removed, so validate the nested MAST while deferring
             // debug validation that could otherwise prevent stripping malformed metadata.
             let mut kernel_package = Self::read_from_bytes_trusted(section.data.as_ref())
                 .map_err(|source| PackageStripError::DecodeEmbeddedKernel { source })?;
-            kernel_package.strip_debug_info()?;
+            // The assembler never embeds a kernel in a kernel, so strip one level only instead of
+            // recursing into attacker-controlled nesting.
+            if kernel_package.sections.iter().any(|section| section.id == SectionId::KERNEL) {
+                return Err(PackageStripError::NestedEmbeddedKernel);
+            }
+            kernel_package.sections.retain(|section| !section.id.is_debug());
             section.data = Cow::Owned(kernel_package.to_bytes());
         }
 
@@ -786,7 +795,8 @@ impl Package {
             for row in source_node.inline_calls.iter() {
                 let is_external_boundary = exec_node.is_external()
                     && source_node.op_start == source_node.op_end
-                    && row.op_idx == source_node.op_start;
+                    && row.op_idx == source_node.op_start
+                    && row.op_end == source_node.op_end;
                 if !is_external_boundary {
                     self.validate_source_map_row(
                         source_id,
@@ -794,6 +804,14 @@ impl Package {
                         row.op_idx,
                         "inline call",
                     )?;
+                    if row.op_end <= row.op_idx || row.op_end > source_node.op_end {
+                        return Err(PackageDebugInfoError::InvalidValue {
+                            message: format!(
+                                "debug inline-call range {}..{} is outside source node range {}..{}",
+                                row.op_idx, row.op_end, source_node.op_start, source_node.op_end,
+                            ),
+                        });
+                    }
                 }
                 if debug_info.get_function(row.callee_idx).is_none() {
                     return Err(PackageDebugInfoError::InvalidReference {
@@ -1911,6 +1929,7 @@ mod tests {
         let mut node = debug_source_node(exec_node, Vec::new(), 0, 1);
         node.inline_calls.push(DebugSourceInlineCall {
             op_idx: 0,
+            op_end: 1,
             callee_idx: DebugFunctionIdx::from(1),
             loc_idx: DebugLocIdx::from(0),
         });
@@ -1935,6 +1954,7 @@ mod tests {
         let mut node = debug_source_node(exec_node, Vec::new(), 0, 1);
         node.inline_calls.push(DebugSourceInlineCall {
             op_idx: 0,
+            op_end: 1,
             callee_idx: function_idx,
             loc_idx: DebugLocIdx::from(99),
         });
@@ -1944,6 +1964,30 @@ mod tests {
 
         let err = package.debug_info().expect_err("bad inline call location should be rejected");
         assert!(matches!(err, PackageDebugInfoError::InvalidReference { .. }));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_inline_ranges_outside_the_source_occurrence() {
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        let exec_node = package.get_export_node_id("app::entry");
+        for (op_idx, op_end) in [(0, 0), (0, 2), (1, 2)] {
+            let mut builder = PackageDebugInfoBuilder::default();
+            let mut node = debug_source_node(exec_node, Vec::new(), 0, 1);
+            node.inline_calls.push(DebugSourceInlineCall {
+                op_idx,
+                op_end,
+                callee_idx: DebugFunctionIdx::from(0),
+                loc_idx: DebugLocIdx::from(0),
+            });
+            builder.add_node(node).unwrap();
+            package.sections = vec![debug_info_section(builder.build().as_ref())];
+            let error = package.debug_info().unwrap_err();
+            if op_idx == 0 {
+                assert!(matches!(error, PackageDebugInfoError::InvalidValue { .. }), "{error}");
+            } else {
+                assert!(matches!(error, PackageDebugInfoError::InvalidReference { .. }), "{error}",);
+            }
+        }
     }
 
     #[test]
@@ -2166,6 +2210,23 @@ mod tests {
             "untrusted embedded-kernel decode should retain validated nested debug sections"
         );
         assert!(untrusted_kernel.debug_info().unwrap().is_some());
+    }
+
+    #[test]
+    fn strip_debug_info_rejects_nested_embedded_kernel() {
+        let inner = build_debug_package("inner", TargetType::Kernel, "inner::boot", "inner_ctx");
+        let mut kernel =
+            build_debug_package("kernel", TargetType::Kernel, "kernel::boot", "kernel_ctx");
+        kernel.sections.push(Section::new(SectionId::KERNEL, inner.to_bytes()));
+
+        let mut package =
+            build_debug_package("app", TargetType::Executable, "app::entry", "app_ctx");
+        package.sections.push(Section::new(SectionId::KERNEL, kernel.to_bytes()));
+
+        assert!(matches!(
+            package.strip_debug_info(),
+            Err(PackageStripError::NestedEmbeddedKernel)
+        ));
     }
 
     #[test]

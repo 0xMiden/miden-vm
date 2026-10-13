@@ -645,6 +645,7 @@ mod tests {
                 debug_vars: Vec::new(),
                 inline_calls: vec![DebugSourceInlineCall {
                     op_idx: 7,
+                    op_end: 7,
                     callee_idx: DebugFunctionIdx::from(0),
                     loc_idx: DebugLocIdx::from(0),
                 }],
