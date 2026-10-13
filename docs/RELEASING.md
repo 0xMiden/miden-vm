@@ -33,7 +33,7 @@ Keep the branch at that commit until publication finishes.
 The `release` environment requires approval from an authorized repository admin.
 An admin can approve their own release. Keep admin bypass disabled.
 Configure named users as required reviewers. The workflow checks that each user has repository admin access.
-It repeats the check after approval before publication jobs proceed.
+It repeats the check after approval before crate publication proceeds.
 Update the reviewer list when admin access changes.
 Allow deployments from `main`, `next`, `release/v*`, and `release-v*`.
 
@@ -48,11 +48,17 @@ gh workflow run workspace-publish.yml --repo 0xMiden/miden-vm \
 
 For a release candidate, use `--ref next -f tag=v1.0.0-rc.1`.
 Use `--ref main` for stable minor releases and the final `v1.0.0`.
-Review the branch and commit in the Actions run before approving its pending jobs.
+Review the draft assets and the source commit in the Actions run before approving crate publication.
+Draft creation and asset upload run before approval.
+Only the crate publisher uses the `release` environment, so each run requires one approval.
 Builds and package verification run without publication credentials.
 The publisher receives its token only for the Cargo upload step, which skips compilation.
-The workflow checks the branch before tag creation and crate publication.
-It checks the remote tag again before making the GitHub release public.
+Cargo waits up to five minutes for each uploaded dependency to appear in the registry index.
+The wait setting is unstable, so the upload command uses `RUSTC_BOOTSTRAP=1` with the numbered toolchain.
+The workflow checks the branch and any existing tag before crate publication.
+After the approved crate publisher succeeds, the workflow creates the immutable tag.
+This order meets the tag ruleset requirement for a completed `release` deployment.
+The workflow checks the remote tag before making the GitHub release public.
 GitHub marks release candidates as prereleases.
 Patch branches do not replace GitHub's latest release. Stable releases from `main` do.
 
