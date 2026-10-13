@@ -17,6 +17,56 @@ Generated core-library MASM can be inspected locally:
 cargo run -p miden-core-lib-codegen -- --out target/miden-core-lib-generated-asm
 ```
 
+## Caller-maintained precompile roots
+
+Deferred precompile procedures have `_with_root` variants for programs that accumulate their own
+obligations. They take the caller's four-felt root after their ordinary arguments, append every
+advice-binding assertion, and leave the VM's built-in deferred root unchanged. Start with the
+implicit TRUE digest (`padw`). Expression constructors, arithmetic expressions, loads, reductions,
+and MSM remain shared; they take no root.
+
+Hash and signature procedures return `[NEXT_ROOT, ordinary results..., ...]`. Field/uint evaluation,
+curve evaluation, inversion/division, and predicates return `[ordinary results..., NEXT_ROOT, ...]`.
+Assertions return only `NEXT_ROOT`. Comparisons can return false successfully: the root binds the
+values used to compute their result rather than asserting the result is true. Memory hashes keep
+their existing input/output encoding, alignment, padding, overlap, and length-limit contracts.
+
+`precompiles::append_root` takes `[ASSERTION, ROOT, ...]` and returns the exact digest of
+`AND(ROOT, ASSERTION)`, registering and hashing the same ordered payload without logging. Both
+children must be registered true assertions or implicit TRUE. The helper also combines independently
+built roots, and does not simplify TRUE children.
+
+```masm
+use miden::core::precompiles::fields::k1_scalar
+use miden::core::sys
+
+begin
+    padw
+    exec.k1_scalar::push_two_digest
+    exec.k1_scalar::inv_with_root
+    # => [INV_TWO_EXPR, ROOT1, ...]
+    exec.k1_scalar::push_two_digest
+    exec.k1_scalar::mul
+    exec.k1_scalar::push_one_digest
+    exec.k1_scalar::assert_eq_with_root
+    # => [ROOT2, ...]
+    adv.export_deferred_witness
+    exec.sys::truncate_stack
+end
+```
+
+Export preserves the selected root and writes its portable witness to the advice map under that
+digest. Skip export for an untouched TRUE root: no obligation was created, and the export
+instruction rejects literal TRUE. Registration evaluates assertions eagerly in the host, but a VM proof with an unchanged
+built-in root does not prove these caller-maintained obligations. Callers must retain the final
+root and arrange its proof and verification separately. `open_value` adds no obligation and still
+requires an already-bound canonical VALUE digest; an arbitrary expression digest does not meet
+that contract.
+
+Native ECDSA and EdDSA entry points keep their stack interfaces and acceptance rules. Their shared
+algorithm bodies build an obligation graph from TRUE, and the native wrapper logs that graph once.
+This changes their deferred commitment digests and can change their cycle counts.
+
 ## Available modules
 Currently, Miden core library contains just a few modules, which are listed below. Over time, we plan to add many more modules which will include various cryptographic primitives, additional numeric data types and operations, and many others.
 

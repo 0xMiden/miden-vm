@@ -412,3 +412,137 @@ pub proc double(point: Point) -> Point
     exec.add
     # => [DOUBLE_POINT_DIGEST, ...]
 end
+
+#! Caller-root form of `assert_eq`; never logs into the VM root.
+#! Input:  [LHS, RHS, ROOT, ...]
+#! Output: [NEXT_ROOT, ...]
+pub proc assert_eq_with_root(
+    lhs: Point,
+    rhs: Point,
+    root: precompiles::Digest,
+) -> precompiles::Digest
+    push.EQ_INIT_CV
+    exec.precompiles::register_fixed_expr
+    exec.precompiles::append_root
+end
+
+#! Caller-root form of `eval`; never logs into the VM root.
+#! Input:  [POINT_EXPR, ROOT, ...]
+#! Output: [VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, NEXT_ROOT, ...]
+@locals(4)
+pub proc eval_with_root(
+    point: Point,
+    root: precompiles::Digest,
+) -> (Point, PointValue, precompiles::Digest)
+    swapw loc_storew_le.0 dropw
+    # Park ROOT while constructing the three-word result; otherwise it lies below the top 16.
+    adv.evaluate_deferred_payload
+    adv_pushw adv_pushw
+    # => [X, Y, EXPR, ...]; ROOT is saved in loc[0..4].
+    dupw.1 dupw.1
+    push.VALUE_INIT_CV
+    exec.precompiles::register_fixed_expr
+    # => [VALUE_DIGEST, X, Y, EXPR, ...]
+    movupw.3
+    dupw.1 movdnw.2
+    push.EQ_INIT_CV
+    exec.precompiles::register_fixed_expr
+    padw loc_loadw_le.0 swapw
+    # => [EQ_DIGEST, ROOT, VALUE_DIGEST, X, Y, ...]
+    exec.precompiles::append_root
+    movdnw.3
+end
+
+#! Caller-root form of `eval_digest`; never logs into the VM root.
+#! Input:  [POINT_EXPR, ROOT, ...]
+#! Output: [VALUE_DIGEST, NEXT_ROOT, ...]
+proc eval_digest_with_root(point: Point, root: precompiles::Digest) -> (Point, precompiles::Digest)
+    adv.evaluate_deferred_payload
+    adv_pushw adv_pushw
+    push.VALUE_INIT_CV
+    exec.precompiles::register_fixed_expr
+    # => [VALUE_DIGEST, EXPR, ROOT, ...]
+    dupw movdnw.2
+    push.EQ_INIT_CV
+    exec.precompiles::register_fixed_expr
+    movupw.2 swapw
+    # => [EQ_DIGEST, ROOT, VALUE_DIGEST, ...]
+    exec.precompiles::append_root
+    swapw
+end
+
+#! Caller-root form of `is_eq`; never logs into the VM root.
+#! Input:  [LHS, RHS, ROOT, ...]
+#! Output: [is_equal, NEXT_ROOT, ...]
+#! Both canonical values are bound; inequality itself does not trap.
+pub proc is_eq_with_root(
+    lhs: Point,
+    rhs: Point,
+    root: precompiles::Digest,
+) -> (i1, precompiles::Digest)
+    movupw.2 swapw
+    exec.eval_digest_with_root
+    # => [LHS_VALUE, ROOT1, RHS, ...]
+    movdnw.2 swapw
+    exec.eval_digest_with_root
+    # => [RHS_VALUE, NEXT_ROOT, LHS_VALUE, ...]
+    movupw.2 swapw
+    exec.precompiles::word_eq
+end
+
+#! Caller-root form of `is_eq_digest`; never logs into the VM root.
+#! Input:  [TARGET, EXPR, ROOT, ...]
+#! Output: [is_equal, NEXT_ROOT, ...]
+#! TARGET must already be a bound canonical point VALUE digest, as for is_eq_digest.
+pub proc is_eq_digest_with_root(
+    target: Point,
+    value: Point,
+    root: precompiles::Digest,
+) -> (i1, precompiles::Digest)
+    swapw movupw.2 swapw
+    # => [EXPR, ROOT, TARGET, ...]
+    exec.eval_digest_with_root
+    # => [VALUE_DIGEST, NEXT_ROOT, TARGET, ...]
+    movupw.2
+    exec.precompiles::word_eq
+end
+
+#! Caller-root form of `assert_eq_digest`; never logs into the VM root.
+#! Input:  [TARGET, EXPR, ROOT, ...]
+#! Output: [NEXT_ROOT, ...]
+pub proc assert_eq_digest_with_root(
+    target: Point,
+    value: Point,
+    root: precompiles::Digest,
+) -> precompiles::Digest
+    exec.assert_eq_with_root
+end
+
+#! Caller-root form of `is_identity`; never logs into the VM root.
+#! Input:  [POINT_EXPR, ROOT, ...]
+#! Output: [is_identity, NEXT_ROOT, ...]
+pub proc is_identity_with_root(point: Point, root: precompiles::Digest) -> (i1, precompiles::Digest)
+    push.IDENTITY_DIGEST
+    exec.is_eq_digest_with_root
+end
+
+#! Caller-root form of `assert_identity`; never logs into the VM root.
+#! Input:  [POINT_EXPR, ROOT, ...]
+#! Output: [NEXT_ROOT, ...]
+pub proc assert_identity_with_root(point: Point, root: precompiles::Digest) -> precompiles::Digest
+    push.IDENTITY_DIGEST
+    exec.assert_eq_digest_with_root
+end
+
+#! Caller-root form of `assert_not_identity`; never logs into the VM root.
+#! Input:  [POINT_EXPR, ROOT, ...]
+#! Output: [NEXT_ROOT, ...]
+pub proc assert_not_identity_with_root(
+    point: Point,
+    root: precompiles::Digest,
+) -> precompiles::Digest
+    exec.eval_digest_with_root
+    push.IDENTITY_DIGEST
+    exec.precompiles::word_eq
+    assertz
+end

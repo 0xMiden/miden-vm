@@ -95,8 +95,10 @@ Registration interprets payloads by the node type selected by the frame:
   - precompile-owned join frames require `n_chunks == 1` and interpret the chunk as
     `lhs_digest || rhs_digest`.
 
-Framework-owned AND and `TRUE` nodes are not accepted by either generic registration instruction.
-Rolling AND nodes are constructed by `log_deferred`.
+The exact framework AND frame is accepted by `adv.register_deferred`, with the ordered payload
+`lhs_digest || rhs_digest`, without changing the built-in root. Parameterized AND-domain frames
+and `TRUE` nodes are rejected. Memory-backed AND registration remains unsupported.
+`log_deferred` constructs an AND node and also advances the built-in root.
 
 The register arguments are visible in the VM execution trace, but the event does not constrain the
 host-side registration. `adv.register_deferred_data` additionally performs direct host reads without

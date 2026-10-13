@@ -31,6 +31,9 @@ const EIDOS_INIT_CV_3_BASE = 6620516959492505600
 # Eidos bases; the dynamic encoded length is added to lane 1.
 const DEFERRED_CHUNKS_INIT_CV_0 = 13503953893964383233
 
+# Framework AND frame, pinned to miden_core::deferred::DEFERRED_AND_INIT_CV.
+const DEFERRED_AND_INIT_CV = [4280581857109607169, 2688637132020383744, 1947077364412317696, 6620516959492505600]
+
 # Initial chaining words for one, two, and three framework CHUNKS payload blocks. Each word binds
 # the encoded Felt length: `init(DEFERRED_CHUNKS_DOMAIN, [8 * n_chunks, 0, 0])`.
 const DEFERRED_CHUNKS_INIT_CV_1 = [13503953893964383233, 11912009168875159560, 11170449401267093504, 6620516959492505600]
@@ -243,4 +246,18 @@ end
 pub proc log_deferred(node: Digest)
     log_deferred
     dropw
+end
+
+#! Appends a registered true assertion to a caller-maintained root, without logging.
+#! Input:  [ASSERTION, ROOT, ...]
+#! Output: [NEXT_ROOT, ...]
+#! Both children must be registered and evaluate to TRUE, or be implicit TRUE. The result is
+#! exactly AND(ROOT, ASSERTION), including when either child is TRUE; no identity is simplified.
+#! Registration and VM hashing use the same framework AND chaining word and ordered payload.
+pub proc append_root(assertion: Digest, root: Digest) -> Digest
+    swapw
+    # => [ROOT, ASSERTION, ...]
+    push.DEFERRED_AND_INIT_CV
+    exec.register_fixed_expr
+    # => [NEXT_ROOT, ...]
 end

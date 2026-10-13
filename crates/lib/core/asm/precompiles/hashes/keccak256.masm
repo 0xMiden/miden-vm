@@ -141,3 +141,75 @@ pub proc hash_2_chunks_mem(in_ptr: ptr<u32>, len_bytes: u32, out_ptr: ptr<u32>)
     exec.finish_hash_assert
     # => [...]
 end
+
+#! Caller-root form of `finish_hash_assert`; never logs into the VM root.
+#! Input:  [out_ptr, PREIMAGE, len_bytes, ROOT, ...]
+#! Output: [NEXT_ROOT, ...]
+proc finish_hash_assert_with_root(
+    out_ptr: ptr<u32>,
+    preimage: precompiles::Digest,
+    len_bytes: u32,
+    root: precompiles::Digest,
+) -> precompiles::Digest
+    adv_pushw
+    dup.4 mem_storew_le dropw
+    adv_pushw
+    dup.4 add.4 mem_storew_le dropw
+    exec.precompiles::register_chunks_mem_1
+    swapw
+    movup.8
+    exec.register_hash_assert
+    exec.precompiles::append_root
+end
+
+#! Caller-root form of `hash_bytes_mem`; never logs into the VM root.
+#! Input:  [in_ptr, len_bytes, out_ptr, ROOT, ...]
+#! Output: [NEXT_ROOT, ...]
+#! The advised digest is written to out_ptr and its hash assertion is appended to ROOT.
+pub proc hash_bytes_mem_with_root(
+    in_ptr: ptr<u32>,
+    len_bytes: u32,
+    out_ptr: ptr<u32>,
+    root: precompiles::Digest,
+) -> precompiles::Digest
+    emit.KECCAK256_DIGEST_EVENT
+    dup.1
+    add.31 u32div.32
+    dup eq.0 add
+    swap
+    exec.precompiles::register_chunks_mem
+    movup.5
+    exec.finish_hash_assert_with_root
+end
+
+#! Caller-root form of `hash_1_chunk_mem`; never logs into the VM root.
+#! Input:  [in_ptr, len_bytes, out_ptr, ROOT, ...]
+#! Output: [NEXT_ROOT, ...]
+#! The advised digest is written to out_ptr and its hash assertion is appended to ROOT.
+pub proc hash_1_chunk_mem_with_root(
+    in_ptr: ptr<u32>,
+    len_bytes: u32,
+    out_ptr: ptr<u32>,
+    root: precompiles::Digest,
+) -> precompiles::Digest
+    emit.KECCAK256_DIGEST_EVENT
+    exec.precompiles::register_chunks_mem_1
+    movup.5
+    exec.finish_hash_assert_with_root
+end
+
+#! Caller-root form of `hash_2_chunks_mem`; never logs into the VM root.
+#! Input:  [in_ptr, len_bytes, out_ptr, ROOT, ...]
+#! Output: [NEXT_ROOT, ...]
+#! The advised digest is written to out_ptr and its hash assertion is appended to ROOT.
+pub proc hash_2_chunks_mem_with_root(
+    in_ptr: ptr<u32>,
+    len_bytes: u32,
+    out_ptr: ptr<u32>,
+    root: precompiles::Digest,
+) -> precompiles::Digest
+    emit.KECCAK256_DIGEST_EVENT
+    exec.precompiles::register_chunks_mem_2
+    movup.5
+    exec.finish_hash_assert_with_root
+end

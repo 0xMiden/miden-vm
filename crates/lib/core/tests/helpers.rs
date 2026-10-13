@@ -88,6 +88,97 @@ pub fn assert_precompile_witness_round_trips(output: &ExecutionOutput) {
     );
 }
 
+/// Reads an explicitly exported caller root and checks its portable graph without a PVM proof.
+pub fn assert_exported_manual_root(
+    output: &ExecutionOutput,
+    root_offset: usize,
+) -> miden_core::deferred::PrecompileWitness {
+    let root = Word::new(core::array::from_fn(|i| {
+        output.stack.get_element(root_offset + i).expect("root element")
+    }));
+    assert_manual_graph(output, root)
+}
+
+fn assert_manual_graph(
+    output: &ExecutionOutput,
+    root: Word,
+) -> miden_core::deferred::PrecompileWitness {
+    use std::sync::Arc;
+
+    use miden_core::{
+        deferred::{PrecompileWitness, TRUE_DIGEST},
+        serde::Deserializable,
+        utils::packed_u32_elements_to_bytes,
+    };
+
+    assert_eq!(output.precompile_root(), TRUE_DIGEST, "manual calls must not log");
+    assert!(output.precompile_witness.is_none());
+    assert!(output.advice.stack().is_empty());
+    let value = output.advice.get_mapped_values(&root).expect("root must be exported");
+    let byte_len = usize::try_from(value[0].as_canonical_u64()).unwrap();
+    let mut bytes = packed_u32_elements_to_bytes(&value[1..]);
+    bytes.truncate(byte_len);
+    let witness = PrecompileWitness::read_from_bytes(&bytes).expect("exported witness must decode");
+    assert_eq!(witness.root_unchecked(), root);
+    assert_eq!(witness.compute_root(Arc::new(miden_precompiles::registry())).unwrap(), root);
+    witness
+}
+
+/// Exercises the root-last manual entry while preserving the native caller's result layout.
+pub fn manual_signature_source(
+    source: &str,
+    module: &str,
+    procedure: &str,
+    seeded: bool,
+) -> String {
+    let start = if seeded {
+        "begin padw padw exec.::miden::core::precompiles::append_root"
+    } else {
+        "begin padw"
+    };
+    source.replacen("begin", start, 1).replace(
+        &format!("exec.::miden::core::crypto::dsa::{module}::{procedure}"),
+        &format!("exec.::miden::core::crypto::dsa::{module}::{procedure}_with_root adv.export_deferred_witness dropw"),
+    )
+}
+
+pub fn assert_manual_signature_matches_native(
+    native: &ExecutionOutput,
+    manual: &ExecutionOutput,
+    obligations: usize,
+    seeded: bool,
+) {
+    use miden_core::deferred::{DEFERRED_AND_FRAME, Node, PrecompileWitnessEntry, TRUE_DIGEST};
+
+    assert_eq!(manual.advice.map().len(), 1, "one selected root was exported");
+    let root = *manual.advice.map().iter().next().unwrap().0;
+    let witness = assert_manual_graph(manual, root);
+    if seeded {
+        assert_eq!(
+            witness.entries().first(),
+            Some(&PrecompileWitnessEntry::Join {
+                frame: DEFERRED_AND_FRAME,
+                lhs: 0,
+                rhs: 0,
+            }),
+            "the incoming nonempty root must remain reachable"
+        );
+    } else {
+        assert_eq!(native.precompile_root(), Node::and(TRUE_DIGEST, root).digest());
+    }
+    assert_eq!(native.stack, manual.stack, "ordinary results and tail must match");
+    assert_eq!(witness.entries().iter().filter(|entry| {
+        matches!(entry, PrecompileWitnessEntry::Join { frame, .. } if *frame == DEFERRED_AND_FRAME)
+    }).count(), obligations + usize::from(seeded), "every nested binding must reach the exported root");
+    let uint_eq =
+        miden_precompiles::UintPrecompile::op_frame(miden_precompiles::UintPrecompile::EQ_OP_ID);
+    let curve_eq =
+        miden_precompiles::CurvePrecompile::op_frame(miden_precompiles::CurvePrecompile::EQ_OP_ID);
+    assert_eq!(witness.entries().iter().filter(|entry| {
+        matches!(entry, PrecompileWitnessEntry::Join { frame, .. } if *frame == uint_eq || *frame == curve_eq)
+    }).count(), obligations - 1, "all arithmetic/curve bindings must be present alongside the hash assertion");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

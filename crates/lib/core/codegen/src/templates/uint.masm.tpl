@@ -328,3 +328,103 @@ pub proc eval(value: Expr) -> Value
     exec.precompiles::log_deferred
     # => [VALUE_LO, VALUE_HI, ...]
 end
+
+#! Caller-root form of `assert_eq`; never logs into the VM root.
+#! Input:  [LHS, RHS, ROOT, ...]
+#! Output: [NEXT_ROOT, ...]
+pub proc assert_eq_with_root(lhs: Expr, rhs: Expr, root: precompiles::Digest) -> precompiles::Digest
+    push.EQ_INIT_CV
+    exec.precompiles::register_fixed_expr
+    exec.precompiles::append_root
+end
+
+#! Caller-root form of `eval`; never logs into the VM root.
+#! Input:  [EXPR, ROOT, ...]
+#! Output: [VALUE_LO, VALUE_HI, NEXT_ROOT, ...]
+#! The advised canonical value is bound to the expression by an equality in NEXT_ROOT.
+pub proc eval_with_root(value: Expr, root: precompiles::Digest) -> (Value, precompiles::Digest)
+    adv.evaluate_deferred_payload
+    adv_pushw adv_pushw
+    # => [VALUE_LO, VALUE_HI, EXPR, ROOT, ...]
+    dupw.1 dupw.1
+    push.VALUE_INIT_CV
+    exec.precompiles::register_fixed_expr
+    # => [VALUE_DIGEST, VALUE_LO, VALUE_HI, EXPR, ROOT, ...]
+    movupw.3
+    push.EQ_INIT_CV
+    exec.precompiles::register_fixed_expr
+    movupw.3 swapw
+    # => [EQ_DIGEST, ROOT, preserved results..., ...]
+    exec.precompiles::append_root
+    movdnw.2
+end
+
+#! Caller-root form of `is_eq_digest`; never logs into the VM root.
+#! Input:  [TARGET, EXPR, ROOT, ...]
+#! Output: [is_equal, NEXT_ROOT, ...]
+#! The advised canonical value is bound to the expression by an equality in NEXT_ROOT.
+pub proc is_eq_digest_with_root(
+    target: Expr,
+    value: Expr,
+    root: precompiles::Digest,
+) -> (i1, precompiles::Digest)
+    swapw
+    # => [EXPR, TARGET, ROOT, ...]
+    adv.evaluate_deferred_payload
+    adv_pushw adv_pushw
+    push.VALUE_INIT_CV
+    exec.precompiles::register_fixed_expr
+    # => [VALUE_DIGEST, EXPR, TARGET, ROOT, ...]
+    dupw movdnw.2
+    push.EQ_INIT_CV
+    exec.precompiles::register_fixed_expr
+    movupw.3 swapw
+    # => [EQ_DIGEST, ROOT, preserved results..., ...]
+    exec.precompiles::append_root
+    movdnw.2
+    exec.precompiles::word_eq
+end
+
+#! Caller-root form of `is_eq`; never logs into the VM root.
+#! Input:  [LHS, RHS, ROOT, ...]
+#! Output: [is_equal, NEXT_ROOT, ...]
+#! A false comparison succeeds; both advised values are bound into NEXT_ROOT.
+pub proc is_eq_with_root(
+    lhs: Expr,
+    rhs: Expr,
+    root: precompiles::Digest,
+) -> (i1, precompiles::Digest)
+    movupw.2 swapw
+    # => [LHS, ROOT, RHS, ...]
+    exec.eval_with_root
+    # => [LHS_LO, LHS_HI, ROOT1, RHS, ...]
+    movupw.3 movupw.3 swapw
+    # => [RHS, ROOT1, LHS_LO, LHS_HI, ...]
+    exec.eval_with_root
+    # => [RHS_LO, RHS_HI, NEXT_ROOT, LHS_LO, LHS_HI, ...]
+    movupw.3
+    exec.precompiles::word_eq
+    # => [lo_equal, RHS_HI, NEXT_ROOT, LHS_HI, ...]
+    movdn.12 movupw.2
+    exec.precompiles::word_eq
+    # => [hi_equal, NEXT_ROOT, lo_equal, ...]
+    movup.5 and
+end
+
+#! Caller-root form of `is_zero`; never logs into the VM root.
+#! Input:  [EXPR, ROOT, ...]
+#! Output: [is_zero, NEXT_ROOT, ...]
+#! A false predicate succeeds; the advised value remains bound into NEXT_ROOT.
+pub proc is_zero_with_root(value: Expr, root: precompiles::Digest) -> (i1, precompiles::Digest)
+    exec.push_zero_digest
+    exec.is_eq_digest_with_root
+end
+
+#! Caller-root form of `is_one`; never logs into the VM root.
+#! Input:  [EXPR, ROOT, ...]
+#! Output: [is_one, NEXT_ROOT, ...]
+#! A false predicate succeeds; the advised value remains bound into NEXT_ROOT.
+pub proc is_one_with_root(value: Expr, root: precompiles::Digest) -> (i1, precompiles::Digest)
+    exec.push_one_digest
+    exec.is_eq_digest_with_root
+end

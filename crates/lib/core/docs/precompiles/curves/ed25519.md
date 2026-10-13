@@ -26,3 +26,11 @@
 | assert_not_identity | Evaluates a curve expression and asserts it is not the identity point.<br />Input:  [POINT_DIGEST, ...]<br />Output: [...]<br /> |
 | neg | Negates a point by computing O - P.<br />Input:  [POINT_DIGEST, ...]<br />Output: [NEG_POINT_DIGEST, ...]<br /> |
 | double | Doubles a point by computing P + P.<br />Input:  [POINT_DIGEST, ...]<br />Output: [DOUBLE_POINT_DIGEST, ...]<br /> |
+| assert_eq_with_root | Caller-root form of `assert_eq`; never logs into the VM root.<br />Input:  [LHS, RHS, ROOT, ...]<br />Output: [NEXT_ROOT, ...]<br /> |
+| eval_with_root | Caller-root form of `eval`; never logs into the VM root.<br />Input:  [POINT_EXPR, ROOT, ...]<br />Output: [VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, NEXT_ROOT, ...]<br /> |
+| is_eq_with_root | Caller-root form of `is_eq`; never logs into the VM root.<br />Input:  [LHS, RHS, ROOT, ...]<br />Output: [is_equal, NEXT_ROOT, ...]<br />Both canonical values are bound; inequality itself does not trap.<br /> |
+| is_eq_digest_with_root | Caller-root form of `is_eq_digest`; never logs into the VM root.<br />Input:  [TARGET, EXPR, ROOT, ...]<br />Output: [is_equal, NEXT_ROOT, ...]<br />TARGET must already be a bound canonical point VALUE digest, as for is_eq_digest.<br /> |
+| assert_eq_digest_with_root | Caller-root form of `assert_eq_digest`; never logs into the VM root.<br />Input:  [TARGET, EXPR, ROOT, ...]<br />Output: [NEXT_ROOT, ...]<br /> |
+| is_identity_with_root | Caller-root form of `is_identity`; never logs into the VM root.<br />Input:  [POINT_EXPR, ROOT, ...]<br />Output: [is_identity, NEXT_ROOT, ...]<br /> |
+| assert_identity_with_root | Caller-root form of `assert_identity`; never logs into the VM root.<br />Input:  [POINT_EXPR, ROOT, ...]<br />Output: [NEXT_ROOT, ...]<br /> |
+| assert_not_identity_with_root | Caller-root form of `assert_not_identity`; never logs into the VM root.<br />Input:  [POINT_EXPR, ROOT, ...]<br />Output: [NEXT_ROOT, ...]<br /> |
