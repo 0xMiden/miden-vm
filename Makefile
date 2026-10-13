@@ -236,7 +236,7 @@ test-docs: ## Run documentation tests (cargo test - nextest doesn't support doct
 # -- filtered test runs ---------------------------------------------------------------------------
 
 .PHONY: test-fast
-test-fast: test-masm-root-stability ## Runs fast tests (excludes all CLI tests and proptests)
+test-fast: test-masm-root-stability ## Runs fast tests (excludes proptests and test names containing cli_)
 	# Keep this feature set aligned with `test` so both targets reuse the same test binaries.
 	$(MAKE) core-test \
 		FEATURES="$(WORKSPACE_TEST_FEATURES)" \
