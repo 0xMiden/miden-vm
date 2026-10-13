@@ -886,6 +886,11 @@ impl Linker {
         self.libraries.values()
     }
 
+    /// Returns the library whose exported interface supplied a compiled procedure.
+    pub(crate) fn library_by_commitment(&self, commitment: Word) -> Option<&LinkLibrary> {
+        self.libraries.get(&commitment)
+    }
+
     /// Get an iterator over the static libraries used to build the final MAST forest.
     pub fn static_libraries(&self) -> impl Iterator<Item = &LinkLibrary> {
         self.static_libraries.values()
