@@ -27,9 +27,11 @@ std = [
     "miden-utils-diagnostics/std",
     "thiserror/std",
 ]
-testing = ["miden-air/testing"]
+testing = ["arbitrary", "miden-air/testing"]
+arbitrary = ["dep:proptest", "miden-air/arbitrary", "miden-core/arbitrary"]
 
 [dependencies]
+proptest = { workspace = true, optional = true }
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true
@@ -48,6 +50,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 miden-assembly = { workspace = true, features = ["testing"] }
+miden-test-serialization-macros.workspace = true
 miden-core = { workspace = true, features = ["arbitrary"] }
 tracing = { workspace = true, features = ["std"] }
 tracing-subscriber.workspace = true

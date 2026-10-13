@@ -31,6 +31,10 @@ const OUTPUT_FELTS: usize = Word::NUM_ELEMENTS;
 /// interval: knowledge of the stored state permits recomputing every output block derived from
 /// that state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct EidosRandomCoin {
     state: Word,
     output: Word,
@@ -199,6 +203,46 @@ impl TryRng for EidosRandomCoin {
 
     fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
         utils::fill_bytes_via_next_word(dest, || self.try_next_u32())
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod eidos_coin_arbitrary {
+    use proptest::prelude::*;
+
+    use super::{EidosRandomCoin, OUTPUT_FELTS};
+    use crate::Word;
+
+    impl Arbitrary for EidosRandomCoin {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader rejects current > OUTPUT_FELTS and a buffered current (<
+            // OUTPUT_FELTS) with counter == 0; both regimes are generated explicitly and all
+            // remaining fields are any-valid.
+            prop_oneof![
+                // Exhausted-buffer regime: current == OUTPUT_FELTS, any counter.
+                (any::<Word>(), any::<Word>(), any::<u64>())
+                    .prop_map(|(state, output, counter)| Self {
+                        state,
+                        output,
+                        counter,
+                        current: OUTPUT_FELTS
+                    })
+                    .boxed(),
+                // Buffered regime: current < OUTPUT_FELTS requires counter >= 1.
+                (any::<Word>(), any::<Word>(), 1u64..=u64::MAX, 0usize..OUTPUT_FELTS)
+                    .prop_map(|(state, output, counter, current)| Self {
+                        state,
+                        output,
+                        counter,
+                        current
+                    })
+                    .boxed(),
+            ]
+            .boxed()
+        }
     }
 }
 

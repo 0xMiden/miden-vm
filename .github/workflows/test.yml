@@ -41,7 +41,7 @@ jobs:
             while IFS= read -r -d '' path; do
               case "${path}" in
                 .cargo/*|.config/nextest.toml|.github/actions/cleanup-runner/*|\
-                .github/workflows/test.yml|Cargo.lock|Cargo.toml|rust-toolchain.toml|\
+                .github/workflows/test.yml|Cargo.lock|Cargo.toml|Makefile|rust-toolchain.toml|\
                 crates/crypto/*|crates/crypto-derive/*|crates/field/*|crates/lifted-air/*|\
                 crates/lifted-stark/*|crates/serde-utils/*|crates/stark-transcript/*|\
                 crates/stateful-hasher/*)
@@ -133,7 +133,7 @@ jobs:
         run: make test-crypto
 
   eidos-x86-backends:
-    name: Eidos x86 backends
+    name: Eidos x86 backends and RPX debug
     needs: classify-eidos-paths
     if: needs.classify-eidos-paths.outputs.run == 'true'
     runs-on: warp-ubuntu-latest-x64-8x
@@ -226,6 +226,8 @@ jobs:
             failed=1
           fi
           exit "${failed}"
+      - name: Run RPX debug permutation with AVX2 on a 2 MiB stack
+        run: make test-rpx-avx2-debug NEXTEST_PROFILE=ci
 
   doc-tests:
     name: doc-tests

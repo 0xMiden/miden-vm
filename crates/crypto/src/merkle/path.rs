@@ -15,6 +15,10 @@ use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 /// Indexing into this type starts at the deepest part of the path and gets shallower. That is,
 /// the node at index `0` is deeper than the node at index `self.len() - 1`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct MerklePath {
     nodes: Vec<Word>,
 }
@@ -204,6 +208,10 @@ impl Iterator for InnerNodeIterator<'_> {
 
 /// A container for a [crate::Word] value and its [MerklePath] opening.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct MerkleProof {
     /// The node value opening for `path`.
     pub value: Word,
@@ -229,6 +237,10 @@ impl From<(MerklePath, Word)> for MerkleProof {
 /// This structure does not provide any guarantees regarding the correctness of the path to the
 /// root. For more information, check [MerklePath::verify].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct RootPath {
     /// The node value opening for `path`.
     pub root: Word,
@@ -301,6 +313,23 @@ mod tests {
     #[should_panic(expected = "MerklePath may have at most 255 items")]
     fn new_rejects_more_than_255_nodes() {
         let _ = MerklePath::new(vec![int_to_node(0); u8::MAX as usize + 1]);
+    }
+
+    /// The `Arbitrary` impl only generates paths up to `SMT_MAX_DEPTH` (64) nodes, so the
+    /// round-trip proptest never reaches the 65..=255 length range the wire format supports.
+    /// These cases cover the length-prefix boundaries explicitly, including the maximum.
+    #[test]
+    fn serialization_roundtrip_boundary_lengths() {
+        use miden_serde_utils::Deserializable;
+
+        use crate::merkle::MerklePath;
+
+        for len in [65usize, 254, 255] {
+            let path = MerklePath::new((0..len as u64).map(int_to_node).collect());
+            let bytes = path.to_bytes();
+            let round_trip = MerklePath::read_from_bytes(&bytes).unwrap();
+            assert_eq!(path, round_trip, "round trip failed for length {len}");
+        }
     }
 
     #[test]

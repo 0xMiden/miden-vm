@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc c3ee159723fc829c8324b0342696ca94a8eac895ed07393be878d99ada58a0e9 # shrinks to obj = Join { left_child_id: 0, right_child_id: 1073741824 }
+cc 6921606048fdcc0af36976fb0761faf2eb9a1fa54c00a72179a3261688ad4226 # shrinks to obj = MastNodeInfo { entry: Join { left_child_id: 1073741824, right_child_id: 0 }, digest: Word([0, 0, 0, 0]) }

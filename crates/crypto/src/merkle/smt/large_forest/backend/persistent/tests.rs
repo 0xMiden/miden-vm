@@ -9,6 +9,8 @@ use alloc::vec::Vec;
 
 use assert_matches::assert_matches;
 use itertools::Itertools;
+use miden_field::Felt;
+use proptest::prelude::*;
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use tempfile::{TempDir, tempdir};
@@ -1016,4 +1018,83 @@ fn reader_clone() -> Result<()> {
     }
 
     Ok(())
+}
+
+// PROPERTY TESTS
+// ================================================================================================
+// The oracle relations of `load_extant` / `open` generalized over generated
+// identities and key/value pairs: the backend's roots must equal reference
+// `Smt`s built from the same entries, its openings must match the reference
+// tree's for absent and present keys, and a close/reload roundtrip must
+// preserve lineages and versions. The values are don't-care (any Word is
+// valid); the relations are what's under test.
+
+fn arb_word() -> impl Strategy<Value = Word> {
+    any::<[u64; 4]>().prop_map(|limbs| Word::new(limbs.map(Felt::new_unchecked)))
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(16))]
+
+    #[test]
+    fn backend_matches_reference_smt(
+        (version, lineage_1, lineage_2, kvs_1, kvs_2, absent) in (
+            any::<u64>(),
+            any::<[u8; 32]>(),
+            any::<[u8; 32]>(),
+            (arb_word(), arb_word(), arb_word(), arb_word()),
+            (arb_word(), arb_word(), arb_word(), arb_word()),
+            arb_word(),
+        )
+            .prop_filter("lineage ids must differ", |(_, l1, l2, ..)| l1 != l2)
+            .prop_filter("keys within a lineage must differ", |(_, _, _, (k1a, _, k2a, _), (k1b, _, k2b, _), _)| {
+                k1a != k2a && k1b != k2b
+            })
+            .prop_map(|(version, l1, l2, (k1a, v1a, k2a, v2a), (k1b, v1b, k2b, v2b), absent)| {
+                // Entries are (key, value) pairs from independently
+                // generated words: a backend that stored keys instead of
+                // the supplied values must fail the comparisons below.
+                (
+                    version,
+                    LineageId::new(l1),
+                    LineageId::new(l2),
+                    [(k1a, v1a), (k2a, v2a)],
+                    [(k1b, v1b), (k2b, v2b)],
+                    absent,
+                )
+            })
+    ) {
+        let (path, mut backend) = default_backend()?;
+
+        let batch_1 = SmtUpdateBatch::from(kvs_1.into_iter());
+        let batch_2 = SmtUpdateBatch::from(kvs_2.into_iter());
+        let root_1 = backend.add_lineage(lineage_1, version, batch_1)?;
+        let root_2 = backend.add_lineage(lineage_2, version, batch_2)?;
+
+        // Roots must match reference SMTs built from the same entries.
+        let tree_1 = Smt::with_entries(kvs_1)?;
+        let tree_2 = Smt::with_entries(kvs_2)?;
+        prop_assert_eq!(root_1.root(), tree_1.root());
+        prop_assert_eq!(root_2.root(), tree_2.root());
+
+        // Persistence: close and reload, then the data must be intact.
+        drop(backend);
+        let backend = PersistentBackend::load(Config::new(path.path())?)?;
+        prop_assert_eq!(backend.lineages()?.count(), 2);
+        prop_assert!(backend.lineages()?.contains(&lineage_1));
+        prop_assert!(backend.lineages()?.contains(&lineage_2));
+        prop_assert_eq!(backend.version(lineage_1)?, version);
+        prop_assert_eq!(backend.version(lineage_2)?, version);
+
+        // Open oracle: the backend must match the reference tree for
+        // absent and present keys alike.
+        prop_assert_eq!(backend.open(lineage_1, absent)?, tree_1.open(&absent));
+        for (k, _) in kvs_1 {
+            prop_assert_eq!(backend.open(lineage_1, k)?, tree_1.open(&k));
+        }
+        prop_assert_eq!(backend.open(lineage_2, absent)?, tree_2.open(&absent));
+        for (k, _) in kvs_2 {
+            prop_assert_eq!(backend.open(lineage_2, k)?, tree_2.open(&k));
+        }
+    }
 }

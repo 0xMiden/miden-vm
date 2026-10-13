@@ -4,6 +4,7 @@
 
 #### Features
 
+- Added `Arbitrary` implementations and property tests for serialization and VM operations. Expanded fuzz input checks and seed inputs ([#3976](https://github.com/0xMiden/miden-vm/pull/3976)).
 - [BREAKING] Share one Lagrange basis across periodic columns of a period ([#3847](https://github.com/0xMiden/miden-vm/pull/3847)).
 - [BREAKING] Added proven SHA-512 hashing and Ed25519 signature verification to the precompile VM and core library ([#3867](https://github.com/0xMiden/miden-vm/issues/3867)).
 - [BREAKING] Added P-256 curve support, a deferred SHA-256 precompile chiplet, and ECDSA P-256/SHA-256 signature verification and public-key recovery to the core library ([#3896](https://github.com/0xMiden/miden-vm/pull/3896)).
@@ -28,6 +29,7 @@
 
 - [BREAKING] Fixed a Keccak soundness issue that allowed a Keccak assertion to bind its input to the digest of another sponge invocation. Each Keccak node's sponge permutation count must now match its byte length. PVM proofs and verifier roots change ([#3974](https://github.com/0xMiden/miden-vm/pull/3974)).
 - [BREAKING] Fixed an MSM soundness issue that allowed distinct claims sharing one expression to redistribute its terms and bind to incorrect results. Each MSM expression now serves at most one claim, and the prover lays a copy of it for each further claim. PVM proofs and verifier roots change ([#3974](https://github.com/0xMiden/miden-vm/pull/3974)).
+- [BREAKING] Fixed canonical ordering of recursive types and bumped the package format to 8.0.0. Rebuild version 7 packages. Rejected reversed source spans and noncanonical partial-SMT payloads. Fixed RPX debug stack overflow ([#3976](https://github.com/0xMiden/miden-vm/pull/3976)).
 - [BREAKING] Bumped the portable precompile witness encoding to version 2; version-1 witnesses are rejected before decoding their payloads ([#3879](https://github.com/0xMiden/miden-vm/pull/3879)).
 - [BREAKING] Introduced serialization format version 1 for `MerkleStore` and `PartialMmr` as part of the Eidos migration. Unversioned encodings, including stores embedded in `AdviceInputs`, are rejected; rebuild cached Merkle state using Eidos ([#3879](https://github.com/0xMiden/miden-vm/pull/3879)).
 - [BREAKING] Fixed Eidos AEAD authentication to prevent key-independent tag adjustments. The AEAD key derivation domains use version 2; ciphertexts and tags produced under version 1 are incompatible ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
