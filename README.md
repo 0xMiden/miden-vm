@@ -130,7 +130,6 @@ The workspace contains the main crates below. Internal support and benchmark cra
 
 The [miden-docs](https://github.com/0xMiden/miden-docs) repository imports the Markdown from
 [`docs/src`](docs/src) for the published documentation website.
-Documentation changes on `next` trigger a rebuild of that site.
 You can build a local preview with Docusaurus. See the [docs setup instructions](docs/README.md).
 
 ## Performance
