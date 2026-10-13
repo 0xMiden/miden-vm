@@ -41,12 +41,29 @@
 
 #### Fixes
 
+- Fixed release version comparisons to respect prerelease precedence and compare patch releases within their major/minor line. API compatibility checks use stable releases instead of release candidates ([#3654](https://github.com/0xMiden/miden-vm/issues/3654)).
+- [BREAKING] `Package::strip_debug_info` strips an embedded kernel one level deep and rejects a kernel section that embeds another kernel with the new `PackageStripError::NestedEmbeddedKernel`, instead of recursing until the stack overflows ([#3981](https://github.com/0xMiden/miden-vm/pull/3981)).
 - Fixed linker module-capacity overflow so AST and pre-assembled module registration return a structured error instead of panicking ([#3895](https://github.com/0xMiden/miden-vm/issues/3895)).
 - [BREAKING] `MmrPeaks::verify` now takes the tree, peak and relative position from the peaks' forest instead of the proof's, and rejects positions outside that forest (`PositionNotFound`, previously a panic) and paths whose depth differs from the tree height (`InvalidMerklePath`) ([#3931](https://github.com/0xMiden/miden-vm/pull/3931)).
+- `build_trace` returns an error instead of panicking when a fragment continuation in an execution witness names a missing node, a node of the wrong kind, or a batch the basic block does not have ([#3978](https://github.com/0xMiden/miden-vm/pull/3978)).
+- Fixed assembler debug metadata losing procedure definitions and declared invocation targets for plain `exec`, including nested calls and package linking, while preserving executable MAST roots. Raised the bounded debug-payload limit to 32 MiB so the core library's invocation metadata remains readable ([#3982](https://github.com/0xMiden/miden-vm/pull/3982)).
+- Fixed cross-module calls through re-export aliases of private procedures by preserving the visibility granted through the alias.
 
 #### Features
 
 - Added `PublicKey::from_sec1_bytes` and `PublicKey::from_hex` to `ecdsa_k256_keccak` for parsing and validating compressed and uncompressed SEC1 public keys ([#3961](https://github.com/0xMiden/miden-vm/pull/3961)).
+- [BREAKING] Added MASM `pub(package)` visibility and `Visibility::Internal`, allowing declarations and re-exports to follow public access rules without being exported from the package.
+- Allowed re-exporting private items and import aliases visible at the re-export declaration site, including using re-exported private types in public signatures.
+
+#### Changes
+
+- Replaced the main-only release restriction. Stable releases can use `main`. Matching patch releases can also use `release/vVERSION` or `release-vVERSION` branches. Release candidates use `next`. Tags must match the VM version and source commit. Maintenance branches must descend from the base and latest earlier stable patch tags ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- Required release approval from a repository admin through the `release` environment. Admins can approve their own releases. Release candidates remain prereleases, and patch branches preserve GitHub's latest stable release ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- Required manual release dispatch and removed the `release.published` publication fallback. Removed the option to skip the package version gate ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- Moved builds and package verification into jobs without OIDC access. Cargo uploads use `--no-verify` after the selected packages pass verification, so compilation does not receive publication credentials. Added a remote tag check before publishing the GitHub release ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- Replaced custom release version comparisons with Rust `semver` and added Rust tests. Added release preparation and recovery instructions in `docs/RELEASING.md` ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- Separated synthetic CodSpeed compilation from measurement while retaining the optimized profile and benchmark coverage. The executable builds on an ARM64 8x runner using Ubuntu 22.04, and SMT benchmarks run independently ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- [BREAKING] Store inline-call frames as operation ranges instead of per-operation rows. Package debug-info version 4 preserves inline chains across clears, control flow, and dynamic or external boundaries without expanding them during decoding ([#3956](https://github.com/0xMiden/miden-vm/pull/3956)).
 
 ## v0.35.0 (2026-10-01)
 

@@ -10,6 +10,7 @@ use crate::{
     host::default::NoopHost,
     mast::{ExecutableMastForest, MastNode, MastNodeId},
     operation::OperationError,
+    option_map_break_reason,
     processor::{Processor, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
 };
@@ -323,7 +324,11 @@ where
         state.current_source_node_id = source_node_id;
         match continuation {
             Continuation::StartNode(node_id) => {
-                let node = current_forest.get_node_by_id(node_id).unwrap();
+                let node = option_map_break_reason(
+                    current_forest.get_node_by_id(node_id),
+                    "node not found in current forest",
+                )
+                .map_break(InternalBreakReason::from)?;
 
                 match node {
                     MastNode::Block(basic_block_node) => {
@@ -380,8 +385,11 @@ where
                     .map_break(InternalBreakReason::from)?
             },
             Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
-                let basic_block_node =
-                    current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
+                let basic_block_node = option_map_break_reason(
+                    current_forest.get_node_by_id(node_id).and_then(MastNode::get_basic_block),
+                    "basic block node not found in current forest",
+                )
+                .map_break(InternalBreakReason::from)?;
 
                 basic_block::execute_basic_block_node_from_op_idx(
                     &mut state,
@@ -393,8 +401,11 @@ where
                 )?
             },
             Continuation::Respan { node_id, batch_index } => {
-                let basic_block_node =
-                    current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
+                let basic_block_node = option_map_break_reason(
+                    current_forest.get_node_by_id(node_id).and_then(MastNode::get_basic_block),
+                    "basic block node not found in current forest",
+                )
+                .map_break(InternalBreakReason::from)?;
 
                 basic_block::execute_basic_block_node_from_batch(
                     &mut state,
@@ -459,7 +470,11 @@ where
     while let Some(continuation) = state.continuation_stack.pop_continuation() {
         match continuation {
             Continuation::StartNode(node_id) => {
-                let node = current_forest.get_node_by_id(node_id).unwrap();
+                let node = option_map_break_reason(
+                    current_forest.get_node_by_id(node_id),
+                    "node not found in current forest",
+                )
+                .map_break(InternalBreakReason::from)?;
 
                 match node {
                     MastNode::Block(basic_block_node) => {
@@ -521,8 +536,11 @@ where
                     .map_break(InternalBreakReason::from)?
             },
             Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
-                let basic_block_node =
-                    current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
+                let basic_block_node = option_map_break_reason(
+                    current_forest.get_node_by_id(node_id).and_then(MastNode::get_basic_block),
+                    "basic block node not found in current forest",
+                )
+                .map_break(InternalBreakReason::from)?;
 
                 basic_block::execute_basic_block_node_from_op_idx(
                     &mut state,
@@ -534,8 +552,11 @@ where
                 )?
             },
             Continuation::Respan { node_id, batch_index } => {
-                let basic_block_node =
-                    current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
+                let basic_block_node = option_map_break_reason(
+                    current_forest.get_node_by_id(node_id).and_then(MastNode::get_basic_block),
+                    "basic block node not found in current forest",
+                )
+                .map_break(InternalBreakReason::from)?;
 
                 basic_block::execute_basic_block_node_from_batch(
                     &mut state,

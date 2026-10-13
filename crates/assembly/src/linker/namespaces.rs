@@ -68,7 +68,21 @@ pub struct UseDecl {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ResolvedUse {
     Module(ModuleIndex),
-    Item(GlobalItemIndex),
+    Item {
+        id: GlobalItemIndex,
+        visibility: Visibility,
+    },
+}
+
+impl ResolvedUse {
+    /// A re-export can expose a private definition; a private import preserves the target's
+    /// existing visibility for checks on types used in public signatures.
+    fn with_visibility(self, visibility: Visibility) -> Self {
+        match self {
+            Self::Item { id, .. } if visibility.is_public() => Self::Item { id, visibility },
+            resolved => resolved,
+        }
+    }
 }
 
 /// Import resolutions keyed by the module that owns the import and the local alias name.
@@ -136,7 +150,7 @@ impl NamespaceGraph {
             }
 
             for edge in self.module(module_index).submodules.values() {
-                if edge.visibility.is_public() {
+                if edge.visibility.is_exported() {
                     stack.push(edge.child);
                 }
             }
@@ -179,7 +193,10 @@ impl NamespaceGraph {
 
                 self.validate_resolved_import(import, resolved, linker)?;
 
-                imports.imports.insert((import.owner(), import.alias().to_string()), resolved);
+                imports.imports.insert(
+                    (import.owner(), import.alias().to_string()),
+                    resolved.with_visibility(import.visibility()),
+                );
                 progress = true;
             }
 
@@ -189,7 +206,7 @@ impl NamespaceGraph {
 
             if !progress {
                 if let Some(import) = next.iter().copied().find(|import| {
-                    self.public_import_dependency(import).is_some_and(|dependency| {
+                    self.visible_import_dependency(import).is_some_and(|dependency| {
                         next.iter().any(|candidate| candidate.key() == dependency)
                     })
                 }) {
@@ -233,14 +250,14 @@ impl NamespaceGraph {
     ) -> Result<(), LinkerError> {
         match (import.kind(), resolved) {
             (ImportKind::Module, ResolvedUse::Module(_)) => Ok(()),
-            (ImportKind::Module, ResolvedUse::Item(item)) => {
+            (ImportKind::Module, ResolvedUse::Item { id: item, .. }) => {
                 Err(LinkerError::InvalidModuleImportTarget {
                     span: import.span(),
                     source_file: source_file(linker.source_manager.as_ref(), import.span()),
                     path: item_path(linker, item),
                 })
             },
-            (ImportKind::Item, ResolvedUse::Item(item)) => {
+            (ImportKind::Item, ResolvedUse::Item { id: item, .. }) => {
                 // Reject re-export of kernel syscalls from any module other than the root kernel
                 // module itself
                 if import.visibility().is_public()
@@ -269,12 +286,12 @@ impl NamespaceGraph {
         }
     }
 
-    fn public_import_dependency(&self, import: &UseDecl) -> Option<(ModuleIndex, String)> {
+    fn visible_import_dependency(&self, import: &UseDecl) -> Option<(ModuleIndex, String)> {
         let path = import.target().as_deref();
         let (name, parent_path) = path.split_last()?;
         let parent = self.find_import_target_parent(import.owner(), parent_path)?;
         let dependency = self.module(parent).import(name)?;
-        dependency.visibility().is_public().then(|| dependency.key())
+        (parent == import.owner() || dependency.visibility().is_public()).then(|| dependency.key())
     }
 
     fn find_import_target_parent(&self, owner: ModuleIndex, path: &Path) -> Option<ModuleIndex> {
@@ -416,7 +433,10 @@ impl NamespaceGraph {
         if rest.is_empty() {
             if let Some(item) = owner_module.item(first) {
                 self.ensure_item_visible(owner, item, path.span(), linker)?;
-                return Ok(ResolvedUse::Item(item.id()));
+                return Ok(ResolvedUse::Item {
+                    id: item.id(),
+                    visibility: item.visibility(),
+                });
             }
 
             if let Some(resolved) = imports.get(owner, first) {
@@ -447,12 +467,14 @@ impl NamespaceGraph {
                         imports,
                         linker,
                     ),
-                    ResolvedUse::Item(item) => Err(SymbolResolutionError::invalid_sub_path(
-                        path.span(),
-                        linker[item.module][item.index].name().span(),
-                        linker.source_manager.as_ref(),
-                    )
-                    .into()),
+                    ResolvedUse::Item { id: item, .. } => {
+                        Err(SymbolResolutionError::invalid_sub_path(
+                            path.span(),
+                            linker[item.module][item.index].name().span(),
+                            linker.source_manager.as_ref(),
+                        )
+                        .into())
+                    },
                 };
             }
 
@@ -512,7 +534,10 @@ impl NamespaceGraph {
             if rest.is_empty() {
                 if let Some(item) = module.item(component) {
                     self.ensure_item_visible(owner, item, span, linker)?;
-                    return Ok(ResolvedUse::Item(item.id()));
+                    return Ok(ResolvedUse::Item {
+                        id: item.id(),
+                        visibility: item.visibility(),
+                    });
                 }
 
                 if let Some(edge) = module.submodule(component) {
@@ -521,7 +546,7 @@ impl NamespaceGraph {
                 }
 
                 if let Some(import) = module.import(component)
-                    && import.visibility().is_public()
+                    && (owner == current || import.visibility().is_public())
                     && let Some(resolved) = imports.get(current, component)
                 {
                     return Ok(resolved);
@@ -582,7 +607,10 @@ impl NamespaceGraph {
 
         if let Some(item) = module.item(name) {
             self.ensure_item_visible(owner, item, span, linker)?;
-            return Ok(ResolvedUse::Item(item.id()));
+            return Ok(ResolvedUse::Item {
+                id: item.id(),
+                visibility: item.visibility(),
+            });
         }
 
         if let Some(edge) = module.submodule(name) {
@@ -592,7 +620,7 @@ impl NamespaceGraph {
 
         if let Some(imports) = imports
             && let Some(import) = module.import(name)
-            && import.visibility().is_public()
+            && (owner == parent || import.visibility().is_public())
             && let Some(resolved) = imports.get(parent, name)
         {
             return Ok(resolved);
@@ -1129,7 +1157,7 @@ mod tests {
         let imports = graph.resolve_imports(&linker).expect("imports should resolve");
 
         assert_eq!(imports.get(consumer_id, "mod"), Some(ResolvedUse::Module(imported_id)));
-        assert!(matches!(imports.get(consumer_id, "VALUE"), Some(ResolvedUse::Item(_))));
+        assert!(matches!(imports.get(consumer_id, "VALUE"), Some(ResolvedUse::Item { .. })));
     }
 
     #[test]
@@ -1169,7 +1197,7 @@ mod tests {
             )
             .expect("code path should resolve through imported module");
 
-        assert!(matches!(resolved, ResolvedUse::Item(_)));
+        assert!(matches!(resolved, ResolvedUse::Item { .. }));
     }
 
     #[test]
@@ -1219,7 +1247,7 @@ mod tests {
             )
             .expect("absolute code path should resolve globally");
 
-        assert!(matches!(resolved, ResolvedUse::Item(gid) if gid.module == global_id));
+        assert!(matches!(resolved, ResolvedUse::Item { id: gid, .. } if gid.module == global_id));
     }
 
     #[test]
@@ -1259,7 +1287,7 @@ mod tests {
             )
             .expect("absolute code path should resolve to public item re-export");
 
-        assert!(matches!(resolved, ResolvedUse::Item(gid) if gid.module == dep_id));
+        assert!(matches!(resolved, ResolvedUse::Item { id: gid, .. } if gid.module == dep_id));
     }
 
     #[test]

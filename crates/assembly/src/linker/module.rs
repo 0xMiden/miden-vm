@@ -298,7 +298,7 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
                         id,
                         path: Span::new(span, Arc::from(self.resolver.module_path(id))),
                     },
-                    ResolvedUse::Item(gid) => SymbolResolution::Exact {
+                    ResolvedUse::Item { id: gid, .. } => SymbolResolution::Exact {
                         gid,
                         path: Span::new(span, self.resolver.item_path(gid)),
                     },
