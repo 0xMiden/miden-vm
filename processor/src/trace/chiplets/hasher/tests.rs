@@ -19,6 +19,7 @@ const ROW_DATA_COL_RANGE: Range<usize> = 15..19;
 const NODE_INDEX_COL_IDX: usize = 15;
 const NODE_INDEX_NEXT_COL_IDX: usize = 16;
 const IS_START_COL_IDX: usize = 17;
+const LEVEL_COL_IDX: usize = 18;
 const OP_FINAL_COL_IDX: usize = 19;
 const MRUPDATE_ID_COL_IDX: usize = 20;
 const CONTROLLER_MERKLE_OR_PADDING_COL_IDX: usize = TRACE_WIDTH - 1;
@@ -155,9 +156,9 @@ fn hasher_build_merkle_root_depth_3() {
 
     // Depth 3: 3 controller rows.
     // Index=5 (binary 101): direction bits are LSBs at each level
-    check_merkle_controller_row(&trace, 0, MP_VERIFY, 5, true, false, ZERO, ONE);
-    check_merkle_controller_row(&trace, 1, MP_VERIFY, 2, false, false, ZERO, ZERO);
-    check_merkle_controller_row(&trace, 2, MP_VERIFY, 1, false, true, ZERO, ONE);
+    check_merkle_controller_row(&trace, 0, MP_VERIFY, 5, 0, true, false, ZERO, ONE);
+    check_merkle_controller_row(&trace, 1, MP_VERIFY, 2, 1, false, false, ZERO, ZERO);
+    check_merkle_controller_row(&trace, 2, MP_VERIFY, 1, 2, false, true, ZERO, ONE);
 }
 
 #[test]
@@ -187,13 +188,13 @@ fn hasher_update_merkle_root() {
 
     // MV leg (old path): rows 0-1
     // Index=1 (binary 01): direction bits are LSBs at each level
-    check_merkle_controller_row(&trace, 0, MR_UPDATE_OLD, 1, true, false, ONE, ONE);
-    check_merkle_controller_row(&trace, 1, MR_UPDATE_OLD, 0, false, true, ONE, ZERO);
+    check_merkle_controller_row(&trace, 0, MR_UPDATE_OLD, 1, 0, true, false, ONE, ONE);
+    check_merkle_controller_row(&trace, 1, MR_UPDATE_OLD, 0, 1, false, true, ONE, ZERO);
 
     // MU leg (new path): rows 2-3
-    // Same index, same direction bits
-    check_merkle_controller_row(&trace, 2, MR_UPDATE_NEW, 1, true, false, ONE, ONE);
-    check_merkle_controller_row(&trace, 3, MR_UPDATE_NEW, 0, false, true, ONE, ZERO);
+    // Same index, same direction bits, levels restart at zero
+    check_merkle_controller_row(&trace, 2, MR_UPDATE_NEW, 1, 0, true, false, ONE, ONE);
+    check_merkle_controller_row(&trace, 3, MR_UPDATE_NEW, 0, 1, false, true, ONE, ZERO);
 
     for row in 4..controller_len(4) {
         assert_eq!(trace[0][row], PADDING[0], "padding s0 at row {row}");
@@ -633,6 +634,7 @@ fn check_merkle_controller_row(
     row: usize,
     selectors: Selectors,
     node_index: u64,
+    level: u64,
     is_start: bool,
     is_final: bool,
     mrupdate_id: Felt,
@@ -655,6 +657,11 @@ fn check_merkle_controller_row(
         trace[IS_START_COL_IDX][row],
         if is_start { ONE } else { ZERO },
         "is_start at Merkle row {row}"
+    );
+    assert_eq!(
+        trace[LEVEL_COL_IDX][row],
+        Felt::new_unchecked(level),
+        "level at Merkle row {row}"
     );
     assert_eq!(
         trace[NODE_INDEX_COL_IDX][row] - trace[NODE_INDEX_NEXT_COL_IDX][row].double(),
