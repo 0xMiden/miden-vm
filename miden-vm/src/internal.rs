@@ -18,6 +18,8 @@ use crate::{
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree, SimpleSmt},
 };
 
+mod merkle_builder;
+
 // CONSTANTS
 // ================================================================================================
 
@@ -105,30 +107,57 @@ impl InputFile {
         Ok(inputs)
     }
 
-    /// Parse advice inputs from the input file.
+    /// Parse advice inputs without an execution budget.
+    ///
+    /// CLI execution should use [`Self::parse_advice_inputs_with_options`] so that Merkle-tree
+    /// construction is covered by the advice budget.
     pub fn parse_advice_inputs(&self) -> Result<AdviceInputs, String> {
-        let mut advice_inputs = AdviceInputs::default();
-
-        let stack = self
-            .parse_advice_stack()
-            .map_err(|e| format!("failed to parse advice provider: {e}"))?;
-        let stack = AdviceStack::try_from_values(stack).map_err(|e| e.to_string())?;
-        advice_inputs = advice_inputs.with_stack(stack);
-
-        if let Some(map) = self
-            .parse_advice_map()
-            .map_err(|e| format!("failed to parse advice provider: {e}"))?
-        {
-            advice_inputs = advice_inputs.with_map(map);
-        }
-
+        let mut advice_inputs = self.parse_advice_inputs_base()?;
         if let Some(merkle_store) = self
             .parse_merkle_store()
             .map_err(|e| format!("failed to parse advice provider: {e}"))?
         {
             advice_inputs = advice_inputs.with_merkle_store(merkle_store);
         }
+        Ok(advice_inputs)
+    }
 
+    /// Parse advice inputs under the execution advice-memory budget.
+    ///
+    /// Final Merkle nodes are inserted through the advice provider as they are computed, rather
+    /// than materializing a full tree before checking its size. Shared nodes and empty subtrees
+    /// use the same accounting as execution. This bounds logical advice size, not JSON ingestion
+    /// or process-wide memory; sparse/partial input sorting still uses borrowed input metadata.
+    pub fn parse_advice_inputs_with_options(
+        &self,
+        options: &miden_processor::ExecutionOptions,
+    ) -> Result<AdviceInputs, String> {
+        let mut provider =
+            miden_processor::advice::AdviceProvider::new(self.parse_advice_inputs_base()?, options)
+                .map_err(|err| err.to_string())?;
+        for data in self.merkle_store.as_deref().unwrap_or_default() {
+            let root = merkle_builder::add_tree(data, &mut |left, right| {
+                provider.merge_roots(left, right).map_err(|err| err.to_string())
+            })?;
+            event!(Level::TRACE, "Added Merkle tree with root {} to the Merkle store", root);
+        }
+        let (stack, map, store) = provider.into_parts();
+        Ok(AdviceInputs::new(stack.into(), map, store))
+    }
+
+    /// Parse the stack and normalized map before constructing any Merkle nodes.
+    fn parse_advice_inputs_base(&self) -> Result<AdviceInputs, String> {
+        let stack = self
+            .parse_advice_stack()
+            .map_err(|e| format!("failed to parse advice provider: {e}"))?;
+        let stack = AdviceStack::try_from_values(stack).map_err(|e| e.to_string())?;
+        let mut advice_inputs = AdviceInputs::default().with_stack(stack);
+        if let Some(map) = self
+            .parse_advice_map()
+            .map_err(|e| format!("failed to parse advice provider: {e}"))?
+        {
+            advice_inputs = advice_inputs.with_map(map);
+        }
         Ok(advice_inputs)
     }
 
@@ -306,6 +335,9 @@ impl InputFile {
 
 // TESTS
 // ================================================================================================
+
+#[cfg(test)]
+mod budget_tests;
 
 #[cfg(test)]
 mod tests {

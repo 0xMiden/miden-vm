@@ -141,18 +141,19 @@ fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
     // use simplified input data reading
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
-    let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
-    let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
-    let mut host = DefaultHost::default().with_library(&CoreLibrary::default())?;
-
-    let program_hash: [u8; 32] = program.hash().into();
-
     let exec_options = ExecutionOptions::new(
         Some(params.max_cycles),
         params.expected_cycles,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
     )
     .map_err(|err| Report::msg(format!("{err}")))?;
+    let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
+    let advice_inputs = input_data
+        .parse_advice_inputs_with_options(&exec_options)
+        .map_err(Report::msg)?;
+    let mut host = DefaultHost::default().with_library(&CoreLibrary::default())?;
+
+    let program_hash: [u8; 32] = program.hash().into();
 
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
         .map_err(|err| Report::msg(format!("{err}")))?;
@@ -195,8 +196,16 @@ fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
     // fetch the stack and program inputs from the arguments
+    let exec_options = ExecutionOptions::new(
+        Some(params.max_cycles),
+        params.expected_cycles,
+        ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
+    )
+    .map_err(|err| Report::msg(format!("{err}")))?;
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
-    let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
+    let advice_inputs = input_data
+        .parse_advice_inputs_with_options(&exec_options)
+        .map_err(Report::msg)?;
     let mut host = DefaultHost::default().with_source_manager(source_manager);
     host.load_library(&CoreLibrary::default())
         .into_diagnostic()
@@ -206,13 +215,6 @@ fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
     }
 
     let program_hash: [u8; 32] = program.hash().into();
-
-    let exec_options = ExecutionOptions::new(
-        Some(params.max_cycles),
-        params.expected_cycles,
-        ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-    )
-    .map_err(|err| Report::msg(format!("{err}")))?;
 
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
         .map_err(|err| Report::msg(format!("{err}")))?;

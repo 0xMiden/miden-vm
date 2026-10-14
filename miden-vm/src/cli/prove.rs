@@ -142,10 +142,12 @@ impl ProveCmd {
         let now = Instant::now();
 
         // fetch the stack and program inputs from the arguments
-        let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
-        let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
-
         let execution_options = self.get_execution_options()?;
+        let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
+        let advice_inputs = input_data
+            .parse_advice_inputs_with_options(&execution_options)
+            .map_err(Report::msg)?;
+
         let hash_fn = self.get_hash_fn()?;
 
         // execute program and generate proof
