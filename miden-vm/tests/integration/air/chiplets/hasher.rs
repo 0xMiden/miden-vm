@@ -32,8 +32,8 @@ fn compress_accepts_unmasked_input_cv() {
 }
 
 #[test]
-fn hmerge() {
-    let asm_op = "hmerge";
+fn hdword() {
+    let asm_op = "hdword";
     let pub_inputs: Vec<u64> = (0..8).map(|_| rand::random()).collect();
 
     build_op_test!(asm_op, &pub_inputs).check_constraints();

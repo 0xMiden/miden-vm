@@ -290,7 +290,7 @@ pub proc load_h_s2_and_product(ptr: ptr<felt>, public_key: eidos::Digest)
     # 4) Start the Falcon product transcript with the public-key commitment.
     padw
     swapw
-    push.FALCON_PRODUCT_INIT_CV exec.eidos::merge_with_chaining_word
+    push.FALCON_PRODUCT_INIT_CV exec.eidos::compress_double_word
     padw padw
     # => [BLOCK_LO, BLOCK_HI, CV, ptr, tau_inv_ptr, A_h(2), ...]
 
@@ -649,7 +649,7 @@ pub proc move_sig_from_map_to_adv_stack(
     public_key: eidos::Digest,
     message: word,
 ) -> (eidos::Digest, word)
-    dupw.1 dupw.1 hmerge
+    dupw.1 dupw.1 hdword
     #=> [hash(PK || MSG), PK, MSG, ...]
 
     adv.push_mapval dropw

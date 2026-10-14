@@ -38,14 +38,14 @@ pub fn merge(values: &[Digest; 2]) -> Digest {
 
 /// Hashes two words as an eight-Felt sequence under the generic Felt-sequence domain.
 #[inline(always)]
-pub fn hash_two_words(values: &[Digest; 2]) -> Digest {
-    Eidos::hash_two_words(values)
+pub fn hash_double_word(values: &[Digest; 2]) -> Digest {
+    Eidos::hash_double_word(values)
 }
 
 /// Hashes an ordered list of words under the generic Felt-sequence domain.
 #[inline(always)]
-pub fn merge_many(values: &[Digest]) -> Digest {
-    Eidos::merge_many(values)
+pub fn hash_words(values: &[Digest]) -> Digest {
+    Eidos::hash_words(values)
 }
 
 /// Hashes a pair with the opcode-domain framing used by MAST control nodes.
@@ -145,7 +145,7 @@ mod tests {
         ];
 
         let expected = hash_elements(Digest::words_as_elements(&values));
-        assert_eq!(hash_two_words(&values), expected);
-        assert_ne!(hash_two_words(&values), merge(&values));
+        assert_eq!(hash_double_word(&values), expected);
+        assert_ne!(hash_double_word(&values), merge(&values));
     }
 }

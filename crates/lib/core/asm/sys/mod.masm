@@ -71,6 +71,6 @@ pub proc build_proof_request_key(
     swapw
     # => [CLAIM_COMMITMENT, VERIFIER_ROOT, ...]
     push.PROOF_REQUEST_INIT_CV
-    exec.eidos::merge_with_chaining_word
+    exec.eidos::compress_double_word
     # => [PROOF_REQUEST_KEY, ...]
 end

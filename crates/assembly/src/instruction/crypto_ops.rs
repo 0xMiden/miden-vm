@@ -42,17 +42,17 @@ pub(super) fn hash(block_builder: &mut BasicBlockBuilder) {
     block_builder.push_ops(ops);
 }
 
-/// Appends Eidos compression and stack manipulation operations to compute a 2-to-1 hash.
+/// Appends Eidos operations to hash a double word under the generic Felt-sequence domain.
 ///
 /// - Input:   the top 8 elements form the 2-word preimage `[A, B]` in stack order (A on top).
 /// - Output:  the top 4 elements are `Eidos::hash_elements(A || B)`.
-pub(super) fn hmerge(block_builder: &mut BasicBlockBuilder) {
+pub(super) fn hdword(block_builder: &mut BasicBlockBuilder) {
     let cv = eidos_compression::felt_sequence_chaining_word(8);
-    hash_two_words_with_chaining_word(block_builder, cv);
+    compress_double_word(block_builder, cv);
 }
 
-/// Hashes the top two stack words with the supplied initial chaining word.
-fn hash_two_words_with_chaining_word(block_builder: &mut BasicBlockBuilder, cv: Word) {
+/// Compresses the top two stack words with the supplied chaining word and extracts the digest.
+fn compress_double_word(block_builder: &mut BasicBlockBuilder, cv: Word) {
     #[rustfmt::skip]
     let ops = [
         // Add the initial chaining value.
@@ -151,9 +151,9 @@ pub(super) fn mtree_merge(block_builder: &mut BasicBlockBuilder) {
     block_builder.push_system_event(SystemEvent::MerkleNodeMerge);
 
     // Compute the parent with the reserved Merkle inner-node construction. This is intentionally
-    // distinct from `hmerge`, which hashes eight Felts under the generic Felt-sequence domain.
+    // distinct from `hdword`, which hashes eight Felts under the generic Felt-sequence domain.
     let cv = eidos_compression::merkle_node_chaining_word();
-    hash_two_words_with_chaining_word(block_builder, cv)
+    compress_double_word(block_builder, cv)
 }
 
 // MERKLE TREES - HELPERS
