@@ -509,7 +509,7 @@ impl DebugCallFrameResolver {
                     + node
                         .inline_calls
                         .iter()
-                        .filter(|row| row.op_idx == operation)
+                        .filter(|row| row.contains_operation(operation))
                         .count()
                         .saturating_sub(own_inline);
                 frames.push(frame(

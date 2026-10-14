@@ -347,6 +347,50 @@ fn source_debug_call_frames_expose_inference_and_reuse_the_index() {
 }
 
 #[test]
+fn source_debug_call_frames_preserve_inherited_inline_calls_across_operations() {
+    let package = Arc::<Package>::from(
+        Assembler::new(Arc::new(DefaultSourceManager::default()))
+            .assemble_program(
+                "program",
+                "proc inner push.7 drop end proc outer exec.inner push.8 drop end begin exec.outer push.9 drop end",
+            )
+            .unwrap(),
+    );
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let mut host = DefaultHost::default();
+    let mut resume = processor.get_initial_resume_context_for_package(package).unwrap();
+    let mut resolver = DebugCallFrameResolver::new();
+    let mut previous = None::<DebugCallFrame>;
+    let mut observations = 0;
+    loop {
+        for frame in resolver.resolve(&resume) {
+            if frame.debug_info()[frame.function().name_idx].ends_with("::inner") {
+                assert_eq!(frame.origin(), DebugFrameOrigin::InferredContext);
+                assert_eq!(
+                    frame.inherited_inline_calls(),
+                    2,
+                    "both enclosing exec calls remain inherited throughout inner"
+                );
+                if let Some(previous) = &previous {
+                    assert!(previous.is_same_frame(&frame));
+                }
+                previous = Some(frame);
+                observations += 1;
+            }
+        }
+        match processor
+            .step_with_package_debug_info_sync(&mut host, resume, &debug_info)
+            .unwrap()
+        {
+            Some(next) => resume = next,
+            None => break,
+        }
+    }
+    assert!(observations >= 2, "inner must be observed across multiple operations");
+}
+
+#[test]
 fn source_debug_call_frames_distinguish_adjacent_identical_invocations() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let package = Arc::<Package>::from(
