@@ -113,8 +113,8 @@ fn test_init_in_domain_prepares_domain_separated_compression_state() {
 
             begin
                 push.99
-                push.{domain}
                 push.{NUM_ELEMENTS}
+                push.{domain}
                 exec.eidos::init_in_domain
                 exec.sys::truncate_stack
             end
@@ -147,7 +147,7 @@ fn test_init_with_chaining_word_preserves_supplied_cv() {
 }
 
 #[test]
-fn test_state_initializers_reject_non_u32_length() {
+fn test_state_initializers_reject_non_u32_inputs() {
     const NON_U32_LENGTH: u64 = u32::MAX as u64 + 1;
     let invocations = [
         (
@@ -155,7 +155,11 @@ fn test_state_initializers_reject_non_u32_length() {
             "num_elements must fit in a u32",
         ),
         (
-            format!("push.0 push.{NON_U32_LENGTH} exec.eidos::init_chaining_word_in_domain"),
+            format!("push.{NON_U32_LENGTH}.0 exec.eidos::init_chaining_word_in_domain"),
+            "Eidos init values must fit in u32",
+        ),
+        (
+            format!("push.0.{NON_U32_LENGTH} exec.eidos::init_chaining_word_in_domain"),
             "Eidos init values must fit in u32",
         ),
         (
@@ -163,7 +167,11 @@ fn test_state_initializers_reject_non_u32_length() {
             "num_elements must fit in a u32",
         ),
         (
-            format!("push.0 push.{NON_U32_LENGTH} exec.eidos::init_in_domain"),
+            format!("push.{NON_U32_LENGTH}.0 exec.eidos::init_in_domain"),
+            "Eidos init values must fit in u32",
+        ),
+        (
+            format!("push.0.{NON_U32_LENGTH} exec.eidos::init_in_domain"),
             "Eidos init values must fit in u32",
         ),
     ];
@@ -200,47 +208,6 @@ fn test_invalid_end_addr() {
         test,
         ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
         if err_code == ZERO && err_msg.is_none()
-    );
-}
-
-#[test]
-fn test_invalid_end_addr_has_message() {
-    let source = "
-    use miden::core::crypto::hashes::eidos
-    use miden::core::sys
-
-    begin
-        push.0999 # end address
-        push.1000 # start address
-
-        exec.eidos::hash_double_words
-    end
-    ";
-    let test = build_test!(source, &[]);
-    expect_assert_error_message!(test);
-}
-
-#[test]
-fn test_hash_double_words_rejects_incomplete_block() {
-    const ERROR_MSG: &str = "range length must be a multiple of 8";
-    let expected_error_code = miden_core::mast::error_code_from_msg(ERROR_MSG);
-    let source = "
-    use miden::core::crypto::hashes::eidos
-
-    begin
-        push.1004 # end address
-        push.1000 # start address
-        exec.eidos::hash_double_words
-    end
-    ";
-
-    let test = build_test!(source, &[]);
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, .. },
-            ..
-        } if err_code == expected_error_code
     );
 }
 
@@ -305,7 +272,7 @@ fn test_empty_felt_sequence_digest_matches_native_eidos() {
 }
 
 #[test]
-fn test_hash_empty_words_with_domain() {
+fn test_hash_empty_words_in_domain() {
     use miden_core::{Felt, chiplets::hasher, program};
 
     const PTR: u64 = 1000;
@@ -317,7 +284,7 @@ fn test_hash_empty_words_with_domain() {
             push.{PTR} # end address
             push.{PTR} # start address
             push.{domain}
-            exec.eidos::hash_words_with_domain
+            exec.eidos::hash_words_in_domain
             swapw dropw
         end
         ",
@@ -349,9 +316,9 @@ fn test_hash_elements_in_domain_matches_native_eidos() {
                 push.8.7.6.5.1004 mem_storew_le dropw
                 push.0.11.10.9.1008 mem_storew_le dropw
 
-                push.{domain}
                 push.{NUM_ELEMENTS}
                 push.{PTR}
+                push.{domain}
                 exec.eidos::hash_elements_in_domain
                 swapw dropw
             end
@@ -376,7 +343,7 @@ fn test_generic_felt_domain_hash_elements_matches_default() {
                 push.4.3.2.1.1000 mem_storew_le dropw
                 push.8.7.6.5.1004 mem_storew_le dropw
 
-                push.{domain} push.{num_elements} push.{PTR}
+                push.{num_elements} push.{PTR} push.{domain}
                 exec.eidos::hash_elements_in_domain
 
                 push.{num_elements} push.{PTR}
@@ -393,7 +360,7 @@ fn test_generic_felt_domain_hash_elements_matches_default() {
 }
 
 #[test]
-fn test_two_word_helpers_match_eight_felt_hashing() {
+fn test_double_word_helpers_match_eight_felt_hashing() {
     let values = [
         Felt::new_unchecked(1),
         Felt::new_unchecked(2),
@@ -411,23 +378,38 @@ fn test_two_word_helpers_match_eight_felt_hashing() {
     use miden::core::crypto::hashes::eidos
 
     begin
-        exec.eidos::hash_two_words
+        push.4.3.2.1.1000 mem_storew_le dropw
+        push.8.7.6.5.1004 mem_storew_le dropw
+
+        exec.eidos::hash_double_word
+
+        dupw push.8.1000 exec.eidos::hash_elements assert_eqw
+        dupw push.1008.1000 exec.eidos::hash_words assert_eqw
     end
     ";
     build_test!(source, &stack_inputs).expect_stack(&expected);
 
-    const TAG: u32 = 42;
-    let expected = word_elements(hash_elements_with_raw_tag(&values, TAG));
-    let mut tagged_inputs = vec![TAG as u64];
-    tagged_inputs.extend(stack_inputs);
-    let source = "
-    use miden::core::crypto::hashes::eidos
+    for tag in [0, 42, GenericFeltSequenceDomain::TAG.as_u32(), u32::MAX] {
+        let expected = word_elements(hash_elements_with_raw_tag(&values, tag));
+        let mut tagged_inputs = vec![tag as u64];
+        tagged_inputs.extend(stack_inputs);
+        let source = format!(
+            "
+            use miden::core::crypto::hashes::eidos
 
-    begin
-        exec.eidos::hash_two_words_in_domain
-    end
-    ";
-    build_test!(source, &tagged_inputs).expect_stack(&expected);
+            begin
+                push.4.3.2.1.1000 mem_storew_le dropw
+                push.8.7.6.5.1004 mem_storew_le dropw
+
+                exec.eidos::hash_double_word_in_domain
+
+                dupw push.8.1000.{tag} exec.eidos::hash_elements_in_domain assert_eqw
+                dupw push.1008.1000.{tag} exec.eidos::hash_words_in_domain assert_eqw
+            end
+            "
+        );
+        build_test!(source.as_str(), &tagged_inputs).expect_stack(&expected);
+    }
 }
 
 #[test]
@@ -651,10 +633,10 @@ fn test_hash_words_rejects_unaligned_end() {
 }
 
 #[test]
-fn test_hash_double_words() {
+fn test_hash_words_multiple_blocks() {
     // test the standard case
     // With mem_storew_le: push.D.C.B.A stores [A, B, C, D]
-    let double_words = "
+    let words = "
     use miden::core::sys
     use miden::core::crypto::hashes::eidos
 
@@ -669,7 +651,7 @@ fn test_hash_double_words() {
         push.1000      # start address
         # => [start_addr, end_addr]
 
-        exec.eidos::hash_double_words
+        exec.eidos::hash_words
         # => [HASH]
 
         # truncate stack
@@ -688,34 +670,7 @@ fn test_hash_double_words() {
         0, 0, 0, 1,
     ]).into_iter().map(|e| e.as_canonical_u64()).collect();
 
-    build_test!(double_words, &[]).expect_stack(&resulting_hash);
-
-    // test the corner case when the end pointer equals to the start pointer
-    let empty_double_words = r#"
-    use miden::core::sys
-    use miden::core::crypto::hashes::eidos
-
-    begin
-        push.1000.1000 # start and end addresses
-        # => [start_addr, end_addr]
-
-        exec.eidos::hash_double_words
-        # => [HASH]
-
-        # assert that the resulting hash is equal to the framed empty hash
-        dupw
-        push.0.1000 exec.eidos::hash_elements
-        assert_eqw.err="resulting hash should be equal to the empty hash"
-
-        # truncate stack
-        exec.sys::truncate_stack
-        # => [HASH]
-    end
-    "#;
-
-    let empty_hash: Vec<u64> =
-        build_expected_hash(&[]).into_iter().map(|e| e.as_canonical_u64()).collect();
-    build_test!(empty_double_words, &[]).expect_stack(&empty_hash);
+    build_test!(words, &[]).expect_stack(&resulting_hash);
 }
 
 #[test]
@@ -742,7 +697,6 @@ fn test_digest() {
     end
     ";
 
-    // Same input as test_hash_double_words: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
     #[rustfmt::skip]
     let mut even_hash = raw_absorb_digest(&[
         1, 0, 0, 0,

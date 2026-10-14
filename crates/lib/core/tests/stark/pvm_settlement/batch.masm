@@ -47,7 +47,7 @@ proc append_deferred_root(deferred_root: word, batch_root: word) -> word
 
             # Hash the AND node without adding deferred work to the batcher's own proof.
             push.0.0.0.DEFERRED_AND_DOMAIN exec.eidos::init_chaining_word_with_params
-            exec.eidos::merge_with_chaining_word
+            exec.eidos::compress_double_word
         end
     end
 end

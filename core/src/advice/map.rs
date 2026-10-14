@@ -87,7 +87,7 @@ impl AdviceMap {
     ///
     /// Entries are committed in key order. Each entry is hashed as the key elements followed by the
     /// value elements. [`hasher::hash_elements`] binds the entry length, and
-    /// [`hasher::merge_many`] folds the ordered entry commitments into the final map commitment.
+    /// [`hasher::hash_words`] folds the ordered entry commitments into the final map commitment.
     pub fn commitment(&self) -> Word {
         let entry_commitments = self
             .iter()
@@ -99,7 +99,7 @@ impl AdviceMap {
             })
             .collect::<Vec<_>>();
 
-        hasher::merge_many(&entry_commitments)
+        hasher::hash_words(&entry_commitments)
     }
 
     /// Gets the given key's corresponding entry in the map for in-place manipulation.
@@ -291,7 +291,7 @@ mod tests {
         ]);
         let low_entry = [low_key.as_elements(), low_values.as_slice()].concat();
         let high_entry = [high_key.as_elements(), high_values.as_slice()].concat();
-        let expected = Eidos::merge_many(&[
+        let expected = Eidos::hash_words(&[
             Eidos::hash_elements(&low_entry),
             Eidos::hash_elements(&high_entry),
         ]);

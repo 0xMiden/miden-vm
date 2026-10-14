@@ -291,8 +291,8 @@ pub proc pipe_words_to_memory_in_domain(
   # it does not read memory when num_elements is zero.
   dup.1 eq.0
   if.true
-    swap drop dup.1 push.0 swap
-    # => [write_ptr, num_elements=0, domain, write_ptr, ...]
+    swap drop push.0 dup.2 movup.2
+    # => [domain, write_ptr, num_elements=0, write_ptr, ...]
     exec.eidos::hash_elements_in_domain
     # => [DIGEST, write_ptr, ...]
   else
@@ -311,7 +311,7 @@ pub proc pipe_words_to_memory_in_domain(
     # num_felts = end_ptr - write_ptr + needs_padding * 4.
     dup.1 dup.1 sub
     dup.4 mul.4 add
-    movup.3 swap
+    movup.3
     exec.eidos::init_chaining_word_in_domain
     # => [CV, write_ptr, end_ptr, needs_padding, ...]
 
@@ -426,8 +426,8 @@ end
 #! - write_ptr' is the memory pointer to the end of the copied words.
 #! - COMMITMENT is the domain-tagged digest that the preimage must hash to.
 #!
-pub proc pipe_double_words_preimage_to_memory_with_domain(
-    domain: felt,
+pub proc pipe_double_words_preimage_to_memory_in_domain(
+    domain: u32,
     num_words: u32,
     write_ptr: ptr<word>,
     commitment: eidos::Digest,
@@ -439,13 +439,13 @@ pub proc pipe_double_words_preimage_to_memory_with_domain(
   dup eq.0
   if.true
     # Reuse the element hasher's canonical empty-input path while preserving write_ptr.
-    drop dup.1 push.0 swap
-    # => [write_ptr, num_elements=0, domain, write_ptr, COMMITMENT, ...]
+    drop push.0 dup.2 movup.2
+    # => [domain, write_ptr, num_elements=0, write_ptr, COMMITMENT, ...]
     exec.eidos::hash_elements_in_domain
     # => [DIGEST, write_ptr, COMMITMENT, ...]
   else
     # Assert precondition.
-    dup is_odd assertz.err="pipe_double_words_preimage_to_memory_with_domain: num_words must be even"
+    dup is_odd assertz.err="pipe_double_words_preimage_to_memory_in_domain: num_words must be even"
     # => [num_words, domain, write_ptr, COMMITMENT, ...]
 
     # Compute end_ptr and initialize the Eidos CV with the committed Felt length.
@@ -453,7 +453,7 @@ pub proc pipe_double_words_preimage_to_memory_with_domain(
     movup.2 drop movup.3
     # => [write_ptr, end_ptr, num_elements, domain, COMMITMENT, ...]
 
-    movup.3 movup.3 exec.eidos::init_chaining_word_in_domain
+    movup.2 movup.3 exec.eidos::init_chaining_word_in_domain
     # => [CV, write_ptr, end_ptr, COMMITMENT, ...]
 
     padw padw
@@ -471,5 +471,5 @@ pub proc pipe_double_words_preimage_to_memory_with_domain(
   movup.4 movdn.8
 
   # Assert the commitment.
-  assert_eqw.err="pipe_double_words_preimage_to_memory_with_domain: COMMITMENT does not match"
+  assert_eqw.err="pipe_double_words_preimage_to_memory_in_domain: COMMITMENT does not match"
 end
