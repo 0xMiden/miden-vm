@@ -504,14 +504,15 @@ impl DebugCallFrameResolver {
                     frame.function_idx == function && Arc::ptr_eq(&frame.debug_info, info)
                 })
             {
-                let own_inline = index.entry_inline_counts.get(&function).copied().unwrap_or(0);
-                let inherited = inherited
-                    + node
-                        .inline_calls
-                        .iter()
-                        .filter(|row| row.contains_operation(operation))
-                        .count()
-                        .saturating_sub(own_inline);
+                let inline_calls =
+                    node.inline_calls.iter().filter(|row| row.contains_operation(operation));
+                // Rows are innermost-first. The exec boundary separates the callee's changing
+                // source-inline context from its inherited callers, including the boundary itself.
+                let own_inline =
+                    inline_calls.clone().position(|row| row.callee_idx == function).unwrap_or_else(
+                        || index.entry_inline_counts.get(&function).copied().unwrap_or(0),
+                    );
+                let inherited = inherited + inline_calls.count().saturating_sub(own_inline);
                 frames.push(frame(
                     info,
                     function,

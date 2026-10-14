@@ -391,6 +391,107 @@ fn source_debug_call_frames_preserve_inherited_inline_calls_across_operations() 
 }
 
 #[test]
+fn source_debug_call_frames_distinguish_owned_and_inherited_inline_calls() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut module = Module::parser(Some(ModuleKind::Executable))
+        .parse_str(
+            None,
+            "proc inner push.7 drop nop push.6 drop nop push.5 drop end proc outer exec.inner push.8 drop end begin exec.outer push.9 drop end",
+            source_manager.clone(),
+        )
+        .unwrap();
+    let mut markers = [Some("source::inline"), None].into_iter();
+    for procedure in module.procedures_mut() {
+        for op in procedure.body_mut().iter_mut() {
+            let Op::Inst(instruction) = op else { continue };
+            if !matches!(instruction.inner(), Instruction::Nop) {
+                continue;
+            }
+            let span = instruction.span();
+            let replacement = match markers.next().unwrap() {
+                Some(name) => {
+                    let location = source_manager.file_line_col(span).unwrap();
+                    Instruction::DebugInlineCall(DebugInlineCallInfo::new(
+                        name,
+                        location.clone(),
+                        location,
+                    ))
+                },
+                None => Instruction::DebugInlineCallClear,
+            };
+            *op = Op::Inst(Span::new(span, replacement));
+        }
+    }
+    assert!(markers.next().is_none());
+    let package = Arc::<Package>::from(
+        Assembler::new(source_manager).assemble_program("program", module).unwrap(),
+    );
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let mut host = DefaultHost::default();
+    let mut resume = processor.get_initial_resume_context_for_package(package).unwrap();
+    let mut resolver = DebugCallFrameResolver::new();
+    let mut phases = Vec::new();
+    let mut previous = None::<DebugCallFrame>;
+    loop {
+        let operation = resume
+            .continuation_stack()
+            .iter_continuations_for_next_clock_with_source_node_ids()
+            .find_map(|(continuation, source)| {
+                let Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } =
+                    continuation
+                else {
+                    return None;
+                };
+                let offset = resume.current_forest()[*node_id]
+                    .unwrap_basic_block()
+                    .op_batches()
+                    .iter()
+                    .take(*batch_index)
+                    .map(|batch| batch.ops().len())
+                    .sum::<usize>();
+                Some((source?, (offset + op_idx_in_batch) as u32))
+            });
+        for frame in resolver.resolve(&resume) {
+            if frame.debug_info()[frame.function().name_idx].ends_with("::inner") {
+                assert_eq!(frame.origin(), DebugFrameOrigin::InferredContext);
+                assert_eq!(
+                    frame.inherited_inline_calls(),
+                    2,
+                    "callee-owned inline calls are not inherited"
+                );
+                if let Some(previous) = &previous {
+                    assert!(previous.is_same_frame(&frame));
+                }
+                previous = Some(frame);
+                if let Some((source, operation)) = operation {
+                    let own_inline =
+                        debug_info.inline_calls_for_operation(source, operation).any(|row| {
+                            debug_info[debug_info[row.callee_idx].name_idx].as_ref()
+                                == "source::inline"
+                        });
+                    if phases.last() != Some(&own_inline) {
+                        phases.push(own_inline);
+                    }
+                }
+            }
+        }
+        match processor
+            .step_with_package_debug_info_sync(&mut host, resume, &debug_info)
+            .unwrap()
+        {
+            Some(next) => resume = next,
+            None => break,
+        }
+    }
+    assert_eq!(
+        phases,
+        [false, true, false],
+        "inner must enter and clear its own inline context"
+    );
+}
+
+#[test]
 fn source_debug_call_frames_distinguish_adjacent_identical_invocations() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let package = Arc::<Package>::from(
