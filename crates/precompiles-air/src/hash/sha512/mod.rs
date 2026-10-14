@@ -198,16 +198,52 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha512Air {
         // The ownership equation makes these Boolean, disjoint activity flags. Inactive padding
         // enables neither batch, even though its compression controller continues advancing.
         let exec_act = LB::Expr::from(local[compression::COL_ACT]) - io_act.clone();
-        // One group per column: its two batches are mutually exclusive. Separate groups
-        // would multiply denominators, increasing both degree and committed area.
+        let opcode =
+            |index: usize| -> LB::Expr { comp_local[compression::COL_PROG_BEGIN + index].into() };
+        let byte_op = [
+            compression::program::T_IS_XOR,
+            compression::program::T_IS_AND,
+            compression::program::T_IS_ANDNOT,
+            compression::program::T_IS_ADD,
+            compression::program::T_IS_INPUT,
+        ]
+        .into_iter()
+        .map(opcode)
+        .sum::<LB::Expr>();
+        let rotate_op = opcode(compression::program::T_IS_ROL);
+        // IO, compression byte operations, and rotations are mutually exclusive. Keep their
+        // alternatives in one group so denominators are selected rather than multiplied.
         for (index, kind) in compression::SHARED_BATCHES.into_iter().enumerate() {
+            let range = match kind {
+                compression::LookupKind::Byte(byte) if byte < 4 => {
+                    Some(compression::LookupKind::RangePair(byte))
+                },
+                _ => None,
+            };
+            let flag_degree = if range.is_some() { 2 } else { 1 };
             let comp = compression::lookup_batch_degree(kind, 0);
             let io = io::lookup_batch_degree(index, 0);
-            // Inner entries use act = 1; the outer linear flag raises both numerator and
-            // denominator degree by one. Disjoint batches share the maximum of their bounds.
-            let comp = Deg { v: comp.v + 1, u: comp.u + 1 };
+            let comp = Deg {
+                v: comp.v + flag_degree,
+                u: comp.u + flag_degree,
+            };
             let io = Deg { v: io.v + 1, u: io.u + 1 };
-            let degree = Deg { v: comp.v.max(io.v), u: comp.u.max(io.u) };
+            let range_degree = range.map(|kind| {
+                let d = compression::lookup_batch_degree(kind, 0);
+                Deg { v: d.v + 2, u: d.u + 2 }
+            });
+            let mut degree = Deg { v: comp.v.max(io.v), u: comp.u.max(io.u) };
+            if let Some(d) = range_degree {
+                degree = Deg {
+                    v: degree.v.max(d.v),
+                    u: degree.u.max(d.u),
+                };
+            }
+            let comp_flag = if range.is_some() {
+                exec_act.clone() * byte_op.clone()
+            } else {
+                exec_act.clone()
+            };
             builder.next_column(
                 |column| {
                     column.group(
@@ -215,7 +251,7 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha512Air {
                         |group| {
                             group.batch(
                                 "compression",
-                                exec_act.clone(),
+                                comp_flag,
                                 |batch| {
                                     compression::eval_lookup_batch(
                                         batch,
@@ -228,6 +264,24 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha512Air {
                                 },
                                 comp,
                             );
+                            if let Some(range) = range {
+                                group.batch(
+                                    "rotation",
+                                    exec_act.clone() * rotate_op.clone(),
+                                    |batch| {
+                                        compression::eval_lookup_batch(
+                                            batch,
+                                            range,
+                                            &comp_local,
+                                            &comp_periods,
+                                            LB::Expr::ONE,
+                                            0,
+                                        );
+                                    },
+                                    range_degree
+                                        .expect("rotation degree is defined with its batch"),
+                                );
+                            }
                             group.batch(
                                 "io",
                                 io_act.clone(),

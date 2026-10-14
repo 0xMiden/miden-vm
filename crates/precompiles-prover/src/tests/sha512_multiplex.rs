@@ -6,6 +6,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
+use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
 use miden_precompiles_air::hash::sha512::{
     COL_IO_ACT, IO_COLUMNS, IO_ROW_START, NUM_MAIN_COLS, Sha512IoContinuation,
 };
@@ -41,6 +42,14 @@ fn requirements(lengths: &[usize]) -> (Sha512CompressionRequires, Sha512IoRequir
 fn io_index(block: usize, lane: usize, column: usize) -> usize {
     (block * compression::COMPRESSION_PERIOD + IO_ROW_START + lane) * NUM_MAIN_COLS
         + IO_COLUMNS[column]
+}
+
+#[test]
+fn sha512_opcode_lookup_packing_preserves_degree() {
+    assert_eq!(Sha512Air.width(), 54);
+    assert_eq!(Sha512Air.aux_width(), 14);
+    assert_eq!(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&Sha512Air).max(), 5);
+    assert_eq!(crate::tests::log_quotient_degree(&Sha512Air), 2);
 }
 
 #[test]

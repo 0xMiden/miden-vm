@@ -5,10 +5,10 @@ use miden::core::sys::pvm::layout
 
 # Per-row OOD layout uses LMCS alignment 8:
 #   preprocessed: 0 + 0 + 0 + 8 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 = 8 scalar evaluations
-#   main:         96 + 112 + 72 + 8 + 40 + 48 + 32 + 24 + 24 + 40 + 56 + 40 = 592 scalar evaluations
-#   aux:          32 + 40 + 24 + 8 + 24 + 56 + 8 + 8 + 24 + 32 + 40 + 24 = 320 scalar evaluations
+#   main:         96 + 112 + 64 + 8 + 40 + 48 + 32 + 24 + 24 + 40 + 56 + 40 = 584 scalar evaluations
+#   aux:          40 + 40 + 24 + 8 + 24 + 56 + 8 + 8 + 24 + 24 + 32 + 24 = 312 scalar evaluations
 #   quotient:     8 scalar evaluations
-# The advice stream supplies 1856 base felts, read as 232 `adv_pipe` blocks,
+# The advice stream supplies 1824 base felts, read as 228 `adv_pipe` blocks,
 # split into 26 segments (24 of them order-dependent).
 
 #! Absorbs 2 advice blocks at the destination supplied by the caller.
@@ -83,12 +83,12 @@ proc pipe_14
     end
 end
 
-#! Absorbs 18 advice blocks at the destination supplied by the caller.
+#! Absorbs 16 advice blocks at the destination supplied by the caller.
 #!
 #! Inputs:  [rate(8), cv(4), ptr, alpha_ptr, acc0, acc1]
-#! Outputs: [rate'(8), cv'(4), ptr + 144, alpha_ptr, acc0', acc1']
-proc pipe_18
-    repeat.18
+#! Outputs: [rate'(8), cv'(4), ptr + 128, alpha_ptr, acc0', acc1']
+proc pipe_16
+    repeat.16
         adv_pipe
         horner_eval_ext
         compress
@@ -210,7 +210,7 @@ pub proc stage_ood_scatter_table()
     procref.pipe_10 dup.4 add.64 mem_storew_le dropw
     procref.pipe_12 dup.4 add.68 mem_storew_le dropw
     procref.pipe_14 dup.4 add.72 mem_storew_le dropw
-    procref.pipe_18 dup.4 add.76 mem_storew_le dropw
+    procref.pipe_16 dup.4 add.76 mem_storew_le dropw
     procref.pipe_24 dup.4 add.80 mem_storew_le dropw
     procref.pipe_28 dup.4 add.84 mem_storew_le dropw
     exec.layout::proof_order_positions_ptr
@@ -222,9 +222,9 @@ pub proc stage_ood_scatter_table()
     # main: 24 blocks at row offset 16
     push.16 dup.1 add.4 mem_store
     dup.2 add.80 dup.1 add.5 mem_store
-    # aux: 8 blocks at row offset 1200
-    push.1200 dup.1 add.28 mem_store
-    dup.2 add.60 dup.1 add.29 mem_store
+    # aux: 10 blocks at row offset 1184
+    push.1184 dup.1 add.28 mem_store
+    dup.2 add.64 dup.1 add.29 mem_store
     drop
 
     # AIR 1: its pair slots start at table + 2 * pos_by_id[1]
@@ -241,7 +241,7 @@ pub proc stage_ood_scatter_table()
     # AIR 2: its pair slots start at table + 2 * pos_by_id[2]
     dup add.2 mem_load mul.2 dup.2 add
     # => [base, pos_ptr, table]
-    # main: 18 blocks at row offset 432
+    # main: 16 blocks at row offset 432
     push.432 dup.1 add.4 mem_store
     dup.2 add.76 dup.1 add.5 mem_store
     # aux: 6 blocks at row offset 1344
@@ -252,8 +252,8 @@ pub proc stage_ood_scatter_table()
     # AIR 3: its pair slots start at table + 2 * pos_by_id[3]
     dup add.3 mem_load mul.2 dup.2 add
     # => [base, pos_ptr, table]
-    # main: 2 blocks at row offset 576
-    push.576 dup.1 add.4 mem_store
+    # main: 2 blocks at row offset 560
+    push.560 dup.1 add.4 mem_store
     dup.2 add.52 dup.1 add.5 mem_store
     # aux: 2 blocks at row offset 1392
     push.1392 dup.1 add.28 mem_store
@@ -263,8 +263,8 @@ pub proc stage_ood_scatter_table()
     # AIR 4: its pair slots start at table + 2 * pos_by_id[4]
     dup add.4 mem_load mul.2 dup.2 add
     # => [base, pos_ptr, table]
-    # main: 10 blocks at row offset 592
-    push.592 dup.1 add.4 mem_store
+    # main: 10 blocks at row offset 576
+    push.576 dup.1 add.4 mem_store
     dup.2 add.64 dup.1 add.5 mem_store
     # aux: 6 blocks at row offset 1408
     push.1408 dup.1 add.28 mem_store
@@ -274,8 +274,8 @@ pub proc stage_ood_scatter_table()
     # AIR 5: its pair slots start at table + 2 * pos_by_id[5]
     dup add.5 mem_load mul.2 dup.2 add
     # => [base, pos_ptr, table]
-    # main: 12 blocks at row offset 672
-    push.672 dup.1 add.4 mem_store
+    # main: 12 blocks at row offset 656
+    push.656 dup.1 add.4 mem_store
     dup.2 add.68 dup.1 add.5 mem_store
     # aux: 14 blocks at row offset 1456
     push.1456 dup.1 add.28 mem_store
@@ -285,8 +285,8 @@ pub proc stage_ood_scatter_table()
     # AIR 6: its pair slots start at table + 2 * pos_by_id[6]
     dup add.6 mem_load mul.2 dup.2 add
     # => [base, pos_ptr, table]
-    # main: 8 blocks at row offset 768
-    push.768 dup.1 add.4 mem_store
+    # main: 8 blocks at row offset 752
+    push.752 dup.1 add.4 mem_store
     dup.2 add.60 dup.1 add.5 mem_store
     # aux: 2 blocks at row offset 1568
     push.1568 dup.1 add.28 mem_store
@@ -296,8 +296,8 @@ pub proc stage_ood_scatter_table()
     # AIR 7: its pair slots start at table + 2 * pos_by_id[7]
     dup add.7 mem_load mul.2 dup.2 add
     # => [base, pos_ptr, table]
-    # main: 6 blocks at row offset 832
-    push.832 dup.1 add.4 mem_store
+    # main: 6 blocks at row offset 816
+    push.816 dup.1 add.4 mem_store
     dup.2 add.56 dup.1 add.5 mem_store
     # aux: 2 blocks at row offset 1584
     push.1584 dup.1 add.28 mem_store
@@ -307,8 +307,8 @@ pub proc stage_ood_scatter_table()
     # AIR 8: its pair slots start at table + 2 * pos_by_id[8]
     dup add.8 mem_load mul.2 dup.2 add
     # => [base, pos_ptr, table]
-    # main: 6 blocks at row offset 880
-    push.880 dup.1 add.4 mem_store
+    # main: 6 blocks at row offset 864
+    push.864 dup.1 add.4 mem_store
     dup.2 add.56 dup.1 add.5 mem_store
     # aux: 6 blocks at row offset 1600
     push.1600 dup.1 add.28 mem_store
@@ -318,33 +318,33 @@ pub proc stage_ood_scatter_table()
     # AIR 9: its pair slots start at table + 2 * pos_by_id[9]
     dup add.9 mem_load mul.2 dup.2 add
     # => [base, pos_ptr, table]
-    # main: 10 blocks at row offset 928
-    push.928 dup.1 add.4 mem_store
+    # main: 10 blocks at row offset 912
+    push.912 dup.1 add.4 mem_store
     dup.2 add.64 dup.1 add.5 mem_store
-    # aux: 8 blocks at row offset 1648
+    # aux: 6 blocks at row offset 1648
     push.1648 dup.1 add.28 mem_store
-    dup.2 add.60 dup.1 add.29 mem_store
+    dup.2 add.56 dup.1 add.29 mem_store
     drop
 
     # AIR 10: its pair slots start at table + 2 * pos_by_id[10]
     dup add.10 mem_load mul.2 dup.2 add
     # => [base, pos_ptr, table]
-    # main: 14 blocks at row offset 1008
-    push.1008 dup.1 add.4 mem_store
+    # main: 14 blocks at row offset 992
+    push.992 dup.1 add.4 mem_store
     dup.2 add.72 dup.1 add.5 mem_store
-    # aux: 10 blocks at row offset 1712
-    push.1712 dup.1 add.28 mem_store
-    dup.2 add.64 dup.1 add.29 mem_store
+    # aux: 8 blocks at row offset 1696
+    push.1696 dup.1 add.28 mem_store
+    dup.2 add.60 dup.1 add.29 mem_store
     drop
 
     # AIR 11: its pair slots start at table + 2 * pos_by_id[11]
     dup add.11 mem_load mul.2 dup.2 add
     # => [base, pos_ptr, table]
-    # main: 10 blocks at row offset 1120
-    push.1120 dup.1 add.4 mem_store
+    # main: 10 blocks at row offset 1104
+    push.1104 dup.1 add.4 mem_store
     dup.2 add.64 dup.1 add.5 mem_store
-    # aux: 6 blocks at row offset 1792
-    push.1792 dup.1 add.28 mem_store
+    # aux: 6 blocks at row offset 1760
+    push.1760 dup.1 add.28 mem_store
     dup.2 add.56 dup.1 add.29 mem_store
     drop
     drop drop
@@ -358,7 +358,7 @@ end
 #! absorbed block. Call `stage_ood_scatter_table` before ingesting the first row.
 #!
 #! Inputs:  [rate(8), cv(4), ptr, alpha_ptr, acc0, acc1]
-#! Outputs: [rate'(8), cv'(4), ptr + 1856, alpha_ptr, acc0', acc1']
+#! Outputs: [rate'(8), cv'(4), ptr + 1824, alpha_ptr, acc0', acc1']
 #! Invocation: exec
 pub proc process_row_ood_evaluations(
     state: types::EidosState,
@@ -489,10 +489,10 @@ pub proc process_row_ood_evaluations(
     swap.13 drop
     exec.layout::ood_scatter_table_ptr add.51 mem_load
     dynexec
-    # quotient group, sole occupant: 2 blocks at row offset 1840
-    exec.layout::ood_scatter_table_ptr mem_load add.1840
+    # quotient group, sole occupant: 2 blocks at row offset 1808
+    exec.layout::ood_scatter_table_ptr mem_load add.1808
     swap.13 drop
     exec.pipe_2
-    exec.layout::ood_scatter_table_ptr mem_load add.1856
+    exec.layout::ood_scatter_table_ptr mem_load add.1824
     swap.13 drop
 end

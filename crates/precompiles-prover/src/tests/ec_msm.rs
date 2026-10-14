@@ -100,11 +100,11 @@ fn msm_two_intro_traces() -> crate::session::SessionTraces {
 fn shape_and_degree_match_design() {
     let air = EcMsmAir;
 
-    assert_eq!(air.width(), 38);
-    assert_eq!(air.aux_width(), 14);
+    assert_eq!(air.width(), 35);
+    assert_eq!(air.aux_width(), 12);
     assert_eq!(
         <EcMsmAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(&air),
-        &[1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1],
+        &[2; 12],
     );
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),

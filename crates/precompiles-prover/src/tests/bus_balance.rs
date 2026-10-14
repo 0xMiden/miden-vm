@@ -42,7 +42,7 @@ fn sha512_reuses_compression_padding_for_io() {
     assert_eq!(Sha512Air.width(), 54);
     assert_eq!(miden_precompiles_air::hash::sha512::io::NUM_MAIN_COLS, 37);
     assert_eq!(miden_precompiles_air::hash::sha512::io::IO_PERIOD, 64);
-    assert_eq!(Sha512Air.aux_width(), 18);
+    assert_eq!(Sha512Air.aux_width(), 14);
     assert_eq!(NUM_CHIPLETS, 12);
     assert_eq!(crate::tests::log_quotient_degree(&Sha512Air), 2);
 }

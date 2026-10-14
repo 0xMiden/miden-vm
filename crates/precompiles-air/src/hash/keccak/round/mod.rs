@@ -60,12 +60,13 @@ pub const B_BYTES_RANGE: Range<usize> = 9..17;
 /// Memory64 result from `(x - a + b) / 2`.
 pub const R_BYTES_RANGE: Range<usize> = 17..25;
 /// 16-bit limbs of `(x_half + 2^32)·k` for `x`'s low and high halves
-/// (first 4 limbs: low half; next 4: high half), populated iff
+/// (first 3 limbs: low half; next 3: high half), populated iff
 /// `is_rol = 1`. Same construction as a rotate chiplet's ROL row, but
 /// rotating this row's own `x` rather than a value read from elsewhere.
 /// Range-checked via [`Range16Msg`] requires. See `memory_provide_c`
-/// for how the rotated 64-bit value is reconstructed from these limbs.
-pub const ROT_LIMBS_RANGE: Range<usize> = 25..33;
+/// for how the rotated 64-bit value is reconstructed from these limbs. Shifts below 16 omit
+/// the zero high limb; shifts at least 16 omit the zero low limb.
+pub const ROT_LIMBS_RANGE: Range<usize> = 25..31;
 /// Active indicator. 1 on active rounds, 0 on each cycle's dead round
 /// (the 25th round of every perm cycle) and on trace-tail padding.
 /// Constant within each round (changes only at round boundaries —
@@ -74,14 +75,14 @@ pub const ROT_LIMBS_RANGE: Range<usize> = 25..33;
 /// nothing to the Memory64 or BytePairLut buses. The sponge AIR
 /// σ-matches the chiplet's active-rows-only residue; it also forces
 /// `act = 1` at row 0 by providing `RC[0]`, which the round's iota row consumes.
-pub const COL_ACT: usize = 33;
+pub const COL_ACT: usize = 31;
 
 // All COL_* / *_RANGE indices above are **lane-local** (within one
 // [`LANE_WIDTH`]-wide band); the absolute main-trace index is
 // `lane * LANE_WIDTH + local`, via [`lane_base`].
 
 /// Width of one permutation-lane's column band.
-pub const LANE_WIDTH: usize = 34;
+pub const LANE_WIDTH: usize = 32;
 /// Number of permutation-lanes packed side-by-side per row. Each lane runs a
 /// contiguous block of permutations in its own column band while sharing the
 /// (preprocessed, free) periodic program, so the row count is ~`1/NUM_LANES`
@@ -104,20 +105,20 @@ pub fn lane_base(lane: usize) -> usize {
 // AUX COLUMN LAYOUT
 // ================================================================================================
 
-/// Flattened running-sum layout, repeated per lane: each lane's 6-column band holds
-/// 19 fractions, the band's col 0 a single fraction. The flattening does not
+/// Flattened running-sum layout, repeated per lane: each lane's 5-column band holds
+/// 17 fractions, the band's col 0 a single fraction. The flattening does not
 /// bring this AIR to `log_quotient_degree = 1`: the four-fraction columns reach degree 5, while
 /// the Memory64 destination column reaches degree 4.
 /// - band col 0: memory64 dst provide.
-/// - band col 1: memory64 `src_a` + `src_b` requires.
+/// - band col 1: memory64 `src_a` + `src_b` and two `Range16` requires.
 /// - band cols 2–3: 8 `BytePairLut` byte requires verifying `x = a xor b` (or `x = a` on pure-ROL
 ///   rows — see [`R_BYTES_RANGE`]), four per column.
-/// - band cols 4–5: 8 `Range16` requires on `rot_limbs`, four per column.
+/// - band col 4: the remaining four `Range16` requires on `rot_limbs`.
 ///
 /// Aux column 0 (lane 0's dst provide) is the running sum; every later
 /// fraction column — including each later lane's dst provide — is folded into
 /// it by the col-0 recurrence.
-const AUX_LANE_WIDTH: usize = 6;
+const AUX_LANE_WIDTH: usize = 5;
 pub const NUM_AUX_COLS: usize = AUX_LANE_WIDTH * NUM_LANES;
 
 // PERIODIC COLUMN INDICES
@@ -127,7 +128,7 @@ pub use program::{
     COL_BACK_A as PCOL_BACK_A, COL_BACK_B as PCOL_BACK_B, COL_DST_MULT as PCOL_DST_MULT,
     COL_IS_ANDNOT as PCOL_IS_ANDNOT, COL_IS_ROL as PCOL_IS_ROL, COL_IS_XOR as PCOL_IS_XOR,
     COL_IS_XORROL as PCOL_IS_XORROL, COL_K as PCOL_K, COL_P_LAST as PCOL_P_LAST,
-    COL_SWAP as PCOL_SWAP,
+    COL_ROT_HIGH as PCOL_ROT_HIGH, COL_SWAP as PCOL_SWAP,
 };
 
 // AIR
@@ -196,6 +197,8 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
         let is_andnot: AB::Expr = periodic[PCOL_IS_ANDNOT].into();
         let is_rol: AB::Expr = periodic[PCOL_IS_ROL].into();
         let k: AB::Expr = periodic[PCOL_K].into();
+        let rot_high: AB::Expr = periodic[PCOL_ROT_HIGH].into();
+        let rot_factor = is_rol.clone() + rot_high * Felt::from_u32((1 << 16) - 1);
         let two_32 = AB::Expr::from(Felt::new(1u64 << 32).expect("2^32 fits"));
 
         for lane in 0..NUM_LANES {
@@ -266,11 +269,11 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
             // = 0`, `x = 0`) — an `is_rol`-only gate would wrongly demand
             // `2^32·k = 0` on those padding rows and break completeness.
             let x_bytes: [AB::Var; 8] = array::from_fn(|i| local[base + R_BYTES_RANGE.start + i]);
-            let rot_limbs: [AB::Var; 8] =
+            let rot_limbs: [AB::Var; 6] =
                 array::from_fn(|i| local[base + ROT_LIMBS_RANGE.start + i]);
             let [x_lo, x_hi] = halves_le(&x_bytes, 256);
-            let lo_decomp: AB::Expr = pack_le(&rot_limbs[0..4], 1u64 << 16);
-            let hi_decomp: AB::Expr = pack_le(&rot_limbs[4..8], 1u64 << 16);
+            let lo_decomp: AB::Expr = rot_factor.clone() * pack_le(&rot_limbs[0..3], 1u64 << 16);
+            let hi_decomp: AB::Expr = rot_factor.clone() * pack_le(&rot_limbs[3..6], 1u64 << 16);
             let rol_gate = act.clone() * is_rol.clone();
             builder
                 .assert_zero(rol_gate.clone() * ((x_lo + two_32.clone()) * k.clone() - lo_decomp));
@@ -289,22 +292,27 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
 /// `≤ 2^30` — see [`program::rol_decompose`]), and `swap` (1 on fused
 /// slots whose *true* rotation `ρ ≥ 32`, where the reduced shift is
 /// `ρ − 32` and the true output's 32-bit halves are the reduced
-/// output's halves swapped). Same limb-pairing formula a rotate
-/// chiplet's ROL row uses (`c0 = limb0+limb6`, …), applied to this
-/// row's own `rot_limbs` instead of a value read from elsewhere.
+/// output's halves swapped). The periodic branch restores the omitted zero limb. Rotation
+/// coefficients and `k` vanish on non-ROL slots, so these halves are zero there.
 fn rotated_halves<E: Algebra<Felt>, V: Copy + Into<E>>(
-    rot_limbs: &[V; 8],
+    rot_limbs: &[V; 6],
     k: E,
     swap: E,
+    is_rol: E,
+    high: E,
 ) -> [E; 2] {
     let two_16 = E::from(Felt::from(1u32 << 16));
-    let limb: [E; 8] = array::from_fn(|i| rot_limbs[i].into());
-    let c0 = limb[0].clone() + limb[6].clone();
-    let c1 = limb[1].clone() + limb[7].clone();
-    let c2 = limb[2].clone() + limb[4].clone();
-    let c3 = limb[3].clone() + limb[5].clone();
-    let lo = c0 + c1 * two_16.clone() - k.clone();
-    let hi = c2 + c3 * two_16 - k;
+    let limb: [E; 6] = array::from_fn(|i| rot_limbs[i].into());
+    let low = is_rol.clone() - high.clone();
+    let factor = is_rol + high.clone() * (two_16.clone() - E::ONE);
+    let lo = factor.clone() * (limb[0].clone() + limb[5].clone())
+        + two_16.clone() * low.clone() * limb[1].clone()
+        + high.clone() * limb[4].clone()
+        - k.clone();
+    let hi = factor * (limb[2].clone() + limb[3].clone())
+        + high * limb[1].clone()
+        + two_16 * low * limb[4].clone()
+        - k;
     // Full-range rotation: for ρ ≥ 32 the reduced rotation's halves are
     // half-swapped to recover the true `ROL(r, ρ)` (`ROL(x, ρ) =
     // halfswap(ROL(x, ρ − 32))`).
@@ -319,22 +327,25 @@ fn memory_provide_c<E: Algebra<Felt>, V: Copy + Into<E>>(
     a_bytes: &[V; 8],
     b_bytes: &[V; 8],
     x_bytes: &[V; 8],
-    rot_limbs: &[V; 8],
+    rot_limbs: &[V; 6],
     k: E,
     swap: E,
     is_andnot: E,
     is_rol: E,
+    rot_high: E,
 ) -> [E; 2] {
     let [a_lo, a_hi] = halves_le(a_bytes, 256);
     let [b_lo, b_hi] = halves_le(b_bytes, 256);
     let [x_lo, x_hi] = halves_le(x_bytes, 256);
-    let [rot_lo, rot_hi] = rotated_halves(rot_limbs, k, swap);
+    let [rot_lo, rot_hi] = rotated_halves(rot_limbs, k, swap, is_rol.clone(), rot_high);
     let andnot_lo = andnot_result_from_xor(a_lo, b_lo, x_lo.clone());
     let andnot_hi = andnot_result_from_xor(a_hi, b_hi, x_hi.clone());
     let logic_lo = x_lo.clone() + is_andnot.clone() * (andnot_lo - x_lo.clone());
     let logic_hi = x_hi.clone() + is_andnot * (andnot_hi - x_hi.clone());
-    let lo = logic_lo + is_rol.clone() * (rot_lo - x_lo);
-    let hi = logic_hi + is_rol * (rot_hi - x_hi);
+    // The rotation coefficients already select ROL rows. Avoid multiplying them by the
+    // selector again: doing so would increase the destination denominator degree.
+    let lo = logic_lo + rot_lo - is_rol.clone() * x_lo;
+    let hi = logic_hi + rot_hi - is_rol * x_hi;
     [lo, hi]
 }
 
@@ -343,9 +354,9 @@ fn memory_provide_c<E: Algebra<Felt>, V: Copy + Into<E>>(
 
 /// Aux column shape, repeated per lane (band-local):
 /// - band col 0: memory64 dst provide (lane 0's is the running sum).
-/// - band col 1: memory64 `src_a` + `src_b` requires.
+/// - band col 1: memory64 `src_a` + `src_b` and two `Range16` requires.
 /// - band cols 2–3: 8 `BytePairLut` byte requires, four per column.
-/// - band cols 4–5: 8 `Range16` requires on `rot_limbs`, four per column.
+/// - band col 4: the remaining four `Range16` requires on `rot_limbs`.
 ///
 /// This AIR derives `log_quotient_degree = 2`: each four-fraction column below carries
 /// `Deg { v: 5, u: 4 }`. The degree follows from the symbolic expressions, not the trace width.
@@ -357,7 +368,6 @@ const fn build_column_shape() -> [usize; NUM_AUX_COLS] {
     while lane < NUM_LANES {
         // Band-local col 0 is a single fraction (dst provide).
         shape[lane * AUX_LANE_WIDTH] = 1;
-        shape[lane * AUX_LANE_WIDTH + 1] = 2;
         lane += 1;
     }
     shape
@@ -393,12 +403,12 @@ where
         let k: LB::Expr = periodic[PCOL_K].into();
         let dst_mult: LB::Expr = periodic[PCOL_DST_MULT].into();
         let swap: LB::Expr = periodic[PCOL_SWAP].into();
+        let rot_high: LB::Expr = periodic[PCOL_ROT_HIGH].into();
         let linear_interaction_deg = Deg { v: 2, u: 1 };
         let dst_deg = Deg { v: 2, u: 3 };
-        let source_pair_deg = Deg { v: 3, u: 2 };
         let quad_deg = Deg { v: 5, u: 4 };
 
-        // Each lane emits its own 6-column band of fractions over its
+        // Each lane emits its own 5-column band of fractions over its
         // disjoint data columns, reading the shared periodic gates. Lane 0's
         // dst provide is the running sum (aux col 0); every later lane's
         // fractions — its dst provide included — are ordinary fraction
@@ -413,7 +423,7 @@ where
             let a_bytes: [LB::Var; 8] = array::from_fn(|i| local[base + A_BYTES_RANGE.start + i]);
             let b_bytes: [LB::Var; 8] = array::from_fn(|i| local[base + B_BYTES_RANGE.start + i]);
             let x_bytes: [LB::Var; 8] = array::from_fn(|i| local[base + R_BYTES_RANGE.start + i]);
-            let rot_limbs: [LB::Var; 8] =
+            let rot_limbs: [LB::Var; 6] =
                 array::from_fn(|i| local[base + ROT_LIMBS_RANGE.start + i]);
 
             // Multiplicity expressions, all gated by this lane's `act` so
@@ -446,6 +456,7 @@ where
                 swap.clone(),
                 is_andnot.clone(),
                 is_rol.clone(),
+                rot_high.clone(),
             );
             let neg_dst_mult: LB::Expr = LB::Expr::ZERO - dst_mult_act;
             frac_col!(
@@ -459,13 +470,13 @@ where
                     dst_deg
                 ),
             );
-            // band col 1: memory64 src_a + src_b requires.
+            // band col 1: memory64 src_a + src_b and two rotation-limb requires.
             let [a_lo, a_hi] = halves_le(&a_bytes, 256);
             let [b_lo, b_hi] = halves_le(&b_bytes, 256);
             frac_col!(
                 builder,
                 "memory64",
-                source_pair_deg,
+                quad_deg,
                 (
                     "src_a",
                     is_active.clone(),
@@ -474,6 +485,18 @@ where
                         lo: a_lo,
                         hi: a_hi
                     },
+                    linear_interaction_deg
+                ),
+                (
+                    "limb",
+                    rol_act.clone(),
+                    Range16Msg { w: rot_limbs[0].into() },
+                    linear_interaction_deg
+                ),
+                (
+                    "limb",
+                    rol_act.clone(),
+                    Range16Msg { w: rot_limbs[1].into() },
                     linear_interaction_deg
                 ),
                 (
@@ -541,9 +564,9 @@ where
                     ),
                 );
             }
-            // band cols 4–5: 8 Range16 requires on rot_limbs, four per column.
-            for batch in 0..2 {
-                let i0 = batch * 4;
+            // band col 4: the four remaining compact rotation-limb requires.
+            {
+                let i0 = 2;
                 let i1 = i0 + 1;
                 let i2 = i0 + 2;
                 let i3 = i0 + 3;

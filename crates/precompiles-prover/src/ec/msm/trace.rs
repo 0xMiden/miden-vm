@@ -767,13 +767,14 @@ pub fn generate_trace(
                 set(COL_BOUND_PTR, e.bound_ptr);
                 set(COL_BETA_PTR, e.beta_ptr);
                 set(COL_LAMBDA_PTR, e.lambda_ptr);
+                // These cells alias combine's run-constant B-expression/value cells.
+                set(COL_NEG_X, e.neg_x);
+                set(COL_NEG_YA, e.neg_ya);
                 if is_boundary {
                     // The cheap value negation lives on the boundary: the
                     // shared x + the two y ptrs (pinned by the EcPoint consumes
                     // + the y-flip UintAdd) and the mint flag (gating the
                     // EcOnCurveCert provide for `val`).
-                    set(COL_NEG_X, e.neg_x);
-                    set(COL_NEG_YA, e.neg_ya);
                     set(COL_NEG_YR, e.neg_yr);
                     set(COL_NEG_MINTED, e.neg_minted);
                     let a_diff = expr_ptr - e.a_expr - 1;

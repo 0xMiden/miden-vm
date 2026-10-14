@@ -29,10 +29,10 @@ pub(crate) const PVM_PROTOCOL_ID: u64 = 4;
 #[cfg(any(test, feature = "constants-tools", feature = "std"))]
 #[rustfmt::skip]
 pub const PVM_RELATION_DIGEST: [u64; 4] = [
-    2915298144622636998,
-    8184209425391255152,
-    2268721728404677769,
-    7579119665906560055,
+    3701210020891453972,
+    5654005178025621372,
+    1943904801135359027,
+    9085658677624169106,
 ];
 
 /// Eidos digest of the order-invariant PVM ACE circuit's instruction stream (raw canonical u64
@@ -40,10 +40,10 @@ pub const PVM_RELATION_DIGEST: [u64; 4] = [
 #[cfg(any(test, feature = "constants-tools"))]
 #[rustfmt::skip]
 pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [
-    2652358487213089745,
-    930279588596952338,
-    5991288584664522394,
-    3426255373085831715,
+    5052378141201654292,
+    2535198681450433888,
+    1514554246941692778,
+    8776902161883269336,
 ];
 
 /// Commitment to the preprocessed (setup) trace tree under the Eidos config (raw canonical
@@ -61,7 +61,7 @@ pub const PVM_PREPROCESSED_COMMITMENT: [u64; 4] = [
 /// Encoded circuit shape: (READ variables, evaluation gates, stream length in felts). An in-VM
 /// verifier needs these as compile-time constants to size its reads and its ACE evaluation.
 #[cfg(any(test, feature = "constants-tools"))]
-pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (2550, 13020, 14248);
+pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (2520, 13000, 14232);
 
 /// Computes the relation digest binding an ACE circuit commitment into the Fiat-Shamir transcript.
 #[cfg(any(test, feature = "constants-tools"))]

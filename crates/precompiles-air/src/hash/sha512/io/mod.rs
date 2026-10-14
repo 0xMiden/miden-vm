@@ -39,9 +39,8 @@ use crate::{
 };
 
 pub const NUM_MAIN_COLS: usize = 37;
-pub const NUM_AUX_COLS: usize = 18;
-pub const COLUMN_SHAPE: [usize; NUM_AUX_COLS] =
-    [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1];
+pub const NUM_AUX_COLS: usize = 14;
+pub const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1];
 
 pub const COL_ACT: usize = 0;
 pub const COL_BLOCK_ID: usize = 1;
@@ -449,8 +448,8 @@ pub fn eval_lookups<LB: LookupBuilder<F = Felt>>(
             2 => "sha512-digest-and-input",
             3..=5 => "sha512-chunks",
             6..=7 => "sha512-assertion",
-            8..=15 => "sha512-bytes",
-            16..=17 => "sha512-length",
+            8..=11 => "sha512-bytes",
+            12..=13 => "sha512-length",
             _ => unreachable!(),
         };
         builder.next_column(
@@ -493,10 +492,9 @@ pub(super) fn lookup_batch_degree(index: usize, activity_degree: usize) -> Deg {
         3 => (4, 2),
         6 => (3, 1),
         7 => (4, 2),
-        8..=11 => (3, 2),
-        12..=15 => (4, 2),
-        16 => (3, 2),
-        17 => (3, 1),
+        8..=11 => (4, 2),
+        12 => (3, 2),
+        13 => (3, 1),
         _ => unreachable!(),
     };
     Deg { v: v - (1 - activity_degree), u }
@@ -733,8 +731,8 @@ pub(super) fn eval_lookup_batch<B, V>(
             );
         },
         8..=11 => {
-            // The XOR identity (0, byte, byte) range-checks every raw byte, including zeros
-            // outside the message. Each batch checks two of the row's eight bytes.
+            // Raw and final-digest stages share the same byte cells and denominators. The
+            // periodic stages are disjoint; binding rows contain arbitrary felts and are excluded.
             let i = 2 * (index - 8);
             let byte = |offset| {
                 BytePairLutMsg::from_xor(
@@ -743,32 +741,18 @@ pub(super) fn eval_lookup_batch<B, V>(
                     e(COL_RAW_BEGIN + i + offset),
                 )
             };
-            let raw = act * p[program::P_RAW].clone();
-            batch.insert("byte", raw.clone(), byte(0), d(2, 1));
-            batch.insert("byte", raw, byte(1), d(2, 1));
+            let active = act
+                * (p[program::P_RAW].clone() + p[program::P_DIGEST].clone() * e(COL_FINAL_BLOCK));
+            batch.insert("byte", active.clone(), byte(0), d(3, 1));
+            batch.insert("byte", active, byte(1), d(3, 1));
         },
-        12..=15 => {
-            // Range-check digest bytes only where they exist. These columns hold arbitrary
-            // assertion-digest felts on row 32 and must not be interpreted as bytes there.
-            let i = 2 * (index - 12);
-            let digest = act * p[program::P_DIGEST].clone() * e(COL_FINAL_BLOCK);
-            let byte = |offset| {
-                BytePairLutMsg::from_xor(
-                    B::Expr::ZERO,
-                    e(COL_DIGEST_BEGIN + i + offset),
-                    e(COL_DIGEST_BEGIN + i + offset),
-                )
-            };
-            batch.insert("byte", digest.clone(), byte(0), d(3, 1));
-            batch.insert("byte", digest, byte(1), d(3, 1));
-        },
-        16 => {
+        12 => {
             // Together with LEFT = lo16 + 2^16*hi16, enforce a nonnegative u32 remaining count.
             let raw = act * p[program::P_RAW].clone();
             batch.insert("left-low", raw.clone(), Range16Msg { w: e(COL_LEFT_LO16) }, d(2, 1));
             batch.insert("left-high", raw, Range16Msg { w: e(COL_LEFT_HI16) }, d(2, 1));
         },
-        17 => {
+        13 => {
             // Bound the final length word below 2^48, excluding a field-modulus alias for 8*LEN.
             let end = act * e(COL_FINAL_BLOCK) * p[program::P_RAW_LAST].clone();
             batch.insert("length-high", end, Range16Msg { w: e(COL_WORD_HI) }, d(3, 1));

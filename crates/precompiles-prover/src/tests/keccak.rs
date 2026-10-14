@@ -4,7 +4,7 @@
 //! Keccak-f[1600] implementation, and runs `check_constraints` on the
 //! resulting AIR/witness pair.
 
-use std::{vec, vec::Vec};
+use std::{collections::HashMap, vec, vec::Vec};
 
 use miden_air::lookup::{
     LookupFractions, build_lookup_fractions,
@@ -28,10 +28,11 @@ use crate::{
             extract_outputs, generate_trace_from_states, lane_base, program::SLOT_D_ROL_BEGIN,
         },
     },
-    logup::{Challenges, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
+    logup::{Challenges, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
+    primitives::byte_pair_lut::Range16Msg,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::{ChipletAir, Session},
-    tests::bus_balance::session_stack_residual,
+    tests::bus_balance::{fold_balance, session_stack_residual},
 };
 
 fn lookup_challenges() -> Challenges<QuadFelt> {
@@ -235,9 +236,9 @@ fn keccak_round_constraints_hold_on_canonical_input() {
 fn keccak_round_shape_and_degree_match_design() {
     let air = KeccakRoundAir;
 
-    assert_eq!(air.width(), 68);
-    assert_eq!(air.aux_width(), 12);
-    assert_eq!(crate::tests::lookup_column_shape(&air), &[1, 2, 4, 4, 4, 4, 1, 2, 4, 4, 4, 4],);
+    assert_eq!(air.width(), 64);
+    assert_eq!(air.aux_width(), 10);
+    assert_eq!(crate::tests::lookup_column_shape(&air), &[1, 4, 4, 4, 4, 1, 4, 4, 4, 4],);
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
         ConstraintDegrees { base: 4, ext: 5 }
@@ -299,8 +300,8 @@ fn pure_rol_raw_b_affects_every_byte_and_lane() {
                     assert_eq!(attacked_fold, baseline_fold);
                     if col == source_col {
                         // `src_b` has zero multiplicity on a pure-ROL row, so the
-                        // production collector omits it and only the unchanged `src_a`
-                        // fraction remains in this column.
+                        // production collector omits it. The `src_a` and two rotation-limb
+                        // fractions in this column remain unchanged.
                         assert_eq!(
                             fractions_at(&attacked_fractions, 0, col),
                             fractions_at(&baseline, 0, col),
@@ -455,4 +456,75 @@ fn keccak_round_constraints_hold_on_extreme_input() {
     let main = generate_trace_from_states(&[all_ones, alternating], &KECCAK_RC);
 
     crate::tests::check_local(KeccakRoundAir, &main);
+}
+
+#[test]
+fn compact_rotation_limbs_bind_every_cell_and_reject_range_valid_aliases() {
+    use crate::hash::keccak::round::{Op, slots};
+
+    let main = generate_trace_from_states(&[[0x0123_4567_89ab_cdef; 25]], &KECCAK_RC);
+    let program = slots();
+    // Both compact branches, with and without the free half swap.
+    for rotation in [1, 18, 36, 56] {
+        let row = program
+            .iter()
+            .position(|slot| matches!(slot.op, Op::Rol(s) | Op::XorRol(s) if s == rotation))
+            .expect("the rotation is present in the fixed program");
+        for limb in ROT_LIMBS_RANGE.clone() {
+            let mut bad = main.clone();
+            bad.values[row * NUM_MAIN_COLS + limb] += Felt::ONE;
+            crate::tests::assert_constraint_failure(|| {
+                crate::tests::check_local(KeccakRoundAir, &bad)
+            });
+        }
+        let mut bad = main.clone();
+        for limb in ROT_LIMBS_RANGE.clone() {
+            bad.values[row * NUM_MAIN_COLS + limb] = Felt::from_u16(u16::MAX);
+        }
+        crate::tests::assert_constraint_failure(|| crate::tests::check_local(KeccakRoundAir, &bad));
+    }
+}
+
+#[test]
+fn compact_rotation_arithmetic_preserving_limb_alias_fails_global_range_checks() {
+    use crate::hash::keccak::round::{Op, program::rol_decompose, slots};
+
+    let mut session = Session::new();
+    let input: Vec<u8> = (0..160).map(|i| i as u8).collect();
+    let (_, claim) = session.keccak(&input);
+    let root = session.assert_and_fold([claim]);
+    let traces = session.finish(root);
+    let mains = traces.mains();
+    let challenges = lookup_challenges();
+    let round_idx = ChipletAir::all()
+        .into_iter()
+        .position(|a| a == ChipletAir::KeccakRound)
+        .unwrap();
+    let main = mains[round_idx];
+    let program = slots();
+    assert!(session_stack_residual(&mains, &[], &challenges).is_empty());
+
+    for high in [false, true] {
+        let first = usize::from(high);
+        let row = (0..program.len())
+            .find(|&row| {
+                matches!(program[row].op, Op::Rol(s) | Op::XorRol(s)
+                    if (rol_decompose(s).0 >= 16) == high)
+                    && main.values[row * NUM_MAIN_COLS + ROT_LIMBS_RANGE.start + first + 1]
+                        != Felt::ZERO
+            })
+            .expect("a rotation with a nonzero upper compact limb exists");
+        let mut bad = main.clone();
+        let cell = row * NUM_MAIN_COLS + ROT_LIMBS_RANGE.start + first;
+        bad.values[cell] += Felt::from_u32(1 << 16);
+        bad.values[cell + 1] -= Felt::ONE;
+        // The two changes cancel in both the integer decomposition and rotated result.
+        crate::tests::check_local(KeccakRoundAir, &bad);
+        let invalid = Range16Msg { w: bad.values[cell] };
+        let residual = session_stack_residual(&mains, &[(round_idx, &bad)], &challenges);
+        assert!(!residual.is_empty(), "a noncanonical rotation limb must unbalance the stack");
+        let mut requests = HashMap::new();
+        fold_balance(&KeccakRoundAir, &bad, &challenges, &mut requests);
+        assert_eq!(requests[&invalid.encode(&challenges)].0, Felt::ONE);
+    }
 }

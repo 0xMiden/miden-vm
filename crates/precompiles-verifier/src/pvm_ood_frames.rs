@@ -299,11 +299,11 @@ mod tests {
     fn pvm_row_geometry_is_the_one_the_hook_was_rendered_from() {
         let geometry = live_geometry();
         assert_eq!(geometry.preprocessed, vec![0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(geometry.main, vec![96, 112, 72, 8, 40, 48, 32, 24, 24, 40, 56, 40]);
-        assert_eq!(geometry.aux, vec![32, 40, 24, 8, 24, 56, 8, 8, 24, 32, 40, 24]);
+        assert_eq!(geometry.main, vec![96, 112, 64, 8, 40, 48, 32, 24, 24, 40, 56, 40]);
+        assert_eq!(geometry.aux, vec![40, 40, 24, 8, 24, 56, 8, 8, 24, 24, 32, 24]);
         assert_eq!(geometry.quotient, 8);
-        assert_eq!(geometry.row_felts(), 1_856);
-        assert_eq!(geometry.row_blocks(), 232);
+        assert_eq!(geometry.row_felts(), 1_824);
+        assert_eq!(geometry.row_blocks(), 228);
 
         let plan = pvm_scatter_plan(&geometry).expect("scatter plan");
         assert_eq!(plan.segment_count(), 26, "one segment per occupied per-chiplet block");

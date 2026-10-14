@@ -435,7 +435,7 @@ pub(super) enum LookupKind {
     MetadataConsumer,
 }
 
-pub(super) const SHARED_BATCHES: [LookupKind; 17] = [
+pub(super) const SHARED_BATCHES: [LookupKind; 13] = [
     LookupKind::Input,
     LookupKind::Destination,
     LookupKind::Sources,
@@ -447,10 +447,6 @@ pub(super) const SHARED_BATCHES: [LookupKind; 17] = [
     LookupKind::Byte(5),
     LookupKind::Byte(6),
     LookupKind::Byte(7),
-    LookupKind::RangePair(0),
-    LookupKind::RangePair(1),
-    LookupKind::RangePair(2),
-    LookupKind::RangePair(3),
     LookupKind::MetadataProvider,
     LookupKind::MetadataConsumer,
 ];
