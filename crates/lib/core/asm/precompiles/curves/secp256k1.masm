@@ -471,8 +471,8 @@ pub proc is_eq_with_root(lhs: Point, rhs: Point) -> (precompiles::Digest, i1)
     # Both comparison operands are bound canonical point VALUE digests.
     exec.precompiles::word_eq
     # => [is_equal, LHS_ROOT, RHS_ROOT, ...]
-    movdn.8 swapw
-    # => [RHS_ROOT, LHS_ROOT, is_equal, ...]
+    movdn.8
+    # => [LHS_ROOT, RHS_ROOT, is_equal, ...]
     exec.precompiles::append_root
     # => [ROOT=AND(LHS_ROOT, RHS_ROOT), is_equal, ...]
 end

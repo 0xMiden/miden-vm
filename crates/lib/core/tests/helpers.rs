@@ -138,11 +138,11 @@ pub fn manual_signature_source(
         "begin"
     };
     let finish = if composed {
-        // Save the returned root above the ordinary results, including all sixteen recovery
-        // limbs, then load both roots above those results for explicit caller composition.
-        "adv.export_deferred_witness push.68 mem_storew_le dropw \
-         padw push.64 mem_loadw_le padw push.68 mem_loadw_le \
-         exec.::miden::core::precompiles::append_root adv.export_deferred_witness dropw"
+        // Save the returned root for comparison, then compose in place without disturbing the
+        // ordinary results, including all sixteen recovery limbs.
+        "adv.export_deferred_witness push.68 mem_storew_le \
+         push.64 exec.::miden::core::precompiles::append_root_ptr \
+         padw push.64 mem_loadw_le adv.export_deferred_witness dropw"
     } else {
         "adv.export_deferred_witness dropw"
     };

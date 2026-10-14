@@ -32,10 +32,15 @@ Comparisons can return false successfully: ROOT binds the values used to compute
 than asserting the result is true. Expression constructors, arithmetic expressions, loads,
 reductions, and MSM remain shared and produce no obligation.
 
-`precompiles::append_root` takes `[ASSERTION, ROOT, ...]` and returns the exact digest of
-`AND(ROOT, ASSERTION)`, registering and hashing the same ordered payload without logging. Both
+`precompiles::append_root` takes `[LHS_ROOT, RHS_ROOT, ...]` and returns the exact digest of
+`AND(LHS_ROOT, RHS_ROOT)`, registering and hashing the same ordered payload without logging. Both
 children must be registered true assertions or implicit TRUE. The helper also combines independently
 built roots, and does not simplify TRUE children.
+
+`precompiles::append_root_ptr` takes `[ROOT_PTR, ASSERTION, ...]` and updates a word-aligned
+root in memory to `AND(ROOT, ASSERTION)`, preserving the operand-stack tail. AND obligations are
+commutative, so callers can use the existing stack order; swapping children changes their digest
+without changing the obligations.
 
 ```masm
 use miden::core::precompiles::fields::k1_scalar

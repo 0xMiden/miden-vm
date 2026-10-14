@@ -147,7 +147,7 @@ fn manual_uint_equality_preserves_canonical_bindings_and_high_limb_inequality() 
             let lhs_binding = Node::join(eq, lhs_expr, lhs_value).unwrap().digest();
             let rhs_binding = Node::join(eq, rhs_expr, rhs_value).unwrap().digest();
             let comparison = Node::and(lhs_binding, rhs_binding).digest();
-            let expected = Node::and(seed, comparison).digest();
+            let expected = Node::and(comparison, seed).digest();
             let source = format!(
                 "use miden::core::precompiles::{module}\nbegin push.99.98.97.96 padw padw exec.::miden::core::precompiles::append_root {setup} exec.{leaf}::is_eq_with_root adv.export_deferred_witness movup.4 movdn.8 exec.::miden::core::precompiles::append_root adv.export_deferred_witness end"
             );
@@ -178,7 +178,7 @@ fn independent_inversion_and_division_roots_compose_explicitly() {
                 exec.{leaf}::push_one_digest
                 exec.{leaf}::div_with_root
                 # => [DIV_ROOT, QUOTIENT, INV_ROOT, ...]
-                movupw.2 swapw exec.::miden::core::precompiles::append_root
+                movupw.2 exec.::miden::core::precompiles::append_root
                 swapw
                 exec.{leaf}::push_two_digest exec.{leaf}::assert_eq_with_root
                 exec.::miden::core::precompiles::append_root
@@ -274,10 +274,55 @@ fn independent_manual_roots_can_be_composed_without_logging() {
     let lhs = Word::new(read_memory_felts(&output, 0, 4).try_into().unwrap());
     let rhs = Word::new(read_memory_felts(&output, 4, 4).try_into().unwrap());
     let witness = assert_exported_manual_root(&output, 0);
-    assert_eq!(witness.root_unchecked(), Node::and(lhs, rhs).digest());
+    assert_eq!(witness.root_unchecked(), Node::and(rhs, lhs).digest());
     assert_eq!(and_count(&witness), 1);
     assert!(output.advice.get_mapped_values(&lhs).is_some());
     assert!(output.advice.get_mapped_values(&rhs).is_some());
+}
+
+#[test]
+fn stored_roots_compose_in_place_preserving_neighbors_and_tail() {
+    let one = UintPrecompile::value_node(UintDomain::U256, ONE_LIMBS).digest();
+    let two = UintPrecompile::value_node(UintDomain::U256, [2, 0, 0, 0, 0, 0, 0, 0]).digest();
+    let eq = UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID);
+    let first = Node::join(eq, one, one).unwrap().digest();
+    let second = Node::join(eq, two, two).unwrap().digest();
+    let guards = [91, 92, 93, 94].map(Felt::from_u32);
+    let stores = format!("{} {}", masm_store_felts(&guards, 60), masm_store_felts(&guards, 68));
+    for (seed_setup, seed, seed_ands) in [
+        ("padw", TRUE_DIGEST, 0),
+        (
+            "padw padw exec.precompiles::append_root",
+            Node::and(TRUE_DIGEST, TRUE_DIGEST).digest(),
+            1,
+        ),
+    ] {
+        let source = format!(
+            r#"
+            use miden::core::precompiles
+            use miden::core::precompiles::u256
+            begin
+                {stores}
+                {seed_setup} push.64 mem_storew_le dropw
+                push.99.98.97.96
+                exec.u256::push_one_digest dupw exec.u256::assert_eq_with_root
+                push.64 exec.precompiles::append_root_ptr
+                exec.u256::push_two_digest dupw exec.u256::assert_eq_with_root
+                push.64 exec.precompiles::append_root_ptr
+                padw push.64 mem_loadw_le adv.export_deferred_witness
+            end
+        "#
+        );
+        let output = run_precompile_program(&source).unwrap();
+        let witness = assert_exported_manual_root(&output, 0);
+        let expected = Node::and(Node::and(seed, first).digest(), second).digest();
+        assert_eq!(witness.root_unchecked(), expected);
+        assert_eq!(read_memory_felts(&output, 64, 4), expected.as_elements());
+        assert_eq!(and_count(&witness), seed_ands + 2);
+        assert_eq!(read_memory_felts(&output, 60, 4), guards);
+        assert_eq!(read_memory_felts(&output, 68, 4), guards);
+        assert_eq!(&read_stack_felts(&output, 8)[4..], &[96, 97, 98, 99].map(Felt::from_u32));
+    }
 }
 
 #[test]
@@ -331,7 +376,7 @@ fn manual_hashes_return_the_exact_assertion_root_and_memory_digest() {
                 // Explicit composition must retain the exact hash assertion and caller root.
                 let composed = source.replace(
                     "adv.export_deferred_witness",
-                    "padw swapw exec.::miden::core::precompiles::append_root adv.export_deferred_witness",
+                    "padw exec.::miden::core::precompiles::append_root adv.export_deferred_witness",
                 );
                 let composed = run_precompile_program(&composed).unwrap();
                 assert_eq!(
@@ -361,7 +406,7 @@ fn returned_hash_roots_compose_with_arithmetic_and_preserve_the_vm_root() {
         preimage,
         Node::chunks_from_bytes(Sha512::hash(b"abc").as_bytes()).digest(),
     );
-    let expected = Node::and(Node::and(seed, sha256.digest()).digest(), sha512.digest()).digest();
+    let expected = Node::and(sha512.digest(), Node::and(sha256.digest(), seed).digest()).digest();
     let source = r#"
         use miden::core::precompiles
         use miden::core::precompiles::u256

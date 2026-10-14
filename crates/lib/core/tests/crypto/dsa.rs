@@ -336,7 +336,7 @@ fn core_ecdsa_k256_keccak_verify_cycle_baseline() {
     // The parent fixture used 1191 cycles. Independent obligation roots compose into one
     // signature subgraph, which the native wrapper logs once. Primitive native hashing
     // baselines remain separate.
-    assert_eq!(cycles, 1326);
+    assert_eq!(cycles, 1324);
 }
 
 #[test]

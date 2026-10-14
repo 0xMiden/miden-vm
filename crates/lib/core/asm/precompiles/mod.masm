@@ -248,16 +248,32 @@ pub proc log_deferred(node: Digest)
     dropw
 end
 
-#! Appends a registered true assertion to a caller-maintained root, without logging.
-#! Input:  [ASSERTION, ROOT, ...]
-#! Output: [NEXT_ROOT, ...]
+#! Combines two registered true obligation roots without logging.
+#! Input:  [LHS_ROOT, RHS_ROOT, ...]
+#! Output: [ROOT, ...]
 #! Both children must be registered and evaluate to TRUE, or be implicit TRUE. The result is
-#! exactly AND(ROOT, ASSERTION), including when either child is TRUE; no identity is simplified.
+#! exactly AND(LHS_ROOT, RHS_ROOT), including when either child is TRUE; no identity is simplified.
 #! Registration and VM hashing use the same framework AND chaining word and ordered payload.
-pub proc append_root(assertion: Digest, root: Digest) -> Digest
-    swapw
-    # => [ROOT, ASSERTION, ...]
+#! The obligation is commutative; swapping the children changes the digest, not its truth value.
+pub proc append_root(lhs: Digest, rhs: Digest) -> Digest
     push.DEFERRED_AND_INIT_CV
     exec.register_fixed_expr
-    # => [NEXT_ROOT, ...]
+    # => [ROOT, ...]
+end
+
+#! Appends a registered true assertion to the root stored at a word-aligned pointer, without logging.
+#! Input:  [ROOT_PTR, ASSERTION, ...]
+#! Output: [...]
+#! ROOT_PTR must be word-aligned and reference four readable, writable felts.
+#! Updates this word to exactly AND(ROOT, ASSERTION). Both children must
+#! be registered and evaluate to TRUE, or be implicit TRUE; no identity is simplified.
+pub proc append_root_ptr(root_ptr: ptr<Digest>, assertion: Digest)
+    dup movdn.5
+    # => [ROOT_PTR, ASSERTION, ROOT_PTR, ...]
+    padw movup.4 mem_loadw_le
+    # => [ROOT, ASSERTION, ROOT_PTR, ...]
+    exec.append_root
+    # => [NEXT_ROOT, ROOT_PTR, ...]
+    movup.4 mem_storew_le dropw
+    # => [...]
 end

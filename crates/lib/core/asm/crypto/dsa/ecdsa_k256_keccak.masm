@@ -240,7 +240,7 @@ pub proc recover_with_root(
     loc_storew_le.8 dropw
     exec.recover_digest
     # => [RECOVERY_ROOT, QX[8], QY[8], ...]
-    padw loc_loadw_le.8 swapw
+    padw loc_loadw_le.8
     exec.precompiles::append_root
     # => [ROOT, QX[8], QY[8], ...]
 end
@@ -308,7 +308,7 @@ pub proc recover_bytes_with_root(
     # => [digest_ptr=loc[0], SIG_PTR, ...]  (DIGEST_U32[8] written to loc[0..8])
     exec.recover_digest
     # => [RECOVERY_ROOT, QX[8], QY[8], ...]
-    padw loc_loadw_le.8 swapw
+    padw loc_loadw_le.8
     exec.precompiles::append_root
     # => [ROOT, QX[8], QY[8], ...]
 end
@@ -337,7 +337,7 @@ proc verify_digest(
     # => [VERIFY_POINT, SIG_R, ...]
     exec.assert_x_eq_scalar_k1
     # => [POINT_CHECK_ROOT, ...]
-    padw loc_loadw_le.0 swapw
+    padw loc_loadw_le.0
     exec.precompiles::append_root
     # => [ROOT, ...]
 end
@@ -396,9 +396,7 @@ proc recover_digest(
     # => [RECOVERY_POINT, SIG_R_BASE, recovery_parity, ...]
     exec.assert_recovery_point
     # => [POINT_CHECK_ROOT, ...]
-    padw loc_loadw_le.16 swapw
-    exec.precompiles::append_root
-    loc_storew_le.16 dropw
+    locaddr.16 exec.precompiles::append_root_ptr
     # => [...]
 
     # Return the now-constrained point in the same native layout used for public-key commitments.
