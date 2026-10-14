@@ -187,36 +187,36 @@ fn merkle_initializer_has_zero_in_every_injected_lane() {
 }
 
 #[test]
-fn hash_two_words_in_domain_matches_hash_elements_in_domain() {
+fn hash_double_word_in_domain_matches_hash_elements_in_domain() {
     let left = word([10, 20, 30, 40]);
     let right = word([50, 60, 70, 80]);
     let concat = vec![left[0], left[1], left[2], left[3], right[0], right[1], right[2], right[3]];
 
     assert_eq!(
-        Eidos::hash_two_words_in_domain(&[left, right], RANDOM_COIN_STATE),
+        Eidos::hash_double_word_in_domain(&[left, right], RANDOM_COIN_STATE),
         Eidos::hash_elements_in_domain(&concat, RANDOM_COIN_STATE)
     );
 }
 
 #[test]
-fn hash_two_words_matches_generic_felt_hash() {
+fn hash_double_word_matches_generic_felt_hash() {
     let left = word([10, 20, 30, 40]);
     let right = word([50, 60, 70, 80]);
     let concat = vec![left[0], left[1], left[2], left[3], right[0], right[1], right[2], right[3]];
 
-    assert_eq!(Eidos::hash_two_words(&[left, right]), Eidos::hash_elements(&concat));
-    assert_ne!(Eidos::hash_two_words(&[left, right]), Eidos::merge(&[left, right]));
+    assert_eq!(Eidos::hash_double_word(&[left, right]), Eidos::hash_elements(&concat));
+    assert_ne!(Eidos::hash_double_word(&[left, right]), Eidos::merge(&[left, right]));
 }
 
 #[test]
-fn merge_many_matches_hash_elements_on_concat() {
+fn hash_words_matches_hash_elements_on_concat() {
     let words = vec![word([1, 2, 3, 4]), word([5, 6, 7, 8]), word([9, 10, 11, 12])];
     let mut concat = Vec::new();
     for w in &words {
         concat.extend_from_slice(w.as_ref());
     }
 
-    assert_eq!(Eidos::merge_many(&words), Eidos::hash_elements(&concat));
+    assert_eq!(Eidos::hash_words(&words), Eidos::hash_elements(&concat));
 }
 
 #[test]

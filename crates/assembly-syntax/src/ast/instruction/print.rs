@@ -269,7 +269,7 @@ impl PrettyPrint for Instruction {
 
             // ----- cryptographic operations -----------------------------------------------------
             Self::Hash => const_text("hash"),
-            Self::HMerge => const_text("hmerge"),
+            Self::HDword => const_text("hdword"),
             Self::Compress => const_text("compress"),
             Self::MTreeGet => const_text("mtree_get"),
             Self::MTreeSet => const_text("mtree_set"),

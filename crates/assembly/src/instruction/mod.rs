@@ -522,7 +522,7 @@ impl Assembler {
             // ----- cryptographic instructions ---------------------------------------------------
             Instruction::Hash => crypto_ops::hash(block_builder),
             Instruction::Compress => block_builder.push_op(Compress),
-            Instruction::HMerge => crypto_ops::hmerge(block_builder),
+            Instruction::HDword => crypto_ops::hdword(block_builder),
             Instruction::MTreeGet => crypto_ops::mtree_get(block_builder),
             Instruction::MTreeSet => crypto_ops::mtree_set(block_builder),
             Instruction::MTreeMerge => crypto_ops::mtree_merge(block_builder),

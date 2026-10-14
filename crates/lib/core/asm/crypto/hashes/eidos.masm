@@ -80,17 +80,17 @@ end
 #! Constructs an initial chaining word from a runtime domain tag and `n`.
 #! Both values must fit in a u32. The caller is responsible for registry and schema validation.
 #!
-#! Input:  [n, domain_tag, ...]
+#! Input:  [domain_tag, n, ...]
 #! Output: [CV, ...]
 #!
 #! Invocation: exec
-pub proc init_chaining_word_in_domain(num_elements: u32, domain: u32) -> ChainingValue
+pub proc init_chaining_word_in_domain(domain: u32, num_elements: u32) -> ChainingValue
     u32assert2.err="Eidos init values must fit in u32"
 
-    push.EIDOS_INIT_CV_1_BASE add
-    swap push.EIDOS_INIT_CV_0_BASE add
+    push.EIDOS_INIT_CV_0_BASE add
+    swap push.EIDOS_INIT_CV_1_BASE add
     push.EIDOS_INIT_CV_3_BASE.EIDOS_INIT_CV_2_BASE
-    movdn.3 movdn.3
+    movup.2 movup.3
     # => [CV, ...]
 end
 
@@ -121,11 +121,11 @@ end
 #! `num_elements` and the tag must fit in a u32.
 #! An empty message still requires one zero-block compression after initialization.
 #!
-#! Input:  [num_elements, domain, ...]
+#! Input:  [domain, num_elements, ...]
 #! Output: [BLOCK_LO=0w, BLOCK_HI=0w, CV, ...]
 #!
 #! Invocation: exec
-pub proc init_in_domain(num_elements: u32, domain: u32) -> State
+pub proc init_in_domain(domain: u32, num_elements: u32) -> State
     exec.init_chaining_word_in_domain
     exec.init_with_chaining_word
 end
@@ -220,28 +220,6 @@ pub proc absorb_double_words_from_memory(
     end
 end
 
-#! Hashes a memory range containing zero or more complete 8-Felt blocks.
-#!
-#! The range length must be a multiple of 8. The input length is bound into the initial chaining
-#! word.
-#!
-#! Input: [start_addr, end_addr, ...]
-#! Output: [HASH, ...]
-#!
-#! Invocation: exec
-pub proc hash_double_words(start_addr: ptr<felt>, end_addr: ptr<felt>) -> Digest
-    # enforce `start_addr <= end_addr`
-    dup.1 dup.1 u32assert2
-    u32gte assert.err="start address should be less or equal to the end address"
-    # => [start_addr, end_addr, ...]
-
-    dup.1 dup.1 sub u32mod.8
-    assertz.err="range length must be a multiple of 8"
-    # => [start_addr, end_addr, ...]
-
-    exec.hash_words
-end
-
 #! Hashes the word-aligned memory range `[start_addr, end_addr)` with a runtime domain tag.
 #!
 #! Requires `start_addr <= end_addr`, `end_addr` is not inclusive.
@@ -251,20 +229,14 @@ end
 #! Output: [H, ...]
 #!
 #! Invocation: exec
-pub proc hash_words_with_domain(domain: u32, start_addr: ptr<felt>, end_addr: ptr<felt>) -> Digest
-    movdn.2
-    # => [start_addr, end_addr, domain, ...]
+pub proc hash_words_in_domain(domain: u32, start_addr: ptr<felt>, end_addr: ptr<felt>) -> Digest
+    dup.2 dup.2 u32assert2 u32gte assert
+    # => [domain, start_addr, end_addr, ...]
 
-    dup.1 dup.1 u32assert2 u32gte assert
-    # => [start_addr, end_addr, domain, ...]
+    dup.2 u32mod.4 assertz.err="end address must be word-aligned"
 
-    dup.1 u32mod.4 assertz.err="end address must be word-aligned"
-
-    dup.1 dup.1 sub
-    # => [num_elements, start_addr, end_addr, domain, ...]
-
-    movup.2 drop swap
-    # => [start_addr, num_elements, domain, ...]
+    movup.2 dup.2 sub movdn.2
+    # => [domain, start_addr, num_elements, ...]
 
     exec.hash_elements_in_domain
 end
@@ -284,38 +256,37 @@ pub proc hash_words(start_addr: ptr<felt>, end_addr: ptr<felt>) -> Digest
     push.GENERIC_FELT_SEQUENCE_DOMAIN_TAG
     # => [domain_tag, start_addr, end_addr, ...]
 
-    exec.hash_words_with_domain
+    exec.hash_words_in_domain
 end
 
 #! Prepares a domain-tagged state for `hash_elements_with_state`.
 #!
-#! Input:  [ptr, num_elements, domain, ...]
+#! Input:  [domain, ptr, num_elements, ...]
 #! Output: [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, end_pairs_addr, num_elements%8, ...]
 proc prepare_hasher_state_in_domain(
+    domain: u32,
     ptr: ptr<felt>,
     num_elements: u32,
-    domain: u32,
 ) -> (State, ptr<felt>, ptr<felt>, u8)
-    # move number of inputs to the top of the stack
-    swap
-    # => [num_elements, ptr, domain]
+    movup.2
+    # => [num_elements, domain, ptr, ...]
 
     dup
-    # => [num_elements, num_elements, ptr, domain]
+    # => [num_elements, num_elements, domain, ptr, ...]
 
     u32assert.err="num_elements must fit in a u32"
 
     # Get the number of double words.
     u32divmod.8
     swap
-    # => [num_elements/8, num_elements%8, num_elements, ptr, domain]
+    # => [num_elements/8, num_elements%8, num_elements, domain, ptr, ...]
 
     # get the end address for absorb_double_words_from_memory procedure (end address for pairs of
     # words)
-    mul.8 dup.3 add movup.3
-    # => [ptr, end_pairs_addr, num_elements%8, num_elements, domain]
+    mul.8 dup.4 add movup.4
+    # => [ptr, end_pairs_addr, num_elements%8, num_elements, domain, ...]
 
-    movup.4 movup.4 exec.init_chaining_word_in_domain
+    movup.3 movup.4 exec.init_chaining_word_in_domain
     # => [CV, ptr, end_pairs_addr, num_elements%8]
 
     # prepare the three-word VM hasher state
@@ -405,8 +376,8 @@ pub proc prepare_hasher_state(
         exec.prepare_padded_hasher_state
     else
         # Bind the logical input length in the generic Felt-sequence domain.
-        push.GENERIC_FELT_SEQUENCE_DOMAIN_TAG movdn.2
-        # => [ptr, num_elements, domain_tag]
+        push.GENERIC_FELT_SEQUENCE_DOMAIN_TAG
+        # => [domain_tag, ptr, num_elements, ...]
 
         exec.prepare_hasher_state_in_domain
     end
@@ -585,22 +556,21 @@ end
 
 #! Computes a domain-tagged hash of Felt values starting at the specified memory address.
 #!
-#! This procedure divides the hashing process into two parts: hashing pairs of words using
-#! `absorb_double_words_from_memory` procedure and hashing the remaining values with `compress`
-#! procedure.
+#! The initial chaining word binds the domain and logical input length. A partial final block is
+#! zero-padded; an empty input is hashed with one zero-block compression.
 #!
-#! Inputs:  [ptr, num_elements, domain]
+#! Inputs:  [domain, ptr, num_elements]
 #! Outputs: [HASH]
 #!
 #! Where:
 #! - ptr is the memory address of the first element to be hashed. This address must be
 #!   word-aligned - i.e., divisible by 4.
 #! - num_elements is the number of elements to be hashed and must fit in a u32.
-#! - domain is the runtime domain tag mixed into the initial chaining word.
+#! - domain must fit in a u32; the caller is responsible for registry and schema validation.
 #! - HASH is the resulting hash of the provided memory values.
 #!
 #! Invocation: exec
-pub proc hash_elements_in_domain(ptr: ptr<felt>, num_elements: u32, domain: u32) -> Digest
+pub proc hash_elements_in_domain(domain: u32, ptr: ptr<felt>, num_elements: u32) -> Digest
     exec.prepare_hasher_state_in_domain
     # => [BLOCK_LO, BLOCK_HI, CV, ptr, end_pairs_addr, num_elements%8]
 
@@ -618,8 +588,8 @@ end
 #!
 #! Invocation: exec
 pub proc hash_elements(ptr: ptr<felt>, num_elements: u32) -> Digest
-    push.GENERIC_FELT_SEQUENCE_DOMAIN_TAG movdn.2
-    # => [ptr, num_elements, domain_tag]
+    push.GENERIC_FELT_SEQUENCE_DOMAIN_TAG
+    # => [domain_tag, ptr, num_elements, ...]
 
     exec.hash_elements_in_domain
 end
@@ -672,21 +642,22 @@ end
 #! Outputs: [C]
 #!
 #! Where:
-#! - A and B are the words to be merged.
+#! - A and B are the input words, with A first.
 #! - C is the resulting hash.
 #!
 #! Invocation: exec
-pub proc hash_two_words(a: Digest, b: Digest) -> Digest
-    hmerge
+pub proc hash_double_word(a: word, b: word) -> Digest
+    hdword
 end
 
-#! Merges two words using a caller-supplied chaining word for their single 8-Felt block.
+#! Compresses one 8-Felt block using a caller-supplied chaining word. Adds no domain or length
+#! framing; the caller must supply the chaining word required by its construction.
 #!
 #! Inputs:  [CV, A, B, ...]
-#! Outputs: [C, ...]
+#! Outputs: [CV', ...]
 #!
 #! Invocation: exec
-pub proc merge_with_chaining_word(chaining_value: ChainingValue, a: Digest, b: Digest) -> Digest
+pub proc compress_double_word(chaining_value: ChainingValue, a: word, b: word) -> ChainingValue
     movdnw.2
     compress
     exec.digest
@@ -698,17 +669,14 @@ end
 #! Outputs: [C, ...]
 #!
 #! Where:
-#! - A and B are the words to be merged (A is the first block word).
-#! - C is `hash_elements_in_domain(A || B, domain)`.
+#! - A and B are the input words, with A first.
+#! - C is the hash of their eight Felts under `domain`. The domain must fit in a u32;
+#!   the caller is responsible for registry and schema validation.
 #!
 #! Invocation: exec
-pub proc hash_two_words_in_domain(domain: u32, a: Digest, b: Digest) -> Digest
-    movdn.8
-    # => [A, B, domain, ...]
+pub proc hash_double_word_in_domain(domain: u32, a: word, b: word) -> Digest
+    push.8 swap exec.init_chaining_word_in_domain
+    # => [CV, A, B, ...]
 
-    movup.8 push.8 exec.init_chaining_word_in_domain movdnw.2
-    # => [A, B, CV, ...]
-
-    compress
-    exec.digest
+    exec.compress_double_word
 end

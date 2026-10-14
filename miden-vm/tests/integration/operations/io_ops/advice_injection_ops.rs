@@ -337,8 +337,8 @@ fn advice_insert_hdword() {
         adv.insert_hdword
 
         # manually compute the hash of the two words
-        # hmerge computes hash(W0 || W1), matching adv.insert_hdword
-        hmerge
+        # hdword computes hash(W0 || W1), matching adv.insert_hdword
+        hdword
         # => [KEY, ...]
 
         # load the advice stack with values from the advice map and drop the key
