@@ -11,6 +11,7 @@
 
 #### Changes
 
+- [BREAKING] Simplified Eidos hashing APIs: renamed `hmerge` to `hdword` and `hash_two_words*` to `hash_double_word*`. Use `hash_words` instead of `merge_many` or MASM `hash_double_words`, and `compress_double_word` for raw MASM compression. MASM domain helpers use `_in_domain` and take the domain first. Rebuild compiled MASM packages; the recursive VM verifier root changes.
 - Refreshed VM and crypto benchmark results for Eidos ([#3975](https://github.com/0xMiden/miden-vm/pull/3975)).
 - [BREAKING] Optimized Falcon512-Eidos verification with counter-mode hash-to-point and fused norm computation. Regenerate signatures and use `falcon512_eidos::encode_signature` for advice. `mod_12289` takes `u64` in `[lo, hi]` order instead of `[hi, lo]`; `Nonce` uses `{ lo, hi }`. Replaced `hash_to_point` and `compute_s1_norm_sq` with `hash_to_point_s1_norm_sq`; removed `diff_mod_M` and `WideInteger` ([#3990](https://github.com/0xMiden/miden-vm/pull/3990)).
 - Added opt-in hashing of completed trace LDE blocks to the lifted STARK prover (`hash_lde_blocks`) ([#3866](https://github.com/0xMiden/miden-vm/pull/3866)).

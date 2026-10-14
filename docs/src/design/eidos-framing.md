@@ -118,7 +118,7 @@ Unlisted namespace values remain unallocated. Adding one requires an update to t
 namespace registry in `miden-crypto`; it is not a local convention.
 
 Values in the reserved `(namespace, local_id) = (0, 0)` region are not domain tags. The all-zero
-tuple initializes Merkle inner-node compression. MAST control nodes place an opcode in the tag
+tuple initializes Merkle internal-node compression. MAST control nodes place an opcode in the tag
 lane, bind `param0 = 8`, and leave the other parameters zero. Registered tags are at least `0x100`,
 so neither VM-internal framing family can overlap a registry allocation.
 
@@ -231,9 +231,9 @@ exactly. The adapter deliberately splits any other `u64` into its two 32-bit lim
 reduction for its low-level consumers; those extra inputs do not define another registered
 construction or alter the typed `FeltSequence` API.
 
-## Reserved Merkle inner-node construction
+## Reserved Merkle internal-node construction
 
-Merkle inner-node compression is the only unregistered Eidos construction. It uses the all-zero
+Merkle internal nodes use a fixed construction outside the domain registry. It uses the all-zero
 framing tuple and exactly one 8-Felt block:
 
 ```text
@@ -248,16 +248,17 @@ MerkleInner(left, right):
 "All zero" refers to the four injected lanes. The actual initial chaining word is
 `[BASE0, BASE1, BASE2, BASE3]`, not the literal zero word.
 
-This construction is reserved exclusively for Merkle inner nodes so that the VM's Merkle-path
-operations have one fixed initialization. Structured leaves bind their own meaning before they
-enter the tree, and callers bind the role of a root where it is consumed. In particular:
+The VM's native Merkle verification and update operations enforce this fixed initialization.
+Trees used with these operations must therefore use the same internal-node construction.
+Structured leaves bind their own meaning before they enter the tree, and callers bind the role
+of a root where it is consumed. In particular:
 
 ```text
 Eidos::merge([left, right]) != Eidos::hash_elements(left || right)
 ```
 
-The right-hand side uses the registered generic Felt tag and binds length eight. The VM's `hmerge`
-instruction and `eidos::hash_two_words` procedure implement that generic hash. Merkle code uses
+The right-hand side uses the registered generic Felt tag and binds length eight. The VM's `hdword`
+instruction and `eidos::hash_double_word` procedure implement that generic hash. Merkle code uses
 `Eidos::merge`, or obtains its reserved initial word from
 `Eidos::merkle_node_init_chaining_word` when compression is scheduled by a separate engine.
 

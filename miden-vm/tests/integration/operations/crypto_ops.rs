@@ -6,7 +6,7 @@ use miden_utils_testing::build_expected_hash;
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
 use miden_utils_testing::{
-    Felt, build_expected_compress, build_expected_hmerge, build_op_test, build_test,
+    Felt, build_expected_compress, build_expected_hdword, build_op_test, build_test,
     crypto::{MerkleTree, NodeIndex, init_merkle_leaf, init_merkle_store},
 };
 
@@ -97,12 +97,12 @@ fn compress() {
 }
 
 #[test]
-fn hmerge() {
-    let asm_op = "hmerge";
+fn hdword() {
+    let asm_op = "hdword";
 
     // --- test hashing [ONE, ONE, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO] ----------------------------
     let values = [1, 1, 0, 0, 0, 0, 0, 0];
-    let expected = build_expected_hmerge(&values);
+    let expected = build_expected_hdword(&values);
 
     let test = build_op_test!(asm_op, &values);
     let last_state = test.get_last_stack_state();
@@ -127,7 +127,7 @@ fn hmerge() {
 #[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
-    fn hmerge_proptest(
+    fn hdword_proptest(
         v0 in any::<u64>(),
         v1 in any::<u64>(),
         v2 in any::<u64>(),
@@ -137,11 +137,11 @@ proptest! {
         v6 in any::<u64>(),
         v7 in any::<u64>(),
     ) {
-        let asm_op = "hmerge";
+        let asm_op = "hdword";
 
         // --- test hashing 8 random values -----------------------------------------------------------
         let values = [v0, v1, v2, v3, v4, v5, v6, v7];
-        let expected = build_expected_hmerge(&values);
+        let expected = build_expected_hdword(&values);
 
         let test = build_op_test!(asm_op, &values);
         let last_state = test.get_last_stack_state();

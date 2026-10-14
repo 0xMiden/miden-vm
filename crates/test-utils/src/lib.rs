@@ -1044,9 +1044,9 @@ pub fn build_expected_hash(values: &[u64]) -> [Felt; 4] {
     digest.into()
 }
 
-/// Computes the generic eight-Felt hash used by `hmerge`.
-pub fn build_expected_hmerge(values: &[u64]) -> [Felt; 4] {
-    assert!(values.len() >= 2 * WORD_SIZE, "expected at least two words for hmerge test");
+/// Computes the generic eight-Felt hash used by `hdword`.
+pub fn build_expected_hdword(values: &[u64]) -> [Felt; 4] {
+    assert!(values.len() >= 2 * WORD_SIZE, "expected at least two words for hdword test");
 
     let values = values.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
     hash_elements(&values[..2 * WORD_SIZE]).into()

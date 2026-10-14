@@ -417,8 +417,8 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::Hash,
     },
     PrimitiveSpec {
-        spelling: "hmerge",
-        build: || Instruction::HMerge,
+        spelling: "hdword",
+        build: || Instruction::HDword,
     },
     PrimitiveSpec {
         spelling: "horner_eval_base",
