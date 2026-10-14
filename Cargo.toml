@@ -113,7 +113,7 @@ miden-prover            = { path = "./prover", version = "1.0", default-features
 miden-serde-utils       = { path = "./crates/serde-utils", version = "1.0", default-features = false }
 miden-stark-transcript  = { path = "./crates/stark-transcript", version = "1.0", default-features = false }
 miden-stateful-hasher   = { path = "./crates/stateful-hasher", version = "1.0", default-features = false }
-midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "0.18", default-features = false }
+midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "0.19", default-features = false }
 miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "1.0", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "1.0", default-features = false }
 miden-utils-indexing    = { path = "./crates/utils-indexing", version = "1.0", default-features = false }
