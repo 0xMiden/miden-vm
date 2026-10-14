@@ -7,7 +7,8 @@
 //! [`Preprocessed::build`] + [`ProverInstance::new`], and the verifier receives
 //! only the commitment via [`VerifierInstance::new`].
 
-use alloc::{vec, vec::Vec};
+use alloc::{sync::Arc, vec, vec::Vec};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -557,4 +558,118 @@ fn preprocessed_multiple_heights_below_max() {
     );
 
     prove_verify_reparse(ps);
+}
+
+/// Instrument the real prover dispatch without changing the existing fallback AIR fixtures.
+#[derive(Clone, Debug)]
+struct CountedAir {
+    inner: MixedAir,
+    materializations: Arc<AtomicUsize>,
+    aux_calls: Arc<AtomicUsize>,
+    borrowed_address: Arc<AtomicUsize>,
+}
+
+impl BaseAir<Felt> for CountedAir {
+    fn width(&self) -> usize {
+        self.inner.width()
+    }
+    fn preprocessed_width(&self) -> usize {
+        self.inner.preprocessed_width()
+    }
+    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+        self.materializations.fetch_add(1, Ordering::Relaxed);
+        self.inner.preprocessed_trace()
+    }
+}
+
+impl LiftedAir<Felt, QuadFelt> for CountedAir {
+    fn aux_width(&self) -> usize {
+        self.inner.aux_width()
+    }
+    fn num_randomness(&self) -> usize {
+        self.inner.num_randomness()
+    }
+    fn num_aux_values(&self) -> usize {
+        self.inner.num_aux_values()
+    }
+    fn build_aux_trace(
+        &self,
+        _main: &RowMajorMatrix<Felt>,
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
+        _challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        panic!("the prover must dispatch the borrowed setup hook")
+    }
+    fn build_aux_trace_with_preprocessed(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        preprocessed: Option<&RowMajorMatrix<Felt>>,
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
+        challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        assert_eq!(preprocessed.is_some(), self.preprocessed_width() > 0);
+        if let Some(trace) = preprocessed {
+            assert_eq!(trace.height(), main.height());
+            assert_eq!(trace.width(), self.preprocessed_width());
+        }
+        self.borrowed_address.store(
+            preprocessed.map_or(0, |trace| trace.values.as_ptr() as usize),
+            Ordering::Relaxed,
+        );
+        self.aux_calls.fetch_add(1, Ordering::Relaxed);
+        self.inner.build_aux_trace(main, air_inputs, aux_inputs, challenges)
+    }
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+        self.inner.eval(builder)
+    }
+}
+
+#[test]
+fn auxiliary_construction_reuses_one_preprocessed_bundle_across_proofs() {
+    // Include a missing table and different heights in an instance order unlike proof order.
+    let airs: Vec<_> = [
+        MixedAir::Constant(ConstantAir),
+        MixedAir::RowCounter(RowCounterAir { preprocessed: row_index_trace(4) }),
+        MixedAir::RowCounter(RowCounterAir { preprocessed: row_index_trace(2) }),
+    ]
+    .into_iter()
+    .map(|inner| CountedAir {
+        inner,
+        materializations: Arc::new(AtomicUsize::new(0)),
+        aux_calls: Arc::new(AtomicUsize::new(0)),
+        borrowed_address: Arc::new(AtomicUsize::new(0)),
+    })
+    .collect();
+    let make_statement = || {
+        prover_statement(
+            airs.clone(),
+            vec![squaring_trace(8), row_index_trace(4), row_index_trace(2)],
+        )
+    };
+    let config = test_config();
+    let first = make_statement();
+    let preprocessed = Preprocessed::build(first.statement(), &config).expect("has preprocessed");
+    let original_addresses: Vec<_> = preprocessed
+        .raw_traces()
+        .iter()
+        .map(|trace| trace.as_ref().map_or(0, |trace| trace.values.as_ptr() as usize))
+        .collect();
+    for ps in [first, make_statement()] {
+        let prover = ProverInstance::new(&config, ps, Some(&preprocessed)).expect("valid setup");
+        let (output, statement) = prover.prove(test_challenger()).expect("prove");
+        verify_and_reparse(&config, &statement, &output, &preprocessed);
+        for (air, &address) in airs.iter().zip(&original_addresses) {
+            assert_eq!(
+                air.borrowed_address.load(Ordering::Relaxed),
+                address,
+                "reuse the original allocation in instance order, including absent slots"
+            );
+        }
+    }
+    for air in airs {
+        assert_eq!(air.materializations.load(Ordering::Relaxed), 1, "generate only during setup");
+        assert_eq!(air.aux_calls.load(Ordering::Relaxed), 2, "both proofs build auxiliary traces");
+    }
 }

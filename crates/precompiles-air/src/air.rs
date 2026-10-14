@@ -149,6 +149,24 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
         delegate!(self, build_aux_trace, main, air_inputs, aux_inputs, challenges)
     }
+    fn build_aux_trace_with_preprocessed(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        preprocessed: Option<&RowMajorMatrix<Felt>>,
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
+        challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        delegate!(
+            self,
+            build_aux_trace_with_preprocessed,
+            main,
+            preprocessed,
+            air_inputs,
+            aux_inputs,
+            challenges
+        )
+    }
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
             ChipletAir::ChunkNodeSponge => eval_lifted(&ChunkNodeSpongeAir, builder),
