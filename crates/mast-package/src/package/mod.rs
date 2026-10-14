@@ -86,8 +86,6 @@ pub struct Package {
     pub name: PackageId,
     /// An optional semantic version for the package
     pub version: Version,
-    /// The commitment to the underlying MAST forest.
-    mast_forest_commitment: Word,
     /// An optional description of the package
     pub description: Option<String>,
     /// The project target type which produced this package
@@ -106,6 +104,117 @@ pub struct Package {
     /// sections before marking them trusted. Trusted local/cache readers and in-process package
     /// construction may defer debug validation until [`Package::debug_info`] is called.
     debug_sections_trusted: bool,
+}
+
+struct PackageCommitment<'a> {
+    package: &'a Package,
+}
+
+impl<'a> PackageCommitment<'a> {
+    fn new(package: &'a Package) -> Self {
+        Self { package }
+    }
+
+    fn interface_commitment(&self) -> Result<Word, ManifestValidationError> {
+        let mut node_ids = Vec::with_capacity(self.package.manifest.num_exports());
+        for export in self.package.manifest.exports() {
+            if let PackageExport::Procedure(export) = export {
+                if let Some(node_id) = export.node {
+                    node_ids.push(node_id);
+                } else {
+                    node_ids.push(
+                        self.package.mast.find_procedure_root(export.digest).ok_or_else(|| {
+                            ManifestValidationError::MissingProcedureMast {
+                                path: export.path.clone(),
+                                digest: export.digest,
+                            }
+                        })?,
+                    );
+                }
+            }
+        }
+
+        Ok(self.package.mast.compute_nodes_commitment(node_ids.iter()))
+    }
+
+    fn mast_forest_commitment(&self) -> Word {
+        self.package.mast.commitment()
+    }
+
+    fn code_commitment(&self) -> Word {
+        let interface_commitment =
+            self.interface_commitment().expect("package manifest exports were validated");
+        Self::merge_commitments(
+            b"miden.package.code.v1",
+            interface_commitment,
+            self.mast_forest_commitment(),
+        )
+    }
+
+    fn dependency_commitment(&self) -> Word {
+        let mut bytes = Vec::new();
+        bytes.write_bytes(b"miden.package.dependency.v1");
+        self.code_commitment().write_into(&mut bytes);
+        self.package.name.write_into(&mut bytes);
+        self.package.version.to_string().write_into(&mut bytes);
+        bytes.write_u8(self.package.kind.into());
+        self.package.manifest.write_into(&mut bytes);
+        self.write_dependency_commitment_sections(&mut bytes);
+        hasher::hash(&bytes)
+    }
+
+    fn write_dependency_commitment_sections<W: ByteWriter>(&self, target: &mut W) {
+        // Event-handler code decides the advice a program receives, so the section affects
+        // package use: two packages that differ only in handler code must not share a
+        // dependency identity.
+        let mut sections = self
+            .package
+            .sections
+            .iter()
+            .filter(|section| {
+                section.id == SectionId::ACCOUNT_COMPONENT_METADATA
+                    || section.id == SectionId::EVENT_HANDLERS
+            })
+            .collect::<Vec<_>>();
+        // The commitment must not depend on the order in which the sections were attached, so
+        // the sections go into the preimage in a canonical order. The on-disk order does not
+        // change. The data breaks a tie on the ID: a malformed package can carry two sections
+        // with the same ID, and the commitment of such a package must still not depend on the
+        // attach order.
+        sections.sort_by(|a, b| {
+            a.id.as_str()
+                .cmp(b.id.as_str())
+                .then_with(|| a.data.as_ref().cmp(b.data.as_ref()))
+        });
+        target.write_usize(sections.len());
+        for section in sections {
+            section.write_into(target);
+        }
+    }
+
+    fn artifacts_commitment(&self) -> Word {
+        let mut bytes = Vec::new();
+        bytes.write_bytes(b"miden.package.artifacts.v1");
+        self.package.write_header_into(&mut bytes);
+        self.package.write_trailer_into(&mut bytes);
+        hasher::hash(&bytes)
+    }
+
+    fn commitment(&self) -> Word {
+        Self::merge_commitments(
+            b"miden.package.v1",
+            self.code_commitment(),
+            self.artifacts_commitment(),
+        )
+    }
+
+    fn merge_commitments(domain: &[u8], left: Word, right: Word) -> Word {
+        let mut bytes = Vec::new();
+        bytes.write_bytes(domain);
+        left.write_into(&mut bytes);
+        right.write_into(&mut bytes);
+        hasher::hash(&bytes)
+    }
 }
 
 /// Construction
@@ -152,10 +261,9 @@ impl Package {
             }
         }
 
-        let mut package = Self {
+        let package = Self {
             name,
             version,
-            mast_forest_commitment: Default::default(),
             description: None,
             kind,
             mast,
@@ -164,34 +272,9 @@ impl Package {
             debug_sections_trusted: true,
         };
 
-        package.compute_interface_commitment()?;
-        package.recompute_mast_commitment();
+        package.interface_commitment()?;
 
         Ok(package)
-    }
-
-    fn compute_interface_commitment(&self) -> Result<Word, ManifestValidationError> {
-        let mut node_ids = Vec::with_capacity(self.manifest.num_exports());
-        for export in self.manifest.exports() {
-            if let PackageExport::Procedure(export) = export {
-                if let Some(node_id) = export.node {
-                    node_ids.push(node_id);
-                } else {
-                    node_ids.push(self.mast.find_procedure_root(export.digest).ok_or_else(
-                        || ManifestValidationError::MissingProcedureMast {
-                            path: export.path.clone(),
-                            digest: export.digest,
-                        },
-                    )?);
-                }
-            }
-        }
-
-        Ok(self.mast.compute_nodes_commitment(node_ids.iter()))
-    }
-
-    fn recompute_mast_commitment(&mut self) {
-        self.mast_forest_commitment = self.mast.commitment();
     }
 
     /// Produces a new library with the existing [`MastForest`] and where all key/values in the
@@ -204,20 +287,28 @@ impl Package {
     /// Extends the advice map of this library
     pub fn extend_advice_map(&mut self, advice_map: AdviceMap) {
         self.mast = Arc::new(self.mast.as_ref().clone().with_advice_map(advice_map));
-        self.recompute_mast_commitment();
     }
 
     /// Removes all package-owned debug information from this package.
     ///
-    /// This removes well-known package debug sections and recursively strips an embedded kernel
+    /// This removes well-known package debug sections and also strips them from an embedded kernel
     /// package if one is present.
+    ///
+    /// # Errors
+    /// Returns an error if an embedded kernel package cannot be decoded, or if it embeds another
+    /// kernel package.
     pub fn strip_debug_info(&mut self) -> Result<(), PackageStripError> {
         for section in self.sections.iter_mut().filter(|section| section.id == SectionId::KERNEL) {
             // Debug metadata is about to be removed, so validate the nested MAST while deferring
             // debug validation that could otherwise prevent stripping malformed metadata.
             let mut kernel_package = Self::read_from_bytes_trusted(section.data.as_ref())
                 .map_err(|source| PackageStripError::DecodeEmbeddedKernel { source })?;
-            kernel_package.strip_debug_info()?;
+            // The assembler never embeds a kernel in a kernel, so strip one level only instead of
+            // recursing into attacker-controlled nesting.
+            if kernel_package.sections.iter().any(|section| section.id == SectionId::KERNEL) {
+                return Err(PackageStripError::NestedEmbeddedKernel);
+            }
+            kernel_package.sections.retain(|section| !section.id.is_debug());
             section.data = Cow::Owned(kernel_package.to_bytes());
         }
 
@@ -245,26 +336,20 @@ impl Package {
 
     /// Returns the commitment to the exported procedure roots used by the linker.
     pub fn interface_commitment(&self) -> Result<Word, ManifestValidationError> {
-        self.compute_interface_commitment()
+        PackageCommitment::new(self).interface_commitment()
     }
 
     /// Returns the commitment to the package's MAST forest.
     #[inline]
     pub fn mast_forest_commitment(&self) -> Word {
-        self.mast_forest_commitment
+        PackageCommitment::new(self).mast_forest_commitment()
     }
 
     /// Returns the commitment to the package's code.
     ///
     /// This binds the public interface to the complete MAST forest which implements it.
     pub fn code_commitment(&self) -> Word {
-        let interface_commitment =
-            self.interface_commitment().expect("package manifest exports were validated");
-        Self::merge_commitments(
-            b"miden.package.code.v1",
-            interface_commitment,
-            self.mast_forest_commitment(),
-        )
+        PackageCommitment::new(self).code_commitment()
     }
 
     /// Returns the commitment used to identify this package during dependency resolution.
@@ -273,69 +358,17 @@ impl Package {
     /// (account component metadata and event handlers). Optional debug data, descriptions, and
     /// opaque custom sections are excluded.
     pub fn dependency_commitment(&self) -> Word {
-        let mut bytes = Vec::new();
-        bytes.write_bytes(b"miden.package.dependency.v1");
-        self.code_commitment().write_into(&mut bytes);
-        self.name.write_into(&mut bytes);
-        self.version.to_string().write_into(&mut bytes);
-        bytes.write_u8(self.kind.into());
-        self.manifest.write_into(&mut bytes);
-        self.write_dependency_commitment_sections(&mut bytes);
-        hasher::hash(&bytes)
-    }
-
-    fn write_dependency_commitment_sections<W: ByteWriter>(&self, target: &mut W) {
-        // Event-handler code decides the advice a program receives, so the section affects
-        // package use: two packages that differ only in handler code must not share a
-        // dependency identity.
-        let mut sections = self
-            .sections
-            .iter()
-            .filter(|section| {
-                section.id == SectionId::ACCOUNT_COMPONENT_METADATA
-                    || section.id == SectionId::EVENT_HANDLERS
-            })
-            .collect::<Vec<_>>();
-        // The commitment must not depend on the order in which the sections were attached, so
-        // the sections go into the preimage in a canonical order. The on-disk order does not
-        // change. The data breaks a tie on the ID: a malformed package can carry two sections
-        // with the same ID, and the commitment of such a package must still not depend on the
-        // attach order.
-        sections.sort_by(|a, b| {
-            a.id.as_str()
-                .cmp(b.id.as_str())
-                .then_with(|| a.data.as_ref().cmp(b.data.as_ref()))
-        });
-        target.write_usize(sections.len());
-        for section in sections {
-            section.write_into(target);
-        }
+        PackageCommitment::new(self).dependency_commitment()
     }
 
     /// Returns the commitment to all serialized package data outside the MAST forest.
     pub fn artifacts_commitment(&self) -> Word {
-        let mut bytes = Vec::new();
-        bytes.write_bytes(b"miden.package.artifacts.v1");
-        self.write_header_into(&mut bytes);
-        self.write_trailer_into(&mut bytes);
-        hasher::hash(&bytes)
+        PackageCommitment::new(self).artifacts_commitment()
     }
 
     /// Returns the commitment to the complete package.
     pub fn commitment(&self) -> Word {
-        Self::merge_commitments(
-            b"miden.package.v1",
-            self.code_commitment(),
-            self.artifacts_commitment(),
-        )
-    }
-
-    fn merge_commitments(domain: &[u8], left: Word, right: Word) -> Word {
-        let mut bytes = Vec::new();
-        bytes.write_bytes(domain);
-        left.write_into(&mut bytes);
-        right.write_into(&mut bytes);
-        hasher::hash(&bytes)
+        PackageCommitment::new(self).commitment()
     }
 
     /// Returns true if this package was produced for an executable target
@@ -823,7 +856,8 @@ impl Package {
             for row in source_node.inline_calls.iter() {
                 let is_external_boundary = exec_node.is_external()
                     && source_node.op_start == source_node.op_end
-                    && row.op_idx == source_node.op_start;
+                    && row.op_idx == source_node.op_start
+                    && row.op_end == source_node.op_end;
                 if !is_external_boundary {
                     self.validate_source_map_row(
                         source_id,
@@ -831,6 +865,14 @@ impl Package {
                         row.op_idx,
                         "inline call",
                     )?;
+                    if row.op_end <= row.op_idx || row.op_end > source_node.op_end {
+                        return Err(PackageDebugInfoError::InvalidValue {
+                            message: format!(
+                                "debug inline-call range {}..{} is outside source node range {}..{}",
+                                row.op_idx, row.op_end, source_node.op_start, source_node.op_end,
+                            ),
+                        });
+                    }
                 }
                 if debug_info.get_function(row.callee_idx).is_none() {
                     return Err(PackageDebugInfoError::InvalidReference {
@@ -1737,6 +1779,8 @@ mod tests {
     #[test]
     fn package_commitment_layers_handle_advice_map_changes() {
         let package = build_kernel_package("kernel");
+        assert_eq!(package.mast_forest_commitment(), package.mast_forest().commitment());
+
         let package_commitment = package.commitment();
         let interface_commitment = package.interface_commitment().unwrap();
         let code_commitment = package.code_commitment();
@@ -2218,6 +2262,7 @@ mod tests {
         let mut node = debug_source_node(exec_node, Vec::new(), 0, 1);
         node.inline_calls.push(DebugSourceInlineCall {
             op_idx: 0,
+            op_end: 1,
             callee_idx: DebugFunctionIdx::from(1),
             loc_idx: DebugLocIdx::from(0),
         });
@@ -2242,6 +2287,7 @@ mod tests {
         let mut node = debug_source_node(exec_node, Vec::new(), 0, 1);
         node.inline_calls.push(DebugSourceInlineCall {
             op_idx: 0,
+            op_end: 1,
             callee_idx: function_idx,
             loc_idx: DebugLocIdx::from(99),
         });
@@ -2251,6 +2297,30 @@ mod tests {
 
         let err = package.debug_info().expect_err("bad inline call location should be rejected");
         assert!(matches!(err, PackageDebugInfoError::InvalidReference { .. }));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_inline_ranges_outside_the_source_occurrence() {
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        let exec_node = package.get_export_node_id("app::entry");
+        for (op_idx, op_end) in [(0, 0), (0, 2), (1, 2)] {
+            let mut builder = PackageDebugInfoBuilder::default();
+            let mut node = debug_source_node(exec_node, Vec::new(), 0, 1);
+            node.inline_calls.push(DebugSourceInlineCall {
+                op_idx,
+                op_end,
+                callee_idx: DebugFunctionIdx::from(0),
+                loc_idx: DebugLocIdx::from(0),
+            });
+            builder.add_node(node).unwrap();
+            package.sections = vec![debug_info_section(builder.build().as_ref())];
+            let error = package.debug_info().unwrap_err();
+            if op_idx == 0 {
+                assert!(matches!(error, PackageDebugInfoError::InvalidValue { .. }), "{error}");
+            } else {
+                assert!(matches!(error, PackageDebugInfoError::InvalidReference { .. }), "{error}",);
+            }
+        }
     }
 
     #[test]
@@ -2473,6 +2543,23 @@ mod tests {
             "untrusted embedded-kernel decode should retain validated nested debug sections"
         );
         assert!(untrusted_kernel.debug_info().unwrap().is_some());
+    }
+
+    #[test]
+    fn strip_debug_info_rejects_nested_embedded_kernel() {
+        let inner = build_debug_package("inner", TargetType::Kernel, "inner::boot", "inner_ctx");
+        let mut kernel =
+            build_debug_package("kernel", TargetType::Kernel, "kernel::boot", "kernel_ctx");
+        kernel.sections.push(Section::new(SectionId::KERNEL, inner.to_bytes()));
+
+        let mut package =
+            build_debug_package("app", TargetType::Executable, "app::entry", "app_ctx");
+        package.sections.push(Section::new(SectionId::KERNEL, kernel.to_bytes()));
+
+        assert!(matches!(
+            package.strip_debug_info(),
+            Err(PackageStripError::NestedEmbeddedKernel)
+        ));
     }
 
     #[test]

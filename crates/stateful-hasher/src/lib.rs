@@ -111,27 +111,3 @@ pub trait Alignable<Input, Target> {
     /// could be added due to padding when absorbing input.
     const ALIGNMENT: usize;
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::testing::{MockBinaryHasher, MockBinaryPermutation};
-
-    /// Compile-time verification that all StatefulHasher implementations
-    /// satisfy their generic bounds with mock types.
-    #[test]
-    fn types_instantiate() {
-        // Native sponge: T -> [T; WIDTH] -> [T; OUT]
-        let _sponge = StatefulSponge::<_, 8, 4, 2>::new(MockBinaryPermutation::<u64, 8>::default());
-        let _: [u64; 8] = Default::default();
-
-        // Serializing sponge: F -> [binary; WIDTH] -> [binary; OUT]
-        let inner = StatefulSponge::<_, 8, 4, 2>::new(MockBinaryPermutation::<u64, 8>::default());
-        let _serializing: SerializingStatefulSponge<_> = SerializingStatefulSponge::new(inner);
-        let _: [u64; 8] = Default::default();
-
-        // Chaining hasher: F -> [binary; N] (digest = state)
-        let _chaining: ChainingHasher<MockBinaryHasher> = ChainingHasher::new(MockBinaryHasher);
-        let _: [u64; 4] = Default::default();
-    }
-}

@@ -11,12 +11,19 @@ edition = "2024"
 [package.metadata]
 cargo-fuzz = true
 
+[lib]
+name = "miden_core_fuzz"
+path = "lib.rs"
+
 [dependencies]
 libfuzzer-sys = "0.4"
 
 [dependencies.miden-core]
 path = "../../core"
-features = ["std"]
+# "arbitrary" unlocks the builder add_to_forest impls (gated any(test, feature)) used by
+# the mast_forest_wire_view_new known-roots oracle; the serialization derives stay
+# test-only (all(feature = "arbitrary", test)), so fuzz-build behavior is unchanged.
+features = ["std", "arbitrary"]
 
 [dependencies.miden-assembly-syntax]
 path = "../../crates/assembly-syntax"

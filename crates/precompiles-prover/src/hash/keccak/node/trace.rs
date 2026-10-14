@@ -32,7 +32,7 @@ use crate::{
         chunk::trace::{ChunkRequires, ChunkSeqId},
         keccak::{
             digest::KeccakDigest,
-            node::{NUM_HASH, NUM_MAIN_COLS},
+            node::{MAX_SPONGE_PERMS, NUM_HASH, NUM_MAIN_COLS, SPONGE_RATE_BYTES},
             round::RoundRequires,
             sponge::trace::{
                 Invocation as SpongeInvocation, SpongeRequires, SpongeSeqId, keccak_oracle,
@@ -88,7 +88,7 @@ impl KeccakNodeInvocation {
     /// Sponge perms = Keccak blocks = `floor(len_bytes / 136) + 1`
     /// under multi-rate-10*1 padding.
     pub fn n_sponge_perms(&self) -> u64 {
-        u64::from(self.len_bytes) / 136 + 1
+        u64::from(self.len_bytes / SPONGE_RATE_BYTES) + 1
     }
 
     /// Chunks in this invocation's chain = `max(1, ceil(len_bytes / 32))`.
@@ -260,6 +260,16 @@ impl KeccakNodeRequires {
 
         let remainder = len_bytes.saturating_sub(1) % 32;
         bpl_req.require(BytePairOp::Xor, remainder as u8, (31 - remainder) as u8);
+
+        let full_blocks = len_bytes / SPONGE_RATE_BYTES;
+        assert!(
+            full_blocks < MAX_SPONGE_PERMS,
+            "a Keccak input must span at most {MAX_SPONGE_PERMS} sponge permutations"
+        );
+        let last_block_remainder = len_bytes % SPONGE_RATE_BYTES;
+        bpl_req.require_range16(full_blocks as u16);
+        bpl_req.require_range16(last_block_remainder as u16);
+        bpl_req.require_range16((SPONGE_RATE_BYTES - 1 - last_block_remainder) as u16);
 
         // Miss path: full allocation through sponge + 2× Eidos one-shots.
         let sponge_inv = SpongeInvocation { input: input.to_vec() };

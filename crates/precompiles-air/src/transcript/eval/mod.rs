@@ -545,7 +545,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
         // Op operand ptrs: a_ptr and b_ptr on any op row (both families) or
         // finite EcCreate. On `Is` (either family) b_ptr = a_ptr *is* the equality.
         // a_ptr / b_ptr also carry the absorb's (Pᵢ_ptr, sᵢ_ptr) on EcMsm
-        // rows — the MsmTerm base/scalar and the child binding consumes.
+        // rows — the MsmClaimTerm base/scalar and the child binding consumes.
         let a_ptr: AB::Expr = local[COL_A_PTR].into();
         let b_ptr: AB::Expr = local[COL_B_PTR].into();
         builder.assert_zero(
@@ -1055,7 +1055,7 @@ where
         // col 10/11: the EcMsm continuation-run consumes. Per row: the
         // `Pᵢ` `Group` binding + the `sᵢ` `Uint` binding (tying the compression
         // block to real child nodes) + `MsmClaimTerm(expr, Pᵢ, sᵢ)`
-        // (positionless — tying to the chiplet's term *set*, so the absorb
+        // (positionless — tying to the chiplet's term *multiset*, so the absorb
         // order is the caller's). At the boundary: `MsmExpr(expr, group,
         // val, k = idx + 1)` (every term named, the value bound). Fields
         // re-read fresh from `local`.
@@ -1096,7 +1096,7 @@ where
             builder,
             "ec-msm-absorb",
             linear_pair_deg,
-            // Positionless set match: the claim's terms, any order — so the
+            // Positionless multiset match: the claim's terms, any order — so the
             // absorb (hash) order is the caller's, not the chiplet's `idx`.
             (
                 "consume-msmclaimterm",

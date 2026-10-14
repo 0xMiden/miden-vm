@@ -23,6 +23,10 @@ pub enum RowIndexError {
 
 /// A newtype wrapper around a usize value representing a step in the execution trace.
 #[derive(Debug, Default, Copy, Clone, Eq, Ord, PartialOrd)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct RowIndex(u32);
 
 impl RowIndex {
@@ -309,25 +313,31 @@ impl RangeBounds<RowIndex> for RowIndex {
 // TESTS
 // ================================================================================================
 
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::RowIndex;
+
+    impl Arbitrary for RowIndex {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Any u32 is a valid trace row index.
+            any::<u32>().prop_map(RowIndex).boxed()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::collections::BTreeMap;
 
     use miden_core::serde::{Deserializable, Serializable};
-
-    #[test]
-    fn row_index_conversions() {
-        use super::RowIndex;
-        // Into
-        let _: RowIndex = 5.into();
-        let _: RowIndex = 5u32.into();
-        let _: RowIndex = (5usize).into();
-
-        // From
-        let _: u32 = RowIndex(5).into();
-        let _: u64 = RowIndex(5).into();
-        let _: usize = RowIndex(5).into();
-    }
 
     #[test]
     fn row_index_ops() {

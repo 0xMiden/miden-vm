@@ -275,6 +275,8 @@ mod tests {
             ("EcPointStoreGroups", 1),
             ("EcGroupAdd", 1),
             ("EcMsm", 1),
+            ("Sha512", 2),
+            ("Sha256", 2),
         ];
 
         let derived: Vec<(String, u8)> = ChipletAir::all()
@@ -307,6 +309,14 @@ mod tests {
     /// Keep protocol and cost changes visible as numbers rather than only as a digest diff.
     #[test]
     fn pvm_canonical_ace_shape_matches_current_air() {
+        assert!(
+            ChipletAir::all().iter().all(|air| {
+                <ChipletAir as miden_lifted_air::LiftedAir<Felt, QuadFelt>>::max_periodic_length(
+                    air,
+                ) <= 128
+            }),
+            "long periodic tables make every recursive proof pay for dense SHA program polynomials"
+        );
         let canonical = build_canonical_precompile_ace_circuit().expect("canonical circuit");
         // BytePairLut is the only chiplet with a preprocessed trace, so the combined
         // preprocessed region must be nonempty.
@@ -320,6 +330,10 @@ mod tests {
         assert_eq!(canonical.layout().counts.num_aux_boundary, num_aux_values);
 
         let circuit = build_pvm_recursive_verifier_ace_circuit().expect("recursive circuit");
+        assert!(
+            circuit.num_eval_gates < 32_768,
+            "the SHA program must not restore the 97,576-gate fixed verifier cost"
+        );
         let snapshot = format!(
             "layout_inputs: {}\nnum_vars: {}\nnum_eval_gates: {}\nstream_len: \
              {}\ncircuit_digest: {:?}\nrelation_digest: {:?}",
@@ -387,7 +401,7 @@ mod tests {
         );
     }
 
-    /// The PVM aux hook reads ten quadratic-extension component residues as five MASM words.
+    /// The PVM aux hook reads twelve quadratic-extension component residues as six MASM words.
     /// Pin the complete per-chiplet shape so a redistribution cannot preserve only the total.
     #[test]
     fn pvm_aux_hook_matches_every_chiplets_boundary_shape() {
@@ -820,9 +834,10 @@ mod tests {
             .eval_external(&challenges, &[Felt::ZERO; 4], &[], &aux_refs, &[0; NUM_CHIPLETS])
             .expect("fixture denominators are non-zero");
         let expected = match crate::ace_constants::PVM_PROTOCOL_ID {
-            2 => QuadFelt::new([
-                Felt::new_unchecked(17_120_654_257_594_545_925),
-                Felt::new_unchecked(12_713_559_468_620_802_518),
+            // Fixed secp256k1, Ed25519 and P-256 boundary denominators plus one value per chiplet.
+            4 => QuadFelt::new([
+                Felt::new_unchecked(13_307_287_383_580_918_166),
+                Felt::new_unchecked(9_765_647_450_999_344_333),
             ]),
             version => panic!("add an external-assertion vector for protocol version {version}"),
         };
@@ -845,6 +860,8 @@ mod tests {
             ChipletAir::EcPointStoreGroups,
             ChipletAir::EcGroupAdd,
             ChipletAir::EcMsm,
+            ChipletAir::Sha512,
+            ChipletAir::Sha256,
         ];
         assert_eq!(
             ChipletAir::all(),

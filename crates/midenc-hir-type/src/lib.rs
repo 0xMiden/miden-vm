@@ -18,6 +18,8 @@ use alloc::{borrow::Cow, boxed::Box, sync::Arc};
 use core::fmt;
 
 use miden_formatting::prettier::PrettyPrint;
+#[cfg(all(feature = "arbitrary", test))]
+use miden_serde_utils::{Deserializable, Serializable};
 
 pub use self::{
     alignable::Alignable, array_type::ArrayType, enum_type::*, function_type::*, pointer_type::*,
@@ -26,6 +28,10 @@ pub use self::{
 
 /// Represents the type of a value in the HIR type system
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub enum Type {
     /// This indicates a failure to type a value, or a value which is untypable
     Unknown,

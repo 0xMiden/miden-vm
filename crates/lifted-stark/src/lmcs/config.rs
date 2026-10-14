@@ -6,12 +6,12 @@ use core::marker::PhantomData;
 use miden_stark_transcript::VerifierChannel;
 use miden_stateful_hasher::{Alignable, StatefulHasher};
 use p3_field::PackedValue;
-use p3_matrix::{Matrix, bitrev::BitReversibleMatrix};
+use p3_matrix::{Dimensions, Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use p3_symmetric::{Hash, PseudoCompressionFunction};
 
 use crate::{
     lmcs::{
-        Lmcs, LmcsError, OpenedRows,
+        BlockConsumerFactory, Lmcs, LmcsError, OpenedRows,
         lifted_tree::LiftedMerkleTree,
         merkle_witness::MerkleWitness,
         proof::{BatchProof, LeafOpening},
@@ -180,6 +180,26 @@ where
             leaves,
             None,
             <H as Alignable<PF::Value, PD::Value>>::ALIGNMENT,
+        )
+    }
+
+    fn build_aligned_tree_with_blocks<P>(
+        &self,
+        leaves: Vec<RowMajorMatrix<Self::F>>,
+        dimensions: Dimensions,
+        produce: P,
+    ) -> Self::Tree<RowMajorMatrix<Self::F>>
+    where
+        P: FnOnce(Option<BlockConsumerFactory<'_, Self::F>>) -> RowMajorMatrix<Self::F>,
+    {
+        const { assert!(SALT_ELEMS == 0) }
+        LiftedMerkleTree::build_aligned_with_blocks::<PF, PD, H, C, P, WIDTH>(
+            &self.sponge,
+            &self.compress,
+            leaves,
+            dimensions,
+            produce,
+            None,
         )
     }
 

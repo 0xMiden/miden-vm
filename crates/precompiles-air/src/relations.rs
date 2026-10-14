@@ -34,13 +34,19 @@
 //! | 17    | `EcOnCurveCert` | `ec::add::EcGroupAddAir`, `ec::msm::EcMsmAir` | `(group_ptr, r_ptr)` — an on-curve membership certificate for a fresh point `r`: provided by its minting op (a group-law add result, an MSM `neg` value `−P`, or an MSM `intro_endo` value `φ(P)`), consumed by `r`'s point-store row in place of the on-curve MAC trio |
 //! | 18    | `MsmTerm`      | `ec::msm::EcMsmAir`           | `(expr_ptr, idx, base_ptr, scalar_ptr)` — one term `P × s` of MSM expression `expr_ptr` at position `idx` |
 //! | 19    | `MsmExpr`      | `ec::msm::EcMsmAir`           | `(expr_ptr, group_ptr, val_ptr, k)` — MSM expression head: `k` terms summing to the point `val_ptr` (see `chiplets/ec-msm.md`) |
-//! | 20    | `MsmClaimTerm` | `ec::msm::EcMsmAir`           | `(expr_ptr, base_ptr, scalar_ptr)` — a **resolve-seam** term of MSM expression `expr_ptr`, *positionless* (unlike `MsmTerm`): the eval `EcMsm` absorb consumes the claim's terms as a **set**, so the DAG absorb order is the caller's, decoupled from the chiplet's storage `idx` (and thus from the addition-chain strategy). Provided per claim-expr term at the **resolve** use count |
+//! | 20    | `MsmClaimTerm` | `ec::msm::EcMsmAir`           | `(expr_ptr, base_ptr, scalar_ptr)` — a **resolve-seam** term of MSM expression `expr_ptr`, *positionless* (unlike `MsmTerm`): the eval `EcMsm` absorb consumes the claim's terms as a **multiset**, so the DAG absorb order is the caller's, decoupled from the chiplet's storage `idx` (and thus from the addition-chain strategy). Provided once per term of an expression that serves a transcript claim (`COL_IS_CLAIMED`) |
 //! | 21    | `EidosCv`       | native `EidosCompressionAir` | `(compression_cycle_id, cv0, ..., cv7)` — atomic internal bridge from the first fused row to footer 3 |
 //! | 22    | `EidosInit`     | native `EidosCompressionAir` | `(compression_id, cv0, cv1, cv2, cv3)` — initial chaining value at a chain head |
 //! | 24,26 | `EidosRot12Pos*` | `byte_pair_lut::BytePairLutAir` | `(a, b, z)` — normalized positions 1 and 3 of `rotr32(a xor b, 12)` |
 //! | 27,29,30 | `EidosRot7Pos*` | `byte_pair_lut::BytePairLutAir` | `(a, b, z)` — normalized positions 0, 2, and 3 of `rotr32(a xor b, 7)` |
 //! | 23,25,28 | reserved | — | These byte positions use the canonical relation at bus 0 |
 //! | 31    | `EidosWord`     | native `EidosCompressionAir` | `(message_index, message_word, compression_cycle_id)` — scheduled message-word permutation |
+//! | 32    | `Sha512Word`   | SHA-512 IO and compression bands | `(block_id, addr, lo, hi)` — a 64-bit word in a compression block's fixed program |
+//! | 33    | `Sha512RoundMetadata` | SHA-512 compression | `(block_id, t, input_word, w_mult, a_mult, e_mult, k_lo, k_hi)` — fixed round metadata |
+//! | 34    | `Sha512IoContinuation` | SHA-512 IO | `(block_id, len, left, before, input_eidos, input_head)` — invocation state between consecutive IO blocks |
+//! | 35    | `Sha256Word`   | SHA-256 IO and compression bands | `(block_id, addr, value)` — a 32-bit word in a compression block's fixed program |
+//! | 36    | `Sha256RoundMetadata` | SHA-256 compression | `(block_id, t, input_word, w_mult, a_mult, e_mult, k)` — fixed round metadata |
+//! | 37    | `Sha256IoContinuation` | SHA-256 IO | `(block_id, len, left, before, input_eidos, input_head)` — invocation state between consecutive IO blocks |
 //!
 //! ## Adding a new relation
 //!
@@ -92,14 +98,20 @@ pub enum BusId {
     EidosRot7Pos2 = 29,
     EidosRot7Pos3 = 30,
     EidosWord = 31,
+    Sha512Word = 32,
+    Sha512RoundMetadata = 33,
+    Sha512IoContinuation = 34,
+    Sha256Word = 35,
+    Sha256RoundMetadata = 36,
+    Sha256IoContinuation = 37,
 }
 
 /// Number of bus-prefix slots, one greater than the maximum [`BusId`].
 ///
 /// [`Challenges::new`](miden_air::lookup::Challenges::new) precomputes one prefix for each numeric
 /// ID in this range, including the reserved entries.
-pub const NUM_BUS_IDS: usize = 32;
-const _: () = assert!(NUM_BUS_IDS == BusId::EidosWord as usize + 1);
+pub const NUM_BUS_IDS: usize = 38;
+const _: () = assert!(NUM_BUS_IDS == BusId::Sha256IoContinuation as usize + 1);
 
 // The numeric IDs are transcript domain separators. Pin every assigned and reserved slot so a
 // reorder cannot silently change relation encodings while leaving `NUM_BUS_IDS` unchanged.
@@ -135,6 +147,12 @@ const _: () = assert!(BusId::ReservedEidosRot7Pos1 as usize == 28);
 const _: () = assert!(BusId::EidosRot7Pos2 as usize == 29);
 const _: () = assert!(BusId::EidosRot7Pos3 as usize == 30);
 const _: () = assert!(BusId::EidosWord as usize == 31);
+const _: () = assert!(BusId::Sha512Word as usize == 32);
+const _: () = assert!(BusId::Sha512RoundMetadata as usize == 33);
+const _: () = assert!(BusId::Sha512IoContinuation as usize == 34);
+const _: () = assert!(BusId::Sha256Word as usize == 35);
+const _: () = assert!(BusId::Sha256RoundMetadata as usize == 36);
+const _: () = assert!(BusId::Sha256IoContinuation as usize == 37);
 
 /// Maximum payload width (excluding the bus prefix) any message in this
 /// VM emits. Sets the size of the precomputed `β^0..β^{W-1}` table held

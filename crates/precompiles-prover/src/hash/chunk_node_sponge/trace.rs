@@ -1,5 +1,4 @@
-//! Trace generation for the merged chunk + keccak-node + keccak-sponge
-//! chiplet.
+//! Trace generation for the merged chunk and Keccak chiplet.
 
 use alloc::vec::Vec;
 

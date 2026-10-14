@@ -29,7 +29,14 @@ The result is an execution trace of 24 columns: 23 shared selector/data cells pl
 clock. Row overlays provide room for the hash controller and for the 20-column AEAD-stream view of
 the bitwise region without allocating those layouts side by side.
 
-During the finalization of the overall execution trace, the chiplets' traces (including internal selectors) are appended to the trace of the Chiplets module one after another, as pictured. Thus, when one chiplet's trace ends, the trace of the next chiplet starts in the subsequent row.
+![Chiplet regions stacked in shared columns, with lookup links to the separate Eidos compression and byte-lookup traces](../../img/design/chiplets/chiplets.png)
+
+`EidosCompressionAir` and `And8LookupAir` are separate trace tables. Dashed arrows show the hash
+controller's compression link and the compression AIR's byte lookups; other lookup relations are
+omitted. A controller request occupies one row, while a physical compression block occupies 32 rows.
+Requests with identical compression inputs may share a block whose provider multiplicity counts
+the number of those requests. See the [hash chiplet](./hasher.md) for the controller and compression layouts,
+and the [bitwise chiplet](./bitwise.md) for the AEAD stream overlay.
 
 The concatenated chiplet trace is padded independently to the smallest supported power-of-two height that can contain it. Padding rows use the all-ones selector prefix and zero payload columns.
 

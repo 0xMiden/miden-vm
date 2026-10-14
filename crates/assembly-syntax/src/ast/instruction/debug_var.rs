@@ -149,6 +149,10 @@ pub enum DebugFrameBase {
 /// as Wasm local/global indices, before constructing this expression.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct DebugLocationExpression {
     operations: Vec<DebugLocationExpressionOp>,
 }
@@ -269,6 +273,10 @@ impl<'de> Deserialize<'de> for DebugLocationExpression {
 /// unavailable rather than wrapping.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub enum DebugLocationExpressionOp {
     /// Push the value at this Miden operand-stack position (0 is the top).
     ReadStack(u8),
@@ -304,6 +312,10 @@ pub enum DebugLocationExpressionOp {
 /// during program execution, ranging from simple stack positions to complex
 /// expressions.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub enum DebugVarLocation {
     /// Variable is at stack position N (0 = top of stack)
     Stack(u8),
@@ -555,6 +567,103 @@ fn read_debug_frame_base<R: ByteReader>(
         tag => Err(DeserializationError::InvalidValue(format!(
             "invalid resolved debug frame-base tag: {tag}"
         ))),
+    }
+}
+
+// ARBITRARY (proptest)
+// ===============================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::{
+        DebugFrameBase, DebugLocationExpression, DebugLocationExpressionOp, DebugVarLocation,
+    };
+    use crate::Felt;
+
+    impl Arbitrary for DebugFrameBase {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            prop_oneof![
+                any::<i16>().prop_map(Self::Local).boxed(),
+                any::<u32>().prop_map(Self::Memory).boxed(),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for DebugLocationExpressionOp {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Every operation is any-valid on the wire; prop_oneof exercises all ten tags.
+            prop_oneof![
+                any::<u8>().prop_map(Self::ReadStack).boxed(),
+                any::<u32>().prop_map(Self::ReadMemory).boxed(),
+                any::<i16>().prop_map(Self::ReadLocal).boxed(),
+                any::<u64>().prop_map(Self::ConstU64).boxed(),
+                any::<i64>().prop_map(Self::ConstI64).boxed(),
+                any::<u64>().prop_map(Self::AddUnsigned).boxed(),
+                Just(Self::Add),
+                Just(Self::Sub),
+                Just(Self::DerefBytes),
+                (any::<DebugFrameBase>(), any::<i64>())
+                    .prop_map(|(base, byte_offset)| Self::FrameBaseAddress { base, byte_offset })
+                    .boxed(),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for DebugLocationExpression {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader validates the op count against MAX_DEBUG_LOCATION_EXPRESSION_OPS (256).
+            // Small lengths keep shrinking cheap; the boundary branch hits the vint64 128
+            // transition and the accepted maximum (255/256) deliberately - a 256-op expression
+            // is only a few KB, so boundary coverage is nearly free.
+            let length = prop_oneof![
+                (0usize..=8).boxed(),
+                Just(127usize),
+                Just(128usize),
+                Just(255usize),
+                Just(256usize),
+            ];
+            length
+                .prop_flat_map(|len| {
+                    proptest::collection::vec(any::<DebugLocationExpressionOp>(), len)
+                })
+                .prop_map(|operations| Self { operations })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for DebugVarLocation {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Const is built from a real Felt: the wire carries its canonical u64, so arbitrary
+            // u64s >= the field order would be invalid input (the reader uses new_unchecked).
+            prop_oneof![
+                any::<u8>().prop_map(Self::Stack).boxed(),
+                any::<u32>().prop_map(Self::Memory).boxed(),
+                any::<Felt>().prop_map(Self::Const).boxed(),
+                any::<i16>().prop_map(Self::Local).boxed(),
+                Just(Self::Unavailable),
+                (any::<DebugFrameBase>(), any::<i64>())
+                    .prop_map(|(base, byte_offset)| Self::ResolvedFrameBase { base, byte_offset })
+                    .boxed(),
+                any::<DebugLocationExpression>().prop_map(Self::Expression).boxed(),
+            ]
+            .boxed()
+        }
     }
 }
 

@@ -206,8 +206,10 @@ fn core_library_load_registers_required_handlers() {
         handlers::{
             aead_eidos::AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
             ecdsa_k256_keccak::ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,
+            ecdsa_p256_sha256::ECDSA_P256_SHA256_RECOVER_EVENT_NAME,
             precompiles::{
-                keccak256::KECCAK256_DIGEST_EVENT_NAME, uint_field_inv::UINT_FIELD_INV_EVENT_NAME,
+                keccak256::KECCAK256_DIGEST_EVENT_NAME, sha256::SHA256_DIGEST_EVENT_NAME,
+                uint_field_inv::UINT_FIELD_INV_EVENT_NAME,
             },
         },
     };
@@ -222,6 +224,8 @@ fn core_library_load_registers_required_handlers() {
         KECCAK256_DIGEST_EVENT_NAME,
         UINT_FIELD_INV_EVENT_NAME,
         ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,
+        SHA256_DIGEST_EVENT_NAME,
+        ECDSA_P256_SHA256_RECOVER_EVENT_NAME,
     ] {
         assert_eq!(host.resolve_event(event.to_event_id()), Some(&event));
     }

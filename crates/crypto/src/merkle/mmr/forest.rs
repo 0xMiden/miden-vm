@@ -33,6 +33,10 @@ use crate::{
 /// Forest sizes are capped at [`Forest::MAX_LEAVES`]. Use [`Forest::new`] or
 /// [`Forest::append_leaf`] to enforce the limit.
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct Forest(usize);
 
 impl Forest {
@@ -574,6 +578,30 @@ pub(crate) fn high_bitmask(bit: u32) -> usize {
 
 // SERIALIZATION
 // ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod forest_arbitrary {
+    use proptest::prelude::*;
+
+    use super::Forest;
+
+    impl Arbitrary for Forest {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader rejects sizes above MAX_LEAVES; bound by construction with the 0 and
+            // MAX_LEAVES edges represented.
+            prop_oneof![
+                Just(0usize),
+                Just(Forest::MAX_LEAVES),
+                any::<usize>().prop_map(|v| v % (Forest::MAX_LEAVES + 1))
+            ]
+            .prop_map(|num_leaves| Forest::new(num_leaves).expect("size is within the cap"))
+            .boxed()
+        }
+    }
+}
 
 impl Serializable for Forest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {

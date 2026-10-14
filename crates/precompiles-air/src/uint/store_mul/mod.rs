@@ -29,6 +29,7 @@ use miden_core::{
 };
 use miden_crypto::stark::air::ExtensionBuilder;
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_utils_sync::LazyLock;
 
 use crate::{
     logup::{
@@ -124,6 +125,24 @@ pub(crate) const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = column_shape();
 #[derive(Debug, Default, Clone, Copy)]
 pub struct UintStoreMulAir;
 
+static PERIODIC_COLUMNS: LazyLock<Vec<Vec<Felt>>> = LazyLock::new(|| {
+    let mut cols = Vec::with_capacity(NUM_PERIODIC);
+    for row in 0..MUL_PERIOD {
+        let mut c = vec![Felt::ZERO; MUL_PERIOD];
+        c[row] = Felt::ONE;
+        cols.push(c);
+    }
+    cols.push(S_KEEP.iter().map(|&g| Felt::from(g as u32)).collect());
+    for role in 0..STORE_PERIOD {
+        let mut c = vec![Felt::ZERO; MUL_PERIOD];
+        for tile in 0..STORE_TILE_COUNT {
+            c[role + tile * STORE_PERIOD] = Felt::ONE;
+        }
+        cols.push(c);
+    }
+    cols
+});
+
 impl BaseAir<Felt> for UintStoreMulAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
@@ -134,25 +153,15 @@ impl BaseAir<Felt> for UintStoreMulAir {
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        let mut cols = Vec::with_capacity(NUM_PERIODIC);
-        for row in 0..MUL_PERIOD {
-            let mut c = vec![Felt::ZERO; MUL_PERIOD];
-            c[row] = Felt::ONE;
-            cols.push(c);
-        }
-        cols.push(S_KEEP.iter().map(|&g| Felt::from(g as u32)).collect());
-        for role in 0..STORE_PERIOD {
-            let mut c = vec![Felt::ZERO; MUL_PERIOD];
-            for tile in 0..STORE_TILE_COUNT {
-                c[role + tile * STORE_PERIOD] = Felt::ONE;
-            }
-            cols.push(c);
-        }
-        Cow::Owned(cols)
+        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
     }
 }
 
 impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
+    fn max_periodic_length(&self) -> usize {
+        PERIOD
+    }
+
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }

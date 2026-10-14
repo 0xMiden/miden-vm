@@ -5,10 +5,11 @@ use miden_assembly_syntax::{ast::GlobalItemIndex, module::ItemInfo};
 pub use self::module::ModuleRewriter;
 use super::*;
 
-/// Rewrite `symbol` such that all unresolved references to other symbols have been resolved.
+/// Validate references in `symbol` and fold constant expressions before marking it linked.
 ///
 /// This function will use `resolver` to resolve references to other symbols, using `cache` to cache
-/// resolutions.
+/// resolutions. Invocation targets retain their access paths rather than being replaced with
+/// definition paths, preserving visibility granted through re-export aliases.
 pub fn rewrite_symbol(
     gid: GlobalItemIndex,
     symbol: &Symbol,

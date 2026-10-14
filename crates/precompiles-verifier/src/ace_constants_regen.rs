@@ -464,6 +464,14 @@ fn render_pvm_layout(
         allocation_end,
     } = pvm_scratch_allocation(layout, stream_len)?;
     let proof_order_padding = PROOF_ORDER_POSITIONS_FELTS - NUM_CHIPLETS as u32;
+    let proof_order_liveness = if proof_order_padding == 0 {
+        format!("All {NUM_CHIPLETS} cells are live.")
+    } else {
+        format!(
+            "The first {NUM_CHIPLETS} cells are live and the final {proof_order_padding} pad the\n\
+             ### following table to a word boundary."
+        )
+    };
     let pair_end = scatter_table
         .proof_order_pairs
         .end
@@ -552,8 +560,8 @@ fn render_pvm_layout(
     writeln!(
         out,
         "### {PROOF_ORDER_POSITIONS_FELTS} felts: {proof_order_positions_ptr}..{proof_order_ids_ptr}. `pos_by_id`: the position of each\n\
-         ### chiplet, in ChipletAir::all() order, within the height-sorted proof order. The first\n\
-         ### {NUM_CHIPLETS} cells are live and the final {proof_order_padding} pad the following table to a word boundary.\n\
+         ### chiplet, in ChipletAir::all() order, within the height-sorted proof order.\n\
+         ### {proof_order_liveness}\n\
          ### Staged once per proof by `sys/pvm/ood_frames.masm::stage_proof_order_maps`; read by both\n\
          ### ingest scatters.\nconst PROOF_ORDER_POSITIONS_PTR = {proof_order_positions_ptr}\n"
     )

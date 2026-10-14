@@ -25,6 +25,7 @@ std = [
     "miden-core/std",
     "miden-crypto/std",
     "miden-precompiles/std",
+    "miden-utils-sync/std",
     "ruint/std",
 ]
 testing = ["miden-air/testing"]
@@ -36,6 +37,7 @@ miden-crypto.workspace = true
 miden-lifted-air.workspace = true
 miden-lifted-stark.workspace = true
 miden-precompiles.workspace = true
+miden-utils-sync.workspace = true
 p3-security.workspace = true
 ruint.workspace = true
 

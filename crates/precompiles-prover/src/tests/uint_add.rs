@@ -11,13 +11,14 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_lifted_air::LiftedAir;
+use proptest::prelude::*;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
-    math::{U256, add_reduce, sub_reduce},
+    math::{U256, add_reduce, from_limbs16, sub_reduce},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    tests::uint::{random_modulus, random_uint_below},
+    tests::uint::{arb_modulus, arb_qf, arb_uint_below, random_modulus, random_uint_below},
     uint::{
         UintStoreAir,
         add::{
@@ -596,4 +597,270 @@ fn log_quotient_degree_matches_design_target() {
     // ungated ternary carry checks (deg 3), and the flattened LogUp
     // closings (≤ 2 fractions per column) — stays at degree ≤ 3 → lqd 1.
     assert_eq!(crate::tests::log_quotient_degree(&UintAddAir), 1);
+}
+
+fn reduction_arrangement(bound: U256) -> (UintAddRequires, UintStoreRequires, u32) {
+    let c = add_reduce(bound, bound, bound);
+    let mut store = UintStoreRequires::new();
+    let fp = store.pin_modulus(1, bound);
+    let c_ptr = store.intern(c, fp);
+    let mut add = UintAddRequires::new();
+    add.record(fp, fp, c_ptr, fp, 0);
+    (add, store, 1)
+}
+
+fn arrangement(bound: U256, a: U256, b: U256) -> (UintAddRequires, UintStoreRequires, u32) {
+    let c = add_reduce(a, b, bound);
+    let k = u32::from(a + b > bound); // bound < 2²⁵⁵, so the sum can't wrap
+
+    let mut store = UintStoreRequires::new();
+    let fp = store.pin_modulus(1, bound);
+    let a_ptr = store.intern_pinned(2, a, fp);
+    // Pinned slots reject the same value in two columns, so coinciding
+    // operands share one ptr (the trace reads the same storage for both
+    // halves — semantically a + a ≡ c).
+    let b_ptr = if b == a { a_ptr } else { store.intern_pinned(3, b, fp) };
+    let c_ptr = store.intern(c, fp);
+    let mut add = UintAddRequires::new();
+    add.record(a_ptr, b_ptr, c_ptr, fp, 0);
+    (add, store, k)
+}
+
+fn fixed_bound() -> U256 {
+    let mut m = [0x1234u16; 16];
+    m[15] = 0x4242;
+    from_limbs16(&m)
+}
+
+// PROPERTY TESTS
+// ================================================================================================
+// The oracle relations above, generalized over generated operands with
+// shrinking. The deterministic tests keep the named boundary roles
+// (forced carry, tamper mechanics); these cover the random space. Case
+// counts are capped per the test-time budget: the balance properties run
+// three trace passes per case, the constraint properties one.
+
+fn arb_arrangement() -> impl Strategy<Value = (U256, U256, U256)> {
+    arb_modulus()
+        .prop_flat_map(|bound| {
+            let below = arb_uint_below(bound);
+            (Just(bound), below, arb_uint_below(bound))
+        })
+        // Pinned slots reject the same value in two columns; keep the
+        // operands distinct so shrinking (which drives both toward zero)
+        // cannot produce a colliding pair.
+        .prop_filter("operands must differ", |(_, a, b)| a != b)
+}
+
+#[test]
+fn sub_to_bound_edge_holds() {
+    // x = 0, y = 1 gives z = sub_reduce(0, 1) = bound (the stored modulus
+    // value itself): the derived operands must alias the existing ptrs
+    // (y pinned, z and x canonically interning to the modulus / zero
+    // slots) rather than colliding, and the arrangement
+    // 1 + bound ≡ 0 (k = 1) must satisfy the constraints.
+    let bound = fixed_bound();
+    let x = U256::ZERO;
+    let y = U256::from(1u32);
+    let z = sub_reduce(x, y, bound);
+    assert_eq!(z, bound, "0 − 1 ≡ bound (mod p)");
+
+    let mut store = UintStoreRequires::new();
+    let fp = store.pin_modulus(1, bound);
+    let y_ptr = store.intern_pinned(2, y, fp);
+    let z_ptr = store.intern(z, fp);
+    let x_ptr = store.intern(x, fp);
+    let mut add = UintAddRequires::new();
+    add.record(y_ptr, z_ptr, x_ptr, fp, 0);
+    let main = generate_trace(add, &mut store);
+    crate::tests::check_local(UintAddAir, &main);
+}
+
+#[test]
+fn negation_of_one_edge_holds() {
+    // a = 1 gives a_neg = p − 1 = bound: the derived inverse aliases the
+    // modulus ptr, and 1 + bound ≡ 0 (k = 1) must hold on the bus.
+    let bound = fixed_bound();
+    let a = U256::from(1u32);
+    let a_neg = sub_reduce(U256::ZERO, a, bound);
+    assert_eq!(a_neg, bound);
+
+    let mut store = UintStoreRequires::new();
+    let fp = store.pin_modulus(1, bound);
+    let a_ptr = store.intern_pinned(2, a, fp);
+    let neg_ptr = store.intern(a_neg, fp);
+    let mut add = UintAddRequires::new();
+    add.record_to_zero(a_ptr, neg_ptr, fp, 0);
+    let main = generate_trace(add, &mut store);
+    crate::tests::check_local(UintAddAir, &main);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(48))]
+
+    #[test]
+    fn add_constraints_hold_proptest((bound, a, b) in arb_arrangement()) {
+        let (add, mut store, _k) = arrangement(bound, a, b);
+        let main = generate_trace(add, &mut store);
+        crate::tests::check_local(UintAddAir, &main);
+    }
+
+    #[test]
+    fn add_with_reduction_proptest(bound in arb_modulus()) {
+        let (add, mut store, k) = reduction_arrangement(bound);
+        assert_eq!(k, 1, "forced reduction must set k = 1");
+        let main = generate_trace(add, &mut store);
+        crate::tests::check_local(UintAddAir, &main);
+    }
+
+    #[test]
+    fn sub_as_arrangement_proptest((bound, x, y) in arb_arrangement()) {
+        let z = sub_reduce(x, y, bound);
+        prop_assert_eq!(add_reduce(y, z, bound), x, "y + z ≡ x must hold");
+
+        // z and x are DERIVED values: they can equal the pinned modulus
+        // (x = 0, y = 1 gives z = bound) or each other, so they intern
+        // canonically — reusing an existing ptr instead of panicking.
+        let mut store = UintStoreRequires::new();
+        let fp = store.pin_modulus(1, bound);
+        let y_ptr = store.intern_pinned(2, y, fp);
+        let z_ptr = store.intern(z, fp);
+        let x_ptr = store.intern(x, fp);
+        let mut add = UintAddRequires::new();
+        add.record(y_ptr, z_ptr, x_ptr, fp, 0);
+        let main = generate_trace(add, &mut store);
+        crate::tests::check_local(UintAddAir, &main);
+    }
+
+    #[test]
+    fn negation_holds_proptest((bound, a) in arb_modulus()
+        .prop_flat_map(|bound| {
+            let a = arb_uint_below(bound);
+            (Just(bound), a)
+        })
+        .prop_filter("a must be nonzero", |(_, a)| *a != U256::ZERO))
+    {
+        let a_neg = sub_reduce(U256::ZERO, a, bound);
+        // a_neg is a DERIVED value: a = 1 gives a_neg = bound (already
+        // pinned as the modulus), so it interns canonically.
+        let mut store = UintStoreRequires::new();
+        let fp = store.pin_modulus(1, bound);
+        let a_ptr = store.intern_pinned(2, a, fp);
+        let neg_ptr = store.intern(a_neg, fp);
+        let mut add = UintAddRequires::new();
+        add.record_to_zero(a_ptr, neg_ptr, fp, 0);
+        let main = generate_trace(add, &mut store);
+        crate::tests::check_local(UintAddAir, &main);
+    }
+
+    #[test]
+    fn equality_certificate_holds_proptest((bound, a) in arb_modulus()
+        .prop_flat_map(|bound| {
+            let a = arb_uint_below(bound);
+            (Just(bound), a)
+        }))
+    {
+        let mut store = UintStoreRequires::new();
+        let fp = store.pin_modulus(1, bound);
+        let a_ptr = store.intern_pinned(2, a, fp);
+        let c_ptr = store.intern(a, fp);
+        prop_assert_eq!(a_ptr, c_ptr, "equal values intern onto one ptr");
+
+        let mut add = UintAddRequires::new();
+        add.record_eq(a_ptr, c_ptr, fp, 0);
+        let main = generate_trace(add, &mut store);
+        prop_assert_eq!(main.values[ROW_AB * NUM_MAIN_COLS + CELL_IS_B_ZERO], Felt::ONE);
+        prop_assert_eq!(main.values[ROW_AB * NUM_MAIN_COLS + CELL_HI], Felt::ZERO);
+        crate::tests::check_local(UintAddAir, &main);
+    }
+
+    #[test]
+    fn nz_cert_holds_proptest(
+        (bound, a, b) in arb_arrangement().prop_filter(
+            "b must be nonzero",
+            |(_, _, b)| *b != U256::ZERO,
+        )
+    ) {
+        let mut store = UintStoreRequires::new();
+        let fp = store.pin_modulus(1, bound);
+        let a_ptr = store.intern_pinned(2, a, fp);
+        let b_ptr = store.intern_pinned(3, b, fp);
+        let c_ptr = store.intern(add_reduce(a, b, bound), fp);
+        let mut add = UintAddRequires::new();
+        add.record_nz(a_ptr, b_ptr, c_ptr, fp, 0);
+        let main = generate_trace(add, &mut store);
+
+        prop_assert_eq!(main.values[ROW_AB * NUM_MAIN_COLS + COL_NZ], Felt::ONE);
+        let w = main.values[ROW_AB * NUM_MAIN_COLS + CELL_D_W];
+        let ws = main.values[ROW_AB * NUM_MAIN_COLS + CELL_D_WS];
+        prop_assert_ne!(w, Felt::ZERO, "w must be a genuine inverse candidate");
+        prop_assert_eq!(ws, Felt::ONE, "wS must pin to 1 when the cert holds");
+        crate::tests::check_local(UintAddAir, &main);
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(16))]
+
+    #[test]
+    fn add_buses_balance_proptest(
+        (bound, a, b) in arb_arrangement(),
+        (alpha, beta) in (arb_qf(), arb_qf()),
+    ) {
+        let (add, mut store, _k) = arrangement(bound, a, b);
+        let add_main = generate_trace(add, &mut store);
+        let mut bpl = BytePairLutRequires::new();
+        let store_main = store_trace(store, &mut bpl);
+        let bpl_main = bpl_trace(bpl);
+
+        let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+        let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
+        fold_balance(&UintAddAir, &add_main, &challenges, &mut net);
+        fold_balance(&UintStoreAir, &store_main, &challenges, &mut net);
+        fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
+        let residual = net.values().filter(|m| **m != Felt::ZERO).count();
+        prop_assert_eq!(residual, 0, "the buses must balance for generated operands");
+    }
+
+    #[test]
+    fn add_pad_blocks_balance_proptest(
+        (bound, ops) in arb_modulus().prop_flat_map(|bound| {
+            let below = arb_uint_below(bound);
+            (
+                Just(bound),
+                proptest::collection::vec(below, 3),
+            )
+            .prop_filter("pinned operands must differ", |(_, ops)| {
+                ops[0] != ops[1] && ops[1] != ops[2] && ops[0] != ops[2]
+            })
+        }),
+        (alpha, beta) in (arb_qf(), arb_qf()),
+    ) {
+        let mut store = UintStoreRequires::new();
+        let fp = store.pin_modulus(1, bound);
+        let mut add = UintAddRequires::new();
+        let ptrs: Vec<_> = ops
+            .iter()
+            .enumerate()
+            .map(|(i, x)| store.intern_pinned(2 + i as u32, *x, fp))
+            .collect();
+        for (l, r) in [(0usize, 1usize), (1, 2), (0, 0)] {
+            let c_ptr = store.intern(add_reduce(ops[l], ops[r], bound), fp);
+            add.record(ptrs[l], ptrs[r], c_ptr, fp, 0);
+        }
+        let add_main = generate_trace(add, &mut store);
+        prop_assert_eq!(add_main.height(), 8, "3 ops pad to 4 blocks");
+        let mut bpl = BytePairLutRequires::new();
+        let store_main = store_trace(store, &mut bpl);
+        let bpl_main = bpl_trace(bpl);
+        crate::tests::check_local(UintAddAir, &add_main);
+
+        let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+        let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
+        fold_balance(&UintAddAir, &add_main, &challenges, &mut net);
+        fold_balance(&UintStoreAir, &store_main, &challenges, &mut net);
+        fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
+        let residual = net.values().filter(|m| **m != Felt::ZERO).count();
+        prop_assert_eq!(residual, 0, "the act = 0 pad block contributes nothing");
+    }
 }

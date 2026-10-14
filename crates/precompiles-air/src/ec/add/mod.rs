@@ -101,6 +101,7 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_utils_sync::LazyLock;
 
 use crate::{
     ec::{EcGroupMsg, EcPointMsg},
@@ -279,6 +280,14 @@ const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 1];
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EcGroupAddAir;
 
+static PERIODIC_COLUMNS: LazyLock<[Vec<Felt>; NUM_PERIODIC]> = LazyLock::new(|| {
+    array::from_fn(|i| {
+        let mut col = vec![Felt::ZERO; PERIOD];
+        col[ROLE_ROWS[i]] = Felt::ONE;
+        col
+    })
+});
+
 impl BaseAir<Felt> for EcGroupAddAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
@@ -289,20 +298,15 @@ impl BaseAir<Felt> for EcGroupAddAir {
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Owned(
-            ROLE_ROWS
-                .iter()
-                .map(|&row| {
-                    let mut col = vec![Felt::ZERO; PERIOD];
-                    col[row] = Felt::ONE;
-                    col
-                })
-                .collect(),
-        )
+        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
     }
 }
 
 impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
+    fn max_periodic_length(&self) -> usize {
+        PERIOD
+    }
+
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }

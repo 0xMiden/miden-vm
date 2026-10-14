@@ -325,6 +325,8 @@ pub enum MastForestReadView<'a> {
 /// structural sections needed for random access, but it does not fully materialize the forest.
 /// Hashless payloads are rejected because trusted cache bytes must be complete. Trailing payloads
 /// are rejected because debug metadata now belongs to package-owned debug sections.
+/// Internal digest limbs are decoded on access, so an in-range node may still produce a decoding
+/// error. External digests are decoded during construction to validate their ordering.
 ///
 /// Use this when callers need random access to roots or node metadata without deserializing the
 /// full forest. For strict trusted deserialization, use
@@ -366,7 +368,8 @@ impl<'a> MastForestWireView<'a> {
     /// delegated to the same single-pass scanner used by reader-based deserialization paths.
     ///
     /// This constructor validates the header and sections needed for node/roots/random-access
-    /// metadata, indexes `AdviceMap` keys for on-demand lookup, and rejects trailing payloads.
+    /// metadata, checks dense node ordering and backward child references, indexes `AdviceMap` keys
+    /// for on-demand lookup, and rejects trailing payloads.
     ///
     /// Treat this as a trusted cache API, not as an untrusted-validation entry point. It is
     /// appropriate for local tools that need random access over serialized structure, but callers
@@ -375,7 +378,6 @@ impl<'a> MastForestWireView<'a> {
     /// In particular, this constructor does **not** protect callers from untrusted-input concerns
     /// that are enforced by [`crate::mast::UntrustedMastForest::validate`]. It does not:
     /// - verify that serialized non-external digests match the structure they describe
-    /// - check topological ordering / forward-reference constraints
     /// - validate basic-block batch invariants
     /// - materialize or expose package-owned debug sections
     ///
@@ -383,8 +385,11 @@ impl<'a> MastForestWireView<'a> {
     /// [`crate::mast::MastForest::read_from_bytes`].
     ///
     /// Digest lookup follows the wire layout:
-    /// - Non-external node digests are read from the internal-hash section.
-    /// - External node digests are read from the external-digest section.
+    /// - Non-external node digests are read from the internal-hash section on demand. Invalid field
+    ///   limbs produce an error from `node_digest_at` and `node_info_at`, even for in-range
+    ///   indices.
+    /// - External node digests are read from the external-digest section and decoded during
+    ///   construction to check their ordering.
     ///
     /// # Examples
     ///
@@ -441,7 +446,7 @@ impl<'a> MastForestWireView<'a> {
 
     /// Returns the `MastNodeInfo` at the specified index.
     ///
-    /// Returns an error if `index >= self.node_count()`.
+    /// Returns an error if `index >= self.node_count()` or the node's digest cannot be decoded.
     ///
     /// # Examples
     ///
@@ -479,7 +484,8 @@ impl<'a> MastForestWireView<'a> {
 
     /// Returns the digest for the node at the specified index.
     ///
-    /// Returns an error if `index >= self.node_count()`.
+    /// Returns an error if `index >= self.node_count()` or the digest cannot be decoded.
+    /// Non-external digest limbs are validated on access.
     pub fn node_digest_at(&self, index: usize) -> Result<Word, DeserializationError> {
         self.resolved()?.node_digest_at(index)
     }

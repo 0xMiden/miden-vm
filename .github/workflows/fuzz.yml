@@ -51,7 +51,7 @@ jobs:
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install Rust toolchain
-        run: rustup update --no-self-update nightly
+        run: rustup update --no-self-update stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
@@ -73,8 +73,9 @@ jobs:
       - name: Run fuzz target (smoke test)
         env:
           TARGET: ${{ matrix.target }}
+          RUSTC_BOOTSTRAP: "1"
         run: |
-          FUZZ_TARGET="$(cargo +nightly fuzz build --help | awk '
+          FUZZ_TARGET="$(cargo +stable fuzz build --help | awk '
             $0 ~ /^      --target <TRIPLE>/ { in_target = 1; next }
             in_target && /\[default:/ {
               sub(/^.*\[default: /, "")
@@ -85,7 +86,7 @@ jobs:
           ')"
           test -n "$FUZZ_TARGET"
           # Build the fuzz target first
-          cargo +nightly fuzz build --target "$FUZZ_TARGET" --fuzz-dir tools/miden-core-fuzz "$TARGET"
+          cargo +stable fuzz build --target "$FUZZ_TARGET" --fuzz-dir tools/miden-core-fuzz "$TARGET"
           # Run directly to avoid cargo-fuzz wrapper SIGPIPE issue
           FUZZ_BIN="tools/miden-core-fuzz/target/$FUZZ_TARGET/release/$TARGET"
           test -x "$FUZZ_BIN"
@@ -121,15 +122,16 @@ jobs:
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install Rust toolchain
-        run: rustup update --no-self-update nightly
+        run: rustup update --no-self-update stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: Run fuzz target (smoke test)
         env:
           TARGET: ${{ matrix.target }}
+          RUSTC_BOOTSTRAP: "1"
         run: |
-          FUZZ_TARGET="$(cargo +nightly fuzz build --help | awk '
+          FUZZ_TARGET="$(cargo +stable fuzz build --help | awk '
             $0 ~ /^      --target <TRIPLE>/ { in_target = 1; next }
             in_target && /\[default:/ {
               sub(/^.*\[default: /, "")
@@ -139,7 +141,7 @@ jobs:
             }
           ')"
           test -n "$FUZZ_TARGET"
-          cargo +nightly fuzz build --target "$FUZZ_TARGET" --fuzz-dir tools/miden-crypto-fuzz "$TARGET"
+          cargo +stable fuzz build --target "$FUZZ_TARGET" --fuzz-dir tools/miden-crypto-fuzz "$TARGET"
           FUZZ_BIN="tools/miden-crypto-fuzz/target/$FUZZ_TARGET/release/$TARGET"
           test -x "$FUZZ_BIN"
           "$FUZZ_BIN" -max_total_time=60 -runs=10000
@@ -165,15 +167,16 @@ jobs:
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install Rust toolchain
-        run: rustup update --no-self-update nightly
+        run: rustup update --no-self-update stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: Run fuzz target (smoke test)
         env:
           TARGET: ${{ matrix.target }}
+          RUSTC_BOOTSTRAP: "1"
         run: |
-          FUZZ_TARGET="$(cargo +nightly fuzz build --help | awk '
+          FUZZ_TARGET="$(cargo +stable fuzz build --help | awk '
             $0 ~ /^      --target <TRIPLE>/ { in_target = 1; next }
             in_target && /\[default:/ {
               sub(/^.*\[default: /, "")
@@ -183,7 +186,7 @@ jobs:
             }
           ')"
           test -n "$FUZZ_TARGET"
-          cargo +nightly fuzz build --target "$FUZZ_TARGET" --fuzz-dir tools/miden-serde-utils-fuzz "$TARGET"
+          cargo +stable fuzz build --target "$FUZZ_TARGET" --fuzz-dir tools/miden-serde-utils-fuzz "$TARGET"
           FUZZ_BIN="tools/miden-serde-utils-fuzz/target/$FUZZ_TARGET/release/$TARGET"
           test -x "$FUZZ_BIN"
           "$FUZZ_BIN" -max_total_time=60 -runs=10000

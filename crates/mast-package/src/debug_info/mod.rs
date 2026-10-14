@@ -24,22 +24,42 @@ pub use types::*;
 type FxHashMap<K, V> = hashbrown::HashMap<K, V, rustc_hash::FxBuildHasher>;
 type FxHashSet<K> = hashbrown::HashSet<K, rustc_hash::FxBuildHasher>;
 
-pub const DEBUG_INFO_VERSION: u8 = 3;
+pub const DEBUG_INFO_VERSION: u8 = 4;
 
 /// Maximum encoded payload size accepted for package-owned debug information.
 ///
 /// Decoding temporarily retains the encoded section, an aligned copy, and decoded table storage,
-/// so this cap bounds peak memory before any package-level validation can run.
-pub const MAX_DEBUG_INFO_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
+/// so this cap bounds peak memory before any package-level validation can run. Assembly currently
+/// imports complete shared dependency tables even for dynamic `exec`, so the allowance accommodates
+/// several large libraries until selective debug-table imports are available.
+pub const MAX_DEBUG_INFO_PAYLOAD_SIZE: usize = 256 * 1024 * 1024;
 
 /// Maximum number of rows accepted in the variable-width debug string table.
-pub const MAX_DEBUG_INFO_STRING_ROWS: usize = 100_000;
+///
+/// Dependency imports currently merge complete shared tables, including for dynamic `exec`.
+/// Allow their distinct strings to accumulate while retaining the encoded payload size cap.
+pub const MAX_DEBUG_INFO_STRING_ROWS: usize = 1_000_000;
 
 /// Maximum encoded byte length accepted for one debug string.
 pub const MAX_DEBUG_INFO_STRING_SIZE: usize = 4 * 1024;
 
 /// Maximum number of rows accepted in the variable-width debug type table.
 pub const MAX_DEBUG_INFO_TYPE_ROWS: usize = 1_000_000;
+
+/// Errors returned when encoding debug information for the bounded package reader.
+#[derive(Debug, thiserror::Error)]
+pub enum DebugInfoEncodingError {
+    /// A debug-information resource exceeds the reader's limit.
+    #[error("{resource} {size} exceeds limit {limit}")]
+    LimitExceeded {
+        resource: &'static str,
+        size: usize,
+        limit: usize,
+    },
+    /// The serialized debug-information envelope could not be read.
+    #[error("invalid encoded debug-information envelope: {0}")]
+    InvalidEnvelope(#[from] miden_core::serde::DeserializationError),
+}
 
 // PACKAGE DEBUG INFO
 // ================================================================================================
@@ -51,6 +71,11 @@ pub const MAX_DEBUG_INFO_TYPE_ROWS: usize = 1_000_000;
 /// limits for potentially adversarial input. Tools that deliberately accept the resource cost of
 /// larger debug information can use [`PackageDebugInfo::read_from_unmetered`] or
 /// [`PackageDebugInfo::read_from_bytes_unmetered`].
+///
+/// Strings are stored and serialized verbatim, including control characters, and consumers decide
+/// their validity for each use case (see [PR #3460]).
+///
+/// [PR #3460]: https://github.com/0xMiden/miden-vm/pull/3460#discussion_r3759590646
 #[cfg_attr(
     all(feature = "arbitrary", test),
     miden_test_serialization_macros::serialization_test
@@ -519,7 +544,7 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
         op_idx: u32,
     ) -> impl Iterator<Item = &DebugSourceInlineCall> {
         self.inline_calls_for_source_node(source_node)
-            .filter(move |row| row.op_idx == op_idx)
+            .filter(move |row| row.contains_operation(op_idx))
     }
 }
 
@@ -933,6 +958,7 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
                     )?;
                     target_node.inline_calls.push(DebugSourceInlineCall {
                         op_idx: row.op_idx,
+                        op_end: row.op_end,
                         callee_idx,
                         loc_idx,
                     });
@@ -1121,5 +1147,31 @@ fn table_remap_error<Exec: Idx, Src: Idx>(
         DebugInfoTableRemapError::MissingSourceFile { file_idx } => {
             DebugInfoMergeError::MissingSourceFileMapping { forest_index, file_idx }
         },
+    }
+}
+
+#[cfg(test)]
+mod control_char_tests {
+    /// Control characters are preserved by the package format. Consumers decide whether a
+    /// decoded string is appropriate for their use case.
+    #[test]
+    fn control_chars_round_trip_through_debug_info() {
+        use miden_core::serde::{Deserializable, Serializable, SliceReader};
+
+        use crate::debug_info::{PackageDebugInfo, PackageDebugInfoBuilder};
+
+        let mut builder = PackageDebugInfoBuilder::default();
+        let idx = builder.add_string("has\u{0001}control");
+        let debug_info: PackageDebugInfo = *builder.build();
+        let bytes = debug_info.to_bytes();
+        let mut reader = SliceReader::new(&bytes);
+        let decoded = PackageDebugInfo::read_from(&mut reader).expect("decode should succeed");
+        // Check the exact string at its captured index and the whole decoded value.
+        assert_eq!(
+            decoded.get_string(idx).as_deref(),
+            Some("has\u{0001}control"),
+            "the exact control-char string must round-trip at its index"
+        );
+        assert_eq!(decoded, debug_info, "the whole value must round-trip");
     }
 }

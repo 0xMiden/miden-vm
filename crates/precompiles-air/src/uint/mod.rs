@@ -71,6 +71,7 @@ use miden_core::{
 };
 use miden_crypto::stark::air::ExtensionBuilder;
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_utils_sync::LazyLock;
 
 use crate::{
     logup::{
@@ -237,6 +238,15 @@ pub(crate) const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct UintStoreAir;
 
+static PERIODIC_COLUMNS: LazyLock<[Vec<Felt>; 4]> = LazyLock::new(|| {
+    [
+        vec![Felt::ONE, Felt::ZERO, Felt::ZERO, Felt::ZERO],
+        vec![Felt::ZERO, Felt::ONE, Felt::ZERO, Felt::ZERO],
+        vec![Felt::ZERO, Felt::ZERO, Felt::ONE, Felt::ZERO],
+        vec![Felt::ZERO, Felt::ZERO, Felt::ZERO, Felt::ONE],
+    ]
+});
+
 impl BaseAir<Felt> for UintStoreAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
@@ -247,19 +257,15 @@ impl BaseAir<Felt> for UintStoreAir {
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        let o = Felt::ONE;
-        let z = Felt::ZERO;
-        // One one-hot column per row role.
-        Cow::Owned(vec![
-            vec![o, z, z, z], // V_LO  (row 0)
-            vec![z, o, z, z], // V_HI  (row 1)
-            vec![z, z, o, z], // COMP  (row 2)
-            vec![z, z, z, o], // BOUND (row 3)
-        ])
+        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
     }
 }
 
 impl LiftedAir<Felt, QuadFelt> for UintStoreAir {
+    fn max_periodic_length(&self) -> usize {
+        PERIOD
+    }
+
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }

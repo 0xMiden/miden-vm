@@ -27,6 +27,7 @@ std = [
     "miden-crypto/std",
     "miden-precompiles-air/std",
     "miden-precompiles/std",
+    "miden-utils-sync/std",
     "thiserror/std",
 ]
 
@@ -38,6 +39,7 @@ miden-lifted-stark.workspace = true
 miden-precompiles-air.workspace = true
 miden-precompiles.workspace = true
 miden-precompiles-verifier = { workspace = true, optional = true }
+miden-utils-sync.workspace = true
 serde.workspace = true
 serde-wincode.workspace = true
 thiserror.workspace = true
@@ -56,5 +58,10 @@ k256 = { workspace = true, features = ["arithmetic"] }
 miden-air = { workspace = true, features = ["std", "testing"] }
 miden-precompiles-air = { workspace = true, features = ["testing"] }
 miden-precompiles-verifier = { workspace = true, features = ["std"] }
+proptest = { workspace = true, features = ["std"] }
+# Kept for upstream test files (e.g. the #3943 AIR-constraint tests) that still sample
+# with a seeded StdRng; the property-testing migration only replaced this crate's own
+# manual randomness.
 rand = { workspace = true, features = ["std_rng"] }
+rayon.workspace = true
 tracing = { workspace = true, features = ["std"] }

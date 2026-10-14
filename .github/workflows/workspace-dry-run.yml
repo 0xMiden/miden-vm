@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - next
+      - release/v*
+      - release-v*
   pull_request:
     types: [opened, reopened, synchronize]
   workflow_dispatch:
@@ -40,11 +42,14 @@ jobs:
         run: |
           make packages
 
+      - name: Check package selection
+        id: plan
+        env:
+          RELEASE_PACKAGES: ${{ inputs.packages || '' }}
+        run: scripts/check-package-release-plan.sh --skip-semver --allow-existing=true "$RELEASE_PACKAGES"
+
       - name: Dry-run workspace release
+        if: steps.plan.outputs.packages != '[]'
         uses: ./.github/actions/workspace-release
         with:
-          mode: "dry-run"
-          verify-main-head: "false"
-          packages: ${{ github.event.inputs.packages || '' }}
-          allow_existing: "true"
-          # ref left blank: uses the pushed ref
+          packages: ${{ join(fromJSON(steps.plan.outputs.packages), ' ') }}

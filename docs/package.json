@@ -4,29 +4,35 @@
   "scripts": {
     "start:dev": "docusaurus start --port 3000 --host 0.0.0.0",
     "build:dev": "docusaurus build",
-    "serve:dev": "docusaurus serve build"
+    "serve:dev": "docusaurus serve build",
+    "audit:ci": "node scripts/audit.mjs",
+    "test:audit": "node --test scripts/audit.test.mjs"
   },
   "dependencies": {
-    "@docusaurus/core": "3.10.1",
-    "@docusaurus/preset-classic": "3.10.1",
-    "@docusaurus/theme-mermaid": "3.10.1",
+    "@docusaurus/core": "3.10.2",
+    "@docusaurus/plugin-content-docs": "3.10.2",
+    "@docusaurus/theme-classic": "3.10.2",
+    "@docusaurus/theme-mermaid": "3.10.2",
     "@mdx-js/react": "^3.1.1",
     "@mermaid-js/layout-elk": "0.1.9",
-    "katex": "^0.16.22",
+    "katex": "^0.18.2",
+    "mermaid": "^11.17.2",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "rehype-katex": "^7",
     "remark-math": "^6"
   },
   "devDependencies": {
-    "@cmfcmf/docusaurus-search-local": "^2.0.0"
+    "@cmfcmf/docusaurus-search-local": "^2.0.1"
   },
   "overrides": {
-    "mermaid": "11.15.0",
-    "serialize-javascript": "7.0.5",
-    "webpack": "5.104.1",
-    "webpack-dev-server": "5.2.6",
-    "ws": "8.21.0",
-    "uuid": "11.1.1"
+    "mermaid": "$mermaid",
+    "serialize-javascript": "^7.1.2",
+    "sockjs": {
+      "uuid": "^11.1.1"
+    },
+    "katex": "$katex",
+    "postcss-selector-parser": "^7.1.6",
+    "tinypool": "^2.1.2"
   }
 }

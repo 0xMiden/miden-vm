@@ -402,7 +402,11 @@ fn verify_exported_type_expr(
                 return;
             };
 
-            if !type_decl.visibility().is_public() {
+            let publicly_aliased = path
+                .as_ident()
+                .and_then(|name| module.get_import(name.as_str()))
+                .is_some_and(|import| import.visibility().is_public());
+            if !type_decl.visibility().is_public() && !publicly_aliased {
                 analyzer.error(usage.private_type_error(path.span(), type_decl.name().span()));
                 return;
             }
@@ -436,7 +440,22 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
             (import.local_name().as_str().to_string(), LocalInvokeTarget::from(import))
         }),
     );
-    let mut used_aliases = BTreeSet::default();
+    // Import targets can themselves name a local import, including a private alias.
+    let mut used_aliases = module
+        .imports()
+        .filter_map(|import| match import {
+            Import::Item(import)
+                if import.module_path().as_str() == "self"
+                    || import
+                        .module_path()
+                        .to_absolute()
+                        .is_ok_and(|path| path.as_ref() == module.path()) =>
+            {
+                Some(import.source_name().as_str().to_string())
+            },
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
     let mut items = VecDeque::from(module.take_items());
     while let Some(item) = items.pop_front() {
         match item {

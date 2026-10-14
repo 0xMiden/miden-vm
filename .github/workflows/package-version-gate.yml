@@ -8,7 +8,13 @@ on:
     branches:
       - main
       - next
+      - release/v*
+      - release-v*
   workflow_call:
+    outputs:
+      packages:
+        description: "JSON array of checked packages that need publication."
+        value: ${{ jobs.package-versions.outputs.packages }}
     inputs:
       ref:
         description: "Git ref or SHA to check. Empty checks the caller ref."
@@ -46,6 +52,8 @@ jobs:
   package-versions:
     if: ${{ github.repository_owner == '0xMiden' }}
     runs-on: warp-ubuntu-latest-x64-8x
+    outputs:
+      packages: ${{ steps.plan.outputs.packages }}
     env:
       RUSTC_BOOTSTRAP: "1"
     steps:
@@ -59,9 +67,11 @@ jobs:
         run: rustup toolchain install --no-self-update
 
       - name: Install cargo-semver-checks
-        run: cargo install cargo-semver-checks --version 0.49.0 --locked
+        # Rust 1.99 emits rustdoc JSON v61, supported by cargo-semver-checks 0.51.
+        run: cargo install cargo-semver-checks --version 0.51.0 --locked
 
       - name: Check package versions
+        id: plan
         run: scripts/check-package-release-plan.sh "--allow-existing=$PACKAGE_VERSION_GATE_ALLOW_EXISTING" "$PACKAGE_VERSION_GATE_PACKAGES"
         env:
           PACKAGE_VERSION_GATE_PACKAGES: ${{ inputs.packages || '' }}

@@ -1,4 +1,6 @@
 mod dsa;
+mod ecdsa_p256;
+mod eddsa;
 mod falcon;
 
 mod aead_eidos;

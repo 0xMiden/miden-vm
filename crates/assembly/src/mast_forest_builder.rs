@@ -104,16 +104,18 @@ pub struct MastForestBuilder {
     debug_info: DebugInfoBuilder<MastNodeRef, SourceNodeRef>,
     /// Interned source-level functions referenced by inline-call rows.
     inline_function_indices: BTreeMap<InlineFunctionKey, DebugFunctionIdx>,
+    /// Canonical function records keyed by resolved procedure identity.
+    procedure_function_indices: BTreeMap<GlobalItemIndex, DebugFunctionIdx>,
+    /// Decoded dependency debug data and table mappings, keyed by linker library identity.
+    imported_debug_tables: BTreeMap<Word, Option<(PackageDebugInfo, Arc<DebugInfoTableRemapping>)>>,
     /// Decorated source trees reused by identical exec occurrences.
     decorated_source_refs: BTreeMap<(SourceNodeRef, InlineCallChainKey), SourceNodeRef>,
     /// A map of all procedures added to the MAST forest indexed by their global procedure ID.
-    /// This includes all local, exported, and re-exported procedures. In case multiple procedures
-    /// with the same digest are added to the MAST forest builder, only the first procedure is
-    /// added to the map, and all subsequent insertions are ignored.
+    /// This includes all local, exported, and re-exported procedures. Each declared procedure
+    /// has its own entry, even when multiple procedures share a MAST root.
     procedures: BTreeMap<GlobalItemIndex, Procedure>,
-    /// A map from procedure MAST root to its global procedure index. Similar to the `procedures`
-    /// map, this map contains only the first inserted procedure for procedures with the same MAST
-    /// root.
+    /// One procedure index per MAST root, used for digest-based validation. This map is not a
+    /// source identity: distinct procedures may share a root.
     proc_gid_by_mast_root: BTreeMap<Word, GlobalItemIndex>,
     /// Procedure roots recorded by builder-local node ref until finalization.
     procedure_root_refs: Vec<MastNodeRef>,
@@ -126,6 +128,8 @@ pub struct MastForestBuilder {
     nodes: IndexVec<MastNodeRef, PendingMastNode>,
     /// Most recent source occurrence for each execution node ref.
     latest_source_ref_by_node_ref: BTreeMap<MastNodeRef, SourceNodeRef>,
+    /// Most recent concrete occurrence, excluding normalized external invocation boundaries.
+    concrete_source_ref_by_node_ref: BTreeMap<MastNodeRef, SourceNodeRef>,
     /// Selectable source occurrences recorded for each execution node ref, in creation order.
     ///
     /// Supplemental range records created while merging blocks are excluded because they do not
@@ -574,27 +578,51 @@ impl MastForestBuilder {
         self.source_refs_for_node_ref_occurrences(child_refs)
     }
 
+    pub(crate) fn procedure_function_index(
+        &self,
+        gid: GlobalItemIndex,
+    ) -> Option<DebugFunctionIdx> {
+        self.procedure_function_indices.get(&gid).copied()
+    }
+
+    /// Retains the public linkage identity of a re-export without inventing a definition.
+    pub(crate) fn record_exported_function(
+        &mut self,
+        gid: GlobalItemIndex,
+        path: &miden_assembly_syntax::Path,
+    ) {
+        let Some(index) = self.procedure_function_index(gid) else {
+            return;
+        };
+        let mut function = self.debug_info[index];
+        let name = function.linkage_name_idx.into_option().unwrap_or(function.name_idx);
+        if self.debug_info[name].as_ref() == path.as_str() {
+            return;
+        }
+        // Keep the original source name, signature, location, and canonical definition (if any).
+        // The gid still names the defining procedure; only the export uses this new linkage name.
+        function.linkage_name_idx = Some(self.debug_info.add_string(path.as_str())).into();
+        self.debug_info.add_function(function);
+    }
+
     /// Records a source occurrence of an `exec` target under the supplied inline call chain.
     ///
-    /// `exec` reuses the callee's execution node instead of creating a control node. An undecorated
-    /// use can reuse the exact source occurrence carried by [`MastNodeUse`]. When an inline chain
-    /// is active, clone its source-occurrence tree so the chain is visible for every executed
-    /// operation while leaving the shared MAST nodes and other source occurrences unchanged.
+    /// `exec` reuses the callee's execution node instead of creating a control node. Clone its
+    /// source tree even when debug call data is unavailable: a caller must never share its
+    /// definition occurrence with the callee. Inline rows decorate only the invocation copy.
     pub(crate) fn record_exec_inline_calls(
         &mut self,
         target: MastNodeUse,
         inline_calls: &[DebugSourceInlineCall],
     ) -> Result<MastNodeUse, Report> {
-        if inline_calls.is_empty() {
-            return Ok(target);
-        }
-
         let chain_key = inline_calls
             .iter()
             .map(|inline_call| (inline_call.callee_idx, inline_call.loc_idx))
             .collect::<Vec<_>>();
         let cache_key = (target.source_ref(), chain_key);
-        if let Some(source_ref) = self.decorated_source_refs.get(&cache_key) {
+        if !inline_calls.is_empty()
+            && let Some(source_ref) = self.decorated_source_refs.get(&cache_key)
+        {
             return Ok(MastNodeUse::new(target.node_ref(), *source_ref));
         }
 
@@ -604,7 +632,9 @@ impl MastForestBuilder {
             inline_calls,
             &mut cloned,
         )?;
-        self.decorated_source_refs.insert(cache_key, decorated_source_ref);
+        if !inline_calls.is_empty() {
+            self.decorated_source_refs.insert(cache_key, decorated_source_ref);
+        }
         Ok(MastNodeUse::new(target.node_ref(), decorated_source_ref))
     }
 
@@ -715,36 +745,12 @@ impl MastForestBuilder {
             })
             .collect();
 
-        let mut inline_calls = Vec::with_capacity(
-            source_node.inline_calls.len()
-                + active_inline_calls.len()
-                    * core::cmp::max(
-                        source_node.op_end.saturating_sub(source_node.op_start),
-                        u32::from(is_external_boundary),
-                    ) as usize,
-        );
-        if source_node.op_start == source_node.op_end && is_external_boundary {
-            let boundary_op_idx = source_node.op_start;
-            inline_calls.extend(source_node.inline_calls.iter().copied());
+        let mut inline_calls = source_node.inline_calls.clone();
+        if source_node.op_start < source_node.op_end || is_external_boundary {
             inline_calls.extend(active_inline_calls.iter().map(|inline_call| {
                 DebugSourceInlineCall {
-                    op_idx: boundary_op_idx,
-                    callee_idx: inline_call.callee_idx,
-                    loc_idx: inline_call.loc_idx,
-                }
-            }));
-        }
-        for op_idx in source_node.op_start..source_node.op_end {
-            inline_calls.extend(
-                source_node
-                    .inline_calls
-                    .iter()
-                    .filter(|inline_call| inline_call.op_idx == op_idx)
-                    .copied(),
-            );
-            inline_calls.extend(active_inline_calls.iter().map(|inline_call| {
-                DebugSourceInlineCall {
-                    op_idx,
+                    op_idx: source_node.op_start,
+                    op_end: source_node.op_end,
                     callee_idx: inline_call.callee_idx,
                     loc_idx: inline_call.loc_idx,
                 }
@@ -777,13 +783,32 @@ impl MastForestBuilder {
         let is_external_boundary = draft.kind.is_external();
         if is_external_boundary && !self.nodes[exec_ref].kind.is_external() {
             let source_ref = self
-                .latest_source_ref_by_node_ref
+                .concrete_source_ref_by_node_ref
                 .get(&exec_ref)
                 .copied()
                 .expect("a concrete execution node must have a source occurrence");
-            for function in &draft.functions {
-                self.debug_info.set_function_source_node(*function, source_ref);
+            if !draft.inline_calls.is_empty() || !draft.functions.is_empty() {
+                let source_node = self.source_occurrence_with_inline_calls(
+                    source_ref,
+                    &draft.inline_calls,
+                    &mut BTreeMap::new(),
+                )?;
+                // Keep the concrete occurrence as the basis for later external imports, so
+                // independent wrappers cannot inherit one another's invocation frames.
+                return self.push_source_occurrence(
+                    exec_ref,
+                    source_node.children,
+                    source_node.op_start as usize,
+                    source_node.op_end as usize,
+                    source_node.asm_ops,
+                    source_node.debug_vars,
+                    source_node.inline_calls,
+                    &draft.functions,
+                    false,
+                    true,
+                );
             }
+            self.latest_source_ref_by_node_ref.insert(exec_ref, source_ref);
             return Ok(source_ref);
         }
 
@@ -801,6 +826,7 @@ impl MastForestBuilder {
         )?;
 
         if !is_external_boundary {
+            self.concrete_source_ref_by_node_ref.insert(exec_ref, source_ref);
             self.remap_external_boundary_occurrences(exec_ref, source_ref)?;
         }
 
@@ -883,31 +909,16 @@ impl MastForestBuilder {
             self.external_boundary_source_refs.insert(source_ref);
         }
         for function in functions {
-            self.debug_info.set_function_source_node(*function, source_ref);
+            // Repeated imports may copy a definition again; keep its first canonical occurrence.
+            if self.debug_info[*function].source_node.into_option().is_none() {
+                self.debug_info.set_function_source_node(*function, source_ref);
+            }
         }
         if update_latest {
             self.latest_source_ref_by_node_ref.insert(exec_ref, source_ref);
             self.source_refs_by_node_ref.entry(exec_ref).or_default().push(source_ref);
         }
         Ok(source_ref)
-    }
-
-    fn function_indices_for_source_ref(&self, source_ref: SourceNodeRef) -> Vec<DebugFunctionIdx> {
-        self.debug_info
-            .debug_info()
-            .functions()
-            .iter()
-            .enumerate()
-            .filter(|(_, function)| {
-                function
-                    .source_node
-                    .into_option()
-                    .is_some_and(|function_source_ref| function_source_ref == source_ref)
-            })
-            .map(|(index, _)| {
-                DebugFunctionIdx::from(u32::try_from(index).expect("too many functions"))
-            })
-            .collect()
     }
 
     /// Removes the unused nodes that were created as part of the assembly process, and returns the
@@ -954,6 +965,32 @@ fn compute_operations_and_adjust_mappings(
             let num_ops = mappings.iter().map(|idx| idx + 1).max().unwrap_or(0);
             (num_ops, mappings)
         },
+    }
+}
+
+fn remap_inline_ranges(
+    rows: &mut [DebugSourceInlineCall],
+    map: impl FnOnce(Vec<usize>) -> Vec<usize>,
+) {
+    let endpoints = rows
+        .iter()
+        .filter(|row| row.op_idx != row.op_end)
+        .flat_map(|row| [row.op_idx as usize, row.op_end as usize - 1])
+        .collect::<Vec<_>>();
+    if endpoints.is_empty() {
+        return;
+    }
+
+    let endpoint_count = endpoints.len();
+    let mapped = map(endpoints);
+    assert_eq!(mapped.len(), endpoint_count);
+    for (row, pair) in rows
+        .iter_mut()
+        .filter(|row| row.op_idx != row.op_end)
+        .zip(mapped.as_chunks::<2>().0)
+    {
+        row.op_idx = u32::try_from(pair[0]).unwrap();
+        row.op_end = u32::try_from(pair[1] + 1).unwrap();
     }
 }
 
@@ -1135,7 +1172,7 @@ impl MastForestBuilder {
         }
 
         self.record_procedure_root_use(procedure.body_node_use());
-        self.record_procedure_debug_info(&procedure, source_manager)?;
+        self.record_procedure_debug_info(gid, &procedure, source_manager)?;
         self.proc_gid_by_mast_root.insert(procedure.mast_root(), gid);
 
         self.procedures.insert(gid, procedure);
@@ -1145,6 +1182,7 @@ impl MastForestBuilder {
 
     fn record_procedure_debug_info(
         &mut self,
+        gid: GlobalItemIndex,
         procedure: &Procedure,
         source_manager: &dyn SourceManager,
     ) -> Result<(), Report> {
@@ -1186,7 +1224,8 @@ impl MastForestBuilder {
             if let Some(type_idx) = type_idx {
                 func_info = func_info.with_type(type_idx);
             }
-            self.debug_info.add_function(func_info);
+            let index = self.debug_info.add_function(func_info);
+            self.procedure_function_indices.insert(gid, index);
         }
 
         Ok(())
@@ -1489,10 +1528,11 @@ impl MastForestBuilder {
                     .into_iter()
                     .map(|mut inline_call| {
                         inline_call.op_idx = remap_op_idx(inline_call.op_idx);
+                        inline_call.op_end = remap_op_idx(inline_call.op_end);
                         inline_call
                     })
                     .collect(),
-                // The functions now belong to the aggregate merged occurrence created above.
+                // Function records retain their canonical definition occurrences.
                 &[],
                 false,
                 false,
@@ -1534,7 +1574,6 @@ impl MastForestBuilder {
         let mut merged_asm_ops: Vec<DebugSourceAsmOp> = Vec::new();
         let mut merged_debug_vars: Vec<DebugSourceVar> = Vec::new();
         let mut merged_inline_calls: Vec<DebugSourceInlineCall> = Vec::new();
-        let mut merged_functions: Vec<DebugFunctionIdx> = Vec::new();
         let mut merged_source_occurrences: Vec<(SourceNodeRef, usize)> = Vec::new();
 
         let mut merged_basic_block_uses = Vec::new();
@@ -1576,9 +1615,9 @@ impl MastForestBuilder {
                 merged_inline_calls.extend(source_node.inline_calls.iter().map(|inline_call| {
                     let mut inline_call = *inline_call;
                     inline_call.op_idx += u32::try_from(ops_offset).unwrap();
+                    inline_call.op_end += u32::try_from(ops_offset).unwrap();
                     inline_call
                 }));
-                merged_functions.extend(self.function_indices_for_source_ref(source_ref));
 
                 operations.extend(block_ops);
             } else {
@@ -1589,14 +1628,13 @@ impl MastForestBuilder {
                     let block_asm_ops = core::mem::take(&mut merged_asm_ops);
                     let block_debug_vars = core::mem::take(&mut merged_debug_vars);
                     let block_inline_calls = core::mem::take(&mut merged_inline_calls);
-                    let block_functions = core::mem::take(&mut merged_functions);
                     let block_source_occurrences = core::mem::take(&mut merged_source_occurrences);
                     let merged_basic_block_use = self.ensure_block_use(
                         block_ops,
                         block_asm_ops,
                         block_debug_vars,
                         block_inline_calls,
-                        block_functions,
+                        vec![],
                     )?;
                     self.record_merged_source_occurrences(
                         merged_basic_block_use.node_ref(),
@@ -1615,7 +1653,7 @@ impl MastForestBuilder {
                 merged_asm_ops,
                 merged_debug_vars,
                 merged_inline_calls,
-                merged_functions,
+                vec![],
             )?;
             self.record_merged_source_occurrences(
                 merged_basic_block.node_ref(),
@@ -1750,6 +1788,55 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn inline_range_remapping_batches_all_endpoints() {
+        let mut rows = (0..128_u32)
+            .map(|index| DebugSourceInlineCall {
+                op_idx: index,
+                op_end: index + 2,
+                callee_idx: DebugFunctionIdx::from(index),
+                loc_idx: DebugLocIdx::from(index),
+            })
+            .collect::<Vec<_>>();
+        let boundary = DebugSourceInlineCall {
+            op_idx: 40,
+            op_end: 40,
+            callee_idx: DebugFunctionIdx::from(0_u32),
+            loc_idx: DebugLocIdx::from(0_u32),
+        };
+        rows.insert(5, boundary);
+        let original = rows.clone();
+        let mut map_calls = 0;
+        remap_inline_ranges(&mut rows, |endpoints| {
+            map_calls += 1;
+            let expected = (0..128_usize).flat_map(|index| [index, index + 1]).collect::<Vec<_>>();
+            assert_eq!(endpoints, expected);
+            endpoints.into_iter().map(|endpoint| endpoint + 7).collect()
+        });
+        assert_eq!(map_calls, 1);
+        for (row, original) in rows.iter().zip(original) {
+            let offset = if original.op_idx == original.op_end { 0 } else { 7 };
+            assert_eq!(row.op_idx, original.op_idx + offset);
+            assert_eq!(row.op_end, original.op_end + offset);
+            assert_eq!(row.callee_idx, original.callee_idx);
+            assert_eq!(row.loc_idx, original.loc_idx);
+        }
+    }
+
+    #[test]
+    fn inline_range_remapping_skips_zero_width_boundaries() {
+        let boundary = DebugSourceInlineCall {
+            op_idx: 7,
+            op_end: 7,
+            callee_idx: DebugFunctionIdx::from(0_u32),
+            loc_idx: DebugLocIdx::from(0_u32),
+        };
+        let mut rows = [boundary];
+        remap_inline_ranges(&mut rows, |_| panic!("boundary rows must not be remapped"));
+        assert_eq!(rows, [boundary]);
+        remap_inline_ranges(&mut [], |_| panic!("empty rows must not be remapped"));
+    }
+
     fn record_test_root(builder: &mut MastForestBuilder, node_ref: MastNodeRef) -> MastNodeRef {
         builder.record_procedure_root_ref(node_ref);
         node_ref
@@ -1840,18 +1927,20 @@ mod tests {
     }
 
     #[test]
-    fn plain_exec_reuses_the_exact_source_occurrence() {
+    fn exec_without_debug_data_keeps_source_occurrences_distinct() {
         let mut builder = MastForestBuilder::new(&[]).unwrap();
         let target = builder
             .ensure_block_use(vec![Operation::Add], vec![], vec![], vec![], vec![])
             .unwrap();
         let source_node_count = builder.debug_info.debug_info().nodes().len();
 
-        for _ in 0..1_024 {
-            assert_eq!(builder.record_exec_inline_calls(target, &[]).unwrap(), target);
-        }
-
-        assert_eq!(builder.debug_info.debug_info().nodes().len(), source_node_count);
+        let first = builder.record_exec_inline_calls(target, &[]).unwrap();
+        let second = builder.record_exec_inline_calls(target, &[]).unwrap();
+        assert_eq!(first.node_ref(), target.node_ref());
+        assert_eq!(second.node_ref(), target.node_ref());
+        assert_ne!(first.source_ref(), target.source_ref());
+        assert_ne!(second.source_ref(), first.source_ref());
+        assert_eq!(builder.debug_info.debug_info().nodes().len(), source_node_count + 2);
     }
 
     #[test]
@@ -1884,7 +1973,12 @@ mod tests {
             ));
             (callee_idx, call_site_span)
         };
-        let inline_call = DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx };
+        let inline_call = DebugSourceInlineCall {
+            op_idx: 0,
+            op_end: 1,
+            callee_idx,
+            loc_idx,
+        };
         let decorated = builder.record_exec_inline_calls(target, &[inline_call]).unwrap();
         let source_node_count = builder.debug_info.debug_info().nodes().len();
 
@@ -1924,7 +2018,12 @@ mod tests {
             ));
             (callee_idx, loc_idx)
         };
-        let inline_call = DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx };
+        let inline_call = DebugSourceInlineCall {
+            op_idx: 0,
+            op_end: 1,
+            callee_idx,
+            loc_idx,
+        };
         let external_ref = builder
             .ensure_external_link_with_source_ref(mast_root, None, None, None)
             .unwrap();
@@ -1936,7 +2035,7 @@ mod tests {
                 7,
                 vec![],
                 vec![],
-                vec![DebugSourceInlineCall { op_idx: 7, ..inline_call }],
+                vec![DebugSourceInlineCall { op_idx: 7, op_end: 7, ..inline_call }],
                 &[],
                 true,
                 false,
@@ -1972,6 +2071,54 @@ mod tests {
     }
 
     #[test]
+    fn resolved_external_definitions_keep_distinct_source_occurrences() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let target = builder
+            .ensure_block_use(vec![Operation::Add], vec![], vec![], vec![], vec![])
+            .unwrap();
+        let mast_root = builder.nodes[target.node_ref()].digest;
+        let function = {
+            let debug_info = builder.debug_info_mut();
+            let loc = debug_info.add_location(Location::new(
+                Uri::from("file:///wrapper.masm"),
+                ByteIndex::from(0u32),
+                ByteIndex::from(1u32),
+            ));
+            let file = debug_info.debug_info().locations()[loc].file_idx;
+            let name = debug_info.add_string("wrapper");
+            debug_info.add_function(FunctionInfo::new(
+                None,
+                name,
+                file,
+                LineNumber::new(1).unwrap(),
+                ColumnNumber::new(1).unwrap(),
+                mast_root,
+            ))
+        };
+        let mut draft =
+            PendingMastNodeDraft::new(PendingMastNodeKind::External, mast_root, Vec::new());
+        draft.functions.push(function);
+        let wrapper = builder.intern_pending_node_use(draft.clone(), Vec::new()).unwrap();
+        assert_ne!(wrapper.source_ref(), target.source_ref());
+        assert_eq!(
+            builder.debug_info[function].source_node.into_option(),
+            Some(wrapper.source_ref())
+        );
+        assert_eq!(builder.latest_node_use(target.node_ref()), Some(wrapper));
+        assert_eq!(
+            builder.concrete_source_ref_by_node_ref[&target.node_ref()],
+            target.source_ref()
+        );
+
+        let repeated = builder.intern_pending_node_use(draft, Vec::new()).unwrap();
+        assert_ne!(repeated.source_ref(), target.source_ref());
+        assert_eq!(
+            builder.debug_info[function].source_node.into_option(),
+            Some(wrapper.source_ref())
+        );
+    }
+
+    #[test]
     fn decorated_external_source_is_remapped_when_the_concrete_node_arrives() {
         let mut builder = MastForestBuilder::new(&[]).unwrap();
         let block_digest =
@@ -1996,7 +2143,12 @@ mod tests {
             ));
             (callee_idx, loc_idx)
         };
-        let inline_call = DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx };
+        let inline_call = DebugSourceInlineCall {
+            op_idx: 0,
+            op_end: 1,
+            callee_idx,
+            loc_idx,
+        };
         let external_ref = builder
             .ensure_external_link_with_source_ref(block_digest, None, None, None)
             .unwrap();
@@ -2431,6 +2583,7 @@ mod tests {
                 vec![debug_var_a],
                 vec![DebugSourceInlineCall {
                     op_idx: 0,
+                    op_end: 1,
                     callee_idx: function_a,
                     loc_idx: location_a,
                 }],
@@ -2445,6 +2598,7 @@ mod tests {
                 vec![debug_var_b],
                 vec![DebugSourceInlineCall {
                     op_idx: 0,
+                    op_end: 1,
                     callee_idx: function_b,
                     loc_idx: location_b,
                 }],
@@ -2456,6 +2610,7 @@ mod tests {
         assert_eq!(alias_a_ref, alias_b_ref, "same-digest aliases must share execution identity");
         assert_ne!(alias_a_source_ref, alias_b_source_ref);
 
+        let alias_b_source_ref = builder.latest_source_ref_for_node_ref(alias_b_ref).unwrap();
         let tail_ref = builder
             .ensure_block_ref(vec![Operation::Mul], vec![], vec![], vec![], vec![])
             .unwrap();
@@ -2470,6 +2625,7 @@ mod tests {
             merged_source.inline_calls,
             vec![DebugSourceInlineCall {
                 op_idx: 0,
+                op_end: 1,
                 callee_idx: function_b,
                 loc_idx: location_b,
             }],
@@ -2492,8 +2648,8 @@ mod tests {
         );
         assert_eq!(
             builder.debug_info[function_b].source_node.into_option(),
-            Some(merged_source_ref),
-            "the selected alias's function must follow the merged occurrence",
+            Some(alias_b_source_ref),
+            "the selected alias's function must retain its canonical definition",
         );
 
         let second_tail_ref = builder
@@ -2511,6 +2667,7 @@ mod tests {
             remerged_source.inline_calls,
             vec![DebugSourceInlineCall {
                 op_idx: 0,
+                op_end: 1,
                 callee_idx: function_b,
                 loc_idx: location_b,
             }],
@@ -2523,8 +2680,8 @@ mod tests {
         );
         assert_eq!(
             builder.debug_info[function_b].source_node.into_option(),
-            Some(remerged_source_ref),
-            "the selected alias's function must follow repeated merges",
+            Some(alias_b_source_ref),
+            "the selected alias's function must retain its definition through repeated merges",
         );
     }
 
@@ -3152,6 +3309,7 @@ mod tests {
         );
         debug_info[source_ref].inline_calls.push(DebugSourceInlineCall {
             op_idx: 0,
+            op_end: 1,
             callee_idx: function_idx,
             loc_idx: location_idx,
         });

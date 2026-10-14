@@ -336,6 +336,10 @@ impl PackageManifest {
 
 /// Represents a module surface declared by a package.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct PackageModule {
     /// The fully-qualified path of this module.
     pub path: Arc<Path>,
@@ -366,6 +370,10 @@ impl PackageModule {
 
 /// Represents a submodule declaration in a package module surface.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct PackageSubmodule {
     /// The name of the submodule.
     pub name: ast::Ident,

@@ -53,8 +53,16 @@ mod tests;
 // ================================================================================================
 
 /// A `Felt` backed by Plonky3's Goldilocks field element.
+///
+/// Round-trip equality is safe even though `Felt` may hold non-canonical internal values:
+/// `PartialEq for Felt` delegates to `Goldilocks::eq`, which compares `as_canonical_u64()` on
+/// both sides, so canonicalization by serialization is invisible to equality.
 #[derive(Copy, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[repr(transparent)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct Felt(Goldilocks);
 
 impl Felt {
@@ -733,16 +741,128 @@ mod arbitrary {
         }
     }
 
-    /// Generates field elements with canonical representations.
+    /// Boundary values of the canonical regime, hit by construction: zero,
+    /// one, both sides of the 2^32 seam, and the two elements adjacent to
+    /// the modulus. The edge index derives from `r / 8` — a component
+    /// independent of the branch gate `r % 8` (the run-#84 correlation
+    /// lesson).
+    pub(super) const CANONICAL_EDGES: [u64; 6] =
+        [0, 1, (1 << 32) - 1, 1 << 32, Felt::ORDER - 2, Felt::ORDER - 1];
+
+    /// Generates field elements with canonical representations: ~7/8 of
+    /// draws are uniform over `[0, ORDER)` and ~1/8 are boundary values
+    /// hit by construction (uniform sampling leaves them measure-zero,
+    /// which under-covers every wire test's Felt fields). The branch gate
+    /// and the value draw are INDEPENDENT components — deriving both from
+    /// one `u64` would remove every canonical value congruent to the gate
+    /// class from the generator's range (the run-#84 correlation lesson at
+    /// full depth).
     pub fn arb_felt_canonical() -> impl Strategy<Value = Felt> {
-        (0u64..Felt::ORDER).prop_map(Felt::new_unchecked)
+        (any::<u64>(), any::<u64>()).prop_map(|(gate, value)| {
+            if gate % 8 == 7 {
+                Felt::new_unchecked(CANONICAL_EDGES[(gate / 8) as usize % CANONICAL_EDGES.len()])
+            } else {
+                Felt::new_unchecked(value % Felt::ORDER)
+            }
+        })
     }
 
-    /// Generates field elements with non-canonical representations.
+    /// Boundary values of the non-canonical regime: the first and last
+    /// non-canonical representations (ORDER aliases canonical zero;
+    /// u64::MAX is the largest).
+    pub(super) const NONCANONICAL_EDGES: [u64; 3] = [Felt::ORDER, u64::MAX - 1, u64::MAX];
+
+    /// Generates field elements with non-canonical representations: ~3/4
+    /// uniform over `[ORDER, u64::MAX]` and ~1/4 boundary values, with the
+    /// same independent gate/value components as the canonical adapter.
     pub fn arb_felt_noncanonical() -> impl Strategy<Value = Felt> {
-        (Felt::ORDER..=u64::MAX).prop_map(Felt::new_unchecked)
+        (any::<u64>(), any::<u64>()).prop_map(|(gate, value)| {
+            if gate % 4 == 3 {
+                Felt::new_unchecked(
+                    NONCANONICAL_EDGES[(gate / 4) as usize % NONCANONICAL_EDGES.len()],
+                )
+            } else {
+                Felt::new_unchecked(Felt::ORDER + value % (u64::MAX - Felt::ORDER + 1))
+            }
+        })
     }
 }
 
 #[cfg(all(any(test, feature = "arbitrary"), not(all(target_family = "wasm", miden))))]
 pub use arbitrary::{arb_felt_canonical, arb_felt_noncanonical};
+
+#[cfg(all(test, not(all(target_family = "wasm", miden))))]
+mod arbitrary_boundary_tests {
+    use proptest::{
+        strategy::{Strategy, ValueTree},
+        test_runner::TestRunner,
+    };
+
+    use super::{
+        Felt,
+        arbitrary::{
+            CANONICAL_EDGES, NONCANONICAL_EDGES, arb_felt_canonical, arb_felt_noncanonical,
+        },
+    };
+
+    /// The boundary values are reachable BY CONSTRUCTION — pin it
+    /// empirically so a future refactor of the branch gating cannot
+    /// silently drop edges (the run-#84 correlation regression).
+    #[test]
+    fn boundary_values_are_reached_by_construction() {
+        let mut runner = TestRunner::deterministic();
+        let samples = 10_000;
+
+        let mut canonical_hits = [0usize; CANONICAL_EDGES.len()];
+        for _ in 0..samples {
+            let felt = arb_felt_canonical().new_tree(&mut runner).unwrap().current();
+            for (i, edge) in CANONICAL_EDGES.iter().enumerate() {
+                if super::raw_felt_u64(felt) == *edge {
+                    canonical_hits[i] += 1;
+                }
+            }
+        }
+        for (edge, hits) in CANONICAL_EDGES.iter().zip(canonical_hits) {
+            assert!(hits > 0, "canonical boundary {edge} never sampled");
+        }
+
+        let mut noncanonical_hits = [0usize; NONCANONICAL_EDGES.len()];
+        for _ in 0..samples {
+            let felt = arb_felt_noncanonical().new_tree(&mut runner).unwrap().current();
+            for (i, edge) in NONCANONICAL_EDGES.iter().enumerate() {
+                if super::raw_felt_u64(felt) == *edge {
+                    noncanonical_hits[i] += 1;
+                }
+            }
+        }
+        for (edge, hits) in NONCANONICAL_EDGES.iter().zip(noncanonical_hits) {
+            assert!(hits > 0, "non-canonical boundary {edge} never sampled");
+        }
+
+        // The canonical adapter never leaves the canonical regime.
+        for _ in 0..samples {
+            let felt = arb_felt_canonical().new_tree(&mut runner).unwrap().current();
+            assert!(
+                super::raw_felt_u64(felt) < Felt::ORDER,
+                "canonical adapter emitted a non-canonical element",
+            );
+        }
+
+        // Every residue class mod 8 must occur among NON-boundary draws —
+        // pinning that the gate and the value are independent components
+        // (deriving both from one u64 removes the gate class from the
+        // generator's range, the run-#430 regression).
+        let mut residue_seen = [false; 8];
+        for _ in 0..samples {
+            let felt = arb_felt_canonical().new_tree(&mut runner).unwrap().current();
+            let raw = super::raw_felt_u64(felt);
+            if !CANONICAL_EDGES.contains(&raw) {
+                residue_seen[(raw % 8) as usize] = true;
+            }
+        }
+        assert!(
+            residue_seen.iter().all(|&seen| seen),
+            "a residue class mod 8 is missing from non-boundary draws: {residue_seen:?}",
+        );
+    }
+}

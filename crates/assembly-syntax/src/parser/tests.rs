@@ -239,6 +239,49 @@ fn rejects_deeply_nested_binary_constant_expression() {
         .expect("parser thread panicked");
 }
 
+/// The nesting limits reject the FIRST depth past the boundary (limit + 1), not just
+/// far-past depths: an off-by-N check (e.g. `> limit + 5`) would pass both the
+/// inclusive-at-limit test and the deep-rejection tests while accepting depths the
+/// contract forbids. All three expression kinds are pinned at their own limit + 1.
+#[test]
+fn rejects_first_depth_past_the_nesting_limits() {
+    let cases = [
+        (
+            format!(
+                "const VALUE = {}1{}\n",
+                "(".repeat(MAX_CONSTANT_EXPR_NESTING + 1),
+                ")".repeat(MAX_CONSTANT_EXPR_NESTING + 1),
+            ),
+            "constant expression nesting depth exceeded",
+        ),
+        (
+            format!("const VALUE = 1{}\n", " + 1".repeat(MAX_CONSTANT_EXPR_NESTING + 1)),
+            "constant expression nesting depth exceeded",
+        ),
+        (
+            format!(
+                "type T = {}felt{}\n",
+                "[".repeat(MAX_TYPE_EXPR_NESTING + 1),
+                "; 1]".repeat(MAX_TYPE_EXPR_NESTING + 1),
+            ),
+            "type expression nesting depth exceeded",
+        ),
+    ];
+
+    for (source, expected) in cases {
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || {
+                let error = parse_forms(test_source_file(&source))
+                    .expect_err("the first depth past the limit should return an error");
+                assert_eq!(error.to_string(), expected);
+            })
+            .expect("failed to start parser thread")
+            .join()
+            .expect("parser thread panicked");
+    }
+}
+
 #[test]
 fn rejects_deeply_nested_type_expression() {
     let depth = 10_000;
@@ -1294,5 +1337,58 @@ fn parser_rejects_debug_instructions() {
             render_diagnostic(err),
             diag if diag.contains("invalid syntax") || diag.contains("invalid instruction")
         );
+    }
+}
+
+#[test]
+fn parse_package_visibility_on_all_declarations() {
+    let forms = parse_forms(test_source_file(
+        "pub(package) mod api\n\
+         pub(package) use {helper} from api\n\
+         pub(package) const VALUE = 1\n\
+         pub(package) type Word = felt\n\
+         pub(package) enum Tag : u8 { A }\n\
+         pub(package) proc helper nop end\n",
+    ))
+    .expect("package visibility should parse");
+    assert_eq!(forms.len(), 6);
+    for form in &forms {
+        let visibility = match form {
+            Form::Submodule(decl) => decl.visibility,
+            Form::Import(import) => import.visibility(),
+            Form::Constant(constant) => constant.visibility,
+            Form::Type(ty) => ty.visibility,
+            Form::Enum(ty) => ty.visibility(),
+            Form::Procedure(proc) => proc.visibility(),
+            other => panic!("unexpected form: {other:?}"),
+        };
+        assert_eq!(visibility.to_string(), "pub(package)");
+        assert!(visibility.is_public());
+    }
+}
+
+#[test]
+fn package_visibility_survives_ast_roundtrip() {
+    let source = "namespace root\npub(package) mod api\npub(package) use {helper} from self::api\npub(package) const VALUE = 1\npub(package) type Word = felt\npub(package) proc entry nop end\n";
+    let source_manager = Arc::new(miden_debug_types::DefaultSourceManager::default());
+    let module = ModuleParser::new(Some(ast::ModuleKind::Library))
+        .parse_str(None, source, source_manager.clone())
+        .expect("package visibility should parse");
+    let rendered = module.to_string();
+    assert_eq!(rendered.matches("pub(package)").count(), 5, "{rendered}");
+    let reparsed = ModuleParser::new(Some(ast::ModuleKind::Library))
+        .parse_str(None, &rendered, source_manager)
+        .expect("printed package visibility should parse");
+    assert_eq!(reparsed.to_string(), rendered);
+}
+
+#[test]
+fn invalid_package_visibility_qualifiers_are_rejected() {
+    for source in [
+        "pub(module) proc helper nop end",
+        "pub() proc helper nop end",
+        "pub(package proc helper nop end",
+    ] {
+        assert!(parse_forms(test_source_file(source)).is_err(), "accepted {source}");
     }
 }

@@ -24,6 +24,10 @@ use crate::{
 /// NOTE: This type assumes that Merkle paths always span from the root of the tree to a leaf.
 /// Partial paths are not supported.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct SparseMerklePath {
     /// A bitmask representing empty nodes. The set bit corresponds to the depth of an empty node.
     /// The least significant bit (bit 0) describes depth 1 node (root's children).
@@ -465,7 +469,35 @@ mod arbitrary {
     use proptest::prelude::*;
 
     use super::{MerklePath, SparseMerklePath};
-    use crate::{Word, merkle::smt::SMT_MAX_DEPTH};
+    use crate::{
+        Word,
+        merkle::{MerkleProof, RootPath, smt::SMT_MAX_DEPTH},
+    };
+
+    impl Arbitrary for MerkleProof {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Both components have their own sound strategies; any pairing is a valid proof.
+            (any::<Word>(), any::<MerklePath>())
+                .prop_map(|(value, path)| MerkleProof::new(value, path))
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for RootPath {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The type explicitly does not guarantee path-to-root correctness, so any
+            // (root, path) pairing is valid.
+            (any::<Word>(), any::<MerklePath>())
+                .prop_map(|(root, path)| RootPath { root, path })
+                .boxed()
+        }
+    }
 
     impl Arbitrary for MerklePath {
         type Parameters = ();
