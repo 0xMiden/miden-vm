@@ -187,7 +187,7 @@ fn pvm_verifies_a_session_mixing_every_precompile() {
     advice.append_elements(k256.advice);
     advice.append_elements(eddsa_25519_sha512::sign(&ed25519_key, k256.message));
     advice.append_elements(ecdsa_p256_sha256::sign(&p256_key, k256.message));
-    let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
+    let mut host = DefaultHost::default().with_library(core_lib.host_library()).unwrap();
     let output = FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default().with_stack(advice),
@@ -398,8 +398,8 @@ fn run_pvm_verifier_with_advice(
     let mut initial_stack = claim_elements.to_vec();
     initial_stack.extend(CALLER_WORD);
     let verifier_stack = VerifierStack::default();
-    let mut test = build_test!(source, initial_stack)
-        .with_trace_handler(VERIFIER_RETURN, verifier_stack.clone());
+    let mut test =
+        build_test!(source, initial_stack).with_handler(VERIFIER_RETURN, verifier_stack.clone());
     test.advice_inputs = advice.clone();
     test.execute_for_output()?;
     Ok(verifier_stack)

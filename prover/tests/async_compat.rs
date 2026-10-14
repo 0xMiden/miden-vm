@@ -4,24 +4,25 @@ use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host,
-    LoadedMastForest, ProcessorState, Word,
-    advice::AdviceMutation,
+    LoadedMastForest, Word,
     event::{EventError, EventName},
 };
+#[allow(deprecated)] // The async compatibility fixture implements the old callback.
+use miden_processor::{ProcessorState, advice::AdviceMutation};
 use miden_prover::{AdviceInputs, ExecutionClaim, ExecutionProof, Prover, StackInputs};
 use miden_verifier::Verifier;
 
-struct YieldingAsyncHost {
+struct YieldingLegacyAsyncHost {
     event_calls: usize,
 }
 
-impl YieldingAsyncHost {
+impl YieldingLegacyAsyncHost {
     fn new() -> Self {
         Self { event_calls: 0 }
     }
 }
 
-impl BaseHost for YieldingAsyncHost {
+impl BaseHost for YieldingLegacyAsyncHost {
     fn get_label_and_source_file(
         &self,
         _location: &Location,
@@ -30,7 +31,7 @@ impl BaseHost for YieldingAsyncHost {
     }
 }
 
-impl Host for YieldingAsyncHost {
+impl Host for YieldingLegacyAsyncHost {
     fn get_mast_forest(
         &self,
         _node_digest: &Word,
@@ -38,6 +39,7 @@ impl Host for YieldingAsyncHost {
         async { None }
     }
 
+    #[allow(deprecated)] // Verifies the retained async callback during proving.
     fn on_event(
         &mut self,
         _process: &ProcessorState<'_>,
@@ -115,7 +117,7 @@ async fn proving_supports_witnesses_from_async_only_host_events() {
         .expect("program should compile")
         .unwrap_program();
 
-    let mut host = YieldingAsyncHost::new();
+    let mut host = YieldingLegacyAsyncHost::new();
     let witness = FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),

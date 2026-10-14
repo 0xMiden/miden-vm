@@ -23,11 +23,12 @@ use miden_crypto::{
     dsa::eddsa_25519_sha512::SigningKey,
     hash::{eidos::Eidos, sha2::Sha512},
 };
+use miden_event_handler::{AdviceBatch, AdviceRecorder, EventContext, EventHandler};
 use miden_precompiles::{Ed25519Base, UintSpec, ed25519_decompress_x};
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, StackInputs,
-    advice::{AdviceInputs, AdviceMutation, AdviceStack},
-    event::EventHandler,
+    advice::{AdviceInputs, AdviceStack},
+    event::registration,
     operation::OperationError,
 };
 
@@ -137,16 +138,16 @@ fn ed25519_rejects_advice_that_negates_both_encoded_points() {
         masm_push_word(&key.public_key().to_commitment()),
     );
     let handler: Arc<dyn EventHandler> =
-        Arc::new(|process: &miden_processor::ProcessorState<'_>| {
-            let mut mutations = handle_ed25519_decompress(process)?;
-            let AdviceMutation::ExtendStack { stack } = mutations.pop().unwrap() else {
-                panic!("coordinate witness must be advice-stack data")
-            };
+        Arc::new(|context: EventContext<'_>, advice: &mut AdviceRecorder<'_>| {
+            let mut batch = AdviceBatch::new();
+            handle_ed25519_decompress(context, &mut batch.recorder())?;
+            let (stack, ..) = batch.into_parts();
             let mut limbs: [Felt; 8] = stack.into_elements().try_into().unwrap();
             // Restore operand-stack limb order from the scalar advice-pop order.
             limbs.reverse();
             let opposite_x = Ed25519Base::sub([0; 8], limbs.map(|v| v.as_canonical_u64() as u32));
-            Ok(vec![decompression_advice(opposite_x)])
+            decompression_advice(advice, opposite_x);
+            Ok(())
         });
     // [-s]B = (-R)+[k](-A). Both advised points are valid curve points, but their signs disagree
     // with the committed encodings. Removing the parity check would accept this witness.
@@ -195,13 +196,14 @@ fn ed25519_rejects_noncanonical_x_witness_even_when_parity_matches() {
     let decompressions = Arc::new(AtomicUsize::new(0));
     let handler_decompressions = Arc::clone(&decompressions);
     let handler: Arc<dyn EventHandler> =
-        Arc::new(move |process: &miden_processor::ProcessorState<'_>| {
+        Arc::new(move |context: EventContext<'_>, advice: &mut AdviceRecorder<'_>| {
             if handler_decompressions.fetch_add(1, Ordering::Relaxed) == 0 {
-                Ok(vec![decompression_advice(noncanonical)])
+                decompression_advice(advice, noncanonical);
+                Ok(())
             } else {
                 // Keep the R witness canonical if execution reaches the second point. The
                 // failure should therefore come from A's noncanonical x witness alone.
-                handle_ed25519_decompress(process)
+                handle_ed25519_decompress(context, advice)
             }
         });
     assert!(run_program_with_handler(&source, &pk, &sig, Some(handler)).is_err());
@@ -241,11 +243,12 @@ fn ed25519_rejects_noncanonical_y_encoding() {
     let decompressions = Arc::new(AtomicUsize::new(0));
     let handler_decompressions = Arc::clone(&decompressions);
     let handler: Arc<dyn EventHandler> =
-        Arc::new(move |process: &miden_processor::ProcessorState<'_>| {
+        Arc::new(move |context: EventContext<'_>, advice: &mut AdviceRecorder<'_>| {
             if handler_decompressions.fetch_add(1, Ordering::Relaxed) == 0 {
-                Ok(vec![decompression_advice(canonical_x)])
+                decompression_advice(advice, canonical_x);
+                Ok(())
             } else {
-                handle_ed25519_decompress(process)
+                handle_ed25519_decompress(context, advice)
             }
         });
     assert!(run_program_with_handler(&source, &pk, &sig, Some(handler)).is_err());
@@ -352,9 +355,15 @@ fn run_program_with_handler(
         .assemble_program("ed25519_test", source)
         .expect("Ed25519 verification interface must assemble")
         .unwrap_program();
-    let mut host = DefaultHost::default().with_library(&library).unwrap();
+    let mut host = DefaultHost::default().with_library(library.host_library()).unwrap();
     if let Some(handler) = handler {
-        assert!(host.replace_handler(ED25519_DECOMPRESS_EVENT_NAME, handler).unwrap());
+        assert!(
+            host.replace_handler(
+                ED25519_DECOMPRESS_EVENT_NAME,
+                registration::EventHandler::shared(handler)
+            )
+            .unwrap()
+        );
     }
     let mut advice = AdviceStack::new();
     advice.append_elements(bytes_to_packed_u32_elements(pk));
@@ -373,10 +382,8 @@ fn run_program_with_handler(
 }
 
 /// Encodes a coordinate witness for the decompression loader's eight scalar advice pushes.
-fn decompression_advice(x: [u32; 8]) -> AdviceMutation {
-    let mut advice = AdviceStack::new();
-    advice.append_for_adv_push(&x.map(Felt::from_u32));
-    AdviceMutation::extend_advice_stack(advice)
+fn decompression_advice(advice: &mut AdviceRecorder<'_>, x: [u32; 8]) {
+    advice.prepend_stack(x.map(Felt::from_u32).into_iter().rev());
 }
 
 fn hex_bytes<const N: usize>(hex: &str) -> [u8; N] {

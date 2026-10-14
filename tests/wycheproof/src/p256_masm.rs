@@ -95,7 +95,7 @@ end
             advice.append_elements(public_key_limbs.into_iter().flatten());
             advice.append_elements(be_to_le_limbs(&r));
             advice.append_elements(be_to_le_limbs(&s));
-            let mut host = DefaultHost::default().with_library(&library).unwrap();
+            let mut host = DefaultHost::default().with_library(library.host_library()).unwrap();
             let result = FastProcessor::new_with_options(
                 StackInputs::default(),
                 AdviceInputs::default().with_stack(advice),

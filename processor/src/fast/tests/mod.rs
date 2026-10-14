@@ -26,8 +26,10 @@ use miden_debug_types::{
     ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan,
     Span, Uri,
 };
+use miden_event_handler::{AdviceRecorder, EventContext, EventError};
 use miden_mast_package::{
-    Package, PackageExport, PackageId, ProcedureExport, Section, SectionId, TargetType, Version,
+    Package, PackageDebugInfoError, PackageExport, PackageId, ProcedureExport, Section, SectionId,
+    TargetType, Version,
     debug_info::{
         DebugSourceAsmOp, DebugSourceNode, DebugSourceNodeId, PackageDebugInfo,
         PackageDebugInfoBuilder,
@@ -38,10 +40,8 @@ use rstest::rstest;
 
 use super::*;
 use crate::{
-    AdviceInputs, BaseHost, DefaultHost, LoadedMastForest, ProcessorState, ProgramExecutor,
-    SyncHost,
-    advice::{AdviceMap, AdviceMutation},
-    event::EventError,
+    AdviceInputs, BaseHost, DefaultHost, EventLibrary, LoadedMastForest, ProgramExecutor, SyncHost,
+    advice::AdviceMap,
     operation::OperationError,
     processor::{StackInterface, SystemInterface},
 };
@@ -49,6 +49,7 @@ use crate::{
 mod advice_provider;
 mod all_ops;
 mod arbitrary_forest;
+mod event_context;
 mod masm_consistency;
 mod memory;
 
@@ -495,7 +496,7 @@ fn source_debug_call_frames_preserve_external_tail_callers() {
         let package: Arc<Package> =
             Arc::from(assembler.assemble_program("program", source).unwrap());
         let mut host = DefaultHost::default();
-        host.load_library(library.clone()).unwrap();
+        host.load_library(code_only_library(&library)).unwrap();
         let chains = collect_package_debug_call_chains(package, host);
         assert!(
             chains.iter().any(|chain| chain.len() == callers.len() + 1
@@ -740,6 +741,15 @@ fn validated_debug_child_bearing_package_executes_with_debug_info() {
     assert_eq!(output.stack.get_element(0), Some(Felt::new_unchecked(4)));
 }
 
+/// Loads these code-only fixtures with the same trusted debug information as their packages.
+fn code_only_library(package: &Package) -> EventLibrary {
+    let debug_info = match package.debug_info() {
+        Err(PackageDebugInfoError::UntrustedSections) => Ok(None),
+        result => result,
+    };
+    EventLibrary::new(package.mast_forest().clone(), debug_info, [])
+}
+
 #[test]
 fn host_loaded_package_debug_info_reports_loaded_source_span() {
     let source_manager = Arc::new(DefaultSourceManager::default());
@@ -751,7 +761,7 @@ fn host_loaded_package_debug_info_reports_loaded_source_span() {
     let (program, caller_debug_info) = external_program_for_digest(target_digest);
     let mut host = DefaultHost::default()
         .with_source_manager(source_manager)
-        .with_library(Arc::new(loaded_package))
+        .with_library(code_only_library(&loaded_package))
         .expect("loaded package should register");
 
     let err = FastProcessor::new(StackInputs::default())
@@ -781,7 +791,7 @@ fn host_loaded_package_debug_info_requires_source_aware_execution() {
     let (program, _) = external_program_for_digest(target_digest);
     let mut plain_host = DefaultHost::default()
         .with_source_manager(source_manager.clone())
-        .with_library(Arc::new(loaded_package.clone()))
+        .with_library(code_only_library(&loaded_package))
         .expect("loaded package should register");
 
     let err = FastProcessor::new(StackInputs::default())
@@ -799,7 +809,7 @@ fn host_loaded_package_debug_info_requires_source_aware_execution() {
     let caller_debug_info = PackageDebugInfo::default();
     let mut source_aware_host = DefaultHost::default()
         .with_source_manager(source_manager)
-        .with_library(Arc::new(loaded_package))
+        .with_library(code_only_library(&loaded_package))
         .expect("loaded package should register");
     let err = FastProcessor::new(StackInputs::default())
         .execute_with_package_debug_info_sync(&program, &caller_debug_info, &mut source_aware_host)
@@ -829,7 +839,7 @@ fn host_loaded_package_debug_info_survives_missing_caller_entrypoint_root() {
     let caller_debug_info = PackageDebugInfo::default();
     let mut host = DefaultHost::default()
         .with_source_manager(source_manager)
-        .with_library(Arc::new(loaded_package))
+        .with_library(code_only_library(&loaded_package))
         .expect("loaded package should register");
 
     let err = FastProcessor::new(StackInputs::default())
@@ -859,7 +869,7 @@ fn host_loaded_package_debug_info_survives_step_execution() {
     let (program, caller_debug_info) = external_program_for_digest(target_digest);
     let mut host = DefaultHost::default()
         .with_source_manager(source_manager)
-        .with_library(Arc::new(loaded_package))
+        .with_library(code_only_library(&loaded_package))
         .expect("loaded package should register");
 
     let err = FastProcessor::new(StackInputs::default())
@@ -889,7 +899,7 @@ fn direct_step_with_package_debug_info_seeds_initial_resume_context() {
     let (program, caller_debug_info) = external_program_for_digest(target_digest);
     let mut host = DefaultHost::default()
         .with_source_manager(source_manager)
-        .with_library(Arc::new(loaded_package))
+        .with_library(code_only_library(&loaded_package))
         .expect("loaded package should register");
     let mut processor = FastProcessor::new(StackInputs::default());
     let mut resume_ctx = processor
@@ -929,7 +939,7 @@ fn host_loaded_stripped_package_executes_without_loaded_debug_info() {
     let (program, caller_debug_info) = external_program_for_digest(target_digest);
     let mut host = DefaultHost::default()
         .with_source_manager(source_manager)
-        .with_library(Arc::new(stripped_package))
+        .with_library(code_only_library(&stripped_package))
         .expect("stripped loaded package should register");
 
     let output =
@@ -954,7 +964,7 @@ fn host_loaded_stripped_package_restores_caller_debug_info() {
         external_then_fail_program_for_digest(source_manager.clone(), target_digest);
     let mut host = DefaultHost::default()
         .with_source_manager(source_manager)
-        .with_library(Arc::new(stripped_package))
+        .with_library(code_only_library(&stripped_package))
         .expect("stripped loaded package should register");
 
     let err = FastProcessor::new(StackInputs::default())
@@ -987,9 +997,9 @@ fn host_loaded_debug_info_survives_stripped_intermediate_package() {
     let (program, caller_debug_info) = external_program_for_digest(forwarder_digest);
     let mut host = DefaultHost::default()
         .with_source_manager(source_manager)
-        .with_library(Arc::new(forwarder_package))
+        .with_library(code_only_library(&forwarder_package))
         .expect("forwarder package should register")
-        .with_library(Arc::new(leaf_package))
+        .with_library(code_only_library(&leaf_package))
         .expect("leaf package should register");
 
     let err = FastProcessor::new(StackInputs::default())
@@ -1030,7 +1040,7 @@ fn host_loaded_ambiguous_debug_root_drops_precise_loaded_source_span() {
     let (program, caller_debug_info) = external_program_for_digest(target_digest);
     let mut host = DefaultHost::default()
         .with_source_manager(source_manager)
-        .with_library(Arc::new(loaded_package))
+        .with_library(code_only_library(&loaded_package))
         .expect("loaded package should register");
 
     let err = FastProcessor::new(StackInputs::default())
@@ -1526,7 +1536,7 @@ fn external_exec_propagates_inline_context_into_the_loaded_package() {
         .get_initial_resume_context_for_package(package)
         .expect("package resume context should initialize");
     let mut host = DefaultHost::default();
-    host.load_library(library).unwrap();
+    host.load_library(code_only_library(&library)).unwrap();
     let mut saw_target_context = false;
     let mut saw_context_cleared = false;
     loop {
@@ -1586,9 +1596,9 @@ fn nested_external_returns_restore_the_caller_before_resuming() {
 
     let mut host = DefaultHost::default()
         .with_source_manager(source_manager)
-        .with_library(Arc::new(forwarder_package))
+        .with_library(code_only_library(&forwarder_package))
         .expect("forwarder package should register")
-        .with_library(Arc::new(leaf_package))
+        .with_library(code_only_library(&leaf_package))
         .expect("leaf package should register");
     let mut processor = FastProcessor::new(StackInputs::default());
     let mut resume_context = processor
@@ -1947,8 +1957,12 @@ impl SyncHost for CountingMastForestHost {
             .cloned()
     }
 
-    fn on_event(&mut self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        Ok(Vec::new())
+    fn handle_event(
+        &mut self,
+        _context: EventContext<'_>,
+        _advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
+        Ok(())
     }
 }
 
@@ -1981,8 +1995,12 @@ impl SyncHost for MalformedExternalHost {
         Some(self.loaded_mast_forest.clone())
     }
 
-    fn on_event(&mut self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        Ok(Vec::new())
+    fn handle_event(
+        &mut self,
+        _context: EventContext<'_>,
+        _advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
+        Ok(())
     }
 }
 

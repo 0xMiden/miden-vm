@@ -1,14 +1,8 @@
 //! Advice for the proof-bound compressed Ed25519 point loader.
 
-use alloc::{vec, vec::Vec};
-
 use miden_core::{Felt, events::EventName};
+use miden_event_handler::{AdviceRecorder, EventContext, EventError, InvocationKind};
 use miden_precompiles::ed25519_decompress_x;
-use miden_processor::{
-    ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::EventError,
-};
 
 use super::packed_memory::read_memory_packed_u32;
 
@@ -24,12 +18,13 @@ pub const ED25519_DECOMPRESS_EVENT_NAME: EventName =
 /// Advice is arranged for `repeat.8 adv_push end` to leave x's eight u32 limbs on the operand
 /// stack in little-endian order, with the least-significant limb on top.
 pub fn handle_ed25519_decompress(
-    process: &ProcessorState<'_>,
-) -> Result<Vec<AdviceMutation>, EventError> {
-    let ptr = process.get_stack_item(1).as_canonical_u64();
-    let encoded = read_memory_packed_u32(process, ptr, COMPRESSED_POINT_BYTES)?;
+    context: EventContext<'_>,
+    advice: &mut AdviceRecorder<'_>,
+) -> Result<(), EventError> {
+    context.kind().require(InvocationKind::Event)?;
+    let ptr = context.stack_item(0).as_canonical_u64();
+    let encoded = read_memory_packed_u32(context, ptr, COMPRESSED_POINT_BYTES)?;
     let x = ed25519_decompress_x(encoded.try_into().expect("exactly 32 point bytes"))?;
-    let mut advice = AdviceStack::new();
-    advice.append_for_adv_push(&x.map(Felt::from_u32));
-    Ok(vec![AdviceMutation::extend_advice_stack(advice)])
+    advice.prepend_stack(x.map(Felt::from_u32).into_iter().rev());
+    Ok(())
 }

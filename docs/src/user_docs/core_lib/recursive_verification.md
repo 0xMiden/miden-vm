@@ -96,29 +96,29 @@ end
 
 ## Supplying the PVM proof
 
-`pvm::request_proof` emits a `miden_core_lib::PVM_PROOF_REQUEST_EVENT_NAME` event. A `Host::on_event`
-handler supplies the PVM proof and may await its generation or retrieval. The core library
+`pvm::request_proof` emits a `miden_core_lib::PVM_PROOF_REQUEST_EVENT_NAME` event. A `Host::handle_event`
+handler supplies the PVM proof through an `AdviceRecorder` and may await its generation or retrieval. The core library
 provides no default handler.
 
-At the event, the operand stack is `[event_id, VERIFIER_ROOT, D, ...]`. The handler then checks that `VERIFIER_ROOT` matches the PVM verifier your host supports, then obtains
+The `EventContext` payload starts with `[VERIFIER_ROOT, D, ...]`; the event ID is available through `context.id()`. The handler checks that `VERIFIER_ROOT` matches the PVM verifier your host supports, then obtains
 a PVM proof for `D` compatible with `VERIFIER_ROOT`. Generating it requires the original execution's deferred witness data.
 
 Package `pvm_proof` with `PvmRecursiveVerifierInputs::for_request`, which uses
 `pvm_proof.aggregate_root()` for the request key. For a single execution and hence for a single root, `pvm_proof.roots` is
-`[D]`. Return the advice map and Merkle nodes from the event handler:
+`[D]`. Record the advice map and Merkle nodes from the event handler:
 
 ```rust
 use miden_precompiles_verifier::masm_verifier::PvmRecursiveVerifierInputs;
-use miden_processor::advice::AdviceMutation;
 
 let package = PvmRecursiveVerifierInputs::for_request(verifier_root, &pvm_proof)?;
-let (advice, _) = package.into_parts();
-let (_, advice_map, store) = advice.into_parts();
+let (advice_inputs, _) = package.into_parts();
+let (_, advice_map, store) = advice_inputs.into_parts();
 
-Ok(vec![
-    AdviceMutation::extend_map(advice_map),
-    AdviceMutation::extend_merkle_store(store.inner_nodes()),
-])
+for (key, values) in advice_map {
+    advice.insert_map_entry(key, values);
+}
+advice.extend_merkle_store(store.inner_nodes());
+Ok(())
 ```
 
 `request_proof` loads advice under `proof_request_key(verifier_root, D)`. The PVM verifier checks

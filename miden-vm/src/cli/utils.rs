@@ -7,12 +7,12 @@ use miden_assembly::{
 use miden_core::program::Program;
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::{
-    EventHandlerSection, Package,
+    EventHandlerSection, Package, PackageDebugInfoError,
     debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
-use miden_processor::{DefaultHost, HostLibrary};
+use miden_processor::{DefaultHost, EventLibrary};
 use miden_prover::serde::Deserializable;
-use miden_wasm_event_handlers::{WasmHandlerLimits, host_library_from_package};
+use miden_wasm_event_handlers::{WasmHandlerLimits, event_library_from_package};
 
 use crate::cli::data::{Libraries, ProgramFile};
 
@@ -56,13 +56,20 @@ pub fn load_package_with_handlers(
     if let Some(section) = section {
         if loaded_handler_sections.contains(&section) {
             return host
-                .load_library(HostLibrary::from(package.clone()))
+                .load_library(EventLibrary::new(
+                    package.mast_forest().clone(),
+                    match package.debug_info() {
+                        Err(PackageDebugInfoError::UntrustedSections) => Ok(None),
+                        result => result,
+                    },
+                    [],
+                ))
                 .into_diagnostic()
                 .wrap_err("Failed to register the package's MAST forest");
         }
         loaded_handler_sections.push(section);
     }
-    let library = host_library_from_package(package, WasmHandlerLimits::default())
+    let library = event_library_from_package(package, WasmHandlerLimits::default())
         .into_diagnostic()
         .wrap_err("Failed to load the package's Wasm event handlers")?;
     host.load_library(library)

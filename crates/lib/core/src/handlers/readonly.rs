@@ -1,17 +1,14 @@
-//! No-op event handlers that never produce advice mutations and are therefore safe to ignore.
+//! Default no-op handlers for debugger observation events.
 //! Hosts that want to handle these events are expected to replace the no-op handlers.
 //!
-//! This enables communicating readonly events to hosts importing the core library without having
-//! to manually add these no-op handlers. This is a temporary solution. In the long-term, events
-//! themselves should be marked as readonly.
+//! These defaults accept either invocation kind. A custom handler may perform required host
+//! bookkeeping without producing advice; such bookkeeping must remain a regular event.
 
-use alloc::{sync::Arc, vec, vec::Vec};
+use alloc::{vec, vec::Vec};
 
-use miden_processor::{
-    ProcessorState,
-    advice::AdviceMutation,
-    event::{EventError, EventHandler, EventName},
-};
+use miden_core::events::EventName;
+use miden_event_handler::NoopHandler;
+use miden_processor::event::registration;
 
 // EVENT NAMES
 // ================================================================================================
@@ -34,17 +31,9 @@ pub const READONLY_MIDEN_DEBUG_UNKNOWN: EventName =
 pub const READONLY_MIDEN_DEBUG_PRINTLN: EventName =
     EventName::new("readonly::miden_debug::println");
 
-struct ReadonlyNoopHandler;
-
-impl EventHandler for ReadonlyNoopHandler {
-    fn on_event(&self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        Ok(vec![])
-    }
-}
-
 /// Returns no-op handlers for all readonly events.
-pub fn readonly_noop_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
-    let handler: Arc<dyn EventHandler> = Arc::new(ReadonlyNoopHandler);
+pub fn readonly_noop_event_handlers() -> Vec<(EventName, registration::EventHandler)> {
+    let handler: registration::EventHandler = NoopHandler.into();
     vec![
         (READONLY_MIDEN_DEBUG_FRAME_START, handler.clone()),
         (READONLY_MIDEN_DEBUG_FRAME_END, handler.clone()),
@@ -52,4 +41,12 @@ pub fn readonly_noop_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
         (READONLY_MIDEN_DEBUG_UNKNOWN, handler.clone()),
         (READONLY_MIDEN_DEBUG_PRINTLN, handler),
     ]
+}
+
+/// Legacy event-only handler list; use `readonly_noop_event_handlers` for unified delivery.
+#[allow(deprecated)] // Legacy facade.
+#[deprecated(note = "use readonly_noop_event_handlers for unified event and trace delivery")]
+pub fn readonly_noop_handlers()
+-> Vec<(EventName, alloc::sync::Arc<dyn miden_processor::event::EventHandler>)> {
+    super::legacy_handlers(readonly_noop_event_handlers())
 }

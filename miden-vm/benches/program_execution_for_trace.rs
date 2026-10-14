@@ -62,8 +62,9 @@ fn program_execution_for_trace(c: &mut Criterion) {
                     let stack_inputs = StackInputs::new(&stack_inputs_vec).unwrap();
                     bench.to_async(Runtime::new().unwrap()).iter_batched(
                         || {
+                            let core_lib = CoreLibrary::default();
                             let host = DefaultHost::default()
-                                .with_library(&CoreLibrary::default())
+                                .with_library(core_lib.host_library())
                                 .unwrap();
 
                             let processor = FastProcessor::new_with_options(

@@ -10,14 +10,15 @@ use miden_core::{
     mast::{BasicBlockNodeBuilder, MastForest, error_code_from_msg},
 };
 use miden_debug_types::{Location, SourceFile, SourceManager, SourceSpan};
+use miden_event_handler::{AdviceRecorder, EventContext, EventError, EventHandler};
 use miden_utils_testing::crypto::{init_merkle_leaves, init_merkle_store};
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
 use crate::{
-    BaseHost, DefaultHost, FastProcessor, KernelDescriptor, LoadedMastForest, ONE, ProcessorState,
-    Program, StackInputs, SyncHost, Word, ZERO,
-    advice::{AdviceInputs, AdviceMap, AdviceMutation},
-    event::{EventError, EventHandler, EventName, TraceError, TraceHandler},
+    BaseHost, DefaultHost, FastProcessor, KernelDescriptor, LoadedMastForest, ONE, Program,
+    StackInputs, SyncHost, Word, ZERO,
+    advice::{AdviceInputs, AdviceMap},
+    event::EventName,
     operation::Operation,
 };
 
@@ -41,7 +42,11 @@ struct DummyHostEventError;
 struct AlwaysFailEventHandler;
 
 impl EventHandler for AlwaysFailEventHandler {
-    fn on_event(&self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn handle(
+        &self,
+        _context: EventContext<'_>,
+        _advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
         Err(DummyHostEventError.into())
     }
 }
@@ -52,8 +57,12 @@ struct DummyHostTraceError;
 
 struct AlwaysFailTraceHandler;
 
-impl TraceHandler for AlwaysFailTraceHandler {
-    fn on_trace(&self, _process: &ProcessorState) -> Result<(), TraceError> {
+impl EventHandler for AlwaysFailTraceHandler {
+    fn handle(
+        &self,
+        _context: EventContext<'_>,
+        _advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
         Err(DummyHostTraceError.into())
     }
 }
@@ -61,11 +70,13 @@ impl TraceHandler for AlwaysFailTraceHandler {
 struct DuplicateMapMutationHandler;
 
 impl EventHandler for DuplicateMapMutationHandler {
-    fn on_event(&self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        Ok(vec![AdviceMutation::extend_map(AdviceMap::from_iter([(
-            Word::default(),
-            vec![ONE],
-        )]))])
+    fn handle(
+        &self,
+        _context: EventContext<'_>,
+        advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
+        advice.insert_map_entry(Word::default(), vec![ONE]);
+        Ok(())
     }
 }
 
@@ -124,8 +135,12 @@ impl SyncHost for MalformedMastForestHost {
         Some(LoadedMastForest::new(self.mast_forest.clone()))
     }
 
-    fn on_event(&mut self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        Ok(Vec::new())
+    fn handle_event(
+        &mut self,
+        _context: EventContext<'_>,
+        _advice: &mut AdviceRecorder<'_>,
+    ) -> Result<(), EventError> {
+        Ok(())
     }
 }
 
@@ -261,7 +276,7 @@ fn test_diagnostic_host_event_error_uses_emit_location() {
     let debug_info = package.debug_info().unwrap().unwrap();
     let program = package.unwrap_program();
     let mut host = DefaultHost::default().with_source_manager(source_manager);
-    host.register_handler(event.clone(), Arc::new(AlwaysFailEventHandler)).unwrap();
+    host.register_handler(event.clone(), AlwaysFailEventHandler).unwrap();
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
@@ -301,8 +316,7 @@ fn test_diagnostic_host_trace_error_uses_trace_location() {
     let debug_info = package.debug_info().unwrap().unwrap();
     let program = package.unwrap_program();
     let mut host = DefaultHost::default().with_source_manager(source_manager);
-    host.register_trace_handler(trace.clone(), Arc::new(AlwaysFailTraceHandler))
-        .unwrap();
+    host.register_handler(trace.clone(), AlwaysFailTraceHandler).unwrap();
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
@@ -340,7 +354,7 @@ fn test_diagnostic_host_event_advice_error_uses_emit_location() {
     let debug_info = package.debug_info().unwrap().unwrap();
     let program = package.unwrap_program();
     let mut host = DefaultHost::default().with_source_manager(source_manager);
-    host.register_handler(event, Arc::new(DuplicateMapMutationHandler)).unwrap();
+    host.register_handler(event, DuplicateMapMutationHandler).unwrap();
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default().with_map([(Word::default(), vec![ZERO])]))

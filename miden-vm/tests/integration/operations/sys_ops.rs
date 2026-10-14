@@ -1,9 +1,5 @@
-use miden_processor::{
-    ExecutionError, ProcessorState, ZERO,
-    event::{EventName, NoopEventHandler},
-    mast,
-    operation::OperationError,
-};
+use miden_event_handler::NoopHandler;
+use miden_processor::{ExecutionError, ZERO, event::EventName, mast, operation::OperationError};
 use miden_utils_testing::{build_op_test, expect_exec_error_matches};
 
 // SYSTEM OPS ASSERTIONS - MANUAL TESTS
@@ -91,8 +87,7 @@ fn emit() {
     let event_id = event_name.to_event_id().as_felt();
 
     let source = format!("push.{event_id} emit drop");
-    let test =
-        build_op_test!(&source, &[0, 0, 0, 0]).with_event_handler(event_name, NoopEventHandler);
+    let test = build_op_test!(&source, &[0, 0, 0, 0]).with_handler(event_name, NoopHandler);
     test.check_constraints();
 }
 
@@ -102,15 +97,5 @@ fn emit_trace_event_without_handler() {
 
     let source = format!("trace.event(\"{trace_name}\")");
     let test = build_op_test!(&source, &[0, 0, 0, 0]);
-    test.check_constraints();
-}
-
-#[test]
-fn emit_trace_event_with_handler() {
-    let trace_name = "test::emit_trace::handler";
-
-    let source = format!("trace.event(\"{trace_name}\")");
-    let test = build_op_test!(&source, &[0, 0, 0, 0])
-        .with_trace_handler(EventName::new(trace_name), |_: &ProcessorState| Ok(()));
     test.check_constraints();
 }

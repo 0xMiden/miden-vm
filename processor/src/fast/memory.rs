@@ -2,6 +2,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_air::trace::RowIndex;
 use miden_core::{EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO};
+use miden_event_handler::EventContextError;
 
 use crate::{ContextId, ExecutionOptions, MemoryAddress, MemoryError, processor::MemoryInterface};
 
@@ -157,8 +158,9 @@ impl Memory {
 
     /// Returns the entire memory state for the specified execution context.
     ///
-    /// The state is returned as a vector of (address, value) tuples, and includes addresses which
-    /// have been accessed at least once.
+    /// The state is returned as a vector of (address, value) tuples. A word is included after any
+    /// of its cells is written, including its zero-valued neighbours. Reads do not allocate
+    /// words.
     pub fn get_memory_state(&self, ctx: ContextId) -> Vec<(MemoryAddress, Felt)> {
         self.memory
             .iter()
@@ -212,6 +214,59 @@ impl Memory {
         let word = self.memory.get(&(ctx, addr)).copied();
 
         Ok(word)
+    }
+
+    /// Reads a contiguous range without allocating or modifying `output` on error.
+    ///
+    /// Unwritten cells contain zero, matching VM memory instructions.
+    pub(crate) fn read_range_for_event(
+        &self,
+        ctx: ContextId,
+        start: MemoryAddress,
+        output: &mut [Felt],
+    ) -> Result<(), EventContextError> {
+        let start = start.as_u32();
+        let count = output.len();
+        let count_u64 = u64::try_from(count).unwrap_or(u64::MAX);
+        let end = u64::from(start).saturating_add(count_u64);
+        if end > u64::from(u32::MAX) + 1 {
+            return Err(EventContextError::RangeOverflow {
+                start: u64::from(start),
+                count: count_u64,
+            });
+        }
+        if output.is_empty() {
+            return Ok(());
+        }
+
+        let (first_word_addr, offset) = split_addr(start);
+        let (last_word_addr, _) = split_addr((end - 1) as u32);
+        // Scalar, aligned-word, and partial-word reads all need just one lookup.
+        if first_word_addr == last_word_addr {
+            let word = self.memory.get(&(ctx, first_word_addr)).copied().unwrap_or(EMPTY_WORD);
+            let offset = offset as usize;
+            output.copy_from_slice(&word.as_elements()[offset..offset + count]);
+            return Ok(());
+        }
+
+        let words = self.memory.range((ctx, first_word_addr)..=(ctx, last_word_addr));
+        let start = u64::from(start);
+        let mut filled = 0;
+        // Validation is complete. Visit each stored word once, zeroing only the gaps.
+        for (&(_, word_addr), word) in words {
+            let word_addr = u64::from(word_addr);
+            let copy_start = start.max(word_addr);
+            let copy_end = end.min(word_addr + WORD_SIZE as u64);
+            let source_start = (copy_start - word_addr) as usize;
+            let target_start = (copy_start - start) as usize;
+            let copy_len = (copy_end - copy_start) as usize;
+            output[filled..target_start].fill(ZERO);
+            filled = target_start + copy_len;
+            output[target_start..filled]
+                .copy_from_slice(&word.as_elements()[source_start..source_start + copy_len]);
+        }
+        output[filled..].fill(ZERO);
+        Ok(())
     }
 
     // TEST HELPERS

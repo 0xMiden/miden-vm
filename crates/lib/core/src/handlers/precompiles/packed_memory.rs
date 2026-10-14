@@ -4,14 +4,12 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 
 use miden_core::{WORD_SIZE, utils::packed_u32_elements_to_bytes};
-use miden_processor::ProcessorState;
-
-use crate::handlers::read_uninitialized_memory_region;
+use miden_event_handler::EventContext;
 
 const BYTES_PER_U32: usize = size_of::<u32>();
 
 pub(super) fn read_memory_packed_u32(
-    process: &ProcessorState<'_>,
+    context: EventContext<'_>,
     start: u64,
     len_bytes: usize,
 ) -> Result<Vec<u8>, PackedMemoryError> {
@@ -32,8 +30,9 @@ pub(super) fn read_memory_packed_u32(
         .checked_next_multiple_of(BYTES_PER_U32)
         .ok_or(PackedMemoryError::AddressOverflow { start, len_bytes })?;
 
-    let felts = read_uninitialized_memory_region(process, start, len_felts_u64)
-        .ok_or(PackedMemoryError::MemoryAccessFailed { address: start_u32 })?;
+    let felts = context
+        .memory_slice(start, len_felts_u64)
+        .map_err(|_| PackedMemoryError::MemoryAccessFailed { address: start_u32 })?;
 
     for (offset, felt) in felts.iter().enumerate() {
         let value = felt.as_canonical_u64();
