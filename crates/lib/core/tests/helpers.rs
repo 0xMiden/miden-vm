@@ -124,6 +124,28 @@ fn assert_manual_graph(
     witness
 }
 
+/// Checks a nonzero stack tail beneath a signature call while preserving recovery results.
+pub fn signature_source_with_stack_tail(source: &str, procedure: &str) -> String {
+    let mut check = String::new();
+    // Expose the tail beneath recovery's sixteen result limbs, then restore those results.
+    // This scratch area is separate from the message, signature, and Ed25519 scratch fixtures.
+    if procedure.starts_with("recover") {
+        for ptr in [4096, 4100, 4104, 4108] {
+            check.push_str(&format!("push.{ptr} mem_storew_le dropw "));
+        }
+    }
+    check.push_str("push.99.98.97.96 assert_eqw.err=\"signature overwrote stack tail\" ");
+    if procedure.starts_with("recover") {
+        for ptr in [4108, 4104, 4100, 4096] {
+            check.push_str(&format!("padw push.{ptr} mem_loadw_le "));
+        }
+    }
+    let truncate = "exec.::miden::core::sys::truncate_stack";
+    source
+        .replacen("begin", "begin push.99.98.97.96", 1)
+        .replace(truncate, &format!("{check}{truncate}"))
+}
+
 /// Exports the operation's root, optionally composing it with an independent caller root.
 /// Both paths consume the root-first return while preserving the native result layout.
 pub fn manual_signature_source(

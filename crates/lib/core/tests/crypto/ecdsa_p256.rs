@@ -943,7 +943,10 @@ fn assert_failed_assertion(result: Result<ExecutionOutput, ExecutionError>, mess
 
 #[test]
 fn manual_signature_variants_export_all_obligations_and_preserve_results() {
-    use crate::helpers::{assert_manual_signature_matches_native, manual_signature_source};
+    use crate::helpers::{
+        assert_manual_signature_matches_native, manual_signature_source,
+        signature_source_with_stack_tail,
+    };
 
     let fixture = valid_fixture();
     let message_bytes = fixture.message.as_bytes();
@@ -993,6 +996,21 @@ fn manual_signature_variants_export_all_obligations_and_preserve_results() {
                 obligations - 1,
                 composed,
             );
+            if composed {
+                let tail_source = signature_source_with_stack_tail(&source, procedure);
+                let tail_native = run_core_program(&tail_source, advice, None).unwrap();
+                let tail_source =
+                    manual_signature_source(&tail_source, "ecdsa_p256_sha256", procedure, true);
+                let tail_manual = run_core_program(&tail_source, advice, None).unwrap();
+                assert_eq!(tail_native.stack, native.stack);
+                assert_manual_signature_matches_native(
+                    &tail_native,
+                    &tail_manual,
+                    obligations,
+                    obligations - 1,
+                    true,
+                );
+            }
             if procedure == "verify" || procedure == "verify_bytes" {
                 let wrong = manual_source.replace(&commitment, &masm_push_word(&Word::default()));
                 assert!(run_core_program(&wrong, advice, None).is_err());

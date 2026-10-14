@@ -336,7 +336,7 @@ fn core_ecdsa_k256_keccak_verify_cycle_baseline() {
     // The parent fixture used 1191 cycles. Independent obligation roots compose into one
     // signature subgraph, which the native wrapper logs once. Primitive native hashing
     // baselines remain separate.
-    assert_eq!(cycles, 1324);
+    assert_eq!(cycles, 1258);
 }
 
 #[test]
@@ -715,7 +715,10 @@ fn tamper_felt(felt: &mut Felt) {
 
 #[test]
 fn manual_signature_variants_export_all_obligations_and_preserve_results() {
-    use crate::helpers::{assert_manual_signature_matches_native, manual_signature_source};
+    use crate::helpers::{
+        assert_manual_signature_matches_native, manual_signature_source,
+        signature_source_with_stack_tail,
+    };
 
     let fixture = valid_fixture();
     let message_bytes = fixture.message.as_bytes();
@@ -763,6 +766,21 @@ fn manual_signature_variants_export_all_obligations_and_preserve_results() {
                 obligations - 1,
                 composed,
             );
+            if composed {
+                let tail_source = signature_source_with_stack_tail(&source, procedure);
+                let tail_native = run_core_program_with_advice(&tail_source, advice).unwrap();
+                let tail_source =
+                    manual_signature_source(&tail_source, "ecdsa_k256_keccak", procedure, true);
+                let tail_manual = run_core_program_with_advice(&tail_source, advice).unwrap();
+                assert_eq!(tail_native.stack, native.stack);
+                assert_manual_signature_matches_native(
+                    &tail_native,
+                    &tail_manual,
+                    obligations,
+                    obligations - 1,
+                    true,
+                );
+            }
             if procedure == "verify" || procedure == "verify_bytes" {
                 let wrong = manual_source.replace(&commitment, &masm_push_word(&Word::default()));
                 assert!(run_core_program_with_advice(&wrong, advice).is_err());

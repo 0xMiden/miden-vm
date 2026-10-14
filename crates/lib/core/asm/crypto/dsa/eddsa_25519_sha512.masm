@@ -116,7 +116,7 @@ end
 #! obligation, for example using precompiles::append_root.
 #! Input: [PK_COMM, MSG_PTR, MSG_LEN_BYTES, SCRATCH_PTR, ...]
 #! Output: [ROOT, ...]
-@locals(8)
+@locals(4)
 pub proc verify_bytes_with_root(
     public_key: eidos::Digest,
     message_ptr: ptr<u32>,
@@ -175,54 +175,64 @@ pub proc verify_bytes_with_root(
     padw adv_loadw
     swapw
     exec.ed25519_scalar::load
-    exec.ed25519_scalar::eval_with_root
-    # => [S_ROOT, S_U32[8], OFFSET, SQRT, ...]
-    # The scalar limbs and two constants fill the accessible stack window. Keep the accumulated
-    # obligation in locals 4..8 while these operands are consumed by subsequent phases.
-    loc_storew_le.4 dropw
-    exec.ed25519_order::load
+    # => [S_EXPR, OFFSET, SQRT, ...]
+    # Keep the canonical scalar expression buried until the point decoders consume the constants.
     swapw.2
-    # => [SQRT, OFFSET, S, ...]
+    # => [SQRT, OFFSET, S_EXPR, ...]
 
     # Preserve one copy of each constant for R while decoding A first.
     dupw.1 dupw.1
     loc_load.SCRATCH_PTR_LOCAL add.PREIMAGE_A_OFFSET
     exec.load_compressed_point
-    # => [A_ROOT, A, SQRT, OFFSET, S, ...]
-    locaddr.4 exec.precompiles::append_root_ptr
-    # => [A, SQRT, OFFSET, S, ...]
-    movdnw.2
+    # => [A_ROOT, A, SQRT, OFFSET, S_EXPR, ...]
+    movdnw.3 movdnw.2
+    # => [SQRT, OFFSET, A, A_ROOT, S_EXPR, ...]
     loc_load.SCRATCH_PTR_LOCAL
     exec.load_compressed_point
-    # => [R_ROOT, R, A, S, ...]
-    locaddr.4 exec.precompiles::append_root_ptr
-    # => [R, A, S, ...]
+    # => [R_ROOT, R, A, A_ROOT, S_EXPR, ...]
+    movupw.3 exec.precompiles::append_root
+    # => [POINT_ROOT, R, A, S_EXPR, ...]
+
+    # Widen the canonical S into the complete-order ring after its eight limbs have room.
+    # Roots remain on the stack, including while they are temporarily below the top sixteen felts.
+    movupw.3 exec.ed25519_scalar::eval_with_root
+    # => [S_ROOT, S_U32[8], POINT_ROOT, R, A, ...]
+    movdnw.2 exec.ed25519_order::load
+    # => [S, S_ROOT, POINT_ROOT, R, A, ...]
+    movdnw.2 exec.precompiles::append_root
+    # => [ROOT, S, R, A, ...]
 
     # Both encodings are now represented by point digests. The SHA helper registers and hashes
     # the complete preimage before writing its output, so its 16-felt result can overwrite scratch.
     loc_load.SCRATCH_PTR_LOCAL loc_load.MSG_LEN_LOCAL add.PREIMAGE_PREFIX_BYTES
     loc_load.SCRATCH_PTR_LOCAL
     exec.sha512::hash_bytes_mem_with_root
-    # => [HASH_ROOT, ...]
-    locaddr.4 exec.precompiles::append_root_ptr
+    # => [HASH_ROOT, ROOT, S, R, A, ...]
+    exec.precompiles::append_root
+    swapw.2 swapw.3 swapw.2
+    # => [ROOT, S, A, R, ...]
     # SHA-512 digest bytes already form the little-endian 512-bit challenge integer.
     loc_load.SCRATCH_PTR_LOCAL exec.ed25519_scalar::load_reduced_512_mem
     exec.ed25519_scalar::eval_with_root
-    # => [K_ROOT, K_U32[8], R, A, S, ...]
-    locaddr.4 exec.precompiles::append_root_ptr
-    exec.ed25519_order::load
+    # => [K_ROOT, K_U32[8], ROOT, S, A, R, ...]
+    movdnw.2 exec.ed25519_order::load
+    # => [K, K_ROOT, ROOT, S, A, R, ...]
+    movdnw.2 exec.precompiles::append_root
+    # => [ROOT, K, S, A, R, ...]
+    movdnw.3
+    # => [K, S, A, ROOT, R, ...]
     # The curve MSM uses the complete-order ring (8l), so negate k in that domain. This is
     # [8l-k] for nonzero k and zero for k=0, exactly the coefficient of -[k]A.
     exec.ed25519_order::push_zero_digest exec.ed25519_order::sub
-    # => [-k, R, A, S, ...]
-    swapw.2 swapdw swapw
-    # => [S, -k, A, R, ...]
+    # => [-k, S, A, ROOT, R, ...]
+    swapw
+    # => [S, -k, A, ROOT, R, ...]
     exec.ed25519::msm2_generator
-    # => [[s]B + [-k]A, R, ...]
+    # => [[s]B + [-k]A, ROOT, R, ...]
     # These are deferred point expressions; compare their values through the curve relation.
-    swapw exec.ed25519::assert_eq_with_root
-    # => [SIGNATURE_ROOT, ...]
-    padw loc_loadw_le.4 exec.precompiles::append_root
+    movupw.2 exec.ed25519::assert_eq_with_root
+    # => [SIGNATURE_ROOT, ROOT, ...]
+    exec.precompiles::append_root
     # => [ROOT, ...]
 end
 
@@ -235,7 +245,6 @@ end
 #! Output: [ROOT, POINT, ...]
 #! The event supplies x's eight u32 limbs for `repeat.8 adv_push end`, leaving x0 on top.
 #! Field/curve relations bind this advice to the compressed encoding.
-@locals(4)
 proc load_compressed_point(
     ptr: ptr<u32>,
     sqrt_minus_486664: ed25519_base::Expr,
@@ -269,32 +278,36 @@ proc load_compressed_point(
     swapw exec.ed25519_base::push_one_digest exec.ed25519_base::sub
     exec.ed25519_base::inv_with_root
     # => [Y_INVERSE_ROOT, Y_INVERSE, ONE_PLUS_Y, X_DIGEST, SQRT, OFFSET, ...]
-    # U, X, SQRT, and OFFSET fill the accessible stack window during the birational map.
-    loc_storew_le.0 dropw
+    movdnw.3
+    # => [Y_INVERSE, ONE_PLUS_Y, X_DIGEST, Y_INVERSE_ROOT, SQRT, OFFSET, ...]
     exec.ed25519_base::mul
-    # => [U_DIGEST, X_DIGEST, SQRT, OFFSET, ...]
+    # => [U_DIGEST, X_DIGEST, Y_INVERSE_ROOT, SQRT, OFFSET, ...]
 
     # Y = sqrt(-486664)*u/x. Inverting x rejects both x=0 exceptional encodings.
     swapw exec.ed25519_base::inv_with_root
-    # => [X_INVERSE_ROOT, X_INVERSE, U_DIGEST, SQRT, OFFSET, ...]
-    locaddr.0 exec.precompiles::append_root_ptr
+    # => [X_INVERSE_ROOT, X_INVERSE, U_DIGEST, Y_INVERSE_ROOT, SQRT, OFFSET, ...]
+    movupw.3 exec.precompiles::append_root
+    # => [INVERSE_ROOT, X_INVERSE, U_DIGEST, SQRT, OFFSET, ...]
+    movdnw.3
+    # => [X_INVERSE, U_DIGEST, SQRT, INVERSE_ROOT, OFFSET, ...]
     dupw.1 exec.ed25519_base::mul
     movupw.2 exec.ed25519_base::mul
-    # => [MAPPED_Y, U_DIGEST, OFFSET, ...]
+    # => [MAPPED_Y, U_DIGEST, INVERSE_ROOT, OFFSET, ...]
 
     # X = u + 486662/3.
-    swapw movupw.2 exec.ed25519_base::add
+    swapw movupw.3 exec.ed25519_base::add
     exec.ed25519::load_digest_pair
+    # => [POINT, INVERSE_ROOT, ...]
 
     # Preserve P while testing [8]P. This rejects small-order points without requiring P to
     # lie in the prime-order subgroup, matching the strict verification acceptance policy.
     dupw
     repeat.3 dupw exec.ed25519::add end
     exec.ed25519::is_identity_with_root
-    # => [IDENTITY_ROOT, is_identity, POINT, ...]
+    # => [IDENTITY_ROOT, is_identity, POINT, INVERSE_ROOT, ...]
     movup.4 assertz.err="small-order Ed25519 point"
-    # => [IDENTITY_ROOT, POINT, ...]
-    padw loc_loadw_le.0 exec.precompiles::append_root
+    # => [IDENTITY_ROOT, POINT, INVERSE_ROOT, ...]
+    movupw.2 exec.precompiles::append_root
     # => [ROOT, POINT, ...]
 end
 

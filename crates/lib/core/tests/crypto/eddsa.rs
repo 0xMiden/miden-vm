@@ -395,7 +395,10 @@ fn add_ed25519_base_modulus(value: [u32; 8]) -> [u32; 8] {
 
 #[test]
 fn manual_ed25519_word_and_bytes_export_all_nested_bindings() {
-    use crate::helpers::{assert_manual_signature_matches_native, manual_signature_source};
+    use crate::helpers::{
+        assert_manual_signature_matches_native, manual_signature_source,
+        signature_source_with_stack_tail,
+    };
 
     let key = SigningKey::read_from_bytes(&[42; 32]).unwrap();
     let message = Word::new([1, 2, 3, 4].map(Felt::from_u32));
@@ -416,6 +419,15 @@ fn manual_ed25519_word_and_bytes_export_all_nested_bindings() {
                 manual_signature_source(&source, "eddsa_25519_sha512", procedure, composed);
             let manual = run_program(&manual_source, &pk, &sig).unwrap();
             assert_manual_signature_matches_native(&native, &manual, 10, 9, composed);
+            if composed {
+                let tail_source = signature_source_with_stack_tail(&source, procedure);
+                let tail_native = run_program(&tail_source, &pk, &sig).unwrap();
+                let tail_source =
+                    manual_signature_source(&tail_source, "eddsa_25519_sha512", procedure, true);
+                let tail_manual = run_program(&tail_source, &pk, &sig).unwrap();
+                assert_eq!(tail_native.stack, native.stack);
+                assert_manual_signature_matches_native(&tail_native, &tail_manual, 10, 9, true);
+            }
             let wrong = manual_source.replace(&commitment, &masm_push_word(&Word::default()));
             assert!(run_program(&wrong, &pk, &sig).is_err());
         }

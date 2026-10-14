@@ -321,23 +321,20 @@ end
 #! Input:  [Z_U32[8], pubkey_ptr, ...]
 #! Advice: [SIG_R[8] | SIG_S[8] | ...]
 #! Output: [ROOT, ...]
-@locals(4)
 proc verify_digest(
     prehash: Prehash,
     public_key_ptr: ptr<PublicKey>,
 ) -> precompiles::Digest
     exec.prepare_verify_inputs
-    # => [INVERSE_ROOT, U1, Q, U2, SIG_R, ...]
-    # The four MSM input digests fill the accessible stack window.
-    loc_storew_le.0 dropw
-    # => [U1, Q, U2, SIG_R, ...]
+    # => [U1, Q, U2, INVERSE_ROOT, SIG_R, ...]
     exec.secp256k1::push_generator
-    # => [G, U1, Q, U2, SIG_R, ...]
+    # => [G, U1, Q, U2, INVERSE_ROOT, SIG_R, ...]
     exec.secp256k1::msm2
-    # => [VERIFY_POINT, SIG_R, ...]
+    # => [VERIFY_POINT, INVERSE_ROOT, SIG_R, ...]
+    swapw movdnw.2
+    # => [VERIFY_POINT, SIG_R, INVERSE_ROOT, ...]
     exec.assert_x_eq_scalar_k1
-    # => [POINT_CHECK_ROOT, ...]
-    padw loc_loadw_le.0
+    # => [POINT_CHECK_ROOT, INVERSE_ROOT, ...]
     exec.precompiles::append_root
     # => [ROOT, ...]
 end
@@ -351,7 +348,7 @@ end
 #! `SIG_PTR` is word-aligned and addresses `R_LE_U32[8] || S_LE_U32[8] || V`, with V = 27 or 28.
 #! The recovery event supplies only the candidate `QX[8] || QY[8]`; all witness data is loaded
 #! independently from memory and the advice point is constrained before it is returned.
-@locals(20)
+@locals(16)
 proc recover_digest(
     digest_ptr: ptr<Prehash>,
     signature_ptr: ptr<RecoverySignature>,
@@ -385,27 +382,30 @@ proc recover_digest(
     # => [SIG_S, SIG_R, Z, Q, SIG_R_BASE, recovery_parity, ...]
 
     exec.compute_ecdsa_scalars
-    # => [INVERSE_ROOT, U1, Q, U2, SIG_R, SIG_R_BASE, recovery_parity, ...]
-    loc_storew_le.16 dropw
-    # => [U1, Q, U2, SIG_R, SIG_R_BASE, recovery_parity, ...]
+    # => [U1, Q, U2, INVERSE_ROOT, SIG_R, SIG_R_BASE, recovery_parity, ...]
     exec.secp256k1::push_generator
-    # => [G, U1, Q, U2, SIG_R, SIG_R_BASE, recovery_parity, ...]
+    # => [G, U1, Q, U2, INVERSE_ROOT, SIG_R, SIG_R_BASE, recovery_parity, ...]
     exec.secp256k1::msm2
-    # => [RECOVERY_POINT, SIG_R, SIG_R_BASE, recovery_parity, ...]
-    swapw dropw
-    # => [RECOVERY_POINT, SIG_R_BASE, recovery_parity, ...]
+    # => [RECOVERY_POINT, INVERSE_ROOT, SIG_R, SIG_R_BASE, recovery_parity, ...]
+    swapw.2 dropw
+    # => [INVERSE_ROOT, RECOVERY_POINT, SIG_R_BASE, recovery_parity, ...]
+    movdnw.2
+    movup.12 movdn.8
+    # => [RECOVERY_POINT, SIG_R_BASE, recovery_parity, INVERSE_ROOT, ...]
     exec.assert_recovery_point
-    # => [POINT_CHECK_ROOT, ...]
-    locaddr.16 exec.precompiles::append_root_ptr
-    # => [...]
+    # => [POINT_CHECK_ROOT, INVERSE_ROOT, ...]
+    exec.precompiles::append_root
+    # => [ROOT, ...]
 
     # Return the now-constrained point in the same native layout used for public-key commitments.
-    padw loc_loadw_le.12
-    padw loc_loadw_le.8
-    padw loc_loadw_le.4
-    padw loc_loadw_le.0
-    # => [QX[8] | QY[8], ...]
-    padw loc_loadw_le.16
+    # Keep ROOT above each loaded word rather than retrieving it below all sixteen limbs.
+    padw loc_loadw_le.12 swapw
+    # => [ROOT, QY_HI[4], ...]
+    padw loc_loadw_le.8 swapw
+    # => [ROOT, QY[8], ...]
+    padw loc_loadw_le.4 swapw
+    # => [ROOT, QX_HI[4], QY[8], ...]
+    padw loc_loadw_le.0 swapw
     # => [ROOT, QX[8], QY[8], ...]
 end
 
@@ -462,7 +462,7 @@ end
 #!
 #! Input:  [Z_U32[8], pubkey_ptr, ...]
 #! Advice: [SIG_R[8] | SIG_S[8] | ...]
-#! Output: [ROOT, U1_DIGEST, Q_DIGEST, U2_DIGEST, SIG_R_DIGEST, ...]
+#! Output: [U1_DIGEST, Q_DIGEST, U2_DIGEST, ROOT, SIG_R_DIGEST, ...]
 #!
 #! Preconditions/provenance:
 #! - Z_U32[8] is the Keccak256 message digest converted to little-endian scalar limbs;
@@ -471,7 +471,7 @@ end
 proc prepare_verify_inputs(
     prehash: Prehash,
     public_key_ptr: ptr<PublicKey>,
-) -> (precompiles::Digest, k1_scalar::Expr, secp256k1::Point, k1_scalar::Expr, k1_scalar::Expr)
+) -> (k1_scalar::Expr, secp256k1::Point, k1_scalar::Expr, precompiles::Digest, k1_scalar::Expr)
     exec.k1_scalar::load_reduced_256
     # => [Z, pubkey_ptr, ...]
 
@@ -486,7 +486,7 @@ proc prepare_verify_inputs(
     # => [SIG_S, SIG_R, Z, Q, ...]
 
     exec.compute_ecdsa_scalars
-    # => [ROOT, U1, Q, U2, SIG_R, ...]
+    # => [U1, Q, U2, ROOT, SIG_R, ...]
 end
 
 #! Loads a native EVM recovery witness before any procedure-local writes can alias its memory.
@@ -552,18 +552,17 @@ end
 #! Checks the ECDSA signature scalars and computes `U1 = z/s` and `U2 = r/s`.
 #!
 #! Input:  [SIG_S, SIG_R, Z, Q, ...]
-#! Output: [ROOT, U1, Q, U2, SIG_R, ...]
+#! Output: [U1, Q, U2, ROOT, SIG_R, ...]
 #!
 #! SIG_R/S are canonical k1-scalar VALUE digests from the scalar loaders; Z is a k1-scalar
 #! expression digest from `load_reduced_256`; Q originates from `secp256k1::load_mem`. Thus direct
 #! comparison of SIG_R with the pinned zero VALUE digest is sound.
-@locals(4)
 proc compute_ecdsa_scalars(
     s: k1_scalar::Expr,
     r: k1_scalar::Expr,
     z: k1_scalar::Expr,
     q: secp256k1::Point,
-) -> (precompiles::Digest, k1_scalar::Expr, secp256k1::Point, k1_scalar::Expr, k1_scalar::Expr)
+) -> (k1_scalar::Expr, secp256k1::Point, k1_scalar::Expr, precompiles::Digest, k1_scalar::Expr)
     # Inversion rejects s = 0; check r explicitly.
     dupw.1
     exec.k1_scalar::push_zero_digest
@@ -571,31 +570,24 @@ proc compute_ecdsa_scalars(
     assertz.err="invalid ECDSA signature: r is zero"
     # => [SIG_S, SIG_R, Z, Q, ...]
 
+    # Keep the final SIG_R copy below the arithmetic inputs before inversion adds its root.
+    swapdw movupw.2 dupw.3 swapw
+    # => [SIG_S, SIG_R, Z, Q, SIG_R, ...]
     exec.k1_scalar::inv_with_root
-    # => [INVERSE_ROOT, S_INV, SIG_R, Z, Q, ...]
-    # Retain the obligation while all four expressions are needed for the scalar arithmetic.
-    loc_storew_le.0 dropw
-    # => [S_INV, SIG_R, Z, Q, ...]
+    # => [INVERSE_ROOT, S_INV, SIG_R, Z, Q, SIG_R, ...]
+    movdnw.3
+    # => [S_INV, SIG_R, Z, INVERSE_ROOT, Q, SIG_R, ...]
 
-    dupw
-    movupw.3
+    dupw movupw.2
     exec.k1_scalar::mul
-    # => [U1 = Z*S_INV, S_INV, SIG_R, Q, ...]
+    # => [U2 = SIG_R*S_INV, S_INV, Z, INVERSE_ROOT, Q, SIG_R, ...]
 
-    dupw.1
-    dupw.3
+    swapw movupw.2
     exec.k1_scalar::mul
-    # => [U2 = SIG_R*S_INV, U1, S_INV, SIG_R, Q, ...]
-
-    swapw.2
-    # => [S_INV, U1, U2, SIG_R, Q, ...]
-    dropw
-    # => [U1, U2, SIG_R, Q, ...]
+    # => [U1 = Z*S_INV, U2, INVERSE_ROOT, Q, SIG_R, ...]
 
     movupw.3 swapw
-    # => [U1, Q, U2, SIG_R, ...]
-    padw loc_loadw_le.0
-    # => [ROOT, U1, Q, U2, SIG_R, ...]
+    # => [U1, Q, U2, INVERSE_ROOT, SIG_R, ...]
 end
 
 #! Evaluates VERIFY_POINT once, rejects the identity, reduces x(VERIFY_POINT) modulo n, and
