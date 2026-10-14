@@ -30,10 +30,11 @@ payload claims retain their declared work; MSM admission covers either lowering 
 reductions retain O(n log n) term processing for the fixed scalar width. After import, the prover
 checks estimated memory immediately before trace allocation and proving; this does not cap import
 or preparation allocations.
-Batch-count and proving-memory failures are capacity errors. Default-limit calibration is
-separate follow-up work. See the [admission and migration contract](
+Batch-count and proving-memory failures are capacity errors. Admission defaults bound declared work
+independently of algorithm-specific supported-input ceilings and aggregate proving capacity; a batch
+of admitted witnesses can still exceed the memory budget. See the [admission and migration contract](
 ../../docs/src/design/deferred/semantics.md#witness-preparation-and-admission) for checked-node
-ownership, error changes, capacity handling, and calibration requirements.
+ownership, default values, error changes, capacity handling, and remaining calibration work.
 
 ## Build
 

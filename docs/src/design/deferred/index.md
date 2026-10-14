@@ -264,5 +264,6 @@ deferred operation, while verification limits account every explicit node in the
 root-reachable witness before commitment hashing or evaluation. Batches and proofs share a
 128-root ceiling, with no aggregate logical-work admission.
 Prover memory is estimated after import and checked before trace allocation; default admission-limit
-calibration remains separate follow-up work. The external STARK that verifies a committed DAG, the
-**Precompile VM**, is described in GitHub discussion #3005.
+values are documented in the [admission contract](./semantics.md#witness-preparation-and-admission)
+and do not guarantee that maximal admitted work fits the proving-memory budget. The external STARK
+that verifies a committed DAG, the **Precompile VM**, is described in GitHub discussion #3005.
