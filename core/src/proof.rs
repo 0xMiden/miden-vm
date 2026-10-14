@@ -28,17 +28,17 @@ const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
 
 /// The recursive VM verifier root declared by proofs from the current prover.
 pub const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(3888939917915676318),
-    crate::Felt::new_unchecked(5248204768907221866),
-    crate::Felt::new_unchecked(4678865532793718149),
-    crate::Felt::new_unchecked(2289431476753270917),
+    crate::Felt::new_unchecked(5179813136823985417),
+    crate::Felt::new_unchecked(5312242887441553515),
+    crate::Felt::new_unchecked(4097580854916300360),
+    crate::Felt::new_unchecked(72336355905753543),
 ]);
 /// The recursive precompile verifier root declared by proofs from the current prover.
 pub const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(5535101693158110802),
-    crate::Felt::new_unchecked(3354858845263878736),
-    crate::Felt::new_unchecked(4666845482925451385),
-    crate::Felt::new_unchecked(8251708314544882643),
+    crate::Felt::new_unchecked(4048196284829847270),
+    crate::Felt::new_unchecked(5387021284814271710),
+    crate::Felt::new_unchecked(538758927063010471),
+    crate::Felt::new_unchecked(1361279841018483989),
 ]);
 
 // HASH FUNCTION

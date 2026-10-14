@@ -93,7 +93,7 @@ impl Eidos {
     /// Construct an initial chaining value from a registered domain tag and three parameters.
     ///
     /// The domain defines the construction and the meaning of its parameters. Every supplied
-    /// value occupies one complete low u32 lane; the corresponding high lane is a fixed masked IV
+    /// value occupies one complete low u32 lane; the corresponding high lane is a fixed IV
     /// word.
     #[inline]
     pub fn init_chaining_word_with_params<D: EidosDomain>(_: D, params: [u32; 3]) -> Word {
@@ -221,7 +221,7 @@ impl Eidos {
     /// use [`Self::merge`] directly.
     #[inline]
     pub fn merkle_node_init_chaining_word() -> Word {
-        encoding::mask_and_pack_word(MERKLE_NODE_INIT_CV)
+        Word::new(framing::init_u64_cv(0, [0; 3]).map(Felt::new_unchecked))
     }
 
     /// Compress two packed digest words as reserved Merkle inner nodes in every packed lane.

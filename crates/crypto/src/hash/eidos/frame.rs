@@ -69,7 +69,7 @@ impl EidosFrame {
     /// Derives the initial chaining word for this frame.
     #[inline]
     pub fn initial_chaining_word(self) -> Word {
-        encoding::mask_and_pack_word(framing::init_cv(self.domain.as_u32(), self.params))
+        Word::new(framing::init_u64_cv(self.domain.as_u32(), self.params).map(Felt::new_unchecked))
     }
 
     /// Recovers a frame from an initial chaining word produced by Eidos framing.
@@ -144,15 +144,18 @@ mod tests {
     #[test]
     fn initial_chaining_word_rejects_wrong_fixed_lanes() {
         let frame = EidosFrame::for_domain(GENERIC_FELT_SEQUENCE, [1, 2, 3]);
-        let mut lanes = encoding::word_to_cv(frame.initial_chaining_word());
-        for index in [1, 3, 5, 7] {
-            let original = lanes[index];
-            lanes[index] ^= 1;
-            assert_eq!(
-                EidosFrame::from_initial_chaining_word(encoding::mask_and_pack_word(lanes)),
-                None
-            );
-            lanes[index] = original;
+        for index in 0..4 {
+            let mut values = frame.initial_chaining_word().into_elements();
+            values[index] = Felt::new_unchecked(values[index].as_canonical_u64() ^ (1 << 32));
+            assert_eq!(EidosFrame::from_initial_chaining_word(Word::new(values)), None);
         }
+    }
+
+    #[test]
+    fn initial_chaining_word_rejects_masked_iv() {
+        let frame = EidosFrame::for_domain(GENERIC_FELT_SEQUENCE, [0; 3]);
+        let masked =
+            encoding::mask_and_pack_word(encoding::word_to_cv(frame.initial_chaining_word()));
+        assert_eq!(EidosFrame::from_initial_chaining_word(masked), None);
     }
 }

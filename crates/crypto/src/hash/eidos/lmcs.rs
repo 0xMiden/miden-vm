@@ -4,6 +4,7 @@
 //! the eight-Felt block width, and the total padded length is bound in the initial chaining value.
 //! Matrix metadata fixes the row boundaries and widths. Internal nodes use the reserved Merkle
 //! inner-node construction and remain separated from leaves.
+//! An empty leaf returns the initial CV without compression.
 
 use alloc::vec::Vec;
 
@@ -96,6 +97,11 @@ impl StatefulHasher<Felt, Digest> for EidosLmcsHasher {
     }
 
     fn absorb_into(&self, state: &mut Self::State, input: impl IntoIterator<Item = Felt>) {
+        let mut input = input.into_iter().peekable();
+        // Without compression, output packing would clear the initial CV's high bits.
+        if input.peek().is_none() {
+            return;
+        }
         let cv = absorb_blocks(encoding::unpack_u64_cv(*state), input, Felt::ZERO, |cv, block| {
             compression::compress_cv(cv, encoding::encode_felt_block(&block))
         });
@@ -127,6 +133,10 @@ impl StatefulHasher<PackedFelt, PackedDigest> for EidosLmcsHasher {
     }
 
     fn absorb_into(&self, state: &mut Self::State, input: impl IntoIterator<Item = PackedFelt>) {
+        let mut input = input.into_iter().peekable();
+        if input.peek().is_none() {
+            return;
+        }
         let cv = absorb_blocks(
             encoding::unpack_packed_u64_cv(*state),
             input,
@@ -198,8 +208,7 @@ where
 
 fn new_state(encoded_len: usize) -> State {
     let encoded_len = u32::try_from(encoded_len).expect("LMCS encoded length exceeds u32");
-    let cv = framing::init_cv(LmcsLeafDomain::TAG.as_u32(), [encoded_len, 0, 0]);
-    encoding::pack_cv_to_u64s(cv)
+    framing::init_u64_cv(LmcsLeafDomain::TAG.as_u32(), [encoded_len, 0, 0])
 }
 
 fn new_packed_state(encoded_len: usize) -> PackedState {
@@ -257,6 +266,8 @@ mod tests {
             .into_elements()
             .map(|value| value.as_canonical_u64());
         assert_eq!(scalar, expected);
+        assert_eq!(scalar.map(|value| value >> 63), [1, 1, 1, 0]);
+        assert_eq!(hasher.hash_rows(core::iter::once(&[] as &[Felt])), expected);
 
         let packed_state = new_packed_state(0);
         let packed = <EidosLmcsHasher as StatefulHasher<PackedFelt, PackedDigest>>::squeeze(
@@ -265,6 +276,26 @@ mod tests {
         );
         for lane in 0..PACKED_LANES {
             assert_eq!(unpack_digest_lane(&packed, lane), expected);
+        }
+    }
+
+    #[test]
+    fn empty_rows_preserve_initial_and_intermediate_states() {
+        let hasher = EidosLmcsHasher;
+        let mut scalar = new_state(BLOCK_LEN);
+        let mut packed = new_packed_state(BLOCK_LEN);
+
+        for absorb_block in [false, true] {
+            if absorb_block {
+                hasher.absorb_into(&mut scalar, [Felt::ONE; BLOCK_LEN]);
+                hasher.absorb_into(&mut packed, [[Felt::ONE; PACKED_LANES]; BLOCK_LEN]);
+            }
+            let scalar_before = scalar;
+            let packed_before = packed;
+            hasher.absorb_into(&mut scalar, core::iter::empty::<Felt>());
+            hasher.absorb_into(&mut packed, core::iter::empty::<PackedFelt>());
+            assert_eq!(scalar, scalar_before);
+            assert_eq!(packed, packed_before);
         }
     }
 
@@ -363,24 +394,29 @@ mod tests {
 
         assert_eq!(
             left,
-            [7975491762537237790, 210725808216452534, 809262867721008121, 4612689512912990922,],
+            [
+                3918243956146598221,
+                897906922062776109,
+                3378367372491488114,
+                5692382823531614453,
+            ],
         );
         assert_eq!(
             right,
             [
-                3235890721826482854,
-                5501488662693794106,
-                7516676704806885018,
-                6369515668133163107,
+                9154573482336700562,
+                6545812582309301820,
+                5687666513979918889,
+                8387665454715395271,
             ],
         );
         assert_eq!(
             root,
             [
-                2202331962719226590,
-                2302273434923287409,
-                7081266703261990827,
-                2694702893234644687,
+                3435579172312273559,
+                4596428526797861920,
+                4255471116642818765,
+                3200963824415111372,
             ],
         );
     }

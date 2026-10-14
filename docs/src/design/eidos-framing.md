@@ -50,10 +50,10 @@ Let `IV` be the eight 32-bit words of the BLAKE3 initialization vector and let
 `pack(low, high) = low + 2^32 * high`. Define four packed base field elements:
 
 ```text
-BASE0 = pack(0, IV[1] & 0x7fff_ffff) = 4280581857092829184
-BASE1 = pack(0, IV[3] & 0x7fff_ffff) = 2688637132020383744
-BASE2 = pack(0, IV[5] & 0x7fff_ffff) = 1947077364412317696
-BASE3 = pack(0, IV[7] & 0x7fff_ffff) = 6620516959492505600
+BASE0 = pack(0, IV[1]) = 13503953893947604992
+BASE1 = pack(0, IV[3]) = 11912009168875159552
+BASE2 = pack(0, IV[5]) = 11170449401267093504
+BASE3 = pack(0, IV[7]) = 6620516959492505600
 ```
 
 For a domain tag and three parameters, Eidos initializes:
@@ -71,22 +71,25 @@ Equivalently, unpacking the four field elements into eight 32-bit lanes gives:
 
 ```text
 [
-    tag,    fixed0,
-    param0, fixed1,
-    param1, fixed2,
-    param2, fixed3,
+    tag,    IV[1],
+    param0, IV[3],
+    param1, IV[5],
+    param2, IV[7],
 ]
 ```
 
 The tag and each parameter may use the complete `u32` range. Each fixed high lane is below
-`2^31`, so the largest packed value is:
+`2^32 - 1`, so every packed value is at most:
 
 ```text
-(2^31 - 1) * 2^32 + (2^32 - 1) = 2^63 - 1
+(2^32 - 2) * 2^32 + (2^32 - 1) = 2^64 - 2^32 - 1
 ```
 
 This is below the Goldilocks modulus `2^64 - 2^32 + 1`. The additions therefore place each input
 directly in the low half of one Felt without a carry or runtime bit manipulation.
+
+The first three packed elements of an initial CV have their top bit set. Compression clears these
+bits, so an initial CV cannot equal a compression output.
 
 ## Domain-tag hierarchy
 
@@ -304,6 +307,10 @@ supplies the row boundaries and widths fixed by its LMCS configuration; the tota
 replace that shape check. LMCS internal nodes use the reserved Merkle construction above. The tag
 is part of the canonical `EidosLmcs` configuration, not something callers choose per matrix. A
 different leaf schedule needs its own registered domain and matching hasher.
+
+An empty LMCS leaf returns its initial CV without compression. This value is outside the 252-bit
+packed subspace and cannot equal a nonempty leaf digest. Absorbing an empty row leaves the state
+unchanged. Salt, when present, is absorbed as another row, so a salted leaf is not empty.
 
 The Fiat-Shamir challenger also uses a dedicated schedule. `transcript_init_cv(domain)` creates the
 standard framed initial CV with the registered transcript tag and three zero parameters. The
