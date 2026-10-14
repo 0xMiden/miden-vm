@@ -247,7 +247,8 @@ runs:
         if [[ "$RELEASE_MODE" == "dry-run" ]]; then
           publish_cmd+=(--dry-run)
         else
-          publish_cmd+=(--no-verify)
+          # Cargo's index wait is unstable; enable it only for this upload, without compilation.
+          publish_cmd=(env RUSTC_BOOTSTRAP=1 "${publish_cmd[@]}" -Zpublish-timeout --config publish.timeout=300 --no-verify)
         fi
 
         while IFS= read -r package; do
@@ -264,8 +265,11 @@ runs:
           git fetch --no-tags origin "refs/heads/$RELEASE_BRANCH"
           [[ "$(git rev-parse 'FETCH_HEAD^{commit}')" == "$RELEASE_SHA" ]]
           [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA" ]]
-          git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
-          [[ "$(git rev-parse 'FETCH_HEAD^{commit}')" == "$RELEASE_SHA" ]]
+          refs="$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG")"
+          if [[ -n "$refs" ]]; then
+            git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+            [[ "$(git rev-parse 'FETCH_HEAD^{commit}')" == "$RELEASE_SHA" ]]
+          fi
         fi
 
         "${publish_cmd[@]}"
