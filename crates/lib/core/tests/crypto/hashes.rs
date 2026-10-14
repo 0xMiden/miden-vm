@@ -147,7 +147,7 @@ fn cycle_eidos_domain_init_source(domain: u32, num_elements: u32) -> String {
 
         begin
             clk push.512 mem_store
-            push.{domain} push.{num_elements}
+            push.{num_elements} push.{domain}
             exec.::miden::core::crypto::hashes::eidos::init_in_domain
             clk push.512 mem_load sub
             exec.truncate_stack_to_1

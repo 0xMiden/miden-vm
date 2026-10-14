@@ -450,7 +450,7 @@ fn pipe_words_to_memory_in_domain_matches_native_and_memory_hashes() {
                 movup.4 eq.{guard_addr} assert
 
                 dupw
-                push.{domain} push.{num_felts} push.{MEM_ADDR}
+                push.{num_felts} push.{MEM_ADDR} push.{domain}
                 exec.eidos::hash_elements_in_domain
                 assert_eqw
 
@@ -588,37 +588,44 @@ fn pipe_double_words_preimage_to_memory_accepts_canonical_empty_hash() {
 }
 
 #[test]
-fn test_pipe_empty_preimage_to_memory_with_domain() {
+fn test_pipe_double_words_preimage_to_memory_in_domain() {
     use miden_core::{chiplets::hasher, program};
 
     const MEM_ADDR: u64 = 1000;
-    let source = format!(
-        "
-        use miden::core::mem
+    const CANARY: [u64; 4] = [41, 42, 43, 44];
+    for num_words in [0, 2, 4] {
+        let data: Vec<u64> = (1..=num_words * 4).collect();
+        let felts: Vec<Felt> = data.iter().copied().map(Felt::new_unchecked).collect();
+        let end_ptr = MEM_ADDR + data.len() as u64;
+        let source = format!(
+            "
+            use miden::core::mem
 
-        begin
-            push.[41,42,43,44] push.{MEM_ADDR} mem_storew_le dropw
+            begin
+                push.[41,42,43,44] push.{end_ptr} mem_storew_le dropw
 
-            padw adv_loadw
-            push.{MEM_ADDR}
-            push.0
-            push.{domain}
-            exec.mem::pipe_double_words_preimage_to_memory_with_domain
-            swap drop
-        end
-        ",
-        domain = program::KERNEL_DOMAIN_TAG.as_canonical_u64(),
-    );
+                padw adv_loadw
+                push.{MEM_ADDR}
+                push.{num_words}
+                push.{domain}
+                exec.mem::pipe_double_words_preimage_to_memory_in_domain
+                swap drop
+            end
+            ",
+            domain = program::KERNEL_DOMAIN_TAG.as_canonical_u64(),
+        );
 
-    let commitment = hasher::hash_elements_in_domain(&[], program::domain::KERNEL_COMMITMENT);
-    let mut advice_stack = AdviceStack::new();
-    advice_stack.append_word(commitment);
+        let commitment =
+            hasher::hash_elements_in_domain(&felts, program::domain::KERNEL_COMMITMENT);
+        let advice_stack = advice_stack_from_hash_and_data(commitment, &data);
+        let expected_memory: Vec<u64> = data.iter().copied().chain(CANARY).collect();
 
-    build_test!(source.as_str(), &[], advice_stack).expect_stack_and_memory(
-        &[MEM_ADDR],
-        MEM_ADDR as u32,
-        &[41, 42, 43, 44],
-    );
+        build_test!(source.as_str(), &[], advice_stack).expect_stack_and_memory(
+            &[end_ptr],
+            MEM_ADDR as u32,
+            &expected_memory,
+        );
+    }
 }
 
 #[test]

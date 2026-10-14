@@ -235,7 +235,7 @@ pub enum SystemEvent {
     MemToMap,
 
     /// Reads two words from the operand stack and inserts them into the advice map under
-    /// `hmerge(A, B)`.
+    /// `hdword(A, B)`.
     ///
     /// Inputs:
     ///   Operand stack: [A, B, ...]
