@@ -72,7 +72,7 @@ end
             advice.append_word(Eidos::hash_elements(&key));
             advice.append_elements(key);
             advice.append_elements(bytes_to_packed_u32_elements(test.sig.as_ref()));
-            let mut host = DefaultHost::default().with_library(&library).unwrap();
+            let mut host = DefaultHost::default().with_library(library.host_library()).unwrap();
             let result = FastProcessor::new_with_options(
                 StackInputs::default(),
                 AdviceInputs::default().with_stack(advice),

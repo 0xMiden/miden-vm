@@ -17,6 +17,7 @@ use miden_core_lib::{
     },
 };
 use miden_crypto::hash::{eidos::Eidos, sha2::Sha256};
+use miden_event_handler::{AdviceRecorder, EventContext, EventError, EventHandler};
 use miden_precompiles::{
     CurveId, CurvePoint, Limbs, ONE_LIMBS, P256Base, P256Scalar, UintDomain, UintPrecompile,
     ZERO_LIMBS,
@@ -25,9 +26,9 @@ use miden_precompiles_prover::{HashFunction, prove_precompiles};
 use miden_precompiles_verifier::verify_deferred;
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, MemoryError,
-    ProcessorState, StackInputs,
-    advice::{AdviceInputs, AdviceMutation, AdviceStack},
-    event::{EventError, EventHandler},
+    StackInputs,
+    advice::{AdviceInputs, AdviceStack},
+    event::registration,
     operation::OperationError,
 };
 use p256::ecdsa::{
@@ -857,11 +858,15 @@ fn run_core_program(
         .unwrap_program();
 
     let mut host = DefaultHost::default()
-        .with_library(&core_lib)
+        .with_library(core_lib.host_library())
         .expect("failed to load CoreLibrary into the host");
     if let Some((event, handler)) = handler {
         let message = format!("the default {event} handler must already be registered");
-        assert!(host.replace_handler(event, handler).unwrap(), "{message}");
+        assert!(
+            host.replace_handler(event, registration::EventHandler::shared(handler))
+                .unwrap(),
+            "{message}"
+        );
     }
 
     let mut advice_stack = AdviceStack::new();
@@ -892,11 +897,14 @@ fn sha256_digest_handler(message: &[u8]) -> HandlerOverride {
 }
 
 fn advice_handler(elements: Vec<Felt>) -> Arc<dyn EventHandler> {
-    Arc::new(move |_process: &ProcessorState| -> Result<Vec<AdviceMutation>, EventError> {
-        let mut advice_stack = AdviceStack::new();
-        advice_stack.append_for_adv_pipe(&elements);
-        Ok(vec![AdviceMutation::extend_advice_stack(advice_stack)])
-    })
+    Arc::new(
+        move |_context: EventContext<'_>,
+              advice: &mut AdviceRecorder<'_>|
+              -> Result<(), EventError> {
+            advice.prepend_stack(elements.iter().copied());
+            Ok(())
+        },
+    )
 }
 
 fn assert_deferred_proof_verifies(output: &ExecutionOutput) {

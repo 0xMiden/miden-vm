@@ -196,7 +196,7 @@ Do not construct a synthetic invocation for independent inspection. `ProcessorSt
 and deprecated for downstream compatibility; ordinary first-party callers should not suppress its
 warning.
 
-Native Keccak input is limited to 1 MiB and AEAD plaintext to 16 MiB. These fixed limits replace the
+Native Keccak and SHA-2 input is limited to 1 MiB and AEAD plaintext to 16 MiB. These fixed limits replace the
 configurable hash limit accessors on `ExecutionOptions` and apply before expensive work; the
 processor's aggregate advice budget still applies. Eidos AEAD reads unwritten ciphertext limbs and
 tag elements as zero, just like VM memory instructions, and authenticates those values. Explicitly

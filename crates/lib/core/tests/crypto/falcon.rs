@@ -14,12 +14,8 @@ use miden_core_lib::{
     dsa::falcon512_eidos::{self, product_check_digest},
 };
 use miden_crypto::hash::eidos::domains::{FALCON_HASH_TO_POINT, FALCON_PUBLIC_KEY};
-use miden_processor::{
-    ExecutionError, ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::EventError,
-    operation::OperationError,
-};
+use miden_event_handler::{AdviceRecorder, EventContext, EventError};
+use miden_processor::{ExecutionError, operation::OperationError};
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::{
     array::{uniform4, uniform8},
@@ -27,7 +23,7 @@ use miden_utils_testing::proptest::{
     prelude::*,
 };
 use miden_utils_testing::{
-    Test, Word,
+    EventTest, Word,
     crypto::{
         MerkleStore,
         falcon512_eidos::{Polynomial, SecretKey},
@@ -124,7 +120,7 @@ fn test_falcon512_norm_sq() {
 }
 
 /// Exposes private arithmetic from the production module through test-only exports.
-fn private_arithmetic_test(procedure: &str, inputs: &[u64]) -> Test {
+fn private_arithmetic_test(procedure: &str, inputs: &[u64]) -> EventTest {
     const MODULE: &str = concat!(
         include_str!("../../asm/crypto/dsa/falcon512_eidos.masm"),
         "\npub proc reduce_for_test(c: felt, shift: felt) -> Coefficient
@@ -481,21 +477,23 @@ fn test_mod_12289_after_u32split() {
 }
 
 /// Supplies q and r without installing the core library's honest division handler.
-fn forged_division_test(dividend: u64, quotient: u64, remainder: u64) -> Test {
+fn forged_division_test(dividend: u64, quotient: u64, remainder: u64) -> EventTest {
     const FALCON_DIV: EventName =
         EventName::new("miden::core::crypto::dsa::falcon512_eidos::falcon_div");
     let inputs = [dividend & 0xffff_ffff, dividend >> 32];
     miden_utils_testing::build_test_by_mode!(false, MOD_12289_SOURCE, &inputs)
         .with_library(CoreLibrary::default().package())
-        .with_event_handler(FALCON_DIV, move |_process: &ProcessorState| {
-            let mut advice = AdviceStack::new();
-            advice.append_elements([
-                Felt::new_unchecked(quotient >> 32),
-                Felt::new_unchecked(quotient & 0xffff_ffff),
-                Felt::new_unchecked(remainder),
-            ]);
-            Ok::<_, EventError>(vec![AdviceMutation::extend_advice_stack(advice)])
-        })
+        .with_handler(
+            FALCON_DIV,
+            move |_context: EventContext<'_>, advice: &mut AdviceRecorder<'_>| {
+                advice.prepend_stack([
+                    Felt::new_unchecked(quotient >> 32),
+                    Felt::new_unchecked(quotient & 0xffff_ffff),
+                    Felt::new_unchecked(remainder),
+                ]);
+                Ok::<_, EventError>(())
+            },
+        )
 }
 
 #[rstest]
@@ -752,13 +750,13 @@ fn signature_fixture() -> (Word, Word, Vec<Felt>) {
     (secret_key.public_key().to_commitment(), message, advice)
 }
 
-fn verify_test(public_key: Word, message: Word, advice: &[Felt]) -> Test {
+fn verify_test(public_key: Word, message: Word, advice: &[Felt]) -> EventTest {
     let inputs = stack_from_words(&[public_key, message]);
     let advice: Vec<_> = advice.iter().map(Felt::as_canonical_u64).collect();
     build_test!(VERIFY_SOURCE, &inputs, &advice)
 }
 
-fn verify_from_map_test(public_key: Word, message: Word, advice: Vec<Felt>) -> Test {
+fn verify_from_map_test(public_key: Word, message: Word, advice: Vec<Felt>) -> EventTest {
     let key = Eidos::hash_elements(Word::words_as_elements(&[public_key, message]));
     let inputs = stack_from_words(&[public_key, message]);
     build_debug_test!(VERIFY_FROM_MAP_SOURCE, &inputs, &[], MerkleStore::new(), [(key, advice)])
@@ -799,7 +797,7 @@ fn product_advice(h: &[Felt], s2: &[Felt], pi: &[Felt]) -> (Word, Vec<Felt>) {
     (public_key, advice)
 }
 
-fn product_test(h: &[Felt], s2: &[Felt], pi: &[Felt]) -> Test {
+fn product_test(h: &[Felt], s2: &[Felt], pi: &[Felt]) -> EventTest {
     let (public_key, advice) = product_advice(h, s2, pi);
     let inputs = stack_from_words(&[public_key]);
     let advice: Vec<_> = advice.iter().map(Felt::as_canonical_u64).collect();
@@ -811,7 +809,7 @@ fn stack_from_words(words: &[Word]) -> Vec<u64> {
     words.iter().flat_map(|word| word.iter().map(Felt::as_canonical_u64)).collect()
 }
 
-fn norm_boundary_test(target_s1: &[(usize, i64)]) -> Test {
+fn norm_boundary_test(target_s1: &[(usize, i64)]) -> EventTest {
     let mut s1 = [0i64; N];
     for &(index, coefficient) in target_s1 {
         assert!(index < N);
@@ -827,7 +825,7 @@ fn norm_boundary_test(target_s1: &[(usize, i64)]) -> Test {
 
 /// Chooses h so that c - h * s2 equals the supplied s1 in Z_M[x]/(x^512 + 1), with
 /// s2 = sign * x^degree. The integer convolution is pi[i + degree] = sign * h[i].
-fn norm_test(s1: &[i64], degree: usize, sign: i64, message: Word, nonce: [Felt; 8]) -> Test {
+fn norm_test(s1: &[i64], degree: usize, sign: i64, message: Word, nonce: [Felt; 8]) -> EventTest {
     assert_eq!(s1.len(), N);
     assert!(sign == -1 || sign == 1);
     let c = hash_to_point_samples(&message, &nonce);

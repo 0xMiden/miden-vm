@@ -187,7 +187,7 @@ fn pvm_verifies_a_session_mixing_every_precompile() {
     advice.append_elements(k256.advice);
     advice.append_elements(eddsa_25519_sha512::sign(&ed25519_key, k256.message));
     advice.append_elements(ecdsa_p256_sha256::sign(&p256_key, k256.message));
-    let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
+    let mut host = DefaultHost::default().with_library(core_lib.host_library()).unwrap();
     let output = FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default().with_stack(advice),

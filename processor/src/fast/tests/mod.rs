@@ -496,7 +496,7 @@ fn source_debug_call_frames_preserve_external_tail_callers() {
         let package: Arc<Package> =
             Arc::from(assembler.assemble_program("program", source).unwrap());
         let mut host = DefaultHost::default();
-        host.load_library(library.clone()).unwrap();
+        host.load_library(code_only_library(&library)).unwrap();
         let chains = collect_package_debug_call_chains(package, host);
         assert!(
             chains.iter().any(|chain| chain.len() == callers.len() + 1

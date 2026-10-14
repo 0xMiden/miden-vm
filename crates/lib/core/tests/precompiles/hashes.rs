@@ -13,15 +13,15 @@ use miden_crypto::hash::{
     keccak::Keccak256,
     sha2::{Sha256, Sha512},
 };
-use miden_event_handler::MAX_KECCAK_INPUT_BYTES;
+use miden_event_handler::{
+    AdviceRecorder, EventContext, EventHandler, MAX_KECCAK_INPUT_BYTES, MAX_SHA2_INPUT_BYTES,
+};
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs,
-    advice::{AdviceInputs, AdviceMutation, AdviceStack},
-    event::EventHandler,
-    operation::OperationError,
+    advice::AdviceInputs, event::registration, operation::OperationError,
 };
 
 use super::helpers::{
@@ -275,10 +275,9 @@ fn sha512_hash_bytes_mem_rejects_a_forged_upper_digest_half() {
     let mut digest: [u8; 64] = Sha512::hash(input).into();
     digest[32] ^= 1;
     let handler: Arc<dyn EventHandler> =
-        Arc::new(move |_: &miden_processor::ProcessorState<'_>| {
-            let mut advice = AdviceStack::new();
-            advice.append_for_adv_pipe(&bytes_to_packed_u32_elements(&digest));
-            Ok(vec![AdviceMutation::extend_advice_stack(advice)])
+        Arc::new(move |_: EventContext<'_>, advice: &mut AdviceRecorder<'_>| {
+            advice.prepend_stack(bytes_to_packed_u32_elements(&digest));
+            Ok(())
         });
     let library = CoreLibrary::default();
     let stores = masm_store_felts(&bytes_to_packed_u32_elements(input), IN_PTR);
@@ -292,8 +291,11 @@ fn sha512_hash_bytes_mem_rejects_a_forged_upper_digest_half() {
         .assemble_program("sha512_forged_digest", source)
         .unwrap()
         .unwrap_program();
-    let mut host = DefaultHost::default().with_library(&library).unwrap();
-    assert!(host.replace_handler(SHA512_DIGEST_EVENT_NAME, handler).unwrap());
+    let mut host = DefaultHost::default().with_library(library.host_library()).unwrap();
+    assert!(
+        host.replace_handler(SHA512_DIGEST_EVENT_NAME, registration::EventHandler::shared(handler))
+            .unwrap()
+    );
     let result = FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),
@@ -354,10 +356,9 @@ fn sha256_hash_bytes_mem_rejects_a_forged_digest() {
     let mut digest: [u8; 32] = Sha256::hash(input).into();
     digest[31] ^= 1;
     let handler: Arc<dyn EventHandler> =
-        Arc::new(move |_: &miden_processor::ProcessorState<'_>| {
-            let mut advice = AdviceStack::new();
-            advice.append_for_adv_pipe(&bytes_to_packed_u32_elements(&digest));
-            Ok(vec![AdviceMutation::extend_advice_stack(advice)])
+        Arc::new(move |_: EventContext<'_>, advice: &mut AdviceRecorder<'_>| {
+            advice.prepend_stack(bytes_to_packed_u32_elements(&digest));
+            Ok(())
         });
     let library = CoreLibrary::default();
     let stores = masm_store_felts(&bytes_to_packed_u32_elements(input), IN_PTR);
@@ -371,8 +372,11 @@ fn sha256_hash_bytes_mem_rejects_a_forged_digest() {
         .assemble_program("sha256_forged_digest", source)
         .unwrap()
         .unwrap_program();
-    let mut host = DefaultHost::default().with_library(&library).unwrap();
-    assert!(host.replace_handler(SHA256_DIGEST_EVENT_NAME, handler).unwrap());
+    let mut host = DefaultHost::default().with_library(library.host_library()).unwrap();
+    assert!(
+        host.replace_handler(SHA256_DIGEST_EVENT_NAME, registration::EventHandler::shared(handler))
+            .unwrap()
+    );
     let result = FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),
@@ -402,27 +406,30 @@ fn keccak_hash_bytes_mem_handles_short_preimages() {
 }
 
 #[test]
-fn keccak_input_limit_is_inclusive_and_checked_before_memory() {
-    // An unaligned pointer makes the exact-limit case stop before allocating the preimage.
-    for (len_bytes, expected) in [
-        (
-            MAX_KECCAK_INPUT_BYTES,
-            "address 1 is not word-aligned (must be divisible by 4)".to_owned(),
-        ),
-        (
-            MAX_KECCAK_INPUT_BYTES + 1,
-            format!(
-                "keccak256 input length {} bytes exceeds maximum of {MAX_KECCAK_INPUT_BYTES} bytes",
-                MAX_KECCAK_INPUT_BYTES + 1
-            ),
-        ),
+fn hash_input_limit_is_inclusive_and_checked_before_memory() {
+    for (event, algorithm, max) in [
+        (KECCAK256_DIGEST_EVENT_NAME, "keccak256", MAX_KECCAK_INPUT_BYTES),
+        (SHA256_DIGEST_EVENT_NAME, "sha256", MAX_SHA2_INPUT_BYTES),
+        (SHA512_DIGEST_EVENT_NAME, "sha512", MAX_SHA2_INPUT_BYTES),
     ] {
-        let source =
-            format!("begin push.{len_bytes}.1 emit.event(\"{KECCAK256_DIGEST_EVENT_NAME}\") end");
-        let Err(ExecutionError::EventError { error, .. }) = run_precompile_program(&source) else {
-            panic!("Keccak input should fail before reading memory");
-        };
-        assert_eq!(error.to_string(), expected);
+        // An unaligned pointer makes the exact-limit case stop before allocating the preimage.
+        for (len_bytes, expected) in [
+            (max, "address 1 is not word-aligned (must be divisible by 4)".to_owned()),
+            (
+                max + 1,
+                format!(
+                    "{algorithm} input length {} bytes exceeds maximum of {max} bytes",
+                    max + 1
+                ),
+            ),
+        ] {
+            let source = format!("begin push.{len_bytes}.1 emit.event(\"{event}\") end");
+            let Err(ExecutionError::EventError { error, .. }) = run_precompile_program(&source)
+            else {
+                panic!("{algorithm} input should fail before reading memory");
+            };
+            assert_eq!(error.to_string(), expected);
+        }
     }
 }
 
