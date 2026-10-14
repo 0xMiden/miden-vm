@@ -32,7 +32,7 @@ fn construction_stops_at_the_first_unaffordable_final_node() {
             miden_processor::advice::AdviceProvider::new(AdviceInputs::default(), &options)
                 .unwrap();
         let mut parents_computed = 0;
-        let err = super::merkle_builder::add_tree(&data, &mut |left, right| {
+        let err = merkle_builder::add_tree(&data, &mut |left, right| {
             parents_computed += 1;
             provider.merge_roots(left, right).map_err(|err| err.to_string())
         })
