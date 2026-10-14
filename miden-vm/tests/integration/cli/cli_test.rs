@@ -23,6 +23,57 @@ fn fixture(path: impl AsRef<Path>) -> PathBuf {
 }
 
 #[test]
+fn advice_budget_is_checked_before_merkle_loading_in_run_and_prove() {
+    let working_dir = TempDir::new().unwrap();
+    let source = "begin push.1 drop end";
+    let masm_path = working_dir.path().join("budget.masm");
+    let masp_path = working_dir.path().join("budget.masp");
+    fs::write(&masm_path, source).unwrap();
+    miden_assembly::Assembler::default()
+        .assemble_program("budget", source)
+        .unwrap()
+        .write_to_file(&masp_path)
+        .unwrap();
+
+    // The map alone fills the default allowance before accounting for its key and the
+    // default Merkle store. A legacy parser decodes the malformed SMT leaf first instead.
+    let values = "0,".repeat(miden_vm::ExecutionOptions::DEFAULT_MAX_ADVICE_SIZE_BYTES / 8);
+    let key = format!("0x{}", "00".repeat(32));
+    let json = format!(
+        "{{\"operand_stack\":[],\"advice_map\":{{\"{key}\":[{values}0]}},\
+         \"merkle_store\":[{{\"sparse_merkle_tree\":[[0,\"not-a-word\"]]}}]}}"
+    );
+    fs::write(working_dir.path().join("budget.inputs"), json).unwrap();
+
+    for command in ["run", "prove"] {
+        for program in [&masm_path, &masp_path] {
+            let mut cmd = bin_under_test(working_dir.path());
+            cmd.arg(command).arg(program);
+            cmd.assert()
+                .failure()
+                .stderr(predicate::str::contains("advice provider size budget exceeded"))
+                .stderr(predicate::str::contains("failed to decode").not());
+        }
+    }
+
+    // Both run entrypoints must still accept a valid sparse tree, including the maximum index.
+    let leaf = format!("0x01{}", "00".repeat(31));
+    fs::write(
+        working_dir.path().join("budget.inputs"),
+        format!(
+            "{{\"operand_stack\":[],\"merkle_store\":[{{\"sparse_merkle_tree\":[[{},\"{leaf}\"]]}}]}}",
+            u64::MAX,
+        ),
+    )
+    .unwrap();
+    for program in [&masm_path, &masp_path] {
+        let mut cmd = bin_under_test(working_dir.path());
+        cmd.arg("run").arg(program);
+        cmd.assert().success();
+    }
+}
+
+#[test]
 // The exact row counts and elapsed time can change, so this checks only the stable labels printed
 // by the `run` command.
 fn cli_run() {
