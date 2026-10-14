@@ -6,9 +6,15 @@ use miden_assembly::{
     diagnostics::{IntoDiagnostic, Report, Result, WrapErr},
 };
 use miden_mast_package::Package;
-use miden_vm::{ExecutionClaim, KernelDescriptor, ProgramInfo, internal::InputFile};
+use miden_vm::{
+    ExecutionClaim, KernelDescriptor, ProgramInfo, default_verification_precompile_limits,
+    internal::InputFile,
+};
 
-use super::data::{OutputFile, ProgramHash, ProofFile};
+use super::{
+    data::{OutputFile, ProgramHash, ProofFile},
+    precompile_limits::PrecompileArgs,
+};
 
 #[derive(Debug, Clone, Parser)]
 #[command(about = "Verify a Miden program")]
@@ -29,10 +35,22 @@ pub struct VerifyCmd {
     /// Path to a file (.masm or .masp) containing the kernel to be loaded with the program
     #[arg(long = "kernel", value_parser)]
     kernel_file: Option<PathBuf>,
+
+    #[command(flatten)]
+    precompile_limits: PrecompileArgs,
+
+    /// Require a complete STARK-backed proof rather than a natively validated deferred witness
+    ///
+    /// By default, valid deferred proofs succeed with an explicit deferred status, VM-only
+    /// security level, and outstanding root. This option rejects that valid but incomplete result.
+    #[arg(long = "require-complete")]
+    require_complete: bool,
 }
 
 impl VerifyCmd {
     pub fn execute(&self) -> Result<(), Report> {
+        let verification_limits =
+            self.precompile_limits.apply(default_verification_precompile_limits());
         // Validate the kernel file's extension before doing any other file I/O (mirrors the
         // same ordering issue already fixed for `prove` in #3587).
         if let Some(ref kernel_path) = self.kernel_file {
@@ -82,15 +100,26 @@ impl VerifyCmd {
         let stack_outputs = outputs_data.stack_outputs().map_err(Report::msg)?;
         let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
         let outcome = miden_vm::Verifier::new()
+            .with_verification_precompile_limits(verification_limits)
             .verify(&claim, &proof)
             .into_diagnostic()
             .wrap_err("Program failed verification!")?;
-        if let Some(root) = outcome.outstanding_precompile_root() {
-            return Err(Report::msg(format!(
-                "Program proof is valid but incomplete; outstanding precompile root: {root}"
-            )));
-        }
         let vm_security_level = outcome.vm_security_parameters().conjectured_security_level();
+        if let Some(root) = outcome.outstanding_precompile_root() {
+            println!("Proof status: deferred");
+            println!("VM STARK security level: {vm_security_level} bits");
+            println!("Precompile witness: validated natively");
+            println!("Precompile STARK: not supplied");
+            println!("Outstanding precompile root: {root}");
+            println!("Verification complete in {} ms", now.elapsed().as_millis());
+            if self.require_complete {
+                return Err(Report::msg(
+                    "Deferred proof is valid but --require-complete requires a precompile STARK",
+                ));
+            }
+            return Ok(());
+        }
+        println!("Proof status: complete");
         let security_level = outcome.precompile_security_parameters().map_or(
             vm_security_level,
             |precompile_parameters| {
@@ -207,6 +236,8 @@ mod tests {
             proof_file: proof_path.clone(),
             program_hash: "00".to_string(),
             kernel_file: None,
+            precompile_limits: PrecompileArgs::default(),
+            require_complete: false,
         };
 
         // exercise
@@ -231,6 +262,8 @@ mod tests {
             proof_file: PathBuf::from("/nonexistent/does-not-exist.proof"),
             program_hash: "00".to_string(),
             kernel_file: Some(PathBuf::from("kernel.txt")),
+            precompile_limits: PrecompileArgs::default(),
+            require_complete: false,
         };
 
         let err = cmd.execute().expect_err("expected the bad kernel extension to be rejected");
