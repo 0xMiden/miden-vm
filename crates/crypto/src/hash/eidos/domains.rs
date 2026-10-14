@@ -33,10 +33,10 @@ crate::eidos_domain_registry! {
             }
             pub FALCON_HASH_TO_POINT: FalconHashToPointDomain {
                 local_id: 0x0004,
-                version: DomainVersion::numbered(1),
+                version: DomainVersion::numbered(2),
                 encoding: Custom,
                 description: "Falcon512-Eidos hash-to-point construction.",
-                schema: "params = [0, 0, 0]; absorb the eight-Felt nonce, then the four-Felt message padded with four zeros; repeat 128 times: compress an all-zero block, continue the chain from the Eidos CV without Falcon-field reduction, and emit its four Felts reduced modulo 12289 in order; 2^63 mod 12289 = 2832",
+                schema: "params = [0, 0, 0]; absorb the eight-Felt nonce, then the four-Felt message padded with four zeros to derive a fixed seed; for counters 0 through 127, compress [counter, 0, 0, 0, 0, 0, 0, 0] under that seed and emit its four Felts reduced modulo 12289 in order; 2^63 mod 12289 = 2832",
             }
             pub FALCON_PUBLIC_KEY: FalconPublicKeyDomain {
                 local_id: 0x0005,
