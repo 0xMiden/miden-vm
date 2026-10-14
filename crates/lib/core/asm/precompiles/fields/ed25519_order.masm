@@ -369,7 +369,8 @@ pub proc is_eq_digest_with_root(target: Expr, value: Expr) -> (precompiles::Dige
     push.VALUE_INIT_CV
     exec.precompiles::register_fixed_expr
     # => [VALUE_DIGEST, EXPR, TARGET, ...]
-    dupw movdnw.2
+    swapw dupw.1
+    # => [VALUE_DIGEST, EXPR, VALUE_DIGEST, TARGET, ...]
     push.EQ_INIT_CV
     exec.precompiles::register_fixed_expr
     # => [ROOT=EQ(VALUE_DIGEST, EXPR), VALUE_DIGEST, TARGET, ...]
@@ -391,7 +392,7 @@ proc eval_digest_with_root(value: Expr) -> (precompiles::Digest, Expr)
     # => [VALUE_DIGEST, EXPR, ...]
 
     # Preserve VALUE_DIGEST and the binding order used by eval_with_root: EQ(EXPR, VALUE).
-    dupw movupw.2
+    dupw swapw.2
     # => [EXPR, VALUE_DIGEST, VALUE_DIGEST, ...]
     push.EQ_INIT_CV
     exec.precompiles::register_fixed_expr

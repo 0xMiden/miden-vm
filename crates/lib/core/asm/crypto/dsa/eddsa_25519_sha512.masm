@@ -185,7 +185,7 @@ pub proc verify_bytes_with_root(
     loc_load.SCRATCH_PTR_LOCAL add.PREIMAGE_A_OFFSET
     exec.load_compressed_point
     # => [A_ROOT, A, SQRT, OFFSET, S_EXPR, ...]
-    movdnw.3 movdnw.2
+    swapw swapdw
     # => [SQRT, OFFSET, A, A_ROOT, S_EXPR, ...]
     loc_load.SCRATCH_PTR_LOCAL
     exec.load_compressed_point
@@ -278,24 +278,28 @@ proc load_compressed_point(
     swapw exec.ed25519_base::push_one_digest exec.ed25519_base::sub
     exec.ed25519_base::inv_with_root
     # => [Y_INVERSE_ROOT, Y_INVERSE, ONE_PLUS_Y, X_DIGEST, SQRT, OFFSET, ...]
-    movdnw.3
-    # => [Y_INVERSE, ONE_PLUS_Y, X_DIGEST, Y_INVERSE_ROOT, SQRT, OFFSET, ...]
-    exec.ed25519_base::mul
-    # => [U_DIGEST, X_DIGEST, Y_INVERSE_ROOT, SQRT, OFFSET, ...]
 
-    # Y = sqrt(-486664)*u/x. Inverting x rejects both x=0 exceptional encodings.
-    swapw exec.ed25519_base::inv_with_root
-    # => [X_INVERSE_ROOT, X_INVERSE, U_DIGEST, Y_INVERSE_ROOT, SQRT, OFFSET, ...]
-    movupw.3 exec.precompiles::append_root
-    # => [INVERSE_ROOT, X_INVERSE, U_DIGEST, SQRT, OFFSET, ...]
-    movdnw.3
-    # => [X_INVERSE, U_DIGEST, SQRT, INVERSE_ROOT, OFFSET, ...]
-    dupw.1 exec.ed25519_base::mul
-    movupw.2 exec.ed25519_base::mul
-    # => [MAPPED_Y, U_DIGEST, INVERSE_ROOT, OFFSET, ...]
+    # Invert x before constructing u so both inverse roots can stay on the stack until u/x is formed.
+    # Inverting x rejects both x=0 exceptional encodings; the inverse advice order is unchanged.
+    swapw.3 exec.ed25519_base::inv_with_root
+    # => [X_INVERSE_ROOT, X_INVERSE, Y_INVERSE, ONE_PLUS_Y, Y_INVERSE_ROOT, SQRT, OFFSET, ...]
+    swapdw
+    # => [Y_INVERSE, ONE_PLUS_Y, X_INVERSE_ROOT, X_INVERSE, Y_INVERSE_ROOT, SQRT, OFFSET, ...]
+    exec.ed25519_base::mul
+    # => [U_DIGEST, X_INVERSE_ROOT, X_INVERSE, Y_INVERSE_ROOT, SQRT, OFFSET, ...]
+
+    # Preserve u while forming u/x, then combine the now-adjacent inverse obligations.
+    swapdw dupw.2 exec.ed25519_base::mul
+    # => [U_OVER_X, Y_INVERSE_ROOT, U_DIGEST, X_INVERSE_ROOT, SQRT, OFFSET, ...]
+    swapw.3 exec.precompiles::append_root
+    # => [INVERSE_ROOT=AND(X_INVERSE_ROOT, Y_INVERSE_ROOT), U_DIGEST, U_OVER_X, SQRT, OFFSET, ...]
+
+    # Y = sqrt(-486664)*u/x.
+    swapdw swapw exec.ed25519_base::mul
+    # => [MAPPED_Y, INVERSE_ROOT, U_DIGEST, OFFSET, ...]
 
     # X = u + 486662/3.
-    swapw movupw.3 exec.ed25519_base::add
+    swapdw swapw exec.ed25519_base::add
     exec.ed25519::load_digest_pair
     # => [POINT, INVERSE_ROOT, ...]
 

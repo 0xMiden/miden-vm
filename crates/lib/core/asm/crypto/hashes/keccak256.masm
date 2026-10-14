@@ -136,8 +136,9 @@ pub proc hash_bytes_with_root(
     movup.4
     # => [saved_out_ptr, ROOT, ...]
     padw dup.4 mem_loadw_le
-    padw movup.8 add.4 mem_loadw_le swapw
-    movupw.2
+    padw movup.8 add.4 mem_loadw_le
+    # => [DIGEST_HI, DIGEST_LO, ROOT, ...]
+    swapw.2
     # => [ROOT, DIGEST_LO, DIGEST_HI, ...]
 end
 
@@ -159,8 +160,9 @@ pub proc hash_with_root(input: Digest) -> (precompiles::Digest, Digest)
     movup.4
     # => [saved_out_ptr, ROOT, ...]
     padw dup.4 mem_loadw_le
-    padw movup.8 add.4 mem_loadw_le swapw
-    movupw.2
+    padw movup.8 add.4 mem_loadw_le
+    # => [DIGEST_HI, DIGEST_LO, ROOT, ...]
+    swapw.2
     # => [ROOT, DIGEST_LO, DIGEST_HI, ...]
 end
 
@@ -187,7 +189,8 @@ pub proc merge_with_root(
     movup.4
     # => [saved_out_ptr, ROOT, ...]
     padw dup.4 mem_loadw_le
-    padw movup.8 add.4 mem_loadw_le swapw
-    movupw.2
+    padw movup.8 add.4 mem_loadw_le
+    # => [DIGEST_HI, DIGEST_LO, ROOT, ...]
+    swapw.2
     # => [ROOT, DIGEST_LO, DIGEST_HI, ...]
 end

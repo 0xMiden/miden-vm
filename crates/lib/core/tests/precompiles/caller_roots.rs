@@ -178,9 +178,10 @@ fn independent_inversion_and_division_roots_compose_explicitly() {
                 exec.{leaf}::push_one_digest
                 exec.{leaf}::div_with_root
                 # => [DIV_ROOT, QUOTIENT, INV_ROOT, ...]
-                movupw.2 exec.::miden::core::precompiles::append_root
                 swapw
                 exec.{leaf}::push_two_digest exec.{leaf}::assert_eq_with_root
+                # => [EQUALITY_ROOT, DIV_ROOT, INV_ROOT, ...]
+                exec.::miden::core::precompiles::append_root
                 exec.::miden::core::precompiles::append_root
                 adv.export_deferred_witness
             end

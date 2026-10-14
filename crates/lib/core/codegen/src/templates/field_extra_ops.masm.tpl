@@ -152,8 +152,8 @@ pub proc inv_with_root(value: Expr) -> (precompiles::Digest, Expr)
     swapw
     exec.load
     # => [INV_DIGEST, X_DIGEST, ...]
-    dupw
-    movupw.2
+    dupw swapw.2
+    # => [X_DIGEST, INV_DIGEST, INV_DIGEST, ...]
     exec.mul
     # => [PRODUCT_DIGEST, INV_DIGEST, ...]
     exec.push_one_digest

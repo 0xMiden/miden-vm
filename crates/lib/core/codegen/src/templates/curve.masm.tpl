@@ -434,8 +434,10 @@ pub proc eval_with_root(point: Point) -> (precompiles::Digest, Point, PointValue
     push.VALUE_INIT_CV
     exec.precompiles::register_fixed_expr
     # => [VALUE_DIGEST, X, Y, EXPR, ...]
-    movupw.3
-    dupw.1 movdnw.2
+    swapdw swapw.3
+    # => [X, EXPR, VALUE_DIGEST, Y, ...]
+    dupw.2 swapdw
+    # => [EXPR, VALUE_DIGEST, VALUE_DIGEST, X, Y, ...]
     push.EQ_INIT_CV
     exec.precompiles::register_fixed_expr
     # => [ROOT=EQ(EXPR, VALUE_DIGEST), VALUE_DIGEST, X, Y, ...]
@@ -450,7 +452,8 @@ proc eval_digest_with_root(point: Point) -> (precompiles::Digest, Point)
     push.VALUE_INIT_CV
     exec.precompiles::register_fixed_expr
     # => [VALUE_DIGEST, EXPR, ...]
-    dupw movdnw.2
+    swapw dupw.1
+    # => [VALUE_DIGEST, EXPR, VALUE_DIGEST, ...]
     push.EQ_INIT_CV
     exec.precompiles::register_fixed_expr
     # => [ROOT=EQ(VALUE_DIGEST, EXPR), VALUE_DIGEST, ...]

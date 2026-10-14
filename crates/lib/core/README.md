@@ -84,7 +84,8 @@ that contract.
 
 Native ECDSA and EdDSA entry points keep their stack interfaces and acceptance rules. Their shared
 algorithm bodies build a complete obligation graph, and the native wrapper logs that graph once.
-Algorithm phases return their own obligations, which the public procedures combine explicitly.
+Algorithm phases keep their obligations on the stack, combining them as intermediate values are
+consumed.
 This changes their deferred commitment digests and can change their cycle counts.
 
 ## Available modules
