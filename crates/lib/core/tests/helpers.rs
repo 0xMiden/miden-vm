@@ -156,6 +156,7 @@ pub fn assert_manual_signature_matches_native(
     native: &ExecutionOutput,
     manual: &ExecutionOutput,
     obligations: usize,
+    root_ands: usize,
     composed: bool,
 ) {
     use miden_core::deferred::{DEFERRED_AND_FRAME, Node, PrecompileWitnessEntry, TRUE_DIGEST};
@@ -173,12 +174,12 @@ pub fn assert_manual_signature_matches_native(
         let combined = assert_manual_graph(manual, expected);
         assert_eq!(combined.entries().iter().filter(|entry| {
             matches!(entry, PrecompileWitnessEntry::Join { frame, .. } if *frame == DEFERRED_AND_FRAME)
-        }).count(), obligations + 2, "composition must retain both independent subgraphs");
+        }).count(), root_ands + 2, "composition must retain both independent subgraphs");
     }
     assert_eq!(native.stack, manual.stack, "ordinary results and tail must match");
     assert_eq!(witness.entries().iter().filter(|entry| {
         matches!(entry, PrecompileWitnessEntry::Join { frame, .. } if *frame == DEFERRED_AND_FRAME)
-    }).count(), obligations, "every nested binding must reach the exported root");
+    }).count(), root_ands, "the returned root must use the expected grouping");
     let uint_eq =
         miden_precompiles::UintPrecompile::op_frame(miden_precompiles::UintPrecompile::EQ_OP_ID);
     let curve_eq =

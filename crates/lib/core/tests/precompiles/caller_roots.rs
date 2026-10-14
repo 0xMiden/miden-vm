@@ -102,6 +102,65 @@ fn manual_uint_evaluation_and_predicates_bind_the_complete_graph() {
 }
 
 #[test]
+fn manual_uint_equality_preserves_canonical_bindings_and_high_limb_inequality() {
+    for domain in UintDomain::ALL {
+        let module = uint_module(domain);
+        let leaf = module.rsplit("::").next().unwrap();
+        let one = UintPrecompile::value_node(domain, ONE_LIMBS).digest();
+        let two = UintPrecompile::value_node(domain, [2, 0, 0, 0, 0, 0, 0, 0]).digest();
+        let sum = Node::join(UintPrecompile::op_frame(UintPrecompile::ADD_OP_ID), one, one)
+            .unwrap()
+            .digest();
+        let mut cases = vec![(
+            format!(
+                "exec.{leaf}::push_two_digest exec.{leaf}::push_one_digest dupw exec.{leaf}::add"
+            ),
+            sum,
+            two,
+            two,
+            two,
+            true,
+        )];
+        for limb in 4..8 {
+            let mut high = ONE_LIMBS;
+            high[limb] = 1;
+            let value = UintPrecompile::value_node(domain, high).digest();
+            let words = high
+                .map(Felt::from_u32)
+                .chunks(4)
+                .rev()
+                .map(|word| masm_push_word(&Word::new(word.try_into().unwrap())))
+                .collect::<Vec<_>>()
+                .join(" ");
+            cases.push((
+                format!("{words} exec.{leaf}::load exec.{leaf}::push_one_digest"),
+                one,
+                one,
+                value,
+                value,
+                false,
+            ));
+        }
+        for (setup, lhs_expr, lhs_value, rhs_expr, rhs_value, equal) in cases {
+            let seed = Node::and(TRUE_DIGEST, TRUE_DIGEST).digest();
+            let eq = UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID);
+            let lhs_binding = Node::join(eq, lhs_expr, lhs_value).unwrap().digest();
+            let rhs_binding = Node::join(eq, rhs_expr, rhs_value).unwrap().digest();
+            let expected = Node::and(Node::and(seed, lhs_binding).digest(), rhs_binding).digest();
+            let source = format!(
+                "use miden::core::precompiles::{module}\nbegin push.99.98.97.96 padw padw exec.::miden::core::precompiles::append_root {setup} exec.{leaf}::is_eq_with_root movdn.4 adv.export_deferred_witness end"
+            );
+            let output = run_precompile_program(&source).unwrap();
+            let witness = assert_exported_manual_root(&output, 0);
+            assert_eq!(witness.root_unchecked(), expected, "{module}: binding order");
+            assert_eq!(and_count(&witness), 3);
+            assert_eq!(output.stack.get_element(4), Some(Felt::from_u32(u32::from(equal))));
+            assert_eq!(&read_stack_felts(&output, 9)[5..], &[96, 97, 98, 99].map(Felt::from_u32));
+        }
+    }
+}
+
+#[test]
 fn manual_inversion_and_division_chain_the_caller_root() {
     for domain in UintDomain::ALL.into_iter().filter(|d| d.is_prime_field()) {
         let module = uint_module(domain);

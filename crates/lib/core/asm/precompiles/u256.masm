@@ -397,6 +397,29 @@ pub proc is_eq_digest_with_root(
     exec.precompiles::word_eq
 end
 
+#! Evaluates and binds a canonical VALUE digest without returning its limbs.
+#! Input:  [EXPR, ROOT, ...]
+#! Output: [VALUE_DIGEST, NEXT_ROOT, ...]
+proc eval_digest_with_root(value: Expr, root: precompiles::Digest) -> (Expr, precompiles::Digest)
+    adv.evaluate_deferred_payload
+    adv_pushw adv_pushw
+    push.VALUE_INIT_CV
+    exec.precompiles::register_fixed_expr
+    # => [VALUE_DIGEST, EXPR, ROOT, ...]
+
+    # Preserve VALUE_DIGEST and the binding order used by eval_with_root: EQ(EXPR, VALUE).
+    dupw movupw.2
+    # => [EXPR, VALUE_DIGEST, VALUE_DIGEST, ROOT, ...]
+    push.EQ_INIT_CV
+    exec.precompiles::register_fixed_expr
+    # => [EQ_DIGEST, VALUE_DIGEST, ROOT, ...]
+    movupw.2 swapw
+    # => [EQ_DIGEST, ROOT, VALUE_DIGEST, ...]
+    exec.precompiles::append_root
+    swapw
+    # => [VALUE_DIGEST, NEXT_ROOT, ...]
+end
+
 #! Caller-root form of `is_eq`; never logs into the VM root.
 #! Input:  [LHS, RHS, ROOT, ...]
 #! Output: [is_equal, NEXT_ROOT, ...]
@@ -408,19 +431,19 @@ pub proc is_eq_with_root(
 ) -> (i1, precompiles::Digest)
     movupw.2 swapw
     # => [LHS, ROOT, RHS, ...]
-    exec.eval_with_root
-    # => [LHS_LO, LHS_HI, ROOT1, RHS, ...]
-    movupw.3 movupw.3 swapw
-    # => [RHS, ROOT1, LHS_LO, LHS_HI, ...]
-    exec.eval_with_root
-    # => [RHS_LO, RHS_HI, NEXT_ROOT, LHS_LO, LHS_HI, ...]
-    movupw.3
+    exec.eval_digest_with_root
+    # => [LHS_VALUE, ROOT1, RHS, ...]
+    movdnw.2 swapw
+    # => [RHS, ROOT1, LHS_VALUE, ...]
+    exec.eval_digest_with_root
+    # => [RHS_VALUE, NEXT_ROOT, LHS_VALUE, ...]
+    movupw.2 swapw
+    # => [RHS_VALUE, LHS_VALUE, NEXT_ROOT, ...]
+
+    # Raw digest equality is sound here: both operands are canonical VALUE nodes, and their
+    # equality bindings to the original expressions are included in NEXT_ROOT.
     exec.precompiles::word_eq
-    # => [lo_equal, RHS_HI, NEXT_ROOT, LHS_HI, ...]
-    movdn.12 movupw.2
-    exec.precompiles::word_eq
-    # => [hi_equal, NEXT_ROOT, lo_equal, ...]
-    movup.5 and
+    # => [is_equal, NEXT_ROOT, ...]
 end
 
 #! Caller-root form of `is_zero`; never logs into the VM root.

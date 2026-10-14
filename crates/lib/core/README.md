@@ -78,7 +78,8 @@ requires an already-bound canonical VALUE digest; an arbitrary expression digest
 that contract.
 
 Native ECDSA and EdDSA entry points keep their stack interfaces and acceptance rules. Their shared
-algorithm bodies build an obligation graph from TRUE, and the native wrapper logs that graph once.
+algorithm bodies build a complete obligation graph, and the native wrapper logs that graph once.
+ECDSA starts its graph at the hash assertion; EdDSA starts from TRUE before its first binding.
 This changes their deferred commitment digests and can change their cycle counts.
 
 ## Available modules

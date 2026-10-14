@@ -515,10 +515,10 @@ fn p256_recover_loads_signature_before_local_write() {
     let fixture = valid_fixture();
     // Deliberately bypass the caller-owned-memory precondition to preserve the defensive
     // load-before-local-write ordering.
-    // `recover_impl` owns locals [2^31, 2^31 + 12), so the nested `recover_digest` frame begins
+    // `recover_impl` owns locals [2^31, 2^31 + 8), so the nested `recover_digest` frame begins
     // here. Its candidate-key `adv_pipe` overwrites this region after the signature has been
     // loaded.
-    let recover_digest_locals_ptr = (1_u32 << 31) + 12;
+    let recover_digest_locals_ptr = (1_u32 << 31) + 8;
 
     let output = run_recover_with_native_signature(
         fixture.message,
@@ -986,7 +986,13 @@ fn manual_signature_variants_export_all_obligations_and_preserve_results() {
             let manual_source =
                 manual_signature_source(&source, "ecdsa_p256_sha256", procedure, composed);
             let manual = run_core_program(&manual_source, advice, None).unwrap();
-            assert_manual_signature_matches_native(&native, &manual, obligations, composed);
+            assert_manual_signature_matches_native(
+                &native,
+                &manual,
+                obligations,
+                obligations - 1,
+                composed,
+            );
             if procedure == "verify" || procedure == "verify_bytes" {
                 let wrong = manual_source.replace(&commitment, &masm_push_word(&Word::default()));
                 assert!(run_core_program(&wrong, advice, None).is_err());

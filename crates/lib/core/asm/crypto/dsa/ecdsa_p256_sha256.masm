@@ -87,19 +87,15 @@ pub proc verify_with_root(
     public_key: eidos::Digest,
     message: word,
 ) -> precompiles::Digest
-    padw
-    # => [TRUE, PK_COMM, MSG_WORD, ...]
     exec.verify_impl
 end
 
-# Shared body: ROOT is passed first internally and returned above ordinary results.
-@locals(28)
+# Start the obligation graph at the hash assertion and thread it through ECDSA verification.
+@locals(24)
 proc verify_impl(
-    root: precompiles::Digest,
     public_key: eidos::Digest,
     message: word,
 ) -> precompiles::Digest
-    loc_storew_le.24 dropw
     locaddr.0
     # => [pubkey_ptr=loc[0], PK_COMM, MSG_WORD, ...]
     exec.load_and_verify_public_key
@@ -117,20 +113,17 @@ proc verify_impl(
     dup dup push.32 swap
     # => [in_ptr=loc[16], len_bytes=32, out_ptr=loc[16], digest_ptr=loc[16], ...]
     exec.sha256::hash_bytes_mem_with_root
-    # => [HASH_ROOT, ...]
-    padw loc_loadw_le.24
-    swapw exec.precompiles::append_root
-    loc_storew_le.24 dropw
-    # => [digest_ptr=loc[16], ...]  (DIGEST_U32[8] written to loc[16..24])
+    # => [HASH_ROOT, digest_ptr=loc[16], ...]  (DIGEST_U32[8] written to loc[16..24])
 
-    locaddr.0 swap
-    # => [digest_ptr=loc[16], pubkey_ptr=loc[0], ...]
+    movup.4 locaddr.0 movdn.5
+    # => [digest_ptr=loc[16], HASH_ROOT, pubkey_ptr=loc[0], ...]
     exec.load_sha256_digest_as_z
-    # => [PREHASH_U32[8], pubkey_ptr, ...] where PREHASH[0] = byte_reverse(Sha256Digest[7])
+    # => [PREHASH_U32[8], HASH_ROOT, pubkey_ptr, ...]
+    # PREHASH[0] = byte_reverse(Sha256Digest[7]).
 
-    padw loc_loadw_le.24
+    movupw.2
+    # => [HASH_ROOT, PREHASH_U32[8], pubkey_ptr, ...]
     exec.verify_digest_impl
-    # => [...]
     # => [NEXT_ROOT, ...]
 end
 
@@ -180,20 +173,16 @@ pub proc verify_bytes_with_root(
     message_ptr: ptr<u32>,
     message_len_bytes: u32,
 ) -> precompiles::Digest
-    padw
-    # => [TRUE, PK_COMM, MSG_PTR, MSG_LEN_BYTES, ...]
     exec.verify_bytes_impl
 end
 
-# Shared body: ROOT is passed first internally and returned above ordinary results.
-@locals(28)
+# Start the obligation graph at the hash assertion and thread it through ECDSA verification.
+@locals(24)
 proc verify_bytes_impl(
-    root: precompiles::Digest,
     public_key: eidos::Digest,
     message_ptr: ptr<u32>,
     message_len_bytes: u32,
 ) -> precompiles::Digest
-    loc_storew_le.24 dropw
     locaddr.0
     # => [pubkey_ptr=loc[0], PK_COMM, MSG_PTR, MSG_LEN_BYTES, ...]
     exec.load_and_verify_public_key
@@ -203,18 +192,15 @@ proc verify_bytes_impl(
     # => [MSG_PTR, MSG_LEN_BYTES, out_ptr=loc[16], ...]
     exec.sha256::hash_bytes_mem_with_root
     # => [HASH_ROOT, ...]
-    padw loc_loadw_le.24
-    swapw exec.precompiles::append_root
-    loc_storew_le.24 dropw
-    # => [...]
 
-    locaddr.0 locaddr.16
-    # => [digest_ptr=loc[16], pubkey_ptr=loc[0], ...]  (DIGEST_U32[8] written to loc[16..24])
+    locaddr.0 movdn.4 locaddr.16
+    # => [digest_ptr=loc[16], HASH_ROOT, pubkey_ptr=loc[0], ...]
+    # DIGEST_U32[8] has been written to loc[16..24].
     exec.load_sha256_digest_as_z
-    # => [PREHASH_U32[8], pubkey_ptr=loc[0], ...]
-    padw loc_loadw_le.24
+    # => [PREHASH_U32[8], HASH_ROOT, pubkey_ptr=loc[0], ...]
+    movupw.2
+    # => [HASH_ROOT, PREHASH_U32[8], pubkey_ptr=loc[0], ...]
     exec.verify_digest_impl
-    # => [...]
     # => [NEXT_ROOT, ...]
 end
 
@@ -262,19 +248,15 @@ pub proc recover_with_root(
     message: word,
     signature_ptr: ptr<RecoverySignature>,
 ) -> (precompiles::Digest, PublicKey)
-    padw
-    # => [TRUE, MSG_WORD, SIG_PTR, ...]
     exec.recover_impl
 end
 
-# Shared body: ROOT is passed first internally and returned above ordinary results.
-@locals(12)
+# Start the obligation graph at the hash assertion and thread it through ECDSA recovery.
+@locals(8)
 proc recover_impl(
-    root: precompiles::Digest,
     message: word,
     signature_ptr: ptr<RecoverySignature>,
 ) -> (precompiles::Digest, PublicKey)
-    loc_storew_le.8 dropw
     locaddr.0 movdn.4
     # => [MSG_WORD, digest_ptr=loc[0], SIG_PTR, ...]
     exec.store_word_u32s_le
@@ -283,15 +265,9 @@ proc recover_impl(
     dup dup push.32 swap
     # => [in_ptr=loc[0], len_bytes=32, out_ptr=loc[0], digest_ptr=loc[0], SIG_PTR, ...]
     exec.sha256::hash_bytes_mem_with_root
-    # => [HASH_ROOT, ...]
-    padw loc_loadw_le.8
-    swapw exec.precompiles::append_root
-    loc_storew_le.8 dropw
-    # => [digest_ptr=loc[0], SIG_PTR, ...]
+    # => [HASH_ROOT, digest_ptr=loc[0], SIG_PTR, ...]
 
-    padw loc_loadw_le.8
     exec.recover_digest
-    # => [QX[8] | QY[8], ...]
     # => [NEXT_ROOT, QX[8], QY[8], ...]
 end
 
@@ -346,34 +322,24 @@ pub proc recover_bytes_with_root(
     message_len_bytes: u32,
     signature_ptr: ptr<RecoverySignature>,
 ) -> (precompiles::Digest, PublicKey)
-    padw
-    # => [TRUE, MSG_PTR, MSG_LEN_BYTES, SIG_PTR, ...]
     exec.recover_bytes_impl
 end
 
-# Shared body: ROOT is passed first internally and returned above ordinary results.
-@locals(12)
+# Start the obligation graph at the hash assertion and thread it through ECDSA recovery.
+@locals(8)
 proc recover_bytes_impl(
-    root: precompiles::Digest,
     message_ptr: ptr<u32>,
     message_len_bytes: u32,
     signature_ptr: ptr<RecoverySignature>,
 ) -> (precompiles::Digest, PublicKey)
-    loc_storew_le.8 dropw
     locaddr.0 movdn.2
     # => [MSG_PTR, MSG_LEN_BYTES, digest_ptr=loc[0], SIG_PTR, ...]
     exec.sha256::hash_bytes_mem_with_root
     # => [HASH_ROOT, ...]
-    padw loc_loadw_le.8
-    swapw exec.precompiles::append_root
-    loc_storew_le.8 dropw
-    # => [SIG_PTR, ...]  (DIGEST_U32[8] written to loc[0..8])
 
-    locaddr.0
-    # => [digest_ptr=loc[0], SIG_PTR, ...]
-    padw loc_loadw_le.8
+    locaddr.0 movdn.4
+    # => [HASH_ROOT, digest_ptr=loc[0], SIG_PTR, ...]  (DIGEST_U32[8] written to loc[0..8])
     exec.recover_digest
-    # => [QX[8] | QY[8], ...]
     # => [NEXT_ROOT, QX[8], QY[8], ...]
 end
 

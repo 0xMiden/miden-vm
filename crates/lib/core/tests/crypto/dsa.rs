@@ -52,10 +52,10 @@ fn core_ecdsa_k256_keccak_recover_loads_signature_before_local_write() {
     let fixture = valid_fixture();
     // Deliberately bypass the caller-owned-memory precondition to preserve the defensive
     // load-before-local-write ordering requested in review.
-    // `recover_impl` owns locals [2^31, 2^31 + 12), so the nested `recover_digest` frame begins
+    // `recover_impl` owns locals [2^31, 2^31 + 8), so the nested `recover_digest` frame begins
     // here. Its candidate-key `adv_pipe` overwrites this region after the signature has been
     // loaded.
-    let recover_digest_locals_ptr = (1_u32 << 31) + 12;
+    let recover_digest_locals_ptr = (1_u32 << 31) + 8;
 
     let output = run_recover_with_native_signature(
         fixture.message,
@@ -333,9 +333,10 @@ fn core_ecdsa_k256_keccak_verify_cycle_baseline() {
     let cycles = output.stack.get_element(0).expect("cycle count").as_canonical_u64();
     // This includes the deferred-node registration and hashing performed by the Keccak and
     // secp256k1 precompile wrappers.
-    // Previously 1191 cycles. The shared body now threads a caller root and the wrapper logs
-    // its complete subgraph once; primitive native hashing baselines remain separate.
-    assert_eq!(cycles, 1517);
+    // The parent fixture used 1191 cycles. The shared body now builds one complete subgraph,
+    // starting at the hash assertion to avoid a redundant AND with TRUE, and logs it once.
+    // Primitive native hashing baselines remain separate.
+    assert_eq!(cycles, 1452);
 }
 
 #[test]
@@ -755,7 +756,13 @@ fn manual_signature_variants_export_all_obligations_and_preserve_results() {
             let manual_source =
                 manual_signature_source(&source, "ecdsa_k256_keccak", procedure, composed);
             let manual = run_core_program_with_advice(&manual_source, advice).unwrap();
-            assert_manual_signature_matches_native(&native, &manual, obligations, composed);
+            assert_manual_signature_matches_native(
+                &native,
+                &manual,
+                obligations,
+                obligations - 1,
+                composed,
+            );
             if procedure == "verify" || procedure == "verify_bytes" {
                 let wrong = manual_source.replace(&commitment, &masm_push_word(&Word::default()));
                 assert!(run_core_program_with_advice(&wrong, advice).is_err());
