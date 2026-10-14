@@ -181,16 +181,16 @@ The following runs use 128 Blake3 calls (828,632 VM cycles, padded to 2<sup>20</
 
 | Machine                        | Execution time | Proving time | Execution % | Implied Frequency |
 | ------------------------------ | :------------: | :----------: | :---------: | :---------------: |
-| Apple M1 Pro (12 threads)      | 9.4 ms         | 7.75 sec     | 0.12%       | 130 KHz           |
-| Apple M4 Pro (14 threads)      | 6.3 ms         | 4.36 sec     | 0.14%       | 190 KHz           |
-| Apple M4 Max (16 threads)      | 5.9 ms         | 2.97 sec     | 0.20%       | 337 KHz           |
-| Apple M5 Max (18 threads)      | 5.8 ms         | 2.69 sec     | 0.22%       | 309 KHz           |
+| Apple M1 Pro (12 threads)      | 9.4 ms         | 7.75 sec     | 0.12%       | 135 KHz           |
+| Apple M4 Pro (14 threads)      | 6.3 ms         | 4.36 sec     | 0.14%       | 240 KHz           |
+| Apple M4 Max (16 threads)      | 5.9 ms         | 2.97 sec     | 0.20%       | 353 KHz           |
+| Apple M5 Max (18 threads)      | 5.8 ms         | 2.69 sec     | 0.22%       | 390 KHz           |
 | Amazon Graviton 4 (64 threads) |                |              |             |                   |
 | AMD EPYC 9R45 (64 threads)     |                |              |             |                   |
-| AMD Ryzen 9 9950X (16 threads) | 9.7 ms         | 3.78 sec     | 0.26%       | 219 KHz           |
-| AMD Ryzen 9 9950X (32 threads) | 9.5 ms         | 3.83 sec     | 0.25%       | 217 KHz           |
+| AMD Ryzen 9 9950X (16 threads) | 9.7 ms         | 3.78 sec     | 0.26%       | 277 KHz           |
+| AMD Ryzen 9 9950X (32 threads) | 9.5 ms         | 3.83 sec     | 0.25%       | 274 KHz           |
 
-Execution % is execution time divided by proving time. Implied frequency measures VM cycles proved per second.
+Execution % is execution time divided by proving time. Implied frequency is the padded VM cycle count (2<sup>20</sup> for these runs) divided by proving time, reported in KHz.
 
 ## References
 
