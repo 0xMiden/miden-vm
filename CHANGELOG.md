@@ -1,6 +1,14 @@
 # Changelog
 
-## v0.36.0 (Unreleased)
+## v0.36.1 (Unreleased)
+
+#### Features
+
+#### Changes
+
+#### Fixes
+
+## v0.36.0 (2026-10-14)
 
 #### Fixes
 
