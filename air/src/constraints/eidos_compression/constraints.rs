@@ -59,10 +59,14 @@ pub fn enforce_fused_rows<AB>(
         .when(is_inner_fused_transition)
         .assert_eq(fused_compression_cycle_id::<AB>(next), fused_compression_cycle_id::<AB>(local));
 
+    // The four periodic families are mutually exclusive. Share assertions by local lane
+    // position, retaining each family's fixed rotation and its omitted final B transition.
+    let mut word_residuals: [[AB::Expr; 4]; NUM_G] =
+        core::array::from_fn(|_| core::array::from_fn(|_| AB::Expr::ZERO));
     // The transition relation uses the row family's fixed first rotation. Selecting between
     // rotations inside the payload would raise the gated transition degree above 3.
-    enforce_transition_for_maps::<AB>(
-        builder,
+    accumulate_transition_for_maps::<AB>(
+        &mut word_residuals,
         selectors.is_ab() * is_col.clone(),
         local,
         next,
@@ -71,8 +75,8 @@ pub fn enforce_fused_rows<AB>(
         16,
         8,
     );
-    enforce_transition_for_maps::<AB>(
-        builder,
+    accumulate_transition_for_maps::<AB>(
+        &mut word_residuals,
         selectors.is_cd() * is_col,
         local,
         next,
@@ -81,8 +85,8 @@ pub fn enforce_fused_rows<AB>(
         8,
         16,
     );
-    enforce_transition_for_maps::<AB>(
-        builder,
+    accumulate_transition_for_maps::<AB>(
+        &mut word_residuals,
         selectors.is_ab() * is_diag.clone(),
         local,
         next,
@@ -91,8 +95,8 @@ pub fn enforce_fused_rows<AB>(
         16,
         8,
     );
-    enforce_transition_for_maps::<AB>(
-        builder,
+    accumulate_transition_for_maps::<AB>(
+        &mut word_residuals,
         selectors.is_cd() * is_diag - selectors.is_last_fused(),
         local,
         next,
@@ -101,6 +105,13 @@ pub fn enforce_fused_rows<AB>(
         8,
         16,
     );
+    for (g, residuals) in word_residuals.into_iter().enumerate() {
+        for (position, residual) in residuals.into_iter().enumerate() {
+            if g != MISSING_ROTATION_G || position != 1 {
+                builder.assert_zero(residual);
+            }
+        }
+    }
 }
 
 /// Enforces the fused-to-footer bridge and all four footer rows of each cycle.
@@ -448,8 +459,8 @@ pub(crate) fn enforce_inactive_footer_output_aux<AB>(
     builder.assert_zero_ext(footer_output_aux * inactive);
 }
 
-fn enforce_transition_for_maps<AB>(
-    builder: &mut AB,
+fn accumulate_transition_for_maps<AB>(
+    residuals: &mut [[AB::Expr; 4]; NUM_G],
     gate: AB::Expr,
     local: &[AB::Var],
     next: &[AB::Var],
@@ -469,7 +480,7 @@ fn enforce_transition_for_maps<AB>(
         }
         let lhs = transition_output_word::<AB>(local, local_map, word_idx, d_rotation);
         let rhs = input_word::<AB>(next, next_map, word_idx, next_d_rotation);
-        builder.when(gate.clone()).assert_zero(lhs - rhs);
+        residuals[g][position] += gate.clone() * (lhs - rhs);
     }
 }
 
