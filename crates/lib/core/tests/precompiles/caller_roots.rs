@@ -54,16 +54,15 @@ fn manual_uint_evaluation_and_predicates_bind_the_complete_graph() {
         let binding =
             Node::join(UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID), sum.digest(), two)
                 .unwrap();
-        let expected = Node::and(TRUE_DIGEST, binding.digest()).digest();
+        let expected = binding.digest();
         let source = format!(
             r#"
             use miden::core::precompiles::{module}
             begin
                 push.99.98.97.96
-                padw
                 exec.{leaf}::push_one_digest dupw exec.{leaf}::add
                 exec.{leaf}::eval_with_root
-                movupw.2 adv.export_deferred_witness
+                adv.export_deferred_witness
             end
         "#,
             leaf = module.rsplit("::").next().unwrap()
@@ -91,12 +90,13 @@ fn manual_uint_evaluation_and_predicates_bind_the_complete_graph() {
                 .collect::<Vec<_>>()
                 .join(" ");
             let source = format!(
-                "use miden::core::precompiles::{module}\nbegin padw {args} exec.{leaf}::{name}_with_root movdn.4 adv.export_deferred_witness end"
+                "use miden::core::precompiles::{module}\nbegin push.99.98.97.96 {args} exec.{leaf}::{name}_with_root adv.export_deferred_witness end"
             );
             let output = run_precompile_program(&source).unwrap();
             let witness = assert_exported_manual_root(&output, 0);
-            assert_eq!(and_count(&witness), bindings, "{module}::{name}");
+            assert_eq!(and_count(&witness), bindings - 1, "{module}::{name}");
             assert_eq!(output.stack.get_element(4).unwrap(), Felt::from_u32(expected_bit));
+            assert_eq!(&read_stack_felts(&output, 9)[5..], &[96, 97, 98, 99].map(Felt::from_u32));
         }
     }
 }
@@ -146,13 +146,15 @@ fn manual_uint_equality_preserves_canonical_bindings_and_high_limb_inequality() 
             let eq = UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID);
             let lhs_binding = Node::join(eq, lhs_expr, lhs_value).unwrap().digest();
             let rhs_binding = Node::join(eq, rhs_expr, rhs_value).unwrap().digest();
-            let expected = Node::and(Node::and(seed, lhs_binding).digest(), rhs_binding).digest();
+            let comparison = Node::and(lhs_binding, rhs_binding).digest();
+            let expected = Node::and(seed, comparison).digest();
             let source = format!(
-                "use miden::core::precompiles::{module}\nbegin push.99.98.97.96 padw padw exec.::miden::core::precompiles::append_root {setup} exec.{leaf}::is_eq_with_root movdn.4 adv.export_deferred_witness end"
+                "use miden::core::precompiles::{module}\nbegin push.99.98.97.96 padw padw exec.::miden::core::precompiles::append_root {setup} exec.{leaf}::is_eq_with_root adv.export_deferred_witness movup.4 movdn.8 exec.::miden::core::precompiles::append_root adv.export_deferred_witness end"
             );
             let output = run_precompile_program(&source).unwrap();
             let witness = assert_exported_manual_root(&output, 0);
             assert_eq!(witness.root_unchecked(), expected, "{module}: binding order");
+            assert!(output.advice.get_mapped_values(&comparison).is_some());
             assert_eq!(and_count(&witness), 3);
             assert_eq!(output.stack.get_element(4), Some(Felt::from_u32(u32::from(equal))));
             assert_eq!(&read_stack_felts(&output, 9)[5..], &[96, 97, 98, 99].map(Felt::from_u32));
@@ -161,7 +163,7 @@ fn manual_uint_equality_preserves_canonical_bindings_and_high_limb_inequality() 
 }
 
 #[test]
-fn manual_inversion_and_division_chain_the_caller_root() {
+fn independent_inversion_and_division_roots_compose_explicitly() {
     for domain in UintDomain::ALL.into_iter().filter(|d| d.is_prime_field()) {
         let module = uint_module(domain);
         let leaf = module.rsplit("::").next().unwrap();
@@ -169,21 +171,27 @@ fn manual_inversion_and_division_chain_the_caller_root() {
             r#"
             use miden::core::precompiles::{module}
             begin
-                padw
+                push.99.98.97.96
                 exec.{leaf}::push_two_digest
                 exec.{leaf}::inv_with_root
+                swapw
                 exec.{leaf}::push_one_digest
                 exec.{leaf}::div_with_root
+                # => [DIV_ROOT, QUOTIENT, INV_ROOT, ...]
+                movupw.2 swapw exec.::miden::core::precompiles::append_root
+                swapw
                 exec.{leaf}::push_two_digest exec.{leaf}::assert_eq_with_root
+                exec.::miden::core::precompiles::append_root
                 adv.export_deferred_witness
             end
         "#
         );
         // 1 / (1 / 2) = 2, with two inversion bindings and the final equality.
         let output = run_precompile_program(&source).unwrap();
-        assert_eq!(and_count(&assert_exported_manual_root(&output, 0)), 3);
+        assert_eq!(and_count(&assert_exported_manual_root(&output, 0)), 2);
+        assert_eq!(&read_stack_felts(&output, 8)[4..], &[96, 97, 98, 99].map(Felt::from_u32));
         let zero = format!(
-            "use miden::core::precompiles::{module}\nbegin padw exec.{leaf}::push_zero_digest exec.{leaf}::inv_with_root end"
+            "use miden::core::precompiles::{module}\nbegin exec.{leaf}::push_zero_digest exec.{leaf}::inv_with_root end"
         );
         assert!(run_precompile_program(&zero).is_err());
     }
@@ -211,25 +219,39 @@ fn manual_curve_calls_bind_values_and_allow_false_predicates() {
                 .map(|p| format!("exec.{module}::{p}"))
                 .collect::<Vec<_>>()
                 .join(" ");
-            let adjust = if bit.is_some() { "movdn.4" } else { "" };
             let source = format!(
-                "use miden::core::precompiles::curves::{module}\nbegin padw {args} exec.{module}::{name}_with_root {adjust} adv.export_deferred_witness end"
+                "use miden::core::precompiles::curves::{module}\nbegin push.99.98.97.96 {args} exec.{module}::{name}_with_root adv.export_deferred_witness end"
             );
             let output = run_precompile_program(&source).unwrap();
-            assert_eq!(and_count(&assert_exported_manual_root(&output, 0)), count);
+            assert_eq!(and_count(&assert_exported_manual_root(&output, 0)), count - 1);
             if let Some(bit) = bit {
                 assert_eq!(output.stack.get_element(4).unwrap(), Felt::from_u32(bit));
             }
+            let tail_offset = 4 + usize::from(bit.is_some());
+            assert_eq!(
+                &read_stack_felts(&output, tail_offset + 4)[tail_offset..],
+                &[96, 97, 98, 99].map(Felt::from_u32)
+            );
         }
         let source = format!(
-            "use miden::core::precompiles::curves::{module}\nbegin padw exec.{module}::push_generator exec.{module}::eval_with_root movupw.3 adv.export_deferred_witness end"
+            "use miden::core::precompiles::curves::{module}\nbegin push.99.98.97.96 exec.{module}::push_generator exec.{module}::eval_with_root adv.export_deferred_witness push.64 mem_storew_le dropw push.68 mem_storew_le dropw push.72 mem_storew_le dropw push.76 mem_storew_le dropw padw push.64 mem_loadw_le end"
         );
         let output = run_precompile_program(&source).unwrap();
-        assert_eq!(and_count(&assert_exported_manual_root(&output, 0)), 1);
-        assert_eq!(
-            &read_stack_felts(&output, 8)[4..],
-            CurvePrecompile::generator_node(curve).digest().as_elements()
-        );
+        let witness = assert_exported_manual_root(&output, 0);
+        assert_eq!(and_count(&witness), 0);
+        let generator = CurvePrecompile::generator_node(curve);
+        let (x, y) = generator.payload().as_join().unwrap();
+        let binding = Node::join(
+            CurvePrecompile::op_frame(CurvePrecompile::EQ_OP_ID),
+            generator.digest(),
+            generator.digest(),
+        )
+        .unwrap();
+        assert_eq!(witness.root_unchecked(), binding.digest());
+        assert_eq!(read_memory_felts(&output, 68, 4), generator.digest().as_elements());
+        assert_eq!(read_memory_felts(&output, 72, 4), x.as_elements());
+        assert_eq!(read_memory_felts(&output, 76, 4), y.as_elements());
+        assert_eq!(&read_stack_felts(&output, 8)[4..], &[96, 97, 98, 99].map(Felt::from_u32));
     }
 }
 
@@ -239,10 +261,10 @@ fn independent_manual_roots_can_be_composed_without_logging() {
         use miden::core::precompiles
         use miden::core::precompiles::u256
         begin
-            padw exec.u256::push_one_digest dupw exec.u256::assert_eq_with_root
-            dupw adv.export_deferred_witness push.0 mem_storew_le dropw
-            padw exec.u256::push_two_digest dupw exec.u256::assert_eq_with_root
-            dupw adv.export_deferred_witness push.4 mem_storew_le dropw
+            exec.u256::push_one_digest dupw exec.u256::assert_eq_with_root
+            adv.export_deferred_witness push.0 mem_storew_le dropw
+            exec.u256::push_two_digest dupw exec.u256::assert_eq_with_root
+            adv.export_deferred_witness push.4 mem_storew_le dropw
             padw push.0 mem_loadw_le padw push.4 mem_loadw_le
             exec.precompiles::append_root
             adv.export_deferred_witness
@@ -253,7 +275,7 @@ fn independent_manual_roots_can_be_composed_without_logging() {
     let rhs = Word::new(read_memory_felts(&output, 4, 4).try_into().unwrap());
     let witness = assert_exported_manual_root(&output, 0);
     assert_eq!(witness.root_unchecked(), Node::and(lhs, rhs).digest());
-    assert_eq!(and_count(&witness), 3);
+    assert_eq!(and_count(&witness), 1);
     assert!(output.advice.get_mapped_values(&lhs).is_some());
     assert!(output.advice.get_mapped_values(&rhs).is_some());
 }
@@ -327,7 +349,7 @@ fn returned_hash_roots_compose_with_arithmetic_and_preserve_the_vm_root() {
     let one = UintPrecompile::value_node(UintDomain::U256, ONE_LIMBS).digest();
     let equality =
         Node::join(UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID), one, one).unwrap();
-    let seed = Node::and(TRUE_DIGEST, equality.digest()).digest();
+    let seed = equality.digest();
     let preimage = Node::chunks_from_bytes(b"abc").digest();
     let sha256 = Sha256Precompile::assert_node(
         3,
@@ -348,7 +370,7 @@ fn returned_hash_roots_compose_with_arithmetic_and_preserve_the_vm_root() {
         begin
             push.6513249 push.128 mem_store
             push.99.98.97.96
-            padw exec.u256::push_one_digest dupw exec.u256::assert_eq_with_root
+            exec.u256::push_one_digest dupw exec.u256::assert_eq_with_root
             push.256 push.3 push.128 exec.sha256::hash_bytes_mem_with_root
             adv.export_deferred_witness
             exec.precompiles::append_root
@@ -361,7 +383,7 @@ fn returned_hash_roots_compose_with_arithmetic_and_preserve_the_vm_root() {
     let output = run_precompile_program(source).unwrap();
     let witness = assert_exported_manual_root(&output, 0);
     assert_eq!(witness.root_unchecked(), expected);
-    assert_eq!(and_count(&witness), 3);
+    assert_eq!(and_count(&witness), 2);
     assert!(output.advice.get_mapped_values(&sha256.digest()).is_some());
     assert!(output.advice.get_mapped_values(&sha512.digest()).is_some());
     assert_eq!(&read_stack_felts(&output, 8)[4..], &[96, 97, 98, 99].map(Felt::from_u32));

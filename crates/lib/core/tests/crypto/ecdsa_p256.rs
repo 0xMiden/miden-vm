@@ -515,10 +515,10 @@ fn p256_recover_loads_signature_before_local_write() {
     let fixture = valid_fixture();
     // Deliberately bypass the caller-owned-memory precondition to preserve the defensive
     // load-before-local-write ordering.
-    // `recover_impl` owns locals [2^31, 2^31 + 8), so the nested `recover_digest` frame begins
-    // here. Its candidate-key `adv_pipe` overwrites this region after the signature has been
-    // loaded.
-    let recover_digest_locals_ptr = (1_u32 << 31) + 8;
+    // `recover_with_root` owns locals [2^31, 2^31 + 12), so the nested `recover_digest` frame
+    // begins here. Its candidate-key `adv_pipe` overwrites this region after the signature has
+    // been loaded.
+    let recover_digest_locals_ptr = (1_u32 << 31) + 12;
 
     let output = run_recover_with_native_signature(
         fixture.message,

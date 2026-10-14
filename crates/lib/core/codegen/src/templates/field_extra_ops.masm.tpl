@@ -141,38 +141,38 @@ pub proc div(numerator: Expr, denominator: Expr) -> Expr
     # => [QUOTIENT_DIGEST, ...]
 end
 
-#! Caller-root form of `inv`; never logs into the VM root.
-#! Input:  [X_DIGEST, ROOT, ...]
-#! Output: [INV_DIGEST, NEXT_ROOT, ...]
-#! The root binds X * INV = 1; zero inputs fail.
-pub proc inv_with_root(value: Expr, root: precompiles::Digest) -> (Expr, precompiles::Digest)
+#! Computes an inverse and returns its binding obligation first without logging it.
+#! Input:  [X_DIGEST, ...]
+#! Output: [ROOT, INV_DIGEST, ...]
+#! ROOT binds X * INV = 1; zero inputs fail. The caller must include ROOT in its own obligation.
+pub proc inv_with_root(value: Expr) -> (precompiles::Digest, Expr)
     emit.event("miden::precompiles::fields::field_inv")
     adv_pushw
     adv_pushw
     swapw
     exec.load
+    # => [INV_DIGEST, X_DIGEST, ...]
     dupw
     movupw.2
     exec.mul
+    # => [PRODUCT_DIGEST, INV_DIGEST, ...]
     exec.push_one_digest
-    movupw.3 movdnw.2
-    # => [ONE, PRODUCT, ROOT, INV_DIGEST, ...]
     exec.assert_eq_with_root
-    swapw
+    # => [ROOT=EQ(ONE, PRODUCT), INV_DIGEST, ...]
 end
 
-#! Caller-root form of `div`; never logs into the VM root.
-#! Input:  [NUMERATOR, DENOMINATOR, ROOT, ...]
-#! Output: [QUOTIENT_EXPR, NEXT_ROOT, ...]
-pub proc div_with_root(
-    numerator: Expr,
-    denominator: Expr,
-    root: precompiles::Digest,
-) -> (Expr, precompiles::Digest)
-    movdnw.2
-    # => [DENOMINATOR, ROOT, NUMERATOR, ...]
+#! Divides two field expressions and returns the denominator's inverse obligation first.
+#! Input:  [NUMERATOR, DENOMINATOR, ...]
+#! Output: [ROOT, QUOTIENT_EXPR, ...]
+#! The VM built-in root is unchanged; the caller must include ROOT in its own obligation.
+pub proc div_with_root(numerator: Expr, denominator: Expr) -> (precompiles::Digest, Expr)
+    swapw
+    # => [DENOMINATOR, NUMERATOR, ...]
     exec.inv_with_root
-    # => [INVERSE, NEXT_ROOT, NUMERATOR, ...]
-    movupw.2
+    # => [ROOT, INVERSE, NUMERATOR, ...]
+    swapw.2
+    # => [NUMERATOR, INVERSE, ROOT, ...]
     exec.mul
+    swapw
+    # => [ROOT, QUOTIENT_EXPR, ...]
 end

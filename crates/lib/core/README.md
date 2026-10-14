@@ -19,21 +19,18 @@ cargo run -p miden-core-lib-codegen -- --out target/miden-core-lib-generated-asm
 
 ## Caller-maintained precompile roots
 
-Deferred precompile procedures have `_with_root` variants for programs that accumulate their own
-obligations without changing the VM's built-in deferred root. Field/uint and curve operations take
-the caller's four-felt root after their ordinary arguments and append every advice-binding
-assertion. Start with the implicit TRUE digest (`padw`). Evaluation, inversion/division, and
-predicates return `[ordinary results..., NEXT_ROOT, ...]`; assertions return only `NEXT_ROOT`.
-Comparisons can return false successfully: the root binds the values used to compute their result
-rather than asserting the result is true. Expression constructors, arithmetic expressions, loads,
-reductions, and MSM remain shared; they take no root.
+Deferred precompile procedures have `_with_root` variants that return an independent obligation
+without changing the VM's built-in deferred root. They take the same ordinary arguments as their
+native counterparts and return `[ROOT, ordinary results..., ...]`. Assertions and signature
+verification return only ROOT. Memory hashes also return only ROOT and write their digest to
+memory, retaining their encoding, alignment, padding, overlap, and length-limit contracts.
 
-Hash and signature procedures take the same arguments as their original procedures and return
-`[ROOT, ordinary results..., ...]`. They build an independent obligation, which the caller must
-include in its own root using `precompiles::append_root`. A hash returns its registered assertion
-directly, without an initial AND with TRUE; a signature returns its complete graph, including all
-nested advice bindings. Memory hashes write the digest to memory and return only ROOT, retaining
-their existing encoding, alignment, padding, overlap, and length-limit contracts.
+A single-binding operation returns its registered assertion directly. A compound operation combines
+all of its own advice-binding assertions into one root. Callers explicitly combine these independent
+roots with `precompiles::append_root`; no operation takes the caller's accumulator as an argument.
+Comparisons can return false successfully: ROOT binds the values used to compute their result rather
+than asserting the result is true. Expression constructors, arithmetic expressions, loads,
+reductions, and MSM remain shared and produce no obligation.
 
 `precompiles::append_root` takes `[ASSERTION, ROOT, ...]` and returns the exact digest of
 `AND(ROOT, ASSERTION)`, registering and hashing the same ordered payload without logging. Both
@@ -47,14 +44,17 @@ use miden::core::precompiles
 use miden::core::sys
 
 begin
-    padw
     exec.k1_scalar::push_two_digest
     exec.k1_scalar::inv_with_root
-    # => [INV_TWO_EXPR, ROOT1, ...]
+    # => [INV_ROOT, INV_TWO_EXPR, ...]
+    swapw
+    # => [INV_TWO_EXPR, INV_ROOT, ...]
     exec.k1_scalar::push_two_digest
     exec.k1_scalar::mul
     exec.k1_scalar::push_one_digest
     exec.k1_scalar::assert_eq_with_root
+    # => [EQUALITY_ROOT, INV_ROOT, ...]
+    exec.precompiles::append_root
     # => [ROOT2, ...]
 
     # Hash the packed bytes "abc" and explicitly include the returned obligation.
@@ -79,7 +79,7 @@ that contract.
 
 Native ECDSA and EdDSA entry points keep their stack interfaces and acceptance rules. Their shared
 algorithm bodies build a complete obligation graph, and the native wrapper logs that graph once.
-ECDSA starts its graph at the hash assertion; EdDSA starts from TRUE before its first binding.
+Algorithm phases return their own obligations, which the public procedures combine explicitly.
 This changes their deferred commitment digests and can change their cycle counts.
 
 ## Available modules

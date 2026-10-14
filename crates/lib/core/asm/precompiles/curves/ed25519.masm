@@ -413,32 +413,23 @@ pub proc double(point: Point) -> Point
     # => [DOUBLE_POINT_DIGEST, ...]
 end
 
-#! Caller-root form of `assert_eq`; never logs into the VM root.
-#! Input:  [LHS, RHS, ROOT, ...]
-#! Output: [NEXT_ROOT, ...]
-pub proc assert_eq_with_root(
-    lhs: Point,
-    rhs: Point,
-    root: precompiles::Digest,
-) -> precompiles::Digest
+#! Returns the equality assertion for two curve expressions without logging it.
+#! Input:  [LHS, RHS, ...]
+#! Output: [ROOT, ...]
+#! The caller must include ROOT in its own obligation.
+pub proc assert_eq_with_root(lhs: Point, rhs: Point) -> precompiles::Digest
     push.EQ_INIT_CV
     exec.precompiles::register_fixed_expr
-    exec.precompiles::append_root
 end
 
-#! Caller-root form of `eval`; never logs into the VM root.
-#! Input:  [POINT_EXPR, ROOT, ...]
-#! Output: [VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, NEXT_ROOT, ...]
-@locals(4)
-pub proc eval_with_root(
-    point: Point,
-    root: precompiles::Digest,
-) -> (Point, PointValue, precompiles::Digest)
-    swapw loc_storew_le.0 dropw
-    # Park ROOT while constructing the three-word result; otherwise it lies below the top 16.
+#! Evaluates a curve expression and returns its binding obligation first.
+#! Input:  [POINT_EXPR, ...]
+#! Output: [ROOT, VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, ...]
+#! ROOT binds the advised canonical VALUE to POINT_EXPR; the VM built-in root is unchanged.
+pub proc eval_with_root(point: Point) -> (precompiles::Digest, Point, PointValue)
     adv.evaluate_deferred_payload
     adv_pushw adv_pushw
-    # => [X, Y, EXPR, ...]; ROOT is saved in loc[0..4].
+    # => [X, Y, EXPR, ...]
     dupw.1 dupw.1
     push.VALUE_INIT_CV
     exec.precompiles::register_fixed_expr
@@ -447,102 +438,96 @@ pub proc eval_with_root(
     dupw.1 movdnw.2
     push.EQ_INIT_CV
     exec.precompiles::register_fixed_expr
-    padw loc_loadw_le.0 swapw
-    # => [EQ_DIGEST, ROOT, VALUE_DIGEST, X, Y, ...]
-    exec.precompiles::append_root
-    movdnw.3
+    # => [ROOT=EQ(EXPR, VALUE_DIGEST), VALUE_DIGEST, X, Y, ...]
 end
 
-#! Caller-root form of `eval_digest`; never logs into the VM root.
-#! Input:  [POINT_EXPR, ROOT, ...]
-#! Output: [VALUE_DIGEST, NEXT_ROOT, ...]
-proc eval_digest_with_root(point: Point, root: precompiles::Digest) -> (Point, precompiles::Digest)
+#! Evaluates a canonical point VALUE digest and returns its binding obligation first.
+#! Input:  [POINT_EXPR, ...]
+#! Output: [ROOT, VALUE_DIGEST, ...]
+proc eval_digest_with_root(point: Point) -> (precompiles::Digest, Point)
     adv.evaluate_deferred_payload
     adv_pushw adv_pushw
     push.VALUE_INIT_CV
     exec.precompiles::register_fixed_expr
-    # => [VALUE_DIGEST, EXPR, ROOT, ...]
+    # => [VALUE_DIGEST, EXPR, ...]
     dupw movdnw.2
     push.EQ_INIT_CV
     exec.precompiles::register_fixed_expr
-    movupw.2 swapw
-    # => [EQ_DIGEST, ROOT, VALUE_DIGEST, ...]
-    exec.precompiles::append_root
-    swapw
+    # => [ROOT=EQ(VALUE_DIGEST, EXPR), VALUE_DIGEST, ...]
 end
 
-#! Caller-root form of `is_eq`; never logs into the VM root.
-#! Input:  [LHS, RHS, ROOT, ...]
-#! Output: [is_equal, NEXT_ROOT, ...]
-#! Both canonical values are bound; inequality itself does not trap.
-pub proc is_eq_with_root(
-    lhs: Point,
-    rhs: Point,
-    root: precompiles::Digest,
-) -> (i1, precompiles::Digest)
-    movupw.2 swapw
+#! Compares two canonical point values and returns their combined binding obligation first.
+#! Input:  [LHS, RHS, ...]
+#! Output: [ROOT, is_equal, ...]
+#! Both canonical values are bound; inequality itself does not trap or log into the VM root.
+pub proc is_eq_with_root(lhs: Point, rhs: Point) -> (precompiles::Digest, i1)
     exec.eval_digest_with_root
-    # => [LHS_VALUE, ROOT1, RHS, ...]
-    movdnw.2 swapw
-    exec.eval_digest_with_root
-    # => [RHS_VALUE, NEXT_ROOT, LHS_VALUE, ...]
-    movupw.2 swapw
-    exec.precompiles::word_eq
-end
-
-#! Caller-root form of `is_eq_digest`; never logs into the VM root.
-#! Input:  [TARGET, EXPR, ROOT, ...]
-#! Output: [is_equal, NEXT_ROOT, ...]
-#! TARGET must already be a bound canonical point VALUE digest, as for is_eq_digest.
-pub proc is_eq_digest_with_root(
-    target: Point,
-    value: Point,
-    root: precompiles::Digest,
-) -> (i1, precompiles::Digest)
-    swapw movupw.2 swapw
-    # => [EXPR, ROOT, TARGET, ...]
-    exec.eval_digest_with_root
-    # => [VALUE_DIGEST, NEXT_ROOT, TARGET, ...]
+    # => [LHS_ROOT, LHS_VALUE, RHS, ...]
     movupw.2
+    exec.eval_digest_with_root
+    # => [RHS_ROOT, RHS_VALUE, LHS_ROOT, LHS_VALUE, ...]
+    swapw.3
+    # => [LHS_VALUE, RHS_VALUE, LHS_ROOT, RHS_ROOT, ...]
+    # Both comparison operands are bound canonical point VALUE digests.
     exec.precompiles::word_eq
+    # => [is_equal, LHS_ROOT, RHS_ROOT, ...]
+    movdn.8 swapw
+    # => [RHS_ROOT, LHS_ROOT, is_equal, ...]
+    exec.precompiles::append_root
+    # => [ROOT=AND(LHS_ROOT, RHS_ROOT), is_equal, ...]
 end
 
-#! Caller-root form of `assert_eq_digest`; never logs into the VM root.
-#! Input:  [TARGET, EXPR, ROOT, ...]
-#! Output: [NEXT_ROOT, ...]
-pub proc assert_eq_digest_with_root(
-    target: Point,
-    value: Point,
-    root: precompiles::Digest,
-) -> precompiles::Digest
+#! Compares a canonical point VALUE digest and returns the input's binding obligation first.
+#! Input:  [TARGET, EXPR, ...]
+#! Output: [ROOT, is_equal, ...]
+#! TARGET must already be a bound canonical point VALUE digest. A false comparison succeeds.
+pub proc is_eq_digest_with_root(target: Point, value: Point) -> (precompiles::Digest, i1)
+    swapw
+    exec.eval_digest_with_root
+    # => [ROOT, VALUE_DIGEST, TARGET, ...]
+    movdnw.2
+    exec.precompiles::word_eq
+    # => [is_equal, ROOT, ...]
+    movdn.4
+    # => [ROOT, is_equal, ...]
+end
+
+#! Returns the equality assertion for a target curve expression without logging it.
+#! Input:  [TARGET, EXPR, ...]
+#! Output: [ROOT, ...]
+pub proc assert_eq_digest_with_root(target: Point, value: Point) -> precompiles::Digest
     exec.assert_eq_with_root
 end
 
-#! Caller-root form of `is_identity`; never logs into the VM root.
-#! Input:  [POINT_EXPR, ROOT, ...]
-#! Output: [is_identity, NEXT_ROOT, ...]
-pub proc is_identity_with_root(point: Point, root: precompiles::Digest) -> (i1, precompiles::Digest)
+#! Returns the identity comparison bit together with its binding obligation.
+#! Input:  [POINT_EXPR, ...]
+#! Output: [ROOT, is_identity, ...]
+#! A false comparison succeeds; the VM built-in root is unchanged.
+pub proc is_identity_with_root(point: Point) -> (precompiles::Digest, i1)
     push.IDENTITY_DIGEST
     exec.is_eq_digest_with_root
 end
 
-#! Caller-root form of `assert_identity`; never logs into the VM root.
-#! Input:  [POINT_EXPR, ROOT, ...]
-#! Output: [NEXT_ROOT, ...]
-pub proc assert_identity_with_root(point: Point, root: precompiles::Digest) -> precompiles::Digest
+#! Returns the assertion that a curve expression is the identity without logging it.
+#! Input:  [POINT_EXPR, ...]
+#! Output: [ROOT, ...]
+pub proc assert_identity_with_root(point: Point) -> precompiles::Digest
     push.IDENTITY_DIGEST
     exec.assert_eq_digest_with_root
 end
 
-#! Caller-root form of `assert_not_identity`; never logs into the VM root.
-#! Input:  [POINT_EXPR, ROOT, ...]
-#! Output: [NEXT_ROOT, ...]
-pub proc assert_not_identity_with_root(
-    point: Point,
-    root: precompiles::Digest,
-) -> precompiles::Digest
+#! Asserts a curve expression is not the identity and returns its binding obligation.
+#! Input:  [POINT_EXPR, ...]
+#! Output: [ROOT, ...]
+#! The VM built-in root is unchanged; the caller must include ROOT in its own obligation.
+pub proc assert_not_identity_with_root(point: Point) -> precompiles::Digest
     exec.eval_digest_with_root
+    # => [ROOT, VALUE_DIGEST, ...]
+    swapw
     push.IDENTITY_DIGEST
+    # => [IDENTITY_DIGEST, VALUE_DIGEST, ROOT, ...]
     exec.precompiles::word_eq
+    # => [is_identity, ROOT, ...]
     assertz
+    # => [ROOT, ...]
 end

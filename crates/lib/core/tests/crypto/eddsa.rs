@@ -415,7 +415,7 @@ fn manual_ed25519_word_and_bytes_export_all_nested_bindings() {
             let manual_source =
                 manual_signature_source(&source, "eddsa_25519_sha512", procedure, composed);
             let manual = run_program(&manual_source, &pk, &sig).unwrap();
-            assert_manual_signature_matches_native(&native, &manual, 10, 10, composed);
+            assert_manual_signature_matches_native(&native, &manual, 10, 9, composed);
             let wrong = manual_source.replace(&commitment, &masm_push_word(&Word::default()));
             assert!(run_program(&wrong, &pk, &sig).is_err());
         }
