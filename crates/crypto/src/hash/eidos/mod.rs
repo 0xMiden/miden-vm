@@ -7,7 +7,7 @@
 //!
 //! Eidos digests occupy a 252-bit packed subspace: the high bit of each odd Eidos compression
 //! output lane is cleared before two `u32` lanes are packed into one Goldilocks field element. The
-//! resulting generic collision-resistance bound is 126 bits.
+//! resulting generic collision-resistance ceiling is 126 bits.
 //!
 //! Each digest element is below `2^63`, so digest elements are not uniform over the Goldilocks
 //! field and their 32-byte serialization is not a uniform 256-bit string. Use

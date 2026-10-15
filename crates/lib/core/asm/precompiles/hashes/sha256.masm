@@ -8,9 +8,9 @@ const ASSERT_OP_ID = 0
 const SHA256_DIGEST_EVENT = event("miden::precompiles::hashes::sha256::digest")
 
 # Fixed lanes of `init(DOMAIN_TAG, [ASSERT_OP_ID, len_bytes, 0])`.
-const ASSERT_INIT_CV_0 = 4280581857109609473
-const ASSERT_INIT_CV_1 = 2688637132020383744
-const ASSERT_INIT_CV_2_BASE = 1947077364412317696
+const ASSERT_INIT_CV_0 = 13503953893964385281
+const ASSERT_INIT_CV_1 = 11912009168875159552
+const ASSERT_INIT_CV_2_BASE = 11170449401267093504
 const ASSERT_INIT_CV_3 = 6620516959492505600
 
 #! Hashes a variable-length byte message using the deferred SHA-256 precompile.

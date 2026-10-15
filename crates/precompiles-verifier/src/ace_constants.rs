@@ -29,10 +29,10 @@ pub(crate) const PVM_PROTOCOL_ID: u64 = 4;
 #[cfg(any(test, feature = "constants-tools", feature = "std"))]
 #[rustfmt::skip]
 pub const PVM_RELATION_DIGEST: [u64; 4] = [
-    3701210020891453972,
-    5654005178025621372,
-    1943904801135359027,
-    9085658677624169106,
+    5618632176883261929,
+    5091169848121332946,
+    9110857118546866548,
+    100418585322354598,
 ];
 
 /// Eidos digest of the order-invariant PVM ACE circuit's instruction stream (raw canonical u64
@@ -40,10 +40,10 @@ pub const PVM_RELATION_DIGEST: [u64; 4] = [
 #[cfg(any(test, feature = "constants-tools"))]
 #[rustfmt::skip]
 pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [
-    5052378141201654292,
-    2535198681450433888,
-    1514554246941692778,
-    8776902161883269336,
+    2255028588524991477,
+    8088146176287763667,
+    1935595524963351362,
+    5560235558590875651,
 ];
 
 /// Commitment to the preprocessed (setup) trace tree under the Eidos config (raw canonical
@@ -52,10 +52,10 @@ pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [
 #[cfg(any(test, feature = "constants-tools"))]
 #[rustfmt::skip]
 pub const PVM_PREPROCESSED_COMMITMENT: [u64; 4] = [
-    7435130241103350969,
-    2209492810180294937,
-    2763208909109372110,
-    5080896414781165458,
+    1070440981155119101,
+    2022626773377316756,
+    6941685244114430330,
+    5172579525468662096,
 ];
 
 /// Encoded circuit shape: (READ variables, evaluation gates, stream length in felts). An in-VM
