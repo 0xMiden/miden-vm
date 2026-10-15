@@ -133,7 +133,7 @@ jobs:
         run: make test-crypto
 
   eidos-x86-backends:
-    name: Eidos x86 backends and RPX debug
+    name: Eidos x86 backends
     needs: classify-eidos-paths
     if: needs.classify-eidos-paths.outputs.run == 'true'
     runs-on: warp-ubuntu-latest-x64-8x
@@ -226,8 +226,6 @@ jobs:
             failed=1
           fi
           exit "${failed}"
-      - name: Run RPX debug permutation with AVX2 on a 2 MiB stack
-        run: make test-rpx-avx2-debug NEXTEST_PROFILE=ci
 
   doc-tests:
     name: doc-tests

@@ -1,6 +1,6 @@
 //! Cryptographic hash functions used by the Miden protocol.
 
-use crate::{Felt, Word, ZERO};
+use crate::Felt;
 
 /// Generic digest types for binary hash functions.
 pub(crate) mod digest;
@@ -16,32 +16,6 @@ pub mod keccak;
 
 /// SHA-2 hash functions (SHA-256 and SHA-512).
 pub mod sha2;
-
-/// Poseidon2 hash function.
-pub mod poseidon2 {
-    pub use p3_goldilocks::Poseidon2Goldilocks;
-
-    pub use super::algebraic_sponge::poseidon2::{
-        Poseidon2, Poseidon2Challenger, Poseidon2Compression, Poseidon2Hasher,
-        Poseidon2Permutation256,
-    };
-}
-
-/// Rescue Prime Optimized (RPO) hash function.
-pub mod rpo {
-    pub use super::algebraic_sponge::rescue::rpo::{
-        Rpo256, RpoChallenger, RpoCompression, RpoHasher, RpoPermutation256,
-    };
-}
-
-/// Rescue Prime Extended (RPX) hash function.
-pub mod rpx {
-    pub use super::algebraic_sponge::rescue::rpx::{
-        Rpx256, RpxChallenger, RpxCompression, RpxHasher, RpxPermutation256,
-    };
-}
-
-mod algebraic_sponge;
 
 // TRAITS
 // ================================================================================================

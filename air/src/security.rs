@@ -73,11 +73,7 @@ pub fn security_report_with_hash(
 ) -> SecurityReport {
     match hash_fn {
         HashFunction::Eidos => {},
-        HashFunction::Blake3_256
-        | HashFunction::Rpo256
-        | HashFunction::Rpx256
-        | HashFunction::Poseidon2
-        | HashFunction::Keccak => {
+        HashFunction::Blake3_256 | HashFunction::Keccak => {
             return p3_security::budget::security_report(params, instance, air);
         },
     }
@@ -110,9 +106,9 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 
 /// Column alignment of the commitment scheme, in base field elements.
 ///
-/// The commitment sponge absorbs whole rates, so a committed matrix is padded up to a multiple of
-/// the rate.
-pub const COMMITMENT_ALIGNMENT: usize = config::SPONGE_RATE;
+/// Eidos absorbs whole message blocks, so a committed matrix is padded up to a multiple of
+/// the block length.
+pub const COMMITMENT_ALIGNMENT: usize = miden_crypto::hash::eidos::BLOCK_LEN;
 
 /// Shape of the Miden VM multi-AIR statement used by the security estimator.
 ///
@@ -633,13 +629,7 @@ mod tests {
     #[test]
     fn full_field_challengers_preserve_their_security_bounds() {
         let params = protocol_params(&config::pcs_params());
-        for hash_fn in [
-            HashFunction::Blake3_256,
-            HashFunction::Rpo256,
-            HashFunction::Rpx256,
-            HashFunction::Poseidon2,
-            HashFunction::Keccak,
-        ] {
+        for hash_fn in [HashFunction::Blake3_256, HashFunction::Keccak] {
             let parameters = proof_security_parameters(&config::pcs_params(), 20, 0, 8, hash_fn);
             assert_eq!(parameters.hash_fn, hash_fn);
             assert_eq!(
