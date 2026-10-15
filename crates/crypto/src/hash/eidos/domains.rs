@@ -85,7 +85,7 @@ crate::eidos_domain_registry! {
                 version: DomainVersion::numbered(1),
                 encoding: Custom,
                 description: "Canonical Eidos LMCS leaf hashing.",
-                schema: "param0 = sum of matrix-row and salt widths after each is independently padded to 8 Felts; param1 = 0; param2 = 0; absorb rows in commitment order; the verifier fixes the row boundaries and widths",
+                schema: "param0 = sum of matrix-row and salt widths after each is independently padded to 8 Felts; param1 = 0; param2 = 0; absorb rows in commitment order; an empty leaf returns the unmasked initial CV; the verifier fixes the row boundaries and widths",
             }
         }
     }

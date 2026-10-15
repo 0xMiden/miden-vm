@@ -317,7 +317,7 @@ mod tests {
         assert_eq!(coin.state, initial_state);
         assert_eq!(coin.output, expected);
         assert_eq!(coin.counter, 1);
-        assert_eq!(actual, [3_343_138_332, 3_182_666_834, 3_956_264_476, 4_003_292_457]);
+        assert_eq!(actual, [850_465_975, 2_814_286_374, 3_247_141_700, 1_839_660_647]);
     }
 
     #[test]
@@ -389,7 +389,7 @@ mod tests {
         coin.reseed(data);
 
         let actual: [u32; OUTPUT_FELTS] = core::array::from_fn(|_| coin.random());
-        assert_eq!(actual, [3_145_282_389, 2_211_610_295, 3_232_936_185, 3_064_838_016]);
+        assert_eq!(actual, [3_745_419_018, 1_592_641_853, 33_771_270, 3_071_911_292]);
     }
 
     #[test]

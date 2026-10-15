@@ -27,9 +27,9 @@ const NUM_AIRS = 4
 const ACE_STREAM_BLOCKS = 881
 
 # Precomputed generic Felt-sequence chaining word for the fixed-length stream.
-const ACE_STREAM_INIT_CV_0 = 4280581857092831745
-const ACE_STREAM_INIT_CV_1 = 2688637132020390792
-const ACE_STREAM_INIT_CV_2 = 1947077364412317696
+const ACE_STREAM_INIT_CV_0 = 13503953893947607553
+const ACE_STREAM_INIT_CV_1 = 11912009168875166600
+const ACE_STREAM_INIT_CV_2 = 11170449401267093504
 const ACE_STREAM_INIT_CV_3 = 6620516959492505600
 
 # Quotient recomposition inputs derived from the circuit's quotient arity and the
@@ -42,10 +42,10 @@ const QUOTIENT_FIRST_WEIGHT = 8868329529835627796
 
 # Eidos digest of the ACE circuit stream this relation accepts. One circuit serves
 # every proof order, so it is the advice-map key and the value the loader pins.
-const ACE_CIRCUIT_DIGEST_0 = 2893474567964624504
-const ACE_CIRCUIT_DIGEST_1 = 3562548738414551618
-const ACE_CIRCUIT_DIGEST_2 = 5681201847518939183
-const ACE_CIRCUIT_DIGEST_3 = 1543407423981343295
+const ACE_CIRCUIT_DIGEST_0 = 6070044760583918874
+const ACE_CIRCUIT_DIGEST_1 = 6584757606466659360
+const ACE_CIRCUIT_DIGEST_2 = 4666628460971067828
+const ACE_CIRCUIT_DIGEST_3 = 2854795711877818887
 
 # ERRORS
 # =================================================================================================
