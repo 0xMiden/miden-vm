@@ -400,3 +400,13 @@ fn inactive_point_row_cannot_provide() {
 
     check_points(&points_main);
 }
+
+#[test]
+fn inactive_point_rows_cannot_select_membership_subtypes() {
+    // Linear membership selectors are safe only when both subtypes are subsets of activity.
+    for subtype in [COL_IS_PAI, crate::ec::COL_IS_CERT] {
+        let (_, mut points) = ec_store_traces(EcStoreRequires::new());
+        points.values[subtype] = Felt::ONE;
+        assert!(std::panic::catch_unwind(|| check_points(&points)).is_err());
+    }
+}

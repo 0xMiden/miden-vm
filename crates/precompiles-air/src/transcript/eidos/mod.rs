@@ -52,14 +52,14 @@ pub const COL_EIDOS_COMPRESSION_END: usize = NUM_EIDOS_COMPRESSION_COLS;
 
 /// Number of caller-side block and initial-CV messages consumed by this compression.
 pub const COL_IN_MULTIPLICITY: usize = COL_EIDOS_COMPRESSION_END;
-/// Number of caller-side terminal-digest messages consumed by this chain.
-pub const COL_OUT_MULTIPLICITY: usize = COL_IN_MULTIPLICITY + 1;
+/// Terminal-digest multiplicity, stored only on footer row 3 in a free core cell.
+pub const COL_OUT_MULTIPLICITY: usize = 64;
 /// Whether this compression continues the chain immediately before it.
-pub const COL_IS_CONTINUATION: usize = COL_OUT_MULTIPLICITY + 1;
+pub const COL_IS_CONTINUATION: usize = COL_IN_MULTIPLICITY + 1;
 /// Physical compression ID of this chain's first cycle. Carried through continuations so the
 /// terminal output binds both ends of the physical chain.
 pub const COL_CHAIN_HEAD_ID: usize = COL_IS_CONTINUATION + 1;
-/// Total PVM Eidos width: 108 compression columns and four interface columns.
+/// Total PVM Eidos width: 108 compression columns and three interface columns.
 pub const NUM_MAIN_COLS: usize = COL_CHAIN_HEAD_ID + 1;
 
 // Block input plus the internal full-CV bridge, and the initial/terminal boundary relation.

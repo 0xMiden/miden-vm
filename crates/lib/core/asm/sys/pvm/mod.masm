@@ -23,10 +23,10 @@ use miden::core::stark::verifier
 # zero because Lifted STARK does not grind lookup challenges.
 const LOOKUP_POW_BITS = 0
 const MAX_MESSAGE_WIDTH = 18
-const NUM_COMPOSED_CONSTRAINTS = 923
+const NUM_COMPOSED_CONSTRAINTS = 857
 const MAX_CONSTRAINT_DEGREE = 5
-const NUM_DEEP_TERMS = 970
-const LOOKUP_FRACTIONS_PER_ROW = 317
+const NUM_DEEP_TERMS = 914
+const LOOKUP_FRACTIONS_PER_ROW = 291
 const FIXED_BOUNDARY_LOOKUP_TERMS = 19
 
 # Inclusive upper bound used by the PVM shape checks.
@@ -55,10 +55,10 @@ const MIN_LOG_HEIGHT_10 = 7
 const MIN_LOG_HEIGHT_11 = 7
 
 # PVM_RELATION_DIGEST = Eidos(PVM_PROTOCOL_ID || PVM_ACE_CIRCUIT_DIGEST).
-const RELATION_DIGEST_0 = 3430130751249333112
-const RELATION_DIGEST_1 = 3923292911056463301
-const RELATION_DIGEST_2 = 9102369175960030177
-const RELATION_DIGEST_3 = 2472984497279583389
+const RELATION_DIGEST_0 = 5618632176883261929
+const RELATION_DIGEST_1 = 5091169848121332946
+const RELATION_DIGEST_2 = 9110857118546866548
+const RELATION_DIGEST_3 = 100418585322354598
 
 # Trusted commitment to the PVM preprocessed trace tree under the native Eidos configuration;
 # `random_coin::init_seed` binds it into the Fiat-Shamir transcript.

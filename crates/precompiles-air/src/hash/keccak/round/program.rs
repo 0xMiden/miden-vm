@@ -1,7 +1,7 @@
-//! Keccak round program: 128 slots, encoded as 10 length-128 periodic
+//! Keccak round program: 128 slots, encoded as 11 length-128 periodic
 //! columns over the chiplet's trace.
 //!
-//! Each slot describes one TAM operation `c = ROL(a OP b, s)`. The ten
+//! Each slot describes one TAM operation `c = ROL(a OP b, s)`. The eleven
 //! columns are:
 //!
 //! - `is_xor`, `is_andnot`, `is_rol` — selector flags. A fused XORROL row sets both `is_xor` and
@@ -10,6 +10,7 @@
 //!   chiplet recover a one-per-row "reads src_a" count from the otherwise-overlapping selectors
 //!   without a degree bump.
 //! - `swap` — 1 on fused XORROL slots whose true rotation `ρ ≥ 32` (see [`COL_SWAP`]).
+//! - `rot_high` — 1 when the reduced shift is at least 16 (see [`COL_ROT_HIGH`]).
 //! - `back_a`, `back_b` — source A / B back-offsets (`src_addr = ip - back`).
 //! - `k` — ROL shift multiplier `2^s` (0 when `is_rol = 0`).
 //! - `dst_mult` — destination provide multiplicity (0 on NOP rows).
@@ -50,7 +51,7 @@ use crate::relations::ProvideMult;
 pub const ROUND_PERIOD: usize = 128;
 
 /// Number of preprocessed columns produced by [`round_program`].
-pub const NUM_PERIODIC_COLS: usize = 10;
+pub const NUM_PERIODIC_COLS: usize = 11;
 
 /// Column indices in the periodic table.
 pub const COL_IS_XOR: usize = 0;
@@ -70,6 +71,9 @@ pub const COL_IS_XORROL: usize = 8;
 /// (`ROL(x, ρ) = halfswap(ROL(x, ρ − 32))`). The round commits the true `c`
 /// for the Memory64 result.
 pub const COL_SWAP: usize = 9;
+/// 1 on rotation slots whose reduced shift is at least 16. Such slots omit the zero low
+/// u16 limb of each biased half; smaller shifts omit the zero high limb instead.
+pub const COL_ROT_HIGH: usize = 10;
 /// 1 at slot 127 of each round (the round's last slot), 0 elsewhere.
 /// Gates the round-boundary toggles of [`act`](super::COL_ACT): the
 /// within-round-constant constraint multiplies the column difference
@@ -460,10 +464,10 @@ pub fn rol_decompose(s: u32) -> (u32, bool) {
 // PERIODIC-COLUMN MATERIALIZATION
 // ================================================================================================
 
-/// Build the 10 periodic columns (one per row of the per-row format)
+/// Build the 11 periodic columns (one per row of the per-row format)
 /// for one Keccak round. Returned in canonical column order
 /// (`is_xor`, `is_andnot`, `is_rol`, `back_a`, `back_b`, `k`,
-/// `dst_mult`, `p_last`, `is_xorrol`, `swap`).
+/// `dst_mult`, `p_last`, `is_xorrol`, `swap`, `rot_high`).
 pub fn round_program() -> [Vec<Felt>; NUM_PERIODIC_COLS] {
     let table = slot_table();
     let mut cols: [Vec<Felt>; NUM_PERIODIC_COLS] =
@@ -485,6 +489,7 @@ pub fn round_program() -> [Vec<Felt>; NUM_PERIODIC_COLS] {
         cols[COL_IS_ROL][slot] = Felt::from(is_rol as u8);
         cols[COL_IS_XORROL][slot] = Felt::from(is_xorrol as u8);
         cols[COL_SWAP][slot] = Felt::from(swap as u8);
+        cols[COL_ROT_HIGH][slot] = Felt::from((is_rol != 0 && k >= 1 << 16) as u8);
         cols[COL_BACK_A][slot] =
             Felt::new(spec.src_a.back_off(slot)).expect("back_a fits in canonical Goldilocks");
         cols[COL_BACK_B][slot] =
@@ -556,6 +561,22 @@ mod tests {
         let cols = round_program();
         for (i, col) in cols.iter().enumerate() {
             assert_eq!(col.len(), ROUND_PERIOD, "col {i} length");
+        }
+    }
+
+    #[test]
+    fn compact_rotation_branch_matches_every_scheduled_shift() {
+        let columns = round_program();
+        for (index, slot) in slots().iter().enumerate() {
+            let high = match slot.op {
+                Op::Rol(s) | Op::XorRol(s) => {
+                    let shift = rol_decompose(s).0;
+                    assert!((1..=30).contains(&shift));
+                    shift >= 16
+                },
+                _ => false,
+            };
+            assert_eq!(columns[COL_ROT_HIGH][index], Felt::from(high as u8));
         }
     }
 }

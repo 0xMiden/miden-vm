@@ -6,7 +6,11 @@
 
 use alloc::vec::Vec;
 
-use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
+use miden_core::{
+    Felt,
+    field::{PrimeCharacteristicRing, QuadFelt},
+    utils::RowMajorMatrix,
+};
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 
 use crate::{
@@ -16,29 +20,15 @@ use crate::{
         NUM_RANDOMNESS,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    utils::current_main,
 };
 
 /// First main-trace column of the group-table band.
 pub const GROUPS_COL_OFFSET: usize = ec::NUM_MAIN_COLS;
 
 pub const NUM_MAIN_COLS: usize = ec::NUM_MAIN_COLS + groups::NUM_MAIN_COLS;
-pub const NUM_AUX_COLS: usize = ec::NUM_LOGUP_COLS + groups::NUM_LOGUP_COLS;
-
-const fn column_shape() -> [usize; NUM_AUX_COLS] {
-    let mut shape = [0usize; NUM_AUX_COLS];
-    let mut i = 0;
-    while i < ec::NUM_LOGUP_COLS {
-        shape[i] = ec::COLUMN_SHAPE[i];
-        i += 1;
-    }
-    let mut j = 0;
-    while j < groups::NUM_LOGUP_COLS {
-        shape[ec::NUM_LOGUP_COLS + j] = groups::COLUMN_SHAPE[j];
-        j += 1;
-    }
-    shape
-}
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = column_shape();
+pub const NUM_AUX_COLS: usize = 4;
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2];
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EcPointStoreGroupsAir;
@@ -103,7 +93,20 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        ec::eval_point_store_lookups(builder, 0);
-        groups::eval_lookups(builder, GROUPS_COL_OFFSET);
+        let local: [LB::Var; groups::NUM_MAIN_COLS] =
+            current_main(builder.main(), GROUPS_COL_OFFSET);
+        let provider = (
+            LB::Expr::ZERO - local[groups::COL_MULT].into(),
+            ec::EcGroupMsg {
+                group_ptr: local[groups::COL_PTR].into(),
+                a_ptr: local[groups::COL_A_PTR].into(),
+                b_ptr: local[groups::COL_B_PTR].into(),
+                bound_ptr: local[groups::COL_BOUND_PTR].into(),
+                scalar_bound_ptr: local[groups::COL_SBOUND_PTR].into(),
+                beta_ptr: local[groups::COL_BETA_PTR].into(),
+                lambda_ptr: local[groups::COL_LAMBDA_PTR].into(),
+            },
+        );
+        ec::eval_point_store_lookups(builder, 0, Some(provider));
     }
 }

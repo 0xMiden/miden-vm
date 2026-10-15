@@ -184,15 +184,12 @@ pub const COL_BETA_PTR: usize = 14;
 pub const COL_LAMBDA_PTR: usize = 15;
 pub const NUM_MAIN_COLS: usize = 16;
 
-// Aux: five columns, flattened via `frac_col!` so every closing
-// constraint stays at degree ≤ 3 → `log_quotient_degree = 1`. Six
-// fractions total: `EcPoint` provide alone in col 0, `EcGroup` consume paired with the `EcGroupAdd`
-// on-curve-cert consume (col 1), and the three trio MAC consumes — each
-// degree 3, so each sits alone (cols 2-4). The trio and the cert are
-// mutually-exclusive membership modes.
-pub(crate) const NUM_LOGUP_COLS: usize = 5;
-const AUX_WIDTH: usize = 5;
-pub(crate) const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 1, 1, 1];
+// Aux: four product-batched columns at degree ≤ 3 → `log_quotient_degree = 1`.
+// The point provide anchors col 0; group/cert consumes share col 1, membership MACs u/w
+// share col 2, and MAC y occupies col 3. In the composite, the group-table provide joins y.
+pub(crate) const NUM_LOGUP_COLS: usize = 4;
+const AUX_WIDTH: usize = NUM_LOGUP_COLS;
+pub(crate) const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 1];
 
 // AIR
 // ================================================================================================
@@ -262,6 +259,8 @@ where
     builder.assert_zero(is_pai.clone() * (AB::Expr::ONE - is_pai.clone()));
     builder.assert_zero(is_cert.clone() * (AB::Expr::ONE - is_cert.clone()));
     builder.assert_zero(act.clone() * (AB::Expr::ONE - act.clone()));
+    builder.assert_zero(is_pai.clone() * (AB::Expr::ONE - act.clone()));
+    builder.assert_zero(is_cert.clone() * (AB::Expr::ONE - act.clone()));
     // A cert point is finite — the two membership modes are exclusive.
     builder.assert_zero(is_pai.clone() * is_cert.clone());
 
@@ -316,13 +315,16 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        eval_point_store_lookups(builder, 0);
+        eval_point_store_lookups(builder, 0, None);
     }
 }
 
-/// Evaluate this component's LogUp columns in a main-trace column band.
-pub(crate) fn eval_point_store_lookups<LB>(builder: &mut LB, main_col_offset: usize)
-where
+/// Evaluate the point lookups, optionally packing a group-table provide with the final MAC.
+pub(crate) fn eval_point_store_lookups<LB>(
+    builder: &mut LB,
+    main_col_offset: usize,
+    group_provider: Option<(LB::Expr, EcGroupMsg<LB::Expr>)>,
+) where
     LB: LookupBuilder<F = Felt>,
 {
     let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
@@ -348,19 +350,18 @@ where
     // on finite, non-cert rows; the cert consume on finite cert rows —
     // disjoint, partitioning a finite point's one membership obligation.
     let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_ECPOINT_MULT].into();
-    let member_flag: LB::Expr =
-        act.clone() * (LB::Expr::ONE - is_pai.clone()) * (LB::Expr::ONE - is_cert.clone());
-    let cert_flag: LB::Expr = act.clone() * is_cert;
+    let member_flag: LB::Expr = act.clone() - is_pai.clone() - is_cert.clone();
+    let cert_flag: LB::Expr = is_cert;
 
     let one: LB::Expr = LB::Expr::ONE;
     let zero: LB::Expr = LB::Expr::ZERO;
 
     let provide_deg = Deg { v: 1, u: 1 };
     let consume_deg = Deg { v: 1, u: 1 };
-    let member_deg = Deg { v: 3, u: 1 };
-    let cert_deg = Deg { v: 2, u: 1 };
+    let member_deg = Deg { v: 1, u: 1 };
+    let cert_deg = Deg { v: 1, u: 1 };
     let single_deg = Deg { v: 1, u: 2 };
-    let paired_deg = Deg { v: 3, u: 2 };
+    let paired_deg = Deg { v: 2, u: 2 };
 
     // col 0: the point binding, alone.
     frac_col!(
@@ -413,13 +414,12 @@ where
             cert_deg
         ),
     );
-    // cols 2-4: the curve-membership MAC trio (shared r_ptr = w makes
-    // y² = x³ + ax + b an identity of stored values), each degree 3
-    // so each sits alone.
+    // Pair the first two linear membership fractions. The final MAC can share a
+    // product batch with the group-table provide in the production composite.
     frac_col!(
         builder,
         "ec-points",
-        single_deg,
+        paired_deg,
         (
             "consume-mac-u",
             member_flag.clone(),
@@ -435,11 +435,6 @@ where
             },
             member_deg
         ),
-    );
-    frac_col!(
-        builder,
-        "ec-points",
-        single_deg,
         (
             "consume-mac-w",
             member_flag.clone(),
@@ -456,24 +451,45 @@ where
             member_deg
         ),
     );
-    frac_col!(
-        builder,
-        "ec-points",
-        single_deg,
-        (
-            "consume-mac-y",
-            member_flag,
-            UintMulMsg {
-                kappa_a: one,
-                kappa_c: zero,
-                a_ptr: y_ptr.clone(),
-                b_ptr: y_ptr.clone(),
-                c_ptr: bound_ptr.clone(),
-                r_ptr: w_ptr.clone(),
-                bound_ptr: bound_ptr.clone(),
-                is_sub: LB::Expr::ZERO,
-            },
-            member_deg
-        ),
+    let final_deg = if group_provider.is_some() {
+        paired_deg
+    } else {
+        single_deg
+    };
+    builder.next_column(
+        |column| {
+            column.group(
+                "ec-points",
+                |group| {
+                    group.batch(
+                        "f",
+                        LB::Expr::ONE,
+                        |batch| {
+                            batch.insert(
+                                "consume-mac-y",
+                                member_flag,
+                                UintMulMsg {
+                                    kappa_a: one,
+                                    kappa_c: zero,
+                                    a_ptr: y_ptr.clone(),
+                                    b_ptr: y_ptr,
+                                    c_ptr: bound_ptr.clone(),
+                                    r_ptr: w_ptr,
+                                    bound_ptr,
+                                    is_sub: LB::Expr::ZERO,
+                                },
+                                member_deg,
+                            );
+                            if let Some((multiplicity, message)) = group_provider {
+                                batch.insert("provide-ecgroup", multiplicity, message, provide_deg);
+                            }
+                        },
+                        final_deg,
+                    );
+                },
+                final_deg,
+            );
+        },
+        final_deg,
     );
 }

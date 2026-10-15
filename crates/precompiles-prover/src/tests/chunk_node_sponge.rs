@@ -86,8 +86,8 @@ fn layout_and_lookup_shape_match_design() {
         ProverLookupBuilder<'_, Felt, QuadFelt>,
     >>::column_shape(&ChunkNodeSpongeAir);
     assert_eq!(&composite_shape[..chunk_node::NUM_AUX_COLS], [3, 3, 4, 4, 4, 4, 2, 1]);
-    assert_eq!(NUM_MAIN_COLS, 101);
-    assert_eq!(NUM_AUX_COLS, 20);
+    assert_eq!(NUM_MAIN_COLS, 93);
+    assert_eq!(NUM_AUX_COLS, 18);
     assert_eq!(NUM_AUX_COLS, chunk_node::NUM_AUX_COLS + SPONGE_NUM_AUX_COLS);
     assert_eq!(<ChunkNodeSpongeAir as BaseAir<Felt>>::width(&ChunkNodeSpongeAir), NUM_MAIN_COLS);
     assert_eq!(

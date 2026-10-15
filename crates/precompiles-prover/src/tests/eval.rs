@@ -197,12 +197,12 @@ fn shape_and_degree_match_design() {
     let air = TranscriptEvalAir;
 
     assert_eq!(air.width(), 37);
-    assert_eq!(air.aux_width(), 12);
+    assert_eq!(air.aux_width(), 10);
     assert_eq!(
         <TranscriptEvalAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(
             &air
         ),
-        &[2, 2, 2, 1, 1, 2, 1, 2, 1, 1, 2, 2]
+        &[2, 2, 2, 1, 1, 1, 1, 1, 2, 2]
     );
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),

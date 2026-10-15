@@ -42,7 +42,7 @@ use crate::{
     logup::{
         Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
         LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
-        NUM_RANDOMNESS, build_logup_aux_trace, frac_col,
+        NUM_RANDOMNESS, build_logup_aux_trace, build_logup_aux_trace_with_preprocessed, frac_col,
     },
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::current_main,
@@ -297,6 +297,17 @@ impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
         build_aux(main, challenges)
     }
 
+    fn build_aux_trace_with_preprocessed(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        preprocessed: Option<&RowMajorMatrix<Felt>>,
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
+        challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        build_logup_aux_trace_with_preprocessed(self, main, preprocessed, challenges)
+    }
+
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
@@ -450,6 +461,8 @@ pub(crate) fn build_aux(
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
     use super::*;
 
     #[test]
@@ -512,5 +525,49 @@ mod tests {
                 assert_ne!(encodings[left], encodings[right]);
             }
         }
+    }
+    #[test]
+    fn borrowed_byte_table_matches_owned_aux_and_chiplet_dispatch() {
+        let air = BytePairLutAir;
+        let preprocessed = preprocessed_table();
+        let main = RowMajorMatrix::new(
+            (0..TRACE_HEIGHT * NUM_MAIN_COLS)
+                .map(|i| Felt::from_usize(i % 17 + 1))
+                .collect(),
+            NUM_MAIN_COLS,
+        );
+        let challenges = [QuadFelt::new([Felt::from_u32(7), Felt::ONE]), QuadFelt::from_u32(13)];
+        let owned = air.build_aux_trace(&main, &[], &[], &challenges);
+        let borrowed = air.build_aux_trace_with_preprocessed(
+            &main,
+            Some(&preprocessed),
+            &[],
+            &[],
+            &challenges,
+        );
+        assert_eq!(borrowed.0.values, owned.0.values);
+        assert_eq!(borrowed.1, owned.1);
+        let dispatched = crate::air::ChipletAir::BytePairLut.build_aux_trace_with_preprocessed(
+            &main,
+            Some(&preprocessed),
+            &[],
+            &[],
+            &challenges,
+        );
+        assert_eq!(dispatched.0.values, owned.0.values);
+        assert_eq!(dispatched.1, owned.1);
+        assert!(
+            std::panic::catch_unwind(|| {
+                crate::air::ChipletAir::BytePairLut.build_aux_trace_with_preprocessed(
+                    &main,
+                    None,
+                    &[],
+                    &[],
+                    &challenges,
+                )
+            })
+            .is_err(),
+            "chiplet dispatch must reach the borrowed hook's setup validation"
+        );
     }
 }
