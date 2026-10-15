@@ -1,4 +1,5 @@
 use alloc::{borrow::ToOwned, string::String, sync::Arc, vec::Vec};
+use core::cell::OnceCell;
 
 use miden_debug_types::{SourceFile, SourceId, SourceLanguage, SourceSpan, Uri};
 use rowan::{GreenNodeBuilder, NodeOrToken, TextRange};
@@ -10,6 +11,10 @@ use crate::{
     lexer::{Token, tokenize},
     syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken},
 };
+
+mod attribute_lookahead;
+
+use self::attribute_lookahead::AttributeLookahead;
 
 /// The result of parsing a MASM source file into a lossless CST.
 ///
@@ -132,6 +137,7 @@ pub fn parse_inline_masm_text(input: &str, bounds: Option<core::ops::Range<usize
 
 struct Parser<'input> {
     tokens: Vec<Token<'input>>,
+    attribute_lookahead: OnceCell<AttributeLookahead>,
     pos: usize,
     builder: GreenNodeBuilder<'static>,
     diagnostics: Vec<Diagnostic>,
@@ -235,6 +241,7 @@ impl<'input> Parser<'input> {
         let eof_span = eof_anchor_span(source, None);
         Self {
             tokens: tokenize(source),
+            attribute_lookahead: OnceCell::new(),
             pos: 0,
             builder: GreenNodeBuilder::new(),
             diagnostics: Vec::new(),
@@ -248,6 +255,7 @@ impl<'input> Parser<'input> {
         let eof_span = eof_anchor_span(source, Some(bounds.into_slice_index()));
         Self {
             tokens: tokenize(source),
+            attribute_lookahead: OnceCell::new(),
             pos: 0,
             builder: GreenNodeBuilder::new(),
             diagnostics: Vec::new(),
@@ -1461,28 +1469,14 @@ impl<'input> Parser<'input> {
     /// Peeks past attributes for recovery, returning the candidate token's index and whether
     /// attributes were present.
     fn peek_declaration_after_attributes(&self) -> Option<(usize, bool)> {
-        let mut index = self.next_relevant_block_token(self.pos)?;
-        let has_attributes = self.tokens[index].kind() == SyntaxKind::At;
-        while self.tokens[index].kind() == SyntaxKind::At {
-            index = self.next_relevant_block_token(index + 1)?;
-            if !is_name_like(self.tokens[index].kind()) {
-                return None;
-            }
-
-            index = self.next_relevant_block_token(index + 1)?;
-            if self.tokens[index].kind() == SyntaxKind::LParen {
-                let mut nesting = Nesting::default();
-                loop {
-                    nesting = nesting.bump(self.tokens[index].kind()).ok()?;
-                    index = self.next_relevant_block_token(index + 1)?;
-                    if nesting.is_root() {
-                        break;
-                    }
-                }
-            }
+        let index = self.next_relevant_block_token(self.pos)?;
+        if self.tokens[index].kind() != SyntaxKind::At {
+            return Some((index, false));
         }
 
-        Some((index, has_attributes))
+        let lookahead =
+            self.attribute_lookahead.get_or_init(|| AttributeLookahead::new(&self.tokens));
+        lookahead.declaration_after(index).map(|candidate| (candidate, true))
     }
 
     /// Detects declaration starts even inside unclosed type annotations.
@@ -2355,6 +2349,9 @@ end
             ("@storage([1, 2])\nproc foo", true),
             ("@storage([1, 2]\nproc foo", false),
             ("@storage(})\nproc foo", false),
+            ("@storage([)]\nproc foo", false),
+            ("@storage({)}\nproc foo", false),
+            ("@storage([{1}])\nproc foo", true),
             ("@inline\npub type T = u8", false),
             ("@packed { type: u8 }", false),
             ("@42\nproc foo", false),
@@ -2435,6 +2432,17 @@ end
     }
 
     #[test]
+    fn repeated_attributes_preserve_constant_annotation_initializer() {
+        for attributes in [
+            "@packed ".repeat(4096),
+            format!("{}{}", "@packed(".repeat(4096), ")".repeat(4096)),
+        ] {
+            let source = format!("const X: struct {attributes} {{ x: u8 }} = 1\n");
+            assert_constant_annotation(&source, "1");
+        }
+    }
+
+    #[test]
     fn parses_constant_type_annotations_with_keyword_path_component() {
         for (source, annotation_tokens, value) in [
             ("const X: parts::type = 1\n", &[":", "parts", "::", "type"][..], "1"),
@@ -2504,6 +2512,30 @@ end
             assert_eq!(items[1].kind(), SyntaxKind::Procedure);
             assert_eq!(items[1].children().next().unwrap().kind(), SyntaxKind::Attribute);
         }
+    }
+
+    #[test]
+    fn constant_annotation_recovery_preserves_long_attribute_sequence() {
+        // Constructed source:
+        //
+        // const X: struct @packed(4
+        // @inline
+        // @locals([1, {2}])
+        // ... repeated 128 times ...
+        // pub(package) proc foo
+        // end
+        //
+        // Recovery should stop at the first attribute and preserve all 256 on the procedure.
+        let attributes = "@inline\n@locals([1, {2}])\n".repeat(128);
+        let source = format!("const X: struct @packed(4\n{attributes}pub(package) proc foo\nend\n");
+        let parse = assert_constant_annotation_recovery(&source, "@inline");
+        let items = parse.syntax().children().collect::<Vec<_>>();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[1].kind(), SyntaxKind::Procedure);
+        assert_eq!(
+            items[1].children().filter(|node| node.kind() == SyntaxKind::Attribute).count(),
+            256
+        );
     }
 
     #[test]
