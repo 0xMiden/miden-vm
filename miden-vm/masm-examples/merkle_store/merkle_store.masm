@@ -1,6 +1,6 @@
 begin
     # push the root of the Partial Merkle Tree on the stack
-    push.[4354557847066887723, 3705206103185506188, 3065790524112588048, 1006518982072772390]
+    push.[3592149118160960216, 6995720899793639419, 6100817290608042347, 7361590537490851870]
     # => [PMT_ROOT]
 
     # get value at depth = 2, index = 0 from the Partial Merkle Tree; this value should be 20
@@ -19,7 +19,7 @@ begin
     # => []
 
     # push the root of the Sparse Merkle Tree on the stack
-    push.[7179464494001383711, 5139072329818424141, 2495249804143160693, 5508167173474013932]
+    push.[1737681038535991445, 7560390544216192210, 5535670201686481542, 1322434351096032228]
     # => [SMT_ROOT]
 
     # get value at depth = 64, index = 1 from the Sparse Merkle Tree; this value should be 21
@@ -38,7 +38,7 @@ begin
     # => []
 
     # push the root of the Merkle Tree on the stack
-    push.[6411074386239618267, 1114954619663136292, 2122053204087199806, 8032056024985183229]
+    push.[4129859408273653003, 7069681445814322461, 6778690658624518486, 6954020550641196246]
     # => [MT_ROOT]
 
     # get value at depth = 2, index = 2 from the Merkle Tree; this value should be 22

@@ -31,6 +31,10 @@ const OUTPUT_FELTS: usize = Word::NUM_ELEMENTS;
 /// interval: knowledge of the stored state permits recomputing every output block derived from
 /// that state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct EidosRandomCoin {
     state: Word,
     output: Word,
@@ -202,6 +206,46 @@ impl TryRng for EidosRandomCoin {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary"))]
+mod eidos_coin_arbitrary {
+    use proptest::prelude::*;
+
+    use super::{EidosRandomCoin, OUTPUT_FELTS};
+    use crate::Word;
+
+    impl Arbitrary for EidosRandomCoin {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader rejects current > OUTPUT_FELTS and a buffered current (<
+            // OUTPUT_FELTS) with counter == 0; both regimes are generated explicitly and all
+            // remaining fields are any-valid.
+            prop_oneof![
+                // Exhausted-buffer regime: current == OUTPUT_FELTS, any counter.
+                (any::<Word>(), any::<Word>(), any::<u64>())
+                    .prop_map(|(state, output, counter)| Self {
+                        state,
+                        output,
+                        counter,
+                        current: OUTPUT_FELTS
+                    })
+                    .boxed(),
+                // Buffered regime: current < OUTPUT_FELTS requires counter >= 1.
+                (any::<Word>(), any::<Word>(), 1u64..=u64::MAX, 0usize..OUTPUT_FELTS)
+                    .prop_map(|(state, output, counter, current)| Self {
+                        state,
+                        output,
+                        counter,
+                        current
+                    })
+                    .boxed(),
+            ]
+            .boxed()
+        }
+    }
+}
+
 impl Serializable for EidosRandomCoin {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.state.write_into(target);
@@ -273,7 +317,7 @@ mod tests {
         assert_eq!(coin.state, initial_state);
         assert_eq!(coin.output, expected);
         assert_eq!(coin.counter, 1);
-        assert_eq!(actual, [3_343_138_332, 3_182_666_834, 3_956_264_476, 4_003_292_457]);
+        assert_eq!(actual, [850_465_975, 2_814_286_374, 3_247_141_700, 1_839_660_647]);
     }
 
     #[test]
@@ -345,7 +389,7 @@ mod tests {
         coin.reseed(data);
 
         let actual: [u32; OUTPUT_FELTS] = core::array::from_fn(|_| coin.random());
-        assert_eq!(actual, [3_145_282_389, 2_211_610_295, 3_232_936_185, 3_064_838_016]);
+        assert_eq!(actual, [3_745_419_018, 1_592_641_853, 33_771_270, 3_071_911_292]);
     }
 
     #[test]

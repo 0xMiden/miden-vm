@@ -23,7 +23,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: [stable, nightly]
         target: [wasm32-unknown-unknown, wasm32-wasip1]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -33,9 +32,9 @@ jobs:
         uses: ./.github/actions/cleanup-runner
       - name: Build for no-std
         run: |
-          rustup update --no-self-update ${{ matrix.toolchain }}
-          rustup +${{ matrix.toolchain }} target add ${{ matrix.target }}
-          RUSTUP_TOOLCHAIN=${{ matrix.toolchain }} NO_STD_TARGET=${{ matrix.target }} make build-no-std
+          rustup update --no-self-update stable
+          rustup +stable target add ${{ matrix.target }}
+          RUSTUP_TOOLCHAIN=stable NO_STD_TARGET=${{ matrix.target }} make build-no-std
 
   target-miden:
     name: Build for Miden target
@@ -66,7 +65,7 @@ jobs:
           rustup toolchain install --no-self-update
           rustup target add wasm32-wasip1
       - name: Install wasmtime
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: wasmtime-cli@45.0.2
       - name: Run packed Goldilocks/Poseidon2/Eidos vs scalar tests under WASM SIMD128

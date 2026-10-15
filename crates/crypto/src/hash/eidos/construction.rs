@@ -93,7 +93,7 @@ impl Eidos {
     /// Construct an initial chaining value from a registered domain tag and three parameters.
     ///
     /// The domain defines the construction and the meaning of its parameters. Every supplied
-    /// value occupies one complete low u32 lane; the corresponding high lane is a fixed masked IV
+    /// value occupies one complete low u32 lane; the corresponding high lane is a fixed IV
     /// word.
     #[inline]
     pub fn init_chaining_word_with_params<D: EidosDomain>(_: D, params: [u32; 3]) -> Word {
@@ -221,7 +221,7 @@ impl Eidos {
     /// use [`Self::merge`] directly.
     #[inline]
     pub fn merkle_node_init_chaining_word() -> Word {
-        encoding::mask_and_pack_word(MERKLE_NODE_INIT_CV)
+        Word::new(framing::init_u64_cv(0, [0; 3]).map(Felt::new_unchecked))
     }
 
     /// Compress two packed digest words as reserved Merkle inner nodes in every packed lane.
@@ -234,22 +234,22 @@ impl Eidos {
         encoding::pack_cv_to_felts(compression::compress_packed_felt_block(&cv, &block))
     }
 
-    /// Hash two digest words as one generic eight-Felt sequence.
+    /// Hash two words as one generic eight-Felt sequence.
     #[inline]
-    pub fn hash_two_words(values: &[Word; 2]) -> Word {
-        Self::hash_two_words_in_domain(values, GENERIC_FELT_SEQUENCE)
+    pub fn hash_double_word(values: &[Word; 2]) -> Word {
+        Self::hash_double_word_in_domain(values, GENERIC_FELT_SEQUENCE)
     }
 
-    /// Hash packed pairs of digest words as generic eight-Felt sequences.
+    /// Hash packed pairs of words as generic eight-Felt sequences.
     #[inline]
-    pub fn hash_two_words_packed(values: &[PackedDigest; 2]) -> PackedDigest {
+    pub fn hash_double_word_packed(values: &[PackedDigest; 2]) -> PackedDigest {
         let cv = Self::init_packed_chaining_word(GENERIC_FELT_SEQUENCE, BLOCK_LEN as u32);
         compress_packed_digest_pair(values, &cv)
     }
 
-    /// Hash two digest words under a typed Felt-sequence domain.
+    /// Hash two words as one eight-Felt sequence under a typed Felt-sequence domain.
     #[inline]
-    pub fn hash_two_words_in_domain<D>(values: &[Word; 2], _: D) -> Word
+    pub fn hash_double_word_in_domain<D>(values: &[Word; 2], _: D) -> Word
     where
         D: EidosDomain<Encoding = FeltSequence>,
     {
@@ -257,13 +257,13 @@ impl Eidos {
         compress_digest_pair(values, cv)
     }
 
-    /// Hash a sequence of digest words under the generic Felt-sequence domain.
+    /// Hash a sequence of words under the generic Felt-sequence domain.
     ///
     /// # Panics
     ///
     /// Panics if the flattened Felt length does not fit in `u32`.
     #[inline]
-    pub fn merge_many(values: &[Word]) -> Word {
+    pub fn hash_words(values: &[Word]) -> Word {
         Self::hash_elements(Word::words_as_elements(values))
     }
 }
@@ -552,7 +552,7 @@ mod tests {
             array::from_fn(|word| packed_block[DIGEST_WIDTH + word]),
         ];
         let packed_merged = Eidos::merge_packed(&packed_values);
-        let packed_hashed = Eidos::hash_two_words_packed(&packed_values);
+        let packed_hashed = Eidos::hash_double_word_packed(&packed_values);
 
         for lane in 0..PACKED_LANES {
             let scalar_cv = Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, input_len);
@@ -571,7 +571,7 @@ mod tests {
             let actual = Word::new(array::from_fn(|word| packed_hashed[word][lane]));
             assert_eq!(
                 actual,
-                Eidos::hash_two_words(&scalar_values),
+                Eidos::hash_double_word(&scalar_values),
                 "packed generic hash lane {lane} diverged"
             );
         }

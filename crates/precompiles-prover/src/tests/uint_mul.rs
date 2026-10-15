@@ -12,13 +12,16 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_lifted_air::LiftedAir;
+use proptest::prelude::*;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     math::{U256, from_limbs16, mac_reduce, to_limbs16},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    tests::uint::{random_modulus, random_uint_below},
+    tests::uint::{
+        arb_modulus, arb_uint_below, fixed_challenges, random_modulus, random_uint_below,
+    },
     uint::{
         UintStoreAir,
         mul::{
@@ -61,7 +64,13 @@ fn store_with(bound: U256, operands: &[U256]) -> (UintStoreRequires, UintPtr, Ve
     let ptrs = operands
         .iter()
         .enumerate()
-        .map(|(i, v)| store.intern_pinned(2 + i as u32, *v, fp))
+        .map(|(i, v)| {
+            if *v == bound || operands[..i].contains(v) {
+                store.intern(*v, fp)
+            } else {
+                store.intern_pinned(2 + i as u32, *v, fp)
+            }
+        })
         .collect();
     (store, fp, ptrs)
 }
@@ -95,7 +104,7 @@ fn record_mac(
 fn check_and_balance(
     mut store: UintStoreRequires,
     mul: UintMulRequires,
-    rng: &mut impl Rng,
+    challenges: &Challenges<QuadFelt>,
 ) -> RowMajorMatrix<Felt> {
     let mut bpl = BytePairLutRequires::new();
     let mul_main = generate_trace(mul, &mut store, &mut bpl);
@@ -104,12 +113,10 @@ fn check_and_balance(
 
     crate::tests::check_local(UintMulAir, &mul_main);
 
-    let [alpha, beta] = [rand_qf(rng), rand_qf(rng)];
-    let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
-    fold_balance(&UintMulAir, &mul_main, &challenges, &mut net);
-    fold_balance(&UintStoreAir, &store_main, &challenges, &mut net);
-    fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
+    fold_balance(&UintMulAir, &mul_main, challenges, &mut net);
+    fold_balance(&UintStoreAir, &store_main, challenges, &mut net);
+    fold_balance(&BytePairLutAir, &bpl_main, challenges, &mut net);
     let residual = net.values().filter(|m| **m != Felt::ZERO).count();
     assert_eq!(
         residual, 0,
@@ -173,7 +180,7 @@ fn mul_scaled_17_limb_quotient() {
     let r_ptr = store.intern(r, fp);
     mul.record(3, fp, fp, 2, ptrs[0], r_ptr, fp, 0);
 
-    let main = check_and_balance(store, mul, &mut rng);
+    let main = check_and_balance(store, mul, &fixed_challenges());
     let q16 = main.values[ROW_Q * NUM_MAIN_COLS + 16];
     assert_ne!(q16, Felt::ZERO, "κₐ = 3 at full size must spill into q₁₆");
 }
@@ -197,7 +204,7 @@ fn mul_ops_balance_with_padding() {
     let r_ptr = store.intern(r, fp);
     mul.record(1, ptrs[0], ptrs[0], 1, ptrs[2], r_ptr, fp, 0);
 
-    let mul_main = check_and_balance(store, mul, &mut rng);
+    let mul_main = check_and_balance(store, mul, &fixed_challenges());
     assert_eq!(mul_main.height(), 32, "3 ops pad to 4 blocks");
 }
 
@@ -217,7 +224,7 @@ fn mul_div_arrangement() {
     // (a, b, c, r) = (y@2, z@3, modulus@1 with κ_c = 0, x).
     mul.record(1, ptrs[0], ptrs[1], 0, fp, x_ptr, fp, 0);
 
-    check_and_balance(store, mul, &mut rng);
+    check_and_balance(store, mul, &fixed_challenges());
 }
 
 #[test]
@@ -237,7 +244,7 @@ fn mul_zero_operand() {
     let r = store.uint(r_ptr).value;
     assert_eq!(r, c, "0·b + c must reduce to c");
 
-    check_and_balance(store, mul, &mut rng);
+    check_and_balance(store, mul, &fixed_challenges());
 }
 
 #[test]
@@ -329,4 +336,131 @@ fn gamma_slots_is_a_bijection_onto_distinct_cells() {
         assert!(seen.insert(slot), "duplicate γ slot placement at {slot:?}");
     }
     assert_eq!(seen.len(), NUM_GAMMA_SLOTS);
+}
+
+// PROPERTY TESTS
+// ================================================================================================
+// The oracle relations above, generalized over generated operands with
+// shrinking. Case counts capped per the test-time budget (the balance
+// properties run three trace passes per case).
+
+fn arb_triple() -> impl Strategy<Value = (U256, U256, U256, U256)> {
+    arb_modulus().prop_flat_map(|bound| {
+        let below = arb_uint_below(bound);
+        (Just(bound), arb_uint_below(bound), arb_uint_below(bound), below)
+    })
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+
+    #[test]
+    fn mul_constraints_hold_proptest((bound, a, b, c) in arb_triple()) {
+        let (mut store, fp, ptrs) = store_with(bound, &[a, b, c]);
+        let mut mul = UintMulRequires::new();
+        record_mac(&mut store, fp, &ptrs, &mut mul, 1, a, 1, c, b, bound);
+
+        let main = generate_trace(mul, &mut store, &mut BytePairLutRequires::new());
+        prop_assert_eq!(main.height(), PERIOD, "one op = one period-8 block");
+        crate::tests::check_local(UintMulAir, &main);
+    }
+
+    #[test]
+    fn mul_scaled_17_limb_quotient_proptest(
+        (bound, c) in arb_modulus()
+            .prop_map(|bound| {
+                let mut bound16 = to_limbs16(bound);
+                bound16[15] = 0x7fff;
+                from_limbs16(&bound16)
+            })
+            .prop_flat_map(|bound| {
+                let below = arb_uint_below(bound);
+                (Just(bound), below)
+            }),
+    ) {
+        // kappa_a = 3 against a near-2^255 modulus with a = b = p - 1
+        // pushes the quotient past 2^256 for ANY c below the bound.
+        let (mut store, fp, ptrs) = store_with(bound, &[c]);
+        let mut mul = UintMulRequires::new();
+        let r = mac_reduce(3, bound, bound, 2, c, bound);
+        let r_ptr = store.intern(r, fp);
+        mul.record(3, fp, fp, 2, ptrs[0], r_ptr, fp, 0);
+
+        let main = check_and_balance(store, mul, &fixed_challenges());
+        let q16 = main.values[ROW_Q * NUM_MAIN_COLS + 16];
+        prop_assert_ne!(q16, Felt::ZERO, "kappa_a = 3 at full size must spill into q_16");
+    }
+
+    #[test]
+    fn mul_div_arrangement_proptest((bound, _a, y, z) in arb_triple()) {
+        // z is provable as y * z + 0 * c = x: kappa_c = 0 kills the
+        // addend, so c_ptr can dummy onto the modulus.
+        let x = mac_reduce(1, y, z, 0, bound, bound);
+        let (mut store, fp, ptrs) = store_with(bound, &[y, z]);
+        let x_ptr = store.intern(x, fp);
+        let mut mul = UintMulRequires::new();
+        mul.record(1, ptrs[0], ptrs[1], 0, fp, x_ptr, fp, 0);
+
+        check_and_balance(store, mul, &fixed_challenges());
+    }
+
+    #[test]
+    fn mul_zero_operand_proptest((bound, b, c) in arb_modulus()
+        .prop_flat_map(|bound| {
+            let below = arb_uint_below(bound);
+            (
+                Just(bound),
+                below.clone(),
+                below,
+            )
+        }))
+    {
+        // a = 0 degenerates the product: S = 0, q = 0, r = c — the
+        // zero-heavy block must still satisfy constraints and balance.
+        let (mut store, fp, ptrs) = store_with(bound, &[U256::ZERO, b, c]);
+        let mut mul = UintMulRequires::new();
+        let r_ptr = record_mac(&mut store, fp, &ptrs, &mut mul, 1, U256::ZERO, 1, c, b, bound);
+        let r = store.uint(r_ptr).value;
+        prop_assert_eq!(r, c, "0 * b + c must reduce to c");
+
+        check_and_balance(store, mul, &fixed_challenges());
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(16))]
+
+    #[test]
+    fn mul_ops_balance_with_padding_proptest(
+        (bound, a, b, c) in arb_triple()
+            .prop_filter("product and square must be distinct operations", |(_, a, b, _)| a != b)
+    ) {
+        // Three ops (two scaled, one squaring a by itself) pad to four
+        // blocks; the all-zero act = 0 padding block must stay off every
+        // bus.
+        let (mut store, fp, ptrs) = store_with(bound, &[a, b, c]);
+        let mut mul = UintMulRequires::new();
+        record_mac(&mut store, fp, &ptrs, &mut mul, 1, a, 1, c, b, bound);
+        record_mac(&mut store, fp, &ptrs, &mut mul, 3, a, 0, c, b, bound);
+        let r = mac_reduce(1, a, a, 1, c, bound);
+        let r_ptr = store.intern(r, fp);
+        mul.record(1, ptrs[0], ptrs[0], 1, ptrs[2], r_ptr, fp, 0);
+
+        let mul_main = check_and_balance(store, mul, &fixed_challenges());
+        prop_assert_eq!(mul_main.height(), 32, "3 ops pad to 4 blocks");
+    }
+}
+
+#[test]
+fn repeated_zero_operands_balance() {
+    let mut limbs = [0x1234u16; 16];
+    limbs[15] = 0x7fff;
+    let bound = from_limbs16(&limbs);
+    let (mut store, fp, ptrs) = store_with(bound, &[U256::ZERO; 3]);
+    let mut mul = UintMulRequires::new();
+    record_mac(&mut store, fp, &ptrs, &mut mul, 1, U256::ZERO, 1, U256::ZERO, U256::ZERO, bound);
+    record_mac(&mut store, fp, &ptrs, &mut mul, 3, U256::ZERO, 0, U256::ZERO, U256::ZERO, bound);
+    mul.record(1, ptrs[0], ptrs[0], 1, ptrs[2], ptrs[0], fp, 0);
+    let main = check_and_balance(store, mul, &fixed_challenges());
+    assert_eq!(main.height(), 2 * PERIOD, "equal operands deduplicate the product and square");
 }

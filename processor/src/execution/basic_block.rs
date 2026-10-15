@@ -12,6 +12,7 @@ use crate::{
     },
     mast::{BasicBlockNode, ExecutableMastForest, MastNodeId},
     operation::Operation,
+    option_map_break_reason,
     processor::Processor,
     tracer::Tracer,
 };
@@ -248,7 +249,11 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    let batch = &basic_block.op_batches()[batch_index];
+    let batch = option_map_break_reason(
+        basic_block.op_batches().get(batch_index),
+        "batch index out of range for basic block",
+    )
+    .map_break(InternalBreakReason::from)?;
 
     // Execute operations in the batch one by one
     for (op_idx_in_batch, op) in batch.ops().iter().enumerate().skip(start_op_idx) {

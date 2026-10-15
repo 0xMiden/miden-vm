@@ -269,7 +269,7 @@ impl PrettyPrint for Instruction {
 
             // ----- cryptographic operations -----------------------------------------------------
             Self::Hash => const_text("hash"),
-            Self::HMerge => const_text("hmerge"),
+            Self::HDword => const_text("hdword"),
             Self::Compress => const_text("compress"),
             Self::MTreeGet => const_text("mtree_get"),
             Self::MTreeSet => const_text("mtree_set"),
@@ -466,7 +466,7 @@ mod tests {
         let target = InvocationTarget::MastRoot(Span::unknown(digest));
         let instruction = format!("{}", Instruction::Exec(target));
         assert_eq!(
-            "exec.0x084d13700c55861f4d85d6898f3f7775bd38fbf314d651486b4c3758ed192e3a",
+            "exec.0x517a70559a11f74acd98f20c85eeaf04dddbca3459510e40e5e979a26cfa3c69",
             instruction
         );
     }

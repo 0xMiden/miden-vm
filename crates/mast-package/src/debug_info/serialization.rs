@@ -1,6 +1,6 @@
 //! Serialization and deserialization for the debug_info section.
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{string::ToString, sync::Arc, vec::Vec};
 use core::{alloc::Layout, ptr::NonNull};
 
 use miden_assembly_syntax::ast::DebugVarLocation;
@@ -77,6 +77,17 @@ impl PackageDebugInfoDecodeLimits {
     };
 }
 
+fn check_decode_limit(
+    resource: &'static str,
+    actual: usize,
+    limit: usize,
+) -> Result<(), super::DebugInfoEncodingError> {
+    if actual > limit {
+        return Err(super::DebugInfoEncodingError::LimitExceeded { resource, size: actual, limit });
+    }
+    Ok(())
+}
+
 // PACKAGE DEBUG INFO SERIALIZATION
 // ================================================================================================
 
@@ -134,6 +145,37 @@ impl Serializable for PackageDebugInfo {
 
 #[cfg(target_endian = "little")]
 impl PackageDebugInfo {
+    /// Encodes debug information after checking the standard decoder's fixed resource limits.
+    ///
+    /// This lets producers reject metadata that a normal package consumer could not read, without
+    /// decoding another copy of the tables. Ordinary serialization remains unmetered. This checks
+    /// resource limits, not table references or the package's source graph.
+    pub fn to_bytes_with_standard_limits(&self) -> Result<Vec<u8>, super::DebugInfoEncodingError> {
+        self.to_bytes_with_limits(PackageDebugInfoDecodeLimits::BOUNDED)
+    }
+
+    fn to_bytes_with_limits(
+        &self,
+        limits: PackageDebugInfoDecodeLimits,
+    ) -> Result<Vec<u8>, super::DebugInfoEncodingError> {
+        for (label, actual, limit) in [
+            ("debug_info strings count", self.strings.len(), limits.string_rows),
+            ("debug_info types count", self.types.len(), limits.type_rows),
+        ] {
+            check_decode_limit(label, actual, limit)?;
+        }
+        for string in self.strings.iter() {
+            check_decode_limit("debug string size", string.len(), limits.string_size)?;
+        }
+
+        let bytes = self.to_bytes();
+        let mut header = miden_core::serde::SliceReader::new(&bytes);
+        header.read_u8()?;
+        let payload_size = header.read_usize()?;
+        check_decode_limit("package debug info payload size", payload_size, limits.payload_size)?;
+        Ok(bytes)
+    }
+
     /// Reads package debug information without the fixed resource limits enforced by
     /// [`Self::read_from`].
     ///
@@ -161,6 +203,8 @@ impl PackageDebugInfo {
         source: &mut R,
         limits: PackageDebugInfoDecodeLimits,
     ) -> Result<Self, DeserializationError> {
+        use alloc::string::ToString;
+
         let version = source.read_u8()?;
         if version != DEBUG_INFO_VERSION {
             return Err(DeserializationError::InvalidValue(format!(
@@ -169,23 +213,15 @@ impl PackageDebugInfo {
         }
 
         let data_len = read_bounded_len(source, "package debug info", 1)?;
-        if data_len > limits.payload_size {
-            return Err(DeserializationError::InvalidValue(format!(
-                "package debug info payload size {data_len} exceeds limit {}",
-                limits.payload_size,
-            )));
-        }
+        check_decode_limit("package debug info payload size", data_len, limits.payload_size)
+            .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
         let data = source.read_slice(data_len)?;
         let aligned = AlignedBytes::copy_from_slice(data, POD_BUFFER_ALIGNMENT)?;
         let mut source = PodSliceReader::new(aligned.as_slice());
 
         let strings_len = read_bounded_len(&mut source, "debug_info strings", 1)?;
-        if strings_len > limits.string_rows {
-            return Err(DeserializationError::InvalidValue(format!(
-                "debug_info strings count {strings_len} exceeds limit {}",
-                limits.string_rows,
-            )));
-        }
+        check_decode_limit("debug_info strings count", strings_len, limits.string_rows)
+            .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
         let mut strings = Vec::new();
         for _ in 0..strings_len {
             strings.push(read_string(&mut source, limits.string_size)?);
@@ -208,12 +244,8 @@ impl PackageDebugInfo {
             "debug_info types",
             DebugTypeInfo::min_serialized_size(),
         )?;
-        if types_len > limits.type_rows {
-            return Err(DeserializationError::InvalidValue(format!(
-                "debug_info types count {types_len} exceeds limit {}",
-                limits.type_rows,
-            )));
-        }
+        check_decode_limit("debug_info types count", types_len, limits.type_rows)
+            .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
         let types = source.read_many_iter(types_len)?.collect::<Result<Vec<DebugTypeInfo>, _>>()?;
         let types = IndexVec::try_from(types).map_err(|_| {
             DeserializationError::InvalidValue(
@@ -436,6 +468,7 @@ impl Deserializable for DebugSourceVar {
 impl Serializable for DebugSourceInlineCall {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u32(self.op_idx);
+        target.write_u32(self.op_end);
         self.callee_idx.write_into(target);
         self.loc_idx.write_into(target);
     }
@@ -444,13 +477,19 @@ impl Serializable for DebugSourceInlineCall {
 impl Deserializable for DebugSourceInlineCall {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let op_idx = source.read_u32()?;
+        let op_end = source.read_u32()?;
+        if op_end < op_idx {
+            return Err(DeserializationError::InvalidValue(
+                "debug inline-call range ends before its start".into(),
+            ));
+        }
         let callee_idx = DebugFunctionIdx::read_from(source)?;
         let loc_idx = DebugLocIdx::read_from(source)?;
-        Ok(DebugSourceInlineCall { op_idx, callee_idx, loc_idx })
+        Ok(DebugSourceInlineCall { op_idx, op_end, callee_idx, loc_idx })
     }
 
     fn min_serialized_size() -> usize {
-        4 + DebugFunctionIdx::min_serialized_size() + DebugLocIdx::min_serialized_size()
+        8 + DebugFunctionIdx::min_serialized_size() + DebugLocIdx::min_serialized_size()
     }
 }
 
@@ -896,11 +935,8 @@ fn read_string<R: ByteReader>(
     max_size: usize,
 ) -> Result<Arc<str>, DeserializationError> {
     let len = read_bounded_len(source, "debug string bytes", 1)?;
-    if len > max_size {
-        return Err(DeserializationError::InvalidValue(alloc::format!(
-            "debug string size {len} exceeds limit {max_size}"
-        )));
-    }
+    check_decode_limit("debug string size", len, max_size)
+        .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
     let bytes = source.read_slice(len)?;
     let s = core::str::from_utf8(bytes).map_err(|err| {
         DeserializationError::InvalidValue(alloc::format!("invalid utf-8 in string: {err}"))
@@ -918,7 +954,8 @@ fn read_debug_type_indices<R: ByteReader>(
 
 #[cfg(test)]
 mod tests {
-    use core::cell::Cell;
+    use alloc::string::ToString;
+    use core::{assert_matches, cell::Cell};
 
     use miden_assembly_syntax::ast::DebugVarLocation;
     use miden_core::{Felt, Word};
@@ -1232,7 +1269,7 @@ mod tests {
     }
 
     #[test]
-    fn debug_function_v3_wire_bytes_are_stable() {
+    fn debug_function_v4_wire_bytes_are_stable() {
         const EXPECTED_ROW: [u8; size_of::<WireDebugFunctionInfo>()] = [
             1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0,
             0, 0, 0, 1, 0, 0, 0, 7, 0, 0, 0, 1, 0, 0, 0, 9, 0, 0, 0, 1, 0, 0, 0, 11, 0, 0, 0, 13,
@@ -1259,7 +1296,7 @@ mod tests {
         let debug_info = builder.build();
 
         let bytes = debug_info.to_bytes();
-        assert_eq!(bytes[0], 3);
+        assert_eq!(bytes[0], 4);
         assert!(
             bytes.windows(EXPECTED_ROW.len()).any(|window| window == EXPECTED_ROW),
             "serialized debug info did not contain the expected function row",
@@ -1346,6 +1383,7 @@ mod tests {
                 }],
                 inline_calls: alloc::vec![DebugSourceInlineCall {
                     op_idx: 2,
+                    op_end: 3,
                     callee_idx: function_idx,
                     loc_idx: location_idx,
                 }],
@@ -1543,6 +1581,55 @@ mod tests {
     }
 
     #[test]
+    fn inline_range_wire_bytes_are_stable_and_reversed_ranges_are_rejected() {
+        let row = DebugSourceInlineCall {
+            op_idx: 2,
+            op_end: 100_000,
+            callee_idx: DebugFunctionIdx::from(3),
+            loc_idx: DebugLocIdx::from(4),
+        };
+        let bytes = row.to_bytes();
+        assert_eq!(bytes, [2, 0, 0, 0, 160, 134, 1, 0, 3, 0, 0, 0, 4, 0, 0, 0]);
+        assert_eq!(DebugSourceInlineCall::read_from_bytes(&bytes).unwrap(), row);
+        assert!(row.contains_operation(2));
+        assert!(row.contains_operation(99_999));
+        assert!(!row.contains_operation(100_000));
+        let mut invalid = bytes;
+        invalid[4..8].copy_from_slice(&1u32.to_le_bytes());
+        assert!(DebugSourceInlineCall::read_from_bytes(&invalid).is_err());
+        assert!(PackageDebugInfo::read_from_bytes(&[3]).is_err());
+    }
+
+    #[test]
+    fn long_inline_ranges_roundtrip_without_expanding_into_operation_rows() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let source_id = builder
+            .add_node(DebugSourceNode {
+                exec_node: MastNodeId::new_unchecked(0),
+                children: Vec::new(),
+                op_start: 0,
+                op_end: 1_000_000,
+                asm_ops: Vec::new(),
+                debug_vars: Vec::new(),
+                inline_calls: (0..7)
+                    .map(|index| DebugSourceInlineCall {
+                        op_idx: 0,
+                        op_end: 1_000_000,
+                        callee_idx: DebugFunctionIdx::from(index),
+                        loc_idx: DebugLocIdx::from(index),
+                    })
+                    .collect(),
+            })
+            .unwrap();
+        let bytes = builder.build().to_bytes();
+        assert!(bytes.len() < 256);
+        let decoded = PackageDebugInfo::read_from_bytes(&bytes).unwrap();
+        assert_eq!(decoded.source_node(source_id).unwrap().inline_calls.len(), 7);
+        assert_eq!(decoded.inline_calls_for_operation(source_id, 999_999).count(), 7);
+        assert_eq!(decoded.inline_calls_for_operation(source_id, 1_000_000).count(), 0);
+    }
+
+    #[test]
     fn test_debug_info_payload_bounds() {
         let bytes = PackageDebugInfo::default().to_bytes();
 
@@ -1568,6 +1655,107 @@ mod tests {
     }
 
     #[test]
+    fn checked_encoding_matches_standard_decoder_limits() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        builder.add_string("hello");
+        builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Felt));
+        let debug = builder.build();
+        let bytes = debug.to_bytes_with_standard_limits().unwrap();
+        assert_eq!(bytes, debug.to_bytes());
+        assert_eq!(PackageDebugInfo::read_from_bytes(&bytes).unwrap(), *debug);
+
+        for limits in [
+            PackageDebugInfoDecodeLimits {
+                payload_size: 0,
+                ..PackageDebugInfoDecodeLimits::BOUNDED
+            },
+            PackageDebugInfoDecodeLimits {
+                string_rows: 0,
+                ..PackageDebugInfoDecodeLimits::BOUNDED
+            },
+            PackageDebugInfoDecodeLimits {
+                string_size: 0,
+                ..PackageDebugInfoDecodeLimits::BOUNDED
+            },
+            PackageDebugInfoDecodeLimits {
+                type_rows: 0,
+                ..PackageDebugInfoDecodeLimits::BOUNDED
+            },
+        ] {
+            let encode_error = DeserializationError::InvalidValue(
+                debug.to_bytes_with_limits(limits).unwrap_err().to_string(),
+            );
+            let mut reader = miden_core::serde::SliceReader::new(&bytes);
+            let decode_error =
+                PackageDebugInfo::read_from_with_limits(&mut reader, limits).unwrap_err();
+            assert_eq!(encode_error.to_string(), decode_error.to_string());
+        }
+    }
+
+    #[test]
+    fn package_debug_info_decodes_merged_dependency_tables() {
+        // Dynamic exec currently imports entire dependency tables. Each dependency is readable
+        // on its own, but their distinct strings together exceed the former 32 MiB limit.
+        const STRING_SIZE: usize = 4096;
+        const STRING_COUNT: usize = 18 * 1024 * 1024 / STRING_SIZE;
+        let mut merged = PackageDebugInfoBuilder::default();
+        for dependency in ['a', 'b'] {
+            let mut builder = PackageDebugInfoBuilder::default();
+            for index in 0..STRING_COUNT {
+                let mut prefix = alloc::format!("{dependency}:{index:04}");
+                let padding = "x".repeat(STRING_SIZE - prefix.len());
+                prefix.push_str(&padding);
+                builder.add_string(prefix);
+            }
+            let bytes = builder.build().to_bytes();
+            let debug = PackageDebugInfo::read_from_bytes(&bytes)
+                .expect("each dependency's debug tables must be readable");
+            debug.merge_tables_into(&mut merged).unwrap();
+        }
+        let merged = merged.build();
+        let bytes = merged.to_bytes();
+        let decoded = PackageDebugInfo::read_from_bytes(&bytes)
+            .expect("merged dependency debug tables must remain readable");
+        assert_eq!(decoded.strings().len(), 2 * STRING_COUNT);
+        assert_eq!(decoded, *merged);
+    }
+
+    #[test]
+    fn package_debug_info_decodes_merged_dependency_string_rows() {
+        let mut merged = PackageDebugInfoBuilder::default();
+        for dependency in ['a', 'b'] {
+            let mut builder = PackageDebugInfoBuilder::default();
+            for index in 0..60_000 {
+                builder.add_string(alloc::format!("{dependency}:{index}"));
+            }
+            let bytes = builder.build().to_bytes();
+            let debug = PackageDebugInfo::read_from_bytes(&bytes).unwrap();
+            debug.merge_tables_into(&mut merged).unwrap();
+        }
+        let merged = merged.build();
+        let decoded = PackageDebugInfo::read_from_bytes(&merged.to_bytes())
+            .expect("merged string tables from readable dependencies must remain readable");
+        assert_eq!(decoded.strings().len(), 120_000);
+        assert_eq!(decoded, *merged);
+    }
+
+    #[test]
+    fn package_debug_info_rejects_payload_over_standard_limit() {
+        let payload_size = MAX_DEBUG_INFO_PAYLOAD_SIZE + 1;
+        let mut bytes = Vec::new();
+        bytes.write_u8(DEBUG_INFO_VERSION);
+        bytes.write_usize(payload_size);
+        bytes.resize(bytes.len() + payload_size, 0);
+
+        let error = PackageDebugInfo::read_from_bytes(&bytes).unwrap_err();
+        let DeserializationError::InvalidValue(message) = error else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("package debug info payload size"), "{message}");
+        assert!(message.contains("exceeds limit"), "{message}");
+    }
+
+    #[test]
     fn unmetered_package_debug_info_decode_ignores_fixed_limits() {
         let oversized_string = "x".repeat(MAX_DEBUG_INFO_STRING_SIZE + 1);
         let mut builder = PackageDebugInfoBuilder::default();
@@ -1584,6 +1772,48 @@ mod tests {
         let decoded = PackageDebugInfo::read_from_bytes_unmetered(&bytes).unwrap();
         assert_eq!(decoded.strings().len(), 1);
         assert_eq!(decoded.strings()[DebugStringIdx::from(0)].as_ref(), oversized_string);
+    }
+
+    #[test]
+    fn checked_debug_encoding_matches_normal_encoding_for_readable_data() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        builder.add_string("source.rs");
+        let info = builder.build();
+        let bytes = info.to_bytes_with_standard_limits().unwrap();
+        assert_eq!(bytes, info.to_bytes());
+        assert!(PackageDebugInfo::read_from_bytes(&bytes).is_ok());
+    }
+
+    #[test]
+    fn checked_debug_encoding_rejects_oversized_strings() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        builder.add_string("x".repeat(MAX_DEBUG_INFO_STRING_SIZE + 1));
+        assert_matches!(
+            builder.build().to_bytes_with_standard_limits(),
+            Err(super::super::DebugInfoEncodingError::LimitExceeded {
+                resource: "debug string size",
+                ..
+            })
+        );
+    }
+
+    #[test]
+    fn checked_debug_encoding_rejects_oversized_payloads() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        for index in 0..((MAX_DEBUG_INFO_PAYLOAD_SIZE / MAX_DEBUG_INFO_STRING_SIZE) + 1) {
+            let mut string = format!("{index:08}");
+            string.push_str(&"x".repeat(MAX_DEBUG_INFO_STRING_SIZE - string.len()));
+            builder.add_string(string);
+        }
+        let info = builder.build();
+        assert_matches!(
+            info.to_bytes_with_standard_limits(),
+            Err(super::super::DebugInfoEncodingError::LimitExceeded {
+                resource: "package debug info payload size",
+                ..
+            })
+        );
+        assert!(PackageDebugInfo::read_from_bytes(&info.to_bytes()).is_err());
     }
 
     #[test]

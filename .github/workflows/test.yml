@@ -41,7 +41,7 @@ jobs:
             while IFS= read -r -d '' path; do
               case "${path}" in
                 .cargo/*|.config/nextest.toml|.github/actions/cleanup-runner/*|\
-                .github/workflows/test.yml|Cargo.lock|Cargo.toml|rust-toolchain.toml|\
+                .github/workflows/test.yml|Cargo.lock|Cargo.toml|Makefile|rust-toolchain.toml|\
                 crates/crypto/*|crates/crypto-derive/*|crates/field/*|crates/lifted-air/*|\
                 crates/lifted-stark/*|crates/serde-utils/*|crates/stark-transcript/*|\
                 crates/stateful-hasher/*)
@@ -72,7 +72,7 @@ jobs:
       # install-action commit and set tool explicitly, or zizmor's
       # impostor-commit audit can flag stale shortcut-tag hashes.
       - name: Install nextest
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -121,7 +121,7 @@ jobs:
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install nextest
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -133,7 +133,7 @@ jobs:
         run: make test-crypto
 
   eidos-x86-backends:
-    name: Eidos x86 backends
+    name: Eidos x86 backends and RPX debug
     needs: classify-eidos-paths
     if: needs.classify-eidos-paths.outputs.run == 'true'
     runs-on: warp-ubuntu-latest-x64-8x
@@ -159,7 +159,7 @@ jobs:
       - name: Install rust
         run: rustup update --no-self-update
       - name: Install nextest
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-nextest
       - name: Check every Eidos x86 backend
@@ -226,6 +226,8 @@ jobs:
             failed=1
           fi
           exit "${failed}"
+      - name: Run RPX debug permutation with AVX2 on a 2 MiB stack
+        run: make test-rpx-avx2-debug NEXTEST_PROFILE=ci
 
   doc-tests:
     name: doc-tests
@@ -299,7 +301,7 @@ jobs:
       # Keep this on a released install-action commit with an explicit tool; see
       # the nextest install above for the zizmor/tool-shortcut rationale.
       - name: Install cargo-hack
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-hack
       - name: Check all feature combinations

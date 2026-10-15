@@ -829,6 +829,7 @@ dependencies = [
  "miden-utils-core-derive",
  "miden-utils-indexing",
  "miden-utils-sync",
+ "proptest",
  "thiserror",
 ]
 
@@ -876,6 +877,7 @@ dependencies = [
  "p3-maybe-rayon",
  "p3-symmetric",
  "p3-util",
+ "proptest",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
  "serde",
@@ -923,6 +925,7 @@ dependencies = [
  "p3-goldilocks",
  "p3-util",
  "paste",
+ "proptest",
  "rand 0.10.2",
  "serde",
  "subtle",
@@ -1155,7 +1158,7 @@ dependencies = [
 
 [[package]]
 name = "midenc-hir-type"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "miden-formatting",
  "miden-serde-utils",

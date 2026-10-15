@@ -4,7 +4,6 @@ use super::{
     Custom, DomainTag, DomainVersion, Eidos, EidosDomain, FeltSequence,
     domain::namespace,
     domains::{GENERIC_FELT_SEQUENCE, RANDOM_COIN_STATE},
-    encoding::ODD_LANE_MASK,
     primitive::IV,
 };
 use crate::{Felt, Word};
@@ -52,32 +51,32 @@ fn assert_digest(actual: Word, expected: [u64; 4]) {
 fn frozen_eidos_vectors() {
     assert_digest(
         Eidos::hash_elements::<Felt>(&[]),
-        [0x11a6458b66a84073, 0x4ffff7a2ad92252b, 0x3c84006ce9b051f5, 0x55b4b6847dcdfd93],
+        [0x394b82985c203861, 0x767f9ee738c588d9, 0x4a582bcdcf50b7c6, 0x29d2a973dd12e195],
     );
     assert_digest(
         Eidos::hash(&[]),
-        [0x2864baae4689a79a, 0x3b41d3365c3c8860, 0x07fea97b08976abc, 0x3ac995324799df08],
+        [0x1a1d01f1f53d5a1a, 0x60a2c88bb5ef01fc, 0x579e22074274d2d0, 0x145e42f2d5759c97],
     );
     assert_digest(
         Eidos::hash_elements(&felts_seq(3)),
-        [0x17cf960fb0322da4, 0x307f9ec74ec5b4d7, 0x798ca1783855c9ec, 0x61909a51c2d68383],
+        [0x64428385d648baa2, 0x5404c904e97a7f37, 0x7c4cf2c1b0c7ef6a, 0x77d4c8d4ae1ad174],
     );
     assert_digest(
         Eidos::hash(b"abc"),
-        [0x365b33e5d73475c7, 0x7842d2a7da672026, 0x080ccab96956c05a, 0x1c431bb11d6f35ee],
+        [0x07f9536d92a1654f, 0x2e317349ae070f54, 0x5a60f9e1b34e0d3d, 0x60bb248ba9c1794f],
     );
     assert_digest(
         Eidos::hash_elements_in_domain(&felts_seq(4), RANDOM_COIN_STATE),
-        [0x275e1958ad7c08dc, 0x12b8f7731460be11, 0x29718531efa9484b, 0x4e32493e94faf462],
+        [0x0f8c1c7a8568edc8, 0x1a04d832f38ca35a, 0x1a21f18cbe36e475, 0x6aa934b4e4804a28],
     );
     assert_digest(
         Eidos::hash_elements(&felts_seq(9)),
-        [0x4d59f4c52d792900, 0x79244370f96f6467, 0x748d893146975bd4, 0x3fda88c89a46ce40],
+        [0x145da8dc3881a521, 0x6aace1ee7b38c0dd, 0x5e586c8122d16b20, 0x578c44963e7c6146],
     );
     let bytes: Vec<u8> = (0..65).map(|i| i as u8).collect();
     assert_digest(
         Eidos::hash(&bytes),
-        [0x0a3700b1a8d0e65c, 0x389e810e5f3cdab2, 0x36cd639c19ced5e9, 0x4e8a2f58fb01c8ac],
+        [0x4afc15e949880e22, 0x481ee11654cb9add, 0x48f18d9556b4c92c, 0x2fdc84adcdd09358],
     );
 }
 
@@ -143,13 +142,13 @@ fn generic_initializer_has_the_exact_lane_layout() {
         lanes,
         [
             TestParameterizedDomain::TAG.as_u32(),
-            IV[1] & ODD_LANE_MASK,
+            IV[1],
             params[0],
-            IV[3] & ODD_LANE_MASK,
+            IV[3],
             params[1],
-            IV[5] & ODD_LANE_MASK,
+            IV[5],
             params[2],
-            IV[7] & ODD_LANE_MASK,
+            IV[7],
         ]
     );
     assert_eq!(
@@ -184,52 +183,40 @@ fn merkle_initializer_has_zero_in_every_injected_lane() {
         .try_into()
         .unwrap();
 
-    assert_eq!(
-        lanes,
-        [
-            0,
-            IV[1] & ODD_LANE_MASK,
-            0,
-            IV[3] & ODD_LANE_MASK,
-            0,
-            IV[5] & ODD_LANE_MASK,
-            0,
-            IV[7] & ODD_LANE_MASK,
-        ]
-    );
+    assert_eq!(lanes, [0, IV[1], 0, IV[3], 0, IV[5], 0, IV[7]]);
 }
 
 #[test]
-fn hash_two_words_in_domain_matches_hash_elements_in_domain() {
+fn hash_double_word_in_domain_matches_hash_elements_in_domain() {
     let left = word([10, 20, 30, 40]);
     let right = word([50, 60, 70, 80]);
     let concat = vec![left[0], left[1], left[2], left[3], right[0], right[1], right[2], right[3]];
 
     assert_eq!(
-        Eidos::hash_two_words_in_domain(&[left, right], RANDOM_COIN_STATE),
+        Eidos::hash_double_word_in_domain(&[left, right], RANDOM_COIN_STATE),
         Eidos::hash_elements_in_domain(&concat, RANDOM_COIN_STATE)
     );
 }
 
 #[test]
-fn hash_two_words_matches_generic_felt_hash() {
+fn hash_double_word_matches_generic_felt_hash() {
     let left = word([10, 20, 30, 40]);
     let right = word([50, 60, 70, 80]);
     let concat = vec![left[0], left[1], left[2], left[3], right[0], right[1], right[2], right[3]];
 
-    assert_eq!(Eidos::hash_two_words(&[left, right]), Eidos::hash_elements(&concat));
-    assert_ne!(Eidos::hash_two_words(&[left, right]), Eidos::merge(&[left, right]));
+    assert_eq!(Eidos::hash_double_word(&[left, right]), Eidos::hash_elements(&concat));
+    assert_ne!(Eidos::hash_double_word(&[left, right]), Eidos::merge(&[left, right]));
 }
 
 #[test]
-fn merge_many_matches_hash_elements_on_concat() {
+fn hash_words_matches_hash_elements_on_concat() {
     let words = vec![word([1, 2, 3, 4]), word([5, 6, 7, 8]), word([9, 10, 11, 12])];
     let mut concat = Vec::new();
     for w in &words {
         concat.extend_from_slice(w.as_ref());
     }
 
-    assert_eq!(Eidos::merge_many(&words), Eidos::hash_elements(&concat));
+    assert_eq!(Eidos::hash_words(&words), Eidos::hash_elements(&concat));
 }
 
 #[test]
@@ -279,7 +266,7 @@ fn frozen_merge_and_challenger_vectors() {
     let merged = Eidos::merge(&[word([1, 2, 3, 4]), word([5, 6, 7, 8])]);
     assert_digest(
         merged,
-        [0x4d75748c8d801fcb, 0x08777791a35ff853, 0x1b245de8521c0075, 0x24e16f44209db86c],
+        [0x6ca4b9f83388bfcd, 0x35f5179a10630d76, 0x258fe3db5ee34599, 0x7709af38e69c9e2b],
     );
 
     let mut challenger = MidenEidosChallenger::new(word([1, 2, 3, 4]), word([10, 11, 12, 13]));

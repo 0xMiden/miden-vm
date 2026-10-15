@@ -43,6 +43,7 @@ members = [
     "processor",
     "prover",
     "tests/wycheproof",
+    "tools/release-policy",
     "verifier",
 ]
 resolver = "3"
@@ -112,7 +113,7 @@ miden-prover            = { path = "./prover", version = "1.0", default-features
 miden-serde-utils       = { path = "./crates/serde-utils", version = "1.0", default-features = false }
 miden-stark-transcript  = { path = "./crates/stark-transcript", version = "1.0", default-features = false }
 miden-stateful-hasher   = { path = "./crates/stateful-hasher", version = "1.0", default-features = false }
-midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "0.18", default-features = false }
+midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "0.19", default-features = false }
 miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "1.0", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "1.0", default-features = false }
 miden-utils-indexing    = { path = "./crates/utils-indexing", version = "1.0", default-features = false }
@@ -159,6 +160,7 @@ rand            = { version = "0.10", default-features = false }
 rayon           = { version = "1.11", default-features = false }
 rocksdb         = { version = "0.24", default-features = false }
 seq-macro       = "0.3"
+semver          = { version = "1.0", default-features = false }
 serde           = { version = "1.0", default-features = false, features = ["alloc", "derive", "rc"] }
 serde_json      = { version = "1.0", default-features = false, features = ["alloc"] }
 serde-untagged  = {version = "0.1" }

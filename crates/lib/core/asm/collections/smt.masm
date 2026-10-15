@@ -24,16 +24,16 @@ const MAX_LEAF_SIZE = 8192
 
 # `SMT_BUCKET_LEAF` (tag 0x00000101) initial chaining-word constants. Only the entry count is
 # dynamic.
-const LEAF_INIT_CV_0 = 4280581857092829441
-const LEAF_INIT_CV_1_BASE = 2688637132020383744
-const LEAF_INIT_CV_2 = 1947077364412317696
+const LEAF_INIT_CV_0 = 13503953893947605249
+const LEAF_INIT_CV_1_BASE = 11912009168875159552
+const LEAF_INIT_CV_2 = 11170449401267093504
 const LEAF_INIT_CV_3 = 6620516959492505600
 
 # Eidos chaining word for one key-value pair under `SMT_BUCKET_LEAF`.
 const LEAF_MERGE_INIT_CV = [
-    4280581857092829441,
-    2688637132020383745,
-    1947077364412317696,
+    13503953893947605249,
+    11912009168875159553,
+    11170449401267093504,
     6620516959492505600
 ]
 
@@ -189,7 +189,7 @@ pub proc get(key: Key, root: eidos::Digest) -> (word, eidos::Digest)
             # (39 cycles)
             dupw.1 dupw.1
             # => [K_l, V, K_l, V, NV, K, R]
-            push.LEAF_MERGE_INIT_CV exec.eidos::merge_with_chaining_word movupw.3 assert_eqw
+            push.LEAF_MERGE_INIT_CV exec.eidos::compress_double_word movupw.3 assert_eqw
             # => [K_l, V, K, R]
 
             # The leaf may hold a different key with the same leaf index. Return V if the stored
@@ -298,7 +298,7 @@ pub proc set(value: word, key: Key, root: eidos::Digest) -> (word, eidos::Digest
             # SMT_BUCKET_LEAF hash equals NV.
             adv_pushw adv_pushw
             # => [V_l, K_l, NV, V, K, R]
-            dupw dupw.2 push.LEAF_MERGE_INIT_CV exec.eidos::merge_with_chaining_word
+            dupw dupw.2 push.LEAF_MERGE_INIT_CV exec.eidos::compress_double_word
             # => [leaf_hash, V_l, K_l, NV, V, K, R]
             movupw.3 assert_eqw.err="invalid single-leaf preimage: hash does not match node value"
             # => [V_l, K_l, V, K, R]
@@ -951,8 +951,7 @@ proc set_multi_leaf(
     key: Key,
     root: eidos::Digest,
 ) -> (word, eidos::Digest)
-    # We'll have to pipe all the pairs from the advice stack. Let's get the
-    # stack ready for pipe_double_words_preimage_to_memory_with_domain.
+    # Prepare the bucket commitment and destination for pipe_leaf_preimage_to_memory.
 
     movdn.12
     # => [NV, V, K, leaf_size, R]

@@ -28,17 +28,17 @@ const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
 
 /// The recursive VM verifier root declared by proofs from the current prover.
 pub const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(856346024428662848),
-    crate::Felt::new_unchecked(2381272743568986504),
-    crate::Felt::new_unchecked(7097569908047301588),
-    crate::Felt::new_unchecked(4819724101067878519),
+    crate::Felt::new_unchecked(645095247659359049),
+    crate::Felt::new_unchecked(1729527159274860834),
+    crate::Felt::new_unchecked(7193222135919118062),
+    crate::Felt::new_unchecked(791984781394194097),
 ]);
 /// The recursive precompile verifier root declared by proofs from the current prover.
 pub const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(5535101693158110802),
-    crate::Felt::new_unchecked(3354858845263878736),
-    crate::Felt::new_unchecked(4666845482925451385),
-    crate::Felt::new_unchecked(8251708314544882643),
+    crate::Felt::new_unchecked(4048196284829847270),
+    crate::Felt::new_unchecked(5387021284814271710),
+    crate::Felt::new_unchecked(538758927063010471),
+    crate::Felt::new_unchecked(1361279841018483989),
 ]);
 
 // HASH FUNCTION
@@ -159,6 +159,10 @@ impl Deserializable for HashFunction {
 
 /// A Miden VM STARK proof together with its authenticated precompile obligation.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct VmProof {
     pub proof: StarkProof,
     pub precompile_root: DeferredRoot,
@@ -199,6 +203,10 @@ impl Deserializable for VmProof {
 /// Binary decoding enforces the fixed root ceiling before reserving root storage, but otherwise
 /// preserves the encoded artifact shape.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct PrecompileProof {
     pub proof: StarkProof,
     pub roots: Vec<DeferredRoot>,
@@ -346,6 +354,10 @@ pub enum PrecompileStatus {
 ///
 /// This type preserves proof artifacts without establishing their validity.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct ExecutionProof {
     compatibility: ExecutionProofCompatibility,
     vm: VmProof,
@@ -532,6 +544,10 @@ pub enum ExecutionProofError {
 
 /// A serialized STARK proof and the hash function used during proof generation.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct StarkProof {
     bytes: Vec<u8>,
     hash_fn: HashFunction,
@@ -940,5 +956,99 @@ mod tests {
         assert!(
             matches!(error, DeserializationError::InvalidValue(message) if message.contains("STARK proof contains too many bytes"))
         );
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod proof_arbitrary {
+    use proptest::prelude::*;
+
+    use super::{
+        ExecutionProof, ExecutionProofCompatibility, HashFunction, PrecompileProof,
+        PrecompileStatus, PrecompileWitness, StarkProof, VmProof,
+    };
+    use crate::{Felt, Word};
+
+    impl Arbitrary for StarkProof {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader enforces only the byte-count ceiling (64 MiB); bound well under it. The
+            // bytes are an opaque serialized artifact - the type does not validate their contents.
+            (
+                proptest::collection::vec(any::<u8>(), 0..=64),
+                prop_oneof![
+                    Just(HashFunction::Blake3_256),
+                    Just(HashFunction::Rpo256),
+                    Just(HashFunction::Rpx256),
+                    Just(HashFunction::Poseidon2),
+                    Just(HashFunction::Keccak),
+                ],
+            )
+                .prop_map(|(bytes, hash_fn)| StarkProof::new(bytes, hash_fn))
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for VmProof {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // DeferredRoot is a Word alias; both fields are any-valid.
+            (any::<StarkProof>(), any::<Word>())
+                .prop_map(|(proof, precompile_root)| Self { proof, precompile_root })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for PrecompileProof {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader enforces the MAX_PRECOMPILE_ROOTS ceiling; bound well under it.
+            (any::<StarkProof>(), proptest::collection::vec(any::<Word>(), 0..=4))
+                .prop_map(|(proof, roots)| Self { proof, roots })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for PrecompileStatus {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            prop_oneof![
+                Just(Self::Empty),
+                any::<PrecompileWitness>().prop_map(Self::Deferred).boxed(),
+                any::<PrecompileProof>().prop_map(Self::Proven).boxed(),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for ExecutionProof {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Sound by construction: compatibility roots are index-derived (distinct within each
+            // list, satisfying the duplicate check); the rest composes covered parts.
+            (0usize..=3, 0usize..=3, any::<VmProof>(), any::<PrecompileStatus>())
+                .prop_map(|(vm_count, pvm_count, vm, precompile)| {
+                    let compatibility = ExecutionProofCompatibility::new(
+                        (0..vm_count).map(|i| [Felt::from(i as u32); 4].into()).collect(),
+                        (0..pvm_count).map(|i| [Felt::from((i as u32) + 1000); 4].into()).collect(),
+                    )
+                    .expect("index-derived roots are distinct");
+                    Self::from_parts(compatibility, vm, precompile)
+                })
+                .boxed()
+        }
     }
 }
