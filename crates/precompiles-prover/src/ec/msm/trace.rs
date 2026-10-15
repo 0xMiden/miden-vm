@@ -15,12 +15,12 @@ use miden_core::{Felt, utils::RowMajorMatrix};
 use super::EcMsmAir;
 use super::{
     COL_A_DIFF_HI, COL_A_DIFF_LO, COL_A_EXPR, COL_A_PTR, COL_ACT, COL_B_DIFF_HI, COL_B_DIFF_LO,
-    COL_B_EXPR, COL_B_PTR, COL_BASE, COL_BASE_A, COL_BASE_B, COL_BETA_PTR, COL_BOUND_PTR,
-    COL_ENDO_BASE_X, COL_ENDO_MINTED, COL_ENDO_VAL_X, COL_ENDO_Y, COL_EXPR_PTR, COL_GROUP_PTR,
-    COL_I, COL_IDX, COL_IS_BOUNDARY, COL_IS_CLAIMED, COL_IS_COMBINE, COL_IS_INTRO,
-    COL_IS_INTRO_ZERO, COL_IS_NEG, COL_J, COL_LAMBDA_PTR, COL_MULT, COL_NEG_MINTED, COL_NEG_X,
-    COL_NEG_YA, COL_NEG_YR, COL_S_A, COL_S_B, COL_SBOUND_PTR, COL_SCALAR, COL_TAKE_A, COL_TAKE_B,
-    COL_TAKE_BOTH, COL_VAL, COL_VAL_A, COL_VAL_B, NUM_MAIN_COLS,
+    COL_B_EXPR, COL_B_PTR, COL_BASE, COL_BETA_PTR, COL_BOUND_PTR, COL_ENDO_BASE_X, COL_ENDO_MINTED,
+    COL_ENDO_VAL_X, COL_ENDO_Y, COL_EXPR_PTR, COL_GROUP_PTR, COL_I, COL_IDX, COL_IS_BOUNDARY,
+    COL_IS_CLAIMED, COL_IS_COMBINE, COL_IS_INTRO, COL_IS_INTRO_ZERO, COL_IS_NEG, COL_J,
+    COL_LAMBDA_PTR, COL_MULT, COL_NEG_MINTED, COL_NEG_X, COL_NEG_YA, COL_NEG_YR, COL_S_A, COL_S_B,
+    COL_SBOUND_PTR, COL_SCALAR, COL_TAKE_A, COL_TAKE_B, COL_VAL, COL_VAL_A, COL_VAL_B,
+    NUM_MAIN_COLS,
 };
 use crate::{
     ec::trace::{EcGroupPtr, EcPointPtr},
@@ -48,12 +48,9 @@ impl EcExprPtr {
 pub struct CombineRow {
     pub take_a: bool,
     pub take_b: bool,
-    pub take_both: bool,
     pub i: u32,
     pub j: u32,
-    pub base_a: EcPointPtr,
     pub s_a: UintPtr,
-    pub base_b: EcPointPtr,
     pub s_b: UintPtr,
     pub out_base: EcPointPtr,
     pub out_scalar: UintPtr,
@@ -89,10 +86,7 @@ struct RowVals {
     j: u32,
     take_a: u32,
     take_b: u32,
-    take_both: u32,
-    base_a: u32,
     s_a: u32,
-    base_b: u32,
     s_b: u32,
 }
 
@@ -475,10 +469,7 @@ impl EcMsmRequires {
                 j: r.j,
                 take_a: r.take_a as u32,
                 take_b: r.take_b as u32,
-                take_both: r.take_both as u32,
-                base_a: r.base_a.addr(),
                 s_a: r.s_a.addr(),
-                base_b: r.base_b.addr(),
                 s_b: r.s_b.addr(),
             })
             .collect();
@@ -545,11 +536,10 @@ impl EcMsmRequires {
         let rows = rows
             .into_iter()
             .map(|r| RowVals {
-                // out_base = base_a (the copied base); out_scalar = −s_a.
+                // The operand consumes the output base; out_scalar = −s_a.
                 base: r.base.addr(),
                 scalar: r.out_scalar.addr(),
                 i: r.i,
-                base_a: r.base.addr(),
                 s_a: r.s_a.addr(),
                 ..RowVals::default()
             })
@@ -742,10 +732,7 @@ pub fn generate_trace(
                 set(COL_J, rv.j);
                 set(COL_TAKE_A, rv.take_a);
                 set(COL_TAKE_B, rv.take_b);
-                set(COL_TAKE_BOTH, rv.take_both);
-                set(COL_BASE_A, rv.base_a);
                 set(COL_S_A, rv.s_a);
-                set(COL_BASE_B, rv.base_b);
                 set(COL_S_B, rv.s_b);
                 set(COL_VAL_A, e.val_a);
                 set(COL_VAL_B, e.val_b);
@@ -773,7 +760,6 @@ pub fn generate_trace(
                 // certificate ordering when this neg mints `val`.
                 set(COL_A_EXPR, e.a_expr);
                 set(COL_I, rv.i);
-                set(COL_BASE_A, rv.base_a);
                 set(COL_S_A, rv.s_a);
                 set(COL_VAL_A, e.val_a);
                 set(COL_A_PTR, e.a_ptr);
@@ -781,13 +767,14 @@ pub fn generate_trace(
                 set(COL_BOUND_PTR, e.bound_ptr);
                 set(COL_BETA_PTR, e.beta_ptr);
                 set(COL_LAMBDA_PTR, e.lambda_ptr);
+                // These cells alias combine's run-constant B-expression/value cells.
+                set(COL_NEG_X, e.neg_x);
+                set(COL_NEG_YA, e.neg_ya);
                 if is_boundary {
                     // The cheap value negation lives on the boundary: the
                     // shared x + the two y ptrs (pinned by the EcPoint consumes
                     // + the y-flip UintAdd) and the mint flag (gating the
                     // EcOnCurveCert provide for `val`).
-                    set(COL_NEG_X, e.neg_x);
-                    set(COL_NEG_YA, e.neg_ya);
                     set(COL_NEG_YR, e.neg_yr);
                     set(COL_NEG_MINTED, e.neg_minted);
                     let a_diff = expr_ptr - e.a_expr - 1;
@@ -912,12 +899,9 @@ mod tests {
             CombineRow {
                 take_a: true,
                 take_b: false,
-                take_both: false,
                 i: 0,
                 j: 0,
-                base_a: g,
                 s_a: one,
-                base_b: EcPointPtr::from_addr(0),
                 s_b: UintPtr::from_addr(0),
                 out_base: g,
                 out_scalar: one,
@@ -925,12 +909,9 @@ mod tests {
             CombineRow {
                 take_a: false,
                 take_b: true,
-                take_both: false,
                 i: 1,
                 j: 0,
-                base_a: EcPointPtr::from_addr(0),
                 s_a: UintPtr::from_addr(0),
-                base_b: q,
                 s_b: one,
                 out_base: q,
                 out_scalar: one,
@@ -985,12 +966,9 @@ mod tests {
             CombineRow {
                 take_a: true,
                 take_b: false,
-                take_both: false,
                 i: 0,
                 j: 0,
-                base_a: g,
                 s_a: one,
-                base_b: EcPointPtr::from_addr(0),
                 s_b: UintPtr::from_addr(0),
                 out_base: g,
                 out_scalar: one,
@@ -998,12 +976,9 @@ mod tests {
             CombineRow {
                 take_a: false,
                 take_b: true,
-                take_both: false,
                 i: 1,
                 j: 0,
-                base_a: EcPointPtr::from_addr(0),
                 s_a: UintPtr::from_addr(0),
-                base_b: q,
                 s_b: one,
                 out_base: q,
                 out_scalar: one,
@@ -1093,7 +1068,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn forged_take_flag_on_intro_rejected() {
-        // The take one-hot `take_a + take_b + take_both = is_combine` is the
+        // Booleanity of the derived `take_both` selector is the
         // linchpin pinning the take flags (and thus the combine consumes) to
         // 0 off combine rows. A stray `take_a` on an intro row (is_combine =
         // 0) breaks it `1 ≠ 0`, so check_constraints rejects it locally —
@@ -1148,7 +1123,7 @@ mod tests {
     fn forged_take_flag_on_intro_zero_rejected() {
         // Same linchpin as `forged_take_flag_on_intro_rejected`, exercised
         // on an intro_zero row instead: a stray `take_a` (is_combine = 0)
-        // breaks the take one-hot `take_a + take_b + take_both = is_combine`.
+        // breaks Booleanity of the derived `take_both` selector.
         let mut store = UintStoreRequires::new();
         let mut bpl = BytePairLutRequires::new();
         let mut req = EcMsmRequires::new();

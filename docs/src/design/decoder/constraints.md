@@ -85,11 +85,12 @@ body. The block-hash relation authenticates this flag on the `END` row:
 > f_{repeat}' \cdot (1 - f_{end} \cdot h_4) = 0 \text{ | degree} = 9
 > $$
 
-`LOOP` cannot transition directly to `END`; that would skip the body if its body-hash
-multiplicity were zero:
+Neither `LOOP` nor `REPEAT` can transition directly to `END`: every iteration must enter the
+body. The body-count lookup authenticates completed iterations; it does not require an iteration
+requested by `LOOP` or `REPEAT` to execute:
 
 > $$
-> f_{loop} \cdot f_{end}' = 0 \text{ | degree} = 9
+> (f_{loop} + f_{repeat}) \cdot f_{end}' = 0 \text{ | degree} = 9
 > $$
 
 The first row has no predecessor, so it cannot be a `REPEAT` operation:

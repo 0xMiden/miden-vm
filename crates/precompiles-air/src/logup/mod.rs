@@ -49,7 +49,8 @@ pub(crate) use frac_col;
 pub use miden_air::lookup::{
     BoundaryBuilder, Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch,
     LookupBuilder, LookupColumn, LookupFractions, LookupGroup, LookupMessage, ProverLookupBuilder,
-    accumulate, build_logup_aux_trace, build_lookup_fractions,
+    accumulate, build_logup_aux_trace, build_logup_aux_trace_with_preprocessed,
+    build_lookup_fractions,
 };
 use miden_core::field::QuadFelt;
 

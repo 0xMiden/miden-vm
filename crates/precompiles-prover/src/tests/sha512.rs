@@ -384,7 +384,9 @@ fn sha512_compression_records_all_byte_pair_and_range16_demands() {
         }
     }
     // AND and ANDNOT consume the canonical XOR relation through their affine result encodings.
-    assert_eq!(counts[COL_MULT_CANONICAL_XOR], (368 + 80 + 24 + 82 + 928 + 816 + 760) * 8);
+    // CONST halves are fixed; ROL halves inherit the source word's bounds. Neither needs
+    // another byte lookup, while every rotation still needs its eight u16 limb checks.
+    assert_eq!(counts[COL_MULT_CANONICAL_XOR], (368 + 80 + 24 + 816 + 760) * 8);
     assert_eq!(counts[COL_MULT_RANGE16], 928 * 8);
     crate::tests::check_local(BytePairLutAir, &bpl_main);
     crate::tests::check_local(Sha512CompressionAir, &main);
@@ -571,8 +573,8 @@ fn sha512_two_block_bus_binds_rotation_source_bytes() {
     let row = first_slot(program::Op::Rol(30));
     assert!(
         two_block_bus_residual(|main| {
-            // ROL stores the unrotated source in r; XOR(a, 0, r) must enforce r == a.
-            main.values[row * NUM_MAIN_COLS + COL_R_BEGIN] += Felt::ONE;
+            // ROL reads its authenticated source halves directly for the bounded decomposition.
+            main.values[row * NUM_MAIN_COLS + COL_A_BEGIN] += Felt::ONE;
         }) > 0
     );
 }

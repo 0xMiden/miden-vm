@@ -1189,27 +1189,29 @@ where
 // sparse β layout expected by the hasher chiplet. Lookup-message encoders may touch sparse β
 // positions; contiguity is a convention, not a requirement.
 
-/// Sibling-table message for the Merkle sibling bus.
+/// Sibling-table message pairing the old and new paths of an MRUPDATE.
 ///
-/// The Merkle direction bit picks which half of the Eidos block holds the sibling:
-/// `bit = 0` puts the sibling at `h[4..8]`, with payload in β positions
-/// `[1, 2, 7, 8, 9, 10]` (mrupdate_id at β¹, node_index at β²,
-/// high block word at β⁷..β¹⁰). `bit = 1` puts the sibling at `h[0..4]`,
-/// with payload in β positions `[1, 2, 3, 4, 5, 6]`.
+/// The path level, MRUPDATE id, and node index occupy β⁰, β¹, and β². The Merkle direction bit
+/// selects the sibling from the Eidos block and determines its encoding:
+///
+/// - `bit = 0`: the high block word (`block[4..8]`), encoded at β⁷..β¹⁰;
+/// - `bit = 1`: the low block word (`block[0..4]`), encoded at β³..β⁶.
 #[derive(Clone, Debug)]
 pub struct SiblingMsg<E> {
     pub bit: SiblingBit,
+    pub level: E,
     pub mrupdate_id: E,
     pub node_index: E,
+    /// The selected sibling word.
     pub h: WordFields<E>,
 }
 
 /// Which half of the Eidos block holds the sibling word for this row.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SiblingBit {
-    /// `bit = 0` — sibling lives in the high block word (`h[4..8]`).
+    /// `bit = 0` — sibling lives in the high block word (`block[4..8]`).
     Zero,
-    /// `bit = 1` — sibling lives in the low block word (`h[0..4]`).
+    /// `bit = 1` — sibling lives in the low block word (`block[0..4]`).
     One,
 }
 
@@ -1220,7 +1222,10 @@ where
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         let mut acc = challenges.bus_prefix[BusId::SiblingTable as usize].clone();
-        acc += challenges.inner_product_at(1, &[self.mrupdate_id.clone(), self.node_index.clone()]);
+        acc += challenges.inner_product_at(
+            0,
+            &[self.level.clone(), self.mrupdate_id.clone(), self.node_index.clone()],
+        );
         let base = match self.bit {
             SiblingBit::Zero => 7,
             SiblingBit::One => 3,

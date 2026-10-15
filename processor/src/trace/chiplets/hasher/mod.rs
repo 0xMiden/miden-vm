@@ -369,11 +369,13 @@ impl Hasher {
     }
 
     /// Appends a Merkle-controller compression row and records the Eidos compression request.
+    /// `level` is the row's position in its path, starting at zero.
     fn append_merkle_compression(
         &mut self,
         selectors: Selectors,
         input_state: HasherState,
         node_index: u64,
+        level: usize,
         is_start: bool,
         is_final: bool,
     ) -> HasherState {
@@ -386,7 +388,7 @@ impl Hasher {
             Felt::new_unchecked(node_index),
             Felt::new_unchecked(node_index >> 1),
             if is_start { ONE } else { ZERO },
-            ZERO,
+            Felt::new_unchecked(level as u64),
         ];
         let op_final = if is_final { ONE } else { ZERO };
         self.trace.append_controller_row(
@@ -427,8 +429,14 @@ impl Hasher {
             let b_i = index & 1;
             let state = build_merge_state(&root, &sibling, b_i);
 
-            let compressed =
-                self.append_merkle_compression(main_selectors, state, index, i == 0, i == last_idx);
+            let compressed = self.append_merkle_compression(
+                main_selectors,
+                state,
+                index,
+                i,
+                i == 0,
+                i == last_idx,
+            );
 
             root = get_digest(&compressed);
             index >>= 1;

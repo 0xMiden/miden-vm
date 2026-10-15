@@ -11,15 +11,15 @@ use super::compression::{
     layout::{BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, NUM_COLS as NUM_EIDOS_COMPRESSION_COLS},
     trace::{
         ByteLookupRecorder, EidosCompressionByteLookup, retag_felt_trace_block_cycle_id,
-        write_felt_trace_block_into_zeroed_with_lookups,
+        set_footer_output_multiplicity, write_felt_trace_block_into_zeroed_with_lookups,
     },
 };
 use crate::{
     primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp},
     relations::ProvideMult,
     transcript::eidos::{
-        COL_CHAIN_HEAD_ID, COL_IN_MULTIPLICITY, COL_IS_CONTINUATION, COL_OUT_MULTIPLICITY,
-        NUM_MAIN_COLS, digest::EidosDigest,
+        COL_CHAIN_HEAD_ID, COL_IN_MULTIPLICITY, COL_IS_CONTINUATION, NUM_MAIN_COLS,
+        digest::EidosDigest,
     },
 };
 
@@ -209,7 +209,6 @@ impl CompressionCycle {
         let meta = &mut row[start..];
         let col = |absolute: usize| absolute - NUM_EIDOS_COMPRESSION_COLS;
         meta[col(COL_IN_MULTIPLICITY)] = Felt::from(self.in_mult);
-        meta[col(COL_OUT_MULTIPLICITY)] = Felt::from(self.out_mult);
         meta[col(COL_IS_CONTINUATION)] = Felt::from_u8(self.is_continuation as u8);
         meta[col(COL_CHAIN_HEAD_ID)] = Felt::from(self.chain_head_id);
     }
@@ -481,9 +480,13 @@ pub(crate) fn generate_trace_with_byte_lookups(
     for (row_idx, base_row) in
         eidos_compression.values.chunks_exact(eidos_compression.width).enumerate()
     {
+        let start = values.len();
         values.extend_from_slice(base_row);
         let cycle_idx = row_idx / EIDOS_COMPRESSION_CYCLE_LEN;
         if let Some(cycle) = cycles.get(cycle_idx) {
+            if row_idx % EIDOS_COMPRESSION_CYCLE_LEN == EIDOS_COMPRESSION_CYCLE_LEN - 1 {
+                set_footer_output_multiplicity(&mut values[start..], Felt::from(cycle.out_mult));
+            }
             cycle.append_metadata(&mut values);
         } else {
             let start = values.len();

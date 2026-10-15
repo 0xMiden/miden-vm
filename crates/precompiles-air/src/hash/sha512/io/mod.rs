@@ -1,14 +1,10 @@
-//! SHA-512 padding, chaining, and deferred-assertion binding.
+//! Serialized SHA-512 IO with shared payload cells.
 //!
-//! Each active block occupies sixteen rows, one per big-endian u64 message word. Raw message
-//! bytes are committed independently of SHA padding, through framed Eidos compression chains. SHA
-//! word messages connect this band to the fixed-program compressor without entering Keccak's
-//! namespace.
-//!
-//! Rows 0..8 also carry the incoming chaining state and, in the final block, the digest bytes.
-//! Four consecutive rows form one 32-byte Eidos chunk, packed into little-endian u32 felts.
-//! The last row of the final block binds the input and digest commitments, together with the
-//! original byte length, into the deferred SHA-512 assertion.
+//! Each 64-row block checks raw input and padding on rows 0..16, incoming state on
+//! rows 16..24, and the final digest on rows 24..32. Row 32 authenticates the Eidos
+//! assertion; rows 33..64 carry invocation metadata to the continuation endpoint.
+//! Raw input and digest bytes use little-endian CHUNKS packing while SHA words use
+//! big-endian packing. Disjoint stages reuse the same physical payload cells.
 
 pub mod program;
 
@@ -42,10 +38,9 @@ use crate::{
     utils::{current_main, halves_le, next_main},
 };
 
-pub const NUM_MAIN_COLS: usize = 51;
-pub const NUM_AUX_COLS: usize = 18;
-pub const COLUMN_SHAPE: [usize; NUM_AUX_COLS] =
-    [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1];
+pub const NUM_MAIN_COLS: usize = 37;
+pub const NUM_AUX_COLS: usize = 14;
+pub const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1];
 
 pub const COL_ACT: usize = 0;
 pub const COL_BLOCK_ID: usize = 1;
@@ -66,29 +61,27 @@ pub const COL_DIGEST_EIDOS: usize = 11;
 /// Eidos compression ID of the assertion node.
 pub const COL_NODE_EIDOS: usize = 12;
 pub const COL_OUT_MULT: usize = 13;
-pub const COL_RAW_BEGIN: usize = 14;
-/// Eight presence bits, one per raw byte; they may fall from one to zero but never rise again.
-pub const COL_MSG_BEGIN: usize = 22;
-pub const COL_PREVIOUS_RAW: usize = 30;
-pub const COL_WORD_LO: usize = 32;
-pub const COL_WORD_HI: usize = 33;
-pub const COL_STATE_LO: usize = 34;
-pub const COL_STATE_HI: usize = 35;
-pub const COL_DIGEST_BEGIN: usize = 36;
-pub const COL_PREVIOUS_DIGEST: usize = 44;
 /// Eidos compression ID of the raw-input chain head, carried through the invocation.
-pub const COL_INPUT_HEAD: usize = 46;
-/// Packed raw-input felts of a chunk's first row, carried to the row that emits the chunk.
-pub const COL_CHUNK_HEAD_RAW: usize = 47;
-/// Packed digest felts of a chunk's first row, carried to the row that emits the chunk.
-pub const COL_CHUNK_HEAD_DIGEST: usize = 49;
+pub const COL_INPUT_HEAD: usize = 14;
+pub const COL_RAW_BEGIN: usize = 15;
+/// Eight presence bits, one per raw byte; they may fall from one to zero but never rise again.
+pub const COL_MSG_BEGIN: usize = 23;
+pub const COL_PREVIOUS_RAW: usize = 31;
+pub const COL_WORD_LO: usize = 33;
+pub const COL_WORD_HI: usize = 34;
+/// Packed raw-input felts of a chunk's first row, carried to its emitting row.
+pub const COL_CHUNK_HEAD_RAW: usize = 35;
 
-// The following cells are unused by state/digest extraction on row 15 and hold assertion hashes.
-// Every constraint and lookup on their ordinary byte/word meaning is restricted to rows 0..7.
-pub const COL_H_INPUT: usize = COL_DIGEST_BEGIN;
-pub const COL_H_DIGEST: usize = COL_DIGEST_BEGIN + 4;
+// Disjoint raw, state, digest, and binding rows reuse the same payload cells.
+pub const COL_STATE_LO: usize = COL_WORD_LO;
+pub const COL_STATE_HI: usize = COL_WORD_HI;
+pub const COL_DIGEST_BEGIN: usize = COL_RAW_BEGIN;
+pub const COL_PREVIOUS_DIGEST: usize = COL_PREVIOUS_RAW;
+pub const COL_CHUNK_HEAD_DIGEST: usize = COL_CHUNK_HEAD_RAW;
+pub const COL_H_INPUT: usize = COL_RAW_BEGIN;
+pub const COL_H_DIGEST: usize = COL_RAW_BEGIN + 4;
 pub const H_SHA512_COLS: [usize; 4] =
-    [COL_STATE_LO, COL_STATE_HI, COL_PREVIOUS_DIGEST, COL_PREVIOUS_DIGEST + 1];
+    [COL_MSG_BEGIN, COL_MSG_BEGIN + 1, COL_MSG_BEGIN + 2, COL_MSG_BEGIN + 3];
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Sha512IoAir;
@@ -139,7 +132,7 @@ impl LiftedAir<Felt, QuadFelt> for Sha512IoAir {
 }
 
 /// Evaluate the local constraints in an independent main/periodic column band.
-/// Active rows form whole sixteen-row blocks. Invocation boundaries reset the message counters;
+/// Active rows form whole sixty-four-row blocks. Invocation boundaries reset the message counters;
 /// all other block boundaries continue them. The composite AIR enforces these same boundaries
 /// using its compression controller and continuation lookup instead of adjacent IO blocks.
 pub fn eval_main<AB: LiftedAirBuilder<F = Felt>>(
@@ -162,14 +155,14 @@ pub fn eval_main<AB: LiftedAirBuilder<F = Felt>>(
     let last = p[program::P_LAST].clone();
     let end = last.clone() * final_block.clone();
     // Carry invocation state into the next active row unless this row closes the invocation.
-    // In this dense layout, row 15 can carry directly into row 0 of the next compression block.
+    // In this dense layout, row 63 can carry directly into row 0 of the next compression block.
     let carry = next_act.clone() * (one.clone() - end);
 
     eval_main_rows(builder, &local, &next, &p, one.clone(), carry);
 
     // These controller constraints belong to the dense standalone wrapper. A composite caller
     // supplies the corresponding block/coverage constraints from the shared compression rows.
-    // The first active block starts an invocation; block IDs advance exactly once per 16 rows.
+    // The first active block starts an invocation; block IDs advance exactly once per 64 rows.
     builder.when_first_row().assert_zero(v(COL_BLOCK_ID));
     builder.when_first_row().assert_zero(act.clone() * (first - one.clone()));
     builder
@@ -217,7 +210,8 @@ pub(super) fn eval_main_rows<AB: LiftedAirBuilder<F = Felt>>(
     let first = v(COL_FIRST_BLOCK);
     let final_block = v(COL_FINAL_BLOCK);
     let last = p[program::P_LAST].clone();
-    let end = last.clone() * final_block.clone();
+    let end = p[program::P_RAW_LAST].clone() * final_block.clone();
+    let raw = owned.clone() * p[program::P_RAW].clone();
 
     // These selectors describe IO data only. Gating by `owned` avoids imposing Boolean
     // constraints on the compression values occupying the same cells outside the IO window.
@@ -233,7 +227,7 @@ pub(super) fn eval_main_rows<AB: LiftedAirBuilder<F = Felt>>(
     builder
         .when_transition()
         .assert_zero(carry.clone() * (nv(COL_INPUT_HEAD) - v(COL_INPUT_HEAD)));
-    // First/final are block-wide flags: allow changes only after row 15. Boundary constraints
+    // First/final are block-wide flags: allow changes only after row 63. Boundary constraints
     // in the wrapper decide whether those changes describe a continuation or a new invocation.
     for index in [COL_FIRST_BLOCK, COL_FINAL_BLOCK] {
         builder
@@ -249,7 +243,9 @@ pub(super) fn eval_main_rows<AB: LiftedAirBuilder<F = Felt>>(
     // Two Range16 lookups bound LEFT to u32. Since LEFT = LEN at invocation start, this also
     // bounds LEN; subsequent subtractions cannot wrap through the base field back into u32.
     builder.assert_zero(
-        act.clone() * (v(COL_LEFT) - v(COL_LEFT_LO16) - v(COL_LEFT_HI16) * Felt::from_u32(1 << 16)),
+        act.clone()
+            * p[program::P_RAW].clone()
+            * (v(COL_LEFT) - v(COL_LEFT_LO16) - v(COL_LEFT_HI16) * Felt::from_u32(1 << 16)),
     );
 
     let mut sum_msg = AB::Expr::ZERO;
@@ -261,11 +257,10 @@ pub(super) fn eval_main_rows<AB: LiftedAirBuilder<F = Felt>>(
     let padded: [AB::Expr; 8] = array::from_fn(|i| {
         let msg = v(COL_MSG_BEGIN + i);
         builder.assert_zero(
-            owned.clone() * local[COL_MSG_BEGIN + i].into() * (one.clone() - msg.clone()),
+            raw.clone() * local[COL_MSG_BEGIN + i].into() * (one.clone() - msg.clone()),
         );
-        builder
-            .assert_zero(owned.clone() * v(COL_MSG_BEGIN + i) * (one.clone() - previous.clone()));
-        builder.assert_zero(owned.clone() * v(COL_RAW_BEGIN + i) * (one.clone() - msg.clone()));
+        builder.assert_zero(raw.clone() * v(COL_MSG_BEGIN + i) * (one.clone() - previous.clone()));
+        builder.assert_zero(raw.clone() * v(COL_RAW_BEGIN + i) * (one.clone() - msg.clone()));
         let byte = v(COL_RAW_BEGIN + i) + (previous.clone() - msg.clone()) * Felt::from_u8(128);
         sum_msg += msg.clone();
         previous = msg;
@@ -274,17 +269,23 @@ pub(super) fn eval_main_rows<AB: LiftedAirBuilder<F = Felt>>(
     // If the prefix has ended by this row's last byte, consume all remaining message bytes
     // here. Otherwise each of its eight presence bits is one, and the counter decreases by eight.
     builder.assert_zero(
-        act.clone() * (one.clone() - previous.clone()) * (v(COL_LEFT) - sum_msg.clone()),
+        act.clone()
+            * p[program::P_RAW].clone()
+            * (one.clone() - previous.clone())
+            * (v(COL_LEFT) - sum_msg.clone()),
     );
     // Carry the remaining count and last presence bit to the next row. This joins byte prefixes
     // across rows, while continuation lookups perform the same transport between sparse blocks.
-    builder
-        .when_transition()
-        .assert_zero(carry.clone() * (nv(COL_LEFT) - v(COL_LEFT) + sum_msg.clone()));
-    builder
-        .when_transition()
-        .assert_zero(carry.clone() * (nv(COL_BEFORE) - previous));
-    // The final row has no continuation, so require exhaustion explicitly at the invocation end.
+    builder.when_transition().assert_zero(
+        carry.clone() * (nv(COL_LEFT) - v(COL_LEFT) + p[program::P_RAW].clone() * sum_msg.clone()),
+    );
+    builder.when_transition().assert_zero(
+        carry.clone()
+            * (nv(COL_BEFORE)
+                - v(COL_BEFORE)
+                - p[program::P_RAW].clone() * (previous - v(COL_BEFORE))),
+    );
+    // Require exhaustion on the final raw row before its payload cells are reused.
     builder.assert_zero(act.clone() * end.clone() * (v(COL_LEFT) - sum_msg));
     // At row 14, BEFORE describes byte 111. The block is final exactly when that byte is
     // already past the message, leaving room for the marker before the 128-bit length suffix.
@@ -296,7 +297,7 @@ pub(super) fn eval_main_rows<AB: LiftedAirBuilder<F = Felt>>(
     // Every word except the final length word is the big-endian packing of message/marker/zeros.
     // In a final block, the row-14 condition above forces its high length word to be zero too.
     let [word_lo, word_hi]: [AB::Expr; 2] = halves_be(&padded);
-    let data_gate = act.clone() * (one.clone() - end.clone());
+    let data_gate = act.clone() * (p[program::P_RAW].clone() - end.clone());
     builder.assert_zero(data_gate.clone() * (v(COL_WORD_LO) - word_lo));
     builder.assert_zero(data_gate * (v(COL_WORD_HI) - word_hi));
     // The u32 message length needs only the suffix's low 64 bits; row 14 supplies its zero
@@ -304,7 +305,7 @@ pub(super) fn eval_main_rows<AB: LiftedAirBuilder<F = Felt>>(
     // word below 2^48 and prevents satisfying this equation with the field alias 8*len + p.
     builder.assert_zero(
         act.clone()
-            * end.clone()
+            * end
             * (v(COL_WORD_LO) + v(COL_WORD_HI) * Felt::new_unchecked(1u64 << 32)
                 - v(COL_LEN) * Felt::from_u8(8)),
     );
@@ -320,27 +321,33 @@ pub(super) fn eval_main_rows<AB: LiftedAirBuilder<F = Felt>>(
     // crossing into an active next chunk; after the input ends it stays at the chain tail.
     builder.when_transition().assert_zero(
         owned.clone()
-            * (one.clone() - p[program::P_CHUNK_LAST].clone())
+            * (p[program::P_RAW].clone() - p[program::P_CHUNK_LAST].clone())
             * (nv(COL_CHUNK_ACTIVE) - v(COL_CHUNK_ACTIVE)),
     );
     builder.when_transition().assert_zero(
-        carry.clone()
+        carry
             * (nv(COL_INPUT_EIDOS)
                 - v(COL_INPUT_EIDOS)
-                - p[program::P_CHUNK_LAST].clone() * nv(COL_CHUNK_ACTIVE)),
+                - (p[program::P_CHUNK_ADVANCE].clone() + last.clone()) * nv(COL_CHUNK_ACTIVE)),
     );
     // An Eidos block carries a whole chunk. Chunk rows 1 and 2 already see the preceding row's
     // packed felts; row 1 also forwards its predecessor so the emitting row sees all four rows.
-    for (head, previous) in [
-        (COL_CHUNK_HEAD_RAW, COL_PREVIOUS_RAW),
-        (COL_CHUNK_HEAD_DIGEST, COL_PREVIOUS_DIGEST),
+    for (head, previous, gate) in [
+        (
+            COL_CHUNK_HEAD_RAW,
+            COL_PREVIOUS_RAW,
+            owned.clone() * p[program::P_CHUNK_SECOND].clone(),
+        ),
+        (
+            COL_CHUNK_HEAD_DIGEST,
+            COL_PREVIOUS_DIGEST,
+            act.clone() * final_block.clone() * p[program::P_DIGEST_SECOND].clone(),
+        ),
     ] {
         for i in 0..2 {
-            builder.when_transition().assert_zero(
-                owned.clone()
-                    * p[program::P_CHUNK_SECOND].clone()
-                    * (nv(head + i) - v(previous + i)),
-            );
+            builder
+                .when_transition()
+                .assert_zero(gate.clone() * (nv(head + i) - v(previous + i)));
         }
     }
     let raw: [AB::Var; 8] = array::from_fn(|i| local[COL_RAW_BEGIN + i]);
@@ -348,9 +355,9 @@ pub(super) fn eval_main_rows<AB: LiftedAirBuilder<F = Felt>>(
     // Preserve each row's two packed raw felts for the next row's chunk assembly. The chunk's
     // third row then has rows 0 and 1 in carried cells, row 2 locally, and row 3 through `next`.
     for (i, packed) in raw_le.into_iter().enumerate() {
-        builder
-            .when_transition()
-            .assert_zero(carry.clone() * (nv(COL_PREVIOUS_RAW + i) - packed));
+        builder.when_transition().assert_zero(
+            owned.clone() * p[program::P_RAW_NEXT].clone() * (nv(COL_PREVIOUS_RAW + i) - packed),
+        );
     }
 
     // Initialize only the first block from the fixed SHA-512 IV. Later blocks obtain these
@@ -360,8 +367,8 @@ pub(super) fn eval_main_rows<AB: LiftedAirBuilder<F = Felt>>(
     builder.assert_zero(state_gate * (v(COL_STATE_HI) - p[program::P_IV_HI].clone()));
     let digest: [AB::Var; 8] = array::from_fn(|i| local[COL_DIGEST_BEGIN + i]);
     let digest_le: [AB::Expr; 2] = halves_le(&digest, 256);
-    // Only the final block exposes digest bytes, in rows 0..8. Carry their packed felts across
-    // rows 0->1 through 6->7 for its two Eidos chunks, without constraining reused cells later.
+    // Only the final block exposes digest bytes, in rows 24..32. Carry their packed felts across
+    // rows 24->25 through 30->31 for its two Eidos chunks, without constraining reused cells later.
     for (i, packed) in digest_le.into_iter().enumerate() {
         builder.when_transition().assert_zero(
             act.clone()
@@ -370,13 +377,16 @@ pub(super) fn eval_main_rows<AB: LiftedAirBuilder<F = Felt>>(
                 * (nv(COL_PREVIOUS_DIGEST + i) - packed),
         );
     }
-    // This includes row 14->15: the final EidosOut must refer to the same two-block digest span.
+    // This includes the binding row: the final EidosOut must refer to the same two-block digest
+    // span.
     builder.when_transition().assert_zero(
         act.clone() * final_block * (one - last) * (nv(COL_DIGEST_EIDOS) - v(COL_DIGEST_EIDOS)),
     );
-    // Only the last row of a final block may publish truth claims. Zero the multiplicity on
+    // Only the binding row of a final block may publish truth claims. Zero the multiplicity on
     // every other owned row; the truth lookup uses it directly without another row selector.
-    builder.assert_zero((owned - act * end) * v(COL_OUT_MULT));
+    builder.assert_zero(
+        (owned - act * v(COL_FINAL_BLOCK) * p[program::P_BIND].clone()) * v(COL_OUT_MULT),
+    );
 }
 
 /// The eight packed felts of the chunk whose third row is `local`: the carried first row, the
@@ -438,8 +448,8 @@ pub fn eval_lookups<LB: LookupBuilder<F = Felt>>(
             2 => "sha512-digest-and-input",
             3..=5 => "sha512-chunks",
             6..=7 => "sha512-assertion",
-            8..=15 => "sha512-bytes",
-            16..=17 => "sha512-length",
+            8..=11 => "sha512-bytes",
+            12..=13 => "sha512-length",
             _ => unreachable!(),
         };
         builder.next_column(
@@ -477,15 +487,14 @@ pub(super) fn lookup_batch_degree(index: usize, activity_degree: usize) -> Deg {
     debug_assert!(index < NUM_AUX_COLS);
     debug_assert!(activity_degree <= 1);
     let (v, u) = match index {
-        0 => (1, 1),
+        0 => (2, 1),
         1 | 2 | 4 | 5 => (4, 2),
-        3 => (5, 2),
+        3 => (4, 2),
         6 => (3, 1),
         7 => (4, 2),
-        8..=11 => (2, 2),
-        12..=15 => (4, 2),
-        16 => (2, 2),
-        17 => (3, 1),
+        8..=11 => (4, 2),
+        12 => (3, 2),
+        13 => (3, 1),
         _ => unreachable!(),
     };
     Deg { v: v - (1 - activity_degree), u }
@@ -517,14 +526,14 @@ pub(super) fn eval_lookup_batch<B, V>(
         // Supply the padded word checked by the local equations to this block's INPUT slot.
         0 => batch.insert(
             "input",
-            B::Expr::ZERO - act,
+            B::Expr::ZERO - act * p[program::P_RAW].clone(),
             word(
                 e(COL_BLOCK_ID),
                 p[program::P_IDX].clone() + B::Expr::from_u32(INPUT_ADDR_BASE),
                 e(COL_WORD_LO),
                 e(COL_WORD_HI),
             ),
-            d(1, 1),
+            d(2, 1),
         ),
         1 => {
             // Supply all eight incoming state words. Except at an invocation's first block,
@@ -536,7 +545,7 @@ pub(super) fn eval_lookup_batch<B, V>(
                 B::Expr::ZERO - state,
                 word(
                     e(COL_BLOCK_ID),
-                    p[program::P_IDX].clone() + B::Expr::from_u32(INPUT_ADDR_BASE + 16),
+                    p[program::P_STATE_IDX].clone() + B::Expr::from_u32(INPUT_ADDR_BASE + 16),
                     e(COL_STATE_LO),
                     e(COL_STATE_HI),
                 ),
@@ -547,7 +556,7 @@ pub(super) fn eval_lookup_batch<B, V>(
                 previous_state,
                 word(
                     e(COL_BLOCK_ID) - B::Expr::ONE,
-                    p[program::P_IDX].clone() + B::Expr::from_u32(OUTPUT_SLOTS[0]),
+                    p[program::P_STATE_IDX].clone() + B::Expr::from_u32(OUTPUT_SLOTS[0]),
                     e(COL_STATE_LO),
                     e(COL_STATE_HI),
                 ),
@@ -558,8 +567,7 @@ pub(super) fn eval_lookup_batch<B, V>(
             // Consume the final block's eight output words using big-endian digest-byte packing.
             // The raw-block interaction separately binds message bytes, without SHA padding,
             // to the Eidos input chain using the little-endian packing in chunk_block.
-            let state = act.clone() * p[program::P_STATE].clone();
-            let digest = state * e(COL_FINAL_BLOCK);
+            let digest = act.clone() * p[program::P_DIGEST].clone() * e(COL_FINAL_BLOCK);
             let raw_emit = act * e(COL_CHUNK_ACTIVE) * p[program::P_CHUNK_EMIT].clone();
             let digest_bytes: [V; 8] = array::from_fn(|i| local[COL_DIGEST_BEGIN + i]);
             let digest_expr: [B::Expr; 8] = digest_bytes.map(Into::into);
@@ -569,7 +577,7 @@ pub(super) fn eval_lookup_batch<B, V>(
                 digest,
                 word(
                     e(COL_BLOCK_ID),
-                    p[program::P_IDX].clone() + B::Expr::from_u32(OUTPUT_SLOTS[0]),
+                    p[program::P_DIGEST_IDX].clone() + B::Expr::from_u32(OUTPUT_SLOTS[0]),
                     digest_be[0].clone(),
                     digest_be[1].clone(),
                 ),
@@ -594,9 +602,8 @@ pub(super) fn eval_lookup_batch<B, V>(
         3 => {
             // At invocation end, INPUT_EIDOS is the tail. Its distance from INPUT_HEAD counts
             // the zero-padded chunks; eight felts per chunk fixes the CHUNKS frame's length.
-            let end = act.clone() * e(COL_FINAL_BLOCK) * p[program::P_LAST].clone();
-            let state = act * p[program::P_STATE].clone();
-            let digest_emit = state * e(COL_FINAL_BLOCK) * p[program::P_CHUNK_EMIT].clone();
+            let end = act.clone() * e(COL_FINAL_BLOCK) * p[program::P_BIND].clone();
+            let digest_emit = act * e(COL_FINAL_BLOCK) * p[program::P_DIGEST_EMIT].clone();
             batch.insert(
                 "raw-init",
                 end,
@@ -609,7 +616,7 @@ pub(super) fn eval_lookup_batch<B, V>(
                 },
                 d(3, 1),
             );
-            // Bind the 64 digest bytes as two consecutive Eidos blocks, emitted on rows 2 and 6.
+            // Bind the 64 digest bytes as two consecutive Eidos blocks, emitted on rows 26 and 30.
             batch.insert(
                 "digest-block",
                 digest_emit,
@@ -623,13 +630,13 @@ pub(super) fn eval_lookup_batch<B, V>(
                         COL_DIGEST_BEGIN,
                     ),
                 },
-                d(4, 1),
+                d(3, 1),
             );
         },
         4 => {
             // The digest chain always hashes sixteen packed felts. Bind the input commitment
             // to both its head and tail, so it cannot be replaced by an unrelated chain output.
-            let end = act * e(COL_FINAL_BLOCK) * p[program::P_LAST].clone();
+            let end = act * e(COL_FINAL_BLOCK) * p[program::P_BIND].clone();
             batch.insert(
                 "digest-init",
                 end.clone(),
@@ -654,7 +661,7 @@ pub(super) fn eval_lookup_batch<B, V>(
             // Authenticate the complete two-block digest chain, then initialize the assertion
             // with its domain, operation, and exact message length. CHUNKS padding alone would
             // not distinguish a short message from the same bytes followed by zero bytes.
-            let end = act * e(COL_FINAL_BLOCK) * p[program::P_LAST].clone();
+            let end = act * e(COL_FINAL_BLOCK) * p[program::P_BIND].clone();
             let assert_frame = [
                 B::Expr::from(Sha512Precompile::domain().as_felt()),
                 B::Expr::from(Felt::from_u32(Sha512Precompile::ASSERT_OP_ID)),
@@ -684,7 +691,7 @@ pub(super) fn eval_lookup_batch<B, V>(
         6 => {
             // The assertion's single Eidos block contains the authenticated input commitment
             // followed by the authenticated digest commitment, in the deferred node's order.
-            let end = act * e(COL_FINAL_BLOCK) * p[program::P_LAST].clone();
+            let end = act * e(COL_FINAL_BLOCK) * p[program::P_BIND].clone();
             batch.insert(
                 "node-block",
                 end,
@@ -704,7 +711,7 @@ pub(super) fn eval_lookup_batch<B, V>(
         7 => {
             // Authenticate that assertion node's output and provide its truth once per consumer.
             // OUT_MULT is zero on other owned rows, as enforced by the local constraints.
-            let end = act * e(COL_FINAL_BLOCK) * p[program::P_LAST].clone();
+            let end = act * e(COL_FINAL_BLOCK) * p[program::P_BIND].clone();
             let h_sha512 = H_SHA512_COLS.map(e);
             batch.insert(
                 "node-out",
@@ -724,8 +731,8 @@ pub(super) fn eval_lookup_batch<B, V>(
             );
         },
         8..=11 => {
-            // The XOR identity (0, byte, byte) range-checks every raw byte, including zeros
-            // outside the message. Each batch checks two of the row's eight bytes.
+            // Raw and final-digest stages share the same byte cells and denominators. The
+            // periodic stages are disjoint; binding rows contain arbitrary felts and are excluded.
             let i = 2 * (index - 8);
             let byte = |offset| {
                 BytePairLutMsg::from_xor(
@@ -734,33 +741,20 @@ pub(super) fn eval_lookup_batch<B, V>(
                     e(COL_RAW_BEGIN + i + offset),
                 )
             };
-            batch.insert("byte", act.clone(), byte(0), d(1, 1));
-            batch.insert("byte", act, byte(1), d(1, 1));
+            let active = act
+                * (p[program::P_RAW].clone() + p[program::P_DIGEST].clone() * e(COL_FINAL_BLOCK));
+            batch.insert("byte", active.clone(), byte(0), d(3, 1));
+            batch.insert("byte", active, byte(1), d(3, 1));
         },
-        12..=15 => {
-            // Range-check digest bytes only where they exist. These columns hold arbitrary
-            // assertion-digest felts on row 15 and must not be interpreted as bytes there.
-            let i = 2 * (index - 12);
-            let state = act * p[program::P_STATE].clone();
-            let digest = state * e(COL_FINAL_BLOCK);
-            let byte = |offset| {
-                BytePairLutMsg::from_xor(
-                    B::Expr::ZERO,
-                    e(COL_DIGEST_BEGIN + i + offset),
-                    e(COL_DIGEST_BEGIN + i + offset),
-                )
-            };
-            batch.insert("byte", digest.clone(), byte(0), d(3, 1));
-            batch.insert("byte", digest, byte(1), d(3, 1));
-        },
-        16 => {
+        12 => {
             // Together with LEFT = lo16 + 2^16*hi16, enforce a nonnegative u32 remaining count.
-            batch.insert("left-low", act.clone(), Range16Msg { w: e(COL_LEFT_LO16) }, d(1, 1));
-            batch.insert("left-high", act, Range16Msg { w: e(COL_LEFT_HI16) }, d(1, 1));
+            let raw = act * p[program::P_RAW].clone();
+            batch.insert("left-low", raw.clone(), Range16Msg { w: e(COL_LEFT_LO16) }, d(2, 1));
+            batch.insert("left-high", raw, Range16Msg { w: e(COL_LEFT_HI16) }, d(2, 1));
         },
-        17 => {
+        13 => {
             // Bound the final length word below 2^48, excluding a field-modulus alias for 8*LEN.
-            let end = act * e(COL_FINAL_BLOCK) * p[program::P_LAST].clone();
+            let end = act * e(COL_FINAL_BLOCK) * p[program::P_RAW_LAST].clone();
             batch.insert("length-high", end, Range16Msg { w: e(COL_WORD_HI) }, d(3, 1));
         },
         _ => unreachable!(),

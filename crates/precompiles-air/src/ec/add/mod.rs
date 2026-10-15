@@ -256,7 +256,7 @@ const PCOL_TERM: usize = 3;
 const NUM_PERIODIC: usize = 4;
 const ROLE_ROWS: [usize; NUM_PERIODIC] = [0, 1, 2, 3];
 
-// Aux: 11 columns, flattened via `frac_col!` over the 19 fractions so
+// Aux: 10 columns, flattened via `frac_col!` over the 19 fractions so
 // every closing constraint stays at degree ≤ 3 → `log_quotient_degree`
 // = 1:
 // - col 0: the `EcGroupAdd` provide, alone.
@@ -267,12 +267,11 @@ const ROLE_ROWS: [usize; NUM_PERIODIC] = [0, 1, 2, 3];
 // - col 5: the double case's tangent-numerator + slope-pin certificates.
 // - col 6: the generic case's `t`-add + fused `x₃` mul-subtract.
 // - col 7: the shared tail's `e`-subtract + fused `y₃` mul-subtract.
-// - col 8: the double case's fused `x₃` mul-subtract, alone (no partner left to pair).
+// - col 8: the double case's fused `x₃` mul-subtract + result-membership cert provide.
 // - col 9: the closure-cert ptr-ordering Range16 limb pair, on result and term rows.
-// - col 10: the result-membership cert provide, alone.
-const NUM_LOGUP_COLS: usize = 11;
-const AUX_WIDTH: usize = 11;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 1];
+const NUM_LOGUP_COLS: usize = 10;
+const AUX_WIDTH: usize = 10;
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2];
 
 // AIR
 // ================================================================================================
@@ -783,13 +782,14 @@ where
                 f2
             ),
         );
-        // col 8: double's fused x₃ = λ² − 2·x₁, alone (no partner left to
-        // pair) — folds `t = 2x₁` into the mul-subtract (κ_c = 2, c = x₁),
-        // laying no separate `t` add.
+        // col 8: pair doubling's fused x3 MAC with the fresh result's membership certificate.
+        let cert_group: LB::Expr = local[CELL_GROUP].into();
+        let cert_r: LB::Expr = local[CELL_R].into();
+        let cert_gate = sel[PCOL_RES].clone() * mints.clone();
         frac_col!(
             builder,
             "ec-add-tail",
-            single_deg,
+            pair_deg,
             (
                 "consume-x3-macsub-dbl",
                 dbl * at_slope,
@@ -805,6 +805,12 @@ where
                 },
                 f2
             ),
+            (
+                "provide-ecgroupadd-cert",
+                LB::Expr::ZERO - cert_gate,
+                EcOnCurveCertMsg { group_ptr: cert_group, r_ptr: cert_r },
+                f2
+            ),
         );
 
         // ---- col 9: the mint column. Four Range16 consumes per block for the
@@ -812,33 +818,13 @@ where
         //      proving r_ptr > p_ptr ∧ r_ptr > q_ptr on a mint op — the
         //      well-foundedness the certificate rests on. All gated
         //      `(at_res + at_term) · mints`: one limb pair on each row.
-        let gate = (sel[PCOL_RES].clone() + sel[PCOL_TERM].clone()) * mints.clone();
+        let gate = (sel[PCOL_RES].clone() + sel[PCOL_TERM].clone()) * mints;
         frac_col!(
             builder,
             "ec-add-mint",
             pair_deg,
             ("range16-order-lo", gate.clone(), Range16Msg { w: rp_lo }, f2),
             ("range16-order-hi", gate, Range16Msg { w: rp_hi }, f2),
-        );
-        // col 10: the result-membership cert provide, alone. −1 per mint
-        // op (negative ⇒ provide), naming the fresh result `r` and its
-        // group. Consumed by `r`'s point-store row (the point band of
-        // `EcPointStoreGroupsAir`), discharging its on-curve obligation
-        // without the MAC trio; the bus balances because a fresh result
-        // is minted by exactly one op.
-        let cert_group: LB::Expr = local[CELL_GROUP].into();
-        let cert_r: LB::Expr = local[CELL_R].into();
-        let cert_gate = sel[PCOL_RES].clone() * mints;
-        frac_col!(
-            builder,
-            "ec-add-mint",
-            single_deg,
-            (
-                "provide-ecgroupadd-cert",
-                LB::Expr::ZERO - cert_gate,
-                EcOnCurveCertMsg { group_ptr: cert_group, r_ptr: cert_r },
-                f2
-            ),
         );
     }
 }

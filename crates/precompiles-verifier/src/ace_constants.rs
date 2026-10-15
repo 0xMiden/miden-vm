@@ -26,11 +26,12 @@ pub(crate) const PVM_PROTOCOL_ID: u64 = 4;
 /// Relation digest binding the accepted circuit into the Fiat-Shamir transcript
 /// (raw canonical u64 limbs): `Eidos(PVM_PROTOCOL_ID || PVM_ACE_CIRCUIT_DIGEST)`.
 #[cfg(any(test, feature = "constants-tools"))]
+#[rustfmt::skip]
 pub const PVM_RELATION_DIGEST: [u64; 4] = [
-    3430130751249333112,
-    3923292911056463301,
-    9102369175960030177,
-    2472984497279583389,
+    5618632176883261929,
+    5091169848121332946,
+    9110857118546866548,
+    100418585322354598,
 ];
 
 /// Eidos digest of the order-invariant PVM ACE circuit's instruction stream (raw canonical u64
@@ -38,16 +39,17 @@ pub const PVM_RELATION_DIGEST: [u64; 4] = [
 #[cfg(any(test, feature = "constants-tools"))]
 #[rustfmt::skip]
 pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [
-    6538378689345343479,
-    2699441165468814929,
-    5325642021112777038,
-    4153236842813463216,
+    2255028588524991477,
+    8088146176287763667,
+    1935595524963351362,
+    5560235558590875651,
 ];
 
 /// Commitment to the preprocessed (setup) trace tree under the Eidos config (raw canonical
 /// u64 limbs). A trusted verifier input, not proof data: an in-VM verifier cannot rebuild the
 /// bundle, so it observes this pinned value into the transcript.
 #[cfg(any(test, feature = "constants-tools"))]
+#[rustfmt::skip]
 pub const PVM_PREPROCESSED_COMMITMENT: [u64; 4] = [
     1070440981155119101,
     2022626773377316756,
@@ -58,7 +60,7 @@ pub const PVM_PREPROCESSED_COMMITMENT: [u64; 4] = [
 /// Encoded circuit shape: (READ variables, evaluation gates, stream length in felts). An in-VM
 /// verifier needs these as compile-time constants to size its reads and its ACE evaluation.
 #[cfg(feature = "constants-tools")]
-pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (2632, 13008, 14240);
+pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (2520, 13000, 14232);
 
 /// Computes the relation digest binding an ACE circuit commitment into the Fiat-Shamir transcript.
 #[cfg(any(test, feature = "constants-tools"))]

@@ -11,14 +11,6 @@ proc pipe_2
     end
 end
 
-proc pipe_4
-    repeat.4
-        adv_pipe
-        horner_eval_ext
-        compress
-    end
-end
-
 proc pipe_6
     repeat.6
         adv_pipe
@@ -67,16 +59,8 @@ proc pipe_16
     end
 end
 
-proc pipe_18
-    repeat.18
-        adv_pipe
-        horner_eval_ext
-        compress
-    end
-end
-
-proc pipe_26
-    repeat.26
+proc pipe_24
+    repeat.24
         adv_pipe
         horner_eval_ext
         compress
@@ -417,16 +401,14 @@ end
 
 pub proc stage_ood_scatter_table()
     procref.pipe_2 exec.layout::ood_scatter_table_ptr add.52 mem_storew_le dropw
-    procref.pipe_4 exec.layout::ood_scatter_table_ptr add.56 mem_storew_le dropw
-    procref.pipe_6 exec.layout::ood_scatter_table_ptr add.60 mem_storew_le dropw
-    procref.pipe_8 exec.layout::ood_scatter_table_ptr add.64 mem_storew_le dropw
-    procref.pipe_10 exec.layout::ood_scatter_table_ptr add.68 mem_storew_le dropw
-    procref.pipe_12 exec.layout::ood_scatter_table_ptr add.72 mem_storew_le dropw
-    procref.pipe_14 exec.layout::ood_scatter_table_ptr add.76 mem_storew_le dropw
-    procref.pipe_16 exec.layout::ood_scatter_table_ptr add.80 mem_storew_le dropw
-    procref.pipe_18 exec.layout::ood_scatter_table_ptr add.84 mem_storew_le dropw
-    procref.pipe_26 exec.layout::ood_scatter_table_ptr add.88 mem_storew_le dropw
-    procref.pipe_28 exec.layout::ood_scatter_table_ptr add.92 mem_storew_le dropw
+    procref.pipe_6 exec.layout::ood_scatter_table_ptr add.56 mem_storew_le dropw
+    procref.pipe_8 exec.layout::ood_scatter_table_ptr add.60 mem_storew_le dropw
+    procref.pipe_10 exec.layout::ood_scatter_table_ptr add.64 mem_storew_le dropw
+    procref.pipe_12 exec.layout::ood_scatter_table_ptr add.68 mem_storew_le dropw
+    procref.pipe_14 exec.layout::ood_scatter_table_ptr add.72 mem_storew_le dropw
+    procref.pipe_16 exec.layout::ood_scatter_table_ptr add.76 mem_storew_le dropw
+    procref.pipe_24 exec.layout::ood_scatter_table_ptr add.80 mem_storew_le dropw
+    procref.pipe_28 exec.layout::ood_scatter_table_ptr add.84 mem_storew_le dropw
     exec.layout::ood_scatter_table_ptr add.4
     exec.layout::main_ood_pipe_offsets_ptr
     exec.layout::main_ood_offsets_ptr
