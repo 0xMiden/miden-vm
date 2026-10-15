@@ -41,7 +41,7 @@ pub struct RunCmd {
 
     /// Maximum modelled peak memory for VM trace construction (512M, 32Gi)
     ///
-    /// Excludes fixed preprocessed setup and precompile proving.
+    /// Does not cover precompile proving or total process memory.
     #[arg(
         long = "max-prover-memory",
         default_value_t = DEFAULT_MAX_PROVER_MEMORY_BYTES,

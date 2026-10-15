@@ -7,8 +7,8 @@ use miden_assembly::{
 };
 use miden_mast_package::Package;
 use miden_vm::{
-    ExecutionClaim, KernelDescriptor, ProgramInfo, default_verification_precompile_limits,
-    internal::InputFile, serde::Deserializable,
+    ExecutionClaim, KernelDescriptor, PrecompileStatus, ProgramInfo,
+    default_verification_precompile_limits, internal::InputFile, serde::Deserializable,
 };
 
 use super::{
@@ -39,10 +39,11 @@ pub struct VerifyCmd {
     #[command(flatten)]
     precompile_limits: PrecompileArgs,
 
-    /// Require a complete STARK-backed proof rather than a natively validated deferred witness
+    /// Require a complete STARK-backed proof
     ///
-    /// By default, valid deferred proofs succeed with an explicit deferred status, VM-only
-    /// security level, and outstanding root. This option rejects that valid but incomplete result.
+    /// By default, accept valid deferred proofs after VM STARK verification and native witness
+    /// validation, reporting deferred status, VM-only security, and the outstanding root.
+    /// This option rejects deferred artifacts before verification, without claiming validity.
     #[arg(long = "require-complete")]
     require_complete: bool,
 }
@@ -80,6 +81,14 @@ impl VerifyCmd {
         let proof = ProofFile::read(&Some(self.proof_file.clone()), self.proof_file.as_ref())
             .map_err(Report::msg)?;
 
+        // This unauthenticated variant is sufficient for CLI policy rejection. Only the
+        // verifier below can establish proof validity, authenticate roots, and evaluate witnesses.
+        if self.require_complete && matches!(proof.precompile(), PrecompileStatus::Deferred(_)) {
+            return Err(Report::msg(
+                "--require-complete rejects deferred proofs; proof has not been verified",
+            ));
+        }
+
         let now = Instant::now();
 
         // Load kernel if provided, otherwise use default
@@ -112,11 +121,6 @@ impl VerifyCmd {
             println!("Precompile STARK: not supplied");
             println!("Outstanding precompile root: {root}");
             println!("Verification complete in {} ms", now.elapsed().as_millis());
-            if self.require_complete {
-                return Err(Report::msg(
-                    "Deferred proof is valid but --require-complete requires a precompile STARK",
-                ));
-            }
             return Ok(());
         }
         println!("Proof status: complete");

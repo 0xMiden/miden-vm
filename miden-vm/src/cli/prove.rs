@@ -4,7 +4,7 @@ use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor};
-use miden_vm::{HashFunction, PrecompileLimits, Prover, internal::InputFile};
+use miden_vm::{HashFunction, PrecompileLimits, PrecompileStatus, Prover, internal::InputFile};
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
@@ -35,11 +35,11 @@ pub struct ProveCmd {
     #[arg(short = 'm', long = "max-cycles", default_value_t = ExecutionOptions::MAX_CYCLES)]
     max_cycles: u32,
 
-    /// Maximum modelled peak memory for both sequential proving stages (512M, 32Gi)
+    /// Maximum modelled peak memory for each enabled proving stage (512M, 32Gi)
     ///
-    /// Sets the same budget for VM and precompile proving. When omitted, each stage retains
-    /// its library default. This is a modelled budget, not an allocation cap; VM fixed setup
-    /// and precompile preparation/import are excluded.
+    /// Sets the same budget for VM and precompile proving; the precompile stage runs only with
+    /// --complete. When omitted, each stage retains its library default. This is a modelled
+    /// budget, not a total allocation cap; precompile witness preparation/import are excluded.
     #[arg(
         long = "max-prover-memory",
         value_parser = parse_byte_size
@@ -48,6 +48,13 @@ pub struct ProveCmd {
 
     #[command(flatten)]
     precompile_limits: PrecompileArgs,
+
+    /// Generate a complete proof, including a STARK for any precompile work
+    ///
+    /// By default, prove only the VM STARK and carry a deferred precompile witness for later
+    /// proving. Without precompile work, the VM STARK alone is already complete.
+    #[arg(long = "complete")]
+    complete: bool,
 
     /// Number of outputs
     #[arg(short = 'n', long = "num-outputs", default_value = "16")]
@@ -191,12 +198,22 @@ impl ProveCmd {
                 .wrap_err("Failed to execute program")?,
         };
         let stack_outputs = *witness.claim().stack_outputs();
-        let proof = self
-            .prover(hash_fn, verification_limits)
-            .prove_full(witness)
-            .map_err(|err| Report::msg(format!("Failed to prove program: {err}")))?;
+        let prover = self.prover(hash_fn, verification_limits);
+        let proof = if self.complete {
+            prover.prove_full(witness)
+        } else {
+            prover.prove(witness)
+        }
+        .map_err(|err| Report::msg(format!("Failed to prove program: {err}")))?;
 
         println!("Program proved in {} ms", now.elapsed().as_millis());
+        if matches!(proof.precompile(), PrecompileStatus::Deferred(_)) {
+            println!("Proof status: deferred");
+            println!("Precompile STARK: not supplied");
+            println!("Outstanding precompile root: {}", proof.vm().precompile_root);
+        } else {
+            println!("Proof status: complete");
+        }
 
         // write proof to file
         ProofFile::write(proof, &self.proof_file, &self.program_file).map_err(Report::msg)?;
