@@ -68,6 +68,7 @@ mod config;
 pub mod debug;
 pub(crate) mod domain;
 pub mod lmcs;
+pub mod memory;
 mod order;
 pub mod pcs;
 mod preprocessed;

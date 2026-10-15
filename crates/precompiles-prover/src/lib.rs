@@ -95,17 +95,6 @@ pub fn prove_precompile_for_root_with_limits_and_budget(
     )
 }
 
-fn check_memory_budget(
-    estimated_bytes: Option<u64>,
-    budget_bytes: u64,
-) -> Result<(), PrecompileProvingError> {
-    let estimated_bytes = estimated_bytes.ok_or(PrecompileProvingError::MemoryEstimateOverflow)?;
-    if estimated_bytes > budget_bytes {
-        return Err(PrecompileProvingError::MemoryBudgetExceeded { estimated_bytes, budget_bytes });
-    }
-    Ok(())
-}
-
 /// Errors produced while importing and proving portable precompile claims.
 #[derive(Debug, thiserror::Error)]
 pub enum PrecompileProvingError {
