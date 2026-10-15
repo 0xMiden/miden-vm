@@ -8,6 +8,8 @@
 
 #### Fixes
 
+- Fixed `miden-format` widening signature items on every run when the signature contains a comment, and dropping comments inside procedure attribute arguments ([#4029](https://github.com/0xMiden/miden-vm/pull/4029)).
+
 ## v0.36.1 (2026-10-16)
 
 #### Features
