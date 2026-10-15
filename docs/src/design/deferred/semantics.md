@@ -128,8 +128,11 @@ last entry.
 
 In-memory construction and standalone decoding enforce canonical transport syntax and allocation
 bounds only; standalone decoding also rejects trailing bytes. They do not hash commitments or
-validate graph topology. Completed execution outputs carry this same portable representation and
-release the runtime state.
+validate graph topology. This changes the decoding contract: callers that previously treated
+successful decoding as graph validation must call `prepare`, bind its reconstructed root to the
+authenticated execution root, and evaluate or prove the prepared computation. Only
+`PreparedWitness` establishes graph integrity and admission. Completed execution outputs carry the
+portable representation and release the runtime state.
 
 ## Witness preparation and admission
 
@@ -178,8 +181,8 @@ workloads, with both little sharing and repeated/shared inputs. The defaults are
 evidence that 128 maximal inputs are practical.
 
 `MAX_DEFERRED_WIRE_ELEMENTS` remains a separate hard transport/allocation ceiling. The proving
-Session accepts only `PreparedWitness` values and never reapplies logical-work admission. Prover
-memory is independently bounded by the batch-wide peak-memory policy.
+Session accepts only `PreparedWitness` values and never reapplies logical-work admission. The
+batch-wide peak-memory policy bounds trace generation and STARK proving after Session construction.
 
 ## Proof obligations and composition
 
@@ -255,7 +258,9 @@ decoding their payloads. Previous encodings and conversion between formats are n
 Canonical binary decoders enforce fixed hard ceilings before allocating declared collections:
 `MAX_STARK_PROOF_BYTES` per inner STARK, `MAX_PRECOMPILE_ROOTS = 128` per ordered root list, and
 `MAX_DEFERRED_WIRE_ELEMENTS` for each portable witness. The same 128-root ceiling applies to proving
-requests and verification of in-memory proofs. Proofs with more than 128 roots are unsupported.
+requests and verification of in-memory proofs. This lowers the previous ceiling of 4,096 roots:
+existing format-2 proofs with 129–4,096 roots are now rejected, although the encoding version and
+valid byte layouts are unchanged.
 
 Logical element and operation limits apply independently to every witness, including repetitions.
 Computation sharing does not discount admission. A batch may exceed these totals collectively;
@@ -269,7 +274,10 @@ peak proving memory, including aggregation overhead. It checks this estimate bef
 chiplet traces or starting the STARK pipeline. `MemoryBudgetExceeded` and `MemoryEstimateOverflow`
 are outer capacity errors, not failures attributed to a witness. The caller can choose a smaller
 batch or larger memory budget. This check does not bound preparation or Session-building allocations.
-Backend trace-height/estimate overflow remains a capacity failure, separate from witness admission.
+A preparation/import capacity guard is separate follow-up work: it must account for retained graphs
+and lowering-dependent state before allocation. Default calibration alone does not supply this
+guard. Backend trace-height/estimate overflow remains a capacity failure, separate from witness
+admission.
 These are library safety and admission bounds, not whole-envelope, file, network, or ingestion policy.
 
 Generic serialization traits are representation formats. Generic Serde
