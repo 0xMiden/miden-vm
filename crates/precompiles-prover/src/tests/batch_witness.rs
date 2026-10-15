@@ -656,7 +656,8 @@ fn default_hash_limits_bound_individual_input_and_shared_class_totals() {
             };
             fixture.log_statement(claim).unwrap();
         }
-        let result = fixture.witness().prepare(
+        let witness = fixture.witness();
+        let result = witness.clone().prepare(
             Arc::new(miden_precompiles::registry()),
             &miden_precompiles::default_verification_precompile_limits(),
         );
@@ -667,14 +668,40 @@ fn default_hash_limits_bound_individual_input_and_shared_class_totals() {
                 assert_eq!(work.count(), count as u64);
                 assert_eq!(work.total_size(), (count * bytes) as u64);
             },
-            Some(expected) => assert!(
-                matches!(
-                    result,
-                    Err(PreparationError::Precompile(PrecompileError::Limit(actual)))
-                        if actual == expected
-                ),
-                "unexpected admission result for {count} hashes of {bytes} bytes",
-            ),
+            Some(expected) => {
+                assert!(
+                    matches!(
+                        result,
+                        Err(PreparationError::Precompile(PrecompileError::Limit(actual)))
+                            if actual == expected
+                    ),
+                    "unexpected admission result for {count} hashes of {bytes} bytes",
+                );
+                if matches!(expected, ItemSize { .. }) {
+                    // Raising only the item allowance admits this supported input, independently
+                    // for every repeated witness, while preserving the class total allowance.
+                    let limits = miden_precompiles::default_verification_precompile_limits()
+                        .with_class(
+                            HASH_WORK,
+                            WorkLimit {
+                                max_count: 256,
+                                max_total_size: 256 * 1024,
+                                max_size: bytes as u32,
+                            },
+                        );
+                    import_witnesses(vec![witness.clone(), witness], &limits).unwrap();
+                    let second = keccak(&mut fixture, &vec![1; bytes]);
+                    fixture.log_statement(second).unwrap();
+                    assert!(matches!(
+                        fixture.witness().prepare(Arc::new(miden_precompiles::registry()), &limits),
+                        Err(PreparationError::Precompile(PrecompileError::Limit(TotalSize {
+                            class: HASH_WORK,
+                            actual,
+                            max: 262_144,
+                        }))) if actual == 2 * bytes as u64
+                    ));
+                }
+            },
         }
     }
 }
