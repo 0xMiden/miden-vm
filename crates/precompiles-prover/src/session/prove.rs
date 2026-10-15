@@ -23,7 +23,7 @@ use miden_precompiles_air::{
     ChipletMultiAir, preprocessed,
     stark_config::{
         PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
-        observe_protocol_params, poseidon2_config, precompile_pcs_params, rpo_config, rpx_config,
+        observe_protocol_params, precompile_pcs_params,
     },
 };
 use serde::Serialize;
@@ -55,21 +55,6 @@ impl SessionTraces {
             HashFunction::Blake3_256 => {
                 let config = blake3_256_config(params, PRECOMPILE_RELATION_DIGEST);
                 let preprocessed = preprocessed::blake3();
-                self.prove_stark_with_config(&config, &preprocessed, hash_fn)
-            },
-            HashFunction::Rpo256 => {
-                let config = rpo_config(params, PRECOMPILE_RELATION_DIGEST);
-                let preprocessed = preprocessed::rpo();
-                self.prove_stark_with_config(&config, &preprocessed, hash_fn)
-            },
-            HashFunction::Rpx256 => {
-                let config = rpx_config(params, PRECOMPILE_RELATION_DIGEST);
-                let preprocessed = preprocessed::rpx();
-                self.prove_stark_with_config(&config, &preprocessed, hash_fn)
-            },
-            HashFunction::Poseidon2 => {
-                let config = poseidon2_config(params, PRECOMPILE_RELATION_DIGEST);
-                let preprocessed = preprocessed::poseidon2();
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Keccak => {

@@ -7,9 +7,6 @@
 //! # Organization
 //!
 //! The benchmarks are organized by hash algorithm:
-//! - RPO256
-//! - RPX256
-//! - Poseidon2
 //! - Eidos
 //! - Blake3 variants (256, 192)
 //! - Keccak256
@@ -26,9 +23,6 @@ use miden_crypto::hash::{
     blake::{Blake3_192, Blake3_256},
     eidos::Eidos,
     keccak::Keccak256,
-    poseidon2::Poseidon2,
-    rpo::Rpo256,
-    rpx::Rpx256,
 };
 
 // Import common utilities
@@ -37,69 +31,6 @@ use common::data::{generate_byte_array_random, generate_felt_array_sequential};
 
 // Import config constants
 use crate::common::config::HASH_ELEMENT_COUNTS;
-
-// === RPO256 Hash Benchmarks ===
-
-// 2-to-1 hash merge
-benchmark_hash_merge!(hash_rpo256_merge, "rpo256", |b: &mut criterion::Bencher| {
-    let input1 = Rpo256::hash(&generate_byte_array_random(32));
-    let input2 = Rpo256::hash(&generate_byte_array_random(32));
-    b.iter(|| Rpo256::merge(black_box(&[input1, input2])))
-});
-
-// Sequential hashing of Felt elements
-benchmark_hash_felt!(
-    hash_rpo256_sequential_felt,
-    "rpo256",
-    HASH_ELEMENT_COUNTS,
-    |b: &mut criterion::Bencher, count| {
-        let elements = generate_felt_array_sequential(count);
-        b.iter(|| Rpo256::hash_elements(black_box(&elements)))
-    },
-    |count| Some(criterion::Throughput::Elements(count as u64))
-);
-
-// === RPX256 Hash Benchmarks ===
-
-// 2-to-1 hash merge
-benchmark_hash_merge!(hash_rpx256_merge, "rpx256", |b: &mut criterion::Bencher| {
-    let input1 = Rpx256::hash(&generate_byte_array_random(32));
-    let input2 = Rpx256::hash(&generate_byte_array_random(32));
-    b.iter(|| Rpx256::merge(black_box(&[input1, input2])))
-});
-
-// Sequential hashing of Felt elements
-benchmark_hash_felt!(
-    hash_rpx256_sequential_felt,
-    "rpx256",
-    HASH_ELEMENT_COUNTS,
-    |b: &mut criterion::Bencher, count| {
-        let elements = generate_felt_array_sequential(count);
-        b.iter(|| Rpx256::hash_elements(black_box(&elements)))
-    },
-    |count| Some(criterion::Throughput::Elements(count as u64))
-);
-
-// === Poseidon2 Hash Benchmarks ===
-
-// 2-to-1 hash merge
-benchmark_hash_merge!(hash_poseidon2_merge, "poseidon2", |b: &mut criterion::Bencher| {
-    let input1 = Poseidon2::hash(&generate_byte_array_random(32));
-    let input2 = Poseidon2::hash(&generate_byte_array_random(32));
-    b.iter(|| Poseidon2::merge(black_box(&[input1, input2])))
-});
-
-// Sequential hashing of Felt elements
-benchmark_hash_felt!(
-    hash_poseidon2_sequential_felt,
-    "poseidon2",
-    HASH_ELEMENT_COUNTS,
-    |b: &mut criterion::Bencher, count| {
-        let elements = generate_felt_array_sequential(count);
-        b.iter(|| Poseidon2::hash_elements(black_box(&elements)))
-    },
-    |count| Some(criterion::Throughput::Elements(count as u64))
-);
 
 // === Eidos Hash Benchmarks ===
 
@@ -190,15 +121,6 @@ benchmark_hash_felt!(
 
 criterion_group!(
     hash_benchmark_group,
-    // RPO256 benchmarks
-    hash_rpo256_merge,
-    hash_rpo256_sequential_felt,
-    // RPX256 benchmarks
-    hash_rpx256_merge,
-    hash_rpx256_sequential_felt,
-    // Poseidon2 benchmarks
-    hash_poseidon2_merge,
-    hash_poseidon2_sequential_felt,
     // Eidos benchmarks
     hash_eidos_merge,
     hash_eidos_sequential_felt,

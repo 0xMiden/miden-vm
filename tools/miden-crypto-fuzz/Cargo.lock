@@ -167,12 +167,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "critical-section"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
-
-[[package]]
 name = "crossbeam-deque"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -580,7 +574,6 @@ name = "miden-crypto"
 version = "1.0.0"
 dependencies = [
  "blake3",
- "cc",
  "chacha20poly1305",
  "curve25519-dalek",
  "der",
@@ -594,11 +587,9 @@ dependencies = [
  "miden-serde-utils",
  "num",
  "num-complex",
- "once_cell",
  "p3-blake3",
  "p3-challenger",
  "p3-dft",
- "p3-goldilocks",
  "p3-keccak",
  "p3-matrix",
  "p3-maybe-rayon",
@@ -815,10 +806,6 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
-dependencies = [
- "critical-section",
- "portable-atomic",
-]
 
 [[package]]
 name = "p3-air"
@@ -1043,12 +1030,6 @@ dependencies = [
  "cpufeatures",
  "universal-hash",
 ]
-
-[[package]]
-name = "portable-atomic"
-version = "1.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d20d5497ef88037a52ff98267d066e7f11fcc5e99bbfbd58a42336193aacec3"
 
 [[package]]
 name = "ppv-lite86"
