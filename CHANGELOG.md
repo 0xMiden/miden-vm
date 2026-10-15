@@ -41,6 +41,8 @@
 - Fixed lifted STARK proving for quotient domains smaller than the SIMD packing width ([#3910](https://github.com/0xMiden/miden-vm/pull/3910)).
 - Restored the VM chiplets diagram showing the hash controller and the Eidos compression and byte-lookup AIRs ([#3977](https://github.com/0xMiden/miden-vm/pull/3977)).
 - `smt::get` returns the empty word for an absent key whose leaf holds a single pair for a different key, instead of failing an assertion ([#3979](https://github.com/0xMiden/miden-vm/pull/3979)).
+- [BREAKING] Closed a constraint gap in `MRUPDATE` by requiring the old and new Merkle paths to use the same sibling at each level. Existing VM proofs are incompatible with the updated verifier ([#4002](https://github.com/0xMiden/miden-vm/pull/4002)).
+- [BREAKING] Closed a constraint gap in loop control flow by requiring `REPEAT`, like `LOOP`, to enter the body before the loop's `END`. Existing VM proofs are incompatible with the updated verifier ([#4002](https://github.com/0xMiden/miden-vm/pull/4002)).
 
 ## v0.36.0 (Unreleased)
 
