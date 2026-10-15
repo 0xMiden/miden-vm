@@ -26,8 +26,16 @@
 //! `AB::ExprEF` exactly where an ext op consumes them. Since the builder bound
 //! does not name `EF`, only ext constants liftable from the base field can be
 //! emitted (enforced at generation time).
+//!
+//! [`emit_module`] retains the baseline schedule described above.
+//! [`emit_optimized_module`] additionally specializes single-use arithmetic
+//! regions, preserving global CSE at shared nodes and all assertion metadata.
 
 use std::fmt::Write as _;
+
+mod plan;
+
+use plan::{Coefficient, DotKind, Piece, Plan, Rewrite};
 
 use crate::ir::{CapturedConstraints, Class, Graph, Leaf, Node, NodeId, OpKind};
 
@@ -54,6 +62,23 @@ pub fn emit_module(header: &str, evals: &[AirEvaluator<'_>]) -> String {
     out.push_str(MODULE_IMPORTS);
     for eval in evals {
         emit_evaluator(eval, &mut out);
+    }
+    out
+}
+
+/// Emit typed arithmetic specializations without modifying the captured graph.
+///
+/// Unlike [`emit_module`], sums may be reassociated and single-use products
+/// fused or factored. Constraint order and classes are preserved. The baseline
+/// entry point remains available for structural compiler tests.
+pub fn emit_optimized_module(header: &str, evals: &[AirEvaluator<'_>]) -> String {
+    let mut out = String::from(header);
+    out.push_str(
+        &MODULE_IMPORTS
+            .replace("field::PrimeCharacteristicRing", "field::{Algebra, PrimeCharacteristicRing}"),
+    );
+    for eval in evals {
+        emit_evaluator_with_plan(eval, &mut out, true);
     }
     out
 }
@@ -141,6 +166,7 @@ fn operand(t: &Token) -> String {
 
 struct Emitter<'g> {
     graph: &'g Graph,
+    plan: Option<Plan<'g>>,
     /// Token per emitted node, memoized on first use.
     tokens: Vec<Option<Token>>,
     /// Emitted lines — node `let`s and constraint asserts, interleaved in
@@ -154,6 +180,7 @@ impl<'g> Emitter<'g> {
     fn new(graph: &'g Graph) -> Self {
         Self {
             graph,
+            plan: None,
             tokens: vec![None; graph.len()],
             lines: Vec::new(),
             hoisted: 0,
@@ -268,6 +295,10 @@ impl<'g> Emitter<'g> {
         x: NodeId,
         y: Option<NodeId>,
     ) -> Token {
+        if let Some(rewrite) = self.plan.as_ref().and_then(|p| p.rewrite(id)) {
+            let rhs = self.rewrite_rhs(class, rewrite);
+            return self.bind_op(id, class, rhs);
+        }
         let xt = self.token(x);
         let yt = y.map(|y| self.token(y));
         let rhs = match class {
@@ -302,6 +333,10 @@ impl<'g> Emitter<'g> {
                 },
             },
         };
+        self.bind_op(id, class, rhs)
+    }
+
+    fn bind_op(&mut self, id: NodeId, class: Class, rhs: String) -> Token {
         let prefix = match class {
             Class::Base => 'b',
             Class::Ext => 'e',
@@ -311,6 +346,99 @@ impl<'g> Emitter<'g> {
             class,
             repr: Repr::Expr,
             code: format!("{prefix}{}", id.index()),
+        }
+    }
+
+    fn expr(&mut self, id: NodeId, class: Class) -> String {
+        let token = self.token(id);
+        if class == Class::Ext && token.class == Class::Base {
+            lift_base_to_ext(&token)
+        } else {
+            as_expr(&token)
+        }
+    }
+
+    fn rewrite_rhs(&mut self, class: Class, rewrite: Rewrite) -> String {
+        let ty = match class {
+            Class::Base => "AB::Expr",
+            Class::Ext => "AB::ExprEF",
+        };
+        match rewrite {
+            Rewrite::Square(id) => format!("{}.square()", self.expr(id, class)),
+            Rewrite::Scalar { value, scalar, op, reversed } => {
+                let value = self.expr(value, Class::Base);
+                if op == OpKind::Mul {
+                    match scalar {
+                        2 => return format!("{value}.double()"),
+                        0x7fff_ffff_8000_0001 => return format!("{value}.halve()"),
+                        c if c.is_power_of_two() => {
+                            return format!("{value}.mul_2exp_u64({})", c.trailing_zeros());
+                        },
+                        _ => {},
+                    }
+                }
+                if reversed && op == OpKind::Sub {
+                    format!("-{value} + Felt::from_u64({scalar})")
+                } else {
+                    format!("{value} {} Felt::from_u64({scalar})", sym(op))
+                }
+            },
+            Rewrite::Factor { common, scalar, left, right } => {
+                if let Some(scalar) = scalar {
+                    let left = self.expr(left, class);
+                    let right = self.expr(right, class);
+                    return format!("({left} + {right}) * Felt::from_u64({scalar})");
+                }
+                let common = self.expr(common, class);
+                let left = self.expr(left, class);
+                let right = self.expr(right, class);
+                format!("{common} * ({left} + {right})")
+            },
+            Rewrite::Sum(pieces) => {
+                let values: Vec<_> = pieces
+                    .into_iter()
+                    .map(|piece| match piece {
+                        Piece::Node(id) => self.expr(id, class),
+                        Piece::Dot { kind, pairs } => {
+                            let n = pairs.len();
+                            let values: Vec<_> =
+                                pairs.iter().map(|&(id, _)| self.expr(id, class)).collect();
+                            let coefficients: Vec<_> = pairs
+                                .iter()
+                                .map(|&(_, coefficient)| match coefficient {
+                                    Coefficient::Scalar(c) => format!("Felt::from_u64({c})"),
+                                    Coefficient::One => "AB::Expr::ONE".to_string(),
+                                    Coefficient::Node(id) => self.expr(
+                                        id,
+                                        if kind == DotKind::Mixed { Class::Base } else { class },
+                                    ),
+                                })
+                                .collect();
+                            let method = match kind {
+                                DotKind::Same => format!("{ty}::dot_product::<{n}>"),
+                                DotKind::Scalar => {
+                                    format!("<{ty} as Algebra<Felt>>::mixed_dot_product::<{n}>")
+                                },
+                                DotKind::Mixed => {
+                                    format!("<{ty} as Algebra<AB::Expr>>::mixed_dot_product::<{n}>")
+                                },
+                            };
+                            format!(
+                                "{method}(&[{}], &[{}])",
+                                values.join(", "),
+                                coefficients.join(", ")
+                            )
+                        },
+                    })
+                    .collect();
+                match values.len() {
+                    1 => values[0].clone(),
+                    2 | 3 => {
+                        values.into_iter().map(|v| format!("({v})")).collect::<Vec<_>>().join(" + ")
+                    },
+                    n => format!("{ty}::sum_array::<{n}>(&[{}])", values.join(", ")),
+                }
+            },
         }
     }
 }
@@ -340,6 +468,10 @@ fn sym(op: OpKind) -> char {
 
 /// Append one `eval_{name}` function (preceded by a blank line) to `out`.
 fn emit_evaluator(eval: &AirEvaluator<'_>, out: &mut String) {
+    emit_evaluator_with_plan(eval, out, false);
+}
+
+fn emit_evaluator_with_plan(eval: &AirEvaluator<'_>, out: &mut String, optimized: bool) {
     // Order the constraint roots by global index; emission then walks them in
     // that order, so the asserts replay the hand-written eval's layout (and
     // alpha assignment) exactly.
@@ -354,6 +486,9 @@ fn emit_evaluator(eval: &AirEvaluator<'_>, out: &mut String) {
     }
 
     let mut e = Emitter::new(eval.graph);
+    if optimized {
+        e.plan = Some(Plan::new(eval.graph, cons));
+    }
     for entry in roots {
         let (root, is_ext) = entry.expect("every global constraint index must be assigned");
         let t = e.token(root);
@@ -371,12 +506,17 @@ fn emit_evaluator(eval: &AirEvaluator<'_>, out: &mut String) {
         e.lines.push(line);
     }
 
+    let schedule = if optimized {
+        "with single-use arithmetic specialized at its first use."
+    } else {
+        "with each node's `let` placed at its first use."
+    };
     writeln!(
         out,
         "\n/// Generated globally-CSE'd evaluator for `{}`.\n\
          ///\n\
          /// Emits constraints in the exact global order of the hand-written `eval`,\n\
-         /// with each node's `let` placed at its first use.\n\
+         /// {schedule}\n\
          #[inline(never)]\n\
          pub fn eval_{}<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {{",
         eval.air_label, eval.name,
@@ -615,5 +755,178 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
                 constraints: &cons,
             }],
         );
+    }
+    fn optimized(b: GraphBuilder, base: Vec<NodeId>, ext: Vec<NodeId>) -> String {
+        let graph = b.freeze();
+        let cons = constraints(
+            base.iter().enumerate().map(|(i, &r)| (r, i)).collect(),
+            ext.iter().enumerate().map(|(i, &r)| (r, base.len() + i)).collect(),
+        );
+        let out = emit_optimized_module(
+            "//! Test.\n",
+            &[AirEvaluator {
+                name: "optimized",
+                air_label: "TEST",
+                graph: &graph,
+                constraints: &cons,
+            }],
+        );
+        assert_eq!(
+            out,
+            emit_optimized_module(
+                "//! Test.\n",
+                &[AirEvaluator {
+                    name: "optimized",
+                    air_label: "TEST",
+                    graph: &graph,
+                    constraints: &cons,
+                }],
+            )
+        );
+        out
+    }
+
+    #[test]
+    fn optimized_square_and_scalar_scaling() {
+        let mut b = GraphBuilder::new();
+        let x = b.leaf(Leaf::Main { offset: 0, index: 0 });
+        let (sq, _) = b.op(Class::Base, OpKind::Mul, x, Some(x));
+        let two = b.leaf(Leaf::BaseConst(2));
+        let eight = b.leaf(Leaf::BaseConst(8));
+        let half = b.leaf(Leaf::BaseConst(0x7fff_ffff_8000_0001));
+        let (double, _) = b.op(Class::Base, OpKind::Mul, two, Some(x));
+        let (scale, _) = b.op(Class::Base, OpKind::Mul, x, Some(eight));
+        let (halve, _) = b.op(Class::Base, OpKind::Mul, half, Some(x));
+        let (sub, _) = b.op(Class::Base, OpKind::Sub, two, Some(x));
+        let out = optimized(b, vec![sq, double, scale, halve, sub], vec![]);
+        assert!(out.contains(".square()"), "{out}");
+        assert!(out.contains(".double()"));
+        assert!(out.contains(".mul_2exp_u64(3)"));
+        assert!(out.contains(".halve()"));
+        assert!(out.contains("-AB::Expr::from(h0) + Felt::from_u64(2)"), "{out}");
+    }
+
+    #[test]
+    fn optimized_sum_and_typed_dots() {
+        let mut b = GraphBuilder::new();
+        let xs: Vec<_> = (0..8).map(|index| b.leaf(Leaf::Main { offset: 0, index })).collect();
+        let mut sums = Vec::new();
+        for (left, right) in [(xs[0], xs[1]), (xs[2], xs[3]), (xs[4], xs[5])] {
+            sums.push(b.op(Class::Base, OpKind::Add, left, Some(right)).0);
+        }
+        let sum = b.op(Class::Base, OpKind::Add, sums[0], Some(sums[1])).0;
+        let p = b.op(Class::Base, OpKind::Mul, xs[0], Some(xs[1])).0;
+        let q = b.op(Class::Base, OpKind::Mul, xs[2], Some(xs[3])).0;
+        let dot = b.op(Class::Base, OpKind::Add, p, Some(q)).0;
+        let c = b.leaf(Leaf::BaseConst(7));
+        let weighted = b.op(Class::Base, OpKind::Mul, c, Some(xs[4])).0;
+        let lc = b.op(Class::Base, OpKind::Add, xs[5], Some(weighted)).0;
+        let e0 = b.leaf(Leaf::Challenge(0));
+        let e1 = b.leaf(Leaf::Challenge(1));
+        let ep = b.op(Class::Ext, OpKind::Mul, xs[6], Some(e0)).0;
+        let eq = b.op(Class::Ext, OpKind::Mul, e1, Some(xs[7])).0;
+        let mixed = b.op(Class::Ext, OpKind::Add, ep, Some(eq)).0;
+        let out = optimized(b, vec![sum, dot, lc], vec![mixed]);
+        assert!(out.contains("AB::Expr::sum_array::<4>"), "{out}");
+        assert!(out.contains("AB::Expr::dot_product::<2>"));
+        assert!(out.contains("<AB::Expr as Algebra<Felt>>::mixed_dot_product::<2>"));
+        assert!(out.contains("<AB::ExprEF as Algebra<AB::Expr>>::mixed_dot_product::<2>"));
+        assert!(!out.contains("Algebra<Felt>>::mixed_dot_product::<2>(&[Into::<AB::ExprEF>"));
+    }
+
+    #[test]
+    fn optimized_factoring_respects_edges_and_assertion_roots() {
+        let mut b = GraphBuilder::new();
+        let input = b.leaf(Leaf::Main { offset: 0, index: 0 });
+        let u = b.op(Class::Base, OpKind::Mul, input, Some(input)).0;
+        let a = b.leaf(Leaf::Main { offset: 0, index: 1 });
+        let c = b.leaf(Leaf::Main { offset: 0, index: 2 });
+        let p = b.op(Class::Base, OpKind::Mul, u, Some(a)).0;
+        let q = b.op(Class::Base, OpKind::Mul, c, Some(u)).0;
+        let factored = b.op(Class::Base, OpKind::Add, p, Some(q)).0;
+        let out = optimized(b, vec![factored], vec![]);
+        assert!(out.contains(" * ("), "{out}");
+        assert!(!out.contains("dot_product"));
+        assert_eq!(out.matches(".square()").count(), 1, "shared factor evaluated once");
+        assert!(!out.contains(&format!("let b{} =", p.index())));
+        assert!(!out.contains(&format!("let b{} =", q.index())));
+
+        let mut b = GraphBuilder::new();
+        let u = b.leaf(Leaf::Main { offset: 0, index: 0 });
+        let a = b.leaf(Leaf::Main { offset: 0, index: 1 });
+        let c = b.leaf(Leaf::Main { offset: 0, index: 2 });
+        let p = b.op(Class::Base, OpKind::Mul, u, Some(a)).0;
+        let q = b.op(Class::Base, OpKind::Mul, c, Some(u)).0;
+        let sum = b.op(Class::Base, OpKind::Add, p, Some(q)).0;
+        // A constraint root is a use too: p must be computed once and retained.
+        let out = optimized(b, vec![p, sum], vec![]);
+        assert!(out.contains(&format!("let b{} =", p.index())));
+        assert!(out.contains(&format!("b{}.dup() +", p.index())));
+        assert!(!out.contains("dot_product"));
+    }
+    #[test]
+    fn optimized_dots_recover_product_regions_after_a_prefix() {
+        let mut b = GraphBuilder::new();
+        let xs: Vec<_> = (0..5).map(|index| b.leaf(Leaf::Main { offset: 0, index })).collect();
+        let p = b.op(Class::Base, OpKind::Mul, xs[1], Some(xs[2])).0;
+        let q = b.op(Class::Base, OpKind::Mul, xs[3], Some(xs[4])).0;
+        let prefix = b.op(Class::Base, OpKind::Add, xs[0], Some(p)).0;
+        let sum = b.op(Class::Base, OpKind::Add, prefix, Some(q)).0;
+        let out = optimized(b, vec![sum], vec![]);
+        assert!(out.contains("AB::Expr::dot_product::<2>"), "{out}");
+        assert!(!out.contains(&format!("let b{} =", p.index())));
+        assert!(!out.contains(&format!("let b{} =", q.index())));
+    }
+
+    #[test]
+    fn optimized_extension_dots_keep_coefficient_types() {
+        let mut b = GraphBuilder::new();
+        let es: Vec<_> = (0..4).map(|i| b.leaf(Leaf::Challenge(i))).collect();
+        let p = b.op(Class::Ext, OpKind::Mul, es[0], Some(es[1])).0;
+        let q = b.op(Class::Ext, OpKind::Mul, es[2], Some(es[3])).0;
+        let sum = b.op(Class::Ext, OpKind::Add, p, Some(q)).0;
+        let base = b.leaf(Leaf::Main { offset: 0, index: 0 });
+        let lift = b.leaf(Leaf::ExtBase(base));
+        let weighted = b.op(Class::Ext, OpKind::Mul, lift, Some(es[0])).0;
+        let mixed = b.op(Class::Ext, OpKind::Add, es[1], Some(weighted)).0;
+        let out = optimized(b, vec![], vec![sum, mixed]);
+        assert!(out.contains("AB::ExprEF::dot_product::<2>"), "{out}");
+        assert!(out.contains("<AB::ExprEF as Algebra<AB::Expr>>::mixed_dot_product::<2>"));
+        assert!(out.contains("AB::Expr::ONE"));
+        assert!(!out.contains("Algebra<Felt>"));
+    }
+
+    #[test]
+    fn optimized_sums_bound_arrays_and_keep_shared_prefixes() {
+        let mut b = GraphBuilder::new();
+        let xs: Vec<_> = (0..40).map(|index| b.leaf(Leaf::Main { offset: 0, index })).collect();
+        let mut sum = xs[0];
+        let mut shared = xs[0];
+        for (i, &x) in xs.iter().enumerate().skip(1) {
+            sum = b.op(Class::Base, OpKind::Add, sum, Some(x)).0;
+            if i == 7 {
+                shared = sum;
+            }
+        }
+        let out = optimized(b, vec![sum, shared, shared], vec![]);
+        assert!(out.contains(&format!("let b{} =", shared.index())));
+        assert_eq!(out.matches(&format!("assert_zero(b{}.dup())", shared.index())).count(), 2);
+        for n in 17..=40 {
+            assert!(!out.contains(&format!("sum_array::<{n}>")), "{out}");
+        }
+    }
+
+    #[test]
+    fn optimized_factored_literal_coefficients_stay_scalar() {
+        let mut b = GraphBuilder::new();
+        let c = b.leaf(Leaf::BaseConst(7));
+        let a = b.leaf(Leaf::Main { offset: 0, index: 0 });
+        let z = b.leaf(Leaf::Main { offset: 0, index: 1 });
+        let p = b.op(Class::Base, OpKind::Mul, c, Some(a)).0;
+        let q = b.op(Class::Base, OpKind::Mul, c, Some(z)).0;
+        let sum = b.op(Class::Base, OpKind::Add, p, Some(q)).0;
+        let out = optimized(b, vec![sum], vec![]);
+        assert!(out.contains(") * Felt::from_u64(7)"), "{out}");
+        assert!(!out.contains("AB::Expr::from(Felt::from_u64(7))"));
     }
 }

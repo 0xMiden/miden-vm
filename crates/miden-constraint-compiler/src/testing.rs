@@ -6,11 +6,26 @@ use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Algebra, BasedVectorSpace, PrimeCharacteristicRing};
 use miden_lifted_stark::air::{
     AirBuilder, ExtensionBuilder, LiftedAir, PermutationAirBuilder, RowWindow,
-    symbolic::AirLayout,
+    symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpr},
 };
 use p3_field::{PackedField, PackedValue};
 
 use crate::ir::{Class, Graph, Leaf, Node, OpKind};
+
+/// Degree of every assertion in each class, preserving its local order. This
+/// uses the builder's symbolic degree rules independently of the optimizer IR.
+pub fn constraint_degrees<A: LiftedAir<Felt, QuadFelt>>(air: &A) -> [Vec<usize>; 2] {
+    let mut builder = SymbolicAirBuilder::<Felt>::new(air.air_layout());
+    air.eval(&mut builder);
+    [
+        builder.base_constraints().iter().map(SymbolicExpr::degree_multiple).collect(),
+        builder
+            .extension_constraints()
+            .iter()
+            .map(SymbolicExpr::degree_multiple)
+            .collect(),
+    ]
+}
 
 /// Canonical id per node: a second hash-cons pass with `Add`/`Mul` children
 /// sorted, so two nodes get equal canonical ids iff their subgraphs are
