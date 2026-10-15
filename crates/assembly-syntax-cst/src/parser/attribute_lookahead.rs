@@ -7,7 +7,7 @@ use super::{SyntaxKind, Token, is_name_like};
 /// For each token position, it caches where to continue after skipping trivia and any consecutive
 /// attributes starting there. Shared group endpoints and cached failures avoid rescanning long,
 /// nested, or malformed attribute sequences. The resulting token is only a candidate. Parser
-/// recovery checks whether it actually starts a declaration.
+/// recovery classifies candidates on demand and caches the results independently of attributes.
 pub(super) struct AttributeLookahead {
     /// Index of the next candidate token after skipping trivia and consecutive attributes.
     ///
@@ -15,9 +15,20 @@ pub(super) struct AttributeLookahead {
     /// malformed or no token remains. The extra entry at `tokens.len()` represents EOF and is
     /// `None`, so a lookup just after a group ending at the final token safely finds no candidate.
     candidates: Vec<Option<usize>>,
+    /// Context-independent classifications so shared candidates do not rescan following trivia.
+    classifications: Vec<Option<DeclarationCandidate>>,
     /// Token visits during index construction, retained to test linear work without timing checks.
+    // TODO remove this and related assertions
     #[cfg(test)]
     token_visits: usize,
+}
+
+/// Whether a candidate starts a declaration, before applying attribute restrictions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DeclarationCandidate {
+    NotDeclaration,
+    Procedure,
+    OtherDeclaration,
 }
 
 impl AttributeLookahead {
@@ -28,6 +39,7 @@ impl AttributeLookahead {
     pub(super) fn new(tokens: &[Token<'_>]) -> Self {
         let mut lookahead = Self {
             candidates: vec![None; tokens.len() + 1],
+            classifications: vec![None; tokens.len()],
             #[cfg(test)]
             token_visits: 0,
         };
@@ -57,6 +69,22 @@ impl AttributeLookahead {
     /// Panics if `index` exceeds the length of the token sequence used to build this index.
     pub(super) fn declaration_after(&self, index: usize) -> Option<usize> {
         self.candidates[index]
+    }
+
+    /// Classifies a candidate once, including negative results, then reuses its classification.
+    ///
+    /// `classify` must not depend on whether attributes precede the candidate. This allows recovery
+    /// to reuse the result when normal token consumption reaches the candidate itself.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is not a token index in the sequence used to build this index.
+    pub(super) fn classify_candidate(
+        &mut self,
+        index: usize,
+        classify: impl FnOnce() -> DeclarationCandidate,
+    ) -> DeclarationCandidate {
+        *self.classifications[index].get_or_insert_with(classify)
     }
 
     fn index_argument_groups(&mut self, tokens: &[Token<'_>]) -> Vec<Option<usize>> {
