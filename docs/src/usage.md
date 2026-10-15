@@ -153,28 +153,41 @@ ceilings, or combine different work classes into an aggregate budget.
 
 ### Prover memory budgets
 
-For `prove`, `--max-prover-memory SIZE` sets the modelled peak-memory budget for both sequential
-VM and precompile proving stages. When omitted, each stage uses its own library default
-(`Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES` and
+For `prove`, `--max-prover-memory SIZE` sets the modelled peak-memory budget for each enabled
+proving stage. Default proving runs only the VM stage; `--complete` also proves precompile work.
+The explicit option sets the same budget for both stages. When omitted, each stage uses its own
+library default (`Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES` and
 `Prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES`). The option uses the byte suffixes
 described above. Independent stage budgets remain configurable through the Rust interfaces.
 
-These are separate modelled budgets rather than a combined allocation cap. VM fixed preprocessed
-setup and precompile witness preparation/Session import are outside the respective models. Logical
-work limits remain independent. For `run`, `--max-prover-memory` controls VM trace construction;
-the command does not generate a precompile STARK.
+These are separate modelled proving-stage budgets rather than a combined allocation cap or a
+bound on total process memory. Precompile witness preparation/Session import and concurrent
+proofs are outside the proving budgets. Logical work limits remain independent. For `run`,
+`--max-prover-memory` controls VM trace construction; the command does not generate a precompile
+STARK.
 
-### Complete and deferred verification
+### Complete and deferred proofs
 
-`verify` accepts complete and valid deferred proofs by default and exits successfully for either.
-A deferred proof authenticates the VM STARK and carries a precompile witness. The verifier checks
-the witness limits, binds its reconstructed root to the VM-authenticated root, and evaluates it
-natively. Its output states `Proof status: deferred`, reports only the VM STARK security level,
-and identifies the natively validated witness, missing precompile STARK, and outstanding root.
-This does not establish a cryptographically complete precompile proof.
+`prove` follows the library's `Prover::prove` workflow by default: it generates the VM STARK and
+carries a deferred precompile witness for later proving. Use `prove --complete` to follow
+`Prover::prove_full` and also generate a precompile STARK. Without precompile work, the VM STARK
+alone is already complete in either mode. Deferral applies to the precompile STARK; normal
+execution still checks precompile predicates natively. Proving reports the resulting proof status
+and, for a deferred proof, its missing precompile STARK and outstanding root.
 
-Use `verify --require-complete` when a fully STARK-backed proof is required. A valid deferred
-result then exits with status 1; complete results exit with status 0. Complete results print
+`verify` accepts valid complete and deferred proofs by default. For a deferred proof, the
+verifier authenticates the VM STARK, checks the witness limits, binds its reconstructed root to
+the VM-authenticated root, and evaluates it natively. Only after these checks succeed does it
+exit with status 0 and print `Proof status: deferred`, the VM STARK security level, the natively
+validated witness, missing precompile STARK, and outstanding root. Native validation does not
+establish a cryptographically complete precompile proof.
+
+Use `verify --require-complete` to require a fully STARK-backed proof. A serialized deferred
+artifact then exits with status 1 before STARK verification or native witness evaluation. This
+is a policy rejection based on unauthenticated proof metadata; it does not establish whether the
+proof is valid.
+
+Complete results exit with status 0 with or without `--require-complete`. They print
 `Proof status: complete` and the minimum security level of the verified STARKs (the VM level
 alone if there is no precompile work). Invalid STARKs, malformed or false witnesses, root
 mismatches, and admission failures always fail verification.

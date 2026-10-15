@@ -92,11 +92,11 @@ mod tests {
         );
 
         for (args, size, total) in [
-            (vec!["--max-precompile-msm-terms", "32"], Some(32), None),
+            (vec!["--max-precompile-msm-terms", "16"], Some(16), None),
             (vec!["--max-precompile-total-msm-terms", "64"], None, Some(64)),
             (
-                vec!["--max-precompile-msm-terms", "32", "--max-precompile-total-msm-terms", "64"],
-                Some(32),
+                vec!["--max-precompile-msm-terms", "16", "--max-precompile-total-msm-terms", "64"],
+                Some(16),
                 Some(64),
             ),
         ] {
