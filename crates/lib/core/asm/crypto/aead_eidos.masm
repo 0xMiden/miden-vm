@@ -25,15 +25,15 @@ use miden::core::crypto::hashes::eidos
 # Eidos::init_chaining_word(AEAD_CTR_KEY, 0), where AEAD_CTR_KEY = 0x00000602.
 # Fixed-arity derivations use registered domain tags for separation; variable-length Eidos hashes
 # also bind their length in the initial chaining value.
-const AEAD_CTR_INIT_CV_0 = 4280581857092830722
-const AEAD_CTR_INIT_CV_1 = 2688637132020383744
-const AEAD_CTR_INIT_CV_2 = 1947077364412317696
+const AEAD_CTR_INIT_CV_0 = 13503953893947606530
+const AEAD_CTR_INIT_CV_1 = 11912009168875159552
+const AEAD_CTR_INIT_CV_2 = 11170449401267093504
 const AEAD_CTR_INIT_CV_3 = 6620516959492505600
 
 # Eidos::init_chaining_word(AEAD_MAC_KEY, 0), where AEAD_MAC_KEY = 0x00000702.
-const AEAD_MAC_INIT_CV_0 = 4280581857092830978
-const AEAD_MAC_INIT_CV_1 = 2688637132020383744
-const AEAD_MAC_INIT_CV_2 = 1947077364412317696
+const AEAD_MAC_INIT_CV_0 = 13503953893947606786
+const AEAD_MAC_INIT_CV_1 = 11912009168875159552
+const AEAD_MAC_INIT_CV_2 = 11170449401267093504
 const AEAD_MAC_INIT_CV_3 = 6620516959492505600
 
 # The limit includes the nonce, associated data, ciphertext, two lengths, and final zero padding.
