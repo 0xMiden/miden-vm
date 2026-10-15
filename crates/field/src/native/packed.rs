@@ -28,7 +28,7 @@ use rand::{
     distr::{Distribution, StandardUniform},
 };
 
-use super::{Felt, felts_as_goldilocks_array};
+use super::{Felt, felts_as_goldilocks_array, felts_as_goldilocks_slice};
 
 #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(target_feature = "avx512f")))]
 type PackedGoldilocks = p3_goldilocks::PackedGoldilocksAVX2;
@@ -93,6 +93,14 @@ fn packed_as_goldilocks_array<const N: usize>(a: &[PackedFelt; N]) -> &[PackedGo
     // SAFETY: `PackedFelt` and `PackedGoldilocks` have identical layouts (see
     // `PackedFelt::to_inner`), so `[PackedFelt; N]` matches `[PackedGoldilocks; N]`.
     unsafe { &*(a as *const [PackedFelt; N] as *const [PackedGoldilocks; N]) }
+}
+
+/// Reinterprets a `PackedFelt` slice as `PackedGoldilocks`.
+#[inline]
+fn packed_as_goldilocks_slice(s: &[PackedFelt]) -> &[PackedGoldilocks] {
+    // SAFETY: `PackedFelt` and `PackedGoldilocks` have identical layouts (see
+    // `PackedFelt::to_inner`), so the slice element layout matches.
+    unsafe { core::slice::from_raw_parts(s.as_ptr().cast::<PackedGoldilocks>(), s.len()) }
 }
 
 impl From<Felt> for PackedFelt {
@@ -188,6 +196,11 @@ impl PrimeCharacteristicRing for PackedFelt {
     }
 
     #[inline]
+    fn sum_array<const N: usize>(input: &[Self]) -> Self {
+        Self::from_inner(PackedGoldilocks::sum_array::<N>(packed_as_goldilocks_slice(input)))
+    }
+
+    #[inline]
     fn dot_product<const N: usize>(lhs: &[Self; N], rhs: &[Self; N]) -> Self {
         Self::from_inner(PackedGoldilocks::dot_product(
             packed_as_goldilocks_array(lhs),
@@ -223,6 +236,20 @@ impl_sum_prod_base_field!(PackedFelt, Felt);
 
 impl Algebra<Felt> for PackedFelt {
     const BATCHED_LC_CHUNK: usize = <PackedGoldilocks as Algebra<Goldilocks>>::BATCHED_LC_CHUNK;
+
+    #[inline]
+    fn quadratic_extension_square(a: &[Self; 2], w: Felt) -> [Self; 2] {
+        PackedGoldilocks::quadratic_extension_square(packed_as_goldilocks_array(a), w.0)
+            .map(Self::from_inner)
+    }
+
+    #[inline]
+    fn batched_linear_combination(values: &[Self], coeffs: &[Felt]) -> Self {
+        Self::from_inner(PackedGoldilocks::batched_linear_combination(
+            packed_as_goldilocks_slice(values),
+            felts_as_goldilocks_slice(coeffs),
+        ))
+    }
 
     #[inline]
     fn mixed_dot_product<const N: usize>(a: &[Self; N], f: &[Felt; N]) -> Self {
@@ -300,6 +327,97 @@ mod tests {
             let rhs_lane: [Felt; 4] = core::array::from_fn(|i| rhs[i].0[lane]);
             assert_eq!(dot.0[lane], Felt::dot_product(&lhs_lane, &rhs_lane));
             assert_eq!(mixed.0[lane], Felt::dot_product(&lhs_lane, &scalars));
+        }
+    }
+
+    /// Exercise raw representatives, including carries and noncanonical zero/coefficients.
+    fn raw_packed(rng: &mut SmallRng, i: usize) -> PackedFelt {
+        const EDGES: [u64; 6] = [0, 1, Felt::ORDER - 1, Felt::ORDER, Felt::ORDER + 7, u64::MAX];
+        PackedFelt::from_fn(|lane| {
+            Felt::new_unchecked(if i < EDGES.len() {
+                EDGES[(i + lane) % EDGES.len()]
+            } else {
+                rng.random()
+            })
+        })
+    }
+
+    /// Slice casts must preserve every lane and the final partial reduction chunk.
+    #[test]
+    fn packed_sum_array_matches_scalar_lanes() {
+        fn check<const N: usize>() {
+            let mut rng = SmallRng::seed_from_u64(11);
+            let values: [PackedFelt; N] = core::array::from_fn(|i| raw_packed(&mut rng, i));
+            let sum = PackedFelt::sum_array::<N>(&values);
+            for lane in 0..WIDTH {
+                assert_eq!(sum.0[lane], values.iter().map(|v| v.0[lane]).sum::<Felt>());
+            }
+        }
+
+        check::<0>();
+        check::<1>();
+        check::<2>();
+        check::<3>();
+        check::<4>();
+        check::<7>();
+        check::<8>();
+        check::<9>();
+        check::<63>();
+        check::<64>();
+        check::<65>();
+        check::<127>();
+        check::<128>();
+        check::<129>();
+    }
+
+    #[test]
+    #[should_panic]
+    fn packed_sum_array_rejects_mismatched_length() {
+        let _ = PackedFelt::sum_array::<0>(&[PackedFelt::ONE]);
+    }
+
+    /// Coefficient conversion and runtime tails must not truncate or reorder a linear combination.
+    #[test]
+    fn packed_batched_linear_combination_matches_scalar_lanes() {
+        let mut rng = SmallRng::seed_from_u64(12);
+        let values: [PackedFelt; 130] = core::array::from_fn(|i| raw_packed(&mut rng, i));
+        let coeffs: [Felt; 130] = core::array::from_fn(|i| raw_packed(&mut rng, i).0[0]);
+        for len in 0..=values.len() {
+            let result = PackedFelt::batched_linear_combination(&values[..len], &coeffs[..len]);
+            for lane in 0..WIDTH {
+                let expected: Felt = (0..len).map(|i| values[i].0[lane] * coeffs[i]).sum();
+                assert_eq!(result.0[lane], expected, "length {len}, lane {lane}");
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn packed_batched_linear_combination_rejects_short_coefficients() {
+        let _ = PackedFelt::batched_linear_combination(&[PackedFelt::ONE; 4], &[Felt::ONE; 3]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn packed_batched_linear_combination_rejects_long_coefficients() {
+        let _ = PackedFelt::batched_linear_combination(&[], &[Felt::ONE]);
+    }
+
+    /// The quadratic hook accepts arbitrary w, including noncanonical representations of 7.
+    #[test]
+    fn packed_quadratic_extension_square_matches_scalar_lanes() {
+        let mut rng = SmallRng::seed_from_u64(13);
+        for i in 0..50 {
+            let a = [raw_packed(&mut rng, i), raw_packed(&mut rng, i + 1)];
+            for w in [0, 1, 7, Felt::ORDER + 7, u64::MAX, rng.random()] {
+                let w = Felt::new_unchecked(w);
+                let result = PackedFelt::quadratic_extension_square(&a, w);
+                for lane in 0..WIDTH {
+                    let [a0, a1] = a.map(|v| v.0[lane]);
+                    assert_eq!(result[0].0[lane], a0 * a0 + w * a1 * a1);
+                    assert_eq!(result[1].0[lane], (a0 * a1).double());
+                }
+            }
         }
     }
 
