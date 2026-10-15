@@ -7,21 +7,23 @@ use alloc::{
 };
 
 use miden_core::{
+    Felt,
     deferred::{
         DEFERRED_AND_FRAME, DataChunk, Digest, MAX_PRECOMPILE_ROOTS, PrecompileLimits,
         PrecompileWitness, PreparationError, PreparedNode, PreparedWitness, TRUE_DIGEST,
         fold_deferred_root,
     },
+    field::QuadFelt,
     program::domain::DeferredChunksDomain,
 };
-use miden_crypto::hash::eidos::EidosDomain;
+use miden_crypto::{hash::eidos::EidosDomain, stark::memory};
 use miden_precompiles::{
     CurveBinaryOp, CurveId, CurveOp, Keccak256Precompile, Sha256Precompile, Sha512Precompile,
     UintBinaryOp, UintDomain, UintOp, UintPrecompile, chunks_to_bytes_exact, n_chunks,
 };
 use miden_precompiles_air::{
+    ChipletMultiAir,
     hash::keccak::node::{MAX_SPONGE_PERMS, SPONGE_RATE_BYTES},
-    memory,
     stark_config::precompile_pcs_params,
 };
 
@@ -94,29 +96,19 @@ pub(crate) struct WitnessSession {
     roots: Vec<Digest>,
 }
 
+#[cfg(test)]
 impl WitnessSession {
     /// Test-only view of the per-witness roots the importer recorded, in
     /// input order — lets properties bind the importer's root bookkeeping
     /// to the witnesses' own commitments.
-    #[cfg(test)]
     pub(crate) fn roots(&self) -> &[Digest] {
         &self.roots
     }
 
-    /// Estimates the completed Session's peak proving memory without applying a budget.
-    fn estimated_prover_memory(&self, hash_fn: crate::HashFunction) -> Option<u64> {
-        let params = precompile_pcs_params();
-        self.session
-            .trace_heights()
-            .and_then(|heights| memory::prover_peak_bytes(&heights, &params, hash_fn))
-    }
-
-    #[cfg(test)]
     pub(crate) fn finish(self) -> crate::session::SessionTraces {
         self.session.finish(self.root)
     }
 
-    #[cfg(test)]
     pub(crate) fn msm_expr_count(&self) -> usize {
         self.session.msm_expr_count()
     }
@@ -177,7 +169,22 @@ pub(crate) fn prove(
         let _span = tracing::info_span!("build_session").entered();
         import_witnesses_with_roots(witnesses, verification_limits, expected_roots)?
     };
-    crate::check_memory_budget(imported.estimated_prover_memory(hash_fn), max_prover_memory_bytes)?;
+    let heights = imported
+        .session
+        .trace_heights()
+        .ok_or(PrecompileProvingError::MemoryEstimateOverflow)?;
+    let estimated_bytes = memory::prover_peak_bytes::<Felt, QuadFelt, _>(
+        &ChipletMultiAir::new(),
+        &heights,
+        &precompile_pcs_params(),
+    )
+    .ok_or(PrecompileProvingError::MemoryEstimateOverflow)?;
+    if estimated_bytes > max_prover_memory_bytes {
+        return Err(PrecompileProvingError::MemoryBudgetExceeded {
+            estimated_bytes,
+            budget_bytes: max_prover_memory_bytes,
+        });
+    }
 
     let traces = {
         let _span = tracing::info_span!("build_trace").entered();

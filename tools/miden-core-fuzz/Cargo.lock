@@ -1072,6 +1072,7 @@ dependencies = [
  "itertools",
  "miden-air",
  "miden-core",
+ "miden-crypto",
  "miden-debug-types",
  "miden-mast-package",
  "miden-precompiles",

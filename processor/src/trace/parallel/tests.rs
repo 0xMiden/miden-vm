@@ -1177,7 +1177,10 @@ fn test_build_trace_with_budget_corner_cases(
     let measured = build_trace(build_witness()).expect("default budget must succeed");
     let summary = measured.trace_len_summary();
     let pcs_params = config::pcs_params();
-    let exact_peak = summary.prover_memory_bytes(&pcs_params).expect("modelled peak fits in u64");
+    let heights = summary.padded_heights().expect("build_trace records padded heights");
+    let exact_peak =
+        memory::prover_peak_bytes::<Felt, QuadFelt, _>(&MidenMultiAir::new(), heights, &pcs_params)
+            .expect("modelled peak fits in u64");
     let budget = exact_peak.checked_add_signed(budget_offset_from_exact_peak).unwrap();
 
     let result = build_trace_with_budget(build_witness(), budget);
@@ -1230,7 +1233,10 @@ fn test_build_trace_with_budget_accepts_small_program_at_default_fragment_size()
     let measured = build_trace(build_witness()).expect("default budget must succeed");
     let summary = measured.trace_len_summary();
     let pcs_params = config::pcs_params();
-    let exact_peak = summary.prover_memory_bytes(&pcs_params).expect("modelled peak fits in u64");
+    let heights = summary.padded_heights().expect("build_trace records padded heights");
+    let exact_peak =
+        memory::prover_peak_bytes::<Felt, QuadFelt, _>(&MidenMultiAir::new(), heights, &pcs_params)
+            .expect("modelled peak fits in u64");
 
     // A budget well above the exact peak, but that the buggy tier-1 cap (`max_any_height_for_
     // budget`, which divides the budget by the full proving pipeline's per-row cost) still shrinks
@@ -1325,7 +1331,12 @@ fn test_build_trace_returns_err_when_eidos_compression_trace_exceeds_budget() {
             && eidos_compression_height > heights[MidenAir::And8Lookup.instance_index()],
         "test setup must make the EidosCompression AIR the dominant height: {heights:?}"
     );
-    let exact_peak = summary.prover_memory_bytes(&pcs_params).expect("modelled peak fits in u64");
+    let exact_peak = memory::prover_peak_bytes::<Felt, QuadFelt, _>(
+        &MidenMultiAir::new(),
+        &heights,
+        &pcs_params,
+    )
+    .expect("modelled peak fits in u64");
 
     let mut vm_witness = build_witness(&program, stack_inputs);
     inject_extra_compressions(&mut vm_witness);

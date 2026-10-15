@@ -2,7 +2,7 @@
 use alloc::vec::Vec;
 
 use miden_air::{
-    MIDEN_AIR_COUNT, PcsParams, memory,
+    MIDEN_AIR_COUNT,
     trace::{MIN_TRACE_LEN, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},
 };
 
@@ -293,12 +293,6 @@ impl TraceLenSummary {
         self.padded_heights.as_ref()
     }
 
-    /// Returns the modelled peak prover memory, in bytes, for the padded per-AIR heights, if
-    /// known. See [`miden_air::memory::prover_peak_bytes`] for what this does and does not cover.
-    pub fn prover_memory_bytes(&self, params: &PcsParams) -> Option<u64> {
-        memory::prover_peak_bytes(self.padded_heights()?, params)
-    }
-
     /// Returns the percent (0 - 100) of rows added by padding.
     pub fn padding_percentage(&self) -> usize {
         (self.padded_trace_len() - self.trace_len()) * 100 / self.padded_trace_len()
@@ -336,12 +330,6 @@ mod tests {
         assert_eq!(summary.byte_pair_lookup_rows(), 1 << 16);
         assert_eq!(summary.padded_heights(), Some(&heights));
         assert_eq!(summary.padded_trace_len(), 1 << 16);
-
-        let params = miden_air::config::pcs_params();
-        assert_eq!(
-            summary.prover_memory_bytes(&params),
-            memory::prover_peak_bytes(&heights, &params)
-        );
     }
 }
 
