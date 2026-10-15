@@ -1,5 +1,4 @@
 use alloc::{borrow::ToOwned, string::String, sync::Arc, vec::Vec};
-use core::cell::OnceCell;
 
 use miden_debug_types::{SourceFile, SourceId, SourceLanguage, SourceSpan, Uri};
 use rowan::{GreenNodeBuilder, NodeOrToken, TextRange};
@@ -14,7 +13,7 @@ use crate::{
 
 mod attribute_lookahead;
 
-use self::attribute_lookahead::AttributeLookahead;
+use self::attribute_lookahead::{AttributeLookahead, DeclarationCandidate};
 
 /// The result of parsing a MASM source file into a lossless CST.
 ///
@@ -137,7 +136,7 @@ pub fn parse_inline_masm_text(input: &str, bounds: Option<core::ops::Range<usize
 
 struct Parser<'input> {
     tokens: Vec<Token<'input>>,
-    attribute_lookahead: OnceCell<AttributeLookahead>,
+    attribute_lookahead: Option<AttributeLookahead>,
     pos: usize,
     builder: GreenNodeBuilder<'static>,
     diagnostics: Vec<Diagnostic>,
@@ -241,7 +240,7 @@ impl<'input> Parser<'input> {
         let eof_span = eof_anchor_span(source, None);
         Self {
             tokens: tokenize(source),
-            attribute_lookahead: OnceCell::new(),
+            attribute_lookahead: None,
             pos: 0,
             builder: GreenNodeBuilder::new(),
             diagnostics: Vec::new(),
@@ -255,7 +254,7 @@ impl<'input> Parser<'input> {
         let eof_span = eof_anchor_span(source, Some(bounds.into_slice_index()));
         Self {
             tokens: tokenize(source),
-            attribute_lookahead: OnceCell::new(),
+            attribute_lookahead: None,
             pos: 0,
             builder: GreenNodeBuilder::new(),
             diagnostics: Vec::new(),
@@ -1468,14 +1467,15 @@ impl<'input> Parser<'input> {
 
     /// Peeks past attributes for recovery, returning the candidate token's index and whether
     /// attributes were present.
-    fn peek_declaration_after_attributes(&self) -> Option<(usize, bool)> {
+    fn peek_declaration_after_attributes(&mut self) -> Option<(usize, bool)> {
         let index = self.next_relevant_block_token(self.pos)?;
         if self.tokens[index].kind() != SyntaxKind::At {
             return Some((index, false));
         }
 
-        let lookahead =
-            self.attribute_lookahead.get_or_init(|| AttributeLookahead::new(&self.tokens));
+        let lookahead = self
+            .attribute_lookahead
+            .get_or_insert_with(|| AttributeLookahead::new(&self.tokens));
         lookahead.declaration_after(index).map(|candidate| (candidate, true))
     }
 
@@ -1483,12 +1483,28 @@ impl<'input> Parser<'input> {
     ///
     /// Looks ahead without consuming tokens, distinguishing declaration prefixes from fields named
     /// after keywords and struct representation attributes.
-    fn at_strong_top_level_form_starter(&self) -> bool {
+    fn at_strong_top_level_form_starter(&mut self) -> bool {
         let Some((index, has_attributes)) = self.peek_declaration_after_attributes() else {
             return false;
         };
+        let classify = || Self::classify_declaration_candidate(&self.tokens, index);
+        let candidate = match self.attribute_lookahead.as_mut() {
+            Some(lookahead) => lookahead.classify_candidate(index, classify),
+            None => classify(),
+        };
+        match candidate {
+            DeclarationCandidate::NotDeclaration => false,
+            DeclarationCandidate::Procedure => true,
+            DeclarationCandidate::OtherDeclaration => !has_attributes,
+        }
+    }
+
+    fn classify_declaration_candidate(tokens: &[Token<'_>], index: usize) -> DeclarationCandidate {
+        if tokens[index].kind() != SyntaxKind::Ident {
+            return DeclarationCandidate::NotDeclaration;
+        }
         let mut tokens =
-            self.tokens[index..].iter().filter(|token| !token.kind().is_trivia()).peekable();
+            tokens[index..].iter().filter(|token| !token.kind().is_trivia()).peekable();
         let mut declaration = tokens.next().expect("declaration token");
 
         if declaration.text() == "pub"
@@ -1497,24 +1513,21 @@ impl<'input> Parser<'input> {
             tokens.next();
             tokens.next();
             if !tokens.next().is_some_and(|token| token.kind() == SyntaxKind::RParen) {
-                return false;
+                return DeclarationCandidate::NotDeclaration;
             }
         }
         if !is_top_level_declaration_prefix(declaration, tokens.peek().copied()) {
-            return false;
+            return DeclarationCandidate::NotDeclaration;
         }
         if declaration.text() == "pub" {
             declaration = tokens.next().expect("public declaration keyword");
         }
-        if has_attributes && declaration.text() != "proc" {
-            return false;
-        }
 
         let Some(next) = tokens.next() else {
-            return false;
+            return DeclarationCandidate::NotDeclaration;
         };
         let is_name = is_name_like(next.kind());
-        match declaration.text() {
+        let is_declaration = match declaration.text() {
             "const" | "enum" | "type" => {
                 is_name
                     && tokens.next().is_some_and(|token| {
@@ -1537,6 +1550,13 @@ impl<'input> Parser<'input> {
                     )
             },
             _ => false,
+        };
+        if !is_declaration {
+            DeclarationCandidate::NotDeclaration
+        } else if declaration.text() == "proc" {
+            DeclarationCandidate::Procedure
+        } else {
+            DeclarationCandidate::OtherDeclaration
         }
     }
 
@@ -2323,7 +2343,7 @@ end
             ("extern const Y = 2", false, false),
         ] {
             let file = super::detached_source_file(source);
-            let parser = super::Parser::new(&file);
+            let mut parser = super::Parser::new(&file);
             assert_eq!(
                 parser.at_top_level_form_starter(),
                 regular,
@@ -2360,12 +2380,75 @@ end
             ("@", false),
         ] {
             let file = super::detached_source_file(source);
-            let parser = super::Parser::new(&file);
+            let mut parser = super::Parser::new(&file);
             assert!(parser.at_top_level_form_starter(), "regular lookahead for {source}");
             assert_eq!(
                 parser.at_strong_top_level_form_starter(),
                 strong,
                 "strong lookahead for {source}"
+            );
+        }
+    }
+
+    /// Checks strong-lookahead results from attribute positions and from the candidate itself.
+    ///
+    /// Attribute-prefixed lookahead accepts only procedures, while direct lookahead can accept
+    /// other valid declarations.
+    fn assert_shared_candidate_validation(
+        source: &str,
+        expected_with_attributes: bool,
+        expected_at_candidate: bool,
+    ) {
+        let file = super::detached_source_file(source);
+        let mut parser = super::Parser::new(&file);
+        let (candidate, has_attributes) = parser.peek_declaration_after_attributes().unwrap();
+        assert!(has_attributes);
+
+        for index in 0..parser.tokens.len() {
+            if parser.tokens[index].kind() == SyntaxKind::At {
+                parser.pos = index;
+                assert_eq!(
+                    parser.at_strong_top_level_form_starter(),
+                    expected_with_attributes,
+                    "{source}"
+                );
+            }
+        }
+        parser.pos = candidate;
+        assert_eq!(
+            parser.at_strong_top_level_form_starter(),
+            expected_at_candidate,
+            "{source}"
+        );
+    }
+
+    #[test]
+    fn shared_candidate_validation_preserves_attribute_restrictions() {
+        // Each source has 256 attributes, a candidate prefix, 256 comment/doc-comment pairs,
+        // then a tail.
+        let attributes = "@inline ".repeat(256);
+        let trivia = "# comment\n#! docs\n".repeat(256);
+        // `prefix` and `tail` form the candidate. The booleans are expected results with and
+        // without preceding attributes.
+        for (prefix, tail, expected_with_attributes, expected_at_candidate) in [
+            // A struct body is not a declaration candidate, with or without attributes.
+            ("{", "field: u8 }", false, false),
+            // Attributes reject a constant declaration, but direct lookahead accepts it.
+            ("const", "Y = 2", false, true),
+            // Visibility and intervening trivia still lead to a constant declaration.
+            ("pub", "const Y = 2", false, true),
+            // The same restriction applies to a type declaration with package visibility.
+            ("pub(package)", "type T = u8", false, true),
+            // An incomplete constant declaration is rejected even without attributes.
+            ("pub", "const", false, false),
+            // Attributes allow procedures, and direct lookahead accepts them too.
+            ("pub", "proc foo", true, true),
+        ] {
+            let source = format!("{attributes}{prefix} {trivia}{tail}");
+            assert_shared_candidate_validation(
+                &source,
+                expected_with_attributes,
+                expected_at_candidate,
             );
         }
     }
