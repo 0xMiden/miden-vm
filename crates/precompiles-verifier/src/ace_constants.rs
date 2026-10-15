@@ -1,10 +1,8 @@
-//! Protocol constants of the PVM recursive-verifier ACE circuit.
+//! Protocol constants for the full PVM recursive-verifier AIR variant.
 //!
-//! One order-invariant circuit serves every proof ordering, so the accepted circuit is named
-//! outright by its digest: [`miden_air::precompiles::protocol::PVM_ACE_CIRCUIT_DIGEST`] is the
-//! advice-map key its instruction stream is served under, the value the MASM loader pins that
-//! stream to, and — through [`PVM_RELATION_DIGEST`] — what binds the Fiat-Shamir transcript to the
-//! relation.
+//! Each hash variant has one order-invariant circuit. The full variant's constants below retain
+//! the original protocol commitment; the generator also emits the trusted configuration table
+//! used by the shared MASM verifier to select all eight variants.
 //!
 //! The values are pinned in `miden_air::precompiles`; the tests here and there recompute them from
 //! the chiplet AIRs.
@@ -25,8 +23,9 @@ pub(crate) const GENERATED_BY: &str = "cargo run -p miden-precompiles-verifier -
 #[cfg(any(test, feature = "constants-tools"))]
 pub(crate) const PVM_PROTOCOL_ID: u64 = miden_air::precompiles::policy::PROTOCOL_ID;
 
+#[cfg(test)]
 pub use miden_air::precompiles::protocol::PVM_RELATION_DIGEST;
-#[cfg(any(test, feature = "constants-tools"))]
+#[cfg(test)]
 pub use miden_air::precompiles::protocol::{
     PVM_ACE_CIRCUIT_DIGEST, PVM_CIRCUIT_SHAPE, PVM_PREPROCESSED_COMMITMENT,
 };

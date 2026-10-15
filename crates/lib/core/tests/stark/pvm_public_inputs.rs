@@ -16,17 +16,14 @@ const ROOT: [u64; 4] = [101, 102, 103, 104];
 const HEIGHTS: [u64; 12] = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
 const MAIN_COMMITMENT: [u64; 4] = [201, 202, 203, 204];
 
-fn pvm_masm_const(name: &str) -> u64 {
-    let source = include_str!("../../asm/sys/pvm/parameters.masm");
-    let prefix = format!("pub const {name} = ");
-    source
-        .lines()
-        .find_map(|line| line.trim().strip_prefix(&prefix)?.parse().ok())
-        .unwrap_or_else(|| panic!("missing PVM MASM constant {name}"))
-}
-
 fn pvm_word(prefix: &str) -> [u64; 4] {
-    core::array::from_fn(|index| pvm_masm_const(&format!("{prefix}_{index}")))
+    match prefix {
+        "RELATION_DIGEST" => miden_air::precompiles::PVM_RELATION_DIGEST,
+        "PREPROCESSED_COMMITMENT" => {
+            miden_air::precompiles::preprocessed::eidos().commitment().into()
+        },
+        _ => panic!("unknown PVM word {prefix}"),
+    }
 }
 
 fn precompile_pcs_params() -> PcsParams {
@@ -89,8 +86,10 @@ fn transcript_source() -> String {
         use miden::core::stark::random_coin
         use miden::core::sys::pvm::layout
         use miden::core::sys::pvm::public_inputs
+        use miden::core::sys::pvm::variants
 
         begin
+            exec.variants::load
             {setup}
 
             push.{relation3}.{relation2}.{relation1}.{relation0}
@@ -135,7 +134,7 @@ fn transcript_source() -> String {
 
 #[test]
 fn pvm_public_input_hook_matches_the_rust_challenger() {
-    let (output, _) = build_test!(&transcript_source(), &[])
+    let (output, _) = build_test!(&transcript_source(), &[], &[7])
         .execute_for_output()
         .expect("PVM public-input hook must execute");
 
@@ -200,12 +199,14 @@ fn pvm_public_input_hook_rejects_a_nonempty_input_buffer() {
     let source = r#"
         use {RANDOM_COIN_INPUT_LENGTH_PTR} from miden::core::stark::constants
         use miden::core::sys::pvm::public_inputs
+        use miden::core::sys::pvm::variants
 
         begin
+            exec.variants::load
             push.1 mem_store.RANDOM_COIN_INPUT_LENGTH_PTR
             exec.public_inputs::process_public_inputs
         end
     "#;
-    let test = build_test!(source, &[]);
+    let test = build_test!(source, &[], &[7]);
     expect_assert_error_message!(test);
 }

@@ -1,7 +1,7 @@
 use alloc::{borrow::Cow, vec::Vec};
 
 use miden_air_definitions::precompiles as definitions;
-use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
+use miden_core::{Felt, deferred::PvmAirVariant, field::QuadFelt, utils::RowMajorMatrix};
 use miden_lifted_air::{
     BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, MultiAir, ReductionError,
 };
@@ -78,6 +78,10 @@ impl ChipletAir {
     /// `BytePairLut` commits its main and preprocessed traces at
     /// [`crate::precompiles::primitives::byte_pair_lut::TRACE_HEIGHT`], so its proof shapes must
     /// carry exactly that height; every other instance ranges above its derived minimum.
+    pub fn is_in_variant(&self, variant: PvmAirVariant) -> bool {
+        self.definition().is_in_variant(variant)
+    }
+
     pub fn fixed_log_height(&self) -> Option<u32> {
         self.definition().fixed_log_height()
     }
@@ -176,9 +180,21 @@ pub struct ChipletMultiAir {
 }
 impl ChipletMultiAir {
     pub fn new() -> Self {
-        let definition = definitions::ChipletMultiAir::new();
+        Self::with_variant(PvmAirVariant::ALL)
+    }
+
+    pub fn with_variant(variant: PvmAirVariant) -> Self {
+        let definition = definitions::ChipletMultiAir::with_variant(variant);
         let airs = definition.airs().iter().copied().map(ChipletAir::from_definition).collect();
         Self { airs, definition }
+    }
+
+    pub fn variant(&self) -> PvmAirVariant {
+        self.definition.variant()
+    }
+
+    pub fn transcript_eval_index(&self) -> usize {
+        self.definition.transcript_eval_index()
     }
 
     fn definition(&self) -> &definitions::ChipletMultiAir {

@@ -2,7 +2,7 @@ use std::{env, fs, path::PathBuf};
 
 use miden_ace_codegen::{LayoutKind, RecursiveAceCircuit};
 use miden_air_definitions::precompiles::{
-    fixed, geometry,
+    PvmAirVariant, fixed, geometry,
     relation::{AIRS, CapturedPvmRelation},
 };
 use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_optimized_module};
@@ -39,36 +39,34 @@ pub fn generate() {
             "pub(super) fn generated_degrees(air: &ChipletAir) -> ConstraintDegrees {{ match air {{ {degree_arms} }} }}"
         ),
     );
-    let compiled = captured.compile().expect("compile PVM relation");
-    let circuit: RecursiveAceCircuit = compiled
-        .build_circuit(LayoutKind::Masm)
-        .expect("PVM ACE circuit")
-        .to_ace()
-        .expect("encode PVM ACE")
-        .try_into()
-        .expect("PVM recursive circuit");
-    write(
-        "ace_instructions.rs",
-        format!(
-            "{:?}",
-            circuit
-                .instructions
-                .iter()
-                .map(miden_core::Felt::as_canonical_u64)
-                .collect::<Vec<_>>()
-        ),
-    );
     let fixed_boundary_lookup_terms =
         fixed::fixed_uintval_msgs().count() + fixed::fixed_ecgroup_msgs().count();
+    let mut metadata = String::new();
+    let mut instructions = String::new();
+    for variant in PvmAirVariant::ALL_VARIANTS {
+        let compiled = captured.compile_for(variant).expect("compile PVM relation");
+        let circuit: RecursiveAceCircuit = compiled
+            .build_circuit(LayoutKind::Masm)
+            .expect("PVM ACE circuit")
+            .to_ace()
+            .expect("encode PVM ACE")
+            .try_into()
+            .expect("PVM recursive circuit");
+        let stream: Vec<_> =
+            circuit.instructions.iter().map(miden_core::Felt::as_canonical_u64).collect();
+        instructions.push_str(&format!("&{stream:?},"));
+        metadata.push_str(&format!(
+            "ProtocolMetadata {{ circuit_shape: {:?}, air_shape: {:?}, raw_widths: &{:?}, num_quotient_chunks: {}, fixed_boundary_lookup_terms: {} }},",
+            (circuit.num_inputs, circuit.num_eval_gates, circuit.stream_len),
+            geometry::air_shape_for(&compiled, variant), compiled.geometry().raw_widths(),
+            compiled.geometry().num_quotient_chunks, fixed_boundary_lookup_terms,
+        ));
+    }
+    write("ace_instructions.rs", format!("[{instructions}]"));
     write(
         "protocol.rs",
         format!(
-            "pub const PROTOCOL: ProtocolMetadata = ProtocolMetadata {{ circuit_shape: {:?}, air_shape: {:?}, raw_widths: &{:?}, num_quotient_chunks: {}, fixed_boundary_lookup_terms: {} }};",
-            (circuit.num_inputs, circuit.num_eval_gates, circuit.stream_len),
-            geometry::air_shape(&compiled),
-            compiled.geometry().raw_widths(),
-            compiled.geometry().num_quotient_chunks,
-            fixed_boundary_lookup_terms
+            "pub const PROTOCOLS: [ProtocolMetadata; 8] = [{metadata}]; pub const PROTOCOL: ProtocolMetadata = PROTOCOLS[7];"
         ),
     );
 }

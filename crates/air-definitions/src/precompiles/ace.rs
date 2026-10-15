@@ -12,7 +12,16 @@ pub const LMCS_ALIGNMENT: usize = 8;
 /// Builds the canonical precompile chiplet ACE circuit.
 #[cfg(feature = "compiler")]
 pub fn build_canonical_precompile_ace_circuit() -> Result<AceCircuit<QuadFelt>, AceError> {
-    CapturedPvmRelation::new()?.compile()?.build_circuit(LayoutKind::Masm)
+    build_canonical_precompile_ace_circuit_for(super::PvmAirVariant::ALL)
+}
+
+#[cfg(feature = "compiler")]
+pub fn build_canonical_precompile_ace_circuit_for(
+    variant: super::PvmAirVariant,
+) -> Result<AceCircuit<QuadFelt>, AceError> {
+    CapturedPvmRelation::with_variant(variant)?
+        .compile()?
+        .build_circuit(LayoutKind::Masm)
 }
 
 // RECURSIVE VERIFIER CIRCUIT
@@ -25,6 +34,13 @@ pub use miden_ace_codegen::RecursiveAceCircuit as PvmRecursiveAceCircuit;
 /// Callers needing the circuit for multiple proofs should cache the encoded result.
 #[cfg(feature = "compiler")]
 pub fn build_pvm_recursive_verifier_ace_circuit() -> Result<PvmRecursiveAceCircuit, AceError> {
-    let encoded = build_canonical_precompile_ace_circuit()?.to_ace()?;
+    build_pvm_recursive_verifier_ace_circuit_for(super::PvmAirVariant::ALL)
+}
+
+#[cfg(feature = "compiler")]
+pub fn build_pvm_recursive_verifier_ace_circuit_for(
+    variant: super::PvmAirVariant,
+) -> Result<PvmRecursiveAceCircuit, AceError> {
+    let encoded = build_canonical_precompile_ace_circuit_for(variant)?.to_ace()?;
     encoded.try_into()
 }

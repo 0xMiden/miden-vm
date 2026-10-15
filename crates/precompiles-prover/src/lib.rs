@@ -10,7 +10,10 @@ use alloc::vec::Vec;
 pub use deferred::session::testing;
 pub use deferred::session::{SessionInputError, WitnessLocation};
 use miden_core::deferred::{PrecompileLimits, PrecompileWitness};
-pub use miden_core::proof::{HashFunction, PrecompileProof, StarkProof};
+pub use miden_core::{
+    deferred::PvmAirVariant,
+    proof::{HashFunction, PrecompileProof, StarkProof},
+};
 pub use miden_precompiles::default_verification_precompile_limits;
 
 pub(crate) mod ec;
@@ -38,6 +41,7 @@ pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 = 64 << 30;
 /// [`miden_core::deferred::MAX_PRECOMPILE_ROOTS`] are rejected before preparation. Every portable
 /// witness is consumed and prepared under verification limits before a private Session shares
 /// computations. Session import does not reapply workload admission.
+/// Only the optional hash AIRs used by the batch are included in the proof.
 pub fn prove_precompiles(
     witnesses: Vec<PrecompileWitness>,
     hash_fn: HashFunction,
@@ -93,6 +97,41 @@ pub fn prove_precompile_for_root_with_limits_and_budget(
         hash_fn,
         verification_limits,
         Some(core::slice::from_ref(&expected_root)),
+        max_prover_memory_bytes,
+    )
+}
+
+/// Proves a batch using an explicit optional hash AIR selection and the default memory budget.
+///
+/// Witnesses that use a hash absent from `variant` are rejected. Unlike [`prove_precompiles`],
+/// this uses the exact requested selection, including unused hash AIRs.
+pub fn prove_precompiles_with_variant(
+    witnesses: Vec<PrecompileWitness>,
+    hash_fn: HashFunction,
+    variant: PvmAirVariant,
+) -> Result<PrecompileProof, PrecompileProvingError> {
+    prove_precompiles_with_variant_and_budget(
+        witnesses,
+        hash_fn,
+        variant,
+        DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
+    )
+}
+
+/// Same as [`prove_precompiles_with_variant`], with an explicit memory budget.
+///
+/// Only the selected AIRs contribute to the memory estimate and generated traces.
+pub fn prove_precompiles_with_variant_and_budget(
+    witnesses: Vec<PrecompileWitness>,
+    hash_fn: HashFunction,
+    variant: PvmAirVariant,
+    max_prover_memory_bytes: u64,
+) -> Result<PrecompileProof, PrecompileProvingError> {
+    deferred::session::prove_with_variant(
+        witnesses,
+        hash_fn,
+        variant,
+        &default_verification_precompile_limits(),
         max_prover_memory_bytes,
     )
 }

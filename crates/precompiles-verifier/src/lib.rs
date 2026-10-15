@@ -91,4 +91,15 @@ mod tests {
             Err(VerifyError::ProofTooLarge { size: _, max: MAX_STARK_PROOF_BYTES })
         ));
     }
+
+    #[test]
+    fn verify_deferred_rejects_unknown_variant_headers_before_stark_decoding() {
+        for bytes in [b"MIDENPVM\x02\x00".to_vec(), b"MIDENPVM\x01\x08".to_vec()] {
+            let proof = StarkProof::new(bytes, HashFunction::Eidos);
+            assert!(matches!(
+                verify_deferred(&proof, TRUE_DIGEST),
+                Err(VerifyError::InvalidVariantHeader(_))
+            ));
+        }
+    }
 }

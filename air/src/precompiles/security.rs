@@ -17,7 +17,10 @@ pub use crate::shared::security::{
     SecurityTerm,
 };
 use crate::{
-    precompiles::stark_config::{LOG_BLOWUP, LOG_FOLDING_ARITY},
+    precompiles::{
+        PvmAirVariant,
+        stark_config::{LOG_BLOWUP, LOG_FOLDING_ARITY},
+    },
     shared::security::{
         CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT,
         EIDOS_CHALLENGE_SAMPLE_BITS, OOD_POW_BITS, security_report_with_hash,
@@ -46,13 +49,22 @@ pub const LOOKUP_SHAPE: LookupShape = match AIR_SHAPE.lookup {
 /// [`AIR_SHAPE`] constant.
 #[cfg(any(test, feature = "compiler"))]
 pub fn derive_air_shape() -> AirShape {
-    miden_air_definitions::precompiles::geometry::derive_air_shape()
+    derive_air_shape_for(PvmAirVariant::ALL)
+}
+
+#[cfg(any(test, feature = "compiler"))]
+pub fn derive_air_shape_for(variant: PvmAirVariant) -> AirShape {
+    miden_air_definitions::precompiles::geometry::derive_air_shape_for(variant)
 }
 
 /// Build-compiled security shape of the precompile relation at the given commitment
 /// alignment; this does not capture AIRs.
 pub fn air_shape_for(alignment: usize) -> AirShape {
-    let metadata = crate::precompiles::protocol::metadata();
+    air_shape_for_variant(PvmAirVariant::ALL, alignment)
+}
+
+pub fn air_shape_for_variant(variant: PvmAirVariant, alignment: usize) -> AirShape {
+    let metadata = crate::precompiles::protocol::metadata_for(variant);
     AirShape {
         num_deep_terms: Some(metadata.num_deep_terms(alignment)),
         ..metadata.air_shape
@@ -68,7 +80,11 @@ pub fn air_shape_for(alignment: usize) -> AirShape {
 /// alignment 17) calls this instead of using the alignment-[`COMMITMENT_ALIGNMENT`] [`AIR_SHAPE`]
 /// fixed for the default Eidos preset.
 pub fn num_deep_terms(alignment: usize) -> u32 {
-    crate::precompiles::protocol::metadata().num_deep_terms(alignment)
+    num_deep_terms_for(PvmAirVariant::ALL, alignment)
+}
+
+pub fn num_deep_terms_for(variant: PvmAirVariant, alignment: usize) -> u32 {
+    crate::precompiles::protocol::metadata_for(variant).num_deep_terms(alignment)
 }
 
 // SECURITY MODEL CONSTANTS
@@ -224,6 +240,22 @@ pub fn proof_security_parameters(
     alignment: usize,
     hash_fn: HashFunction,
 ) -> ProofSecurityParameters {
+    proof_security_parameters_for(
+        pcs_params,
+        log_max_height,
+        alignment,
+        hash_fn,
+        PvmAirVariant::ALL,
+    )
+}
+
+pub fn proof_security_parameters_for(
+    pcs_params: &PcsParams,
+    log_max_height: u32,
+    alignment: usize,
+    hash_fn: HashFunction,
+    variant: PvmAirVariant,
+) -> ProofSecurityParameters {
     ProofSecurityParameters {
         protocol_params: protocol_params(pcs_params),
         log_final_degree: u32::from(pcs_params.log_final_degree()),
@@ -234,8 +266,8 @@ pub fn proof_security_parameters(
         },
         hash_fn,
         air_shape: AirShape {
-            num_deep_terms: Some(num_deep_terms(alignment)),
-            ..AIR_SHAPE
+            num_deep_terms: Some(num_deep_terms_for(variant, alignment)),
+            ..air_shape_for_variant(variant, alignment)
         },
         num_ood_points: NUM_OOD_POINTS,
         num_lookup_boundary_terms: FIXED_BOUNDARY_LOOKUP_TERMS,
@@ -291,6 +323,16 @@ mod tests {
 
     /// Checks that [`AIR_SHAPE`] matches the current chiplet AIRs. A stale shape can make the
     /// reported security level differ from the level implied by the relation being verified.
+    #[test]
+    fn variant_shapes_match_symbolic() {
+        for variant in PvmAirVariant::ALL_VARIANTS {
+            assert_eq!(
+                air_shape_for_variant(variant, COMMITMENT_ALIGNMENT),
+                derive_air_shape_for(variant)
+            );
+        }
+    }
+
     #[test]
     fn air_shape_matches_symbolic() {
         assert_eq!(AIR_SHAPE, derive_air_shape(), "AIR_SHAPE in security.rs is stale");

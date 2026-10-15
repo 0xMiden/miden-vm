@@ -543,6 +543,79 @@ fn multi_air_uses_canonical_offsets_and_stable_selectors() {
 }
 
 #[test]
+fn canonical_quotient_padding_does_not_add_recomposition_chunks() {
+    let circuit = build_canonical_multi_air_ace_circuit(
+        &[TestAir::simple()],
+        AceConfig {
+            num_quotient_chunks: 2,
+            layout: LayoutKind::Masm,
+        },
+        8,
+    )
+    .unwrap();
+    let layout = circuit.layout();
+    assert_eq!(layout.counts.num_quotient_chunks, 2);
+    assert_eq!(layout.regions.quotient_curr.width, 8);
+    assert_eq!(layout.regions.quotient_next.width, 8);
+    assert_eq!(layout.regions.preprocessed_next.offset, layout.regions.quotient_curr.offset + 8);
+    assert_eq!(layout.regions.aux_bus_boundary.offset, layout.regions.quotient_next.offset + 8);
+    assert!(
+        layout
+            .index(InputKey::QuotientChunkCoord { offset: 0, chunk: 2, coord: 0 })
+            .is_none()
+    );
+
+    let mut inputs = vec![EF::ZERO; layout.total_inputs];
+    for (key, value) in [
+        (InputKey::Main { offset: 0, index: 0 }, 11),
+        (InputKey::MultiAirFoldCoeff(0), 3),
+        (InputKey::ZPowN, 19),
+        (InputKey::S0, 2),
+        (InputKey::F, 3),
+        (InputKey::Weight0, 7),
+        (InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 }, 2),
+        (InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 1 }, 3),
+        (InputKey::QuotientChunkCoord { offset: 0, chunk: 1, coord: 0 }, 5),
+        (InputKey::QuotientChunkCoord { offset: 0, chunk: 1, coord: 1 }, 7),
+    ] {
+        set_input(&circuit, &mut inputs, key, ef(value));
+    }
+    // Two chunks give Q = 7*13*(2 + 3u) + 21*17*(5 + 7u) = 1967 + 2772u.
+    // The constraint fold is 3*11; the quotient binding multiplies Q by 19 - 1.
+    let expected = ef(33) - EF::new([F::from_u64(35_406), F::from_u64(49_896)]);
+    assert_eq!(circuit.eval(&inputs).unwrap(), expected);
+    for region in [layout.regions.quotient_curr, layout.regions.quotient_next] {
+        inputs[region.offset + 4..region.offset + region.width].fill(ef(99));
+    }
+    assert_eq!(circuit.eval(&inputs).unwrap(), expected);
+    circuit.to_ace().expect("padded quotient circuit must encode");
+}
+
+#[test]
+fn canonical_aligned_quotients_preserve_the_existing_circuit_encoding() {
+    let airs = [TestAir {
+        preprocessed: 8,
+        main: 8,
+        aux: 4,
+        ..TestAir::simple()
+    }];
+    for num_quotient_chunks in [4, 8] {
+        let config = AceConfig {
+            num_quotient_chunks,
+            layout: LayoutKind::Masm,
+        };
+        let word_aligned = build_canonical_multi_air_ace_circuit(&airs, config, 4).unwrap();
+        let lmcs_aligned = build_canonical_multi_air_ace_circuit(&airs, config, 8).unwrap();
+        let word_aligned = word_aligned.to_ace().unwrap();
+        let lmcs_aligned = lmcs_aligned.to_ace().unwrap();
+        assert_eq!(word_aligned.num_vars(), lmcs_aligned.num_vars());
+        assert_eq!(word_aligned.num_eval_rows(), lmcs_aligned.num_eval_rows());
+        assert_eq!(word_aligned.instructions(), lmcs_aligned.instructions());
+        assert_eq!(word_aligned.circuit_hash(), lmcs_aligned.circuit_hash());
+    }
+}
+
+#[test]
 fn multi_air_concatenates_distinct_public_inputs() {
     let airs = [0, 1, 0, 2, 0].map(|public| TestAir { public, ..TestAir::simple() });
     let order = [3, 0, 4, 1, 2];

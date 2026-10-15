@@ -14,7 +14,7 @@
 //! config; it runs at [`ProverInstance::new`](crate::ProverInstance::new)
 //! construction time, so the prover never re-checks the shape.
 
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 
 use miden_lifted_air::{BaseAir, MultiAir, ProverStatement, Statement, log2_strict_u8};
 use p3_dft::TwoAdicSubgroupDft;
@@ -45,7 +45,8 @@ use crate::{
 /// Parameterized over the LMCS `L` rather than a full [`StarkConfig`] so the
 /// value can be borrowed by prover instances with the same commitment type. The
 /// bundle is still tied to the PCS blowup and LMCS alignment used at build time;
-/// `validate_preprocessed` checks those config-dependent dimensions.
+/// `validate_preprocessed` checks those config-dependent dimensions. Bundles returned by
+/// [`Self::select_airs`] share the immutable raw matrices and committed tree.
 pub struct Preprocessed<F, L>
 where
     F: TwoAdicField,
@@ -56,9 +57,9 @@ where
     /// `preprocessed_trace` re-allocates on every call, so they are computed
     /// once here and retained for validation, auxiliary-trace construction,
     /// and `check_constraints`.
-    traces: Vec<Option<RowMajorMatrix<F>>>,
+    traces: Vec<Option<Arc<RowMajorMatrix<F>>>>,
     /// Committed LDE tree, one committed LDE trace per preprocessed AIR.
-    committed: Committed<F, RowMajorMatrix<F>, L>,
+    committed: Arc<Committed<F, RowMajorMatrix<F>, L>>,
 }
 
 impl<F, L> Preprocessed<F, L>
@@ -127,8 +128,40 @@ where
             .collect();
 
         Some(Self {
-            traces,
-            committed: Committed::new(config.lmcs().build_aligned_tree(ldes)),
+            traces: traces.into_iter().map(|trace| trace.map(Arc::new)).collect(),
+            committed: Arc::new(Committed::new(config.lmcs().build_aligned_tree(ldes))),
+        })
+    }
+
+    /// Selects AIR slots while sharing the raw matrices and committed tree with this setup.
+    ///
+    /// `indices` names slots in this bundle's instance order. They must be strictly increasing
+    /// and retain every AIR with preprocessed columns; only AIRs without setup data may be
+    /// removed. This preserves the committed matrix order and avoids rebuilding fixed tables
+    /// when a relation omits AIRs that have no preprocessed columns.
+    pub fn select_airs(&self, indices: &[usize]) -> Result<Self, PreprocessedValidationError> {
+        for (position, &air) in indices.iter().enumerate() {
+            if air >= self.traces.len() {
+                return Err(PreprocessedValidationError::AirSelectionIndexOutOfBounds {
+                    air,
+                    num_airs: self.traces.len(),
+                });
+            }
+            if position > 0 && indices[position - 1] >= air {
+                return Err(PreprocessedValidationError::AirSelectionNotIncreasing {
+                    previous: indices[position - 1],
+                    air,
+                });
+            }
+        }
+        for (air, trace) in self.traces.iter().enumerate() {
+            if trace.is_some() && indices.binary_search(&air).is_err() {
+                return Err(PreprocessedValidationError::OmittedPreprocessedAir { air });
+            }
+        }
+        Ok(Self {
+            traces: indices.iter().map(|&air| self.traces[air].clone()).collect(),
+            committed: Arc::clone(&self.committed),
         })
     }
 
@@ -139,7 +172,7 @@ where
     }
 
     /// Raw setup traces in AIR instance order.
-    pub(crate) fn raw_traces(&self) -> &[Option<RowMajorMatrix<F>>] {
+    pub(crate) fn raw_traces(&self) -> &[Option<Arc<RowMajorMatrix<F>>>] {
         &self.traces
     }
 
@@ -308,10 +341,16 @@ where
     Ok(())
 }
 
-/// Errors from constructing a stark-layer instance: preprocessed presence
-/// parity and (prover side) the bundle's shape against the AIR declarations.
+/// Errors from selecting setup AIR slots or constructing a stark-layer instance:
+/// preprocessed presence parity and the bundle's shape against the AIR declarations.
 #[derive(Debug, Error)]
 pub enum PreprocessedValidationError {
+    #[error("selected AIR index {air} is out of bounds for {num_airs} setup slots")]
+    AirSelectionIndexOutOfBounds { air: usize, num_airs: usize },
+    #[error("selected AIR indices must strictly increase: {previous} precedes {air}")]
+    AirSelectionNotIncreasing { previous: usize, air: usize },
+    #[error("cannot omit AIR {air}, which declares preprocessed columns")]
+    OmittedPreprocessedAir { air: usize },
     #[error(
         "preprocessed setup presence mismatch: AIRs declare preprocessed columns = {expected}, setup supplied = {actual}"
     )]
@@ -361,4 +400,68 @@ pub enum PreprocessedValidationError {
         expected: usize,
         actual: usize,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+
+    use p3_field::PrimeCharacteristicRing;
+    use p3_matrix::bitrev::BitReversibleMatrix;
+
+    use super::*;
+    use crate::testing::configs::goldilocks_poseidon2::{Felt, Lmcs as TestLmcs, test_lmcs};
+
+    fn setup() -> Preprocessed<Felt, TestLmcs> {
+        let first = RowMajorMatrix::new(vec![Felt::ZERO; 4], 1);
+        let second = RowMajorMatrix::new(vec![Felt::ONE; 4], 1);
+        Preprocessed {
+            committed: Arc::new(Committed::new(test_lmcs().build_aligned_tree(vec![
+                first.clone().bit_reverse_rows(),
+                second.clone().bit_reverse_rows(),
+            ]))),
+            traces: vec![None, Some(Arc::new(first)), None, Some(Arc::new(second))],
+        }
+    }
+
+    #[test]
+    fn air_selection_shares_raw_matrices_and_committed_tree() {
+        let original = setup();
+        let selected = original.select_airs(&[1, 3]).expect("all preprocessed AIRs retained");
+        assert_eq!(selected.traces.len(), 2);
+        assert!(Arc::ptr_eq(&original.committed, &selected.committed));
+        for (selected_index, original_index) in [1, 3].into_iter().enumerate() {
+            assert!(Arc::ptr_eq(
+                original.traces[original_index].as_ref().unwrap(),
+                selected.traces[selected_index].as_ref().unwrap(),
+            ));
+        }
+        assert_eq!(selected.commitment(), original.commitment());
+        drop(original);
+        assert_eq!(selected.raw_traces()[0].as_deref().unwrap().height(), 4);
+        assert_eq!(selected.committed().tree().leaves().len(), 2);
+    }
+
+    #[test]
+    fn air_selection_rejects_invalid_mappings_and_removed_setup_data() {
+        let original = setup();
+        assert!(matches!(
+            original.select_airs(&[1, 3, 4]),
+            Err(PreprocessedValidationError::AirSelectionIndexOutOfBounds { air: 4, num_airs: 4 })
+        ));
+        for indices in [&[1, 1, 3][..], &[3, 1][..]] {
+            assert!(matches!(
+                original.select_airs(indices),
+                Err(PreprocessedValidationError::AirSelectionNotIncreasing { .. })
+            ));
+        }
+        assert!(matches!(
+            original.select_airs(&[0, 1, 2]),
+            Err(PreprocessedValidationError::OmittedPreprocessedAir { air: 3 })
+        ));
+        assert!(matches!(
+            original.select_airs(&[]),
+            Err(PreprocessedValidationError::OmittedPreprocessedAir { air: 1 })
+        ));
+    }
 }

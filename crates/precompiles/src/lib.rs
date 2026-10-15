@@ -5,6 +5,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+pub use miden_core::deferred::PvmAirVariant;
 use miden_core::deferred::{PrecompileLimits, PrecompileRegistry, WorkClass, WorkLimit};
 
 mod codec;
@@ -134,22 +135,63 @@ fn default_precompile_limits() -> PrecompileLimits {
 /// TODO: If constructing the official registry becomes measurable overhead, consider a
 /// cached/shared registry for default processor initialization.
 pub fn registry() -> PrecompileRegistry {
-    PrecompileRegistry::new()
-        .with_precompile(Keccak256Precompile::default())
-        .with_precompile(Sha512Precompile::default())
-        .with_precompile(Sha256Precompile::default())
-        .with_precompile(UintPrecompile)
-        .with_precompile(CurvePrecompile)
+    registry_for(PvmAirVariant::ALL)
+}
+
+/// Returns the uint and curve precompiles together with the selected hash precompiles.
+pub fn registry_for(variant: PvmAirVariant) -> PrecompileRegistry {
+    let mut registry = PrecompileRegistry::new();
+    if variant.contains(PvmAirVariant::KECCAK) {
+        registry = registry.with_precompile(Keccak256Precompile::default());
+    }
+    if variant.contains(PvmAirVariant::SHA512) {
+        registry = registry.with_precompile(Sha512Precompile::default());
+    }
+    if variant.contains(PvmAirVariant::SHA256) {
+        registry = registry.with_precompile(Sha256Precompile::default());
+    }
+    registry.with_precompile(UintPrecompile).with_precompile(CurvePrecompile)
 }
 
 #[cfg(test)]
 mod tests {
     use alloc::{sync::Arc, vec};
 
-    use miden_core::deferred::{DeferredState, Node, PrecompileError, PrecompileLimitError};
+    use miden_core::deferred::{
+        DeferredState, Node, NodeType, PrecompileError, PrecompileLimitError,
+    };
 
     use super::*;
     use crate::hash::keccak256::Keccak256Hash;
+
+    #[test]
+    fn variant_registry_rejects_disabled_hash_frames() {
+        for variant in PvmAirVariant::ALL_VARIANTS {
+            let registry = registry_for(variant);
+            for (required, frame) in [
+                (PvmAirVariant::KECCAK, Keccak256Precompile::assert_frame(0)),
+                (PvmAirVariant::SHA256, Sha256Precompile::assert_frame(0)),
+                (PvmAirVariant::SHA512, Sha512Precompile::assert_frame(0)),
+            ] {
+                let result = registry.decode_precompile_frame(frame);
+                if variant.contains(required) {
+                    assert_eq!(result.unwrap(), NodeType::Join);
+                } else {
+                    assert!(result.is_err());
+                }
+            }
+            assert!(
+                registry
+                    .decode_precompile_frame(CurvePrecompile::value_frame(CurveId::Secp256k1))
+                    .is_ok()
+            );
+            assert!(
+                registry
+                    .decode_precompile_frame(UintPrecompile::value_frame(UintDomain::U256))
+                    .is_ok()
+            );
+        }
+    }
 
     #[test]
     fn default_execution_limits_charge_repeated_registrations() {

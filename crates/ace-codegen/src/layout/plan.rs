@@ -50,7 +50,7 @@ pub(crate) struct LayoutRegions {
     pub main_curr: InputRegion,
     /// Aux trace OOD coordinates at `zeta`.
     pub aux_curr: InputRegion,
-    /// Quotient chunk OOD coordinates at `zeta`.
+    /// Quotient chunk OOD coordinates at `zeta`, including commitment-width padding.
     pub quotient_curr: InputRegion,
     /// Preprocessed trace OOD values at `g * zeta`.
     pub preprocessed_next: InputRegion,
@@ -58,7 +58,7 @@ pub(crate) struct LayoutRegions {
     pub main_next: InputRegion,
     /// Aux trace OOD coordinates at `g * zeta`.
     pub aux_next: InputRegion,
-    /// Quotient chunk OOD coordinates at `g * zeta`.
+    /// Quotient chunk OOD coordinates at `g * zeta`, including commitment-width padding.
     pub quotient_next: InputRegion,
     /// Aux bus boundary values.
     pub aux_bus_boundary: InputRegion,

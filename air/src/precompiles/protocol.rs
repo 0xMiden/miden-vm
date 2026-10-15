@@ -4,6 +4,7 @@
 
 use miden_core::{Felt, Word};
 
+use super::{PvmAirVariant, stark_config::RelationDigest};
 use crate::{
     precompiles::ace::PvmRecursiveAceCircuit,
     shared::security::{AirShape, LookupShape},
@@ -60,6 +61,51 @@ pub const PINS: RelationPins = RelationPins {
     ],
 };
 
+/// Pinned identities indexed by the validated three-bit variant encoding.
+#[rustfmt::skip]
+pub const VARIANT_PINS: [RelationPins; 8] = [
+    RelationPins {
+        relation_digest: [5037309581053606001, 4652131943349973794, 3880393715358053860, 5271631991865501378],
+        ace_circuit_digest: [5251948994965901507, 4151536163129843953, 6004953599316764378, 729494014684347571],
+        ..PINS
+    },
+    RelationPins {
+        relation_digest: [2582332774046369188, 1072053327979911243, 6713651570918595485, 6073761103759693799],
+        ace_circuit_digest: [1150806986525360586, 6385881546235171185, 3088844689177878736, 855245688392829920],
+        ..PINS
+    },
+    RelationPins {
+        relation_digest: [7289746450302907152, 7387778580008730127, 3946827889284192196, 4046644346856571842],
+        ace_circuit_digest: [4330296538007097447, 5894462593886618614, 6788438165901582814, 2877048879417689485],
+        ..PINS
+    },
+    RelationPins {
+        relation_digest: [3336159573874225633, 6614922508981891616, 1234273484765090406, 1286405320932314013],
+        ace_circuit_digest: [4396738227565961873, 6072612855696322582, 2436496626496891650, 6363230939523067048],
+        ..PINS
+    },
+    RelationPins {
+        relation_digest: [8522518933733780231, 2928841532244636932, 7509595186887362948, 4989441565317127714],
+        ace_circuit_digest: [2097477967877147045, 4351521734277241040, 6566930203304389981, 2614835179433632892],
+        ..PINS
+    },
+    RelationPins {
+        relation_digest: [5841529994669314999, 7807727408957571417, 6068865522460645069, 5975599908726164451],
+        ace_circuit_digest: [1612635745991472591, 1855983954644886643, 8784641286958232746, 4372756397776815076],
+        ..PINS
+    },
+    RelationPins {
+        relation_digest: [1853919516612247493, 6581202252805593365, 1629796579374992896, 2588276376799344278],
+        ace_circuit_digest: [5214003344260243158, 442921291513503576, 4183103994599696498, 2547830690261919684],
+        ..PINS
+    },
+    RelationPins {
+        relation_digest: [577643653330231829, 8049569379806614310, 9065231626553763524, 8410282077427902040],
+        ace_circuit_digest: [3139198613463016739, 5267671753421984926, 8940512396910594546, 7747458865038124780],
+        ..PINS
+    },
+];
+
 /// Relation digest of the precompile relation.
 pub const PVM_RELATION_DIGEST: [u64; 4] = PINS.relation_digest;
 
@@ -78,6 +124,19 @@ pub const PVM_KECCAK_PREPROCESSED_COMMITMENT: [u64; 4] = PINS.keccak_preprocesse
 /// Pinned identity of the precompile relation.
 pub fn pins() -> &'static RelationPins {
     &PINS
+}
+
+/// Build-compiled identity of the selected relation.
+pub fn pins_for(variant: PvmAirVariant) -> &'static RelationPins {
+    if variant == PvmAirVariant::ALL {
+        &PINS
+    } else {
+        &VARIANT_PINS[variant.as_u8() as usize]
+    }
+}
+
+pub fn relation_digest(variant: PvmAirVariant) -> RelationDigest {
+    pins_for(variant).relation_digest.map(Felt::new_unchecked)
 }
 
 /// Geometry of the precompile relation, compiled from the chiplet AIRs.
@@ -112,7 +171,11 @@ pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = PROTOCOL.circuit_shape;
 
 /// Build-compiled metadata of the precompile relation.
 pub fn metadata() -> &'static ProtocolMetadata {
-    &PROTOCOL
+    metadata_for(PvmAirVariant::ALL)
+}
+
+pub fn metadata_for(variant: PvmAirVariant) -> &'static ProtocolMetadata {
+    &PROTOCOLS[variant.as_u8() as usize]
 }
 
 /// Materialize the relation's embedded instruction stream without symbolic AIR capture.
@@ -120,17 +183,26 @@ pub fn metadata() -> &'static ProtocolMetadata {
 /// The commitment is the relation's pinned ACE circuit digest; the recursive verifier rejects a
 /// stream that does not hash to it.
 pub fn recursive_circuit() -> PvmRecursiveAceCircuit {
-    let (num_inputs, num_eval_gates, stream_len) = metadata().circuit_shape;
+    recursive_circuit_for(PvmAirVariant::ALL)
+}
+
+pub fn recursive_circuit_for(variant: PvmAirVariant) -> PvmRecursiveAceCircuit {
+    let (num_inputs, num_eval_gates, stream_len) = metadata_for(variant).circuit_shape;
     PvmRecursiveAceCircuit {
         num_inputs,
         num_eval_gates,
         stream_len,
-        commitment: Word::new(pins().ace_circuit_digest.map(Felt::new_unchecked)),
-        instructions: ACE_INSTRUCTIONS.iter().copied().map(Felt::new_unchecked).collect(),
+        commitment: Word::new(pins_for(variant).ace_circuit_digest.map(Felt::new_unchecked)),
+        instructions: ACE_INSTRUCTIONS[variant.as_u8() as usize]
+            .iter()
+            .copied()
+            .map(Felt::new_unchecked)
+            .collect(),
     }
 }
 
-static ACE_INSTRUCTIONS: &[u64] = &include!(concat!(env!("OUT_DIR"), "/pvm_ace_instructions.rs"));
+static ACE_INSTRUCTIONS: &[&[u64]] =
+    &include!(concat!(env!("OUT_DIR"), "/pvm_ace_instructions.rs"));
 
 #[cfg(test)]
 mod tests {
@@ -144,6 +216,16 @@ mod tests {
         let independent =
             crate::precompiles::ace::build_pvm_recursive_verifier_ace_circuit().unwrap();
         assert_eq!(recursive_circuit(), independent, "{UPDATE_HINT}");
+        for variant in PvmAirVariant::ALL_VARIANTS {
+            let circuit =
+                crate::precompiles::ace::build_pvm_recursive_verifier_ace_circuit_for(variant)
+                    .unwrap();
+            assert_eq!(recursive_circuit_for(variant), circuit);
+            assert_eq!(
+                crate::shared::config::relation_digest(policy::PROTOCOL_ID, &circuit.commitment),
+                relation_digest(variant)
+            );
+        }
     }
 
     #[test]

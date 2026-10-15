@@ -3,7 +3,7 @@ use std::{format, string::String, vec, vec::Vec};
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
 use miden_air::{
     lookup::Challenges,
-    precompiles::{ChipletMultiAir, NUM_CHIPLETS, stark_config::precompile_pcs_params},
+    precompiles::{ChipletMultiAir, stark_config::precompile_pcs_params},
 };
 use miden_core::{
     Felt,
@@ -513,12 +513,15 @@ fn prove_precompiles_with_budget_corner_cases() {
     // Measure the exact modelled peak for the state's real (small) padded chiplet heights.
     let traces = session_from_witnesses(vec![synthetic.state.witness()])
         .expect("Keccak-only witness should import")
-        .finish();
-    let heights: [usize; NUM_CHIPLETS] = traces.mains().map(Matrix::height);
+        .finish_with_variant(crate::PvmAirVariant::KECCAK);
+    let heights: Vec<_> = traces.into_mains().iter().map(Matrix::height).collect();
     let params = precompile_pcs_params();
-    let exact_peak =
-        memory::prover_peak_bytes::<Felt, QuadFelt, _>(&ChipletMultiAir::new(), &heights, &params)
-            .expect("modelled peak fits in u64");
+    let exact_peak = memory::prover_peak_bytes::<Felt, QuadFelt, _>(
+        &ChipletMultiAir::with_variant(crate::PvmAirVariant::KECCAK),
+        &heights,
+        &params,
+    )
+    .expect("the default prover models only the hash AIRs used by this witness");
 
     // At the exact peak, the budget check passes and the state proves.
     prove_precompiles_with_budget(

@@ -7,7 +7,7 @@ use miden_ace_codegen::{AceError, CapturedAir, CompiledRelation};
 use miden_core::utils::Matrix;
 use miden_lifted_air::{BaseAir, LiftedAir};
 
-use crate::precompiles::{ChipletAir, NUM_CHIPLETS};
+use crate::precompiles::{ChipletAir, NUM_CHIPLETS, PvmAirVariant};
 
 /// Canonical AIR identity and proof instance order.
 pub const AIRS: [ChipletAir; NUM_CHIPLETS] = [
@@ -26,7 +26,11 @@ pub const AIRS: [ChipletAir; NUM_CHIPLETS] = [
 ];
 
 pub fn protocol() -> RelationProtocol {
-    let airs = &AIRS;
+    protocol_for(PvmAirVariant::ALL)
+}
+
+pub fn protocol_for(variant: PvmAirVariant) -> RelationProtocol {
+    let airs: Vec<_> = AIRS.iter().filter(|air| air.is_in_variant(variant)).collect();
     RelationProtocol {
         heights: airs
             .iter()
@@ -64,6 +68,7 @@ pub struct RelationProtocol {
 #[cfg(feature = "compiler")]
 pub struct CapturedPvmRelation {
     airs: Vec<CapturedAir>,
+    variant: PvmAirVariant,
 }
 
 #[cfg(feature = "compiler")]
@@ -73,13 +78,32 @@ impl CapturedPvmRelation {
     }
 
     pub fn new() -> Result<Self, AceError> {
+        Self::with_variant(PvmAirVariant::ALL)
+    }
+
+    pub fn with_variant(variant: PvmAirVariant) -> Result<Self, AceError> {
         Ok(Self {
-            airs: AIRS.iter().map(CapturedAir::new).collect::<Result<_, _>>()?,
+            variant,
+            airs: AIRS
+                .iter()
+                .filter(|air| air.is_in_variant(variant))
+                .map(CapturedAir::new)
+                .collect::<Result<_, _>>()?,
         })
     }
 
     pub fn compile(&self) -> Result<CompiledRelation<'_>, AceError> {
-        let airs: Vec<_> = self.airs.iter().collect();
+        self.compile_for(self.variant)
+    }
+
+    /// Compile a subset without repeating symbolic capture of the retained AIRs.
+    pub fn compile_for(&self, variant: PvmAirVariant) -> Result<CompiledRelation<'_>, AceError> {
+        assert!(self.variant.contains(variant));
+        let declarations = AIRS.iter().filter(|air| air.is_in_variant(self.variant));
+        let airs: Vec<_> = declarations
+            .zip(&self.airs)
+            .filter_map(|(air, capture)| air.is_in_variant(variant).then_some(capture))
+            .collect();
         CompiledRelation::from_captured(&airs, crate::precompiles::ace::LMCS_ALIGNMENT)
     }
 }

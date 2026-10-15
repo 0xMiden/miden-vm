@@ -6,7 +6,7 @@ use p3_security::budget::{AirShape, LookupShape};
 #[cfg(feature = "compiler")]
 use crate::geometry::NUM_OOD_POINTS;
 use crate::precompiles::{
-    ChipletAir,
+    ChipletAir, PvmAirVariant,
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
     hash::{
         chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir, sha256::Sha256Air,
@@ -21,7 +21,12 @@ use crate::precompiles::{
 
 /// Derive the full member's security shape for tooling and differential validation.
 pub fn derive_air_shape() -> AirShape {
-    let airs = ChipletAir::all();
+    derive_air_shape_for(PvmAirVariant::ALL)
+}
+
+pub fn derive_air_shape_for(variant: PvmAirVariant) -> AirShape {
+    let airs: alloc::vec::Vec<_> =
+        ChipletAir::all().into_iter().filter(|air| air.is_in_variant(variant)).collect();
     crate::shared::geometry::derive_air_shape(
         &airs,
         LookupShape {
@@ -35,9 +40,14 @@ pub fn derive_air_shape() -> AirShape {
 /// Security shape from the same captured relation used for evaluators and ACE generation.
 #[cfg(feature = "compiler")]
 pub fn air_shape(relation: &CompiledRelation<'_>) -> AirShape {
+    air_shape_for(relation, PvmAirVariant::ALL)
+}
+
+#[cfg(feature = "compiler")]
+pub fn air_shape_for(relation: &CompiledRelation<'_>, variant: PvmAirVariant) -> AirShape {
     let geometry = relation.geometry();
-    assert_eq!(geometry.airs.len(), crate::precompiles::NUM_CHIPLETS);
-    let fractions_per_row: usize = ChipletAir::all().into_iter().map(fractions_per_row_of).sum();
+    let airs = ChipletAir::all().into_iter().filter(|air| air.is_in_variant(variant));
+    let fractions_per_row: usize = airs.map(fractions_per_row_of).sum();
     AirShape {
         num_composed_constraints: (geometry.num_constraints + geometry.airs.len() - 1) as u32,
         max_constraint_degree: geometry.max_constraint_degree as u32,

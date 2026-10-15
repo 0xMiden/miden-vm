@@ -20,32 +20,22 @@ const BYTE_PAIR_LUT_AIR_INDEX: usize = 3;
 const MIN_LOG_HEIGHTS: [u64; 12] = [5, 5, 7, 16, 1, 3, 1, 1, 2, 1, 7, 7];
 const HEIGHTS: [u64; 12] = [16, 7, 12, 16, 11, 7, 10, 12, 13, 14, 9, 8];
 
-fn masm_const(source: &str, name: &str) -> u64 {
-    let prefix = format!("pub const {name} = ");
-    source
-        .lines()
-        .find_map(|line| line.trim().strip_prefix(&prefix)?.parse().ok())
-        .unwrap_or_else(|| panic!("missing generated PVM MASM constant {name}"))
-}
-
-fn pvm_const(name: &str) -> u64 {
-    masm_const(include_str!("../../asm/sys/pvm/parameters.masm"), name)
-}
-
-fn pvm_word(prefix: &str) -> [u64; 4] {
-    core::array::from_fn(|index| pvm_const(&format!("{prefix}_{index}")))
+fn context_advice(heights: &[u64]) -> Vec<u64> {
+    std::iter::once(7).chain(heights.iter().copied()).collect()
 }
 
 fn source() -> &'static str {
     "use miden::core::sys::pvm
+     use miden::core::sys::pvm::variants
      begin
+         exec.variants::load
          exec.pvm::load_air_context
      end"
 }
 
 #[test]
 fn pvm_wrapper_stores_heights_proof_order_positions_and_relation_metadata() {
-    let (output, _) = build_test!(source(), &[], &HEIGHTS)
+    let (output, _) = build_test!(source(), &[], &context_advice(&HEIGHTS))
         .execute_for_output()
         .expect("PVM AIR context must load");
 
@@ -80,7 +70,7 @@ fn pvm_wrapper_stores_heights_proof_order_positions_and_relation_metadata() {
         );
     }
 
-    for (i, expected) in pvm_word("RELATION_DIGEST").into_iter().enumerate() {
+    for (i, expected) in miden_air::precompiles::PVM_RELATION_DIGEST.into_iter().enumerate() {
         assert_eq!(
             read_memory_felt(&output, RELATION_DIGEST_PTR + i as u32),
             Felt::new_unchecked(expected)
@@ -92,7 +82,7 @@ fn pvm_wrapper_stores_heights_proof_order_positions_and_relation_metadata() {
 fn pvm_wrapper_enforces_every_air_height_boundary() {
     assert_eq!(MIN_LOG_HEIGHTS[BYTE_PAIR_LUT_AIR_INDEX], PVM_LOG_HEIGHT_MIN);
 
-    build_test!(source(), &[], &MIN_LOG_HEIGHTS)
+    build_test!(source(), &[], &context_advice(&MIN_LOG_HEIGHTS))
         .execute()
         .expect("every AIR must accept its derived minimum height");
 
@@ -100,7 +90,7 @@ fn pvm_wrapper_enforces_every_air_height_boundary() {
         if minimum > 0 {
             let mut heights = MIN_LOG_HEIGHTS;
             heights[air] = minimum - 1;
-            let test = build_test!(source(), &[], &heights);
+            let test = build_test!(source(), &[], &context_advice(&heights));
             expect_assert_error_message!(test);
         }
     }
@@ -108,14 +98,14 @@ fn pvm_wrapper_enforces_every_air_height_boundary() {
     let mut maximum = [LOG_HEIGHT_MAX; 12];
     // BytePairLut's height is fixed; only the other instances range up to the ceiling.
     maximum[BYTE_PAIR_LUT_AIR_INDEX] = MIN_LOG_HEIGHTS[BYTE_PAIR_LUT_AIR_INDEX];
-    build_test!(source(), &[], &maximum)
+    build_test!(source(), &[], &context_advice(&maximum))
         .execute()
         .expect("every AIR must accept the maximum supported log height");
 
     for air in 0..MIN_LOG_HEIGHTS.len() {
         let mut heights = MIN_LOG_HEIGHTS;
         heights[air] = LOG_HEIGHT_MAX + 1;
-        let test = build_test!(source(), &[], &heights);
+        let test = build_test!(source(), &[], &context_advice(&heights));
         expect_assert_error_message!(test);
     }
 }
@@ -127,7 +117,7 @@ fn pvm_wrapper_rejects_non_fixed_byte_pair_height() {
     let mut heights = MIN_LOG_HEIGHTS;
     heights[BYTE_PAIR_LUT_AIR_INDEX] += 1;
 
-    let test = build_test!(source(), &[], &heights);
+    let test = build_test!(source(), &[], &context_advice(&heights));
     expect_assert_error_message!(test);
 }
 
@@ -136,7 +126,7 @@ fn pvm_wrapper_rejects_a_non_u32_air_height() {
     let mut heights = MIN_LOG_HEIGHTS;
     heights[0] = u64::from(u32::MAX) + 1;
 
-    let test = build_test!(source(), &[], &heights);
+    let test = build_test!(source(), &[], &context_advice(&heights));
     assert!(test.execute().is_err(), "a non-u32 AIR height must be rejected");
 }
 
@@ -150,7 +140,7 @@ fn pvm_wrapper_preserves_the_caller_stack() {
     let (control, _) = build_test!("begin push.0 drop end", &SENTINELS)
         .execute_for_output()
         .expect("control program must run");
-    let (subject, _) = build_test!(source(), &SENTINELS, &HEIGHTS)
+    let (subject, _) = build_test!(source(), &SENTINELS, &context_advice(&HEIGHTS))
         .execute_for_output()
         .expect("PVM AIR context must load");
 

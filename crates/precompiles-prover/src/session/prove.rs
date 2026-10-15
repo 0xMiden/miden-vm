@@ -5,14 +5,14 @@ use alloc::{vec, vec::Vec};
 #[cfg(test)]
 use miden_air::precompiles::stark_config::test_challenger;
 use miden_air::precompiles::{
-    ChipletAir, ChipletMultiAir, preprocessed,
+    ChipletMultiAir, preprocessed,
+    proof::encode_proof,
+    protocol::relation_digest,
     stark_config::{
-        PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
-        observe_protocol_params, precompile_pcs_params,
+        blake3_256_config, eidos_config, keccak_config, observe_protocol_params,
+        precompile_pcs_params,
     },
 };
-#[cfg(test)]
-use miden_core::utils::RowMajorMatrix;
 use miden_core::{
     Felt,
     field::QuadFelt,
@@ -35,13 +35,11 @@ use crate::ProveError;
 impl SessionTraces {
     #[cfg(test)]
     fn prover_statement(&self) -> ProverStatement<Felt, QuadFelt, ChipletMultiAir> {
-        let statement = Statement::new(
-            ChipletMultiAir::new(),
-            vec![(ChipletAir::TRANSCRIPT_EVAL_INDEX, self.air_inputs())],
-            Vec::new(),
-        )
-        .expect("chiplet statement inputs are valid");
-        let mains: Vec<RowMajorMatrix<Felt>> = self.mains().into_iter().cloned().collect();
+        let air = ChipletMultiAir::with_variant(self.variant);
+        let inputs = vec![(air.transcript_eval_index(), self.air_inputs())];
+        let statement =
+            Statement::new(air, inputs, Vec::new()).expect("chiplet statement inputs are valid");
+        let mains = self.main_traces.clone();
         ProverStatement::new(statement, mains).expect("chiplet trace shapes are valid")
     }
 
@@ -55,20 +53,22 @@ impl SessionTraces {
     #[tracing::instrument("prove_stark", skip_all)]
     pub(crate) fn prove_stark(self, hash_fn: HashFunction) -> Result<StarkProof, ProveError> {
         let params = precompile_pcs_params();
+        let variant = self.variant;
+        let relation_digest = relation_digest(variant);
         match hash_fn {
             HashFunction::Blake3_256 => {
-                let config = blake3_256_config(params, PRECOMPILE_RELATION_DIGEST);
-                let preprocessed = preprocessed::blake3();
+                let config = blake3_256_config(params, relation_digest);
+                let preprocessed = preprocessed::blake3_for(variant);
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Keccak => {
-                let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
-                let preprocessed = preprocessed::keccak();
+                let config = keccak_config(params, relation_digest);
+                let preprocessed = preprocessed::keccak_for(variant);
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Eidos => {
-                let config = eidos_config(params, PRECOMPILE_RELATION_DIGEST);
-                let preprocessed = preprocessed::eidos();
+                let config = eidos_config(params, relation_digest);
+                let preprocessed = preprocessed::eidos_for(variant);
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
         }
@@ -84,12 +84,11 @@ impl SessionTraces {
         SC: StarkConfig<Felt, QuadFelt>,
         <SC::Lmcs as LmcsTrait>::Commitment: Serialize,
     {
-        let statement = Statement::new(
-            ChipletMultiAir::new(),
-            vec![(ChipletAir::TRANSCRIPT_EVAL_INDEX, self.air_inputs())],
-            Vec::new(),
-        )
-        .expect("chiplet statement inputs are valid");
+        let variant = self.variant;
+        let air = ChipletMultiAir::with_variant(variant);
+        let inputs = vec![(air.transcript_eval_index(), self.air_inputs())];
+        let statement =
+            Statement::new(air, inputs, Vec::new()).expect("chiplet statement inputs are valid");
         let prover_statement = ProverStatement::new(statement, self.into_mains())
             .expect("chiplet trace shapes are valid");
 
@@ -103,6 +102,6 @@ impl SessionTraces {
         let proof_bytes = <SerdeCompat<StarkProofData<Felt, QuadFelt, SC>> as wincode::config::Serialize<
             _,
         >>::serialize(&output.proof, proof_encoding_config)?;
-        Ok(StarkProof::new(proof_bytes, hash_fn))
+        Ok(StarkProof::new(encode_proof(variant, proof_bytes), hash_fn))
     }
 }

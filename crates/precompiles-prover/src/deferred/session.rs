@@ -7,7 +7,7 @@ use alloc::{
 };
 
 use miden_air::precompiles::{
-    ChipletMultiAir,
+    ChipletAir, ChipletMultiAir,
     hash::keccak::node::{MAX_SPONGE_PERMS, SPONGE_RATE_BYTES},
     stark_config::precompile_pcs_params,
 };
@@ -15,8 +15,8 @@ use miden_core::{
     Felt,
     deferred::{
         DEFERRED_AND_FRAME, DataChunk, Digest, MAX_PRECOMPILE_ROOTS, PrecompileLimits,
-        PrecompileWitness, PreparationError, PreparedNode, PreparedWitness, TRUE_DIGEST,
-        fold_deferred_root,
+        PrecompileWitness, PreparationError, PreparedNode, PreparedWitness, PvmAirVariant,
+        TRUE_DIGEST, fold_deferred_root,
     },
     field::QuadFelt,
     program::domain::DeferredChunksDomain,
@@ -95,6 +95,7 @@ pub(crate) struct WitnessSession {
     session: Session,
     root: Truthy,
     roots: Vec<Digest>,
+    variant: PvmAirVariant,
 }
 
 #[cfg(test)]
@@ -108,6 +109,13 @@ impl WitnessSession {
 
     pub(crate) fn finish(self) -> crate::session::SessionTraces {
         self.session.finish(self.root)
+    }
+
+    pub(crate) fn finish_with_variant(
+        self,
+        variant: PvmAirVariant,
+    ) -> crate::session::SessionTraces {
+        self.session.finish_with_variant(self.root, variant)
     }
 
     pub(crate) fn msm_expr_count(&self) -> usize {
@@ -150,6 +158,8 @@ struct WitnessImporter {
     roots: Vec<Digest>,
     aggregate: Option<Truthy>,
     location: WitnessLocation,
+    requested_variant: Option<PvmAirVariant>,
+    used_variant: PvmAirVariant,
 }
 
 #[cfg(test)]
@@ -166,16 +176,62 @@ pub(crate) fn prove(
     expected_roots: Option<&[Digest]>,
     max_prover_memory_bytes: u64,
 ) -> Result<crate::PrecompileProof, PrecompileProvingError> {
+    prove_selected_variant(
+        witnesses,
+        hash_fn,
+        verification_limits,
+        expected_roots,
+        None,
+        max_prover_memory_bytes,
+    )
+}
+
+pub(crate) fn prove_with_variant(
+    witnesses: Vec<PrecompileWitness>,
+    hash_fn: crate::HashFunction,
+    variant: PvmAirVariant,
+    verification_limits: &PrecompileLimits,
+    max_prover_memory_bytes: u64,
+) -> Result<crate::PrecompileProof, PrecompileProvingError> {
+    prove_selected_variant(
+        witnesses,
+        hash_fn,
+        verification_limits,
+        None,
+        Some(variant),
+        max_prover_memory_bytes,
+    )
+}
+
+fn prove_selected_variant(
+    witnesses: Vec<PrecompileWitness>,
+    hash_fn: crate::HashFunction,
+    verification_limits: &PrecompileLimits,
+    expected_roots: Option<&[Digest]>,
+    requested_variant: Option<PvmAirVariant>,
+    max_prover_memory_bytes: u64,
+) -> Result<crate::PrecompileProof, PrecompileProvingError> {
     let imported = {
         let _span = tracing::info_span!("build_session").entered();
-        import_witnesses_with_roots(witnesses, verification_limits, expected_roots)?
+        import_witnesses_selecting_variant(
+            witnesses,
+            verification_limits,
+            expected_roots,
+            requested_variant,
+        )?
     };
+    let variant = imported.variant;
     let heights = imported
         .session
         .trace_heights()
         .ok_or(PrecompileProvingError::MemoryEstimateOverflow)?;
+    let heights: Vec<_> = heights
+        .into_iter()
+        .zip(ChipletAir::all())
+        .filter_map(|(height, air)| air.is_in_variant(variant).then_some(height))
+        .collect();
     let estimated_bytes = memory::prover_peak_bytes::<Felt, QuadFelt, _>(
-        &ChipletMultiAir::new(),
+        &ChipletMultiAir::with_variant(variant),
         &heights,
         &precompile_pcs_params(),
     )
@@ -189,7 +245,11 @@ pub(crate) fn prove(
 
     let traces = {
         let _span = tracing::info_span!("build_trace").entered();
-        imported.session.finish(imported.root)
+        if variant == PvmAirVariant::ALL {
+            imported.session.finish(imported.root)
+        } else {
+            imported.session.finish_with_variant(imported.root, variant)
+        }
     };
     Ok(crate::PrecompileProof {
         proof: traces.prove_stark(hash_fn)?,
@@ -203,7 +263,7 @@ pub mod testing {
     use miden_core::utils::Matrix;
 
     use super::{
-        ChipletMultiAir, Felt, PrecompileLimits, QuadFelt, WitnessSession,
+        ChipletAir, ChipletMultiAir, Felt, PrecompileLimits, QuadFelt, WitnessSession,
         import_witnesses_with_roots, memory, precompile_pcs_params,
     };
     use crate::{
@@ -226,12 +286,18 @@ pub mod testing {
         limits: &PrecompileLimits,
     ) -> Result<PreparedSession, PrecompileProvingError> {
         let imported = import_witnesses_with_roots(witnesses, limits, None)?;
+        let variant = imported.variant;
         let heights = imported
             .session
             .trace_heights()
             .ok_or(PrecompileProvingError::MemoryEstimateOverflow)?;
+        let heights: alloc::vec::Vec<_> = heights
+            .into_iter()
+            .zip(ChipletAir::all())
+            .filter_map(|(height, air)| air.is_in_variant(variant).then_some(height))
+            .collect();
         let estimated_bytes = memory::prover_peak_bytes::<Felt, QuadFelt, _>(
-            &ChipletMultiAir::new(),
+            &ChipletMultiAir::with_variant(variant),
             &heights,
             &precompile_pcs_params(),
         )
@@ -250,7 +316,7 @@ pub mod testing {
         pub fn build_trace(self) -> PreparedTraces {
             let imported = self.0;
             PreparedTraces {
-                traces: imported.session.finish(imported.root),
+                traces: imported.session.finish_with_variant(imported.root, imported.variant),
                 roots: imported.roots,
             }
         }
@@ -260,7 +326,7 @@ pub mod testing {
         /// Returns `(height, width)` for each main trace in canonical AIR instance order.
         pub fn main_trace_shapes(&self) -> alloc::vec::Vec<(usize, usize)> {
             self.traces
-                .mains()
+                .main_traces
                 .iter()
                 .map(|matrix| (matrix.height(), matrix.width()))
                 .collect()
@@ -284,10 +350,29 @@ pub(crate) fn import_witnesses(
     import_witnesses_with_roots(witnesses, verification_limits, None)
 }
 
+#[cfg(any(test, feature = "testing"))]
 pub(crate) fn import_witnesses_with_roots(
     witnesses: Vec<PrecompileWitness>,
     verification_limits: &PrecompileLimits,
     expected_roots: Option<&[Digest]>,
+) -> Result<WitnessSession, PrecompileProvingError> {
+    import_witnesses_selecting_variant(witnesses, verification_limits, expected_roots, None)
+}
+
+#[cfg(test)]
+pub(crate) fn import_witnesses_with_variant(
+    witnesses: Vec<PrecompileWitness>,
+    verification_limits: &PrecompileLimits,
+    variant: PvmAirVariant,
+) -> Result<WitnessSession, PrecompileProvingError> {
+    import_witnesses_selecting_variant(witnesses, verification_limits, None, Some(variant))
+}
+
+fn import_witnesses_selecting_variant(
+    witnesses: Vec<PrecompileWitness>,
+    verification_limits: &PrecompileLimits,
+    expected_roots: Option<&[Digest]>,
+    requested_variant: Option<PvmAirVariant>,
 ) -> Result<WitnessSession, PrecompileProvingError> {
     if witnesses.is_empty() {
         return Err(SessionInputError::Empty.into());
@@ -327,7 +412,7 @@ pub(crate) fn import_witnesses_with_roots(
         })
         .collect::<Result<Vec<_>, SessionInputError>>()?;
 
-    let mut importer = WitnessImporter::new();
+    let mut importer = WitnessImporter::new(requested_variant);
     for witness in prepared {
         importer = importer.import(witness)?;
     }
@@ -335,7 +420,7 @@ pub(crate) fn import_witnesses_with_roots(
 }
 
 impl WitnessImporter {
-    fn new() -> Self {
+    fn new(requested_variant: Option<PvmAirVariant>) -> Self {
         Self {
             session: Session::new(),
             cache: BTreeMap::new(),
@@ -344,6 +429,8 @@ impl WitnessImporter {
             roots: Vec::new(),
             aggregate: None,
             location: WitnessLocation::Batch,
+            requested_variant,
+            used_variant: PvmAirVariant::NONE,
         }
     }
 
@@ -356,6 +443,23 @@ impl WitnessImporter {
                 witness: witness_index,
                 entry: entry_index + 1,
             };
+            if let Some(frame) = prepared.node().frame() {
+                for (required, decoded) in [
+                    (PvmAirVariant::KECCAK, Keccak256Precompile::decode_assert_frame(frame)),
+                    (PvmAirVariant::SHA512, Sha512Precompile::decode_assert_frame(frame)),
+                    (PvmAirVariant::SHA256, Sha256Precompile::decode_assert_frame(frame)),
+                ] {
+                    if decoded.map_err(|_| self.invalid("invalid hash frame"))?.is_some() {
+                        if self.requested_variant.is_some_and(|variant| !variant.contains(required))
+                        {
+                            return Err(self.invalid(
+                                "hash precompile is disabled in the selected PVM AIR variant",
+                            ));
+                        }
+                        self.used_variant = self.used_variant.union(required);
+                    }
+                }
+            }
             let digest = prepared.digest();
             if let Some(previous) = self.cache.get(&digest) {
                 if previous.definition.node() != prepared.node() {
@@ -406,6 +510,7 @@ impl WitnessImporter {
             session: self.session,
             root,
             roots: self.roots,
+            variant: self.requested_variant.unwrap_or(self.used_variant),
         })
     }
 
