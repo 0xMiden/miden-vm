@@ -335,23 +335,22 @@ pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
 // AUX LAYOUT
 // ================================================================================================
 //
-// 12 aux columns. Simultaneous interactions are product-batched; the
+// 10 aux columns. Simultaneous interactions are product-batched; the
 // mutually exclusive typed relations in col 3 share a direct group. Every
 // closing constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
 //
-// - col 0:  Binding bus `consume-lhs` + the linear, head-aware terminal `EidosOut`.
-// - col 1:  `consume-rhs` + `provide-h` (the True-binding provide, heavy — a degree-2 message).
-// - col 2:  Eidos block + initial CV.
-// - col 3:  Typed value relations — one of `consume-uint`, `consume-uintmul`, or `consume-ecpoint`
+// - col 0: Binding bus child pair for AND, uint op, EC create, and EC op rows — `consume-lhs` +
+//   `consume-rhs`.
+// - col 1: The linear, head-aware terminal `EidosOut` + `provide-h` (the True-binding provide).
+// - col 2: Eidos block + initial CV.
+// - col 3: Typed value relations — one of `consume-uint`, `consume-uintmul`, or `consume-ecpoint`
 //   on their mutually exclusive row families.
-// - col 4:  `provide-binding`, alone (heavy — a transient-scaled degree-2 message).
-// - col 5:  Binding bus, op-children path — `consume-lhs-uint` + `consume-rhs-uint`.
-// - col 6:  `consume-uintadd`, alone (heavy — a role-mixed degree-2 message).
-// - col 7:  Binding bus, Group path — `consume-p` + `consume-q`.
-// - col 8:  `provide-group`, alone (heavy).
-// - col 9:  `consume-ecgroupadd`, alone (heavy — a role-mixed degree-2 message).
-// - col 10: EcMsm continuation — `consume-base-group` + `consume-scalar-uint`.
-// - col 11: EcMsm continuation — `consume-msmclaimterm` + `consume-msmexpr`.
+// - col 4: `provide-binding`, alone (heavy — a transient-scaled degree-2 message).
+// - col 5: `consume-uintadd`, alone (heavy — a role-mixed degree-2 message).
+// - col 6: `provide-group`, alone (heavy).
+// - col 7: `consume-ecgroupadd`, alone (heavy — a role-mixed degree-2 message).
+// - col 8: EcMsm continuation — `consume-base-group` + `consume-scalar-uint`.
+// - col 9: EcMsm continuation — `consume-msmclaimterm` + `consume-msmexpr`.
 pub const NUM_AUX_COLS: usize = 10;
 const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [2, 2, 2, 1, 1, 1, 1, 1, 2, 2];
 
@@ -1016,7 +1015,7 @@ where
             ),
         );
 
-        // col 10/11: the EcMsm continuation-run consumes. Per row: the
+        // col 8/9: the EcMsm continuation-run consumes. Per row: the
         // `Pᵢ` `Group` binding + the `sᵢ` `Uint` binding (tying the compression
         // block to real child nodes) + `MsmClaimTerm(expr, Pᵢ, sᵢ)`
         // (positionless — tying to the chiplet's term *multiset*, so the absorb
