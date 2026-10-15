@@ -1,9 +1,8 @@
-//! Protocol constants of the PVM recursive-verifier ACE circuit.
+//! Protocol constants for the full PVM recursive-verifier AIR variant.
 //!
-//! One order-invariant circuit serves every proof ordering, so the accepted circuit is named
-//! outright by its digest: [`PVM_ACE_CIRCUIT_DIGEST`] is the advice-map key its instruction stream
-//! is served under, the value the MASM loader pins that stream to, and — through
-//! [`PVM_RELATION_DIGEST`] — what binds the Fiat-Shamir transcript to the relation.
+//! Each hash variant has one order-invariant circuit. The full variant's constants below retain
+//! the original protocol commitment; the generator also emits the trusted configuration table
+//! used by the shared MASM verifier to select all eight variants.
 //!
 //! The values below are written by `pvm-constants-regen`; do not edit them by hand.
 
@@ -26,7 +25,7 @@ pub(crate) const PVM_PROTOCOL_ID: u64 = 4;
 
 /// Relation digest binding the accepted circuit into the Fiat-Shamir transcript
 /// (raw canonical u64 limbs): `Eidos(PVM_PROTOCOL_ID || PVM_ACE_CIRCUIT_DIGEST)`.
-#[cfg(any(test, feature = "constants-tools", feature = "std"))]
+#[cfg(any(test, feature = "constants-tools"))]
 pub const PVM_RELATION_DIGEST: [u64; 4] = [
     6300943842119190689,
     8396374335577542810,
@@ -58,7 +57,7 @@ pub const PVM_PREPROCESSED_COMMITMENT: [u64; 4] = [
 
 /// Encoded circuit shape: (READ variables, evaluation gates, stream length in felts). An in-VM
 /// verifier needs these as compile-time constants to size its reads and its ACE evaluation.
-#[cfg(any(test, feature = "constants-tools"))]
+#[cfg(feature = "constants-tools")]
 pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (2632, 13008, 14240);
 
 /// Computes the relation digest binding an ACE circuit commitment into the Fiat-Shamir transcript.

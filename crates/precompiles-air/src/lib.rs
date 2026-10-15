@@ -13,6 +13,7 @@ pub mod math;
 pub mod memory;
 pub mod preprocessed;
 pub mod primitives;
+pub mod proof;
 pub mod protocol;
 pub mod relations;
 pub mod security;
@@ -22,4 +23,5 @@ pub mod uint;
 pub mod utils;
 
 pub use air::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS};
+pub use miden_core::deferred::PvmAirVariant;
 pub use protocol::PVM_RELATION_DIGEST;

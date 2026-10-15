@@ -12,7 +12,7 @@ use miden_core::{
 };
 use miden_crypto::hash::keccak::Keccak256;
 use miden_precompiles::Keccak256Precompile;
-use miden_precompiles_prover::prove_precompiles;
+use miden_precompiles_prover::{PvmAirVariant, prove_precompiles_with_variant};
 use miden_precompiles_verifier::verify_deferred;
 
 const PROOF_PATH: &str = "../precompiles-verifier/tests/fixtures/pvm_eidos_v1_0.bin";
@@ -57,9 +57,10 @@ fn run(mode: Mode) -> Result<(), String> {
         .into_witness()
         .map_err(|error| format!("open fixture witness: {error}"))?
         .ok_or("fixture state has deferred work")?;
-    let proof = prove_precompiles(vec![witness], HashFunction::Eidos)
-        .map_err(|error| format!("generate proof: {error}"))?
-        .proof;
+    let proof =
+        prove_precompiles_with_variant(vec![witness], HashFunction::Eidos, PvmAirVariant::ALL)
+            .map_err(|error| format!("generate proof: {error}"))?
+            .proof;
     verify_deferred(&proof, root).map_err(|error| format!("verify generated proof: {error}"))?;
 
     let proof_path = fixture_path(PROOF_PATH);

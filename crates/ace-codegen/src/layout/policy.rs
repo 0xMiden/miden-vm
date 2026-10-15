@@ -117,28 +117,55 @@ impl LayoutBuilder {
 impl InputLayout {
     /// Build a native layout with no alignment padding.
     pub fn new(counts: InputCounts) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::native(), AirComposition::Single)
+        Self::build_with_policy(counts, LayoutPolicy::native(), AirComposition::Single, 1)
     }
 
     /// Build the MASM-compatible layout.
     pub fn new_masm(counts: InputCounts) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::masm(), AirComposition::Single)
+        Self::build_with_policy(counts, LayoutPolicy::masm(), AirComposition::Single, 1)
     }
 
     /// Build a native layout for a multi-AIR relation.
     pub fn new_multi_air(counts: InputCounts, num_airs: usize) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::native(), AirComposition::multi_air(num_airs))
+        Self::new_multi_air_with_quotient_alignment(counts, num_airs, 1)
     }
 
     /// Build the MASM-compatible layout for a multi-AIR relation.
     pub fn new_masm_multi_air(counts: InputCounts, num_airs: usize) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::masm(), AirComposition::multi_air(num_airs))
+        Self::new_masm_multi_air_with_quotient_alignment(counts, num_airs, 1)
+    }
+
+    pub(crate) fn new_multi_air_with_quotient_alignment(
+        counts: InputCounts,
+        num_airs: usize,
+        quotient_width_alignment: usize,
+    ) -> Self {
+        Self::build_with_policy(
+            counts,
+            LayoutPolicy::native(),
+            AirComposition::multi_air(num_airs),
+            quotient_width_alignment,
+        )
+    }
+
+    pub(crate) fn new_masm_multi_air_with_quotient_alignment(
+        counts: InputCounts,
+        num_airs: usize,
+        quotient_width_alignment: usize,
+    ) -> Self {
+        Self::build_with_policy(
+            counts,
+            LayoutPolicy::masm(),
+            AirComposition::multi_air(num_airs),
+            quotient_width_alignment,
+        )
     }
 
     fn build_with_policy(
         counts: InputCounts,
         policy: LayoutPolicy,
         composition: AirComposition,
+        quotient_width_alignment: usize,
     ) -> Self {
         const NUM_RANDOMNESS_INPUTS: usize = 2;
         assert_eq!(
@@ -160,11 +187,13 @@ impl InputLayout {
         let main_curr = builder.alloc(counts.width, policy.main);
         let aux_coord_width = counts.aux_width * EXT_DEGREE;
         let aux_curr = builder.alloc(aux_coord_width, policy.aux);
-        let quotient_curr = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
+        let quotient_width =
+            (counts.num_quotient_chunks * EXT_DEGREE).next_multiple_of(quotient_width_alignment);
+        let quotient_curr = builder.alloc(quotient_width, policy.quotient);
         let preprocessed_next = builder.alloc(counts.preprocessed_width, policy.preprocessed);
         let main_next = builder.alloc(counts.width, policy.main);
         let aux_next = builder.alloc(aux_coord_width, policy.aux);
-        let quotient_next = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
+        let quotient_next = builder.alloc(quotient_width, policy.quotient);
         let aux_bus_boundary = builder.alloc(counts.num_aux_boundary, policy.aux_bus_boundary);
         let stark_vars = builder.alloc(num_stark_vars, policy.stark_vars);
 

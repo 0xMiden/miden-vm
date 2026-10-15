@@ -6,6 +6,7 @@ extern crate alloc;
 extern crate std;
 
 use miden_core::deferred::PrecompileRegistry;
+pub use miden_core::deferred::PvmAirVariant;
 
 mod codec;
 mod hash;
@@ -50,10 +51,56 @@ pub use math::{
 /// TODO: If constructing the official registry becomes measurable overhead, consider a
 /// cached/shared registry for default processor initialization.
 pub fn registry() -> PrecompileRegistry {
-    PrecompileRegistry::new()
-        .with_precompile(Keccak256Precompile::default())
-        .with_precompile(Sha512Precompile::default())
-        .with_precompile(Sha256Precompile::default())
-        .with_precompile(UintPrecompile)
-        .with_precompile(CurvePrecompile)
+    registry_for(PvmAirVariant::ALL)
+}
+
+/// Returns the uint and curve precompiles together with the selected hash precompiles.
+pub fn registry_for(variant: PvmAirVariant) -> PrecompileRegistry {
+    let mut registry = PrecompileRegistry::new();
+    if variant.contains(PvmAirVariant::KECCAK) {
+        registry = registry.with_precompile(Keccak256Precompile::default());
+    }
+    if variant.contains(PvmAirVariant::SHA512) {
+        registry = registry.with_precompile(Sha512Precompile::default());
+    }
+    if variant.contains(PvmAirVariant::SHA256) {
+        registry = registry.with_precompile(Sha256Precompile::default());
+    }
+    registry.with_precompile(UintPrecompile).with_precompile(CurvePrecompile)
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_core::deferred::NodeType;
+
+    use super::*;
+
+    #[test]
+    fn variant_registry_rejects_disabled_hash_frames() {
+        for variant in PvmAirVariant::ALL_VARIANTS {
+            let registry = registry_for(variant);
+            for (required, frame) in [
+                (PvmAirVariant::KECCAK, Keccak256Precompile::assert_frame(0)),
+                (PvmAirVariant::SHA256, Sha256Precompile::assert_frame(0)),
+                (PvmAirVariant::SHA512, Sha512Precompile::assert_frame(0)),
+            ] {
+                let result = registry.decode_precompile_frame(frame);
+                if variant.contains(required) {
+                    assert_eq!(result.unwrap(), NodeType::Join);
+                } else {
+                    assert!(result.is_err());
+                }
+            }
+            assert!(
+                registry
+                    .decode_precompile_frame(CurvePrecompile::value_frame(CurveId::Secp256k1))
+                    .is_ok()
+            );
+            assert!(
+                registry
+                    .decode_precompile_frame(UintPrecompile::value_frame(UintDomain::U256))
+                    .is_ok()
+            );
+        }
+    }
 }

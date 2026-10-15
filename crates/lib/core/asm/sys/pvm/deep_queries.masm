@@ -19,9 +19,6 @@ const PREPROCESSED_INDEX_MASK = 524287
 # One opened query row, in the same commitment-group order as lifted-stark's DeepOracle.
 # Each double word is one eight-felt Eidos compression block.
 const PREPROCESSED_ROW_DOUBLE_WORDS = 1
-const MAIN_ROW_DOUBLE_WORDS = 77
-const AUX_ROW_DOUBLE_WORDS = 42
-const QUOTIENT_ROW_DOUBLE_WORDS = 1
 
 # ERRORS
 # =================================================================================================
@@ -33,9 +30,6 @@ const QUOTIENT_LEAF_VALUE_MISMATCH = "quotient query leaf hash mismatch"
 
 # Registered LMCS leaf initial chaining words, generated from the PVM row widths above.
 const PREPROCESSED_LMCS_INIT_CV = [4280581857092832001, 2688637132020383752, 1947077364412317696, 6620516959492505600]
-const MAIN_LMCS_INIT_CV = [4280581857092832001, 2688637132020384360, 1947077364412317696, 6620516959492505600]
-const AUX_LMCS_INIT_CV = [4280581857092832001, 2688637132020384080, 1947077364412317696, 6620516959492505600]
-const QUOTIENT_LMCS_INIT_CV = [4280581857092832001, 2688637132020383752, 1947077364412317696, 6620516959492505600]
 
 # MAIN PROCEDURE
 # =================================================================================================
@@ -165,26 +159,15 @@ proc process_main_trace(
     adv.push_mapval
 
     dropw
-    push.MAIN_LMCS_INIT_CV
+    exec.layout::main_lmcs_init_cv
     swapw padw
-    exec.load_main_trace
+    exec.layout::main_query_loader_ptr dynexec
 
     swapw.2
     padw
     mem_loadw_le.TMP3_PTR
     assert_eqw.err=MAIN_LEAF_VALUE_MISMATCH
     dropw
-end
-
-proc load_main_trace(
-    state: types::EidosState,
-    evaluation: types::HornerState,
-) -> (types::EidosState, types::HornerState)
-    repeat.MAIN_ROW_DOUBLE_WORDS
-        adv_pipe
-        horner_eval_base
-        exec.eidos::compress
-    end
 end
 
 # AUXILIARY TRACE
@@ -205,26 +188,15 @@ proc process_aux_trace(
     adv.push_mapval
 
     dropw
-    push.AUX_LMCS_INIT_CV
+    exec.layout::aux_lmcs_init_cv
     swapw padw
-    exec.load_aux_trace
+    exec.layout::aux_query_loader_ptr dynexec
 
     swapw.2
     padw
     mem_loadw_le.TMP3_PTR
     assert_eqw.err=AUX_LEAF_VALUE_MISMATCH
     dropw
-end
-
-proc load_aux_trace(
-    state: types::EidosState,
-    evaluation: types::HornerState,
-) -> (types::EidosState, types::HornerState)
-    repeat.AUX_ROW_DOUBLE_WORDS
-        adv_pipe
-        horner_eval_base
-        exec.eidos::compress
-    end
 end
 
 # QUOTIENT TRACE
@@ -245,24 +217,15 @@ proc process_quotient_trace(
     adv.push_mapval
 
     dropw
-    push.QUOTIENT_LMCS_INIT_CV
+    exec.layout::quotient_lmcs_init_cv
     swapw padw
-    exec.load_quotient_trace
+    adv_pipe
+    horner_eval_base
+    exec.eidos::compress
 
     swapw.2
     padw
     mem_loadw_le.TMP3_PTR
     assert_eqw.err=QUOTIENT_LEAF_VALUE_MISMATCH
     dropw
-end
-
-proc load_quotient_trace(
-    state: types::EidosState,
-    evaluation: types::HornerState,
-) -> (types::EidosState, types::HornerState)
-    repeat.QUOTIENT_ROW_DOUBLE_WORDS
-        adv_pipe
-        horner_eval_base
-        exec.eidos::compress
-    end
 end

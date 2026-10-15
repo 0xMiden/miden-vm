@@ -26,7 +26,7 @@ use miden_lifted_air::{BaseAir, ConstraintCounts, ConstraintDegrees, LiftedAir};
 use p3_security::{budget::report::LOOKUP_LABEL, fixed};
 
 use crate::{
-    ChipletAir,
+    ChipletAir, PvmAirVariant,
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
     hash::{
         chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir, sha256::Sha256Air,
@@ -71,15 +71,20 @@ pub const LOOKUP_SHAPE: LookupShape = LookupShape {
 /// This allocating pass supports validation and tooling. [`security_report`] uses the stored
 /// [`AIR_SHAPE`] constant.
 pub fn derive_air_shape() -> AirShape {
+    derive_air_shape_for(PvmAirVariant::ALL)
+}
+
+/// Symbolically derives the AIR shape of the selected chiplets for validation and tooling.
+pub fn derive_air_shape_for(variant: PvmAirVariant) -> AirShape {
     let airs = ChipletAir::all();
-    let num_airs = airs.len();
+    let num_airs = airs.iter().filter(|air| air.is_in_variant(variant)).count();
 
     let mut num_constraints = 0;
     let mut max_constraint_degree = 0;
     let mut num_columns = 0;
     let mut fractions_per_row = 0;
 
-    for air in airs {
+    for air in airs.into_iter().filter(|air| air.is_in_variant(variant)) {
         num_constraints += ConstraintCounts::from_air::<Felt, QuadFelt, _>(&air).total();
         max_constraint_degree =
             max_constraint_degree.max(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air).max());
@@ -104,6 +109,36 @@ pub fn derive_air_shape() -> AirShape {
     }
 }
 
+/// Stored variant shapes at the default commitment alignment. Keeping these small descriptors
+/// avoids symbolic AIR evaluation during verification, including on `no_std` targets. The
+/// all-variant symbolic test checks every field against the selected relation.
+fn air_shape_for(variant: PvmAirVariant) -> AirShape {
+    const fn shape(constraints: u32, degree: u32, deep_terms: u32, fractions: u32) -> AirShape {
+        AirShape {
+            num_composed_constraints: constraints,
+            max_constraint_degree: degree,
+            num_quotient_chunks: if degree == 3 { 2 } else { 4 },
+            max_combo: NUM_OOD_POINTS,
+            num_deep_terms: Some(deep_terms),
+            lookup: Some(LookupShape {
+                fractions_per_row: fractions,
+                max_message_width: MAX_MESSAGE_WIDTH as u32,
+            }),
+        }
+    }
+    const SHAPES: [AirShape; 8] = [
+        shape(540, 3, 562, 169), // Base.
+        shape(676, 5, 802, 264), // Keccak.
+        shape(652, 5, 626, 188), // SHA-256.
+        shape(788, 5, 866, 283), // Keccak + SHA-256.
+        shape(675, 5, 666, 203), // SHA-512.
+        shape(811, 5, 906, 298), // Keccak + SHA-512.
+        shape(787, 5, 730, 222), // SHA-256 + SHA-512.
+        AIR_SHAPE,
+    ];
+    SHAPES[variant.as_u8() as usize]
+}
+
 /// Number of DEEP-quotient batching terms for a commitment scheme with the given column
 /// alignment, holding every other AIR shape input fixed at [`AIR_SHAPE`]'s stored values.
 ///
@@ -114,11 +149,17 @@ pub fn derive_air_shape() -> AirShape {
 /// alignment 17) calls this instead of using the alignment-[`COMMITMENT_ALIGNMENT`] [`AIR_SHAPE`]
 /// fixed for the default Eidos preset.
 pub fn num_deep_terms(alignment: usize) -> u32 {
+    num_deep_terms_for(PvmAirVariant::ALL, alignment)
+}
+
+/// DEEP-quotient batching terms for the selected AIRs and commitment alignment.
+pub fn num_deep_terms_for(variant: PvmAirVariant, alignment: usize) -> u32 {
     let mut num_columns = 0;
-    for air in ChipletAir::all() {
+    for air in ChipletAir::all().into_iter().filter(|air| air.is_in_variant(variant)) {
         num_columns += column_count(&air, alignment);
     }
-    num_columns += quotient_column_count(AIR_SHAPE.max_constraint_degree as usize, alignment);
+    num_columns +=
+        quotient_column_count(air_shape_for(variant).max_constraint_degree as usize, alignment);
 
     num_columns as u32 + NUM_OOD_POINTS
 }
@@ -340,6 +381,23 @@ pub fn proof_security_parameters(
     alignment: usize,
     hash_fn: HashFunction,
 ) -> ProofSecurityParameters {
+    proof_security_parameters_for(
+        pcs_params,
+        log_max_height,
+        alignment,
+        hash_fn,
+        PvmAirVariant::ALL,
+    )
+}
+
+/// Builds security parameters for the AIR variant authenticated by the proof transcript.
+pub fn proof_security_parameters_for(
+    pcs_params: &PcsParams,
+    log_max_height: u32,
+    alignment: usize,
+    hash_fn: HashFunction,
+    variant: PvmAirVariant,
+) -> ProofSecurityParameters {
     ProofSecurityParameters {
         protocol_params: protocol_params(pcs_params),
         log_final_degree: u32::from(pcs_params.log_final_degree()),
@@ -350,8 +408,8 @@ pub fn proof_security_parameters(
         },
         hash_fn,
         air_shape: AirShape {
-            num_deep_terms: Some(num_deep_terms(alignment)),
-            ..AIR_SHAPE
+            num_deep_terms: Some(num_deep_terms_for(variant, alignment)),
+            ..air_shape_for(variant)
         },
         num_ood_points: NUM_OOD_POINTS,
         num_lookup_boundary_terms: FIXED_BOUNDARY_LOOKUP_TERMS,
@@ -404,6 +462,41 @@ mod tests {
 
     use super::*;
     use crate::stark_config::precompile_pcs_params;
+
+    /// Every stored variant descriptor must reflect the relation being verified.
+    #[test]
+    fn variant_shapes_match_symbolic_and_omit_only_selected_airs() {
+        for variant in PvmAirVariant::ALL_VARIANTS {
+            let derived = derive_air_shape_for(variant);
+            assert_eq!(air_shape_for(variant), derived, "{variant:?}");
+            let params = proof_security_parameters_for(
+                &precompile_pcs_params(),
+                19,
+                COMMITMENT_ALIGNMENT,
+                HashFunction::Eidos,
+                variant,
+            );
+            assert_eq!(params.air_shape, derived, "{variant:?}");
+            assert!(derived.num_composed_constraints <= AIR_SHAPE.num_composed_constraints);
+            if variant != PvmAirVariant::ALL {
+                assert!(derived.num_composed_constraints < AIR_SHAPE.num_composed_constraints);
+                assert!(derived.lookup.unwrap().fractions_per_row < LOOKUP_SHAPE.fractions_per_row);
+            }
+            for alignment in [1, 4, 8, 17] {
+                let columns: usize = ChipletAir::all()
+                    .iter()
+                    .filter(|air| air.is_in_variant(variant))
+                    .map(|air| column_count(air, alignment))
+                    .sum();
+                let quotient =
+                    quotient_column_count(derived.max_constraint_degree as usize, alignment);
+                assert_eq!(
+                    num_deep_terms_for(variant, alignment),
+                    (columns + quotient) as u32 + NUM_OOD_POINTS
+                );
+            }
+        }
+    }
 
     /// Checks that [`AIR_SHAPE`] matches the current chiplet AIRs. A stale shape can make the
     /// reported security level differ from the level implied by the relation being verified.

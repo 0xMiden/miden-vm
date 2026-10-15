@@ -9,7 +9,7 @@ use alloc::{
 use miden_core::{
     deferred::{
         DEFERRED_AND_FRAME, DataChunk, Digest, MAX_DEFERRED_ELEMENTS, MAX_PRECOMPILE_ROOTS, Node,
-        PrecompileWitness, PrecompileWitnessEntry, TRUE_DIGEST, fold_deferred_root,
+        PrecompileWitness, PrecompileWitnessEntry, PvmAirVariant, TRUE_DIGEST, fold_deferred_root,
     },
     program::domain::DeferredChunksDomain,
 };
@@ -122,6 +122,7 @@ pub(crate) struct WitnessSession {
     session: Session,
     root: Truthy,
     roots: Vec<Digest>,
+    variant: PvmAirVariant,
 }
 
 impl WitnessSession {
@@ -136,6 +137,14 @@ impl WitnessSession {
     #[cfg(test)]
     pub(crate) fn finish(self) -> crate::session::SessionTraces {
         self.session.finish(self.root)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn finish_with_variant(
+        self,
+        variant: PvmAirVariant,
+    ) -> crate::session::SessionTraces {
+        self.session.finish_with_variant(self.root, variant)
     }
 
     #[cfg(test)]
@@ -193,20 +202,43 @@ pub(crate) fn prove(
     hash_fn: crate::HashFunction,
     max_prover_memory_bytes: u64,
 ) -> Result<crate::PrecompileProof, crate::PrecompileProvingError> {
+    prove_selected_variant(witnesses, hash_fn, None, max_prover_memory_bytes)
+}
+
+pub(crate) fn prove_with_variant(
+    witnesses: Vec<PrecompileWitness>,
+    hash_fn: crate::HashFunction,
+    variant: PvmAirVariant,
+    max_prover_memory_bytes: u64,
+) -> Result<crate::PrecompileProof, crate::PrecompileProvingError> {
+    prove_selected_variant(witnesses, hash_fn, Some(variant), max_prover_memory_bytes)
+}
+
+fn prove_selected_variant(
+    witnesses: Vec<PrecompileWitness>,
+    hash_fn: crate::HashFunction,
+    requested_variant: Option<PvmAirVariant>,
+    max_prover_memory_bytes: u64,
+) -> Result<crate::PrecompileProof, crate::PrecompileProvingError> {
     let imported = {
         let _span = tracing::info_span!("build_session").entered();
-        import_witnesses(witnesses, ImportLimits::default())?
+        import_witnesses_selecting_variant(witnesses, ImportLimits::default(), requested_variant)?
     };
+    let variant = imported.variant;
     let params = precompile_pcs_params();
     let estimated_bytes = imported
         .session
         .trace_heights()
-        .and_then(|heights| memory::prover_peak_bytes(&heights, &params, hash_fn));
+        .and_then(|heights| memory::prover_peak_bytes_for(&heights, &params, hash_fn, variant));
     crate::check_memory_budget(estimated_bytes, max_prover_memory_bytes)?;
 
     let traces = {
         let _span = tracing::info_span!("build_trace").entered();
-        imported.session.finish(imported.root)
+        if variant == PvmAirVariant::ALL {
+            imported.session.finish(imported.root)
+        } else {
+            imported.session.finish_with_variant(imported.root, variant)
+        }
     };
     Ok(crate::PrecompileProof {
         proof: traces.prove_stark(hash_fn)?,
@@ -214,9 +246,27 @@ pub(crate) fn prove(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn import_witnesses(
     witnesses: Vec<PrecompileWitness>,
     limits: ImportLimits,
+) -> Result<WitnessSession, SessionInputError> {
+    import_witnesses_with_variant(witnesses, limits, PvmAirVariant::ALL)
+}
+
+#[cfg(test)]
+pub(crate) fn import_witnesses_with_variant(
+    witnesses: Vec<PrecompileWitness>,
+    limits: ImportLimits,
+    variant: PvmAirVariant,
+) -> Result<WitnessSession, SessionInputError> {
+    import_witnesses_selecting_variant(witnesses, limits, Some(variant))
+}
+
+fn import_witnesses_selecting_variant(
+    witnesses: Vec<PrecompileWitness>,
+    limits: ImportLimits,
+    requested_variant: Option<PvmAirVariant>,
 ) -> Result<WitnessSession, SessionInputError> {
     if witnesses.is_empty() {
         return Err(SessionInputError::Empty);
@@ -232,6 +282,7 @@ pub(crate) fn import_witnesses(
     // singleton; retaining their commitments lets cache hits compare definitions across inputs.
     let mut elements_left = limits.elements;
     let mut hash_bytes_left = limits.hash_bytes;
+    let mut used_variant = PvmAirVariant::NONE;
     let mut index_tables = Vec::with_capacity(witnesses.len());
     for (witness_index, witness) in witnesses.iter().enumerate() {
         let location = WitnessLocation::Root { witness: witness_index };
@@ -261,18 +312,24 @@ pub(crate) fn import_witnesses(
                 .and_then(|n| n.checked_add(EidosFrame::FELT_LEN))
                 .ok_or(SessionInputError::Limit { location, resource: "input elements" })?;
             reserve(&mut elements_left, elements, location, "input elements")?;
-            let hash_frame = match Keccak256Precompile::decode_assert_frame(entry.frame()) {
-                Ok(None) => match Sha512Precompile::decode_assert_frame(entry.frame()) {
-                    Ok(None) => Sha256Precompile::decode_assert_frame(entry.frame()),
-                    sha512 => sha512,
-                },
-                keccak => keccak,
-            };
-            if let Some(n_bytes) = hash_frame.map_err(|_| SessionInputError::Invalid {
-                location,
-                reason: "invalid hash frame",
-            })? {
-                reserve(&mut hash_bytes_left, n_bytes as usize, location, "hash input bytes")?;
+            for (required, hash_frame) in [
+                (PvmAirVariant::KECCAK, Keccak256Precompile::decode_assert_frame(entry.frame())),
+                (PvmAirVariant::SHA512, Sha512Precompile::decode_assert_frame(entry.frame())),
+                (PvmAirVariant::SHA256, Sha256Precompile::decode_assert_frame(entry.frame())),
+            ] {
+                if let Some(n_bytes) = hash_frame.map_err(|_| SessionInputError::Invalid {
+                    location,
+                    reason: "invalid hash frame",
+                })? {
+                    if requested_variant.is_some_and(|variant| !variant.contains(required)) {
+                        return Err(SessionInputError::Invalid {
+                            location,
+                            reason: "hash precompile is disabled in the selected PVM AIR variant",
+                        });
+                    }
+                    used_variant = used_variant.union(required);
+                    reserve(&mut hash_bytes_left, n_bytes as usize, location, "hash input bytes")?;
+                }
             }
             digests.push(entry.digest(&digests).map_err(|_| SessionInputError::Invalid {
                 location,
@@ -355,7 +412,12 @@ pub(crate) fn import_witnesses(
             .ok_or(SessionInputError::Empty)?,
         root.hash(),
     )?;
-    Ok(WitnessSession { session: import.session, root, roots })
+    Ok(WitnessSession {
+        session: import.session,
+        root,
+        roots,
+        variant: requested_variant.unwrap_or(used_variant),
+    })
 }
 
 fn reserve(

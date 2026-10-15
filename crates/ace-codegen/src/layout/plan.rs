@@ -49,7 +49,7 @@ pub(crate) struct LayoutRegions {
     pub main_curr: InputRegion,
     /// Aux trace OOD coordinates at `zeta`.
     pub aux_curr: InputRegion,
-    /// Quotient chunk OOD coordinates at `zeta`.
+    /// Quotient chunk OOD coordinates at `zeta`, including commitment-width padding.
     pub quotient_curr: InputRegion,
     /// Preprocessed trace OOD values at `g * zeta`.
     pub preprocessed_next: InputRegion,
@@ -57,7 +57,7 @@ pub(crate) struct LayoutRegions {
     pub main_next: InputRegion,
     /// Aux trace OOD coordinates at `g * zeta`.
     pub aux_next: InputRegion,
-    /// Quotient chunk OOD coordinates at `g * zeta`.
+    /// Quotient chunk OOD coordinates at `g * zeta`, including commitment-width padding.
     pub quotient_next: InputRegion,
     /// Aux bus boundary values.
     pub aux_bus_boundary: InputRegion,
@@ -168,12 +168,12 @@ impl InputLayout {
         assert_eq!(self.regions.aux_next.width, aux_coord_width, "aux_next width mismatch");
 
         let quotient_width = self.counts.num_quotient_chunks * EXT_DEGREE;
-        assert_eq!(
-            self.regions.quotient_curr.width, quotient_width,
-            "quotient_curr width mismatch"
+        assert!(
+            self.regions.quotient_curr.width >= quotient_width,
+            "quotient_curr must contain every quotient chunk"
         );
         assert_eq!(
-            self.regions.quotient_next.width, quotient_width,
+            self.regions.quotient_next.width, self.regions.quotient_curr.width,
             "quotient_next width mismatch"
         );
         assert_eq!(
