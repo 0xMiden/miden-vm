@@ -864,9 +864,16 @@ mod tests {
         // Borrowed export is structural and works even when the selected node is not a statement.
         let witness = empty.witness_for(value, &framework_limits()).unwrap();
         assert_eq!(
-            witness.prepare(Arc::new(PrecompileRegistry::new()), &framework_limits()).unwrap().root(),
+            witness
+                .prepare(Arc::new(PrecompileRegistry::new()), &framework_limits())
+                .unwrap()
+                .root(),
             value
         );
+        assert!(matches!(
+            empty.witness_for(value, &PrecompileLimits::new(0)),
+            Err(PrecompileError::Limit(PrecompileLimitError::Elements { max: 0, .. }))
+        ));
         assert_eq!(empty.root(), TRUE_DIGEST);
         assert!(empty.get_node(&value).is_some());
         for root in [TRUE_DIGEST, Word::new([Felt::from_u32(99); 4])] {
