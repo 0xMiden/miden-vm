@@ -810,28 +810,40 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
     fn optimized_sum_and_typed_dots() {
         let mut b = GraphBuilder::new();
         let xs: Vec<_> = (0..8).map(|index| b.leaf(Leaf::Main { offset: 0, index })).collect();
-        let mut sums = Vec::new();
-        for (left, right) in [(xs[0], xs[1]), (xs[2], xs[3]), (xs[4], xs[5])] {
-            sums.push(b.op(Class::Base, OpKind::Add, left, Some(right)).0);
+        let left = b.op(Class::Base, OpKind::Add, xs[0], Some(xs[1])).0;
+        let right = b.op(Class::Base, OpKind::Add, xs[2], Some(xs[3])).0;
+        let sum = b.op(Class::Base, OpKind::Add, left, Some(right)).0;
+        let products: Vec<_> = xs
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| b.op(Class::Base, OpKind::Mul, pair[0], Some(pair[1])).0)
+            .collect();
+        let dot = products
+            .into_iter()
+            .reduce(|x, y| b.op(Class::Base, OpKind::Add, x, Some(y)).0)
+            .unwrap();
+        let mut lc = xs[0];
+        for i in 1..4 {
+            let coefficient = b.leaf(Leaf::BaseConst(7 + i as u64));
+            let weighted = b.op(Class::Base, OpKind::Mul, coefficient, Some(xs[2 * i])).0;
+            lc = b.op(Class::Base, OpKind::Add, lc, Some(weighted)).0;
         }
-        let sum = b.op(Class::Base, OpKind::Add, sums[0], Some(sums[1])).0;
-        let p = b.op(Class::Base, OpKind::Mul, xs[0], Some(xs[1])).0;
-        let q = b.op(Class::Base, OpKind::Mul, xs[2], Some(xs[3])).0;
-        let dot = b.op(Class::Base, OpKind::Add, p, Some(q)).0;
-        let c = b.leaf(Leaf::BaseConst(7));
-        let weighted = b.op(Class::Base, OpKind::Mul, c, Some(xs[4])).0;
-        let lc = b.op(Class::Base, OpKind::Add, xs[5], Some(weighted)).0;
-        let e0 = b.leaf(Leaf::Challenge(0));
-        let e1 = b.leaf(Leaf::Challenge(1));
-        let ep = b.op(Class::Ext, OpKind::Mul, xs[6], Some(e0)).0;
-        let eq = b.op(Class::Ext, OpKind::Mul, e1, Some(xs[7])).0;
-        let mixed = b.op(Class::Ext, OpKind::Add, ep, Some(eq)).0;
+        let mut products = Vec::new();
+        for i in 0..4 {
+            let challenge = b.leaf(Leaf::Challenge(i));
+            products.push(b.op(Class::Ext, OpKind::Mul, xs[4 + i], Some(challenge)).0);
+        }
+        let mixed = products
+            .into_iter()
+            .reduce(|x, y| b.op(Class::Ext, OpKind::Add, x, Some(y)).0)
+            .unwrap();
         let out = optimized(b, vec![sum, dot, lc], vec![mixed]);
         assert!(out.contains("AB::Expr::sum_array::<4>"), "{out}");
-        assert!(out.contains("AB::Expr::dot_product::<2>"));
-        assert!(out.contains("<AB::Expr as Algebra<Felt>>::mixed_dot_product::<2>"));
-        assert!(out.contains("<AB::ExprEF as Algebra<AB::Expr>>::mixed_dot_product::<2>"));
-        assert!(!out.contains("Algebra<Felt>>::mixed_dot_product::<2>(&[Into::<AB::ExprEF>"));
+        assert!(out.contains("AB::Expr::dot_product::<4>"));
+        assert!(out.contains("<AB::Expr as Algebra<Felt>>::mixed_dot_product::<4>"));
+        assert!(out.contains("<AB::ExprEF as Algebra<AB::Expr>>::mixed_dot_product::<4>"));
+        assert!(!out.contains("Algebra<Felt>>::mixed_dot_product::<4>(&[Into::<AB::ExprEF>"));
     }
 
     #[test]
@@ -867,31 +879,45 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
     #[test]
     fn optimized_dots_recover_product_regions_after_a_prefix() {
         let mut b = GraphBuilder::new();
-        let xs: Vec<_> = (0..5).map(|index| b.leaf(Leaf::Main { offset: 0, index })).collect();
-        let p = b.op(Class::Base, OpKind::Mul, xs[1], Some(xs[2])).0;
-        let q = b.op(Class::Base, OpKind::Mul, xs[3], Some(xs[4])).0;
-        let prefix = b.op(Class::Base, OpKind::Add, xs[0], Some(p)).0;
-        let sum = b.op(Class::Base, OpKind::Add, prefix, Some(q)).0;
+        let xs: Vec<_> = (0..9).map(|index| b.leaf(Leaf::Main { offset: 0, index })).collect();
+        let products: Vec<_> = xs[1..]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| b.op(Class::Base, OpKind::Mul, pair[0], Some(pair[1])).0)
+            .collect();
+        let mut sum = xs[0];
+        for &product in &products {
+            sum = b.op(Class::Base, OpKind::Add, sum, Some(product)).0;
+        }
         let out = optimized(b, vec![sum], vec![]);
-        assert!(out.contains("AB::Expr::dot_product::<2>"), "{out}");
-        assert!(!out.contains(&format!("let b{} =", p.index())));
-        assert!(!out.contains(&format!("let b{} =", q.index())));
+        assert!(out.contains("AB::Expr::dot_product::<4>"), "{out}");
+        for product in products {
+            assert!(!out.contains(&format!("let b{} =", product.index())));
+        }
     }
 
     #[test]
     fn optimized_extension_dots_keep_coefficient_types() {
         let mut b = GraphBuilder::new();
-        let es: Vec<_> = (0..4).map(|i| b.leaf(Leaf::Challenge(i))).collect();
-        let p = b.op(Class::Ext, OpKind::Mul, es[0], Some(es[1])).0;
-        let q = b.op(Class::Ext, OpKind::Mul, es[2], Some(es[3])).0;
-        let sum = b.op(Class::Ext, OpKind::Add, p, Some(q)).0;
-        let base = b.leaf(Leaf::Main { offset: 0, index: 0 });
-        let lift = b.leaf(Leaf::ExtBase(base));
-        let weighted = b.op(Class::Ext, OpKind::Mul, lift, Some(es[0])).0;
-        let mixed = b.op(Class::Ext, OpKind::Add, es[1], Some(weighted)).0;
+        let es: Vec<_> = (0..8).map(|i| b.leaf(Leaf::Challenge(i))).collect();
+        let products: Vec<_> = (0..4)
+            .map(|i| b.op(Class::Ext, OpKind::Mul, es[i], Some(es[4 + i])).0)
+            .collect();
+        let sum = products
+            .into_iter()
+            .reduce(|x, y| b.op(Class::Ext, OpKind::Add, x, Some(y)).0)
+            .unwrap();
+        let mut mixed = es[0];
+        for (i, &challenge) in es.iter().enumerate().take(4).skip(1) {
+            let base = b.leaf(Leaf::Main { offset: 0, index: i - 1 });
+            let lift = b.leaf(Leaf::ExtBase(base));
+            let weighted = b.op(Class::Ext, OpKind::Mul, lift, Some(challenge)).0;
+            mixed = b.op(Class::Ext, OpKind::Add, mixed, Some(weighted)).0;
+        }
         let out = optimized(b, vec![], vec![sum, mixed]);
-        assert!(out.contains("AB::ExprEF::dot_product::<2>"), "{out}");
-        assert!(out.contains("<AB::ExprEF as Algebra<AB::Expr>>::mixed_dot_product::<2>"));
+        assert!(out.contains("AB::ExprEF::dot_product::<4>"), "{out}");
+        assert!(out.contains("<AB::ExprEF as Algebra<AB::Expr>>::mixed_dot_product::<4>"));
         assert!(out.contains("AB::Expr::ONE"));
         assert!(!out.contains("Algebra<Felt>"));
     }
@@ -928,5 +954,48 @@ pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
         let out = optimized(b, vec![sum], vec![]);
         assert!(out.contains(") * Felt::from_u64(7)"), "{out}");
         assert!(!out.contains("AB::Expr::from(Felt::from_u64(7))"));
+    }
+
+    #[test]
+    fn optimized_tiny_dots_keep_plain_arithmetic() {
+        // Array setup and coordinate gathers need enough terms to amortize
+        // their cost, including on builders with lane-wise dot fallbacks.
+        for n in [2, 3] {
+            for kind in 0..4 {
+                let mut b = GraphBuilder::new();
+                let class = if kind < 2 { Class::Base } else { Class::Ext };
+                let mut products = Vec::new();
+                for i in 0..n {
+                    let left = if class == Class::Base {
+                        b.leaf(Leaf::Main { offset: 0, index: i })
+                    } else {
+                        b.leaf(Leaf::Challenge(i))
+                    };
+                    let right = match kind {
+                        0 => b.leaf(Leaf::Main { offset: 0, index: n + i }),
+                        1 => b.leaf(Leaf::BaseConst(7 + i as u64)),
+                        2 => b.leaf(Leaf::Challenge(n + i)),
+                        3 => b.leaf(Leaf::Main { offset: 0, index: i }),
+                        _ => unreachable!(),
+                    };
+                    products.push(b.op(class, OpKind::Mul, left, Some(right)).0);
+                }
+                let sum = products
+                    .iter()
+                    .copied()
+                    .reduce(|x, y| b.op(class, OpKind::Add, x, Some(y)).0)
+                    .unwrap();
+                let out = if class == Class::Base {
+                    optimized(b, vec![sum], vec![])
+                } else {
+                    optimized(b, vec![], vec![sum])
+                };
+                assert!(!out.contains("dot_product"), "{n} terms, kind {kind}: {out}");
+                let prefix = if class == Class::Base { 'b' } else { 'e' };
+                for id in products {
+                    assert!(out.contains(&format!("let {prefix}{} =", id.index())));
+                }
+            }
+        }
     }
 }

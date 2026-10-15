@@ -5,6 +5,9 @@ use crate::ir::{CapturedConstraints, Class, Graph, Leaf, Node, NodeId, OpKind};
 
 // Bound array sizes and live ranges. Longer sums retain a materialized prefix.
 const MAX_TERMS: usize = 16;
+// Reserve array/gather dots for larger regions. Tiny cases keep arithmetic
+// explicit, including small scalar scalings and packed multiplies.
+const MIN_DOT_TERMS: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum DotKind {
@@ -154,7 +157,7 @@ impl<'g> Plan<'g> {
                     terms[start..].iter().map_while(|&id| self.pair(id, class, kind)).collect();
                 // Unit terms allow beta^0*x and non-product prefixes, but a dot
                 // must consume a real, single-use multiplication to be useful.
-                if pairs.len() >= 2
+                if pairs.len() >= MIN_DOT_TERMS
                     && terms[start..start + pairs.len()]
                         .iter()
                         .any(|&id| self.product(id).is_some())
