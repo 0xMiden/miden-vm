@@ -2415,11 +2415,7 @@ end
             }
         }
         parser.pos = candidate;
-        assert_eq!(
-            parser.at_strong_top_level_form_starter(),
-            expected_at_candidate,
-            "{source}"
-        );
+        assert_eq!(parser.at_strong_top_level_form_starter(), expected_at_candidate, "{source}");
     }
 
     #[test]
