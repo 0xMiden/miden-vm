@@ -2893,9 +2893,7 @@ pub proc foo
     nop
 end
 ";
-        let formatted = assert_format_idempotent(source, "attribute");
-        assert!(formatted.contains("# role of the script"), "{formatted}");
-        assert!(formatted.contains("role = \"custom\""), "{formatted}");
+        assert_eq!(assert_format_idempotent(source, "attribute"), source);
     }
 
     #[test]
