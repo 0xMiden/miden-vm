@@ -17,8 +17,8 @@ bench = false
 doctest = false
 
 [features]
-default = ["std"]
-compiler = []
+default = ["std", "compiler"]
+compiler = ["miden-ace-codegen/compiler"]
 arbitrary = ["std", "dep:proptest"]
 std = ["miden-core/std", "proptest?/std", "rand/std", "rand/thread_rng", "thiserror/std", "miden-precompiles/std", "miden-utils-sync/std", "ruint/std"]
 concurrent = ["std", "miden-crypto/concurrent"]
@@ -26,7 +26,7 @@ testing = ["arbitrary"]
 
 [dependencies]
 # Miden dependencies
-miden-ace-codegen.workspace = true
+miden-ace-codegen = { workspace = true, features = ["compiler"] }
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-utils-indexing.workspace = true

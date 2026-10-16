@@ -14,9 +14,9 @@ rust-version.workspace = true
 edition.workspace = true
 
 [dependencies]
-miden-lifted-stark.workspace = true
 miden-core = { workspace = true }
 miden-crypto = { workspace = true }
+miden-lifted-stark = { workspace = true }
 
 [dev-dependencies]
 miden-core = { workspace = true, features = ["std"] }

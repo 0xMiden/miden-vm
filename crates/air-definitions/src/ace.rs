@@ -11,6 +11,8 @@
 mod multi_air;
 mod recursive;
 
+#[cfg(feature = "compiler")]
+pub use miden_ace_codegen::{CapturedAir, CompiledRelation, LayoutKind};
 pub use multi_air::build_canonical_multi_air_ace_circuit;
 #[cfg(feature = "std")]
 pub use recursive::shared_recursive_circuit;

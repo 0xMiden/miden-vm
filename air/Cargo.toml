@@ -26,7 +26,7 @@ concurrent = ["std", "miden-air-definitions/concurrent", "miden-lifted-stark/con
 testing = ["arbitrary", "miden-air-definitions/testing"]
 
 [dependencies]
-miden-air-definitions.workspace = true
+miden-air-definitions = { workspace = true, features = ["compiler"] }
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-lifted-stark.workspace = true

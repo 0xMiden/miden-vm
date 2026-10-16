@@ -19,5 +19,5 @@ std = ["miden-air-definitions/std"]
 testing = ["miden-air-definitions/testing"]
 
 [dependencies]
-miden-air-definitions.workspace = true
+miden-air-definitions = { workspace = true, features = ["compiler"] }
 miden-lifted-stark.workspace = true
