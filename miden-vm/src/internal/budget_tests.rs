@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use miden_processor::{ExecutionOptions, FastProcessor};
 
 use super::*;
@@ -17,6 +19,98 @@ fn inputs_with(data: MerkleData) -> InputFile {
         merkle_store: Some(vec![data]),
         ..InputFile::default()
     }
+}
+
+// SplitMix64 keeps generated fixtures deterministic without adding a test dependency.
+fn next_generated_u64(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9e3779b97f4a7c15);
+    let mut value = *state;
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
+    value ^ (value >> 31)
+}
+
+fn assert_matches_legacy_at_exact_and_short_budget(data: MerkleData, context: &str) {
+    let inputs = inputs_with(data);
+    let expected = inputs.parse_advice_inputs().unwrap();
+    let required = expected.store().num_internal_nodes() * 3 * Word::SERIALIZED_SIZE;
+    let exact = ExecutionOptions::default().with_max_advice_size_bytes(required);
+    assert_eq!(
+        inputs.parse_advice_inputs_with_options(&exact).unwrap(),
+        expected,
+        "exact budget: {context}"
+    );
+
+    let short = exact.with_max_advice_size_bytes(required - 1);
+    let err = inputs.parse_advice_inputs_with_options(&short).unwrap_err();
+    assert!(
+        err.contains("advice provider size budget exceeded"),
+        "one-byte-short budget: {context}: {err}"
+    );
+}
+
+fn generated_sparse_leaves(seed: u64) -> Vec<(u64, String)> {
+    let mut state = seed;
+    let prefix_bits = 1 + (next_generated_u64(&mut state) % 63) as u32;
+    let suffix_bits = 64 - prefix_bits;
+    let suffix_mask = (1u64 << suffix_bits) - 1;
+    let prefix = next_generated_u64(&mut state) & !suffix_mask;
+    let mut leaves = BTreeMap::new();
+
+    // Most entries share an arbitrary generated prefix; the rest exercise unrelated branches.
+    for index in 0..20 {
+        let position = if index < 16 {
+            prefix | (next_generated_u64(&mut state) & suffix_mask)
+        } else {
+            next_generated_u64(&mut state)
+        };
+        let value = next_generated_u64(&mut state) % Felt::ORDER_U64;
+        leaves.insert(position, word_hex(value));
+    }
+
+    leaves.into_iter().rev().collect()
+}
+
+fn generated_partial_partition(seed: u64, splits: usize) -> Vec<((u8, u64), String)> {
+    let mut state = seed;
+    let mut leaves = vec![(1u8, 0u64), (1, 1)];
+    for _ in 0..splits {
+        let candidates: Vec<_> = leaves
+            .iter()
+            .enumerate()
+            .filter(|(_, (depth, _))| *depth < SIMPLE_SMT_DEPTH)
+            .map(|(index, _)| index)
+            .collect();
+        let selected = candidates[next_generated_u64(&mut state) as usize % candidates.len()];
+        let (depth, position) = leaves.swap_remove(selected);
+        leaves.push((depth + 1, position * 2));
+        leaves.push((depth + 1, position * 2 + 1));
+    }
+
+    leaves
+        .into_iter()
+        .map(|index| {
+            let value = next_generated_u64(&mut state) % Felt::ORDER_U64;
+            (index, word_hex(value))
+        })
+        .collect()
+}
+
+fn right_edge_depth_64_partition() -> Vec<((u8, u64), String)> {
+    let mut leaves = vec![(1u8, 0u64), (1, 1)];
+    for depth in 1..SIMPLE_SMT_DEPTH {
+        let position = (1u64 << depth) - 1;
+        let selected = leaves.iter().position(|index| *index == (depth, position)).unwrap();
+        leaves.swap_remove(selected);
+        leaves.push((depth + 1, position * 2));
+        leaves.push((depth + 1, position * 2 + 1));
+    }
+
+    leaves
+        .into_iter()
+        .enumerate()
+        .map(|(value, index)| (index, word_hex(value as u64 + 1)))
+        .collect()
 }
 
 #[test]
@@ -132,34 +226,39 @@ fn shared_and_repeated_trees_are_charged_once() {
 }
 
 #[test]
-fn sparse_variants_match_the_legacy_store_at_exact_budget() {
-    let positions = [0, 1, 2, 3, 1 << 63, u64::MAX - 1, u64::MAX];
-    for seed in 0..24u64 {
-        let mut leaves: Vec<_> = positions
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| !(seed + *i as u64).is_multiple_of(3))
-            .map(|(i, &index)| (index, word_hex((seed + i as u64) % 4)))
-            .collect();
-        leaves.reverse();
-        let inputs = inputs_with(MerkleData::SparseMerkleTree(leaves));
-        let expected = inputs.parse_advice_inputs().unwrap();
-        let options = ExecutionOptions::default()
-            .with_max_advice_size_bytes(expected.store().num_internal_nodes() * 96);
-        assert_eq!(
-            inputs.parse_advice_inputs_with_options(&options).unwrap(),
-            expected,
-            "seed={seed}"
+fn generated_sparse_prefixes_match_legacy_at_budget_boundary() {
+    for seed in 0..16u64 {
+        let leaves = generated_sparse_leaves(seed);
+        assert_matches_legacy_at_exact_and_short_budget(
+            MerkleData::SparseMerkleTree(leaves),
+            &format!("sparse seed={seed}"),
         );
     }
 }
 
 #[test]
-fn partial_depth_64_and_dense_empty_subtrees_match_legacy() {
-    let mut deep: Vec<_> = (1..=64).map(|depth| ((depth, 1), word_hex(depth as u64))).collect();
-    deep.push(((64, 0), word_hex(65)));
+fn generated_mixed_depth_partitions_match_legacy_at_budget_boundary() {
+    for seed in 0..12u64 {
+        let leaves = generated_partial_partition(seed, 12 + seed as usize);
+        let depths: BTreeSet<_> = leaves.iter().map(|((depth, _), _)| *depth).collect();
+        assert!(depths.len() >= 3, "seed={seed}: expected mixed depths");
+        assert_matches_legacy_at_exact_and_short_budget(
+            MerkleData::PartialMerkleTree(leaves),
+            &format!("partial seed={seed}"),
+        );
+    }
+
+    let leaves = right_edge_depth_64_partition();
+    assert!(leaves.iter().any(|(index, _)| *index == (64, u64::MAX)));
+    assert_matches_legacy_at_exact_and_short_budget(
+        MerkleData::PartialMerkleTree(leaves),
+        "right-edge depth-64 partition",
+    );
+}
+
+#[test]
+fn dense_empty_subtrees_match_legacy() {
     let cases = [
-        MerkleData::PartialMerkleTree(deep),
         MerkleData::MerkleTree(vec![word_hex(0); 64]),
         MerkleData::MerkleTree((0..32).map(|i| word_hex(i % 3)).collect()),
     ];
@@ -183,6 +282,39 @@ fn partial_duplicate_indices_keep_the_last_value() {
     let options = ExecutionOptions::default()
         .with_max_advice_size_bytes(expected.store().num_internal_nodes() * 96);
     assert_eq!(inputs.parse_advice_inputs_with_options(&options).unwrap(), expected);
+}
+
+#[test]
+fn partial_missing_node_error_reports_depth_and_position() {
+    let inputs = inputs_with(MerkleData::PartialMerkleTree(vec![
+        ((2, 0), word_hex(1)),
+        ((2, 2), word_hex(2)),
+        ((2, 3), word_hex(3)),
+    ]));
+
+    let err = inputs
+        .parse_advice_inputs_with_options(&ExecutionOptions::default())
+        .unwrap_err();
+
+    assert!(err.contains("incomplete leaves"), "{err}");
+    assert!(err.contains("depth 2 and position 1"), "{err}");
+}
+
+#[test]
+fn partial_overlap_error_reports_ancestor_depth_and_position() {
+    let inputs = inputs_with(MerkleData::PartialMerkleTree(vec![
+        ((1, 0), word_hex(1)),
+        ((2, 0), word_hex(2)),
+        ((2, 1), word_hex(3)),
+        ((1, 1), word_hex(4)),
+    ]));
+
+    let err = inputs
+        .parse_advice_inputs_with_options(&ExecutionOptions::default())
+        .unwrap_err();
+
+    assert!(err.contains("overlapping leaves"), "{err}");
+    assert!(err.contains("depth 1 and position 0"), "{err}");
 }
 
 #[test]

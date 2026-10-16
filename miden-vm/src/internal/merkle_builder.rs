@@ -58,7 +58,7 @@ pub(super) fn add_tree(
                 by_index.insert(index, value.as_str());
             }
             let mut entries: Vec<_> = by_index.into_iter().collect();
-            entries.sort_unstable_by_key(|(index, _)| interval_start(*index));
+            entries.sort_unstable_by_key(|(index, _)| (interval_start(*index), index.depth()));
             if entries.is_empty() {
                 return Ok(Word::default());
             }
@@ -66,17 +66,28 @@ pub(super) fn add_tree(
             // A partial tree is a complete partition of the root's leaf interval. Missing
             // siblings and ancestor/descendant pairs must not be interpreted as empty subtrees.
             let mut end = 0u128;
+            let mut previous: Option<NodeIndex> = None;
             for (index, _) in &entries {
-                if interval_start(*index) != end {
-                    return Err(
-                        "failed to parse a Partial Merkle Tree: incomplete or overlapping leaves"
-                            .into(),
-                    );
+                let start = interval_start(*index);
+                if start > end {
+                    return Err(missing_node_error(end, start));
                 }
-                end = (u128::from(index.position()) + 1) << (SIMPLE_SMT_DEPTH - index.depth());
+                if start < end {
+                    let ancestor = previous.expect("an overlap requires a preceding interval");
+                    return Err(format!(
+                        "failed to parse a Partial Merkle Tree: overlapping leaves: node at depth \
+                         {} and position {} is an ancestor of node at depth {} and position {}",
+                        ancestor.depth(),
+                        ancestor.position(),
+                        index.depth(),
+                        index.position(),
+                    ));
+                }
+                end = interval_end(*index);
+                previous = Some(*index);
             }
             if end != 1u128 << SIMPLE_SMT_DEPTH {
-                return Err("failed to parse a Partial Merkle Tree: incomplete leaves".into());
+                return Err(missing_node_error(end, 1u128 << SIMPLE_SMT_DEPTH));
             }
             partial_subtree(&entries, NodeIndex::root(), merge)
         },
@@ -121,6 +132,30 @@ fn sparse_subtree(
 
 fn interval_start(index: NodeIndex) -> u128 {
     u128::from(index.position()) << (SIMPLE_SMT_DEPTH - index.depth())
+}
+
+fn interval_end(index: NodeIndex) -> u128 {
+    (u128::from(index.position()) + 1) << (SIMPLE_SMT_DEPTH - index.depth())
+}
+
+/// Returns an error naming the largest aligned missing node at the start of a gap.
+fn missing_node_error(start: u128, limit: u128) -> String {
+    debug_assert!(start < limit);
+    let gap = limit - start;
+    let alignment = if start == 0 {
+        u32::from(SIMPLE_SMT_DEPTH)
+    } else {
+        start.trailing_zeros().min(u32::from(SIMPLE_SMT_DEPTH))
+    };
+    let gap_power = u128::BITS - 1 - gap.leading_zeros();
+    let subtree_power = alignment.min(gap_power);
+    let depth = SIMPLE_SMT_DEPTH - subtree_power as u8;
+    let position = (start >> subtree_power) as u64;
+
+    format!(
+        "failed to parse a Partial Merkle Tree: incomplete leaves: missing node at depth {depth} \
+         and position {position}"
+    )
 }
 
 fn partial_subtree(
