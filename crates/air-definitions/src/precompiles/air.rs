@@ -33,7 +33,7 @@ pub const NUM_CHIPLETS: usize = 12;
 /// The twelve chiplet AIRs wrapped into one enum.
 ///
 /// Variant order is the canonical proof instance order.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ChipletAir {
     ChunkNodeSponge,
     EidosCompression,
@@ -77,25 +77,29 @@ where
 }
 
 impl ChipletAir {
+    /// Stable generated evaluator name, independent of canonical proof order.
+    pub const fn file_token(&self) -> &'static str {
+        match self {
+            Self::ChunkNodeSponge => "chunk_node_sponge",
+            Self::EidosCompression => "eidos_compression",
+            Self::KeccakRound => "keccak_round",
+            Self::BytePairLut => "byte_pair_lut",
+            Self::TranscriptEval => "transcript_eval",
+            Self::UintStoreMul => "uint_store_mul",
+            Self::UintAdd => "uint_add",
+            Self::EcPointStoreGroups => "ec_point_store_groups",
+            Self::EcGroupAdd => "ec_group_add",
+            Self::EcMsm => "ec_msm",
+            Self::Sha512 => "sha512",
+            Self::Sha256 => "sha256",
+        }
+    }
     /// Instance index of the AIR that reads the public transcript root.
     pub const TRANSCRIPT_EVAL_INDEX: usize = 4;
 
     /// The twelve AIRs in canonical prover trace order.
     pub fn all() -> [ChipletAir; NUM_CHIPLETS] {
-        [
-            ChipletAir::ChunkNodeSponge,
-            ChipletAir::EidosCompression,
-            ChipletAir::KeccakRound,
-            ChipletAir::BytePairLut,
-            ChipletAir::TranscriptEval,
-            ChipletAir::UintStoreMul,
-            ChipletAir::UintAdd,
-            ChipletAir::EcPointStoreGroups,
-            ChipletAir::EcGroupAdd,
-            ChipletAir::EcMsm,
-            ChipletAir::Sha512,
-            ChipletAir::Sha256,
-        ]
+        crate::precompiles::relation::AIRS
     }
 
     /// The fixed log2 trace height of this instance, if the relation pins one.
@@ -195,11 +199,14 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
 #[derive(Debug, Clone)]
 pub struct ChipletMultiAir {
     airs: Vec<ChipletAir>,
+    boundary: crate::precompiles::relation::AuxBoundaryPlan,
 }
 
 impl ChipletMultiAir {
     pub fn new() -> Self {
-        Self { airs: ChipletAir::all().to_vec() }
+        let airs = ChipletAir::all().to_vec();
+        let boundary = crate::precompiles::relation::AuxBoundaryPlan::for_airs(&airs);
+        Self { airs, boundary }
     }
 }
 
@@ -295,26 +302,7 @@ impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
             return Err(format!("expected no auxiliary inputs, got {}", aux_inputs.len()).into());
         }
 
-        let mut weighted_aux_sum = QuadFelt::ZERO;
-        for ((air, values), &log_height) in self.airs.iter().zip(aux_values).zip(log_trace_heights)
-        {
-            let expected = air.num_aux_values();
-            if values.len() != expected {
-                return Err(format!(
-                    "{air:?} expects {expected} aux boundary values, got {}",
-                    values.len()
-                )
-                .into());
-            }
-
-            let trace_length = 1_u64.checked_shl(u32::from(log_height)).ok_or_else(|| {
-                ReductionError::from(format!(
-                    "{air:?} log trace height {log_height} does not fit in u64"
-                ))
-            })?;
-            weighted_aux_sum +=
-                values.iter().copied().sum::<QuadFelt>() * Felt::new_unchecked(trace_length);
-        }
+        let weighted_aux_sum = self.boundary.reduce(aux_values, log_trace_heights)?;
         Ok(vec![weighted_aux_sum + fixed_boundary_correction(challenges)?])
     }
 }
@@ -324,6 +312,18 @@ mod tests {
     use miden_core::field::PrimeCharacteristicRing;
 
     use super::*;
+
+    #[test]
+    fn declared_relation_preserves_the_full_statement() {
+        assert_eq!(crate::precompiles::relation::AIRS, ChipletAir::all());
+        let protocol = crate::precompiles::relation::protocol();
+        assert_eq!(protocol.num_public_values, crate::precompiles::logup::NUM_PUBLIC_VALUES);
+        assert_eq!(protocol.max_aux_inputs, 0);
+        assert_eq!(protocol.num_aux_inputs, 0);
+        assert_eq!(protocol.boundary.values_per_air, vec![1; NUM_CHIPLETS]);
+        assert_eq!(protocol.boundary.fixed_boundary_terms, 19);
+        assert_eq!(protocol.heights[3], crate::precompiles::relation::HeightRule::Fixed(16));
+    }
 
     /// The external assertion is part of the production relation but excluded from the ACE
     /// circuit digest. This test guards its weighting; raw bus-balance tests cover the underlying
@@ -481,7 +481,7 @@ mod tests {
     }
 
     /// The chiplet instance order fixes proof-order tie-breaks and the relation digest.
-    /// Intentional changes require regenerated protocol constants and a breaking changelog entry.
+    /// Intentional changes require a protocol-version bump and a breaking changelog entry.
     #[test]
     fn chiplet_instance_order_is_protocol_pinned() {
         assert_eq!(
@@ -505,7 +505,7 @@ mod tests {
         assert_eq!(
             ChipletAir::all(),
             pinned,
-            "chiplet instance order moved; run `make regenerate-pvm-constants` for an intentional \
+            "chiplet instance order moved; review the protocol-version bump for an intentional \
              protocol break"
         );
     }
