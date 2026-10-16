@@ -17,6 +17,17 @@ Generated core-library MASM can be inspected locally:
 cargo run -p miden-core-lib-codegen -- --out target/miden-core-lib-generated-asm
 ```
 
+The recursive verifier modules `sys::vm` and `sys::pvm` are rendered during the build from the
+handwritten AIRs, protocol policy, and the templates in `crates/verifier-codegen/templates`,
+into a staged copy of `asm/` under `OUT_DIR` (`MIDEN_CORE_ASM_DIR` for this crate's tests).
+The handwritten tree alone omits `sys::vm` and `sys::pvm`; `make stage-verifiers DIR=<path>`
+writes the complete tree for inspection or other tools. Relation
+identities and verifier roots are pinned, so their tests fail when a change alters them.
+
+Documentation builds also write under `OUT_DIR` by default. Run
+`make regenerate-core-docs` to update the published API documentation explicitly,
+or `make check-core-docs` to check it without changing the checkout.
+
 ## Caller-maintained precompile roots
 
 Deferred precompile procedures have `_with_root` variants that return an independent obligation

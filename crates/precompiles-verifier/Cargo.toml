@@ -19,7 +19,6 @@ concurrent = [
     "std",
     "miden-precompiles-air/concurrent",
 ]
-constants-tools = ["std", "dep:miden-air"]
 std = [
     "dep:miden-ace-codegen",
     "miden-core/std",
@@ -30,7 +29,6 @@ std = [
 
 [dependencies]
 miden-ace-codegen = { workspace = true, optional = true }
-miden-air = { workspace = true, optional = true }
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-lifted-air.workspace = true
@@ -41,11 +39,6 @@ serde.workspace = true
 serde-wincode.workspace = true
 thiserror.workspace = true
 wincode.workspace = true
-
-[[bin]]
-name = "pvm-constants-regen"
-path = "src/bin/pvm_constants_regen.rs"
-required-features = ["constants-tools"]
 
 [dev-dependencies]
 insta.workspace = true

@@ -22,6 +22,7 @@ struct LayoutPolicy {
     main: Alignment,
     aux: Alignment,
     quotient: Alignment,
+    quotient_padding: usize,
     aux_bus_boundary: Alignment,
     stark_vars: Alignment,
     end_align: Option<Alignment>,
@@ -72,6 +73,7 @@ impl LayoutPolicy {
             main: Alignment::Unaligned,
             aux: Alignment::Unaligned,
             quotient: Alignment::Unaligned,
+            quotient_padding: 1,
             aux_bus_boundary: Alignment::Unaligned,
             stark_vars: Alignment::Unaligned,
             end_align: None,
@@ -86,6 +88,7 @@ impl LayoutPolicy {
             main: Alignment::DoubleWord,
             aux: Alignment::DoubleWord,
             quotient: Alignment::DoubleWord,
+            quotient_padding: 8,
             aux_bus_boundary: Alignment::Word,
             stark_vars: Alignment::Word,
             end_align: Some(Alignment::DoubleWord),
@@ -117,28 +120,58 @@ impl LayoutBuilder {
 impl InputLayout {
     /// Build a native layout with no alignment padding.
     pub fn new(counts: InputCounts) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::native(), AirComposition::Single)
+        Self::build_with_policy(counts, LayoutPolicy::native(), AirComposition::Single, None)
     }
 
     /// Build the MASM-compatible layout.
     pub fn new_masm(counts: InputCounts) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::masm(), AirComposition::Single)
+        Self::build_with_policy(counts, LayoutPolicy::masm(), AirComposition::Single, None)
     }
 
     /// Build a native layout for a multi-AIR relation.
     pub fn new_multi_air(counts: InputCounts, num_airs: usize) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::native(), AirComposition::multi_air(num_airs))
+        Self::build_with_policy(
+            counts,
+            LayoutPolicy::native(),
+            AirComposition::multi_air(num_airs),
+            None,
+        )
     }
 
     /// Build the MASM-compatible layout for a multi-AIR relation.
     pub fn new_masm_multi_air(counts: InputCounts, num_airs: usize) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::masm(), AirComposition::multi_air(num_airs))
+        Self::build_with_policy(
+            counts,
+            LayoutPolicy::masm(),
+            AirComposition::multi_air(num_airs),
+            None,
+        )
+    }
+
+    pub(crate) fn for_relation(
+        counts: InputCounts,
+        num_airs: usize,
+        quotient_width: usize,
+        masm: bool,
+    ) -> Self {
+        let policy = if masm {
+            LayoutPolicy::masm()
+        } else {
+            LayoutPolicy::native()
+        };
+        Self::build_with_policy(
+            counts,
+            policy,
+            AirComposition::multi_air(num_airs),
+            Some(quotient_width),
+        )
     }
 
     fn build_with_policy(
         counts: InputCounts,
         policy: LayoutPolicy,
         composition: AirComposition,
+        quotient_width: Option<usize>,
     ) -> Self {
         const NUM_RANDOMNESS_INPUTS: usize = 2;
         assert_eq!(
@@ -160,11 +193,15 @@ impl InputLayout {
         let main_curr = builder.alloc(counts.width, policy.main);
         let aux_coord_width = counts.aux_width * EXT_DEGREE;
         let aux_curr = builder.alloc(aux_coord_width, policy.aux);
-        let quotient_curr = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
+        let quotient_width = quotient_width.unwrap_or_else(|| {
+            (counts.num_quotient_chunks * EXT_DEGREE).next_multiple_of(policy.quotient_padding)
+        });
+        assert!(quotient_width >= counts.num_quotient_chunks * EXT_DEGREE);
+        let quotient_curr = builder.alloc(quotient_width, policy.quotient);
         let preprocessed_next = builder.alloc(counts.preprocessed_width, policy.preprocessed);
         let main_next = builder.alloc(counts.width, policy.main);
         let aux_next = builder.alloc(aux_coord_width, policy.aux);
-        let quotient_next = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
+        let quotient_next = builder.alloc(quotient_width, policy.quotient);
         let aux_bus_boundary = builder.alloc(counts.num_aux_boundary, policy.aux_bus_boundary);
         let stark_vars = builder.alloc(num_stark_vars, policy.stark_vars);
 
@@ -235,6 +272,20 @@ mod tests {
             num_randomness: 2,
             num_quotient_chunks: 1,
         }
+    }
+
+    #[test]
+    fn masm_reads_committed_quotient_padding_without_exposing_extra_chunks() {
+        let mut counts = test_counts();
+        counts.num_quotient_chunks = 2;
+        let layout = InputLayout::new_masm(counts);
+        assert_eq!(layout.regions.quotient_curr.width, 8);
+        assert_eq!(layout.regions.quotient_next.width, 8);
+        assert_eq!(
+            layout.index(InputKey::QuotientChunkCoord { offset: 0, chunk: 2, coord: 0 }),
+            None
+        );
+        layout.validate();
     }
 
     #[test]

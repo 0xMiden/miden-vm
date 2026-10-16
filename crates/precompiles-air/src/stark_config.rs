@@ -46,32 +46,19 @@ pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
 // ================================================================================================
 
 /// Log2 of the PVM FRI blowup factor (blowup = 8).
-pub(crate) const LOG_BLOWUP: u8 = 3;
-
+pub(crate) use miden_precompiles_air_definitions::policy::LOG_BLOWUP;
 /// Log2 of the PVM FRI folding arity (arity = 4).
-pub(crate) const LOG_FOLDING_ARITY: u8 = 2;
-
+pub(crate) use miden_precompiles_air_definitions::policy::LOG_FOLDING_ARITY;
 /// PCS parameters for the precompile chiplet stack.
 ///
 /// Mirrors `miden_air::config::pcs_params` in every parameter, including
 /// `log_blowup = 3`. It exists as its own function so the Rust prover and
 /// verifier bind the actual PVM parameters into their transcript rather than
 /// relying on the core VM's defaults. Every [`ChipletAir`](crate::ChipletAir) requires at most
-/// four quotient chunks, below the eight permitted by `log_blowup = 3`. The MASM verifier compiles
-/// this PCS geometry, so changing it requires a coordinated MASM update and security review; it is
-/// not a runtime configuration.
-pub fn precompile_pcs_params() -> PcsParams {
-    PcsParams::new(
-        LOG_BLOWUP, // must be >= log_quotient_degree
-        LOG_FOLDING_ARITY,
-        7,  // log_final_degree
-        4,  // folding_pow_bits
-        12, // deep_pow_bits
-        27, // num_queries
-        17, // query_pow_bits
-    )
-    .expect("invalid precompile PCS parameters")
-}
+/// four quotient chunks, below the eight permitted by `log_blowup = 3`. The MASM verifier
+/// compiles this PCS geometry, so changing it requires a coordinated MASM update and security
+/// review; it is not a runtime configuration.
+pub use miden_precompiles_air_definitions::policy::precompile_pcs_params;
 
 // TEST CONFIG
 // ================================================================================================

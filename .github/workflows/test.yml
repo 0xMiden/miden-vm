@@ -88,28 +88,7 @@ jobs:
         run: make test NEXTEST_PROFILE=ci
       - name: Build core library and generate documentation
         run: |
-          # Build core library with documentation generation enabled
-          MIDEN_BUILD_LIB_DOCS=1 cargo build -p miden-core-lib
-      - name: Check for documentation changes in crates/lib/core/docs
-        run: |
-          if [ -n "$(git status --porcelain crates/lib/core/docs)" ]; then
-            echo "ERROR: Found uncommitted changes in crates/lib/core/docs/"
-            echo "This indicates that the assembly source code has changed but the documentation was not updated."
-            echo "Please commit the generated documentation changes before merging."
-            echo ""
-            echo "To fix this:"
-            echo "1. Run: MIDEN_BUILD_LIB_DOCS=1 cargo build -p miden-core-lib"
-            echo "2. Commit the changes in crates/lib/core/docs/"
-            echo ""
-            echo "Uncommitted changes:"
-            git status crates/lib/core/docs
-            echo ""
-            echo "Diff:"
-            git diff crates/lib/core/docs
-            exit 1
-          else
-            echo "No documentation changes in crates/lib/core/docs/ - OK"
-          fi
+          make check-core-docs
 
   crypto-test:
     name: crypto test on warpbuild
@@ -246,8 +225,8 @@ jobs:
       - name: Run doc-tests
         run: make test-docs
 
-  check-constraints:
-    name: check recursive constraint and PVM ACE artifacts
+  check-verifiers:
+    name: check generated AIR evaluators and verifier MASM
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -260,12 +239,14 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
-      - name: Check recursive constraint artifacts for drift
-        run: make check-constraints
-      - name: Check PVM ACE constants and MASM artifacts for drift
-        run: make check-pvm-constants
+      - name: Check generated evaluators and assembled verifiers
+        run: make check-verifiers
       - name: Check pinned PVM proof fixture for drift
         run: make check-pvm-proof-fixture
+      - name: Ensure builds leave source files unchanged
+        run: |
+          git diff --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
 
   run-examples:
     name: run masm examples

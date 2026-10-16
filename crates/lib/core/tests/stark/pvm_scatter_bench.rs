@@ -43,9 +43,8 @@ const INITIAL_ACC: [u64; 2] = [7, 9];
 /// Widths are counted in evaluation slots (one per committed base column, or per auxiliary
 /// coordinate); each slot is one extension-field value, hence two felts on the wire.
 ///
-/// This benchmark reads the widths from the checked-in generated hook's header. The verifier-side
-/// `pvm_row_geometry_is_the_one_the_hook_was_rendered_from` test ties that header to the
-/// [`miden_precompiles_air::ChipletAir`] declarations.
+/// This benchmark reads the widths from the generated hook's header, which `miden-verifier-codegen`
+/// renders from the compiled relation's chiplet widths during the core-library build.
 #[derive(Clone, Debug)]
 struct RowGeometry {
     preprocessed: Vec<usize>,
@@ -64,7 +63,7 @@ struct Segment {
     blocks: u32,
 }
 
-const HOOK: &str = include_str!("../../asm/sys/pvm/ood_frames.masm");
+const HOOK: &str = include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/ood_frames.masm"));
 
 /// Reads a rendered `label: a + b + ... = total scalar evaluations` line as its parts.
 fn rendered_parts(label: &str) -> Vec<usize> {

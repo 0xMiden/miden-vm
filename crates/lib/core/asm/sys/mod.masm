@@ -1,8 +1,7 @@
 use miden::core::stark::types
 use miden::core::crypto::hashes::eidos
 
-pub mod pvm
-pub mod vm
+# The `pvm` and `vm` verifier modules are declared when miden-verifier-codegen stages this tree.
 
 # CONSTANTS
 # =================================================================================================

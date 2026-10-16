@@ -17,7 +17,6 @@ use miden_assembly::{
 
 const ASM_DIR_PATH: &str = "asm";
 const PKG_OUT_DIR: &str = "assets";
-const DOC_DIR_PATH: &str = "docs";
 
 // MARKDOWN RENDERER
 // ================================================================================================
@@ -99,6 +98,11 @@ pub fn build_core_lib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
     for module in core::slice::from_ref(&root).iter().chain(support.iter()) {
         let label = module.path().to_relative();
         let relative = markdown_file_name(label);
+        // Relation-family subtrees repeat the full PVM relation's procedures; document the full
+        // relation's modules only.
+        if relative.starts_with("sys/pvm/relations/") {
+            continue;
+        }
         let out = output_path.join(&relative);
 
         // Create directories if needed
@@ -214,6 +218,7 @@ fn main() -> Result<(), Report> {
     println!("cargo:rerun-if-changed=asm");
     println!("cargo:rerun-if-changed=codegen");
     println!("cargo:rerun-if-env-changed=MIDEN_BUILD_LIB_DOCS");
+    println!("cargo:rerun-if-env-changed=MIDEN_CORE_LIB_DOCS_DIR");
     // NOTE: path is relative to the package root (crates/lib/core/), so we need
     // ../../ to reach crates/assembly/src.
     println!("cargo:rerun-if-changed=../../assembly/src");
@@ -230,9 +235,20 @@ fn main() -> Result<(), Report> {
     // Build the precompiles package first so that the core package can resolve its dynamic
     // dependency against the exact embedded artifact.
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let asm_dir = Path::new(manifest_dir).join(ASM_DIR_PATH);
-    let precompiles_asm_dir = asm_dir.join("precompiles");
     let build_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    // The handwritten tree stays read-only; the staged copy adds the generated verifier modules.
+    let asm_dir = build_dir.join(ASM_DIR_PATH);
+    // `OUT_DIR` belongs to this build, so its previous staging is always safe to replace.
+    if asm_dir.exists() {
+        fs::remove_dir_all(&asm_dir).into_diagnostic()?;
+    }
+    miden_verifier_codegen::stage_core_library(
+        &Path::new(manifest_dir).join(ASM_DIR_PATH),
+        &asm_dir,
+    )
+    .map_err(Report::msg)?;
+    println!("cargo:rustc-env=MIDEN_CORE_ASM_DIR={}", asm_dir.display());
+    let precompiles_asm_dir = asm_dir.join("precompiles");
     miden_core_lib_codegen::masm::write_math_masm(&precompiles_asm_dir).map_err(Report::msg)?;
 
     let mut registry = miden_package_registry::InMemoryPackageRegistry::default();
@@ -246,7 +262,21 @@ fn main() -> Result<(), Report> {
 
     // Generate documentation
     if env::var("MIDEN_BUILD_LIB_DOCS").is_ok() {
-        build_core_lib_docs(&asm_dir, DOC_DIR_PATH).into_diagnostic()?;
+        // Only the explicit documentation targets opt into a source-tree destination.
+        let docs_dir = match env::var_os("MIDEN_CORE_LIB_DOCS_DIR").map(PathBuf::from) {
+            Some(dir) if dir.is_absolute() => dir,
+            Some(dir) => {
+                return Err(Report::msg(format!(
+                    "MIDEN_CORE_LIB_DOCS_DIR must be an absolute path, got {}",
+                    dir.display()
+                )));
+            },
+            None => build_dir.join("docs"),
+        };
+        let docs_dir = docs_dir
+            .to_str()
+            .ok_or_else(|| Report::msg("the documentation directory must be valid UTF-8"))?;
+        build_core_lib_docs(&asm_dir, docs_dir).into_diagnostic()?;
     }
 
     Ok(())

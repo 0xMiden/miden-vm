@@ -364,15 +364,13 @@ where
         aux_inputs: &[F],
         log_trace_heights: &[u8],
     ) {
-        challenger.observe(F::from_usize(air_inputs.len()));
-        for &v in air_inputs {
-            challenger.observe(v);
+        crate::StatementEncoding {
+            num_public_values: air_inputs.len(),
+            max_aux_inputs: self.max_aux_inputs(),
+            num_aux_inputs: aux_inputs.len(),
+            num_airs: self.airs().len(),
         }
-        challenger.observe(F::from_usize(self.max_aux_inputs()));
-        challenger.observe(F::from_usize(aux_inputs.len()));
-        for &v in aux_inputs {
-            challenger.observe(v);
-        }
+        .observe(challenger, air_inputs, aux_inputs);
         let _ = log_trace_heights;
     }
 }

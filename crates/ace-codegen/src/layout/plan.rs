@@ -125,6 +125,31 @@ impl InputLayout {
         super::InputKeyMapper { layout: self }
     }
 
+    /// Number of quotient coordinate READ slots, including committed row padding.
+    ///
+    /// The logical quotient chunk count remains `counts.num_quotient_chunks`.
+    pub fn quotient_width(&self) -> usize {
+        self.regions.quotient_curr.width
+    }
+
+    /// Starts of the preprocessed, main, and auxiliary coordinate READ regions.
+    /// Empty regions still have a defined start.
+    pub fn trace_starts(&self, offset: usize) -> Option<[usize; 3]> {
+        match offset {
+            0 => Some([
+                self.regions.preprocessed_curr.offset,
+                self.regions.main_curr.offset,
+                self.regions.aux_curr.offset,
+            ]),
+            1 => Some([
+                self.regions.preprocessed_next.offset,
+                self.regions.main_next.offset,
+                self.regions.aux_next.offset,
+            ]),
+            _ => None,
+        }
+    }
+
     /// Map a logical `InputKey` into the flat input index, if present.
     pub fn index(&self, key: InputKey) -> Option<usize> {
         self.mapper().index_of(key)
@@ -168,13 +193,13 @@ impl InputLayout {
         assert_eq!(self.regions.aux_next.width, aux_coord_width, "aux_next width mismatch");
 
         let quotient_width = self.counts.num_quotient_chunks * EXT_DEGREE;
-        assert_eq!(
-            self.regions.quotient_curr.width, quotient_width,
-            "quotient_curr width mismatch"
+        assert!(
+            self.regions.quotient_curr.width >= quotient_width,
+            "quotient_curr omits logical chunks"
         );
         assert_eq!(
-            self.regions.quotient_next.width, quotient_width,
-            "quotient_next width mismatch"
+            self.regions.quotient_next.width, self.regions.quotient_curr.width,
+            "quotient row widths differ"
         );
         assert_eq!(
             self.regions.aux_bus_boundary.width, self.counts.num_aux_boundary,

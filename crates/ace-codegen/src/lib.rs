@@ -49,6 +49,7 @@ mod randomness;
 
 // High-level orchestration.
 mod pipeline;
+mod protocol;
 
 #[cfg(test)]
 mod tests;
@@ -87,4 +88,8 @@ pub use crate::{
         build_canonical_multi_air_ace_circuit,
     },
     proof_order::{MAX_ORDER_AIRS, factorial, order_from_tag, order_tag},
+    protocol::{
+        AirDeclaration, AirGeometry, CapturedAir, CompiledRelation, Inclusion, RelationFamily,
+        RelationGeometry, RowSegment,
+    },
 };

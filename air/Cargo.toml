@@ -19,29 +19,31 @@ doctest = false
 
 [features]
 default = ["std"]
-arbitrary = ["std", "dep:proptest"]
-std = ["miden-core/std", "proptest?/std", "rand/std", "rand/thread_rng", "thiserror/std"]
-concurrent = ["std", "miden-crypto/concurrent"]
-testing = ["arbitrary"]
+arbitrary = ["std", "miden-air-definitions/arbitrary"]
+std = ["miden-air-definitions/std", "miden-core/std"]
+concurrent = ["miden-air-definitions/concurrent", "std", "miden-crypto/concurrent"]
+testing = ["arbitrary", "miden-air-definitions/testing"]
+
+[package.metadata.cargo-shear]
+# The build-generated constraint evaluators import `p3_field::Dup`.
+ignored = ["p3-field"]
 
 [dependencies]
 # Miden dependencies
 miden-ace-codegen.workspace = true
+miden-air-definitions.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
-miden-utils-indexing.workspace = true
 
 # External dependencies
 p3-field.workspace = true
 p3-security.workspace = true
-proptest = { workspace = true, optional = true }
-rand.workspace = true
-thiserror.workspace = true
-tracing.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
 miden-ace-codegen = { workspace = true, features = ["testing"] }
 miden-constraint-compiler.workspace = true
-miden-test-serialization-macros.workspace = true
-proptest.workspace = true
+
+[build-dependencies]
+miden-air-definitions = { workspace = true, features = ["std"] }
+miden-constraint-compiler.workspace = true

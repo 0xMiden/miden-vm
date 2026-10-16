@@ -42,6 +42,25 @@ latest_release_tag_on_head() {
         || true
 }
 
+# The core library's recursive verifier modules are generated from the AIRs. When a checkout
+# generates them, stage its complete assembly tree and compare that project instead of the
+# handwritten sources.
+assembled_project() {
+    local checkout="$1"
+    local relative_project="$2"
+    local staged="$3"
+
+    if [[ "$relative_project" == "crates/lib/core/asm/miden-project.toml" ]] \
+        && grep -q -- '"--stage"' "$checkout/crates/verifier-codegen/src/main.rs" 2>/dev/null; then
+        RUSTC_WRAPPER= CARGO_TARGET_DIR="$staged-target" cargo run --quiet --locked \
+            --manifest-path "$checkout/Cargo.toml" --package miden-verifier-codegen \
+            -- --stage "$checkout/crates/lib/core/asm" "$staged" >&2 || return 1
+        echo "$staged/miden-project.toml"
+    else
+        echo "$checkout/$relative_project"
+    fi
+}
+
 parse_version "$workspace_version" current
 
 baseline_tag="$(latest_release_tag_on_head)"
@@ -104,10 +123,12 @@ for project in "${projects[@]}"; do
     fi
 
     echo "Checking MASM release compatibility for $relative_project against $baseline_tag"
+    baseline_assembled="$(assembled_project "$workdir/baseline" "$relative_project" "$workdir/staged-baseline")"
+    current_assembled="$(assembled_project "$repo_root" "$relative_project" "$workdir/staged-current")"
     RUSTC_BOOTSTRAP=1 RUSTC_WRAPPER= rustup run stable cargo -Zscript \
         "$check_script" \
-        "$baseline_project" \
-        "$current_project"
+        "$baseline_assembled" \
+        "$current_assembled"
 done
 
 echo "MASM release compatibility checks passed against $baseline_tag"
