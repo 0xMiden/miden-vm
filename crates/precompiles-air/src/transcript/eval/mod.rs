@@ -325,11 +325,11 @@ pub fn add_flag<E: PrimeCharacteristicRing, V: Copy + Into<E>>(row: &[V]) -> E {
 // `[public_root[0], …, public_root[3]]` — just the transcript's target root
 // (`PUBLIC_ROOT_BEGIN = 0`).
 
-/// Index of the first `public_root` felt in the shared public-input (`air_inputs`) vector.
+/// Index of the first `public_root` felt in this AIR's public-input slice.
 pub const PUBLIC_ROOT_BEGIN: usize = 0;
 pub const PUBLIC_ROOT_END: usize = PUBLIC_ROOT_BEGIN + DIGEST_WIDTH;
 /// Total public-values count: the 4-felt `public_root`. Equals
-/// `logup::NUM_PUBLIC_VALUES` — the shared count every AIR agrees on.
+/// `logup::NUM_PUBLIC_VALUES` — the total public-input count for the chiplet stack.
 pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
 
 // AUX LAYOUT

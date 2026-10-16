@@ -115,7 +115,7 @@ where
     fn eval_external(
         &self,
         _challenges: &[QuadFelt],
-        _air_inputs: &[Felt],
+        _air_inputs: &[Vec<Felt>],
         _aux_inputs: &[Felt],
         _aux_values: &[&[QuadFelt]],
         _log_trace_heights: &[u8],
@@ -124,14 +124,12 @@ where
     }
 }
 
-/// Check one AIR's local constraints on `main` with explicit shared public
-/// inputs (the eval chip's transcript root; dummy for chiplets that ignore
-/// them — see [`check_local`]).
+/// Check one AIR's local constraints on `main` with its public inputs.
 pub(crate) fn check_local_inputs<A>(air: A, main: &RowMajorMatrix<Felt>, air_inputs: Vec<Felt>)
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
-    let statement = Statement::new(LocalAir(vec![air]), air_inputs, Vec::new())
+    let statement = Statement::new(LocalAir(vec![air]), vec![(0, air_inputs)], Vec::new())
         .expect("local check statement inputs are valid");
     let ps = ProverStatement::new(statement, vec![main.clone()])
         .expect("local check trace shape is valid");
@@ -139,7 +137,7 @@ where
 }
 
 /// Check one AIR's local constraints on `main` with dummy public inputs
-/// (zeros, sized to the shared `num_public_values`) — fine for every
+/// (zeros, sized to its `num_public_values`) — fine for every
 /// chiplet except the eval chip, which should use [`check_local_inputs`]
 /// with its real root.
 pub(crate) fn check_local<A>(air: A, main: &RowMajorMatrix<Felt>)

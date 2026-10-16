@@ -29,7 +29,7 @@ use crate::{
     ec::EcGroupMsg,
     logup::{
         ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
+        LookupGroup, NUM_LOGUP_VALUES, NUM_RANDOMNESS,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::{current_main, next_main},
@@ -73,10 +73,6 @@ pub struct EcGroupsAir;
 impl BaseAir<Felt> for EcGroupsAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
-    }
-
-    fn num_public_values(&self) -> usize {
-        NUM_PUBLIC_VALUES
     }
 }
 

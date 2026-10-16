@@ -671,8 +671,8 @@ impl SessionTraces {
         ]
     }
 
-    /// The VM's shared public inputs: the four-felt transcript root. All AIRs declare it
-    /// (`num_public_values = 4`); only the transcript-eval chip reads it and pins its row-0 hash.
+    /// The four public inputs read by transcript eval: the transcript root.
+    /// The other AIRs have no public inputs.
     pub fn air_inputs(&self) -> Vec<Felt> {
         self.public_root.as_array().to_vec()
     }

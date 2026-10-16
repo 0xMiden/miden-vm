@@ -12,9 +12,7 @@ use miden_precompiles_air::primitives::byte_pair_lut::eidos::{
 };
 
 use crate::{
-    logup::{
-        Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, lookup_challenges_from_slice,
-    },
+    logup::{Challenges, LookupMessage, NUM_RANDOMNESS, lookup_challenges_from_slice},
     primitives::byte_pair_lut::{
         BytePairLutAir, BytePairLutMsg, BytePairLutRequires, BytePairOp, NUM_AUX_COLS,
         NUM_MAIN_COLS, NUM_PREPROCESSED_COLS, PRE_A, PRE_B, PRE_WRAP7, PRE_WRAP12, PRE_XOR,
@@ -252,7 +250,7 @@ fn lookup_degree_annotations_match_the_unified_table_layout() {
         .validate(ValidateLayout {
             preprocessed_width: NUM_PREPROCESSED_COLS,
             trace_width: NUM_MAIN_COLS,
-            num_public_values: NUM_PUBLIC_VALUES,
+            num_public_values: 0,
             num_periodic_columns: 0,
             permutation_width: NUM_AUX_COLS,
             num_permutation_challenges: NUM_RANDOMNESS,
@@ -351,6 +349,6 @@ fn committed_logup_value_is_the_centered_full_sum() {
 }
 
 #[test]
-fn num_public_values_matches_shared_root() {
-    assert_eq!(BytePairLutAir.num_public_values(), NUM_PUBLIC_VALUES);
+fn num_public_values_is_zero() {
+    assert_eq!(BytePairLutAir.num_public_values(), 0);
 }

@@ -469,7 +469,7 @@ where
             preprocessed: preprocessed_window,
             aux: aux_window,
             randomness: &randomness[..num_rand],
-            public_values: air_inputs,
+            public_values: &air_inputs[instance_idx],
             periodic_values: &periodic_values,
             permutation_values: aux_values_j,
             selectors,

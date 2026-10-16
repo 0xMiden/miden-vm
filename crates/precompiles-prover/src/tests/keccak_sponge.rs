@@ -32,7 +32,7 @@ use crate::{
             },
         },
     },
-    logup::{Challenges, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
+    logup::{Challenges, LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::{ChipletAir, Session},
@@ -153,7 +153,7 @@ fn lifted_air_validates_and_layout_matches_spec() {
     let layout = <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::air_layout(&air);
     assert_eq!(layout.preprocessed_width, 0);
     assert_eq!(layout.main_width, NUM_MAIN_COLS);
-    assert_eq!(layout.num_public_values, NUM_PUBLIC_VALUES);
+    assert_eq!(layout.num_public_values, 0);
     assert_eq!(layout.permutation_width, NUM_AUX_COLS);
     assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
     assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
@@ -170,7 +170,7 @@ fn lifted_air_validates_and_layout_matches_spec() {
         ValidateLayout {
             preprocessed_width: air.preprocessed_width(),
             trace_width: air.width(),
-            num_public_values: NUM_PUBLIC_VALUES,
+            num_public_values: 0,
             num_periodic_columns: air.periodic_columns().len(),
             permutation_width: NUM_AUX_COLS,
             num_permutation_challenges: NUM_RANDOMNESS,

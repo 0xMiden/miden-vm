@@ -18,7 +18,7 @@ use proptest::prelude::*;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
-    logup::{NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
+    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     math::{U256, from_limbs16, mac_reduce, to_limbs16, to_limbs32},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -360,7 +360,7 @@ fn uint_store_shape_and_degree_match_design() {
     let layout = ValidateLayout {
         preprocessed_width: air.preprocessed_width(),
         trace_width: air.width(),
-        num_public_values: NUM_PUBLIC_VALUES,
+        num_public_values: 0,
         num_periodic_columns: air.periodic_columns().len(),
         permutation_width: air.aux_width(),
         num_permutation_challenges: NUM_RANDOMNESS,
@@ -389,7 +389,7 @@ fn uint_store_mul_shape_and_degree_match_design() {
     let layout = ValidateLayout {
         preprocessed_width: air.preprocessed_width(),
         trace_width: air.width(),
-        num_public_values: NUM_PUBLIC_VALUES,
+        num_public_values: 0,
         num_periodic_columns: air.periodic_columns().len(),
         permutation_width: STORE_MUL_AUX_WIDTH,
         num_permutation_challenges: NUM_RANDOMNESS,

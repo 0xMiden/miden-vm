@@ -23,6 +23,7 @@
 
 use alloc::{
     string::{String, ToString},
+    vec,
     vec::Vec,
 };
 
@@ -190,9 +191,12 @@ fn build_from_proof_bytes(
     let mut challenger = config.challenger();
     config::observe_protocol_params(config.pcs(), &mut challenger);
 
-    let statement =
-        Statement::<Felt, Challenge, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
-            .map_err(|e| RecursiveVerifierInputsError::StatementAssembly(e.to_string()))?;
+    let statement = Statement::<Felt, Challenge, _>::new(
+        MidenMultiAir::new(),
+        vec![(0, public_values)],
+        aux_inputs,
+    )
+    .map_err(|e| RecursiveVerifierInputsError::StatementAssembly(e.to_string()))?;
     let preprocessed_commitment = Some(config::EIDOS_PREPROCESSED_COMMITMENT.into());
     let verifier_instance = VerifierInstance::new(&config, &statement, preprocessed_commitment)?;
 
@@ -543,12 +547,8 @@ mod tests {
     #[test]
     fn eidos_preprocessed_commitment_matches_recursive_verifier_constant() {
         let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
-        let statement = Statement::<Felt, Challenge, _>::new(
-            MidenMultiAir::new(),
-            vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES],
-            vec![],
-        )
-        .expect("valid Miden statement shape");
+        let statement = Statement::<Felt, Challenge, _>::new(MidenMultiAir::new(), vec![], vec![])
+            .expect("valid Miden statement shape");
         let commitment: [u64; 4] = Preprocessed::build(&statement, &config)
             .expect("And8 declares a preprocessed table")
             .commitment()
