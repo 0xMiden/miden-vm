@@ -31,7 +31,7 @@ impl TryFrom<MidenVmCli> for Cli {
 
     fn try_from(value: MidenVmCli) -> Result<Self, Self::Error> {
         match value.behavior {
-            Behavior::MidenVm { cli } => Ok(cli),
+            Behavior::MidenVm { cli } => Ok(*cli),
             Behavior::External(args) => {
                 let used_alias = args.first();
                 let is_known_alias = used_alias
@@ -67,7 +67,7 @@ enum Behavior {
     /// The Miden VM CLI.
     MidenVm {
         #[command(flatten)]
-        cli: Cli,
+        cli: Box<Cli>,
     },
 
     /// This variant will be matched when the CLI is called under an alias, like
@@ -188,8 +188,8 @@ mod test {
             .expect("failed to parse commands");
 
         assert!(matches!(
-            miden_vm_command.behavior,
-            Behavior::MidenVm { cli: Cli { external: false, .. } }
+            &miden_vm_command.behavior,
+            Behavior::MidenVm { cli } if !cli.external
         ));
 
         let cli: Cli = miden_vm_command.try_into().expect("Failed to turn MidenVmCli into Cli.");
