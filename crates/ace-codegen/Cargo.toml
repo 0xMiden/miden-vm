@@ -14,17 +14,25 @@ rust-version.workspace = true
 edition.workspace = true
 
 [features]
-testing = []
+default = ["compiler"]
+compiler = [
+    "dep:miden-constraint-compiler",
+    "dep:miden-lifted-stark",
+    "dep:p3-dft",
+    "miden-core/std",
+    "miden-crypto/std",
+]
+testing = ["compiler"]
 
 [dependencies]
-p3-matrix.workspace = true
-p3-dft.workspace = true
-miden-lifted-stark.workspace = true
-miden-constraint-compiler = { workspace = true }
+miden-constraint-compiler = { workspace = true, optional = true }
 miden-core = { workspace = true }
 miden-crypto = { workspace = true }
+miden-lifted-stark = { workspace = true, optional = true }
+p3-dft = { workspace = true, optional = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 miden-core = { workspace = true, features = ["std"] }
+p3-matrix.workspace = true
 proptest.workspace = true

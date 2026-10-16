@@ -19,3 +19,12 @@ pub use self::{
     air::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS},
     protocol::PVM_RELATION_DIGEST,
 };
+
+pub mod policy;
+
+pub mod ace;
+
+pub mod relation;
+
+#[cfg(any(test, feature = "compiler"))]
+pub mod geometry;

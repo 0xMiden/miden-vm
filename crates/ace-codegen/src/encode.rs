@@ -9,13 +9,17 @@
 //! The encoded stream concatenates constants (EF) followed by operations
 //! (base-field), then pads to an `adv_pipe` block boundary.
 
+use alloc::vec::Vec;
+#[cfg(feature = "compiler")]
+use alloc::{format, string::ToString};
+
 use miden_core::{Felt, Word, crypto::hash::Eidos};
+#[cfg(feature = "compiler")]
 use miden_crypto::field::ExtensionField;
 
-use crate::{
-    AceError,
-    circuit::{AceCircuit, AceNode, AceOp, AceOpNode},
-};
+use crate::AceError;
+#[cfg(feature = "compiler")]
+use crate::circuit::{AceCircuit, AceNode, AceOp, AceOpNode};
 
 // NOTE: `num_vars`/`num_const_nodes` count extension-field (EF) nodes, while the
 // instruction stream (`instructions.len()`) is measured in base field elements.
@@ -25,6 +29,7 @@ const BASE_FELTS_PER_EF: usize = crate::EXT_DEGREE;
 /// Number of EF nodes read per ACE READ row (two EF per row).
 const ACE_READ_ROW_EF_NODES: usize = 2;
 /// Constants are padded to an even number of EF nodes (full READ rows).
+#[cfg(feature = "compiler")]
 pub(crate) const CONST_EF_ALIGN: usize = 2;
 /// Instruction stream padding unit in base felts (adv_pipe block size), so that
 /// the constants+ops stream can be read in aligned chunks.
@@ -33,6 +38,7 @@ pub(crate) const ADV_PIPE_BLOCK_FELTS: usize = 8;
 ///
 /// Packed node ids occupy 30 bits, but `eval_circuit` requires the total number of READ and EVAL
 /// nodes to be strictly less than `2^30`.
+#[cfg(feature = "compiler")]
 const MAX_NUM_ACE_NODES: usize = (1 << 30) - 1;
 
 /// Encoded ACE circuit ready for chiplet consumption.
@@ -138,6 +144,7 @@ impl EncodedCircuit {
 ///
 /// The chiplet numbers nodes downward from `num_nodes - 1`: inputs first, then constants,
 /// then operations.
+#[cfg(feature = "compiler")]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct StreamGeometry {
     input_start: usize,
@@ -145,6 +152,7 @@ pub(crate) struct StreamGeometry {
     ops_start: usize,
 }
 
+#[cfg(feature = "compiler")]
 impl StreamGeometry {
     /// Derive the bases from UNPADDED counts, applying the chiplet padding rules:
     /// constants are rounded up to full READ rows and the constants+ops stream is padded
@@ -234,6 +242,7 @@ impl StreamGeometry {
     }
 }
 
+#[cfg(feature = "compiler")]
 impl<EF> AceCircuit<EF>
 where
     EF: ExtensionField<Felt>,

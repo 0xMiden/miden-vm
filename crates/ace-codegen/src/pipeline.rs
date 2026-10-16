@@ -6,12 +6,11 @@
 //! - choose a READ layout for inputs,
 //! - emit a circuit that matches verifier evaluation.
 
-use miden_constraint_compiler::ir::capture;
 use miden_core::{Felt, field::QuadFelt};
-use miden_lifted_stark::air::{BaseAir, LiftedAir};
+use miden_lifted_stark::air::LiftedAir;
 
 use crate::{
-    AceError, EXT_DEGREE,
+    AceError, CapturedAir, CompiledRelation, EXT_DEGREE,
     circuit::{AceCircuit, emit_circuit},
     dag::{
         AceDag, DagBuilder, NodeId, NodeKind, PeriodicColumnData, build_verifier_dag_from_ir,
@@ -77,77 +76,40 @@ pub fn build_ace_dag_for_air<A>(
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
-    let periodic_columns = air.periodic_columns();
-    let shared_period = max_period(&periodic_columns);
-    build_ace_dag_for_air_with_periodic_columns(
-        air,
-        config,
-        periodic_columns.into_owned(),
-        shared_period,
-    )
+    let air = CapturedAir::new(air)?;
+    let shared_period = air.max_periodic_length.max(1);
+    build_ace_dag_from_capture(&air, config, shared_period)
 }
 
-/// Build verifier-equivalent DAGs against one shared periodic-column basis.
-fn build_ace_dags_for_airs<A>(
-    airs: &[A],
+fn build_ace_dag_from_capture(
+    air: &CapturedAir,
     config: AceConfig,
-) -> Result<Vec<AceArtifacts<QuadFelt>>, AceError>
-where
-    A: LiftedAir<Felt, QuadFelt>,
-{
-    let periodic_columns_by_air: Vec<_> =
-        airs.iter().map(BaseAir::<Felt>::periodic_columns).collect();
-    let shared_period = periodic_columns_by_air
-        .iter()
-        .map(|columns| max_period(columns))
-        .max()
-        .unwrap_or(1);
-
-    airs.iter()
-        .zip(periodic_columns_by_air)
-        .map(|(air, periodic_columns)| {
-            build_ace_dag_for_air_with_periodic_columns(
-                air,
-                config,
-                periodic_columns.into_owned(),
-                shared_period,
-            )
-        })
-        .collect()
-}
-
-fn build_ace_dag_for_air_with_periodic_columns<A>(
-    air: &A,
-    config: AceConfig,
-    periodic_columns: Vec<Vec<Felt>>,
     shared_period: usize,
-) -> Result<AceArtifacts<QuadFelt>, AceError>
-where
-    A: LiftedAir<Felt, QuadFelt>,
-{
-    let counts = input_counts_for_air(air, config)?;
+) -> Result<AceArtifacts<QuadFelt>, AceError> {
+    if config.num_quotient_chunks == 0 {
+        return Err(AceError::InvalidInputLayout {
+            message: "num_quotient_chunks must be > 0".into(),
+        });
+    }
+    let counts = InputCounts {
+        num_quotient_chunks: config.num_quotient_chunks,
+        ..air.counts
+    };
     let layout = match config.layout {
         LayoutKind::Native => InputLayout::new(counts),
         LayoutKind::Masm => InputLayout::new_masm(counts),
     };
     layout.validate();
-
-    let (graph, constraints) = capture(air);
-    let periodic_data = (!periodic_columns.is_empty())
-        .then(|| PeriodicColumnData::from_periodic_columns::<Felt>(periodic_columns));
+    let periodic_data = (!air.periodic_columns.is_empty())
+        .then(|| PeriodicColumnData::from_periodic_columns::<Felt>(air.periodic_columns.clone()));
     let dag = build_verifier_dag_from_ir(
-        &graph,
-        &constraints,
+        &air.graph,
+        &air.constraints,
         &layout,
         periodic_data.as_ref(),
         shared_period,
     );
-
     Ok(AceArtifacts { layout, dag })
-}
-
-fn max_period<F>(periodic_columns: &[Vec<F>]) -> usize {
-    periodic_columns.iter().map(Vec::len).max().unwrap_or(1)
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -213,35 +175,6 @@ fn reemit_air_root(
     (translated[accumulator.index()], translated[quotient_binding.index()])
 }
 
-fn input_counts_for_air<A>(air: &A, config: AceConfig) -> Result<InputCounts, AceError>
-where
-    A: LiftedAir<Felt, QuadFelt>,
-{
-    if config.num_quotient_chunks == 0 {
-        return Err(AceError::InvalidInputLayout {
-            message: "num_quotient_chunks must be > 0".into(),
-        });
-    }
-    let num_randomness = air.num_randomness();
-    if num_randomness != 2 {
-        return Err(AceError::InvalidInputLayout {
-            message: format!(
-                "AIR must declare exactly 2 randomness challenges (alpha, beta), got {num_randomness}"
-            ),
-        });
-    }
-
-    Ok(InputCounts {
-        preprocessed_width: air.preprocessed_width(),
-        width: air.width(),
-        aux_width: air.aux_width(),
-        num_aux_boundary: air.num_aux_values(),
-        num_public: air.num_public_values(),
-        num_randomness,
-        num_quotient_chunks: config.num_quotient_chunks,
-    })
-}
-
 /// Builds one order-invariant ACE circuit for a nonempty AIR set.
 ///
 /// Each AIR reads public and trace inputs at its canonical instance offset and its fold coefficient
@@ -257,52 +190,45 @@ pub fn build_canonical_multi_air_ace_circuit<A>(
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
-    let num_airs = airs.len();
-    if num_airs == 0 {
-        return Err(AceError::InvalidInputLayout {
-            message: "multi-AIR composition requires a nonempty AIR set".into(),
-        });
-    }
-    if trace_width_alignment == 0 {
-        return Err(AceError::InvalidInputLayout {
-            message: "trace width alignment must be nonzero".into(),
-        });
-    }
+    let captured = airs.iter().map(CapturedAir::new).collect::<Result<Vec<_>, _>>()?;
+    let captured = captured.iter().collect::<Vec<_>>();
+    let relation = CompiledRelation::with_quotient_chunks(
+        &captured,
+        trace_width_alignment,
+        Some(config.num_quotient_chunks),
+    )?;
+    build_circuit_for_relation(&relation, config)
+}
 
-    let artifacts = build_ace_dags_for_airs(airs, config)?;
-    let shared = artifacts[0].layout.counts;
-
-    let mut offsets = Vec::with_capacity(num_airs);
-    let mut totals = TraceOffsets::default();
-    for artifact in &artifacts {
-        let counts = artifact.layout.counts;
-        let aligned_aux = (counts.aux_width * EXT_DEGREE).next_multiple_of(trace_width_alignment);
-        if !aligned_aux.is_multiple_of(EXT_DEGREE) {
-            return Err(AceError::InvalidInputLayout {
-                message: "aligned auxiliary width must be divisible by the extension degree".into(),
-            });
-        }
-        offsets.push(totals);
-        totals.public += counts.num_public;
-        totals.preprocessed += counts.preprocessed_width.next_multiple_of(trace_width_alignment);
-        totals.main += counts.width.next_multiple_of(trace_width_alignment);
-        totals.aux += aligned_aux / EXT_DEGREE;
-        totals.boundary += counts.num_aux_boundary;
-    }
-
-    let counts = InputCounts {
-        preprocessed_width: totals.preprocessed,
-        width: totals.main,
-        aux_width: totals.aux,
-        num_aux_boundary: totals.boundary,
-        num_public: totals.public,
-        num_randomness: shared.num_randomness,
-        num_quotient_chunks: shared.num_quotient_chunks,
-    };
-    let layout = match config.layout {
-        LayoutKind::Native => InputLayout::new_multi_air(counts, num_airs),
-        LayoutKind::Masm => InputLayout::new_masm_multi_air(counts, num_airs),
-    };
+pub(crate) fn build_circuit_for_relation(
+    relation: &CompiledRelation<'_>,
+    config: AceConfig,
+) -> Result<AceCircuit<QuadFelt>, AceError> {
+    let num_airs = relation.airs.len();
+    let artifacts = relation
+        .airs
+        .iter()
+        .map(|air| build_ace_dag_from_capture(air, config, relation.geometry.shared_period))
+        .collect::<Result<Vec<_>, _>>()?;
+    let offsets: Vec<_> = relation
+        .geometry
+        .airs
+        .iter()
+        .map(|air| TraceOffsets {
+            public: air.public_offset,
+            preprocessed: air.preprocessed.offset,
+            main: air.main.offset,
+            aux: air.aux.offset / EXT_DEGREE,
+            boundary: air.aux_boundary_offset,
+        })
+        .collect();
+    let layout = InputLayout::for_relation(
+        relation.geometry.input_counts(),
+        num_airs,
+        relation.geometry.quotient_width,
+        matches!(config.layout, LayoutKind::Masm),
+    );
+    layout.validate();
 
     // Re-emit in stable instance order, each AIR placed at its canonical trace offset and scaled
     // by the fold coefficient it reads from its own slot.

@@ -955,3 +955,139 @@ fn canonical_builder_air_count_is_independent_of_order_maps() {
         circuit.to_ace().expect("canonical circuit must encode");
     }
 }
+
+#[test]
+fn compiled_relation_reuses_capture_and_pads_each_air_row() {
+    use crate::{CapturedAir, CompiledRelation};
+    let first = TestAir {
+        main: 3,
+        aux: 1,
+        preprocessed: 2,
+        ..TestAir::simple()
+    };
+    let second = TestAir {
+        main: 5,
+        aux: 3,
+        boundaries: 2,
+        period: 4,
+        ..TestAir::simple()
+    };
+    let captures = [CapturedAir::new(&first).unwrap(), CapturedAir::new(&second).unwrap()];
+    let relation = CompiledRelation::from_captured(&[&captures[0], &captures[1]], 8).unwrap();
+    assert_eq!(relation.geometry().main_width, 16);
+    assert_eq!(relation.geometry().preprocessed_width, 8);
+    assert_eq!(relation.geometry().aux_width, 16);
+    assert_eq!(relation.geometry().airs[1].main.offset, 8);
+    assert_eq!(relation.geometry().airs[1].aux.raw_width, 6);
+    assert_eq!(relation.geometry().num_constraints, 4);
+    assert_eq!(relation.geometry().num_quotient_chunks, 1);
+    assert_eq!(relation.geometry().quotient_width, 8);
+    assert_eq!(relation.geometry().shared_period, 4);
+    let circuit = relation.build_circuit(LayoutKind::Masm).unwrap();
+    assert_eq!(circuit.layout.quotient_width(), 8);
+    assert!(core::ptr::eq(relation.airs()[0], &captures[0]));
+    assert!(CompiledRelation::from_captured(&[], 8).is_err());
+    assert!(CompiledRelation::from_captured(&[&captures[0]], 0).is_err());
+}
+
+#[test]
+fn captured_degrees_match_symbolic_selector_and_extension_semantics() {
+    use miden_lifted_stark::air::ConstraintDegrees;
+
+    use crate::CapturedAir;
+    for selector in [Selector::None, Selector::First, Selector::Last, Selector::Transition] {
+        let air = TestAir {
+            selector,
+            period: 4,
+            aux: 1,
+            boundaries: 1,
+            ..TestAir::simple()
+        };
+        let captured = CapturedAir::new(&air).unwrap();
+        assert_eq!(captured.degrees(), ConstraintDegrees::from_air::<F, EF, _>(&air));
+        assert_eq!(captured.constraint_counts().base, 1);
+        assert_eq!(captured.constraint_counts().ext, 1);
+    }
+}
+
+#[test]
+fn relation_geometry_concatenates_public_windows_and_rejects_width_overflow() {
+    use crate::{CapturedAir, CompiledRelation};
+    let first = CapturedAir::new(&TestAir { public: 2, ..TestAir::simple() }).unwrap();
+    let mut second = CapturedAir::new(&TestAir { public: 1, ..TestAir::simple() }).unwrap();
+    let relation = CompiledRelation::from_captured(&[&first, &second], 8).unwrap();
+    assert_eq!(relation.geometry().num_public, 3);
+    assert_eq!(relation.geometry().airs[0].public_offset, 0);
+    assert_eq!(relation.geometry().airs[0].num_public, 2);
+    assert_eq!(relation.geometry().airs[1].public_offset, 2);
+    assert_eq!(relation.geometry().airs[1].num_public, 1);
+
+    // Intentionally inject invalid crate-private metadata to exercise defensive geometry checks.
+    // Production callers can only read a capture's metadata through immutable getters.
+    second.counts.num_public = usize::MAX;
+    assert!(CompiledRelation::from_captured(&[&first, &second], 8).is_err());
+    second.counts.num_public = 1;
+    second.counts.width = usize::MAX;
+    assert!(CompiledRelation::from_captured(&[&first, &second], 8).is_err());
+    second.counts.width = 1;
+    second.counts.aux_width = 1;
+    assert!(CompiledRelation::from_captured(&[&second], 3).is_err());
+}
+
+struct CountedCubicAir {
+    eval_count: std::sync::atomic::AtomicUsize,
+}
+
+impl BaseAir<F> for CountedCubicAir {
+    fn width(&self) -> usize {
+        1
+    }
+}
+
+impl LiftedAir<F, EF> for CountedCubicAir {
+    fn aux_width(&self) -> usize {
+        0
+    }
+
+    fn num_aux_values(&self) -> usize {
+        0
+    }
+
+    fn num_randomness(&self) -> usize {
+        2
+    }
+
+    fn build_aux_trace(
+        &self,
+        _main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        unreachable!("capture-only AIR")
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+        self.eval_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let x: AB::Expr = builder.main().current_slice()[0].into();
+        builder.assert_zero(x.clone() * x.clone() * x);
+    }
+}
+
+#[test]
+fn repeated_artifact_generation_evaluates_the_air_only_during_capture() {
+    use crate::{CapturedAir, CompiledRelation};
+    let air = CountedCubicAir {
+        eval_count: std::sync::atomic::AtomicUsize::new(0),
+    };
+    let captured = CapturedAir::new(&air).unwrap();
+    assert_eq!(captured.degrees().base, 3);
+    let relation = CompiledRelation::from_captured(&[&captured], 8).unwrap();
+    assert_eq!(relation.geometry().num_quotient_chunks, 2);
+    for layout in [LayoutKind::Native, LayoutKind::Masm] {
+        let circuit = relation.build_circuit(layout).unwrap();
+        assert_eq!(circuit.layout().quotient_width(), 8);
+        assert_eq!(circuit.layout().counts.num_quotient_chunks, 2);
+    }
+    assert_eq!(air.eval_count.load(std::sync::atomic::Ordering::Relaxed), 1);
+}
