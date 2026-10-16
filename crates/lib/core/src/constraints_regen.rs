@@ -35,7 +35,7 @@ pub enum Mode {
 }
 
 const PROTOCOL_ID: u64 = 1;
-const AIR_CONFIG_PATH: &str = "../../../air/src/config.rs";
+const AIR_CONFIG_PATH: &str = "../../../crates/air-definitions/src/shared/config.rs";
 const CONSTRAINTS_EVAL_PATH: &str = "asm/sys/vm/constraints_eval.masm";
 const VM_WRAPPER_PATH: &str = "asm/sys/vm/mod.masm";
 const VM_LAYOUT_PATH: &str = "asm/sys/vm/layout.masm";

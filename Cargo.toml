@@ -8,6 +8,7 @@ members = [
     "benches/synthetic-bench",
     "core",
     "crates/ace-codegen",
+    "crates/air-definitions",
     "crates/assembly",
     "crates/assembly-syntax-cst",
     "crates/assembly-syntax",
@@ -85,6 +86,7 @@ opt-level = 0
 # Workspace crates
 miden-ace-codegen       = { path = "./crates/ace-codegen", version = "1.0.0-rc.1", default-features = false }
 miden-air               = { path = "./air", version = "1.0.0-rc.1", default-features = false }
+miden-air-definitions   = { path = "./crates/air-definitions", version = "1.0.0-rc.1", default-features = false }
 miden-assembly          = { path = "./crates/assembly", version = "1.0.0-rc.1", default-features = false }
 miden-assembly-syntax   = { path = "./crates/assembly-syntax", version = "1.0.0-rc.1", default-features = false }
 miden-assembly-syntax-cst = { path = "./crates/assembly-syntax-cst", version = "1.0.0-rc.1", default-features = false }

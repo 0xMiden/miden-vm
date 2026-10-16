@@ -26,7 +26,7 @@ use super::{
     },
 };
 use crate::{
-    Felt, HandwrittenMidenAir, MidenAir,
+    Felt, MidenAir,
     constraints::and8_lookup::eidos::normalize,
     lookup::{ConstraintLookupBuilder, LookupAir},
 };
@@ -46,7 +46,7 @@ struct ConstraintEvalBuilder {
 
 #[test]
 fn handwritten_constraint_degree_remains_three() {
-    let air = HandwrittenMidenAir(MidenAir::EidosCompression);
+    let air = MidenAir::EidosCompression;
     let degree = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air);
     assert_eq!(degree, ConstraintDegrees { base: 3, ext: 3 });
 }

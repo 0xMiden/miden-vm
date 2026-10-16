@@ -773,19 +773,32 @@ dependencies = [
 name = "miden-air"
 version = "1.0.0-rc.1"
 dependencies = [
- "miden-ace-codegen",
+ "miden-air-definitions",
  "miden-core",
  "miden-crypto",
  "miden-lifted-stark",
+]
+
+[[package]]
+name = "miden-air-definitions"
+version = "1.0.0-rc.1"
+dependencies = [
+ "miden-ace-codegen",
+ "miden-core",
+ "miden-crypto",
+ "miden-lifted-air",
+ "miden-lifted-stark",
+ "miden-precompiles",
  "miden-stateful-hasher",
  "miden-utils-indexing",
+ "miden-utils-sync",
  "p3-challenger",
  "p3-dft",
  "p3-field",
- "p3-matrix",
  "p3-security",
  "p3-symmetric",
  "rand 0.10.2",
+ "ruint",
  "thiserror",
  "tracing",
 ]
