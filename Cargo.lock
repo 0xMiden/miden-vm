@@ -2064,13 +2064,30 @@ version = "1.0.0"
 dependencies = [
  "insta",
  "miden-ace-codegen",
+ "miden-air-definitions",
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
  "miden-lifted-stark",
+ "p3-field",
+ "proptest",
+]
+
+[[package]]
+name = "miden-air-definitions"
+version = "1.0.0"
+dependencies = [
+ "insta",
+ "miden-ace-codegen",
+ "miden-core",
+ "miden-crypto",
+ "miden-lifted-air",
+ "miden-lifted-stark",
+ "miden-precompiles",
  "miden-stateful-hasher",
  "miden-test-serialization-macros",
  "miden-utils-indexing",
+ "miden-utils-sync",
  "p3-challenger",
  "p3-dft",
  "p3-field",
@@ -2079,6 +2096,7 @@ dependencies = [
  "p3-symmetric",
  "proptest",
  "rand 0.10.2",
+ "ruint",
  "thiserror",
  "tracing",
 ]

@@ -114,7 +114,7 @@ pub mod core {
     /// Byte-pair rotation relations shared by the MVM and PVM lookup tables.
     #[doc(hidden)]
     pub mod rotation_lookup {
-        pub use crate::constraints::and8_lookup::eidos::{
+        pub use crate::shared::eidos_lookup::{
             BytePairRelation, NUM_RELATIONS, Rotation, contribution, denormalize, normalize,
             provider_values,
         };

@@ -14,7 +14,7 @@ use super::{
     model::{initial_working_state, low_output},
     schedule::fused_step_at,
 };
-use crate::constraints::and8_lookup::eidos::{self as eidos_lookup, BytePairRelation, Rotation};
+use crate::shared::eidos_lookup::{self as eidos_lookup, BytePairRelation, Rotation};
 
 /// One row of the Eidos compression main trace over the VM base field.
 pub type EidosCompressionFeltRow = [Felt; NUM_COLS];
