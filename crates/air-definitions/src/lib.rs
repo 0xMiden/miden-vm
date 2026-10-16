@@ -28,6 +28,7 @@ pub use shared::config;
 mod constraints;
 pub mod lookup;
 pub mod memory;
+pub mod precompiles;
 mod proof_order;
 pub mod security;
 pub mod shared;

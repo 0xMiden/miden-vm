@@ -14,32 +14,10 @@ repository.workspace = true
 
 [features]
 default = ["std"]
-concurrent = [
-    "std",
-    "miden-air/concurrent",
-    "miden-crypto/concurrent",
-    "miden-lifted-stark/concurrent",
-]
-std = [
-    "miden-air/std",
-    "miden-core/std",
-    "miden-crypto/std",
-    "miden-precompiles/std",
-    "miden-utils-sync/std",
-    "ruint/std",
-]
-testing = ["miden-air/testing"]
+concurrent = ["std", "miden-air-definitions/concurrent", "miden-lifted-stark/concurrent"]
+std = ["miden-air-definitions/std"]
+testing = ["miden-air-definitions/testing"]
 
 [dependencies]
-miden-air.workspace = true
-miden-core.workspace = true
-miden-crypto.workspace = true
-miden-lifted-air.workspace = true
+miden-air-definitions.workspace = true
 miden-lifted-stark.workspace = true
-miden-precompiles.workspace = true
-miden-utils-sync.workspace = true
-p3-security.workspace = true
-ruint.workspace = true
-
-[dev-dependencies]
-miden-air = { workspace = true, features = ["testing"] }
