@@ -17,7 +17,6 @@ use miden_assembly::{
 
 const ASM_DIR_PATH: &str = "asm";
 const PKG_OUT_DIR: &str = "assets";
-const DOC_DIR_PATH: &str = "docs";
 
 // MARKDOWN RENDERER
 // ================================================================================================
@@ -214,6 +213,7 @@ fn main() -> Result<(), Report> {
     println!("cargo:rerun-if-changed=asm");
     println!("cargo:rerun-if-changed=codegen");
     println!("cargo:rerun-if-env-changed=MIDEN_BUILD_LIB_DOCS");
+    println!("cargo:rerun-if-env-changed=MIDEN_CORE_LIB_DOCS_DIR");
     // NOTE: path is relative to the package root (crates/lib/core/), so we need
     // ../../ to reach crates/assembly/src.
     println!("cargo:rerun-if-changed=../../assembly/src");
@@ -230,10 +230,15 @@ fn main() -> Result<(), Report> {
     // Build the precompiles package first so that the core package can resolve its dynamic
     // dependency against the exact embedded artifact.
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let asm_dir = Path::new(manifest_dir).join(ASM_DIR_PATH);
+    let build_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    // Assemble tracked MASM, using a build-owned copy for generated precompile assembly.
+    let asm_dir = build_dir.join(ASM_DIR_PATH);
+    if asm_dir.exists() {
+        fs::remove_dir_all(&asm_dir).into_diagnostic()?;
+    }
+    copy_assembly_tree(&Path::new(manifest_dir).join(ASM_DIR_PATH), &asm_dir).into_diagnostic()?;
     println!("cargo:rustc-env=MIDEN_CORE_ASM_DIR={}", asm_dir.display());
     let precompiles_asm_dir = asm_dir.join("precompiles");
-    let build_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     miden_core_lib_codegen::masm::write_math_masm(&precompiles_asm_dir).map_err(Report::msg)?;
 
     let mut registry = miden_package_registry::InMemoryPackageRegistry::default();
@@ -247,8 +252,36 @@ fn main() -> Result<(), Report> {
 
     // Generate documentation
     if env::var("MIDEN_BUILD_LIB_DOCS").is_ok() {
-        build_core_lib_docs(&asm_dir, DOC_DIR_PATH).into_diagnostic()?;
+        // Only the explicit documentation targets opt into a source-tree destination.
+        let docs_dir = match env::var_os("MIDEN_CORE_LIB_DOCS_DIR").map(PathBuf::from) {
+            Some(dir) if dir.is_absolute() => dir,
+            Some(dir) => {
+                return Err(Report::msg(format!(
+                    "MIDEN_CORE_LIB_DOCS_DIR must be an absolute path, got {}",
+                    dir.display()
+                )));
+            },
+            None => build_dir.join("docs"),
+        };
+        let docs_dir = docs_dir
+            .to_str()
+            .ok_or_else(|| Report::msg("the documentation directory must be valid UTF-8"))?;
+        build_core_lib_docs(&asm_dir, docs_dir).into_diagnostic()?;
     }
 
+    Ok(())
+}
+
+fn copy_assembly_tree(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::create_dir_all(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let target = destination.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_assembly_tree(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), target)?;
+        }
+    }
     Ok(())
 }

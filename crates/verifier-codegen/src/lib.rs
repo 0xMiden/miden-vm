@@ -1,10 +1,12 @@
-//! Specialization of recursive verifier MASM from AIR definitions.
+//! Specialization of the recursive verifier MASM from the AIR definitions.
 //!
-//! Generated modules are tracked beside handwritten assembly. Regeneration and
-//! freshness checks are explicit and never accept new protocol identities.
+//! Complete generated MASM is tracked beside handwritten assembly. Explicit regeneration and
+//! freshness checks use the authored AIRs and typed templates. Ordinary core-library builds
+//! assemble the tracked tree without loading compiler tooling. Relation identities are pinned in
+//! `miden-air`, and verifier roots in `miden-core`.
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 mod protocol;
@@ -15,6 +17,9 @@ mod vm;
 
 /// Generator named in the header of every rendered module.
 const GENERATED_BY: &str = "miden-verifier-codegen";
+
+/// File that identifies a directory written by [`stage_core_library`].
+const STAGING_STAMP: &str = ".miden-verifier-codegen-stage";
 
 /// One rendered module: its path below the assembly root and its source.
 pub type RenderedModule = (PathBuf, String);
@@ -87,6 +92,84 @@ pub fn sync_verifier_masm(root: &Path, write: bool) -> Result<(), String> {
         fs::write(&path, source).map_err(io_error(&path))?;
     }
     Ok(())
+}
+
+/// Check and copy the complete tracked core-library assembly tree for inspection or release checks.
+///
+/// `destination` must be absent, empty, or an earlier staging output, which is recreated so no
+/// module from it survives; any other directory is refused rather than overwritten.
+pub fn stage_core_library(source: &Path, destination: &Path) -> Result<(), String> {
+    if destination.as_os_str().is_empty() {
+        return Err("the staging destination must be a directory path".into());
+    }
+    let (resolved_source, resolved_destination) = (resolve(source)?, resolve(destination)?);
+    if resolved_destination.starts_with(&resolved_source)
+        || resolved_source.starts_with(&resolved_destination)
+    {
+        return Err(format!(
+            "the staging destination {} must not contain or lie inside the source {}",
+            destination.display(),
+            source.display()
+        ));
+    }
+    if destination.exists() {
+        let is_empty = fs::read_dir(destination).map_err(io_error(destination))?.next().is_none();
+        if !is_empty && !destination.join(STAGING_STAMP).is_file() {
+            return Err(format!(
+                "{} is not empty and was not written by stage_core_library; refusing to replace it",
+                destination.display()
+            ));
+        }
+        fs::remove_dir_all(destination).map_err(io_error(destination))?;
+    }
+    // Stamp first, so a staging interrupted midway can be replaced by the next one.
+    fs::create_dir_all(destination).map_err(io_error(destination))?;
+    let stamp = destination.join(STAGING_STAMP);
+    fs::write(&stamp, "").map_err(io_error(&stamp))?;
+    sync_verifier_masm(source, false)?;
+    copy_tree(source, destination)?;
+    Ok(())
+}
+
+fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
+    fs::create_dir_all(destination).map_err(io_error(destination))?;
+    for entry in fs::read_dir(source).map_err(io_error(source))? {
+        let entry = entry.map_err(io_error(source))?;
+        let target = destination.join(entry.file_name());
+        if entry.file_type().map_err(io_error(&target))?.is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), &target).map_err(io_error(&target))?;
+        }
+    }
+    Ok(())
+}
+
+/// Absolute form of `path` with its deepest existing ancestor canonicalized, so paths that do not
+/// exist yet compare consistently with existing ones.
+///
+/// Components below that ancestor cannot be resolved, so they must be plain names.
+fn resolve(path: &Path) -> Result<PathBuf, String> {
+    let absolute = std::path::absolute(path).map_err(io_error(path))?;
+    let mut existing = absolute.as_path();
+    let mut missing = Vec::new();
+    while !existing.exists() {
+        match existing.components().next_back() {
+            Some(Component::Normal(name)) => missing.push(name.to_owned()),
+            _ => {
+                return Err(format!(
+                    "{} must not use `..` below a directory that does not exist",
+                    path.display()
+                ));
+            },
+        }
+        existing = existing
+            .parent()
+            .ok_or_else(|| format!("{} has no existing ancestor", path.display()))?;
+    }
+    let mut resolved = fs::canonicalize(existing).map_err(io_error(existing))?;
+    resolved.extend(missing.iter().rev());
+    Ok(resolved)
 }
 
 fn io_error(path: &Path) -> impl Fn(std::io::Error) -> String + '_ {
@@ -170,5 +253,46 @@ mod tests {
             );
             assert!(!source.contains("{{"), "{} has an unexpanded field", path.display());
         }
+    }
+
+    /// Staging the core library adds every rendered module and declares the verifier modules,
+    /// leaving the handwritten tree untouched.
+    #[test]
+    fn staging_completes_the_core_library_project() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../lib/core/asm");
+        let staged = std::env::temp_dir()
+            .join(format!("miden-verifier-codegen-stage-{}", std::process::id()));
+        stage_core_library(&source, &staged).unwrap();
+        for (path, rendered) in render_verifier_masm().unwrap() {
+            assert_eq!(fs::read_to_string(staged.join(&path)).unwrap(), rendered);
+            assert_eq!(fs::read_to_string(source.join(&path)).unwrap(), rendered);
+        }
+        let sys = fs::read_to_string(staged.join("sys/mod.masm")).unwrap();
+        assert!(sys.contains("pub mod pvm\npub mod vm\n"));
+
+        // Restaging replaces an earlier staging output.
+        stage_core_library(&source, &staged).unwrap();
+        fs::remove_dir_all(staged).unwrap();
+    }
+
+    /// Staging refuses destinations it did not write, so a mistyped path cannot erase them.
+    #[test]
+    fn staging_refuses_foreign_destinations() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../lib/core/asm");
+        assert!(stage_core_library(&source, Path::new("")).is_err());
+        let foreign = std::env::temp_dir()
+            .join(format!("miden-verifier-codegen-foreign-{}", std::process::id()));
+        fs::create_dir_all(&foreign).unwrap();
+        fs::write(foreign.join("keep"), "user data").unwrap();
+        assert!(stage_core_library(&source, &foreign).is_err());
+        assert_eq!(fs::read_to_string(foreign.join("keep")).unwrap(), "user data");
+        assert!(stage_core_library(&source, &source).is_err());
+        assert!(stage_core_library(&source, &source.join("nested")).is_err());
+        assert!(!source.join("nested").exists());
+        let escape = source.join("missing").join("..").join("nested");
+        assert!(stage_core_library(&source, &escape).is_err());
+        assert!(!source.join("missing").exists() && !source.join("nested").exists());
+        assert!(stage_core_library(&source, source.parent().unwrap()).is_err());
+        fs::remove_dir_all(foreign).unwrap();
     }
 }

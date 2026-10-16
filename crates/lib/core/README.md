@@ -17,6 +17,12 @@ Generated core-library MASM can be inspected locally:
 cargo run -p miden-core-lib-codegen -- --out target/miden-core-lib-generated-asm
 ```
 
+Complete generated verifier MASM is tracked in `asm/sys/vm` and `asm/sys/pvm` beside handwritten assembly. The build assembles a copy under `OUT_DIR` (`MIDEN_CORE_ASM_DIR` for tests), without compiling AIR definitions. After changing the AIRs or typed templates, run `make regenerate-verifiers`, then `make check-verifiers` to check regeneration, independent evaluator checks, and pinned verifier roots. `make stage-verifiers DIR=<path>` checks and copies the complete tree for inspection or release tooling.
+
+Documentation builds also write under `OUT_DIR` by default. Run
+`make regenerate-core-docs` to update the published API documentation explicitly,
+or `make check-core-docs` to check it without changing the checkout.
+
 ## Caller-maintained precompile roots
 
 Deferred precompile procedures have `_with_root` variants that return an independent obligation
