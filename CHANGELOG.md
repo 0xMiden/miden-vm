@@ -10,6 +10,7 @@
 
 - Fixed `miden-format` widening signature items on every run when the signature contains a comment, and dropping comments inside procedure attribute arguments ([#4029](https://github.com/0xMiden/miden-vm/pull/4029)).
 - Enforced the VM CLI advice-memory budget while constructing Merkle trees from input files, before the full trees are materialized ([#4022](https://github.com/0xMiden/miden-vm/pull/4022)).
+- Fixed debugger invocation recovery across re-batched padding and generated local-frame instructions, preserving suspended callers and invocation identities for nested `exec` calls.
 
 ## v0.36.1 (2026-10-16)
 
