@@ -45,6 +45,7 @@ pub enum ConstantKind {
 }
 
 impl ConstantDecl {
+    /// Creates an unannotated constant declaration.
     pub fn new(span: SourceSpan, visibility: Visibility, name: Ident, value: ConstantExpr) -> Self {
         Self {
             definition: ConstantDefinition::new(span, visibility, name, value),
@@ -89,39 +90,48 @@ impl ConstantDecl {
         }
     }
 
+    /// Returns the constant's definition, without its optional type annotation.
     pub fn definition(&self) -> &ConstantDefinition {
         &self.definition
     }
 
+    /// Returns a mutable reference to the constant's definition.
     pub fn definition_mut(&mut self) -> &mut ConstantDefinition {
         &mut self.definition
     }
 
+    /// Sets the documentation attached to this declaration.
     pub fn with_docs(mut self, docs: Option<Span<String>>) -> Self {
         *self.definition_mut().docs_mut() = docs.map(DocString::new);
         self
     }
 
+    /// Returns the constant's name.
     pub fn name(&self) -> &Ident {
         self.definition().name()
     }
 
+    /// Returns the constant's visibility.
     pub fn visibility(&self) -> Visibility {
         self.definition().visibility()
     }
 
+    /// Returns the documentation attached to this declaration, if any.
     pub fn docs(&self) -> Option<Span<&str>> {
         self.definition().docs()
     }
 
+    /// Returns the constant's value expression.
     pub fn value(&self) -> &ConstantExpr {
         self.definition().value()
     }
 
+    /// Returns a mutable reference to the constant's value expression.
     pub fn value_mut(&mut self) -> &mut ConstantExpr {
         self.definition_mut().value_mut()
     }
 
+    /// Returns the declared type annotation, if any.
     pub fn ty(&self) -> Option<&TypeExpr> {
         self.ty.as_ref()
     }
@@ -159,6 +169,7 @@ pub struct ConstantDefinition {
 }
 
 impl ConstantDefinition {
+    /// Creates a constant definition without a type annotation.
     pub fn new(span: SourceSpan, visibility: Visibility, name: Ident, value: ConstantExpr) -> Self {
         Self {
             span,
@@ -169,35 +180,43 @@ impl ConstantDefinition {
         }
     }
 
+    /// Sets the documentation attached to this definition.
     pub fn with_docs(mut self, docs: Option<Span<String>>) -> Self {
         self.docs = docs.map(DocString::new);
         self
     }
 
+    /// Returns the documentation attached to this definition, if any.
     pub fn docs(&self) -> Option<Span<&str>> {
         self.docs.as_ref().map(|docstring| docstring.as_spanned_str())
     }
 
+    /// Returns mutable access to this definition's documentation.
     pub fn docs_mut(&mut self) -> &mut Option<DocString> {
         &mut self.docs
     }
 
+    /// Returns the name of this definition.
     pub fn name(&self) -> &Ident {
         &self.name
     }
 
+    /// Returns mutable access to this definition's name.
     pub fn name_mut(&mut self) -> &mut Ident {
         &mut self.name
     }
 
+    /// Returns this definition's visibility.
     pub fn visibility(&self) -> Visibility {
         self.visibility
     }
 
+    /// Returns this definition's value expression.
     pub fn value(&self) -> &ConstantExpr {
         &self.value
     }
 
+    /// Returns mutable access to this definition's value expression.
     pub fn value_mut(&mut self) -> &mut ConstantExpr {
         &mut self.value
     }
