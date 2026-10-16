@@ -135,6 +135,11 @@ impl ConstantDecl {
     pub fn ty(&self) -> Option<&TypeExpr> {
         self.ty.as_ref()
     }
+
+    /// Returns a mutable reference to the declared type annotation, if any.
+    pub fn ty_mut(&mut self) -> Option<&mut TypeExpr> {
+        self.ty.as_mut()
+    }
 }
 
 impl Spanned for ConstantDecl {
