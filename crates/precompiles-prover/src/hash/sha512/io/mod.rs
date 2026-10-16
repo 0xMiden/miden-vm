@@ -1,6 +1,6 @@
 //! Trace construction for SHA-512 padding, chaining, and assertion binding.
 
-pub use miden_precompiles_air::hash::sha512::io::*;
+pub use miden_air::precompiles::hash::sha512::io::*;
 
 mod trace;
 pub use trace::Sha512IoRequires;

@@ -1,13 +1,12 @@
-//! Regeneration tool for the PVM ACE circuit constants and generated MASM artifacts.
+//! Regeneration tool for the PVM recursive-verifier MASM artifacts.
 //!
-//! One order-invariant circuit serves every proof ordering, so `--write` builds that circuit,
-//! mints its digest and the relation digest derived from it, and emits the memory layout, the
-//! out-of-domain ingest hook, and the constraint evaluator from the same circuit metadata.
-//! `--check` recomputes the same artifacts, compares the digests and circuit shape against the
-//! constants compiled into `ace_constants.rs`, then byte-compares every rendered file against its
-//! checked-in copy. The relation wrapper and query loaders import generated parameters; their
-//! procedure bodies are not regeneration inputs. The tool updates constant initializers in the
-//! native `ace_constants.rs` module; its API documentation is handwritten.
+//! One order-invariant circuit serves every proof ordering, so the tool compiles that circuit from
+//! the captured chiplet AIRs and emits the memory layout, the out-of-domain ingest hook, and the
+//! constraint evaluator from the same relation geometry. Both modes first compare the circuit
+//! digest, relation digest, and circuit shape against the identity pinned in
+//! `miden_air::precompiles::protocol`; generation never accepts a new identity. `--check` then
+//! byte-compares every rendered file against its checked-in copy. The relation wrapper and query
+//! loaders import generated parameters; their procedure bodies are not regeneration inputs.
 
 use std::{
     fmt::Write as _,
@@ -17,17 +16,17 @@ use std::{
 };
 
 use miden_ace_codegen::{
-    EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, MasmConstraintsEvalConfig,
-    render_masm_constraints_eval,
+    EXT_DEGREE, FoldCoefficientStaging, InputKey, InputLayout, LayoutKind,
+    MasmConstraintsEvalConfig, render_masm_constraints_eval,
 };
-use miden_core::{Felt, Word, crypto::hash::Eidos, utils::Matrix};
+use miden_air::precompiles::{NUM_CHIPLETS, security as pvm_security};
+use miden_air_definitions::precompiles::relation::{self, CapturedPvmRelation, HeightRule};
+use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
-use miden_lifted_air::{BaseAir, LiftedAir};
 use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
-use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS, security as pvm_security};
 
 use crate::{
-    ace::{PvmRecursiveAceCircuit, build_canonical_precompile_ace_circuit},
+    ace::PvmRecursiveAceCircuit,
     ace_constants::{
         GENERATED_BY, PVM_ACE_CIRCUIT_DIGEST, PVM_CIRCUIT_SHAPE, PVM_PREPROCESSED_COMMITMENT,
         PVM_RELATION_DIGEST, relation_digest_for_circuit,
@@ -38,8 +37,6 @@ use crate::{
     },
 };
 
-const CONSTANTS_PATH: &str = "src/ace_constants.rs";
-const PROTOCOL_PATH: &str = "../precompiles-air/src/protocol.rs";
 const PVM_CONSTRAINTS_EVAL_PATH: &str = "../lib/core/asm/sys/pvm/constraints_eval.masm";
 const PVM_PARAMETERS_PATH: &str = "../lib/core/asm/sys/pvm/parameters.masm";
 const PVM_FIXED_BOUNDARY_PATH: &str = "../lib/core/asm/sys/pvm/fixed_boundary.masm";
@@ -55,7 +52,7 @@ const NEXT_VM_REGION_START: u32 = 3_238_002_688;
 /// `pos_by_id` is padded to a whole word so the following `id_by_pos` table is word-aligned.
 const PROOF_ORDER_POSITIONS_FELTS: u32 = (NUM_CHIPLETS as u32).next_multiple_of(4);
 
-/// Whether [`run`] re-mints the committed artifacts (`Write`) or byte-compares a freshly
+/// Whether [`run`] rewrites the committed artifacts (`Write`) or byte-compares a freshly
 /// built set against them (`Check`).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {
@@ -66,6 +63,7 @@ pub enum Mode {
 /// Runs write (`--write`) or staleness-check (`--check`) mode.
 pub fn run(mode: Mode) -> Result<(), String> {
     let artifacts = compute()?;
+    pinned_identity_matches(&artifacts)?;
     match mode {
         Mode::Check => check(&artifacts),
         Mode::Write => write(&artifacts).map_err(|e| format!("{e}")),
@@ -77,13 +75,6 @@ struct GeneratedArtifacts {
     circuit_digest: Word,
     /// Relation digest binding that circuit into the Fiat-Shamir transcript.
     relation_digest: [Felt; 4],
-    /// Commitment to the preprocessed (setup) LDE tree under the Eidos config —
-    /// the configuration an in-VM verifier targets.
-    ///
-    /// This is a trusted verifier input rather than proof data: the Rust verifier
-    /// rebuilds the bundle locally, but a MASM verifier has no way to, so it must be
-    /// pinned as a protocol constant and observed into the transcript.
-    preprocessed_commitment: Word,
     /// Shape of the encoded circuit stream.
     shape: CircuitShape,
     /// Generated PVM relation layout, derived from the ACE `InputLayout`.
@@ -96,10 +87,6 @@ struct GeneratedArtifacts {
     fixed_boundary_masm: String,
     /// Generated PVM constraint evaluator, rendered from the same circuit metadata.
     constraints_eval_masm: String,
-    /// Hand-written constants module with its generated values updated.
-    constants_rs: String,
-    /// PVM AIR protocol module with the canonical-circuit relation digest updated.
-    protocol_rs: String,
 }
 
 #[derive(Clone, Debug)]
@@ -238,9 +225,12 @@ impl PvmReadLayout {
     }
 }
 
-/// Build the canonical circuit and derive every generated artifact from it.
+/// Compile the canonical circuit from the captured chiplet AIRs and derive every generated
+/// artifact from it.
 fn compute() -> Result<GeneratedArtifacts, String> {
-    let source = build_canonical_precompile_ace_circuit().map_err(|e| format!("{e}"))?;
+    let captured = CapturedPvmRelation::new().map_err(|e| format!("{e}"))?;
+    let compiled = captured.compile().map_err(|e| format!("{e}"))?;
+    let source = compiled.build_circuit(LayoutKind::Masm).map_err(|e| format!("{e}"))?;
     let input_layout = source.layout();
     let circuit = PvmRecursiveAceCircuit::try_from(source.to_ace().map_err(|e| format!("{e}"))?)
         .map_err(|e| format!("{e}"))?;
@@ -253,7 +243,7 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     }
     let quotient_inputs = quotient_recomposition_inputs::<Felt>(
         num_quotient_chunks.ilog2() as u8,
-        miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup(),
+        miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup(),
     )
     .map_err(|err| err.to_string())?;
 
@@ -264,9 +254,12 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     };
     let circuit_digest = circuit.commitment;
     let relation_digest = relation_digest_for_circuit(&circuit_digest);
-    let preprocessed_commitment = preprocessed_commitment(relation_digest);
+    // The setup commitment is a trusted verifier input pinned in `miden_air::precompiles`, whose
+    // tests rebuild it from the authored setup trace.
+    let preprocessed_commitment = Word::new(PVM_PREPROCESSED_COMMITMENT.map(Felt::new_unchecked));
+    let protocol = relation::protocol();
 
-    let geometry = PvmOodGeometry::from_input_layout(input_layout)?;
+    let geometry = PvmOodGeometry::from_compiled(compiled.geometry(), input_layout)?;
     let scatter_table_layout = pvm_scatter_table_layout(&geometry)?;
     let layout_masm = render_pvm_layout(&read_layout, shape.stream_len, &scatter_table_layout)?;
     let stream_len = u32::try_from(shape.stream_len)
@@ -275,53 +268,25 @@ fn compute() -> Result<GeneratedArtifacts, String> {
     let ood_frames_masm =
         render_pvm_ood_frames(&geometry, scratch.proof_order_ids_ptr.is_multiple_of(4))?;
     let parameters_masm =
-        render_pvm_parameters(&geometry, relation_digest, preprocessed_commitment)?;
+        render_pvm_parameters(&geometry, &protocol, relation_digest, preprocessed_commitment)?;
     let constraints_eval_masm = render_pvm_constraints_eval(
         shape,
         circuit_digest,
         quotient_inputs,
         read_layout.fold_coefficient_offset,
+        protocol.max_periodic_log,
     )?;
-
-    let mut constants_rs = read_generated_file(CONSTANTS_PATH)?;
-    for (name, word) in [
-        ("PVM_RELATION_DIGEST", Word::new(relation_digest)),
-        ("PVM_ACE_CIRCUIT_DIGEST", circuit_digest),
-        ("PVM_PREPROCESSED_COMMITMENT", preprocessed_commitment),
-    ] {
-        replace_limb_array_const(&mut constants_rs, name, &word)?;
-    }
-    replace_shape_const(&mut constants_rs, shape)?;
-    let protocol_rs = render_protocol(&relation_digest);
 
     Ok(GeneratedArtifacts {
         circuit_digest,
         relation_digest,
-        preprocessed_commitment,
         shape,
         layout_masm,
         ood_frames_masm,
         parameters_masm,
         fixed_boundary_masm: crate::fixed_boundary_codegen::render_fixed_boundary()?,
         constraints_eval_masm,
-        constants_rs,
-        protocol_rs,
     })
-}
-
-/// Commitment to the setup (preprocessed) trace tree under the Eidos config.
-///
-/// Built through the same cache the prover and Rust verifier use, seeded with the freshly
-/// minted relation digest, so the config matches production exactly and the minted constant
-/// is by construction the value they observe into the transcript. (The commitment itself
-/// is digest-independent; threading the digest avoids relying on that property here.)
-fn preprocessed_commitment(digest: [Felt; 4]) -> Word {
-    let params = miden_precompiles_air::stark_config::precompile_pcs_params();
-    let config = miden_precompiles_air::stark_config::eidos_config(params, digest);
-    // The LMCS commitment is a 4-felt hash; Word is the MASM-facing representation.
-    let commitment: [u64; 4] =
-        miden_precompiles_air::preprocessed::build_uncached(&config).commitment().into();
-    Word::new(commitment.map(Felt::new_unchecked))
 }
 
 /// Relation-local scratch that follows the ACE READ section, in allocation order.
@@ -556,8 +521,8 @@ fn render_pvm_constraints_eval(
     circuit_digest: Word,
     quotient_inputs: QuotientRecompositionInputs<Felt>,
     fold_coefficient_offset: usize,
+    max_cycle_len_log: u32,
 ) -> Result<String, String> {
-    let max_cycle_len_log = max_periodic_cycle_len_log()?;
     render_masm_constraints_eval(&MasmConstraintsEvalConfig {
         generated_by: GENERATED_BY,
         layout_module: "miden::core::sys::pvm::layout",
@@ -578,6 +543,7 @@ fn render_pvm_constraints_eval(
 
 fn render_pvm_parameters(
     geometry: &PvmOodGeometry,
+    protocol: &relation::RelationProtocol,
     relation_digest: [Felt; 4],
     preprocessed_commitment: Word,
 ) -> Result<String, String> {
@@ -593,7 +559,7 @@ fn render_pvm_parameters(
             writeln!(output, "pub const {prefix}_{index} = {}", felt.as_canonical_u64()).unwrap();
         }
     }
-    output.push_str("\n# Security descriptor from miden_precompiles_air::security.\n");
+    output.push_str("\n# Security descriptor from miden_air::precompiles::security.\n");
     for (name, value) in [
         ("MAX_MESSAGE_WIDTH", u64::from(pvm_security::LOOKUP_SHAPE.max_message_width)),
         (
@@ -624,19 +590,19 @@ fn render_pvm_parameters(
 
     output.push_str("\n# Bus-domain scale factors: BusId + 1 from the native relation registry.\n");
     for (name, bus) in [
-        ("UINT_VAL_BUS_SCALE", miden_precompiles_air::relations::BusId::UintVal),
-        ("EC_GROUP_BUS_SCALE", miden_precompiles_air::relations::BusId::EcGroup),
+        ("UINT_VAL_BUS_SCALE", miden_air::precompiles::relations::BusId::UintVal),
+        ("EC_GROUP_BUS_SCALE", miden_air::precompiles::relations::BusId::EcGroup),
     ] {
         writeln!(output, "pub const {name} = {}", bus as usize + 1).unwrap();
     }
 
-    let setup_height = miden_precompiles_air::primitives::byte_pair_lut::TRACE_HEIGHT;
+    let setup_height = miden_air::precompiles::primitives::byte_pair_lut::TRACE_HEIGHT;
     if !setup_height.is_power_of_two() {
         return Err("BytePairLut setup height must be a power of two".into());
     }
     let log_height = setup_height.ilog2();
     let depth = log_height
-        + u32::from(miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup());
+        + u32::from(miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup());
     let index_mask = 1u64
         .checked_shl(depth)
         .and_then(|size| u32::try_from(size - 1).ok())
@@ -650,18 +616,10 @@ fn render_pvm_parameters(
         "\n# Minimum log2 heights for non-fixed AIRs, indexed in ChipletAir::all() order.\n\
          # The row bound is max(2, longest periodic cycle, preprocessed trace height).\n",
     );
-    for (index, air) in ChipletAir::all().iter().enumerate() {
-        if air.fixed_log_height().is_some() {
-            continue;
+    for (index, height) in protocol.heights.iter().enumerate() {
+        if let HeightRule::Minimum(log_height) = height {
+            writeln!(output, "pub const MIN_LOG_HEIGHT_{index} = {log_height}").unwrap();
         }
-        let preprocessed_height = air.preprocessed_trace().map_or(0, |trace| trace.height());
-        let min_height = air.max_periodic_length().max(2).max(preprocessed_height);
-        if !min_height.is_power_of_two() {
-            return Err(format!(
-                "PVM {air:?} minimum trace height {min_height} is not a power of two"
-            ));
-        }
-        writeln!(output, "pub const MIN_LOG_HEIGHT_{index} = {}", min_height.ilog2()).unwrap();
     }
 
     output.push_str(
@@ -683,46 +641,37 @@ fn render_pvm_parameters(
     Ok(output)
 }
 
-fn max_periodic_cycle_len_log() -> Result<u32, String> {
-    let max_len = ChipletAir::all()
-        .iter()
-        .flat_map(|air| <ChipletAir as BaseAir<Felt>>::periodic_columns(air).into_owned())
-        .map(|column| column.len())
-        .max()
-        .unwrap_or(1);
-    if !max_len.is_power_of_two() {
-        return Err("maximum PVM AIR periodic cycle length is not a power of two".into());
+/// Compares the compiled circuit with the relation identity pinned in `miden-air`.
+fn pinned_identity_matches(artifacts: &GeneratedArtifacts) -> Result<(), String> {
+    const PINS_PATH: &str = "air/src/precompiles/protocol.rs";
+    for (name, actual, expected) in [
+        ("relation_digest", PVM_RELATION_DIGEST, artifacts.relation_digest),
+        ("ace_circuit_digest", PVM_ACE_CIRCUIT_DIGEST, *artifacts.circuit_digest),
+    ] {
+        if actual.map(Felt::new_unchecked) != expected {
+            return Err(format!(
+                "pinned {name} in {PINS_PATH} is stale: expected {:?}; an intentional relation \
+                 change must update the pins before regenerating",
+                expected.map(|felt| felt.as_canonical_u64())
+            ));
+        }
     }
-    Ok(max_len.ilog2())
+    let shape = (
+        artifacts.shape.num_inputs,
+        artifacts.shape.num_eval_gates,
+        artifacts.shape.stream_len,
+    );
+    if PVM_CIRCUIT_SHAPE != shape {
+        return Err(format!(
+            "the build-compiled PVM circuit shape {PVM_CIRCUIT_SHAPE:?} differs from the \
+             regenerated shape {shape:?}"
+        ));
+    }
+    Ok(())
 }
 
 fn check(artifacts: &GeneratedArtifacts) -> Result<(), String> {
-    for (name, actual, expected) in [
-        ("PVM_RELATION_DIGEST", PVM_RELATION_DIGEST, artifacts.relation_digest),
-        ("PVM_ACE_CIRCUIT_DIGEST", PVM_ACE_CIRCUIT_DIGEST, *artifacts.circuit_digest),
-        (
-            "PVM_PREPROCESSED_COMMITMENT",
-            PVM_PREPROCESSED_COMMITMENT,
-            *artifacts.preprocessed_commitment,
-        ),
-    ] {
-        if actual.map(Felt::new_unchecked) != expected {
-            return Err(format!("{name} in {CONSTANTS_PATH} is stale"));
-        }
-    }
-    if PVM_CIRCUIT_SHAPE
-        != (
-            artifacts.shape.num_inputs,
-            artifacts.shape.num_eval_gates,
-            artifacts.shape.stream_len,
-        )
-    {
-        return Err(format!("PVM_CIRCUIT_SHAPE in {CONSTANTS_PATH} is stale"));
-    }
-
     for (path, rendered) in [
-        (CONSTANTS_PATH, &artifacts.constants_rs),
-        (PROTOCOL_PATH, &artifacts.protocol_rs),
         (PVM_LAYOUT_PATH, &artifacts.layout_masm),
         (PVM_PARAMETERS_PATH, &artifacts.parameters_masm),
         (PVM_FIXED_BOUNDARY_PATH, &artifacts.fixed_boundary_masm),
@@ -733,13 +682,11 @@ fn check(artifacts: &GeneratedArtifacts) -> Result<(), String> {
             return Err(format!("{path} is stale; run `make regenerate-pvm-constants`"));
         }
     }
-    println!("PVM ACE constants and MASM artifacts are up to date");
+    println!("PVM MASM artifacts are up to date");
     Ok(())
 }
 
 fn write(artifacts: &GeneratedArtifacts) -> io::Result<()> {
-    write_generated_file(CONSTANTS_PATH, &artifacts.constants_rs)?;
-    write_generated_file(PROTOCOL_PATH, &artifacts.protocol_rs)?;
     write_generated_file(PVM_LAYOUT_PATH, &artifacts.layout_masm)?;
     write_generated_file(PVM_PARAMETERS_PATH, &artifacts.parameters_masm)?;
     write_generated_file(PVM_FIXED_BOUNDARY_PATH, &artifacts.fixed_boundary_masm)?;
@@ -776,94 +723,22 @@ fn masm_word_literal(word: Word) -> String {
     )
 }
 
-fn render_protocol(relation_digest: &[Felt; 4]) -> String {
-    let body: String = relation_digest
-        .iter()
-        .map(|felt| format!("    {},\n", felt.as_canonical_u64()))
-        .collect();
-    format!(
-        "/// Relation digest binding the canonical PVM ACE circuit into the Fiat-Shamir transcript.\n\
-         ///\n\
-         /// Regenerated by `pvm-constants-regen`; must match `PVM_RELATION_DIGEST` in\n\
-         /// `miden-precompiles-verifier`'s `ace_constants.rs`.\n\
-         #[rustfmt::skip]\n\
-         pub const PVM_RELATION_DIGEST: [u64; 4] = [\n{body}];\n"
-    )
-}
-
-/// Rewrite the initializer of a `pub const NAME: [u64; 4]` declaration.
-fn replace_limb_array_const(content: &mut String, name: &str, word: &Word) -> Result<(), String> {
-    let body: String =
-        word.iter().map(|felt| format!("\n    {},", felt.as_canonical_u64())).collect();
-    replace_const_initializer(content, name, "[", "];", &format!("{body}\n"))
-}
-
-/// Rewrite the initializer of the `pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize)`
-/// declaration.
-fn replace_shape_const(content: &mut String, shape: CircuitShape) -> Result<(), String> {
-    let body = format!("{}, {}, {}", shape.num_inputs, shape.num_eval_gates, shape.stream_len);
-    replace_const_initializer(content, "PVM_CIRCUIT_SHAPE", "(", ");", &body)
-}
-
-fn replace_const_initializer(
-    content: &mut String,
-    name: &str,
-    open: &str,
-    close: &str,
-    body: &str,
-) -> Result<(), String> {
-    let marker = format!("pub const {name}:");
-    let start = content
-        .find(&marker)
-        .ok_or_else(|| format!("{name} not found in {CONSTANTS_PATH}"))?;
-    if content[start + marker.len()..].contains(&marker) {
-        return Err(format!("{name} is declared more than once in {CONSTANTS_PATH}"));
-    }
-    let declaration_start = start + marker.len();
-    let declaration_end = content[declaration_start..]
-        .find("pub const ")
-        .map(|offset| declaration_start + offset)
-        .unwrap_or(content.len());
-    let declaration = &content[declaration_start..declaration_end];
-    // The initializer follows the first `=` after the declaration's type. rustfmt may wrap it
-    // onto its own line, so the search for the opening delimiter starts at that `=` (never inside
-    // the `[u64; 4]` type) and the whole `= <open>...<close>` span is rewritten in one canonical
-    // shape rather than patched in place. Every search is bounded by the next public constant so a
-    // malformed declaration cannot consume its neighbor's initializer.
-    let assign = declaration
-        .find('=')
-        .map(|offset| declaration_start + offset)
-        .ok_or_else(|| format!("{name} initializer not found in {CONSTANTS_PATH}"))?;
-    let after_assign = &content[assign..declaration_end];
-    let open_start = after_assign
-        .find(open)
-        .map(|offset| assign + offset)
-        .ok_or_else(|| format!("{name} initializer not found in {CONSTANTS_PATH}"))?;
-    let body_start = open_start + open.len();
-    let body_end = content[body_start..declaration_end]
-        .find(close)
-        .map(|offset| body_start + offset)
-        .ok_or_else(|| format!("{name} terminator not found in {CONSTANTS_PATH}"))?;
-    content.replace_range(assign..body_end + close.len(), &format!("= {open}{body}{close}"));
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use std::string::String;
-
-    use miden_core::{Felt, Word};
+    use miden_ace_codegen::LayoutKind;
+    use miden_air_definitions::precompiles::relation::CapturedPvmRelation;
 
     use super::{
-        CircuitShape, NEXT_VM_REGION_START, PROOF_ORDER_POSITIONS_FELTS, PvmReadLayout,
-        pvm_scratch_allocation, replace_limb_array_const, replace_shape_const,
+        NEXT_VM_REGION_START, PROOF_ORDER_POSITIONS_FELTS, PvmReadLayout, pvm_scratch_allocation,
     };
 
     #[test]
     fn pvm_proof_order_tables_are_disjoint_and_word_aligned() {
-        let canonical = crate::ace::build_canonical_precompile_ace_circuit().unwrap();
+        let captured = CapturedPvmRelation::new().unwrap();
+        let compiled = captured.compile().unwrap();
+        let canonical = compiled.build_circuit(LayoutKind::Masm).unwrap();
         let read_layout = PvmReadLayout::from_input_layout(canonical.layout()).unwrap();
-        let circuit = crate::ace::build_pvm_recursive_verifier_ace_circuit().unwrap();
+        let circuit = miden_air::precompiles::protocol::recursive_circuit();
         let stream_len = u32::try_from(circuit.stream_len).unwrap();
         let scratch = pvm_scratch_allocation(&read_layout, stream_len).unwrap();
 
@@ -876,79 +751,9 @@ mod tests {
         );
         assert_eq!(
             scratch.allocation_end - scratch.proof_order_ids_ptr,
-            miden_precompiles_air::NUM_CHIPLETS as u32,
+            miden_air::precompiles::NUM_CHIPLETS as u32,
             "id_by_pos must reserve exactly one cell per chiplet"
         );
         assert!(scratch.allocation_end <= NEXT_VM_REGION_START);
-    }
-
-    #[test]
-    fn generated_rust_constants_are_rewritten_in_place() {
-        let mut source = String::from(
-            "/// doc\npub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [0, 0, 0, 0];\n\npub const \
-             PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (0, 0, 0);\n",
-        );
-        let word = Word::new([1u64, 2, 3, 4].map(Felt::new_unchecked));
-        replace_limb_array_const(&mut source, "PVM_ACE_CIRCUIT_DIGEST", &word).unwrap();
-        replace_shape_const(
-            &mut source,
-            CircuitShape {
-                num_inputs: 5,
-                num_eval_gates: 6,
-                stream_len: 8,
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            source,
-            "/// doc\npub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [\n    1,\n    2,\n    3,\n    \
-             4,\n];\n\npub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (5, 6, 8);\n"
-        );
-    }
-
-    /// rustfmt wraps a long limb array onto the line after the `=`; the initializer must still be
-    /// found (not the `[` of the `[u64; 4]` type) and rewritten in the canonical shape.
-    #[test]
-    fn generated_rust_constants_are_rewritten_when_rustfmt_wraps_the_initializer() {
-        let mut source = String::from(
-            "pub const PVM_RELATION_DIGEST: [u64; 4] =\n    [1, 2, 3, 4];\n\npub const \
-             PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [\n    0,\n    0,\n    0,\n    0,\n];\n",
-        );
-        let word = Word::new([5u64, 6, 7, 8].map(Felt::new_unchecked));
-        replace_limb_array_const(&mut source, "PVM_RELATION_DIGEST", &word).unwrap();
-        assert_eq!(
-            source,
-            "pub const PVM_RELATION_DIGEST: [u64; 4] = [\n    5,\n    6,\n    7,\n    8,\n];\n\n\
-             pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [\n    0,\n    0,\n    0,\n    0,\n];\n"
-        );
-    }
-
-    #[test]
-    fn generated_rust_constant_replacement_fails_closed_when_absent_or_malformed() {
-        let word = Word::new([1u64, 2, 3, 4].map(Felt::new_unchecked));
-        let following = "pub const OTHER: [u64; 4] = [9, 8, 7, 6];\n";
-        for (malformed, expected_error) in [
-            (String::new(), "not found"),
-            ("pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4]\n".into(), "initializer not found"),
-            (
-                "pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = 0;\n".into(),
-                "initializer not found",
-            ),
-            (
-                "pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [0, 0, 0, 0;\n".into(),
-                "terminator not found",
-            ),
-        ] {
-            let mut source = malformed;
-            source.push_str(following);
-            let original = source.clone();
-
-            let error =
-                replace_limb_array_const(&mut source, "PVM_ACE_CIRCUIT_DIGEST", &word).unwrap_err();
-
-            assert!(error.contains(expected_error), "unexpected error: {error}");
-            assert_eq!(source, original);
-            assert!(source.ends_with(following));
-        }
     }
 }

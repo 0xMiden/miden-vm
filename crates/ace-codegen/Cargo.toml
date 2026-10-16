@@ -14,7 +14,7 @@ rust-version.workspace = true
 edition.workspace = true
 
 [features]
-default = ["compiler"]
+default = []
 compiler = [
     "dep:miden-constraint-compiler",
     "dep:miden-lifted-stark",

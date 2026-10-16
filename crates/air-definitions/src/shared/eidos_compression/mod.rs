@@ -133,7 +133,7 @@ pub mod core {
 }
 
 /// Test-only access to the shared compression constraints.
-#[cfg(feature = "testing")]
+#[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
 pub mod testing {
     use miden_core::Felt;

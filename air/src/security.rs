@@ -209,6 +209,33 @@ fn apply_lookup_correction(report: SecurityReport, correction: u64) -> SecurityR
     SecurityReport::new(terms)
 }
 
+impl ProofSecurityParameters {
+    /// Computes the conjectured security report for the verified proof.
+    ///
+    /// The same estimator handles MVM and PVM proofs because the parameters include the protocol,
+    /// instance, and AIR shapes. Callers must use parameters returned by the verifier that
+    /// authenticated the proof rather than values assembled independently.
+    pub fn conjectured_security_report(&self) -> SecurityReport {
+        let report = security_report_with_hash(
+            &self.protocol_params,
+            &self.instance_shape,
+            &self.air_shape,
+            self.hash_fn,
+        );
+        let correction = lookup_boundary_correction(
+            self.num_lookup_boundary_terms,
+            self.air_shape.lookup.map_or(0, |lookup| lookup.fractions_per_row),
+            self.instance_shape.log_max_height,
+        );
+        apply_lookup_correction(report, correction)
+    }
+
+    /// Returns the conjectured security level for the verified proof.
+    pub fn conjectured_security_level(&self) -> u32 {
+        self.conjectured_security_report().security_level()
+    }
+}
+
 /// Builds MVM security parameters from values obtained during proof verification.
 ///
 /// `log_max_height` and `alignment` must come from successful STARK verification,

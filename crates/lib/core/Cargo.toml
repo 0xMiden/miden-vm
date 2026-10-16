@@ -67,7 +67,7 @@ criterion.workspace = true
 curve25519-dalek.workspace = true
 p3-challenger.workspace = true
 miden-ace-codegen = { workspace = true, features = ["compiler"] }
-miden-air.workspace = true
+miden-air = { workspace = true, features = ["compiler"] }
 miden-air-definitions = { workspace = true, features = ["compiler"] }
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-core-lib-codegen = { workspace = true, features = ["std"] }
@@ -75,7 +75,6 @@ miden-debug-types.workspace = true
 miden-lifted-stark = { workspace = true, features = ["testing"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
 miden-processor = { workspace = true, features = ["testing"] }
-miden-precompiles-air.workspace = true
 miden-precompiles-prover = { workspace = true, features = ["concurrent"] }
 miden-precompiles-verifier = { workspace = true, features = ["concurrent"] }
 miden-prover = { workspace = true, features = ["concurrent"] }

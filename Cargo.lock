@@ -2246,7 +2246,6 @@ dependencies = [
  "miden-mast-package",
  "miden-package-registry",
  "miden-precompiles",
- "miden-precompiles-air",
  "miden-precompiles-prover",
  "miden-precompiles-verifier",
  "miden-processor",
@@ -2569,14 +2568,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-precompiles-air"
-version = "1.0.0-rc.1"
-dependencies = [
- "miden-air-definitions",
- "miden-lifted-stark",
-]
-
-[[package]]
 name = "miden-precompiles-prover"
 version = "1.0.0-rc.1"
 dependencies = [
@@ -2587,7 +2578,6 @@ dependencies = [
  "miden-lifted-air",
  "miden-lifted-stark",
  "miden-precompiles",
- "miden-precompiles-air",
  "miden-precompiles-verifier",
  "miden-utils-sync",
  "proptest",
@@ -2607,11 +2597,11 @@ dependencies = [
  "insta",
  "miden-ace-codegen",
  "miden-air",
+ "miden-air-definitions",
  "miden-core",
  "miden-crypto",
  "miden-lifted-air",
  "miden-lifted-stark",
- "miden-precompiles-air",
  "miden-serde-utils",
  "serde",
  "serde-wincode",
@@ -2876,7 +2866,6 @@ dependencies = [
  "miden-core",
  "miden-core-lib",
  "miden-crypto",
- "miden-precompiles-air",
  "miden-precompiles-prover",
  "miden-vm",
  "p256",
@@ -2893,7 +2882,6 @@ dependencies = [
  "miden-core",
  "miden-core-lib",
  "miden-lifted-stark",
- "miden-precompiles-air",
  "miden-precompiles-verifier",
  "miden-processor",
  "miden-verifier",

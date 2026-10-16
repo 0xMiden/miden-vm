@@ -108,8 +108,8 @@ pub enum BusId {
 
 /// Number of bus-prefix slots, one greater than the maximum [`BusId`].
 ///
-/// [`Challenges::new`](crate::lookup::Challenges::new) precomputes one prefix for each numeric
-/// ID in this range, including the reserved entries.
+/// [`Challenges::new`](crate::lookup::Challenges::new) precomputes one prefix for
+/// each numeric ID in this range, including the reserved entries.
 pub const NUM_BUS_IDS: usize = 38;
 const _: () = assert!(NUM_BUS_IDS == BusId::Sha256IoContinuation as usize + 1);
 

@@ -71,7 +71,7 @@ pub const CHIPLETS_CLK_COL: usize = CHIPLETS_MODE_COL + 1;
 pub const CHIPLETS_WIDTH: usize = CHIPLETS_CLK_COL + 1;
 
 pub mod eidos_compression {
-    pub use crate::shared::eidos_compression::{
+    pub use crate::constraints::eidos_compression::{
         layout::{
             BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, BYTES_PER_WORD, F_C_CANON_INV_COL,
             F_C_CANON_Z_COL, F_COMPRESSION_CYCLE_ID_COL, F_COMPRESSION_MULTIPLICITY_COL,

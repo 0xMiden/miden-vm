@@ -50,7 +50,7 @@ impl Relation {
     fn pvm() -> Self {
         Self {
             module: "pvm",
-            num_airs: miden_precompiles_air::NUM_CHIPLETS,
+            num_airs: miden_air::precompiles::NUM_CHIPLETS,
             layout_const: pvm_layout_const,
         }
     }

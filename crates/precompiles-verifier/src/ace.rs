@@ -1,10 +1,11 @@
 //! ACE circuit policy for the precompile chiplet multi-AIR proof.
 //!
-//! The relation uses [`ChipletAir::all`] as its stable instance order and canonical ACE fold order,
-//! and aligns each per-AIR trace region to eight base-field elements. The lifted STARK proof
-//! commits traces in ascending height order, which varies per workload, but one order-invariant
-//! circuit serves every ordering: the verifier lands each proof-ordered segment at the canonical
-//! address the circuit reads it from and stages each chiplet's fold coefficient by proof position.
+//! The relation uses [`miden_air::precompiles::ChipletAir::all`] as its stable instance order and
+//! canonical ACE fold order, and aligns each per-AIR trace region to eight base-field elements. The
+//! lifted STARK proof commits traces in ascending height order, which varies per workload, but one
+//! order-invariant circuit serves every ordering: the verifier lands each proof-ordered segment at
+//! the canonical address the circuit reads it from and stages each chiplet's fold coefficient by
+//! proof position.
 //!
 //! The cross-chiplet LogUp identity enforced by `ChipletMultiAir::eval_external` remains an
 //! external multi-AIR assertion.
@@ -12,75 +13,22 @@
 #[cfg(test)]
 use alloc::vec::Vec;
 
-use miden_ace_codegen::{
-    AceCircuit, AceConfig, AceError, LayoutKind, build_canonical_multi_air_ace_circuit,
+#[cfg(test)]
+use miden_air::precompiles::ChipletAir;
+use miden_air::precompiles::NUM_CHIPLETS;
+pub use miden_air::precompiles::ace::PvmRecursiveAceCircuit;
+#[cfg(test)]
+use miden_air_definitions::precompiles::ace::{
+    build_canonical_precompile_ace_circuit, build_pvm_recursive_verifier_ace_circuit,
 };
-use miden_core::{Felt, field::QuadFelt};
-use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS};
-
-// MULTI-AIR ACE CIRCUIT
-// ================================================================================================
-
-/// Per-AIR trace regions are padded to this width before concatenation, matching the LMCS wire
-/// alignment used by the commitment scheme.
-const LMCS_ALIGNMENT: usize = 8;
-
-/// Number of quotient chunks the precompile relation commits to.
-///
-/// The lifted STARK verifier derives this quantity symbolically from the AIRs. Deriving it through
-/// the same implementation keeps the ACE circuit's READ layout coupled to the proof protocol.
-fn num_quotient_chunks() -> usize {
-    let max_log_quotient_degree = ChipletAir::all()
-        .iter()
-        .map(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, ChipletAir>)
-        .max()
-        .expect("the chiplet stack is non-empty");
-    1usize << max_log_quotient_degree
-}
-
-/// ACE codegen settings for the precompile chiplet relation.
-fn precompile_ace_config() -> AceConfig {
-    AceConfig {
-        num_quotient_chunks: num_quotient_chunks(),
-        layout: LayoutKind::Masm,
-    }
-}
-
-/// Builds the canonical (order-invariant) precompile chiplet ACE circuit.
-///
-/// Every chiplet's trace regions sit at its [`ChipletAir::all`] offset and every chiplet reads its
-/// fold coefficient from a dedicated slot, so one circuit serves every proof ordering. The caller
-/// lands each proof-ordered trace segment on its canonical address and stages the chiplet at proof
-/// position `k` with the coefficient `beta^(NUM_CHIPLETS - 1 - k)`.
-pub fn build_canonical_precompile_ace_circuit() -> Result<AceCircuit<QuadFelt>, AceError> {
-    let airs = ChipletAir::all();
-    build_canonical_multi_air_ace_circuit(&airs, precompile_ace_config(), LMCS_ALIGNMENT)
-}
-
-// RECURSIVE VERIFIER CIRCUIT
-// ================================================================================================
-
-pub use miden_ace_codegen::RecursiveAceCircuit as PvmRecursiveAceCircuit;
-
-/// Builds and encodes the order-invariant PVM recursive-verifier ACE circuit.
-///
-/// A caller that needs the circuit per proof should hold [`shared_pvm_recursive_circuit`] rather
-/// than rebuild it here.
-pub fn build_pvm_recursive_verifier_ace_circuit() -> Result<PvmRecursiveAceCircuit, AceError> {
-    let encoded = build_canonical_precompile_ace_circuit()?.to_ace()?;
-    encoded.try_into()
-}
 
 /// Returns the process-wide canonical circuit shared by every proof order.
 pub fn shared_pvm_recursive_circuit() -> &'static PvmRecursiveAceCircuit {
     static CIRCUIT: std::sync::OnceLock<PvmRecursiveAceCircuit> = std::sync::OnceLock::new();
-    CIRCUIT.get_or_init(|| {
-        build_pvm_recursive_verifier_ace_circuit()
-            .expect("PVM recursive-verifier ACE circuit must build")
-    })
+    CIRCUIT.get_or_init(miden_air::precompiles::protocol::recursive_circuit)
 }
 
-/// Returns [`ChipletAir::all`] instance indices in committed-trace order.
+/// Returns [`miden_air::precompiles::ChipletAir::all`] instance indices in committed-trace order.
 pub fn proof_order_from_log_heights(log_heights: &[u8; NUM_CHIPLETS]) -> [usize; NUM_CHIPLETS] {
     let mut order = core::array::from_fn(|index| index);
     order.sort_by_key(|&index| (log_heights[index], index));
@@ -141,6 +89,7 @@ mod tests {
     use alloc::{format, string::String, vec::Vec};
 
     use miden_ace_codegen::InputKey;
+    use miden_air::precompiles::ace::LMCS_ALIGNMENT;
     use miden_core::{Felt, Word, crypto::hash::Eidos, field::QuadFelt};
     use miden_crypto::field::PrimeCharacteristicRing;
 
@@ -311,9 +260,10 @@ mod tests {
         );
 
         let max = derived.iter().map(|(_, degree)| *degree).max().expect("non-empty stack");
+        assert!(max <= miden_air::precompiles::policy::LOG_BLOWUP);
         let expected_chunks = 1usize << max;
         assert_eq!(
-            precompile_ace_config().num_quotient_chunks,
+            miden_air::precompiles::protocol::metadata().num_quotient_chunks,
             expected_chunks,
             "the ACE circuit must read exactly the quotient chunks the proof carries"
         );
@@ -349,6 +299,12 @@ mod tests {
             circuit.num_eval_gates < 32_768,
             "the SHA program must not restore the 97,576-gate fixed verifier cost"
         );
+        // Encoded READ nodes include constants as well as the layout's variable inputs.
+        assert_eq!(
+            PVM_CIRCUIT_SHAPE,
+            (circuit.num_inputs, circuit.num_eval_gates, circuit.stream_len)
+        );
+        assert_eq!(circuit.stream_len % 8, 0, "ACE stream supports whole-block ingestion");
         let snapshot = format!(
             "layout_inputs: {}\nnum_vars: {}\nnum_eval_gates: {}\nstream_len: \
              {}\ncircuit_digest: {:?}\nrelation_digest: {:?}",
@@ -453,7 +409,7 @@ mod tests {
 
     #[test]
     fn pvm_fixed_boundary_scales_match_the_logup_registry() {
-        use miden_precompiles_air::relations::BusId;
+        use miden_air::precompiles::relations::BusId;
 
         assert_eq!(
             masm_const(PVM_PARAMETERS_PATH, "UINT_VAL_BUS_SCALE"),
@@ -467,8 +423,8 @@ mod tests {
 
     #[test]
     fn pvm_public_input_hook_matches_the_statement_schema() {
+        use miden_air::precompiles::ChipletMultiAir;
         use miden_lifted_air::{BaseAir, MultiAir};
-        use miden_precompiles_air::ChipletMultiAir;
 
         use crate::ace_constants::PVM_PREPROCESSED_COMMITMENT;
 
@@ -565,7 +521,7 @@ mod tests {
 
     #[test]
     fn pvm_deep_query_hook_matches_commitment_group_geometry() {
-        use miden_precompiles_air::{
+        use miden_air::precompiles::{
             primitives::byte_pair_lut::TRACE_HEIGHT, stark_config::precompile_pcs_params,
         };
 
@@ -666,7 +622,7 @@ mod tests {
     /// that does not determine the result.
     #[test]
     fn pvm_security_masm_matches_air() {
-        use miden_precompiles_air::security as pvm_security;
+        use miden_air::precompiles::security as pvm_security;
 
         let fractional_bits = pvm_security::FIXED_POINT_FRACTIONAL_BITS;
         let fixed_point_one = pvm_security::FIXED_POINT_ONE;
@@ -681,14 +637,15 @@ mod tests {
                 "DEEP_FIELD_BASE_BITS",
                 (sample_bits >> fractional_bits)
                     - u64::from(
-                        miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup(),
+                        miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup(),
                     ),
             ),
             ("FRI_FOLDING_BASE_BITS", pvm_security::FOLDING_BASE >> fractional_bits),
             ("LOG2_E_FP", pvm_security::LOG2_E),
             (
                 "MAX_CONSTRAINT_DEGREE",
-                (1u64 << miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup())
+                (1u64
+                    << miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup())
                     + 1,
             ),
         ] {
@@ -805,7 +762,7 @@ mod tests {
         assert!(num_chunks.is_power_of_two());
         let expected = miden_lifted_stark::quotient_recomposition_inputs::<Felt>(
             num_chunks.ilog2() as u8,
-            miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup(),
+            miden_air::precompiles::stark_config::precompile_pcs_params().log_blowup(),
         )
         .expect("PVM quotient degree fits the PCS blowup");
 
@@ -823,6 +780,7 @@ mod tests {
         );
     }
 
+    /// Proof ordering is stable for equal heights and sorts taller traces last.
     #[test]
     fn proof_order_sorts_by_height_then_instance_index() {
         let mut log_heights = [10u8; NUM_CHIPLETS];
@@ -843,8 +801,8 @@ mod tests {
     /// producing a different input.
     #[test]
     fn external_assertion_matches_the_protocol_version() {
+        use miden_air::precompiles::{ChipletAir, ChipletMultiAir, logup::NUM_PUBLIC_VALUES};
         use miden_lifted_air::Statement;
-        use miden_precompiles_air::{ChipletAir, ChipletMultiAir, logup::NUM_PUBLIC_VALUES};
 
         let challenges = [
             QuadFelt::new([Felt::from(3u32), Felt::from(5u32)]),
@@ -885,7 +843,7 @@ mod tests {
     }
 
     /// The chiplet instance order fixes proof-order tie-breaks and the relation digest.
-    /// Intentional changes require regenerated protocol constants and a breaking changelog entry.
+    /// Intentional changes require a protocol-version bump and a breaking changelog entry.
     #[test]
     fn chiplet_instance_order_is_protocol_pinned() {
         let pinned = [
@@ -905,8 +863,7 @@ mod tests {
         assert_eq!(
             ChipletAir::all(),
             pinned,
-            "chiplet instance order moved; run `make regenerate-pvm-constants` for an \
-             intentional protocol break"
+            "chiplet instance order moved; an intentional change requires a protocol-version bump"
         );
     }
 }
