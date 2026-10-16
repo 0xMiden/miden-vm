@@ -765,7 +765,6 @@ dependencies = [
  "miden-crypto",
  "miden-lifted-stark",
  "p3-dft",
- "p3-matrix",
  "thiserror",
 ]
 
