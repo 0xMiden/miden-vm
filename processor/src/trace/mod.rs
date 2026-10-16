@@ -455,7 +455,7 @@ impl VmTrace {
         let (public_values, kernel_felts) = self.public_inputs().to_air_inputs();
 
         let statement: Statement<Felt, QuadFelt, MidenMultiAir> =
-            Statement::new(MidenMultiAir::new(), public_values, kernel_felts)
+            Statement::new(MidenMultiAir::new(), vec![(0, public_values)], kernel_felts)
                 .expect("statement construction failed");
         let prover_statement = ProverStatement::new(
             statement,

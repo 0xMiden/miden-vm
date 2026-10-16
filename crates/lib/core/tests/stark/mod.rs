@@ -1,8 +1,6 @@
 use std::{array, fmt::Write as _, sync::Arc};
 
-use miden_air::{
-    MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, NUM_PUBLIC_VALUES, ProofOrder, Statement, config,
-};
+use miden_air::{MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, ProofOrder, Statement, config};
 use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE, Word,
@@ -1180,12 +1178,9 @@ fn log_deferred_stack_inputs() -> Vec<u64> {
 /// bound by `load_air_context` (must match `AND8_PREPROCESSED_TRACE_COM_*` in `sys/vm/mod.masm`).
 fn and8_preprocessed_commitment() -> [Felt; WORD_SIZE] {
     let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
-    let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
-        MidenMultiAir::new(),
-        vec![Felt::ZERO; NUM_PUBLIC_VALUES],
-        vec![],
-    )
-    .expect("zero public inputs satisfy the Miden statement shape");
+    let statement =
+        Statement::<Felt, QuadFelt, MidenMultiAir>::new(MidenMultiAir::new(), vec![], vec![])
+            .expect("zero public inputs satisfy the Miden statement shape");
     let commitment: [u64; WORD_SIZE] = Preprocessed::build(&statement, &config)
         .expect("the Miden relation declares the AND8 preprocessed table")
         .commitment()

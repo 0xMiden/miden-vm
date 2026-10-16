@@ -2,7 +2,7 @@
 //! holds per-proof caller inputs, and [`ProverStatement`] adds per-AIR main
 //! traces.
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 use core::marker::PhantomData;
 
 use p3_challenger::CanObserve;
@@ -24,8 +24,7 @@ use crate::{
 /// Holding one guarantees the caller-input length checks in [`Statement::new`] passed.
 /// The `MultiAir` itself is trusted application code; run
 /// [`crate::debug::assert_multi_air_valid`] in tests/setup to check structural
-/// invariants such as non-empty `airs()`, shared public-value counts, and
-/// periodic-column shape.
+/// invariants such as non-empty `airs()` and periodic-column shape.
 pub struct Statement<F, EF, MA>
 where
     F: Field,
@@ -33,7 +32,7 @@ where
     MA: MultiAir<F, EF>,
 {
     multi_air: MA,
-    air_inputs: Vec<F>,
+    air_inputs: Vec<Vec<F>>,
     aux_inputs: Vec<F>,
     _ef: PhantomData<EF>,
 }
@@ -44,29 +43,39 @@ where
     EF: ExtensionField<F>,
     MA: MultiAir<F, EF>,
 {
-    /// Construct a [`Statement`], validating caller-supplied input lengths
-    /// against `multi_air`.
+    /// Construct a [`Statement`] from `(AIR instance index, public inputs)` entries.
+    ///
+    /// Entries may appear in any order. Omitted AIRs receive zeros sized to their
+    /// declared public-input count. Duplicate indices, indices outside `multi_air.airs()`,
+    /// and entries whose lengths differ from the AIR's declaration are rejected.
     ///
     /// This assumes `multi_air` satisfies the structural contract checked by
     /// [`crate::debug::assert_multi_air_valid`]; malformed AIR definitions (for
-    /// example an empty [`MultiAir::airs`] collection) may panic in trusted
-    /// helper methods such as [`MultiAir::num_air_inputs`].
+    /// example an empty [`MultiAir::airs`] collection) may panic.
     pub fn new(
         multi_air: MA,
-        air_inputs: Vec<F>,
+        air_inputs: Vec<(usize, Vec<F>)>,
         aux_inputs: Vec<F>,
     ) -> Result<Self, InstanceError> {
-        let expected = multi_air.num_air_inputs();
-        if expected != air_inputs.len() {
-            return Err(InstanceError::PublicValuesLengthMismatch {
-                expected,
-                actual: air_inputs.len(),
-            });
+        let airs = multi_air.airs();
+        assert!(!airs.is_empty(), "a MultiAir must carry at least one AIR");
+        let mut inputs: Vec<_> = (0..airs.len()).map(|_| None).collect();
+        for (air_index, values) in air_inputs {
+            let slot = inputs.get_mut(air_index).ok_or(InstanceError::InvalidPublicInputs)?;
+            if slot.is_some() || values.len() != airs[air_index].num_public_values() {
+                return Err(InstanceError::InvalidPublicInputs);
+            }
+            *slot = Some(values);
         }
         let max = multi_air.max_aux_inputs();
         if aux_inputs.len() > max {
             return Err(InstanceError::AuxInputsTooLong { actual: aux_inputs.len(), max });
         }
+        let air_inputs = inputs
+            .into_iter()
+            .zip(airs)
+            .map(|(values, air)| values.unwrap_or_else(|| vec![F::ZERO; air.num_public_values()]))
+            .collect();
         Ok(Self {
             multi_air,
             air_inputs,
@@ -83,7 +92,8 @@ where
         self.multi_air.airs()
     }
 
-    pub fn air_inputs(&self) -> &[F] {
+    /// Public inputs for every AIR in instance order, including zero-filled omitted entries.
+    pub fn air_inputs(&self) -> &[Vec<F>] {
         &self.air_inputs
     }
 
@@ -115,7 +125,8 @@ where
     /// statement data.
     ///
     /// The default [`MultiAir::observe`] implementation absorbs, in order, the
-    /// `air_inputs` length, `air_inputs`, [`MultiAir::max_aux_inputs`], the
+    /// total public-input count, public inputs flattened in instance order,
+    /// [`MultiAir::max_aux_inputs`], the
     /// `aux_inputs` length, and `aux_inputs`.
     ///
     /// # Examples
@@ -192,7 +203,7 @@ where
     ///
     /// let statement = Statement::<Felt, Felt, _>::new(
     ///     ExampleMultiAir { airs: [ExampleAir] },
-    ///     vec![Felt::new_unchecked(10), Felt::new_unchecked(11)],
+    ///     vec![(0, vec![Felt::new_unchecked(10), Felt::new_unchecked(11)])],
     ///     vec![Felt::new_unchecked(20), Felt::new_unchecked(21)],
     /// )
     /// .unwrap();
@@ -316,8 +327,8 @@ where
 /// trust boundary on caller-supplied inputs.
 #[derive(Debug, Error)]
 pub enum InstanceError {
-    #[error("num_air_inputs() = {expected}, but air_inputs().len() = {actual}")]
-    PublicValuesLengthMismatch { expected: usize, actual: usize },
+    #[error("invalid public inputs")]
+    InvalidPublicInputs,
 
     #[error("aux_inputs().len() = {actual} exceeds max_aux_inputs() = {max}")]
     AuxInputsTooLong { actual: usize, max: usize },

@@ -54,7 +54,7 @@ where
 /// Evaluate AIR constraints against concrete trace values and panic on failure.
 ///
 /// Constraints are checked row-by-row using the trace + aux trace built by
-/// [`ProverStatement`]. All AIRs see the same `air_inputs` from `statement`.
+/// [`ProverStatement`]. Each AIR sees its own public-input slice from `statement`.
 ///
 /// Derives auxiliary-trace challenges from the supplied challenger using only
 /// statement-owned data plus the instance count and log trace heights. This is
@@ -98,10 +98,10 @@ pub fn check_constraints<F, EF, MA, Ch>(
 
     let mut aux_traces = Vec::with_capacity(airs.len());
     let mut aux_values_per_air = Vec::with_capacity(airs.len());
-    for (air, main) in airs.iter().zip(traces.iter()) {
+    for (i, (air, main)) in airs.iter().zip(traces.iter()).enumerate() {
         let num_randomness = air.num_randomness();
         let (aux_trace, aux_values) =
-            air.build_aux_trace(main, air_inputs, aux_inputs, &challenges[..num_randomness]);
+            air.build_aux_trace(main, &air_inputs[i], aux_inputs, &challenges[..num_randomness]);
         aux_traces.push(aux_trace);
         aux_values_per_air.push(aux_values);
     }
@@ -134,7 +134,7 @@ pub fn check_constraints<F, EF, MA, Ch>(
             aux_trace.height()
         );
 
-        check_single_trace(air, main, aux_trace, aux_values, air_inputs, &challenges, i);
+        check_single_trace(air, main, aux_trace, aux_values, &air_inputs[i], &challenges, i);
     }
 }
 

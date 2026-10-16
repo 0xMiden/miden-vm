@@ -17,7 +17,6 @@ use miden_lifted_stark::{Preprocessed, StarkConfig, lmcs::Lmcs};
 
 use crate::{
     ChipletMultiAir,
-    logup::NUM_PUBLIC_VALUES,
     stark_config::{
         Blake3Config, EidosConfig, KeccakConfig, PRECOMPILE_RELATION_DIGEST, blake3_256_config,
         eidos_config, keccak_config, precompile_pcs_params,
@@ -57,7 +56,7 @@ where
 /// inputs — so a scratch statement with dummy public inputs builds the exact
 /// same bundle as the real per-proof statement would.
 fn scratch_statement() -> Statement<Felt, QuadFelt, ChipletMultiAir> {
-    Statement::new(ChipletMultiAir::new(), vec![Felt::ZERO; NUM_PUBLIC_VALUES], vec![])
+    Statement::new(ChipletMultiAir::new(), vec![], vec![])
         .expect("chiplet statement inputs are valid")
 }
 

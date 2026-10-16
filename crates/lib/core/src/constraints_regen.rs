@@ -11,7 +11,7 @@ use miden_ace_codegen::{
     ProofOrderMapsConfig, render_proof_order_maps,
 };
 use miden_air::{
-    AIRS, MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, NUM_PUBLIC_VALUES, Statement,
+    AIRS, MIDEN_AIR_COUNT, MidenAir, MidenMultiAir, Statement,
     ace::{
         RecursiveAceCircuit, build_canonical_multi_air_ace_circuit, recursive_verifier_ace_config,
     },
@@ -179,12 +179,9 @@ struct PreprocessedCommitments {
 type Commitment<SC> = <<SC as StarkConfig<Felt, QuadFelt>>::Lmcs as Lmcs>::Commitment;
 
 fn compute_preprocessed_commitments(digest: [Felt; 4]) -> io::Result<PreprocessedCommitments> {
-    let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
-        MidenMultiAir::new(),
-        vec![Felt::ZERO; NUM_PUBLIC_VALUES],
-        vec![],
-    )
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    let statement =
+        Statement::<Felt, QuadFelt, MidenMultiAir>::new(MidenMultiAir::new(), vec![], vec![])
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
     let params = config::pcs_params();
     Ok(PreprocessedCommitments {
         blake3: compute_preprocessed_commitment(

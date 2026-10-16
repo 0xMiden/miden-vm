@@ -1,6 +1,6 @@
 //! Proving for the precompile multi-AIR relation.
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 #[cfg(test)]
 use miden_core::utils::RowMajorMatrix;
@@ -20,7 +20,7 @@ use miden_lifted_stark::{
 #[cfg(test)]
 use miden_precompiles_air::stark_config::test_challenger;
 use miden_precompiles_air::{
-    ChipletMultiAir, preprocessed,
+    ChipletAir, ChipletMultiAir, preprocessed,
     stark_config::{
         PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
         observe_protocol_params, precompile_pcs_params,
@@ -35,8 +35,12 @@ use crate::ProveError;
 impl SessionTraces {
     #[cfg(test)]
     fn prover_statement(&self) -> ProverStatement<Felt, QuadFelt, ChipletMultiAir> {
-        let statement = Statement::new(ChipletMultiAir::new(), self.air_inputs(), Vec::new())
-            .expect("chiplet statement inputs are valid");
+        let statement = Statement::new(
+            ChipletMultiAir::new(),
+            vec![(ChipletAir::TRANSCRIPT_EVAL_INDEX, self.air_inputs())],
+            Vec::new(),
+        )
+        .expect("chiplet statement inputs are valid");
         let mains: Vec<RowMajorMatrix<Felt>> = self.mains().into_iter().cloned().collect();
         ProverStatement::new(statement, mains).expect("chiplet trace shapes are valid")
     }
@@ -80,8 +84,12 @@ impl SessionTraces {
         SC: StarkConfig<Felt, QuadFelt>,
         <SC::Lmcs as LmcsTrait>::Commitment: Serialize,
     {
-        let statement = Statement::new(ChipletMultiAir::new(), self.air_inputs(), Vec::new())
-            .expect("chiplet statement inputs are valid");
+        let statement = Statement::new(
+            ChipletMultiAir::new(),
+            vec![(ChipletAir::TRANSCRIPT_EVAL_INDEX, self.air_inputs())],
+            Vec::new(),
+        )
+        .expect("chiplet statement inputs are valid");
         let prover_statement = ProverStatement::new(statement, self.into_mains())
             .expect("chiplet trace shapes are valid");
 

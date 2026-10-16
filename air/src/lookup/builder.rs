@@ -512,10 +512,6 @@ pub trait BoundaryBuilder {
     /// `LookupAir`'s `LB::EF`.
     type EF: ExtensionField<Self::F>;
 
-    /// Public values passed to the proof (the `public_values` slice threaded through
-    /// `prove_stark`).
-    fn public_values(&self) -> &[Self::F];
-
     /// Variable-length public inputs (e.g. kernel felts). Matches the layout the
     /// prover hands to `miden_crypto::stark::prover::prove_single`.
     fn var_len_public_inputs(&self) -> &[&[Self::F]];

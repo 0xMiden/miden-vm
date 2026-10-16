@@ -24,7 +24,7 @@ use crate::{
         },
         memory64::Memory64Msg,
     },
-    logup::{Challenges, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
+    logup::{Challenges, LookupMessage, NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::eidos::trace::EidosRequires,
 };
@@ -119,7 +119,7 @@ fn lifted_air_validates_and_layout_matches_spec() {
     let layout = <ChunkAir as LiftedAir<Felt, QuadFelt>>::air_layout(&air);
     assert_eq!(layout.preprocessed_width, 0);
     assert_eq!(layout.main_width, NUM_MAIN_COLS);
-    assert_eq!(layout.num_public_values, NUM_PUBLIC_VALUES);
+    assert_eq!(layout.num_public_values, 0);
     assert_eq!(layout.permutation_width, NUM_AUX_COLS);
     assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
     assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
