@@ -73,7 +73,6 @@ fn advice_budget_is_checked_before_merkle_loading_in_run_and_prove() {
     }
 }
 
-
 #[test]
 // Tt test might be an overkill to test only that the 'run' cli command
 // outputs steps and ms.
