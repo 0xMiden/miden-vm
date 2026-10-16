@@ -8,8 +8,9 @@ use miden_core::{
 use miden_crypto::hash::eidos::{
     BLOCK_LEN as EIDOS_BLOCK_WIDTH, Eidos,
     domains::{
-        AEAD_CTR_KEY, AEAD_MAC_KEY, FALCON_HASH_TO_POINT, FALCON_PUBLIC_KEY, GENERIC_FELT_SEQUENCE,
-        LMCS_LEAF, MMR_PEAKS, SMT_BUCKET_LEAF,
+        AEAD_CTR_KEY, AEAD_MAC_KEY, ECGFP5_PREPROCESSED_PUBLIC_KEY, ECGFP5_PUBLIC_KEY,
+        FALCON_HASH_TO_POINT, FALCON_PUBLIC_KEY, GENERIC_FELT_SEQUENCE, LMCS_LEAF, MMR_PEAKS,
+        SMT_BUCKET_LEAF,
     },
 };
 use miden_precompiles::{Keccak256Precompile, Sha256Precompile, Sha512Precompile};
@@ -22,6 +23,8 @@ const ECDSA_K256_KECCAK: &str = include_str!("../../asm/crypto/dsa/ecdsa_k256_ke
 const ECDSA_P256_SHA256: &str = include_str!("../../asm/crypto/dsa/ecdsa_p256_sha256.masm");
 const EDDSA_25519_SHA512: &str = include_str!("../../asm/crypto/dsa/eddsa_25519_sha512.masm");
 const AEAD: &str = include_str!("../../asm/crypto/aead_eidos.masm");
+const ECGFP5_TABLES: &str = include_str!("../../asm/crypto/ecdh/ecgfp5/tables.masm");
+const ECGFP5_DIRECT: &str = include_str!("../../asm/crypto/ecdh/ecgfp5/direct.masm");
 const PRECOMPILES: &str = include_str!("../../asm/precompiles/mod.masm");
 const KECCAK: &str = include_str!("../../asm/precompiles/hashes/keccak256.masm");
 const SHA256: &str = include_str!("../../asm/precompiles/hashes/sha256.masm");
@@ -131,7 +134,39 @@ fn masm_domain_tags_match_rust_registries() {
 }
 
 #[test]
+fn ecgfp5_generator_commitment_matches_rust() {
+    use miden_crypto::ecdh::ecgfp5::SecretKey;
+
+    let mut bytes = [0; 40];
+    bytes[0] = 1;
+    let secret = SecretKey::from_bytes(&bytes).unwrap();
+    let advice = secret.public_key().advise(&secret);
+    // The direct advice starts with Q(5) and the scalar's ten u32 limbs, then the twenty roots.
+    let roots: Vec<_> = advice.elements().skip(5 + 10).take(80).collect();
+    assert_word(
+        ECGFP5_DIRECT,
+        "GENERATOR_COMMITMENT",
+        Eidos::hash_elements_in_domain(&roots, ECGFP5_PREPROCESSED_PUBLIC_KEY),
+    );
+}
+
+#[test]
 fn masm_initial_chaining_words_match_rust() {
+    assert_word(
+        ECGFP5_DIRECT,
+        "PUBLIC_KEY_INIT_CV",
+        Eidos::init_chaining_word(ECGFP5_PUBLIC_KEY, 5),
+    );
+    assert_word(
+        ECGFP5_TABLES,
+        "ROOTS_INIT_CV",
+        Eidos::init_chaining_word(ECGFP5_PREPROCESSED_PUBLIC_KEY, 80),
+    );
+    assert_word(
+        ECGFP5_TABLES,
+        "LEAF_INIT_CV",
+        Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, 24),
+    );
     let merkle_cv = Eidos::merkle_node_init_chaining_word();
     assert_eq!(masm_base_word(EIDOS, "EIDOS_INIT_CV"), merkle_cv);
     assert_eq!(masm_base_word(PRECOMPILES, "EIDOS_INIT_CV"), merkle_cv);

@@ -87,6 +87,20 @@ crate::eidos_domain_registry! {
                 description: "Canonical Eidos LMCS leaf hashing.",
                 schema: "param0 = sum of matrix-row and salt widths after each is independently padded to 8 Felts; param1 = 0; param2 = 0; absorb rows in commitment order; an empty leaf returns the unmasked initial CV; the verifier fixes the row boundaries and widths",
             }
+            pub ECGFP5_PUBLIC_KEY: Ecgfp5PublicKeyDomain {
+                local_id: 0x0010,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "EcGFp5 public-key commitment.",
+                schema: "param0 = 5; param1 = 0; param2 = 0; payload = canonical point encoding in increasing coefficient order",
+            }
+            pub ECGFP5_PREPROCESSED_PUBLIC_KEY: Ecgfp5PreprocessedPublicKeyDomain {
+                local_id: 0x0011,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "EcGFp5 preprocessed public-key commitment.",
+                schema: "param0 = 80; param1 = 0; param2 = 0; payload = twenty ordered Merkle roots of paired 16-bit multiplication tables",
+            }
         }
     }
 }
