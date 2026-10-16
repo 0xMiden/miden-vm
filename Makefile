@@ -37,14 +37,12 @@ BUILDDOCS                := MIDEN_BUILD_LIB_DOCS=1
 # Stable and beta rustfmt ignore the unstable settings even with RUSTC_BOOTSTRAP.
 RUSTFMT_TOOLCHAIN        := nightly-2026-10-09
 FUZZ_CARGO               := RUSTC_BOOTSTRAP=1 cargo +stable
-PVM_GENERATOR_RUST_OUTPUTS := crates/precompiles-verifier/src/ace_constants.rs \
-	crates/precompiles-air/src/protocol.rs
 
 # -- feature configuration ------------------------------------------------------------------------
 ALL_FEATURES             := --all-features
 
 # Workspace-wide test features
-WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,fixture-tools,constants-tools,midenc-hir-type/arbitrary
+WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,fixture-tools,midenc-hir-type/arbitrary
 MIDEN_CRYPTO_FUZZ_TARGETS := smt word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
 MIDEN_SERDE_UTILS_FUZZ_TARGETS := primitives collections string vint64 goldilocks budgeted
 EXECUTION_PROOF_FUZZ_LIMITS := -rss_limit_mb=512 -timeout=10
@@ -345,8 +343,7 @@ regenerate-constraints: ## Regenerate the checked-in constraint artifacts (MASM 
 
 .PHONY: regenerate-pvm-constants
 regenerate-pvm-constants: ## Regenerate PVM ACE constants and MASM artifacts (protocol break)
-	cargo run --release --package miden-precompiles-verifier --features constants-tools --bin pvm-constants-regen -- --write
-	rustup run nightly rustfmt --edition 2024 --config-path . $(PVM_GENERATOR_RUST_OUTPUTS)
+	cargo run --locked --package miden-verifier-codegen -- --write crates/lib/core/asm
 	@$(MAKE) --no-print-directory recursive-verifier-regeneration-handoff
 
 .PHONY: recursive-verifier-regeneration-handoff
@@ -361,7 +358,8 @@ recursive-verifier-regeneration-handoff:
 
 .PHONY: check-pvm-constants
 check-pvm-constants: ## Check PVM ACE constants and MASM artifacts for drift
-	cargo run --release --package miden-precompiles-verifier --features constants-tools --bin pvm-constants-regen -- --check
+	cargo run --locked --package miden-verifier-codegen -- --check crates/lib/core/asm
+	cargo test --locked --package miden-air --test precompiles_generated_drift
 
 .PHONY: check-precompile-masm
 check-precompile-masm: ## Check generated precompile MASM artifacts for drift

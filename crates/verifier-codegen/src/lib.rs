@@ -7,6 +7,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod protocol;
+mod pvm;
+mod pvm_ood_frames;
 mod templates;
 mod vm;
 
@@ -20,6 +23,7 @@ pub type RenderedModule = (PathBuf, String);
 pub fn render_verifier_masm() -> Result<Vec<RenderedModule>, String> {
     let mut modules = Vec::new();
     vm::render(&mut modules)?;
+    pvm::render(&mut modules)?;
     Ok(modules)
 }
 
@@ -28,7 +32,7 @@ pub fn render_verifier_masm() -> Result<Vec<RenderedModule>, String> {
 pub fn sync_verifier_masm(root: &Path, write: bool) -> Result<(), String> {
     let modules = render_verifier_masm()?;
     let mut obsolete = Vec::new();
-    for relation in ["vm"] {
+    for relation in ["vm", "pvm"] {
         let directory = root.join("sys").join(relation);
         if !directory.exists() {
             continue;
@@ -143,11 +147,17 @@ mod tests {
         let modules = render_verifier_masm().unwrap();
         let mut paths: Vec<_> = modules.iter().map(|(path, _)| path.clone()).collect();
         paths.sort();
-        let mut expected: Vec<_> =
-            ["mod", "layout", "ood_frames", "deep_queries", "constraints_eval"]
-                .into_iter()
-                .map(|module| Path::new("sys").join("vm").join(format!("{module}.masm")))
-                .collect();
+        let mut expected: Vec<_> = ["vm", "pvm"]
+            .into_iter()
+            .flat_map(|relation| {
+                ["mod", "layout", "ood_frames", "deep_queries", "constraints_eval"]
+                    .map(|module| Path::new("sys").join(relation).join(format!("{module}.masm")))
+            })
+            .chain(
+                ["aux_trace", "public_inputs"]
+                    .map(|module| Path::new("sys").join("pvm").join(format!("{module}.masm"))),
+            )
+            .collect();
         expected.sort();
         assert_eq!(paths, expected);
         for (path, source) in &modules {

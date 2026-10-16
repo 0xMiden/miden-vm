@@ -14,7 +14,6 @@ homepage.workspace = true
 repository.workspace = true
 
 [features]
-constants-tools = ["std", "miden-air/compiler", "miden-ace-codegen/compiler"]
 default = ["std"]
 concurrent = [
     "std",
@@ -22,7 +21,6 @@ concurrent = [
 ]
 std = [
     "dep:miden-ace-codegen",
-    "miden-ace-codegen/compiler",
     "miden-core/std",
     "miden-crypto/std",
     "miden-air/std",
@@ -30,7 +28,6 @@ std = [
 ]
 
 [dependencies]
-miden-precompiles-air.workspace = true
 miden-ace-codegen = { workspace = true, optional = true }
 miden-core.workspace = true
 miden-crypto.workspace = true
@@ -47,8 +44,3 @@ wincode.workspace = true
 insta.workspace = true
 miden-air = { workspace = true, features = ["std", "compiler"] }
 miden-ace-codegen = { workspace = true, features = ["testing"] }
-
-[[bin]]
-name = "pvm-constants-regen"
-path = "src/bin/pvm_constants_regen.rs"
-required-features = ["constants-tools"]

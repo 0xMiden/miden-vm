@@ -2613,13 +2613,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-precompiles-air"
-version = "1.0.0"
-dependencies = [
- "miden-air",
-]
-
-[[package]]
 name = "miden-precompiles-prover"
 version = "1.0.0"
 dependencies = [
@@ -2653,7 +2646,6 @@ dependencies = [
  "miden-crypto",
  "miden-lifted-air",
  "miden-lifted-stark",
- "miden-precompiles-air",
  "miden-serde-utils",
  "serde",
  "serde-wincode",

@@ -541,7 +541,7 @@ pub(crate) fn render(modules: &mut Vec<crate::RenderedModule>) -> Result<(), Str
         .map_err(|e| e.to_string())?;
     check_vm_ace_stream_capacity(
         geometry.ace_circuit_stream_ptr,
-        3_225_432_064usize,
+        super::pvm::PVM_READ_START as usize,
         circuit.stream_len,
     )
     .map_err(|e| e.to_string())?;
