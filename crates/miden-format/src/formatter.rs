@@ -231,12 +231,18 @@ fn render_visibility_comments(visibility: Option<Visibility>, indent: usize) -> 
     let Some(visibility) = visibility else {
         return Vec::new();
     };
+    visibility_comment_tokens(&visibility)
+        .iter()
+        .map(|token| format!("{}{}", indent_string(indent), trimmed_comment(token)))
+        .collect()
+}
+
+fn visibility_comment_tokens(visibility: &Visibility) -> Vec<SyntaxToken> {
     let node = visibility.syntax();
     let mut comments = node
         .descendants_with_tokens()
         .filter_map(NodeOrToken::into_token)
         .filter(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment))
-        .map(|token| format!("{}{}", indent_string(indent), trimmed_comment(&token)))
         .collect::<Vec<_>>();
 
     if let Some(parent) = node.parent() {
@@ -250,7 +256,7 @@ fn render_visibility_comments(visibility: Option<Visibility>, indent: usize) -> 
                 break;
             }
             if matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment) {
-                comments.push(format!("{}{}", indent_string(indent), trimmed_comment(&token)));
+                comments.push(token);
             }
         }
     }
@@ -438,7 +444,11 @@ fn render_constant(constant: &Constant, indent: usize, config: &Config) -> Strin
         return render_line_form(constant.syntax(), indent);
     };
 
-    let prefix_tokens = tokens_before_child(constant.syntax(), value.syntax());
+    let mut prefix_tokens = tokens_before_child(constant.syntax(), value.syntax());
+    if let Some(visibility) = constant.visibility() {
+        let visibility_comments = visibility_comment_tokens(&visibility);
+        prefix_tokens.retain(|token| !visibility_comments.contains(token));
+    }
     let header = render_declaration_prefix(&prefix_tokens, indent, config);
 
     let mut rendered = render_assigned_value(header, value.syntax(), indent, config);
