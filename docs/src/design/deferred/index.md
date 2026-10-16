@@ -137,7 +137,7 @@ memory chunk sequence in a precompile-specific assembly procedure.
 
 | Event (`adv.*`)            | Operand stack in                 | Effect |
 | -------------------------- | -------------------------------- | ------ |
-| `register_deferred`        | `[CV, PAYLOAD_LO, PAYLOAD_HI, ...]` | Recovers the frame from the initial chaining word `CV`, registers one stack-resident 8-felt payload block, and evaluates the node immediately. The frame determines whether the block is data, two child digests for a precompile-owned join, or one digest pair. Registration rejects an incompatible payload shape or arity before insertion. Structural children may reference only registered nodes or `TRUE_DIGEST`. The event returns nothing; code that uses the digest must compress the same block from the same `CV`. |
+| `register_deferred`        | `[CV, PAYLOAD_LO, PAYLOAD_HI, ...]` | Recovers the frame from the initial chaining word `CV`, registers one stack-resident 8-felt payload block, and evaluates the node immediately. The frame determines whether the block is data, two child digests for a precompile-owned join or framework AND, or one digest pair. Registration rejects an incompatible payload shape or arity before insertion. Structural children may reference only registered nodes or `TRUE_DIGEST`. The event returns nothing; code that uses the digest must compress the same block from the same `CV`. |
 | `register_deferred_data`   | `[n_chunks, CV, ptr, ...]`        | Recovers the frame from `CV`, reads `n_chunks` non-empty 8-felt blocks from word-aligned memory, registers the corresponding data, pair-list, or one-block precompile-owned join node, and evaluates it immediately. The event returns nothing; code that uses the digest must hash the same memory range from the same `CV`. |
 | `evaluate_deferred`        | `[NODE_DIGEST, ...]`               | Looks the node up, evaluates it to canonical form, and pushes its frame and payload felts onto the **advice stack**. For a non-TRUE node, the frame is first in advice-pop order; for a single 8-felt payload, `adv_pushw adv_pushw adv_pushw` leaves `[PAYLOAD_LO, PAYLOAD_HI, FRAME, ...]` on the operand stack. `TRUE` emits one zero word in the frame slot. |
 | `evaluate_deferred_frame`  | `[NODE_DIGEST, ...]`               | Looks the node up, evaluates it to canonical form, and pushes its frame onto the **advice stack**. `TRUE` emits one zero word in the frame slot. |
@@ -148,10 +148,15 @@ closure for structural payloads. The precompile's `validate_payload` checks any 
 pair-list arity before insertion. Registration stores the original node under its digest,
 evaluates it immediately, and fails immediately if semantic evaluation fails.
 
-The generic registration events accept precompile-owned nodes and framework CHUNKS nodes, but not
-the framework-owned `DEFERRED_AND_FRAME` (or malformed parameterized frames in that domain).
-Execution constructs rolling AND nodes through `log_deferred`; state merge and wire rehydration use
-the same framework-owned node construction directly.
+The generic registration events accept precompile-owned nodes and framework CHUNKS nodes.
+`register_deferred` also accepts the exact `DEFERRED_AND_FRAME`, with the ordered payload
+`lhs_digest || rhs_digest`, and registers the AND without advancing the deferred root. Both children
+must be registered statements that evaluate to `TRUE`, or implicit `TRUE_DIGEST`. Parameterized
+AND-domain frames and explicit TRUE nodes are rejected. Memory-backed `register_deferred_data`
+continues to reject framework AND nodes.
+
+`log_deferred` constructs rolling AND nodes and advances the root; state merge and wire rehydration
+use the same framework-owned node construction directly.
 
 ### Why the digest is computed inside the VM
 

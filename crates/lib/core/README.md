@@ -74,13 +74,16 @@ begin
 end
 ```
 
-Export preserves the selected root and writes its portable witness to the advice map under that
-digest. Skip export for an untouched TRUE root: no obligation was created, and the export
-instruction rejects literal TRUE. Registration evaluates assertions eagerly in the host, but a VM proof with an unchanged
-built-in root does not prove these caller-maintained obligations. Callers must retain the final
-root and arrange its proof and verification separately. `open_value` adds no obligation and still
-requires an already-bound canonical VALUE digest; an arbitrary expression digest does not meet
-that contract.
+Export preserves the selected root. If its advice-map key is absent, export writes the portable
+witness under that digest. If the key already exists, export returns without validating or replacing
+the mapped value. Consumers must validate the witness and bind its reconstructed root to an
+independently established expected digest. Skip export for an untouched TRUE root: no obligation
+was created, and an absent key cannot be populated from literal TRUE.
+
+Registration evaluates assertions eagerly in the host, but a VM proof with an unchanged built-in
+root does not prove these caller-maintained obligations. Callers must retain the final root and
+arrange its proof and verification separately. `open_value` adds no obligation and still requires
+an already-bound canonical VALUE digest; an arbitrary expression digest does not meet that contract.
 
 Native ECDSA and EdDSA entry points keep their stack interfaces and acceptance rules. Their shared
 algorithm bodies build a complete obligation graph, and the native wrapper logs that graph once.
