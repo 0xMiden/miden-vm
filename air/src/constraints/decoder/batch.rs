@@ -2,7 +2,7 @@ use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing},
 };
-use miden_crypto::stark::air::AirBuilder;
+use miden_lifted_stark::air::AirBuilder;
 
 use crate::{MidenAirBuilder, constraints::utils::BoolNot};
 

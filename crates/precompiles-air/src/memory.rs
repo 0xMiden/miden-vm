@@ -21,8 +21,8 @@ use miden_core::{
     field::{BasedVectorSpace, QuadFelt},
     proof::HashFunction,
 };
-use miden_crypto::stark::{log_quotient_degree, pcs::PcsParams};
 use miden_lifted_air::{BaseAir, LiftedAir};
+use miden_lifted_stark::{log_quotient_degree, pcs::PcsParams};
 
 use crate::{
     air::{ChipletAir, NUM_CHIPLETS},

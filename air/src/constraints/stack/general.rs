@@ -23,7 +23,7 @@
 //!
 //! 4. **Top binary**: Enforced by the specific op constraints that require it.
 
-use miden_crypto::stark::air::AirBuilder;
+use miden_lifted_stark::air::AirBuilder;
 
 use crate::{CoreCols, MidenAirBuilder, constraints::op_flags::OpFlags};
 

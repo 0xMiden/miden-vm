@@ -35,7 +35,13 @@ std = [
     "miden-utils-sync/std",
 ]
 testing = ["arbitrary"]
-constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen", "dep:miden-constraint-compiler"]
+constraints-tools = [
+    "std",
+    "dep:miden-air",
+    "dep:miden-ace-codegen",
+    "dep:miden-constraint-compiler",
+    "dep:miden-lifted-stark",
+]
 
 [dependencies]
 # Miden dependencies
@@ -48,6 +54,7 @@ miden-utils-sync.workspace = true
 miden-air = { workspace = true, optional = true }
 miden-ace-codegen = { workspace = true, optional = true }
 miden-constraint-compiler = { workspace = true, optional = true }
+miden-lifted-stark = { workspace = true, optional = true }
 
 # External dependencies
 p256 = { workspace = true, features = ["ecdsa"] }
@@ -56,6 +63,7 @@ thiserror.workspace = true
 [dev-dependencies]
 criterion.workspace = true
 curve25519-dalek.workspace = true
+p3-challenger.workspace = true
 miden-ace-codegen.workspace = true
 miden-air.workspace = true
 miden-assembly = { workspace = true, features = ["testing"] }

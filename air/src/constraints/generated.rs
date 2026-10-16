@@ -10,10 +10,8 @@
 #![allow(clippy::eq_op)]
 
 use miden_core::Felt;
-use miden_crypto::{
-    field::PrimeCharacteristicRing,
-    stark::air::{LiftedAirBuilder, WindowAccess},
-};
+use miden_crypto::field::PrimeCharacteristicRing;
+use miden_lifted_stark::air::{LiftedAirBuilder, WindowAccess};
 use p3_field::Dup;
 
 /// Generated globally-CSE'd evaluator for `MidenAir::Core`.

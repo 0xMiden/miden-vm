@@ -29,7 +29,7 @@
 //!    - On a left shift or DYNCALL at depth 16: stack[15]' = 0
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::AirBuilder;
+use miden_lifted_stark::air::AirBuilder;
 use p3_field::Dup;
 
 use crate::{

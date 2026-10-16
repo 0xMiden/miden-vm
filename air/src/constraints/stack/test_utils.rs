@@ -4,10 +4,8 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_crypto::stark::{
-    air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow},
-    matrix::RowMajorMatrix,
-};
+use miden_lifted_stark::air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
+use p3_matrix::dense::RowMajorMatrix;
 
 use crate::trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH};
 

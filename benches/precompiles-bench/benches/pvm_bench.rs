@@ -5,8 +5,8 @@ use std::{collections::BTreeSet, hint::black_box, time::Duration};
 use codspeed_criterion_compat::{
     BatchSize, Criterion, SamplingMode, criterion_group, criterion_main,
 };
+use miden_air::{BaseAir, LiftedAir};
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::stark::air::{BaseAir, LiftedAir};
 use miden_precompiles_air::ChipletAir;
 use miden_precompiles_prover::{
     DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES, HashFunction,

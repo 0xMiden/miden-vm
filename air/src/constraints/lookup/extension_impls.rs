@@ -17,7 +17,7 @@
 //! only six outputs via four subtractions, so the boolean shortcut is noise.
 
 use miden_core::field::ExtensionField;
-use miden_crypto::stark::air::LiftedAirBuilder;
+use miden_lifted_stark::air::LiftedAirBuilder;
 
 use super::{
     and8_lookup_air::And8LookupBuilder, buses::LookupOpFlags, chiplet_air::ChipletLookupBuilder,

@@ -12,10 +12,8 @@ pub use miden_air::config::{
     keccak_config, observe_protocol_params,
 };
 use miden_core::Felt;
-use miden_crypto::{
-    hash::eidos::MidenEidosChallenger,
-    stark::{StarkConfig, pcs::PcsParams},
-};
+use miden_crypto::hash::eidos::MidenEidosChallenger;
+use miden_lifted_stark::{StarkConfig, pcs::PcsParams};
 
 // SHARED TYPES
 // ================================================================================================

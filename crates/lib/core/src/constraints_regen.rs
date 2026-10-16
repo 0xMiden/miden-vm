@@ -20,14 +20,12 @@ use miden_air::{
 use miden_core::{
     Felt, WORD_SIZE, Word, crypto::hash::Eidos, field::QuadFelt, program::KernelDescriptor,
 };
-use miden_crypto::{
-    hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF},
-    stark::{
-        Preprocessed, QuotientRecompositionInputs, StarkConfig,
-        air::{BaseAir, LiftedAir},
-        lmcs::Lmcs,
-        quotient_recomposition_inputs,
-    },
+use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF};
+use miden_lifted_stark::{
+    Preprocessed, QuotientRecompositionInputs, StarkConfig,
+    air::{BaseAir, LiftedAir},
+    lmcs::Lmcs,
+    quotient_recomposition_inputs,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

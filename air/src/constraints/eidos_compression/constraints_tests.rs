@@ -1,10 +1,10 @@
 use alloc::vec::Vec;
 
 use miden_core::field::{Field, PrimeCharacteristicRing, QuadFelt};
-use miden_crypto::stark::{
-    air::{AirBuilder, ConstraintDegrees, ExtensionBuilder, PermutationAirBuilder, RowWindow},
-    matrix::RowMajorMatrix,
+use miden_lifted_stark::air::{
+    AirBuilder, ConstraintDegrees, ExtensionBuilder, PermutationAirBuilder, RowWindow,
 };
+use p3_matrix::dense::RowMajorMatrix;
 
 use super::{
     constraints::{

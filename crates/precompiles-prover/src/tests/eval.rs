@@ -11,8 +11,8 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_crypto::stark::air::ConstraintDegrees;
 use miden_lifted_air::{BaseAir, LiftedAir};
+use miden_lifted_stark::air::ConstraintDegrees;
 use miden_precompiles_air::hash::{
     chunk_node::NODE_COL_OFFSET, keccak::node::COL_OUT_MULT as KECCAK_OUT_MULT,
 };

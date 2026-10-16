@@ -7,7 +7,7 @@
 //! Stack shifting is enforced in the general stack constraints; here we only cover explicit
 //! rewrites of stack positions for these op groups.
 
-use miden_crypto::stark::air::AirBuilder;
+use miden_lifted_stark::air::AirBuilder;
 
 use crate::{
     CoreCols, MidenAirBuilder,
