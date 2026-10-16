@@ -387,7 +387,7 @@ mod tests {
     #[test]
     fn recursive_inputs_reject_non_eidos_proofs_before_parsing() {
         let proof = PrecompileProof {
-            proof: SerializedStarkProof::new(Vec::new(), HashFunction::Rpo256),
+            proof: SerializedStarkProof::new(Vec::new(), HashFunction::Blake3_256),
             roots: vec![Word::default()],
         };
         assert!(matches!(

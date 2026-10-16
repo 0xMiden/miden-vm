@@ -697,7 +697,7 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            // Build structurally valid stores bottom-up: every inserted key is the Poseidon2
+            // Build structurally valid stores bottom-up: every inserted key is the Eidos
             // hash of its two children, matching the invariant maintained by `add_merkle_path`
             // and `merge_roots`.
             prop::collection::vec(any::<Word>(), 0..=16)

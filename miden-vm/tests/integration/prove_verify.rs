@@ -131,9 +131,6 @@ fn test_all_hash_functions_prove_verify() {
         (HashFunction::Blake3_256, "Blake3_256"),
         (HashFunction::Keccak, "Keccak"),
         (HashFunction::Eidos, "Eidos"),
-        (HashFunction::Rpo256, "RPO"),
-        (HashFunction::Poseidon2, "Poseidon2"),
-        (HashFunction::Rpx256, "RPX"),
     ] {
         assert_prove_verify(source, hash_fn, hash_name, false, false);
     }

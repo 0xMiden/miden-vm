@@ -234,42 +234,6 @@ impl Prover {
                     &aux_inputs,
                 )
             },
-            HashFunction::Rpo256 => {
-                let config = config::rpo_config(params, config::RELATION_DIGEST);
-                prove_stark(
-                    &config,
-                    core_matrix,
-                    chiplets_matrix,
-                    eidos_compression_matrix,
-                    and8_matrix,
-                    &public_values,
-                    &aux_inputs,
-                )
-            },
-            HashFunction::Poseidon2 => {
-                let config = config::poseidon2_config(params, config::RELATION_DIGEST);
-                prove_stark(
-                    &config,
-                    core_matrix,
-                    chiplets_matrix,
-                    eidos_compression_matrix,
-                    and8_matrix,
-                    &public_values,
-                    &aux_inputs,
-                )
-            },
-            HashFunction::Rpx256 => {
-                let config = config::rpx_config(params, config::RELATION_DIGEST);
-                prove_stark(
-                    &config,
-                    core_matrix,
-                    chiplets_matrix,
-                    eidos_compression_matrix,
-                    and8_matrix,
-                    &public_values,
-                    &aux_inputs,
-                )
-            },
         }
         .map_err(ProverError::VmProofGeneration)?;
 
@@ -371,8 +335,8 @@ mod tests {
         let prover = Prover::new();
         assert_eq!(prover.hash_fn, HashFunction::Eidos);
 
-        let prover = prover.with_hash_fn(HashFunction::Poseidon2);
-        assert_eq!(prover.hash_fn, HashFunction::Poseidon2);
+        let prover = prover.with_hash_fn(HashFunction::Blake3_256);
+        assert_eq!(prover.hash_fn, HashFunction::Blake3_256);
     }
 
     #[test]

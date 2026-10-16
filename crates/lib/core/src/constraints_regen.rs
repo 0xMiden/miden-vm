@@ -141,25 +141,10 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
         "BLAKE3_PREPROCESSED_COMMITMENT",
         &preprocessed_commitments.blake3,
     )?;
-    replace_felt_array_const(
-        &mut air_config,
-        "RPO_PREPROCESSED_COMMITMENT",
-        &preprocessed_commitments.rpo,
-    )?;
-    replace_felt_array_const(
-        &mut air_config,
-        "RPX_PREPROCESSED_COMMITMENT",
-        &preprocessed_commitments.rpx,
-    )?;
     replace_u64_array_const(
         &mut air_config,
         "EIDOS_PREPROCESSED_COMMITMENT",
         &preprocessed_commitments.eidos,
-    )?;
-    replace_felt_array_const(
-        &mut air_config,
-        "POSEIDON2_PREPROCESSED_COMMITMENT",
-        &preprocessed_commitments.poseidon2,
     )?;
     replace_u64_array_const(
         &mut air_config,
@@ -187,10 +172,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
 
 struct PreprocessedCommitments {
     blake3: [u8; 32],
-    rpo: [Felt; 4],
-    rpx: [Felt; 4],
     eidos: [u64; 4],
-    poseidon2: [Felt; 4],
     keccak: [u64; 4],
 }
 
@@ -210,17 +192,8 @@ fn compute_preprocessed_commitments(digest: [Felt; 4]) -> io::Result<Preprocesse
             &config::blake3_256_config(params, digest),
         )?
         .into(),
-        rpo: compute_preprocessed_commitment(&statement, &config::rpo_config(params, digest))?
-            .into(),
-        rpx: compute_preprocessed_commitment(&statement, &config::rpx_config(params, digest))?
-            .into(),
         eidos: compute_preprocessed_commitment(&statement, &config::eidos_config(params, digest))?
             .into(),
-        poseidon2: compute_preprocessed_commitment(
-            &statement,
-            &config::poseidon2_config(params, digest),
-        )?
-        .into(),
         keccak: compute_preprocessed_commitment(
             &statement,
             &config::keccak_config(params, digest),
@@ -954,10 +927,7 @@ fn relation_digest_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), 
 
     let commitments = &artifact.preprocessed_commitments;
     if config::BLAKE3_PREPROCESSED_COMMITMENT != commitments.blake3
-        || config::RPO_PREPROCESSED_COMMITMENT != commitments.rpo
-        || config::RPX_PREPROCESSED_COMMITMENT != commitments.rpx
         || config::EIDOS_PREPROCESSED_COMMITMENT != commitments.eidos
-        || config::POSEIDON2_PREPROCESSED_COMMITMENT != commitments.poseidon2
         || config::KECCAK_PREPROCESSED_COMMITMENT != commitments.keccak
     {
         return Err("preprocessed commitments in air/src/config.rs are stale".into());

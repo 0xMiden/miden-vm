@@ -99,7 +99,7 @@ internal          = ["concurrent"]
 persistent-forest = ["rocksdb"]
 rocksdb           = ["concurrent", "dep:rocksdb"]
 serde             = ["dep:serde", "serde?/alloc"]
-std               = ["blake3/std", "miden-serde-utils/std", "once_cell/std", "rand/std", "rand/thread_rng", "serde?/std"]
+std               = ["blake3/std", "miden-serde-utils/std", "rand/std", "rand/thread_rng", "serde?/std"]
 testing           = ["arbitrary"]
 
 [dependencies]
@@ -121,7 +121,6 @@ hkdf             = { workspace = true }
 k256             = { features = ["alloc", "ecdh", "ecdsa", "pkcs8"], workspace = true }
 num              = { features = ["alloc", "libm"], workspace = true }
 num-complex      = { features = ["libm"], workspace = true }
-once_cell        = { features = ["alloc", "critical-section"], workspace = true }
 proptest         = { features = ["alloc"], optional = true, workspace = true }
 rand             = { workspace = true }
 rand_chacha      = { workspace = true }
@@ -138,7 +137,6 @@ x25519-dalek     = { features = ["static_secrets"], workspace = true }
 p3-blake3.workspace      = true
 p3-challenger.workspace  = true
 p3-dft.workspace         = true
-p3-goldilocks.workspace  = true
 p3-keccak.workspace      = true
 p3-matrix.workspace      = true
 p3-maybe-rayon.workspace = true
@@ -159,9 +157,6 @@ tempfile       = { workspace = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 criterion = { workspace = true }
-
-[build-dependencies]
-cc = { features = ["parallel"], workspace = true }
 
 [lints]
 workspace = true
