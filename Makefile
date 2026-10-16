@@ -267,7 +267,8 @@ build-no-std: ## Builds without the standard library
 		--exclude miden-vm-synthetic-bench \
 		--exclude miden-crypto-smt-codspeed-bench \
 		--exclude miden-bench \
-		--exclude miden-crypto-wycheproof-tests
+		--exclude miden-crypto-wycheproof-tests \
+		--exclude miden-verifier-codegen
 
 .PHONY: build-target-miden
 build-target-miden: ## Builds miden-field for wasm32-wasip2 with cfg(miden)
@@ -339,7 +340,7 @@ exec-sve: ## Builds an executable with SVE acceleration enabled
 
 .PHONY: regenerate-constraints
 regenerate-constraints: ## Regenerate the checked-in constraint artifacts (MASM circuit + evaluator)
-	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write
+	cargo run --locked --package miden-verifier-codegen -- --write crates/lib/core/asm
 	@$(MAKE) --no-print-directory recursive-verifier-regeneration-handoff
 
 .PHONY: regenerate-pvm-constants
@@ -392,7 +393,7 @@ check-pvm-proof-fixture: ## Check the pinned Eidos PVM proof and deferred root f
 
 .PHONY: check-constraints
 check-constraints: ## Check the checked-in constraint artifacts for drift
-	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --check
+	cargo run --locked --package miden-verifier-codegen -- --check crates/lib/core/asm
 
 .PHONY: exec-info
 exec-info: ## Builds an executable with log tree enabled

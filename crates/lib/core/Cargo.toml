@@ -35,11 +35,8 @@ std = [
     "miden-utils-sync/std",
 ]
 testing = ["arbitrary"]
-constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen", "dep:miden-constraint-compiler", "miden-air/compiler", "miden-ace-codegen/compiler"]
 
 [dependencies]
-p3-challenger.workspace = true
-miden-lifted-stark.workspace = true
 # Miden dependencies
 miden-mast-package.workspace = true
 miden-core.workspace = true
@@ -47,18 +44,15 @@ miden-crypto.workspace = true
 miden-precompiles.workspace = true
 miden-processor.workspace = true
 miden-utils-sync.workspace = true
-miden-air = { workspace = true, optional = true }
-miden-ace-codegen = { workspace = true, optional = true }
-miden-constraint-compiler = { workspace = true, optional = true }
 
 # External dependencies
 p256 = { workspace = true, features = ["ecdsa"] }
 thiserror.workspace = true
 
 [dev-dependencies]
-p3-challenger.workspace = true
 criterion.workspace = true
 curve25519-dalek.workspace = true
+p3-challenger.workspace = true
 miden-ace-codegen = { workspace = true, features = ["compiler"] }
 miden-air = { workspace = true, features = ["compiler"] }
 miden-assembly = { workspace = true, features = ["testing"] }
@@ -67,7 +61,6 @@ miden-debug-types.workspace = true
 miden-lifted-stark = { workspace = true, features = ["testing"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
 miden-processor = { workspace = true, features = ["testing"] }
-miden-precompiles-air.workspace = true
 miden-precompiles-prover = { workspace = true, features = ["concurrent"] }
 miden-precompiles-verifier = { workspace = true, features = ["concurrent"] }
 miden-prover = { workspace = true, features = ["concurrent"] }
@@ -87,8 +80,3 @@ miden-assembly = { workspace = true, features = ["std"] }
 miden-assembly-syntax = { workspace = true, features = ["std"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
 miden-core-lib-codegen = { workspace = true, features = ["std"] }
-
-[[bin]]
-name = "regenerate-constraints"
-path = "src/bin/regenerate-constraints.rs"
-required-features = ["constraints-tools"]
