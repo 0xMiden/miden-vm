@@ -12,6 +12,7 @@ use crate::utils::{
     zeroize::{Zeroize, ZeroizeOnDrop},
 };
 
+pub mod ecgfp5;
 pub mod k256;
 pub mod x25519;
 

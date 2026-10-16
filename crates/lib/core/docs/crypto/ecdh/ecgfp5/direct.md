@@ -1,0 +1,7 @@
+Diffie-Hellman agreement using short-scalar verification.<br /><br />Let G be the generator, Q the recipient's public key, r the private scalar, and n the prime<br />subgroup order. Compute R = rG from the fixed generator table. For the proposed shared point S,<br />the host supplies signed a and positive b, both at most 160 bits. Check b*r = a (mod n), then<br />[a]Q - [b]S = O.<br />Both points are decoded into the prime-order subgroup. Since 0 < b < n, the checks imply S = rQ.<br /><br />The host obtains a,b using extended Euclid. The VM checks the integer relation through<br />range-checked limbs and carries; it does not repeat that search. A sixteen-entry joint table<br />and eighty radix-four windows evaluate the point equation. Unlike the generator accumulation,<br />this computation can encounter equal, opposite, or identity points and handles all three cases.<br />
+
+
+## miden::core::crypto::ecdh::ecgfp5::direct
+| Procedure | Description |
+| ----------- | ------------- |
+| agree_inner | Computes R from the generator table and verifies S using the short-scalar relation.<br />Internal procedure; use `ecgfp5::agree` for key agreement.<br /><br />Input:  [public_key(4), pad(12)]<br />Output: [R(5), S(5), Q(5), scratch(1)]<br />Advice: Q, scalar, generator entries, short coefficients, and point witnesses<br />from `PublicKey::advise`.<br /><br />Called in a fresh memory context by `agree`. Uses this module's workspace together with<br />the shared scalar digits, table roots, and point slots.<br /><br />Invocation: call<br /> |

@@ -204,7 +204,7 @@ fn core_library_load_registers_required_handlers() {
     use miden_core_lib::{
         CoreLibrary,
         handlers::{
-            aead_eidos::AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
+            aead_eidos::AEAD_EIDOS_DECRYPT_EVENT_NAME,
             ecdsa_k256_keccak::ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,
             ecdsa_p256_sha256::ECDSA_P256_SHA256_RECOVER_EVENT_NAME,
             precompiles::{
@@ -220,7 +220,7 @@ fn core_library_load_registers_required_handlers() {
     host.load_library(&core_lib).expect("failed to load core library");
 
     for event in [
-        AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
+        AEAD_EIDOS_DECRYPT_EVENT_NAME,
         KECCAK256_DIGEST_EVENT_NAME,
         UINT_FIELD_INV_EVENT_NAME,
         ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,

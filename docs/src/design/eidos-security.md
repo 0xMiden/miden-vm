@@ -49,6 +49,6 @@ ceiling is a separate limit.
 Do not encrypt a field element by adding an Eidos digest element as a mask. Its restricted
 range can reveal information about the plaintext.
 
-Eidos AEAD uses raw compression output lanes for its XOR stream, and its polynomial MAC analysis
-accounts for the restricted distribution of its MAC keys. Use the supplied AEAD APIs and follow
-their nonce and verification-budget limits. See [Eidos authenticated encryption](./eidos-aead.md).
+Use [Eidos authenticated encryption](./eidos-aead.md), which uses raw output lanes for its XOR
+stream and accounts for the restricted MAC-key distribution. Its guide specifies nonce and
+verification-budget limits.
