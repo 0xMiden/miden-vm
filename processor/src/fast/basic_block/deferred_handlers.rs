@@ -173,7 +173,7 @@ fn evaluate_canonical_node(processor: &mut FastProcessor) -> Result<Node, System
         .ok_or(PrecompileError::MissingNode.into())
 }
 
-/// Exports the original graph of a registered true assertion into the advice map.
+/// Computes the original graph of a registered true assertion and replaces its advice-map value.
 pub(super) fn handle_deferred_export_witness(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
@@ -186,15 +186,11 @@ pub(super) fn handle_deferred_export_witness(
         .witness_for(digest)
         .map_err(|_| PrecompileError::InvalidNode)?;
     let bytes = witness.to_bytes();
-    let value_len = 1 + bytes.len().div_ceil(size_of::<u32>());
-    if processor.advice.get_mapped_values(&digest).is_none() {
-        processor.advice.check_map_value_allocation(value_len)?;
-    }
 
     let mut values = bytes_to_packed_u32_elements(&bytes);
     // The deferred graph's element ceiling bounds its byte length well below the field modulus.
     values.insert(0, Felt::new_unchecked(bytes.len() as u64));
-    processor.advice.insert_into_map(digest, values)?;
+    processor.advice.replace_into_map(digest, values)?;
     Ok(())
 }
 
@@ -339,7 +335,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn export_witness_rejects_missing_true_and_value_roots() {
+    fn export_witness_rejects_invalid_roots_even_with_existing_entries() {
         let mut processor = FastProcessor::new(StackInputs::default());
         let value = processor
             .deferred_state_mut()
@@ -351,48 +347,52 @@ mod tests {
             (value, PrecompileError::AssertionFailed),
         ] {
             processor.stack_write_word(1, &digest);
-            let advice = processor.advice.clone();
-            let SystemEventError::Deferred(error) =
-                handle_deferred_export_witness(&mut processor).unwrap_err()
-            else {
-                panic!("expected a deferred error");
-            };
-            assert_eq!(core::mem::discriminant(error.root()), core::mem::discriminant(&expected));
-            assert_eq!(processor.advice, advice);
-            assert_eq!(processor.deferred_state().root(), TRUE_DIGEST);
+            for existing_entry in [false, true] {
+                if existing_entry {
+                    processor.advice.insert_into_map(digest, vec![Felt::ONE]).unwrap();
+                }
+                let advice = processor.advice.clone();
+                let stack = processor.stack().to_vec();
+                let SystemEventError::Deferred(error) =
+                    handle_deferred_export_witness(&mut processor).unwrap_err()
+                else {
+                    panic!("expected a deferred error");
+                };
+                assert_eq!(
+                    core::mem::discriminant(error.root()),
+                    core::mem::discriminant(&expected)
+                );
+                assert_eq!(processor.advice, advice);
+                assert_eq!(processor.stack(), stack);
+                assert_eq!(processor.deferred_state().root(), TRUE_DIGEST);
+            }
         }
     }
 
     #[test]
-    fn export_witness_preserves_advice_on_conflict_or_budget_failure() {
+    fn export_witness_preserves_existing_advice_on_budget_failure() {
         use miden_core::{WORD_SIZE, crypto::merkle::MerkleStore};
 
         use crate::{ExecutionOptions, advice::AdviceError};
 
-        for conflicting_entry in [false, true] {
-            let mut processor = FastProcessor::new(StackInputs::default());
-            let digest = processor
-                .deferred_state_mut()
-                .register(Node::and(TRUE_DIGEST, TRUE_DIGEST))
-                .unwrap();
-            processor.stack_write_word(1, &digest);
-            let mut budget = MerkleStore::default().num_internal_nodes() * 3 * WORD_SIZE * 8;
-            if conflicting_entry {
-                processor.advice.insert_into_map(digest, vec![Felt::ONE]).unwrap();
-                budget += (WORD_SIZE + 1) * 8;
-            }
-            processor = processor
-                .with_options(ExecutionOptions::default().with_max_advice_size_bytes(budget))
-                .unwrap();
-            let advice = processor.advice.clone();
-            let error = handle_deferred_export_witness(&mut processor).unwrap_err();
-            assert!(matches!(
-                (conflicting_entry, error),
-                (true, SystemEventError::Advice(AdviceError::MapKeyAlreadyPresent { .. }))
-                    | (false, SystemEventError::Advice(AdviceError::SizeBudgetExceeded { .. }))
-            ));
-            assert_eq!(processor.advice, advice);
-        }
+        let mut processor = FastProcessor::new(StackInputs::default());
+        let digest = processor
+            .deferred_state_mut()
+            .register(Node::and(TRUE_DIGEST, TRUE_DIGEST))
+            .unwrap();
+        processor.stack_write_word(1, &digest);
+        processor.advice.insert_into_map(digest, vec![Felt::ONE]).unwrap();
+        let budget =
+            (MerkleStore::default().num_internal_nodes() * 3 * WORD_SIZE + WORD_SIZE + 1) * 8;
+        processor = processor
+            .with_options(ExecutionOptions::default().with_max_advice_size_bytes(budget))
+            .unwrap();
+        let advice = processor.advice.clone();
+        assert!(matches!(
+            handle_deferred_export_witness(&mut processor),
+            Err(SystemEventError::Advice(AdviceError::SizeBudgetExceeded { .. }))
+        ));
+        assert_eq!(processor.advice, advice);
     }
 
     #[test]

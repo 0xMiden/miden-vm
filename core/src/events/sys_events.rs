@@ -399,16 +399,16 @@ pub enum SystemEvent {
     ///   Deferred state: node registered and semantically evaluated
     DeferredRegisterData,
 
-    /// Exports a registered true assertion's reachable DAG into the advice map under its digest.
+    /// Exports a registered true assertion's witness into the advice map.
     ///
-    /// The selected node need not be logged into the current deferred root. The map value is
-    /// `[byte_len, packed_u32_le(witness_bytes)...]`, using the existing portable witness encoding.
-    /// Only the final u32 limb is zero-padded; `byte_len` excludes that padding.
+    /// The selected node may be unlogged, but cannot be literal TRUE. Its original digest is
+    /// both the witness root and map key; any existing value is replaced with the computed witness.
+    /// The value is `[byte_len, packed_u32_le(witness_bytes)...]`. Only the final u32 limb is
+    /// zero-padded, and `byte_len` excludes padding.
     ///
-    /// Returns an error for missing nodes, implicit TRUE, non-TRUE evaluation results, failed
-    /// evaluation/export, conflicting advice-map entries, or advice budget exhaustion. Identical
-    /// repeated exports succeed. The deferred root and both stacks remain unchanged; evaluation
-    /// may populate deferred-state caches. The exported witness remains untrusted advice.
+    /// Both stacks and the deferred root are preserved. Errors leave existing advice unchanged.
+    /// Consumers must validate the witness and bind its root to an independently established
+    /// expected digest.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, NODE_DIGEST, ...]

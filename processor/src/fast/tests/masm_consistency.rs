@@ -413,9 +413,7 @@ fn test_log_deferred_correctness() {
 #[test]
 fn export_deferred_witness_opens_an_unlogged_shared_graph() {
     use miden_core::{
-        WORD_SIZE,
         advice::AdviceStack,
-        crypto::merkle::MerkleStore,
         deferred::{Node, PrecompileRegistry, PrecompileWitness, TRUE_DIGEST},
         utils::packed_u32_elements_to_bytes,
     };
@@ -439,19 +437,16 @@ fn export_deferred_witness_opens_an_unlogged_shared_graph() {
     processor = processor
         .with_advice(AdviceInputs::default().with_stack(AdviceStack::from(advice_stack.clone())))
         .unwrap();
-    let value_len = 1 + byte_len.div_ceil(4);
-    let budget = (MerkleStore::default().num_internal_nodes() * 3 * WORD_SIZE
-        + advice_stack.len()
-        + WORD_SIZE
-        + value_len)
-        * 8;
-    processor = processor
-        .with_options(ExecutionOptions::default().with_max_advice_size_bytes(budget))
-        .unwrap();
     let program = Assembler::new(Arc::new(DefaultSourceManager::default()))
         .assemble_program(
             "program",
-            r#"begin adv.export_deferred_witness emit.event("sys::adv::export_deferred_witness") end"#,
+            r#"begin
+                # Insert one zero felt under the selected root before exporting its witness.
+                push.0.1 movdn.5 movdn.4 adv.insert_mem
+                movup.4 drop movup.4 drop
+                adv.export_deferred_witness
+                emit.event("sys::adv::export_deferred_witness")
+            end"#,
         )
         .unwrap()
         .unwrap_program();
@@ -465,6 +460,7 @@ fn export_deferred_witness_opens_an_unlogged_shared_graph() {
     assert_eq!(output.advice.map().len(), 1);
     let value = output.advice.get_mapped_values(&selected).unwrap();
     assert_eq!(value[0].as_canonical_u64() as usize, byte_len);
+    assert_eq!(value.len(), 1 + byte_len.div_ceil(4));
     let bytes = packed_u32_elements_to_bytes(&value[1..]);
     assert!(bytes[byte_len..].iter().all(|byte| *byte == 0));
     let witness = PrecompileWitness::read_from_bytes(&bytes[..byte_len]).unwrap();
