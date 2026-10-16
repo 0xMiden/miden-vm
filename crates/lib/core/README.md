@@ -74,11 +74,13 @@ begin
 end
 ```
 
-Export preserves the selected root. If its advice-map key is absent, export writes the portable
-witness under that digest. If the key already exists, export returns without validating or replacing
-the mapped value. Consumers must validate the witness and bind its reconstructed root to an
-independently established expected digest. Skip export for an untouched TRUE root: no obligation
-was created, and an absent key cannot be populated from literal TRUE.
+Export validates the selected root and regenerates its portable witness on every call, then stores
+it under the original digest, replacing any existing advice value. A preloaded or program-created
+dummy entry cannot suppress export. Failed validation, export or advice-budget checks leave an
+existing entry unchanged. Both stacks and the VM's built-in root are preserved; there is no export
+cache. Consumers must still validate the witness and bind its reconstructed root to an independently
+established expected digest. Skip export for an untouched literal TRUE root: no obligation was
+created, and literal TRUE cannot be exported.
 
 Registration evaluates assertions eagerly in the host, but a VM proof with an unchanged built-in
 root does not prove these caller-maintained obligations. Callers must retain the final root and
