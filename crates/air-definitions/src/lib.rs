@@ -3,7 +3,7 @@
 #[macro_use]
 extern crate alloc;
 
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "std"))]
 extern crate std;
 
 use alloc::{borrow::Cow, vec::Vec};
@@ -26,11 +26,10 @@ use proptest::prelude::*;
 pub mod ace;
 pub use shared::config;
 mod constraints;
+pub mod geometry;
 pub mod lookup;
-pub mod memory;
 pub mod precompiles;
 mod proof_order;
-pub mod security;
 pub mod shared;
 pub mod trace;
 
@@ -109,7 +108,7 @@ mod export {
 }
 
 pub use export::*;
-pub use proof_order::{AIRS, MIDEN_AIR_COUNT, PROOF_ORDER_COUNT, ProofOrder};
+pub use proof_order::{AIRS, MIDEN_AIR_COUNT};
 
 // MIDEN AIR BUILDER
 // ================================================================================================
@@ -727,10 +726,8 @@ impl MidenAir {
 
     /// Evaluate the hand-written constraint definitions.
     ///
-    /// [`LiftedAir::eval`] runs the generated evaluators instead; use this entry
-    /// point (via [`HandwrittenMidenAir`] where an AIR value is expected) when
-    /// the hand-written source itself is required — regenerating the evaluators,
-    /// or checking them for drift.
+    /// The definitions crate always evaluates the handwritten source. The runtime facade
+    /// specializes this source during its Cargo build.
     pub fn eval_handwritten<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
             Self::Core => CoreAir.eval(builder),
@@ -741,12 +738,10 @@ impl MidenAir {
     }
 }
 
-/// [`MidenAir`] with `eval` routed to the hand-written constraint definitions.
+/// [`MidenAir`] wrapped for symbolic capture of the hand-written constraint definitions.
 ///
-/// Symbolic capture that feeds artifact generation, or anchors an equivalence
-/// oracle, must consume the hand-written source — a generated evaluator as input
-/// makes regeneration self-referential and severs the chain back to the auditable
-/// source. Passing this wrapper enforces that by construction.
+/// Capture that feeds generated artifacts, or anchors an equivalence oracle, must consume the
+/// hand-written source; taking this wrapper makes that explicit at the call site.
 #[derive(Copy, Clone, Debug)]
 pub struct HandwrittenMidenAir(pub MidenAir);
 
@@ -918,23 +913,15 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     }
 
     fn constraint_degree(&self) -> ConstraintDegrees {
-        match self {
-            Self::Core | Self::Chiplets => ConstraintDegrees { base: 9, ext: 9 },
-            Self::EidosCompression => ConstraintDegrees { base: 3, ext: 3 },
-            Self::And8Lookup => ConstraintDegrees { base: 0, ext: 3 },
-        }
+        ConstraintDegrees::from_air::<Felt, EF, _>(self)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        // The generated, globally-CSE'd evaluators: same constraint values in
-        // the same global order as the hand-written definitions, machine-checked
-        // by tests/generated_drift.rs. The definitions themselves remain
-        // available via `eval_handwritten`.
         match self {
-            Self::Core => constraints::generated::eval_core(builder),
-            Self::Chiplets => constraints::generated::eval_chiplets(builder),
-            Self::EidosCompression => constraints::generated::eval_eidos_compression(builder),
-            Self::And8Lookup => constraints::generated::eval_and8_lookup(builder),
+            Self::Core => CoreAir.eval(builder),
+            Self::Chiplets => ChipletsAir.eval(builder),
+            Self::EidosCompression => EidosCompressionAir.eval(builder),
+            Self::And8Lookup => And8LookupAir.eval(builder),
         }
     }
 }
@@ -1264,14 +1251,15 @@ mod tests {
 
     use super::*;
 
-    /// Guards the static `constraint_degree` override: if an AIR change moves the symbolic
-    /// degree away from the declared value, the override must be updated.
+    /// Every source AIR must fit within the degree admitted by the explicit PCS policy.
     #[test]
-    fn constraint_degree_override_matches_symbolic() {
+    fn handwritten_degrees_fit_the_pcs_policy() {
         for air in AIRS {
-            let symbolic = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air);
-            let declared = <MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air);
-            assert_eq!(declared, symbolic, "static constraint_degree override is stale");
+            assert!(
+                miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air)
+                    <= config::LOG_BLOWUP
+            );
+            assert_eq!(LiftedAir::<Felt, QuadFelt>::aux_width(&air), air.column_shape().len());
         }
     }
 
@@ -1534,4 +1522,6 @@ mod tests {
     }
 }
 
-pub mod geometry;
+pub mod memory;
+
+pub mod security;
