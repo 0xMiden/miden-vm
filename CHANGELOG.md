@@ -10,6 +10,7 @@
 
 #### Fixes
 
+- Fixed debugger invocation recovery across re-batched padding and generated local-frame instructions, preserving suspended callers and invocation identities for nested `exec` calls.
 - Fixed `DebugCallFrameResolver` to preserve inherited inline-call counts throughout operation ranges and distinguish caller contexts from inline frames entered or cleared within the callee.
 
 ## v0.36.0 (2026-10-14)
