@@ -16,7 +16,29 @@ pub const COMMITMENT_ALIGNMENT: usize = super::config::SPONGE_RATE;
 pub const COLLISION_RESISTANCE: u32 = HashFunction::Eidos.collision_resistance();
 pub const OOD_POW_BITS: u32 = 0;
 pub const LOOKUP_POW_BITS: u32 = 0;
-pub use miden_air_definitions::security::ProofSecurityParameters;
+/// Security parameters of a verified Miden STARK proof.
+///
+/// Native MVM and PVM verifiers return these parameters after deriving them from the proof, the
+/// commitment scheme used to verify it, and the AIR relation selected by the verifier. Callers
+/// pass the returned value to a security estimator and apply their own acceptance policy.
+/// Constructing this type directly does not authenticate its contents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProofSecurityParameters {
+    /// Protocol parameters bound by the proof transcript.
+    pub protocol_params: ProtocolParams,
+    /// Log2 of the configured final FRI polynomial degree.
+    pub log_final_degree: u32,
+    /// Instance shape derived from the proof and its commitment scheme.
+    pub instance_shape: InstanceShape,
+    /// Verified proof-hash configuration, which also selects the Fiat-Shamir challenger.
+    pub hash_fn: HashFunction,
+    /// Security-relevant shape of the AIR relation and commitment scheme.
+    pub air_shape: AirShape,
+    /// Number of out-of-domain points opened per committed column.
+    pub num_ood_points: u32,
+    /// Lookup fractions consumed once per proof in addition to the per-row fractions.
+    pub num_lookup_boundary_terms: u32,
+}
 
 /// Conservative Q16 lower bound on the log2 of the challenge-field cardinality.
 ///

@@ -1,10 +1,6 @@
 [package]
 name = "miden-precompiles-air"
 version.workspace = true
-description = "AIR and shared proof setup for Miden VM precompiles"
-documentation = "https://docs.rs/miden-precompiles-air"
-categories = ["cryptography", "no-std"]
-keywords = ["miden", "precompile", "air", "zkp"]
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -14,10 +10,9 @@ repository.workspace = true
 
 [features]
 default = ["std"]
-concurrent = ["std", "miden-air-definitions/concurrent", "miden-lifted-stark/concurrent"]
-std = ["miden-air-definitions/std"]
-testing = ["miden-air-definitions/testing"]
+std = ["miden-air/std"]
+concurrent = ["std", "miden-air/concurrent"]
+testing = ["miden-air/testing"]
 
 [dependencies]
-miden-air-definitions = { workspace = true, features = ["compiler"] }
-miden-lifted-stark.workspace = true
+miden-air = { workspace = true, features = ["compiler"] }

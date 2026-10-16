@@ -3,7 +3,7 @@
 //! This module provides production-style configuration factories matching the Miden VM
 //! hash-function surface, along with a smaller Eidos configuration for local tests.
 //!
-//! Production configs delegate to `crate::config`; callers pass the relation digest
+//! Production configs delegate to `crate::shared::config`; callers pass the relation digest
 //! explicitly. Callers should observe protocol parameters with [`observe_protocol_params`]
 //! before proving or verifying.
 
@@ -11,7 +11,7 @@ use miden_core::Felt;
 use miden_crypto::hash::eidos::MidenEidosChallenger;
 use miden_lifted_stark::{StarkConfig, pcs::PcsParams};
 
-pub use crate::config::{
+pub use crate::shared::config::{
     Blake3Config, EidosConfig, KeccakConfig, RelationDigest, blake3_256_config, eidos_config,
     keccak_config, observe_protocol_params,
 };
@@ -20,7 +20,7 @@ pub use crate::config::{
 // ================================================================================================
 
 /// Precompile prover STARK configuration with pre-filled common type parameters.
-pub type PrecompileStarkConfig<L, Ch> = crate::config::MidenStarkConfig<L, Ch>;
+pub type PrecompileStarkConfig<L, Ch> = crate::shared::config::MidenStarkConfig<L, Ch>;
 
 /// Relation digest binding the canonical PVM ACE circuit into the Fiat-Shamir transcript.
 ///
@@ -44,32 +44,19 @@ pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
 // ================================================================================================
 
 /// Log2 of the PVM FRI blowup factor (blowup = 8).
-pub(crate) const LOG_BLOWUP: u8 = 3;
-
+pub(crate) use miden_air_definitions::precompiles::policy::LOG_BLOWUP;
 /// Log2 of the PVM FRI folding arity (arity = 4).
-pub(crate) const LOG_FOLDING_ARITY: u8 = 2;
-
+pub(crate) use miden_air_definitions::precompiles::policy::LOG_FOLDING_ARITY;
 /// PCS parameters for the precompile chiplet stack.
 ///
-/// Mirrors `crate::config::pcs_params` in every parameter, including
+/// Mirrors `crate::shared::config::pcs_params` in every parameter, including
 /// `log_blowup = 3`. It exists as its own function so the Rust prover and
 /// verifier bind the actual PVM parameters into their transcript rather than
-/// relying on the core VM's defaults. Every [`ChipletAir`](crate::precompiles::ChipletAir) requires
-/// at most four quotient chunks, below the eight permitted by `log_blowup = 3`. The MASM verifier
-/// compiles this PCS geometry, so changing it requires a coordinated MASM update and security
-/// review; it is not a runtime configuration.
-pub fn precompile_pcs_params() -> PcsParams {
-    PcsParams::new(
-        LOG_BLOWUP, // must be >= log_quotient_degree
-        LOG_FOLDING_ARITY,
-        7,  // log_final_degree
-        4,  // folding_pow_bits
-        12, // deep_pow_bits
-        27, // num_queries
-        17, // query_pow_bits
-    )
-    .expect("invalid precompile PCS parameters")
-}
+/// relying on the core VM's defaults. Every [`ChipletAir`](crate::precompiles::ChipletAir)
+/// requires at most four quotient chunks, below the eight permitted by `log_blowup = 3`. The
+/// MASM verifier compiles this PCS geometry, so changing it requires a coordinated MASM update
+/// and security review; it is not a runtime configuration.
+pub use miden_air_definitions::precompiles::policy::precompile_pcs_params;
 
 // TEST CONFIG
 // ================================================================================================

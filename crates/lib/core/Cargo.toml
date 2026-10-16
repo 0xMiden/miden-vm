@@ -41,6 +41,8 @@ constraints-tools = [
     "dep:miden-ace-codegen",
     "dep:miden-constraint-compiler",
     "dep:miden-lifted-stark",
+    "miden-air/compiler",
+    "miden-ace-codegen/compiler",
 ]
 
 [dependencies]
@@ -64,8 +66,8 @@ thiserror.workspace = true
 criterion.workspace = true
 curve25519-dalek.workspace = true
 p3-challenger.workspace = true
-miden-ace-codegen.workspace = true
-miden-air.workspace = true
+miden-ace-codegen = { workspace = true, features = ["compiler"] }
+miden-air = { workspace = true, features = ["compiler"] }
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-core-lib-codegen = { workspace = true, features = ["std"] }
 miden-debug-types.workspace = true

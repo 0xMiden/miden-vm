@@ -8,35 +8,17 @@
 //! [`AIR_SHAPE`] stores the relation shape used by the security calculation, while
 //! `air_shape_matches_symbolic` checks it against the shape obtained from the chiplet AIRs.
 
-use miden_core::{
-    Felt,
-    field::{BasedVectorSpace, QuadFelt},
-    proof::HashFunction,
-};
-use miden_lifted_air::{BaseAir, ConstraintCounts, ConstraintDegrees, LiftedAir};
+use miden_core::proof::HashFunction;
 use miden_lifted_stark::pcs::PcsParams;
 use p3_security::{budget::report::LOOKUP_LABEL, fixed};
 
-pub use crate::security::{
+pub use crate::shared::security::{
     AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
     SecurityTerm,
 };
 use crate::{
-    precompiles::{
-        ChipletAir,
-        ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
-        hash::{
-            chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir,
-            sha256::Sha256Air, sha512::Sha512Air,
-        },
-        logup::{LookupAir, ProverLookupBuilder},
-        primitives::byte_pair_lut::BytePairLutAir,
-        relations::MAX_MESSAGE_WIDTH,
-        stark_config::{LOG_BLOWUP, LOG_FOLDING_ARITY},
-        transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
-        uint::{add::UintAddAir, store_mul::UintStoreMulAir},
-    },
-    security::{
+    precompiles::stark_config::{LOG_BLOWUP, LOG_FOLDING_ARITY},
+    shared::security::{
         CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT,
         EIDOS_CHALLENGE_SAMPLE_BITS, OOD_POW_BITS, security_report_with_hash,
     },
@@ -47,62 +29,33 @@ use crate::{
 /// The chiplet AIRs use `local` and `next` rotations only.
 const NUM_OOD_POINTS: u32 = 2;
 
-/// Base field elements per challenge-field element.
-const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
-
 /// Shape of the chiplet multi-AIR statement used by the security estimator.
 ///
 /// This stored value must equal the shape returned by [`derive_air_shape`].
-pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 857,
-    max_constraint_degree: 5,
-    num_quotient_chunks: 4,
-    max_combo: NUM_OOD_POINTS,
-    num_deep_terms: Some(914),
-    lookup: Some(LOOKUP_SHAPE),
-};
+pub const AIR_SHAPE: AirShape = super::protocol::PROTOCOL.air_shape;
 
-/// Lookup argument shape of the chiplet multi-AIR statement, as stored in [`AIR_SHAPE`].
-pub const LOOKUP_SHAPE: LookupShape = LookupShape {
-    fractions_per_row: 291,
-    max_message_width: 18,
+/// Lookup shape generated from the authored AIR metadata.
+pub const LOOKUP_SHAPE: LookupShape = match AIR_SHAPE.lookup {
+    Some(shape) => shape,
+    None => panic!("canonical AIR has lookup arguments"),
 };
 
 /// Computes the AIR shape by symbolically evaluating every chiplet AIR.
 ///
 /// This allocating pass supports validation and tooling. [`security_report`] uses the stored
 /// [`AIR_SHAPE`] constant.
+#[cfg(any(test, feature = "compiler"))]
 pub fn derive_air_shape() -> AirShape {
-    let airs = ChipletAir::all();
-    let num_airs = airs.len();
+    miden_air_definitions::precompiles::geometry::derive_air_shape()
+}
 
-    let mut num_constraints = 0;
-    let mut max_constraint_degree = 0;
-    let mut num_columns = 0;
-    let mut fractions_per_row = 0;
-
-    for air in airs {
-        num_constraints += ConstraintCounts::from_air::<Felt, QuadFelt, _>(&air).total();
-        max_constraint_degree =
-            max_constraint_degree.max(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air).max());
-        num_columns += column_count(&air, COMMITMENT_ALIGNMENT);
-        fractions_per_row += fractions_per_row_of(air);
-    }
-    num_columns += quotient_column_count(max_constraint_degree, COMMITMENT_ALIGNMENT);
-
+/// Build-compiled security shape of the precompile relation at the given commitment
+/// alignment; this does not capture AIRs.
+pub fn air_shape_for(alignment: usize) -> AirShape {
+    let metadata = crate::precompiles::protocol::metadata();
     AirShape {
-        // One batching slot per AIR beyond the first sits alongside the constraints themselves:
-        // constraints are folded by powers of one challenge and the AIRs by a second, so a
-        // single-AIR statement needs no cross-AIR batching challenge.
-        num_composed_constraints: (num_constraints + num_airs - 1) as u32,
-        max_constraint_degree: max_constraint_degree as u32,
-        num_quotient_chunks: quotient_chunk_count(max_constraint_degree) as u32,
-        max_combo: NUM_OOD_POINTS,
-        num_deep_terms: Some(num_columns as u32 + NUM_OOD_POINTS),
-        lookup: Some(LookupShape {
-            fractions_per_row: fractions_per_row as u32,
-            max_message_width: MAX_MESSAGE_WIDTH as u32,
-        }),
+        num_deep_terms: Some(metadata.num_deep_terms(alignment)),
+        ..metadata.air_shape
     }
 }
 
@@ -110,47 +63,12 @@ pub fn derive_air_shape() -> AirShape {
 /// alignment, holding every other AIR shape input fixed at [`AIR_SHAPE`]'s stored values.
 ///
 /// Only the per-column padding is alignment-dependent, so this recomputes committed column counts
-/// from the chiplet AIRs' own width accessors — no symbolic constraint pass — reusing
-/// [`AIR_SHAPE`]'s `max_constraint_degree` for the quotient group's chunk count. Native
+/// from the compiler's stored raw widths and quotient chunk count. Native
 /// verification of a proof committed under a non-algebraic LMCS (Blake3, alignment 1; Keccak,
 /// alignment 17) calls this instead of using the alignment-[`COMMITMENT_ALIGNMENT`] [`AIR_SHAPE`]
 /// fixed for the default Eidos preset.
 pub fn num_deep_terms(alignment: usize) -> u32 {
-    let mut num_columns = 0;
-    for air in ChipletAir::all() {
-        num_columns += column_count(&air, alignment);
-    }
-    num_columns += quotient_column_count(AIR_SHAPE.max_constraint_degree as usize, alignment);
-
-    num_columns as u32 + NUM_OOD_POINTS
-}
-
-/// Committed base columns for one chiplet: preprocessed, main, and auxiliary traces, each its own
-/// matrix within its commitment group and so each padded on its own.
-fn column_count(air: &ChipletAir, alignment: usize) -> usize {
-    aligned(BaseAir::<Felt>::preprocessed_width(air), alignment)
-        + aligned(BaseAir::<Felt>::width(air), alignment)
-        + aligned(LiftedAir::<Felt, QuadFelt>::aux_width(air) * EXTENSION_DEGREE, alignment)
-}
-
-/// Committed base columns in the quotient group: one chunk per unit of degree above the vanishing
-/// polynomial, rounded up to a power of two, committed as a single extension-valued matrix.
-fn quotient_column_count(max_constraint_degree: usize, alignment: usize) -> usize {
-    aligned(quotient_chunk_count(max_constraint_degree) * EXTENSION_DEGREE, alignment)
-}
-
-/// Committed quotient chunks: one per unit of degree above the vanishing polynomial, rounded up to
-/// a power of two.
-fn quotient_chunk_count(max_constraint_degree: usize) -> usize {
-    max_constraint_degree.saturating_sub(1).max(1).next_power_of_two()
-}
-
-/// Pads a committed width up to the commitment scheme's column alignment.
-///
-/// The DEEP reduction batches every element of each opened, alignment-padded row, so padding also
-/// contributes batching slots.
-fn aligned(width: usize, alignment: usize) -> usize {
-    width.next_multiple_of(alignment)
+    crate::precompiles::protocol::metadata().num_deep_terms(alignment)
 }
 
 // SECURITY MODEL CONSTANTS
@@ -246,36 +164,6 @@ const fn deployed_instance(log_max_height: u32) -> InstanceShape {
         log_max_height,
         field_bits: CHALLENGE_FIELD_BITS,
         collision_resistance: COLLISION_RESISTANCE,
-    }
-}
-
-/// Lookup fractions one chiplet emits per row, summed over its auxiliary lookup columns.
-///
-/// `LookupAir` is generic over its builder, so reading a shape means naming one; the choice does
-/// not affect the result, since the shapes are per-AIR constants.
-fn fractions_per_row_of(air: ChipletAir) -> usize {
-    type ShapeBuilder<'a> = ProverLookupBuilder<'a, Felt, QuadFelt>;
-
-    fn shape_of<A>(air: A) -> usize
-    where
-        A: for<'a> LookupAir<ShapeBuilder<'a>>,
-    {
-        LookupAir::<ShapeBuilder<'_>>::column_shape(&air).iter().sum()
-    }
-
-    match air {
-        ChipletAir::ChunkNodeSponge => shape_of(ChunkNodeSpongeAir),
-        ChipletAir::EidosCompression => shape_of(EidosCompressionAir),
-        ChipletAir::KeccakRound => shape_of(KeccakRoundAir),
-        ChipletAir::BytePairLut => shape_of(BytePairLutAir),
-        ChipletAir::TranscriptEval => shape_of(TranscriptEvalAir),
-        ChipletAir::UintStoreMul => shape_of(UintStoreMulAir),
-        ChipletAir::UintAdd => shape_of(UintAddAir),
-        ChipletAir::EcPointStoreGroups => shape_of(EcPointStoreGroupsAir),
-        ChipletAir::EcGroupAdd => shape_of(EcGroupAddAir),
-        ChipletAir::EcMsm => shape_of(EcMsmAir),
-        ChipletAir::Sha512 => shape_of(Sha512Air),
-        ChipletAir::Sha256 => shape_of(Sha256Air),
     }
 }
 
@@ -462,7 +350,14 @@ mod tests {
     /// level for an Eidos proof as [`conjectured_security_level`].
     #[test]
     fn num_deep_terms_matches_the_reference_alignment() {
+        assert_eq!(
+            air_shape_for(COMMITMENT_ALIGNMENT),
+            AIR_SHAPE,
+            "the build-compiled full-relation shape must equal the pinned AIR_SHAPE"
+        );
         assert_eq!(num_deep_terms(COMMITMENT_ALIGNMENT), AIR_SHAPE.num_deep_terms.unwrap());
+        assert_eq!(num_deep_terms(1), 861, "unexpected Blake3 (alignment 1) DEEP term count");
+        assert_eq!(num_deep_terms(17), 1141, "unexpected Keccak (alignment 17) DEEP term count");
     }
 
     /// Parameters built for a PVM proof must reproduce the independent PVM security report.

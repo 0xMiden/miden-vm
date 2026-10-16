@@ -1,13 +1,13 @@
 //! Peak prover memory model for the precompile chiplet-stack proof.
 //!
-//! Mirrors `crate::memory`'s peak-memory model for the Miden VM proof, generalized over the
-//! [`NUM_CHIPLETS`] heterogeneous chiplet AIRs. [`prover_peak_bytes`] models the allocations that
-//! dominate peak usage: each main and aux trace held at its 1x buffer plus its blowup-factor LDE,
-//! the quotient accumulator, every layer of the three per-proof LMCS digest trees (main, aux,
-//! quotient) alive at `open` time, the transient per-leaf hashing buffer held while whichever of
-//! those trees is under construction squeezes its leaf digests, and the process-cached
-//! BytePairLut preprocessed bundle. That bundle retains its raw `2^16`-row trace, its
-//! blowup-factor LDE, its LMCS digest tree, and the same transient per-leaf hashing buffer for
+//! Mirrors `crate::memory`'s peak-memory model for the Miden VM proof, generalized
+//! over the [`NUM_CHIPLETS`] heterogeneous chiplet AIRs. [`prover_peak_bytes`] models the
+//! allocations that dominate peak usage: each main and aux trace held at its 1x buffer plus its
+//! blowup-factor LDE, the quotient accumulator, every layer of the three per-proof LMCS digest
+//! trees (main, aux, quotient) alive at `open` time, the transient per-leaf hashing buffer held
+//! while whichever of those trees is under construction squeezes its leaf digests, and the
+//! process-cached BytePairLut preprocessed bundle. That bundle retains its raw `2^16`-row trace,
+//! its blowup-factor LDE, its LMCS digest tree, and the same transient per-leaf hashing buffer for
 //! its own one-time construction. The estimate covers one proof and the preprocessed bundle for
 //! its selected hash configuration. It excludes bundles cached for other hash configurations and
 //! concurrent proofs.
@@ -73,12 +73,67 @@ const fn leaf_state_bytes(hash_fn: HashFunction) -> u64 {
 // PEAK MEMORY MODEL
 // ================================================================================================
 
-/// Peak prover memory, in bytes, for a proof over the given per-chiplet padded trace heights.
+/// Peak prover memory, deriving quotient geometry symbolically for tooling.
+/// Production callers use the facade's compiled-degree estimator.
 pub fn prover_peak_bytes(
     heights: &[usize; NUM_CHIPLETS],
     params: &PcsParams,
     hash_fn: HashFunction,
 ) -> Option<u64> {
+    let max_log_quotient_degree = ChipletAir::all()
+        .iter()
+        .map(log_quotient_degree::<Felt, QuadFelt, ChipletAir>)
+        .max()?;
+    let num_quotient_chunks = 1usize.checked_shl(u32::from(max_log_quotient_degree))?;
+    prover_peak_bytes_with_quotient_chunks(heights, params, hash_fn, num_quotient_chunks)
+}
+
+/// Peak prover memory using a quotient chunk count already derived by the relation compiler.
+///
+/// This path reads trace widths only and never evaluates AIR constraints. The caller supplies
+/// the compiled relation's quotient chunk count, a positive power of two.
+pub fn prover_peak_bytes_with_quotient_chunks(
+    heights: &[usize; NUM_CHIPLETS],
+    params: &PcsParams,
+    hash_fn: HashFunction,
+    num_quotient_chunks: usize,
+) -> Option<u64> {
+    let raw_widths = ChipletAir::all().map(|air| {
+        (
+            air.preprocessed_width(),
+            air.width(),
+            <ChipletAir as LiftedAir<Felt, QuadFelt>>::aux_width(&air) * EXT_DIMENSION as usize,
+        )
+    });
+    prover_peak_bytes_for_shape(
+        heights,
+        &raw_widths,
+        (TRACE_HEIGHT, ChipletAir::BytePairLut.preprocessed_width()),
+        num_quotient_chunks,
+        params,
+        hash_fn,
+    )
+}
+
+/// Numeric peak-memory model for raw committed widths and one fixed preprocessed table.
+///
+/// Each width tuple is `(preprocessed, main, auxiliary)` in base-field coordinates, before
+/// commitment padding. `preprocessed_shape` is the fixed table's `(height, width)`.
+pub fn prover_peak_bytes_for_shape(
+    heights: &[usize],
+    raw_widths: &[(usize, usize, usize)],
+    preprocessed_shape: (usize, usize),
+    num_quotient_chunks: usize,
+    params: &PcsParams,
+    hash_fn: HashFunction,
+) -> Option<u64> {
+    if heights.len() != raw_widths.len() {
+        return None;
+    }
+    if !num_quotient_chunks.is_power_of_two() {
+        return None;
+    }
+    let max_quotient_degree = u64::try_from(num_quotient_chunks).ok()?;
     let blowup = 1u64.checked_shl(u32::from(params.log_blowup()))?;
     let one_plus_blowup = blowup.checked_add(1)?;
     // `tree_bytes`/`preprocessed_tree_bytes` already bound the persisted digest tree, leaf layer
@@ -90,8 +145,8 @@ pub fn prover_peak_bytes(
     // its LDE, every layer of its LMCS tree, and the leaf-hashing scratch buffer held while that
     // tree's leaves are squeezed. A full binary tree has fewer than twice as many digests as
     // leaves, so `2 * LDE height * DIGEST_BYTES` is a conservative upper bound.
-    let preprocessed_height = u64::try_from(TRACE_HEIGHT).ok()?;
-    let preprocessed_width = u64::try_from(ChipletAir::BytePairLut.preprocessed_width()).ok()?;
+    let preprocessed_height = u64::try_from(preprocessed_shape.0).ok()?;
+    let preprocessed_width = u64::try_from(preprocessed_shape.1).ok()?;
     let preprocessed_trace_bytes = preprocessed_height
         .checked_mul(one_plus_blowup)?
         .checked_mul(preprocessed_width)?
@@ -108,24 +163,17 @@ pub fn prover_peak_bytes(
 
     let mut per_air_total: u64 = 0;
     let mut max_height: u64 = 0;
-    let mut max_quotient_degree: u64 = 0;
 
-    for (air, &height) in ChipletAir::all().iter().zip(heights.iter()) {
+    for (&(_, width, aux_base_columns), &height) in raw_widths.iter().zip(heights) {
         let height = u64::try_from(height).ok()?;
-        let width = u64::try_from(air.width()).ok()?;
-        let aux_width =
-            u64::try_from(<ChipletAir as LiftedAir<Felt, QuadFelt>>::aux_width(air)).ok()?;
-        let log_d = log_quotient_degree::<Felt, QuadFelt, _>(air);
-        let quotient_degree = 1u64.checked_shl(u32::from(log_d))?;
-
-        let aux_base_columns = aux_width.checked_mul(EXT_DIMENSION)?;
+        let width = u64::try_from(width).ok()?;
+        let aux_base_columns = u64::try_from(aux_base_columns).ok()?;
         let columns = width.checked_add(aux_base_columns)?;
         let bytes_per_row = FELT_BYTES.checked_mul(one_plus_blowup)?.checked_mul(columns)?;
         let per_air = height.checked_mul(bytes_per_row)?;
 
         per_air_total = per_air_total.checked_add(per_air)?;
         max_height = max_height.max(height);
-        max_quotient_degree = max_quotient_degree.max(quotient_degree);
     }
 
     let quotient_bytes = EXT_DIMENSION
@@ -153,7 +201,25 @@ pub fn prover_peak_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::precompiles::stark_config::precompile_pcs_params;
+    use crate::precompiles::policy::precompile_pcs_params;
+
+    #[test]
+    fn supplied_quotient_chunks_preserve_the_symbolic_estimate() {
+        let params = precompile_pcs_params();
+        let heights = [16; NUM_CHIPLETS];
+        assert_eq!(
+            prover_peak_bytes_with_quotient_chunks(&heights, &params, HashFunction::Eidos, 4),
+            prover_peak_bytes(&heights, &params, HashFunction::Eidos),
+        );
+        // The supplied compiled dimension must drive the estimate; recomputing the symbolic
+        // full-relation degree here would silently discard a caller's relation geometry.
+        assert!(
+            prover_peak_bytes_with_quotient_chunks(&heights, &params, HashFunction::Eidos, 2)
+                .unwrap()
+                < prover_peak_bytes_with_quotient_chunks(&heights, &params, HashFunction::Eidos, 4)
+                    .unwrap(),
+        );
+    }
 
     #[test]
     fn preprocessed_bundle_cost_scales_with_blowup() {
@@ -170,38 +236,34 @@ mod tests {
         );
     }
 
+    /// Synthetic rows isolate memory accounting from routine production AIR-width changes.
+    /// Auxiliary widths below are already base-field coordinates, exactly like committed rows.
     #[test]
-    fn pinned_bytes_for_current_air_shape() {
-        let params = precompile_pcs_params();
-        // Current per-row trace costs before the safety multiplier, in `ChipletAir::all()` order,
-        // are:
-        // 9_288, 10_872, 6_048, 1_080, 4_104, 7_056, 2_592, 2_304, 2_952, 4_248, 5_904, and
-        // 4_464 bytes. The shared term uses the maximum quotient degree (4) across the full AIR
-        // set. Each expectation also includes that quotient/tree peak, the preprocessed
-        // bundle, and the 5/4 safety factor. Blake3 and Eidos add no leaf-hashing scratch
-        // beyond the digest itself. Any AIR shape change must break this test rather than
-        // silently drift the model.
-        let expected = [
-            71_448_410, 71_450_390, 71_444_360, 71_438_150, 71_441_930, 71_445_620, 71_440_040,
-            71_439_680, 71_440_490, 71_442_110, 71_444_180, 71_442_380,
-        ];
-        for hash_fn in [HashFunction::Blake3_256, HashFunction::Eidos] {
-            for (i, expected) in expected.into_iter().enumerate() {
-                let mut heights = [0; NUM_CHIPLETS];
-                heights[i] = 1;
-                assert_eq!(
-                    prover_peak_bytes(&heights, &params, hash_fn),
-                    Some(expected),
-                    "{:?} alone with {hash_fn:?}",
-                    ChipletAir::all()[i]
-                );
-            }
+    fn synthetic_shape_accounts_for_traces_quotient_trees_and_hashing_scratch() {
+        let params = PcsParams::new(1, 1, 3, 0, 0, 1, 0).unwrap();
+        let widths = [(0, 3, 2), (0, 1, 4)];
+        // At blowup 2, the main/aux buffers cost 720 bytes; the quotient and three proof
+        // trees cost 1792; the fixed table and its tree cost 1216. Their total 3728 is
+        // multiplied by 5/4. Wide hash states add scratch for 8 setup and 4 proof rows.
+        for (hash_fn, expected) in [
+            (HashFunction::Blake3_256, 4660),
+            (HashFunction::Eidos, 4660),
+            (HashFunction::Keccak, 9700),
+        ] {
             assert_eq!(
-                prover_peak_bytes(&[1; NUM_CHIPLETS], &params, hash_fn),
-                Some(71_512_940),
-                "all chiplet AIRs at height 1 with {hash_fn:?}"
+                prover_peak_bytes_for_shape(&[2, 4], &widths, (8, 1), 2, &params, hash_fn),
+                Some(expected)
             );
         }
+        // An AIR's own buffer cost is separate from the shared peak at the maximum height.
+        assert_eq!(
+            prover_peak_bytes_for_shape(&[2, 0], &widths, (8, 1), 2, &params, HashFunction::Eidos),
+            Some(2940)
+        );
+        assert_eq!(
+            prover_peak_bytes_for_shape(&[0, 4], &widths, (8, 1), 2, &params, HashFunction::Eidos),
+            Some(4360)
+        );
     }
 
     #[test]

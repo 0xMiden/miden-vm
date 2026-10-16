@@ -4,17 +4,18 @@ extern crate alloc;
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
+pub use miden_air::precompiles::security::{
+    AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
+    SecurityTerm,
+};
 pub use miden_core::{
     deferred::DeferredRoot,
     proof::{HashFunction, StarkProof},
 };
-pub use miden_precompiles_air::security::{
-    AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
-    SecurityTerm,
-};
 
 #[cfg(any(test, feature = "std"))]
 pub(crate) mod ace;
+#[cfg(any(test, feature = "std"))]
 pub(crate) mod ace_constants;
 #[cfg(feature = "constants-tools")]
 pub mod ace_constants_regen;

@@ -3,6 +3,15 @@
 use alloc::{vec, vec::Vec};
 
 #[cfg(test)]
+use miden_air::precompiles::stark_config::test_challenger;
+use miden_air::precompiles::{
+    ChipletAir, ChipletMultiAir, preprocessed,
+    stark_config::{
+        PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
+        observe_protocol_params, precompile_pcs_params,
+    },
+};
+#[cfg(test)]
 use miden_core::utils::RowMajorMatrix;
 use miden_core::{
     Felt,
@@ -16,15 +25,6 @@ use miden_lifted_stark::{
     Preprocessed, ProverInstance, StarkConfig,
     lmcs::Lmcs as LmcsTrait,
     proof::{StarkOutput, StarkProofData},
-};
-#[cfg(test)]
-use miden_precompiles_air::stark_config::test_challenger;
-use miden_precompiles_air::{
-    ChipletAir, ChipletMultiAir, preprocessed,
-    stark_config::{
-        PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
-        observe_protocol_params, precompile_pcs_params,
-    },
 };
 use serde::Serialize;
 use serde_wincode::SerdeCompat;

@@ -7,7 +7,11 @@ use miden_air_definitions::{
 };
 use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_module};
 
+#[path = "build/precompiles.rs"]
+mod precompiles;
+
 fn main() {
+    precompiles::generate();
     println!("cargo:rerun-if-changed=build.rs");
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo provides OUT_DIR"));
     let write = |name: &str, contents: String| {

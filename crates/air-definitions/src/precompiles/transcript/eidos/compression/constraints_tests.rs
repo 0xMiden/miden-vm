@@ -13,7 +13,7 @@ use super::{
     testing::generate_felt_trace_block_with_cycle_id,
     trace::EidosCompressionFeltRow,
 };
-use crate::eidos_compression::{
+use crate::shared::eidos_compression::{
     core::{EidosCompressionSelectors, get_periodic_column_values},
     testing as mvm,
 };

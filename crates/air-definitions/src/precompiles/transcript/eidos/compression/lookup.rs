@@ -4,14 +4,14 @@ use miden_core::Felt;
 
 use super::layout::AUX_COLS;
 use crate::{
-    eidos_compression::core::{
-        EidosCompressionCols, EidosCompressionSelectors, LookupMultiplicitySign,
-        NarrowLookupConfig, XorExpression, emit_narrow_lookup_columns,
-    },
     precompiles::{
         logup::LookupBuilder,
         primitives::byte_pair_lut::eidos::{self, Relation},
         relations::BusId,
+    },
+    shared::eidos_compression::core::{
+        EidosCompressionCols, EidosCompressionSelectors, LookupMultiplicitySign,
+        NarrowLookupConfig, XorExpression, emit_narrow_lookup_columns,
     },
 };
 

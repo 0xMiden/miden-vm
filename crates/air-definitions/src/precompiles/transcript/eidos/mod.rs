@@ -31,9 +31,6 @@ use miden_core::{
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess};
 
 use crate::{
-    eidos_compression::core::{
-        EidosCompressionSelectors, get_periodic_column_values, universal_cv_word,
-    },
     precompiles::{
         logup::{
             ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
@@ -41,6 +38,9 @@ use crate::{
         },
         relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
         utils::{current_main, next_main},
+    },
+    shared::eidos_compression::core::{
+        EidosCompressionSelectors, get_periodic_column_values, universal_cv_word,
     },
 };
 

@@ -4,13 +4,15 @@ use miden_core::{Felt, field::PrimeCharacteristicRing};
 
 use super::layout::{NUM_COLS, footer_digest_col};
 #[doc(hidden)]
-pub use crate::eidos_compression::core::trace::{
+pub use crate::shared::eidos_compression::core::trace::{
     ByteLookupRecorder, EidosCompressionByteLookup, EidosCompressionFeltRow,
     retag_felt_trace_block_cycle_id,
 };
 #[cfg(any(test, feature = "testing"))]
-use crate::eidos_compression::core::{layout::FOOTER_START, trace::write_core_felt_footer_rows};
-use crate::eidos_compression::core::{
+use crate::shared::eidos_compression::core::{
+    layout::FOOTER_START, trace::write_core_felt_footer_rows,
+};
+use crate::shared::eidos_compression::core::{
     layout::{BLOCK_PERIOD, NUM_COLS as SHARED_NUM_COLS},
     trace::write_core_felt_trace_block_into_zeroed_with_lookups,
 };
