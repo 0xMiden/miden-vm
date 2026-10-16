@@ -2,9 +2,14 @@
 
 use std::{vec, vec::Vec};
 
-use miden_air::lookup::{
-    LookupAir, LookupFractions, LookupMessage, ProverLookupBuilder, build_lookup_fractions,
-    debug::{ValidateLayout, ValidateLookupAir},
+use miden_air::{
+    lookup::{
+        LookupAir, LookupFractions, LookupMessage, ProverLookupBuilder, build_lookup_fractions,
+        debug::{ValidateLayout, ValidateLookupAir},
+    },
+    precompiles::hash::{
+        chunk_node::NODE_COL_OFFSET, keccak::node::COL_OUT_MULT as KECCAK_OUT_MULT,
+    },
 };
 use miden_core::{
     Felt,
@@ -13,9 +18,6 @@ use miden_core::{
 };
 use miden_lifted_air::{BaseAir, LiftedAir};
 use miden_lifted_stark::air::ConstraintDegrees;
-use miden_precompiles_air::hash::{
-    chunk_node::NODE_COL_OFFSET, keccak::node::COL_OUT_MULT as KECCAK_OUT_MULT,
-};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{

@@ -28,6 +28,7 @@ mod isolation;
 mod proof_order_maps;
 mod pvm_aux_trace;
 mod pvm_deep_queries;
+mod pvm_geometry;
 mod pvm_public_inputs;
 mod pvm_scatter_bench;
 mod pvm_settlement;
@@ -44,7 +45,7 @@ mod vm_sigma_scatter;
 use verifier_stack::{CALLER_WORD, VERIFIER_RETURN, VerifierStack};
 
 pub(crate) fn pvm_layout_const(name: &str) -> u32 {
-    let source = include_str!("../../asm/sys/pvm/layout.masm");
+    let source = include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/layout.masm"));
     let prefix = format!("const {name} = ");
     let region_prefix = format!("### {name}: ");
     let value = source
@@ -62,7 +63,7 @@ pub(crate) fn pvm_layout_const(name: &str) -> u32 {
 }
 
 pub(crate) fn vm_layout_const(name: &str) -> u32 {
-    let source = include_str!("../../asm/sys/vm/layout.masm");
+    let source = include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/vm/layout.masm"));
     let prefix = format!("const {name} = ");
     let value = source
         .lines()
@@ -1774,8 +1775,8 @@ fn quotient_recomposition_constants_match_derivation() {
     // has arity = blowup = 8, so deriving all three from the blowup would produce the
     // same numbers and conceal the conflation that breaks relations where they differ.
     let masm = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/asm/sys/vm/constraints_eval.masm"
+        env!("MIDEN_CORE_ASM_DIR"),
+        "/sys/vm/constraints_eval.masm"
     ))
     .expect("read generated VM constraints evaluator");
     let masm_const = |name: &str| -> u64 {
@@ -1847,12 +1848,12 @@ fn staged_fold_coefficients_fit_the_declared_ace_input_region() {
         (
             "vm",
             vm_layout_const as fn(&str) -> u32,
-            include_str!("../../asm/sys/vm/constraints_eval.masm"),
+            include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/vm/constraints_eval.masm")),
         ),
         (
             "pvm",
             pvm_layout_const as fn(&str) -> u32,
-            include_str!("../../asm/sys/pvm/constraints_eval.masm"),
+            include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/constraints_eval.masm")),
         ),
     ] {
         let num_airs = masm_const(evaluator, "NUM_AIRS", relation);

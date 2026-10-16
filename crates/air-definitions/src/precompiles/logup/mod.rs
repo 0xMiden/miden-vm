@@ -1,9 +1,9 @@
 //! PVM relation definitions over the shared Miden LogUp framework.
 //!
 //! Prover-side fraction collection, centered cyclic accumulation, constraint emission, and the
-//! preprocessed/main window contract come directly from [`crate::lookup`]. LogUp columns occupy
-//! the declared auxiliary prefix; chiplet-specific extension-field registers may follow that
-//! prefix without entering the bus balance.
+//! preprocessed/main window contract come directly from [`crate::lookup`]. LogUp
+//! columns occupy the declared auxiliary prefix; chiplet-specific extension-field registers may
+//! follow that prefix without entering the bus balance.
 //!
 //! ## Encoding
 //!

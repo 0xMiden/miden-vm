@@ -1,4 +1,8 @@
 #![no_std]
-
-//! Compatibility facade for the extracted precompile AIR definitions.
-pub use miden_air_definitions::precompiles::*;
+//! Temporary source compatibility for the legacy PVM artifact generator.
+pub use miden_air::precompiles::*;
+pub mod protocol;
+pub use protocol::PVM_RELATION_DIGEST;
+pub mod stark_config {
+    pub use miden_air::precompiles::stark_config::*;
+}

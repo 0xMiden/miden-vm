@@ -1521,7 +1521,3 @@ mod tests {
         );
     }
 }
-
-pub mod memory;
-
-pub mod security;

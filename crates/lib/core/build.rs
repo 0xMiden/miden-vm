@@ -231,6 +231,7 @@ fn main() -> Result<(), Report> {
     // dependency against the exact embedded artifact.
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let asm_dir = Path::new(manifest_dir).join(ASM_DIR_PATH);
+    println!("cargo:rustc-env=MIDEN_CORE_ASM_DIR={}", asm_dir.display());
     let precompiles_asm_dir = asm_dir.join("precompiles");
     let build_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     miden_core_lib_codegen::masm::write_math_masm(&precompiles_asm_dir).map_err(Report::msg)?;

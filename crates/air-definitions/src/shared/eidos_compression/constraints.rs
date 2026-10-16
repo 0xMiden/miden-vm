@@ -173,7 +173,7 @@ pub(crate) fn enforce_footer_rows<AB>(
 /// Enforces the footer constraints shared with the PVM compression AIR.
 ///
 /// The MVM mode column must be zero so that the shared output slots carry the ordinary digest.
-#[cfg(feature = "testing")]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) fn enforce_common_footer_rows<AB>(
     builder: &mut AB,
     local: &[AB::Var],

@@ -1,6 +1,6 @@
 pub mod chunk;
 #[cfg(test)]
-pub use miden_precompiles_air::hash::{chunk_node, memory64};
+pub use miden_air::precompiles::hash::{chunk_node, memory64};
 pub mod chunk_node_sponge;
 pub mod keccak;
 pub mod sha256;

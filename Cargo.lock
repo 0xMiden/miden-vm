@@ -2571,8 +2571,7 @@ dependencies = [
 name = "miden-precompiles-air"
 version = "1.0.0"
 dependencies = [
- "miden-air-definitions",
- "miden-lifted-stark",
+ "miden-air",
 ]
 
 [[package]]
@@ -2586,7 +2585,6 @@ dependencies = [
  "miden-lifted-air",
  "miden-lifted-stark",
  "miden-precompiles",
- "miden-precompiles-air",
  "miden-precompiles-verifier",
  "miden-utils-sync",
  "proptest",

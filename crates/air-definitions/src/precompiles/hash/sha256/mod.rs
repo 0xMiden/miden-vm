@@ -305,7 +305,7 @@ mod tests {
 
     #[test]
     fn sha256_constraints_fit_the_deployed_degree_bound() {
-        let bound = crate::precompiles::security::AIR_SHAPE.max_constraint_degree as usize;
+        let bound = crate::precompiles::geometry::derive_air_shape().max_constraint_degree as usize;
         let degrees = [
             ConstraintDegrees::from_air::<Felt, QuadFelt, _>(
                 &super::compression::Sha256CompressionAir,
