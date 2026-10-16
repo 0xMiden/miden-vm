@@ -55,7 +55,7 @@ macro_rules! impl_borrow_for_chiplet_cols {
 ///
 /// - hash rows: `state = block[8] || cv_in[4]`, `row_data = cv_out[4]`;
 /// - Merkle rows: `state = block[8] || digest_out[4]`, `row_data = [node_index, node_index_next,
-///   is_start, 0]`.
+///   is_start, level]`.
 ///
 /// Merkle rows use the reserved fixed inner-node CV, so it does not need trace columns. Hash rows
 /// need both `cv_in` and `cv_out`, so they place the output CV in `row_data`.
@@ -114,6 +114,11 @@ impl<T: Copy> ControllerCols<T> {
     /// Merkle operation start flag (`row_data[2]`).
     pub fn merkle_is_start(&self) -> T {
         self.row_data[2]
+    }
+
+    /// Merkle path level (`row_data[3]`): zero on the start row, plus one per continuation row.
+    pub fn merkle_level(&self) -> T {
+        self.row_data[3]
     }
 
     /// Returns the low block word (`state[0..4]`).

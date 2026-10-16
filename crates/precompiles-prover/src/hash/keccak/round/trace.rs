@@ -65,10 +65,11 @@ fn bytes_le(x: u64) -> [Felt; 8] {
 
 /// `rot_limbs` for rotating `r` by the *reduced* shift `2^shift` (`shift
 /// ≤ 30` — see [`program::rol_decompose`]): 16-bit limbs of
-/// `(r_half + 2^32)·k`, low half first. Mirrors a rotate chiplet's ROL
-/// row construction. Returned as raw `u16`s (for driving the
+/// `(r_half + 2^32)·k`, low half first, with each half's known-zero limb omitted.
+/// Returned as raw `u16`s (for driving the
 /// `Range16` requires) alongside their `Felt` form (for the trace row).
-fn rot_limbs_for(r: u64, shift: u32) -> [u16; 8] {
+fn rot_limbs_for(r: u64, shift: u32) -> [u16; 6] {
+    assert!((1..=30).contains(&shift), "the biased half decomposition requires shifts 1..30");
     let k = 1u64 << shift;
     let r_lo = r & 0xffff_ffff;
     let r_hi = r >> 32;
@@ -76,15 +77,18 @@ fn rot_limbs_for(r: u64, shift: u32) -> [u16; 8] {
     let hi_offset_k = (r_hi + (1u64 << 32)).wrapping_mul(k);
     let lo_limbs = u64_as_four_u16_limbs(lo_offset_k);
     let hi_limbs = u64_as_four_u16_limbs(hi_offset_k);
+    // Below 16, the highest limb is zero. At least 16, the lowest limb is zero.
+    let first = usize::from(shift >= 16);
+    let omitted = if first == 0 { 3 } else { 0 };
+    debug_assert_eq!(lo_limbs[omitted], 0);
+    debug_assert_eq!(hi_limbs[omitted], 0);
     [
-        lo_limbs[0],
-        lo_limbs[1],
-        lo_limbs[2],
-        lo_limbs[3],
-        hi_limbs[0],
-        hi_limbs[1],
-        hi_limbs[2],
-        hi_limbs[3],
+        lo_limbs[first],
+        lo_limbs[first + 1],
+        lo_limbs[first + 2],
+        hi_limbs[first],
+        hi_limbs[first + 1],
+        hi_limbs[first + 2],
     ]
 }
 
@@ -127,7 +131,7 @@ fn push_row(
         require_logic64(bpl_req, bpl_op, a, b_eff);
     }
 
-    let mut rot_limbs = [0u16; 8];
+    let mut rot_limbs = [0u16; 6];
     if let Op::Rol(s) | Op::XorRol(s) = spec.op {
         let (shift, _swap) = program::rol_decompose(s);
         rot_limbs = rot_limbs_for(r, shift);
@@ -504,4 +508,27 @@ pub fn generate_trace(
     });
 
     interleave_lanes(&lane_cells, height)
+}
+
+#[cfg(test)]
+mod compact_rotation_tests {
+    use super::rot_limbs_for;
+
+    #[test]
+    fn compact_limbs_preserve_biased_halves_at_every_shift() {
+        for shift in 1..=30 {
+            for word in [0, 1, u32::MAX as u64, u64::MAX, 0x0123_4567_89ab_cdef] {
+                let limbs = rot_limbs_for(word, shift);
+                let factor = if shift < 16 { 1 } else { 1u64 << 16 };
+                for (half, compact) in limbs.as_chunks::<3>().0.iter().enumerate() {
+                    let packed = compact
+                        .iter()
+                        .enumerate()
+                        .fold(0u64, |acc, (i, &limb)| acc + (u64::from(limb) << (16 * i)));
+                    let input_half = (word >> (32 * half)) & u32::MAX as u64;
+                    assert_eq!(packed * factor, (input_half + (1u64 << 32)) << shift);
+                }
+            }
+        }
+    }
 }

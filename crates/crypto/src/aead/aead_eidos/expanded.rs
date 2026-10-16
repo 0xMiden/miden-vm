@@ -363,16 +363,16 @@ mod tests {
 
         let ciphertext = encrypt_felts_expanded(key(), nonce(), &plaintext);
         let expected = vec![
-            Felt::from_u32(0xbb25_603c),
-            Felt::from_u32(0x19cf_6da5),
-            Felt::from_u32(0xefac_9bbd),
-            Felt::from_u32(0xc61c_cf91),
-            Felt::from_u32(0xb375_27b5),
-            Felt::from_u32(0x1414_a95b),
-            Felt::from_u32(0xd9ff_7018),
-            Felt::from_u32(0x7782_e039),
-            Felt::from_u32(0x94b0_4b55),
-            Felt::from_u32(0x0073_05bf),
+            Felt::from_u32(0x7572_8480),
+            Felt::from_u32(0x9971_f125),
+            Felt::from_u32(0xb30c_b877),
+            Felt::from_u32(0x3807_f1ad),
+            Felt::from_u32(0xcd93_8cd1),
+            Felt::from_u32(0x820d_deb5),
+            Felt::from_u32(0xe0c9_5a01),
+            Felt::from_u32(0x52b4_1d4b),
+            Felt::from_u32(0x0d1c_a488),
+            Felt::from_u32(0xeddf_7af8),
         ];
 
         assert_eq!(ciphertext, expected);
@@ -392,8 +392,8 @@ mod tests {
         let ciphertext = encrypt_felts_expanded(key(), nonce(), &plaintext);
         let tag = auth_tag_expanded(key(), nonce(), &associated_data, &ciphertext);
         let expected = [
-            Felt::new_unchecked(9878978564639456879),
-            Felt::new_unchecked(13261684965002033322),
+            Felt::new_unchecked(6415520634642954294),
+            Felt::new_unchecked(16888960919599723412),
         ];
 
         assert_eq!(tag, expected);

@@ -643,21 +643,17 @@ fn merkle_direction_bit(main: &MainTrace, row: RowIndex) -> Felt {
     main.chiplet_node_index(row) - main.chiplet_node_index_next(row).double()
 }
 
-// SIBLING TABLE BUS (MRUPDATE add/remove pairing)
+// SIBLING TABLE (MRUPDATE add/remove pairing)
 // ================================================================================================
 //
-// MRUPDATE verifies the old Merkle root (MV leg, adds to sibling table) and then recomputes
-// the new root (MU leg, removes from sibling table). Each of the 3 levels of a depth-3 tree
-// emits one add on the MV leg and one remove on the MU leg, matched by `(mrupdate_id,
-// node_index, sibling_word)`.
+// MRUPDATE verifies the old root on the MV leg and recomputes the new root on the MU leg.
+// Each level adds one sibling-table entry on MV and removes the matching entry on MU.
+// Entries match by `(level, mrupdate_id, node_index, sibling_word)`, with direction-dependent
+// sibling lanes.
 //
-// The test iterates every hasher controller row, picks out the MV/MU sibling-emitting rows
-// via the `(s0, s1, s2)` sub-selectors, and attaches a `SiblingMsg` expectation tagged with
-// the direction bit. The subset matcher is column-blind and finds each message regardless of
-// where the M4/C2 packing puts it.
+// The matcher checks emitted messages independently of their lookup-column placement.
 
-/// Drive a depth-3 Merkle MRUPDATE and assert the sibling-table bus fires one add per MV
-/// controller row and one remove per MU controller row (3 levels: 3 adds + 3 removes).
+/// Checks that a depth-3 MRUPDATE emits three sibling-table adds and three matching removals.
 #[rstest]
 #[case(5_u64)]
 #[case(4_u64)]
@@ -680,10 +676,8 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
     let log = InteractionLog::new(&trace);
     let main = trace.main_trace();
 
-    // Collect MV / MU controller rows. A row is a sibling-table add/remove site when
-    // `chiplet_active.controller = 1` (s_ctrl column) AND the hasher internal
-    // `(s0, s1, s2)` sub-selectors pick out the MV-all (`s0 * s1 * (1-s2)`) or MU-all
-    // (`s0 * s1 * s2`) pattern. See `air/src/constraints/lookup/buses/hash_kernel.rs`.
+    // The sibling-table gates are defined by `emit_siblings` in
+    // `air/src/constraints/lookup/operations/merkle.rs`.
     let mut mv_rows: Vec<RowIndex> = Vec::new();
     let mut mu_rows: Vec<RowIndex> = Vec::new();
     for row in 0..main.chiplets_height() {
@@ -734,7 +728,14 @@ fn push_sibling(exp: &mut Expectations<'_>, row: RowIndex, main: &MainTrace, sid
     } else {
         (SiblingBit::One, block_lo)
     };
-    let msg = SiblingMsg { bit: bit_tag, mrupdate_id, node_index, h };
+    let level = main.chiplet_merkle_level(row);
+    let msg = SiblingMsg {
+        bit: bit_tag,
+        level,
+        mrupdate_id,
+        node_index,
+        h,
+    };
     match side {
         SiblingSide::Add => exp.add(row_usize, &msg),
         SiblingSide::Remove => exp.remove(row_usize, &msg),

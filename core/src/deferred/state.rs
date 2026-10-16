@@ -250,6 +250,17 @@ impl DeferredState {
         self.evals.get(&digest).copied().ok_or(PrecompileError::MissingNode)
     }
 
+    /// Exports the portable graph reachable from `root` without evaluating or changing this state.
+    ///
+    /// The selected node need not be logged into the current deferred root. Export preserves its
+    /// original commitment and omits unrelated nodes and evaluation caches. Structural export does
+    /// not establish assertion truth; callers that require it must evaluate `root` separately.
+    ///
+    /// Returns an error if `root` is missing, is implicit TRUE, or cannot be structurally exported.
+    pub fn witness_for(&self, root: Digest) -> Result<PrecompileWitness, IntegrityError> {
+        PrecompileWitness::from_state(self, root)
+    }
+
     /// Consumes completed execution state and exports its root-reachable portable graph.
     ///
     /// Executions without logged work return `None`. Export preserves original node commitments
@@ -258,7 +269,7 @@ impl DeferredState {
         if self.root == TRUE_DIGEST {
             return Ok(None);
         }
-        PrecompileWitness::from_state(&self).map(Some)
+        self.witness_for(self.root).map(Some)
     }
 
     fn validate_node_for_insertion(&self, node: &Node) -> Result<NodeType, PrecompileError> {

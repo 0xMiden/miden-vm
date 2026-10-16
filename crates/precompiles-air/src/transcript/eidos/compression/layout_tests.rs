@@ -55,6 +55,10 @@ fn footer_overlay_fits_108_columns_without_collisions() {
         mark_range(&mut used, F_R_CANON_Z_BASE_COL..F_R_CANON_Z_BASE_COL + 2);
         mark_col(&mut used, F_C_CANON_Z_COL);
 
+        if footer == 3 {
+            assert!(!used[super::super::COL_OUT_MULTIPLICITY]);
+        }
+
         let expected = if footer == 0 { 105 } else { 104 };
         assert_eq!(used.into_iter().filter(|&live| live).count(), expected, "footer {footer}");
     }

@@ -209,6 +209,10 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluatePayload),
     },
     PrimitiveSpec {
+        spelling: "adv.export_deferred_witness",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredExportWitness),
+    },
+    PrimitiveSpec {
         spelling: "add",
         build: || Instruction::Add,
     },

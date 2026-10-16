@@ -659,7 +659,7 @@ fn plain_exec_preserves_invocation_identity_through_merging() -> TestResult {
     let leaf_package =
         assemble(&source.replace("exec.wrapper\n drop\nend", "exec.leaf   \n drop\nend"))?;
     assert_eq!(wrapper_package.mast_forest().to_bytes(), leaf_package.mast_forest().to_bytes());
-    // Captured from next before this merge: source changes must not alter execution bytes.
+    // Invocation source identity must not alter execution bytes.
     let baseline = include_bytes!("fixtures/exec-source-identity.mast");
     assert_eq!(wrapper_package.mast_forest().to_bytes(), baseline.as_slice());
     let debug = wrapper_package.debug_info().into_diagnostic()?.unwrap();

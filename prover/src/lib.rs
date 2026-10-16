@@ -47,6 +47,8 @@ mod dyncall_saved_frame_soundness_repro;
 #[cfg(all(test, feature = "std"))]
 mod first_row_repeat_soundness_repro;
 #[cfg(all(test, feature = "std"))]
+mod mrupdate_sibling_level_soundness_repro;
+#[cfg(all(test, feature = "std"))]
 mod overflow_pointer_soundness_repro;
 #[cfg(all(test, feature = "std"))]
 mod repeat_loop_schema_soundness_repro;

@@ -27,11 +27,12 @@ pub(crate) const PVM_PROTOCOL_ID: u64 = 4;
 /// Relation digest binding the accepted circuit into the Fiat-Shamir transcript
 /// (raw canonical u64 limbs): `Eidos(PVM_PROTOCOL_ID || PVM_ACE_CIRCUIT_DIGEST)`.
 #[cfg(any(test, feature = "constants-tools", feature = "std"))]
+#[rustfmt::skip]
 pub const PVM_RELATION_DIGEST: [u64; 4] = [
-    6300943842119190689,
-    8396374335577542810,
-    5764913128661491021,
-    5986524562656033797,
+    5618632176883261929,
+    5091169848121332946,
+    9110857118546866548,
+    100418585322354598,
 ];
 
 /// Eidos digest of the order-invariant PVM ACE circuit's instruction stream (raw canonical u64
@@ -39,27 +40,28 @@ pub const PVM_RELATION_DIGEST: [u64; 4] = [
 #[cfg(any(test, feature = "constants-tools"))]
 #[rustfmt::skip]
 pub const PVM_ACE_CIRCUIT_DIGEST: [u64; 4] = [
-    854444154604257140,
-    6828720246784212310,
-    3227607691732405618,
-    235673600838045139,
+    2255028588524991477,
+    8088146176287763667,
+    1935595524963351362,
+    5560235558590875651,
 ];
 
 /// Commitment to the preprocessed (setup) trace tree under the Eidos config (raw canonical
 /// u64 limbs). A trusted verifier input, not proof data: an in-VM verifier cannot rebuild the
 /// bundle, so it observes this pinned value into the transcript.
 #[cfg(any(test, feature = "constants-tools"))]
+#[rustfmt::skip]
 pub const PVM_PREPROCESSED_COMMITMENT: [u64; 4] = [
-    7435130241103350969,
-    2209492810180294937,
-    2763208909109372110,
-    5080896414781165458,
+    1070440981155119101,
+    2022626773377316756,
+    6941685244114430330,
+    5172579525468662096,
 ];
 
 /// Encoded circuit shape: (READ variables, evaluation gates, stream length in felts). An in-VM
 /// verifier needs these as compile-time constants to size its reads and its ACE evaluation.
 #[cfg(any(test, feature = "constants-tools"))]
-pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (2632, 13008, 14240);
+pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (2520, 13000, 14232);
 
 /// Computes the relation digest binding an ACE circuit commitment into the Fiat-Shamir transcript.
 #[cfg(any(test, feature = "constants-tools"))]

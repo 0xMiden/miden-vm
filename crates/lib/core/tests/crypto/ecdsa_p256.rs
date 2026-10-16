@@ -515,8 +515,9 @@ fn p256_recover_loads_signature_before_local_write() {
     let fixture = valid_fixture();
     // Deliberately bypass the caller-owned-memory precondition to preserve the defensive
     // load-before-local-write ordering.
-    // `recover` owns locals [2^31, 2^31 + 8), so the nested `recover_digest` frame begins here.
-    // Its candidate-key `adv_pipe` overwrites this region after the signature has been loaded.
+    // `recover_with_root` owns locals [2^31, 2^31 + 8), so the nested `recover_digest` frame
+    // begins here. Its candidate-key `adv_pipe` overwrites this region after the signature has
+    // been loaded.
     let recover_digest_locals_ptr = (1_u32 << 31) + 8;
 
     let output = run_recover_with_native_signature(
@@ -938,4 +939,82 @@ fn is_invalid_uint_value(err: &ExecutionError) -> bool {
 fn assert_failed_assertion(result: Result<ExecutionOutput, ExecutionError>, message: &str) {
     let err = result.expect_err(message);
     assert!(is_failed_assertion(&err, message), "expected `{message}`, got {err:?}");
+}
+
+#[test]
+fn manual_signature_variants_export_all_obligations_and_preserve_results() {
+    use crate::helpers::{
+        assert_manual_signature_matches_native, manual_signature_source,
+        signature_source_with_stack_tail,
+    };
+
+    let fixture = valid_fixture();
+    let message_bytes = fixture.message.as_bytes();
+    let message_stores =
+        masm_store_felts(&bytes_to_packed_u32_elements(&message_bytes), MESSAGE_PTR);
+    let signature_stores = masm_store_felts(
+        &native_recovery_signature(&fixture.signature, fixture.recovery_id),
+        SIGNATURE_PTR,
+    );
+    let message = masm_push_word(&fixture.message);
+    let commitment = masm_push_word(&fixture.public_key_commitment);
+    for (procedure, setup, advice, obligations) in [
+        ("verify", format!("{message} {commitment}"), fixture.advice.as_slice(), 4),
+        (
+            "verify_bytes",
+            format!("{message_stores} push.32 push.{MESSAGE_PTR} {commitment}"),
+            fixture.advice.as_slice(),
+            4,
+        ),
+        (
+            "recover",
+            format!("{signature_stores} push.{SIGNATURE_PTR} {message}"),
+            &[][..],
+            3,
+        ),
+        (
+            "recover_bytes",
+            format!(
+                "{message_stores} {signature_stores} push.{SIGNATURE_PTR} push.32 push.{MESSAGE_PTR}"
+            ),
+            &[][..],
+            3,
+        ),
+    ] {
+        let source = format!(
+            "begin {setup} exec.::miden::core::crypto::dsa::ecdsa_p256_sha256::{procedure} exec.::miden::core::sys::truncate_stack end"
+        );
+        let native = run_core_program(&source, advice, None).unwrap();
+        for composed in [false, true] {
+            let manual_source =
+                manual_signature_source(&source, "ecdsa_p256_sha256", procedure, composed);
+            let manual = run_core_program(&manual_source, advice, None).unwrap();
+            assert_manual_signature_matches_native(
+                &native,
+                &manual,
+                obligations,
+                obligations - 1,
+                composed,
+            );
+            if composed {
+                let tail_source = signature_source_with_stack_tail(&source, procedure);
+                let tail_native = run_core_program(&tail_source, advice, None).unwrap();
+                let tail_source =
+                    manual_signature_source(&tail_source, "ecdsa_p256_sha256", procedure, true);
+                let tail_manual = run_core_program(&tail_source, advice, None).unwrap();
+                assert_eq!(tail_native.stack, native.stack);
+                assert_manual_signature_matches_native(
+                    &tail_native,
+                    &tail_manual,
+                    obligations,
+                    obligations - 1,
+                    true,
+                );
+            }
+            if procedure == "verify" || procedure == "verify_bytes" {
+                let wrong = manual_source.replace(&commitment, &masm_push_word(&Word::default()));
+                assert!(run_core_program(&wrong, advice, None).is_err());
+            }
+        }
+    }
 }

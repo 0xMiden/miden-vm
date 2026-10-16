@@ -13,8 +13,29 @@ use miden_precompiles_air::hash::sha512::compression::{
     self,
     program::{self, Op},
 };
+use miden_utils_sync::LazyLock;
 
 use crate::primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp};
+
+static SLOTS: LazyLock<[program::Slot; program::COMPRESSION_PERIOD]> =
+    LazyLock::new(program::slots);
+
+/// Cache the fixed controller, metadata and program prefix for active and padding blocks.
+static ROW_TEMPLATES: LazyLock<Vec<[Felt; compression::COL_A_BEGIN]>> = LazyLock::new(|| {
+    let metadata = program::round_metadata();
+    let inverses: [Felt; 128] =
+        core::array::from_fn(|i| (-Felt::from(i as u32)).try_inverse().unwrap_or(Felt::ZERO));
+    SLOTS
+        .iter()
+        .enumerate()
+        .map(|(index, &slot)| {
+            let mut row = [Felt::ZERO; compression::COL_A_BEGIN];
+            fill_control(&mut row, index, &metadata, &inverses);
+            fill_program(&mut row, slot);
+            row
+        })
+        .collect()
+});
 
 /// One padded block and its incoming chaining state, as numeric SHA-512 u64 words.
 #[derive(Debug, Clone, Copy)]
@@ -116,12 +137,7 @@ fn populate_block(
                 }
                 value
             },
-            Op::Const(v) => {
-                for j in 0..8 {
-                    bpl.require(BytePairOp::Xor, 0, v.to_le_bytes()[j]);
-                }
-                v
-            },
+            Op::Const(v) => v,
             Op::Xor => {
                 for j in 0..8 {
                     bpl.require(BytePairOp::Xor, a.to_le_bytes()[j], b.to_le_bytes()[j]);
@@ -152,9 +168,6 @@ fn populate_block(
                 ((hi as u64) << 32) | lo as u64
             },
             Op::Rol(sh) => {
-                for j in 0..8 {
-                    bpl.require(BytePairOp::Xor, a.to_le_bytes()[j], 0);
-                }
                 // Match the AIR's biased half-word decomposition. The bias prevents modular
                 // aliases; the destination lookup removes it when joining the rotated halves.
                 let z = 1u64 << (sh % 32);
@@ -188,8 +201,7 @@ fn populate_block(
             rows[base + compression::COL_B_BEGIN..base + compression::COL_B_BEGIN + 8]
                 .copy_from_slice(&witness_b.to_le_bytes().map(Felt::from));
         }
-        // ROL keeps unrotated bytes in R for the byte lookup and limb equations. Its actual
-        // result is already in mem[i] and is reconstructed by the AIR's destination lookup.
+        // ROL's result is reconstructed from its range-checked limbs on the destination bus.
         let raw = match s.op {
             Op::Rol(_) => a,
             _ => r,
@@ -240,16 +252,14 @@ pub(crate) fn populate_trace(
     assert!(
         values.len() / row_width >= requires.trace_height().expect("SHA-512 trace height overflow")
     );
-    let slots = program::slots();
-    let metadata = program::round_metadata();
+    let templates = &*ROW_TEMPLATES;
     for (index, row) in values.chunks_exact_mut(row_width).enumerate() {
         let block = index / program::COMPRESSION_PERIOD;
+        let slot_index = index % program::COMPRESSION_PERIOD;
+        row[..compression::COL_A_BEGIN].copy_from_slice(&templates[slot_index]);
         row[compression::COL_BLOCK_ID] =
             Felt::from(u32::try_from(block).expect("SHA-512 block id overflow"));
         row[compression::COL_ACT] = Felt::from((block < requires.records.len()) as u8);
-        let slot_index = index % program::COMPRESSION_PERIOD;
-        fill_control(row, slot_index, &metadata);
-        fill_program(row, slots[slot_index]);
     }
     // Populate directly into the final allocation; reuse scratch words across blocks.
     let mut memory = vec![0u64; program::COMPRESSION_PERIOD];
@@ -257,7 +267,7 @@ pub(crate) fn populate_trace(
         .chunks_exact_mut(program::COMPRESSION_PERIOD * row_width)
         .zip(&requires.records)
     {
-        populate_block(rec, &slots, rows, row_width, &mut memory, bpl);
+        populate_block(rec, &SLOTS, rows, row_width, &mut memory, bpl);
     }
 }
 
@@ -265,14 +275,15 @@ fn fill_control(
     row: &mut [Felt],
     index: usize,
     metadata: &[program::RoundMetadata; program::MAX_PERIODIC_LENGTH],
+    inverses: &[Felt; 128],
 ) {
     let phase = program::PHASE_BASES.iter().rposition(|&base| index >= base as usize).unwrap();
     let cycle = (index - program::PHASE_BASES[phase] as usize) / 32;
     row[compression::COL_PHASE_BEGIN + phase] = Felt::ONE;
     row[compression::COL_CYCLE] = Felt::from(cycle as u32);
-    let delta = Felt::from((cycle + 1) as u32) - Felt::from(program::PHASE_CYCLES[phase]);
-    row[compression::COL_PHASE_END] = Felt::from((delta == Felt::ZERO) as u8);
-    row[compression::COL_PHASE_INV] = delta.try_inverse().unwrap_or(Felt::ZERO);
+    let remaining = program::PHASE_CYCLES[phase] as usize - cycle - 1;
+    row[compression::COL_PHASE_END] = Felt::from((remaining == 0) as u8);
+    row[compression::COL_PHASE_INV] = inverses[remaining];
     let round = match phase {
         program::PHASE_WORDS => 2 * cycle + index % 32 / 16,
         program::PHASE_HASH => cycle,

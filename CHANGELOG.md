@@ -5,12 +5,16 @@
 #### Features
 
 - Added `Arbitrary` implementations and property tests for serialization and VM operations. Expanded fuzz input checks and seed inputs ([#3976](https://github.com/0xMiden/miden-vm/pull/3976)).
+- [BREAKING] Added `adv.export_deferred_witness` to store a registered true assertion's portable witness in the advice map under its digest. Downstream exhaustive matches on `SystemEvent` and `SystemEventNode` must handle the new `DeferredExportWitness` variant ([#4003](https://github.com/0xMiden/miden-vm/pull/4003)).
+- Added independent precompile obligation roots through `_with_root` stdlib procedures and `precompiles::append_root`, including arithmetic, curves, hashes, ECDSA, and EdDSA. Each manual call takes ordinary inputs and returns its complete obligation root first; callers compose roots explicitly without advancing the VM root. `append_root` hashes its children in stack order, and `append_root_ptr` updates a root in memory. Single-binding operations return bare assertions, and predicates bind their inputs even when false. Signature implementations keep obligation roots on the operand stack and delay composition while intermediate values are consumed. Native signature procedures log their complete obligation once; root grouping changes their deferred commitment digests.
+
 - [BREAKING] Share one Lagrange basis across periodic columns of a period ([#3847](https://github.com/0xMiden/miden-vm/pull/3847)).
 - [BREAKING] Added proven SHA-512 hashing and Ed25519 signature verification to the precompile VM and core library ([#3867](https://github.com/0xMiden/miden-vm/issues/3867)).
 - [BREAKING] Added P-256 curve support, a deferred SHA-256 precompile chiplet, and ECDSA P-256/SHA-256 signature verification and public-key recovery to the core library ([#3896](https://github.com/0xMiden/miden-vm/pull/3896)).
 
 #### Changes
 
+- [BREAKING] Preserve the full IV words in Eidos initial chaining values. This changes Eidos hashes and derived commitments in the VM and crypto crates ([#4021](https://github.com/0xMiden/miden-vm/pull/4021)).
 - [BREAKING] Simplified Eidos hashing APIs: renamed `hmerge` to `hdword` and `hash_two_words*` to `hash_double_word*`. Use `hash_words` instead of `merge_many` or MASM `hash_double_words`, and `compress_double_word` for raw MASM compression. MASM domain helpers use `_in_domain` and take the domain first. Rebuild compiled MASM packages; the recursive VM verifier root changes ([#4018](https://github.com/0xMiden/miden-vm/pull/4018)).
 - Refreshed VM and crypto benchmark results for Eidos ([#3975](https://github.com/0xMiden/miden-vm/pull/3975)).
 - [BREAKING] Optimized Falcon512-Eidos verification with counter-mode hash-to-point and fused norm computation. Regenerate signatures and use `falcon512_eidos::encode_signature` for advice. `mod_12289` takes `u64` in `[lo, hi]` order instead of `[hi, lo]`; `Nonce` uses `{ lo, hi }`. Replaced `hash_to_point` and `compute_s1_norm_sq` with `hash_to_point_s1_norm_sq`; removed `diff_mod_M` and `WideInteger` ([#3990](https://github.com/0xMiden/miden-vm/pull/3990)).
@@ -26,6 +30,7 @@
 - Optimized Eidos Merkle tree construction ([#3898](https://github.com/0xMiden/miden-vm/pull/3898)).
 - Evaluated Eidos AEAD MACs without allocating a coefficient buffer and checked input lengths before byte conversion, associated-data copying, or ciphertext deserialization ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
 - [BREAKING] Renamed `auth_empty_ad_expanded_with_scratch` to `auth_empty_ad_expanded_exact` and removed its `scratch_ptr` parameter. Reduced cycle costs in the core library's Eidos AEAD encryption, authentication, and decryption procedures ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
+- [BREAKING] Optimized PVM by reducing AIR widths and lookup costs ([#4027](https://github.com/0xMiden/miden-vm/pull/4027)).
 
 #### Fixes
 
@@ -41,6 +46,8 @@
 - Fixed lifted STARK proving for quotient domains smaller than the SIMD packing width ([#3910](https://github.com/0xMiden/miden-vm/pull/3910)).
 - Restored the VM chiplets diagram showing the hash controller and the Eidos compression and byte-lookup AIRs ([#3977](https://github.com/0xMiden/miden-vm/pull/3977)).
 - `smt::get` returns the empty word for an absent key whose leaf holds a single pair for a different key, instead of failing an assertion ([#3979](https://github.com/0xMiden/miden-vm/pull/3979)).
+- [BREAKING] Closed a constraint gap in `MRUPDATE` by requiring the old and new Merkle paths to use the same sibling at each level. Existing VM proofs are incompatible with the updated verifier ([#4002](https://github.com/0xMiden/miden-vm/pull/4002)).
+- [BREAKING] Closed a constraint gap in loop control flow by requiring `REPEAT`, like `LOOP`, to enter the body before the loop's `END`. Existing VM proofs are incompatible with the updated verifier ([#4002](https://github.com/0xMiden/miden-vm/pull/4002)).
 
 ## v0.36.0 (Unreleased)
 

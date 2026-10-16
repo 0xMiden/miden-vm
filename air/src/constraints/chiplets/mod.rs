@@ -57,4 +57,5 @@ pub fn enforce_main<AB>(
     bitwise::enforce_bitwise_constraints(builder, local, next, selectors.bitwise.normal.clone());
     memory::enforce_memory_constraints(builder, local, next, &selectors.memory);
     ace::enforce_ace_constraints_all_rows(builder, local, next, &selectors.ace);
+    hasher_control::enforce_merkle_level_constraints(builder, local, next);
 }

@@ -52,7 +52,7 @@ fn sha512_io_empty_accumulator_and_exact_final_row_are_valid() {
     let mut io = Sha512IoRequires::new();
     io.require(&[0xa5; 112], &mut Sha512CompressionRequires::new(), &mut EidosRequires::new());
     let main = generate_trace(io, &mut BytePairLutRequires::new());
-    assert_eq!(main.values.len(), 32 * io::NUM_MAIN_COLS);
+    assert_eq!(main.values.len(), 2 * io::IO_PERIOD * io::NUM_MAIN_COLS);
     crate::tests::check_local(Sha512IoAir, &main);
 }
 
@@ -60,31 +60,36 @@ fn sha512_io_empty_accumulator_and_exact_final_row_are_valid() {
 fn sha512_io_rejects_noncanonical_padding_and_invocation_transitions() {
     let mut io = Sha512IoRequires::new();
     io.require(&[0xa5; 129], &mut Sha512CompressionRequires::new(), &mut EidosRequires::new());
-    let main = io::generate_trace_padded_to(io, &mut BytePairLutRequires::new(), 64);
+    let main = io::generate_trace_padded_to(io, &mut BytePairLutRequires::new(), 4 * io::IO_PERIOD);
     crate::tests::check_local(Sha512IoAir, &main);
     // Each case changes a distinct part of the canonical message/padding layout. In particular,
-    // the final digest pointer must be transported all the way into its row-15 EidosOut read.
+    // the final digest pointer must be transported all the way into its binding-row EidosOut read.
     for (name, row, col, value) in [
         ("claimed length", 0, io::COL_LEN, Felt::from_u32(130)),
         ("negative countdown", 1, io::COL_LEFT, -Felt::ONE),
         ("countdown decomposition", 0, io::COL_LEFT_LO16, Felt::ZERO),
-        ("message restarts after padding", 17, io::COL_MSG_BEGIN, Felt::ONE),
-        ("nonzero raw zero tail", 17, io::COL_RAW_BEGIN, Felt::ONE),
-        ("missing padding marker", 16, io::COL_WORD_HI, Felt::new_unchecked(0xa500_0000)),
-        ("repeated padding marker", 17, io::COL_WORD_HI, Felt::new_unchecked(0x8000_0000)),
-        ("nonzero upper bit length", 30, io::COL_WORD_LO, Felt::ONE),
-        ("byte length instead of bit length", 31, io::COL_WORD_LO, Felt::from_u32(129)),
-        ("nonstandard IV", 0, io::COL_STATE_LO, Felt::ZERO),
-        ("wrong block id", 16, io::COL_BLOCK_ID, Felt::ZERO),
+        ("message restarts after padding", 65, io::COL_MSG_BEGIN, Felt::ONE),
+        ("nonzero raw zero tail", 65, io::COL_RAW_BEGIN, Felt::ONE),
+        ("missing padding marker", 64, io::COL_WORD_HI, Felt::new_unchecked(0xa500_0000)),
+        ("repeated padding marker", 65, io::COL_WORD_HI, Felt::new_unchecked(0x8000_0000)),
+        ("nonzero upper bit length", 78, io::COL_WORD_LO, Felt::ONE),
+        ("byte length instead of bit length", 79, io::COL_WORD_LO, Felt::from_u32(129)),
+        ("nonstandard IV", 16, io::COL_STATE_LO, Felt::ZERO),
+        ("wrong block id", 64, io::COL_BLOCK_ID, Felt::ZERO),
         ("activity changes within block", 1, io::COL_ACT, Felt::ZERO),
-        ("activity reactivates", 48, io::COL_ACT, Felt::ONE),
+        ("activity reactivates", 192, io::COL_ACT, Felt::ONE),
         ("non-Boolean activity", 1, io::COL_ACT, Felt::from_u8(2)),
-        ("extra raw zero chunk", 20, io::COL_CHUNK_ACTIVE, Felt::ONE),
+        ("extra raw zero chunk", 68, io::COL_CHUNK_ACTIVE, Felt::ONE),
         ("raw chunk skips a cycle", 4, io::COL_INPUT_EIDOS, Felt::ZERO),
         ("raw chain head drifts", 5, io::COL_INPUT_HEAD, Felt::ONE),
         ("raw chunk head not forwarded", 2, io::COL_CHUNK_HEAD_RAW, Felt::ONE),
-        ("digest chunk head not forwarded", 18, io::COL_CHUNK_HEAD_DIGEST, Felt::ONE),
-        ("final digest span substituted on row 15", 31, io::COL_DIGEST_EIDOS, Felt::ZERO),
+        ("digest chunk head not forwarded", 90, io::COL_CHUNK_HEAD_DIGEST, Felt::ONE),
+        (
+            "final digest span substituted on binding row",
+            96,
+            io::COL_DIGEST_EIDOS,
+            Felt::ZERO,
+        ),
         ("off-end Binding output", 1, io::COL_OUT_MULT, Felt::ONE),
     ] {
         let mut bad = main.clone();
@@ -99,7 +104,7 @@ fn sha512_io_rejects_noncanonical_padding_and_invocation_transitions() {
         ("gratuitous extra block", 1, Felt::ZERO),
     ] {
         let mut bad = main.clone();
-        for row in block * 16..(block + 1) * 16 {
+        for row in block * io::IO_PERIOD..(block + 1) * io::IO_PERIOD {
             bad.values[row * io::NUM_MAIN_COLS + io::COL_FINAL_BLOCK] = final_flag;
         }
         assert!(
@@ -168,21 +173,30 @@ fn sha512_io_binds_chained_blocks_full_digest_and_shared_eidos_multiplicities() 
         balanced(&main),
         "honest SHA compression, IO, Eidos, and byte/range messages must balance"
     );
+    let mut substituted = main.clone();
+    for row in io::IO_PERIOD..2 * io::IO_PERIOD {
+        substituted.values[row * io::NUM_MAIN_COLS + io::COL_DIGEST_EIDOS] += Felt::ONE;
+    }
+    crate::tests::check_local(Sha512IoAir, &substituted);
+    assert!(
+        !balanced(&substituted),
+        "a coherent digest-chain substitution must fail global authentication at binding"
+    );
     for (name, row, col) in [
-        ("borrowed chaining state", 16, io::COL_STATE_LO),
-        ("digest low half", 16, io::COL_DIGEST_BEGIN),
-        ("digest high half", 23, io::COL_DIGEST_BEGIN),
+        ("borrowed chaining state", 80, io::COL_STATE_LO),
+        ("digest low half", 88, io::COL_DIGEST_BEGIN),
+        ("digest high half", 95, io::COL_DIGEST_BEGIN),
         ("reordered raw block", 2, io::COL_PREVIOUS_RAW),
         ("wrong raw chunk head", 2, io::COL_CHUNK_HEAD_RAW),
-        ("reordered digest block", 18, io::COL_PREVIOUS_DIGEST),
-        ("wrong digest chunk head", 22, io::COL_CHUNK_HEAD_DIGEST),
-        ("wrong raw CHUNKS digest", 31, io::COL_H_INPUT),
-        ("wrong full digest commitment", 31, io::COL_H_DIGEST),
-        ("wrong SHA assertion hash", 31, io::H_SHA512_COLS[0]),
-        ("wrong node Eidos chain", 31, io::COL_NODE_EIDOS),
-        ("wrong raw chain head", 31, io::COL_INPUT_HEAD),
-        ("wrong assertion length", 31, io::COL_LEN),
-        ("missing duplicate Binding consume", 79, io::COL_OUT_MULT),
+        ("reordered digest block", 90, io::COL_PREVIOUS_DIGEST),
+        ("wrong digest chunk head", 94, io::COL_CHUNK_HEAD_DIGEST),
+        ("wrong raw CHUNKS digest", 96, io::COL_H_INPUT),
+        ("wrong full digest commitment", 96, io::COL_H_DIGEST),
+        ("wrong SHA assertion hash", 96, io::H_SHA512_COLS[0]),
+        ("wrong node Eidos chain", 96, io::COL_NODE_EIDOS),
+        ("wrong raw chain head", 96, io::COL_INPUT_HEAD),
+        ("wrong assertion length", 96, io::COL_LEN),
+        ("missing duplicate Binding consume", 288, io::COL_OUT_MULT),
     ] {
         let mut bad = main.clone();
         bad.values[row * io::NUM_MAIN_COLS + col] += Felt::ONE;
@@ -192,8 +206,10 @@ fn sha512_io_binds_chained_blocks_full_digest_and_shared_eidos_multiplicities() 
     // must still fail Range16; simply comparing a reconstructed u64 in the field is insufficient.
     let mut bad = main.clone();
     let alias = 129 * 8 + 0xffff_ffff_0000_0001u64;
-    bad.values[31 * io::NUM_MAIN_COLS + io::COL_WORD_LO] = Felt::from_u32(alias as u32);
-    bad.values[31 * io::NUM_MAIN_COLS + io::COL_WORD_HI] = Felt::from_u32((alias >> 32) as u32);
+    bad.values[(io::IO_PERIOD + 15) * io::NUM_MAIN_COLS + io::COL_WORD_LO] =
+        Felt::from_u32(alias as u32);
+    bad.values[(io::IO_PERIOD + 15) * io::NUM_MAIN_COLS + io::COL_WORD_HI] =
+        Felt::from_u32((alias >> 32) as u32);
     crate::tests::check_local(Sha512IoAir, &bad);
     let mut alias_requests = HashMap::new();
     fold_balance(&Sha512IoAir, &bad, &challenges, &mut alias_requests);
@@ -211,8 +227,8 @@ fn sha512_io_binds_chained_blocks_full_digest_and_shared_eidos_multiplicities() 
     // Only the compression band's byte-checked INPUT binds these halves to a real SHA word.
     let mut bad = main.clone();
     let bad_lo = Felt::from_u32(129 * 8) - Felt::new_unchecked(1u64 << 32);
-    bad.values[31 * io::NUM_MAIN_COLS + io::COL_WORD_LO] = bad_lo;
-    bad.values[31 * io::NUM_MAIN_COLS + io::COL_WORD_HI] = Felt::ONE;
+    bad.values[(io::IO_PERIOD + 15) * io::NUM_MAIN_COLS + io::COL_WORD_LO] = bad_lo;
+    bad.values[(io::IO_PERIOD + 15) * io::NUM_MAIN_COLS + io::COL_WORD_HI] = Felt::ONE;
     crate::tests::check_local(Sha512IoAir, &bad);
     let mut residual = net.clone();
     fold_balance(&Sha512IoAir, &bad, &challenges, &mut residual);
@@ -232,10 +248,9 @@ fn sha512_io_binds_chained_blocks_full_digest_and_shared_eidos_multiplicities() 
     assert_eq!(residual[&word_message(bad_lo, Felt::ONE)].0, -Felt::ONE);
     assert_eq!(residual[&word_message(Felt::from_u32(129 * 8), Felt::ZERO)].0, Felt::ONE);
     assert_eq!(residual.values().filter(|(mult, _)| *mult != Felt::ZERO).count(), 2);
-    for col in [io::COL_RAW_BEGIN, io::COL_DIGEST_BEGIN] {
+    for (row, col) in [(0, io::COL_RAW_BEGIN), (io::IO_PERIOD + 24, io::COL_DIGEST_BEGIN)] {
         let mut bad = main.clone();
         // Preserve the big-endian packed word using non-byte digits; the byte LUT must reject it.
-        let row = if col == io::COL_RAW_BEGIN { 0 } else { 16 };
         bad.values[row * io::NUM_MAIN_COLS + col] -= Felt::ONE;
         bad.values[row * io::NUM_MAIN_COLS + col + 1] += Felt::from_u32(256);
         assert!(!balanced(&bad), "non-byte digits cannot change the endian interpretation");

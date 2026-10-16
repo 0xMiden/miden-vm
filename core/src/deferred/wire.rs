@@ -1,7 +1,7 @@
 //! Portable singleton deferred witnesses and their versioned encoding.
 //!
 //! Index zero is implicit TRUE. Every explicit entry references earlier entries, and the final
-//! entry opens the execution root. Decoding checks structure and commitments without evaluating
+//! entry opens the selected root. Decoding checks structure and commitments without evaluating
 //! precompile operations; operation support and assertion truth require evaluation.
 
 use alloc::{
@@ -308,14 +308,14 @@ impl PrecompileWitness {
         Ok(*digests.last().expect("TRUE seeds the digest table"))
     }
 
-    /// Exports the original root-reachable execution graph without serializing through bytes.
-    pub(crate) fn from_state(state: &DeferredState) -> Result<Self, IntegrityError> {
+    /// Exports the original graph reachable from `root` without serializing through bytes.
+    pub(crate) fn from_state(state: &DeferredState, root: Digest) -> Result<Self, IntegrityError> {
+        if root == TRUE_DIGEST {
+            return Err(IntegrityError::InvalidStructure);
+        }
         let mut build = WireEncoder::default();
-        build.visit_state_digest(state, state.root())?;
-        Ok(Self {
-            entries: build.entries,
-            root: state.root(),
-        })
+        build.visit_state_digest(state, root)?;
+        Ok(Self { entries: build.entries, root })
     }
 
     fn validate_element_limit(&self) -> Result<(), IntegrityError> {
@@ -861,7 +861,16 @@ mod tests {
     #[test]
     fn export_omits_unreachable_state_and_retains_logged_true() {
         let mut empty = DeferredState::default();
-        empty.register(Node::chunks(alloc::vec![felts(10)]).unwrap()).unwrap();
+        let value = empty.register(Node::chunks(alloc::vec![felts(10)]).unwrap()).unwrap();
+        let elements = empty.num_elements();
+        // Borrowed export is structural and works even when the selected node is not a statement.
+        let witness = empty.witness_for(value).unwrap();
+        assert_eq!(witness.root_unchecked(), value);
+        assert_eq!(empty.root(), TRUE_DIGEST);
+        assert_eq!(empty.num_elements(), elements);
+        for root in [TRUE_DIGEST, Word::new([Felt::from_u32(99); 4])] {
+            assert_eq!(empty.witness_for(root), Err(IntegrityError::InvalidStructure));
+        }
         assert!(empty.into_witness().unwrap().is_none());
         let mut state = DeferredState::default();
         state.register(Node::chunks(alloc::vec![felts(10)]).unwrap()).unwrap();

@@ -537,6 +537,11 @@ impl MainTrace {
         self.chiplet_cols(i).controller().merkle_is_start()
     }
 
+    /// Returns the Merkle path level carried by a controller row.
+    pub fn chiplet_merkle_level(&self, i: RowIndex) -> Felt {
+        self.chiplet_cols(i).controller().merkle_level()
+    }
+
     /// Returns the virtual Merkle direction bit `node_index - 2 * node_index_next`.
     pub fn chiplet_merkle_direction_bit(&self, i: RowIndex) -> Felt {
         let ctrl = self.chiplet_cols(i).controller();
@@ -848,8 +853,7 @@ impl MainTrace {
 
     /// Returns `true` if row `i` is an MR_UPDATE_OLD (Merkle Verify) controller row.
     ///
-    /// These rows appear during the old-path leg of a Merkle root update (MRUPDATE). Each
-    /// MV rows insert siblings into the virtual sibling table via the hash-kernel bus.
+    /// Each row on the old path inserts its sibling into the virtual sibling table.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn f_mv(&self, i: RowIndex) -> bool {
@@ -864,9 +868,8 @@ impl MainTrace {
 
     /// Returns `true` if row `i` is an MR_UPDATE_NEW (Merkle Update) controller row.
     ///
-    /// These rows appear during the new-path leg of a Merkle root update (MRUPDATE). Each
-    /// MU rows remove siblings from the virtual sibling table via the hash-kernel bus.
-    /// The sibling table balance ensures the old and new paths use the same siblings.
+    /// Each row on the new path removes its sibling from the virtual sibling table. Both paths
+    /// must use the same sibling at each level to balance the table.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn f_mu(&self, i: RowIndex) -> bool {
