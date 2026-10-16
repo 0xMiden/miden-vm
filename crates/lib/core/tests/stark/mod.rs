@@ -8,10 +8,7 @@ use miden_core::{
     program::{ExecutionClaim, KernelDescriptor, NUM_CLAIM_ELEMENTS},
     proof::HashFunction,
 };
-use miden_crypto::stark::{
-    Preprocessed, StarkConfig,
-    challenger::{CanObserve, FieldChallenger},
-};
+use miden_lifted_stark::{Preprocessed, StarkConfig};
 use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, Program, ProgramInfo};
 use miden_utils_testing::{
@@ -19,6 +16,7 @@ use miden_utils_testing::{
     recursive_verifier::{VerifierData, generate_advice_inputs},
     stack_inputs_from_ints,
 };
+use p3_challenger::{CanObserve, FieldChallenger};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
@@ -1798,10 +1796,10 @@ fn quotient_recomposition_constants_match_derivation() {
 
     let log_quotient_degree = miden_air::AIRS
         .iter()
-        .map(miden_crypto::stark::log_quotient_degree::<Felt, QuadFelt, _>)
+        .map(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, _>)
         .max()
         .expect("the Miden AIR set is non-empty");
-    let expected = miden_crypto::stark::quotient_recomposition_inputs::<Felt>(
+    let expected = miden_lifted_stark::quotient_recomposition_inputs::<Felt>(
         log_quotient_degree,
         config::pcs_params().log_blowup(),
     )

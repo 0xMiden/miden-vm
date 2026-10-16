@@ -24,7 +24,7 @@ pub mod memory;
 pub mod selectors;
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::AirBuilder;
+use miden_lifted_stark::air::AirBuilder;
 use selectors::ChipletSelectors;
 
 use crate::{ChipletCols, MidenAirBuilder};

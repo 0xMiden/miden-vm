@@ -763,6 +763,9 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
+ "miden-lifted-stark",
+ "p3-dft",
+ "p3-matrix",
  "thiserror",
 ]
 
@@ -773,9 +776,15 @@ dependencies = [
  "miden-ace-codegen",
  "miden-core",
  "miden-crypto",
+ "miden-lifted-stark",
+ "miden-stateful-hasher",
  "miden-utils-indexing",
+ "p3-challenger",
+ "p3-dft",
  "p3-field",
+ "p3-matrix",
  "p3-security",
+ "p3-symmetric",
  "rand 0.10.2",
  "thiserror",
  "tracing",
@@ -830,6 +839,7 @@ version = "1.0.0"
 dependencies = [
  "miden-core",
  "miden-crypto",
+ "miden-lifted-stark",
 ]
 
 [[package]]
@@ -845,6 +855,7 @@ dependencies = [
  "miden-utils-core-derive",
  "miden-utils-indexing",
  "miden-utils-sync",
+ "p3-matrix",
  "proptest",
  "thiserror",
 ]
@@ -879,17 +890,15 @@ dependencies = [
  "k256",
  "miden-crypto-derive",
  "miden-field",
- "miden-lifted-stark",
  "miden-serde-utils",
+ "miden-stateful-hasher",
  "num",
  "num-complex",
  "once_cell",
  "p3-blake3",
  "p3-challenger",
- "p3-dft",
  "p3-goldilocks",
  "p3-keccak",
- "p3-matrix",
  "p3-maybe-rayon",
  "p3-symmetric",
  "p3-util",
@@ -1566,9 +1575,9 @@ dependencies = [
 
 [[package]]
 name = "portable-atomic"
-version = "1.15.0"
+version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
+checksum = "3d20d5497ef88037a52ff98267d066e7f11fcc5e99bbfbd58a42336193aacec3"
 
 [[package]]
 name = "ppv-lite86"

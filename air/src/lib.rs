@@ -18,10 +18,8 @@ use miden_core::{
         StackOutputs,
     },
 };
-use miden_crypto::stark::{
-    air::{ReductionError, WindowAccess},
-    challenger::CanObserve,
-};
+use miden_lifted_stark::air::{ReductionError, WindowAccess};
+use p3_challenger::CanObserve;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 
@@ -97,7 +95,7 @@ mod export {
         serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
         utils::ToElements,
     };
-    pub use miden_crypto::stark::{
+    pub use miden_lifted_stark::{
         StarkConfig,
         air::{
             AirBuilder, BaseAir, ConstraintCounts, ConstraintDegrees, ExtensionBuilder, LiftedAir,
@@ -643,7 +641,7 @@ impl And8LookupAir {
 
 /// AIR instance identifier for the Miden multi-AIR statement.
 ///
-/// [`MultiAir::Air`](miden_crypto::stark::air::MultiAir) is a single associated type, so every
+/// [`MultiAir::Air`](miden_lifted_stark::air::MultiAir) is a single associated type, so every
 /// instance in the multi-AIR proof must have the same type. This enum identifies which concrete
 /// AIR logic to dispatch to.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -1289,7 +1287,7 @@ mod tests {
             symbolic,
             "Core's declared degree must match its handwritten constraints",
         );
-        assert_eq!(miden_crypto::stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 3);
+        assert_eq!(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 3);
     }
 
     #[test]
@@ -1304,7 +1302,7 @@ mod tests {
             LiftedAir::<Felt, QuadFelt>::constraint_degree(&air),
             ConstraintDegrees { base: 0, ext: 3 }
         );
-        assert_eq!(miden_crypto::stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 1);
+        assert_eq!(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 1);
     }
 
     #[test]

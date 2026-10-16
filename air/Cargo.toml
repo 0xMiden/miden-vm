@@ -21,10 +21,16 @@ doctest = false
 default = ["std"]
 arbitrary = ["std", "dep:proptest"]
 std = ["miden-core/std", "proptest?/std", "rand/std", "rand/thread_rng", "thiserror/std"]
-concurrent = ["std", "miden-crypto/concurrent"]
+concurrent = ["std", "miden-crypto/concurrent", "miden-lifted-stark/concurrent"]
 testing = ["arbitrary"]
 
 [dependencies]
+p3-symmetric.workspace = true
+p3-matrix.workspace = true
+p3-dft.workspace = true
+p3-challenger.workspace = true
+miden-stateful-hasher.workspace = true
+miden-lifted-stark.workspace = true
 # Miden dependencies
 miden-ace-codegen.workspace = true
 miden-core.workspace = true

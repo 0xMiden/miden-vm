@@ -12,7 +12,7 @@ use crate::AIRS;
 fn recursive_verifier_num_quotient_chunks() -> usize {
     let max_log_quotient_degree = AIRS
         .iter()
-        .map(miden_crypto::stark::log_quotient_degree::<Felt, QuadFelt, _>)
+        .map(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, _>)
         .max()
         .expect("the Miden AIR set is non-empty");
     1usize << max_log_quotient_degree

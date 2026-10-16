@@ -38,6 +38,8 @@ testing = ["arbitrary"]
 constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen", "dep:miden-constraint-compiler"]
 
 [dependencies]
+p3-challenger.workspace = true
+miden-lifted-stark.workspace = true
 # Miden dependencies
 miden-mast-package.workspace = true
 miden-core.workspace = true

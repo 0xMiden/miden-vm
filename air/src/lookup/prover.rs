@@ -12,7 +12,7 @@ use miden_core::{
     field::{ExtensionField, Field},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_crypto::stark::air::RowWindow;
+use miden_lifted_stark::air::RowWindow;
 
 use super::{
     Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupFractions,
@@ -598,7 +598,7 @@ mod tests {
     use std::{vec, vec::Vec};
 
     use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
-    use miden_crypto::stark::air::{RowWindow, WindowAccess};
+    use miden_lifted_stark::air::{RowWindow, WindowAccess};
 
     use super::*;
     use crate::{

@@ -22,7 +22,7 @@ use miden_core::{
     program::{Program, StackOutputs},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_crypto::stark::air::BaseAir;
+use miden_lifted_stark::air::BaseAir;
 use miden_processor::{
     DefaultHost, FastProcessor, StackInputs,
     trace::{VmTrace, chiplets::build_external_eidos_compression_traces},

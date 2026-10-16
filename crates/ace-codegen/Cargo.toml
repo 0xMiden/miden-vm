@@ -17,6 +17,9 @@ edition.workspace = true
 testing = []
 
 [dependencies]
+p3-matrix.workspace = true
+p3-dft.workspace = true
+miden-lifted-stark.workspace = true
 miden-constraint-compiler = { workspace = true }
 miden-core = { workspace = true }
 miden-crypto = { workspace = true }
