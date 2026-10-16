@@ -19,7 +19,7 @@ use p3_security::{
 };
 
 use crate::{
-    AIRS, ConstraintCounts, ConstraintDegrees, Felt, HandwrittenMidenAir, MidenAir, config,
+    AIRS, ConstraintCounts, ConstraintDegrees, Felt, MidenAir, config,
     constraints::lookup::messages::MIDEN_MAX_MESSAGE_WIDTH,
 };
 
@@ -140,10 +140,9 @@ pub fn derive_air_shape() -> AirShape {
     let mut fractions_per_row = 0;
 
     for air in AIRS {
-        let handwritten = HandwrittenMidenAir(air);
-        num_constraints += ConstraintCounts::from_air::<Felt, QuadFelt, _>(&handwritten).total();
-        max_constraint_degree = max_constraint_degree
-            .max(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&handwritten).max());
+        num_constraints += ConstraintCounts::from_air::<Felt, QuadFelt, _>(&air).total();
+        max_constraint_degree =
+            max_constraint_degree.max(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air).max());
         num_columns += column_count(air, COMMITMENT_ALIGNMENT);
         fractions_per_row += air.column_shape().iter().sum::<usize>();
     }

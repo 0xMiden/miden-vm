@@ -21,7 +21,6 @@ pub mod constants;
 pub mod decoder;
 pub use crate::shared::eidos_compression;
 pub mod ext_field;
-pub mod generated;
 pub mod lookup;
 pub(crate) mod op_flags;
 pub mod public_inputs;

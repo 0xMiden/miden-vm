@@ -2068,9 +2068,11 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
+ "miden-lifted-air",
  "miden-lifted-stark",
+ "p3-challenger",
  "p3-field",
- "proptest",
+ "p3-security",
 ]
 
 [[package]]
@@ -2233,9 +2235,9 @@ dependencies = [
  "fs-err",
  "miden-ace-codegen",
  "miden-air",
+ "miden-air-definitions",
  "miden-assembly",
  "miden-assembly-syntax",
- "miden-constraint-compiler",
  "miden-core",
  "miden-core-lib-codegen",
  "miden-crypto",
