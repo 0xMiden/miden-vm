@@ -2,3 +2,4 @@ pub mod aead_eidos
 pub mod dsa
 pub mod ecdh
 pub mod hashes
+pub mod ies

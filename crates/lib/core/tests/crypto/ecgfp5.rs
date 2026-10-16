@@ -247,18 +247,20 @@ fn direct_agreement_rejects_invalid_points_scalars_and_witnesses() {
 }
 
 #[test]
-fn agreement_rejects_a_different_recipient() {
+fn agreement_and_sealing_reject_a_different_recipient() {
     let secret = sample();
     let other_key = secret.public_key();
     let other_prepared = PreparedPublicKey::new(other_key);
-    for (source, commitment, advice, message) in [
+    for (mode, source, commitment, advice, message) in [
         (
+            SealMode::Direct,
             DIRECT_SOURCE,
             recipient().public_key().to_commitment(),
             direct_advice_inputs(&other_key, &secret),
             "public key commitment",
         ),
         (
+            SealMode::Preprocessed,
             SOURCE,
             prepared().to_commitment(),
             advice_inputs(&other_prepared, &secret),
@@ -266,7 +268,11 @@ fn agreement_rejects_a_different_recipient() {
         ),
     ] {
         // The advice is internally consistent, but belongs to another valid recipient key.
-        assert_failure(&agreement(source, commitment, advice), message);
+        assert_failure(&agreement(source, commitment, advice.clone()), message);
+        let program = seal_program(&[], &[], mode);
+        let mut test = build_test!(&program, &[]);
+        test.advice_inputs = advice;
+        assert_failure(&test, message);
     }
 }
 
@@ -772,4 +778,264 @@ fn proves_native_dh() {
     let test = agreement(source, prepared().to_commitment(), advice_inputs(prepared(), &sample()));
     let inputs = prepared().to_commitment().iter().map(Felt::as_canonical_u64).collect();
     test.prove_and_verify(inputs, false);
+}
+
+#[derive(Clone, Copy)]
+enum SealMode {
+    Direct,
+    Preprocessed,
+}
+
+impl SealMode {
+    fn call(self) -> String {
+        match self {
+            Self::Direct => {
+                let key = recipient().public_key().to_commitment().into_elements();
+                format!("push.{key:?} exec.ecgfp5_eidos::seal")
+            },
+            Self::Preprocessed => {
+                let key = prepared().to_commitment().into_elements();
+                format!("push.{key:?} exec.ecgfp5_eidos::seal_preprocessed")
+            },
+        }
+    }
+
+    fn advice(self, secret: &SecretKey) -> AdviceInputs {
+        match self {
+            Self::Direct => direct_advice_inputs(&recipient().public_key(), secret),
+            Self::Preprocessed => advice_inputs(prepared(), secret),
+        }
+    }
+}
+
+fn seal_program(plaintext: &[Felt], context: &[Felt], mode: SealMode) -> String {
+    let mut body = String::new();
+    for (ptr, elements) in [(1000, plaintext), (2000, context)] {
+        for (i, value) in elements.iter().enumerate() {
+            body.push_str(&format!("push.{value} mem_store.{}\n", ptr + i));
+        }
+    }
+    // Sentinels make accidental padding reads observable and guard the end of the output.
+    for address in [1000 + plaintext.len(), 2000 + context.len(), 3008 + 2 * plaintext.len()] {
+        body.push_str(&format!("push.999 mem_store.{address}\n"));
+    }
+    let seal = mode.call();
+    format!(
+        "use miden::core::crypto::ies::ecgfp5_eidos
+        use miden::core::crypto::hashes::eidos
+        begin
+            {body}
+            push.123.456
+            push.3000.{}.2000.{}.1000 {seal}
+            push.456 assert_eq push.123 assert_eq
+            mem_load.{} eq.999 assert
+            push.{}.3000 exec.eidos::hash_elements
+            swapw dropw
+        end",
+        context.len(),
+        plaintext.len(),
+        3008 + 2 * plaintext.len(),
+        8 + 2 * plaintext.len(),
+    )
+}
+
+#[test]
+fn sealing_matches_rust_with_general_associated_data() {
+    use miden_crypto::{
+        hash::eidos::Eidos,
+        ies::{SealedMessage, UnsealingKey, ecgfp5_eidos},
+        utils::Deserializable,
+    };
+
+    let ephemeral = sample();
+    for (pt_len, ad_len) in
+        [(0, 0), (0, 9), (1, 0), (1, 1), (7, 3), (8, 2), (8, 4), (8, 6), (9, 7), (32, 17)]
+    {
+        let plaintext: Vec<_> = (0..pt_len).map(|i| -Felt::from_u32(i)).collect();
+        let context: Vec<_> = (0..ad_len).map(|i| Felt::from_u32(i * 17)).collect();
+        let expected = ecgfp5_eidos::seal_with_scalar(
+            &recipient().public_key(),
+            &plaintext,
+            &context,
+            &ephemeral,
+        )
+        .unwrap();
+        let expected_elements = expected.to_elements();
+        let digest = Eidos::hash_elements(&expected_elements);
+        for mode in [SealMode::Direct, SealMode::Preprocessed] {
+            let source = seal_program(&plaintext, &context, mode);
+            let mut test = build_test!(&source, &[]);
+            test.advice_inputs = mode.advice(&ephemeral);
+            let (output, _) = test.execute_for_output().unwrap();
+            assert_eq!(output.stack.get_num_elements(4), digest.as_elements());
+            assert_eq!(output.stack.get_num_elements(16)[4..], [Felt::ZERO; 12]);
+            let envelope: Vec<_> = (0..expected_elements.len())
+                .map(|i| {
+                    output
+                        .memory
+                        .read_element(0_u32.into(), Felt::from_u32(3000 + i as u32))
+                        .unwrap()
+                })
+                .collect();
+            assert_eq!(envelope, expected_elements);
+            let sealed = ecgfp5_eidos::Envelope::from_elements(&envelope).unwrap();
+            let message = SealedMessage::from(sealed);
+            let message = SealedMessage::read_from_bytes(&message.to_bytes()).unwrap();
+            assert_eq!(
+                UnsealingKey::Ecgfp5Eidos(recipient())
+                    .unseal_elements_with_associated_data(message, &context)
+                    .unwrap(),
+                plaintext,
+            );
+            if (pt_len, ad_len) == (9, 7) {
+                test.check_constraints();
+            }
+        }
+    }
+}
+
+#[test]
+fn sealing_rejects_bad_memory_before_reading_advice() {
+    let frame = miden_core::FMP_INIT_VALUE.as_canonical_u64();
+    for (src, len, context, context_len, dst, message) in [
+        (1001, 1, 2000, 1, 3000, "pointer must be word-aligned"),
+        (1000, 1, 2001, 1, 3000, "pointer must be word-aligned"),
+        (1000, 1, 2000, 1, 3001, "pointer must be word-aligned"),
+        (1 << 32, 0, 2000, 0, 3000, "pointer must fit in a u32"),
+        (1000, 1_u64 << 32, 2000, 0, 3000, "plaintext length must fit in a u32"),
+        (1000, 0, 2000, 1_u64 << 32, 3000, "context length must fit in a u32"),
+        (
+            1000,
+            1 << 27,
+            2000,
+            0,
+            3000,
+            "authentication input exceeds its supported length",
+        ),
+        (
+            1000,
+            0,
+            2000,
+            1 << 28,
+            3000,
+            "authentication input exceeds its supported length",
+        ),
+        (frame, 1, 2000, 0, 3000, "memory ranges must stay below the local frame"),
+        (1000, 0, frame, 1, 3000, "memory ranges must stay below the local frame"),
+        (1000, 0, 2000, 0, frame - 4, "memory ranges must stay below the local frame"),
+        (
+            u32::MAX as u64 - 3,
+            8,
+            2000,
+            0,
+            3000,
+            "memory range exceeds the u32 address space",
+        ),
+        (1000, 4, 2000, 1, 1000, "destination overlaps an input"),
+        (1000, 4, 2000, 1, 996, "destination overlaps an input"),
+        (1000, 4, 2000, 1, 2000, "destination overlaps an input"),
+        (1000, 4, 2000, 1, 1996, "destination overlaps an input"),
+    ] {
+        for mode in [SealMode::Direct, SealMode::Preprocessed] {
+            let seal = mode.call();
+            let source = format!(
+                "use miden::core::crypto::ies::ecgfp5_eidos
+                begin push.{dst}.{context_len}.{context}.{len}.{src} {seal} end"
+            );
+            assert_failure(&build_test!(&source, &[]), &format!("EcGFp5-Eidos {message}"));
+        }
+    }
+}
+
+#[test]
+fn proves_in_vm_encryption() {
+    for mode in [SealMode::Direct, SealMode::Preprocessed] {
+        let source = seal_program(&[Felt::ONE; 9], &[Felt::ONE; 7], mode);
+        let mut test = build_test!(&source, &[]);
+        test.advice_inputs = mode.advice(&sample());
+        // This checks proof validity, not ZK; the program embeds public test plaintext.
+        test.prove_and_verify(vec![], false);
+    }
+}
+
+#[test]
+fn sealing_empty_ranges_does_not_read_their_addresses() {
+    use miden_crypto::ies::ecgfp5_eidos;
+
+    let ephemeral = sample();
+    let sealed =
+        ecgfp5_eidos::seal_with_scalar(&recipient().public_key(), &[], &[], &ephemeral).unwrap();
+    let unread = u32::MAX - 3;
+    let dst = miden_core::FMP_INIT_VALUE.as_canonical_u64() as u32 - 8;
+    let expected: Vec<_> = sealed.to_elements().iter().map(Felt::as_canonical_u64).collect();
+    for mode in [SealMode::Direct, SealMode::Preprocessed] {
+        let seal = mode.call();
+        let source = format!(
+            "use miden::core::crypto::ies::ecgfp5_eidos
+            begin push.{dst}.0.{unread}.0.{unread} {seal} end"
+        );
+        let mut test = build_test!(&source, &[]);
+        test.advice_inputs = mode.advice(&ephemeral);
+        test.expect_stack_and_memory(&[], dst, &expected);
+    }
+}
+
+#[test]
+fn repeated_sealing_preserves_caller_state_and_allows_overlapping_read_inputs() {
+    use miden_crypto::ies::ecgfp5_eidos;
+
+    let plaintext: Vec<_> = (0..8).map(Felt::from_u32).collect();
+    let context = &plaintext[..3];
+    let mut body = String::from("push.999 loc_store.0\n");
+    for (i, value) in plaintext.iter().enumerate() {
+        body.push_str(&format!("push.{value} mem_store.{}\n", 1000 + i));
+    }
+    for value in 1..=32 {
+        body.push_str(&format!("push.{value}\n"));
+    }
+    let mut advice = AdviceInputs::default();
+    for (mode, ephemeral) in [
+        (SealMode::Direct, sample()),
+        (SealMode::Preprocessed, scalar([65537, 0, 0, 0, 0, 0, 0, 0, 0, 0])),
+    ] {
+        advice.extend(mode.advice(&ephemeral));
+        let seal = mode.call();
+        // Both read inputs start at 1000; the output starts immediately after the plaintext.
+        body.push_str(&format!("push.1008.3.1000.8.1000 {seal}\n"));
+        let sealed = ecgfp5_eidos::seal_with_scalar(
+            &recipient().public_key(),
+            &plaintext,
+            context,
+            &ephemeral,
+        )
+        .unwrap();
+        for (i, value) in sealed.to_elements().iter().enumerate() {
+            body.push_str(&format!("mem_load.{} push.{value} assert_eq\n", 1008 + i));
+        }
+        // Observe the entire preserved stack after each call, including its overflow region.
+        for value in (1..=32).rev() {
+            body.push_str(&format!("push.{value} assert_eq\n"));
+        }
+        for value in 1..=32 {
+            body.push_str(&format!("push.{value}\n"));
+        }
+    }
+    for value in (1..=32).rev() {
+        body.push_str(&format!("push.{value} assert_eq\n"));
+    }
+    for (i, value) in plaintext.iter().enumerate() {
+        body.push_str(&format!("mem_load.{} push.{value} assert_eq\n", 1000 + i));
+    }
+    body.push_str("loc_load.0 eq.999 assert\n");
+    let source = format!(
+        "use miden::core::crypto::ies::ecgfp5_eidos
+        @locals(4)
+        proc caller
+            {body}
+        end
+        begin exec.caller end"
+    );
+    let mut test = build_test!(&source, &[]);
+    test.advice_inputs = advice;
+    test.expect_stack(&[]);
 }
