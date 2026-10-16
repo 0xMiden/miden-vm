@@ -6,7 +6,7 @@ use alloc::{
 };
 use core::{assert_matches, cell::Cell, str::FromStr};
 
-use miden_air::trace::MIN_TRACE_LEN;
+use miden_air::{MidenMultiAir, trace::MIN_TRACE_LEN};
 use miden_assembly::{
     Assembler, DefaultSourceManager, Linkage, Path,
     ast::{DebugInlineCallInfo, Instruction, Module, ModuleKind, Op, QualifiedProcedureName},
@@ -14,6 +14,7 @@ use miden_assembly::{
 use miden_core::{
     ONE, Word,
     events::SystemEvent,
+    field::QuadFelt,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastNodeExt,
         MastNodeId, SplitNodeBuilder,
@@ -22,6 +23,7 @@ use miden_core::{
     program::StackInputs,
     serde::{Deserializable, Serializable},
 };
+use miden_crypto::stark::memory::prover_peak_bytes;
 use miden_debug_types::{
     ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan,
     Span, Uri,
@@ -2283,10 +2285,13 @@ fn test_prover_memory_budget_exceeded() {
 
     let measured = crate::trace::build_trace(build_witness()).expect("default budget must succeed");
     let params = miden_air::config::pcs_params();
-    let exact_peak = measured
+    let heights = measured
         .trace_len_summary()
-        .prover_memory_bytes(&params)
-        .expect("modelled peak fits in u64");
+        .padded_heights()
+        .expect("build_trace records padded heights");
+    let exact_peak =
+        prover_peak_bytes::<Felt, QuadFelt, _>(&MidenMultiAir::new(), heights, &params)
+            .expect("modelled peak fits in u64");
 
     let err = crate::trace::build_trace_with_budget(build_witness(), exact_peak - 1).unwrap_err();
 

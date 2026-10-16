@@ -53,6 +53,7 @@ pub mod stark {
     //! - [`air`] — AIR traits, builders, symbolic types (includes all of `p3-air`)
     //! - [`pcs`] — PCS parameters, DEEP + FRI sub-proofs
     //! - [`lmcs`] — Lifted Merkle commitment scheme
+    //! - [`memory`] — Approximate prover memory estimation
     //! - [`hasher`] — Stateful hasher primitives
     //! - [`prover`] — [`ProverInstance::prove`]
     //! - [`verifier`] — [`VerifierInstance::verify`]
@@ -71,7 +72,7 @@ pub mod stark {
         quotient_recomposition_inputs,
     };
     // Lifted-stark sub-modules (re-exported as-is)
-    pub use miden_lifted_stark::{air, debug, hasher, lmcs, pcs, proof, prover, verifier};
+    pub use miden_lifted_stark::{air, debug, hasher, lmcs, memory, pcs, proof, prover, verifier};
 
     // Upstream Plonky3: challenger
     pub mod challenger {
