@@ -66,7 +66,14 @@ Patch branches do not replace GitHub's latest release. Stable releases from `mai
 
 Rerun the workflow for the same commit with `allow_existing=true` to finish a partial publication.
 The package version gate checks existing crate archives against local packages and excludes them from publication.
-The gate is required for every release.
+For library-only packages, it ignores the generated `Cargo.lock` because packaging can resolve newer registry dependencies from the same commit.
+Packages with executable targets retain lockfile comparisons.
+
+For manual recovery after verifying the selected packages, set `skip_package_version_gate=true` and provide an explicit `packages` list.
+This skips version, archive and semver validation while still generating the publication plan.
+Package verification and release approval remain required.
+Use `allow_existing=true` when the selection includes already-published versions.
+
 Do not move or delete release tags. If the commit must change after tag creation, prepare a new version.
 If the GitHub release is already public, convert it back to draft if permitted before retrying.
 Otherwise, prepare a new version.
