@@ -16,7 +16,7 @@ use crate::ast::{
 
 /// This maintains the state for semantic analysis of a single [Module].
 pub struct AnalysisContext {
-    constants: BTreeMap<Ident, Constant>,
+    constants: BTreeMap<Ident, ConstantDecl>,
     cached_constant_values: BTreeMap<Ident, ConstantValue>,
     imported: BTreeSet<Ident>,
     procedures: BTreeSet<ProcedureName>,
@@ -41,7 +41,7 @@ impl constants::ConstEnvironment for AnalysisContext {
         if let Some(value) = self.cached_constant_values.get(name) {
             Ok(Some(CachedConstantValue::Hit(value)))
         } else if let Some(constant) = self.constants.get(name) {
-            Ok(Some(CachedConstantValue::Miss(&constant.value)))
+            Ok(Some(CachedConstantValue::Miss(constant.value())))
         } else if self.imported.contains(name) {
             // We don't have the definition available yet
             Ok(None)
@@ -117,11 +117,11 @@ impl AnalysisContext {
     /// Define a new constant `constant`
     ///
     /// Returns `Err` if a constant with the same name is already defined
-    pub fn define_constant(&mut self, module: &mut Module, constant: Constant) {
+    pub fn define_constant(&mut self, module: &mut Module, constant: ConstantDecl) {
         if let Err(err) = module.define_constant(constant.clone()) {
             self.errors.push(err);
         } else {
-            let name = constant.name.clone();
+            let name = constant.name().clone();
             self.constants.insert(name, constant);
         }
     }
@@ -130,13 +130,13 @@ impl AnalysisContext {
     ///
     /// This is used for enum variants so we can fold discriminants without
     /// attempting to define the same constant twice.
-    pub fn register_constant(&mut self, constant: Constant) {
-        let name = constant.name.clone();
+    pub fn register_constant(&mut self, constant: ConstantDecl) {
+        let name = constant.name().clone();
         self.cached_constant_values.remove(&name);
         if let Some(prev) = self.constants.get(&name) {
             self.errors.push(SemanticAnalysisError::SymbolConflict {
-                span: constant.span,
-                prev_span: prev.span,
+                span: constant.span(),
+                prev_span: prev.span(),
             });
         } else {
             self.constants.insert(name, constant);
@@ -179,7 +179,7 @@ impl AnalysisContext {
         if let Some(value) = self.cached_constant_values.get(name) {
             Ok(value.clone().into())
         } else if let Some(constant) = self.constants.get(name) {
-            Ok(constant.value.clone())
+            Ok(constant.value().clone())
         } else {
             Err(SemanticAnalysisError::SymbolResolutionError(Box::new(
                 SymbolResolutionError::undefined(name.span(), &self.source_manager),
@@ -250,7 +250,7 @@ mod tests {
     use crate::{
         Path, PathBuf,
         ast::{
-            Constant, ConstantExpr, ConstantOp, ConstantValue, Ident, Visibility,
+            ConstantDecl, ConstantExpr, ConstantOp, ConstantValue, Ident, Visibility,
             constants::{self, eval::CachedConstantValue},
         },
         debuginfo::{
@@ -336,7 +336,7 @@ mod tests {
         for i in 0..depth {
             let name = make_name(i);
             let next = make_name(i + 1);
-            context.register_constant(Constant::new(
+            context.register_constant(ConstantDecl::new(
                 SourceSpan::default(),
                 Visibility::Public,
                 name,
@@ -349,7 +349,7 @@ mod tests {
             ));
         }
 
-        context.register_constant(Constant::new(
+        context.register_constant(ConstantDecl::new(
             SourceSpan::default(),
             Visibility::Public,
             make_name(depth),
