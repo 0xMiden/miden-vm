@@ -5,7 +5,7 @@
 #### Features
 
 - Added `Arbitrary` implementations and property tests for serialization and VM operations. Expanded fuzz input checks and seed inputs ([#3976](https://github.com/0xMiden/miden-vm/pull/3976)).
-- Added EcGFp5 Diffie-Hellman support in Rust and MASM.
+- [BREAKING] Added EcGFp5 Diffie-Hellman support in Rust and MASM, plus the `Ecgfp5Eidos` IES scheme.
 - [BREAKING] Added associated-data support to MASM Eidos AEAD and replaced its low-level API with `encrypt`, `decrypt`, `encrypt_with_ad`, and `decrypt_with_ad`.
 - [BREAKING] Share one Lagrange basis across periodic columns of a period ([#3847](https://github.com/0xMiden/miden-vm/pull/3847)).
 - [BREAKING] Added proven SHA-512 hashing and Ed25519 signature verification to the precompile VM and core library ([#3867](https://github.com/0xMiden/miden-vm/issues/3867)).
