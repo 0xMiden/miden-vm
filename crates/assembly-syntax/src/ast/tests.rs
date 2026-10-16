@@ -686,16 +686,18 @@ fn test_ast_parsing_deferred_advice() -> Result<(), Report> {
     let context = SyntaxTestContext::new();
     let source = source_file!(
         &context,
-        "begin adv.register_deferred adv.register_deferred_data adv.evaluate_deferred adv.evaluate_deferred_frame adv.evaluate_deferred_payload end"
+        "begin adv.register_deferred adv.register_deferred_data adv.evaluate_deferred adv.evaluate_deferred_frame adv.evaluate_deferred_payload adv.export_deferred_witness end"
     );
     let forms = module!(begin!(
         inst!(SysEvent(DeferredRegister)),
         inst!(SysEvent(DeferredRegisterData)),
         inst!(SysEvent(DeferredEvaluate)),
         inst!(SysEvent(DeferredEvaluateFrame)),
-        inst!(SysEvent(DeferredEvaluatePayload))
+        inst!(SysEvent(DeferredEvaluatePayload)),
+        inst!(SysEvent(DeferredExportWitness))
     ));
     assert_eq!(context.parse_forms(source)?, forms);
+    assert_eq!(DeferredExportWitness.to_string(), "export_deferred_witness");
     Ok(())
 }
 

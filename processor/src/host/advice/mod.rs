@@ -482,6 +482,22 @@ impl AdviceProvider {
         self.check_advice_size_addition(added)
     }
 
+    /// Stores a VM-computed value, replacing any existing entry only after checking its budget.
+    /// Ordinary advice insertion retains its conflicting-value checks.
+    pub(crate) fn replace_into_map(
+        &mut self,
+        key: Word,
+        values: Vec<Felt>,
+    ) -> Result<(), AdviceError> {
+        let old_bytes =
+            self.map.get(&key).map_or(Ok(0), |values| Self::map_entry_bytes(values.len()))?;
+        let new_bytes = Self::map_entry_bytes(values.len())?;
+        self.check_advice_size_addition(new_bytes.saturating_sub(old_bytes))?;
+        self.map.insert(key, values);
+        self.advice_size_bytes = self.advice_size_bytes - old_bytes + new_bytes;
+        Ok(())
+    }
+
     /// Inserts the provided value into the advice map under the specified key.
     ///
     /// The values in the advice map can be moved onto the advice stack by invoking
@@ -877,6 +893,62 @@ mod tests {
         assert_eq!(provider.map.len(), 1);
         assert!(provider.contains_map_key(&make_leaf(0)));
         assert!(!provider.contains_map_key(&make_leaf(1)));
+    }
+
+    #[test]
+    fn advice_map_replace_accounts_for_growth_shrinkage_and_failure() {
+        for (old_len, new_len, below_limit) in [
+            (None, 3, false),
+            (None, 3, true),
+            (Some(1), 3, false),
+            (Some(1), 3, true),
+            (Some(3), 3, false),
+            (Some(5), 2, false),
+            (Some(0), 0, false),
+        ] {
+            let mut provider = AdviceProvider::default();
+            // Advice-stack storage remains charged when a map value is replaced.
+            provider.push_stack(Felt::ONE).unwrap();
+            let base = provider.advice_size_bytes;
+            let key = make_leaf(0);
+            if let Some(old_len) = old_len {
+                provider.insert_into_map(key, vec![Felt::ONE; old_len]).unwrap();
+            }
+            let expected = base + AdviceProvider::map_entry_bytes(new_len).unwrap();
+            let max = base
+                + AdviceProvider::map_entry_bytes(new_len.max(old_len.unwrap_or(0))).unwrap()
+                - usize::from(below_limit);
+            provider
+                .set_options(&ExecutionOptions::default().with_max_advice_size_bytes(max))
+                .unwrap();
+            let before = provider.clone();
+            let values = vec![Felt::from_u32(2); new_len];
+            let result = provider.replace_into_map(key, values.clone());
+            if below_limit {
+                assert!(
+                    matches!(result, Err(AdviceError::SizeBudgetExceeded { current, added, max: limit })
+                    if current == before.advice_size_bytes && added == expected - current && limit == max)
+                );
+                assert_eq!(provider, before);
+            } else {
+                result.unwrap();
+                assert_eq!(provider.get_mapped_values(&key), Some(values.as_slice()));
+                assert_eq!(provider.advice_size_bytes, expected);
+                assert_eq!(
+                    provider.advice_size_bytes,
+                    provider.compute_advice_size_bytes().unwrap()
+                );
+                // Repeated equal replacements are budget-neutral even at the exact ceiling.
+                provider.replace_into_map(key, values).unwrap();
+                for _ in 0..old_len.unwrap_or(0).saturating_sub(new_len) {
+                    provider.push_stack(Felt::ONE).unwrap();
+                }
+                assert!(matches!(
+                    provider.push_stack(Felt::ONE),
+                    Err(AdviceError::SizeBudgetExceeded { .. })
+                ));
+            }
+        }
     }
 
     #[test]

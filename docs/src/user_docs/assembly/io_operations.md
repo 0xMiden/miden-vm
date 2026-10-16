@@ -120,6 +120,18 @@ Evaluation advice is also shape-dependent:
 All deferred-evaluation outputs, including frame-only output, are host hints. Before proof-relevant
 use, code must relate them with VM instructions to values established independently of that advice.
 
+`adv.export_deferred_witness` exports the reachable graph of a registered node that evaluates to
+TRUE. Literal `TRUE_DIGEST` cannot be exported; the selected node may be unlogged. The computed
+witness is stored under the node's original digest, replacing any existing advice value. Both
+stacks and the deferred root are preserved. Failed exports leave existing advice unchanged.
+
+The value is `[byte_len, packed_u32_le(witness_bytes)...]`, using the portable witness encoding.
+Each field element holds four little-endian bytes; only the final element is zero-padded, and
+`byte_len` excludes padding. Consumers must validate the witness and compare its reconstructed
+root with an independently established expected digest.
+
+The underlying system event is `sys::adv::export_deferred_witness`.
+
 | Instruction           | Stack_input        | Stack_output       | Notes                                                                                                                                                                                                                                                                |
 | --------------------- | ------------------ | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | adv.push_mapval                              | [K, ... ]          | [K, ... ]          | Pushes a list of field elements onto the advice stack. The list is looked up in the advice map using word $K$ as the key.                                                                                                                                            |
@@ -132,6 +144,7 @@ use, code must relate them with VM instructions to values established independen
 | adv.evaluate_deferred                        | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes its canonical frame and payload felts onto the advice stack. |
 | adv.evaluate_deferred_frame                  | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes only its canonical frame onto the advice stack. |
 | adv.evaluate_deferred_payload                | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes only its canonical payload felts onto the advice stack. |
+| adv.export_deferred_witness                  | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Stores the witness under its digest, replacing any existing value. Preserves both stacks and the deferred root. |
 | adv.insert_mem                               | [K, a, b, ... ]    | [K, a, b, ... ]    | Reads words $data \leftarrow mem[a] .. mem[b]$ from memory, and save the data into $advice\_map[K] \leftarrow data$.                                                                                                                                                 |
 | adv.insert_hdword                            | [A, B, ... ]       | [A, B, ... ]       | Reads the top two words, uses the generic eight-Felt `hdword` as the key, and saves $advice\_map[K] \leftarrow [A, B]$. |
 | adv.insert_hqword                            | [A, B, C, D, ... ] | [A, B, C, D, ... ] | Reads top four words from the stack, computes a key as $K \leftarrow hash\_elements([A, B, C, D])$, and saves the data into $advice\_map[K] \leftarrow [A, B, C, D]$.                                                                                                  |

@@ -254,6 +254,12 @@ Deferred DAG details:
   - Join payloads use the same two-word LIFO convention, leaving `lhs_digest` above `rhs_digest`
     after two `adv_pushw`s.
   - `TRUE` emits no advice.
+- `adv.export_deferred_witness` stores a registered true assertion's witness under its original
+  digest, replacing any existing advice value. The selected node may be unlogged, but cannot be
+  literal `TRUE_DIGEST`. Both stacks and the deferred root are preserved; failed exports leave
+  existing advice unchanged. See [nondeterministic inputs](io_operations.md#nondeterministic-inputs)
+  for the encoded value and witness-validation requirements. The system event is
+  `sys::adv::export_deferred_witness`.
 - All `adv.evaluate_deferred*` outputs, including frame-only output, are host-provided hints. Before
   proof-relevant use, code must relate them with VM instructions to values established independently
   of that advice.
@@ -262,6 +268,7 @@ _Insert into Advice Map:_
 
 | Instruction           | Stack Input          | Stack Output         | Notes                                                                                  |
 | --------------------- | -------------------- | -------------------- | -------------------------------------------------------------------------------------- |
+| `adv.export_deferred_witness` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Stores the witness under its digest, replacing any existing value. Preserves both stacks and the deferred root. |
 | `adv.insert_mem`      | `[K, a, b, ... ]`    | `[K, a, b, ... ]`    | `advice_map[K] ← mem[a..b]`.                                                           |
 | `adv.insert_hdword`   | `[A, B, ... ]`       | `[A, B, ... ]`       | `K ← hdword(A \|\| B)` (top first). `advice_map[K] ← [A,B]`. |
 | `adv.insert_hqword`   | `[A, B, C, D, ... ]` | `[A, B, C, D, ... ]` | `K ← hash_elements([A,B,C,D])`. `advice_map[K] ← [A,B,C,D]`. |
