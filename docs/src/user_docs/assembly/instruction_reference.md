@@ -224,7 +224,8 @@ Deferred DAG details:
   - Precompile-owned join frames interpret them as `lhs_digest || rhs_digest`.
   - Pair-list frames interpret them as one `lhs_digest || rhs_digest` pair.
 
-  Framework-owned AND and `TRUE` nodes are not accepted by this instruction. Frames that
+  The exact framework AND frame registers `AND(lhs_digest, rhs_digest)` without changing the
+  built-in deferred root. Parameterized AND-domain frames and `TRUE` nodes are rejected. Frames that
   semantically require more data chunks or pairs fail during precompile evaluation. Code that later
   uses the node digest must compute it inside the VM from the same `CV`, `PAYLOAD_LO`, and
   `PAYLOAD_HI` values.

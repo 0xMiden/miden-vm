@@ -392,3 +392,44 @@ fn add_ed25519_base_modulus(value: [u32; 8]) -> [u32; 8] {
         sum as u32
     })
 }
+
+#[test]
+fn manual_ed25519_word_and_bytes_export_all_nested_bindings() {
+    use crate::helpers::{
+        assert_manual_signature_matches_native, manual_signature_source,
+        signature_source_with_stack_tail,
+    };
+
+    let key = SigningKey::read_from_bytes(&[42; 32]).unwrap();
+    let message = Word::new([1, 2, 3, 4].map(Felt::from_u32));
+    let pk: [u8; 32] = key.public_key().to_bytes().try_into().unwrap();
+    let sig: [u8; 64] = key.sign(message).to_bytes().try_into().unwrap();
+    let commitment = masm_push_word(&key.public_key().to_commitment());
+    let stores = masm_store_felts(&bytes_to_packed_u32_elements(&message.as_bytes()), 128);
+    for (procedure, setup) in [
+        ("verify", format!("{} {commitment}", masm_push_word(&message))),
+        ("verify_bytes", format!("{stores} push.1024 push.32 push.128 {commitment}")),
+    ] {
+        let source = format!(
+            "begin {setup} exec.::miden::core::crypto::dsa::eddsa_25519_sha512::{procedure} exec.::miden::core::sys::truncate_stack end"
+        );
+        let native = run_program(&source, &pk, &sig).unwrap();
+        for composed in [false, true] {
+            let manual_source =
+                manual_signature_source(&source, "eddsa_25519_sha512", procedure, composed);
+            let manual = run_program(&manual_source, &pk, &sig).unwrap();
+            assert_manual_signature_matches_native(&native, &manual, 10, 9, composed);
+            if composed {
+                let tail_source = signature_source_with_stack_tail(&source, procedure);
+                let tail_native = run_program(&tail_source, &pk, &sig).unwrap();
+                let tail_source =
+                    manual_signature_source(&tail_source, "eddsa_25519_sha512", procedure, true);
+                let tail_manual = run_program(&tail_source, &pk, &sig).unwrap();
+                assert_eq!(tail_native.stack, native.stack);
+                assert_manual_signature_matches_native(&tail_native, &tail_manual, 10, 9, true);
+            }
+            let wrong = manual_source.replace(&commitment, &masm_push_word(&Word::default()));
+            assert!(run_program(&wrong, &pk, &sig).is_err());
+        }
+    }
+}

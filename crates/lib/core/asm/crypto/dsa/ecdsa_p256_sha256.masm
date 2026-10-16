@@ -4,6 +4,7 @@ use miden::core::precompiles::fields::p256_base
 use miden::core::precompiles::fields::p256_scalar
 use miden::core::crypto::hashes::eidos
 use miden::core::word
+use miden::core::precompiles
 
 const ECDSA_RECOVER_EVENT = event("miden::core::crypto::dsa::ecdsa_p256_sha256::recover")
 
@@ -72,8 +73,21 @@ type Prehash = struct { limbs: [u32; 8] }
 #! reduced SHA-256 prehash, and signature scalars through precompile-backed deferred evaluation.
 #!
 #! Invocation: exec
-@locals(24)
 pub proc verify(public_key: eidos::Digest, message: word)
+    exec.verify_with_root
+    exec.precompiles::log_deferred
+end
+
+#! Returns the complete obligation root for `verify`, including every nested advice binding.
+#! Leaves the VM built-in deferred root unchanged; the caller must include ROOT in its own
+#! obligation, for example using precompiles::append_root.
+#! Input: [PK_COMM, MSG_WORD, ...]
+#! Output: [ROOT, ...]
+@locals(24)
+pub proc verify_with_root(
+    public_key: eidos::Digest,
+    message: word,
+) -> precompiles::Digest
     locaddr.0
     # => [pubkey_ptr=loc[0], PK_COMM, MSG_WORD, ...]
     exec.load_and_verify_public_key
@@ -90,16 +104,19 @@ pub proc verify(public_key: eidos::Digest, message: word)
 
     dup dup push.32 swap
     # => [in_ptr=loc[16], len_bytes=32, out_ptr=loc[16], digest_ptr=loc[16], ...]
-    exec.sha256::hash_bytes_mem
-    # => [digest_ptr=loc[16], ...]  (DIGEST_U32[8] written to loc[16..24])
+    exec.sha256::hash_bytes_mem_with_root
+    # => [HASH_ROOT, digest_ptr=loc[16], ...]  (DIGEST_U32[8] written to loc[16..24])
 
-    locaddr.0 swap
-    # => [digest_ptr=loc[16], pubkey_ptr=loc[0], ...]
+    locaddr.0 movup.5
+    # => [digest_ptr=loc[16], pubkey_ptr=loc[0], HASH_ROOT, ...]
     exec.load_sha256_digest_as_z
-    # => [PREHASH_U32[8], pubkey_ptr, ...] where PREHASH[0] = byte_reverse(Sha256Digest[7])
+    # => [PREHASH_U32[8], pubkey_ptr, HASH_ROOT, ...]
+    # PREHASH[0] = byte_reverse(Sha256Digest[7]).
 
-    exec.verify_digest_impl
-    # => [...]
+    exec.verify_digest
+    # => [SIGNATURE_ROOT, HASH_ROOT, ...]
+    exec.precompiles::append_root
+    # => [ROOT, ...]
 end
 
 #! Verifies a P-256 ECDSA witness over a variable-length message stored as bytes in memory.
@@ -133,8 +150,22 @@ end
 #! deferred evaluation.
 #!
 #! Invocation: exec
-@locals(24)
 pub proc verify_bytes(public_key: eidos::Digest, message_ptr: ptr<u32>, message_len_bytes: u32)
+    exec.verify_bytes_with_root
+    exec.precompiles::log_deferred
+end
+
+#! Returns the complete obligation root for `verify_bytes`, including every nested advice binding.
+#! Leaves the VM built-in deferred root unchanged; the caller must include ROOT in its own
+#! obligation, for example using precompiles::append_root.
+#! Input: [PK_COMM, MSG_PTR, MSG_LEN_BYTES, ...]
+#! Output: [ROOT, ...]
+@locals(24)
+pub proc verify_bytes_with_root(
+    public_key: eidos::Digest,
+    message_ptr: ptr<u32>,
+    message_len_bytes: u32,
+) -> precompiles::Digest
     locaddr.0
     # => [pubkey_ptr=loc[0], PK_COMM, MSG_PTR, MSG_LEN_BYTES, ...]
     exec.load_and_verify_public_key
@@ -142,15 +173,18 @@ pub proc verify_bytes(public_key: eidos::Digest, message_ptr: ptr<u32>, message_
 
     movdn.2
     # => [MSG_PTR, MSG_LEN_BYTES, out_ptr=loc[16], ...]
-    exec.sha256::hash_bytes_mem
-    # => [...]
+    exec.sha256::hash_bytes_mem_with_root
+    # => [HASH_ROOT, ...]
 
     locaddr.0 locaddr.16
-    # => [digest_ptr=loc[16], pubkey_ptr=loc[0], ...]  (DIGEST_U32[8] written to loc[16..24])
+    # => [digest_ptr=loc[16], pubkey_ptr=loc[0], HASH_ROOT, ...]
+    # DIGEST_U32[8] has been written to loc[16..24].
     exec.load_sha256_digest_as_z
-    # => [PREHASH_U32[8], pubkey_ptr=loc[0], ...]
-    exec.verify_digest_impl
-    # => [...]
+    # => [PREHASH_U32[8], pubkey_ptr=loc[0], HASH_ROOT, ...]
+    exec.verify_digest
+    # => [SIGNATURE_ROOT, HASH_ROOT, ...]
+    exec.precompiles::append_root
+    # => [ROOT, ...]
 end
 
 #! Recovers the P-256 public key from a native recovery witness over a Word message.
@@ -183,8 +217,21 @@ end
 #! Raw signature bytes are not a replay key because equivalent low-s and high-s encodings exist.
 #!
 #! Invocation: exec
-@locals(8)
 pub proc recover(message: word, signature_ptr: ptr<RecoverySignature>) -> PublicKey
+    exec.recover_with_root
+    exec.precompiles::log_deferred
+end
+
+#! Returns the complete obligation root for `recover`, including every nested advice binding.
+#! Leaves the VM built-in deferred root unchanged; the caller must include ROOT in its own
+#! obligation, for example using precompiles::append_root.
+#! Input: [MSG_WORD, SIG_PTR, ...]
+#! Output: [ROOT, QX[8], QY[8], ...]
+@locals(8)
+pub proc recover_with_root(
+    message: word,
+    signature_ptr: ptr<RecoverySignature>,
+) -> (precompiles::Digest, PublicKey)
     locaddr.0 movdn.4
     # => [MSG_WORD, digest_ptr=loc[0], SIG_PTR, ...]
     exec.store_word_u32s_le
@@ -192,11 +239,15 @@ pub proc recover(message: word, signature_ptr: ptr<RecoverySignature>) -> Public
 
     dup dup push.32 swap
     # => [in_ptr=loc[0], len_bytes=32, out_ptr=loc[0], digest_ptr=loc[0], SIG_PTR, ...]
-    exec.sha256::hash_bytes_mem
-    # => [digest_ptr=loc[0], SIG_PTR, ...]
+    exec.sha256::hash_bytes_mem_with_root
+    # => [HASH_ROOT, digest_ptr=loc[0], SIG_PTR, ...]
 
+    # Pass the hash obligation below the recovery inputs; the private phase folds it before
+    # materializing all sixteen public-key limbs.
+    movup.5 movup.5
+    # => [digest_ptr=loc[0], SIG_PTR, HASH_ROOT, ...]
     exec.recover_digest
-    # => [QX[8] | QY[8], ...]
+    # => [ROOT, QX[8], QY[8], ...]
 end
 
 #! Recovers the P-256 public key from a native recovery witness over bytes in memory.
@@ -231,21 +282,36 @@ end
 #! trusted state.
 #!
 #! Invocation: exec
-@locals(8)
 pub proc recover_bytes(
     message_ptr: ptr<u32>,
     message_len_bytes: u32,
     signature_ptr: ptr<RecoverySignature>,
 ) -> PublicKey
+    exec.recover_bytes_with_root
+    exec.precompiles::log_deferred
+end
+
+#! Returns the complete obligation root for `recover_bytes`, including every nested advice binding.
+#! Leaves the VM built-in deferred root unchanged; the caller must include ROOT in its own
+#! obligation, for example using precompiles::append_root.
+#! Input: [MSG_PTR, MSG_LEN_BYTES, SIG_PTR, ...]
+#! Output: [ROOT, QX[8], QY[8], ...]
+@locals(8)
+pub proc recover_bytes_with_root(
+    message_ptr: ptr<u32>,
+    message_len_bytes: u32,
+    signature_ptr: ptr<RecoverySignature>,
+) -> (precompiles::Digest, PublicKey)
     locaddr.0 movdn.2
     # => [MSG_PTR, MSG_LEN_BYTES, digest_ptr=loc[0], SIG_PTR, ...]
-    exec.sha256::hash_bytes_mem
-    # => [SIG_PTR, ...]  (DIGEST_U32[8] written to loc[0..8])
+    exec.sha256::hash_bytes_mem_with_root
+    # => [HASH_ROOT, SIG_PTR, ...]
 
-    locaddr.0
-    # => [digest_ptr=loc[0], SIG_PTR, ...]
+    # Keep the hash obligation below the recovery inputs until that phase consumes them.
+    movup.4 locaddr.0
+    # => [digest_ptr=loc[0], SIG_PTR, HASH_ROOT, ...]  (DIGEST_U32[8] written to loc[0..8])
     exec.recover_digest
-    # => [QX[8] | QY[8], ...]
+    # => [ROOT, QX[8], QY[8], ...]
 end
 
 # INTERNAL PROCEDURES — ECDSA
@@ -255,72 +321,99 @@ end
 #!
 #! Input:  [Z_U32[8], pubkey_ptr, ...]
 #! Advice: [SIG_R[8] | SIG_S[8] | ...]
-#! Output: [...]
-proc verify_digest_impl(prehash: Prehash, public_key_ptr: ptr<PublicKey>)
+#! Output: [ROOT, ...]
+proc verify_digest(
+    prehash: Prehash,
+    public_key_ptr: ptr<PublicKey>,
+) -> precompiles::Digest
     exec.prepare_verify_inputs
-    # => [U1, Q, U2, SIG_R, ...]
+    # => [U1, Q, U2, INVERSE_ROOT, SIG_R, ...]
     exec.p256::push_generator
-    # => [G, U1, Q, U2, SIG_R, ...]
+    # => [G, U1, Q, U2, INVERSE_ROOT, SIG_R, ...]
     exec.p256::msm2
-    # => [VERIFY_POINT, SIG_R, ...]
+    # => [VERIFY_POINT, INVERSE_ROOT, SIG_R, ...]
+    swapw movdnw.2
+    # => [VERIFY_POINT, SIG_R, INVERSE_ROOT, ...]
     exec.assert_x_eq_scalar_p256
-    # => [...]
+    # => [POINT_CHECK_ROOT, INVERSE_ROOT, ...]
+    exec.precompiles::append_root
+    # => [ROOT, ...]
 end
 
 #! Recovers and constrains a public key for a SHA-256 digest and native recovery witness.
 #!
-#! Input:  [digest_ptr, SIG_PTR, ...]
-#! Output: [QX[8] | QY[8], ...]
+#! Input:  [digest_ptr, SIG_PTR, HASH_ROOT, ...]
+#! Output: [ROOT, QX[8] | QY[8], ...]
 #!
 #! `digest_ptr` addresses eight packed little-endian u32 felts containing the SHA-256 digest.
 #! `SIG_PTR` is word-aligned and addresses `R_LE_U32[8] || S_LE_U32[8] || V`, with V = 0 or 1.
+#! HASH_ROOT binds the message digest at digest_ptr. ROOT includes it and every recovery binding.
 #! The recovery event supplies only the candidate `QX[8] || QY[8]`; all witness data is loaded
 #! independently from memory and the advice point is constrained before it is returned.
 @locals(16)
-proc recover_digest(digest_ptr: ptr<Prehash>, signature_ptr: ptr<RecoverySignature>) -> PublicKey
+proc recover_digest(
+    digest_ptr: ptr<Prehash>,
+    signature_ptr: ptr<RecoverySignature>,
+    hash_root: precompiles::Digest,
+) -> (precompiles::Digest, PublicKey)
+    # Do not write locals before loading the signature.
     emit.ECDSA_RECOVER_EVENT
-    # => [digest_ptr, SIG_PTR, ...]  Advice: [QX[8] | QY[8] | ...]
+    # => [digest_ptr, SIG_PTR, HASH_ROOT, ...]  Advice: [QX[8] | QY[8] | ...]
 
     # Bind the digest and signature before writing candidate-point advice into procedure locals.
     # SIG_PTR must be caller-owned; this ordering is also robust to an out-of-contract absolute
     # pointer into this local frame.
     exec.load_sha256_digest_as_z
-    # => [PREHASH_U32[8], SIG_PTR, ...]
+    # => [PREHASH_U32[8], SIG_PTR, HASH_ROOT, ...]
     exec.p256_scalar::load_reduced_256
-    # => [Z, SIG_PTR, ...]
+    # => [Z, SIG_PTR, HASH_ROOT, ...]
     exec.load_recovery_signature_p256
-    # => [SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
+    swapw.2 swapw.3 swapw.2
+    # => [SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, HASH_ROOT, ...]
 
     # Stream the candidate point into local memory. The Eidos block words and chaining word are
     # scratch; no digest is derived from the untrusted advice here.
     locaddr.0 padw padw padw
     adv_pipe
     adv_pipe
-    # => [QY_BLOCK[8], CV, end_ptr=loc[16], SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
+    # => [QY_BLOCK[8], CV, end_ptr=loc[16], SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, HASH_ROOT, ...]
     dropw dropw dropw sub.16
-    # => [pubkey_ptr=loc[0], SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
+    # => [pubkey_ptr=loc[0], SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, HASH_ROOT, ...]
     exec.p256::load_mem
-    # => [Q, SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
+    # => [Q, SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, HASH_ROOT, ...]
     movdnw.3
-    # => [SIG_S, SIG_R, Z, Q, SIG_R_BASE, recovery_parity, ...]
+    # => [SIG_S, SIG_R, Z, Q, SIG_R_BASE, recovery_parity, HASH_ROOT, ...]
 
     exec.compute_ecdsa_scalars
-    # => [U1, Q, U2, SIG_R, SIG_R_BASE, recovery_parity, ...]
+    # => [U1, Q, U2, INVERSE_ROOT, SIG_R, SIG_R_BASE, recovery_parity, HASH_ROOT, ...]
     exec.p256::push_generator
-    # => [G, U1, Q, U2, SIG_R, SIG_R_BASE, recovery_parity, ...]
+    # => [G, U1, Q, U2, INVERSE_ROOT, SIG_R, SIG_R_BASE, recovery_parity, HASH_ROOT, ...]
     exec.p256::msm2
-    # => [RECOVERY_POINT, SIG_R, SIG_R_BASE, recovery_parity, ...]
-    swapw dropw
-    # => [RECOVERY_POINT, SIG_R_BASE, recovery_parity, ...]
+    # => [RECOVERY_POINT, INVERSE_ROOT, SIG_R, SIG_R_BASE, recovery_parity, HASH_ROOT, ...]
+    swapw.2 dropw
+    # => [INVERSE_ROOT, RECOVERY_POINT, SIG_R_BASE, recovery_parity, HASH_ROOT, ...]
+    # Temporarily group parity with HASH_ROOT's first three felts; restore all root/tail felts.
+    swapw swapdw swapw.3
+    # => [INVERSE_ROOT, recovery_parity, HASH_ROOT[0..3], RECOVERY_POINT, SIG_R_BASE, HASH_ROOT[3], ...]
+    movup.4 swapdw
+    # => [RECOVERY_POINT, SIG_R_BASE, recovery_parity, INVERSE_ROOT, HASH_ROOT, ...]
     exec.assert_recovery_point
-    # => [...]
+    # => [POINT_CHECK_ROOT, INVERSE_ROOT, HASH_ROOT, ...]
+    exec.precompiles::append_root
+    # => [RECOVERY_ROOT, HASH_ROOT, ...]
+    exec.precompiles::append_root
+    # => [ROOT, ...]
 
     # Return the now-constrained point in the same native layout used for public-key commitments.
-    padw loc_loadw_le.12
-    padw loc_loadw_le.8
+    # Load words in an order that keeps ROOT accessible with only two word swaps.
+    padw loc_loadw_le.12 swapw
+    # => [ROOT, QY_HI[4], ...]
     padw loc_loadw_le.4
+    # => [QX_HI[4], ROOT, QY_HI[4], ...]
     padw loc_loadw_le.0
-    # => [QX[8] | QY[8], ...]
+    # => [QX[8], ROOT, QY_HI[4], ...]
+    padw loc_loadw_le.8 swapw.3
+    # => [ROOT, QX[8], QY[8], ...]
 end
 
 #! Loads QX || QY from advice, binds it to PK_COMM, and returns the end of the public-key buffer.
@@ -376,7 +469,7 @@ end
 #!
 #! Input:  [Z_U32[8], pubkey_ptr, ...]
 #! Advice: [SIG_R[8] | SIG_S[8] | ...]
-#! Output: [U1_DIGEST, Q_DIGEST, U2_DIGEST, SIG_R_DIGEST, ...]
+#! Output: [U1_DIGEST, Q_DIGEST, U2_DIGEST, ROOT, SIG_R_DIGEST, ...]
 #!
 #! Preconditions/provenance:
 #! - Z_U32[8] is the SHA-256 message digest converted to little-endian scalar limbs;
@@ -385,7 +478,7 @@ end
 proc prepare_verify_inputs(
     prehash: Prehash,
     public_key_ptr: ptr<PublicKey>,
-) -> (p256_scalar::Expr, p256::Point, p256_scalar::Expr, p256_scalar::Expr)
+) -> (p256_scalar::Expr, p256::Point, p256_scalar::Expr, precompiles::Digest, p256_scalar::Expr)
     exec.p256_scalar::load_reduced_256
     # => [Z, pubkey_ptr, ...]
 
@@ -400,21 +493,21 @@ proc prepare_verify_inputs(
     # => [SIG_S, SIG_R, Z, Q, ...]
 
     exec.compute_ecdsa_scalars
-    # => [U1, Q, U2, SIG_R, ...]
+    # => [U1, Q, U2, ROOT, SIG_R, ...]
 end
 
 #! Loads a native recovery witness before any procedure-local writes can alias its memory.
 #!
 #! Input:  [Z_SCALAR_EXPR_DIGEST, SIG_PTR, ...]
-#! Output: [SIG_S_SCALAR_VALUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, Z_SCALAR_EXPR_DIGEST,
-#!          SIG_R_BASE_VALUE_DIGEST, recovery_parity, ...]
+#! Output: [SIG_S_SCALAR_VALUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST,
+#!          SIG_R_BASE_VALUE_DIGEST, Z_SCALAR_EXPR_DIGEST, recovery_parity, ...]
 #!
 #! `SIG_PTR` is word-aligned and addresses `R_LE_U32[8] || S_LE_U32[8] || V`, with V = 0 or 1.
 #! Loading r in both uint domains is sound because scalar canonicality proves `r < n < p`.
 proc load_recovery_signature_p256(
     z: p256_scalar::Expr,
     signature_ptr: ptr<RecoverySignature>,
-) -> (p256_scalar::Expr, p256_scalar::Expr, p256_scalar::Expr, p256_base::Expr, i1)
+) -> (p256_scalar::Expr, p256_scalar::Expr, p256_base::Expr, p256_scalar::Expr, i1)
     movup.4
     # => [SIG_PTR, Z, ...]
 
@@ -434,9 +527,6 @@ proc load_recovery_signature_p256(
     # => [SIG_R, SIG_PTR, SIG_R_BASE, Z, recovery_parity, ...]
     movup.4 add.8 exec.p256_scalar::load_mem
     # => [SIG_S, SIG_R, SIG_R_BASE, Z, recovery_parity, ...]
-
-    movupw.3 movdnw.2
-    # => [SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
 end
 
 #! Loads SIG_R and SIG_S from advice as P-256 scalar VALUE digests and returns SIG_S on top.
@@ -469,7 +559,7 @@ end
 #! Checks the ECDSA signature scalars and computes `U1 = z/s` and `U2 = r/s`.
 #!
 #! Input:  [SIG_S, SIG_R, Z, Q, ...]
-#! Output: [U1, Q, U2, SIG_R, ...]
+#! Output: [U1, Q, U2, ROOT, SIG_R, ...]
 #!
 #! SIG_R/S are canonical P-256 scalar VALUE digests from the scalar loaders; Z is a P-256 scalar
 #! expression digest from `load_reduced_256`; Q originates from `p256::load_mem`. Thus direct
@@ -479,7 +569,7 @@ proc compute_ecdsa_scalars(
     r: p256_scalar::Expr,
     z: p256_scalar::Expr,
     q: p256::Point,
-) -> (p256_scalar::Expr, p256::Point, p256_scalar::Expr, p256_scalar::Expr)
+) -> (p256_scalar::Expr, p256::Point, p256_scalar::Expr, precompiles::Digest, p256_scalar::Expr)
     # Inversion rejects s = 0; check r explicitly.
     dupw.1
     exec.p256_scalar::push_zero_digest
@@ -487,102 +577,111 @@ proc compute_ecdsa_scalars(
     assertz.err="invalid ECDSA signature: r is zero"
     # => [SIG_S, SIG_R, Z, Q, ...]
 
-    exec.p256_scalar::inv
-    # => [S_INV, SIG_R, Z, Q, ...]
+    # Keep the final SIG_R copy below the arithmetic inputs before inversion adds its root.
+    swapdw movupw.2 dupw.3 swapw
+    # => [SIG_S, SIG_R, Z, Q, SIG_R, ...]
+    exec.p256_scalar::inv_with_root
+    # => [INVERSE_ROOT, S_INV, SIG_R, Z, Q, SIG_R, ...]
+    movdnw.3
+    # => [S_INV, SIG_R, Z, INVERSE_ROOT, Q, SIG_R, ...]
 
-    dupw
-    movupw.3
+    dupw swapw.2
     exec.p256_scalar::mul
-    # => [U1 = Z*S_INV, S_INV, SIG_R, Q, ...]
-
-    dupw.1
-    dupw.3
-    exec.p256_scalar::mul
-    # => [U2 = SIG_R*S_INV, U1, S_INV, SIG_R, Q, ...]
+    # => [U2 = SIG_R*S_INV, S_INV, Z, INVERSE_ROOT, Q, SIG_R, ...]
 
     swapw.2
-    # => [S_INV, U1, U2, SIG_R, Q, ...]
-    dropw
-    # => [U1, U2, SIG_R, Q, ...]
+    exec.p256_scalar::mul
+    # => [U1 = Z*S_INV, U2, INVERSE_ROOT, Q, SIG_R, ...]
 
-    movupw.3 swapw
-    # => [U1, Q, U2, SIG_R, ...]
+    movdnw.2 swapdw
+    # => [U1, Q, U2, INVERSE_ROOT, SIG_R, ...]
 end
 
 #! Evaluates VERIFY_POINT once, rejects the identity, reduces x(VERIFY_POINT) modulo n, and
 #! compares the resulting scalar-field expression against SIG_R.
 #!
 #! Input:  [VERIFY_POINT_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
-#! Output: [...]
+#! Output: [ROOT, ...]
 #!
 #! Preconditions/provenance:
 #! - SIG_R_SCALAR_VALUE_DIGEST is a canonical P-256 scalar VALUE digest, e.g. from
 #!   load_signature_p256;
 #! - p256::eval binds VERIFY_POINT_DIGEST to the returned canonical curve VALUE payload;
 #! - after identity rejection succeeds, X_OR_TRUE_DIGEST/Y_OR_TRUE_DIGEST are real coordinate digests.
-proc assert_x_eq_scalar_p256(point: p256::Point, r: p256_scalar::Expr)
-    exec.p256::eval
-    # => [VERIFY_POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+proc assert_x_eq_scalar_p256(
+    point: p256::Point,
+    r: p256_scalar::Expr,
+) -> precompiles::Digest
+    exec.p256::eval_with_root
+    # => [CURVE_ROOT, VERIFY_POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+    swapw
+    # => [VERIFY_POINT_VALUE_DIGEST, CURVE_ROOT, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
 
     # Reject identity at the curve VALUE-digest level. `eval` returns the canonical VALUE digest
     # alongside the coordinate payload, so direct comparison to the registered identity VALUE digest
     # is sound and avoids a second curve evaluation.
     exec.p256::push_identity
-    # => [IDENTITY_VALUE_DIGEST, VERIFY_POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+    # => [IDENTITY_VALUE_DIGEST, VERIFY_POINT_VALUE_DIGEST, CURVE_ROOT, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
     exec.word::eq
-    # => [is_identity, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+    # => [is_identity, CURVE_ROOT, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
     assertz.err="invalid ECDSA verification point: identity"
-    # => [X_DIGEST, Y_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
-    swapw dropw
-    # => [X_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+    swapw.2 dropw
+    # => [X_DIGEST, CURVE_ROOT, SIG_R_SCALAR_VALUE_DIGEST, ...]
 
     # X_DIGEST is a canonical P-256 base-field VALUE child of the proof-bound curve VALUE above.
     # Open that commitment directly; ordinary `eval` remains necessary for arbitrary expression
     # digests.
     exec.p256_base::open_value
-    # => [X_U32[8], SIG_R_SCALAR_VALUE_DIGEST, ...]
+    # => [X_U32[8], CURVE_ROOT, SIG_R_SCALAR_VALUE_DIGEST, ...]
     exec.p256_scalar::load_reduced_256
-    # => [X_SCALAR_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+    # => [X_SCALAR_DIGEST, CURVE_ROOT, SIG_R_SCALAR_VALUE_DIGEST, ...]
 
     # Deferred registration evaluates this same-domain scalar equality eagerly, so a mismatch traps
     # during main-VM execution as well as being committed to the deferred root.
-    exec.p256_scalar::assert_eq
-    # => [...]
+    swapw movdnw.2
+    # => [X_SCALAR_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, CURVE_ROOT, ...]
+    exec.p256_scalar::assert_eq_with_root
+    # => [SCALAR_EQUALITY_ROOT, CURVE_ROOT, ...]
+    exec.precompiles::append_root
+    # => [ROOT, ...]
 end
 
 #! Checks exact x-coordinate and y parity for parity-only public-key recovery.
 #!
 #! Input:  [RECOVERY_POINT_DIGEST, SIG_R_BASE_VALUE_DIGEST, recovery_parity, ...]
-#! Output: [...]
+#! Output: [ROOT, ...]
 #!
 #! The x-coordinate is compared without reduction: recovery bytes 0 and 1 select only the
 #! `x(R) = r` branches, not the x-reduced recovery-ID branches where `x(R) = r + n`.
-proc assert_recovery_point(point: p256::Point, r: p256_base::Expr, parity: i1)
-    # Keep the curve evaluation inline in each final-check mode: placing it behind a non-tail helper
-    # adds three cycles to the existing verifier hot path.
-    exec.p256::eval
-    # => [RECOVERY_POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_BASE, recovery_parity, ...]
+proc assert_recovery_point(
+    point: p256::Point,
+    r: p256_base::Expr,
+    parity: i1,
+) -> precompiles::Digest
+    exec.p256::eval_with_root
+    # => [CURVE_ROOT, RECOVERY_POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_BASE, recovery_parity, ...]
+    swapw
 
     # Identity has TRUE_DIGEST children, so the exact base-field X comparison below rejects it.
     dropw
-    # => [X_DIGEST, Y_DIGEST, SIG_R_BASE, recovery_parity, ...]
-
     # Both operands are canonical base-field VALUE digests. Raw equality is exact and cannot admit
     # x = r + n; identity has TRUE_DIGEST children and therefore also fails this comparison.
-    movupw.2
-    # => [R_BASE_VALUE_DIGEST, X_BASE_VALUE_DIGEST, Y_DIGEST, recovery_parity, ...]
+    swapw.3
+    # => [R_BASE_VALUE_DIGEST, X_BASE_VALUE_DIGEST, Y_DIGEST, CURVE_ROOT, recovery_parity, ...]
     assert_eqw.err="ECDSA recovery point x-coordinate does not equal r"
-    # => [Y_DIGEST, recovery_parity, ...]
+    # => [Y_DIGEST, CURVE_ROOT, recovery_parity, ...]
+    movup.8 movdn.4
+    # => [Y_DIGEST, recovery_parity, CURVE_ROOT, ...]
 
     exec.p256_base::open_value
-    # => [Y_U32[8], recovery_parity, ...]
+    # => [Y_U32[8], recovery_parity, CURVE_ROOT, ...]
     push.1 u32and
-    # => [y_parity, Y_U32[1..8], recovery_parity, ...]
+    # => [y_parity, Y_U32[1..8], recovery_parity, CURVE_ROOT, ...]
     movup.8 assert_eq.err="ECDSA recovery point has the wrong y parity"
     repeat.7
         drop
     end
-    # => [...]
+    # => [CURVE_ROOT, ...]
 end
 
 # INTERNAL PROCEDURES — BYTE OPS
