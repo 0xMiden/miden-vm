@@ -148,3 +148,4 @@ AEADs and message-size limits.
 - [BLAKE3 specification](https://github.com/BLAKE3-team/BLAKE3-specs)
 - [Reconsidering Generic Composition](https://eprint.iacr.org/2014/206)
 - [Poly1305-AES](https://cr.yp.to/mac/poly1305-20050329.pdf)
+- Eidos polynomial MAC bound (technical note in preparation)
