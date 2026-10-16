@@ -12,7 +12,7 @@ use miden_constraint_compiler::{
 
 pub use crate::constraints_regen::Mode;
 
-const GENERATED_EVAL_PATH: &str = "../../../air/src/constraints/generated.rs";
+const GENERATED_EVAL_PATH: &str = "../../../crates/air-definitions/src/constraints/generated.rs";
 
 const HEADER: &str = "\
 //! GENERATED globally-CSE'd constraint evaluators -- do not edit.

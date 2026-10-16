@@ -19,35 +19,21 @@ doctest = false
 
 [features]
 default = ["std"]
-arbitrary = ["std", "dep:proptest"]
-std = ["miden-core/std", "proptest?/std", "rand/std", "rand/thread_rng", "thiserror/std"]
-concurrent = ["std", "miden-crypto/concurrent", "miden-lifted-stark/concurrent"]
-testing = ["arbitrary"]
+compiler = ["miden-air-definitions/compiler"]
+arbitrary = ["std", "miden-air-definitions/arbitrary"]
+std = ["miden-air-definitions/std"]
+concurrent = ["std", "miden-air-definitions/concurrent", "miden-lifted-stark/concurrent"]
+testing = ["arbitrary", "miden-air-definitions/testing"]
 
 [dependencies]
-p3-symmetric.workspace = true
-p3-matrix.workspace = true
-p3-dft.workspace = true
-p3-challenger.workspace = true
-miden-stateful-hasher.workspace = true
-miden-lifted-stark.workspace = true
-# Miden dependencies
-miden-ace-codegen.workspace = true
+miden-air-definitions.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
-miden-utils-indexing.workspace = true
-
-# External dependencies
-p3-field.workspace = true
-p3-security.workspace = true
-proptest = { workspace = true, optional = true }
-rand.workspace = true
-thiserror.workspace = true
-tracing.workspace = true
+miden-lifted-stark.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
 miden-ace-codegen = { workspace = true, features = ["testing"] }
 miden-constraint-compiler.workspace = true
-miden-test-serialization-macros.workspace = true
+p3-field.workspace = true
 proptest.workspace = true

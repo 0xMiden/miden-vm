@@ -10,7 +10,7 @@ use super::{
     schedule::{EIDOS_COMPRESSION_IV, G_IDX_COL, G_IDX_DIAG, LaneMap},
     selectors::EidosCompressionSelectors,
 };
-use crate::constraints::and8_lookup::eidos as eidos_lookup;
+use crate::shared::eidos_lookup;
 
 /// Enforces all constraints which are active on the 28 fused Eidos compression rows of each cycle.
 pub fn enforce_fused_rows<AB>(

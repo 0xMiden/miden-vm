@@ -8,7 +8,7 @@
 use miden_core::{Felt, utils::RowMajorMatrix};
 
 pub mod columns;
-pub(crate) mod eidos;
+pub(crate) use crate::shared::eidos_lookup as eidos;
 
 /// Builds the fixed byte-pair table used by the AND8 lookup AIR.
 pub fn preprocessed_trace() -> RowMajorMatrix<Felt> {
