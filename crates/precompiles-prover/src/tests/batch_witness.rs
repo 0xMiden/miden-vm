@@ -611,6 +611,153 @@ fn distinct_hash_claims_count_shared_payload_demand() {
 }
 
 #[test]
+fn default_hash_limits_bound_individual_input_and_shared_class_totals() {
+    use PrecompileLimitError::{Count, ItemSize, TotalSize};
+    use miden_crypto::hash::sha2::Sha512;
+    use miden_precompiles::Sha512Precompile;
+
+    for (count, bytes, expected_error) in [
+        (2, 128 * 1024, None),
+        (
+            3,
+            128 * 1024,
+            Some(TotalSize {
+                class: HASH_WORK,
+                actual: 384 * 1024,
+                max: 256 * 1024,
+            }),
+        ),
+        (
+            1,
+            128 * 1024 + 1,
+            Some(ItemSize {
+                class: HASH_WORK,
+                actual: 128 * 1024 + 1,
+                max: 128 * 1024,
+            }),
+        ),
+        (256, 4, None),
+        (257, 4, Some(Count { class: HASH_WORK, actual: 257, max: 256 })),
+    ] {
+        let mut fixture = WitnessFixture::new();
+        for index in 0..count {
+            let mut input = vec![0; bytes];
+            input[..4].copy_from_slice(&(index as u32).to_le_bytes());
+            // Keccak and SHA-512 share one budget despite their different proving relations.
+            let claim = if index % 2 == 0 {
+                keccak(&mut fixture, &input)
+            } else {
+                let preimage = fixture.register(Node::chunks_from_bytes(&input)).unwrap();
+                let digest: [u8; 64] = Sha512::hash(&input).into();
+                let expected = fixture.register(Node::chunks_from_bytes(&digest)).unwrap();
+                fixture
+                    .register(Sha512Precompile::assert_node(bytes as u32, preimage, expected))
+                    .unwrap()
+            };
+            fixture.log_statement(claim).unwrap();
+        }
+        let witness = fixture.witness();
+        let result = witness.clone().prepare(
+            Arc::new(miden_precompiles::registry()),
+            &miden_precompiles::default_verification_precompile_limits(),
+        );
+        match expected_error {
+            None => {
+                let prepared = result.unwrap();
+                let work = prepared.work().class(HASH_WORK).unwrap();
+                assert_eq!(work.count(), count as u64);
+                assert_eq!(work.total_size(), (count * bytes) as u64);
+            },
+            Some(expected) => {
+                assert!(
+                    matches!(
+                        result,
+                        Err(PreparationError::Precompile(PrecompileError::Limit(actual)))
+                            if actual == expected
+                    ),
+                    "unexpected admission result for {count} hashes of {bytes} bytes",
+                );
+                if matches!(expected, ItemSize { .. }) {
+                    // Raising only the item allowance admits this supported input, independently
+                    // for every repeated witness, while preserving the class total allowance.
+                    let limits = miden_precompiles::default_verification_precompile_limits()
+                        .with_class(
+                            HASH_WORK,
+                            WorkLimit {
+                                max_count: 256,
+                                max_total_size: 256 * 1024,
+                                max_size: bytes as u32,
+                            },
+                        );
+                    import_witnesses(vec![witness.clone(), witness], &limits).unwrap();
+                    let second = keccak(&mut fixture, &vec![1; bytes]);
+                    fixture.log_statement(second).unwrap();
+                    assert!(matches!(
+                        fixture.witness().prepare(Arc::new(miden_precompiles::registry()), &limits),
+                        Err(PreparationError::Precompile(PrecompileError::Limit(TotalSize {
+                            class: HASH_WORK,
+                            actual,
+                            max: 262_144,
+                        }))) if actual == 2 * bytes as u64
+                    ));
+                }
+            },
+        }
+    }
+}
+
+#[test]
+fn default_msm_limits_charge_zero_scalars_and_repeated_bases() {
+    use PrecompileLimitError::{Count, ItemSize, TotalSize};
+
+    for (count, terms, expected_error) in [
+        (64, 4, None),
+        (65, 4, Some(Count { class: MSM_WORK, actual: 65, max: 64 })),
+        (8, 32, None),
+        (9, 32, Some(TotalSize { class: MSM_WORK, actual: 288, max: 256 })),
+        (1, 33, Some(ItemSize { class: MSM_WORK, actual: 33, max: 32 })),
+    ] {
+        let mut fixture = WitnessFixture::new();
+        let generator =
+            fixture.register(CurvePrecompile::generator_node(CurveId::Secp256k1)).unwrap();
+        let zero = uint(&mut fixture, UintDomain::K1Scalar, 0);
+        let one = uint(&mut fixture, UintDomain::K1Scalar, 1);
+        let mut current = generator;
+        for _ in 0..count {
+            // Nested declarations stay distinct while zero terms and repeated bases preserve
+            // the generator as the result, keeping each subsequent MSM base valid.
+            let mut pairs = vec![(current, zero); terms];
+            pairs[terms - 1] = (current, one);
+            current = fixture
+                .register(
+                    Node::try_pair_list(CurvePrecompile::msm_frame(terms as u32), pairs).unwrap(),
+                )
+                .unwrap();
+        }
+        let result = fixture.open(current).prepare(
+            Arc::new(miden_precompiles::registry()),
+            &miden_precompiles::default_verification_precompile_limits(),
+        );
+        match expected_error {
+            None => {
+                let prepared = result.unwrap();
+                let work = prepared.work().class(MSM_WORK).unwrap();
+                assert_eq!(work.count(), count as u64);
+                assert_eq!(work.total_size(), (count * terms) as u64);
+            },
+            Some(expected) => assert!(
+                matches!(
+                    result,
+                    Err(PreparationError::Precompile(PrecompileError::Limit(actual)))
+                        if actual == expected
+                ),
+                "unexpected admission result for {count} MSMs of {terms} terms",
+            ),
+        }
+    }
+}
+
+#[test]
 fn msm_payload_shape_and_declared_arity_are_prepared_before_import() {
     use miden_precompiles::CurveId;
 
