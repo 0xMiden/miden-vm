@@ -313,6 +313,9 @@ pub fn visit_constant<V, T>(visitor: &mut V, constant: &ConstantDecl) -> Control
 where
     V: ?Sized + Visit<T>,
 {
+    if let Some(ty) = constant.ty() {
+        visitor.visit_type_expr(ty)?;
+    }
     visitor.visit_constant_expr(constant.value())
 }
 
@@ -880,6 +883,9 @@ pub fn visit_mut_constant<V, T>(visitor: &mut V, constant: &mut ConstantDecl) ->
 where
     V: ?Sized + VisitMut<T>,
 {
+    if let Some(ty) = constant.ty_mut() {
+        visitor.visit_mut_type_expr(ty)?;
+    }
     visitor.visit_mut_constant_expr(constant.value_mut())
 }
 

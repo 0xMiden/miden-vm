@@ -709,6 +709,86 @@ end
 }
 
 #[test]
+fn constant_annotation_marks_item_import_used() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    let module = context
+        .parse_module(
+            "\
+namespace test
+use {ForeignType} from some::module
+const N: ForeignType = 42
+",
+        )
+        .expect("type import used in a constant annotation should pass analysis");
+
+    assert_import(&module, "ForeignType", ImportKind::Item, true);
+}
+
+#[test]
+fn constant_annotation_marks_renamed_import_used() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    let module = context
+        .parse_module(
+            "\
+namespace test
+use {ForeignType as LocalType} from some::module
+const N: LocalType = 42
+",
+        )
+        .expect("renamed type import used in a constant annotation should pass analysis");
+
+    assert_import(&module, "LocalType", ImportKind::Item, true);
+}
+
+#[test]
+fn constant_annotation_marks_module_import_used() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    let module = context
+        .parse_module(
+            "\
+namespace test
+use some::module as sm
+const N: sm::ForeignType = 42
+",
+        )
+        .expect("module import used in a constant annotation should pass analysis");
+
+    assert_import(&module, "sm", ImportKind::Module, true);
+}
+
+#[test]
+fn constant_annotation_marks_nested_type_import_used() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    let module = context
+        .parse_module(
+            "\
+namespace test
+use {ForeignType} from some::module
+const N: [ForeignType; 1] = 42
+",
+        )
+        .expect("type import nested in a constant annotation should pass analysis");
+
+    assert_import(&module, "ForeignType", ImportKind::Item, true);
+}
+
+#[test]
+fn constant_annotation_leaves_unrelated_import_unused() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    let error = context
+        .parse_module(
+            "\
+namespace test
+use {ForeignType, OtherType} from some::module
+const N: ForeignType = 42
+",
+        )
+        .expect_err("unrelated import should remain unused");
+
+    assert_eq!(unused_import_slices(&error), vec!["OtherType"]);
+}
+
+#[test]
 fn sema_import_renamed_proc_resolves_local_name() {
     let context = SyntaxTestContext::default();
     let module = context

@@ -1,4 +1,5 @@
-use alloc::{boxed::Box, sync::Arc};
+use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use core::ops::ControlFlow;
 
 use miden_core::events::EventId;
 use miden_debug_types::{SourceId, SourceSpan, Span, Spanned};
@@ -6,7 +7,7 @@ use miden_debug_types::{SourceId, SourceSpan, Span, Spanned};
 use super::*;
 use crate::{
     Felt, Path,
-    ast::types::Type,
+    ast::{Visit, VisitMut, types::Type},
     parser::{IntValue, WordValue},
     prettier::PrettyPrint,
 };
@@ -44,6 +45,118 @@ fn constant_decl_fixture(value: ConstantExpr, ty: Option<TypeExpr>) -> ConstantD
         },
         None => ConstantDecl::new(declaration_span(), Visibility::Public, name, value),
     }
+}
+
+/// Records type and initializer visits to test traversal order and early exit behavior for both
+/// `Visit` and `VisitMut`.
+#[derive(Default)]
+struct ConstantVisitor {
+    /// Ordered visit events recorded by the visitor.
+    visited: Vec<&'static str>,
+    /// Whether visiting a type reference should stop traversal.
+    break_on_type: bool,
+}
+
+impl ConstantVisitor {
+    fn record_type(&mut self) -> ControlFlow<()> {
+        self.visited.push("type");
+        if self.break_on_type {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn record_initializer(&mut self) -> ControlFlow<()> {
+        self.visited.push("initializer");
+        ControlFlow::Continue(())
+    }
+}
+
+impl Visit for ConstantVisitor {
+    fn visit_type_ref(&mut self, _path: &Span<Arc<Path>>) -> ControlFlow<()> {
+        self.record_type()
+    }
+
+    fn visit_constant_ref(&mut self, _path: &Span<Arc<Path>>) -> ControlFlow<()> {
+        self.record_initializer()
+    }
+}
+
+impl VisitMut for ConstantVisitor {
+    fn visit_mut_type_ref(&mut self, _path: &mut Span<Arc<Path>>) -> ControlFlow<()> {
+        self.record_type()
+    }
+
+    fn visit_mut_constant_ref(&mut self, _path: &mut Span<Arc<Path>>) -> ControlFlow<()> {
+        self.record_initializer()
+    }
+}
+
+fn foreign_type() -> TypeExpr {
+    TypeExpr::Ref(Span::unknown(Arc::from(Path::new("ForeignType"))))
+}
+
+#[test]
+fn constant_annotation_is_visited_before_initializer() {
+    let constant = constant_decl_fixture(reference(), Some(foreign_type()));
+    let mut visitor = ConstantVisitor::default();
+
+    assert_eq!(visitor.visit_constant(&constant), ControlFlow::Continue(()));
+    assert_eq!(visitor.visited, vec!["type", "initializer"]);
+}
+
+#[test]
+fn constant_annotation_is_visited_before_initializer_mut() {
+    let mut constant = constant_decl_fixture(reference(), Some(foreign_type()));
+    let mut visitor = ConstantVisitor::default();
+
+    assert_eq!(visitor.visit_mut_constant(&mut constant), ControlFlow::Continue(()));
+    assert_eq!(visitor.visited, vec!["type", "initializer"]);
+}
+
+/// Checks that immutable traversal propagates an annotation break without visiting the initializer.
+#[test]
+fn constant_annotation_break_skips_initializer() {
+    let constant = constant_decl_fixture(reference(), Some(foreign_type()));
+    let mut visitor = ConstantVisitor {
+        break_on_type: true,
+        ..Default::default()
+    };
+
+    assert_eq!(visitor.visit_constant(&constant), ControlFlow::Break(()));
+    assert_eq!(visitor.visited, vec!["type"]);
+}
+
+/// Checks that mutable traversal propagates an annotation break without visiting the initializer.
+#[test]
+fn constant_annotation_break_skips_initializer_mut() {
+    let mut constant = constant_decl_fixture(reference(), Some(foreign_type()));
+    let mut visitor = ConstantVisitor {
+        break_on_type: true,
+        ..Default::default()
+    };
+
+    assert_eq!(visitor.visit_mut_constant(&mut constant), ControlFlow::Break(()));
+    assert_eq!(visitor.visited, vec!["type"]);
+}
+
+#[test]
+fn unannotated_constant_initializer_is_visited() {
+    let constant = constant_decl_fixture(reference(), None);
+    let mut visitor = ConstantVisitor::default();
+
+    assert_eq!(visitor.visit_constant(&constant), ControlFlow::Continue(()));
+    assert_eq!(visitor.visited, vec!["initializer"]);
+}
+
+#[test]
+fn unannotated_constant_initializer_is_visited_mut() {
+    let mut constant = constant_decl_fixture(reference(), None);
+    let mut visitor = ConstantVisitor::default();
+
+    assert_eq!(visitor.visit_mut_constant(&mut constant), ControlFlow::Continue(()));
+    assert_eq!(visitor.visited, vec!["initializer"]);
 }
 
 /// An expression and its expected kind with either annotation state.
