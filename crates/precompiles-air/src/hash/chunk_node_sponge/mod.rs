@@ -16,10 +16,7 @@ use crate::{
         chunk_node,
         keccak::sponge::{self, sponge_program},
     },
-    logup::{
-        ConstraintLookupBuilder, LookupAir, LookupBuilder, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
-        NUM_RANDOMNESS,
-    },
+    logup::{ConstraintLookupBuilder, LookupAir, LookupBuilder, NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
 };
 
@@ -53,10 +50,6 @@ static PERIODIC_COLUMNS: LazyLock<Vec<Vec<Felt>>> = LazyLock::new(|| Vec::from(s
 impl BaseAir<Felt> for ChunkNodeSpongeAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
-    }
-
-    fn num_public_values(&self) -> usize {
-        NUM_PUBLIC_VALUES
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {

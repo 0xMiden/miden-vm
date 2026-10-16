@@ -98,9 +98,12 @@ where
 
     // `air_inputs` are the public values read by the AIRs (stack i/o); `aux_inputs` are the
     // statement inputs read during observation/boundary correction.
-    let statement =
-        Statement::new(MidenMultiAir::new(), public_values.to_vec(), aux_inputs.to_vec())
-            .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
+    let statement = Statement::new(
+        MidenMultiAir::new(),
+        vec![(0, public_values.to_vec())],
+        aux_inputs.to_vec(),
+    )
+    .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
     let prover_statement = ProverStatement::new(
         statement,
         vec![core_trace, chiplets_trace, eidos_compression_trace, and8_trace],

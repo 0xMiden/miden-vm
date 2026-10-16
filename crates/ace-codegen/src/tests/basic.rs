@@ -36,6 +36,7 @@ enum Selector {
 
 #[derive(Clone, Copy)]
 struct TestAir {
+    public: usize,
     preprocessed: usize,
     main: usize,
     aux: usize,
@@ -47,6 +48,7 @@ struct TestAir {
 impl TestAir {
     fn simple() -> Self {
         Self {
+            public: 0,
             preprocessed: 0,
             main: 1,
             aux: 0,
@@ -58,6 +60,10 @@ impl TestAir {
 }
 
 impl BaseAir<F> for TestAir {
+    fn num_public_values(&self) -> usize {
+        self.public
+    }
+
     fn width(&self) -> usize {
         self.main
     }
@@ -104,6 +110,10 @@ impl LiftedAir<F, EF> for TestAir {
             let main = builder.main();
             main.current_slice()[self.main - 1].into()
         };
+        for &value in builder.public_values() {
+            let value: AB::Expr = value.into();
+            expression += value;
+        }
         if self.preprocessed > 0 {
             let preprocessed: AB::Expr = {
                 let trace = builder.preprocessed();
@@ -534,6 +544,52 @@ fn multi_air_uses_canonical_offsets_and_stable_selectors() {
         );
     }
     circuit.to_ace().expect("multi-AIR root must be MASM encodable");
+}
+
+#[test]
+fn multi_air_concatenates_distinct_public_inputs() {
+    let airs = [0, 1, 0, 2, 0].map(|public| TestAir { public, ..TestAir::simple() });
+    let order = [3, 0, 4, 1, 2];
+    let beta = ef(3);
+    let roots = [ef(1), ef(13), ef(3), ef(34), ef(5)];
+    let expected = order.iter().fold(EF::ZERO, |acc, &i| acc * beta + roots[i]);
+    for layout in [LayoutKind::Native, LayoutKind::Masm] {
+        let circuit = build_canonical_multi_air_ace_circuit(
+            &airs,
+            AceConfig { num_quotient_chunks: 1, layout },
+            1,
+        )
+        .unwrap();
+        assert_eq!(circuit.layout().counts.num_public, 3);
+        let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
+        for (i, value) in [11, 13, 17].into_iter().enumerate() {
+            set_input(&circuit, &mut inputs, InputKey::Public(i), ef(value));
+        }
+        for i in 0..airs.len() {
+            set_input(
+                &circuit,
+                &mut inputs,
+                InputKey::Main { offset: 0, index: i },
+                ef(i as u64 + 1),
+            );
+        }
+        for (position, i) in order.into_iter().enumerate() {
+            let coefficient = beta.exp_u64((order.len() - 1 - position) as u64);
+            set_input(&circuit, &mut inputs, InputKey::MultiAirFoldCoeff(i), coefficient);
+        }
+        assert_eq!(circuit.eval(&inputs).unwrap(), expected);
+        assert_eq!(
+            crate::testing::eval_multi_air_constraints(
+                &airs,
+                circuit.layout(),
+                &inputs,
+                &order,
+                beta,
+                1,
+            ),
+            expected,
+        );
+    }
 }
 
 #[test]

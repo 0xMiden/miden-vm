@@ -195,7 +195,8 @@ where
 {
     let airs: Vec<A> = core::iter::repeat_n(air.clone(), traces.len()).collect();
     let traces_owned: Vec<RowMajorMatrix<Felt>> = traces.to_vec();
-    let statement = Statement::new(TestMultiAir::new(airs), air_inputs.to_vec(), Vec::new())
+    let air_inputs = (0..airs.len()).map(|i| (i, air_inputs.to_vec())).collect();
+    let statement = Statement::new(TestMultiAir::new(airs), air_inputs, Vec::new())
         .expect("statement inputs valid");
     let prover_statement =
         ProverStatement::new(statement, traces_owned).expect("trace shape valid");

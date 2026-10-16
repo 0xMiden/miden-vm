@@ -83,8 +83,8 @@ pub fn lookup_challenges_from_slice(s: &[QuadFelt]) -> Challenges<QuadFelt> {
 /// Number of base-field public inputs the VM exposes: the 4-felt
 /// transcript root (an Eidos digest).
 ///
-/// Every chiplet declares the same public-input count. Only the transcript-eval chip reads the
-/// root, pinning its row-0 hash to `public_values()[0..4]`. Trace lengths are supplied to the
+/// Only the transcript-eval chip declares and reads these inputs, pinning its row-0 hash to
+/// `public_values()[0..4]`. Trace lengths are supplied to the
 /// external multi-AIR closure and are not duplicated in the AIR public inputs.
 pub const NUM_PUBLIC_VALUES: usize = 4;
 
