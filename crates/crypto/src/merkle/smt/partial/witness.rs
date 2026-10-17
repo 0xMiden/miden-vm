@@ -21,6 +21,10 @@ use crate::{
 /// openings against the declared root and bounds reconstruction. A root-only witness carries no
 /// openings to check. Use a budgeted reader for untrusted input as well.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct SmtWitness(UniqueNodes);
 
 impl SmtWitness {
@@ -122,4 +126,20 @@ fn read_ordered_map<R: ByteReader, K: Deserializable + Ord, V: Deserializable>(
         map.insert(key, value);
     }
     Ok(map)
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::{PartialSmt, SmtWitness};
+
+    impl Arbitrary for SmtWitness {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            any::<PartialSmt>().prop_map(|tree| Self::from(&tree)).boxed()
+        }
+    }
 }
