@@ -409,6 +409,70 @@ fn test_log_deferred_correctness() {
     }
 }
 
+/// Exporting an unlogged assertion preserves its original root and the execution's deferred root.
+#[test]
+fn export_deferred_witness_opens_an_unlogged_shared_graph() {
+    use miden_core::{
+        advice::AdviceStack,
+        deferred::{Node, PrecompileRegistry, PrecompileWitness, TRUE_DIGEST},
+        utils::packed_u32_elements_to_bytes,
+    };
+
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let state = processor.deferred_state_mut();
+    let shared = state.register(Node::and(TRUE_DIGEST, TRUE_DIGEST)).unwrap();
+    let branch = state.register(Node::and(shared, shared)).unwrap();
+    let selected = state.register(Node::and(branch, branch)).unwrap();
+    let unrelated = state.register(Node::and(shared, TRUE_DIGEST)).unwrap();
+    let logged_root = state.log_statement(unrelated).unwrap();
+    let byte_len = state.witness_for(selected).unwrap().to_bytes().len();
+    assert!(!byte_len.is_multiple_of(4), "exercise final-limb padding");
+
+    let mut stack_inputs = [Felt::from_u32(7); 16];
+    stack_inputs[..4].copy_from_slice(selected.as_elements());
+    for (offset, value) in stack_inputs.iter().copied().enumerate() {
+        processor.stack_write(offset, value);
+    }
+    let advice_stack = vec![Felt::from_u32(17), Felt::from_u32(19)];
+    processor = processor
+        .with_advice(AdviceInputs::default().with_stack(AdviceStack::from(advice_stack.clone())))
+        .unwrap();
+    let program = Assembler::new(Arc::new(DefaultSourceManager::default()))
+        .assemble_program(
+            "program",
+            r#"begin
+                # Insert one zero felt under the selected root before exporting its witness.
+                push.0.1 movdn.5 movdn.4 adv.insert_mem
+                movup.4 drop movup.4 drop
+                adv.export_deferred_witness
+                emit.event("sys::adv::export_deferred_witness")
+            end"#,
+        )
+        .unwrap()
+        .unwrap_program();
+    let output = processor.execute_sync(&program, &mut DefaultHost::default()).unwrap();
+
+    assert_eq!(output.precompile_root(), logged_root);
+    for (offset, expected) in stack_inputs.into_iter().enumerate() {
+        assert_eq!(output.stack.get_element(offset), Some(expected));
+    }
+    assert_eq!(output.advice.stack(), advice_stack);
+    assert_eq!(output.advice.map().len(), 1);
+    let value = output.advice.get_mapped_values(&selected).unwrap();
+    assert_eq!(value[0].as_canonical_u64() as usize, byte_len);
+    assert_eq!(value.len(), 1 + byte_len.div_ceil(4));
+    let bytes = packed_u32_elements_to_bytes(&value[1..]);
+    assert!(bytes[byte_len..].iter().all(|byte| *byte == 0));
+    let witness = PrecompileWitness::read_from_bytes(&bytes[..byte_len]).unwrap();
+    assert_eq!(witness.root_unchecked(), selected);
+    assert_eq!(witness.compute_root(Arc::new(PrecompileRegistry::new())).unwrap(), selected);
+    let mut digests = vec![TRUE_DIGEST];
+    for entry in witness.entries() {
+        digests.push(entry.digest(&digests).unwrap());
+    }
+    assert_eq!(digests, [TRUE_DIGEST, shared, branch, selected]);
+}
+
 /// Tests that successive `log_deferred` calls fold registered DAG roots in execution order.
 #[test]
 fn successive_log_deferred_calls_build_an_ordered_and_chain() {

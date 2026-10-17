@@ -1,3 +1,4 @@
+use miden::core::precompiles
 use miden::core::crypto::hashes::eidos
 use miden::core::precompiles::hashes::sha512
 use miden::core::precompiles::curves::ed25519
@@ -59,8 +60,21 @@ const PUBLIC_KEY_INIT_CV = [
 #! The configured max_hash_len_bytes must be at least 96 for the R || A || M preimage.
 #! The signature is an uncommitted advice witness; callers needing exact signature binding must
 #! commit to its encoding separately. No result is pushed; failed verification traps.
-@locals(48)
 pub proc verify(public_key: eidos::Digest, message: word)
+    exec.verify_with_root
+    exec.precompiles::log_deferred
+end
+
+#! Returns the complete obligation root for `verify`, including every nested advice binding.
+#! Leaves the VM built-in deferred root unchanged; the caller must include ROOT in its own
+#! obligation, for example using precompiles::append_root.
+#! Input: [PK_COMM, MSG_WORD, ...]
+#! Output: [ROOT, ...]
+@locals(48)
+pub proc verify_with_root(
+    public_key: eidos::Digest,
+    message: word,
+) -> precompiles::Digest
     # Reserve locals 4..12 for the packed message and 16..40 for R || A || M.
     swapw
     locaddr.VERIFY_MSG_LOCAL movdn.4 exec.store_word_u32s_le
@@ -71,7 +85,8 @@ pub proc verify(public_key: eidos::Digest, message: word)
     movdn.4
     # => [PK_COMM, MSG_PTR, 32, SCRATCH_PTR, ...]
 
-    exec.verify_bytes
+    exec.verify_bytes_with_root
+    # => [ROOT, ...]
 end
 
 #! Verifies an Ed25519 signature over bytes in memory, using caller-owned scratch memory.
@@ -86,13 +101,28 @@ end
 #! overwritten. Both complete ranges must lie below this procedure's local frame; parent-frame
 #! locals are supported. MSG_LEN_BYTES + 64 must fit the max_hash_len_bytes execution limit.
 #! Public-key commitments and acceptance rules are the same as verify. Advice is untrusted.
-@locals(4)
 pub proc verify_bytes(
     public_key: eidos::Digest,
     message_ptr: ptr<u32>,
     message_len_bytes: u32,
     scratch_ptr: ptr<u32>,
 )
+    exec.verify_bytes_with_root
+    exec.precompiles::log_deferred
+end
+
+#! Returns the complete obligation root for `verify_bytes`, including every nested advice binding.
+#! Leaves the VM built-in deferred root unchanged; the caller must include ROOT in its own
+#! obligation, for example using precompiles::append_root.
+#! Input: [PK_COMM, MSG_PTR, MSG_LEN_BYTES, SCRATCH_PTR, ...]
+#! Output: [ROOT, ...]
+@locals(4)
+pub proc verify_bytes_with_root(
+    public_key: eidos::Digest,
+    message_ptr: ptr<u32>,
+    message_len_bytes: u32,
+    scratch_ptr: ptr<u32>,
+) -> precompiles::Digest
     # Locals 0 and 1 hold SCRATCH_PTR and MSG_LEN_BYTES; locals 2 and 3 are alignment padding.
     # Reject aliases with this or nested local frames before storing any arguments.
     # Retain the padded message length N (in felts) for the nonoverlap checks and copy.
@@ -145,35 +175,65 @@ pub proc verify_bytes(
     padw adv_loadw
     swapw
     exec.ed25519_scalar::load
-    exec.ed25519_scalar::eval exec.ed25519_order::load
+    # => [S_EXPR, OFFSET, SQRT, ...]
+    # Keep the canonical scalar expression buried until the point decoders consume the constants.
     swapw.2
-    # => [SQRT, OFFSET, S, ...]
+    # => [SQRT, OFFSET, S_EXPR, ...]
 
     # Preserve one copy of each constant for R while decoding A first.
     dupw.1 dupw.1
-    loc_load.SCRATCH_PTR_LOCAL add.PREIMAGE_A_OFFSET exec.load_compressed_point
-    # => [A, SQRT, OFFSET, S, ...]
-    movdnw.2
-    loc_load.SCRATCH_PTR_LOCAL exec.load_compressed_point
-    # => [R, A, S, ...]
+    loc_load.SCRATCH_PTR_LOCAL add.PREIMAGE_A_OFFSET
+    exec.load_compressed_point
+    # => [A_ROOT, A, SQRT, OFFSET, S_EXPR, ...]
+    swapw swapdw
+    # => [SQRT, OFFSET, A, A_ROOT, S_EXPR, ...]
+    loc_load.SCRATCH_PTR_LOCAL
+    exec.load_compressed_point
+    # => [R_ROOT, R, A, A_ROOT, S_EXPR, ...]
+    movupw.3 exec.precompiles::append_root
+    # => [POINT_ROOT, R, A, S_EXPR, ...]
+
+    # Widen the canonical S into the complete-order ring after its eight limbs have room.
+    # Roots remain on the stack, including while they are temporarily below the top sixteen felts.
+    movupw.3 exec.ed25519_scalar::eval_with_root
+    # => [S_ROOT, S_U32[8], POINT_ROOT, R, A, ...]
+    movdnw.2 exec.ed25519_order::load
+    # => [S, S_ROOT, POINT_ROOT, R, A, ...]
+    movdnw.2 exec.precompiles::append_root
+    # => [ROOT, S, R, A, ...]
 
     # Both encodings are now represented by point digests. The SHA helper registers and hashes
     # the complete preimage before writing its output, so its 16-felt result can overwrite scratch.
     loc_load.SCRATCH_PTR_LOCAL loc_load.MSG_LEN_LOCAL add.PREIMAGE_PREFIX_BYTES
-    loc_load.SCRATCH_PTR_LOCAL exec.sha512::hash_bytes_mem
+    loc_load.SCRATCH_PTR_LOCAL
+    exec.sha512::hash_bytes_mem_with_root
+    # => [HASH_ROOT, ROOT, S, R, A, ...]
+    exec.precompiles::append_root
+    swapw.2 swapw.3 swapw.2
+    # => [ROOT, S, A, R, ...]
     # SHA-512 digest bytes already form the little-endian 512-bit challenge integer.
     loc_load.SCRATCH_PTR_LOCAL exec.ed25519_scalar::load_reduced_512_mem
-    exec.ed25519_scalar::eval exec.ed25519_order::load
+    exec.ed25519_scalar::eval_with_root
+    # => [K_ROOT, K_U32[8], ROOT, S, A, R, ...]
+    movdnw.2 exec.ed25519_order::load
+    # => [K, K_ROOT, ROOT, S, A, R, ...]
+    movdnw.2 exec.precompiles::append_root
+    # => [ROOT, K, S, A, R, ...]
+    movdnw.3
+    # => [K, S, A, ROOT, R, ...]
     # The curve MSM uses the complete-order ring (8l), so negate k in that domain. This is
     # [8l-k] for nonzero k and zero for k=0, exactly the coefficient of -[k]A.
     exec.ed25519_order::push_zero_digest exec.ed25519_order::sub
-    # => [-k, R, A, S, ...]
-    swapw.2 swapdw swapw
-    # => [S, -k, A, R, ...]
+    # => [-k, S, A, ROOT, R, ...]
+    swapw
+    # => [S, -k, A, ROOT, R, ...]
     exec.ed25519::msm2_generator
-    # => [[s]B + [-k]A, R, ...]
+    # => [[s]B + [-k]A, ROOT, R, ...]
     # These are deferred point expressions; compare their values through the curve relation.
-    swapw exec.ed25519::assert_eq
+    movupw.2 exec.ed25519::assert_eq_with_root
+    # => [SIGNATURE_ROOT, ROOT, ...]
+    exec.precompiles::append_root
+    # => [ROOT, ...]
 end
 
 #! Decodes a compressed point through an untrusted Edwards x-coordinate witness.
@@ -182,14 +242,14 @@ end
 #! `ptr` must be word-aligned and reference eight readable packed-u32 felts. The compressed
 #! encoding is left unchanged. The supplied constants and returned point are four-felt digests.
 #! Input:  [ptr, SQRT, OFFSET, ...]
-#! Output: [POINT, ...]
+#! Output: [ROOT, POINT, ...]
 #! The event supplies x's eight u32 limbs for `repeat.8 adv_push end`, leaving x0 on top.
 #! Field/curve relations bind this advice to the compressed encoding.
 proc load_compressed_point(
     ptr: ptr<u32>,
     sqrt_minus_486664: ed25519_base::Expr,
     offset_486662_div_3: ed25519_base::Expr,
-) -> ed25519::Point
+) -> (precompiles::Digest, ed25519::Point)
     emit.DECOMPRESS_EVENT
 
     # Retain x's low limb for parity, and register the complete canonical x before using it.
@@ -216,25 +276,43 @@ proc load_compressed_point(
     # u = (1+y)/(1-y), where y is canonical after removing the sign bit.
     dupw exec.ed25519_base::push_one_digest exec.ed25519_base::add
     swapw exec.ed25519_base::push_one_digest exec.ed25519_base::sub
-    exec.ed25519_base::inv exec.ed25519_base::mul
-    # => [U_DIGEST, X_DIGEST, SQRT, OFFSET, ...]
+    exec.ed25519_base::inv_with_root
+    # => [Y_INVERSE_ROOT, Y_INVERSE, ONE_PLUS_Y, X_DIGEST, SQRT, OFFSET, ...]
 
-    # Y = sqrt(-486664)*u/x. Inverting x rejects both x=0 exceptional encodings.
-    swapw exec.ed25519_base::inv
-    dupw.1 exec.ed25519_base::mul
-    movupw.2 exec.ed25519_base::mul
-    # => [MAPPED_Y, U_DIGEST, OFFSET, ...]
+    # Invert x before constructing u so both inverse roots can stay on the stack until u/x is formed.
+    # Inverting x rejects both x=0 exceptional encodings; the inverse advice order is unchanged.
+    swapw.3 exec.ed25519_base::inv_with_root
+    # => [X_INVERSE_ROOT, X_INVERSE, Y_INVERSE, ONE_PLUS_Y, Y_INVERSE_ROOT, SQRT, OFFSET, ...]
+    swapdw
+    # => [Y_INVERSE, ONE_PLUS_Y, X_INVERSE_ROOT, X_INVERSE, Y_INVERSE_ROOT, SQRT, OFFSET, ...]
+    exec.ed25519_base::mul
+    # => [U_DIGEST, X_INVERSE_ROOT, X_INVERSE, Y_INVERSE_ROOT, SQRT, OFFSET, ...]
+
+    # Preserve u while forming u/x, then combine the now-adjacent inverse obligations.
+    swapdw dupw.2 exec.ed25519_base::mul
+    # => [U_OVER_X, Y_INVERSE_ROOT, U_DIGEST, X_INVERSE_ROOT, SQRT, OFFSET, ...]
+    swapw.3 exec.precompiles::append_root
+    # => [INVERSE_ROOT=AND(X_INVERSE_ROOT, Y_INVERSE_ROOT), U_DIGEST, U_OVER_X, SQRT, OFFSET, ...]
+
+    # Y = sqrt(-486664)*u/x.
+    swapdw swapw exec.ed25519_base::mul
+    # => [MAPPED_Y, INVERSE_ROOT, U_DIGEST, OFFSET, ...]
 
     # X = u + 486662/3.
-    swapw movupw.2 exec.ed25519_base::add
+    swapdw swapw exec.ed25519_base::add
     exec.ed25519::load_digest_pair
+    # => [POINT, INVERSE_ROOT, ...]
 
     # Preserve P while testing [8]P. This rejects small-order points without requiring P to
     # lie in the prime-order subgroup, matching the strict verification acceptance policy.
     dupw
     repeat.3 dupw exec.ed25519::add end
-    exec.ed25519::is_identity
-    assertz.err="small-order Ed25519 point"
+    exec.ed25519::is_identity_with_root
+    # => [IDENTITY_ROOT, is_identity, POINT, INVERSE_ROOT, ...]
+    movup.4 assertz.err="small-order Ed25519 point"
+    # => [IDENTITY_ROOT, POINT, INVERSE_ROOT, ...]
+    movupw.2 exec.precompiles::append_root
+    # => [ROOT, POINT, ...]
 end
 
 #! Copies eight advice felts to word-aligned memory, with the low four limbs first.

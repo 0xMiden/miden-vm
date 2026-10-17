@@ -34,7 +34,8 @@ clock-tagged AEAD input/output relations rather than an ordinary controller comp
 
 ## Chiplet selector prefix
 
-The chiplets trace uses a top-level selector prefix `s0..s4`.
+The first physical selector is `s_ctrl = chiplets[0]`, which is one on controller rows. The
+remaining regions use the virtual selector `s0 = 1 - s_ctrl` and the physical selectors `s1..s4`:
 
 | Region                | Active when               |
 |-----------------------|---------------------------|
@@ -64,7 +65,8 @@ The overlay depends on row kind:
 
 - hash rows store `block[8] || cv_in[4]` in `state` and `cv_out[4]` in `row_data`;
 - Merkle rows store `block[8] || cv_out[4]` in `state` and
-  `[node_index, node_index_next, is_start, 0]` in `row_data`.
+  `[node_index, node_index_next, is_start, level]` in `row_data`, where `level` is zero on the
+  path's first row and increases by one on each continuation row.
 
 Merkle compression always uses the fixed domain-zero two-to-one chaining value, so it does not
 need a committed `cv_in` column.
@@ -90,6 +92,7 @@ The controller AIR enforces:
 - `op_final` booleanity and valid start/continuation sequencing;
 - chaining-value continuity between consecutive blocks of one sequential hash;
 - Merkle index decomposition and direction-bit booleanity;
+- a Merkle path level that starts at zero and increments by one on each continuation row;
 - continuity of the shifted Merkle index across non-final controller rows;
 - routing the current Merkle digest into the correct half of the next block;
 - termination of a Merkle path at index zero;
@@ -196,11 +199,13 @@ matching physical compression receives the tuple with its provider multiplicity.
 Cycle-tagged relations connect fused computation rows to footer reconstruction for the message and
 input chaining value. Separate byte-table relations prove XOR, rotation, and range witnesses.
 
-### Hash-kernel table {#sibling-table-constraints}
+### Merkle sibling table {#sibling-table-constraints}
 
 During `MRUPDATE`, old-path rows insert sibling entries and new-path rows remove them. Entries are
-keyed by `mrupdate_id`, node index, sibling word, and branch side, so only the two legs of the same
-update can balance.
+keyed by path level, `mrupdate_id`, node index, sibling word, and branch side, so both legs of an
+update must use the same sibling at each level. Including the level prevents sibling permutations
+after the shifted node index reaches zero, when all remaining rows have the same node index and
+direction bit.
 
 ## Four-AIR topology
 

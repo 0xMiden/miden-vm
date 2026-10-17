@@ -282,10 +282,11 @@ pub fn enforce_main<AB>(
         .when(op_flags.repeat_next())
         .assert_one(op_flags.end() * is_loop_body);
 
-    // Prevent LOOP -> END, which would skip the body when its lookup multiplicity is zero.
+    // LOOP and REPEAT must enter a body before the loop can return. The body-count lookup
+    // authenticates completed iterations; it does not enforce this successor transition.
     builder
         .when_transition()
-        .when(op_flags.loop_op())
+        .when(op_flags.loop_op() + op_flags.repeat())
         .assert_zero(op_flags.end_next());
 
     // The first row has no END predecessor, so it cannot be REPEAT.
@@ -684,16 +685,19 @@ mod tests {
     }
 
     #[test]
-    fn loop_cannot_jump_directly_to_its_end() {
-        let loop_row = generate_test_row(opcodes::LOOP.into());
+    fn loop_iteration_entries_require_a_body() {
         let span = span_row_with_single_group();
-        assert!(decoder_accepts(&loop_row, &span), "LOOP must be allowed to enter its body");
-
-        let end = generate_test_row(opcodes::END.into());
-        assert!(
-            !decoder_accepts(&loop_row, &end),
-            "LOOP must not skip its do-while body by jumping directly to END"
-        );
+        let mut end = generate_test_row(opcodes::END.into());
+        end.decoder.addr = span.decoder.addr;
+        for mut entry in [generate_test_row(opcodes::LOOP.into()), repeat_row_with_true_condition()]
+        {
+            entry.decoder.addr = span.decoder.addr;
+            assert!(
+                decoder_accepts(&entry, &span),
+                "an iteration must be allowed to enter its body"
+            );
+            assert!(!decoder_accepts(&entry, &end), "an iteration must enter a body before END");
+        }
     }
 
     #[test]

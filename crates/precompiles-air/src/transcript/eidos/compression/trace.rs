@@ -13,7 +13,7 @@ use miden_air::eidos_compression::core::{
     layout::{BLOCK_PERIOD, NUM_COLS as SHARED_NUM_COLS},
     trace::write_core_felt_trace_block_into_zeroed_with_lookups,
 };
-use miden_core::Felt;
+use miden_core::{Felt, field::PrimeCharacteristicRing};
 
 use super::layout::{NUM_COLS, footer_digest_col};
 
@@ -118,6 +118,16 @@ fn write_pvm_footer_output(row: &mut EidosCompressionFeltRow, output: &[u64; 4])
 }
 
 const _: () = assert!(NUM_COLS == SHARED_NUM_COLS);
+
+/// Set the terminal footer multiplicity while preserving the core's linear CV encoding.
+/// The caller must supply footer row 3: column 64 is a different witness on fused rows.
+pub fn set_footer_output_multiplicity(row: &mut [Felt], multiplicity: Felt) {
+    let col = super::super::COL_OUT_MULTIPLICITY;
+    // Column 64 contributes 2^8 to CV word 1; its correction coordinate contributes 2^32.
+    let delta = multiplicity - row[col];
+    row[super::layout::F_CV_STORAGE_COLS[1]] -= delta.div_2exp_u64(24);
+    row[col] = multiplicity;
+}
 
 #[cfg(test)]
 mod tests {

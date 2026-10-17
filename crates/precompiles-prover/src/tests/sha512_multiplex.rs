@@ -6,6 +6,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
+use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
 use miden_precompiles_air::hash::sha512::{
     COL_IO_ACT, IO_COLUMNS, IO_ROW_START, NUM_MAIN_COLS, Sha512IoContinuation,
 };
@@ -18,7 +19,7 @@ use crate::{
         trace::generate_trace,
     },
     logup::LookupMessage,
-    primitives::byte_pair_lut::{self, BytePairLutRequires},
+    primitives::byte_pair_lut::{self, BytePairLutRequires, Range16Msg},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     tests::{bus_balance::fold_balance, check_local},
     transcript::eidos::trace::EidosRequires,
@@ -41,6 +42,14 @@ fn requirements(lengths: &[usize]) -> (Sha512CompressionRequires, Sha512IoRequir
 fn io_index(block: usize, lane: usize, column: usize) -> usize {
     (block * compression::COMPRESSION_PERIOD + IO_ROW_START + lane) * NUM_MAIN_COLS
         + IO_COLUMNS[column]
+}
+
+#[test]
+fn sha512_opcode_lookup_packing_preserves_degree() {
+    assert_eq!(Sha512Air.width(), 54);
+    assert_eq!(Sha512Air.aux_width(), 14);
+    assert_eq!(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&Sha512Air).max(), 5);
+    assert_eq!(crate::tests::log_quotient_degree(&Sha512Air), 2);
 }
 
 #[test]
@@ -106,11 +115,28 @@ fn sha512_multiplex_rejects_wrong_row_ownership_and_io_witnesses() {
         assert!(std::panic::catch_unwind(|| check_local(Sha512Air, &bad)).is_err(), "{name}");
     }
     let mut bad = main;
-    bad.values[io_index(0, 15, io::COL_DIGEST_EIDOS)] += Felt::ONE;
+    bad.values[io_index(0, 32, io::COL_DIGEST_EIDOS)] += Felt::ONE;
     assert!(
         std::panic::catch_unwind(|| check_local(Sha512Air, &bad)).is_err(),
-        "digest pointer must be held across IO row 14 -> 15",
+        "digest pointer must be held across the binding row",
     );
+}
+
+#[test]
+fn sha512_multiplex_ranges_the_length_word_before_binding_reuses_its_cells() {
+    let (compression, io) = requirements(&[129]);
+    let mut main = generate_trace(compression, io, &mut BytePairLutRequires::new());
+    // This noncanonical u64 satisfies the bit-length equality in the base field. The
+    // boundary lookup must read its high half on raw row 15, before later stages reuse it.
+    let alias = 129 * 8 + 0xffff_ffff_0000_0001u64;
+    main.values[io_index(1, 15, io::COL_WORD_LO)] = Felt::from_u32(alias as u32);
+    main.values[io_index(1, 15, io::COL_WORD_HI)] = Felt::from_u32((alias >> 32) as u32);
+    check_local(Sha512Air, &main);
+    let challenges = challenges();
+    let mut net = HashMap::new();
+    fold_balance(&Sha512Air, &main, &challenges, &mut net);
+    let invalid = Range16Msg { w: Felt::from_u32((alias >> 32) as u32) };
+    assert_eq!(net[&invalid.encode(&challenges)].0, Felt::ONE);
 }
 
 fn continuation(
@@ -118,22 +144,58 @@ fn continuation(
     block: usize,
     provide: bool,
 ) -> Sha512IoContinuation<Felt> {
-    let lane = if provide { 15 } else { 0 };
+    let lane = if provide { io::IO_PERIOD - 1 } else { 0 };
     let v = |column| main.values[io_index(block, lane, column)];
     Sha512IoContinuation {
         block_id: v(io::COL_BLOCK_ID) + Felt::from_bool(provide),
         len: v(io::COL_LEN),
-        left: v(io::COL_LEFT)
-            - if provide {
-                (0..8).map(|i| v(io::COL_MSG_BEGIN + i)).sum::<Felt>()
-            } else {
-                Felt::ZERO
-            },
-        before: v(if provide { io::COL_MSG_BEGIN + 7 } else { io::COL_BEFORE }),
+        left: v(io::COL_LEFT),
+        before: v(io::COL_BEFORE),
         input_eidos: v(io::COL_INPUT_EIDOS)
             - if provide { Felt::ZERO } else { v(io::COL_CHUNK_ACTIVE) },
         input_head: v(io::COL_INPUT_HEAD),
     }
+}
+
+#[test]
+fn sha512_multiplex_preserves_metadata_across_reused_payload_rows() {
+    let (compression, io) = requirements(&[129]);
+    let main = generate_trace(compression, io, &mut BytePairLutRequires::new());
+    check_local(Sha512Air, &main);
+    // The raw counter is consumed at row 15 and then held through state, digest, binding,
+    // and unused tail rows. Both digest chunks must forward their own first packed word.
+    for (lane, column) in [
+        (16, io::COL_LEFT),
+        (16, io::COL_BEFORE),
+        (24, io::COL_LEN),
+        (26, io::COL_CHUNK_HEAD_DIGEST),
+        (30, io::COL_CHUNK_HEAD_DIGEST),
+        (32, io::COL_INPUT_HEAD),
+        (33, io::COL_DIGEST_EIDOS),
+        (63, io::COL_FINAL_BLOCK),
+    ] {
+        let mut bad = main.clone();
+        bad.values[io_index(1, lane, column)] += Felt::ONE;
+        assert!(
+            std::panic::catch_unwind(|| check_local(Sha512Air, &bad)).is_err(),
+            "metadata/chunk transport at row {lane}, column {column}"
+        );
+    }
+
+    // After binding, reused payload cells have no byte/word meaning or lookup demand.
+    let mut decorated = main.clone();
+    for lane in 33..io::IO_PERIOD {
+        for column in io::COL_RAW_BEGIN..io::NUM_MAIN_COLS {
+            decorated.values[io_index(1, lane, column)] = Felt::from_u32(256 + column as u32);
+        }
+    }
+    check_local(Sha512Air, &decorated);
+    let challenges = challenges();
+    let mut original = HashMap::new();
+    let mut actual = HashMap::new();
+    fold_balance(&Sha512Air, &main, &challenges, &mut original);
+    fold_balance(&Sha512Air, &decorated, &challenges, &mut actual);
+    assert_eq!(actual, original, "unused tail payload must remain invisible to every bus");
 }
 
 #[test]
@@ -149,12 +211,12 @@ fn sha512_multiplex_continuation_binds_every_transport_field() {
         io::COL_BLOCK_ID,
         io::COL_LEN,
         io::COL_LEFT,
-        io::COL_MSG_BEGIN + 7,
+        io::COL_BEFORE,
         io::COL_INPUT_EIDOS,
         io::COL_INPUT_HEAD,
     ] {
         let mut bad = main.clone();
-        bad.values[io_index(0, 15, column)] += Felt::ONE;
+        bad.values[io_index(0, io::IO_PERIOD - 1, column)] += Felt::ONE;
         let changed = continuation(&bad, 0, true).encode(&challenges);
         let mut net = HashMap::new();
         fold_balance(&Sha512Air, &bad, &challenges, &mut net);
@@ -174,7 +236,7 @@ fn sha512_multiplex_endpoints_and_cross_gap_pointers_need_global_closure() {
         net
     };
     let mut bad = main.clone();
-    for lane in 0..16 {
+    for lane in 0..io::IO_PERIOD {
         bad.values[io_index(0, lane, io::COL_FIRST_BLOCK)] = Felt::ZERO;
     }
     check_local(Sha512Air, &bad);
@@ -185,7 +247,7 @@ fn sha512_multiplex_endpoints_and_cross_gap_pointers_need_global_closure() {
     );
 
     let mut bad = main.clone();
-    for lane in 0..16 {
+    for lane in 0..io::IO_PERIOD {
         bad.values[io_index(1, lane, io::COL_INPUT_EIDOS)] += Felt::ONE;
     }
     check_local(Sha512Air, &bad);
@@ -198,7 +260,7 @@ fn sha512_multiplex_endpoints_and_cross_gap_pointers_need_global_closure() {
     let mut bad = main.clone();
     // Replace the final block's IO with a locally valid non-final block. The shared controller
     // still fixes block id 2; no later block can consume its key-3 continuation.
-    for lane in 0..16 {
+    for lane in 0..io::IO_PERIOD {
         for column in 2..io::NUM_MAIN_COLS {
             bad.values[io_index(2, lane, column)] = main.values[io_index(0, lane, column)];
         }

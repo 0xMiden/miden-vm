@@ -6,11 +6,13 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Word, ZERO,
+    Felt, Word, ZERO,
     deferred::{
-        DEFERRED_CHUNKS_DOMAIN, DataChunk, DeferredError, Digest, EidosFrame,
-        MAX_DEFERRED_ELEMENTS, Node, NodeType, PrecompileError,
+        DEFERRED_AND_FRAME, DEFERRED_CHUNKS_DOMAIN, DataChunk, DeferredError, Digest, EidosFrame,
+        MAX_DEFERRED_ELEMENTS, Node, NodeType, PrecompileError, TRUE_DIGEST,
     },
+    serde::Serializable,
+    utils::bytes_to_packed_u32_elements,
 };
 
 use super::SystemEventError;
@@ -22,7 +24,7 @@ use crate::{AdviceProvider, MemoryError, fast::FastProcessor};
 // used by the VM to hash the same payload. The handler recovers the unique semantic frame from it.
 // The eight payload felts form one compression block. The payload is one
 // 8-felt data chunk, `lhs || rhs` child digests for a precompile-owned join, or one `lhs || rhs`
-// pair for a pair-list node. Framework-owned AND nodes are not accepted by this generic event.
+// pair for a pair-list node. The exact framework AND frame registers a non-logging conjunction.
 
 /// Stack offset of the initial Eidos chaining word.
 const DEFERRED_CV_OFFSET: usize = 1;
@@ -75,8 +77,8 @@ fn payload_node_num_elements(n_blocks: u32) -> usize {
 /// Stack-resident registration of an operand-stack deferred node.
 ///
 /// The frame decodes to one [`DataChunk`] (8 field elements), a precompile-owned join payload
-/// containing two 4-felt child digests, or a one-pair pair-list payload containing `lhs || rhs`.
-/// Framework-owned AND and TRUE nodes are not accepted. Frames that semantically require more than
+/// containing two 4-felt child digests, a framework AND, or a one-pair pair-list payload containing
+/// `lhs || rhs`. TRUE nodes are not accepted. Frames that semantically require more than
 /// one data chunk or pair still form a one-chunk or one-pair node here; precompile-specific
 /// evaluation rejects the semantic length mismatch.
 /// Registration is delegated to [`miden_core::deferred::DeferredState::register`], so
@@ -106,7 +108,11 @@ pub(super) fn handle_deferred_register(
         NodeType::Join => {
             let lhs = Digest::new([block[0], block[1], block[2], block[3]]);
             let rhs = Digest::new([block[4], block[5], block[6], block[7]]);
-            Node::join(frame, lhs, rhs).map_err(PrecompileError::from)?
+            if frame == DEFERRED_AND_FRAME {
+                Node::and(lhs, rhs)
+            } else {
+                Node::join(frame, lhs, rhs).map_err(PrecompileError::from)?
+            }
         },
         NodeType::PairList => {
             let lhs = Digest::new([block[0], block[1], block[2], block[3]]);
@@ -169,6 +175,27 @@ fn evaluate_canonical_node(processor: &mut FastProcessor) -> Result<Node, System
         .get_node(&canonical_digest)
         .cloned()
         .ok_or(PrecompileError::MissingNode.into())
+}
+
+/// Computes the original graph of a registered true assertion and replaces its advice-map value.
+pub(super) fn handle_deferred_export_witness(
+    processor: &mut FastProcessor,
+) -> Result<(), SystemEventError> {
+    let digest = processor.stack_get_word(DEFERRED_NODE_DIGEST_OFFSET);
+    if processor.deferred_state_mut().evaluate_digest(digest)? != TRUE_DIGEST {
+        return Err(PrecompileError::AssertionFailed.into());
+    }
+    let witness = processor
+        .deferred_state()
+        .witness_for(digest)
+        .map_err(|_| PrecompileError::InvalidNode)?;
+    let bytes = witness.to_bytes();
+
+    let mut values = bytes_to_packed_u32_elements(&bytes);
+    // The deferred graph's element ceiling bounds its byte length well below the field modulus.
+    values.insert(0, Felt::new_unchecked(bytes.len() as u64));
+    processor.advice.replace_into_map(digest, values)?;
+    Ok(())
 }
 
 /// Pushes `node`'s canonical frame onto the advice stack.
@@ -304,8 +331,7 @@ fn decode_frame_from_cv(cv: Word) -> Result<EidosFrame, SystemEventError> {
 #[cfg(test)]
 mod tests {
     use miden_core::{
-        Felt,
-        deferred::{DEFERRED_AND_FRAME, EidosFrame, deferred_chunks_frame},
+        deferred::{EidosFrame, deferred_chunks_frame},
         program::{StackInputs, domain::DomainTag},
     };
     use miden_precompiles::Keccak256Precompile;
@@ -313,7 +339,68 @@ mod tests {
     use super::*;
 
     #[test]
-    fn register_rejects_framework_and_frames() {
+    fn export_witness_rejects_invalid_roots_even_with_existing_entries() {
+        let mut processor = FastProcessor::new(StackInputs::default());
+        let value = processor
+            .deferred_state_mut()
+            .register(Node::chunks(vec![[ZERO; 8]]).unwrap())
+            .unwrap();
+        for (digest, expected) in [
+            (Word::new([Felt::from_u32(99); 4]), PrecompileError::MissingNode),
+            (TRUE_DIGEST, PrecompileError::InvalidNode),
+            (value, PrecompileError::AssertionFailed),
+        ] {
+            processor.stack_write_word(1, &digest);
+            for existing_entry in [false, true] {
+                if existing_entry {
+                    processor.advice.insert_into_map(digest, vec![Felt::ONE]).unwrap();
+                }
+                let advice = processor.advice.clone();
+                let stack = processor.stack().to_vec();
+                let SystemEventError::Deferred(error) =
+                    handle_deferred_export_witness(&mut processor).unwrap_err()
+                else {
+                    panic!("expected a deferred error");
+                };
+                assert_eq!(
+                    core::mem::discriminant(error.root()),
+                    core::mem::discriminant(&expected)
+                );
+                assert_eq!(processor.advice, advice);
+                assert_eq!(processor.stack(), stack);
+                assert_eq!(processor.deferred_state().root(), TRUE_DIGEST);
+            }
+        }
+    }
+
+    #[test]
+    fn export_witness_preserves_existing_advice_on_budget_failure() {
+        use miden_core::{WORD_SIZE, crypto::merkle::MerkleStore};
+
+        use crate::{ExecutionOptions, advice::AdviceError};
+
+        let mut processor = FastProcessor::new(StackInputs::default());
+        let digest = processor
+            .deferred_state_mut()
+            .register(Node::and(TRUE_DIGEST, TRUE_DIGEST))
+            .unwrap();
+        processor.stack_write_word(1, &digest);
+        processor.advice.insert_into_map(digest, vec![Felt::ONE]).unwrap();
+        let budget =
+            (MerkleStore::default().num_internal_nodes() * 3 * WORD_SIZE + WORD_SIZE + 1) * 8;
+        processor = processor
+            .with_options(ExecutionOptions::default().with_max_advice_size_bytes(budget))
+            .unwrap();
+        let advice = processor.advice.clone();
+        assert!(matches!(
+            handle_deferred_export_witness(&mut processor),
+            Err(SystemEventError::Advice(AdviceError::SizeBudgetExceeded { .. }))
+        ));
+        assert_eq!(processor.advice, advice);
+    }
+
+    #[test]
+    fn register_accepts_only_exact_framework_and_frame() {
         let malformed_and = EidosFrame::new(DEFERRED_AND_FRAME.domain(), [1, 0, 0]);
 
         for (name, frame, exact) in [
@@ -326,6 +413,13 @@ mod tests {
             let mut processor =
                 FastProcessor::new(StackInputs::new(&stack).expect("valid test stack"));
 
+            if exact {
+                handle_deferred_register(&mut processor).expect("exact AND must register");
+                let digest = Node::and(TRUE_DIGEST, TRUE_DIGEST).digest();
+                assert!(processor.deferred_state().get_node(&digest).is_some());
+                assert_eq!(processor.deferred_state().root(), TRUE_DIGEST);
+                continue;
+            }
             let error = match handle_deferred_register(&mut processor) {
                 Ok(()) => panic!("{name} should be rejected"),
                 Err(error) => error,
@@ -333,18 +427,44 @@ mod tests {
             let SystemEventError::Deferred(error) = error else {
                 panic!("{name} returned the wrong error class: {error}");
             };
-            if exact {
-                assert!(
-                    matches!(error.root(), PrecompileError::Other(DeferredError::InvalidFrame)),
-                    "{name} returned {error}",
-                );
-            } else {
-                assert!(
-                    matches!(error.root(), PrecompileError::InvalidNode),
-                    "{name} returned {error}",
-                );
-            }
+            assert!(
+                matches!(error.root(), PrecompileError::InvalidNode),
+                "{name} returned {error}",
+            );
         }
+    }
+
+    #[test]
+    fn register_and_validates_children_without_advancing_logged_root() {
+        let mut processor = FastProcessor::new(StackInputs::default());
+        let logged_root = processor.deferred_state_mut().log_statement(TRUE_DIGEST).unwrap();
+        let value = processor
+            .deferred_state_mut()
+            .register(Node::chunks(vec![[ZERO; 8]]).unwrap())
+            .unwrap();
+        processor.stack_write_word(1, &DEFERRED_AND_FRAME.initial_chaining_word());
+        processor.stack_write_word(9, &TRUE_DIGEST);
+
+        for (child, expected) in [
+            (Word::new([Felt::from_u32(99); 4]), PrecompileError::MissingNode),
+            (value, PrecompileError::AssertionFailed),
+        ] {
+            processor.stack_write_word(5, &child);
+            let SystemEventError::Deferred(error) =
+                handle_deferred_register(&mut processor).unwrap_err()
+            else {
+                panic!("expected invalid AND child");
+            };
+            assert_eq!(core::mem::discriminant(error.root()), core::mem::discriminant(&expected));
+            assert_eq!(processor.deferred_state().root(), logged_root);
+        }
+
+        processor.stack_write_word(5, &logged_root);
+        handle_deferred_register(&mut processor).unwrap();
+        let selected_root = Node::and(logged_root, TRUE_DIGEST).digest();
+        assert_ne!(selected_root, logged_root);
+        assert!(processor.deferred_state().get_node(&selected_root).is_some());
+        assert_eq!(processor.deferred_state().root(), logged_root);
     }
 
     #[test]

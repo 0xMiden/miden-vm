@@ -34,6 +34,7 @@ use crate::{
                 EidosCompressionFeltTraceBlock, generate_felt_trace_block_with_cycle_id,
                 rewrite_felt_footer_for_test,
             },
+            trace::set_footer_output_multiplicity,
         },
         trace::{
             EidosRequires,
@@ -129,7 +130,12 @@ fn set_cycle_metadata(
     let rows = cycle * EIDOS_COMPRESSION_CYCLE_LEN..(cycle + 1) * EIDOS_COMPRESSION_CYCLE_LEN;
     for row in rows {
         trace.values[row * NUM_MAIN_COLS + COL_IN_MULTIPLICITY] = in_mult;
-        trace.values[row * NUM_MAIN_COLS + COL_OUT_MULTIPLICITY] = out_mult;
+        if row % EIDOS_COMPRESSION_CYCLE_LEN == EIDOS_COMPRESSION_CYCLE_LEN - 1 {
+            set_footer_output_multiplicity(
+                &mut trace.values[row * NUM_MAIN_COLS..(row + 1) * NUM_MAIN_COLS],
+                out_mult,
+            );
+        }
         trace.values[row * NUM_MAIN_COLS + COL_IS_CONTINUATION] = is_continuation;
         trace.values[row * NUM_MAIN_COLS + COL_CHAIN_HEAD_ID] = chain_head_id;
     }
@@ -278,10 +284,10 @@ fn air_layout_matches_32_row_eidos_compression_spec() {
     assert_eq!(EIDOS_COMPRESSION_CYCLE_LEN, 32);
     assert_eq!(COL_EIDOS_COMPRESSION_END, 108);
     assert_eq!(COL_IN_MULTIPLICITY, 108);
-    assert_eq!(COL_OUT_MULTIPLICITY, 109);
-    assert_eq!(COL_IS_CONTINUATION, 110);
-    assert_eq!(COL_CHAIN_HEAD_ID, 111);
-    assert_eq!(NUM_MAIN_COLS, 112);
+    assert_eq!(COL_OUT_MULTIPLICITY, 64);
+    assert_eq!(COL_IS_CONTINUATION, 109);
+    assert_eq!(COL_CHAIN_HEAD_ID, 110);
+    assert_eq!(NUM_MAIN_COLS, 111);
     assert_eq!(NUM_AUX_COLS, 20);
 
     let layout =
@@ -423,11 +429,19 @@ fn digests_match_eidos_framing_and_integrated_eidos_compression_air_holds() {
     for cycle in 0..6 {
         assert_eq!(row(cycle, F_COMPRESSION_CYCLE_ID_COL), Felt::from_usize(cycle));
         assert_eq!(row(cycle, COL_IN_MULTIPLICITY), Felt::ONE);
-        assert_eq!(row(cycle, COL_OUT_MULTIPLICITY), Felt::ONE);
+        assert_eq!(
+            compression.values[((cycle + 1) * EIDOS_COMPRESSION_CYCLE_LEN - 1) * NUM_MAIN_COLS
+                + COL_OUT_MULTIPLICITY],
+            Felt::ONE
+        );
     }
     for cycle in 6..8 {
         assert_eq!(row(cycle, COL_IN_MULTIPLICITY), Felt::ZERO);
-        assert_eq!(row(cycle, COL_OUT_MULTIPLICITY), Felt::ZERO);
+        assert_eq!(
+            compression.values[((cycle + 1) * EIDOS_COMPRESSION_CYCLE_LEN - 1) * NUM_MAIN_COLS
+                + COL_OUT_MULTIPLICITY],
+            Felt::ZERO
+        );
         assert_eq!(row(cycle, COL_IS_CONTINUATION), Felt::ZERO);
         assert_eq!(row(cycle, COL_CHAIN_HEAD_ID), Felt::from_usize(cycle));
     }
@@ -726,9 +740,11 @@ fn interning_reuses_logical_span_and_tallies_multiplicity() {
     assert_eq!(total_cycles(&requires), 2);
 
     let compression = generate_trace(requires);
-    for row in compression.values.as_chunks::<NUM_MAIN_COLS>().0 {
+    for (index, row) in compression.values.as_chunks::<NUM_MAIN_COLS>().0.iter().enumerate() {
         assert_eq!(row[COL_IN_MULTIPLICITY], Felt::from_u8(2));
-        assert_eq!(row[COL_OUT_MULTIPLICITY], Felt::from_u8(3));
+        if index % EIDOS_COMPRESSION_CYCLE_LEN == EIDOS_COMPRESSION_CYCLE_LEN - 1 {
+            assert_eq!(row[COL_OUT_MULTIPLICITY], Felt::from_u8(3));
+        }
     }
     crate::tests::check_local(EidosCompressionAir, &compression);
 }
@@ -753,7 +769,9 @@ fn output_only_physical_chain_unbalances_its_owner_messages() {
     for row in 0..EIDOS_COMPRESSION_CYCLE_LEN {
         let offset = row * NUM_MAIN_COLS;
         assert_eq!(output_only.values[offset + COL_IN_MULTIPLICITY], Felt::ONE);
-        assert_eq!(output_only.values[offset + COL_OUT_MULTIPLICITY], Felt::ONE);
+        if row == EIDOS_COMPRESSION_CYCLE_LEN - 1 {
+            assert_eq!(output_only.values[offset + COL_OUT_MULTIPLICITY], Felt::ONE);
+        }
         output_only.values[offset + COL_IN_MULTIPLICITY] = Felt::ZERO;
     }
 

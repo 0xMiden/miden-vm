@@ -2,7 +2,7 @@
 //!
 //! The controller records one Eidos compression request per row. Hash rows carry
 //! `block[8] || cv_in[4]` in `state` and `cv_out[4]` in `row_data`. Merkle rows carry
-//! `block[8] || cv_out[4]` in `state` and `[node_index, node_index_next, is_start, 0]`
+//! `block[8] || cv_out[4]` in `state` and `[node_index, node_index_next, is_start, level]`
 //! in `row_data`.
 
 pub mod flags;
@@ -22,7 +22,9 @@ use crate::{
 // ENTRY POINT
 // ================================================================================================
 
-/// Enforce all controller sub-chiplet constraints.
+/// Enforces controller row validity, operation sequencing, and hash/Merkle routing.
+///
+/// Merkle level increments are enforced by [`enforce_merkle_level_constraints`].
 pub fn enforce_controller_constraints<AB>(
     builder: &mut AB,
     local: &ChipletCols<AB::Var>,
@@ -157,8 +159,8 @@ pub fn enforce_controller_constraints<AB>(
     {
         let builder = &mut builder.when(controller_merkle.clone());
 
-        builder.assert_bool(merkle_start);
-        builder.assert_zero(cols.row_data[3]);
+        builder.assert_bool(merkle_start.clone());
+        builder.when(merkle_start).assert_zero(cols.merkle_level());
 
         let node_index: AB::Expr = cols.merkle_node_index().into();
         let node_index_next: AB::Expr = cols.merkle_node_index_next().into();
@@ -192,6 +194,28 @@ pub fn enforce_controller_constraints<AB>(
         .when(controller_merkle)
         .when(op_final)
         .assert_zero(cols.merkle_node_index_next());
+}
+
+/// Enforces the Merkle path level increment between consecutive rows of a path.
+///
+/// [`enforce_controller_constraints`] requires level zero on the start row.
+pub fn enforce_merkle_level_constraints<AB>(
+    builder: &mut AB,
+    local: &ChipletCols<AB::Var>,
+    next: &ChipletCols<AB::Var>,
+) where
+    AB: MidenAirBuilder,
+{
+    let cols: &ControllerCols<AB::Var> = local.controller();
+    let cols_next: &ControllerCols<AB::Var> = next.controller();
+    let op_final: AB::Expr = local.controller_op_final().into();
+    let merkle_or_padding: AB::Expr = local.controller_merkle_or_padding().into();
+    let controller_merkle = merkle_or_padding * Into::<AB::Expr>::into(cols.s0);
+    let level: AB::Expr = cols.merkle_level().into();
+
+    builder
+        .when(controller_merkle * op_final.not())
+        .assert_eq(cols_next.merkle_level(), level + AB::Expr::ONE);
 }
 
 #[cfg(test)]
@@ -385,6 +409,7 @@ mod tests {
         let mut builder = ConstraintEvalBuilder::new();
         let selectors = build_chiplet_selectors(&mut builder, local, next);
         super::enforce_controller_constraints(&mut builder, local, next, &selectors.controller);
+        super::enforce_merkle_level_constraints(&mut builder, local, next);
         builder.evaluations
     }
 
@@ -401,6 +426,7 @@ mod tests {
     fn valid_merkle_continuation_pair() -> (ChipletCols<Felt>, ChipletCols<Felt>) {
         let local = merkle_controller_row(MP_VERIFY_SELECTORS, 5, true, false);
         let mut next = merkle_controller_row(MP_VERIFY_SELECTORS, 2, false, true);
+        next.chiplets[CTRL_ROW_DATA_BASE + 3] = Felt::ONE;
         set_block_lo(&mut next, merkle_digest(&local));
         (local, next)
     }
@@ -409,6 +435,36 @@ mod tests {
     fn merkle_controller_accepts_valid_index_route() {
         let (local, next) = valid_merkle_continuation_pair();
         assert_accepts(&local, &next, "valid Merkle continuation should satisfy constraints");
+    }
+
+    #[test]
+    fn merkle_controller_rejects_nonzero_level_on_start_row() {
+        let (mut local, mut next) = valid_merkle_continuation_pair();
+        // Keep the increment valid so only the start-level constraint can reject these rows.
+        local.chiplets[CTRL_ROW_DATA_BASE + 3] = Felt::ONE;
+        next.chiplets[CTRL_ROW_DATA_BASE + 3] = Felt::new_unchecked(2);
+
+        assert_rejects(&local, &next, "a Merkle start row must carry level zero");
+    }
+
+    #[test]
+    fn merkle_controller_rejects_unincremented_level_on_next_row() {
+        let (local, mut next) = valid_merkle_continuation_pair();
+        next.chiplets[CTRL_ROW_DATA_BASE + 3] = Felt::ZERO;
+
+        assert_rejects(
+            &local,
+            &next,
+            "a Merkle continuation must carry the previous level plus one",
+        );
+    }
+
+    #[test]
+    fn merkle_controller_rejects_skipped_level_on_next_row() {
+        let (local, mut next) = valid_merkle_continuation_pair();
+        next.chiplets[CTRL_ROW_DATA_BASE + 3] = Felt::new_unchecked(2);
+
+        assert_rejects(&local, &next, "a Merkle continuation must not skip a level");
     }
 
     #[test]

@@ -306,6 +306,7 @@ where
     let block_hi: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
     let mrupdate_id = local.controller_mrupdate_id();
     let node_index = ctrl.merkle_node_index();
+    let level = ctrl.merkle_level();
     let node_index_next: LB::Expr = ctrl.merkle_node_index_next().into();
     let bit: LB::Expr = node_index.into() - node_index_next.double();
     let one_minus_bit: LB::Expr = bit.not();
@@ -321,13 +322,20 @@ where
     ] {
         let gate = f_all * bit_gate;
         let build = move || {
+            let level: LB::Expr = level.into();
             let mrupdate_id: LB::Expr = mrupdate_id.into();
             let node_index: LB::Expr = node_index.into();
             let h = match bit_tag {
                 SiblingBit::Zero => array::from_fn(|i| block_hi[i].into()),
                 SiblingBit::One => array::from_fn(|i| block_lo[i].into()),
             };
-            SiblingMsg { bit: bit_tag, mrupdate_id, node_index, h }
+            SiblingMsg {
+                bit: bit_tag,
+                level,
+                mrupdate_id,
+                node_index,
+                h,
+            }
         };
         if is_add {
             g.add(op_name, gate, build, Deg { v: 5, u: 6 });

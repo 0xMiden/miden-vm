@@ -28,6 +28,7 @@ pub enum SystemEventNode {
     DeferredEvaluate,
     DeferredEvaluateFrame,
     DeferredEvaluatePayload,
+    DeferredExportWitness,
 }
 
 impl From<&SystemEventNode> for SystemEvent {
@@ -50,6 +51,7 @@ impl From<&SystemEventNode> for SystemEvent {
             DeferredEvaluate => Self::DeferredEvaluate,
             DeferredEvaluateFrame => Self::DeferredEvaluateFrame,
             DeferredEvaluatePayload => Self::DeferredEvaluatePayload,
+            DeferredExportWitness => Self::DeferredExportWitness,
         }
     }
 }
@@ -79,6 +81,7 @@ impl fmt::Display for SystemEventNode {
             Self::DeferredEvaluate => write!(f, "evaluate_deferred"),
             Self::DeferredEvaluateFrame => write!(f, "evaluate_deferred_frame"),
             Self::DeferredEvaluatePayload => write!(f, "evaluate_deferred_payload"),
+            Self::DeferredExportWitness => write!(f, "export_deferred_witness"),
         }
     }
 }

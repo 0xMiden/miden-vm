@@ -59,7 +59,7 @@ where
 ///
 /// `preprocessed` must be the trace declared by `air`, or `None` when the AIR
 /// has no preprocessed columns.
-pub(crate) fn build_logup_aux_trace_with_preprocessed<A, F, EF>(
+pub fn build_logup_aux_trace_with_preprocessed<A, F, EF>(
     air: &A,
     main: &RowMajorMatrix<F>,
     preprocessed: Option<&RowMajorMatrix<F>>,
@@ -80,6 +80,16 @@ where
     );
     let num_rows = main.height();
     assert!(num_rows > 0, "LogUp normalization requires a non-empty trace");
+    let preprocessed_width = air.preprocessed_width();
+    assert_eq!(
+        preprocessed.is_some(),
+        preprocessed_width > 0,
+        "LogUp preprocessed presence does not match the AIR declaration",
+    );
+    if let Some(trace) = preprocessed {
+        assert_eq!(trace.width(), preprocessed_width, "LogUp preprocessed width mismatch");
+        assert_eq!(trace.height(), num_rows, "LogUp preprocessed height mismatch");
+    }
 
     let alpha = challenges[0];
     let beta = challenges[1];
@@ -564,6 +574,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
     use miden_core::{
         field::{PrimeCharacteristicRing, QuadFelt},
         utils::Matrix,
@@ -609,8 +621,25 @@ mod tests {
             &lookup_challenges,
         );
         let (expected, sigma_prime) = accumulate_slow(&fractions);
-        let (actual, aux_values) =
-            build_logup_aux_trace_with_preprocessed(&air, &main, Some(&preprocessed), &challenges);
+        let (actual, aux_values) = build_logup_aux_trace(&air, &main, &challenges);
+        let borrowed = air.build_aux_trace_with_preprocessed(
+            &main,
+            Some(&preprocessed),
+            &[],
+            &[],
+            &challenges,
+        );
+        assert_eq!(borrowed.0.values, actual.values);
+        assert_eq!(borrowed.1, aux_values);
+        let handwritten = crate::HandwrittenMidenAir(air).build_aux_trace_with_preprocessed(
+            &main,
+            Some(&preprocessed),
+            &[],
+            &[],
+            &challenges,
+        );
+        assert_eq!(handwritten.0.values, actual.values);
+        assert_eq!(handwritten.1, aux_values);
 
         assert_eq!(aux_values, [sigma_prime]);
         assert_eq!(actual.height(), num_rows);
@@ -620,6 +649,51 @@ mod tests {
                 assert_eq!(value, expected[column][row_idx], "row {row_idx}, column {column}");
             }
         }
+    }
+
+    #[test]
+    fn borrowed_logup_rejects_missing_or_malformed_setup_windows() {
+        use miden_crypto::stark::air::BaseAir;
+
+        let air = crate::MidenAir::AND8_LOOKUP;
+        let main = RowMajorMatrix::new(Felt::zero_vec(8 * air.width()), air.width());
+        let width = air.preprocessed_width();
+        let challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(13)];
+        let assert_rejected = |air: crate::MidenAir,
+                               main: &RowMajorMatrix<Felt>,
+                               preprocessed: Option<&RowMajorMatrix<Felt>>,
+                               expected: &str| {
+            let error = std::panic::catch_unwind(|| {
+                air.build_aux_trace_with_preprocessed(main, preprocessed, &[], &[], &challenges)
+            })
+            .expect_err("invalid setup must fail before fraction accumulation");
+            let message = error
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| {
+                    error.downcast_ref::<std::string::String>().map(std::string::String::as_str)
+                })
+                .expect("validation panic must have a message");
+            assert!(message.contains(expected), "expected {expected:?}, got {message:?}");
+        };
+        for (expected, preprocessed) in [
+            ("LogUp preprocessed presence", None),
+            (
+                "LogUp preprocessed width mismatch",
+                Some(RowMajorMatrix::new(Felt::zero_vec(8 * (width + 1)), width + 1)),
+            ),
+            (
+                "LogUp preprocessed height mismatch",
+                Some(RowMajorMatrix::new(Felt::zero_vec(4 * width), width)),
+            ),
+        ] {
+            assert_rejected(air, &main, preprocessed.as_ref(), expected);
+        }
+        let no_table_air = crate::MidenAir::EIDOS_COMPRESSION;
+        let main =
+            RowMajorMatrix::new(Felt::zero_vec(32 * no_table_air.width()), no_table_air.width());
+        let unexpected = RowMajorMatrix::new(Felt::zero_vec(32), 1);
+        assert_rejected(no_table_air, &main, Some(&unexpected), "LogUp preprocessed presence");
     }
 
     // Small deterministic LCG — reproducible stream for random-fixture cross-check tests.

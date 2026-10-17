@@ -13,6 +13,7 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
+use miden_crypto::hash::keccak::Keccak256;
 use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
@@ -22,8 +23,8 @@ use crate::{
         keccak::{
             round::RoundRequires,
             sponge::{
-                CHUNK_BYTES_RANGE, CLEARED_BYTES_RANGE, COL_B_BEGIN, COL_B_RANGE, COL_CHUNK_PTR,
-                COL_IS_CHUNK_AVAIL, COL_SPONGE_SEQ_ID, COL_STATE_OUT_HI, COL_STATE_OUT_LO,
+                CHUNK_BYTES_RANGE, COL_B_BEGIN, COL_B_RANGE, COL_CHUNK_PTR, COL_IS_CHUNK_AVAIL,
+                COL_IS_ZERO, COL_SPONGE_SEQ_ID, COL_STATE_OUT_HI, COL_STATE_OUT_LO,
                 KeccakSpongeAir, KeccakSpongeMsg, NUM_AUX_COLS, NUM_B_SELECTORS, NUM_MAIN_COLS,
                 NUM_PERIODIC_COLS, PADDED_BYTES_RANGE, SPONGE_PERIOD, STATE_NEW_BYTES_RANGE,
                 STATE_PREV_BYTES_RANGE,
@@ -34,6 +35,8 @@ use crate::{
     logup::{Challenges, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    session::{ChipletAir, Session},
+    tests::bus_balance::session_stack_residual,
     transcript::eidos::trace::EidosRequires,
 };
 
@@ -111,13 +114,13 @@ fn keccak_sponge_msg_encoding_is_bus_distinct_from_memory64() {
 }
 
 #[test]
-fn main_column_layout_partitions_57_indices() {
-    // The 57 main witness columns are partitioned into:
+fn main_column_layout_partitions_49_indices() {
+    // The 49 main witness columns are partitioned into:
     //   - structural (5): sponge_seq_id, act, bytes_left, is_first_block, chunk_ptr (indices 0..4).
     //   - padding-state machine (10): is_zero_p, is_chunk_avail, b_0..b_7 (indices 5..14).
     //   - squeeze value (2): state_out as u32 lo/hi (indices 15..16).
-    //   - byte lanes (40): chunk, state_prev, state_new, cleared, padded — each an 8-byte
-    //     little-endian decomposition (indices 17..56).
+    //   - byte lanes (32): chunk, state_prev, state_new, padded — each an 8-byte little-endian
+    //     decomposition (indices 17..48).
     //
     // The boundary checks below pin the split so layout drift fails fast.
 
@@ -134,10 +137,9 @@ fn main_column_layout_partitions_57_indices() {
     assert_eq!(CHUNK_BYTES_RANGE, 17..25);
     assert_eq!(STATE_PREV_BYTES_RANGE, 25..33);
     assert_eq!(STATE_NEW_BYTES_RANGE, 33..41);
-    assert_eq!(CLEARED_BYTES_RANGE, 41..49);
-    assert_eq!(PADDED_BYTES_RANGE, 49..57);
+    assert_eq!(PADDED_BYTES_RANGE, 41..49);
     // Total matches the spec.
-    assert_eq!(NUM_MAIN_COLS, 57);
+    assert_eq!(NUM_MAIN_COLS, 49);
     // `BaseAir::width()` agrees.
     assert_eq!(<KeccakSpongeAir as BaseAir<Felt>>::width(&KeccakSpongeAir), NUM_MAIN_COLS);
 }
@@ -156,8 +158,8 @@ fn lifted_air_validates_and_layout_matches_spec() {
     assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
     assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
     assert_eq!(layout.num_periodic_columns, NUM_PERIODIC_COLS);
-    assert_eq!(NUM_AUX_COLS, 12);
-    assert_eq!(crate::tests::lookup_column_shape(&air), &[2, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 2]);
+    assert_eq!(NUM_AUX_COLS, 10);
+    assert_eq!(crate::tests::lookup_column_shape(&air), &[2, 3, 1, 3, 3, 2, 3, 3, 2, 2]);
 
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
@@ -193,7 +195,7 @@ fn periodic_columns_match_program() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // The 32 exact fractions are partitioned across 12 columns with at most
+    // The 24 exact fractions are partitioned across 10 columns with at most
     // three entries each. The degree-4 `squeeze` and `chunk-consume`
     // multiplicities remain low-arity, so every constraint stays at degree 5
     // or below and `log_quotient_degree` remains 2.
@@ -548,6 +550,196 @@ fn normalized_xor_operand_is_pinned_on_verbatim_and_lane16_rows() {
             assert!(rejected.is_err(), "forged XOR operand at row {row}, byte {byte}");
         }
     }
+}
+
+#[test]
+fn padding_bytes_are_pinned_at_every_byte_offset() {
+    // Padding must be constrained locally, even if a prover rebuilds the auxiliary trace
+    // consistently with a forged padded-byte witness.
+    for offset in 0..8 {
+        let (requires, ..) = build_sponge_requires(&[Invocation { input: vec![0xa5; offset] }]);
+        let main = generate_trace(requires);
+        crate::tests::check_local(KeccakSpongeAir, &main);
+        for byte in 0..8 {
+            let mut forged = main.clone();
+            forged.values[PADDED_BYTES_RANGE.start + byte] += Felt::ONE;
+            let rejected = std::panic::catch_unwind(|| {
+                crate::tests::check_local(KeccakSpongeAir, &forged);
+            });
+            assert!(rejected.is_err(), "forged padding at offset {offset}, byte {byte}");
+        }
+    }
+}
+
+#[test]
+fn padding_records_only_canonical_inputs_and_state_xors() {
+    // There is one leading pad per invocation, regardless of its block count. Its input-byte
+    // checks and state XOR need sixteen requests; the separate final 0x80 needs another eight.
+    for len in [0, 1, 7, 8, 134, 135, 136, 137, 271, 407] {
+        let mut sponge = SpongeRequires::new();
+        let mut bpl = BytePairLutRequires::new();
+        sponge.require(
+            &Invocation { input: vec![0xa5; len] },
+            &mut ChunkRequires::new(),
+            &mut RoundRequires::new(),
+            &mut bpl,
+            &mut EidosRequires::new(),
+        );
+        let requests: u64 = (0..=u8::MAX)
+            .flat_map(|a| (0..=u8::MAX).map(move |b| (a, b)))
+            .map(|(a, b)| u64::from(bpl.multiplicity_canonical_xor(a, b)))
+            .sum();
+        assert_eq!(requests, 8 * (len as u64 / 8 + 3), "input length {len}");
+    }
+}
+
+#[test]
+fn padding_covers_every_lane_offset_and_matches_independent_keccak() {
+    // Cover every position in a rate block, the extra padding block, and overshoot seams.
+    for len in (0..=137).chain([271, 272, 273, 407]) {
+        let input: Vec<u8> = (0..len).map(|i| (i as u8).wrapping_mul(37)).collect();
+        let expected = Keccak256::hash(&input);
+        let mut requires = SpongeRequires::new();
+        let out = requires.require(
+            &Invocation { input: input.clone() },
+            &mut ChunkRequires::new(),
+            &mut RoundRequires::new(),
+            &mut BytePairLutRequires::new(),
+            &mut EidosRequires::new(),
+        );
+        assert_eq!(
+            out.keccak_digest.to_u32s(),
+            core::array::from_fn(|i| {
+                u32::from_le_bytes(expected.as_bytes()[4 * i..4 * i + 4].try_into().unwrap())
+            }),
+            "input length {len}",
+        );
+        let main = generate_trace(requires);
+        let pad_row = (len / 136) * SPONGE_PERIOD + (len % 136) / 8;
+        let offset = len % 8;
+        for byte in 0..8 {
+            let expected_byte = if byte < offset {
+                input[len - offset + byte]
+            } else {
+                u8::from(byte == offset)
+            };
+            assert_eq!(
+                main.values[pad_row * NUM_MAIN_COLS + PADDED_BYTES_RANGE.start + byte],
+                Felt::from(expected_byte),
+                "input length {len}, byte {byte}",
+            );
+        }
+        crate::tests::check_local(KeccakSpongeAir, &main);
+    }
+}
+
+#[test]
+fn padding_selectors_remain_one_hot_across_the_period() {
+    let (requires, ..) = build_sponge_requires(&[Invocation { input: vec![0x5a] }]);
+    let main = generate_trace(requires);
+    crate::tests::check_local(KeccakSpongeAir, &main);
+    for (first, second) in
+        [(Felt::ZERO, Felt::ZERO), (Felt::ONE, Felt::ONE), (Felt::from(2u8), -Felt::ONE)]
+    {
+        let mut forged = main.clone();
+        for row in forged.values.as_chunks_mut::<NUM_MAIN_COLS>().0 {
+            row[COL_B_BEGIN + 1] = first;
+            row[COL_B_BEGIN + 2] = second;
+        }
+        let rejected = std::panic::catch_unwind(|| {
+            crate::tests::check_local(KeccakSpongeAir, &forged);
+        });
+        assert!(rejected.is_err(), "forged padding selectors {first}, {second}");
+    }
+}
+
+#[test]
+fn padding_rejects_noncanonical_chunk_digits_with_unchanged_packed_words() {
+    use crate::hash::chunk_node_sponge::{ChunkNodeSpongeAir, SPONGE_COL_OFFSET};
+
+    let mut session = Session::new();
+    let (_, claim) = session.keccak(b"");
+    let root = session.assert_and_fold([claim]);
+    let traces = session.finish(root);
+    let mains = traces.mains();
+    let challenges = Challenges::new(
+        QuadFelt::from_u32(7),
+        QuadFelt::from_u32(13),
+        MAX_MESSAGE_WIDTH,
+        NUM_BUS_IDS,
+    );
+    let sponge_idx = ChipletAir::all()
+        .into_iter()
+        .position(|air| air == ChipletAir::ChunkNodeSponge)
+        .unwrap();
+    assert!(session_stack_residual(&mains, &[], &challenges).is_empty());
+
+    for byte in 0..8 {
+        let mut forged = mains[sponge_idx].clone();
+        let start = SPONGE_COL_OFFSET + CHUNK_BYTES_RANGE.start;
+        forged.values[start + byte] += Felt::from(256u16);
+        if byte % 4 < 3 {
+            forged.values[start + byte + 1] -= Felt::ONE;
+        } else {
+            forged.values[start + byte - 1] -= Felt::from(65_536u32);
+        }
+        // These aliases preserve both packed halves, and padding at offset zero ignores
+        // every input byte. Only fixed-table membership can reject the forged digits.
+        assert_eq!(
+            crate::utils::halves_le::<Felt, _>(&forged.values[start..start + 8], 256),
+            [Felt::ZERO, Felt::ZERO]
+        );
+        crate::tests::check_local(ChunkNodeSpongeAir, &forged);
+        assert!(
+            !session_stack_residual(&mains, &[(sponge_idx, &forged)], &challenges).is_empty(),
+            "noncanonical padding input byte {byte}"
+        );
+    }
+}
+
+#[test]
+fn dead_padding_state_remains_bus_inert() {
+    use crate::hash::chunk_node_sponge::{ChunkNodeSpongeAir, SPONGE_COL_OFFSET};
+
+    let mut session = Session::new();
+    let (_, claim) = session.keccak(&vec![0x5a; 300]);
+    let root = session.assert_and_fold([claim]);
+    let traces = session.finish(root);
+    let mains = traces.mains();
+    let sponge_idx = ChipletAir::all()
+        .into_iter()
+        .position(|air| air == ChipletAir::ChunkNodeSponge)
+        .unwrap();
+    let mut decorated = mains[sponge_idx].clone();
+    let width = decorated.width;
+    assert_eq!(decorated.values.len() / width, 128);
+    for slot in 0..SPONGE_PERIOD {
+        let start = (96 + slot) * width + SPONGE_COL_OFFSET;
+        assert_eq!(decorated.values[start + crate::hash::keccak::sponge::COL_ACT], Felt::ZERO);
+        decorated.values[start + COL_B_BEGIN] = Felt::ONE;
+        decorated.values[start + COL_IS_ZERO] = Felt::from(u8::from(slot != 0));
+        // Let bytes_left reset at the preceding active seam while keeping the dead period
+        // locally consistent. Activity suppresses this decorative invocation's request.
+        decorated.values[start + crate::hash::keccak::sponge::COL_IS_FIRST_BLOCK_OF_INVOCATION] =
+            Felt::ONE;
+    }
+    let pad = 96 * width + SPONGE_COL_OFFSET;
+    decorated.values[pad + crate::hash::keccak::sponge::COL_BYTES_LEFT] = Felt::ZERO;
+    decorated.values[pad + CHUNK_BYTES_RANGE.start] = Felt::from(256u16);
+    decorated.values[pad + CHUNK_BYTES_RANGE.start + 1] = -Felt::ONE;
+    decorated.values[pad + PADDED_BYTES_RANGE.start] = Felt::from(1_000u16);
+    decorated.values[(96 + 25) * width + SPONGE_COL_OFFSET + PADDED_BYTES_RANGE.start + 7] =
+        Felt::from(0x80u8);
+    // Dead selectors need not be zero, but their decorative padding must neither constrain
+    // the active hash computation nor emit canonical-input or state-XOR demands.
+    crate::tests::check_local(ChunkNodeSpongeAir, &decorated);
+    let challenges = Challenges::new(
+        QuadFelt::from_u32(7),
+        QuadFelt::from_u32(13),
+        MAX_MESSAGE_WIDTH,
+        NUM_BUS_IDS,
+    );
+    assert!(session_stack_residual(&mains, &[(sponge_idx, &decorated)], &challenges).is_empty());
 }
 
 // TAPE CONSUMPTION
