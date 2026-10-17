@@ -351,6 +351,52 @@ fn smt_witness_rejects_invalid_wire_data_and_corrupt_roots() {
 }
 
 #[test]
+fn smt_witness_rejects_frontier_nodes_masking_forged_empty_openings() {
+    let key = Word::from([1, 2, 3, 7u32]);
+    let full = Smt::with_entries([(key, Word::from([4, 5, 6, 8u32]))]).unwrap();
+    let store: MerkleStore = full.inner_nodes().collect();
+    let leaf = SmtLeaf::new_empty(LeafIndex::new_max_depth(7));
+    let lower = NodeIndex::new(63, 3).unwrap();
+    let upper = lower.parent();
+    let lower_hash = store.get_node(full.root(), lower).unwrap();
+    let upper_hash = store.get_node(full.root(), upper).unwrap();
+
+    // A frontier hash alone authenticates the subtree, but not a value inside it.
+    let bytes = witness_payload(full.root(), &[(lower, lower_hash)], &[], &[]);
+    let partial = SmtWitness::read_from_bytes(&bytes).unwrap().into_partial_smt(64).unwrap();
+    assert_eq!(partial.root(), full.root());
+    assert!(partial.get_value(&key).is_err());
+
+    // The genuine ancestor hash must not mask a forged empty complete leaf, hash-only leaf,
+    // or frontier descendant after the reconstructed empty parent is discarded.
+    for (bytes, expected) in [
+        (
+            witness_payload(full.root(), &[(lower, lower_hash)], core::slice::from_ref(&leaf), &[]),
+            "SMT frontier node at depth 63 position 3 overlaps a descendant",
+        ),
+        (
+            witness_payload(full.root(), &[(lower, lower_hash)], &[], &[(7, leaf.hash())]),
+            "SMT frontier node at depth 63 position 3 overlaps a descendant",
+        ),
+        (
+            witness_payload(
+                full.root(),
+                &[(upper, upper_hash), (lower, *EmptySubtreeRoots::entry(SMT_DEPTH, 63))],
+                &[],
+                &[],
+            ),
+            "SMT frontier node at depth 62 position 1 overlaps a descendant",
+        ),
+    ] {
+        let witness = SmtWitness::read_from_bytes(&bytes).unwrap();
+        assert_eq!(
+            witness.into_partial_smt(128),
+            Err(DeserializationError::InvalidValue(expected.into()))
+        );
+    }
+}
+
+#[test]
 fn budgeted_collections_accept_compact_empty_transports() {
     type Transports = (SparseMerklePath, SmtProof, UniqueNodes, PartialSmt, SmtWitness);
 

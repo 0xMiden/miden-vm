@@ -36,7 +36,7 @@
 
 #### Fixes
 
-- Reject mismatched roots when partial-SMT reconstruction produces only empty parents. Corrected minimum serialized sizes so budgeted collections accept compact sparse paths, SMT proofs, and partial SMTs ([#3848](https://github.com/0xMiden/miden-vm/issues/3848)).
+- [BREAKING] Reject overlapping frontier entries and mismatched roots when partial-SMT reconstruction produces empty parents. Corrected minimum serialized sizes so budgeted collections accept compact sparse paths, SMT proofs, and partial SMTs ([#3848](https://github.com/0xMiden/miden-vm/issues/3848)).
 - [BREAKING] Fixed a Keccak soundness issue that allowed a Keccak assertion to bind its input to the digest of another sponge invocation. Each Keccak node's sponge permutation count must now match its byte length. PVM proofs and verifier roots change ([#3974](https://github.com/0xMiden/miden-vm/pull/3974)).
 - [BREAKING] Fixed an MSM soundness issue that allowed distinct claims sharing one expression to redistribute its terms and bind to incorrect results. Each MSM expression now serves at most one claim, and the prover lays a copy of it for each further claim. PVM proofs and verifier roots change ([#3974](https://github.com/0xMiden/miden-vm/pull/3974)).
 - [BREAKING] Fixed canonical ordering of recursive types and bumped the package format to 8.0.0. Rebuild version 7 packages. Rejected reversed source spans and noncanonical partial-SMT payloads. Fixed RPX debug stack overflow ([#3976](https://github.com/0xMiden/miden-vm/pull/3976)).
