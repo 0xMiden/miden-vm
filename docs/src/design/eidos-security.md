@@ -41,8 +41,9 @@ For an extension of degree `d`, the Eidos challenger samples `d` base-field coef
 therefore use a sampling-space size of `2^(63 * d)`.
 
 Miden's native and MASM recursive verifiers use the quadratic extension (`d = 2`), giving
-`2 * 63 = 126` bits. Their proof-security estimates are conjectured; the digest's 126-bit collision
-ceiling is a separate limit.
+`2 * 63 = 126` bits. Their conjectured security estimates use this support. Their proven estimates
+use 125 bits, which also covers rejecting base-field out-of-domain points. The digest's 126-bit
+collision ceiling is a separate limit.
 
 ## Encryption
 

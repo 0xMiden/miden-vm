@@ -26,6 +26,7 @@
 - Added `Prover::with_hash_lde_blocks` to enable blockwise LDE hashing ([#4075](https://github.com/0xMiden/miden-vm/pull/4075)).
 - Added PVM benchmarks and updated synthetic transaction and recursive verification benchmarks for Eidos ([#4075](https://github.com/0xMiden/miden-vm/pull/4075)).
 - Specialized generated native evaluator arithmetic for faster MVM and PVM proving ([#4082](https://github.com/0xMiden/miden-vm/pull/4082)).
+- Added proven security bounds for verified MVM and PVM proofs. `ProofSecurityParameters::proven_security_report` and `proven_security_level` report the stronger of the unique- and list-decoding bounds, charging the lookup round the list-decoding list size. `miden verify` prints both conjectured and proven levels.
 
 #### Fixes
 

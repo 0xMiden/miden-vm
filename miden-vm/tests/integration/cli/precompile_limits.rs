@@ -256,6 +256,8 @@ fn cli_precompile_verification_status_limits_and_failures() {
         .code(0)
         .stdout(predicate::str::contains("Proof status: deferred"))
         .stdout(predicate::str::contains("VM STARK security level:"))
+        .stdout(predicate::str::contains("bits conjectured,"))
+        .stdout(predicate::str::contains("bits proven"))
         .stdout(predicate::str::contains("Precompile witness: validated natively"))
         .stdout(predicate::str::contains("Precompile STARK: not supplied"))
         .stdout(predicate::str::contains(format!(
@@ -287,6 +289,7 @@ fn cli_precompile_verification_status_limits_and_failures() {
             .code(0)
             .stdout(predicate::str::contains("Proof status: complete"))
             .stdout(predicate::str::contains("Security level:"))
+            .stdout(predicate::str::contains("bits proven"))
             .stdout(predicate::str::contains("validated natively").not());
     }
 

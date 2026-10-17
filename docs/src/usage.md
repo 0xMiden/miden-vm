@@ -187,9 +187,9 @@ missing precompile STARK and outstanding root.
 `verify` accepts valid complete and deferred proofs by default. For a deferred proof, the
 verifier authenticates the VM STARK, checks the witness limits, binds its reconstructed root to
 the VM-authenticated root, and evaluates it natively. Only after these checks succeed does it
-exit with status 0 and print `Proof status: deferred`, the VM STARK security level, the natively
-validated witness, missing precompile STARK, and outstanding root. Native validation does not
-establish a cryptographically complete precompile proof.
+exit with status 0 and print `Proof status: deferred`, the VM STARK conjectured and proven
+security levels, the natively validated witness, missing precompile STARK, and outstanding root.
+Native validation does not establish a cryptographically complete precompile proof.
 
 Use `verify --require-complete` to require a fully STARK-backed proof. A serialized deferred
 artifact then exits with status 1 before STARK verification or native witness evaluation. This
@@ -197,9 +197,9 @@ is a policy rejection based on unauthenticated proof metadata; it does not estab
 proof is valid.
 
 Complete results exit with status 0 with or without `--require-complete`. They print
-`Proof status: complete` and the minimum security level of the verified STARKs (the VM level
-alone if there is no precompile work). Invalid STARKs, malformed or false witnesses, root
-mismatches, and admission failures always fail verification.
+`Proof status: complete` and the minimum conjectured and proven security levels of the verified
+STARKs (the VM levels alone if there is no precompile work). Invalid STARKs, malformed or false
+witnesses, root mismatches, and admission failures always fail verification.
 
 ### Inputs
 

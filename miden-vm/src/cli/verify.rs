@@ -113,10 +113,14 @@ impl VerifyCmd {
             .verify(&claim, &proof)
             .into_diagnostic()
             .wrap_err("Program failed verification!")?;
-        let vm_security_level = outcome.vm_security_parameters().conjectured_security_level();
+        let vm_parameters = outcome.vm_security_parameters();
+        let vm_security_level = (
+            vm_parameters.conjectured_security_level(),
+            vm_parameters.proven_security_level(),
+        );
         if let Some(root) = outcome.outstanding_precompile_root() {
             println!("Proof status: deferred");
-            println!("VM STARK security level: {vm_security_level} bits");
+            println!("VM STARK security level: {}", format_security_level(vm_security_level));
             println!("Precompile witness: validated natively");
             println!("Precompile STARK: not supplied");
             println!("Outstanding precompile root: {root}");
@@ -127,14 +131,17 @@ impl VerifyCmd {
         let security_level = outcome.precompile_security_parameters().map_or(
             vm_security_level,
             |precompile_parameters| {
-                vm_security_level.min(precompile_parameters.conjectured_security_level())
+                (
+                    vm_security_level.0.min(precompile_parameters.conjectured_security_level()),
+                    vm_security_level.1.min(precompile_parameters.proven_security_level()),
+                )
             },
         );
 
         println!(
-            "Verification complete in {} ms. Security level: {} bits",
+            "Verification complete in {} ms. Security level: {}",
             now.elapsed().as_millis(),
-            security_level
+            format_security_level(security_level)
         );
 
         Ok(())
@@ -155,6 +162,11 @@ impl VerifyCmd {
 
         Ok((input_file, output_file))
     }
+}
+
+/// Formats `(conjectured, proven)` whole-bit security levels.
+fn format_security_level((conjectured, proven): (u32, u32)) -> String {
+    format!("{conjectured} bits conjectured, {proven} bits proven")
 }
 
 /// Validates that `kernel_path` has a `.masm` or `.masp` extension, without touching the

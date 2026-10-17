@@ -39,8 +39,8 @@ pub use miden_processor::{
 };
 pub use miden_prover::{PrecompileProvingError, Prover, ProverError, prove_sync};
 pub use miden_verifier::{
-    PrecompileVerificationError, ProofSecurityParameters, SecurityReport, StarkVerificationError,
-    VerificationError, VerificationOutcome, Verifier,
+    PrecompileVerificationError, ProofSecurityParameters, ProvenSecurityReport, SecurityReport,
+    StarkVerificationError, VerificationError, VerificationOutcome, Verifier,
 };
 
 // (private) exports
