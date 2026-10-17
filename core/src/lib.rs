@@ -60,10 +60,6 @@ pub mod crypto {
         };
     }
 
-    pub mod random {
-        pub use miden_crypto::rand::RandomCoin;
-    }
-
     pub mod dsa {
         pub use miden_crypto::dsa::{ecdsa_k256_keccak, falcon512_eidos};
     }
