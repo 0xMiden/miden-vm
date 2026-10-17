@@ -246,6 +246,8 @@ where
 /// [`InputKey::MultiAirFoldCoeff`]. The caller must scatter proof-ordered trace segments to those
 /// offsets and stage `beta^(N - 1 - k)` for the AIR at proof position `k`, where `N = airs.len()`.
 /// Trace widths are padded to `trace_width_alignment` base-field elements before concatenation.
+/// Quotient coordinates use the same commitment-width padding; recomposition uses only the
+/// actual number of chunks from `config`.
 pub fn build_canonical_multi_air_ace_circuit<A>(
     airs: &[A],
     config: AceConfig,
@@ -301,8 +303,16 @@ where
         num_quotient_chunks: shared.num_quotient_chunks,
     };
     let layout = match config.layout {
-        LayoutKind::Native => InputLayout::new_multi_air(counts, num_airs),
-        LayoutKind::Masm => InputLayout::new_masm_multi_air(counts, num_airs),
+        LayoutKind::Native => InputLayout::new_multi_air_with_quotient_alignment(
+            counts,
+            num_airs,
+            trace_width_alignment,
+        ),
+        LayoutKind::Masm => InputLayout::new_masm_multi_air_with_quotient_alignment(
+            counts,
+            num_airs,
+            trace_width_alignment,
+        ),
     };
 
     // Re-emit in stable instance order, each AIR placed at its canonical trace offset and scaled

@@ -12,6 +12,7 @@ mod claim;
 mod node;
 mod precompile;
 mod precompile_registry;
+mod pvm_air_variant;
 mod state;
 mod wire;
 
@@ -23,6 +24,7 @@ pub use miden_crypto::hash::eidos::EidosFrame;
 pub use node::{DataChunk, Digest, Node, NodeType, Payload, TRUE_DIGEST};
 pub use precompile::Precompile;
 pub use precompile_registry::PrecompileRegistry;
+pub use pvm_air_variant::PvmAirVariant;
 pub use state::{DeferredContext, DeferredState};
 pub use wire::{IntegrityError, PrecompileWitness, WireEntry as PrecompileWitnessEntry};
 
@@ -153,5 +155,30 @@ mod tests {
     #[test]
     fn deferred_and_init_cv_matches_its_eidos_derivation() {
         assert_eq!(DEFERRED_AND_INIT_CV, DEFERRED_AND_FRAME.initial_chaining_word(),);
+    }
+
+    #[test]
+    fn pvm_air_variants_reject_unknown_hash_bits() {
+        for bits in 0..=u8::MAX {
+            let variant = PvmAirVariant::from_u8(bits);
+            if bits < 8 {
+                assert_eq!(variant.unwrap().as_u8(), bits);
+            } else {
+                assert!(variant.is_none());
+            }
+        }
+        assert_eq!(PvmAirVariant::default(), PvmAirVariant::ALL);
+        assert_eq!(
+            PvmAirVariant::KECCAK.union(PvmAirVariant::SHA256).union(PvmAirVariant::SHA512),
+            PvmAirVariant::ALL,
+        );
+        for variant in PvmAirVariant::ALL_VARIANTS {
+            assert!(variant.contains(PvmAirVariant::NONE));
+            assert!(PvmAirVariant::ALL.contains(variant));
+            assert!(variant.contains(variant));
+        }
+        assert!(!PvmAirVariant::KECCAK.contains(PvmAirVariant::SHA256));
+        assert!(!PvmAirVariant::SHA256.contains(PvmAirVariant::SHA512));
+        assert!(!PvmAirVariant::SHA512.contains(PvmAirVariant::KECCAK));
     }
 }

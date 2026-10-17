@@ -7,6 +7,8 @@ use miden_core::{
     crypto::hash::Eidos,
     field::{BasedVectorSpace, QuadFelt},
 };
+use miden_lifted_stark::air::{BaseAir, LiftedAir};
+use miden_precompiles_air::ChipletAir;
 
 use super::{
     pvm_layout_const,
@@ -43,9 +45,7 @@ const INITIAL_ACC: [u64; 2] = [7, 9];
 /// Widths are counted in evaluation slots (one per committed base column, or per auxiliary
 /// coordinate); each slot is one extension-field value, hence two felts on the wire.
 ///
-/// This benchmark reads the widths from the checked-in generated hook's header. The verifier-side
-/// `pvm_row_geometry_is_the_one_the_hook_was_rendered_from` test ties that header to the
-/// [`miden_precompiles_air::ChipletAir`] declarations.
+/// Widths come from the native full relation, independently of the trusted MASM descriptor.
 #[derive(Clone, Debug)]
 struct RowGeometry {
     preprocessed: Vec<usize>,
@@ -64,35 +64,27 @@ struct Segment {
     blocks: u32,
 }
 
-const HOOK: &str = include_str!("../../asm/sys/pvm/ood_frames.masm");
-
-/// Reads a rendered `label: a + b + ... = total scalar evaluations` line as its parts.
-fn rendered_parts(label: &str) -> Vec<usize> {
-    let line = HOOK
-        .lines()
-        .map(|line| line.trim().trim_start_matches('#').trim())
-        .find(|line| line.starts_with(label))
-        .unwrap_or_else(|| panic!("the generated hook declares no {label} widths"));
-    let rest = line.strip_prefix(label).expect("prefix matched above");
-    let parts = rest.split('=').next().expect("split yields at least one part");
-    parts
-        .split('+')
-        .map(|part| {
-            part.split_whitespace()
-                .next()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or_else(|| panic!("could not read {label} widths from {line:?}"))
-        })
-        .collect()
-}
-
 impl RowGeometry {
     fn pvm() -> Self {
+        let airs = ChipletAir::all();
+        let alignment = 8;
         Self {
-            preprocessed: rendered_parts("preprocessed:"),
-            main: rendered_parts("main:"),
-            aux: rendered_parts("aux:"),
-            quotient: rendered_parts("quotient:")[0],
+            preprocessed: airs
+                .iter()
+                .map(|air| BaseAir::<Felt>::preprocessed_width(air).next_multiple_of(alignment))
+                .collect(),
+            main: airs
+                .iter()
+                .map(|air| BaseAir::<Felt>::width(air).next_multiple_of(alignment))
+                .collect(),
+            aux: airs
+                .iter()
+                .map(|air| {
+                    (LiftedAir::<Felt, QuadFelt>::aux_width(air) * 2).next_multiple_of(alignment)
+                })
+                .collect(),
+            quotient: (miden_precompiles_air::security::AIR_SHAPE.num_quotient_chunks as usize * 2)
+                .next_multiple_of(alignment),
         }
     }
 
@@ -201,10 +193,8 @@ fn synthetic_row(row_felts: u32) -> Vec<Felt> {
 // TESTS
 // ================================================================================================
 
-/// The header the segment table is read from must agree with the row the hook actually pipes.
-///
-/// A stale header would give every oracle below the wrong destinations while the hook itself was
-/// still self-consistent, so the sweep would compare two different geometries and pass.
+/// The trusted descriptor must agree with the independently derived full native row geometry.
+/// Otherwise the sweep would compare different geometries while appearing self-consistent.
 #[test]
 fn pvm_row_geometry_matches_the_generated_hook() {
     let geometry = RowGeometry::pvm();
@@ -212,11 +202,17 @@ fn pvm_row_geometry_matches_the_generated_hook() {
     assert_eq!(geometry.aux.len(), NUM_CHIPLETS);
     assert_eq!(geometry.preprocessed.len(), NUM_CHIPLETS);
 
-    let blocks: u32 = HOOK
-        .lines()
-        .find_map(|line| line.split_once("read as ")?.1.split_whitespace().next()?.parse().ok())
-        .expect("the generated hook declares a block count");
-    assert_eq!(blocks, geometry.row_felts() / BLOCK_FELTS, "the declared block count is stale");
+    let source = "use miden::core::sys::pvm::variants
+                  use miden::core::sys::pvm::layout
+                  begin exec.variants::load exec.layout::ood_row_felts swap drop end";
+    let (output, _) = build_test!(source, &[], &[7])
+        .execute_for_output()
+        .expect("full variant metadata must load");
+    assert_eq!(
+        output.stack.get_element(0),
+        Some(Felt::from_u32(geometry.row_felts())),
+        "the trusted OOD row extent must match the native full relation"
+    );
 }
 
 // GENERATED HOOK
@@ -237,8 +233,10 @@ fn generated_hook_source(heights: &[u64], ood_ptr: u32) -> String {
     format!(
         "use {{LOG_AIR_TRACE_LENGTHS_PTR}} from miden::core::stark::constants
 use miden::core::sys::pvm::ood_frames
+use miden::core::sys::pvm::variants
 
 begin
+        exec.variants::load
 {stores}
         clk mem_store.{CLK0_PTR}
         exec.ood_frames::stage_proof_order_maps
@@ -324,6 +322,7 @@ fn generated_hook_scatters_both_rows_to_canonical_addresses() {
     for heights in height_fixtures() {
         let order = proof_order(&heights);
         let mut advice = AdviceStack::new();
+        advice.append_element(Felt::from_u8(7));
         advice.append_for_adv_pipe(&wire);
         let (output, _) = build_test!(generated_hook_source(&heights, ood_ptr), &[], &advice)
             .execute_for_output()

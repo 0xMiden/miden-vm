@@ -10,6 +10,8 @@ use miden_core::{
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_RATE, domains::LMCS_LEAF};
+use miden_lifted_stark::air::{BaseAir, LiftedAir};
+use miden_precompiles_air::{ChipletAir, PvmAirVariant, security};
 
 use super::pvm_layout_const;
 use crate::helpers::{masm_push_word, read_memory_felt};
@@ -28,19 +30,6 @@ const QUOTIENT_COM_PTR: u32 = 3_223_322_648;
 
 const ALPHA: [u64; 2] = [3, 5];
 const DOMAIN_GENERATOR: u64 = 7;
-
-fn commitment_width(current_ptr: &str, next_ptr: &str) -> usize {
-    let current_ptr = pvm_layout_const(current_ptr);
-    let next_ptr = pvm_layout_const(next_ptr);
-    let ood_felts = next_ptr.checked_sub(current_ptr).expect("PVM OOD regions are ordered");
-    let ood_felts = usize::try_from(ood_felts).expect("PVM OOD extent fits in usize");
-    assert_eq!(
-        ood_felts % EXT_DEGREE,
-        0,
-        "PVM OOD region must contain whole extension-field evaluations"
-    );
-    ood_felts / EXT_DEGREE
-}
 
 fn row(width: usize, offset: u32) -> Vec<Felt> {
     (0..width)
@@ -88,8 +77,10 @@ fn source(preprocessed_root: Word, main_root: Word, aux_root: Word, quotient_roo
             DOMAIN_OFFSET_PTR, LDE_DOMAIN_INFO_PTR, TMP2_PTR
         }} from miden::core::stark::constants
         use miden::core::sys::pvm::deep_queries
+        use miden::core::sys::pvm::variants
 
         begin
+            exec.variants::load
             # Query word: [natural index, full tree depth, natural index, 0].
             push.0.{index}.{depth}.{index} push.{query_ptr} mem_storew_le dropw
 
@@ -118,7 +109,9 @@ fn source(preprocessed_root: Word, main_root: Word, aux_root: Word, quotient_roo
             padw
             push.{query_end_ptr}.{query_ptr}
             padw
+            clk mem_store.500
             exec.deep_queries::compute_deep_composition_polynomial_queries
+            clk mem_store.501
         end
         "#,
         index = FULL_INDEX,
@@ -142,23 +135,40 @@ fn source(preprocessed_root: Word, main_root: Word, aux_root: Word, quotient_roo
     )
 }
 
-#[test]
-fn pvm_deep_query_hook_authenticates_folded_setup_index_and_reduces_every_group() {
+#[rstest::rstest]
+#[case(PvmAirVariant::NONE)]
+#[case(PvmAirVariant::KECCAK)]
+#[case(PvmAirVariant::SHA256)]
+#[case(PvmAirVariant::KECCAK.union(PvmAirVariant::SHA256))]
+#[case(PvmAirVariant::SHA512)]
+#[case(PvmAirVariant::KECCAK.union(PvmAirVariant::SHA512))]
+#[case(PvmAirVariant::SHA256.union(PvmAirVariant::SHA512))]
+#[case(PvmAirVariant::ALL)]
+fn pvm_deep_query_hook_authenticates_folded_setup_index_and_reduces_every_group(
+    #[case] variant: PvmAirVariant,
+) {
     let result_row_ptr = pvm_layout_const("CURRENT_TRACE_ROW_PTR");
+    let airs: Vec<_> =
+        ChipletAir::all().into_iter().filter(|air| air.is_in_variant(variant)).collect();
     let widths = [
-        commitment_width("PREPROCESSED_CURRENT_PTR", "MAIN_CURRENT_PTR"),
-        commitment_width("MAIN_CURRENT_PTR", "AUX_CURRENT_PTR"),
-        commitment_width("AUX_CURRENT_PTR", "QUOTIENT_CURRENT_PTR"),
-        commitment_width("QUOTIENT_CURRENT_PTR", "PREPROCESSED_NEXT_PTR"),
+        airs.iter()
+            .map(|air| BaseAir::<Felt>::preprocessed_width(air).next_multiple_of(EIDOS_RATE))
+            .sum(),
+        airs.iter()
+            .map(|air| BaseAir::<Felt>::width(air).next_multiple_of(EIDOS_RATE))
+            .sum(),
+        airs.iter()
+            .map(|air| {
+                (LiftedAir::<Felt, QuadFelt>::aux_width(air) * EXT_DEGREE)
+                    .next_multiple_of(EIDOS_RATE)
+            })
+            .sum(),
+        (security::derive_air_shape_for(variant).num_quotient_chunks as usize * EXT_DEGREE)
+            .next_multiple_of(EIDOS_RATE),
     ];
-    let next_widths = [
-        commitment_width("PREPROCESSED_NEXT_PTR", "MAIN_NEXT_PTR"),
-        commitment_width("MAIN_NEXT_PTR", "AUX_NEXT_PTR"),
-        commitment_width("AUX_NEXT_PTR", "QUOTIENT_NEXT_PTR"),
-        commitment_width("QUOTIENT_NEXT_PTR", "AUX_BUS_BOUNDARY_PTR"),
-    ];
-    assert_eq!(widths, next_widths, "current and next PVM OOD rows must have equal geometry");
-
+    if variant == PvmAirVariant::ALL {
+        assert_eq!(widths, [8, 584, 312, 8], "full PVM commitment-group geometry changed");
+    }
     let [preprocessed_width, main_width, aux_width, quotient_width] = widths;
     let preprocessed = row(preprocessed_width, 100);
     let main = row(main_width, 200);
@@ -180,19 +190,26 @@ fn pvm_deep_query_hook_authenticates_folded_setup_index_and_reduces_every_group(
     ];
 
     let program = source(preprocessed_root, main_root, aux_root, quotient_root);
-    let (output, _) = build_test!(&program, &[], &[], store, advice_map)
+    let (output, _) = build_test!(&program, &[], &[u64::from(variant.as_u8())], store, advice_map)
         .execute_for_output()
         .expect("PVM DEEP-query hook must execute");
+
+    let cycles = read_memory_felt(&output, 501).as_canonical_u64()
+        - read_memory_felt(&output, 500).as_canonical_u64();
+    assert!(
+        cycles <= 1_500,
+        "a full PVM query took {cycles} cycles; avoid per-block dispatch"
+    );
 
     let opened_row: Vec<Felt> =
         preprocessed.into_iter().chain(main).chain(aux).chain(quotient).collect();
     let scratch_row_width = pvm_layout_const("PREPROCESSED_COM_PTR")
         .checked_sub(result_row_ptr)
         .expect("PVM query scratch precedes the preprocessed commitment");
-    assert_eq!(
-        opened_row.len(),
-        usize::try_from(scratch_row_width).expect("PVM query scratch extent fits in usize"),
-        "OOD commitment-group widths must match the independently allocated query scratch row"
+    assert!(
+        opened_row.len()
+            <= usize::try_from(scratch_row_width).expect("PVM query scratch extent fits in usize"),
+        "query rows must fit the independently allocated scratch region"
     );
     for (i, expected) in opened_row.iter().enumerate() {
         assert_eq!(

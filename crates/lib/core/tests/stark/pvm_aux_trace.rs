@@ -111,8 +111,10 @@ fn hook_source(log_heights: &LogHeights) -> String {
         }} from miden::core::stark::constants
         use miden::core::sys::pvm::aux_trace
         use miden::core::sys::pvm::ood_frames
+        use miden::core::sys::pvm::variants
 
         begin
+            exec.variants::load
             {}
             exec.ood_frames::stage_proof_order_maps
             exec.aux_trace::observe_aux_trace
@@ -133,8 +135,10 @@ fn reference_source(log_heights: &LogHeights) -> String {
         }} from miden::core::stark::constants
         use miden::core::stark::random_coin
         use miden::core::sys::pvm::layout
+        use miden::core::sys::pvm::variants
 
         begin
+            exec.variants::load
             {}
             exec.random_coin::generate_aux_randomness
 
@@ -308,8 +312,8 @@ fn proof_ordered_normalized_sums(
 
 fn advice(normalized_sums: &[Vec<QuadFelt>; 12], log_heights: &LogHeights) -> Vec<u64> {
     let ordered = proof_ordered_normalized_sums(normalized_sums, log_heights);
-    COMMITMENT
-        .into_iter()
+    std::iter::once(7)
+        .chain(COMMITMENT)
         .chain(ordered.iter().flat_map(|value| {
             value
                 .as_basis_coefficients_slice()

@@ -8,6 +8,7 @@
 
 use miden_ace_codegen::{MAX_ORDER_AIRS, ProofOrderMapsConfig, render_proof_order_maps};
 use miden_core::Felt;
+use miden_precompiles_air::PvmAirVariant;
 
 use super::{
     pvm_layout_const,
@@ -74,6 +75,11 @@ impl Relation {
     /// Stores the heights and runs the pass under the sentinels.
     fn source(&self, heights: &[u64]) -> String {
         let module = self.module;
+        let (variant_import, variant_load) = if module == "pvm" {
+            ("use miden::core::sys::pvm::variants", "    exec.variants::load")
+        } else {
+            ("", "")
+        };
         let stores = heights
             .iter()
             .enumerate()
@@ -92,8 +98,10 @@ impl Relation {
         format!(
             "use {{LOG_AIR_TRACE_LENGTHS_PTR}} from miden::core::stark::constants
 use miden::core::sys::{module}::ood_frames
+{variant_import}
 
 begin
+{variant_load}
 {stores}
 {memory_guards}
     push.{s3}.{s2}.{s1}.{s0}
@@ -109,7 +117,9 @@ end",
 
     fn check(&self, heights: &[u64]) {
         let source = self.source(heights);
-        let test = build_test!(source.as_str(), &[]);
+        let variant = [u64::from(PvmAirVariant::ALL.as_u8())];
+        let advice_stack = if self.module == "pvm" { variant.as_slice() } else { &[] };
+        let test = build_test!(source.as_str(), &[], advice_stack);
         let (output, _) = test.execute_for_output().unwrap_or_else(|err| {
             panic!("{}: the proof-order pass must execute for {heights:?}: {err}", self.module)
         });
@@ -323,17 +333,23 @@ fn pvm_maps_match_the_stable_sort_for_seeded_random_heights() {
     }
 }
 
-/// The generated pass must be branch-free: a fixed comparator network of `cswap`s, no loops and
-/// no conditionals, so its cost and its control flow are independent of the proof order. Both the
-/// four-input VM network and the twelve-input PVM network are Batcher's merge exchange, generated
-/// by `miden-ace-codegen`.
+/// Each generated network must be branch-free: fixed `cswap`s, no loops and no conditionals, so
+/// its cost and control flow are independent of the proof order. PVM's public dispatcher selects
+/// a private network by the variant's AIR count. Pin each network's comparator count independently
+/// of the renderer, including the size-optimal ten-input network.
 #[test]
 fn the_pass_is_a_fixed_comparator_network() {
-    for (hook, comparators) in [
-        (include_str!("../../asm/sys/vm/ood_frames.masm"), 5),
-        (include_str!("../../asm/sys/pvm/ood_frames.masm"), 41),
+    let vm = include_str!("../../asm/sys/vm/ood_frames.masm");
+    let pvm = include_str!("../../asm/sys/pvm/ood_frames.masm");
+    for (hook, procedure, comparators) in [
+        (vm, "pub proc stage_proof_order_maps()", 5),
+        (pvm, "proc stage_proof_order_maps_8()", 19),
+        (pvm, "proc stage_proof_order_maps_9()", 26),
+        (pvm, "proc stage_proof_order_maps_10()", 29),
+        (pvm, "proc stage_proof_order_maps_11()", 37),
+        (pvm, "proc stage_proof_order_maps_12()", 41),
     ] {
-        let start = hook.find("pub proc stage_proof_order_maps").expect("the pass is generated");
+        let start = hook.find(procedure).expect("the network is generated");
         let body = &hook[start..];
         let body = &body[..body.find("\nend").expect("the pass ends")];
         let ops: Vec<_> = body

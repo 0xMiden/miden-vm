@@ -170,8 +170,10 @@ fn source(heights: &[u64]) -> String {
 use miden::core::sys::pvm::aux_trace
 use miden::core::sys::pvm::layout
 use miden::core::sys::pvm::ood_frames
+use miden::core::sys::pvm::variants
 
 begin
+    exec.variants::load
 {stores}
     exec.ood_frames::stage_proof_order_maps
 
@@ -193,7 +195,7 @@ end",
 
 /// Runs one fixture and returns the boundary region, in address order.
 fn run(heights: &[u64]) -> Vec<u64> {
-    let advice = wire_values();
+    let advice: Vec<_> = std::iter::once(7).chain(wire_values()).collect();
     let source = source(heights);
     let (output, _) = build_test!(source.as_str(), &[], &advice)
         .execute_for_output()

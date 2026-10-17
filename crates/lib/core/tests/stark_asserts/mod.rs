@@ -285,13 +285,18 @@ fn production_fold_staging_module(relation: &str, evaluator_source: &str) -> Str
     let start = evaluator_source
         .find(HEADER)
         .unwrap_or_else(|| panic!("{relation}: the evaluator declares no fold staging"));
+    let attributes = evaluator_source[..start]
+        .lines()
+        .last()
+        .filter(|line| line.starts_with('@'))
+        .unwrap_or("");
     let body = &evaluator_source[start + HEADER.len()..];
     let end = body.find("\nend").expect("the fold staging procedure ends") + "\nend".len();
     format!(
         "use {{
             CONSTRAINT_COMPOSITION_COEFS_PTR, LOG_AIR_TRACE_LENGTHS_PTR
         }} from miden::core::stark::constants\nuse miden::core::sys::{relation}::layout\n\n\
-         pub {HEADER}{}\n",
+         {attributes}\npub {HEADER}{}\n",
         &body[..end]
     )
 }
@@ -301,6 +306,7 @@ struct FoldRelation {
     /// Layout, evaluator, and proof-order modules below `miden::core::sys`.
     relation: &'static str,
     num_airs: usize,
+    variant: Option<miden_precompiles_air::PvmAirVariant>,
     stark_vars_ptr: u32,
     /// The checked-in generated evaluator, whose private staging procedure is under test.
     evaluator: &'static str,
@@ -311,24 +317,35 @@ impl FoldRelation {
         Self {
             relation: "vm",
             num_airs: miden_air::MIDEN_AIR_COUNT,
+            variant: None,
             stark_vars_ptr: crate::stark::vm_layout_const("AUXILIARY_ACE_INPUTS_PTR"),
             evaluator: include_str!("../../asm/sys/vm/constraints_eval.masm"),
         }
     }
 
-    fn pvm() -> Self {
+    fn pvm(variant: miden_precompiles_air::PvmAirVariant) -> Self {
         Self {
             relation: "pvm",
-            num_airs: miden_precompiles_air::NUM_CHIPLETS,
-            stark_vars_ptr: crate::stark::pvm_layout_const("AUXILIARY_ACE_INPUTS_PTR"),
+            num_airs: miden_precompiles_air::ChipletAir::all()
+                .into_iter()
+                .filter(|air| air.is_in_variant(variant))
+                .count(),
+            variant: Some(variant),
+            stark_vars_ptr: crate::stark::pvm_variant_layout_const(
+                variant,
+                "AUXILIARY_ACE_INPUTS_PTR",
+            ),
             evaluator: include_str!("../../asm/sys/pvm/constraints_eval.masm"),
         }
     }
 
     /// The test program with the production staging attached as `test::fold`.
     fn test(&self, heights: &[u64], beta: (u64, u64)) -> miden_utils_testing::Test {
+        assert_eq!(heights.len(), self.num_airs, "each selected AIR needs a height");
         let source = self.source(heights, beta);
-        let mut test = build_test!(source.as_str(), &[]);
+        let advice: Vec<_> =
+            self.variant.map(|variant| u64::from(variant.as_u8())).into_iter().collect();
+        let mut test = build_test!(source.as_str(), &[], &advice);
         test.add_module(
             "test::fold",
             production_fold_staging_module(self.relation, self.evaluator),
@@ -346,13 +363,20 @@ impl FoldRelation {
         let relation = self.relation;
         let num_airs = self.num_airs;
         let (beta0, beta1) = beta;
+        let (variant_import, initialize) = if self.variant.is_some() {
+            ("use miden::core::sys::pvm::variants", "exec.variants::load")
+        } else {
+            ("", "")
+        };
         let mut source = format!(
             "use {{
                 CONSTRAINT_COMPOSITION_COEFS_PTR, LOG_AIR_TRACE_LENGTHS_PTR
             }} from miden::core::stark::constants
              use miden::core::sys::{relation}::ood_frames
+             {variant_import}
              use test::fold
-             begin\n"
+             begin
+                 {initialize}\n"
         );
         for (i, height) in heights.iter().enumerate() {
             let offset = if i == 0 { String::new() } else { format!(" add.{i}") };
@@ -495,7 +519,9 @@ fn assert_fold_staging_case(relation: &FoldRelation, heights: &[u64], beta_value
 fn stage_air_fold_coefficients_places_beta_powers_by_proof_order_position() {
     const BETA: (u64, u64) = (7, 3);
 
-    for relation in [FoldRelation::vm(), FoldRelation::pvm()] {
+    for relation in std::iter::once(FoldRelation::vm())
+        .chain(miden_precompiles_air::PvmAirVariant::ALL_VARIANTS.map(FoldRelation::pvm))
+    {
         for heights in fold_height_cases(relation.num_airs) {
             assert_fold_staging_case(&relation, &heights, BETA);
         }
@@ -508,10 +534,11 @@ fn stage_air_fold_coefficients_places_beta_powers_by_proof_order_position() {
 /// full nonzero-beta matrix above.
 #[test]
 fn stage_air_fold_coefficients_handles_zero_beta() {
-    for (relation, heights) in [
-        (FoldRelation::vm(), vec![12, 10, 12, 11]),
-        (FoldRelation::pvm(), vec![12, 12, 11, 11, 13, 13, 12, 11, 13, 12]),
-    ] {
+    for relation in std::iter::once(FoldRelation::vm())
+        .chain(miden_precompiles_air::PvmAirVariant::ALL_VARIANTS.map(FoldRelation::pvm))
+    {
+        let template = [12, 10, 12, 11, 13, 13, 12, 11, 13, 12, 11, 13];
+        let heights = template[..relation.num_airs].to_vec();
         let positions = proof_order_positions(&heights);
         assert_ne!(
             positions,
@@ -733,6 +760,8 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         // Twelve live position cells, followed by one ID per proof position.
         ("pvm/layout.masm", "PROOF_ORDER_POSITIONS_PTR", 0, Until("PROOF_ORDER_IDS_PTR")),
         ("pvm/layout.masm", "PROOF_ORDER_IDS_PTR", 0, Fixed(12)),
+        // Trusted variant shape, READ boundaries, and selected procedure digests.
+        ("pvm/layout.masm", "VARIANT_METADATA_PTR", 0, Fixed(140)),
         ("vm/layout.masm", "NUM_KERNEL_PROCEDURES_PTR", 0, Fixed(1)),
         ("vm/layout.masm", "CONTROL_ALIGNMENT_PADDING_PTR", 0, Fixed(3)),
         ("vm/layout.masm", "BUS_GAMMA_PTR", 0, Fixed(4)),
@@ -990,6 +1019,53 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
                 "relation source visited twice: {source}"
             );
         }
+    }
+
+    // The PVM READ regions are selected at runtime. Audit the largest relation's native
+    // boundaries, keeping the fixed scratch frame disjoint from the entire stream reservation.
+    let pvm = relation_declarations.get_mut("pvm/layout.masm").expect("PVM layout is present");
+    for name in [
+        "AUX_RAND_ELEM_PTR",
+        "PREPROCESSED_CURRENT_PTR",
+        "MAIN_CURRENT_PTR",
+        "AUX_CURRENT_PTR",
+        "QUOTIENT_CURRENT_PTR",
+        "PREPROCESSED_NEXT_PTR",
+        "MAIN_NEXT_PTR",
+        "AUX_NEXT_PTR",
+        "QUOTIENT_NEXT_PTR",
+        "AUX_BUS_BOUNDARY_PTR",
+        "AUXILIARY_ACE_INPUTS_PTR",
+        "ACE_CIRCUIT_STREAM_PTR",
+    ] {
+        assert!(
+            pvm.insert(name.to_string(), u64::from(crate::stark::pvm_layout_const(name)))
+                .is_none()
+        );
+    }
+    const METADATA_START: u64 = 3_225_452_000;
+    const METADATA_END: u64 = METADATA_START + 140;
+    pvm.insert("VARIANT_METADATA_PTR".to_string(), METADATA_START);
+
+    // Immediate metadata writes are not constant declarations. Every variant must initialize
+    // exactly this complete region, so moving or extending it cannot escape the manifest.
+    let variants = include_str!("../../asm/sys/pvm/variants.masm");
+    for variant in miden_precompiles_air::PvmAirVariant::ALL_VARIANTS {
+        let header = format!("proc initialize_{}\n", variant.as_u8());
+        let body = variants.split_once(&header).expect("variant initializer exists").1;
+        let body = body.split_once("\nend").expect("variant initializer ends").0;
+        let mut writes = Vec::new();
+        for token in body.split_whitespace() {
+            if let Some(address) = token.strip_prefix("mem_storew_le.") {
+                writes.push(address.parse::<u64>().expect("metadata write has a fixed address"));
+            }
+        }
+        writes.sort_unstable();
+        assert_eq!(
+            writes,
+            (METADATA_START..METADATA_END).step_by(4).collect::<Vec<_>>(),
+            "variant {variant:?} must initialize the declared metadata region exactly once"
+        );
     }
 
     let extent_between =

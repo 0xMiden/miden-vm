@@ -48,13 +48,72 @@ mod vm_sigma_scatter;
 use verifier_stack::{CALLER_WORD, VERIFIER_RETURN, VerifierStack};
 
 pub(crate) fn pvm_layout_const(name: &str) -> u32 {
+    pvm_variant_layout_const(miden_precompiles_air::PvmAirVariant::ALL, name)
+}
+
+pub(crate) fn pvm_variant_layout_const(
+    variant: miden_precompiles_air::PvmAirVariant,
+    name: &str,
+) -> u32 {
+    use miden_ace_codegen::{
+        AceConfig, InputKey, LayoutKind, build_canonical_multi_air_ace_circuit,
+    };
+    use miden_precompiles_air::ChipletAir;
+
     let source = include_str!("../../asm/sys/pvm/layout.masm");
     let prefix = format!("const {name} = ");
-    let value = source
+    if let Some(value) = source
         .lines()
         .find_map(|line| line.trim().strip_prefix(&prefix)?.parse::<u64>().ok())
-        .unwrap_or_else(|| panic!("missing generated PVM layout constant {name}"));
-    u32::try_from(value).expect("PVM layout pointer must fit in u32")
+    {
+        return u32::try_from(value).expect("PVM layout pointer must fit in u32");
+    }
+
+    // Standalone hook tests derive selected READ addresses from the native circuit. Production
+    // loads these addresses from the trusted variant metadata.
+    static CIRCUITS: [std::sync::OnceLock<miden_ace_codegen::AceCircuit<QuadFelt>>; 8] =
+        [const { std::sync::OnceLock::new() }; 8];
+    let circuit = CIRCUITS[usize::from(variant.as_u8())].get_or_init(|| {
+        let airs: Vec<_> =
+            ChipletAir::all().into_iter().filter(|air| air.is_in_variant(variant)).collect();
+        let log_quotient_degree = airs
+            .iter()
+            .map(miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, ChipletAir>)
+            .max()
+            .expect("the PVM AIR set is non-empty");
+        build_canonical_multi_air_ace_circuit(
+            &airs,
+            AceConfig {
+                num_quotient_chunks: 1 << log_quotient_degree,
+                layout: LayoutKind::Masm,
+            },
+            8,
+        )
+        .expect("selected PVM circuit must build")
+    });
+    let key = match name {
+        "AUX_RAND_ELEM_PTR" => InputKey::AuxRandBeta,
+        "PREPROCESSED_CURRENT_PTR" => InputKey::Preprocessed { offset: 0, index: 0 },
+        "MAIN_CURRENT_PTR" => InputKey::Main { offset: 0, index: 0 },
+        "AUX_CURRENT_PTR" => InputKey::AuxCoord { offset: 0, index: 0, coord: 0 },
+        "QUOTIENT_CURRENT_PTR" => InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 },
+        "PREPROCESSED_NEXT_PTR" => InputKey::Preprocessed { offset: 1, index: 0 },
+        "MAIN_NEXT_PTR" => InputKey::Main { offset: 1, index: 0 },
+        "AUX_NEXT_PTR" => InputKey::AuxCoord { offset: 1, index: 0, coord: 0 },
+        "QUOTIENT_NEXT_PTR" => InputKey::QuotientChunkCoord { offset: 1, chunk: 0, coord: 0 },
+        "AUX_BUS_BOUNDARY_PTR" => InputKey::AuxBusBoundary(0),
+        "AUXILIARY_ACE_INPUTS_PTR" => InputKey::Alpha,
+        "AIR_FOLD_COEFFICIENTS_PTR" => InputKey::MultiAirFoldCoeff(0),
+        "ACE_CIRCUIT_STREAM_PTR" => {
+            return pvm_layout_const("PUBLIC_INPUTS_PTR")
+                + u32::try_from(2 * circuit.layout().total_inputs)
+                    .expect("PVM READ extent must fit in u32");
+        },
+        _ => panic!("unknown generated PVM layout constant {name}"),
+    };
+    pvm_layout_const("PUBLIC_INPUTS_PTR")
+        + u32::try_from(2 * circuit.layout().index(key).expect("PVM READ boundary must exist"))
+            .expect("PVM READ offset must fit in u32")
 }
 
 pub(crate) fn vm_layout_const(name: &str) -> u32 {
@@ -1839,18 +1898,10 @@ fn staged_fold_coefficients_fit_the_declared_ace_input_region() {
         "the shared module must not carry a second fold-coefficient algorithm"
     );
 
-    for (relation, layout_const, evaluator) in [
-        (
-            "vm",
-            vm_layout_const as fn(&str) -> u32,
-            include_str!("../../asm/sys/vm/constraints_eval.masm"),
-        ),
-        (
-            "pvm",
-            pvm_layout_const as fn(&str) -> u32,
-            include_str!("../../asm/sys/pvm/constraints_eval.masm"),
-        ),
-    ] {
+    {
+        let relation = "vm";
+        let layout_const = vm_layout_const;
+        let evaluator = include_str!("../../asm/sys/vm/constraints_eval.masm");
         let num_airs = masm_const(evaluator, "NUM_AIRS", relation);
         let region_felts =
             layout_const("ACE_CIRCUIT_STREAM_PTR") - layout_const("AUXILIARY_ACE_INPUTS_PTR");
@@ -1896,6 +1947,38 @@ fn staged_fold_coefficients_fit_the_declared_ace_input_region() {
              {region_felts}-felt AUXILIARY_ACE_INPUTS_PTR region; enlarge the region before \
              staging them"
         );
+    }
+
+    // PVM stages through trusted variant metadata rather than a fixed evaluator offset. Check
+    // every selected address against the native READ layout and its circuit-stream boundary.
+    let evaluator = include_str!("../../asm/sys/pvm/constraints_eval.masm");
+    assert!(evaluator.contains(&format!("proc {STAGING_PROC}")));
+    assert!(!evaluator.contains(&format!("pub proc {STAGING_PROC}")));
+    assert!(evaluator.contains("exec.layout::air_fold_coefficients_ptr"));
+    for variant in miden_precompiles_air::PvmAirVariant::ALL_VARIANTS {
+        let num_airs = miden_precompiles_air::ChipletAir::all()
+            .into_iter()
+            .filter(|air| air.is_in_variant(variant))
+            .count() as u32;
+        let auxiliary = pvm_variant_layout_const(variant, "AUXILIARY_ACE_INPUTS_PTR");
+        let coefficients = pvm_variant_layout_const(variant, "AIR_FOLD_COEFFICIENTS_PTR");
+        let stream = pvm_variant_layout_const(variant, "ACE_CIRCUIT_STREAM_PTR");
+        assert_eq!(coefficients, auxiliary + first_selector_offset + selector_stride * num_airs);
+        assert!(coefficients + COEFFICIENT_STRIDE * num_airs <= stream);
+        let source = format!(
+            "use miden::core::sys::pvm::layout
+             use miden::core::sys::pvm::variants
+             begin
+                 exec.variants::load
+                 exec.layout::num_airs push.{num_airs} assert_eq
+                 exec.layout::auxiliary_ace_inputs_ptr push.{auxiliary} assert_eq
+                 exec.layout::air_fold_coefficients_ptr push.{coefficients} assert_eq
+                 exec.layout::ace_circuit_stream_ptr push.{stream} assert_eq
+             end"
+        );
+        build_test!(source.as_str(), &[], &[u64::from(variant.as_u8())])
+            .execute_for_output()
+            .unwrap_or_else(|err| panic!("PVM variant {variant:?}: invalid staging layout: {err}"));
     }
 }
 

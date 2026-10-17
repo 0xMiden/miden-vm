@@ -13,7 +13,9 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use core::{fmt::Write as _, ops::Range};
+use core::fmt::Write as _;
+#[cfg(test)]
+use core::ops::Range;
 
 use miden_ace_codegen::{
     EXT_DEGREE, InputKey, InputLayout, OodScatterPlan, ProofOrderMapsConfig,
@@ -21,7 +23,7 @@ use miden_ace_codegen::{
 };
 use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::{BaseAir, LiftedAir};
-use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS};
+use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS, PvmAirVariant};
 
 /// Per-AIR trace regions are padded to this width before concatenation into a commitment group.
 const LMCS_ALIGNMENT: usize = 8;
@@ -44,18 +46,27 @@ pub(crate) const OOD_SCATTER_TABLE_FELTS: u32 = 96;
 /// Each slot is one quadratic-extension value, hence [`EXT_DEGREE`] felts on the wire.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PvmOodGeometry {
-    preprocessed: Vec<usize>,
-    main: Vec<usize>,
-    aux: Vec<usize>,
+    pub(crate) preprocessed: Vec<usize>,
+    pub(crate) main: Vec<usize>,
+    pub(crate) aux: Vec<usize>,
     /// Shared across chiplets: the quotient is one recomposed matrix, not a per-AIR one.
-    quotient: usize,
+    pub(crate) quotient: usize,
 }
 
 impl PvmOodGeometry {
     /// Derives the row geometry from the chiplet declarations and cross-checks it against the
     /// circuit's own input layout.
+    #[cfg(test)]
     pub(crate) fn from_input_layout(layout: &InputLayout) -> Result<Self, String> {
-        let airs = ChipletAir::all();
+        Self::for_variant(layout, PvmAirVariant::ALL)
+    }
+
+    pub(crate) fn for_variant(
+        layout: &InputLayout,
+        variant: PvmAirVariant,
+    ) -> Result<Self, String> {
+        let airs: Vec<_> =
+            ChipletAir::all().into_iter().filter(|air| air.is_in_variant(variant)).collect();
         let mut preprocessed = Vec::with_capacity(NUM_CHIPLETS);
         let mut main = Vec::with_capacity(NUM_CHIPLETS);
         let mut aux = Vec::with_capacity(NUM_CHIPLETS);
@@ -72,7 +83,7 @@ impl PvmOodGeometry {
             );
             aux_values.push(<ChipletAir as LiftedAir<Felt, QuadFelt>>::num_aux_values(air));
         }
-        if aux_values.as_slice() != [1usize; NUM_CHIPLETS].as_slice() {
+        if aux_values.iter().any(|&count| count != 1) {
             return Err(format!(
                 "the PVM proof-order boundary scatter requires exactly one auxiliary value per \
                  chiplet, got {aux_values:?}"
@@ -82,7 +93,8 @@ impl PvmOodGeometry {
             preprocessed,
             main,
             aux,
-            quotient: layout.counts.num_quotient_chunks * EXT_DEGREE,
+            quotient: (layout.counts.num_quotient_chunks * EXT_DEGREE)
+                .next_multiple_of(LMCS_ALIGNMENT),
         };
 
         for (name, derived, actual) in [
@@ -150,27 +162,9 @@ impl PvmOodGeometry {
     }
 
     /// `adv_pipe` blocks in one out-of-domain row.
+    #[cfg(test)]
     pub(crate) fn row_blocks(&self) -> usize {
         self.row_felts() / ADV_PIPE_BLOCK_FELTS
-    }
-
-    /// Committed-row widths and the MASM constants that bind their DEEP-query LMCS frames.
-    ///
-    /// These are base-field widths: auxiliary columns have already been expanded into extension
-    /// coordinates above, while out-of-domain transport expands every evaluation once more in
-    /// [`Self::row_felts`].
-    #[cfg(feature = "constants-tools")]
-    pub(crate) fn deep_query_groups(&self) -> [(&'static str, &'static str, usize); 4] {
-        [
-            (
-                "PREPROCESSED_ROW_DOUBLE_WORDS",
-                "PREPROCESSED_LMCS_INIT_CV",
-                self.preprocessed.iter().sum(),
-            ),
-            ("MAIN_ROW_DOUBLE_WORDS", "MAIN_LMCS_INIT_CV", self.main.iter().sum()),
-            ("AUX_ROW_DOUBLE_WORDS", "AUX_LMCS_INIT_CV", self.aux.iter().sum()),
-            ("QUOTIENT_ROW_DOUBLE_WORDS", "QUOTIENT_LMCS_INIT_CV", self.quotient),
-        ]
     }
 }
 
@@ -178,6 +172,7 @@ impl PvmOodGeometry {
 // ================================================================================================
 
 /// Live ranges occupied within the out-of-domain scatter table.
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PvmScatterTableLayout {
     /// `(row-relative destination, pipe digest address)` pairs for order-dependent segments.
@@ -204,7 +199,7 @@ fn pvm_scatter_plan(geometry: &PvmOodGeometry) -> Result<OodScatterPlan, String>
 }
 
 /// Derives the occupied scatter-table ranges from the same plan that renders the ingest hook.
-#[cfg(any(test, feature = "constants-tools"))]
+#[cfg(test)]
 pub(crate) fn pvm_scatter_table_layout(
     geometry: &PvmOodGeometry,
 ) -> Result<PvmScatterTableLayout, String> {
@@ -218,63 +213,133 @@ pub(crate) fn pvm_scatter_table_layout(
 // RENDERING
 // ================================================================================================
 
-fn format_sum(parts: &[usize]) -> String {
-    parts.iter().map(usize::to_string).collect::<Vec<_>>().join(" + ")
+/// Distinct pipe lengths used by every variant, in their compact digest-table order.
+pub(crate) fn pvm_pipe_lengths() -> Vec<usize> {
+    let mut lengths: Vec<_> = ChipletAir::all()
+        .iter()
+        .flat_map(|air| {
+            [
+                <ChipletAir as BaseAir<Felt>>::width(air).next_multiple_of(LMCS_ALIGNMENT),
+                (<ChipletAir as LiftedAir<Felt, QuadFelt>>::aux_width(air) * EXT_DEGREE)
+                    .next_multiple_of(LMCS_ALIGNMENT),
+            ]
+        })
+        .map(|width| width * EXT_DEGREE / ADV_PIPE_BLOCK_FELTS)
+        .chain([2])
+        .collect();
+    lengths.sort_unstable();
+    lengths.dedup();
+    lengths
 }
 
-/// Renders `asm/sys/pvm/ood_frames.masm` from the chiplet widths.
-///
-/// `ids_word_aligned` states whether the `id_by_pos` table starts on a word boundary, which lets
-/// the proof-order pass write complete groups of four IDs with word stores.
+/// Renders shared OOD ingestion and the five possible proof-order sort networks.
 pub(crate) fn render_pvm_ood_frames(
     geometry: &PvmOodGeometry,
     ids_word_aligned: bool,
 ) -> Result<String, String> {
-    let plan = pvm_scatter_plan(geometry)?;
-    let row_felts = geometry.row_felts();
-    let row_blocks = geometry.row_blocks();
-    let proof_order_maps = render_proof_order_maps(&ProofOrderMapsConfig {
-        num_airs: NUM_CHIPLETS,
-        heights_ptr: "push.LOG_AIR_TRACE_LENGTHS_PTR",
-        pos_by_id_ptr: "exec.layout::proof_order_positions_ptr",
-        id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
-        // Ten heights do not form a single word and are read once per proof.
-        word_load_heights: false,
-        word_store_ids: ids_word_aligned,
-    })
-    .map_err(|err| err.to_string())?;
+    pvm_scatter_plan(geometry)?;
+    let lengths = pvm_pipe_lengths();
+    let mut out = format!(
+        "# GENERATED by `{}` — do not edit by hand.\nuse {{LOG_AIR_TRACE_LENGTHS_PTR}} from miden::core::stark::constants\nuse miden::core::stark::types\nuse miden::core::sys::pvm::layout\n\n",
+        crate::ace_constants::GENERATED_BY,
+    );
+    for blocks in &lengths {
+        writeln!(out, "proc pipe_{blocks}\n    repeat.{blocks}\n        adv_pipe\n        horner_eval_ext\n        compress\n    end\nend\n").unwrap();
+    }
+    for count in 8..=NUM_CHIPLETS {
+        let maps = render_proof_order_maps(&ProofOrderMapsConfig {
+            num_airs: count,
+            heights_ptr: "push.LOG_AIR_TRACE_LENGTHS_PTR",
+            pos_by_id_ptr: "exec.layout::proof_order_positions_ptr",
+            id_by_pos_ptr: "exec.layout::proof_order_ids_ptr",
+            word_load_heights: false,
+            word_store_ids: ids_word_aligned,
+        })
+        .map_err(|err| err.to_string())?;
+        out.push_str(&maps.replace(
+            "pub proc stage_proof_order_maps",
+            &format!("proc stage_proof_order_maps_{count}"),
+        ));
+    }
+    out.push_str("\npub proc stage_proof_order_maps()\n");
+    for count in 8..NUM_CHIPLETS {
+        writeln!(out, "    exec.layout::num_airs eq.{count}\n    if.true exec.stage_proof_order_maps_{count} else").unwrap();
+    }
+    out.push_str("    exec.stage_proof_order_maps_12\n");
+    for _ in 8..NUM_CHIPLETS {
+        out.push_str("    end\n");
+    }
+    out.push_str("end\n\npub proc stage_ood_scatter_table()\n");
+    for (index, blocks) in lengths.iter().enumerate() {
+        writeln!(out, "    procref.pipe_{blocks} exec.layout::ood_scatter_table_ptr add.{} mem_storew_le dropw", 52+4*index).unwrap();
+    }
+    out.push_str(
+        r#"    exec.layout::ood_scatter_table_ptr add.4
+    exec.layout::main_ood_pipe_offsets_ptr
+    exec.layout::main_ood_offsets_ptr
+    exec.stage_group
+    exec.layout::ood_scatter_table_ptr add.4
+    exec.layout::num_airs mul.2 add
+    exec.layout::aux_ood_pipe_offsets_ptr
+    exec.layout::aux_ood_offsets_ptr
+    exec.stage_group
+end
 
-    let procedures = plan.render(&proof_order_maps);
+# Input: [offsets_ptr, pipe_offsets_ptr, slots_ptr]. Every source is trusted selected metadata.
+proc stage_group
+    push.0
+    dup exec.layout::num_airs u32lt
+    while.true
+        dup exec.layout::proof_order_positions_ptr add mem_load mul.2 dup.4 add
+        # [pair, i, offsets, pipe_offsets, slots]
+        dup.1 dup.3 add mem_load
+        dup.1 mem_store
+        dup.1 dup.4 add mem_load exec.layout::ood_scatter_table_ptr add
+        dup.1 add.1 mem_store
+        drop add.1
+        dup exec.layout::num_airs u32lt
+    end
+    drop drop drop drop
+end
 
-    let mut out = String::new();
-    write!(
-        out,
-        r#"# GENERATED by `{generated_by}` — do not edit by hand.
-use {{LOG_AIR_TRACE_LENGTHS_PTR}} from miden::core::stark::constants
-use miden::core::stark::types
-use miden::core::sys::pvm::layout
+#! Absorbs proof-ordered OOD values while scattering them into canonical READ addresses.
+pub proc process_row_ood_evaluations(
+    state: types::EidosState,
+    evaluation: types::HornerState,
+) -> (types::EidosState, types::HornerState)
+    dup.12 exec.layout::ood_scatter_table_ptr mem_store
+    # BytePairLut is the sole preprocessed occupant in every variant.
+    exec.pipe_2
 
-# Per-row OOD layout uses LMCS alignment {LMCS_ALIGNMENT}:
-#   preprocessed: {preprocessed_parts} = {preprocessed} scalar evaluations
-#   main:         {main_parts} = {main} scalar evaluations
-#   aux:          {aux_parts} = {aux} scalar evaluations
-#   quotient:     {quotient} scalar evaluations
-# The advice stream supplies {row_felts} base felts, read as {row_blocks} `adv_pipe` blocks,
-# split into {segments} segments ({dispatched} of them order-dependent).
-
-{procedures}"#,
-        generated_by = crate::ace_constants::GENERATED_BY,
-        preprocessed_parts = format_sum(&geometry.preprocessed),
-        preprocessed = geometry.preprocessed.iter().sum::<usize>(),
-        main_parts = format_sum(&geometry.main),
-        main = geometry.main.iter().sum::<usize>(),
-        aux_parts = format_sum(&geometry.aux),
-        aux = geometry.aux.iter().sum::<usize>(),
-        quotient = geometry.quotient,
-        segments = plan.segment_count(),
-        dispatched = plan.dispatched_slots(),
-    )
-    .expect("writing to String cannot fail");
+"#,
+    );
+    // Every supported relation has at least eight AIRs. A shared unrolled prefix and four
+    // guarded suffixes avoid carrying loop state through the full 16-cell pipe ABI.
+    for position in 0..2 * NUM_CHIPLETS {
+        if position >= 16 && position % 2 == 0 {
+            writeln!(out, "    exec.layout::num_airs u32gt.{}\n    if.true", position / 2).unwrap();
+        }
+        writeln!(
+            out,
+            "    exec.layout::ood_scatter_table_ptr dup add.{} mem_load swap mem_load add\n    swap.13 drop\n    exec.layout::ood_scatter_table_ptr add.{} mem_load\n    dynexec",
+            4 + 2 * position,
+            5 + 2 * position,
+        )
+        .unwrap();
+    }
+    for _ in 8..NUM_CHIPLETS {
+        out.push_str("    end\n");
+    }
+    out.push_str(
+        r#"
+    exec.layout::ood_scatter_table_ptr mem_load exec.layout::quotient_row_offset add
+    swap.13 drop
+    exec.pipe_2
+    exec.layout::ood_scatter_table_ptr mem_load exec.layout::ood_row_felts add
+    swap.13 drop
+end
+"#,
+    );
     Ok(out)
 }
 

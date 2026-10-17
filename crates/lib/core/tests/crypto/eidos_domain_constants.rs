@@ -1,5 +1,7 @@
+use miden_ace_codegen::EXT_DEGREE;
 use miden_core::{
     Felt, Word,
+    field::QuadFelt,
     program::domain::{
         DEFERRED_CHUNKS, EXECUTION_CLAIM, FALCON_PRODUCT_CHECK, FALCON_PRODUCT_CHECK_PAYLOAD_LEN,
         KERNEL_COMMITMENT, PROOF_REQUEST, STARK_TRANSCRIPT, domain_tag,
@@ -12,7 +14,11 @@ use miden_crypto::hash::eidos::{
         LMCS_LEAF, MMR_PEAKS, SMT_BUCKET_LEAF,
     },
 };
+use miden_lifted_stark::air::{BaseAir, LiftedAir};
 use miden_precompiles::{Keccak256Precompile, Sha256Precompile, Sha512Precompile};
+use miden_precompiles_air::{ChipletAir, PvmAirVariant, security};
+
+use crate::helpers::read_memory_felt;
 
 const EIDOS: &str = include_str!("../../asm/crypto/hashes/eidos.masm");
 const SMT: &str = include_str!("../../asm/collections/smt.masm");
@@ -249,17 +255,59 @@ fn masm_initial_chaining_words_match_rust() {
     ] {
         assert_word(VM_DEEP_QUERIES, name, Eidos::init_chaining_word(LMCS_LEAF, len));
     }
-    for (cv_name, blocks_name) in [
-        ("PREPROCESSED_LMCS_INIT_CV", "PREPROCESSED_ROW_DOUBLE_WORDS"),
-        ("MAIN_LMCS_INIT_CV", "MAIN_ROW_DOUBLE_WORDS"),
-        ("AUX_LMCS_INIT_CV", "AUX_ROW_DOUBLE_WORDS"),
-        ("QUOTIENT_LMCS_INIT_CV", "QUOTIENT_ROW_DOUBLE_WORDS"),
-    ] {
-        let blocks = u32::try_from(masm_scalar(PVM_DEEP_QUERIES, blocks_name))
-            .expect("PVM LMCS block count exceeds u32");
-        let encoded_len = blocks
-            .checked_mul(EIDOS_BLOCK_WIDTH as u32)
-            .expect("PVM LMCS encoded length exceeds u32");
-        assert_word(PVM_DEEP_QUERIES, cv_name, Eidos::init_chaining_word(LMCS_LEAF, encoded_len));
+    let blocks = u32::try_from(masm_scalar(PVM_DEEP_QUERIES, "PREPROCESSED_ROW_DOUBLE_WORDS"))
+        .expect("PVM LMCS block count exceeds u32");
+    let encoded_len = blocks
+        .checked_mul(EIDOS_BLOCK_WIDTH as u32)
+        .expect("PVM LMCS encoded length exceeds u32");
+    assert_word(
+        PVM_DEEP_QUERIES,
+        "PREPROCESSED_LMCS_INIT_CV",
+        Eidos::init_chaining_word(LMCS_LEAF, encoded_len),
+    );
+}
+
+#[test]
+fn pvm_variant_initial_chaining_words_match_rust() {
+    let source = "use miden::core::sys::pvm::variants
+use miden::core::sys::pvm::layout
+
+begin
+    exec.variants::load
+    exec.layout::main_lmcs_init_cv mem_storew_le.1000 dropw
+    exec.layout::aux_lmcs_init_cv mem_storew_le.1004 dropw
+    exec.layout::quotient_lmcs_init_cv mem_storew_le.1008 dropw
+end";
+    for variant in PvmAirVariant::ALL_VARIANTS {
+        let airs: Vec<_> =
+            ChipletAir::all().into_iter().filter(|air| air.is_in_variant(variant)).collect();
+        // LMCS pads each AIR's row separately before concatenating the commitment group.
+        let widths = [
+            airs.iter()
+                .map(|air| BaseAir::<Felt>::width(air).next_multiple_of(EIDOS_BLOCK_WIDTH))
+                .sum::<usize>(),
+            airs.iter()
+                .map(|air| {
+                    (LiftedAir::<Felt, QuadFelt>::aux_width(air) * EXT_DEGREE)
+                        .next_multiple_of(EIDOS_BLOCK_WIDTH)
+                })
+                .sum(),
+            (security::derive_air_shape_for(variant).num_quotient_chunks as usize * EXT_DEGREE)
+                .next_multiple_of(EIDOS_BLOCK_WIDTH),
+        ];
+        let test = build_test!(source, &[], &[u64::from(variant.as_u8())]);
+        let (output, _) = test.execute_for_output().expect("PVM variant metadata must load");
+        for (group, width) in widths.into_iter().enumerate() {
+            let cv = Word::new(core::array::from_fn(|lane| {
+                read_memory_felt(&output, 1000 + (group * Word::NUM_ELEMENTS + lane) as u32)
+            }));
+            let encoded_len = u32::try_from(width).expect("PVM LMCS encoded length exceeds u32");
+            assert_eq!(
+                cv,
+                Eidos::init_chaining_word(LMCS_LEAF, encoded_len),
+                "PVM variant {} commitment group {group} initial CV drifted",
+                variant.as_u8(),
+            );
+        }
     }
 }
