@@ -16,11 +16,13 @@ extern crate alloc;
 mod air;
 mod builder;
 pub mod debug;
+mod encoding;
 mod statement;
 mod util;
 
 pub use air::{ConstraintCounts, ConstraintDegrees, LiftedAir, MultiAir, ReductionError};
 pub use builder::LiftedAirBuilder;
+pub use encoding::{StatementEncoding, StatementField};
 // Re-export upstream p3-air types so downstream crates never need to depend on p3-air
 // directly.
 pub use p3_air::{

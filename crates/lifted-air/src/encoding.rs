@@ -1,0 +1,77 @@
+//! The default multi-AIR statement transcript schema.
+
+use p3_challenger::CanObserve;
+use p3_field::Field;
+
+/// Fields of the default statement binding, in transcript order.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StatementField {
+    PublicValuesLength,
+    PublicValues,
+    MaxAuxInputs,
+    AuxInputsLength,
+    AuxInputs,
+}
+
+/// Static dimensions of the default statement and its instance-shape suffix.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StatementEncoding {
+    pub num_public_values: usize,
+    pub max_aux_inputs: usize,
+    pub num_aux_inputs: usize,
+    pub num_airs: usize,
+}
+
+impl StatementEncoding {
+    pub const FIELDS: [StatementField; 5] = [
+        StatementField::PublicValuesLength,
+        StatementField::PublicValues,
+        StatementField::MaxAuxInputs,
+        StatementField::AuxInputsLength,
+        StatementField::AuxInputs,
+    ];
+
+    pub const fn statement_len(self) -> usize {
+        3 + self.num_public_values + self.num_aux_inputs
+    }
+
+    /// Statement values followed by the instance count and one height per instance.
+    pub const fn shape_len(self) -> usize {
+        self.statement_len() + 1 + self.num_airs
+    }
+
+    /// Emit the default binding. The fixed field order is also consumed by code generators.
+    #[inline]
+    pub fn observe<F: Field, C: CanObserve<F>>(
+        self,
+        challenger: &mut C,
+        air_inputs: &[F],
+        aux_inputs: &[F],
+    ) {
+        debug_assert_eq!(air_inputs.len(), self.num_public_values, "public value count");
+        debug_assert_eq!(aux_inputs.len(), self.num_aux_inputs, "auxiliary input count");
+        for field in Self::FIELDS {
+            match field {
+                StatementField::PublicValuesLength => {
+                    challenger.observe(F::from_usize(self.num_public_values))
+                },
+                StatementField::PublicValues => {
+                    for &value in air_inputs {
+                        challenger.observe(value);
+                    }
+                },
+                StatementField::MaxAuxInputs => {
+                    challenger.observe(F::from_usize(self.max_aux_inputs))
+                },
+                StatementField::AuxInputsLength => {
+                    challenger.observe(F::from_usize(self.num_aux_inputs))
+                },
+                StatementField::AuxInputs => {
+                    for &value in aux_inputs {
+                        challenger.observe(value);
+                    }
+                },
+            }
+        }
+    }
+}

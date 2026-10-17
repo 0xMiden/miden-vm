@@ -29,7 +29,7 @@ fn masm_const(source: &str, name: &str) -> u64 {
 }
 
 fn pvm_const(name: &str) -> u64 {
-    masm_const(include_str!("../../asm/sys/pvm/mod.masm"), name)
+    masm_const(include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/mod.masm")), name)
 }
 
 fn pvm_word(prefix: &str) -> [u64; 4] {

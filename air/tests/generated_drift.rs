@@ -13,11 +13,6 @@
 //! - **Polynomial identity testing**: independently captured graphs evaluate to identical
 //!   per-constraint values on pseudorandom leaf assignments (4 seeds). Unlike the structural check,
 //!   this does not rely on shared-builder id canonicalization or the commutative-sort pass.
-//!
-//! If these fail after an intentional constraint change, the artifact is stale:
-//! `cargo run -p miden-core-lib --features constraints-tools --bin
-//! regenerate-evaluator -- --write`
-
 use std::collections::HashMap;
 
 use miden_air::{AIRS, HandwrittenMidenAir};
@@ -202,4 +197,15 @@ fn mix(seed: u64, tag: u64, a: u64, b: u64) -> u64 {
     x ^= x >> 27;
     x = x.wrapping_mul(0x94d049bb133111eb);
     x ^ (x >> 31)
+}
+
+#[test]
+fn generated_degrees_match_handwritten() {
+    use miden_crypto::stark::air::{ConstraintDegrees, LiftedAir};
+    for air in AIRS {
+        assert_eq!(
+            <miden_air::MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air),
+            ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&HandwrittenMidenAir(air))
+        );
+    }
 }

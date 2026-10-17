@@ -1,111 +1,15 @@
-//! STARK configuration factories for different hash functions.
+//! Protocol configuration and the pinned identity of the VM relation.
 //!
-//! Each factory creates a [`StarkConfig`](miden_crypto::stark::StarkConfig) bundling the
-//! PCS parameters, LMCS commitment scheme, and Fiat-Shamir challenger for proving and verification.
-
-use alloc::vec;
-
-use miden_core::{Felt, Word, field::QuadFelt, program::domain::STARK_TRANSCRIPT};
-use miden_crypto::{
-    field::Field,
-    hash::{
-        blake::Blake3Hasher,
-        eidos::{Eidos, EidosLmcs, MidenEidosChallenger, lmcs_config},
-        keccak::{Keccak256Hash, KeccakF, VECTOR_LEN},
-        poseidon2::Poseidon2Permutation256,
-        rpo::RpoPermutation256,
-        rpx::RpxPermutation256,
-    },
-    stark::{
-        GenericStarkConfig,
-        challenger::{CanObserve, DuplexChallenger, HashChallenger, SerializingChallenger64},
-        dft::Radix2DitParallel,
-        hasher::{ChainingHasher, SerializingStatefulSponge, StatefulSponge},
-        lmcs::config::LmcsConfig,
-        pcs::PcsParams,
-        symmetric::{
-            CompressionFunctionFromHasher, CryptographicPermutation, PaddingFreeSponge,
-            TruncatedPermutation,
-        },
-    },
-};
-
-// SHARED TYPES
-// ================================================================================================
-
-/// Miden VM STARK configuration with pre-filled common type parameters.
-///
-/// All Miden configurations use `Felt` as the base field, `QuadFelt` as the extension field,
-/// and `Radix2DitParallel<Felt>` as the DFT. Only the LMCS commitment scheme (`L`) and
-/// Fiat-Shamir challenger (`Ch`) vary by hash function.
-pub type MidenStarkConfig<L, Ch> =
-    GenericStarkConfig<Felt, QuadFelt, L, Radix2DitParallel<Felt>, Ch>;
-
-type PackedFelt = <Felt as Field>::Packing;
-
-/// Number of inputs to the Merkle compression function.
-const COMPRESSION_INPUTS: usize = 2;
-
-// PCS PARAMETERS
-// ================================================================================================
-
-/// Base-two logarithm of the low-degree extension blowup used by canonical VM proofs.
-pub const LOG_BLOWUP: u8 = 3;
-/// Log2 of the FRI folding arity (arity = 4).
-pub const LOG_FOLDING_ARITY: u8 = 2;
-/// Log2 of the final polynomial degree (degree = 128).
-const LOG_FINAL_DEGREE: u8 = 7;
-/// Proof-of-work bits for FRI folding challenges.
-pub const FOLDING_POW_BITS: usize = 4;
-/// Proof-of-work bits for DEEP composition polynomial.
-pub const DEEP_POW_BITS: usize = 12;
-/// Number of FRI query repetitions.
-const NUM_QUERIES: usize = 27;
-/// Proof-of-work bits for the query phase. Together with 27 queries, this gives the query round
-/// exactly 96 conjectured bits; lowering either value drops the preset below that target.
-const QUERY_POW_BITS: usize = 17;
-
-/// Default PCS parameters shared by all hash function configurations.
-///
-/// These are protocol constants. They must not depend on the process environment or benchmark
-/// settings because the same factory is used by production provers and verifiers.
-pub fn pcs_params() -> PcsParams {
-    PcsParams::new(
-        LOG_BLOWUP,
-        LOG_FOLDING_ARITY,
-        LOG_FINAL_DEGREE,
-        FOLDING_POW_BITS,
-        DEEP_POW_BITS,
-        NUM_QUERIES,
-        QUERY_POW_BITS,
-    )
-    .expect("invalid PCS parameters")
-}
-
-// DOMAIN-SEPARATED FIAT-SHAMIR TRANSCRIPT
-// ================================================================================================
-
-/// Relation digest absorbed into the Fiat-Shamir transcript domain separator.
-pub type RelationDigest = [Felt; 4];
-
-/// Bind a protocol version and the canonical ACE circuit commitment into a relation digest.
-pub fn relation_digest(protocol_id: u64, circuit_digest: &Word) -> RelationDigest {
-    let input = [
-        Felt::new_unchecked(protocol_id),
-        circuit_digest[0],
-        circuit_digest[1],
-        circuit_digest[2],
-        circuit_digest[3],
-    ];
-    let digest = Eidos::hash_elements(&input);
-    let elements = digest.as_elements();
-    [elements[0], elements[1], elements[2], elements[3]]
-}
+//! The digests and commitments below name the relation that proofs are bound to. They are pinned
+//! so that any change to the AIRs or the ACE circuit surfaces as a failing test; the tests in this
+//! module recompute every value from the AIR definitions.
+pub use miden_air_definitions::config::*;
+use miden_core::Felt;
 
 /// RELATION_DIGEST = Eidos::hash_elements([PROTOCOL_ID, ACE_CIRCUIT_DIGEST]).
 ///
-/// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
-/// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
+/// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR. The generated
+/// `sys::vm` wrapper embeds it, and the pinned VM verifier root covers that module.
 pub const RELATION_DIGEST: RelationDigest = [
     Felt::new_unchecked(9098509505774412735),
     Felt::new_unchecked(4737936789760532215),
@@ -117,8 +21,6 @@ pub const RELATION_DIGEST: RelationDigest = [
 ///
 /// One circuit serves every proof order, so this digest names the accepted circuit outright: it
 /// is the advice-map key the stream is served under and the value the MASM loader pins it to.
-///
-/// Regenerated by `constraints_regen.rs`, do not edit by hand.
 pub const ACE_CIRCUIT_DIGEST: [Felt; 4] = [
     Felt::new_unchecked(9122225125595333314),
     Felt::new_unchecked(4575736417990392984),
@@ -126,8 +28,8 @@ pub const ACE_CIRCUIT_DIGEST: [Felt; 4] = [
     Felt::new_unchecked(7406482881221041553),
 ];
 
-// Fixed And8 commitments for the six VM proof configurations.
-// Generated by `constraints_regen.rs` from the canonical VM setup.
+// Fixed And8 commitments for the six VM proof configurations, each built from the canonical VM
+// setup under its configuration and [`RELATION_DIGEST`].
 pub const BLAKE3_PREPROCESSED_COMMITMENT: [u8; 32] = [
     237, 165, 181, 150, 170, 183, 11, 117, 116, 34, 106, 27, 89, 68, 113, 212, 124, 97, 90, 201,
     199, 30, 220, 145, 185, 5, 104, 155, 67, 55, 138, 126,
@@ -163,204 +65,21 @@ pub const KECCAK_PREPROCESSED_COMMITMENT: [u64; 4] = [
     8308041584975270064,
 ];
 
-/// Observes PCS protocol parameters into the challenger.
-///
-/// Call on a challenger obtained from `config.challenger()` to complete the
-/// domain-separated transcript initialization. The config factories bind the
-/// caller-supplied relation digest into the prototype challenger; this function
-/// adds the actual PCS parameters used by that config.
-pub fn observe_protocol_params(params: &PcsParams, challenger: &mut impl CanObserve<Felt>) {
-    // Batch 1: PCS parameters, zero-padded to SPONGE_RATE.
-    challenger.observe(Felt::new_unchecked(params.num_queries() as u64));
-    challenger.observe(Felt::new_unchecked(params.query_pow_bits() as u64));
-    challenger.observe(Felt::new_unchecked(params.deep_pow_bits() as u64));
-    challenger.observe(Felt::new_unchecked(params.folding_pow_bits() as u64));
-    challenger.observe(Felt::new_unchecked(params.log_blowup() as u64));
-    challenger.observe(Felt::new_unchecked(params.log_final_degree() as u64));
-    challenger.observe(Felt::new_unchecked(1_u64 << params.log_folding_arity()));
-    challenger.observe(Felt::ZERO);
-}
-
-// ALGEBRAIC HASHES (RPO, Poseidon2, RPX)
-// ================================================================================================
-
-/// Sponge state width in field elements.
-const SPONGE_WIDTH: usize = 12;
-/// Sponge rate (absorbable elements per permutation).
-pub(crate) const SPONGE_RATE: usize = 8;
-/// Sponge digest width in field elements.
-pub(crate) const DIGEST_WIDTH: usize = 4;
-/// Range of capacity slots within the sponge state array.
-const CAPACITY_RANGE: core::ops::Range<usize> = SPONGE_RATE..SPONGE_WIDTH;
-
-/// Algebraic LMCS (for RPO, Poseidon2, RPX).
-type AlgLmcs<P> = LmcsConfig<
-    PackedFelt,
-    PackedFelt,
-    StatefulSponge<P, SPONGE_WIDTH, SPONGE_RATE, DIGEST_WIDTH>,
-    TruncatedPermutation<P, COMPRESSION_INPUTS, DIGEST_WIDTH, SPONGE_WIDTH>,
-    SPONGE_WIDTH,
-    DIGEST_WIDTH,
->;
-
-/// Algebraic duplex challenger (for RPO, Poseidon2, RPX).
-type AlgChallenger<P> = DuplexChallenger<Felt, P, SPONGE_WIDTH, SPONGE_RATE>;
-
-/// Concrete STARK configuration type for RPO.
-pub type RpoConfig = MidenStarkConfig<AlgLmcs<RpoPermutation256>, AlgChallenger<RpoPermutation256>>;
-
-/// Concrete STARK configuration type for Poseidon2.
-pub type Poseidon2Config =
-    MidenStarkConfig<AlgLmcs<Poseidon2Permutation256>, AlgChallenger<Poseidon2Permutation256>>;
-/// Concrete STARK configuration type for RPX.
-pub type RpxConfig = MidenStarkConfig<AlgLmcs<RpxPermutation256>, AlgChallenger<RpxPermutation256>>;
-
-/// Creates an RPO-based STARK configuration bound to `relation_digest`.
-pub fn rpo_config(params: PcsParams, relation_digest: RelationDigest) -> RpoConfig {
-    alg_config(params, RpoPermutation256, relation_digest)
-}
-
-/// Creates a Poseidon2-based STARK configuration bound to `relation_digest`.
-pub fn poseidon2_config(params: PcsParams, relation_digest: RelationDigest) -> Poseidon2Config {
-    alg_config(params, Poseidon2Permutation256, relation_digest)
-}
-
-/// Creates an RPX-based STARK configuration bound to `relation_digest`.
-pub fn rpx_config(params: PcsParams, relation_digest: RelationDigest) -> RpxConfig {
-    alg_config(params, RpxPermutation256, relation_digest)
-}
-
-/// Internal helper: builds an algebraic STARK configuration from a permutation.
-///
-/// The prototype challenger has the relation digest pre-loaded in the sponge capacity.
-/// When `observe_protocol_params` is called, the first duplexing permutes this
-/// capacity together with the PCS parameters written into the rate.
-fn alg_config<P>(
-    params: PcsParams,
-    perm: P,
-    relation_digest: RelationDigest,
-) -> MidenStarkConfig<AlgLmcs<P>, AlgChallenger<P>>
-where
-    P: CryptographicPermutation<[Felt; SPONGE_WIDTH]> + Copy,
-{
-    let lmcs = LmcsConfig::new(StatefulSponge::new(perm), TruncatedPermutation::new(perm));
-    let mut state = [Felt::ZERO; SPONGE_WIDTH];
-    state[CAPACITY_RANGE].copy_from_slice(&relation_digest);
-    let challenger = DuplexChallenger {
-        sponge_state: state,
-        input_buffer: vec![],
-        output_buffer: vec![],
-        permutation: perm,
-    };
-    GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
-}
-
-// BLAKE3
-// ================================================================================================
-
-/// Digest size in bytes for Blake3.
-const BLAKE_DIGEST_SIZE: usize = 32;
-
-/// Blake3 LMCS.
-type BlakeLmcs = LmcsConfig<
-    Felt,
-    u8,
-    ChainingHasher<Blake3Hasher>,
-    CompressionFunctionFromHasher<Blake3Hasher, COMPRESSION_INPUTS, BLAKE_DIGEST_SIZE>,
-    BLAKE_DIGEST_SIZE,
-    BLAKE_DIGEST_SIZE,
->;
-
-/// Blake3 challenger.
-type BlakeChallenger =
-    SerializingChallenger64<Felt, HashChallenger<u8, Blake3Hasher, BLAKE_DIGEST_SIZE>>;
-
-/// Concrete STARK configuration type for Blake3.
-pub type Blake3Config = MidenStarkConfig<BlakeLmcs, BlakeChallenger>;
-
-/// Creates a Blake3_256-based STARK configuration bound to `relation_digest`.
-pub fn blake3_256_config(params: PcsParams, relation_digest: RelationDigest) -> Blake3Config {
-    let lmcs = LmcsConfig::new(
-        ChainingHasher::new(Blake3Hasher),
-        CompressionFunctionFromHasher::new(Blake3Hasher),
-    );
-    let mut challenger = SerializingChallenger64::from_hasher(vec![], Blake3Hasher);
-    challenger.observe_slice(&relation_digest);
-    GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
-}
-
-// EIDOS
-// ================================================================================================
-
-/// Concrete STARK configuration type for Eidos.
-pub type EidosConfig = MidenStarkConfig<EidosLmcs, MidenEidosChallenger>;
-
-/// Creates an Eidos-based STARK configuration bound to `relation_digest`.
-pub fn eidos_config(params: PcsParams, relation_digest: RelationDigest) -> EidosConfig {
-    let lmcs = lmcs_config();
-    let transcript_init_cv = Eidos::transcript_init_cv(STARK_TRANSCRIPT);
-    let challenger = MidenEidosChallenger::new(transcript_init_cv, relation_digest.into());
-    GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
-}
-
-// KECCAK
-// ================================================================================================
-
-/// Keccak permutation state width (in u64 elements).
-const KECCAK_WIDTH: usize = 25;
-/// Keccak sponge rate (absorbable u64 elements per permutation).
-const KECCAK_RATE: usize = 17;
-/// Keccak digest width (in u64 elements).
-const KECCAK_DIGEST: usize = 4;
-/// Keccak-256 digest size in bytes (for the Fiat-Shamir challenger).
-const KECCAK_CHALLENGER_DIGEST_SIZE: usize = 32;
-
-/// Keccak MMCS sponge (padding-free, used for compression).
-type KeccakMmcsSponge = PaddingFreeSponge<KeccakF, KECCAK_WIDTH, KECCAK_RATE, KECCAK_DIGEST>;
-
-/// Keccak LMCS using the stateful binary sponge with `[Felt; VECTOR_LEN]` packing.
-type KeccakLmcs = LmcsConfig<
-    [Felt; VECTOR_LEN],
-    [u64; VECTOR_LEN],
-    SerializingStatefulSponge<StatefulSponge<KeccakF, KECCAK_WIDTH, KECCAK_RATE, KECCAK_DIGEST>>,
-    CompressionFunctionFromHasher<KeccakMmcsSponge, COMPRESSION_INPUTS, KECCAK_DIGEST>,
-    KECCAK_WIDTH,
-    KECCAK_DIGEST,
->;
-
-/// Keccak challenger.
-type KeccakChallenger =
-    SerializingChallenger64<Felt, HashChallenger<u8, Keccak256Hash, KECCAK_CHALLENGER_DIGEST_SIZE>>;
-
-/// Concrete STARK configuration type for Keccak.
-pub type KeccakConfig = MidenStarkConfig<KeccakLmcs, KeccakChallenger>;
-
-/// Creates a Keccak-based STARK configuration.
-///
-/// Uses the stateful binary sponge with the Keccak permutation and `[Felt; VECTOR_LEN]` packing
-/// for SIMD parallelization.
-pub fn keccak_config(params: PcsParams, relation_digest: RelationDigest) -> KeccakConfig {
-    let mmcs_sponge = KeccakMmcsSponge::new(KeccakF {});
-    let compress = CompressionFunctionFromHasher::new(mmcs_sponge);
-    let sponge = SerializingStatefulSponge::new(StatefulSponge::new(KeccakF {}));
-    let lmcs = LmcsConfig::new(sponge, compress);
-    let mut challenger = SerializingChallenger64::from_hasher(vec![], Keccak256Hash {});
-    challenger.observe_slice(&relation_digest);
-    GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
-}
-
 #[cfg(test)]
 mod tests {
     extern crate alloc;
-    use alloc::vec::Vec;
+    use alloc::{format, vec, vec::Vec};
 
-    use miden_core::Felt;
-    use miden_crypto::stark::{challenger::CanObserve, pcs::PcsParams};
+    use miden_core::{Felt, field::QuadFelt};
+    use miden_crypto::stark::{
+        Preprocessed, StarkConfig, challenger::CanObserve, lmcs::Lmcs, pcs::PcsParams,
+    };
 
-    use crate::ace;
+    use crate::{MidenMultiAir, NUM_PUBLIC_VALUES, Statement, ace};
 
-    const PROTOCOL_ID: u64 = 1;
-    const REGEN_HINT: &str = "cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write";
+    const UPDATE_HINT: &str = "an intentional relation change must update the pinned constants \
+                               in air/src/config.rs and update \
+                               CURRENT_VM_VERIFIER_ROOT in core/src/proof.rs";
 
     #[derive(Default)]
     struct RecordingChallenger(Vec<Felt>);
@@ -387,18 +106,13 @@ mod tests {
     }
 
     /// Snapshot test: catches any AIR change that alters the constraint circuit.
-    ///
-    /// If this test fails, regenerate with:
-    /// ```text
-    /// cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write
-    /// ```
     #[test]
     fn relation_digest_matches_current_air() {
         let circuit =
             ace::build_recursive_verifier_ace_circuit().expect("recursive-verifier ACE circuit");
         let commitment: Vec<u64> = circuit.commitment.iter().map(Felt::as_canonical_u64).collect();
 
-        let digest = super::relation_digest(PROTOCOL_ID, &circuit.commitment);
+        let digest = super::relation_digest(super::PROTOCOL_ID, &circuit.commitment);
         let expected: Vec<u64> = digest.iter().map(Felt::as_canonical_u64).collect();
 
         let snapshot = format!(
@@ -409,29 +123,89 @@ mod tests {
         insta::assert_snapshot!(snapshot);
 
         let actual: Vec<u64> = super::RELATION_DIGEST.iter().map(Felt::as_canonical_u64).collect();
-        assert_eq!(
-            actual, expected,
-            "RELATION_DIGEST in config.rs is stale. Regenerate with: {REGEN_HINT}"
-        );
+        assert_eq!(actual, expected, "RELATION_DIGEST is stale; {UPDATE_HINT}");
     }
 
-    /// The compiled-in circuit digest must equal the commitment of the canonical circuit the
-    /// recursive verifier actually evaluates: it is what binds the transcript to that circuit,
-    /// so any drift between them would let a proof be verified against a circuit the protocol
-    /// constant never committed to.
-    #[cfg(feature = "std")]
+    /// The pinned circuit digest must equal the commitment of the canonical circuit the recursive
+    /// verifier evaluates: it binds the transcript to that circuit, so any drift between them
+    /// would let a proof be verified against a circuit the protocol constant never committed to.
     #[test]
     fn ace_circuit_digest_matches_canonical_circuit() {
-        let expected: Vec<u64> = ace::shared_recursive_circuit()
+        let expected: Vec<u64> = ace::build_recursive_verifier_ace_circuit()
+            .expect("recursive-verifier ACE circuit")
             .commitment
             .iter()
             .map(Felt::as_canonical_u64)
             .collect();
         let actual: Vec<u64> =
             super::ACE_CIRCUIT_DIGEST.iter().map(Felt::as_canonical_u64).collect();
-        assert_eq!(
-            actual, expected,
-            "ACE_CIRCUIT_DIGEST in config.rs is stale. Regenerate with: {REGEN_HINT}"
-        );
+        assert_eq!(actual, expected, "ACE_CIRCUIT_DIGEST is stale; {UPDATE_HINT}");
     }
+
+    /// The And8 setup commitment the given configuration builds from the canonical VM setup.
+    fn canonical_setup_commitment<SC: StarkConfig<Felt, QuadFelt>>(
+        config: &SC,
+    ) -> <SC::Lmcs as Lmcs>::Commitment {
+        let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
+            MidenMultiAir::new(),
+            vec![Felt::ZERO; NUM_PUBLIC_VALUES],
+            vec![],
+        )
+        .expect("canonical VM statement");
+        Preprocessed::build(&statement, config).expect("fixed And8 setup").commitment()
+    }
+
+    /// Each pinned And8 setup commitment must be the one its configuration builds from the
+    /// canonical VM setup.
+    macro_rules! setup_commitment_matches_canonical_setup {
+        ($test:ident, $config:ident, $pinned:ident, $repr:ty) => {
+            #[test]
+            fn $test() {
+                let config = super::$config(super::pcs_params(), super::RELATION_DIGEST);
+                assert_eq!(
+                    <$repr>::from(canonical_setup_commitment(&config)),
+                    super::$pinned,
+                    "{} is stale; {UPDATE_HINT}",
+                    stringify!($pinned)
+                );
+            }
+        };
+    }
+
+    setup_commitment_matches_canonical_setup!(
+        rpo_setup_commitment_is_current,
+        rpo_config,
+        RPO_PREPROCESSED_COMMITMENT,
+        [Felt; 4]
+    );
+    setup_commitment_matches_canonical_setup!(
+        rpx_setup_commitment_is_current,
+        rpx_config,
+        RPX_PREPROCESSED_COMMITMENT,
+        [Felt; 4]
+    );
+    setup_commitment_matches_canonical_setup!(
+        poseidon2_setup_commitment_is_current,
+        poseidon2_config,
+        POSEIDON2_PREPROCESSED_COMMITMENT,
+        [Felt; 4]
+    );
+    setup_commitment_matches_canonical_setup!(
+        blake3_setup_commitment_is_current,
+        blake3_256_config,
+        BLAKE3_PREPROCESSED_COMMITMENT,
+        [u8; 32]
+    );
+    setup_commitment_matches_canonical_setup!(
+        eidos_setup_commitment_is_current,
+        eidos_config,
+        EIDOS_PREPROCESSED_COMMITMENT,
+        [u64; 4]
+    );
+    setup_commitment_matches_canonical_setup!(
+        keccak_setup_commitment_is_current,
+        keccak_config,
+        KECCAK_PREPROCESSED_COMMITMENT,
+        [u64; 4]
+    );
 }

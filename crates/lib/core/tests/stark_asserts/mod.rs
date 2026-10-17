@@ -278,7 +278,7 @@ const FOLD_STACK_SENTINEL_PTR: u32 = 1_100;
 /// procedure of a test module, so tests execute the exact production text without widening the
 /// production module's surface.
 ///
-/// `evaluator_source` is the checked-in `sys/<relation>/constraints_eval.masm`; `relation` is
+/// `evaluator_source` is the generated `sys/<relation>/constraints_eval.masm`; `relation` is
 /// the `sys` submodule the procedure's `layout` accessors resolve against.
 fn production_fold_staging_module(relation: &str, evaluator_source: &str) -> String {
     const HEADER: &str = "proc stage_air_fold_coefficients";
@@ -302,7 +302,7 @@ struct FoldRelation {
     relation: &'static str,
     num_airs: usize,
     stark_vars_ptr: u32,
-    /// The checked-in generated evaluator, whose private staging procedure is under test.
+    /// The generated evaluator, whose private staging procedure is under test.
     evaluator: &'static str,
 }
 
@@ -312,7 +312,10 @@ impl FoldRelation {
             relation: "vm",
             num_airs: miden_air::MIDEN_AIR_COUNT,
             stark_vars_ptr: crate::stark::vm_layout_const("AUXILIARY_ACE_INPUTS_PTR"),
-            evaluator: include_str!("../../asm/sys/vm/constraints_eval.masm"),
+            evaluator: include_str!(concat!(
+                env!("MIDEN_CORE_ASM_DIR"),
+                "/sys/vm/constraints_eval.masm"
+            )),
         }
     }
 
@@ -321,7 +324,10 @@ impl FoldRelation {
             relation: "pvm",
             num_airs: miden_precompiles_air::NUM_CHIPLETS,
             stark_vars_ptr: crate::stark::pvm_layout_const("AUXILIARY_ACE_INPUTS_PTR"),
-            evaluator: include_str!("../../asm/sys/pvm/constraints_eval.masm"),
+            evaluator: include_str!(concat!(
+                env!("MIDEN_CORE_ASM_DIR"),
+                "/sys/pvm/constraints_eval.masm"
+            )),
         }
     }
 
@@ -930,7 +936,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         assert_eq!(next, frame_end, "{source} frame does not end at its declared boundary");
     }
 
-    let base = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/asm"));
+    let base = Path::new(env!("MIDEN_CORE_ASM_DIR"));
     let generic_path = base.join("stark/constants.masm");
     let generic_declarations = declarations(&generic_path);
     assert!(!generic_declarations.is_empty(), "the generic layer must declare addresses");

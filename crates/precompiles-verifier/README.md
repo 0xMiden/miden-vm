@@ -6,8 +6,15 @@ for Miden VM execution proofs.
 Use `verify_deferred` to verify a proof against its deferred root. With `std`,
 the `masm_verifier` module builds host inputs for the in-VM PVM verifier.
 
-The crate also owns the canonical PVM ACE circuit constants. The
-`constants-tools` feature enables the constants and MASM artifact generator.
+The handwritten AIRs and protocol policy live in `miden-precompiles-air-definitions`.
+Cargo compiles the constraint evaluators and the ACE instruction stream into `OUT_DIR`.
+The relation digest, ACE circuit digest, and setup commitment are pinned in
+`miden-precompiles-air`; its tests and this crate's tests recompute them from the AIRs,
+so a relation change must update them deliberately. `miden-verifier-codegen` renders
+the PVM verifier MASM from the AIR metadata and templates while `miden-core-lib` builds.
+
+Run `make check-verifiers` to check evaluator equivalence, the generated verifier modules,
+and the pinned verifier roots.
 
 The pinned Eidos proof in `tests/fixtures` proves a Keccak-256 assertion for the
 input `abc`. Check or regenerate the proof and its deferred root with:
@@ -31,7 +38,6 @@ src/
 ├── lib.rs                  crate root
 ├── verify.rs               native precompile proof verification
 ├── ace.rs                  PVM ACE circuit and proof-order policy
-├── ace_constants.rs        pinned circuit digest and relation constants
-├── ace_constants_regen.rs  constants and MASM artifact generator
+├── ace_constants.rs        re-exports of the pinned circuit digest and relation constants
 └── masm_verifier.rs        host inputs for the in-VM PVM verifier
 ```

@@ -330,8 +330,11 @@ fn pvm_maps_match_the_stable_sort_for_seeded_random_heights() {
 #[test]
 fn the_pass_is_a_fixed_comparator_network() {
     for (hook, comparators) in [
-        (include_str!("../../asm/sys/vm/ood_frames.masm"), 5),
-        (include_str!("../../asm/sys/pvm/ood_frames.masm"), 41),
+        (include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/vm/ood_frames.masm")), 5),
+        (
+            include_str!(concat!(env!("MIDEN_CORE_ASM_DIR"), "/sys/pvm/ood_frames.masm")),
+            41,
+        ),
     ] {
         let start = hook.find("pub proc stage_proof_order_maps").expect("the pass is generated");
         let body = &hook[start..];

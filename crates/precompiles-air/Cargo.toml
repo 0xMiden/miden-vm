@@ -15,31 +15,40 @@ repository.workspace = true
 [features]
 default = ["std"]
 concurrent = [
+    "miden-precompiles-air-definitions/concurrent",
     "std",
     "miden-air/concurrent",
     "miden-crypto/concurrent",
     "miden-lifted-stark/concurrent",
 ]
 std = [
+    "miden-precompiles-air-definitions/std",
     "miden-air/std",
     "miden-core/std",
     "miden-crypto/std",
-    "miden-precompiles/std",
-    "miden-utils-sync/std",
-    "ruint/std",
 ]
-testing = ["miden-air/testing"]
+testing = ["miden-precompiles-air-definitions/testing", "miden-air/testing"]
+
+[package.metadata.cargo-shear]
+# The build-generated constraint evaluators import `p3_field::Dup`.
+ignored = ["p3-field"]
 
 [dependencies]
+miden-precompiles-air-definitions.workspace = true
 miden-air.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-lifted-air.workspace = true
 miden-lifted-stark.workspace = true
-miden-precompiles.workspace = true
-miden-utils-sync.workspace = true
+p3-field.workspace = true
 p3-security.workspace = true
-ruint.workspace = true
 
 [dev-dependencies]
+miden-constraint-compiler.workspace = true
 miden-air = { workspace = true, features = ["testing"] }
+
+[build-dependencies]
+miden-precompiles-air-definitions = { workspace = true, features = ["std"] }
+miden-ace-codegen.workspace = true
+miden-constraint-compiler.workspace = true
+miden-core.workspace = true

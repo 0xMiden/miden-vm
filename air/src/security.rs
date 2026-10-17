@@ -18,10 +18,7 @@ use p3_security::{
     fixed,
 };
 
-use crate::{
-    AIRS, ConstraintCounts, ConstraintDegrees, Felt, HandwrittenMidenAir, MidenAir, config,
-    constraints::lookup::messages::MIDEN_MAX_MESSAGE_WIDTH,
-};
+use crate::{Felt, config, geometry::NUM_OOD_POINTS};
 
 /// Security parameters of a verified Miden STARK proof.
 ///
@@ -100,11 +97,6 @@ pub fn security_report_with_hash(
     }))
 }
 
-/// Number of out-of-domain points opened per committed column.
-///
-/// The AIRs use `local` and `next` rotations only.
-const NUM_OOD_POINTS: u32 = 2;
-
 /// Base field elements per challenge-field element.
 const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 
@@ -133,89 +125,31 @@ pub const LOOKUP_SHAPE: LookupShape = LookupShape {
     max_message_width: 16,
 };
 
+/// Raw `(preprocessed, main, auxiliary)` widths of each AIR, compiled from the AIR definitions.
+const RAW_WIDTHS: &[(usize, usize, usize)] = &include!(concat!(env!("OUT_DIR"), "/raw_widths.rs"));
+
 /// Computes the AIR shape by symbolically evaluating every AIR in the statement.
 ///
 /// Tests compare [`AIR_SHAPE`] with this result. The symbolic pass allocates and evaluates every
 /// AIR, so verifiers use the checked constant instead of calling this function.
 pub fn derive_air_shape() -> AirShape {
-    let mut num_constraints = 0;
-    let mut max_constraint_degree = 0;
-    let mut num_columns = 0;
-    let mut fractions_per_row = 0;
-
-    for air in AIRS {
-        let handwritten = HandwrittenMidenAir(air);
-        num_constraints += ConstraintCounts::from_air::<Felt, QuadFelt, _>(&handwritten).total();
-        max_constraint_degree = max_constraint_degree
-            .max(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&handwritten).max());
-        num_columns += column_count(air, COMMITMENT_ALIGNMENT);
-        fractions_per_row += air.column_shape().iter().sum::<usize>();
-    }
-    num_columns += quotient_column_count(max_constraint_degree, COMMITMENT_ALIGNMENT);
-
-    AirShape {
-        // One batching slot per AIR beyond the first sits alongside the constraints themselves:
-        // constraints are folded by powers of one challenge and the AIRs by a second, so a
-        // single-AIR statement needs no cross-AIR batching challenge.
-        num_composed_constraints: (num_constraints + AIRS.len() - 1) as u32,
-        max_constraint_degree: max_constraint_degree as u32,
-        num_quotient_chunks: quotient_chunk_count(max_constraint_degree) as u32,
-        max_combo: NUM_OOD_POINTS,
-        num_deep_terms: Some(num_columns as u32 + NUM_OOD_POINTS),
-        lookup: Some(LookupShape {
-            fractions_per_row: fractions_per_row as u32,
-            max_message_width: MIDEN_MAX_MESSAGE_WIDTH as u32,
-        }),
-    }
+    miden_air_definitions::geometry::derive_air_shape()
 }
 
 /// Number of DEEP-quotient batching terms for a commitment scheme with the given column
 /// alignment, holding every other AIR shape input fixed at [`AIR_SHAPE`]'s stored values.
 ///
 /// Only the per-column padding is alignment-dependent, so this recomputes committed column counts
-/// from the AIRs' own width accessors — no symbolic constraint pass — reusing
-/// `AIR_SHAPE::max_constraint_degree` for the quotient group's chunk count. A native verifier
+/// from the compiler's stored raw widths and quotient chunk count. A native verifier
 /// computing the security level of a proof committed under a different LMCS (Blake3, alignment 1;
 /// Keccak, alignment 17) calls this instead of using the alignment-8 [`AIR_SHAPE`], which is fixed
 /// for the Eidos-only recursive verifier.
 pub fn num_deep_terms(alignment: usize) -> u32 {
-    let mut num_columns = 0;
-    for air in AIRS {
-        num_columns += column_count(air, alignment);
-    }
-    num_columns += quotient_column_count(AIR_SHAPE.max_constraint_degree as usize, alignment);
-
-    num_columns as u32 + NUM_OOD_POINTS
-}
-
-/// Committed base columns for one AIR: preprocessed, main, and auxiliary traces, each its own
-/// matrix within its commitment group and so each padded on its own.
-fn column_count(air: MidenAir, alignment: usize) -> usize {
-    use miden_crypto::stark::air::{BaseAir, LiftedAir};
-
-    aligned(BaseAir::<Felt>::preprocessed_width(&air), alignment)
-        + aligned(BaseAir::<Felt>::width(&air), alignment)
-        + aligned(LiftedAir::<Felt, QuadFelt>::aux_width(&air) * EXTENSION_DEGREE, alignment)
-}
-
-/// Committed base columns in the quotient group: one chunk per unit of degree above the vanishing
-/// polynomial, rounded up to a power of two, committed as a single extension-valued matrix.
-fn quotient_column_count(max_constraint_degree: usize, alignment: usize) -> usize {
-    aligned(quotient_chunk_count(max_constraint_degree) * EXTENSION_DEGREE, alignment)
-}
-
-/// Committed quotient chunks: one per unit of degree above the vanishing polynomial, rounded up to
-/// a power of two.
-fn quotient_chunk_count(max_constraint_degree: usize) -> usize {
-    max_constraint_degree.saturating_sub(1).max(1).next_power_of_two()
-}
-
-/// Pads a committed width up to the commitment scheme's column alignment.
-///
-/// The DEEP reduction batches every element of each opened, alignment-padded row, so padding also
-/// contributes batching slots.
-fn aligned(width: usize, alignment: usize) -> usize {
-    width.next_multiple_of(alignment)
+    miden_air_definitions::geometry::num_deep_terms_for_widths(
+        RAW_WIDTHS,
+        AIR_SHAPE.num_quotient_chunks as usize,
+        alignment,
+    )
 }
 
 // SECURITY MODEL CONSTANTS

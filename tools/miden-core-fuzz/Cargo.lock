@@ -755,11 +755,25 @@ name = "miden-air"
 version = "1.0.0"
 dependencies = [
  "miden-ace-codegen",
+ "miden-air-definitions",
+ "miden-constraint-compiler",
+ "miden-core",
+ "miden-crypto",
+ "p3-field",
+ "p3-security",
+]
+
+[[package]]
+name = "miden-air-definitions"
+version = "1.0.0"
+dependencies = [
+ "miden-ace-codegen",
  "miden-core",
  "miden-crypto",
  "miden-utils-indexing",
  "p3-field",
  "p3-security",
+ "proptest",
  "rand 0.10.2",
  "thiserror",
  "tracing",

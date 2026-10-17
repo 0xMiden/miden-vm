@@ -31,6 +31,7 @@
 - Evaluated Eidos AEAD MACs without allocating a coefficient buffer and checked input lengths before byte conversion, associated-data copying, or ciphertext deserialization ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
 - [BREAKING] Renamed `auth_empty_ad_expanded_with_scratch` to `auth_empty_ad_expanded_exact` and removed its `scratch_ptr` parameter. Reduced cycle costs in the core library's Eidos AEAD encryption, authentication, and decryption procedures ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
 - [BREAKING] Optimized PVM by reducing AIR widths and lookup costs ([#4027](https://github.com/0xMiden/miden-vm/pull/4027)).
+- [BREAKING] Generate VM/PVM evaluators, ACE streams, and recursive verifier MASM at build time from shared AIR definitions. Removed manual regeneration tools and the `constraints-tools`/`constants-tools` features. Relation digests and verifier roots are unchanged ([#4040](https://github.com/0xMiden/miden-vm/pull/4040)).
 
 #### Fixes
 

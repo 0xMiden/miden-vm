@@ -15,13 +15,10 @@ pub use miden_precompiles_air::security::{
 
 #[cfg(any(test, feature = "std"))]
 pub(crate) mod ace;
+#[cfg(any(test, feature = "std"))]
 pub(crate) mod ace_constants;
-#[cfg(feature = "constants-tools")]
-pub mod ace_constants_regen;
 #[cfg(feature = "std")]
 pub mod masm_verifier;
-#[cfg(any(test, feature = "constants-tools"))]
-pub(crate) mod pvm_ood_frames;
 mod verify;
 
 pub use verify::{VerifyError, verify_deferred};

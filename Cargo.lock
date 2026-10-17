@@ -2061,7 +2061,20 @@ version = "1.0.0"
 dependencies = [
  "insta",
  "miden-ace-codegen",
+ "miden-air-definitions",
  "miden-constraint-compiler",
+ "miden-core",
+ "miden-crypto",
+ "p3-field",
+ "p3-security",
+]
+
+[[package]]
+name = "miden-air-definitions"
+version = "1.0.0"
+dependencies = [
+ "insta",
+ "miden-ace-codegen",
  "miden-core",
  "miden-crypto",
  "miden-test-serialization-macros",
@@ -2203,7 +2216,6 @@ dependencies = [
  "miden-air",
  "miden-assembly",
  "miden-assembly-syntax",
- "miden-constraint-compiler",
  "miden-core",
  "miden-core-lib-codegen",
  "miden-crypto",
@@ -2220,6 +2232,7 @@ dependencies = [
  "miden-test-utils",
  "miden-utils-sync",
  "miden-verifier",
+ "miden-verifier-codegen",
  "num",
  "p256",
  "p3-security",
@@ -2541,11 +2554,27 @@ dependencies = [
 name = "miden-precompiles-air"
 version = "1.0.0"
 dependencies = [
+ "miden-ace-codegen",
  "miden-air",
+ "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
  "miden-lifted-air",
  "miden-lifted-stark",
+ "miden-precompiles-air-definitions",
+ "p3-field",
+ "p3-security",
+]
+
+[[package]]
+name = "miden-precompiles-air-definitions"
+version = "1.0.0"
+dependencies = [
+ "miden-ace-codegen",
+ "miden-air-definitions",
+ "miden-core",
+ "miden-crypto",
+ "miden-lifted-air",
  "miden-precompiles",
  "miden-utils-sync",
  "p3-security",
@@ -2792,6 +2821,19 @@ dependencies = [
  "serde",
  "serde-wincode",
  "thiserror",
+]
+
+[[package]]
+name = "miden-verifier-codegen"
+version = "1.0.0"
+dependencies = [
+ "miden-ace-codegen",
+ "miden-air",
+ "miden-core",
+ "miden-crypto",
+ "miden-lifted-air",
+ "miden-lifted-stark",
+ "miden-precompiles-air",
 ]
 
 [[package]]

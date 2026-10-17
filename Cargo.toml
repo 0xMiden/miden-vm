@@ -8,6 +8,7 @@ members = [
     "benches/synthetic-bench",
     "core",
     "crates/ace-codegen",
+    "crates/air-definitions",
     "crates/assembly",
     "crates/assembly-syntax-cst",
     "crates/assembly-syntax",
@@ -35,9 +36,11 @@ members = [
     "crates/utils-diagnostics",
     "crates/utils-indexing",
     "crates/utils-sync",
+    "crates/verifier-codegen",
     "miden-vm",
     "crates/precompiles",
     "crates/precompiles-air",
+    "crates/precompiles-air-definitions",
     "crates/precompiles-verifier",
     "crates/precompiles-prover",
     "processor",
@@ -87,6 +90,7 @@ opt-level = 0
 # Workspace crates
 miden-ace-codegen       = { path = "./crates/ace-codegen", version = "1.0", default-features = false }
 miden-air               = { path = "./air", version = "1.0", default-features = false }
+miden-air-definitions   = { path = "./crates/air-definitions", version = "1.0", default-features = false }
 miden-assembly          = { path = "./crates/assembly", version = "1.0", default-features = false }
 miden-assembly-syntax   = { path = "./crates/assembly-syntax", version = "1.0", default-features = false }
 miden-assembly-syntax-cst = { path = "./crates/assembly-syntax-cst", version = "1.0", default-features = false }
@@ -104,6 +108,7 @@ miden-mast-package      = { path = "./crates/mast-package", version = "1.0", def
 miden-package-registry  = { path = "./crates/package-registry", version = "1.0", default-features = false }
 miden-precompiles       = { path = "./crates/precompiles", version = "1.0", default-features = false }
 miden-precompiles-air   = { path = "./crates/precompiles-air", version = "1.0", default-features = false }
+miden-precompiles-air-definitions = { path = "./crates/precompiles-air-definitions", version = "1.0", default-features = false }
 miden-precompiles-prover = { path = "./crates/precompiles-prover", version = "1.0", default-features = false }
 miden-precompiles-verifier = { path = "./crates/precompiles-verifier", version = "1.0", default-features = false }
 miden-processor         = { path = "./processor", version = "1.0", default-features = false }
@@ -118,6 +123,7 @@ miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "1.0"
 miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "1.0", default-features = false }
 miden-utils-indexing    = { path = "./crates/utils-indexing", version = "1.0", default-features = false }
 miden-utils-sync        = { path = "./crates/utils-sync", version = "1.0", default-features = false }
+miden-verifier-codegen  = { path = "./crates/verifier-codegen", version = "1.0", default-features = false }
 miden-utils-testing     = { path = "./crates/test-utils", package = "miden-test-utils" }
 miden-verifier          = { path = "./verifier", version = "1.0", default-features = false }
 

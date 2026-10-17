@@ -7,12 +7,15 @@ use crate::MidenAir;
 /// Supported AIRs in instance order.
 ///
 /// This order is used for per-AIR inputs and breaks proof-order ties when trace heights are equal.
-pub const AIRS: [MidenAir; 4] = [
-    MidenAir::Core,
-    MidenAir::Chiplets,
-    MidenAir::EidosCompression,
-    MidenAir::And8Lookup,
-];
+pub const AIRS: [MidenAir; miden_air_definitions::MIDEN_AIR_COUNT] = {
+    let mut airs = [MidenAir::Core; miden_air_definitions::MIDEN_AIR_COUNT];
+    let mut i = 0;
+    while i < airs.len() {
+        airs[i] = MidenAir::from_definition(miden_air_definitions::AIRS[i]);
+        i += 1;
+    }
+    airs
+};
 
 pub const MIDEN_AIR_COUNT: usize = AIRS.len();
 
