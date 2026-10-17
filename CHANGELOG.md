@@ -14,6 +14,7 @@
 
 #### Changes
 
+- Omit canonical empty-subtree nodes when serializing `MerkleStore`, saving 24,480 bytes without changing format version 1 ([#3848](https://github.com/0xMiden/miden-vm/issues/3848)).
 - [BREAKING] Preserve the full IV words in Eidos initial chaining values. This changes Eidos hashes and derived commitments in the VM and crypto crates ([#4021](https://github.com/0xMiden/miden-vm/pull/4021)).
 - [BREAKING] Simplified Eidos hashing APIs: renamed `hmerge` to `hdword` and `hash_two_words*` to `hash_double_word*`. Use `hash_words` instead of `merge_many` or MASM `hash_double_words`, and `compress_double_word` for raw MASM compression. MASM domain helpers use `_in_domain` and take the domain first. Rebuild compiled MASM packages; the recursive VM verifier root changes ([#4018](https://github.com/0xMiden/miden-vm/pull/4018)).
 - Refreshed VM and crypto benchmark results for Eidos ([#3975](https://github.com/0xMiden/miden-vm/pull/3975)).

@@ -36,6 +36,7 @@ pub struct StoreNode {
 /// share unchanged subtrees.
 ///
 /// Serialization uses format version 1; unversioned encodings and other versions are rejected.
+/// Canonical empty-subtree nodes are omitted on write and restored on read.
 /// Deserialization does not verify parent hashes against their children.
 ///
 /// Example usage:
@@ -606,11 +607,14 @@ impl Deserializable for StoreNode {
 
 impl Serializable for MerkleStore {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        let empty_nodes: Map<_, _> = empty_hashes().collect();
+        let nodes = self.nodes.iter().filter(|(key, node)| empty_nodes.get(*key) != Some(*node));
+
         target.write_bytes(&Self::FORMAT_MAGIC);
         target.write_u8(Self::FORMAT_VERSION);
-        target.write_u64(self.nodes.len() as u64);
+        target.write_u64(nodes.clone().count() as u64);
 
-        for (k, v) in self.nodes.iter() {
+        for (k, v) in nodes {
             k.write_into(target);
             v.write_into(target);
         }
