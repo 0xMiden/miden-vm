@@ -15,6 +15,8 @@ use crate::{
 };
 
 mod serialization;
+mod witness;
+pub use witness::SmtWitness;
 #[cfg(test)]
 mod tests;
 
@@ -503,8 +505,17 @@ impl PartialSmt {
     /// # Errors
     ///
     /// - [`DeserializationError::InvalidValue`] if a leaf's map key does not match its embedded
-    ///   index, or the reconstructed tree fails validation.
+    ///   index, a frontier node overlaps a supplied descendant, or the reconstructed tree fails
+    ///   validation.
     pub fn from_unique_nodes(unique_nodes: UniqueNodes) -> Result<Self, DeserializationError> {
+        Self::from_unique_nodes_with_limit(unique_nodes, usize::MAX)
+    }
+
+    /// Limits reconstructed parents, including canonical empty parents which are not retained.
+    fn from_unique_nodes_with_limit(
+        unique_nodes: UniqueNodes,
+        mut remaining_nodes: usize,
+    ) -> Result<Self, DeserializationError> {
         unique_nodes.validate()?;
 
         let mut smt = Self::new(unique_nodes.root);
@@ -533,7 +544,22 @@ impl PartialSmt {
             // next layer is built.
             let parents = active_nodes.into_iter().map(NodeIndex::parent).collect::<BTreeSet<_>>();
 
+            remaining_nodes = remaining_nodes.checked_sub(parents.len()).ok_or_else(|| {
+                DeserializationError::InvalidValue(
+                    "SMT witness reconstruction limit exceeded".into(),
+                )
+            })?;
+
             for parent in &parents {
+                // A frontier hash must not mask reconstructed descendants, including empty
+                // parents that insertion would discard before the next layer's hash lookup.
+                if unique_nodes.nodes.contains_key(parent) {
+                    return Err(DeserializationError::InvalidValue(format!(
+                        "SMT frontier node at depth {} position {} overlaps a descendant",
+                        parent.depth(),
+                        parent.position(),
+                    )));
+                }
                 // A child is either a leaf, a node rebuilt on the prior pass, a stored sparse node,
                 // or an omitted empty subtree root. The lookup helpers handle the last two cases.
                 let [left, right] = [parent.left_child(), parent.right_child()].map(|child| {
@@ -545,7 +571,15 @@ impl PartialSmt {
                             .unwrap_or_else(|| unique_nodes.get_node_hash(child))
                     }
                 });
-                smt.insert_inner_node(*parent, InnerNode { left, right });
+                let inner_node = InnerNode { left, right };
+                // Check before insertion: canonical empty parents are not retained, so the
+                // later validation cannot compare an empty reconstructed root to the claimed root.
+                if parent.is_root() && inner_node.hash() != smt.root {
+                    return Err(DeserializationError::InvalidValue(
+                        "reconstructed SMT root does not match expected root".into(),
+                    ));
+                }
+                smt.insert_inner_node(*parent, inner_node);
             }
 
             if child_depth > 1 {
@@ -824,5 +858,9 @@ impl Deserializable for PartialSmt {
         let unique_rep = UniqueNodes::read_from(source)?;
         PartialSmt::from_unique_nodes(unique_rep)
             .map_err(|e| DeserializationError::InvalidValue(format!("{e}")))
+    }
+
+    fn min_serialized_size() -> usize {
+        UniqueNodes::min_serialized_size()
     }
 }

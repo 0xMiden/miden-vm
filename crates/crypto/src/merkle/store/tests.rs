@@ -967,12 +967,39 @@ const STORE_HEADER: &[u8] = b"MRKSTORE\x01";
 #[cfg(feature = "std")]
 #[test]
 fn test_serialization() -> Result<(), Box<dyn Error>> {
-    let mtree = MerkleTree::new(VALUES4)?;
-    let store = MerkleStore::from(&mtree);
-    let bytes = store.to_bytes();
-    assert!(bytes.starts_with(STORE_HEADER));
-    let decoded = MerkleStore::read_from_bytes(&bytes).expect("deserialization failed");
-    assert_eq!(store, decoded);
+    // Equal, non-empty children must not be mistaken for canonical empty nodes.
+    for leaves in [VALUES4, [VALUES4[0]; 4]] {
+        let mtree = MerkleTree::new(leaves)?;
+        let store = MerkleStore::from(&mtree);
+        let bytes = store.to_bytes();
+        let unique_nodes = mtree.inner_nodes().map(|node| node.value).collect::<crate::Set<_>>();
+        assert_eq!(bytes.len(), 17 + unique_nodes.len() * 96);
+        assert!(bytes.starts_with(STORE_HEADER));
+
+        // The reader also accepts version-1 payloads that explicitly include empty nodes.
+        let mut full_bytes = STORE_HEADER.to_vec();
+        (store.num_internal_nodes() as u64).write_into(&mut full_bytes);
+        for node in store.inner_nodes() {
+            node.value.write_into(&mut full_bytes);
+            node.left.write_into(&mut full_bytes);
+            node.right.write_into(&mut full_bytes);
+        }
+        for payload in [&bytes, &full_bytes] {
+            let mut decoded = MerkleStore::read_from_bytes(payload)?;
+            assert_eq!(store, decoded);
+            for (position, leaf) in leaves.into_iter().enumerate() {
+                let index = NodeIndex::new(2, position as u64)?;
+                let proof = decoded.get_path(mtree.root(), index)?;
+                assert_eq!(proof.value, leaf);
+                assert_eq!(proof.path, mtree.get_path(index)?);
+            }
+
+            let new_root = decoded.set_node(mtree.root(), NodeIndex::new(2, 1)?, VALUES8[7])?.root;
+            let mut updated = mtree.clone();
+            updated.update_leaf(1, VALUES8[7])?;
+            assert_eq!(new_root, updated.root());
+        }
+    }
     Ok(())
 }
 
@@ -1011,7 +1038,16 @@ fn deserialize_accepts_empty_versioned_store() {
     let mut bytes = STORE_HEADER.to_vec();
     0u64.write_into(&mut bytes);
     assert_eq!(bytes.len(), MerkleStore::min_serialized_size());
-    assert_eq!(MerkleStore::read_from_bytes(&bytes).unwrap(), MerkleStore::default());
+    assert_eq!(MerkleStore::default().to_bytes(), bytes);
+    let decoded = MerkleStore::read_from_bytes(&bytes).unwrap();
+    assert_eq!(decoded, MerkleStore::default());
+    for depth in [1, 64, 255] {
+        let root = *EmptySubtreeRoots::entry(depth, 0);
+        let path_depth = depth.min(SMT_MAX_DEPTH);
+        let proof = decoded.get_path(root, NodeIndex::new(path_depth, 1).unwrap()).unwrap();
+        assert_eq!(proof.value, *EmptySubtreeRoots::entry(depth, path_depth));
+        assert_eq!(proof.path.compute_root(1, proof.value).unwrap(), root);
+    }
 }
 
 #[test]

@@ -56,7 +56,7 @@ mod simple;
 pub use simple::{SimpleSmt, SimpleSmtProof};
 
 mod partial;
-pub use partial::{PartialSmt, UniqueNodes};
+pub use partial::{PartialSmt, SmtWitness, UniqueNodes};
 // CONSTANTS
 // ================================================================================================
 
