@@ -732,6 +732,21 @@ fn non_hasher_trace_len(
         .ok_or_else(overflow)
 }
 
+/// Checks a Merkle path request from the hasher replay before the hasher chiplet records it.
+///
+/// The replay can come from a deserialized execution witness, so this returns an error for the
+/// inputs that `Hasher::build_merkle_root` and `Hasher::update_merkle_root` assert against: an
+/// empty path, or an index that does not fit in the path's depth.
+fn check_replayed_merkle_path(path: &[Word], index: Felt) -> Result<(), ExecutionError> {
+    if path.is_empty() {
+        return Err(ExecutionError::Internal("replayed Merkle path is empty"));
+    }
+    if index.as_canonical_u64().checked_shr(path.len() as u32).unwrap_or(0) != 0 {
+        return Err(ExecutionError::Internal("replayed Merkle path index exceeds the path depth"));
+    }
+    Ok(())
+}
+
 /// Builds the hasher chiplet from buffered or streamed, fully resolved requests.
 pub(crate) fn build_hasher_chiplet<'a>(
     ops: impl IntoIterator<Item = Result<ResolvedHasherOp<'a>, ExecutionError>>,
@@ -759,9 +774,11 @@ pub(crate) fn build_hasher_chiplet<'a>(
                 },
             },
             ResolvedHasherOp::BuildMerkleRoot((value, path, index)) => {
+                check_replayed_merkle_path(&path, index)?;
                 let _ = hasher.build_merkle_root(value, &path, index);
             },
             ResolvedHasherOp::UpdateMerkleRoot((old_value, new_value, path, index)) => {
+                check_replayed_merkle_path(&path, index)?;
                 hasher.update_merkle_root(old_value, new_value, &path, index);
             },
         }
