@@ -505,7 +505,8 @@ impl PartialSmt {
     /// # Errors
     ///
     /// - [`DeserializationError::InvalidValue`] if a leaf's map key does not match its embedded
-    ///   index, or the reconstructed tree fails validation.
+    ///   index, a frontier node overlaps a supplied descendant, or the reconstructed tree fails
+    ///   validation.
     pub fn from_unique_nodes(unique_nodes: UniqueNodes) -> Result<Self, DeserializationError> {
         Self::from_unique_nodes_with_limit(unique_nodes, usize::MAX)
     }
@@ -550,6 +551,15 @@ impl PartialSmt {
             })?;
 
             for parent in &parents {
+                // A frontier hash must not mask reconstructed descendants, including empty
+                // parents that insertion would discard before the next layer's hash lookup.
+                if unique_nodes.nodes.contains_key(parent) {
+                    return Err(DeserializationError::InvalidValue(format!(
+                        "SMT frontier node at depth {} position {} overlaps a descendant",
+                        parent.depth(),
+                        parent.position(),
+                    )));
+                }
                 // A child is either a leaf, a node rebuilt on the prior pass, a stored sparse node,
                 // or an omitted empty subtree root. The lookup helpers handle the last two cases.
                 let [left, right] = [parent.left_child(), parent.right_child()].map(|child| {
