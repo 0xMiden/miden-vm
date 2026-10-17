@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 483138f9967047147b7a76bd1c834b5c8d8b1a078b96e15405c2f29e10881cd7 # shrinks to (key, first, second) = (Word([0, 0, 0, 0]), [], [])

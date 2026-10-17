@@ -17,6 +17,82 @@ Generated core-library MASM can be inspected locally:
 cargo run -p miden-core-lib-codegen -- --out target/miden-core-lib-generated-asm
 ```
 
+## Caller-maintained precompile roots
+
+Deferred precompile procedures have `_with_root` variants that return an independent obligation
+without changing the VM's built-in deferred root. They take the same ordinary arguments as their
+native counterparts and return `[ROOT, ordinary results..., ...]`. Assertions and signature
+verification return only ROOT. Memory hashes also return only ROOT and write their digest to
+memory, retaining their encoding, alignment, padding, overlap, and length-limit contracts.
+
+A single-binding operation returns its registered assertion directly. A compound operation combines
+all of its own advice-binding assertions into one root. Callers explicitly combine these independent
+roots with `precompiles::append_root`; no operation takes the caller's accumulator as an argument.
+Comparisons can return false successfully: ROOT binds the values used to compute their result rather
+than asserting the result is true. Expression constructors, arithmetic expressions, loads,
+reductions, and MSM remain shared and produce no obligation.
+
+`precompiles::append_root` takes `[LHS_ROOT, RHS_ROOT, ...]` and returns the exact digest of
+`AND(LHS_ROOT, RHS_ROOT)`, registering and hashing the same ordered payload without logging. Both
+children must be registered true assertions or implicit TRUE. The helper also combines independently
+built roots, and does not simplify TRUE children.
+
+`precompiles::append_root_ptr` takes `[ROOT_PTR, ASSERTION, ...]` and updates a word-aligned
+root in memory to `AND(ROOT, ASSERTION)`, preserving the operand-stack tail. AND obligations are
+commutative, so callers can use the existing stack order; swapping children changes their digest
+without changing the obligations.
+
+```masm
+use miden::core::precompiles::fields::k1_scalar
+use miden::core::precompiles::hashes::sha256
+use miden::core::precompiles
+use miden::core::sys
+
+begin
+    exec.k1_scalar::push_two_digest
+    exec.k1_scalar::inv_with_root
+    # => [INV_ROOT, INV_TWO_EXPR, ...]
+    swapw
+    # => [INV_TWO_EXPR, INV_ROOT, ...]
+    exec.k1_scalar::push_two_digest
+    exec.k1_scalar::mul
+    exec.k1_scalar::push_one_digest
+    exec.k1_scalar::assert_eq_with_root
+    # => [EQUALITY_ROOT, INV_ROOT, ...]
+    exec.precompiles::append_root
+    # => [ROOT2, ...]
+
+    # Hash the packed bytes "abc" and explicitly include the returned obligation.
+    push.6513249 push.128 mem_store
+    push.256 push.3 push.128
+    exec.sha256::hash_bytes_mem_with_root
+    # => [HASH_ROOT, ROOT2, ...] (digest written to address 256)
+    exec.precompiles::append_root
+    # => [ROOT3, ...]
+    adv.export_deferred_witness
+    exec.sys::truncate_stack
+end
+```
+
+Export validates the selected root and regenerates its portable witness on every call, then stores
+it under the original digest, replacing any existing advice value. A preloaded or program-created
+dummy entry cannot suppress export. Failed validation, export or advice-budget checks leave an
+existing entry unchanged. Both stacks and the VM's built-in root are preserved; there is no export
+cache. Consumers must still validate the witness and bind its reconstructed root to an independently
+established expected digest. Skip export for an untouched literal TRUE root: no obligation was
+created, and literal TRUE cannot be exported.
+
+Registration evaluates assertions eagerly in the host, but a VM proof with an unchanged built-in
+root does not prove these caller-maintained obligations. Callers must retain the final root and
+arrange its proof and verification separately. `open_value` adds no obligation and still requires
+an already-bound canonical VALUE digest; an arbitrary expression digest does not meet that contract.
+
+Native ECDSA and EdDSA entry points keep their stack interfaces and acceptance rules. Their shared
+algorithm bodies build a complete obligation graph, and the native wrapper logs that graph once.
+Algorithm phases keep their obligations on the stack, combining them as intermediate values are
+consumed.
+This changes their deferred commitment digests and can change their cycle counts.
+
 ## Available modules
 Currently, Miden core library contains just a few modules, which are listed below. Over time, we plan to add many more modules which will include various cryptographic primitives, additional numeric data types and operations, and many others.
 

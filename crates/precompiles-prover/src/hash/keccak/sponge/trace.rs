@@ -14,7 +14,7 @@
 //! invocation (CR-dedup invariant).
 //!
 //! [`generate_trace_padded_to`] consumes a `SpongeRequires` and walks records in
-//! allocation order, stamping the 57-column trace; trailing rows up
+//! allocation order, stamping the 49-column trace; trailing rows up
 //! to the next power of two are inactive (`act = 0`).
 
 use alloc::vec::Vec;
@@ -29,8 +29,8 @@ use crate::{
             reference::{KECCAK_RC, keccak_f1600, keccak_round},
             round::{NUM_ROUNDS, RoundRequires},
             sponge::{
-                CHUNK_BYTES_RANGE, CLEARED_BYTES_RANGE, COL_ACT, COL_B_BEGIN, COL_BYTES_LEFT,
-                COL_CHUNK_PTR, COL_IS_CHUNK_AVAIL, COL_IS_FIRST_BLOCK_OF_INVOCATION, COL_IS_ZERO,
+                CHUNK_BYTES_RANGE, COL_ACT, COL_B_BEGIN, COL_BYTES_LEFT, COL_CHUNK_PTR,
+                COL_IS_CHUNK_AVAIL, COL_IS_FIRST_BLOCK_OF_INVOCATION, COL_IS_ZERO,
                 COL_SPONGE_SEQ_ID, COL_STATE_OUT_LO, NUM_MAIN_COLS, PADDED_BYTES_RANGE,
                 SPONGE_PERIOD, STATE_NEW_BYTES_RANGE, STATE_PREV_BYTES_RANGE,
                 program::{EXTRA_BLOCK_BEGIN, NOP_SLACK_BEGIN},
@@ -274,7 +274,7 @@ pub fn keccak_oracle(input: &[u8]) -> KeccakDigest {
 /// `round_req` (24 `require_round` calls per block, threading state
 /// through `keccak_round` + `KECCAK_RC`) and `bpl_req` for the per-row
 /// `BytePairLut` byte requires the sponge AIR consumes directly:
-/// rate-XORin (verbatim Xor, or the pad row's AndNot/Xor/Xor chain) and
+/// rate-XORin (verbatim Xor, or the pad row's canonical-input checks and state Xor) and
 /// the lane-16 0x80 Xor on last blocks.
 fn compute_block_snapshots_driving(
     inv: &Invocation,
@@ -297,12 +297,9 @@ fn compute_block_snapshots_driving(
                 if is_verbatim {
                     *lane = require_logic64(bpl_req, BytePairOp::Xor, *lane, chunk_lane);
                 } else if is_pad_row {
-                    let andnot_mask_val = andnot_mask(layout.byte_offset);
-                    let padding_mask_val = padding_mask(layout.byte_offset);
-                    let cleared =
-                        require_logic64(bpl_req, BytePairOp::AndNot, andnot_mask_val, chunk_lane);
-                    let padded =
-                        require_logic64(bpl_req, BytePairOp::Xor, cleared, padding_mask_val);
+                    require_logic64(bpl_req, BytePairOp::Xor, chunk_lane, 0);
+                    let padded = (!andnot_mask(layout.byte_offset) & chunk_lane)
+                        | padding_mask(layout.byte_offset);
                     *lane = require_logic64(bpl_req, BytePairOp::Xor, *lane, padded);
                 }
                 // past-pad: no XOR, no BytePairLut emission.
@@ -559,20 +556,19 @@ fn fill_state_lane_row(
     if is_rate_slot {
         let state_prev = state_at_block_start[slot];
         write_u64_bytes(r, STATE_PREV_BYTES_RANGE.start, state_prev);
-        let (state_new, cleared, padded) = if is_last_block && slot == layout.pad_lane_idx {
+        let (state_new, padded) = if is_last_block && slot == layout.pad_lane_idx {
             // Pad row.
             let cleared = !andnot_mask(layout.byte_offset) & chunk_lane;
             let padded = cleared ^ padding_mask(layout.byte_offset);
-            (state_prev ^ padded, cleared, padded)
+            (state_prev ^ padded, padded)
         } else if is_last_block && slot > layout.pad_lane_idx {
             // Past-pad: state_new = state_prev.
-            (state_prev, 0, 0)
+            (state_prev, 0)
         } else {
             // Verbatim XORin.
-            (state_prev ^ chunk_lane, 0, chunk_lane)
+            (state_prev ^ chunk_lane, chunk_lane)
         };
         write_u64_bytes(r, STATE_NEW_BYTES_RANGE.start, state_new);
-        write_u64_bytes(r, CLEARED_BYTES_RANGE.start, cleared);
         write_u64_bytes(r, PADDED_BYTES_RANGE.start, padded);
         if is_last_block {
             // Squeeze provides the perm-`last`'s output for
@@ -626,9 +622,8 @@ fn write_u64_bytes(row: &mut [Felt], bytes_start: usize, value: u64) {
     }
 }
 
-/// `0xFFFF_FFFF_FFFF_FFFF << (8·byte_offset)` — zeroes the low
-/// `byte_offset` bytes when ANDed with `chunk`, keeping the high
-/// bytes for the pad row's `cleared` intermediate.
+/// `0xFFFF_FFFF_FFFF_FFFF << (8·byte_offset)` — its complement preserves
+/// the low `byte_offset` input bytes and clears the padding suffix.
 fn andnot_mask(byte_offset: usize) -> u64 {
     u64::MAX << (8 * byte_offset)
 }

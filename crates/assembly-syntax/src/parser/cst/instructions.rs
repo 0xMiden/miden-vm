@@ -209,6 +209,10 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluatePayload),
     },
     PrimitiveSpec {
+        spelling: "adv.export_deferred_witness",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredExportWitness),
+    },
+    PrimitiveSpec {
         spelling: "add",
         build: || Instruction::Add,
     },
@@ -417,8 +421,8 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::Hash,
     },
     PrimitiveSpec {
-        spelling: "hmerge",
-        build: || Instruction::HMerge,
+        spelling: "hdword",
+        build: || Instruction::HDword,
     },
     PrimitiveSpec {
         spelling: "horner_eval_base",

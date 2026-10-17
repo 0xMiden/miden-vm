@@ -88,6 +88,129 @@ pub fn assert_precompile_witness_round_trips(output: &ExecutionOutput) {
     );
 }
 
+/// Reads an explicitly exported caller root and checks its portable graph without a PVM proof.
+pub fn assert_exported_manual_root(
+    output: &ExecutionOutput,
+    root_offset: usize,
+) -> miden_core::deferred::PrecompileWitness {
+    let root = Word::new(core::array::from_fn(|i| {
+        output.stack.get_element(root_offset + i).expect("root element")
+    }));
+    assert_manual_graph(output, root)
+}
+
+fn assert_manual_graph(
+    output: &ExecutionOutput,
+    root: Word,
+) -> miden_core::deferred::PrecompileWitness {
+    use std::sync::Arc;
+
+    use miden_core::{
+        deferred::{PrecompileWitness, TRUE_DIGEST},
+        serde::Deserializable,
+        utils::packed_u32_elements_to_bytes,
+    };
+
+    assert_eq!(output.precompile_root(), TRUE_DIGEST, "manual calls must not log");
+    assert!(output.precompile_witness.is_none());
+    assert!(output.advice.stack().is_empty());
+    let value = output.advice.get_mapped_values(&root).expect("root must be exported");
+    let byte_len = usize::try_from(value[0].as_canonical_u64()).unwrap();
+    let mut bytes = packed_u32_elements_to_bytes(&value[1..]);
+    bytes.truncate(byte_len);
+    let witness = PrecompileWitness::read_from_bytes(&bytes).expect("exported witness must decode");
+    assert_eq!(witness.root_unchecked(), root);
+    assert_eq!(witness.compute_root(Arc::new(miden_precompiles::registry())).unwrap(), root);
+    witness
+}
+
+/// Checks a nonzero stack tail beneath a signature call while preserving recovery results.
+pub fn signature_source_with_stack_tail(source: &str, procedure: &str) -> String {
+    let mut check = String::new();
+    // Expose the tail beneath recovery's sixteen result limbs, then restore those results.
+    // This scratch area is separate from the message, signature, and Ed25519 scratch fixtures.
+    if procedure.starts_with("recover") {
+        for ptr in [4096, 4100, 4104, 4108] {
+            check.push_str(&format!("push.{ptr} mem_storew_le dropw "));
+        }
+    }
+    check.push_str("push.99.98.97.96 assert_eqw.err=\"signature overwrote stack tail\" ");
+    if procedure.starts_with("recover") {
+        for ptr in [4108, 4104, 4100, 4096] {
+            check.push_str(&format!("padw push.{ptr} mem_loadw_le "));
+        }
+    }
+    let truncate = "exec.::miden::core::sys::truncate_stack";
+    source
+        .replacen("begin", "begin push.99.98.97.96", 1)
+        .replace(truncate, &format!("{check}{truncate}"))
+}
+
+/// Exports the operation's root, optionally composing it with an independent caller root.
+/// Both paths consume the root-first return while preserving the native result layout.
+pub fn manual_signature_source(
+    source: &str,
+    module: &str,
+    procedure: &str,
+    composed: bool,
+) -> String {
+    let start = if composed {
+        "begin padw padw exec.::miden::core::precompiles::append_root push.64 mem_storew_le dropw"
+    } else {
+        "begin"
+    };
+    let finish = if composed {
+        // Save the returned root for comparison, then compose in place without disturbing the
+        // ordinary results, including all sixteen recovery limbs.
+        "adv.export_deferred_witness push.68 mem_storew_le \
+         push.64 exec.::miden::core::precompiles::append_root_ptr \
+         padw push.64 mem_loadw_le adv.export_deferred_witness dropw"
+    } else {
+        "adv.export_deferred_witness dropw"
+    };
+    source.replacen("begin", start, 1).replace(
+        &format!("exec.::miden::core::crypto::dsa::{module}::{procedure}"),
+        &format!("exec.::miden::core::crypto::dsa::{module}::{procedure}_with_root {finish}"),
+    )
+}
+
+pub fn assert_manual_signature_matches_native(
+    native: &ExecutionOutput,
+    manual: &ExecutionOutput,
+    obligations: usize,
+    root_ands: usize,
+    composed: bool,
+) {
+    use miden_core::deferred::{DEFERRED_AND_FRAME, Node, PrecompileWitnessEntry, TRUE_DIGEST};
+
+    assert_eq!(manual.advice.map().len(), 1 + usize::from(composed));
+    let root = if composed {
+        Word::new(core::array::from_fn(|i| read_memory_felt(manual, 68 + i as u32)))
+    } else {
+        *manual.advice.map().iter().next().unwrap().0
+    };
+    let witness = assert_manual_graph(manual, root);
+    assert_eq!(native.precompile_root(), Node::and(TRUE_DIGEST, root).digest());
+    if composed {
+        let expected = Node::and(Node::and(TRUE_DIGEST, TRUE_DIGEST).digest(), root).digest();
+        let combined = assert_manual_graph(manual, expected);
+        assert_eq!(combined.entries().iter().filter(|entry| {
+            matches!(entry, PrecompileWitnessEntry::Join { frame, .. } if *frame == DEFERRED_AND_FRAME)
+        }).count(), root_ands + 2, "composition must retain both independent subgraphs");
+    }
+    assert_eq!(native.stack, manual.stack, "ordinary results and tail must match");
+    assert_eq!(witness.entries().iter().filter(|entry| {
+        matches!(entry, PrecompileWitnessEntry::Join { frame, .. } if *frame == DEFERRED_AND_FRAME)
+    }).count(), root_ands, "the returned root must use the expected grouping");
+    let uint_eq =
+        miden_precompiles::UintPrecompile::op_frame(miden_precompiles::UintPrecompile::EQ_OP_ID);
+    let curve_eq =
+        miden_precompiles::CurvePrecompile::op_frame(miden_precompiles::CurvePrecompile::EQ_OP_ID);
+    assert_eq!(witness.entries().iter().filter(|entry| {
+        matches!(entry, PrecompileWitnessEntry::Join { frame, .. } if *frame == uint_eq || *frame == curve_eq)
+    }).count(), obligations - 1, "all arithmetic/curve bindings must be present alongside the hash assertion");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

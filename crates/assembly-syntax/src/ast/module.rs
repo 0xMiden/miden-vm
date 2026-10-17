@@ -868,7 +868,7 @@ impl crate::prettier::PrettyPrint for Module {
         for submodule in self.submodules.iter() {
             doc += nl();
             if submodule.visibility.is_public() {
-                doc += const_text("pub mod");
+                doc += display(submodule.visibility) + const_text(" mod");
             } else {
                 doc += const_text("mod");
             }

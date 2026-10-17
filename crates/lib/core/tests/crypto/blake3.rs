@@ -1,6 +1,5 @@
 use miden_crypto::hash::blake::Blake3_256;
-use miden_utils_testing::{Felt, IntoBytes, group_slice_elements};
-
+use miden_utils_testing::{IntoBytes, group_slice_elements, rand::seeded_word};
 #[test]
 fn blake3_hash_64_bytes() {
     let source = "
@@ -12,8 +11,9 @@ fn blake3_hash_64_bytes() {
     end
     ";
 
-    let input0 = rand::random::<[Felt; 4]>().into_bytes();
-    let input1 = rand::random::<[Felt; 4]>().into_bytes();
+    let mut seed = 1u64;
+    let (input0, input1) = (seeded_word(&mut seed), seeded_word(&mut seed));
+    let (input0, input1) = (input0.into_bytes(), input1.into_bytes());
 
     let mut ibytes = [0u8; 64];
     ibytes[..32].copy_from_slice(&input0);
@@ -45,7 +45,8 @@ fn blake3_hash_32_bytes() {
     end
     ";
 
-    let ibytes = rand::random::<[Felt; 4]>().into_bytes();
+    let mut seed = 2u64;
+    let ibytes = seeded_word(&mut seed).into_bytes();
     let ifelts = group_slice_elements::<u8, 4>(&ibytes)
         .iter()
         .map(|&bytes| u32::from_le_bytes(bytes) as u64)

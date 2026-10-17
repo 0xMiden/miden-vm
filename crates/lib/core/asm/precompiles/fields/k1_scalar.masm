@@ -22,11 +22,11 @@ const BOUND_PTR = 3
 # UintPrecompile op ids are fixed by the Rust precompile: VALUE=0, ADD=1, SUB=2, MUL=3,
 # EQ=4. Only the VALUE frame carries BOUND_PTR; operation frames use zero in that slot.
 # Codegen derives each fixed initial chaining word from its complete frame.
-const VALUE_INIT_CV = [4280581857109608193, 2688637132020383744, 1947077364412317699, 6620516959492505600]
-const ADD_INIT_CV = [4280581857109608193, 2688637132020383745, 1947077364412317696, 6620516959492505600]
-const SUB_INIT_CV = [4280581857109608193, 2688637132020383746, 1947077364412317696, 6620516959492505600]
-const MUL_INIT_CV = [4280581857109608193, 2688637132020383747, 1947077364412317696, 6620516959492505600]
-const EQ_INIT_CV = [4280581857109608193, 2688637132020383748, 1947077364412317696, 6620516959492505600]
+const VALUE_INIT_CV = [13503953893964384001, 11912009168875159552, 11170449401267093507, 6620516959492505600]
+const ADD_INIT_CV = [13503953893964384001, 11912009168875159553, 11170449401267093504, 6620516959492505600]
+const SUB_INIT_CV = [13503953893964384001, 11912009168875159554, 11170449401267093504, 6620516959492505600]
+const MUL_INIT_CV = [13503953893964384001, 11912009168875159555, 11170449401267093504, 6620516959492505600]
+const EQ_INIT_CV = [13503953893964384001, 11912009168875159556, 11170449401267093504, 6620516959492505600]
 
 #! Deferred expression digest for this arithmetic domain.
 pub type Expr = struct { digest: word }
@@ -77,7 +77,7 @@ end
 
 #! Pushes the registered digest of constant 0.
 pub proc push_zero_digest() -> Expr
-    push.[6236153432504297367, 3187957907739580400, 2167405117855143298, 2074936142808467692]
+    push.[1533681861426107142, 3610576405811847415, 7785458875091022039, 5335987581156012816]
 end
 
 #! Pushes the raw little-endian u32 limbs of constant 0.
@@ -90,7 +90,7 @@ end
 
 #! Pushes the registered digest of constant 1.
 pub proc push_one_digest() -> Expr
-    push.[7464568316776584729, 756360488376334061, 5942046779145830497, 4755354035037013503]
+    push.[8036396005909281416, 634096678527048552, 7821647453498516734, 4229809944304776032]
 end
 
 #! Pushes the raw little-endian u32 limbs of constant 1.
@@ -103,7 +103,7 @@ end
 
 #! Pushes the registered digest of constant 2.
 pub proc push_two_digest() -> Expr
-    push.[5602755106130037630, 7850876901144447652, 329452132147011061, 3565534390785263390]
+    push.[3205656990037672249, 1254676971237220327, 1331203601515980943, 2621399740982225228]
 end
 
 #! Pushes the raw little-endian u32 limbs of constant 2.
@@ -116,7 +116,7 @@ end
 
 #! Pushes the registered digest of field constant -1.
 pub proc push_minus_one_digest() -> Expr
-    push.[614321536017220366, 6007502553770890584, 324337015041596265, 3058966544373281870]
+    push.[4201701209340472927, 871752538852498062, 5844178027720889769, 8284849043228535378]
 end
 
 #! Pushes the raw little-endian u32 limbs of field constant -1.
@@ -129,7 +129,7 @@ end
 
 #! Pushes the registered digest of field constant 1/2.
 pub proc push_half_digest() -> Expr
-    push.[970058174780189669, 4907315192859269815, 7867314814362352239, 3659396051114564159]
+    push.[553040932433476145, 1666747397192170126, 2451081273567554467, 7811136562176072644]
 end
 
 #! Pushes the raw little-endian u32 limbs of field constant 1/2.
@@ -142,7 +142,7 @@ end
 
 #! Pushes the registered digest of field constant 2^128.
 pub proc push_pow_2_128_digest() -> Expr
-    push.[820403235471979306, 4042673319427659404, 1097178646929916258, 8310727398821009432]
+    push.[1319232587353538582, 6140375458926640063, 5294130995404586923, 995444696337620941]
 end
 
 #! Pushes the raw little-endian u32 limbs of field constant 2^128.
@@ -155,7 +155,7 @@ end
 
 #! Pushes the registered digest of field constant 2^256.
 pub proc push_pow_2_256_digest() -> Expr
-    push.[9065246745448323193, 4296843267000753241, 1891134523019173253, 3676110652989133639]
+    push.[4815092938261375825, 703287909235242476, 8562080490038389978, 1660989398355194715]
 end
 
 #! Pushes the raw little-endian u32 limbs of field constant 2^256.
@@ -168,7 +168,7 @@ end
 
 #! Pushes the registered digest of field constant 2^384.
 pub proc push_pow_2_384_digest() -> Expr
-    push.[1909907222482129482, 5022922055055806093, 946644410698393121, 3654951996295571167]
+    push.[6500454974850548137, 8461948573539544442, 2299466448795107539, 4473660486133932428]
 end
 
 #! Pushes the raw little-endian u32 limbs of field constant 2^384.
@@ -425,6 +425,42 @@ pub proc div(numerator: Expr, denominator: Expr) -> Expr
     # => [QUOTIENT_DIGEST, ...]
 end
 
+#! Computes an inverse and returns its binding obligation first without logging it.
+#! Input:  [X_DIGEST, ...]
+#! Output: [ROOT, INV_DIGEST, ...]
+#! ROOT binds X * INV = 1; zero inputs fail. The caller must include ROOT in its own obligation.
+pub proc inv_with_root(value: Expr) -> (precompiles::Digest, Expr)
+    emit.event("miden::precompiles::fields::field_inv")
+    adv_pushw
+    adv_pushw
+    swapw
+    exec.load
+    # => [INV_DIGEST, X_DIGEST, ...]
+    dupw swapw.2
+    # => [X_DIGEST, INV_DIGEST, INV_DIGEST, ...]
+    exec.mul
+    # => [PRODUCT_DIGEST, INV_DIGEST, ...]
+    exec.push_one_digest
+    exec.assert_eq_with_root
+    # => [ROOT=EQ(ONE, PRODUCT), INV_DIGEST, ...]
+end
+
+#! Divides two field expressions and returns the denominator's inverse obligation first.
+#! Input:  [NUMERATOR, DENOMINATOR, ...]
+#! Output: [ROOT, QUOTIENT_EXPR, ...]
+#! The VM built-in root is unchanged; the caller must include ROOT in its own obligation.
+pub proc div_with_root(numerator: Expr, denominator: Expr) -> (precompiles::Digest, Expr)
+    swapw
+    # => [DENOMINATOR, NUMERATOR, ...]
+    exec.inv_with_root
+    # => [ROOT, INVERSE, NUMERATOR, ...]
+    swapw.2
+    # => [NUMERATOR, INVERSE, ROOT, ...]
+    exec.mul
+    swapw
+    # => [ROOT, QUOTIENT_EXPR, ...]
+end
+
 #! Evaluates a field expression digest and returns whether its canonical VALUE digest matches a target.
 #! Input:  [TARGET_DIGEST, EXPR_DIGEST, ...]
 #! Output: [is_equal, ...]
@@ -533,4 +569,115 @@ pub proc eval(value: Expr) -> Value
     # => [EQ_DIGEST, VALUE_LO, VALUE_HI, ...]
     exec.precompiles::log_deferred
     # => [VALUE_LO, VALUE_HI, ...]
+end
+
+#! Returns the equality assertion for two field expressions without logging it.
+#! Input:  [LHS, RHS, ...]
+#! Output: [ROOT, ...]
+#! The caller must include ROOT in its own obligation.
+pub proc assert_eq_with_root(lhs: Expr, rhs: Expr) -> precompiles::Digest
+    push.EQ_INIT_CV
+    exec.precompiles::register_fixed_expr
+end
+
+#! Evaluates a field expression and returns its binding obligation first.
+#! Input:  [EXPR, ...]
+#! Output: [ROOT, VALUE_LO, VALUE_HI, ...]
+#! ROOT binds the advised canonical value to EXPR; the VM built-in root is unchanged.
+pub proc eval_with_root(value: Expr) -> (precompiles::Digest, Value)
+    adv.evaluate_deferred_payload
+    adv_pushw adv_pushw
+    # => [VALUE_LO, VALUE_HI, EXPR, ...]
+    dupw.1 dupw.1
+    push.VALUE_INIT_CV
+    exec.precompiles::register_fixed_expr
+    # => [VALUE_DIGEST, VALUE_LO, VALUE_HI, EXPR, ...]
+    movupw.3
+    push.EQ_INIT_CV
+    exec.precompiles::register_fixed_expr
+    # => [ROOT=EQ(EXPR, VALUE_DIGEST), VALUE_LO, VALUE_HI, ...]
+end
+
+#! Returns a canonical VALUE digest comparison together with its binding obligation.
+#! Input:  [TARGET, EXPR, ...]
+#! Output: [ROOT, is_equal, ...]
+#! TARGET must already be a bound canonical VALUE digest. A false comparison succeeds.
+#! ROOT binds the advised value to EXPR; the VM built-in root is unchanged.
+pub proc is_eq_digest_with_root(target: Expr, value: Expr) -> (precompiles::Digest, i1)
+    swapw
+    # => [EXPR, TARGET, ...]
+    adv.evaluate_deferred_payload
+    adv_pushw adv_pushw
+    push.VALUE_INIT_CV
+    exec.precompiles::register_fixed_expr
+    # => [VALUE_DIGEST, EXPR, TARGET, ...]
+    swapw dupw.1
+    # => [VALUE_DIGEST, EXPR, VALUE_DIGEST, TARGET, ...]
+    push.EQ_INIT_CV
+    exec.precompiles::register_fixed_expr
+    # => [ROOT=EQ(VALUE_DIGEST, EXPR), VALUE_DIGEST, TARGET, ...]
+    movdnw.2
+    exec.precompiles::word_eq
+    # => [is_equal, ROOT, ...]
+    movdn.4
+    # => [ROOT, is_equal, ...]
+end
+
+#! Evaluates a canonical VALUE digest and returns its binding obligation first.
+#! Input:  [EXPR, ...]
+#! Output: [ROOT, VALUE_DIGEST, ...]
+proc eval_digest_with_root(value: Expr) -> (precompiles::Digest, Expr)
+    adv.evaluate_deferred_payload
+    adv_pushw adv_pushw
+    push.VALUE_INIT_CV
+    exec.precompiles::register_fixed_expr
+    # => [VALUE_DIGEST, EXPR, ...]
+
+    # Preserve VALUE_DIGEST and the binding order used by eval_with_root: EQ(EXPR, VALUE).
+    dupw swapw.2
+    # => [EXPR, VALUE_DIGEST, VALUE_DIGEST, ...]
+    push.EQ_INIT_CV
+    exec.precompiles::register_fixed_expr
+    # => [ROOT=EQ(EXPR, VALUE_DIGEST), VALUE_DIGEST, ...]
+end
+
+#! Compares two canonical values and returns their combined binding obligation first.
+#! Input:  [LHS, RHS, ...]
+#! Output: [ROOT, is_equal, ...]
+#! A false comparison succeeds; ROOT binds both advised values without logging into the VM root.
+pub proc is_eq_with_root(lhs: Expr, rhs: Expr) -> (precompiles::Digest, i1)
+    exec.eval_digest_with_root
+    # => [LHS_ROOT, LHS_VALUE, RHS, ...]
+    movupw.2
+    exec.eval_digest_with_root
+    # => [RHS_ROOT, RHS_VALUE, LHS_ROOT, LHS_VALUE, ...]
+    swapw.3
+    # => [LHS_VALUE, RHS_VALUE, LHS_ROOT, RHS_ROOT, ...]
+
+    # Raw digest equality is sound: both operands are canonical VALUE nodes. The root returned
+    # below includes their bindings to the original expressions, regardless of the comparison bit.
+    exec.precompiles::word_eq
+    # => [is_equal, LHS_ROOT, RHS_ROOT, ...]
+    movdn.8
+    # => [LHS_ROOT, RHS_ROOT, is_equal, ...]
+    exec.precompiles::append_root
+    # => [ROOT=AND(LHS_ROOT, RHS_ROOT), is_equal, ...]
+end
+
+#! Returns the zero comparison bit together with its binding obligation.
+#! Input:  [EXPR, ...]
+#! Output: [ROOT, is_zero, ...]
+#! A false predicate succeeds; the VM built-in root is unchanged.
+pub proc is_zero_with_root(value: Expr) -> (precompiles::Digest, i1)
+    exec.push_zero_digest
+    exec.is_eq_digest_with_root
+end
+
+#! Returns the one comparison bit together with its binding obligation.
+#! Input:  [EXPR, ...]
+#! Output: [ROOT, is_one, ...]
+#! A false predicate succeeds; the VM built-in root is unchanged.
+pub proc is_one_with_root(value: Expr) -> (precompiles::Digest, i1)
+    exec.push_one_digest
+    exec.is_eq_digest_with_root
 end

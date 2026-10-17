@@ -183,6 +183,28 @@ fn package_serialization_roundtrip() {
 }
 
 #[test]
+fn package_format_version_rejects_previous_version() {
+    let bytes = build_package().to_bytes();
+    let version_offset = MAGIC_PACKAGE.len();
+    assert_eq!(&bytes[version_offset..version_offset + 3], &[8, 0, 0]);
+
+    let mut old_bytes = bytes;
+    old_bytes[version_offset..version_offset + 3].copy_from_slice(&[7, 0, 0]);
+    // The header alone must reject the old version, before reading the package body.
+    old_bytes.truncate(version_offset + 3);
+    for result in [
+        Package::read_from_bytes(&old_bytes),
+        Package::read_from_bytes_trusted(&old_bytes),
+    ] {
+        assert_matches!(
+            result,
+            Err(DeserializationError::InvalidValue(message))
+                if message == "unsupported version. Got '[7, 0, 0]', but only '[8, 0, 0]' is supported"
+        );
+    }
+}
+
+#[test]
 fn executable_package_entrypoint_roundtrips() {
     let (forest, node_id) = build_forest();
     let entrypoint =
@@ -496,7 +518,6 @@ fn package_rejects_non_root_export() {
     let package = Package {
         name: PackageId::from("test_pkg"),
         version: crate::Version::new(0, 0, 0),
-        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Library,
         mast: Arc::new(forest),
@@ -729,7 +750,6 @@ fn regression_package_deserialisation_rejects_spoofed_mast_node_digests() {
     let package = Package {
         name: PackageId::from("lib"),
         version: crate::Version::new(0, 0, 0),
-        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Library,
         mast: Arc::new(forest),
@@ -774,7 +794,6 @@ fn trusted_package_deserialisation_accepts_spoofed_mast_hashes() {
     let package = Package {
         name: PackageId::from("lib"),
         version: crate::Version::new(0, 0, 0),
-        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Library,
         mast: Arc::new(forest),
@@ -823,7 +842,6 @@ fn regression_kernel_package_deserialisation_rejects_spoofed_mast_node_digests()
     let package = Package {
         name: PackageId::from("kernel"),
         version: crate::Version::new(0, 0, 0),
-        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Kernel,
         mast: Arc::new(forest),
@@ -869,7 +887,6 @@ fn package_deserialize_from_file_rejects_spoofed_kernel_mast_node_digests() {
     let package = Package {
         name: PackageId::from("kernel"),
         version: crate::Version::new(0, 0, 0),
-        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Kernel,
         mast: Arc::new(forest),
@@ -923,7 +940,6 @@ fn trusted_kernel_package_deserialisation_accepts_spoofed_mast_hashes() {
     let package = Package {
         name: PackageId::from("kernel"),
         version: crate::Version::new(0, 0, 0),
-        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Kernel,
         mast: Arc::new(forest),

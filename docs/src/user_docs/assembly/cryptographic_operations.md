@@ -20,7 +20,7 @@ An Eidos digest has four elements below `2^63`, giving a generic collision-resis
 | -------------------------------- | ------------------ | ----------------- | ----- |
 | hash <br /> - *(18 cycles)*      | [A, ...]           | [B, ...]          | Computes the Eidos hash of one word. The 4-element input length is bound into the initial chaining value. |
 | compress <br /> - *(1 cycle)*   | [BLOCK_LO, BLOCK_HI, CV, ...] | [BLOCK_LO, BLOCK_HI, CV', ...] | Performs one Eidos compression. The 8-element block is preserved and only the chaining-value word is replaced. |
-| hmerge <br /> - *(15 cycles)*    | [A, B, ...]        | [C, ...]          | Hashes the eight Felts in `A || B` under the generic Felt-sequence domain. |
+| hdword <br /> - *(15 cycles)*    | [A, B, ...]        | [C, ...]          | Hashes the eight Felts in `A || B` under the generic Felt-sequence domain. |
 | mtree_get  <br /> - *(10 cycles)*  | [d, i, R, ...]     | [V, R, ...]       | Fetches the node value from the advice provider and runs a verification equivalent to `mtree_verify`, returning the value if succeeded.                                                                                                                                                                                                                |
 | mtree_set <br /> - *(30 cycles)*   | [d, i, R, V', ...] | [V, R', ...]      | Updates a node in the Merkle tree with root $R$ at depth $d$ and index $i$ to value $V'$. $R'$ is the Merkle root of the resulting tree and $V$ is old value of the node. Merkle tree with root $R$ must be present in the advice provider, otherwise execution fails. At the end of the operation the advice provider will contain both Merkle trees. |
 | mtree_merge <br /> - *(15 cycles)* | [L, R, ...]        | [M, ...]          | Merges two Merkle trees with the provided roots L (left), R (right) into a new Merkle tree with root M (merged). The input trees are retained in the advice provider.                                                                                                                                                                                  |
@@ -39,7 +39,7 @@ If the error code is omitted, the default value of $0$ is assumed.
 #### Choosing an Eidos operation
 
 - **`hash`** is a macro-instruction for a one-word, exact-length Eidos hash.
-- **`hmerge`** is the exact eight-Felt form of generic Felt-sequence hashing. Merkle instructions
+- **`hdword`** is the exact eight-Felt form of generic Felt-sequence hashing. Merkle instructions
   use the reserved Merkle inner-node construction internally; MAST nodes use their opcode-specific
   framing.
 - **`compress`** is the native primitive. It accepts a caller-supplied 8-element block and
@@ -48,7 +48,7 @@ If the error code is omitted, the default value of $0$ is assumed.
   ad-hoc chaining-value or framing convention.
 
 The core library module `miden::core::crypto::hashes::eidos` provides exact-length hashing,
-domain-tagged hashing, streaming absorption, and digest extraction. `hash` and `hmerge` expand to
+domain-tagged hashing, streaming absorption, and digest extraction. `hash` and `hdword` expand to
 stack manipulation, a length-bound generic Felt chaining value, one `compress`, and removal of the
 preserved block words.
 

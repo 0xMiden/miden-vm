@@ -21,6 +21,8 @@
 //!    (block low = H_input_chunks, block high = H_digest_chunks) under the VM Keccak-256 assertion
 //!    frame `(KECCAK256_PRECOMPILE, ASSERT, len_bytes, 0)` → `H_keccak`.
 //! 7. Provides `Binding(H_keccak, True, 0, 0)`.
+//! 8. Range-checks `n_sponge_perms − 1` and the last sponge block's remainder, pinning
+//!    `n_sponge_perms = floor(len_bytes / 136) + 1`.
 //!
 //! Continuity (`+n_chunks` on `chunk_seq_id_head`, `+32·n_sponge_perms`
 //! on `sponge_seq_id_head`, gated on `act_next`) prevents per-namespace
@@ -47,7 +49,7 @@ use crate::{
         ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
         LookupGroup, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, frac_col,
     },
-    primitives::byte_pair_lut::BytePairLutMsg,
+    primitives::byte_pair_lut::{BytePairLutMsg, Range16Msg},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
         binding::BindingMsg,
@@ -80,10 +82,9 @@ pub const COL_ACT: usize = 0;
 /// `sponge_seq_id_head_next = sponge_seq_id_head + 32·n_sponge_perms`
 /// keeps the sponge namespace gap-free across invocations.
 pub const COL_SPONGE_SEQ_ID_HEAD: usize = 1;
-/// Number of Keccak permutations this invocation occupies on the sponge (= sponge blocks). On a
-/// non-final active row, successor-head continuity fixes this free witness. On the final active
-/// row, its digest-address selections must match the sponge's fixed-multiplicity `Memory64`
-/// outputs.
+/// Number of Keccak permutations this invocation occupies on the sponge
+/// (= sponge blocks), `floor(len_bytes / 136) + 1`. The range lookups
+/// pin it to that value on every active row.
 pub const COL_N_SPONGE_PERMS: usize = 2;
 /// Head chunk index of this invocation's chunk chain. Pinned by the
 /// `ChunkChain` consume; `chunk_seq_id_head_next = chunk_seq_id_head +
@@ -165,7 +166,7 @@ pub const NUM_MAIN_COLS: usize = COL_N_CHUNKS_INV + 1;
 // AUX / PUBLIC LAYOUT
 // ================================================================================================
 
-/// Nine aux columns, flattened via `frac_col!` so every closing
+/// Eleven aux columns, flattened via `frac_col!` so every closing
 /// constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
 ///
 /// - col 0: `KeccakSponge` provide alone — the centered running-sum column.
@@ -175,9 +176,17 @@ pub const NUM_MAIN_COLS: usize = COL_N_CHUNKS_INV + 1;
 /// - col 5: digest-chunks block + initial CV.
 /// - col 6: `EidosOut(H_digest_chunks)` + byte-pair remainder check.
 /// - col 7/8: Keccak-node block + initial CV, then `EidosOut(H_keccak)`.
-pub const NUM_AUX_COLS: usize = 9;
+/// - col 9/10: range checks of the last-block remainder `r`, of `135 - r`, and of `n_sponge_perms -
+///   1`.
+pub const NUM_AUX_COLS: usize = 11;
 
-pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 1];
+pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 1];
+
+/// Bytes absorbed by one Keccak-256 sponge permutation.
+pub const SPONGE_RATE_BYTES: u32 = 136;
+
+/// Largest `n_sponge_perms` the range check on `n_sponge_perms - 1` admits.
+pub const MAX_SPONGE_PERMS: u32 = 1 << 16;
 
 // AIR
 // ================================================================================================
@@ -319,6 +328,50 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
 
 // LOOKUP AIR — bus interactions
 // ================================================================================================
+
+/// Emits the `Range16` checks that pin `n_sponge_perms` to `floor(len_bytes / 136) + 1` on each
+/// active row. With `n_sponge_perms − 1 ∈ [0, 2^16)` and the last-block remainder
+/// `r = len_bytes − 136·(n_sponge_perms − 1)` satisfying `r, 135 − r ∈ [0, 2^16)`, the length
+/// equation `len_bytes = 136·(n_sponge_perms − 1) + r` holds over the integers with
+/// `r ∈ [0, 135]`.
+///
+/// That count is the block count of this node's own sponge invocation. The invocation's first
+/// sponge row consumes this node's `KeccakSponge` request, which pins its starting `bytes_left` to
+/// `len_bytes`. The sponge's `bytes_left` decrement chain, pad-lane tie-down and pad-must-fire
+/// constraints then end the invocation on the block that absorbs the padding, its
+/// `floor(len_bytes / 136) + 1`-th. The digest address therefore reads this invocation's final
+/// permutation, and the sponge-head continuity steps to the first row of the next invocation.
+pub(crate) fn eval_sponge_perm_count<LB>(builder: &mut LB, local: &[LB::Var; NUM_MAIN_COLS])
+where
+    LB: LookupBuilder<F = Felt>,
+{
+    let act: LB::Expr = local[COL_ACT].into();
+    let len_bytes: LB::Expr = local[COL_LEN_BYTES].into();
+    let n_sponge_perms: LB::Expr = local[COL_N_SPONGE_PERMS].into();
+    let full_blocks = n_sponge_perms - LB::Expr::ONE;
+    let remainder = len_bytes - LB::Expr::from(Felt::from(SPONGE_RATE_BYTES)) * full_blocks.clone();
+    let rate_gap = LB::Expr::from(Felt::from(SPONGE_RATE_BYTES - 1)) - remainder.clone();
+
+    let interaction_deg = Deg { v: 1, u: 1 };
+    frac_col!(
+        builder,
+        "sponge-perm-count",
+        Deg { v: 2, u: 2 },
+        (
+            "last-block-remainder",
+            act.clone(),
+            Range16Msg { w: remainder },
+            interaction_deg
+        ),
+        ("last-block-rate-gap", act.clone(), Range16Msg { w: rate_gap }, interaction_deg),
+    );
+    frac_col!(
+        builder,
+        "sponge-perm-count",
+        Deg { v: 1, u: 1 },
+        ("full-blocks", act, Range16Msg { w: full_blocks }, interaction_deg),
+    );
+}
 
 impl<LB> LookupAir<LB> for KeccakNodeAir
 where
@@ -621,5 +674,8 @@ where
                 interaction_deg
             ),
         );
+
+        // ---- col 9/10: sponge-permutation count range checks ----
+        eval_sponge_perm_count(builder, &local);
     }
 }

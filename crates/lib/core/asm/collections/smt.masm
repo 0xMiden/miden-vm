@@ -24,16 +24,16 @@ const MAX_LEAF_SIZE = 8192
 
 # `SMT_BUCKET_LEAF` (tag 0x00000101) initial chaining-word constants. Only the entry count is
 # dynamic.
-const LEAF_INIT_CV_0 = 4280581857092829441
-const LEAF_INIT_CV_1_BASE = 2688637132020383744
-const LEAF_INIT_CV_2 = 1947077364412317696
+const LEAF_INIT_CV_0 = 13503953893947605249
+const LEAF_INIT_CV_1_BASE = 11912009168875159552
+const LEAF_INIT_CV_2 = 11170449401267093504
 const LEAF_INIT_CV_3 = 6620516959492505600
 
 # Eidos chaining word for one key-value pair under `SMT_BUCKET_LEAF`.
 const LEAF_MERGE_INIT_CV = [
-    4280581857092829441,
-    2688637132020383745,
-    1947077364412317696,
+    13503953893947605249,
+    11912009168875159553,
+    11170449401267093504,
     6620516959492505600
 ]
 
@@ -189,7 +189,7 @@ pub proc get(key: Key, root: eidos::Digest) -> (word, eidos::Digest)
             # (39 cycles)
             dupw.1 dupw.1
             # => [K_l, V, K_l, V, NV, K, R]
-            push.LEAF_MERGE_INIT_CV exec.eidos::merge_with_chaining_word movupw.3 assert_eqw
+            push.LEAF_MERGE_INIT_CV exec.eidos::compress_double_word movupw.3 assert_eqw
             # => [K_l, V, K, R]
 
             # The leaf may hold a different key with the same leaf index. Return V if the stored
@@ -298,7 +298,7 @@ pub proc set(value: word, key: Key, root: eidos::Digest) -> (word, eidos::Digest
             # SMT_BUCKET_LEAF hash equals NV.
             adv_pushw adv_pushw
             # => [V_l, K_l, NV, V, K, R]
-            dupw dupw.2 push.LEAF_MERGE_INIT_CV exec.eidos::merge_with_chaining_word
+            dupw dupw.2 push.LEAF_MERGE_INIT_CV exec.eidos::compress_double_word
             # => [leaf_hash, V_l, K_l, NV, V, K, R]
             movupw.3 assert_eqw.err="invalid single-leaf preimage: hash does not match node value"
             # => [V_l, K_l, V, K, R]
@@ -764,7 +764,7 @@ proc insert_single_leaf(
         # => [K_l, K, V_l, V, R]
 
         exec.insert_single_to_multi_leaf
-        # => [V_l, R_new]
+        # => [ZERO, R_new]
     end
 end
 
@@ -772,12 +772,12 @@ end
 #! converting the leaf to a multi-leaf.
 #!
 #! Inputs: [K_l, K, V_l, V, R]
-#! Outputs: [V_l, R_new]
+#! Outputs: [ZERO, R_new]
 #!
 #! where:
 #! - `K_l` is the original key stored in the single-leaf.
 #! - `V_l` is the original value stored in the single-leaf.
-#! - `K` is the new key to insert.
+#! - `K` is the new key to insert, distinct from `K_l`.
 #! - `V` is the new value to insert.
 #! - `R` is the root of the original SMT.
 #! - `R_new` is the root of the SMT after the insertion.
@@ -800,7 +800,7 @@ proc insert_single_to_multi_leaf(
     # => [K_l < K, K_l, K, V_l, V, R]
 
     # We need a contiguous region of memory containing the sorted pairs. Converting a single-leaf
-    # To a multi-leaf will always involve 2 pairs (8 words), so we can use local memory for this.
+    # to a multi-leaf will always involve 2 pairs (4 words), so we can use local memory for this.
 
     if.true
         # => [K_l, K, V_l, V, R]
@@ -951,8 +951,7 @@ proc set_multi_leaf(
     key: Key,
     root: eidos::Digest,
 ) -> (word, eidos::Digest)
-    # We'll have to pipe all the pairs from the advice stack. Let's get the
-    # stack ready for pipe_double_words_preimage_to_memory_with_domain.
+    # Prepare the bucket commitment and destination for pipe_leaf_preimage_to_memory.
 
     movdn.12
     # => [NV, V, K, leaf_size, R]
@@ -1252,14 +1251,8 @@ proc replace_in_multi_leaf(
     # => [V_old, R_new]
 end
 
-#! Removes a key-value pair from a multi-leaf.
-#!
-#! LOCALS: MAX_LEAF_SIZE of key-value pairs + 4 pointers:
-#! - pairs_array_start: pointer to the start of the original leaf data
-#! - pairs_array_end: pointer to the end of the original leaf data
-#! - cur_read: pointer to the current read position in the original leaf data
-#! - cur_write: pointer to the current write position
-@locals(8196)
+#! Removes a key-value pair in place from the caller's multi-leaf buffer.
+@locals(2)
 proc remove_in_multi_leaf(
     key_ptr: ptr<Entry>,
     start_ptr: ptr<Entry>,
@@ -1273,19 +1266,11 @@ proc remove_in_multi_leaf(
     # LOCALS:
     # 0: pairs_array_start
     # 1: pairs_array_end
-    # 2: cur_read
-    # 3: cur_write
-    # 8..8196: leaf memory space
 
     movdn.6
     # => [start_ptr, end_ptr, V=EMPTY, key_ptr, K, R]
-    dup loc_store.0 # start_ptr
-    loc_store.2 # cur_read = start_ptr
+    loc_store.0 # start_ptr
     loc_store.1 # end_ptr
-    # => [V, key_ptr, K, R]
-
-    # cur_write = &LOCALS[4]
-    locaddr.4 loc_store.3
     # => [V=EMPTY, key_ptr, K, R]
 
     # Get V_in_leaf from key_ptr+4. We'll need it later. Since we know V is an
@@ -1309,7 +1294,7 @@ proc remove_in_multi_leaf(
     exec.memmove_word_range_left_and_advance_ptrs
     # => [cur_read', cur_write'; V_old, K, R]
 
-    drop loc_store.3
+    drop loc_store.1 # pairs_array_end after removal
     # => [V_old, K, R]
 
     movupw.2
@@ -1319,7 +1304,7 @@ proc remove_in_multi_leaf(
     dup.11
     # => [leaf_index, R, V_old, K]
 
-    loc_load.3 loc_load.0
+    loc_load.1 loc_load.0
     # => [start_addr, end_addr, leaf_index, R; V_old, K]
 
     exec.hash_and_insert_mem

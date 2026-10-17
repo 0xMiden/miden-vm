@@ -771,14 +771,17 @@ impl TranscriptEvalRequires {
     /// digest is `h_claim` and it binds `(h_claim, Group, val)`. Consumes each
     /// term's child `Group`/`Uint` binding (their `out_mult`);
     /// the absorb rows additionally consume `MsmClaimTerm` and the boundary
-    /// `MsmExpr` over the bus (laid by the AIR). Dedups by `(expr, h_claim)` and bumps the MSM
-    /// resolve use count only for a new row. Returns the value's shared-use [`EcNode`].
+    /// `MsmExpr` over the bus (laid by the AIR). Dedups by `(expr, h_claim)` and marks an MSM
+    /// expression claimed only for a new row. A new row claims `expr` itself while it is
+    /// unclaimed and otherwise the copy `duplicate` lays, since the AIR admits one transcript
+    /// claim per expression. Returns the value's shared-use [`EcNode`].
     pub fn record_ec_msm(
         &mut self,
         expr: EcExprPtr,
         terms: &[(EcNode, UintNode)],
         msm: &mut EcMsmRequires,
         eidos: &mut EidosRequires,
+        duplicate: impl FnOnce(&mut EcMsmRequires, EcExprPtr) -> EcExprPtr,
     ) -> EcNode {
         assert!(!terms.is_empty(), "an MSM claim needs at least one term");
         let group = msm.group(expr);
@@ -788,7 +791,7 @@ impl TranscriptEvalRequires {
 
         // `terms` must match `expr`'s own term rows as an exact multiset —
         // each chiplet row claimed exactly once, repeats included — so the
-        // seam's set match is well-defined and the root tracks the term set
+        // seam's multiset match is well-defined and the root tracks the terms
         // exactly as declared. (A bare existence check would let a claim
         // over-consume a row — e.g. naming the same base twice when the
         // chiplet has only one row for it — which the LogUp bus would still
@@ -831,6 +834,11 @@ impl TranscriptEvalRequires {
             return node;
         }
 
+        let claimed = if msm.is_claimed(expr) {
+            duplicate(msm, expr)
+        } else {
+            expr
+        };
         let absorption = eidos.require_absorption(frame, blocks.iter().copied());
         debug_assert_eq!(absorption.digest, h_claim);
         let _ = eidos.require_digest(absorption.digest);
@@ -864,7 +872,7 @@ impl TranscriptEvalRequires {
             absorbed: None, // per-row compressions / digests live in `absorbs`
             kind: NodeKind::EcMsm {
                 absorbs,
-                expr: expr.addr(),
+                expr: claimed.addr(),
                 group: group.addr(),
                 val: val.addr(),
                 bound: bound.addr(),
@@ -872,7 +880,7 @@ impl TranscriptEvalRequires {
         });
         let node = EcNode { id, hash: h_claim, point: val };
         self.ec_dedup.insert(key, node);
-        msm.consume_claim(expr, 1);
+        msm.mark_claimed(claimed);
         node
     }
 

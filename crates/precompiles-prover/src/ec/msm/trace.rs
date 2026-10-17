@@ -15,12 +15,12 @@ use miden_core::{Felt, utils::RowMajorMatrix};
 use super::EcMsmAir;
 use super::{
     COL_A_DIFF_HI, COL_A_DIFF_LO, COL_A_EXPR, COL_A_PTR, COL_ACT, COL_B_DIFF_HI, COL_B_DIFF_LO,
-    COL_B_EXPR, COL_B_PTR, COL_BASE, COL_BASE_A, COL_BASE_B, COL_BETA_PTR, COL_BOUND_PTR,
-    COL_CLAIM_MULT, COL_ENDO_BASE_X, COL_ENDO_MINTED, COL_ENDO_VAL_X, COL_ENDO_Y, COL_EXPR_PTR,
-    COL_GROUP_PTR, COL_I, COL_IDX, COL_IS_BOUNDARY, COL_IS_COMBINE, COL_IS_INTRO,
-    COL_IS_INTRO_ZERO, COL_IS_NEG, COL_J, COL_LAMBDA_PTR, COL_MULT, COL_NEG_MINTED, COL_NEG_X,
-    COL_NEG_YA, COL_NEG_YR, COL_S_A, COL_S_B, COL_SBOUND_PTR, COL_SCALAR, COL_TAKE_A, COL_TAKE_B,
-    COL_TAKE_BOTH, COL_VAL, COL_VAL_A, COL_VAL_B, NUM_MAIN_COLS,
+    COL_B_EXPR, COL_B_PTR, COL_BASE, COL_BETA_PTR, COL_BOUND_PTR, COL_ENDO_BASE_X, COL_ENDO_MINTED,
+    COL_ENDO_VAL_X, COL_ENDO_Y, COL_EXPR_PTR, COL_GROUP_PTR, COL_I, COL_IDX, COL_IS_BOUNDARY,
+    COL_IS_CLAIMED, COL_IS_COMBINE, COL_IS_INTRO, COL_IS_INTRO_ZERO, COL_IS_NEG, COL_J,
+    COL_LAMBDA_PTR, COL_MULT, COL_NEG_MINTED, COL_NEG_X, COL_NEG_YA, COL_NEG_YR, COL_S_A, COL_S_B,
+    COL_SBOUND_PTR, COL_SCALAR, COL_TAKE_A, COL_TAKE_B, COL_VAL, COL_VAL_A, COL_VAL_B,
+    NUM_MAIN_COLS,
 };
 use crate::{
     ec::trace::{EcGroupPtr, EcPointPtr},
@@ -48,12 +48,9 @@ impl EcExprPtr {
 pub struct CombineRow {
     pub take_a: bool,
     pub take_b: bool,
-    pub take_both: bool,
     pub i: u32,
     pub j: u32,
-    pub base_a: EcPointPtr,
     pub s_a: UintPtr,
-    pub base_b: EcPointPtr,
     pub s_b: UintPtr,
     pub out_base: EcPointPtr,
     pub out_scalar: UintPtr,
@@ -89,10 +86,7 @@ struct RowVals {
     j: u32,
     take_a: u32,
     take_b: u32,
-    take_both: u32,
-    base_a: u32,
     s_a: u32,
-    base_b: u32,
     s_b: u32,
 }
 
@@ -135,9 +129,9 @@ struct ExprRecord {
     /// **Op** use count — bumped per `combine` / `neg` operand use; drives
     /// the `MsmTerm` provides + part of `MsmExpr`.
     mult: ProvideMult,
-    /// **Resolve** use count — bumped per eval `EcMsm` resolve; drives the
-    /// `MsmClaimTerm` provides + the rest of `MsmExpr`.
-    claim_mult: ProvideMult,
+    /// Set when this expression serves a transcript claim (an eval `EcMsm`
+    /// node); drives the `MsmClaimTerm` provides + the rest of `MsmExpr`.
+    is_claimed: bool,
 }
 
 /// Relation identity of a recorded expression — the dedup key. An `intro`
@@ -149,7 +143,7 @@ struct ExprRecord {
 /// returns an *earlier* expr, only ever referenced by *later* ones, so it
 /// can never close a cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum DedupKey {
+pub(crate) enum DedupKey {
     /// `⟨base × 1⟩` — keyed by the base point (which fixes group + bound).
     Intro(u32),
     /// `⟨base × λ⟩` — keyed by the base point.
@@ -176,6 +170,8 @@ pub struct EcMsmRequires {
     /// Relation identity → the expression it produced; a repeated derivation
     /// reuses the stored handle (see [`lookup_intro`](Self::lookup_intro)).
     dedup: BTreeMap<DedupKey, EcExprPtr>,
+    /// Relation identity of each expression, in allocator order.
+    derivations: Vec<DedupKey>,
 }
 
 impl EcMsmRequires {
@@ -251,11 +247,10 @@ impl EcMsmRequires {
                 ..RowVals::default()
             }],
             mult: 0,
-            claim_mult: 0,
+            is_claimed: false,
         });
         let e = EcExprPtr(self.exprs.len() as u32);
-        self.dedup.insert(DedupKey::Intro(base.addr()), e);
-        e
+        self.register(DedupKey::Intro(base.addr()), e)
     }
 
     /// The expression a prior `intro_zero(base)` produced, if any — a
@@ -319,11 +314,10 @@ impl EcMsmRequires {
                 ..RowVals::default()
             }],
             mult: 0,
-            claim_mult: 0,
+            is_claimed: false,
         });
         let e = EcExprPtr(self.exprs.len() as u32);
-        self.dedup.insert(DedupKey::IntroZero(base.addr()), e);
-        e
+        self.register(DedupKey::IntroZero(base.addr()), e)
     }
 
     /// The expression a prior `intro_endo(base)` produced, if any — a
@@ -384,11 +378,10 @@ impl EcMsmRequires {
                 ..RowVals::default()
             }],
             mult: 0,
-            claim_mult: 0,
+            is_claimed: false,
         });
         let e = EcExprPtr(self.exprs.len() as u32);
-        self.dedup.insert(DedupKey::IntroEndo(base.addr()), e);
-        e
+        self.register(DedupKey::IntroEndo(base.addr()), e)
     }
 
     /// Record a `combine(a, b) = c` with value `val = val_a + val_b` and
@@ -418,8 +411,7 @@ impl EcMsmRequires {
             group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, a_expr, b_expr, val_a,
             val_b, val, rows,
         );
-        self.dedup.insert(DedupKey::Combine(a_expr.addr(), b_expr.addr()), e);
-        e
+        self.register(DedupKey::Combine(a_expr.addr(), b_expr.addr()), e)
     }
 
     /// Record a `combine_concat(a, b) = c` — the term-preserving fold (see
@@ -448,8 +440,7 @@ impl EcMsmRequires {
             group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, a_expr, b_expr, val_a,
             val_b, val, rows,
         );
-        self.dedup.insert(DedupKey::ConcatCombine(a_expr.addr(), b_expr.addr()), e);
-        e
+        self.register(DedupKey::ConcatCombine(a_expr.addr(), b_expr.addr()), e)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -478,10 +469,7 @@ impl EcMsmRequires {
                 j: r.j,
                 take_a: r.take_a as u32,
                 take_b: r.take_b as u32,
-                take_both: r.take_both as u32,
-                base_a: r.base_a.addr(),
                 s_a: r.s_a.addr(),
-                base_b: r.base_b.addr(),
                 s_b: r.s_b.addr(),
             })
             .collect();
@@ -509,7 +497,7 @@ impl EcMsmRequires {
             endo_minted: 0,
             rows,
             mult: 0,
-            claim_mult: 0,
+            is_claimed: false,
         });
         EcExprPtr(self.exprs.len() as u32)
     }
@@ -548,11 +536,10 @@ impl EcMsmRequires {
         let rows = rows
             .into_iter()
             .map(|r| RowVals {
-                // out_base = base_a (the copied base); out_scalar = −s_a.
+                // The operand consumes the output base; out_scalar = −s_a.
                 base: r.base.addr(),
                 scalar: r.out_scalar.addr(),
                 i: r.i,
-                base_a: r.base.addr(),
                 s_a: r.s_a.addr(),
                 ..RowVals::default()
             })
@@ -581,11 +568,10 @@ impl EcMsmRequires {
             endo_minted: 0,
             rows,
             mult: 0,
-            claim_mult: 0,
+            is_claimed: false,
         });
         let e = EcExprPtr(self.exprs.len() as u32);
-        self.dedup.insert(DedupKey::Neg(a_expr.addr()), e);
-        e
+        self.register(DedupKey::Neg(a_expr.addr()), e)
     }
 
     /// Bump an expression's **op** use count by `mult` — one per `combine` /
@@ -594,12 +580,73 @@ impl EcMsmRequires {
         self.exprs[expr.0 as usize - 1].mult += mult;
     }
 
-    /// Bump an expression's **resolve** use count by `mult` — one per eval
-    /// `EcMsm` resolve (drives `MsmClaimTerm` + the rest of `MsmExpr`). The
-    /// resolve seam consumes the positionless `MsmClaimTerm`, so the absorb
-    /// order is the caller's, decoupled from the chiplet's `idx`.
-    pub fn consume_claim(&mut self, expr: EcExprPtr, mult: ProvideMult) {
-        self.exprs[expr.0 as usize - 1].claim_mult += mult;
+    /// Mark `expr` as serving a transcript claim — one eval `EcMsm` node,
+    /// whose absorb consumes `MsmClaimTerm` + the rest of `MsmExpr`. The
+    /// claim consumes the positionless `MsmClaimTerm`, so the absorb order is
+    /// the caller's, decoupled from the chiplet's `idx`. The AIR admits at
+    /// most one claim per expression; a further claim on the same terms uses
+    /// a [`duplicate`](crate::ec::msm::require::duplicate). Panics if `expr`
+    /// is already claimed.
+    pub fn mark_claimed(&mut self, expr: EcExprPtr) {
+        let is_claimed = &mut self.exprs[expr.0 as usize - 1].is_claimed;
+        assert!(!*is_claimed, "an MSM expression serves at most one transcript claim");
+        *is_claimed = true;
+    }
+
+    /// Whether `expr` serves a transcript claim.
+    pub fn is_claimed(&self, expr: EcExprPtr) -> bool {
+        self.exprs[expr.0 as usize - 1].is_claimed
+    }
+
+    /// Lay a copy of `expr` — the same terms and value under a new expression
+    /// ptr. `fresh` lays the given derivation without consulting the dedup
+    /// map. The copy is registered under `expr`'s derivation, whose dedup
+    /// entry keeps naming the representative it named before. Panics unless
+    /// `fresh` lays exactly one expression, with `expr`'s group, scalar bound,
+    /// value, and ordered terms.
+    pub(crate) fn lay_copy(
+        &mut self,
+        expr: EcExprPtr,
+        fresh: impl FnOnce(&mut Self, DedupKey) -> EcExprPtr,
+    ) -> EcExprPtr {
+        let derivation = self.derivations[expr.0 as usize - 1];
+        let representative =
+            *self.dedup.get(&derivation).expect("every laid derivation has a dedup entry");
+        let laid = self.exprs.len();
+        let copy = fresh(self, derivation);
+        assert!(
+            self.exprs.len() == laid + 1 && copy.0 as usize == laid + 1,
+            "a copy is exactly one freshly laid expression"
+        );
+        assert_eq!(
+            self.derivations[laid], derivation,
+            "a copy is registered under the copied derivation"
+        );
+        let (original, copied) = (&self.exprs[expr.0 as usize - 1], &self.exprs[laid]);
+        assert_eq!(
+            (copied.group, copied.sbound, copied.val),
+            (original.group, original.sbound, original.val),
+            "a copy keeps the group, scalar bound, and value"
+        );
+        assert!(
+            copied
+                .rows
+                .iter()
+                .map(|r| (r.base, r.scalar))
+                .eq(original.rows.iter().map(|r| (r.base, r.scalar))),
+            "a copy keeps the ordered terms"
+        );
+        self.dedup.insert(derivation, representative);
+        copy
+    }
+
+    /// Records the relation identity of the just-laid expression `e` and makes
+    /// it the dedup target for `key`.
+    fn register(&mut self, key: DedupKey, e: EcExprPtr) -> EcExprPtr {
+        debug_assert_eq!(self.derivations.len() + 1, e.0 as usize, "one derivation per expression");
+        self.derivations.push(key);
+        self.dedup.insert(key, e);
+        e
     }
 
     /// Count of recorded expressions (ordinary, zero, and endomorphism intros; combines; and
@@ -673,7 +720,7 @@ pub fn generate_trace(
             set(COL_SCALAR, rv.scalar);
             set(COL_VAL, e.val);
             set(COL_MULT, e.mult);
-            set(COL_CLAIM_MULT, e.claim_mult);
+            set(COL_IS_CLAIMED, e.is_claimed as u32);
             set(COL_IS_INTRO, is_intro as u32);
             set(COL_IS_COMBINE, is_combine as u32);
             set(COL_IS_NEG, is_neg as u32);
@@ -685,10 +732,7 @@ pub fn generate_trace(
                 set(COL_J, rv.j);
                 set(COL_TAKE_A, rv.take_a);
                 set(COL_TAKE_B, rv.take_b);
-                set(COL_TAKE_BOTH, rv.take_both);
-                set(COL_BASE_A, rv.base_a);
                 set(COL_S_A, rv.s_a);
-                set(COL_BASE_B, rv.base_b);
                 set(COL_S_B, rv.s_b);
                 set(COL_VAL_A, e.val_a);
                 set(COL_VAL_B, e.val_b);
@@ -716,7 +760,6 @@ pub fn generate_trace(
                 // certificate ordering when this neg mints `val`.
                 set(COL_A_EXPR, e.a_expr);
                 set(COL_I, rv.i);
-                set(COL_BASE_A, rv.base_a);
                 set(COL_S_A, rv.s_a);
                 set(COL_VAL_A, e.val_a);
                 set(COL_A_PTR, e.a_ptr);
@@ -724,13 +767,14 @@ pub fn generate_trace(
                 set(COL_BOUND_PTR, e.bound_ptr);
                 set(COL_BETA_PTR, e.beta_ptr);
                 set(COL_LAMBDA_PTR, e.lambda_ptr);
+                // These cells alias combine's run-constant B-expression/value cells.
+                set(COL_NEG_X, e.neg_x);
+                set(COL_NEG_YA, e.neg_ya);
                 if is_boundary {
                     // The cheap value negation lives on the boundary: the
                     // shared x + the two y ptrs (pinned by the EcPoint consumes
                     // + the y-flip UintAdd) and the mint flag (gating the
                     // EcOnCurveCert provide for `val`).
-                    set(COL_NEG_X, e.neg_x);
-                    set(COL_NEG_YA, e.neg_ya);
                     set(COL_NEG_YR, e.neg_yr);
                     set(COL_NEG_MINTED, e.neg_minted);
                     let a_diff = expr_ptr - e.a_expr - 1;
@@ -855,12 +899,9 @@ mod tests {
             CombineRow {
                 take_a: true,
                 take_b: false,
-                take_both: false,
                 i: 0,
                 j: 0,
-                base_a: g,
                 s_a: one,
-                base_b: EcPointPtr::from_addr(0),
                 s_b: UintPtr::from_addr(0),
                 out_base: g,
                 out_scalar: one,
@@ -868,12 +909,9 @@ mod tests {
             CombineRow {
                 take_a: false,
                 take_b: true,
-                take_both: false,
                 i: 1,
                 j: 0,
-                base_a: EcPointPtr::from_addr(0),
                 s_a: UintPtr::from_addr(0),
-                base_b: q,
                 s_b: one,
                 out_base: q,
                 out_scalar: one,
@@ -928,12 +966,9 @@ mod tests {
             CombineRow {
                 take_a: true,
                 take_b: false,
-                take_both: false,
                 i: 0,
                 j: 0,
-                base_a: g,
                 s_a: one,
-                base_b: EcPointPtr::from_addr(0),
                 s_b: UintPtr::from_addr(0),
                 out_base: g,
                 out_scalar: one,
@@ -941,12 +976,9 @@ mod tests {
             CombineRow {
                 take_a: false,
                 take_b: true,
-                take_both: false,
                 i: 1,
                 j: 0,
-                base_a: EcPointPtr::from_addr(0),
                 s_a: UintPtr::from_addr(0),
-                base_b: q,
                 s_b: one,
                 out_base: q,
                 out_scalar: one,
@@ -1036,7 +1068,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn forged_take_flag_on_intro_rejected() {
-        // The take one-hot `take_a + take_b + take_both = is_combine` is the
+        // Booleanity of the derived `take_both` selector is the
         // linchpin pinning the take flags (and thus the combine consumes) to
         // 0 off combine rows. A stray `take_a` on an intro row (is_combine =
         // 0) breaks it `1 ≠ 0`, so check_constraints rejects it locally —
@@ -1091,7 +1123,7 @@ mod tests {
     fn forged_take_flag_on_intro_zero_rejected() {
         // Same linchpin as `forged_take_flag_on_intro_rejected`, exercised
         // on an intro_zero row instead: a stray `take_a` (is_combine = 0)
-        // breaks the take one-hot `take_a + take_b + take_both = is_combine`.
+        // breaks Booleanity of the derived `take_both` selector.
         let mut store = UintStoreRequires::new();
         let mut bpl = BytePairLutRequires::new();
         let mut req = EcMsmRequires::new();

@@ -22,20 +22,23 @@ const DEFERRED_CHUNKS_DOMAIN = 0x01000401
 
 # Eidos initial-CV bases. Kept local so this package remains independent of `miden-core`; they
 # match `miden::core::crypto::eidos`.
-const EIDOS_INIT_CV_0_BASE = 4280581857092829184
-const EIDOS_INIT_CV_1_BASE = 2688637132020383744
-const EIDOS_INIT_CV_2_BASE = 1947077364412317696
+const EIDOS_INIT_CV_0_BASE = 13503953893947604992
+const EIDOS_INIT_CV_1_BASE = 11912009168875159552
+const EIDOS_INIT_CV_2_BASE = 11170449401267093504
 const EIDOS_INIT_CV_3_BASE = 6620516959492505600
 
 # Domain-injected first lane for framework CHUNKS. The remaining lanes start from the generic
 # Eidos bases; the dynamic encoded length is added to lane 1.
-const DEFERRED_CHUNKS_INIT_CV_0 = 4280581857109607425
+const DEFERRED_CHUNKS_INIT_CV_0 = 13503953893964383233
+
+# Framework AND frame, pinned to miden_core::deferred::DEFERRED_AND_INIT_CV.
+const DEFERRED_AND_INIT_CV = [13503953893964382977, 11912009168875159552, 11170449401267093504, 6620516959492505600]
 
 # Initial chaining words for one, two, and three framework CHUNKS payload blocks. Each word binds
 # the encoded Felt length: `init(DEFERRED_CHUNKS_DOMAIN, [8 * n_chunks, 0, 0])`.
-const DEFERRED_CHUNKS_INIT_CV_1 = [4280581857109607425, 2688637132020383752, 1947077364412317696, 6620516959492505600]
-const DEFERRED_CHUNKS_INIT_CV_2 = [4280581857109607425, 2688637132020383760, 1947077364412317696, 6620516959492505600]
-const DEFERRED_CHUNKS_INIT_CV_3 = [4280581857109607425, 2688637132020383768, 1947077364412317696, 6620516959492505600]
+const DEFERRED_CHUNKS_INIT_CV_1 = [13503953893964383233, 11912009168875159560, 11170449401267093504, 6620516959492505600]
+const DEFERRED_CHUNKS_INIT_CV_2 = [13503953893964383233, 11912009168875159568, 11170449401267093504, 6620516959492505600]
+const DEFERRED_CHUNKS_INIT_CV_3 = [13503953893964383233, 11912009168875159576, 11170449401267093504, 6620516959492505600]
 
 #! Constructs an Eidos chaining word from a domain tag and three domain-defined
 #! parameters.
@@ -243,4 +246,34 @@ end
 pub proc log_deferred(node: Digest)
     log_deferred
     dropw
+end
+
+#! Combines two registered true obligation roots without logging.
+#! Input:  [LHS_ROOT, RHS_ROOT, ...]
+#! Output: [ROOT, ...]
+#! Both children must be registered and evaluate to TRUE, or be implicit TRUE. The result is
+#! exactly AND(LHS_ROOT, RHS_ROOT), including when either child is TRUE; no identity is simplified.
+#! Registration and VM hashing use the same framework AND chaining word and ordered payload.
+#! The obligation is commutative; swapping the children changes the digest, not its truth value.
+pub proc append_root(lhs: Digest, rhs: Digest) -> Digest
+    push.DEFERRED_AND_INIT_CV
+    exec.register_fixed_expr
+    # => [ROOT, ...]
+end
+
+#! Appends a registered true assertion to the root stored at a word-aligned pointer, without logging.
+#! Input:  [ROOT_PTR, ASSERTION, ...]
+#! Output: [...]
+#! ROOT_PTR must be word-aligned and reference four readable, writable felts.
+#! Updates this word to exactly AND(ROOT, ASSERTION). Both children must
+#! be registered and evaluate to TRUE, or be implicit TRUE; no identity is simplified.
+pub proc append_root_ptr(root_ptr: ptr<Digest>, assertion: Digest)
+    dup movdn.5
+    # => [ROOT_PTR, ASSERTION, ROOT_PTR, ...]
+    padw movup.4 mem_loadw_le
+    # => [ROOT, ASSERTION, ROOT_PTR, ...]
+    exec.append_root
+    # => [NEXT_ROOT, ROOT_PTR, ...]
+    movup.4 mem_storew_le dropw
+    # => [...]
 end

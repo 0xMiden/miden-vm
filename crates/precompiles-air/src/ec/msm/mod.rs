@@ -24,7 +24,7 @@
 //!
 //! `intro`, `intro_zero`, `intro_endo`, `combine`, and `neg` build the expression; the
 //! eval `EcMsm` absorb seam resolves a claim in-circuit, consuming the
-//! positionless `MsmClaimTerm` set so the absorb — and the transcript root
+//! positionless `MsmClaimTerm` multiset so the absorb — and the transcript root
 //! — follow the caller's declared term order, not the chiplet's `idx`
 //! storage order.
 
@@ -91,8 +91,9 @@ where
 /// LogUp message for the [`MsmExpr`](BusId::MsmExpr) relation: the head
 /// `(expr_ptr, group_ptr, val_ptr, k)` of an MSM expression — its `k`
 /// terms sum (under `group_ptr`) to the stored point `val_ptr`. Provided
-/// once per expression on its boundary row; consumed as an operand head
-/// by combine/neg and at the eval `EcMsm` resolve.
+/// on the expression's boundary row at its op use count plus
+/// [`COL_IS_CLAIMED`]; consumed as an operand head by combine/neg and by
+/// the boundary of the eval `EcMsm` claim the expression serves.
 #[derive(Debug, Clone)]
 pub struct MsmExprMsg<E> {
     pub expr_ptr: E,
@@ -122,10 +123,10 @@ where
 /// LogUp message for the [`MsmClaimTerm`](BusId::MsmClaimTerm) relation:
 /// one **positionless** term `(expr_ptr, base_ptr, scalar_ptr)` of an MSM
 /// expression — the resolve-seam twin of [`MsmTermMsg`] without the `idx`
-/// field. Provided once per term row at the expression's **resolve** use
-/// count (`COL_CLAIM_MULT`); consumed by the eval `EcMsm` absorb seam,
-/// which matches the claim's terms as an unordered set so the DAG absorb
-/// order (and root) is the caller's, not the chiplet's `idx` storage order.
+/// field. Provided once per term row of a claimed expression
+/// ([`COL_IS_CLAIMED`]); consumed by the eval `EcMsm` absorb seam, which
+/// matches the claim's terms as a multiset so the DAG absorb order (and
+/// root) is the caller's, not the chiplet's `idx` storage order.
 #[derive(Debug, Clone)]
 pub struct MsmClaimTermMsg<E> {
     pub expr_ptr: E,
@@ -175,9 +176,9 @@ pub const COL_VAL: usize = 8;
 /// **Op** use count — how often this expression is consumed as a
 /// `combine` / `neg` operand. Drives the `MsmTerm` provide (every term
 /// row) and part of the `MsmExpr` provide; constant within a run, 0 on
-/// pads. (The eval resolve uses [`COL_CLAIM_MULT`] instead, so the two
-/// consumers of a claim — combine-operand vs DAG-resolve — bill separate
-/// provides.)
+/// pads. (The eval claim uses [`COL_IS_CLAIMED`] instead, so the two
+/// consumers of an expression — combine/neg operand vs transcript claim —
+/// bill separate provides.)
 pub const COL_MULT: usize = 9;
 /// Two stored op-family flags. Together with [`COL_IS_NEG`], they determine
 /// the residual `intro_endo` selector and form a one-hot encoding of every
@@ -195,35 +196,32 @@ pub const COL_B_EXPR: usize = 13;
 /// These identities tie each operand-head consume to its term count.
 pub const COL_I: usize = 14;
 pub const COL_J: usize = 15;
-/// Per-row take one-hot: `take_a + take_b + take_both = is_combine`.
+/// Stored single-take selectors; `take_both = is_combine - take_a - take_b` is derived.
 pub const COL_TAKE_A: usize = 16;
 pub const COL_TAKE_B: usize = 17;
-pub const COL_TAKE_BOTH: usize = 18;
-/// Operand term cells consumed from `MsmTerm(A, i, …)` / `MsmTerm(B, j,
-/// …)`. Combine uses both sides; neg uses A only.
-pub const COL_BASE_A: usize = 19;
-pub const COL_S_A: usize = 20;
-pub const COL_BASE_B: usize = 21;
-pub const COL_S_B: usize = 22;
+/// Operand scalars consumed from `MsmTerm(A, i, …)` / `MsmTerm(B, j, …)`. Both
+/// consumes use the output base. Combine uses both sides; neg uses A only.
+pub const COL_S_A: usize = 18;
+pub const COL_S_B: usize = 19;
 /// Operand values. Combine uses both; neg uses A only. On a combine
 /// boundary, `EcGroupAdd` asserts `val = val_a + val_b`.
-pub const COL_VAL_A: usize = 23;
-pub const COL_VAL_B: usize = 24;
+pub const COL_VAL_A: usize = 20;
+pub const COL_VAL_B: usize = 21;
 /// Group curve parameters used by combine, neg, and intro_endo to close the
 /// boundary's `EcGroup` consume and pin `sbound` to the group.
-pub const COL_A_PTR: usize = 25;
-pub const COL_B_PTR: usize = 26;
-pub const COL_BOUND_PTR: usize = 27;
+pub const COL_A_PTR: usize = 22;
+pub const COL_B_PTR: usize = 23;
+pub const COL_BOUND_PTR: usize = 24;
 /// A-side ordering witness on combine and neg boundaries:
 /// `expr − a_expr − 1 = a_diff_lo + 2¹⁶·a_diff_hi`, with both 16-bit limbs
 /// range-checked to enforce `a_expr < expr`.
-pub const COL_A_DIFF_LO: usize = 28;
-pub const COL_A_DIFF_HI: usize = 29;
+pub const COL_A_DIFF_LO: usize = 25;
+pub const COL_A_DIFF_HI: usize = 26;
 /// B-side ordering witness. On combine boundaries it enforces `b_expr < expr`.
 /// On certificate-minting neg and intro_endo rows, it enforces `val > val_a`
 /// or `val > base`, respectively. Both limbs are range-checked.
-pub const COL_B_DIFF_LO: usize = 30;
-pub const COL_B_DIFF_HI: usize = 31;
+pub const COL_B_DIFF_LO: usize = 27;
+pub const COL_B_DIFF_HI: usize = 28;
 
 // --- shared negation/endomorphism witness and resolve multiplicity -----
 /// Op-family flag for `neg`. Together with `is_intro`, `is_combine`, and `is_intro_zero`, it
@@ -232,31 +230,34 @@ pub const COL_B_DIFF_HI: usize = 31;
 /// output term per A term, the base copied and the scalar negated (the
 /// `is_c_zero` `UintAdd` `s_a + out_scalar ≡ 0`), with the value's shared
 /// x-coordinate and negated y-coordinate authenticated on the boundary.
-pub const COL_IS_NEG: usize = 32;
-/// Family value-relation cell (boundary only). For `neg`, this is the
-/// **shared x ptr** of `R = (x_a, −y_a)`; for `intro_endo`, it is `P`'s x
-/// ptr.
-pub const COL_NEG_X: usize = 33;
+pub const COL_IS_NEG: usize = 29;
+/// Family value-relation cell, sharing combine's B-expression cell. For `neg`, this is the
+/// shared x ptr of `R = (x_a, −y_a)`; for `intro_endo`, it is `P`'s x ptr. Neg runs carry it
+/// on every row to preserve the shared cell's run constancy.
+pub const COL_NEG_X: usize = COL_B_EXPR;
 /// **Resolve** use count — how often this expression is resolved at the
 /// eval `EcMsm` seam. Drives the `MsmClaimTerm` provide (every term row)
 /// and the rest of the `MsmExpr` provide; constant within a run, 0 on
 /// pads. This multiplicity records resolve uses of the positionless `MsmClaimTerm`; [`COL_MULT`]
 /// records combine uses of `MsmTerm` indexed by `idx`.
-pub const COL_CLAIM_MULT: usize = 34;
-/// Family value-relation cells (boundary only). For `neg`, these are the two
-/// y ptrs of `R = (x_a, −y_a)`; for `intro_endo`, they are the shared y ptr
-/// and `φ(P)`'s x ptr, respectively.
-pub const COL_NEG_YA: usize = 35;
-pub const COL_NEG_YR: usize = 36;
+/// Boolean: two resolves of one expression would only jointly consume twice
+/// its claim terms, letting each absorb a different multiset, so every
+/// resolve has an expression of its own.
+pub const COL_IS_CLAIMED: usize = 30;
+/// Family value-relation cells, sharing combine's B-value and B-scalar cells. For `neg`,
+/// these are the two y ptrs of `R = (x_a, −y_a)`; for `intro_endo`, they are the shared y ptr
+/// and `φ(P)`'s x ptr. Neg runs carry `COL_NEG_YA` throughout; `COL_NEG_YR` is boundary-only.
+pub const COL_NEG_YA: usize = COL_VAL_B;
+pub const COL_NEG_YR: usize = COL_S_B;
 /// Family mint flag (boundary only): 1 iff a `neg` or `intro_endo` row
 /// freshly mints its value, gating the common `EcOnCurveCert(group, val)`
 /// provide.
-pub const COL_NEG_MINTED: usize = 37;
+pub const COL_NEG_MINTED: usize = 31;
 /// The group's GLV endomorphism `β`/`λ` ptrs, used by combine, neg, and
 /// intro_endo to close the boundary's `EcGroup` consume. Both are the
 /// none-sentinel 0 for a group without an endomorphism.
-pub const COL_BETA_PTR: usize = 38;
-pub const COL_LAMBDA_PTR: usize = 39;
+pub const COL_BETA_PTR: usize = 32;
+pub const COL_LAMBDA_PTR: usize = 33;
 
 // `intro_endo` is the residual active operation after subtracting the four stored selectors. Its
 // value relation reuses the negation columns; `intro_zero` reuses the base-coordinate pair as
@@ -285,15 +286,15 @@ pub const COL_ENDO_MINTED: usize = COL_NEG_MINTED;
 ///
 /// This is one of five mutually exclusive operation flags:
 /// `is_intro + is_intro_endo + is_combine + is_neg + is_intro_zero = act`.
-pub const COL_IS_INTRO_ZERO: usize = 40;
-pub const NUM_MAIN_COLS: usize = 41;
+pub const COL_IS_INTRO_ZERO: usize = 34;
+pub const NUM_MAIN_COLS: usize = 35;
 
-// Aux: 14 columns, flattened via `frac_col!` over the 26 fractions so
+// Aux: 12 columns, flattened via `frac_col!` over the 24 fractions so
 // every closing constraint stays at degree ≤ 3 → `log_quotient_degree` =
 // 1:
-//  col 0:  MsmTerm provide, alone as the centered running-sum anchor.
+//  col 0:  MsmTerm provide + literal-1/0 UintVal, with the centered running-sum anchor.
 //  col 1:  MsmExpr provide + MsmClaimTerm provide.
-//  col 2:  merged EcOnCurveCert provide (neg/intro_endo value) + literal-1 UintVal.
+//  col 2:  merged EcOnCurveCert provide + EcPoint(val, is_pai = 1) (intro_zero).
 //  col 3:  MsmTerm consume A + UintMul (intro_endo's x_φ = β·x_P).
 //  col 4:  MsmTerm consume B + UintAdd (take_both merge).
 //  col 5:  UintAdd (neg scalar) + UintAdd (neg value y-flip).
@@ -303,12 +304,10 @@ pub const NUM_MAIN_COLS: usize = 41;
 //          intro_zero).
 //  col 9:  ordering Range16 — a_lo + a_hi.
 //  col 10: ordering Range16 — b_lo + b_hi.
-//  col 11: EcPoint(base) (intro_endo coord) + EcPoint(val) (intro_endo coord) — the shared-y tie.
-//  col 12: literal-0 UintVal (intro_zero) + EcPoint(val, is_pai) tie (intro_zero's value relation).
-//  col 13: EcPoint(base, is_pai = 0) tie (intro_zero's own base membership) — alone.
-const NUM_LOGUP_COLS: usize = 14;
+//  col 11: EcPoint(base) (intro_endo/intro_zero coord) + EcPoint(val) (intro_endo coord).
+const NUM_LOGUP_COLS: usize = 12;
 const AUX_WIDTH: usize = NUM_LOGUP_COLS;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1];
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [2; NUM_LOGUP_COLS];
 /// `2¹⁶`, the high-half weight in the ordering decomposition.
 const TWO16: u32 = 1 << 16;
 
@@ -394,7 +393,10 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // `MsmExpr` provide both vanish — so a forged pad `mult` can't inject
         // phantom terms, independent of the consumer set.
         builder.assert_zero((AB::Expr::ONE - act.clone()) * local[COL_MULT].into());
-        builder.assert_zero((AB::Expr::ONE - act) * local[COL_CLAIM_MULT].into());
+        builder.assert_zero((AB::Expr::ONE - act) * local[COL_IS_CLAIMED].into());
+        // At most one claim per expression: each claim run must consume
+        // exactly its own expression's claim terms.
+        builder.assert_bool(local[COL_IS_CLAIMED]);
 
         // Allocator: expr_ptr = 1 on the first row, `+1` after each
         // boundary. ptr → (run) is injective by construction.
@@ -421,7 +423,7 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
             COL_SBOUND_PTR,
             COL_VAL,
             COL_MULT,
-            COL_CLAIM_MULT,
+            COL_IS_CLAIMED,
             COL_IS_INTRO,
             COL_IS_COMBINE,
             COL_IS_NEG,
@@ -471,12 +473,10 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // Per-row take one-hot: each combine row emits one output term.
         let take_a: AB::Expr = local[COL_TAKE_A].into();
         let take_b: AB::Expr = local[COL_TAKE_B].into();
-        let take_both: AB::Expr = local[COL_TAKE_BOTH].into();
+        let take_both = is_combine.clone() - take_a.clone() - take_b.clone();
         builder.assert_bool(local[COL_TAKE_A]);
         builder.assert_bool(local[COL_TAKE_B]);
-        builder.assert_bool(local[COL_TAKE_BOTH]);
-        builder
-            .assert_zero(take_a.clone() + take_b.clone() + take_both.clone() - is_combine.clone());
+        builder.assert_bool(take_both.clone());
 
         // Cursors: 0 at run start, advance by the take on each in-run step
         // (reset to 0 across a boundary). The boundary's i + adv_i is k_a.
@@ -490,7 +490,7 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // is `is_neg` (the take flags are 0 off combine, pinned by the
         // one-hot above); j never advances on a neg.
         let adv_i = take_a.clone() + take_both.clone() + is_neg.clone();
-        let adv_j = take_b.clone() + take_both.clone();
+        let adv_j = take_b.clone() + take_both;
         builder
             .when_transition()
             .assert_zero(i_next - (AB::Expr::ONE - is_boundary.clone()) * (i_cur + adv_i));
@@ -498,26 +498,12 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
             .when_transition()
             .assert_zero(j_next - (AB::Expr::ONE - is_boundary.clone()) * (j_cur + adv_j));
 
-        // Output role-mix: take_a / take_both copy A's (base, s); take_b
-        // copies B's. take_both's merged scalar is pinned by its UintAdd
-        // consume (bus), so only the base and the non-merge scalars tie
-        // here. take_both forces a shared base.
-        let base_a: AB::Expr = local[COL_BASE_A].into();
-        let base_b: AB::Expr = local[COL_BASE_B].into();
+        // Operand consumes authenticate the output base directly. Single takes copy the
+        // scalar; merged and negated scalars are authenticated by their UintAdd messages.
         let s_a: AB::Expr = local[COL_S_A].into();
         let s_b: AB::Expr = local[COL_S_B].into();
-        let out_base: AB::Expr = local[COL_BASE].into();
         let out_scalar: AB::Expr = local[COL_SCALAR].into();
-        // take_a / take_both / neg copy A's base; take_b copies B's. (neg's
-        // out_scalar is bus-pinned by its `is_c_zero` UintAdd, like
-        // take_both's merged scalar, so it needs no equality here.)
-        builder.assert_zero(
-            (take_a.clone() + take_both.clone() + is_neg.clone()) * (out_base - base_a.clone())
-                + take_b.clone() * (local[COL_BASE].into() - base_b.clone()),
-        );
-        builder
-            .assert_zero(take_a * (out_scalar - s_a) + take_b * (local[COL_SCALAR].into() - s_b));
-        builder.assert_zero(take_both * (base_a - base_b));
+        builder.assert_zero(take_a * (out_scalar.clone() - s_a) + take_b * (out_scalar - s_b));
 
         // Strict pointer ordering (boundary): expr − operand − 1 =
         // lo + 2¹⁶·hi, halves range-checked on the bus ⇒ a_expr, b_expr <
@@ -595,7 +581,7 @@ where
         let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
 
         let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_MULT].into();
-        let neg_claim_mult: LB::Expr = LB::Expr::ZERO - local[COL_CLAIM_MULT].into();
+        let neg_is_claimed: LB::Expr = LB::Expr::ZERO - local[COL_IS_CLAIMED].into();
         let act: LB::Expr = local[COL_ACT].into();
         let is_boundary: LB::Expr = local[COL_IS_BOUNDARY].into();
         let is_intro: LB::Expr = local[COL_IS_INTRO].into();
@@ -619,10 +605,8 @@ where
         let j_cur: LB::Expr = local[COL_J].into();
         let take_a: LB::Expr = local[COL_TAKE_A].into();
         let take_b: LB::Expr = local[COL_TAKE_B].into();
-        let take_both: LB::Expr = local[COL_TAKE_BOTH].into();
-        let base_a: LB::Expr = local[COL_BASE_A].into();
+        let take_both = is_combine.clone() - take_a.clone() - take_b.clone();
         let s_a: LB::Expr = local[COL_S_A].into();
-        let base_b: LB::Expr = local[COL_BASE_B].into();
         let s_b: LB::Expr = local[COL_S_B].into();
         let val_a: LB::Expr = local[COL_VAL_A].into();
         let val_b: LB::Expr = local[COL_VAL_B].into();
@@ -671,15 +655,15 @@ where
 
         let one_deg = Deg { v: 1, u: 1 };
         let two_deg = Deg { v: 2, u: 1 };
-        let anchor_deg = Deg { v: 1, u: 1 };
         let linear_pair_deg = Deg { v: 2, u: 2 };
         let pair_deg = Deg { v: 3, u: 2 };
 
-        // col 0: the MsmTerm provide, alone as the centered accumulator anchor.
+        // col 0: MsmTerm provide and the literal scalar of the disjoint intro/intro_zero
+        // families. Both messages stay affine, including the selected low scalar limb.
         frac_col!(
             builder,
             "ec-msm-provide",
-            anchor_deg,
+            linear_pair_deg,
             (
                 "provide-msmterm",
                 neg_mult.clone(),
@@ -691,18 +675,37 @@ where
                 },
                 one_deg
             ),
+            (
+                "consume-intro-scalar",
+                is_intro.clone() + is_intro_zero.clone(),
+                UintValMsg {
+                    ptr: scalar.clone(),
+                    bound_ptr: sbound_ptr.clone(),
+                    limbs: [
+                        is_intro.clone(),
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                    ],
+                },
+                one_deg
+            ),
         );
         // col 1 (paired, lqd-1): the expression head — consumed by
-        // combine/neg operand heads (op uses) AND the eval resolve (claim
-        // uses), so it provides at the *sum* — paired with the positionless
-        // resolve-seam term (one per term row at the resolve count).
+        // combine/neg operand heads (op uses) AND the eval claim it serves
+        // (if claimed), so it provides at the *sum* — paired with the
+        // positionless claim term (one per term row of a claimed expression).
         frac_col!(
             builder,
             "ec-msm-provide",
             pair_deg,
             (
                 "provide-msmexpr",
-                (neg_mult.clone() + neg_claim_mult.clone()) * is_boundary.clone(),
+                (neg_mult.clone() + neg_is_claimed.clone()) * is_boundary.clone(),
                 MsmExprMsg {
                     expr_ptr: expr_ptr.clone(),
                     group_ptr: group_ptr.clone(),
@@ -713,7 +716,7 @@ where
             ),
             (
                 "provide-msmclaimterm",
-                neg_claim_mult.clone(),
+                neg_is_claimed.clone(),
                 MsmClaimTermMsg {
                     expr_ptr: expr_ptr.clone(),
                     base_ptr: base.clone(),
@@ -723,8 +726,8 @@ where
             ),
         );
         // col 2 (paired, lqd-1): neg and intro_endo share their mint flag and
-        // mint the same typed `EcOnCurveCert(group_ptr, val)` tuple, then pair
-        // it with intro's literal-1 UintVal.
+        // mint the same typed `EcOnCurveCert(group_ptr, val)` tuple, paired with
+        // intro_zero's point-at-infinity value relation.
         frac_col!(
             builder,
             "ec-msm-provide",
@@ -739,23 +742,16 @@ where
                 two_deg
             ),
             (
-                "consume-one",
-                is_intro.clone(),
-                UintValMsg {
-                    ptr: scalar.clone(),
-                    bound_ptr: sbound_ptr.clone(),
-                    limbs: [
-                        LB::Expr::ONE,
-                        LB::Expr::ZERO,
-                        LB::Expr::ZERO,
-                        LB::Expr::ZERO,
-                        LB::Expr::ZERO,
-                        LB::Expr::ZERO,
-                        LB::Expr::ZERO,
-                        LB::Expr::ZERO,
-                    ],
+                "consume-ecpoint-intro-zero-val",
+                bnd_intro_zero.clone(),
+                EcPointMsg {
+                    point_ptr: val.clone(),
+                    group_ptr: group_ptr.clone(),
+                    x_ptr: LB::Expr::ZERO,
+                    y_ptr: LB::Expr::ZERO,
+                    is_pai: LB::Expr::ONE,
                 },
-                one_deg
+                two_deg
             ),
         );
         // col 3 (paired, lqd-1): the combine/neg term walk's operand-A
@@ -770,7 +766,7 @@ where
                 MsmTermMsg {
                     expr_ptr: a_expr.clone(),
                     idx: i_cur.clone(),
-                    base_ptr: base_a.clone(),
+                    base_ptr: base.clone(),
                     scalar_ptr: s_a.clone(),
                 },
                 one_deg
@@ -804,7 +800,7 @@ where
                 MsmTermMsg {
                     expr_ptr: b_expr.clone(),
                     idx: j_cur.clone(),
-                    base_ptr: base_b.clone(),
+                    base_ptr: base.clone(),
                     scalar_ptr: s_b.clone(),
                 },
                 one_deg
@@ -983,8 +979,8 @@ where
             "ec-msm-endo",
             pair_deg,
             (
-                "consume-ecpoint-endo-base",
-                bnd_endo.clone(),
+                "consume-ecpoint-endo-or-zero-base",
+                bnd_endo.clone() + bnd_intro_zero,
                 EcPointMsg {
                     point_ptr: base.clone(),
                     group_ptr: group_ptr.clone(),
@@ -1002,71 +998,6 @@ where
                     group_ptr: group_ptr.clone(),
                     x_ptr: endo_val_x.clone(),
                     y_ptr: endo_y.clone(),
-                    is_pai: LB::Expr::ZERO,
-                },
-                two_deg
-            ),
-        );
-        // col 12 (paired, lqd-1): intro_zero's own two ties — the literal-0
-        // scalar `UintVal`, mirroring intro's literal-1 (col 2), and the
-        // `EcPoint(val, is_pai = 1)` consume tying `val` to `group_ptr`'s
-        // canonical PAI row (unlike plain intro's `val = base` native
-        // equality, `val ≠ base` here so this can't be a native constraint —
-        // see [`msm::require::intro_zero`](crate::ec::msm::require::intro_zero)).
-        frac_col!(
-            builder,
-            "ec-msm-intro-zero",
-            pair_deg,
-            (
-                "consume-zero",
-                is_intro_zero,
-                UintValMsg {
-                    ptr: scalar,
-                    bound_ptr: sbound_ptr,
-                    limbs: [
-                        LB::Expr::ZERO,
-                        LB::Expr::ZERO,
-                        LB::Expr::ZERO,
-                        LB::Expr::ZERO,
-                        LB::Expr::ZERO,
-                        LB::Expr::ZERO,
-                        LB::Expr::ZERO,
-                        LB::Expr::ZERO,
-                    ],
-                },
-                one_deg
-            ),
-            (
-                "consume-ecpoint-intro-zero-val",
-                bnd_intro_zero.clone(),
-                EcPointMsg {
-                    point_ptr: val,
-                    group_ptr: group_ptr.clone(),
-                    x_ptr: LB::Expr::ZERO,
-                    y_ptr: LB::Expr::ZERO,
-                    is_pai: LB::Expr::ONE,
-                },
-                two_deg
-            ),
-        );
-        // col 13: intro_zero's own base-membership tie — unlike `val`,
-        // `base` must be a genuine finite point of `group_ptr` (`is_pai =
-        // 0`), not a literal PAI, so this reuses the coordinate cells
-        // `intro_endo` uses for the analogous tie on its own base (see
-        // [`COL_ENDO_BASE_X`]). Without it, an `intro_zero` row would place
-        // no constraint at all on `base` beyond its bare pointer value.
-        frac_col!(
-            builder,
-            "ec-msm-intro-zero",
-            two_deg,
-            (
-                "consume-ecpoint-intro-zero-base",
-                bnd_intro_zero,
-                EcPointMsg {
-                    point_ptr: base,
-                    group_ptr,
-                    x_ptr: endo_base_x,
-                    y_ptr: endo_y,
                     is_pai: LB::Expr::ZERO,
                 },
                 two_deg

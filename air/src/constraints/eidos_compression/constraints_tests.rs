@@ -52,6 +52,86 @@ fn handwritten_constraint_degree_remains_three() {
 }
 
 #[test]
+fn fused_rows_share_fifteen_word_transition_assertions() {
+    let row = [Felt::ZERO; NUM_COLS];
+    for row_idx in 0..BLOCK_PERIOD {
+        assert_eq!(eval_fused_row(&row, &row, row_idx).len(), 33, "row {row_idx}");
+    }
+}
+
+/// Decode global words independently of the AIR's payload helpers. Rotation uses bit weights
+/// rather than their byte permutation, and the omitted B output remains absent.
+fn transition_words(
+    row: &[Felt; NUM_COLS],
+    step: &super::schedule::FusedStep,
+) -> ([Felt; 16], [Option<Felt>; 16]) {
+    let mut inputs = [Felt::ZERO; 16];
+    let mut outputs = [None; 16];
+    let pack = |column: &dyn Fn(usize) -> usize| {
+        (0..4)
+            .map(|byte| row[column(byte)] * Felt::from_u64(1 << (8 * byte)))
+            .sum::<Felt>()
+    };
+    for (g, &[a, b, c, d]) in step.lane_map.iter().enumerate() {
+        let a_out = pack(&|byte| g_ac_byte_slot_col(g, byte, 1));
+        let b_in = pack(&|byte| g_bd_rot_slot_col(g, byte, 0));
+        let c_out = pack(&|byte| g_bd_rot_slot_col(g, byte, 1));
+        let d_in = pack(&|byte| g_ac_byte_slot_col(g, byte, 0));
+        let d_out = (0..4)
+            .map(|byte| {
+                let xor = row[g_ac_byte_slot_col(g, byte, 0)] + row[g_ac_byte_slot_col(g, byte, 1)]
+                    - Felt::from_u8(2) * row[g_ac_byte_slot_col(g, byte, 2)];
+                let shift = (8 * byte as u32 + 32 - step.first_rotation) % 32;
+                xor * Felt::from_u64(1 << shift)
+            })
+            .sum::<Felt>();
+        inputs[a] =
+            a_out + Felt::from_u64(1 << 32) * row[g_k3_col(g)] - b_in - row[g_msg_word_col(g)];
+        inputs[b] = b_in;
+        inputs[c] = c_out + Felt::from_u64(1 << 32) * row[G_K2_BASE_COL + g] - d_out;
+        inputs[d] = d_in;
+        outputs[a] = Some(a_out);
+        if g != MISSING_ROTATION_G {
+            outputs[b] = Some((0..4).map(|byte| row[g_bd_rot_result_col(g, byte).unwrap()]).sum());
+        }
+        outputs[c] = Some(c_out);
+        outputs[d] = Some(d_out);
+    }
+    (inputs, outputs)
+}
+
+#[test]
+fn shared_transitions_equal_the_independent_word_equations_on_every_row() {
+    // For a fixed periodic row, every word residual is a linear map of the local/next cells.
+    // Checking every coordinate basis vector proves equality even off the honest witness.
+    for row_idx in 0..BLOCK_PERIOD {
+        for coordinate in 0..2 * NUM_COLS {
+            let mut local = [Felt::ZERO; NUM_COLS];
+            let mut next = local;
+            if coordinate < NUM_COLS {
+                local[coordinate] = Felt::ONE;
+            } else {
+                next[coordinate - NUM_COLS] = Felt::ONE;
+            }
+            let actual = eval_fused_row(&local, &next, row_idx);
+            let expected = match (fused_step_at(row_idx), fused_step_at(row_idx + 1)) {
+                (Some(step), Some(next_step)) => {
+                    let (_, outputs) = transition_words(&local, &step);
+                    let (inputs, _) = transition_words(&next, &next_step);
+                    step.lane_map
+                        .iter()
+                        .flatten()
+                        .filter_map(|&word| outputs[word].map(|output| output - inputs[word]))
+                        .collect::<Vec<_>>()
+                },
+                _ => alloc::vec![Felt::ZERO; 15],
+            };
+            assert_eq!(&actual[18..], expected, "row {row_idx}, coordinate {coordinate}");
+        }
+    }
+}
+
+#[test]
 fn footer_input_aux_is_pinned_outside_full_cv_rows() {
     let row = [Felt::ZERO; NUM_COLS];
 

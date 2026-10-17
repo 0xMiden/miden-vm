@@ -10,7 +10,7 @@ use miden_core::{
 
 use super::deferred_handlers::{
     handle_deferred_evaluate, handle_deferred_evaluate_frame, handle_deferred_evaluate_payload,
-    handle_deferred_register, handle_deferred_register_data,
+    handle_deferred_export_witness, handle_deferred_register, handle_deferred_register_data,
 };
 use crate::{MemoryError, advice::AdviceError, errors::OperationError, fast::FastProcessor};
 
@@ -64,6 +64,7 @@ pub fn handle_system_event(
         SystemEvent::DeferredEvaluateFrame => handle_deferred_evaluate_frame(processor),
         SystemEvent::DeferredEvaluatePayload => handle_deferred_evaluate_payload(processor),
         SystemEvent::DeferredRegisterData => handle_deferred_register_data(processor),
+        SystemEvent::DeferredExportWitness => handle_deferred_export_witness(processor),
         // `TraceEvent` does not have a handler. Its purpose is signaling the processor to trigger
         // a `TraceEvent` for the host.
         SystemEvent::TraceEvent => Ok(()),
@@ -127,7 +128,7 @@ fn insert_mem_values_into_adv_map(processor: &mut FastProcessor) -> Result<(), S
     Ok(())
 }
 
-/// Inserts the top two stack words into the advice map under the same key as `hmerge`.
+/// Inserts the top two stack words into the advice map under the same key as `hdword`.
 ///
 /// ```text
 /// Inputs:
@@ -145,7 +146,7 @@ fn insert_hdword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
     let a = processor.stack_get_word(1);
     let b = processor.stack_get_word(5);
 
-    let key = hasher::hash_two_words(&[a, b]);
+    let key = hasher::hash_double_word(&[a, b]);
 
     // Store values as [A, B] matching the hash order.
     // Retrieval with `padw adv_loadw padw adv_loadw swapw` produces [A, B] on operand stack.
@@ -179,7 +180,7 @@ fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
     let d = processor.stack_get_word_safe(13);
 
     // Hash in natural stack order [A, B, C, D].
-    let key = hasher::merge_many(&[Word::new(*a), Word::new(*b), Word::new(*c), Word::new(*d)]);
+    let key = hasher::hash_words(&[Word::new(*a), Word::new(*b), Word::new(*c), Word::new(*d)]);
 
     // Store values in [A, B, C, D] order.
     let mut values = Vec::with_capacity(4 * WORD_SIZE);

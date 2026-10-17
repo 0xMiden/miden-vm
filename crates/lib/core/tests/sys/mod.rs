@@ -144,9 +144,9 @@ fn hash_elements_in_domain_matches_native() {
 
             begin
                 {store_ops}
-                push.{domain_int}
                 push.{num_elements}
                 push.{PTR}
+                push.{domain_int}
                 exec.eidos::hash_elements_in_domain
                 exec.sys::truncate_stack
             end
@@ -177,7 +177,7 @@ fn element_hash_procedures_reject_non_u32_length() {
     let invocations = [
         format!("push.0 push.{NON_U32_LENGTH} push.{PTR} exec.eidos::prepare_hasher_state"),
         format!("push.{NON_U32_LENGTH} push.{PTR} exec.eidos::hash_elements"),
-        format!("push.1 push.{NON_U32_LENGTH} push.{PTR} exec.eidos::hash_elements_in_domain"),
+        format!("push.{NON_U32_LENGTH} push.{PTR} push.1 exec.eidos::hash_elements_in_domain"),
         format!("push.{NON_U32_LENGTH} push.{PTR} exec.eidos::pad_and_hash_elements"),
     ];
 

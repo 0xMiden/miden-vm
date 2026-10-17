@@ -179,7 +179,7 @@ pub fn eval_main<AB: LiftedAirBuilder<F = Felt>>(
     eval_main_with_io(builder, main_col_offset, periodic_col_offset, AB::Expr::ZERO);
 }
 
-/// Keep the block controller live while the final sixteen NOP rows hold IO witnesses.
+/// Keep the block controller live while the final sixty-four NOP rows hold IO witnesses.
 ///
 /// The controller fixes the instruction schedule; the row equations below enforce ADD, CONST,
 /// and the ROL decomposition. Operand provenance, bytewise logic, range checks, and round metadata
@@ -379,33 +379,34 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
     // The high carry is deliberately discarded to implement wrapping addition.
     builder.assert_zero(
         gate_add.clone()
-            * (a_lo + b_lo
+            * (a_lo.clone() + b_lo
                 - r_lo.clone()
                 - AB::Expr::from(Felt::new(1u64 << 32).unwrap()) * carry_lo.clone()),
     );
     builder.assert_zero(
         gate_add
-            * (a_hi + b_hi + carry_lo
+            * (a_hi.clone() + b_hi + carry_lo
                 - r_hi.clone()
                 - AB::Expr::from(Felt::new(1u64 << 32).unwrap()) * carry_hi),
     );
-    // CONST has no source lookup: bind its range-checked result directly to the selected mask
+    // CONST has no source lookup: bind its result halves directly to the selected mask
     // or round constant. The same result is then available to consumers through the word bus.
     let gate_const = act.clone() * is_const;
-    builder.assert_zero(gate_const.clone() * (r_lo.clone() - const_lo));
-    builder.assert_zero(gate_const * (r_hi.clone() - const_hi));
-    // On ROL rows, R holds the unrotated input and B holds two four-u16 decompositions of
+    builder.assert_zero(gate_const.clone() * (r_lo - const_lo));
+    builder.assert_zero(gate_const * (r_hi - const_hi));
+    // On ROL rows, B holds two four-u16 decompositions of
     // y = (input_half + 2^32) * k, where k = 2^(shift mod 32). For shift mod 32 in 1..=30,
     // we have 2^32 - 1 < y < p. Since p = 2^64 - 2^32 + 1, y + p exceeds 2^64 - 1:
     // four u16 limbs cannot encode a second representative of y modulo the base field.
-    // RangePair lookups bound all eight limbs to u16. The byte lookup also forces R = A on
-    // these rows; the destination lookup reconstructs the rotated result from these limbs.
+    // RangePair lookups bound all eight limbs to u16. The source bus authenticates both
+    // input halves as u32: sources precede destinations and every operation preserves that
+    // range. The destination lookup reconstructs the rotated result from these limbs.
     let rol_gate = act * is_rol;
     let lo_decomp: AB::Expr = pack_le(&limbs[0..4], 1u64 << 16);
     let hi_decomp: AB::Expr = pack_le(&limbs[4..8], 1u64 << 16);
     let two32 = AB::Expr::from(Felt::new(1u64 << 32).unwrap());
-    builder.assert_zero(rol_gate.clone() * ((r_lo + two32.clone()) * k.clone() - lo_decomp));
-    builder.assert_zero(rol_gate * ((r_hi + two32) * k - hi_decomp));
+    builder.assert_zero(rol_gate.clone() * ((a_lo + two32.clone()) * k.clone() - lo_decomp));
+    builder.assert_zero(rol_gate * ((a_hi + two32) * k - hi_decomp));
 }
 
 /// Join each shifted half's low 32 bits with the bits spilling from the opposite half.
@@ -434,7 +435,7 @@ pub(super) enum LookupKind {
     MetadataConsumer,
 }
 
-pub(super) const SHARED_BATCHES: [LookupKind; 17] = [
+pub(super) const SHARED_BATCHES: [LookupKind; 13] = [
     LookupKind::Input,
     LookupKind::Destination,
     LookupKind::Sources,
@@ -446,10 +447,6 @@ pub(super) const SHARED_BATCHES: [LookupKind; 17] = [
     LookupKind::Byte(5),
     LookupKind::Byte(6),
     LookupKind::Byte(7),
-    LookupKind::RangePair(0),
-    LookupKind::RangePair(1),
-    LookupKind::RangePair(2),
-    LookupKind::RangePair(3),
     LookupKind::MetadataProvider,
     LookupKind::MetadataConsumer,
 ];
@@ -617,7 +614,7 @@ pub(super) fn eval_lookup_batch<B, V>(
             // A single XOR-table tuple covers each byte's logic and range constraints:
             // - XOR checks (a, b, r) directly; AND/ANDNOT convert r to an XOR result below.
             // - ADD/INPUT/CONST check (0, r, r), which range-checks the result byte.
-            // - ROL checks (a, 0, r), which range-checks a and forces r = a before rotation.
+            // CONST is fixed and ROL inherits source bounds; neither needs byte requests.
             let bid_kind = matches!(kind, LookupKind::BytePair(_));
             let pair_indices = if bid_kind {
                 [index * 2, index * 2 + 1]
@@ -629,15 +626,13 @@ pub(super) fn eval_lookup_batch<B, V>(
             let is_andnot = v(COL_PROG_BEGIN + program::T_IS_ANDNOT);
             let is_add = v(COL_PROG_BEGIN + program::T_IS_ADD);
             let is_input = v(COL_PROG_BEGIN + program::T_IS_INPUT);
-            let is_const = v(COL_PROG_BEGIN + program::T_IS_CONST);
-            let is_rol = v(COL_PROG_BEGIN + program::T_IS_ROL);
             let logic = is_xor.clone() + is_and.clone() + is_andnot.clone();
-            let value = is_add.clone() + is_input.clone() + is_const.clone();
+            let value = is_add.clone() + is_input.clone();
             let a: [V; 8] = array::from_fn(|i| local[COL_A_BEGIN + i]);
             let b: [V; 8] = array::from_fn(|i| local[COL_B_BEGIN + i]);
             let r: [V; 8] = array::from_fn(|i| local[COL_R_BEGIN + i]);
             for i in pair_indices {
-                let lut_a = (is_xor.clone() + is_andnot.clone() + is_rol.clone()) * v_at(&a, i)
+                let lut_a = (is_xor.clone() + is_andnot.clone()) * v_at(&a, i)
                     + is_and.clone() * (B::Expr::from(Felt::from(255u8)) - v_at(&a, i));
                 let b_value = logic.clone() * v_at(&b, i) + value.clone() * v_at(&r, i);
                 // The table stores `lut_a xor b_value`. ANDNOT results map through
@@ -654,9 +649,7 @@ pub(super) fn eval_lookup_batch<B, V>(
                             + is_and.clone()
                             + is_andnot.clone()
                             + is_add.clone()
-                            + is_rol.clone()
-                            + is_input.clone()
-                            + is_const.clone()),
+                            + is_input.clone()),
                     BytePairLutMsg::from_xor(lut_a, b_value, x),
                     entry_degree,
                 );

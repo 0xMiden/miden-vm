@@ -110,6 +110,22 @@ mod tests {
         check(RpxPermutation256::apply_permutation, |s| RpxPermutation256.permute_mut(s));
     }
 
+    #[cfg(all(
+        feature = "std",
+        debug_assertions,
+        target_arch = "x86_64",
+        target_feature = "avx2"
+    ))]
+    #[test]
+    fn rpx_packed_permutation_fits_default_thread_stack() {
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(rpx_packed_permutation_matches_scalar)
+            .expect("test thread should start")
+            .join()
+            .expect("RPX packed permutation should fit the default thread stack");
+    }
+
     #[test]
     fn poseidon2_packed_permutation_matches_scalar() {
         check(Poseidon2Permutation256::apply_permutation, |s| {

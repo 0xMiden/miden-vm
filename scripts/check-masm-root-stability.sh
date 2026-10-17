@@ -104,7 +104,7 @@ for project in "${projects[@]}"; do
     fi
 
     echo "Checking MASM release compatibility for $relative_project against $baseline_tag"
-    RUSTC_WRAPPER= rustup run nightly cargo -Zscript \
+    RUSTC_BOOTSTRAP=1 RUSTC_WRAPPER= rustup run stable cargo -Zscript \
         "$check_script" \
         "$baseline_project" \
         "$current_project"
