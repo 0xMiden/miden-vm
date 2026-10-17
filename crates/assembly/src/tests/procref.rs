@@ -82,3 +82,16 @@ fn get_proc_name_of_unknown_module() -> TestResult {
 
     Ok(())
 }
+
+/// `procref.<MAST root>` must not panic the assembler when it records `AssemblyOp` metadata.
+#[test]
+fn procref_mast_root_does_not_panic() {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "begin procref.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a213dae dropw end"
+    );
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| context.assemble(source)));
+    assert!(result.is_ok(), "assembler panicked on procref with a MAST root");
+}

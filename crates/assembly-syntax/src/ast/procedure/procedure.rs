@@ -281,7 +281,8 @@ impl crate::prettier::PrettyPrint for Procedure {
                 .iter()
                 .map(PrettyPrint::render)
                 .reduce(|acc, attr| acc + nl() + attr)
-                .unwrap_or(Document::Empty);
+                .unwrap_or(Document::Empty)
+                + nl();
         }
 
         if self.is_entrypoint() {

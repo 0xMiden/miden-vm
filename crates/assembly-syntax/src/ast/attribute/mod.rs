@@ -41,6 +41,13 @@ use crate::{ast::Ident, prettier};
     all(feature = "arbitrary", test),
     miden_test_serialization_macros::serialization_test
 )]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::text_roundtrip_test(
+        parse = "crate::testing::roundtrip::parse_attribute",
+        accept = "crate::testing::roundtrip::is_masm_text"
+    )
+)]
 pub enum Attribute {
     /// A named behavior, trait or action; e.g. `@inline`
     Marker(Ident),
@@ -184,7 +191,7 @@ impl prettier::PrettyPrint for Attribute {
                         .items
                         .iter()
                         .map(PrettyPrint::render)
-                        .reduce(|acc, item| acc + nl() + item)
+                        .reduce(|acc, item| acc + const_text(",") + nl() + item)
                         .unwrap_or(Document::Empty),
                 ) + nl();
                 doc + const_text("(") + (singleline_items | multiline_items) + const_text(")")
@@ -202,7 +209,7 @@ impl prettier::PrettyPrint for Attribute {
                         .items
                         .iter()
                         .map(|(k, v)| text(k) + const_text(" = ") + v.render())
-                        .reduce(|acc, item| acc + nl() + item)
+                        .reduce(|acc, item| acc + const_text(",") + nl() + item)
                         .unwrap_or(Document::Empty),
                 ) + nl();
                 doc + const_text("(") + (singleline_items | multiline_items) + const_text(")")
