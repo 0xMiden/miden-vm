@@ -15,7 +15,7 @@
 
 - [BREAKING] Warn on unused private assembly constants. `AnalysisContext::new` takes a module path. Pass the parsed module to `AnalysisContext::set_module` and handle its `Result`. Add an `UnusedConstant` variant to `SemanticAnalysisError` ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
 
-- [BREAKING] Removed the crypto crate's `RandomCoin` alias and `FeltRng` trait, and the VM core crate's `crypto::random` reexport module ([#3531](https://github.com/0xMiden/miden-vm/issues/3531)).
+- [BREAKING] Removed the crypto crate's `RandomCoin` alias and `FeltRng` trait, and the VM core crate's `crypto::random` reexport module ([#4041](https://github.com/0xMiden/miden-vm/pull/4041)).
 - [BREAKING] Preserve the full IV words in Eidos initial chaining values. This changes Eidos hashes and derived commitments in the VM and crypto crates ([#4021](https://github.com/0xMiden/miden-vm/pull/4021)).
 - [BREAKING] Simplified Eidos hashing APIs: renamed `hmerge` to `hdword` and `hash_two_words*` to `hash_double_word*`. Use `hash_words` instead of `merge_many` or MASM `hash_double_words`, and `compress_double_word` for raw MASM compression. MASM domain helpers use `_in_domain` and take the domain first. Rebuild compiled MASM packages; the recursive VM verifier root changes ([#4018](https://github.com/0xMiden/miden-vm/pull/4018)).
 - Refreshed VM and crypto benchmark results for Eidos ([#3975](https://github.com/0xMiden/miden-vm/pull/3975)).
