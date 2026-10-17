@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+test_root="$(mktemp -d)"
+trap 'rm -rf "$test_root"' EXIT
+
+write_project() {
+    local name="$1"
+    mkdir -p "$test_root/$name"
+    cat > "$test_root/$name/miden-project.toml" <<EOF
+[package]
+name = "$name"
+version = "0.0.0"
+
+[lib]
+namespace = "advice_lint_test::$name"
+path = "mod.masm"
+EOF
+}
+
+check_result() {
+    local name="$1" expected_status="$2" diagnostic="${3:-}" actual_status verbose_status
+    if bash "$repo_root/scripts/check-masm-advice-taint.sh" \
+        "$test_root/$name/miden-project.toml" > "$test_root/$name/output" 2>&1; then
+        actual_status=0
+    else
+        actual_status=$?
+    fi
+    if [[ "$actual_status" -ne "$expected_status" ]] || \
+        { [[ -n "$diagnostic" ]] && ! grep -Fq "$diagnostic" "$test_root/$name/output"; }; then
+        cat "$test_root/$name/output" >&2
+        echo "$name: expected status $expected_status and diagnostic '$diagnostic', got $actual_status" >&2
+        exit 1
+    fi
+    if bash "$repo_root/scripts/check-masm-advice-taint.sh" \
+        --verbose "$test_root/$name/miden-project.toml" > "$test_root/$name/verbose-output" 2>&1; then
+        verbose_status=0
+    else
+        verbose_status=$?
+    fi
+    if [[ "$verbose_status" -ne "$actual_status" ]] || \
+        { [[ -n "$diagnostic" ]] && ! grep -Fq "$diagnostic" "$test_root/$name/verbose-output"; }; then
+        cat "$test_root/$name/verbose-output" >&2
+        echo "$name: verbose mode changed the status or lost the diagnostic" >&2
+        exit 1
+    fi
+    grep '^midenc-masm-lint:' "$test_root/$name/output" > "$test_root/$name/counts"
+    grep '^midenc-masm-lint:' "$test_root/$name/verbose-output" > "$test_root/$name/verbose-counts"
+    if ! cmp -s "$test_root/$name/counts" "$test_root/$name/verbose-counts"; then
+        echo "$name: verbosity changed diagnostic or coverage counts" >&2
+        exit 1
+    fi
+    if grep -Fq 'MASM lint skipped procedure' "$test_root/$name/output"; then
+        echo "$name: default output includes individual skip diagnostics" >&2
+        exit 1
+    fi
+    echo "$name: passed (default and verbose)"
+}
+
+check_error() {
+    local name="$1" context="$2" diagnostic="$3" mode actual_status
+    shift 3
+    for mode in default verbose; do
+        if [[ "$mode" == verbose ]]; then
+            set -- --verbose "$@"
+        fi
+        if bash "$repo_root/scripts/check-masm-advice-taint.sh" \
+            "$@" > "$test_root/$name-$mode-output" 2>&1; then
+            actual_status=0
+        else
+            actual_status=$?
+        fi
+        if [[ "$actual_status" -ne 2 ]] || \
+            ! grep -Fq "$context" "$test_root/$name-$mode-output" || \
+            ! grep -Fq "$diagnostic" "$test_root/$name-$mode-output"; then
+            cat "$test_root/$name-$mode-output" >&2
+            echo "$name: expected status 2 and diagnostic '$diagnostic', got $actual_status" >&2
+            exit 1
+        fi
+    done
+    echo "$name: passed (default and verbose)"
+}
+
+check_error invalid_arguments "unexpected argument: --unknown" \
+    "usage: midenc-masm-lint" --unknown
+check_error missing_project "failed to analyze '$test_root/missing/miden-project.toml'" \
+    "No such file or directory (os error 2)" \
+    "$test_root/missing/miden-project.toml"
+
+write_project malformed_project
+printf 'invalid = [\n' > "$test_root/malformed_project/miden-project.toml"
+check_error malformed_project "failed to analyze '$test_root/malformed_project/miden-project.toml'" \
+    "unclosed array, expected \`]\`" \
+    "$test_root/malformed_project/miden-project.toml"
+
+write_project clean
+cat > "$test_root/clean/mod.masm" <<'EOF'
+pub proc entry(value: u32) -> u32
+    push.1
+    u32wrapping_add
+end
+EOF
+check_result clean 0
+
+# A module-index file can also contain procedures. The gate must analyze them.
+write_project unconstrained
+cat > "$test_root/unconstrained/mod.masm" <<'EOF'
+pub mod helper
+
+pub proc entry() -> u32
+    adv_push
+    push.1
+    u32wrapping_add
+end
+EOF
+cat > "$test_root/unconstrained/helper.masm" <<'EOF'
+pub proc clean() -> felt
+    push.1
+end
+EOF
+check_result unconstrained 1 "reaches operation requiring"
+
+# Compact output groups a procedure's return advisories without losing findings.
+write_project returns
+cat > "$test_root/returns/mod.masm" <<'EOF'
+pub proc entry() -> word
+    adv_pushw
+end
+EOF
+check_result returns 1 "returns unconstrained advice"
+grep -Fq '4 finding(s)' "$test_root/returns/output"
+grep -Fq 'results [0, 1, 2, 3]' "$test_root/returns/output"
+if [[ "$(grep -Fc 'return advisory:' "$test_root/returns/output")" -ne 1 ]]; then
+    echo 'The return advisories were not grouped by procedure' >&2
+    exit 1
+fi
+
+# Exercise advice passed through a declared word signature into a callee's sink.
+write_project word_call
+cat > "$test_root/word_call/mod.masm" <<'EOF'
+proc consume(value: word) -> word
+    push.1
+    u32wrapping_add
+end
+
+pub proc entry() -> word
+    adv_pushw
+    exec.consume
+end
+EOF
+check_result word_call 1 "reaches operation requiring"
+if ! grep -Fq "Coverage full" "$test_root/word_call/output"; then
+    cat "$test_root/word_call/output" >&2
+    echo 'The word-call taint control unexpectedly skipped a procedure' >&2
+    exit 1
+fi
+
+# A pointer annotation must not sanitize an advice-derived memory address.
+write_project pointer_call
+cat > "$test_root/pointer_call/mod.masm" <<'EOF'
+proc load(pointer: ptr<felt>) -> felt
+    mem_load
+end
+
+pub proc entry() -> felt
+    adv_push
+    exec.load
+end
+EOF
+check_result pointer_call 1 "reaches operation requiring"
+if ! grep -Fq "Coverage full" "$test_root/pointer_call/output"; then
+    cat "$test_root/pointer_call/output" >&2
+    echo 'The pointer-call taint control unexpectedly skipped a procedure' >&2
+    exit 1
+fi
+
+# Preparation failures must reject the run even when all lifted code is clean.
+write_project skipped
+cat > "$test_root/skipped/mod.masm" <<'EOF'
+pub proc clean() -> felt
+    push.1
+end
+
+@locals(1)
+pub proc bad() -> felt
+    push.7 drop
+    loc_load.1
+end
+
+pub proc caller() -> felt
+    exec.bad
+end
+EOF
+check_result skipped 1 "Coverage partial"
+grep -Fq "invalid local index 1" "$test_root/skipped/verbose-output"
+grep -Fq "depends on skipped procedure" "$test_root/skipped/verbose-output"
+grep -Fq "1 root failures, 1 dependent callers" "$test_root/skipped/output"
+
+# A child module with no lifted procedures must fail cleanly instead of panicking.
+mkdir -p "$test_root/empty_module"
+cp "$repo_root/scripts/fixtures/masm-advice-taint-empty-module/miden-project.toml" \
+    "$repo_root/scripts/fixtures/masm-advice-taint-empty-module/mod.masm" \
+    "$repo_root/scripts/fixtures/masm-advice-taint-empty-module/broken.masm" \
+    "$test_root/empty_module/"
+check_result empty_module 1 "Coverage partial"
+grep -Fq "MASM lint skipped procedure" "$test_root/empty_module/verbose-output"
+
+# Every procedure is supported and below the per-procedure limits, but together
+# they exceed the compiler's fixed dataflow budget. Findings alone cannot decide success.
+write_project incomplete
+cat > "$test_root/incomplete/mod.masm" <<'EOF'
+proc duplicate(value: u32) -> (u32, u32)
+    dup
+end
+
+EOF
+for ((procedure = 0; procedure < 150; procedure++)); do
+    printf 'pub proc work_%s(value: u32) -> u32\n' "$procedure"
+    for ((operation = 0; operation < 32; operation++)); do
+        printf '    exec.duplicate u32wrapping_add\n'
+    done
+    printf 'end\n\n'
+done >> "$test_root/incomplete/mod.masm"
+check_result incomplete 1 "MASM advice taint analysis incomplete"
+if ! grep -Fq "Coverage full" "$test_root/incomplete/output"; then
+    cat "$test_root/incomplete/output" >&2
+    echo 'The budget fixture unexpectedly skipped a procedure' >&2
+    exit 1
+fi
+
+echo 'MASM advice-taint gate tests passed'

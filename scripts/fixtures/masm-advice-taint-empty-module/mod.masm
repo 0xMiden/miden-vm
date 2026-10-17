@@ -1,0 +1,14 @@
+pub mod broken
+
+#! Returns one while another module is skipped by lint preparation.
+#!
+#! Inputs:  []
+#! Outputs: [value]
+#!
+#! Where:
+#! - value is one.
+#!
+#! Invocation: exec
+pub proc clean() -> felt
+    push.1
+end

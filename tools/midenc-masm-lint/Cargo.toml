@@ -1,0 +1,13 @@
+[package]
+name = "midenc-masm-lint"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+midenc-dialect-hir = { git = "https://github.com/0xMiden/compiler", rev = "5d45ed62b2f3ba390cc212e8a4519b2896941af9" }
+midenc-frontend-masm = { git = "https://github.com/0xMiden/compiler", rev = "5d45ed62b2f3ba390cc212e8a4519b2896941af9" }
+midenc-hir = { git = "https://github.com/0xMiden/compiler", rev = "5d45ed62b2f3ba390cc212e8a4519b2896941af9" }
+midenc-hir-analysis = { git = "https://github.com/0xMiden/compiler", rev = "5d45ed62b2f3ba390cc212e8a4519b2896941af9" }

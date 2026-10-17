@@ -130,6 +130,19 @@ shear: ## Runs cargo-shear to find unused or misplaced dependencies
 .PHONY: lint
 lint: xclippy format-check shear ## Runs all lint checks without modifying files
 
+.PHONY: build-masm-advice-lint
+build-masm-advice-lint: ## Builds the compiler advice-taint developer tool
+	cd tools/midenc-masm-lint && cargo build --locked
+
+.PHONY: masm-advice-lint
+masm-advice-lint: ## Analyzes core MASM, rejecting findings and lost coverage
+	bash scripts/check-masm-advice-taint.sh $(args)
+
+.PHONY: test-masm-advice-lint
+test-masm-advice-lint: build-masm-advice-lint ## Checks advice-taint findings and coverage failure behavior
+	cd tools/midenc-masm-lint && cargo test --locked
+	bash scripts/test-masm-advice-taint.sh
+
 # --- docs ----------------------------------------------------------------------------------------
 
 .PHONY: doc
@@ -223,7 +236,7 @@ test-docs: ## Run documentation tests (cargo test - nextest doesn't support doct
 # -- filtered test runs ---------------------------------------------------------------------------
 
 .PHONY: test-fast
-test-fast: test-masm-root-stability ## Runs fast tests (excludes all CLI tests and proptests)
+test-fast: test-masm-root-stability ## Runs fast tests (excludes proptests and test names containing cli_)
 	# Keep this feature set aligned with `test` so both targets reuse the same test binaries.
 	$(MAKE) core-test \
 		FEATURES="$(WORKSPACE_TEST_FEATURES)" \

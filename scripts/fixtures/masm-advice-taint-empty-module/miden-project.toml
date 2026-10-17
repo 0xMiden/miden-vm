@@ -1,0 +1,7 @@
+[package]
+name = "empty-module-repro"
+version = "0.0.0"
+
+[lib]
+namespace = "empty_module_repro"
+path = "mod.masm"
