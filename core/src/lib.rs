@@ -43,7 +43,10 @@ pub mod crypto {
             EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleTree, NodeIndex,
             PartialMerkleTree,
             mmr::{Mmr, MmrPeaks},
-            smt::{LeafIndex, SMT_DEPTH, SimpleSmt, Smt, SmtProof, SmtProofError},
+            smt::{
+                LeafIndex, PartialSmt, SMT_DEPTH, SimpleSmt, Smt, SmtProof, SmtProofError,
+                SmtWitness,
+            },
             store::{MerkleStore, StoreNode},
         };
     }

@@ -4,6 +4,7 @@
 
 #### Features
 
+- [BREAKING] Added opt-in versioned `SmtWitness` transport with shared-node reconstruction limits and one position per complete leaf. CLI input files accept `{"smt_witness": "0x..."}` Merkle entries and load their leaf preimages into the advice map. Downstream exhaustive matches on `MerkleData` must handle the new `SmtWitness` variant. Added sparse, dense, exclusion, multi-root, and multi-version transport benchmarks ([#3848](https://github.com/0xMiden/miden-vm/issues/3848)).
 - Added `Arbitrary` implementations and property tests for serialization and VM operations. Expanded fuzz input checks and seed inputs ([#3976](https://github.com/0xMiden/miden-vm/pull/3976)).
 - [BREAKING] Added `adv.export_deferred_witness` to store a registered true assertion's portable witness in the advice map under its digest. Downstream exhaustive matches on `SystemEvent` and `SystemEventNode` must handle the new `DeferredExportWitness` variant ([#4003](https://github.com/0xMiden/miden-vm/pull/4003)).
 - Added independent precompile obligation roots through `_with_root` stdlib procedures and `precompiles::append_root`, including arithmetic, curves, hashes, ECDSA, and EdDSA. Each manual call takes ordinary inputs and returns its complete obligation root first; callers compose roots explicitly without advancing the VM root. `append_root` hashes its children in stack order, and `append_root_ptr` updates a root in memory. Single-binding operations return bare assertions, and predicates bind their inputs even when false. Signature implementations keep obligation roots on the operand stack and delay composition while intermediate values are consumed. Native signature procedures log their complete obligation once; root grouping changes their deferred commitment digests.
@@ -35,6 +36,7 @@
 
 #### Fixes
 
+- Reject mismatched roots when partial-SMT reconstruction produces only empty parents. Corrected minimum serialized sizes so budgeted collections accept compact sparse paths, SMT proofs, and partial SMTs ([#3848](https://github.com/0xMiden/miden-vm/issues/3848)).
 - [BREAKING] Fixed a Keccak soundness issue that allowed a Keccak assertion to bind its input to the digest of another sponge invocation. Each Keccak node's sponge permutation count must now match its byte length. PVM proofs and verifier roots change ([#3974](https://github.com/0xMiden/miden-vm/pull/3974)).
 - [BREAKING] Fixed an MSM soundness issue that allowed distinct claims sharing one expression to redistribute its terms and bind to incorrect results. Each MSM expression now serves at most one claim, and the prover lays a copy of it for each further claim. PVM proofs and verifier roots change ([#3974](https://github.com/0xMiden/miden-vm/pull/3974)).
 - [BREAKING] Fixed canonical ordering of recursive types and bumped the package format to 8.0.0. Rebuild version 7 packages. Rejected reversed source spans and noncanonical partial-SMT payloads. Fixed RPX debug stack overflow ([#3976](https://github.com/0xMiden/miden-vm/pull/3976)).
