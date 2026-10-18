@@ -37,9 +37,6 @@ VM custom claim observation remains separate. The generated PVM aux/public hooks
 in core-lib and are included in full-source freshness checks. Ordinary
 production builds continue to decode the precompiled canonical ACE artifacts.
 
-See the workspace [MASM generation guide](../../../docs/masm-verifier-generation.md) for ownership,
-the clean-room migration, compatibility checks, and protected-file policy.
-
 PVM `MultiAir::with_variant` selects canonical optional hash AIRs while retaining Eidos, transcript,
 uint, curve and lookup support. Tooling captures the exact selected slice, including its periodic
 basis. `codegen::pvm_variants` renders seven internal selected wrapper/layout pairs from the same typed templates

@@ -1,12 +1,15 @@
-# miden-precompiles-prover
+# miden-precompile-stark
 
-`miden-precompiles-prover` proves STARK-backed deferred precompile claims for
+`miden-precompile-stark` proves STARK-backed deferred precompile claims for
 Miden VM execution proofs.
 
-The public entry point is `prove_precompiles(Vec<PrecompileWitness>, HashFunction)`. It consumes
+With the `prover` feature, the public entry point is
+`miden_precompile_stark::prove_precompiles(Vec<PrecompileWitness>, HashFunction)`. It consumes
 singleton execution witnesses and returns one `PrecompileProof`, preserving input root order and
-repetitions. The AIR definitions live in `miden-precompiles-air`; this crate owns witness
-generation and proof orchestration. The chiplet and session modules remain private.
+repetitions. Authored AIR definitions live in `miden_air_source::precompile::{Air, MultiAir}`;
+production types live in `miden_air::precompile::{Air, MultiAir}`. This crate owns witness
+generation and proof orchestration. Chiplet implementations remain private; the `trace` feature
+exposes session and witness-import APIs through `miden_precompile_stark::trace`.
 
 ## What's here
 
@@ -24,6 +27,8 @@ sorted term-multiset checks keep term processing at O(n log n) for the fixed sca
 
 ## Build
 
+From the workspace root:
+
 ```sh
 make check
 make test-fast
@@ -37,8 +42,8 @@ src/
 ├── deferred/session.rs checked singleton batch import
 ├── relations.rs        AIR relation definitions re-export
 ├── math.rs             field and integer helpers
-├── logup/              shared LogUp framework re-exports
-├── stark_config.rs     selectable STARK proof-hash configurations (Eidos default)
+├── logup/              test-only shared LogUp framework re-exports
+├── stark_config.rs     test-only production proof-hash configuration re-exports
 ├── utils.rs            shared field-element helpers
 ├── session/            orchestration facade + addition-chain strategies
 ├── primitives/         byte-pair lookup witness collection

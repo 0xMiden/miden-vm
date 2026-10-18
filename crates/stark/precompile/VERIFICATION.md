@@ -10,7 +10,7 @@ Accepted PVM ACE constants live in `miden-air`. Generation belongs to
 `miden-air-source` tooling; this product has no generation feature or command.
 Check all VM/PVM artifacts with `make check-constraints`, or regenerate managed
 outputs with `make regenerate-constraints`. Accepted pins remain protected and
-require deliberate review. See the [generation guide](../../../docs/masm-verifier-generation.md).
+require deliberate review.
 
 The pinned Eidos proof in `tests/fixtures` proves a Keccak-256 assertion for the
 input `abc`. Check or regenerate the proof and its deferred root with:
@@ -21,6 +21,8 @@ make regenerate-pvm-proof-fixture
 ```
 
 ## Build
+
+From the workspace root:
 
 ```sh
 make check
