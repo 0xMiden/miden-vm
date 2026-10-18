@@ -20,6 +20,16 @@ fn checked_align_up(offset: u32, align: u16) -> Result<u32, InvalidStructTypeErr
         .ok_or(InvalidStructTypeError::SizeOverflow)
 }
 
+/// The size of a struct field in bytes, or an error if it does not fit in a `u32`.
+///
+/// The size is computed with checked arithmetic, so a field whose size overflows `usize` (such
+/// as `[[felt; 2^30]; 2^29]`) is rejected instead of panicking or wrapping.
+fn field_size(ty: &Type) -> Result<u32, InvalidStructTypeError> {
+    ty.checked_size_in_bytes()
+        .and_then(|size| u32::try_from(size).ok())
+        .ok_or(InvalidStructTypeError::SizeOverflow)
+}
+
 /// This represents a structured aggregate type
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StructType {
@@ -212,8 +222,7 @@ impl StructType {
                 for (index, NameAndType { name, ty }) in tys.into_iter().enumerate() {
                     let index: u8 =
                         index.try_into().expect("invalid struct: expected no more than 255 fields");
-                    let field_size = u32::try_from(ty.size_in_bytes())
-                        .map_err(|_| InvalidStructTypeError::SizeOverflow)?;
+                    let field_size = field_size(&ty)?;
                     if field_size == 0 {
                         fields.push(StructField { name, index, align: 1, offset, ty });
                     } else {
@@ -247,8 +256,7 @@ impl StructType {
                 for (index, NameAndType { name, ty }) in tys.into_iter().enumerate() {
                     let index: u8 =
                         index.try_into().expect("invalid struct: expected no more than 255 fields");
-                    let field_size = u32::try_from(ty.size_in_bytes())
-                        .map_err(|_| InvalidStructTypeError::SizeOverflow)?;
+                    let field_size = field_size(&ty)?;
                     let default_align: u16 = ty.min_alignment().try_into().expect(
                         "invalid struct field alignment: expected power of two between 1 and 2^16",
                     );

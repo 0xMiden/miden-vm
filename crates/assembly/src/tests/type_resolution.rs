@@ -456,3 +456,19 @@ fn struct_with_a_field_larger_than_u32_max_bytes_is_an_error() {
         assert_diagnostic!(&err, "invalid recursive type");
     }
 }
+
+#[test]
+fn struct_with_a_field_whose_size_overflows_usize_is_an_error() {
+    // `[[felt; 2^30]; 2^29]` is 2^64 bits, so sizing it overflows a 64-bit `usize`.
+    for masm in [
+        "type T = struct { a: [[felt; 1073741824]; 536870912] }\nbegin\n    nop\nend\n",
+        "type T = struct { a: [[felt; 1073741824]; 536870912] }\n\
+         proc f(x: T)\n    nop\nend\n\
+         begin\n    exec.f\nend\n",
+    ] {
+        let err = Assembler::default()
+            .assemble_program("program", masm)
+            .expect_err("a struct larger than u32::MAX bytes should be rejected");
+        assert_diagnostic!(&err, "invalid recursive type");
+    }
+}
