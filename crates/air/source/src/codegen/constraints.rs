@@ -135,7 +135,13 @@ pub fn check_setup(root: &Path) -> Result<(), String> {
 
 /// Compare rendered outputs against the explicit destination checkout.
 pub fn check_artifacts(root: &Path, artifact: &ComputedArtifacts) -> Result<(), String> {
+    super::accepted::load(root)?.check(
+        "vm",
+        artifact.circuit_digest.map(|felt| felt.as_canonical_u64()),
+        artifact.relation_digest.map(|felt| felt.as_canonical_u64()),
+    )?;
     validate_delivery(root, artifact)?;
+    validate_shared_abi(root)?;
     super::delivery::deliver(root, &artifact.files, Mode::Check)?;
     public_inputs_masm_matches_air(root)?;
     security_masm_matches_air(root)?;
@@ -414,10 +420,8 @@ fn max_periodic_cycle_len_log() -> u32 {
     max_len.ilog2()
 }
 
-fn relation_digest_matches_artifact(
-    root: &Path,
-    artifact: &ComputedArtifacts,
-) -> Result<(), String> {
+/// Validate numerical pins and protected projections before output delivery.
+pub(super) fn validate_delivery(root: &Path, artifact: &ComputedArtifacts) -> Result<(), String> {
     let expected = artifact.relation_digest;
 
     let pin_source = read_file(root, AIR_CONFIG_PATH).map_err(|e| e.to_string())?;
@@ -487,17 +491,6 @@ fn relation_digest_matches_artifact(
     }
 
     Ok(())
-}
-
-/// Validate protected inputs and source ABI before any output delivery.
-pub(super) fn validate_delivery(root: &Path, artifact: &ComputedArtifacts) -> Result<(), String> {
-    super::accepted::load(root)?.check(
-        "vm",
-        artifact.circuit_digest.map(|felt| felt.as_canonical_u64()),
-        artifact.relation_digest.map(|felt| felt.as_canonical_u64()),
-    )?;
-    relation_digest_matches_artifact(root, artifact)?;
-    validate_shared_abi(root)
 }
 
 pub(super) fn validate_shared_abi(root: &Path) -> Result<(), String> {
@@ -814,10 +807,7 @@ pub struct ComputedArtifacts {
 
 #[cfg(test)]
 mod tests {
-    use super::super::expect_panic;
-    use alloc::string::ToString;
-
-    use super::*;
+    use super::{super::expect_panic, *};
 
     const PVM_PROTECTED_WRAPPER: &str = "crates/lib/core/asm/sys/pvm/mod.masm";
     const DELIVERY_MANAGED_PATHS: [&str; 24] = [
@@ -952,6 +942,7 @@ mod tests {
                 fixture.write(relative, &format!("unchanged managed sentinel: {relative}\n"));
             }
             validate_delivery(&fixture.root, vm).expect("valid VM delivery fixture");
+            validate_shared_abi(&fixture.root).expect("valid shared ABI delivery fixture");
             super::super::precompile::validate_delivery(&fixture.root, pvm)
                 .expect("valid PVM delivery fixture");
             fixture
@@ -996,7 +987,7 @@ mod tests {
         let mut compiled = compile(accepted_setup_commitments());
         compiled.masm.circuit.stream_felts -= 1;
         let error = expect_panic(|| render(&compiled));
-        assert!(error.to_string().contains("circuit metadata"), "unexpected error: {error}");
+        assert!(error.contains("circuit metadata"), "unexpected error: {error}");
     }
 
     #[test]
@@ -1146,14 +1137,14 @@ mod tests {
         let mut malformed = format!("{declaration} = [0, 0, 0, 0;\n\n{following}");
         let original = malformed.clone();
         let error = expect_panic(|| replace_felt_array_const(&mut malformed, name, &values));
-        assert!(error.to_string().contains("terminator not found"));
+        assert!(error.contains("terminator not found"));
         assert_eq!(malformed, original);
 
         let mut duplicate =
             format!("{declaration} = [0, 0, 0, 0];\n{declaration} = [0, 0, 0, 0];\n");
         let original = duplicate.clone();
         let error = expect_panic(|| replace_felt_array_const(&mut duplicate, name, &values));
-        assert!(error.to_string().contains("declared more than once"));
+        assert!(error.contains("declared more than once"));
         assert_eq!(duplicate, original);
     }
 

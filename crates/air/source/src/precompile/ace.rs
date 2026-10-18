@@ -9,11 +9,12 @@
 //! The cross-chiplet LogUp identity enforced by `ChipletMultiAir::eval_external` remains an
 //! external multi-AIR assertion.
 
+use alloc::vec::Vec;
+
 use miden_ace::{AceCircuit, AceConfig, LayoutKind, build_canonical_multi_air_ace_circuit};
 use miden_core::{Felt, field::QuadFelt};
 
 use super::{Air, PvmAirVariant};
-use alloc::vec::Vec;
 
 // MULTI-AIR ACE CIRCUIT
 // ================================================================================================

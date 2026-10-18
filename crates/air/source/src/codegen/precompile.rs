@@ -85,6 +85,12 @@ pub fn compile_and_render(commitment: Word) -> GeneratedArtifacts {
 /// Independently derive source fixed setup and compare the accepted outputs.
 pub fn check_setup(root: &Path) -> Result<(), String> {
     let artifacts = compute(None);
+    super::accepted::load(root)?.check(
+        "precompile",
+        canonical_word(artifacts.circuit_digest),
+        artifacts.relation_digest.map(|felt| felt.as_canonical_u64()),
+    )?;
+    constraints::validate_shared_abi(root)?;
     validate_delivery(root, &artifacts)?;
     super::delivery::deliver(root, &artifacts.files, Mode::Check)
 }
@@ -349,14 +355,8 @@ fn max_periodic_cycle_len_log(airs: &[ChipletAir]) -> u32 {
     max_len.ilog2()
 }
 
-/// Validate accepted inputs and protected projections before any managed output write.
+/// Validate numerical pins and protected projections before any managed output write.
 pub(super) fn validate_delivery(root: &Path, artifacts: &GeneratedArtifacts) -> Result<(), String> {
-    super::accepted::load(root)?.check(
-        "precompile",
-        canonical_word(artifacts.circuit_digest),
-        artifacts.relation_digest.map(|felt| felt.as_canonical_u64()),
-    )?;
-    constraints::validate_shared_abi(root)?;
     for (name, actual, expected) in [
         ("PVM_RELATION_DIGEST", PVM_RELATION_DIGEST, artifacts.relation_digest),
         ("PVM_ACE_CIRCUIT_DIGEST", PVM_ACE_CIRCUIT_DIGEST, *artifacts.circuit_digest),
@@ -387,14 +387,16 @@ fn render_protocol(relation_digest: &[Felt; 4]) -> String {
         .iter()
         .map(|felt| format!("    {},\n", felt.as_canonical_u64()))
         .collect();
-    format!(
+    let mut protocol = format!(
         "/// Relation digest binding the canonical PVM ACE circuit into the Fiat-Shamir transcript.\n\
          ///\n\
          /// Checked by `air-codegen`; must match `PVM_RELATION_DIGEST` in\n\
          /// `miden-air::precompile::ace_constants`.\n\
          #[rustfmt::skip]\n\
          pub const PVM_RELATION_DIGEST: [u64; 4] = [\n{body}];\n"
-    ) + "\ninclude!(\"../../artifacts/precompile-variants.rs\");\n\n/// Returns the identity of the exact selected canonical relation.\npub fn relation_digest(variant: super::PvmAirVariant) -> super::stark_config::RelationDigest {\n    PVM_VARIANT_RELATION_DIGESTS[variant.as_u8() as usize].map(miden_core::Felt::new_unchecked)\n}\n"
+    );
+    protocol.push_str("\ninclude!(\"../../artifacts/precompile-variants.rs\");\n\n/// Returns the identity of the exact selected canonical relation.\npub fn relation_digest(variant: super::PvmAirVariant) -> super::stark_config::RelationDigest {\n    PVM_VARIANT_RELATION_DIGESTS[variant.as_u8() as usize].map(miden_core::Felt::new_unchecked)\n}\n");
+    protocol
 }
 
 /// Rewrite the initializer of a `pub const NAME: [u64; 4]` declaration.
@@ -456,14 +458,14 @@ fn replace_const_initializer(
 
 #[cfg(test)]
 mod tests {
-    use super::super::expect_panic;
     use std::string::String;
 
     use miden_core::{Felt, Word};
 
     use super::{
-        CircuitShape, NEXT_VM_REGION_START, PVM_READ_START, accepted_setup_commitment, compile,
-        compile_variant, masm_renderer, render, replace_limb_array_const, replace_shape_const,
+        super::expect_panic, CircuitShape, NEXT_VM_REGION_START, PVM_READ_START,
+        accepted_setup_commitment, compile, compile_variant, masm_renderer, render,
+        replace_limb_array_const, replace_shape_const,
     };
 
     #[test]

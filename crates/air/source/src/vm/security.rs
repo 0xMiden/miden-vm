@@ -326,7 +326,7 @@ mod tests {
         alignment: usize,
         hash_fn: HashFunction,
     ) -> ProofSecurityParameters {
-        super::proof_security_parameters_with_shape(
+        proof_security_parameters_with_shape(
             pcs_params,
             log_max_height,
             num_kernel_procedures,
@@ -341,7 +341,7 @@ mod tests {
         hash_fn: HashFunction,
         num_kernel_procedures: u32,
     ) -> SecurityReport {
-        super::security_report_with_shape(
+        security_report_with_shape(
             params,
             log_max_height,
             hash_fn,

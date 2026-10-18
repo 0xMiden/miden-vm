@@ -1,5 +1,4 @@
-use super::super::expect_panic;
-use super::{proof_order::ProofOrderPlan, *};
+use super::{super::expect_panic, proof_order::ProofOrderPlan, *};
 
 fn proof_config(n: usize, word_load: bool, word_store: bool) -> ProofOrderConfig {
     ProofOrderConfig {

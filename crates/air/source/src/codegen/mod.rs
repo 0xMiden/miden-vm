@@ -1,7 +1,7 @@
 //! Source-owned generation workflow. Compilation/rendering uses package-local templates and
 //! ordinary authored AIR values. Output paths are explicit; default writes never accept new pins.
 
-use alloc::string::String;
+use alloc::{format, string::String};
 
 pub mod constraints;
 pub mod degrees;
@@ -39,6 +39,7 @@ pub fn run(root: &std::path::Path, mode: Mode) -> Result<(), String> {
         pvm.relation_digest.map(|felt| felt.as_canonical_u64()),
     )?;
     constraints::validate_delivery(root, &vm)?;
+    constraints::validate_shared_abi(root)?;
     precompile::validate_delivery(root, &pvm)?;
     let mut plans = std::vec![vm_plan];
     plans.extend(miden_core::deferred::PvmAirVariant::ALL_VARIANTS[..7].iter().map(|&variant| {
@@ -47,14 +48,20 @@ pub fn run(root: &std::path::Path, mode: Mode) -> Result<(), String> {
         )
     }));
     let variants = pvm_variants::render_prepared(&plans[1..]);
-    pvm_variants::validate(root, &variants)?;
+    pvm_variants::validate(root, &identities, &variants)?;
     shared_verifier::validate_obsolete(root)?;
     plans.push(pvm_plan);
     let shared = masm_renderer::shared::render(&plans);
     let rust_evaluator = evaluator::generate();
-    let degree_tables = degrees::generate();
-    let metadata_tables = metadata::generate();
-    let artifacts = root.join("crates/air/generated/artifacts");
+    let tables: std::vec::Vec<_> = degrees::generate()
+        .into_iter()
+        .chain(metadata::generate())
+        .map(|(file, body)| masm_renderer::RenderedArtifact {
+            relative_path: format!("crates/air/generated/artifacts/{file}"),
+            body,
+            ownership: masm_renderer::ArtifactOwnership::Managed,
+        })
+        .collect();
     let evaluator_path = root.join("crates/air/generated/artifacts").join(evaluator::ARTIFACT_FILE);
     // All accepted/protected checks above precede every managed write.
     if mode == Mode::Check {
@@ -64,8 +71,7 @@ pub fn run(root: &std::path::Path, mode: Mode) -> Result<(), String> {
     delivery::deliver(root, &shared, mode)?;
     delivery::deliver(root, &vm.files, mode)?;
     delivery::deliver(root, &pvm.files, mode)?;
-    degrees::deliver(&artifacts, &degree_tables, mode)?;
-    degrees::deliver(&artifacts, &metadata_tables, mode)?;
+    delivery::deliver(root, &tables, mode)?;
     evaluator::deliver(&evaluator_path, &rust_evaluator, mode)?;
     for variant in variants {
         delivery::deliver(root, &variant.files, mode)?;

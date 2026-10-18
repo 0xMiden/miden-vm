@@ -18,8 +18,10 @@ use alloc::vec::Vec;
 pub use deferred::session::{SessionInputError, WitnessLocation};
 #[cfg(feature = "prover")]
 use miden_core::deferred::PrecompileWitness;
-pub use miden_core::deferred::PvmAirVariant;
-pub use miden_core::proof::{HashFunction, PrecompileProof, StarkProof};
+pub use miden_core::{
+    deferred::PvmAirVariant,
+    proof::{HashFunction, PrecompileProof, StarkProof},
+};
 
 #[cfg(feature = "trace")]
 pub(crate) mod ec;

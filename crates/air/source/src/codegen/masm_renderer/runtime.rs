@@ -1,6 +1,7 @@
 //! Fixed trusted runtime parameter ABI. No proof/advice value selects these fields.
-use super::{LayoutPlan, RelationInput, V1RenderInput, deep::DeepPlan, ood::MemoryRegion};
 use std::{vec, vec::Vec};
+
+use super::{LayoutPlan, RelationInput, V1RenderInput, deep::DeepPlan, ood::MemoryRegion};
 pub const PARAMETERS_PTR: u32 = 3_223_324_000;
 pub const PARAMETERS_FELTS: u32 = 80;
 /// One fixed ABI field, shared by Rust staging and MASM consumers.
@@ -242,7 +243,8 @@ impl RuntimePlan {
             kind: "ace",
             blocks: i.circuit.stream_felts / 8,
         });
-        // All digest slots and reserved fields initially zero; each digest is then staged by procref.
+        // All digest slots and reserved fields initially zero; each digest is then staged by
+        // procref.
         QUOTIENT_DESTINATION.write(
             &mut values,
             &[l.query_row_felts

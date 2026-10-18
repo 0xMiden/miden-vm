@@ -86,9 +86,11 @@ pub fn commitment_felts<C: Copy + Into<[u64; 4]>>(commitment: C) -> [Felt; 4] {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use alloc::vec;
+
     use miden_core::utils::RowMajorMatrix;
+
+    use super::*;
 
     #[test]
     fn commitment_limbs_are_canonicalized_before_entering_advice() {

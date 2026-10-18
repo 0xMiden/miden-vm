@@ -1,6 +1,5 @@
 use alloc::vec;
 
-use crate::verify_deferred;
 use miden_air::precompile::{
     ChipletAir,
     proof::{decode_proof, encode_proof},
@@ -23,6 +22,7 @@ use crate::{
     PrecompileProvingError, PvmAirVariant, SessionInputError,
     deferred::session::{ImportLimits, import_witnesses_with_variant},
     prove_precompiles, prove_precompiles_with_variant, prove_precompiles_with_variant_and_budget,
+    verify_deferred,
 };
 
 fn witness(variant: PvmAirVariant) -> PrecompileWitness {
@@ -260,8 +260,9 @@ fn assert_selected_security(
 
 #[test]
 fn public_verifier_rejects_recognized_malformed_frames_and_checks_outer_size_first() {
-    use crate::VerifyError;
     use miden_core::{Word, proof::MAX_STARK_PROOF_BYTES};
+
+    use crate::VerifyError;
     for bytes in [
         b"MIDENPVM".to_vec(),
         b"MIDENPVM\x01".to_vec(),

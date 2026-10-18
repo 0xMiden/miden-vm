@@ -1,6 +1,7 @@
 //! Per-AIR facts from authored schema and capture. No production metadata is an input.
 use alloc::string::String;
 use core::fmt::{Debug, Write};
+
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::{air::LiftedAir, capture::ir::capture};
 

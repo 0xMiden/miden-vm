@@ -1,11 +1,13 @@
 //! Deterministic shared runtime universe, emitted once outside relation projections.
+use std::{collections::BTreeSet, string::String, vec::Vec};
+
+use askama::Template;
+
 use super::{
     ood::RowGroup,
     proof_order::{ProofOrderPlan, SortStep},
     *,
 };
-use askama::Template;
-use std::{collections::BTreeSet, string::String, vec::Vec};
 #[derive(Template)]
 #[template(path = "verifier/shared_parameters.masm", escape = "none")]
 struct Parameters {
@@ -43,7 +45,7 @@ struct Deep {
 #[derive(Template)]
 #[template(path = "verifier/shared_fixed.masm", escape = "none")]
 struct Fixed<'a> {
-    g: &'a super::pvm_glue::PvmGluePlan,
+    g: &'a pvm_glue::PvmGluePlan,
 }
 #[derive(Template)]
 #[template(path = "verifier/shared_aux.masm", escape = "none")]
@@ -54,7 +56,7 @@ struct Aux<'a> {
 #[template(path = "verifier/shared_public.masm", escape = "none")]
 struct Public<'a> {
     abi: &'static [runtime::ParameterField],
-    g: &'a super::pvm_glue::PvmGluePlan,
+    g: &'a pvm_glue::PvmGluePlan,
 }
 fn rendered(result: askama::Result<String>) -> String {
     result.expect("packaged shared verifier template must render")

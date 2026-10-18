@@ -154,9 +154,11 @@ cached_preprocessed!(eidos, eidos_for, EidosConfig, eidos_config);
 #[cfg(test)]
 mod tests {
     use miden_core::utils::RowMajorMatrix;
-    use miden_stark::ProverInstance;
-    use miden_stark::air::{BaseAir, LiftedAir, ProverStatement};
-    use miden_stark::pcs::PcsParams;
+    use miden_stark::{
+        ProverInstance,
+        air::{BaseAir, LiftedAir, ProverStatement},
+        pcs::PcsParams,
+    };
 
     use super::*;
 

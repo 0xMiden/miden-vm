@@ -56,7 +56,7 @@ pub fn proof_security_parameters(
     alignment: usize,
     hash_fn: HashFunction,
 ) -> ProofSecurityParameters {
-    source::proof_security_parameters_with_shape(
+    proof_security_parameters_with_shape(
         pcs_params,
         log_max_height,
         num_kernel_procedures,
@@ -85,7 +85,7 @@ pub fn conjectured_security_level(
     log_max_height: u32,
     num_kernel_procedures: u32,
 ) -> u32 {
-    source::conjectured_security_level_with_shape(
+    conjectured_security_level_with_shape(
         num_queries,
         query_pow_bits,
         deep_pow_bits,
@@ -117,7 +117,7 @@ pub fn conjectured_security_level_for_alignment(
     alignment: usize,
     hash_fn: HashFunction,
 ) -> u32 {
-    source::conjectured_security_level_for_alignment_with_shape(
+    conjectured_security_level_for_alignment_with_shape(
         num_queries,
         query_pow_bits,
         deep_pow_bits,
@@ -143,7 +143,7 @@ pub fn security_report(
     hash_fn: HashFunction,
     num_kernel_procedures: u32,
 ) -> SecurityReport {
-    source::security_report_with_shape(
+    security_report_with_shape(
         params,
         log_max_height,
         hash_fn,

@@ -240,8 +240,8 @@ pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
 
 /// Builds PVM security parameters from values obtained during proof verification.
 ///
-/// `log_max_height` and the supplied aligned `shape` must come from successful STARK verification, and
-/// `hash_fn` from the configuration used to verify the proof, including its challenger.
+/// `log_max_height` and the supplied aligned `shape` must come from successful STARK verification,
+/// and `hash_fn` from the configuration used to verify the proof, including its challenger.
 pub fn proof_security_parameters_with_shape(
     pcs_params: &PcsParams,
     log_max_height: u32,
@@ -323,16 +323,11 @@ mod tests {
         alignment: usize,
         hash_fn: HashFunction,
     ) -> ProofSecurityParameters {
-        super::proof_security_parameters_with_shape(
-            pcs_params,
-            log_max_height,
-            shape(alignment),
-            hash_fn,
-        )
+        proof_security_parameters_with_shape(pcs_params, log_max_height, shape(alignment), hash_fn)
     }
 
     fn security_report(params: &ProtocolParams, log_max_height: u32) -> SecurityReport {
-        super::security_report_with_shape(params, log_max_height, shape(COMMITMENT_ALIGNMENT))
+        security_report_with_shape(params, log_max_height, shape(COMMITMENT_ALIGNMENT))
     }
 
     use p3_security::budget::report::QUERY_LABEL;

@@ -1,9 +1,10 @@
 //! Canonical security API backed by generated relation geometry and source-owned policy.
-use crate::vm::security::{COMMITMENT_ALIGNMENT, EIDOS_CHALLENGE_SAMPLE_BITS};
 use miden_air_source::precompile::security as source;
 use miden_core::{deferred::PvmAirVariant, proof::HashFunction};
 use miden_stark::{pcs::PcsParams, security::fixed};
 pub use source::*;
+
+use crate::vm::security::{COMMITMENT_ALIGNMENT, EIDOS_CHALLENGE_SAMPLE_BITS};
 
 /// Security shape of the full canonical relation at the recursive verifier's alignment.
 pub const AIR_SHAPE: AirShape = shape(COMMITMENT_ALIGNMENT);
@@ -56,21 +57,12 @@ pub fn proof_security_parameters(
     alignment: usize,
     hash_fn: HashFunction,
 ) -> ProofSecurityParameters {
-    source::proof_security_parameters_with_shape(
-        pcs_params,
-        log_max_height,
-        shape(alignment),
-        hash_fn,
-    )
+    proof_security_parameters_with_shape(pcs_params, log_max_height, shape(alignment), hash_fn)
 }
 
 /// Computes an Eidos chiplet-stack proof's conjectured security level, in bits.
 pub fn conjectured_security_level(params: &PcsParams, log_max_height: u32) -> u32 {
-    source::conjectured_security_level_with_shape(
-        params,
-        log_max_height,
-        shape(COMMITMENT_ALIGNMENT),
-    )
+    conjectured_security_level_with_shape(params, log_max_height, shape(COMMITMENT_ALIGNMENT))
 }
 
 /// Computes a chiplet-stack proof's conjectured security level, in bits, for a proof committed
@@ -87,7 +79,7 @@ pub fn conjectured_security_level_for_alignment(
     alignment: usize,
     hash_fn: HashFunction,
 ) -> u32 {
-    source::conjectured_security_level_for_alignment_with_shape(
+    conjectured_security_level_for_alignment_with_shape(
         params,
         log_max_height,
         shape(alignment),
@@ -106,7 +98,7 @@ pub fn conjectured_security_level_for_alignment(
 /// also accepts configurations outside that domain; such inputs are not part of the recursive
 /// estimator's contract.
 pub fn security_report(params: &ProtocolParams, log_max_height: u32) -> SecurityReport {
-    source::security_report_with_shape(params, log_max_height, shape(COMMITMENT_ALIGNMENT))
+    security_report_with_shape(params, log_max_height, shape(COMMITMENT_ALIGNMENT))
 }
 
 /// Security parameters for the relation authenticated by the selected transcript.
@@ -119,7 +111,7 @@ pub fn proof_security_parameters_for(
 ) -> ProofSecurityParameters {
     let airs: alloc::vec::Vec<_> =
         super::Air::all().into_iter().filter(|air| air.is_in_variant(variant)).collect();
-    source::proof_security_parameters_with_shape(
+    proof_security_parameters_with_shape(
         pcs_params,
         log_max_height,
         super::geometry(&airs, alignment).air_shape(),

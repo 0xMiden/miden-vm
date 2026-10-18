@@ -5,7 +5,7 @@
 
 use std::{format, path::Path, string::String, vec::Vec};
 
-use super::{accepted, masm_renderer, precompile};
+use super::{accepted::AcceptedIdentities, masm_renderer, precompile};
 use crate::precompile::PvmAirVariant;
 
 pub struct VariantArtifacts {
@@ -61,8 +61,11 @@ pub(super) fn render_prepared(plans: &[masm_renderer::V1RenderPlan]) -> Vec<Vari
         .collect()
 }
 
-pub(super) fn validate(root: &Path, variants: &[VariantArtifacts]) -> Result<(), String> {
-    let accepted = accepted::load(root)?;
+pub(super) fn validate(
+    root: &Path,
+    accepted: &AcceptedIdentities,
+    variants: &[VariantArtifacts],
+) -> Result<(), String> {
     for variant in variants {
         accepted.check(
             &format!("precompile-{}", variant.mask),
