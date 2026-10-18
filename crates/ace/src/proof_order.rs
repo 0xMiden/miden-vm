@@ -3,7 +3,7 @@
 //! This module provides Lehmer encoding for proof-order permutations and the comparator networks
 //! used by the MASM order-map renderer.
 
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 
 /// Largest AIR count whose complete permutation set fits in the `u32` tag space.
 ///
@@ -70,6 +70,124 @@ pub fn order_from_tag(tag: u32, num_airs: usize) -> Option<Vec<usize>> {
         rank %= factor;
     }
     Some(order)
+}
+
+/// AIR identities and diagnostic tokens for a fixed proof-order composition.
+///
+/// `N` must be in `1..=MAX_ORDER_AIRS`. The canonical array must contain each supported AIR
+/// exactly once, with each AIR's instance index equal to its position in that array.
+pub trait ProofOrderAir<const N: usize>: Copy {
+    /// Supported AIRs in canonical instance order.
+    const INSTANCE_ORDER: [Self; N];
+
+    /// Index of this AIR in the canonical instance order.
+    fn instance_index(self) -> usize;
+
+    /// Stable token used in proof-order diagnostic labels.
+    fn file_token(self) -> &'static str;
+}
+
+/// Proof-order AIR permutation.
+///
+/// The proof stores AIR commitments in ascending `(log_trace_height, instance_index)` order. That
+/// order can vary by statement, so the recursive verifier resolves each AIR's position in it when
+/// placing that AIR's data and weighting its contribution. `tag` is the Lehmer rank of the
+/// permutation relative to [`ProofOrderAir::INSTANCE_ORDER`].
+///
+/// The recursive verifier derives the complete order once from the committed heights with the
+/// fixed sorting network emitted as `stage_proof_order_maps` in each relation's out-of-domain
+/// hook. The resulting position maps drive scatter, boundary placement, and fold-coefficient
+/// staging. The Lehmer tag API provides a stable encoding for exhaustive proof-order enumeration.
+/// The shared [`MAX_ORDER_AIRS`] bound ensures that every supported rank fits in `u32`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofOrder<A, const N: usize> {
+    airs: [A; N],
+    tag: u32,
+}
+
+impl<A: ProofOrderAir<N>, const N: usize> ProofOrder<A, N> {
+    /// Construct a proof order from an explicit AIR permutation.
+    ///
+    /// Panics if an AIR is missing or duplicated.
+    pub fn new(airs: [A; N]) -> Self {
+        let instance_order: Vec<usize> = airs.iter().map(|air| air.instance_index()).collect();
+        let tag = order_tag(&instance_order);
+        Self { airs, tag }
+    }
+
+    /// Construct a proof order from a slice containing every supported AIR exactly once.
+    pub fn from_airs(airs: &[A]) -> Self {
+        let Ok(airs) = airs.try_into() else {
+            panic!("proof order must include every AIR exactly once");
+        };
+        Self::new(airs)
+    }
+
+    /// Return the canonical instance order from [`ProofOrderAir::INSTANCE_ORDER`].
+    pub fn instance_order() -> Self {
+        Self::new(A::INSTANCE_ORDER)
+    }
+
+    /// Return every supported proof order, sorted by tag.
+    pub fn variants() -> Vec<Self> {
+        (0..factorial(N)).map(Self::from_rank).collect()
+    }
+
+    /// Decode a Lehmer tag into a proof order.
+    pub fn from_tag(tag: u32) -> Option<Self> {
+        let instance_order = order_from_tag(tag, N)?;
+        let mut airs = [A::INSTANCE_ORDER[0]; N];
+        for (slot, index) in airs.iter_mut().zip(instance_order) {
+            *slot = A::INSTANCE_ORDER[index];
+        }
+        Some(Self { airs, tag })
+    }
+
+    /// Sort AIRs by trace height, using instance order as the tie-breaker.
+    ///
+    /// `log_heights` must be in [`ProofOrderAir::INSTANCE_ORDER`] order.
+    pub fn from_instance_log_heights(log_heights: &[u8]) -> Self {
+        assert_eq!(log_heights.len(), N, "one log height is required per AIR");
+
+        let mut ordered: Vec<(A, u8)> =
+            A::INSTANCE_ORDER.iter().copied().zip(log_heights.iter().copied()).collect();
+        ordered.sort_by_key(|(air, height)| (*height, air.instance_index()));
+
+        let mut airs = [A::INSTANCE_ORDER[0]; N];
+        for (dst, (air, _)) in airs.iter_mut().zip(ordered) {
+            *dst = air;
+        }
+        Self::new(airs)
+    }
+
+    /// AIRs in the order used by the proof.
+    pub fn airs(&self) -> &[A] {
+        &self.airs
+    }
+
+    /// Lehmer tag for this proof order.
+    pub fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    /// Returns a stable diagnostic label for this proof order.
+    pub fn file_stem(&self) -> String {
+        let mut stem = String::from("constraints_eval_");
+        for (i, air) in self.airs.iter().copied().enumerate() {
+            if i > 0 {
+                stem.push_str("_then_");
+            }
+            stem.push_str(air.file_token());
+        }
+        stem
+    }
+
+    /// Decode a Lehmer rank into its AIR permutation.
+    fn from_rank(rank: usize) -> Self {
+        debug_assert!(rank < factorial(N));
+        let tag = u32::try_from(rank).expect("proof-order tags fit in u32");
+        Self::from_tag(tag).expect("rank is in range")
+    }
 }
 
 /// Packed proof-order key stride: `key = PROOF_ORDER_KEY_STRIDE * log_height + instance_index`.
@@ -200,6 +318,15 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
+
+    #[test]
+    fn proof_order_count_is_factorial() {
+        assert_eq!(factorial(0), 1);
+        assert_eq!(factorial(1), 1);
+        assert_eq!(factorial(2), 2);
+        assert_eq!(factorial(3), 6);
+        assert_eq!(factorial(4), 24);
+    }
 
     #[test]
     fn order_tags_round_trip_over_the_whole_range() {

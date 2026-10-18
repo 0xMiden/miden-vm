@@ -14,10 +14,8 @@ pub use miden_air_source::*;
 pub use miden_stark::air::MultiAir;
 pub use vm::{
     AIRS, Air, Air as MidenAir, MIDEN_AIR_COUNT, MultiAir as MidenMultiAir, PROOF_ORDER_COUNT,
-    ProofOrder, PublicInputs,
+    ProofOrder, PublicInputs, security,
 };
-
-pub use vm::security;
 
 pub mod config;
 pub use vm::ace;

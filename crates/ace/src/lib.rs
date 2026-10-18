@@ -71,8 +71,8 @@ pub use crate::{
     layout::{InputCounts, InputKey, InputLayout},
     ood_scatter::{OodScatterGroup, OodScatterPlan, OodScatterSegment},
     proof_order::{
-        MAX_ORDER_AIRS, PROOF_ORDER_KEY_STRIDE, factorial, order_from_tag, order_tag,
-        sorting_network as proof_order_comparators,
+        MAX_ORDER_AIRS, PROOF_ORDER_KEY_STRIDE, ProofOrder, ProofOrderAir, factorial,
+        order_from_tag, order_tag, sorting_network as proof_order_comparators,
     },
     records::{EvalNode, EvaluationTrace, ReadNode},
 };
