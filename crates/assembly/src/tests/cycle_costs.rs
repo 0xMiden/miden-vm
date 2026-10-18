@@ -3,15 +3,14 @@
 
 use super::*;
 
-/// Pins the cycle cost of every instruction documented in
-/// `docs/src/user_docs/assembly/field_operations.md` to the number of operations the assembler
-/// actually emits, so the two cannot drift apart.
+/// Pins documented field-operation and u32max cycle costs to the number of operations the
+/// assembler actually emits, so the two cannot drift apart.
 ///
 /// Cost is measured by differencing programs containing the instruction once, twice and three
 /// times: this cancels the entrypoint prologue exactly, and requiring the two deltas to agree
 /// rules out any fusion between adjacent copies.
 #[test]
-fn field_operation_cycle_costs_match_docs() {
+fn instruction_cycle_costs_match_docs() {
     // (source, documented cycles)
     let cases: &[(&str, usize)] = &[
         // Assertions and tests
@@ -36,17 +35,17 @@ fn field_operation_cycle_costs_match_docs() {
         ("exp.u16", 25),
         ("exp.u32", 41),
         ("exp.u63", 72),
-        // exp.b: small-power table for b <= 7, then 11 + floor(log2(b))
+        // exp.b: addition chains for selected small powers, EXPACC otherwise
         ("exp.0", 3),
         ("exp.1", 1),
         ("exp.2", 2),
         ("exp.3", 4),
-        ("exp.4", 6),
-        ("exp.5", 8),
-        ("exp.6", 10),
-        ("exp.7", 12),
-        ("exp.8", 14),
-        ("exp.16", 15),
+        ("exp.4", 4),
+        ("exp.5", 6),
+        ("exp.6", 6),
+        ("exp.7", 8),
+        ("exp.8", 6),
+        ("exp.16", 8),
         ("exp.256", 19),
         ("ilog2", 70),
         ("not", 1),
@@ -60,14 +59,20 @@ fn field_operation_cycle_costs_match_docs() {
         ("neq.2", 3),
         ("lt", 17),
         ("lt.2", 18),
+        ("lt.0", 2),
         ("lte", 18),
         ("lte.2", 19),
+        ("lte.0", 1),
         ("gt", 16),
         ("gt.2", 17),
+        ("gt.0", 2),
         ("gte", 17),
         ("gte.2", 18),
+        ("gte.0", 3),
         ("is_odd", 6),
         ("eqw", 15),
+        ("u32max", 7),
+        ("u32max.2", 8),
         // Extension field operations
         ("ext2add", 5),
         ("ext2sub", 7),
@@ -112,7 +117,7 @@ fn field_operation_cycle_costs_match_docs() {
 
     assert!(
         mismatches.is_empty(),
-        "field_operations.md is out of date:\n{}",
+        "instruction cycle costs are out of date:\n{}",
         mismatches.join("\n")
     );
 }

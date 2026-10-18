@@ -3,7 +3,7 @@ use core::cmp::Ordering;
 
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
-use miden_utils_testing::{Felt, PrimeField64, build_op_test};
+use miden_utils_testing::{Felt, PrimeField64, build_op_test, build_test};
 
 // U32 OPERATIONS TESTS - MANUAL - COMPARISON OPERATIONS
 // ================================================================================================
@@ -54,6 +54,28 @@ fn u32max() {
 
     // should put the maximum of the 2 inputs on the stack
     test_max(asm_op);
+}
+
+#[test]
+fn u32max_preserves_the_full_stack_for_both_selection_branches() {
+    let mut inputs: Vec<u64> = (1..=16).collect();
+    for (a, b, expected_max) in [
+        (0, 0, 0),
+        (0, 1, 1),
+        (1, 0, 1),
+        (u32::MAX as u64, 0, u32::MAX as u64),
+        (0, u32::MAX as u64, u32::MAX as u64),
+        (u32::MAX as u64, u32::MAX as u64, u32::MAX as u64),
+    ] {
+        inputs[0] = a;
+        let mut expected = inputs.clone();
+        expected[0] = expected_max;
+
+        for source in [format!("begin push.{b} u32max end"), format!("begin u32max.{b} end")] {
+            let test = build_test!(&source, &inputs);
+            test.expect_stack(&expected);
+        }
+    }
 }
 
 // U32 OPERATIONS TESTS - RANDOMIZED - COMPARISON OPERATIONS

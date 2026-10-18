@@ -912,18 +912,14 @@ pub fn u32min(block_builder: &mut BasicBlockBuilder) {
 
 /// Translates u32max assembly instruction to VM operations.
 ///
-/// Specifically, we subtract the top value from the second to the top value (U32SUB), check the
-/// underflow flag (EQZ), and perform a conditional swap (CSWAP) to have the max number in front.
-/// Then we finally drop the 2nd element to keep the max.
+/// Subtracts copies of the operands (U32SUB) and uses the borrow flag directly to conditionally
+/// swap them (CSWAP), placing the minimum on top. Dropping it leaves the maximum.
 ///
 /// This operation takes:
-/// - 9 cycles without immediate value.
-/// - 10 cycles with immediate value.
+/// - 7 cycles without immediate value.
+/// - 8 cycles with immediate value.
 pub fn u32max(block_builder: &mut BasicBlockBuilder) {
-    compute_max_and_min(block_builder);
-
-    // Drop the min and keep the max
-    block_builder.push_ops([Swap, Drop]);
+    block_builder.push_ops([Dup1, Dup1, U32sub, Swap, Drop, CSwap, Drop]);
 }
 
 // COMPARISON OPERATIONS - HELPERS
