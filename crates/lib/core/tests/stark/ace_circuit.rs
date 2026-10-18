@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use miden_air_source::codegen::{self, Mode, constraints, evaluator};
+use miden_air_source::codegen::{Mode, constraints, evaluator};
+use miden_core_lib_codegen::verifier;
 
 fn workspace() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
@@ -8,7 +9,7 @@ fn workspace() -> PathBuf {
 
 #[test]
 fn generated_recursive_verifier_artifacts_match_air() {
-    codegen::run(&workspace(), Mode::Check)
+    verifier::run(&workspace(), Mode::Check)
         .expect("recursive-verifier artifact drift check failed");
 }
 

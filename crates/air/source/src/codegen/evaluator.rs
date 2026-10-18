@@ -58,7 +58,8 @@ pub fn run(path: &Path, mode: Mode) -> Result<(), String> {
 }
 
 /// Deliver an already generated evaluator after the caller validates other projections.
-pub(super) fn deliver(path: &Path, content: &str, mode: Mode) -> Result<(), String> {
+/// Combined generation must complete accepted/protected preflight before invoking write mode.
+pub fn deliver(path: &Path, content: &str, mode: Mode) -> Result<(), String> {
     let encoded = encode(content);
     match mode {
         Mode::Write => {

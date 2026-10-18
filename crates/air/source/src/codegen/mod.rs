@@ -1,7 +1,7 @@
-//! Source-owned generation workflow. Compilation/rendering uses package-local templates and
-//! ordinary authored AIR values. Output paths are explicit; default writes never accept new pins.
+//! Source-owned compilation and rendering using package-local templates and authored AIR values.
+//! Complete projections validate accepted inputs and protected bodies without writing outputs.
 
-use alloc::{format, string::String};
+use alloc::{format, string::String, vec::Vec};
 
 pub mod constraints;
 pub mod degrees;
@@ -17,9 +17,18 @@ pub mod shared_verifier;
 mod accepted;
 mod delivery;
 
-/// Compile and validate every projection before writing any managed output.
-/// Accepted identities are loaded explicitly; protected bodies remain check-only.
-pub fn run(root: &std::path::Path, mode: Mode) -> Result<(), String> {
+/// Complete projections in delivery order, with the binary evaluator transport kept separate.
+pub struct RenderedArtifacts {
+    pub before_evaluator: Vec<masm_renderer::RenderedArtifact>,
+    pub evaluator: String,
+    pub after_evaluator: Vec<masm_renderer::RenderedArtifact>,
+}
+
+/// Compile and render all projections, checking accepted identities, protected bodies and ABI.
+///
+/// Reads explicit checkout inputs without writing outputs or accepting pins. The destination
+/// owner must also reject obsolete modules before delivery.
+pub fn render_and_validate(root: &std::path::Path) -> Result<RenderedArtifacts, String> {
     let identities = accepted::load(root)?;
     let compiled_vm = constraints::compile(constraints::accepted_setup_commitments());
     let vm_plan = masm_renderer::prepare_v1(compiled_vm.masm);
@@ -49,11 +58,10 @@ pub fn run(root: &std::path::Path, mode: Mode) -> Result<(), String> {
     }));
     let variants = pvm_variants::render_prepared(&plans[1..]);
     pvm_variants::validate(root, &identities, &variants)?;
-    shared_verifier::validate_obsolete(root)?;
     plans.push(pvm_plan);
     let shared = masm_renderer::shared::render(&plans);
     let rust_evaluator = evaluator::generate();
-    let tables: std::vec::Vec<_> = degrees::generate()
+    let tables: Vec<_> = degrees::generate()
         .into_iter()
         .chain(metadata::generate())
         .map(|(file, body)| masm_renderer::RenderedArtifact {
@@ -62,21 +70,15 @@ pub fn run(root: &std::path::Path, mode: Mode) -> Result<(), String> {
             ownership: masm_renderer::ArtifactOwnership::Managed,
         })
         .collect();
-    let evaluator_path = root.join("crates/air/generated/artifacts").join(evaluator::ARTIFACT_FILE);
-    // All accepted/protected checks above precede every managed write.
-    if mode == Mode::Check {
-        constraints::public_inputs_masm_matches_air(root)?;
-        constraints::security_masm_matches_air(root)?;
-    }
-    delivery::deliver(root, &shared, mode)?;
-    delivery::deliver(root, &vm.files, mode)?;
-    delivery::deliver(root, &pvm.files, mode)?;
-    delivery::deliver(root, &tables, mode)?;
-    evaluator::deliver(&evaluator_path, &rust_evaluator, mode)?;
-    for variant in variants {
-        delivery::deliver(root, &variant.files, mode)?;
-    }
-    Ok(())
+    let mut before_evaluator = shared;
+    before_evaluator.extend(vm.files);
+    before_evaluator.extend(pvm.files);
+    before_evaluator.extend(tables);
+    Ok(RenderedArtifacts {
+        before_evaluator,
+        evaluator: rust_evaluator,
+        after_evaluator: variants.into_iter().flat_map(|variant| variant.files).collect(),
+    })
 }
 
 #[cfg(test)]

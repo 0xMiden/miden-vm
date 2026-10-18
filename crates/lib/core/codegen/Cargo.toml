@@ -1,5 +1,6 @@
 [package]
 name = "miden-core-lib-codegen"
+default-run = "miden-core-lib-codegen"
 version.workspace = true
 description = "Build-time MASM code generation support for miden-core-lib"
 license.workspace = true
@@ -12,6 +13,7 @@ edition.workspace = true
 [features]
 default = ["std"]
 std = ["miden-core/std", "miden-precompiles/std"]
+air = ["std", "dep:miden-air-source"]
 
 [lib]
 bench = false
@@ -22,7 +24,16 @@ name = "miden-core-lib-codegen"
 path = "src/main.rs"
 required-features = ["std"]
 
+[[bin]]
+name = "verifier-codegen"
+path = "src/bin/verifier-codegen.rs"
+required-features = ["air"]
+
 [dependencies]
+miden-air-source = { workspace = true, optional = true, features = ["tooling"] }
 miden-core.workspace = true
 miden-precompiles.workspace = true
 tempfile = { workspace = true, features = ["getrandom"] }
+
+[dev-dependencies]
+serde_json.workspace = true

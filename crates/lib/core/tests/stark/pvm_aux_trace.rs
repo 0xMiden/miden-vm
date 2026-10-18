@@ -443,7 +443,8 @@ fn pvm_aux_hook_rejects_an_unbalanced_normalized_sum() {
 
 #[test]
 fn pvm_odd_selected_aux_hook_preserves_alignment_gap_and_independent_boundary() {
-    // SHA-256 selects nine AIRs. This hand-authored schedule includes a tie and a nonidentity order.
+    // SHA-256 selects nine AIRs. This hand-authored schedule includes a tie and a nonidentity
+    // order.
     let heights = [16, 16, 5, 9, 10, 11, 12, 13, 7, 0, 0, 0];
     let selected_ptr = |name: &str| {
         let prefix = format!("const {name} = ");

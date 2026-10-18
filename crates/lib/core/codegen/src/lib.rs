@@ -7,3 +7,6 @@ extern crate std;
 
 #[cfg(feature = "std")]
 pub mod masm;
+
+#[cfg(feature = "air")]
+pub mod verifier;

@@ -1,10 +1,7 @@
-//! Destination I/O for complete projections; callers validate all protected inputs before writes.
+//! Read-only comparisons for protected projections and standalone source checks.
 use std::{format, fs, path::Path, string::String};
 
-use super::{
-    Mode,
-    masm_renderer::{ArtifactOwnership, RenderedArtifact},
-};
+use super::masm_renderer::{ArtifactOwnership, RenderedArtifact};
 
 fn compare(root: &Path, artifact: &RenderedArtifact, reason: &str) -> Result<(), String> {
     let path = root.join(&artifact.relative_path);
@@ -33,22 +30,9 @@ pub(super) fn validate_protected(
     Ok(())
 }
 
-pub(super) fn deliver(
-    root: &Path,
-    artifacts: &[RenderedArtifact],
-    mode: Mode,
-) -> Result<(), String> {
+pub(super) fn check(root: &Path, artifacts: &[RenderedArtifact]) -> Result<(), String> {
     for artifact in artifacts {
-        match mode {
-            Mode::Check => compare(root, artifact, "is stale; run make regenerate-constraints")?,
-            Mode::Write if artifact.ownership == ArtifactOwnership::Managed => {
-                let path = root.join(&artifact.relative_path);
-                fs::create_dir_all(path.parent().expect("projection parent"))
-                    .and_then(|()| fs::write(&path, &artifact.body))
-                    .map_err(|error| format!("{}: {error}", path.display()))?;
-            },
-            Mode::Write => {},
-        }
+        compare(root, artifact, "is stale; run make regenerate-constraints")?;
     }
     Ok(())
 }

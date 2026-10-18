@@ -1,13 +1,14 @@
-//! Generate or check production Rust and VM/PVM MASM projections from authored source.
+//! Explicit developer delivery/checking of source-rendered Rust and VM/PVM MASM projections.
 
 use std::{env, path::PathBuf, process::ExitCode};
 
-use miden_air_source::codegen::{self, Mode, constraints, precompile};
+use miden_air_source::codegen::{constraints, precompile};
+use miden_core_lib_codegen::verifier::{self, Mode};
 
 fn run() -> Result<(), String> {
     let mut args = env::args().skip(1);
     let workspace = PathBuf::from(args.next().ok_or_else(|| {
-        "usage: air-codegen <workspace-root> [--check|--write] [--derive-setup]".to_string()
+        "usage: verifier-codegen <workspace-root> [--check|--write] [--derive-setup]".to_string()
     })?);
     let mut mode = Mode::Check;
     let mut derive_setup = false;
@@ -23,7 +24,7 @@ fn run() -> Result<(), String> {
         constraints::check_setup(&workspace)?;
         precompile::check_setup(&workspace)?;
     }
-    codegen::run(&workspace, mode)
+    verifier::run(&workspace, mode)
 }
 
 fn main() -> ExitCode {

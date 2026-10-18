@@ -40,16 +40,10 @@ mod accepted {
 
 const PROTOCOL_ID: u64 = 1;
 const AIR_CONFIG_PATH: &str = "crates/air/generated/src/config.rs";
-#[cfg(test)]
-const CONSTRAINTS_EVAL_PATH: &str = "crates/lib/core/asm/sys/vm/constraints_eval.masm";
 const RELATION_DIGEST_PATH: &str = "crates/lib/core/asm/sys/vm/mod.masm";
 #[cfg(test)]
 const VM_LAYOUT_PATH: &str = "crates/lib/core/asm/sys/vm/layout.masm";
 const STARK_CONSTANTS_PATH: &str = "crates/lib/core/asm/stark/constants.masm";
-#[cfg(test)]
-const VM_OOD_FRAMES_PATH: &str = "crates/lib/core/asm/sys/vm/ood_frames.masm";
-#[cfg(test)]
-const VM_DEEP_QUERIES_PATH: &str = "crates/lib/core/asm/sys/vm/deep_queries.masm";
 const VM_PUBLIC_INPUTS_PATH: &str = "crates/lib/core/asm/sys/vm/public_inputs.masm";
 const SECURITY_ESTIMATOR_PATH: &str = "crates/lib/core/asm/stark/security.masm";
 const GENERIC_UTILS_PATH: &str = "crates/lib/core/asm/stark/utils.masm";
@@ -63,12 +57,6 @@ const ADV_PIPE_BLOCK_FELTS: usize = 8;
 /// Computes the relation digest used by recursive verification.
 pub fn compute_relation_digest(circuit_digest: &[Felt; 4]) -> [Felt; 4] {
     relation_digest(PROTOCOL_ID, &Word::new(*circuit_digest))
-}
-
-/// Runs write (`--write`) or staleness-check (`--check`) mode.
-pub fn run(root: &Path, mode: Mode) -> Result<(), String> {
-    // Shared runtime is one fixed VM/all-mask universe; use the global preflight boundary.
-    super::run(root, mode)
 }
 
 /// Captured and compiled inputs, including layout metadata absent from canonical ACE bytes.
@@ -142,7 +130,7 @@ pub fn check_artifacts(root: &Path, artifact: &ComputedArtifacts) -> Result<(), 
     )?;
     validate_delivery(root, artifact)?;
     validate_shared_abi(root)?;
-    super::delivery::deliver(root, &artifact.files, Mode::Check)?;
+    super::delivery::check(root, &artifact.files)?;
     public_inputs_masm_matches_air(root)?;
     security_masm_matches_air(root)?;
     Ok(())
@@ -809,298 +797,12 @@ pub struct ComputedArtifacts {
 mod tests {
     use super::{super::expect_panic, *};
 
-    const PVM_PROTECTED_WRAPPER: &str = "crates/lib/core/asm/sys/pvm/mod.masm";
-    const DELIVERY_MANAGED_PATHS: [&str; 24] = [
-        CONSTRAINTS_EVAL_PATH,
-        VM_LAYOUT_PATH,
-        VM_OOD_FRAMES_PATH,
-        VM_DEEP_QUERIES_PATH,
-        "crates/lib/core/asm/sys/pvm/constraints_eval.masm",
-        "crates/lib/core/asm/sys/pvm/layout.masm",
-        "crates/lib/core/asm/sys/pvm/ood_frames.masm",
-        "crates/lib/core/asm/sys/pvm/deep_queries.masm",
-        "crates/lib/core/asm/sys/pvm/aux_trace.masm",
-        "crates/lib/core/asm/sys/pvm/public_inputs.masm",
-        "crates/air/generated/artifacts/vm-evaluator.rs.zlib",
-        "crates/air/generated/artifacts/vm-degrees.rs",
-        "crates/air/generated/artifacts/precompile-degrees.rs",
-        "crates/air/generated/artifacts/vm-metadata.rs",
-        "crates/air/generated/artifacts/precompile-metadata.rs",
-        "crates/lib/core/asm/sys/verifier/parameters.masm",
-        "crates/lib/core/asm/sys/verifier/pipes.masm",
-        "crates/lib/core/asm/sys/verifier/evaluator.masm",
-        "crates/lib/core/asm/sys/verifier/proof_order.masm",
-        "crates/lib/core/asm/sys/verifier/ood.masm",
-        "crates/lib/core/asm/sys/verifier/deep.masm",
-        "crates/lib/core/asm/sys/verifier/fixed.masm",
-        "crates/lib/core/asm/sys/verifier/pvm_aux.masm",
-        "crates/lib/core/asm/sys/verifier/pvm_public.masm",
-    ];
-
-    struct DeliveryFixture {
-        root: std::path::PathBuf,
-    }
-
-    impl DeliveryFixture {
-        fn new(vm: &ComputedArtifacts, pvm: &super::super::precompile::GeneratedArtifacts) -> Self {
-            static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-            let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let fixture = Self {
-                root: std::env::temp_dir().join(format!(
-                    "miden-masm-delivery-{}-{timestamp}-{unique}",
-                    std::process::id(),
-                )),
-            };
-            // This fixture exercises delivery behavior, not accepted-identity derivation.
-            // Independent pin/golden and live-library tests retain that separate obligation.
-            let mut accepted = serde_json::json!({
-                "accepted_schema": 1,
-                "relations": {
-                    "vm": {
-                        "protocol_id": 1,
-                        "accepted_circuit_digest": vm.circuit_digest.map(|felt| felt.as_canonical_u64()),
-                        "accepted_relation_digest": vm.relation_digest.map(|felt| felt.as_canonical_u64()),
-                    },
-                    "precompile": {
-                        "protocol_id": 4,
-                        "accepted_circuit_digest": canonical_word(pvm.circuit_digest),
-                        "accepted_relation_digest": pvm.relation_digest.map(|felt| felt.as_canonical_u64()),
-                    },
-                },
-            });
-            assert_eq!((vm.files.len(), pvm.files.len()), (6, 9));
-            for relative in &DELIVERY_MANAGED_PATHS[..10] {
-                let file = vm
-                    .files
-                    .iter()
-                    .chain(&pvm.files)
-                    .find(|file| file.relative_path == *relative)
-                    .unwrap();
-                assert_eq!(file.ownership, ArtifactOwnership::Managed);
-            }
-            for variant in super::super::pvm_variants::generate() {
-                assert_eq!(variant.files.len(), 2);
-                for (name, ownership) in [
-                    ("layout", ArtifactOwnership::Managed),
-                    ("mod", ArtifactOwnership::ProtectedCheckOnly),
-                ] {
-                    let path = format!("crates/lib/core/asm/sys/pvm/v{}/{name}.masm", variant.mask);
-                    assert!(
-                        variant
-                            .files
-                            .iter()
-                            .any(|file| file.relative_path == path && file.ownership == ownership)
-                    );
-                }
-                accepted["relations"][format!("precompile-{}", variant.mask)] = serde_json::json!({"protocol_id":4,"accepted_circuit_digest":variant.circuit,"accepted_relation_digest":variant.relation});
-                for file in variant.files {
-                    let body =
-                        if file.ownership == masm_renderer::ArtifactOwnership::ProtectedCheckOnly {
-                            file.body
-                        } else {
-                            format!("unchanged reduced sentinel: {}", file.relative_path)
-                        };
-                    fixture.write(&file.relative_path, &body);
-                }
-            }
-            fixture.write(
-                "crates/air/generated/protocol/accepted.json",
-                &serde_json::to_string_pretty(&accepted).unwrap(),
-            );
-            let shared = format!(
-                "pub const LOG_AIR_TRACE_LENGTHS_PTR = {}\n\
-                 pub const LOG_AIR_TRACE_LENGTHS_CAPACITY = {}\n\
-                 pub const CONSTRAINT_COMPOSITION_COEFS_PTR = {}\n\
-                 pub const PUBLIC_INPUTS_ADDRESS_PTR = {}\n",
-                SHARED_ABI.heights_ptr,
-                SHARED_ABI.heights_capacity,
-                SHARED_ABI.composition_coefficients_ptr,
-                SHARED_ABI.public_inputs_address_ptr,
-            );
-            fixture.write(STARK_CONSTANTS_PATH, &shared);
-            for relative in [
-                AIR_CONFIG_PATH,
-                RELATION_DIGEST_PATH,
-                "crates/air/generated/src/precompile/ace_constants.rs",
-                "crates/air/generated/src/precompile/protocol.rs",
-                PVM_PROTECTED_WRAPPER,
-            ] {
-                let file = vm
-                    .files
-                    .iter()
-                    .chain(&pvm.files)
-                    .find(|file| file.relative_path == relative)
-                    .unwrap();
-                assert_eq!(file.ownership, ArtifactOwnership::ProtectedCheckOnly);
-                fixture.write(relative, &file.body);
-            }
-            for relative in DELIVERY_MANAGED_PATHS {
-                fixture.write(relative, &format!("unchanged managed sentinel: {relative}\n"));
-            }
-            validate_delivery(&fixture.root, vm).expect("valid VM delivery fixture");
-            validate_shared_abi(&fixture.root).expect("valid shared ABI delivery fixture");
-            super::super::precompile::validate_delivery(&fixture.root, pvm)
-                .expect("valid PVM delivery fixture");
-            fixture
-        }
-
-        fn write(&self, relative: &str, body: &str) {
-            let path = self.root.join(relative);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path, body).unwrap();
-        }
-
-        fn managed_contents(&self) -> Vec<Vec<u8>> {
-            DELIVERY_MANAGED_PATHS
-                .iter()
-                .map(|relative| fs::read(self.root.join(relative)).unwrap())
-                .chain((0..7).map(|mask| {
-                    fs::read(
-                        self.root.join(format!("crates/lib/core/asm/sys/pvm/v{mask}/layout.masm")),
-                    )
-                    .unwrap()
-                }))
-                .collect()
-        }
-    }
-
-    impl Drop for DeliveryFixture {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
-    }
-
-    fn delivery_artifacts() -> (ComputedArtifacts, super::super::precompile::GeneratedArtifacts) {
-        let vm = compile_and_render(accepted_setup_commitments());
-        let pvm = super::super::precompile::compile_and_render(
-            super::super::precompile::accepted_setup_commitment(),
-        );
-        (vm, pvm)
-    }
-
     #[test]
     fn typed_render_rejects_a_misaligned_ace_stream() {
         let mut compiled = compile(accepted_setup_commitments());
         compiled.masm.circuit.stream_felts -= 1;
         let error = expect_panic(|| render(&compiled));
         assert!(error.contains("circuit metadata"), "unexpected error: {error}");
-    }
-
-    #[test]
-    fn protected_full_body_drift_is_detected_with_unchanged_numeric_pins() {
-        let (vm, pvm) = delivery_artifacts();
-        let fixture = DeliveryFixture::new(&vm, &pvm);
-        for (relative, suffix) in [
-            (AIR_CONFIG_PATH, "// protected body drift\n"),
-            (RELATION_DIGEST_PATH, "# protected body drift\n"),
-        ] {
-            let original = read_file(&fixture.root, relative).unwrap();
-            let drifted = format!("{original}\n{suffix}");
-            if relative == AIR_CONFIG_PATH {
-                assert_eq!(
-                    parse_rust_pin_array(&original, "RELATION_DIGEST").unwrap(),
-                    parse_rust_pin_array(&drifted, "RELATION_DIGEST").unwrap()
-                );
-            } else {
-                assert_eq!(
-                    parse_masm_const::<u64>(&original, "RELATION_DIGEST_0", relative).unwrap(),
-                    parse_masm_const::<u64>(&drifted, "RELATION_DIGEST_0", relative).unwrap()
-                );
-            }
-            fixture.write(relative, &drifted);
-            let error = validate_delivery(&fixture.root, &vm).unwrap_err();
-            assert!(
-                error.contains(relative) && error.contains("protected template-body drift"),
-                "unexpected error: {error}"
-            );
-            fixture.write(relative, &original);
-        }
-    }
-
-    #[test]
-    fn rejected_write_delivery_preserves_every_managed_output() {
-        let (vm, pvm) = delivery_artifacts();
-        for rejected_input in [
-            "accepted identity",
-            "VM protected body",
-            "PVM protected body",
-            "reduced protected body",
-            "reduced accepted identity",
-            "obsolete module",
-        ] {
-            let fixture = DeliveryFixture::new(&vm, &pvm);
-            let before = fixture.managed_contents();
-            let expected = match rejected_input {
-                "accepted identity" => {
-                    let relative = "crates/air/generated/protocol/accepted.json";
-                    let mut accepted: serde_json::Value =
-                        serde_json::from_str(&read_file(&fixture.root, relative).unwrap()).unwrap();
-                    let limb = &mut accepted["relations"]["vm"]["accepted_circuit_digest"][0];
-                    *limb = serde_json::Value::from(limb.as_u64().unwrap() + 1);
-                    fixture.write(relative, &serde_json::to_string_pretty(&accepted).unwrap());
-                    "candidate identity differs"
-                },
-                "VM protected body" => {
-                    fixture.write(
-                        RELATION_DIGEST_PATH,
-                        &format!(
-                            "{}\n# rejected body drift\n",
-                            read_file(&fixture.root, RELATION_DIGEST_PATH).unwrap()
-                        ),
-                    );
-                    RELATION_DIGEST_PATH
-                },
-                "PVM protected body" => {
-                    fixture.write(
-                        PVM_PROTECTED_WRAPPER,
-                        &format!(
-                            "{}\n# rejected body drift\n",
-                            read_file(&fixture.root, PVM_PROTECTED_WRAPPER).unwrap()
-                        ),
-                    );
-                    PVM_PROTECTED_WRAPPER
-                },
-                "reduced protected body" => {
-                    let path = "crates/lib/core/asm/sys/pvm/v2/mod.masm";
-                    fixture.write(
-                        path,
-                        &format!(
-                            "{}\n# rejected reduced drift\n",
-                            read_file(&fixture.root, path).unwrap()
-                        ),
-                    );
-                    path
-                },
-                "reduced accepted identity" => {
-                    let path = "crates/air/generated/protocol/accepted.json";
-                    let mut accepted: serde_json::Value =
-                        serde_json::from_str(&read_file(&fixture.root, path).unwrap()).unwrap();
-                    accepted["relations"]["precompile-2"]["accepted_circuit_digest"][0] = 0.into();
-                    fixture.write(path, &serde_json::to_string_pretty(&accepted).unwrap());
-                    "candidate identity differs"
-                },
-                "obsolete module" => {
-                    fixture.write(
-                        "crates/lib/core/asm/sys/pvm/v2/aux_trace.masm",
-                        "obsolete sentinel",
-                    );
-                    "obsolete variant algorithm"
-                },
-                _ => unreachable!(),
-            };
-            let error = super::super::run(&fixture.root, Mode::Write)
-                .expect_err("rejected input must prevent delivery");
-            assert!(error.contains(expected), "unexpected {rejected_input} error: {error}");
-            assert_eq!(
-                fixture.managed_contents(),
-                before,
-                "rejected {rejected_input} changed a managed output"
-            );
-        }
     }
 
     #[test]

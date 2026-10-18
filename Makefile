@@ -40,7 +40,7 @@ FUZZ_CARGO               := RUSTC_BOOTSTRAP=1 cargo +stable
 ALL_FEATURES             := --all-features
 
 # Workspace-wide test features
-WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,fixture-tools,miden-air-source/tooling,midenc-hir-type/arbitrary
+WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,fixture-tools,miden-air-source/tooling,miden-core-lib-codegen/air,midenc-hir-type/arbitrary
 MIDEN_CRYPTO_FUZZ_TARGETS := smt word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
 MIDEN_SERDE_UTILS_FUZZ_TARGETS := primitives collections string vint64 goldilocks budgeted
 EXECUTION_PROOF_FUZZ_LIMITS := -rss_limit_mb=512 -timeout=10
@@ -352,7 +352,7 @@ exec-sve: ## Builds an executable with SVE acceleration enabled
 
 .PHONY: regenerate-constraints
 regenerate-constraints: ## Regenerate VM/PVM MASM, Rust evaluator and ACE artifacts; never accept pins
-	cargo run --package miden-air-source --features tooling --bin air-codegen -- "$(CURDIR)" --write
+	cargo run --package miden-core-lib-codegen --features air --bin verifier-codegen -- "$(CURDIR)" --write
 	cargo run --package miden-air-source --features tooling --bin air-artifacts -- --accepted-pins "$(CURDIR)/crates/air/generated/protocol/accepted.json" "$(CURDIR)/crates/air/generated/artifacts" --write
 	@$(MAKE) --no-print-directory recursive-verifier-regeneration-handoff
 
@@ -396,12 +396,12 @@ check-pvm-proof-fixture: ## Check the pinned Eidos PVM proof and deferred root f
 
 .PHONY: check-constraints
 check-constraints: ## Check all VM/PVM MASM, Rust evaluator and ACE artifacts for drift
-	cargo run --package miden-air-source --features tooling --bin air-codegen -- "$(CURDIR)" --check
+	cargo run --package miden-core-lib-codegen --features air --bin verifier-codegen -- "$(CURDIR)" --check
 	cargo run --package miden-air-source --features tooling --bin air-artifacts -- --accepted-pins "$(CURDIR)/crates/air/generated/protocol/accepted.json" "$(CURDIR)/crates/air/generated/artifacts" --check
 
 .PHONY: check-constraint-setup
 check-constraint-setup: ## Check canonical VM/PVM setup against deliberately accepted pins
-	cargo run --package miden-air-source --features tooling --bin air-codegen -- "$(CURDIR)" --check --derive-setup
+	cargo run --package miden-core-lib-codegen --features air --bin verifier-codegen -- "$(CURDIR)" --check --derive-setup
 
 .PHONY: check-air-stark-boundaries
 check-air-stark-boundaries: ## Check package ownership and isolated native verifier features without compiling

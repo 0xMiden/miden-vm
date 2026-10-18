@@ -14,9 +14,18 @@ captures counts/degrees and emits the small production metadata tables as well a
 artifacts. Memory models remain here for processor consumers.
 
 Verifier templates live in `templates/verifier`; typed compilation adapters and pure rendering live
-in `src/codegen`. `air-codegen <workspace-root> --check` checks complete committed projections;
-`--write` updates managed outputs after validating accepted inputs and protected bodies. It does
-not accept protocol pins. Core-lib assembles the tracked MASM during its normal build.
+in `src/codegen`. `codegen::render_and_validate` prepares the complete batch without writes.
+Core's explicit developer command checks or delivers it:
+
+```sh
+cargo run -p miden-core-lib-codegen --features air --bin verifier-codegen -- <workspace-root> --check
+```
+
+`--write` updates all managed MASM/evaluator/table outputs after accepted/protected and destination
+preflight, without accepting protocol pins. Core-lib's ordinary build assembles tracked MASM and
+does not enable AIR tooling. Embedded `air-codegen` command hints retain their pre-cutover bytes;
+use the command above or the workspace Make targets. The separate `air-artifacts` CLI retains its
+explicit accepted-file/artifact-directory contract and independent transport validation.
 
 The compiler adapters derive rendering metadata from ACE's compiler-only `CompiledCircuit`,
 which retains the encoding, originating READ layout and cached commitment together. Code-owned
@@ -43,7 +52,7 @@ Consolidated runtime generation emits `sys::verifier` once across VM and all eig
 Reduced selections retain only wrapper/layout modules; full VM/PVM module paths provide explicit
 standalone adapters. One named 80-felt ABI map generates trusted field constants and complete
 per-invocation stagers. Shared count/width kernels preserve transcript order and fixed stack frames.
-Both relation `run` APIs use global accepted/protected preflight before shared managed writes;
+The core developer command completes global accepted/protected preflight before any managed write;
 obsolete reduced algorithm copies reject explicitly. No runtime/ordinary build enables tooling.
 Actual assembled roots are accepted separately from frozen circuit/relation/setup/ACE/evaluator
 identities and native ALL payload compatibility.

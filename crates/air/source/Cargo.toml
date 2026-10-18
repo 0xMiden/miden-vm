@@ -52,8 +52,3 @@ thiserror.workspace = true
 insta.workspace = true
 miden-test-serialization-macros.workspace = true
 proptest.workspace = true
-
-[[bin]]
-name = "air-codegen"
-path = "src/bin/air-codegen.rs"
-required-features = ["tooling", "std"]

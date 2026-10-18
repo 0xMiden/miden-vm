@@ -1,11 +1,12 @@
 //! Same-context lifecycle and independent parameter/assembled identity oracles.
+use std::fmt::Write as _;
+
 use miden_air_source::codegen::{constraints, masm_renderer::V1RenderInput, precompile};
 use miden_core::{
     deferred::PvmAirVariant,
     serde::{Deserializable, Serializable},
 };
 use miden_core_lib::CoreLibrary;
-use std::fmt::Write as _;
 
 // Deliberately independent of RuntimePlan and its descriptor constants/table.
 const BASE: u32 = 3_223_324_000;
@@ -192,7 +193,7 @@ fn shared_vm_runtime_cost_is_bounded() {
         &data.initial_stack(),
         data.advice_stack(),
         data.store.clone(),
-        data.advice_map.clone()
+        data.advice_map
     );
     let trace = test.execute().unwrap();
     let rows = trace.trace_len_summary().core_rows();

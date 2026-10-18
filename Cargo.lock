@@ -2297,8 +2297,10 @@ dependencies = [
 name = "miden-core-lib-codegen"
 version = "1.0.0"
 dependencies = [
+ "miden-air-source",
  "miden-core",
  "miden-precompiles",
+ "serde_json",
  "tempfile",
 ]
 

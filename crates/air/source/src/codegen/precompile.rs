@@ -2,10 +2,10 @@
 //!
 //! Compilation adapts authored AIR and explicit setup inputs; pure rendering consumes compiled
 //! metadata plus packaged engine templates.
-//! `run` defaults to checking the caller's checkout; ordinary writes update generated projections
-//! while retaining accepted pins. Fresh setup derivation and deliberate pin acceptance are separate
-//! operations. Byte comparisons complement independent numeric pin/shape checks and downstream
-//! native/MASM layout and protocol oracles.
+//! Core's explicit developer command delivers projections while retaining accepted pins.
+//! Fresh setup derivation and deliberate pin acceptance are separate operations. Byte comparisons
+//! complement independent numeric pin/shape checks and downstream native/MASM layout and protocol
+//! oracles.
 
 use std::{
     format,
@@ -55,12 +55,6 @@ const PVM_LAYOUT_PATH: &str = "crates/lib/core/asm/sys/pvm/layout.masm";
 pub(super) const PVM_READ_START: u32 = 3_225_432_064;
 /// Start of the VM relation's next scratch region; the PVM allocation must end before it.
 const NEXT_VM_REGION_START: u32 = constraints::VM_ABI.current_trace_row_ptr;
-/// Runs write (`--write`) or staleness-check (`--check`) mode.
-pub fn run(root: &Path, mode: Mode) -> Result<(), String> {
-    // Shared runtime is one fixed VM/all-mask universe; use the global preflight boundary.
-    super::run(root, mode)
-}
-
 /// Explicit accepted setup value; supplying it does not derive setup afresh.
 pub fn accepted_setup_commitment() -> Word {
     Word::new(PVM_PREPROCESSED_COMMITMENT.map(Felt::new_unchecked))
@@ -92,7 +86,7 @@ pub fn check_setup(root: &Path) -> Result<(), String> {
     )?;
     constraints::validate_shared_abi(root)?;
     validate_delivery(root, &artifacts)?;
-    super::delivery::deliver(root, &artifacts.files, Mode::Check)
+    super::delivery::check(root, &artifacts.files)
 }
 
 pub struct GeneratedArtifacts {
