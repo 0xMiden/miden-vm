@@ -5,6 +5,6 @@ pub mod analyze;
 pub mod capture;
 pub mod graph;
 
-pub use analyze::{OpCounts, op_counts};
+pub use analyze::{OpCounts, constraint_degrees, op_counts};
 pub use capture::{CapturedConstraints, capture, capture_into};
 pub use graph::{Class, Graph, GraphBuilder, Leaf, Node, NodeId, OpKind};

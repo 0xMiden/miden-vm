@@ -17,5 +17,7 @@ pub use vm::{
     ProofOrder, PublicInputs,
 };
 
+pub use vm::security;
+
 pub mod config;
 pub use vm::ace;

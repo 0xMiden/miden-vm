@@ -1,6 +1,30 @@
 {
+  "air_metadata_tables": [
+    {
+      "bytes": 1553,
+      "file": "vm-metadata.rs",
+      "sha256": "83b0bf3da3a0af5ed8d1ae869685c7490a43ab9623a0f6904c702a295f548852"
+    },
+    {
+      "bytes": 2051,
+      "file": "precompile-metadata.rs",
+      "sha256": "81bd0e5f67a2c8eafd9ae24299c3601d6a79820ffc5e83a8773d4df3de8f5bee"
+    }
+  ],
   "artifact_schema": 1,
   "baseline": "c90abdb34e8f1b8f5d03efe0ac5bd11893543991",
+  "constraint_degree_tables": [
+    {
+      "bytes": 673,
+      "file": "vm-degrees.rs",
+      "sha256": "9f8ea9220e8cceb7f59777dcba04d51d6eddc6b698521179111e6140f4ba8380"
+    },
+    {
+      "bytes": 1254,
+      "file": "precompile-degrees.rs",
+      "sha256": "1b351b769ee6a89e1d3b1eb916610384eff07897bdb89cb42bca0cd17c3ab6ed"
+    }
+  ],
   "field": "canonical Miden Felt, little-endian u64",
   "members": [
     {

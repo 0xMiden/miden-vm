@@ -30,6 +30,9 @@ pub enum Air {
     Sha256,
 }
 
+include!("../artifacts/precompile-degrees.rs");
+include!("../artifacts/precompile-metadata.rs");
+
 impl Air {
     pub const fn source(self) -> source::Air {
         match self {
@@ -47,7 +50,7 @@ impl Air {
             Self::Sha256 => source::Air::Sha256,
         }
     }
-    pub fn all() -> [Air; NUM_CHIPLETS] {
+    pub const fn all() -> [Air; NUM_CHIPLETS] {
         [
             Air::ChunkNodeSponge,
             Air::EidosCompression,
@@ -94,13 +97,13 @@ impl From<Air> for source::Air {
 
 impl BaseAir<Felt> for Air {
     fn width(&self) -> usize {
-        self.source().width()
+        self.metadata().widths.main
     }
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
         self.source().preprocessed_trace()
     }
     fn preprocessed_width(&self) -> usize {
-        self.source().preprocessed_width()
+        self.metadata().widths.preprocessed
     }
     fn num_public_values(&self) -> usize {
         self.source().num_public_values()
@@ -118,7 +121,7 @@ impl LiftedAir<Felt, QuadFelt> for Air {
         self.source().num_randomness()
     }
     fn aux_width(&self) -> usize {
-        self.source().aux_width()
+        self.metadata().widths.aux
     }
     fn num_aux_values(&self) -> usize {
         self.source().num_aux_values()
@@ -149,7 +152,7 @@ impl LiftedAir<Felt, QuadFelt> for Air {
         )
     }
     fn constraint_degree(&self) -> ConstraintDegrees {
-        self.source().constraint_degree()
+        self.degrees()
     }
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         <source::Air as LiftedAir<Felt, QuadFelt>>::eval(&self.source(), builder)
@@ -220,3 +223,5 @@ pub use protocol::PVM_RELATION_DIGEST;
 pub mod artifacts;
 
 pub mod ace_constants;
+
+pub mod security;

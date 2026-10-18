@@ -304,26 +304,17 @@ fn compute(supplied_commitment: Option<Word>) -> Result<GeneratedArtifacts, Stri
             )?;
         }
     }
+    let air_shape = pvm_security::derive_air_shape();
+    let lookup = air_shape.lookup.expect("the relation uses lookup");
     for (name, value) in [
-        ("MAX_MESSAGE_WIDTH", u64::from(pvm_security::LOOKUP_SHAPE.max_message_width)),
-        (
-            "NUM_COMPOSED_CONSTRAINTS",
-            u64::from(pvm_security::AIR_SHAPE.num_composed_constraints),
-        ),
-        (
-            "MAX_CONSTRAINT_DEGREE",
-            u64::from(pvm_security::AIR_SHAPE.max_constraint_degree),
-        ),
+        ("MAX_MESSAGE_WIDTH", u64::from(lookup.max_message_width)),
+        ("NUM_COMPOSED_CONSTRAINTS", u64::from(air_shape.num_composed_constraints)),
+        ("MAX_CONSTRAINT_DEGREE", u64::from(air_shape.max_constraint_degree)),
         (
             "NUM_DEEP_TERMS",
-            u64::from(
-                pvm_security::AIR_SHAPE.num_deep_terms.expect("the PVM uses DEEP composition"),
-            ),
+            u64::from(air_shape.num_deep_terms.expect("the PVM uses DEEP composition")),
         ),
-        (
-            "LOOKUP_FRACTIONS_PER_ROW",
-            u64::from(pvm_security::LOOKUP_SHAPE.fractions_per_row),
-        ),
+        ("LOOKUP_FRACTIONS_PER_ROW", u64::from(lookup.fractions_per_row)),
         (
             "FIXED_BOUNDARY_LOOKUP_TERMS",
             u64::from(pvm_security::FIXED_BOUNDARY_LOOKUP_TERMS),

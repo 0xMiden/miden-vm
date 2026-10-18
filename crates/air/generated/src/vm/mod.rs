@@ -28,6 +28,9 @@ pub enum Air {
     And8Lookup,
 }
 
+include!("../../artifacts/vm-degrees.rs");
+include!("../../artifacts/vm-metadata.rs");
+
 impl Air {
     pub const CORE: Self = Self::Core;
     pub const CHIPLETS: Self = Self::Chiplets;
@@ -77,13 +80,13 @@ impl From<Air> for source::Air {
 
 impl BaseAir<Felt> for Air {
     fn width(&self) -> usize {
-        self.source().width()
+        self.metadata().widths.main
     }
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
         self.source().preprocessed_trace()
     }
     fn preprocessed_width(&self) -> usize {
-        self.source().preprocessed_width()
+        self.metadata().widths.preprocessed
     }
     fn num_public_values(&self) -> usize {
         self.source().num_public_values()
@@ -101,7 +104,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for Air {
         <source::Air as LiftedAir<Felt, EF>>::num_randomness(&self.source())
     }
     fn aux_width(&self) -> usize {
-        <source::Air as LiftedAir<Felt, EF>>::aux_width(&self.source())
+        self.metadata().widths.aux
     }
     fn num_aux_values(&self) -> usize {
         <source::Air as LiftedAir<Felt, EF>>::num_aux_values(&self.source())
@@ -132,7 +135,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for Air {
         )
     }
     fn constraint_degree(&self) -> ConstraintDegrees {
-        <source::Air as LiftedAir<Felt, EF>>::constraint_degree(&self.source())
+        self.degrees()
     }
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
@@ -224,3 +227,5 @@ impl<EF: ExtensionField<Felt>> MultiAirTrait<Felt, EF> for MultiAir {
 pub use crate::config;
 pub mod ace;
 pub mod artifacts;
+
+pub mod security;

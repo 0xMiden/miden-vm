@@ -1090,12 +1090,12 @@ pub fn security_masm_matches_air(root: &Path) -> Result<(), String> {
     }
 
     // The estimator omits four native security terms only while the MVM shape and the generic
-    // verifier's parameter ranges satisfy its documented bounds. `air_shape_matches_symbolic`
-    // checks the stored shape against the AIRs; the checks below fail if that shape leaves the
-    // estimator envelope. This function also pins the generic verifier bounds directly.
+    // verifier's parameter ranges satisfy its documented bounds. Independent metadata tests check
+    // production shape against symbolic AIRs; these checks fail if it leaves the estimator
+    // envelope. This function also pins the generic verifier bounds directly.
     let wrapper = read_file(root, RELATION_DIGEST_PATH).map_err(|e| e.to_string())?;
     let utils = read_file(root, GENERIC_UTILS_PATH).map_err(|e| e.to_string())?;
-    let air_shape = crate::vm::security::AIR_SHAPE;
+    let air_shape = crate::vm::security::derive_air_shape();
     let parsed = |name: &str| parse_masm_const::<u64>(&estimator, name, SECURITY_ESTIMATOR_PATH);
     let lookup = air_shape.lookup.expect("the MVM uses a lookup argument");
     let lookup_coefficient =
@@ -1141,29 +1141,18 @@ pub fn security_masm_matches_air(root: &Path) -> Result<(), String> {
 
     let descriptor_literals: [(&str, u64); 9] = [
         ("LOOKUP_POW_BITS", crate::vm::security::LOOKUP_POW_BITS as u64),
-        ("MAX_MESSAGE_WIDTH", crate::vm::security::LOOKUP_SHAPE.max_message_width as u64),
-        (
-            "NUM_COMPOSED_CONSTRAINTS",
-            crate::vm::security::AIR_SHAPE.num_composed_constraints as u64,
-        ),
-        (
-            "MAX_CONSTRAINT_DEGREE",
-            crate::vm::security::AIR_SHAPE.max_constraint_degree as u64,
-        ),
+        ("MAX_MESSAGE_WIDTH", lookup.max_message_width as u64),
+        ("NUM_COMPOSED_CONSTRAINTS", air_shape.num_composed_constraints as u64),
+        ("MAX_CONSTRAINT_DEGREE", air_shape.max_constraint_degree as u64),
         (
             "NUM_DEEP_TERMS",
-            crate::vm::security::AIR_SHAPE
-                .num_deep_terms
-                .expect("the MVM uses DEEP composition") as u64,
+            air_shape.num_deep_terms.expect("the MVM uses DEEP composition") as u64,
         ),
         (
             "CORE_BOUNDARY_LOOKUP_TERMS",
             crate::vm::security::CORE_BOUNDARY_LOOKUP_TERMS as u64,
         ),
-        (
-            "LOOKUP_FRACTIONS_PER_ROW",
-            crate::vm::security::LOOKUP_SHAPE.fractions_per_row as u64,
-        ),
+        ("LOOKUP_FRACTIONS_PER_ROW", lookup.fractions_per_row as u64),
         ("MAX_NUM_KERNEL_PROCEDURES", KernelDescriptor::MAX_NUM_PROCEDURES as u64),
         ("LOG_HEIGHT_MAX", estimator_heights),
     ];

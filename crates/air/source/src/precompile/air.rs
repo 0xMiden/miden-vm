@@ -321,6 +321,38 @@ impl MultiAirTrait<Felt, QuadFelt> for MultiAir {
 pub use Air as ChipletAir;
 pub use MultiAir as ChipletMultiAir;
 
+/// `LookupAir` is generic over its builder, so reading a shape means naming one; the choice does
+/// not affect the result, since the shapes are per-AIR constants.
+pub(crate) fn lookup_shape(air: Air) -> (usize, usize) {
+    use super::logup::{LookupAir, ProverLookupBuilder};
+    type ShapeBuilder<'a> = ProverLookupBuilder<'a, Felt, QuadFelt>;
+
+    fn shape_of<A>(air: A) -> (usize, usize)
+    where
+        A: for<'a> LookupAir<ShapeBuilder<'a>>,
+    {
+        (
+            LookupAir::<ShapeBuilder<'_>>::column_shape(&air).iter().sum(),
+            LookupAir::<ShapeBuilder<'_>>::max_message_width(&air),
+        )
+    }
+
+    match air {
+        Air::ChunkNodeSponge => shape_of(ChunkNodeSpongeAir),
+        Air::EidosCompression => shape_of(EidosCompressionAir),
+        Air::KeccakRound => shape_of(KeccakRoundAir),
+        Air::BytePairLut => shape_of(BytePairLutAir),
+        Air::TranscriptEval => shape_of(TranscriptEvalAir),
+        Air::UintStoreMul => shape_of(UintStoreMulAir),
+        Air::UintAdd => shape_of(UintAddAir),
+        Air::EcPointStoreGroups => shape_of(EcPointStoreGroupsAir),
+        Air::EcGroupAdd => shape_of(EcGroupAddAir),
+        Air::EcMsm => shape_of(EcMsmAir),
+        Air::Sha512 => shape_of(Sha512Air),
+        Air::Sha256 => shape_of(Sha256Air),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use miden_core::field::PrimeCharacteristicRing;

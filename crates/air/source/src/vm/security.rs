@@ -1,8 +1,8 @@
 //! Conjectured security level computation for the Miden VM STARK configuration.
 //!
-//! The AIR shape entering the security calculation is stored in [`AIR_SHAPE`], allowing the MASM
-//! estimator to use it without evaluating the AIRs symbolically. [`derive_air_shape`] performs
-//! that evaluation in Rust, and `air_shape_matches_symbolic` checks the stored value against it.
+//! Production wrappers in `miden-air` supply generated geometry to the shape-parameterized
+//! helpers here. [`derive_air_shape`] and [`num_deep_terms`] independently evaluate authored
+//! AIRs for host generation and symbolic validation; no production table feeds these oracles.
 
 use miden_core::{
     field::{BasedVectorSpace, QuadFelt},
@@ -32,29 +32,8 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 /// the rate.
 pub const COMMITMENT_ALIGNMENT: usize = config::SPONGE_RATE;
 
-/// Shape of the Miden VM multi-AIR statement used by the security estimator.
-///
-/// This is stored rather than derived during verification. `air_shape_matches_symbolic` checks it
-/// against the shape obtained by symbolically evaluating the AIRs.
-pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 631,
-    max_constraint_degree: 9,
-    num_quotient_chunks: 8,
-    max_combo: NUM_OOD_POINTS,
-    num_deep_terms: Some(282),
-    lookup: Some(LOOKUP_SHAPE),
-};
-
-/// Lookup argument shape of the Miden VM multi-AIR statement, as stored in [`AIR_SHAPE`].
-pub const LOOKUP_SHAPE: LookupShape = LookupShape {
-    fractions_per_row: 78,
-    max_message_width: 16,
-};
-
-/// Computes the AIR shape by symbolically evaluating every AIR in the statement.
-///
-/// Tests compare [`AIR_SHAPE`] with this result. The symbolic pass allocates and evaluates every
-/// AIR, so verifiers use the checked constant instead of calling this function.
+/// Independently compute the full canonical shape from authored schema and symbolic equations.
+/// This allocating oracle is for host generation and tests, not production verification.
 pub fn derive_air_shape() -> AirShape {
     let mut num_constraints = 0;
     let mut max_constraint_degree = 0;
@@ -87,21 +66,15 @@ pub fn derive_air_shape() -> AirShape {
     }
 }
 
-/// Number of DEEP-quotient batching terms for a commitment scheme with the given column
-/// alignment, holding every other AIR shape input fixed at [`AIR_SHAPE`]'s stored values.
-///
-/// Only the per-column padding is alignment-dependent, so this recomputes committed column counts
-/// from the AIRs' own width accessors — no symbolic constraint pass — reusing
-/// `AIR_SHAPE::max_constraint_degree` for the quotient group's chunk count. A native verifier
-/// computing the security level of a proof committed under a different LMCS (Blake3, alignment 1;
-/// Keccak, alignment 17) calls this instead of using the alignment-8 [`AIR_SHAPE`], which is fixed
-/// for the Eidos-only recursive verifier.
+/// Independent full-relation DEEP count from raw source widths and symbolic maximum degree.
+/// Production uses generated geometry; this allocating path remains an oracle for each alignment.
 pub fn num_deep_terms(alignment: usize) -> u32 {
     let mut num_columns = 0;
     for air in AIRS {
         num_columns += column_count(air, alignment);
     }
-    num_columns += quotient_column_count(AIR_SHAPE.max_constraint_degree as usize, alignment);
+    num_columns +=
+        quotient_column_count(derive_air_shape().max_constraint_degree as usize, alignment);
 
     num_columns as u32 + NUM_OOD_POINTS
 }
@@ -141,8 +114,7 @@ fn aligned(width: usize, alignment: usize) -> usize {
 //
 // The MASM recursive estimator consumes the raw AIR shape. Tests in
 // `crates/lib/core/tests/stark/security.rs` compare it with the native calculation over the ranges
-// accepted by the recursive verifiers. `derived_security_constants_match_snapshot` checks the
-// native constants independently.
+// accepted by the recursive verifiers. Fixed-point tests retain independent rounding references.
 
 /// Fractional bits in the fixed-point representation shared with the MASM estimator.
 pub const FIXED_POINT_FRACTIONAL_BITS: u32 = fixed::FRACTIONAL_BITS;
@@ -162,48 +134,8 @@ pub const COLLISION_RESISTANCE: u32 = HashFunction::Eidos.collision_resistance()
 /// Upper bound on every reported level, in fixed point.
 pub const SECURITY_CAP: u64 = deployed_instance(0).cap();
 
-/// Q16 upper bound on the log2 of the lookup round's error coefficient.
-pub const LOOKUP_COEFFICIENT: u64 = fixed::ceil_log2(
-    (LOOKUP_SHAPE.max_message_width as u64 + 2) * LOOKUP_SHAPE.fractions_per_row as u64,
-);
-
-/// Q16 upper bound on the log2 of the constraint-composition round's error coefficient.
-pub const COMPOSITION_COEFFICIENT: u64 =
-    fixed::ceil_log2(AIR_SHAPE.num_composed_constraints as u64);
-
-/// Q16 upper bound on the log2 of the out-of-domain round's error coefficient.
-///
-/// The round's error size is `max(d * (H + combo - 1) + (H - 1), (c + 1) * H + combo - 1)` for a
-/// trace height `H`, maximum constraint degree `d`, out-of-domain point count `combo`, and
-/// quotient chunk count `c <= d`. At `combo = 2` that is at most `(d + 1) * H + (d - 1)`, which
-/// `(d + 2) * H` bounds for every trace height at or above `d - 1`. Dividing out `H` leaves this
-/// height-independent coefficient, so `OOD_BASE - log_max_height` stays a lower bound on the
-/// round.
-pub const OOD_COEFFICIENT: u64 =
-    fixed::ceil_log2(AIR_SHAPE.max_constraint_degree as u64 + AIR_SHAPE.max_combo as u64);
-
-/// Q16 upper bound on the log2 of the DEEP round's error coefficient.
-pub const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(match AIR_SHAPE.num_deep_terms {
-    Some(n) => n as u64,
-    None => 0,
-});
-
 /// Q16 upper bound on the log2 of the FRI folding round's error coefficient.
 pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << config::LOG_FOLDING_ARITY) - 1));
-
-/// The Eidos challenge-support bound less the lookup round's coefficient, in fixed point.
-pub const LOOKUP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - LOOKUP_COEFFICIENT;
-
-/// The Eidos challenge-support bound less the constraint-composition round's coefficient, in
-/// fixed point.
-pub const COMPOSITION_TERM: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - COMPOSITION_COEFFICIENT;
-
-/// The Eidos challenge-support bound less the out-of-domain round's coefficient, in fixed
-/// point.
-pub const OOD_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - OOD_COEFFICIENT;
-
-/// The Eidos challenge-support bound less the DEEP round's coefficient, in fixed point.
-pub const DEEP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - DEEP_COEFFICIENT;
 
 /// The Eidos challenge-support bound less the FRI folding round's coefficient and fixed
 /// blowup, in fixed point.
@@ -232,14 +164,14 @@ pub const CORE_BOUNDARY_LOOKUP_TERMS: u32 = 3;
 
 /// Builds MVM security parameters from values obtained during proof verification.
 ///
-/// `log_max_height` and `alignment` must come from successful STARK verification,
+/// `log_max_height` and the supplied aligned `shape` must come from successful STARK verification,
 /// `num_kernel_procedures` from the authenticated execution claim, and `hash_fn`
 /// from the configuration used to verify the proof, including its challenger.
-pub fn proof_security_parameters(
+pub fn proof_security_parameters_with_shape(
     pcs_params: &PcsParams,
     log_max_height: u32,
     num_kernel_procedures: u32,
-    alignment: usize,
+    shape: AirShape,
     hash_fn: HashFunction,
 ) -> ProofSecurityParameters {
     mvm_security_parameters_from_protocol(
@@ -247,7 +179,7 @@ pub fn proof_security_parameters(
         u32::from(pcs_params.log_final_degree()),
         log_max_height,
         num_kernel_procedures,
-        alignment,
+        shape,
         hash_fn,
     )
 }
@@ -257,7 +189,7 @@ fn mvm_security_parameters_from_protocol(
     log_final_degree: u32,
     log_max_height: u32,
     num_kernel_procedures: u32,
-    alignment: usize,
+    shape: AirShape,
     hash_fn: HashFunction,
 ) -> ProofSecurityParameters {
     ProofSecurityParameters {
@@ -269,10 +201,7 @@ fn mvm_security_parameters_from_protocol(
             collision_resistance: hash_fn.collision_resistance(),
         },
         hash_fn,
-        air_shape: AirShape {
-            num_deep_terms: Some(num_deep_terms(alignment)),
-            ..AIR_SHAPE
-        },
+        air_shape: shape,
         num_ood_points: NUM_OOD_POINTS,
         num_lookup_boundary_terms: CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
     }
@@ -290,13 +219,14 @@ fn mvm_security_parameters_from_protocol(
 /// zero lookup grinding, log trace height in `6..=29`, and 0..=255 kernel procedures. This function
 /// also accepts configurations outside that domain; such inputs are not part of the recursive
 /// estimator's contract.
-pub fn conjectured_security_level(
+pub fn conjectured_security_level_with_shape(
     num_queries: u32,
     query_pow_bits: u32,
     deep_pow_bits: u32,
     folding_pow_bits: u32,
     log_max_height: u32,
     num_kernel_procedures: u32,
+    shape: AirShape,
 ) -> u32 {
     let protocol = ProtocolParams {
         log_blowup: config::LOG_BLOWUP as u32,
@@ -313,31 +243,21 @@ pub fn conjectured_security_level(
         u32::from(config::pcs_params().log_final_degree()),
         log_max_height,
         num_kernel_procedures,
-        COMMITMENT_ALIGNMENT,
+        shape,
         HashFunction::Eidos,
     )
     .conjectured_security_level()
 }
 
-/// Computes a deployed Miden VM proof's conjectured security level, in whole bits, for a proof
-/// committed under a commitment scheme with the given column alignment.
-///
-/// Every AIR shape input but `num_deep_terms` is alignment-independent, so this reuses
-/// [`AIR_SHAPE`] otherwise. Not mirrored in MASM: the recursive verifier accepts only Eidos
-/// proofs, which `conjectured_security_level` computes at alignment
-/// [`COMMITMENT_ALIGNMENT`] (and this function is identical at that alignment, since
-/// `num_deep_terms(COMMITMENT_ALIGNMENT)` equals `AIR_SHAPE.num_deep_terms` —
-/// `num_deep_terms_matches_the_pinned_alignment` checks it). The native verifier calls this for
-/// every hash function, including the non-algebraic ones the recursive verifier never sees, and
-/// supplies the hash configuration to select both the collision bound and the sampling support.
-pub fn conjectured_security_level_for_alignment(
+/// Compute the security level for the supplied aligned relation shape and verified hash choice.
+pub fn conjectured_security_level_for_alignment_with_shape(
     num_queries: u32,
     query_pow_bits: u32,
     deep_pow_bits: u32,
     folding_pow_bits: u32,
     log_max_height: u32,
     num_kernel_procedures: u32,
-    alignment: usize,
+    shape: AirShape,
     hash_fn: HashFunction,
 ) -> u32 {
     let protocol = ProtocolParams {
@@ -355,7 +275,7 @@ pub fn conjectured_security_level_for_alignment(
         u32::from(config::pcs_params().log_final_degree()),
         log_max_height,
         num_kernel_procedures,
-        alignment,
+        shape,
         hash_fn,
     )
     .conjectured_security_level()
@@ -369,21 +289,22 @@ pub fn conjectured_security_level_for_alignment(
 /// `hash_fn` selects the commitment collision bound and challenger sampling support.
 /// `num_kernel_procedures` is the proof's kernel procedure count, transcript-bound through the
 /// kernel witness.
-pub fn security_report(
+pub fn security_report_with_shape(
     params: &ProtocolParams,
     log_max_height: u32,
     hash_fn: HashFunction,
     num_kernel_procedures: u32,
+    shape: AirShape,
 ) -> SecurityReport {
     let instance = InstanceShape {
         log_max_height,
         field_bits: CHALLENGE_FIELD_BITS,
         collision_resistance: hash_fn.collision_resistance(),
     };
-    let report = security_report_with_hash(params, &instance, &AIR_SHAPE, hash_fn);
+    let report = security_report_with_hash(params, &instance, &shape, hash_fn);
     let correction = lookup_boundary_correction(
         CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
-        LOOKUP_SHAPE.fractions_per_row,
+        shape.lookup.expect("the relation uses lookup").fractions_per_row,
         log_max_height,
     );
     apply_lookup_correction(report, correction)
@@ -391,6 +312,44 @@ pub fn security_report(
 
 #[cfg(test)]
 mod tests {
+    fn shape(alignment: usize) -> AirShape {
+        AirShape {
+            num_deep_terms: Some(num_deep_terms(alignment)),
+            ..derive_air_shape()
+        }
+    }
+
+    fn proof_security_parameters(
+        pcs_params: &PcsParams,
+        log_max_height: u32,
+        num_kernel_procedures: u32,
+        alignment: usize,
+        hash_fn: HashFunction,
+    ) -> ProofSecurityParameters {
+        super::proof_security_parameters_with_shape(
+            pcs_params,
+            log_max_height,
+            num_kernel_procedures,
+            shape(alignment),
+            hash_fn,
+        )
+    }
+
+    fn security_report(
+        params: &ProtocolParams,
+        log_max_height: u32,
+        hash_fn: HashFunction,
+        num_kernel_procedures: u32,
+    ) -> SecurityReport {
+        super::security_report_with_shape(
+            params,
+            log_max_height,
+            hash_fn,
+            num_kernel_procedures,
+            shape(COMMITMENT_ALIGNMENT),
+        )
+    }
+
     use super::*;
 
     /// Power-of-two error coefficients make the root-counting bounds exact without using the
@@ -412,7 +371,7 @@ mod tests {
                 max_message_width: 6,
                 fractions_per_row: 128,
             }),
-            ..AIR_SHAPE
+            ..derive_air_shape()
         };
         let instance = deployed_instance(20);
         let report = security_report_with_hash(&params, &instance, &air, HashFunction::Eidos);
@@ -470,38 +429,20 @@ mod tests {
                 hash_fn.collision_resistance()
             );
             assert_eq!(
-                security_report_with_hash(&params, &parameters.instance_shape, &AIR_SHAPE, hash_fn),
+                security_report_with_hash(
+                    &params,
+                    &parameters.instance_shape,
+                    &derive_air_shape(),
+                    hash_fn
+                ),
                 p3_security::budget::security_report(
                     &params,
                     &parameters.instance_shape,
-                    &AIR_SHAPE
+                    &derive_air_shape()
                 ),
                 "full-field sampling changed for {hash_fn:?}"
             );
         }
-    }
-
-    /// Checks that [`AIR_SHAPE`] matches the current AIRs. A stale shape can make the reported
-    /// security level differ from the level implied by the relation being verified.
-    #[test]
-    fn air_shape_matches_symbolic() {
-        assert_eq!(AIR_SHAPE, derive_air_shape(), "AIR_SHAPE in security.rs is stale");
-    }
-
-    /// `num_deep_terms` at [`COMMITMENT_ALIGNMENT`] (algebraic sponges) must reproduce
-    /// [`AIR_SHAPE`]'s stored `num_deep_terms` exactly, so
-    /// `conjectured_security_level_for_alignment` computes the same level for an Eidos proof
-    /// as `conjectured_security_level`.
-    ///
-    /// The other two are the deployed non-algebraic configurations' actual alignments: Blake3's
-    /// `ChainingHasher` (1, no padding) and Keccak's `SerializingStatefulSponge` over its 17-word
-    /// rate (`lcm(8, 17·8)/8 = 17`).
-    #[test]
-    fn num_deep_terms_matches_the_pinned_alignment() {
-        assert_eq!(num_deep_terms(COMMITMENT_ALIGNMENT), AIR_SHAPE.num_deep_terms.unwrap());
-        assert_eq!(num_deep_terms(1), 274, "unexpected Blake3 (alignment 1) DEEP term count");
-        assert_eq!(num_deep_terms(8), 282, "unexpected algebraic (alignment 8) DEEP term count");
-        assert_eq!(num_deep_terms(17), 359, "unexpected Keccak (alignment 17) DEEP term count");
     }
 
     /// Parameters built for an MVM proof must reproduce the independent MVM security report.
@@ -552,36 +493,15 @@ mod tests {
         }
     }
 
-    /// Every derived Rust security constant, checked against a fixed numeric snapshot.
-    ///
-    /// This test does not read the MASM source; it checks that the Rust-side values below have not
-    /// silently drifted from the pinned snapshot.
+    /// Stable fixed-point representation and rounding references, independent of AIR facts.
     #[test]
-    fn derived_security_constants_match_snapshot() {
-        const FP_SHIFT: u32 = 16;
-        const FP_ONE: u64 = 65_536;
-        const BITS_PER_QUERY_FP: u64 = 193_381;
-        const SECURITY_CAP_FP: u64 = 8_257_536;
-        const LOOKUP_BASE_FP: u64 = 7_572_335;
-        const COMPOSITION_TERM_FP: u64 = 7_647_953;
-        const OOD_BASE_FP: u64 = 8_030_818;
-        const DEEP_BASE_FP: u64 = 7_724_102;
-        const FOLDING_BASE_FP: u64 = 7_891_519;
-        const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
-
-        assert_eq!(FIXED_POINT_FRACTIONAL_BITS, FP_SHIFT, "FP_SHIFT is stale");
-        assert_eq!(FIXED_POINT_ONE, FP_ONE, "FP_ONE is stale");
-        assert_eq!(BITS_PER_QUERY, BITS_PER_QUERY_FP, "BITS_PER_QUERY_FP is stale");
-        assert_eq!(SECURITY_CAP, SECURITY_CAP_FP, "SECURITY_CAP_FP is stale");
-        assert_eq!(LOOKUP_BASE, LOOKUP_BASE_FP, "LOOKUP_BASE_FP is stale");
-        assert_eq!(COMPOSITION_TERM, COMPOSITION_TERM_FP, "COMPOSITION_TERM_FP is stale");
-        assert_eq!(OOD_BASE, OOD_BASE_FP, "OOD_BASE_FP is stale");
-        assert_eq!(DEEP_BASE, DEEP_BASE_FP, "DEEP_BASE_FP is stale");
-        assert_eq!(FOLDING_BASE, FOLDING_BASE_FP, "FOLDING_BASE_FP is stale");
-        assert_eq!(
-            LOOKUP_POW_BITS, LOOKUP_POW_BITS_SNAPSHOT,
-            "Lifted STARK does not support lookup grinding"
-        );
+    fn fixed_point_constants_match_reference() {
+        assert_eq!(FIXED_POINT_FRACTIONAL_BITS, 16);
+        assert_eq!(FIXED_POINT_ONE, 65_536);
+        assert_eq!(BITS_PER_QUERY, 193_381);
+        assert_eq!(SECURITY_CAP, 8_257_536);
+        assert_eq!(FOLDING_BASE, 7_891_519);
+        assert_eq!(LOOKUP_POW_BITS, 0);
     }
 
     /// Checks every round against values computed independently from its documented formula.
@@ -674,7 +594,7 @@ mod tests {
 
     /// A proof with the maximum kernel witness reports a lower lookup-round bound than a bare one
     /// at the same height, since `emit_chiplets_boundary` adds one lookup fraction per kernel
-    /// procedure digest on top of the per-row bus terms `AIR_SHAPE` counts.
+    /// procedure digest on top of the per-row bus terms `derive_air_shape()` counts.
     #[test]
     fn lookup_boundary_correction_lowers_the_lookup_term_with_a_full_kernel_witness() {
         let lookup_bits = |report: SecurityReport| {

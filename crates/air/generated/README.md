@@ -24,6 +24,20 @@ size and UTF-8, wraps it in its module, and writes `OUT_DIR/vm_evaluator.rs` for
 Ordinary builds do not run AIR capture or optimization. The pure Rust decoder runs on the host
 when cross compiling and adds no target `std` requirement.
 
+Production VM/PVM `Air::degrees()` and `LiftedAir::constraint_degree()` read the small generated
+`artifacts/{vm,precompile}-degrees.rs` tables. They preserve separate base/extension symbolic
+degree multiples and do not run source evaluation. Independent tests compare every entry against
+fresh symbolic evaluation of the authored equations. Both regeneration commands include these
+tables; the artifact manifest records their hashes and sizes.
+
+`Air::metadata()` reads `artifacts/{vm,precompile}-metadata.rs`: raw column widths,
+base/extension constraint counts and lookup facts, with degrees supplied by `Air::degrees()`.
+`vm::geometry`/`precompile::geometry` derive committed widths, quotient layout and security
+shape from explicit nonempty AIR slices. Raw auxiliary widths are extension-valued; the distinct
+committed-width type uses base coordinates after separate matrix padding. Checked const
+arithmetic rejects overflow and invalid u32 shapes. Canonical security wrappers consume this
+geometry; source helpers retain authored policy and independent symbolic shape oracles.
+
 Canonical VM/PVM ACE circuits and their metadata also live in `artifacts/`; deliberately accepted
 protocol identities remain in `protocol/accepted.json`. Generated verifier MASM stays checked
 in under core-lib's existing `asm/sys/{vm,pvm}` paths for direct compiler consumption.

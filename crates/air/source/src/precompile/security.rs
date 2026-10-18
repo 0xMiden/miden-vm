@@ -5,8 +5,9 @@
 //! field. Their recursive verifiers both use Eidos. Native verification derives alignment and
 //! collision resistance from the commitment scheme used for each proof.
 //!
-//! [`AIR_SHAPE`] stores the relation shape used by the security calculation, while
-//! `air_shape_matches_symbolic` checks it against the shape obtained from the chiplet AIRs.
+//! Production wrappers in `miden-air` supply generated geometry to the shape-parameterized
+//! helpers here. [`derive_air_shape`] and [`num_deep_terms`] independently evaluate authored
+//! AIRs for host generation and symbolic validation; no production table feeds these oracles.
 
 use miden_core::{
     Felt,
@@ -26,17 +27,8 @@ pub use crate::vm::security::{
 use crate::{
     precompile::{
         ChipletAir,
-        ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
-        hash::{
-            chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir,
-            sha256::Sha256Air, sha512::Sha512Air,
-        },
-        logup::{LookupAir, ProverLookupBuilder},
-        primitives::byte_pair_lut::BytePairLutAir,
         relations::MAX_MESSAGE_WIDTH,
         stark_config::{LOG_BLOWUP, LOG_FOLDING_ARITY},
-        transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
-        uint::{add::UintAddAir, store_mul::UintStoreMulAir},
     },
     vm::security::{
         CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT,
@@ -52,28 +44,8 @@ const NUM_OOD_POINTS: u32 = 2;
 /// Base field elements per challenge-field element.
 const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 
-/// Shape of the chiplet multi-AIR statement used by the security estimator.
-///
-/// This stored value must equal the shape returned by [`derive_air_shape`].
-pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 857,
-    max_constraint_degree: 5,
-    num_quotient_chunks: 4,
-    max_combo: NUM_OOD_POINTS,
-    num_deep_terms: Some(914),
-    lookup: Some(LOOKUP_SHAPE),
-};
-
-/// Lookup argument shape of the chiplet multi-AIR statement, as stored in [`AIR_SHAPE`].
-pub const LOOKUP_SHAPE: LookupShape = LookupShape {
-    fractions_per_row: 291,
-    max_message_width: 18,
-};
-
-/// Computes the AIR shape by symbolically evaluating every chiplet AIR.
-///
-/// This allocating pass supports validation and tooling. [`security_report`] uses the stored
-/// [`AIR_SHAPE`] constant.
+/// Independently compute the full canonical shape from authored schema and symbolic equations.
+/// This allocating oracle is for host generation and tests, not production verification.
 pub fn derive_air_shape() -> AirShape {
     let airs = ChipletAir::all();
     let num_airs = airs.len();
@@ -88,7 +60,7 @@ pub fn derive_air_shape() -> AirShape {
         max_constraint_degree =
             max_constraint_degree.max(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air).max());
         num_columns += column_count(&air, COMMITMENT_ALIGNMENT);
-        fractions_per_row += fractions_per_row_of(air);
+        fractions_per_row += super::air::lookup_shape(air).0;
     }
     num_columns += quotient_column_count(max_constraint_degree, COMMITMENT_ALIGNMENT);
 
@@ -108,21 +80,15 @@ pub fn derive_air_shape() -> AirShape {
     }
 }
 
-/// Number of DEEP-quotient batching terms for a commitment scheme with the given column
-/// alignment, holding every other AIR shape input fixed at [`AIR_SHAPE`]'s stored values.
-///
-/// Only the per-column padding is alignment-dependent, so this recomputes committed column counts
-/// from the chiplet AIRs' own width accessors — no symbolic constraint pass — reusing
-/// [`AIR_SHAPE`]'s `max_constraint_degree` for the quotient group's chunk count. Native
-/// verification of a proof committed under a non-algebraic LMCS (Blake3, alignment 1; Keccak,
-/// alignment 17) calls this instead of using the alignment-[`COMMITMENT_ALIGNMENT`] [`AIR_SHAPE`]
-/// fixed for the default Eidos preset.
+/// Independent full-relation DEEP count from raw source widths and symbolic maximum degree.
+/// Production uses generated geometry; this allocating path remains an oracle for each alignment.
 pub fn num_deep_terms(alignment: usize) -> u32 {
     let mut num_columns = 0;
     for air in ChipletAir::all() {
         num_columns += column_count(&air, alignment);
     }
-    num_columns += quotient_column_count(AIR_SHAPE.max_constraint_degree as usize, alignment);
+    num_columns +=
+        quotient_column_count(derive_air_shape().max_constraint_degree as usize, alignment);
 
     num_columns as u32 + NUM_OOD_POINTS
 }
@@ -160,8 +126,7 @@ fn aligned(width: usize, alignment: usize) -> usize {
 //
 // The MASM recursive estimator consumes the raw AIR shape. Tests in
 // `crates/lib/core/tests/stark/security.rs` compare it with the native calculation over the ranges
-// accepted by the recursive verifiers. `derived_security_constants_match_snapshot` checks the
-// native constants independently.
+// accepted by the recursive verifiers. Fixed-point tests retain independent rounding references.
 
 /// Fractional bits in the fixed-point representation shared with the MASM estimator.
 pub const FIXED_POINT_FRACTIONAL_BITS: u32 = fixed::FRACTIONAL_BITS;
@@ -174,32 +139,6 @@ pub const BITS_PER_QUERY: u64 = fixed::bits_per_query(LOG_BLOWUP as u32, CHALLEN
 
 /// Upper bound on every reported level, in fixed point.
 pub const SECURITY_CAP: u64 = deployed_instance(0).cap();
-
-/// Q16 upper bound on the log2 of the lookup round's error coefficient.
-pub const LOOKUP_COEFFICIENT: u64 = fixed::ceil_log2(
-    (LOOKUP_SHAPE.max_message_width as u64 + 2) * LOOKUP_SHAPE.fractions_per_row as u64,
-);
-
-/// Q16 upper bound on the log2 of the constraint-composition round's error coefficient.
-pub const COMPOSITION_COEFFICIENT: u64 =
-    fixed::ceil_log2(AIR_SHAPE.num_composed_constraints as u64);
-
-/// Q16 upper bound on the log2 of the out-of-domain round's error coefficient.
-///
-/// The round's error size is `max(d * (H + combo - 1) + (H - 1), (c + 1) * H + combo - 1)` for a
-/// trace height `H`, maximum constraint degree `d`, out-of-domain point count `combo`, and
-/// quotient chunk count `c <= d`. At `combo = 2` that is at most `(d + 1) * H + (d - 1)`, which
-/// `(d + 2) * H` bounds for every trace height at or above `d - 1`. Dividing out `H` leaves this
-/// height-independent coefficient, so `OOD_BASE - log_max_height` stays a lower bound on the
-/// round.
-pub const OOD_COEFFICIENT: u64 =
-    fixed::ceil_log2(AIR_SHAPE.max_constraint_degree as u64 + AIR_SHAPE.max_combo as u64);
-
-/// Q16 upper bound on the log2 of the DEEP round's error coefficient.
-pub const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(match AIR_SHAPE.num_deep_terms {
-    Some(n) => n as u64,
-    None => 0,
-});
 
 /// Q16 upper bound on the log2 of the FRI folding round's error coefficient.
 pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << LOG_FOLDING_ARITY) - 1));
@@ -216,20 +155,6 @@ pub const LOOKUP_POW_BITS: u32 = 0;
 /// `fixed_boundary_fraction_count` derives this value from the fixed messages; the descriptor
 /// constant must equal the derived count.
 pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 19;
-
-/// The Eidos challenge-support bound less the lookup round's coefficient, in fixed point.
-pub const LOOKUP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - LOOKUP_COEFFICIENT;
-
-/// The Eidos challenge-support bound less the constraint-composition round's coefficient, in
-/// fixed point.
-pub const COMPOSITION_TERM: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - COMPOSITION_COEFFICIENT;
-
-/// The Eidos challenge-support bound less the out-of-domain round's coefficient, in fixed
-/// point.
-pub const OOD_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - OOD_COEFFICIENT;
-
-/// The Eidos challenge-support bound less the DEEP round's coefficient, in fixed point.
-pub const DEEP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - DEEP_COEFFICIENT;
 
 /// The Eidos challenge-support bound less the FRI folding round's coefficient and fixed
 /// blowup, in fixed point.
@@ -251,40 +176,10 @@ const fn deployed_instance(log_max_height: u32) -> InstanceShape {
     }
 }
 
-/// Lookup fractions one chiplet emits per row, summed over its auxiliary lookup columns.
-///
-/// `LookupAir` is generic over its builder, so reading a shape means naming one; the choice does
-/// not affect the result, since the shapes are per-AIR constants.
-fn fractions_per_row_of(air: ChipletAir) -> usize {
-    type ShapeBuilder<'a> = ProverLookupBuilder<'a, Felt, QuadFelt>;
-
-    fn shape_of<A>(air: A) -> usize
-    where
-        A: for<'a> LookupAir<ShapeBuilder<'a>>,
-    {
-        LookupAir::<ShapeBuilder<'_>>::column_shape(&air).iter().sum()
-    }
-
-    match air {
-        ChipletAir::ChunkNodeSponge => shape_of(ChunkNodeSpongeAir),
-        ChipletAir::EidosCompression => shape_of(EidosCompressionAir),
-        ChipletAir::KeccakRound => shape_of(KeccakRoundAir),
-        ChipletAir::BytePairLut => shape_of(BytePairLutAir),
-        ChipletAir::TranscriptEval => shape_of(TranscriptEvalAir),
-        ChipletAir::UintStoreMul => shape_of(UintStoreMulAir),
-        ChipletAir::UintAdd => shape_of(UintAddAir),
-        ChipletAir::EcPointStoreGroups => shape_of(EcPointStoreGroupsAir),
-        ChipletAir::EcGroupAdd => shape_of(EcGroupAddAir),
-        ChipletAir::EcMsm => shape_of(EcMsmAir),
-        ChipletAir::Sha512 => shape_of(Sha512Air),
-        ChipletAir::Sha256 => shape_of(Sha256Air),
-    }
-}
-
 /// Counts the lookup fractions added at the PVM boundary by fixed protocol data: one
 /// `UintVal` fraction per fixed uint ([`crate::precompile::fixed::fixed_uintval_msgs`]) and one
 /// `EcGroup` fraction per fixed curve group ([`crate::precompile::fixed::fixed_ecgroup_msgs`]).
-/// These are additional to the per-row fractions recorded in [`AIR_SHAPE`].
+/// These are additional to the per-row fractions recorded in [`derive_air_shape`].
 fn fixed_boundary_fraction_count() -> u64 {
     (crate::precompile::fixed::fixed_uintval_msgs().count()
         + crate::precompile::fixed::fixed_ecgroup_msgs().count()) as u64
@@ -296,19 +191,21 @@ fn fixed_boundary_fraction_count() -> u64 {
 /// The generic lookup bound counts `fractions_per_row * 2^log_max_height` terms. The PVM boundary
 /// also adds one lookup fraction for every fixed `UintVal` and `EcGroup` message, for a total
 /// of [`fixed_boundary_fraction_count`] additional terms per proof. These terms are not included
-/// in [`AIR_SHAPE`]'s per-row count, so their contribution is accounted for separately. Both
+/// in [`derive_air_shape`]'s per-row count, so their contribution is accounted for separately. Both
 /// divisions round up, which keeps the correction conservative.
-fn fixed_boundary_correction(log_max_height: u32) -> u64 {
+fn fixed_boundary_correction(log_max_height: u32, fractions_per_row: u32) -> u64 {
     let numerator = fixed_boundary_fraction_count() * LOG2_E;
-    numerator
-        .div_ceil(LOOKUP_SHAPE.fractions_per_row as u64)
-        .div_ceil(1u64 << log_max_height)
+    numerator.div_ceil(fractions_per_row as u64).div_ceil(1u64 << log_max_height)
 }
 
 /// Applies the contribution from the fixed `UintVal` and `EcGroup` boundary messages to the lookup
 /// term.
-fn apply_fixed_boundary_correction(report: SecurityReport, log_max_height: u32) -> SecurityReport {
-    let correction = fixed_boundary_correction(log_max_height);
+fn apply_fixed_boundary_correction(
+    report: SecurityReport,
+    log_max_height: u32,
+    fractions_per_row: u32,
+) -> SecurityReport {
+    let correction = fixed_boundary_correction(log_max_height, fractions_per_row);
     let terms = (*report.terms()).map(|term| {
         if term.label == LOOKUP_LABEL {
             SecurityTerm::new(term.label, term.bits.saturating_sub(correction))
@@ -337,12 +234,12 @@ pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
 
 /// Builds PVM security parameters from values obtained during proof verification.
 ///
-/// `log_max_height` and `alignment` must come from successful STARK verification, and
+/// `log_max_height` and the supplied aligned `shape` must come from successful STARK verification, and
 /// `hash_fn` from the configuration used to verify the proof, including its challenger.
-pub fn proof_security_parameters(
+pub fn proof_security_parameters_with_shape(
     pcs_params: &PcsParams,
     log_max_height: u32,
-    alignment: usize,
+    shape: AirShape,
     hash_fn: HashFunction,
 ) -> ProofSecurityParameters {
     ProofSecurityParameters {
@@ -354,10 +251,7 @@ pub fn proof_security_parameters(
             collision_resistance: hash_fn.collision_resistance(),
         },
         hash_fn,
-        air_shape: AirShape {
-            num_deep_terms: Some(num_deep_terms(alignment)),
-            ..AIR_SHAPE
-        },
+        air_shape: shape,
         num_ood_points: NUM_OOD_POINTS,
         num_lookup_boundary_terms: FIXED_BOUNDARY_LOOKUP_TERMS,
     }
@@ -373,49 +267,72 @@ pub fn proof_security_parameters(
 /// fixed zero lookup grinding, and a maximum log trace height in `16..=29`. This native function
 /// also accepts configurations outside that domain; such inputs are not part of the recursive
 /// estimator's contract.
-pub fn security_report(params: &ProtocolParams, log_max_height: u32) -> SecurityReport {
+pub fn security_report_with_shape(
+    params: &ProtocolParams,
+    log_max_height: u32,
+    shape: AirShape,
+) -> SecurityReport {
     let instance = deployed_instance(log_max_height);
-    let report = security_report_with_hash(params, &instance, &AIR_SHAPE, HashFunction::Eidos);
-    apply_fixed_boundary_correction(report, log_max_height)
+    let report = security_report_with_hash(params, &instance, &shape, HashFunction::Eidos);
+    apply_fixed_boundary_correction(
+        report,
+        log_max_height,
+        shape.lookup.expect("the relation uses lookup").fractions_per_row,
+    )
 }
 
 /// Computes an Eidos chiplet-stack proof's conjectured security level, in bits.
-pub fn conjectured_security_level(params: &PcsParams, log_max_height: u32) -> u32 {
-    proof_security_parameters(params, log_max_height, COMMITMENT_ALIGNMENT, HashFunction::Eidos)
+pub fn conjectured_security_level_with_shape(
+    params: &PcsParams,
+    log_max_height: u32,
+    shape: AirShape,
+) -> u32 {
+    proof_security_parameters_with_shape(params, log_max_height, shape, HashFunction::Eidos)
         .conjectured_security_level()
 }
 
-/// Computes a chiplet-stack proof's conjectured security level, in bits, for a proof committed
-/// under a commitment scheme with the given column alignment.
-///
-/// Every AIR shape input but `num_deep_terms` is alignment-independent, so this reuses
-/// [`AIR_SHAPE`] otherwise. [`conjectured_security_level`] is exact only at the Eidos preset's
-/// alignment [`COMMITMENT_ALIGNMENT`]; verification calls this instead for every hash function, so
-/// a proof committed under a different LMCS (Blake3, alignment 1; Keccak, alignment 17) is graded
-/// under its own DEEP term count and collision-resistance cap rather than the Eidos ones.
-pub fn conjectured_security_level_for_alignment(
+/// Compute the security level for the supplied aligned relation shape and verified hash choice.
+pub fn conjectured_security_level_for_alignment_with_shape(
     params: &PcsParams,
     log_max_height: u32,
-    alignment: usize,
+    shape: AirShape,
     hash_fn: HashFunction,
 ) -> u32 {
-    proof_security_parameters(params, log_max_height, alignment, hash_fn)
+    proof_security_parameters_with_shape(params, log_max_height, shape, hash_fn)
         .conjectured_security_level()
 }
 
 #[cfg(test)]
 mod tests {
+    fn shape(alignment: usize) -> AirShape {
+        AirShape {
+            num_deep_terms: Some(num_deep_terms(alignment)),
+            ..derive_air_shape()
+        }
+    }
+
+    fn proof_security_parameters(
+        pcs_params: &PcsParams,
+        log_max_height: u32,
+        alignment: usize,
+        hash_fn: HashFunction,
+    ) -> ProofSecurityParameters {
+        super::proof_security_parameters_with_shape(
+            pcs_params,
+            log_max_height,
+            shape(alignment),
+            hash_fn,
+        )
+    }
+
+    fn security_report(params: &ProtocolParams, log_max_height: u32) -> SecurityReport {
+        super::security_report_with_shape(params, log_max_height, shape(COMMITMENT_ALIGNMENT))
+    }
+
     use p3_security::budget::report::QUERY_LABEL;
 
     use super::*;
     use crate::precompile::stark_config::precompile_pcs_params;
-
-    /// Checks that [`AIR_SHAPE`] matches the current chiplet AIRs. A stale shape can make the
-    /// reported security level differ from the level implied by the relation being verified.
-    #[test]
-    fn air_shape_matches_symbolic() {
-        assert_eq!(AIR_SHAPE, derive_air_shape(), "AIR_SHAPE in security.rs is stale");
-    }
 
     /// Checks that the descriptor's fixed boundary count matches the number of fixed `UintVal` and
     /// `EcGroup` messages.
@@ -428,43 +345,15 @@ mod tests {
         );
     }
 
-    /// Every derived Rust security constant, checked against a fixed numeric snapshot.
-    ///
-    /// The recursive estimator consumes the raw PVM shape rather than mirroring these Q16 values.
+    /// Stable fixed-point representation and rounding references, independent of AIR facts.
     #[test]
-    fn derived_security_constants_match_snapshot() {
-        const FP_SHIFT: u32 = 16;
-        const FP_ONE: u64 = 65_536;
-        const BITS_PER_QUERY_FP: u64 = 193_381;
-        const SECURITY_CAP_FP: u64 = 8_257_536;
-        const LOOKUP_BASE_FP: u64 = 7_437_890;
-        const COMPOSITION_TERM_FP: u64 = 7_619_008;
-        const OOD_BASE_FP: u64 = 8_073_553;
-        const DEEP_BASE_FP: u64 = 7_612_920;
-        const FOLDING_BASE_FP: u64 = 7_891_519;
-        const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
-
-        assert_eq!(FIXED_POINT_FRACTIONAL_BITS, FP_SHIFT, "FP_SHIFT is stale");
-        assert_eq!(FIXED_POINT_ONE, FP_ONE, "FP_ONE is stale");
-        assert_eq!(BITS_PER_QUERY, BITS_PER_QUERY_FP, "BITS_PER_QUERY_FP is stale");
-        assert_eq!(SECURITY_CAP, SECURITY_CAP_FP, "SECURITY_CAP_FP is stale");
-        assert_eq!(LOOKUP_BASE, LOOKUP_BASE_FP, "LOOKUP_BASE_FP is stale");
-        assert_eq!(COMPOSITION_TERM, COMPOSITION_TERM_FP, "COMPOSITION_TERM_FP is stale");
-        assert_eq!(OOD_BASE, OOD_BASE_FP, "OOD_BASE_FP is stale");
-        assert_eq!(DEEP_BASE, DEEP_BASE_FP, "DEEP_BASE_FP is stale");
-        assert_eq!(FOLDING_BASE, FOLDING_BASE_FP, "FOLDING_BASE_FP is stale");
-        assert_eq!(
-            LOOKUP_POW_BITS, LOOKUP_POW_BITS_SNAPSHOT,
-            "Lifted STARK does not support lookup grinding"
-        );
-    }
-
-    /// [`num_deep_terms`] at [`COMMITMENT_ALIGNMENT`] must reproduce [`AIR_SHAPE`]'s stored
-    /// `num_deep_terms` exactly, so [`conjectured_security_level_for_alignment`] computes the same
-    /// level for an Eidos proof as [`conjectured_security_level`].
-    #[test]
-    fn num_deep_terms_matches_the_reference_alignment() {
-        assert_eq!(num_deep_terms(COMMITMENT_ALIGNMENT), AIR_SHAPE.num_deep_terms.unwrap());
+    fn fixed_point_constants_match_reference() {
+        assert_eq!(FIXED_POINT_FRACTIONAL_BITS, 16);
+        assert_eq!(FIXED_POINT_ONE, 65_536);
+        assert_eq!(BITS_PER_QUERY, 193_381);
+        assert_eq!(SECURITY_CAP, 8_257_536);
+        assert_eq!(FOLDING_BASE, 7_891_519);
+        assert_eq!(LOOKUP_POW_BITS, 0);
     }
 
     /// Parameters built for a PVM proof must reproduce the independent PVM security report.

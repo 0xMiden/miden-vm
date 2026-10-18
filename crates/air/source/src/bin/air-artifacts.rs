@@ -5,7 +5,10 @@
 
 use std::{env, fs, path::PathBuf, process::ExitCode};
 
-use miden_air_source::{codegen::evaluator, precompile, vm};
+use miden_air_source::{
+    codegen::{degrees, evaluator, metadata},
+    precompile, vm,
+};
 use miden_core::Felt;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -152,6 +155,24 @@ fn run() -> Result<(), String> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
+    let mut degree_tables = Vec::new();
+    for (file, source) in degrees::generate() {
+        let sha256: String = Sha256::digest(source.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        degree_tables.push(json!({ "file": file, "bytes": source.len(), "sha256": sha256 }));
+        artifacts.push((file, source.into_bytes()));
+    }
+    let mut metadata_tables = Vec::new();
+    for (file, source) in metadata::generate() {
+        let sha256: String = Sha256::digest(source.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        metadata_tables.push(json!({ "file": file, "bytes": source.len(), "sha256": sha256 }));
+        artifacts.push((file, source.into_bytes()));
+    }
     let manifest = json!({
         "artifact_schema": 1, "baseline": baseline,
         "field": "canonical Miden Felt, little-endian u64", "members": members,
@@ -161,6 +182,8 @@ fn run() -> Result<(), String> {
         "rust_evaluator_sha256": evaluator_sha256,
         "rust_evaluator_source_bytes": evaluator_source.len(),
         "rust_evaluator_source_sha256": evaluator_source_sha256,
+        "constraint_degree_tables": degree_tables,
+        "air_metadata_tables": metadata_tables,
         "pvm_evaluation": "authored dispatch delegated through independent production type",
     });
     artifacts.push((evaluator::ARTIFACT_FILE, evaluator_bytes));

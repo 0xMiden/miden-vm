@@ -826,14 +826,6 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for Air {
         (aux_trace, committed)
     }
 
-    fn constraint_degree(&self) -> ConstraintDegrees {
-        match self {
-            Self::Core | Self::Chiplets => ConstraintDegrees { base: 9, ext: 9 },
-            Self::EidosCompression => ConstraintDegrees { base: 3, ext: 3 },
-            Self::And8Lookup => ConstraintDegrees { base: 0, ext: 3 },
-        }
-    }
-
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
             Self::Core => CoreAir.eval(builder),
@@ -1181,17 +1173,6 @@ mod tests {
 
     use super::*;
 
-    /// Guards the static `constraint_degree` override: if an AIR change moves the symbolic
-    /// degree away from the declared value, the override must be updated.
-    #[test]
-    fn constraint_degree_override_matches_symbolic() {
-        for air in AIRS {
-            let symbolic = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air);
-            let declared = <Air as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air);
-            assert_eq!(declared, symbolic, "static constraint_degree override is stale");
-        }
-    }
-
     #[test]
     fn core_shape_and_degree_match_design() {
         let air = Air::CORE;
@@ -1201,11 +1182,6 @@ mod tests {
         assert_eq!(constraints::columns::NUM_DECODER_COLS, 23);
         assert_eq!(LiftedAir::<Felt, QuadFelt>::aux_width(&air), 4);
         assert_eq!(symbolic, ConstraintDegrees { base: 9, ext: 9 });
-        assert_eq!(
-            LiftedAir::<Felt, QuadFelt>::constraint_degree(&air),
-            symbolic,
-            "Core's declared degree must match its handwritten constraints",
-        );
         assert_eq!(miden_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 3);
     }
 

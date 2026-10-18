@@ -2,7 +2,7 @@
 
 use std::{env, path::PathBuf, process::ExitCode};
 
-use miden_air_source::codegen::{Mode, constraints, evaluator, precompile};
+use miden_air_source::codegen::{self, Mode, constraints, precompile};
 
 fn run() -> Result<(), String> {
     let mut args = env::args().skip(1);
@@ -19,12 +19,7 @@ fn run() -> Result<(), String> {
             other => return Err(format!("unknown option: {other}")),
         }
     }
-    evaluator::run(
-        &workspace.join("crates/air/generated/artifacts").join(evaluator::ARTIFACT_FILE),
-        mode,
-    )?;
-    constraints::run(&workspace, mode)?;
-    precompile::run(&workspace, mode)?;
+    codegen::run(&workspace, mode)?;
     if derive_setup {
         constraints::check_setup(&workspace)?;
         precompile::check_setup(&workspace)?;

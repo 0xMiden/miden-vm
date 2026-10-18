@@ -5,6 +5,8 @@ extern crate alloc;
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
+pub mod metadata;
+
 /// Authored precompile equations, schema, fixed data, and statement semantics.
 pub mod precompile;
 /// Authored VM equations, schema, fixed data, and statement semantics.

@@ -1,6 +1,52 @@
 //! Analyses over the constraint graph.
 
-use super::graph::{Class, Graph, Node, OpKind};
+use alloc::vec::Vec;
+
+use super::{
+    CapturedConstraints,
+    graph::{Class, Graph, Leaf, Node, OpKind},
+};
+use crate::air::ConstraintDegrees;
+
+/// Raw symbolic degree multiples for one captured AIR, split by assertion class.
+///
+/// Matches `ConstraintDegrees::from_air`: trace columns, periodic values and first/last
+/// selectors have degree 1; transition selectors, public inputs, challenges and boundary
+/// values have degree 0. Lifting a base expression preserves its degree. An empty class
+/// has degree 0. This is not the trace-size-aware quotient bound and does not apply an
+/// AIR's advisory degree hint.
+pub fn constraint_degrees(graph: &Graph, constraints: &CapturedConstraints) -> ConstraintDegrees {
+    let mut degrees: Vec<usize> = Vec::with_capacity(graph.len());
+    for (_, node) in graph.iter() {
+        let degree = match node {
+            Node::Leaf(
+                Leaf::Preprocessed { .. }
+                | Leaf::Main { .. }
+                | Leaf::Periodic(_)
+                | Leaf::IsFirst
+                | Leaf::IsLast
+                | Leaf::Aux { .. },
+            ) => 1,
+            Node::Leaf(Leaf::ExtBase(inner)) => degrees[inner.index()],
+            Node::Leaf(_) => 0,
+            Node::Op { op, x, y, .. } => {
+                let x = degrees[x.index()];
+                match op {
+                    OpKind::Neg => x,
+                    OpKind::Add | OpKind::Sub => x.max(degrees[y.unwrap().index()]),
+                    OpKind::Mul => x
+                        .checked_add(degrees[y.unwrap().index()])
+                        .expect("captured constraint degree overflow"),
+                }
+            },
+        };
+        degrees.push(degree);
+    }
+    ConstraintDegrees {
+        base: constraints.base_roots.iter().map(|id| degrees[id.index()]).max().unwrap_or(0),
+        ext: constraints.ext_roots.iter().map(|id| degrees[id.index()]).max().unwrap_or(0),
+    }
+}
 
 /// Field-operation counts, split by kind.
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
