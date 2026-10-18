@@ -19,6 +19,7 @@ use common::{SEEDS, canonical_ids, eval_graph};
 use miden_air::precompiles::ChipletAir;
 use miden_constraint_compiler::ir::{Graph, NodeId, capture, capture_into};
 use miden_core::{Felt, field::QuadFelt};
+use miden_constraint_compiler::testing::assert_concrete_evaluation;
 
 #[test]
 fn generated_evaluators_match_handwritten_structurally() {
@@ -71,6 +72,8 @@ fn generated_evaluators_match_handwritten_values() {
         assert_eq!(hand.ext_global_indices, generated.ext_global_indices);
 
         for seed in SEEDS {
+            assert_concrete_evaluation(&air, &hand_graph, &hand, seed);
+            assert_concrete_evaluation(&air.definition(), &hand_graph, &hand, seed);
             let hand_values = eval_graph(&hand_graph, seed);
             let gen_values = eval_graph(&gen_graph, seed);
             // (handwritten root, generated root) with its global constraint
@@ -101,6 +104,31 @@ fn generated_degrees_match_handwritten() {
         assert_eq!(
             <ChipletAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air),
             ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air.definition())
+        );
+    }
+}
+
+/// Reusable arithmetic-only comparison; run with `--release --ignored --nocapture`.
+#[test]
+#[ignore = "manual evaluator timing; use release mode"]
+fn evaluator_timing() {
+    let iterations = std::env::var("MIDEN_EVAL_ITERATIONS")
+        .map(|value| value.parse::<usize>().expect("positive iteration count"))
+        .unwrap_or(256);
+    assert!(iterations > 0);
+    for air in ChipletAir::all() {
+        let handwritten = miden_constraint_compiler::testing::time_evaluation(
+            &air.definition(),
+            iterations,
+        );
+        let generated = miden_constraint_compiler::testing::time_evaluation(&air, iterations);
+        std::eprintln!(
+            "{}: {iterations} evaluations, handwritten scalar={:?} packed={:?}, generated scalar={:?} packed={:?}",
+            air.definition().file_token(),
+            handwritten[0],
+            handwritten[1],
+            generated[0],
+            generated[1],
         );
     }
 }
