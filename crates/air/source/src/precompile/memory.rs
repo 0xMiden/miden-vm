@@ -9,8 +9,8 @@
 //! BytePairLut preprocessed bundle. That bundle retains its raw `2^16`-row trace, its
 //! blowup-factor LDE, its LMCS digest tree, and the same transient per-leaf hashing buffer for
 //! its own one-time construction. The estimate covers one proof and the preprocessed bundle for
-//! its selected hash configuration. It excludes bundles cached for other hash configurations and
-//! concurrent proofs.
+//! its selected hash configuration; AIR variants share this bundle. It excludes bundles cached
+//! for other hash configurations and concurrent proofs.
 //! Smaller or transient allocations — FRI folding layers, the DEEP composition polynomial,
 //! per-chiplet scratch buffers, allocator slack, rayon scratch, the live session — are covered
 //! instead by [`SAFETY_NUMERATOR`] / [`SAFETY_DENOMINATOR`], a documented guess rather than a
@@ -28,6 +28,7 @@ use miden_stark::{
 };
 
 use crate::precompile::{
+    PvmAirVariant,
     air::{ChipletAir, NUM_CHIPLETS},
     primitives::byte_pair_lut::TRACE_HEIGHT,
 };
@@ -89,6 +90,17 @@ pub fn prover_peak_bytes(
     params: &PcsParams,
     hash_fn: HashFunction,
 ) -> Option<u64> {
+    prover_peak_bytes_for(heights, params, hash_fn, PvmAirVariant::ALL)
+}
+
+/// Peak prover memory for selected AIRs, using heights in [`ChipletAir::all`] order.
+/// Heights of omitted AIRs are ignored.
+pub fn prover_peak_bytes_for(
+    heights: &[usize; NUM_CHIPLETS],
+    params: &PcsParams,
+    hash_fn: HashFunction,
+    variant: PvmAirVariant,
+) -> Option<u64> {
     let blowup = 1u64.checked_shl(u32::from(params.log_blowup()))?;
     let one_plus_blowup = blowup.checked_add(1)?;
     // `tree_bytes`/`preprocessed_tree_bytes` already bound the persisted digest tree, leaf layer
@@ -121,6 +133,9 @@ pub fn prover_peak_bytes(
     let mut max_quotient_degree: u64 = 0;
 
     for (air, &height) in ChipletAir::all().iter().zip(heights.iter()) {
+        if !air.is_in_variant(variant) {
+            continue;
+        }
         let height = u64::try_from(height).ok()?;
         let width = u64::try_from(air.width()).ok()?;
         let aux_width =

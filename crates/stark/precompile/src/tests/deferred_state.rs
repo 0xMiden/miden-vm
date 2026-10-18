@@ -535,18 +535,21 @@ fn prove_precompiles_with_budget_corner_cases() {
     let exact_peak = memory::prover_peak_bytes(&heights, &params, HashFunction::Blake3_256)
         .expect("modelled peak fits in u64");
 
+    // This independent model uses ALL heights; explicitly select ALL for the matching proof.
     // At the exact peak, the budget check passes and the state proves.
-    prove_precompiles_with_budget(
+    crate::prove_precompiles_with_variant_and_budget(
         vec![synthetic.state.witness()],
         HashFunction::Blake3_256,
+        miden_core::deferred::PvmAirVariant::ALL,
         exact_peak,
     )
     .expect("budget equal to the exact modelled peak must succeed");
 
     // One byte under the exact peak, the budget check must fail with the typed error.
-    let err = prove_precompiles_with_budget(
+    let err = crate::prove_precompiles_with_variant_and_budget(
         vec![synthetic.state.witness()],
         HashFunction::Blake3_256,
+        miden_core::deferred::PvmAirVariant::ALL,
         exact_peak - 1,
     )
     .expect_err("budget one byte under the exact modelled peak must fail");

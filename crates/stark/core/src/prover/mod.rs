@@ -364,7 +364,7 @@ where
                         "AIR requested more aux randomness than the shared challenge pool contains",
                     );
                     let preprocessed_trace =
-                        preprocessed_traces.and_then(|traces| traces[air_index].as_ref());
+                        preprocessed_traces.and_then(|traces| traces[air_index].as_deref());
                     let (trace, values) = air.build_aux_trace_with_preprocessed(
                         main,
                         preprocessed_trace,

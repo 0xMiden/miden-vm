@@ -9,3 +9,10 @@ pub const PVM_RELATION_DIGEST: [u64; 4] = [
     9110857118546866548,
     100418585322354598,
 ];
+
+include!("../../artifacts/precompile-variants.rs");
+
+/// Returns the identity of the exact selected canonical relation.
+pub fn relation_digest(variant: super::PvmAirVariant) -> super::stark_config::RelationDigest {
+    PVM_VARIANT_RELATION_DIGESTS[variant.as_u8() as usize].map(miden_core::Felt::new_unchecked)
+}

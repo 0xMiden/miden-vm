@@ -47,7 +47,13 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 /// Independently compute the full canonical shape from authored schema and symbolic equations.
 /// This allocating oracle is for host generation and tests, not production verification.
 pub fn derive_air_shape() -> AirShape {
-    let airs = ChipletAir::all();
+    derive_air_shape_for(super::PvmAirVariant::ALL)
+}
+
+/// Independently captures the geometry of the selected authored relation.
+pub fn derive_air_shape_for(variant: super::PvmAirVariant) -> AirShape {
+    let airs: alloc::vec::Vec<_> =
+        ChipletAir::all().into_iter().filter(|air| air.is_in_variant(variant)).collect();
     let num_airs = airs.len();
 
     let mut num_constraints = 0;

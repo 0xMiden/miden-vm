@@ -12,7 +12,8 @@
 use miden_ace::{AceCircuit, AceConfig, LayoutKind, build_canonical_multi_air_ace_circuit};
 use miden_core::{Felt, field::QuadFelt};
 
-use super::Air;
+use super::{Air, PvmAirVariant};
+use alloc::vec::Vec;
 
 // MULTI-AIR ACE CIRCUIT
 // ================================================================================================
@@ -25,8 +26,8 @@ const LMCS_ALIGNMENT: usize = 8;
 ///
 /// The lifted STARK verifier derives this quantity symbolically from the AIRs. Deriving it through
 /// the same implementation keeps the ACE circuit's READ layout coupled to the proof protocol.
-fn num_quotient_chunks() -> usize {
-    let max_log_quotient_degree = Air::all()
+fn num_quotient_chunks(airs: &[Air]) -> usize {
+    let max_log_quotient_degree = airs
         .iter()
         .map(miden_stark::log_quotient_degree::<Felt, QuadFelt, Air>)
         .max()
@@ -35,9 +36,9 @@ fn num_quotient_chunks() -> usize {
 }
 
 /// ACE codegen settings for the precompile chiplet relation.
-fn precompile_ace_config() -> AceConfig {
+fn precompile_ace_config(airs: &[Air]) -> AceConfig {
     AceConfig {
-        num_quotient_chunks: num_quotient_chunks(),
+        num_quotient_chunks: num_quotient_chunks(airs),
         layout: LayoutKind::Masm,
     }
 }
@@ -49,8 +50,19 @@ fn precompile_ace_config() -> AceConfig {
 /// lands each proof-ordered trace segment on its canonical address and stages the chiplet at proof
 /// position `k` with the coefficient `beta^(NUM_CHIPLETS - 1 - k)`.
 pub fn build_canonical_precompile_ace_circuit() -> AceCircuit<QuadFelt> {
-    let airs = Air::all();
-    build_canonical_multi_air_ace_circuit(&airs, precompile_ace_config(), LMCS_ALIGNMENT)
+    build_canonical_precompile_ace_circuit_for(PvmAirVariant::ALL)
+}
+
+/// Compiles the exact selected relation in canonical order.
+pub fn build_canonical_precompile_ace_circuit_for(variant: PvmAirVariant) -> AceCircuit<QuadFelt> {
+    let airs: Vec<_> = Air::all().into_iter().filter(|air| air.is_in_variant(variant)).collect();
+    build_canonical_precompile_ace_circuit_from_airs(&airs)
+}
+
+pub(crate) fn build_canonical_precompile_ace_circuit_from_airs(
+    airs: &[Air],
+) -> AceCircuit<QuadFelt> {
+    build_canonical_multi_air_ace_circuit(airs, precompile_ace_config(airs), LMCS_ALIGNMENT)
 }
 
 // RECURSIVE VERIFIER CIRCUIT

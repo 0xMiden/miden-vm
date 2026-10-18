@@ -15,6 +15,9 @@ pub mod transcript;
 pub mod uint;
 pub mod utils;
 
+pub use miden_core::deferred::PvmAirVariant;
+pub mod proof;
+
 pub use air::{Air as ChipletAir, Air, MultiAir as ChipletMultiAir, MultiAir, NUM_CHIPLETS};
 
 /// Public statement of the precompile relation: its ordered aggregate root.

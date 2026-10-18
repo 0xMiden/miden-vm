@@ -367,3 +367,32 @@ fn canonical_circuit_matches_every_vm_proof_order() {
         }
     }
 }
+
+#[test]
+fn selected_pvm_circuits_match_independent_authored_folds_and_periodic_basis() {
+    use miden_air_source::precompile::{self as pvm, PvmAirVariant};
+    use miden_stark::air::MultiAir as _;
+    for variant in PvmAirVariant::ALL_VARIANTS {
+        let relation = pvm::MultiAir::with_variant(variant);
+        let airs = relation.airs();
+        let circuit = pvm::ace::build_canonical_precompile_ace_circuit_for(variant);
+        let layout = circuit.layout();
+        let beta = QuadFelt::from_u32(97);
+        let mut orders = vec![(0..airs.len()).collect::<Vec<_>>(), (0..airs.len()).rev().collect()];
+        let mut rotated = orders[0].clone();
+        rotated.rotate_left(3);
+        orders.push(rotated);
+        for order in orders {
+            let mut inputs: Vec<QuadFelt> = fill_inputs(layout);
+            for (position, &id) in order.iter().enumerate() {
+                inputs[layout.index(InputKey::MultiAirFoldCoeff(id)).unwrap()] =
+                    beta.exp_u64((airs.len() - 1 - position) as u64);
+            }
+            // Direct symbolic evaluation uses independently authored constraints and periodic columns.
+            let expected = miden_ace::testing::eval_multi_air_constraints(
+                airs, layout, &inputs, &order, beta, 8,
+            );
+            assert_eq!(circuit.eval(&inputs), expected, "{variant:?} {order:?}");
+        }
+    }
+}

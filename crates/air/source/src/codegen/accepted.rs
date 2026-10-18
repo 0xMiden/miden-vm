@@ -1,6 +1,6 @@
 //! Explicit accepted identity inputs for delivery; rendering never accepts new pins.
 
-use std::{format, fs, path::Path, string::String};
+use std::{collections::BTreeMap, format, fs, path::Path, string::String};
 
 use miden_core::Felt;
 use serde_json::Value;
@@ -8,8 +8,7 @@ use serde_json::Value;
 const ACCEPTED_PATH: &str = "crates/air/generated/protocol/accepted.json";
 
 pub(super) struct AcceptedIdentities {
-    vm: RelationIdentity,
-    precompile: RelationIdentity,
+    relations: BTreeMap<String, RelationIdentity>,
 }
 
 struct RelationIdentity {
@@ -29,10 +28,24 @@ fn parse(json: &Value) -> Result<AcceptedIdentities, String> {
     if json["accepted_schema"].as_u64() != Some(1) {
         return Err("expected accepted_schema 1".into());
     }
-    Ok(AcceptedIdentities {
-        vm: relation(&json["relations"]["vm"], 1)?,
-        precompile: relation(&json["relations"]["precompile"], 4)?,
-    })
+    let mut relations = BTreeMap::new();
+    for (name, input) in
+        json["relations"].as_object().ok_or("accepted relations must be an object")?
+    {
+        if name != "vm"
+            && name != "precompile"
+            && !(0..7).any(|mask| name == &format!("precompile-{mask}"))
+        {
+            return Err(format!("unknown accepted relation {name}"));
+        }
+        relations.insert(name.clone(), relation(input, if name == "vm" { 1 } else { 4 })?);
+    }
+    for required in ["vm", "precompile"] {
+        if !relations.contains_key(required) {
+            return Err(format!("missing accepted relation {required}"));
+        }
+    }
+    Ok(AcceptedIdentities { relations })
 }
 
 fn relation(json: &Value, protocol: u64) -> Result<RelationIdentity, String> {
@@ -65,11 +78,10 @@ impl AcceptedIdentities {
         circuit: [u64; 4],
         relation: [u64; 4],
     ) -> Result<(), String> {
-        let accepted = match name {
-            "vm" => &self.vm,
-            "precompile" => &self.precompile,
-            _ => return Err(format!("unknown accepted relation {name}")),
-        };
+        let accepted = self
+            .relations
+            .get(name)
+            .ok_or_else(|| format!("missing accepted relation {name}"))?;
         if accepted.circuit != circuit || accepted.relation != relation {
             return Err(format!(
                 "{name} candidate identity differs from explicit accepted inputs; no pins accepted and no outputs written"

@@ -33,6 +33,118 @@
         9110857118546866548,
         100418585322354598
       ]
+    },
+    "precompile-0": {
+      "protocol_id": 4,
+      "configuration": "PVM hash mask 0; canonical aligned ACE",
+      "accepted_circuit_digest": [
+        6987701291168650935,
+        1874112954610385191,
+        8877506527348710597,
+        418781855040486654
+      ],
+      "accepted_relation_digest": [
+        8660254512019004240,
+        7935465391408137414,
+        1388127093670746217,
+        8188879724001487938
+      ]
+    },
+    "precompile-1": {
+      "protocol_id": 4,
+      "configuration": "PVM hash mask 1; canonical aligned ACE",
+      "accepted_circuit_digest": [
+        3608935278465100661,
+        9017431329742808199,
+        5585131326920580993,
+        759604262147698743
+      ],
+      "accepted_relation_digest": [
+        4039734733229347566,
+        1620260141748240589,
+        7582144099766249348,
+        5066236885543983397
+      ]
+    },
+    "precompile-2": {
+      "protocol_id": 4,
+      "configuration": "PVM hash mask 2; canonical aligned ACE",
+      "accepted_circuit_digest": [
+        2443872330193181785,
+        2865932378728934406,
+        4124236873548537646,
+        694563616318973872
+      ],
+      "accepted_relation_digest": [
+        3300811727592470653,
+        3946292050535992920,
+        991076082313332274,
+        7746109074738338308
+      ]
+    },
+    "precompile-3": {
+      "protocol_id": 4,
+      "configuration": "PVM hash mask 3; canonical aligned ACE",
+      "accepted_circuit_digest": [
+        4053192321956509323,
+        5514407655114284522,
+        1010849018120704192,
+        8749150486897769988
+      ],
+      "accepted_relation_digest": [
+        3061111973207939424,
+        5578698455899901663,
+        7833948616622646442,
+        4851309530017789194
+      ]
+    },
+    "precompile-4": {
+      "protocol_id": 4,
+      "configuration": "PVM hash mask 4; canonical aligned ACE",
+      "accepted_circuit_digest": [
+        3853873982301236175,
+        7532463636511710268,
+        3936155923034949476,
+        6982980173593056077
+      ],
+      "accepted_relation_digest": [
+        2510518710396149644,
+        1110592858778022816,
+        3137474039458876177,
+        3691647013413182492
+      ]
+    },
+    "precompile-5": {
+      "protocol_id": 4,
+      "configuration": "PVM hash mask 5; canonical aligned ACE",
+      "accepted_circuit_digest": [
+        8996165557227025434,
+        4092118345412116890,
+        6632315618526477551,
+        5996087535579010065
+      ],
+      "accepted_relation_digest": [
+        4924011711948822826,
+        3347103154035610020,
+        1954628960837130406,
+        2452244865817863644
+      ]
+    },
+    "precompile-6": {
+      "protocol_id": 4,
+      "configuration": "PVM hash mask 6; canonical aligned ACE",
+      "accepted_circuit_digest": [
+        3873579867528594007,
+        7273476287203209162,
+        4770939193761780949,
+        5505833891080163485
+      ],
+      "accepted_relation_digest": [
+        1032182185154380287,
+        3256977641776688401,
+        8918109662827522844,
+        7587764288391907104
+      ]
     }
   },
   "statement_context": "external multi-AIR assertions and public input observation are independently authored; ACE digest alone does not cover them"

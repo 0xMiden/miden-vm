@@ -89,12 +89,44 @@ fn run() -> Result<(), String> {
     let precompile_circuit = miden_ace::CompiledCircuit::from_circuit(
         precompile::ace::build_canonical_precompile_ace_circuit(),
     );
-    let circuits = [
+    let mut circuits = vec![
         ("vm", "vm.ace", vm_circuit),
         ("precompile", "precompile.ace", precompile_circuit),
     ];
+    for (mask, name) in [
+        "precompile-0.ace",
+        "precompile-1.ace",
+        "precompile-2.ace",
+        "precompile-3.ace",
+        "precompile-4.ace",
+        "precompile-5.ace",
+        "precompile-6.ace",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let relation = [
+            "precompile-0",
+            "precompile-1",
+            "precompile-2",
+            "precompile-3",
+            "precompile-4",
+            "precompile-5",
+            "precompile-6",
+        ][mask];
+        circuits.push((
+            relation,
+            name,
+            miden_ace::CompiledCircuit::from_circuit(
+                precompile::ace::build_canonical_precompile_ace_circuit_for(
+                    precompile::PvmAirVariant::from_u8(mask as u8).unwrap(),
+                ),
+            ),
+        ));
+    }
     let mut artifacts = Vec::new();
     let mut members = Vec::new();
+    let mut variants = std::collections::BTreeMap::new();
     for (relation, name, compiled) in circuits {
         let encoded = compiled.encoded();
         let pins = accepted
@@ -146,8 +178,42 @@ fn run() -> Result<(), String> {
             "candidate_relation_digest": candidate_relation,
             "statement_context": statement_context,
         }));
+        if relation != "vm" {
+            let mask = if relation == "precompile" {
+                7
+            } else {
+                relation.rsplit('-').next().unwrap().parse::<u8>().unwrap()
+            };
+            variants.insert(
+                mask,
+                (
+                    candidate.clone(),
+                    candidate_relation.clone(),
+                    [encoded.num_vars(), encoded.num_eval_rows(), encoded.size_in_felt()],
+                ),
+            );
+        }
         artifacts.push((name, bytes));
     }
+    let mut descriptors = String::from(
+        "// GENERATED selected PVM identities; checked against explicit accepted.json.\n",
+    );
+    for (name, ty, field) in [
+        ("PVM_VARIANT_CIRCUIT_DIGESTS", "[[u64; 4]; 8]", 0),
+        ("PVM_VARIANT_RELATION_DIGESTS", "[[u64; 4]; 8]", 1),
+        ("PVM_VARIANT_CIRCUIT_SHAPES", "[[usize; 3]; 8]", 2),
+    ] {
+        descriptors += &format!("pub const {name}: {ty} = [\n");
+        for (circuit, relation, shape) in variants.values() {
+            descriptors += &match field {
+                0 => format!("    {circuit:?},\n"),
+                1 => format!("    {relation:?},\n"),
+                _ => format!("    {shape:?},\n"),
+            };
+        }
+        descriptors += "];\n";
+    }
+    artifacts.push(("precompile-variants.rs", descriptors.into_bytes()));
     let evaluator_source = evaluator::generate();
     let evaluator_bytes = evaluator::encode(&evaluator_source);
     let evaluator_sha256: String = Sha256::digest(&evaluator_bytes)

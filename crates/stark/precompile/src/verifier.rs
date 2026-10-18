@@ -1,11 +1,13 @@
 use alloc::vec::Vec;
 
 use miden_air::precompile::{
-    ChipletMultiAir,
+    ChipletMultiAir, PvmAirVariant,
+    proof::decode_proof,
+    protocol::relation_digest,
     security::{self, ProofSecurityParameters},
     stark_config::{
-        PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
-        observe_protocol_params, poseidon2_config, precompile_pcs_params, rpo_config, rpx_config,
+        blake3_256_config, eidos_config, keccak_config, observe_protocol_params, poseidon2_config,
+        precompile_pcs_params, rpo_config, rpx_config,
     },
     transcript::eidos::EidosDigest,
 };
@@ -35,17 +37,21 @@ pub fn verify_deferred(
     proof: &StarkProof,
     public_root: DeferredRoot,
 ) -> Result<ProofSecurityParameters, VerifyError> {
-    let (log_max_height, alignment) = verify_stark(proof, EidosDigest::from(public_root))?;
+    let (log_max_height, alignment, variant) = verify_stark(proof, EidosDigest::from(public_root))?;
 
-    Ok(security::proof_security_parameters(
+    Ok(security::proof_security_parameters_for(
         &precompile_pcs_params(),
         log_max_height,
         alignment,
         proof.hash_fn(),
+        variant,
     ))
 }
 
-fn verify_stark(proof: &StarkProof, public_root: EidosDigest) -> Result<(u32, usize), VerifyError> {
+fn verify_stark(
+    proof: &StarkProof,
+    public_root: EidosDigest,
+) -> Result<(u32, usize, PvmAirVariant), VerifyError> {
     if proof.bytes().len() > MAX_STARK_PROOF_BYTES {
         return Err(VerifyError::ProofTooLarge {
             size: proof.bytes().len(),
@@ -53,37 +59,40 @@ fn verify_stark(proof: &StarkProof, public_root: EidosDigest) -> Result<(u32, us
         });
     }
 
+    let (variant, proof_bytes) =
+        decode_proof(proof.bytes()).map_err(VerifyError::InvalidVariantHeader)?;
+    let digest = relation_digest(variant);
     let params = precompile_pcs_params();
     match proof.hash_fn() {
         HashFunction::Blake3_256 => {
-            let config = blake3_256_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::blake3();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
+            let config = blake3_256_config(params, digest);
+            let preprocessed = preprocessed::blake3_for(variant);
+            verify_stark_with_config(&config, &preprocessed, proof_bytes, public_root, variant)
         },
         HashFunction::Rpo256 => {
-            let config = rpo_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::rpo();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
+            let config = rpo_config(params, digest);
+            let preprocessed = preprocessed::rpo_for(variant);
+            verify_stark_with_config(&config, &preprocessed, proof_bytes, public_root, variant)
         },
         HashFunction::Rpx256 => {
-            let config = rpx_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::rpx();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
+            let config = rpx_config(params, digest);
+            let preprocessed = preprocessed::rpx_for(variant);
+            verify_stark_with_config(&config, &preprocessed, proof_bytes, public_root, variant)
         },
         HashFunction::Poseidon2 => {
-            let config = poseidon2_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::poseidon2();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
+            let config = poseidon2_config(params, digest);
+            let preprocessed = preprocessed::poseidon2_for(variant);
+            verify_stark_with_config(&config, &preprocessed, proof_bytes, public_root, variant)
         },
         HashFunction::Keccak => {
-            let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::keccak();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
+            let config = keccak_config(params, digest);
+            let preprocessed = preprocessed::keccak_for(variant);
+            verify_stark_with_config(&config, &preprocessed, proof_bytes, public_root, variant)
         },
         HashFunction::Eidos => {
-            let config = eidos_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::eidos();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
+            let config = eidos_config(params, digest);
+            let preprocessed = preprocessed::eidos_for(variant);
+            verify_stark_with_config(&config, &preprocessed, proof_bytes, public_root, variant)
         },
     }
 }
@@ -93,7 +102,8 @@ fn verify_stark_with_config<SC>(
     preprocessed: &Preprocessed<Felt, SC::Lmcs>,
     proof_bytes: &[u8],
     public_root: EidosDigest,
-) -> Result<(u32, usize), VerifyError>
+    variant: PvmAirVariant,
+) -> Result<(u32, usize, PvmAirVariant), VerifyError>
 where
     SC: StarkConfig<Felt, QuadFelt>,
     <SC::Lmcs as LmcsTrait>::Commitment: DeserializeOwned,
@@ -105,9 +115,12 @@ where
         proof_encoding_config,
     )?;
 
-    let statement =
-        Statement::new(ChipletMultiAir::new(), public_root.as_array().to_vec(), Vec::new())
-            .expect("chiplet statement inputs are valid");
+    let statement = Statement::new(
+        ChipletMultiAir::with_variant(variant),
+        public_root.as_array().to_vec(),
+        Vec::new(),
+    )
+    .expect("chiplet statement inputs are valid");
 
     let mut challenger = config.challenger();
     observe_protocol_params(config.pcs(), &mut challenger);
@@ -116,12 +129,15 @@ where
         .verify(&proof, challenger)?;
 
     let log_max_height = u32::from(proof.log_trace_heights().iter().copied().max().unwrap_or(0));
-    Ok((log_max_height, config.lmcs().alignment()))
+    Ok((log_max_height, config.lmcs().alignment(), variant))
 }
 
 /// Why precompile STARK verification rejected a proof.
 #[derive(Debug, thiserror::Error)]
 pub enum VerifyError {
+    /// The PVM payload names an unsupported variant or encoding version.
+    #[error("invalid PVM variant header: {0}")]
+    InvalidVariantHeader(&'static str),
     /// The serialized STARK proof bytes could not be decoded for the selected hash function.
     #[error("failed to deserialize STARK proof: {0}")]
     Deserialization(#[from] wincode::error::ReadError),

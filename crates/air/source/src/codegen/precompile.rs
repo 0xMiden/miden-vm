@@ -374,7 +374,7 @@ fn render_protocol(relation_digest: &[Felt; 4]) -> String {
          /// `miden-air::precompile::ace_constants`.\n\
          #[rustfmt::skip]\n\
          pub const PVM_RELATION_DIGEST: [u64; 4] = [\n{body}];\n"
-    )
+    ) + "\ninclude!(\"../../artifacts/precompile-variants.rs\");\n\n/// Returns the identity of the exact selected canonical relation.\npub fn relation_digest(variant: super::PvmAirVariant) -> super::stark_config::RelationDigest {\n    PVM_VARIANT_RELATION_DIGESTS[variant.as_u8() as usize].map(miden_core::Felt::new_unchecked)\n}\n"
 }
 
 /// Rewrite the initializer of a `pub const NAME: [u64; 4]` declaration.

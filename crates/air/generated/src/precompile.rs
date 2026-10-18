@@ -66,6 +66,9 @@ impl Air {
             Air::Sha256,
         ]
     }
+    pub const fn is_in_variant(&self, variant: PvmAirVariant) -> bool {
+        self.source().is_in_variant(variant)
+    }
     pub fn fixed_log_height(&self) -> Option<u32> {
         self.source().fixed_log_height()
     }
@@ -161,11 +164,18 @@ impl LiftedAir<Felt, QuadFelt> for Air {
 
 #[derive(Clone, Debug)]
 pub struct MultiAir {
+    source: source::MultiAir,
     airs: Vec<Air>,
 }
 impl MultiAir {
     pub fn new() -> Self {
-        Self { airs: Air::all().to_vec() }
+        Self::with_variant(PvmAirVariant::ALL)
+    }
+    pub fn with_variant(variant: PvmAirVariant) -> Self {
+        let source = source::MultiAir::with_variant(variant);
+        use miden_stark::air::MultiAir as _;
+        let airs = source.airs().iter().cloned().map(Air::from).collect();
+        Self { source, airs }
     }
 }
 impl Default for MultiAir {
@@ -179,10 +189,10 @@ impl MultiAirTrait<Felt, QuadFelt> for MultiAir {
         &self.airs
     }
     fn num_air_inputs(&self) -> usize {
-        source::MultiAir::new().num_air_inputs()
+        self.source.num_air_inputs()
     }
     fn max_aux_inputs(&self) -> usize {
-        source::MultiAir::new().max_aux_inputs()
+        self.source.max_aux_inputs()
     }
     fn observe<C: CanObserve<Felt>>(
         &self,
@@ -191,7 +201,7 @@ impl MultiAirTrait<Felt, QuadFelt> for MultiAir {
         aux_inputs: &[Felt],
         log_trace_heights: &[u8],
     ) {
-        source::MultiAir::new().observe(challenger, air_inputs, aux_inputs, log_trace_heights);
+        self.source.observe(challenger, air_inputs, aux_inputs, log_trace_heights);
     }
     fn eval_external(
         &self,
@@ -201,13 +211,8 @@ impl MultiAirTrait<Felt, QuadFelt> for MultiAir {
         aux_values: &[&[QuadFelt]],
         log_trace_heights: &[u8],
     ) -> Result<Vec<QuadFelt>, ReductionError> {
-        source::MultiAir::new().eval_external(
-            challenges,
-            air_inputs,
-            aux_inputs,
-            aux_values,
-            log_trace_heights,
-        )
+        self.source
+            .eval_external(challenges, air_inputs, aux_inputs, aux_values, log_trace_heights)
     }
 }
 

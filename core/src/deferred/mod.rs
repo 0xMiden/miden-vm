@@ -12,6 +12,7 @@ mod claim;
 mod node;
 mod precompile;
 mod precompile_registry;
+mod pvm_air_variant;
 mod state;
 mod wire;
 
@@ -23,6 +24,7 @@ pub use miden_crypto::hash::eidos::EidosFrame;
 pub use node::{DataChunk, Digest, Node, NodeType, Payload, TRUE_DIGEST};
 pub use precompile::Precompile;
 pub use precompile_registry::PrecompileRegistry;
+pub use pvm_air_variant::PvmAirVariant;
 pub use state::{DeferredContext, DeferredState};
 pub use wire::{IntegrityError, PrecompileWitness, WireEntry as PrecompileWitnessEntry};
 

@@ -10,7 +10,7 @@ use miden_core::{
     serde::{Deserializable, Serializable},
 };
 
-fn check_runtime(bytes: &[u8], accepted: Word) {
+fn check_runtime(bytes: &[u8], accepted: Word) -> EncodedCircuit {
     let encoded = EncodedCircuit::from_canonical_bytes(bytes).expect("staged canonical artifact");
     assert_eq!(encoded.to_canonical_bytes(), bytes, "artifact delivery must be canonical");
     assert_eq!(encoded.circuit_hash(), accepted, "staged stream must retain the accepted pin");
@@ -78,6 +78,7 @@ fn check_runtime(bytes: &[u8], accepted: Word) {
         assert_eq!(runtime.multiplicities().collect::<Vec<_>>(), multiplicities);
         assert_eq!(EvaluationTrace::read_from_bytes(&runtime.to_bytes()).unwrap(), runtime);
     }
+    encoded
 }
 
 #[test]
@@ -88,10 +89,30 @@ fn vm_staged_stream_matches_runtime_and_accepted_digest() {
 }
 
 #[test]
-fn precompile_staged_stream_matches_runtime_and_accepted_digest() {
-    let artifacts = miden_air::precompile::artifacts::recursive_circuit().unwrap();
-    let accepted =
-        Word::new(miden_air::precompile::artifacts::ACE_CIRCUIT_DIGEST.map(Felt::new_unchecked));
-    assert_eq!(artifacts.commitment, accepted);
-    check_runtime(miden_air::precompile::artifacts::ENCODED_ACE, accepted);
+fn every_selected_pvm_stream_matches_raw_runtime_and_retained_shape() {
+    use miden_air::precompile::{PvmAirVariant, artifacts, protocol};
+    for variant in PvmAirVariant::ALL_VARIANTS {
+        let i = variant.as_u8() as usize;
+        let bytes = artifacts::encoded_ace_for(variant);
+        let accepted = Word::new(protocol::PVM_VARIANT_CIRCUIT_DIGESTS[i].map(Felt::new_unchecked));
+        let decoded = check_runtime(bytes, accepted);
+        if variant == PvmAirVariant::ALL {
+            assert_eq!(bytes, artifacts::ENCODED_ACE);
+            let legacy = artifacts::recursive_circuit().unwrap();
+            assert_eq!(legacy.commitment, accepted);
+            assert_eq!(
+                legacy.commitment,
+                Word::new(artifacts::ACE_CIRCUIT_DIGEST.map(Felt::new_unchecked))
+            );
+            #[cfg(feature = "std")]
+            assert!(core::ptr::eq(
+                artifacts::shared_recursive_circuit(),
+                artifacts::shared_recursive_circuit_for(variant)
+            ));
+        }
+        assert_eq!(
+            protocol::PVM_VARIANT_CIRCUIT_SHAPES[i],
+            [decoded.num_vars(), decoded.num_eval_rows(), decoded.size_in_felt()]
+        );
+    }
 }

@@ -306,3 +306,41 @@ fn geometry_rejects_overflow_and_invalid_shape_in_release_too() {
     large.degrees.base = usize::MAX;
     assert!(catch_unwind(|| RelationGeometry::new(8).with_air(large).air_shape()).is_err());
 }
+
+#[test]
+fn every_pvm_variant_matches_independent_selected_geometry_and_security() {
+    use miden_core::{field::PrimeCharacteristicRing, proof::HashFunction};
+    use miden_stark::air::MultiAir as _;
+    for variant in precompile::PvmAirVariant::ALL_VARIANTS {
+        let selected = precompile::MultiAir::with_variant(variant);
+        let source = source_pvm::MultiAir::with_variant(variant);
+        assert_eq!(
+            selected.airs().iter().map(|air| air.source()).collect::<Vec<_>>(),
+            source.airs()
+        );
+        for alignment in [1, 8, 17] {
+            let geometry = precompile::geometry(selected.airs(), alignment);
+            check_geometry(geometry, source.airs(), alignment);
+            let params = precompile::security::proof_security_parameters_for(
+                &precompile::stark_config::precompile_pcs_params(),
+                19,
+                alignment,
+                HashFunction::Eidos,
+                variant,
+            );
+            assert_eq!(params.air_shape, geometry.air_shape());
+            assert_eq!(params.num_lookup_boundary_terms, 19);
+        }
+        // Check selected forwarding, including odd AIR counts. Independent numeric boundary
+        // and transcript oracles live in the downstream core-lib hook tests.
+        let challenges = [QuadFelt::from_u32(3), QuadFelt::from_u32(7)];
+        let values = vec![vec![QuadFelt::ONE]; source.airs().len()];
+        let refs: Vec<_> = values.iter().map(Vec::as_slice).collect();
+        let heights = vec![16; source.airs().len()];
+        let inputs = [Felt::ZERO; 4];
+        assert_eq!(
+            selected.eval_external(&challenges, &inputs, &[], &refs, &heights).unwrap(),
+            source.eval_external(&challenges, &inputs, &[], &refs, &heights).unwrap()
+        );
+    }
+}

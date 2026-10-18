@@ -32,11 +32,11 @@
 //! `prove_multi` (or a bus-balance check) is the caller's job — that's
 //! generic lifted-stark usage, not chiplet wiring.
 
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 
 #[cfg(debug_assertions)]
 use miden_core::utils::Matrix;
-use miden_core::{Felt, utils::RowMajorMatrix};
+use miden_core::{Felt, deferred::PvmAirVariant, utils::RowMajorMatrix};
 
 pub use crate::transcript::eval::trace::{EcNode, Truthy, UintNode};
 use crate::{
@@ -92,7 +92,7 @@ pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
 #[cfg(test)]
 pub mod statements;
 pub mod strategies;
-#[cfg(test)]
+#[cfg(any(test, debug_assertions))]
 pub use miden_air::precompile::ChipletAir;
 pub(crate) use miden_air::precompile::NUM_CHIPLETS;
 
@@ -519,7 +519,13 @@ impl Session {
     /// checks, driven directly). `finish` owns that order so callers
     /// can't transpose it; each trace-gen consumes its accumulator, so a
     /// chiplet can't be laid twice.
-    pub fn finish(mut self, root: Truthy) -> SessionTraces {
+    pub fn finish(self, root: Truthy) -> SessionTraces {
+        self.finish_with_variant(root, PvmAirVariant::ALL)
+    }
+
+    /// Generates only the selected hash traces, preserving the shared chiplet dependency order.
+    /// The importer must reject witnesses for disabled hash precompiles before recording them.
+    pub fn finish_with_variant(mut self, root: Truthy, variant: PvmAirVariant) -> SessionTraces {
         macro_rules! trace_span {
             ($name:literal, $expr:expr) => {{
                 let _span = tracing::info_span!($name).entered();
@@ -542,21 +548,29 @@ impl Session {
         }
         // EcCreate rows hash the group pointer and bind it through their EcPoint consume.
         let eval = trace_span!("eval", eval_trace(self.eval, root));
-        let chunk_node_sponge = trace_span!(
-            "chunk_node_sponge",
-            chunk_node_sponge_trace(self.chunk, self.node, self.sponge)
-        );
+        let chunk_node_sponge = variant.contains(PvmAirVariant::KECCAK).then(|| {
+            trace_span!(
+                "chunk_node_sponge",
+                chunk_node_sponge_trace(self.chunk, self.node, self.sponge)
+            )
+        });
         let eidos_compression =
             trace_span!("eidos_compression", eidos_compression_trace(self.eidos, &mut self.bpl));
-        let sha512 = trace_span!(
-            "sha512",
-            sha512_trace(self.sha512_compression, self.sha512_io, &mut self.bpl)
-        );
-        let sha256 = trace_span!(
-            "sha256",
-            sha256_trace(self.sha256_compression, self.sha256_io, &mut self.bpl)
-        );
-        let round = trace_span!("keccak_round", round_trace(self.round, &mut self.bpl));
+        let sha512 = variant.contains(PvmAirVariant::SHA512).then(|| {
+            trace_span!(
+                "sha512",
+                sha512_trace(self.sha512_compression, self.sha512_io, &mut self.bpl)
+            )
+        });
+        let sha256 = variant.contains(PvmAirVariant::SHA256).then(|| {
+            trace_span!(
+                "sha256",
+                sha256_trace(self.sha256_compression, self.sha256_io, &mut self.bpl)
+            )
+        });
+        let round = variant
+            .contains(PvmAirVariant::KECCAK)
+            .then(|| trace_span!("keccak_round", round_trace(self.round, &mut self.bpl)));
         // The relation traces route their store demand as they lay, so
         // they run before the store reads its provide multiplicities;
         // every Range16 consumer fires before BPL. (The EC add chiplet
@@ -582,24 +596,36 @@ impl Session {
         let byte_pair_lut = trace_span!("byte_pair_lut", bpl_trace(self.bpl));
 
         let traces = SessionTraces {
-            chunk_node_sponge,
-            eidos_compression,
-            round,
-            byte_pair_lut,
-            eval,
-            uint,
-            add,
-            ec,
-            ec_add,
-            msm,
-            sha512,
-            sha256,
+            main_traces: [
+                chunk_node_sponge,
+                Some(eidos_compression),
+                round,
+                Some(byte_pair_lut),
+                Some(eval),
+                Some(uint),
+                Some(add),
+                Some(ec),
+                Some(ec_add),
+                Some(msm),
+                sha512,
+                sha256,
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
             public_root,
+            variant,
         };
         #[cfg(debug_assertions)]
         debug_assert_eq!(
-            predicted_heights,
-            Some(traces.mains().map(Matrix::height)),
+            predicted_heights.map(|heights| {
+                heights
+                    .into_iter()
+                    .zip(ChipletAir::all())
+                    .filter_map(|(height, air)| air.is_in_variant(variant).then_some(height))
+                    .collect::<Vec<_>>()
+            }),
+            Some(traces.main_traces.iter().map(Matrix::height).collect::<Vec<_>>()),
             "preflight trace heights must match generated traces",
         );
         traces
@@ -616,59 +642,35 @@ impl Default for Session {
 /// feed `prove_multi` or a bus-balance check.
 #[derive(Debug)]
 pub struct SessionTraces {
-    chunk_node_sponge: RowMajorMatrix<Felt>,
-    eidos_compression: RowMajorMatrix<Felt>,
-    round: RowMajorMatrix<Felt>,
-    byte_pair_lut: RowMajorMatrix<Felt>,
-    eval: RowMajorMatrix<Felt>,
-    uint: RowMajorMatrix<Felt>,
-    add: RowMajorMatrix<Felt>,
-    ec: RowMajorMatrix<Felt>,
-    ec_add: RowMajorMatrix<Felt>,
-    msm: RowMajorMatrix<Felt>,
-    sha512: RowMajorMatrix<Felt>,
-    sha256: RowMajorMatrix<Felt>,
+    main_traces: Vec<RowMajorMatrix<Felt>>,
     public_root: EidosDigest,
+    variant: PvmAirVariant,
 }
 
 impl SessionTraces {
-    /// Borrows the twelve main traces in [`Self::into_mains`] order.
+    /// Borrows the selected main traces in canonical relation order.
     pub fn mains(&self) -> [&RowMajorMatrix<Felt>; NUM_CHIPLETS] {
-        [
-            &self.chunk_node_sponge,
-            &self.eidos_compression,
-            &self.round,
-            &self.byte_pair_lut,
-            &self.eval,
-            &self.uint,
-            &self.add,
-            &self.ec,
-            &self.ec_add,
-            &self.msm,
-            &self.sha512,
-            &self.sha256,
-        ]
+        let mains: &[RowMajorMatrix<Felt>; NUM_CHIPLETS] = self
+            .main_traces
+            .as_slice()
+            .try_into()
+            .expect("mains requires the full relation; use selected_mains for a variant");
+        mains.each_ref()
     }
 
-    /// Consumes the bundle and returns its twelve main traces in canonical chiplet order:
-    /// chunk-node-sponge, Eidos compression, Keccak round, canonical byte-pair lookup,
-    /// transcript eval, uint-store-mul, uint-add, ec-point-store-groups, ec-add, ec-msm, SHA-512,
-    /// and SHA-256. The AIRs, provers, and public values must use this same order.
+    /// Borrows the selected traces in canonical relation order.
+    pub fn selected_mains(&self) -> &[RowMajorMatrix<Felt>] {
+        &self.main_traces
+    }
+
+    /// Consumes the selected main traces in canonical relation order.
     pub fn into_mains(self) -> Vec<RowMajorMatrix<Felt>> {
-        vec![
-            self.chunk_node_sponge,
-            self.eidos_compression,
-            self.round,
-            self.byte_pair_lut,
-            self.eval,
-            self.uint,
-            self.add,
-            self.ec,
-            self.ec_add,
-            self.msm,
-            self.sha512,
-            self.sha256,
-        ]
+        self.main_traces
+    }
+
+    /// The hash AIR selection used to generate these traces.
+    pub fn variant(&self) -> PvmAirVariant {
+        self.variant
     }
 
     /// The VM's shared public inputs: the four-felt transcript root. All AIRs declare it

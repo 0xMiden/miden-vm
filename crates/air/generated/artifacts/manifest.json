@@ -102,6 +102,272 @@
       "relation": "precompile",
       "sha256": "ada43f6069bbfab4434b8c18843592067e6b0135f6b85631ef38363b2ea2102e",
       "statement_context": "external multi-AIR assertions and public input observation are independently authored; ACE digest alone does not cover them"
+    },
+    {
+      "accepted_circuit_digest": [
+        6987701291168650935,
+        1874112954610385191,
+        8877506527348710597,
+        418781855040486654
+      ],
+      "accepted_pin_policy": "compare; never accept implicitly",
+      "accepted_relation_digest": [
+        8660254512019004240,
+        7935465391408137414,
+        1388127093670746217,
+        8188879724001487938
+      ],
+      "bytes": 45524,
+      "candidate_circuit_digest": [
+        6987701291168650935,
+        1874112954610385191,
+        8877506527348710597,
+        418781855040486654
+      ],
+      "candidate_relation_digest": [
+        8660254512019004240,
+        7935465391408137414,
+        1388127093670746217,
+        8188879724001487938
+      ],
+      "codec": "MIDACE-v1",
+      "configuration": "PVM hash mask 0; canonical aligned ACE",
+      "file": "precompile-0.ace",
+      "instruction_elements": 5688,
+      "num_ops": 5504,
+      "num_vars": 1224,
+      "protocol_id": 4,
+      "relation": "precompile-0",
+      "sha256": "ca152805b25b850105b23580994d699dd2da7603426469fc6ee7992fa98beb54",
+      "statement_context": "external multi-AIR assertions and public input observation are independently authored; ACE digest alone does not cover them"
+    },
+    {
+      "accepted_circuit_digest": [
+        3608935278465100661,
+        9017431329742808199,
+        5585131326920580993,
+        759604262147698743
+      ],
+      "accepted_pin_policy": "compare; never accept implicitly",
+      "accepted_relation_digest": [
+        4039734733229347566,
+        1620260141748240589,
+        7582144099766249348,
+        5066236885543983397
+      ],
+      "bytes": 71828,
+      "candidate_circuit_digest": [
+        3608935278465100661,
+        9017431329742808199,
+        5585131326920580993,
+        759604262147698743
+      ],
+      "candidate_relation_digest": [
+        4039734733229347566,
+        1620260141748240589,
+        7582144099766249348,
+        5066236885543983397
+      ],
+      "codec": "MIDACE-v1",
+      "configuration": "PVM hash mask 1; canonical aligned ACE",
+      "file": "precompile-1.ace",
+      "instruction_elements": 8976,
+      "num_ops": 8432,
+      "num_vars": 1860,
+      "protocol_id": 4,
+      "relation": "precompile-1",
+      "sha256": "92b4d5dfa305713d4b1f0bc36b166c93367ccccad124d6035d3840d3c4ea6a51",
+      "statement_context": "external multi-AIR assertions and public input observation are independently authored; ACE digest alone does not cover them"
+    },
+    {
+      "accepted_circuit_digest": [
+        2443872330193181785,
+        2865932378728934406,
+        4124236873548537646,
+        694563616318973872
+      ],
+      "accepted_pin_policy": "compare; never accept implicitly",
+      "accepted_relation_digest": [
+        3300811727592470653,
+        3946292050535992920,
+        991076082313332274,
+        7746109074738338308
+      ],
+      "bytes": 72148,
+      "candidate_circuit_digest": [
+        2443872330193181785,
+        2865932378728934406,
+        4124236873548537646,
+        694563616318973872
+      ],
+      "candidate_relation_digest": [
+        3300811727592470653,
+        3946292050535992920,
+        991076082313332274,
+        7746109074738338308
+      ],
+      "codec": "MIDACE-v1",
+      "configuration": "PVM hash mask 2; canonical aligned ACE",
+      "file": "precompile-2.ace",
+      "instruction_elements": 9016,
+      "num_ops": 8240,
+      "num_vars": 1652,
+      "protocol_id": 4,
+      "relation": "precompile-2",
+      "sha256": "cd66bff41e426ac70e970bda12cb461417adca039962fa032fd3e5e8e627dcce",
+      "statement_context": "external multi-AIR assertions and public input observation are independently authored; ACE digest alone does not cover them"
+    },
+    {
+      "accepted_circuit_digest": [
+        4053192321956509323,
+        5514407655114284522,
+        1010849018120704192,
+        8749150486897769988
+      ],
+      "accepted_pin_policy": "compare; never accept implicitly",
+      "accepted_relation_digest": [
+        3061111973207939424,
+        5578698455899901663,
+        7833948616622646442,
+        4851309530017789194
+      ],
+      "bytes": 91284,
+      "candidate_circuit_digest": [
+        4053192321956509323,
+        5514407655114284522,
+        1010849018120704192,
+        8749150486897769988
+      ],
+      "candidate_relation_digest": [
+        3061111973207939424,
+        5578698455899901663,
+        7833948616622646442,
+        4851309530017789194
+      ],
+      "codec": "MIDACE-v1",
+      "configuration": "PVM hash mask 3; canonical aligned ACE",
+      "file": "precompile-3.ace",
+      "instruction_elements": 11408,
+      "num_ops": 10532,
+      "num_vars": 2162,
+      "protocol_id": 4,
+      "relation": "precompile-3",
+      "sha256": "bdb436f6c5c6671cab599129ebdd5c79b9bb76b3d62769ba291ea6b098046b3f",
+      "statement_context": "external multi-AIR assertions and public input observation are independently authored; ACE digest alone does not cover them"
+    },
+    {
+      "accepted_circuit_digest": [
+        3853873982301236175,
+        7532463636511710268,
+        3936155923034949476,
+        6982980173593056077
+      ],
+      "accepted_pin_policy": "compare; never accept implicitly",
+      "accepted_relation_digest": [
+        2510518710396149644,
+        1110592858778022816,
+        3137474039458876177,
+        3691647013413182492
+      ],
+      "bytes": 81684,
+      "candidate_circuit_digest": [
+        3853873982301236175,
+        7532463636511710268,
+        3936155923034949476,
+        6982980173593056077
+      ],
+      "candidate_relation_digest": [
+        2510518710396149644,
+        1110592858778022816,
+        3137474039458876177,
+        3691647013413182492
+      ],
+      "codec": "MIDACE-v1",
+      "configuration": "PVM hash mask 4; canonical aligned ACE",
+      "file": "precompile-4.ace",
+      "instruction_elements": 10208,
+      "num_ops": 9196,
+      "num_vars": 1818,
+      "protocol_id": 4,
+      "relation": "precompile-4",
+      "sha256": "a0bc8c0dcb63f3c06cde3d35cb8348286c8e2602643bafcec937339fee220d06",
+      "statement_context": "external multi-AIR assertions and public input observation are independently authored; ACE digest alone does not cover them"
+    },
+    {
+      "accepted_circuit_digest": [
+        8996165557227025434,
+        4092118345412116890,
+        6632315618526477551,
+        5996087535579010065
+      ],
+      "accepted_pin_policy": "compare; never accept implicitly",
+      "accepted_relation_digest": [
+        4924011711948822826,
+        3347103154035610020,
+        1954628960837130406,
+        2452244865817863644
+      ],
+      "bytes": 99732,
+      "candidate_circuit_digest": [
+        8996165557227025434,
+        4092118345412116890,
+        6632315618526477551,
+        5996087535579010065
+      ],
+      "candidate_relation_digest": [
+        4924011711948822826,
+        3347103154035610020,
+        1954628960837130406,
+        2452244865817863644
+      ],
+      "codec": "MIDACE-v1",
+      "configuration": "PVM hash mask 5; canonical aligned ACE",
+      "file": "precompile-5.ace",
+      "instruction_elements": 12464,
+      "num_ops": 11360,
+      "num_vars": 2324,
+      "protocol_id": 4,
+      "relation": "precompile-5",
+      "sha256": "109dd92919f929cd705f05f28652c5d5eff4cde29328b80cf904c1c086b915b4",
+      "statement_context": "external multi-AIR assertions and public input observation are independently authored; ACE digest alone does not cover them"
+    },
+    {
+      "accepted_circuit_digest": [
+        3873579867528594007,
+        7273476287203209162,
+        4770939193761780949,
+        5505833891080163485
+      ],
+      "accepted_pin_policy": "compare; never accept implicitly",
+      "accepted_relation_digest": [
+        1032182185154380287,
+        3256977641776688401,
+        8918109662827522844,
+        7587764288391907104
+      ],
+      "bytes": 96020,
+      "candidate_circuit_digest": [
+        3873579867528594007,
+        7273476287203209162,
+        4770939193761780949,
+        5505833891080163485
+      ],
+      "candidate_relation_digest": [
+        1032182185154380287,
+        3256977641776688401,
+        8918109662827522844,
+        7587764288391907104
+      ],
+      "codec": "MIDACE-v1",
+      "configuration": "PVM hash mask 6; canonical aligned ACE",
+      "file": "precompile-6.ace",
+      "instruction_elements": 12000,
+      "num_ops": 10852,
+      "num_vars": 2018,
+      "protocol_id": 4,
+      "relation": "precompile-6",
+      "sha256": "b6d85b69b4ef61c25ce902c359ae2683327cc589e9908306cbaa806d851aa075",
+      "statement_context": "external multi-AIR assertions and public input observation are independently authored; ACE digest alone does not cover them"
     }
   ],
   "pvm_evaluation": "authored dispatch delegated through independent production type",

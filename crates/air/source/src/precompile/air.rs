@@ -9,6 +9,7 @@ use alloc::{borrow::Cow, format, vec, vec::Vec};
 
 use miden_core::{
     Felt,
+    deferred::PvmAirVariant,
     field::{Field, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
@@ -95,6 +96,16 @@ impl Air {
             Air::Sha512,
             Air::Sha256,
         ]
+    }
+
+    /// Returns whether this AIR belongs to the selected optional hash subset.
+    pub const fn is_in_variant(&self, variant: PvmAirVariant) -> bool {
+        match self {
+            Self::ChunkNodeSponge | Self::KeccakRound => variant.contains(PvmAirVariant::KECCAK),
+            Self::Sha256 => variant.contains(PvmAirVariant::SHA256),
+            Self::Sha512 => variant.contains(PvmAirVariant::SHA512),
+            _ => true,
+        }
     }
 
     /// The fixed log2 trace height of this instance, if the relation pins one.
@@ -189,7 +200,7 @@ impl LiftedAir<Felt, QuadFelt> for Air {
 
 /// The chiplet stack as a [`MultiAir`].
 ///
-/// It owns the twelve AIRs in canonical order and closes the cross-chiplet LogUp identity in
+/// It owns the selected AIRs in canonical order and closes the cross-chiplet LogUp identity in
 /// [`eval_external`](Self::eval_external), weighting each normalized residue by its trace length.
 #[derive(Debug, Clone)]
 pub struct MultiAir {
@@ -198,7 +209,14 @@ pub struct MultiAir {
 
 impl MultiAir {
     pub fn new() -> Self {
-        Self { airs: Air::all().to_vec() }
+        Self::with_variant(PvmAirVariant::ALL)
+    }
+
+    /// Builds the relation with only the selected optional hash AIRs.
+    pub fn with_variant(variant: PvmAirVariant) -> Self {
+        Self {
+            airs: Air::all().into_iter().filter(|air| air.is_in_variant(variant)).collect(),
+        }
     }
 }
 
@@ -358,6 +376,46 @@ mod tests {
     use miden_core::field::PrimeCharacteristicRing;
 
     use super::*;
+
+    #[test]
+    fn variants_preserve_required_airs_and_canonical_order() {
+        let required = [
+            Air::EidosCompression,
+            Air::BytePairLut,
+            Air::TranscriptEval,
+            Air::UintStoreMul,
+            Air::UintAdd,
+            Air::EcPointStoreGroups,
+            Air::EcGroupAdd,
+            Air::EcMsm,
+        ];
+        let optional = [
+            (1, Air::ChunkNodeSponge),
+            (1, Air::KeccakRound),
+            (2, Air::Sha256),
+            (4, Air::Sha512),
+        ];
+        for (bits, variant) in PvmAirVariant::ALL_VARIANTS.into_iter().enumerate() {
+            let multi_air = MultiAir::with_variant(variant);
+            assert_eq!(multi_air.airs().len(), 8 + bits.count_ones() as usize + (bits & 1));
+            for air in &required {
+                assert!(air.is_in_variant(variant));
+                assert!(multi_air.airs().contains(air));
+            }
+            for (bit, air) in &optional {
+                let enabled = bits & bit != 0;
+                assert_eq!(air.is_in_variant(variant), enabled);
+                assert_eq!(multi_air.airs().contains(air), enabled);
+            }
+            let positions: Vec<_> = multi_air
+                .airs()
+                .iter()
+                .map(|air| Air::all().iter().position(|item| item == air).unwrap())
+                .collect();
+            assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+        }
+        assert_eq!(MultiAir::new().airs(), Air::all());
+    }
 
     /// The external assertion is part of the production relation but excluded from the ACE
     /// circuit digest. This test guards its weighting; raw bus-balance tests cover the underlying

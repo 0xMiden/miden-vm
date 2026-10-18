@@ -18,6 +18,7 @@ use alloc::vec::Vec;
 pub use deferred::session::{SessionInputError, WitnessLocation};
 #[cfg(feature = "prover")]
 use miden_core::deferred::PrecompileWitness;
+pub use miden_core::deferred::PvmAirVariant;
 pub use miden_core::proof::{HashFunction, PrecompileProof, StarkProof};
 
 #[cfg(feature = "trace")]
@@ -72,6 +73,37 @@ pub fn prove_precompiles_with_budget(
     max_prover_memory_bytes: u64,
 ) -> Result<PrecompileProof, PrecompileProvingError> {
     deferred::session::prove(witnesses, hash_fn, max_prover_memory_bytes)
+}
+
+/// Proves a batch using an explicit optional hash AIR selection and the default memory budget.
+///
+/// Witnesses that use a hash absent from `variant` are rejected before lowering. Unlike
+/// [`prove_precompiles`], this uses the exact requested selection, including unused hash AIRs.
+#[cfg(feature = "prover")]
+pub fn prove_precompiles_with_variant(
+    witnesses: Vec<PrecompileWitness>,
+    hash_fn: HashFunction,
+    variant: PvmAirVariant,
+) -> Result<PrecompileProof, PrecompileProvingError> {
+    prove_precompiles_with_variant_and_budget(
+        witnesses,
+        hash_fn,
+        variant,
+        DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
+    )
+}
+
+/// Same as [`prove_precompiles_with_variant`], with an explicit memory budget.
+///
+/// Only the selected AIRs contribute to the memory estimate and generated traces.
+#[cfg(feature = "prover")]
+pub fn prove_precompiles_with_variant_and_budget(
+    witnesses: Vec<PrecompileWitness>,
+    hash_fn: HashFunction,
+    variant: PvmAirVariant,
+    max_prover_memory_bytes: u64,
+) -> Result<PrecompileProof, PrecompileProvingError> {
+    deferred::session::prove_with_variant(witnesses, hash_fn, variant, max_prover_memory_bytes)
 }
 
 #[cfg(feature = "prover")]
@@ -150,6 +182,7 @@ pub mod trace {
 pub mod prover {
     pub use crate::{
         DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES, PrecompileProvingError, ProveError,
-        prove_precompiles, prove_precompiles_with_budget,
+        prove_precompiles, prove_precompiles_with_budget, prove_precompiles_with_variant,
+        prove_precompiles_with_variant_and_budget,
     };
 }

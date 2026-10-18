@@ -208,3 +208,5 @@ pub(crate) fn assert_same_rational_fold(
     assert_ne!(expected.1, QuadFelt::ZERO, "{context}: expected denominator is zero");
     assert_eq!(actual.0 * expected.1, expected.0 * actual.1, "{context}");
 }
+
+mod pvm_variants;

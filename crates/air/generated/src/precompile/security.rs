@@ -1,7 +1,7 @@
 //! Canonical security API backed by generated relation geometry and source-owned policy.
 use crate::vm::security::{COMMITMENT_ALIGNMENT, EIDOS_CHALLENGE_SAMPLE_BITS};
 use miden_air_source::precompile::security as source;
-use miden_core::proof::HashFunction;
+use miden_core::{deferred::PvmAirVariant, proof::HashFunction};
 use miden_stark::{pcs::PcsParams, security::fixed};
 pub use source::*;
 
@@ -107,4 +107,22 @@ pub fn conjectured_security_level_for_alignment(
 /// estimator's contract.
 pub fn security_report(params: &ProtocolParams, log_max_height: u32) -> SecurityReport {
     source::security_report_with_shape(params, log_max_height, shape(COMMITMENT_ALIGNMENT))
+}
+
+/// Security parameters for the relation authenticated by the selected transcript.
+pub fn proof_security_parameters_for(
+    pcs_params: &PcsParams,
+    log_max_height: u32,
+    alignment: usize,
+    hash_fn: HashFunction,
+    variant: PvmAirVariant,
+) -> ProofSecurityParameters {
+    let airs: alloc::vec::Vec<_> =
+        super::Air::all().into_iter().filter(|air| air.is_in_variant(variant)).collect();
+    source::proof_security_parameters_with_shape(
+        pcs_params,
+        log_max_height,
+        super::geometry(&airs, alignment).air_shape(),
+        hash_fn,
+    )
 }
