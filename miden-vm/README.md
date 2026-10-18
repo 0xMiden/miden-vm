@@ -1,7 +1,7 @@
 # Miden VM
 
 This crate aggregates all components of the Miden VM in a single place. Specifically, it re-exports
-functionality from [processor](../processor/), [prover](../prover/), and [verifier](../verifier/)
+functionality from [processor](../processor/), [prover](../crates/stark/vm/), and [verifier](../verifier/)
 crates. Additionally, when compiled as an executable, this crate can be used via a
 [CLI interface](#cli-interface) to execute Miden VM programs and to verify correctness of their
 execution.

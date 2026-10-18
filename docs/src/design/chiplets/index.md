@@ -105,7 +105,7 @@ The following selection covers Core requests and their stacked-chiplet responses
 | ACE initialization           | 16            |
 
 Other cross-AIR and virtual-table relations have their own IDs. The authoritative list is the
-`BusId` definition in `air/src/constraints/lookup/messages.rs`.
+`BusId` definition in `crates/air/source/src/constraints/lookup/messages.rs`.
 
 ## Chiplets module constraints
 

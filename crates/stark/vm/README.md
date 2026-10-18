@@ -1,7 +1,7 @@
 # Miden prover
 
 This crate proves post-execution witnesses produced by the
-[Miden processor](../processor/) using [Plonky3](https://github.com/0xMiden/Plonky3). The
+[Miden processor](../../../processor/) using [Plonky3](https://github.com/0xMiden/Plonky3). The
 synchronous `Prover` does not execute programs: it consumes `ExecutionWitness` values and owned
 batches of portable `PrecompileWitness` values.
 
@@ -54,14 +54,14 @@ to each deferred proof with `complete`, then verify each completed proof.
 compatibility.
 
 Transport, direct import, structural validity, and fixed limits are specified in the
-[deferred-proof semantics](../docs/src/design/deferred/semantics.md).
+[deferred-proof semantics](../../../docs/src/design/deferred/semantics.md).
 
 ### Recursive batch settlement
 
-The [batch settlement example](../crates/lib/core/tests/stark/pvm_settlement/batch.rs) verifies
+The [batch settlement example](../../../crates/lib/core/tests/stark/pvm_settlement/batch.rs) verifies
 multiple Miden VM proofs and settles their deferred work with one precompile VM proof. It also
 proves the batcher itself, leaving no deferred work for the recipient. The
-[MASM verification guide](../docs/src/user_docs/core_lib/recursive_verification.md#example-batch-n-executions)
+[MASM verification guide](../../../docs/src/user_docs/core_lib/recursive_verification.md#example-batch-n-executions)
 explains the claim list, ordered root fold, and host request.
 
 ### Synchronous execution and proving
@@ -95,7 +95,7 @@ To compile with `no_std`, disable default features via `--no-default-features` f
 ### Concurrent proof generation
 When compiled with the `concurrent` feature enabled, the prover generates STARK proofs using
 multiple threads. For the benefits of concurrent proof generation, see these
-[benchmarks](../README.md#Performance).
+[benchmarks](../../../README.md#Performance).
 
 Internally, we use [rayon](https://github.com/rayon-rs/rayon) for parallel computations. Use the
 `RAYON_NUM_THREADS` environment variable to control the number of threads used to generate a STARK
