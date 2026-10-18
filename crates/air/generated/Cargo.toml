@@ -32,6 +32,9 @@ miden-core.workspace = true
 miden-crypto.workspace = true
 p3-field.workspace = true
 
+[build-dependencies]
+miniz_oxide.workspace = true
+
 [dev-dependencies]
 insta.workspace = true
 miden-air-source = { workspace = true, features = ["tooling", "testing"] }

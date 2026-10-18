@@ -81,5 +81,10 @@
     }
   ],
   "pvm_evaluation": "authored dispatch delegated through independent production type",
-  "rust_evaluator": "../src/vm/generated.rs"
+  "rust_evaluator": "vm-evaluator.rs.zlib",
+  "rust_evaluator_bytes": 48176,
+  "rust_evaluator_codec": "zlib",
+  "rust_evaluator_sha256": "25ab1dcc012358242e825d9ea9aaa6b9390c56c21da970fa99d08da29ec6ee01",
+  "rust_evaluator_source_bytes": 255008,
+  "rust_evaluator_source_sha256": "ea2030b72b0683755d6669dc694150eb7ff6ca842b70afe6997603c4003b2850"
 }

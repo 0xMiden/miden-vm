@@ -15,6 +15,24 @@ Miden VM is a four-AIR statement:
 
 These AIRs and their internal components are tied together with typed LogUp relations.
 
+## Generated artifacts
+
+Production VM constraint evaluation uses optimized Rust generated from the independent authored
+AIR in `miden-air-source`. The package ships that exact source compressed in
+`artifacts/vm-evaluator.rs.zlib`. A small host build script validates its checksum, decompressed
+size and UTF-8, wraps it in its module, and writes `OUT_DIR/vm_evaluator.rs` for compilation.
+Ordinary builds do not run AIR capture or optimization. The pure Rust decoder runs on the host
+when cross compiling and adds no target `std` requirement.
+
+Canonical VM/PVM ACE circuits and their metadata also live in `artifacts/`; deliberately accepted
+protocol identities remain in `protocol/accepted.json`. Generated verifier MASM stays checked
+in under core-lib's existing `asm/sys/{vm,pvm}` paths for direct compiler consumption.
+
+From the workspace root, `make regenerate-constraints` updates managed outputs and
+`make check-constraints` checks their freshness. Follow the repository AC-power gate before Rust
+compilation or tests. These commands check accepted pins without replacing them and preserve
+independent authored-versus-production equivalence checks.
+
 All AIR constraints for Miden VM are described in detail in the [design](https://docs.miden.xyz/miden-vm/design) section of Miden VM documentation.
 
 If you'd like to learn more about AIR, the following blog posts from StarkWare are an excellent resource:

@@ -14,7 +14,7 @@ use miden_stark::{
     lookup::{BoundaryBuilder, LookupAir, LookupBuilder},
 };
 
-mod generated;
+include!(concat!(env!("OUT_DIR"), "/vm_evaluator.rs"));
 mod proof_order;
 pub use proof_order::{AIRS, MIDEN_AIR_COUNT, PROOF_ORDER_COUNT, ProofOrder};
 pub use source::PublicInputs;

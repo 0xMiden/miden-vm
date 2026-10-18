@@ -1,11 +1,11 @@
-//! Explicit canonical ACE artifact generation/checking from authored VM and PVM AIRs.
+//! Explicit Rust and canonical ACE artifact delivery/checking from authored VM and PVM AIRs.
 //!
 //! Accepted values are mandatory explicit inputs. This command compares candidates and never
 //! accepts a new pin, derives setup commitments, or imports production evaluator types.
 
 use std::{env, fs, path::PathBuf, process::ExitCode};
 
-use miden_air_source::{precompile, vm};
+use miden_air_source::{codegen::evaluator, precompile, vm};
 use miden_core::Felt;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -142,13 +142,29 @@ fn run() -> Result<(), String> {
         }));
         artifacts.push((name, bytes));
     }
+    let evaluator_source = evaluator::generate();
+    let evaluator_bytes = evaluator::encode(&evaluator_source);
+    let evaluator_sha256: String = Sha256::digest(&evaluator_bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let evaluator_source_sha256: String = Sha256::digest(evaluator_source.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     let manifest = json!({
         "artifact_schema": 1, "baseline": baseline,
         "field": "canonical Miden Felt, little-endian u64", "members": members,
-        "rust_evaluator": "../src/vm/generated.rs",
+        "rust_evaluator": evaluator::ARTIFACT_FILE,
+        "rust_evaluator_codec": "zlib",
+        "rust_evaluator_bytes": evaluator_bytes.len(),
+        "rust_evaluator_sha256": evaluator_sha256,
+        "rust_evaluator_source_bytes": evaluator_source.len(),
+        "rust_evaluator_source_sha256": evaluator_source_sha256,
         "pvm_evaluation": "authored dispatch delegated through independent production type",
     });
-    // Both relation pins and every transport round trip have passed before any output mutation.
+    artifacts.push((evaluator::ARTIFACT_FILE, evaluator_bytes));
+    // Both relation pins and ACE transport round trips have passed before any output mutation.
     if write {
         fs::create_dir_all(&destination)
             .map_err(|error| format!("{}: {error}", destination.display()))?;
@@ -163,13 +179,13 @@ fn run() -> Result<(), String> {
             let staged = fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
             if staged != bytes {
                 return Err(format!(
-                    "{} differs from authored canonical ACE; inspect before explicit --write",
+                    "{} differs from authored generated output; inspect before explicit --write",
                     path.display()
                 ));
             }
         }
         println!(
-            "{} {} ({} bytes; candidate digest matches explicit accepted pin)",
+            "{} {} ({} bytes)",
             if write { "wrote/verified" } else { "checked" },
             path.display(),
             bytes.len()

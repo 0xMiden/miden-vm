@@ -19,7 +19,10 @@ fn run() -> Result<(), String> {
             other => return Err(format!("unknown option: {other}")),
         }
     }
-    evaluator::run(&workspace.join("crates/air/generated/src/vm/generated.rs"), mode)?;
+    evaluator::run(
+        &workspace.join("crates/air/generated/artifacts").join(evaluator::ARTIFACT_FILE),
+        mode,
+    )?;
     constraints::run(&workspace, mode)?;
     precompile::run(&workspace, mode)?;
     if derive_setup {
