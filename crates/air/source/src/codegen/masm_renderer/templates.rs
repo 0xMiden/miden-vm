@@ -41,14 +41,8 @@ struct PvmLayoutTemplate<'a> {
 }
 
 #[derive(Template)]
-#[template(path = "verifier/vm_deep.masm", escape = "none")]
-struct VmDeepTemplate<'a> {
-    p: &'a V1RenderPlan,
-}
-
-#[derive(Template)]
-#[template(path = "verifier/pvm_deep.masm", escape = "none")]
-struct PvmDeepTemplate<'a> {
+#[template(path = "verifier/deep_adapter.masm", escape = "none")]
+struct DeepTemplate<'a> {
     p: &'a V1RenderPlan,
 }
 
@@ -106,11 +100,7 @@ pub(crate) fn render(p: &V1RenderPlan) -> Vec<RenderedArtifact> {
         super::RelationInput::Pvm { .. } => PvmLayoutTemplate { p }.render(),
     }
     .expect("packaged verifier template must render");
-    let deep = match &p.input.relation {
-        super::RelationInput::Vm(_) => VmDeepTemplate { p }.render(),
-        super::RelationInput::Pvm { .. } => PvmDeepTemplate { p }.render(),
-    }
-    .expect("packaged verifier template must render");
+    let deep = DeepTemplate { p }.render().expect("packaged verifier template must render");
     let wrapper = match &p.input.relation {
         super::RelationInput::Vm(_) => VmWrapperTemplate { p }.render(),
         super::RelationInput::Pvm { .. } => PvmWrapperTemplate {

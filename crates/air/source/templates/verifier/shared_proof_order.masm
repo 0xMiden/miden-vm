@@ -1,6 +1,7 @@
+{%- let pointer_module = "parameters" -%}
 #! Generated stable (height, canonical ID) networks, once per AIR count.
 use {LOG_AIR_TRACE_LENGTHS_PTR} from miden::core::stark::constants
 use miden::core::sys::verifier::parameters
 {%- for proof in proofs %}
-{%- include "verifier/shared_proof_order_body.masm" %}
+{%- include "verifier/proof_order_body.masm" %}
 {%- endfor %}

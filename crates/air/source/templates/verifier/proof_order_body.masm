@@ -5,7 +5,7 @@ push.{{ address }}
 {%- when PointerRef::SharedHeights with { address } -%}
 push.LOG_AIR_TRACE_LENGTHS_PTR
 {%- when PointerRef::Layout with { accessor, address } -%}
-exec.parameters::{{ accessor.name() }}
+exec.{{ pointer_module }}::{{ accessor.name() }}
 {%- endmatch -%}
 {%- endmacro %}
 #! Keys are 16*validated_log_height+canonical_id; equal heights retain ID order.
