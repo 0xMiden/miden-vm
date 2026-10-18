@@ -60,6 +60,7 @@
 - `build_trace` returns an error instead of panicking when a fragment continuation in an execution witness names a missing node, a node of the wrong kind, or a batch the basic block does not have ([#3978](https://github.com/0xMiden/miden-vm/pull/3978)).
 - Fixed assembler debug metadata losing procedure definitions and declared invocation targets for plain `exec`, including nested calls, re-exported procedures, and package linking, while preserving executable MAST roots. Raised the bounded debug-payload limit to 256 MiB and the debug string-table allowance to one million rows to accommodate merged dependency metadata; assembly now reports an error when emitted debug information exceeds the standard decoder limits ([#3982](https://github.com/0xMiden/miden-vm/pull/3982)).
 - Fixed cross-module calls through re-export aliases of private procedures by preserving the visibility granted through the alias.
+- [BREAKING] Rejected struct and enum types larger than `u32::MAX` bytes with an error instead of panicking (debug builds) or computing a wrapped size (release builds). This affects the assembler, the recursive type builder, and `Type` deserialization; the new fallible `StructType::try_from_parts` reports the error as `InvalidStructTypeError::SizeOverflow`, and `EnumType::new` as `InvalidEnumTypeError::SizeOverflow` ([#3959](https://github.com/0xMiden/miden-vm/issues/3959)).
 
 #### Features
 
