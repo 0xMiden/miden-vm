@@ -462,6 +462,25 @@ impl Type {
         (bits / 8) + (!bits.is_multiple_of(8)) as usize
     }
 
+    /// Same as [Self::size_in_bits], but returns `None` instead of overflowing `usize`.
+    ///
+    /// Use this to size a type that has not been validated yet: an array's size is its element
+    /// size times its length, which [Self::size_in_bits] does not check.
+    pub fn checked_size_in_bits(&self) -> Option<usize> {
+        match self {
+            Self::Struct(struct_ty) => struct_ty.size().checked_mul(8),
+            Self::Enum(enum_ty) => enum_ty.size_in_bytes().checked_mul(8),
+            Self::Array(array_ty) => array_ty.checked_size_in_bits(),
+            ty => Some(ty.size_in_bits()),
+        }
+    }
+
+    /// Same as [Self::size_in_bytes], but returns `None` instead of overflowing `usize`.
+    pub fn checked_size_in_bytes(&self) -> Option<usize> {
+        let bits = self.checked_size_in_bits()?;
+        Some((bits / 8) + (!bits.is_multiple_of(8)) as usize)
+    }
+
     /// Same as `size_in_bytes`, but with sufficient padding to guarantee alignment of the value.
     pub fn aligned_size_in_bytes(&self) -> usize {
         let align = self.min_alignment();
@@ -570,6 +589,42 @@ mod tests {
         assert_eq!(node.min_alignment(), 4);
         assert!(!node.is_zst());
         assert!(node.is_struct());
+    }
+
+    /// `[[felt; 2^30]; 2^29]` is 2^64 bits, one past what a 64-bit `usize` can hold.
+    fn array_whose_size_overflows_usize() -> Type {
+        let inner = Type::from(ArrayType::new(Type::Felt, 1 << 30));
+        Type::from(ArrayType::new(inner, 1 << 29))
+    }
+
+    #[test]
+    fn checked_size_reports_overflow_and_matches_unchecked_size_otherwise() {
+        let ty = array_whose_size_overflows_usize();
+        assert_eq!(ty.checked_size_in_bits(), None);
+        assert_eq!(ty.checked_size_in_bytes(), None);
+
+        for ty in [
+            Type::I1,
+            Type::Felt,
+            Type::U256,
+            Type::from(ArrayType::new(Type::U16, 3)),
+            Type::from(ArrayType::new(Type::from(ArrayType::new(Type::U8, 3)), 5)),
+            Type::from(StructType::new([Type::U8, Type::U32])),
+        ] {
+            assert_eq!(ty.checked_size_in_bits(), Some(ty.size_in_bits()), "{ty}");
+            assert_eq!(ty.checked_size_in_bytes(), Some(ty.size_in_bytes()), "{ty}");
+        }
+    }
+
+    #[test]
+    fn struct_with_a_field_whose_size_overflows_usize_is_an_error() {
+        // Sizing the field must not overflow: that panics in debug builds and, in release
+        // builds, wraps to a zero-byte field that the struct then accepts.
+        for repr in [TypeRepr::Default, TypeRepr::Transparent, TypeRepr::packed(1)] {
+            let err = StructType::try_from_parts(None, repr, [array_whose_size_overflows_usize()])
+                .unwrap_err();
+            assert_eq!(err, InvalidStructTypeError::SizeOverflow, "{repr:?}");
+        }
     }
 
     #[test]

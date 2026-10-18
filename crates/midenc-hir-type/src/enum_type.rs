@@ -624,6 +624,16 @@ mod tests {
     }
 
     #[test]
+    fn enum_type_rejects_variant_payload_whose_size_overflows_usize() {
+        // `[[felt; 2^30]; 2^29]` is 2^64 bits; sizing it must fail cleanly instead of overflowing.
+        let inner = Type::from(ArrayType::new(Type::Felt, 1 << 30));
+        let payload = Type::from(ArrayType::new(inner, 1 << 29));
+        let err = EnumType::new("T".into(), Type::U8, [Variant::new("A".into(), payload, None)])
+            .unwrap_err();
+        assert!(matches!(err, InvalidEnumTypeError::SizeOverflow), "unexpected error: {err}");
+    }
+
+    #[test]
     #[should_panic = "discriminant value 256 is out of range for u8"]
     fn out_of_range_discriminant_values_are_caught() {
         EnumType::new("T".into(), Type::U8, [Variant::c_like("A".into(), Some(256))])
