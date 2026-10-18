@@ -244,8 +244,7 @@ impl PvmReadLayout {
 fn compute() -> Result<GeneratedArtifacts, String> {
     let source = build_canonical_precompile_ace_circuit().map_err(|e| format!("{e}"))?;
     let input_layout = source.layout();
-    let circuit = PvmRecursiveAceCircuit::try_from(source.to_ace().map_err(|e| format!("{e}"))?)
-        .map_err(|e| format!("{e}"))?;
+    let circuit = PvmRecursiveAceCircuit::from(source.to_ace());
     let read_layout = PvmReadLayout::from_input_layout(input_layout)?;
     let num_quotient_chunks = input_layout.counts.num_quotient_chunks;
     if !num_quotient_chunks.is_power_of_two() {

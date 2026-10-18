@@ -12,7 +12,11 @@ pub fn build_canonical_multi_air_ace_circuit(
     config: AceConfig,
 ) -> Result<AceCircuit<QuadFelt>, AceError> {
     let airs = AIRS.map(HandwrittenMidenAir);
-    miden_ace_codegen::build_canonical_multi_air_ace_circuit(&airs, config, LMCS_ALIGNMENT)
+    Ok(miden_ace_codegen::build_canonical_multi_air_ace_circuit(
+        &airs,
+        config,
+        LMCS_ALIGNMENT,
+    ))
 }
 
 #[cfg(test)]
@@ -41,7 +45,7 @@ mod tests {
 
         // The extra fold-coefficient slots must not break the READ-section alignment the
         // recursive verifier's `adv_pipe` ingestion relies on.
-        let encoded = circuit.to_ace().expect("canonical circuit must be MASM encodable");
+        let encoded = circuit.to_ace();
         assert!(
             encoded.size_in_felt().is_multiple_of(8),
             "encoded canonical circuit must be 8-felt aligned for adv_pipe"

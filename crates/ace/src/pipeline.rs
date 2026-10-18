@@ -11,7 +11,7 @@ use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::stark::air::{BaseAir, LiftedAir};
 
 use crate::{
-    AceError, EXT_DEGREE,
+    EXT_DEGREE,
     circuit::{AceCircuit, emit_circuit},
     dag::{
         AceDag, DagBuilder, NodeId, NodeKind, PeriodicColumnData, build_verifier_dag_from_ir,
@@ -56,24 +56,19 @@ pub struct AceArtifacts<EF> {
 /// The constraints are captured from `air.eval`: callers producing production
 /// artifacts must pass an AIR whose `eval` routes to the hand-written
 /// definitions (e.g. `HandwrittenMidenAir`).
-pub fn build_ace_circuit_for_air<A>(
-    air: &A,
-    config: AceConfig,
-) -> Result<AceCircuit<QuadFelt>, AceError>
+/// Invalid compiler configuration or inconsistent authored AIR/layout metadata panics.
+pub fn build_ace_circuit_for_air<A>(air: &A, config: AceConfig) -> AceCircuit<QuadFelt>
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
-    let artifacts = build_ace_dag_for_air(air, config)?;
+    let artifacts = build_ace_dag_for_air(air, config);
     emit_circuit(&artifacts.dag, artifacts.layout)
 }
 
 /// Build a verifier-equivalent DAG and layout for the provided AIR.
 ///
 /// See [`build_ace_circuit_for_air`] for the capture invariant on `air`.
-pub fn build_ace_dag_for_air<A>(
-    air: &A,
-    config: AceConfig,
-) -> Result<AceArtifacts<QuadFelt>, AceError>
+pub fn build_ace_dag_for_air<A>(air: &A, config: AceConfig) -> AceArtifacts<QuadFelt>
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
@@ -88,10 +83,7 @@ where
 }
 
 /// Build verifier-equivalent DAGs against one shared periodic-column basis.
-fn build_ace_dags_for_airs<A>(
-    airs: &[A],
-    config: AceConfig,
-) -> Result<Vec<AceArtifacts<QuadFelt>>, AceError>
+fn build_ace_dags_for_airs<A>(airs: &[A], config: AceConfig) -> Vec<AceArtifacts<QuadFelt>>
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
@@ -121,11 +113,11 @@ fn build_ace_dag_for_air_with_periodic_columns<A>(
     config: AceConfig,
     periodic_columns: Vec<Vec<Felt>>,
     shared_period: usize,
-) -> Result<AceArtifacts<QuadFelt>, AceError>
+) -> AceArtifacts<QuadFelt>
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
-    let counts = input_counts_for_air(air, config)?;
+    let counts = input_counts_for_air(air, config);
     let layout = match config.layout {
         LayoutKind::Native => InputLayout::new(counts),
         LayoutKind::Masm => InputLayout::new_masm(counts),
@@ -143,7 +135,7 @@ where
         shared_period,
     );
 
-    Ok(AceArtifacts { layout, dag })
+    AceArtifacts { layout, dag }
 }
 
 fn max_period<F>(periodic_columns: &[Vec<F>]) -> usize {
@@ -164,7 +156,7 @@ fn reemit_air_root(
     air_index: usize,
     offsets: TraceOffsets,
 ) -> (NodeId, NodeId) {
-    debug_assert_eq!(source.root().index() + 1, source.nodes.len());
+    assert_eq!(source.root().index() + 1, source.nodes.len(), "verifier root must be final");
     // The right operand is `Mul(q, v)` over quotient inputs, which AIR constraints cannot
     // reference. It is therefore neither equal nor structurally related to the accumulator,
     // so none of `DagBuilder::sub`'s simplifications can remove the final `Sub` node.
@@ -211,25 +203,18 @@ fn reemit_air_root(
     (translated[accumulator.index()], translated[quotient_binding.index()])
 }
 
-fn input_counts_for_air<A>(air: &A, config: AceConfig) -> Result<InputCounts, AceError>
+fn input_counts_for_air<A>(air: &A, config: AceConfig) -> InputCounts
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
-    if config.num_quotient_chunks == 0 {
-        return Err(AceError::InvalidInputLayout {
-            message: "num_quotient_chunks must be > 0".into(),
-        });
-    }
+    assert!(config.num_quotient_chunks > 0, "num_quotient_chunks must be > 0");
     let num_randomness = air.num_randomness();
-    if num_randomness != 2 {
-        return Err(AceError::InvalidInputLayout {
-            message: format!(
-                "AIR must declare exactly 2 randomness challenges (alpha, beta), got {num_randomness}"
-            ),
-        });
-    }
+    assert_eq!(
+        num_randomness, 2,
+        "AIR must declare exactly 2 randomness challenges (alpha, beta)"
+    );
 
-    Ok(InputCounts {
+    InputCounts {
         preprocessed_width: air.preprocessed_width(),
         width: air.width(),
         aux_width: air.aux_width(),
@@ -237,7 +222,7 @@ where
         num_public: air.num_public_values(),
         num_randomness,
         num_quotient_chunks: config.num_quotient_chunks,
-    })
+    }
 }
 
 /// Builds one order-invariant ACE circuit for a nonempty AIR set.
@@ -245,50 +230,59 @@ where
 /// Each AIR reads trace inputs at its canonical instance offset and its fold coefficient from
 /// [`InputKey::MultiAirFoldCoeff`]. The caller must scatter proof-ordered trace segments to those
 /// offsets and stage `beta^(N - 1 - k)` for the AIR at proof position `k`, where `N = airs.len()`.
-/// Trace widths are padded to `trace_width_alignment` base-field elements before concatenation.
+/// Trace and committed quotient widths are padded to `trace_width_alignment` base-field elements.
+/// Quotient recomposition reads only the configured logical chunks.
+/// Empty AIR sets, invalid alignment, overflow or inconsistent compiler metadata panic.
 pub fn build_canonical_multi_air_ace_circuit<A>(
     airs: &[A],
     config: AceConfig,
     trace_width_alignment: usize,
-) -> Result<AceCircuit<QuadFelt>, AceError>
+) -> AceCircuit<QuadFelt>
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
     let num_airs = airs.len();
-    if num_airs == 0 {
-        return Err(AceError::InvalidInputLayout {
-            message: "multi-AIR composition requires a nonempty AIR set".into(),
-        });
-    }
-    if trace_width_alignment == 0 {
-        return Err(AceError::InvalidInputLayout {
-            message: "trace width alignment must be nonzero".into(),
-        });
-    }
+    assert!(num_airs > 0, "multi-AIR composition requires a nonempty AIR set");
+    assert!(trace_width_alignment > 0, "trace width alignment must be nonzero");
 
-    let artifacts = build_ace_dags_for_airs(airs, config)?;
+    let artifacts = build_ace_dags_for_airs(airs, config);
     let shared = artifacts[0].layout.counts;
-    if artifacts.iter().any(|air| air.layout.counts.num_public != shared.num_public) {
-        return Err(AceError::InvalidInputLayout {
-            message: "all AIRs must use the same public-value window".into(),
-        });
-    }
+    assert!(
+        artifacts.iter().all(|air| air.layout.counts.num_public == shared.num_public),
+        "all AIRs must use the same public-value window"
+    );
 
     let mut offsets = Vec::with_capacity(num_airs);
     let mut totals = TraceOffsets::default();
     for artifact in &artifacts {
         let counts = artifact.layout.counts;
-        let aligned_aux = (counts.aux_width * EXT_DEGREE).next_multiple_of(trace_width_alignment);
-        if !aligned_aux.is_multiple_of(EXT_DEGREE) {
-            return Err(AceError::InvalidInputLayout {
-                message: "aligned auxiliary width must be divisible by the extension degree".into(),
-            });
-        }
+        // Aux widths count EF columns; alignment is in base coordinates.
+        let aligned_aux = counts
+            .aux_width
+            .checked_mul(EXT_DEGREE)
+            .and_then(|width| width.checked_next_multiple_of(trace_width_alignment))
+            .expect("aligned auxiliary width overflows");
+        assert!(
+            aligned_aux.is_multiple_of(EXT_DEGREE),
+            "aligned auxiliary width must be divisible by the extension degree"
+        );
         offsets.push(totals);
-        totals.preprocessed += counts.preprocessed_width.next_multiple_of(trace_width_alignment);
-        totals.main += counts.width.next_multiple_of(trace_width_alignment);
-        totals.aux += aligned_aux / EXT_DEGREE;
-        totals.boundary += counts.num_aux_boundary;
+        let add_aligned = |total: usize, width: usize| {
+            width
+                .checked_next_multiple_of(trace_width_alignment)
+                .and_then(|width| total.checked_add(width))
+                .expect("aligned trace width overflows")
+        };
+        totals.preprocessed = add_aligned(totals.preprocessed, counts.preprocessed_width);
+        totals.main = add_aligned(totals.main, counts.width);
+        totals.aux = totals
+            .aux
+            .checked_add(aligned_aux / EXT_DEGREE)
+            .expect("aggregate auxiliary width overflows");
+        totals.boundary = totals
+            .boundary
+            .checked_add(counts.num_aux_boundary)
+            .expect("aggregate boundary width overflows");
     }
 
     let counts = InputCounts {
@@ -301,8 +295,16 @@ where
         num_quotient_chunks: shared.num_quotient_chunks,
     };
     let layout = match config.layout {
-        LayoutKind::Native => InputLayout::new_multi_air(counts, num_airs),
-        LayoutKind::Masm => InputLayout::new_masm_multi_air(counts, num_airs),
+        LayoutKind::Native => InputLayout::new_multi_air_with_quotient_alignment(
+            counts,
+            num_airs,
+            trace_width_alignment,
+        ),
+        LayoutKind::Masm => InputLayout::new_masm_multi_air_with_quotient_alignment(
+            counts,
+            num_airs,
+            trace_width_alignment,
+        ),
     };
 
     // Re-emit in stable instance order, each AIR placed at its canonical trace offset and scaled
@@ -313,11 +315,10 @@ where
         roots.push(reemit_air_root(&mut builder, &artifacts.dag, air_index, offsets[air_index]));
     }
     let quotient_binding = roots[0].1;
-    if roots.iter().any(|&(_, binding)| binding != quotient_binding) {
-        return Err(AceError::InvalidInputLayout {
-            message: "all AIR quotient bindings must use the same q*v node".into(),
-        });
-    }
+    assert!(
+        roots.iter().all(|&(_, binding)| binding == quotient_binding),
+        "all AIR quotient bindings must use the same q*v node"
+    );
 
     let mut accumulator = None;
     for (air_index, &(acc, _)) in roots.iter().enumerate() {

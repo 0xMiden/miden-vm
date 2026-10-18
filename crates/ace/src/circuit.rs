@@ -3,14 +3,15 @@
 //! The emitted circuit is a flat list of inputs, constants, and arithmetic
 //! ops that matches the ACE chiplet execution model.
 
+use alloc::vec::Vec;
+#[cfg(feature = "compiler")]
 use std::collections::HashMap;
 
 use miden_crypto::field::Field;
 
-use crate::{
-    AceError, InputLayout,
-    dag::{AceDag, NodeId, NodeKind},
-};
+use crate::InputLayout;
+#[cfg(feature = "compiler")]
+use crate::dag::{AceDag, NodeId, NodeKind};
 
 /// Arithmetic operations supported by the ACE circuit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,13 +55,11 @@ impl<EF: Field> AceCircuit<EF> {
     }
 
     /// Evaluate the circuit against the provided input vector.
-    pub fn eval(&self, inputs: &[EF]) -> Result<EF, AceError> {
-        if inputs.len() != self.layout.total_inputs {
-            return Err(AceError::InvalidInputLength {
-                expected: self.layout.total_inputs,
-                got: inputs.len(),
-            });
-        }
+    ///
+    /// Panics if the input length differs from the compiler-owned layout. This evaluator
+    /// returns the selected root, independently of the encoded runtime's padding operations.
+    pub fn eval(&self, inputs: &[EF]) -> EF {
+        assert_eq!(inputs.len(), self.layout.total_inputs, "ACE input length must match layout");
         let mut op_values = vec![EF::ZERO; self.operations.len()];
         for (idx, op) in self.operations.iter().enumerate() {
             let lhs = self.node_value(op.lhs, inputs, &op_values);
@@ -71,7 +70,7 @@ impl<EF: Field> AceCircuit<EF> {
                 AceOp::Mul => lhs * rhs,
             };
         }
-        Ok(self.node_value(self.root, inputs, &op_values))
+        self.node_value(self.root, inputs, &op_values)
     }
 
     /// Total number of nodes (inputs + constants + ops).
@@ -89,7 +88,9 @@ impl<EF: Field> AceCircuit<EF> {
 }
 
 /// Emit an ACE circuit from the DAG and input layout.
-pub fn emit_circuit<EF>(dag: &AceDag<EF>, layout: InputLayout) -> Result<AceCircuit<EF>, AceError>
+/// Panics if an authored DAG input is absent from the layout.
+#[cfg(feature = "compiler")]
+pub fn emit_circuit<EF>(dag: &AceDag<EF>, layout: InputLayout) -> AceCircuit<EF>
 where
     EF: Field,
 {
@@ -103,9 +104,9 @@ where
     for (idx, node) in dag.nodes().iter().enumerate() {
         let ace_node = match node {
             NodeKind::Input(key) => {
-                let input_idx = layout.index(*key).ok_or_else(|| AceError::InvalidInputLayout {
-                    message: format!("missing input key in layout: {key:?}"),
-                })?;
+                let input_idx = layout
+                    .index(*key)
+                    .unwrap_or_else(|| panic!("missing input key in layout: {key:?}"));
                 AceNode::Input(input_idx)
             },
             NodeKind::Constant(value) => {
@@ -155,9 +156,53 @@ where
     }
 
     let root = lookup_node(&node_map, dag.root());
-    Ok(AceCircuit { layout, constants, operations, root })
+    AceCircuit { layout, constants, operations, root }
 }
 
+#[cfg(feature = "compiler")]
 fn lookup_node(map: &[Option<AceNode>], id: NodeId) -> AceNode {
     map[id.index()].expect("ACE DAG nodes must be topologically ordered")
+}
+
+#[cfg(test)]
+mod runtime_tests {
+    use miden_core::{Felt, field::QuadFelt};
+    use miden_crypto::field::PrimeCharacteristicRing;
+
+    use super::*;
+    use crate::InputCounts;
+
+    #[test]
+    fn off_vm_evaluation_returns_selected_root_even_with_later_operations() {
+        let layout = InputLayout::new(InputCounts {
+            preprocessed_width: 0,
+            width: 0,
+            aux_width: 0,
+            num_aux_boundary: 0,
+            num_public: 2,
+            num_randomness: 2,
+            num_quotient_chunks: 1,
+        });
+        let circuit = AceCircuit {
+            layout,
+            constants: vec![],
+            operations: vec![
+                AceOpNode {
+                    op: AceOp::Sub,
+                    lhs: AceNode::Input(0),
+                    rhs: AceNode::Input(1),
+                },
+                AceOpNode {
+                    op: AceOp::Mul,
+                    lhs: AceNode::Input(0),
+                    rhs: AceNode::Input(1),
+                },
+            ],
+            root: AceNode::Operation(0),
+        };
+        let mut inputs = vec![QuadFelt::ZERO; circuit.layout.total_inputs];
+        inputs[0] = QuadFelt::from(Felt::from_u32(3));
+        inputs[1] = QuadFelt::from(Felt::from_u32(5));
+        assert_eq!(circuit.eval(&inputs), QuadFelt::from(-Felt::from_u32(2)));
+    }
 }

@@ -1,8 +1,8 @@
 [package]
-name = "miden-ace-codegen"
+name = "miden-ace"
 version = "1.0.0"
-description = "ACE circuit codegen for Plonky3-based Miden AIRs."
-documentation = "https://docs.rs/miden-ace-codegen"
+description = "ACE runtime, circuit compilation, and rendering for Miden AIRs."
+documentation = "https://docs.rs/miden-ace"
 readme = "README.md"
 categories = ["cryptography"]
 keywords = ["air", "arithmetization", "crypto", "miden"]
@@ -14,14 +14,20 @@ rust-version.workspace = true
 edition.workspace = true
 
 [features]
-testing = []
+default = ["std"]
+std = ["miden-core/std", "miden-crypto/std", "thiserror/std"]
+compiler = ["std", "dep:miden-constraint-compiler"]
+testing = ["compiler"]
+arbitrary = ["dep:proptest", "miden-core/arbitrary"]
 
 [dependencies]
-miden-constraint-compiler = { workspace = true }
+proptest = { workspace = true, optional = true }
+miden-constraint-compiler = { workspace = true, optional = true }
 miden-core = { workspace = true }
 miden-crypto = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-miden-core = { workspace = true, features = ["std"] }
+miden-test-serialization-macros = { workspace = true }
+miden-core = { workspace = true, features = ["std", "arbitrary"] }
 proptest.workspace = true

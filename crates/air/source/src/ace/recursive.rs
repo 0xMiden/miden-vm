@@ -34,8 +34,7 @@ pub use miden_ace_codegen::RecursiveAceCircuit;
 /// [`shared_recursive_circuit`] rather than rebuild it for each proof.
 pub fn build_recursive_verifier_ace_circuit() -> Result<RecursiveAceCircuit, AceError> {
     let circuit = build_canonical_multi_air_ace_circuit(recursive_verifier_ace_config())?;
-    let encoded = circuit.to_ace()?;
-    encoded.try_into()
+    Ok(circuit.to_ace().into())
 }
 
 /// Returns the process-wide canonical circuit shared by every proof order.

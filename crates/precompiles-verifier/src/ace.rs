@@ -54,7 +54,11 @@ fn precompile_ace_config() -> AceConfig {
 /// position `k` with the coefficient `beta^(NUM_CHIPLETS - 1 - k)`.
 pub fn build_canonical_precompile_ace_circuit() -> Result<AceCircuit<QuadFelt>, AceError> {
     let airs = ChipletAir::all();
-    build_canonical_multi_air_ace_circuit(&airs, precompile_ace_config(), LMCS_ALIGNMENT)
+    Ok(build_canonical_multi_air_ace_circuit(
+        &airs,
+        precompile_ace_config(),
+        LMCS_ALIGNMENT,
+    ))
 }
 
 // RECURSIVE VERIFIER CIRCUIT
@@ -67,8 +71,7 @@ pub use miden_ace_codegen::RecursiveAceCircuit as PvmRecursiveAceCircuit;
 /// A caller that needs the circuit per proof should hold [`shared_pvm_recursive_circuit`] rather
 /// than rebuild it here.
 pub fn build_pvm_recursive_verifier_ace_circuit() -> Result<PvmRecursiveAceCircuit, AceError> {
-    let encoded = build_canonical_precompile_ace_circuit()?.to_ace()?;
-    encoded.try_into()
+    Ok(build_canonical_precompile_ace_circuit()?.to_ace().into())
 }
 
 /// Returns the process-wide canonical circuit shared by every proof order.
@@ -193,10 +196,7 @@ mod tests {
     /// else: its digest is what the compiled-in PVM circuit commitment has to pin.
     #[test]
     fn pvm_recursive_circuit_matches_the_canonical_builder() {
-        let encoded = build_canonical_precompile_ace_circuit()
-            .expect("canonical circuit")
-            .to_ace()
-            .expect("canonical circuit must be MASM encodable");
+        let encoded = build_canonical_precompile_ace_circuit().expect("canonical circuit").to_ace();
         let produced = build_pvm_recursive_verifier_ace_circuit().expect("recursive circuit");
 
         assert_eq!(produced.num_inputs, encoded.num_vars());
@@ -238,7 +238,7 @@ mod tests {
                     .expect("canonical fold-coefficient slot");
                 canonical_inputs[index] = beta.exp_u64((NUM_CHIPLETS - 1 - position) as u64);
             }
-            let canonical_root = canonical.eval(&canonical_inputs).expect("canonical evaluation");
+            let canonical_root = canonical.eval(&canonical_inputs);
 
             let direct = miden_ace_codegen::testing::eval_multi_air_constraints(
                 &airs,

@@ -405,7 +405,7 @@ pub(super) fn execute_and_check(test: &Test, proof_stream: &[u64], claim: &[u64]
     assert_air_selectors_match_trace_metadata(&read, &inputs, layout);
     assert_fold_coefficients_match_the_proof_order(&read, &order, &inputs, layout);
 
-    let result = circuit.eval(&inputs).expect("ACE eval failed");
+    let result = circuit.eval(&inputs);
     assert!(
         result.is_zero(),
         "ACE cross-evaluation is non-zero: {result:?}\n\

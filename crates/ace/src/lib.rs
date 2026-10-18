@@ -1,90 +1,93 @@
-//! ACE circuit codegen for Plonky3-based Miden AIRs.
+//! ACE runtime, circuit compilation, and shared recursive-verifier rendering.
 //!
-//! The pipeline is:
-//! 1. Capture AIR constraints into the `miden-constraint-compiler` IR.
-//! 2. Lower the constraint graph into a DAG that mirrors verifier constraints evaluation.
-//! 3. Emit an ACE circuit plus an `InputLayout` describing the MASM ACE-READ section order.
-//!
-//! The resulting circuit is intended to run inside the recursive verifier. All
-//! input layout decisions (point-major OOD ordering, aux/quotient coords, and
-//! alpha/beta randomness expansion) are centralized in this crate so tests can
-//! validate both layout and evaluation.
-//!
-//! Quick start:
-//! ```ignore
-//! use miden_ace_codegen::{AceConfig, LayoutKind, build_ace_circuit_for_air};
-//! use miden_air::ChipletsAir;
-//!
-//! let config = AceConfig { num_quotient_chunks: 8, layout: LayoutKind::Masm };
-//! let circuit = build_ace_circuit_for_air(&ChipletsAir, config)?;
-//! ```
-//!
-//! Module map (data flow):
-//! - `pipeline`: public entry points that orchestrate layout + DAG + circuit emission.
-//! - `dag`: verifier-style DAG IR and lowering helpers.
-//! - `circuit`: off-VM circuit representation (inputs/constants/ops/root).
-//! - `layout`: READ-section layout and index mapping.
-//! - `encode`: ACE stream encoding + padding rules.
-//! - `masm`: shared renderer for relation-local MASM constraint evaluators.
-//! - `randomness`: challenge input planning for layouts + DAG lowering.
-//! - `quotient`: barycentric quotient recomposition helpers (used by DAG + tests).
-//! - `proof_order`: Lehmer ranking and the sorting network of a relation's committed-trace
-//!   orderings.
-//! - `order_maps`: shared renderer for the MASM proof-order pass that materializes inverse maps.
-//! - `ood_scatter`: shared OOD scatter planning and MASM procedure generation.
+//! Runtime circuit data, canonical artifact decoding, selected-root evaluation and sequential
+//! evaluated-wire records are available without the compiler. The optional `compiler` feature
+//! captures AIR constraints through the constraint compiler, lowers them into a verifier DAG,
+//! and emits circuit streams and MASM. Enabling `std` alone does not enable the compiler.
 
-// Core IR and lowering.
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[macro_use]
+extern crate alloc;
+
+use alloc::string::String;
+
 mod circuit;
-mod dag;
-
-// Input layout and encoding.
 mod encode;
+pub mod instruction;
 mod layout;
-mod masm;
 mod ood_scatter;
-mod order_maps;
 mod proof_order;
-mod quotient;
 mod randomness;
+mod records;
 
-// High-level orchestration.
+#[cfg(feature = "compiler")]
+mod artifact;
+#[cfg(feature = "compiler")]
+mod dag;
+#[cfg(feature = "compiler")]
+mod masm;
+#[cfg(feature = "compiler")]
+mod order_maps;
+#[cfg(feature = "compiler")]
 mod pipeline;
+#[cfg(feature = "compiler")]
+mod quotient;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "compiler"))]
 mod tests;
-#[cfg(test)]
+#[cfg(all(test, feature = "compiler"))]
 mod unit_tests;
 
 /// Extension field degree (quadratic extension for Miden VM).
 pub const EXT_DEGREE: usize = 2;
 
-/// Errors returned by ACE codegen.
+/// External circuit format and guest-supplied execution errors.
 #[derive(Debug, thiserror::Error)]
 pub enum AceError {
-    #[error("invalid input length: expected {expected}, got {got}")]
-    InvalidInputLength { expected: usize, got: usize },
     #[error("invalid input layout: {message}")]
     InvalidInputLayout { message: String },
+    #[error("failed to decode instruction")]
+    InvalidInstruction,
+    #[error("failed to read from the wiring bus")]
+    UnavailableWire,
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(all(feature = "compiler", any(test, feature = "testing")))]
 pub mod testing;
 
-/// Exposed for the lowering differential tests (`miden-air/tests/ace_codegen.rs`);
-/// production consumes the IR lowering through the pipeline.
-#[cfg(any(test, feature = "testing"))]
+#[cfg(all(feature = "compiler", any(test, feature = "testing")))]
 pub use crate::dag::{PeriodicColumnData, build_verifier_dag, build_verifier_dag_from_ir};
+#[cfg(feature = "compiler")]
 pub use crate::{
-    circuit::{AceCircuit, emit_circuit},
+    artifact::CompiledCircuit,
+    circuit::emit_circuit,
     dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
-    encode::{EncodedCircuit, RecursiveAceCircuit},
-    layout::{InputCounts, InputKey, InputLayout},
     masm::{FoldCoefficientStaging, MasmConstraintsEvalConfig, render_masm_constraints_eval},
-    ood_scatter::OodScatterPlan,
     order_maps::{ProofOrderMapsConfig, render_proof_order_maps},
     pipeline::{
         AceArtifacts, AceConfig, LayoutKind, build_ace_circuit_for_air, build_ace_dag_for_air,
         build_canonical_multi_air_ace_circuit,
     },
-    proof_order::{MAX_ORDER_AIRS, factorial, order_from_tag, order_tag},
 };
+pub use crate::{
+    circuit::AceCircuit,
+    encode::{EncodedCircuit, RecursiveAceCircuit},
+    layout::{InputCounts, InputKey, InputLayout},
+    ood_scatter::OodScatterPlan,
+    proof_order::{
+        MAX_ORDER_AIRS, PROOF_ORDER_KEY_STRIDE, factorial, order_from_tag, order_tag,
+        sorting_network as proof_order_comparators,
+    },
+    records::{EvalNode, EvaluationTrace, ReadNode},
+};
+
+/// Optional AIR capture, lowering, and circuit emission.
+#[cfg(feature = "compiler")]
+pub mod compiler {
+    pub use crate::{
+        AceArtifacts, AceConfig, AceDag, CompiledCircuit, DagBuilder, DagSnapshot, LayoutKind,
+        NodeId, NodeKind, build_ace_circuit_for_air, build_ace_dag_for_air,
+        build_canonical_multi_air_ace_circuit, emit_circuit,
+    };
+}

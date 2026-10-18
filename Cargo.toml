@@ -85,7 +85,9 @@ opt-level = 0
 
 [workspace.dependencies]
 # Workspace crates
-miden-ace-codegen       = { path = "./crates/ace", version = "1.0", default-features = false }
+miden-ace               = { path = "./crates/ace", version = "1.0", default-features = false }
+# Temporary compiler alias until AIR/source tooling migrates in the ownership stages.
+miden-ace-codegen       = { package = "miden-ace", path = "./crates/ace", version = "1.0", default-features = false, features = ["compiler"] }
 miden-air               = { path = "./crates/air/source", version = "1.0", default-features = false }
 miden-assembly          = { path = "./crates/assembly", version = "1.0", default-features = false }
 miden-assembly-syntax   = { path = "./crates/assembly-syntax", version = "1.0", default-features = false }

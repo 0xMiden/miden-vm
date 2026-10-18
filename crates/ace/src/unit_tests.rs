@@ -48,7 +48,7 @@ fn ace_simple_circuit_matches_hand_eval() {
 
     let dag = builder.build(root);
 
-    let circuit: AceCircuit<QuadFelt> = emit_circuit(&dag, layout.clone()).expect("emit circuit");
+    let circuit: AceCircuit<QuadFelt> = emit_circuit(&dag, layout.clone());
 
     let a_val = QuadFelt::from(Felt::new_unchecked(3));
     let b_val = QuadFelt::from(Felt::new_unchecked(5));
@@ -63,7 +63,7 @@ fn ace_simple_circuit_matches_hand_eval() {
         ],
     );
 
-    let result = circuit.eval(&inputs).expect("circuit eval");
+    let result = circuit.eval(&inputs);
     assert!(result.is_zero());
 }
 
@@ -86,7 +86,7 @@ fn ace_simple_circuit_with_shared_terms() {
 
     let dag = builder.build(root);
 
-    let circuit: AceCircuit<QuadFelt> = emit_circuit(&dag, layout.clone()).expect("emit circuit");
+    let circuit: AceCircuit<QuadFelt> = emit_circuit(&dag, layout.clone());
 
     let a_val = QuadFelt::from(Felt::new_unchecked(7));
     let b_val = QuadFelt::from(Felt::new_unchecked(2));
@@ -101,7 +101,7 @@ fn ace_simple_circuit_with_shared_terms() {
         ],
     );
 
-    let result = circuit.eval(&inputs).expect("circuit eval");
+    let result = circuit.eval(&inputs);
     assert!(result.is_zero());
 }
 
@@ -129,9 +129,9 @@ proptest! {
             };
             let mut dag = builder.build(root);
             dag.compact();
-            let circuit = emit_circuit(&dag, layout.clone()).expect("emit normalized circuit");
+            let circuit = emit_circuit(&dag, layout.clone());
 
-            prop_assert_eq!(circuit.eval(&inputs).expect("evaluate normalized circuit"), expected);
+            prop_assert_eq!(circuit.eval(&inputs), expected);
         }
 
         let mut builder = DagBuilder::<QuadFelt>::new();
@@ -141,8 +141,8 @@ proptest! {
         let root = builder.sub(a_id, neg_b);
         let mut dag = builder.build(root);
         dag.compact();
-        let circuit = emit_circuit(&dag, layout).expect("emit normalized circuit");
-        prop_assert_eq!(circuit.eval(&inputs).expect("evaluate normalized circuit"), a + b);
+        let circuit = emit_circuit(&dag, layout);
+        prop_assert_eq!(circuit.eval(&inputs), a + b);
     }
 
     #[test]
@@ -177,9 +177,9 @@ proptest! {
             };
             let mut dag = builder.build(root);
             dag.compact();
-            let circuit = emit_circuit(&dag, layout.clone()).expect("emit normalized circuit");
+            let circuit = emit_circuit(&dag, layout.clone());
 
-            prop_assert_eq!(circuit.eval(&inputs).expect("evaluate normalized circuit"), expected);
+            prop_assert_eq!(circuit.eval(&inputs), expected);
         }
     }
 
@@ -238,17 +238,17 @@ proptest! {
         let mut dag = builder.build(root);
         dag.compact();
 
-        let original = emit_circuit(&dag, layout.clone()).expect("emit original circuit");
+        let original = emit_circuit(&dag, layout.clone());
         let normalized_dag = normalize_dag(dag);
         let normalized_len = normalized_dag.nodes.len();
         let normalized_dag = normalize_dag(normalized_dag);
         prop_assert_eq!(normalized_dag.nodes.len(), normalized_len);
         let normalized =
-            emit_circuit(&normalized_dag, layout).expect("emit normalized circuit");
+            emit_circuit(&normalized_dag, layout);
         prop_assert!(normalized.operations.len() < original.operations.len());
         prop_assert_eq!(
-            normalized.eval(&inputs).expect("evaluate normalized circuit"),
-            original.eval(&inputs).expect("evaluate original circuit"),
+            normalized.eval(&inputs),
+            original.eval(&inputs),
         );
     }
 }
@@ -278,7 +278,7 @@ fn compact_removes_dead_nodes() {
     // Only Input(Public(0)), Constant(8), and the Mul remain reachable.
     assert_eq!(after, 3);
 
-    let circuit: AceCircuit<QuadFelt> = emit_circuit(&dag, layout.clone()).expect("emit circuit");
+    let circuit: AceCircuit<QuadFelt> = emit_circuit(&dag, layout.clone());
     // Without compaction the orphaned Constant(3) and Constant(5) would still be
     // deduplicated into the emitted circuit's constant pool alongside Constant(8).
     assert_eq!(
@@ -289,7 +289,7 @@ fn compact_removes_dead_nodes() {
 
     let a_val = QuadFelt::from(Felt::new_unchecked(2));
     let inputs = build_inputs(&layout, &[(InputKey::Public(0), a_val)]);
-    let result = circuit.eval(&inputs).expect("circuit eval");
+    let result = circuit.eval(&inputs);
     assert_eq!(result, a_val * QuadFelt::from(Felt::new_unchecked(8)));
 }
 
@@ -317,7 +317,7 @@ fn compact_removes_dead_operation_subtree() {
     // Only Input(Public(0)), Input(Public(1)), and the Add remain reachable.
     assert_eq!(after, 3);
 
-    let circuit: AceCircuit<QuadFelt> = emit_circuit(&dag, layout.clone()).expect("emit circuit");
+    let circuit: AceCircuit<QuadFelt> = emit_circuit(&dag, layout.clone());
     // Without compaction the dead Mul would still be emitted as a second operation.
     assert_eq!(circuit.operations.len(), 1, "dead Mul must not reach the emitted circuit");
 
@@ -325,7 +325,7 @@ fn compact_removes_dead_operation_subtree() {
     let b_val = QuadFelt::from(Felt::new_unchecked(9));
     let inputs =
         build_inputs(&layout, &[(InputKey::Public(0), a_val), (InputKey::Public(1), b_val)]);
-    let result = circuit.eval(&inputs).expect("circuit eval");
+    let result = circuit.eval(&inputs);
     assert_eq!(result, a_val + b_val);
 }
 
@@ -374,6 +374,7 @@ fn compact_preserves_already_compact_dag() {
 }
 
 #[test]
+#[should_panic(expected = "root must be the last operation")]
 fn ace_encoding_rejects_non_final_root() {
     let layout = minimal_layout(2);
 
@@ -384,17 +385,8 @@ fn ace_encoding_rejects_non_final_root() {
     let _dead_op = builder.mul(root, b);
 
     let dag = builder.build(root);
-    let circuit = emit_circuit(&dag, layout).expect("emit circuit");
-    let err = circuit.to_ace().expect_err("non-final root should be rejected");
-
-    assert!(
-        matches!(
-            err,
-            crate::AceError::InvalidInputLayout { ref message }
-                if message.contains("root must be the last operation")
-        ),
-        "expected non-final root layout error, got {err:?}"
-    );
+    let circuit = emit_circuit(&dag, layout);
+    circuit.to_ace();
 }
 
 /// A constant-zero left operand still produces a `Sub` when the right operand is a

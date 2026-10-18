@@ -1,6 +1,10 @@
 //! OOD scatter planning and MASM procedure generation shared by VM and PVM verifiers.
 
-use core::{fmt::Write, ops::Range};
+use alloc::vec::Vec;
+use core::ops::Range;
+
+#[cfg(feature = "compiler")]
+use {alloc::string::String, core::fmt::Write};
 
 use crate::{AceError, EXT_DEGREE};
 
@@ -154,6 +158,7 @@ impl OodScatterPlan {
         self.pipe_digests().end
     }
 
+    #[cfg(feature = "compiler")]
     fn digest_offset_for(&self, blocks: usize) -> usize {
         let index = self
             .lengths
@@ -167,6 +172,7 @@ impl OodScatterPlan {
     ///
     /// The enclosing MASM module must import `constants`, `types`, and its relation's `layout`.
     /// The layout supplies the scatter-table and proof-order map accessors.
+    #[cfg(feature = "compiler")]
     pub fn render(&self, proof_order_maps: &str) -> String {
         let mut out = String::new();
         for &blocks in &self.lengths {
@@ -314,6 +320,7 @@ pub proc process_row_ood_evaluations(
 }
 
 /// Loads one AIR's staged proof-order position, leaving it on the stack.
+#[cfg(feature = "compiler")]
 fn scatter_position_load(air: usize) -> String {
     if air == 0 {
         "dup mem_load".into()

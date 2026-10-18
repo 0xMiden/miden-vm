@@ -741,7 +741,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
-name = "miden-ace-codegen"
+name = "miden-ace"
 version = "1.0.0"
 dependencies = [
  "miden-constraint-compiler",
@@ -754,7 +754,7 @@ dependencies = [
 name = "miden-air"
 version = "1.0.0"
 dependencies = [
- "miden-ace-codegen",
+ "miden-ace",
  "miden-core",
  "miden-crypto",
  "miden-utils-indexing",
@@ -1054,6 +1054,7 @@ name = "miden-processor"
 version = "1.0.0"
 dependencies = [
  "itertools",
+ "miden-ace",
  "miden-air",
  "miden-core",
  "miden-debug-types",

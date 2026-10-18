@@ -3,6 +3,8 @@
 //! This module provides Lehmer encoding for proof-order permutations and the comparator networks
 //! used by the MASM order-map renderer.
 
+use alloc::vec::Vec;
+
 /// Largest AIR count whose complete permutation set fits in the `u32` tag space.
 ///
 /// `12!` fits; `13!` does not. Ranking must reject larger compositions before any rank is
@@ -76,7 +78,7 @@ pub fn order_from_tag(tag: u32, num_airs: usize) -> Option<Vec<usize>> {
 /// proof order is defined as, provided every instance index is below the stride. Keys are compared
 /// as `u32`s, so the log height must also stay below `2^32 / PROOF_ORDER_KEY_STRIDE`; production
 /// verifiers bound it below 30 before any key is formed.
-pub(crate) const PROOF_ORDER_KEY_STRIDE: usize = 16;
+pub const PROOF_ORDER_KEY_STRIDE: usize = 16;
 const _: () = assert!(MAX_ORDER_AIRS <= PROOF_ORDER_KEY_STRIDE, "keys must separate every AIR");
 // The generated pass unpacks the instance index with `u32and.(PROOF_ORDER_KEY_STRIDE - 1)`.
 const _: () = assert!(
@@ -142,7 +144,7 @@ const TEN_INPUT_SORTING_NETWORK: [Comparator; 29] = [
 /// Panics unless `1 <= num_inputs <= MAX_ORDER_AIRS`.
 ///
 /// The returned comparator sequence sorts arbitrary inputs over a totally ordered domain.
-pub(crate) fn sorting_network(num_inputs: usize) -> Vec<Comparator> {
+pub fn sorting_network(num_inputs: usize) -> Vec<(usize, usize)> {
     assert!(
         (1..=MAX_ORDER_AIRS).contains(&num_inputs),
         "sorting networks are generated for 1..={MAX_ORDER_AIRS} inputs"

@@ -88,12 +88,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     let source = build_canonical_multi_air_ace_circuit(recursive_verifier_ace_config())
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
     let input_layout = source.layout();
-    let circuit = RecursiveAceCircuit::try_from(
-        source
-            .to_ace()
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?,
-    )
-    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    let circuit = RecursiveAceCircuit::from(source.to_ace());
 
     let num_quotient_chunks = input_layout.counts.num_quotient_chunks;
     if !num_quotient_chunks.is_power_of_two() {

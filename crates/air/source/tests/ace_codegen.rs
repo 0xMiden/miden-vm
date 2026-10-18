@@ -1,6 +1,6 @@
 use miden_ace_codegen::{
-    AceConfig, AceDag, AceError, EXT_DEGREE, InputKey, InputLayout, LayoutKind, NodeKind,
-    PeriodicColumnData, build_ace_dag_for_air, build_verifier_dag, emit_circuit,
+    AceConfig, AceDag, EXT_DEGREE, InputKey, InputLayout, LayoutKind, NodeKind, PeriodicColumnData,
+    build_ace_dag_for_air, build_verifier_dag, emit_circuit,
     testing::{
         eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient, fill_inputs,
         zps_for_chunk,
@@ -34,7 +34,7 @@ fn assert_dag_matches_manual_eval(air: MidenAir) {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
     };
-    let artifacts = build_ace_dag_for_air(&HandwrittenMidenAir(air), config).unwrap();
+    let artifacts = build_ace_dag_for_air(&HandwrittenMidenAir(air), config);
     let layout = artifacts.layout.clone();
     let inputs: Vec<QuadFelt> = fill_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
@@ -56,7 +56,7 @@ fn assert_dag_matches_manual_eval(air: MidenAir) {
     let vanishing = z_pow_n - QuadFelt::ONE;
     let expected = acc - eval_quotient::<Felt, QuadFelt>(&layout, &inputs) * vanishing;
 
-    let actual = eval_dag(&artifacts.dag, &inputs, &layout).unwrap();
+    let actual = eval_dag(&artifacts.dag, &inputs, &layout);
     assert_eq!(actual, expected);
 }
 
@@ -79,15 +79,11 @@ fn core_air_dag_rejects_mismatched_layout() {
         layout: LayoutKind::Native,
     };
 
-    let dag = build_ace_dag_for_air(&air, dag_config).unwrap().dag;
-    let wrong_layout = build_ace_dag_for_air(&air, layout_config).unwrap().layout;
+    let dag = build_ace_dag_for_air(&air, dag_config).dag;
+    let wrong_layout = build_ace_dag_for_air(&air, layout_config).layout;
     let inputs: Vec<QuadFelt> = fill_inputs(&wrong_layout);
 
-    let err = eval_dag(&dag, &inputs, &wrong_layout).unwrap_err();
-    assert!(
-        matches!(err, AceError::InvalidInputLayout { .. }),
-        "expected InvalidInputLayout, got {err:?}"
-    );
+    assert!(std::panic::catch_unwind(|| eval_dag(&dag, &inputs, &wrong_layout)).is_err());
 }
 
 #[test]
@@ -97,11 +93,11 @@ fn synthetic_ood_adjusts_quotient_to_zero() {
         layout: LayoutKind::Masm,
     };
 
-    let artifacts = build_ace_dag_for_air(&MidenAir::Core, config).expect("ace dag");
-    let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone()).expect("ace circuit");
+    let artifacts = build_ace_dag_for_air(&MidenAir::Core, config);
+    let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone());
 
     let mut inputs: Vec<QuadFelt> = fill_inputs(&artifacts.layout);
-    let root = circuit.eval(&inputs).expect("circuit eval");
+    let root = circuit.eval(&inputs);
 
     let z_pow_n = inputs[artifacts.layout.index(InputKey::ZPowN).unwrap()];
     let vanishing = z_pow_n - QuadFelt::ONE;
@@ -114,7 +110,7 @@ fn synthetic_ood_adjusts_quotient_to_zero() {
         .unwrap();
     inputs[idx] += delta;
 
-    let result = circuit.eval(&inputs).expect("circuit eval");
+    let result = circuit.eval(&inputs);
     assert!(result.is_zero(), "ACE circuit must evaluate to zero");
 }
 
@@ -125,12 +121,12 @@ fn quotient_next_inputs_do_not_affect_eval() {
         layout: LayoutKind::Masm,
     };
 
-    let artifacts = build_ace_dag_for_air(&MidenAir::Core, config).expect("ace dag");
-    let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone()).expect("ace circuit");
+    let artifacts = build_ace_dag_for_air(&MidenAir::Core, config);
+    let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone());
 
     let mut inputs: Vec<QuadFelt> = fill_inputs(&artifacts.layout);
 
-    let root = circuit.eval(&inputs).expect("circuit eval");
+    let root = circuit.eval(&inputs);
     let z_pow_n = inputs[artifacts.layout.index(InputKey::ZPowN).unwrap()];
     let vanishing = z_pow_n - QuadFelt::ONE;
     let zps_0 = zps_for_chunk::<Felt, QuadFelt>(&artifacts.layout, &inputs, 0);
@@ -140,10 +136,7 @@ fn quotient_next_inputs_do_not_affect_eval() {
         .index(InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 })
         .unwrap();
     inputs[idx] += delta;
-    assert!(
-        circuit.eval(&inputs).expect("circuit eval").is_zero(),
-        "precondition: zero root"
-    );
+    assert!(circuit.eval(&inputs).is_zero(), "precondition: zero root");
 
     for chunk in 0..artifacts.layout.counts.num_quotient_chunks {
         for coord in 0..EXT_DEGREE {
@@ -155,7 +148,7 @@ fn quotient_next_inputs_do_not_affect_eval() {
         }
     }
 
-    let result = circuit.eval(&inputs).expect("circuit eval");
+    let result = circuit.eval(&inputs);
     assert!(result.is_zero(), "quotient_next should not affect ACE eval");
 }
 
@@ -260,7 +253,7 @@ fn ir_lowering_matches_symbolic_lowering_node_for_node() {
     };
     for air in AIRS {
         // Production path: handwritten capture -> IR -> DAG.
-        let artifacts = build_ace_dag_for_air(&HandwrittenMidenAir(air), config).unwrap();
+        let artifacts = build_ace_dag_for_air(&HandwrittenMidenAir(air), config);
 
         // Anchor: the original symbolic-tree lowering over the same constraints.
         let mut builder =
@@ -307,7 +300,7 @@ fn recursive_verifier_circuit_matches_the_canonical_builder() {
         layout: LayoutKind::Masm,
     })
     .expect("canonical circuit");
-    let encoded = canonical.to_ace().expect("encode canonical circuit");
+    let encoded = canonical.to_ace();
 
     assert_eq!(produced.num_inputs, encoded.num_vars());
     assert_eq!(produced.num_eval_gates, encoded.num_eval_rows());
@@ -356,7 +349,7 @@ fn canonical_circuit_matches_every_vm_proof_order() {
                 .expect("coeff slot");
             canonical_inputs[idx] = beta.exp_u64((MIDEN_AIR_COUNT - 1 - position) as u64);
         }
-        let canonical_root = canonical.eval(&canonical_inputs).expect("canonical eval");
+        let canonical_root = canonical.eval(&canonical_inputs);
 
         let direct = miden_ace_codegen::testing::eval_multi_air_constraints(
             &AIRS.map(HandwrittenMidenAir),

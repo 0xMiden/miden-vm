@@ -17,7 +17,7 @@ use miden_crypto::{
     },
 };
 
-use crate::{AceDag, AceError, InputCounts, InputKey, InputLayout};
+use crate::{AceDag, InputCounts, InputKey, InputLayout};
 
 /// Evaluates a multi-AIR relation from symbolic constraints, independently of DAG lowering.
 ///
@@ -380,24 +380,20 @@ where
 }
 
 /// Evaluate a lowered DAG against concrete inputs.
-pub fn eval_dag<EF>(dag: &AceDag<EF>, inputs: &[EF], layout: &InputLayout) -> Result<EF, AceError>
+/// Invalid compiler input lengths or missing authored layout keys panic.
+pub fn eval_dag<EF>(dag: &AceDag<EF>, inputs: &[EF], layout: &InputLayout) -> EF
 where
     EF: Field,
 {
-    if inputs.len() != layout.total_inputs {
-        return Err(AceError::InvalidInputLength {
-            expected: layout.total_inputs,
-            got: inputs.len(),
-        });
-    }
+    assert_eq!(inputs.len(), layout.total_inputs, "ACE input length must match layout");
 
     let mut values: Vec<EF> = vec![EF::ZERO; dag.nodes().len()];
     for (idx, node) in dag.nodes().iter().enumerate() {
         let value = match node {
             crate::dag::NodeKind::Input(key) => {
-                let input_idx = layout.index(*key).ok_or_else(|| AceError::InvalidInputLayout {
-                    message: format!("missing input key in layout: {key:?}"),
-                })?;
+                let input_idx = layout
+                    .index(*key)
+                    .unwrap_or_else(|| panic!("missing input key in layout: {key:?}"));
                 inputs[input_idx]
             },
             crate::dag::NodeKind::Constant(c) => *c,
@@ -409,7 +405,7 @@ where
         values[idx] = value;
     }
 
-    Ok(values[dag.root().index()])
+    values[dag.root().index()]
 }
 
 fn compute_deltas_and_weights<EF: Field>(
