@@ -1,9 +1,9 @@
 //! Internal instance↔proof ordering helper: the crate-internal [`TraceOrder`]
 //! plus the public [`ShapeError`].
 //!
-//! The air crate's [`MultiAir`](miden_lifted_air::MultiAir) trait is order-agnostic — every list it
+//! The air crate's [`MultiAir`](crate::air::MultiAir) trait is order-agnostic — every list it
 //! exposes is in **instance order** (the position returned by
-//! [`MultiAir::airs`](miden_lifted_air::MultiAir::airs)). [`TraceOrder`] carries the permutation
+//! [`MultiAir::airs`](crate::air::MultiAir::airs)). [`TraceOrder`] carries the permutation
 //! between instance order and the proof's wire-format **proof order** (a deterministic stable sort
 //! of the per-AIR heights), and validates the proof-supplied log heights against the AIRs at
 //! construction.
@@ -12,17 +12,18 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-use miden_lifted_air::{LiftedAir, log2_strict_u8};
 use p3_challenger::CanObserve;
 use p3_field::Field;
 use thiserror::Error;
+
+use crate::air::{LiftedAir, log2_strict_u8};
 
 // ============================================================================
 // TraceOrder
 // ============================================================================
 
 /// The permutation between **instance order** (AIR positions from
-/// [`MultiAir::airs`](miden_lifted_air::MultiAir::airs)) and **proof order**, the wire-format
+/// [`MultiAir::airs`](crate::air::MultiAir::airs)) and **proof order**, the wire-format
 /// ordering used inside the prover/verifier.
 ///
 /// Proof order is the stable sort of instance indices by `(log_trace_height,
@@ -135,7 +136,7 @@ impl TraceOrder {
     }
 
     /// Log trace heights in instance order. Matches
-    /// [`MultiAir::airs`](miden_lifted_air::MultiAir::airs).
+    /// [`MultiAir::airs`](crate::air::MultiAir::airs).
     pub(crate) fn log_heights(&self) -> &[u8] {
         &self.log_heights
     }
@@ -235,7 +236,7 @@ impl TraceOrder {
     /// AIR instance index backing each committed preprocessed trace.
     ///
     /// The preprocessed commitment contains one committed LDE trace per AIR with
-    /// [`preprocessed_width`](miden_lifted_air::BaseAir::preprocessed_width)
+    /// [`preprocessed_width`](crate::air::BaseAir::preprocessed_width)
     /// `> 0`, in proof order (the LMCS height-monotone committed-trace order). The result
     /// length is the number of preprocessed AIRs, which is `<= len()`.
     pub(crate) fn preprocessed_air_for_trace_index<F, EF, A>(&self, airs: &[A]) -> Vec<u8>
@@ -305,11 +306,11 @@ pub enum ShapeError {
 mod tests {
     use alloc::{vec, vec::Vec};
 
-    use miden_lifted_air::{BaseAir, LiftedAirBuilder};
     use p3_goldilocks::Goldilocks;
     use p3_matrix::dense::RowMajorMatrix;
 
     use super::*;
+    use crate::air::{BaseAir, LiftedAirBuilder};
 
     type TF = Goldilocks;
 

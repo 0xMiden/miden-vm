@@ -260,9 +260,8 @@ fn dag_residual_with(
     rng: &mut impl Rng,
 ) -> usize {
     let mains = traces.mains();
-    let composite = crate::tests::with_transcript_eval_main(traces, eval_main.clone());
     let challenges = Challenges::new(rand_qf(rng), rand_qf(rng), MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
-    session_stack_residual(&mains, &[(4, &composite), (8, add_main)], &challenges).len()
+    session_stack_residual(&mains, &[(4, eval_main), (8, add_main)], &challenges).len()
 }
 
 /// First row whose `col` flag is 1 (width taken from the matrix, so this

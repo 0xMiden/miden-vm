@@ -96,11 +96,11 @@
 //! wrapped subtree (mirroring the tree lowering's `ExtLeaf::Base` case). Fields
 //! are concrete (`Felt`/`QuadFelt`), matching the capture frontend.
 
-use miden_constraint_compiler::ir::{
-    CapturedConstraints, Graph, Leaf, Node, NodeId as IrNodeId, OpKind,
-};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{BasedVectorSpace, PrimeCharacteristicRing};
+use miden_stark::capture::ir::{
+    CapturedConstraints, Graph, Leaf, Node, NodeId as IrNodeId, OpKind,
+};
 
 use super::{
     builder::DagBuilder,

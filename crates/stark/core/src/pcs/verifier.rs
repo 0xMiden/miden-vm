@@ -10,12 +10,11 @@
 //! | [`verify_aligned`]| automatic |
 //!
 //! Callers should use
-//! [`VerifierTranscript::finalize`](miden_stark_transcript::VerifierTranscript::finalize)
+//! [`VerifierTranscript::finalize`](crate::transcript::VerifierTranscript::finalize)
 //! after verification to check that the transcript is fully consumed.
 
 use alloc::vec::Vec;
 
-use miden_stark_transcript::{TranscriptError, VerifierChannel};
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, horizontally_truncated::HorizontallyTruncated};
 use thiserror::Error;
@@ -31,6 +30,7 @@ use crate::{
         fri::verifier::{FriError, FriOracle},
         params::PcsParams,
     },
+    transcript::{TranscriptError, VerifierChannel},
     util::align::aligned_widths,
 };
 
@@ -57,7 +57,7 @@ pub(crate) struct CommitmentGroup<C> {
 ///
 /// Does **not** check that the channel is fully consumed after verification.
 /// Callers should use
-/// [`VerifierTranscript::finalize`](miden_stark_transcript::VerifierTranscript::finalize) to
+/// [`VerifierTranscript::finalize`](crate::transcript::VerifierTranscript::finalize) to
 /// enforce transcript exhaustion.
 ///
 /// # Preconditions

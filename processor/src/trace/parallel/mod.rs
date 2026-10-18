@@ -2,7 +2,7 @@ use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
 
 use itertools::Itertools;
-use miden_air::{
+use miden_air_source::{
     AIRS, CoreCols, Felt, MIDEN_AIR_COUNT, MidenAir, StackCols, SystemCols, config, memory,
     trace::{
         DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RowIndex, STACK_TRACE_WIDTH,
@@ -105,7 +105,7 @@ pub fn build_trace(witness: VmWitness) -> Result<VmTrace, ExecutionError> {
 }
 
 /// Same as [`build_trace`], but with an explicit modelled peak-memory budget instead of the
-/// default. See [`miden_air::memory`] for the model's scope and exclusions.
+/// default. See [`miden_air_source::memory`] for the model's scope and exclusions.
 pub fn build_trace_with_budget(
     witness: VmWitness,
     max_prover_memory_bytes: u64,

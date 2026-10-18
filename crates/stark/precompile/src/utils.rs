@@ -1,1 +1,1 @@
-pub use miden_precompiles_air::utils::*;
+pub use miden_air::precompile::utils::*;

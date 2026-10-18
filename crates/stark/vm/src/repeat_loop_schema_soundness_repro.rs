@@ -22,11 +22,11 @@ use miden_core::{
     program::{Program, StackOutputs},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_crypto::stark::air::BaseAir;
 use miden_processor::{
     DefaultHost, FastProcessor, StackInputs,
     trace::{VmTrace, chiplets::build_external_eidos_compression_traces},
 };
+use miden_stark::air::BaseAir;
 
 use crate::{
     Prover,
@@ -236,7 +236,10 @@ fn honest_repeated_loop_verifies() {
         }),
         "fixture must execute REPEAT"
     );
-    assert!(ReproTrace::new(&trace).prove_and_verify_current().unwrap().is_complete());
+    assert_eq!(
+        ReproTrace::new(&trace).prove_and_verify_current().unwrap().precompile_root,
+        miden_core::deferred::TRUE_DIGEST
+    );
 }
 
 #[test]

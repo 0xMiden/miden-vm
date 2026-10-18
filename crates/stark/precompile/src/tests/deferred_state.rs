@@ -1,7 +1,10 @@
 use std::{format, string::String, vec, vec::Vec};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
-use miden_air::lookup::Challenges;
+use miden_air::{
+    lookup::Challenges,
+    precompile::{NUM_CHIPLETS, memory, stark_config::precompile_pcs_params},
+};
 use miden_core::{
     Felt,
     deferred::{Digest, Node as VmNode, PrecompileWitness, TRUE_DIGEST as VM_TRUE_DIGEST},
@@ -13,12 +16,10 @@ use miden_core::{
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
-use miden_precompiles_air::{NUM_CHIPLETS, memory, stark_config::precompile_pcs_params};
-use miden_precompiles_verifier::{VerifyError, verify_deferred};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
-    PrecompileProvingError, check_memory_budget,
+    PrecompileProvingError, VerifyError, check_memory_budget,
     deferred::session::session_from_witnesses,
     hash::{
         chunk::{COL_F_BEGIN as CHUNK_COL_F_BEGIN, COL_F_END as CHUNK_COL_F_END},
@@ -47,6 +48,7 @@ use crate::{
         COL_CHAIN_HEAD_ID, EidosDigest, EidosOutMsg, NUM_MAIN_COLS as EIDOS_NUM_MAIN_COLS,
         compression::layout::{BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, footer_digest_col},
     },
+    verify_deferred,
 };
 
 /// A raw Keccak-only portable fixture and the prover-typed view of its root.
@@ -561,7 +563,7 @@ fn prove_precompiles_with_budget_corner_cases() {
 }
 
 /// Each `HashFunction` selects a distinct preprocessed-bundle cache slot
-/// (`miden_precompiles_air::preprocessed`, keyed by LMCS type). Proving and
+/// (`miden_air::precompile::preprocessed`, keyed by LMCS type). Proving and
 /// verifying twice per hash function exercises both the cold path (first
 /// call in the process, builds and caches the bundle) and the warm path
 /// (later calls, reused from cache) for every slot, guarding against a

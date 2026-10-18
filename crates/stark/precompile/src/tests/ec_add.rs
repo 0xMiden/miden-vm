@@ -19,8 +19,10 @@ use miden_core::{
     field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{MultiAir, ProverStatement, ReductionError, Statement};
-use miden_lifted_stark::{Preprocessed, ProverInstance, VerifierInstance};
+use miden_stark::{
+    Preprocessed, ProverInstance, VerifierInstance,
+    air::{MultiAir, ProverStatement, ReductionError, Statement},
+};
 use proptest::prelude::*;
 
 // The subset MultiAir closes its trace-length-weighted bus identity during the ignored prove
@@ -634,8 +636,8 @@ fn inactive_block_cannot_provide_ecgroupadd() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    assert_eq!(miden_lifted_air::BaseAir::<Felt>::width(&EcGroupAddAir), 21);
-    assert_eq!(miden_lifted_air::LiftedAir::<Felt, QuadFelt>::aux_width(&EcGroupAddAir), 10);
+    assert_eq!(miden_stark::air::BaseAir::<Felt>::width(&EcGroupAddAir), 21);
+    assert_eq!(miden_stark::air::LiftedAir::<Felt, QuadFelt>::aux_width(&EcGroupAddAir), 10);
     // Flattened via `frac_col!` into 10 aux columns (col 0 carries the `EcGroupAdd` provide alone,
     // the rest each carry a pair), so every closing constraint stays
     // at degree ≤ 3 → log_quotient_degree = 1.

@@ -1,0 +1,141 @@
+//! Physical lookup-column emitters for the Miden VM's LogUp argument.
+//!
+//! The Miden VM's LogUp buses are emitted across 8 columns — most host a single bus, but
+//! several host two or more linearly-independent buses sharing one running accumulator via
+//! distinct `bus_prefix[bus]` additive bases (see per-bus module docs for the merges).
+//! Each emitter opens one [`crate::lookup::LookupBuilder::next_column`] closure and fixes
+//! group placement, column degree, and per-row fraction capacity. AEAD and Merkle logic lives in
+//! [`super::operations`]; these emitters call it inside the appropriate column groups.
+//!
+//! ## Shared merge rules
+//!
+//! A [`crate::lookup::LookupColumn::group`] assumes its top-level entries are mutually exclusive,
+//! so the column degree is the max over active branches. Simultaneous fractions belong in
+//! a [`crate::lookup::LookupGroup::batch`] with an explicit degree. If two interaction families are
+//! not mutually exclusive, they must be emitted as sibling groups; sibling groups compose
+//! product-wise and increase the column degree accordingly.
+//!
+//! Some columns merge multiple bus families into one group. This is valid only when their
+//! row selectors are mutually exclusive. Each bus still has its own `bus_prefix[bus]`.
+//!
+//! The emitters are routed per-AIR:
+//! - [`super::main_air::MainLookupAir`] for the main-trace columns, driven by [`crate::CoreAir`]'s
+//!   `LookupAir` impl.
+//! - [`super::chiplet_air::emit_chiplet_lookup_columns`] for the chiplet-trace columns, driven by
+//!   [`crate::ChipletsAir`]'s `LookupAir` impl.
+//! - [`crate::constraints::eidos_compression::lookup`] for the standalone Eidos compression
+//!   columns, driven by [`crate::EidosCompressionAir`]'s `LookupAir` impl.
+//! - [`crate::constraints::and8_lookup`] for the fixed byte-table columns, driven by
+//!   [`crate::And8LookupAir`]'s `LookupAir` impl.
+//!
+//! ## Shared precompute contexts
+//!
+//! The main-trace and chiplet-trace contexts live next to their respective LookupAirs:
+//! - [`super::main_air::MainBusContext`]: two-row window plus the shared [`LookupOpFlags`] instance
+//!   consumed by the 4 main-trace emitters.
+//! - [`super::chiplet_air::ChipletBusContext`]: two-row window plus the shared
+//!   [`ChipletActiveFlags`] snapshot consumed by the 4 chiplet-trace emitters.
+//!
+//! Each context is built once per `eval` through an extension-trait hook
+//! ([`super::main_air::MainLookupBuilder::build_op_flags`] /
+//! [`super::chiplet_air::ChipletLookupBuilder::build_chiplet_active`]). Prover-side
+//! implementations can override those hooks with boolean fast paths without changing
+//! emitter code. [`ChipletActiveFlags`] lives in this module because it is the pure
+//! helper used by the default chiplet hook and by optimized implementations.
+
+use miden_core::field::{Algebra, PrimeCharacteristicRing};
+
+use crate::ChipletCols;
+
+pub(in crate::vm::constraints::lookup) mod block_hash_and_op_group;
+pub(in crate::vm::constraints::lookup) mod block_stack_and_range_logcap;
+pub(in crate::vm::constraints::lookup) mod chiplet_requests;
+pub(in crate::vm::constraints::lookup) mod chiplet_responses;
+pub(in crate::vm::constraints::lookup) mod hash_kernel;
+pub(in crate::vm::constraints::lookup) mod hasher_returns;
+pub(in crate::vm::constraints::lookup) mod lookup_op_flags;
+pub(in crate::vm::constraints::lookup) mod stack_overflow;
+pub(in crate::vm::constraints::lookup) mod wiring;
+
+pub(in crate::vm::constraints::lookup) use lookup_op_flags::LookupOpFlags;
+
+// CHIPLET ACTIVE FLAGS
+// ================================================================================================
+
+/// Per-chiplet `is_active` expressions, mirroring the active-flag block of
+/// [`build_chiplet_selectors`](super::super::chiplets::selectors::build_chiplet_selectors).
+///
+/// These are the only chiplet flags the LogUp buses consume.
+/// `is_transition`, `is_last`, and `next_is_first` are used only by the chiplet
+/// constraints, so this type does not carry them.
+///
+/// The constructor is a pure compute function: it builds the same algebra as
+/// `build_chiplet_selectors` but does NOT emit any `when` / `assert_*` calls, so it is
+/// safe to run in parallel with the constraint-path chiplet selector pass.
+pub(crate) struct ChipletActiveFlags<E> {
+    /// `is_active` for the hasher controller sub-chiplet (= `s_ctrl`).
+    pub controller: E,
+    /// `is_active` for normal bitwise rows.
+    pub bitwise: E,
+    /// `is_active` for AEAD stream rows inside the bitwise selector region.
+    pub aead_stream: E,
+    /// `is_active` for the memory chiplet (= `s01 - s012`).
+    pub memory: E,
+    /// `is_active` for the ACE chiplet (= `s012 - s0123`).
+    pub ace: E,
+    /// `is_active` for the kernel ROM chiplet (= `s0123 - s01234`).
+    pub kernel_rom: E,
+}
+
+impl<E> ChipletActiveFlags<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+{
+    /// Build the chiplet active-flag snapshot from a `ChipletCols` borrow.
+    ///
+    /// Mirrors the active-flag block of
+    /// [`build_chiplet_selectors`](super::super::chiplets::selectors::build_chiplet_selectors):
+    /// - `s_ctrl = chiplets[0]`
+    /// - virtual `s0 = 1 - s_ctrl`
+    /// - prefix chain `s01 / s012 / s0123 / s01234`
+    /// - `is_bitwise = s0 - s01`
+    /// - `aead_stream = is_bitwise * stream_mode`
+    /// - `normal_bitwise = is_bitwise - aead_stream`
+    /// - `is_memory = s01 - s012`, `is_ace = s012 - s0123`, `is_kernel_rom = s0123 - s01234`
+    pub fn from_chiplet_cols<V>(local: &ChipletCols<V>) -> Self
+    where
+        V: Copy,
+        E: Algebra<V>,
+    {
+        let s_ctrl: E = local.chiplets[0].into();
+        let s1: E = local.chiplets[1].into();
+        let s2: E = local.chiplets[2].into();
+        let s3: E = local.chiplets[3].into();
+        let s4: E = local.chiplets[4].into();
+        let stream_mode: E = local.bitwise_stream_mode().into();
+
+        // Virtual non-hasher selector and prefix products.
+        let s0 = E::ONE - s_ctrl.clone();
+        let s01 = s0.clone() * s1;
+        let s012 = s01.clone() * s2;
+        let s0123 = s012.clone() * s3;
+        let s01234 = s0123.clone() * s4;
+
+        // Active flags via the subtraction trick.
+        let is_bitwise = s0 - s01.clone();
+        let aead_stream = is_bitwise.clone() * stream_mode;
+        let bitwise = is_bitwise - aead_stream.clone();
+        let memory = s01 - s012.clone();
+        let ace = s012 - s0123.clone();
+        let kernel_rom = s0123 - s01234;
+
+        Self {
+            controller: s_ctrl,
+            bitwise,
+            aead_stream,
+            memory,
+            ace,
+            kernel_rom,
+        }
+    }
+}

@@ -7,7 +7,7 @@
 use alloc::vec::Vec;
 use core::{borrow::BorrowMut, mem::size_of};
 
-use miden_air::{
+use miden_air_source::{
     ControllerCols, CoreCols,
     logup::{HasherMsg, RangeMsg},
     trace::{

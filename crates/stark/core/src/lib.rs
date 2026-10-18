@@ -9,7 +9,7 @@
 //!
 //! 1. **AIR = trusted** — [`air::LiftedAir`] / [`air::MultiAir`] implementations are application
 //!    code. Structural mistakes, including an empty AIR collection, may panic; check them in
-//!    tests/setup with [`miden_lifted_air::debug::assert_multi_air_valid`] or
+//!    tests/setup with [`crate::air::debug::assert_multi_air_valid`] or
 //!    [`debug::assert_prover_setup`].
 //!
 //! 2. **Runtime inputs = validated** — [`Statement::new`](air::Statement::new),
@@ -42,8 +42,7 @@
 //!
 //! 1. **AIR structural contract** — non-empty AIR collection, shared public-value count, positive
 //!    aux width, power-of-two periodic column lengths, and matching override helpers. Checked by
-//!    [`miden_lifted_air::debug::assert_multi_air_valid`]. These are not typed `Statement::new`
-//!    errors.
+//!    [`crate::air::debug::assert_multi_air_valid`]. These are not typed `Statement::new` errors.
 //! 2. **Window size** — only transition window size 2.
 //! 3. **Deterministic constraints** — `eval()` emits the same number and types of constraints
 //!    regardless of builder implementation.
@@ -60,11 +59,23 @@
 
 extern crate alloc;
 
+#[cfg(any(test, feature = "std"))]
+extern crate std;
+
+pub use miden_core::Felt;
+
 // ============================================================================
 // Private implementation modules
 // ============================================================================
 
-mod config;
+pub mod config;
+mod engine_config;
+pub mod lookup;
+pub mod security;
+pub mod transcript;
+
+#[cfg(feature = "capture")]
+pub mod capture;
 pub mod debug;
 pub(crate) mod domain;
 pub mod lmcs;
@@ -77,7 +88,9 @@ mod selectors;
 pub(crate) mod util;
 pub mod verifier;
 
-pub use config::{GenericStarkConfig, StarkConfig};
+#[cfg(test)]
+mod eidos_tests;
+
 pub use debug::check_constraints;
 // `domain` and `order` are internal modules. Their error types surface through the public
 // `ProverError` / `VerifierError`, and quotient-degree derivation is part of the relation
@@ -85,6 +98,7 @@ pub use debug::check_constraints;
 pub use domain::{
     DomainError, QuotientRecompositionInputs, log_quotient_degree, quotient_recomposition_inputs,
 };
+pub use engine_config::{GenericStarkConfig, StarkConfig};
 pub use order::ShapeError;
 pub use preprocessed::{Preprocessed, PreprocessedValidationError};
 pub use prover::{ProverError, ProverInstance};
@@ -94,52 +108,37 @@ pub use verifier::{VerifierError, VerifierInstance};
 // Namespaced re-exports from upstream crates
 // ============================================================================
 
-/// AIR traits, statement/proving-input types, and upstream `p3-air` re-exports.
-///
-/// This module re-exports items from [`miden_lifted_air`], which in turn
-/// re-exports `p3-air` types. Consumers should never need to depend on `p3-air`
-/// directly.
-pub mod air {
-    pub use miden_lifted_air::{
-        // Upstream p3-air re-exports
-        Air,
-        AirBuilder,
-        AirBuilderWithContext,
-        BaseAir,
-        ConstraintCounts,
-        ConstraintDegrees,
-        ExtensionBuilder,
-        FilteredAirBuilder,
-        // Lifted AIR types
-        InstanceError,
-        LiftedAir,
-        LiftedAirBuilder,
-        MultiAir,
-        PermutationAirBuilder,
-        ProverStatement,
-        ReductionError,
-        RowWindow,
-        Statement,
-        WindowAccess,
-        debug,
-        log2_strict_u8,
-    };
-
-    /// Symbolic constraint analysis types from upstream p3-air.
-    pub mod symbolic {
-        pub use miden_lifted_air::symbolic::*;
-    }
-
-    /// AIR constraint utility functions from upstream p3-air.
-    pub mod utils {
-        pub use miden_lifted_air::utils::*;
-    }
-}
+/// AIR traits, statement types, and portable symbolic analysis.
+pub mod air;
 
 /// Stateful hasher primitives for LMCS construction.
 pub mod hasher {
-    pub use miden_stateful_hasher::{
-        Alignable, ChainingHasher, SerializingStatefulSponge, StatefulHasher, StatefulSponge,
+    pub use miden_crypto::hasher::*;
+}
+
+/// Upstream Fiat-Shamir challenger traits and implementations.
+pub mod challenger {
+    pub use p3_challenger::{
+        CanFinalizeDigest, CanObserve, DuplexChallenger, FieldChallenger, GrindingChallenger,
+        HashChallenger, SerializingChallenger64,
+    };
+}
+
+/// Upstream DFT traits and implementations.
+pub mod dft {
+    pub use p3_dft::{Radix2DFTSmallBatch, Radix2DitParallel, TwoAdicSubgroupDft};
+}
+
+/// Upstream matrix types; core imports these directly from `p3-matrix`.
+pub mod matrix {
+    pub use p3_matrix::{Matrix, dense::RowMajorMatrix};
+}
+
+/// Upstream symmetric cryptographic primitives.
+pub mod symmetric {
+    pub use p3_symmetric::{
+        CompressionFunctionFromHasher, CryptographicPermutation, PaddingFreeSponge, Permutation,
+        SerializingHasher, TruncatedPermutation,
     };
 }
 

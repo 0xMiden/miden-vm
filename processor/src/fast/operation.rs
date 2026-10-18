@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::{
+use miden_air_source::{
     Felt,
     trace::{RowIndex, chiplets::hasher::HasherState},
 };

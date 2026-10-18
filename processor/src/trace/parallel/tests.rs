@@ -1,6 +1,6 @@
 use alloc::{string::String, sync::Arc};
 
-use miden_air::{
+use miden_air_source::{
     MidenAir,
     lookup::build_logup_aux_trace,
     trace::{RowIndex, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},

@@ -6,9 +6,11 @@
 //! - choose a READ layout for inputs,
 //! - emit a circuit that matches verifier evaluation.
 
-use miden_constraint_compiler::ir::capture;
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::stark::air::{BaseAir, LiftedAir};
+use miden_stark::{
+    air::{BaseAir, LiftedAir},
+    capture::ir::capture,
+};
 
 use crate::{
     EXT_DEGREE,

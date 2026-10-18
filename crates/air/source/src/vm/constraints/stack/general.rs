@@ -1,0 +1,181 @@
+//! General stack transition constraints.
+//!
+//! This module contains the general constraints that enforce how stack items transition
+//! based on the operation type (no shift, left shift, right shift).
+//!
+//! ## Stack Transition Model
+//!
+//! The stack has 16 visible positions (0-15). For each operation, stack items can:
+//! - **Stay in place** (no shift): item stays at same position
+//! - **Shift left**: item moves to position i from position i+1
+//! - **Shift right**: item moves to position i from position i-1
+//!
+//! ## Constraints
+//!
+//! 1. **Position 0**: Can receive from position 0 (no shift) or position 1 (left shift). Right
+//!    shift doesn't apply - position 0 gets a new value pushed.
+//!
+//! 2. **Positions 1-14**: Can receive from position i (no shift), i+1 (left shift), or i-1 (right
+//!    shift).
+//!
+//! 3. **Position 15**: Can receive from position 15 (no shift) or position 14 (right shift). Left
+//!    shift at position 15 is handled by overflow constraints (zeroing).
+//!
+//! 4. **Top binary**: Enforced by the specific op constraints that require it.
+
+use miden_stark::air::AirBuilder;
+
+use crate::{CoreCols, MidenAirBuilder, constraints::op_flags::OpFlags};
+
+// ENTRY POINTS
+// ================================================================================================
+
+/// Enforces all general stack transition constraints.
+///
+/// This includes:
+/// - 16 constraints for stack item transitions at each position
+pub fn enforce_main<AB>(
+    builder: &mut AB,
+    local: &CoreCols<AB::Var>,
+    next: &CoreCols<AB::Var>,
+    op_flags: &OpFlags<AB::Expr>,
+) where
+    AB: MidenAirBuilder,
+{
+    // For each position i, the constraint ensures that the next value is consistent
+    // with the current value based on the shift flags:
+    //
+    // next[i] * flag_sum = no_shift[i] * current[i]
+    //                    + left_shift[i+1] * current[i+1]
+    //                    + right_shift[i-1] * current[i-1]
+    //
+    // where flag_sum is the sum of applicable flags for that position.
+
+    // Position 0: no right shift (new value pushed instead)
+    // next[0] * flag_sum = no_shift[0] * current[0] + left_shift[1] * current[1]
+    {
+        let flag_sum = op_flags.no_shift_at(0) + op_flags.left_shift_at(1);
+        let expected = op_flags.no_shift_at(0) * local.stack.get(0).into()
+            + op_flags.left_shift_at(1) * local.stack.get(1).into();
+        let actual = next.stack.get(0);
+
+        builder.when_transition().assert_zero(actual * flag_sum - expected);
+    }
+
+    // Positions 1-14: all three shift types possible.
+    for i in 1..15 {
+        let flag_sum = op_flags.no_shift_at(i)
+            + op_flags.left_shift_at(i + 1)
+            + op_flags.right_shift_at(i - 1);
+
+        let expected = op_flags.no_shift_at(i) * local.stack.get(i).into()
+            + op_flags.left_shift_at(i + 1) * local.stack.get(i + 1).into()
+            + op_flags.right_shift_at(i - 1) * local.stack.get(i - 1).into();
+        let actual = next.stack.get(i);
+
+        builder.when_transition().assert_zero(actual * flag_sum - expected);
+    }
+
+    // Position 15: no left shift (handled by overflow constraints)
+    // next[15] * flag_sum = no_shift[15] * current[15] + right_shift[14] * current[14]
+    {
+        let flag_sum = op_flags.no_shift_at(15) + op_flags.right_shift_at(14);
+        let expected = op_flags.no_shift_at(15) * local.stack.get(15).into()
+            + op_flags.right_shift_at(14) * local.stack.get(14).into();
+        let actual = next.stack.get(15);
+
+        builder.when_transition().assert_zero(actual * flag_sum - expected);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use miden_core::{
+        Felt,
+        field::{PrimeCharacteristicRing, QuadFelt},
+        operations::opcodes,
+    };
+
+    use super::enforce_main;
+    use crate::constraints::{
+        columns::CoreCols,
+        op_flags::{OpFlags, generate_test_row},
+        stack::test_utils::ConstraintEvalBuilder,
+    };
+
+    fn eval_stack_general(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {
+        let mut builder = ConstraintEvalBuilder::new();
+        let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+        enforce_main(&mut builder, local, next, &op_flags);
+        builder.evaluations
+    }
+
+    #[test]
+    fn evalcircuit_rejects_forged_stack_transition() {
+        let local = generate_test_row(opcodes::EVALCIRCUIT.into());
+        let mut next = generate_test_row(0);
+
+        let evaluations = eval_stack_general(&local, &next);
+        assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
+
+        next.stack.top[7] += Felt::ONE;
+        let evaluations = eval_stack_general(&local, &next);
+        assert!(
+            evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+            "EVALCIRCUIT must preserve the visible stack"
+        );
+    }
+
+    #[test]
+    fn logdeferred_allows_top_word_rewrite_but_rejects_tail_mutations() {
+        let mut local = generate_test_row(opcodes::LOGDEFERRED.into());
+        let mut next = generate_test_row(0);
+
+        for i in 0..16 {
+            local.stack.top[i] = Felt::new_unchecked(100 + i as u64);
+            next.stack.top[i] = local.stack.top[i];
+        }
+
+        // The opcode replaces the top word with the new deferred root.
+        for i in 0..4 {
+            next.stack.top[i] = Felt::new_unchecked(200 + i as u64);
+        }
+
+        let evaluations = eval_stack_general(&local, &next);
+        assert!(
+            evaluations.iter().all(|value| *value == QuadFelt::ZERO),
+            "LOGDEFERRED must allow the top word to be replaced"
+        );
+
+        for i in 4..16 {
+            let mut mutated = next.clone();
+            mutated.stack.top[i] += Felt::ONE;
+
+            let evaluations = eval_stack_general(&local, &mutated);
+            assert!(
+                evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+                "LOGDEFERRED must preserve stack position {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn unused_opcode_6_preserves_top_stack_value() {
+        const UNUSED_DEGREE_7_NO_SHIFT_OPCODE: usize = 6;
+
+        let local = generate_test_row(UNUSED_DEGREE_7_NO_SHIFT_OPCODE);
+        let mut next = generate_test_row(0);
+
+        let evaluations = eval_stack_general(&local, &next);
+        assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
+
+        next.stack.top[0] += Felt::ONE;
+        let evaluations = eval_stack_general(&local, &next);
+        assert!(
+            evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+            "unused opcode 6 must preserve s0 like a complete no-shift alias"
+        );
+    }
+}

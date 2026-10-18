@@ -5,13 +5,14 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_lifted_air::{
-    AirBuilder, ExtensionBuilder, LiftedAir, PermutationAirBuilder, WindowAccess,
-    symbolic::{AirLayout, ConstraintLayout},
-};
 use p3_field::{ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
 use tracing::instrument;
+
+use crate::air::{
+    AirBuilder, ExtensionBuilder, LiftedAir, PermutationAirBuilder, WindowAccess,
+    symbolic::{AirLayout, ConstraintLayout},
+};
 
 // ============================================================================
 // Constraint Layout Builder (lightweight, no symbolic expressions)
@@ -31,7 +32,7 @@ where
 {
     let mut builder = ConstraintLayoutBuilder::<F>::new(air.air_layout());
     #[cfg(debug_assertions)]
-    miden_lifted_air::debug::check_builder_shape(air, &builder);
+    crate::air::debug::check_builder_shape(air, &builder);
     air.eval(&mut builder);
     builder.into_layout()
 }

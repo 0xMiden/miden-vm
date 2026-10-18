@@ -80,8 +80,8 @@ use crate::{
 
 /// A handle to a `Binding(hash, True)` claim, issued by the eval requires.
 ///
-/// Shared-use: each edge recorded by [`TranscriptEvalRequires::record_and`] counts a use.
-/// Unused claims are rejected at [`generate_trace`], except for the designated root.
+/// Shared-use: each edge recorded by `TranscriptEvalRequires::record_and` counts a use.
+/// Unused claims are rejected at `generate_trace`, except for the designated root.
 #[derive(Debug, Clone, Copy)]
 pub struct Truthy {
     id: u32,
@@ -292,7 +292,7 @@ enum ClaimKind {
 }
 
 /// `*Requires`-pattern accumulator for the eval chip, built from explicit
-/// [`Truthy`] / [`UintNode`] handles. [`generate_trace`] lays its trace.
+/// [`Truthy`] / [`UintNode`] handles. `generate_trace` lays its trace.
 #[derive(Debug, Default)]
 pub struct TranscriptEvalRequires {
     /// A handle's id indexes its consumer count and provider kind.

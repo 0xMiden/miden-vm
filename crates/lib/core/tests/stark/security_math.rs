@@ -40,7 +40,7 @@ fn security_parameters(
 /// or bounded fractional-bit decision can change.
 #[test]
 fn lookup_slack_bound_is_conservative_at_every_transition() {
-    use miden_precompiles_air::security as pvm;
+    use miden_air::precompile::security as pvm;
 
     const COEFFICIENT_MAX: u64 = 65_536;
 

@@ -19,10 +19,7 @@ use super::{
 };
 use crate::{
     Felt,
-    stark::{
-        hasher::{Alignable, StatefulHasher},
-        lmcs::config::LmcsConfig,
-    },
+    hasher::{Alignable, StatefulHasher},
 };
 
 const DIGEST_WIDTH: usize = super::DIGEST_WIDTH;
@@ -36,16 +33,6 @@ type Digest = [u64; DIGEST_WIDTH];
 type PackedDigest = [PackedU64; DIGEST_WIDTH];
 type State = Digest;
 type PackedState = PackedDigest;
-
-/// Eidos LMCS configuration.
-pub type EidosLmcs = LmcsConfig<
-    PackedFelt,
-    PackedU64,
-    EidosLmcsHasher,
-    EidosLmcsCompressor,
-    DIGEST_WIDTH,
-    DIGEST_WIDTH,
->;
 
 /// Stateful hasher used by the Eidos LMCS configuration.
 #[derive(Clone, Copy, Debug)]
@@ -171,11 +158,6 @@ impl<Input, Target> Alignable<Input, Target> for EidosLmcsHasher {
     const ALIGNMENT: usize = BLOCK_LEN;
 }
 
-/// Creates the Eidos LMCS configuration used by the STARK proof config.
-pub const fn config() -> EidosLmcs {
-    LmcsConfig::new(EidosLmcsHasher, EidosLmcsCompressor)
-}
-
 fn absorb_blocks<T, D>(
     mut digest: D,
     input: impl IntoIterator<Item = T>,
@@ -230,10 +212,7 @@ fn encoded_len(row_lengths: impl IntoIterator<Item = usize>) -> usize {
 mod tests {
     use core::array;
 
-    use miden_field::PrimeCharacteristicRing;
-    use p3_matrix::{bitrev::BitReversibleMatrix, dense::RowMajorMatrixView};
     use p3_symmetric::PseudoCompressionFunction;
-    use rand::{SeedableRng, rngs::SmallRng};
 
     use super::*;
     use crate::{
@@ -241,11 +220,7 @@ mod tests {
         hash::eidos::{
             Eidos, compression::compress_felt_block_for_test, pack_digest_lanes, unpack_digest_lane,
         },
-        stark::{
-            hasher::{Alignable, StatefulHasher},
-            lmcs::{Lmcs, LmcsTree, hiding_config::HidingLmcsConfig},
-            matrix::{Matrix, RowMajorMatrix},
-        },
+        hasher::{Alignable, StatefulHasher},
     };
 
     const INPUT_LENGTHS: [usize; 7] = [0, 1, 7, 8, 9, 16, 17];
@@ -328,49 +303,6 @@ mod tests {
         );
 
         assert_eq!(partial_state, padded_state);
-    }
-
-    #[test]
-    fn block_hashing_preserves_length_bound_salted_commitment() {
-        let lmcs =
-            HidingLmcsConfig::<PackedFelt, PackedU64, _, _, _, DIGEST_WIDTH, DIGEST_WIDTH, 4>::new(
-                EidosLmcsHasher,
-                EidosLmcsCompressor,
-                SmallRng::seed_from_u64(42),
-            );
-        for with_prefix in [false, true] {
-            let mut matrices = Vec::new();
-            if with_prefix {
-                matrices.push(RowMajorMatrix::new(vec![Felt::ONE; 3], 3));
-            }
-            matrices.push(RowMajorMatrix::new(
-                (1..=2 * PACKED_LANES * 9).map(Felt::from_usize).collect(),
-                9,
-            ));
-            let expected = lmcs.clone().build_aligned_tree(
-                matrices.iter().map(|matrix| matrix.as_view().bit_reverse_rows()).collect(),
-            );
-            let expected_root = expected.root();
-            drop(expected);
-            let matrix = matrices.pop().unwrap();
-            let actual = lmcs.clone().build_aligned_tree_with_blocks(
-                matrices,
-                matrix.dimensions(),
-                |make_consumer| {
-                    let consume = make_consumer.unwrap()(PACKED_LANES);
-                    for (index, values) in
-                        matrix.values.chunks_exact(PACKED_LANES * matrix.width()).enumerate()
-                    {
-                        consume(
-                            index * PACKED_LANES,
-                            RowMajorMatrixView::new(values, matrix.width()),
-                        );
-                    }
-                    matrix
-                },
-            );
-            assert_eq!(actual.root(), expected_root);
-        }
     }
 
     #[test]
@@ -481,37 +413,6 @@ mod tests {
                 "LMCS digest changed field semantics at input length {len}",
             );
         }
-    }
-
-    #[test]
-    fn lmcs_paths_bind_the_sum_of_independently_padded_rows() {
-        let first = (1..=3).map(Felt::new_unchecked).collect::<Vec<_>>();
-        let second = (4..=12).map(Felt::new_unchecked).collect::<Vec<_>>();
-        let matrices = vec![
-            RowMajorMatrix::new(first.clone(), first.len()),
-            RowMajorMatrix::new(second.clone(), second.len()),
-        ];
-        let lmcs = config();
-
-        let hasher = EidosLmcsHasher;
-        let mut expected_state = new_state(24);
-        <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::absorb_into(
-            &hasher,
-            &mut expected_state,
-            first.iter().copied(),
-        );
-        <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::absorb_into(
-            &hasher,
-            &mut expected_state,
-            second.iter().copied(),
-        );
-
-        let leaf = lmcs.hash([first.as_slice(), second.as_slice()]);
-        assert_eq!(*leaf.as_ref(), expected_state);
-        let tree = lmcs.build_tree(matrices.clone());
-        let aligned_tree = lmcs.build_aligned_tree(matrices);
-        assert_eq!(tree.root(), leaf);
-        assert_eq!(aligned_tree.root(), leaf);
     }
 
     #[test]

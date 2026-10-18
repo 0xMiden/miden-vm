@@ -8,14 +8,14 @@ use gl::{
 };
 use hiding_config::HidingLmcsConfig;
 use lifted_tree::LiftedMerkleTree;
-use miden_lifted_air::log2_strict_u8;
-use miden_stateful_hasher::{Alignable, StatefulHasher};
+use miden_crypto::hasher::{Alignable, StatefulHasher};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use proof::BatchProofView;
 use rand::{RngExt, SeedableRng, rngs::SmallRng};
 
 use super::*;
+use crate::air::log2_strict_u8;
 // ============================================================================
 // Test Helpers and Re-exports
 // ============================================================================

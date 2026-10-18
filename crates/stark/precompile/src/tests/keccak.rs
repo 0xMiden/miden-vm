@@ -15,8 +15,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_crypto::stark::air::ConstraintDegrees;
-use miden_lifted_air::{BaseAir, LiftedAir};
+use miden_stark::air::{BaseAir, ConstraintDegrees, LiftedAir};
 use proptest::prelude::*;
 
 use crate::{
@@ -69,7 +68,7 @@ fn fold_fractions(fractions: &[(Felt, QuadFelt)]) -> (QuadFelt, QuadFelt) {
 
 #[test]
 fn packed_passthrough_keeps_round_assertions_within_budget() {
-    let counts = miden_lifted_air::ConstraintCounts::from_air::<Felt, QuadFelt, _>(&KeccakRoundAir);
+    let counts = miden_stark::air::ConstraintCounts::from_air::<Felt, QuadFelt, _>(&KeccakRoundAir);
     assert_eq!(counts.base, 15);
 }
 

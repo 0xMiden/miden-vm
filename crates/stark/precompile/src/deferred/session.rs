@@ -6,6 +6,9 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_air::precompile::hash::keccak::node::{MAX_SPONGE_PERMS, SPONGE_RATE_BYTES};
+#[cfg(feature = "prover")]
+use miden_air::precompile::{memory, stark_config::precompile_pcs_params};
 use miden_core::{
     deferred::{
         DEFERRED_AND_FRAME, DataChunk, Digest, MAX_DEFERRED_ELEMENTS, MAX_PRECOMPILE_ROOTS, Node,
@@ -17,11 +20,6 @@ use miden_crypto::hash::eidos::{EidosDomain, EidosFrame};
 use miden_precompiles::{
     CurveBinaryOp, CurveId, CurveOp, Keccak256Precompile, Sha256Precompile, Sha512Precompile,
     UintBinaryOp, UintDomain, UintOp, chunks_to_bytes_exact, n_chunks,
-};
-use miden_precompiles_air::{
-    hash::keccak::node::{MAX_SPONGE_PERMS, SPONGE_RATE_BYTES},
-    memory,
-    stark_config::precompile_pcs_params,
 };
 
 use crate::{
@@ -118,23 +116,20 @@ pub enum SessionInputError {
     },
 }
 
-pub(crate) struct WitnessSession {
+pub struct WitnessSession {
     session: Session,
     root: Truthy,
     roots: Vec<Digest>,
 }
 
 impl WitnessSession {
-    /// Test-only view of the per-witness roots the importer recorded, in
-    /// input order — lets properties bind the importer's root bookkeeping
-    /// to the witnesses' own commitments.
-    #[cfg(test)]
-    pub(crate) fn roots(&self) -> &[Digest] {
+    /// Returns the imported per-witness roots in input order, preserving repetitions.
+    pub fn roots(&self) -> &[Digest] {
         &self.roots
     }
 
-    #[cfg(test)]
-    pub(crate) fn finish(self) -> crate::session::SessionTraces {
+    /// Lowers the imported session into canonical chiplet traces.
+    pub fn finish(self) -> crate::session::SessionTraces {
         self.session.finish(self.root)
     }
 
@@ -188,6 +183,7 @@ pub(crate) fn session_from_witnesses(
     import_witnesses(witnesses, ImportLimits::default())
 }
 
+#[cfg(feature = "prover")]
 pub(crate) fn prove(
     witnesses: Vec<PrecompileWitness>,
     hash_fn: crate::HashFunction,

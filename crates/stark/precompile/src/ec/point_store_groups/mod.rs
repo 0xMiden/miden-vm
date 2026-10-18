@@ -1,3 +1,3 @@
-pub use miden_precompiles_air::ec::point_store_groups::*;
+pub use miden_air::precompile::ec::point_store_groups::*;
 
 pub mod trace;

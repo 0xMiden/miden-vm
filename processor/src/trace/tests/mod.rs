@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::PublicInputs;
+use miden_air_source::PublicInputs;
 use miden_core::{
     deferred::TRUE_DIGEST,
     mast::{BasicBlockNodeBuilder, MastForest},

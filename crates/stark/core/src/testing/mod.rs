@@ -28,8 +28,6 @@ mod test_tiny_air;
 // Re-export commonly used params at the module level for convenience.
 use alloc::vec::Vec;
 
-// Re-exports used by external integration tests and benches.
-pub use miden_lifted_air::{MultiAir, ProverStatement, Statement, log2_strict_u8};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 pub use params::{
@@ -42,6 +40,8 @@ use rand::{
     rngs::SmallRng,
 };
 
+// Re-exports used by external integration tests and benches.
+pub use crate::air::{MultiAir, ProverStatement, Statement, log2_strict_u8};
 pub use crate::{
     domain::{Coset, LiftedDomain},
     lmcs::{Lmcs, LmcsTree},
@@ -88,12 +88,11 @@ where
     F: TwoAdicField,
     EF: ExtensionField<F>,
     C: Clone,
-    Ch: miden_stark_transcript::TranscriptChallenger<F, C>,
+    Ch: crate::transcript::TranscriptChallenger<F, C>,
 {
-    use miden_stark_transcript::Channel;
+    use crate::transcript::Channel;
 
-    let mut channel =
-        miden_stark_transcript::VerifierTranscript::<F, C, Ch>::new(challenger, &[], &[]);
+    let mut channel = crate::transcript::VerifierTranscript::<F, C, Ch>::new(challenger, &[], &[]);
     let z = domain.sample_ood_point(&mut channel);
     (z, channel.sample())
 }
@@ -166,25 +165,25 @@ macro_rules! define_lmcs_test_helpers {
 
         pub type TestTree = <Lmcs as LmcsTrait>::Tree<p3_matrix::dense::RowMajorMatrix<Felt>>;
         pub type TestCommitment = <Lmcs as LmcsTrait>::Commitment;
-        pub type TestTranscriptData = miden_stark_transcript::TranscriptData<Felt, TestCommitment>;
+        pub type TestTranscriptData = crate::transcript::TranscriptData<Felt, TestCommitment>;
         pub type TestDigest = <Challenger as p3_challenger::CanFinalizeDigest>::Digest;
         pub type TestProverChannel =
-            miden_stark_transcript::ProverTranscript<Felt, TestCommitment, Challenger>;
+            crate::transcript::ProverTranscript<Felt, TestCommitment, Challenger>;
         pub type TestVerifierChannel<'a> =
-            miden_stark_transcript::VerifierTranscript<'a, Felt, TestCommitment, Challenger>;
+            crate::transcript::VerifierTranscript<'a, Felt, TestCommitment, Challenger>;
 
         pub fn prover_channel() -> TestProverChannel {
-            miden_stark_transcript::ProverTranscript::new(test_challenger())
+            crate::transcript::ProverTranscript::new(test_challenger())
         }
 
         pub fn prover_channel_with_commitment(commitment: &TestCommitment) -> TestProverChannel {
             let mut challenger = test_challenger();
             p3_challenger::CanObserve::observe(&mut challenger, commitment.clone());
-            miden_stark_transcript::ProverTranscript::new(challenger)
+            crate::transcript::ProverTranscript::new(challenger)
         }
 
         pub fn verifier_channel(data: &TestTranscriptData) -> TestVerifierChannel<'_> {
-            miden_stark_transcript::VerifierTranscript::from_data(test_challenger(), data)
+            crate::transcript::VerifierTranscript::from_data(test_challenger(), data)
         }
 
         pub fn verifier_channel_with_commitment<'a>(
@@ -193,7 +192,7 @@ macro_rules! define_lmcs_test_helpers {
         ) -> TestVerifierChannel<'a> {
             let mut challenger = test_challenger();
             p3_challenger::CanObserve::observe(&mut challenger, commitment.clone());
-            miden_stark_transcript::VerifierTranscript::from_data(challenger, data)
+            crate::transcript::VerifierTranscript::from_data(challenger, data)
         }
     };
 }

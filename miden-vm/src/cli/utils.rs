@@ -10,7 +10,7 @@ use miden_mast_package::{
     Package,
     debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
-use miden_prover::serde::Deserializable;
+use miden_vm::serde::Deserializable;
 
 use crate::cli::data::{Libraries, ProgramFile};
 

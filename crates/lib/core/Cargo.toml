@@ -1,96 +1,86 @@
 [package]
-name = "miden-core-lib"
-version = "1.0.0"
-description = "Miden VM core library"
-documentation = "https://docs.rs/miden-core-lib"
-readme = "README.md"
-categories = ["cryptography", "mathematics"]
-keywords = ["miden", "program", "core-lib"]
-license.workspace = true
-authors.workspace = true
-homepage.workspace = true
-repository.workspace = true
-rust-version.workspace = true
-edition.workspace = true
+"name" = "miden-core-lib"
+"version" = "1.0.0"
+"description" = "Miden VM core library"
+"documentation" = "https://docs.rs/miden-core-lib"
+"readme" = "README.md"
+"categories" = ["cryptography", "mathematics"]
+"keywords" = ["miden", "program", "core-lib"]
+"license" = { "workspace" = true }
+"authors" = { "workspace" = true }
+"homepage" = { "workspace" = true }
+"repository" = { "workspace" = true }
+"rust-version" = { "workspace" = true }
+"edition" = { "workspace" = true }
 
 [lib]
-bench = false
-doctest = false
+"bench" = false
+"doctest" = false
 
 [[bench]]
-name = "compilation"
-harness = false
+"name" = "compilation"
+"harness" = false
 
 [[test]]
-name = "core-lib"
-path = "tests/main.rs"
+"name" = "core-lib"
+"path" = "tests/main.rs"
 
 [features]
-default = ["std"]
-arbitrary = ["std", "miden-assembly/testing", "miden-utils-testing/arbitrary"]
-std = [
-    "miden-assembly/std",
-    "miden-precompiles/std",
-    "miden-processor/std",
-    "miden-utils-sync/std",
-]
-testing = ["arbitrary"]
-constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen", "dep:miden-constraint-compiler"]
+"default" = ["std"]
+"arbitrary" = ["std", "miden-assembly/testing", "miden-utils-testing/arbitrary"]
+"std" = ["miden-assembly/std", "miden-precompiles/std", "miden-processor/std", "miden-utils-sync/std"]
+"testing" = ["arbitrary"]
+"constraints-tools" = ["dep:miden-air-source", "miden-air-source/tooling", "std", "dep:miden-air", "dep:miden-ace", "dep:miden-stark"]
 
 [dependencies]
-# Miden dependencies
-miden-mast-package.workspace = true
-miden-core.workspace = true
-miden-crypto.workspace = true
-miden-precompiles.workspace = true
-miden-processor.workspace = true
-miden-utils-sync.workspace = true
-miden-air = { workspace = true, optional = true }
-miden-ace-codegen = { workspace = true, optional = true }
-miden-constraint-compiler = { workspace = true, optional = true }
-
-# External dependencies
-p256 = { workspace = true, features = ["ecdsa"] }
-thiserror.workspace = true
+"miden-air-source" = { workspace = true, optional = true }
+"miden-mast-package" = { "workspace" = true }
+"miden-core" = { "workspace" = true }
+"miden-crypto" = { "workspace" = true }
+"miden-precompiles" = { "workspace" = true }
+"miden-processor" = { "workspace" = true }
+"miden-utils-sync" = { "workspace" = true }
+"miden-air" = { "workspace" = true, "optional" = true }
+"p256" = { "workspace" = true, "features" = ["ecdsa"] }
+"thiserror" = { "workspace" = true }
+"miden-stark" = { "workspace" = true, "optional" = true, "features" = ["capture"] }
+"miden-ace" = { "workspace" = true, "optional" = true, "features" = ["compiler"] }
 
 [dev-dependencies]
-criterion.workspace = true
-curve25519-dalek.workspace = true
-miden-ace-codegen.workspace = true
-miden-air.workspace = true
-miden-assembly = { workspace = true, features = ["testing"] }
-miden-core-lib-codegen = { workspace = true, features = ["std"] }
-miden-debug-types.workspace = true
-miden-lifted-stark = { workspace = true, features = ["testing"] }
-miden-package-registry = { workspace = true, features = ["resolver"] }
-miden-processor = { workspace = true, features = ["testing"] }
-miden-precompiles-air.workspace = true
-miden-precompiles-prover = { workspace = true, features = ["concurrent"] }
-miden-precompiles-verifier = { workspace = true, features = ["concurrent"] }
-miden-prover = { workspace = true, features = ["concurrent"] }
-miden-utils-testing.workspace = true
-miden-verifier = { workspace = true, features = ["std"] }
-num = { workspace = true }
-p3-security.workspace = true
-rand = { workspace = true, features = ["std", "std_rng", "thread_rng"] }
-rand_chacha = { workspace = true }
-rstest = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt"] }
+"miden-air-source" = { workspace = true, features = ["tooling"] }
+"criterion" = { "workspace" = true }
+"curve25519-dalek" = { "workspace" = true }
+"miden-air" = { "workspace" = true }
+"miden-assembly" = { "workspace" = true, "features" = ["testing"] }
+"miden-core-lib-codegen" = { "workspace" = true, "features" = ["std"] }
+"miden-debug-types" = { "workspace" = true }
+"miden-package-registry" = { "workspace" = true, "features" = ["resolver"] }
+"miden-processor" = { "workspace" = true, "features" = ["testing"] }
+"miden-utils-testing" = { "workspace" = true }
+"num" = { "workspace" = true }
+"p3-security" = { "workspace" = true }
+"rand" = { "workspace" = true, "features" = ["std", "std_rng", "thread_rng"] }
+"rand_chacha" = { "workspace" = true }
+"rstest" = { "workspace" = true }
+"tokio" = { "workspace" = true, "features" = ["macros", "rt"] }
+"miden-stark" = { "workspace" = true, "features" = ["testing"] }
+"miden-ace" = { "workspace" = true, "features" = ["compiler"] }
+"miden-vm" = { "workspace" = true, "features" = ["concurrent", "prover", "std", "recursive"] }
+"miden-precompile-stark" = { "workspace" = true, "features" = ["concurrent", "prover", "recursive"] }
 
 [build-dependencies]
-env_logger.workspace = true
-fs-err = { version = "3.1" }
-miden-assembly = { workspace = true, features = ["std"] }
-miden-assembly-syntax = { workspace = true, features = ["std"] }
-miden-package-registry = { workspace = true, features = ["resolver"] }
-miden-core-lib-codegen = { workspace = true, features = ["std"] }
+"env_logger" = { "workspace" = true }
+"fs-err" = { "version" = "3.1" }
+"miden-assembly" = { "workspace" = true, "features" = ["std"] }
+"miden-assembly-syntax" = { "workspace" = true, "features" = ["std"] }
+"miden-package-registry" = { "workspace" = true, "features" = ["resolver"] }
+"miden-core-lib-codegen" = { "workspace" = true, "features" = ["std"] }
 
 [[bin]]
-name = "regenerate-constraints"
-path = "src/bin/regenerate-constraints.rs"
-required-features = ["constraints-tools"]
-
+"name" = "regenerate-constraints"
+"path" = "src/bin/regenerate-constraints.rs"
+"required-features" = ["constraints-tools"]
 [[bin]]
-name = "regenerate-evaluator"
-path = "src/bin/regenerate-evaluator.rs"
-required-features = ["constraints-tools"]
+"name" = "regenerate-evaluator"
+"path" = "src/bin/regenerate-evaluator.rs"
+"required-features" = ["constraints-tools"]

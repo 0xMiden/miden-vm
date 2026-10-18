@@ -7,12 +7,10 @@
 //! after the checked-in circuit digests survive a release cycle on the IR path;
 //! the node-for-node differential retires with it. Do not add production callers.
 
-use miden_crypto::{
-    field::{ExtensionField, Field},
-    stark::air::symbolic::{
-        BaseEntry, BaseLeaf, ConstraintLayout, ExtEntry, ExtLeaf, SymbolicExpression,
-        SymbolicExpressionExt,
-    },
+use miden_crypto::field::{ExtensionField, Field};
+use miden_stark::air::symbolic::{
+    BaseEntry, BaseLeaf, ConstraintLayout, ExtEntry, ExtLeaf, SymbolicExpression,
+    SymbolicExpressionExt,
 };
 
 use super::{

@@ -1,13 +1,15 @@
 use std::{collections::HashMap, string::String, vec};
 
-use miden_air::lookup::Challenges;
+use miden_air::{
+    lookup::Challenges,
+    precompile::hash::sha256::{
+        COL_IO_ACT, IO_COLUMNS, IO_ROW_START, NUM_MAIN_COLS, Sha256IoContinuation,
+    },
+};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
-};
-use miden_precompiles_air::hash::sha256::{
-    COL_IO_ACT, IO_COLUMNS, IO_ROW_START, NUM_MAIN_COLS, Sha256IoContinuation,
 };
 
 use crate::{
@@ -45,7 +47,7 @@ fn io_index(block: usize, lane: usize, column: usize) -> usize {
 
 #[test]
 fn sha256_trace_meets_per_block_memory_budget() {
-    use miden_lifted_air::LiftedAir;
+    use miden_stark::air::LiftedAir;
 
     let (compression, io) = requirements(&[55]);
     let main = generate_trace(compression, io, &mut BytePairLutRequires::new());

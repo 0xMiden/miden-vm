@@ -4,9 +4,9 @@
 //!
 //! [`Session`] owns the per-chiplet `*Requires` accumulators and lends
 //! them to the recording layers that do the wiring — the six-`&mut`
-//! [`KeccakNodeRequires::require`] call, the eval layer's node entries
+//! `KeccakNodeRequires::require` call, the eval layer's node entries
 //! (which drive their own framed Eidos absorptions and the
-//! [`UintRequire`](crate::uint::UintRequire) relation recording) — and
+//! `UintRequire` relation recording) — and
 //! owns the dependency-ordered trace-gen sweep (eval before its
 //! Eidos / BPL demand; round before BPL (round drives its per-row
 //! `BytePairLut` byte-check demand directly); the arithmetic ops' store
@@ -85,6 +85,7 @@ use crate::{
 };
 
 mod fixed;
+#[cfg(feature = "prover")]
 mod prove;
 #[cfg(test)]
 pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
@@ -92,8 +93,8 @@ pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
 pub mod statements;
 pub mod strategies;
 #[cfg(test)]
-pub use miden_precompiles_air::ChipletAir;
-pub(crate) use miden_precompiles_air::NUM_CHIPLETS;
+pub use miden_air::precompile::ChipletAir;
+pub(crate) use miden_air::precompile::NUM_CHIPLETS;
 
 /// Stateful builder over the full chiplet stack.
 ///
@@ -367,7 +368,7 @@ impl Session {
     /// Promote a stored point to the 1-term MSM expression `⟨P × 1⟩` (value
     /// = P) — the base of any addition chain. Chiplet-internal: the strategy
     /// never touches the DAG, only [`ec_msm`](Self::ec_msm) does. Mechanism
-    /// in [`msm::require::intro`](crate::ec::msm::require::intro).
+    /// in `msm::require::intro`.
     pub fn msm_intro(&mut self, point: &EcNode) -> EcExprPtr {
         require::intro(&mut self.msm, &mut self.ec, &mut self.uint, point.point)
     }
@@ -375,7 +376,7 @@ impl Session {
     /// Promote a stored point `P` to the 1-term MSM expression `⟨P × λ⟩`
     /// (value `= φ(P)`) — GLV's endomorphism leaf. Chiplet-internal, like
     /// [`msm_intro`](Self::msm_intro). Mechanism in
-    /// [`msm::require::intro_endo`](crate::ec::msm::require::intro_endo).
+    /// `msm::require::intro_endo`.
     /// Panics if `point` is the point at infinity — check
     /// [`is_pai`](Self::is_pai) first.
     pub fn msm_intro_endo(&mut self, point: &EcNode) -> EcExprPtr {
@@ -386,7 +387,7 @@ impl Session {
     /// (value = the group's point at infinity) — the zero-scalar leaf, dual
     /// to [`msm_intro`](Self::msm_intro). Chiplet-internal, like
     /// [`msm_intro`](Self::msm_intro). Mechanism in
-    /// [`msm::require::intro_zero`](crate::ec::msm::require::intro_zero).
+    /// `msm::require::intro_zero`.
     pub fn msm_intro_zero(&mut self, point: &EcNode) -> EcExprPtr {
         require::intro_zero(&mut self.msm, &mut self.ec, &mut self.uint, point.point)
     }
@@ -403,7 +404,7 @@ impl Session {
     /// Combine two MSM expressions: union their term multisets (shared-base
     /// scalars merge `mod` the scalar bound) and add their values; the
     /// operands' use counts are bumped. Mechanism in
-    /// [`msm::require::combine`](crate::ec::msm::require::combine).
+    /// `msm::require::combine`.
     pub fn msm_combine(&mut self, a: EcExprPtr, b: EcExprPtr) -> EcExprPtr {
         require::combine(&mut self.msm, &mut self.ec, &mut self.uint, a, b)
     }
@@ -411,14 +412,14 @@ impl Session {
     /// Combine two MSM expressions without merging shared bases — every
     /// term of both operands survives as its own row, even across a
     /// repeated base. Mechanism in
-    /// [`msm::require::combine_terms_preserving`](crate::ec::msm::require::combine_terms_preserving).
+    /// `msm::require::combine_terms_preserving`.
     pub fn msm_combine_terms_preserving(&mut self, a: EcExprPtr, b: EcExprPtr) -> EcExprPtr {
         require::combine_terms_preserving(&mut self.msm, &mut self.ec, &mut self.uint, a, b)
     }
 
     /// Negate an MSM expression: every term's scalar negated (the base
     /// kept), the value negated. Mechanism in
-    /// [`msm::require::neg`](crate::ec::msm::require::neg).
+    /// `msm::require::neg`.
     pub fn msm_neg(&mut self, a: EcExprPtr) -> EcExprPtr {
         require::neg(&mut self.msm, &mut self.ec, &mut self.uint, a)
     }
@@ -632,7 +633,6 @@ pub struct SessionTraces {
 
 impl SessionTraces {
     /// Borrows the twelve main traces in [`Self::into_mains`] order.
-    #[cfg(any(test, debug_assertions))]
     pub fn mains(&self) -> [&RowMajorMatrix<Felt>; NUM_CHIPLETS] {
         [
             &self.chunk_node_sponge,
@@ -678,7 +678,6 @@ impl SessionTraces {
     }
 
     /// The transcript root committed by the eval chip.
-    #[cfg(test)]
     pub fn public_root(&self) -> EidosDigest {
         self.public_root
     }

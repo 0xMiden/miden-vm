@@ -1,5 +1,5 @@
 //! Test-side adapter over the production recursive-verifier advice builder
-//! (`miden_verifier::recursive`).
+//! (`miden_vm::proofs::vm::recursive`).
 //!
 //! The production builder produces the advice-stack stream, Merkle store, and advice map; the
 //! test harness additionally needs the claim commitment on the operand stack and the proof stream
@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 
 pub use miden_core::program::proof_request_key;
 use miden_core::{Felt, Word, program::ExecutionClaim, proof::ExecutionProof};
-pub use miden_verifier::recursive::RecursiveVerifierInputsError;
+pub use miden_vm::proofs::vm::recursive::RecursiveVerifierInputsError;
 
 use crate::crypto::MerkleStore;
 
@@ -70,16 +70,16 @@ pub fn generate_request_inputs(
     proof: &ExecutionProof,
     claim: &ExecutionClaim,
 ) -> Result<VerifierData, RecursiveVerifierInputsError> {
-    let inputs = miden_verifier::recursive::RecursiveVerifierInputs::for_request(
+    let inputs = miden_vm::proofs::vm::recursive::RecursiveVerifierInputs::for_vm_request(
         verifier_root,
-        proof,
+        proof.vm(),
         claim,
     )?;
     Ok(verifier_data(inputs, claim))
 }
 
 fn verifier_data(
-    inputs: miden_verifier::recursive::RecursiveVerifierInputs,
+    inputs: miden_vm::proofs::vm::recursive::RecursiveVerifierInputs,
     claim: &ExecutionClaim,
 ) -> VerifierData {
     let (advice, claim_commitment) = inputs.into_parts();

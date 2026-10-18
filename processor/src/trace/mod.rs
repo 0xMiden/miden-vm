@@ -2,7 +2,7 @@ use alloc::{format, vec::Vec};
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
-use miden_air::{
+use miden_air_source::{
     MidenMultiAir, ProverStatement, PublicInputs, StarkConfig, Statement, config, debug,
     trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
@@ -39,7 +39,7 @@ mod tests;
 // ================================================================================================
 
 pub(crate) use execution_tracer::TraceReplay;
-pub use miden_air::trace::RowIndex;
+pub use miden_air_source::trace::RowIndex;
 pub use miden_core::deferred::PrecompileWitness;
 pub use parallel::{
     CORE_TRACE_WIDTH, DEFAULT_MAX_PROVER_MEMORY_BYTES, build_trace, build_trace_with_budget,
@@ -463,7 +463,9 @@ impl VmTrace {
         )
         .expect("prover statement construction failed");
 
-        let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+        // Diagnostic constraint evaluation has no authenticated protocol transcript. A fixed
+        // local domain keeps this helper independent of production relation pins/artifacts.
+        let config = config::eidos_config(config::pcs_params(), [Felt::ZERO; 4]);
         debug::check_constraints(&prover_statement, config.challenger());
     }
 

@@ -13,12 +13,17 @@ This crate contains the full lifted STARK implementation: shared types,
 prover, and verifier.
 
 ```
-miden-lifted-stark              ← this crate
-├── src/prover/                    ← Proving: trace commitment, constraint evaluation, quotient construction
-├── src/verifier/                  ← Verification: OOD check, quotient reconstruction, transcript canonicality
-├── src/pcs/                       ← PCS (DEEP + FRI)
-├── src/lmcs/                      ← Merkle commitments with lifting
-└── miden-lifted-air            ← AIR traits (aux columns, periodic columns)
+miden-stark
+├── src/air/           AIR traits, statements and portable symbolic analysis
+├── src/lookup/        Generic LogUp contract and auxiliary kernels
+├── src/prover/        Trace commitment, quotient construction and proving
+├── src/verifier/      OOD checks, quotient reconstruction and canonicality
+├── src/pcs/           DEEP + FRI
+├── src/lmcs/          Lifted Merkle commitments
+├── src/transcript/    Fiat-Shamir recording and consumption
+├── src/config.rs      Shared hash/challenger configuration factories
+├── src/security.rs    Relation-independent security reporting
+└── src/capture/       Optional compiler capture, IR and Rust rendering
 ```
 
 The system supports **multiple traces of different power-of-two heights of at
@@ -183,14 +188,14 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 
 | Item | Purpose |
 |------|---------|
-| `prover::prove` | Prove one or more AIR instances |
-| `ProverStatement` | Validated proving input: a `Statement` plus per-AIR main witness traces in instance order |
-| `Statement` | A `MultiAir` plus validated per-proof caller inputs (`air_inputs`, optional `aux_inputs`) |
-| `MultiAir` | Trusted statement definition: AIR instances, cross-AIR assertions, and statement observation hooks |
-| `verifier::verify` | Verify a multi-trace proof |
+| `ProverInstance::prove` | Prove one or more AIR instances |
+| `air::ProverStatement` | Validated proving input: a `Statement` plus per-AIR main witness traces in instance order |
+| `air::Statement` | A `MultiAir` plus validated per-proof caller inputs (`air_inputs`, optional `aux_inputs`) |
+| `air::MultiAir` | Trusted statement definition: AIR instances, cross-AIR assertions, and statement observation hooks |
+| `VerifierInstance::verify` | Verify a multi-trace proof |
 | `MultiAir::eval_external` | Cross-AIR assertion hook: returns assertion expression values to be checked for zero (default: no assertions) |
 | `Statement::aux_inputs` | Auxiliary public inputs consumed only by `eval_external` (empty unless provided) |
-| `StarkProof` | Structured parse-only view of the proof; `log_trace_heights()` exposes instance-order heights and `air_order()` exposes the derived proof-order mapping |
+| `proof::StarkProof` | Structured parse-only view of the proof; `log_trace_heights()` exposes instance-order heights and `air_order()` exposes the derived proof-order mapping |
 | `StarkConfig` | PCS params + LMCS + DFT configuration |
 | `pcs` | Structured PCS sub-proof types (DEEP / FRI) for inspection and error matching |
 
@@ -198,7 +203,11 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 
 | Path | Purpose |
 |------|---------|
-| `src/config.rs` | `StarkConfig` — wraps `PcsParams`, LMCS, and DFT |
+| `src/engine_config.rs` | `StarkConfig` — wraps `PcsParams`, LMCS, and DFT |
+| `src/config.rs` | Shared configuration factories with explicit PCS parameters and relation digest; accepted pins belong to production AIR |
+| `src/air/`, `src/lookup/`, `src/transcript/` | Generic AIR/statement, lookup and transcript support |
+| `src/capture/` | Optional compiler capture/IR and Rust emitter (`capture` feature) |
+| `src/security.rs` | Shared proof security parameters and budget reporting |
 | `src/domain.rs` | `TwoAdicSubgroup`, `TwoAdicCoset`, `LiftedDomain` — the domain hierarchy; `log_quotient_degree`, `DomainError` (incl. the `log_quotient_degree ≤ log_blowup` compat bound) |
 | `src/selectors.rs` | `Selectors<T>` — generic container for row selectors |
 | `src/prover/mod.rs` | `prove` — orchestration and protocol flow |
@@ -211,7 +220,7 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | `src/verifier/periodic.rs` | `PeriodicPolys` — polynomial coefficients for OOD evaluation |
 | `src/proof.rs` | `StarkProofData`, `StarkProof` — wire artifact and structured parse-only view |
 | `src/order.rs` | public `ShapeError` plus the crate-internal instance↔proof ordering helper; `TraceOrder` construction validates the proof's log heights against the AIRs |
-| `src/debug.rs` | `check_constraints` (row-by-row), structural assertion (`assert_prover_setup`) over `miden_lifted_air::debug::assert_multi_air_valid` |
+| `src/debug.rs` | `check_constraints` (row-by-row), structural assertion (`assert_prover_setup`) over `miden_stark::air::debug::assert_multi_air_valid` |
 
 ## Conventions & Assumptions
 
@@ -248,10 +257,16 @@ benchmark matrix:
 - **`test_multi_aux_alignment.rs`** — aux-trace alignment across multiple AIRs.
 - **`test_per_air_degree.rs`** — per-AIR quotient degrees.
 
-Run with:
+`std` and `concurrent` are default features. `--no-default-features` retains the
+portable engine and symbolic AIR analysis. `capture` enables host compiler
+support and implies `std`; enabling `std` does not enable the compiler. Crypto
+owns stateful hash primitives, reexported by `miden_stark::hasher`.
+
+Run with an AC-power gate before compilation:
 ```bash
-cargo test -p miden-lifted-stark --features testing
+systemd-ac-power && cargo test -p miden-stark --lib --features testing,capture
 ```
+If the power gate fails, wait for explicit user approval before compiling or testing.
 
 ## Security
 

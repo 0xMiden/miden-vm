@@ -3,34 +3,34 @@
 use alloc::vec::Vec;
 
 #[cfg(test)]
+use miden_air::precompile::stark_config::test_challenger;
+use miden_air::precompile::{
+    ChipletMultiAir,
+    stark_config::{
+        PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
+        observe_protocol_params, poseidon2_config, precompile_pcs_params, rpo_config, rpx_config,
+    },
+};
+#[cfg(test)]
 use miden_core::utils::RowMajorMatrix;
 use miden_core::{
     Felt,
     field::QuadFelt,
     proof::{HashFunction, StarkProof},
 };
-use miden_lifted_air::{ProverStatement, Statement};
 #[cfg(test)]
-use miden_lifted_stark::check_constraints;
-use miden_lifted_stark::{
+use miden_stark::check_constraints;
+use miden_stark::{
     Preprocessed, ProverInstance, StarkConfig,
+    air::{ProverStatement, Statement},
     lmcs::Lmcs as LmcsTrait,
     proof::{StarkOutput, StarkProofData},
-};
-#[cfg(test)]
-use miden_precompiles_air::stark_config::test_challenger;
-use miden_precompiles_air::{
-    ChipletMultiAir, preprocessed,
-    stark_config::{
-        PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
-        observe_protocol_params, poseidon2_config, precompile_pcs_params, rpo_config, rpx_config,
-    },
 };
 use serde::Serialize;
 use serde_wincode::SerdeCompat;
 
 use super::SessionTraces;
-use crate::ProveError;
+use crate::{ProveError, setup as preprocessed};
 
 impl SessionTraces {
     #[cfg(test)]

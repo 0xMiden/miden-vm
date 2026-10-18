@@ -481,6 +481,34 @@ mod prover_api_lifecycle {
     }
 
     #[test]
+    fn relation_vm_proof_and_advice_preserve_outstanding_obligations() {
+        let witness = u256_witness(1);
+        let claim = witness.claim();
+        let (vm_witness, precompile_witness) = witness.into_parts();
+        let pending = precompile_witness.expect("fixture has a precompile obligation");
+        let expected_root = pending.root_unchecked();
+        assert_ne!(expected_root, miden_core::deferred::TRUE_DIGEST);
+        let proof = miden_vm_stark::prover::Prover::new()
+            .prove_vm_witness(vm_witness)
+            .expect("VM relation may authenticate pending work");
+        let verified = miden_vm_stark::verifier::Verifier::new()
+            .verify(&claim, &proof)
+            .expect("independent VM relation verifies");
+        assert_eq!(verified.precompile_root, expected_root);
+        let root = miden_core::proof::CURRENT_VM_VERIFIER_ROOT;
+        let direct = miden_vm_stark::recursive::RecursiveVerifierInputs::for_vm_request(
+            root, &proof, &claim,
+        )
+        .expect("relation advice needs no execution envelope");
+        let envelope = ExecutionProof::new(proof, PrecompileStatus::Deferred(pending));
+        let compatibility = miden_vm_stark::recursive::RecursiveVerifierInputs::for_request(
+            root, &envelope, &claim,
+        )
+        .expect("compatibility forwarding keeps advice unchanged");
+        assert_eq!(direct, compatibility);
+    }
+
+    #[test]
     fn direct_vm_witness_proving_rejects_precompile_work() {
         let (vm_witness, precompile_witness) = u256_witness(1).into_parts();
         assert!(precompile_witness.is_some());
@@ -737,11 +765,11 @@ mod execution_witness_serialization {
         DefaultHost, FastProcessor, HostLibrary, StackInputs, advice::AdviceInputs,
         trace::build_trace,
     };
-    use miden_prover::{HashFunction, Prover, serde::Serializable};
     #[cfg(feature = "arbitrary")]
     use miden_utils_testing::proptest::prelude::*;
-    use miden_verifier::Verifier;
-    use miden_vm::{ExecutionWitness, Program};
+    use miden_vm::{
+        ExecutionWitness, HashFunction, Program, Prover, Verifier, serde::Serializable,
+    };
 
     fn default_source_manager_host() -> DefaultHost {
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()))

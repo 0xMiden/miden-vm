@@ -17,7 +17,7 @@
 
 use alloc::vec::Vec;
 
-use miden_air::{
+use miden_air_source::{
     logup::{HasherMsg, SiblingBit, SiblingMsg},
     trace::{
         MainTrace,
@@ -677,7 +677,7 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
     let main = trace.main_trace();
 
     // The sibling-table gates are defined by `emit_siblings` in
-    // `crates/air/source/src/constraints/lookup/operations/merkle.rs`.
+    // `air/src/constraints/lookup/operations/merkle.rs`.
     let mut mv_rows: Vec<RowIndex> = Vec::new();
     let mut mu_rows: Vec<RowIndex> = Vec::new();
     for row in 0..main.chiplets_height() {

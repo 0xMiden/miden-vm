@@ -744,25 +744,26 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 name = "miden-ace"
 version = "1.0.0"
 dependencies = [
- "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
  "thiserror",
 ]
 
 [[package]]
-name = "miden-air"
+name = "miden-air-source"
 version = "1.0.0"
 dependencies = [
  "miden-ace",
  "miden-core",
  "miden-crypto",
+ "miden-precompiles",
+ "miden-stark",
  "miden-utils-indexing",
+ "miden-utils-sync",
  "p3-field",
  "p3-security",
- "rand 0.10.2",
+ "ruint",
  "thiserror",
- "tracing",
 ]
 
 [[package]]
@@ -809,14 +810,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-constraint-compiler"
-version = "1.0.0"
-dependencies = [
- "miden-core",
- "miden-crypto",
-]
-
-[[package]]
 name = "miden-core"
 version = "1.0.0"
 dependencies = [
@@ -829,6 +822,7 @@ dependencies = [
  "miden-utils-core-derive",
  "miden-utils-indexing",
  "miden-utils-sync",
+ "p3-matrix",
  "proptest",
  "thiserror",
 ]
@@ -863,17 +857,15 @@ dependencies = [
  "k256",
  "miden-crypto-derive",
  "miden-field",
- "miden-lifted-stark",
  "miden-serde-utils",
  "num",
  "num-complex",
  "once_cell",
  "p3-blake3",
  "p3-challenger",
- "p3-dft",
+ "p3-field",
  "p3-goldilocks",
  "p3-keccak",
- "p3-matrix",
  "p3-maybe-rayon",
  "p3-symmetric",
  "p3-util",
@@ -939,40 +931,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e392e0a8c34b32671012b439de35fa8987bf14f0f8aac279b97f8b8cc6e263b"
 dependencies = [
  "unicode-width 0.1.14",
-]
-
-[[package]]
-name = "miden-lifted-air"
-version = "1.0.0"
-dependencies = [
- "p3-air",
- "p3-challenger",
- "p3-field",
- "p3-matrix",
- "p3-util",
- "thiserror",
-]
-
-[[package]]
-name = "miden-lifted-stark"
-version = "1.0.0"
-dependencies = [
- "miden-lifted-air",
- "miden-stark-transcript",
- "miden-stateful-hasher",
- "miden-utils-sync",
- "p3-challenger",
- "p3-dft",
- "p3-field",
- "p3-goldilocks",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-symmetric",
- "p3-util",
- "rand 0.10.2",
- "serde",
- "thiserror",
- "tracing",
 ]
 
 [[package]]
@@ -1055,7 +1013,7 @@ version = "1.0.0"
 dependencies = [
  "itertools",
  "miden-ace",
- "miden-air",
+ "miden-air-source",
  "miden-core",
  "miden-debug-types",
  "miden-mast-package",
@@ -1103,21 +1061,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-stark-transcript"
+name = "miden-stark"
 version = "1.0.0"
 dependencies = [
+ "miden-core",
+ "miden-crypto",
+ "miden-utils-sync",
+ "p3-air",
  "p3-challenger",
+ "p3-dft",
  "p3-field",
+ "p3-goldilocks",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-security",
+ "p3-symmetric",
+ "p3-util",
+ "rand 0.10.2",
  "serde",
  "thiserror",
-]
-
-[[package]]
-name = "miden-stateful-hasher"
-version = "1.0.0"
-dependencies = [
- "p3-field",
- "p3-symmetric",
+ "tracing",
 ]
 
 [[package]]

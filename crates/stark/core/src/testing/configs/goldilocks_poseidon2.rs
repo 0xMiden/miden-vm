@@ -36,7 +36,7 @@ pub const DIGEST: usize = 4;
 pub type Perm = Poseidon2Goldilocks<WIDTH>;
 
 /// Stateful sponge for hashing (can be used for LMCS).
-pub type Sponge = miden_stateful_hasher::StatefulSponge<Perm, WIDTH, RATE, DIGEST>;
+pub type Sponge = miden_crypto::hasher::StatefulSponge<Perm, WIDTH, RATE, DIGEST>;
 
 /// Truncated permutation for 2-to-1 compression.
 pub type Compress = TruncatedPermutation<Perm, 2, DIGEST, WIDTH>;

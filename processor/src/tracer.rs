@@ -1,4 +1,6 @@
-use miden_air::trace::{RowIndex, chiplets::hasher::STATE_WIDTH, decoder::NUM_USER_OP_HELPERS};
+use miden_air_source::trace::{
+    RowIndex, chiplets::hasher::STATE_WIDTH, decoder::NUM_USER_OP_HELPERS,
+};
 use miden_core::{
     Felt, Word, ZERO,
     crypto::merkle::MerklePath,

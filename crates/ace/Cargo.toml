@@ -16,13 +16,13 @@ edition.workspace = true
 [features]
 default = ["std"]
 std = ["miden-core/std", "miden-crypto/std", "thiserror/std"]
-compiler = ["std", "dep:miden-constraint-compiler"]
+compiler = ["std", "dep:miden-stark"]
 testing = ["compiler"]
 arbitrary = ["dep:proptest", "miden-core/arbitrary"]
 
 [dependencies]
 proptest = { workspace = true, optional = true }
-miden-constraint-compiler = { workspace = true, optional = true }
+miden-stark = { workspace = true, optional = true, features = ["capture"] }
 miden-core = { workspace = true }
 miden-crypto = { workspace = true }
 thiserror = { workspace = true }

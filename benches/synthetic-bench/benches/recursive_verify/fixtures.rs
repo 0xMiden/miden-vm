@@ -18,12 +18,12 @@ use miden_core::{
     utils::to_hex,
 };
 use miden_core_lib::CoreLibrary;
-use miden_precompiles_verifier::masm_verifier::PvmRecursiveVerifierInputs;
+use miden_precompile_stark::recursive::PvmRecursiveVerifierInputs;
 use miden_processor::{ExecutionOptions, FastProcessor};
-use miden_verifier::{Verifier, recursive::RecursiveVerifierInputs};
 use miden_vm::{
     Assembler, ExecutionProof, HashFunction, PrecompileWitness, ProgramInfo, Prover, StackInputs,
-    StackOutputs, internal::InputFile, prove_sync, trace::build_trace,
+    StackOutputs, Verifier, internal::InputFile, prove_sync, recursive::RecursiveVerifierInputs,
+    trace::build_trace,
 };
 
 use super::{

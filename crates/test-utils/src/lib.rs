@@ -43,8 +43,7 @@ use miden_processor::{
     DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionWitness, FastProcessor, Program,
     event::{EventHandler, TraceHandler},
 };
-pub use miden_prover::Prover;
-pub use miden_verifier::Verifier;
+pub use miden_vm::{Prover, Verifier};
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 use proptest::prelude::{Arbitrary, Strategy};

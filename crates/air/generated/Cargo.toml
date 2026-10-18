@@ -1,0 +1,39 @@
+[package]
+name = "miden-air"
+version.workspace = true
+description = "Production VM and precompile AIRs and precompiled artifacts"
+documentation = "https://docs.rs/miden-air"
+readme = "README.md"
+categories = ["cryptography", "no-std"]
+keywords = ["air", "arithmetization", "crypto", "miden"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+doctest = false
+
+[features]
+default = ["std"]
+arbitrary = ["miden-air-source/arbitrary"]
+std = ["miden-air-source/std", "miden-stark/std", "miden-ace/std", "miden-core/std", "miden-crypto/std"]
+concurrent = ["std", "miden-air-source/concurrent", "miden-stark/concurrent"]
+testing = ["arbitrary", "miden-air-source/testing"]
+
+[dependencies]
+miden-air-source.workspace = true
+miden-stark.workspace = true
+miden-ace.workspace = true
+miden-core.workspace = true
+miden-crypto.workspace = true
+p3-field.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+miden-air-source = { workspace = true, features = ["tooling", "testing"] }
+miden-stark = { workspace = true, features = ["capture"] }
+miden-ace = { workspace = true, features = ["testing"] }

@@ -1,6 +1,5 @@
 use alloc::vec::Vec;
 
-use miden_stark_transcript::ProverChannel;
 use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::{bitrev::BitReversalPerm, dense::RowMajorMatrix, extension::FlatMatrixView};
@@ -12,6 +11,7 @@ use crate::{
     domain::{Coset, LiftedDomain},
     lmcs::{Lmcs, LmcsTree, tree_indices::TreeIndices},
     pcs::fri::FriParams,
+    transcript::ProverChannel,
 };
 
 /// Tree type for FRI folding rounds.

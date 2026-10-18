@@ -9,13 +9,13 @@ use miden_core::{
 };
 use miden_crypto::hash::eidos::{DomainTag, DomainVersion, EidosFrame, namespace};
 use miden_precompiles::{CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile};
-use miden_precompiles_verifier::verify_deferred;
 use proptest::prelude::*;
 
 use crate::{
     HashFunction, SessionInputError, WitnessLocation,
     deferred::session::{ImportLimits, import_witnesses, session_from_witnesses},
     hash::keccak::sponge::trace::keccak_oracle,
+    verify_deferred,
 };
 
 /// Raw committed test graphs, with no runtime evaluator. The shared fixture also supports the

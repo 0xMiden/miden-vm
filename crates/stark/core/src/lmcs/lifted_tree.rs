@@ -1,8 +1,7 @@
 use alloc::{boxed::Box, collections::BTreeMap, vec, vec::Vec};
 use core::{array, mem};
 
-use miden_stark_transcript::ProverChannel;
-use miden_stateful_hasher::{Alignable, StatefulHasher};
+use miden_crypto::hasher::{Alignable, StatefulHasher};
 use miden_utils_sync::RwLock;
 use p3_field::PackedValue;
 use p3_matrix::{
@@ -24,6 +23,7 @@ use crate::{
         row_list::RowList,
         tree_indices::TreeIndices,
     },
+    transcript::ProverChannel,
     util::align::aligned_len_sum,
 };
 

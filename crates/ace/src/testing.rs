@@ -6,15 +6,13 @@
 //! downstream integration tests (e.g. in miden-air).
 
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::{
-    field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField},
-    stark::{
-        air::symbolic::{
-            BaseEntry, BaseLeaf, ConstraintLayout, ExtEntry, ExtLeaf, SymbolicExpression,
-            SymbolicExpressionExt,
-        },
-        dft::{Radix2DitParallel, TwoAdicSubgroupDft},
+use miden_crypto::field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
+use miden_stark::{
+    air::symbolic::{
+        BaseEntry, BaseLeaf, ConstraintLayout, ExtEntry, ExtLeaf, SymbolicExpression,
+        SymbolicExpressionExt,
     },
+    dft::{Radix2DitParallel, TwoAdicSubgroupDft},
 };
 
 use crate::{AceDag, InputCounts, InputKey, InputLayout};
@@ -34,9 +32,9 @@ pub fn eval_multi_air_constraints<A>(
     trace_alignment: usize,
 ) -> QuadFelt
 where
-    A: miden_crypto::stark::air::LiftedAir<Felt, QuadFelt>,
+    A: miden_stark::air::LiftedAir<Felt, QuadFelt>,
 {
-    use miden_crypto::stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
+    use miden_stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
 
     let periods: Vec<_> = airs.iter().map(|air| air.periodic_columns()).collect();
     let shared_period =

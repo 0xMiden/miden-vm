@@ -1,9 +1,9 @@
 [package]
-description            = "Lifted STARK prover and verifier (LMCS-based)."
+description            = "Generic AIR, STARK engine, transcript, configuration and optional compiler capture."
 edition.workspace      = true
 homepage.workspace     = true
 license.workspace      = true
-name                   = "miden-lifted-stark"
+name                   = "miden-stark"
 readme                 = "README.md"
 repository.workspace   = true
 rust-version.workspace = true
@@ -14,12 +14,13 @@ doctest = false
 
 [dependencies]
 # Internal
-miden-lifted-air.workspace       = true
-miden-stark-transcript.workspace = true
-miden-stateful-hasher.workspace  = true
+miden-core = { workspace = true }
+miden-crypto = { workspace = true }
 miden-utils-sync.workspace       = true
 
 # Plonky3 (always needed)
+p3-air.workspace = true
+p3-security.workspace = true
 p3-challenger.workspace  = true
 p3-dft.workspace         = true
 p3-field.workspace       = true
@@ -43,6 +44,7 @@ thiserror.workspace = true
 tracing.workspace   = true
 
 [dev-dependencies]
+miden-field.workspace = true
 # Plonky3
 p3-blake3.workspace      = true
 p3-challenger.workspace  = true
@@ -59,8 +61,10 @@ proptest.workspace           = true
 tracing-subscriber.workspace = true
 
 [features]
-concurrent = ["p3-maybe-rayon/parallel"]
-default    = ["concurrent"]
+std = ["miden-core/std", "miden-crypto/std", "miden-utils-sync/std", "rand/std", "rand/thread_rng", "thiserror/std"]
+capture = ["std"]
+concurrent = ["std", "miden-crypto/concurrent", "p3-maybe-rayon/parallel"]
+default = ["concurrent", "std"]
 testing    = ["dep:p3-blake3", "dep:p3-blake3-air", "dep:p3-keccak", "dep:p3-keccak-air", "dep:p3-poseidon2-air"]
 
 [[bench]]

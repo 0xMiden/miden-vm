@@ -9,7 +9,7 @@
 
 use alloc::vec::Vec;
 
-use miden_air::logup::BitwiseMsg;
+use miden_air_source::logup::BitwiseMsg;
 use miden_core::{
     Felt,
     operations::{Operation, opcodes},

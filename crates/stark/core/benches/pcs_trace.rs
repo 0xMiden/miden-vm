@@ -10,12 +10,14 @@
 
 use std::time::Instant;
 
-use miden_lifted_stark::testing::{
-    LOG_HEIGHTS, Lmcs, LmcsTree, PcsParams, RELATIVE_SPECS, canonical_domain,
-    configs::goldilocks_poseidon2::{Felt, QuadFelt, test_challenger, test_lmcs},
-    generate_matrices_from_specs, open_with_channel,
+use miden_stark::{
+    testing::{
+        LOG_HEIGHTS, Lmcs, LmcsTree, PcsParams, RELATIVE_SPECS, canonical_domain,
+        configs::goldilocks_poseidon2::{Felt, QuadFelt, test_challenger, test_lmcs},
+        generate_matrices_from_specs, open_with_channel,
+    },
+    transcript::ProverTranscript,
 };
-use miden_stark_transcript::ProverTranscript;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
 use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};

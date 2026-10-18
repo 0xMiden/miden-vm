@@ -1,8 +1,8 @@
 [package]
-name = "miden-air"
-version = "1.0.0"
-description = "Algebraic intermediate representation of Miden VM processor"
-documentation = "https://docs.rs/miden-air"
+name = "miden-air-source"
+version.workspace = true
+description = "Authored VM and precompile AIR equations, schemas, and generation tools"
+documentation = "https://docs.rs/miden-air-source"
 readme = "README.md"
 categories = ["cryptography", "no-std"]
 keywords = ["air", "arithmetization", "crypto", "miden"]
@@ -17,31 +17,41 @@ edition.workspace = true
 bench = false
 doctest = false
 
+[[bin]]
+name = "air-artifacts"
+path = "src/bin/air-artifacts.rs"
+required-features = ["tooling", "std"]
+
 [features]
 default = ["std"]
 arbitrary = ["std", "dep:proptest"]
-std = ["miden-core/std", "proptest?/std", "rand/std", "rand/thread_rng", "thiserror/std"]
-concurrent = ["std", "miden-crypto/concurrent"]
+std = ["miden-core/std", "miden-crypto/std", "miden-stark/std", "miden-ace/std", "miden-precompiles/std", "miden-utils-sync/std", "ruint/std", "proptest?/std", "thiserror/std"]
+concurrent = ["std", "miden-crypto/concurrent", "miden-stark/concurrent"]
 testing = ["arbitrary"]
+tooling = ["dep:serde_json", "dep:sha2", "std", "miden-stark/capture", "miden-ace/compiler"]
 
 [dependencies]
-# Miden dependencies
-miden-ace-codegen.workspace = true
+serde_json = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+miden-ace.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
+miden-stark.workspace = true
+miden-precompiles.workspace = true
 miden-utils-indexing.workspace = true
-
-# External dependencies
+miden-utils-sync.workspace = true
 p3-field.workspace = true
 p3-security.workspace = true
 proptest = { workspace = true, optional = true }
-rand.workspace = true
+ruint.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
-miden-ace-codegen = { workspace = true, features = ["testing"] }
-miden-constraint-compiler.workspace = true
 miden-test-serialization-macros.workspace = true
 proptest.workspace = true
+
+[[bin]]
+name = "air-codegen"
+path = "src/bin/air-codegen.rs"
+required-features = ["tooling", "std"]

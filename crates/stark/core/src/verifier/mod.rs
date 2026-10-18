@@ -47,10 +47,6 @@ use alloc::{vec, vec::Vec};
 use core::marker::PhantomData;
 
 use constraints::ConstraintFolder;
-use miden_lifted_air::{
-    BaseAir, InstanceError, LiftedAir, MultiAir, ReductionError, RowWindow, Statement,
-};
-use miden_stark_transcript::{Channel, TranscriptError, VerifierChannel, VerifierTranscript};
 use p3_challenger::CanObserve;
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::Matrix;
@@ -59,12 +55,14 @@ use thiserror::Error;
 
 use crate::{
     StarkConfig,
+    air::{BaseAir, InstanceError, LiftedAir, MultiAir, ReductionError, RowWindow, Statement},
     domain::{Coset, DomainError, LiftedDomain, log_quotient_degree},
     lmcs::Lmcs,
     order::{ShapeError, TraceOrder},
     pcs::verifier::{CommitmentGroup, PcsError, verify_aligned},
     preprocessed::PreprocessedValidationError,
     proof::{StarkDigest, StarkProofData},
+    transcript::{Channel, TranscriptError, VerifierChannel, VerifierTranscript},
     util::packing::row_to_packed_ext,
 };
 
@@ -150,7 +148,7 @@ where
 /// Returned exclusively for runtime instance / proof-shape failures or
 /// cryptographic verification failures. AIR structural correctness is
 /// trusted — call [`crate::debug::assert_prover_setup`] (or
-/// [`miden_lifted_air::debug::assert_multi_air_valid`]) from tests.
+/// [`crate::air::debug::assert_multi_air_valid`]) from tests.
 #[derive(Debug, Error)]
 pub enum VerifierError {
     #[error(transparent)]
@@ -210,7 +208,7 @@ pub enum VerifierError {
 ///
 /// `verify` validates the runtime statement plus everything carried on the
 /// proof; the AIR list is **trusted** (run
-/// [`miden_lifted_air::debug::assert_multi_air_valid`] from tests).
+/// [`crate::air::debug::assert_multi_air_valid`] from tests).
 ///
 /// ## Validated
 /// - Same statement checks as [`prove`](crate::ProverInstance::prove) minus trace shape (no traces
@@ -285,7 +283,7 @@ where
 
     // Infer constraint degree from symbolic AIR analysis (max across all AIRs).
     // NOTE: `log_quotient_degree` runs symbolic eval and may panic if the AIR is
-    // invalid. The AIR is trusted (see `miden_lifted_air::debug::assert_multi_air_valid`
+    // invalid. The AIR is trusted (see `crate::air::debug::assert_multi_air_valid`
     // for the debug-only structural check).
     let max_log_quotient_degree = proof_ordered_airs
         .iter()
@@ -479,7 +477,7 @@ where
         };
 
         #[cfg(debug_assertions)]
-        miden_lifted_air::debug::check_builder_shape(*air, &folder);
+        crate::air::debug::check_builder_shape(*air, &folder);
         air.eval(&mut folder);
 
         // Accumulate: acc = acc * beta + folded_j

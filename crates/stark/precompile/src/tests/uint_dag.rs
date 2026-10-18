@@ -264,9 +264,8 @@ fn forged_result_ptr_unbalances() {
     let row = find_op_row(&tampered, COL_IS_MUL);
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_PTR] += Felt::ONE;
 
-    let composite = crate::tests::with_transcript_eval_main(&traces, tampered);
     let mut mains = traces.mains();
-    mains[4] = &composite;
+    mains[4] = &tampered;
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let residual = session_stack_residual(&mains, &[], &challenges);
@@ -312,9 +311,8 @@ fn reencoded_op_id_passes_constraints_but_unbalances() {
     crate::tests::check_local_inputs(TranscriptEvalAir, &tampered, traces.air_inputs());
 
     // …but the bus refuses the re-encoded frame and re-wired relation.
-    let composite = crate::tests::with_transcript_eval_main(&traces, tampered);
     let mut mains = traces.mains();
-    mains[4] = &composite;
+    mains[4] = &tampered;
     let [alpha, beta] = random_challenges(&mut rng);
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let residual = session_stack_residual(&mains, &[], &challenges);

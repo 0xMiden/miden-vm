@@ -161,7 +161,7 @@ impl FastProcessor {
         host: &mut impl SyncHost,
         max_prover_memory_bytes: u64,
     ) -> Result<(crate::trace::VmTrace, Option<PrecompileWitness>), ExecutionError> {
-        use miden_air::{config, memory};
+        use miden_air_source::{config, memory};
 
         use crate::trace::{
             MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_budget,

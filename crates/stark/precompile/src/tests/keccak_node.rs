@@ -15,8 +15,8 @@ use miden_core::{
     field::{Field, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, LiftedAir};
 use miden_precompiles::Keccak256Precompile;
+use miden_stark::air::{BaseAir, LiftedAir};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{

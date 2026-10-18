@@ -6,6 +6,7 @@ extern crate alloc;
 // EXPORTS
 // ================================================================================================
 
+#[cfg(feature = "execution")]
 pub use miden_assembly::{
     self as assembly, Assembler,
     ast::{Module, ModuleKind},
@@ -19,21 +20,36 @@ pub use miden_core::{
         ExecutionProofError, HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
     },
 };
+#[cfg(feature = "execution")]
 pub use miden_core_lib::conjectured_security_estimator_root;
+#[cfg(feature = "execution")]
 pub use miden_processor::{
     BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionWitness,
-    FastProcessor, FutureMaybeSend, Host, KernelDescriptor, PrecompileWitness, Program,
-    ProgramExecutor, ProgramInfo, StackInputs, SyncHost, VmWitness, ZERO, advice, crypto, field,
-    operation::Operation, serde, trace, trace::VmTrace, utils,
+    FastProcessor, FutureMaybeSend, Host, PrecompileWitness, Program, ProgramExecutor, SyncHost,
+    VmWitness, ZERO, advice, crypto, field, operation::Operation, serde, trace, trace::VmTrace,
+    utils,
 };
-pub use miden_prover::{InputError, Prover, ProverError, StackOutputs, Word, prove_sync};
-pub use miden_verifier::{
+pub mod proofs;
+pub use miden_core::{
+    Word,
+    advice::AdviceInputs,
+    program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
+};
+#[cfg(feature = "execution")]
+pub use miden_processor::InputError;
+pub use proofs::{
     AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
-    SecurityTerm, VerificationError, VerificationOutcome, Verifier,
+    SecurityTerm, StarkVerificationError, VerificationError, VerificationOutcome, Verifier,
 };
+#[cfg(feature = "prover")]
+pub use proofs::{Prover, ProverError, prove_sync};
 
 // (private) exports
 // ================================================================================================
 
 #[cfg(feature = "internal")]
 pub mod internal;
+
+/// Compatibility forwarding for VM recursive advice.
+#[cfg(feature = "recursive")]
+pub use miden_vm_stark::recursive;

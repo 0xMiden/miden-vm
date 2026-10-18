@@ -10,7 +10,7 @@ use miden_core::{
     field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::LiftedAir;
+use miden_stark::air::LiftedAir;
 use proptest::prelude::*;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 

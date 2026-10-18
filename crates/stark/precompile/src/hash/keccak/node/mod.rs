@@ -1,3 +1,3 @@
-pub use miden_precompiles_air::hash::keccak::node::*;
+pub use miden_air::precompile::hash::keccak::node::*;
 
 pub mod trace;

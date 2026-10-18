@@ -2,7 +2,7 @@
 //!
 //! Runtime circuit data, canonical artifact decoding, selected-root evaluation and sequential
 //! evaluated-wire records are available without the compiler. The optional `compiler` feature
-//! captures AIR constraints through the constraint compiler, lowers them into a verifier DAG,
+//! captures AIR constraints through `miden_stark`, lowers them into a verifier DAG,
 //! and emits circuit streams and MASM. Enabling `std` alone does not enable the compiler.
 
 #![cfg_attr(not(feature = "std"), no_std)]

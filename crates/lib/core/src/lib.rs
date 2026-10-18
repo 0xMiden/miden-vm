@@ -233,7 +233,7 @@ pub fn conjectured_security_estimator_root() -> Word {
 
 #[cfg(test)]
 mod tests {
-    use miden_verifier::Verifier;
+    use miden_vm::Verifier;
 
     use super::*;
 

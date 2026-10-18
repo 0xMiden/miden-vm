@@ -16,7 +16,7 @@
 use alloc::{boxed::Box, vec::Vec};
 use std::collections::HashMap;
 
-use miden_air::{
+use miden_air_source::{
     BaseAir, MidenAir, MidenMultiAir, ProverStatement, StarkConfig, Statement, config, debug,
     logup::{BusId, HasherCompressionLinkMsg, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{Challenges, LookupFractions, LookupMessage, accumulate, build_lookup_fractions},
@@ -865,7 +865,7 @@ pub(super) fn assert_trace_constraints_reject(
     )
     .expect("valid trace shapes");
 
-    let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+    let config = config::eidos_config(config::pcs_params(), [Felt::ZERO; 4]);
     let _guard = PANIC_HOOK_LOCK.lock().expect("panic hook lock poisoned");
     let panic_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));

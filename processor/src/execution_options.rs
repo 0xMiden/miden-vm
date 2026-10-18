@@ -1,4 +1,4 @@
-use miden_air::trace::MIN_TRACE_LEN;
+use miden_air_source::trace::MIN_TRACE_LEN;
 use miden_core::program::MIN_STACK_DEPTH;
 
 // EXECUTION OPTIONS

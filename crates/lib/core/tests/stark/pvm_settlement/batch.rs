@@ -18,8 +18,7 @@ use miden_core_lib::CoreLibrary;
 use miden_processor::{
     ExecutionOptions, FastProcessor, Program, StackInputs, advice::AdviceInputs,
 };
-use miden_prover::Prover;
-use miden_verifier::{Verifier, recursive::RecursiveVerifierInputs};
+use miden_vm::{Prover, Verifier, recursive::RecursiveVerifierInputs};
 
 use super::{PvmSettlementHost, prove_ecdsa_execution};
 use crate::support::ecdsa::{generator_public_key_fixture, valid_fixture};

@@ -1,31 +1,54 @@
 #![no_std]
-
 extern crate alloc;
 #[cfg(any(test, feature = "std"))]
 extern crate std;
-
+pub mod setup;
+pub mod verifier;
+pub use verifier::{VerifyError, verify_deferred};
+#[cfg(test)]
+mod ace;
+#[cfg(test)]
+mod ace_constants;
+#[cfg(feature = "constants-tools")]
+pub mod ace_constants_regen;
+#[cfg(test)]
+mod pvm_ood_frames;
+#[cfg(feature = "recursive")]
+pub mod recursive;
+#[cfg(feature = "prover")]
 use alloc::vec::Vec;
 
+#[cfg(feature = "trace")]
 pub use deferred::session::{SessionInputError, WitnessLocation};
+#[cfg(feature = "prover")]
 use miden_core::deferred::PrecompileWitness;
 pub use miden_core::proof::{HashFunction, PrecompileProof, StarkProof};
 
+#[cfg(feature = "trace")]
 pub(crate) mod ec;
+#[cfg(feature = "trace")]
 pub(crate) mod hash;
-#[cfg(test)]
+#[cfg(all(test, feature = "prover"))]
 pub(crate) mod logup;
+#[cfg(feature = "trace")]
 pub(crate) mod math;
+#[cfg(feature = "trace")]
 pub(crate) mod primitives;
+#[cfg(feature = "trace")]
 pub(crate) mod relations;
-pub(crate) mod session;
-#[cfg(test)]
+#[cfg(feature = "trace")]
+pub mod session;
+#[cfg(all(test, feature = "prover"))]
 pub(crate) mod stark_config;
+#[cfg(feature = "trace")]
 pub(crate) mod transcript;
+#[cfg(feature = "trace")]
 pub(crate) mod uint;
+#[cfg(feature = "trace")]
 pub(crate) mod utils;
 
 /// Default maximum memory, in bytes, [`prove_precompiles`] assumes when no budget is given
-/// explicitly. Callers that own actual proving policy (e.g. `miden-prover`'s `Prover`) are
+/// explicitly. Callers that own actual proving policy (e.g. `miden-vm::proofs::Prover`) are
 /// expected to set their own via [`prove_precompiles_with_budget`].
 pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 = 64 << 30;
 
@@ -33,6 +56,7 @@ pub const DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES: u64 = 64 << 30;
 ///
 /// The returned roots preserve input order and repetitions. Empty batches are rejected. The
 /// importer validates portable semantics and enforces batch-wide input and lowering limits.
+#[cfg(feature = "prover")]
 pub fn prove_precompiles(
     witnesses: Vec<PrecompileWitness>,
     hash_fn: HashFunction,
@@ -45,6 +69,7 @@ pub fn prove_precompiles(
 /// Checks the modelled peak prover memory against `max_prover_memory_bytes` before allocating
 /// chiplet traces or entering the STARK pipeline. The budget applies to this single proof using
 /// `hash_fn`; concurrent proofs require separate budgeting. Witness import precedes the check.
+#[cfg(feature = "prover")]
 pub fn prove_precompiles_with_budget(
     witnesses: Vec<PrecompileWitness>,
     hash_fn: HashFunction,
@@ -53,6 +78,7 @@ pub fn prove_precompiles_with_budget(
     deferred::session::prove(witnesses, hash_fn, max_prover_memory_bytes)
 }
 
+#[cfg(feature = "prover")]
 fn check_memory_budget(
     estimated_bytes: Option<u64>,
     budget_bytes: u64,
@@ -65,6 +91,7 @@ fn check_memory_budget(
 }
 
 /// Errors produced while importing and proving portable precompile claims.
+#[cfg(feature = "prover")]
 #[derive(Debug, thiserror::Error)]
 pub enum PrecompileProvingError {
     #[error(transparent)]
@@ -84,6 +111,7 @@ pub enum PrecompileProvingError {
 }
 
 /// Errors produced by serialized precompile STARK proof generation.
+#[cfg(feature = "prover")]
 #[derive(Debug, thiserror::Error)]
 pub enum ProveError {
     /// The chiplet stack declares preprocessed columns, but no preprocessed
@@ -92,16 +120,40 @@ pub enum ProveError {
     MissingPreprocessed,
     /// The preprocessed bundle did not match the declared AIR columns/config.
     #[error(transparent)]
-    Preprocessed(#[from] miden_lifted_stark::PreprocessedValidationError),
+    Preprocessed(#[from] miden_stark::PreprocessedValidationError),
     /// The lifted STARK prover rejected the instance.
     #[error(transparent)]
-    Prover(#[from] miden_lifted_stark::ProverError),
+    Prover(#[from] miden_stark::ProverError),
     /// Failed to serialize the STARK proof data into the core proof envelope.
     #[error("failed to serialize STARK proof: {0}")]
     Serialization(#[from] wincode::error::WriteError),
 }
 
+#[cfg(feature = "trace")]
 pub(crate) mod deferred;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "prover"))]
 mod tests;
+
+#[cfg(feature = "trace")]
+pub mod trace {
+    pub use crate::{
+        deferred::session::{SessionInputError, WitnessLocation, WitnessSession},
+        session::{Session, SessionTraces},
+    };
+    pub fn import_witnesses(
+        witnesses: alloc::vec::Vec<miden_core::deferred::PrecompileWitness>,
+    ) -> Result<WitnessSession, SessionInputError> {
+        crate::deferred::session::import_witnesses(
+            witnesses,
+            crate::deferred::session::ImportLimits::default(),
+        )
+    }
+}
+#[cfg(feature = "prover")]
+pub mod prover {
+    pub use crate::{
+        DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES, PrecompileProvingError, ProveError,
+        prove_precompiles, prove_precompiles_with_budget,
+    };
+}

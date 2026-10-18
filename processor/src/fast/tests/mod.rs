@@ -6,7 +6,7 @@ use alloc::{
 };
 use core::{assert_matches, cell::Cell, str::FromStr};
 
-use miden_air::trace::MIN_TRACE_LEN;
+use miden_air_source::trace::MIN_TRACE_LEN;
 use miden_assembly::{
     Assembler, DefaultSourceManager, Linkage, Path,
     ast::{DebugInlineCallInfo, Instruction, Module, ModuleKind, Op, QualifiedProcedureName},
@@ -2282,7 +2282,7 @@ fn test_prover_memory_budget_exceeded() {
     };
 
     let measured = crate::trace::build_trace(build_witness()).expect("default budget must succeed");
-    let params = miden_air::config::pcs_params();
+    let params = miden_air_source::config::pcs_params();
     let exact_peak = measured
         .trace_len_summary()
         .prover_memory_bytes(&params)

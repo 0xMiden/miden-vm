@@ -2,7 +2,7 @@
 
 use alloc::vec;
 
-use miden_stateful_hasher::ChainingHasher;
+use miden_crypto::hasher::ChainingHasher;
 use p3_blake3::Blake3;
 use p3_challenger::{HashChallenger, SerializingChallenger64};
 use p3_symmetric::CompressionFunctionFromHasher;

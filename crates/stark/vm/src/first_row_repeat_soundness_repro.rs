@@ -123,7 +123,10 @@ fn first_row_repeat_is_rejected() {
     let forged = build_first_row_repeat_trace();
     let honest_outcome =
         forged.repro.prove_and_verify_current().expect("the honest trace must verify");
-    assert!(honest_outcome.is_complete(), "the honest proof must verify completely");
+    assert!(
+        honest_outcome.precompile_root == miden_core::deferred::TRUE_DIGEST,
+        "the honest proof must verify completely"
+    );
 
     let result = forged.repro.prove_and_verify_parts_allowing_lookup_rejection(
         forged.core,

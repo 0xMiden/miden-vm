@@ -2,6 +2,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
+use miden_air::precompile::hash::sha256::io::{self, program::IV};
 #[cfg(test)]
 use miden_core::utils::RowMajorMatrix;
 use miden_core::{
@@ -10,7 +11,6 @@ use miden_core::{
     field::PrimeCharacteristicRing,
 };
 use miden_precompiles::Sha256Precompile;
-use miden_precompiles_air::hash::sha256::io::{self, program::IV};
 
 use crate::{
     hash::sha256::compression::Sha256CompressionRequires,

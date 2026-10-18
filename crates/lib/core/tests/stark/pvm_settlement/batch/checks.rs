@@ -13,14 +13,14 @@ use miden_core::{
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus},
 };
 use miden_core_lib::{CoreLibrary, PVM_PROOF_REQUEST_EVENT_NAME};
-use miden_precompiles_verifier::masm_verifier::PvmRecursiveVerifierInputs;
+use miden_precompile_stark::recursive::PvmRecursiveVerifierInputs;
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, ProcessorState, Program,
     StackInputs,
     advice::{AdviceInputs, AdviceMutation},
     operation::OperationError,
 };
-use miden_prover::Prover;
+use miden_vm::Prover;
 
 use super::{PvmSettlementHost, assemble_batch, batch_inputs, prove_ecdsa_execution};
 use crate::support::ecdsa::{generator_public_key_fixture, valid_fixture};

@@ -42,9 +42,8 @@ jobs:
               case "${path}" in
                 .cargo/*|.config/nextest.toml|.github/actions/cleanup-runner/*|\
                 .github/workflows/test.yml|Cargo.lock|Cargo.toml|Makefile|rust-toolchain.toml|\
-                crates/crypto/*|crates/crypto-derive/*|crates/field/*|crates/lifted-air/*|\
-                crates/stark/core/*|crates/serde-utils/*|crates/stark-transcript/*|\
-                crates/stateful-hasher/*)
+                core/*|crates/crypto/*|crates/crypto-derive/*|crates/field/*|\
+                crates/stark/core/*|crates/serde-utils/*)
                   run=true
                   break
                   ;;
@@ -66,6 +65,8 @@ jobs:
         run: |
           bash -n scripts/bench_eidos_vs_poseidon2.sh
           python3 -m unittest discover -s scripts/tests -v
+      - name: Check AIR/STARK package boundaries
+        run: python3 tools/air-stark/check-boundaries.py
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       # Do not pin taiki-e's moving tool shortcut tags by hash. Pin a released

@@ -11,11 +11,13 @@ use miden_core::{
     proof::{ExecutionProof, HashFunction, StarkProof, VmProof},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_crypto::stark::verifier::VerifierError;
 use miden_processor::{DefaultHost, FastProcessor, StackInputs};
-use miden_verifier::{StarkVerificationError, VerificationError, Verifier};
+use miden_stark::verifier::VerifierError;
 
-use crate::{Prover, config, prove_stark};
+use crate::{
+    Prover, config, prove_stark,
+    verifier::{StarkVerificationError, Verifier},
+};
 
 fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreCols<Felt> {
     let width = matrix.width();
@@ -162,15 +164,11 @@ fn verifier_rejects_forged_overflow_pop_order() {
         forged_outputs,
     );
 
-    let verification_result = Verifier::new().verify(&claim, &proof);
+    let verification_result = Verifier::new().verify(&claim, proof.vm());
     assert!(
         matches!(
             &verification_result,
-            Err(VerificationError::StarkVerificationError(_, source))
-                if matches!(
-                    source.as_ref(),
-                    StarkVerificationError::Verifier(VerifierError::ConstraintMismatch)
-                )
+            Err(StarkVerificationError::Verifier(VerifierError::ConstraintMismatch))
         ),
         "the forged public output must fail an AIR constraint, got {verification_result:?}",
     );

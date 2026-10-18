@@ -9,9 +9,13 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_processor::trace::VmTrace;
-use miden_verifier::{VerificationError, VerificationOutcome, Verifier};
 
-use crate::{config, prove_stark};
+use crate::{
+    config, prove_stark,
+    verifier::{
+        StarkVerificationError as VerificationError, VerifiedVm as VerificationOutcome, Verifier,
+    },
+};
 
 /// Returns a mutable view of one core trace row.
 pub fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreCols<Felt> {
@@ -163,6 +167,6 @@ impl ReproTrace {
         );
         let claim =
             ExecutionClaim::from_program_info(self.program_info.clone(), self.init_stack, outputs);
-        Verifier::new().verify(&claim, &proof)
+        Verifier::new().verify(&claim, proof.vm())
     }
 }

@@ -1,6 +1,6 @@
 use alloc::collections::BTreeMap;
 
-use miden_air::trace::and8_lookup::{
+use miden_air_source::trace::and8_lookup::{
     BYTE_LOOKUP_COUNT_LEN, BYTE_PAIR_ROWS, RANGE_CHECK_COUNT_OFFSET,
 };
 

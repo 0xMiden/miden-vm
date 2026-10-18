@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use std::collections::HashMap;
 
 use encoder::EncodedCircuit;
-use miden_air::trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
+use miden_air_source::trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
 
 // Chiplet-local column indices used by the ACE trace tests.
 const SELECTOR_START_IDX: usize = 0;

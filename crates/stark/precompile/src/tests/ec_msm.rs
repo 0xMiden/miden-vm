@@ -22,8 +22,8 @@ use miden_core::{
     field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
 use miden_precompiles::{CurveId, CurvePoint, phi_generator};
+use miden_stark::air::{BaseAir, ConstraintDegrees, LiftedAir};
 
 use crate::{
     ec::msm::{

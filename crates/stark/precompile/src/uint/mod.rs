@@ -1,4 +1,4 @@
-pub use miden_precompiles_air::uint::*;
+pub use miden_air::precompile::uint::*;
 
 pub mod add;
 pub mod mul;

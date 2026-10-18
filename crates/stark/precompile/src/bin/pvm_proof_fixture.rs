@@ -11,12 +11,11 @@ use miden_core::{
     proof::HashFunction,
 };
 use miden_crypto::hash::keccak::Keccak256;
+use miden_precompile_stark::{prove_precompiles, verify_deferred};
 use miden_precompiles::Keccak256Precompile;
-use miden_precompiles_prover::prove_precompiles;
-use miden_precompiles_verifier::verify_deferred;
 
-const PROOF_PATH: &str = "../../precompiles-verifier/tests/fixtures/pvm_eidos_v1_0.bin";
-const ROOT_PATH: &str = "../../precompiles-verifier/tests/fixtures/pvm_eidos_v1_0.root";
+const PROOF_PATH: &str = "tests/fixtures/pvm_eidos_v1_0.bin";
+const ROOT_PATH: &str = "tests/fixtures/pvm_eidos_v1_0.root";
 const INPUT: &[u8] = b"abc";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

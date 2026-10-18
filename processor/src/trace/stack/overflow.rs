@@ -1,4 +1,4 @@
-use miden_air::trace::RowIndex;
+use miden_air_source::trace::RowIndex;
 use miden_utils_indexing::IndexVec;
 
 use super::{Felt, ZERO};
@@ -229,7 +229,7 @@ impl Default for OverflowTable {
 
 #[cfg(test)]
 mod tests {
-    use miden_air::trace::RowIndex;
+    use miden_air_source::trace::RowIndex;
 
     use super::*;
 

@@ -5,11 +5,12 @@
 
 use alloc::vec::Vec;
 
-use miden_lifted_air::{Air, BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_field::Field;
 use p3_goldilocks::{GenericPoseidon2LinearLayersGoldilocks, Goldilocks};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use p3_poseidon2_air::{Poseidon2Air, RoundConstants, num_cols};
+
+use crate::air::{Air, BaseAir, LiftedAir, LiftedAirBuilder};
 
 /// Goldilocks Poseidon2 configuration constants.
 pub const WIDTH: usize = 12;

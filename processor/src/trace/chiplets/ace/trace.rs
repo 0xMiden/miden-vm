@@ -2,7 +2,7 @@ use alloc::string::ToString;
 use core::borrow::BorrowMut;
 
 use miden_ace::EvaluationTrace;
-use miden_air::{
+use miden_air_source::vm::{
     AceCols, QuadFeltExpr,
     trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS},
 };

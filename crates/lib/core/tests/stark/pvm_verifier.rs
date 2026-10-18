@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use miden_air::precompile::NUM_CHIPLETS;
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     Felt, Word,
@@ -21,12 +22,11 @@ use miden_core_lib::{
     dsa::{ecdsa_p256_sha256, eddsa_25519_sha512},
 };
 use miden_crypto::dsa::eddsa_25519_sha512::SigningKey as Ed25519SigningKey;
-use miden_precompiles::{Keccak256Precompile, Sha256Precompile, Sha512Precompile};
-use miden_precompiles_air::NUM_CHIPLETS;
-use miden_precompiles_prover::prove_precompiles;
-use miden_precompiles_verifier::masm_verifier::{
-    PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
+use miden_precompile_stark::{
+    prove_precompiles,
+    recursive::{PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError},
 };
+use miden_precompiles::{Keccak256Precompile, Sha256Precompile, Sha512Precompile};
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs,
     operation::OperationError,
@@ -407,7 +407,7 @@ fn run_pvm_verifier_with_advice(
 
 #[track_caller]
 fn assert_pvm_verifies(inputs: &PvmRecursiveVerifierInputs) {
-    use miden_precompiles_air::security;
+    use miden_air::precompile::security;
 
     let verifier_stack = run_pvm_verifier_with_advice(inputs.advice(), inputs.claim_commitment())
         .expect("PVM MASM verifier rejected a valid proof");

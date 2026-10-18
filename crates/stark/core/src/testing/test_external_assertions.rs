@@ -4,7 +4,6 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_lifted_air::ReductionError;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
@@ -12,7 +11,7 @@ use crate::{
     ProverInstance, VerifierInstance,
     air::{
         AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, MultiAir,
-        ProverStatement, Statement, WindowAccess,
+        ProverStatement, ReductionError, Statement, WindowAccess,
     },
     testing::configs::goldilocks_poseidon2::{
         Felt, QuadFelt, generate_pow4_trace, test_challenger, test_config,

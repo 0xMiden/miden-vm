@@ -1,1 +1,1 @@
-pub use miden_precompiles_air::stark_config::*;
+pub use miden_air::precompile::stark_config::*;

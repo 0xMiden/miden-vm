@@ -1,0 +1,85 @@
+{
+  "artifact_schema": 1,
+  "baseline": "c90abdb34e8f1b8f5d03efe0ac5bd11893543991",
+  "field": "canonical Miden Felt, little-endian u64",
+  "members": [
+    {
+      "accepted_circuit_digest": [
+        9122225125595333314,
+        4575736417990392984,
+        5414688566126692380,
+        7406482881221041553
+      ],
+      "accepted_pin_policy": "compare; never accept implicitly",
+      "accepted_relation_digest": [
+        9098509505774412735,
+        4737936789760532215,
+        1438664865551243811,
+        7897993217034479822
+      ],
+      "bytes": 55956,
+      "candidate_circuit_digest": [
+        9122225125595333314,
+        4575736417990392984,
+        5414688566126692380,
+        7406482881221041553
+      ],
+      "candidate_relation_digest": [
+        9098509505774412735,
+        4737936789760532215,
+        1438664865551243811,
+        7897993217034479822
+      ],
+      "codec": "MIDACE-v1",
+      "configuration": "canonical Eidos recursive verifier, LMCS alignment 8",
+      "file": "vm.ace",
+      "instruction_elements": 6992,
+      "num_ops": 6780,
+      "num_vars": 734,
+      "protocol_id": 1,
+      "relation": "vm",
+      "sha256": "6b63f75e5693e894ac5eff9d6db0a25624c48e54a22fba6103156bb03bafca00",
+      "statement_context": "external multi-AIR assertions and public input observation are independently authored; ACE digest alone does not cover them"
+    },
+    {
+      "accepted_circuit_digest": [
+        2255028588524991477,
+        8088146176287763667,
+        1935595524963351362,
+        5560235558590875651
+      ],
+      "accepted_pin_policy": "compare; never accept implicitly",
+      "accepted_relation_digest": [
+        5618632176883261929,
+        5091169848121332946,
+        9110857118546866548,
+        100418585322354598
+      ],
+      "bytes": 113876,
+      "candidate_circuit_digest": [
+        2255028588524991477,
+        8088146176287763667,
+        1935595524963351362,
+        5560235558590875651
+      ],
+      "candidate_relation_digest": [
+        5618632176883261929,
+        5091169848121332946,
+        9110857118546866548,
+        100418585322354598
+      ],
+      "codec": "MIDACE-v1",
+      "configuration": "canonical Eidos recursive verifier, LMCS alignment 8",
+      "file": "precompile.ace",
+      "instruction_elements": 14232,
+      "num_ops": 13000,
+      "num_vars": 2520,
+      "protocol_id": 4,
+      "relation": "precompile",
+      "sha256": "ada43f6069bbfab4434b8c18843592067e6b0135f6b85631ef38363b2ea2102e",
+      "statement_context": "external multi-AIR assertions and public input observation are independently authored; ACE digest alone does not cover them"
+    }
+  ],
+  "pvm_evaluation": "authored dispatch delegated through independent production type",
+  "rust_evaluator": "../src/vm/generated.rs"
+}

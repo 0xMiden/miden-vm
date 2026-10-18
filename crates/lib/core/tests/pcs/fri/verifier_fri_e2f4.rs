@@ -1,6 +1,6 @@
 use miden_air::config;
 use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt};
-use miden_lifted_stark::{
+use miden_stark::{
     StarkConfig,
     testing::fri_vectors::{
         DIGEST_WIDTH, EXTENSION_DEGREE, Fold4Ext2TestVectors, FriQuery, fold4_ext2_test_vectors,

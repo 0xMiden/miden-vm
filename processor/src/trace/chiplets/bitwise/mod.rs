@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, vec, vec::Vec};
 use core::{borrow::BorrowMut, mem::size_of};
 
-use miden_air::{
+use miden_air_source::{
     AeadStreamCols, BitwiseCols,
     trace::{
         CHIPLETS_STREAM_MODE_COL,

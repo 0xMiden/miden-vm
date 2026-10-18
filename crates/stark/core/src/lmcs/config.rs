@@ -3,8 +3,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::marker::PhantomData;
 
-use miden_stark_transcript::VerifierChannel;
-use miden_stateful_hasher::{Alignable, StatefulHasher};
+use miden_crypto::hasher::{Alignable, StatefulHasher};
 use p3_field::PackedValue;
 use p3_matrix::{Dimensions, Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use p3_symmetric::{Hash, PseudoCompressionFunction};
@@ -18,6 +17,7 @@ use crate::{
         row_list::RowList,
         tree_indices::TreeIndices,
     },
+    transcript::VerifierChannel,
     util::align::aligned_len_sum,
 };
 
@@ -340,13 +340,16 @@ where
 mod tests {
     use alloc::vec;
 
-    use miden_lifted_air::log2_strict_u8;
-    use miden_stark_transcript::{ProverTranscript, TranscriptData, VerifierTranscript};
     use p3_field::PrimeCharacteristicRing;
     use p3_matrix::dense::RowMajorMatrix;
 
     use super::*;
-    use crate::{lmcs::LmcsTree, testing::configs::goldilocks_poseidon2 as gl};
+    use crate::{
+        air::log2_strict_u8,
+        lmcs::LmcsTree,
+        testing::configs::goldilocks_poseidon2 as gl,
+        transcript::{ProverTranscript, TranscriptData, VerifierTranscript},
+    };
 
     fn small_matrix(height: usize, width: usize, seed: u64) -> RowMajorMatrix<gl::Felt> {
         let values = (0..height * width).map(|i| gl::Felt::from_u64(seed + i as u64)).collect();
@@ -431,7 +434,7 @@ mod tests {
         assert_eq!(
             lmcs.open_batch(&commitment, &widths, &tree_indices_0, &mut verifier_channel),
             Err(LmcsError::TranscriptError(
-                miden_stark_transcript::TranscriptError::NoMoreCommitments
+                crate::transcript::TranscriptError::NoMoreCommitments
             ))
         );
 
@@ -526,13 +529,15 @@ mod tests {
     fn goldilocks_blake3_roundtrip() {
         use alloc::{vec, vec::Vec};
 
-        use miden_stark_transcript::{ProverTranscript, VerifierTranscript};
-        use miden_stateful_hasher::ChainingHasher;
+        use miden_crypto::hasher::ChainingHasher;
         use p3_blake3::Blake3;
         use p3_challenger::{HashChallenger, SerializingChallenger64};
         use p3_symmetric::CompressionFunctionFromHasher;
 
-        use crate::testing::configs::goldilocks_poseidon2::Felt;
+        use crate::{
+            testing::configs::goldilocks_poseidon2::Felt,
+            transcript::{ProverTranscript, VerifierTranscript},
+        };
 
         type Sponge = ChainingHasher<Blake3>;
         type Compress = CompressionFunctionFromHasher<Blake3, 2, 32>;
@@ -583,7 +588,7 @@ mod tests {
     fn goldilocks_blake3_192_roundtrip() {
         use alloc::{vec, vec::Vec};
 
-        use miden_stateful_hasher::{ChainingHasher, TruncatingHasher};
+        use miden_crypto::hasher::{ChainingHasher, TruncatingHasher};
         use p3_blake3::Blake3;
         use p3_challenger::{HashChallenger, SerializingChallenger64};
         use p3_symmetric::CompressionFunctionFromHasher;

@@ -4,8 +4,8 @@ use miden_processor::{
     ExecutionError, ExecutionOptions, FastProcessor, StackInputs, TestHost,
     advice::{AdviceError, AdviceInputs},
 };
-use miden_prover::Word;
 use miden_utils_testing::{build_test, crypto::MerkleStore};
+use miden_vm::Word;
 
 // ADVICE INJECTION
 // ================================================================================================

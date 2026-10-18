@@ -1,6 +1,6 @@
 use alloc::collections::BTreeMap;
 
-use miden_air::trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
+use miden_air_source::trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 
 use crate::trace::ChipletTraceFragment;

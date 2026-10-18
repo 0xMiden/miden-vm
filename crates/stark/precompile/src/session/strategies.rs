@@ -2,7 +2,7 @@
 //!
 //! [`wnaf_table`] precomputes a base's odd multiples. The resulting [`WnafTable`] can be
 //! reused by [`wnaf_scalarmul`] or [`joint_wnaf_with_tables`] across multiple claims.
-//! Each strategy returns an [`EcExprPtr`]; bind it to a claimed point with [`Session::ec_msm`].
+//! Each strategy returns an `EcExprPtr`; bind it to a claimed point with [`Session::ec_msm`].
 
 #[cfg(test)]
 use alloc::vec;

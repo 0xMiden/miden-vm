@@ -1,112 +1,96 @@
 [package]
-name = "miden-vm"
-version = "1.0.0"
-description = "Miden virtual machine"
-documentation = "https://docs.rs/miden-vm"
-readme = "README.md"
-categories = ["cryptography", "emulators", "no-std"]
-keywords = ["miden", "stark", "virtual-machine", "zkp"]
-license.workspace = true
-authors.workspace = true
-homepage.workspace = true
-repository.workspace = true
-rust-version.workspace = true
-edition.workspace = true
+"name" = "miden-vm"
+"version" = "1.0.0"
+"description" = "Miden virtual machine"
+"documentation" = "https://docs.rs/miden-vm"
+"readme" = "README.md"
+"categories" = ["cryptography", "emulators", "no-std"]
+"keywords" = ["miden", "stark", "virtual-machine", "zkp"]
+"license" = { "workspace" = true }
+"authors" = { "workspace" = true }
+"homepage" = { "workspace" = true }
+"repository" = { "workspace" = true }
+"rust-version" = { "workspace" = true }
+"edition" = { "workspace" = true }
 
 [[bin]]
-name = "miden-vm"
-path = "src/main.rs"
-bench = false
-doctest = false
-required-features = ["executable"]
+"name" = "miden-vm"
+"path" = "src/main.rs"
+"bench" = false
+"doctest" = false
+"required-features" = ["executable"]
 
 [lib]
-path = "src/lib.rs"
-bench = false
-doctest = false
+"path" = "src/lib.rs"
+"bench" = false
+"doctest" = false
 
 [[bench]]
-name = "build_trace"
-required-features = ["internal"]
-harness = false
-
+"name" = "build_trace"
+"required-features" = ["internal"]
+"harness" = false
 [[bench]]
-name = "program_execution_for_trace"
-required-features = ["internal"]
-harness = false
-
+"name" = "program_execution_for_trace"
+"required-features" = ["internal"]
+"harness" = false
 [[bench]]
-name = "program_execution_fast"
-required-features = ["internal"]
-harness = false
-
+"name" = "program_execution_fast"
+"required-features" = ["internal"]
+"harness" = false
 [[bench]]
-name = "deserialize_core_lib"
-harness = false
-
+"name" = "deserialize_core_lib"
+"harness" = false
 [[bench]]
-name = "deserialize_core_lib_debug_info"
-harness = false
+"name" = "deserialize_core_lib_debug_info"
+"harness" = false
 
 [[test]]
-name = "miden-cli"
-path = "tests/integration/main.rs"
+"name" = "miden-cli"
+"path" = "tests/integration/main.rs"
 
 [features]
-arbitrary = ["std", "miden-assembly/testing", "miden-utils-testing/arbitrary"]
-concurrent = ["miden-prover/concurrent", "std"]
-default = ["std"]
-executable = [
-    "dep:clap",
-    "dep:hex",
-    "dep:tracing-subscriber",
-    "internal",
-    "serde",
-    "std",
-]
-serde = ["dep:serde", "dep:serde_json"]
-std = [
-    "hex?/std",
-    "miden-assembly/std",
-    "miden-core-lib/std",
-    "miden-processor/std",
-    "miden-prover/std",
-    "miden-verifier/std",
-    "serde?/std",
-    "serde_json?/std",
-]
-testing = ["arbitrary"]
-# For internal use, not meant to be used by users
-internal = ["dep:hex", "serde", "std"]
+"arbitrary" = ["std", "miden-assembly/testing", "miden-utils-testing/arbitrary", "execution"]
+"concurrent" = ["std", "miden-vm-stark/concurrent", "miden-precompile-stark/concurrent", "miden-processor?/concurrent"]
+"default" = ["std", "execution", "prover", "recursive"]
+"executable" = ["dep:clap", "dep:hex", "dep:tracing-subscriber", "internal", "serde", "std"]
+"serde" = ["dep:serde", "dep:serde_json"]
+"std" = ["hex?/std", "miden-core/std", "miden-air/std", "miden-vm-stark/std", "miden-precompile-stark/std", "miden-precompiles/std", "miden-assembly?/std", "miden-core-lib?/std", "miden-processor?/std", "thiserror/std", "serde?/std", "serde_json?/std"]
+"testing" = ["arbitrary"]
+"internal" = ["dep:hex", "serde", "std", "execution", "prover"]
+"execution" = ["dep:miden-assembly", "dep:miden-processor", "dep:miden-core-lib", "dep:miden-mast-package"]
+"prover" = ["execution", "miden-vm-stark/prover", "miden-precompile-stark/prover"]
+"recursive" = ["miden-vm-stark/recursive", "miden-precompile-stark/recursive"]
 
 [dependencies]
-# Miden dependencies
-miden-assembly.workspace = true
-miden-core.workspace = true
-miden-processor.workspace = true
-miden-prover.workspace = true
-miden-mast-package.workspace = true
-miden-core-lib.workspace = true
-miden-verifier.workspace = true
-
-# External dependencies
-clap = { workspace = true, optional = true }
-hex = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
-tracing.workspace = true
-tracing-subscriber = { workspace = true, optional = true, features = ["std", "env-filter"] }
-tracing-forest = { workspace = true, optional = true, features = ["ansi", "smallvec"] }
+"miden-assembly" = { "workspace" = true, "optional" = true }
+"miden-core" = { "workspace" = true }
+"miden-processor" = { "workspace" = true, "optional" = true }
+"miden-mast-package" = { "workspace" = true, "optional" = true }
+"miden-core-lib" = { "workspace" = true, "optional" = true }
+"clap" = { "workspace" = true, "optional" = true }
+"hex" = { "workspace" = true, "optional" = true }
+"serde" = { "workspace" = true, "optional" = true }
+"serde_json" = { "workspace" = true, "optional" = true }
+"tracing" = { "workspace" = true }
+"tracing-subscriber" = { "workspace" = true, "optional" = true, "features" = ["std", "env-filter"] }
+"tracing-forest" = { "workspace" = true, "optional" = true, "features" = ["ansi", "smallvec"] }
+"miden-air" = { "workspace" = true }
+"miden-vm-stark" = { "workspace" = true }
+"miden-precompile-stark" = { "workspace" = true }
+"miden-precompiles" = { "workspace" = true }
+"thiserror" = { "workspace" = true }
 
 [dev-dependencies]
-miden-precompiles.workspace = true
-assert_cmd = { version = "2.1" }
-criterion = { workspace = true, features = ["async_tokio"] }
-miden-assembly = { workspace = true, features = ["testing"] }
-miden-processor = { workspace = true, features = ["testing"] }
-miden-utils-testing.workspace = true
-predicates = { version = "3.1" }
-rand = { workspace = true, features = ["std", "thread_rng"] }
-tempfile.workspace = true
-tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
-walkdir.workspace = true
+"miden-debug-types" = { workspace = true }
+"miden-stark" = { workspace = true }
+"miden-precompiles" = { "workspace" = true }
+"assert_cmd" = { "version" = "2.1" }
+"criterion" = { "workspace" = true, "features" = ["async_tokio"] }
+"miden-assembly" = { "workspace" = true, "features" = ["testing"] }
+"miden-processor" = { "workspace" = true, "features" = ["testing"] }
+"miden-utils-testing" = { "workspace" = true }
+"predicates" = { "version" = "3.1" }
+"rand" = { "workspace" = true, "features" = ["std", "thread_rng"] }
+"tempfile" = { "workspace" = true }
+"tokio" = { "workspace" = true, "features" = ["macros", "rt", "rt-multi-thread"] }
+"walkdir" = { "workspace" = true }
